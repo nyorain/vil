@@ -1,0 +1,4 @@
+.clangd/
+.compile_commands
+subprojects/**
+build/
