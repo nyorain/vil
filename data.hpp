@@ -9,11 +9,11 @@
 namespace fuen {
 
 // data table
-static std::unordered_map<std::uint64_t, void*> dataTable;
-static std::shared_mutex dataMutex;
+extern std::unordered_map<std::uint64_t, void*> dataTable;
+extern std::shared_mutex dataMutex;
 
 // We need a unique hash for type and handle id
-std::uint64_t hash_combine(std::uint64_t a, std::uint64_t b) {
+inline std::uint64_t hash_combine(std::uint64_t a, std::uint64_t b) {
 	return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
 }
 
@@ -74,17 +74,23 @@ void eraseData(T handle) {
 }
 
 template<typename R, typename T>
-std::unique_ptr<R> moveData(T handle) {
+std::unique_ptr<R> moveDataOpt(T handle) {
 	std::lock_guard lock(dataMutex);
 	auto it = dataTable.find(handleCast(handle));
 	if(it == dataTable.end()) {
-		dlg_error("Couldn't find data for {} ({})", handleCast(handle), typeid(T).name());
 		return nullptr;
 	}
 
 	auto ptr = it->second;
 	dataTable.erase(it);
 	return std::unique_ptr<R>(static_cast<R*>(ptr));
+}
+
+template<typename R, typename T>
+std::unique_ptr<R> moveData(T handle) {
+	auto ret = moveDataOpt<R>(handle);
+	dlg_assertm(ret, "Couldn't find data for {} ({})", handleCast(handle), typeid(T).name());
+	return ret;
 }
 
 } // namespace fuen

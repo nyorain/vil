@@ -27,6 +27,7 @@ endforeach
 cc = meson.get_compiler('cpp')
 subdir('imgui')
 
+dep_wayland = dependency('wayland-client')
 dep_dlg = dependency('dlg', fallback: ['dlg', 'dlg_dep'])
 dep_vkpp = dependency('vkpp',
 	fallback: ['vkpp', 'vkpp_dep'],
@@ -34,13 +35,14 @@ dep_vkpp = dependency('vkpp',
 
 src = files(
   'layer.cpp',
+  'wayland.cpp',
 )
 
 vklayer_mesa_overlay = shared_library(
 	'VkLayer_fuencaliente',
 	[src, spv],
 	gnu_symbol_visibility: 'hidden',
-	dependencies: [dep_dlg, dep_vkpp, libimgui_core_dep],
+	dependencies: [dep_dlg, dep_vkpp, dep_wayland, libimgui_core_dep],
 	include_directories: [],
 	link_args: cc.get_supported_link_arguments(['-Wl,-Bsymbolic-functions', '-Wl,-z,relro']),
 	install: true

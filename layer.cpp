@@ -1,6 +1,6 @@
-#define VK_NO_PROTOTYPES
-
+#include "common.hpp"
 #include "data.hpp"
+#include "wayland.hpp"
 
 #include "overlay.frag.spv.h"
 #include "overlay.vert.spv.h"
@@ -13,7 +13,6 @@
 
 #include <dlg/dlg.hpp>
 
-#include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
 
 #include <string>
@@ -36,119 +35,9 @@ thread_local ImGuiContext* __LayerImGui;
 
 namespace fuen {
 
-using u32 = std::uint32_t;
-using i32 = std::int32_t;
-
-struct Device;
-struct Instance;
-
-struct Instance {
-	vk::DynamicDispatch dispatch;
-	VkInstance ini;
-};
-
-struct Image {
-	Device* dev;
-	std::string name;
-	VkImageCreateInfo ci;
-	VkImageView view;
-};
-
-struct Buffer {
-	Device* dev;
-	std::string name;
-	VkBufferCreateInfo ci;
-};
-
-// All data used for drawing a single frame of the overlay.
-struct Draw {
-	struct Buffer {
-		VkBuffer buf;
-		VkDeviceMemory mem;
-		VkDeviceSize size;
-
-		void ensure(Device& dev, VkDeviceSize, VkBufferUsageFlags);
-	};
-
-	Buffer vertexBuffer;
-	Buffer indexBuffer;
-	VkCommandBuffer cb;
-	VkSemaphore semaphore;
-	VkFence fence;
-	VkDescriptorSet ds;
-};
-
-struct Swapchain {
-	Device* dev;
-	VkSwapchainKHR swapchain;
-	VkSwapchainCreateInfoKHR ci;
-
-	struct Buffer {
-		VkImage image;
-		VkImageView view;
-		VkFramebuffer fb;
-	};
-
-	VkRenderPass rp;
-	VkPipeline pipe;
-
-	std::vector<Buffer> buffers;
-	std::vector<Draw> draws;
-
-	ImGuiContext* imgui;
-
-	struct {
-		bool uploaded;
-		VkDeviceMemory mem;
-		VkImage image;
-		VkImageView view;
-
-		VkDeviceMemory uploadMem;
-		VkBuffer uploadBuf;
-	} font;
-
-	~Swapchain() {
-		// TODO
-	}
-};
-
-struct Queue {
-	Device* dev;
-
-	VkQueue queue;
-	VkQueueFlags flags;
-	u32 family;
-};
-
-struct Device {
-	Instance* ini;
-	VkDevice dev;
-	vk::DynamicDispatch dispatch;
-
-	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
-
-	std::vector<Queue> queues;
-	Queue* gfxQueue;
-
-	std::shared_mutex mutex;
-	std::unordered_map<VkImage, std::unique_ptr<Image>> images;
-	std::unordered_map<VkBuffer, std::unique_ptr<Buffer>> buffers;
-	std::unordered_map<VkSwapchainKHR, std::unique_ptr<Swapchain>> swapchains;
-
-	VkDescriptorPool dsPool;
-	VkSampler sampler;
-	VkDescriptorSetLayout dsLayout;
-	VkPipelineLayout pipeLayout;
-	VkCommandPool commandPool;
-
-	u32 hostVisibleMemTypeBits;
-	u32 deviceLocalMemTypeBits;
-};
-
-#define VK_CHECK(x) do {\
-		auto result = (x);\
-		dlg_assert(result == VK_SUCCESS); \
-	} while(0)
+// data.hpp
+std::unordered_map<std::uint64_t, void*> dataTable;
+std::shared_mutex dataMutex;
 
 // high-level stuff
 u32 findLSB(u32 v) {
@@ -718,6 +607,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	swapd.dev = &devd;
 	swapd.ci = *pCreateInfo;
 	swapd.swapchain = *pSwapchain;
+	swapd.platform = findData<Platform>(pCreateInfo->surface);
 
 	// setup swapchain
 	// setup render pass and pipeline
@@ -796,7 +686,6 @@ void drawGui(Swapchain& swapchain, Draw& draw) {
 	auto& dev = *swapchain.dev;
 
 	ImGui::NewFrame();
-	ImGui::SetNextWindowSize({200, 800});
 	if(ImGui::Begin("Images")) {
 		for(auto& img : dev.images) {
 			ImGui::Text("Name: %s", img.second->name.c_str());
@@ -1115,6 +1004,11 @@ VkResult drawPresent(Queue& queue, Swapchain& swapchain,
 
 	dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
 
+	// if there is a platform (for input stuff), update it
+	if(swapchain.platform) {
+		swapchain.platform->update();
+	}
+
 	// render gui
 	drawGui(swapchain, draw);
 	uploadDraw(dev, draw);
@@ -1179,6 +1073,15 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	return combinedResult;
 }
 
+VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
+		VkInstance                                  instance,
+		VkSurfaceKHR                                surface,
+		const VkAllocationCallbacks*                pAllocator) {
+	auto platform = moveDataOpt<Platform>(surface); // destroy it
+	auto& ini = getData<Instance>(instance);
+	ini.dispatch.vkDestroySurfaceKHR(instance, surface, pAllocator);
+}
+
 VKAPI_CALL PFN_vkVoidFunction GetInstanceProcAddr(VkInstance, const char*);
 VKAPI_CALL PFN_vkVoidFunction GetDeviceProcAddr(VkDevice, const char*);
 
@@ -1211,6 +1114,11 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    // Anyways, then check (in GetProcAddr) whether that extension was
    // enabled.
    FUEN_HOOK(SetDebugUtilsObjectNameEXT),
+
+   // TODO: make optional
+   FUEN_HOOK(CreateWaylandSurfaceKHR),
+
+   FUEN_HOOK(DestroySurfaceKHR),
 
 #undef FUEN_HOOK
 #undef FUEN_ALIAS
