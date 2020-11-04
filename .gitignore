@@ -1,4 +1,4 @@
 .clangd/
-.compile_commands
+compile_commands.json
 subprojects/**
 build/
