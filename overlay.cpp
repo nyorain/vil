@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "data.hpp"
+#include "image.hpp"
 
 #include "overlay.frag.spv.h"
 #include "overlay.vert.spv.h"
@@ -16,15 +17,11 @@ void Overlay::init(Swapchain& swapchain) {
 	this->renderer.init(*swapchain.dev, swapchain.ci.imageFormat, false);
 
 	auto& dev = *swapchain.dev;
-	u32 imgCount = 0u;
-	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.dev, swapchain.swapchain, &imgCount, nullptr));
-	auto imgs = std::make_unique<VkImage[]>(imgCount);
-	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.dev, swapchain.swapchain, &imgCount, imgs.get()));
 
-	buffers.resize(imgCount);
-	for(auto i = 0u; i < imgCount; ++i) {
-		buffers[i].init(*swapchain.dev, imgs[i], swapchain.ci.imageFormat,
-			swapchain.ci.imageExtent, renderer.rp);
+	buffers.resize(swapchain.images.size());
+	for(auto i = 0u; i < swapchain.images.size(); ++i) {
+		buffers[i].init(dev, swapchain.images[i]->image,
+			swapchain.ci.imageFormat, swapchain.ci.imageExtent, renderer.rp);
 	}
 }
 
@@ -436,7 +433,7 @@ void Renderer::drawGui() {
 
 	if(ImGui::Begin("Images")) {
 		std::shared_lock lock(dev.mutex);
-		for(auto& img : dev.images) {
+		for(auto& img : dev.images.map) {
 			ImGui::Text("Name: %s", img.second->name.c_str());
 		}
 	}

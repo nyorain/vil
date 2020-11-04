@@ -46,6 +46,9 @@ src = files(
   'wayland.cpp',
   'overlay.cpp',
   'swa.cpp',
+  'image.cpp',
+  'rp.cpp',
+  'cb.cpp',
 )
 
 deps = [

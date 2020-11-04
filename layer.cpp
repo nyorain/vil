@@ -2,6 +2,10 @@
 #include "data.hpp"
 #include "wayland.hpp"
 
+#include "image.hpp"
+#include "rp.hpp"
+#include "cb.hpp"
+
 #include <vkpp/enums.hpp>
 #include <vkpp/names.hpp>
 #include <vkpp/dispatch.hpp>
@@ -261,6 +265,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// In case GetDeviceProcAddr of the next chain didn't return itself
 	devData.dispatch.vkGetDeviceProcAddr = fpGetDeviceProcAddr;
 
+	devData.swapchains.mutex = &devData.mutex;
+	devData.images.mutex = &devData.mutex;
+	devData.imageViews.mutex = &devData.mutex;
+	devData.buffers.mutex = &devData.mutex;
+	devData.framebuffers.mutex = &devData.mutex;
+	devData.renderPasses.mutex = &devData.mutex;
+	devData.commandBuffers.mutex = &devData.mutex;
+	devData.commandPools.mutex = &devData.mutex;
+
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
 	while(loaderData && loaderData->function != VK_LOADER_DATA_CALLBACK) {
@@ -398,6 +411,9 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	dlg_assert(devd->swapchains.empty());
 	dlg_assert(devd->images.empty());
 	dlg_assert(devd->buffers.empty());
+	dlg_assert(devd->imageViews.empty());
+	dlg_assert(devd->framebuffers.empty());
+	dlg_assert(devd->renderPasses.empty());
 
 	// erase queue datas
 	for(auto& queue : devd->queues) {
@@ -410,67 +426,47 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	destroyDev(dev, alloc);
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
-		VkDevice                                   	device,
-		const VkImageCreateInfo*                    pCreateInfo,
-		const VkAllocationCallbacks*                pAllocator,
-		VkImage*                                    pImage) {
-	auto& devd = *findData<Device>(device);
-
-	// TODO: check if sampling is supported for this image
-	auto ici = *pCreateInfo;
-	ici.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-
-	auto res = devd.dispatch.vkCreateImage(device, pCreateInfo, pAllocator, pImage);
-	if(res != VK_SUCCESS) {
-		return res;
-	}
-
-	auto pimg = std::make_unique<Image>();
-	auto& img = *pimg;
-	img.ci = *pCreateInfo;
-
-	{
-		std::lock_guard lock(devd.mutex);
-		auto [it, success] = devd.images.emplace(*pImage, std::move(pimg));
-		dlg_assert(success);
-	}
-
-	return res;
-}
-
-VKAPI_ATTR void VKAPI_CALL DestroyImage(
-		VkDevice                                    device,
-		VkImage                                     image,
-		const VkAllocationCallbacks*                pAllocator) {
-	auto& devd = *findData<Device>(device);
-
-	{
-		std::lock_guard lock(devd.mutex);
-		auto it = devd.images.find(image);
-		dlg_assert(it != devd.images.end());
-		devd.images.erase(it);
-	}
-
-	devd.dispatch.vkDestroyImage(device, image, pAllocator);
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectNameEXT(
 		VkDevice                                    device,
 		const VkDebugUtilsObjectNameInfoEXT*        pNameInfo) {
 	auto& devd = getData<Device>(device);
 	switch(pNameInfo->objectType) {
-		case VK_OBJECT_TYPE_IMAGE: {
-			std::shared_lock lock(devd.mutex);
-			auto it = devd.images.find((VkImage) pNameInfo->objectHandle);
-			dlg_assert(it != devd.images.end());
-			it->second->name = pNameInfo->pObjectName;
+		case VK_OBJECT_TYPE_QUEUE: {
+			// queues is dispatchable
+			auto& q = getData<Queue>((VkQueue) pNameInfo->objectHandle);
+			q.name = pNameInfo->pObjectName;
+			break;
+		} case VK_OBJECT_TYPE_SWAPCHAIN_KHR: {
+			auto& sc = devd.swapchains.get((VkSwapchainKHR) pNameInfo->objectHandle);
+			sc.name = pNameInfo->pObjectName;
+			break;
+		} case VK_OBJECT_TYPE_IMAGE: {
+			auto& img = devd.images.get((VkImage) pNameInfo->objectHandle);
+			img.name = pNameInfo->pObjectName;
+			break;
+		} case VK_OBJECT_TYPE_IMAGE_VIEW: {
+			auto& view = devd.imageViews.get((VkImageView) pNameInfo->objectHandle);
+			view.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_BUFFER: {
-			std::shared_lock lock(devd.mutex);
-			auto it = devd.buffers.find((VkBuffer) pNameInfo->objectHandle);
-			dlg_assert(it != devd.buffers.end());
-			it->second->name = pNameInfo->pObjectName;
+			auto& buf = devd.buffers.get((VkBuffer) pNameInfo->objectHandle);
+			buf.name = pNameInfo->pObjectName;
+			break;
+		} case VK_OBJECT_TYPE_FRAMEBUFFER: {
+			auto& fb = devd.framebuffers.get((VkFramebuffer) pNameInfo->objectHandle);
+			fb.name = pNameInfo->pObjectName;
+			break;
+		} case VK_OBJECT_TYPE_RENDER_PASS: {
+			auto& rp = devd.renderPasses.get((VkRenderPass) pNameInfo->objectHandle);
+			rp.name = pNameInfo->pObjectName;
+			break;
+		} case VK_OBJECT_TYPE_COMMAND_POOL: {
+			auto& cp = devd.commandPools.get((VkCommandPool) pNameInfo->objectHandle);
+			cp.name = pNameInfo->pObjectName;
+			break;
+		} case VK_OBJECT_TYPE_COMMAND_BUFFER: {
+			auto& cp = devd.commandBuffers.get((VkCommandBuffer) pNameInfo->objectHandle);
+			cp.name = pNameInfo->pObjectName;
 			break;
 		} default: break;
 	}
@@ -502,18 +498,31 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	swapd.ci = *pCreateInfo;
 	swapd.swapchain = *pSwapchain;
 
+	// add swapchain images to tracked images
+	u32 imgCount = 0u;
+	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.dev, swapd.swapchain, &imgCount, nullptr));
+	auto imgs = std::make_unique<VkImage[]>(imgCount);
+	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.dev, swapd.swapchain, &imgCount, imgs.get()));
+
+	swapd.images.resize(imgCount);
+	for(auto i = 0u; i < imgCount; ++i) {
+		auto& img = devd.images.add(imgs[i]);
+		img.swapchain = &swapd;
+		img.dev = &devd;
+		img.image = imgs[i];
+		img.name = dlg::format("Swapchain {} image {}", (void*) swapd.swapchain, i);
+
+		swapd.images[i] = &img;
+	}
+
+	// overlay?
 	constexpr auto overlay = false;
 	if(overlay) {
 		swapd.useOverlay = true;
 		swapd.overlay.init(swapd);
 	}
 
-	{
-		std::lock_guard lock(devd.mutex);
-		auto [it, success] = devd.swapchains.emplace(*pSwapchain, std::move(pswapd));
-		dlg_assert(success);
-	}
-
+	devd.swapchains.mustEmplace(*pSwapchain, std::move(pswapd));
 	return result;
 }
 
@@ -523,21 +532,14 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& devd = getData<Device>(device);
 
-	{
-		std::lock_guard lock(devd.mutex);
-		auto it = devd.swapchains.find(swapchain);
-		dlg_assert(it != devd.swapchains.end());
-		devd.swapchains.erase(it);
+	auto& sc = devd.swapchains.get(swapchain);
+	for(auto* img : sc.images) {
+		devd.images.mustErase(img->image);
 	}
 
-	devd.dispatch.vkDestroySwapchainKHR(device, swapchain, pAllocator);
-}
+	devd.swapchains.mustErase(swapchain);
 
-Swapchain& getSwapchain(Device& dev, VkSwapchainKHR swapchain) {
-	std::shared_lock lock(dev.mutex);
-	auto it = dev.swapchains.find(swapchain);
-	dlg_assert(it != dev.swapchains.end());
-	return *it->second;
+	devd.dispatch.vkDestroySwapchainKHR(device, swapchain, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
@@ -547,7 +549,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 
 	auto combinedResult = VK_SUCCESS;
 	for(auto i = 0u; i < pPresentInfo->swapchainCount; ++i) {
-		auto& swapchain = getSwapchain(*qd.dev, pPresentInfo->pSwapchains[i]);
+		auto& swapchain = qd.dev->swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 		if(swapchain.useOverlay) {
 			auto waitsems = std::span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
@@ -578,6 +580,16 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	return combinedResult;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
+		VkQueue                                     queue,
+		uint32_t                                    submitCount,
+		const VkSubmitInfo*                         pSubmits,
+		VkFence                                     fence) {
+	auto& qd = getData<Queue>(queue);
+	auto& dev = *qd.dev;
+	return dev.dispatch.vkQueueSubmit(queue, submitCount, pSubmits, fence);
+}
+
 VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		VkInstance                                  instance,
 		VkSurfaceKHR                                surface,
@@ -590,9 +602,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 VKAPI_CALL PFN_vkVoidFunction GetInstanceProcAddr(VkInstance, const char*);
 VKAPI_CALL PFN_vkVoidFunction GetDeviceProcAddr(VkDevice, const char*);
 
-static const std::unordered_map<std::string_view, void*> funcPtrTable {
 #define FUEN_HOOK(fn) { "vk" # fn, (void *) fn }
 #define FUEN_ALIAS(alias, fn) { "vk" # alias, (void *) ## fn }
+
+static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(GetInstanceProcAddr),
    FUEN_HOOK(GetDeviceProcAddr),
 
@@ -602,12 +615,10 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CreateDevice),
    FUEN_HOOK(DestroyDevice),
 
-   FUEN_HOOK(CreateImage),
-   FUEN_HOOK(DestroyImage),
-
    FUEN_HOOK(CreateSwapchainKHR),
    FUEN_HOOK(DestroySwapchainKHR),
 
+   FUEN_HOOK(QueueSubmit),
    FUEN_HOOK(QueuePresentKHR),
 
    // TODO: we probably have to implement *all* the functions since
@@ -625,9 +636,38 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
 
    FUEN_HOOK(DestroySurfaceKHR),
 
+   // rp.hpp
+   FUEN_HOOK(CreateFramebuffer),
+   FUEN_HOOK(DestroyFramebuffer),
+
+   FUEN_HOOK(CreateRenderPass),
+   FUEN_HOOK(DestroyRenderPass),
+
+   // image.hpp
+   FUEN_HOOK(CreateImage),
+   FUEN_HOOK(DestroyImage),
+
+   FUEN_HOOK(CreateImageView),
+   FUEN_HOOK(DestroyImageView),
+
+   // cb.hpp
+   FUEN_HOOK(CreateCommandPool),
+   FUEN_HOOK(DestroyCommandPool),
+   FUEN_HOOK(ResetCommandPool),
+
+   FUEN_HOOK(AllocateCommandBuffers),
+   FUEN_HOOK(FreeCommandBuffers),
+   FUEN_HOOK(BeginCommandBuffer),
+   FUEN_HOOK(EndCommandBuffer),
+   FUEN_HOOK(ResetCommandBuffer),
+
+   FUEN_HOOK(CmdBeginRenderPass),
+   FUEN_HOOK(CmdWaitEvents),
+   FUEN_HOOK(CmdPipelineBarrier),
+};
+
 #undef FUEN_HOOK
 #undef FUEN_ALIAS
-};
 
 PFN_vkVoidFunction findFunctionPtr(const char* name) {
 	auto it = funcPtrTable.find(std::string_view(name));

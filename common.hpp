@@ -11,6 +11,7 @@
 #include <vulkan/vk_layer.h>
 
 #include <cstdint>
+#include <cassert>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -40,6 +41,15 @@ struct Instance;
 struct Queue;
 struct Swapchain;
 
+struct Image;
+struct ImageView;
+struct Framebuffer;
+struct RenderPass;
+struct CommandBuffer;
+
+struct Event;
+struct CommandPool;
+
 using u32 = std::uint32_t;
 using i32 = std::int32_t;
 
@@ -55,13 +65,6 @@ struct Platform {
 struct Instance {
 	vk::DynamicDispatch dispatch;
 	VkInstance ini;
-};
-
-struct Image {
-	Device* dev;
-	std::string name;
-	VkImageCreateInfo ci;
-	VkImageView view;
 };
 
 struct Buffer {
@@ -142,9 +145,12 @@ struct Swapchain {
 	Device* dev;
 	VkSwapchainKHR swapchain;
 	VkSwapchainCreateInfoKHR ci;
+	std::string name;
 
 	bool useOverlay {};
 	Overlay overlay;
+
+	std::vector<Image*> images;
 
 	~Swapchain() {
 		// TODO
@@ -153,6 +159,7 @@ struct Swapchain {
 
 struct Queue {
 	Device* dev;
+	std::string name;
 
 	VkQueue queue;
 	VkQueueFlags flags;
@@ -185,6 +192,99 @@ struct DisplayWindow {
 	void mainLoop();
 };
 
+// Synchronized unordered map.
+// Elements are stored in unique_ptr's, making sure that as long as two
+// threads never operate on the same entry and lookup/creation/destruction
+// of entries is synchronized, everything just works.
+// You should never (outside of a lock and we try to limit the locks to
+// the immediate lookup/creation/destruction sections) work with iterators
+// or unique_ptr<Value> refs of this map since they might get destroyed
+// at *any* moment, when the unordered map needs a rehash.
+template<typename K, typename T>
+class SyncedUniqueUnorderedMap {
+public:
+	using UnorderedMap = std::unordered_map<K, std::unique_ptr<T>>;
+
+	std::size_t erase(const K& key) {
+		std::lock_guard lock(*mutex);
+		return map.erase(key);
+	}
+
+	std::size_t mustErase(const K& key) {
+		std::lock_guard lock(*mutex);
+		auto count = map.erase(key);
+		assert(count);
+		return count;
+	}
+
+	T* find(const K& key) {
+		std::shared_lock lock(*mutex);
+		auto it = map.find(key);
+		return it == map.end() ? nullptr : it->second.get();
+	}
+
+	// Expects an element in the map, finds and returns it.
+	// Unlike operator[], will never create the element.
+	// Error to call this with a key that isn't present.
+	T& get(const K& key) {
+		std::shared_lock lock(*mutex);
+		auto it = map.find(key);
+		assert(it != map.end());
+		return *it->second.get();
+	}
+
+	template<class O>
+	bool contains(const O& x) const {
+		// TODO C++20, use map.contains
+		std::shared_lock lock(*mutex);
+		return map.find(x) != map.end();
+	}
+
+	T& operator[](const K& key) {
+		std::lock_guard lock(*mutex);
+		return map[key];
+	}
+
+	// emplace methods may be counter-intuitive.
+	// You must actually pass a unique_ptr<T> as value.
+	// Might wanna use add() instead.
+	template<class... Args>
+	std::pair<T*, bool> emplace(Args&&... args) {
+		std::lock_guard lock(*mutex);
+		auto [it, success] = map.emplace(std::forward<Args>(args)...);
+		return {it->second.get(), success};
+	}
+
+	template<class... Args>
+	T& mustEmplace(Args&&... args) {
+		auto [ptr, success] = this->emplace(std::forward<Args>(args)...);
+		assert(success);
+		return *ptr;
+	}
+
+	// Asserts that element is really new
+	template<typename V = T, class... Args>
+	T& add(const K& key, Args&&... args) {
+		auto elem = std::make_unique<V>(std::forward<Args>(args)...);
+		return this->mustEmplace(key, std::move(elem));
+	}
+
+	// Keep in mind they can immediately be out-of-date.
+	bool empty() const {
+		std::shared_lock lock(*mutex);
+		return map.empty();
+	}
+
+	std::size_t size() const {
+		std::shared_lock lock(*mutex);
+		return map.size();
+	}
+
+	// Can also be used directly, but take care!
+	std::shared_mutex* mutex;
+	UnorderedMap map;
+};
+
 struct Device {
 	Instance* ini;
 	VkDevice dev;
@@ -197,9 +297,18 @@ struct Device {
 	Queue* gfxQueue;
 
 	std::shared_mutex mutex;
-	std::unordered_map<VkImage, std::unique_ptr<Image>> images;
-	std::unordered_map<VkBuffer, std::unique_ptr<Buffer>> buffers;
-	std::unordered_map<VkSwapchainKHR, std::unique_ptr<Swapchain>> swapchains;
+	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
+
+	SyncedUniqueUnorderedMap<VkImage, Image> images;
+	SyncedUniqueUnorderedMap<VkImageView, ImageView> imageViews;
+	SyncedUniqueUnorderedMap<VkBuffer, Buffer> buffers;
+
+	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
+	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
+	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
+	SyncedUniqueUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
+
+	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 
 	VkDescriptorPool dsPool;
 	VkSampler sampler;
