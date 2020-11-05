@@ -12,6 +12,7 @@ struct Command {
 
 struct CommandPool {
 	Device* dev;
+	VkCommandPool pool;
 	std::vector<CommandBuffer*> cbs;
 	std::string name;
 };
@@ -33,6 +34,9 @@ struct CommandBuffer {
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
 	std::string name;
+
+	// pending submissions
+	std::vector<PendingSubmission*> pending;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(

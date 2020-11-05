@@ -5,6 +5,7 @@
 #include "image.hpp"
 #include "rp.hpp"
 #include "cb.hpp"
+#include "sync.hpp"
 
 #include <vkpp/enums.hpp>
 #include <vkpp/names.hpp>
@@ -43,30 +44,6 @@ u32 findLSB(u32 v) {
 		31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
 	};
 	return blackMagic[((u32)((v & -v) * 0x077CB531U)) >> 27];
-}
-
-void Draw::init(Device& dev) {
-	// init data
-	VkCommandBufferAllocateInfo cbai = vk::CommandBufferAllocateInfo();
-	cbai.commandBufferCount = 1u;
-	cbai.commandPool = dev.commandPool;
-	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	VK_CHECK(dev.dispatch.vkAllocateCommandBuffers(dev.dev, &cbai, &cb));
-
-	// command buffer is a dispatchable object
-	dev.setDeviceLoaderData(dev.dev, cb);
-
-	VkFenceCreateInfo fci = vk::FenceCreateInfo();
-	VK_CHECK(dev.dispatch.vkCreateFence(dev.dev, &fci, nullptr, &fence));
-
-	VkSemaphoreCreateInfo sci = vk::SemaphoreCreateInfo();
-	VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.dev, &sci, nullptr, &semaphore));
-
-	VkDescriptorSetAllocateInfo dsai = vk::DescriptorSetAllocateInfo();
-	dsai.descriptorPool = dev.dsPool;
-	dsai.descriptorSetCount = 1u;
-	dsai.pSetLayouts = &dev.dsLayout;
-	VK_CHECK(dev.dispatch.vkAllocateDescriptorSets(dev.dev, &dsai, &ds));
 }
 
 void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
@@ -273,6 +250,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	devData.renderPasses.mutex = &devData.mutex;
 	devData.commandBuffers.mutex = &devData.mutex;
 	devData.commandPools.mutex = &devData.mutex;
+	devData.fences.mutex = &devData.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
@@ -552,7 +530,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		auto& swapchain = qd.dev->swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 		if(swapchain.useOverlay) {
-			auto waitsems = std::span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
+			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay.drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
 		} else {
 			VkPresentInfoKHR pi = vk::PresentInfoKHR();
@@ -587,7 +565,54 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		VkFence                                     fence) {
 	auto& qd = getData<Queue>(queue);
 	auto& dev = *qd.dev;
+
+	// hook fence
+	auto& subm = *dev.pending.emplace_back(std::make_unique<PendingSubmission>());
+	subm.queue = &qd;
+	if(fence) {
+		subm.hookedFence = &dev.fences.get(fence);
+	}
+
+	for(auto i = 0u; i < submitCount; ++i) {
+		auto& si = *pSubmits[i];
+
+		auto& dst = subm.submissions.emplace_back();
+		TODO
+	}
+
 	return dev.dispatch.vkQueueSubmit(queue, submitCount, pSubmits, fence);
+}
+
+bool check(PendingSubmission& subm) {
+	if(subm.waitedUpon.load()) {
+		return false;
+	}
+
+	auto& dev = *subm.queue->dev;
+	if(dev.dispatch.vkGetFenceStatus(dev.dev, subm.fence) != VK_SUCCESS) {
+		return false;
+	}
+
+	auto it = std::find(dev.pending.begin(), dev.pending.end(), &subm);
+	dlg_assert(it != dev.pending.end());
+
+	for(auto& cb : subm.cbs) {
+		auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &subm);
+		dlg_assert(it2 != cb->pending.end());
+		cb->pending.erase(it2);
+	}
+
+	if(subm.hookedFence) {
+		dlg_assert(subm.hookedFence->hooked == &subm);
+		subm.hookedFence->hooked = nullptr;
+		subm.hookedFence->hookedDone.store(true);
+	}
+
+	dev.dispatch.vkResetFences(dev.dev, 1, &subm.fence);
+	dev.fencePool.push_back(subm.fence);
+	dev.pending.erase(it);
+
+	return true;
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(

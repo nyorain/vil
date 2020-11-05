@@ -340,20 +340,7 @@ void DisplayWindow::mainLoop() {
 		io.DisplaySize.y = sci.imageExtent.height;
 		renderer.ensureFontAtlas(draw.cb);
 
-		// TODO: not needed every frame
-		VkDescriptorImageInfo dsii;
-		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		dsii.imageView = renderer.font.view;
-
-		VkWriteDescriptorSet write = vk::WriteDescriptorSet();
-		write.descriptorCount = 1u;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		write.dstSet = draw.ds;
-		write.pImageInfo = &dsii;
-
-		dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
-
-		renderer.drawGui();
+		renderer.drawGui(draw);
 		renderer.uploadDraw(draw);
 		renderer.recordDraw(draw, sci.imageExtent, buffers[id].fb);
 

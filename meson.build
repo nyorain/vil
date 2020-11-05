@@ -49,6 +49,8 @@ src = files(
   'image.cpp',
   'rp.cpp',
   'cb.cpp',
+  'util.cpp',
+  'f16.cpp',
 )
 
 deps = [

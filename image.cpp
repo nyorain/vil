@@ -15,7 +15,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	auto ici = *pCreateInfo;
 	ici.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
 
-	auto res = dev.dispatch.vkCreateImage(device, pCreateInfo, pAllocator, pImage);
+	auto res = dev.dispatch.vkCreateImage(device, &ici, pAllocator, pImage);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -23,7 +23,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	auto& img = dev.images.add(*pImage);
 	img.dev = &dev;
 	img.image = *pImage;
-	img.ci = *pCreateInfo;
+	img.ci = ici;
 
 	return res;
 }

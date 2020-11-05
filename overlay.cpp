@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "data.hpp"
+#include "util.hpp"
 #include "image.hpp"
 
 #include "overlay.frag.spv.h"
@@ -9,6 +10,31 @@
 #include <imgui/imgui.h>
 
 namespace fuen {
+
+// Draw
+void Draw::init(Device& dev) {
+	// init data
+	VkCommandBufferAllocateInfo cbai = vk::CommandBufferAllocateInfo();
+	cbai.commandBufferCount = 1u;
+	cbai.commandPool = dev.commandPool;
+	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	VK_CHECK(dev.dispatch.vkAllocateCommandBuffers(dev.dev, &cbai, &cb));
+
+	// command buffer is a dispatchable object
+	dev.setDeviceLoaderData(dev.dev, cb);
+
+	VkFenceCreateInfo fci = vk::FenceCreateInfo();
+	VK_CHECK(dev.dispatch.vkCreateFence(dev.dev, &fci, nullptr, &fence));
+
+	VkSemaphoreCreateInfo sci = vk::SemaphoreCreateInfo();
+	VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.dev, &sci, nullptr, &semaphore));
+
+	VkDescriptorSetAllocateInfo dsai = vk::DescriptorSetAllocateInfo();
+	dsai.descriptorPool = dev.dsPool;
+	dsai.descriptorSetCount = 1u;
+	dsai.pSetLayouts = &dev.dsLayout;
+	VK_CHECK(dev.dispatch.vkAllocateDescriptorSets(dev.dev, &dsai, &dsSelected));
+}
 
 // Overlay
 void Overlay::init(Swapchain& swapchain) {
@@ -25,7 +51,7 @@ void Overlay::init(Swapchain& swapchain) {
 	}
 }
 
-VkResult Overlay::drawPresent(Queue& queue, std::span<const VkSemaphore> semaphores,
+VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 		u32 imageIdx) {
 	auto& dev = *queue.dev;
 
@@ -56,27 +82,13 @@ VkResult Overlay::drawPresent(Queue& queue, std::span<const VkSemaphore> semapho
 	ImGui::GetIO().DisplaySize.y = swapchain->ci.imageExtent.height;
 	renderer.ensureFontAtlas(draw.cb);
 
-	// TODO: not needed every frame, really
-	// update descriptor
-	VkDescriptorImageInfo dsii;
-	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	dsii.imageView = renderer.font.view;
-
-	VkWriteDescriptorSet write = vk::WriteDescriptorSet();
-	write.descriptorCount = 1u;
-	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	write.dstSet = draw.ds;
-	write.pImageInfo = &dsii;
-
-	dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
-
 	// if there is a platform (for input stuff), update it
 	if(platform) {
 		platform->update();
 	}
 
 	// render gui
-	renderer.drawGui();
+	renderer.drawGui(draw);
 	renderer.uploadDraw(draw);
 	renderer.recordDraw(draw, swapchain->ci.imageExtent, buffers[imageIdx].fb);
 
@@ -422,19 +434,154 @@ void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
 		0, NULL,
 		1, useBarrier);
 
+	// create descriptor
+	VkDescriptorSetAllocateInfo dsai = vk::DescriptorSetAllocateInfo();
+	dsai.descriptorPool = dev.dsPool;
+	dsai.descriptorSetCount = 1u;
+	dsai.pSetLayouts = &dev.dsLayout;
+	VK_CHECK(dev.dispatch.vkAllocateDescriptorSets(dev.dev, &dsai, &dsFont));
+
+	// ...and update it
+	VkDescriptorImageInfo dsii;
+	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	dsii.imageView = font.view;
+
+	VkWriteDescriptorSet write = vk::WriteDescriptorSet();
+	write.descriptorCount = 1u;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.dstSet = dsFont;
+	write.pImageInfo = &dsii;
+
+	dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
+
 	// Store our identifier
-	io.Fonts->TexID = (ImTextureID)(std::intptr_t)font.view;
+	io.Fonts->TexID = (ImTextureID) dsFont;
 	font.uploaded = true;
 }
 
-void Renderer::drawGui() {
+void Renderer::drawGui(Draw& draw) {
 	auto& dev = *this->dev;
 	ImGui::NewFrame();
 
 	if(ImGui::Begin("Images")) {
 		std::shared_lock lock(dev.mutex);
+
+		ImGui::BeginChild("Image list", {400, 600});
+
 		for(auto& img : dev.images.map) {
-			ImGui::Text("Name: %s", img.second->name.c_str());
+			ImGui::PushID(img.second.get());
+
+			auto label = img.second->name;
+			if(label.empty()) {
+				auto& ci = img.second->ci;
+				label += std::to_string(ci.extent.width);
+				label += "x";
+				label += std::to_string(ci.extent.height);
+				if(ci.extent.depth > 1) {
+					label += "x";
+					label += std::to_string(ci.extent.depth);
+				}
+
+				if(ci.arrayLayers > 1) {
+					label += "[";
+					label += std::to_string(ci.arrayLayers);
+					label += "]";
+				}
+
+				label += " ";
+				label += vk::name(vk::Format(ci.format));
+			}
+
+			if(ImGui::Button(label.c_str())) {
+				auto newSelection = img.second.get();
+				if(newSelection != selected.image) {
+					selected.image = newSelection;
+
+					if(selected.view) {
+						dev.dispatch.vkDestroyImageView(dev.dev, selected.view, nullptr);
+						selected.view = {};
+					}
+
+					if(!selected.image->swapchain) {
+						dlg_debug("updating image view");
+
+						VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
+						ivi.image = selected.image->image;
+						ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+						ivi.format = selected.image->ci.format;
+						ivi.subresourceRange.aspectMask = isDepthFormat(vk::Format(ivi.format)) ?
+							VK_IMAGE_ASPECT_DEPTH_BIT :
+							VK_IMAGE_ASPECT_COLOR_BIT;
+						ivi.subresourceRange.layerCount = 1u;
+						ivi.subresourceRange.levelCount = 1u;
+
+						auto res = dev.dispatch.vkCreateImageView(dev.dev, &ivi, nullptr, &selected.view);
+						dlg_assert(res == VK_SUCCESS);
+
+						VkDescriptorImageInfo dsii;
+						dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+						dsii.imageView = selected.view;
+
+						VkWriteDescriptorSet write = vk::WriteDescriptorSet();
+						write.descriptorCount = 1u;
+						write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+						write.dstSet = draw.dsSelected;
+						write.pImageInfo = &dsii;
+
+						dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
+					} else {
+						dlg_debug("not creating view due to swapchain image");
+					}
+				}
+			}
+
+			ImGui::PopID();
+		}
+
+		ImGui::EndChild();
+
+		if(selected.image) {
+			ImGui::SameLine();
+			ImGui::BeginChild("Selected Image", {600, 600});
+
+			ImGui::Text("%s", selected.image->name.c_str());
+			ImGui::Spacing();
+
+			// info
+			ImGui::Columns(2);
+
+			ImGui::SetColumnWidth(0, 100);
+
+			ImGui::Text("Extent");
+			ImGui::Text("Layers");
+			ImGui::Text("Levels");
+			ImGui::Text("Format");
+			ImGui::Text("Usage");
+			ImGui::Text("Flags");
+			ImGui::Text("Tiling");
+			ImGui::Text("Samples");
+
+			ImGui::NextColumn();
+
+			auto& ci = selected.image->ci;
+			ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.height);
+			ImGui::Text("%d", ci.arrayLayers);
+			ImGui::Text("%d", ci.mipLevels);
+			ImGui::Text("%s", vk::name(vk::Format(ci.format)));
+			ImGui::Text("%s", vk::name(vk::ImageUsageFlags(vk::ImageUsageBits(ci.usage))).c_str());
+			ImGui::Text("%s", vk::name(vk::ImageCreateFlags(vk::ImageCreateBits(ci.flags))).c_str());
+			ImGui::Text("%s", vk::name(vk::ImageTiling(ci.tiling)));
+			ImGui::Text("%s", vk::name(vk::SampleCountBits(ci.samples)));
+
+			ImGui::Columns();
+
+			// content
+			if(selected.view) {
+				ImGui::Spacing();
+				ImGui::Image((void*) draw.dsSelected, {400, 400});
+			}
+
+			ImGui::EndChild();
 		}
 	}
 
@@ -445,7 +592,7 @@ void Renderer::drawGui() {
 
 void Renderer::uploadDraw(Draw& draw) {
 	auto& dev = *this->dev;
-	auto drawData = *ImGui::GetDrawData();
+	auto& drawData = *ImGui::GetDrawData();
 	if(drawData.TotalIdxCount == 0) {
 		return;
 	}
@@ -467,7 +614,7 @@ void Renderer::uploadDraw(Draw& draw) {
 	VK_CHECK(dev.dispatch.vkMapMemory(dev.dev, draw.indexBuffer.mem, 0, indexSize, 0, (void**) &inds));
 
 	for(auto i = 0; i < drawData.CmdListsCount; ++i) {
-		auto cmds = *drawData.CmdLists[i];
+		auto& cmds = *drawData.CmdLists[i];
 		std::memcpy(verts, cmds.VtxBuffer.Data, cmds.VtxBuffer.size() * sizeof(ImDrawVert));
 		std::memcpy(inds, cmds.IdxBuffer.Data, cmds.IdxBuffer.size() * sizeof(ImDrawIdx));
 		verts += cmds.VtxBuffer.Size;
@@ -489,7 +636,7 @@ void Renderer::uploadDraw(Draw& draw) {
 
 void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb) {
 	auto& dev = *this->dev;
-	auto drawData = *ImGui::GetDrawData();
+	auto& drawData = *ImGui::GetDrawData();
 	if(drawData.TotalIdxCount == 0) {
 		return;
 	}
@@ -515,8 +662,6 @@ void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb) {
 	dev.dispatch.vkCmdSetViewport(draw.cb, 0, 1, &viewport);
 
 	dev.dispatch.vkCmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-	dev.dispatch.vkCmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		dev.pipeLayout, 0, 1, &draw.ds, 0, nullptr);
 
 	VkDeviceSize off0 = 0u;
 	dev.dispatch.vkCmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
@@ -535,17 +680,26 @@ void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb) {
 	auto vtxOff = 0u;
 	for(auto i = 0; i < drawData.CmdListsCount; ++i) {
 		auto& cmds = *drawData.CmdLists[i];
+
 		for(auto j = 0; j < cmds.CmdBuffer.Size; ++j) {
 			auto& cmd = cmds.CmdBuffer[j];
 
-			// TODO
+			auto ds = (VkDescriptorSet) cmd.TextureId;
+			if(!ds) {
+				// we have to always bind a valid ds
+				ds = dsFont;
+			}
+			dev.dispatch.vkCmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				dev.pipeLayout, 0, 1, &ds, 0, nullptr);
+
+			// TODO?
 			VkRect2D scissor {};
-			// scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
-			// scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
-			// scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
-			// scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
-			scissor.extent.width = viewport.width;
-			scissor.extent.height = viewport.height;
+			scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
+			scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
+			scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
+			scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
+			// scissor.extent.width = viewport.width;
+			// scissor.extent.height = viewport.height;
 			dev.dispatch.vkCmdSetScissor(draw.cb, 0, 1, &scissor);
 
 			dev.dispatch.vkCmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);

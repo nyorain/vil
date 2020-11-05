@@ -1,9 +1,9 @@
 #pragma once
 
-#define VK_NO_PROTOTYPES
-
 // TODO: leave to build system/config file
 #define VK_USE_PLATFORM_WAYLAND_KHR
+
+#include "fwd.hpp"
 
 #include <vkpp/dispatch.hpp>
 #include <vkpp/span.hpp>
@@ -19,6 +19,8 @@
 #include <shared_mutex>
 #include <memory>
 #include <thread>
+#include <deque>
+#include <atomic>
 
 struct ImGuiContext;
 struct swa_display;
@@ -35,23 +37,6 @@ namespace std {
 } // namespace std
 
 namespace fuen {
-
-struct Device;
-struct Instance;
-struct Queue;
-struct Swapchain;
-
-struct Image;
-struct ImageView;
-struct Framebuffer;
-struct RenderPass;
-struct CommandBuffer;
-
-struct Event;
-struct CommandPool;
-
-using u32 = std::uint32_t;
-using i32 = std::int32_t;
 
 // util
 u32 findLSB(u32 v);
@@ -98,7 +83,8 @@ struct Draw {
 	VkCommandBuffer cb;
 	VkSemaphore semaphore;
 	VkFence fence;
-	VkDescriptorSet ds;
+
+	VkDescriptorSet dsSelected;
 
 	void init(Device& dev);
 };
@@ -110,6 +96,13 @@ struct Renderer {
 
 	bool clear {};
 	ImGuiContext* imgui;
+
+	VkDescriptorSet dsFont;
+
+	struct {
+		Image* image {};
+		VkImageView view {};
+	} selected;
 
 	struct {
 		bool uploaded {};
@@ -124,7 +117,7 @@ struct Renderer {
 	void init(Device& dev, VkFormat, bool clear);
 	void ensureFontAtlas(VkCommandBuffer cb);
 
-	void drawGui();
+	void drawGui(Draw&);
 	void uploadDraw(Draw&);
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb);
 };
@@ -138,7 +131,7 @@ struct Overlay {
 	Platform* platform;
 
 	void init(Swapchain& swapchain);
-	VkResult drawPresent(Queue& queue, std::span<const VkSemaphore>, u32 imageIdx);
+	VkResult drawPresent(Queue& queue, span<const VkSemaphore>, u32 imageIdx);
 };
 
 struct Swapchain {
@@ -285,6 +278,35 @@ public:
 	UnorderedMap map;
 };
 
+struct Submission {
+	std::vector<std::pair<VkSemaphore, VkPipelineStageFlags>> waitSemaphores;
+	VkSemaphore signalSemaphore;
+
+	// Accessing those might not be save if the submission has completed,
+	// they might have already been destroyed. So:
+	// - lock dev.mutex (shared lock is enough)
+	// - check whether associated pending fence has completed
+	// - only if not are you allowed to acces them (and only while
+	//   mutex is still locked)
+	std::vector<CommandBuffer*> cbs;
+};
+
+struct PendingSubmission {
+	Queue* queue {};
+	std::vector<Submission> submissions;
+
+	// The fence original used for the submission that we hooked
+	Fence* hookedFence {};
+
+	// Fence set by us to know when submission completed.
+	// Allocated from a fence pool.
+	VkFence fence {};
+	std::atomic<unsigned> waitedUpon {};
+};
+
+// dev.mutex *must* be locked (non-shared) before calling this.
+bool check(PendingSubmission& subm);
+
 struct Device {
 	Instance* ini;
 	VkDevice dev;
@@ -295,6 +317,20 @@ struct Device {
 
 	std::vector<Queue> queues;
 	Queue* gfxQueue;
+
+	VkDescriptorPool dsPool;
+	VkSampler sampler;
+	VkDescriptorSetLayout dsLayout;
+	VkPipelineLayout pipeLayout;
+	VkCommandPool commandPool;
+
+	u32 hostVisibleMemTypeBits;
+	u32 deviceLocalMemTypeBits;
+
+	DisplayWindow window;
+
+	std::vector<VkFence> fencePool; // currently unused fences
+	std::vector<std::unique_ptr<PendingSubmission>> pending;
 
 	std::shared_mutex mutex;
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
@@ -307,19 +343,9 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
 	SyncedUniqueUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
+	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
-
-	VkDescriptorPool dsPool;
-	VkSampler sampler;
-	VkDescriptorSetLayout dsLayout;
-	VkPipelineLayout pipeLayout;
-	VkCommandPool commandPool;
-
-	u32 hostVisibleMemTypeBits;
-	u32 deviceLocalMemTypeBits;
-
-	DisplayWindow window;
 };
 
 } // namespace fuen

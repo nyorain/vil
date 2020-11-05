@@ -11,7 +11,7 @@ struct Image {
 	VkImageCreateInfo ci;
 
 	// when they belong to a swapchain
-	Swapchain* swapchain;
+	Swapchain* swapchain {};
 };
 
 struct ImageView {
