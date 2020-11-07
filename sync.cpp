@@ -3,7 +3,7 @@
 
 namespace fuen {
 
-VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
+VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 		VkDevice                                    device,
 		const VkFenceCreateInfo*                    pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
@@ -21,17 +21,19 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateFence(
 	return res;
 }
 
-VKAPI_ATTR void VKAPI_CALL vkDestroyFence(
+VKAPI_ATTR void VKAPI_CALL DestroyFence(
 		VkDevice                                    device,
 		VkFence                                     fence,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	auto* fenceD = dev.fences.find(fence);
+	auto& fenceD = dev.fences.get(fence);
 
+	// per spec, we can assume all associated payload to be finished
 	{
 		std::lock_guard lock(dev.mutex);
-		if(fenceD && fenceD->hooked) {
-			fenceD->hooked->hookedFence = {};
+		if(fenceD.submission) {
+			auto finished = checkLocked(*fenceD.submission);
+			dlg_assert(finished);
 		}
 	}
 
@@ -39,110 +41,65 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyFence(
 	dev.dispatch.vkDestroyFence(device, fence, pAllocator);
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL vkResetFences(
+// We hook these calls so we have as much knowledge about payload
+// completion as the application. Might make other things easier.
+
+VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 		VkDevice                                    device,
 		uint32_t                                    fenceCount,
 		const VkFence*                              pFences) {
 	auto& dev = getData<Device>(device);
 
+	// per spec, we can assume all associated payload to be finished
 	for(auto i = 0u; i < fenceCount; ++i) {
-		auto& fence = dev.fences.get(pFences[i]);
-		fence.hookedDone.store(false);
-		// don't reset fence.hooked, no effect on that
+		auto fence = pFences[i];
+		auto& fenceD = dev.fences.get(fence);
+
+		std::lock_guard lock(dev.mutex);
+		if(fenceD.submission) {
+			auto finished = checkLocked(*fenceD.submission);
+			dlg_assert(finished);
+		}
 	}
 
 	return dev.dispatch.vkResetFences(device, fenceCount, pFences);
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL vkGetFenceStatus(
+VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
 		VkDevice                                    device,
 		VkFence                                     fence) {
 	auto& dev = getData<Device>(device);
 	auto& fenceD = dev.fences.get(fence);
 
-	{
-		std::lock_guard lock (dev.mutex);
-		if(auto* subm = fenceD.hooked) {
-			// even if the fence we forwarded to isn't done, the original
-			// fence might still be. So only return the forwarded value
-			// here if it is success.
-			if(check(*subm)) {
-				return VK_SUCCESS;
-			}
-		} else if(fenceD.hookedDone) {
-			return VK_SUCCESS;
+	auto res = dev.dispatch.vkGetFenceStatus(device, fence);
+	if(res == VK_SUCCESS) {
+		std::lock_guard lock(dev.mutex);
+		if(fenceD.submission) {
+			auto finished = checkLocked(*fenceD.submission);
+			dlg_assert(finished);
 		}
 	}
 
-	return dev.dispatch.vkGetFenceStatus(device, fence);
+	return res;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(
+VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 		VkDevice                                    device,
 		uint32_t                                    fenceCount,
 		const VkFence*                              pFences,
 		VkBool32                                    waitAll,
 		uint64_t                                    timeout) {
 	auto& dev = getData<Device>(device);
-
-	// have to check here, can't do early return below
-	if(!waitAll) {
-		for(auto i = 0u; i < fenceCount; ++i) {
-			auto& fence = dev.fences.get(pFences[i]);
-			if(fence.hookedDone) {
-				return VK_SUCCESS;
-			}
-		}
-	}
-
-	bool afterCheck = false;
-	std::vector<VkFence> fences;
-	fences.reserve(fenceCount);
-
-	{
-		std::lock_guard lock(dev.mutex);
-
-		// build fences
-		// Important that we don't return from here on, as we potentially increased
-		// the waitUpon counter in the loop, have to decrease again after waiting.
-		for(auto i = 0u; i < fenceCount; ++i) {
-			auto& fence = dev.fences.get(pFences[i]);
-			if(fence.hookedDone) {
-				continue;
-			}
-
-			if(!fence.hooked) {
-				fences.push_back(fence.fence);
-				continue;
-			}
-
-			// could check whether hooked fence is done here already? optimization?
-			// if(check(*fence.hooked)) continue;
-
-			afterCheck = true;
-			fences.push_back(fence.hooked->fence);
-			++fence.hooked->waitedUpon;
-		}
-	}
-
-	if(fences.empty()) {
-		dlg_assert(!afterCheck);
-		return VK_SUCCESS;
-	}
-
 	auto res = dev.dispatch.vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
 
-	// we kept at least one sumission alive, check up on it now
-	if(afterCheck) {
-		std::lock_guard lock(dev.mutex);
+	if(res == VK_SUCCESS || !waitAll) {
+		// have to check all fences for completed payloads
 		for(auto i = 0u; i < fenceCount; ++i) {
 			auto& fence = dev.fences.get(pFences[i]);
-			if(!fence.hooked) {
-				continue;
+			std::lock_guard lock(dev.mutex);
+			if(fence.submission) {
+				checkLocked(*fence.submission);
 			}
-
-			--fence.hooked->waitedUpon;
-			check(*fence.hooked);
 		}
 	}
 

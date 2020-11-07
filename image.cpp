@@ -24,6 +24,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.dev = &dev;
 	img.image = *pImage;
 	img.ci = ici;
+	img.pendingLayout = ici.initialLayout;
 
 	return res;
 }

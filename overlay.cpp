@@ -90,7 +90,7 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	// render gui
 	renderer.drawGui(draw);
 	renderer.uploadDraw(draw);
-	renderer.recordDraw(draw, swapchain->ci.imageExtent, buffers[imageIdx].fb);
+	renderer.recordDraw(draw, swapchain->ci.imageExtent, buffers[imageIdx].fb, false);
 
 	dev.dispatch.vkEndCommandBuffer(draw.cb);
 
@@ -505,13 +505,15 @@ void Renderer::drawGui(Draw& draw) {
 					if(!selected.image->swapchain) {
 						dlg_debug("updating image view");
 
+						selected.aspectMask = isDepthFormat(vk::Format(selected.image->ci.format)) ?
+							VK_IMAGE_ASPECT_DEPTH_BIT :
+							VK_IMAGE_ASPECT_COLOR_BIT;
+
 						VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
 						ivi.image = selected.image->image;
 						ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
 						ivi.format = selected.image->ci.format;
-						ivi.subresourceRange.aspectMask = isDepthFormat(vk::Format(ivi.format)) ?
-							VK_IMAGE_ASPECT_DEPTH_BIT :
-							VK_IMAGE_ASPECT_COLOR_BIT;
+						ivi.subresourceRange.aspectMask = selected.aspectMask;
 						ivi.subresourceRange.layerCount = 1u;
 						ivi.subresourceRange.levelCount = 1u;
 
@@ -564,7 +566,7 @@ void Renderer::drawGui(Draw& draw) {
 			ImGui::NextColumn();
 
 			auto& ci = selected.image->ci;
-			ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.height);
+			ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
 			ImGui::Text("%d", ci.arrayLayers);
 			ImGui::Text("%d", ci.mipLevels);
 			ImGui::Text("%s", vk::name(vk::Format(ci.format)));
@@ -577,6 +579,7 @@ void Renderer::drawGui(Draw& draw) {
 
 			// content
 			if(selected.view) {
+				ImGui::Spacing();
 				ImGui::Spacing();
 				ImGui::Image((void*) draw.dsSelected, {400, 400});
 			}
@@ -634,10 +637,10 @@ void Renderer::uploadDraw(Draw& draw) {
 	dev.dispatch.vkUnmapMemory(dev.dev, draw.indexBuffer.mem);
 }
 
-void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb) {
+void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb, bool force) {
 	auto& dev = *this->dev;
 	auto& drawData = *ImGui::GetDrawData();
-	if(drawData.TotalIdxCount == 0) {
+	if(drawData.TotalIdxCount == 0 && !force) {
 		return;
 	}
 
@@ -655,58 +658,60 @@ void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb) {
 
 	dev.dispatch.vkCmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
-	VkViewport viewport {};
-	viewport.width = extent.width;
-	viewport.height = extent.height;
-	viewport.maxDepth = 1.f;
-	dev.dispatch.vkCmdSetViewport(draw.cb, 0, 1, &viewport);
+	if(drawData.TotalIdxCount > 0) {
+		VkViewport viewport {};
+		viewport.width = extent.width;
+		viewport.height = extent.height;
+		viewport.maxDepth = 1.f;
+		dev.dispatch.vkCmdSetViewport(draw.cb, 0, 1, &viewport);
 
-	dev.dispatch.vkCmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+		dev.dispatch.vkCmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
 
-	VkDeviceSize off0 = 0u;
-	dev.dispatch.vkCmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
-	dev.dispatch.vkCmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
+		VkDeviceSize off0 = 0u;
+		dev.dispatch.vkCmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
+		dev.dispatch.vkCmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
 
-	float pcr[4];
-	// scale
-    pcr[0] = 2.0f / drawData.DisplaySize.x;
-    pcr[1] = 2.0f / drawData.DisplaySize.y;
-    // translate
-    pcr[2] = -1.0f - drawData.DisplayPos.x * pcr[0];
-    pcr[3] = -1.0f - drawData.DisplayPos.y * pcr[1];
-    dev.dispatch.vkCmdPushConstants(draw.cb, dev.pipeLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pcr), pcr);
+		float pcr[4];
+		// scale
+		pcr[0] = 2.0f / drawData.DisplaySize.x;
+		pcr[1] = 2.0f / drawData.DisplaySize.y;
+		// translate
+		pcr[2] = -1.0f - drawData.DisplayPos.x * pcr[0];
+		pcr[3] = -1.0f - drawData.DisplayPos.y * pcr[1];
+		dev.dispatch.vkCmdPushConstants(draw.cb, dev.pipeLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pcr), pcr);
 
-	auto idxOff = 0u;
-	auto vtxOff = 0u;
-	for(auto i = 0; i < drawData.CmdListsCount; ++i) {
-		auto& cmds = *drawData.CmdLists[i];
+		auto idxOff = 0u;
+		auto vtxOff = 0u;
+		for(auto i = 0; i < drawData.CmdListsCount; ++i) {
+			auto& cmds = *drawData.CmdLists[i];
 
-		for(auto j = 0; j < cmds.CmdBuffer.Size; ++j) {
-			auto& cmd = cmds.CmdBuffer[j];
+			for(auto j = 0; j < cmds.CmdBuffer.Size; ++j) {
+				auto& cmd = cmds.CmdBuffer[j];
 
-			auto ds = (VkDescriptorSet) cmd.TextureId;
-			if(!ds) {
-				// we have to always bind a valid ds
-				ds = dsFont;
+				auto ds = (VkDescriptorSet) cmd.TextureId;
+				if(!ds) {
+					// we have to always bind a valid ds
+					ds = dsFont;
+				}
+				dev.dispatch.vkCmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+					dev.pipeLayout, 0, 1, &ds, 0, nullptr);
+
+				// TODO?
+				VkRect2D scissor {};
+				scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
+				scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
+				scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
+				scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
+				// scissor.extent.width = viewport.width;
+				// scissor.extent.height = viewport.height;
+				dev.dispatch.vkCmdSetScissor(draw.cb, 0, 1, &scissor);
+
+				dev.dispatch.vkCmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);
+				idxOff += cmd.ElemCount;
 			}
-			dev.dispatch.vkCmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				dev.pipeLayout, 0, 1, &ds, 0, nullptr);
 
-			// TODO?
-			VkRect2D scissor {};
-			scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
-			scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
-			scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
-			scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
-			// scissor.extent.width = viewport.width;
-			// scissor.extent.height = viewport.height;
-			dev.dispatch.vkCmdSetScissor(draw.cb, 0, 1, &scissor);
-
-			dev.dispatch.vkCmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);
-			idxOff += cmd.ElemCount;
+			vtxOff += cmds.VtxBuffer.Size;
 		}
-
-		vtxOff += cmds.VtxBuffer.Size;
 	}
 
 	dev.dispatch.vkCmdEndRenderPass(draw.cb);

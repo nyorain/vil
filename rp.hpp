@@ -17,6 +17,10 @@ struct RenderPass {
 		std::vector<VkSubpassDescription> subpasses;
 		std::vector<VkSubpassDependency> dependencies;
 	} info;
+
+	RenderPass() = default;
+	RenderPass(const RenderPass&) = delete;
+	RenderPass& operator=(const RenderPass&) = delete;
 };
 
 struct Framebuffer {
@@ -29,6 +33,10 @@ struct Framebuffer {
 	u32 width;
 	u32 height;
 	u32 layers;
+
+	Framebuffer() = default;
+	Framebuffer(const Framebuffer&) = delete;
+	Framebuffer& operator=(const Framebuffer&) = delete;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(

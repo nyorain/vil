@@ -1,4 +1,7 @@
 #include "common.hpp"
+#include "cb.hpp"
+#include "sync.hpp"
+#include "image.hpp"
 #include <vkpp/names.hpp>
 #include <swa/swa.h>
 #include <dlg/dlg.hpp>
@@ -342,53 +345,148 @@ void DisplayWindow::mainLoop() {
 
 		renderer.drawGui(draw);
 		renderer.uploadDraw(draw);
-		renderer.recordDraw(draw, sci.imageExtent, buffers[id].fb);
 
-		dev.dispatch.vkEndCommandBuffer(draw.cb);
+		// pretty long, terrible critical section...
+		{
+			std::lock_guard queueLock(dev.queueMutex);
 
-		// submit render commands
-		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			// Make sure relevant command buffers have completed (and check
+			// for latest image layout).
+			// We do this while holding the queue lock to make sure
+			// no new submissions are done until we are done.
+			// TODO: terrible! optimize! Might be possible with semaphores,
+			// even tho hard (semaphore pool is harder to manage than
+			// fence pool since we can't reset)
+			VkImageLayout finalLayout;
+			bool depImg = renderer.selected.image && !renderer.selected.image->swapchain;
+			if (depImg) {
+				std::lock_guard lock(dev.mutex);
+				finalLayout = renderer.selected.image->pendingLayout;
+				std::vector<PendingSubmission*> toComplete;
+				for(auto& pending : dev.pending) {
+					bool wait = false;
+					for(auto& sub : pending->submissions) {
+						for(auto* cb : sub.cbs) {
+							auto it = cb->images.find(renderer.selected.image->image);
+							if(it == cb->images.end()) {
+								continue;
+							}
 
-		VkSubmitInfo si = vk::SubmitInfo();
-		si.pCommandBuffers = &draw.cb;
-		si.commandBufferCount = 1u;
-		si.waitSemaphoreCount = 1u;
-		si.pWaitSemaphores = &acquireSem;
-		si.pWaitDstStageMask = &stage;
-		si.signalSemaphoreCount = 1u;
-		si.pSignalSemaphores = &renderSem;
+							wait = true;
+							finalLayout = it->second.finalLayout;
+						}
+					}
 
-		res = dev.dispatch.vkQueueSubmit(dev.gfxQueue->queue, 1, &si, draw.fence);
-		if(res != VK_SUCCESS) {
-			dlg_error("vkQueueSubmit: {}", vk::name(vk::Result(res)));
-			run = false;
-			break;
-		}
+					if(wait) {
+						toComplete.push_back(pending.get());
+					}
+				}
 
-		// TODO: use an actual present queue...
-		// present
-		VkPresentInfoKHR pi = vk::PresentInfoKHR();
-		pi.swapchainCount = 1;
-		pi.pSwapchains = &swapchain;
-		pi.pImageIndices = &id;
-		pi.waitSemaphoreCount = 1;
-		pi.pWaitSemaphores = &renderSem;
+				if(!toComplete.empty()) {
+					std::vector<VkFence> fences;
+					for(auto* pending : toComplete) {
+						fences.push_back(pending->ourFence ?
+							pending->ourFence :
+							pending->appFence->fence);
+					}
 
-		res = dev.dispatch.vkQueuePresentKHR(dev.gfxQueue->queue, &pi);
-		if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-			if(res == VK_ERROR_OUT_OF_DATE_KHR) {
-				dlg_warn("Got out of date swapchain (present)");
-				continue;
+					VK_CHECK(dev.dispatch.vkWaitForFences(dev.dev,
+						fences.size(), fences.data(), true, UINT64_MAX));
+
+					for(auto* pending : toComplete) {
+						auto res = checkLocked(*pending);
+						// we waited for it above. It should really
+						// be completed now.
+						dlg_assert(res);
+					}
+				}
+
+				// Make sure our image is in the right layout.
+				// And we are allowed to read it
+				// TODO: transfer queue
+				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
+				imgb.image = renderer.selected.image->image;
+				imgb.subresourceRange.aspectMask = renderer.selected.aspectMask;
+				imgb.subresourceRange.layerCount = 1u;
+				imgb.subresourceRange.levelCount = 1u;
+				imgb.oldLayout = finalLayout;
+				imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
+				imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+				dev.dispatch.vkCmdPipelineBarrier(draw.cb,
+					VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
+					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
+					0, 0, nullptr, 0, nullptr, 1, &imgb);
 			}
 
-			dlg_error("vkQueuePresentKHR: {}", vk::name(vk::Result(res)));
-			run = false;
-			break;
-		}
+			renderer.recordDraw(draw, sci.imageExtent, buffers[id].fb, true);
 
-		// wait on finish
-		VK_CHECK(dev.dispatch.vkWaitForFences(dev.dev, 1, &draw.fence, true, UINT64_MAX));
-		VK_CHECK(dev.dispatch.vkResetFences(dev.dev, 1, &draw.fence));
+			if(depImg) {
+				// return it to original layout
+				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
+				imgb.image = renderer.selected.image->image;
+				imgb.subresourceRange.aspectMask = renderer.selected.aspectMask;
+				imgb.subresourceRange.layerCount = 1u;
+				imgb.subresourceRange.levelCount = 1u;
+				imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				imgb.newLayout = finalLayout;
+				imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+				imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
+
+				dev.dispatch.vkCmdPipelineBarrier(draw.cb,
+					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
+					VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // wait in everything
+					0, 0, nullptr, 0, nullptr, 1, &imgb);
+			}
+
+			dev.dispatch.vkEndCommandBuffer(draw.cb);
+
+			// submit render commands
+			VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+			VkSubmitInfo si = vk::SubmitInfo();
+			si.commandBufferCount = 1u;
+			si.pCommandBuffers = &draw.cb;
+			si.waitSemaphoreCount = 1u;
+			si.pWaitSemaphores = &acquireSem;
+			si.pWaitDstStageMask = &stage;
+			si.signalSemaphoreCount = 1u;
+			si.pSignalSemaphores = &renderSem;
+
+			res = dev.dispatch.vkQueueSubmit(dev.gfxQueue->queue, 1, &si, draw.fence);
+			if(res != VK_SUCCESS) {
+				dlg_error("vkQueueSubmit: {}", vk::name(vk::Result(res)));
+				run = false;
+				break;
+			}
+
+			// present
+			VkPresentInfoKHR pi = vk::PresentInfoKHR();
+			pi.swapchainCount = 1;
+			pi.pSwapchains = &swapchain;
+			pi.pImageIndices = &id;
+			pi.waitSemaphoreCount = 1;
+			pi.pWaitSemaphores = &renderSem;
+
+			// TODO: use an actual present queue...
+			res = dev.dispatch.vkQueuePresentKHR(dev.gfxQueue->queue, &pi);
+
+			if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+				if(res == VK_ERROR_OUT_OF_DATE_KHR) {
+					dlg_warn("Got out of date swapchain (present)");
+					continue;
+				}
+
+				dlg_error("vkQueuePresentKHR: {}", vk::name(vk::Result(res)));
+				run = false;
+				break;
+			}
+
+			// wait on finish
+			VK_CHECK(dev.dispatch.vkWaitForFences(dev.dev, 1, &draw.fence, true, UINT64_MAX));
+			VK_CHECK(dev.dispatch.vkResetFences(dev.dev, 1, &draw.fence));
+		}
 	}
 }
 

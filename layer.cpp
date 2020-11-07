@@ -315,9 +315,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	if(devData.gfxQueue) {
 		// sampler
 		VkSamplerCreateInfo sci = vk::SamplerCreateInfo();
-		sci.magFilter = VK_FILTER_LINEAR;
-		sci.minFilter = VK_FILTER_LINEAR;
-		sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		// TODO: create multiple samplers, one with VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		sci.magFilter = VK_FILTER_NEAREST;
+		sci.minFilter = VK_FILTER_NEAREST;
+		sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 		sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
 		sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -558,6 +559,34 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	return combinedResult;
 }
 
+VkFence getFenceFromPool(Device& dev) {
+	{
+		std::lock_guard lock(dev.mutex);
+		if(!dev.fencePool.empty()) {
+			auto ret = dev.fencePool.back();
+			dev.fencePool.pop_back();
+			return ret;
+		}
+
+		// check if we a submission finished
+		for(auto it = dev.pending.begin(); it < dev.pending.end(); ++it) {
+			auto& subm = *it;
+			if(subm->ourFence && checkLocked(*subm)) {
+				dlg_assert(!dev.fencePool.empty());
+				auto ret = dev.fencePool.back();
+				dev.fencePool.pop_back();
+				return ret;
+			}
+		}
+	}
+
+	// create new fence
+	VkFence fence;
+	VkFenceCreateInfo fci = vk::FenceCreateInfo();
+	VK_CHECK(dev.dispatch.vkCreateFence(dev.dev, &fci, nullptr, &fence));
+	return fence;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		VkQueue                                     queue,
 		uint32_t                                    submitCount,
@@ -567,51 +596,108 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	auto& dev = *qd.dev;
 
 	// hook fence
-	auto& subm = *dev.pending.emplace_back(std::make_unique<PendingSubmission>());
+	auto submPtr = std::make_unique<PendingSubmission>();
+	auto& subm = *submPtr;
 	subm.queue = &qd;
-	if(fence) {
-		subm.hookedFence = &dev.fences.get(fence);
-	}
 
 	for(auto i = 0u; i < submitCount; ++i) {
-		auto& si = *pSubmits[i];
-
+		auto& si = pSubmits[i];
 		auto& dst = subm.submissions.emplace_back();
-		TODO
+
+		for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
+			dst.signalSemaphore.push_back(si.pSignalSemaphores[j]);
+		}
+
+		for(auto j = 0u; j < si.commandBufferCount; ++j) {
+			auto& cb = dev.commandBuffers.get(si.pCommandBuffers[j]);
+			dst.cbs.push_back(&cb);
+
+			{
+				// store in command buffer that it was submitted here
+				std::lock_guard lock(dev.mutex);
+				cb.pending.push_back(&subm);
+
+				// store pending layouts
+				for(auto& used : cb.images) {
+					used.second.image->pendingLayout = used.second.finalLayout;
+				}
+			}
+		}
+
+		for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
+			dst.waitSemaphores.emplace_back(
+				si.pWaitSemaphores[j],
+				si.pWaitDstStageMask[j]);
+		}
 	}
 
-	return dev.dispatch.vkQueueSubmit(queue, submitCount, pSubmits, fence);
+	VkFence submFence;
+	if(fence) {
+		subm.appFence = &dev.fences.get(fence);
+
+		std::lock_guard lock(dev.mutex);
+		if(subm.appFence->submission) {
+			auto completed = checkLocked(*subm.appFence->submission);
+			// per vulkan spec, using a fence in QueueSubmit that has
+			// non-completed payload is not allowed.
+			dlg_assert(completed);
+		}
+
+		submFence = fence;
+		subm.appFence->submission = &subm;
+	} else {
+		subm.ourFence = getFenceFromPool(dev);
+		submFence = subm.ourFence;
+	}
+
+	// Important that we lock the queue lock before we add the pending work.
+	// See swa.cpp, its usage of the queue lock. Otherwise, we might add
+	// the pending work (while our swa display holds the queue lock),
+	// then we wait for all pending work fences to complete (even tho
+	// we haven't even really submitted the work and can't until that
+	// wait operation is completed) => creating a deadlock
+	std::lock_guard queueLock(dev.queueMutex);
+
+	{
+		std::lock_guard lock(dev.mutex);
+		dev.pending.push_back(std::move(submPtr));
+	}
+
+	return dev.dispatch.vkQueueSubmit(queue, submitCount, pSubmits, submFence);
 }
 
-bool check(PendingSubmission& subm) {
-	if(subm.waitedUpon.load()) {
-		return false;
-	}
-
+bool checkLocked(PendingSubmission& subm) {
 	auto& dev = *subm.queue->dev;
-	if(dev.dispatch.vkGetFenceStatus(dev.dev, subm.fence) != VK_SUCCESS) {
+
+	VkFence fence = subm.appFence ? subm.appFence->fence : subm.ourFence;
+	dlg_assert(fence);
+
+	if(dev.dispatch.vkGetFenceStatus(dev.dev, fence) != VK_SUCCESS) {
 		return false;
 	}
 
-	auto it = std::find(dev.pending.begin(), dev.pending.end(), &subm);
+	// apparently unique_ptr == ptr comparision not supported in stdlibc++ yet?
+	auto it = std::find_if(dev.pending.begin(), dev.pending.end(), [&](auto& ptr){
+			return ptr.get() == &subm;
+	});
 	dlg_assert(it != dev.pending.end());
 
-	for(auto& cb : subm.cbs) {
-		auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &subm);
-		dlg_assert(it2 != cb->pending.end());
-		cb->pending.erase(it2);
+	for(auto& sub : subm.submissions) {
+		for(auto* cb : sub.cbs) {
+			auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &subm);
+			dlg_assert(it2 != cb->pending.end());
+			cb->pending.erase(it2);
+		}
 	}
 
-	if(subm.hookedFence) {
-		dlg_assert(subm.hookedFence->hooked == &subm);
-		subm.hookedFence->hooked = nullptr;
-		subm.hookedFence->hookedDone.store(true);
+	if(subm.ourFence) {
+		dev.dispatch.vkResetFences(dev.dev, 1, &subm.ourFence);
+		dev.fencePool.push_back(subm.ourFence);
+	} else if(subm.appFence) {
+		subm.appFence->submission = nullptr;
 	}
 
-	dev.dispatch.vkResetFences(dev.dev, 1, &subm.fence);
-	dev.fencePool.push_back(subm.fence);
 	dev.pending.erase(it);
-
 	return true;
 }
 
@@ -689,6 +775,13 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdBeginRenderPass),
    FUEN_HOOK(CmdWaitEvents),
    FUEN_HOOK(CmdPipelineBarrier),
+
+   // sync.hpp
+   FUEN_HOOK(CreateFence),
+   FUEN_HOOK(DestroyFence),
+   FUEN_HOOK(ResetFences),
+   FUEN_HOOK(GetFenceStatus),
+   FUEN_HOOK(WaitForFences),
 };
 
 #undef FUEN_HOOK

@@ -10,7 +10,12 @@ struct Image {
 	std::string name;
 	VkImageCreateInfo ci;
 
-	// when they belong to a swapchain
+	// The image layout this image will have when *all* pending submissions
+	// are completed. When there are no pending submissions using this
+	// image, it's the current layout.
+	VkImageLayout pendingLayout {VK_IMAGE_LAYOUT_UNDEFINED};
+
+	// when images belongs to a swapchain
 	Swapchain* swapchain {};
 };
 

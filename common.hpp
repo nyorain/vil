@@ -56,6 +56,10 @@ struct Buffer {
 	Device* dev;
 	std::string name;
 	VkBufferCreateInfo ci;
+
+	Buffer() = default;
+	Buffer(const Buffer&) = delete;
+	Buffer& operator=(const Buffer&) = delete;
 };
 
 struct RenderBuffer {
@@ -102,6 +106,7 @@ struct Renderer {
 	struct {
 		Image* image {};
 		VkImageView view {};
+		VkImageAspectFlagBits aspectMask {};
 	} selected;
 
 	struct {
@@ -119,7 +124,7 @@ struct Renderer {
 
 	void drawGui(Draw&);
 	void uploadDraw(Draw&);
-	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb);
+	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, bool force);
 };
 
 // When rendering directly onto the hooked window
@@ -280,7 +285,7 @@ public:
 
 struct Submission {
 	std::vector<std::pair<VkSemaphore, VkPipelineStageFlags>> waitSemaphores;
-	VkSemaphore signalSemaphore;
+	std::vector<VkSemaphore> signalSemaphore;
 
 	// Accessing those might not be save if the submission has completed,
 	// they might have already been destroyed. So:
@@ -295,17 +300,17 @@ struct PendingSubmission {
 	Queue* queue {};
 	std::vector<Submission> submissions;
 
-	// The fence original used for the submission that we hooked
-	Fence* hookedFence {};
+	// The fence added by the caller.
+	// Might be null
+	Fence* appFence {};
 
-	// Fence set by us to know when submission completed.
-	// Allocated from a fence pool.
-	VkFence fence {};
-	std::atomic<unsigned> waitedUpon {};
+	// When the caller didn't add a fence, we added this one from the fence pool.
+	// When appFence is not null, this is null.
+	VkFence ourFence {};
 };
 
-// dev.mutex *must* be locked (non-shared) before calling this.
-bool check(PendingSubmission& subm);
+// Expects dev.mutex to be locked
+bool checkLocked(PendingSubmission& subm);
 
 struct Device {
 	Instance* ini;
@@ -332,7 +337,9 @@ struct Device {
 	std::vector<VkFence> fencePool; // currently unused fences
 	std::vector<std::unique_ptr<PendingSubmission>> pending;
 
-	std::shared_mutex mutex;
+	std::shared_mutex mutex; // mutex for general shared access
+	std::mutex queueMutex; // mutex for accessing queues
+
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 
 	SyncedUniqueUnorderedMap<VkImage, Image> images;

@@ -244,13 +244,19 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 	cmd->info = *pRenderPassBegin;
 	cmd->fb = cb.dev->framebuffers.find(pRenderPassBegin->framebuffer);
 
+	dlg_assert(cmd->fb);
+	dlg_assert(cmd->fb && cmd->fb->rp);
 	if(cmd->fb && cmd->fb->rp) {
+		dlg_assert(cmd->fb->rp->info.attachments.size() == cmd->fb->attachments.size());
 		for(auto i = 0u; i < cmd->fb->attachments.size(); ++i) {
 			auto& attachment = cmd->fb->attachments[i];
 			if(!attachment || !attachment->img) {
 				continue;
 			}
 
+			// TODO: can there be barriers inside the renderpasss?
+			//   maybe better move this to RenderPassEnd?
+			// TODO: handle secondary command buffers.
 			auto& img = cb.images[attachment->img->image];
 			img.finalLayout = cmd->fb->rp->info.attachments[i].finalLayout;
 			if(!img.image) {

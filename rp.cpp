@@ -15,8 +15,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		return res;
 	}
 
-	auto fb = dev.framebuffers.add(*pFramebuffer);
+	auto& fb = dev.framebuffers.add(*pFramebuffer);
 	fb.rp = dev.renderPasses.find(pCreateInfo->renderPass);
+	dlg_assert(fb.rp);
 	fb.width = pCreateInfo->width;
 	fb.height = pCreateInfo->height;
 	fb.layers = pCreateInfo->layers;
@@ -52,7 +53,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		return res;
 	}
 
-	auto rp = dev.renderPasses.add(*pRenderPass);
+	auto& rp = dev.renderPasses.add(*pRenderPass);
 	rp.dev = &dev;
 	rp.rp = *pRenderPass;
 	rp.info.subpasses = {pCreateInfo->pSubpasses, pCreateInfo->pSubpasses + pCreateInfo->subpassCount};

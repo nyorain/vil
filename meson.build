@@ -49,6 +49,7 @@ src = files(
   'image.cpp',
   'rp.cpp',
   'cb.cpp',
+  'sync.cpp',
   'util.cpp',
   'f16.cpp',
 )
