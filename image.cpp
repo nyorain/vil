@@ -34,7 +34,36 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		VkImage                                     image,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = *findData<Device>(device);
-	dev.images.mustErase(image);
+	auto img = dev.images.mustMove(image);
+
+	// TODO: messy. Use a callback system?
+	{
+		std::lock_guard guard(dev.mutex);
+		for(auto& swapchain : dev.swapchains.map) {
+			if(!swapchain.second->useOverlay) {
+				continue;
+			}
+
+			auto& renderer = swapchain.second->overlay.renderer;
+			if(renderer.selected.image == img.get()) {
+				renderer.selected.image = nullptr;
+				if(renderer.selected.view) {
+					dev.dispatch.vkDestroyImageView(dev.dev, renderer.selected.view, nullptr);
+					renderer.selected.view = {};
+				}
+			}
+		}
+
+		auto& renderer = dev.window.renderer;
+		if(renderer.selected.image == img.get()) {
+			renderer.selected.image = nullptr;
+			if(renderer.selected.view) {
+				dev.dispatch.vkDestroyImageView(dev.dev, renderer.selected.view, nullptr);
+				renderer.selected.view = {};
+			}
+		}
+	}
+
 	dev.dispatch.vkDestroyImage(device, image, pAllocator);
 }
 

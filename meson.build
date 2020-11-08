@@ -33,9 +33,9 @@ dep_dlg = dependency('dlg', fallback: ['dlg', 'dlg_dep'])
 dep_swa = dependency('swa',
 	fallback: ['swa', 'swa_dep'],
 	default_options: [
-		'with-gl=false',
+		'with-gl=disabled',
 		'link-vulkan=false',
-		'with-kms=false'
+		'with-kms=disabled'
 	])
 dep_vkpp = dependency('vkpp MASTER',
 	fallback: ['vkpp', 'vkpp_dep'],

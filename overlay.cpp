@@ -463,6 +463,7 @@ void Renderer::drawGui(Draw& draw) {
 	auto& dev = *this->dev;
 	ImGui::NewFrame();
 
+	ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 	if(ImGui::Begin("Images")) {
 		std::shared_lock lock(dev.mutex);
 

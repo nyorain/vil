@@ -350,6 +350,10 @@ void DisplayWindow::mainLoop() {
 		{
 			std::lock_guard queueLock(dev.queueMutex);
 
+			// TODO: only need this here to prevent resources we use
+			// (e.g. the image) from begin destroyed
+			std::lock_guard lock(dev.mutex);
+
 			// Make sure relevant command buffers have completed (and check
 			// for latest image layout).
 			// We do this while holding the queue lock to make sure
@@ -360,10 +364,20 @@ void DisplayWindow::mainLoop() {
 			VkImageLayout finalLayout;
 			bool depImg = renderer.selected.image && !renderer.selected.image->swapchain;
 			if (depImg) {
-				std::lock_guard lock(dev.mutex);
+
 				finalLayout = renderer.selected.image->pendingLayout;
 				std::vector<PendingSubmission*> toComplete;
-				for(auto& pending : dev.pending) {
+				for(auto it = dev.pending.begin(); it != dev.pending.end();) {
+					auto& pending = *it;
+
+					// remove finished pending submissions.
+					// important to do this before accessing them.
+					if(checkLocked(*pending)) {
+						// don't increase iterator as the current one
+						// was erased.
+						continue;
+					}
+
 					bool wait = false;
 					for(auto& sub : pending->submissions) {
 						for(auto* cb : sub.cbs) {
@@ -380,6 +394,8 @@ void DisplayWindow::mainLoop() {
 					if(wait) {
 						toComplete.push_back(pending.get());
 					}
+
+					++it;
 				}
 
 				if(!toComplete.empty()) {

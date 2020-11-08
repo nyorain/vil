@@ -203,6 +203,24 @@ class SyncedUniqueUnorderedMap {
 public:
 	using UnorderedMap = std::unordered_map<K, std::unique_ptr<T>>;
 
+	std::unique_ptr<T> move(const K& key) {
+		std::lock_guard lock(*mutex);
+		auto it = map.find(key);
+		if(it == map.end()) {
+			return nullptr;
+		}
+
+		auto ret = std::move(it->second);
+		map.erase(it);
+		return ret;
+	}
+
+	std::unique_ptr<T> mustMove(const K& key) {
+		auto ret = move(key);
+		assert(ret);
+		return ret;
+	}
+
 	std::size_t erase(const K& key) {
 		std::lock_guard lock(*mutex);
 		return map.erase(key);
@@ -337,7 +355,11 @@ struct Device {
 	std::vector<VkFence> fencePool; // currently unused fences
 	std::vector<std::unique_ptr<PendingSubmission>> pending;
 
-	std::shared_mutex mutex; // mutex for general shared access
+	// Mutex for general shared access.
+	// While this mutex is locked, resources won't be inserted or
+	// erased from the resource tables below (and therefore can't
+	// logically be created or destroyed).
+	std::shared_mutex mutex;
 	std::mutex queueMutex; // mutex for accessing queues
 
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
