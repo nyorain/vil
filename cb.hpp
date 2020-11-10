@@ -1,13 +1,17 @@
 #pragma once
 
 #include "common.hpp"
-#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan.h>
 #include <vector>
 #include <memory>
 
 namespace fuen {
 
 struct Command {
+	virtual ~Command() = default;
+
+	// Display the command via ImGui
+	virtual void display() = 0;
 };
 
 struct CommandPool {
@@ -19,8 +23,9 @@ struct CommandPool {
 
 struct CommandBuffer {
 	struct UsedImage {
-		Image* image;
-		VkImageLayout finalLayout;
+		Image* image {};
+		VkImageLayout finalLayout {};
+		bool layoutChanged {};
 	};
 
 	struct UsedBuffer {
@@ -128,6 +133,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
     VkCommandBuffer                             commandBuffer,
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    reference);
+*/
 
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
     VkCommandBuffer                             commandBuffer,
@@ -192,12 +198,14 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
     VkBuffer                                    buffer,
     VkDeviceSize                                offset);
 
+/*
 VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
     VkCommandBuffer                             commandBuffer,
     VkBuffer                                    srcBuffer,
     VkBuffer                                    dstBuffer,
     uint32_t                                    regionCount,
     const VkBufferCopy*                         pRegions);
+*/
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
     VkCommandBuffer                             commandBuffer,
@@ -234,6 +242,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
     uint32_t                                    regionCount,
     const VkBufferImageCopy*                    pRegions);
 
+/*
 VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
     VkCommandBuffer                             commandBuffer,
     VkBuffer                                    dstBuffer,
@@ -247,6 +256,7 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
     VkDeviceSize                                dstOffset,
     VkDeviceSize                                size,
     uint32_t                                    data);
+*/
 
 VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
     VkCommandBuffer                             commandBuffer,
@@ -256,6 +266,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
     uint32_t                                    rangeCount,
     const VkImageSubresourceRange*              pRanges);
 
+/*
 VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
     VkCommandBuffer                             commandBuffer,
     VkImage                                     image,
@@ -371,11 +382,11 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
     VkCommandBuffer                             commandBuffer);
+*/
 
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    commandBufferCount,
     const VkCommandBuffer*                      pCommandBuffers);
-*/
 
 } // namespace fuen

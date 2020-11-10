@@ -1,7 +1,9 @@
- #include "cb.hpp"
- #include "data.hpp"
- #include "rp.hpp"
- #include "image.hpp"
+#include "cb.hpp"
+#include "data.hpp"
+#include "rp.hpp"
+#include "image.hpp"
+#include "imgui/imgui.h"
+#include <vkpp/names.hpp>
 
 namespace fuen {
 
@@ -18,15 +20,130 @@ struct WaitEventsCmd : BarrierCmdBase {
 	// TODO
 	// std::vector<Event*> events;
 	std::vector<VkEvent> events;
+
+	void display() override {
+		ImGui::Text("CmdWaitEvents");
+	}
 };
 
 struct BarrierCmd : BarrierCmdBase {
     VkDependencyFlags dependencyFlags;
+
+	void display() override {
+		ImGui::Text("CmdPipelineBarrier");
+	}
 };
 
-struct BeginRenderPassCmd : BarrierCmdBase {
+struct BeginRenderPassCmd : Command {
 	VkRenderPassBeginInfo info;
 	Framebuffer* fb;
+	RenderPass* rp;
+
+	void display() override {
+		ImGui::Text("CmdBeginRenderPass");
+	}
+};
+
+struct DrawCmd : Command {
+	u32 vertexCount;
+	u32 instanceCount;
+	u32 firstVertex;
+	u32 firstInstance;
+
+	void display() override {
+		ImGui::Text("CmdDraw(%d, %d, %d, %d)",
+			vertexCount, instanceCount, firstVertex, firstInstance);
+	}
+};
+
+struct DrawIndirectCmd : Command {
+	void display() override {
+		ImGui::Text("CmdDrawIndrect");
+	}
+};
+
+struct DrawIndexedCmd : Command {
+	u32 indexCount;
+	u32 instanceCount;
+	u32 firstIndex;
+	i32 vertexOffset;
+	u32 firstInstance;
+
+	void display() override {
+		ImGui::Text("CmdDraw(%d, %d, %d, %d, %d)",
+			indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+	}
+};
+
+struct DrawIndexedIndirectCmd : Command {
+	void display() override {
+		ImGui::Text("CmdDrawIndexedIndirect");
+	}
+};
+
+struct BindVertexBuffersCmd : Command {
+	void display() override {
+		ImGui::Text("CmdBindVertexBuffers");
+	}
+};
+
+struct BindIndexBufferCmd : Command {
+	void display() override {
+		ImGui::Text("CmdBindIndexBuffer");
+	}
+};
+
+struct BindDescriptorSetCmd : Command {
+	void display() override {
+		ImGui::Text("CmdBindDescriptorSets");
+	}
+};
+
+struct DispatchCmd : Command {
+	u32 groupsX;
+	u32 groupsY;
+	u32 groupsZ;
+
+	void display() override {
+		ImGui::Text("CmdDispatch(%d, %d, %d)",
+			groupsX, groupsY, groupsZ);
+	}
+};
+
+struct DispatchIndirectCmd : Command {
+	void display() override {
+		ImGui::Text("CmdDispatchIndirect");
+	}
+};
+
+struct CopyImageCmd : Command {
+	void display() override {
+		ImGui::Text("CmdCopyImage");
+	}
+};
+
+struct CopyBufferToImageCmd : Command {
+	void display() override {
+		ImGui::Text("CmdCopyBufferToImage");
+	}
+};
+
+struct CopyImageToBufferCmd : Command {
+	void display() override {
+		ImGui::Text("CmdCopyImageToBuffer");
+	}
+};
+
+struct BlitImageCmd : Command {
+	void display() override {
+		ImGui::Text("CmdBlitImage");
+	}
+};
+
+struct ClearColorImageCmd : Command {
+	void display() override {
+		ImGui::Text("CmdClearColorImage");
+	}
 };
 
 // util
@@ -154,6 +271,24 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 	return cb.dev->dispatch.vkResetCommandBuffer(commandBuffer, flags);
 }
 
+CommandBuffer::UsedImage& useImage(CommandBuffer& cb, VkImage image) {
+	auto& img = cb.images[image];
+	if(!img.image) {
+		img.image = cb.dev->images.find(image);
+		dlg_assert(img.image);
+	}
+
+	return img;
+}
+
+CommandBuffer::UsedImage& useImage(CommandBuffer& cb, VkImage image,
+		VkImageLayout newLayout) {
+	auto& img = useImage(cb, image);
+	img.layoutChanged = true;
+	img.finalLayout = newLayout;
+	return img;
+}
+
 void cmdBarrier(
 		CommandBuffer& cb,
 		BarrierCmdBase& cmd,
@@ -172,11 +307,8 @@ void cmdBarrier(
 	cmd.bufBarriers = {pBufferMemoryBarriers, pBufferMemoryBarriers + bufferMemoryBarrierCount};
 
 	for(auto& imgb : cmd.imgBarriers) {
-		auto& img = cb.images[imgb.image];
-		img.finalLayout = imgb.newLayout;
-		if(!img.image) {
-			img.image = cb.dev->images.find(imgb.image);
-		}
+		useImage(cb, imgb.image, imgb.newLayout);
+		dlg_trace("cb {}: img barrier of {}: {}", cb.cb, imgb.image, vk::name(vk::ImageLayout(imgb.newLayout)));
 	}
 }
 
@@ -243,11 +375,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 	auto cmd = std::make_unique<BeginRenderPassCmd>();
 	cmd->info = *pRenderPassBegin;
 	cmd->fb = cb.dev->framebuffers.find(pRenderPassBegin->framebuffer);
+	cmd->rp = cb.dev->renderPasses.find(pRenderPassBegin->renderPass);
 
 	dlg_assert(cmd->fb);
-	dlg_assert(cmd->fb && cmd->fb->rp);
-	if(cmd->fb && cmd->fb->rp) {
-		dlg_assert(cmd->fb->rp->info.attachments.size() == cmd->fb->attachments.size());
+	dlg_assert(cmd->rp);
+	if(cmd->fb && cmd->rp) {
+		dlg_assert(cmd->rp->info.attachments.size() == cmd->fb->attachments.size());
 		for(auto i = 0u; i < cmd->fb->attachments.size(); ++i) {
 			auto& attachment = cmd->fb->attachments[i];
 			if(!attachment || !attachment->img) {
@@ -257,17 +390,290 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 			// TODO: can there be barriers inside the renderpasss?
 			//   maybe better move this to RenderPassEnd?
 			// TODO: handle secondary command buffers.
-			auto& img = cb.images[attachment->img->image];
-			img.finalLayout = cmd->fb->rp->info.attachments[i].finalLayout;
-			if(!img.image) {
-				img.image = cb.dev->images.find(attachment->img->image);
-			}
+			useImage(cb, attachment->img->image, cmd->rp->info.attachments[i].finalLayout);
 		}
 	}
 
 	cb.commands.push_back(std::move(cmd));
 
 	cb.dev->dispatch.vkCmdBeginRenderPass(commandBuffer, pRenderPassBegin, contents);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipelineLayout                            layout,
+		uint32_t                                    firstSet,
+		uint32_t                                    descriptorSetCount,
+		const VkDescriptorSet*                      pDescriptorSets,
+		uint32_t                                    dynamicOffsetCount,
+		const uint32_t*                             pDynamicOffsets) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<BindDescriptorSetCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdBindDescriptorSets(commandBuffer,
+		pipelineBindPoint,
+		layout,
+		firstSet,
+		descriptorSetCount,
+		pDescriptorSets,
+		dynamicOffsetCount,
+		pDynamicOffsets);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    buffer,
+		VkDeviceSize                                offset,
+		VkIndexType                                 indexType) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<BindIndexBufferCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdBindIndexBuffer(commandBuffer,
+		buffer, offset, indexType);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstBinding,
+		uint32_t                                    bindingCount,
+		const VkBuffer*                             pBuffers,
+		const VkDeviceSize*                         pOffsets) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<BindVertexBuffersCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdBindVertexBuffers(commandBuffer,
+		firstBinding, bindingCount, pBuffers, pOffsets);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDraw(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    vertexCount,
+		uint32_t                                    instanceCount,
+		uint32_t                                    firstVertex,
+		uint32_t                                    firstInstance) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<DrawCmd>();
+
+	cmd->vertexCount = vertexCount;
+	cmd->instanceCount = instanceCount;
+	cmd->firstVertex = firstVertex;
+	cmd->firstInstance = firstInstance;
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdDraw(commandBuffer,
+		vertexCount, instanceCount, firstVertex, firstInstance);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    indexCount,
+		uint32_t                                    instanceCount,
+		uint32_t                                    firstIndex,
+		int32_t                                     vertexOffset,
+		uint32_t                                    firstInstance) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<DrawIndexedCmd>();
+
+	cmd->firstInstance = firstInstance;
+	cmd->instanceCount = instanceCount;
+	cmd->indexCount = indexCount;
+	cmd->vertexOffset = vertexOffset;
+	cmd->firstIndex = firstIndex;
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdDrawIndexed(commandBuffer,
+		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    buffer,
+		VkDeviceSize                                offset,
+		uint32_t                                    drawCount,
+		uint32_t                                    stride) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<DrawIndirectCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdDrawIndirect(commandBuffer,
+		buffer, offset, drawCount, stride);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    buffer,
+		VkDeviceSize                                offset,
+		uint32_t                                    drawCount,
+		uint32_t                                    stride) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<DrawIndexedIndirectCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdDrawIndexedIndirect(commandBuffer,
+		buffer, offset, drawCount, stride);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDispatch(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    groupCountX,
+		uint32_t                                    groupCountY,
+		uint32_t                                    groupCountZ) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<DispatchCmd>();
+
+	cmd->groupsX = groupCountX;
+	cmd->groupsY = groupCountY;
+	cmd->groupsZ = groupCountZ;
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdDispatch(commandBuffer,
+		groupCountX, groupCountY, groupCountZ);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    buffer,
+		VkDeviceSize                                offset) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<DispatchIndirectCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	cb.dev->dispatch.vkCmdDispatchIndirect(commandBuffer, buffer, offset);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
+		VkCommandBuffer                             commandBuffer,
+		VkImage                                     srcImage,
+		VkImageLayout                               srcImageLayout,
+		VkImage                                     dstImage,
+		VkImageLayout                               dstImageLayout,
+		uint32_t                                    regionCount,
+		const VkImageCopy*                          pRegions) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<CopyImageCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	useImage(cb, srcImage);
+	useImage(cb, dstImage);
+
+	cb.dev->dispatch.vkCmdCopyImage(commandBuffer,
+		srcImage, srcImageLayout,
+		dstImage, dstImageLayout,
+		regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
+		VkCommandBuffer                             commandBuffer,
+		VkImage                                     srcImage,
+		VkImageLayout                               srcImageLayout,
+		VkImage                                     dstImage,
+		VkImageLayout                               dstImageLayout,
+		uint32_t                                    regionCount,
+		const VkImageBlit*                          pRegions,
+		VkFilter                                    filter) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<BlitImageCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	useImage(cb, srcImage);
+	useImage(cb, dstImage);
+
+	cb.dev->dispatch.vkCmdBlitImage(commandBuffer,
+		srcImage, srcImageLayout,
+		dstImage, dstImageLayout,
+		regionCount, pRegions, filter);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
+		VkCommandBuffer                             commandBuffer,
+		VkBuffer                                    srcBuffer,
+		VkImage                                     dstImage,
+		VkImageLayout                               dstImageLayout,
+		uint32_t                                    regionCount,
+		const VkBufferImageCopy*                    pRegions) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<CopyBufferToImageCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	useImage(cb, dstImage);
+
+	cb.dev->dispatch.vkCmdCopyBufferToImage(commandBuffer,
+		srcBuffer, dstImage, dstImageLayout, regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
+		VkCommandBuffer                             commandBuffer,
+		VkImage                                     srcImage,
+		VkImageLayout                               srcImageLayout,
+		VkBuffer                                    dstBuffer,
+		uint32_t                                    regionCount,
+		const VkBufferImageCopy*                    pRegions) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<CopyImageToBufferCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	useImage(cb, srcImage);
+
+	cb.dev->dispatch.vkCmdCopyImageToBuffer(commandBuffer,
+		srcImage, srcImageLayout, dstBuffer, regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
+		VkCommandBuffer                             commandBuffer,
+		VkImage                                     image,
+		VkImageLayout                               imageLayout,
+		const VkClearColorValue*                    pColor,
+		uint32_t                                    rangeCount,
+		const VkImageSubresourceRange*              pRanges) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<ClearColorImageCmd>();
+
+	cb.commands.push_back(std::move(cmd));
+
+	useImage(cb, image);
+
+	cb.dev->dispatch.vkCmdClearColorImage(commandBuffer,
+		image, imageLayout, pColor, rangeCount, pRanges);
+}
+
+// TODO: kinda ugly...
+VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    commandBufferCount,
+		const VkCommandBuffer*                      pCommandBuffers) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+
+	for(auto i = 0u; i < commandBufferCount; ++i) {
+		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
+
+		// TODO: ugly
+		for(auto& img : secondary.images) {
+			auto& thisImg = useImage(cb, img.second.image->image);
+			if(img.second.layoutChanged) {
+				thisImg.layoutChanged = true;
+				thisImg.finalLayout = img.second.finalLayout;
+			}
+		}
+	}
+
+	cb.dev->dispatch.vkCmdExecuteCommands(commandBuffer,
+		commandBufferCount, pCommandBuffers);
 }
 
 } // namespace fuen

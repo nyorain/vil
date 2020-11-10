@@ -50,6 +50,14 @@ struct Platform {
 struct Instance {
 	vk::DynamicDispatch dispatch;
 	VkInstance ini;
+
+	struct {
+		u32 version;
+		u32 apiVersion;
+		u32 engineVersion;
+		std::string name;
+		std::string engineName;
+	} app;
 };
 
 struct Buffer {
@@ -104,9 +112,13 @@ struct Renderer {
 	VkDescriptorSet dsFont;
 
 	struct {
+		// image
 		Image* image {};
 		VkImageView view {};
 		VkImageAspectFlagBits aspectMask {};
+
+		// command buffer
+		CommandBuffer* cb {};
 	} selected;
 
 	struct {
@@ -121,6 +133,11 @@ struct Renderer {
 
 	void init(Device& dev, VkFormat, bool clear);
 	void ensureFontAtlas(VkCommandBuffer cb);
+
+	void drawImagesGui(Draw&);
+	void drawOverviewGui(Draw&);
+	void drawBuffersGui(Draw&);
+	void drawCbsGui();
 
 	void drawGui(Draw&);
 	void uploadDraw(Draw&);

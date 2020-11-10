@@ -29,7 +29,11 @@ struct Framebuffer {
 	std::string name;
 
 	std::vector<ImageView*> attachments;
-	RenderPass* rp;
+	// TODO: we shouldn't store the renderpass a framebuffer was created
+	// with here since the renderpass might be destroyed (and instead a
+	// compatible one used in render pass begin). We should just store
+	// the relevant render pass info
+	// RenderPass* rp;
 	u32 width;
 	u32 height;
 	u32 layers;

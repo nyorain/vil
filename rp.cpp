@@ -16,8 +16,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	}
 
 	auto& fb = dev.framebuffers.add(*pFramebuffer);
-	fb.rp = dev.renderPasses.find(pCreateInfo->renderPass);
-	dlg_assert(fb.rp);
+	// fb.rp = dev.renderPasses.find(pCreateInfo->renderPass);
+	// dlg_assert(fb.rp);
 	fb.width = pCreateInfo->width;
 	fb.height = pCreateInfo->height;
 	fb.layers = pCreateInfo->layers;

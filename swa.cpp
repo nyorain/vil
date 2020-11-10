@@ -50,6 +50,11 @@ void cbKey(swa_window*, const swa_key_event* ev) {
 	}
 }
 
+void cbMouseWheel(swa_window*, float x, float y) {
+	ImGui::GetIO().MouseWheel = y;
+	ImGui::GetIO().MouseWheelH = x;
+}
+
 // DisplayWindow
 bool DisplayWindow::init(Device& dev) {
 	this->dev = &dev;
@@ -66,6 +71,7 @@ bool DisplayWindow::init(Device& dev) {
 	listener.mouse_move = cbMouseMove;
 	listener.mouse_cross = cbMouseCross;
 	listener.mouse_button = cbMouseButton;
+	listener.mouse_wheel = cbMouseWheel;
 	listener.key = cbKey;
 
 	swa_window_settings ws;
@@ -447,6 +453,9 @@ void DisplayWindow::mainLoop() {
 				imgb.subresourceRange.levelCount = 1u;
 				imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				imgb.newLayout = finalLayout;
+				dlg_assert(
+					finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
+					finalLayout != VK_IMAGE_LAYOUT_UNDEFINED);
 				imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
 				imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
 
@@ -470,6 +479,8 @@ void DisplayWindow::mainLoop() {
 			si.signalSemaphoreCount = 1u;
 			si.pSignalSemaphores = &renderSem;
 
+			// TODO: break, continue etc: all early-returns here are problematic
+			// for sync stuff.
 			res = dev.dispatch.vkQueueSubmit(dev.gfxQueue->queue, 1, &si, draw.fence);
 			if(res != VK_SUCCESS) {
 				dlg_error("vkQueueSubmit: {}", vk::name(vk::Result(res)));

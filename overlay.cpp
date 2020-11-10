@@ -1,6 +1,7 @@
 #include "common.hpp"
 #include "data.hpp"
 #include "util.hpp"
+#include "cb.hpp"
 #include "image.hpp"
 
 #include "overlay.frag.spv.h"
@@ -301,6 +302,8 @@ void Renderer::init(Device& dev, VkFormat format, bool clear) {
 	this->imgui = ImGui::CreateContext();
 	ImGui::SetCurrentContext(imgui);
 	ImGui::GetIO().IniFilename = nullptr;
+	ImGui::GetStyle().WindowRounding = 0.f;
+	ImGui::GetStyle().WindowBorderSize = 0.f;
 }
 
 void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
@@ -459,133 +462,281 @@ void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
 	font.uploaded = true;
 }
 
-void Renderer::drawGui(Draw& draw) {
+void Renderer::drawOverviewGui(Draw& draw) {
+	(void) draw;
+
 	auto& dev = *this->dev;
-	ImGui::NewFrame();
+	std::shared_lock lock(dev.mutex);
 
-	ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-	if(ImGui::Begin("Images")) {
-		std::shared_lock lock(dev.mutex);
+	// instance info
+	ImGui::Columns(2);
 
-		ImGui::BeginChild("Image list", {400, 600});
+	ImGui::Text("API Version");
+	ImGui::Text("Application");
+	ImGui::Text("Engine");
 
-		for(auto& img : dev.images.map) {
-			ImGui::PushID(img.second.get());
+	ImGui::NextColumn();
 
-			auto label = img.second->name;
-			if(label.empty()) {
-				auto& ci = img.second->ci;
-				label += std::to_string(ci.extent.width);
+	auto& ini = *dev.ini;
+	ImGui::Text("%d.%d.%d",
+		VK_VERSION_MAJOR(ini.app.apiVersion),
+		VK_VERSION_MINOR(ini.app.apiVersion),
+		VK_VERSION_PATCH(ini.app.apiVersion));
+	ImGui::Text("%s %d.%d.%d", ini.app.name.c_str(),
+		VK_VERSION_MAJOR(ini.app.version),
+		VK_VERSION_MINOR(ini.app.version),
+		VK_VERSION_PATCH(ini.app.version));
+	ImGui::Text("%s %d.%d.%d", ini.app.engineName.c_str(),
+		VK_VERSION_MAJOR(ini.app.engineVersion),
+		VK_VERSION_MINOR(ini.app.engineVersion),
+		VK_VERSION_PATCH(ini.app.engineVersion));
+
+	ImGui::Columns();
+
+	ImGui::Separator();
+
+	// phdev info
+	ImGui::Columns(2);
+
+	// physical device info
+	VkPhysicalDeviceProperties phProps;
+	dev.dispatch.vkGetPhysicalDeviceProperties(dev.phdev, &phProps);
+
+	ImGui::Text("Physical device, API version");
+	ImGui::Text("Driver version");
+
+	ImGui::NextColumn();
+
+	ImGui::Text("%s %d.%d.%d", phProps.deviceName,
+		VK_VERSION_MAJOR(phProps.apiVersion),
+		VK_VERSION_MINOR(phProps.apiVersion),
+		VK_VERSION_PATCH(phProps.apiVersion));
+	ImGui::Text("%d.%d.%d",
+		VK_VERSION_MAJOR(phProps.driverVersion),
+		VK_VERSION_MINOR(phProps.driverVersion),
+		VK_VERSION_PATCH(phProps.driverVersion));
+
+	ImGui::Columns();
+
+	// pretty much just own debug stuff
+	ImGui::Separator();
+
+	ImGui::Columns(2);
+
+	ImGui::Text("num submissions");
+
+	ImGui::NextColumn();
+
+	ImGui::Text("%u", u32(dev.pending.size()));
+
+	ImGui::Columns();
+}
+
+void Renderer::drawBuffersGui(Draw& draw) {
+	(void) draw;
+	auto& dev = *this->dev;
+	std::shared_lock lock(dev.mutex);
+
+	ImGui::Text("TODO");
+}
+
+void Renderer::drawImagesGui(Draw& draw) {
+	auto& dev = *this->dev;
+
+	std::shared_lock lock(dev.mutex);
+	ImGui::BeginChild("Image list", {400, 600});
+
+	for(auto& img : dev.images.map) {
+		ImGui::PushID(img.second.get());
+
+		auto label = img.second->name;
+		if(label.empty()) {
+			auto& ci = img.second->ci;
+			label += dlg::format("{}", img.second->image);
+			label += " ";
+			label += std::to_string(ci.extent.width);
+			label += "x";
+			label += std::to_string(ci.extent.height);
+			if(ci.extent.depth > 1) {
 				label += "x";
-				label += std::to_string(ci.extent.height);
-				if(ci.extent.depth > 1) {
-					label += "x";
-					label += std::to_string(ci.extent.depth);
-				}
-
-				if(ci.arrayLayers > 1) {
-					label += "[";
-					label += std::to_string(ci.arrayLayers);
-					label += "]";
-				}
-
-				label += " ";
-				label += vk::name(vk::Format(ci.format));
+				label += std::to_string(ci.extent.depth);
 			}
 
-			if(ImGui::Button(label.c_str())) {
-				auto newSelection = img.second.get();
-				if(newSelection != selected.image) {
-					selected.image = newSelection;
-
-					if(selected.view) {
-						dev.dispatch.vkDestroyImageView(dev.dev, selected.view, nullptr);
-						selected.view = {};
-					}
-
-					if(!selected.image->swapchain) {
-						dlg_debug("updating image view");
-
-						selected.aspectMask = isDepthFormat(vk::Format(selected.image->ci.format)) ?
-							VK_IMAGE_ASPECT_DEPTH_BIT :
-							VK_IMAGE_ASPECT_COLOR_BIT;
-
-						VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
-						ivi.image = selected.image->image;
-						ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-						ivi.format = selected.image->ci.format;
-						ivi.subresourceRange.aspectMask = selected.aspectMask;
-						ivi.subresourceRange.layerCount = 1u;
-						ivi.subresourceRange.levelCount = 1u;
-
-						auto res = dev.dispatch.vkCreateImageView(dev.dev, &ivi, nullptr, &selected.view);
-						dlg_assert(res == VK_SUCCESS);
-
-						VkDescriptorImageInfo dsii;
-						dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-						dsii.imageView = selected.view;
-
-						VkWriteDescriptorSet write = vk::WriteDescriptorSet();
-						write.descriptorCount = 1u;
-						write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-						write.dstSet = draw.dsSelected;
-						write.pImageInfo = &dsii;
-
-						dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
-					} else {
-						dlg_debug("not creating view due to swapchain image");
-					}
-				}
+			if(ci.arrayLayers > 1) {
+				label += "[";
+				label += std::to_string(ci.arrayLayers);
+				label += "]";
 			}
 
-			ImGui::PopID();
+			label += " ";
+			label += vk::name(vk::Format(ci.format));
+		}
+
+		if(ImGui::Button(label.c_str())) {
+			auto newSelection = img.second.get();
+			if(newSelection != selected.image) {
+				selected.image = newSelection;
+
+				if(selected.view) {
+					dev.dispatch.vkDestroyImageView(dev.dev, selected.view, nullptr);
+					selected.view = {};
+				}
+
+				if(!selected.image->swapchain) {
+					dlg_debug("updating image view");
+
+					selected.aspectMask = isDepthFormat(vk::Format(selected.image->ci.format)) ?
+						VK_IMAGE_ASPECT_DEPTH_BIT :
+						VK_IMAGE_ASPECT_COLOR_BIT;
+
+					VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
+					ivi.image = selected.image->image;
+					ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+					ivi.format = selected.image->ci.format;
+					ivi.subresourceRange.aspectMask = selected.aspectMask;
+					ivi.subresourceRange.layerCount = 1u;
+					ivi.subresourceRange.levelCount = 1u;
+
+					auto res = dev.dispatch.vkCreateImageView(dev.dev, &ivi, nullptr, &selected.view);
+					dlg_assert(res == VK_SUCCESS);
+
+					VkDescriptorImageInfo dsii;
+					dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					dsii.imageView = selected.view;
+
+					VkWriteDescriptorSet write = vk::WriteDescriptorSet();
+					write.descriptorCount = 1u;
+					write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					write.dstSet = draw.dsSelected;
+					write.pImageInfo = &dsii;
+
+					dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
+				} else {
+					dlg_debug("not creating view due to swapchain image");
+				}
+			}
+		}
+
+		ImGui::PopID();
+	}
+
+	ImGui::EndChild();
+
+	if(selected.image) {
+		ImGui::SameLine();
+		ImGui::BeginChild("Selected Image", {600, 600});
+
+		ImGui::Text("%s", selected.image->name.c_str());
+		ImGui::Spacing();
+
+		// info
+		ImGui::Columns(2);
+
+		ImGui::SetColumnWidth(0, 100);
+
+		ImGui::Text("Extent");
+		ImGui::Text("Layers");
+		ImGui::Text("Levels");
+		ImGui::Text("Format");
+		ImGui::Text("Usage");
+		ImGui::Text("Flags");
+		ImGui::Text("Tiling");
+		ImGui::Text("Samples");
+
+		ImGui::NextColumn();
+
+		auto& ci = selected.image->ci;
+		ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
+		ImGui::Text("%d", ci.arrayLayers);
+		ImGui::Text("%d", ci.mipLevels);
+		ImGui::Text("%s", vk::name(vk::Format(ci.format)));
+		ImGui::Text("%s", vk::name(vk::ImageUsageFlags(vk::ImageUsageBits(ci.usage))).c_str());
+		ImGui::Text("%s", vk::name(vk::ImageCreateFlags(vk::ImageCreateBits(ci.flags))).c_str());
+		ImGui::Text("%s", vk::name(vk::ImageTiling(ci.tiling)));
+		ImGui::Text("%s", vk::name(vk::SampleCountBits(ci.samples)));
+
+		ImGui::Columns();
+
+		// content
+		if(selected.view) {
+			ImGui::Spacing();
+			ImGui::Spacing();
+			ImGui::Image((void*) draw.dsSelected, {400, 400});
 		}
 
 		ImGui::EndChild();
+	}
+}
 
-		if(selected.image) {
-			ImGui::SameLine();
-			ImGui::BeginChild("Selected Image", {600, 600});
+void Renderer::drawCbsGui() {
+	auto& dev = *this->dev;
 
-			ImGui::Text("%s", selected.image->name.c_str());
-			ImGui::Spacing();
+	std::shared_lock lock(dev.mutex);
+	ImGui::BeginChild("CommandBuffer list", {400, 600});
 
-			// info
-			ImGui::Columns(2);
+	for(auto& cb : dev.commandBuffers.map) {
+		ImGui::PushID(cb.second.get());
 
-			ImGui::SetColumnWidth(0, 100);
+		auto label = cb.second->name;
+		if(label.empty()) {
+			label = "-";
+		}
 
-			ImGui::Text("Extent");
-			ImGui::Text("Layers");
-			ImGui::Text("Levels");
-			ImGui::Text("Format");
-			ImGui::Text("Usage");
-			ImGui::Text("Flags");
-			ImGui::Text("Tiling");
-			ImGui::Text("Samples");
+		if(ImGui::Button(label.c_str())) {
+			auto newSelection = cb.second.get();
+			if(newSelection != selected.cb) {
+				selected.cb = newSelection;
+			}
+		}
 
-			ImGui::NextColumn();
+		ImGui::PopID();
+	}
 
-			auto& ci = selected.image->ci;
-			ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
-			ImGui::Text("%d", ci.arrayLayers);
-			ImGui::Text("%d", ci.mipLevels);
-			ImGui::Text("%s", vk::name(vk::Format(ci.format)));
-			ImGui::Text("%s", vk::name(vk::ImageUsageFlags(vk::ImageUsageBits(ci.usage))).c_str());
-			ImGui::Text("%s", vk::name(vk::ImageCreateFlags(vk::ImageCreateBits(ci.flags))).c_str());
-			ImGui::Text("%s", vk::name(vk::ImageTiling(ci.tiling)));
-			ImGui::Text("%s", vk::name(vk::SampleCountBits(ci.samples)));
+	ImGui::EndChild();
 
-			ImGui::Columns();
+	if(selected.cb) {
+		ImGui::SameLine();
+		ImGui::BeginChild("Selected CommandBuffer", {600, 600});
+		for(auto& cmd : selected.cb->commands) {
+			cmd->display();
+			ImGui::Separator();
+		}
 
-			// content
-			if(selected.view) {
-				ImGui::Spacing();
-				ImGui::Spacing();
-				ImGui::Image((void*) draw.dsSelected, {400, 400});
+		ImGui::EndChild();
+	}
+}
+
+void Renderer::drawGui(Draw& draw) {
+	ImGui::NewFrame();
+
+	ImGui::SetNextWindowPos({0, 0});
+	ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+
+	auto flags = ImGuiWindowFlags_NoDecoration;
+
+	if(ImGui::Begin("Images", nullptr, flags)) {
+		if(ImGui::BeginTabBar("MainTabBar")) {
+			if(ImGui::BeginTabItem("Overview")) {
+				drawOverviewGui(draw);
+				ImGui::EndTabItem();
 			}
 
-			ImGui::EndChild();
+			if(ImGui::BeginTabItem("Images")) {
+				drawImagesGui(draw);
+				ImGui::EndTabItem();
+			}
+
+			if(ImGui::BeginTabItem("CommandBuffers")) {
+				drawCbsGui();
+				ImGui::EndTabItem();
+			}
+
+			if(ImGui::BeginTabItem("Buffers")) {
+				drawBuffersGui(draw);
+				ImGui::EndTabItem();
+			}
+
+			ImGui::EndTabBar();
 		}
 	}
 

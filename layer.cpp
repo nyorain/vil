@@ -166,8 +166,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		return result;
 	}
 
+
 	auto& instanceData = createData<Instance>(*ini);
 	instanceData.ini = *ini;
+
+	auto strOr = [](const char* str) {
+		return str ? str : "";
+	};
+
+	instanceData.app.apiVersion = ci->pApplicationInfo->apiVersion;
+	instanceData.app.version = ci->pApplicationInfo->applicationVersion;
+	instanceData.app.name = strOr(ci->pApplicationInfo->pApplicationName);
+	instanceData.app.engineName = strOr(ci->pApplicationInfo->pEngineName);
+	instanceData.app.engineVersion = ci->pApplicationInfo->engineVersion;
 
 	instanceData.dispatch.init((vk::Instance) *ini, fpGetInstanceProcAddr, false);
 	// Needed in case the next layer does not make vkGetInstanceProcAddr
@@ -619,7 +630,12 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 				// store pending layouts
 				for(auto& used : cb.images) {
-					used.second.image->pendingLayout = used.second.finalLayout;
+					if(used.second.layoutChanged) {
+						if(used.second.image->pendingLayout != used.second.finalLayout) {
+							dlg_trace("cb {}: layout of {}: {}", cb.cb, used.second.image->image, vk::name(vk::ImageLayout(used.second.finalLayout)));
+						}
+						used.second.image->pendingLayout = used.second.finalLayout;
+					}
 				}
 			}
 		}
@@ -775,6 +791,21 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdBeginRenderPass),
    FUEN_HOOK(CmdWaitEvents),
    FUEN_HOOK(CmdPipelineBarrier),
+   FUEN_HOOK(CmdDraw),
+   FUEN_HOOK(CmdDrawIndexed),
+   FUEN_HOOK(CmdDrawIndirect),
+   FUEN_HOOK(CmdDrawIndexedIndirect),
+   FUEN_HOOK(CmdDispatch),
+   FUEN_HOOK(CmdDispatchIndirect),
+   FUEN_HOOK(CmdBindVertexBuffers),
+   FUEN_HOOK(CmdBindIndexBuffer),
+   FUEN_HOOK(CmdBindDescriptorSets),
+   FUEN_HOOK(CmdClearColorImage),
+   FUEN_HOOK(CmdCopyBufferToImage),
+   FUEN_HOOK(CmdCopyImageToBuffer),
+   FUEN_HOOK(CmdBlitImage),
+   FUEN_HOOK(CmdCopyImage),
+   FUEN_HOOK(CmdExecuteCommands),
 
    // sync.hpp
    FUEN_HOOK(CreateFence),
