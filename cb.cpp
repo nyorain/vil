@@ -1,6 +1,7 @@
 #include "cb.hpp"
 #include "data.hpp"
 #include "rp.hpp"
+#include "ds.hpp"
 #include "image.hpp"
 #include "imgui/imgui.h"
 #include <vkpp/names.hpp>
@@ -94,6 +95,11 @@ struct BindIndexBufferCmd : Command {
 };
 
 struct BindDescriptorSetCmd : Command {
+	u32 firstSet;
+	VkPipelineBindPoint pipeBindPoint;
+	VkPipelineLayout pipeLayout;
+	std::vector<DescriptorSet*> sets;
+
 	void display() override {
 		ImGui::Text("CmdBindDescriptorSets");
 	}
@@ -271,6 +277,16 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 	return cb.dev->dispatch.vkResetCommandBuffer(commandBuffer, flags);
 }
 
+CommandBuffer::UsedImage& useImage(CommandBuffer& cb, Image* image) {
+	auto& img = cb.images[image->handle];
+	if(!img.image) {
+		img.image = image;
+		dlg_assert(img.image);
+	}
+
+	return img;
+}
+
 CommandBuffer::UsedImage& useImage(CommandBuffer& cb, VkImage image) {
 	auto& img = cb.images[image];
 	if(!img.image) {
@@ -390,7 +406,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 			// TODO: can there be barriers inside the renderpasss?
 			//   maybe better move this to RenderPassEnd?
 			// TODO: handle secondary command buffers.
-			useImage(cb, attachment->img->image, cmd->rp->info.attachments[i].finalLayout);
+			useImage(cb, attachment->img->handle, cmd->rp->info.attachments[i].finalLayout);
 		}
 	}
 
@@ -410,6 +426,33 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		const uint32_t*                             pDynamicOffsets) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto cmd = std::make_unique<BindDescriptorSetCmd>();
+
+	cmd->firstSet = firstSet;
+	cmd->pipeBindPoint = pipelineBindPoint;
+	cmd->pipeLayout = layout;
+
+	// TODO: we could push this to the point where the descriptor set is
+	// acutally used, in case it is just bound without usage.
+	for(auto i = 0u; i < descriptorSetCount; ++i) {
+		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
+
+		for(auto b = 0u; b < ds.bindings.size(); ++b) {
+			if(category(ds.layout->bindings[b].descriptorType) != DescriptorCategory::image) {
+				continue;
+			}
+
+			for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
+				if(!ds.bindings[b][e].valid || !ds.bindings[b][e].imageInfo.imageView) {
+					continue;
+				}
+
+				auto& view = cb.dev->imageViews.get(ds.bindings[b][e].imageInfo.imageView);
+				useImage(cb, view.img);
+			}
+		}
+
+		cmd->sets.push_back(&ds);
+	}
 
 	cb.commands.push_back(std::move(cmd));
 
@@ -664,7 +707,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 
 		// TODO: ugly
 		for(auto& img : secondary.images) {
-			auto& thisImg = useImage(cb, img.second.image->image);
+			auto& thisImg = useImage(cb, img.second.image->handle);
 			if(img.second.layoutChanged) {
 				thisImg.layoutChanged = true;
 				thisImg.finalLayout = img.second.finalLayout;

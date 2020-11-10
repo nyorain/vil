@@ -22,7 +22,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 
 	auto& img = dev.images.add(*pImage);
 	img.dev = &dev;
-	img.image = *pImage;
+	img.handle = *pImage;
 	img.ci = ici;
 	img.pendingLayout = ici.initialLayout;
 

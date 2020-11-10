@@ -50,8 +50,11 @@ src = files(
   'rp.cpp',
   'cb.cpp',
   'sync.cpp',
+  'ds.cpp',
   'util.cpp',
   'f16.cpp',
+
+  'spirv_reflect.c',
 )
 
 deps = [

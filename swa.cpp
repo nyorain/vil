@@ -387,7 +387,7 @@ void DisplayWindow::mainLoop() {
 					bool wait = false;
 					for(auto& sub : pending->submissions) {
 						for(auto* cb : sub.cbs) {
-							auto it = cb->images.find(renderer.selected.image->image);
+							auto it = cb->images.find(renderer.selected.image->handle);
 							if(it == cb->images.end()) {
 								continue;
 							}
@@ -427,7 +427,7 @@ void DisplayWindow::mainLoop() {
 				// And we are allowed to read it
 				// TODO: transfer queue
 				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
-				imgb.image = renderer.selected.image->image;
+				imgb.image = renderer.selected.image->handle;
 				imgb.subresourceRange.aspectMask = renderer.selected.aspectMask;
 				imgb.subresourceRange.layerCount = 1u;
 				imgb.subresourceRange.levelCount = 1u;
@@ -447,7 +447,7 @@ void DisplayWindow::mainLoop() {
 			if(depImg) {
 				// return it to original layout
 				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
-				imgb.image = renderer.selected.image->image;
+				imgb.image = renderer.selected.image->handle;
 				imgb.subresourceRange.aspectMask = renderer.selected.aspectMask;
 				imgb.subresourceRange.layerCount = 1u;
 				imgb.subresourceRange.levelCount = 1u;

@@ -6,6 +6,7 @@
 #include "rp.hpp"
 #include "cb.hpp"
 #include "sync.hpp"
+#include "ds.hpp"
 
 #include <vkpp/enums.hpp>
 #include <vkpp/names.hpp>
@@ -262,6 +263,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	devData.commandBuffers.mutex = &devData.mutex;
 	devData.commandPools.mutex = &devData.mutex;
 	devData.fences.mutex = &devData.mutex;
+	devData.dsPools.mutex = &devData.mutex;
+	devData.dsLayouts.mutex = &devData.mutex;
+	devData.descriptorSets.mutex = &devData.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
@@ -404,6 +408,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	dlg_assert(devd->imageViews.empty());
 	dlg_assert(devd->framebuffers.empty());
 	dlg_assert(devd->renderPasses.empty());
+	dlg_assert(devd->commandPools.empty());
+	dlg_assert(devd->commandBuffers.empty());
+	dlg_assert(devd->fences.empty());
+	dlg_assert(devd->dsPools.empty());
+	dlg_assert(devd->dsLayouts.empty());
+	dlg_assert(devd->descriptorSets.empty());
 
 	// erase queue datas
 	for(auto& queue : devd->queues) {
@@ -499,7 +509,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		auto& img = devd.images.add(imgs[i]);
 		img.swapchain = &swapd;
 		img.dev = &devd;
-		img.image = imgs[i];
+		img.handle = imgs[i];
 		img.name = dlg::format("Swapchain {} image {}", (void*) swapd.swapchain, i);
 
 		swapd.images[i] = &img;
@@ -524,7 +534,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 
 	auto& sc = devd.swapchains.get(swapchain);
 	for(auto* img : sc.images) {
-		devd.images.mustErase(img->image);
+		devd.images.mustErase(img->handle);
 	}
 
 	devd.swapchains.mustErase(swapchain);
@@ -632,7 +642,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				for(auto& used : cb.images) {
 					if(used.second.layoutChanged) {
 						if(used.second.image->pendingLayout != used.second.finalLayout) {
-							dlg_trace("cb {}: layout of {}: {}", cb.cb, used.second.image->image, vk::name(vk::ImageLayout(used.second.finalLayout)));
+							dlg_trace("cb {}: layout of {}: {}", cb.cb, used.second.image->handle,
+								vk::name(vk::ImageLayout(used.second.finalLayout)));
 						}
 						used.second.image->pendingLayout = used.second.finalLayout;
 					}
@@ -813,6 +824,16 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(ResetFences),
    FUEN_HOOK(GetFenceStatus),
    FUEN_HOOK(WaitForFences),
+
+	// ds.hpp
+	FUEN_HOOK(CreateDescriptorSetLayout),
+	FUEN_HOOK(DestroyDescriptorSetLayout),
+	FUEN_HOOK(CreateDescriptorPool),
+	FUEN_HOOK(DestroyDescriptorPool),
+	FUEN_HOOK(ResetDescriptorPool),
+	FUEN_HOOK(AllocateDescriptorSets),
+	FUEN_HOOK(FreeDescriptorSets),
+	FUEN_HOOK(UpdateDescriptorSets),
 };
 
 #undef FUEN_HOOK

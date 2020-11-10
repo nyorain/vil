@@ -47,7 +47,7 @@ void Overlay::init(Swapchain& swapchain) {
 
 	buffers.resize(swapchain.images.size());
 	for(auto i = 0u; i < swapchain.images.size(); ++i) {
-		buffers[i].init(dev, swapchain.images[i]->image,
+		buffers[i].init(dev, swapchain.images[i]->handle,
 			swapchain.ci.imageFormat, swapchain.ci.imageExtent, renderer.rp);
 	}
 }
@@ -552,7 +552,7 @@ void Renderer::drawImagesGui(Draw& draw) {
 		auto label = img.second->name;
 		if(label.empty()) {
 			auto& ci = img.second->ci;
-			label += dlg::format("{}", img.second->image);
+			label += dlg::format("{}", img.second->handle);
 			label += " ";
 			label += std::to_string(ci.extent.width);
 			label += "x";
@@ -590,7 +590,7 @@ void Renderer::drawImagesGui(Draw& draw) {
 						VK_IMAGE_ASPECT_COLOR_BIT;
 
 					VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
-					ivi.image = selected.image->image;
+					ivi.image = selected.image->handle;
 					ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
 					ivi.format = selected.image->ci.format;
 					ivi.subresourceRange.aspectMask = selected.aspectMask;

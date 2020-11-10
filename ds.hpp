@@ -6,13 +6,27 @@
 
 namespace fuen {
 
+// Which member in descriptor binding is valid
+enum class DescriptorCategory {
+	none,
+	image,
+	buffer,
+	bufferView
+};
+
+DescriptorCategory category(VkDescriptorType);
+
 struct DescriptorPool {
 	Device* dev;
-	std::vector<DescriptorSet*> dss;
+	std::vector<DescriptorSet*> descriptorSets;
+	VkDescriptorPool handle;
 };
 
 struct DescriptorSetLayout {
 	Device* dev;
+	VkDescriptorSetLayout handle;
+
+	// static after creation
 	std::vector<VkDescriptorSetLayoutBinding> bindings;
 };
 
@@ -20,12 +34,18 @@ struct DescriptorSet {
 	Device* dev;
 	DescriptorPool* pool;
 	DescriptorSetLayout* layout;
+	VkDescriptorSet handle;
 
-	using Binding = std::variant<
-		VkDescriptorBufferInfo,
-		VkDescriptorImageInfo,
-		VkBufferView>;
-	std::vector<Binding> bindings;
+	struct Binding {
+		bool valid {};
+		union {
+			VkDescriptorBufferInfo bufferInfo;
+			VkDescriptorImageInfo imageInfo;
+			VkBufferView bufferView;
+		};
+	};
+
+	std::vector<std::vector<Binding>> bindings;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(

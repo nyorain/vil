@@ -41,6 +41,13 @@ namespace fuen {
 // util
 u32 findLSB(u32 v);
 
+template<typename C>
+void ensureSize(C& container, std::size_t size) {
+	if(container.size() < size) {
+		container.resize(size);
+	}
+}
+
 // Can be associated with a VkSurfaceKHR
 struct Platform {
 	virtual ~Platform() = default;
@@ -390,6 +397,9 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
 	SyncedUniqueUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
+	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
+	SyncedUniqueUnorderedMap<VkDescriptorSetLayout, DescriptorSetLayout> dsLayouts;
+	SyncedUniqueUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 };

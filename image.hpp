@@ -6,7 +6,7 @@ namespace fuen {
 
 struct Image {
 	Device* dev;
-	VkImage image;
+	VkImage handle;
 	std::string name;
 	VkImageCreateInfo ci;
 
