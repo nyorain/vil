@@ -7,6 +7,9 @@
 #include "cb.hpp"
 #include "sync.hpp"
 #include "ds.hpp"
+#include "buffer.hpp"
+#include "memory.hpp"
+#include "shader.hpp"
 
 #include <vkpp/enums.hpp>
 #include <vkpp/names.hpp>
@@ -266,6 +269,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	devData.dsPools.mutex = &devData.mutex;
 	devData.dsLayouts.mutex = &devData.mutex;
 	devData.descriptorSets.mutex = &devData.mutex;
+	devData.buffers.mutex = &devData.mutex;
+	devData.deviceMemories.mutex = &devData.mutex;
+	devData.shaderModules.mutex = &devData.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
@@ -414,6 +420,9 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	dlg_assert(devd->dsPools.empty());
 	dlg_assert(devd->dsLayouts.empty());
 	dlg_assert(devd->descriptorSets.empty());
+	dlg_assert(devd->deviceMemories.empty());
+	dlg_assert(devd->shaderModules.empty());
+	dlg_assert(devd->buffers.empty());
 
 	// erase queue datas
 	for(auto& queue : devd->queues) {
@@ -641,10 +650,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				// store pending layouts
 				for(auto& used : cb.images) {
 					if(used.second.layoutChanged) {
-						if(used.second.image->pendingLayout != used.second.finalLayout) {
-							dlg_trace("cb {}: layout of {}: {}", cb.cb, used.second.image->handle,
-								vk::name(vk::ImageLayout(used.second.finalLayout)));
-						}
+						dlg_assert(
+							used.second.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+							used.second.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
+
 						used.second.image->pendingLayout = used.second.finalLayout;
 					}
 				}
@@ -784,9 +793,23 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    // image.hpp
    FUEN_HOOK(CreateImage),
    FUEN_HOOK(DestroyImage),
+   FUEN_HOOK(BindImageMemory),
 
    FUEN_HOOK(CreateImageView),
    FUEN_HOOK(DestroyImageView),
+
+   // buffer.hpp
+   FUEN_HOOK(CreateBuffer),
+   FUEN_HOOK(DestroyBuffer),
+   FUEN_HOOK(BindBufferMemory),
+
+   // memory.hpp
+   FUEN_HOOK(AllocateMemory),
+   FUEN_HOOK(FreeMemory),
+
+   // shader.hpp
+   FUEN_HOOK(CreateShaderModule),
+   FUEN_HOOK(DestroyShaderModule),
 
    // cb.hpp
    FUEN_HOOK(CreateCommandPool),
@@ -817,6 +840,9 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdBlitImage),
    FUEN_HOOK(CmdCopyImage),
    FUEN_HOOK(CmdExecuteCommands),
+   FUEN_HOOK(CmdCopyBuffer),
+   FUEN_HOOK(CmdFillBuffer),
+   FUEN_HOOK(CmdUpdateBuffer),
 
    // sync.hpp
    FUEN_HOOK(CreateFence),

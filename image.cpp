@@ -37,6 +37,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 	auto img = dev.images.mustMove(image);
 
 	// TODO: messy. Use a callback system?
+	// Or just remember VkImage as selected one in those instances? But
+	// that might create problems when image handle is reused
 	{
 		std::lock_guard guard(dev.mutex);
 		for(auto& swapchain : dev.swapchains.map) {
@@ -65,6 +67,29 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 	}
 
 	dev.dispatch.vkDestroyImage(device, image, pAllocator);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
+		VkDevice                                    device,
+		VkImage                                     image,
+		VkDeviceMemory                              memory,
+		VkDeviceSize                                memoryOffset) {
+	auto& dev = getData<Device>(device);
+	auto& img = dev.images.get(image);
+	auto& mem = dev.deviceMemories.get(memory);
+
+	dlg_assert(!img.memory);
+
+	// find required size
+	VkMemoryRequirements memReqs;
+	dev.dispatch.vkGetImageMemoryRequirements(dev.dev, image, &memReqs);
+
+	img.memory = &mem;
+	img.allocationOffset = memoryOffset;
+	img.allocationSize = memReqs.size;
+	mem.allocations.insert({memoryOffset, memReqs.size, &img});
+
+	return dev.dispatch.vkBindImageMemory(device, image, memory, memoryOffset);
 }
 
 // ImageView

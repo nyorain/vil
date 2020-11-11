@@ -67,16 +67,6 @@ struct Instance {
 	} app;
 };
 
-struct Buffer {
-	Device* dev;
-	std::string name;
-	VkBufferCreateInfo ci;
-
-	Buffer() = default;
-	Buffer(const Buffer&) = delete;
-	Buffer& operator=(const Buffer&) = delete;
-};
-
 struct RenderBuffer {
 	Device* dev {};
 	VkImage image {};
@@ -391,7 +381,6 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
 	SyncedUniqueUnorderedMap<VkImageView, ImageView> imageViews;
 	SyncedUniqueUnorderedMap<VkBuffer, Buffer> buffers;
-
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
 	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
@@ -400,6 +389,8 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
 	SyncedUniqueUnorderedMap<VkDescriptorSetLayout, DescriptorSetLayout> dsLayouts;
 	SyncedUniqueUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
+	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
+	SyncedUniqueUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 };

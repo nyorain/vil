@@ -46,13 +46,17 @@ src = files(
   'wayland.cpp',
   'overlay.cpp',
   'swa.cpp',
-  'image.cpp',
-  'rp.cpp',
-  'cb.cpp',
-  'sync.cpp',
-  'ds.cpp',
   'util.cpp',
   'f16.cpp',
+
+  'image.cpp',
+  'sync.cpp',
+  'rp.cpp',
+  'cb.cpp',
+  'ds.cpp',
+  'buffer.cpp',
+  'memory.cpp',
+  'shader.cpp',
 
   'spirv_reflect.c',
 )

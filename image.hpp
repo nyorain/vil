@@ -1,10 +1,11 @@
 #pragma once
 
 #include "common.hpp"
+#include "memory.hpp"
 
 namespace fuen {
 
-struct Image {
+struct Image : MemoryResource {
 	Device* dev;
 	VkImage handle;
 	std::string name;
@@ -38,6 +39,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 	VkDevice                                    device,
 	VkImage                                     image,
 	const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
+    VkDevice                                    device,
+    VkImage                                     image,
+    VkDeviceMemory                              memory,
+    VkDeviceSize                                memoryOffset);
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
     VkDevice                                    device,

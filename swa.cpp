@@ -393,7 +393,6 @@ void DisplayWindow::mainLoop() {
 							}
 
 							wait = true;
-							finalLayout = it->second.finalLayout;
 						}
 					}
 

@@ -26,10 +26,12 @@ struct CommandBuffer {
 		Image* image {};
 		VkImageLayout finalLayout {};
 		bool layoutChanged {};
+		std::vector<Command*> commands;
 	};
 
 	struct UsedBuffer {
-		// TODO
+		Buffer* buffer {};
+		std::vector<Command*> commands;
 	};
 
 	Device* dev;
@@ -198,14 +200,12 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
     VkBuffer                                    buffer,
     VkDeviceSize                                offset);
 
-/*
 VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
     VkCommandBuffer                             commandBuffer,
     VkBuffer                                    srcBuffer,
     VkBuffer                                    dstBuffer,
     uint32_t                                    regionCount,
     const VkBufferCopy*                         pRegions);
-*/
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
     VkCommandBuffer                             commandBuffer,
@@ -242,7 +242,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
     uint32_t                                    regionCount,
     const VkBufferImageCopy*                    pRegions);
 
-/*
 VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
     VkCommandBuffer                             commandBuffer,
     VkBuffer                                    dstBuffer,
@@ -256,7 +255,6 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
     VkDeviceSize                                dstOffset,
     VkDeviceSize                                size,
     uint32_t                                    data);
-*/
 
 VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
     VkCommandBuffer                             commandBuffer,

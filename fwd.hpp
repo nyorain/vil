@@ -14,20 +14,20 @@ struct Device;
 struct Instance;
 struct Queue;
 struct Swapchain;
-
 struct Image;
 struct ImageView;
 struct Framebuffer;
 struct RenderPass;
 struct CommandBuffer;
-
+struct Buffer;
+struct DeviceMemory;
 struct Fence;
 struct Event;
 struct CommandPool;
-
 struct DescriptorPool;
 struct DescriptorSet;
 struct DescriptorSetLayout;
+struct ShaderModule;
 
 using u8 = std::uint8_t;
 using u16 = std::uint16_t;
