@@ -3,6 +3,7 @@
 #include "util.hpp"
 #include "cb.hpp"
 #include "image.hpp"
+#include "commands.hpp"
 
 #include "overlay.frag.spv.h"
 #include "overlay.vert.spv.h"
@@ -697,11 +698,7 @@ void Renderer::drawCbsGui() {
 	if(selected.cb) {
 		ImGui::SameLine();
 		ImGui::BeginChild("Selected CommandBuffer", {600, 600});
-		for(auto& cmd : selected.cb->commands) {
-			cmd->display();
-			ImGui::Separator();
-		}
-
+		displayCommands(selected.cb->commands);
 		ImGui::EndChild();
 	}
 }

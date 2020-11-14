@@ -3,226 +3,19 @@
 #include "rp.hpp"
 #include "ds.hpp"
 #include "buffer.hpp"
+#include "commands.hpp"
 #include "image.hpp"
 #include "imgui/imgui.h"
 #include <vkpp/names.hpp>
 
 namespace fuen {
 
-// commands
-struct BarrierCmdBase : Command {
-    VkPipelineStageFlags srcStageMask;
-    VkPipelineStageFlags dstStageMask;
-	std::vector<VkMemoryBarrier> memBarriers;
-	std::vector<VkBufferMemoryBarrier> bufBarriers;
-	std::vector<VkImageMemoryBarrier> imgBarriers;
-};
-
-struct WaitEventsCmd : BarrierCmdBase {
-	// TODO
-	// std::vector<Event*> events;
-	std::vector<VkEvent> events;
-
-	void display() override {
-		ImGui::Text("CmdWaitEvents");
-	}
-};
-
-struct BarrierCmd : BarrierCmdBase {
-    VkDependencyFlags dependencyFlags;
-
-	void display() override {
-		ImGui::Text("CmdPipelineBarrier");
-	}
-};
-
-struct BeginRenderPassCmd : Command {
-	VkRenderPassBeginInfo info;
-	Framebuffer* fb;
-	RenderPass* rp;
-
-	void display() override {
-		ImGui::Text("CmdBeginRenderPass");
-	}
-};
-
-struct DrawCmd : Command {
-	u32 vertexCount;
-	u32 instanceCount;
-	u32 firstVertex;
-	u32 firstInstance;
-
-	void display() override {
-		ImGui::Text("CmdDraw(%d, %d, %d, %d)",
-			vertexCount, instanceCount, firstVertex, firstInstance);
-	}
-};
-
-struct DrawIndirectCmd : Command {
-	Buffer* buffer {};
-	void display() override {
-		ImGui::Text("CmdDrawIndrect");
-	}
-};
-
-struct DrawIndexedCmd : Command {
-	u32 indexCount;
-	u32 instanceCount;
-	u32 firstIndex;
-	i32 vertexOffset;
-	u32 firstInstance;
-
-	void display() override {
-		ImGui::Text("CmdDraw(%d, %d, %d, %d, %d)",
-			indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
-	}
-};
-
-struct DrawIndexedIndirectCmd : Command {
-	Buffer* buffer {};
-	void display() override {
-		ImGui::Text("CmdDrawIndexedIndirect");
-	}
-};
-
-struct BindVertexBuffersCmd : Command {
-	std::vector<Buffer*> buffers;
-
-	void display() override {
-		ImGui::Text("CmdBindVertexBuffers");
-	}
-};
-
-struct BindIndexBufferCmd : Command {
-	Buffer* buffer {};
-	void display() override {
-		ImGui::Text("CmdBindIndexBuffer");
-	}
-};
-
-struct BindDescriptorSetCmd : Command {
-	u32 firstSet;
-	VkPipelineBindPoint pipeBindPoint;
-	VkPipelineLayout pipeLayout;
-	std::vector<DescriptorSet*> sets;
-
-	void display() override {
-		ImGui::Text("CmdBindDescriptorSets");
-	}
-};
-
-struct DispatchCmd : Command {
-	u32 groupsX;
-	u32 groupsY;
-	u32 groupsZ;
-
-	void display() override {
-		ImGui::Text("CmdDispatch(%d, %d, %d)",
-			groupsX, groupsY, groupsZ);
-	}
-};
-
-struct DispatchIndirectCmd : Command {
-	Buffer* buffer {};
-
-	void display() override {
-		ImGui::Text("CmdDispatchIndirect");
-	}
-};
-
-struct CopyImageCmd : Command {
-	Image* src {};
-	Image* dst {};
-	std::vector<VkImageCopy> copies;
-
-	void display() override {
-		ImGui::Text("CmdCopyImage");
-	}
-};
-
-struct CopyBufferToImageCmd : Command {
-	Buffer* src {};
-	Image* dst {};
-	std::vector<VkBufferImageCopy> copies;
-
-	void display() override {
-		ImGui::Text("CmdCopyBufferToImage");
-	}
-};
-
-struct CopyImageToBufferCmd : Command {
-	Image* src {};
-	Buffer* dst {};
-	std::vector<VkBufferImageCopy> copies;
-
-	void display() override {
-		ImGui::Text("CmdCopyImageToBuffer");
-	}
-};
-
-struct BlitImageCmd : Command {
-	Image* src {};
-	Image* dst {};
-	std::vector<VkImageBlit> blits;
-	VkFilter filter;
-
-	void display() override {
-		ImGui::Text("CmdBlitImage");
-	}
-};
-
-struct ClearColorImageCmd : Command {
-	Image* dst {};
-
-	void display() override {
-		ImGui::Text("CmdClearColorImage");
-	}
-};
-
-struct CopyBufferCmd : Command {
-	Buffer* src {};
-	Buffer* dst {};
-	std::vector<VkBufferCopy> regions;
-
-	void display() override {
-		ImGui::Text("CmdCopyBuffer");
-	}
-};
-
-struct UpdateBufferCmd : Command {
-	Buffer* dst {};
-	VkDeviceSize offset {};
-	std::vector<std::byte> data;
-
-	void display() override {
-		ImGui::Text("CmdUpdateBuffer");
-	}
-};
-
-struct FillBufferCmd : Command {
-	Buffer* dst {};
-	VkDeviceSize offset {};
-	VkDeviceSize size {};
-	u32 data {};
-
-	void display() override {
-		ImGui::Text("CmdFillBuffer");
-	}
-};
-
-struct ExecuteCommandsCmd : Command {
-	std::vector<CommandBuffer*> secondaries {};
-
-	void display() override {
-		ImGui::Text("CmdExecuteCommands");
-	}
-};
-
 // util
 void reset(CommandBuffer& cb) {
 	cb.buffers.clear();
 	cb.images.clear();
 	cb.commands.clear();
+	cb.sections.clear();
 }
 
 // api
@@ -332,6 +125,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
+	dlg_assert(cb.sections.empty());
 	return cb.dev->dispatch.vkEndCommandBuffer(commandBuffer);
 }
 
@@ -389,6 +183,34 @@ CommandBuffer::UsedBuffer& useBuffer(CommandBuffer& cb, Command& cmd, Buffer& bu
 	return useBuf;
 }
 
+void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
+	if(!cb.sections.empty()) {
+		cb.sections.back()->children.emplace_back(std::move(cmd));
+	} else {
+		cb.commands.emplace_back(std::move(cmd));
+	}
+}
+
+void addSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
+	auto* section = cmd.get();
+	add(cb, std::move(cmd));
+	cb.sections.push_back(section);
+}
+
+void addNextSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
+	auto* section = cmd.get();
+	add(cb, std::move(cmd));
+	dlg_assert(!cb.sections.empty());
+	cb.sections.pop_back();
+	cb.sections.push_back(section);
+}
+
+void addEndSection(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
+	add(cb, std::move(cmd));
+	dlg_assert(!cb.sections.empty());
+	cb.sections.pop_back();
+}
+
 void cmdBarrier(
 		CommandBuffer& cb,
 		BarrierCmdBase& cmd,
@@ -436,7 +258,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		bufferMemoryBarrierCount, pBufferMemoryBarriers,
 		imageMemoryBarrierCount, pImageMemoryBarriers);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdWaitEvents(commandBuffer, eventCount, pEvents,
 		srcStageMask, dstStageMask,
 		memoryBarrierCount, pMemoryBarriers,
@@ -463,7 +285,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 		bufferMemoryBarrierCount, pBufferMemoryBarriers,
 		imageMemoryBarrierCount, pImageMemoryBarriers);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdPipelineBarrier(commandBuffer,
 		srcStageMask, dstStageMask, dependencyFlags,
 		memoryBarrierCount, pMemoryBarriers,
@@ -499,9 +321,28 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 		}
 	}
 
-	cb.commands.push_back(std::move(cmd));
-
+	addSection(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBeginRenderPass(commandBuffer, pRenderPassBegin, contents);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
+		VkCommandBuffer                             commandBuffer,
+		VkSubpassContents                           contents) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<NextSubpassCmd>();
+	// TODO; figure this out, should subpass be whole section?
+	// but then how to handle first subpass?
+	// addNextSection(cb, std::move(cmd));
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.vkCmdNextSubpass(commandBuffer, contents);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
+		VkCommandBuffer                             commandBuffer) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<EndRenderPassCmd>();
+	addEndSection(cb, std::move(cmd));
+	cb.dev->dispatch.vkCmdEndRenderPass(commandBuffer);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
@@ -551,7 +392,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		cmd->sets.push_back(&ds);
 	}
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBindDescriptorSets(commandBuffer,
 		pipelineBindPoint,
 		layout,
@@ -574,7 +415,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBindIndexBuffer(commandBuffer,
 		buffer, offset, indexType);
 }
@@ -594,7 +435,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 		useBuffer(cb, *cmd, buf);
 	}
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBindVertexBuffers(commandBuffer,
 		firstBinding, bindingCount, pBuffers, pOffsets);
 }
@@ -613,7 +454,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	cmd->firstVertex = firstVertex;
 	cmd->firstInstance = firstInstance;
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDraw(commandBuffer,
 		vertexCount, instanceCount, firstVertex, firstInstance);
 }
@@ -634,7 +475,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	cmd->vertexOffset = vertexOffset;
 	cmd->firstIndex = firstIndex;
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDrawIndexed(commandBuffer,
 		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
@@ -652,7 +493,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDrawIndirect(commandBuffer,
 		buffer, offset, drawCount, stride);
 }
@@ -670,7 +511,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDrawIndexedIndirect(commandBuffer,
 		buffer, offset, drawCount, stride);
 }
@@ -687,7 +528,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 	cmd->groupsY = groupCountY;
 	cmd->groupsZ = groupCountZ;
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDispatch(commandBuffer,
 		groupCountX, groupCountY, groupCountZ);
 }
@@ -703,7 +544,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDispatchIndirect(commandBuffer, buffer, offset);
 }
 
@@ -728,7 +569,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	useImage(cb, *cmd, src);
 	useImage(cb, *cmd, dst);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdCopyImage(commandBuffer,
 		srcImage, srcImageLayout,
 		dstImage, dstImageLayout,
@@ -758,7 +599,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	useImage(cb, *cmd, src);
 	useImage(cb, *cmd, dst);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBlitImage(commandBuffer,
 		srcImage, srcImageLayout,
 		dstImage, dstImageLayout,
@@ -785,7 +626,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	useBuffer(cb, *cmd, src);
 	useImage(cb, *cmd, dst);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdCopyBufferToImage(commandBuffer,
 		srcBuffer, dstImage, dstImageLayout, regionCount, pRegions);
 }
@@ -810,7 +651,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	useImage(cb, *cmd, src);
 	useBuffer(cb, *cmd, dst);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdCopyImageToBuffer(commandBuffer,
 		srcImage, srcImageLayout, dstBuffer, regionCount, pRegions);
 }
@@ -830,7 +671,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 
 	useImage(cb, *cmd, dst);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdClearColorImage(commandBuffer,
 		image, imageLayout, pColor, rangeCount, pRanges);
 }
@@ -864,7 +705,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		}
 	}
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdExecuteCommands(commandBuffer,
 		commandBufferCount, pCommandBuffers);
 }
@@ -888,7 +729,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 	useBuffer(cb, *cmd, srcBuf);
 	useBuffer(cb, *cmd, dstBuf);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdCopyBuffer(commandBuffer,
 		srcBuffer, dstBuffer, regionCount, pRegions);
 }
@@ -910,7 +751,7 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 
 	useBuffer(cb, *cmd, buf);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdUpdateBuffer(commandBuffer, dstBuffer, dstOffset, dataSize, pData);
 }
 
@@ -931,8 +772,36 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 
 	useBuffer(cb, *cmd, buf);
 
-	cb.commands.push_back(std::move(cmd));
+	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdFillBuffer(commandBuffer, dstBuffer, dstOffset, size, data);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<BeginDebugUtilsLabelCmd>();
+
+	auto* c = pLabelInfo->color;
+	cmd->color = {c[0], c[1], c[2], c[3]};
+	cmd->name = pLabelInfo->pLabelName;
+
+	addSection(cb, std::move(cmd));
+
+	if(cb.dev->dispatch.vkCmdBeginDebugUtilsLabelEXT) {
+		cb.dev->dispatch.vkCmdBeginDebugUtilsLabelEXT(commandBuffer, pLabelInfo);
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
+		VkCommandBuffer                             commandBuffer) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<EndDebugUtilsLabelCmd>();
+	addEndSection(cb, std::move(cmd));
+
+	if(cb.dev->dispatch.vkCmdEndDebugUtilsLabelEXT) {
+		cb.dev->dispatch.vkCmdEndDebugUtilsLabelEXT(commandBuffer);
+	}
 }
 
 } // namespace fuen

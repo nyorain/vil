@@ -6,7 +6,7 @@
 namespace fuen {
 
 // ShaderModule
-ShaderModule::~ShaderModule() {
+SpirvData::~SpirvData() {
 	spvReflectDestroyShaderModule(reflection.get());
 }
 
@@ -24,12 +24,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 
 	auto& mod = dev.shaderModules.add(*pShaderModule);
 	mod.dev = &dev;
-	mod.spv = {pCreateInfo->pCode, pCreateInfo->pCode + pCreateInfo->codeSize};
 	mod.handle = *pShaderModule;
 
-	mod.reflection = std::make_unique<SpvReflectShaderModule>();
+	mod.code = std::make_shared<SpirvData>();
+	mod.code->spv = {pCreateInfo->pCode, pCreateInfo->pCode + pCreateInfo->codeSize};
+	mod.code->reflection = std::make_unique<SpvReflectShaderModule>();
 	auto reflRes = spvReflectCreateShaderModule(pCreateInfo->codeSize,
-		pCreateInfo->pCode, mod.reflection.get());
+		pCreateInfo->pCode, mod.code->reflection.get());
 	dlg_assert(reflRes == SPV_REFLECT_RESULT_SUCCESS);
 
 	return res;

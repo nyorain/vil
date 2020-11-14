@@ -7,13 +7,20 @@ typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 
 namespace fuen {
 
-struct ShaderModule {
-	Device* dev;
-	VkShaderModule handle;
+struct SpirvData {
 	std::vector<u32> spv;
 	std::unique_ptr<SpvReflectShaderModule> reflection;
 
-	~ShaderModule();
+	~SpirvData();
+};
+
+struct ShaderModule {
+	Device* dev;
+	VkShaderModule handle;
+
+	// Managed via shared ptr since it may outlive the shader module in
+	// (possibly multiple) pipeline objects.
+	std::shared_ptr<SpirvData> code;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(

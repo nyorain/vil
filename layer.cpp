@@ -10,6 +10,8 @@
 #include "buffer.hpp"
 #include "memory.hpp"
 #include "shader.hpp"
+#include "pipe.hpp"
+#include "commands.hpp"
 
 #include <vkpp/enums.hpp>
 #include <vkpp/names.hpp>
@@ -777,6 +779,8 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    // Anyways, then check (in GetProcAddr) whether that extension was
    // enabled.
    FUEN_HOOK(SetDebugUtilsObjectNameEXT),
+   FUEN_HOOK(CmdBeginDebugUtilsLabelEXT),
+   FUEN_HOOK(CmdEndDebugUtilsLabelEXT),
 
    // TODO: make optional
    FUEN_HOOK(CreateWaylandSurfaceKHR),
@@ -811,6 +815,29 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CreateShaderModule),
    FUEN_HOOK(DestroyShaderModule),
 
+   // sync.hpp
+   FUEN_HOOK(CreateFence),
+   FUEN_HOOK(DestroyFence),
+   FUEN_HOOK(ResetFences),
+   FUEN_HOOK(GetFenceStatus),
+   FUEN_HOOK(WaitForFences),
+
+	// ds.hpp
+	FUEN_HOOK(CreateDescriptorSetLayout),
+	FUEN_HOOK(DestroyDescriptorSetLayout),
+	FUEN_HOOK(CreateDescriptorPool),
+	FUEN_HOOK(DestroyDescriptorPool),
+	FUEN_HOOK(ResetDescriptorPool),
+	FUEN_HOOK(AllocateDescriptorSets),
+	FUEN_HOOK(FreeDescriptorSets),
+	FUEN_HOOK(UpdateDescriptorSets),
+
+	// pipe.hpp
+	FUEN_HOOK(CreateGraphicsPipelines),
+	FUEN_HOOK(CreateComputePipelines),
+	FUEN_HOOK(CreatePipelineLayout),
+	FUEN_HOOK(DestroyPipelineLayout),
+
    // cb.hpp
    FUEN_HOOK(CreateCommandPool),
    FUEN_HOOK(DestroyCommandPool),
@@ -823,6 +850,8 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(ResetCommandBuffer),
 
    FUEN_HOOK(CmdBeginRenderPass),
+   FUEN_HOOK(CmdEndRenderPass),
+   FUEN_HOOK(CmdNextSubpass),
    FUEN_HOOK(CmdWaitEvents),
    FUEN_HOOK(CmdPipelineBarrier),
    FUEN_HOOK(CmdDraw),
@@ -843,23 +872,6 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdCopyBuffer),
    FUEN_HOOK(CmdFillBuffer),
    FUEN_HOOK(CmdUpdateBuffer),
-
-   // sync.hpp
-   FUEN_HOOK(CreateFence),
-   FUEN_HOOK(DestroyFence),
-   FUEN_HOOK(ResetFences),
-   FUEN_HOOK(GetFenceStatus),
-   FUEN_HOOK(WaitForFences),
-
-	// ds.hpp
-	FUEN_HOOK(CreateDescriptorSetLayout),
-	FUEN_HOOK(DestroyDescriptorSetLayout),
-	FUEN_HOOK(CreateDescriptorPool),
-	FUEN_HOOK(DestroyDescriptorPool),
-	FUEN_HOOK(ResetDescriptorPool),
-	FUEN_HOOK(AllocateDescriptorSets),
-	FUEN_HOOK(FreeDescriptorSets),
-	FUEN_HOOK(UpdateDescriptorSets),
 };
 
 #undef FUEN_HOOK

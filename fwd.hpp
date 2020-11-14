@@ -28,6 +28,13 @@ struct DescriptorPool;
 struct DescriptorSet;
 struct DescriptorSetLayout;
 struct ShaderModule;
+struct Pipeline;
+struct GraphicsPipeline;
+struct ComutePipeline;
+struct PipelineLayout;
+
+struct Command;
+struct SectionCommand;
 
 using u8 = std::uint8_t;
 using u16 = std::uint16_t;

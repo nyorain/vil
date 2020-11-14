@@ -57,6 +57,7 @@ src = files(
   'buffer.cpp',
   'memory.cpp',
   'shader.cpp',
+  'pipe.cpp',
 
   'spirv_reflect.c',
 )

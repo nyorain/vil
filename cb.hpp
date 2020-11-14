@@ -7,18 +7,40 @@
 
 namespace fuen {
 
-struct Command {
-	virtual ~Command() = default;
-
-	// Display the command via ImGui
-	virtual void display() = 0;
-};
-
 struct CommandPool {
 	Device* dev;
 	VkCommandPool pool;
 	std::vector<CommandBuffer*> cbs;
 	std::string name;
+};
+
+// Contains all bound state
+struct PushConstantData {
+	std::vector<std::byte> data;
+	std::vector<std::pair<VkDeviceSize, VkDeviceSize>> ranges; // (offset, size)[]
+};
+
+struct DescriptorState {
+	std::vector<DescriptorSet*> descriptorSets;
+	std::unordered_map<VkShaderStageFlagBits, PushConstantData> pushConstants;
+};
+
+struct BoundVertexBuffer {
+	Buffer* buffer {};
+	VkDeviceSize offset {};
+};
+
+struct BoundIndexBuffer {
+	Buffer* buffer {};
+	VkIndexType type {};
+	VkDeviceSize offset {};
+};
+
+struct DrawState : DescriptorState {
+	BoundIndexBuffer indices;
+	std::vector<BoundVertexBuffer> vertices;
+
+	// TODO: dynamic pipeline states
 };
 
 struct CommandBuffer {
@@ -41,6 +63,8 @@ struct CommandBuffer {
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
 	std::string name;
+
+	std::vector<SectionCommand*> sections {}; // stack
 
 	// pending submissions
 	std::vector<PendingSubmission*> pending;
@@ -373,18 +397,23 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
     const VkRenderPassBeginInfo*                pRenderPassBegin,
     VkSubpassContents                           contents);
 
-/*
 VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
     VkCommandBuffer                             commandBuffer,
     VkSubpassContents                           contents);
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
     VkCommandBuffer                             commandBuffer);
-*/
 
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    commandBufferCount,
     const VkCommandBuffer*                      pCommandBuffers);
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
+    VkCommandBuffer                             commandBuffer,
+    const VkDebugUtilsLabelEXT*                 pLabelInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
+    VkCommandBuffer                             commandBuffer);
 
 } // namespace fuen
