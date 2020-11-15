@@ -29,9 +29,10 @@ struct DescriptorSet;
 struct DescriptorSetLayout;
 struct ShaderModule;
 struct Pipeline;
+struct ComputePipeline;
 struct GraphicsPipeline;
-struct ComutePipeline;
 struct PipelineLayout;
+struct Sampler;
 
 struct Command;
 struct SectionCommand;

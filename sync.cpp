@@ -57,11 +57,15 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 
 		std::lock_guard lock(dev.mutex);
 		if(fenceD.submission) {
+			// per vulkan spec: fence must not be associated with a submission
+			// that has not completed execution
 			auto finished = checkLocked(*fenceD.submission);
 			dlg_assert(finished);
 		}
 	}
 
+	// technically, we could also just lock and reset on a per-fence basis
+	MultiFenceLock lock(dev, {pFences, pFences + fenceCount});
 	return dev.dispatch.vkResetFences(device, fenceCount, pFences);
 }
 
@@ -71,7 +75,13 @@ VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
 	auto& dev = getData<Device>(device);
 	auto& fenceD = dev.fences.get(fence);
 
-	auto res = dev.dispatch.vkGetFenceStatus(device, fence);
+	VkResult res;
+
+	{
+		std::lock_guard lock(fenceD.mutex);
+		res = dev.dispatch.vkGetFenceStatus(device, fence);
+	}
+
 	if(res == VK_SUCCESS) {
 		std::lock_guard lock(dev.mutex);
 		if(fenceD.submission) {
@@ -90,7 +100,12 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 		VkBool32                                    waitAll,
 		uint64_t                                    timeout) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
+	VkResult res;
+
+	{
+		MultiFenceLock lock(dev, {pFences, pFences + fenceCount});
+		res = dev.dispatch.vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
+	}
 
 	if(res == VK_SUCCESS || !waitAll) {
 		// have to check all fences for completed payloads
@@ -104,6 +119,33 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 	}
 
 	return res;
+}
+
+// MultiFenceLock
+MultiFenceLock::MultiFenceLock(Device& dev, span<const VkFence> fences) {
+	std::vector<std::mutex*> mutexes;
+	for(auto& fence : fences) {
+		mutexes.push_back(&dev.fences.get(fence).mutex);
+	}
+	init(mutexes);
+}
+
+MultiFenceLock::MultiFenceLock(std::vector<std::mutex*> mutexes) {
+	init(std::move(mutexes));
+}
+
+void MultiFenceLock::init(std::vector<std::mutex*> mutexes) {
+	mutexes_ = std::move(mutexes);
+	std::sort(mutexes_.begin(), mutexes_.end());
+	for(auto* mtx : mutexes_) {
+		mtx->lock();
+	}
+}
+
+MultiFenceLock::~MultiFenceLock() {
+	for(auto* mtx : mutexes_) {
+		mtx->unlock();
+	}
 }
 
 } // namespace fuen

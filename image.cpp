@@ -36,27 +36,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 	auto& dev = *findData<Device>(device);
 	auto img = dev.images.mustMove(image);
 
-	// TODO: messy. Use a callback system?
-	// Or just remember VkImage as selected one in those instances? But
-	// that might create problems when image handle is reused
-	{
-		std::lock_guard guard(dev.mutex);
-		for(auto& swapchain : dev.swapchains.map) {
-			if(!swapchain.second->useOverlay) {
-				continue;
-			}
-
-			auto& renderer = swapchain.second->overlay.renderer;
-			if(renderer.selected.image == img.get()) {
-				renderer.selected.image = nullptr;
-				if(renderer.selected.view) {
-					dev.dispatch.vkDestroyImageView(dev.dev, renderer.selected.view, nullptr);
-					renderer.selected.view = {};
-				}
-			}
-		}
-
-		auto& renderer = dev.window.renderer;
+	// Unset selection if needed
+	auto unsetter = [&](Renderer& renderer) {
 		if(renderer.selected.image == img.get()) {
 			renderer.selected.image = nullptr;
 			if(renderer.selected.view) {
@@ -64,7 +45,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 				renderer.selected.view = {};
 			}
 		}
-	}
+	};
+	forEachRenderer(dev, unsetter);
 
 	dev.dispatch.vkDestroyImage(device, image, pAllocator);
 }
@@ -105,7 +87,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	}
 
 	auto& view = dev.imageViews.add(*pView);
-	view.view = *pView;
+	view.handle = *pView;
 	view.img = dev.images.find(pCreateInfo->image);
 	view.dev = &dev;
 	view.ci = *pCreateInfo;
@@ -117,10 +99,37 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		VkDevice                                    device,
 		VkImageView                                 imageView,
 		const VkAllocationCallbacks*                pAllocator) {
-	auto& dev = *findData<Device>(device);
+	auto& dev = getData<Device>(device);
 	dev.imageViews.mustErase(imageView);
 	dev.dispatch.vkDestroyImageView(device, imageView, pAllocator);
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
+		VkDevice                                    device,
+		const VkSamplerCreateInfo*                  pCreateInfo,
+		const VkAllocationCallbacks*                pAllocator,
+		VkSampler*                                  pSampler) {
+	auto& dev = getData<Device>(device);
+	auto res = dev.dispatch.vkCreateSampler(device, pCreateInfo, pAllocator, pSampler);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	auto& view = dev.samplers.add(*pSampler);
+	view.dev = &dev;
+	view.handle = *pSampler;
+	view.ci = *pCreateInfo;
+
+	return res;
+}
+
+VKAPI_ATTR void VKAPI_CALL DestroySampler(
+		VkDevice                                    device,
+		VkSampler                                   sampler,
+		const VkAllocationCallbacks*                pAllocator) {
+	auto& dev = getData<Device>(device);
+	dev.samplers.mustErase(sampler);
+	dev.dispatch.vkDestroySampler(device, sampler, pAllocator);
+}
 
 } // namespace fuen

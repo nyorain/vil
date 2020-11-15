@@ -97,7 +97,7 @@ Vec3f e5b9g9r9ToRgb(u32 e5r9g9b9);
 
 Vec4d read(vk::Format srcFormat, std::span<const std::byte>& src);
 void write(vk::Format dstFormat, std::span<std::byte>& dst, const Vec4d& color);
-void convert(vk::Format dstFormat, nytl::Span<std::byte>& dst,
-		vk::Format srcFormat, nytl::Span<const std::byte>& src);
+void convert(vk::Format dstFormat, std::span<std::byte>& dst,
+		vk::Format srcFormat, std::span<const std::byte>& src);
 
 } // namespace fuen

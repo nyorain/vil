@@ -20,9 +20,19 @@ struct PushConstantData {
 	std::vector<std::pair<VkDeviceSize, VkDeviceSize>> ranges; // (offset, size)[]
 };
 
+using PushConstantMap = std::unordered_map<VkShaderStageFlagBits, PushConstantData>;
+
+struct BoundDescriptorSet {
+	DescriptorSet* ds {};
+	PipelineLayout* layout {};
+	std::vector<u32> dynamicOffsets;
+};
+
 struct DescriptorState {
-	std::vector<DescriptorSet*> descriptorSets;
-	std::unordered_map<VkShaderStageFlagBits, PushConstantData> pushConstants;
+	std::vector<BoundDescriptorSet> descriptorSets;
+
+	void bind(PipelineLayout& layout, u32 firstSet,
+		span<DescriptorSet* const> sets, span<const u32> offsets);
 };
 
 struct BoundVertexBuffer {
@@ -36,11 +46,17 @@ struct BoundIndexBuffer {
 	VkDeviceSize offset {};
 };
 
-struct DrawState : DescriptorState {
+struct GraphicsState : DescriptorState {
 	BoundIndexBuffer indices;
 	std::vector<BoundVertexBuffer> vertices;
+	GraphicsPipeline* pipe;
+	RenderPass* rp;
 
 	// TODO: dynamic pipeline states
+};
+
+struct ComputeState : DescriptorState {
+	ComputePipeline* pipe;
 };
 
 struct CommandBuffer {
@@ -58,13 +74,26 @@ struct CommandBuffer {
 
 	Device* dev;
 	CommandPool* pool;
-	VkCommandBuffer cb;
+	VkCommandBuffer handle;
 	std::vector<std::unique_ptr<Command>> commands;
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
 	std::string name;
 
 	std::vector<SectionCommand*> sections {}; // stack
+	u32 resetCount {};
+
+	ComputeState computeState {};
+	GraphicsState graphicsState {};
+
+	struct {
+		PushConstantMap map;
+		PipelineLayout* layout;
+	} pushConstants;
+
+	// CommandBuffers are mutable, need a mutex to make sure they
+	// aren't modified while read by us.
+	std::mutex mutex;
 
 	// pending submissions
 	std::vector<PendingSubmission*> pending;
@@ -108,12 +137,12 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
     VkCommandBuffer                             commandBuffer,
     VkCommandBufferResetFlags                   flags);
 
-/*
 VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
     VkCommandBuffer                             commandBuffer,
     VkPipelineBindPoint                         pipelineBindPoint,
     VkPipeline                                  pipeline);
 
+/*
 VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    firstViewport,
@@ -382,6 +411,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
     VkDeviceSize                                dstOffset,
     VkDeviceSize                                stride,
     VkQueryResultFlags                          flags);
+*/
 
 VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
     VkCommandBuffer                             commandBuffer,
@@ -390,7 +420,6 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
     uint32_t                                    offset,
     uint32_t                                    size,
     const void*                                 pValues);
-*/
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
     VkCommandBuffer                             commandBuffer,

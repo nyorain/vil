@@ -46,6 +46,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		dsLayout.bindings.push_back(pCreateInfo->pBindings[i]);
 	}
 
+	std::sort(dsLayout.bindings.begin(), dsLayout.bindings.end(),
+		[](auto& ba, auto& bb) { return ba.binding < bb.binding; });
+
 	return res;
 }
 

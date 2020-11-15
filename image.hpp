@@ -23,11 +23,16 @@ struct Image : MemoryResource {
 struct ImageView {
 	Device* dev;
 	Image* img;
-	VkImageView view;
+	VkImageView handle;
 	std::string name;
 	VkImageViewCreateInfo ci;
 };
 
+struct Sampler {
+	Device* dev;
+	VkSampler handle;
+	VkSamplerCreateInfo ci;
+};
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	VkDevice                                   	device,
@@ -55,6 +60,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 VKAPI_ATTR void VKAPI_CALL DestroyImageView(
     VkDevice                                    device,
     VkImageView                                 imageView,
+    const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
+    VkDevice                                    device,
+    const VkSamplerCreateInfo*                  pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkSampler*                                  pSampler);
+
+VKAPI_ATTR void VKAPI_CALL DestroySampler(
+    VkDevice                                    device,
+    VkSampler                                   sampler,
     const VkAllocationCallbacks*                pAllocator);
 
 } // namespace fuen

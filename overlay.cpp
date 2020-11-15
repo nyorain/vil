@@ -696,10 +696,14 @@ void Renderer::drawCbsGui() {
 	ImGui::EndChild();
 
 	if(selected.cb) {
+		ImGui::PushID(dlg::format("{}'{}", selected.cb, selected.cb->resetCount).c_str());
+
 		ImGui::SameLine();
 		ImGui::BeginChild("Selected CommandBuffer", {600, 600});
+		std::lock_guard lock(selected.cb->mutex);
 		displayCommands(selected.cb->commands);
 		ImGui::EndChild();
+		ImGui::PopID();
 	}
 }
 

@@ -352,13 +352,15 @@ void DisplayWindow::mainLoop() {
 		renderer.drawGui(draw);
 		renderer.uploadDraw(draw);
 
+
 		// pretty long, terrible critical section...
 		{
-			std::lock_guard queueLock(dev.queueMutex);
-
-			// TODO: only need this here to prevent resources we use
-			// (e.g. the image) from begin destroyed
+			// Need this here to prevent resources we use
+			// (e.g. the image) from being destroyed. Also to make sure
+			// no new submissions are added
 			std::lock_guard lock(dev.mutex);
+
+			std::lock_guard queueLock(dev.queueMutex);
 
 			// Make sure relevant command buffers have completed (and check
 			// for latest image layout).
@@ -405,14 +407,21 @@ void DisplayWindow::mainLoop() {
 
 				if(!toComplete.empty()) {
 					std::vector<VkFence> fences;
+					std::vector<std::mutex*> mutexes;
 					for(auto* pending : toComplete) {
-						fences.push_back(pending->ourFence ?
-							pending->ourFence :
-							pending->appFence->fence);
+						if(pending->appFence) {
+							mutexes.push_back(&pending->appFence->mutex);
+							fences.push_back(pending->appFence->fence);
+						} else {
+							fences.push_back(pending->ourFence);
+						}
 					}
 
-					VK_CHECK(dev.dispatch.vkWaitForFences(dev.dev,
-						fences.size(), fences.data(), true, UINT64_MAX));
+					{
+						MultiFenceLock lock(std::move(mutexes));
+						VK_CHECK(dev.dispatch.vkWaitForFences(dev.dev,
+							fences.size(), fences.data(), true, UINT64_MAX));
+					}
 
 					for(auto* pending : toComplete) {
 						auto res = checkLocked(*pending);

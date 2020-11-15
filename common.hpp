@@ -339,6 +339,7 @@ struct PendingSubmission {
 	// When the caller didn't add a fence, we added this one from the fence pool.
 	// When appFence is not null, this is null.
 	VkFence ourFence {};
+	std::mutex ourMutex;
 };
 
 // Expects dev.mutex to be locked
@@ -380,7 +381,11 @@ struct Device {
 
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
 	SyncedUniqueUnorderedMap<VkImageView, ImageView> imageViews;
+	SyncedUniqueUnorderedMap<VkSampler, Sampler> samplers;
 	SyncedUniqueUnorderedMap<VkBuffer, Buffer> buffers;
+	SyncedUniqueUnorderedMap<VkPipelineLayout, PipelineLayout> pipeLayouts;
+	SyncedUniqueUnorderedMap<VkPipeline, ComputePipeline> computePipes;
+	SyncedUniqueUnorderedMap<VkPipeline, GraphicsPipeline> graphicsPipes;
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
 	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
@@ -394,5 +399,21 @@ struct Device {
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 };
+
+template<typename F>
+void forEachRenderer(Device& dev, F&& func) {
+	std::lock_guard guard(dev.mutex);
+	for(auto& swapchain : dev.swapchains.map) {
+		if(!swapchain.second->useOverlay) {
+			continue;
+		}
+
+		func(swapchain.second->overlay.renderer);
+	}
+
+	if(dev.window.display) {
+		func(dev.window.renderer);
+	}
+}
 
 } // namespace fuen

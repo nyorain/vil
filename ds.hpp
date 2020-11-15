@@ -26,7 +26,8 @@ struct DescriptorSetLayout {
 	Device* dev;
 	VkDescriptorSetLayout handle;
 
-	// static after creation
+	// Static after creation.
+	// Ordered by binding.
 	std::vector<VkDescriptorSetLayoutBinding> bindings;
 };
 

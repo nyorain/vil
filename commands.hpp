@@ -84,7 +84,12 @@ struct EndRenderPassCmd : Command {
 	}
 };
 
-struct DrawCmd : Command {
+struct BaseDrawCmd : Command {
+	GraphicsState state;
+	PushConstantMap pushConstants;
+};
+
+struct DrawCmd : BaseDrawCmd {
 	u32 vertexCount;
 	u32 instanceCount;
 	u32 firstVertex;
@@ -96,14 +101,14 @@ struct DrawCmd : Command {
 	}
 };
 
-struct DrawIndirectCmd : Command {
+struct DrawIndirectCmd : BaseDrawCmd {
 	Buffer* buffer {};
 	void display() override {
 		ImGui::Text("CmdDrawIndrect");
 	}
 };
 
-struct DrawIndexedCmd : Command {
+struct DrawIndexedCmd : BaseDrawCmd {
 	u32 indexCount;
 	u32 instanceCount;
 	u32 firstIndex;
@@ -116,7 +121,7 @@ struct DrawIndexedCmd : Command {
 	}
 };
 
-struct DrawIndexedIndirectCmd : Command {
+struct DrawIndexedIndirectCmd : BaseDrawCmd {
 	Buffer* buffer {};
 	void display() override {
 		ImGui::Text("CmdDrawIndexedIndirect");
@@ -124,6 +129,7 @@ struct DrawIndexedIndirectCmd : Command {
 };
 
 struct BindVertexBuffersCmd : Command {
+	u32 firstBinding;
 	std::vector<Buffer*> buffers;
 
 	void display() override {
@@ -141,7 +147,7 @@ struct BindIndexBufferCmd : Command {
 struct BindDescriptorSetCmd : Command {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
-	VkPipelineLayout pipeLayout;
+	PipelineLayout* pipeLayout;
 	std::vector<DescriptorSet*> sets;
 
 	void display() override {
@@ -149,7 +155,12 @@ struct BindDescriptorSetCmd : Command {
 	}
 };
 
-struct DispatchCmd : Command {
+struct BaseDispatchCmd : Command {
+	ComputeState state;
+	PushConstantMap pushConstants;
+};
+
+struct DispatchCmd : BaseDispatchCmd {
 	u32 groupsX;
 	u32 groupsY;
 	u32 groupsZ;
@@ -160,7 +171,7 @@ struct DispatchCmd : Command {
 	}
 };
 
-struct DispatchIndirectCmd : Command {
+struct DispatchIndirectCmd : BaseDispatchCmd {
 	Buffer* buffer {};
 
 	void display() override {
@@ -286,6 +297,27 @@ struct BeginDebugUtilsLabelCmd : SectionCommand {
 struct EndDebugUtilsLabelCmd : Command {
 	void display() override {
 		ImGui::Text("CmdEndDebugUtilsLabelEXT");
+	}
+};
+
+struct BindPipelineCmd : Command {
+	VkPipelineBindPoint bindPoint;
+	Pipeline* pipe;
+
+	void display() override {
+		ImGui::Text("CmdBindPipeline");
+	}
+};
+
+struct PushConstantsCmd : Command {
+	PipelineLayout* layout;
+	VkShaderStageFlags stages;
+	u32 offset;
+	u32 size;
+	std::vector<std::byte> values;
+
+	void display() override {
+		ImGui::Text("CmdPushConstants");
 	}
 };
 

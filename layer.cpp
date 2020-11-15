@@ -274,6 +274,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	devData.buffers.mutex = &devData.mutex;
 	devData.deviceMemories.mutex = &devData.mutex;
 	devData.shaderModules.mutex = &devData.mutex;
+	devData.samplers.mutex = &devData.mutex;
+	devData.computePipes.mutex = &devData.mutex;
+	devData.graphicsPipes.mutex = &devData.mutex;
+	devData.pipeLayouts.mutex = &devData.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
@@ -440,43 +444,54 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectNameEXT(
 		VkDevice                                    device,
 		const VkDebugUtilsObjectNameInfoEXT*        pNameInfo) {
+
 	auto& devd = getData<Device>(device);
+
 	switch(pNameInfo->objectType) {
 		case VK_OBJECT_TYPE_QUEUE: {
 			// queues is dispatchable
 			auto& q = getData<Queue>((VkQueue) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			q.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_SWAPCHAIN_KHR: {
 			auto& sc = devd.swapchains.get((VkSwapchainKHR) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			sc.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_IMAGE: {
 			auto& img = devd.images.get((VkImage) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			img.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_IMAGE_VIEW: {
 			auto& view = devd.imageViews.get((VkImageView) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			view.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_BUFFER: {
 			auto& buf = devd.buffers.get((VkBuffer) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			buf.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_FRAMEBUFFER: {
 			auto& fb = devd.framebuffers.get((VkFramebuffer) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			fb.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_RENDER_PASS: {
 			auto& rp = devd.renderPasses.get((VkRenderPass) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			rp.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_COMMAND_POOL: {
 			auto& cp = devd.commandPools.get((VkCommandPool) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			cp.name = pNameInfo->pObjectName;
 			break;
 		} case VK_OBJECT_TYPE_COMMAND_BUFFER: {
 			auto& cp = devd.commandBuffers.get((VkCommandBuffer) pNameInfo->objectHandle);
+			std::lock_guard lock(devd.mutex);
 			cp.name = pNameInfo->pObjectName;
 			break;
 		} default: break;
@@ -576,6 +591,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 			// TODO: might be bad to not forward this
 			// pi.pNext
 
+			std::lock_guard queueLock(qd.dev->queueMutex);
 			res = qd.dev->dispatch.vkQueuePresentKHR(queue, &pi);
 		}
 
@@ -600,7 +616,7 @@ VkFence getFenceFromPool(Device& dev) {
 			return ret;
 		}
 
-		// check if we a submission finished
+		// check if a submission finished
 		for(auto it = dev.pending.begin(); it < dev.pending.end(); ++it) {
 			auto& subm = *it;
 			if(subm->ourFence && checkLocked(*subm)) {
@@ -674,13 +690,11 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		subm.appFence = &dev.fences.get(fence);
 
 		std::lock_guard lock(dev.mutex);
-		if(subm.appFence->submission) {
-			auto completed = checkLocked(*subm.appFence->submission);
-			// per vulkan spec, using a fence in QueueSubmit that has
-			// non-completed payload is not allowed.
-			dlg_assert(completed);
-		}
 
+		// per vulkan spec, using a fence in QueueSubmit that is signals
+		// is not allowed. And if it was reset we also reset its associated
+		// submission.
+		dlg_assert(!subm.appFence->submission);
 		submFence = fence;
 		subm.appFence->submission = &subm;
 	} else {
@@ -688,32 +702,32 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		submFence = subm.ourFence;
 	}
 
-	// Important that we lock the queue lock before we add the pending work.
-	// See swa.cpp, its usage of the queue lock. Otherwise, we might add
-	// the pending work (while our swa display holds the queue lock),
-	// then we wait for all pending work fences to complete (even tho
-	// we haven't even really submitted the work and can't until that
-	// wait operation is completed) => creating a deadlock
-	std::lock_guard queueLock(dev.queueMutex);
-
+	// Lock order here important, see mutex usage for rendering in swa.cpp.
+	// Also important that we don't lock both mutexes at once.
 	{
 		std::lock_guard lock(dev.mutex);
 		dev.pending.push_back(std::move(submPtr));
 	}
 
+	std::lock_guard queueLock(dev.queueMutex);
 	return dev.dispatch.vkQueueSubmit(queue, submitCount, pSubmits, submFence);
 }
 
 bool checkLocked(PendingSubmission& subm) {
 	auto& dev = *subm.queue->dev;
 
-	VkFence fence = subm.appFence ? subm.appFence->fence : subm.ourFence;
-	dlg_assert(fence);
-
-	if(dev.dispatch.vkGetFenceStatus(dev.dev, fence) != VK_SUCCESS) {
-		return false;
+	if(subm.appFence) {
+		std::lock_guard fenceLock(subm.appFence->mutex);
+		if(dev.dispatch.vkGetFenceStatus(dev.dev, subm.appFence->fence) != VK_SUCCESS) {
+			return false;
+		}
+	} else {
+		dlg_assert(subm.ourFence);
+		std::lock_guard fenceLock(subm.ourMutex);
+		if(dev.dispatch.vkGetFenceStatus(dev.dev, subm.ourFence) != VK_SUCCESS) {
+			return false;
+		}
 	}
-
 	// apparently unique_ptr == ptr comparision not supported in stdlibc++ yet?
 	auto it = std::find_if(dev.pending.begin(), dev.pending.end(), [&](auto& ptr){
 			return ptr.get() == &subm;
@@ -802,6 +816,9 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CreateImageView),
    FUEN_HOOK(DestroyImageView),
 
+   FUEN_HOOK(CreateSampler),
+   FUEN_HOOK(DestroySampler),
+
    // buffer.hpp
    FUEN_HOOK(CreateBuffer),
    FUEN_HOOK(DestroyBuffer),
@@ -872,6 +889,8 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdCopyBuffer),
    FUEN_HOOK(CmdFillBuffer),
    FUEN_HOOK(CmdUpdateBuffer),
+   FUEN_HOOK(CmdBindPipeline),
+   FUEN_HOOK(CmdPushConstants),
 };
 
 #undef FUEN_HOOK

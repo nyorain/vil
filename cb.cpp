@@ -4,6 +4,7 @@
 #include "ds.hpp"
 #include "buffer.hpp"
 #include "commands.hpp"
+#include "pipe.hpp"
 #include "image.hpp"
 #include "imgui/imgui.h"
 #include <vkpp/names.hpp>
@@ -12,10 +13,15 @@ namespace fuen {
 
 // util
 void reset(CommandBuffer& cb) {
+	std::lock_guard lock(cb.mutex);
 	cb.buffers.clear();
 	cb.images.clear();
 	cb.commands.clear();
 	cb.sections.clear();
+	cb.graphicsState = {};
+	cb.computeState = {};
+	cb.pushConstants = {};
+	++cb.resetCount;
 }
 
 // api
@@ -46,8 +52,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(
 	auto& cp = dev.commandPools.get(commandPool);
 
 	for(auto* cb : cp.cbs) {
-		eraseData(cb->cb);
-		dev.commandBuffers.mustErase(cb->cb);
+		eraseData(cb->handle);
+		dev.commandBuffers.mustErase(cb->handle);
 	}
 
 	dev.commandPools.mustErase(commandPool);
@@ -81,7 +87,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 	for(auto i = 0u; i < pAllocateInfo->commandBufferCount; ++i) {
 		auto& cb = dev.commandBuffers.add(pCommandBuffers[i]);
 		cb.dev = &dev;
-		cb.cb = pCommandBuffers[i];
+		cb.handle = pCommandBuffers[i];
 		cb.pool = cp;
 		cb.pool->cbs.push_back(&cb);
 
@@ -98,7 +104,17 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 		uint32_t                                    commandBufferCount,
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& dev = getData<Device>(device);
-	dev.dispatch.vkFreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);
+
+	// Unset selection if needed
+	auto unsetter = [&](Renderer& renderer) {
+		if(renderer.selected.cb) {
+			auto it = std::find(pCommandBuffers, pCommandBuffers + commandBufferCount, renderer.selected.cb->handle);
+			if(it != pCommandBuffers + commandBufferCount) {
+				renderer.selected.cb = nullptr;
+			}
+		}
+	};
+	forEachRenderer(dev, unsetter);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& cb = dev.commandBuffers.get(pCommandBuffers[i]);
@@ -112,6 +128,8 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 		eraseData(pCommandBuffers[i]);
 		dev.commandBuffers.mustErase(pCommandBuffers[i]);
 	}
+
+	dev.dispatch.vkFreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
@@ -184,6 +202,7 @@ CommandBuffer::UsedBuffer& useBuffer(CommandBuffer& cb, Command& cmd, Buffer& bu
 }
 
 void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
+	std::lock_guard lock(cb.mutex);
 	if(!cb.sections.empty()) {
 		cb.sections.back()->children.emplace_back(std::move(cmd));
 	} else {
@@ -359,7 +378,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	cmd->firstSet = firstSet;
 	cmd->pipeBindPoint = pipelineBindPoint;
-	cmd->pipeLayout = layout;
+	cmd->pipeLayout = &cb.dev->pipeLayouts.get(layout);
 
 	// TODO: we could push this to the point where the descriptor set is
 	// acutally used, in case it is just bound without usage.
@@ -392,6 +411,26 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		cmd->sets.push_back(&ds);
 	}
 
+	// TODO: not sure about this. The spec isn't clear about this.
+	// But this seems to be what the validation layers do.
+	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
+	if(cb.pushConstants.layout &&
+			pushConstantCompatible(*cmd->pipeLayout, *cb.pushConstants.layout)) {
+		cb.pushConstants.layout = nullptr;
+		cb.pushConstants.map.clear();
+	}
+
+	// update bound state
+	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+		cb.computeState.bind(*cmd->pipeLayout, firstSet, cmd->sets,
+			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
+	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+		cb.graphicsState.bind(*cmd->pipeLayout, firstSet, cmd->sets,
+			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
+	} else {
+		dlg_error("Unknown pipeline bind point");
+	}
+
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBindDescriptorSets(commandBuffer,
 		pipelineBindPoint,
@@ -415,6 +454,10 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
 
+	cb.graphicsState.indices.buffer = &buf;
+	cb.graphicsState.indices.offset = offset;
+	cb.graphicsState.indices.type = indexType;
+
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBindIndexBuffer(commandBuffer,
 		buffer, offset, indexType);
@@ -428,11 +471,16 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 		const VkDeviceSize*                         pOffsets) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto cmd = std::make_unique<BindVertexBuffersCmd>();
+	cmd->firstBinding = firstBinding;
 
+	ensureSize(cb.graphicsState.vertices, firstBinding + bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
 		auto& buf = cb.dev->buffers.get(pBuffers[i]);
 		cmd->buffers.push_back(&buf);
 		useBuffer(cb, *cmd, buf);
+
+		cb.graphicsState.vertices[firstBinding + i].buffer = &buf;
+		cb.graphicsState.vertices[firstBinding + i].offset = pOffsets[i];
 	}
 
 	add(cb, std::move(cmd));
@@ -453,6 +501,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	cmd->instanceCount = instanceCount;
 	cmd->firstVertex = firstVertex;
 	cmd->firstInstance = firstInstance;
+
+	cmd->state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd->pushConstants = cb.pushConstants.map;
+	}
 
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDraw(commandBuffer,
@@ -475,6 +528,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	cmd->vertexOffset = vertexOffset;
 	cmd->firstIndex = firstIndex;
 
+	cmd->state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd->pushConstants = cb.pushConstants.map;
+	}
+
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDrawIndexed(commandBuffer,
 		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
@@ -492,6 +550,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
+
+	cmd->state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd->pushConstants = cb.pushConstants.map;
+	}
 
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDrawIndirect(commandBuffer,
@@ -511,6 +574,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
 
+	cmd->state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd->pushConstants = cb.pushConstants.map;
+	}
+
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDrawIndexedIndirect(commandBuffer,
 		buffer, offset, drawCount, stride);
@@ -528,6 +596,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 	cmd->groupsY = groupCountY;
 	cmd->groupsZ = groupCountZ;
 
+	cmd->state = cb.computeState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd->pushConstants = cb.pushConstants.map;
+	}
+
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDispatch(commandBuffer,
 		groupCountX, groupCountY, groupCountZ);
@@ -543,6 +616,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd->buffer = &buf;
 	useBuffer(cb, *cmd, buf);
+
+	cmd->state = cb.computeState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd->pushConstants = cb.pushConstants.map;
+	}
 
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdDispatchIndirect(commandBuffer, buffer, offset);
@@ -801,6 +879,142 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 
 	if(cb.dev->dispatch.vkCmdEndDebugUtilsLabelEXT) {
 		cb.dev->dispatch.vkCmdEndDebugUtilsLabelEXT(commandBuffer);
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipeline                                  pipeline) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<BindPipelineCmd>();
+	cmd->bindPoint = pipelineBindPoint;
+
+	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+		cb.computeState.pipe = &cb.dev->computePipes.get(pipeline);
+		cmd->pipe = cb.computeState.pipe;
+	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+		cb.graphicsState.pipe = &cb.dev->graphicsPipes.get(pipeline);
+		cmd->pipe = cb.graphicsState.pipe;
+	} else {
+		dlg_error("unknown pipeline bind point");
+	}
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.vkCmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineLayout                            layout,
+		VkShaderStageFlags                          stageFlags,
+		uint32_t                                    offset,
+		uint32_t                                    size,
+		const void*                                 pValues) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<PushConstantsCmd>();
+
+	cmd->layout = &cb.dev->pipeLayouts.get(layout);
+	cmd->stages = stageFlags;
+	cmd->offset = offset;
+	cmd->size = size;
+	auto ptr = static_cast<const std::byte*>(pValues);
+	cmd->values = {ptr, ptr + size};
+
+	// TODO: not sure about this. The spec isn't clear about this.
+	// But this seems to be what the validation layers do.
+	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
+	if(cb.pushConstants.layout &&
+			pushConstantCompatible(*cmd->layout, *cb.pushConstants.layout)) {
+		cb.pushConstants.layout = nullptr;
+		cb.pushConstants.map.clear();
+	}
+
+	cb.pushConstants.layout = cmd->layout;
+	for(auto i = 0u; i < 32; ++i) {
+		if((stageFlags & (1 << i)) == 0) {
+			continue;
+		}
+
+		auto& pc = cb.pushConstants.map[VkShaderStageFlagBits(1 << i)];
+		ensureSize(pc.data, offset + size);
+		std::memcpy(pc.data.data() + offset, pValues, size);
+
+		auto it = pc.ranges.begin();
+		for(; it != pc.ranges.end(); ++it) {
+			if(it->first < offset) {
+				continue;
+			} else if(it->first == offset) {
+				if(it->second < size) {
+					it->second = size;
+				}
+			} else if(it->first + it->second == offset) {
+				it->second += size;
+			} else if(it->first > offset) {
+				it = pc.ranges.insert(it, {offset, size});
+			}
+
+			// merge following ranges
+			for(auto iit = ++it; it != pc.ranges.end();) {
+				if(iit->first > it->first + it->second) {
+					break;
+				}
+
+				it->second = std::max(it->second, iit->first + iit->second - offset);
+				iit = pc.ranges.erase(iit);
+			}
+
+			break;
+		}
+
+		if(it == pc.ranges.end()) {
+			pc.ranges.push_back({offset, size});
+		}
+	}
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.vkCmdPushConstants(commandBuffer, layout, stageFlags,
+		offset, size, pValues);
+}
+
+// util
+void DescriptorState::bind(PipelineLayout& layout, u32 firstSet,
+		span<DescriptorSet* const> sets, span<const u32>) {
+	ensureSize(descriptorSets, firstSet + sets.size());
+
+	// TODO: the "ds disturbing" part of vulkan is hard to grasp IMO.
+	// There may be errors here.
+
+	auto lastSet = firstSet + sets.size() - 1;
+	for(auto i = 0u; i < firstSet; ++i) {
+		if(!descriptorSets[i].ds) {
+			continue;
+		}
+
+		dlg_assert(descriptorSets[i].layout);
+		if(!compatibleForSetN(*descriptorSets[i].layout, layout, lastSet)) {
+			// disturbed!
+			descriptorSets[i] = {};
+		}
+	}
+
+	// bind descriptors and check if future bindings are disturbed
+	auto followingDisturbed = false;
+	for(auto i = 0u; i < sets.size(); ++i) {
+		auto s = firstSet + i;
+		if(!descriptorSets[s].ds || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
+			followingDisturbed = true;
+		}
+
+		descriptorSets[s].layout = &layout;
+		descriptorSets[s].ds = sets[i];
+		// TODO: use given offsets. We have to analyze the layout and
+		// count the offset into the offsets array.
+		descriptorSets[s].dynamicOffsets = {};
+	}
+
+	if(followingDisturbed) {
+		descriptorSets.resize(lastSet + 1);
 	}
 }
 
