@@ -1,14 +1,12 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include <atomic>
 
 namespace fuen {
 
-struct Fence {
-	Device* dev {};
-	VkFence fence {};
-	std::string name;
+struct Fence : DeviceHandle {
+	VkFence handle {};
 
 	PendingSubmission* submission {};
 
@@ -20,7 +18,29 @@ struct Fence {
 	std::mutex mutex {};
 };
 
+struct Semaphore : DeviceHandle {
+	VkSemaphore handle {};
+};
+
+struct Event : DeviceHandle {
+	VkEvent handle {};
+};
+
+// Locks multiple fences.
+// Always call this instead of just locking them in any order to avoid
+// deadlocks between multiple mult-fence-locks.
+struct MultiFenceLock {
+	MultiFenceLock(Device& dev, span<const VkFence>);
+	MultiFenceLock(std::vector<std::mutex*>);
+	~MultiFenceLock();
+
+private:
+	void init(std::vector<std::mutex*>);
+	std::vector<std::mutex*> mutexes_;
+};
+
 // api
+// fence
 VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
     VkDevice                                    device,
     const VkFenceCreateInfo*                    pCreateInfo,
@@ -48,17 +68,40 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
     VkBool32                                    waitAll,
     uint64_t                                    timeout);
 
-// Locks multiple fences.
-// Always call this instead of just locking them in any order to avoid
-// deadlocks between multiple mult-fence-locks.
-struct MultiFenceLock {
-	MultiFenceLock(Device& dev, span<const VkFence>);
-	MultiFenceLock(std::vector<std::mutex*>);
-	~MultiFenceLock();
+// semaphore
+VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
+    VkDevice                                    device,
+    const VkSemaphoreCreateInfo*                pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkSemaphore*                                pSemaphore);
 
-private:
-	void init(std::vector<std::mutex*>);
-	std::vector<std::mutex*> mutexes_;
-};
+VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
+    VkDevice                                    device,
+    VkSemaphore                                 semaphore,
+    const VkAllocationCallbacks*                pAllocator);
+
+// event
+VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
+    VkDevice                                    device,
+    const VkEventCreateInfo*                    pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkEvent*                                    pEvent);
+
+VKAPI_ATTR void VKAPI_CALL DestroyEvent(
+    VkDevice                                    device,
+    VkEvent                                     event,
+    const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetEventStatus(
+    VkDevice                                    device,
+    VkEvent                                     event);
+
+VKAPI_ATTR VkResult VKAPI_CALL SetEvent(
+    VkDevice                                    device,
+    VkEvent                                     event);
+
+VKAPI_ATTR VkResult VKAPI_CALL ResetEvent(
+    VkDevice                                    device,
+    VkEvent                                     event);
 
 } // namespace fuen

@@ -1,17 +1,14 @@
 #pragma once
 
-#include "common.hpp"
-#include <vulkan/vulkan.h>
+#include "device.hpp"
 #include <vector>
 #include <memory>
 
 namespace fuen {
 
-struct CommandPool {
-	Device* dev;
-	VkCommandPool pool;
+struct CommandPool : DeviceHandle {
+	VkCommandPool pool {};
 	std::vector<CommandBuffer*> cbs;
-	std::string name;
 };
 
 // Contains all bound state
@@ -59,7 +56,7 @@ struct ComputeState : DescriptorState {
 	ComputePipeline* pipe;
 };
 
-struct CommandBuffer {
+struct CommandBuffer : DeviceHandle {
 	struct UsedImage {
 		Image* image {};
 		VkImageLayout finalLayout {};
@@ -72,13 +69,11 @@ struct CommandBuffer {
 		std::vector<Command*> commands;
 	};
 
-	Device* dev;
-	CommandPool* pool;
-	VkCommandBuffer handle;
+	CommandPool* pool {};
+	VkCommandBuffer handle {};
 	std::vector<std::unique_ptr<Command>> commands;
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
-	std::string name;
 
 	std::vector<SectionCommand*> sections {}; // stack
 	u32 resetCount {};

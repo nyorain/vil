@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include "shader.hpp"
 
 #include <memory>
@@ -25,9 +25,8 @@ struct PipelineShaderStage {
 	explicit PipelineShaderStage(Device& dev, const VkPipelineShaderStageCreateInfo&);
 };
 
-struct Pipeline {
-	Device* dev;
-	VkPipeline handle;
+struct Pipeline : DeviceHandle {
+	VkPipeline handle {};
 	PipelineType type;
 	PipelineLayout* layout;
 
@@ -35,9 +34,6 @@ protected:
 	// Make sure Pipeline objects are not created.
 	// Should always be GraphicsPipeline or ComputePipeline
 	Pipeline() = default;
-
-	Pipeline(Pipeline&&) = delete;
-	Pipeline& operator=(Pipeline&&) = delete;
 };
 
 struct GraphicsPipeline : Pipeline {
@@ -71,7 +67,7 @@ struct ComputePipeline : Pipeline {
 	PipelineShaderStage stage;
 };
 
-struct PipelineLayout {
+struct PipelineLayout : Handle {
 	Device* dev;
 	VkPipelineLayout handle;
 	std::vector<DescriptorSetLayout*> descriptors;

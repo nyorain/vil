@@ -1,5 +1,5 @@
 #include "f16.hpp"
-#include "common.hpp"
+#include "fwd.hpp"
 
 #include <cstring>
 #include <cmath>

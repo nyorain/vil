@@ -44,7 +44,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.vkGetBufferMemoryRequirements(dev.dev, buffer, &memReqs);
+	dev.dispatch.vkGetBufferMemoryRequirements(device, buffer, &memReqs);
 
 	buf.memory = &mem;
 	buf.allocationOffset = memoryOffset;

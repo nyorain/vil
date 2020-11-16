@@ -1,14 +1,12 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include "memory.hpp"
 
 namespace fuen {
 
 struct Buffer : MemoryResource {
-	Device* dev;
-	VkBuffer handle;
-	std::string name;
+	VkBuffer handle {};
 	VkBufferCreateInfo ci;
 };
 

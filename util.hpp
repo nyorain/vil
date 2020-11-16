@@ -1,9 +1,38 @@
 #pragma once
 
-#include "common.hpp"
+#include "fwd.hpp"
+#include <vulkan/vulkan.h>
+#include <vkpp/enums.hpp>
+#include <vkpp/structs.hpp>
 #include <array>
 
 namespace fuen {
+
+// util
+u32 findLSB(u32 v);
+
+template<typename C>
+void ensureSize(C& container, std::size_t size) {
+	if(container.size() < size) {
+		container.resize(size);
+	}
+}
+
+template<typename R, VkStructureType SType, typename CI>
+const R* findChainInfo(const CI& ci) {
+	auto* link = static_cast<const VkBaseInStructure*>(ci.pNext);
+	// dlg_trace("pNext chain looking on {} for {}", &ci, vk::name(vk::StructureType(SType)));
+	while(link) {
+		// dlg_trace("\tpNext: {}", vk::name(vk::StructureType(link->sType)));
+		if(link->sType == SType) {
+			return reinterpret_cast<const R*>(link);
+		}
+
+		link = static_cast<const VkBaseInStructure*>(link->pNext);
+	}
+
+	return nullptr;
+}
 
 // nytl/vec
 template<size_t D, typename T>

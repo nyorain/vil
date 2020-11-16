@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include <vulkan/vulkan.h>
 
 struct VkWaylandSurfaceCreateInfoKHR;

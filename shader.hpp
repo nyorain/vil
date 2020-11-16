@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include <memory>
 
 typedef struct SpvReflectShaderModule SpvReflectShaderModule;
@@ -14,9 +14,8 @@ struct SpirvData {
 	~SpirvData();
 };
 
-struct ShaderModule {
-	Device* dev;
-	VkShaderModule handle;
+struct ShaderModule : DeviceHandle {
+	VkShaderModule handle {};
 
 	// Managed via shared ptr since it may outlive the shader module in
 	// (possibly multiple) pipeline objects.

@@ -1,8 +1,6 @@
 #pragma once
 
-#include "common.hpp"
-#include <vulkan/vulkan.h>
-#include <variant>
+#include "device.hpp"
 
 namespace fuen {
 
@@ -16,26 +14,23 @@ enum class DescriptorCategory {
 
 DescriptorCategory category(VkDescriptorType);
 
-struct DescriptorPool {
-	Device* dev;
+struct DescriptorPool : DeviceHandle {
+	VkDescriptorPool handle {};
 	std::vector<DescriptorSet*> descriptorSets;
-	VkDescriptorPool handle;
 };
 
-struct DescriptorSetLayout {
-	Device* dev;
-	VkDescriptorSetLayout handle;
+struct DescriptorSetLayout : DeviceHandle {
+	VkDescriptorSetLayout handle {};
 
 	// Static after creation.
 	// Ordered by binding.
 	std::vector<VkDescriptorSetLayoutBinding> bindings;
 };
 
-struct DescriptorSet {
-	Device* dev;
-	DescriptorPool* pool;
-	DescriptorSetLayout* layout;
-	VkDescriptorSet handle;
+struct DescriptorSet : DeviceHandle {
+	DescriptorPool* pool {};
+	DescriptorSetLayout* layout {};
+	VkDescriptorSet handle {};
 
 	struct Binding {
 		bool valid {};

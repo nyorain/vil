@@ -42,24 +42,31 @@ dep_vkpp = dependency('vkpp MASTER',
 	default_options: ['lib=false'])
 
 src = files(
-  'layer.cpp',
-  'wayland.cpp',
-  'overlay.cpp',
-  'swa.cpp',
-  'util.cpp',
-  'f16.cpp',
+	# own meta sources & util
+	'layer.cpp',
+	'data.cpp',
+	'gui.cpp',
+	'window.cpp',
+	'util.cpp',
+	'f16.cpp',
 
-  'image.cpp',
-  'sync.cpp',
-  'rp.cpp',
-  'cb.cpp',
-  'ds.cpp',
-  'buffer.cpp',
-  'memory.cpp',
-  'shader.cpp',
-  'pipe.cpp',
+	# vulkan api entrypoints
+	'handle.cpp',
+	'device.cpp',
+	'swapchain.cpp',
+	'image.cpp',
+	'sync.cpp',
+	'rp.cpp',
+	'cb.cpp',
+	'ds.cpp',
+	'buffer.cpp',
+	'memory.cpp',
+	'shader.cpp',
+	'pipe.cpp',
+	'wayland.cpp',
 
-  'spirv_reflect.c',
+	# external util
+	'spirv_reflect.c',
 )
 
 deps = [

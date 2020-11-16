@@ -16,7 +16,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 
 	auto& fence = dev.fences.add(*pFence);
 	fence.dev = &dev;
-	fence.fence = *pFence;
+	fence.handle = *pFence;
 
 	return res;
 }
@@ -26,18 +26,21 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(
 		VkFence                                     fence,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	auto& fenceD = dev.fences.get(fence);
+	auto fenceD = dev.fences.mustMove(fence);
 
 	// per spec, we can assume all associated payload to be finished
 	{
 		std::lock_guard lock(dev.mutex);
-		if(fenceD.submission) {
-			auto finished = checkLocked(*fenceD.submission);
+		if(fenceD->submission) {
+			auto finished = checkLocked(*fenceD->submission);
 			dlg_assert(finished);
 		}
+
+		// important that we do this while mutex is locked,
+		// see ~DeviceHandle
+		fenceD.reset();
 	}
 
-	dev.fences.erase(fence);
 	dev.dispatch.vkDestroyFence(device, fence, pAllocator);
 }
 
@@ -146,6 +149,83 @@ MultiFenceLock::~MultiFenceLock() {
 	for(auto* mtx : mutexes_) {
 		mtx->unlock();
 	}
+}
+
+// semaphore
+VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
+		VkDevice                                    device,
+		const VkSemaphoreCreateInfo*                pCreateInfo,
+		const VkAllocationCallbacks*                pAllocator,
+		VkSemaphore*                                pSemaphore) {
+	auto& dev = getData<Device>(device);
+	auto res = dev.dispatch.vkCreateSemaphore(device, pCreateInfo, pAllocator, pSemaphore);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	auto& semaphore = dev.semaphores.add(*pSemaphore);
+	semaphore.dev = &dev;
+	semaphore.handle = *pSemaphore;
+
+	return res;
+}
+
+VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
+		VkDevice                                    device,
+		VkSemaphore                                 semaphore,
+		const VkAllocationCallbacks*                pAllocator) {
+	auto& dev = getData<Device>(device);
+	dev.semaphores.mustErase(semaphore);
+	dev.dispatch.vkDestroySemaphore(device, semaphore, pAllocator);
+}
+
+// event
+VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
+		VkDevice                                    device,
+		const VkEventCreateInfo*                    pCreateInfo,
+		const VkAllocationCallbacks*                pAllocator,
+		VkEvent*                                    pEvent) {
+	auto& dev = getData<Device>(device);
+	auto res = dev.dispatch.vkCreateEvent(device, pCreateInfo, pAllocator, pEvent);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	auto& event = dev.events.add(*pEvent);
+	event.dev = &dev;
+	event.handle = *pEvent;
+
+	return res;
+}
+
+VKAPI_ATTR void VKAPI_CALL DestroyEvent(
+		VkDevice                                    device,
+		VkEvent                                     event,
+		const VkAllocationCallbacks*                pAllocator) {
+	auto& dev = getData<Device>(device);
+	dev.events.mustErase(event);
+	dev.dispatch.vkDestroyEvent(device, event, pAllocator);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL GetEventStatus(
+		VkDevice                                    device,
+		VkEvent                                     event) {
+	auto& dev = getData<Device>(device);
+	return dev.dispatch.vkGetEventStatus(device, event);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL SetEvent(
+		VkDevice                                    device,
+		VkEvent                                     event) {
+	auto& dev = getData<Device>(device);
+	return dev.dispatch.vkSetEvent(device, event);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL ResetEvent(
+		VkDevice                                    device,
+		VkEvent                                     event) {
+	auto& dev = getData<Device>(device);
+	return dev.dispatch.vkResetEvent(device, event);
 }
 
 } // namespace fuen

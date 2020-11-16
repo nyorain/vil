@@ -1,4 +1,5 @@
-#include "common.hpp"
+#include "window.hpp"
+#include "layer.hpp"
 #include "cb.hpp"
 #include "sync.hpp"
 #include "image.hpp"
@@ -79,7 +80,7 @@ bool DisplayWindow::init(Device& dev) {
 	ws.title = "fuencaliente";
 	ws.listener = &listener;
 	ws.surface = swa_surface_vk;
-	ws.surface_settings.vk.instance = reinterpret_cast<std::uintptr_t>(dev.ini->ini);
+	ws.surface_settings.vk.instance = reinterpret_cast<std::uintptr_t>(dev.ini->handle);
 	ws.surface_settings.vk.get_instance_proc_addr = reinterpret_cast<swa_proc>(dev.dispatch.vkGetInstanceProcAddr);
 	window = swa_display_create_window(display, &ws);
 	swa_window_set_userdata(window, this);
@@ -209,7 +210,7 @@ bool DisplayWindow::init(Device& dev) {
 	sci.clipped = VK_TRUE;
 	sci.compositeAlpha = alpha;
 
-	res = dev.dispatch.vkCreateSwapchainKHR(dev.dev, &sci, NULL, &swapchain);
+	res = dev.dispatch.vkCreateSwapchainKHR(dev.handle, &sci, NULL, &swapchain);
 	if(res != VK_SUCCESS) {
 		dlg_error("Failed to create vk swapchain: {}", vk::name(vk::Result(res)));
 		return false;
@@ -217,8 +218,8 @@ bool DisplayWindow::init(Device& dev) {
 
 	{
 		VkSemaphoreCreateInfo sci = vk::SemaphoreCreateInfo();
-		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.dev, &sci, nullptr, &acquireSem));
-		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.dev, &sci, nullptr, &renderSem));
+		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.handle, &sci, nullptr, &acquireSem));
+		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.handle, &sci, nullptr, &renderSem));
 	}
 
 	this->draw.init(dev);
@@ -254,9 +255,9 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	}
 
 	sci.oldSwapchain = swapchain;
-	res = dev.dispatch.vkCreateSwapchainKHR(dev.dev, &sci, nullptr, &swapchain);
+	res = dev.dispatch.vkCreateSwapchainKHR(dev.handle, &sci, nullptr, &swapchain);
 
-	dev.dispatch.vkDestroySwapchainKHR(dev.dev, sci.oldSwapchain, nullptr);
+	dev.dispatch.vkDestroySwapchainKHR(dev.handle, sci.oldSwapchain, nullptr);
 	sci.oldSwapchain = VK_NULL_HANDLE;
 
 	if(res != VK_SUCCESS) {
@@ -272,9 +273,9 @@ void DisplayWindow::initBuffers() {
 	auto& dev = *this->dev;
 
 	u32 imgCount = 0u;
-	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.dev, swapchain, &imgCount, nullptr));
+	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, nullptr));
 	auto imgs = std::make_unique<VkImage[]>(imgCount);
-	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.dev, swapchain, &imgCount, imgs.get()));
+	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, imgs.get()));
 
 	buffers.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
@@ -312,7 +313,7 @@ void DisplayWindow::mainLoop() {
 	while(run && swa_display_dispatch(display, false)) {
 		u32 id;
 		// render a frame
-		VkResult res = dev.dispatch.vkAcquireNextImageKHR(dev.dev, swapchain,
+		VkResult res = dev.dispatch.vkAcquireNextImageKHR(dev.handle, swapchain,
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &id);
 		if(res == VK_SUBOPTIMAL_KHR) {
 			dlg_info("Got suboptimal swapchain (acquire)");
@@ -419,7 +420,7 @@ void DisplayWindow::mainLoop() {
 
 					{
 						MultiFenceLock lock(std::move(mutexes));
-						VK_CHECK(dev.dispatch.vkWaitForFences(dev.dev,
+						VK_CHECK(dev.dispatch.vkWaitForFences(dev.handle,
 							fences.size(), fences.data(), true, UINT64_MAX));
 					}
 
@@ -519,8 +520,8 @@ void DisplayWindow::mainLoop() {
 			}
 
 			// wait on finish
-			VK_CHECK(dev.dispatch.vkWaitForFences(dev.dev, 1, &draw.fence, true, UINT64_MAX));
-			VK_CHECK(dev.dispatch.vkResetFences(dev.dev, 1, &draw.fence));
+			VK_CHECK(dev.dispatch.vkWaitForFences(dev.handle, 1, &draw.fence, true, UINT64_MAX));
+			VK_CHECK(dev.dispatch.vkResetFences(dev.handle, 1, &draw.fence));
 		}
 	}
 }

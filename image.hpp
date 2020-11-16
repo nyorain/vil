@@ -1,14 +1,12 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include "memory.hpp"
 
 namespace fuen {
 
 struct Image : MemoryResource {
-	Device* dev;
 	VkImage handle;
-	std::string name;
 	VkImageCreateInfo ci;
 
 	// The image layout this image will have when *all* pending submissions
@@ -18,19 +16,17 @@ struct Image : MemoryResource {
 
 	// when images belongs to a swapchain
 	Swapchain* swapchain {};
+	u32 swapchainImageID {};
 };
 
-struct ImageView {
-	Device* dev;
-	Image* img;
-	VkImageView handle;
-	std::string name;
+struct ImageView : DeviceHandle {
+	Image* img {};
+	VkImageView handle {};
 	VkImageViewCreateInfo ci;
 };
 
-struct Sampler {
-	Device* dev;
-	VkSampler handle;
+struct Sampler : DeviceHandle {
+	VkSampler handle {};
 	VkSamplerCreateInfo ci;
 };
 

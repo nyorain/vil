@@ -21,8 +21,8 @@ struct Command {
 template<typename T>
 void displayCommands(const T& container) {
 	for(auto& cmd : container) {
-		cmd->display();
 		ImGui::Separator();
+		cmd->display();
 	}
 }
 

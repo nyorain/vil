@@ -1,46 +1,36 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include <vulkan/vulkan_core.h>
 #include <vector>
 #include <memory>
 
 namespace fuen {
 
-struct RenderPass {
-	VkRenderPass rp;
-	Device* dev;
-	std::string name;
+struct RenderPass : DeviceHandle {
+	VkRenderPass handle {};
 
 	struct {
 		std::vector<VkAttachmentDescription> attachments;
 		std::vector<VkSubpassDescription> subpasses;
 		std::vector<VkSubpassDependency> dependencies;
 	} info;
-
-	RenderPass() = default;
-	RenderPass(const RenderPass&) = delete;
-	RenderPass& operator=(const RenderPass&) = delete;
 };
 
-struct Framebuffer {
-	VkFramebuffer fb;
-	Device* dev;
-	std::string name;
+struct Framebuffer : DeviceHandle {
+	VkFramebuffer handle {};
 
 	std::vector<ImageView*> attachments;
-	// TODO: we shouldn't store the renderpass a framebuffer was created
+
+	// NOTE: we don't store the renderpass a framebuffer was created
 	// with here since the renderpass might be destroyed (and instead a
 	// compatible one used in render pass begin). We should just store
 	// the relevant render pass info
 	// RenderPass* rp;
+
 	u32 width;
 	u32 height;
 	u32 layers;
-
-	Framebuffer() = default;
-	Framebuffer(const Framebuffer&) = delete;
-	Framebuffer& operator=(const Framebuffer&) = delete;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(

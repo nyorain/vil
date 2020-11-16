@@ -1,29 +1,30 @@
 #pragma once
 
-#include "common.hpp"
+#include "device.hpp"
 #include <set>
 
 namespace fuen {
 
 // TODO: support sparse binding
-struct MemoryResource {
+struct MemoryResource : DeviceHandle {
+	enum class Type {
+		buffer,
+		image,
+	};
+
 	DeviceMemory* memory {};
 	VkDeviceSize allocationOffset {};
 	VkDeviceSize allocationSize {};
+	Type memoryResourceType {};
 
-	MemoryResource() = default;
-	MemoryResource(const Buffer&) = delete;
-	MemoryResource& operator=(const MemoryResource&) = delete;
 	~MemoryResource();
 };
 
-struct DeviceMemory {
-	Device* dev;
-	VkDeviceMemory handle;
-	std::string name;
+struct DeviceMemory : DeviceHandle {
+	VkDeviceMemory handle {};
 
-	u32 typeIndex;
-	VkDeviceSize size;
+	u32 typeIndex {};
+	VkDeviceSize size {};
 
 	struct Allocation {
 		VkDeviceSize offset;
@@ -38,10 +39,6 @@ struct DeviceMemory {
 	};
 
 	std::set<Allocation, AllocationCmp> allocations;
-
-	DeviceMemory() = default;
-	DeviceMemory(const DeviceMemory&) = delete;
-	DeviceMemory& operator=(const DeviceMemory&) = delete;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(

@@ -1,5 +1,6 @@
 #include "image.hpp"
 #include "data.hpp"
+#include "gui.hpp"
 
 namespace fuen {
 
@@ -25,6 +26,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.handle = *pImage;
 	img.ci = ici;
 	img.pendingLayout = ici.initialLayout;
+	img.memoryResourceType = MemoryResource::Type::image;
 
 	return res;
 }
@@ -34,19 +36,27 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		VkImage                                     image,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = *findData<Device>(device);
-	auto img = dev.images.mustMove(image);
 
-	// Unset selection if needed
-	auto unsetter = [&](Renderer& renderer) {
-		if(renderer.selected.image == img.get()) {
-			renderer.selected.image = nullptr;
-			if(renderer.selected.view) {
-				dev.dispatch.vkDestroyImageView(dev.dev, renderer.selected.view, nullptr);
-				renderer.selected.view = {};
+	{
+		auto img = dev.images.mustMove(image);
+
+		// Unset selection if needed
+		std::lock_guard lock(dev.mutex);
+		auto unsetter = [&](Renderer& renderer) {
+			if(renderer.selected.image.handle == img->handle) {
+				if(renderer.selected.image.view) {
+					dev.dispatch.vkDestroyImageView(device, renderer.selected.image.view, nullptr);
+				}
+
+				renderer.selected.image = {};
 			}
-		}
-	};
-	forEachRenderer(dev, unsetter);
+		};
+		forEachRenderer(dev, unsetter);
+
+		// important that the destructor is run while mutex is locked,
+		// see ~DeviceHandle
+		img.reset();
+	}
 
 	dev.dispatch.vkDestroyImage(device, image, pAllocator);
 }
@@ -64,7 +74,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.vkGetImageMemoryRequirements(dev.dev, image, &memReqs);
+	dev.dispatch.vkGetImageMemoryRequirements(device, image, &memReqs);
 
 	img.memory = &mem;
 	img.allocationOffset = memoryOffset;

@@ -1,6 +1,8 @@
 #include "cb.hpp"
 #include "data.hpp"
 #include "rp.hpp"
+#include "util.hpp"
+#include "gui.hpp"
 #include "ds.hpp"
 #include "buffer.hpp"
 #include "commands.hpp"
@@ -49,14 +51,19 @@ VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(
 		VkCommandPool                               commandPool,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	auto& cp = dev.commandPools.get(commandPool);
+	auto cp = dev.commandPools.mustMove(commandPool);
 
-	for(auto* cb : cp.cbs) {
+	for(auto* cb : cp->cbs) {
 		eraseData(cb->handle);
 		dev.commandBuffers.mustErase(cb->handle);
 	}
 
-	dev.commandPools.mustErase(commandPool);
+	{
+		// ~DeviceHandle expects device mutex locked
+		std::lock_guard lock(dev.mutex);
+		cp.reset();
+	}
+
 	dev.dispatch.vkDestroyCommandPool(device, commandPool, pAllocator);
 }
 
@@ -105,28 +112,20 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& dev = getData<Device>(device);
 
-	// Unset selection if needed
-	auto unsetter = [&](Renderer& renderer) {
-		if(renderer.selected.cb) {
-			auto it = std::find(pCommandBuffers, pCommandBuffers + commandBufferCount, renderer.selected.cb->handle);
-			if(it != pCommandBuffers + commandBufferCount) {
-				renderer.selected.cb = nullptr;
-			}
-		}
-	};
-	forEachRenderer(dev, unsetter);
-
 	for(auto i = 0u; i < commandBufferCount; ++i) {
-		auto& cb = dev.commandBuffers.get(pCommandBuffers[i]);
-		if(cb.pool) {
-			dlg_assert(cb.pool == dev.commandPools.find(commandPool));
-			auto it = std::find(cb.pool->cbs.begin(), cb.pool->cbs.end(), &cb);
-			dlg_assert(it != cb.pool->cbs.end());
-			cb.pool->cbs.erase(it);
+		auto cb = dev.commandBuffers.mustMove(pCommandBuffers[i]);
+		if(cb->pool) {
+			dlg_assert(cb->pool == dev.commandPools.find(commandPool));
+			auto it = std::find(cb->pool->cbs.begin(), cb->pool->cbs.end(), &cb);
+			dlg_assert(it != cb->pool->cbs.end());
+			cb->pool->cbs.erase(it);
 		}
 
 		eraseData(pCommandBuffers[i]);
-		dev.commandBuffers.mustErase(pCommandBuffers[i]);
+
+		// ~DeviceHandle expects device mutex to be locked
+		std::lock_guard lock(dev.mutex);
+		cb.reset();
 	}
 
 	dev.dispatch.vkFreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);

@@ -1,9 +1,17 @@
-#include "common.hpp"
+#include "gui.hpp"
+#include "layer.hpp"
 #include "data.hpp"
+#include "swapchain.hpp"
 #include "util.hpp"
-#include "cb.hpp"
 #include "image.hpp"
+#include "ds.hpp"
+#include "sync.hpp"
+#include "shader.hpp"
+#include "pipe.hpp"
+#include "buffer.hpp"
+#include "cb.hpp"
 #include "commands.hpp"
+#include "rp.hpp"
 
 #include "overlay.frag.spv.h"
 #include "overlay.vert.spv.h"
@@ -11,7 +19,80 @@
 #include <vkpp/names.hpp>
 #include <imgui/imgui.h>
 
+thread_local ImGuiContext* __LayerImGui;
+
 namespace fuen {
+
+void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
+		VkExtent2D extent, VkRenderPass rp) {
+	this->dev = &dev;
+	this->image = img;
+
+	VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
+	ivi.image = image;
+	ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	ivi.components = {};
+	ivi.format = format;
+	ivi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	ivi.subresourceRange.layerCount = 1;
+	ivi.subresourceRange.levelCount = 1;
+	VK_CHECK(dev.dispatch.vkCreateImageView(dev.handle, &ivi, nullptr, &view));
+
+	VkFramebufferCreateInfo fbi = vk::FramebufferCreateInfo();
+	fbi.attachmentCount = 1u;
+	fbi.pAttachments = &view;
+	fbi.layers = 1u;
+	fbi.width = extent.width;
+	fbi.height = extent.height;
+	fbi.renderPass = rp;
+	VK_CHECK(dev.dispatch.vkCreateFramebuffer(dev.handle, &fbi, nullptr, &fb));
+}
+
+RenderBuffer::~RenderBuffer() {
+	if(dev) {
+		if(fb) {
+			dev->dispatch.vkDestroyFramebuffer(dev->handle, fb, nullptr);
+		}
+		if(view) {
+			dev->dispatch.vkDestroyImageView(dev->handle, view, nullptr);
+		}
+	}
+}
+
+void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
+		VkBufferUsageFlags usage) {
+	if(size >= reqSize) {
+		return;
+	}
+
+	// over-allocate
+	reqSize *= 2;
+
+	if(buf) {
+		dev.dispatch.vkDestroyBuffer(dev.handle, buf, nullptr);
+		dev.dispatch.vkFreeMemory(dev.handle, mem, nullptr);
+	}
+
+	// new buffer
+	VkBufferCreateInfo bufInfo = vk::BufferCreateInfo();
+	bufInfo.size = reqSize;
+	bufInfo.usage = usage;
+	VK_CHECK(dev.dispatch.vkCreateBuffer(dev.handle, &bufInfo, nullptr, &buf));
+
+	// get memory props
+	VkMemoryRequirements memReqs;
+	dev.dispatch.vkGetBufferMemoryRequirements(dev.handle, buf, &memReqs);
+
+	// new memory
+	VkMemoryAllocateInfo allocInfo = vk::MemoryAllocateInfo();
+	allocInfo.allocationSize = memReqs.size;
+	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
+	VK_CHECK(dev.dispatch.vkAllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
+
+	// bind
+	VK_CHECK(dev.dispatch.vkBindBufferMemory(dev.handle, buf, mem, 0));
+	this->size = reqSize;
+}
 
 // Draw
 void Draw::init(Device& dev) {
@@ -20,22 +101,22 @@ void Draw::init(Device& dev) {
 	cbai.commandBufferCount = 1u;
 	cbai.commandPool = dev.commandPool;
 	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	VK_CHECK(dev.dispatch.vkAllocateCommandBuffers(dev.dev, &cbai, &cb));
+	VK_CHECK(dev.dispatch.vkAllocateCommandBuffers(dev.handle, &cbai, &cb));
 
 	// command buffer is a dispatchable object
-	dev.setDeviceLoaderData(dev.dev, cb);
+	dev.setDeviceLoaderData(dev.handle, cb);
 
 	VkFenceCreateInfo fci = vk::FenceCreateInfo();
-	VK_CHECK(dev.dispatch.vkCreateFence(dev.dev, &fci, nullptr, &fence));
+	VK_CHECK(dev.dispatch.vkCreateFence(dev.handle, &fci, nullptr, &fence));
 
 	VkSemaphoreCreateInfo sci = vk::SemaphoreCreateInfo();
-	VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.dev, &sci, nullptr, &semaphore));
+	VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
 
 	VkDescriptorSetAllocateInfo dsai = vk::DescriptorSetAllocateInfo();
 	dsai.descriptorPool = dev.dsPool;
 	dsai.descriptorSetCount = 1u;
 	dsai.pSetLayouts = &dev.dsLayout;
-	VK_CHECK(dev.dispatch.vkAllocateDescriptorSets(dev.dev, &dsai, &dsSelected));
+	VK_CHECK(dev.dispatch.vkAllocateDescriptorSets(dev.handle, &dsai, &dsSelected));
 }
 
 // Overlay
@@ -60,8 +141,8 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	// find free draw
 	Draw* foundDraw = nullptr;
 	for(auto& draw : draws) {
-		if(dev.dispatch.vkGetFenceStatus(dev.dev, draw.fence) == VK_SUCCESS) {
-			VK_CHECK(dev.dispatch.vkResetFences(dev.dev, 1, &draw.fence));
+		if(dev.dispatch.vkGetFenceStatus(dev.handle, draw.fence) == VK_SUCCESS) {
+			VK_CHECK(dev.dispatch.vkResetFences(dev.handle, 1, &draw.fence));
 
 			foundDraw = &draw;
 			break;
@@ -133,6 +214,43 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 }
 
 // Renderer
+Renderer::~Renderer() {
+	if(!dev) {
+		return;
+	}
+
+	// no need to free descriptor sets i guess
+
+	if(imgui) {
+		ImGui::DestroyContext(imgui);
+	}
+
+	if(selected.view) {
+		dev->dispatch.vkDestroyImageView(dev->handle,
+			selected.view, nullptr);
+	}
+
+	if(font.uploadBuf) {
+		dev->dispatch.vkDestroyBuffer(dev->handle, font.uploadBuf, nullptr);
+	}
+
+	if(font.uploadMem) {
+		dev->dispatch.vkFreeMemory(dev->handle, font.uploadMem, nullptr);
+	}
+
+	if(font.view) {
+		dev->dispatch.vkDestroyImageView(dev->handle, font.view, nullptr);
+	}
+
+	if(font.image) {
+		dev->dispatch.vkDestroyImage(dev->handle, font.image, nullptr);
+	}
+
+	if(font.mem) {
+		dev->dispatch.vkFreeMemory(dev->handle, font.mem, nullptr);
+	}
+}
+
 void Renderer::init(Device& dev, VkFormat format, bool clear) {
 	this->dev = &dev;
 	this->clear = clear;
@@ -186,7 +304,7 @@ void Renderer::init(Device& dev, VkFormat format, bool clear) {
 	rpi.dependencyCount = 2;
 	rpi.pDependencies = dependencies;
 
-	VK_CHECK(dev.dispatch.vkCreateRenderPass(dev.dev, &rpi, nullptr, &rp));
+	VK_CHECK(dev.dispatch.vkCreateRenderPass(dev.handle, &rpi, nullptr, &rp));
 
 	// pipeline
 	VkShaderModule vertModule, fragModule;
@@ -194,12 +312,12 @@ void Renderer::init(Device& dev, VkFormat format, bool clear) {
 	VkShaderModuleCreateInfo vertShaderInfo = vk::ShaderModuleCreateInfo();
 	vertShaderInfo.codeSize = sizeof(overlay_vert_spv_data);
 	vertShaderInfo.pCode = overlay_vert_spv_data;
-	VK_CHECK(dev.dispatch.vkCreateShaderModule(dev.dev, &vertShaderInfo, NULL, &vertModule));
+	VK_CHECK(dev.dispatch.vkCreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertModule));
 
 	VkShaderModuleCreateInfo fragShaderInfo = vk::ShaderModuleCreateInfo();
 	fragShaderInfo.codeSize = sizeof(overlay_frag_spv_data);
 	fragShaderInfo.pCode = overlay_frag_spv_data;
-	VK_CHECK(dev.dispatch.vkCreateShaderModule(dev.dev, &fragShaderInfo, NULL, &fragModule));
+	VK_CHECK(dev.dispatch.vkCreateShaderModule(dev.handle, &fragShaderInfo, NULL, &fragModule));
 
 	VkPipelineShaderStageCreateInfo stage[2] = {};
 	stage[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -293,11 +411,11 @@ void Renderer::init(Device& dev, VkFormat format, bool clear) {
 	gpi.pDynamicState = &dynamic_state;
 	gpi.layout = dev.pipeLayout;
 	gpi.renderPass = rp;
-	VK_CHECK(dev.dispatch.vkCreateGraphicsPipelines(dev.dev,
+	VK_CHECK(dev.dispatch.vkCreateGraphicsPipelines(dev.handle,
 		VK_NULL_HANDLE, 1, &gpi, nullptr, &pipe));
 
-	dev.dispatch.vkDestroyShaderModule(dev.dev, vertModule, nullptr);
-	dev.dispatch.vkDestroyShaderModule(dev.dev, fragModule, nullptr);
+	dev.dispatch.vkDestroyShaderModule(dev.handle, vertModule, nullptr);
+	dev.dispatch.vkDestroyShaderModule(dev.handle, fragModule, nullptr);
 
 	// setup imgui
 	this->imgui = ImGui::CreateContext();
@@ -336,17 +454,17 @@ void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
 	ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-	VK_CHECK(dev.dispatch.vkCreateImage(dev.dev, &ici, nullptr, &font.image));
+	VK_CHECK(dev.dispatch.vkCreateImage(dev.handle, &ici, nullptr, &font.image));
 
 	VkMemoryRequirements fontImageReq;
-	dev.dispatch.vkGetImageMemoryRequirements(dev.dev, font.image, &fontImageReq);
+	dev.dispatch.vkGetImageMemoryRequirements(dev.handle, font.image, &fontImageReq);
 
 	VkMemoryAllocateInfo iai = {};
 	iai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	iai.allocationSize = fontImageReq.size;
 	iai.memoryTypeIndex = findLSB(fontImageReq.memoryTypeBits & dev.deviceLocalMemTypeBits);
-	VK_CHECK(dev.dispatch.vkAllocateMemory(dev.dev, &iai, nullptr, &font.mem));
-	VK_CHECK(dev.dispatch.vkBindImageMemory(dev.dev, font.image, font.mem, 0));
+	VK_CHECK(dev.dispatch.vkAllocateMemory(dev.handle, &iai, nullptr, &font.mem));
+	VK_CHECK(dev.dispatch.vkBindImageMemory(dev.handle, font.image, font.mem, 0));
 
 	// font image view
 	VkImageViewCreateInfo ivi = {};
@@ -357,36 +475,36 @@ void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
 	ivi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	ivi.subresourceRange.levelCount = 1;
 	ivi.subresourceRange.layerCount = 1;
-	VK_CHECK(dev.dispatch.vkCreateImageView(dev.dev, &ivi, nullptr, &font.view));
+	VK_CHECK(dev.dispatch.vkCreateImageView(dev.handle, &ivi, nullptr, &font.view));
 
 	// Create the upload buffer
 	VkBufferCreateInfo bci = vk::BufferCreateInfo();
 	bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	bci.size = uploadSize;
 	bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-	VK_CHECK(dev.dispatch.vkCreateBuffer(dev.dev, &bci, nullptr, &font.uploadBuf));
+	VK_CHECK(dev.dispatch.vkCreateBuffer(dev.handle, &bci, nullptr, &font.uploadBuf));
 
 	VkMemoryRequirements uploadBufReq;
-	dev.dispatch.vkGetBufferMemoryRequirements(dev.dev, font.uploadBuf, &uploadBufReq);
+	dev.dispatch.vkGetBufferMemoryRequirements(dev.handle, font.uploadBuf, &uploadBufReq);
 
 	VkMemoryAllocateInfo uploadai = {};
 	uploadai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	uploadai.allocationSize = uploadBufReq.size;
 	uploadai.memoryTypeIndex = findLSB(uploadBufReq.memoryTypeBits & dev.hostVisibleMemTypeBits);
-	VK_CHECK(dev.dispatch.vkAllocateMemory(dev.dev, &uploadai, nullptr, &font.uploadMem));
-	VK_CHECK(dev.dispatch.vkBindBufferMemory(dev.dev, font.uploadBuf, font.uploadMem, 0));
+	VK_CHECK(dev.dispatch.vkAllocateMemory(dev.handle, &uploadai, nullptr, &font.uploadMem));
+	VK_CHECK(dev.dispatch.vkBindBufferMemory(dev.handle, font.uploadBuf, font.uploadMem, 0));
 
 	// Upload to Buffer
 	char* map = NULL;
-	VK_CHECK(dev.dispatch.vkMapMemory(dev.dev, font.uploadMem, 0, uploadSize, 0, (void**)(&map)));
+	VK_CHECK(dev.dispatch.vkMapMemory(dev.handle, font.uploadMem, 0, uploadSize, 0, (void**)(&map)));
 	std::memcpy(map, pixels, uploadSize);
 
 	VkMappedMemoryRange range[1] = {};
 	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
 	range[0].memory = font.uploadMem;
 	range[0].size = uploadSize;
-	VK_CHECK(dev.dispatch.vkFlushMappedMemoryRanges(dev.dev, 1, range));
-	dev.dispatch.vkUnmapMemory(dev.dev, font.uploadMem);
+	VK_CHECK(dev.dispatch.vkFlushMappedMemoryRanges(dev.handle, 1, range));
+	dev.dispatch.vkUnmapMemory(dev.handle, font.uploadMem);
 
 	// Copy buffer to image
 	VkImageMemoryBarrier copyBarrier[1] = {};
@@ -443,7 +561,7 @@ void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
 	dsai.descriptorPool = dev.dsPool;
 	dsai.descriptorSetCount = 1u;
 	dsai.pSetLayouts = &dev.dsLayout;
-	VK_CHECK(dev.dispatch.vkAllocateDescriptorSets(dev.dev, &dsai, &dsFont));
+	VK_CHECK(dev.dispatch.vkAllocateDescriptorSets(dev.handle, &dsai, &dsFont));
 
 	// ...and update it
 	VkDescriptorImageInfo dsii;
@@ -456,7 +574,7 @@ void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
 	write.dstSet = dsFont;
 	write.pImageInfo = &dsii;
 
-	dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
+	dev.dispatch.vkUpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 
 	// Store our identifier
 	io.Fonts->TexID = (ImTextureID) dsFont;
@@ -533,14 +651,189 @@ void Renderer::drawOverviewGui(Draw& draw) {
 	ImGui::Columns();
 }
 
-void Renderer::drawBuffersGui(Draw& draw) {
-	(void) draw;
-	auto& dev = *this->dev;
-	std::shared_lock lock(dev.mutex);
+void Renderer::drawImageUI(Draw& draw, Image& image) {
+	if(selected.image.handle != image.handle) {
+		selected.image.handle = image.handle;
 
+		if(selected.image.view) {
+			dev->dispatch.vkDestroyImageView(dev->handle, selected.image.view, nullptr);
+			selected.image.view = {};
+		}
+
+		if(!image.swapchain) {
+			selected.image.aspectMask = isDepthFormat(vk::Format(image.ci.format)) ?
+				VK_IMAGE_ASPECT_DEPTH_BIT :
+				VK_IMAGE_ASPECT_COLOR_BIT;
+
+			VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
+			ivi.image = image.handle;
+			ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			ivi.format = image.ci.format;
+			ivi.subresourceRange.aspectMask = selected.image.aspectMask;
+			ivi.subresourceRange.layerCount = 1u;
+			ivi.subresourceRange.levelCount = 1u;
+
+			auto res = dev->dispatch.vkCreateImageView(dev->handle, &ivi, nullptr, &selected.image.view);
+			dlg_assert(res == VK_SUCCESS);
+
+			VkDescriptorImageInfo dsii;
+			dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			dsii.imageView = selected.image.view;
+
+			VkWriteDescriptorSet write = vk::WriteDescriptorSet();
+			write.descriptorCount = 1u;
+			write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			write.dstSet = draw.dsSelected;
+			write.pImageInfo = &dsii;
+
+			dev->dispatch.vkUpdateDescriptorSets(dev->handle, 1, &write, 0, nullptr);
+		} else {
+			dlg_debug("not creating view due to swapchain image");
+		}
+	}
+
+	ImGui::Text("%s", image.name.c_str());
+	ImGui::Spacing();
+
+	// info
+	ImGui::Columns(2);
+
+	ImGui::SetColumnWidth(0, 100);
+
+	ImGui::Text("Extent");
+	ImGui::Text("Layers");
+	ImGui::Text("Levels");
+	ImGui::Text("Format");
+	ImGui::Text("Usage");
+	ImGui::Text("Flags");
+	ImGui::Text("Tiling");
+	ImGui::Text("Samples");
+
+	ImGui::NextColumn();
+
+	auto& ci = image.ci;
+	ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
+	ImGui::Text("%d", ci.arrayLayers);
+	ImGui::Text("%d", ci.mipLevels);
+	ImGui::Text("%s", vk::name(vk::Format(ci.format)));
+	ImGui::Text("%s", vk::name(vk::ImageUsageFlags(vk::ImageUsageBits(ci.usage))).c_str());
+	ImGui::Text("%s", vk::name(vk::ImageCreateFlags(vk::ImageCreateBits(ci.flags))).c_str());
+	ImGui::Text("%s", vk::name(vk::ImageTiling(ci.tiling)));
+	ImGui::Text("%s", vk::name(vk::SampleCountBits(ci.samples)));
+
+	ImGui::Columns();
+
+	// content
+	if(selected.image.view) {
+		ImGui::Spacing();
+		ImGui::Spacing();
+		ImGui::Image((void*) draw.dsSelected, {400, 400});
+	}
+
+	// resource references
+	ImGui::Spacing();
+	if(image.memory) {
+		ImGui::Text("Bound to memory ");
+		ImGui::SameLine();
+		auto name = image.memory->name.empty() ? dlg::format("{}", image.memory->handle) : image.memory->name;
+		if(ImGui::SmallButton(name.c_str())) {
+			selected.handle = image.memory;
+		}
+
+		ImGui::SameLine();
+		ImGui::Text(" (offset %lu, size %lu)",
+			(unsigned long) image.allocationOffset,
+			(unsigned long) image.allocationSize);
+	}
+}
+
+void Renderer::drawBufferUI(Draw&, Buffer& buffer) {
+	ImGui::Text("%s", buffer.name.c_str());
+	ImGui::Spacing();
+
+	// info
+	ImGui::Columns(2);
+
+	ImGui::SetColumnWidth(0, 100);
+
+	ImGui::Text("Size");
+	ImGui::Text("Usage");
+
+	ImGui::NextColumn();
+
+	auto& ci = buffer.ci;
+	ImGui::Text("%lu", ci.size);
+	ImGui::Text("%s", vk::name(vk::BufferUsageFlags(vk::BufferUsageBits(ci.usage))).c_str());
+
+	ImGui::Columns();
+
+	// resource references
+	ImGui::Spacing();
+	if(buffer.memory) {
+		ImGui::Text("Bound to memory ");
+		ImGui::SameLine();
+		auto name = buffer.memory->name.empty() ? dlg::format("{}", buffer.memory->handle) : buffer.memory->name;
+		if(ImGui::SmallButton(name.c_str())) {
+			selected.handle = buffer.memory;
+		}
+
+		ImGui::SameLine();
+		ImGui::Text(" (offset %lu, size %lu)",
+			(unsigned long) buffer.allocationOffset,
+			(unsigned long) buffer.allocationSize);
+	}
+}
+void Renderer::drawSamplerUI(Draw&, Sampler&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawDescriptorSetUI(Draw&, DescriptorSet&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawDescriptorPoolUI(Draw&, DescriptorPool&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawDescriptorSetLayoutUI(Draw&, DescriptorSetLayout&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawGraphicsPipelineUI(Draw&, GraphicsPipeline&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawComputePipelineUI(Draw&, ComputePipeline&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawPipelineLayoutUI(Draw&, PipelineLayout&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawCommandPoolUI(Draw&, CommandPool&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawMemoryUI(Draw&, DeviceMemory& mem) {
+	ImGui::Text("%s", mem.name.c_str());
+	ImGui::Spacing();
+
+	// info
+	ImGui::Columns(2);
+
+	ImGui::SetColumnWidth(0, 100);
+
+	ImGui::Text("Size");
+	ImGui::Text("Type Index");
+
+	ImGui::NextColumn();
+
+	ImGui::Text("%lu", mem.size);
+	ImGui::Text("%u", mem.typeIndex);
+
+	ImGui::Columns();
+
+	// resource references
+}
+
+void Renderer::drawCommandBufferUI(Draw&, CommandBuffer&) {
 	ImGui::Text("TODO");
 }
 
+/*
 void Renderer::drawImagesGui(Draw& draw) {
 	auto& dev = *this->dev;
 
@@ -579,7 +872,7 @@ void Renderer::drawImagesGui(Draw& draw) {
 				selected.image = newSelection;
 
 				if(selected.view) {
-					dev.dispatch.vkDestroyImageView(dev.dev, selected.view, nullptr);
+					dev.dispatch.vkDestroyImageView(dev.handle, selected.view, nullptr);
 					selected.view = {};
 				}
 
@@ -598,7 +891,7 @@ void Renderer::drawImagesGui(Draw& draw) {
 					ivi.subresourceRange.layerCount = 1u;
 					ivi.subresourceRange.levelCount = 1u;
 
-					auto res = dev.dispatch.vkCreateImageView(dev.dev, &ivi, nullptr, &selected.view);
+					auto res = dev.dispatch.vkCreateImageView(dev.handle, &ivi, nullptr, &selected.view);
 					dlg_assert(res == VK_SUCCESS);
 
 					VkDescriptorImageInfo dsii;
@@ -611,7 +904,7 @@ void Renderer::drawImagesGui(Draw& draw) {
 					write.dstSet = draw.dsSelected;
 					write.pImageInfo = &dsii;
 
-					dev.dispatch.vkUpdateDescriptorSets(dev.dev, 1, &write, 0, nullptr);
+					dev.dispatch.vkUpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 				} else {
 					dlg_debug("not creating view due to swapchain image");
 				}
@@ -668,7 +961,9 @@ void Renderer::drawImagesGui(Draw& draw) {
 		ImGui::EndChild();
 	}
 }
+*/
 
+/*
 void Renderer::drawCbsGui() {
 	auto& dev = *this->dev;
 
@@ -706,6 +1001,7 @@ void Renderer::drawCbsGui() {
 		ImGui::PopID();
 	}
 }
+*/
 
 void Renderer::drawGui(Draw& draw) {
 	ImGui::NewFrame();
@@ -718,22 +1014,12 @@ void Renderer::drawGui(Draw& draw) {
 	if(ImGui::Begin("Images", nullptr, flags)) {
 		if(ImGui::BeginTabBar("MainTabBar")) {
 			if(ImGui::BeginTabItem("Overview")) {
-				drawOverviewGui(draw);
+				drawOverviewUI(draw);
 				ImGui::EndTabItem();
 			}
 
-			if(ImGui::BeginTabItem("Images")) {
-				drawImagesGui(draw);
-				ImGui::EndTabItem();
-			}
-
-			if(ImGui::BeginTabItem("CommandBuffers")) {
-				drawCbsGui();
-				ImGui::EndTabItem();
-			}
-
-			if(ImGui::BeginTabItem("Buffers")) {
-				drawBuffersGui(draw);
+			if(ImGui::BeginTabItem("Resources")) {
+				drawResourceSelectorUI(draw);
 				ImGui::EndTabItem();
 			}
 
@@ -764,10 +1050,10 @@ void Renderer::uploadDraw(Draw& draw) {
 
 	// map
 	ImDrawVert* verts;
-	VK_CHECK(dev.dispatch.vkMapMemory(dev.dev, draw.vertexBuffer.mem, 0, vertexSize, 0, (void**) &verts));
+	VK_CHECK(dev.dispatch.vkMapMemory(dev.handle, draw.vertexBuffer.mem, 0, vertexSize, 0, (void**) &verts));
 
 	ImDrawIdx* inds;
-	VK_CHECK(dev.dispatch.vkMapMemory(dev.dev, draw.indexBuffer.mem, 0, indexSize, 0, (void**) &inds));
+	VK_CHECK(dev.dispatch.vkMapMemory(dev.handle, draw.indexBuffer.mem, 0, indexSize, 0, (void**) &inds));
 
 	for(auto i = 0; i < drawData.CmdListsCount; ++i) {
 		auto& cmds = *drawData.CmdLists[i];
@@ -785,9 +1071,9 @@ void Renderer::uploadDraw(Draw& draw) {
 	range[1].memory = draw.indexBuffer.mem;
 	range[1].size = VK_WHOLE_SIZE;
 
-	VK_CHECK(dev.dispatch.vkFlushMappedMemoryRanges(dev.dev, 2, range));
-	dev.dispatch.vkUnmapMemory(dev.dev, draw.vertexBuffer.mem);
-	dev.dispatch.vkUnmapMemory(dev.dev, draw.indexBuffer.mem);
+	VK_CHECK(dev.dispatch.vkFlushMappedMemoryRanges(dev.handle, 2, range));
+	dev.dispatch.vkUnmapMemory(dev.handle, draw.vertexBuffer.mem);
+	dev.dispatch.vkUnmapMemory(dev.handle, draw.indexBuffer.mem);
 }
 
 void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb, bool force) {
@@ -868,6 +1154,19 @@ void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb, bool 
 	}
 
 	dev.dispatch.vkCmdEndRenderPass(draw.cb);
+}
+
+void Renderer::unselect(const Handle& handle) {
+	if(selected.handle.index() == 0) {
+		return;
+	}
+
+	auto same = std::visit([&](auto* selected) {
+		return static_cast<const Handle*>(selected) == &handle;
+	}, selected.handle);
+	if(same) {
+		selected.handle = {};
+	}
 }
 
 } // namespace fuen

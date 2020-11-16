@@ -1,5 +1,7 @@
 #include "wayland.hpp"
+#include "layer.hpp"
 #include "data.hpp"
+#include "gui.hpp"
 
 #include "imgui/imgui.h"
 
