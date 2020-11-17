@@ -116,7 +116,7 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 		auto cb = dev.commandBuffers.mustMove(pCommandBuffers[i]);
 		if(cb->pool) {
 			dlg_assert(cb->pool == dev.commandPools.find(commandPool));
-			auto it = std::find(cb->pool->cbs.begin(), cb->pool->cbs.end(), &cb);
+			auto it = std::find(cb->pool->cbs.begin(), cb->pool->cbs.end(), cb.get());
 			dlg_assert(it != cb->pool->cbs.end());
 			cb->pool->cbs.erase(it);
 		}

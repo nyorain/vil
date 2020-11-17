@@ -41,7 +41,6 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		auto img = dev.images.mustMove(image);
 
 		// Unset selection if needed
-		std::lock_guard lock(dev.mutex);
 		auto unsetter = [&](Renderer& renderer) {
 			if(renderer.selected.image.handle == img->handle) {
 				if(renderer.selected.image.view) {
@@ -51,7 +50,9 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 				renderer.selected.image = {};
 			}
 		};
-		forEachRenderer(dev, unsetter);
+
+		std::lock_guard lock(dev.mutex);
+		forEachRendererLocked(dev, unsetter);
 
 		// important that the destructor is run while mutex is locked,
 		// see ~DeviceHandle
@@ -102,6 +103,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	view.dev = &dev;
 	view.ci = *pCreateInfo;
 
+	{
+		std::lock_guard lock(dev.mutex);
+		view.img->views.push_back(&view);
+	}
+
 	return res;
 }
 
@@ -110,7 +116,21 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		VkImageView                                 imageView,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	dev.imageViews.mustErase(imageView);
+
+	auto view = dev.imageViews.mustMove(imageView);
+
+	{
+		std::lock_guard lock(dev.mutex);
+
+		auto it = std::find(view->img->views.begin(), view->img->views.end(), view.get());
+		dlg_assert(it != view->img->views.end());
+		view->img->views.erase(it);
+
+		// important that the destructor is run while mutex is locked,
+		// see ~DeviceHandle
+		view.reset();
+	}
+
 	dev.dispatch.vkDestroyImageView(device, imageView, pAllocator);
 }
 

@@ -94,18 +94,23 @@ public:
 	void init(Device& dev, VkFormat, bool clear);
 	void ensureFontAtlas(VkCommandBuffer cb);
 
-	void drawImageUI(Draw&, Image&);
-	void drawBufferUI(Draw&, Buffer&);
-	void drawSamplerUI(Draw&, Sampler&);
-	void drawDescriptorSetUI(Draw&, DescriptorSet&);
-	void drawDescriptorPoolUI(Draw&, DescriptorPool&);
-	void drawDescriptorSetLayoutUI(Draw&, DescriptorSetLayout&);
-	void drawGraphicsPipelineUI(Draw&, GraphicsPipeline&);
-	void drawComputePipelineUI(Draw&, ComputePipeline&);
-	void drawPipelineLayoutUI(Draw&, PipelineLayout&);
-	void drawCommandPoolUI(Draw&, CommandPool&);
-	void drawMemoryUI(Draw&, DeviceMemory&);
-	void drawCommandBufferUI(Draw&, DeviceMemory&);
+	void drawMemoryResourceUI(Draw&, MemoryResource&);
+	void drawResourceUI(Draw&, Image&);
+	void drawResourceUI(Draw&, ImageView&);
+	void drawResourceUI(Draw&, Framebuffer&);
+	void drawResourceUI(Draw&, RenderPass&);
+	void drawResourceUI(Draw&, Buffer&);
+	void drawResourceUI(Draw&, Sampler&);
+	void drawResourceUI(Draw&, DescriptorSet&);
+	void drawResourceUI(Draw&, DescriptorPool&);
+	void drawResourceUI(Draw&, DescriptorSetLayout&);
+	void drawResourceUI(Draw&, GraphicsPipeline&);
+	void drawResourceUI(Draw&, ComputePipeline&);
+	void drawResourceUI(Draw&, PipelineLayout&);
+	void drawResourceUI(Draw&, DeviceMemory&);
+	void drawResourceUI(Draw&, CommandPool&);
+	void drawResourceUI(Draw&, CommandBuffer&);
+	void drawResourceUI(Draw&, ShaderModule&);
 
 	void drawCommandBufferInspector(Draw&, CommandBuffer& cb);
 

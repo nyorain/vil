@@ -116,9 +116,9 @@ Renderer* getOverlayRenderer(Swapchain& swapchain);
 // Expects device mutex to be locked.
 void notifyDestruction(Device& dev, Handle& handle);
 
+// Expects dev.mutex to be locked
 template<typename F>
-void forEachRenderer(Device& dev, F&& func) {
-	std::lock_guard guard(dev.mutex);
+void forEachRendererLocked(Device& dev, F&& func) {
 	for(auto& swapchain : dev.swapchains.map) {
 		auto* renderer = getOverlayRenderer(*swapchain.second);
 		if(renderer) {

@@ -8,7 +8,12 @@
 
 namespace fuen {
 
-// util
+template<typename ...Ts>
+struct Visitor : Ts...  {
+    Visitor(const Ts&... args) : Ts(args)...  {}
+    using Ts::operator()...;
+};
+
 u32 findLSB(u32 v);
 
 template<typename C>

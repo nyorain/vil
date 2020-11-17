@@ -364,12 +364,13 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 	// Lock order here important, see mutex usage for rendering in swa.cpp.
 	// Also important that we don't lock both mutexes at once.
+	std::lock_guard queueLock(dev.queueMutex);
+
 	{
 		std::lock_guard lock(dev.mutex);
 		dev.pending.push_back(std::move(submPtr));
 	}
 
-	std::lock_guard queueLock(dev.queueMutex);
 	return dev.dispatch.vkQueueSubmit(queue, submitCount, pSubmits, submFence);
 }
 
@@ -414,7 +415,7 @@ bool checkLocked(PendingSubmission& subm) {
 }
 
 void notifyDestruction(Device& dev, Handle& handle) {
-	forEachRenderer(dev, [&](auto& renderer) {
+	forEachRendererLocked(dev, [&](auto& renderer) {
 		renderer.unselect(handle);
 	});
 }

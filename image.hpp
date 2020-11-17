@@ -14,6 +14,12 @@ struct Image : MemoryResource {
 	// image, it's the current layout.
 	VkImageLayout pendingLayout {VK_IMAGE_LAYOUT_UNDEFINED};
 
+	// resource references
+	std::vector<ImageView*> views;
+	std::vector<Framebuffer*> fbs;
+	// std::vector<DescriptorSet*> descriptors;
+	// std::vector<CommandBuffer*> commandBuffers;
+
 	// when images belongs to a swapchain
 	Swapchain* swapchain {};
 	u32 swapchainImageID {};

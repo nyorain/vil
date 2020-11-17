@@ -205,7 +205,7 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	presentInfo.pImageIndices = &imageIdx;
 	presentInfo.pWaitSemaphores = &draw.semaphore;
 	presentInfo.waitSemaphoreCount = 1u;
-	presentInfo.pSwapchains = &swapchain->swapchain;
+	presentInfo.pSwapchains = &swapchain->handle;
 	presentInfo.swapchainCount = 1u;
 	// TODO: might be bad to not forward this
 	// pi.pNext
@@ -225,9 +225,9 @@ Renderer::~Renderer() {
 		ImGui::DestroyContext(imgui);
 	}
 
-	if(selected.view) {
+	if(selected.image.view) {
 		dev->dispatch.vkDestroyImageView(dev->handle,
-			selected.view, nullptr);
+			selected.image.view, nullptr);
 	}
 
 	if(font.uploadBuf) {
@@ -581,11 +581,10 @@ void Renderer::ensureFontAtlas(VkCommandBuffer cb) {
 	font.uploaded = true;
 }
 
-void Renderer::drawOverviewGui(Draw& draw) {
+void Renderer::drawOverviewUI(Draw& draw) {
 	(void) draw;
 
 	auto& dev = *this->dev;
-	std::shared_lock lock(dev.mutex);
 
 	// instance info
 	ImGui::Columns(2);
@@ -651,7 +650,34 @@ void Renderer::drawOverviewGui(Draw& draw) {
 	ImGui::Columns();
 }
 
-void Renderer::drawImageUI(Draw& draw, Image& image) {
+template<typename T>
+std::string name(const T& handle) {
+	std::string name = handle.name;
+	if(name.empty()) {
+		name = dlg::format("{} {}{}", typeid(handle).name(),
+			std::hex, handleToU64(handle.handle));
+	}
+
+	return name;
+}
+
+void Renderer::drawMemoryResourceUI(Draw& draw, MemoryResource& res) {
+	if(res.memory) {
+		ImGui::Text("Bound to memory ");
+		ImGui::SameLine();
+		auto label = name(*res.memory);
+		if(ImGui::SmallButton(label.c_str())) {
+			selected.handle = res.memory;
+		}
+
+		ImGui::SameLine();
+		ImGui::Text(" (offset %lu, size %lu)",
+			(unsigned long) res.allocationOffset,
+			(unsigned long) res.allocationSize);
+	}
+}
+
+void Renderer::drawResourceUI(Draw& draw, Image& image) {
 	if(selected.image.handle != image.handle) {
 		selected.image.handle = image.handle;
 
@@ -732,22 +758,13 @@ void Renderer::drawImageUI(Draw& draw, Image& image) {
 
 	// resource references
 	ImGui::Spacing();
-	if(image.memory) {
-		ImGui::Text("Bound to memory ");
-		ImGui::SameLine();
-		auto name = image.memory->name.empty() ? dlg::format("{}", image.memory->handle) : image.memory->name;
-		if(ImGui::SmallButton(name.c_str())) {
-			selected.handle = image.memory;
-		}
+	drawMemoryResourceUI(draw, image);
 
-		ImGui::SameLine();
-		ImGui::Text(" (offset %lu, size %lu)",
-			(unsigned long) image.allocationOffset,
-			(unsigned long) image.allocationSize);
-	}
+	ImGui::Spacing();
+	ImGui::Text("Image Views:");
 }
 
-void Renderer::drawBufferUI(Draw&, Buffer& buffer) {
+void Renderer::drawResourceUI(Draw& draw, Buffer& buffer) {
 	ImGui::Text("%s", buffer.name.c_str());
 	ImGui::Spacing();
 
@@ -769,45 +786,34 @@ void Renderer::drawBufferUI(Draw&, Buffer& buffer) {
 
 	// resource references
 	ImGui::Spacing();
-	if(buffer.memory) {
-		ImGui::Text("Bound to memory ");
-		ImGui::SameLine();
-		auto name = buffer.memory->name.empty() ? dlg::format("{}", buffer.memory->handle) : buffer.memory->name;
-		if(ImGui::SmallButton(name.c_str())) {
-			selected.handle = buffer.memory;
-		}
+	drawMemoryResourceUI(draw, buffer);
+}
+void Renderer::drawResourceUI(Draw&, Sampler&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawResourceUI(Draw&, DescriptorSet&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawResourceUI(Draw&, DescriptorPool&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawResourceUI(Draw&, DescriptorSetLayout&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawResourceUI(Draw&, GraphicsPipeline&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawResourceUI(Draw&, ComputePipeline&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawResourceUI(Draw&, PipelineLayout&) {
+	ImGui::Text("TODO");
+}
+void Renderer::drawResourceUI(Draw&, CommandPool&) {
+	ImGui::Text("TODO");
+}
 
-		ImGui::SameLine();
-		ImGui::Text(" (offset %lu, size %lu)",
-			(unsigned long) buffer.allocationOffset,
-			(unsigned long) buffer.allocationSize);
-	}
-}
-void Renderer::drawSamplerUI(Draw&, Sampler&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawDescriptorSetUI(Draw&, DescriptorSet&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawDescriptorPoolUI(Draw&, DescriptorPool&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawDescriptorSetLayoutUI(Draw&, DescriptorSetLayout&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawGraphicsPipelineUI(Draw&, GraphicsPipeline&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawComputePipelineUI(Draw&, ComputePipeline&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawPipelineLayoutUI(Draw&, PipelineLayout&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawCommandPoolUI(Draw&, CommandPool&) {
-	ImGui::Text("TODO");
-}
-void Renderer::drawMemoryUI(Draw&, DeviceMemory& mem) {
+void Renderer::drawResourceUI(Draw&, DeviceMemory& mem) {
 	ImGui::Text("%s", mem.name.c_str());
 	ImGui::Spacing();
 
@@ -827,10 +833,51 @@ void Renderer::drawMemoryUI(Draw&, DeviceMemory& mem) {
 	ImGui::Columns();
 
 	// resource references
+	ImGui::Spacing();
+	ImGui::Text("Bound Resources:");
+
+	ImGui::Columns(3);
+	ImGui::SetColumnWidth(0, 100);
+	ImGui::SetColumnWidth(1, 300);
+
+	for(auto& resource : mem.allocations) {
+		ImGui::Text("%lu: ", resource.offset);
+
+		ImGui::NextColumn();
+
+		if(resource.resource->memoryResourceType == MemoryResource::Type::buffer) {
+			Buffer& buffer = static_cast<Buffer&>(*resource.resource);
+			auto label = name(buffer);
+			ImGui::SmallButton(label.c_str());
+		} else if(resource.resource->memoryResourceType == MemoryResource::Type::image) {
+			Image& img = static_cast<Image&>(*resource.resource);
+			auto label = name(img);
+			ImGui::SmallButton(label.c_str());
+		}
+
+		ImGui::NextColumn();
+		ImGui::Text("size %lu", resource.size);
+
+		ImGui::NextColumn();
+	}
+
+	ImGui::Columns();
 }
 
-void Renderer::drawCommandBufferUI(Draw&, CommandBuffer&) {
+void Renderer::drawResourceUI(Draw&, CommandBuffer&) {
 	ImGui::Text("TODO");
+}
+
+void Renderer::drawResourceUI(Draw&, ImageView&) {
+}
+
+void Renderer::drawResourceUI(Draw&, ShaderModule&) {
+}
+
+void Renderer::drawResourceUI(Draw&, Framebuffer&) {
+}
+
+void Renderer::drawResourceUI(Draw&, RenderPass&) {
 }
 
 /*
@@ -1003,6 +1050,48 @@ void Renderer::drawCbsGui() {
 }
 */
 
+void Renderer::drawResourceSelectorUI(Draw& draw) {
+	// resource list
+	ImGui::BeginChild("Resource List", {300, 0.f});
+
+	auto displayResources = [&](auto& resMap) {
+		for(auto& entry : resMap.map) {
+			ImGui::PushID(entry.second.get());
+
+			auto label = name(*entry.second);
+			if(ImGui::Button(label.c_str())) {
+				selected.handle = entry.second.get();
+			}
+
+			ImGui::PopID();
+		}
+	};
+
+	displayResources(dev->buffers);
+	displayResources(dev->images);
+	displayResources(dev->deviceMemories);
+	displayResources(dev->graphicsPipes);
+	displayResources(dev->computePipes);
+	displayResources(dev->commandBuffers);
+
+	ImGui::EndChild();
+
+	// resource view
+	ImGui::SameLine();
+	ImGui::BeginChild("Resource View", {0.f, 0.f});
+
+	std::visit(Visitor{
+		[&](std::monostate) {},
+		[&](auto* selected) {
+			ImGui::PushID(selected);
+			drawResourceUI(draw, *selected);
+			ImGui::PopID();
+		}
+	}, selected.handle);
+
+	ImGui::EndChild();
+}
+
 void Renderer::drawGui(Draw& draw) {
 	ImGui::NewFrame();
 
@@ -1011,7 +1100,8 @@ void Renderer::drawGui(Draw& draw) {
 
 	auto flags = ImGuiWindowFlags_NoDecoration;
 
-	if(ImGui::Begin("Images", nullptr, flags)) {
+	std::shared_lock lock(dev->mutex);
+	if(ImGui::Begin("Fuencaliente", nullptr, flags)) {
 		if(ImGui::BeginTabBar("MainTabBar")) {
 			if(ImGui::BeginTabItem("Overview")) {
 				drawOverviewUI(draw);
@@ -1157,12 +1247,12 @@ void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb, bool 
 }
 
 void Renderer::unselect(const Handle& handle) {
-	if(selected.handle.index() == 0) {
-		return;
-	}
-
-	auto same = std::visit([&](auto* selected) {
-		return static_cast<const Handle*>(selected) == &handle;
+	auto same = std::visit(Visitor{
+		[&](std::monostate) {
+			return false;
+		}, [&](auto& selected) {
+			return static_cast<const Handle*>(selected) == &handle;
+		}
 	}, selected.handle);
 	if(same) {
 		selected.handle = {};

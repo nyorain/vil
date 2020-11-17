@@ -356,12 +356,13 @@ void DisplayWindow::mainLoop() {
 
 		// pretty long, terrible critical section...
 		{
+			// Lock order important. See vkQueueSubmit
+			std::lock_guard queueLock(dev.queueMutex);
+
 			// Need this here to prevent resources we use
 			// (e.g. the image) from being destroyed. Also to make sure
 			// no new submissions are added
 			std::lock_guard lock(dev.mutex);
-
-			std::lock_guard queueLock(dev.queueMutex);
 
 			// Make sure relevant command buffers have completed (and check
 			// for latest image layout).
@@ -371,10 +372,15 @@ void DisplayWindow::mainLoop() {
 			// even tho hard (semaphore pool is harder to manage than
 			// fence pool since we can't reset)
 			VkImageLayout finalLayout;
-			bool depImg = renderer.selected.image && !renderer.selected.image->swapchain;
-			if (depImg) {
+			Image** selImg = std::get_if<Image*>(&renderer.selected.handle);
+			if(!renderer.selected.image.view) {
+				selImg = {};
+			}
 
-				finalLayout = renderer.selected.image->pendingLayout;
+			if (selImg) {
+				auto& img = **selImg;
+
+				finalLayout = img.pendingLayout;
 				std::vector<PendingSubmission*> toComplete;
 				for(auto it = dev.pending.begin(); it != dev.pending.end();) {
 					auto& pending = *it;
@@ -390,7 +396,7 @@ void DisplayWindow::mainLoop() {
 					bool wait = false;
 					for(auto& sub : pending->submissions) {
 						for(auto* cb : sub.cbs) {
-							auto it = cb->images.find(renderer.selected.image->handle);
+							auto it = cb->images.find(img.handle);
 							if(it == cb->images.end()) {
 								continue;
 							}
@@ -412,7 +418,7 @@ void DisplayWindow::mainLoop() {
 					for(auto* pending : toComplete) {
 						if(pending->appFence) {
 							mutexes.push_back(&pending->appFence->mutex);
-							fences.push_back(pending->appFence->fence);
+							fences.push_back(pending->appFence->handle);
 						} else {
 							fences.push_back(pending->ourFence);
 						}
@@ -436,8 +442,8 @@ void DisplayWindow::mainLoop() {
 				// And we are allowed to read it
 				// TODO: transfer queue
 				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
-				imgb.image = renderer.selected.image->handle;
-				imgb.subresourceRange.aspectMask = renderer.selected.aspectMask;
+				imgb.image = img.handle;
+				imgb.subresourceRange.aspectMask = renderer.selected.image.aspectMask;
 				imgb.subresourceRange.layerCount = 1u;
 				imgb.subresourceRange.levelCount = 1u;
 				imgb.oldLayout = finalLayout;
@@ -453,11 +459,11 @@ void DisplayWindow::mainLoop() {
 
 			renderer.recordDraw(draw, sci.imageExtent, buffers[id].fb, true);
 
-			if(depImg) {
+			if(selImg) {
 				// return it to original layout
 				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
-				imgb.image = renderer.selected.image->handle;
-				imgb.subresourceRange.aspectMask = renderer.selected.aspectMask;
+				imgb.image = (*selImg)->handle;
+				imgb.subresourceRange.aspectMask = renderer.selected.image.aspectMask;
 				imgb.subresourceRange.layerCount = 1u;
 				imgb.subresourceRange.levelCount = 1u;
 				imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

@@ -1,5 +1,6 @@
 #include "rp.hpp"
 #include "data.hpp"
+#include "image.hpp"
 
 namespace fuen {
 
@@ -21,12 +22,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	fb.width = pCreateInfo->width;
 	fb.height = pCreateInfo->height;
 	fb.layers = pCreateInfo->layers;
-	fb.fb = *pFramebuffer;
+	fb.handle = *pFramebuffer;
 	fb.dev = &dev;
 
 	for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
-		auto view = pCreateInfo->pAttachments[i];
-		fb.attachments.emplace_back(dev.imageViews.find(view));
+		auto& view = dev.imageViews.get(pCreateInfo->pAttachments[i]);
+		fb.attachments.emplace_back(&view);
+
+		std::lock_guard lock(dev.mutex);
+		view.img->fbs.push_back(&fb);
 	}
 
 	return res;
@@ -37,8 +41,20 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 		VkFramebuffer                               framebuffer,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
+	auto fb = dev.framebuffers.mustMove(framebuffer);
+
+	{
+		std::lock_guard lock(dev.mutex);
+		for(auto* att : fb->attachments) {
+			auto& img = *att->img;
+			auto it = std::find(img.fbs.begin(), img.fbs.end(), fb.get());
+			dlg_assert(it != img.fbs.end());
+			img.fbs.erase(it);
+		}
+		fb.reset(); // must be called while dev.mutex is locked
+	}
+
 	dev.dispatch.vkDestroyFramebuffer(device, framebuffer, pAllocator);
-	dev.framebuffers.mustErase(framebuffer);
 }
 
 // RenderPass
@@ -55,7 +71,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 
 	auto& rp = dev.renderPasses.add(*pRenderPass);
 	rp.dev = &dev;
-	rp.rp = *pRenderPass;
+	rp.handle = *pRenderPass;
 	rp.info.subpasses = {pCreateInfo->pSubpasses, pCreateInfo->pSubpasses + pCreateInfo->subpassCount};
 	rp.info.dependencies = {pCreateInfo->pDependencies, pCreateInfo->pDependencies + pCreateInfo->dependencyCount};
 	rp.info.attachments = {pCreateInfo->pAttachments, pCreateInfo->pAttachments + pCreateInfo->attachmentCount};

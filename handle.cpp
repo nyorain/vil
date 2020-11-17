@@ -17,7 +17,7 @@ namespace fuen {
 
 DeviceHandle::~DeviceHandle() {
 	if(dev) {
-		notifyDestruction(dev, *this);
+		notifyDestruction(*dev, *this);
 	}
 }
 

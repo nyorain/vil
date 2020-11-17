@@ -27,13 +27,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	auto& swapd = *pswapd;
 	swapd.dev = &devd;
 	swapd.ci = *pCreateInfo;
-	swapd.swapchain = *pSwapchain;
+	swapd.handle = *pSwapchain;
 
 	// add swapchain images to tracked images
 	u32 imgCount = 0u;
-	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.handle, swapd.swapchain, &imgCount, nullptr));
+	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, nullptr));
 	auto imgs = std::make_unique<VkImage[]>(imgCount);
-	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.handle, swapd.swapchain, &imgCount, imgs.get()));
+	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, imgs.get()));
 
 	swapd.images.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {

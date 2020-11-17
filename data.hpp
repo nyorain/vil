@@ -18,11 +18,17 @@ inline std::uint64_t hash_combine(std::uint64_t a, std::uint64_t b) {
 }
 
 template<typename T>
-std::uint64_t handleCast(T handle) {
+std::uint64_t handleToU64(T handle) {
 	std::uint64_t id {};
+	dlg_assert(sizeof(handle) <= sizeof(id));
 	std::memcpy(&id, &handle, sizeof(handle));
+	return id;
+}
+
+template<typename T>
+std::uint64_t handleCast(T handle) {
 	auto typeHash = typeid(handle).hash_code();
-	return hash_combine(id, typeHash);
+	return hash_combine(handleToU64(handle), typeHash);
 }
 
 template<typename T>
