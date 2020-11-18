@@ -16,9 +16,6 @@ struct Image : MemoryResource {
 
 	// resource references
 	std::vector<ImageView*> views;
-	std::vector<Framebuffer*> fbs;
-	// std::vector<DescriptorSet*> descriptors;
-	// std::vector<CommandBuffer*> commandBuffers;
 
 	// when images belongs to a swapchain
 	Swapchain* swapchain {};
@@ -29,6 +26,10 @@ struct ImageView : DeviceHandle {
 	Image* img {};
 	VkImageView handle {};
 	VkImageViewCreateInfo ci;
+
+	std::vector<Framebuffer*> fbs;
+	// std::vector<DescriptorSet*> descriptors;
+	// std::vector<CommandBuffers*> cbs;
 };
 
 struct Sampler : DeviceHandle {

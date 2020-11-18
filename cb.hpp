@@ -7,7 +7,7 @@
 namespace fuen {
 
 struct CommandPool : DeviceHandle {
-	VkCommandPool pool {};
+	VkCommandPool handle {};
 	std::vector<CommandBuffer*> cbs;
 };
 

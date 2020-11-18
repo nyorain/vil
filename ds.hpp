@@ -22,8 +22,7 @@ struct DescriptorPool : DeviceHandle {
 struct DescriptorSetLayout : DeviceHandle {
 	VkDescriptorSetLayout handle {};
 
-	// Static after creation.
-	// Ordered by binding.
+	// Static after creation. Ordered by binding.
 	std::vector<VkDescriptorSetLayoutBinding> bindings;
 };
 

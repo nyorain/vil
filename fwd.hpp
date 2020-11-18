@@ -42,6 +42,7 @@ struct ComputePipeline;
 struct GraphicsPipeline;
 struct PipelineLayout;
 struct Sampler;
+struct MemoryResource;
 
 struct Command;
 struct SectionCommand;

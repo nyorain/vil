@@ -12,11 +12,15 @@
 #include "cb.hpp"
 #include "commands.hpp"
 #include "rp.hpp"
+#include "bytes.hpp"
 
 #include "overlay.frag.spv.h"
 #include "overlay.vert.spv.h"
 
+#include <set>
+#include <map>
 #include <vkpp/names.hpp>
+#include <vkpp/structs.hpp>
 #include <imgui/imgui.h>
 
 thread_local ImGuiContext* __LayerImGui;
@@ -661,7 +665,7 @@ std::string name(const T& handle) {
 	return name;
 }
 
-void Renderer::drawMemoryResourceUI(Draw& draw, MemoryResource& res) {
+void Renderer::drawMemoryResourceUI(Draw&, MemoryResource& res) {
 	if(res.memory) {
 		ImGui::Text("Bound to memory ");
 		ImGui::SameLine();
@@ -722,30 +726,30 @@ void Renderer::drawResourceUI(Draw& draw, Image& image) {
 	ImGui::Spacing();
 
 	// info
+	auto ci = bit_cast<vk::ImageCreateInfo>(image.ci);
 	ImGui::Columns(2);
-
-	ImGui::SetColumnWidth(0, 100);
 
 	ImGui::Text("Extent");
 	ImGui::Text("Layers");
 	ImGui::Text("Levels");
 	ImGui::Text("Format");
 	ImGui::Text("Usage");
-	ImGui::Text("Flags");
 	ImGui::Text("Tiling");
 	ImGui::Text("Samples");
+	ImGui::Text("Type");
+	ImGui::Text("Flags");
 
 	ImGui::NextColumn();
 
-	auto& ci = image.ci;
 	ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
 	ImGui::Text("%d", ci.arrayLayers);
 	ImGui::Text("%d", ci.mipLevels);
-	ImGui::Text("%s", vk::name(vk::Format(ci.format)));
-	ImGui::Text("%s", vk::name(vk::ImageUsageFlags(vk::ImageUsageBits(ci.usage))).c_str());
-	ImGui::Text("%s", vk::name(vk::ImageCreateFlags(vk::ImageCreateBits(ci.flags))).c_str());
-	ImGui::Text("%s", vk::name(vk::ImageTiling(ci.tiling)));
-	ImGui::Text("%s", vk::name(vk::SampleCountBits(ci.samples)));
+	ImGui::Text("%s", vk::name(ci.format));
+	ImGui::Text("%s", vk::name(ci.usage).c_str());
+	ImGui::Text("%s", vk::name(ci.tiling));
+	ImGui::Text("%s", vk::name(ci.samples));
+	ImGui::Text("%s", vk::name(ci.imageType));
+	ImGui::Text("%s", vk::name(ci.flags).c_str());
 
 	ImGui::Columns();
 
@@ -762,10 +766,19 @@ void Renderer::drawResourceUI(Draw& draw, Image& image) {
 
 	ImGui::Spacing();
 	ImGui::Text("Image Views:");
+
+	for(auto* view : image.views) {
+		ImGui::Bullet();
+		if(ImGui::SmallButton(name(*view).c_str())) {
+			selected.handle = view;
+		}
+	}
+
+	// TODO: pending layout?
 }
 
 void Renderer::drawResourceUI(Draw& draw, Buffer& buffer) {
-	ImGui::Text("%s", buffer.name.c_str());
+	ImGui::Text("%s", name(buffer).c_str());
 	ImGui::Spacing();
 
 	// info
@@ -788,43 +801,350 @@ void Renderer::drawResourceUI(Draw& draw, Buffer& buffer) {
 	ImGui::Spacing();
 	drawMemoryResourceUI(draw, buffer);
 }
-void Renderer::drawResourceUI(Draw&, Sampler&) {
-	ImGui::Text("TODO");
+
+void Renderer::drawResourceUI(Draw&, Sampler& sampler) {
+	ImGui::Text("%s", name(sampler).c_str());
+	ImGui::Spacing();
+	auto ci = bit_cast<vk::SamplerCreateInfo>(sampler.ci);
+
+	// names
+	ImGui::Columns(2);
+
+	ImGui::Text("Min Filter");
+	ImGui::Text("Mag Filter");
+	ImGui::Text("Mipmap Mode");
+	ImGui::Text("Addressing U");
+	ImGui::Text("Addressing V");
+	ImGui::Text("Addressing W");
+	ImGui::Text("Border Color");
+	ImGui::Text("Unnormalized");
+	ImGui::Text("min LOD");
+	ImGui::Text("max LOD");
+
+	if(ci.anisotropyEnable) {
+		ImGui::Text("Max Anisotropy");
+	}
+
+	if(ci.compareEnable) {
+		ImGui::Text("Compare Op");
+	}
+
+	// data
+	ImGui::NextColumn();
+
+	ImGui::Text("%s", vk::name(ci.minFilter));
+	ImGui::Text("%s", vk::name(ci.magFilter));
+	ImGui::Text("%s", vk::name(ci.mipmapMode));
+	ImGui::Text("%s", vk::name(ci.addressModeU));
+	ImGui::Text("%s", vk::name(ci.addressModeV));
+	ImGui::Text("%s", vk::name(ci.addressModeW));
+	ImGui::Text("%s", vk::name(ci.borderColor));
+	ImGui::Text("%d", ci.unnormalizedCoordinates);
+	ImGui::Text("%f", ci.minLod);
+	ImGui::Text("%f", ci.maxLod);
+
+	if(ci.anisotropyEnable) {
+		ImGui::Text("%f", ci.maxAnisotropy);
+	}
+
+	if(ci.compareEnable) {
+		ImGui::Text("%s", vk::name(ci.compareOp));
+	}
+
+	ImGui::Columns();
 }
+
 void Renderer::drawResourceUI(Draw&, DescriptorSet&) {
 	ImGui::Text("TODO");
 }
+
 void Renderer::drawResourceUI(Draw&, DescriptorPool&) {
 	ImGui::Text("TODO");
 }
-void Renderer::drawResourceUI(Draw&, DescriptorSetLayout&) {
-	ImGui::Text("TODO");
+
+void Renderer::drawResourceUI(Draw&, DescriptorSetLayout& dsl) {
+	ImGui::Text("%s", name(dsl).c_str());
+	ImGui::Spacing();
+
+	ImGui::Text("Bindings");
+
+	for(auto& binding : dsl.bindings) {
+		// TODO: immutable samplers
+		if(binding.descriptorCount > 1) {
+			ImGui::BulletText("%s[%d] in (%s)",
+				vk::name(vk::DescriptorType(binding.descriptorType)),
+				binding.descriptorCount,
+				vk::name(vk::ShaderStageFlags(vk::ShaderStageBits(binding.stageFlags))).c_str());
+		} else {
+			ImGui::BulletText("%s in (%s)",
+				vk::name(vk::DescriptorType(binding.descriptorType)),
+				vk::name(vk::ShaderStageFlags(vk::ShaderStageBits(binding.stageFlags))).c_str());
+		}
+	}
 }
-void Renderer::drawResourceUI(Draw&, GraphicsPipeline&) {
-	ImGui::Text("TODO");
+
+void Renderer::drawResourceUI(Draw&, GraphicsPipeline& pipe) {
+	ImGui::Text("%s", name(pipe).c_str());
+	ImGui::Spacing();
+
+	// general info
+	// text
+	ImGui::Columns(2);
+
+	ImGui::Text("Layout");
+	ImGui::Text("Render Pass");
+	ImGui::Text("Subpass");
+
+	// data
+	ImGui::NextColumn();
+
+	if(ImGui::SmallButton(name(*pipe.layout).c_str())) {
+		selected.handle = pipe.layout;
+	}
+	if(ImGui::SmallButton(name(*pipe.renderPass).c_str())) {
+		selected.handle = pipe.renderPass;
+	}
+	ImGui::Text("%d", pipe.subpass);
+
+	ImGui::Columns();
+	ImGui::Separator();
+
+	// rasterization
+	auto rastInfo = bit_cast<vk::PipelineRasterizationStateCreateInfo>(pipe.rasterizationState);
+
+	ImGui::Text("Rasterization");
+	ImGui::Columns(2);
+
+	ImGui::Text("Discard");
+	ImGui::Text("Depth Clamp");
+	ImGui::Text("Cull Mode");
+	ImGui::Text("Polygon Mode");
+	ImGui::Text("Front Face");
+
+	if(rastInfo.depthBiasEnable) {
+		ImGui::Text("Depth Bias Constant");
+		ImGui::Text("Depth Bias Slope");
+		ImGui::Text("Depth Bias Clamp");
+	}
+
+	ImGui::NextColumn();
+
+	ImGui::Text("%d", rastInfo.rasterizerDiscardEnable);
+	ImGui::Text("%d", rastInfo.depthClampEnable);
+
+	ImGui::Text("%s", vk::name(rastInfo.cullMode).c_str());
+	ImGui::Text("%s", vk::name(rastInfo.polygonMode));
+	ImGui::Text("%s", vk::name(rastInfo.frontFace));
+
+	if(rastInfo.depthBiasEnable) {
+		ImGui::Text("%f", rastInfo.depthBiasSlopeFactor);
+		ImGui::Text("%f", rastInfo.depthBiasConstantFactor);
+		ImGui::Text("%f", rastInfo.depthBiasClamp);
+	}
+
+	ImGui::Columns();
+	ImGui::Separator();
+
+	if(!pipe.hasMeshShader) {
+		// input assembly
+		ImGui::Text("Input Assembly");
+
+		ImGui::Columns(2);
+		ImGui::Separator();
+
+		ImGui::Text("Primitive restart");
+		ImGui::Text("Topology");
+
+		ImGui::NextColumn();
+
+		ImGui::Text("%d", pipe.inputAssemblyState.primitiveRestartEnable);
+		ImGui::Text("%s", vk::name(vk::PrimitiveTopology(pipe.inputAssemblyState.topology)));
+
+		ImGui::Columns();
+		ImGui::Separator();
+
+		// vertex input
+		if(pipe.vertexInputState.vertexAttributeDescriptionCount > 0) {
+			ImGui::Text("Vertex input");
+
+			std::map<u32, u32> bindings;
+			for(auto i = 0u; i < pipe.vertexInputState.vertexBindingDescriptionCount; ++i) {
+				auto& binding = pipe.vertexInputState.pVertexBindingDescriptions[i];
+				bindings[binding.binding] = i;
+			}
+
+			std::map<u32, u32> attribs;
+			for(auto bid : bindings) {
+				auto& binding = pipe.vertexInputState.pVertexBindingDescriptions[bid.second];
+
+				ImGui::BulletText("Binding %d, %s, stride %d", binding.binding,
+					vk::name(vk::VertexInputRate(binding.inputRate)), binding.stride);
+
+				attribs.clear();
+				for(auto i = 0u; i < pipe.vertexInputState.vertexAttributeDescriptionCount; ++i) {
+					auto& attrib = pipe.vertexInputState.pVertexAttributeDescriptions[i];
+					if(attrib.binding != binding.binding) {
+						continue;
+					}
+
+					attribs[attrib.location] = i;
+				}
+
+				ImGui::Indent();
+
+				for(auto& aid : attribs) {
+					auto& attrib = pipe.vertexInputState.pVertexAttributeDescriptions[aid.second];
+					ImGui::BulletText("location %d at offset %d, %s",
+						attrib.location, attrib.offset, vk::name(vk::Format(attrib.format)));
+				}
+
+				ImGui::Unindent();
+			}
+
+			ImGui::Separator();
+		}
+	}
+
+	if(!pipe.dynamicState.empty()) {
+		ImGui::Text("Dynamic states");
+
+		for(auto& dynState : pipe.dynamicState) {
+			ImGui::BulletText("%s", vk::name(vk::DynamicState(dynState)));
+		}
+
+		ImGui::Separator();
+	}
+
+	if(!pipe.rasterizationState.rasterizerDiscardEnable) {
+		if(pipe.multisampleState.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT) {
+			ImGui::Text("Multisample state");
+
+			ImGui::Columns(2);
+
+			ImGui::Text("Samples");
+			ImGui::Text("Sample Shading");
+			ImGui::Text("Min Sample Shading");
+			ImGui::Text("Alpha To One");
+			ImGui::Text("Alpha To Coverage");
+
+			ImGui::NextColumn();
+
+			ImGui::Text("%s", vk::name(vk::SampleCountBits(pipe.multisampleState.rasterizationSamples)));
+			ImGui::Text("%d", pipe.multisampleState.sampleShadingEnable);
+			ImGui::Text("%f", pipe.multisampleState.minSampleShading);
+			ImGui::Text("%d", pipe.multisampleState.alphaToOneEnable);
+			ImGui::Text("%d", pipe.multisampleState.alphaToCoverageEnable);
+
+			// TODO: sample mask
+
+			ImGui::Columns();
+			ImGui::Separator();
+		}
+
+		// TODO: viewport & scissors
+
+		if(pipe.hasDepthStencil) {
+			ImGui::Text("Depth stencil");
+
+			ImGui::Columns(2);
+
+			ImGui::Text("Depth Test Enable");
+			ImGui::Text("Depth Write Enable");
+
+			if(pipe.depthStencilState.depthTestEnable) {
+				ImGui::Text("Depth Compare Op");
+				if(pipe.depthStencilState.depthBoundsTestEnable) {
+					ImGui::Text("Min Depth Bounds");
+					ImGui::Text("Max Depth Bounds");
+				}
+			}
+
+			ImGui::Text("Stencil Test Enable");
+			if(pipe.depthStencilState.stencilTestEnable) {
+			}
+
+			// Data
+			ImGui::NextColumn();
+
+			ImGui::Text("%d", pipe.depthStencilState.depthTestEnable);
+			ImGui::Text("%d", pipe.depthStencilState.depthWriteEnable);
+			ImGui::Text("%d", pipe.depthStencilState.stencilTestEnable);
+
+			if(pipe.depthStencilState.depthTestEnable) {
+				ImGui::Text("%s", vk::name(vk::CompareOp(pipe.depthStencilState.depthCompareOp)));
+
+				if(pipe.depthStencilState.depthBoundsTestEnable) {
+					ImGui::Text("%f", pipe.depthStencilState.minDepthBounds);
+					ImGui::Text("%f", pipe.depthStencilState.maxDepthBounds);
+				}
+			}
+
+			/*
+			// TODO: stencil info
+			if(pipe.depthStencilState.stencilTestEnable) {
+				auto printStencilValues = [&](const VkStencilOpState& stencil) {
+				};
+
+				if(ImGui::TreeNode("Stencil Front")) {
+					printStencilState(pipe.depthStencilState.front);
+				}
+
+				if(ImGui::TreeNode("Stencil Back")) {
+					printStencilState(pipe.depthStencilState.back);
+				}
+			}
+			*/
+
+			ImGui::Columns();
+			ImGui::Separator();
+		}
+	}
+
+	// TODO: shader data
+	// TODO: color blend state
+	// TODO: tesselation
 }
+
 void Renderer::drawResourceUI(Draw&, ComputePipeline&) {
 	ImGui::Text("TODO");
 }
-void Renderer::drawResourceUI(Draw&, PipelineLayout&) {
-	ImGui::Text("TODO");
+
+void Renderer::drawResourceUI(Draw&, PipelineLayout& pipeLayout) {
+	ImGui::Text("%s", name(pipeLayout).c_str());
+	ImGui::Spacing();
+
+	if(!pipeLayout.pushConstants.empty()) {
+		ImGui::Text("Push Constants");
+		for(auto& pcr : pipeLayout.pushConstants) {
+			ImGui::Bullet();
+			ImGui::Text("Offset %d, Size %d, in %s", pcr.offset, pcr.size,
+				vk::name(vk::ShaderStageFlags(vk::ShaderStageBits(pcr.stageFlags))).c_str());
+		}
+	}
+
+	ImGui::Text("Descriptor Set Layouts");
+	for(auto* ds : pipeLayout.descriptors) {
+		ImGui::Bullet();
+		if(ImGui::SmallButton(name(*ds).c_str())) {
+			selected.handle = ds;
+		}
+	}
 }
 void Renderer::drawResourceUI(Draw&, CommandPool&) {
 	ImGui::Text("TODO");
 }
 
 void Renderer::drawResourceUI(Draw&, DeviceMemory& mem) {
-	ImGui::Text("%s", mem.name.c_str());
+	ImGui::Text("%s", name(mem).c_str());
 	ImGui::Spacing();
 
 	// info
 	ImGui::Columns(2);
 
-	ImGui::SetColumnWidth(0, 100);
-
 	ImGui::Text("Size");
 	ImGui::Text("Type Index");
 
+	// data
 	ImGui::NextColumn();
 
 	ImGui::Text("%lu", mem.size);
@@ -864,191 +1184,126 @@ void Renderer::drawResourceUI(Draw&, DeviceMemory& mem) {
 	ImGui::Columns();
 }
 
-void Renderer::drawResourceUI(Draw&, CommandBuffer&) {
-	ImGui::Text("TODO");
+void Renderer::drawResourceUI(Draw&, CommandBuffer& cb) {
+	// make sure command buffer isn't changed in the meantime
+	std::lock_guard lock(cb.mutex);
+
+	ImGui::Text("%s", name(cb).c_str());
+	ImGui::Spacing();
+
+	// TODO: more info about cb
+
+	ImGui::Text("Pool: ");
+	ImGui::SameLine();
+	if(ImGui::SmallButton(name(*cb.pool).c_str())) {
+		selected.handle = cb.pool;
+	}
+
+	// maybe show commands inline (in tree node)
+	// and allow via button to switch to cb viewer?
+	if(ImGui::Button("View Content")) {
+		selected.cb.selectTabCounter = 0u;
+		selected.cb.cb = &cb;
+	}
 }
 
-void Renderer::drawResourceUI(Draw&, ImageView&) {
+void imguiPrintRange(u32 base, u32 count) {
+	if(count > 1) {
+		ImGui::Text("[%d, %d]", base, base + count - 1);
+	} else {
+		ImGui::Text("%d", base);
+	}
+}
+
+void Renderer::drawResourceUI(Draw&, ImageView& view) {
+	ImGui::Text("%s", name(view).c_str());
+	ImGui::Spacing();
+
+	// info
+	ImGui::Columns(2);
+	auto ci = bit_cast<vk::ImageViewCreateInfo>(view.ci);
+
+	ImGui::Text("Image");
+	ImGui::Text("Type");
+	ImGui::Text("Layers");
+	ImGui::Text("Levels");
+	ImGui::Text("Aspect");
+	ImGui::Text("Format");
+	ImGui::Text("Flags");
+
+	// data
+	ImGui::NextColumn();
+
+	if(ImGui::SmallButton(name(*view.img).c_str())) {
+		selected.handle = view.img;
+	}
+
+	ImGui::Text("%s", vk::name(ci.viewType));
+	imguiPrintRange(ci.subresourceRange.baseArrayLayer, ci.subresourceRange.layerCount);
+	imguiPrintRange(ci.subresourceRange.baseMipLevel, ci.subresourceRange.levelCount);
+	ImGui::Text("%s", vk::name(ci.subresourceRange.aspectMask).c_str());
+	ImGui::Text("%s", vk::name(ci.format));
+	ImGui::Text("%s", vk::name(ci.flags).c_str());
+
+	ImGui::Columns();
+
+	// resource references
+	ImGui::Spacing();
+	if(!view.fbs.empty()) {
+		ImGui::Text("Framebuffers:");
+
+		for(auto* fb : view.fbs) {
+			ImGui::Bullet();
+			if(ImGui::SmallButton(name(*fb).c_str())) {
+				selected.handle = fb;
+			}
+		}
+	}
 }
 
 void Renderer::drawResourceUI(Draw&, ShaderModule&) {
+	ImGui::Text("TODO");
 }
 
-void Renderer::drawResourceUI(Draw&, Framebuffer&) {
+void Renderer::drawResourceUI(Draw&, Framebuffer& fb) {
+	ImGui::Text("%s", name(fb).c_str());
+	ImGui::Spacing();
+
+	// TODO: info
+
+	// Resource references
+	ImGui::Spacing();
+	ImGui::Text("Attachments:");
+
+	for(auto* view : fb.attachments) {
+		ImGui::Bullet();
+		if(ImGui::SmallButton(name(*view).c_str())) {
+			selected.handle = view;
+		}
+	}
 }
 
 void Renderer::drawResourceUI(Draw&, RenderPass&) {
+	ImGui::Text("TODO");
 }
 
-/*
-void Renderer::drawImagesGui(Draw& draw) {
-	auto& dev = *this->dev;
+void Renderer::drawCommandBufferInspector(Draw&, CommandBuffer& cb) {
+	// make sure command buffer isn't changed in the meantime
+	std::lock_guard lock(cb.mutex);
 
-	std::shared_lock lock(dev.mutex);
-	ImGui::BeginChild("Image list", {400, 600});
-
-	for(auto& img : dev.images.map) {
-		ImGui::PushID(img.second.get());
-
-		auto label = img.second->name;
-		if(label.empty()) {
-			auto& ci = img.second->ci;
-			label += dlg::format("{}", img.second->handle);
-			label += " ";
-			label += std::to_string(ci.extent.width);
-			label += "x";
-			label += std::to_string(ci.extent.height);
-			if(ci.extent.depth > 1) {
-				label += "x";
-				label += std::to_string(ci.extent.depth);
-			}
-
-			if(ci.arrayLayers > 1) {
-				label += "[";
-				label += std::to_string(ci.arrayLayers);
-				label += "]";
-			}
-
-			label += " ";
-			label += vk::name(vk::Format(ci.format));
-		}
-
-		if(ImGui::Button(label.c_str())) {
-			auto newSelection = img.second.get();
-			if(newSelection != selected.image) {
-				selected.image = newSelection;
-
-				if(selected.view) {
-					dev.dispatch.vkDestroyImageView(dev.handle, selected.view, nullptr);
-					selected.view = {};
-				}
-
-				if(!selected.image->swapchain) {
-					dlg_debug("updating image view");
-
-					selected.aspectMask = isDepthFormat(vk::Format(selected.image->ci.format)) ?
-						VK_IMAGE_ASPECT_DEPTH_BIT :
-						VK_IMAGE_ASPECT_COLOR_BIT;
-
-					VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
-					ivi.image = selected.image->handle;
-					ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-					ivi.format = selected.image->ci.format;
-					ivi.subresourceRange.aspectMask = selected.aspectMask;
-					ivi.subresourceRange.layerCount = 1u;
-					ivi.subresourceRange.levelCount = 1u;
-
-					auto res = dev.dispatch.vkCreateImageView(dev.handle, &ivi, nullptr, &selected.view);
-					dlg_assert(res == VK_SUCCESS);
-
-					VkDescriptorImageInfo dsii;
-					dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					dsii.imageView = selected.view;
-
-					VkWriteDescriptorSet write = vk::WriteDescriptorSet();
-					write.descriptorCount = 1u;
-					write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-					write.dstSet = draw.dsSelected;
-					write.pImageInfo = &dsii;
-
-					dev.dispatch.vkUpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
-				} else {
-					dlg_debug("not creating view due to swapchain image");
-				}
-			}
-		}
-
-		ImGui::PopID();
-	}
-
+	// Command list
+	ImGui::BeginChild("Command list", {400, 0});
+	ImGui::PushID(dlg::format("{}:{}", &cb, cb.resetCount).c_str());
+	displayCommands(cb.commands);
+	ImGui::PopID();
 	ImGui::EndChild();
+	ImGui::SameLine();
 
-	if(selected.image) {
-		ImGui::SameLine();
-		ImGui::BeginChild("Selected Image", {600, 600});
-
-		ImGui::Text("%s", selected.image->name.c_str());
-		ImGui::Spacing();
-
-		// info
-		ImGui::Columns(2);
-
-		ImGui::SetColumnWidth(0, 100);
-
-		ImGui::Text("Extent");
-		ImGui::Text("Layers");
-		ImGui::Text("Levels");
-		ImGui::Text("Format");
-		ImGui::Text("Usage");
-		ImGui::Text("Flags");
-		ImGui::Text("Tiling");
-		ImGui::Text("Samples");
-
-		ImGui::NextColumn();
-
-		auto& ci = selected.image->ci;
-		ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
-		ImGui::Text("%d", ci.arrayLayers);
-		ImGui::Text("%d", ci.mipLevels);
-		ImGui::Text("%s", vk::name(vk::Format(ci.format)));
-		ImGui::Text("%s", vk::name(vk::ImageUsageFlags(vk::ImageUsageBits(ci.usage))).c_str());
-		ImGui::Text("%s", vk::name(vk::ImageCreateFlags(vk::ImageCreateBits(ci.flags))).c_str());
-		ImGui::Text("%s", vk::name(vk::ImageTiling(ci.tiling)));
-		ImGui::Text("%s", vk::name(vk::SampleCountBits(ci.samples)));
-
-		ImGui::Columns();
-
-		// content
-		if(selected.view) {
-			ImGui::Spacing();
-			ImGui::Spacing();
-			ImGui::Image((void*) draw.dsSelected, {400, 400});
-		}
-
-		ImGui::EndChild();
-	}
-}
-*/
-
-/*
-void Renderer::drawCbsGui() {
-	auto& dev = *this->dev;
-
-	std::shared_lock lock(dev.mutex);
-	ImGui::BeginChild("CommandBuffer list", {400, 600});
-
-	for(auto& cb : dev.commandBuffers.map) {
-		ImGui::PushID(cb.second.get());
-
-		auto label = cb.second->name;
-		if(label.empty()) {
-			label = "-";
-		}
-
-		if(ImGui::Button(label.c_str())) {
-			auto newSelection = cb.second.get();
-			if(newSelection != selected.cb) {
-				selected.cb = newSelection;
-			}
-		}
-
-		ImGui::PopID();
-	}
-
+	// command info
+	ImGui::BeginChild("Command Info", {600, 0});
+	ImGui::Text("TODO: information about selected command");
 	ImGui::EndChild();
-
-	if(selected.cb) {
-		ImGui::PushID(dlg::format("{}'{}", selected.cb, selected.cb->resetCount).c_str());
-
-		ImGui::SameLine();
-		ImGui::BeginChild("Selected CommandBuffer", {600, 600});
-		std::lock_guard lock(selected.cb->mutex);
-		displayCommands(selected.cb->commands);
-		ImGui::EndChild();
-		ImGui::PopID();
-	}
 }
-*/
 
 void Renderer::drawResourceSelectorUI(Draw& draw) {
 	// resource list
@@ -1067,12 +1322,22 @@ void Renderer::drawResourceSelectorUI(Draw& draw) {
 		}
 	};
 
-	displayResources(dev->buffers);
 	displayResources(dev->images);
+	displayResources(dev->imageViews);
+	displayResources(dev->samplers);
+	displayResources(dev->framebuffers);
+	displayResources(dev->renderPasses);
+	displayResources(dev->buffers);
 	displayResources(dev->deviceMemories);
+	displayResources(dev->commandBuffers);
+	displayResources(dev->commandPools);
+	displayResources(dev->dsPools);
+	displayResources(dev->descriptorSets);
+	displayResources(dev->dsLayouts);
 	displayResources(dev->graphicsPipes);
 	displayResources(dev->computePipes);
-	displayResources(dev->commandBuffers);
+	displayResources(dev->pipeLayouts);
+	displayResources(dev->shaderModules);
 
 	ImGui::EndChild();
 
@@ -1095,10 +1360,14 @@ void Renderer::drawResourceSelectorUI(Draw& draw) {
 void Renderer::drawGui(Draw& draw) {
 	ImGui::NewFrame();
 
-	ImGui::SetNextWindowPos({0, 0});
-	ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+	ImGui::ShowDemoWindow();
+	ImGui::ShowAboutWindow();
+	ImGui::ShowMetricsWindow();
 
-	auto flags = ImGuiWindowFlags_NoDecoration;
+	// ImGui::SetNextWindowPos({0, 0});
+	// ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+	// auto flags = ImGuiWindowFlags_NoDecoration;
+	auto flags = 0;
 
 	std::shared_lock lock(dev->mutex);
 	if(ImGui::Begin("Fuencaliente", nullptr, flags)) {
@@ -1111,6 +1380,15 @@ void Renderer::drawGui(Draw& draw) {
 			if(ImGui::BeginTabItem("Resources")) {
 				drawResourceSelectorUI(draw);
 				ImGui::EndTabItem();
+			}
+
+			if(selected.cb.cb) {
+				auto flags = (selected.cb.selectTabCounter < 2) ? ImGuiTabItemFlags_SetSelected : 0;
+				++selected.cb.selectTabCounter;
+				if(ImGui::BeginTabItem("Command Buffer", nullptr, flags)) {
+					drawCommandBufferInspector(draw, *selected.cb.cb);
+					ImGui::EndTabItem();
+				}
 			}
 
 			ImGui::EndTabBar();
@@ -1247,6 +1525,7 @@ void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb, bool 
 }
 
 void Renderer::unselect(const Handle& handle) {
+	// unselect handle
 	auto same = std::visit(Visitor{
 		[&](std::monostate) {
 			return false;
@@ -1254,8 +1533,14 @@ void Renderer::unselect(const Handle& handle) {
 			return static_cast<const Handle*>(selected) == &handle;
 		}
 	}, selected.handle);
+
 	if(same) {
 		selected.handle = {};
+	}
+
+	// special cases
+	if(selected.cb.cb == &handle) {
+		selected.cb.cb = {};
 	}
 }
 

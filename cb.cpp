@@ -41,7 +41,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
 
 	auto& cp = dev.commandPools.add(*pCommandPool);
 	cp.dev = &dev;
-	cp.pool = *pCommandPool;
+	cp.handle = *pCommandPool;
 
 	return res;
 }

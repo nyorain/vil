@@ -53,6 +53,7 @@ struct Renderer {
 			std::monostate,
 			Image*,
 			ImageView*,
+			Sampler*,
 			Framebuffer*,
 			RenderPass*,
 			Buffer*,
@@ -73,6 +74,12 @@ struct Renderer {
 			VkImageView view {};
 			VkImageAspectFlagBits aspectMask {};
 		} image;
+
+		// For command buffer selector
+		struct {
+			CommandBuffer* cb {};
+			u32 selectTabCounter {};
+		} cb;
 	} selected;
 
 	struct {

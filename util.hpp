@@ -1,10 +1,12 @@
 #pragma once
 
 #include "fwd.hpp"
+#include "bytes.hpp"
 #include <vulkan/vulkan.h>
 #include <vkpp/enums.hpp>
 #include <vkpp/structs.hpp>
 #include <array>
+#include <cstring>
 
 namespace fuen {
 
@@ -15,6 +17,15 @@ struct Visitor : Ts...  {
 };
 
 u32 findLSB(u32 v);
+
+// C++20: std::bit_cast
+template<typename T, typename O>
+auto bit_cast(const O& src) {
+	static_assert(BytesConvertible<T> && BytesConvertible<O> && sizeof(T) == sizeof(O));
+	T ret;
+	std::memcpy(static_cast<void*>(&ret), static_cast<const void*>(&src), sizeof(src));
+	return ret;
+}
 
 template<typename C>
 void ensureSize(C& container, std::size_t size) {

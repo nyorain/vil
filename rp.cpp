@@ -30,7 +30,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		fb.attachments.emplace_back(&view);
 
 		std::lock_guard lock(dev.mutex);
-		view.img->fbs.push_back(&fb);
+		view.fbs.push_back(&fb);
 	}
 
 	return res;
@@ -45,12 +45,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 
 	{
 		std::lock_guard lock(dev.mutex);
-		for(auto* att : fb->attachments) {
-			auto& img = *att->img;
-			auto it = std::find(img.fbs.begin(), img.fbs.end(), fb.get());
-			dlg_assert(it != img.fbs.end());
-			img.fbs.erase(it);
+		for(auto* view : fb->attachments) {
+			auto it = std::find(view->fbs.begin(), view->fbs.end(), fb.get());
+			dlg_assert(it != view->fbs.end());
+			view->fbs.erase(it);
 		}
+
 		fb.reset(); // must be called while dev.mutex is locked
 	}
 

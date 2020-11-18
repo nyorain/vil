@@ -1,6 +1,7 @@
 #include "image.hpp"
 #include "data.hpp"
 #include "gui.hpp"
+#include "rp.hpp"
 
 namespace fuen {
 
@@ -53,6 +54,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 
 		std::lock_guard lock(dev.mutex);
 		forEachRendererLocked(dev, unsetter);
+
+		// it's legal to destroy an image before views/fbs its used in
+		for(auto* view : img->views) {
+			view->img = nullptr;
+		}
 
 		// important that the destructor is run while mutex is locked,
 		// see ~DeviceHandle
@@ -122,9 +128,18 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 	{
 		std::lock_guard lock(dev.mutex);
 
-		auto it = std::find(view->img->views.begin(), view->img->views.end(), view.get());
-		dlg_assert(it != view->img->views.end());
-		view->img->views.erase(it);
+		if(view->img) {
+			auto it = std::find(view->img->views.begin(), view->img->views.end(), view.get());
+			dlg_assert(it != view->img->views.end());
+			view->img->views.erase(it);
+		}
+
+		// it's legal to destroy an image view before resources its used in
+		for(auto* fb : view->fbs) {
+			auto it = std::find(fb->attachments.begin(), fb->attachments.end(), view.get());
+			dlg_assert(it != fb->attachments.end());
+			fb->attachments.erase(it);
+		}
 
 		// important that the destructor is run while mutex is locked,
 		// see ~DeviceHandle

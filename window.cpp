@@ -332,6 +332,11 @@ void DisplayWindow::mainLoop() {
 		VK_CHECK(dev.dispatch.vkBeginCommandBuffer(draw.cb, &cbBegin));
 
 		// update modifiers
+		io.KeyAlt = false;
+		io.KeyShift = false;
+		io.KeyCtrl = false;
+		io.KeySuper = false;
+
 		auto mods = swa_display_active_keyboard_mods(display);
 		if(mods & swa_keyboard_mod_alt) {
 			io.KeyAlt = true;
