@@ -27,7 +27,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	mod.handle = *pShaderModule;
 
 	mod.code = std::make_shared<SpirvData>();
-	mod.code->spv = {pCreateInfo->pCode, pCreateInfo->pCode + pCreateInfo->codeSize};
+	dlg_assert(pCreateInfo->codeSize % 4 == 0);
+	mod.code->spv = {pCreateInfo->pCode, pCreateInfo->pCode + pCreateInfo->codeSize / 4};
 	mod.code->reflection = std::make_unique<SpvReflectShaderModule>();
 	auto reflRes = spvReflectCreateShaderModule(pCreateInfo->codeSize,
 		pCreateInfo->pCode, mod.code->reflection.get());

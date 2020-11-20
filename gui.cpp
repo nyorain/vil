@@ -17,8 +17,12 @@
 #include "overlay.frag.spv.h"
 #include "overlay.vert.spv.h"
 
+#include "spirv_reflect.h"
+
 #include <set>
 #include <map>
+#include <fstream>
+#include <filesystem>
 #include <vkpp/names.hpp>
 #include <vkpp/structs.hpp>
 #include <imgui/imgui.h>
@@ -27,6 +31,36 @@ thread_local ImGuiContext* __LayerImGui;
 
 namespace fuen {
 
+// util
+struct Row {
+	const char* name;
+	std::string content;
+
+	template<typename... Args>
+	Row(const char* rname, const char* fmt, Args&&... args) :
+			name(rname), content(dlg::format(fmt, std::forward<Args>(args)...)) {
+	}
+};
+
+void AsColumns2(span<const Row> rows) {
+	ImGui::Columns(2);
+	for(auto& row : rows) {
+		ImGui::Text("%s", row.name);
+		ImGui::NextColumn();
+		ImGui::Text("%s", row.content.c_str());
+		ImGui::NextColumn();
+	}
+
+	ImGui::Columns();
+}
+
+template<typename T>
+T& nonNull(T* ptr) {
+	dlg_assert(ptr);
+	return *ptr;
+}
+
+// Renderer
 void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
 		VkExtent2D extent, VkRenderPass rp) {
 	this->dev = &dev;
@@ -655,11 +689,40 @@ void Renderer::drawOverviewUI(Draw& draw) {
 }
 
 template<typename T>
+constexpr const char* handleName() {
+	if constexpr(std::is_same_v<T, Device>) return "Device";
+	if constexpr(std::is_same_v<T, Image>) return "Image";
+	if constexpr(std::is_same_v<T, ImageView>) return "ImageView";
+	if constexpr(std::is_same_v<T, Sampler>) return "Sampler";
+	if constexpr(std::is_same_v<T, Buffer>) return "Buffer";
+	if constexpr(std::is_same_v<T, CommandBuffer>) return "CommandBuffer";
+	if constexpr(std::is_same_v<T, CommandPool>) return "CommandPool";
+	if constexpr(std::is_same_v<T, DescriptorSet>) return "DescriptorSet";
+	if constexpr(std::is_same_v<T, DescriptorSetLayout>) return "DescriptorSetLayout";
+	if constexpr(std::is_same_v<T, DescriptorPool>) return "DescriptorPool";
+	if constexpr(std::is_same_v<T, PipelineLayout>) return "PipelineLayout";
+	if constexpr(std::is_same_v<T, GraphicsPipeline>) return "GraphicsPipeline";
+	if constexpr(std::is_same_v<T, ComputePipeline>) return "ComputePipeline";
+	if constexpr(std::is_same_v<T, Fence>) return "Fence";
+	if constexpr(std::is_same_v<T, Event>) return "Event";
+	if constexpr(std::is_same_v<T, Semaphore>) return "Semaphore";
+	if constexpr(std::is_same_v<T, RenderPass>) return "RenderPass";
+	if constexpr(std::is_same_v<T, Swapchain>) return "Swapchain";
+	if constexpr(std::is_same_v<T, Framebuffer>) return "Framebuffer";
+	if constexpr(std::is_same_v<T, DeviceMemory>) return "DeviceMemory";
+
+	return "<unknown>";
+}
+
+template<typename T>
 std::string name(const T& handle) {
-	std::string name = handle.name;
-	if(name.empty()) {
-		name = dlg::format("{} {}{}", typeid(handle).name(),
-			std::hex, handleToU64(handle.handle));
+	constexpr auto hn = handleName<T>();
+
+	std::string name;
+	if(handle.name.empty()) {
+		name = dlg::format("{} {}{}", hn, std::hex, handleToU64(handle.handle));
+	} else {
+		name = dlg::format("{} {}", hn, handle.name);
 	}
 
 	return name;
@@ -682,6 +745,9 @@ void Renderer::drawMemoryResourceUI(Draw&, MemoryResource& res) {
 }
 
 void Renderer::drawResourceUI(Draw& draw, Image& image) {
+	ImGui::Text("%s", name(image).c_str());
+	ImGui::Spacing();
+
 	if(selected.image.handle != image.handle) {
 		selected.image.handle = image.handle;
 
@@ -721,9 +787,6 @@ void Renderer::drawResourceUI(Draw& draw, Image& image) {
 			dlg_debug("not creating view due to swapchain image");
 		}
 	}
-
-	ImGui::Text("%s", image.name.c_str());
-	ImGui::Spacing();
 
 	// info
 	auto ci = bit_cast<vk::ImageCreateInfo>(image.ci);
@@ -1087,10 +1150,12 @@ void Renderer::drawResourceUI(Draw&, GraphicsPipeline& pipe) {
 
 				if(ImGui::TreeNode("Stencil Front")) {
 					printStencilState(pipe.depthStencilState.front);
+					ImGui::TreePop();
 				}
 
 				if(ImGui::TreeNode("Stencil Back")) {
 					printStencilState(pipe.depthStencilState.back);
+					ImGui::TreePop();
 				}
 			}
 			*/
@@ -1100,7 +1165,113 @@ void Renderer::drawResourceUI(Draw&, GraphicsPipeline& pipe) {
 		}
 	}
 
-	// TODO: shader data
+	ImGui::Text("Stages");
+	for(auto& stage : pipe.stages) {
+		if(ImGui::TreeNode(&stage, "%s", vk::name(vk::ShaderStageBits(stage.stage)))) {
+			ImGui::Text("Entry Point: %s", stage.entryPoint.c_str());
+			// TODO: spec data
+
+
+			auto& refl = nonNull(stage.spirv->reflection.get());
+			auto& entryPoint = nonNull(spvReflectGetEntryPoint(&refl, stage.entryPoint.c_str()));
+
+			// TODO: shader module info
+			// - source language
+			// - push constant blocks?
+			// - all entry points?
+			// - all descriptor sets?
+
+			ImGui::Text("Entry Point %s:", entryPoint.name);
+			ImGui::Text("Input variables");
+			for(auto i = 0u; i < entryPoint.input_variable_count; ++i) {
+				auto& iv = entryPoint.input_variables[i];
+
+				if(ImGui::TreeNode(&iv, "%d: %s", iv.location, iv.name)) {
+					AsColumns2({{
+						{"Format", "{}", vk::name(vk::Format(iv.format))},
+						{"Storage", "{}", iv.storage_class},
+					}});
+
+					ImGui::TreePop();
+				}
+			}
+
+			ImGui::Text("Output variables");
+			for(auto i = 0u; i < entryPoint.output_variable_count; ++i) {
+				auto& ov = entryPoint.output_variables[i];
+
+				if(ImGui::TreeNode(&ov, "%d: %s", ov.location, ov.name)) {
+					AsColumns2({{
+						{"Format", "{}", vk::name(vk::Format(ov.format))},
+						{"Storage", "{}", ov.storage_class},
+					}});
+
+					ImGui::TreePop();
+				}
+			}
+
+			ImGui::Text("Descriptor Sets");
+			for(auto i = 0u; i < entryPoint.descriptor_set_count; ++i) {
+				auto& ds = entryPoint.descriptor_sets[i];
+
+				if(ImGui::TreeNode(&ds, "Set %d", ds.set)) {
+					for(auto b = 0u; b < ds.binding_count; ++b) {
+						auto& binding = *ds.bindings[b];
+
+						std::string name = dlg::format("{}: {}",
+							binding.binding, vk::name(vk::DescriptorType(binding.descriptor_type)));
+						if(binding.count > 1) {
+							name += dlg::format("[{}]", binding.count);
+						}
+						name += " ";
+						name += binding.name;
+
+						ImGui::BulletText("%s", name.c_str());
+					}
+
+					ImGui::TreePop();
+				}
+			}
+
+			// TODO: only show for compute shaders
+			ImGui::Text("Workgroup size: %d %d %d",
+				entryPoint.local_size.x,
+				entryPoint.local_size.y,
+				entryPoint.local_size.z);
+
+			if(ImGui::Button("Open in Vim")) {
+				namespace fs = std::filesystem;
+
+				auto fileName = dlg::format("fuencaliente.{}.spv", (std::uint64_t) stage.spirv.get());
+				auto tmpPath = fs::temp_directory_path() / fileName;
+
+				bool launch = false;
+
+				{
+					auto of = std::ofstream(tmpPath, std::ios::out | std::ios::binary);
+					if(of.is_open()) {
+						of.write((const char*) stage.spirv->spv.data(), stage.spirv->spv.size() * 4);
+						of.flush();
+						launch = true;
+					}
+				}
+
+				// ugh, not exactly beautiful, i know
+				if(launch) {
+					auto cmd = dlg::format("termite -e 'nvim {}' &", tmpPath);
+					dlg_info("cmd: {}", cmd);
+					std::system(cmd.c_str());
+				}
+
+				// TODO: we should probably delete the file somehow...
+			}
+
+			// TODO: used push constants
+
+			ImGui::TreePop();
+		}
+	}
+
 	// TODO: color blend state
 	// TODO: tesselation
 }
@@ -1269,7 +1440,11 @@ void Renderer::drawResourceUI(Draw&, Framebuffer& fb) {
 	ImGui::Text("%s", name(fb).c_str());
 	ImGui::Spacing();
 
-	// TODO: info
+	AsColumns2({{
+		{"Width", "{}", fb.width},
+		{"Height", "{}", fb.height},
+		{"Layers", "{}", fb.layers},
+	}});
 
 	// Resource references
 	ImGui::Spacing();
@@ -1283,8 +1458,80 @@ void Renderer::drawResourceUI(Draw&, Framebuffer& fb) {
 	}
 }
 
-void Renderer::drawResourceUI(Draw&, RenderPass&) {
-	ImGui::Text("TODO");
+void Renderer::drawResourceUI(Draw&, RenderPass& rp) {
+	ImGui::Text("%s", name(rp).c_str());
+	ImGui::Spacing();
+
+	// info
+	// attachments
+	for(auto i = 0u; i < rp.info.attachments.size(); ++i) {
+		auto att = bit_cast<vk::AttachmentDescription>(rp.info.attachments[i]);
+		if(ImGui::TreeNode(&rp.info.attachments[i], "Attachment %d: %s", i, vk::name(att.format))) {
+			AsColumns2({{
+				{"Samples", "{}", vk::name(att.samples)},
+				{"Initial Layout", "{}", vk::name(att.initialLayout)},
+				{"Final Layout", "{}", vk::name(att.finalLayout)},
+				{"Flags", "{}", vk::name(att.flags).c_str()},
+				{"Load Op", "{}", vk::name(att.loadOp)},
+				{"Store Op", "{}", vk::name(att.storeOp)},
+				{"Stencil Load Op", "{}", vk::name(att.stencilLoadOp)},
+				{"Stencil Store Op", "{}", vk::name(att.stencilStoreOp)},
+			}});
+
+			ImGui::TreePop();
+		}
+	}
+
+	// subpasses
+	for(auto i = 0u; i < rp.info.subpasses.size(); ++i) {
+		auto subp = bit_cast<vk::SubpassDescription>(rp.info.subpasses[i]);
+		if(ImGui::TreeNode(&rp.info.subpasses[i], "Subpass %d", i)) {
+			AsColumns2({{
+				{"Pipeline Bind Point", "{}", vk::name(subp.pipelineBindPoint)},
+				{"Flags", "{}", vk::name(subp.flags).c_str()},
+			}});
+
+			ImGui::Separator();
+			if(subp.colorAttachmentCount) {
+				ImGui::Text("Color Attachments:");
+				for(auto c = 0u; c < subp.colorAttachmentCount; ++c) {
+					auto& att = subp.pColorAttachments[c];
+					ImGui::BulletText("%d, %s", att.attachment, vk::name(att.layout));
+				}
+			}
+
+			if(subp.inputAttachmentCount) {
+				ImGui::Text("Input Attachments:");
+				for(auto c = 0u; c < subp.inputAttachmentCount; ++c) {
+					auto& att = subp.pInputAttachments[c];
+					ImGui::BulletText("%d, %s", att.attachment, vk::name(att.layout));
+				}
+			}
+
+			if(subp.pDepthStencilAttachment) {
+				auto& att = *subp.pInputAttachments;
+				ImGui::Text("DepthStencil Attachment: %d, %s", att.attachment, vk::name(att.layout));
+			}
+
+			if(subp.preserveAttachmentCount) {
+				ImGui::Text("Preserve Attachments: ");
+				for(auto c = 0u; c < subp.preserveAttachmentCount; ++c) {
+					ImGui::SameLine();
+					ImGui::Text("%d ", subp.pPreserveAttachments[c]);
+				}
+			}
+
+			// TODO; resolve attachments...
+
+			ImGui::TreePop();
+		}
+	}
+
+	// TODO: dependencies
+}
+
+void Renderer::drawResourceUI(Draw&, SpirvData&) {
+	// TODO
 }
 
 void Renderer::drawCommandBufferInspector(Draw&, CommandBuffer& cb) {
@@ -1360,14 +1607,16 @@ void Renderer::drawResourceSelectorUI(Draw& draw) {
 void Renderer::drawGui(Draw& draw) {
 	ImGui::NewFrame();
 
+#if 0
 	ImGui::ShowDemoWindow();
 	ImGui::ShowAboutWindow();
 	ImGui::ShowMetricsWindow();
-
-	// ImGui::SetNextWindowPos({0, 0});
-	// ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-	// auto flags = ImGuiWindowFlags_NoDecoration;
 	auto flags = 0;
+#else
+	ImGui::SetNextWindowPos({0, 0});
+	ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+	auto flags = ImGuiWindowFlags_NoDecoration;
+#endif
 
 	std::shared_lock lock(dev->mutex);
 	if(ImGui::Begin("Fuencaliente", nullptr, flags)) {
@@ -1525,12 +1774,16 @@ void Renderer::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb, bool 
 }
 
 void Renderer::unselect(const Handle& handle) {
+	unselect(static_cast<const void*>(&handle));
+}
+
+void Renderer::unselect(const void* handle) {
 	// unselect handle
 	auto same = std::visit(Visitor{
 		[&](std::monostate) {
 			return false;
 		}, [&](auto& selected) {
-			return static_cast<const Handle*>(selected) == &handle;
+			return selected == handle;
 		}
 	}, selected.handle);
 
@@ -1539,7 +1792,7 @@ void Renderer::unselect(const Handle& handle) {
 	}
 
 	// special cases
-	if(selected.cb.cb == &handle) {
+	if(selected.cb.cb == handle) {
 		selected.cb.cb = {};
 	}
 }

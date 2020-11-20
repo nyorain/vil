@@ -50,7 +50,10 @@ struct Renderer {
 
 	struct {
 		std::variant<
+			// empty
 			std::monostate,
+
+			// handles
 			Image*,
 			ImageView*,
 			Sampler*,
@@ -66,7 +69,11 @@ struct Renderer {
 			GraphicsPipeline*,
 			ComputePipeline*,
 			PipelineLayout*,
-			ShaderModule*> handle;
+			ShaderModule*,
+
+			// custom stuff
+			SpirvData*
+		> handle;
 
 		// image data
 		struct {
@@ -119,6 +126,8 @@ public:
 	void drawResourceUI(Draw&, CommandBuffer&);
 	void drawResourceUI(Draw&, ShaderModule&);
 
+	void drawResourceUI(Draw&, SpirvData&);
+
 	void drawCommandBufferInspector(Draw&, CommandBuffer& cb);
 
 	void drawResourceSelectorUI(Draw&);
@@ -130,6 +139,7 @@ public:
 
 	// unselects the given handle, if it was selected.
 	void unselect(const Handle& handle);
+	void unselect(const void* handle);
 };
 
 // Can be associated with a VkSurfaceKHR
