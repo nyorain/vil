@@ -49,6 +49,7 @@ src = files(
 	'window.cpp',
 	'util.cpp',
 	'f16.cpp',
+	'api.cpp',
 
 	# vulkan api entrypoints
 	'handle.cpp',

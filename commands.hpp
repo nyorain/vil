@@ -80,7 +80,7 @@ struct NextSubpassCmd : SectionCommand {
 
 struct EndRenderPassCmd : Command {
 	void display() override {
-		ImGui::Text("EndRenderPassCmd");
+		ImGui::Text("CmdEndRenderPass");
 	}
 };
 

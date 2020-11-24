@@ -224,7 +224,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		VK_CHECK(devData.dispatch.vkCreateDescriptorPool(*dev, &dpci, nullptr, &devData.dsPool));
 	}
 
-	constexpr auto useWindow = true;
+	constexpr auto useWindow = false;
 	if(useWindow) {
 		devData.window = std::make_unique<DisplayWindow>();
 		devData.window->init(devData);

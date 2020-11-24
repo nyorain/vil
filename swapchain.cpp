@@ -23,8 +23,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	}
 
 	// TODO: try to simply reuse all of pCreateInfo->oldSwapchain.
-	auto pswapd = std::make_unique<Swapchain>();
-	auto& swapd = *pswapd;
+	auto& swapd = devd.swapchains.add(*pSwapchain);
 	swapd.dev = &devd;
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
@@ -46,14 +45,34 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		swapd.images[i] = &img;
 	}
 
-	// overlay?
-	constexpr auto overlay = false;
-	if(overlay) {
+	bool createOverlay = true;
+	if(pCreateInfo->oldSwapchain) {
+		// TODO: check if format and stuff stayed the same. Only then
+		// can we do this...
+		auto& oldChain = devd.swapchains.get(pCreateInfo->oldSwapchain);
+		if(oldChain.overlay) {
+			// have to make sure previous rendering has finished.
+			if(!oldChain.overlay->draws.empty()) {
+				std::vector<VkFence> fences;
+				for(auto& draw : oldChain.overlay->draws) {
+					fences.push_back(draw.fence);
+				}
+
+				VK_CHECK(devd.dispatch.vkWaitForFences(devd.handle, fences.size(), fences.data(), true, UINT64_MAX));
+			}
+
+			swapd.overlay = std::move(oldChain.overlay);
+			swapd.overlay->swapchain = &swapd;
+			swapd.overlay->initRenderBuffers();
+			createOverlay = false;
+		}
+	}
+
+	if(createOverlay) {
 		swapd.overlay = std::make_unique<Overlay>();
 		swapd.overlay->init(swapd);
 	}
 
-	devd.swapchains.mustEmplace(*pSwapchain, std::move(pswapd));
 	return result;
 }
 
@@ -82,7 +101,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	for(auto i = 0u; i < pPresentInfo->swapchainCount; ++i) {
 		auto& swapchain = qd.dev->swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
-		if(swapchain.overlay) {
+		if(swapchain.overlay && swapchain.overlay->show) {
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
 		} else {

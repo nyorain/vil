@@ -355,7 +355,7 @@ void DisplayWindow::mainLoop() {
 		io.DisplaySize.y = sci.imageExtent.height;
 		renderer.ensureFontAtlas(draw.cb);
 
-		renderer.drawGui(draw);
+		renderer.drawGui(draw, true);
 		renderer.uploadDraw(draw);
 
 

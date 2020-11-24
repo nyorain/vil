@@ -144,7 +144,7 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdEndDebugUtilsLabelEXT),
 
    // TODO: make optional
-   FUEN_HOOK(CreateWaylandSurfaceKHR),
+   // FUEN_HOOK(CreateWaylandSurfaceKHR),
 
    FUEN_HOOK(DestroySurfaceKHR),
 

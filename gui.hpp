@@ -133,7 +133,7 @@ public:
 	void drawResourceSelectorUI(Draw&);
 	void drawOverviewUI(Draw&);
 
-	void drawGui(Draw&);
+	void drawGui(Draw&, bool fullscreen);
 	void uploadDraw(Draw&);
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, bool force);
 
@@ -155,8 +155,10 @@ struct Overlay {
 	std::vector<RenderBuffer> buffers;
 	std::vector<Draw> draws;
 	Platform* platform;
+	bool show {};
 
 	void init(Swapchain& swapchain);
+	void initRenderBuffers(); // called from init
 	VkResult drawPresent(Queue& queue, span<const VkSemaphore>, u32 imageIdx);
 };
 

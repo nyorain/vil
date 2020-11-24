@@ -160,11 +160,16 @@ void Draw::init(Device& dev) {
 // Overlay
 void Overlay::init(Swapchain& swapchain) {
 	this->swapchain = &swapchain;
-	this->platform = findData<Platform>(swapchain.ci.surface);
+	// this->platform = findData<Platform>(swapchain.ci.surface);
 	this->renderer.init(*swapchain.dev, swapchain.ci.imageFormat, false);
 
+}
+
+void Overlay::initRenderBuffers() {
+	auto& swapchain = *this->swapchain;
 	auto& dev = *swapchain.dev;
 
+	buffers.clear(); // remove old
 	buffers.resize(swapchain.images.size());
 	for(auto i = 0u; i < swapchain.images.size(); ++i) {
 		buffers[i].init(dev, swapchain.images[i]->handle,
@@ -204,12 +209,12 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	renderer.ensureFontAtlas(draw.cb);
 
 	// if there is a platform (for input stuff), update it
-	if(platform) {
-		platform->update();
-	}
+	// if(platform) {
+	// 	platform->update();
+	// }
 
 	// render gui
-	renderer.drawGui(draw);
+	renderer.drawGui(draw, false);
 	renderer.uploadDraw(draw);
 	renderer.recordDraw(draw, swapchain->ci.imageExtent, buffers[imageIdx].fb, false);
 
@@ -1509,7 +1514,7 @@ void Renderer::drawResourceUI(Draw&, RenderPass& rp) {
 			}
 
 			if(subp.pDepthStencilAttachment) {
-				auto& att = *subp.pInputAttachments;
+				auto& att = *subp.pDepthStencilAttachment;
 				ImGui::Text("DepthStencil Attachment: %d, %s", att.attachment, vk::name(att.layout));
 			}
 
@@ -1604,19 +1609,22 @@ void Renderer::drawResourceSelectorUI(Draw& draw) {
 	ImGui::EndChild();
 }
 
-void Renderer::drawGui(Draw& draw) {
+void Renderer::drawGui(Draw& draw, bool fullscreen) {
 	ImGui::NewFrame();
 
-#if 0
-	ImGui::ShowDemoWindow();
-	ImGui::ShowAboutWindow();
-	ImGui::ShowMetricsWindow();
-	auto flags = 0;
-#else
-	ImGui::SetNextWindowPos({0, 0});
-	ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-	auto flags = ImGuiWindowFlags_NoDecoration;
-#endif
+	unsigned flags = 0u;
+	if(fullscreen) {
+		ImGui::SetNextWindowPos({0, 0});
+		ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+		flags = ImGuiWindowFlags_NoDecoration;
+	} else {
+		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
+		ImGui::SetNextWindowSize({800, 500}, ImGuiCond_Once);
+		// ImGui::ShowDemoWindow();
+		// ImGui::ShowAboutWindow();
+		// ImGui::ShowMetricsWindow();
+		// auto flags = 0;
+	}
 
 	std::shared_lock lock(dev->mutex);
 	if(ImGui::Begin("Fuencaliente", nullptr, flags)) {
