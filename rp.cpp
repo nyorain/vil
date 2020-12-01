@@ -23,6 +23,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	fb.height = pCreateInfo->height;
 	fb.layers = pCreateInfo->layers;
 	fb.handle = *pFramebuffer;
+	fb.rp = dev.renderPasses.get(pCreateInfo->renderPass).desc;
 	fb.dev = &dev;
 
 	for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
@@ -72,9 +73,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 	auto& rp = dev.renderPasses.add(*pRenderPass);
 	rp.dev = &dev;
 	rp.handle = *pRenderPass;
-	rp.info.subpasses = {pCreateInfo->pSubpasses, pCreateInfo->pSubpasses + pCreateInfo->subpassCount};
-	rp.info.dependencies = {pCreateInfo->pDependencies, pCreateInfo->pDependencies + pCreateInfo->dependencyCount};
-	rp.info.attachments = {pCreateInfo->pAttachments, pCreateInfo->pAttachments + pCreateInfo->attachmentCount};
+
+	rp.desc = std::make_shared<RenderPassDesc>();
+	rp.desc->subpasses = {pCreateInfo->pSubpasses, pCreateInfo->pSubpasses + pCreateInfo->subpassCount};
+	rp.desc->dependencies = {pCreateInfo->pDependencies, pCreateInfo->pDependencies + pCreateInfo->dependencyCount};
+	rp.desc->attachments = {pCreateInfo->pAttachments, pCreateInfo->pAttachments + pCreateInfo->attachmentCount};
 
 	return res;
 }

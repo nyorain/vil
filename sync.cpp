@@ -15,6 +15,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 	}
 
 	auto& fence = dev.fences.add(*pFence);
+	fence.objectType = VK_OBJECT_TYPE_FENCE;
 	fence.dev = &dev;
 	fence.handle = *pFence;
 
@@ -164,6 +165,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
 	}
 
 	auto& semaphore = dev.semaphores.add(*pSemaphore);
+	semaphore.objectType = VK_OBJECT_TYPE_SEMAPHORE;
 	semaphore.dev = &dev;
 	semaphore.handle = *pSemaphore;
 
@@ -192,6 +194,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
 	}
 
 	auto& event = dev.events.add(*pEvent);
+	event.objectType = VK_OBJECT_TYPE_EVENT;
 	event.dev = &dev;
 	event.handle = *pEvent;
 

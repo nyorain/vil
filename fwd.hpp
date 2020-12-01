@@ -3,9 +3,6 @@
 // Make sure to *never* include them
 #define VK_NO_PROTOTYPES
 
-// TODO: leave to build system/config file
-#define VK_USE_PLATFORM_WAYLAND_KHR
-
 #include <vkpp/span.hpp>
 
 // yep, this is bad.
@@ -17,6 +14,9 @@ namespace fuen {
 
 // C++20: replace with std::span
 using nytl::span;
+
+class Renderer;
+class Gui;
 
 struct Device;
 struct Instance;
@@ -43,13 +43,15 @@ struct GraphicsPipeline;
 struct PipelineLayout;
 struct Sampler;
 struct MemoryResource;
+struct RenderPassDesc;
 
 struct Command;
 struct SectionCommand;
 
-struct Renderer;
+struct RenderData;
 struct DisplayWindow;
 struct Overlay;
+struct Draw;
 
 struct SpirvData;
 
@@ -60,6 +62,12 @@ using u64 = std::uint64_t;
 
 using i16 = std::int16_t;
 using i32 = std::int32_t;
+
+struct DescriptorSetRef {
+	DescriptorSet* ds;
+	u32 binding {};
+	u32 elem {};
+};
 
 } // namespace fuen
 

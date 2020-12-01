@@ -7,20 +7,26 @@
 
 namespace fuen {
 
+template<typename T>
+struct SmartPtrFactory;
+
 // Synchronized unordered map.
-// Elements are stored in unique_ptr's, making sure that as long as two
+// Elements are stored in P<T>'s (where P should be a smart pointer type such
+// as unique_ptr or shared_ptr) making sure that as long as two
 // threads never operate on the same entry and lookup/creation/destruction
 // of entries is synchronized, everything just works.
 // You should never (outside of a lock and we try to limit the locks to
 // the immediate lookup/creation/destruction sections) work with iterators
-// or unique_ptr<Value> refs of this map since they might get destroyed
-// at *any* moment, when the unordered map needs a rehash.
-template<typename K, typename T>
-class SyncedUniqueUnorderedMap {
+// or P<T> refs of this map since they might get destroyed
+// at *any* moment, when the unordered map needs a rehash. But the underlying
+// elements are guaranteed to survive.
+// The mutex will always be unlocked when the destructor of an object is run.
+template<typename K, typename T, template<typename...> typename P>
+class SyncedUnorderedMap {
 public:
-	using UnorderedMap = std::unordered_map<K, std::unique_ptr<T>>;
+	using UnorderedMap = std::unordered_map<K, P<T>>;
 
-	std::unique_ptr<T> move(const K& key) {
+	P<T> move(const K& key) {
 		std::lock_guard lock(*mutex);
 		auto it = map.find(key);
 		if(it == map.end()) {
@@ -32,22 +38,27 @@ public:
 		return ret;
 	}
 
-	std::unique_ptr<T> mustMove(const K& key) {
+	P<T> mustMove(const K& key) {
 		auto ret = move(key);
 		assert(ret);
 		return ret;
 	}
 
+	// Make sure to run destructor outside of lock
 	std::size_t erase(const K& key) {
-		std::lock_guard lock(*mutex);
-		return map.erase(key);
+		// std::lock_guard lock(*mutex);
+		// return map.erase(key);
+		auto ptr = move(key);
+		return ptr ? 1u : 0u;
 	}
 
-	std::size_t mustErase(const K& key) {
-		std::lock_guard lock(*mutex);
-		auto count = map.erase(key);
-		assert(count);
-		return count;
+	void mustErase(const K& key) {
+		// std::lock_guard lock(*mutex);
+		// auto count = map.erase(key);
+		// assert(count);
+		// return count;
+		auto ptr = mustMove(key);
+		(void) ptr;
 	}
 
 	T* find(const K& key) {
@@ -79,7 +90,7 @@ public:
 	}
 
 	// emplace methods may be counter-intuitive.
-	// You must actually pass a unique_ptr<T> as value.
+	// You must actually pass a P<T> as value.
 	// Might wanna use add() instead.
 	template<class... Args>
 	std::pair<T*, bool> emplace(Args&&... args) {
@@ -98,7 +109,7 @@ public:
 	// Asserts that element is really new
 	template<typename V = T, class... Args>
 	T& add(const K& key, Args&&... args) {
-		auto elem = std::make_unique<V>(std::forward<Args>(args)...);
+		auto elem = SmartPtrFactory<P<V>>::create(std::forward<Args>(args)...);
 		return this->mustEmplace(key, std::move(elem));
 	}
 
@@ -113,9 +124,54 @@ public:
 		return map.size();
 	}
 
+	// Only allowed to call this function when P<T> is copyable.
+	// Useful for shared pointers.
+	template<typename = void>
+	P<T> getPtr(const K& key) {
+		static_assert(std::is_copy_constructible_v<P<T>>);
+		std::shared_lock lock(*mutex);
+		auto it = map.find(key);
+		assert(it != map.end());
+		return *it->second.get();
+	}
+
+	template<typename = void>
+	P<T> findPtr(const K& key) {
+		static_assert(std::is_copy_constructible_v<P<T>>);
+		std::shared_lock lock(*mutex);
+		auto it = map.find(key);
+		if(it == map.end()) {
+			return {};
+		}
+
+		return *it->second.get();
+	}
+
 	// Can also be used directly, but take care!
 	std::shared_mutex* mutex;
 	UnorderedMap map;
 };
+
+template<typename T>
+struct SmartPtrFactory<std::unique_ptr<T>> {
+	template<typename... Args>
+	static std::unique_ptr<T> create(Args&&... args) {
+		return std::make_unique<T>(std::forward<Args>(args)...);
+	}
+};
+
+template<typename T>
+struct SmartPtrFactory<std::shared_ptr<T>> {
+	template<typename... Args>
+	static std::shared_ptr<T> create(Args&&... args) {
+		return std::make_shared<T>(std::forward<Args>(args)...);
+	}
+};
+
+template<typename K, typename T>
+using SyncedUniqueUnorderedMap = SyncedUnorderedMap<K, T, std::unique_ptr>;
+
+template<typename K, typename T>
+using SyncedSharedUnorderedMap = SyncedUnorderedMap<K, T, std::shared_ptr>;
 
 } // namespace fuen

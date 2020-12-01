@@ -1,12 +1,133 @@
 #pragma once
 
 #include "device.hpp"
+#include "renderer.hpp"
 #include <variant>
 
 struct ImGuiContext;
+struct ImGuiIO;
 
 namespace fuen {
 
+class Gui {
+public:
+	enum class Tab {
+		overview,
+		resources,
+		commandBuffer,
+
+		// TODO
+		// image,
+		// buffer
+	};
+
+public:
+	void init(Device& dev);
+	~Gui();
+
+	void draw(Draw&, bool fullscreen);
+	void makeImGuiCurrent();
+
+	void unselect(const Handle& handle);
+	void activateTab(Tab);
+
+	template<typename T>
+	void select(T& handle, bool activateTab = true) {
+		selected_.handle = handle;
+		if(activateTab) {
+			this->activateTab(Tab::overview);
+		}
+	}
+
+	VkImage selectedImage() const { return selected_.image.handle; }
+	bool selectedImageViewable() const { return (selected_.image.view); }
+	VkImageAspectFlagBits selectedImageAspect() const { return selected_.image.aspectMask; }
+	ImGuiIO& imguiIO() const { return *io_; }
+
+private:
+	void drawMemoryResourceUI(Draw&, MemoryResource&);
+	void drawResourceUI(Draw&, Image&);
+	void drawResourceUI(Draw&, ImageView&);
+	void drawResourceUI(Draw&, Framebuffer&);
+	void drawResourceUI(Draw&, RenderPass&);
+	void drawResourceUI(Draw&, Buffer&);
+	void drawResourceUI(Draw&, Sampler&);
+	void drawResourceUI(Draw&, DescriptorSet&);
+	void drawResourceUI(Draw&, DescriptorPool&);
+	void drawResourceUI(Draw&, DescriptorSetLayout&);
+	void drawResourceUI(Draw&, GraphicsPipeline&);
+	void drawResourceUI(Draw&, ComputePipeline&);
+	void drawResourceUI(Draw&, PipelineLayout&);
+	void drawResourceUI(Draw&, DeviceMemory&);
+	void drawResourceUI(Draw&, CommandPool&);
+	void drawResourceUI(Draw&, CommandBuffer&);
+	void drawResourceUI(Draw&, ShaderModule&);
+
+	void drawCommandBufferInspector(Draw&, CommandBuffer& cb);
+
+	void drawResourceSelectorUI(Draw&);
+	void drawOverviewUI(Draw&);
+
+private:
+	Device* dev_ {};
+	ImGuiContext* imgui_ {};
+	ImGuiIO* io_ {};
+
+	std::string search_;
+	int filter_ {0};
+
+	using HandleVariant = std::variant<
+		std::monostate, // empty
+		Image*,
+		ImageView*,
+		Sampler*,
+		Framebuffer*,
+		RenderPass*,
+		Buffer*,
+		DeviceMemory*,
+		CommandBuffer*,
+		CommandPool*,
+		DescriptorPool*,
+		DescriptorSet*,
+		DescriptorSetLayout*,
+		GraphicsPipeline*,
+		ComputePipeline*,
+		PipelineLayout*,
+		ShaderModule*>;
+
+	struct {
+		HandleVariant handle;
+
+		// Image data
+		struct {
+			VkImage handle {};
+			VkImageView view {};
+			VkImageAspectFlagBits aspectMask {};
+		} image;
+
+		// For command buffer selector tab.
+		struct {
+			CommandBuffer* cb {}; // the selected command buffer
+			const Command* command {}; // the selected command inside the cb
+			u32 resetCount {}; // the resetCount of cb at which teh command was valid
+		} cb;
+
+		// Data for the buffer viewer
+		struct {
+			VkBuffer handle {};
+		} buffer;
+
+		// These two can be used to activate a tab:
+		// Set tab to the tab id to be actived and tabCounter to zero.
+		// Due the way ImGui is designed we need some hackery, activating
+		// the tab for multiple frames, that's what counter is for.
+		Tab tab {};
+		u32 tabCounter {10};
+	} selected_;
+
+};
+
+/*
 struct RenderBuffer {
 	Device* dev {};
 	VkImage image {};
@@ -17,6 +138,7 @@ struct RenderBuffer {
 	~RenderBuffer();
 };
 
+
 // All data used for drawing a single frame of the overlay.
 struct Draw {
 	struct Buffer {
@@ -24,11 +146,15 @@ struct Draw {
 		VkDeviceMemory mem {};
 		VkDeviceSize size {};
 
+		// Will ensure the buffer has at least the given size.
+		// If not, will recreate it with the given size and usage.
+		// Always uses host visible memory.
 		void ensure(Device& dev, VkDeviceSize, VkBufferUsageFlags);
 	};
 
 	Buffer vertexBuffer;
 	Buffer indexBuffer;
+	Buffer readbackBuffer; // TODO: use!
 	VkCommandBuffer cb;
 	VkSemaphore semaphore;
 	VkFence fence;
@@ -85,8 +211,20 @@ struct Renderer {
 		// For command buffer selector
 		struct {
 			CommandBuffer* cb {};
-			u32 selectTabCounter {};
+			const Command* command {};
+			u32 resetCount {}; // for command
 		} cb;
+
+		struct {
+			std::vector<std::byte> data;
+		} buffer;
+
+		// These two can be used to activate a tab:
+		// Set tab to the tab id to be actived and tabCounter to zero.
+		// Due the way ImGui is designed we need some hackery, activating
+		// the tab for multiple frames, that's what counter is for.
+		u32 tab {};
+		u32 tabCounter {10};
 	} selected;
 
 	struct {
@@ -161,5 +299,6 @@ struct Overlay {
 	void initRenderBuffers(); // called from init
 	VkResult drawPresent(Queue& queue, span<const VkSemaphore>, u32 imageIdx);
 };
+*/
 
 } // namespace fuen

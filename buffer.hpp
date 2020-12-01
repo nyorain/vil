@@ -8,6 +8,8 @@ namespace fuen {
 struct Buffer : MemoryResource {
 	VkBuffer handle {};
 	VkBufferCreateInfo ci;
+
+	std::vector<DescriptorSetRef> descriptors;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(

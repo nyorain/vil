@@ -1,6 +1,8 @@
 #pragma once
 
+#include "fwd.hpp"
 #include "device.hpp"
+#include "cbState.hpp"
 #include <vector>
 #include <memory>
 
@@ -11,52 +13,9 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 };
 
-// Contains all bound state
-struct PushConstantData {
-	std::vector<std::byte> data;
-	std::vector<std::pair<VkDeviceSize, VkDeviceSize>> ranges; // (offset, size)[]
-};
-
-using PushConstantMap = std::unordered_map<VkShaderStageFlagBits, PushConstantData>;
-
-struct BoundDescriptorSet {
-	DescriptorSet* ds {};
-	PipelineLayout* layout {};
-	std::vector<u32> dynamicOffsets;
-};
-
-struct DescriptorState {
-	std::vector<BoundDescriptorSet> descriptorSets;
-
-	void bind(PipelineLayout& layout, u32 firstSet,
-		span<DescriptorSet* const> sets, span<const u32> offsets);
-};
-
-struct BoundVertexBuffer {
-	Buffer* buffer {};
-	VkDeviceSize offset {};
-};
-
-struct BoundIndexBuffer {
-	Buffer* buffer {};
-	VkIndexType type {};
-	VkDeviceSize offset {};
-};
-
-struct GraphicsState : DescriptorState {
-	BoundIndexBuffer indices;
-	std::vector<BoundVertexBuffer> vertices;
-	GraphicsPipeline* pipe;
-	RenderPass* rp;
-
-	// TODO: dynamic pipeline states
-};
-
-struct ComputeState : DescriptorState {
-	ComputePipeline* pipe;
-};
-
 struct CommandBuffer : DeviceHandle {
+	// We don't use shared pointers here, they are used in the
+	// commands referencing the handles.
 	struct UsedImage {
 		Image* image {};
 		VkImageLayout finalLayout {};
@@ -67,13 +26,24 @@ struct CommandBuffer : DeviceHandle {
 	struct UsedBuffer {
 		Buffer* buffer {};
 		std::vector<Command*> commands;
+		// can we determine potentially used bounds?
+	};
+
+	// General definition covering all cases of handles not covered
+	// above.
+	struct UsedHandle {
+		Handle* handle;
+		std::vector<Command*> commands;
 	};
 
 	CommandPool* pool {};
 	VkCommandBuffer handle {};
+
 	std::vector<std::unique_ptr<Command>> commands;
+
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
+	std::unordered_map<std::uint64_t, UsedHandle> handles;
 
 	std::vector<SectionCommand*> sections {}; // stack
 	u32 resetCount {};
@@ -86,12 +56,17 @@ struct CommandBuffer : DeviceHandle {
 		PipelineLayout* layout;
 	} pushConstants;
 
-	// CommandBuffers are mutable, need a mutex to make sure they
-	// aren't modified while read by us.
-	std::mutex mutex;
+	// Whether the command buffer is in invalid state. Check this while locking
+	// the command buffers mutex. And if this is true, all leftover
+	// recording state may contain dangling pointers to resources so should
+	// not be used!
+	bool invalid {};
 
 	// pending submissions
 	std::vector<PendingSubmission*> pending;
+
+	// Moves the command buffer to invalid state.
+	void makeInvalid();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(

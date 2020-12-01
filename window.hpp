@@ -1,6 +1,7 @@
 #pragma once
 
 #include "device.hpp"
+#include "renderer.hpp"
 #include "gui.hpp"
 #include <thread>
 
@@ -9,12 +10,13 @@ struct swa_window;
 
 namespace fuen {
 
-// swa display
+// Creates a new window using swa and displays the overlay in it.
 struct DisplayWindow {
 	swa_display* display;
 	swa_window* window;
 	Device* dev;
 	Renderer renderer;
+	Gui gui;
 
 	VkSurfaceKHR surface {};
 	VkSwapchainKHR swapchain {};

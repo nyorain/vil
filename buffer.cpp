@@ -15,8 +15,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	}
 
 	auto& buf = dev.buffers.add(*pBuffer);
-	buf.ci = *pCreateInfo;
+	buf.objectType = VK_OBJECT_TYPE_BUFFER;
 	buf.dev = &dev;
+	buf.ci = *pCreateInfo;
 	buf.handle = *pBuffer;
 
 	return res;

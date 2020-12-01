@@ -39,12 +39,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		auto& pipe = dev.graphicsPipes.add(pPipelines[i]);
 		pipe.dev = &dev;
+		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
+		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		pipe.handle = pPipelines[i];
 		pipe.layout = &dev.pipeLayouts.get(pci.layout);
-		pipe.renderPass = &dev.renderPasses.get(pci.renderPass);
+		pipe.renderPass = dev.renderPasses.get(pci.renderPass).desc;
 		pipe.subpass = pci.subpass;
 
-		auto& subpassInfo = pipe.renderPass->info.subpasses[pipe.subpass];
+		auto& subpassInfo = pipe.renderPass->subpasses[pipe.subpass];
 
 		pipe.hasTessellation = false;
 		pipe.hasMeshShader = false;
@@ -148,6 +150,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		dlg_assert(pPipelines[i]);
 
 		auto& pipe = dev.computePipes.add(pPipelines[i]);
+		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
+		pipe.type = VK_PIPELINE_BIND_POINT_COMPUTE;
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
 		pipe.layout = &dev.pipeLayouts.get(pCreateInfos[i].layout);
@@ -183,6 +187,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 	}
 
 	auto& pl = dev.pipeLayouts.add(*pPipelineLayout);
+	pl.objectType = VK_OBJECT_TYPE_PIPELINE_LAYOUT;
 	pl.dev = &dev;
 	pl.handle = *pPipelineLayout;
 

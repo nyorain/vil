@@ -1,6 +1,7 @@
 #include "swapchain.hpp"
 #include "data.hpp"
 #include "image.hpp"
+#include "overlay.hpp"
 #include "gui.hpp"
 
 namespace fuen {
@@ -24,6 +25,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 
 	// TODO: try to simply reuse all of pCreateInfo->oldSwapchain.
 	auto& swapd = devd.swapchains.add(*pSwapchain);
+	swapd.objectType = VK_OBJECT_TYPE_SWAPCHAIN_KHR;
 	swapd.dev = &devd;
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
@@ -45,10 +47,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		swapd.images[i] = &img;
 	}
 
-	bool createOverlay = true;
+	devd.lastCreatedSwapchain = &swapd;
+
 	if(pCreateInfo->oldSwapchain) {
 		// TODO: check if format and stuff stayed the same. Only then
 		// can we do this...
+		// check out vulkan guarantees for the oldSwapchain member
 		auto& oldChain = devd.swapchains.get(pCreateInfo->oldSwapchain);
 		if(oldChain.overlay) {
 			// have to make sure previous rendering has finished.
@@ -64,13 +68,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 			swapd.overlay = std::move(oldChain.overlay);
 			swapd.overlay->swapchain = &swapd;
 			swapd.overlay->initRenderBuffers();
-			createOverlay = false;
 		}
-	}
-
-	if(createOverlay) {
-		swapd.overlay = std::make_unique<Overlay>();
-		swapd.overlay->init(swapd);
 	}
 
 	return result;
@@ -87,7 +85,15 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		devd.images.mustErase(img->handle);
 	}
 
-	devd.swapchains.mustErase(swapchain);
+	{
+		auto sc = devd.swapchains.mustMove(swapchain);
+		{
+			std::lock_guard lock(devd.mutex);
+			if(devd.lastCreatedSwapchain == sc.get()) {
+				devd.lastCreatedSwapchain = nullptr;
+			}
+		}
+	}
 
 	devd.dispatch.vkDestroySwapchainKHR(device, swapchain, pAllocator);
 }

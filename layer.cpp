@@ -103,13 +103,13 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		VkInstance                                  instance,
 		VkSurfaceKHR                                surface,
 		const VkAllocationCallbacks*                pAllocator) {
-	auto platform = moveDataOpt<Platform>(surface); // destroy it
+	// auto platform = moveDataOpt<Platform>(surface); // destroy it
 	auto& ini = getData<Instance>(instance);
 	ini.dispatch.vkDestroySurfaceKHR(instance, surface, pAllocator);
 }
 
-VKAPI_CALL PFN_vkVoidFunction GetInstanceProcAddr(VkInstance, const char*);
-VKAPI_CALL PFN_vkVoidFunction GetDeviceProcAddr(VkDevice, const char*);
+VKAPI_ATTR PFN_vkVoidFunction GetInstanceProcAddr(VkInstance, const char*);
+VKAPI_ATTR PFN_vkVoidFunction GetDeviceProcAddr(VkDevice, const char*);
 
 #define FUEN_HOOK(fn) { "vk" # fn, (void *) fn }
 #define FUEN_ALIAS(alias, fn) { "vk" # alias, (void *) ## fn }
@@ -174,6 +174,8 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    // memory.hpp
    FUEN_HOOK(AllocateMemory),
    FUEN_HOOK(FreeMemory),
+   FUEN_HOOK(MapMemory),
+   FUEN_HOOK(UnmapMemory),
 
    // shader.hpp
    FUEN_HOOK(CreateShaderModule),
@@ -299,13 +301,22 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice dev, const c
 
 } // namespace fuen
 
+// TODO: not sure why we need this on windows
+#ifdef _WIN32
+	#define FUEN_EXPORT __declspec(dllexport)
+#else
+	#define FUEN_EXPORT VK_LAYER_EXPORT
+#endif
+
 // Global layer entry points
-extern "C" VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+extern "C" FUEN_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkGetInstanceProcAddr(VkInstance ini, const char* funcName) {
+   dlg_info("fuen get ini proc addr");
 	return fuen::GetInstanceProcAddr(ini, funcName);
 }
 
-extern "C" VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+extern "C" FUEN_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkGetDeviceProcAddr(VkDevice dev, const char* funcName) {
+   dlg_info("fuen get device proc addr");
 	return fuen::GetDeviceProcAddr(dev, funcName);
 }

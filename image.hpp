@@ -28,13 +28,14 @@ struct ImageView : DeviceHandle {
 	VkImageViewCreateInfo ci;
 
 	std::vector<Framebuffer*> fbs;
-	// std::vector<DescriptorSet*> descriptors;
-	// std::vector<CommandBuffers*> cbs;
+	std::vector<DescriptorSetRef> descriptors;
 };
 
 struct Sampler : DeviceHandle {
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
+
+	std::vector<DescriptorSetRef> descriptors;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateImage(

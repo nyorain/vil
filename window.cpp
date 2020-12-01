@@ -224,6 +224,7 @@ bool DisplayWindow::init(Device& dev) {
 
 	this->draw.init(dev);
 	this->renderer.init(dev, sci.imageFormat, true);
+	this->gui.init(dev);
 	initBuffers();
 
 	this->thread = std::thread([&]{ mainLoop(); });
@@ -353,10 +354,10 @@ void DisplayWindow::mainLoop() {
 
 		io.DisplaySize.x = sci.imageExtent.width;
 		io.DisplaySize.y = sci.imageExtent.height;
-		renderer.ensureFontAtlas(draw.cb);
 
-		renderer.drawGui(draw, true);
-		renderer.uploadDraw(draw);
+		gui.draw(draw, true);
+		auto& drawData = *ImGui::GetDrawData();
+		renderer.uploadDraw(draw, drawData);
 
 
 		// pretty long, terrible critical section...
@@ -369,6 +370,8 @@ void DisplayWindow::mainLoop() {
 			// no new submissions are added
 			std::lock_guard lock(dev.mutex);
 
+			// TODO: move to gui/renderer
+
 			// Make sure relevant command buffers have completed (and check
 			// for latest image layout).
 			// We do this while holding the queue lock to make sure
@@ -377,8 +380,8 @@ void DisplayWindow::mainLoop() {
 			// even tho hard (semaphore pool is harder to manage than
 			// fence pool since we can't reset)
 			VkImageLayout finalLayout;
-			Image** selImg = std::get_if<Image*>(&renderer.selected.handle);
-			if(!renderer.selected.image.view) {
+			Image** selImg = std::get_if<Image*>(&gui.selected_.handle);
+			if(!gui.selected_.image.view) {
 				selImg = {};
 			}
 

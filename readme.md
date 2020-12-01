@@ -5,10 +5,10 @@ as much introspection as possible via a debug window.
 
 Work in progress, this is pretty much just a skeleton right now.
 
-Features:
+(Planned) Features:
 - showing all created resources, their usage, content and connection
 	- can be identified via debug names
-	- visualize content of images and see buffer content
+	- visualize content of images and see buffer content, see changed live
 	- take temporary snapshots of resources; "freeze" them to inspection
 - inspect recorded and executing command buffers with gpu timings
 	- quickly inspect pipeline state

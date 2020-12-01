@@ -7,30 +7,31 @@
 
 namespace fuen {
 
+struct RenderPassDesc {
+	std::vector<VkAttachmentDescription> attachments;
+	std::vector<VkSubpassDescription> subpasses;
+	std::vector<VkSubpassDependency> dependencies;
+};
+
 struct RenderPass : DeviceHandle {
 	VkRenderPass handle {};
 
-	struct {
-		std::vector<VkAttachmentDescription> attachments;
-		std::vector<VkSubpassDescription> subpasses;
-		std::vector<VkSubpassDependency> dependencies;
-	} info;
+	// Render passes can be destroyed after they were used to create
+	// framebuffers or pipelines, the created handles must just be
+	// compatible. To know this information, we keep the description
+	// of the render pass alive until all associated handles were destroyed.
+	std::shared_ptr<RenderPassDesc> desc;
 };
 
 struct Framebuffer : DeviceHandle {
 	VkFramebuffer handle {};
 
 	std::vector<ImageView*> attachments;
+	std::shared_ptr<RenderPassDesc> rp {};
 
-	// NOTE: we don't store the renderpass a framebuffer was created
-	// with here since the renderpass might be destroyed (and instead a
-	// compatible one used in render pass begin). We should just store
-	// the relevant render pass info
-	// RenderPass* rp;
-
-	u32 width;
-	u32 height;
-	u32 layers;
+	u32 width {};
+	u32 height {};
+	u32 layers {};
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(

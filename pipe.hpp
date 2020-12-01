@@ -4,14 +4,10 @@
 #include "shader.hpp"
 
 #include <memory>
+#include <cstdlib>
 #include <unordered_set>
 
 namespace fuen {
-
-enum class PipelineType {
-	graphics,
-	compute,
-};
 
 struct PipelineShaderStage {
 	VkShaderStageFlagBits stage;
@@ -27,8 +23,8 @@ struct PipelineShaderStage {
 
 struct Pipeline : DeviceHandle {
 	VkPipeline handle {};
-	PipelineType type;
-	PipelineLayout* layout;
+	VkPipelineBindPoint type {};
+	PipelineLayout* layout {};
 
 protected:
 	// Make sure Pipeline objects are not created.
@@ -37,7 +33,7 @@ protected:
 };
 
 struct GraphicsPipeline : Pipeline {
-	RenderPass* renderPass {};
+	std::shared_ptr<RenderPassDesc> renderPass {};
 	u32 subpass {};
 
 	std::vector<VkPipelineColorBlendAttachmentState> blendAttachments;

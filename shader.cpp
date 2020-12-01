@@ -23,6 +23,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	}
 
 	auto& mod = dev.shaderModules.add(*pShaderModule);
+	mod.objectType = VK_OBJECT_TYPE_SHADER_MODULE;
 	mod.dev = &dev;
 	mod.handle = *pShaderModule;
 

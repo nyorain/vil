@@ -26,6 +26,10 @@ struct DeviceMemory : DeviceHandle {
 	u32 typeIndex {};
 	VkDeviceSize size {};
 
+	void* map {}; // nullptr if not mapped
+	VkDeviceSize mapOffset {};
+	VkDeviceSize mapSize {};
+
 	struct Allocation {
 		VkDeviceSize offset;
 		VkDeviceSize size;
@@ -51,5 +55,17 @@ VKAPI_ATTR void VKAPI_CALL FreeMemory(
     VkDevice                                    device,
     VkDeviceMemory                              memory,
     const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
+    VkDevice                                    device,
+    VkDeviceMemory                              memory,
+    VkDeviceSize                                offset,
+    VkDeviceSize                                size,
+    VkMemoryMapFlags                            flags,
+    void**                                      ppData);
+
+VKAPI_ATTR void VKAPI_CALL UnmapMemory(
+    VkDevice                                    device,
+    VkDeviceMemory                              memory);
 
 } // namespace fuen

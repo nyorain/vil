@@ -4,86 +4,88 @@
 #include "device.hpp"
 #include "gui.hpp"
 #include "swapchain.hpp"
-#include "imgui.h"
+#include "overlay.hpp"
+#include <imgui/imgui.h>
 #include <swa/swa.h>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
   #define FUEN_API __declspec(dllexport)
 #elif __GNUC__ >= 4
   #define FUEN_API __attribute__((visibility ("default")))
+#else
+  #define FUEN_API // just pray it works.
 #endif
 
 using namespace fuen;
 
-extern "C" FUEN_API void fuenOverlayShow(VkDevice vkDevice, VkSwapchainKHR vkSwapchain, bool show) {
-	auto& dev = getData<Device>(vkDevice);
-	auto& swapchain = dev.swapchains.get(vkSwapchain);
-	if(swapchain.overlay) {
-		swapchain.overlay->show = show;
+extern "C" FUEN_API FuenOverlay fuenCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
+	auto& dev = getDeviceByLoader(vkDevice);
+	std::shared_lock lock(dev.mutex);
+	if(!dev.lastCreatedSwapchain) {
+		dlg_warn("No last created swapchain (was the last created swapchain destroyed?)");
+		return {};
 	}
+
+	auto& sc = *dev.lastCreatedSwapchain;
+	if(sc.overlay) {
+		dlg_warn("Swapchain already had an overlay");
+		return {};
+	}
+
+	sc.overlay = std::make_unique<fuen::Overlay>();
+	sc.overlay->init(sc);
+	return {sc.overlay.get()};
 }
 
-extern "C" FUEN_API void fuenOverlayMouseMoveEvent(VkDevice vkDevice, VkSwapchainKHR vkSwapchain, int x, int y) {
-	auto& dev = getData<Device>(vkDevice);
-	auto& swapchain = dev.swapchains.get(vkSwapchain);
-	if(swapchain.overlay && swapchain.overlay->show) {
-		ImGui::SetCurrentContext(swapchain.overlay->renderer.imgui);
-		auto& io = ImGui::GetIO();
-		io.MousePos = {float(x), float(y)};
+extern "C" FUEN_API void fuenOverlayShow(FuenOverlay overlay, bool show) {
+	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	ov.show = show;
+}
+
+extern "C" FUEN_API void fuenOverlayMouseMoveEvent(FuenOverlay overlay, int x, int y) {
+	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	if(ov.show) {
+		ov.gui.imguiIO().MousePos = {float(x), float(y)};
 	}
 }
 
 // They return whether the event was processed by the overlay
-extern "C" FUEN_API bool fuenOverlayMouseButtonEvent(VkDevice vkDevice, VkSwapchainKHR vkSwapchain, unsigned button, bool press) {
-	auto& dev = getData<Device>(vkDevice);
-	auto& swapchain = dev.swapchains.get(vkSwapchain);
-	if(!swapchain.overlay || !swapchain.overlay->show) {
-		return false;
-	}
-
-	ImGui::SetCurrentContext(swapchain.overlay->renderer.imgui);
-	auto& io = ImGui::GetIO();
-
-	if(button < 5) {
+extern "C" FUEN_API bool fuenOverlayMouseButtonEvent(FuenOverlay overlay, unsigned button, bool press) {
+	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	if(ov.show && button < 5) {
+		auto& io = ov.gui.imguiIO();
 		io.MouseDown[button] = press;
 		return io.WantCaptureMouse;
 	}
 
 	return false;
 }
-extern "C" FUEN_API bool fuenOverlayMouseWheelEvent(VkDevice vkDevice, VkSwapchainKHR vkSwapchain, float x, float y) {
-	auto& dev = getData<Device>(vkDevice);
-	auto& swapchain = dev.swapchains.get(vkSwapchain);
-	if(!swapchain.overlay || !swapchain.overlay->show) {
-		return false;
+extern "C" FUEN_API bool fuenOverlayMouseWheelEvent(FuenOverlay overlay, float x, float y) {
+	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	if(ov.show) {
+		auto& io = ov.gui.imguiIO();
+		io.MouseWheel += y;
+		io.MouseWheelH += x;
+		return io.WantCaptureMouse;
 	}
 
-	ImGui::SetCurrentContext(swapchain.overlay->renderer.imgui);
-	auto& io = ImGui::GetIO();
-	io.MouseWheel += y;
-	io.MouseWheelH += x;
-	return io.WantCaptureMouse;
+	return false;
 }
 
-extern "C" FUEN_API bool fuenOverlayKeyEvent(VkDevice vkDevice, VkSwapchainKHR vkSwapchain, uint32_t keycode, bool pressed) {
-	auto& dev = getData<Device>(vkDevice);
-	auto& swapchain = dev.swapchains.get(vkSwapchain);
-	if(!swapchain.overlay) {
-		return false;
-	}
+extern "C" FUEN_API bool fuenOverlayKeyEvent(FuenOverlay overlay, uint32_t keycode, bool pressed) {
+	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
 
 	// TODO; remove hardcoded toggle.
 	if(keycode == swa_key_backslash && pressed) {
-		swapchain.overlay->show ^= true;
+		ov.show ^= true;
 		return true;
 	}
 
-	if(!swapchain.overlay->show) {
+	if(!ov.show) {
 		return false;
 	}
 
-	ImGui::SetCurrentContext(swapchain.overlay->renderer.imgui);
-	auto& io = ImGui::GetIO();
+	auto& io = ov.gui.imguiIO();
 
 	// TODO! define mapping in api.h
 	io.KeyMap[ImGuiKey_A] = swa_key_a;
@@ -108,28 +110,24 @@ extern "C" FUEN_API bool fuenOverlayKeyEvent(VkDevice vkDevice, VkSwapchainKHR v
 	return io.WantCaptureKeyboard;
 }
 
-extern "C" FUEN_API bool fuenOverlayTextEvent(VkDevice vkDevice, VkSwapchainKHR vkSwapchain, const char* utf8) {
-	auto& dev = getData<Device>(vkDevice);
-	auto& swapchain = dev.swapchains.get(vkSwapchain);
-	if(!swapchain.overlay || !swapchain.overlay->show) {
+extern "C" FUEN_API bool fuenOverlayTextEvent(FuenOverlay overlay, const char* utf8) {
+	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	if(!ov.show) {
 		return false;
 	}
 
-	ImGui::SetCurrentContext(swapchain.overlay->renderer.imgui);
-	auto& io = ImGui::GetIO();
+	auto& io = ov.gui.imguiIO();
 	io.AddInputCharactersUTF8(utf8);
-	return io.WantCaptureKeyboard;
+	return io.WantCaptureKeyboard || io.WantTextInput;
 }
 
-extern "C" FUEN_API void fuenOverlayKeyboardModifier(VkDevice vkDevice, VkSwapchainKHR vkSwapchain, uint32_t mod, bool active) {
-	auto& dev = getData<Device>(vkDevice);
-	auto& swapchain = dev.swapchains.get(vkSwapchain);
-	if(!swapchain.overlay || !swapchain.overlay->show) {
+extern "C" FUEN_API void fuenOverlayKeyboardModifier(FuenOverlay overlay, uint32_t mod, bool active) {
+	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	if(!ov.show) {
 		return;
 	}
 
-	ImGui::SetCurrentContext(swapchain.overlay->renderer.imgui);
-	auto& io = ImGui::GetIO();
+	auto& io = ov.gui.imguiIO();
 	switch(mod) {
 		case swa_keyboard_mod_alt:
 			io.KeyAlt = active;

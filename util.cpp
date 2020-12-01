@@ -2,6 +2,7 @@
 #include "bytes.hpp"
 #include "f16.hpp"
 #include <dlg/dlg.hpp>
+#include <cmath>
 
 namespace fuen {
 

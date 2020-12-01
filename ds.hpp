@@ -31,12 +31,24 @@ struct DescriptorSet : DeviceHandle {
 	DescriptorSetLayout* layout {};
 	VkDescriptorSet handle {};
 
+	// TODO: support buffer views
+	struct ImageInfo {
+		ImageView* imageView;
+		Sampler* sampler;
+		VkImageLayout layout;
+	};
+
+	struct BufferInfo {
+		Buffer* buffer;
+		VkDeviceSize offset;
+		VkDeviceSize range;
+	};
+
 	struct Binding {
 		bool valid {};
 		union {
-			VkDescriptorBufferInfo bufferInfo;
-			VkDescriptorImageInfo imageInfo;
-			VkBufferView bufferView;
+			ImageInfo imageInfo;
+			BufferInfo bufferInfo;
 		};
 	};
 

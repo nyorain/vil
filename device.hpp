@@ -11,20 +11,18 @@
 
 #include <shared_mutex>
 #include <memory>
+#include <atomic>
 
 namespace fuen {
 
 struct Submission {
 	std::vector<std::pair<VkSemaphore, VkPipelineStageFlags>> waitSemaphores;
 	std::vector<VkSemaphore> signalSemaphore;
-
-	// Accessing those might not be save if the submission has completed,
-	// they might have already been destroyed. So:
-	// - lock dev.mutex (shared lock is enough)
-	// - check whether associated pending fence has completed
-	// - only if not are you allowed to acces them (and only while
-	//   mutex is still locked)
 	std::vector<CommandBuffer*> cbs;
+
+	// We always add a signal semaphore to a submission, from the
+	// devices semaphore pool.
+	VkSemaphore ourSemaphore;
 };
 
 struct PendingSubmission {
@@ -36,7 +34,8 @@ struct PendingSubmission {
 	Fence* appFence {};
 
 	// When the caller didn't add a fence, we added this one from the fence pool.
-	// When appFence is not null, this is null.
+	// When appFence is not null, this is null. We need the mutex to
+	// synchronize access to the fence.
 	VkFence ourFence {};
 	std::mutex ourMutex;
 };
@@ -55,18 +54,20 @@ struct Device {
 	std::vector<std::unique_ptr<Queue>> queues;
 	Queue* gfxQueue;
 
-	VkDescriptorPool dsPool;
-	VkSampler sampler;
-	VkDescriptorSetLayout dsLayout;
-	VkPipelineLayout pipeLayout;
-	VkCommandPool commandPool;
-
 	u32 hostVisibleMemTypeBits;
 	u32 deviceLocalMemTypeBits;
+
+	VkDescriptorPool dsPool;
+	VkCommandPool commandPool;
+	std::unique_ptr<RenderData> renderData;
 
 	std::unique_ptr<DisplayWindow> window;
 
 	std::vector<VkFence> fencePool; // currently unused fences
+
+	std::vector<VkSemaphore> semaphorePool; // currently used semaphores
+	std::vector<VkSemaphore> resetSemaphores; // list of semaphores that are waiting to be reset
+
 	std::vector<std::unique_ptr<PendingSubmission>> pending;
 
 	// Mutex for general shared access.
@@ -75,6 +76,13 @@ struct Device {
 	// logically be created or destroyed).
 	std::shared_mutex mutex;
 	std::mutex queueMutex; // mutex for accessing queues
+
+	// NOTE:: hacky as hell but can't work around it. Needed only by the
+	// public API to communicate with the application.
+	// Must only be accessed while the mutex is locked.
+	// TODO: could keep a stack of swapchains to support the case
+	// "create" -> "destroy" -> "getLastCreated"
+	Swapchain* lastCreatedSwapchain {};
 
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 
@@ -99,6 +107,8 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
+
+	~Device();
 };
 
 struct Queue : Handle {
@@ -109,26 +119,25 @@ struct Queue : Handle {
 	u32 family;
 };
 
-Renderer* getWindowRenderer(Device& dev);
-Renderer* getOverlayRenderer(Swapchain& swapchain);
+Gui* getWindowGui(Device& dev);
+Gui* getOverlayGui(Swapchain& swapchain);
 
-// Called by destructor of DeviceHandle.
-// Expects device mutex to be locked.
+// Does not expect mutex to be locked
 void notifyDestruction(Device& dev, Handle& handle);
 
 // Expects dev.mutex to be locked
 template<typename F>
-void forEachRendererLocked(Device& dev, F&& func) {
+void forEachGuiLocked(Device& dev, F&& func) {
 	for(auto& swapchain : dev.swapchains.map) {
-		auto* renderer = getOverlayRenderer(*swapchain.second);
+		auto* renderer = getOverlayGui(*swapchain.second);
 		if(renderer) {
 			func(*renderer);
 		}
 	}
 
-	auto* renderer = getWindowRenderer(dev);
-	if(renderer) {
-		func(*renderer);
+	auto* gui = getWindowGui(dev);
+	if(gui) {
+		func(*gui);
 	}
 }
 

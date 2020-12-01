@@ -16,8 +16,22 @@
 namespace fuen {
 
 DeviceHandle::~DeviceHandle() {
+	// Inform command buffers that use this handle that it was
+	// destroyed.
+	invalidateCbs();
+
+	// Notify device that handle is destroyed. It will forward it
+	// to all instances that need to know (e.g. gui)
 	if(dev) {
 		notifyDestruction(*dev, *this);
+	}
+}
+
+void DeviceHandle::invalidateCbs() {
+	std::unique_lock lock(this->mutex);
+	while(!refCbs.empty()) {
+		auto* first = refCbs[0];
+		first->makeInvalid();
 	}
 }
 

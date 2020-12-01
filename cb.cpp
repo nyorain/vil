@@ -14,8 +14,42 @@
 namespace fuen {
 
 // util
-void reset(CommandBuffer& cb) {
+void reset(CommandBuffer& cb, bool invalid = false) {
+	// make sure all submissions are done.
+	{
+		std::lock_guard lock(cb.dev->mutex);
+		for(auto* subm : cb.pending) {
+			auto res = checkLocked(*subm);
+			dlg_assert(res);
+		}
+	}
+
+	// remove cb from all referenced resources
+	auto removeFromResource = [&](auto& res) {
+		// We have to lock the resource mutex since other commands buffers
+		// might add/remove them at the same time.
+		std::lock_guard lock(res.mutex);
+		auto it = std::find_if(res.refCbs.begin(), res.refCbs.end(), &cb);
+		dlg_assert(it != res.refCbs.end());
+		res.refCbs.erase(it);
+	};
+
+	for(auto& img : cb.images) {
+		removeFromResource(*img.second.image);
+	}
+
+	for(auto& buf : cb.buffers) {
+		removeFromResource(*buf.second.buffer);
+	}
+
+	for(auto& handle : cb.handles) {
+		removeFromResource(*handle.second.handle);
+	}
+
+	// We have to lock our own mutex since other threads might read
+	// our data at the same time.
 	std::lock_guard lock(cb.mutex);
+	cb.invalid = invalid;
 	cb.buffers.clear();
 	cb.images.clear();
 	cb.commands.clear();
@@ -24,6 +58,32 @@ void reset(CommandBuffer& cb) {
 	cb.computeState = {};
 	cb.pushConstants = {};
 	++cb.resetCount;
+}
+
+void CommandBuffer::makeInvalid() {
+	// make sure all submissions are done.
+	{
+		std::lock_guard lock(this->dev->mutex);
+		for(auto* subm : this->pending) {
+			auto res = checkLocked(*subm);
+			dlg_assert(res);
+		}
+	}
+
+	// Important to lock the mutex here, even if 'invalid' was atomic
+	// since from this point onwards no recorded state must be accessed
+	// by anyone (since all referenced resources might be dangling pointers).
+	std::lock_guard lock(this->mutex);
+	this->invalid = true;
+
+	// NOTE: we intentionally don't reset the referenced resources and such
+	// here since that would create a complicated synchronization situation:
+	// the resource that made us invalid is holding a lock we would need
+	// to remove ourself from its list of command buffers. And we can't
+	// temporarily unlock the mutex since that would create a whole lot
+	// of new problems. We might be able to do this only if the pass the
+	// resource that made us invalid in here and treat it differently
+	// while resetting (not sure, ugly and error-prone solution).
 }
 
 // api
@@ -40,6 +100,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
 	}
 
 	auto& cp = dev.commandPools.add(*pCommandPool);
+	cp.objectType = VK_OBJECT_TYPE_COMMAND_POOL;
 	cp.dev = &dev;
 	cp.handle = *pCommandPool;
 
@@ -94,6 +155,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 	for(auto i = 0u; i < pAllocateInfo->commandBufferCount; ++i) {
 		auto& cb = dev.commandBuffers.add(pCommandBuffers[i]);
 		cb.dev = &dev;
+		cb.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
 		cb.handle = pCommandBuffers[i];
 		cb.pool = cp;
 		cb.pool->cbs.push_back(&cb);
@@ -125,6 +187,15 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 
 		// ~DeviceHandle expects device mutex to be locked
 		std::lock_guard lock(dev.mutex);
+
+		// it's important we remove all pending submissions so they don't have a
+		// reference to this command buffer. The application is not allowed to
+		// free cbs while they are still executing, per vulkan spec.
+		for(auto* pending : cb->pending) {
+			auto res = checkLocked(*pending);
+			dlg_assert(res);
+		}
+
 		cb.reset();
 	}
 
@@ -156,12 +227,19 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
+void addToHandle(CommandBuffer& cb, Handle& handle) {
+	std::lock_guard lock(handle.mutex);
+	dlg_assert(std::find(handle.refCbs.begin(), handle.refCbs.end(), &cb) == handle.refCbs.end());
+	handle.refCbs.push_back(&cb);
+}
+
 CommandBuffer::UsedImage& useImage(CommandBuffer& cb, Command& cmd, Image& image) {
 	auto& img = cb.images[image.handle];
 	img.commands.push_back(&cmd);
 	if(!img.image) {
 		img.image = &image;
 		dlg_assert(img.image);
+		addToHandle(cb, image);
 	}
 
 	return img;
@@ -172,6 +250,7 @@ CommandBuffer::UsedImage& useImage(CommandBuffer& cb, Command& cmd, VkImage imag
 	img.commands.push_back(&cmd);
 	if(!img.image) {
 		img.image = &cb.dev->images.get(image);
+		addToHandle(cb, *img.image);
 	}
 
 	return img;
@@ -195,9 +274,25 @@ CommandBuffer::UsedImage& useImage(CommandBuffer& cb, Command& cmd, Image& image
 
 CommandBuffer::UsedBuffer& useBuffer(CommandBuffer& cb, Command& cmd, Buffer& buf) {
 	auto& useBuf = cb.buffers[buf.handle];
-	useBuf.buffer = &buf;
+	if(!useBuf.buffer) {
+		useBuf.buffer = &buf;
+		addToHandle(cb, buf);
+	}
+
 	useBuf.commands.push_back(&cmd);
 	return useBuf;
+}
+
+template<typename T>
+void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
+	auto h64 = handleToU64(handle.handle);
+	auto& uh = cb.handles[h64];
+	if(!uh.handle) {
+		uh.handle = &handle;
+		addToHandle(cb, *uh.handle);
+	}
+
+	uh.commands.push_back(&cmd);
 }
 
 void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
@@ -228,6 +323,8 @@ void addEndSection(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
 	dlg_assert(!cb.sections.empty());
 	cb.sections.pop_back();
 }
+
+TODO: add to used handles.
 
 void cmdBarrier(
 		CommandBuffer& cb,
@@ -323,8 +420,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 
 	dlg_assert(cmd->fb);
 	dlg_assert(cmd->rp);
+
+	useHandle(cb, *cmd, *cmd->fb);
+	useHandle(cb, *cmd, *cmd->rp);
+
 	if(cmd->fb && cmd->rp) {
-		dlg_assert(cmd->rp->info.attachments.size() == cmd->fb->attachments.size());
+		dlg_assert(cmd->rp->desc->attachments.size() == cmd->fb->attachments.size());
 		for(auto i = 0u; i < cmd->fb->attachments.size(); ++i) {
 			auto& attachment = cmd->fb->attachments[i];
 			if(!attachment || !attachment->img) {
@@ -334,8 +435,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 			// TODO: can there be barriers inside the renderpasss?
 			//   maybe better move this to RenderPassEnd?
 			// TODO: handle secondary command buffers and stuff
+			useHandle(cb, *cmd, *attachment);
 			useImage(cb, *cmd, *attachment->img,
-				cmd->rp->info.attachments[i].finalLayout);
+				cmd->rp->desc->attachments[i].finalLayout);
 		}
 	}
 
@@ -392,8 +494,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 						continue;
 					}
 
-					auto& view = cb.dev->imageViews.get(ds.bindings[b][e].imageInfo.imageView);
-					useImage(cb, *cmd, *view.img);
+					auto* view = ds.bindings[b][e].imageInfo.imageView;
+					dlg_assert(view);
+					useImage(cb, *cmd, *view->img);
 				}
 			} else if(cat == DescriptorCategory::buffer) {
 				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
@@ -401,8 +504,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 						continue;
 					}
 
-					auto& buf = cb.dev->buffers.get(ds.bindings[b][e].bufferInfo.buffer);
-					useBuffer(cb, *cmd, buf);
+					auto* buf = ds.bindings[b][e].bufferInfo.buffer;
+					dlg_assert(buf);
+					useBuffer(cb, *cmd, *buf);
 				}
 			} // TODO: buffer view
 		}
@@ -502,6 +606,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	cmd->firstInstance = firstInstance;
 
 	cmd->state = cb.graphicsState;
+	cmd->state.pushConstants = cb.pushConstants.map;
 	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
 		cmd->pushConstants = cb.pushConstants.map;
 	}
@@ -528,6 +633,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	cmd->firstIndex = firstIndex;
 
 	cmd->state = cb.graphicsState;
+	cmd->state.pushConstants = cb.pushConstants.map;
 	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
 		cmd->pushConstants = cb.pushConstants.map;
 	}
@@ -551,6 +657,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	useBuffer(cb, *cmd, buf);
 
 	cmd->state = cb.graphicsState;
+	cmd->state.pushConstants = cb.pushConstants.map;
 	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
 		cmd->pushConstants = cb.pushConstants.map;
 	}
@@ -574,6 +681,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	useBuffer(cb, *cmd, buf);
 
 	cmd->state = cb.graphicsState;
+	cmd->state.pushConstants = cb.pushConstants.map;
 	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
 		cmd->pushConstants = cb.pushConstants.map;
 	}
@@ -596,6 +704,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 	cmd->groupsZ = groupCountZ;
 
 	cmd->state = cb.computeState;
+	cmd->state.pushConstants = cb.pushConstants.map;
 	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
 		cmd->pushConstants = cb.pushConstants.map;
 	}
@@ -617,6 +726,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	useBuffer(cb, *cmd, buf);
 
 	cmd->state = cb.computeState;
+	cmd->state.pushConstants = cb.pushConstants.map;
 	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
 		cmd->pushConstants = cb.pushConstants.map;
 	}

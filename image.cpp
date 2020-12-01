@@ -23,10 +23,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	}
 
 	auto& img = dev.images.add(*pImage);
+	img.objectType = VK_OBJECT_TYPE_IMAGE;
 	img.dev = &dev;
 	img.handle = *pImage;
-	img.ci = ici;
-	img.pendingLayout = ici.initialLayout;
+	img.ci = *pCreateInfo;
+	img.pendingLayout = pCreateInfo->initialLayout;
 	img.memoryResourceType = MemoryResource::Type::image;
 
 	return res;
@@ -41,28 +42,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 	{
 		auto img = dev.images.mustMove(image);
 
-		// Unset selection if needed
-		auto unsetter = [&](Renderer& renderer) {
-			if(renderer.selected.image.handle == img->handle) {
-				if(renderer.selected.image.view) {
-					dev.dispatch.vkDestroyImageView(device, renderer.selected.image.view, nullptr);
-				}
-
-				renderer.selected.image = {};
-			}
-		};
-
-		std::lock_guard lock(dev.mutex);
-		forEachRendererLocked(dev, unsetter);
-
 		// it's legal to destroy an image before views/fbs its used in
 		for(auto* view : img->views) {
+			std::lock_guard lock(view->mutex);
 			view->img = nullptr;
 		}
-
-		// important that the destructor is run while mutex is locked,
-		// see ~DeviceHandle
-		img.reset();
 	}
 
 	dev.dispatch.vkDestroyImage(device, image, pAllocator);
@@ -104,6 +88,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	}
 
 	auto& view = dev.imageViews.add(*pView);
+	view.objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
 	view.handle = *pView;
 	view.img = dev.images.find(pCreateInfo->image);
 	view.dev = &dev;

@@ -1,5 +1,7 @@
 #include "ds.hpp"
 #include "data.hpp"
+#include "buffer.hpp"
+#include "image.hpp"
 
 namespace fuen {
 
@@ -39,6 +41,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	}
 
 	auto& dsLayout = dev.dsLayouts.add(*pSetLayout);
+	dsLayout.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT;
 	dsLayout.dev = &dev;
 	dsLayout.handle = *pSetLayout;
 
@@ -74,6 +77,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 	}
 
 	auto& dsPool = dev.dsPools.add(*pDescriptorPool);
+	dsPool.objectType = VK_OBJECT_TYPE_DESCRIPTOR_POOL;
 	dsPool.dev = &dev;
 	dsPool.handle = *pDescriptorPool;
 
@@ -118,6 +122,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 	auto& pool = dev.dsPools.get(pAllocateInfo->descriptorPool);
 	for(auto i = 0u; i < pAllocateInfo->descriptorSetCount; ++i) {
 		auto& ds = dev.descriptorSets.add(pDescriptorSets[i]);
+		ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
 		ds.dev = &dev;
 		ds.handle = pDescriptorSets[i];
 		ds.layout = &dev.dsLayouts.get(pAllocateInfo->pSetLayouts[i]);
@@ -181,22 +186,54 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			auto& binding = ds.bindings[dstBinding][dstElem];
 			binding.valid = true;
 
+			auto addDsRef = [&](auto* res) {
+				if(!res) {
+					return;
+				}
+
+				std::lock_guard lock(res->mutex);
+				res->descriptors.push_back({&ds, dstBinding, dstElem});
+			};
+
+			auto nullOrGetAdd = [&](auto& map, auto& handle) -> decltype(&map.get(handle)) {
+				if(!handle) {
+					return nullptr;
+				}
+
+				auto& res = map.get(handle);
+				std::lock_guard lock(res.mutex);
+				res.descriptors.push_back({&ds, dstBinding, dstElem});
+				return &res;
+			};
+
 			switch(category(write.descriptorType)) {
 				case DescriptorCategory::image:
 					dlg_assert(write.pImageInfo);
-					binding.imageInfo = write.pImageInfo[j];
+					binding.imageInfo.layout = write.pImageInfo[j].imageLayout;
+					binding.imageInfo.imageView = nullOrGetAdd(dev.imageViews, write.pImageInfo[j].imageView);
+					binding.imageInfo.sampler = nullOrGetAdd(dev.samplers, write.pImageInfo[j].sampler);
 					break;
 				case DescriptorCategory::buffer:
 					dlg_assert(write.pBufferInfo);
-					binding.bufferInfo = write.pBufferInfo[j];
+					binding.bufferInfo.buffer = &dev.buffers.get(write.pBufferInfo[j].buffer);
+					addDsRef(binding.bufferInfo.buffer);
+					binding.bufferInfo.offset = write.pBufferInfo[j].offset;
+					binding.bufferInfo.range = write.pBufferInfo[j].range;
 					break;
 				case DescriptorCategory::bufferView:
+					// TODO
+					dlg_error("Buffer views unimplemented");
+					/*
 					dlg_assert(write.pTexelBufferView);
 					binding.bufferView = write.pTexelBufferView[j];
+					*/
 					break;
 				default: break;
 			}
 		}
+
+		// TODO: don't do this for descriptor indexing descriptors
+		ds.invalidateCbs();
 	}
 
 	// handle copies
@@ -226,6 +263,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 
 			dst.bindings[dstBinding][dstElem] = src.bindings[srcBinding][srcElem];
 		}
+
+		// TODO: don't do this for descriptor indexing descriptors
+		dst.invalidateCbs();
 	}
 
 	return dev.dispatch.vkUpdateDescriptorSets(device,

@@ -28,7 +28,6 @@ cc = meson.get_compiler('cpp')
 subdir('imgui')
 
 dep_threads = dependency('threads', required: false)
-dep_wayland = dependency('wayland-client')
 dep_dlg = dependency('dlg', fallback: ['dlg', 'dlg_dep'])
 dep_swa = dependency('swa',
 	fallback: ['swa', 'swa_dep'],
@@ -50,6 +49,10 @@ src = files(
 	'util.cpp',
 	'f16.cpp',
 	'api.cpp',
+	'commands.cpp',
+	'overlay.cpp',
+	'gui.cpp',
+	'renderer.cpp',
 
 	# vulkan api entrypoints
 	'handle.cpp',
@@ -64,10 +67,14 @@ src = files(
 	'memory.cpp',
 	'shader.cpp',
 	'pipe.cpp',
-	'wayland.cpp',
 
 	# external util
 	'spirv_reflect.c',
+
+	# useful for visual studio build
+	'fwd.hpp',
+	'util.hpp',
+	'data.hpp',
 )
 
 deps = [
@@ -75,7 +82,6 @@ deps = [
 	dep_dlg,
 	dep_vkpp,
 	dep_swa,
-	dep_wayland,
 	libimgui_core_dep,
 ]
 

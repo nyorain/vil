@@ -14,6 +14,7 @@
 #include <initializer_list>
 #include <cassert>
 #include <cstring>
+#include <cstdlib>
 #include <dlg/dlg.hpp>
 
 // taken from nytl/bytes.hpp

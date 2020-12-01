@@ -3,6 +3,7 @@
 #include "data.hpp"
 #include "util.hpp"
 #include "gui.hpp"
+#include "renderer.hpp"
 #include "swapchain.hpp"
 #include "window.hpp"
 #include "cb.hpp"
@@ -15,6 +16,7 @@
 #include "shader.hpp"
 #include "ds.hpp"
 #include "sync.hpp"
+#include "overlay.hpp"
 
 namespace fuen {
 
@@ -33,6 +35,41 @@ Renderer* getOverlayRenderer(Swapchain& swapchain) {
 	}
 
 	return nullptr;
+}
+
+// deivce
+Device::~Device() {
+	for(auto& subm : pending) {
+		// we don't have to lock the mutex at checkLocked here since
+		// there can't be any concurrent calls on the device as it
+		// is being destroyed.
+		auto res = checkLocked(*subm);
+		dlg_assert(res);
+	}
+
+	for(auto& fence : fencePool) {
+		dispatch.vkDestroyFence(handle, fence, nullptr);
+	}
+
+	for(auto& semaphore : semaphorePool) {
+		dispatch.vkDestroySemaphore(handle, semaphore, nullptr);
+	}
+
+	for(auto& semaphore : resetSemaphores) {
+		dispatch.vkDestroySemaphore(handle, semaphore, nullptr);
+	}
+
+	if(renderData) {
+		renderData->free(*this);
+	}
+
+	if(dsPool) {
+		dispatch.vkDestroyDescriptorPool(handle, dsPool, nullptr);
+	}
+
+	if(commandPool) {
+		dispatch.vkDestroyCommandPool(handle, commandPool, nullptr);
+	}
 }
 
 // api
@@ -81,6 +118,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	devData.dispatch.init((vk::Device) *dev);
 	// In case GetDeviceProcAddr of the next chain didn't return itself
 	devData.dispatch.vkGetDeviceProcAddr = fpGetDeviceProcAddr;
+
+  	dlg_info("fuen set last device");
 
 	devData.swapchains.mutex = &devData.mutex;
 	devData.images.mutex = &devData.mutex;
@@ -165,19 +204,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	if(devData.gfxQueue) {
-		// sampler
-		VkSamplerCreateInfo sci = vk::SamplerCreateInfo();
-		// TODO: create multiple samplers, one with VK_SAMPLER_MIPMAP_MODE_LINEAR;
-		sci.magFilter = VK_FILTER_NEAREST;
-		sci.minFilter = VK_FILTER_NEAREST;
-		sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-		sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		sci.minLod = -1000;
-		sci.maxLod = 1000;
-		sci.maxAnisotropy = 1.0f;
-		VK_CHECK(devData.dispatch.vkCreateSampler(*dev, &sci, nullptr, &devData.sampler));
+		devData.renderData = std::make_unique<RenderData>();
+		devData.renderData->init(devData);
 
 		// command pool
 		VkCommandPoolCreateInfo cpci = vk::CommandPoolCreateInfo();
@@ -185,33 +213,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 		VK_CHECK(devData.dispatch.vkCreateCommandPool(*dev, &cpci, nullptr, &devData.commandPool));
 
-		// descriptor set layout
-		VkDescriptorSetLayoutBinding binding;
-		binding.binding = 0u;
-		binding.descriptorCount = 1u;
-		binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		binding.pImmutableSamplers = &devData.sampler;
-		binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-		VkDescriptorSetLayoutCreateInfo dslci = vk::DescriptorSetLayoutCreateInfo();
-		dslci.bindingCount = 1u;
-		dslci.pBindings = &binding;
-		VK_CHECK(devData.dispatch.vkCreateDescriptorSetLayout(*dev, &dslci, nullptr, &devData.dsLayout));
-
-		// pipeline layout
-		VkPushConstantRange pcrs[1] = {};
-		pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-		pcrs[0].offset = sizeof(float) * 0;
-		pcrs[0].size = sizeof(float) * 4;
-
-		VkPipelineLayoutCreateInfo plci = vk::PipelineLayoutCreateInfo();
-		plci.setLayoutCount = 1;
-		plci.pSetLayouts = &devData.dsLayout;
-		plci.pushConstantRangeCount = 1;
-		plci.pPushConstantRanges = pcrs;
-		VK_CHECK(devData.dispatch.vkCreatePipelineLayout(*dev, &plci, nullptr, &devData.pipeLayout));
-
-		// descriptoer pool
+		// descriptor pool
+		// TODO: might need multiple pools...
 		VkDescriptorPoolSize poolSize;
 		poolSize.descriptorCount = 50u;
 		poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -267,7 +270,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	destroyDev(dev, alloc);
 }
 
-VkFence getFenceFromPool(Device& dev) {
+VkFence getFenceFromPool(Device& dev, bool& checkedSubmissions) {
 	{
 		std::lock_guard lock(dev.mutex);
 		if(!dev.fencePool.empty()) {
@@ -277,14 +280,18 @@ VkFence getFenceFromPool(Device& dev) {
 		}
 
 		// check if a submission finished
-		for(auto it = dev.pending.begin(); it < dev.pending.end(); ++it) {
-			auto& subm = *it;
-			if(subm->ourFence && checkLocked(*subm)) {
-				dlg_assert(!dev.fencePool.empty());
-				auto ret = dev.fencePool.back();
-				dev.fencePool.pop_back();
-				return ret;
+		if(!checkedSubmissions) {
+			for(auto it = dev.pending.begin(); it < dev.pending.end(); ++it) {
+				auto& subm = *it;
+				if(subm->ourFence && checkLocked(*subm)) {
+					dlg_assert(!dev.fencePool.empty());
+					auto ret = dev.fencePool.back();
+					dev.fencePool.pop_back();
+					return ret;
+				}
 			}
+
+			checkedSubmissions = true;
 		}
 	}
 
@@ -303,13 +310,91 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	auto& qd = getData<Queue>(queue);
 	auto& dev = *qd.dev;
 
+	bool checkedSubmissions = false;
+	bool resettedSemaphores = false;
+
+	// We don't declare this as function since it assumes it's called
+	// inside QueueSubmit: We might make our own queue submit call to
+	// reset semaphores. Doing this outside a QueueSubmit would need additional
+	// synchronization.
+	auto getSemaphoreFromPool = [&]{
+		{
+			std::unique_lock lock(dev.mutex);
+			if(!dev.semaphorePool.empty()) {
+				auto ret = dev.semaphorePool.back();
+				dev.semaphorePool.pop_back();
+				return ret;
+			}
+
+			// If there are enough semaphores in the reset pool, it's worth
+			// resetting it.
+			// TODO: this is somewhat error-prone. But without it, we
+			// might create a shitload of semaphore when the application submits
+			// a lot of command buffers without us ever rendering the overlay.
+			constexpr auto minResetSemCount = 10u;
+			if(!resettedSemaphores && dev.resetSemaphores.size() > minResetSemCount) {
+				if(!checkedSubmissions) {
+					// first check whether any pending submissions have finished.
+					for(auto it = dev.pending.begin(); it < dev.pending.end();) {
+						auto& subm = *it;
+						if(!subm->ourFence || !checkLocked(*subm)) {
+							++it;
+						}
+					}
+
+					checkedSubmissions = true;
+				}
+
+				auto resetSemaphores = std::move(dev.resetSemaphores);
+				auto waitStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+				std::vector<VkPipelineStageFlags> waitFlags(resetSemaphores.size(), waitStage);
+
+				VkSubmitInfo si = vk::SubmitInfo();
+				si.waitSemaphoreCount = resetSemaphores.size();
+				si.pWaitSemaphores = resetSemaphores.data();
+				si.pWaitDstStageMask = waitFlags.data();
+
+				lock.unlock();
+				auto fence = getFenceFromPool(dev, checkedSubmissions);
+
+				{
+					std::lock_guard queueLock(dev.queueMutex);
+					VK_CHECK(dev.dispatch.vkQueueSubmit(queue, 1, &si, fence));
+					VK_CHECK(dev.dispatch.vkWaitForFences(dev.handle, 1, &fence, true, UINT64_MAX));
+				}
+
+				auto ret = resetSemaphores.back();
+				resetSemaphores.pop_back();
+				dev.dispatch.vkResetFences(dev.handle, 1, &fence);
+
+				lock.lock();
+				dev.fencePool.push_back(fence);
+
+				dev.semaphorePool.insert(dev.semaphorePool.end(),
+					resetSemaphores.begin(), resetSemaphores.end());
+
+				resettedSemaphores = true;
+				return ret;
+			}
+		}
+
+		// create new semaphore
+		VkSemaphore semaphore;
+		VkSemaphoreCreateInfo sci = vk::SemaphoreCreateInfo();
+		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
+		return semaphore;
+	};
+
 	// hook fence
 	auto submPtr = std::make_unique<PendingSubmission>();
 	auto& subm = *submPtr;
 	subm.queue = &qd;
 
+	std::vector<VkSubmitInfo> nsubmitInfos;
+	std::vector<std::vector<VkSemaphore>> signalSemaphores;
+
 	for(auto i = 0u; i < submitCount; ++i) {
-		auto& si = pSubmits[i];
+		auto si = pSubmits[i]; // copy it
 		auto& dst = subm.submissions.emplace_back();
 
 		for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
@@ -321,8 +406,9 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			dst.cbs.push_back(&cb);
 
 			{
-				// store in command buffer that it was submitted here
 				std::lock_guard lock(dev.mutex);
+
+				// store in command buffer that it was submitted here
 				cb.pending.push_back(&subm);
 
 				// store pending layouts
@@ -336,6 +422,18 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 					}
 				}
 			}
+
+			// We need to add a semaphore for device synchronization.
+			// We might wanna read from resources that are potentially written
+			// by this submission in the future, we need to be able to gpu-sync them.
+			dst.ourSemaphore = getSemaphoreFromPool();
+
+			signalSemaphores.emplace_back(dst.signalSemaphore);
+			signalSemaphores.back().push_back(dst.ourSemaphore);
+
+			si.signalSemaphoreCount = signalSemaphores.back().size();
+			si.pSignalSemaphores = signalSemaphores.back().data();
+			nsubmitInfos.push_back(si);
 		}
 
 		for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
@@ -345,6 +443,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		}
 	}
 
+	// Make sure that every submission has a fence associated.
+	// If the application already set a fence we can simply check that
+	// to see if the submission completed (the vulkan spec gives us enough
+	// guarantees to allow it). Otherwise we have to use a fence from the pool.
 	VkFence submFence;
 	if(fence) {
 		subm.appFence = &dev.fences.get(fence);
@@ -358,12 +460,11 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		submFence = fence;
 		subm.appFence->submission = &subm;
 	} else {
-		subm.ourFence = getFenceFromPool(dev);
+		subm.ourFence = getFenceFromPool(dev, checkedSubmissions);
 		submFence = subm.ourFence;
 	}
 
-	// Lock order here important, see mutex usage for rendering in swa.cpp.
-	// Also important that we don't lock both mutexes at once.
+	// Lock order here important, see mutex usage for rendering in window.cpp.
 	std::lock_guard queueLock(dev.queueMutex);
 
 	{
@@ -371,7 +472,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		dev.pending.push_back(std::move(submPtr));
 	}
 
-	return dev.dispatch.vkQueueSubmit(queue, submitCount, pSubmits, submFence);
+	dlg_assert(nsubmitInfos.size() == submitCount);
+	return dev.dispatch.vkQueueSubmit(queue, nsubmitInfos.size(), nsubmitInfos.data(), submFence);
 }
 
 bool checkLocked(PendingSubmission& subm) {
@@ -401,6 +503,11 @@ bool checkLocked(PendingSubmission& subm) {
 			dlg_assert(it2 != cb->pending.end());
 			cb->pending.erase(it2);
 		}
+
+		// We don't immediately reset the semaphore since it's not that cheap.
+		// We will do it with the next rendering or when there are a lot
+		// of semaphores pending.
+		dev.resetSemaphores.push_back(sub.ourSemaphore);
 	}
 
 	if(subm.ourFence) {
@@ -415,7 +522,8 @@ bool checkLocked(PendingSubmission& subm) {
 }
 
 void notifyDestruction(Device& dev, Handle& handle) {
-	forEachRendererLocked(dev, [&](auto& renderer) {
+	std::lock_guard lock(dev.mutex);
+	forEachGuiLocked(dev, [&](auto& renderer) {
 		renderer.unselect(handle);
 	});
 }

@@ -2,6 +2,7 @@
 
 #include "fwd.hpp"
 #include "bytes.hpp"
+#include <dlg/dlg.hpp>
 #include <vulkan/vulkan.h>
 #include <vkpp/enums.hpp>
 #include <vkpp/structs.hpp>
@@ -9,6 +10,13 @@
 #include <cstring>
 
 namespace fuen {
+
+// util
+template<typename T>
+T& nonNull(T* ptr) {
+	dlg_assert(ptr);
+	return *ptr;
+}
 
 template<typename ...Ts>
 struct Visitor : Ts...  {
