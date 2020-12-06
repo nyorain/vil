@@ -26,8 +26,7 @@ class SyncedUnorderedMap {
 public:
 	using UnorderedMap = std::unordered_map<K, P<T>>;
 
-	P<T> move(const K& key) {
-		std::lock_guard lock(*mutex);
+	P<T> moveLocked(const K& key) {
 		auto it = map.find(key);
 		if(it == map.end()) {
 			return nullptr;
@@ -38,13 +37,24 @@ public:
 		return ret;
 	}
 
+	P<T> move(const K& key) {
+		std::lock_guard lock(*mutex);
+		return moveLocked(key);
+	}
+
 	P<T> mustMove(const K& key) {
 		auto ret = move(key);
 		assert(ret);
 		return ret;
 	}
 
-	// Make sure to run destructor outside of lock
+	P<T> mustMoveLocked(const K& key) {
+		auto ret = moveLocked(key);
+		assert(ret);
+		return ret;
+	}
+
+	// Mskes sure to run destructor outside of lock
 	std::size_t erase(const K& key) {
 		// std::lock_guard lock(*mutex);
 		// return map.erase(key);

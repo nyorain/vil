@@ -3,6 +3,19 @@
 
 namespace fuen {
 
+Fence::~Fence() {
+	if(!dev) {
+		return;
+	}
+
+	// per spec, we can assume all associated payload to be finished
+	std::lock_guard lock(dev->mutex);
+	if(this->submission) {
+		auto finished = checkLocked(*this->submission);
+		dlg_assert(finished);
+	}
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 		VkDevice                                    device,
 		const VkFenceCreateInfo*                    pCreateInfo,
@@ -29,13 +42,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(
 	auto& dev = getData<Device>(device);
 	auto fenceD = dev.fences.mustMove(fence);
 
-	// per spec, we can assume all associated payload to be finished
 	{
-		std::lock_guard lock(dev.mutex);
-		if(fenceD->submission) {
-			auto finished = checkLocked(*fenceD->submission);
-			dlg_assert(finished);
-		}
 
 		// important that we do this while mutex is locked,
 		// see ~DeviceHandle

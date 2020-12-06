@@ -1,8 +1,26 @@
 #include "buffer.hpp"
 #include "data.hpp"
+#include "ds.hpp"
 
 namespace fuen {
 
+// Classes
+Buffer::~Buffer() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+
+	// Don't use for-loop as the descriptors unregister themselves
+	while(!this->descriptors.empty()) {
+		auto ref = this->descriptors[0];
+		dlg_assert(ref.ds->getBuffer(ref.binding, ref.elem) == this);
+		ref.ds->invalidateLocked(ref.binding, ref.elem);
+	}
+}
+
+// API
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 		VkDevice                                    device,
 		const VkBufferCreateInfo*                   pCreateInfo,
@@ -50,7 +68,12 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 	buf.memory = &mem;
 	buf.allocationOffset = memoryOffset;
 	buf.allocationSize = memReqs.size;
-	mem.allocations.insert({memoryOffset, memReqs.size, &buf});
+
+	{
+		// access to the given memory must be internally synced
+		std::lock_guard lock(dev.mutex);
+		mem.allocations.insert(&buf);
+	}
 
 	return dev.dispatch.vkBindBufferMemory(device, buffer, memory, memoryOffset);
 }

@@ -13,7 +13,26 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 };
 
+// Synchronization for this one is a bitch:
+// - We currently don't synchronize every single record call. A command
+//   buffer can't really be used anywhere while it's in recording
+//   state and we simply try to not show recording command buffers in the ui.
+//   The situation that a command buffer is recorded using resource A while
+//   the resource is destroyed/changed at the same time (moving the command
+//   buffer to invalidate state) is not allowed since this is race situation
+//   and the command buffer might be in invalid state before/during the
+//   record command, which is invalid.
+// - state changes must always acquire a lock. When the command buffer isn't
+//   in recording state, changing the commands must also acquire the device mutex.
 struct CommandBuffer : DeviceHandle {
+public:
+	enum class State {
+		initial,
+		recording,
+		executable, // Might also be pending, see list of pending submissions
+		invalid,
+	};
+
 	// We don't use shared pointers here, they are used in the
 	// commands referencing the handles.
 	struct UsedImage {
@@ -32,41 +51,51 @@ struct CommandBuffer : DeviceHandle {
 	// General definition covering all cases of handles not covered
 	// above.
 	struct UsedHandle {
-		Handle* handle;
+		DeviceHandle* handle;
 		std::vector<Command*> commands;
 	};
 
+public:
 	CommandPool* pool {};
 	VkCommandBuffer handle {};
 
+	// Can be used to track a specific command buffer recording.
+	u32 resetCount {}; // synchronized via dev mutex
+	State state {State::initial}; // synchronized via dev mutex
+
+	// List of pending submissions including this cb
+	std::vector<PendingSubmission*> pending;
+
+	// == Immutable when in executable state, otherwise private ==
 	std::vector<std::unique_ptr<Command>> commands;
 
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
 	std::unordered_map<std::uint64_t, UsedHandle> handles;
 
-	std::vector<SectionCommand*> sections {}; // stack
-	u32 resetCount {};
-
+	// == Only used during recording, private ==
 	ComputeState computeState {};
 	GraphicsState graphicsState {};
+	std::vector<SectionCommand*> sections {}; // stack
 
 	struct {
 		PushConstantMap map;
 		PipelineLayout* layout;
 	} pushConstants;
 
-	// Whether the command buffer is in invalid state. Check this while locking
-	// the command buffers mutex. And if this is true, all leftover
-	// recording state may contain dangling pointers to resources so should
-	// not be used!
-	bool invalid {};
-
-	// pending submissions
-	std::vector<PendingSubmission*> pending;
+	~CommandBuffer();
 
 	// Moves the command buffer to invalid state.
 	void makeInvalid();
+
+public: // API implementation
+	static VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
+		VkCommandBuffer                             commandBuffer,
+		const VkCommandBufferBeginInfo*             pBeginInfo);
+
+	static VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
+		VkCommandBuffer                             commandBuffer);
+
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
@@ -95,13 +124,6 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
     VkCommandPool                               commandPool,
     uint32_t                                    commandBufferCount,
     const VkCommandBuffer*                      pCommandBuffers);
-
-VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
-    VkCommandBuffer                             commandBuffer,
-    const VkCommandBufferBeginInfo*             pBeginInfo);
-
-VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
-    VkCommandBuffer                             commandBuffer);
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
     VkCommandBuffer                             commandBuffer,

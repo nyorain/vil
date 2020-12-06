@@ -10,6 +10,8 @@ struct Buffer : MemoryResource {
 	VkBufferCreateInfo ci;
 
 	std::vector<DescriptorSetRef> descriptors;
+
+	~Buffer();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(

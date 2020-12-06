@@ -26,6 +26,11 @@ struct Visitor : Ts...  {
 
 u32 findLSB(u32 v);
 
+template<typename C, typename K>
+auto find(C&& c, K&& k) {
+	return std::find(c.begin(), c.end(), std::forward<K>(k));
+}
+
 // C++20: std::bit_cast
 template<typename T, typename O>
 auto bit_cast(const O& src) {

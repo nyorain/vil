@@ -5,17 +5,35 @@ namespace fuen {
 
 // MemoryResource
 MemoryResource::~MemoryResource() {
-	if(memory) {
-		for(auto it = memory->allocations.begin(); it != memory->allocations.end();) {
-			if(it->resource == this) {
-				dlg_assert(it->offset == allocationOffset);
-				dlg_assert(it->size == allocationSize);
-				it = memory->allocations.erase(it);
-				continue;
-			}
+	if(!dev) {
+		return;
+	}
 
-			++it;
-		}
+	// If this resource had memory assigned, remove it from the memories
+	// list of resources.
+	std::lock_guard lock(dev->mutex);
+	if(memory) {
+		dlg_assert(!memoryDestroyed);
+		auto it = memory->allocations.find(this);
+		dlg_assert(it != memory->allocations.end());
+		memory->allocations.erase(it);
+	}
+}
+
+// DeviceMemory
+DeviceMemory::~DeviceMemory() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+	for(auto* res : this->allocations) {
+		dlg_assert(!res->memoryDestroyed);
+		dlg_assert(res->memory == this);
+		res->memory = nullptr;
+		res->memoryDestroyed = true;
+		res->allocationOffset = 0u;
+		res->allocationSize = 0u;
 	}
 }
 
@@ -46,10 +64,7 @@ VKAPI_ATTR void VKAPI_CALL FreeMemory(
 		VkDeviceMemory                              memory,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	{
-		auto mem = dev.deviceMemories.mustMove(memory);
-		dlg_assert(mem->allocations.empty());
-	}
+	dev.deviceMemories.mustErase(memory);
 	dev.dispatch.vkFreeMemory(device, memory, pAllocator);
 }
 

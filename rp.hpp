@@ -32,6 +32,8 @@ struct Framebuffer : DeviceHandle {
 	u32 width {};
 	u32 height {};
 	u32 layers {};
+
+	~Framebuffer();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(

@@ -2,8 +2,92 @@
 #include "data.hpp"
 #include "buffer.hpp"
 #include "image.hpp"
+#include "util.hpp"
 
 namespace fuen {
+
+// Classes
+void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
+	dlg_assert(ds.dev);
+	dlg_assert(ds.bindings.size() > binding);
+	dlg_assert(ds.bindings[binding].size() > elem);
+
+	auto& bind = ds.bindings[binding][elem];
+	dlg_assert(bind.valid);
+
+	auto removeFromHandle = [&](auto& handle) {
+		auto& dsrefs = handle.descriptors;
+		auto finder = [&](const DescriptorSetRef& dsref) {
+			return dsref.ds == &ds && dsref.binding == binding && dsref.elem == elem;
+		};
+		auto it = std::find_if(dsrefs.begin(), dsrefs.end(), finder);
+		dlg_assert(it != dsrefs.end());
+		dsrefs.erase(it);
+	};
+
+	switch(category(ds.layout->bindings[binding].descriptorType)) {
+		case DescriptorCategory::buffer: {
+			removeFromHandle(nonNull(bind.bufferInfo.buffer));
+			break;
+		} case DescriptorCategory::image: {
+			dlg_assert(bind.imageInfo.imageView || bind.imageInfo.sampler);
+			if(bind.imageInfo.imageView) {
+				removeFromHandle(*bind.imageInfo.imageView);
+			}
+			if(bind.imageInfo.sampler) {
+				removeFromHandle(*bind.imageInfo.sampler);
+			}
+			break;
+		} default: dlg_error("Unimplemented descriptor type"); break;
+	}
+}
+
+DescriptorSet::~DescriptorSet() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+
+	for(auto b = 0u; b < bindings.size(); ++b) {
+		for(auto e = 0u; e < bindings[b].size(); ++e) {
+			if(!bindings[b][e].valid) {
+				continue;
+			}
+
+			unregisterLocked(*this, b, e);
+		}
+	}
+}
+
+void DescriptorSet::invalidateLocked(unsigned binding, unsigned elem) {
+	unregisterLocked(*this, binding, elem);
+	this->bindings[binding][elem] = {};
+
+	// TODO: change/check for descriptor indexing
+	this->invalidateCbsLocked();
+}
+
+Sampler* DescriptorSet::getSampler(unsigned binding, unsigned elem) {
+	dlg_assert(bindings.size() > binding);
+	dlg_assert(bindings[binding].size() > elem);
+	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::image);
+	return bindings[binding][elem].imageInfo.sampler;
+}
+
+ImageView* DescriptorSet::getImageView(unsigned binding, unsigned elem) {
+	dlg_assert(bindings.size() > binding);
+	dlg_assert(bindings[binding].size() > elem);
+	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::image);
+	return bindings[binding][elem].imageInfo.imageView;
+}
+
+Buffer* DescriptorSet::getBuffer(unsigned binding, unsigned elem) {
+	dlg_assert(bindings.size() > binding);
+	dlg_assert(bindings[binding].size() > elem);
+	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::buffer);
+	return bindings[binding][elem].bufferInfo.buffer;
+}
 
 // util
 DescriptorCategory category(VkDescriptorType type) {
@@ -184,24 +268,28 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			dlg_assert(write.descriptorType == ds.layout->bindings[dstBinding].descriptorType);
 
 			auto& binding = ds.bindings[dstBinding][dstElem];
+
+			std::lock_guard lock(dev.mutex);
 			binding.valid = true;
 
+			// Adds this ds to the list of references in the given resource handle.
 			auto addDsRef = [&](auto* res) {
 				if(!res) {
 					return;
 				}
 
-				std::lock_guard lock(res->mutex);
 				res->descriptors.push_back({&ds, dstBinding, dstElem});
 			};
 
+			// If the given handle is valid (i.e. not a vulkan null handle),
+			// retrieves the assocated object from the given map and adds
+			// this ds to the list of reference in it.
 			auto nullOrGetAdd = [&](auto& map, auto& handle) -> decltype(&map.get(handle)) {
 				if(!handle) {
 					return nullptr;
 				}
 
 				auto& res = map.get(handle);
-				std::lock_guard lock(res.mutex);
 				res.descriptors.push_back({&ds, dstBinding, dstElem});
 				return &res;
 			};
@@ -232,7 +320,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			}
 		}
 
-		// TODO: don't do this for descriptor indexing descriptors
+		// TODO: change/check for descriptor indexing
 		ds.invalidateCbs();
 	}
 
@@ -261,10 +349,11 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 				dlg_assert(srcBinding < src.layout->bindings.size());
 			}
 
+			std::lock_guard lock(dev.mutex);
 			dst.bindings[dstBinding][dstElem] = src.bindings[srcBinding][srcElem];
 		}
 
-		// TODO: don't do this for descriptor indexing descriptors
+		// TODO: change/check for descriptor indexing
 		dst.invalidateCbs();
 	}
 

@@ -1,9 +1,24 @@
 #include "rp.hpp"
 #include "data.hpp"
 #include "image.hpp"
+#include "util.hpp"
 
 namespace fuen {
 
+// Classes
+Framebuffer::~Framebuffer() {
+	if(!dev) {
+		return;
+	}
+
+	for(auto* attachment : attachments) {
+		auto it = find(attachment->fbs, this);
+		dlg_assert(it != attachment->fbs.end());
+		attachment->fbs.erase(it);
+	}
+}
+
+// API
 // Framebuffer
 VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		VkDevice                                    device,
@@ -42,19 +57,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 		VkFramebuffer                               framebuffer,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	auto fb = dev.framebuffers.mustMove(framebuffer);
-
-	{
-		std::lock_guard lock(dev.mutex);
-		for(auto* view : fb->attachments) {
-			auto it = std::find(view->fbs.begin(), view->fbs.end(), fb.get());
-			dlg_assert(it != view->fbs.end());
-			view->fbs.erase(it);
-		}
-
-		fb.reset(); // must be called while dev.mutex is locked
-	}
-
+	dev.framebuffers.mustErase(framebuffer);
 	dev.dispatch.vkDestroyFramebuffer(device, framebuffer, pAllocator);
 }
 

@@ -20,13 +20,6 @@ struct Handle {
 	std::unordered_map<u64, std::vector<std::byte>> tags;
 	VkObjectType objectType {};
 
-	// A list of all command buffers referencing this handle in their
-	// current record state.
-	// On destruction, the handle will inform all of them that they
-	// are now in an invalid state.
-	std::vector<CommandBuffer*> refCbs;
-	std::shared_mutex mutex;
-
 	Handle() = default;
 	Handle(Handle&&) = delete;
 	Handle& operator=(Handle&&) = delete;
@@ -35,9 +28,19 @@ struct Handle {
 struct DeviceHandle : Handle {
 	Device* dev {};
 
+	// A list of all command buffers referencing this handle in their
+	// current record state.
+	// On destruction, the handle will inform all of them that they
+	// are now in an invalid state.
+	std::vector<CommandBuffer*> refCbs;
+
 	// Expects that neither the device mutex nor its own mutex is locked.
 	~DeviceHandle();
+
+	// Will inform all command buffers that use this handle that they
+	// have been invalidated.
 	void invalidateCbs();
+	void invalidateCbsLocked();
 };
 
 template<typename T>

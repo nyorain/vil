@@ -20,6 +20,8 @@ struct Image : MemoryResource {
 	// when images belongs to a swapchain
 	Swapchain* swapchain {};
 	u32 swapchainImageID {};
+
+	~Image();
 };
 
 struct ImageView : DeviceHandle {
@@ -29,6 +31,8 @@ struct ImageView : DeviceHandle {
 
 	std::vector<Framebuffer*> fbs;
 	std::vector<DescriptorSetRef> descriptors;
+
+	~ImageView();
 };
 
 struct Sampler : DeviceHandle {
@@ -36,6 +40,8 @@ struct Sampler : DeviceHandle {
 	VkSamplerCreateInfo ci;
 
 	std::vector<DescriptorSetRef> descriptors;
+
+	~Sampler();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateImage(

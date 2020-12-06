@@ -12,6 +12,11 @@ struct MemoryResource : DeviceHandle {
 		image,
 	};
 
+	// !memoryDestroyed && !memory: no memory associated
+	// !memoryDestroyed && memory: memory associated
+	// memoryDestroyed && memory: invalid state, must not exist
+	// memoryDestroyed && !memory: had memory associated but memory object was destroyed
+	bool memoryDestroyed {};
 	DeviceMemory* memory {};
 	VkDeviceSize allocationOffset {};
 	VkDeviceSize allocationSize {};
@@ -30,19 +35,15 @@ struct DeviceMemory : DeviceHandle {
 	VkDeviceSize mapOffset {};
 	VkDeviceSize mapSize {};
 
-	struct Allocation {
-		VkDeviceSize offset;
-		VkDeviceSize size;
-		MemoryResource* resource;
-	};
-
 	struct AllocationCmp {
-		bool operator()(const Allocation& a, const Allocation& b) const noexcept {
-			return a.offset < b.offset;
+		bool operator()(const MemoryResource* a, const MemoryResource* b) const noexcept {
+			return a->allocationOffset < b->allocationOffset;
 		}
 	};
 
-	std::set<Allocation, AllocationCmp> allocations;
+	std::set<MemoryResource*, AllocationCmp> allocations;
+
+	~DeviceMemory();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(

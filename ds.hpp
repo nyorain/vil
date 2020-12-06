@@ -53,6 +53,17 @@ struct DescriptorSet : DeviceHandle {
 	};
 
 	std::vector<std::vector<Binding>> bindings;
+
+	// Invalidates the given binding & element, resetting them.
+	// Will also invalidate command buffers, if needed.
+	// Expects the device mutex to be locked.
+	void invalidateLocked(unsigned binding, unsigned elem);
+
+	Sampler* getSampler(unsigned binding, unsigned elem);
+	ImageView* getImageView(unsigned binding, unsigned elem);
+	Buffer* getBuffer(unsigned binding, unsigned elem);
+
+	~DescriptorSet();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(

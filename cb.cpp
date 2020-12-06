@@ -14,21 +14,11 @@
 namespace fuen {
 
 // util
-void reset(CommandBuffer& cb, bool invalid = false) {
-	// make sure all submissions are done.
-	{
-		std::lock_guard lock(cb.dev->mutex);
-		for(auto* subm : cb.pending) {
-			auto res = checkLocked(*subm);
-			dlg_assert(res);
-		}
-	}
-
+void removeFromHandlesLocked(CommandBuffer& cb) {
 	// remove cb from all referenced resources
 	auto removeFromResource = [&](auto& res) {
 		// We have to lock the resource mutex since other commands buffers
 		// might add/remove them at the same time.
-		std::lock_guard lock(res.mutex);
 		auto it = std::find_if(res.refCbs.begin(), res.refCbs.end(), &cb);
 		dlg_assert(it != res.refCbs.end());
 		res.refCbs.erase(it);
@@ -45,11 +35,24 @@ void reset(CommandBuffer& cb, bool invalid = false) {
 	for(auto& handle : cb.handles) {
 		removeFromResource(*handle.second.handle);
 	}
+}
+
+void reset(CommandBuffer& cb, bool invalidate = false) {
+	std::lock_guard lock(cb.dev->mutex);
+
+	// make sure all submissions are done.
+	for(auto* subm : cb.pending) {
+		auto res = checkLocked(*subm);
+		dlg_assert(res);
+	}
+
+	removeFromHandlesLocked(cb);
 
 	// We have to lock our own mutex since other threads might read
 	// our data at the same time.
-	std::lock_guard lock(cb.mutex);
-	cb.invalid = invalid;
+	cb.state = invalidate ?
+		CommandBuffer::State::invalid :
+		CommandBuffer::State::initial;
 	cb.buffers.clear();
 	cb.images.clear();
 	cb.commands.clear();
@@ -57,33 +60,30 @@ void reset(CommandBuffer& cb, bool invalid = false) {
 	cb.graphicsState = {};
 	cb.computeState = {};
 	cb.pushConstants = {};
-	++cb.resetCount;
+
+	if(!invalidate) {
+		++cb.resetCount;
+	}
 }
 
 void CommandBuffer::makeInvalid() {
-	// make sure all submissions are done.
-	{
-		std::lock_guard lock(this->dev->mutex);
-		for(auto* subm : this->pending) {
-			auto res = checkLocked(*subm);
-			dlg_assert(res);
-		}
+	reset(*this, true);
+}
+
+CommandBuffer::~CommandBuffer() {
+	if(!dev) {
+		return;
 	}
 
-	// Important to lock the mutex here, even if 'invalid' was atomic
-	// since from this point onwards no recorded state must be accessed
-	// by anyone (since all referenced resources might be dangling pointers).
-	std::lock_guard lock(this->mutex);
-	this->invalid = true;
+	std::lock_guard devLock(this->dev->mutex);
 
-	// NOTE: we intentionally don't reset the referenced resources and such
-	// here since that would create a complicated synchronization situation:
-	// the resource that made us invalid is holding a lock we would need
-	// to remove ourself from its list of command buffers. And we can't
-	// temporarily unlock the mutex since that would create a whole lot
-	// of new problems. We might be able to do this only if the pass the
-	// resource that made us invalid in here and treat it differently
-	// while resetting (not sure, ugly and error-prone solution).
+	// make sure all submissions are done.
+	for(auto* subm : this->pending) {
+		auto res = checkLocked(*subm);
+		dlg_assert(res);
+	}
+
+	removeFromHandlesLocked(*this);
 }
 
 // api
@@ -213,7 +213,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	dlg_assert(cb.sections.empty());
+	dlg_assert(cb.sections.empty()); // all sections must have been popped
+
+	{
+		std::lock_guard lock(cb.dev->mutex);
+		cb.state = CommandBuffer::State::executable;
+	}
+
 	return cb.dev->dispatch.vkEndCommandBuffer(commandBuffer);
 }
 
@@ -227,8 +233,8 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-void addToHandle(CommandBuffer& cb, Handle& handle) {
-	std::lock_guard lock(handle.mutex);
+void addToHandle(CommandBuffer& cb, DeviceHandle& handle) {
+	std::lock_guard lock(cb.dev->mutex);
 	dlg_assert(std::find(handle.refCbs.begin(), handle.refCbs.end(), &cb) == handle.refCbs.end());
 	handle.refCbs.push_back(&cb);
 }
@@ -296,7 +302,6 @@ void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
 }
 
 void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
-	std::lock_guard lock(cb.mutex);
 	if(!cb.sections.empty()) {
 		cb.sections.back()->children.emplace_back(std::move(cmd));
 	} else {
@@ -324,8 +329,6 @@ void addEndSection(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
 	cb.sections.pop_back();
 }
 
-TODO: add to used handles.
-
 void cmdBarrier(
 		CommandBuffer& cb,
 		BarrierCmdBase& cmd,
@@ -344,11 +347,14 @@ void cmdBarrier(
 	cmd.bufBarriers = {pBufferMemoryBarriers, pBufferMemoryBarriers + bufferMemoryBarrierCount};
 
 	for(auto& imgb : cmd.imgBarriers) {
-		useImage(cb, cmd, imgb.image, imgb.newLayout);
+		auto& img = cb.dev->images.get(imgb.image);
+		// cmd.images.push_back(&img);
+		useImage(cb, cmd, img, imgb.newLayout);
 	}
 
 	for(auto& buf : cmd.bufBarriers) {
 		auto& bbuf = cb.dev->buffers.get(buf.buffer);
+		// cmd.buffers.push_back(&bbuf);
 		useBuffer(cb, cmd, bbuf);
 	}
 }
@@ -372,6 +378,11 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		memoryBarrierCount, pMemoryBarriers,
 		bufferMemoryBarrierCount, pBufferMemoryBarriers,
 		imageMemoryBarrierCount, pImageMemoryBarriers);
+
+	for(auto i = 0u; i < eventCount; ++i) {
+		auto& event = cb.dev->events.get(pEvents[i]);
+		useHandle(cb, *cmd, event);
+	}
 
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdWaitEvents(commandBuffer, eventCount, pEvents,
@@ -479,10 +490,13 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	cmd->firstSet = firstSet;
 	cmd->pipeBindPoint = pipelineBindPoint;
-	cmd->pipeLayout = &cb.dev->pipeLayouts.get(layout);
 
-	// TODO: we could push this to the point where the descriptor set is
-	// acutally used, in case it is just bound without usage.
+	auto& pipeLayout = cb.dev->pipeLayouts.get(layout);
+	// cmd->pipeLayout = &pipeLayout;
+	// NOTE: the pipeline layout is intetionally not added to used handles
+	// since it does not have to be kept alive (beyond the command buffer
+	// being in recording state).
+
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
 
@@ -511,6 +525,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 			} // TODO: buffer view
 		}
 
+		useHandle(cb, *cmd, ds);
 		cmd->sets.push_back(&ds);
 	}
 
@@ -518,17 +533,17 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
 	if(cb.pushConstants.layout &&
-			pushConstantCompatible(*cmd->pipeLayout, *cb.pushConstants.layout)) {
+			pushConstantCompatible(pipeLayout, *cb.pushConstants.layout)) {
 		cb.pushConstants.layout = nullptr;
 		cb.pushConstants.map.clear();
 	}
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState.bind(*cmd->pipeLayout, firstSet, cmd->sets,
+		cb.computeState.bind(pipeLayout, firstSet, cmd->sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState.bind(*cmd->pipeLayout, firstSet, cmd->sets,
+		cb.graphicsState.bind(pipeLayout, firstSet, cmd->sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else {
 		dlg_error("Unknown pipeline bind point");
@@ -873,6 +888,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
 		cmd->secondaries.push_back(&secondary);
+		useHandle(cb, *cmd, secondary);
 
 		for(auto& img : secondary.images) {
 			auto& useImg = cb.images[img.second.image->handle];
@@ -1009,13 +1025,15 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 		dlg_error("unknown pipeline bind point");
 	}
 
+	useHandle(cb, *cmd, *cmd->pipe);
+
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.vkCmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 		VkCommandBuffer                             commandBuffer,
-		VkPipelineLayout                            layout,
+		VkPipelineLayout                            pipeLayout,
 		VkShaderStageFlags                          stageFlags,
 		uint32_t                                    offset,
 		uint32_t                                    size,
@@ -1023,7 +1041,11 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto cmd = std::make_unique<PushConstantsCmd>();
 
-	cmd->layout = &cb.dev->pipeLayouts.get(layout);
+	auto& layout = cb.dev->pipeLayouts.get(pipeLayout);
+	// cmd->layout = &layout;
+	// NOTE: pipeline layouts don't have to be kept alive for the command
+	// buffer (beyond it being in recording state)
+
 	cmd->stages = stageFlags;
 	cmd->offset = offset;
 	cmd->size = size;
@@ -1034,12 +1056,12 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
 	if(cb.pushConstants.layout &&
-			pushConstantCompatible(*cmd->layout, *cb.pushConstants.layout)) {
+			pushConstantCompatible(layout, *cb.pushConstants.layout)) {
 		cb.pushConstants.layout = nullptr;
 		cb.pushConstants.map.clear();
 	}
 
-	cb.pushConstants.layout = cmd->layout;
+	cb.pushConstants.layout = &layout;
 	for(auto i = 0u; i < 32; ++i) {
 		if((stageFlags & (1 << i)) == 0) {
 			continue;
@@ -1082,7 +1104,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	}
 
 	add(cb, std::move(cmd));
-	cb.dev->dispatch.vkCmdPushConstants(commandBuffer, layout, stageFlags,
+	cb.dev->dispatch.vkCmdPushConstants(commandBuffer, pipeLayout, stageFlags,
 		offset, size, pValues);
 }
 

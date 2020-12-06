@@ -1,9 +1,60 @@
 #include "image.hpp"
 #include "data.hpp"
-#include "gui.hpp"
+#include "ds.hpp"
 #include "rp.hpp"
 
 namespace fuen {
+
+// Classes
+Image::~Image() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+	for(auto* view : this->views) {
+		view->img = nullptr;
+	}
+}
+
+ImageView::~ImageView() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+	if(this->img) {
+		auto it = std::find(this->img->views.begin(), this->img->views.end(), this);
+		dlg_assert(it != this->img->views.end());
+		this->img->views.erase(it);
+	}
+
+	for(auto* fb : this->fbs) {
+		auto it = std::find(fb->attachments.begin(), fb->attachments.end(), this);
+		dlg_assert(it != fb->attachments.end());
+		fb->attachments.erase(it);
+	}
+
+	// Don't use for-loop as the descriptors unregister themselves
+	while(!this->descriptors.empty()) {
+		auto ref = this->descriptors[0];
+		dlg_assert(ref.ds->getImageView(ref.binding, ref.elem) == this);
+		ref.ds->invalidateLocked(ref.binding, ref.elem);
+	}
+}
+
+Sampler::~Sampler() {
+	if(!dev) {
+		return;
+	}
+
+	// Don't use for-loop as the descriptors unregister themselves
+	while(!this->descriptors.empty()) {
+		auto ref = this->descriptors[0];
+		dlg_assert(ref.ds->getSampler(ref.binding, ref.elem) == this);
+		ref.ds->invalidateLocked(ref.binding, ref.elem);
+	}
+}
 
 // Image
 VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
@@ -38,17 +89,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		VkImage                                     image,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = *findData<Device>(device);
-
-	{
-		auto img = dev.images.mustMove(image);
-
-		// it's legal to destroy an image before views/fbs its used in
-		for(auto* view : img->views) {
-			std::lock_guard lock(view->mutex);
-			view->img = nullptr;
-		}
-	}
-
+	auto img = dev.images.mustErase(image);
 	dev.dispatch.vkDestroyImage(device, image, pAllocator);
 }
 
@@ -70,7 +111,12 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 	img.memory = &mem;
 	img.allocationOffset = memoryOffset;
 	img.allocationSize = memReqs.size;
-	mem.allocations.insert({memoryOffset, memReqs.size, &img});
+
+	{
+		// access to the given memory must be internally synced
+		std::lock_guard lock(dev.mutex);
+		mem.allocations.insert(&img);
+	}
 
 	return dev.dispatch.vkBindImageMemory(device, image, memory, memoryOffset);
 }
@@ -107,30 +153,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		VkImageView                                 imageView,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-
-	auto view = dev.imageViews.mustMove(imageView);
-
-	{
-		std::lock_guard lock(dev.mutex);
-
-		if(view->img) {
-			auto it = std::find(view->img->views.begin(), view->img->views.end(), view.get());
-			dlg_assert(it != view->img->views.end());
-			view->img->views.erase(it);
-		}
-
-		// it's legal to destroy an image view before resources its used in
-		for(auto* fb : view->fbs) {
-			auto it = std::find(fb->attachments.begin(), fb->attachments.end(), view.get());
-			dlg_assert(it != fb->attachments.end());
-			fb->attachments.erase(it);
-		}
-
-		// important that the destructor is run while mutex is locked,
-		// see ~DeviceHandle
-		view.reset();
-	}
-
+	dev.imageViews.mustErase(imageView);
 	dev.dispatch.vkDestroyImageView(device, imageView, pAllocator);
 }
 

@@ -141,8 +141,8 @@ struct BarrierCmdBase : Command {
 	std::vector<VkBufferMemoryBarrier> bufBarriers;
 	std::vector<VkImageMemoryBarrier> imgBarriers;
 
-	std::vector<Image*> images;
-	std::vector<Buffer*> buffers;
+	// std::vector<Image*> images;
+	// std::vector<Buffer*> buffers;
 };
 
 struct WaitEventsCmd : BarrierCmdBase {
@@ -274,7 +274,7 @@ struct BindIndexBufferCmd : Command {
 struct BindDescriptorSetCmd : Command {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
-	PipelineLayout* pipeLayout;
+	// PipelineLayout* pipeLayout;
 	std::vector<DescriptorSet*> sets;
 
 	std::string toString() const override {
@@ -449,7 +449,7 @@ struct BindPipelineCmd : Command {
 };
 
 struct PushConstantsCmd : Command {
-	PipelineLayout* layout;
+	// PipelineLayout* layout;
 	VkShaderStageFlags stages;
 	u32 offset;
 	u32 size;
