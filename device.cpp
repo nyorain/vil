@@ -480,13 +480,11 @@ bool checkLocked(PendingSubmission& subm) {
 	auto& dev = *subm.queue->dev;
 
 	if(subm.appFence) {
-		std::lock_guard fenceLock(subm.appFence->mutex);
 		if(dev.dispatch.vkGetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
 			return false;
 		}
 	} else {
 		dlg_assert(subm.ourFence);
-		std::lock_guard fenceLock(subm.ourMutex);
 		if(dev.dispatch.vkGetFenceStatus(dev.handle, subm.ourFence) != VK_SUCCESS) {
 			return false;
 		}

@@ -7,7 +7,21 @@
 namespace fuen {
 
 Swapchain::~Swapchain() {
-	// TODO
+	if(!dev) {
+		return;
+	}
+
+	for(auto* img : this->images) {
+		dev->images.mustErase(img->handle);
+	}
+
+	// TODO: not sure about this. We don't synchronize access to it
+	// in other places since the api for swapchain/overlay retrieval
+	// can't be threadsafe, by design.
+	std::lock_guard lock(dev->mutex);
+	if(dev->lastCreatedSwapchain == this) {
+		dev->lastCreatedSwapchain = nullptr;
+	}
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
@@ -79,22 +93,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		VkSwapchainKHR                             	swapchain,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& devd = getData<Device>(device);
-
-	auto& sc = devd.swapchains.get(swapchain);
-	for(auto* img : sc.images) {
-		devd.images.mustErase(img->handle);
-	}
-
-	{
-		auto sc = devd.swapchains.mustMove(swapchain);
-		{
-			std::lock_guard lock(devd.mutex);
-			if(devd.lastCreatedSwapchain == sc.get()) {
-				devd.lastCreatedSwapchain = nullptr;
-			}
-		}
-	}
-
+	devd.swapchains.mustErase(swapchain);
 	devd.dispatch.vkDestroySwapchainKHR(device, swapchain, pAllocator);
 }
 

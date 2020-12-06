@@ -8,14 +8,11 @@ namespace fuen {
 struct Fence : DeviceHandle {
 	VkFence handle {};
 
+	// The pending submission this fence is currently associated to.
+	// Synced via device mutex.
 	PendingSubmission* submission {};
 
-	// Needed since we might have to wait on a fence internally
-	// and must synchronize that with fence waits from the application
-	// (in other threads). So this mutex must be locked while the fence
-	// is in a call down the chain.
-	// NOTE: not necessarily locked when members are changed.
-	std::mutex mutex {};
+	~Fence();
 };
 
 struct Semaphore : DeviceHandle {
@@ -24,19 +21,6 @@ struct Semaphore : DeviceHandle {
 
 struct Event : DeviceHandle {
 	VkEvent handle {};
-};
-
-// Locks multiple fences.
-// Always call this instead of just locking them in any order to avoid
-// deadlocks between multiple mult-fence-locks.
-struct MultiFenceLock {
-	MultiFenceLock(Device& dev, span<const VkFence>);
-	MultiFenceLock(std::vector<std::mutex*>);
-	~MultiFenceLock();
-
-private:
-	void init(std::vector<std::mutex*>);
-	std::vector<std::mutex*> mutexes_;
 };
 
 // api

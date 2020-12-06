@@ -363,6 +363,7 @@ void DisplayWindow::mainLoop() {
 		// pretty long, terrible critical section...
 		{
 			// Lock order important. See vkQueueSubmit
+			// TODO: queue lock should not be needed here..
 			std::lock_guard queueLock(dev.queueMutex);
 
 			// Need this here to prevent resources we use

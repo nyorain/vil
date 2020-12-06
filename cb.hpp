@@ -11,6 +11,8 @@ namespace fuen {
 struct CommandPool : DeviceHandle {
 	VkCommandPool handle {};
 	std::vector<CommandBuffer*> cbs;
+
+	~CommandPool();
 };
 
 // Synchronization for this one is a bitch:
@@ -87,15 +89,6 @@ public:
 
 	// Moves the command buffer to invalid state.
 	void makeInvalid();
-
-public: // API implementation
-	static VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
-		VkCommandBuffer                             commandBuffer,
-		const VkCommandBufferBeginInfo*             pBeginInfo);
-
-	static VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
-		VkCommandBuffer                             commandBuffer);
-
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
@@ -124,6 +117,13 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
     VkCommandPool                               commandPool,
     uint32_t                                    commandBufferCount,
     const VkCommandBuffer*                      pCommandBuffers);
+
+VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
+    VkCommandBuffer                             commandBuffer,
+    const VkCommandBufferBeginInfo*             pBeginInfo);
+
+VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
+    VkCommandBuffer                             commandBuffer);
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
     VkCommandBuffer                             commandBuffer,

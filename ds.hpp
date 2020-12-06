@@ -17,6 +17,8 @@ DescriptorCategory category(VkDescriptorType);
 struct DescriptorPool : DeviceHandle {
 	VkDescriptorPool handle {};
 	std::vector<DescriptorSet*> descriptorSets;
+
+	~DescriptorPool();
 };
 
 struct DescriptorSetLayout : DeviceHandle {

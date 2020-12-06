@@ -84,6 +84,35 @@ CommandBuffer::~CommandBuffer() {
 	}
 
 	removeFromHandlesLocked(*this);
+
+	// Remove ourselves from the pool we come from.
+	// A command pool can't be destroyed before its command buffers (it
+	// implicitly frees them).
+	dlg_assert(pool);
+
+	auto it = find(pool->cbs, this);
+	dlg_assert(it != pool->cbs.end());
+	pool->cbs.erase(it);
+}
+
+CommandPool::~CommandPool() {
+	if(!dev) {
+		return;
+	}
+
+	// NOTE: we don't need a lock here:
+	// While the command pool is being destroyed, no command buffers from it
+	// can be created or destroyed in another thread, that would always be a
+	// race. So accessing this vector is safe.
+	// (Just adding a lock here would furthermore result in deadlocks due
+	// to the mutexes locked inside the loop, don't do it!)
+	// We don't use a for loop since the command buffers remove themselves
+	// on destruction
+	while(!cbs.empty()) {
+		auto* cb = cbs[0];
+		eraseData(cb->handle);
+		dev->commandBuffers.mustErase(cb->handle);
+	}
 }
 
 // api
@@ -112,19 +141,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(
 		VkCommandPool                               commandPool,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	auto cp = dev.commandPools.mustMove(commandPool);
-
-	for(auto* cb : cp->cbs) {
-		eraseData(cb->handle);
-		dev.commandBuffers.mustErase(cb->handle);
-	}
-
-	{
-		// ~DeviceHandle expects device mutex locked
-		std::lock_guard lock(dev.mutex);
-		cp.reset();
-	}
-
+	dev.commandPools.mustErase(commandPool);
 	dev.dispatch.vkDestroyCommandPool(device, commandPool, pAllocator);
 }
 
@@ -175,28 +192,8 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 	auto& dev = getData<Device>(device);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
-		auto cb = dev.commandBuffers.mustMove(pCommandBuffers[i]);
-		if(cb->pool) {
-			dlg_assert(cb->pool == dev.commandPools.find(commandPool));
-			auto it = std::find(cb->pool->cbs.begin(), cb->pool->cbs.end(), cb.get());
-			dlg_assert(it != cb->pool->cbs.end());
-			cb->pool->cbs.erase(it);
-		}
-
 		eraseData(pCommandBuffers[i]);
-
-		// ~DeviceHandle expects device mutex to be locked
-		std::lock_guard lock(dev.mutex);
-
-		// it's important we remove all pending submissions so they don't have a
-		// reference to this command buffer. The application is not allowed to
-		// free cbs while they are still executing, per vulkan spec.
-		for(auto* pending : cb->pending) {
-			auto res = checkLocked(*pending);
-			dlg_assert(res);
-		}
-
-		cb.reset();
+		dev.commandBuffers.mustErase(pCommandBuffers[i]);
 	}
 
 	dev.dispatch.vkFreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);

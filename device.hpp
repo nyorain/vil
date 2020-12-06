@@ -34,10 +34,8 @@ struct PendingSubmission {
 	Fence* appFence {};
 
 	// When the caller didn't add a fence, we added this one from the fence pool.
-	// When appFence is not null, this is null. We need the mutex to
-	// synchronize access to the fence.
+	// When appFence is not null, this is null.
 	VkFence ourFence {};
-	std::mutex ourMutex;
 };
 
 // Expects dev.mutex to be locked
@@ -73,11 +71,20 @@ struct Device {
 	// Mutex for general shared access.
 	// While this mutex is locked, resources won't be inserted or
 	// erased from the resource tables below (and therefore can't
-	// logically be created or destroyed).
+	// logically be created or destroyed). Also used to synchronize
+	// shared access to most resources (that can be mutated).
 	std::shared_mutex mutex;
-	std::mutex queueMutex; // mutex for accessing queues
 
-	// NOTE:: hacky as hell but can't work around it. Needed only by the
+	// Mutex that is locked *while* doing a submission. The general mutex
+	// won't be locked for that time. So when we want to do submissions
+	// ourselves from a different thread on from within another call,
+	// we have to lock this to make sure our submissions don't interfer
+	// with application submissions (as well as with our own).
+	// Note that in vulkan submission synchronization happens on per-device,
+	// *not* on per-queue basis.
+	std::mutex queueMutex;
+
+	// NOTE: hacky as hell but can't work around it. Needed only by the
 	// public API to communicate with the application.
 	// Must only be accessed while the mutex is locked.
 	// TODO: could keep a stack of swapchains to support the case

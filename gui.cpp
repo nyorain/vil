@@ -1131,8 +1131,8 @@ void Gui::unselect(const Handle& handle) {
 
 	if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
 		auto& img = static_cast<const Image&>(handle);
-		if(img.handle == selected_.image.handle) {
-			selected_.image.handle = {};
+		if(&img == &selected_.image.object) {
+			selected_.image.object = {};
 			if(selected_.image.view) {
 				dev_->dispatch.vkDestroyImageView(dev_->handle, selected_.image.view, nullptr);
 				selected_.image.view = {};

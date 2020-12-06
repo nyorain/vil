@@ -51,6 +51,14 @@ If that is ever a problem, could add something like
 void DeviceHandle::preDestroyDevLocked();
 ```
 
+---
+
+In general, member of a handle can be
+- private, synchronized in vulkan API implementations just via vulkan
+  guarantees
+- public and immutable (like e.g. create info)
+- public and mutable; synchronized over a mutex (usually device mutex)
+
 Why (not) shared ownership
 ==========================
 

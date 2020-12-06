@@ -14,13 +14,15 @@ v0.1, goal: end of january 2021
 			proprietary software development (such as games). 
 			But otoh, companies not understanding licensing and open source 
 			should not be my problem.
-- [ ] switch to shared pointers for device handles, keeping them alive
-- [ ] store for handles in which command buffers they were used and set the
+- [x] switch to shared pointers for device handles, keeping them alive
+	  NOTE: nope, not doing that for now. Explicit resource connection tracking
+	  implemented though.
+- [x] store for handles in which command buffers they were used and set the
       command buffer to invalid state when they are changed/destroyed
 - [ ] display command buffer state in UI
 - [ ] display in UI whether resources are destroyed or not
-- [ ] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
-- [ ] Remove Device::lastDevice api hack. Instead return a dev handle from fuenLoadApi
+- [x] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
+- [x] Remove Device::lastDevice api hack. Instead return a dev handle from fuenLoadApi
       Should probably just store it inside the api struct.
 - [ ] Implement missing resource overview UIs
 - [ ] Switch to a more useful fork/branch of vkpp: Generate vk::name
@@ -57,7 +59,7 @@ v0.1, goal: end of january 2021
 	- [ ] go at least a bit away from the default imgui style
 - [ ] full support of all vulkan 1.0 commands
 	- [ ] should probably also support the easy-to-support extensions
-	      for resource creation
+	      for resource creation already. At least widely used/important extensions
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
 	- [ ] clearly document (maybe already in README?) that the layer
@@ -69,6 +71,13 @@ v0.1, goal: end of january 2021
 - [ ] support for buffer views
 
 Possibly for later, new features:
+- [ ] (somewhat high prio tho) add support for waiting for command buffer
+      recording to finish (with a timeout tho, in which case we simply display
+	  that is currently being recorded (and that it takes long)), when viewing
+	  it. Especially a big problem for display-window (compared to overlay)
+	  when an application re-records in every frame.
+	  	- [ ] could be done via conditional variable in command buffer
+		      that is signaled on endCommandBuffer
 - [ ] support for sparse binding
 - [ ] we might be able (with checks everywhere and no assumptions at all, basically)
       to support cases where extensions we don't know about/support are used.

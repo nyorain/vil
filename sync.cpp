@@ -40,20 +40,17 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(
 		VkFence                                     fence,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	auto fenceD = dev.fences.mustMove(fence);
-
-	{
-
-		// important that we do this while mutex is locked,
-		// see ~DeviceHandle
-		fenceD.reset();
-	}
-
+	dev.fences.mustErase(fence);
 	dev.dispatch.vkDestroyFence(device, fence, pAllocator);
 }
 
 // We hook these calls so we have as much knowledge about payload
 // completion as the application. Might make other things easier.
+// NOTE: For vulkan, ResetFence calls must be synchronized but otherwise,
+// multiple threads can call wait/getFenceStatus at the same time.
+// That's why we don't have to synchronize these calls even though we might
+// call getFenceStatus on application fences (that have a pending submission)
+// from other places.
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 		VkDevice                                    device,
@@ -75,8 +72,6 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 		}
 	}
 
-	// technically, we could also just lock and reset on a per-fence basis
-	MultiFenceLock lock(dev, {pFences, pFences + fenceCount});
 	return dev.dispatch.vkResetFences(device, fenceCount, pFences);
 }
 
@@ -86,19 +81,17 @@ VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
 	auto& dev = getData<Device>(device);
 	auto& fenceD = dev.fences.get(fence);
 
-	VkResult res;
+	VkResult res = dev.dispatch.vkGetFenceStatus(device, fence);
 
-	{
-		std::lock_guard lock(fenceD.mutex);
-		res = dev.dispatch.vkGetFenceStatus(device, fence);
+	if(res != VK_SUCCESS) {
+		return res;
 	}
 
-	if(res == VK_SUCCESS) {
-		std::lock_guard lock(dev.mutex);
-		if(fenceD.submission) {
-			auto finished = checkLocked(*fenceD.submission);
-			dlg_assert(finished);
-		}
+	// When result is VK_SUCCESS, the payload must be completed
+	std::lock_guard lock(dev.mutex);
+	if(fenceD.submission) {
+		auto finished = checkLocked(*fenceD.submission);
+		dlg_assert(finished);
 	}
 
 	return res;
@@ -111,12 +104,7 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 		VkBool32                                    waitAll,
 		uint64_t                                    timeout) {
 	auto& dev = getData<Device>(device);
-	VkResult res;
-
-	{
-		MultiFenceLock lock(dev, {pFences, pFences + fenceCount});
-		res = dev.dispatch.vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
-	}
+	VkResult res = dev.dispatch.vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
 
 	if(res == VK_SUCCESS || !waitAll) {
 		// have to check all fences for completed payloads
@@ -130,33 +118,6 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 	}
 
 	return res;
-}
-
-// MultiFenceLock
-MultiFenceLock::MultiFenceLock(Device& dev, span<const VkFence> fences) {
-	std::vector<std::mutex*> mutexes;
-	for(auto& fence : fences) {
-		mutexes.push_back(&dev.fences.get(fence).mutex);
-	}
-	init(mutexes);
-}
-
-MultiFenceLock::MultiFenceLock(std::vector<std::mutex*> mutexes) {
-	init(std::move(mutexes));
-}
-
-void MultiFenceLock::init(std::vector<std::mutex*> mutexes) {
-	mutexes_ = std::move(mutexes);
-	std::sort(mutexes_.begin(), mutexes_.end());
-	for(auto* mtx : mutexes_) {
-		mtx->lock();
-	}
-}
-
-MultiFenceLock::~MultiFenceLock() {
-	for(auto* mtx : mutexes_) {
-		mtx->unlock();
-	}
 }
 
 // semaphore

@@ -47,7 +47,6 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 
 	if(!foundDraw) {
 		foundDraw = &draws.emplace_back();
-		*foundDraw = {};
 		foundDraw->init(dev);
 	}
 
@@ -60,12 +59,12 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	ImGui::GetIO().DisplaySize.x = swapchain->ci.imageExtent.width;
 	ImGui::GetIO().DisplaySize.y = swapchain->ci.imageExtent.height;
 
-	// TODO: make sure all used resources are readable.
-
 	// if there is a platform (for input stuff), update it
 	// if(platform) {
 	// 	platform->update();
 	// }
+
+	// TODO: make sure all used resources are readable.
 
 	// render gui
 	gui.draw(draw, false);

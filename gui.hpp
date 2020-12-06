@@ -39,6 +39,8 @@ public:
 		}
 	}
 
+	auto& selectedHandle() const { return selected_.handle; }
+
 	VkImage selectedImage() const { return selected_.image.handle; }
 	bool selectedImageViewable() const { return (selected_.image.view); }
 	VkImageAspectFlagBits selectedImageAspect() const { return selected_.image.aspectMask; }
@@ -100,7 +102,7 @@ private:
 
 		// Image data
 		struct {
-			VkImage handle {};
+			Image* object {};
 			VkImageView view {};
 			VkImageAspectFlagBits aspectMask {};
 		} image;

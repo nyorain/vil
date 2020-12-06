@@ -58,6 +58,14 @@ DescriptorSet::~DescriptorSet() {
 			unregisterLocked(*this, b, e);
 		}
 	}
+
+	// Remove from descriptor pool.
+	// Pools can't be destroyed before their sets as they implicitly free them.
+	dlg_assert(pool);
+
+	auto it = find(pool->descriptorSets, this);
+	dlg_assert(it != pool->descriptorSets.end());
+	pool->descriptorSets.erase(it);
 }
 
 void DescriptorSet::invalidateLocked(unsigned binding, unsigned elem) {
@@ -87,6 +95,25 @@ Buffer* DescriptorSet::getBuffer(unsigned binding, unsigned elem) {
 	dlg_assert(bindings[binding].size() > elem);
 	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::buffer);
 	return bindings[binding][elem].bufferInfo.buffer;
+}
+
+DescriptorPool::~DescriptorPool() {
+	if(!dev) {
+		return;
+	}
+
+	// NOTE: we don't need a lock here:
+	// While the ds pool is being destroyed, no descriptor sets from it
+	// can be created or destroyed in another thread, that would always be a
+	// race. So accessing this vector is safe.
+	// (Just adding a lock here would furthermore result in deadlocks due
+	// to the mutexes locked inside the loop, don't do it!)
+	// We don't use a for loop since the descriptors remove themselves
+	// on destruction
+	while(!descriptorSets.empty()) {
+		auto* ds = descriptorSets[0];
+		dev->descriptorSets.mustErase(ds->handle);
+	}
 }
 
 // util
@@ -231,11 +258,7 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 	auto& dev = getData<Device>(device);
 
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
-		auto ds = dev.descriptorSets.mustMove(pDescriptorSets[i]);
-		auto it = std::find(ds->pool->descriptorSets.begin(), ds->pool->descriptorSets.end(),
-			ds.get());
-		dlg_assert(it != ds->pool->descriptorSets.end());
-		ds->pool->descriptorSets.erase(it);
+		dev.descriptorSets.mustErase(pDescriptorSets[i]);
 	}
 
 	return dev.dispatch.vkFreeDescriptorSets(device, descriptorPool,
