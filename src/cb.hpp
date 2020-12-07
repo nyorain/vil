@@ -89,6 +89,10 @@ public:
 
 	// Moves the command buffer to invalid state.
 	void makeInvalid();
+
+	bool uses(const Handle&) const;
+	bool uses(const Image&) const;
+	bool uses(const Buffer&) const;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(

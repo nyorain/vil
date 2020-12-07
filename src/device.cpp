@@ -17,6 +17,7 @@
 #include "ds.hpp"
 #include "sync.hpp"
 #include "overlay.hpp"
+#include <swa/swa.h>
 
 namespace fuen {
 
@@ -80,6 +81,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		VkDevice* dev) {
 	auto* iniData = findData<Instance>(phdev);
 	dlg_assert(iniData);
+	auto& ini = *iniData;
 
 	auto* linkInfo = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
 	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
@@ -93,17 +95,145 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	auto fpGetInstanceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
 	auto fpGetDeviceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetDeviceProcAddr;
-	auto fpCreateDevice = (PFN_vkCreateDevice)fpGetInstanceProcAddr(iniData->handle, "vkCreateDevice");
+	auto fpCreateDevice = (PFN_vkCreateDevice)fpGetInstanceProcAddr(ini.handle, "vkCreateDevice");
 	if(!fpCreateDevice) {
 		dlg_error("could not load vkCreateDevice");
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
+	auto fpGetPhysicalDeviceQueueFamilyProperties =
+		(PFN_vkGetPhysicalDeviceQueueFamilyProperties)
+		fpGetInstanceProcAddr(ini.handle, "vkGetPhysicalDeviceQueueFamilyProperties");
+	dlg_assert(fpGetPhysicalDeviceQueueFamilyProperties);
+
   	// Advance the link info for the next element on the chain
 	auto mutLinkInfo = const_cast<VkLayerDeviceCreateInfo*>(linkInfo);
    	mutLinkInfo->u.pLayerInfo = linkInfo->u.pLayerInfo->pNext;
 
-	VkResult result = fpCreateDevice(phdev, ci, alloc, dev);
+   	// query queues
+	u32 nqf;
+	fpGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, nullptr);
+	auto qfprops = std::make_unique<VkQueueFamilyProperties[]>(nqf);
+	fpGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, qfprops.get());
+
+	// == Modify create info ==
+	auto nci = *ci;
+
+	// == Extensions ==
+	// TODO: enable extensions useful for us; if supported
+
+	// == Queues ==
+	// Make sure we get a graphics queue.
+	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos = {
+		nci.pQueueCreateInfos,
+		nci.pQueueCreateInfos + nci.queueCreateInfoCount
+	};
+
+	u32 gfxQueueInfoID = u32(-1);
+
+	// First try to identify an application-created queue that has
+	// the graphics flag.
+	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
+		auto& q = queueCreateInfos[i];
+		if(q.queueCount == 0) {
+			continue;
+		}
+
+		auto flags = qfprops[q.queueFamilyIndex].queueFlags;
+		if(gfxQueueInfoID == u32(-1) && flags & VK_QUEUE_GRAPHICS_BIT) {
+			gfxQueueInfoID = i;
+			break;
+		}
+	}
+
+	const float prio1 = 1.f;
+	if(gfxQueueInfoID == u32(-1)) {
+		// The application does not create a graphics queue, so we
+		// add one.
+		for(auto qf = 0u; qf < nqf; ++qf) {
+			if(qfprops[qf].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+				gfxQueueInfoID = queueCreateInfos.size();
+
+				dlg_trace("Adding new queue (for graphics), family {}", qf);
+				auto& q = queueCreateInfos.emplace_back();
+				q.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+				q.pQueuePriorities = &prio1;
+				q.queueFamilyIndex = qf;
+				q.queueCount = 1u;
+				break;
+			}
+		}
+
+		dlg_assertm(gfxQueueInfoID != u32(-1),
+			"The vulkan implementation exposes no graphics queue!");
+	}
+
+	// Make sure we get a queue that can potentially display to our
+	// window. To check that, we first have to create a window though.
+	std::unique_ptr<DisplayWindow> window;
+	u32 presentQueueInfoID = u32(-1);
+	if(ini.display) {
+		// create window
+		window = std::make_unique<DisplayWindow>();
+		if(!window->createWindow(ini)) {
+			window.reset();
+		} else {
+			// Find present queue
+			auto vkSurf64 = swa_window_get_vk_surface(window->window);
+			window->surface = bit_cast<VkSurfaceKHR>(vkSurf64);
+
+			auto fpGetPhysicalDeviceSurfaceSupportKHR =
+				(PFN_vkGetPhysicalDeviceSurfaceSupportKHR)
+				fpGetInstanceProcAddr(ini.handle, "vkGetPhysicalDeviceSurfaceSupportKHR");
+			dlg_assert(fpGetPhysicalDeviceSurfaceSupportKHR);
+
+			// Check queues that are already created for presentation support.
+			for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
+				auto& q = queueCreateInfos[i];
+				if(presentQueueInfoID == u32(-1)) {
+					VkBool32 supported {};
+					auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
+						q.queueFamilyIndex, window->surface, &supported);
+					if(res == VK_SUCCESS && supported) {
+						presentQueueInfoID = i;
+						break;
+					}
+				}
+			}
+
+			// If none found, add our own
+			if(presentQueueInfoID == u32(-1)) {
+				// The application does not create a graphics queue, so we
+				// add one.
+				for(auto qf = 0u; qf < nqf; ++qf) {
+					VkBool32 supported {};
+					auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
+						qf, window->surface, &supported);
+					if(res == VK_SUCCESS && supported) {
+						presentQueueInfoID = queueCreateInfos.size();
+
+						dlg_trace("Adding new queue (for present), family {}", qf);
+						auto& q = queueCreateInfos.emplace_back();
+						q.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+						q.pQueuePriorities = &prio1;
+						q.queueFamilyIndex = qf;
+						q.queueCount = 1u;
+						break;
+					}
+				}
+
+				if(presentQueueInfoID == u32(-1)) {
+					dlg_warn("Can't create present window since no queue supports presenting to it");
+					window.reset();
+				}
+			}
+		}
+	}
+
+	nci.pQueueCreateInfos = queueCreateInfos.data();
+	nci.queueCreateInfoCount = queueCreateInfos.size();
+
+	VkResult result = fpCreateDevice(phdev, &nci, alloc, dev);
 	if(result != VK_SUCCESS) {
 		return result;
 	}
@@ -152,27 +282,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dlg_assert(loaderData);
 	devData.setDeviceLoaderData = loaderData->u.pfnSetDeviceLoaderData;
 
-   	// query queues
-	u32 nqf;
-	devData.dispatch.vkGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, nullptr);
-	auto qfprops = std::make_unique<VkQueueFamilyProperties[]>(nqf);
-	devData.dispatch.vkGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, qfprops.get());
-
-	// reserve vector so we don't get a reallocation
-	auto nQueues = 0u;
-	for(auto i = 0u; i < ci->queueCreateInfoCount; ++i) {
-		nQueues += ci->pQueueCreateInfos[i].queueCount;
-	}
-
-	devData.queues.reserve(nQueues);
-	for(auto i = 0u; i < ci->queueCreateInfoCount; ++i) {
-		auto& qi = ci->pQueueCreateInfos[i];
+	// Get device queues
+	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
+		auto& qi = queueCreateInfos[i];
 		auto& familyProps = qfprops[qi.queueFamilyIndex];
 
 		for(auto j = 0u; j < qi.queueCount; ++j) {
 			auto& q = *devData.queues.emplace_back(std::make_unique<Queue>());
 			q.dev = &devData;
 			q.flags = familyProps.queueFlags;
+			q.priority = qi.pQueuePriorities[j];
 			devData.dispatch.vkGetDeviceQueue(*dev, qi.queueFamilyIndex, j, &q.queue);
 
 			// Queue is a dispatchable handle.
@@ -183,8 +302,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			devData.setDeviceLoaderData(*dev, q.queue);
 			insertData(q.queue, &q);
 
-			if(!devData.gfxQueue && familyProps.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+			if(i == gfxQueueInfoID && j == 0u) {
+				dlg_assert(!devData.gfxQueue);
 				devData.gfxQueue = &q;
+			}
+
+			if(i == presentQueueInfoID && j == 0u) {
+				dlg_assert(devData.window);
+				dlg_assert(!devData.window->presentQueue);
+				devData.window->presentQueue = &q;
 			}
 		}
 	}
@@ -203,34 +329,34 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		}
 	}
 
-	if(devData.gfxQueue) {
-		devData.renderData = std::make_unique<RenderData>();
-		devData.renderData->init(devData);
+	// == graphics-stuff ==
+	devData.renderData = std::make_unique<RenderData>();
+	devData.renderData->init(devData);
 
-		// command pool
-		VkCommandPoolCreateInfo cpci = vk::CommandPoolCreateInfo();
-		cpci.queueFamilyIndex = devData.gfxQueue->family;
-		cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		VK_CHECK(devData.dispatch.vkCreateCommandPool(*dev, &cpci, nullptr, &devData.commandPool));
+	// command pool
+	VkCommandPoolCreateInfo cpci = vk::CommandPoolCreateInfo();
+	cpci.queueFamilyIndex = devData.gfxQueue->family;
+	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	VK_CHECK(devData.dispatch.vkCreateCommandPool(*dev, &cpci, nullptr, &devData.commandPool));
 
-		// descriptor pool
-		// TODO: might need multiple pools...
-		VkDescriptorPoolSize poolSize;
-		poolSize.descriptorCount = 50u;
-		poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	// descriptor pool
+	// TODO: might need multiple pools...
+	VkDescriptorPoolSize poolSize;
+	poolSize.descriptorCount = 50u;
+	poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
-		VkDescriptorPoolCreateInfo dpci = vk::DescriptorPoolCreateInfo();
-		dpci.pPoolSizes = &poolSize;
-		dpci.poolSizeCount = 1u;
-		dpci.maxSets = 50u;
-		dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-		VK_CHECK(devData.dispatch.vkCreateDescriptorPool(*dev, &dpci, nullptr, &devData.dsPool));
-	}
+	VkDescriptorPoolCreateInfo dpci = vk::DescriptorPoolCreateInfo();
+	dpci.pPoolSizes = &poolSize;
+	dpci.poolSizeCount = 1u;
+	dpci.maxSets = 50u;
+	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	VK_CHECK(devData.dispatch.vkCreateDescriptorPool(*dev, &dpci, nullptr, &devData.dsPool));
 
-	constexpr auto useWindow = false;
-	if(useWindow) {
-		devData.window = std::make_unique<DisplayWindow>();
-		devData.window->init(devData);
+	// == window stuff ==
+	if(window) {
+		dlg_assert(window->presentQueue); // should have been set in queue querying
+		devData.window = std::move(window);
+		devData.window->initDevice(devData);
 	}
 
 	return result;

@@ -22,16 +22,24 @@
 #include <vkpp/span.hpp>
 
 #include <dlg/dlg.hpp>
+#include <swa/swa.h>
 
 #include <vulkan/vk_layer.h>
 
 namespace fuen {
 
+// Classes
+Instance::~Instance() {
+	if(display) {
+		swa_display_destroy(display);
+	}
+}
+
 // Instance
 VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkInstanceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
-		VkInstance* ini) {
+		VkInstance* pInstance) {
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
 	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
 		linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*linkInfo);
@@ -43,7 +51,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	}
 
 	auto fpGetInstanceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
-	auto fpCreateInstance = (PFN_vkCreateInstance)fpGetInstanceProcAddr(NULL, "vkCreateInstance");
+	auto fpCreateInstance = (PFN_vkCreateInstance)fpGetInstanceProcAddr(nullptr, "vkCreateInstance");
 	if(!fpCreateInstance) {
 		dlg_error("could not load vkCreateInstance");
 		return VK_ERROR_INITIALIZATION_FAILED;
@@ -53,39 +61,103 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	auto mutLinkInfo = const_cast<VkLayerInstanceCreateInfo*>(linkInfo);
 	mutLinkInfo->u.pLayerInfo = linkInfo->u.pLayerInfo->pNext;
 
-	VkResult result = fpCreateInstance(ci, alloc, ini);
+	// Init instance data
+	// Add additionally requiresd extensions
+	auto iniPtr = std::make_unique<Instance>();
+	auto& ini = *iniPtr;
+
+	// TODO: allow to disable separate window creation via compile-time
+	// flag (not even compiling/requiring swa) and environment variable.
+	ini.display = swa_display_autocreate("fuencaliente");
+
+	std::vector<const char*> newExts; // keep-alive
+	auto nci = *ci;
+	if(ini.display) {
+		newExts = {
+			ci->ppEnabledExtensionNames,
+			ci->ppEnabledExtensionNames + ci->enabledExtensionCount
+		};
+
+		auto fpEnumerateInstanceExtensionProperties =
+			(PFN_vkEnumerateInstanceExtensionProperties)
+			fpGetInstanceProcAddr(nullptr, "vkEnumerateInstanceExtensionProperties");
+		dlg_assert(fpEnumerateInstanceExtensionProperties);
+
+		unsigned nsup;
+		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, nullptr));
+		auto supExts = std::make_unique<VkExtensionProperties[]>(nsup);
+		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, supExts.get()));
+
+		unsigned nexts;
+		auto exts = swa_display_vk_extensions(ini.display, &nexts);
+		auto enable = true;
+		for(auto i = 0u; i < nexts; ++i) {
+			auto ext = std::string_view(exts[i]);
+
+			// check if extension is already enabled by application
+			auto it = find(newExts, ext);
+			if(it != end(newExts)) {
+				continue;
+			}
+
+			// Check if extension is supported.
+			// If not, we simply can't create a window.
+			auto finder = [&](auto& props){ return props.extensionName == ext; };
+			auto sit = std::find_if(supExts.get(), supExts.get() + nsup, finder);
+			if(sit == supExts.get() + nsup) {
+				dlg_warn("Won't create window since required extension '{}' is not supported", ext);
+				enable = false;
+				break;
+			}
+
+			dlg_trace("Adding extension {} to instance creation", ext);
+			newExts.push_back(exts[i]);
+		}
+
+		if(enable) {
+			nci.ppEnabledExtensionNames = newExts.data();
+			nci.enabledExtensionCount = newExts.size();
+		} else {
+			swa_display_destroy(ini.display);
+			ini.display = nullptr;
+		}
+	}
+
+	// Create instance
+	VkResult result = fpCreateInstance(&nci, alloc, pInstance);
 	if(result != VK_SUCCESS) {
 		return result;
 	}
 
+	insertData(*pInstance, iniPtr.release());
+	ini.handle = *pInstance;
 
-	auto& instanceData = createData<Instance>(*ini);
-	instanceData.handle = *ini;
-
-	auto strOr = [](const char* str) {
+	auto strOrEmpty = [](const char* str) {
 		return str ? str : "";
 	};
 
-	instanceData.app.apiVersion = ci->pApplicationInfo->apiVersion;
-	instanceData.app.version = ci->pApplicationInfo->applicationVersion;
-	instanceData.app.name = strOr(ci->pApplicationInfo->pApplicationName);
-	instanceData.app.engineName = strOr(ci->pApplicationInfo->pEngineName);
-	instanceData.app.engineVersion = ci->pApplicationInfo->engineVersion;
+	if(ci->pApplicationInfo) {
+		ini.app.apiVersion = ci->pApplicationInfo->apiVersion;
+		ini.app.version = ci->pApplicationInfo->applicationVersion;
+		ini.app.name = strOrEmpty(ci->pApplicationInfo->pApplicationName);
+		ini.app.engineName = strOrEmpty(ci->pApplicationInfo->pEngineName);
+		ini.app.engineVersion = ci->pApplicationInfo->engineVersion;
+	}
 
-	instanceData.dispatch.init((vk::Instance) *ini, fpGetInstanceProcAddr, false);
+	ini.dispatch.init((vk::Instance) *pInstance, fpGetInstanceProcAddr, false);
 	// Needed in case the next layer does not make vkGetInstanceProcAddr
 	// return itself correctly.
-	instanceData.dispatch.vkGetInstanceProcAddr = fpGetInstanceProcAddr;
+	ini.dispatch.vkGetInstanceProcAddr = fpGetInstanceProcAddr;
 
 	// add instance data to all physical devices so we can retrieve
 	// it in CreateDevice
 	u32 phdevCount = 0;
-	instanceData.dispatch.vkEnumeratePhysicalDevices(*ini, &phdevCount, nullptr);
+	ini.dispatch.vkEnumeratePhysicalDevices(*pInstance, &phdevCount, nullptr);
 	auto phdevs = std::make_unique<VkPhysicalDevice[]>(phdevCount);
-	instanceData.dispatch.vkEnumeratePhysicalDevices(*ini, &phdevCount, phdevs.get());
+	ini.dispatch.vkEnumeratePhysicalDevices(*pInstance, &phdevCount, phdevs.get());
 
 	for(auto i = 0u; i < phdevCount; ++i) {
-		insertData(phdevs[i], &instanceData);
+		insertData(phdevs[i], &ini);
 	}
 
 	return result;
@@ -94,7 +166,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCallbacks* alloc) {
 	auto inid = moveData<Instance>(ini);
 	dlg_assert(inid);
-
 	inid->dispatch.vkDestroyInstance(ini, alloc);
 }
 

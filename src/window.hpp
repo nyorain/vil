@@ -12,11 +12,12 @@ namespace fuen {
 
 // Creates a new window using swa and displays the overlay in it.
 struct DisplayWindow {
-	swa_display* display;
-	swa_window* window;
-	Device* dev;
+	swa_window* window {};
+	Device* dev {};
 	Renderer renderer;
 	Gui gui;
+
+	Queue* presentQueue {};
 
 	VkSurfaceKHR surface {};
 	VkSwapchainKHR swapchain {};
@@ -30,11 +31,14 @@ struct DisplayWindow {
 	std::thread thread;
 	bool run {true};
 
-	bool init(Device& dev);
+	bool createWindow(Instance&);
+	void initDevice(Device& dev);
 	void resize(unsigned w, unsigned h);
 	void initBuffers();
 	void destroyBuffers();
 	void mainLoop();
+
+	~DisplayWindow();
 };
 
 } // namespace fuen

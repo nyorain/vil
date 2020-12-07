@@ -21,4 +21,13 @@ struct Overlay {
 	VkResult drawPresent(Queue& queue, span<const VkSemaphore>, u32 imageIdx);
 };
 
+/*
+// Can be associated with a VkSurfaceKHR
+// TODO: reintroduce this when we try out per-platform child windows
+struct Platform {
+	virtual ~Platform() = default;
+	virtual void update() = 0;
+};
+*/
+
 } // namespace fuen

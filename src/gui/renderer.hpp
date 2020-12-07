@@ -24,7 +24,13 @@ struct Draw {
 	Buffer indexBuffer {};
 	// Buffer readbackBuffer; // TODO:
 	VkCommandBuffer cb {};
+
+	// Semaphore associated with the gfx submission of this rendering.
+	// Consumed by the present info.
 	VkSemaphore semaphore {};
+
+	// Fence associated with the gfx submission of this rendering.
+	// Used to check if frame has completed and Draw can be used again.
 	VkFence fence {};
 
 	VkDescriptorSet dsSelected {};
@@ -53,46 +59,6 @@ struct RenderBuffer {
 
 	void init(Device& dev, VkImage img, VkFormat format, VkExtent2D extent, VkRenderPass rp);
 	~RenderBuffer();
-};
-
-// Manages all rendering of an ImGui
-class Renderer {
-public:
-	Renderer() = default;
-	Renderer(Renderer&&) = delete;
-	Renderer& operator=(Renderer&&) = delete;
-	~Renderer();
-
-	void init(Device& dev, VkFormat, bool clear);
-	void uploadDraw(Draw&, const ImDrawData&);
-	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb,
-		bool drawEvenWhenEmpty, const ImDrawData&);
-
-	Device& dev() const { return *dev_; }
-	VkRenderPass rp() const { return rp_; }
-	VkPipeline pipe() const { return pipe_; }
-
-private:
-	void ensureFontAtlas(VkCommandBuffer cb);
-
-private:
-	Device* dev_ {};
-	VkRenderPass rp_ {};
-	VkPipeline pipe_ {};
-	VkCommandPool commandPool_ {};
-
-	bool clear_ {};
-	VkDescriptorSet dsFont_ {};
-
-	struct {
-		bool uploaded {};
-		VkDeviceMemory mem {};
-		VkImage image {};
-		VkImageView view {};
-
-		VkDeviceMemory uploadMem {};
-		VkBuffer uploadBuf {};
-	} font_;
 };
 
 } // namespace fuen

@@ -42,21 +42,21 @@ struct PendingSubmission {
 bool checkLocked(PendingSubmission& subm);
 
 struct Device {
-	Instance* ini;
-	VkDevice handle;
+	Instance* ini {};
+	VkDevice handle {};
 	VkPhysicalDevice phdev;
 	vk::DynamicDispatch dispatch;
 
 	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
 
 	std::vector<std::unique_ptr<Queue>> queues;
-	Queue* gfxQueue;
+	Queue* gfxQueue {};
 
-	u32 hostVisibleMemTypeBits;
-	u32 deviceLocalMemTypeBits;
+	u32 hostVisibleMemTypeBits {};
+	u32 deviceLocalMemTypeBits {};
 
-	VkDescriptorPool dsPool;
-	VkCommandPool commandPool;
+	VkDescriptorPool dsPool {};
+	VkCommandPool commandPool {};
 	std::unique_ptr<RenderData> renderData;
 
 	std::unique_ptr<DisplayWindow> window;
@@ -119,11 +119,12 @@ struct Device {
 };
 
 struct Queue : Handle {
-	Device* dev;
+	Device* dev {};
 
-	VkQueue queue;
-	VkQueueFlags flags;
-	u32 family;
+	VkQueue queue {};
+	VkQueueFlags flags {};
+	u32 family {};
+	float priority {};
 };
 
 Gui* getWindowGui(Device& dev);

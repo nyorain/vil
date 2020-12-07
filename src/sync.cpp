@@ -58,7 +58,10 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 		const VkFence*                              pFences) {
 	auto& dev = getData<Device>(device);
 
-	// per spec, we can assume all associated payload to be finished
+	// Per spec, we can assume all associated payload to be finished.
+	// It's important we do this *before* resetting the fence since otherwise
+	// we might reset it while other threads are querying/waiting upon it/, which
+	// might be invalid per vulkan speec.
 	for(auto i = 0u; i < fenceCount; ++i) {
 		auto fence = pFences[i];
 		auto& fenceD = dev.fences.get(fence);

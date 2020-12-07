@@ -1138,6 +1138,16 @@ void Gui::unselect(const Handle& handle) {
 				selected_.image.view = {};
 			}
 		}
+
+		// TODO: we have to guarantee that all command buffers rendering
+		// this image have finished.
+		// Might also be needed for other types of handles in future.
+		// But in Gui we don't even know anything about submissions.
+		// Need restructure.
+		// Maybe store vector of used handles in each Draw and Overlay/Window
+		// are informed of this as well and wait for all submissions that use
+		// destroyed handle?
+		// Or directly store Draws a handle is used in, in the handle itself?
 	}
 }
 

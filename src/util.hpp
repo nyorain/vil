@@ -28,7 +28,12 @@ u32 findLSB(u32 v);
 
 template<typename C, typename K>
 auto find(C&& c, K&& k) {
-	return std::find(c.begin(), c.end(), std::forward<K>(k));
+	return std::find(std::begin(c), std::end(c), std::forward<K>(k));
+}
+
+template<typename C, typename F>
+auto find_if(C&& c, F&& f) {
+	return std::find_if(std::begin(c), std::end(c), std::forward<F>(f));
 }
 
 // C++20: std::bit_cast

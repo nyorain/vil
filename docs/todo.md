@@ -19,7 +19,10 @@ v0.1, goal: end of january 2021
 	  implemented though.
 - [x] store for handles in which command buffers they were used and set the
       command buffer to invalid state when they are changed/destroyed
-- [ ] display command buffer state in UI
+- [ ] cleanup Renderer/Gui implementation: merge back together
+	- [ ] proper gui sync implementation
+	- [ ] move gui tabs into own classes
+- [ ] display command buffer state in resource UI
 - [ ] display in UI whether resources are destroyed or not
 - [x] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
 - [x] Remove Device::lastDevice api hack. Instead return a dev handle from fuenLoadApi
@@ -33,9 +36,8 @@ v0.1, goal: end of january 2021
 		- [ ] check if we can use more of the the layer utils
 - [ ] Add more useful overview. Maybe directly link to last submitted command
       buffers?
-- [ ] proper gui sync implementation
 - [ ] properly shutdown everything, no leftover resources and layer warnings
-- [ ] proper queue creation and querying for window display
+- [x] proper queue creation and querying for window display
 - [ ] properly shut down rendering thread for own-window display
 - [ ] test display window for compute-only applications
 	- [ ] come up with something smart to block them before they shut down. 
@@ -66,9 +68,14 @@ v0.1, goal: end of january 2021
 	      can crash when extensions it does not know about/does not support
 		  are being used.
 - [ ] fully implement command buffer viewer
+	- [ ] support all vulkan 1.0 commands (add to cb.h and commands.h)
+	- [ ] show all commands & info for commands
+	- [ ] better resource selection/collapsing etc
 - [ ] properly implement layer querying functions
 - [ ] track and show dynamic graphics pipeline state
 - [ ] support for buffer views
+
+
 
 Possibly for later, new features:
 - [ ] (somewhat high prio tho) add support for waiting for command buffer
@@ -106,3 +113,6 @@ Possibly for later, new features:
 - [ ] track buffer views
 - [ ] better pipeline state overview of inputs, stages, outputs
 	- [ ] maybe via a graph?
+- [ ] we might be able to properly hook input (without needing the public api)
+	  by using a (movable?) child window for our overlay instead of directly
+	  presenting to the swapchain.
