@@ -1,38 +1,31 @@
-#include "device.hpp"
-#include "layer.hpp"
-#include "data.hpp"
-#include "util.hpp"
-#include "gui.hpp"
-#include "renderer.hpp"
-#include "swapchain.hpp"
-#include "window.hpp"
-#include "cb.hpp"
-#include "rp.hpp"
-#include "commands.hpp"
-#include "memory.hpp"
-#include "image.hpp"
-#include "buffer.hpp"
-#include "pipe.hpp"
-#include "shader.hpp"
-#include "ds.hpp"
-#include "sync.hpp"
-#include "overlay.hpp"
+#include <device.hpp>
+#include <layer.hpp>
+#include <data.hpp>
+#include <util.hpp>
+#include <swapchain.hpp>
+#include <window.hpp>
+#include <commands.hpp>
+#include <handles.hpp>
+#include <overlay.hpp>
+#include <gui/gui.hpp>
+
 #include <swa/swa.h>
+#include <vulkan/vk_dispatch_table_helper.h>
 
 namespace fuen {
 
 // util
-Renderer* getWindowRenderer(Device& dev) {
+Gui* getWindowGui(Device& dev) {
 	if(dev.window) {
-		return &dev.window->renderer;
+		return &dev.window->gui;
 	}
 
 	return nullptr;
 }
 
-Renderer* getOverlayRenderer(Swapchain& swapchain) {
+Gui* getOverlayGui(Swapchain& swapchain) {
 	if(swapchain.overlay) {
-		return &swapchain.overlay->renderer;
+		return &swapchain.overlay->gui;
 	}
 
 	return nullptr;
@@ -49,15 +42,15 @@ Device::~Device() {
 	}
 
 	for(auto& fence : fencePool) {
-		dispatch.vkDestroyFence(handle, fence, nullptr);
+		dispatch.DestroyFence(handle, fence, nullptr);
 	}
 
 	for(auto& semaphore : semaphorePool) {
-		dispatch.vkDestroySemaphore(handle, semaphore, nullptr);
+		dispatch.DestroySemaphore(handle, semaphore, nullptr);
 	}
 
 	for(auto& semaphore : resetSemaphores) {
-		dispatch.vkDestroySemaphore(handle, semaphore, nullptr);
+		dispatch.DestroySemaphore(handle, semaphore, nullptr);
 	}
 
 	if(renderData) {
@@ -65,11 +58,11 @@ Device::~Device() {
 	}
 
 	if(dsPool) {
-		dispatch.vkDestroyDescriptorPool(handle, dsPool, nullptr);
+		dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
 	}
 
 	if(commandPool) {
-		dispatch.vkDestroyCommandPool(handle, commandPool, nullptr);
+		dispatch.DestroyCommandPool(handle, commandPool, nullptr);
 	}
 }
 
@@ -242,12 +235,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	devData.ini = iniData;
 	devData.phdev = phdev;
 	devData.handle = *dev;
-	devData.dispatch = iniData->dispatch;
-	devData.dispatch.vkGetInstanceProcAddr = fpGetInstanceProcAddr;
-	devData.dispatch.vkGetDeviceProcAddr = fpGetDeviceProcAddr;
-	devData.dispatch.init((vk::Device) *dev);
-	// In case GetDeviceProcAddr of the next chain didn't return itself
-	devData.dispatch.vkGetDeviceProcAddr = fpGetDeviceProcAddr;
+
+	layer_init_device_dispatch_table(*dev, &devData.dispatch, fpGetDeviceProcAddr);
 
   	dlg_info("fuen set last device");
 
@@ -292,7 +281,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			q.dev = &devData;
 			q.flags = familyProps.queueFlags;
 			q.priority = qi.pQueuePriorities[j];
-			devData.dispatch.vkGetDeviceQueue(*dev, qi.queueFamilyIndex, j, &q.queue);
+			devData.dispatch.GetDeviceQueue(*dev, qi.queueFamilyIndex, j, &q.queue);
 
 			// Queue is a dispatchable handle.
 			// We therefore have to inform the loader that we created this
@@ -317,7 +306,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	// query memory stuff
 	VkPhysicalDeviceMemoryProperties memProps;
-	devData.dispatch.vkGetPhysicalDeviceMemoryProperties(phdev, &memProps);
+	ini.dispatch.GetPhysicalDeviceMemoryProperties(phdev, &memProps);
 	for(auto i = 0u; i < memProps.memoryTypeCount; ++i) {
 		auto flags = memProps.memoryTypes[i].propertyFlags;
 		if(flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
@@ -334,10 +323,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	devData.renderData->init(devData);
 
 	// command pool
-	VkCommandPoolCreateInfo cpci = vk::CommandPoolCreateInfo();
+	VkCommandPoolCreateInfo cpci {};
+	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 	cpci.queueFamilyIndex = devData.gfxQueue->family;
 	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-	VK_CHECK(devData.dispatch.vkCreateCommandPool(*dev, &cpci, nullptr, &devData.commandPool));
+	VK_CHECK(devData.dispatch.CreateCommandPool(*dev, &cpci, nullptr, &devData.commandPool));
 
 	// descriptor pool
 	// TODO: might need multiple pools...
@@ -345,12 +335,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	poolSize.descriptorCount = 50u;
 	poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
-	VkDescriptorPoolCreateInfo dpci = vk::DescriptorPoolCreateInfo();
+	VkDescriptorPoolCreateInfo dpci {};
+	dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	dpci.pPoolSizes = &poolSize;
 	dpci.poolSizeCount = 1u;
 	dpci.maxSets = 50u;
 	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-	VK_CHECK(devData.dispatch.vkCreateDescriptorPool(*dev, &dpci, nullptr, &devData.dsPool));
+	VK_CHECK(devData.dispatch.CreateDescriptorPool(*dev, &dpci, nullptr, &devData.dsPool));
 
 	// == window stuff ==
 	if(window) {
@@ -391,7 +382,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	}
 
 	// destroy our logical device before we call the function.
-	auto* destroyDev = devd->dispatch.vkDestroyDevice;
+	auto* destroyDev = devd->dispatch.DestroyDevice;
 	devd.release();
 	destroyDev(dev, alloc);
 }
@@ -423,8 +414,9 @@ VkFence getFenceFromPool(Device& dev, bool& checkedSubmissions) {
 
 	// create new fence
 	VkFence fence;
-	VkFenceCreateInfo fci = vk::FenceCreateInfo();
-	VK_CHECK(dev.dispatch.vkCreateFence(dev.handle, &fci, nullptr, &fence));
+	VkFenceCreateInfo fci {};
+	fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	VK_CHECK(dev.dispatch.CreateFence(dev.handle, &fci, nullptr, &fence));
 	return fence;
 }
 
@@ -475,7 +467,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				auto waitStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 				std::vector<VkPipelineStageFlags> waitFlags(resetSemaphores.size(), waitStage);
 
-				VkSubmitInfo si = vk::SubmitInfo();
+				VkSubmitInfo si {};
+				si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 				si.waitSemaphoreCount = resetSemaphores.size();
 				si.pWaitSemaphores = resetSemaphores.data();
 				si.pWaitDstStageMask = waitFlags.data();
@@ -485,13 +478,13 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 				{
 					std::lock_guard queueLock(dev.queueMutex);
-					VK_CHECK(dev.dispatch.vkQueueSubmit(queue, 1, &si, fence));
-					VK_CHECK(dev.dispatch.vkWaitForFences(dev.handle, 1, &fence, true, UINT64_MAX));
+					VK_CHECK(dev.dispatch.QueueSubmit(queue, 1, &si, fence));
+					VK_CHECK(dev.dispatch.WaitForFences(dev.handle, 1, &fence, true, UINT64_MAX));
 				}
 
 				auto ret = resetSemaphores.back();
 				resetSemaphores.pop_back();
-				dev.dispatch.vkResetFences(dev.handle, 1, &fence);
+				VK_CHECK(dev.dispatch.ResetFences(dev.handle, 1, &fence));
 
 				lock.lock();
 				dev.fencePool.push_back(fence);
@@ -506,8 +499,9 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 		// create new semaphore
 		VkSemaphore semaphore;
-		VkSemaphoreCreateInfo sci = vk::SemaphoreCreateInfo();
-		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
+		VkSemaphoreCreateInfo sci {};
+		sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
 		return semaphore;
 	};
 
@@ -599,19 +593,19 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	}
 
 	dlg_assert(nsubmitInfos.size() == submitCount);
-	return dev.dispatch.vkQueueSubmit(queue, nsubmitInfos.size(), nsubmitInfos.data(), submFence);
+	return dev.dispatch.QueueSubmit(queue, nsubmitInfos.size(), nsubmitInfos.data(), submFence);
 }
 
 bool checkLocked(PendingSubmission& subm) {
 	auto& dev = *subm.queue->dev;
 
 	if(subm.appFence) {
-		if(dev.dispatch.vkGetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
+		if(dev.dispatch.GetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
 			return false;
 		}
 	} else {
 		dlg_assert(subm.ourFence);
-		if(dev.dispatch.vkGetFenceStatus(dev.handle, subm.ourFence) != VK_SUCCESS) {
+		if(dev.dispatch.GetFenceStatus(dev.handle, subm.ourFence) != VK_SUCCESS) {
 			return false;
 		}
 	}
@@ -635,7 +629,7 @@ bool checkLocked(PendingSubmission& subm) {
 	}
 
 	if(subm.ourFence) {
-		dev.dispatch.vkResetFences(dev.handle, 1, &subm.ourFence);
+		dev.dispatch.ResetFences(dev.handle, 1, &subm.ourFence);
 		dev.fencePool.push_back(subm.ourFence);
 	} else if(subm.appFence) {
 		subm.appFence->submission = nullptr;

@@ -1,8 +1,7 @@
 #pragma once
 
-#include "device.hpp"
-#include "gui.hpp"
-#include "renderer.hpp"
+#include <device.hpp>
+#include <gui/gui.hpp>
 
 namespace fuen {
 
@@ -11,9 +10,7 @@ namespace fuen {
 struct Overlay {
 	Swapchain* swapchain;
 	Gui gui;
-	Renderer renderer;
 	std::vector<RenderBuffer> buffers;
-	std::vector<Draw> draws;
 	bool show {};
 
 	void init(Swapchain& swapchain);

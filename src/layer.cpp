@@ -1,7 +1,6 @@
 #include "layer.hpp"
 #include "util.hpp"
 #include "data.hpp"
-#include "gui.hpp"
 #include "swapchain.hpp"
 #include "image.hpp"
 #include "rp.hpp"
@@ -15,16 +14,11 @@
 #include "wayland.hpp"
 #include "commands.hpp"
 
-#include <vkpp/enums.hpp>
-#include <vkpp/names.hpp>
-#include <vkpp/dispatch.hpp>
-#include <vkpp/dispatch.cpp>
-#include <vkpp/span.hpp>
-
 #include <dlg/dlg.hpp>
 #include <swa/swa.h>
 
 #include <vulkan/vk_layer.h>
+#include <vulkan/vk_dispatch_table_helper.h>
 
 namespace fuen {
 
@@ -144,17 +138,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		ini.app.engineVersion = ci->pApplicationInfo->engineVersion;
 	}
 
-	ini.dispatch.init((vk::Instance) *pInstance, fpGetInstanceProcAddr, false);
-	// Needed in case the next layer does not make vkGetInstanceProcAddr
-	// return itself correctly.
-	ini.dispatch.vkGetInstanceProcAddr = fpGetInstanceProcAddr;
+	layer_init_instance_dispatch_table(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
 
 	// add instance data to all physical devices so we can retrieve
 	// it in CreateDevice
 	u32 phdevCount = 0;
-	ini.dispatch.vkEnumeratePhysicalDevices(*pInstance, &phdevCount, nullptr);
+	ini.dispatch.EnumeratePhysicalDevices(*pInstance, &phdevCount, nullptr);
 	auto phdevs = std::make_unique<VkPhysicalDevice[]>(phdevCount);
-	ini.dispatch.vkEnumeratePhysicalDevices(*pInstance, &phdevCount, phdevs.get());
+	ini.dispatch.EnumeratePhysicalDevices(*pInstance, &phdevCount, phdevs.get());
 
 	for(auto i = 0u; i < phdevCount; ++i) {
 		insertData(phdevs[i], &ini);
@@ -166,7 +157,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCallbacks* alloc) {
 	auto inid = moveData<Instance>(ini);
 	dlg_assert(inid);
-	inid->dispatch.vkDestroyInstance(ini, alloc);
+	inid->dispatch.DestroyInstance(ini, alloc);
 }
 
 
@@ -176,7 +167,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		const VkAllocationCallbacks*                pAllocator) {
 	// auto platform = moveDataOpt<Platform>(surface); // destroy it
 	auto& ini = getData<Instance>(instance);
-	ini.dispatch.vkDestroySurfaceKHR(instance, surface, pAllocator);
+	ini.dispatch.DestroySurfaceKHR(instance, surface, pAllocator);
 }
 
 VKAPI_ATTR PFN_vkVoidFunction GetInstanceProcAddr(VkInstance, const char*);
@@ -347,12 +338,12 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 
 	// If it's not hooked, just forward it to the next chain link
 	auto* inid = fuen::findData<fuen::Instance>(ini);
-	if(!inid || !inid->dispatch.vkGetInstanceProcAddr) {
+	if(!inid || !inid->dispatch.GetInstanceProcAddr) {
 		dlg_error("invalid instance data: {}", fuen::handleCast(ini));
 		return nullptr;
 	}
 
-	return inid->dispatch.vkGetInstanceProcAddr(ini, funcName);
+	return inid->dispatch.GetInstanceProcAddr(ini, funcName);
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice dev, const char* funcName) {
@@ -362,12 +353,12 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice dev, const c
    }
 
    auto* devd = fuen::findData<fuen::Device>(dev);
-   if(!devd || !devd->dispatch.vkGetDeviceProcAddr) {
+   if(!devd || !devd->dispatch.GetDeviceProcAddr) {
 		dlg_error("invalid device data: {}", fuen::handleCast(dev));
 	   return nullptr;
    }
 
-   return devd->dispatch.vkGetDeviceProcAddr(dev, funcName);
+   return devd->dispatch.GetDeviceProcAddr(dev, funcName);
 }
 
 } // namespace fuen

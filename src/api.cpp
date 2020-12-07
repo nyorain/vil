@@ -1,10 +1,10 @@
-#include "fwd.hpp"
-#include "api.h"
-#include "data.hpp"
-#include "device.hpp"
-#include "gui.hpp"
-#include "swapchain.hpp"
-#include "overlay.hpp"
+#include <fwd.hpp>
+#include <api.h>
+#include <data.hpp>
+#include <device.hpp>
+#include <gui/gui.hpp>
+#include <swapchain.hpp>
+#include <overlay.hpp>
 #include <imgui/imgui.h>
 #include <swa/swa.h>
 

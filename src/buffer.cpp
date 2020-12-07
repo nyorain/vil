@@ -27,7 +27,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 		const VkAllocationCallbacks*                pAllocator,
 		VkBuffer*                                   pBuffer) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateBuffer(device, pCreateInfo, pAllocator, pBuffer);
+
+	auto nci = *pCreateInfo;
+	// TODO: needed for our own operations on the buffer. We should
+	// properly acquire/release it instead though, this might have
+	// a performance impact.
+	nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
+
+	auto res = dev.dispatch.CreateBuffer(device, &nci, pAllocator, pBuffer);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -47,7 +54,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.buffers.mustErase(buffer);
-	dev.dispatch.vkDestroyBuffer(device, buffer, pAllocator);
+	dev.dispatch.DestroyBuffer(device, buffer, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
@@ -63,7 +70,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.vkGetBufferMemoryRequirements(device, buffer, &memReqs);
+	dev.dispatch.GetBufferMemoryRequirements(device, buffer, &memReqs);
 
 	buf.memory = &mem;
 	buf.allocationOffset = memoryOffset;
@@ -75,7 +82,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 		mem.allocations.insert(&buf);
 	}
 
-	return dev.dispatch.vkBindBufferMemory(device, buffer, memory, memoryOffset);
+	return dev.dispatch.BindBufferMemory(device, buffer, memory, memoryOffset);
 }
 
 } // namespace fuen

@@ -64,11 +64,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		VkImage*                                    pImage) {
 	auto& dev = getData<Device>(device);
 
+	auto nci = *pCreateInfo;
 	// TODO: check if sampling is supported for this image
-	auto ici = *pCreateInfo;
-	ici.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+	nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
 
-	auto res = dev.dispatch.vkCreateImage(device, &ici, pAllocator, pImage);
+	// TODO: needed for our own operations on the buffer. We should
+	// properly acquire/release it instead though, this might have
+	// a performance impact.
+	nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
+
+	auto res = dev.dispatch.CreateImage(device, &nci, pAllocator, pImage);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -79,7 +84,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.handle = *pImage;
 	img.ci = *pCreateInfo;
 	img.pendingLayout = pCreateInfo->initialLayout;
-	img.memoryResourceType = MemoryResource::Type::image;
 
 	return res;
 }
@@ -89,8 +93,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		VkImage                                     image,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = *findData<Device>(device);
-	auto img = dev.images.mustErase(image);
-	dev.dispatch.vkDestroyImage(device, image, pAllocator);
+	dev.images.mustErase(image);
+	dev.dispatch.DestroyImage(device, image, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
@@ -106,7 +110,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.vkGetImageMemoryRequirements(device, image, &memReqs);
+	dev.dispatch.GetImageMemoryRequirements(device, image, &memReqs);
 
 	img.memory = &mem;
 	img.allocationOffset = memoryOffset;
@@ -118,7 +122,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 		mem.allocations.insert(&img);
 	}
 
-	return dev.dispatch.vkBindImageMemory(device, image, memory, memoryOffset);
+	return dev.dispatch.BindImageMemory(device, image, memory, memoryOffset);
 }
 
 // ImageView
@@ -128,7 +132,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 		const VkAllocationCallbacks*                pAllocator,
 		VkImageView*                                pView) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateImageView(device, pCreateInfo, pAllocator, pView);
+	auto res = dev.dispatch.CreateImageView(device, pCreateInfo, pAllocator, pView);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -154,7 +158,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.imageViews.mustErase(imageView);
-	dev.dispatch.vkDestroyImageView(device, imageView, pAllocator);
+	dev.dispatch.DestroyImageView(device, imageView, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
@@ -163,7 +167,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSampler*                                  pSampler) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateSampler(device, pCreateInfo, pAllocator, pSampler);
+	auto res = dev.dispatch.CreateSampler(device, pCreateInfo, pAllocator, pSampler);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -182,7 +186,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.samplers.mustErase(sampler);
-	dev.dispatch.vkDestroySampler(device, sampler, pAllocator);
+	dev.dispatch.DestroySampler(device, sampler, pAllocator);
 }
 
 } // namespace fuen

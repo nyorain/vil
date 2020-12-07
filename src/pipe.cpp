@@ -27,7 +27,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateGraphicsPipelines(device, pipelineCache,
+	auto res = dev.dispatch.CreateGraphicsPipelines(device, pipelineCache,
 		createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -140,7 +140,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateComputePipelines(device, pipelineCache,
+	auto res = dev.dispatch.CreateComputePipelines(device, pipelineCache,
 		createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -171,7 +171,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipeline(
 	auto count = dev.graphicsPipes.erase(pipeline) + dev.computePipes.erase(pipeline);
 	dlg_assert(count == 1);
 
-	dev.dispatch.vkDestroyPipeline(device, pipeline, pAllocator);
+	dev.dispatch.DestroyPipeline(device, pipeline, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
@@ -180,7 +180,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipelineLayout*                           pPipelineLayout) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreatePipelineLayout(device, pCreateInfo,
+	auto res = dev.dispatch.CreatePipelineLayout(device, pCreateInfo,
 		pAllocator, pPipelineLayout);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -208,7 +208,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.pipeLayouts.mustErase(pipelineLayout);
-	dev.dispatch.vkDestroyPipelineLayout(device, pipelineLayout, pAllocator);
+	dev.dispatch.DestroyPipelineLayout(device, pipelineLayout, pAllocator);
 }
 
 bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b) {

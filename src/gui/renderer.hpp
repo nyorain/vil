@@ -33,7 +33,10 @@ struct Draw {
 	// Used to check if frame has completed and Draw can be used again.
 	VkFence fence {};
 
+	// descriptor set for selected image view.
 	VkDescriptorSet dsSelected {};
+
+	std::vector<Handle*> usedHandles;
 
 	void init(Device& dev);
 	~Draw();

@@ -1,33 +1,11 @@
 #pragma once
 
-#include "cbState.hpp"
-#include "handles.hpp"
+#include <cbState.hpp>
+#include <handles.hpp>
+#include <flags.hpp>
 
 #include <imgui/imgui.h>
-#include <vkpp/names.hpp>
 #include <dlg/dlg.hpp>
-
-// TODO: we store a lot of resources right inside the commands that
-// might not exist anymore. We either have to:
-// 1 track for each resource in which command buffer it is used. When
-//   a resource is destroyed/changed we set a flag in the command buffer
-//   that its contents are invalid (as the vulkan spec specifies)
-// 2 we just never store resources pointers in the command but just the
-//   draw vulkan handles. BAD IDEA since vulkan might reuse handles.
-// 3 ok back to 1. The downside of 1 is that we are not able to inspect
-//   command buffers as soon they become invalid which is bad. We eventually
-//   might want to store command buffer history as well. Just don't destroy
-//   our representation of resources that are still in use somewhere?
-//   A concept of such "zombie" resources would be useful. Could be
-//   realized using shared pointers in the resource maps. This still
-//   does not solve the problem of changed resources (e.g. we bind a descriptor
-//   set in a cb but that ds is later updated, we couldn't inspect the bound
-//   resources in the cb). Just resolve everything that could be displayed
-//   at command buffer recording time? So just copy the resources bound
-//   via ds into the actual Command in that case?
-//     Btw, we probably still wanna do some approach like 1, at least
-//     mark invalid command buffers; that information is useful to display
-//     (maybe even mark why they were invalidated).
 
 namespace fuen {
 

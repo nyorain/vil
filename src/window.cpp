@@ -1,12 +1,13 @@
-#include "window.hpp"
-#include "layer.hpp"
-#include "cb.hpp"
-#include "sync.hpp"
-#include "image.hpp"
-#include <vkpp/names.hpp>
+#include <window.hpp>
+#include <layer.hpp>
+#include <cb.hpp>
+#include <sync.hpp>
+#include <image.hpp>
+#include <util.hpp>
 #include <swa/swa.h>
 #include <dlg/dlg.hpp>
 #include <imgui/imgui.h>
+#include <vulkan/vk_enum_string_helper.h>
 
 namespace fuen {
 
@@ -57,14 +58,8 @@ void cbMouseWheel(swa_window*, float x, float y) {
 }
 
 // DisplayWindow
-bool DisplayWindow::init(Device& dev) {
-	this->dev = &dev;
-
-	// TODO: might explode. Instead create backend matching the
-	// created surface. Otherwise (allowing e.g. full compute debugging
-	// as well) just create the display before the instance is created
-	// and enable the required extensions.
-	display = swa_display_autocreate("fuencaliente");
+bool DisplayWindow::createWindow(Instance& ini) {
+	dlg_assert(ini.display);
 
 	static swa_window_listener listener;
 	listener.close = cbClose;
@@ -80,23 +75,34 @@ bool DisplayWindow::init(Device& dev) {
 	ws.title = "fuencaliente";
 	ws.listener = &listener;
 	ws.surface = swa_surface_vk;
-	ws.surface_settings.vk.instance = reinterpret_cast<std::uintptr_t>(dev.ini->handle);
-	ws.surface_settings.vk.get_instance_proc_addr = reinterpret_cast<swa_proc>(dev.dispatch.vkGetInstanceProcAddr);
-	window = swa_display_create_window(display, &ws);
+	ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(dev->ini->handle);
+	ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(dev->ini->dispatch.GetInstanceProcAddr);
+	window = swa_display_create_window(ini.display, &ws);
+	if(!window) {
+		return false;
+	}
+
 	swa_window_set_userdata(window, this);
 
-	surface = reinterpret_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
+	surface = bit_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
+
+	return true;
+}
+
+bool DisplayWindow::initDevice(Device& dev) {
+	this->dev = &dev;
 
 	// init swapchain
-	auto& sci = swapchainCreateInfo;
-	sci = vk::SwapchainCreateInfoKHR();
+	auto& sci = this->swapchainCreateInfo;
+	sci = {};
+	sci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 	sci.surface = surface;
 
 	VkResult res;
 
 	// check support. mainly for validation layers
 	VkBool32 supported;
-	res = dev.dispatch.vkGetPhysicalDeviceSurfaceSupportKHR(dev.phdev,
+	res = dev.ini->dispatch.GetPhysicalDeviceSurfaceSupportKHR(dev.phdev,
 		dev.gfxQueue->family, surface, &supported);
 	if(res != VK_SUCCESS || !supported) {
 		dlg_error("surface not supported on device");
@@ -105,17 +111,17 @@ bool DisplayWindow::init(Device& dev) {
 
 	// query render format
 	u32 nFormats;
-	res = dev.dispatch.vkGetPhysicalDeviceSurfaceFormatsKHR(dev.phdev, surface, &nFormats, nullptr);
+	res = dev.ini->dispatch.GetPhysicalDeviceSurfaceFormatsKHR(dev.phdev, surface, &nFormats, nullptr);
 	if(res != VK_SUCCESS || nFormats == 0) {
-		dlg_error("failed retrieve surface formats: {}", vk::name(vk::Result(res)));
+		dlg_error("failed retrieve surface formats: {}", string_VkResult(res));
 		return false;
 	}
 
 	auto formats = std::make_unique<VkSurfaceFormatKHR[]>(nFormats);
-	res = dev.dispatch.vkGetPhysicalDeviceSurfaceFormatsKHR(dev.phdev, surface,
+	res = dev.ini->dispatch.GetPhysicalDeviceSurfaceFormatsKHR(dev.phdev, surface,
 		&nFormats, formats.get());
 	if(res != VK_SUCCESS) {
-		dlg_error("failed retrieve surface formats: {}", vk::name(vk::Result(res)));
+		dlg_error("failed retrieve surface formats: {}", string_VkResult(res));
 		return false;
 	}
 
@@ -129,12 +135,12 @@ bool DisplayWindow::init(Device& dev) {
 
 	// Get available present modes
 	u32 nPresentModes;
-	dev.dispatch.vkGetPhysicalDeviceSurfacePresentModesKHR(dev.phdev, surface, &nPresentModes, nullptr);
+	dev.ini->dispatch.GetPhysicalDeviceSurfacePresentModesKHR(dev.phdev, surface, &nPresentModes, nullptr);
 	auto presentModes = std::make_unique<VkPresentModeKHR[]>(nPresentModes);
-	res = dev.dispatch.vkGetPhysicalDeviceSurfacePresentModesKHR(dev.phdev,
+	res = dev.ini->dispatch.GetPhysicalDeviceSurfacePresentModesKHR(dev.phdev,
 		surface, &nPresentModes, presentModes.get());
 	if(res != VK_SUCCESS || nPresentModes == 0) {
-		dlg_error("Failed to retrieve surface present modes: {}", vk::name(vk::Result(res)));
+		dlg_error("Failed to retrieve surface present modes: {}", string_VkResult(res));
 		return false;
 	}
 
@@ -156,9 +162,9 @@ bool DisplayWindow::init(Device& dev) {
 	}
 
 	VkSurfaceCapabilitiesKHR caps;
-	res = dev.dispatch.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
+	res = dev.ini->dispatch.GetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
 	if(res != VK_SUCCESS) {
-		dlg_error("failed retrieve surface caps: {}", vk::name(vk::Result(res)));
+		dlg_error("failed retrieve surface caps: {}", string_VkResult(res));
 		return false;
 	}
 
@@ -210,21 +216,21 @@ bool DisplayWindow::init(Device& dev) {
 	sci.clipped = VK_TRUE;
 	sci.compositeAlpha = alpha;
 
-	res = dev.dispatch.vkCreateSwapchainKHR(dev.handle, &sci, NULL, &swapchain);
+	res = dev.dispatch.CreateSwapchainKHR(dev.handle, &sci, NULL, &swapchain);
 	if(res != VK_SUCCESS) {
-		dlg_error("Failed to create vk swapchain: {}", vk::name(vk::Result(res)));
+		dlg_error("Failed to create vk swapchain: {}", string_VkResult(res));
 		return false;
 	}
 
 	{
-		VkSemaphoreCreateInfo sci = vk::SemaphoreCreateInfo();
-		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.handle, &sci, nullptr, &acquireSem));
-		VK_CHECK(dev.dispatch.vkCreateSemaphore(dev.handle, &sci, nullptr, &renderSem));
+		VkSemaphoreCreateInfo sci;
+		sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &acquireSem));
+		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &renderSem));
 	}
 
 	this->draw.init(dev);
-	this->renderer.init(dev, sci.imageFormat, true);
-	this->gui.init(dev);
+	this->gui.init(dev, sci.imageFormat, true);
 	initBuffers();
 
 	this->thread = std::thread([&]{ mainLoop(); });
@@ -239,9 +245,9 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 
 	// recreate swapchain
 	VkSurfaceCapabilitiesKHR caps;
-	VkResult res = dev.dispatch.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
+	VkResult res = dev.ini->dispatch.GetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
 	if(res != VK_SUCCESS) {
-		dlg_error("failed retrieve surface caps: {}", vk::name(vk::Result(res)));
+		dlg_error("failed retrieve surface caps: {}", string_VkResult(res));
 		run = false;
 		return;
 	}
@@ -256,13 +262,13 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	}
 
 	sci.oldSwapchain = swapchain;
-	res = dev.dispatch.vkCreateSwapchainKHR(dev.handle, &sci, nullptr, &swapchain);
+	res = dev.dispatch.CreateSwapchainKHR(dev.handle, &sci, nullptr, &swapchain);
 
-	dev.dispatch.vkDestroySwapchainKHR(dev.handle, sci.oldSwapchain, nullptr);
+	dev.dispatch.DestroySwapchainKHR(dev.handle, sci.oldSwapchain, nullptr);
 	sci.oldSwapchain = VK_NULL_HANDLE;
 
 	if(res != VK_SUCCESS) {
-		dlg_error("Failed to create vk swapchain: {}", vk::name(vk::Result(res)));
+		dlg_error("Failed to create vk swapchain: {}", string_VkResult(res));
 		run = false;
 		return;
 	}
@@ -274,14 +280,14 @@ void DisplayWindow::initBuffers() {
 	auto& dev = *this->dev;
 
 	u32 imgCount = 0u;
-	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, nullptr));
+	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, nullptr));
 	auto imgs = std::make_unique<VkImage[]>(imgCount);
-	VK_CHECK(dev.dispatch.vkGetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, imgs.get()));
+	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, imgs.get()));
 
 	buffers.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
 		buffers[i].init(dev, imgs[i], swapchainCreateInfo.imageFormat,
-			swapchainCreateInfo.imageExtent, renderer.rp);
+			swapchainCreateInfo.imageExtent, gui.rp());
 	}
 }
 
@@ -292,7 +298,7 @@ void DisplayWindow::destroyBuffers() {
 void DisplayWindow::mainLoop() {
 	auto& dev = *this->dev;
 
-	ImGui::SetCurrentContext(renderer.imgui);
+	gui.makeImGuiCurrent();
 	auto& io = ImGui::GetIO();
 	io.KeyMap[ImGuiKey_A] = swa_key_a;
 	io.KeyMap[ImGuiKey_C] = swa_key_c;
@@ -311,10 +317,10 @@ void DisplayWindow::mainLoop() {
 	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
 	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
 
-	while(run && swa_display_dispatch(display, false)) {
+	while(run && swa_display_dispatch(dev.ini->display, false)) {
 		u32 id;
 		// render a frame
-		VkResult res = dev.dispatch.vkAcquireNextImageKHR(dev.handle, swapchain,
+		VkResult res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain,
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &id);
 		if(res == VK_SUBOPTIMAL_KHR) {
 			dlg_info("Got suboptimal swapchain (acquire)");
@@ -323,14 +329,15 @@ void DisplayWindow::mainLoop() {
 			dlg_warn("Got out of date swapchain (acquire)");
 			continue;
 		} else if(res != VK_SUCCESS) {
-			dlg_error("vkAcquireNextImageKHR: {}", vk::name(vk::Result(res)));
+			dlg_error("vkAcquireNextImageKHR: {}", string_VkResult(res));
 			run = false;
 			break;
 		}
 
 		auto& sci = swapchainCreateInfo;
-		VkCommandBufferBeginInfo cbBegin = vk::CommandBufferBeginInfo();
-		VK_CHECK(dev.dispatch.vkBeginCommandBuffer(draw.cb, &cbBegin));
+		VkCommandBufferBeginInfo cbBegin;
+		cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		VK_CHECK(dev.dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
 
 		// update modifiers
 		io.KeyAlt = false;
@@ -338,7 +345,7 @@ void DisplayWindow::mainLoop() {
 		io.KeyCtrl = false;
 		io.KeySuper = false;
 
-		auto mods = swa_display_active_keyboard_mods(display);
+		auto mods = swa_display_active_keyboard_mods(dev.ini->display);
 		if(mods & swa_keyboard_mod_alt) {
 			io.KeyAlt = true;
 		}
@@ -355,6 +362,7 @@ void DisplayWindow::mainLoop() {
 		io.DisplaySize.x = sci.imageExtent.width;
 		io.DisplaySize.y = sci.imageExtent.height;
 
+		// TODO
 		gui.draw(draw, true);
 		auto& drawData = *ImGui::GetDrawData();
 		renderer.uploadDraw(draw, drawData);

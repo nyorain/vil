@@ -22,7 +22,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 		const VkAllocationCallbacks*                pAllocator,
 		VkFence*                                    pFence) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateFence(device, pCreateInfo, pAllocator, pFence);
+	auto res = dev.dispatch.CreateFence(device, pCreateInfo, pAllocator, pFence);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -41,7 +41,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.fences.mustErase(fence);
-	dev.dispatch.vkDestroyFence(device, fence, pAllocator);
+	dev.dispatch.DestroyFence(device, fence, pAllocator);
 }
 
 // We hook these calls so we have as much knowledge about payload
@@ -75,7 +75,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 		}
 	}
 
-	return dev.dispatch.vkResetFences(device, fenceCount, pFences);
+	return dev.dispatch.ResetFences(device, fenceCount, pFences);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
@@ -84,7 +84,7 @@ VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
 	auto& dev = getData<Device>(device);
 	auto& fenceD = dev.fences.get(fence);
 
-	VkResult res = dev.dispatch.vkGetFenceStatus(device, fence);
+	VkResult res = dev.dispatch.GetFenceStatus(device, fence);
 
 	if(res != VK_SUCCESS) {
 		return res;
@@ -107,7 +107,7 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 		VkBool32                                    waitAll,
 		uint64_t                                    timeout) {
 	auto& dev = getData<Device>(device);
-	VkResult res = dev.dispatch.vkWaitForFences(device, fenceCount, pFences, waitAll, timeout);
+	VkResult res = dev.dispatch.WaitForFences(device, fenceCount, pFences, waitAll, timeout);
 
 	if(res == VK_SUCCESS || !waitAll) {
 		// have to check all fences for completed payloads
@@ -130,7 +130,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSemaphore*                                pSemaphore) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateSemaphore(device, pCreateInfo, pAllocator, pSemaphore);
+	auto res = dev.dispatch.CreateSemaphore(device, pCreateInfo, pAllocator, pSemaphore);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -149,7 +149,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.semaphores.mustErase(semaphore);
-	dev.dispatch.vkDestroySemaphore(device, semaphore, pAllocator);
+	dev.dispatch.DestroySemaphore(device, semaphore, pAllocator);
 }
 
 // event
@@ -159,7 +159,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
 		const VkAllocationCallbacks*                pAllocator,
 		VkEvent*                                    pEvent) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateEvent(device, pCreateInfo, pAllocator, pEvent);
+	auto res = dev.dispatch.CreateEvent(device, pCreateInfo, pAllocator, pEvent);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -178,28 +178,28 @@ VKAPI_ATTR void VKAPI_CALL DestroyEvent(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.events.mustErase(event);
-	dev.dispatch.vkDestroyEvent(device, event, pAllocator);
+	dev.dispatch.DestroyEvent(device, event, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetEventStatus(
 		VkDevice                                    device,
 		VkEvent                                     event) {
 	auto& dev = getData<Device>(device);
-	return dev.dispatch.vkGetEventStatus(device, event);
+	return dev.dispatch.GetEventStatus(device, event);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL SetEvent(
 		VkDevice                                    device,
 		VkEvent                                     event) {
 	auto& dev = getData<Device>(device);
-	return dev.dispatch.vkSetEvent(device, event);
+	return dev.dispatch.SetEvent(device, event);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetEvent(
 		VkDevice                                    device,
 		VkEvent                                     event) {
 	auto& dev = getData<Device>(device);
-	return dev.dispatch.vkResetEvent(device, event);
+	return dev.dispatch.ResetEvent(device, event);
 }
 
 } // namespace fuen

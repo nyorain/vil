@@ -1,13 +1,7 @@
-// Copyright (c) 2017-2020 nyorain
-// Distributed under the Boost Software License, Version 1.0.
-// See accompanying file LICENSE or copy at http://www.boost.org/LICENSE_1_0.txt
-
 #pragma once
 
-#ifndef NYTL_INCLUDE_BYTES
-#define NYTL_INCLUDE_BYTES
-
 #include "fwd.hpp"
+#include <span.hpp>
 #include <cstdlib>
 #include <type_traits>
 #include <vector>
@@ -193,6 +187,4 @@ read(ReadBuf& src, T& dst) {
 // buffer is desired for writing, just use nytl::DynWriteBuf. Works
 // exactly the same and can be converted to ReadBuf as well.
 
-} // namespace nytl
-
-#endif // NYTL_INCLUDE_BYTES
+} // namespace fuen

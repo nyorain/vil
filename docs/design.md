@@ -86,3 +86,16 @@ In the end, we are trying to go for full shared ownership for all handles
 (it still makes sense for information that are truly shared and not owned
 by a specific handle/might outlive it like spirv shader module or renderpass
 data).
+
+Why no typesafe C++ vulkan wrapper?
+===================================
+
+Using vulkan can be made a lot easier by just using a typesafe C++ wrapper,
+avoiding errors due to missing sType or pNext initialization as well as
+passing wrong enum/flag values. But, while it is easy in an application
+to use such a wrapper, it's hard to use in a layer: We receive C-API
+handles, structs and enums and have to pass them on a C-type handles
+(simply casting function pointers is a no-go to since it's undefined behavior).
+Therefore, we don't use it here.
+Early version of this layer tried to use it but that resulted just in
+weird situations and additional cast and an additional dependency.

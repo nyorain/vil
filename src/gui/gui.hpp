@@ -1,8 +1,9 @@
 #pragma once
 
 #include <device.hpp>
-#include <renderer.hpp>
+#include <gui/renderer.hpp>
 #include <gui/resources.hpp>
+#include <gui/cb.hpp>
 #include <variant>
 
 struct ImGuiContext;
@@ -10,47 +11,12 @@ struct ImGuiIO;
 
 namespace fuen {
 
-struct BufferGui {
-	enum class Type {
-		f1, f2, f3, f4,
-		d1, d2, d3, d4,
-		i1, i2, i3, i4,
-		u1, u2, u3, u4,
-		mat2, mat3, mat4,
-		eBool
-	};
-
-	Buffer* buffer_;
-	VkDeviceSize offset_ {};
-	VkDeviceSize size_ {};
-	std::vector<std::byte> lastRead_;
-	std::vector<Type> layout_;
-};
-
-struct ImageGui {
-	void draw();
-
-	Image* image_;
-	VkImageSubresourceRange subres_;
-	VkImageView view_;
-};
-
-struct CommandBufferGui {
-	void draw();
-
-	CommandBuffer* cb_ {}; // the selected command buffer
-	const Command* command_ {}; // the selected command inside the cb
-	u32 resetCount_ {}; // the resetCount of cb at which teh command was valid
-};
-
 class Gui {
 public:
 	enum class Tab {
 		overview,
 		resources,
 		commandBuffer,
-		image,
-		buffer,
 	};
 
 public:
@@ -64,26 +30,40 @@ public:
 	struct FrameInfo {
 		VkSwapchainKHR swapchain {};
 		u32 imageIdx {};
+		VkExtent2D extent {};
 		VkFramebuffer fb {};
-		bool forceClear {};
 		bool fullscreen {};
+		VkQueue queue {};
 
-		std::vector<VkSemaphore> waitSemaphores;
-		std::vector<VkPipelineStageFlags> waitStages;
+		span<VkSemaphore> waitSemaphores;
+		span<VkPipelineStageFlags> waitStages;
 	};
 
-	void renderFrame(Draw&, Gui&, FrameInfo& info);
+	struct FrameResult {
+		VkResult result;
+		Draw* draw;
+	};
+
+	FrameResult renderFrame(FrameInfo& info);
 
 	void makeImGuiCurrent();
 
-	void unselect(const Handle& handle);
+	// Must only be called while device mutex is locked.
+	void destroyed(const Handle& handle);
 	void activateTab(Tab);
 
 	template<typename T>
-	void select(T& handle, bool activateTab = true) {
+	void selectResource(T& handle, bool activateTab = true) {
 		tabs_.resources.select(handle);
 		if(activateTab) {
-			this->activateTab(Tab::overview);
+			this->activateTab(Tab::resources);
+		}
+	}
+
+	void selectCb(CommandBuffer& cb, bool activateTab = true) {
+		tabs_.cb.select(cb);
+		if(activateTab) {
+			this->activateTab(Tab::commandBuffer);
 		}
 	}
 
@@ -99,19 +79,24 @@ private:
 	void ensureFontAtlas(VkCommandBuffer cb);
 
 	void uploadDraw(Draw&, const ImDrawData&);
-	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb,
-		bool drawEvenWhenEmpty, const ImDrawData&);
+	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, const ImDrawData&);
+
+	// Returns the final layout of the image, after all submissions.
+	void waitForSubmissions(const Image& img);
 
 private:
 	Device* dev_ {};
 	ImGuiContext* imgui_ {};
 	ImGuiIO* io_ {};
 
+	Tab activeTab_ {};
+	u32 activateTabCounter_ {};
+
+	std::vector<Draw> draws_;
+
 	struct {
 		ResourceGui resources;
 		CommandBufferGui cb;
-		ImageGui image;
-		BufferGui buffer;
 	} tabs_;
 
 	// rendering stuff
@@ -131,7 +116,6 @@ private:
 		VkDeviceMemory uploadMem {};
 		VkBuffer uploadBuf {};
 	} font_;
-
 };
 
 } // namespace fuen

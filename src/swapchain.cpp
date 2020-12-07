@@ -1,8 +1,7 @@
-#include "swapchain.hpp"
-#include "data.hpp"
-#include "image.hpp"
-#include "overlay.hpp"
-#include "gui.hpp"
+#include <swapchain.hpp>
+#include <data.hpp>
+#include <image.hpp>
+#include <overlay.hpp>
 
 namespace fuen {
 
@@ -30,7 +29,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSwapchainKHR*                             pSwapchain) {
 	auto& devd = getData<Device>(device);
-	auto result = devd.dispatch.vkCreateSwapchainKHR(device, pCreateInfo,
+	auto result = devd.dispatch.CreateSwapchainKHR(device, pCreateInfo,
 		pAllocator, pSwapchain);
 
 	if(result != VK_SUCCESS) {
@@ -46,9 +45,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 
 	// add swapchain images to tracked images
 	u32 imgCount = 0u;
-	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, nullptr));
+	VK_CHECK(devd.dispatch.GetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, nullptr));
 	auto imgs = std::make_unique<VkImage[]>(imgCount);
-	VK_CHECK(devd.dispatch.vkGetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, imgs.get()));
+	VK_CHECK(devd.dispatch.GetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, imgs.get()));
 
 	swapd.images.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
@@ -76,7 +75,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 					fences.push_back(draw.fence);
 				}
 
-				VK_CHECK(devd.dispatch.vkWaitForFences(devd.handle, fences.size(), fences.data(), true, UINT64_MAX));
+				VK_CHECK(devd.dispatch.WaitForFences(devd.handle, fences.size(), fences.data(), true, UINT64_MAX));
 			}
 
 			swapd.overlay = std::move(oldChain.overlay);
@@ -94,7 +93,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& devd = getData<Device>(device);
 	devd.swapchains.mustErase(swapchain);
-	devd.dispatch.vkDestroySwapchainKHR(device, swapchain, pAllocator);
+	devd.dispatch.DestroySwapchainKHR(device, swapchain, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
@@ -110,7 +109,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
 		} else {
-			VkPresentInfoKHR pi = vk::PresentInfoKHR();
+			VkPresentInfoKHR pi {};
+			pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 			pi.pImageIndices = &pPresentInfo->pImageIndices[i];
 			pi.pResults = pPresentInfo->pResults ? &pPresentInfo->pResults[i] : nullptr;
 			pi.pSwapchains = &pPresentInfo->pSwapchains[i];
@@ -121,7 +121,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 			// pi.pNext
 
 			std::lock_guard queueLock(qd.dev->queueMutex);
-			res = qd.dev->dispatch.vkQueuePresentKHR(queue, &pi);
+			res = qd.dev->dispatch.QueuePresentKHR(queue, &pi);
 		}
 
 		if(pPresentInfo->pResults) {

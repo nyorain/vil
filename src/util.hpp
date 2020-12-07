@@ -1,11 +1,9 @@
 #pragma once
 
-#include "fwd.hpp"
-#include "bytes.hpp"
+#include <fwd.hpp>
+#include <bytes.hpp>
 #include <dlg/dlg.hpp>
 #include <vulkan/vulkan.h>
-#include <vkpp/enums.hpp>
-#include <vkpp/structs.hpp>
 #include <array>
 #include <cstring>
 
@@ -140,15 +138,9 @@ using Vec4i32 = Vec4<std::int32_t>;
 using Vec4i64 = Vec4<std::int64_t>;
 
 // Mainly taken from tkn/formats
-bool isDepthFormat(vk::Format);
-
-// Returns whether the given format an hold high dynamic range data, i.e.
-// has a float format and can store values >1.0.
-bool isHDR(vk::Format);
-bool isSRGB(vk::Format);
-vk::Format toggleSRGB(vk::Format);
-vk::ImageType minImageType(vk::Extent3D, unsigned minDim = 1u);
-vk::ImageViewType minImageViewType(vk::Extent3D, unsigned layers,
+bool isDepthFormat(VkFormat);
+VkImageType minImageType(VkExtent3D, unsigned minDim = 1u);
+VkImageViewType minImageViewType(VkExtent3D, unsigned layers,
 	bool cubemap, unsigned minDim = 1u);
 
 // NOTE: rgb must be linear
@@ -158,9 +150,9 @@ Vec3f e5b9g9r9ToRgb(u32 e5r9g9b9);
 // CPU format conversion. This is needed to support reading and writing of
 // data in formats that the GPU does not support.
 
-Vec4d read(vk::Format srcFormat, std::span<const std::byte>& src);
-void write(vk::Format dstFormat, std::span<std::byte>& dst, const Vec4d& color);
-void convert(vk::Format dstFormat, std::span<std::byte>& dst,
-		vk::Format srcFormat, std::span<const std::byte>& src);
+Vec4d read(VkFormat srcFormat, span<const std::byte>& src);
+void write(VkFormat dstFormat, span<std::byte>& dst, const Vec4d& color);
+void convert(VkFormat dstFormat, span<std::byte>& dst,
+		VkFormat srcFormat, span<const std::byte>& src);
 
 } // namespace fuen

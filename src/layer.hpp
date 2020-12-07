@@ -2,17 +2,16 @@
 
 #include "fwd.hpp"
 
-#include <vkpp/dispatch.hpp>
-#include <vkpp/span.hpp>
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
+#include <vulkan/vk_layer_dispatch_table.h>
 
 struct swa_display;
 
 namespace fuen {
 
 struct Instance {
-	vk::DynamicDispatch dispatch;
+	VkLayerInstanceDispatchTable dispatch;
 	VkInstance handle {};
 
 	struct {

@@ -1,8 +1,7 @@
 #pragma once
 
-#include "device.hpp"
-#include "renderer.hpp"
-#include "gui.hpp"
+#include <device.hpp>
+#include <gui/gui.hpp>
 #include <thread>
 
 struct swa_display;
@@ -14,7 +13,6 @@ namespace fuen {
 struct DisplayWindow {
 	swa_window* window {};
 	Device* dev {};
-	Renderer renderer;
 	Gui gui;
 
 	Queue* presentQueue {};
@@ -32,7 +30,7 @@ struct DisplayWindow {
 	bool run {true};
 
 	bool createWindow(Instance&);
-	void initDevice(Device& dev);
+	bool initDevice(Device& dev);
 	void resize(unsigned w, unsigned h);
 	void initBuffers();
 	void destroyBuffers();

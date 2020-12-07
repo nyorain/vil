@@ -44,7 +44,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 		const VkAllocationCallbacks*                pAllocator,
 		VkDeviceMemory*                             pMemory) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkAllocateMemory(device, pAllocateInfo, pAllocator, pMemory);
+	auto res = dev.dispatch.AllocateMemory(device, pAllocateInfo, pAllocator, pMemory);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -65,7 +65,7 @@ VKAPI_ATTR void VKAPI_CALL FreeMemory(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.deviceMemories.mustErase(memory);
-	dev.dispatch.vkFreeMemory(device, memory, pAllocator);
+	dev.dispatch.FreeMemory(device, memory, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
@@ -76,7 +76,7 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 		VkMemoryMapFlags                            flags,
 		void**                                      ppData) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkMapMemory(device, memory, offset, size, flags, ppData);
+	auto res = dev.dispatch.MapMemory(device, memory, offset, size, flags, ppData);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -99,7 +99,7 @@ VKAPI_ATTR void VKAPI_CALL UnmapMemory(
 	mem.mapOffset = 0u;
 	mem.mapSize = 0u;
 
-	dev.dispatch.vkUnmapMemory(device, memory);
+	dev.dispatch.UnmapMemory(device, memory);
 }
 
 } // namespace fuen

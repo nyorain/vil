@@ -26,7 +26,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		const VkAllocationCallbacks*                pAllocator,
 		VkFramebuffer*                              pFramebuffer) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateFramebuffer(device, pCreateInfo, pAllocator, pFramebuffer);
+	auto res = dev.dispatch.CreateFramebuffer(device, pCreateInfo, pAllocator, pFramebuffer);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -58,7 +58,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.framebuffers.mustErase(framebuffer);
-	dev.dispatch.vkDestroyFramebuffer(device, framebuffer, pAllocator);
+	dev.dispatch.DestroyFramebuffer(device, framebuffer, pAllocator);
 }
 
 // RenderPass
@@ -68,7 +68,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		const VkAllocationCallbacks*                pAllocator,
 		VkRenderPass*                               pRenderPass) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateRenderPass(device, pCreateInfo, pAllocator, pRenderPass);
+	auto res = dev.dispatch.CreateRenderPass(device, pCreateInfo, pAllocator, pRenderPass);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -90,7 +90,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 		VkRenderPass                                renderPass,
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
-	dev.dispatch.vkDestroyRenderPass(device, renderPass, pAllocator);
+	dev.dispatch.DestroyRenderPass(device, renderPass, pAllocator);
 	dev.renderPasses.mustErase(renderPass);
 }
 

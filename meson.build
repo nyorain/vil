@@ -1,4 +1,5 @@
 project('fuencaliente', ['c', 'cpp'],
+	version: '0.1.0',
 	default_options: [
 		'werror=true',
 		'warning_level=3',
@@ -38,9 +39,6 @@ dep_swa = dependency('swa',
 		'link-vulkan=false',
 		'with-kms=disabled'
 	])
-dep_vkpp = dependency('vkpp MASTER',
-	fallback: ['vkpp', 'vkpp_dep'],
-	default_options: ['lib=false'])
 
 src = files(
 	# own meta sources & util
@@ -94,12 +92,11 @@ inc = [
 deps = [
 	dep_threads,
 	dep_dlg,
-	dep_vkpp,
 	dep_swa,
 	libimgui_core_dep,
 ]
 
-vklayer_mesa_overlay = shared_library(
+fuen_layer = shared_library(
 	'VkLayer_fuencaliente',
 	[src, spv],
 	gnu_symbol_visibility: 'hidden',
@@ -109,7 +106,14 @@ vklayer_mesa_overlay = shared_library(
 	install: true
 )
 
-install_data(
-	files('VkLayer_fuencaliente.json'),
-	install_dir : join_paths(get_option('datadir'), 'vulkan', 'explicit_layer.d'),
+conf_data = configuration_data()
+conf_data.set('fuen_version', meson.project_version())
+conf_data.set('lib_path', fuen_layer.full_path().split('/')[-1])
+
+configure_file(
+	input: 'VkLayer_fuencaliente.json.in',
+	output: 'VkLayer_fuencaliente.json',
+	install: true,
+	install_dir: join_paths(get_option('datadir'), 'vulkan', 'explicit_layer.d'),
+	configuration: conf_data
 )

@@ -7,11 +7,6 @@ namespace fuen {
 
 // TODO: support sparse binding
 struct MemoryResource : DeviceHandle {
-	enum class Type {
-		buffer,
-		image,
-	};
-
 	// !memoryDestroyed && !memory: no memory associated
 	// !memoryDestroyed && memory: memory associated
 	// memoryDestroyed && memory: invalid state, must not exist
@@ -20,7 +15,6 @@ struct MemoryResource : DeviceHandle {
 	DeviceMemory* memory {};
 	VkDeviceSize allocationOffset {};
 	VkDeviceSize allocationSize {};
-	Type memoryResourceType {};
 
 	~MemoryResource();
 };

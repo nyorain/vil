@@ -1,9 +1,8 @@
-#include "overlay.hpp"
-#include "swapchain.hpp"
-#include "image.hpp"
-#include "cb.hpp"
-#include "sync.hpp"
-#include <vkpp/names.hpp>
+#include <overlay.hpp>
+#include <swapchain.hpp>
+#include <image.hpp>
+#include <cb.hpp>
+#include <sync.hpp>
 #include <imgui/imgui.h>
 
 namespace fuen {
@@ -12,7 +11,7 @@ namespace fuen {
 void Overlay::init(Swapchain& swapchain) {
 	this->swapchain = &swapchain;
 	// this->platform = findData<Platform>(swapchain.ci.surface);
-	this->renderer.init(*swapchain.dev, swapchain.ci.imageFormat, false);
+	this->gui.init(*swapchain.dev, swapchain.ci.imageFormat, false);
 
 }
 
@@ -24,7 +23,7 @@ void Overlay::initRenderBuffers() {
 	buffers.resize(swapchain.images.size());
 	for(auto i = 0u; i < swapchain.images.size(); ++i) {
 		buffers[i].init(dev, swapchain.images[i]->handle,
-			swapchain.ci.imageFormat, swapchain.ci.imageExtent, renderer.rp());
+			swapchain.ci.imageFormat, swapchain.ci.imageExtent, gui.rp());
 	}
 }
 

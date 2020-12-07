@@ -3,20 +3,31 @@
 // Make sure to *never* include them
 #define VK_NO_PROTOTYPES
 
-#include <vkpp/span.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <type_traits>
 
-// yep, this is bad.
-namespace std {
-	using nytl::span;
-} // namespace std
+namespace nytl {
+
+// span
+constexpr const std::size_t dynamic_extent = std::size_t(-1);
+template<typename T, std::size_t N = dynamic_extent> class span;
+template<typename T, std::size_t N = dynamic_extent>
+using Span = span<T, N>;
+
+// flags
+template<typename T, typename U = std::underlying_type_t<T>> class Flags;
+
+} // namespace nytl
 
 namespace fuen {
 
 // C++20: replace with std::span
 using nytl::span;
+using nytl::Flags;
 
-class Renderer;
 class Gui;
+struct RenderBuffer;
 
 struct Device;
 struct Instance;

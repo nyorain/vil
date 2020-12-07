@@ -146,7 +146,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		const VkAllocationCallbacks*                pAllocator,
 		VkDescriptorSetLayout*                      pSetLayout) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
+	auto res = dev.dispatch.CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -172,7 +172,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorSetLayout(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.dsLayouts.mustErase(descriptorSetLayout);
-	dev.dispatch.vkDestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
+	dev.dispatch.DestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
 }
 
 // dsPool
@@ -182,7 +182,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 		const VkAllocationCallbacks*                pAllocator,
 		VkDescriptorPool*                           pDescriptorPool) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateDescriptorPool(device, pCreateInfo, pAllocator, pDescriptorPool);
+	auto res = dev.dispatch.CreateDescriptorPool(device, pCreateInfo, pAllocator, pDescriptorPool);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -201,7 +201,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorPool(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.dsPools.mustErase(descriptorPool);
-	dev.dispatch.vkDestroyDescriptorPool(device, descriptorPool, pAllocator);
+	dev.dispatch.DestroyDescriptorPool(device, descriptorPool, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
@@ -216,7 +216,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 	}
 
 	dsPool.descriptorSets.clear();
-	return dev.dispatch.vkResetDescriptorPool(device, descriptorPool, flags);
+	return dev.dispatch.ResetDescriptorPool(device, descriptorPool, flags);
 }
 
 // descriptor set
@@ -225,7 +225,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		const VkDescriptorSetAllocateInfo*          pAllocateInfo,
 		VkDescriptorSet*                            pDescriptorSets) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkAllocateDescriptorSets(device, pAllocateInfo, pDescriptorSets);
+	auto res = dev.dispatch.AllocateDescriptorSets(device, pAllocateInfo, pDescriptorSets);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -261,7 +261,7 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 		dev.descriptorSets.mustErase(pDescriptorSets[i]);
 	}
 
-	return dev.dispatch.vkFreeDescriptorSets(device, descriptorPool,
+	return dev.dispatch.FreeDescriptorSets(device, descriptorPool,
 		descriptorSetCount, pDescriptorSets);
 }
 
@@ -380,7 +380,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		dst.invalidateCbs();
 	}
 
-	return dev.dispatch.vkUpdateDescriptorSets(device,
+	return dev.dispatch.UpdateDescriptorSets(device,
 		descriptorWriteCount, pDescriptorWrites,
 		descriptorCopyCount, pDescriptorCopies);
 }

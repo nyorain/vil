@@ -1,13 +1,13 @@
 #pragma once
 
-#include "fwd.hpp"
-#include "syncedMap.hpp"
-#include "handle.hpp"
+#include <fwd.hpp>
+#include <syncedMap.hpp>
+#include <handle.hpp>
+#include <span.hpp>
 
-#include <vkpp/dispatch.hpp>
-#include <vkpp/span.hpp>
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
+#include <vulkan/vk_layer_dispatch_table.h>
 
 #include <shared_mutex>
 #include <memory>
@@ -45,7 +45,7 @@ struct Device {
 	Instance* ini {};
 	VkDevice handle {};
 	VkPhysicalDevice phdev;
-	vk::DynamicDispatch dispatch;
+	VkLayerDispatchTable dispatch;
 
 	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
 
