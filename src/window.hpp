@@ -17,17 +17,15 @@ struct DisplayWindow {
 
 	Queue* presentQueue {};
 
-	VkSurfaceKHR surface {};
+	VkSurfaceKHR surface {}; // owned by window
 	VkSwapchainKHR swapchain {};
 	VkSwapchainCreateInfoKHR swapchainCreateInfo {};
-	Draw draw {};
 
 	VkSemaphore acquireSem {};
-	VkSemaphore renderSem {};
 
 	std::vector<RenderBuffer> buffers;
 	std::thread thread;
-	bool run {true};
+	std::atomic<bool> run {true};
 
 	bool createWindow(Instance&);
 	bool initDevice(Device& dev);

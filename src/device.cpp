@@ -33,12 +33,35 @@ Gui* getOverlayGui(Swapchain& swapchain) {
 
 // deivce
 Device::~Device() {
+	dlg_trace("Destroying Device");
+
 	for(auto& subm : pending) {
 		// we don't have to lock the mutex at checkLocked here since
 		// there can't be any concurrent calls on the device as it
 		// is being destroyed.
 		auto res = checkLocked(*subm);
 		dlg_assert(res);
+	}
+
+	// user must have erased all resources
+	dlg_assert(this->swapchains.empty());
+	dlg_assert(this->images.empty());
+	dlg_assert(this->buffers.empty());
+	dlg_assert(this->imageViews.empty());
+	dlg_assert(this->framebuffers.empty());
+	dlg_assert(this->renderPasses.empty());
+	dlg_assert(this->commandPools.empty());
+	dlg_assert(this->commandBuffers.empty());
+	dlg_assert(this->fences.empty());
+	dlg_assert(this->dsPools.empty());
+	dlg_assert(this->dsLayouts.empty());
+	dlg_assert(this->descriptorSets.empty());
+	dlg_assert(this->deviceMemories.empty());
+	dlg_assert(this->shaderModules.empty());
+	dlg_assert(this->buffers.empty());
+
+	if(window) {
+		window.reset();
 	}
 
 	for(auto& fence : fencePool) {
@@ -63,6 +86,11 @@ Device::~Device() {
 
 	if(commandPool) {
 		dispatch.DestroyCommandPool(handle, commandPool, nullptr);
+	}
+
+	// erase queue datas
+	for(auto& queue : this->queues) {
+		eraseData(queue->queue);
 	}
 }
 
@@ -165,7 +193,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// window. To check that, we first have to create a window though.
 	std::unique_ptr<DisplayWindow> window;
 	u32 presentQueueInfoID = u32(-1);
-	if(ini.display) {
+	auto createWindow = false;
+	if(ini.display && createWindow) {
 		// create window
 		window = std::make_unique<DisplayWindow>();
 		if(!window->createWindow(ini)) {
@@ -238,8 +267,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	layer_init_device_dispatch_table(*dev, &devData.dispatch, fpGetDeviceProcAddr);
 
-  	dlg_info("fuen set last device");
-
 	devData.swapchains.mutex = &devData.mutex;
 	devData.images.mutex = &devData.mutex;
 	devData.imageViews.mutex = &devData.mutex;
@@ -297,9 +324,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			}
 
 			if(i == presentQueueInfoID && j == 0u) {
-				dlg_assert(devData.window);
-				dlg_assert(!devData.window->presentQueue);
-				devData.window->presentQueue = &q;
+				dlg_assert(window);
+				dlg_assert(!window->presentQueue);
+				window->presentQueue = &q;
 			}
 		}
 	}
@@ -350,6 +377,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		devData.window->initDevice(devData);
 	}
 
+	// Make sure we can recognize the VkDevice even when it comes from
+	// the application directly (and is potentially wrapped by other
+	// layers). See our public API doc/implementation for why we need this.
+	storeDeviceByLoader(devData.handle, &devData);
+
 	return result;
 }
 
@@ -359,31 +391,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	auto devd = moveData<Device>(dev);
 	dlg_assert(devd);
 
-	// user must have erased all resources
-	dlg_assert(devd->swapchains.empty());
-	dlg_assert(devd->images.empty());
-	dlg_assert(devd->buffers.empty());
-	dlg_assert(devd->imageViews.empty());
-	dlg_assert(devd->framebuffers.empty());
-	dlg_assert(devd->renderPasses.empty());
-	dlg_assert(devd->commandPools.empty());
-	dlg_assert(devd->commandBuffers.empty());
-	dlg_assert(devd->fences.empty());
-	dlg_assert(devd->dsPools.empty());
-	dlg_assert(devd->dsLayouts.empty());
-	dlg_assert(devd->descriptorSets.empty());
-	dlg_assert(devd->deviceMemories.empty());
-	dlg_assert(devd->shaderModules.empty());
-	dlg_assert(devd->buffers.empty());
-
-	// erase queue datas
-	for(auto& queue : devd->queues) {
-		eraseData(queue->queue);
-	}
-
 	// destroy our logical device before we call the function.
 	auto* destroyDev = devd->dispatch.DestroyDevice;
-	devd.release();
+	devd.reset();
+
 	destroyDev(dev, alloc);
 }
 
@@ -641,8 +652,8 @@ bool checkLocked(PendingSubmission& subm) {
 
 void notifyDestruction(Device& dev, Handle& handle) {
 	std::lock_guard lock(dev.mutex);
-	forEachGuiLocked(dev, [&](auto& renderer) {
-		renderer.unselect(handle);
+	forEachGuiLocked(dev, [&](auto& gui) {
+		gui.destroyed(handle);
 	});
 }
 

@@ -1,30 +1,30 @@
 #pragma once
 
-#include "fwd.hpp"
+#include <fwd.hpp>
+#include <dlg/dlg.hpp>
+#include <vulkan/vulkan.h>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
 #include <shared_mutex>
-#include <dlg/dlg.hpp>
-#include <vulkan/vulkan.h>
 
 namespace fuen {
 
-// data table
-// TODO: hashing handle type and handle itself are kinda hacky, could
-// cause random problems in the end. Should rather have one table
-// per dispatchable.
-// TODO: we don't have to do this whole type hashing thingy.
-// vulkan gaurantees us dispatchable handles are *globally* unique.
-// TODO: use small buffer optimization for those (especially devices & instances)
-extern std::unordered_map<std::uint64_t, void*> dataTable;
-extern std::unordered_map<void*, Device*> devByLoaderTable;
-extern std::shared_mutex dataMutex;
+// TODO: use small buffer optimization for those (especially
+//   devices & instances, optimizing for the common case of just one
+//   instance/device here would likely reduce the overhead quite a bit).
+//   Look into using the vk_layer small-buffer hashtable implementation
 
-// We need a unique hash for type and handle id
-inline std::uint64_t hash_combine(std::uint64_t a, std::uint64_t b) {
-	return a ^ (b + 0x9e3779b9 + (a << 6) + (a >> 2));
-}
+// Table of all dispatchable handles (instance, device, phdev, queue, cb)
+extern std::unordered_map<std::uint64_t, void*> dispatchableTable;
+// Table of device loaders (the first word in any VkDevice handle, not matter
+// where/how it is wrapped). This allows us in our public API implementation
+// to recognize VkDevice handles directly coming from the device (we can't
+// just use the dispatchableTable directly for that since it might
+// be wrapped by other layers).
+extern std::unordered_map<void*, Device*> devByLoaderTable;
+// Synchronizes access to those global tables
+extern std::shared_mutex dataMutex;
 
 template<typename T>
 std::uint64_t handleToU64(T handle) {
@@ -35,37 +35,31 @@ std::uint64_t handleToU64(T handle) {
 }
 
 template<typename T>
-std::uint64_t handleCast(T handle) {
-	auto typeHash = typeid(handle).hash_code();
-	return hash_combine(handleToU64(handle), typeHash);
-}
-
-template<typename T>
 void* findData(T handle) {
 	std::shared_lock lock(dataMutex);
-	auto it = dataTable.find(handleCast(handle));
-	return it == dataTable.end() ? nullptr : it->second;
+	auto it = dispatchableTable.find(handleToU64(handle));
+	return it == dispatchableTable.end() ? nullptr : it->second;
 }
 
 template<typename R, typename T>
 R* findData(T handle) {
 	std::shared_lock lock(dataMutex);
-	auto it = dataTable.find(handleCast(handle));
-	return static_cast<R*>(it == dataTable.end() ? nullptr : it->second);
+	auto it = dispatchableTable.find(handleToU64(handle));
+	return static_cast<R*>(it == dispatchableTable.end() ? nullptr : it->second);
 }
 
 template<typename R, typename T>
 R& getData(T handle) {
 	std::shared_lock lock(dataMutex);
-	auto it = dataTable.find(handleCast(handle));
-	dlg_assert(it != dataTable.end());
+	auto it = dispatchableTable.find(handleToU64(handle));
+	dlg_assert(it != dispatchableTable.end());
 	return *static_cast<R*>(it->second);
 }
 
 template<typename T>
 void insertData(T handle, void* data) {
 	std::lock_guard lock(dataMutex);
-	auto [_, success] = dataTable.emplace(handleCast(handle), data);
+	auto [_, success] = dispatchableTable.emplace(handleToU64(handle), data);
 	dlg_assert(success);
 }
 
@@ -79,32 +73,32 @@ R& createData(T handle, Args&&... args) {
 template<typename T>
 void eraseData(T handle) {
 	std::lock_guard lock(dataMutex);
-	auto it = dataTable.find(handleCast(handle));
-	if(it == dataTable.end()) {
-		dlg_error("Couldn't find data for {} ({})", handleCast(handle), typeid(T).name());
+	auto it = dispatchableTable.find(handleToU64(handle));
+	if(it == dispatchableTable.end()) {
+		dlg_error("Couldn't find data for {} ({})", handleToU64(handle), typeid(T).name());
 		return;
 	}
 
-	dataTable.erase(it);
+	dispatchableTable.erase(it);
 }
 
 template<typename R, typename T>
 std::unique_ptr<R> moveDataOpt(T handle) {
 	std::lock_guard lock(dataMutex);
-	auto it = dataTable.find(handleCast(handle));
-	if(it == dataTable.end()) {
+	auto it = dispatchableTable.find(handleToU64(handle));
+	if(it == dispatchableTable.end()) {
 		return nullptr;
 	}
 
 	auto ptr = it->second;
-	dataTable.erase(it);
+	dispatchableTable.erase(it);
 	return std::unique_ptr<R>(static_cast<R*>(ptr));
 }
 
 template<typename R, typename T>
 std::unique_ptr<R> moveData(T handle) {
 	auto ret = moveDataOpt<R>(handle);
-	dlg_assertm(ret, "Couldn't find data for {} ({})", handleCast(handle), typeid(T).name());
+	dlg_assertm(ret, "Couldn't find data for {} ({})", handleToU64(handle), typeid(T).name());
 	return ret;
 }
 

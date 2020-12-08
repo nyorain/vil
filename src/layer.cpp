@@ -77,7 +77,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 			fpGetInstanceProcAddr(nullptr, "vkEnumerateInstanceExtensionProperties");
 		dlg_assert(fpEnumerateInstanceExtensionProperties);
 
-		unsigned nsup;
+		u32 nsup = 0;
 		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, nullptr));
 		auto supExts = std::make_unique<VkExtensionProperties[]>(nsup);
 		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, supExts.get()));
@@ -159,7 +159,6 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 	dlg_assert(inid);
 	inid->dispatch.DestroyInstance(ini, alloc);
 }
-
 
 VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		VkInstance                                  instance,
@@ -339,7 +338,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	// If it's not hooked, just forward it to the next chain link
 	auto* inid = fuen::findData<fuen::Instance>(ini);
 	if(!inid || !inid->dispatch.GetInstanceProcAddr) {
-		dlg_error("invalid instance data: {}", fuen::handleCast(ini));
+		dlg_error("invalid instance data: {}", ini);
 		return nullptr;
 	}
 
@@ -354,7 +353,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice dev, const c
 
    auto* devd = fuen::findData<fuen::Device>(dev);
    if(!devd || !devd->dispatch.GetDeviceProcAddr) {
-		dlg_error("invalid device data: {}", fuen::handleCast(dev));
+		dlg_error("invalid device data: {}", dev);
 	   return nullptr;
    }
 
@@ -373,12 +372,12 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice dev, const c
 // Global layer entry points
 extern "C" FUEN_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkGetInstanceProcAddr(VkInstance ini, const char* funcName) {
-   dlg_info("fuen get ini proc addr");
+	// dlg_trace("fuen get ini proc addr");
 	return fuen::GetInstanceProcAddr(ini, funcName);
 }
 
 extern "C" FUEN_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkGetDeviceProcAddr(VkDevice dev, const char* funcName) {
-   dlg_info("fuen get device proc addr");
+	// dlg_trace("fuen get device proc addr");
 	return fuen::GetDeviceProcAddr(dev, funcName);
 }

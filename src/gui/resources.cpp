@@ -22,7 +22,7 @@ void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 		ImGui::SameLine();
 		auto label = name(*res.memory);
 		if(ImGui::Button(label.c_str())) {
-			select(res.memory);
+			select(*res.memory);
 		}
 
 		ImGui::SameLine();
@@ -129,7 +129,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	for(auto* view : image.views) {
 		ImGui::Bullet();
 		if(ImGui::Button(name(*view).c_str())) {
-			select(view);
+			select(*view);
 		}
 	}
 
@@ -260,9 +260,10 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	if(ImGui::Button(name(*pipe.layout).c_str())) {
 		select(*pipe.layout);
 	}
-	if(ImGui::Button(name(*pipe.renderPass).c_str())) {
-		select(*pipe.renderPass);
-	}
+	// TODO: allow to display RenderPassDesc
+	// if(ImGui::Button(name(*pipe.renderPass).c_str())) {
+	// 	select(*pipe.renderPass);
+	// }
 	ImGui::Text("%d", pipe.subpass);
 
 	ImGui::Columns();
@@ -596,7 +597,7 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 	for(auto* ds : pipeLayout.descriptors) {
 		ImGui::Bullet();
 		if(ImGui::Button(name(*ds).c_str())) {
-			select(ds);
+			select(*ds);
 		}
 	}
 }
@@ -672,7 +673,7 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 	ImGui::Text("Pool: ");
 	ImGui::SameLine();
 	if(ImGui::Button(name(*cb.pool).c_str())) {
-		select(cb.pool);
+		select(*cb.pool);
 	}
 
 	auto stateName = [](auto state) {
@@ -721,8 +722,12 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 	// data
 	ImGui::NextColumn();
 
-	if(ImGui::Button(name(*view.img).c_str())) {
-		select(view.img);
+	if(view.img) {
+		if(ImGui::Button(name(*view.img).c_str())) {
+			select(*view.img);
+		}
+	} else {
+		ImGui::Text("Associated Image was destroyed");
 	}
 
 	ImGui::Text("%s", string_VkImageViewType(ci.viewType));
@@ -742,7 +747,7 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 		for(auto* fb : view.fbs) {
 			ImGui::Bullet();
 			if(ImGui::Button(name(*fb).c_str())) {
-				select(fb);
+				select(*fb);
 			}
 		}
 	}
@@ -769,7 +774,7 @@ void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
 	for(auto* view : fb.attachments) {
 		ImGui::Bullet();
 		if(ImGui::Button(name(*view).c_str())) {
-			select(view);
+			select(*view);
 		}
 	}
 }

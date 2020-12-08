@@ -17,7 +17,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 		const VkAllocationCallbacks*                pAllocator,
 		VkShaderModule*                             pShaderModule) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.vkCreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
+	auto res = dev.dispatch.CreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -44,7 +44,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.shaderModules.mustErase(shaderModule);
-	dev.dispatch.vkDestroyShaderModule(device, shaderModule, pAllocator);
+	dev.dispatch.DestroyShaderModule(device, shaderModule, pAllocator);
 }
 
 } // namespace fuen

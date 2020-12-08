@@ -33,10 +33,9 @@ public:
 		VkExtent2D extent {};
 		VkFramebuffer fb {};
 		bool fullscreen {};
-		VkQueue queue {};
+		VkQueue presentQueue {};
 
-		span<VkSemaphore> waitSemaphores;
-		span<VkPipelineStageFlags> waitStages;
+		span<const VkSemaphore> waitSemaphores;
 	};
 
 	struct FrameResult {
@@ -50,6 +49,10 @@ public:
 
 	// Must only be called while device mutex is locked.
 	void destroyed(const Handle& handle);
+
+	// Must only be called when it is guaranteed that no other thread
+	// is drawing at the same time (externally synchronized).
+	void finishDraws();
 	void activateTab(Tab);
 
 	template<typename T>

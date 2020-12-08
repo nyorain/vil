@@ -1,7 +1,7 @@
 #pragma once
 
-#include "fwd.hpp"
-#include "imgui/imgui.h"
+#include <fwd.hpp>
+#include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
 #include <string>
 
@@ -18,11 +18,11 @@ struct Row {
 };
 
 template<typename... Args>
-void imGuiText(const char* fmt, Args&&... args) {
+inline void imGuiText(const char* fmt, Args&&... args) {
 	ImGui::Text("%s", dlg::format(fmt, std::forward<Args>(args)...).c_str());
 }
 
-void asColumns2(span<const Row> rows) {
+inline void asColumns2(span<const Row> rows) {
 	ImGui::Columns(2);
 	for(auto& row : rows) {
 		ImGui::Text("%s", row.name);
@@ -34,7 +34,7 @@ void asColumns2(span<const Row> rows) {
 	ImGui::Columns();
 }
 
-bool imGuiTextInput(const char* label, std::string& output) {
+inline bool imGuiTextInput(const char* label, std::string& output) {
 	// Yes, there is a lot of ugliness here.
 	auto callback = [](ImGuiInputTextCallbackData* data) {
 		if(data->EventFlag == ImGuiInputTextFlags_CallbackResize) {

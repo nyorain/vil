@@ -33,7 +33,7 @@ void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
 
 	// new memory
 	VkMemoryAllocateInfo allocInfo {};
-	allocInfo.sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO;
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = memReqs.size;
 	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
@@ -55,6 +55,8 @@ void Draw::Buffer::free(Device& dev) {
 
 // Draw
 void Draw::init(Device& dev) {
+	this->dev = &dev;
+
 	// init data
 	VkCommandBufferAllocateInfo cbai {};
 	cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -90,13 +92,16 @@ Draw::~Draw() {
 	vertexBuffer.free(*dev);
 	indexBuffer.free(*dev);
 
-	if(semaphore) {
-		dev->dispatch.DestroySemaphore(dev->handle, semaphore, nullptr);
+	if(fence) {
+		if(inUse) {
+			dev->dispatch.WaitForFences(dev->handle, 1, &fence, true, UINT64_MAX);
+		}
+
+		dev->dispatch.DestroyFence(dev->handle, fence, nullptr);
 	}
 
-	if(fence) {
-		dev->dispatch.WaitForFences(dev->handle, 1, &fence, true, UINT64_MAX);
-		dev->dispatch.DestroyFence(dev->handle, fence, nullptr);
+	if(semaphore) {
+		dev->dispatch.DestroySemaphore(dev->handle, semaphore, nullptr);
 	}
 
 	if(cb) {
@@ -137,13 +142,15 @@ void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
 }
 
 RenderBuffer::~RenderBuffer() {
-	if(dev) {
-		if(fb) {
-			dev->dispatch.DestroyFramebuffer(dev->handle, fb, nullptr);
-		}
-		if(view) {
-			dev->dispatch.DestroyImageView(dev->handle, view, nullptr);
-		}
+	if(!dev) {
+		return;
+	}
+
+	if(fb) {
+		dev->dispatch.DestroyFramebuffer(dev->handle, fb, nullptr);
+	}
+	if(view) {
+		dev->dispatch.DestroyImageView(dev->handle, view, nullptr);
 	}
 }
 
@@ -168,7 +175,7 @@ void RenderData::init(Device& dev) {
 	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &linearSampler));
 
 	// descriptor set layout
-	VkDescriptorSetLayoutBinding binding;
+	VkDescriptorSetLayoutBinding binding {};
 	binding.binding = 0u;
 	binding.descriptorCount = 1u;
 	binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;

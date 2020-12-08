@@ -84,5 +84,5 @@ struct DescriptorSetRef {
 
 #define VK_CHECK(x) do {\
 		auto result = (x);\
-		dlg_assert(result == VK_SUCCESS); \
+		dlg_assertm(result == VK_SUCCESS, "result: {}", result); \
 	} while(0)

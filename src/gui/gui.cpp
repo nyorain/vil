@@ -72,7 +72,7 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
-	VkRenderPassCreateInfo rpi;
+	VkRenderPassCreateInfo rpi {};
 	rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	rpi.attachmentCount = 1;
 	rpi.pAttachments = &attachment;
@@ -205,7 +205,8 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	// init imgui
 	this->imgui_ = ImGui::CreateContext();
 	ImGui::SetCurrentContext(imgui_);
-	ImGui::GetIO().IniFilename = nullptr;
+	this->io_ = &ImGui::GetIO();
+	this->io_->IniFilename = nullptr;
 	ImGui::GetStyle().WindowRounding = 0.f;
 	ImGui::GetStyle().WindowBorderSize = 0.f;
 }
@@ -215,6 +216,9 @@ Gui::~Gui() {
 	if(!dev_) {
 		return;
 	}
+
+	finishDraws();
+	draws_.clear();
 
 	if(imgui_) {
 		ImGui::DestroyContext(imgui_);
@@ -239,6 +243,14 @@ Gui::~Gui() {
 
 	if(font_.mem) {
 		dev_->dispatch.FreeMemory(vkDev, font_.mem, nullptr);
+	}
+
+	if(pipe_) {
+		dev_->dispatch.DestroyPipeline(vkDev, pipe_, nullptr);
+	}
+
+	if(rp_) {
+		dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
 	}
 }
 
@@ -448,7 +460,6 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 		const ImDrawData& drawData) {
 	auto& dev = *dev_;
-	ensureFontAtlas(draw.cb);
 	if(drawData.TotalIdxCount == 0 && !clear_) {
 		return;
 	}
@@ -682,6 +693,7 @@ void Gui::destroyed(const Handle& handle) {
 
 	for(auto* draw : draws) {
 		draw->usedHandles.clear();
+		draw->inUse = false;
 	}
 }
 
@@ -757,9 +769,13 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	// find a free draw objectg
 	Draw* foundDraw = nullptr;
 	for(auto& draw : draws_) {
+		if(!draw.inUse) {
+			foundDraw = &draw;
+			break;
+		}
+
 		if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
 			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
-
 			foundDraw = &draw;
 			break;
 		}
@@ -770,12 +786,15 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		foundDraw->init(dev());
 	}
 
+	foundDraw->inUse = true;
 	auto& draw = *foundDraw;
 	draw.usedHandles.clear();
 
 	VkCommandBufferBeginInfo cbBegin {};
 	cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
+
+	ensureFontAtlas(draw.cb);
 
 	makeImGuiCurrent();
 	ImGui::GetIO().DisplaySize.x = info.extent.width;
@@ -868,7 +887,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	// TODO: clean this up.
 	// handle case where application doesn't give us semaphore
 	// (and different queues are used?)
-	dlg_assert(info.waitSemaphores.size() == info.waitStages.size());
 	auto waitStages = std::make_unique<VkPipelineStageFlags[]>(info.waitSemaphores.size());
 	for(auto i = 0u; i < info.waitSemaphores.size(); ++i) {
 		waitStages[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
@@ -891,6 +909,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->queue, 1u, &submitInfo, draw.fence);
 	if(res != VK_SUCCESS) {
 		dlg_error("vkSubmit error: {}", string_VkResult(res));
+		draw.inUse = false;
 		return {res, &draw};
 	}
 
@@ -904,13 +923,35 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	presentInfo.swapchainCount = 1u;
 	// TODO: might be bad to not forward this pi.pNext (for overlay)
 
-	res = dev().dispatch.QueuePresentKHR(info.queue, &presentInfo);
+	res = dev().dispatch.QueuePresentKHR(info.presentQueue, &presentInfo);
 	if(res != VK_SUCCESS) {
 		dlg_error("vkQueuePresentKHR error: {}", string_VkResult(res));
 		return {res, &draw};
 	}
 
 	return {VK_SUCCESS, &draw};
+}
+
+void Gui::finishDraws() {
+	std::vector<VkFence> fences;
+	for(auto& draw : draws_) {
+		if(draw.inUse) {
+			fences.push_back(draw.fence);
+		}
+	}
+
+	if(!fences.empty()) {
+		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, fences.size(), fences.data(), true, UINT64_MAX));
+		VK_CHECK(dev().dispatch.ResetFences(dev().handle, fences.size(), fences.data()));
+
+		for(auto& draw : draws_) {
+			draw.inUse = false;
+		}
+	}
+}
+
+void Gui::makeImGuiCurrent() {
+	ImGui::SetCurrentContext(imgui_);
 }
 
 } // namespace fuen

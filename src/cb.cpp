@@ -16,7 +16,7 @@ void removeFromHandlesLocked(CommandBuffer& cb) {
 	auto removeFromResource = [&](auto& res) {
 		// We have to lock the resource mutex since other commands buffers
 		// might add/remove them at the same time.
-		auto it = std::find_if(res.refCbs.begin(), res.refCbs.end(), &cb);
+		auto it = find(res.refCbs, &cb);
 		dlg_assert(it != res.refCbs.end());
 		res.refCbs.erase(it);
 	};
@@ -34,9 +34,7 @@ void removeFromHandlesLocked(CommandBuffer& cb) {
 	}
 }
 
-void reset(CommandBuffer& cb, bool invalidate = false) {
-	std::lock_guard lock(cb.dev->mutex);
-
+void resetLocked(CommandBuffer& cb, bool invalidate = false) {
 	// make sure all submissions are done.
 	for(auto* subm : cb.pending) {
 		auto res = checkLocked(*subm);
@@ -52,6 +50,7 @@ void reset(CommandBuffer& cb, bool invalidate = false) {
 		CommandBuffer::State::initial;
 	cb.buffers.clear();
 	cb.images.clear();
+	cb.handles.clear();
 	cb.commands.clear();
 	cb.sections.clear();
 	cb.graphicsState = {};
@@ -63,8 +62,13 @@ void reset(CommandBuffer& cb, bool invalidate = false) {
 	}
 }
 
-void CommandBuffer::makeInvalid() {
-	reset(*this, true);
+void reset(CommandBuffer& cb, bool invalidate = false) {
+	std::lock_guard lock(cb.dev->mutex);
+	resetLocked(cb, invalidate);
+}
+
+void CommandBuffer::invalidateLocked() {
+	resetLocked(*this, true);
 }
 
 CommandBuffer::~CommandBuffer() {

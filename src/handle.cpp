@@ -32,7 +32,7 @@ DeviceHandle::~DeviceHandle() {
 void DeviceHandle::invalidateCbsLocked() {
 	while(!refCbs.empty()) {
 		auto* first = refCbs[0];
-		first->makeInvalid();
+		first->invalidateLocked();
 	}
 }
 
@@ -109,11 +109,11 @@ VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectNameEXT(
 		handle->name = pNameInfo->pObjectName;
 	}
 
-	if(!devd.dispatch.vkSetDebugUtilsObjectNameEXT) {
+	if(!devd.dispatch.SetDebugUtilsObjectNameEXT) {
 		return VK_SUCCESS;
 	}
 
-	return devd.dispatch.vkSetDebugUtilsObjectNameEXT(device, pNameInfo);
+	return devd.dispatch.SetDebugUtilsObjectNameEXT(device, pNameInfo);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectTagEXT(
@@ -128,11 +128,11 @@ VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectTagEXT(
 		data = {ptr, ptr + pTagInfo->tagSize};
 	}
 
-	if(!devd.dispatch.vkSetDebugUtilsObjectTagEXT) {
+	if(!devd.dispatch.SetDebugUtilsObjectTagEXT) {
 		return VK_SUCCESS;
 	}
 
-	return devd.dispatch.vkSetDebugUtilsObjectTagEXT(device, pTagInfo);
+	return devd.dispatch.SetDebugUtilsObjectTagEXT(device, pTagInfo);
 }
 
 } // namespace fuen

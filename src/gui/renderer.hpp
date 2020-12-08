@@ -31,7 +31,11 @@ struct Draw {
 
 	// Fence associated with the gfx submission of this rendering.
 	// Used to check if frame has completed and Draw can be used again.
+	// Iff inUse is true, the fence has payload associated with it (that might
+	// already be finished though, putting the fence in signaled state).
+	// Waiting on the fence when inUse is false will probably block forever.
 	VkFence fence {};
+	bool inUse {};
 
 	// descriptor set for selected image view.
 	VkDescriptorSet dsSelected {};
@@ -56,7 +60,7 @@ struct RenderData {
 // For swapchain rendering
 struct RenderBuffer {
 	Device* dev {};
-	VkImage image {};
+	VkImage image {}; // owned by swapchain
 	VkImageView view {};
 	VkFramebuffer fb {};
 

@@ -13,7 +13,7 @@ namespace fuen {
 
 void cbClose(swa_window* win) {
 	DisplayWindow* dw = static_cast<DisplayWindow*>(swa_window_get_userdata(win));
-	dw->run = false;
+	dw->run.store(false);
 }
 
 void cbResize(swa_window* win, unsigned width, unsigned height) {
@@ -58,6 +58,27 @@ void cbMouseWheel(swa_window*, float x, float y) {
 }
 
 // DisplayWindow
+DisplayWindow::~DisplayWindow() {
+	run.store(false);
+	if(thread.joinable()) {
+		thread.join();
+	}
+
+	gui.finishDraws(); // NOTE: shouldn't be needed with current blocking rendering
+
+	if(swapchain) {
+		dev->dispatch.DestroySwapchainKHR(dev->handle, swapchain, nullptr);
+	}
+
+	if(window) {
+		swa_window_destroy(window);
+	}
+
+	if(acquireSem) {
+		dev->dispatch.DestroySemaphore(dev->handle, acquireSem, nullptr);
+	}
+}
+
 bool DisplayWindow::createWindow(Instance& ini) {
 	dlg_assert(ini.display);
 
@@ -75,8 +96,8 @@ bool DisplayWindow::createWindow(Instance& ini) {
 	ws.title = "fuencaliente";
 	ws.listener = &listener;
 	ws.surface = swa_surface_vk;
-	ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(dev->ini->handle);
-	ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(dev->ini->dispatch.GetInstanceProcAddr);
+	ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(ini.handle);
+	ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(ini.dispatch.GetInstanceProcAddr);
 	window = swa_display_create_window(ini.display, &ws);
 	if(!window) {
 		return false;
@@ -223,13 +244,11 @@ bool DisplayWindow::initDevice(Device& dev) {
 	}
 
 	{
-		VkSemaphoreCreateInfo sci;
+		VkSemaphoreCreateInfo sci {};
 		sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &acquireSem));
-		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &renderSem));
 	}
 
-	this->draw.init(dev);
 	this->gui.init(dev, sci.imageFormat, true);
 	initBuffers();
 
@@ -248,7 +267,7 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	VkResult res = dev.ini->dispatch.GetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
 	if(res != VK_SUCCESS) {
 		dlg_error("failed retrieve surface caps: {}", string_VkResult(res));
-		run = false;
+		run.store(false);
 		return;
 	}
 
@@ -269,7 +288,7 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 
 	if(res != VK_SUCCESS) {
 		dlg_error("Failed to create vk swapchain: {}", string_VkResult(res));
-		run = false;
+		run.store(false);
 		return;
 	}
 
@@ -297,6 +316,7 @@ void DisplayWindow::destroyBuffers() {
 
 void DisplayWindow::mainLoop() {
 	auto& dev = *this->dev;
+	dlg_assert(this->presentQueue);
 
 	gui.makeImGuiCurrent();
 	auto& io = ImGui::GetIO();
@@ -317,11 +337,11 @@ void DisplayWindow::mainLoop() {
 	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
 	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
 
-	while(run && swa_display_dispatch(dev.ini->display, false)) {
-		u32 id;
+	while(run.load() && swa_display_dispatch(dev.ini->display, false)) {
+		u32 imageIdx;
 		// render a frame
 		VkResult res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain,
-			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &id);
+			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
 		if(res == VK_SUBOPTIMAL_KHR) {
 			dlg_info("Got suboptimal swapchain (acquire)");
 			continue;
@@ -330,14 +350,9 @@ void DisplayWindow::mainLoop() {
 			continue;
 		} else if(res != VK_SUCCESS) {
 			dlg_error("vkAcquireNextImageKHR: {}", string_VkResult(res));
-			run = false;
+			run.store(false);
 			break;
 		}
-
-		auto& sci = swapchainCreateInfo;
-		VkCommandBufferBeginInfo cbBegin;
-		cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		VK_CHECK(dev.dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
 
 		// update modifiers
 		io.KeyAlt = false;
@@ -359,192 +374,25 @@ void DisplayWindow::mainLoop() {
 			io.KeyShift = true;
 		}
 
+		auto& sci = swapchainCreateInfo;
 		io.DisplaySize.x = sci.imageExtent.width;
 		io.DisplaySize.y = sci.imageExtent.height;
 
-		// TODO
-		gui.draw(draw, true);
-		auto& drawData = *ImGui::GetDrawData();
-		renderer.uploadDraw(draw, drawData);
+		// Let gui render frame
+		Gui::FrameInfo frameInfo;
+		frameInfo.extent = sci.imageExtent;
+		frameInfo.imageIdx = imageIdx;
+		frameInfo.fb = buffers[imageIdx].fb;
+		frameInfo.fullscreen = true;
+		frameInfo.presentQueue = this->presentQueue->queue;
+		frameInfo.swapchain = swapchain;
 
-
-		// pretty long, terrible critical section...
-		{
-			// Lock order important. See vkQueueSubmit
-			// TODO: queue lock should not be needed here..
-			std::lock_guard queueLock(dev.queueMutex);
-
-			// Need this here to prevent resources we use
-			// (e.g. the image) from being destroyed. Also to make sure
-			// no new submissions are added
-			std::lock_guard lock(dev.mutex);
-
-			// TODO: move to gui/renderer
-
-			// Make sure relevant command buffers have completed (and check
-			// for latest image layout).
-			// We do this while holding the queue lock to make sure
-			// no new submissions are done until we are done.
-			// TODO: terrible! optimize! Might be possible with semaphores,
-			// even tho hard (semaphore pool is harder to manage than
-			// fence pool since we can't reset)
-			VkImageLayout finalLayout;
-			Image** selImg = std::get_if<Image*>(&gui.selected_.handle);
-			if(!gui.selected_.image.view) {
-				selImg = {};
-			}
-
-			if (selImg) {
-				auto& img = **selImg;
-
-				finalLayout = img.pendingLayout;
-				std::vector<PendingSubmission*> toComplete;
-				for(auto it = dev.pending.begin(); it != dev.pending.end();) {
-					auto& pending = *it;
-
-					// remove finished pending submissions.
-					// important to do this before accessing them.
-					if(checkLocked(*pending)) {
-						// don't increase iterator as the current one
-						// was erased.
-						continue;
-					}
-
-					bool wait = false;
-					for(auto& sub : pending->submissions) {
-						for(auto* cb : sub.cbs) {
-							auto it = cb->images.find(img.handle);
-							if(it == cb->images.end()) {
-								continue;
-							}
-
-							wait = true;
-						}
-					}
-
-					if(wait) {
-						toComplete.push_back(pending.get());
-					}
-
-					++it;
-				}
-
-				if(!toComplete.empty()) {
-					std::vector<VkFence> fences;
-					std::vector<std::mutex*> mutexes;
-					for(auto* pending : toComplete) {
-						if(pending->appFence) {
-							mutexes.push_back(&pending->appFence->mutex);
-							fences.push_back(pending->appFence->handle);
-						} else {
-							fences.push_back(pending->ourFence);
-						}
-					}
-
-					{
-						MultiFenceLock lock(std::move(mutexes));
-						VK_CHECK(dev.dispatch.vkWaitForFences(dev.handle,
-							fences.size(), fences.data(), true, UINT64_MAX));
-					}
-
-					for(auto* pending : toComplete) {
-						auto res = checkLocked(*pending);
-						// we waited for it above. It should really
-						// be completed now.
-						dlg_assert(res);
-					}
-				}
-
-				// Make sure our image is in the right layout.
-				// And we are allowed to read it
-				// TODO: transfer queue
-				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
-				imgb.image = img.handle;
-				imgb.subresourceRange.aspectMask = renderer.selected.image.aspectMask;
-				imgb.subresourceRange.layerCount = 1u;
-				imgb.subresourceRange.levelCount = 1u;
-				imgb.oldLayout = finalLayout;
-				imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
-				imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-				dev.dispatch.vkCmdPipelineBarrier(draw.cb,
-					VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
-					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
-					0, 0, nullptr, 0, nullptr, 1, &imgb);
-			}
-
-			renderer.recordDraw(draw, sci.imageExtent, buffers[id].fb, true);
-
-			if(selImg) {
-				// return it to original layout
-				VkImageMemoryBarrier imgb = vk::ImageMemoryBarrier();
-				imgb.image = (*selImg)->handle;
-				imgb.subresourceRange.aspectMask = renderer.selected.image.aspectMask;
-				imgb.subresourceRange.layerCount = 1u;
-				imgb.subresourceRange.levelCount = 1u;
-				imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				imgb.newLayout = finalLayout;
-				dlg_assert(
-					finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
-					finalLayout != VK_IMAGE_LAYOUT_UNDEFINED);
-				imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-				imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
-
-				dev.dispatch.vkCmdPipelineBarrier(draw.cb,
-					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
-					VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // wait in everything
-					0, 0, nullptr, 0, nullptr, 1, &imgb);
-			}
-
-			dev.dispatch.vkEndCommandBuffer(draw.cb);
-
-			// submit render commands
-			VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-			VkSubmitInfo si = vk::SubmitInfo();
-			si.commandBufferCount = 1u;
-			si.pCommandBuffers = &draw.cb;
-			si.waitSemaphoreCount = 1u;
-			si.pWaitSemaphores = &acquireSem;
-			si.pWaitDstStageMask = &stage;
-			si.signalSemaphoreCount = 1u;
-			si.pSignalSemaphores = &renderSem;
-
-			// TODO: break, continue etc: all early-returns here are problematic
-			// for sync stuff.
-			res = dev.dispatch.vkQueueSubmit(dev.gfxQueue->queue, 1, &si, draw.fence);
-			if(res != VK_SUCCESS) {
-				dlg_error("vkQueueSubmit: {}", vk::name(vk::Result(res)));
-				run = false;
-				break;
-			}
-
-			// present
-			VkPresentInfoKHR pi = vk::PresentInfoKHR();
-			pi.swapchainCount = 1;
-			pi.pSwapchains = &swapchain;
-			pi.pImageIndices = &id;
-			pi.waitSemaphoreCount = 1;
-			pi.pWaitSemaphores = &renderSem;
-
-			// TODO: use an actual present queue...
-			res = dev.dispatch.vkQueuePresentKHR(dev.gfxQueue->queue, &pi);
-
-			if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-				if(res == VK_ERROR_OUT_OF_DATE_KHR) {
-					dlg_warn("Got out of date swapchain (present)");
-					continue;
-				}
-
-				dlg_error("vkQueuePresentKHR: {}", vk::name(vk::Result(res)));
-				run = false;
-				break;
-			}
-
+		auto frameRes = gui.renderFrame(frameInfo);
+		if(frameRes.draw && frameRes.draw->inUse) {
 			// wait on finish
-			VK_CHECK(dev.dispatch.vkWaitForFences(dev.handle, 1, &draw.fence, true, UINT64_MAX));
-			VK_CHECK(dev.dispatch.vkResetFences(dev.handle, 1, &draw.fence));
+			VK_CHECK(dev.dispatch.WaitForFences(dev.handle, 1, &frameRes.draw->fence, true, UINT64_MAX));
+			VK_CHECK(dev.dispatch.ResetFences(dev.handle, 1, &frameRes.draw->fence));
+			frameRes.draw->inUse = false;
 		}
 	}
 }

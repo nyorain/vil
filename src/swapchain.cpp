@@ -36,7 +36,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		return result;
 	}
 
-	// TODO: try to simply reuse all of pCreateInfo->oldSwapchain.
 	auto& swapd = devd.swapchains.add(*pSwapchain);
 	swapd.objectType = VK_OBJECT_TYPE_SWAPCHAIN_KHR;
 	swapd.dev = &devd;
@@ -63,24 +62,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	devd.lastCreatedSwapchain = &swapd;
 
 	if(pCreateInfo->oldSwapchain) {
-		// TODO: check if format and stuff stayed the same. Only then
-		// can we do this...
-		// check out vulkan guarantees for the oldSwapchain member
 		auto& oldChain = devd.swapchains.get(pCreateInfo->oldSwapchain);
 		if(oldChain.overlay) {
-			// have to make sure previous rendering has finished.
-			if(!oldChain.overlay->draws.empty()) {
-				std::vector<VkFence> fences;
-				for(auto& draw : oldChain.overlay->draws) {
-					fences.push_back(draw.fence);
-				}
+			if(Overlay::compatible(oldChain.ci, *pCreateInfo)) {
+				// have to make sure previous rendering has finished.
+				oldChain.overlay->gui.finishDraws();
 
-				VK_CHECK(devd.dispatch.WaitForFences(devd.handle, fences.size(), fences.data(), true, UINT64_MAX));
+				swapd.overlay = std::move(oldChain.overlay);
+				swapd.overlay->swapchain = &swapd;
+				swapd.overlay->initRenderBuffers();
+			} else {
+				// Otherwise we have to create a new renderer from scratch
+				// TODO: carry over all gui logic. Just recreate rendering logic
+				dlg_error("TODO: not implemented");
 			}
-
-			swapd.overlay = std::move(oldChain.overlay);
-			swapd.overlay->swapchain = &swapd;
-			swapd.overlay->initRenderBuffers();
 		}
 	}
 

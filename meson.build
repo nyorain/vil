@@ -28,7 +28,6 @@ endforeach
 
 
 cc = meson.get_compiler('cpp')
-subdir('src/imgui')
 
 dep_threads = dependency('threads', required: false)
 dep_dlg = dependency('dlg', fallback: ['dlg', 'dlg_dep'])
@@ -39,6 +38,16 @@ dep_swa = dependency('swa',
 		'link-vulkan=false',
 		'with-kms=disabled'
 	])
+
+# the same way it's done in swa when not linking vulkan:
+# we only want the headers and definitions, not link anything.
+# we currently carefully only use the header-only vk_layer utilities
+dep_vulkan_full = dependency('vulkan')
+dep_vulkan = dep_vulkan_full.partial_dependency(
+	compile_args: true,
+	includes: true)
+
+subdir('src/imgui')
 
 src = files(
 	# own meta sources & util
@@ -78,15 +87,32 @@ src = files(
 
 	# useful for visual studio build to include them here
 	'src/fwd.hpp',
+	'src/device.hpp',
+	'src/layer.hpp',
+	'src/cb.hpp',
+	'src/handles.hpp',
+	'src/commands.hpp',
+	'src/rp.hpp',
+	'src/sync.hpp',
+	'src/pipe.hpp',
+	'src/shader.hpp',
+	'src/ds.hpp',
+	'src/window.hpp',
+	'src/overlay.hpp',
+	'src/gui/gui.hpp',
+	'src/gui/resources.hpp',
+	'src/gui/cb.hpp',
+	'src/gui/renderer.hpp',
 	'src/util.hpp',
 	'src/data.hpp',
-	'include/api.h',
-	# TODO: include other headers
+	'include/fuen_api.h',
 )
 
+public_inc = include_directories('include')
+private_inc = include_directories('src')
 inc = [
-	include_directories('src'),
-	include_directories('include'),
+	public_inc,
+	private_inc,
 ]
 
 deps = [
@@ -117,3 +143,5 @@ configure_file(
 	install_dir: join_paths(get_option('datadir'), 'vulkan', 'explicit_layer.d'),
 	configuration: conf_data
 )
+
+subdir('docs/example')

@@ -1,5 +1,5 @@
 #include <fwd.hpp>
-#include <api.h>
+#include <fuen_api.h>
 #include <data.hpp>
 #include <device.hpp>
 #include <gui/gui.hpp>
@@ -34,16 +34,16 @@ extern "C" FUEN_API FuenOverlay fuenCreateOverlayForLastCreatedSwapchain(VkDevic
 
 	sc.overlay = std::make_unique<fuen::Overlay>();
 	sc.overlay->init(sc);
-	return {sc.overlay.get()};
+	return reinterpret_cast<FuenOverlay>(sc.overlay.get());
 }
 
 extern "C" FUEN_API void fuenOverlayShow(FuenOverlay overlay, bool show) {
-	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
 	ov.show = show;
 }
 
 extern "C" FUEN_API void fuenOverlayMouseMoveEvent(FuenOverlay overlay, int x, int y) {
-	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
 	if(ov.show) {
 		ov.gui.imguiIO().MousePos = {float(x), float(y)};
 	}
@@ -51,7 +51,7 @@ extern "C" FUEN_API void fuenOverlayMouseMoveEvent(FuenOverlay overlay, int x, i
 
 // They return whether the event was processed by the overlay
 extern "C" FUEN_API bool fuenOverlayMouseButtonEvent(FuenOverlay overlay, unsigned button, bool press) {
-	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
 	if(ov.show && button < 5) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseDown[button] = press;
@@ -61,7 +61,7 @@ extern "C" FUEN_API bool fuenOverlayMouseButtonEvent(FuenOverlay overlay, unsign
 	return false;
 }
 extern "C" FUEN_API bool fuenOverlayMouseWheelEvent(FuenOverlay overlay, float x, float y) {
-	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
 	if(ov.show) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseWheel += y;
@@ -73,7 +73,7 @@ extern "C" FUEN_API bool fuenOverlayMouseWheelEvent(FuenOverlay overlay, float x
 }
 
 extern "C" FUEN_API bool fuenOverlayKeyEvent(FuenOverlay overlay, uint32_t keycode, bool pressed) {
-	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
 
 	// TODO; remove hardcoded toggle.
 	if(keycode == swa_key_backslash && pressed) {
@@ -111,8 +111,8 @@ extern "C" FUEN_API bool fuenOverlayKeyEvent(FuenOverlay overlay, uint32_t keyco
 }
 
 extern "C" FUEN_API bool fuenOverlayTextEvent(FuenOverlay overlay, const char* utf8) {
-	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
-	if(!ov.show) {
+	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+	if(!ov.show || !utf8) {
 		return false;
 	}
 
@@ -122,7 +122,7 @@ extern "C" FUEN_API bool fuenOverlayTextEvent(FuenOverlay overlay, const char* u
 }
 
 extern "C" FUEN_API void fuenOverlayKeyboardModifier(FuenOverlay overlay, uint32_t mod, bool active) {
-	auto& ov = *static_cast<fuen::Overlay*>(overlay.data);
+	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
 	if(!ov.show) {
 		return;
 	}

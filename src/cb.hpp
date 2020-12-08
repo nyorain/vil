@@ -88,7 +88,8 @@ public:
 	~CommandBuffer();
 
 	// Moves the command buffer to invalid state.
-	void makeInvalid();
+	// Expects device mutex to be locked
+	void invalidateLocked();
 
 	bool uses(const Handle&) const;
 	bool uses(const Image&) const;

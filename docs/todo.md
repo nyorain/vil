@@ -3,7 +3,7 @@
 v0.1, goal: end of january 2021
 
 - [x] restructure repo
-	- [ ] add an example (using swa)
+	- [x] add an example (using swa)
 	- [x] move everything else into src (maybe api.h to include/?)
 	- [x] decide on license and add it
 	      pro GPL: no one has to link this layer so it would not have a negative
@@ -15,15 +15,19 @@ v0.1, goal: end of january 2021
 			But otoh, companies not understanding licensing and open source 
 			should not be my problem.
 		  {yep, going with GPL for now}
+- [ ] always try to enable swapchain extension on device creation
+- [ ] name our internal handles for easier debugging
 - [x] switch to shared pointers for device handles, keeping them alive
 	  NOTE: nope, not doing that for now. Explicit resource connection tracking
 	  implemented though.
 - [x] store for handles in which command buffers they were used and set the
       command buffer to invalid state when they are changed/destroyed
-- [ ] cleanup Renderer/Gui implementation: merge back together
-	- [ ] proper gui sync implementation
+- [x] cleanup Renderer/Gui implementation: merge back together
+	- [x] proper gui sync implementation
 	- [x] move gui tabs into own classes
 - [ ] display command buffer state in resource UI
+- [ ] use better enum->string helper. The vk_layer one has several problems
+	  probably best to just modify their python script and put it into docs/
 - [x] display in UI whether resources are destroyed or not
 	  {NOTE: nvm, we decided against shared_ptr approach and never have destroyed resources}	
 - [x] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
@@ -37,7 +41,7 @@ v0.1, goal: end of january 2021
 	  	- [x] nvm, should probably just ditch vkpp all together and use the layer utils
 		- [ ] check if we can use more of the the layer utils
 		      maybe we can replace our own hash table?
-- [ ] fix our global dispatchable handle hash table. Either use the vk_layer
+- [x] fix our global dispatchable handle hash table. Either use the vk_layer
 	  one or remove the type hashing (dispatchable handles are globally unique).
 - [ ] Add more useful overview. Maybe directly link to last submitted command
       buffers?
@@ -75,6 +79,7 @@ v0.1, goal: end of january 2021
 	- [ ] clearly document (maybe already in README?) that the layer
 	      can crash when extensions it does not know about/does not support
 		  are being used.
+	- [ ] update README to correctly show all current features
 - [ ] fully implement command buffer viewer
 	- [ ] support all vulkan 1.0 commands (add to cb.h and commands.h)
 	- [ ] show all commands & info for commands
