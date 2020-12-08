@@ -82,6 +82,10 @@ public:
 	// Error to call this with a key that isn't present.
 	T& get(const K& key) {
 		std::shared_lock lock(*mutex);
+		return getLocked(key);
+	}
+
+	T& getLocked(const K& key) {
 		auto it = map.find(key);
 		assert(it != map.end());
 		return *it->second.get();

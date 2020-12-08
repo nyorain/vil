@@ -189,11 +189,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			"The vulkan implementation exposes no graphics queue!");
 	}
 
+	auto extsBegin = ci->ppEnabledExtensionNames;
+	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
+
 	// Make sure we get a queue that can potentially display to our
 	// window. To check that, we first have to create a window though.
 	std::unique_ptr<DisplayWindow> window;
 	u32 presentQueueInfoID = u32(-1);
-	auto createWindow = false;
+	auto createWindow = true;
+	std::vector<const char*> newExts; // keep-alive
 	if(ini.display && createWindow) {
 		// create window
 		window = std::make_unique<DisplayWindow>();
@@ -247,6 +251,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 				if(presentQueueInfoID == u32(-1)) {
 					dlg_warn("Can't create present window since no queue supports presenting to it");
 					window.reset();
+				} else {
+					// If swapchain extension wasn't enabled, enable it!
+					// TODO: we can and should probably check if the extension
+					// is supported here, first.
+					auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+					auto it = std::find(extsBegin, extsEnd, extName);
+					if(it == extsEnd) {
+						newExts = {extsBegin, extsEnd};
+						newExts.push_back(extName.data());
+
+						nci.enabledExtensionCount = newExts.size();
+						nci.ppEnabledExtensionNames = newExts.data();
+					}
 				}
 			}
 		}
@@ -303,6 +320,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		auto& qi = queueCreateInfos[i];
 		auto& familyProps = qfprops[qi.queueFamilyIndex];
 
+		devData.usedQueueFamilyIndices.push_back(qi.queueFamilyIndex);
+
 		for(auto j = 0u; j < qi.queueCount; ++j) {
 			auto& q = *devData.queues.emplace_back(std::make_unique<Queue>());
 			q.dev = &devData;
@@ -331,6 +350,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		}
 	}
 
+	auto newEnd = std::unique(devData.usedQueueFamilyIndices.begin(), devData.usedQueueFamilyIndices.end());
+	devData.usedQueueFamilyIndices.erase(newEnd, devData.usedQueueFamilyIndices.end());
+
 	// query memory stuff
 	VkPhysicalDeviceMemoryProperties memProps;
 	ini.dispatch.GetPhysicalDeviceMemoryProperties(phdev, &memProps);
@@ -355,6 +377,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	cpci.queueFamilyIndex = devData.gfxQueue->family;
 	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 	VK_CHECK(devData.dispatch.CreateCommandPool(*dev, &cpci, nullptr, &devData.commandPool));
+	nameHandle(devData, devData.commandPool, "Device:commandPool");
 
 	// descriptor pool
 	// TODO: might need multiple pools...
@@ -369,6 +392,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dpci.maxSets = 50u;
 	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 	VK_CHECK(devData.dispatch.CreateDescriptorPool(*dev, &dpci, nullptr, &devData.dsPool));
+	nameHandle(devData, devData.commandPool, "Device:dsPool");
 
 	// == window stuff ==
 	if(window) {
@@ -428,6 +452,7 @@ VkFence getFenceFromPool(Device& dev, bool& checkedSubmissions) {
 	VkFenceCreateInfo fci {};
 	fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	VK_CHECK(dev.dispatch.CreateFence(dev.handle, &fci, nullptr, &fence));
+	nameHandle(dev, fence, "Device:[pool fence]");
 	return fence;
 }
 
@@ -513,6 +538,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		VkSemaphoreCreateInfo sci {};
 		sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
+		nameHandle(dev, semaphore, "Device:[pool semaphore]");
 		return semaphore;
 	};
 
@@ -655,6 +681,22 @@ void notifyDestruction(Device& dev, Handle& handle) {
 	forEachGuiLocked(dev, [&](auto& gui) {
 		gui.destroyed(handle);
 	});
+}
+
+void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name) {
+	if(!dev.ini->debugUtilsEnabled) {
+		return;
+	}
+
+	auto name2 = "fuen:" + std::string(name);
+
+	dlg_assert(dev.dispatch.SetDebugUtilsObjectNameEXT);
+	VkDebugUtilsObjectNameInfoEXT nameInfo {};
+	nameInfo.objectHandle = handle;
+	nameInfo.objectType = objType;
+	nameInfo.pObjectName = name2.c_str();
+	nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+	VK_CHECK(dev.dispatch.SetDebugUtilsObjectNameEXT(dev.handle, &nameInfo));
 }
 
 } // namespace fuen

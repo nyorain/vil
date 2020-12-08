@@ -64,14 +64,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// flag (not even compiling/requiring swa) and environment variable.
 	ini.display = swa_display_autocreate("fuencaliente");
 
+	auto extsBegin = ci->ppEnabledExtensionNames;
+	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
+
 	std::vector<const char*> newExts; // keep-alive
 	auto nci = *ci;
 	if(ini.display) {
-		newExts = {
-			ci->ppEnabledExtensionNames,
-			ci->ppEnabledExtensionNames + ci->enabledExtensionCount
-		};
+		newExts = {extsBegin, extsEnd};
 
+		// NOTE: so it seems we can't enumerate all supported instance
+		// extensions here. We therefore just have to require the extensions
+		// we need to display a window at the moment. If enabling fuen
+		// ever causes an extension_not_present error, this may be the cause!
+#define CHECK_EXTENSIONS 0
+#if CHECK_EXTENSIONS
 		auto fpEnumerateInstanceExtensionProperties =
 			(PFN_vkEnumerateInstanceExtensionProperties)
 			fpGetInstanceProcAddr(nullptr, "vkEnumerateInstanceExtensionProperties");
@@ -81,6 +87,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, nullptr));
 		auto supExts = std::make_unique<VkExtensionProperties[]>(nsup);
 		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, supExts.get()));
+#endif // CHECK_EXTENSIONS
 
 		unsigned nexts;
 		auto exts = swa_display_vk_extensions(ini.display, &nexts);
@@ -94,6 +101,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 				continue;
 			}
 
+#if CHECK_EXTENSIONS
 			// Check if extension is supported.
 			// If not, we simply can't create a window.
 			auto finder = [&](auto& props){ return props.extensionName == ext; };
@@ -103,6 +111,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 				enable = false;
 				break;
 			}
+#endif // CHECK_EXTENSIONS
 
 			dlg_trace("Adding extension {} to instance creation", ext);
 			newExts.push_back(exts[i]);
@@ -125,6 +134,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	insertData(*pInstance, iniPtr.release());
 	ini.handle = *pInstance;
+
+	// TODO: could enable it ourselves. Might be useful even if
+	// application does not want it.
+	// But we can't check whether it's available, see extension
+	// checks above :(
+	auto debugUtilsName = std::string_view(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	ini.debugUtilsEnabled = (std::find(extsBegin, extsEnd, debugUtilsName) != extsEnd);
 
 	auto strOrEmpty = [](const char* str) {
 		return str ? str : "";

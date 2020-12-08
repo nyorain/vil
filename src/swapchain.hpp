@@ -13,6 +13,7 @@ struct Swapchain : DeviceHandle {
 	std::vector<Image*> images;
 
 	~Swapchain();
+	void destroy();
 };
 
 // api

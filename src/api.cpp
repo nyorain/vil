@@ -2,6 +2,7 @@
 #include <fuen_api.h>
 #include <data.hpp>
 #include <device.hpp>
+#include <window.hpp>
 #include <gui/gui.hpp>
 #include <swapchain.hpp>
 #include <overlay.hpp>
@@ -18,23 +19,37 @@
 
 using namespace fuen;
 
+// TODO: we probably have to lock the mutex for every input call
+
 extern "C" FUEN_API FuenOverlay fuenCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
 	auto& dev = getDeviceByLoader(vkDevice);
-	std::shared_lock lock(dev.mutex);
-	if(!dev.lastCreatedSwapchain) {
-		dlg_warn("No last created swapchain (was the last created swapchain destroyed?)");
-		return {};
+
+	FuenOverlay ret {};
+	{
+		std::lock_guard lock(dev.mutex);
+		if(!dev.lastCreatedSwapchain) {
+			dlg_warn("No last created swapchain (was the last created swapchain destroyed?)");
+			return {};
+		}
+
+		auto& sc = *dev.lastCreatedSwapchain;
+		if(sc.overlay) {
+			dlg_warn("Swapchain already had an overlay");
+			return {};
+		}
+
+		sc.overlay = std::make_unique<fuen::Overlay>();
+		sc.overlay->init(sc);
+		ret = reinterpret_cast<FuenOverlay>(sc.overlay.get());
 	}
 
-	auto& sc = *dev.lastCreatedSwapchain;
-	if(sc.overlay) {
-		dlg_warn("Swapchain already had an overlay");
-		return {};
+	// TODO: race.
+	// When the application creates an overlay, we can close the window
+	if(dev.window) {
+		dev.window.reset();
 	}
 
-	sc.overlay = std::make_unique<fuen::Overlay>();
-	sc.overlay->init(sc);
-	return reinterpret_cast<FuenOverlay>(sc.overlay.get());
+	return ret;
 }
 
 extern "C" FUEN_API void fuenOverlayShow(FuenOverlay overlay, bool show) {

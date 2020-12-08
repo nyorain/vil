@@ -2,7 +2,6 @@
 #include "util.hpp"
 #include <imgui/imgui.h>
 
-
 namespace fuen {
 
 // Draw
@@ -26,6 +25,7 @@ void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
 	bufInfo.size = reqSize;
 	bufInfo.usage = usage;
 	VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf));
+	nameHandle(dev, this->buf, "Draw:Buffer:buf");
 
 	// get memory props
 	VkMemoryRequirements memReqs;
@@ -37,6 +37,7 @@ void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
 	allocInfo.allocationSize = memReqs.size;
 	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
+	nameHandle(dev, this->mem, "Draw:Buffer:mem");
 
 	// bind
 	VK_CHECK(dev.dispatch.BindBufferMemory(dev.handle, buf, mem, 0));
@@ -64,6 +65,7 @@ void Draw::init(Device& dev) {
 	cbai.commandPool = dev.commandPool;
 	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &cbai, &cb));
+	nameHandle(dev, this->cb, "Draw:cb");
 
 	// command buffer is a dispatchable object
 	dev.setDeviceLoaderData(dev.handle, cb);
@@ -71,10 +73,12 @@ void Draw::init(Device& dev) {
 	VkFenceCreateInfo fci {};
 	fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	VK_CHECK(dev.dispatch.CreateFence(dev.handle, &fci, nullptr, &fence));
+	nameHandle(dev, this->fence, "Draw:fence");
 
 	VkSemaphoreCreateInfo sci {};
 	sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
+	nameHandle(dev, this->semaphore, "Draw:semaphore");
 
 	VkDescriptorSetAllocateInfo dsai {};
 	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -82,6 +86,7 @@ void Draw::init(Device& dev) {
 	dsai.descriptorSetCount = 1u;
 	dsai.pSetLayouts = &dev.renderData->dsLayout;
 	VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dsai, &dsSelected));
+	nameHandle(dev, this->dsSelected, "Draw:dsSelected");
 }
 
 Draw::~Draw() {
@@ -129,6 +134,7 @@ void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
 	ivi.subresourceRange.layerCount = 1;
 	ivi.subresourceRange.levelCount = 1;
 	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &view));
+	nameHandle(dev, this->view, "RenderBuffer:view");
 
 	VkFramebufferCreateInfo fbi {};
 	fbi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -139,6 +145,7 @@ void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
 	fbi.height = extent.height;
 	fbi.renderPass = rp;
 	VK_CHECK(dev.dispatch.CreateFramebuffer(dev.handle, &fbi, nullptr, &fb));
+	nameHandle(dev, this->fb, "RenderBuffer:fb");
 }
 
 RenderBuffer::~RenderBuffer() {
@@ -169,10 +176,12 @@ void RenderData::init(Device& dev) {
 	sci.maxLod = 1000;
 	sci.maxAnisotropy = 1.0f;
 	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &nearestSampler));
+	nameHandle(dev, this->nearestSampler, "RenderData:nearestSampler");
 
 	sci.magFilter = VK_FILTER_LINEAR;
 	sci.minFilter = VK_FILTER_LINEAR;
 	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &linearSampler));
+	nameHandle(dev, this->linearSampler, "RenderData:linearSampler");
 
 	// descriptor set layout
 	VkDescriptorSetLayoutBinding binding {};
@@ -186,6 +195,7 @@ void RenderData::init(Device& dev) {
 	dslci.bindingCount = 1u;
 	dslci.pBindings = &binding;
 	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &dsLayout));
+	nameHandle(dev, this->dsLayout, "RenderData:dsLayout");
 
 	// pipeline layout
 	VkPushConstantRange pcrs[1] = {};
@@ -200,13 +210,19 @@ void RenderData::init(Device& dev) {
 	plci.pushConstantRangeCount = 1;
 	plci.pPushConstantRanges = pcrs;
 	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &pipeLayout));
+	nameHandle(dev, this->pipeLayout, "RenderData:pipeLayout");
 }
 
 void RenderData::free(Device& dev) {
+	if(!nearestSampler) {
+		return;
+	}
+
 	dev.dispatch.DestroySampler(dev.handle, nearestSampler, nullptr);
 	dev.dispatch.DestroySampler(dev.handle, linearSampler, nullptr);
 	dev.dispatch.DestroyDescriptorSetLayout(dev.handle, dsLayout, nullptr);
 	dev.dispatch.DestroyPipelineLayout(dev.handle, pipeLayout, nullptr);
+	*this = {};
 }
 
 } // namespace fuen

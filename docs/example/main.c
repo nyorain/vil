@@ -1,14 +1,14 @@
 #include <fuen_api.h>
-
-#include <swa/swa.h>
-#include <swa/key.h>
-#include <dlg/dlg.h>
-#include <string.h>
+#include <swa/swa.h> // swa: window creation and input abstraction
+#include <swa/key.h> // swa keycode definitions
+#include <dlg/dlg.h> // dlg: logging & assertion library
 #include <vulkan/vulkan.h>
+#include <string.h>
 #include <time.h>
 #include <signal.h>
 
-// own stuff
+// TODO: handle surface lost error
+
 struct render_buffer {
 	VkCommandBuffer cb;
 	VkImageView iv;
@@ -44,6 +44,13 @@ struct state {
 		PFN_vkDestroyDebugUtilsMessengerEXT destroyDebugUtilsMessengerEXT;
 	} api;
 
+	bool run;
+	bool resized;
+	unsigned w;
+	unsigned h;
+	struct swa_display* dpy;
+
+	bool create_overlay;
 	FuenApi fuen_api;
 	FuenOverlay fuen_overlay;
 };
@@ -61,18 +68,93 @@ static void cleanup(struct state* state);
 
 #define vk_error(res, fmt) dlg_error(fmt ": %s (%d)", vulkan_strerror(res), res)
 
-// window callbacks
-static bool run = true;
-// struct timespec last_redraw;
+void resize(struct state* state) {
+	// make sure all previous rendering has finished since we will
+	// destroy rendering resources
 
-static void window_draw(struct swa_window* win) {
+	vkDeviceWaitIdle(state->device);
+	destroy_render_buffers(state);
+	VkResult res;
+
+	// recreate swapchain
+	VkSurfaceCapabilitiesKHR caps;
+	res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(state->phdev,
+		state->surface, &caps);
+	if(res != VK_SUCCESS) {
+		vk_error(res, "failed retrieve surface caps");
+		state->run = false;
+		return;
+	}
+
+	if(caps.currentExtent.width == 0xFFFFFFFFu) {
+		state->swapchain_info.imageExtent.width = state->w;
+		state->swapchain_info.imageExtent.height = state->h;
+	} else {
+		dlg_info("  fixed swapchain size: %d %d",
+			caps.currentExtent.width,
+			caps.currentExtent.height);
+		state->swapchain_info.imageExtent.width = caps.currentExtent.width;
+		state->swapchain_info.imageExtent.height = caps.currentExtent.height;
+	}
+
+	state->swapchain_info.oldSwapchain = state->swapchain;
+	res = vkCreateSwapchainKHR(state->device, &state->swapchain_info,
+		NULL, &state->swapchain);
+
+	vkDestroySwapchainKHR(state->device,
+		state->swapchain_info.oldSwapchain, NULL);
+	state->swapchain_info.oldSwapchain = VK_NULL_HANDLE;
+
+	if (res != VK_SUCCESS) {
+		vk_error(res, "Failed to create vk swapchain");
+		state->run = false;
+		return;
+	}
+
+	// recreate render buffers
+	if(!init_render_buffers(state)) {
+		state->run = false;
+		return;
+	}
+
+	state->resized = false;
+}
+
+static void window_resize(struct swa_window* win, unsigned w, unsigned h) {
 	struct state* state = swa_window_get_userdata(win);
-	// dlg_info("Redrawing");
+	dlg_info("resized to %d %d", w, h);
+
+	state->w = w;
+	state->h = h;
+
+	if(!state->swapchain) {
+		if(!init_swapchain(state, w, h)) {
+			dlg_error("Failed to init swapchain");
+			return;
+		}
+
+		// query fuen layer api
+		if(fuenLoadApi(&state->fuen_api)) {
+			if(state->create_overlay) {
+				state->fuen_overlay = state->fuen_api.CreateOverlayForLastCreatedSwapchain(state->device);
+				dlg_trace("Created fuen overlay: %p", (void*) state->fuen_overlay);
+			}
+		} else {
+			// TODO: output more info!
+			dlg_warn("Loading fuen failed");
+		}
+	} else {
+		state->resized = true;
+	}
+}
+
+static bool window_draw(struct swa_window* win) {
+	struct state* state = swa_window_get_userdata(win);
 	VkResult res;
 
 	if(!state->swapchain) {
 		dlg_warn("No swapchain!");
-		return;
+		return false;
 	}
 
 	// struct timespec now;
@@ -89,15 +171,18 @@ static void window_draw(struct swa_window* win) {
 	uint32_t id;
 	res = vkAcquireNextImageKHR(state->device, state->swapchain,
 		UINT64_MAX, state->acquire_sem, VK_NULL_HANDLE, &id);
-	if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-		if(res == VK_ERROR_OUT_OF_DATE_KHR) {
-			dlg_warn("Got out of date swapchain (acquire)");
-			return;
-		}
-
+	if(res == VK_SUBOPTIMAL_KHR) {
+		dlg_warn("vkAcquireNextImageKHR: suboptimal");
+		// success nonetheless
+	} else if(res == VK_SUCCESS) {
+		// no-op, success
+	} else if(res == VK_ERROR_OUT_OF_DATE_KHR) {
+		dlg_warn("Got out of date swapchain (acquire)");
+		return false;
+	} else {
 		vk_error(res, "vkAcquireNextImageKHR");
-		run = false;
-		return;
+		state->run = false;
+		return false;
 	}
 
 	// submit render commands
@@ -116,11 +201,9 @@ static void window_draw(struct swa_window* win) {
 	res = vkQueueSubmit(state->qs.gfx, 1, &si, VK_NULL_HANDLE);
 	if(res != VK_SUCCESS) {
 		vk_error(res, "vkQueueSubmit");
-		run = false;
-		return;
+		state->run = false;
+		return false;
 	}
-
-	swa_window_surface_frame(win);
 
 	// present
 	VkPresentInfoKHR present_info = {0};
@@ -132,103 +215,34 @@ static void window_draw(struct swa_window* win) {
 	present_info.pWaitSemaphores = &state->render_sem;
 
 	res = vkQueuePresentKHR(state->qs.present, &present_info);
-	if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+	if(res == VK_SUBOPTIMAL_KHR) {
+		dlg_warn("vkQueuePresentKHR: suboptimal");
+	} else if(res != VK_SUCCESS) {
 		if(res == VK_ERROR_OUT_OF_DATE_KHR) {
-			dlg_warn("Got out of date swapchain (acquire)");
-			return;
+			dlg_warn("Got out of date swapchain (present)");
+			return true;
 		}
 
 		vk_error(res, "vkQueuePresentKHR");
-		run = false;
-		return;
+		state->run = false;
+		return false;
 	}
 
-	swa_window_refresh(win);
+	return true;
 }
 
 static void window_close(struct swa_window* win) {
-	(void) win;
-	run = false;
-}
-
-static void window_resize(struct swa_window* win, unsigned w, unsigned h) {
 	struct state* state = swa_window_get_userdata(win);
-	dlg_info("resized to %d %d", w, h);
-
-	if(!state->swapchain) {
-		if(!state->surface) {
-			dlg_warn("window resize without surface");
-			return;
-		}
-
-		if(!init_swapchain(state, w, h)) {
-			dlg_error("Failed to init swapchain");
-			return;
-		}
-
-		// query fuen layer api
-		if(fuenLoadApi(&state->fuen_api)) {
-			state->fuen_overlay = state->fuen_api.CreateOverlayForLastCreatedSwapchain(state->device);
-			dlg_trace("Created fuen overlay: %p", (void*) state->fuen_overlay);
-		} else {
-			// TODO: more info!
-			dlg_warn("Loading fuen failed");
-		}
-	} else {
-		// make sure all previous rendering has finished since we will
-		// destroy rendering resources
-		vkDeviceWaitIdle(state->device);
-		destroy_render_buffers(state);
-	}
-
-	// recreate swapchain
-	VkSurfaceCapabilitiesKHR caps;
-	VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(state->phdev,
-		state->surface, &caps);
-	if(res != VK_SUCCESS) {
-		vk_error(res, "failed retrieve surface caps");
-		run = false;
-		return;
-	}
-
-	if(caps.currentExtent.width == 0xFFFFFFFFu) {
-		state->swapchain_info.imageExtent.width = w;
-		state->swapchain_info.imageExtent.height = h;
-	} else {
-		dlg_info("  fixed swapchain size: %d %d", caps.currentExtent.width, caps.currentExtent.height);
-		state->swapchain_info.imageExtent.width = caps.currentExtent.width;
-		state->swapchain_info.imageExtent.height = caps.currentExtent.height;
-	}
-
-	state->swapchain_info.oldSwapchain = state->swapchain;
-	res = vkCreateSwapchainKHR(state->device, &state->swapchain_info,
-		NULL, &state->swapchain);
-
-	vkDestroySwapchainKHR(state->device,
-		state->swapchain_info.oldSwapchain, NULL);
-	state->swapchain_info.oldSwapchain = VK_NULL_HANDLE;
-
-	if(res != VK_SUCCESS) {
-		vk_error(res, "Failed to create vk swapchain");
-		run = false;
-		return;
-	}
-
-	// recreate render buffers
-	if(!init_render_buffers(state)) {
-		run = false;
-		return;
-	}
+	state->run = false;
 }
 
 static void window_key(struct swa_window* win, const struct swa_key_event* ev) {
+	struct state* state = swa_window_get_userdata(win);
 	if(ev->pressed && ev->keycode == swa_key_escape) {
 		dlg_info("Escape pressed, exiting");
-		run = false;
+		state->run = false;
 	}
 
-	dlg_trace("key %d, pressed %d", ev->keycode, ev->pressed);
-	struct state* state = swa_window_get_userdata(win);
 	if(state->fuen_overlay) {
 		state->fuen_api.OverlayKeyEvent(state->fuen_overlay, ev->keycode, ev->pressed);
 
@@ -236,25 +250,6 @@ static void window_key(struct swa_window* win, const struct swa_key_event* ev) {
 			state->fuen_api.OverlayTextEvent(state->fuen_overlay, ev->utf8);
 		}
 	}
-}
-
-static void surface_destroyed(struct swa_window* win) {
-	dlg_trace("surface destroyed");
-
-	struct state* state = swa_window_get_userdata(win);
-	vkDeviceWaitIdle(state->device);
-	if(state->swapchain) {
-		vkDestroySwapchainKHR(state->device, state->swapchain, NULL);
-		state->swapchain = VK_NULL_HANDLE;
-	}
-
-	state->surface = VK_NULL_HANDLE;
-}
-
-static void surface_created(struct swa_window* win) {
-	dlg_trace("surface created");
-	struct state* state = swa_window_get_userdata(win);
-	state->surface = (VkSurfaceKHR) swa_window_get_vk_surface(win);
 }
 
 static void mouse_move(struct swa_window* win, const struct swa_mouse_move_event* ev) {
@@ -281,15 +276,12 @@ static void mouse_button(struct swa_window* win, const struct swa_mouse_button_e
 }
 
 static const struct swa_window_listener window_listener = {
-	.draw = window_draw,
 	.close = window_close,
 	.resize = window_resize,
-	.surface_destroyed = surface_destroyed,
-	.surface_created = surface_created,
 	.key = window_key,
+	.mouse_move = mouse_move,
 	.mouse_wheel = mouse_wheel,
 	.mouse_button = mouse_button,
-	.mouse_move = mouse_move,
 };
 
 // Initialization of window and vulkan in general needs the following
@@ -328,16 +320,25 @@ int main(int argc, const char** argv) {
 	unsigned n_exts;
 	const char** exts = swa_display_vk_extensions(dpy, &n_exts);
 
+	bool use_fuen = true;
+	bool fuen_overlay = true;
+
+	for(int i = 1; i < argc; ++i) {
+		if(strcmp(argv[i], "--no-fuen") == 0) {
+			use_fuen = false;
+		}
+
+		if(strcmp(argv[i], "--no-overlay") == 0) {
+			fuen_overlay = false;
+		}
+	}
+
 	// Create the vulkan instance. Make sure to enable the extensions
 	// the display requires. We can't create the device here since
 	// the queues we need depend on the created vulkan surface which
 	// in turn depens on the vulkan instance.
-	bool use_fuen = true;
-	if(argc > 1 && strcmp(argv[1], "--no-fuen") == 0) {
-		use_fuen = false;
-	}
-
 	struct state state = {0};
+	state.create_overlay = fuen_overlay;
 	if(!init_instance(&state, n_exts, exts, use_fuen)) {
 		ret = EXIT_FAILURE;
 		goto cleanup_state;
@@ -374,9 +375,30 @@ int main(int argc, const char** argv) {
 	// timespec_get(&last_redraw, TIME_UTC);
 
 	// main loop
-	while(run) {
+	state.run = true;
+	state.dpy = dpy;
+	while(state.run) {
 		if(!swa_display_dispatch(dpy, false)) {
 			break;
+		}
+
+		if(state.resized) {
+			resize(&state);
+		}
+
+		if(state.fuen_overlay) {
+			enum swa_keyboard_mod mods = swa_display_active_keyboard_mods(dpy);
+			static const enum swa_keyboard_mod all_mods[] = {
+				swa_keyboard_mod_alt,
+				swa_keyboard_mod_shift,
+				swa_keyboard_mod_super,
+				swa_keyboard_mod_ctrl,
+			};
+
+			for(int i = 0u; i < 4; ++i) {
+				state.fuen_api.OverlayKeyboardModifier(state.fuen_overlay,
+					all_mods[i], mods & all_mods[i]);
+			}
 		}
 
 		window_draw(win);
@@ -398,7 +420,7 @@ static bool has_extension(const VkExtensionProperties *avail,
 		uint32_t availc, const char *req) {
 	// check if all required extensions are supported
 	for (size_t j = 0; j < availc; ++j) {
-		if(!strcmp(avail[j].extensionName, req)) {
+		if (!strcmp(avail[j].extensionName, req)) {
 			return true;
 		}
 	}
@@ -425,12 +447,13 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 		// - https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/624
 		// - https://github.com/KhronosGroup/Vulkan-ValidationLayers/pull/1015
 		//   that pr introduced the behavior in the validation layers
-		"VUID-VkSwapchainCreateInfoKHR-imageExtent-01274"
+		// "VUID-VkSwapchainCreateInfoKHR-imageExtent-01274"
+		NULL,
 	};
 
 	if(debug_data->pMessageIdName) {
-		for (unsigned i = 0; i < sizeof(ignored) / sizeof(ignored[0]); ++i) {
-			if(!strcmp(debug_data->pMessageIdName, ignored[i])) {
+		for(unsigned i = 0; i < sizeof(ignored) / sizeof(ignored[0]); ++i) {
+			if(ignored[i] && !strcmp(debug_data->pMessageIdName, ignored[i])) {
 				return false;
 			}
 		}
@@ -453,22 +476,22 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 			break;
 	}
 
-	if(debug_data->queueLabelCount > 0) {
+	if (debug_data->queueLabelCount > 0) {
 		const char *name = debug_data->pQueueLabels[0].pLabelName;
-		if(name) {
+		if (name) {
 			dlg_debug("    last queue label '%s'", name);
 		}
 	}
 
-	if(debug_data->cmdBufLabelCount > 0) {
+	if (debug_data->cmdBufLabelCount > 0) {
 		const char *name = debug_data->pCmdBufLabels[0].pLabelName;
-		if(name) {
+		if (name) {
 			dlg_debug("    last cmdbuf label '%s'", name);
 		}
 	}
 
 	for (unsigned i = 0; i < debug_data->objectCount; ++i) {
-		if(debug_data->pObjects[i].pObjectName) {
+		if (debug_data->pObjects[i].pObjectName) {
 			dlg_debug("    involving '%s'", debug_data->pMessage);
 		}
 	}
@@ -511,7 +534,7 @@ static bool init_render_buffers(struct state* state) {
 
 	res = vkGetSwapchainImagesKHR(dev, state->swapchain,
 		&state->n_bufs, NULL);
-	if(res != VK_SUCCESS) {
+	if (res != VK_SUCCESS) {
 		vk_error(res, "Failed to get swapchain images (1)");
 		return false;
 	}
@@ -519,7 +542,7 @@ static bool init_render_buffers(struct state* state) {
 	VkImage* images = calloc(state->n_bufs, sizeof(*images));
 	res = vkGetSwapchainImagesKHR(dev, state->swapchain,
 		&state->n_bufs, images);
-	if(res != VK_SUCCESS) {
+	if (res != VK_SUCCESS) {
 		vk_error(res, "Failed to get swapchain images (2)");
 		return false;
 	}
@@ -546,7 +569,7 @@ static bool init_render_buffers(struct state* state) {
 		view_info.image = images[i];
 
 		res = vkCreateImageView(dev, &view_info, NULL, &state->bufs[i].iv);
-		if(res != VK_SUCCESS) {
+		if (res != VK_SUCCESS) {
 			vk_error(res, "vkCreateImageView");
 			goto end_images;
 		}
@@ -562,7 +585,7 @@ static bool init_render_buffers(struct state* state) {
 		fb_info.layers = 1;
 
 		res = vkCreateFramebuffer(dev, &fb_info, NULL, &buf->fb);
-		if(res != VK_SUCCESS) {
+		if (res != VK_SUCCESS) {
 			vk_error(res, "vkCreateFramebuffer");
 			goto end_images;
 		}
@@ -579,7 +602,7 @@ static bool init_render_buffers(struct state* state) {
 	cmd_buf_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	cmd_buf_info.commandBufferCount = state->n_bufs;
 	res = vkAllocateCommandBuffers(dev, &cmd_buf_info, cbs);
-	if(res != VK_SUCCESS) {
+	if (res != VK_SUCCESS) {
 		vk_error(res, "vkAllocateCommandBuffers");
 		goto end_cbs;
 	}
@@ -610,9 +633,9 @@ static bool init_render_buffers(struct state* state) {
 		rp_info.pClearValues = &clearValue;
 		vkCmdBeginRenderPass(buf->cb, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
 
-		VkViewport vp = {0.f, 0.f, (float) width, (float) height, 0.f, 1.f};
-		vkCmdSetViewport(buf->cb, 0, 1, &vp);
-		vkCmdSetScissor(buf->cb, 0, 1, &rect);
+		// VkViewport vp = {0.f, 0.f, (float) width, (float) height, 0.f, 1.f};
+		// vkCmdSetViewport(buf->cb, 0, 1, &vp);
+		// vkCmdSetScissor(buf->cb, 0, 1, &rect);
 
 		// here could be your render commands!
 
@@ -671,10 +694,10 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 
 	// TODO: layers seem to crash when using VkDisplayKHR api (used by
 	// swa kms backend).
-	bool use_layers = true;
+	bool use_validation = true;
 	const char* req = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 	bool has_debug = has_extension(avail_exts, avail_extc, req);
-	bool use_debug = has_debug && use_layers;
+	bool use_debug = has_debug && use_validation;
 	if(use_debug) {
 		enable_exts[enable_extc++] = req;
 	}
@@ -692,16 +715,16 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 	application_info.apiVersion = VK_MAKE_VERSION(1,1,0);
 
 	// layer reports error in api usage to debug callback
-	unsigned nlayers;
+	unsigned nlayers = 0;
 	const char* layers[2];
 
+	// We always fuen fuen *before* the validation layer so our calls
+	// in fuen can be validated as well.
 	if(use_fuen) {
-		layers[0] = "VK_LAYER_fuencaliente";
-		layers[1] = "VK_LAYER_KHRONOS_validation";
-		nlayers = 2u;
-	} else {
-		layers[0] = "VK_LAYER_KHRONOS_validation";
-		nlayers = 1u;
+		layers[nlayers++] = "VK_LAYER_fuencaliente";
+	}
+	if(use_validation) {
+		layers[nlayers++] = "VK_LAYER_KHRONOS_validation";
 	}
 
 	VkInstanceCreateInfo instance_info = {0};
@@ -709,11 +732,8 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 	instance_info.pApplicationInfo = &application_info;
 	instance_info.enabledExtensionCount = enable_extc;
 	instance_info.ppEnabledExtensionNames = enable_exts;
-
-	if(use_layers) {
-		instance_info.enabledLayerCount = nlayers;
-		instance_info.ppEnabledLayerNames = layers;
-	}
+	instance_info.enabledLayerCount = nlayers;
+	instance_info.ppEnabledLayerNames = layers;
 
 	res = vkCreateInstance(&instance_info, NULL, &state->instance);
 	free(enable_exts);
@@ -786,13 +806,11 @@ static bool init_swapchain(struct state* state, unsigned width, unsigned height)
 	bool vsync = false;
 	if(!vsync) {
 		for (size_t i = 0; i < present_mode_count; i++) {
-			if(present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+			if (present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
 				info->presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
 				break;
-			} else if(present_modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+			} else if (present_modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
 				info->presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
-			} else if(present_modes[i] == VK_PRESENT_MODE_FIFO_RELAXED_KHR) {
-				info->presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
 			}
 		}
 	}
@@ -829,7 +847,7 @@ static bool init_swapchain(struct state* state, unsigned width, unsigned height)
 	};
 
 	for(int i = 0; i < 4; ++i) {
-		if(caps.supportedCompositeAlpha & alpha_flags[i]) {
+		if (caps.supportedCompositeAlpha & alpha_flags[i]) {
 			alpha = alpha_flags[i];
 			break;
 		}
@@ -925,10 +943,12 @@ bool init_renderer(struct state* state) {
 	unsigned n_exts = 1u;
 	exts[0] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 
-	dev_ext = VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME;
-	if(has_extension(phdev_exts, phdev_extc, dev_ext)) {
-		exts[n_exts++] = VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME;
-	}
+	// TODO: move this into swa and expose it. Like per-window
+	// required device extensions?
+	// dev_ext = VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME;
+	// if(has_extension(phdev_exts, phdev_extc, dev_ext)) {
+	// 	exts[n_exts++] = VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME;
+	// }
 
 	free(phdev_exts);
 
@@ -1167,4 +1187,3 @@ static const char *vulkan_strerror(VkResult err) {
 	}
 	#undef ERR_STR
 }
-

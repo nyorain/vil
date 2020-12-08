@@ -1,0 +1,1 @@
+- layer api doc: https://vulkan.lunarg.com/doc/sdk/1.2.154.1/windows/loader_and_layer_interface.html

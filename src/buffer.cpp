@@ -29,10 +29,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	auto& dev = getData<Device>(device);
 
 	auto nci = *pCreateInfo;
+
+	// Needed so we can copy from it for show its contents.
+	nci.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
 	// TODO: needed for our own operations on the buffer. We should
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
-	nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
+	if(dev.usedQueueFamilyIndices.size() > 1) {
+		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
+		nci.queueFamilyIndexCount = dev.usedQueueFamilyIndices.size();
+		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
+	}
 
 	auto res = dev.dispatch.CreateBuffer(device, &nci, pAllocator, pBuffer);
 	if(res != VK_SUCCESS) {

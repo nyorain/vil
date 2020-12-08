@@ -287,9 +287,7 @@ CommandBuffer::UsedBuffer& useBuffer(CommandBuffer& cb, Command& cmd, Buffer& bu
 	return useBuf;
 }
 
-template<typename T>
-void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
-	auto h64 = handleToU64(handle.handle);
+void useHandle(CommandBuffer& cb, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
 	auto& uh = cb.handles[h64];
 	if(!uh.handle) {
 		uh.handle = &handle;
@@ -297,6 +295,12 @@ void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
 	}
 
 	uh.commands.push_back(&cmd);
+}
+
+template<typename T>
+void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
+	auto h64 = handleToU64(handle.handle);
+	useHandle(cb, cmd, h64, handle);
 }
 
 void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
@@ -441,8 +445,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 				continue;
 			}
 
-			// TODO: can there be barriers inside the renderpasss?
-			//   maybe better move this to RenderPassEnd?
+			// TODO: can there be a transition inside the renderpass on
+			//   an attachment? probably not...
+			//   maybe better move this to RenderPassEnd nonetheless?
 			// TODO: handle secondary command buffers and stuff
 			useHandle(cb, *cmd, *attachment);
 			useImage(cb, *cmd, *attachment->img,
@@ -868,6 +873,8 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 
 	auto& dst = cb.dev->images.get(image);
 	cmd->dst = &dst;
+	cmd->color = *pColor;
+	cmd->ranges = {pRanges, pRanges + rangeCount};
 
 	useImage(cb, *cmd, dst);
 
@@ -888,21 +895,22 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		cmd->secondaries.push_back(&secondary);
 		useHandle(cb, *cmd, secondary);
 
+		// TODO: really track all of them here?
+		// TODO: also add the subcommands to the commands array??
 		for(auto& img : secondary.images) {
-			auto& useImg = cb.images[img.second.image->handle];
-			useImg.image = img.second.image;
-			useImg.commands.push_back(cmd.get());
-
 			if(img.second.layoutChanged) {
-				useImg.layoutChanged = true;
-				useImg.finalLayout = img.second.finalLayout;
+				useImage(cb, *cmd, *img.second.image, img.second.finalLayout);
+			} else {
+				useImage(cb, *cmd, *img.second.image);
 			}
 		}
 
 		for(auto& buf : secondary.buffers) {
-			auto& useBuf = cb.buffers[buf.second.buffer->handle];
-			useBuf.buffer = buf.second.buffer;
-			useBuf.commands.push_back(cmd.get());
+			useBuffer(cb, *cmd, *buf.second.buffer);
+		}
+
+		for(auto& handle : secondary.handles) {
+			useHandle(cb, *cmd, handle.first, *handle.second.handle);
 		}
 	}
 

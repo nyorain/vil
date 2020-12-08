@@ -28,6 +28,9 @@ struct Instance {
 	// all related data) to query for extensions and queue support.
 	swa_display* display {};
 
+	// info about enabled extensions
+	bool debugUtilsEnabled {};
+
 	~Instance();
 };
 

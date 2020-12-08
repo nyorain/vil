@@ -65,13 +65,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	auto& dev = getData<Device>(device);
 
 	auto nci = *pCreateInfo;
+
+	// Needed so we can sample directly from it.
 	// TODO: check if sampling is supported for this image
 	nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
 
 	// TODO: needed for our own operations on the buffer. We should
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
-	nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
+	if(dev.usedQueueFamilyIndices.size() > 1) {
+		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
+		nci.queueFamilyIndexCount = dev.usedQueueFamilyIndices.size();
+		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
+	}
 
 	auto res = dev.dispatch.CreateImage(device, &nci, pAllocator, pImage);
 	if(res != VK_SUCCESS) {

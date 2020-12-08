@@ -1,5 +1,6 @@
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
+#include <imguiutil.hpp>
 #include <commands.hpp>
 #include <imgui/imgui.h>
 
@@ -18,7 +19,7 @@ void CommandBufferGui::draw() {
 	}
 
 	if(cb_->state == CommandBuffer::State::executable) {
-		ImGui::PushID(dlg::format("{}:{}", &cb_, cb_->resetCount).c_str());
+		ImGui::PushID(dlg::format("{}:{}", cb_, cb_->resetCount).c_str());
 
 		// TODO: add selector ui to filter out various commands/don't
 		// show sections etc. Should probably pass a struct DisplayDesc

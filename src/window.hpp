@@ -23,18 +23,20 @@ struct DisplayWindow {
 
 	VkSemaphore acquireSem {};
 
-	std::vector<RenderBuffer> buffers;
-	std::thread thread;
-	std::atomic<bool> run {true};
-
 	bool createWindow(Instance&);
 	bool initDevice(Device& dev);
+
 	void resize(unsigned w, unsigned h);
 	void initBuffers();
 	void destroyBuffers();
 	void mainLoop();
 
 	~DisplayWindow();
+
+private:
+	std::thread thread_;
+	std::atomic<bool> run_ {true};
+	std::vector<RenderBuffer> buffers_;
 };
 
 } // namespace fuen

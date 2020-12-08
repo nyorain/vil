@@ -12,8 +12,10 @@
 namespace fuen {
 
 void cbClose(swa_window* win) {
-	DisplayWindow* dw = static_cast<DisplayWindow*>(swa_window_get_userdata(win));
-	dw->run.store(false);
+	(void) win;
+	// TODO
+	// DisplayWindow* dw = static_cast<DisplayWindow*>(swa_window_get_userdata(win));
+	// dw->close();
 }
 
 void cbResize(swa_window* win, unsigned width, unsigned height) {
@@ -59,9 +61,9 @@ void cbMouseWheel(swa_window*, float x, float y) {
 
 // DisplayWindow
 DisplayWindow::~DisplayWindow() {
-	run.store(false);
-	if(thread.joinable()) {
-		thread.join();
+	run_.store(false);
+	if(thread_.joinable()) {
+		thread_.join();
 	}
 
 	gui.finishDraws(); // NOTE: shouldn't be needed with current blocking rendering
@@ -252,7 +254,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 	this->gui.init(dev, sci.imageFormat, true);
 	initBuffers();
 
-	this->thread = std::thread([&]{ mainLoop(); });
+	this->thread_ = std::thread([&]{ mainLoop(); });
 
 	return true;
 }
@@ -267,7 +269,7 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	VkResult res = dev.ini->dispatch.GetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
 	if(res != VK_SUCCESS) {
 		dlg_error("failed retrieve surface caps: {}", string_VkResult(res));
-		run.store(false);
+		run_.store(false);
 		return;
 	}
 
@@ -288,7 +290,7 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 
 	if(res != VK_SUCCESS) {
 		dlg_error("Failed to create vk swapchain: {}", string_VkResult(res));
-		run.store(false);
+		run_.store(false);
 		return;
 	}
 
@@ -303,15 +305,15 @@ void DisplayWindow::initBuffers() {
 	auto imgs = std::make_unique<VkImage[]>(imgCount);
 	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, imgs.get()));
 
-	buffers.resize(imgCount);
+	buffers_.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
-		buffers[i].init(dev, imgs[i], swapchainCreateInfo.imageFormat,
+		buffers_[i].init(dev, imgs[i], swapchainCreateInfo.imageFormat,
 			swapchainCreateInfo.imageExtent, gui.rp());
 	}
 }
 
 void DisplayWindow::destroyBuffers() {
-	buffers.clear();
+	buffers_.clear();
 }
 
 void DisplayWindow::mainLoop() {
@@ -337,7 +339,32 @@ void DisplayWindow::mainLoop() {
 	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
 	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
 
-	while(run.load() && swa_display_dispatch(dev.ini->display, false)) {
+	while(run_.load()) {
+		/*
+		if(!show_.load()) {
+			swa_window_show(window, false);
+
+			// Block until the window is shown
+			while(!show_.load() && run_.load()) {
+				if(!swa_display_dispatch(dev.ini->display, true)) {
+					run_.store(false);
+					break;
+				}
+			}
+
+			if(!run_.load()) {
+				break;
+			}
+
+			swa_window_show(window, true);
+		}
+		*/
+
+		if(!swa_display_dispatch(dev.ini->display, false)) {
+			run_.store(false);
+			break;
+		}
+
 		u32 imageIdx;
 		// render a frame
 		VkResult res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain,
@@ -350,7 +377,7 @@ void DisplayWindow::mainLoop() {
 			continue;
 		} else if(res != VK_SUCCESS) {
 			dlg_error("vkAcquireNextImageKHR: {}", string_VkResult(res));
-			run.store(false);
+			run_.store(false);
 			break;
 		}
 
@@ -382,10 +409,12 @@ void DisplayWindow::mainLoop() {
 		Gui::FrameInfo frameInfo;
 		frameInfo.extent = sci.imageExtent;
 		frameInfo.imageIdx = imageIdx;
-		frameInfo.fb = buffers[imageIdx].fb;
+		frameInfo.fb = buffers_[imageIdx].fb;
 		frameInfo.fullscreen = true;
 		frameInfo.presentQueue = this->presentQueue->queue;
 		frameInfo.swapchain = swapchain;
+		auto sems = {acquireSem};
+		frameInfo.waitSemaphores = sems;
 
 		auto frameRes = gui.renderFrame(frameInfo);
 		if(frameRes.draw && frameRes.draw->inUse) {
@@ -395,6 +424,17 @@ void DisplayWindow::mainLoop() {
 			frameRes.draw->inUse = false;
 		}
 	}
+
+	dlg_trace("Exiting window thread");
 }
+
+// void DisplayWindow::show(bool doShow) {
+// 	if(show_.load() == doShow) {
+// 		return;
+// 	}
+//
+// 	show_.store(doShow);
+// 	swa_display_wakeup(dev->ini->display);
+// }
 
 } // namespace fuen

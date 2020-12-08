@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include <vulkan/vk_layer_dispatch_table.h>
+#include <vulkan/vk_object_types.h>
 
 #include <shared_mutex>
 #include <memory>
@@ -49,7 +50,14 @@ struct Device {
 
 	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
 
+	// Vector of all queues.
+	// Might includes queues created by us.
 	std::vector<std::unique_ptr<Queue>> queues;
+	// A vector of all queue family indices for which a queue exists.
+	// Needed for concurrent resources.
+	std::vector<u32> usedQueueFamilyIndices;
+	// The queue we use for graphics submissions. Can be assumed to
+	// be non-null.
 	Queue* gfxQueue {};
 
 	u32 hostVisibleMemTypeBits {};
@@ -92,7 +100,6 @@ struct Device {
 	Swapchain* lastCreatedSwapchain {};
 
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
-
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
 	SyncedUniqueUnorderedMap<VkImageView, ImageView> imageViews;
 	SyncedUniqueUnorderedMap<VkSampler, Sampler> samplers;
@@ -147,6 +154,14 @@ void forEachGuiLocked(Device& dev, F&& func) {
 	if(gui) {
 		func(*gui);
 	}
+}
+
+void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name);
+
+template<typename VkT>
+void nameHandle(Device& dev, VkT handle, const char* name) {
+	auto objType = VkHandleInfo<VkT>::kVkObjectType;
+	nameHandle(dev, objType, handleToU64(handle), name);
 }
 
 // api

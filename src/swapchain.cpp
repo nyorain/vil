@@ -6,13 +6,20 @@
 namespace fuen {
 
 Swapchain::~Swapchain() {
+	destroy();
+}
+
+void Swapchain::destroy() {
 	if(!dev) {
 		return;
 	}
 
+	overlay.reset();
 	for(auto* img : this->images) {
 		dev->images.mustErase(img->handle);
 	}
+
+	images.clear();
 
 	// TODO: not sure about this. We don't synchronize access to it
 	// in other places since the api for swapchain/overlay retrieval
@@ -29,9 +36,36 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSwapchainKHR*                             pSwapchain) {
 	auto& devd = getData<Device>(device);
+
+	// It's important we *first* destroy our image objects coming
+	// from this swapchain since they may implicitly destroyed
+	// inside the CreateSwapchain call.
+	// Even when the new CreateSwapchain call fails, the images might
+	// be destroyed via vulkan spec and the old swapchain becomes
+	// unusable.
+	Swapchain* oldChain {};
+	std::unique_ptr<Overlay> savedOverlay {};
+	bool createOverlay {false};
+	if(pCreateInfo->oldSwapchain) {
+		oldChain = &devd.swapchains.get(pCreateInfo->oldSwapchain);
+
+		if(oldChain->overlay) {
+			if(Overlay::compatible(oldChain->ci, *pCreateInfo)) {
+				// have to make sure previous rendering has finished.
+				oldChain->overlay->gui.finishDraws();
+				savedOverlay = std::move(oldChain->overlay);
+			} else {
+				createOverlay = true;
+			}
+		}
+
+		// This is important to destroy our handles of the swapchain
+		// images.
+		oldChain->destroy();
+	}
+
 	auto result = devd.dispatch.CreateSwapchainKHR(device, pCreateInfo,
 		pAllocator, pSwapchain);
-
 	if(result != VK_SUCCESS) {
 		return result;
 	}
@@ -61,22 +95,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 
 	devd.lastCreatedSwapchain = &swapd;
 
-	if(pCreateInfo->oldSwapchain) {
-		auto& oldChain = devd.swapchains.get(pCreateInfo->oldSwapchain);
-		if(oldChain.overlay) {
-			if(Overlay::compatible(oldChain.ci, *pCreateInfo)) {
-				// have to make sure previous rendering has finished.
-				oldChain.overlay->gui.finishDraws();
-
-				swapd.overlay = std::move(oldChain.overlay);
-				swapd.overlay->swapchain = &swapd;
-				swapd.overlay->initRenderBuffers();
-			} else {
-				// Otherwise we have to create a new renderer from scratch
-				// TODO: carry over all gui logic. Just recreate rendering logic
-				dlg_error("TODO: not implemented");
-			}
-		}
+	if(savedOverlay) {
+		swapd.overlay = std::move(savedOverlay);
+		swapd.overlay->swapchain = &swapd;
+		swapd.overlay->initRenderBuffers();
+	} else if(createOverlay) {
+		// Otherwise we have to create a new renderer from scratch
+		// TODO: carry over all gui logic. Just recreate rendering logic
+		dlg_error("TODO: not implemented");
 	}
 
 	return result;

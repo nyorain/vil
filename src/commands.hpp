@@ -3,6 +3,9 @@
 #include <cbState.hpp>
 #include <handles.hpp>
 #include <flags.hpp>
+#include <imguiutil.hpp>
+#include <gui/gui.hpp>
+#include <vulkan/vk_enum_string_helper.h>
 
 #include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
@@ -70,7 +73,7 @@ const Command* displayCommands(const T& container, const Command* selected,
 		Command::TypeFlags typeFlags) {
 	const Command* ret = nullptr;
 	for(auto& cmd : container) {
-		if(typeFlags & cmd->type()) {
+		if(!(typeFlags & cmd->type())) {
 			continue;
 		}
 
@@ -82,6 +85,13 @@ const Command* displayCommands(const T& container, const Command* selected,
 	}
 
 	return ret;
+}
+
+template<typename T>
+void resourceRefButton(Gui& gui, T& resource) {
+	if(ImGui::Button(name(resource).c_str())) {
+		gui.selectResource(resource);
+	}
 }
 
 struct SectionCommand : Command {
@@ -148,10 +158,9 @@ struct BeginRenderPassCmd : SectionCommand {
 		return dlg::format("BeginRenderPass({}, {})", name(*fb), name(*rp));
 	}
 
-	void displayInspector(Gui&) const override {
-		ImGui::Button(name(*fb).c_str());
-		ImGui::Button(name(*rp).c_str());
-		// TODO: something to info
+	void displayInspector(Gui& gui) const override {
+		resourceRefButton(gui, *fb);
+		resourceRefButton(gui, *rp);
 	}
 };
 
@@ -169,6 +178,44 @@ struct BaseDrawCmd : Command {
 	PushConstantMap pushConstants;
 
 	Type type() const override { return Type::dispatchDraw; }
+
+	void displayGrahpicsState(Gui& gui, bool indices) const {
+		if(indices) {
+			dlg_assert(state.indices.buffer);
+			imGuiText("Index Buffer: ");
+			ImGui::SameLine();
+			resourceRefButton(gui, *state.indices.buffer);
+			ImGui::SameLine();
+			imGuiText("Offset {}, Type {}", state.indices.offset, string_VkIndexType(state.indices.type));
+		}
+
+		resourceRefButton(gui, *state.pipe);
+
+		imGuiText("Verex buffers");
+		for(auto& vertBuf : state.vertices) {
+			if(!vertBuf.buffer) {
+				imGuiText("null");
+				continue;
+			}
+
+			resourceRefButton(gui, *vertBuf.buffer);
+			ImGui::SameLine();
+			imGuiText("Offset {}", vertBuf.offset);
+		}
+
+		imGuiText("Descriptors");
+		for(auto& ds : state.descriptorSets) {
+			if(!ds.ds) {
+				imGuiText("null");
+				continue;
+			}
+
+			resourceRefButton(gui, *ds.ds);
+			// TODO: dynamic offsets
+		}
+
+		// TODO: push constants
+	}
 };
 
 struct DrawCmd : BaseDrawCmd {
@@ -181,6 +228,17 @@ struct DrawCmd : BaseDrawCmd {
 		return dlg::format("Draw({}, {}, {}, {})",
 			vertexCount, instanceCount, firstVertex, firstInstance);
 	}
+
+	void displayInspector(Gui& gui) const override {
+		asColumns2({{
+			{"vertexCount", "{}", vertexCount},
+			{"instanceCount", "{}", instanceCount},
+			{"firstVertex", "{}", firstVertex},
+			{"firstInstance", "{}", firstInstance},
+		}});
+
+		BaseDrawCmd::displayGrahpicsState(gui, false);
+	}
 };
 
 struct DrawIndirectCmd : BaseDrawCmd {
@@ -188,6 +246,12 @@ struct DrawIndirectCmd : BaseDrawCmd {
 
 	std::string toString() const override {
 		return "DrawIndirect";
+	}
+
+	void displayInspector(Gui& gui) const override {
+		// TODO: display effective draw command
+		resourceRefButton(gui, *buffer);
+		BaseDrawCmd::displayGrahpicsState(gui, false);
 	}
 };
 
@@ -202,6 +266,18 @@ struct DrawIndexedCmd : BaseDrawCmd {
 		return dlg::format("DrawIndexed({}, {}, {}, {}, {})",
 			indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 	}
+
+	void displayInspector(Gui& gui) const override {
+		asColumns2({{
+			{"indexCount", "{}", indexCount},
+			{"instanceCount", "{}", instanceCount},
+			{"firstIndex", "{}", firstIndex},
+			{"vertexOffset", "{}", vertexOffset},
+			{"firstInstance", "{}", firstInstance},
+		}});
+
+		BaseDrawCmd::displayGrahpicsState(gui, true);
+	}
 };
 
 struct DrawIndexedIndirectCmd : BaseDrawCmd {
@@ -209,6 +285,12 @@ struct DrawIndexedIndirectCmd : BaseDrawCmd {
 
 	std::string toString() const override {
 		return "DrawIndexedIndirect";
+	}
+
+	void displayInspector(Gui& gui) const override {
+		// TODO: display effective draw command
+		resourceRefButton(gui, *buffer);
+		BaseDrawCmd::displayGrahpicsState(gui, true);
 	}
 };
 
@@ -274,6 +356,23 @@ struct BaseDispatchCmd : Command {
 	PushConstantMap pushConstants;
 
 	Type type() const override { return Type::dispatchDraw; }
+
+	void displayComputeState(Gui& gui) const {
+		resourceRefButton(gui, *state.pipe);
+
+		imGuiText("Descriptors");
+		for(auto& ds : state.descriptorSets) {
+			if(!ds.ds) {
+				imGuiText("null");
+				continue;
+			}
+
+			resourceRefButton(gui, *ds.ds);
+			// TODO: dynamic offsets
+		}
+
+		// TODO: push constants
+	}
 };
 
 struct DispatchCmd : BaseDispatchCmd {
@@ -285,6 +384,11 @@ struct DispatchCmd : BaseDispatchCmd {
 		return dlg::format("Dispatch({}, {}, {})",
 			groupsX, groupsY, groupsZ);
 	}
+
+	void displayInspector(Gui& gui) const override {
+		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
+		BaseDispatchCmd::displayComputeState(gui);
+	}
 };
 
 struct DispatchIndirectCmd : BaseDispatchCmd {
@@ -292,6 +396,12 @@ struct DispatchIndirectCmd : BaseDispatchCmd {
 
 	std::string toString() const override {
 		return "DispatchIndirect";
+	}
+
+	void displayInspector(Gui& gui) const override {
+		// TODO: display effective dispatch command
+		resourceRefButton(gui, *buffer);
+		BaseDispatchCmd::displayComputeState(gui);
 	}
 };
 
@@ -305,6 +415,16 @@ struct CopyImageCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+
+	void displayInspector(Gui& gui) const override {
+		resourceRefButton(gui, *src);
+		ImGui::SameLine();
+		imGuiText(" -> ");
+		ImGui::SameLine();
+		resourceRefButton(gui, *dst);
+
+		// TODO: copies
+	}
 };
 
 struct CopyBufferToImageCmd : Command {
@@ -317,6 +437,16 @@ struct CopyBufferToImageCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+
+	void displayInspector(Gui& gui) const override {
+		resourceRefButton(gui, *src);
+		ImGui::SameLine();
+		imGuiText(" -> ");
+		ImGui::SameLine();
+		resourceRefButton(gui, *dst);
+
+		// TODO: copies
+	}
 };
 
 struct CopyImageToBufferCmd : Command {
@@ -329,6 +459,16 @@ struct CopyImageToBufferCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+
+	void displayInspector(Gui& gui) const override {
+		resourceRefButton(gui, *src);
+		ImGui::SameLine();
+		imGuiText(" -> ");
+		ImGui::SameLine();
+		resourceRefButton(gui, *dst);
+
+		// TODO: copies
+	}
 };
 
 struct BlitImageCmd : Command {
@@ -342,10 +482,23 @@ struct BlitImageCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+
+	void displayInspector(Gui& gui) const override {
+		resourceRefButton(gui, *src);
+		ImGui::SameLine();
+		imGuiText(" -> ");
+		ImGui::SameLine();
+		resourceRefButton(gui, *dst);
+
+		// TODO: filter
+		// TODO: blits
+	}
 };
 
 struct ClearColorImageCmd : Command {
 	Image* dst {};
+	VkClearColorValue color;
+	std::vector<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override {
 		return dlg::format("ClearColorImage({})", name(*dst));
@@ -364,6 +517,16 @@ struct CopyBufferCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+
+	void displayInspector(Gui& gui) const override {
+		resourceRefButton(gui, *src);
+		ImGui::SameLine();
+		imGuiText(" -> ");
+		ImGui::SameLine();
+		resourceRefButton(gui, *dst);
+
+		// TODO: copies
+	}
 };
 
 struct UpdateBufferCmd : Command {
@@ -395,6 +558,12 @@ struct ExecuteCommandsCmd : Command {
 	std::vector<CommandBuffer*> secondaries {};
 
 	const Command* display(const Command*, TypeFlags) const override;
+
+	void displayInspector(Gui& gui) const override {
+		for(auto* cb : secondaries) {
+			resourceRefButton(gui, *cb);
+		}
+	}
 };
 
 struct BeginDebugUtilsLabelCmd : SectionCommand {
@@ -424,6 +593,15 @@ struct BindPipelineCmd : Command {
 	}
 
 	Type type() const override { return Type::bind; }
+
+	void displayInspector(Gui& gui) const override {
+		dlg_assert(pipe->type == bindPoint);
+		if(bindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
+			resourceRefButton(gui, *static_cast<ComputePipeline*>(pipe));
+		} else if(bindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+			resourceRefButton(gui, *static_cast<GraphicsPipeline*>(pipe));
+		}
+	}
 };
 
 struct PushConstantsCmd : Command {

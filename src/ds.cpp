@@ -292,9 +292,6 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 
 			auto& binding = ds.bindings[dstBinding][dstElem];
 
-			std::lock_guard lock(dev.mutex);
-			binding.valid = true;
-
 			// Adds this ds to the list of references in the given resource handle.
 			auto addDsRef = [&](auto* res) {
 				if(!res) {
@@ -307,31 +304,32 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			// If the given handle is valid (i.e. not a vulkan null handle),
 			// retrieves the assocated object from the given map and adds
 			// this ds to the list of reference in it.
-			auto nullOrGetAdd = [&](auto& map, auto& handle) -> decltype(&map.get(handle)) {
+			auto nullOrGetAdd = [&](auto& map, auto& handle) -> decltype(&map.getLocked(handle)) {
 				if(!handle) {
 					return nullptr;
 				}
 
-				auto& res = map.get(handle);
+				auto& res = map.getLocked(handle);
 				res.descriptors.push_back({&ds, dstBinding, dstElem});
 				return &res;
 			};
 
+			std::lock_guard lock(dev.mutex);
 			switch(category(write.descriptorType)) {
-				case DescriptorCategory::image:
+				case DescriptorCategory::image: {
 					dlg_assert(write.pImageInfo);
 					binding.imageInfo.layout = write.pImageInfo[j].imageLayout;
 					binding.imageInfo.imageView = nullOrGetAdd(dev.imageViews, write.pImageInfo[j].imageView);
 					binding.imageInfo.sampler = nullOrGetAdd(dev.samplers, write.pImageInfo[j].sampler);
 					break;
-				case DescriptorCategory::buffer:
+				} case DescriptorCategory::buffer: {
 					dlg_assert(write.pBufferInfo);
-					binding.bufferInfo.buffer = &dev.buffers.get(write.pBufferInfo[j].buffer);
+					binding.bufferInfo.buffer = &dev.buffers.getLocked(write.pBufferInfo[j].buffer);
 					addDsRef(binding.bufferInfo.buffer);
 					binding.bufferInfo.offset = write.pBufferInfo[j].offset;
 					binding.bufferInfo.range = write.pBufferInfo[j].range;
 					break;
-				case DescriptorCategory::bufferView:
+				} case DescriptorCategory::bufferView:
 					// TODO
 					dlg_error("Buffer views unimplemented");
 					/*
@@ -341,6 +339,8 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 					break;
 				default: break;
 			}
+
+			binding.valid = true;
 		}
 
 		// TODO: change/check for descriptor indexing
