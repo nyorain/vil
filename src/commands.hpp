@@ -2,10 +2,10 @@
 
 #include <cbState.hpp>
 #include <handles.hpp>
+#include <enumString.hpp>
 #include <flags.hpp>
 #include <imguiutil.hpp>
 #include <gui/gui.hpp>
-#include <vulkan/vk_enum_string_helper.h>
 
 #include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
@@ -98,7 +98,8 @@ struct SectionCommand : Command {
 	std::vector<std::unique_ptr<Command>> children;
 
 	const Command* display(const Command* selected, TypeFlags typeFlags) const override {
-		auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+		// auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+		auto flags = 0u;
 		if(this == selected) {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
@@ -116,6 +117,9 @@ struct SectionCommand : Command {
 			}
 
 			ImGui::TreePop();
+		} else if(ImGui::IsItemClicked()) {
+			// NOTE: not sure about this.
+			ret = this;
 		}
 
 		return ret;
@@ -186,7 +190,7 @@ struct BaseDrawCmd : Command {
 			ImGui::SameLine();
 			resourceRefButton(gui, *state.indices.buffer);
 			ImGui::SameLine();
-			imGuiText("Offset {}, Type {}", state.indices.offset, string_VkIndexType(state.indices.type));
+			imGuiText("Offset {}, Type {}", state.indices.offset, vk::name(state.indices.type));
 		}
 
 		resourceRefButton(gui, *state.pipe);

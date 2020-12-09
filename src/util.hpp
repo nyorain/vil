@@ -139,6 +139,7 @@ using Vec4i64 = Vec4<std::int64_t>;
 
 // Mainly taken from tkn/formats
 bool isDepthFormat(VkFormat);
+// bool isStencilFormat(VkFormat);
 VkImageType minImageType(VkExtent3D, unsigned minDim = 1u);
 VkImageViewType minImageViewType(VkExtent3D, unsigned layers,
 	bool cubemap, unsigned minDim = 1u);

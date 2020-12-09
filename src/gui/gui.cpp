@@ -5,18 +5,23 @@
 #include <handles.hpp>
 #include <commands.hpp>
 #include <bytes.hpp>
+#include <enumString.hpp>
 #include <imguiutil.hpp>
+#include <guidraw.hpp>
 #include <spirv_reflect.h>
 #include <imgui/imgui.h>
 
-#include <vulkan/vk_enum_string_helper.h>
 #include <set>
 #include <map>
 #include <fstream>
 #include <filesystem>
 
-#include "overlay.frag.spv.h"
-#include "overlay.vert.spv.h"
+#include "gui.frag.spv.h"
+#include "gui.vert.spv.h"
+
+#include "image.frag.1DArray.spv.h"
+#include "image.frag.2DArray.spv.h"
+#include "image.frag.3D.spv.h"
 
 thread_local ImGuiContext* __LayerImGui;
 
@@ -84,30 +89,44 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp_));
 
 	// pipeline
-	VkShaderModule vertModule, fragModule;
+	std::vector<VkShaderModule> modules;
+	auto initStages = [&](span<const u32> vertSpv, span<const u32> fragSpv) {
+		VkShaderModule vertModule, fragModule;
 
-	VkShaderModuleCreateInfo vertShaderInfo {};
-	vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	vertShaderInfo.codeSize = sizeof(overlay_vert_spv_data);
-	vertShaderInfo.pCode = overlay_vert_spv_data;
-	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertModule));
+		VkShaderModuleCreateInfo vertShaderInfo {};
+		vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		vertShaderInfo.codeSize = vertSpv.size() * 4;
+		vertShaderInfo.pCode = vertSpv.data();
+		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertModule));
 
-	VkShaderModuleCreateInfo fragShaderInfo {};
-	fragShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	fragShaderInfo.codeSize = sizeof(overlay_frag_spv_data);
-	fragShaderInfo.pCode = overlay_frag_spv_data;
-	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &fragShaderInfo, NULL, &fragModule));
+		VkShaderModuleCreateInfo fragShaderInfo {};
+		fragShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		fragShaderInfo.codeSize = fragSpv.size() * 4;
+		fragShaderInfo.pCode = fragSpv.data();
+		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &fragShaderInfo, NULL, &fragModule));
 
-	VkPipelineShaderStageCreateInfo stage[2] = {};
-	stage[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	stage[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-	stage[0].module = vertModule;
-	stage[0].pName = "main";
+		// store them for destruction later on
+		modules.push_back(vertModule);
+		modules.push_back(fragModule);
 
-	stage[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	stage[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	stage[1].module = fragModule;
-	stage[1].pName = "main";
+		std::array<VkPipelineShaderStageCreateInfo, 2> ret {};
+		ret[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		ret[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		ret[0].module = vertModule;
+		ret[0].pName = "main";
+
+		ret[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		ret[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		ret[1].module = fragModule;
+		ret[1].pName = "main";
+
+		return ret;
+	};
+
+	auto guiStages = initStages(gui_vert_spv_data, gui_frag_spv_data);
+	auto image1DStages = initStages(gui_vert_spv_data, image_frag_1DArray_spv_data);
+	auto image2DStages = initStages(gui_vert_spv_data, image_frag_2DArray_spv_data);
+	auto image3DStages = initStages(gui_vert_spv_data, image_frag_3D_spv_data);
 
 	VkVertexInputBindingDescription bindingDesc[1] = {};
 	bindingDesc[0].stride = sizeof(ImDrawVert);
@@ -181,26 +200,47 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	dynState.dynamicStateCount = 2;
 	dynState.pDynamicStates = dynStates;
 
-	VkGraphicsPipelineCreateInfo gpi {};
-	gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	gpi.flags = 0;
-	gpi.stageCount = 2;
-	gpi.pStages = stage;
-	gpi.pVertexInputState = &vertexInfo;
-	gpi.pInputAssemblyState = &iaInfo;
-	gpi.pViewportState = &viewportInfo;
-	gpi.pRasterizationState = &rasterInfo;
-	gpi.pMultisampleState = &msInfo;
-	gpi.pDepthStencilState = &depthInfo;
-	gpi.pColorBlendState = &blendInfo;
-	gpi.pDynamicState = &dynState;
-	gpi.layout = dev.renderData->pipeLayout;
-	gpi.renderPass = rp_;
-	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
-		VK_NULL_HANDLE, 1, &gpi, nullptr, &pipe_));
+	VkGraphicsPipelineCreateInfo gpi[4] {};
 
-	dev.dispatch.DestroyShaderModule(dev.handle, vertModule, nullptr);
-	dev.dispatch.DestroyShaderModule(dev.handle, fragModule, nullptr);
+	gpi[0].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	gpi[0].flags = 0;
+	gpi[0].stageCount = 2;
+	gpi[0].pStages = guiStages.data();
+	gpi[0].pVertexInputState = &vertexInfo;
+	gpi[0].pInputAssemblyState = &iaInfo;
+	gpi[0].pViewportState = &viewportInfo;
+	gpi[0].pRasterizationState = &rasterInfo;
+	gpi[0].pMultisampleState = &msInfo;
+	gpi[0].pDepthStencilState = &depthInfo;
+	gpi[0].pColorBlendState = &blendInfo;
+	gpi[0].pDynamicState = &dynState;
+	gpi[0].layout = dev.renderData->pipeLayout;
+	gpi[0].renderPass = rp_;
+	gpi[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
+
+	gpi[1] = gpi[0];
+	gpi[1].flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+	gpi[1].basePipelineIndex = 0u;
+	gpi[1].pStages = image1DStages.data();
+
+	gpi[2] = gpi[1];
+	gpi[2].pStages = image2DStages.data();
+
+	gpi[3] = gpi[1];
+	gpi[3].pStages = image3DStages.data();
+
+	VkPipeline pipes[4];
+	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
+		VK_NULL_HANDLE, 4, gpi, nullptr, pipes));
+
+	pipes_.gui = pipes[0];
+	pipes_.image1D = pipes[1];
+	pipes_.image2D = pipes[2];
+	pipes_.image3D = pipes[3];
+
+	for(auto& mod : modules) {
+		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
+	}
 
 	// init imgui
 	this->imgui_ = ImGui::CreateContext();
@@ -209,6 +249,11 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	this->io_->IniFilename = nullptr;
 	ImGui::GetStyle().WindowRounding = 0.f;
 	ImGui::GetStyle().WindowBorderSize = 0.f;
+	ImGui::GetStyle().ScrollbarRounding = 0.f;
+	// ImGui::GetStyle().FramePadding = {5, 5};
+	// ImGui::GetStyle().ItemSpacing = {8, 8};
+	// ImGui::GetStyle().ItemInnerSpacing = {6, 6};
+	ImGui::GetStyle().Alpha = 0.9f;
 }
 
 // ~Gui
@@ -225,33 +270,18 @@ Gui::~Gui() {
 	}
 
 	auto vkDev = dev_->handle;
-	if(font_.uploadBuf) {
-		dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
-	}
+	if(font_.uploadBuf) dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
+	if(font_.uploadMem) dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
+	if(font_.view) dev_->dispatch.DestroyImageView(vkDev, font_.view, nullptr);
+	if(font_.image) dev_->dispatch.DestroyImage(vkDev, font_.image, nullptr);
+	if(font_.mem) dev_->dispatch.FreeMemory(vkDev, font_.mem, nullptr);
 
-	if(font_.uploadMem) {
-		dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
-	}
+	if(pipes_.gui) dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
+	if(pipes_.image1D) dev_->dispatch.DestroyPipeline(vkDev, pipes_.image1D, nullptr);
+	if(pipes_.image2D) dev_->dispatch.DestroyPipeline(vkDev, pipes_.image2D, nullptr);
+	if(pipes_.image3D) dev_->dispatch.DestroyPipeline(vkDev, pipes_.image3D, nullptr);
 
-	if(font_.view) {
-		dev_->dispatch.DestroyImageView(vkDev, font_.view, nullptr);
-	}
-
-	if(font_.image) {
-		dev_->dispatch.DestroyImage(vkDev, font_.image, nullptr);
-	}
-
-	if(font_.mem) {
-		dev_->dispatch.FreeMemory(vkDev, font_.mem, nullptr);
-	}
-
-	if(pipe_) {
-		dev_->dispatch.DestroyPipeline(vkDev, pipe_, nullptr);
-	}
-
-	if(rp_) {
-		dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
-	}
+	if(rp_) dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
 }
 
 // Renderer
@@ -410,7 +440,8 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 
 	// Store our identifier
-	io.Fonts->TexID = (ImTextureID) dsFont_;
+	font_.drawImage.type = DrawGuiImage::font;
+	io.Fonts->TexID = (ImTextureID) &font_.drawImage;
 	font_.uploaded = true;
 }
 
@@ -486,8 +517,6 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 		viewport.maxDepth = 1.f;
 		dev.dispatch.CmdSetViewport(draw.cb, 0, 1, &viewport);
 
-		dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_);
-
 		VkDeviceSize off0 = 0u;
 		dev.dispatch.CmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
 		dev.dispatch.CmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
@@ -500,7 +529,7 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 		pcr[2] = -1.0f - drawData.DisplayPos.x * pcr[0];
 		pcr[3] = -1.0f - drawData.DisplayPos.y * pcr[1];
 		dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
-			VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pcr), pcr);
+			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
 
 		auto idxOff = 0u;
 		auto vtxOff = 0u;
@@ -510,22 +539,63 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 			for(auto j = 0; j < cmds.CmdBuffer.Size; ++j) {
 				auto& cmd = cmds.CmdBuffer[j];
 
-				auto ds = (VkDescriptorSet) cmd.TextureId;
-				if(!ds) {
-					// we have to always bind a valid ds
+				VkDescriptorSet ds;
+				VkPipeline pipe;
+				auto img = (DrawGuiImage*) cmd.TextureId;
+				if(img) {
+					switch(img->type) {
+						case DrawGuiImage::font:
+							ds = dsFont_;
+							pipe = pipes_.gui;
+							break;
+						case DrawGuiImage::e1d:
+							ds = draw.dsSelected;
+							pipe = pipes_.image1D;
+							break;
+						case DrawGuiImage::e2d:
+							ds = draw.dsSelected;
+							pipe = pipes_.image2D;
+							break;
+						case DrawGuiImage::e3d:
+							ds = draw.dsSelected;
+							pipe = pipes_.image3D;
+							break;
+					}
+
+					if(img->type != DrawGuiImage::font) {
+						// bind push constant data
+						struct PcrImageData {
+							float layer;
+							float valMin;
+							float valMax;
+							u32 flags;
+						} pcr = {
+							img->layer,
+							img->minValue,
+							img->maxValue,
+							img->flags
+						};
+
+						dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
+							VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
+							sizeof(pcr), &pcr);
+					}
+				} else {
+					// default: drawing imgui stuff.
+					// Use gui pipe and font texture
 					ds = dsFont_;
+					pipe = pipes_.gui;
 				}
+
+				dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
 				dev.dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 					dev.renderData->pipeLayout, 0, 1, &ds, 0, nullptr);
 
-				// TODO?
 				VkRect2D scissor {};
 				scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
 				scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
 				scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
 				scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
-				// scissor.extent.width = viewport.width;
-				// scissor.extent.height = viewport.height;
 				dev.dispatch.CmdSetScissor(draw.cb, 0, 1, &scissor);
 
 				dev.dispatch.CmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);
@@ -620,11 +690,11 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 		flags = ImGuiWindowFlags_NoDecoration;
 	} else {
-		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
-		ImGui::SetNextWindowSize({800, 500}, ImGuiCond_Once);
 		// ImGui::ShowDemoWindow();
 		// ImGui::ShowAboutWindow();
 		// ImGui::ShowMetricsWindow();
+		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
+		ImGui::SetNextWindowSize({800, 500}, ImGuiCond_Once);
 		// auto flags = 0;
 	}
 
@@ -676,6 +746,10 @@ void Gui::destroyed(const Handle& handle) {
 	std::vector<VkFence> fences;
 	std::vector<Draw*> draws;
 	for(auto& draw : draws_) {
+		if(!draw.inUse) {
+			continue;
+		}
+
 		auto it = find(draw.usedHandles, &handle);
 		if(it != draw.usedHandles.end()) {
 			fences.push_back(draw.fence);
@@ -786,7 +860,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		foundDraw->init(dev());
 	}
 
-	foundDraw->inUse = true;
 	auto& draw = *foundDraw;
 	draw.usedHandles.clear();
 
@@ -857,6 +930,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	if(selImg) {
 		// return it to original layout
 		VkImageMemoryBarrier imgb {};
+		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		imgb.image = selImg->handle;
 		imgb.subresourceRange = tabs_.resources.image_.subres;
 		imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -908,8 +982,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 
 	auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->queue, 1u, &submitInfo, draw.fence);
 	if(res != VK_SUCCESS) {
-		dlg_error("vkSubmit error: {}", string_VkResult(res));
-		draw.inUse = false;
+		dlg_error("vkSubmit error: {}", vk::name(res));
 		return {res, &draw};
 	}
 
@@ -925,9 +998,19 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 
 	res = dev().dispatch.QueuePresentKHR(info.presentQueue, &presentInfo);
 	if(res != VK_SUCCESS) {
-		dlg_error("vkQueuePresentKHR error: {}", string_VkResult(res));
+		dlg_error("vkQueuePresentKHR error: {}", vk::name(res));
 		return {res, &draw};
 	}
+
+	foundDraw->inUse = true;
+
+	// TODO: support not doing this.
+	// For that we would have to chain future submissions using resources
+	// used by this draw via semaphores...
+	VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
+	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+	draw.inUse = false;
+	draw.usedHandles.clear();
 
 	return {VK_SUCCESS, &draw};
 }
@@ -946,6 +1029,7 @@ void Gui::finishDraws() {
 
 		for(auto& draw : draws_) {
 			draw.inUse = false;
+			draw.usedHandles.clear();
 		}
 	}
 }

@@ -4,10 +4,10 @@
 #include <sync.hpp>
 #include <image.hpp>
 #include <util.hpp>
+#include <enumString.hpp>
 #include <swa/swa.h>
 #include <dlg/dlg.hpp>
 #include <imgui/imgui.h>
-#include <vulkan/vk_enum_string_helper.h>
 
 namespace fuen {
 
@@ -136,7 +136,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 	u32 nFormats;
 	res = dev.ini->dispatch.GetPhysicalDeviceSurfaceFormatsKHR(dev.phdev, surface, &nFormats, nullptr);
 	if(res != VK_SUCCESS || nFormats == 0) {
-		dlg_error("failed retrieve surface formats: {}", string_VkResult(res));
+		dlg_error("failed retrieve surface formats: {}", vk::name(res));
 		return false;
 	}
 
@@ -144,7 +144,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 	res = dev.ini->dispatch.GetPhysicalDeviceSurfaceFormatsKHR(dev.phdev, surface,
 		&nFormats, formats.get());
 	if(res != VK_SUCCESS) {
-		dlg_error("failed retrieve surface formats: {}", string_VkResult(res));
+		dlg_error("failed retrieve surface formats: {}", vk::name(res));
 		return false;
 	}
 
@@ -163,7 +163,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 	res = dev.ini->dispatch.GetPhysicalDeviceSurfacePresentModesKHR(dev.phdev,
 		surface, &nPresentModes, presentModes.get());
 	if(res != VK_SUCCESS || nPresentModes == 0) {
-		dlg_error("Failed to retrieve surface present modes: {}", string_VkResult(res));
+		dlg_error("Failed to retrieve surface present modes: {}", vk::name(res));
 		return false;
 	}
 
@@ -187,7 +187,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 	VkSurfaceCapabilitiesKHR caps;
 	res = dev.ini->dispatch.GetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
 	if(res != VK_SUCCESS) {
-		dlg_error("failed retrieve surface caps: {}", string_VkResult(res));
+		dlg_error("failed retrieve surface caps: {}", vk::name(res));
 		return false;
 	}
 
@@ -241,7 +241,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 
 	res = dev.dispatch.CreateSwapchainKHR(dev.handle, &sci, NULL, &swapchain);
 	if(res != VK_SUCCESS) {
-		dlg_error("Failed to create vk swapchain: {}", string_VkResult(res));
+		dlg_error("Failed to create vk swapchain: {}", vk::name(res));
 		return false;
 	}
 
@@ -268,7 +268,7 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	VkSurfaceCapabilitiesKHR caps;
 	VkResult res = dev.ini->dispatch.GetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev, surface, &caps);
 	if(res != VK_SUCCESS) {
-		dlg_error("failed retrieve surface caps: {}", string_VkResult(res));
+		dlg_error("failed retrieve surface caps: {}", vk::name(res));
 		run_.store(false);
 		return;
 	}
@@ -289,7 +289,7 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	sci.oldSwapchain = VK_NULL_HANDLE;
 
 	if(res != VK_SUCCESS) {
-		dlg_error("Failed to create vk swapchain: {}", string_VkResult(res));
+		dlg_error("Failed to create vk swapchain: {}", vk::name(res));
 		run_.store(false);
 		return;
 	}
@@ -376,7 +376,7 @@ void DisplayWindow::mainLoop() {
 			dlg_warn("Got out of date swapchain (acquire)");
 			continue;
 		} else if(res != VK_SUCCESS) {
-			dlg_error("vkAcquireNextImageKHR: {}", string_VkResult(res));
+			dlg_error("vkAcquireNextImageKHR: {}", vk::name(res));
 			run_.store(false);
 			break;
 		}
@@ -417,12 +417,16 @@ void DisplayWindow::mainLoop() {
 		frameInfo.waitSemaphores = sems;
 
 		auto frameRes = gui.renderFrame(frameInfo);
-		if(frameRes.draw && frameRes.draw->inUse) {
-			// wait on finish
-			VK_CHECK(dev.dispatch.WaitForFences(dev.handle, 1, &frameRes.draw->fence, true, UINT64_MAX));
-			VK_CHECK(dev.dispatch.ResetFences(dev.handle, 1, &frameRes.draw->fence));
-			frameRes.draw->inUse = false;
-		}
+		(void) frameRes;
+
+		// NOTE: currently done in gui but may not be like this in future
+		// if(frameRes.draw && frameRes.draw->inUse) {
+		// 	// wait on finish
+		// 	VK_CHECK(dev.dispatch.WaitForFences(dev.handle, 1, &frameRes.draw->fence, true, UINT64_MAX));
+		// 	VK_CHECK(dev.dispatch.ResetFences(dev.handle, 1, &frameRes.draw->fence));
+		// 	frameRes.draw->inUse = false;
+		// 	frameRes.draw->usedHandles.clear();
+		// }
 	}
 
 	dlg_trace("Exiting window thread");

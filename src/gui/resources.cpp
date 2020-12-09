@@ -3,8 +3,9 @@
 #include <handles.hpp>
 #include <util.hpp>
 #include <imguiutil.hpp>
+#include <enumString.hpp>
 #include <spirv_reflect.h>
-#include <vulkan/vk_enum_string_helper.h>
+#include <vulkan/vk_format_utils.h>
 #include <map>
 
 namespace fuen {
@@ -36,51 +37,101 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	ImGui::Text("%s", name(image).c_str());
 	ImGui::Spacing();
 
-	/*
-	if(selected_.image.handle != image.handle) {
-		selected_.image.handle = image.handle;
-
-		if(selected_.image.view) {
-			dev_->dispatch.vkDestroyImageView(dev_->handle, selected_.image.view, nullptr);
-			selected_.image.view = {};
+	auto& dev = gui_->dev();
+	bool recreateView = false;
+	bool canHaveView =
+		!image.swapchain &&
+		image.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+		image.samplerType != Image::SamplerType::none;
+	if(image_.object != &image) {
+		if(image_.view) {
+			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
 		}
 
+		image_ = {};
+		image_.object = &image;
+	}
+
+	recreateView |= (!image_.view && canHaveView);
+	recreateView |= image_.view && (
+		(image_.newSubres.aspectMask != image_.subres.aspectMask) ||
+		(image_.newSubres.baseArrayLayer != image_.subres.baseArrayLayer) ||
+		(image_.newSubres.baseMipLevel != image_.subres.baseMipLevel));
+
+	if(recreateView) {
+		if(!image_.view) {
+			if(FormatIsDepthAndStencil(image.ci.format) || FormatIsDepthOnly(image.ci.format)) {
+				image_.subres.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			} else if(FormatIsStencilOnly(image.ci.format)) {
+				image_.subres.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+			} else {
+				image_.subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			}
+
+			image_.subres.levelCount = 1;
+			image_.subres.layerCount = 1;
+			image_.newSubres = image_.subres;
+
+			auto numComponents = FormatChannelCount(image_.object->ci.format);
+			if(numComponents == 1) {
+				image_.draw.flags |= DrawGuiImage::flagMaskR | DrawGuiImage::flagGrayscale;
+			} else {
+				for(auto i = 0u; i < numComponents; ++i) {
+					image_.draw.flags |= (1u << i);
+				}
+			}
+		} else if(image_.view) {
+			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
+		}
+
+		// TODO: check if images supports sampling in the first place!
 		if(!image.swapchain) {
-			selected_.image.aspectMask = isDepthFormat(vk::Format(image.ci.format)) ?
-				VK_IMAGE_ASPECT_DEPTH_BIT :
-				VK_IMAGE_ASPECT_COLOR_BIT;
+			auto getViewType = [&]{
+				switch(image.ci.imageType) {
+					case VK_IMAGE_TYPE_1D:
+						image_.draw.type = DrawGuiImage::e1d;
+						return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
+					case VK_IMAGE_TYPE_2D:
+						image_.draw.type = DrawGuiImage::e2d;
+						return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+					case VK_IMAGE_TYPE_3D:
+						image_.draw.type = DrawGuiImage::e3d;
+						return VK_IMAGE_VIEW_TYPE_3D;
+					default:
+						dlg_error("Unsupported image type");
+						return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+				}
+			};
 
-			// TODO: fix for non-2d images.
-			// TODO: upload sampler here instead of in pipeline layout.
-			//   Might have to use nearest sampler instead of lienar for
-			//   certain formats
-			VkImageViewCreateInfo ivi = vk::ImageViewCreateInfo();
+			VkImageViewCreateInfo ivi {};
+			ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 			ivi.image = image.handle;
-			ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			ivi.viewType = getViewType();
 			ivi.format = image.ci.format;
-			ivi.subresourceRange.aspectMask = selected_.image.aspectMask;
-			ivi.subresourceRange.layerCount = 1u;
-			ivi.subresourceRange.levelCount = 1u;
+			ivi.subresourceRange = image_.newSubres;
 
-			auto res = dev_->dispatch.vkCreateImageView(dev_->handle, &ivi, nullptr, &selected_.image.view);
-			dlg_assert(res == VK_SUCCESS);
+			VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &image_.view));
+			nameHandle(dev, image_.view, "ResourceGui:image_.view");
 
-			VkDescriptorImageInfo dsii;
+			VkDescriptorImageInfo dsii {};
 			dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			dsii.imageView = selected_.image.view;
+			dsii.imageView = image_.view;
+			dsii.sampler = image.samplerType == Image::SamplerType::linear ?
+				dev.renderData->linearSampler :
+				dev.renderData->nearestSampler;
 
-			VkWriteDescriptorSet write = vk::WriteDescriptorSet();
+			VkWriteDescriptorSet write {};
+			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			write.descriptorCount = 1u;
 			write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			write.dstSet = draw.dsSelected;
 			write.pImageInfo = &dsii;
 
-			dev_->dispatch.vkUpdateDescriptorSets(dev_->handle, 1, &write, 0, nullptr);
-		} else {
-			dlg_debug("not creating view due to swapchain image");
+			dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 		}
+
+		image_.subres = image_.newSubres;
 	}
-	*/
 
 	// info
 	const auto& ci = image.ci;
@@ -101,23 +152,108 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
 	ImGui::Text("%d", ci.arrayLayers);
 	ImGui::Text("%d", ci.mipLevels);
-	ImGui::Text("%s", string_VkFormat(ci.format));
-	ImGui::Text("%s", string_VkImageUsageFlags(ci.usage).c_str());
-	ImGui::Text("%s", string_VkImageTiling(ci.tiling));
-	ImGui::Text("%s", string_VkSampleCountFlagBits(ci.samples));
-	ImGui::Text("%s", string_VkImageType(ci.imageType));
-	ImGui::Text("%s", string_VkImageCreateFlags(ci.flags).c_str());
+	ImGui::Text("%s", vk::name(ci.format));
+	ImGui::Text("%s", vk::flagNames(VkImageUsageFlagBits(ci.usage)).c_str());
+	ImGui::Text("%s", vk::name(ci.tiling));
+	ImGui::Text("%s", vk::name(ci.samples));
+	ImGui::Text("%s", vk::name(ci.imageType));
+	ImGui::Text("%s", vk::flagNames(VkImageUsageFlagBits(ci.flags)).c_str());
 
 	ImGui::Columns();
 
 	// content
-	/*
-	if(selected_.image.view) {
+	if(image.swapchain) {
+		ImGui::Text("Image can't be displayed since it's a swapchain image");
+	} else if(image.samplerType == Image::SamplerType::none) {
+		ImGui::Text("Image can't be displayed since its format does not support sampling");
+	} else if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+		// TODO: well, we could still try to display it.
+		// But we have to modify our barrier logic a bit.
+		// And should probably at least output a warning here that it's in
+		// undefined layout and therefore may contain garbage, nothing
+		// we can do about that (well, once again not entirely true, we could
+		// prevent this invalidation by hooking into state transitions
+		// and prevent images from being put into undefined layout; always
+		// storing in renderpass and so on. But that's really something
+		// for waaaay later, i'm already wondering wth i'm doing with my life
+		// writing this).
+		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
+	} else {
+		dlg_assert(image_.view);
+
 		ImGui::Spacing();
 		ImGui::Spacing();
-		ImGui::Image((void*) draw.dsSelected, {400, 400});
+
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+
+		float aspect = float(image.ci.extent.width) / image.ci.extent.height;
+
+		// TODO: this logic might lead to problems for 1xHUGE images
+		float regW = ImGui::GetContentRegionAvail().x - 20.f;
+		float regH = regW / aspect;
+
+		ImGui::Image((void*) &image_.draw, {regW, regH});
+
+		// Taken pretty much just from the imgui demo
+		auto& io = gui_->imguiIO();
+		if (ImGui::IsItemHovered()) {
+			ImGui::BeginTooltip();
+			float region_sz = 64.0f;
+			float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
+			float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
+			float zoom = 4.0f;
+			if (region_x < 0.0f) { region_x = 0.0f; }
+			else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
+			if (region_y < 0.0f) { region_y = 0.0f; }
+			else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
+			ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
+			ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
+			ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
+			ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
+			ImGui::Image((void*) &image_.draw, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
+			ImGui::EndTooltip();
+		}
+
+		// Row 1: components
+		auto numComponents = FormatChannelCount(image_.object->ci.format);
+
+		ImGui::CheckboxFlags("R", &image_.draw.flags, DrawGuiImage::flagMaskR);
+		if(numComponents > 1) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("G", &image_.draw.flags, DrawGuiImage::flagMaskG);
+		}
+		if(numComponents > 2) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("B", &image_.draw.flags, DrawGuiImage::flagMaskB);
+		}
+		if(numComponents > 3) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("A", &image_.draw.flags, DrawGuiImage::flagMaskA);
+		}
+
+		ImGui::SameLine();
+		ImGui::CheckboxFlags("Gray", &image_.draw.flags, DrawGuiImage::flagGrayscale);
+
+		// Row 2: layer and mip
+		if(image.ci.extent.depth > 1) {
+			ImGui::SliderFloat("slice", &image_.draw.layer, 0, image.ci.extent.depth - 1);
+		} else if(image.ci.arrayLayers > 1) {
+			int layer = image_.newSubres.baseArrayLayer;
+			ImGui::SliderInt("Layer", &layer, 0, image.ci.arrayLayers - 1);
+			image_.newSubres.baseArrayLayer = layer;
+		}
+
+		if(image.ci.mipLevels > 1) {
+			ImGui::SameLine();
+			int mip = image_.newSubres.baseMipLevel;
+			ImGui::SliderInt("Mip", &mip, 0, image.ci.mipLevels - 1);
+			image_.newSubres.baseMipLevel = mip;
+		}
+
+		// Row 3: min/max values
+		ImGui::DragFloat("Min", &image_.draw.minValue, 0.01);
+		ImGui::DragFloat("Max", &image_.draw.maxValue, 0.01);
 	}
-	*/
 
 	// resource references
 	ImGui::Spacing();
@@ -133,7 +269,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		}
 	}
 
-	// TODO: pending layout?
+	// TODO: display pending layout?
 }
 
 void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
@@ -152,7 +288,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 
 	auto& ci = buffer.ci;
 	imGuiText("{}", ci.size);
-	imGuiText("{}", string_VkBufferUsageFlags(ci.usage).c_str());
+	imGuiText("{}", vk::flagNames(VkBufferUsageFlagBits(ci.usage)).c_str());
 
 	ImGui::Columns();
 
@@ -191,13 +327,13 @@ void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
 	// data
 	ImGui::NextColumn();
 
-	ImGui::Text("%s", string_VkFilter(ci.minFilter));
-	ImGui::Text("%s", string_VkFilter(ci.magFilter));
-	ImGui::Text("%s", string_VkSamplerMipmapMode(ci.mipmapMode));
-	ImGui::Text("%s", string_VkSamplerAddressMode(ci.addressModeU));
-	ImGui::Text("%s", string_VkSamplerAddressMode(ci.addressModeV));
-	ImGui::Text("%s", string_VkSamplerAddressMode(ci.addressModeW));
-	ImGui::Text("%s", string_VkBorderColor(ci.borderColor));
+	ImGui::Text("%s", vk::name(ci.minFilter));
+	ImGui::Text("%s", vk::name(ci.magFilter));
+	ImGui::Text("%s", vk::name(ci.mipmapMode));
+	ImGui::Text("%s", vk::name(ci.addressModeU));
+	ImGui::Text("%s", vk::name(ci.addressModeV));
+	ImGui::Text("%s", vk::name(ci.addressModeW));
+	ImGui::Text("%s", vk::name(ci.borderColor));
 	ImGui::Text("%d", ci.unnormalizedCoordinates);
 	ImGui::Text("%f", ci.minLod);
 	ImGui::Text("%f", ci.maxLod);
@@ -207,7 +343,7 @@ void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
 	}
 
 	if(ci.compareEnable) {
-		ImGui::Text("%s", string_VkCompareOp(ci.compareOp));
+		ImGui::Text("%s", vk::name(ci.compareOp));
 	}
 
 	ImGui::Columns();
@@ -231,13 +367,13 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 		// TODO: immutable samplers
 		if(binding.descriptorCount > 1) {
 			ImGui::BulletText("%s[%d] in (%s)",
-				string_VkDescriptorType(binding.descriptorType),
+				vk::name(binding.descriptorType),
 				binding.descriptorCount,
-				string_VkShaderStageFlags(binding.stageFlags).c_str());
+				vk::flagNames(VkShaderStageFlagBits(binding.stageFlags)).c_str());
 		} else {
 			ImGui::BulletText("%s in (%s)",
-				string_VkDescriptorType(binding.descriptorType),
-				string_VkShaderStageFlags(binding.stageFlags).c_str());
+				vk::name(binding.descriptorType),
+				vk::flagNames(VkShaderStageFlagBits(binding.stageFlags)).c_str());
 		}
 	}
 }
@@ -292,9 +428,9 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	ImGui::Text("%d", rastInfo.rasterizerDiscardEnable);
 	ImGui::Text("%d", rastInfo.depthClampEnable);
 
-	ImGui::Text("%s", string_VkCullModeFlags(rastInfo.cullMode).c_str());
-	ImGui::Text("%s", string_VkPolygonMode(rastInfo.polygonMode));
-	ImGui::Text("%s", string_VkFrontFace(rastInfo.frontFace));
+	ImGui::Text("%s", vk::flagNames(VkCullModeFlagBits(rastInfo.cullMode)).c_str());
+	ImGui::Text("%s", vk::name(rastInfo.polygonMode));
+	ImGui::Text("%s", vk::name(rastInfo.frontFace));
 
 	if(rastInfo.depthBiasEnable) {
 		ImGui::Text("%f", rastInfo.depthBiasSlopeFactor);
@@ -318,7 +454,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 		ImGui::NextColumn();
 
 		ImGui::Text("%d", pipe.inputAssemblyState.primitiveRestartEnable);
-		ImGui::Text("%s", string_VkPrimitiveTopology(pipe.inputAssemblyState.topology));
+		ImGui::Text("%s", vk::name(pipe.inputAssemblyState.topology));
 
 		ImGui::Columns();
 		ImGui::Separator();
@@ -338,7 +474,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 				auto& binding = pipe.vertexInputState.pVertexBindingDescriptions[bid.second];
 
 				ImGui::BulletText("Binding %d, %s, stride %d", binding.binding,
-					string_VkVertexInputRate(binding.inputRate), binding.stride);
+					vk::name(binding.inputRate), binding.stride);
 
 				attribs.clear();
 				for(auto i = 0u; i < pipe.vertexInputState.vertexAttributeDescriptionCount; ++i) {
@@ -355,7 +491,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 				for(auto& aid : attribs) {
 					auto& attrib = pipe.vertexInputState.pVertexAttributeDescriptions[aid.second];
 					ImGui::BulletText("location %d at offset %d, %s",
-						attrib.location, attrib.offset, string_VkFormat(attrib.format));
+						attrib.location, attrib.offset, vk::name(attrib.format));
 				}
 
 				ImGui::Unindent();
@@ -369,7 +505,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 		ImGui::Text("Dynamic states");
 
 		for(auto& dynState : pipe.dynamicState) {
-			ImGui::BulletText("%s", string_VkDynamicState(dynState));
+			ImGui::BulletText("%s", vk::name(dynState));
 		}
 
 		ImGui::Separator();
@@ -389,7 +525,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 			ImGui::NextColumn();
 
-			ImGui::Text("%s", string_VkSampleCountFlagBits(pipe.multisampleState.rasterizationSamples));
+			ImGui::Text("%s", vk::name(pipe.multisampleState.rasterizationSamples));
 			ImGui::Text("%d", pipe.multisampleState.sampleShadingEnable);
 			ImGui::Text("%f", pipe.multisampleState.minSampleShading);
 			ImGui::Text("%d", pipe.multisampleState.alphaToOneEnable);
@@ -431,7 +567,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 			ImGui::Text("%d", pipe.depthStencilState.stencilTestEnable);
 
 			if(pipe.depthStencilState.depthTestEnable) {
-				ImGui::Text("%s", string_VkCompareOp(pipe.depthStencilState.depthCompareOp));
+				ImGui::Text("%s", vk::name(pipe.depthStencilState.depthCompareOp));
 
 				if(pipe.depthStencilState.depthBoundsTestEnable) {
 					ImGui::Text("%f", pipe.depthStencilState.minDepthBounds);
@@ -464,7 +600,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 	ImGui::Text("Stages");
 	for(auto& stage : pipe.stages) {
-		if(ImGui::TreeNode(&stage, "%s", string_VkShaderStageFlagBits(stage.stage))) {
+		if(ImGui::TreeNode(&stage, "%s", vk::name(stage.stage))) {
 			ImGui::Text("Entry Point: %s", stage.entryPoint.c_str());
 			// TODO: spec data
 
@@ -485,7 +621,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 				if(ImGui::TreeNode(&iv, "%d: %s", iv.location, iv.name)) {
 					asColumns2({{
-						{"Format", "{}", string_VkFormat(VkFormat(iv.format))},
+						{"Format", "{}", vk::name(VkFormat(iv.format))},
 						{"Storage", "{}", iv.storage_class},
 					}});
 
@@ -499,7 +635,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 				if(ImGui::TreeNode(&ov, "%d: %s", ov.location, ov.name)) {
 					asColumns2({{
-						{"Format", "{}", string_VkFormat(VkFormat(ov.format))},
+						{"Format", "{}", vk::name(VkFormat(ov.format))},
 						{"Storage", "{}", ov.storage_class},
 					}});
 
@@ -517,7 +653,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 						std::string name = dlg::format("{}: {}",
 							binding.binding,
-							string_VkDescriptorType(VkDescriptorType(binding.descriptor_type)));
+							vk::name(VkDescriptorType(binding.descriptor_type)));
 						if(binding.count > 1) {
 							name += dlg::format("[{}]", binding.count);
 						}
@@ -589,7 +725,7 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 		for(auto& pcr : pipeLayout.pushConstants) {
 			ImGui::Bullet();
 			ImGui::Text("Offset %d, Size %d, in %s", pcr.offset, pcr.size,
-				string_VkShaderStageFlags(pcr.stageFlags).c_str());
+				vk::flagNames(VkShaderStageFlagBits(pcr.stageFlags)).c_str());
 		}
 	}
 
@@ -730,12 +866,12 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 		ImGui::Text("Associated Image was destroyed");
 	}
 
-	ImGui::Text("%s", string_VkImageViewType(ci.viewType));
+	ImGui::Text("%s", vk::name(ci.viewType));
 	imguiPrintRange(ci.subresourceRange.baseArrayLayer, ci.subresourceRange.layerCount);
 	imguiPrintRange(ci.subresourceRange.baseMipLevel, ci.subresourceRange.levelCount);
-	ImGui::Text("%s", string_VkImageAspectFlags(ci.subresourceRange.aspectMask).c_str());
-	ImGui::Text("%s", string_VkFormat(ci.format));
-	ImGui::Text("%s", string_VkImageViewCreateFlags(ci.flags).c_str());
+	ImGui::Text("%s", vk::flagNames(VkImageAspectFlagBits(ci.subresourceRange.aspectMask)).c_str());
+	ImGui::Text("%s", vk::name(ci.format));
+	ImGui::Text("%s", vk::flagNames(VkImageViewCreateFlagBits(ci.flags)).c_str());
 
 	ImGui::Columns();
 
@@ -787,16 +923,16 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 	// attachments
 	for(auto i = 0u; i < rp.desc->attachments.size(); ++i) {
 		const auto& att = rp.desc->attachments[i];
-		if(ImGui::TreeNode(&rp.desc->attachments[i], "Attachment %d: %s", i, string_VkFormat(att.format))) {
+		if(ImGui::TreeNode(&rp.desc->attachments[i], "Attachment %d: %s", i, vk::name(att.format))) {
 			asColumns2({{
-				{"Samples", "{}", string_VkSampleCountFlagBits(att.samples)},
-				{"Initial Layout", "{}", string_VkImageLayout(att.initialLayout)},
-				{"Final Layout", "{}", string_VkImageLayout(att.finalLayout)},
-				{"Flags", "{}", string_VkAttachmentDescriptionFlags(att.flags).c_str()},
-				{"Load Op", "{}", string_VkAttachmentLoadOp(att.loadOp)},
-				{"Store Op", "{}", string_VkAttachmentStoreOp(att.storeOp)},
-				{"Stencil Load Op", "{}", string_VkAttachmentLoadOp(att.stencilLoadOp)},
-				{"Stencil Store Op", "{}", string_VkAttachmentStoreOp(att.stencilStoreOp)},
+				{"Samples", "{}", vk::name(att.samples)},
+				{"Initial Layout", "{}", vk::name(att.initialLayout)},
+				{"Final Layout", "{}", vk::name(att.finalLayout)},
+				{"Flags", "{}", vk::flagNames(VkAttachmentDescriptionFlagBits(att.flags))},
+				{"Load Op", "{}", vk::name(att.loadOp)},
+				{"Store Op", "{}", vk::name(att.storeOp)},
+				{"Stencil Load Op", "{}", vk::name(att.stencilLoadOp)},
+				{"Stencil Store Op", "{}", vk::name(att.stencilStoreOp)},
 			}});
 
 			ImGui::TreePop();
@@ -808,8 +944,8 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 		const auto& subp = rp.desc->subpasses[i];
 		if(ImGui::TreeNode(&rp.desc->subpasses[i], "Subpass %d", i)) {
 			asColumns2({{
-				{"Pipeline Bind Point", "{}", string_VkPipelineBindPoint(subp.pipelineBindPoint)},
-				{"Flags", "{}", string_VkSubpassDescriptionFlags(subp.flags).c_str()},
+				{"Pipeline Bind Point", "{}", vk::name(subp.pipelineBindPoint)},
+				{"Flags", "{}", vk::flagNames(VkSubpassDescriptionFlagBits(subp.flags)).c_str()},
 			}});
 
 			ImGui::Separator();
@@ -817,7 +953,7 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 				ImGui::Text("Color Attachments:");
 				for(auto c = 0u; c < subp.colorAttachmentCount; ++c) {
 					auto& att = subp.pColorAttachments[c];
-					ImGui::BulletText("%d, %s", att.attachment, string_VkImageLayout(att.layout));
+					ImGui::BulletText("%d, %s", att.attachment, vk::name(att.layout));
 				}
 			}
 
@@ -825,14 +961,14 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 				ImGui::Text("Input Attachments:");
 				for(auto c = 0u; c < subp.inputAttachmentCount; ++c) {
 					auto& att = subp.pInputAttachments[c];
-					ImGui::BulletText("%d, %s", att.attachment, string_VkImageLayout(att.layout));
+					ImGui::BulletText("%d, %s", att.attachment, vk::name(att.layout));
 				}
 			}
 
 			if(subp.pDepthStencilAttachment) {
 				auto& att = *subp.pDepthStencilAttachment;
 				ImGui::Text("DepthStencil Attachment: %d, %s", att.attachment,
-					string_VkImageLayout(att.layout));
+					vk::name(att.layout));
 			}
 
 			if(subp.preserveAttachmentCount) {
@@ -865,10 +1001,10 @@ void ResourceGui::draw(Draw& draw) {
 		int(VK_OBJECT_TYPE_SAMPLER),
 	};
 
-	auto filterName = filter_ == 0 ? "all" : string_VkObjectType(VkObjectType(filter_));
+	auto filterName = filter_ == 0 ? "all" : vk::name(VkObjectType(filter_));
 	if(ImGui::BeginCombo("Filter", filterName)) {
 		for(auto& filter : filters) {
-			auto name = filter == 0 ? "all" : string_VkObjectType(VkObjectType(filter_));
+			auto name = filter == 0 ? "all" : vk::name(VkObjectType(filter));
 			if(ImGui::Selectable(name)) {
 				this->filter_ = filter;
 			}
@@ -958,9 +1094,9 @@ void ResourceGui::destroyed(const Handle& handle) {
 		if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
 			if(image_.view) {
 				dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
-				image_.view = {};
-				image_.subres = {};
 			}
+
+			image_ = {};
 		}
 	}
 }

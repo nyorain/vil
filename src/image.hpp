@@ -21,6 +21,15 @@ struct Image : MemoryResource {
 	Swapchain* swapchain {};
 	u32 swapchainImageID {};
 
+	// Which samples should be used to display it.
+	enum class SamplerType {
+		none, // when an image can't be sampled
+		linear,
+		nearest,
+	};
+
+	SamplerType samplerType {SamplerType::none};
+
 	~Image();
 };
 

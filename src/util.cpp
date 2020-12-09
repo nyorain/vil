@@ -4,6 +4,9 @@
 #include <dlg/dlg.hpp>
 #include <cmath>
 
+// Intentionally including cpp file
+#include <vulkan/vk_format_utils.cpp>
+
 namespace fuen {
 
 // high-level stuff

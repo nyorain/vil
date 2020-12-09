@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 // Have each embedded of ImGui define this symbol :
 struct ImGuiContext;
 extern thread_local ImGuiContext* __LayerImGui;

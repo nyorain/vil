@@ -315,6 +315,13 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			};
 
 			std::lock_guard lock(dev.mutex);
+
+			// If this binding is valid, make sure to inform previously
+			// bound resources that they are no longer bound here.
+			if(binding.valid) {
+				unregisterLocked(ds, dstBinding, dstElem);
+			}
+
 			switch(category(write.descriptorType)) {
 				case DescriptorCategory::image: {
 					dlg_assert(write.pImageInfo);

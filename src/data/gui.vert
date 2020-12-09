@@ -5,8 +5,8 @@ layout(location = 1) in vec2 inUV;
 layout(location = 2) in vec4 inColor;
 
 layout(push_constant) uniform PCR {
-    vec2 scale;
-    vec2 translate;
+    layout(offset = 0) vec2 scale;
+    layout(offset = 8) vec2 translate;
 } pcr;
 
 layout(location = 0) out struct {

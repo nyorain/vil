@@ -25,9 +25,12 @@ v0.1, goal: end of january 2021
 - [x] cleanup Renderer/Gui implementation: merge back together
 	- [x] proper gui sync implementation
 	- [x] move gui tabs into own classes
-- [ ] display command buffer state in resource UI
-- [ ] use better enum->string helper. The vk_layer one has several problems
-	  probably best to just modify their python script and put it into docs/
+- [x] display command buffer state in resource UI
+- [x] use better enum->string helper. The vk_layer one has several problems
+	  probably best to just modify their python script and put it into docs/.
+	  Or use custom vkpp output generator?
+	  {went with custom vkpp output generator, easy to write & maintain given
+	   the extensive registry parser}
 - [x] display in UI whether resources are destroyed or not
 	  {NOTE: nvm, we decided against shared_ptr approach and never have destroyed resources}	
 - [x] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
@@ -45,9 +48,9 @@ v0.1, goal: end of january 2021
 	  one or remove the type hashing (dispatchable handles are globally unique).
 - [ ] Add more useful overview. Maybe directly link to last submitted command
       buffers?
-- [ ] properly shutdown everything, no leftover resources and layer warnings
+- [x] properly shutdown everything, no leftover resources and layer warnings
 - [x] proper queue creation and querying for window display
-- [ ] properly shut down rendering thread for own-window display
+- [x] properly shut down rendering thread for own-window display
 - [ ] test display window for compute-only applications
 	- [ ] come up with something smart to block them before they shut down. 
 	      Is there a sensible way to do this in the layer or should applications
@@ -68,7 +71,7 @@ v0.1, goal: end of january 2021
 	- [ ] could explain why it's needed in the first place. Maybe someone
 	      comes up with a clever idea for the hooked-input-feedback problem?
 - [ ] improve UI
-	- [ ] Add proper image viewer
+	- [x] Add proper image viewer
 	- [ ] Add proper buffer viewer
 - [ ] imgui styling
 	- [ ] use custom font

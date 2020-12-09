@@ -1,7 +1,8 @@
-#include "image.hpp"
-#include "data.hpp"
-#include "ds.hpp"
-#include "rp.hpp"
+#include <image.hpp>
+#include <layer.hpp>
+#include <data.hpp>
+#include <ds.hpp>
+#include <rp.hpp>
 
 namespace fuen {
 
@@ -66,9 +67,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 
 	auto nci = *pCreateInfo;
 
-	// Needed so we can sample directly from it.
-	// TODO: check if sampling is supported for this image
-	nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+	// If supported, we add the sampled flags to usage so we can
+	// display it directly in our gui.
+	VkFormatProperties props {};
+	dev.ini->dispatch.GetPhysicalDeviceFormatProperties(dev.phdev,
+		nci.format, &props);
+	auto features = nci.tiling == VK_IMAGE_TILING_OPTIMAL ? props.optimalTilingFeatures : props.linearTilingFeatures;
+	auto samplerType = Image::SamplerType::none;
+	if(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
+		nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+		samplerType = Image::SamplerType::nearest;
+
+		if(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) {
+			nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+			samplerType = Image::SamplerType::linear;
+		}
+	}
 
 	// TODO: needed for our own operations on the buffer. We should
 	// properly acquire/release it instead though, this might have
@@ -90,6 +104,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.handle = *pImage;
 	img.ci = *pCreateInfo;
 	img.pendingLayout = pCreateInfo->initialLayout;
+	img.samplerType = samplerType;
 
 	return res;
 }
@@ -182,6 +197,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
 	view.dev = &dev;
 	view.handle = *pSampler;
 	view.ci = *pCreateInfo;
+	view.objectType = VK_OBJECT_TYPE_SAMPLER;
 
 	return res;
 }

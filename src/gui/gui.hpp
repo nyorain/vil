@@ -4,6 +4,7 @@
 #include <gui/renderer.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
+#include <guidraw.hpp>
 #include <variant>
 
 struct ImGuiContext;
@@ -74,7 +75,6 @@ public:
 
 	Device& dev() const { return *dev_; }
 	VkRenderPass rp() const { return rp_; }
-	VkPipeline pipe() const { return pipe_; }
 
 private:
 	void draw(Draw&, bool fullscreen);
@@ -104,8 +104,14 @@ private:
 
 	// rendering stuff
 	VkRenderPass rp_ {};
-	VkPipeline pipe_ {};
 	VkCommandPool commandPool_ {};
+
+	struct {
+		VkPipeline gui;
+		VkPipeline image1D;
+		VkPipeline image2D;
+		VkPipeline image3D;
+	} pipes_;
 
 	bool clear_ {};
 	VkDescriptorSet dsFont_ {};
@@ -118,6 +124,8 @@ private:
 
 		VkDeviceMemory uploadMem {};
 		VkBuffer uploadBuf {};
+
+		DrawGuiImage drawImage {};
 	} font_;
 };
 

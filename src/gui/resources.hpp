@@ -1,6 +1,7 @@
 #pragma once
 
 #include <device.hpp>
+#include <guidraw.hpp>
 #include <variant>
 #include <string>
 
@@ -43,8 +44,14 @@ struct ResourceGui {
 	HandleVariant handle_;
 
 	struct {
-		VkImageSubresourceRange subres;
-		VkImageView view;
+		Image* object {};
+		VkImageSubresourceRange newSubres {};
+		VkImageSubresourceRange subres {};
+		VkImageView view {};
+
+		u32 flags {};
+
+		DrawGuiImage draw {};
 	} image_;
 
 	enum class BufferLayoutType {

@@ -198,10 +198,12 @@ void RenderData::init(Device& dev) {
 	nameHandle(dev, this->dsLayout, "RenderData:dsLayout");
 
 	// pipeline layout
+	// We just allocate the full push constant range that all implementations
+	// must support.
 	VkPushConstantRange pcrs[1] = {};
-	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-	pcrs[0].offset = sizeof(float) * 0;
-	pcrs[0].size = sizeof(float) * 4;
+	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pcrs[0].offset = 0;
+	pcrs[0].size = 128;
 
 	VkPipelineLayoutCreateInfo plci {};
 	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

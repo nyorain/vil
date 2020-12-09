@@ -11,19 +11,27 @@ project('fuencaliente', ['c', 'cpp'],
 # needed shaders
 glslang = find_program('glslangValidator')
 
-overlay_shaders = [
-	'overlay.frag',
-	'overlay.vert',
-]
+overlay_shaders = {
+	'gui.frag': { '': [] },
+	'gui.vert': { '': [] },
+	'image.frag': {
+		'1DArray': ['-DTEX_TYPE_1D_ARRAY'],
+		'2DArray': ['-DTEX_TYPE_2D_ARRAY'],
+		'3D': ['-DTEX_TYPE_3D'],
+	}
+}
 
 spv = []
-foreach s : overlay_shaders
-	varname = s.underscorify() + '_spv_data'
-	spv += custom_target(
-		s + '.spv.h',
-		input: files('src/data/' + s),
-		output: s + '.spv.h',
-		command : [glslang, '-V', '--vn', varname, '-o', '@OUTPUT@', '@INPUT@'])
+foreach file, configs : overlay_shaders
+	foreach name, config : configs
+		varname = file.underscorify() + '_' + name.underscorify() + '_spv_data'
+		outname = file + '.' + name.underscorify() + '.spv.h'
+		spv += custom_target(
+			outname,
+			input: files('src/data/' + file),
+			output: outname,
+			command : [glslang, '-V', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@'])
+	endforeach
 endforeach
 
 

@@ -80,6 +80,8 @@ struct DescriptorSetRef {
 	u32 elem {};
 };
 
+struct DrawGuiImage;
+
 } // namespace fuen
 
 #define VK_CHECK(x) do {\
