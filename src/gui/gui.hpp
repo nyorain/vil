@@ -84,8 +84,8 @@ private:
 	void uploadDraw(Draw&, const ImDrawData&);
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, const ImDrawData&);
 
-	// Returns the final layout of the image, after all submissions.
-	void waitForSubmissions(const Image& img);
+	template<typename H>
+	void waitForSubmissions(const H& handle);
 
 private:
 	Device* dev_ {};
@@ -127,6 +127,11 @@ private:
 
 		DrawGuiImage drawImage {};
 	} font_;
+
+	Draw::Buffer readbackBuf_;
+
+	using Clock = std::chrono::high_resolution_clock;
+	Clock::time_point lastFrame_ {};
 };
 
 } // namespace fuen

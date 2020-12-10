@@ -54,20 +54,23 @@ struct ResourceGui {
 		DrawGuiImage draw {};
 	} image_;
 
-	enum class BufferLayoutType {
-		f1, f2, f3, f4,
-		d1, d2, d3, d4,
-		i1, i2, i3, i4,
-		u1, u2, u3, u4,
-		mat2, mat3, mat4,
-		eBool
-	};
+	// enum class BufferLayoutType {
+	// 	f1, f2, f3, f4,
+	// 	d1, d2, d3, d4,
+	// 	i1, i2, i3, i4,
+	// 	u1, u2, u3, u4,
+	// 	mat2, mat3, mat4,
+	// 	eBool
+	// };
 
 	struct {
-		VkDeviceSize offset {};
-		VkDeviceSize size {};
+		Buffer* handle {};
 		std::vector<std::byte> lastRead;
-		std::vector<BufferLayoutType> layout;
+		std::string layoutText;
+		std::vector<std::pair<std::string, VkFormat>> layout;
+		// VkDeviceSize offset {};
+		// VkDeviceSize size {};
+		// std::vector<BufferLayoutType> layout;
 	} buffer_;
 
 	void drawMemoryResDesc(Draw&, MemoryResource&);

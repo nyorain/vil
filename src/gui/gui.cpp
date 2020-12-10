@@ -35,6 +35,8 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	tabs_.cb.gui_ = this;
 	tabs_.resources.gui_ = this;
 
+	lastFrame_ = Clock::now();
+
 	// init render stuff
 	VkAttachmentDescription attachment = {};
 	attachment.format = format;
@@ -254,6 +256,9 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	// ImGui::GetStyle().ItemSpacing = {8, 8};
 	// ImGui::GetStyle().ItemInnerSpacing = {6, 6};
 	ImGui::GetStyle().Alpha = 0.9f;
+
+	// effectively disable imgui key repeat, we rely on it as input events.
+	// ImGui::GetIO().KeyRepeatDelay = 100000000.f;
 }
 
 // ~Gui
@@ -268,6 +273,8 @@ Gui::~Gui() {
 	if(imgui_) {
 		ImGui::DestroyContext(imgui_);
 	}
+
+	readbackBuf_.free(dev());
 
 	auto vkDev = dev_->handle;
 	if(font_.uploadBuf) dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
@@ -698,7 +705,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		// auto flags = 0;
 	}
 
-	std::shared_lock lock(dev_->mutex);
 	auto checkSelectTab = [&](Tab tab) {
 		auto flags = 0;
 		if(activeTab_ == tab && activateTabCounter_ < 2) {
@@ -776,7 +782,8 @@ void Gui::activateTab(Tab tab) {
 	activateTabCounter_ = 0u;
 }
 
-void Gui::waitForSubmissions(const Image& img) {
+template<typename H>
+void Gui::waitForSubmissions(const H& handle) {
 	// find all submissions associated with this image
 	std::vector<PendingSubmission*> toComplete;
 
@@ -799,8 +806,7 @@ void Gui::waitForSubmissions(const Image& img) {
 		for(auto& sub : pending->submissions) {
 			for(auto* cb : sub.cbs) {
 				dlg_assert(cb->state == CommandBuffer::State::executable);
-				auto it = cb->images.find(img.handle);
-				if(it == cb->images.end()) {
+				if(!cb->uses(handle)) {
 					continue;
 				}
 
@@ -873,14 +879,13 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	ImGui::GetIO().DisplaySize.x = info.extent.width;
 	ImGui::GetIO().DisplaySize.y = info.extent.height;
 
-	this->draw(draw, info.fullscreen);
-	auto& drawData = *ImGui::GetDrawData();
-	this->uploadDraw(draw, drawData);
-
-	auto pSelImg = std::get_if<Image*>(&tabs_.resources.handle_);
-	auto* selImg = pSelImg ? *pSelImg : nullptr;
-	if(selImg && !tabs_.resources.image_.view) {
-		selImg = nullptr;
+	using Secf = std::chrono::duration<float, std::ratio<1, 1>>;
+	auto now = Clock::now();
+	auto diff = now - lastFrame_;
+	lastFrame_ = now;
+	auto dt = std::chrono::duration_cast<Secf>(diff).count();
+	if(dt > 0.f) {
+		ImGui::GetIO().DeltaTime = dt;
 	}
 
 	// Important we already lock this mutex here since we need to make
@@ -891,6 +896,71 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	// TODO: device mutex should probably be unlocked for our
 	// queue calls in the end. Care must be taken though!
 	std::lock_guard devMutex(dev().mutex);
+
+	auto pSelBuf = std::get_if<Buffer*>(&tabs_.resources.handle_);
+	auto* selBuf = pSelBuf ? *pSelBuf : nullptr;
+
+	if(selBuf) {
+		// TODO: ugh, all of this is so expensive.
+		// Here, we could definitely try out semaphore chaining since we only
+		// need the easy way (app subm -> our subm)
+		waitForSubmissions(*selBuf);
+
+		// TODO: offset, sizes and stuff
+		auto size = std::min(selBuf->ci.size, VkDeviceSize(1024 * 16));
+		readbackBuf_.ensure(dev(), size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
+		// TODO: support srcOffset
+		// TODO: need memory barriers
+		VkBufferCopy copy {};
+		copy.size = size;
+		dev().dispatch.CmdCopyBuffer(draw.cb, selBuf->handle, readbackBuf_.buf,
+			1, &copy);
+		dev().dispatch.EndCommandBuffer(draw.cb);
+
+		VkSubmitInfo submitInfo {};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1u;
+		submitInfo.pCommandBuffers = &draw.cb;
+
+		auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->queue, 1u, &submitInfo, draw.fence);
+		if(res != VK_SUCCESS) {
+			dlg_error("vkSubmit error: {}", vk::name(res));
+			return {res, &draw};
+		}
+
+		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
+		VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+
+		void* mapped {};
+		VK_CHECK(dev().dispatch.MapMemory(dev().handle, readbackBuf_.mem, 0, size, {}, &mapped));
+
+		VkMappedMemoryRange range {};
+		range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+		range.memory = readbackBuf_.mem;
+		range.offset = 0u;
+		range.size = size;
+		VK_CHECK(dev().dispatch.InvalidateMappedMemoryRanges(dev().handle, 1, &range));
+
+		tabs_.resources.buffer_.lastRead.resize(size);
+		std::memcpy(tabs_.resources.buffer_.lastRead.data(), mapped, size);
+
+		dev().dispatch.UnmapMemory(dev().handle, readbackBuf_.mem);
+
+		VkCommandBufferBeginInfo cbBegin {};
+		cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
+	}
+
+	this->draw(draw, info.fullscreen);
+	auto& drawData = *ImGui::GetDrawData();
+	this->uploadDraw(draw, drawData);
+
+	auto pSelImg = std::get_if<Image*>(&tabs_.resources.handle_);
+	auto* selImg = pSelImg ? *pSelImg : nullptr;
+	if(selImg && !tabs_.resources.image_.view) {
+		selImg = nullptr;
+	}
 
 	VkImageLayout finalLayout;
 	if(selImg) {

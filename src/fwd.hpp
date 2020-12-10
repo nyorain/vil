@@ -3,6 +3,10 @@
 // Make sure to *never* include them
 #define VK_NO_PROTOTYPES
 
+// TODO: define via meson config
+#define VK_USE_PLATFORM_XCB_KHR
+#define VK_USE_PLATFORM_WAYLAND_KHR
+
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>

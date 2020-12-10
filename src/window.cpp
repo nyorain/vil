@@ -245,6 +245,9 @@ bool DisplayWindow::initDevice(Device& dev) {
 		return false;
 	}
 
+	dlg_assertm(swapchain, "We likely called the stub vkCreateSwapchainKHR "
+		"implementation, maybe we didn't enable the extension correctly");
+
 	{
 		VkSemaphoreCreateInfo sci {};
 		sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -283,6 +286,8 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 	}
 
 	sci.oldSwapchain = swapchain;
+	swapchain = {};
+
 	res = dev.dispatch.CreateSwapchainKHR(dev.handle, &sci, nullptr, &swapchain);
 
 	dev.dispatch.DestroySwapchainKHR(dev.handle, sci.oldSwapchain, nullptr);
@@ -319,6 +324,7 @@ void DisplayWindow::destroyBuffers() {
 void DisplayWindow::mainLoop() {
 	auto& dev = *this->dev;
 	dlg_assert(this->presentQueue);
+	dlg_assert(this->swapchain);
 
 	gui.makeImGuiCurrent();
 	auto& io = ImGui::GetIO();
@@ -364,6 +370,12 @@ void DisplayWindow::mainLoop() {
 			run_.store(false);
 			break;
 		}
+
+		if(!run_.load()) {
+			break;
+		}
+
+		dlg_assert(this->swapchain);
 
 		u32 imageIdx;
 		// render a frame

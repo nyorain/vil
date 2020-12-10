@@ -2,6 +2,7 @@
 #include <gui/gui.hpp>
 #include <handles.hpp>
 #include <util.hpp>
+#include <util.hpp>
 #include <imguiutil.hpp>
 #include <enumString.hpp>
 #include <spirv_reflect.h>
@@ -161,6 +162,20 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 
 	ImGui::Columns();
 
+	// resource references
+	ImGui::Spacing();
+	drawMemoryResDesc(draw, image);
+
+	ImGui::Spacing();
+	ImGui::Text("Image Views:");
+
+	for(auto* view : image.views) {
+		ImGui::Bullet();
+		if(ImGui::Button(name(*view).c_str())) {
+			select(*view);
+		}
+	}
+
 	// content
 	if(image.swapchain) {
 		ImGui::Text("Image can't be displayed since it's a swapchain image");
@@ -255,24 +270,17 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		ImGui::DragFloat("Max", &image_.draw.maxValue, 0.01);
 	}
 
-	// resource references
-	ImGui::Spacing();
-	drawMemoryResDesc(draw, image);
-
-	ImGui::Spacing();
-	ImGui::Text("Image Views:");
-
-	for(auto* view : image.views) {
-		ImGui::Bullet();
-		if(ImGui::Button(name(*view).c_str())) {
-			select(*view);
-		}
-	}
-
 	// TODO: display pending layout?
 }
 
 void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
+	if(buffer_.handle != &buffer) {
+		// TODO: remember used layouts per-buffer?
+		// But would be nice to have mechanism for that across multiple starts
+		buffer_ = {};
+		buffer_.handle = &buffer;
+	}
+
 	ImGui::Text("%s", name(buffer).c_str());
 	ImGui::Spacing();
 
@@ -295,6 +303,124 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	// resource references
 	ImGui::Spacing();
 	drawMemoryResDesc(draw, buffer);
+
+	// content
+	// we are using a child window to avoid column glitches
+	if(!buffer_.lastRead.empty() && ImGui::BeginChild("BufContent")) {
+		imGuiText("Content");
+		ImGui::Spacing();
+
+		if(imGuiTextMultiline("Layout", buffer_.layoutText)) {
+			buffer_.layout.clear();
+
+			constexpr auto whitespace = "\n\t\f\r\v "; // as by std::isspace
+			constexpr auto whitespaceSemic = "\n\t\f\r\v; ";
+
+			// TODO: extend
+			const std::unordered_map<std::string_view, VkFormat> layoutMap = {
+				{"float", VK_FORMAT_R32_SFLOAT},
+				{"f32", VK_FORMAT_R32_SFLOAT},
+				{"vec1", VK_FORMAT_R32_SFLOAT},
+				{"float1", VK_FORMAT_R32_SFLOAT},
+				{"vec2", VK_FORMAT_R32G32_SFLOAT},
+				{"float2", VK_FORMAT_R32G32_SFLOAT},
+				{"vec3", VK_FORMAT_R32G32B32_SFLOAT},
+				{"float3", VK_FORMAT_R32G32B32_SFLOAT},
+				{"vec4", VK_FORMAT_R32G32B32A32_SFLOAT},
+				{"float4", VK_FORMAT_R32G32B32A32_SFLOAT},
+
+				{"half", VK_FORMAT_R16_SFLOAT},
+				{"f16", VK_FORMAT_R16_SFLOAT},
+				{"float16_t", VK_FORMAT_R16_SFLOAT},
+				{"half1", VK_FORMAT_R16_SFLOAT},
+				{"f16vec1", VK_FORMAT_R16_SFLOAT},
+				{"f16vec2", VK_FORMAT_R16G16_SFLOAT},
+				{"half2", VK_FORMAT_R16G16_SFLOAT},
+				{"f16vec3", VK_FORMAT_R16G16B16_SFLOAT},
+				{"half3", VK_FORMAT_R16G16B16_SFLOAT},
+				{"f16vec4", VK_FORMAT_R16G16B16A16_SFLOAT},
+				{"half4", VK_FORMAT_R16G16B16A16_SFLOAT},
+			};
+
+			auto lt = std::string_view(buffer_.layoutText);
+			for(auto end = lt.find(';'); end != lt.npos; end = lt.find(';')) {
+				auto start = lt.find_first_not_of(whitespace);
+				auto elem = lt.substr(start);
+
+				auto sep = elem.find_first_of(whitespaceSemic);
+				auto type = elem.substr(0, sep);
+				auto it = layoutMap.find(type);
+				if(it == layoutMap.end()) {
+					dlg_error("Invalid buffer layout identifier {}", type);
+					break;
+				}
+
+				std::string_view ident = type;
+				if(sep != end) {
+					ident = elem.substr(sep + 1);
+					start = ident.find_first_not_of(whitespace);
+					ident = ident.substr(start);
+					sep = ident.find_first_of(whitespaceSemic);
+					ident = ident.substr(0, sep);
+				}
+
+				buffer_.layout.push_back({std::string(ident), it->second});
+				lt = lt.substr(end + 1);
+			}
+
+			if(!lt.empty()) {
+				auto start = lt.find_first_not_of(whitespace);
+				lt = lt.substr(start);
+			}
+
+			dlg_assertm(lt.empty(), "Invalid buffer layout ending: {}", lt);
+		}
+
+		if(!buffer_.layout.empty()) {
+			auto data = span<const std::byte>(buffer_.lastRead);
+
+			// TODO: offset & scrolling!
+			constexpr auto maxSize = 1024;
+			if(data.size() > maxSize) {
+				data = data.first(maxSize);
+			}
+
+			ImGui::Columns(buffer_.layout.size());
+			for(auto& [name, _] : buffer_.layout) {
+				imGuiText("{}", name);
+				ImGui::NextColumn();
+			}
+
+			ImGui::Separator();
+
+			auto done = false;
+			while(!done) {
+				for(auto& [name, format] : buffer_.layout) {
+					if(data.size() < FormatTexelSize(format)) {
+						done = true;
+						break;
+					}
+
+					auto val = read(format, data);
+					auto cc = FormatChannelCount(format);
+					dlg_assert(cc <= 4);
+
+					std::string text;
+					for(auto i = 0u; i < cc; ++i) {
+						text += dlg::format("{} ", val[i]);
+					}
+
+					imGuiText("{}", text);
+					ImGui::NextColumn();
+				}
+			}
+
+			dlg_assertm(data.empty(), "Leftover data in buffer");
+			ImGui::Columns();
+		}
+
+		ImGui::EndChild();
+	}
 }
 
 void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
@@ -1023,6 +1149,7 @@ void ResourceGui::draw(Draw& draw) {
 		for(auto& entry : resMap.map) {
 			auto label = name(*entry.second);
 
+			// TODO: better search
 			if(!search_.empty() && label.find(search_) == label.npos) {
 				continue;
 			}

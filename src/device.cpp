@@ -247,23 +247,25 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 						break;
 					}
 				}
+			}
 
-				if(presentQueueInfoID == u32(-1)) {
-					dlg_warn("Can't create present window since no queue supports presenting to it");
-					window.reset();
-				} else {
-					// If swapchain extension wasn't enabled, enable it!
-					// TODO: we can and should probably check if the extension
-					// is supported here, first.
-					auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-					auto it = std::find(extsBegin, extsEnd, extName);
-					if(it == extsEnd) {
-						newExts = {extsBegin, extsEnd};
-						newExts.push_back(extName.data());
+			if(presentQueueInfoID == u32(-1)) {
+				dlg_warn("Can't create present window since no queue supports presenting to it");
+				window.reset();
+			} else {
+				// If swapchain extension wasn't enabled, enable it!
+				// TODO: we can and should probably check if the extension
+				// is supported here, first.
+				auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+				auto it = std::find(extsBegin, extsEnd, extName);
+				if(it == extsEnd) {
+					newExts = {extsBegin, extsEnd};
+					newExts.push_back(extName.data());
 
-						nci.enabledExtensionCount = newExts.size();
-						nci.ppEnabledExtensionNames = newExts.data();
-					}
+					dlg_info("Adding {} device extension", extName);
+
+					nci.enabledExtensionCount = newExts.size();
+					nci.ppEnabledExtensionNames = newExts.data();
 				}
 			}
 		}

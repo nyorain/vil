@@ -1155,4 +1155,5 @@ void DescriptorState::bind(PipelineLayout& layout, u32 firstSet,
 	}
 }
 
+
 } // namespace fuen

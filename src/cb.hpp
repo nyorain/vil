@@ -91,9 +91,19 @@ public:
 	// Expects device mutex to be locked
 	void invalidateLocked();
 
-	bool uses(const Handle&) const;
-	bool uses(const Image&) const;
-	bool uses(const Buffer&) const;
+	// TODO: define what exactly this means! Does it always returns true
+	// for transitively used handles? Need consistency
+	//   -> See transitive cb usage rework in todo.md
+	template<typename H>
+	bool uses(const H& handle) const {
+		if constexpr(std::is_same_v<H, Image>) {
+			return images.find(handle.handle) != images.end();
+		} else if constexpr(std::is_same_v<H, Buffer>) {
+			return buffers.find(handle.handle) != buffers.end();
+		} else {
+			return handles.find(handle.handle) != handles.end();
+		}
+	}
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(

@@ -34,21 +34,28 @@ inline void asColumns2(span<const Row> rows) {
 	ImGui::Columns();
 }
 
+
+// Yes, there is a lot of ugliness here.
+inline int imGuiTextStringCallback(ImGuiInputTextCallbackData* data) {
+	if(data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+		auto& output = *static_cast<std::string*>(data->UserData);
+		dlg_assert(output.c_str() == data->Buf);
+		output.resize(data->BufTextLen);
+		data->Buf = (char*) output.c_str();
+	}
+
+	return 0;
+}
+
 inline bool imGuiTextInput(const char* label, std::string& output) {
-	// Yes, there is a lot of ugliness here.
-	auto callback = [](ImGuiInputTextCallbackData* data) {
-		if(data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
-			auto& output = *static_cast<std::string*>(data->UserData);
-			dlg_assert(output.c_str() == data->Buf);
-			output.resize(data->BufTextLen);
-			data->Buf = (char*) output.c_str();
-		}
-
-		return 0;
-	};
-
 	auto ret = ImGui::InputText(label, (char*) output.c_str(), output.capacity() + 1,
-		ImGuiInputTextFlags_CallbackResize, callback, (void*) &output);
+		ImGuiInputTextFlags_CallbackResize, imGuiTextStringCallback, (void*) &output);
+	return ret;
+}
+
+inline bool imGuiTextMultiline(const char* label, std::string& output) {
+	auto ret = ImGui::InputTextMultiline(label, (char*) output.c_str(), output.capacity() + 1,
+		{0, 0}, ImGuiInputTextFlags_CallbackResize, imGuiTextStringCallback, (void*) &output);
 	return ret;
 }
 

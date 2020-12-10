@@ -37,6 +37,11 @@ v0.1, goal: end of january 2021
 - [x] Remove Device::lastDevice api hack. Instead return a dev handle from fuenLoadApi
       Should probably just store it inside the api struct.
 - [ ] Implement missing resource overview UIs
+- [ ] fully implement command buffer viewer
+	- [ ] support all vulkan 1.0 commands (add to cb.h and commands.h)
+	- [ ] show all commands & info for commands
+	- [ ] better resource selection/collapsing etc
+- [ ] track and show dynamic graphics pipeline state
 - [x] Switch to a more useful fork/branch of vkpp: Generate vk::name
       functions for plain vulkan enums, don't use anything else here.
 	  Probably best to not even include vkpp as subproject, just copy
@@ -51,10 +56,14 @@ v0.1, goal: end of january 2021
 - [x] properly shutdown everything, no leftover resources and layer warnings
 - [x] proper queue creation and querying for window display
 - [x] properly shut down rendering thread for own-window display
-- [ ] test display window for compute-only applications
+- [x] test display window for compute-only applications
 	- [ ] come up with something smart to block them before they shut down. 
 	      Is there a sensible way to do this in the layer or should applications
-		  do it themselves? write wiki post
+		  do it themselves? **write wiki post**
+		  We could simply block the application in vkDestroyDevice? but then,
+		  everything is already destroyed I guess. Don't see a way to do it rn.
+		  Applications otoh just have to insert a single std::getchar before
+		  terminating, a lot easier.
 - [ ] figure out a general policy to transitive handle-adding to command buffer
 	- [ ] e.g.: when an descriptor is used, is the imageView added to handles?
 	      the image as well? the memory as well?
@@ -70,36 +79,51 @@ v0.1, goal: end of january 2021
 - [ ] write small wiki documentation post on how to use API
 	- [ ] could explain why it's needed in the first place. Maybe someone
 	      comes up with a clever idea for the hooked-input-feedback problem?
-- [ ] improve UI
+	- [ ] write something on instance extensions for compute-only applications
+	      see: https://github.com/KhronosGroup/Vulkan-Loader/issues/51
+- [ ] improve window creation: try to match up used swa backend with enabled
+	  vulkan extensions. Could extend swa for it, if useful
+	  (e.g. swa_display_create_for_vk_extensions)
+- [x] improve UI
 	- [x] Add proper image viewer
-	- [ ] Add proper buffer viewer
-- [ ] imgui styling
-	- [ ] use custom font
-	- [ ] go at least a bit away from the default imgui style
+	- [x] Add buffer viewer
 - [ ] full support of all vulkan 1.0 commands
 	- [ ] should probably also support the easy-to-support extensions
 	      for resource creation already. At least widely used/important extensions
 	- [ ] at least make sure it does not crash for features we don't
 	      implement yet (such as sparse binding)
+- [ ] improve buffer viewer
+	- [ ] ability to infer layouts (simply use the last known one, link to last usage in cb) from
+		- [ ] uniform and storage buffers (using spirv_inspect)
+		- [ ] vertex buffer (using the pipeline layout)
+		- [ ] index buffer
+		- [ ] texel data from a buffer/image copy
+	- [ ] ability to directly jump to it - in the contextually inferred layout - from a command?
+	      (might be confusing, content might have changed since then)
+- [ ] improve image viewer
+	- [ ] show texel color (requires us to download texels, just like we 
+	      do with buffers)
+	- [ ] better display (or completely hide?) swapchain images
+- [ ] imgui styling
+	- [ ] use custom font
+	- [ ] go at least a bit away from the default imgui style
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
 	- [ ] clearly document (maybe already in README?) that the layer
 	      can crash when extensions it does not know about/does not support
 		  are being used.
 	- [ ] update README to correctly show all current features
-- [ ] fully implement command buffer viewer
-	- [ ] support all vulkan 1.0 commands (add to cb.h and commands.h)
-	- [ ] show all commands & info for commands
-	- [ ] better resource selection/collapsing etc
 - [ ] properly implement layer querying functions
-- [ ] track and show dynamic graphics pipeline state
 - [ ] support for buffer views
-
+	- [ ] use buffer view information to infer layout in buffer viewer?
+	- [ ] support buffer views in our texture viewer (i.e. show their content)
+- [ ] before release: test on windows & linux, on all owned hardware
 
 not sure if viable for first version:
-- [ ] stress test using a vulkan-based game. Test e.g. with doom eternal
+- [ ] stress test using a real vulkan-based game. Test e.g. with doom eternal
 
-Possibly for later, new features:
+Possibly for later, new features/ideas:
+- [ ] directly show content for imageview? with correct format/mip/layer etc?
 - [ ] (somewhat high prio tho) add support for waiting for command buffer
       recording to finish (with a timeout tho, in which case we simply display
 	  that is currently being recorded (and that it takes long)), when viewing
@@ -143,3 +167,29 @@ Possibly for later, new features:
 - [ ] we might be able to properly hook input (without needing the public api)
 	  by using a (movable?) child window for our overlay instead of directly
 	  presenting to the swapchain.
+- [ ] when rendering in own window: continue to dispatch display while
+      waiting for application fence. This allows to track really long
+	  submissions (e.g. for compute) without losing responsiveness.
+	  (Just show something like "image/buffer is in use in the ui")
+	  -> sync rework/semaphore chaining, i guess (but note how it's **not**
+		 solved with semaphore chaining alone!)
+- [ ] explore what random stuff we are able to do
+	- [ ] Visualize models (drawcalls) on its own by inferring
+	  	  position (and possibly other attribs; hard to infer though, could use heuristics
+	  	  but should probably let user just flag them explicitly)
+	- [ ] Infer projection and view matrix, allow to manipulate them.
+	      We could add our entirely own camera to any game, allowing free movement
+		  in the world (likely glitched due to culling and stuff but that's still interesting).
+		  Hard to infer the correct matrix, might rely on manual user flagging.
+	- [ ] Infer as much general information as possible. When annotations are
+		  missing automatically annotate handles and the command buffer
+		  as good as possible. We are likely able to detect depth-only (should probably
+		  even be able to develop good heuristics to decide shadow vs preZ), gbuffer,
+		  shading, post-processing passes. Might also be able to automatically infer
+		  normal/diffuse/other pbr maps (harder though).
+	- [ ] use heuristics to identify interesting constants in ubo/pcr/shader itself
+		  (interesting as in: big effect on the output). Expose them as parameters
+		  in the gui.
+- [ ] (low prio, experiment) allow to visualize buffers as images where it makes sense 
+	  (using a bufferView or buffer-to-image copy)
+- [ ] (low prio) can we support android?
