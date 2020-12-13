@@ -116,6 +116,18 @@ DescriptorPool::~DescriptorPool() {
 	}
 }
 
+DescriptorSetLayout::~DescriptorSetLayout() {
+	if(!dev) {
+		return;
+	}
+
+	// ds layouts are never used directly by command buffers
+	dlg_assert(refCbs.empty());
+	dlg_assert(handle);
+
+	dev->dispatch.DestroyDescriptorSetLayout(dev->handle, handle, nullptr);
+}
+
 // util
 DescriptorCategory category(VkDescriptorType type) {
 	switch(type) {
@@ -145,8 +157,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		const VkDescriptorSetLayoutCreateInfo*      pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkDescriptorSetLayout*                      pSetLayout) {
+	// NOTE: we don't use host allocators here since this handle is potentially
+	// kept alive inside the layer, preventing us from passing an application
+	// allocator to the destruction function
+	// See design.md on allocators.
+	(void) pAllocator;
+
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
+	auto res = dev.dispatch.CreateDescriptorSetLayout(device, pCreateInfo, nullptr, pSetLayout);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -172,7 +190,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorSetLayout(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.dsLayouts.mustErase(descriptorSetLayout);
-	dev.dispatch.DestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
+
+	// NOTE: We intenntionally don't destruct the handle here, handle might
+	// need to be kept alive, they have shared ownership. Destroyed
+	// in handle destructor.
+	// dev.dispatch.DestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
+	(void) pAllocator;
 }
 
 // dsPool
@@ -236,7 +259,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
 		ds.dev = &dev;
 		ds.handle = pDescriptorSets[i];
-		ds.layout = &dev.dsLayouts.get(pAllocateInfo->pSetLayouts[i]);
+		ds.layout = dev.dsLayouts.getPtr(pAllocateInfo->pSetLayouts[i]);
 		ds.pool = &pool;
 
 		ds.bindings.resize(ds.layout->bindings.size());

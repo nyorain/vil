@@ -4,10 +4,10 @@
 #include <sync.hpp>
 #include <image.hpp>
 #include <util.hpp>
-#include <enumString.hpp>
 #include <swa/swa.h>
 #include <dlg/dlg.hpp>
 #include <imgui/imgui.h>
+#include <vk/enumString.hpp>
 
 namespace fuen {
 

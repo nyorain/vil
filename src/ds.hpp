@@ -1,6 +1,7 @@
 #pragma once
 
 #include "device.hpp"
+#include <optional>
 
 namespace fuen {
 
@@ -26,11 +27,14 @@ struct DescriptorSetLayout : DeviceHandle {
 
 	// Static after creation. Ordered by binding.
 	std::vector<VkDescriptorSetLayoutBinding> bindings;
+
+	// handle will be kept alive until this object is actually destroyed.
+	~DescriptorSetLayout();
 };
 
 struct DescriptorSet : DeviceHandle {
 	DescriptorPool* pool {};
-	DescriptorSetLayout* layout {};
+	std::shared_ptr<DescriptorSetLayout> layout {};
 	VkDescriptorSet handle {};
 
 	// TODO: support buffer views

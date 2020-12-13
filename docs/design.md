@@ -99,3 +99,33 @@ handles, structs and enums and have to pass them on a C-type handles
 Therefore, we don't use it here.
 Early version of this layer tried to use it but that resulted just in
 weird situations and additional cast and an additional dependency.
+
+# On vulkan host allocators
+
+A known issue of the fuencaliente design: host allocators might not
+work a 100% correctly in all cases, consider this case:
+We have to keep a handle alive inside the layer while the application
+logically destroyed it. When we destroy the handle later on (after
+the vkDestroy* call has returned to the application), we can no longer
+use the application-supplied allocator (since that might be
+unexpected for the application. The vulkan seems does not seem to
+clearly forbid it but it's probably meant to be? we would also have
+to take care from which thread the handle is destroyed in the end).
+Therefore, we completely ignore allocators for those handles (mainly layout
+handles at the moment).
+We could optionally simply use our own allocators *everywhere*, might
+be a useful thing to do anyways (but allow to enable/disable it via env var for
+instance).
+
+# Hooking command buffers
+
+Hooking a command buffer means to have a modified version of it ourselves
+that we pass down the function chain. This way, we can modify, insert
+or erase commands. Each time a command buffer is submitted, we check whether
+it is hooked and if so retrieve the command buffer to pass down the chain
+from the hooking entity (you could call it hooker, harr, harr).
+
+A command buffer can only have one hook installed at a time.
+What happens if we e.g. have multiple overlays trying to modify it at
+the same time? Probably ok if it just does not work. Maybe we don't want
+to support multiple active overlays anyways, might have problems down the line.

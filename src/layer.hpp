@@ -4,7 +4,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
-#include <vulkan/vk_layer_dispatch_table.h>
+#include <vk/dispatch_table.h>
 #include <string>
 
 struct swa_display;

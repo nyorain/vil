@@ -24,7 +24,11 @@ struct PipelineShaderStage {
 struct Pipeline : DeviceHandle {
 	VkPipeline handle {};
 	VkPipelineBindPoint type {};
-	PipelineLayout* layout {};
+
+	// TODO: don't need shared ownership of the handle here, just
+	// of the data it holds. Separate handle and description into separate
+	// shared-owned objects?
+	std::shared_ptr<PipelineLayout> layout {};
 
 protected:
 	// Make sure Pipeline objects are not created.
@@ -63,11 +67,12 @@ struct ComputePipeline : Pipeline {
 	PipelineShaderStage stage;
 };
 
-struct PipelineLayout : Handle {
-	Device* dev;
+struct PipelineLayout : DeviceHandle {
 	VkPipelineLayout handle;
 	std::vector<DescriptorSetLayout*> descriptors;
 	std::vector<VkPushConstantRange> pushConstants;
+
+	~PipelineLayout();
 };
 
 // See vulkan section "pipeline layout compatibility"

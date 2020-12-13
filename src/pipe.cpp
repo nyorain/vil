@@ -5,6 +5,18 @@
 
 namespace fuen {
 
+PipelineLayout::~PipelineLayout() {
+	if(!dev) {
+		return;
+	}
+
+	// pipe layouts are never used directly by command buffers.
+	dlg_assert(refCbs.empty());
+	dlg_assert(handle);
+
+	dev->dispatch.DestroyPipelineLayout(dev->handle, handle, nullptr);
+}
+
 PipelineShaderStage::PipelineShaderStage(Device& dev, const VkPipelineShaderStageCreateInfo& sci) {
 	stage = sci.stage;
 
@@ -42,7 +54,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		pipe.handle = pPipelines[i];
-		pipe.layout = &dev.pipeLayouts.get(pci.layout);
+		pipe.layout = dev.pipeLayouts.getPtr(pci.layout);
 		pipe.renderPass = dev.renderPasses.get(pci.renderPass).desc;
 		pipe.subpass = pci.subpass;
 
@@ -154,7 +166,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		pipe.type = VK_PIPELINE_BIND_POINT_COMPUTE;
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
-		pipe.layout = &dev.pipeLayouts.get(pCreateInfos[i].layout);
+		pipe.layout = dev.pipeLayouts.getPtr(pCreateInfos[i].layout);
 		pipe.stage = PipelineShaderStage(dev, pCreateInfos[i].stage);
 		dlg_assert(pipe.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 	}
@@ -179,9 +191,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 		const VkPipelineLayoutCreateInfo*           pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipelineLayout*                           pPipelineLayout) {
+	// NOTE: we don't use host allocators here since this handle is potentially
+	// kept alive inside the layer, preventing us from passing an application
+	// allocator to the destruction function.
+	// See design.md on allocators.
+	(void) pAllocator;
+
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreatePipelineLayout(device, pCreateInfo,
-		pAllocator, pPipelineLayout);
+	auto res = dev.dispatch.CreatePipelineLayout(device, pCreateInfo, nullptr, pPipelineLayout);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -208,7 +225,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.pipeLayouts.mustErase(pipelineLayout);
-	dev.dispatch.DestroyPipelineLayout(device, pipelineLayout, pAllocator);
+
+	// NOTE: We intenntionally don't destruct the handle here, handle might
+	// need to be kept alive, they have shared ownership. Destroyed
+	// in handle destructor.
+	// dev.dispatch.DestroyPipelineLayout(device, pipelineLayout, pAllocator);
+	(void) pAllocator;
 }
 
 bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b) {

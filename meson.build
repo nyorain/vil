@@ -67,6 +67,7 @@ src = files(
 	'src/api.cpp',
 	'src/commands.cpp',
 	'src/overlay.cpp',
+	'src/vk/format_utils.cpp',
 
 	# gui
 	'src/gui/renderer.cpp',

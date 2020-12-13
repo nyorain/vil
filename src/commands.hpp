@@ -2,10 +2,10 @@
 
 #include <cbState.hpp>
 #include <handles.hpp>
-#include <enumString.hpp>
 #include <flags.hpp>
 #include <imguiutil.hpp>
 #include <gui/gui.hpp>
+#include <vk/enumString.hpp>
 
 #include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
@@ -60,6 +60,10 @@ struct Command {
 	// Whether this command is empty. Empty commands are usually hidden.
 	// Used for commands like CmdEndRenderPass.
 	virtual Type type() const { return Type::other; }
+
+	// Records itself into the given command buffer.
+	// Does not record its child commands (if it has any).
+	virtual void record(const Device& dev, VkCommandBuffer) const = 0;
 
 	// Draws the command inspector UI.
 	virtual void displayInspector(Gui&) const {}
@@ -144,6 +148,7 @@ struct WaitEventsCmd : BarrierCmdBase {
 
 	std::string toString() const override { return "WaitEvents"; }
 	Type type() const override { return Type::sync; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BarrierCmd : BarrierCmdBase {
@@ -151,10 +156,14 @@ struct BarrierCmd : BarrierCmdBase {
 
 	std::string toString() const override { return "PipelineBarrier"; }
 	Type type() const override { return Type::sync; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BeginRenderPassCmd : SectionCommand {
 	VkRenderPassBeginInfo info;
+	std::vector<VkClearValue> clearValues;
+
+	VkSubpassContents subpassContents;
 	Framebuffer* fb;
 	RenderPass* rp;
 
@@ -166,15 +175,21 @@ struct BeginRenderPassCmd : SectionCommand {
 		resourceRefButton(gui, *fb);
 		resourceRefButton(gui, *rp);
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct NextSubpassCmd : SectionCommand {
+	VkSubpassContents subpassContents;
+
 	std::string toString() const override { return "NextSubpass"; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct EndRenderPassCmd : Command {
 	std::string toString() const override { return "EndRenderPass"; }
 	Type type() const override { return Type::end; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BaseDrawCmd : Command {
@@ -243,10 +258,15 @@ struct DrawCmd : BaseDrawCmd {
 
 		BaseDrawCmd::displayGrahpicsState(gui, false);
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct DrawIndirectCmd : BaseDrawCmd {
 	Buffer* buffer {};
+	VkDeviceSize offset {};
+	u32 drawCount {};
+	u32 stride {};
 
 	std::string toString() const override {
 		return "DrawIndirect";
@@ -257,6 +277,8 @@ struct DrawIndirectCmd : BaseDrawCmd {
 		resourceRefButton(gui, *buffer);
 		BaseDrawCmd::displayGrahpicsState(gui, false);
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct DrawIndexedCmd : BaseDrawCmd {
@@ -282,10 +304,15 @@ struct DrawIndexedCmd : BaseDrawCmd {
 
 		BaseDrawCmd::displayGrahpicsState(gui, true);
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct DrawIndexedIndirectCmd : BaseDrawCmd {
 	Buffer* buffer {};
+	VkDeviceSize offset {};
+	u32 drawCount {};
+	u32 stride {};
 
 	std::string toString() const override {
 		return "DrawIndexedIndirect";
@@ -296,11 +323,14 @@ struct DrawIndexedIndirectCmd : BaseDrawCmd {
 		resourceRefButton(gui, *buffer);
 		BaseDrawCmd::displayGrahpicsState(gui, true);
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BindVertexBuffersCmd : Command {
 	u32 firstBinding;
 	std::vector<Buffer*> buffers;
+	std::vector<VkDeviceSize> offsets;
 
 	std::string toString() const override {
 		if(buffers.size() == 1) {
@@ -311,35 +341,33 @@ struct BindVertexBuffersCmd : Command {
 		}
 	}
 
-	Type type() const override {
-		return Type::bind;
-	}
-
 	void displayInspector(Gui&) const override {
 		for(auto i = 0u; i < buffers.size(); ++i) {
 			auto& buf = *buffers[i];
 			ImGui::Button(dlg::format("{}: {}", firstBinding + i, name(buf)).c_str());
 		}
 	}
+
+	Type type() const override { return Type::bind; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BindIndexBufferCmd : Command {
 	Buffer* buffer {};
+	VkDeviceSize offset {};
+	VkIndexType indexType {};
 
-	std::string toString() const override {
-		return "BindIndexBuffer";
-	}
-
-	Type type() const override {
-		return Type::bind;
-	}
+	std::string toString() const override { return "BindIndexBuffer"; }
+	Type type() const override { return Type::bind; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BindDescriptorSetCmd : Command {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
-	// PipelineLayout* pipeLayout;
+	std::shared_ptr<PipelineLayout> pipeLayout;
 	std::vector<DescriptorSet*> sets;
+	std::vector<u32> dynamicOffsets;
 
 	std::string toString() const override {
 		if(sets.size() == 1) {
@@ -350,9 +378,8 @@ struct BindDescriptorSetCmd : Command {
 		}
 	}
 
-	Type type() const override {
-		return Type::bind;
-	}
+	Type type() const override { return Type::bind; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BaseDispatchCmd : Command {
@@ -380,9 +407,9 @@ struct BaseDispatchCmd : Command {
 };
 
 struct DispatchCmd : BaseDispatchCmd {
-	u32 groupsX;
-	u32 groupsY;
-	u32 groupsZ;
+	u32 groupsX {};
+	u32 groupsY {};
+	u32 groupsZ {};
 
 	std::string toString() const override {
 		return dlg::format("Dispatch({}, {}, {})",
@@ -393,10 +420,13 @@ struct DispatchCmd : BaseDispatchCmd {
 		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
 		BaseDispatchCmd::displayComputeState(gui);
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct DispatchIndirectCmd : BaseDispatchCmd {
 	Buffer* buffer {};
+	VkDeviceSize offset {};
 
 	std::string toString() const override {
 		return "DispatchIndirect";
@@ -407,11 +437,15 @@ struct DispatchIndirectCmd : BaseDispatchCmd {
 		resourceRefButton(gui, *buffer);
 		BaseDispatchCmd::displayComputeState(gui);
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct CopyImageCmd : Command {
 	Image* src {};
 	Image* dst {};
+	VkImageLayout srcLayout {};
+	VkImageLayout dstLayout {};
 	std::vector<VkImageCopy> copies;
 
 	std::string toString() const override {
@@ -429,11 +463,14 @@ struct CopyImageCmd : Command {
 
 		// TODO: copies
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct CopyBufferToImageCmd : Command {
 	Buffer* src {};
 	Image* dst {};
+	VkImageLayout imgLayout {};
 	std::vector<VkBufferImageCopy> copies;
 
 	std::string toString() const override {
@@ -451,11 +488,14 @@ struct CopyBufferToImageCmd : Command {
 
 		// TODO: copies
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct CopyImageToBufferCmd : Command {
 	Image* src {};
 	Buffer* dst {};
+	VkImageLayout imgLayout {};
 	std::vector<VkBufferImageCopy> copies;
 
 	std::string toString() const override {
@@ -473,13 +513,17 @@ struct CopyImageToBufferCmd : Command {
 
 		// TODO: copies
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BlitImageCmd : Command {
 	Image* src {};
 	Image* dst {};
+	VkImageLayout srcLayout {};
+	VkImageLayout dstLayout {};
 	std::vector<VkImageBlit> blits;
-	VkFilter filter;
+	VkFilter filter {};
 
 	std::string toString() const override {
 		return dlg::format("BlitImage({} -> {})", name(*src), name(*dst));
@@ -497,11 +541,14 @@ struct BlitImageCmd : Command {
 		// TODO: filter
 		// TODO: blits
 	}
+
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct ClearColorImageCmd : Command {
 	Image* dst {};
 	VkClearColorValue color;
+	VkImageLayout imgLayout {};
 	std::vector<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override {
@@ -509,6 +556,7 @@ struct ClearColorImageCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct CopyBufferCmd : Command {
@@ -520,8 +568,6 @@ struct CopyBufferCmd : Command {
 		return dlg::format("CopyBuffer({} -> {})", name(*src), name(*dst));
 	}
 
-	Type type() const override { return Type::transfer; }
-
 	void displayInspector(Gui& gui) const override {
 		resourceRefButton(gui, *src);
 		ImGui::SameLine();
@@ -531,6 +577,9 @@ struct CopyBufferCmd : Command {
 
 		// TODO: copies
 	}
+
+	Type type() const override { return Type::transfer; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct UpdateBufferCmd : Command {
@@ -543,6 +592,7 @@ struct UpdateBufferCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct FillBufferCmd : Command {
@@ -556,47 +606,44 @@ struct FillBufferCmd : Command {
 	}
 
 	Type type() const override { return Type::transfer; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct ExecuteCommandsCmd : Command {
 	std::vector<CommandBuffer*> secondaries {};
-
-	const Command* display(const Command*, TypeFlags) const override;
 
 	void displayInspector(Gui& gui) const override {
 		for(auto* cb : secondaries) {
 			resourceRefButton(gui, *cb);
 		}
 	}
+
+	const Command* display(const Command*, TypeFlags) const override;
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BeginDebugUtilsLabelCmd : SectionCommand {
 	std::string name;
 	std::array<float, 4> color; // TODO: could use this in UI
 
-	std::string toString() const override {
-		return dlg::format("Label: {}", name);
-	}
+	std::string toString() const override { return dlg::format("Label: {}", name); }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct EndDebugUtilsLabelCmd : Command {
-	std::string toString() const override {
-		return dlg::format("EndLabel");
-	}
-
+	std::string toString() const override { return dlg::format("EndLabel"); }
 	Type type() const override { return Type::end; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct BindPipelineCmd : Command {
-	VkPipelineBindPoint bindPoint;
-	Pipeline* pipe;
+	VkPipelineBindPoint bindPoint {};
+	Pipeline* pipe {};
 
 	std::string toString() const override {
 		auto bp = (bindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) ? "compute" : "graphics";
 		return dlg::format("BindPipeline({}, {})", bp, name(*pipe));
 	}
-
-	Type type() const override { return Type::bind; }
 
 	void displayInspector(Gui& gui) const override {
 		dlg_assert(pipe->type == bindPoint);
@@ -606,20 +653,99 @@ struct BindPipelineCmd : Command {
 			resourceRefButton(gui, *static_cast<GraphicsPipeline*>(pipe));
 		}
 	}
+
+	Type type() const override { return Type::bind; }
+	void record(const Device&, VkCommandBuffer) const override;
 };
 
 struct PushConstantsCmd : Command {
-	// PipelineLayout* layout;
-	VkShaderStageFlags stages;
-	u32 offset;
-	u32 size;
+	std::shared_ptr<PipelineLayout> layout;
+	VkShaderStageFlags stages {};
+	u32 offset {};
 	std::vector<std::byte> values;
 
-	std::string toString() const override {
-		return "PushConstants";
-	}
+	std::string toString() const override { return "PushConstants"; }
+	Type type() const override { return Type::bind; }
+	void record(const Device&, VkCommandBuffer) const override;
+};
+
+// dynamic state
+struct SetViewportCmd : Command {
+	u32 first {};
+	std::vector<VkViewport> viewports;
 
 	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetViewport"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetScissorCmd : Command {
+	u32 first {};
+	std::vector<VkRect2D> scissors;
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetScissor"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetLineWidthCmd : Command {
+	float width {};
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetLineWidth"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetDepthBiasCmd : Command {
+	DynamicStateDepthBias state {};
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetDepthBias"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetDepthBoundsCmd : Command {
+	float min {};
+	float max {};
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetDepthBounds"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetBlendConstantsCmd : Command {
+	std::array<float, 4> values {};
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetBlendConstants"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetStencilCompareMaskCmd : Command {
+	VkStencilFaceFlags faceMask {};
+	u32 value {};
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetStencilCompareMask"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetStencilWriteMaskCmd : Command {
+	VkStencilFaceFlags faceMask {};
+	u32 value {};
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetStencilWriteMask"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetStencilReferenceCmd : Command {
+	VkStencilFaceFlags faceMask {};
+	u32 value {};
+
+	Type type() const override { return Type::bind; }
+	std::string toString() const override { return "SetStencilReference"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
 } // namespace fuen

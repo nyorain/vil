@@ -7,8 +7,8 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
-#include <vulkan/vk_layer_dispatch_table.h>
-#include <vulkan/vk_object_types.h>
+#include <vk/dispatch_table.h>
+#include <vk/object_types.h>
 
 #include <shared_mutex>
 #include <memory>
@@ -18,7 +18,7 @@ namespace fuen {
 
 struct Submission {
 	std::vector<std::pair<VkSemaphore, VkPipelineStageFlags>> waitSemaphores;
-	std::vector<VkSemaphore> signalSemaphore;
+	std::vector<VkSemaphore> signalSemaphores;
 	std::vector<CommandBuffer*> cbs;
 
 	// We always add a signal semaphore to a submission, from the
@@ -48,6 +48,12 @@ struct Device {
 	VkPhysicalDevice phdev;
 	VkLayerDispatchTable dispatch;
 
+	VkPhysicalDeviceProperties props {};
+	VkPhysicalDeviceMemoryProperties memProps {};
+	VkPhysicalDeviceFeatures enabledFeatures {};
+	std::vector<VkQueueFamilyProperties> queueProps {};
+	// TODO: store all properties here
+
 	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
 
 	// Vector of all queues.
@@ -55,16 +61,20 @@ struct Device {
 	std::vector<std::unique_ptr<Queue>> queues;
 	// A vector of all queue family indices for which a queue exists.
 	// Needed for concurrent resources.
+	// We additionally create a (resettable, primary) command pool
+	// for every used queue index (access them via Queue::commandPool, only
+	// managed here so we don't have multiple pools per family index).
 	std::vector<u32> usedQueueFamilyIndices;
+
 	// The queue we use for graphics submissions. Can be assumed to
 	// be non-null.
 	Queue* gfxQueue {};
+	VkCommandPool commandPool {};
 
 	u32 hostVisibleMemTypeBits {};
 	u32 deviceLocalMemTypeBits {};
 
 	VkDescriptorPool dsPool {};
-	VkCommandPool commandPool {};
 	std::unique_ptr<RenderData> renderData;
 
 	std::unique_ptr<DisplayWindow> window;
@@ -104,7 +114,6 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkImageView, ImageView> imageViews;
 	SyncedUniqueUnorderedMap<VkSampler, Sampler> samplers;
 	SyncedUniqueUnorderedMap<VkBuffer, Buffer> buffers;
-	SyncedUniqueUnorderedMap<VkPipelineLayout, PipelineLayout> pipeLayouts;
 	SyncedUniqueUnorderedMap<VkPipeline, ComputePipeline> computePipes;
 	SyncedUniqueUnorderedMap<VkPipeline, GraphicsPipeline> graphicsPipes;
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
@@ -113,12 +122,26 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
 	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
-	SyncedUniqueUnorderedMap<VkDescriptorSetLayout, DescriptorSetLayout> dsLayouts;
 	SyncedUniqueUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
 	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
 	SyncedUniqueUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
 	SyncedUniqueUnorderedMap<VkEvent, Event> events;
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
+
+	// Some of our handles have shared ownership: this is only used when
+	// an application is allowed to destroy a handle that we might still
+	// need in the future (if we only need its data, do it like its done
+	// with RenderPass and just give the data inside the handle shared
+	// ownership, not the handle itself).
+
+	// Descriptors allocated from the layout expect it to remain
+	// valid. We might also (in future) create new descriptors from the
+	// layout ourselves (e.g. for submission modification).
+	SyncedSharedUnorderedMap<VkDescriptorSetLayout, DescriptorSetLayout> dsLayouts;
+	// An application can destroy a pipeline layout after a command
+	// buffer is recorded without it becoming invalid. But we still need
+	// the handle for internal hooked-recording.
+	SyncedSharedUnorderedMap<VkPipelineLayout, PipelineLayout> pipeLayouts;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 

@@ -1,24 +1,21 @@
-#include "layer.hpp"
-#include "util.hpp"
-#include "data.hpp"
-#include "swapchain.hpp"
-#include "image.hpp"
-#include "rp.hpp"
-#include "cb.hpp"
-#include "sync.hpp"
-#include "ds.hpp"
-#include "buffer.hpp"
-#include "memory.hpp"
-#include "shader.hpp"
-#include "pipe.hpp"
-#include "wayland.hpp"
-#include "commands.hpp"
-
+#include <layer.hpp>
+#include <util.hpp>
+#include <data.hpp>
+#include <swapchain.hpp>
+#include <image.hpp>
+#include <rp.hpp>
+#include <cb.hpp>
+#include <sync.hpp>
+#include <ds.hpp>
+#include <buffer.hpp>
+#include <memory.hpp>
+#include <shader.hpp>
+#include <pipe.hpp>
+#include <wayland.hpp>
+#include <commands.hpp>
+#include <vk/dispatch_table_helper.h>
 #include <dlg/dlg.hpp>
 #include <swa/swa.h>
-
-#include <vulkan/vk_layer.h>
-#include <vulkan/vk_dispatch_table_helper.h>
 
 namespace fuen {
 
@@ -326,6 +323,15 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdUpdateBuffer),
    FUEN_HOOK(CmdBindPipeline),
    FUEN_HOOK(CmdPushConstants),
+   FUEN_HOOK(CmdSetViewport),
+   FUEN_HOOK(CmdSetScissor),
+   FUEN_HOOK(CmdSetLineWidth),
+   FUEN_HOOK(CmdSetDepthBias),
+   FUEN_HOOK(CmdSetBlendConstants),
+   FUEN_HOOK(CmdSetDepthBounds),
+   FUEN_HOOK(CmdSetStencilCompareMask),
+   FUEN_HOOK(CmdSetStencilWriteMask),
+   FUEN_HOOK(CmdSetStencilReference),
 };
 
 #undef FUEN_HOOK

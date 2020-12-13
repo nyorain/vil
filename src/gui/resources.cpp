@@ -2,11 +2,10 @@
 #include <gui/gui.hpp>
 #include <handles.hpp>
 #include <util.hpp>
-#include <util.hpp>
 #include <imguiutil.hpp>
-#include <enumString.hpp>
+#include <vk/enumString.hpp>
+#include <vk/format_utils.h>
 #include <spirv_reflect.h>
-#include <vulkan/vk_format_utils.h>
 #include <map>
 
 namespace fuen {

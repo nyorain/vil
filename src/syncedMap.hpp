@@ -146,7 +146,7 @@ public:
 		std::shared_lock lock(*mutex);
 		auto it = map.find(key);
 		assert(it != map.end());
-		return *it->second.get();
+		return it->second;
 	}
 
 	template<typename = void>
@@ -158,7 +158,7 @@ public:
 			return {};
 		}
 
-		return *it->second.get();
+		return it->second;
 	}
 
 	// Can also be used directly, but take care!

@@ -1,5 +1,5 @@
-#include "renderer.hpp"
-#include "util.hpp"
+#include <gui/renderer.hpp>
+#include <util.hpp>
 #include <imgui/imgui.h>
 
 namespace fuen {

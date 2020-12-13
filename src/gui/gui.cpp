@@ -5,7 +5,6 @@
 #include <handles.hpp>
 #include <commands.hpp>
 #include <bytes.hpp>
-#include <enumString.hpp>
 #include <imguiutil.hpp>
 #include <guidraw.hpp>
 #include <spirv_reflect.h>
@@ -653,22 +652,19 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Columns(2);
 
 	// physical device info
-	VkPhysicalDeviceProperties phProps;
-	dev.ini->dispatch.GetPhysicalDeviceProperties(dev.phdev, &phProps);
-
 	ImGui::Text("Physical device, API version");
 	ImGui::Text("Driver version");
 
 	ImGui::NextColumn();
 
-	ImGui::Text("%s %d.%d.%d", phProps.deviceName,
-		VK_VERSION_MAJOR(phProps.apiVersion),
-		VK_VERSION_MINOR(phProps.apiVersion),
-		VK_VERSION_PATCH(phProps.apiVersion));
+	ImGui::Text("%s %d.%d.%d", dev.props.deviceName,
+		VK_VERSION_MAJOR(dev.props.apiVersion),
+		VK_VERSION_MINOR(dev.props.apiVersion),
+		VK_VERSION_PATCH(dev.props.apiVersion));
 	ImGui::Text("%d.%d.%d",
-		VK_VERSION_MAJOR(phProps.driverVersion),
-		VK_VERSION_MINOR(phProps.driverVersion),
-		VK_VERSION_PATCH(phProps.driverVersion));
+		VK_VERSION_MAJOR(dev.props.driverVersion),
+		VK_VERSION_MINOR(dev.props.driverVersion),
+		VK_VERSION_PATCH(dev.props.driverVersion));
 
 	ImGui::Columns();
 
@@ -822,26 +818,31 @@ void Gui::waitForSubmissions(const H& handle) {
 		++it;
 	}
 
+	waitFor(toComplete);
+}
 
-	if(!toComplete.empty()) {
-		std::vector<VkFence> fences;
-		for(auto* pending : toComplete) {
-			if(pending->appFence) {
-				fences.push_back(pending->appFence->handle);
-			} else {
-				fences.push_back(pending->ourFence);
-			}
+void Gui::waitFor(span<PendingSubmission*> toComplete) {
+	if(toComplete.empty()) {
+		return;
+	}
+
+	std::vector<VkFence> fences;
+	for(auto* pending : toComplete) {
+		if(pending->appFence) {
+			fences.push_back(pending->appFence->handle);
+		} else {
+			fences.push_back(pending->ourFence);
 		}
+	}
 
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
-			fences.size(), fences.data(), true, UINT64_MAX));
+	VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
+		fences.size(), fences.data(), true, UINT64_MAX));
 
-		for(auto* pending : toComplete) {
-			auto res = checkLocked(*pending);
-			// we waited for it above. It should really
-			// be completed now.
-			dlg_assert(res);
-		}
+	for(auto* pending : toComplete) {
+		auto res = checkLocked(*pending);
+		// we waited for it above. It should really
+		// be completed now.
+		dlg_assert(res);
 	}
 }
 
@@ -897,6 +898,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	// queue calls in the end. Care must be taken though!
 	std::lock_guard devMutex(dev().mutex);
 
+	// handle buffer waiting/retrieving logic
 	auto pSelBuf = std::get_if<Buffer*>(&tabs_.resources.handle_);
 	auto* selBuf = pSelBuf ? *pSelBuf : nullptr;
 
@@ -952,10 +954,26 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
 	}
 
+	// handle cb waiting logic:
+	// if we have hooked a command buffer to retrieve its timing, we have
+	// to wait for it to complete.
+	// TODO: could be optimized I guess, we might not strictly have to do this
+	// with some smart query pool management.
+	if(tabs_.cb.cb_ && tabs_.cb.hooked_.cb) {
+		// NOTE: it's important we do a copy here since waiting for the
+		// submissions might modify cb_->pending itself, invalidating
+		// the span.
+		auto pendingCopy = tabs_.cb.cb_->pending;
+		waitFor(pendingCopy);
+	}
+
 	this->draw(draw, info.fullscreen);
 	auto& drawData = *ImGui::GetDrawData();
 	this->uploadDraw(draw, drawData);
 
+	// handle image waiting logic:
+	// if we are displaying an image we have to make sure it is not currently
+	// being written somewhere else.
 	auto pSelImg = std::get_if<Image*>(&tabs_.resources.handle_);
 	auto* selImg = pSelImg ? *pSelImg : nullptr;
 	if(selImg && !tabs_.resources.image_.view) {

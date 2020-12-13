@@ -84,8 +84,10 @@ private:
 	void uploadDraw(Draw&, const ImDrawData&);
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, const ImDrawData&);
 
+	// Functions expect device mutex to be locked
 	template<typename H>
 	void waitForSubmissions(const H& handle);
+	void waitFor(span<PendingSubmission*> submsisions);
 
 private:
 	Device* dev_ {};

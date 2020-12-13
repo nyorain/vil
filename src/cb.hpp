@@ -11,6 +11,7 @@ namespace fuen {
 struct CommandPool : DeviceHandle {
 	VkCommandPool handle {};
 	std::vector<CommandBuffer*> cbs;
+	u32 queueFamily {};
 
 	~CommandPool();
 };
@@ -65,7 +66,8 @@ public:
 	u32 resetCount {}; // synchronized via dev mutex
 	State state {State::initial}; // synchronized via dev mutex
 
-	// List of pending submissions including this cb
+	// List of pending submissions including this cb.
+	// Access synchronized via device mutex.
 	std::vector<PendingSubmission*> pending;
 
 	// == Immutable when in executable state, otherwise private ==
@@ -74,6 +76,9 @@ public:
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
 	std::unordered_map<std::uint64_t, UsedHandle> handles;
+
+	using Hook = std::function<VkCommandBuffer(CommandBuffer&)>;
+	Hook hook;
 
 	// == Only used during recording, private ==
 	ComputeState computeState {};
@@ -149,7 +154,6 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
     VkPipelineBindPoint                         pipelineBindPoint,
     VkPipeline                                  pipeline);
 
-/*
 VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    firstViewport,
@@ -195,7 +199,6 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
     VkCommandBuffer                             commandBuffer,
     VkStencilFaceFlags                          faceMask,
     uint32_t                                    reference);
-*/
 
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
     VkCommandBuffer                             commandBuffer,

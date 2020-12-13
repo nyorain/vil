@@ -38,13 +38,36 @@ struct BoundIndexBuffer {
 	VkDeviceSize offset {};
 };
 
+struct DynamicStateDepthBias {
+	float constant;
+	float clamp;
+	float slope;
+};
+
 struct GraphicsState : DescriptorState {
 	BoundIndexBuffer indices;
 	std::vector<BoundVertexBuffer> vertices;
 	GraphicsPipeline* pipe;
 	RenderPass* rp;
 
-	// TODO: dynamic pipeline states
+	struct StencilState {
+		u32 writeMask;
+		u32 compareMask;
+		u32 reference;
+	};
+
+	struct {
+		std::vector<VkViewport> viewports;
+		std::vector<VkRect2D> scissors;
+		float lineWidth;
+		DynamicStateDepthBias depthBias;
+		std::array<float, 4> blendConstants;
+		float depthBoundsMin;
+		float depthBoundsMax;
+
+		StencilState stencilFront;
+		StencilState stencilBack;
+	} dynamic;
 };
 
 struct ComputeState : DescriptorState {

@@ -8,9 +8,8 @@
 #include <handles.hpp>
 #include <overlay.hpp>
 #include <gui/gui.hpp>
-
 #include <swa/swa.h>
-#include <vulkan/vk_dispatch_table_helper.h>
+#include <vk/dispatch_table_helper.h>
 
 namespace fuen {
 
@@ -35,8 +34,9 @@ Gui* getOverlayGui(Swapchain& swapchain) {
 Device::~Device() {
 	dlg_trace("Destroying Device");
 
+	// Vulkan spec requires that all pending submissions have finished.
 	for(auto& subm : pending) {
-		// we don't have to lock the mutex at checkLocked here since
+		// We don't have to lock the mutex at checkLocked here since
 		// there can't be any concurrent calls on the device as it
 		// is being destroyed.
 		auto res = checkLocked(*subm);
@@ -53,12 +53,17 @@ Device::~Device() {
 	dlg_assert(this->commandPools.empty());
 	dlg_assert(this->commandBuffers.empty());
 	dlg_assert(this->fences.empty());
+	dlg_assert(this->semaphores.empty());
+	dlg_assert(this->events.empty());
 	dlg_assert(this->dsPools.empty());
 	dlg_assert(this->dsLayouts.empty());
 	dlg_assert(this->descriptorSets.empty());
 	dlg_assert(this->deviceMemories.empty());
 	dlg_assert(this->shaderModules.empty());
 	dlg_assert(this->buffers.empty());
+	dlg_assert(this->graphicsPipes.empty());
+	dlg_assert(this->computePipes.empty());
+	dlg_assert(this->pipeLayouts.empty());
 
 	if(window) {
 		window.reset();
@@ -99,7 +104,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		VkPhysicalDevice phdev,
 		const VkDeviceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
-		VkDevice* dev) {
+		VkDevice* pDevice) {
 	auto* iniData = findData<Instance>(phdev);
 	dlg_assert(iniData);
 	auto& ini = *iniData;
@@ -134,8 +139,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
    	// query queues
 	u32 nqf;
 	fpGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, nullptr);
-	auto qfprops = std::make_unique<VkQueueFamilyProperties[]>(nqf);
-	fpGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, qfprops.get());
+	std::vector<VkQueueFamilyProperties> qfprops(nqf);
+	fpGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, qfprops.data());
 
 	// == Modify create info ==
 	auto nci = *ci;
@@ -274,39 +279,43 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	nci.pQueueCreateInfos = queueCreateInfos.data();
 	nci.queueCreateInfoCount = queueCreateInfos.size();
 
-	VkResult result = fpCreateDevice(phdev, &nci, alloc, dev);
+	VkResult result = fpCreateDevice(phdev, &nci, alloc, pDevice);
 	if(result != VK_SUCCESS) {
 		return result;
 	}
 
-	auto& devData = createData<Device>(*dev);
-	devData.ini = iniData;
-	devData.phdev = phdev;
-	devData.handle = *dev;
+	auto& dev = createData<Device>(*pDevice);
+	dev.ini = iniData;
+	dev.phdev = phdev;
+	dev.handle = *pDevice;
+	dev.queueProps = std::move(qfprops);
+	if(ci->pEnabledFeatures) {
+		dev.enabledFeatures = *ci->pEnabledFeatures;
+	}
 
-	layer_init_device_dispatch_table(*dev, &devData.dispatch, fpGetDeviceProcAddr);
+	layer_init_device_dispatch_table(*pDevice, &dev.dispatch, fpGetDeviceProcAddr);
 
-	devData.swapchains.mutex = &devData.mutex;
-	devData.images.mutex = &devData.mutex;
-	devData.imageViews.mutex = &devData.mutex;
-	devData.buffers.mutex = &devData.mutex;
-	devData.framebuffers.mutex = &devData.mutex;
-	devData.renderPasses.mutex = &devData.mutex;
-	devData.commandBuffers.mutex = &devData.mutex;
-	devData.commandPools.mutex = &devData.mutex;
-	devData.fences.mutex = &devData.mutex;
-	devData.dsPools.mutex = &devData.mutex;
-	devData.dsLayouts.mutex = &devData.mutex;
-	devData.descriptorSets.mutex = &devData.mutex;
-	devData.buffers.mutex = &devData.mutex;
-	devData.deviceMemories.mutex = &devData.mutex;
-	devData.shaderModules.mutex = &devData.mutex;
-	devData.samplers.mutex = &devData.mutex;
-	devData.computePipes.mutex = &devData.mutex;
-	devData.graphicsPipes.mutex = &devData.mutex;
-	devData.pipeLayouts.mutex = &devData.mutex;
-	devData.events.mutex = &devData.mutex;
-	devData.semaphores.mutex = &devData.mutex;
+	dev.swapchains.mutex = &dev.mutex;
+	dev.images.mutex = &dev.mutex;
+	dev.imageViews.mutex = &dev.mutex;
+	dev.buffers.mutex = &dev.mutex;
+	dev.framebuffers.mutex = &dev.mutex;
+	dev.renderPasses.mutex = &dev.mutex;
+	dev.commandBuffers.mutex = &dev.mutex;
+	dev.commandPools.mutex = &dev.mutex;
+	dev.fences.mutex = &dev.mutex;
+	dev.dsPools.mutex = &dev.mutex;
+	dev.dsLayouts.mutex = &dev.mutex;
+	dev.descriptorSets.mutex = &dev.mutex;
+	dev.buffers.mutex = &dev.mutex;
+	dev.deviceMemories.mutex = &dev.mutex;
+	dev.shaderModules.mutex = &dev.mutex;
+	dev.samplers.mutex = &dev.mutex;
+	dev.computePipes.mutex = &dev.mutex;
+	dev.graphicsPipes.mutex = &dev.mutex;
+	dev.pipeLayouts.mutex = &dev.mutex;
+	dev.events.mutex = &dev.mutex;
+	dev.semaphores.mutex = &dev.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
@@ -315,33 +324,36 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	dlg_assert(loaderData);
-	devData.setDeviceLoaderData = loaderData->u.pfnSetDeviceLoaderData;
+	dev.setDeviceLoaderData = loaderData->u.pfnSetDeviceLoaderData;
+
+	// Other properties
+	dev.ini->dispatch.GetPhysicalDeviceProperties(dev.phdev, &dev.props);
 
 	// Get device queues
 	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
 		auto& qi = queueCreateInfos[i];
-		auto& familyProps = qfprops[qi.queueFamilyIndex];
+		auto& familyProps = dev.queueProps[qi.queueFamilyIndex];
 
-		devData.usedQueueFamilyIndices.push_back(qi.queueFamilyIndex);
+		dev.usedQueueFamilyIndices.push_back(qi.queueFamilyIndex);
 
 		for(auto j = 0u; j < qi.queueCount; ++j) {
-			auto& q = *devData.queues.emplace_back(std::make_unique<Queue>());
-			q.dev = &devData;
+			auto& q = *dev.queues.emplace_back(std::make_unique<Queue>());
+			q.dev = &dev;
 			q.flags = familyProps.queueFlags;
 			q.priority = qi.pQueuePriorities[j];
-			devData.dispatch.GetDeviceQueue(*dev, qi.queueFamilyIndex, j, &q.queue);
+			dev.dispatch.GetDeviceQueue(dev.handle, qi.queueFamilyIndex, j, &q.queue);
 
 			// Queue is a dispatchable handle.
 			// We therefore have to inform the loader that we created this
 			// resource inside the layer and let it set its dispatch table.
 			// We will also have to get our queue-data just from the VkQueue
 			// later on (e.g. vkQueueSubmit) so associate data with it.
-			devData.setDeviceLoaderData(*dev, q.queue);
+			dev.setDeviceLoaderData(dev.handle, q.queue);
 			insertData(q.queue, &q);
 
 			if(i == gfxQueueInfoID && j == 0u) {
-				dlg_assert(!devData.gfxQueue);
-				devData.gfxQueue = &q;
+				dlg_assert(!dev.gfxQueue);
+				dev.gfxQueue = &q;
 			}
 
 			if(i == presentQueueInfoID && j == 0u) {
@@ -352,34 +364,34 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		}
 	}
 
-	auto newEnd = std::unique(devData.usedQueueFamilyIndices.begin(), devData.usedQueueFamilyIndices.end());
-	devData.usedQueueFamilyIndices.erase(newEnd, devData.usedQueueFamilyIndices.end());
+	auto newEnd = std::unique(dev.usedQueueFamilyIndices.begin(), dev.usedQueueFamilyIndices.end());
+	dev.usedQueueFamilyIndices.erase(newEnd, dev.usedQueueFamilyIndices.end());
 
 	// query memory stuff
-	VkPhysicalDeviceMemoryProperties memProps;
-	ini.dispatch.GetPhysicalDeviceMemoryProperties(phdev, &memProps);
-	for(auto i = 0u; i < memProps.memoryTypeCount; ++i) {
-		auto flags = memProps.memoryTypes[i].propertyFlags;
+	ini.dispatch.GetPhysicalDeviceMemoryProperties(phdev, &dev.memProps);
+	for(auto i = 0u; i < dev.memProps.memoryTypeCount; ++i) {
+		auto flags = dev.memProps.memoryTypes[i].propertyFlags;
 		if(flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
-			devData.hostVisibleMemTypeBits |= (1 << i);
+			dev.hostVisibleMemTypeBits |= (1 << i);
 		}
 
 		if(flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) {
-			devData.deviceLocalMemTypeBits |= (1 << i);
+			dev.deviceLocalMemTypeBits |= (1 << i);
 		}
 	}
 
 	// == graphics-stuff ==
-	devData.renderData = std::make_unique<RenderData>();
-	devData.renderData->init(devData);
+	dev.renderData = std::make_unique<RenderData>();
+	dev.renderData->init(dev);
 
 	// command pool
 	VkCommandPoolCreateInfo cpci {};
 	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	cpci.queueFamilyIndex = devData.gfxQueue->family;
+	cpci.queueFamilyIndex = dev.gfxQueue->family;
 	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-	VK_CHECK(devData.dispatch.CreateCommandPool(*dev, &cpci, nullptr, &devData.commandPool));
-	nameHandle(devData, devData.commandPool, "Device:commandPool");
+
+	VK_CHECK(dev.dispatch.CreateCommandPool(dev.handle, &cpci, nullptr, &dev.commandPool));
+	nameHandle(dev, dev.commandPool, "Device:commandPool");
 
 	// descriptor pool
 	// TODO: might need multiple pools...
@@ -393,20 +405,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dpci.poolSizeCount = 1u;
 	dpci.maxSets = 50u;
 	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-	VK_CHECK(devData.dispatch.CreateDescriptorPool(*dev, &dpci, nullptr, &devData.dsPool));
-	nameHandle(devData, devData.commandPool, "Device:dsPool");
+	VK_CHECK(dev.dispatch.CreateDescriptorPool(dev.handle, &dpci, nullptr, &dev.dsPool));
+	nameHandle(dev, dev.dsPool, "Device:dsPool");
 
 	// == window stuff ==
 	if(window) {
 		dlg_assert(window->presentQueue); // should have been set in queue querying
-		devData.window = std::move(window);
-		devData.window->initDevice(devData);
+		dev.window = std::move(window);
+		dev.window->initDevice(dev);
 	}
 
 	// Make sure we can recognize the VkDevice even when it comes from
 	// the application directly (and is potentially wrapped by other
 	// layers). See our public API doc/implementation for why we need this.
-	storeDeviceByLoader(devData.handle, &devData);
+	storeDeviceByLoader(dev.handle, &dev);
 
 	return result;
 }
@@ -551,15 +563,17 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 	std::vector<VkSubmitInfo> nsubmitInfos;
 	std::vector<std::vector<VkSemaphore>> signalSemaphores;
+	std::vector<std::vector<VkCommandBuffer>> commandBuffers;
 
 	for(auto i = 0u; i < submitCount; ++i) {
 		auto si = pSubmits[i]; // copy it
 		auto& dst = subm.submissions.emplace_back();
 
 		for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
-			dst.signalSemaphore.push_back(si.pSignalSemaphores[j]);
+			dst.signalSemaphores.push_back(si.pSignalSemaphores[j]);
 		}
 
+		auto& cbs = commandBuffers.emplace_back();
 		for(auto j = 0u; j < si.commandBufferCount; ++j) {
 			auto& cb = dev.commandBuffers.get(si.pCommandBuffers[j]);
 			dst.cbs.push_back(&cb);
@@ -580,19 +594,16 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 						used.second.image->pendingLayout = used.second.finalLayout;
 					}
 				}
+
+				// hook command buffer
+				if(cb.hook) {
+					auto hooked = cb.hook(cb);
+					dlg_assert(hooked);
+					cbs.push_back(hooked);
+				} else {
+					cbs.push_back(cb.handle);
+				}
 			}
-
-			// We need to add a semaphore for device synchronization.
-			// We might wanna read from resources that are potentially written
-			// by this submission in the future, we need to be able to gpu-sync them.
-			dst.ourSemaphore = getSemaphoreFromPool();
-
-			signalSemaphores.emplace_back(dst.signalSemaphore);
-			signalSemaphores.back().push_back(dst.ourSemaphore);
-
-			si.signalSemaphoreCount = signalSemaphores.back().size();
-			si.pSignalSemaphores = signalSemaphores.back().data();
-			nsubmitInfos.push_back(si);
 		}
 
 		for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
@@ -600,6 +611,21 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				si.pWaitSemaphores[j],
 				si.pWaitDstStageMask[j]);
 		}
+
+		// We need to add a semaphore for device synchronization.
+		// We might wanna read from resources that are potentially written
+		// by this submission in the future, we need to be able to gpu-sync them.
+		dst.ourSemaphore = getSemaphoreFromPool();
+
+		signalSemaphores.emplace_back(dst.signalSemaphores);
+		signalSemaphores.back().push_back(dst.ourSemaphore);
+
+		si.signalSemaphoreCount = signalSemaphores.back().size();
+		si.pSignalSemaphores = signalSemaphores.back().data();
+
+		si.commandBufferCount = commandBuffers.back().size();
+		si.pCommandBuffers = commandBuffers.back().data();
+		nsubmitInfos.push_back(si);
 	}
 
 	// Make sure that every submission has a fence associated.

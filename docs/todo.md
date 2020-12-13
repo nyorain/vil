@@ -118,6 +118,8 @@ v0.1, goal: end of january 2021
 	- [ ] use buffer view information to infer layout in buffer viewer?
 	- [ ] support buffer views in our texture viewer (i.e. show their content)
 - [ ] before release: test on windows & linux, on all owned hardware
+- [ ] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
+      for inserting query commands
 
 not sure if viable for first version:
 - [ ] stress test using a real vulkan-based game. Test e.g. with doom eternal
