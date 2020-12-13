@@ -38,6 +38,9 @@ void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
 				removeFromHandle(*bind.imageInfo.sampler);
 			}
 			break;
+		} case DescriptorCategory::bufferView: {
+			removeFromHandle(nonNull(bind.bufferView));
+			break;
 		} default: dlg_error("Unimplemented descriptor type"); break;
 	}
 }
@@ -95,6 +98,13 @@ Buffer* DescriptorSet::getBuffer(unsigned binding, unsigned elem) {
 	dlg_assert(bindings[binding].size() > elem);
 	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::buffer);
 	return bindings[binding][elem].bufferInfo.buffer;
+}
+
+BufferView* DescriptorSet::getBufferView(unsigned binding, unsigned elem) {
+	dlg_assert(bindings.size() > binding);
+	dlg_assert(bindings[binding].size() > elem);
+	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::bufferView);
+	return bindings[binding][elem].bufferView;
 }
 
 DescriptorPool::~DescriptorPool() {
@@ -360,12 +370,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 					binding.bufferInfo.range = write.pBufferInfo[j].range;
 					break;
 				} case DescriptorCategory::bufferView:
-					// TODO
-					dlg_error("Buffer views unimplemented");
-					/*
 					dlg_assert(write.pTexelBufferView);
-					binding.bufferView = write.pTexelBufferView[j];
-					*/
+					binding.bufferView = &dev.bufferViews.getLocked(write.pTexelBufferView[j]);
+					addDsRef(binding.bufferView);
 					break;
 				default: break;
 			}

@@ -64,6 +64,8 @@ Device::~Device() {
 	dlg_assert(this->graphicsPipes.empty());
 	dlg_assert(this->computePipes.empty());
 	dlg_assert(this->pipeLayouts.empty());
+	dlg_assert(this->queryPools.empty());
+	dlg_assert(this->bufferViews.empty());
 
 	if(window) {
 		window.reset();
@@ -95,7 +97,7 @@ Device::~Device() {
 
 	// erase queue datas
 	for(auto& queue : this->queues) {
-		eraseData(queue->queue);
+		eraseData(queue->handle);
 	}
 }
 
@@ -316,6 +318,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.pipeLayouts.mutex = &dev.mutex;
 	dev.events.mutex = &dev.mutex;
 	dev.semaphores.mutex = &dev.mutex;
+	dev.queryPools.mutex = &dev.mutex;
+	dev.bufferViews.mutex = &dev.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
@@ -341,15 +345,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			q.dev = &dev;
 			q.flags = familyProps.queueFlags;
 			q.priority = qi.pQueuePriorities[j];
-			dev.dispatch.GetDeviceQueue(dev.handle, qi.queueFamilyIndex, j, &q.queue);
+			dev.dispatch.GetDeviceQueue(dev.handle, qi.queueFamilyIndex, j, &q.handle);
 
 			// Queue is a dispatchable handle.
 			// We therefore have to inform the loader that we created this
 			// resource inside the layer and let it set its dispatch table.
 			// We will also have to get our queue-data just from the VkQueue
 			// later on (e.g. vkQueueSubmit) so associate data with it.
-			dev.setDeviceLoaderData(dev.handle, q.queue);
-			insertData(q.queue, &q);
+			dev.setDeviceLoaderData(dev.handle, q.handle);
+			insertData(q.handle, &q);
 
 			if(i == gfxQueueInfoID && j == 0u) {
 				dlg_assert(!dev.gfxQueue);
@@ -659,6 +663,55 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 	dlg_assert(nsubmitInfos.size() == submitCount);
 	return dev.dispatch.QueueSubmit(queue, nsubmitInfos.size(), nsubmitInfos.data(), submFence);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue vkQueue) {
+	auto& queue = getData<Queue>(vkQueue);
+	auto res = queue.dev->dispatch.QueueWaitIdle(vkQueue);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	// check all submissions for completion
+	std::lock_guard lock(queue.dev->mutex);
+	for(auto it = queue.dev->pending.begin(); it != queue.dev->pending.end();) {
+		auto& subm = *it;
+		if(subm->queue != &queue) {
+			++it;
+			continue;
+		}
+
+		auto res = checkLocked(*subm);
+		if(!res) {
+			dlg_error("Expected submission to be completed after vkQueueWaitIdle");
+			++it;
+		}
+		// otherwise, don't increase it, since the current element was removed
+	}
+
+	return res;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
+	auto& dev = getData<Device>(device);
+	auto res = dev.dispatch.DeviceWaitIdle(device);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	// check all submissions for completion
+	std::lock_guard lock(dev.mutex);
+	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
+		auto& subm = *it;
+		auto res = checkLocked(*subm);
+		if(!res) {
+			dlg_error("Expected submission to be completed after vkDeviceWaitIdle");
+			++it;
+		}
+		// otherwise, don't increase it, since the current element was removed
+	}
+
+	return res;
 }
 
 bool checkLocked(PendingSubmission& subm) {

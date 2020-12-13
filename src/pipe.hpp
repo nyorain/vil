@@ -111,4 +111,6 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
     VkPipelineLayout                            pipelineLayout,
     const VkAllocationCallbacks*                pAllocator);
 
+// No need to hook VkPipelineCache at all at the moment.
+
 } // namespace fuen

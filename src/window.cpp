@@ -423,7 +423,7 @@ void DisplayWindow::mainLoop() {
 		frameInfo.imageIdx = imageIdx;
 		frameInfo.fb = buffers_[imageIdx].fb;
 		frameInfo.fullscreen = true;
-		frameInfo.presentQueue = this->presentQueue->queue;
+		frameInfo.presentQueue = this->presentQueue->handle;
 		frameInfo.swapchain = swapchain;
 		auto sems = {acquireSem};
 		frameInfo.waitSemaphores = sems;

@@ -39,7 +39,12 @@ struct ResourceGui {
 		GraphicsPipeline*,
 		ComputePipeline*,
 		PipelineLayout*,
-		ShaderModule*>;
+		ShaderModule*,
+		BufferView*,
+		QueryPool*,
+		Fence*,
+		Semaphore*,
+		Event*>;
 
 	HandleVariant handle_;
 
@@ -90,6 +95,11 @@ struct ResourceGui {
 	void drawDesc(Draw&, CommandPool&);
 	void drawDesc(Draw&, CommandBuffer&);
 	void drawDesc(Draw&, ShaderModule&);
+	void drawDesc(Draw&, Event&);
+	void drawDesc(Draw&, Semaphore&);
+	void drawDesc(Draw&, Fence&);
+	void drawDesc(Draw&, BufferView&);
+	void drawDesc(Draw&, QueryPool&);
 };
 
 } // namespace fuen

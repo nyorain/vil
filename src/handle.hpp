@@ -43,9 +43,11 @@ struct DeviceHandle : Handle {
 	void invalidateCbsLocked();
 };
 
+// TODO: replace by utils from vk/object_types.h?
 template<typename T>
 constexpr const char* handleName() {
 	if constexpr(std::is_same_v<T, Device>) return "Device";
+	else if constexpr(std::is_same_v<T, Queue>) return "Queue";
 	else if constexpr(std::is_same_v<T, Image>) return "Image";
 	else if constexpr(std::is_same_v<T, ImageView>) return "ImageView";
 	else if constexpr(std::is_same_v<T, Sampler>) return "Sampler";
@@ -67,6 +69,8 @@ constexpr const char* handleName() {
 	else if constexpr(std::is_same_v<T, DeviceMemory>) return "DeviceMemory";
 	else if constexpr(std::is_same_v<T, ShaderModule>) return "ShaderModule";
 	else if constexpr(std::is_same_v<T, Pipeline>) return "Pipeline";
+	else if constexpr(std::is_same_v<T, QueryPool>) return "QueryPool";
+	else if constexpr(std::is_same_v<T, BufferView>) return "Bufferview";
 	else static_assert(!std::is_same_v<T, T>, "Invalid handle type");
 }
 

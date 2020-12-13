@@ -58,4 +58,6 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
     VkRenderPass                                renderPass,
     const VkAllocationCallbacks*                pAllocator);
 
+// No need to hook GetRenderAreaGranularity
+
 } // namespace fuen

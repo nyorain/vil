@@ -70,6 +70,9 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
     VkDeviceMemory                              memory,
     VkDeviceSize                                memoryOffset);
 
+// no need to hook:
+// - GetImageSubresourceLayout
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
     VkDevice                                    device,
     const VkImageViewCreateInfo*                pCreateInfo,

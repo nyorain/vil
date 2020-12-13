@@ -6,10 +6,29 @@
 
 namespace fuen {
 
+CommandBufferGui::CommandBufferGui() = default;
+
+CommandBufferGui::~CommandBufferGui() {
+	auto& dev = gui_->dev();
+
+	// TODO: probably (more efficiently) make sure we can destroy
+	// our hooking resources!
+	VK_CHECK(gui_->dev().dispatch.DeviceWaitIdle(dev.handle));
+
+	if(hooked_.queryPool) {
+		dev.dispatch.DestroyQueryPool(dev.handle, hooked_.queryPool, nullptr);
+	}
+
+	if(hooked_.commandPool) {
+		dev.dispatch.DestroyCommandPool(dev.handle, hooked_.commandPool, nullptr);
+	}
+}
+
 void CommandBufferGui::draw() {
 	auto& dev = gui_->dev();
 
 	// Command list
+	ImGui::Columns(2);
 	ImGui::BeginChild("Command list", {400, 0});
 
 	// We can only display the content when the command buffer is in
@@ -23,6 +42,12 @@ void CommandBufferGui::draw() {
 	if(cb_->state == CommandBuffer::State::executable) {
 		ImGui::PushID(dlg::format("{}:{}", cb_, cb_->resetCount).c_str());
 
+		if(cb_->resetCount != resetCount_) {
+			// try to find a new command matching the old ones description
+			command_ = CommandDescription::find(*cb_, desc_);
+			hooked_.needsUpdate = true;
+		}
+
 		// TODO: add selector ui to filter out various commands/don't
 		// show sections etc. Should probably pass a struct DisplayDesc
 		// to displayCommands instead of various parameters
@@ -30,12 +55,9 @@ void CommandBufferGui::draw() {
 		auto* nsel = displayCommands(cb_->commands, command_, flags);
 		if(nsel) {
 			resetCount_ = cb_->resetCount;
+			desc_ = CommandDescription::get(*cb_, *nsel);
 			command_ = nsel;
 			hooked_.needsUpdate = true;
-		}
-
-		if(cb_->resetCount != resetCount_) {
-			command_ = nullptr;
 		}
 
 		ImGui::PopID();
@@ -45,7 +67,7 @@ void CommandBufferGui::draw() {
 	}
 
 	ImGui::EndChild();
-	ImGui::SameLine();
+	ImGui::NextColumn();
 
 	// command info
 	ImGui::BeginChild("Command Info", {600, 0});
@@ -146,11 +168,11 @@ void CommandBufferGui::draw() {
 			// display it if available (that's why we waited for the submissions
 			// to complete in Gui).
 			u64 data[20];
-			VK_CHECK(dev.dispatch.GetQueryPoolResults(dev.handle, hooked_.queryPool, 0, 3,
-				sizeof(data), data, 16, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT));
+			auto res = dev.dispatch.GetQueryPoolResults(dev.handle, hooked_.queryPool, 0, 3,
+				sizeof(data), data, 16, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
 
 			// check if query is available
-			if(data[1] && data[3] && data[5]) {
+			if(res == VK_SUCCESS && (data[1] && data[3] && data[5])) {
 				u64 before = data[0];
 				u64 afterStart = data[2];
 				u64 afterEnd = data[4];
@@ -175,6 +197,7 @@ void CommandBufferGui::draw() {
 	}
 
 	ImGui::EndChild();
+	ImGui::Columns();
 }
 
 VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
@@ -196,7 +219,6 @@ VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
 		VK_CHECK(dev.dispatch.EndCommandBuffer(hooked_.cb));
 	}
 
-	dlg_trace("returning hooked cb");
 	return hooked_.cb;
 }
 
@@ -238,6 +260,10 @@ void CommandBufferGui::select(CommandBuffer& cb) {
 
 	cb_ = &cb;
 	command_ = {};
+	if(!desc_.empty()) {
+		command_ = CommandDescription::find(cb, desc_);
+	}
+
 	resetCount_ = cb_->resetCount;
 
 	hooked_.query = false;

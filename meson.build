@@ -90,11 +90,12 @@ src = files(
 	'src/memory.cpp',
 	'src/shader.cpp',
 	'src/pipe.cpp',
+	'src/queryPool.cpp',
 
 	# external util
 	'src/spirv_reflect.c',
 
-	# useful for visual studio build to include them here
+	# useful for visual studio build to include headers here
 	'src/fwd.hpp',
 	'src/device.hpp',
 	'src/layer.hpp',

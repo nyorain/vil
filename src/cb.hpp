@@ -327,7 +327,6 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
     uint32_t                                    rangeCount,
     const VkImageSubresourceRange*              pRanges);
 
-/*
 VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
     VkCommandBuffer                             commandBuffer,
     VkImage                                     image,
@@ -361,7 +360,6 @@ VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
     VkCommandBuffer                             commandBuffer,
     VkEvent                                     event,
     VkPipelineStageFlags                        stageMask);
-*/
 
 VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
     VkCommandBuffer                             commandBuffer,
@@ -388,7 +386,6 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
     uint32_t                                    imageMemoryBarrierCount,
     const VkImageMemoryBarrier*                 pImageMemoryBarriers);
 
-/*
 VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
     VkCommandBuffer                             commandBuffer,
     VkQueryPool                                 queryPool,
@@ -421,7 +418,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
     VkDeviceSize                                dstOffset,
     VkDeviceSize                                stride,
     VkQueryResultFlags                          flags);
-*/
 
 VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
     VkCommandBuffer                             commandBuffer,

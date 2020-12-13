@@ -1,17 +1,7 @@
-#include "handle.hpp"
-#include "data.hpp"
-#include "device.hpp"
-
-#include "swapchain.hpp"
-#include "cb.hpp"
-#include "memory.hpp"
-#include "image.hpp"
-#include "buffer.hpp"
-#include "rp.hpp"
-#include "pipe.hpp"
-#include "shader.hpp"
-#include "sync.hpp"
-#include "ds.hpp"
+#include <handle.hpp>
+#include <data.hpp>
+#include <device.hpp>
+#include <handles.hpp>
 
 namespace fuen {
 
@@ -56,6 +46,8 @@ Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle) {
 		  	return dev.images.find((VkImage) handle);
 		case VK_OBJECT_TYPE_IMAGE_VIEW:
 		  	return dev.imageViews.find((VkImageView) handle);
+		case VK_OBJECT_TYPE_SAMPLER:
+			return dev.samplers.find((VkSampler) handle);
 		case VK_OBJECT_TYPE_BUFFER:
 			return dev.buffers.find((VkBuffer) handle);
 		case VK_OBJECT_TYPE_DESCRIPTOR_POOL:
@@ -66,8 +58,6 @@ Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle) {
 			return dev.descriptorSets.find((VkDescriptorSet) handle);
 		case VK_OBJECT_TYPE_SHADER_MODULE:
 			return dev.shaderModules.find((VkShaderModule) handle);
-		case VK_OBJECT_TYPE_SAMPLER:
-			return dev.samplers.find((VkSampler) handle);
 		case VK_OBJECT_TYPE_DEVICE_MEMORY:
 			return dev.deviceMemories.find((VkDeviceMemory) handle);
 		case VK_OBJECT_TYPE_PIPELINE: {
@@ -93,6 +83,10 @@ Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle) {
 			return dev.commandPools.find((VkCommandPool) handle);
 		case VK_OBJECT_TYPE_COMMAND_BUFFER:
 			return dev.commandBuffers.find((VkCommandBuffer) handle);
+		case VK_OBJECT_TYPE_QUERY_POOL:
+			return dev.queryPools.find((VkQueryPool) handle);
+		case VK_OBJECT_TYPE_BUFFER_VIEW:
+			return dev.bufferViews.find((VkBufferView) handle);
 		default: break;
 	}
 

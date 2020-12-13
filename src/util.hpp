@@ -156,4 +156,25 @@ void write(VkFormat dstFormat, span<std::byte>& dst, const Vec4d& color);
 void convert(VkFormat dstFormat, span<std::byte>& dst,
 		VkFormat srcFormat, span<const std::byte>& src);
 
+template<typename V, typename T>
+decltype(auto) constexpr templatize(T&& value) {
+	return std::forward<T>(value);
+}
+
+// ValidExpression impl
+namespace detail {
+template<template<class...> typename E, typename C, typename... T> struct ValidExpressionT {
+	static constexpr auto value = false;
+};
+
+template<template<class...> typename E, typename... T>
+struct ValidExpressionT<E, std::void_t<E<T...>>, T...> {
+	static constexpr auto value = true;
+};
+
+} // namespace detail
+
+template<template<typename...> typename E, typename... T>
+constexpr auto validExpression = detail::ValidExpressionT<E, void, T...>::value;
+
 } // namespace fuen

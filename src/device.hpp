@@ -39,7 +39,9 @@ struct PendingSubmission {
 	VkFence ourFence {};
 };
 
-// Expects dev.mutex to be locked
+// Expects dev.mutex to be locked.
+// Returns whether the given submission was finished and therefore
+// removed.
 bool checkLocked(PendingSubmission& subm);
 
 struct Device {
@@ -52,7 +54,6 @@ struct Device {
 	VkPhysicalDeviceMemoryProperties memProps {};
 	VkPhysicalDeviceFeatures enabledFeatures {};
 	std::vector<VkQueueFamilyProperties> queueProps {};
-	// TODO: store all properties here
 
 	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
 
@@ -106,7 +107,7 @@ struct Device {
 	// public API to communicate with the application.
 	// Must only be accessed while the mutex is locked.
 	// TODO: could keep a stack of swapchains to support the case
-	// "create" -> "destroy" -> "getLastCreated"
+	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
 	Swapchain* lastCreatedSwapchain {};
 
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
@@ -127,6 +128,8 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
 	SyncedUniqueUnorderedMap<VkEvent, Event> events;
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
+	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
+	SyncedUniqueUnorderedMap<VkBufferView, BufferView> bufferViews;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still
@@ -151,7 +154,7 @@ struct Device {
 struct Queue : Handle {
 	Device* dev {};
 
-	VkQueue queue {};
+	VkQueue handle {};
 	VkQueueFlags flags {};
 	u32 family {};
 	float priority {};
@@ -203,5 +206,11 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	uint32_t                                    submitCount,
 	const VkSubmitInfo*                         pSubmits,
 	VkFence                                     fence);
+
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(
+    VkQueue                                     queue);
+
+VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(
+    VkDevice                                    device);
 
 } // naemspace fuen

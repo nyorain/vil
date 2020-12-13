@@ -129,3 +129,37 @@ A command buffer can only have one hook installed at a time.
 What happens if we e.g. have multiple overlays trying to modify it at
 the same time? Probably ok if it just does not work. Maybe we don't want
 to support multiple active overlays anyways, might have problems down the line.
+
+# Event log/tracing concept
+
+```
+struct TracedEvent {
+	enum class Type {
+		submit = (1u << 0), // queue submission/sparse binding
+		present = (1u << 1), // vkQueuePresentKHR call
+		creation = (1u << 2), // creation of a new resource
+		destruction = (1u << 3), // destruction of a resource
+	};
+
+	// Display the event via ImGui
+	virtual void display() const = 0;
+	virutal Type type() const = 0;
+};
+
+struct SubmissionEvent {
+	Queue* queue;
+
+	// somehow track it?
+};
+
+struct CreationEvent {
+	Handle* handle;
+};
+
+struct DestructionEvent {
+	Handle* handle;
+};
+
+struct EventGui {
+};
+```

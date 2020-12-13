@@ -1111,6 +1111,17 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 	// TODO: dependencies
 }
 
+void ResourceGui::drawDesc(Draw&, Event&) {
+}
+void ResourceGui::drawDesc(Draw&, Semaphore&) {
+}
+void ResourceGui::drawDesc(Draw&, Fence&) {
+}
+void ResourceGui::drawDesc(Draw&, BufferView&) {
+}
+void ResourceGui::drawDesc(Draw&, QueryPool&) {
+}
+
 void ResourceGui::draw(Draw& draw) {
 	// search settings
 	ImGui::Columns(2);
@@ -1185,6 +1196,11 @@ void ResourceGui::draw(Draw& draw) {
 	displayResources(dev.computePipes);
 	displayResources(dev.pipeLayouts);
 	displayResources(dev.shaderModules);
+	displayResources(dev.events);
+	displayResources(dev.semaphores);
+	displayResources(dev.fences);
+	displayResources(dev.queryPools);
+	displayResources(dev.bufferViews);
 
 	ImGui::EndChild();
 

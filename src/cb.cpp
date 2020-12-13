@@ -306,6 +306,7 @@ void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
 
 void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
 	if(!cb.sections.empty()) {
+		cmd->parent = cb.sections.back();
 		cb.sections.back()->children.emplace_back(std::move(cmd));
 	} else {
 		cb.commands.emplace_back(std::move(cmd));
@@ -382,7 +383,6 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		const VkImageMemoryBarrier*                 pImageMemoryBarriers) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto cmd = std::make_unique<WaitEventsCmd>();
-	cmd->events = {pEvents, pEvents + eventCount};
 	cmdBarrier(cb, *cmd, srcStageMask, dstStageMask,
 		memoryBarrierCount, pMemoryBarriers,
 		bufferMemoryBarrierCount, pBufferMemoryBarriers,
@@ -390,6 +390,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 
 	for(auto i = 0u; i < eventCount; ++i) {
 		auto& event = cb.dev->events.get(pEvents[i]);
+		cmd->events.push_back(&event);
 		useHandle(cb, *cmd, event);
 	}
 
@@ -527,13 +528,18 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 			auto cat = category(ds.layout->bindings[b].descriptorType);
 			if(cat == DescriptorCategory::image) {
 				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
-					if(!ds.bindings[b][e].valid || !ds.bindings[b][e].imageInfo.imageView) {
+					if(!ds.bindings[b][e].valid) {
 						continue;
 					}
 
-					auto* view = ds.bindings[b][e].imageInfo.imageView;
-					dlg_assert(view);
-					useImage(cb, *cmd, *view->img);
+					if(auto* view = ds.bindings[b][e].imageInfo.imageView; view) {
+						useHandle(cb, *cmd, *view);
+						useImage(cb, *cmd, *view->img);
+					}
+
+					if(auto* sampler = ds.bindings[b][e].imageInfo.sampler; sampler) {
+						useHandle(cb, *cmd, *sampler);
+					}
 				}
 			} else if(cat == DescriptorCategory::buffer) {
 				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
@@ -542,10 +548,20 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 					}
 
 					auto* buf = ds.bindings[b][e].bufferInfo.buffer;
-					dlg_assert(buf);
 					useBuffer(cb, *cmd, *buf);
 				}
-			} // TODO: buffer view
+			} else if(cat == DescriptorCategory::bufferView) {
+				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
+					if(!ds.bindings[b][e].valid || !ds.bindings[b][e].bufferView) {
+						continue;
+					}
+
+					auto* view = ds.bindings[b][e].bufferView;
+					dlg_assert(view->buffer);
+					useHandle(cb, *cmd, *view);
+					useBuffer(cb, *cmd, *view->buffer);
+				}
+			}
 		}
 
 		useHandle(cb, *cmd, ds);
@@ -921,6 +937,106 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 		image, imageLayout, pColor, rangeCount, pRanges);
 }
 
+VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
+		VkCommandBuffer                             commandBuffer,
+		VkImage                                     image,
+		VkImageLayout                               imageLayout,
+		const VkClearDepthStencilValue*             pDepthStencil,
+		uint32_t                                    rangeCount,
+		const VkImageSubresourceRange*              pRanges) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<ClearDepthStencilImageCmd>();
+
+	auto& dst = cb.dev->images.get(image);
+	cmd->dst = &dst;
+	cmd->imgLayout = imageLayout;
+	cmd->value = *pDepthStencil;
+	cmd->ranges = {pRanges, pRanges + rangeCount};
+
+	useImage(cb, *cmd, dst);
+	add(cb, std::move(cmd));
+
+	cb.dev->dispatch.CmdClearDepthStencilImage(commandBuffer, image,
+		imageLayout, pDepthStencil, rangeCount, pRanges);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    attachmentCount,
+		const VkClearAttachment*                    pAttachments,
+		uint32_t                                    rectCount,
+		const VkClearRect*                          pRects) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<ClearAttachmentCmd>();
+	cmd->attachments = {pAttachments, pAttachments + attachmentCount};
+	cmd->rects = {pRects, pRects + rectCount};
+
+	// NOTE: add clears attachments handles to used handles for this cmd?
+	// but they were already used in BeginRenderPass and are just implicitly
+	// used here (as in many other render pass cmds). So we probably should
+	// not do it.
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdClearAttachments(commandBuffer, attachmentCount,
+		pAttachments, rectCount, pRects);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
+		VkCommandBuffer                             commandBuffer,
+		VkImage                                     srcImage,
+		VkImageLayout                               srcImageLayout,
+		VkImage                                     dstImage,
+		VkImageLayout                               dstImageLayout,
+		uint32_t                                    regionCount,
+		const VkImageResolve*                       pRegions) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& src = cb.dev->images.get(srcImage);
+	auto& dst = cb.dev->images.get(dstImage);
+
+	auto cmd = std::make_unique<ResolveImageCmd>();
+	cmd->src = &src;
+	cmd->srcLayout = srcImageLayout;
+	cmd->dst = &dst;
+	cmd->dstLayout = dstImageLayout;
+	cmd->regions = {pRegions, pRegions + regionCount};
+
+	useImage(cb, *cmd, src);
+	useImage(cb, *cmd, dst);
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdResolveImage(commandBuffer, srcImage, srcImageLayout,
+		dstImage, dstImageLayout, regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
+		VkCommandBuffer                             commandBuffer,
+		VkEvent                                     event,
+		VkPipelineStageFlags                        stageMask) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<SetEventCmd>();
+	cmd->event = &cb.dev->events.get(event);
+	cmd->stageMask = stageMask;
+
+	useHandle(cb, *cmd, *cmd->event);
+
+	cb.dev->dispatch.CmdSetEvent(commandBuffer, event, stageMask);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
+		VkCommandBuffer                             commandBuffer,
+		VkEvent                                     event,
+		VkPipelineStageFlags                        stageMask) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<ResetEventCmd>();
+	cmd->event = &cb.dev->events.get(event);
+	cmd->stageMask = stageMask;
+
+	useHandle(cb, *cmd, *cmd->event);
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdSetEvent(commandBuffer, event, stageMask);
+}
+
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    commandBufferCount,
@@ -1073,6 +1189,99 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 
 	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
+		VkCommandBuffer                             commandBuffer,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    query,
+		VkQueryControlFlags                         flags) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<BeginQueryCmd>();
+	cmd->pool = &cb.dev->queryPools.get(queryPool);
+	cmd->query = query;
+	cmd->flags = flags;
+
+	useHandle(cb, *cmd, *cmd->pool);
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdBeginQuery(commandBuffer, queryPool, query, flags);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdEndQuery(
+		VkCommandBuffer                             commandBuffer,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    query) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<EndQueryCmd>();
+	cmd->pool = &cb.dev->queryPools.get(queryPool);
+	cmd->query = query;
+
+	useHandle(cb, *cmd, *cmd->pool);
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdEndQuery(commandBuffer, queryPool, query);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(
+		VkCommandBuffer                             commandBuffer,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    firstQuery,
+		uint32_t                                    queryCount) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<ResetQueryPoolCmd>();
+	cmd->pool = &cb.dev->queryPools.get(queryPool);
+	cmd->first = firstQuery;
+	cmd->count = queryCount;
+
+	useHandle(cb, *cmd, *cmd->pool);
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdResetQueryPool(commandBuffer, queryPool, firstQuery, queryCount);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineStageFlagBits                     pipelineStage,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    query) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<WriteTimestampCmd>();
+	cmd->pool = &cb.dev->queryPools.get(queryPool);
+	cmd->stage = pipelineStage;
+	cmd->query = query;
+
+	useHandle(cb, *cmd, *cmd->pool);
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdWriteTimestamp(commandBuffer, pipelineStage, queryPool, query);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
+		VkCommandBuffer                             commandBuffer,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    firstQuery,
+		uint32_t                                    queryCount,
+		VkBuffer                                    dstBuffer,
+		VkDeviceSize                                dstOffset,
+		VkDeviceSize                                stride,
+		VkQueryResultFlags                          flags) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto cmd = std::make_unique<CopyQueryPoolResultsCmd>();
+	cmd->pool = &cb.dev->queryPools.get(queryPool);
+	cmd->first = firstQuery;
+	cmd->count = queryCount;
+	cmd->dstBuffer = &cb.dev->buffers.get(dstBuffer);
+	cmd->dstOffset = dstOffset;
+	cmd->stride = stride;
+	cmd->flags = flags;
+
+	useHandle(cb, *cmd, *cmd->pool);
+	useBuffer(cb, *cmd, *cmd->dstBuffer);
+
+	add(cb, std::move(cmd));
+	cb.dev->dispatch.CmdCopyQueryPoolResults(commandBuffer, queryPool,
+		firstQuery, queryCount, dstBuffer, dstOffset, stride, flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPushConstants(

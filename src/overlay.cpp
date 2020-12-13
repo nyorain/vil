@@ -34,7 +34,7 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	frameInfo.waitSemaphores = semaphores;
 	frameInfo.fb = buffers[imageIdx].fb;
 	frameInfo.fullscreen = false;
-	frameInfo.presentQueue = queue.queue;
+	frameInfo.presentQueue = queue.handle;
 	frameInfo.swapchain = swapchain->handle;
 
 	auto res = gui.renderFrame(frameInfo);

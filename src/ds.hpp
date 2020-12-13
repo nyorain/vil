@@ -55,6 +55,7 @@ struct DescriptorSet : DeviceHandle {
 		union {
 			ImageInfo imageInfo;
 			BufferInfo bufferInfo;
+			BufferView* bufferView;
 		};
 	};
 
@@ -68,6 +69,7 @@ struct DescriptorSet : DeviceHandle {
 	Sampler* getSampler(unsigned binding, unsigned elem);
 	ImageView* getImageView(unsigned binding, unsigned elem);
 	Buffer* getBuffer(unsigned binding, unsigned elem);
+	BufferView* getBufferView(unsigned binding, unsigned elem);
 
 	~DescriptorSet();
 };

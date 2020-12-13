@@ -10,8 +10,19 @@ struct Buffer : MemoryResource {
 	VkBufferCreateInfo ci;
 
 	std::vector<DescriptorSetRef> descriptors;
+	std::vector<BufferView*> views;
 
 	~Buffer();
+};
+
+struct BufferView : DeviceHandle {
+	VkBufferView handle;
+	VkBufferViewCreateInfo ci;
+	Buffer* buffer {};
+
+	std::vector<DescriptorSetRef> descriptors;
+
+	~BufferView();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
@@ -30,5 +41,16 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
     VkBuffer                                    buffer,
     VkDeviceMemory                              memory,
     VkDeviceSize                                memoryOffset);
+
+VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
+    VkDevice                                    device,
+    const VkBufferViewCreateInfo*               pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkBufferView*                               pView);
+
+VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
+    VkDevice                                    device,
+    VkBufferView                                bufferView,
+    const VkAllocationCallbacks*                pAllocator);
 
 } // namespace fuen

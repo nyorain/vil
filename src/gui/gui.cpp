@@ -671,17 +671,44 @@ void Gui::drawOverviewUI(Draw& draw) {
 	// pretty much just own debug stuff
 	ImGui::Separator();
 
-	ImGui::Columns(2);
+	auto pending = dlg::format("Pending submissions: {}", dev.pending.size());
+	if(ImGui::TreeNode(&dev.pending, "%s", pending.c_str())) {
+		for(auto& subm : dev.pending) {
+			// TODO: make button?
+			imGuiText("To queue {}", name(*subm->queue));
+			if(subm->appFence) {
+				imGuiText("Using Fence");
+				if(ImGui::Button(name(*subm->appFence).c_str())) {
+					selectResource(*subm->appFence);
+				}
+			}
 
-	ImGui::Text("num submissions");
+			ImGui::Indent();
+			for(auto& sub : subm->submissions) {
+				// TODO: show semaphores
+				// should probably store Semaphore instead of VkSemaphore!
+				// if(!sub.waitSemaphores.empty()) {
+				// 	for(auto [sem, flag] : sub.waitSemaphores) {
+				// 	}
+				// }
 
-	ImGui::NextColumn();
+				for(auto* cb : sub.cbs) {
+					ImGui::Bullet();
+					// We have the additional IsItemClicked here since
+					// that might change every frame
+					if(ImGui::Button(name(*cb).c_str()) || ImGui::IsItemClicked()) {
+						selectCb(*cb);
+					}
+				}
+			}
+			ImGui::Unindent();
 
-	ImGui::Text("%u", u32(dev.pending.size()));
+			// ImGui::Separator();
+		}
+		ImGui::TreePop();
+	}
 
 	ImGui::Columns();
-
-	// TODO: quickly get to pending/last submissions from here
 }
 
 void Gui::draw(Draw& draw, bool fullscreen) {
@@ -925,7 +952,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		submitInfo.commandBufferCount = 1u;
 		submitInfo.pCommandBuffers = &draw.cb;
 
-		auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->queue, 1u, &submitInfo, draw.fence);
+		auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
 		if(res != VK_SUCCESS) {
 			dlg_error("vkSubmit error: {}", vk::name(res));
 			return {res, &draw};
@@ -1068,7 +1095,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	submitInfo.pWaitSemaphores = info.waitSemaphores.data();
 	submitInfo.waitSemaphoreCount = info.waitSemaphores.size();
 
-	auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->queue, 1u, &submitInfo, draw.fence);
+	auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
 	if(res != VK_SUCCESS) {
 		dlg_error("vkSubmit error: {}", vk::name(res));
 		return {res, &draw};

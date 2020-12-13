@@ -244,6 +244,8 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CreateBuffer),
    FUEN_HOOK(DestroyBuffer),
    FUEN_HOOK(BindBufferMemory),
+   FUEN_HOOK(CreateBufferView),
+   FUEN_HOOK(DestroyBufferView),
 
    // memory.hpp
    FUEN_HOOK(AllocateMemory),
@@ -287,6 +289,10 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
 	FUEN_HOOK(CreatePipelineLayout),
 	FUEN_HOOK(DestroyPipelineLayout),
 
+	// queryPool.hpp
+	FUEN_HOOK(CreateQueryPool),
+	FUEN_HOOK(DestroyQueryPool),
+
    // cb.hpp
    FUEN_HOOK(CreateCommandPool),
    FUEN_HOOK(DestroyCommandPool),
@@ -303,6 +309,11 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdNextSubpass),
    FUEN_HOOK(CmdWaitEvents),
    FUEN_HOOK(CmdPipelineBarrier),
+   FUEN_HOOK(CmdBeginQuery),
+   FUEN_HOOK(CmdEndQuery),
+   FUEN_HOOK(CmdResetQueryPool),
+   FUEN_HOOK(CmdWriteTimestamp),
+   FUEN_HOOK(CmdCopyQueryPoolResults),
    FUEN_HOOK(CmdDraw),
    FUEN_HOOK(CmdDrawIndexed),
    FUEN_HOOK(CmdDrawIndirect),
@@ -313,6 +324,11 @@ static const std::unordered_map<std::string_view, void*> funcPtrTable {
    FUEN_HOOK(CmdBindIndexBuffer),
    FUEN_HOOK(CmdBindDescriptorSets),
    FUEN_HOOK(CmdClearColorImage),
+   FUEN_HOOK(CmdClearDepthStencilImage),
+   FUEN_HOOK(CmdClearAttachments),
+   FUEN_HOOK(CmdResolveImage),
+   FUEN_HOOK(CmdSetEvent),
+   FUEN_HOOK(CmdResetEvent),
    FUEN_HOOK(CmdCopyBufferToImage),
    FUEN_HOOK(CmdCopyImageToBuffer),
    FUEN_HOOK(CmdBlitImage),

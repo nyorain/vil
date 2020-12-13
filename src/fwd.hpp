@@ -43,6 +43,8 @@ struct Framebuffer;
 struct RenderPass;
 struct CommandBuffer;
 struct Buffer;
+struct BufferView;
+struct QueryPool;
 struct DeviceMemory;
 struct Fence;
 struct Event;
@@ -62,6 +64,7 @@ struct RenderPassDesc;
 
 struct Command;
 struct SectionCommand;
+struct CommandDescription;
 
 struct RenderData;
 struct DisplayWindow;
