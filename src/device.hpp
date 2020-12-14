@@ -50,6 +50,8 @@ struct Device {
 	VkPhysicalDevice phdev;
 	VkLayerDispatchTable dispatch;
 
+	std::vector<std::string> extensions;
+
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
 	VkPhysicalDeviceFeatures enabledFeatures {};
@@ -199,7 +201,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	VkDevice dev,
-	VkAllocationCallbacks* alloc);
+	const VkAllocationCallbacks* alloc);
 
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	VkQueue                                     queue,

@@ -88,23 +88,18 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 	dev.dispatch.DestroyBuffer(device, buffer, pAllocator);
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
-		VkDevice                                    device,
-		VkBuffer                                    buffer,
-		VkDeviceMemory                              memory,
-		VkDeviceSize                                memoryOffset) {
-	auto& dev = getData<Device>(device);
-	auto& buf = dev.buffers.get(buffer);
-	auto& mem = dev.deviceMemories.get(memory);
+void bindBufferMemory(Device& dev, const VkBindBufferMemoryInfo& bind) {
+	auto& buf = dev.buffers.get(bind.buffer);
+	auto& mem = dev.deviceMemories.get(bind.memory);
 
 	dlg_assert(!buf.memory);
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.GetBufferMemoryRequirements(device, buffer, &memReqs);
+	dev.dispatch.GetBufferMemoryRequirements(dev.handle, bind.buffer, &memReqs);
 
 	buf.memory = &mem;
-	buf.allocationOffset = memoryOffset;
+	buf.allocationOffset = bind.memoryOffset;
 	buf.allocationSize = memReqs.size;
 
 	{
@@ -112,8 +107,29 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 		std::lock_guard lock(dev.mutex);
 		mem.allocations.insert(&buf);
 	}
+}
 
+VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
+		VkDevice                                    device,
+		VkBuffer                                    buffer,
+		VkDeviceMemory                              memory,
+		VkDeviceSize                                memoryOffset) {
+	auto& dev = getData<Device>(device);
+	bindBufferMemory(dev, {{}, {}, buffer, memory, memoryOffset});
 	return dev.dispatch.BindBufferMemory(device, buffer, memory, memoryOffset);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
+		VkDevice                                    device,
+		uint32_t                                    bindInfoCount,
+		const VkBindBufferMemoryInfo*               pBindInfos) {
+	auto& dev = getData<Device>(device);
+	for(auto i = 0u; i < bindInfoCount; ++i) {
+		auto& bind = pBindInfos[i];
+		bindBufferMemory(dev, bind);
+	}
+
+	return dev.dispatch.BindBufferMemory2(device, bindInfoCount, pBindInfos);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(

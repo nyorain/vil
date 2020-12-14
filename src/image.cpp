@@ -118,23 +118,18 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 	dev.dispatch.DestroyImage(device, image, pAllocator);
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
-		VkDevice                                    device,
-		VkImage                                     image,
-		VkDeviceMemory                              memory,
-		VkDeviceSize                                memoryOffset) {
-	auto& dev = getData<Device>(device);
-	auto& img = dev.images.get(image);
-	auto& mem = dev.deviceMemories.get(memory);
+void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
+	auto& img = dev.images.get(bind.image);
+	auto& mem = dev.deviceMemories.get(bind.memory);
 
 	dlg_assert(!img.memory);
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.GetImageMemoryRequirements(device, image, &memReqs);
+	dev.dispatch.GetImageMemoryRequirements(dev.handle, bind.image, &memReqs);
 
 	img.memory = &mem;
-	img.allocationOffset = memoryOffset;
+	img.allocationOffset = bind.memoryOffset;
 	img.allocationSize = memReqs.size;
 
 	{
@@ -142,7 +137,28 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 		std::lock_guard lock(dev.mutex);
 		mem.allocations.insert(&img);
 	}
+}
 
+VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
+		VkDevice                                    device,
+		uint32_t                                    bindInfoCount,
+		const VkBindImageMemoryInfo*                pBindInfos) {
+	auto& dev = getData<Device>(device);
+	for(auto i = 0u; i < bindInfoCount; ++i) {
+		auto& bind = pBindInfos[i];
+		bindImageMemory(dev, bind);
+	}
+
+	return dev.dispatch.BindImageMemory2(device, bindInfoCount, pBindInfos);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
+		VkDevice                                    device,
+		VkImage                                     image,
+		VkDeviceMemory                              memory,
+		VkDeviceSize                                memoryOffset) {
+	auto& dev = getData<Device>(device);
+	bindImageMemory(dev, {{}, {}, image, memory, memoryOffset});
 	return dev.dispatch.BindImageMemory(device, image, memory, memoryOffset);
 }
 

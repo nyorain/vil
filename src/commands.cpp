@@ -67,6 +67,10 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 		}
 	};
 
+	// TODO: when we can't find an exact match, we probably want to return
+	// the nearest parent we could find (maybe require an even higher
+	// threshold though since jumping to a false parent sucks).
+	// Maybe control that behavior via an external argument
 	auto findCandidates = [](const std::vector<std::unique_ptr<Command>>& cmds,
 			const CommandDescription& desc) -> std::vector<Candidate> {
 		std::vector<Candidate> candidates;
@@ -309,7 +313,7 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdEndRenderPass(cb);
 }
 
-void BaseDrawCmd::displayGrahpicsState(Gui& gui, bool indices) const {
+void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	if(indices) {
 		dlg_assert(state.indices.buffer);
 		imGuiText("Index Buffer: ");
@@ -356,21 +360,32 @@ std::vector<std::string> DrawCmd::argumentsDesc() const {
 		vertexCount, instanceCount, firstInstance, firstVertex);
 }
 
+// DrawIndirectCmd
 void DrawIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdDrawIndirect(cb, buffer->handle, offset, drawCount, stride);
+	if(indexed) {
+		dev.dispatch.CmdDrawIndexedIndirect(cb, buffer->handle, offset, drawCount, stride);
+	} else {
+		dev.dispatch.CmdDrawIndirect(cb, buffer->handle, offset, drawCount, stride);
+	}
 }
 
 std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
-	return createArgumentsDesc(buffer, offset, drawCount, stride,
-		state.pipe, state.indices, state.vertices, state.descriptorSets);
+	auto ret = createArgumentsDesc(buffer, offset, drawCount, stride,
+		state.pipe, state.vertices, state.descriptorSets);
+	if(indexed) {
+		addToArgumentsDesc(ret, state.indices);
+	}
+
+	return ret;
 }
 
 void DrawIndirectCmd::displayInspector(Gui& gui) const {
 	// TODO: display effective draw command
 	resourceRefButton(gui, *buffer);
-	BaseDrawCmd::displayGrahpicsState(gui, false);
+	DrawCmdBase::displayGrahpicsState(gui, false);
 }
 
+// DrawIndexedCmd
 void DrawIndexedCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdDrawIndexed(cb, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
@@ -381,21 +396,41 @@ std::vector<std::string> DrawIndexedCmd::argumentsDesc() const {
 		indexCount, instanceCount, firstInstance, firstIndex);
 }
 
-void DrawIndexedIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdDrawIndexedIndirect(cb, buffer->handle, offset, drawCount, stride);
+// DrawIndirectCountCmd
+void DrawIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	if(indexed) {
+		dev.dispatch.CmdDrawIndexedIndirectCount(cb, buffer->handle, offset,
+			countBuffer->handle, countBufferOffset, maxDrawCount, stride);
+	} else {
+		dev.dispatch.CmdDrawIndirectCount(cb, buffer->handle, offset,
+			countBuffer->handle, countBufferOffset, maxDrawCount, stride);
+	}
 }
 
-void DrawIndexedIndirectCmd::displayInspector(Gui& gui) const {
+std::vector<std::string> DrawIndirectCountCmd::argumentsDesc() const {
+	auto ret = createArgumentsDesc(buffer, offset, countBuffer, countBufferOffset,
+		maxDrawCount, stride, state.pipe, state.vertices, state.descriptorSets);
+	if(indexed) {
+		addToArgumentsDesc(ret, state.indices);
+	}
+
+	return ret;
+}
+
+void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
 	// TODO: display effective draw command
+	imGuiText("Indirect buffer:");
+	ImGui::SameLine();
 	resourceRefButton(gui, *buffer);
-	BaseDrawCmd::displayGrahpicsState(gui, true);
+
+	imGuiText("Count buffer:");
+	ImGui::SameLine();
+	resourceRefButton(gui, *countBuffer);
+
+	DrawCmdBase::displayGrahpicsState(gui, false);
 }
 
-std::vector<std::string> DrawIndexedIndirectCmd::argumentsDesc() const {
-	return createArgumentsDesc(buffer, offset, drawCount, stride,
-		state.pipe, state.indices, state.vertices, state.descriptorSets);
-}
-
+// BindVertexBuffersCmd
 void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	auto vkbuffers = rawHandles(buffers);
 	dev.dispatch.CmdBindVertexBuffers(cb, firstBinding,
@@ -413,7 +448,7 @@ void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		dynamicOffsets.size(), dynamicOffsets.data());
 }
 
-void BaseDispatchCmd::displayComputeState(Gui& gui) const {
+void DispatchCmdBase::displayComputeState(Gui& gui) const {
 	resourceRefButton(gui, *state.pipe);
 
 	imGuiText("Descriptors");
@@ -445,11 +480,21 @@ void DispatchIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 void DispatchIndirectCmd::displayInspector(Gui& gui) const {
 	// TODO: display effective dispatch command
 	resourceRefButton(gui, *buffer);
-	BaseDispatchCmd::displayComputeState(gui);
+	DispatchCmdBase::displayComputeState(gui);
 }
 
 std::vector<std::string> DispatchIndirectCmd::argumentsDesc() const {
 	return createArgumentsDesc(*buffer, offset, state.pipe, state.descriptorSets);
+}
+
+void DispatchBaseCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdDispatchBase(cb, baseGroupX, baseGroupY, baseGroupZ,
+		groupsX, groupsY, groupsZ);
+}
+
+std::vector<std::string> DispatchBaseCmd::argumentsDesc() const {
+	return createArgumentsDesc(baseGroupX, baseGroupY, baseGroupZ,
+		groupsX, groupsY, groupsZ);
 }
 
 void CopyImageCmd::record(const Device& dev, VkCommandBuffer cb) const {

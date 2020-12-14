@@ -131,6 +131,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	insertData(*pInstance, iniPtr.release());
 	ini.handle = *pInstance;
+	ini.extensions = {extsBegin, extsEnd};
 
 	// TODO: could enable it ourselves. Might be useful even if
 	// application does not want it.
@@ -185,182 +186,236 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 VKAPI_ATTR PFN_vkVoidFunction GetInstanceProcAddr(VkInstance, const char*);
 VKAPI_ATTR PFN_vkVoidFunction GetDeviceProcAddr(VkDevice, const char*);
 
-#define FUEN_HOOK(fn) { "vk" # fn, (void *) fn }
-#define FUEN_ALIAS(alias, fn) { "vk" # alias, (void *) ## fn }
-
-static const std::unordered_map<std::string_view, void*> funcPtrTable {
-   FUEN_HOOK(GetInstanceProcAddr),
-   FUEN_HOOK(GetDeviceProcAddr),
-
-   FUEN_HOOK(CreateInstance),
-   FUEN_HOOK(DestroyInstance),
-
-   FUEN_HOOK(CreateDevice),
-   FUEN_HOOK(DestroyDevice),
-
-   FUEN_HOOK(CreateSwapchainKHR),
-   FUEN_HOOK(DestroySwapchainKHR),
-
-   FUEN_HOOK(QueueSubmit),
-   FUEN_HOOK(QueuePresentKHR),
-
-   // TODO: we probably have to implement *all* the functions since
-   // we say we support the extension.
-   // We probably also have to return nullptr when the extension
-   // isn't enabled, instead of our implementations. Just add
-   // an extra "(func name -> (extension, func ptr))" lookup table. Or
-   // simply add "extension" field here that is empty usually?
-   // Anyways, then check (in GetProcAddr) whether that extension was
-   // enabled.
-   FUEN_HOOK(SetDebugUtilsObjectNameEXT),
-   FUEN_HOOK(SetDebugUtilsObjectTagEXT),
-   FUEN_HOOK(CmdBeginDebugUtilsLabelEXT),
-   FUEN_HOOK(CmdEndDebugUtilsLabelEXT),
-
-   // TODO: make optional
-   // FUEN_HOOK(CreateWaylandSurfaceKHR),
-
-   FUEN_HOOK(DestroySurfaceKHR),
-
-   // rp.hpp
-   FUEN_HOOK(CreateFramebuffer),
-   FUEN_HOOK(DestroyFramebuffer),
-
-   FUEN_HOOK(CreateRenderPass),
-   FUEN_HOOK(DestroyRenderPass),
-
-   // image.hpp
-   FUEN_HOOK(CreateImage),
-   FUEN_HOOK(DestroyImage),
-   FUEN_HOOK(BindImageMemory),
-
-   FUEN_HOOK(CreateImageView),
-   FUEN_HOOK(DestroyImageView),
-
-   FUEN_HOOK(CreateSampler),
-   FUEN_HOOK(DestroySampler),
-
-   // buffer.hpp
-   FUEN_HOOK(CreateBuffer),
-   FUEN_HOOK(DestroyBuffer),
-   FUEN_HOOK(BindBufferMemory),
-   FUEN_HOOK(CreateBufferView),
-   FUEN_HOOK(DestroyBufferView),
-
-   // memory.hpp
-   FUEN_HOOK(AllocateMemory),
-   FUEN_HOOK(FreeMemory),
-   FUEN_HOOK(MapMemory),
-   FUEN_HOOK(UnmapMemory),
-
-   // shader.hpp
-   FUEN_HOOK(CreateShaderModule),
-   FUEN_HOOK(DestroyShaderModule),
-
-   // sync.hpp
-   FUEN_HOOK(CreateFence),
-   FUEN_HOOK(DestroyFence),
-   FUEN_HOOK(ResetFences),
-   FUEN_HOOK(GetFenceStatus),
-   FUEN_HOOK(WaitForFences),
-
-   FUEN_HOOK(CreateSemaphore),
-   FUEN_HOOK(DestroySemaphore),
-
-   FUEN_HOOK(CreateEvent),
-   FUEN_HOOK(DestroyEvent),
-   FUEN_HOOK(SetEvent),
-   FUEN_HOOK(ResetEvent),
-   FUEN_HOOK(GetEventStatus),
-
-	// ds.hpp
-	FUEN_HOOK(CreateDescriptorSetLayout),
-	FUEN_HOOK(DestroyDescriptorSetLayout),
-	FUEN_HOOK(CreateDescriptorPool),
-	FUEN_HOOK(DestroyDescriptorPool),
-	FUEN_HOOK(ResetDescriptorPool),
-	FUEN_HOOK(AllocateDescriptorSets),
-	FUEN_HOOK(FreeDescriptorSets),
-	FUEN_HOOK(UpdateDescriptorSets),
-
-	// pipe.hpp
-	FUEN_HOOK(CreateGraphicsPipelines),
-	FUEN_HOOK(CreateComputePipelines),
-	FUEN_HOOK(CreatePipelineLayout),
-	FUEN_HOOK(DestroyPipelineLayout),
-
-	// queryPool.hpp
-	FUEN_HOOK(CreateQueryPool),
-	FUEN_HOOK(DestroyQueryPool),
-
-   // cb.hpp
-   FUEN_HOOK(CreateCommandPool),
-   FUEN_HOOK(DestroyCommandPool),
-   FUEN_HOOK(ResetCommandPool),
-
-   FUEN_HOOK(AllocateCommandBuffers),
-   FUEN_HOOK(FreeCommandBuffers),
-   FUEN_HOOK(BeginCommandBuffer),
-   FUEN_HOOK(EndCommandBuffer),
-   FUEN_HOOK(ResetCommandBuffer),
-
-   FUEN_HOOK(CmdBeginRenderPass),
-   FUEN_HOOK(CmdEndRenderPass),
-   FUEN_HOOK(CmdNextSubpass),
-   FUEN_HOOK(CmdWaitEvents),
-   FUEN_HOOK(CmdPipelineBarrier),
-   FUEN_HOOK(CmdBeginQuery),
-   FUEN_HOOK(CmdEndQuery),
-   FUEN_HOOK(CmdResetQueryPool),
-   FUEN_HOOK(CmdWriteTimestamp),
-   FUEN_HOOK(CmdCopyQueryPoolResults),
-   FUEN_HOOK(CmdDraw),
-   FUEN_HOOK(CmdDrawIndexed),
-   FUEN_HOOK(CmdDrawIndirect),
-   FUEN_HOOK(CmdDrawIndexedIndirect),
-   FUEN_HOOK(CmdDispatch),
-   FUEN_HOOK(CmdDispatchIndirect),
-   FUEN_HOOK(CmdBindVertexBuffers),
-   FUEN_HOOK(CmdBindIndexBuffer),
-   FUEN_HOOK(CmdBindDescriptorSets),
-   FUEN_HOOK(CmdClearColorImage),
-   FUEN_HOOK(CmdClearDepthStencilImage),
-   FUEN_HOOK(CmdClearAttachments),
-   FUEN_HOOK(CmdResolveImage),
-   FUEN_HOOK(CmdSetEvent),
-   FUEN_HOOK(CmdResetEvent),
-   FUEN_HOOK(CmdCopyBufferToImage),
-   FUEN_HOOK(CmdCopyImageToBuffer),
-   FUEN_HOOK(CmdBlitImage),
-   FUEN_HOOK(CmdCopyImage),
-   FUEN_HOOK(CmdExecuteCommands),
-   FUEN_HOOK(CmdCopyBuffer),
-   FUEN_HOOK(CmdFillBuffer),
-   FUEN_HOOK(CmdUpdateBuffer),
-   FUEN_HOOK(CmdBindPipeline),
-   FUEN_HOOK(CmdPushConstants),
-   FUEN_HOOK(CmdSetViewport),
-   FUEN_HOOK(CmdSetScissor),
-   FUEN_HOOK(CmdSetLineWidth),
-   FUEN_HOOK(CmdSetDepthBias),
-   FUEN_HOOK(CmdSetBlendConstants),
-   FUEN_HOOK(CmdSetDepthBounds),
-   FUEN_HOOK(CmdSetStencilCompareMask),
-   FUEN_HOOK(CmdSetStencilWriteMask),
-   FUEN_HOOK(CmdSetStencilReference),
+struct HookedFunction {
+	PFN_vkVoidFunction func {};
+	bool device {}; // device-level function
+	std::string_view iniExt {}; // name of extension that has to be enabled
+	std::string_view devExt {}; // name of extension that has to be enabled
 };
 
-#undef FUEN_HOOK
-#undef FUEN_ALIAS
+// We make sure our hooked functions match the type required by vulkan
+// since everything below here is just wild function pointer casting.
+#define FN_TC(fn, val) []{ \
+	static_assert(std::is_same_v<decltype(&fn), PFN_vk ## fn>); \
+	return val; \
+}()
 
-PFN_vkVoidFunction findFunctionPtr(const char* name) {
-	auto it = funcPtrTable.find(std::string_view(name));
-	if(it == funcPtrTable.end()) {
-		return nullptr;
-	}
+// For aliases we additionally make sure that original and alias function
+// type matches. And we check that original and alias aren't the same (as
+// that mistake can be done easily).
+#define FN_TC_ALIAS(alias, fn, val) []{ \
+	static_assert(std::string_view(#alias) != std::string_view(#fn), "Alias and original can't be same"); \
+	using ImplF = decltype(&fn); \
+	using Ref = PFN_vk ## fn; \
+	using AliasRef = PFN_vk ## alias; \
+	static_assert(std::is_same_v<ImplF, Ref>); \
+	static_assert(std::is_same_v<AliasRef, Ref>); \
+	return val; \
+}()
 
-   return reinterpret_cast<PFN_vkVoidFunction>(it->second);
-}
+#define FUEN_INI_HOOK(fn) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), {}}}
+#define FUEN_INI_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), ext}}
+
+#define FUEN_DEV_HOOK(fn) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), {}, {}}}
+#define FUEN_DEV_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), {}, ext}}
+#define FUEN_DEV_HOOK_ALIAS(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), {}, ext}}
+
+static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
+	FUEN_INI_HOOK(GetInstanceProcAddr),
+	FUEN_INI_HOOK(CreateInstance),
+	FUEN_INI_HOOK(DestroyInstance),
+
+	FUEN_DEV_HOOK(GetDeviceProcAddr),
+	FUEN_DEV_HOOK(CreateDevice),
+	FUEN_DEV_HOOK(DestroyDevice),
+
+	FUEN_DEV_HOOK(QueueSubmit),
+
+	FUEN_DEV_HOOK_EXT(CreateSwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
+	FUEN_DEV_HOOK_EXT(DestroySwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
+	FUEN_DEV_HOOK_EXT(QueuePresentKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK_EXT(SetDebugUtilsObjectNameEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
+	FUEN_DEV_HOOK_EXT(SetDebugUtilsObjectTagEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
+	FUEN_DEV_HOOK_EXT(CmdBeginDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
+	FUEN_DEV_HOOK_EXT(CmdEndDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
+
+	// TODO: enable optionally
+	// FUEN_HOOK(CreateWaylandSurfaceKHR),
+	FUEN_INI_HOOK_EXT(DestroySurfaceKHR, VK_KHR_SURFACE_EXTENSION_NAME),
+
+	// rp.hpp
+	FUEN_DEV_HOOK(CreateFramebuffer),
+	FUEN_DEV_HOOK(DestroyFramebuffer),
+
+	FUEN_DEV_HOOK(CreateRenderPass),
+	FUEN_DEV_HOOK(DestroyRenderPass),
+	FUEN_DEV_HOOK(CreateRenderPass2),
+	FUEN_DEV_HOOK_ALIAS(CreateRenderPass2KHR, CreateRenderPass2,
+		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
+
+	// image.hpp
+	FUEN_DEV_HOOK(CreateImage),
+	FUEN_DEV_HOOK(DestroyImage),
+	FUEN_DEV_HOOK(BindImageMemory),
+	FUEN_DEV_HOOK(BindImageMemory2),
+	FUEN_DEV_HOOK_ALIAS(BindImageMemory2KHR, BindImageMemory2,
+		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK(CreateImageView),
+	FUEN_DEV_HOOK(DestroyImageView),
+
+	FUEN_DEV_HOOK(CreateSampler),
+	FUEN_DEV_HOOK(DestroySampler),
+
+	// buffer.hpp
+	FUEN_DEV_HOOK(CreateBuffer),
+	FUEN_DEV_HOOK(DestroyBuffer),
+	FUEN_DEV_HOOK(BindBufferMemory),
+	FUEN_DEV_HOOK(BindBufferMemory2),
+	FUEN_DEV_HOOK_ALIAS(BindBufferMemory2KHR, BindBufferMemory2,
+		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK(CreateBufferView),
+	FUEN_DEV_HOOK(DestroyBufferView),
+
+	// memory.hpp
+	FUEN_DEV_HOOK(AllocateMemory),
+	FUEN_DEV_HOOK(FreeMemory),
+	FUEN_DEV_HOOK(MapMemory),
+	FUEN_DEV_HOOK(UnmapMemory),
+
+	// shader.hpp
+	FUEN_DEV_HOOK(CreateShaderModule),
+	FUEN_DEV_HOOK(DestroyShaderModule),
+
+	// sync.hpp
+	FUEN_DEV_HOOK(CreateFence),
+	FUEN_DEV_HOOK(DestroyFence),
+	FUEN_DEV_HOOK(ResetFences),
+	FUEN_DEV_HOOK(GetFenceStatus),
+	FUEN_DEV_HOOK(WaitForFences),
+
+	FUEN_DEV_HOOK(CreateSemaphore),
+	FUEN_DEV_HOOK(DestroySemaphore),
+
+	FUEN_DEV_HOOK(CreateEvent),
+	FUEN_DEV_HOOK(DestroyEvent),
+	FUEN_DEV_HOOK(SetEvent),
+	FUEN_DEV_HOOK(ResetEvent),
+	FUEN_DEV_HOOK(GetEventStatus),
+
+	// ds.hpp
+	FUEN_DEV_HOOK(CreateDescriptorSetLayout),
+	FUEN_DEV_HOOK(DestroyDescriptorSetLayout),
+	FUEN_DEV_HOOK(CreateDescriptorPool),
+	FUEN_DEV_HOOK(DestroyDescriptorPool),
+	FUEN_DEV_HOOK(ResetDescriptorPool),
+	FUEN_DEV_HOOK(AllocateDescriptorSets),
+	FUEN_DEV_HOOK(FreeDescriptorSets),
+	FUEN_DEV_HOOK(UpdateDescriptorSets),
+
+	// pipe.hpp
+	FUEN_DEV_HOOK(CreateGraphicsPipelines),
+	FUEN_DEV_HOOK(CreateComputePipelines),
+	FUEN_DEV_HOOK(CreatePipelineLayout),
+	FUEN_DEV_HOOK(DestroyPipelineLayout),
+
+	// queryPool.hpp
+	FUEN_DEV_HOOK(CreateQueryPool),
+	FUEN_DEV_HOOK(DestroyQueryPool),
+
+	// cb.hpp
+	FUEN_DEV_HOOK(CreateCommandPool),
+	FUEN_DEV_HOOK(DestroyCommandPool),
+	FUEN_DEV_HOOK(ResetCommandPool),
+
+	FUEN_DEV_HOOK(AllocateCommandBuffers),
+	FUEN_DEV_HOOK(FreeCommandBuffers),
+	FUEN_DEV_HOOK(BeginCommandBuffer),
+	FUEN_DEV_HOOK(EndCommandBuffer),
+	FUEN_DEV_HOOK(ResetCommandBuffer),
+
+	FUEN_DEV_HOOK(CmdBeginRenderPass),
+	FUEN_DEV_HOOK(CmdEndRenderPass),
+	FUEN_DEV_HOOK(CmdNextSubpass),
+	FUEN_DEV_HOOK(CmdWaitEvents),
+	FUEN_DEV_HOOK(CmdPipelineBarrier),
+	FUEN_DEV_HOOK(CmdBeginQuery),
+	FUEN_DEV_HOOK(CmdEndQuery),
+	FUEN_DEV_HOOK(CmdResetQueryPool),
+	FUEN_DEV_HOOK(CmdWriteTimestamp),
+	FUEN_DEV_HOOK(CmdCopyQueryPoolResults),
+	FUEN_DEV_HOOK(CmdDraw),
+	FUEN_DEV_HOOK(CmdDrawIndexed),
+	FUEN_DEV_HOOK(CmdDrawIndirect),
+	FUEN_DEV_HOOK(CmdDrawIndexedIndirect),
+	FUEN_DEV_HOOK(CmdDispatch),
+	FUEN_DEV_HOOK(CmdDispatchIndirect),
+	FUEN_DEV_HOOK(CmdBindVertexBuffers),
+	FUEN_DEV_HOOK(CmdBindIndexBuffer),
+	FUEN_DEV_HOOK(CmdBindDescriptorSets),
+	FUEN_DEV_HOOK(CmdClearColorImage),
+	FUEN_DEV_HOOK(CmdClearDepthStencilImage),
+	FUEN_DEV_HOOK(CmdClearAttachments),
+	FUEN_DEV_HOOK(CmdResolveImage),
+	FUEN_DEV_HOOK(CmdSetEvent),
+	FUEN_DEV_HOOK(CmdResetEvent),
+	FUEN_DEV_HOOK(CmdCopyBufferToImage),
+	FUEN_DEV_HOOK(CmdCopyImageToBuffer),
+	FUEN_DEV_HOOK(CmdBlitImage),
+	FUEN_DEV_HOOK(CmdCopyImage),
+	FUEN_DEV_HOOK(CmdExecuteCommands),
+	FUEN_DEV_HOOK(CmdCopyBuffer),
+	FUEN_DEV_HOOK(CmdFillBuffer),
+	FUEN_DEV_HOOK(CmdUpdateBuffer),
+	FUEN_DEV_HOOK(CmdBindPipeline),
+	FUEN_DEV_HOOK(CmdPushConstants),
+	FUEN_DEV_HOOK(CmdSetViewport),
+	FUEN_DEV_HOOK(CmdSetScissor),
+	FUEN_DEV_HOOK(CmdSetLineWidth),
+	FUEN_DEV_HOOK(CmdSetDepthBias),
+	FUEN_DEV_HOOK(CmdSetBlendConstants),
+	FUEN_DEV_HOOK(CmdSetDepthBounds),
+	FUEN_DEV_HOOK(CmdSetStencilCompareMask),
+	FUEN_DEV_HOOK(CmdSetStencilWriteMask),
+	FUEN_DEV_HOOK(CmdSetStencilReference),
+
+	FUEN_DEV_HOOK(CmdDispatchBase),
+	FUEN_DEV_HOOK_ALIAS(CmdDispatchBaseKHR, CmdDispatchBase,
+		VK_KHR_DEVICE_GROUP_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK(CmdDrawIndirectCount),
+	FUEN_DEV_HOOK_ALIAS(CmdDrawIndirectCountKHR, CmdDrawIndirectCount,
+		VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
+	FUEN_DEV_HOOK_ALIAS(CmdDrawIndirectCountAMD, CmdDrawIndirectCount,
+		VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK(CmdDrawIndexedIndirectCount),
+	FUEN_DEV_HOOK_ALIAS(CmdDrawIndexedIndirectCountKHR, CmdDrawIndexedIndirectCount,
+		VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
+	FUEN_DEV_HOOK_ALIAS(CmdDrawIndexedIndirectCountAMD, CmdDrawIndexedIndirectCount,
+		VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK(CmdBeginRenderPass2),
+	FUEN_DEV_HOOK_ALIAS(CmdBeginRenderPass2KHR, CmdBeginRenderPass2,
+		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK(CmdNextSubpass2),
+	FUEN_DEV_HOOK_ALIAS(CmdNextSubpass2KHR, CmdNextSubpass2,
+		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
+
+	FUEN_DEV_HOOK(CmdEndRenderPass2),
+	FUEN_DEV_HOOK_ALIAS(CmdEndRenderPass2KHR, CmdEndRenderPass2,
+		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
+};
+
+#undef FUEN_INI_HOOK
+#undef FUEN_INI_HOOK_EXT
+
+#undef FUEN_DEV_HOOK
+#undef FUEN_DEV_HOOK_EXT
+#undef FUEN_DEV_HOOK_ALIAS
 
 // We make sure this way that e.g. calling vkGetInstanceProcAddr with
 // vkGetInstanceProcAddr as funcName parameter returns itself.
@@ -368,34 +423,88 @@ PFN_vkVoidFunction findFunctionPtr(const char* name) {
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, const char* funcName) {
 	// Check if we hooked it. If we didn't hook it and ini is invalid,
 	// return nullptr.
-	auto ptr = fuen::findFunctionPtr(funcName);
-	if(ptr || !ini) {
-		return ptr;
+	auto it = funcPtrTable.find(std::string_view(funcName));
+	if(it == funcPtrTable.end()) {
+		// If it's not hooked, just forward it to the next chain link
+		auto* inid = fuen::findData<fuen::Instance>(ini);
+		if(!inid || !inid->dispatch.GetInstanceProcAddr) {
+			dlg_error("invalid instance data: {}", ini);
+			return nullptr;
+		}
+
+		return inid->dispatch.GetInstanceProcAddr(ini, funcName);
 	}
 
-	// If it's not hooked, just forward it to the next chain link
+	// special case: functions that don't need instance
+	auto& hooked = it->second;
+	if(std::strcmp(funcName, "vkGetInstanceProcAddr") == 0 ||
+			std::strcmp(funcName, "vkCreateInstance") == 0) {
+		return hooked.func;
+	}
+
+	if(!ini) {
+		dlg_trace("Invalid call to GetInstanceProcAddr without ini: {}", funcName);
+		return nullptr;
+	}
+
 	auto* inid = fuen::findData<fuen::Instance>(ini);
-	if(!inid || !inid->dispatch.GetInstanceProcAddr) {
+	if(!inid) {
 		dlg_error("invalid instance data: {}", ini);
 		return nullptr;
 	}
 
-	return inid->dispatch.GetInstanceProcAddr(ini, funcName);
+	if(!hooked.device && !hooked.iniExt.empty()) {
+		auto it = find(inid->extensions, hooked.iniExt);
+		if(it == inid->extensions.end()) {
+			dlg_trace("tried to load ini proc addr {} for disabled ext {}",
+				funcName, hooked.devExt);
+			return nullptr;
+		}
+	}
+
+	// TODO: when the queried function is a device function we technically
+	// should only return it when there is a physical device supporting
+	// the function (we could store a list of those in the instance data).
+	// See documentation for vkGetInstanceProcAddr.
+
+	return hooked.func;
 }
 
-VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice dev, const char* funcName) {
-   auto ptr = fuen::findFunctionPtr(funcName);
-   if(ptr || !dev) {
-	   return ptr;
-   }
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const char* funcName) {
+	auto it = funcPtrTable.find(std::string_view(funcName));
+	if(it == funcPtrTable.end()) {
+		// If it's not hooked, just forward it to the next chain link
+		auto* dev = fuen::findData<fuen::Device>(vkDev);
+		if(!dev || !dev->dispatch.GetDeviceProcAddr) {
+			dlg_error("invalid device data: {}", vkDev);
+			return nullptr;
+		}
 
-   auto* devd = fuen::findData<fuen::Device>(dev);
-   if(!devd || !devd->dispatch.GetDeviceProcAddr) {
-		dlg_error("invalid device data: {}", dev);
-	   return nullptr;
-   }
+  		return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
+	}
 
-   return devd->dispatch.GetDeviceProcAddr(dev, funcName);
+	auto& hooked = it->second;
+	if(!vkDev || !hooked.device) {
+		dlg_trace("GetDeviceProcAddr with no devcice/non-device function: {}", funcName);
+		return nullptr;
+	}
+
+	auto* dev = fuen::findData<fuen::Device>(vkDev);
+	if(!dev) {
+		dlg_error("invalid device data: {}", vkDev);
+		return nullptr;
+	}
+
+	if(!hooked.devExt.empty()) {
+		auto it = find(dev->extensions, hooked.devExt);
+		if(it == dev->extensions.end()) {
+			dlg_trace("tried to load dev proc addr {} for disabled ext {}",
+				funcName, hooked.devExt);
+			return nullptr;
+		}
+	}
+
+	return hooked.func;
 }
 
 } // namespace fuen

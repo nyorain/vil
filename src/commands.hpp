@@ -222,15 +222,14 @@ struct EndRenderPassCmd : Command {
 	void record(const Device&, VkCommandBuffer) const override;
 };
 
-struct BaseDrawCmd : Command {
+struct DrawCmdBase : Command {
 	GraphicsState state;
-	PushConstantMap pushConstants;
 
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
 };
 
-struct DrawCmd : BaseDrawCmd {
+struct DrawCmd : DrawCmdBase {
 	u32 vertexCount;
 	u32 instanceCount;
 	u32 firstVertex;
@@ -249,7 +248,7 @@ struct DrawCmd : BaseDrawCmd {
 			{"firstInstance", "{}", firstInstance},
 		}});
 
-		BaseDrawCmd::displayGrahpicsState(gui, false);
+		DrawCmdBase::displayGrahpicsState(gui, false);
 	}
 
 	std::string nameDesc() const override { return "Draw"; }
@@ -257,23 +256,26 @@ struct DrawCmd : BaseDrawCmd {
 	std::vector<std::string> argumentsDesc() const override;
 };
 
-struct DrawIndirectCmd : BaseDrawCmd {
+struct DrawIndirectCmd : DrawCmdBase {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	u32 drawCount {};
 	u32 stride {};
+	bool indexed {};
 
 	std::string toString() const override {
-		return "DrawIndirect";
+		return indexed ? "DrawIndexedIndirect" : "DrawIndirect";
+	}
+	std::string nameDesc() const override {
+		return indexed ? "DrawIndexedIndirect" : "DrawIndirect";
 	}
 
 	void displayInspector(Gui& gui) const override;
-	std::string nameDesc() const override { return "DrawIndirect"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 };
 
-struct DrawIndexedCmd : BaseDrawCmd {
+struct DrawIndexedCmd : DrawCmdBase {
 	u32 indexCount;
 	u32 instanceCount;
 	u32 firstIndex;
@@ -294,7 +296,7 @@ struct DrawIndexedCmd : BaseDrawCmd {
 			{"firstInstance", "{}", firstInstance},
 		}});
 
-		BaseDrawCmd::displayGrahpicsState(gui, true);
+		DrawCmdBase::displayGrahpicsState(gui, true);
 	}
 
 	std::string nameDesc() const override { return "DrawIndexed"; }
@@ -302,18 +304,23 @@ struct DrawIndexedCmd : BaseDrawCmd {
 	std::vector<std::string> argumentsDesc() const override;
 };
 
-struct DrawIndexedIndirectCmd : BaseDrawCmd {
+struct DrawIndirectCountCmd : DrawCmdBase {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
-	u32 drawCount {};
+	u32 maxDrawCount {};
 	u32 stride {};
+	Buffer* countBuffer {};
+	VkDeviceSize countBufferOffset {};
+	bool indexed {};
 
 	std::string toString() const override {
-		return "DrawIndexedIndirect";
+		return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
+	}
+	std::string nameDesc() const override {
+		return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
 	}
 
 	void displayInspector(Gui& gui) const override;
-	std::string nameDesc() const override { return "DrawIndexedIndirect"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 };
@@ -375,15 +382,14 @@ struct BindDescriptorSetCmd : Command {
 	void record(const Device&, VkCommandBuffer) const override;
 };
 
-struct BaseDispatchCmd : Command {
+struct DispatchCmdBase : Command {
 	ComputeState state;
-	PushConstantMap pushConstants;
 
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;
 };
 
-struct DispatchCmd : BaseDispatchCmd {
+struct DispatchCmd : DispatchCmdBase {
 	u32 groupsX {};
 	u32 groupsY {};
 	u32 groupsZ {};
@@ -395,7 +401,7 @@ struct DispatchCmd : BaseDispatchCmd {
 
 	void displayInspector(Gui& gui) const override {
 		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
-		BaseDispatchCmd::displayComputeState(gui);
+		DispatchCmdBase::displayComputeState(gui);
 	}
 
 	std::string nameDesc() const override { return "Dispatch"; }
@@ -403,7 +409,7 @@ struct DispatchCmd : BaseDispatchCmd {
 	std::vector<std::string> argumentsDesc() const override;
 };
 
-struct DispatchIndirectCmd : BaseDispatchCmd {
+struct DispatchIndirectCmd : DispatchCmdBase {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 
@@ -413,6 +419,30 @@ struct DispatchIndirectCmd : BaseDispatchCmd {
 
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "DispatchIndirect"; }
+	void record(const Device&, VkCommandBuffer) const override;
+	std::vector<std::string> argumentsDesc() const override;
+};
+
+struct DispatchBaseCmd : DispatchCmdBase {
+	u32 baseGroupX {};
+	u32 baseGroupY {};
+	u32 baseGroupZ {};
+	u32 groupsX {};
+	u32 groupsY {};
+	u32 groupsZ {};
+
+	std::string toString() const override {
+		return dlg::format("DispatchBase({}, {}, {}, {}, {}, {})",
+			baseGroupX, baseGroupY, baseGroupZ, groupsX, groupsY, groupsZ);
+	}
+
+	void displayInspector(Gui& gui) const override {
+		imGuiText("Base: {} {} {}", baseGroupX, baseGroupY, baseGroupZ);
+		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
+		DispatchCmdBase::displayComputeState(gui);
+	}
+
+	std::string nameDesc() const override { return "DispatchBase"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 };

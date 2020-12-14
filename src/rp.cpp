@@ -85,6 +85,71 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 	return res;
 }
 
+VkAttachmentDescription downgrade(const VkAttachmentDescription2& x) {
+	struct {
+		VkStructureType sType;
+		const void* pNext;
+		VkAttachmentDescription dst;
+	} dst;
+	static_assert(sizeof(dst) == sizeof(x));
+	std::memcpy(&dst, &x, sizeof(dst));
+	return dst.dst;
+}
+
+VkSubpassDescription downgrade(const VkSubpassDescription2& x) {
+	struct {
+		VkStructureType sType;
+		const void* pNext;
+		VkSubpassDescription dst;
+	} dst;
+	static_assert(sizeof(dst) == sizeof(x));
+	std::memcpy(&dst, &x, sizeof(dst));
+	return dst.dst;
+}
+
+VkSubpassDependency downgrade(const VkSubpassDependency2& x) {
+	struct {
+		VkStructureType sType;
+		const void* pNext;
+		VkSubpassDependency dst;
+	} dst;
+	static_assert(sizeof(dst) == sizeof(x));
+	std::memcpy(&dst, &x, sizeof(dst));
+	return dst.dst;
+}
+
+template<typename D, typename T>
+void downgrade(std::vector<D>& dst, span<const T> src) {
+	dst.clear();
+	dst.reserve(src.size());
+	for(auto& x : src) {
+		dst.push_back(downgrade(x));
+	}
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
+		VkDevice                                    device,
+		const VkRenderPassCreateInfo2*              pCreateInfo,
+		const VkAllocationCallbacks*                pAllocator,
+		VkRenderPass*                               pRenderPass) {
+	auto& dev = getData<Device>(device);
+	auto res = dev.dispatch.CreateRenderPass2(device, pCreateInfo, pAllocator, pRenderPass);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	auto& rp = dev.renderPasses.add(*pRenderPass);
+	rp.dev = &dev;
+	rp.handle = *pRenderPass;
+
+	rp.desc = std::make_shared<RenderPassDesc>();
+	downgrade(rp.desc->subpasses, span{pCreateInfo->pSubpasses, pCreateInfo->subpassCount});
+	downgrade(rp.desc->attachments, span{pCreateInfo->pAttachments, pCreateInfo->attachmentCount});
+	downgrade(rp.desc->dependencies, span{pCreateInfo->pDependencies, pCreateInfo->dependencyCount});
+
+	return res;
+}
+
 VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 		VkDevice                                    device,
 		VkRenderPass                                renderPass,

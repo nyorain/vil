@@ -6,6 +6,7 @@
 #include <vulkan/vk_layer.h>
 #include <vk/dispatch_table.h>
 #include <string>
+#include <vector>
 
 struct swa_display;
 
@@ -29,6 +30,7 @@ struct Instance {
 	swa_display* display {};
 
 	// info about enabled extensions
+	std::vector<std::string> extensions;
 	bool debugUtilsEnabled {};
 
 	~Instance();

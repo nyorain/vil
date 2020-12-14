@@ -73,14 +73,23 @@ public:
 	// == Immutable when in executable state, otherwise private ==
 	std::vector<std::unique_ptr<Command>> commands;
 
+	// Overview over *all* resources used or referenced in some way.
+	// This includes all transitive references, e.g. resources from a
+	// secondary command buffer that is executed or the buffer and memory
+	// associated with a buffer view, for instance.
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
 	std::unordered_map<std::uint64_t, UsedHandle> handles;
 
+	// Commandbuffer hook that allows us to forward a modified version
+	// of this command buffer down the chain.
 	using Hook = std::function<VkCommandBuffer(CommandBuffer&)>;
 	Hook hook;
 
 	// == Only used during recording, private ==
+	// pushConstants member of ComputeState/Graphics state ignored.
+	// TODO: might be able to get rid of this->pushConstants and use
+	//   the respective states directly instead, considering stateFlags.
 	ComputeState computeState {};
 	GraphicsState graphicsState {};
 	std::vector<SectionCommand*> sections {}; // stack
@@ -96,11 +105,13 @@ public:
 	// Expects device mutex to be locked
 	void invalidateLocked();
 
-	// TODO: define what exactly this means! Does it always returns true
-	// for transitively used handles? Need consistency
-	//   -> See transitive cb usage rework in todo.md
+	// Returns whether the command buffer in its current recorded state (only
+	// really makes sense to call on executable command buffers, you probably
+	// want to lock the device mutex to prevent state change) uses the
+	// given handle. Returns true for transitively used handles of any kind.
 	template<typename H>
 	bool uses(const H& handle) const {
+		dlg_assert(state == State::executable);
 		if constexpr(std::is_same_v<H, Image>) {
 			return images.find(handle.handle) != images.end();
 		} else if constexpr(std::is_same_v<H, Buffer>) {
@@ -252,6 +263,24 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
     uint32_t                                    drawCount,
     uint32_t                                    stride);
 
+VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
+    VkCommandBuffer                             commandBuffer,
+    VkBuffer                                    buffer,
+    VkDeviceSize                                offset,
+    VkBuffer                                    countBuffer,
+    VkDeviceSize                                countBufferOffset,
+    uint32_t                                    maxDrawCount,
+    uint32_t                                    stride);
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
+    VkCommandBuffer                             commandBuffer,
+    VkBuffer                                    buffer,
+    VkDeviceSize                                offset,
+    VkBuffer                                    countBuffer,
+    VkDeviceSize                                countBufferOffset,
+    uint32_t                                    maxDrawCount,
+    uint32_t                                    stride);
+
 VKAPI_ATTR void VKAPI_CALL CmdDispatch(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    groupCountX,
@@ -262,6 +291,15 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
     VkCommandBuffer                             commandBuffer,
     VkBuffer                                    buffer,
     VkDeviceSize                                offset);
+
+VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    baseGroupX,
+    uint32_t                                    baseGroupY,
+    uint32_t                                    baseGroupZ,
+    uint32_t                                    groupCountX,
+    uint32_t                                    groupCountY,
+    uint32_t                                    groupCountZ);
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
     VkCommandBuffer                             commandBuffer,
@@ -438,6 +476,20 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
     VkCommandBuffer                             commandBuffer);
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
+    VkCommandBuffer                             commandBuffer,
+    const VkRenderPassBeginInfo*                pRenderPassBegin,
+    const VkSubpassBeginInfo*                   pSubpassBeginInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
+    VkCommandBuffer                             commandBuffer,
+    const VkSubpassBeginInfo*                   pSubpassBeginInfo,
+    const VkSubpassEndInfo*                     pSubpassEndInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
+    VkCommandBuffer                             commandBuffer,
+    const VkSubpassEndInfo*                     pSubpassEndInfo);
 
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
     VkCommandBuffer                             commandBuffer,

@@ -291,6 +291,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.phdev = phdev;
 	dev.handle = *pDevice;
 	dev.queueProps = std::move(qfprops);
+	dev.extensions = {extsBegin, extsEnd};
 	if(ci->pEnabledFeatures) {
 		dev.enabledFeatures = *ci->pEnabledFeatures;
 	}
@@ -429,7 +430,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 		VkDevice dev,
-		VkAllocationCallbacks* alloc) {
+		const VkAllocationCallbacks* alloc) {
 	auto devd = moveData<Device>(dev);
 	dlg_assert(devd);
 
