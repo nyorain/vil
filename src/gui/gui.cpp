@@ -15,12 +15,13 @@
 #include <fstream>
 #include <filesystem>
 
-#include "gui.frag.spv.h"
-#include "gui.vert.spv.h"
+// kinda hacky, done for shaders
+#include <gui.frag.spv.h>
+#include <gui.vert.spv.h>
 
-#include "image.frag.1DArray.spv.h"
-#include "image.frag.2DArray.spv.h"
-#include "image.frag.3D.spv.h"
+#include <image.frag.1DArray.spv.h>
+#include <image.frag.2DArray.spv.h>
+#include <image.frag.3D.spv.h>
 
 thread_local ImGuiContext* __LayerImGui;
 
@@ -566,6 +567,11 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 							ds = draw.dsSelected;
 							pipe = pipes_.image3D;
 							break;
+						default:
+							dlg_error("Invalid DrawGuiImage");
+							pipe = {};
+							ds =  {};
+							break;
 					}
 
 					if(img->type != DrawGuiImage::font) {
@@ -790,9 +796,9 @@ void Gui::destroyed(const Handle& handle) {
 		return;
 	}
 
-	VK_CHECK(dev().dispatch.WaitForFences(dev().handle, fences.size(),
+	VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
 		fences.data(), true, UINT64_MAX));
-	VK_CHECK(dev().dispatch.ResetFences(dev().handle, fences.size(), fences.data()));
+	VK_CHECK(dev().dispatch.ResetFences(dev().handle, u32(fences.size()), fences.data()));
 
 	for(auto* draw : draws) {
 		draw->usedHandles.clear();
@@ -819,9 +825,10 @@ void Gui::waitForSubmissions(const H& handle) {
 
 		// remove finished pending submissions.
 		// important to do this before accessing them.
-		if(checkLocked(*pending)) {
+		if(auto nit = checkLocked(*pending); nit) {
 			// don't increase iterator as the current one
 			// was erased.
+			it = *nit;
 			continue;
 		}
 
@@ -863,7 +870,7 @@ void Gui::waitFor(span<PendingSubmission*> toComplete) {
 	}
 
 	VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
-		fences.size(), fences.data(), true, UINT64_MAX));
+		u32(fences.size()), fences.data(), true, UINT64_MAX));
 
 	for(auto* pending : toComplete) {
 		auto res = checkLocked(*pending);
@@ -1007,7 +1014,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		selImg = nullptr;
 	}
 
-	VkImageLayout finalLayout;
+	VkImageLayout finalLayout {};
 	if(selImg) {
 		auto& img = *selImg;
 		finalLayout = img.pendingLayout;
@@ -1093,7 +1100,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	submitInfo.pSignalSemaphores = &draw.semaphore;
 	submitInfo.pWaitDstStageMask = waitStages.get();
 	submitInfo.pWaitSemaphores = info.waitSemaphores.data();
-	submitInfo.waitSemaphoreCount = info.waitSemaphores.size();
+	submitInfo.waitSemaphoreCount = u32(info.waitSemaphores.size());
 
 	auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
 	if(res != VK_SUCCESS) {
@@ -1139,8 +1146,8 @@ void Gui::finishDraws() {
 	}
 
 	if(!fences.empty()) {
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, fences.size(), fences.data(), true, UINT64_MAX));
-		VK_CHECK(dev().dispatch.ResetFences(dev().handle, fences.size(), fences.data()));
+		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()), fences.data(), true, UINT64_MAX));
+		VK_CHECK(dev().dispatch.ResetFences(dev().handle, u32(fences.size()), fences.data()));
 
 		for(auto& draw : draws_) {
 			draw.inUse = false;

@@ -63,6 +63,10 @@ VKAPI_ATTR void VKAPI_CALL FreeMemory(
 		VkDevice                                    device,
 		VkDeviceMemory                              memory,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!memory) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.deviceMemories.mustErase(memory);
 	dev.dispatch.FreeMemory(device, memory, pAllocator);

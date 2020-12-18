@@ -57,6 +57,14 @@ void resetLocked(CommandBuffer& cb, bool invalidate = false) {
 	cb.computeState = {};
 	cb.pushConstants = {};
 
+	// lock shouldn't really be needed for this btw
+	dlg_assert(cb.pool);
+	auto mb0 = std::make_move_iterator(cb.usedMemBlocks.begin());
+	auto mb1 = std::make_move_iterator(cb.usedMemBlocks.end());
+	cb.pool->memBlocks.insert(cb.pool->memBlocks.end(), mb0, mb1);
+	cb.usedMemBlocks.clear();
+	cb.memBlockOffset = 0u;
+
 	if(!invalidate) {
 		++cb.resetCount;
 	}
@@ -65,6 +73,111 @@ void resetLocked(CommandBuffer& cb, bool invalidate = false) {
 void reset(CommandBuffer& cb, bool invalidate = false) {
 	std::lock_guard lock(cb.dev->mutex);
 	resetLocked(cb, invalidate);
+}
+
+// Taken from vpp/util
+/// Aligns an offset to the given alignment.
+/// An alignment of 0 zero will not change the offset.
+/// An offset of 0 is treated as aligned with every possible alignment.
+/// Undefined if either value is negative.
+template<typename A, typename B>
+constexpr auto align(A offset, B alignment) {
+	if(offset == 0 || alignment == 0) {
+		return offset;
+	}
+
+	auto rest = offset % alignment;
+	return rest ? A(offset + (alignment - rest)) : A(offset);
+}
+
+template<typename T, typename... Args>
+T& allocate(CommandBuffer& cb, Args&&... args) {
+	constexpr auto blockSize = CommandPool::blockSize;
+	static_assert(sizeof(T) < blockSize);
+	cb.memBlockOffset = align(cb.memBlockOffset, alignof(T));
+
+	// we can freely operate on the command pool even if we don't have
+	// any lock. Guaranteed by vulkan spec (command pools including their
+	// command buffers are externally synchronized).
+	if(cb.usedMemBlocks.empty() || (i32(blockSize) - i32(cb.memBlockOffset)) < i32(sizeof(T))) {
+		dlg_assert(cb.pool);
+		if(cb.pool->memBlocks.empty()) {
+			cb.usedMemBlocks.emplace_back(std::make_unique<std::byte[]>(blockSize));
+		} else {
+			auto block = std::move(cb.pool->memBlocks.back());
+			cb.pool->memBlocks.pop_back();
+			cb.usedMemBlocks.push_back(std::move(block));
+		}
+
+		cb.memBlockOffset = 0u;
+	}
+
+	auto* raw = &cb.usedMemBlocks.back()[cb.memBlockOffset];
+	auto* ret = new(raw) T(std::forward<Args>(args)...);
+
+	cb.memBlockOffset += sizeof(T);
+
+	return *ret;
+}
+
+// TODO: old, remove!
+// void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
+// 	if(!cb.sections.empty()) {
+// 		cmd->parent = cb.sections.back();
+// 		cb.sections.back()->children.emplace_back(std::move(cmd));
+// 	} else {
+// 		cb.commands.emplace_back(std::move(cmd));
+// 	}
+// }
+//
+// void addSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
+// 	auto* section = cmd.get();
+// 	add(cb, std::move(cmd));
+// 	cb.sections.push_back(section);
+// }
+//
+// void addNextSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
+// 	auto* section = cmd.get();
+// 	add(cb, std::move(cmd));
+// 	dlg_assert(!cb.sections.empty());
+// 	cb.sections.pop_back();
+// 	cb.sections.push_back(section);
+// }
+//
+// void addEndSection(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
+// 	add(cb, std::move(cmd));
+// 	dlg_assert(!cb.sections.empty());
+// 	cb.sections.pop_back();
+// }
+
+enum class SectionType {
+	none,
+	begin,
+	next,
+	end,
+};
+
+template<typename T, SectionType ST = SectionType::none>
+T& addCmd(CommandBuffer& cb) {
+	auto& cmd = allocate<T>(cb);
+
+	if(!cb.sections.empty()) {
+		cmd.parent = cb.sections.back();
+		cb.sections.back()->children.emplace_back(&cmd);
+	} else {
+		cb.commands.emplace_back(&cmd);
+	}
+
+	if constexpr(ST == SectionType::end || ST == SectionType::next) {
+		dlg_assert(!cb.sections.empty());
+		cb.sections.pop_back();
+	}
+	if constexpr(ST == SectionType::begin || ST == SectionType::next) {
+		static_assert(std::is_convertible_v<T*, SectionCommand*>);
+		cb.sections.push_back(&cmd);
+	}
+
+	return cmd;
 }
 
 void CommandBuffer::invalidateLocked() {
@@ -78,13 +191,9 @@ CommandBuffer::~CommandBuffer() {
 
 	std::lock_guard devLock(this->dev->mutex);
 
-	// make sure all submissions are done.
-	for(auto* subm : this->pending) {
-		auto res = checkLocked(*subm);
-		dlg_assert(res);
-	}
-
-	removeFromHandlesLocked(*this);
+	// Wait for completion, free all data and allocated stuff,
+	// unregister from everything
+	resetLocked(*this);
 
 	// Remove ourselves from the pool we come from.
 	// A command pool can't be destroyed before its command buffers (it
@@ -142,6 +251,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(
 		VkDevice                                    device,
 		VkCommandPool                               commandPool,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!commandPool) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.commandPools.mustErase(commandPool);
 	dev.dispatch.DestroyCommandPool(device, commandPool, pAllocator);
@@ -316,35 +429,6 @@ CommandBuffer::UsedBuffer& useHandle(CommandBuffer& cb, Command& cmd, Buffer& bu
 	return useBuf;
 }
 
-void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
-	if(!cb.sections.empty()) {
-		cmd->parent = cb.sections.back();
-		cb.sections.back()->children.emplace_back(std::move(cmd));
-	} else {
-		cb.commands.emplace_back(std::move(cmd));
-	}
-}
-
-void addSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
-	auto* section = cmd.get();
-	add(cb, std::move(cmd));
-	cb.sections.push_back(section);
-}
-
-void addNextSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
-	auto* section = cmd.get();
-	add(cb, std::move(cmd));
-	dlg_assert(!cb.sections.empty());
-	cb.sections.pop_back();
-	cb.sections.push_back(section);
-}
-
-void addEndSection(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
-	add(cb, std::move(cmd));
-	dlg_assert(!cb.sections.empty());
-	cb.sections.pop_back();
-}
-
 void cmdBarrier(
 		CommandBuffer& cb,
 		BarrierCmdBase& cmd,
@@ -394,19 +478,18 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		uint32_t                                    imageMemoryBarrierCount,
 		const VkImageMemoryBarrier*                 pImageMemoryBarriers) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<WaitEventsCmd>();
-	cmdBarrier(cb, *cmd, srcStageMask, dstStageMask,
+	auto& cmd = addCmd<WaitEventsCmd>(cb);
+	cmdBarrier(cb, cmd, srcStageMask, dstStageMask,
 		memoryBarrierCount, pMemoryBarriers,
 		bufferMemoryBarrierCount, pBufferMemoryBarriers,
 		imageMemoryBarrierCount, pImageMemoryBarriers);
 
 	for(auto i = 0u; i < eventCount; ++i) {
 		auto& event = cb.dev->events.get(pEvents[i]);
-		cmd->events.push_back(&event);
-		useHandle(cb, *cmd, event);
+		cmd.events.push_back(&event);
+		useHandle(cb, cmd, event);
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdWaitEvents(commandBuffer, eventCount, pEvents,
 		srcStageMask, dstStageMask,
 		memoryBarrierCount, pMemoryBarriers,
@@ -426,14 +509,13 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 		uint32_t                                    imageMemoryBarrierCount,
 		const VkImageMemoryBarrier*                 pImageMemoryBarriers) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BarrierCmd>();
-	cmd->dependencyFlags = dependencyFlags;
-	cmdBarrier(cb, *cmd, srcStageMask, dstStageMask,
+	auto& cmd = addCmd<BarrierCmd>(cb);
+	cmd.dependencyFlags = dependencyFlags;
+	cmdBarrier(cb, cmd, srcStageMask, dstStageMask,
 		memoryBarrierCount, pMemoryBarriers,
 		bufferMemoryBarrierCount, pBufferMemoryBarriers,
 		imageMemoryBarrierCount, pImageMemoryBarriers);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdPipelineBarrier(commandBuffer,
 		srcStageMask, dstStageMask, dependencyFlags,
 		memoryBarrierCount, pMemoryBarriers,
@@ -445,30 +527,30 @@ template<typename BeginInfo>
 void cmdBeginRenderPass(CommandBuffer& cb,
 		const BeginInfo*               pRenderPassBegin,
 		VkSubpassContents              contents) {
-	auto cmd = std::make_unique<BeginRenderPassCmd>();
+	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
 
-	cmd->info = *pRenderPassBegin;
-	cmd->clearValues = {
+	cmd.info = *pRenderPassBegin;
+	cmd.clearValues = {
 		pRenderPassBegin->pClearValues,
 		pRenderPassBegin->pClearValues + pRenderPassBegin->clearValueCount
 	};
-	cmd->info.pNext = nullptr;
-	cmd->info.pClearValues = cmd->clearValues.data();
+	cmd.info.pNext = nullptr;
+	cmd.info.pClearValues = cmd.clearValues.data();
 
-	cmd->subpassContents = contents;
-	cmd->fb = cb.dev->framebuffers.find(pRenderPassBegin->framebuffer);
-	cmd->rp = cb.dev->renderPasses.find(pRenderPassBegin->renderPass);
+	cmd.subpassContents = contents;
+	cmd.fb = cb.dev->framebuffers.find(pRenderPassBegin->framebuffer);
+	cmd.rp = cb.dev->renderPasses.find(pRenderPassBegin->renderPass);
 
-	dlg_assert(cmd->fb);
-	dlg_assert(cmd->rp);
+	dlg_assert(cmd.fb);
+	dlg_assert(cmd.rp);
 
-	useHandle(cb, *cmd, *cmd->fb);
-	useHandle(cb, *cmd, *cmd->rp);
+	useHandle(cb, cmd, *cmd.fb);
+	useHandle(cb, cmd, *cmd.rp);
 
-	if(cmd->fb && cmd->rp) {
-		dlg_assert(cmd->rp->desc->attachments.size() == cmd->fb->attachments.size());
-		for(auto i = 0u; i < cmd->fb->attachments.size(); ++i) {
-			auto& attachment = cmd->fb->attachments[i];
+	if(cmd.fb && cmd.rp) {
+		dlg_assert(cmd.rp->desc->attachments.size() == cmd.fb->attachments.size());
+		for(auto i = 0u; i < cmd.fb->attachments.size(); ++i) {
+			auto& attachment = cmd.fb->attachments[i];
 			if(!attachment || !attachment->img) {
 				continue;
 			}
@@ -477,13 +559,11 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 			//   an attachment? probably not...
 			//   maybe better move this to RenderPassEnd nonetheless?
 			// TODO: handle secondary command buffers and stuff
-			useHandle(cb, *cmd, *attachment, false);
-			useHandle(cb, *cmd, *attachment->img,
-				cmd->rp->desc->attachments[i].finalLayout);
+			useHandle(cb, cmd, *attachment, false);
+			useHandle(cb, cmd, *attachment->img,
+				cmd.rp->desc->attachments[i].finalLayout);
 		}
 	}
-
-	addSection(cb, std::move(cmd));
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
@@ -499,20 +579,19 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 		VkCommandBuffer                             commandBuffer,
 		VkSubpassContents                           contents) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<NextSubpassCmd>();
-	cmd->subpassContents = contents;
 	// TODO; figure this out, should subpass be whole section?
 	// but then how to handle first subpass?
 	// addNextSection(cb, std::move(cmd));
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
+	cmd.subpassContents = contents;
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<EndRenderPassCmd>();
-	addEndSection(cb, std::move(cmd));
+	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
+	(void) cmd;
 	cb.dev->dispatch.CmdEndRenderPass(commandBuffer);
 }
 
@@ -530,12 +609,11 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<NextSubpassCmd>();
-	cmd->subpassContents = pSubpassBeginInfo->contents;
 	// TODO; figure this out, should subpass be whole section?
 	// but then how to handle first subpass?
 	// addNextSection(cb, std::move(cmd));
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
+	cmd.subpassContents = pSubpassBeginInfo->contents;
 	cb.dev->dispatch.CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
 }
 
@@ -543,8 +621,8 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 		VkCommandBuffer                             commandBuffer,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<EndRenderPassCmd>();
-	addEndSection(cb, std::move(cmd));
+	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
+	(void) cmd;
 	cb.dev->dispatch.CmdEndRenderPass2(commandBuffer, pSubpassEndInfo);
 }
 
@@ -558,11 +636,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		uint32_t                                    dynamicOffsetCount,
 		const uint32_t*                             pDynamicOffsets) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BindDescriptorSetCmd>();
+	auto& cmd = addCmd<BindDescriptorSetCmd>(cb);
 
-	cmd->firstSet = firstSet;
-	cmd->pipeBindPoint = pipelineBindPoint;
-	cmd->dynamicOffsets = {pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount};
+	cmd.firstSet = firstSet;
+	cmd.pipeBindPoint = pipelineBindPoint;
+	cmd.dynamicOffsets = {pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount};
 
 	// NOTE: the pipeline layout is intetionally not added to used handles
 	// since the application not destroying it does not move the command
@@ -570,7 +648,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// alive while recording).
 	// Since we might need it lateron, we acquire shared ownership.
 	// Also like this in CmdPushConstants
-	cmd->pipeLayout = cb.dev->pipeLayouts.getPtr(layout);
+	cmd.pipeLayout = cb.dev->pipeLayouts.getPtr(layout);
 
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
@@ -584,11 +662,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 					}
 
 					if(auto* view = ds.bindings[b][e].imageInfo.imageView; view) {
-						useHandle(cb, *cmd, *view);
+						useHandle(cb, cmd, *view);
 					}
 
 					if(auto* sampler = ds.bindings[b][e].imageInfo.sampler; sampler) {
-						useHandle(cb, *cmd, *sampler);
+						useHandle(cb, cmd, *sampler);
 					}
 				}
 			} else if(cat == DescriptorCategory::buffer) {
@@ -598,7 +676,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 					}
 
 					auto* buf = ds.bindings[b][e].bufferInfo.buffer;
-					useHandle(cb, *cmd, *buf);
+					useHandle(cb, cmd, *buf);
 				}
 			} else if(cat == DescriptorCategory::bufferView) {
 				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
@@ -608,36 +686,35 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 					auto* view = ds.bindings[b][e].bufferView;
 					dlg_assert(view->buffer);
-					useHandle(cb, *cmd, *view);
+					useHandle(cb, cmd, *view);
 				}
 			}
 		}
 
-		useHandle(cb, *cmd, ds);
-		cmd->sets.push_back(&ds);
+		useHandle(cb, cmd, ds);
+		cmd.sets.push_back(&ds);
 	}
 
 	// TODO: not sure about this. The spec isn't clear about this.
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
 	if(cb.pushConstants.layout &&
-			pushConstantCompatible(*cmd->pipeLayout, *cb.pushConstants.layout)) {
+			pushConstantCompatible(*cmd.pipeLayout, *cb.pushConstants.layout)) {
 		cb.pushConstants.layout = nullptr;
 		cb.pushConstants.map.clear();
 	}
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState.bind(*cmd->pipeLayout, firstSet, cmd->sets,
+		cb.computeState.bind(*cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState.bind(*cmd->pipeLayout, firstSet, cmd->sets,
+		cb.graphicsState.bind(*cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else {
 		dlg_error("Unknown pipeline bind point");
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdBindDescriptorSets(commandBuffer,
 		pipelineBindPoint,
 		layout,
@@ -654,20 +731,19 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 		VkDeviceSize                                offset,
 		VkIndexType                                 indexType) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BindIndexBufferCmd>();
+	auto& cmd = addCmd<BindIndexBufferCmd>(cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
-	cmd->buffer = &buf;
-	useHandle(cb, *cmd, buf);
+	cmd.buffer = &buf;
+	useHandle(cb, cmd, buf);
 
-	cmd->offset = offset;
-	cmd->indexType = indexType;
+	cmd.offset = offset;
+	cmd.indexType = indexType;
 
 	cb.graphicsState.indices.buffer = &buf;
 	cb.graphicsState.indices.offset = offset;
 	cb.graphicsState.indices.type = indexType;
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdBindIndexBuffer(commandBuffer,
 		buffer, offset, indexType);
 }
@@ -679,21 +755,20 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 		const VkBuffer*                             pBuffers,
 		const VkDeviceSize*                         pOffsets) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BindVertexBuffersCmd>();
-	cmd->firstBinding = firstBinding;
-	cmd->offsets = {pOffsets, pOffsets + bindingCount};
+	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
+	cmd.firstBinding = firstBinding;
+	cmd.offsets = {pOffsets, pOffsets + bindingCount};
 
 	ensureSize(cb.graphicsState.vertices, firstBinding + bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
 		auto& buf = cb.dev->buffers.get(pBuffers[i]);
-		cmd->buffers.push_back(&buf);
-		useHandle(cb, *cmd, buf);
+		cmd.buffers.push_back(&buf);
+		useHandle(cb, cmd, buf);
 
 		cb.graphicsState.vertices[firstBinding + i].buffer = &buf;
 		cb.graphicsState.vertices[firstBinding + i].offset = pOffsets[i];
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdBindVertexBuffers(commandBuffer,
 		firstBinding, bindingCount, pBuffers, pOffsets);
 }
@@ -705,19 +780,18 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 		uint32_t                                    firstVertex,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DrawCmd>();
+	auto& cmd = addCmd<DrawCmd>(cb);
 
-	cmd->vertexCount = vertexCount;
-	cmd->instanceCount = instanceCount;
-	cmd->firstVertex = firstVertex;
-	cmd->firstInstance = firstInstance;
+	cmd.vertexCount = vertexCount;
+	cmd.instanceCount = instanceCount;
+	cmd.firstVertex = firstVertex;
+	cmd.firstInstance = firstInstance;
 
-	cmd->state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDraw(commandBuffer,
 		vertexCount, instanceCount, firstVertex, firstInstance);
 }
@@ -730,20 +804,19 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 		int32_t                                     vertexOffset,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DrawIndexedCmd>();
+	auto& cmd = addCmd<DrawIndexedCmd>(cb);
 
-	cmd->firstInstance = firstInstance;
-	cmd->instanceCount = instanceCount;
-	cmd->indexCount = indexCount;
-	cmd->vertexOffset = vertexOffset;
-	cmd->firstIndex = firstIndex;
+	cmd.firstInstance = firstInstance;
+	cmd.instanceCount = instanceCount;
+	cmd.indexCount = indexCount;
+	cmd.vertexOffset = vertexOffset;
+	cmd.firstIndex = firstIndex;
 
-	cmd->state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDrawIndexed(commandBuffer,
 		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
@@ -755,22 +828,21 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DrawIndirectCmd>();
+	auto& cmd = addCmd<DrawIndirectCmd>(cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
-	cmd->buffer = &buf;
-	useHandle(cb, *cmd, buf);
+	cmd.buffer = &buf;
+	useHandle(cb, cmd, buf);
 
-	cmd->indexed = false;
-	cmd->offset = offset;
-	cmd->drawCount = drawCount;
-	cmd->stride = stride;
-	cmd->state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.indexed = false;
+	cmd.offset = offset;
+	cmd.drawCount = drawCount;
+	cmd.stride = stride;
+	cmd.state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDrawIndirect(commandBuffer,
 		buffer, offset, drawCount, stride);
 }
@@ -782,22 +854,21 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DrawIndirectCmd>();
+	auto& cmd = addCmd<DrawIndirectCmd>(cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
-	cmd->buffer = &buf;
-	useHandle(cb, *cmd, buf);
+	cmd.buffer = &buf;
+	useHandle(cb, cmd, buf);
 
-	cmd->indexed = true;
-	cmd->offset = offset;
-	cmd->drawCount = drawCount;
-	cmd->stride = stride;
-	cmd->state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.indexed = true;
+	cmd.offset = offset;
+	cmd.drawCount = drawCount;
+	cmd.stride = stride;
+	cmd.state = cb.graphicsState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDrawIndexedIndirect(commandBuffer,
 		buffer, offset, drawCount, stride);
 }
@@ -811,26 +882,25 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DrawIndirectCountCmd>();
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
-	cmd->buffer = &buf;
-	useHandle(cb, *cmd, buf);
+	cmd.buffer = &buf;
+	useHandle(cb, cmd, buf);
 
 	auto& countBuf = cb.dev->buffers.get(countBuffer);
-	cmd->countBuffer = &countBuf;
-	useHandle(cb, *cmd, countBuf);
+	cmd.countBuffer = &countBuf;
+	useHandle(cb, cmd, countBuf);
 
-	cmd->indexed = false;
-	cmd->offset = offset;
-	cmd->countBufferOffset = countBufferOffset;
-	cmd->maxDrawCount = maxDrawCount;
-	cmd->stride = stride;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.indexed = false;
+	cmd.offset = offset;
+	cmd.countBufferOffset = countBufferOffset;
+	cmd.maxDrawCount = maxDrawCount;
+	cmd.stride = stride;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer,
 		buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
 }
@@ -844,26 +914,25 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DrawIndirectCountCmd>();
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
-	cmd->buffer = &buf;
-	useHandle(cb, *cmd, buf);
+	cmd.buffer = &buf;
+	useHandle(cb, cmd, buf);
 
 	auto& countBuf = cb.dev->buffers.get(countBuffer);
-	cmd->countBuffer = &countBuf;
-	useHandle(cb, *cmd, countBuf);
+	cmd.countBuffer = &countBuf;
+	useHandle(cb, cmd, countBuf);
 
-	cmd->indexed = true;
-	cmd->offset = offset;
-	cmd->countBufferOffset = countBufferOffset;
-	cmd->maxDrawCount = maxDrawCount;
-	cmd->stride = stride;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.indexed = true;
+	cmd.offset = offset;
+	cmd.countBufferOffset = countBufferOffset;
+	cmd.maxDrawCount = maxDrawCount;
+	cmd.stride = stride;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer,
 		buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
 }
@@ -874,18 +943,17 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DispatchCmd>();
+	auto& cmd = addCmd<DispatchCmd>(cb);
 
-	cmd->groupsX = groupCountX;
-	cmd->groupsY = groupCountY;
-	cmd->groupsZ = groupCountZ;
+	cmd.groupsX = groupCountX;
+	cmd.groupsY = groupCountY;
+	cmd.groupsZ = groupCountZ;
 
-	cmd->state = cb.computeState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.state = cb.computeState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDispatch(commandBuffer,
 		groupCountX, groupCountY, groupCountZ);
 }
@@ -895,19 +963,18 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DispatchIndirectCmd>();
-	cmd->offset = offset;
+	auto& cmd = addCmd<DispatchIndirectCmd>(cb);
+	cmd.offset = offset;
 
 	auto& buf = cb.dev->buffers.get(buffer);
-	cmd->buffer = &buf;
-	useHandle(cb, *cmd, buf);
+	cmd.buffer = &buf;
+	useHandle(cb, cmd, buf);
 
-	cmd->state = cb.computeState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.state = cb.computeState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDispatchIndirect(commandBuffer, buffer, offset);
 }
 
@@ -920,21 +987,20 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<DispatchBaseCmd>();
+	auto& cmd = addCmd<DispatchBaseCmd>(cb);
 
-	cmd->baseGroupX = baseGroupX;
-	cmd->baseGroupY = baseGroupY;
-	cmd->baseGroupZ = baseGroupZ;
-	cmd->groupsX = groupCountX;
-	cmd->groupsY = groupCountY;
-	cmd->groupsZ = groupCountZ;
+	cmd.baseGroupX = baseGroupX;
+	cmd.baseGroupY = baseGroupY;
+	cmd.baseGroupZ = baseGroupZ;
+	cmd.groupsX = groupCountX;
+	cmd.groupsY = groupCountY;
+	cmd.groupsZ = groupCountZ;
 
-	cmd->state = cb.computeState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd->state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd->state.pushConstants = cb.pushConstants.map;
+	cmd.state = cb.computeState;
+	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+		cmd.state.pushConstants = cb.pushConstants.map;
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdDispatch(commandBuffer,
 		groupCountX, groupCountY, groupCountZ);
 }
@@ -948,21 +1014,20 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 		uint32_t                                    regionCount,
 		const VkImageCopy*                          pRegions) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<CopyImageCmd>();
+	auto& cmd = addCmd<CopyImageCmd>(cb);
 
 	auto& src = cb.dev->images.get(srcImage);
 	auto& dst = cb.dev->images.get(dstImage);
 
-	cmd->src = &src;
-	cmd->srcLayout = srcImageLayout;
-	cmd->dst = &dst;
-	cmd->dstLayout = dstImageLayout;
-	cmd->copies = {pRegions, pRegions + regionCount};
+	cmd.src = &src;
+	cmd.srcLayout = srcImageLayout;
+	cmd.dst = &dst;
+	cmd.dstLayout = dstImageLayout;
+	cmd.copies = {pRegions, pRegions + regionCount};
 
-	useHandle(cb, *cmd, src);
-	useHandle(cb, *cmd, dst);
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdCopyImage(commandBuffer,
 		srcImage, srcImageLayout,
 		dstImage, dstImageLayout,
@@ -979,22 +1044,21 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 		const VkImageBlit*                          pRegions,
 		VkFilter                                    filter) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BlitImageCmd>();
+	auto& cmd = addCmd<BlitImageCmd>(cb);
 
 	auto& src = cb.dev->images.get(srcImage);
 	auto& dst = cb.dev->images.get(dstImage);
 
-	cmd->src = &src;
-	cmd->srcLayout = srcImageLayout;
-	cmd->dst = &dst;
-	cmd->dstLayout = dstImageLayout;
-	cmd->blits = {pRegions, pRegions + regionCount};
-	cmd->filter = filter;
+	cmd.src = &src;
+	cmd.srcLayout = srcImageLayout;
+	cmd.dst = &dst;
+	cmd.dstLayout = dstImageLayout;
+	cmd.blits = {pRegions, pRegions + regionCount};
+	cmd.filter = filter;
 
-	useHandle(cb, *cmd, src);
-	useHandle(cb, *cmd, dst);
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdBlitImage(commandBuffer,
 		srcImage, srcImageLayout,
 		dstImage, dstImageLayout,
@@ -1009,20 +1073,19 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 		uint32_t                                    regionCount,
 		const VkBufferImageCopy*                    pRegions) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<CopyBufferToImageCmd>();
+	auto& cmd = addCmd<CopyBufferToImageCmd>(cb);
 
 	auto& src = cb.dev->buffers.get(srcBuffer);
 	auto& dst = cb.dev->images.get(dstImage);
 
-	cmd->src = &src;
-	cmd->dst = &dst;
-	cmd->imgLayout = dstImageLayout;
-	cmd->copies = {pRegions, pRegions + regionCount};
+	cmd.src = &src;
+	cmd.dst = &dst;
+	cmd.imgLayout = dstImageLayout;
+	cmd.copies = {pRegions, pRegions + regionCount};
 
-	useHandle(cb, *cmd, src);
-	useHandle(cb, *cmd, dst);
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdCopyBufferToImage(commandBuffer,
 		srcBuffer, dstImage, dstImageLayout, regionCount, pRegions);
 }
@@ -1035,20 +1098,19 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 		uint32_t                                    regionCount,
 		const VkBufferImageCopy*                    pRegions) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<CopyImageToBufferCmd>();
+	auto& cmd = addCmd<CopyImageToBufferCmd>(cb);
 
 	auto& src = cb.dev->images.get(srcImage);
 	auto& dst = cb.dev->buffers.get(dstBuffer);
 
-	cmd->src = &src;
-	cmd->dst = &dst;
-	cmd->imgLayout = srcImageLayout;
-	cmd->copies = {pRegions, pRegions + regionCount};
+	cmd.src = &src;
+	cmd.dst = &dst;
+	cmd.imgLayout = srcImageLayout;
+	cmd.copies = {pRegions, pRegions + regionCount};
 
-	useHandle(cb, *cmd, src);
-	useHandle(cb, *cmd, dst);
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdCopyImageToBuffer(commandBuffer,
 		srcImage, srcImageLayout, dstBuffer, regionCount, pRegions);
 }
@@ -1061,17 +1123,16 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 		uint32_t                                    rangeCount,
 		const VkImageSubresourceRange*              pRanges) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<ClearColorImageCmd>();
+	auto& cmd = addCmd<ClearColorImageCmd>(cb);
 
 	auto& dst = cb.dev->images.get(image);
-	cmd->dst = &dst;
-	cmd->color = *pColor;
-	cmd->imgLayout = imageLayout;
-	cmd->ranges = {pRanges, pRanges + rangeCount};
+	cmd.dst = &dst;
+	cmd.color = *pColor;
+	cmd.imgLayout = imageLayout;
+	cmd.ranges = {pRanges, pRanges + rangeCount};
 
-	useHandle(cb, *cmd, dst);
+	useHandle(cb, cmd, dst);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdClearColorImage(commandBuffer,
 		image, imageLayout, pColor, rangeCount, pRanges);
 }
@@ -1084,16 +1145,15 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 		uint32_t                                    rangeCount,
 		const VkImageSubresourceRange*              pRanges) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<ClearDepthStencilImageCmd>();
+	auto& cmd = addCmd<ClearDepthStencilImageCmd>(cb);
 
 	auto& dst = cb.dev->images.get(image);
-	cmd->dst = &dst;
-	cmd->imgLayout = imageLayout;
-	cmd->value = *pDepthStencil;
-	cmd->ranges = {pRanges, pRanges + rangeCount};
+	cmd.dst = &dst;
+	cmd.imgLayout = imageLayout;
+	cmd.value = *pDepthStencil;
+	cmd.ranges = {pRanges, pRanges + rangeCount};
 
-	useHandle(cb, *cmd, dst);
-	add(cb, std::move(cmd));
+	useHandle(cb, cmd, dst);
 
 	cb.dev->dispatch.CmdClearDepthStencilImage(commandBuffer, image,
 		imageLayout, pDepthStencil, rangeCount, pRanges);
@@ -1106,16 +1166,16 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 		uint32_t                                    rectCount,
 		const VkClearRect*                          pRects) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<ClearAttachmentCmd>();
-	cmd->attachments = {pAttachments, pAttachments + attachmentCount};
-	cmd->rects = {pRects, pRects + rectCount};
+	auto& cmd = addCmd<ClearAttachmentCmd>(cb);
+
+	cmd.attachments = {pAttachments, pAttachments + attachmentCount};
+	cmd.rects = {pRects, pRects + rectCount};
 
 	// NOTE: add clears attachments handles to used handles for this cmd?
 	// but they were already used in BeginRenderPass and are just implicitly
 	// used here (as in many other render pass cmds). So we probably should
 	// not do it.
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdClearAttachments(commandBuffer, attachmentCount,
 		pAttachments, rectCount, pRects);
 }
@@ -1132,17 +1192,16 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	auto& src = cb.dev->images.get(srcImage);
 	auto& dst = cb.dev->images.get(dstImage);
 
-	auto cmd = std::make_unique<ResolveImageCmd>();
-	cmd->src = &src;
-	cmd->srcLayout = srcImageLayout;
-	cmd->dst = &dst;
-	cmd->dstLayout = dstImageLayout;
-	cmd->regions = {pRegions, pRegions + regionCount};
+	auto& cmd = addCmd<ResolveImageCmd>(cb);
+	cmd.src = &src;
+	cmd.srcLayout = srcImageLayout;
+	cmd.dst = &dst;
+	cmd.dstLayout = dstImageLayout;
+	cmd.regions = {pRegions, pRegions + regionCount};
 
-	useHandle(cb, *cmd, src);
-	useHandle(cb, *cmd, dst);
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdResolveImage(commandBuffer, srcImage, srcImageLayout,
 		dstImage, dstImageLayout, regionCount, pRegions);
 }
@@ -1152,11 +1211,11 @@ VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
 		VkEvent                                     event,
 		VkPipelineStageFlags                        stageMask) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetEventCmd>();
-	cmd->event = &cb.dev->events.get(event);
-	cmd->stageMask = stageMask;
+	auto& cmd = addCmd<SetEventCmd>(cb);
+	cmd.event = &cb.dev->events.get(event);
+	cmd.stageMask = stageMask;
 
-	useHandle(cb, *cmd, *cmd->event);
+	useHandle(cb, cmd, *cmd.event);
 
 	cb.dev->dispatch.CmdSetEvent(commandBuffer, event, stageMask);
 }
@@ -1166,13 +1225,12 @@ VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
 		VkEvent                                     event,
 		VkPipelineStageFlags                        stageMask) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<ResetEventCmd>();
-	cmd->event = &cb.dev->events.get(event);
-	cmd->stageMask = stageMask;
+	auto& cmd = addCmd<ResetEventCmd>(cb);
+	cmd.event = &cb.dev->events.get(event);
+	cmd.stageMask = stageMask;
 
-	useHandle(cb, *cmd, *cmd->event);
+	useHandle(cb, cmd, *cmd.event);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdSetEvent(commandBuffer, event, stageMask);
 }
 
@@ -1181,31 +1239,30 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		uint32_t                                    commandBufferCount,
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<ExecuteCommandsCmd>();
+	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
-		cmd->secondaries.push_back(&secondary);
-		useHandle(cb, *cmd, secondary);
+		cmd.secondaries.push_back(&secondary);
+		useHandle(cb, cmd, secondary);
 
 		for(auto& img : secondary.images) {
 			if(img.second.layoutChanged) {
-				useHandle(cb, *cmd, *img.second.image, img.second.finalLayout);
+				useHandle(cb, cmd, *img.second.image, img.second.finalLayout);
 			} else {
-				useHandle(cb, *cmd, *img.second.image);
+				useHandle(cb, cmd, *img.second.image);
 			}
 		}
 
 		for(auto& buf : secondary.buffers) {
-			useHandle(cb, *cmd, *buf.second.buffer);
+			useHandle(cb, cmd, *buf.second.buffer);
 		}
 
 		for(auto& handle : secondary.handles) {
-			useHandle(cb, *cmd, handle.first, *handle.second.handle);
+			useHandle(cb, cmd, handle.first, *handle.second.handle);
 		}
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdExecuteCommands(commandBuffer,
 		commandBufferCount, pCommandBuffers);
 }
@@ -1217,19 +1274,18 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 		uint32_t                                    regionCount,
 		const VkBufferCopy*                         pRegions) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<CopyBufferCmd>();
+	auto& cmd = addCmd<CopyBufferCmd>(cb);
 
 	auto& srcBuf = cb.dev->buffers.get(srcBuffer);
 	auto& dstBuf = cb.dev->buffers.get(dstBuffer);
 
-	cmd->src = &srcBuf;
-	cmd->dst = &dstBuf;
-	cmd->regions = {pRegions, pRegions + regionCount};
+	cmd.src = &srcBuf;
+	cmd.dst = &dstBuf;
+	cmd.regions = {pRegions, pRegions + regionCount};
 
-	useHandle(cb, *cmd, srcBuf);
-	useHandle(cb, *cmd, dstBuf);
+	useHandle(cb, cmd, srcBuf);
+	useHandle(cb, cmd, dstBuf);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdCopyBuffer(commandBuffer,
 		srcBuffer, dstBuffer, regionCount, pRegions);
 }
@@ -1241,17 +1297,16 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 		VkDeviceSize                                dataSize,
 		const void*                                 pData) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<UpdateBufferCmd>();
+	auto& cmd = addCmd<UpdateBufferCmd>(cb);
 
 	auto& buf = cb.dev->buffers.get(dstBuffer);
 	auto dataPtr = static_cast<const std::byte*>(pData);
-	cmd->data = {dataPtr, dataPtr + dataSize};
-	cmd->dst = &buf;
-	cmd->offset = dstOffset;
+	cmd.data = {dataPtr, dataPtr + dataSize};
+	cmd.dst = &buf;
+	cmd.offset = dstOffset;
 
-	useHandle(cb, *cmd, buf);
+	useHandle(cb, cmd, buf);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdUpdateBuffer(commandBuffer, dstBuffer, dstOffset, dataSize, pData);
 }
 
@@ -1262,17 +1317,16 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 		VkDeviceSize                                size,
 		uint32_t                                    data) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<FillBufferCmd>();
+	auto& cmd = addCmd<FillBufferCmd>(cb);
 
 	auto& buf = cb.dev->buffers.get(dstBuffer);
-	cmd->dst = &buf;
-	cmd->offset = dstOffset;
-	cmd->size = size;
-	cmd->data = data;
+	cmd.dst = &buf;
+	cmd.offset = dstOffset;
+	cmd.size = size;
+	cmd.data = data;
 
-	useHandle(cb, *cmd, buf);
+	useHandle(cb, cmd, buf);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdFillBuffer(commandBuffer, dstBuffer, dstOffset, size, data);
 }
 
@@ -1280,13 +1334,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BeginDebugUtilsLabelCmd>();
+	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb);
 
 	auto* c = pLabelInfo->color;
-	cmd->color = {c[0], c[1], c[2], c[3]};
-	cmd->name = pLabelInfo->pLabelName;
-
-	addSection(cb, std::move(cmd));
+	cmd.color = {c[0], c[1], c[2], c[3]};
+	cmd.name = pLabelInfo->pLabelName;
 
 	if(cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(commandBuffer, pLabelInfo);
@@ -1296,8 +1348,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<EndDebugUtilsLabelCmd>();
-	addEndSection(cb, std::move(cmd));
+	auto& cmd = addCmd<EndDebugUtilsLabelCmd, SectionType::end>(cb);
+	(void) cmd;
 
 	if(cb.dev->dispatch.CmdEndDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(commandBuffer);
@@ -1309,22 +1361,21 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 		VkPipelineBindPoint                         pipelineBindPoint,
 		VkPipeline                                  pipeline) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BindPipelineCmd>();
-	cmd->bindPoint = pipelineBindPoint;
+	auto& cmd = addCmd<BindPipelineCmd>(cb);
+	cmd.bindPoint = pipelineBindPoint;
 
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
 		cb.computeState.pipe = &cb.dev->computePipes.get(pipeline);
-		cmd->pipe = cb.computeState.pipe;
+		cmd.pipe = cb.computeState.pipe;
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
 		cb.graphicsState.pipe = &cb.dev->graphicsPipes.get(pipeline);
-		cmd->pipe = cb.graphicsState.pipe;
+		cmd.pipe = cb.graphicsState.pipe;
 	} else {
 		dlg_error("unknown pipeline bind point");
 	}
 
-	useHandle(cb, *cmd, *cmd->pipe);
+	useHandle(cb, cmd, *cmd.pipe);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
 }
 
@@ -1334,14 +1385,13 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
 		uint32_t                                    query,
 		VkQueryControlFlags                         flags) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<BeginQueryCmd>();
-	cmd->pool = &cb.dev->queryPools.get(queryPool);
-	cmd->query = query;
-	cmd->flags = flags;
+	auto& cmd = addCmd<BeginQueryCmd>(cb);
+	cmd.pool = &cb.dev->queryPools.get(queryPool);
+	cmd.query = query;
+	cmd.flags = flags;
 
-	useHandle(cb, *cmd, *cmd->pool);
+	useHandle(cb, cmd, *cmd.pool);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdBeginQuery(commandBuffer, queryPool, query, flags);
 }
 
@@ -1350,13 +1400,12 @@ VKAPI_ATTR void VKAPI_CALL CmdEndQuery(
 		VkQueryPool                                 queryPool,
 		uint32_t                                    query) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<EndQueryCmd>();
-	cmd->pool = &cb.dev->queryPools.get(queryPool);
-	cmd->query = query;
+	auto& cmd = addCmd<EndQueryCmd>(cb);
+	cmd.pool = &cb.dev->queryPools.get(queryPool);
+	cmd.query = query;
 
-	useHandle(cb, *cmd, *cmd->pool);
+	useHandle(cb, cmd, *cmd.pool);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdEndQuery(commandBuffer, queryPool, query);
 }
 
@@ -1366,14 +1415,13 @@ VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(
 		uint32_t                                    firstQuery,
 		uint32_t                                    queryCount) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<ResetQueryPoolCmd>();
-	cmd->pool = &cb.dev->queryPools.get(queryPool);
-	cmd->first = firstQuery;
-	cmd->count = queryCount;
+	auto& cmd = addCmd<ResetQueryPoolCmd>(cb);
+	cmd.pool = &cb.dev->queryPools.get(queryPool);
+	cmd.first = firstQuery;
+	cmd.count = queryCount;
 
-	useHandle(cb, *cmd, *cmd->pool);
+	useHandle(cb, cmd, *cmd.pool);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdResetQueryPool(commandBuffer, queryPool, firstQuery, queryCount);
 }
 
@@ -1383,14 +1431,13 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
 		VkQueryPool                                 queryPool,
 		uint32_t                                    query) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<WriteTimestampCmd>();
-	cmd->pool = &cb.dev->queryPools.get(queryPool);
-	cmd->stage = pipelineStage;
-	cmd->query = query;
+	auto& cmd = addCmd<WriteTimestampCmd>(cb);
+	cmd.pool = &cb.dev->queryPools.get(queryPool);
+	cmd.stage = pipelineStage;
+	cmd.query = query;
 
-	useHandle(cb, *cmd, *cmd->pool);
+	useHandle(cb, cmd, *cmd.pool);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdWriteTimestamp(commandBuffer, pipelineStage, queryPool, query);
 }
 
@@ -1404,19 +1451,18 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
 		VkDeviceSize                                stride,
 		VkQueryResultFlags                          flags) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<CopyQueryPoolResultsCmd>();
-	cmd->pool = &cb.dev->queryPools.get(queryPool);
-	cmd->first = firstQuery;
-	cmd->count = queryCount;
-	cmd->dstBuffer = &cb.dev->buffers.get(dstBuffer);
-	cmd->dstOffset = dstOffset;
-	cmd->stride = stride;
-	cmd->flags = flags;
+	auto& cmd = addCmd<CopyQueryPoolResultsCmd>(cb);
+	cmd.pool = &cb.dev->queryPools.get(queryPool);
+	cmd.first = firstQuery;
+	cmd.count = queryCount;
+	cmd.dstBuffer = &cb.dev->buffers.get(dstBuffer);
+	cmd.dstOffset = dstOffset;
+	cmd.stride = stride;
+	cmd.flags = flags;
 
-	useHandle(cb, *cmd, *cmd->pool);
-	useHandle(cb, *cmd, *cmd->dstBuffer);
+	useHandle(cb, cmd, *cmd.pool);
+	useHandle(cb, cmd, *cmd.dstBuffer);
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdCopyQueryPoolResults(commandBuffer, queryPool,
 		firstQuery, queryCount, dstBuffer, dstOffset, stride, flags);
 }
@@ -1429,26 +1475,26 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 		uint32_t                                    size,
 		const void*                                 pValues) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<PushConstantsCmd>();
+	auto& cmd = addCmd<PushConstantsCmd>(cb);
 
 	// NOTE: See BindDescriptorSets for rationale on handling here.
-	cmd->layout = cb.dev->pipeLayouts.getPtr(pipeLayout);
+	cmd.layout = cb.dev->pipeLayouts.getPtr(pipeLayout);
 
-	cmd->stages = stageFlags;
-	cmd->offset = offset;
+	cmd.stages = stageFlags;
+	cmd.offset = offset;
 	auto ptr = static_cast<const std::byte*>(pValues);
-	cmd->values = {ptr, ptr + size};
+	cmd.values = {ptr, ptr + size};
 
 	// TODO: not sure about this. The spec isn't clear about this.
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
 	if(cb.pushConstants.layout &&
-			pushConstantCompatible(*cmd->layout, *cb.pushConstants.layout)) {
+			pushConstantCompatible(*cmd.layout, *cb.pushConstants.layout)) {
 		cb.pushConstants.layout = nullptr;
 		cb.pushConstants.map.clear();
 	}
 
-	cb.pushConstants.layout = cmd->layout.get();
+	cb.pushConstants.layout = cmd.layout.get();
 	for(auto i = 0u; i < 32; ++i) {
 		if((stageFlags & (1 << i)) == 0) {
 			continue;
@@ -1490,7 +1536,6 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 		}
 	}
 
-	add(cb, std::move(cmd));
 	cb.dev->dispatch.CmdPushConstants(commandBuffer, pipeLayout, stageFlags,
 		offset, size, pValues);
 }
@@ -1501,10 +1546,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 		uint32_t                                    viewportCount,
 		const VkViewport*                           pViewports) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetViewportCmd>();
-	cmd->first = firstViewport;
-	cmd->viewports = {pViewports, pViewports + viewportCount};
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetViewportCmd>(cb);
+	cmd.first = firstViewport;
+	cmd.viewports = {pViewports, pViewports + viewportCount};
 
 	ensureSize(cb.graphicsState.dynamic.viewports, firstViewport + viewportCount);
 	std::copy(pViewports, pViewports + viewportCount,
@@ -1519,10 +1563,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 		uint32_t                                    scissorCount,
 		const VkRect2D*                             pScissors) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetScissorCmd>();
-	cmd->first = firstScissor;
-	cmd->scissors = {pScissors, pScissors + scissorCount};
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetScissorCmd>(cb);
+	cmd.first = firstScissor;
+	cmd.scissors = {pScissors, pScissors + scissorCount};
 
 	ensureSize(cb.graphicsState.dynamic.scissors, firstScissor + scissorCount);
 	std::copy(pScissors, pScissors + scissorCount,
@@ -1535,9 +1578,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineWidth(
 		VkCommandBuffer                             commandBuffer,
 		float                                       lineWidth) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetLineWidthCmd>();
-	cmd->width = lineWidth;
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetLineWidthCmd>(cb);
+	cmd.width = lineWidth;
+
 	cb.graphicsState.dynamic.lineWidth = lineWidth;
 	cb.dev->dispatch.CmdSetLineWidth(commandBuffer, lineWidth);
 }
@@ -1548,10 +1591,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias(
 		float                                       depthBiasClamp,
 		float                                       depthBiasSlopeFactor) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetDepthBiasCmd>();
-	cmd->state = {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor};
-	cb.graphicsState.dynamic.depthBias = cmd->state;
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetDepthBiasCmd>(cb);
+	cmd.state = {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor};
+	cb.graphicsState.dynamic.depthBias = cmd.state;
+
 	cb.dev->dispatch.CmdSetDepthBias(commandBuffer,
 		depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor);
 }
@@ -1560,11 +1603,11 @@ VKAPI_ATTR void VKAPI_CALL CmdSetBlendConstants(
 		VkCommandBuffer                             commandBuffer,
 		const float                                 blendConstants[4]) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetBlendConstantsCmd>();
-	std::memcpy(cmd->values.data(), blendConstants, sizeof(cmd->values));
+	auto& cmd = addCmd<SetBlendConstantsCmd>(cb);
+	std::memcpy(cmd.values.data(), blendConstants, sizeof(cmd.values));
 	std::memcpy(cb.graphicsState.dynamic.blendConstants.data(), blendConstants,
 		sizeof(cb.graphicsState.dynamic.blendConstants));
-	add(cb, std::move(cmd));
+
 	cb.dev->dispatch.CmdSetBlendConstants(commandBuffer, blendConstants);
 }
 
@@ -1573,12 +1616,12 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBounds(
 		float                                       minDepthBounds,
 		float                                       maxDepthBounds) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetDepthBoundsCmd>();
-	cmd->min = minDepthBounds;
-	cmd->max = maxDepthBounds;
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetDepthBoundsCmd>(cb);
+	cmd.min = minDepthBounds;
+	cmd.max = maxDepthBounds;
 	cb.graphicsState.dynamic.depthBoundsMin = minDepthBounds;
 	cb.graphicsState.dynamic.depthBoundsMax = maxDepthBounds;
+
 	cb.dev->dispatch.CmdSetDepthBounds(commandBuffer, minDepthBounds, maxDepthBounds);
 }
 
@@ -1587,16 +1630,16 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilCompareMask(
 		VkStencilFaceFlags                          faceMask,
 		uint32_t                                    compareMask) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetStencilCompareMaskCmd>();
-	cmd->faceMask = faceMask;
-	cmd->value = compareMask;
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetStencilCompareMaskCmd>(cb);
+	cmd.faceMask = faceMask;
+	cmd.value = compareMask;
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
 		cb.graphicsState.dynamic.stencilFront.compareMask = compareMask;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
 		cb.graphicsState.dynamic.stencilBack.compareMask = compareMask;
 	}
+
 	cb.dev->dispatch.CmdSetStencilCompareMask(commandBuffer, faceMask, compareMask);
 }
 
@@ -1605,16 +1648,16 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilWriteMask(
 		VkStencilFaceFlags                          faceMask,
 		uint32_t                                    writeMask) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetStencilWriteMaskCmd>();
-	cmd->faceMask = faceMask;
-	cmd->value = writeMask;
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetStencilWriteMaskCmd>(cb);
+	cmd.faceMask = faceMask;
+	cmd.value = writeMask;
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
 		cb.graphicsState.dynamic.stencilFront.compareMask = writeMask;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
 		cb.graphicsState.dynamic.stencilBack.compareMask = writeMask;
 	}
+
 	cb.dev->dispatch.CmdSetStencilWriteMask(commandBuffer, faceMask, writeMask);
 }
 
@@ -1623,16 +1666,16 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 		VkStencilFaceFlags                          faceMask,
 		uint32_t                                    reference) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto cmd = std::make_unique<SetStencilReferenceCmd>();
-	cmd->faceMask = faceMask;
-	cmd->value = reference;
-	add(cb, std::move(cmd));
+	auto& cmd = addCmd<SetStencilReferenceCmd>(cb);
+	cmd.faceMask = faceMask;
+	cmd.value = reference;
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
 		cb.graphicsState.dynamic.stencilFront.reference = reference;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
 		cb.graphicsState.dynamic.stencilBack.reference = reference;
 	}
+
 	cb.dev->dispatch.CmdSetStencilReference(commandBuffer, faceMask, reference);
 }
 
@@ -1651,7 +1694,7 @@ void DescriptorState::bind(PipelineLayout& layout, u32 firstSet,
 		}
 
 		dlg_assert(descriptorSets[i].layout);
-		if(!compatibleForSetN(*descriptorSets[i].layout, layout, lastSet)) {
+		if(!compatibleForSetN(*descriptorSets[i].layout, layout, u32(lastSet))) {
 			// disturbed!
 			descriptorSets[i] = {};
 		}
@@ -1676,6 +1719,5 @@ void DescriptorState::bind(PipelineLayout& layout, u32 firstSet,
 		descriptorSets.resize(lastSet + 1);
 	}
 }
-
 
 } // namespace fuen

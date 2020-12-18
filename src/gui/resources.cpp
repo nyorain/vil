@@ -384,7 +384,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 				data = data.first(maxSize);
 			}
 
-			ImGui::Columns(buffer_.layout.size());
+			ImGui::Columns(u32(buffer_.layout.size()));
 			for(auto& [name, _] : buffer_.layout) {
 				imGuiText("{}", name);
 				ImGui::NextColumn();

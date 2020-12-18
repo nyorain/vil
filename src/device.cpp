@@ -35,12 +35,12 @@ Device::~Device() {
 	dlg_trace("Destroying Device");
 
 	// Vulkan spec requires that all pending submissions have finished.
-	for(auto& subm : pending) {
+	while(!pending.empty()) {
 		// We don't have to lock the mutex at checkLocked here since
 		// there can't be any concurrent calls on the device as it
 		// is being destroyed.
-		auto res = checkLocked(*subm);
-		dlg_assert(res);
+		auto res = checkLocked(*pending[0]);
+		dlg_assert(res.has_value());
 	}
 
 	// user must have erased all resources
@@ -180,7 +180,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		// add one.
 		for(auto qf = 0u; qf < nqf; ++qf) {
 			if(qfprops[qf].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-				gfxQueueInfoID = queueCreateInfos.size();
+				gfxQueueInfoID = u32(queueCreateInfos.size());
 
 				dlg_trace("Adding new queue (for graphics), family {}", qf);
 				auto& q = queueCreateInfos.emplace_back();
@@ -243,7 +243,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 					auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
 						qf, window->surface, &supported);
 					if(res == VK_SUCCESS && supported) {
-						presentQueueInfoID = queueCreateInfos.size();
+						presentQueueInfoID = u32(queueCreateInfos.size());
 
 						dlg_trace("Adding new queue (for present), family {}", qf);
 						auto& q = queueCreateInfos.emplace_back();
@@ -271,7 +271,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 					dlg_info("Adding {} device extension", extName);
 
-					nci.enabledExtensionCount = newExts.size();
+					nci.enabledExtensionCount = u32(newExts.size());
 					nci.ppEnabledExtensionNames = newExts.data();
 				}
 			}
@@ -279,7 +279,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	nci.pQueueCreateInfos = queueCreateInfos.data();
-	nci.queueCreateInfoCount = queueCreateInfos.size();
+	nci.queueCreateInfoCount = u32(queueCreateInfos.size());
 
 	VkResult result = fpCreateDevice(phdev, &nci, alloc, pDevice);
 	if(result != VK_SUCCESS) {
@@ -431,6 +431,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 		VkDevice dev,
 		const VkAllocationCallbacks* alloc) {
+	if(!dev) {
+		return;
+	}
+
 	auto devd = moveData<Device>(dev);
 	dlg_assert(devd);
 
@@ -452,6 +456,8 @@ VkFence getFenceFromPool(Device& dev, bool& checkedSubmissions) {
 
 		// check if a submission finished
 		if(!checkedSubmissions) {
+			// we can iterate through it like that (even though checkLocked removes)
+			// since we return on the first return.
 			for(auto it = dev.pending.begin(); it < dev.pending.end(); ++it) {
 				auto& subm = *it;
 				if(subm->ourFence && checkLocked(*subm)) {
@@ -507,12 +513,11 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			constexpr auto minResetSemCount = 10u;
 			if(!resettedSemaphores && dev.resetSemaphores.size() > minResetSemCount) {
 				if(!checkedSubmissions) {
-					// first check whether any pending submissions have finished.
-					for(auto it = dev.pending.begin(); it < dev.pending.end();) {
+					// first check whether any additional pending submissions have finished.
+					for(auto it = dev.pending.begin(); it != dev.pending.end();) {
 						auto& subm = *it;
-						if(!subm->ourFence || !checkLocked(*subm)) {
-							++it;
-						}
+						auto nit = checkLocked(*subm);
+						it = nit ? *nit : it + 1;
 					}
 
 					checkedSubmissions = true;
@@ -524,7 +529,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 				VkSubmitInfo si {};
 				si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-				si.waitSemaphoreCount = resetSemaphores.size();
+				si.waitSemaphoreCount = u32(resetSemaphores.size());
 				si.pWaitSemaphores = resetSemaphores.data();
 				si.pWaitDstStageMask = waitFlags.data();
 
@@ -587,6 +592,11 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				std::lock_guard lock(dev.mutex);
 
 				// store in command buffer that it was submitted here
+				// TODO IMPORTANT, REAL-WORLD RACE!
+				//   This should not be here, rather inside the queue lock!
+				//   Otherwise we might have a race (when dev.mutex is unlocked again below)
+				//   where someone uses this submission already even though it wasn't submitted
+				//   yet (and maybe e.g. doesn't even have a fence of something!)
 				cb.pending.push_back(&subm);
 
 				// store pending layouts
@@ -625,10 +635,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		signalSemaphores.emplace_back(dst.signalSemaphores);
 		signalSemaphores.back().push_back(dst.ourSemaphore);
 
-		si.signalSemaphoreCount = signalSemaphores.back().size();
+		si.signalSemaphoreCount = u32(signalSemaphores.back().size());
 		si.pSignalSemaphores = signalSemaphores.back().data();
 
-		si.commandBufferCount = commandBuffers.back().size();
+		si.commandBufferCount = u32(commandBuffers.back().size());
 		si.pCommandBuffers = commandBuffers.back().data();
 		nsubmitInfos.push_back(si);
 	}
@@ -663,7 +673,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	}
 
 	dlg_assert(nsubmitInfos.size() == submitCount);
-	return dev.dispatch.QueueSubmit(queue, nsubmitInfos.size(), nsubmitInfos.data(), submFence);
+	return dev.dispatch.QueueSubmit(queue, u32(nsubmitInfos.size()), nsubmitInfos.data(), submFence);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue vkQueue) {
@@ -682,12 +692,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue vkQueue) {
 			continue;
 		}
 
-		auto res = checkLocked(*subm);
-		if(!res) {
+		auto nit = checkLocked(*subm);
+		if(!nit) {
 			dlg_error("Expected submission to be completed after vkQueueWaitIdle");
 			++it;
+			continue;
 		}
-		// otherwise, don't increase it, since the current element was removed
+
+		it = *nit;
 	}
 
 	return res;
@@ -715,17 +727,17 @@ VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
 	return res;
 }
 
-bool checkLocked(PendingSubmission& subm) {
+std::optional<SubmIterator> checkLocked(PendingSubmission& subm) {
 	auto& dev = *subm.queue->dev;
 
 	if(subm.appFence) {
 		if(dev.dispatch.GetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
-			return false;
+			return std::nullopt;
 		}
 	} else {
 		dlg_assert(subm.ourFence);
 		if(dev.dispatch.GetFenceStatus(dev.handle, subm.ourFence) != VK_SUCCESS) {
-			return false;
+			return std::nullopt;
 		}
 	}
 	// apparently unique_ptr == ptr comparision not supported in stdlibc++ yet?
@@ -754,8 +766,7 @@ bool checkLocked(PendingSubmission& subm) {
 		subm.appFence->submission = nullptr;
 	}
 
-	dev.pending.erase(it);
-	return true;
+	return dev.pending.erase(it);
 }
 
 void notifyDestruction(Device& dev, Handle& handle) {

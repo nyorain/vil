@@ -61,7 +61,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	// a performance impact.
 	if(dev.usedQueueFamilyIndices.size() > 1) {
 		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
-		nci.queueFamilyIndexCount = dev.usedQueueFamilyIndices.size();
+		nci.queueFamilyIndexCount = u32(dev.usedQueueFamilyIndices.size());
 		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
 	}
 
@@ -83,6 +83,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 		VkDevice                                    device,
 		VkBuffer                                    buffer,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!buffer) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.buffers.mustErase(buffer);
 	dev.dispatch.DestroyBuffer(device, buffer, pAllocator);
@@ -162,6 +166,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
 		VkDevice                                    device,
 		VkBufferView                                bufferView,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!bufferView) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.bufferViews.mustErase(bufferView);
 	dev.dispatch.DestroyBufferView(device, bufferView, pAllocator);

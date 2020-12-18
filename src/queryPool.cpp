@@ -26,6 +26,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(
 		VkDevice                                    device,
 		VkQueryPool                                 queryPool,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!queryPool) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.queryPools.mustErase(queryPool);
 	dev.dispatch.DestroyQueryPool(device, queryPool, pAllocator);

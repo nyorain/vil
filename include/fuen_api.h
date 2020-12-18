@@ -20,8 +20,11 @@
   #undef MemoryBarrier
   #undef WIN32_LEAN_AND_MEAN
   #undef NOMINMAX
+  #undef CreateEvent
+  #undef CreateSemaphore
 #else
   #include <dlfcn.h>
+  #include <errno.h>
 #endif
 
 #ifdef __cplusplus
@@ -84,33 +87,38 @@ typedef struct FuenApi {
 
 /// Must be called only *after* a vulkan device was created.
 /// Will remain valid only as long as the vulkan device is valid.
-static inline bool fuenLoadApi(FuenApi* api) {
+/// Returns 0 on success, an error code otherwise.
+static inline int fuenLoadApi(FuenApi* api) {
 	// We don't actually load a library here. If fuen was loaded as a
 	// layer, the shared library must already be present. Otherwise,
 	// we want this to fail anyways.
 
 #if defined(_WIN32) || defined(__CYGWIN__)
-	HMODULE handle = GetModuleHandleA("libVkLayer_fuencaliente.dll");
+	// TODO: name of dll depends on compiler used. For MSC it does not
+	// have the lib prefix, for gcc/mingw it does.
+	HMODULE handle = GetModuleHandleA("VkLayer_fuencaliente.dll");
 
 	// We don't have to call FreeLibrary since GetModuleHandle does not increase ref count
 	#define fuenCloseLib()
-	#define fuenLoadSym(procName) *(FARPROC**) (&api->procName) = GetProcAddress(handle, "fuen" #procName)
+	#define fuenLoadSym(procName) *(FARPROC*) (&api->procName) = GetProcAddress(handle, "fuen" #procName)
+	// #define fuenError() GetLastError()
 #else
 	void* handle = dlopen("libVkLayer_fuencaliente.so", RTLD_NOLOAD | RTLD_LAZY);
 
 	// We have to call dlclose since our dlopen increases the reference count.
 	#define fuenCloseLib() dlclose(handle)
 	#define fuenLoadSym(procName) *(void**) &(api->procName) = dlsym(handle, "fuen" #procName)
+	// #define fuenError() errno
 #endif
 
 	if(!handle) {
 		// In this case, the layer wasn't loaded.
-		return false;
+		return -1;
 	}
 
 	fuenLoadSym(CreateOverlayForLastCreatedSwapchain);
 	if(!api->CreateOverlayForLastCreatedSwapchain) {
-		return false;
+		return -2;
 	}
 
 	// yeah well just assume they'll load fine if overlayShow loaded.
@@ -127,7 +135,7 @@ static inline bool fuenLoadApi(FuenApi* api) {
 #undef mdlsym
 #undef mdlclose
 
-	return true;
+	return 0;
 }
 
 #ifdef __cplusplus

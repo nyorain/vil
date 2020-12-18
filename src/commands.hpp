@@ -131,7 +131,7 @@ const Command* displayCommands(const T& container, const Command* selected,
 }
 
 struct SectionCommand : Command {
-	std::vector<std::unique_ptr<Command>> children;
+	std::vector<CommandPtr> children;
 
 	const Command* display(const Command* selected, TypeFlags typeFlags) const override {
 		// auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;

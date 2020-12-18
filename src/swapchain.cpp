@@ -112,6 +112,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		VkDevice                                    device,
 		VkSwapchainKHR                             	swapchain,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!swapchain) {
+		return;
+	}
+
 	auto& devd = getData<Device>(device);
 	devd.swapchains.mustErase(swapchain);
 	devd.dispatch.DestroySwapchainKHR(device, swapchain, pAllocator);

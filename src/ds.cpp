@@ -198,6 +198,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorSetLayout(
 		VkDevice                                    device,
 		VkDescriptorSetLayout                       descriptorSetLayout,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!descriptorSetLayout) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.dsLayouts.mustErase(descriptorSetLayout);
 
@@ -232,6 +236,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorPool(
 		VkDevice                                    device,
 		VkDescriptorPool                            descriptorPool,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!descriptorPool) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.dsPools.mustErase(descriptorPool);
 	dev.dispatch.DestroyDescriptorPool(device, descriptorPool, pAllocator);

@@ -12,6 +12,7 @@ void Overlay::init(Swapchain& swapchain) {
 	this->swapchain = &swapchain;
 	// this->platform = findData<Platform>(swapchain.ci.surface);
 	this->gui.init(*swapchain.dev, swapchain.ci.imageFormat, false);
+	initRenderBuffers();
 }
 
 void Overlay::initRenderBuffers() {
@@ -28,6 +29,8 @@ void Overlay::initRenderBuffers() {
 
 VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 		u32 imageIdx) {
+	dlg_assert(imageIdx < buffers.size());
+
 	Gui::FrameInfo frameInfo {};
 	frameInfo.extent = swapchain->ci.imageExtent;
 	frameInfo.imageIdx = imageIdx;

@@ -56,6 +56,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 		VkDevice                                    device,
 		VkFramebuffer                               framebuffer,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!framebuffer) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.framebuffers.mustErase(framebuffer);
 	dev.dispatch.DestroyFramebuffer(device, framebuffer, pAllocator);
@@ -154,6 +158,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 		VkDevice                                    device,
 		VkRenderPass                                renderPass,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!renderPass) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.dispatch.DestroyRenderPass(device, renderPass, pAllocator);
 	dev.renderPasses.mustErase(renderPass);

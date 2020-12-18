@@ -8,34 +8,28 @@ project('fuencaliente', ['c', 'cpp'],
 	]
 )
 
-# needed shaders
-glslang = find_program('glslangValidator')
-
-overlay_shaders = {
-	'gui.frag': { '': [] },
-	'gui.vert': { '': [] },
-	'image.frag': {
-		'1DArray': ['-DTEX_TYPE_1D_ARRAY'],
-		'2DArray': ['-DTEX_TYPE_2D_ARRAY'],
-		'3D': ['-DTEX_TYPE_3D'],
-	}
-}
-
-spv = []
-foreach file, configs : overlay_shaders
-	foreach name, config : configs
-		varname = file.underscorify() + '_' + name.underscorify() + '_spv_data'
-		outname = file + '.' + name.underscorify() + '.spv.h'
-		spv += custom_target(
-			outname,
-			input: files('src/data/' + file),
-			output: outname,
-			command : [glslang, '-V', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@'])
-	endforeach
-endforeach
-
+subdir('src/data') # compile shaders
 
 cc = meson.get_compiler('cpp')
+
+args = cc.get_supported_arguments([
+	# enable msvc parallel compilation
+	# '/MP',
+
+	# silence various msvc warnings, we still wanna compile with werror
+	'/wd4065', # switch has no case, just default
+	'/wd26812', # prefer 'enum class' over 'enum'
+	'/wd4244', # lossy type conversion (e.g. double -> int)
+	'/wd4305', # truncating type conversion (e.g. double -> float)
+	'/wd4127', # conditional expression is constant (might be useful but not really for us)
+	'/wd4456', # delecaration hides previous local declaration (sorry, too used to rust's beauty)
+
+	# TODO: msvc slow as fuck in debug build.
+	'-D_ITERATOR_DEBUG_LEVEL=0',
+
+	# TODO: those should be fixed in code, really.
+	'/wd4458', # declaration hides class member
+])
 
 dep_threads = dependency('threads', required: false)
 dep_dlg = dependency('dlg', fallback: ['dlg', 'dlg_dep'])
@@ -118,11 +112,14 @@ src = files(
 	'include/fuen_api.h',
 )
 
-public_inc = include_directories('include')
-private_inc = include_directories('src')
+public_inc = include_directories('include/')
+private_inc = include_directories('src/')
+shader_inc = include_directories('src/data/')
+
 inc = [
 	public_inc,
 	private_inc,
+	shader_inc,
 ]
 
 deps = [
@@ -130,6 +127,7 @@ deps = [
 	dep_dlg,
 	dep_swa,
 	libimgui_core_dep,
+	dep_vulkan,
 ]
 
 fuen_layer = shared_library(
@@ -139,12 +137,20 @@ fuen_layer = shared_library(
 	dependencies: deps,
 	include_directories: inc,
 	link_args: cc.get_supported_link_arguments(['-Wl,-Bsymbolic-functions', '-Wl,-z,relro']),
+	cpp_args: args,
 	install: true
 )
 
 conf_data = configuration_data()
 conf_data.set('fuen_version', meson.project_version())
-conf_data.set('lib_path', fuen_layer.full_path().split('/')[-1])
+
+# TODO: this is terrible... needed for windows
+libpath = fuen_layer.full_path()
+if libpath.contains('\\')
+	conf_data.set('lib_path', '.\\\\' + libpath.split('\\')[-1])
+else
+	conf_data.set('lib_path', libpath.split('/')[-1])
+endif
 
 configure_file(
 	input: 'VkLayer_fuencaliente.json.in',

@@ -39,6 +39,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(
 		VkDevice                                    device,
 		VkFence                                     fence,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!fence) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.fences.mustErase(fence);
 	dev.dispatch.DestroyFence(device, fence, pAllocator);
@@ -147,6 +151,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
 		VkDevice                                    device,
 		VkSemaphore                                 semaphore,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!semaphore) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.semaphores.mustErase(semaphore);
 	dev.dispatch.DestroySemaphore(device, semaphore, pAllocator);
@@ -176,6 +184,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyEvent(
 		VkDevice                                    device,
 		VkEvent                                     event,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!event) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.events.mustErase(event);
 	dev.dispatch.DestroyEvent(device, event, pAllocator);

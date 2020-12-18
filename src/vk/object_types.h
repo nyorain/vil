@@ -32,9 +32,13 @@
 
 #pragma once
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
+#ifdef __GNUC__
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wpedantic"
+	#pragma GCC diagnostic ignored "-Wunused-parameter"
+#elif defined(_MSC_VER)
+    #pragma warning(push, 3)
+#endif
 
 #include "cast_utils.h"
 
@@ -850,5 +854,9 @@ struct VulkanTypedHandle {
         node(nullptr) {}
 };
 
-#pragma GCC diagnostic pop
+#ifdef __GNUC__
+    #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+    #pragma warning(pop)
+#endif
 

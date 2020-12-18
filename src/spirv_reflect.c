@@ -14,6 +14,9 @@
  limitations under the License.
 */
 
+// for windows
+#define _CRT_SECURE_NO_WARNINGS
+
 #include "spirv_reflect.h"
 #include <assert.h>
 #include <stdbool.h>

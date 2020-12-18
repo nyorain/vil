@@ -42,6 +42,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
 		VkDevice                                    device,
 		VkShaderModule                              shaderModule,
 		const VkAllocationCallbacks*                pAllocator) {
+	if (!shaderModule) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.shaderModules.mustErase(shaderModule);
 	dev.dispatch.DestroyShaderModule(device, shaderModule, pAllocator);

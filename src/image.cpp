@@ -89,7 +89,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	// a performance impact.
 	if(dev.usedQueueFamilyIndices.size() > 1) {
 		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
-		nci.queueFamilyIndexCount = dev.usedQueueFamilyIndices.size();
+		nci.queueFamilyIndexCount = u32(dev.usedQueueFamilyIndices.size());
 		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
 	}
 
@@ -113,6 +113,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		VkDevice                                    device,
 		VkImage                                     image,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!device) {
+		return;
+	}
+
 	auto& dev = *findData<Device>(device);
 	dev.images.mustErase(image);
 	dev.dispatch.DestroyImage(device, image, pAllocator);
@@ -177,7 +181,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	auto& view = dev.imageViews.add(*pView);
 	view.objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
 	view.handle = *pView;
-	view.img = dev.images.find(pCreateInfo->image);
+	view.img = &dev.images.get(pCreateInfo->image);
 	view.dev = &dev;
 	view.ci = *pCreateInfo;
 
@@ -193,6 +197,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		VkDevice                                    device,
 		VkImageView                                 imageView,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!imageView) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.imageViews.mustErase(imageView);
 	dev.dispatch.DestroyImageView(device, imageView, pAllocator);
@@ -222,6 +230,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 		VkDevice                                    device,
 		VkSampler                                   sampler,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!sampler) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.samplers.mustErase(sampler);
 	dev.dispatch.DestroySampler(device, sampler, pAllocator);

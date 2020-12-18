@@ -178,6 +178,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipeline(
 		VkDevice                                    device,
 		VkPipeline                                  pipeline,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!pipeline) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 
 	auto count = dev.graphicsPipes.erase(pipeline) + dev.computePipes.erase(pipeline);
@@ -223,6 +227,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
 		VkDevice                                    device,
 		VkPipelineLayout                            pipelineLayout,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!pipelineLayout) {
+		return;
+	}
+
 	auto& dev = getData<Device>(device);
 	dev.pipeLayouts.mustErase(pipelineLayout);
 
@@ -270,18 +278,18 @@ bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b) {
 	return check(a, b) && check(b, a);
 }
 
-bool compatibleForSetN(const PipelineLayout& a, const PipelineLayout& b, u32 N) {
-	if(!pushConstantCompatible(a, b)) {
+bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32 N) {
+	if(!pushConstantCompatible(pl1, pl2)) {
 		return false;
 	}
 
-	if(a.descriptors.size() <= N || b.descriptors.size() <= N) {
+	if(pl1.descriptors.size() <= N || pl2.descriptors.size() <= N) {
 		return false;
 	}
 
 	for(auto s = 0u; s < N; ++s) {
-		auto& da = *a.descriptors[s];
-		auto& db = *b.descriptors[s];
+		auto& da = *pl1.descriptors[s];
+		auto& db = *pl2.descriptors[s];
 		if(da.bindings.size() != db.bindings.size()) {
 			return false;
 		}

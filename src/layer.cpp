@@ -17,6 +17,8 @@
 #include <dlg/dlg.hpp>
 #include <swa/swa.h>
 
+#include <fuen_api.h>
+
 namespace fuen {
 
 // Classes
@@ -31,6 +33,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkInstanceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance) {
+
+	// TODO: remove/find real solution
+#ifdef _WIN32
+	AllocConsole();
+#endif // _WIN32
+
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
 	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
 		linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*linkInfo);
@@ -66,6 +74,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	std::vector<const char*> newExts; // keep-alive
 	auto nci = *ci;
+	/*
 	if(ini.display) {
 		newExts = {extsBegin, extsEnd};
 
@@ -116,12 +125,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 		if(enable) {
 			nci.ppEnabledExtensionNames = newExts.data();
-			nci.enabledExtensionCount = newExts.size();
+			nci.enabledExtensionCount = u32(newExts.size());
 		} else {
 			swa_display_destroy(ini.display);
 			ini.display = nullptr;
 		}
 	}
+	*/
 
 	// Create instance
 	VkResult result = fpCreateInstance(&nci, alloc, pInstance);
@@ -169,6 +179,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCallbacks* alloc) {
+	if(!ini) {
+		return;
+	}
+
 	auto inid = moveData<Instance>(ini);
 	dlg_assert(inid);
 	inid->dispatch.DestroyInstance(ini, alloc);
@@ -178,6 +192,10 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		VkInstance                                  instance,
 		VkSurfaceKHR                                surface,
 		const VkAllocationCallbacks*                pAllocator) {
+	if(!surface) {
+		return;
+	}
+
 	// auto platform = moveDataOpt<Platform>(surface); // destroy it
 	auto& ini = getData<Instance>(instance);
 	ini.dispatch.DestroySurfaceKHR(instance, surface, pAllocator);
@@ -456,9 +474,11 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	if(!hooked.device && !hooked.iniExt.empty()) {
 		auto it = find(inid->extensions, hooked.iniExt);
 		if(it == inid->extensions.end()) {
-			dlg_trace("tried to load ini proc addr {} for disabled ext {}",
-				funcName, hooked.devExt);
-			return nullptr;
+			// dlg_trace("tried to load ini proc addr {} for disabled ext {}",
+			// 	funcName, hooked.iniExt);
+			// TODO: not sure what is better
+			return inid->dispatch.GetInstanceProcAddr(ini, funcName);
+			// return nullptr;
 		}
 	}
 
@@ -471,6 +491,11 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const char* funcName) {
+	//(void) vkDev;
+	//(void) funcName;
+
+	//return reinterpret_cast<PFN_vkVoidFunction>(dummyDev);
+
 	auto it = funcPtrTable.find(std::string_view(funcName));
 	if(it == funcPtrTable.end()) {
 		// If it's not hooked, just forward it to the next chain link
@@ -498,9 +523,11 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 	if(!hooked.devExt.empty()) {
 		auto it = find(dev->extensions, hooked.devExt);
 		if(it == dev->extensions.end()) {
-			dlg_trace("tried to load dev proc addr {} for disabled ext {}",
-				funcName, hooked.devExt);
-			return nullptr;
+			// dlg_trace("tried to load dev proc addr {} for disabled ext {}",
+			// 	funcName, hooked.devExt);
+			// TODO: not sure what is better
+			return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
+			// return nullptr;
 		}
 	}
 

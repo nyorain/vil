@@ -84,36 +84,38 @@ DisplayWindow::~DisplayWindow() {
 bool DisplayWindow::createWindow(Instance& ini) {
 	dlg_assert(ini.display);
 
-	static swa_window_listener listener;
-	listener.close = cbClose;
-	listener.resize = cbResize;
-	listener.mouse_move = cbMouseMove;
-	listener.mouse_cross = cbMouseCross;
-	listener.mouse_button = cbMouseButton;
-	listener.mouse_wheel = cbMouseWheel;
-	listener.key = cbKey;
+	state_.store(State::createWindow);
+	this->thread_ = std::thread([&]{ uiThread(ini); });
 
-	swa_window_settings ws;
-	swa_window_settings_default(&ws);
-	ws.title = "fuencaliente";
-	ws.listener = &listener;
-	ws.surface = swa_surface_vk;
-	ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(ini.handle);
-	ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(ini.dispatch.GetInstanceProcAddr);
-	window = swa_display_create_window(ini.display, &ws);
-	if(!window) {
-		return false;
+	// wait until window was created
+	// It's important we create the window in the ui thread (mainly windows bullshittery).
+	// TODO: technically, we would have to create the display already in the ui thread...
+	// need rework of instance initialization
+	std::unique_lock lock(mutex_);
+	while(state_.load() == State::createWindow) {
+		cv_.wait(lock);
 	}
 
-	swa_window_set_userdata(window, this);
-
-	surface = bit_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
-
-	return true;
+	return state_.load() == State::windowCreated && (surface);
 }
 
 bool DisplayWindow::initDevice(Device& dev) {
 	this->dev = &dev;
+
+	std::unique_lock lock(mutex_);
+	state_.store(State::initDevice);
+	cv_.notify_one();
+
+	while(state_.load() == State::initDevice) {
+		cv_.wait(lock);
+	}
+
+	return state_.load() == State::mainLoop;
+}
+
+bool DisplayWindow::initSwapchain() {
+	dlg_assert(this->dev);
+	auto& dev = *this->dev;
 
 	// init swapchain
 	auto& sci = this->swapchainCreateInfo;
@@ -257,8 +259,6 @@ bool DisplayWindow::initDevice(Device& dev) {
 	this->gui.init(dev, sci.imageFormat, true);
 	initBuffers();
 
-	this->thread_ = std::thread([&]{ mainLoop(); });
-
 	return true;
 }
 
@@ -321,8 +321,62 @@ void DisplayWindow::destroyBuffers() {
 	buffers_.clear();
 }
 
-void DisplayWindow::mainLoop() {
+void DisplayWindow::uiThread(Instance& ini) {
+	// initialization
+	{
+		std::unique_lock lock(mutex_);
+
+		// step 1: window creation
+		dlg_assert(state_.load() == State::createWindow);
+
+		static swa_window_listener listener;
+		listener.close = cbClose;
+		listener.resize = cbResize;
+		listener.mouse_move = cbMouseMove;
+		listener.mouse_cross = cbMouseCross;
+		listener.mouse_button = cbMouseButton;
+		listener.mouse_wheel = cbMouseWheel;
+		listener.key = cbKey;
+
+		swa_window_settings ws;
+		swa_window_settings_default(&ws);
+		ws.title = "fuencaliente";
+		ws.listener = &listener;
+		ws.surface = swa_surface_vk;
+		ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(ini.handle);
+		ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(ini.dispatch.GetInstanceProcAddr);
+		window = swa_display_create_window(ini.display, &ws);
+		if(!window) {
+			state_.store(State::shutdown);
+			cv_.notify_one();
+			return;
+		}
+
+		swa_window_set_userdata(window, this);
+		this->surface = bit_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
+
+		state_.store(State::windowCreated);
+		cv_.notify_one();
+
+		// wait for step 2
+		while(state_.load() != State::initDevice) {
+			cv_.wait(lock);
+		}
+
+		// step 2: swapchain creation
+		if(!initSwapchain()) {
+			state_.store(State::shutdown);
+			cv_.notify_one();
+			return;
+		}
+
+		state_.store(State::mainLoop);
+		cv_.notify_one();
+	}
+
 	auto& dev = *this->dev;
+
+	// run main loop!
 	dlg_assert(this->presentQueue);
 	dlg_assert(this->swapchain);
 
@@ -418,6 +472,8 @@ void DisplayWindow::mainLoop() {
 		io.DisplaySize.y = sci.imageExtent.height;
 
 		// Let gui render frame
+		dlg_assert(imageIdx < buffers_.size());
+
 		Gui::FrameInfo frameInfo;
 		frameInfo.extent = sci.imageExtent;
 		frameInfo.imageIdx = imageIdx;
@@ -441,6 +497,8 @@ void DisplayWindow::mainLoop() {
 		// }
 	}
 
+	state_.store(State::shutdown);
+	cv_.notify_one();
 	dlg_trace("Exiting window thread");
 }
 

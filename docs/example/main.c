@@ -134,14 +134,14 @@ static void window_resize(struct swa_window* win, unsigned w, unsigned h) {
 		}
 
 		// query fuen layer api
-		if(fuenLoadApi(&state->fuen_api)) {
-			if(state->create_overlay) {
-				state->fuen_overlay = state->fuen_api.CreateOverlayForLastCreatedSwapchain(state->device);
-				dlg_trace("Created fuen overlay: %p", (void*) state->fuen_overlay);
-			}
+		int res = fuenLoadApi(&state->fuen_api);
+		if(res == 0) {
+			dlg_assert(state->create_overlay);
+			state->fuen_overlay = state->fuen_api.CreateOverlayForLastCreatedSwapchain(state->device);
+			dlg_trace("Created fuen overlay: %p", (void*) state->fuen_overlay);
 		} else {
 			// TODO: output more info!
-			dlg_warn("Loading fuen failed");
+			dlg_warn("Loading fuen failed, error code %d", res);
 		}
 	} else {
 		state->resized = true;
@@ -689,7 +689,7 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 	}
 
 	const char** enable_exts = malloc((n_dpy_exts + 1) * sizeof(*enable_exts));
-	memcpy(enable_exts, dpy_exts, sizeof(*dpy_exts) * n_dpy_exts);
+	memcpy((char**) enable_exts, dpy_exts, sizeof(*dpy_exts) * n_dpy_exts);
 	uint32_t enable_extc = n_dpy_exts;
 
 	// TODO: layers seem to crash when using VkDisplayKHR api (used by
@@ -736,7 +736,7 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 	instance_info.ppEnabledLayerNames = layers;
 
 	res = vkCreateInstance(&instance_info, NULL, &state->instance);
-	free(enable_exts);
+	free((char**) enable_exts);
 	if(res != VK_SUCCESS) {
 		vk_error(res, "Could not create instance");
 		return false;

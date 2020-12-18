@@ -222,7 +222,7 @@ VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
 	return hooked_.cb;
 }
 
-void CommandBufferGui::hookRecord(span<const std::unique_ptr<Command>> commands) {
+void CommandBufferGui::hookRecord(span<const CommandPtr> commands) {
 	auto& dev = gui_->dev();
 	for(auto& cmd : commands) {
 		if(cmd.get() == command_ && hooked_.query) {

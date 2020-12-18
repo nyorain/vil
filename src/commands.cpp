@@ -71,7 +71,7 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 	// the nearest parent we could find (maybe require an even higher
 	// threshold though since jumping to a false parent sucks).
 	// Maybe control that behavior via an external argument
-	auto findCandidates = [](const std::vector<std::unique_ptr<Command>>& cmds,
+	auto findCandidates = [](const std::vector<CommandPtr>& cmds,
 			const CommandDescription& desc) -> std::vector<Candidate> {
 		std::vector<Candidate> candidates;
 		for(auto& cmd : cmds) {
@@ -178,11 +178,11 @@ auto rawHandles(const std::vector<H*>& handles) {
 void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	auto vkEvents = rawHandles(this->events);
 	dev.dispatch.CmdWaitEvents(cb,
-		vkEvents.size(), vkEvents.data(),
+		u32(vkEvents.size()), vkEvents.data(),
 		this->srcStageMask, this->dstStageMask,
-		this->memBarriers.size(), this->memBarriers.data(),
-		this->bufBarriers.size(), this->bufBarriers.data(),
-		this->imgBarriers.size(), this->imgBarriers.data());
+		u32(this->memBarriers.size()), this->memBarriers.data(),
+		u32(this->bufBarriers.size()), this->bufBarriers.data(),
+		u32(this->imgBarriers.size()), this->imgBarriers.data());
 
 }
 
@@ -280,9 +280,9 @@ void BarrierCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdPipelineBarrier(cb,
 		this->dependencyFlags,
 		this->srcStageMask, this->dstStageMask,
-		this->memBarriers.size(), this->memBarriers.data(),
-		this->bufBarriers.size(), this->bufBarriers.data(),
-		this->imgBarriers.size(), this->imgBarriers.data());
+		u32(this->memBarriers.size()), this->memBarriers.data(),
+		u32(this->bufBarriers.size()), this->bufBarriers.data(),
+		u32(this->imgBarriers.size()), this->imgBarriers.data());
 
 }
 
@@ -434,7 +434,7 @@ void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
 void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	auto vkbuffers = rawHandles(buffers);
 	dev.dispatch.CmdBindVertexBuffers(cb, firstBinding,
-		vkbuffers.size(), vkbuffers.data(), offsets.data());
+		u32(vkbuffers.size()), vkbuffers.data(), offsets.data());
 }
 
 void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -444,8 +444,8 @@ void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	auto vkds = rawHandles(sets);
 	dev.dispatch.CmdBindDescriptorSets(cb, pipeBindPoint, pipeLayout->handle,
-		firstSet, vkds.size(), vkds.data(),
-		dynamicOffsets.size(), dynamicOffsets.data());
+		firstSet, u32(vkds.size()), vkds.data(),
+		u32(dynamicOffsets.size()), dynamicOffsets.data());
 }
 
 void DispatchCmdBase::displayComputeState(Gui& gui) const {
@@ -499,7 +499,7 @@ std::vector<std::string> DispatchBaseCmd::argumentsDesc() const {
 
 void CopyImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyImage(cb, src->handle, srcLayout, dst->handle, dstLayout,
-		copies.size(), copies.data());
+		u32(copies.size()), copies.data());
 }
 
 void CopyImageCmd::displayInspector(Gui& gui) const {
@@ -514,7 +514,7 @@ void CopyImageCmd::displayInspector(Gui& gui) const {
 
 void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyBufferToImage(cb, src->handle, dst->handle,
-		imgLayout, copies.size(), copies.data());
+		imgLayout, u32(copies.size()), copies.data());
 }
 
 void CopyBufferToImageCmd::displayInspector(Gui& gui) const {
@@ -529,7 +529,7 @@ void CopyBufferToImageCmd::displayInspector(Gui& gui) const {
 
 void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyImageToBuffer(cb, src->handle, imgLayout, dst->handle,
-		copies.size(), copies.data());
+		u32(copies.size()), copies.data());
 }
 
 void CopyImageToBufferCmd::displayInspector(Gui& gui) const {
@@ -544,7 +544,7 @@ void CopyImageToBufferCmd::displayInspector(Gui& gui) const {
 
 void BlitImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBlitImage(cb, src->handle, srcLayout, dst->handle, dstLayout,
-		blits.size(), blits.data(), filter);
+		u32(blits.size()), blits.data(), filter);
 }
 
 void BlitImageCmd::displayInspector(Gui& gui) const {
@@ -560,22 +560,22 @@ void BlitImageCmd::displayInspector(Gui& gui) const {
 
 void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearColorImage(cb, dst->handle, imgLayout, &color,
-		ranges.size(), ranges.data());
+		u32(ranges.size()), ranges.data());
 }
 
 void ClearDepthStencilImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearDepthStencilImage(cb, dst->handle, imgLayout, &value,
-		ranges.size(), ranges.data());
+		u32(ranges.size()), ranges.data());
 }
 
 void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdClearAttachments(cb, attachments.size(),
-		attachments.data(), rects.size(), rects.data());
+	dev.dispatch.CmdClearAttachments(cb, u32(attachments.size()),
+		attachments.data(), u32(rects.size()), rects.data());
 }
 
 void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdResolveImage(cb, src->handle, srcLayout,
-		dst->handle, dstLayout, regions.size(), regions.data());
+		dst->handle, dstLayout, u32(regions.size()), regions.data());
 }
 
 void SetEventCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -588,7 +588,7 @@ void ResetEventCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyBuffer(cb, src->handle, dst->handle,
-		regions.size(), regions.data());
+		u32(regions.size()), regions.data());
 }
 
 void CopyBufferCmd::displayInspector(Gui& gui) const {
@@ -611,7 +611,7 @@ void FillBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	auto vkcbs = rawHandles(secondaries);
-	dev.dispatch.CmdExecuteCommands(cb, vkcbs.size(), vkcbs.data());
+	dev.dispatch.CmdExecuteCommands(cb, u32(vkcbs.size()), vkcbs.data());
 }
 
 std::vector<std::string> ExecuteCommandsCmd::argumentsDesc() const {
@@ -693,15 +693,15 @@ void BindPipelineCmd::displayInspector(Gui& gui) const {
 
 void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdPushConstants(cb, layout->handle, stages, offset,
-		values.size(), values.data());
+		u32(values.size()), values.data());
 }
 
 void SetViewportCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdSetViewport(cb, first, viewports.size(), viewports.data());
+	dev.dispatch.CmdSetViewport(cb, first, u32(viewports.size()), viewports.data());
 }
 
 void SetScissorCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdSetScissor(cb, first, scissors.size(), scissors.data());
+	dev.dispatch.CmdSetScissor(cb, first, u32(scissors.size()), scissors.data());
 }
 
 void SetLineWidthCmd::record(const Device& dev, VkCommandBuffer cb) const {

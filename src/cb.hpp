@@ -13,8 +13,22 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 	u32 queueFamily {};
 
+	static constexpr auto blockSize = 16 * 1024;
+	std::vector<std::unique_ptr<std::byte[]>> memBlocks; // BlockSize
+
 	~CommandPool();
 };
+
+/// For CommandBuffers, commands are allocated in per-CommandBuffer
+/// storage to avoid the huge memory allocation over head per command.
+template<typename T>
+struct DestructorCaller {
+	void operator()(T* ptr) const /* noexcept */ {
+		ptr->~T();
+	}
+};
+
+using CommandPtr = std::unique_ptr<Command, DestructorCaller<Command>>;
 
 // Synchronization for this one is a bitch:
 // - We currently don't synchronize every single record call. A command
@@ -71,7 +85,7 @@ public:
 	std::vector<PendingSubmission*> pending;
 
 	// == Immutable when in executable state, otherwise private ==
-	std::vector<std::unique_ptr<Command>> commands;
+	std::vector<CommandPtr> commands;
 
 	// Overview over *all* resources used or referenced in some way.
 	// This includes all transitive references, e.g. resources from a
@@ -80,6 +94,10 @@ public:
 	std::unordered_map<VkImage, UsedImage> images;
 	std::unordered_map<VkBuffer, UsedBuffer> buffers;
 	std::unordered_map<std::uint64_t, UsedHandle> handles;
+
+	// memory storage allocated
+	std::vector<std::unique_ptr<std::byte[]>> usedMemBlocks;
+	std::size_t memBlockOffset {};
 
 	// Commandbuffer hook that allows us to forward a modified version
 	// of this command buffer down the chain.

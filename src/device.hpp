@@ -13,6 +13,7 @@
 #include <shared_mutex>
 #include <memory>
 #include <atomic>
+#include <optional>
 
 namespace fuen {
 
@@ -38,11 +39,6 @@ struct PendingSubmission {
 	// When appFence is not null, this is null.
 	VkFence ourFence {};
 };
-
-// Expects dev.mutex to be locked.
-// Returns whether the given submission was finished and therefore
-// removed.
-bool checkLocked(PendingSubmission& subm);
 
 struct Device {
 	Instance* ini {};
@@ -161,6 +157,14 @@ struct Queue : Handle {
 	u32 family {};
 	float priority {};
 };
+
+
+// Expects dev.mutex to be locked.
+// If the given submission was finished and therefore
+// removed, returns the iterator to the following pending submission.
+// Otherwise returns nullopt.
+using SubmIterator = decltype(Device::pending)::iterator;
+std::optional<SubmIterator> checkLocked(PendingSubmission& subm);
 
 Gui* getWindowGui(Device& dev);
 Gui* getOverlayGui(Swapchain& swapchain);

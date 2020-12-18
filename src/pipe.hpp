@@ -47,14 +47,14 @@ struct GraphicsPipeline : Pipeline {
 	std::vector<VkVertexInputBindingDescription> vertexBindings;
 	std::unordered_set<VkDynamicState> dynamicState;
 
-    VkPipelineVertexInputStateCreateInfo      vertexInputState;
-    VkPipelineInputAssemblyStateCreateInfo    inputAssemblyState;
-    VkPipelineTessellationStateCreateInfo     tessellationState;
-    VkPipelineViewportStateCreateInfo         viewportState;
-    VkPipelineRasterizationStateCreateInfo    rasterizationState;
-    VkPipelineMultisampleStateCreateInfo      multisampleState;
-    VkPipelineDepthStencilStateCreateInfo     depthStencilState;
-    VkPipelineColorBlendStateCreateInfo       colorBlendState;
+	VkPipelineVertexInputStateCreateInfo      vertexInputState;
+	VkPipelineInputAssemblyStateCreateInfo    inputAssemblyState;
+	VkPipelineTessellationStateCreateInfo     tessellationState;
+	VkPipelineViewportStateCreateInfo         viewportState;
+	VkPipelineRasterizationStateCreateInfo    rasterizationState;
+	VkPipelineMultisampleStateCreateInfo      multisampleState;
+	VkPipelineDepthStencilStateCreateInfo     depthStencilState;
+	VkPipelineColorBlendStateCreateInfo       colorBlendState;
 
 	std::vector<PipelineShaderStage> stages;
 

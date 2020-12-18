@@ -3,6 +3,8 @@
 #include <device.hpp>
 #include <gui/gui.hpp>
 #include <thread>
+#include <mutex>
+#include <atomic>
 
 struct swa_display;
 struct swa_window;
@@ -25,11 +27,7 @@ struct DisplayWindow {
 
 	bool createWindow(Instance&);
 	bool initDevice(Device& dev);
-
 	void resize(unsigned w, unsigned h);
-	void initBuffers();
-	void destroyBuffers();
-	void mainLoop();
 
 	~DisplayWindow();
 
@@ -37,6 +35,25 @@ private:
 	std::thread thread_;
 	std::atomic<bool> run_ {true};
 	std::vector<RenderBuffer> buffers_;
+
+	// TODO: hack
+	enum class State {
+		initial,
+		createWindow,
+		windowCreated,
+		initDevice,
+		mainLoop,
+		shutdown,
+	};
+
+	std::atomic<State> state_ {State::initial};
+	std::condition_variable cv_;
+	std::mutex mutex_;
+
+	void initBuffers();
+	void destroyBuffers();
+	bool initSwapchain();
+	void uiThread(Instance& ini);
 };
 
 } // namespace fuen
