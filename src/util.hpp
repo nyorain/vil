@@ -66,6 +66,21 @@ const R* findChainInfo(const CI& ci) {
 	return nullptr;
 }
 
+// Taken from vpp/util
+/// Aligns an offset to the given alignment.
+/// An alignment of 0 zero will not change the offset.
+/// An offset of 0 is treated as aligned with every possible alignment.
+/// Undefined if either value is negative.
+template<typename A, typename B>
+constexpr auto align(A offset, B alignment) {
+	if(offset == 0 || alignment == 0) {
+		return offset;
+	}
+
+	auto rest = offset % alignment;
+	return rest ? A(offset + (alignment - rest)) : A(offset);
+}
+
 // nytl/vec
 template<size_t D, typename T>
 class Vec : public std::array<T, D> {

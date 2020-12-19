@@ -146,6 +146,10 @@ v0.1, goal: end of january 2021
 	  while overlay is active using platform-specific stuff), this might
 	  be useful in some cases, the extra window can be painful.
 - [ ] add example image to readme (with real-world application if possible)
+- [ ] move external source into extra folder
+- [ ] rename cbState.hpp -> boundState.hpp? or just bound.hpp?
+- [ ] A lot of sources can be moved to src/gui
+	- [ ] rename imguiutil. Move to gui
 - [ ] before release: test on windows & linux, on all owned hardware
 
 not sure if viable for first version:

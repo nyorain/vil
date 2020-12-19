@@ -16,16 +16,27 @@
 #include <vk/dispatch_table_helper.h>
 #include <dlg/dlg.hpp>
 #include <swa/swa.h>
+#include <csignal>
 
 #include <fuen_api.h>
 
 namespace fuen {
 
+// Util
+void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
+	if (origin->level >= dlg_level_error) {
+		// break
+		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
+		std::raise(SIGABRT);
+	}
+	dlg_default_output(origin, string, data);
+}
+
 // Classes
 Instance::~Instance() {
-	if(display) {
-		swa_display_destroy(display);
-	}
+	//if(display) {
+	//	swa_display_destroy(display);
+	//}
 }
 
 // Instance
@@ -34,9 +45,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance) {
 
+	// TODO: don't do this. Even in debug kinda unacceptable.
+	// Maybe acceptable if we just reuse the old handler (and restore on DestroyInstance). Might still have problems
+	dlg_set_handler(dlgHandler, nullptr);
+
 	// TODO: remove/find real solution
 #ifdef _WIN32
 	AllocConsole();
+	dlg_trace("Allocated console. Creating vulkan instance");
 #endif // _WIN32
 
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
@@ -67,7 +83,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	// TODO: allow to disable separate window creation via compile-time
 	// flag (not even compiling/requiring swa) and environment variable.
-	ini.display = swa_display_autocreate("fuencaliente");
+	// ini.display = swa_display_autocreate("fuencaliente");
 
 	auto extsBegin = ci->ppEnabledExtensionNames;
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;

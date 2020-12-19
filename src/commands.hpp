@@ -3,6 +3,7 @@
 #include <cbState.hpp>
 #include <handles.hpp>
 #include <flags.hpp>
+#include <pv.hpp>
 #include <imguiutil.hpp>
 #include <vk/enumString.hpp>
 
@@ -114,6 +115,9 @@ struct CommandDescription {
 template<typename T>
 const Command* displayCommands(const T& container, const Command* selected,
 		Command::TypeFlags typeFlags) {
+	// TODO: should use imgui list clipper, might have *a lot* of commands here.
+	// But first we have to restrict what cmd->display can actually do.
+	// Would also have to pre-filter command for that :(
 	const Command* ret = nullptr;
 	for(auto& cmd : container) {
 		if(!(typeFlags & cmd->type())) {
@@ -131,7 +135,9 @@ const Command* displayCommands(const T& container, const Command* selected,
 }
 
 struct SectionCommand : Command {
-	std::vector<CommandPtr> children;
+	CommandVector<CommandPtr> children;
+
+	SectionCommand(CommandBuffer& cb) : children(cb) {}
 
 	const Command* display(const Command* selected, TypeFlags typeFlags) const override {
 		// auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
@@ -199,6 +205,8 @@ struct BeginRenderPassCmd : SectionCommand {
 	Framebuffer* fb;
 	RenderPass* rp;
 
+	using SectionCommand::SectionCommand;
+
 	std::string toString() const override {
 		return dlg::format("BeginRenderPass({}, {})", name(*fb), name(*rp));
 	}
@@ -211,6 +219,8 @@ struct BeginRenderPassCmd : SectionCommand {
 
 struct NextSubpassCmd : SectionCommand {
 	VkSubpassContents subpassContents;
+
+	using SectionCommand::SectionCommand;
 
 	std::string nameDesc() const override { return "NextSubpass"; }
 	void record(const Device&, VkCommandBuffer) const override;
@@ -225,6 +235,9 @@ struct EndRenderPassCmd : Command {
 struct DrawCmdBase : Command {
 	GraphicsState state;
 
+	DrawCmdBase() = default;
+	DrawCmdBase(CommandBuffer& cb);
+
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
 };
@@ -234,6 +247,8 @@ struct DrawCmd : DrawCmdBase {
 	u32 instanceCount;
 	u32 firstVertex;
 	u32 firstInstance;
+
+	using DrawCmdBase::DrawCmdBase;
 
 	std::string toString() const override {
 		return dlg::format("Draw({}, {}, {}, {})",
@@ -263,6 +278,8 @@ struct DrawIndirectCmd : DrawCmdBase {
 	u32 stride {};
 	bool indexed {};
 
+	using DrawCmdBase::DrawCmdBase;
+
 	std::string toString() const override {
 		return indexed ? "DrawIndexedIndirect" : "DrawIndirect";
 	}
@@ -281,6 +298,8 @@ struct DrawIndexedCmd : DrawCmdBase {
 	u32 firstIndex;
 	i32 vertexOffset;
 	u32 firstInstance;
+
+	using DrawCmdBase::DrawCmdBase;
 
 	std::string toString() const override {
 		return dlg::format("DrawIndexed({}, {}, {}, {}, {})",
@@ -312,6 +331,8 @@ struct DrawIndirectCountCmd : DrawCmdBase {
 	Buffer* countBuffer {};
 	VkDeviceSize countBufferOffset {};
 	bool indexed {};
+
+	using DrawCmdBase::DrawCmdBase;
 
 	std::string toString() const override {
 		return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
@@ -385,6 +406,9 @@ struct BindDescriptorSetCmd : Command {
 struct DispatchCmdBase : Command {
 	ComputeState state;
 
+	DispatchCmdBase() = default;
+	DispatchCmdBase(CommandBuffer& cb);
+
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;
 };
@@ -393,6 +417,8 @@ struct DispatchCmd : DispatchCmdBase {
 	u32 groupsX {};
 	u32 groupsY {};
 	u32 groupsZ {};
+
+	using DispatchCmdBase::DispatchCmdBase;
 
 	std::string toString() const override {
 		return dlg::format("Dispatch({}, {}, {})",
@@ -413,6 +439,8 @@ struct DispatchIndirectCmd : DispatchCmdBase {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 
+	using DispatchCmdBase::DispatchCmdBase;
+
 	std::string toString() const override {
 		return "DispatchIndirect";
 	}
@@ -430,6 +458,8 @@ struct DispatchBaseCmd : DispatchCmdBase {
 	u32 groupsX {};
 	u32 groupsY {};
 	u32 groupsZ {};
+
+	using DispatchCmdBase::DispatchCmdBase;
 
 	std::string toString() const override {
 		return dlg::format("DispatchBase({}, {}, {}, {}, {}, {})",
@@ -645,6 +675,8 @@ struct ExecuteCommandsCmd : Command {
 struct BeginDebugUtilsLabelCmd : SectionCommand {
 	std::string name;
 	std::array<float, 4> color; // TODO: could use this in UI
+
+	using SectionCommand::SectionCommand;
 
 	std::string toString() const override { return dlg::format("Label: {}", name); }
 	void record(const Device&, VkCommandBuffer) const override;

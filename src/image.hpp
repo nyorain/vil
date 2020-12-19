@@ -6,7 +6,7 @@
 namespace fuen {
 
 struct Image : MemoryResource {
-	VkImage handle;
+	VkImage handle {};
 	VkImageCreateInfo ci;
 
 	// The image layout this image will have when *all* pending submissions

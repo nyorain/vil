@@ -109,7 +109,8 @@ void bindBufferMemory(Device& dev, const VkBindBufferMemoryInfo& bind) {
 	{
 		// access to the given memory must be internally synced
 		std::lock_guard lock(dev.mutex);
-		mem.allocations.insert(&buf);
+		// mem.allocations.insert(&buf);
+		mem.allocations.push_back(&buf);
 	}
 }
 

@@ -81,25 +81,36 @@ DisplayWindow::~DisplayWindow() {
 	}
 }
 
-bool DisplayWindow::createWindow(Instance& ini) {
-	dlg_assert(ini.display);
-
-	state_.store(State::createWindow);
-	this->thread_ = std::thread([&]{ uiThread(ini); });
+bool DisplayWindow::createDisplay() {
+	state_.store(State::createDisplay);
+	this->thread_ = std::thread([&]{ uiThread(); });
 
 	// wait until window was created
-	// It's important we create the window in the ui thread (mainly windows bullshittery).
-	// TODO: technically, we would have to create the display already in the ui thread...
-	// need rework of instance initialization
+	// It's important we create display & window in the ui thread (mainly windows bullshittery).
 	std::unique_lock lock(mutex_);
+	while(state_.load() == State::createDisplay) {
+		cv_.wait(lock);
+	}
+
+	return state_.load() == State::displayCreated && this->dpy;
+}
+
+bool DisplayWindow::createWindow(Instance& ini) {
+	dlg_assert(dpy);
+	this->ini = &ini;
+
+	std::unique_lock lock(mutex_);
+	state_.store(State::createWindow);
+	cv_.notify_one();
 	while(state_.load() == State::createWindow) {
 		cv_.wait(lock);
 	}
 
-	return state_.load() == State::windowCreated && (surface);
+	return state_.load() == State::windowCreated && this->surface;
 }
 
 bool DisplayWindow::initDevice(Device& dev) {
+	dlg_assert(this->surface);
 	this->dev = &dev;
 
 	std::unique_lock lock(mutex_);
@@ -321,13 +332,30 @@ void DisplayWindow::destroyBuffers() {
 	buffers_.clear();
 }
 
-void DisplayWindow::uiThread(Instance& ini) {
+void DisplayWindow::uiThread() {
 	// initialization
 	{
 		std::unique_lock lock(mutex_);
 
+		// step 0: display creation
+		dlg_assert(state_.load() == State::createDisplay);
+		dpy = swa_display_autocreate("fuencaliente");
+		if (!dpy) {
+			state_.store(State::shutdown);
+			cv_.notify_one();
+			return;
+		}
+
+		state_.store(State::displayCreated);
+		cv_.notify_one();
+
+		// wait for step 1
+		while(state_.load() != State::createWindow) {
+			cv_.wait(lock);
+		}
+
 		// step 1: window creation
-		dlg_assert(state_.load() == State::createWindow);
+		dlg_assert(this->ini);
 
 		static swa_window_listener listener;
 		listener.close = cbClose;
@@ -343,9 +371,9 @@ void DisplayWindow::uiThread(Instance& ini) {
 		ws.title = "fuencaliente";
 		ws.listener = &listener;
 		ws.surface = swa_surface_vk;
-		ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(ini.handle);
-		ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(ini.dispatch.GetInstanceProcAddr);
-		window = swa_display_create_window(ini.display, &ws);
+		ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(this->ini->handle);
+		ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(this->ini->dispatch.GetInstanceProcAddr);
+		window = swa_display_create_window(dpy, &ws);
 		if(!window) {
 			state_.store(State::shutdown);
 			cv_.notify_one();
@@ -420,7 +448,7 @@ void DisplayWindow::uiThread(Instance& ini) {
 		}
 		*/
 
-		if(!swa_display_dispatch(dev.ini->display, false)) {
+		if(!swa_display_dispatch(dpy, false)) {
 			run_.store(false);
 			break;
 		}
@@ -453,7 +481,7 @@ void DisplayWindow::uiThread(Instance& ini) {
 		io.KeyCtrl = false;
 		io.KeySuper = false;
 
-		auto mods = swa_display_active_keyboard_mods(dev.ini->display);
+		auto mods = swa_display_active_keyboard_mods(dpy);
 		if(mods & swa_keyboard_mod_alt) {
 			io.KeyAlt = true;
 		}
@@ -508,7 +536,7 @@ void DisplayWindow::uiThread(Instance& ini) {
 // 	}
 //
 // 	show_.store(doShow);
-// 	swa_display_wakeup(dev->ini->display);
+// 	swa_display_wakeup(dpy);
 // }
 
 } // namespace fuen

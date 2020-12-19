@@ -51,18 +51,18 @@ void resetLocked(CommandBuffer& cb, bool invalidate = false) {
 	cb.buffers.clear();
 	cb.images.clear();
 	cb.handles.clear();
-	cb.commands.clear();
-	cb.sections.clear();
+	cb.commands.release();
+	cb.sections.release();
 	cb.graphicsState = {};
 	cb.computeState = {};
 	cb.pushConstants = {};
 
 	// lock shouldn't really be needed for this btw
 	dlg_assert(cb.pool);
-	auto mb0 = std::make_move_iterator(cb.usedMemBlocks.begin());
-	auto mb1 = std::make_move_iterator(cb.usedMemBlocks.end());
+	auto mb0 = std::make_move_iterator(cb.memBlocks.begin());
+	auto mb1 = std::make_move_iterator(cb.memBlocks.end());
 	cb.pool->memBlocks.insert(cb.pool->memBlocks.end(), mb0, mb1);
-	cb.usedMemBlocks.clear();
+	cb.memBlocks.clear();
 	cb.memBlockOffset = 0u;
 
 	if(!invalidate) {
@@ -75,80 +75,32 @@ void reset(CommandBuffer& cb, bool invalidate = false) {
 	resetLocked(cb, invalidate);
 }
 
-// Taken from vpp/util
-/// Aligns an offset to the given alignment.
-/// An alignment of 0 zero will not change the offset.
-/// An offset of 0 is treated as aligned with every possible alignment.
-/// Undefined if either value is negative.
-template<typename A, typename B>
-constexpr auto align(A offset, B alignment) {
-	if(offset == 0 || alignment == 0) {
-		return offset;
-	}
+std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) {
+	dlg_assert(alignment <= size);
+	dlg_assert((alignment & (alignment - 1)) == 0); // alignment must be power of two
+	dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__); // can't guarantee otherwise
 
-	auto rest = offset % alignment;
-	return rest ? A(offset + (alignment - rest)) : A(offset);
-}
-
-template<typename T, typename... Args>
-T& allocate(CommandBuffer& cb, Args&&... args) {
-	constexpr auto blockSize = CommandPool::blockSize;
-	static_assert(sizeof(T) < blockSize);
-	cb.memBlockOffset = align(cb.memBlockOffset, alignof(T));
-
-	// we can freely operate on the command pool even if we don't have
-	// any lock. Guaranteed by vulkan spec (command pools including their
-	// command buffers are externally synchronized).
-	if(cb.usedMemBlocks.empty() || (i32(blockSize) - i32(cb.memBlockOffset)) < i32(sizeof(T))) {
-		dlg_assert(cb.pool);
-		if(cb.pool->memBlocks.empty()) {
-			cb.usedMemBlocks.emplace_back(std::make_unique<std::byte[]>(blockSize));
-		} else {
-			auto block = std::move(cb.pool->memBlocks.back());
-			cb.pool->memBlocks.pop_back();
-			cb.usedMemBlocks.push_back(std::move(block));
+	if(!cb.memBlocks.empty()) {
+		cb.memBlockOffset = align(cb.memBlockOffset, alignment);
+		auto remaining = i64(cb.memBlocks.back().size) - i64(cb.memBlockOffset);
+		if(remaining > i64(size)) {
+			return &cb.memBlocks.back().block[cb.memBlockOffset];
+			cb.memBlockOffset += size;
 		}
-
-		cb.memBlockOffset = 0u;
 	}
 
-	auto* raw = &cb.usedMemBlocks.back()[cb.memBlockOffset];
-	auto* ret = new(raw) T(std::forward<Args>(args)...);
+	auto blockSize = std::max<std::size_t>(CommandPool::minBlockSize, size);
+	if(!cb.pool->memBlocks.empty() && cb.pool->memBlocks.back().size >= size) {
+		auto block = std::move(cb.pool->memBlocks.back());
+		cb.pool->memBlocks.pop_back();
+		cb.memBlocks.push_back(std::move(block));
+	} else {
+		cb.memBlocks.push_back({std::make_unique<std::byte[]>(blockSize), blockSize});
+	}
 
-	cb.memBlockOffset += sizeof(T);
-
-	return *ret;
+	cb.memBlockOffset = size;
+	return &cb.memBlocks.back().block[0];
 }
-
-// TODO: old, remove!
-// void add(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
-// 	if(!cb.sections.empty()) {
-// 		cmd->parent = cb.sections.back();
-// 		cb.sections.back()->children.emplace_back(std::move(cmd));
-// 	} else {
-// 		cb.commands.emplace_back(std::move(cmd));
-// 	}
-// }
-//
-// void addSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
-// 	auto* section = cmd.get();
-// 	add(cb, std::move(cmd));
-// 	cb.sections.push_back(section);
-// }
-//
-// void addNextSection(CommandBuffer& cb, std::unique_ptr<SectionCommand> cmd) {
-// 	auto* section = cmd.get();
-// 	add(cb, std::move(cmd));
-// 	dlg_assert(!cb.sections.empty());
-// 	cb.sections.pop_back();
-// 	cb.sections.push_back(section);
-// }
-//
-// void addEndSection(CommandBuffer& cb, std::unique_ptr<Command> cmd) {
-// 	add(cb, std::move(cmd));
-// 	dlg_assert(!cb.sections.empty());
-// 	cb.sections.pop_back();
-// }
 
 enum class SectionType {
 	none,
@@ -157,9 +109,9 @@ enum class SectionType {
 	end,
 };
 
-template<typename T, SectionType ST = SectionType::none>
-T& addCmd(CommandBuffer& cb) {
-	auto& cmd = allocate<T>(cb);
+template<typename T, SectionType ST = SectionType::none, typename... Args>
+T& addCmd(CommandBuffer& cb, Args&&... args) {
+	auto& cmd = allocate<T>(cb, std::forward<Args>(args)...);
 
 	if(!cb.sections.empty()) {
 		cmd.parent = cb.sections.back();
@@ -178,6 +130,9 @@ T& addCmd(CommandBuffer& cb) {
 	}
 
 	return cmd;
+}
+
+CommandBuffer::CommandBuffer() : commands(*this), sections(*this) {
 }
 
 void CommandBuffer::invalidateLocked() {
@@ -527,7 +482,7 @@ template<typename BeginInfo>
 void cmdBeginRenderPass(CommandBuffer& cb,
 		const BeginInfo*               pRenderPassBegin,
 		VkSubpassContents              contents) {
-	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
+	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb, cb);
 
 	cmd.info = *pRenderPassBegin;
 	cmd.clearValues = {
@@ -582,7 +537,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 	// TODO; figure this out, should subpass be whole section?
 	// but then how to handle first subpass?
 	// addNextSection(cb, std::move(cmd));
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
+	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb, cb);
 	cmd.subpassContents = contents;
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
@@ -612,7 +567,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 	// TODO; figure this out, should subpass be whole section?
 	// but then how to handle first subpass?
 	// addNextSection(cb, std::move(cmd));
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
+	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb, cb);
 	cmd.subpassContents = pSubpassBeginInfo->contents;
 	cb.dev->dispatch.CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
 }
@@ -780,17 +735,12 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 		uint32_t                                    firstVertex,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawCmd>(cb);
+	auto& cmd = addCmd<DrawCmd>(cb, cb);
 
 	cmd.vertexCount = vertexCount;
 	cmd.instanceCount = instanceCount;
 	cmd.firstVertex = firstVertex;
 	cmd.firstInstance = firstInstance;
-
-	cmd.state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDraw(commandBuffer,
 		vertexCount, instanceCount, firstVertex, firstInstance);
@@ -804,18 +754,13 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 		int32_t                                     vertexOffset,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndexedCmd>(cb);
+	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb);
 
 	cmd.firstInstance = firstInstance;
 	cmd.instanceCount = instanceCount;
 	cmd.indexCount = indexCount;
 	cmd.vertexOffset = vertexOffset;
 	cmd.firstIndex = firstIndex;
-
-	cmd.state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDrawIndexed(commandBuffer,
 		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
@@ -828,7 +773,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb);
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -838,10 +783,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	cmd.offset = offset;
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
-	cmd.state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDrawIndirect(commandBuffer,
 		buffer, offset, drawCount, stride);
@@ -854,7 +795,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb);
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -864,10 +805,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	cmd.offset = offset;
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
-	cmd.state = cb.graphicsState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDrawIndexedIndirect(commandBuffer,
 		buffer, offset, drawCount, stride);
@@ -882,7 +819,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb);
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -897,9 +834,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.countBufferOffset = countBufferOffset;
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer,
 		buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
@@ -914,7 +848,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb);
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -929,9 +863,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.countBufferOffset = countBufferOffset;
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer,
 		buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
@@ -943,16 +874,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchCmd>(cb);
+	auto& cmd = addCmd<DispatchCmd>(cb, cb);
 
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
-
-	cmd.state = cb.computeState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDispatch(commandBuffer,
 		groupCountX, groupCountY, groupCountZ);
@@ -963,17 +889,12 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchIndirectCmd>(cb);
+	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb);
 	cmd.offset = offset;
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
-
-	cmd.state = cb.computeState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDispatchIndirect(commandBuffer, buffer, offset);
 }
@@ -987,7 +908,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchBaseCmd>(cb);
+	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb);
 
 	cmd.baseGroupX = baseGroupX;
 	cmd.baseGroupY = baseGroupY;
@@ -995,11 +916,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
-
-	cmd.state = cb.computeState;
-	if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-		cmd.state.pushConstants = cb.pushConstants.map;
-	}
 
 	cb.dev->dispatch.CmdDispatch(commandBuffer,
 		groupCountX, groupCountY, groupCountZ);
@@ -1023,7 +939,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	cmd.copies = {pRegions, pRegions + regionCount};
+	// TODO
+	// cmd.copies = {pRegions, pRegions + regionCount};
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -1053,7 +970,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	cmd.blits = {pRegions, pRegions + regionCount};
+	// TODO
+	// cmd.blits = {pRegions, pRegions + regionCount};
 	cmd.filter = filter;
 
 	useHandle(cb, cmd, src);
@@ -1081,7 +999,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	cmd.src = &src;
 	cmd.dst = &dst;
 	cmd.imgLayout = dstImageLayout;
-	cmd.copies = {pRegions, pRegions + regionCount};
+	// TODO
+	// cmd.copies = {pRegions, pRegions + regionCount};
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -1106,7 +1025,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	cmd.src = &src;
 	cmd.dst = &dst;
 	cmd.imgLayout = srcImageLayout;
-	cmd.copies = {pRegions, pRegions + regionCount};
+	// TODO
+	// cmd.copies = {pRegions, pRegions + regionCount};
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -1334,7 +1254,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb);
+	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb, cb);
 
 	auto* c = pLabelInfo->color;
 	cmd.color = {c[0], c[1], c[2], c[3]};

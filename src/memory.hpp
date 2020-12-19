@@ -29,13 +29,18 @@ struct DeviceMemory : DeviceHandle {
 	VkDeviceSize mapOffset {};
 	VkDeviceSize mapSize {};
 
-	struct AllocationCmp {
-		bool operator()(const MemoryResource* a, const MemoryResource* b) const noexcept {
-			return a->allocationOffset < b->allocationOffset;
-		}
-	};
-
-	std::set<MemoryResource*, AllocationCmp> allocations;
+	// NOTE: we can't use a set since resources may alias
+	// struct AllocationCmp {
+	// 	bool operator()(const MemoryResource* a, const MemoryResource* b) const noexcept {
+	// 		dlg_assertm(a == b || 
+	// 			a->allocationOffset + a->allocationSize <= b->allocationOffset || 
+	// 			b->allocationOffset + b->allocationSize <= a->allocationOffset,
+	// 			"{} {} vs {} {}", a->allocationOffset, a->allocationSize, b->allocationOffset, b->allocationSize);
+	// 		return a->allocationOffset < b->allocationOffset;
+	// 	}
+	// };
+	// std::set<MemoryResource*, AllocationCmp> allocations;
+	std::vector<MemoryResource*> allocations; // TODO: unsorted, should be sorted for viz
 
 	~DeviceMemory();
 };

@@ -27,7 +27,7 @@ struct Instance {
 	// We only create one display per instance.
 	// We need to create it before we create the device (and initialize
 	// all related data) to query for extensions and queue support.
-	swa_display* display {};
+	// swa_display* display {};
 
 	// info about enabled extensions
 	std::vector<std::string> extensions;

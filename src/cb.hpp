@@ -1,10 +1,10 @@
 #pragma once
 
-#include "fwd.hpp"
-#include "device.hpp"
-#include "cbState.hpp"
+#include <fwd.hpp>
+#include <device.hpp>
+#include <cbState.hpp>
+#include <pv.hpp>
 #include <vector>
-#include <memory>
 
 namespace fuen {
 
@@ -13,8 +13,12 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 	u32 queueFamily {};
 
-	static constexpr auto blockSize = 16 * 1024;
-	std::vector<std::unique_ptr<std::byte[]>> memBlocks; // BlockSize
+	static constexpr auto minBlockSize = 16 * 1024;
+	struct MemBlock {
+		std::unique_ptr<std::byte[]> block;
+		std::size_t size;
+	};
+	std::vector<MemBlock> memBlocks; // BlockSize
 
 	~CommandPool();
 };
@@ -29,6 +33,58 @@ struct DestructorCaller {
 };
 
 using CommandPtr = std::unique_ptr<Command, DestructorCaller<Command>>;
+
+// Allocates a chunk of memory from the given command buffer, will use the
+// internal CommandPool memory allocator. The memory can not be freed in
+// any way, it will simply be reset when the command buffer (or command pool)
+// is reset (when you construct non-trivial types in the buffer, make sure
+// to call the destructor though!).
+std::byte* allocate(CommandBuffer&, std::size_t size, std::size_t alignment);
+
+template<typename T, typename... Args>
+T& allocate(CommandBuffer& cb, Args&&... args) {
+	auto* raw = allocate(cb, sizeof(T), alignof(T));
+	return *(new(raw) T(std::forward<Args>(args)...));
+}
+
+template<typename T>
+struct CommandAllocator {
+	using is_always_equal = std::false_type;
+	using value_type = T;
+
+	CommandBuffer* cb {};
+
+	CommandAllocator(CommandBuffer& xcb) noexcept : cb(&xcb) {}
+
+	template<typename O>
+	CommandAllocator(const CommandAllocator<O>& rhs) noexcept : cb(rhs.cb) {}
+
+	template<typename O>
+	CommandAllocator& operator=(const CommandAllocator<O>& rhs) noexcept {
+		this->cb = rhs.cb;
+		return *this;
+	}
+
+	T* allocate(std::size_t n) {
+		dlg_assert(cb);
+		auto* ptr = fuen::allocate(*cb, n * sizeof(T), alignof(T));
+		return new(ptr) T[n]; // creates the array but not the objects
+	}
+
+	void deallocate(T*, std::size_t) const noexcept {}
+};
+
+template<typename T>
+bool operator==(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noexcept {
+	return a.cb == b.cb;
+}
+
+template<typename T>
+bool operator!=(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noexcept {
+	return a.cb != b.cb;
+}
+
+template<typename T> using CommandVector = PageVector<T, CommandAllocator<T>>;
 
 // Synchronization for this one is a bitch:
 // - We currently don't synchronize every single record call. A command
@@ -85,7 +141,7 @@ public:
 	std::vector<PendingSubmission*> pending;
 
 	// == Immutable when in executable state, otherwise private ==
-	std::vector<CommandPtr> commands;
+	CommandVector<CommandPtr> commands;
 
 	// Overview over *all* resources used or referenced in some way.
 	// This includes all transitive references, e.g. resources from a
@@ -96,8 +152,8 @@ public:
 	std::unordered_map<std::uint64_t, UsedHandle> handles;
 
 	// memory storage allocated
-	std::vector<std::unique_ptr<std::byte[]>> usedMemBlocks;
-	std::size_t memBlockOffset {};
+	std::vector<CommandPool::MemBlock> memBlocks;
+	std::size_t memBlockOffset {}; // offset in last (current) mem block
 
 	// Commandbuffer hook that allows us to forward a modified version
 	// of this command buffer down the chain.
@@ -110,13 +166,14 @@ public:
 	//   the respective states directly instead, considering stateFlags.
 	ComputeState computeState {};
 	GraphicsState graphicsState {};
-	std::vector<SectionCommand*> sections {}; // stack
+	CommandVector<SectionCommand*> sections; // stack
 
 	struct {
 		PushConstantMap map;
 		PipelineLayout* layout;
 	} pushConstants;
 
+	CommandBuffer();
 	~CommandBuffer();
 
 	// Moves the command buffer to invalid state.

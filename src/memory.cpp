@@ -1,5 +1,6 @@
-#include "memory.hpp"
-#include "data.hpp"
+#include <memory.hpp>
+#include <data.hpp>
+#include <util.hpp>
 
 namespace fuen {
 
@@ -14,7 +15,7 @@ MemoryResource::~MemoryResource() {
 	std::lock_guard lock(dev->mutex);
 	if(memory) {
 		dlg_assert(!memoryDestroyed);
-		auto it = memory->allocations.find(this);
+		auto it = find(memory->allocations, this);
 		dlg_assert(it != memory->allocations.end());
 		memory->allocations.erase(it);
 	}
@@ -27,7 +28,22 @@ DeviceMemory::~DeviceMemory() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-	for(auto* res : this->allocations) {
+
+	// dlg_info("Destroying DeviceMemory {} ({})", this, handle);
+
+	// Since we modify the elements inside the sets (with respect to
+	// our comparison iterator) we can't just iterate through them.
+	// Remove and reset one-by-one instead.
+	// TODO: nvm, fix for new vector-based allocations
+	while(!this->allocations.empty())
+	{
+		// auto* res = *this->allocations.begin();
+		// this->allocations.erase(this->allocations.begin());
+		auto* res = this->allocations.back();
+		this->allocations.pop_back();
+
+		// dlg_info("  Unregister handle {}", res);
+
 		dlg_assert(!res->memoryDestroyed);
 		dlg_assert(res->memory == this);
 		res->memory = nullptr;

@@ -82,7 +82,7 @@ Ok, wait, do we really? Is displaying a history worth all the struggle?
 Just displaying the command buffer as "being in invalid state so we don't
 show its contents" sounds pretty sensible to me.
 
-In the end, we are trying to go for full shared ownership for all handles
+In the end, we are not trying to go for full shared ownership for all handles
 (it still makes sense for information that are truly shared and not owned
 by a specific handle/might outlive it like spirv shader module or renderpass
 data).

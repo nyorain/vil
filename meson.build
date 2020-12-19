@@ -109,6 +109,7 @@ src = files(
 	'src/gui/renderer.hpp',
 	'src/util.hpp',
 	'src/data.hpp',
+	'src/imgui/imgui.h',
 	'include/fuen_api.h',
 )
 

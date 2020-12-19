@@ -113,11 +113,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		VkDevice                                    device,
 		VkImage                                     image,
 		const VkAllocationCallbacks*                pAllocator) {
-	if(!device) {
+	if(!image) {
 		return;
 	}
 
-	auto& dev = *findData<Device>(device);
+	auto& dev = getData<Device>(device);
 	dev.images.mustErase(image);
 	dev.dispatch.DestroyImage(device, image, pAllocator);
 }
@@ -127,6 +127,7 @@ void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
 	auto& mem = dev.deviceMemories.get(bind.memory);
 
 	dlg_assert(!img.memory);
+	dlg_assert(!img.memoryDestroyed);
 
 	// find required size
 	VkMemoryRequirements memReqs;
@@ -139,8 +140,11 @@ void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
 	{
 		// access to the given memory must be internally synced
 		std::lock_guard lock(dev.mutex);
-		mem.allocations.insert(&img);
+		// mem.allocations.insert(&img);
+		mem.allocations.push_back(&img);
 	}
+
+	// dlg_trace("Binding image {} ({}) to memory {} ({})", &img, img.handle, &mem, mem.handle);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(

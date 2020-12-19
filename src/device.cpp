@@ -201,14 +201,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	// Make sure we get a queue that can potentially display to our
 	// window. To check that, we first have to create a window though.
-	std::unique_ptr<DisplayWindow> window;
 	u32 presentQueueInfoID = u32(-1);
 	auto createWindow = true;
 	std::vector<const char*> newExts; // keep-alive
-	if(ini.display && createWindow) {
-		// create window
+	std::unique_ptr<DisplayWindow> window;
+	if(createWindow) {
 		window = std::make_unique<DisplayWindow>();
-		if(!window->createWindow(ini)) {
+		if(!window->createDisplay() || !window->createWindow(ini)) {
 			window.reset();
 		} else {
 			// Find present queue

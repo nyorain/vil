@@ -1156,26 +1156,44 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::BeginChild("Resource List", {0.f, 0.f});
 
 	auto displayResources = [&](auto& resMap) {
-		for(auto& entry : resMap.map) {
-			auto label = name(*entry.second);
+		if(resMap.empty()) {
+			return;
+		}
 
-			// TODO: better search
-			if(!search_.empty() && label.find(search_) == label.npos) {
-				continue;
+		if(filter_ != 0 && int(resMap.map.begin()->second->objectType) != filter_) {
+			// Break instead of continue since no object
+			// in this map should be displayed. TODO: kinda ugly...
+			return;
+		}
+
+		ImGuiListClipper clipper;
+		clipper.Begin(int(resMap.size()));
+
+		auto begin = resMap.map.begin();
+		while(clipper.Step()) {
+			for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; i++) {
+				// TODO: optimize
+				auto it = begin;
+				std::advance(it, i);
+				auto& entry = *it;
+
+				auto label = name(*entry.second);
+
+				// TODO: better search
+				// TODO: re-enable and make it work with list clipper (probably just
+				// disable it when we are using search? might be bad tho).
+				// Should probably optimize loop, e.g. not always allocate.
+				//if(!search_.empty() && label.find(search_) == label.npos) {
+				//	continue;
+				//}
+
+				ImGui::PushID(entry.second.get());
+				if(ImGui::Button(label.c_str())) {
+					select(*entry.second.get());
+				}
+
+				ImGui::PopID();
 			}
-
-			if(filter_ != 0 && int(entry.second->objectType) != filter_) {
-				// Break instead of continue since no object
-				// in this map should be displayed. TODO: kinda ugly...
-				break;
-			}
-
-			ImGui::PushID(entry.second.get());
-			if(ImGui::Button(label.c_str())) {
-				select(*entry.second.get());
-			}
-
-			ImGui::PopID();
 		}
 	};
 

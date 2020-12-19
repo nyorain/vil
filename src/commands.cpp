@@ -71,7 +71,7 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 	// the nearest parent we could find (maybe require an even higher
 	// threshold though since jumping to a false parent sucks).
 	// Maybe control that behavior via an external argument
-	auto findCandidates = [](const std::vector<CommandPtr>& cmds,
+	auto findCandidates = [](const CommandVector<CommandPtr>& cmds,
 			const CommandDescription& desc) -> std::vector<Candidate> {
 		std::vector<Candidate> candidates;
 		for(auto& cmd : cmds) {
@@ -153,6 +153,20 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 		levels.push_back(cands);
 		++i;
 	}
+}
+
+DrawCmdBase::DrawCmdBase(CommandBuffer& cb) {
+	(void) cb;
+	// TODO: graphics state and stuff
+	//cmd.state = cb.graphicsState;
+	//if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
+	//	cmd.state.pushConstants = cb.pushConstants.map;
+	//}
+}
+
+DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) {
+	(void) cb;
+	// TODO: compute state and stuff
 }
 
 template<typename T>

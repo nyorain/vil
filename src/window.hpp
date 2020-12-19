@@ -13,7 +13,9 @@ namespace fuen {
 
 // Creates a new window using swa and displays the overlay in it.
 struct DisplayWindow {
+	swa_display* dpy {};
 	swa_window* window {};
+	Instance* ini {};
 	Device* dev {};
 	Gui gui;
 
@@ -25,6 +27,7 @@ struct DisplayWindow {
 
 	VkSemaphore acquireSem {};
 
+	bool createDisplay();
 	bool createWindow(Instance&);
 	bool initDevice(Device& dev);
 	void resize(unsigned w, unsigned h);
@@ -39,6 +42,8 @@ private:
 	// TODO: hack
 	enum class State {
 		initial,
+		createDisplay,
+		displayCreated,
 		createWindow,
 		windowCreated,
 		initDevice,
@@ -53,7 +58,7 @@ private:
 	void initBuffers();
 	void destroyBuffers();
 	bool initSwapchain();
-	void uiThread(Instance& ini);
+	void uiThread();
 };
 
 } // namespace fuen
