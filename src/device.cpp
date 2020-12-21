@@ -590,26 +590,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			{
 				std::lock_guard lock(dev.mutex);
 
-				// store in command buffer that it was submitted here
-				// TODO IMPORTANT, REAL-WORLD RACE!
-				//   This should not be here, rather inside the queue lock!
-				//   Otherwise we might have a race (when dev.mutex is unlocked again below)
-				//   where someone uses this submission already even though it wasn't submitted
-				//   yet (and maybe e.g. doesn't even have a fence of something!)
-				cb.pending.push_back(&subm);
-
-				// store pending layouts
-				for(auto& used : cb.images) {
-					if(used.second.layoutChanged) {
-						dlg_assert(
-							used.second.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
-							used.second.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
-
-						used.second.image->pendingLayout = used.second.finalLayout;
-					}
-				}
-
-				// hook command buffer
+				// potentially hook command buffer
 				if(cb.hook) {
 					auto hooked = cb.hook(cb);
 					dlg_assert(hooked);
@@ -666,13 +647,35 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	// Lock order here important, see mutex usage for rendering in window.cpp.
 	std::lock_guard queueLock(dev.queueMutex);
 
+	dlg_assert(nsubmitInfos.size() == submitCount);
+	auto res = dev.dispatch.QueueSubmit(queue, u32(nsubmitInfos.size()), nsubmitInfos.data(), submFence);
+
+	// TODO: check res? But that would require a lot of custom logic here,
+	// resetting everything. We just always insert the submissions atm
+
 	{
 		std::lock_guard lock(dev.mutex);
+
+		for(auto& sub : subm.submissions) {
+			for(auto& cb : sub.cbs) {
+				cb->pending.push_back(&subm);
+
+				// store pending layouts
+				for(auto& used : cb->images) {
+					if(res == VK_SUCCESS && used.second.layoutChanged) {
+						dlg_assert(
+							used.second.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+							used.second.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
+						used.second.image->pendingLayout = used.second.finalLayout;
+					}
+				}
+			}
+		}
+
 		dev.pending.push_back(std::move(submPtr));
 	}
 
-	dlg_assert(nsubmitInfos.size() == submitCount);
-	return dev.dispatch.QueueSubmit(queue, u32(nsubmitInfos.size()), nsubmitInfos.data(), submFence);
+	return res;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue vkQueue) {

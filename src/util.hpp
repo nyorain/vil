@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 #include <array>
 #include <cstring>
+#include <memory>
 
 namespace fuen {
 
@@ -23,6 +24,13 @@ struct Visitor : Ts...  {
 };
 
 u32 findLSB(u32 v);
+
+template<typename T>
+bool isEmpty(const std::weak_ptr<T>& ptr) {
+	// https://stackoverflow.com/questions/45507041/how-to-check-if-weak-ptr-is-empty-non-assigned
+	using wt = std::weak_ptr<T>;
+    return !ptr.owner_before(wt{}) && !wt{}.owner_before(ptr);
+}
 
 template<typename C, typename K>
 auto find(C&& c, K&& k) {
@@ -72,7 +80,7 @@ const R* findChainInfo(const CI& ci) {
 /// An offset of 0 is treated as aligned with every possible alignment.
 /// Undefined if either value is negative.
 template<typename A, typename B>
-constexpr auto align(A offset, B alignment) {
+constexpr A align(A offset, B alignment) {
 	if(offset == 0 || alignment == 0) {
 		return offset;
 	}

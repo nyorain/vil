@@ -14,12 +14,6 @@ Buffer::~Buffer() {
 	for(auto* view : this->views) {
 		view->buffer = nullptr;
 	}
-
-	while(!this->descriptors.empty()) {
-		auto ref = this->descriptors[0];
-		dlg_assert(ref.ds->getBuffer(ref.binding, ref.elem) == this);
-		ref.ds->invalidateLocked(ref.binding, ref.elem);
-	}
 }
 
 BufferView::~BufferView() {
@@ -33,13 +27,6 @@ BufferView::~BufferView() {
 		auto it = std::find(this->buffer->views.begin(), this->buffer->views.end(), this);
 		dlg_assert(it != this->buffer->views.end());
 		this->buffer->views.erase(it);
-	}
-
-	// Don't use for-loop as the descriptors unregister themselves
-	while(!this->descriptors.empty()) {
-		auto ref = this->descriptors[0];
-		dlg_assert(ref.ds->getBufferView(ref.binding, ref.elem) == this);
-		ref.ds->invalidateLocked(ref.binding, ref.elem);
 	}
 }
 

@@ -2,9 +2,11 @@
 
 #include <fwd.hpp>
 #include <device.hpp>
-#include <cbState.hpp>
+#include <boundState.hpp>
 #include <pv.hpp>
 #include <vector>
+#include <unordered_map>
+#include <map>
 
 namespace fuen {
 
@@ -13,12 +15,13 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 	u32 queueFamily {};
 
-	static constexpr auto minBlockSize = 16 * 1024;
+	static constexpr auto minBlockSize = 64 * 1024;
 	struct MemBlock {
-		std::unique_ptr<std::byte[]> block;
+		MemBlock* next {};
 		std::size_t size;
+		// std::byte block[];
 	};
-	std::vector<MemBlock> memBlocks; // BlockSize
+	MemBlock* memBlocks {}; // forward linked list
 
 	~CommandPool();
 };
@@ -27,7 +30,7 @@ struct CommandPool : DeviceHandle {
 /// storage to avoid the huge memory allocation over head per command.
 template<typename T>
 struct DestructorCaller {
-	void operator()(T* ptr) const /* noexcept */ {
+	void operator()(T* ptr) const noexcept {
 		ptr->~T();
 	}
 };
@@ -48,11 +51,34 @@ T& allocate(CommandBuffer& cb, Args&&... args) {
 }
 
 template<typename T>
+span<T> allocSpan(CommandBuffer& cb, std::size_t count) {
+	if(count == 0) {
+		return {};
+	}
+
+	auto* raw = allocate(cb, sizeof(T) * count, alignof(T));
+	auto* arr = new(raw) T[count];
+	return span<T>(arr, count);
+}
+
+template<typename T>
+span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, T* data, std::size_t count) {
+	auto span = allocSpan<std::remove_const_t<T>>(cb, count);
+	std::copy(data, data + count, span.data());
+	return span;
+}
+
+template<typename T>
+span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, span<T> data) {
+	return copySpan(cb, data.data(), data.size());
+}
+
+template<typename T>
 struct CommandAllocator {
 	using is_always_equal = std::false_type;
 	using value_type = T;
 
-	CommandBuffer* cb {};
+	CommandBuffer* cb;
 
 	CommandAllocator(CommandBuffer& xcb) noexcept : cb(&xcb) {}
 
@@ -68,7 +94,10 @@ struct CommandAllocator {
 	T* allocate(std::size_t n) {
 		dlg_assert(cb);
 		auto* ptr = fuen::allocate(*cb, n * sizeof(T), alignof(T));
-		return new(ptr) T[n]; // creates the array but not the objects
+        // TODO: strictly speaking we need the first line but it doesn't compile
+        // under msvc for non-default-constructibe T
+		// return new(ptr) T[n]; // creates the array but not the objects
+        return reinterpret_cast<T*>(ptr);
 	}
 
 	void deallocate(T*, std::size_t) const noexcept {}
@@ -85,6 +114,10 @@ bool operator!=(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noex
 }
 
 template<typename T> using CommandVector = PageVector<T, CommandAllocator<T>>;
+//template<typename K, typename V> using CommandHashMap = std::unordered_map<K, V,
+//	std::hash<K>, std::equal_to<K>, CommandAllocator<std::pair<const K, V>>>;
+template<typename K, typename V> using CommandMap = std::map<K, V,
+    std::less<K>, CommandAllocator<std::pair<const K, V>>>;
 
 // Synchronization for this one is a bitch:
 // - We currently don't synchronize every single record call. A command
@@ -109,28 +142,51 @@ public:
 	// We don't use shared pointers here, they are used in the
 	// commands referencing the handles.
 	struct UsedImage {
+		UsedImage(Image& img, CommandBuffer& cb) noexcept : image(&img), commands(cb) {}
+		UsedImage(const UsedImage&) noexcept = delete;
+		UsedImage& operator=(const UsedImage&) noexcept = delete;
+		UsedImage(UsedImage&&) noexcept = default;
+		UsedImage& operator=(UsedImage&&) noexcept = default;
+
 		Image* image {};
 		VkImageLayout finalLayout {};
 		bool layoutChanged {};
-		std::vector<Command*> commands;
+		CommandVector<Command*> commands;
 	};
 
 	struct UsedBuffer {
+		UsedBuffer(Buffer& buf, CommandBuffer& cb) noexcept : buffer(&buf), commands(cb) {}
+		UsedBuffer(const UsedBuffer&) noexcept = delete;
+		UsedBuffer& operator=(const UsedBuffer&) noexcept = delete;
+		UsedBuffer(UsedBuffer&&) noexcept = default;
+		UsedBuffer& operator=(UsedBuffer&&) noexcept = default;
+
 		Buffer* buffer {};
-		std::vector<Command*> commands;
+		CommandVector<Command*> commands;
 		// can we determine potentially used bounds?
 	};
 
 	// General definition covering all cases of handles not covered
 	// above.
 	struct UsedHandle {
+		UsedHandle(DeviceHandle& h, CommandBuffer& cb) noexcept : handle(&h), commands(cb) {}
+		UsedHandle(const UsedHandle&) noexcept = delete;
+		UsedHandle& operator=(const UsedHandle&) noexcept = delete;
+		UsedHandle(UsedHandle&&) noexcept = default;
+		UsedHandle& operator=(UsedHandle&&) noexcept = default;
+
 		DeviceHandle* handle;
-		std::vector<Command*> commands;
+		CommandVector<Command*> commands;
 	};
 
 public:
 	CommandPool* pool {};
 	VkCommandBuffer handle {};
+
+	// memory storage allocated
+	// TODO: should probably just be a linked list
+	CommandPool::MemBlock* memBlocks {};
+	std::size_t memBlockOffset {}; // offset in first (current) mem block
 
 	// Can be used to track a specific command buffer recording.
 	u32 resetCount {}; // synchronized via dev mutex
@@ -147,13 +203,9 @@ public:
 	// This includes all transitive references, e.g. resources from a
 	// secondary command buffer that is executed or the buffer and memory
 	// associated with a buffer view, for instance.
-	std::unordered_map<VkImage, UsedImage> images;
-	std::unordered_map<VkBuffer, UsedBuffer> buffers;
-	std::unordered_map<std::uint64_t, UsedHandle> handles;
-
-	// memory storage allocated
-	std::vector<CommandPool::MemBlock> memBlocks;
-	std::size_t memBlockOffset {}; // offset in last (current) mem block
+	CommandMap<VkImage, UsedImage> images;
+	CommandMap<VkBuffer, UsedBuffer> buffers;
+	CommandMap<std::uint64_t, UsedHandle> handles;
 
 	// Commandbuffer hook that allows us to forward a modified version
 	// of this command buffer down the chain.
@@ -168,12 +220,12 @@ public:
 	GraphicsState graphicsState {};
 	CommandVector<SectionCommand*> sections; // stack
 
-	struct {
-		PushConstantMap map;
-		PipelineLayout* layout;
-	} pushConstants;
+	// struct {
+	// 	PushConstantMap map;
+	// 	PipelineLayout* layout;
+	// } pushConstants;
 
-	CommandBuffer();
+	CommandBuffer(CommandPool& pool, VkCommandBuffer handle);
 	~CommandBuffer();
 
 	// Moves the command buffer to invalid state.

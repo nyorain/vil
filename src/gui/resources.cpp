@@ -1155,23 +1155,26 @@ void ResourceGui::draw(Draw& draw) {
 	// resource list
 	ImGui::BeginChild("Resource List", {0.f, 0.f});
 
-	auto displayResources = [&](auto& resMap) {
+	auto displayResources = [&](auto& syncedResMap) {
+		auto& resMap = syncedResMap.map;
 		if(resMap.empty()) {
 			return;
 		}
 
-		if(filter_ != 0 && int(resMap.map.begin()->second->objectType) != filter_) {
+		if(filter_ != 0 && int(resMap.begin()->second->objectType) != filter_) {
 			// Break instead of continue since no object
 			// in this map should be displayed. TODO: kinda ugly...
 			return;
 		}
 
+		// ImGui::Text("Begin");
+
 		ImGuiListClipper clipper;
 		clipper.Begin(int(resMap.size()));
 
-		auto begin = resMap.map.begin();
+		auto begin = resMap.begin();
 		while(clipper.Step()) {
-			for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; i++) {
+			for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 				// TODO: optimize
 				auto it = begin;
 				std::advance(it, i);
@@ -1195,6 +1198,9 @@ void ResourceGui::draw(Draw& draw) {
 				ImGui::PopID();
 			}
 		}
+
+		// ImGui::Text("End");
+		ImGui::Separator();
 	};
 
 	auto& dev = gui_->dev();

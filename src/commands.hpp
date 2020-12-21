@@ -1,11 +1,12 @@
 #pragma once
 
-#include <cbState.hpp>
+#include <boundState.hpp>
 #include <handles.hpp>
 #include <flags.hpp>
 #include <pv.hpp>
 #include <imguiutil.hpp>
 #include <vk/enumString.hpp>
+#include <span.hpp>
 
 #include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
@@ -171,16 +172,17 @@ struct SectionCommand : Command {
 struct BarrierCmdBase : Command {
     VkPipelineStageFlags srcStageMask;
     VkPipelineStageFlags dstStageMask;
-	std::vector<VkMemoryBarrier> memBarriers;
-	std::vector<VkBufferMemoryBarrier> bufBarriers;
-	std::vector<VkImageMemoryBarrier> imgBarriers;
 
-	// std::vector<Image*> images;
-	// std::vector<Buffer*> buffers;
+	span<VkMemoryBarrier> memBarriers;
+	span<VkBufferMemoryBarrier> bufBarriers;
+	span<VkImageMemoryBarrier> imgBarriers;
+
+	span<Image*> images;
+	span<Buffer*> buffers;
 };
 
 struct WaitEventsCmd : BarrierCmdBase {
-	std::vector<Event*> events;
+	span<Event*> events;
 
 	std::string nameDesc() const override { return "WaitEvents"; }
 	Type type() const override { return Type::sync; }
@@ -199,7 +201,7 @@ struct BarrierCmd : BarrierCmdBase {
 
 struct BeginRenderPassCmd : SectionCommand {
 	VkRenderPassBeginInfo info;
-	std::vector<VkClearValue> clearValues;
+	span<VkClearValue> clearValues;
 
 	VkSubpassContents subpassContents;
 	Framebuffer* fb;
@@ -348,12 +350,11 @@ struct DrawIndirectCountCmd : DrawCmdBase {
 
 struct BindVertexBuffersCmd : Command {
 	u32 firstBinding;
-	std::vector<Buffer*> buffers;
-	std::vector<VkDeviceSize> offsets;
+	span<BoundVertexBuffer> buffers;
 
 	std::string toString() const override {
 		if(buffers.size() == 1) {
-			return dlg::format("BindVertexBuffers({}: {})", firstBinding, name(*buffers[0]));
+			return dlg::format("BindVertexBuffers({}: {})", firstBinding, name(*buffers[0].buffer));
 		} else {
 			return dlg::format("BindVertexBuffers({}..{})", firstBinding,
 				firstBinding + buffers.size() - 1);
@@ -362,7 +363,7 @@ struct BindVertexBuffersCmd : Command {
 
 	void displayInspector(Gui&) const override {
 		for(auto i = 0u; i < buffers.size(); ++i) {
-			auto& buf = *buffers[i];
+			auto& buf = *buffers[i].buffer;
 			ImGui::Button(dlg::format("{}: {}", firstBinding + i, name(buf)).c_str());
 		}
 	}
@@ -386,8 +387,8 @@ struct BindDescriptorSetCmd : Command {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
 	std::shared_ptr<PipelineLayout> pipeLayout;
-	std::vector<DescriptorSet*> sets;
-	std::vector<u32> dynamicOffsets;
+	span<DescriptorSet*> sets;
+	span<u32> dynamicOffsets;
 
 	std::string toString() const override {
 		if(sets.size() == 1) {
@@ -482,7 +483,7 @@ struct CopyImageCmd : Command {
 	Image* dst {};
 	VkImageLayout srcLayout {};
 	VkImageLayout dstLayout {};
-	std::vector<VkImageCopy> copies;
+	span<VkImageCopy> copies;
 
 	std::string toString() const override {
 		return dlg::format("CopyImage({} -> {})", name(*src), name(*dst));
@@ -499,7 +500,7 @@ struct CopyBufferToImageCmd : Command {
 	Buffer* src {};
 	Image* dst {};
 	VkImageLayout imgLayout {};
-	std::vector<VkBufferImageCopy> copies;
+	span<VkBufferImageCopy> copies;
 
 	std::string toString() const override {
 		return dlg::format("CopyBufferToImage({} -> {})", name(*src), name(*dst));
@@ -515,7 +516,7 @@ struct CopyImageToBufferCmd : Command {
 	Image* src {};
 	Buffer* dst {};
 	VkImageLayout imgLayout {};
-	std::vector<VkBufferImageCopy> copies;
+	span<VkBufferImageCopy> copies;
 
 	std::string toString() const override {
 		return dlg::format("CopyImageToBuffer({} -> {})", name(*src), name(*dst));
@@ -533,7 +534,7 @@ struct BlitImageCmd : Command {
 	Image* dst {};
 	VkImageLayout srcLayout {};
 	VkImageLayout dstLayout {};
-	std::vector<VkImageBlit> blits;
+	span<VkImageBlit> blits;
 	VkFilter filter {};
 
 	std::string toString() const override {
@@ -551,7 +552,7 @@ struct ClearColorImageCmd : Command {
 	Image* dst {};
 	VkClearColorValue color;
 	VkImageLayout imgLayout {};
-	std::vector<VkImageSubresourceRange> ranges;
+	span<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override {
 		return dlg::format("ClearColorImage({})", name(*dst));
@@ -565,7 +566,7 @@ struct ClearDepthStencilImageCmd : Command {
 	Image* dst {};
 	VkClearDepthStencilValue value {};
 	VkImageLayout imgLayout {};
-	std::vector<VkImageSubresourceRange> ranges;
+	span<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override {
 		return dlg::format("ClearDepthStencilImage({})", name(*dst));
@@ -577,8 +578,8 @@ struct ClearDepthStencilImageCmd : Command {
 };
 
 struct ClearAttachmentCmd : Command {
-	std::vector<VkClearAttachment> attachments;
-	std::vector<VkClearRect> rects;
+	span<VkClearAttachment> attachments;
+	span<VkClearRect> rects;
 
 	std::string nameDesc() const override { return "ClearAttachment"; }
 	Type type() const override { return Type::transfer; }
@@ -590,7 +591,7 @@ struct ResolveImageCmd : Command {
 	VkImageLayout srcLayout {};
 	Image* dst {};
 	VkImageLayout dstLayout {};
-	std::vector<VkImageResolve> regions;
+	span<VkImageResolve> regions;
 
 	std::string toString() const override { return "ResolveImage"; }
 	std::string nameDesc() const override { return "ResolveImage"; }
@@ -621,7 +622,7 @@ struct ResetEventCmd : Command {
 struct CopyBufferCmd : Command {
 	Buffer* src {};
 	Buffer* dst {};
-	std::vector<VkBufferCopy> regions;
+	span<VkBufferCopy> regions;
 
 	std::string toString() const override {
 		return dlg::format("CopyBuffer({} -> {})", name(*src), name(*dst));
@@ -636,7 +637,7 @@ struct CopyBufferCmd : Command {
 struct UpdateBufferCmd : Command {
 	Buffer* dst {};
 	VkDeviceSize offset {};
-	std::vector<std::byte> data;
+	span<std::byte> data;
 
 	std::string toString() const override {
 		return dlg::format("UpdateBuffer({})", name(*dst));
@@ -663,7 +664,7 @@ struct FillBufferCmd : Command {
 };
 
 struct ExecuteCommandsCmd : Command {
-	std::vector<CommandBuffer*> secondaries {};
+	span<CommandBuffer*> secondaries {};
 
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "ExecuteCommands"; }
@@ -711,7 +712,7 @@ struct PushConstantsCmd : Command {
 	std::shared_ptr<PipelineLayout> layout;
 	VkShaderStageFlags stages {};
 	u32 offset {};
-	std::vector<std::byte> values;
+	span<std::byte> values;
 
 	std::string nameDesc() const override { return "PushConstants"; }
 	Type type() const override { return Type::bind; }
@@ -721,7 +722,7 @@ struct PushConstantsCmd : Command {
 // dynamic state
 struct SetViewportCmd : Command {
 	u32 first {};
-	std::vector<VkViewport> viewports;
+	span<VkViewport> viewports;
 
 	Type type() const override { return Type::bind; }
 	std::string nameDesc() const override { return "SetViewport"; }
@@ -730,7 +731,7 @@ struct SetViewportCmd : Command {
 
 struct SetScissorCmd : Command {
 	u32 first {};
-	std::vector<VkRect2D> scissors;
+	span<VkRect2D> scissors;
 
 	Type type() const override { return Type::bind; }
 	std::string nameDesc() const override { return "SetScissor"; }

@@ -13,9 +13,6 @@ subdir('src/data') # compile shaders
 cc = meson.get_compiler('cpp')
 
 args = cc.get_supported_arguments([
-	# enable msvc parallel compilation
-	# '/MP',
-
 	# silence various msvc warnings, we still wanna compile with werror
 	'/wd4065', # switch has no case, just default
 	'/wd26812', # prefer 'enum class' over 'enum'
@@ -137,7 +134,7 @@ fuen_layer = shared_library(
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
-	link_args: cc.get_supported_link_arguments(['-Wl,-Bsymbolic-functions', '-Wl,-z,relro']),
+	# link_args: cc.get_supported_link_arguments(['-Wl,-Bsymbolic-functions', '-Wl,-z,relro']),
 	cpp_args: args,
 	install: true
 )
@@ -162,3 +159,4 @@ configure_file(
 )
 
 subdir('docs/example')
+subdir('docs/test')

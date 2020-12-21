@@ -371,6 +371,7 @@ CODE
  When you are not sure about a old symbol or function name, try using the Search/Find function of your IDE to look for comments or references in all imgui files.
  You can read releases logs https://github.com/ocornut/imgui/releases for more details.
 
+ - 2020/12/04 (1.80) - added imgui_tables.cpp file! Manually constructed project files will need the new file added!
  - 2020/11/18 (1.80) - renamed undocumented/internals ImGuiColumnsFlags_* to ImGuiOldColumnFlags_* in prevision of incoming Tables API.
  - 2020/11/03 (1.80) - renamed io.ConfigWindowsMemoryCompactTimer to io.ConfigMemoryCompactTimer as the feature will apply to other data structures
  - 2020/10/14 (1.80) - backends: moved all backends files (imgui_impl_XXXX.cpp, imgui_impl_XXXX.h) from examples/ to backends/.
@@ -946,6 +947,7 @@ ImGuiStyle::ImGuiStyle()
     FrameBorderSize         = 0.0f;             // Thickness of border around frames. Generally set to 0.0f or 1.0f. Other values not well tested.
     ItemSpacing             = ImVec2(8,4);      // Horizontal and vertical spacing between widgets/lines
     ItemInnerSpacing        = ImVec2(4,4);      // Horizontal and vertical spacing between within elements of a composed widget (e.g. a slider and its label)
+    CellPadding             = ImVec2(4,2);      // Padding within a table cell
     TouchExtraPadding       = ImVec2(0,0);      // Expand reactive bounding box for touch-based system where touch position is not accurate enough. Unfortunately we don't sort widgets so priority on overlap will always be given to the first widget. So don't grow this too much!
     IndentSpacing           = 21.0f;            // Horizontal spacing when e.g. entering a tree node. Generally == (FontSize + FramePadding.x*2).
     ColumnsMinSpacing       = 6.0f;             // Minimum horizontal spacing between two columns. Preferably > (FramePadding.x + 1).
@@ -986,6 +988,7 @@ void ImGuiStyle::ScaleAllSizes(float scale_factor)
     FrameRounding = ImFloor(FrameRounding * scale_factor);
     ItemSpacing = ImFloor(ItemSpacing * scale_factor);
     ItemInnerSpacing = ImFloor(ItemInnerSpacing * scale_factor);
+    CellPadding = ImFloor(CellPadding * scale_factor);
     TouchExtraPadding = ImFloor(TouchExtraPadding * scale_factor);
     IndentSpacing = ImFloor(IndentSpacing * scale_factor);
     ColumnsMinSpacing = ImFloor(ColumnsMinSpacing * scale_factor);
@@ -1433,7 +1436,7 @@ static const ImU32 GCrc32LookupTable[256] =
 // Known size hash
 // It is ok to call ImHashData on a string with known length but the ### operator won't be supported.
 // FIXME-OPT: Replace with e.g. FNV1a hash? CRC32 pretty much randomly access 1KB. Need to do proper measurements.
-ImU32 ImHashData(const void* data_p, size_t data_size, ImU32 seed)
+ImGuiID ImHashData(const void* data_p, size_t data_size, ImU32 seed)
 {
     ImU32 crc = ~seed;
     const unsigned char* data = (const unsigned char*)data_p;
@@ -1449,7 +1452,7 @@ ImU32 ImHashData(const void* data_p, size_t data_size, ImU32 seed)
 // - If we reach ### in the string we discard the hash so far and reset to the seed.
 // - We don't do 'current += 2; continue;' after handling ### to keep the code smaller/faster (measured ~10% diff in Debug build)
 // FIXME-OPT: Replace with e.g. FNV1a hash? CRC32 pretty much randomly access 1KB. Need to do proper measurements.
-ImU32 ImHashStr(const char* data_p, size_t data_size, ImU32 seed)
+ImGuiID ImHashStr(const char* data_p, size_t data_size, ImU32 seed)
 {
     seed = ~seed;
     ImU32 crc = seed;
@@ -2134,6 +2137,14 @@ void ImGuiTextBuffer::appendfv(const char* fmt, va_list args)
 // the API mid-way through development and support two ways to using the clipper, needs some rework (see TODO)
 //-----------------------------------------------------------------------------
 
+// FIXME-TABLE: This prevents us from using ImGuiListClipper _inside_ a table cell.
+// The problem we have is that without a Begin/End scheme for rows using the clipper is ambiguous.
+static bool GetSkipItemForListClipping()
+{
+    ImGuiContext& g = *GImGui;
+    return (g.CurrentTable ? g.CurrentTable->HostSkipItems : g.CurrentWindow->SkipItems);
+}
+
 // Helper to calculate coarse clipping of large list of evenly sized items.
 // NB: Prefer using the ImGuiListClipper higher-level helper if you can! Read comments and instructions there on how those use this sort of pattern.
 // NB: 'items_count' is only used to clamp the result, if you don't know your count you can use INT_MAX
@@ -2148,7 +2159,7 @@ void ImGui::CalcListClipping(int items_count, float items_height, int* out_items
         *out_items_display_end = items_count;
         return;
     }
-    if (window->SkipItems)
+    if (GetSkipItemForListClipping())
     {
         *out_items_display_start = *out_items_display_end = 0;
         return;
@@ -2184,12 +2195,22 @@ static void SetCursorPosYAndSetupForPrevLine(float pos_y, float line_height)
     // The clipper should probably have a 4th step to display the last item in a regular manner.
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
+    float off_y = pos_y - window->DC.CursorPos.y;
     window->DC.CursorPos.y = pos_y;
     window->DC.CursorMaxPos.y = ImMax(window->DC.CursorMaxPos.y, pos_y);
     window->DC.CursorPosPrevLine.y = window->DC.CursorPos.y - line_height;  // Setting those fields so that SetScrollHereY() can properly function after the end of our clipper usage.
     window->DC.PrevLineSize.y = (line_height - g.Style.ItemSpacing.y);      // If we end up needing more accurate data (to e.g. use SameLine) we may as well make the clipper have a fourth step to let user process and display the last item in their list.
-    if (ImGuiColumns* columns = window->DC.CurrentColumns)
+    if (ImGuiOldColumns* columns = window->DC.CurrentColumns)
         columns->LineMinY = window->DC.CursorPos.y;                         // Setting this so that cell Y position are set properly
+    if (ImGuiTable* table = g.CurrentTable)
+    {
+        if (table->IsInsideRow)
+            ImGui::TableEndRow(table);
+        table->RowPosY2 = window->DC.CursorPos.y;
+        const int row_increase = (int)((off_y / line_height) + 0.5f);
+        //table->CurrentRow += row_increase; // Can't do without fixing TableEndRow()
+        table->RowBgColorCounter += row_increase;
+    }
 }
 
 ImGuiListClipper::ImGuiListClipper()
@@ -2211,9 +2232,14 @@ void ImGuiListClipper::Begin(int items_count, float items_height)
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
 
+    if (ImGuiTable* table = g.CurrentTable)
+        if (table->IsInsideRow)
+            ImGui::TableEndRow(table);
+
     StartPosY = window->DC.CursorPos.y;
     ItemsHeight = items_height;
     ItemsCount = items_count;
+    ItemsFrozen = 0;
     StepNo = 0;
     DisplayStart = -1;
     DisplayEnd = 0;
@@ -2226,7 +2252,7 @@ void ImGuiListClipper::End()
 
     // In theory here we should assert that ImGui::GetCursorPosY() == StartPosY + DisplayEnd * ItemsHeight, but it feels saner to just seek at the end and not assert/crash the user.
     if (ItemsCount < INT_MAX && DisplayStart >= 0)
-        SetCursorPosYAndSetupForPrevLine(StartPosY + ItemsCount * ItemsHeight, ItemsHeight);
+        SetCursorPosYAndSetupForPrevLine(StartPosY + (ItemsCount - ItemsFrozen) * ItemsHeight, ItemsHeight);
     ItemsCount = -1;
     StepNo = 3;
 }
@@ -2236,8 +2262,32 @@ bool ImGuiListClipper::Step()
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
 
+    ImGuiTable* table = g.CurrentTable;
+    if (table && table->IsInsideRow)
+        ImGui::TableEndRow(table);
+
+    // Step 1: the clipper infer height from first element.
+	// We need to calculate ItemHeight before we early-out due to no more items being available.
+    if (StepNo == 1)
+    {
+        IM_ASSERT(ItemsHeight <= 0.0f);
+        if (table)
+        {
+            const float pos_y1 = table->RowPosY1;   // Using this instead of StartPosY to handle clipper straddling the frozen row
+            const float pos_y2 = table->RowPosY2;   // Using this instead of CursorPos.y to take account of tallest cell.
+            ItemsHeight = pos_y2 - pos_y1;
+            window->DC.CursorPos.y = pos_y2;
+        }
+        else
+        {
+            ItemsHeight = window->DC.CursorPos.y - StartPosY;
+        }
+        IM_ASSERT(ItemsHeight > 0.0f && "Unable to calculate item height! First item hasn't moved the cursor vertically!");
+        StepNo = 2;
+    }
+
     // Reached end of list
-    if (DisplayEnd >= ItemsCount || window->SkipItems)
+    if (DisplayEnd >= ItemsCount || GetSkipItemForListClipping())
     {
         End();
         return false;
@@ -2246,27 +2296,28 @@ bool ImGuiListClipper::Step()
     // Step 0: Let you process the first element (regardless of it being visible or not, so we can measure the element height)
     if (StepNo == 0)
     {
+        // While we are in frozen row state, keep displaying items one by one, unclipped
+        // FIXME: Could be stored as a table-agnostic state.
+        if (table != NULL && !table->IsUnfrozen)
+        {
+            DisplayStart = ItemsFrozen;
+            DisplayEnd = ItemsFrozen + 1;
+            ItemsFrozen++;
+            return true;
+        }
+
         StartPosY = window->DC.CursorPos.y;
         if (ItemsHeight <= 0.0f)
         {
             // Submit the first item so we can measure its height (generally it is 0..1)
-            DisplayStart = 0;
-            DisplayEnd = 1;
+            DisplayStart = ItemsFrozen;
+            DisplayEnd = ItemsFrozen + 1;
             StepNo = 1;
             return true;
         }
 
         // Already has item height (given by user in Begin): skip to calculating step
         DisplayStart = DisplayEnd;
-        StepNo = 2;
-    }
-
-    // Step 1: the clipper infer height from first element
-    if (StepNo == 1)
-    {
-        IM_ASSERT(ItemsHeight <= 0.0f);
-        ItemsHeight = window->DC.CursorPos.y - StartPosY;
-        IM_ASSERT(ItemsHeight > 0.0f && "Unable to calculate item height! First item hasn't moved the cursor vertically!");
         StepNo = 2;
     }
 
@@ -2282,7 +2333,7 @@ bool ImGuiListClipper::Step()
 
         // Seek cursor
         if (DisplayStart > already_submitted)
-            SetCursorPosYAndSetupForPrevLine(StartPosY + DisplayStart * ItemsHeight, ItemsHeight);
+            SetCursorPosYAndSetupForPrevLine(StartPosY + (DisplayStart - ItemsFrozen) * ItemsHeight, ItemsHeight);
 
         StepNo = 3;
         return true;
@@ -2294,7 +2345,7 @@ bool ImGuiListClipper::Step()
     {
         // Seek cursor
         if (ItemsCount < INT_MAX)
-            SetCursorPosYAndSetupForPrevLine(StartPosY + ItemsCount * ItemsHeight, ItemsHeight); // advance cursor
+            SetCursorPosYAndSetupForPrevLine(StartPosY + (ItemsCount - ItemsFrozen) * ItemsHeight, ItemsHeight); // advance cursor
         ItemsCount = -1;
         return false;
     }
@@ -2404,6 +2455,7 @@ static const ImGuiStyleVarInfo GStyleVarInfo[] =
     { ImGuiDataType_Float, 2, (ImU32)IM_OFFSETOF(ImGuiStyle, ItemSpacing) },         // ImGuiStyleVar_ItemSpacing
     { ImGuiDataType_Float, 2, (ImU32)IM_OFFSETOF(ImGuiStyle, ItemInnerSpacing) },    // ImGuiStyleVar_ItemInnerSpacing
     { ImGuiDataType_Float, 1, (ImU32)IM_OFFSETOF(ImGuiStyle, IndentSpacing) },       // ImGuiStyleVar_IndentSpacing
+    { ImGuiDataType_Float, 2, (ImU32)IM_OFFSETOF(ImGuiStyle, CellPadding) },         // ImGuiStyleVar_CellPadding
     { ImGuiDataType_Float, 1, (ImU32)IM_OFFSETOF(ImGuiStyle, ScrollbarSize) },       // ImGuiStyleVar_ScrollbarSize
     { ImGuiDataType_Float, 1, (ImU32)IM_OFFSETOF(ImGuiStyle, ScrollbarRounding) },   // ImGuiStyleVar_ScrollbarRounding
     { ImGuiDataType_Float, 1, (ImU32)IM_OFFSETOF(ImGuiStyle, GrabMinSize) },         // ImGuiStyleVar_GrabMinSize
@@ -2511,6 +2563,11 @@ const char* ImGui::GetStyleColorName(ImGuiCol idx)
     case ImGuiCol_PlotLinesHovered: return "PlotLinesHovered";
     case ImGuiCol_PlotHistogram: return "PlotHistogram";
     case ImGuiCol_PlotHistogramHovered: return "PlotHistogramHovered";
+    case ImGuiCol_TableHeaderBg: return "TableHeaderBg";
+    case ImGuiCol_TableBorderStrong: return "TableBorderStrong";
+    case ImGuiCol_TableBorderLight: return "TableBorderLight";
+    case ImGuiCol_TableRowBg: return "TableRowBg";
+    case ImGuiCol_TableRowBgAlt: return "TableRowBgAlt";
     case ImGuiCol_TextSelectedBg: return "TextSelectedBg";
     case ImGuiCol_DragDropTarget: return "DragDropTarget";
     case ImGuiCol_NavHighlight: return "NavHighlight";
@@ -2802,7 +2859,7 @@ ImGuiWindow::~ImGuiWindow()
     IM_ASSERT(DrawList == &DrawListInst);
     IM_DELETE(Name);
     for (int i = 0; i != ColumnsStorage.Size; i++)
-        ColumnsStorage[i].~ImGuiColumns();
+        ColumnsStorage[i].~ImGuiOldColumns();
 }
 
 ImGuiID ImGuiWindow::GetID(const char* str, const char* str_end)
@@ -2888,6 +2945,7 @@ static void SetCurrentWindow(ImGuiWindow* window)
 {
     ImGuiContext& g = *GImGui;
     g.CurrentWindow = window;
+    g.CurrentTable = window && window->DC.CurrentTableIdx != -1 ? g.Tables.GetByIndex(window->DC.CurrentTableIdx) : NULL;
     if (window)
         g.FontSize = g.DrawListSharedData.FontSize = window->CalcFontSize();
 }
@@ -2897,6 +2955,7 @@ void ImGui::GcCompactTransientMiscBuffers()
     ImGuiContext& g = *GImGui;
     g.ItemFlagsStack.clear();
     g.GroupStack.clear();
+    TableGcCompactSettings();
 }
 
 // Free up/compact internal window buffers, we can use this when a window becomes unused.
@@ -3410,7 +3469,7 @@ void ImGui::UpdateMouseMovingWindowEndFrame()
 
         if (root_window != NULL && !is_closed_popup)
         {
-            StartMouseMovingWindow(g.HoveredWindow);
+            StartMouseMovingWindow(g.HoveredWindow); //-V595
 
             // Cancel moving if clicked outside of title bar
             if (g.IO.ConfigWindowsMoveFromTitleBarOnly && !(root_window->Flags & ImGuiWindowFlags_NoTitleBar))
@@ -3436,17 +3495,7 @@ void ImGui::UpdateMouseMovingWindowEndFrame()
         // Find the top-most window between HoveredWindow and the top-most Modal Window.
         // This is where we can trim the popup stack.
         ImGuiWindow* modal = GetTopMostPopupModal();
-        bool hovered_window_above_modal = false;
-        if (modal == NULL)
-            hovered_window_above_modal = true;
-        for (int i = g.Windows.Size - 1; i >= 0 && hovered_window_above_modal == false; i--)
-        {
-            ImGuiWindow* window = g.Windows[i];
-            if (window == modal)
-                break;
-            if (window == g.HoveredWindow)
-                hovered_window_above_modal = true;
-        }
+        bool hovered_window_above_modal = g.HoveredWindow && IsWindowAbove(g.HoveredWindow, modal);
         ClosePopupsOverWindow(hovered_window_above_modal ? g.HoveredWindow : modal, true);
     }
 }
@@ -3861,6 +3910,11 @@ void ImGui::NewFrame()
         if (!window->WasActive && !window->MemoryCompacted && window->LastTimeActive < memory_compact_start_time)
             GcCompactTransientWindowBuffers(window);
     }
+
+    // Garbage collect transient buffers of recently unused tables
+    for (int i = 0; i < g.TablesLastTimeActive.Size; i++)
+        if (g.TablesLastTimeActive[i] >= 0.0f && g.TablesLastTimeActive[i] < memory_compact_start_time)
+            TableGcCompactTransientBuffers(g.Tables.GetByIndex(i));
     if (g.GcCompactAll)
         GcCompactTransientMiscBuffers();
     g.GcCompactAll = false;
@@ -3937,15 +3991,7 @@ void ImGui::Initialize(ImGuiContext* context)
 
 #ifdef IMGUI_HAS_TABLE
     // Add .ini handle for ImGuiTable type
-    {
-        ImGuiSettingsHandler ini_handler;
-        ini_handler.TypeName = "Table";
-        ini_handler.TypeHash = ImHashStr("Table");
-        ini_handler.ReadOpenFn = TableSettingsHandler_ReadOpen;
-        ini_handler.ReadLineFn = TableSettingsHandler_ReadLine;
-        ini_handler.WriteAllFn = TableSettingsHandler_WriteAll;
-        g.SettingsHandlers.push_back(ini_handler);
-    }
+    TableSettingsInstallHandler(context);
 #endif // #ifdef IMGUI_HAS_TABLE
 
 #ifdef IMGUI_HAS_DOCK
@@ -4006,6 +4052,10 @@ void ImGui::Shutdown(ImGuiContext* context)
     g.TabBars.Clear();
     g.CurrentTabBarStack.clear();
     g.ShrinkWidthBuffer.clear();
+
+    g.Tables.Clear();
+    g.CurrentTableStack.clear();
+    g.DrawChannelsTempMergeBuffer.clear();
 
     g.ClipboardHandlerData.clear();
     g.MenusIdSubmittedThisFrame.clear();
@@ -4700,6 +4750,7 @@ bool ImGui::IsItemEdited()
 }
 
 // Allow last item to be overlapped by a subsequent item. Both may be activated during the same frame before the later one takes priority.
+// FIXME: Although this is exposed, its interaction and ideal idiom with using ImGuiButtonFlags_AllowItemOverlap flag are extremely confusing, need rework.
 void ImGui::SetItemAllowOverlap()
 {
     ImGuiContext& g = *GImGui;
@@ -5593,6 +5644,7 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
         window->ClipRect = ImVec4(-FLT_MAX, -FLT_MAX, +FLT_MAX, +FLT_MAX);
         window->IDStack.resize(1);
         window->DrawList->_ResetForNewFrame();
+        window->DC.CurrentTableIdx = -1;
 
         // Restore buffer capacity when woken from a compacted state, to avoid
         if (window->MemoryCompacted)
@@ -5618,6 +5670,8 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
             window->HiddenFramesCanSkipItems--;
         if (window->HiddenFramesCannotSkipItems > 0)
             window->HiddenFramesCannotSkipItems--;
+        if (window->HiddenFramesForRenderOnly > 0)
+            window->HiddenFramesForRenderOnly--;
 
         // Hide new windows for one frame until they calculate their size
         if (window_just_created && (!window_size_x_set_by_api || !window_size_y_set_by_api))
@@ -6054,9 +6108,10 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
             // Child window can be out of sight and have "negative" clip windows.
             // Mark them as collapsed so commands are skipped earlier (we can't manually collapse them because they have no title bar).
             IM_ASSERT((flags & ImGuiWindowFlags_NoTitleBar) != 0);
-            if (!(flags & ImGuiWindowFlags_AlwaysAutoResize) && window->AutoFitFramesX <= 0 && window->AutoFitFramesY <= 0)
-                if (window->OuterRectClipped.Min.x >= window->OuterRectClipped.Max.x || window->OuterRectClipped.Min.y >= window->OuterRectClipped.Max.y)
-                    window->HiddenFramesCanSkipItems = 1;
+            if (!(flags & ImGuiWindowFlags_AlwaysAutoResize) && window->AutoFitFramesX <= 0 && window->AutoFitFramesY <= 0) // FIXME: Doesn't make sense for ChildWindow??
+                if (!g.LogEnabled)
+                    if (window->OuterRectClipped.Min.x >= window->OuterRectClipped.Max.x || window->OuterRectClipped.Min.y >= window->OuterRectClipped.Max.y)
+                        window->HiddenFramesCanSkipItems = 1;
 
             // Hide along with parent or if parent is collapsed
             if (parent_window && (parent_window->Collapsed || parent_window->HiddenFramesCanSkipItems > 0))
@@ -6070,7 +6125,7 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
             window->HiddenFramesCanSkipItems = 1;
 
         // Update the Hidden flag
-        window->Hidden = (window->HiddenFramesCanSkipItems > 0) || (window->HiddenFramesCannotSkipItems > 0);
+        window->Hidden = (window->HiddenFramesCanSkipItems > 0) || (window->HiddenFramesCannotSkipItems > 0) || (window->HiddenFramesForRenderOnly > 0);
 
         // Update the SkipItems flag, used to early out of all items functions (no layout required)
         bool skip_items = false;
@@ -6334,6 +6389,20 @@ bool ImGui::IsWindowChildOf(ImGuiWindow* window, ImGuiWindow* potential_parent)
     return false;
 }
 
+bool ImGui::IsWindowAbove(ImGuiWindow* potential_above, ImGuiWindow* potential_below)
+{
+    ImGuiContext& g = *GImGui;
+    for (int i = g.Windows.Size - 1; i >= 0; i--)
+    {
+        ImGuiWindow* candidate_window = g.Windows[i];
+        if (candidate_window == potential_above)
+            return true;
+        if (candidate_window == potential_below)
+            return false;
+    }
+    return false;
+}
+
 bool ImGui::IsWindowHovered(ImGuiHoveredFlags flags)
 {
     IM_ASSERT((flags & ImGuiHoveredFlags_AllowWhenOverlapped) == 0);   // Flags not supported by this function
@@ -6401,7 +6470,7 @@ bool ImGui::IsWindowFocused(ImGuiFocusedFlags flags)
 // If you want a window to never be focused, you may use the e.g. NoInputs flag.
 bool ImGui::IsWindowNavFocusable(ImGuiWindow* window)
 {
-    return window->Active && window == window->RootWindow && !(window->Flags & ImGuiWindowFlags_NoNavFocus);
+    return window->WasActive && window == window->RootWindow && !(window->Flags & ImGuiWindowFlags_NoNavFocus);
 }
 
 float ImGui::GetWindowWidth()
@@ -6842,8 +6911,8 @@ static void ImGui::ErrorCheckNewFrameSanityChecks()
     // (IF YOU GET A WARNING OR COMPILE ERROR HERE: it means you assert macro is incorrectly defined!
     //  If your macro uses multiple statements, it NEEDS to be surrounded by a 'do { ... } while (0)' block.
     //  This is a common C/C++ idiom to allow multiple statements macros to be used in control flow blocks.)
-    // #define IM_ASSERT(EXPR)   SomeCode(EXPR); SomeMoreCode();                    // Wrong!
-    // #define IM_ASSERT(EXPR)   do { SomeCode(EXPR); SomeMoreCode(); } while (0)   // Correct!
+    // #define IM_ASSERT(EXPR)   if (SomeCode(EXPR)) SomeMoreCode();                    // Wrong!
+    // #define IM_ASSERT(EXPR)   do { if (SomeCode(EXPR)) SomeMoreCode(); } while (0)   // Correct!
     if (true) IM_ASSERT(1); else IM_ASSERT(0);
 
     // Check user data
@@ -6852,21 +6921,21 @@ static void ImGui::ErrorCheckNewFrameSanityChecks()
     IM_ASSERT((g.IO.DeltaTime > 0.0f || g.FrameCount == 0)              && "Need a positive DeltaTime!");
     IM_ASSERT((g.FrameCount == 0 || g.FrameCountEnded == g.FrameCount)  && "Forgot to call Render() or EndFrame() at the end of the previous frame?");
     IM_ASSERT(g.IO.DisplaySize.x >= 0.0f && g.IO.DisplaySize.y >= 0.0f  && "Invalid DisplaySize value!");
-    IM_ASSERT(g.IO.Fonts->Fonts.Size > 0                                && "Font Atlas not built. Did you call io.Fonts->GetTexDataAsRGBA32() / GetTexDataAsAlpha8() ?");
-    IM_ASSERT(g.IO.Fonts->Fonts[0]->IsLoaded()                          && "Font Atlas not built. Did you call io.Fonts->GetTexDataAsRGBA32() / GetTexDataAsAlpha8() ?");
+    IM_ASSERT(g.IO.Fonts->Fonts.Size > 0                                && "Font Atlas not built. Did you call io.Fonts->GetTexDataAsRGBA32() / GetTexDataAsAlpha8()?");
+    IM_ASSERT(g.IO.Fonts->Fonts[0]->IsLoaded()                          && "Font Atlas not built. Did you call io.Fonts->GetTexDataAsRGBA32() / GetTexDataAsAlpha8()?");
     IM_ASSERT(g.Style.CurveTessellationTol > 0.0f                       && "Invalid style setting!");
     IM_ASSERT(g.Style.CircleSegmentMaxError > 0.0f                      && "Invalid style setting!");
-    IM_ASSERT(g.Style.Alpha >= 0.0f && g.Style.Alpha <= 1.0f            && "Invalid style setting. Alpha cannot be negative (allows us to avoid a few clamps in color computations)!");
+    IM_ASSERT(g.Style.Alpha >= 0.0f && g.Style.Alpha <= 1.0f            && "Invalid style setting!"); // Allows us to avoid a few clamps in color computations
     IM_ASSERT(g.Style.WindowMinSize.x >= 1.0f && g.Style.WindowMinSize.y >= 1.0f && "Invalid style setting.");
     IM_ASSERT(g.Style.WindowMenuButtonPosition == ImGuiDir_None || g.Style.WindowMenuButtonPosition == ImGuiDir_Left || g.Style.WindowMenuButtonPosition == ImGuiDir_Right);
     for (int n = 0; n < ImGuiKey_COUNT; n++)
         IM_ASSERT(g.IO.KeyMap[n] >= -1 && g.IO.KeyMap[n] < IM_ARRAYSIZE(g.IO.KeysDown) && "io.KeyMap[] contains an out of bound value (need to be 0..512, or -1 for unmapped key)");
 
-    // Perform simple check: required key mapping (we intentionally do NOT check all keys to not pressure user into setting up everything, but Space is required and was only recently added in 1.60 WIP)
+    // Check: required key mapping (we intentionally do NOT check all keys to not pressure user into setting up everything, but Space is required and was only added in 1.60 WIP)
     if (g.IO.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard)
         IM_ASSERT(g.IO.KeyMap[ImGuiKey_Space] != -1 && "ImGuiKey_Space is not mapped, required for keyboard navigation.");
 
-    // Perform simple check: the beta io.ConfigWindowsResizeFromEdges option requires backend to honor mouse cursor changes and set the ImGuiBackendFlags_HasMouseCursors flag accordingly.
+    // Check: the io.ConfigWindowsResizeFromEdges option requires backend to honor mouse cursor changes and set the ImGuiBackendFlags_HasMouseCursors flag accordingly.
     if (g.IO.ConfigWindowsResizeFromEdges && !(g.IO.BackendFlags & ImGuiBackendFlags_HasMouseCursors))
         g.IO.ConfigWindowsResizeFromEdges = false;
 }
@@ -6885,6 +6954,9 @@ static void ImGui::ErrorCheckEndFrameSanityChecks()
     IM_ASSERT((key_mod_flags == 0 || g.IO.KeyMods == key_mod_flags) && "Mismatching io.KeyCtrl/io.KeyShift/io.KeyAlt/io.KeySuper vs io.KeyMods");
     IM_UNUSED(key_mod_flags);
 
+    // Recover from errors
+    //ErrorCheckEndFrameRecover();
+
     // Report when there is a mismatch of Begin/BeginChild vs End/EndChild calls. Important: Remember that the Begin/BeginChild API requires you
     // to always call End/EndChild even if Begin/BeginChild returns false! (this is unfortunately inconsistent with most other Begin* API).
     if (g.CurrentWindowStack.Size != 1)
@@ -6902,6 +6974,80 @@ static void ImGui::ErrorCheckEndFrameSanityChecks()
     }
 
     IM_ASSERT_USER_ERROR(g.GroupStack.Size == 0, "Missing EndGroup call!");
+}
+
+// Experimental recovery from incorrect usage of BeginXXX/EndXXX/PushXXX/PopXXX calls.
+// Must be called during or before EndFrame().
+// This is generally flawed as we are not necessarily End/Popping things in the right order.
+// FIXME: Can't recover from inside BeginTabItem/EndTabItem yet.
+// FIXME: Can't recover from interleaved BeginTabBar/Begin
+void    ImGui::ErrorCheckEndFrameRecover(ImGuiErrorLogCallback log_callback, void* user_data)
+{
+    // PVS-Studio V1044 is "Loop break conditions do not depend on the number of iterations"
+    ImGuiContext& g = *GImGui;
+    while (g.CurrentWindowStack.Size > 0)
+    {
+#ifdef IMGUI_HAS_TABLE
+        while (g.CurrentTable && (g.CurrentTable->OuterWindow == g.CurrentWindow || g.CurrentTable->InnerWindow == g.CurrentWindow))
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing EndTable() in '%s'", g.CurrentTable->OuterWindow->Name);
+            EndTable();
+        }
+#endif
+        ImGuiWindow* window = g.CurrentWindow;
+        IM_ASSERT(window != NULL);
+        while (g.CurrentTabBar != NULL) //-V1044
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing EndTabBar() in '%s'", window->Name);
+            EndTabBar();
+        }
+        while (window->DC.TreeDepth > 0)
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing TreePop() in '%s'", window->Name);
+            TreePop();
+        }
+        while (g.GroupStack.Size > window->DC.StackSizesOnBegin.SizeOfGroupStack)
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing EndGroup() in '%s'", window->Name);
+            EndGroup();
+        }
+        while (window->IDStack.Size > 1)
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing PopID() in '%s'", window->Name);
+            PopID();
+        }
+        while (g.ColorStack.Size > window->DC.StackSizesOnBegin.SizeOfColorStack)
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing PopStyleColor() in '%s' for ImGuiCol_%s", window->Name, GetStyleColorName(g.ColorStack.back().Col));
+            PopStyleColor();
+        }
+        while (g.StyleVarStack.Size > window->DC.StackSizesOnBegin.SizeOfStyleVarStack)
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing PopStyleVar() in '%s'", window->Name);
+            PopStyleVar();
+        }
+        while (g.FocusScopeStack.Size > window->DC.StackSizesOnBegin.SizeOfFocusScopeStack)
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing PopFocusScope() in '%s'", window->Name);
+            PopFocusScope();
+        }
+        if (g.CurrentWindowStack.Size == 1)
+        {
+            IM_ASSERT(g.CurrentWindow->IsFallbackWindow);
+            break;
+        }
+        IM_ASSERT(window == g.CurrentWindow);
+        if (window->Flags & ImGuiWindowFlags_ChildWindow)
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing EndChild() for '%s'", window->Name);
+            EndChild();
+        }
+        else
+        {
+            if (log_callback) log_callback(user_data, "Recovered from missing End() for '%s'", window->Name);
+            End();
+        }
+    }
 }
 
 // Save current stack sizes for later compare
@@ -6923,6 +7069,7 @@ void ImGuiStackSizes::CompareWithCurrentState()
 {
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
+    IM_UNUSED(window);
 
     // Window stacks
     // NOT checking: DC.ItemWidth, DC.TextWrapPos (per window) to allow user to conveniently push once and not pop (they are cleared on Begin)
@@ -7290,7 +7437,7 @@ ImVec2 ImGui::GetContentRegionMax()
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
     ImVec2 mx = window->ContentRegionRect.Max - window->Pos;
-    if (window->DC.CurrentColumns)
+    if (window->DC.CurrentColumns || g.CurrentTable)
         mx.x = window->WorkRect.Max.x - window->Pos.x;
     return mx;
 }
@@ -7301,7 +7448,7 @@ ImVec2 ImGui::GetContentRegionMaxAbs()
     ImGuiContext& g = *GImGui;
     ImGuiWindow* window = g.CurrentWindow;
     ImVec2 mx = window->ContentRegionRect.Max;
-    if (window->DC.CurrentColumns)
+    if (window->DC.CurrentColumns || g.CurrentTable)
         mx.x = window->WorkRect.Max.x;
     return mx;
 }
@@ -7645,7 +7792,7 @@ void ImGui::BeginTooltipEx(ImGuiWindowFlags extra_flags, ImGuiTooltipFlags toolt
             {
                 // Hide previous tooltip from being displayed. We can't easily "reset" the content of a window so we create a new one.
                 window->Hidden = true;
-                window->HiddenFramesCanSkipItems = 1;
+                window->HiddenFramesCanSkipItems = 1; // FIXME: This may not be necessary?
                 ImFormatString(window_name, IM_ARRAYSIZE(window_name), "##Tooltip_%02d", ++g.TooltipOverrideCount);
             }
     ImGuiWindowFlags flags = ImGuiWindowFlags_Tooltip | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize;
@@ -10366,8 +10513,8 @@ void ImGui::ShowMetricsWindow(bool* p_open)
     // Debugging enums
     enum { WRT_OuterRect, WRT_OuterRectClipped, WRT_InnerRect, WRT_InnerClipRect, WRT_WorkRect, WRT_Content, WRT_ContentRegionRect, WRT_Count }; // Windows Rect Type
     const char* wrt_rects_names[WRT_Count] = { "OuterRect", "OuterRectClipped", "InnerRect", "InnerClipRect", "WorkRect", "Content", "ContentRegionRect" };
-    enum { TRT_OuterRect, TRT_WorkRect, TRT_HostClipRect, TRT_InnerClipRect, TRT_BackgroundClipRect, TRT_ColumnsRect, TRT_ColumnsClipRect, TRT_ColumnsContentHeadersUsed, TRT_ColumnsContentHeadersIdeal, TRT_ColumnsContentRowsFrozen, TRT_ColumnsContentRowsUnfrozen, TRT_Count }; // Tables Rect Type
-    const char* trt_rects_names[TRT_Count] = { "OuterRect", "WorkRect", "HostClipRect", "InnerClipRect", "BackgroundClipRect", "ColumnsRect", "ColumnsClipRect", "ColumnsContentHeadersUsed", "ColumnsContentHeadersIdeal", "ColumnsContentRowsFrozen", "ColumnsContentRowsUnfrozen" };
+    enum { TRT_OuterRect, TRT_InnerRect, TRT_WorkRect, TRT_HostClipRect, TRT_InnerClipRect, TRT_BackgroundClipRect, TRT_ColumnsRect, TRT_ColumnsClipRect, TRT_ColumnsContentHeadersUsed, TRT_ColumnsContentHeadersIdeal, TRT_ColumnsContentFrozen, TRT_ColumnsContentUnfrozen, TRT_Count }; // Tables Rect Type
+    const char* trt_rects_names[TRT_Count] = { "OuterRect", "InnerRect", "WorkRect", "HostClipRect", "InnerClipRect", "BackgroundClipRect", "ColumnsRect", "ColumnsClipRect", "ColumnsContentHeadersUsed", "ColumnsContentHeadersIdeal", "ColumnsContentFrozen", "ColumnsContentUnfrozen" };
     if (cfg->ShowWindowsRectsType < 0)
         cfg->ShowWindowsRectsType = WRT_WorkRect;
     if (cfg->ShowTablesRectsType < 0)
@@ -10375,6 +10522,24 @@ void ImGui::ShowMetricsWindow(bool* p_open)
 
     struct Funcs
     {
+        static ImRect GetTableRect(ImGuiTable* table, int rect_type, int n)
+        {
+            if (rect_type == TRT_OuterRect)                     { return table->OuterRect; }
+            else if (rect_type == TRT_InnerRect)                { return table->InnerRect; }
+            else if (rect_type == TRT_WorkRect)                 { return table->WorkRect; }
+            else if (rect_type == TRT_HostClipRect)             { return table->HostClipRect; }
+            else if (rect_type == TRT_InnerClipRect)            { return table->InnerClipRect; }
+            else if (rect_type == TRT_BackgroundClipRect)       { return table->BgClipRect; }
+            else if (rect_type == TRT_ColumnsRect)              { ImGuiTableColumn* c = &table->Columns[n]; return ImRect(c->MinX, table->InnerClipRect.Min.y, c->MaxX, table->InnerClipRect.Min.y + table->LastOuterHeight); }
+            else if (rect_type == TRT_ColumnsClipRect)          { ImGuiTableColumn* c = &table->Columns[n]; return c->ClipRect; }
+            else if (rect_type == TRT_ColumnsContentHeadersUsed){ ImGuiTableColumn* c = &table->Columns[n]; return ImRect(c->WorkMinX, table->InnerClipRect.Min.y, c->ContentMaxXHeadersUsed, table->InnerClipRect.Min.y + table->LastFirstRowHeight); } // Note: y1/y2 not always accurate
+            else if (rect_type == TRT_ColumnsContentHeadersIdeal){ImGuiTableColumn* c = &table->Columns[n]; return ImRect(c->WorkMinX, table->InnerClipRect.Min.y, c->ContentMaxXHeadersIdeal, table->InnerClipRect.Min.y + table->LastFirstRowHeight); }
+            else if (rect_type == TRT_ColumnsContentFrozen)     { ImGuiTableColumn* c = &table->Columns[n]; return ImRect(c->WorkMinX, table->InnerClipRect.Min.y, c->ContentMaxXFrozen, table->InnerClipRect.Min.y + table->LastFirstRowHeight); }
+            else if (rect_type == TRT_ColumnsContentUnfrozen)   { ImGuiTableColumn* c = &table->Columns[n]; return ImRect(c->WorkMinX, table->InnerClipRect.Min.y + table->LastFirstRowHeight, c->ContentMaxXUnfrozen, table->InnerClipRect.Max.y); }
+            IM_ASSERT(0);
+            return ImRect();
+        }
+
         static ImRect GetWindowRect(ImGuiWindow* window, int rect_type)
         {
             if (rect_type == WRT_OuterRect)                 { return window->Rect(); }
@@ -10416,6 +10581,52 @@ void ImGui::ShowMetricsWindow(bool* p_open)
         }
         Checkbox("Show ImDrawCmd mesh when hovering", &cfg->ShowDrawCmdMesh);
         Checkbox("Show ImDrawCmd bounding boxes when hovering", &cfg->ShowDrawCmdBoundingBoxes);
+
+        Checkbox("Show tables rectangles", &cfg->ShowTablesRects);
+        SameLine();
+        SetNextItemWidth(GetFontSize() * 12);
+        cfg->ShowTablesRects |= Combo("##show_table_rects_type", &cfg->ShowTablesRectsType, trt_rects_names, TRT_Count, TRT_Count);
+        if (cfg->ShowTablesRects && g.NavWindow != NULL)
+        {
+            for (int table_n = 0; table_n < g.Tables.GetSize(); table_n++)
+            {
+                ImGuiTable* table = g.Tables.GetByIndex(table_n);
+                if (table->LastFrameActive < g.FrameCount - 1 || (table->OuterWindow != g.NavWindow && table->InnerWindow != g.NavWindow))
+                    continue;
+
+                BulletText("Table 0x%08X (%d columns, in '%s')", table->ID, table->ColumnsCount, table->OuterWindow->Name);
+                if (IsItemHovered())
+                    GetForegroundDrawList()->AddRect(table->OuterRect.Min - ImVec2(1, 1), table->OuterRect.Max + ImVec2(1, 1), IM_COL32(255, 255, 0, 255), 0.0f, ~0, 2.0f);
+                Indent();
+                char buf[128];
+                for (int rect_n = 0; rect_n < TRT_Count; rect_n++)
+                {
+                    if (rect_n >= TRT_ColumnsRect)
+                    {
+                        if (rect_n != TRT_ColumnsRect && rect_n != TRT_ColumnsClipRect)
+                            continue;
+                        for (int column_n = 0; column_n < table->ColumnsCount; column_n++)
+                        {
+                            ImRect r = Funcs::GetTableRect(table, rect_n, column_n);
+                            ImFormatString(buf, IM_ARRAYSIZE(buf), "(%6.1f,%6.1f) (%6.1f,%6.1f) Size (%6.1f,%6.1f) Col %d %s", r.Min.x, r.Min.y, r.Max.x, r.Max.y, r.GetWidth(), r.GetHeight(), column_n, trt_rects_names[rect_n]);
+                            Selectable(buf);
+                            if (IsItemHovered())
+                                GetForegroundDrawList()->AddRect(r.Min - ImVec2(1, 1), r.Max + ImVec2(1, 1), IM_COL32(255, 255, 0, 255), 0.0f, ~0, 2.0f);
+                        }
+                    }
+                    else
+                    {
+                        ImRect r = Funcs::GetTableRect(table, rect_n, -1);
+                        ImFormatString(buf, IM_ARRAYSIZE(buf), "(%6.1f,%6.1f) (%6.1f,%6.1f) Size (%6.1f,%6.1f) %s", r.Min.x, r.Min.y, r.Max.x, r.Max.y, r.GetWidth(), r.GetHeight(), trt_rects_names[rect_n]);
+                        Selectable(buf);
+                        if (IsItemHovered())
+                            GetForegroundDrawList()->AddRect(r.Min - ImVec2(1, 1), r.Max + ImVec2(1, 1), IM_COL32(255, 255, 0, 255), 0.0f, ~0, 2.0f);
+                    }
+                }
+                Unindent();
+            }
+        }
+
         TreePop();
     }
 
@@ -10449,7 +10660,6 @@ void ImGui::ShowMetricsWindow(bool* p_open)
     }
 
     // Details for Tables
-    IM_UNUSED(trt_rects_names);
 #ifdef IMGUI_HAS_TABLE
     if (TreeNode("Tables", "Tables (%d)", g.Tables.GetSize()))
     {
@@ -10580,11 +10790,29 @@ void ImGui::ShowMetricsWindow(bool* p_open)
 
 #ifdef IMGUI_HAS_TABLE
     // Overlay: Display Tables Rectangles
-    if (show_tables_rects)
+    if (cfg->ShowTablesRects)
     {
         for (int table_n = 0; table_n < g.Tables.GetSize(); table_n++)
         {
             ImGuiTable* table = g.Tables.GetByIndex(table_n);
+            if (table->LastFrameActive < g.FrameCount - 1)
+                continue;
+            ImDrawList* draw_list = GetForegroundDrawList(table->OuterWindow);
+            if (cfg->ShowTablesRectsType >= TRT_ColumnsRect)
+            {
+                for (int column_n = 0; column_n < table->ColumnsCount; column_n++)
+                {
+                    ImRect r = Funcs::GetTableRect(table, cfg->ShowTablesRectsType, column_n);
+                    ImU32 col = (table->HoveredColumnBody == column_n) ? IM_COL32(255, 255, 128, 255) : IM_COL32(255, 0, 128, 255);
+                    float thickness = (table->HoveredColumnBody == column_n) ? 3.0f : 1.0f;
+                    draw_list->AddRect(r.Min, r.Max, col, 0.0f, ~0, thickness);
+                }
+            }
+            else
+            {
+                ImRect r = Funcs::GetTableRect(table, cfg->ShowTablesRectsType, -1);
+                draw_list->AddRect(r.Min, r.Max, IM_COL32(255, 0, 128, 255));
+            }
         }
     }
 #endif // #ifdef IMGUI_HAS_TABLE
@@ -10600,7 +10828,7 @@ void ImGui::ShowMetricsWindow(bool* p_open)
 }
 
 // [DEBUG] Display contents of Columns
-void ImGui::DebugNodeColumns(ImGuiColumns* columns)
+void ImGui::DebugNodeColumns(ImGuiOldColumns* columns)
 {
     if (!TreeNode((void*)(uintptr_t)columns->ID, "Columns Id: 0x%08X, Count: %d, Flags: 0x%04X", columns->ID, columns->Count, columns->Flags))
         return;
@@ -10858,7 +11086,7 @@ void ImGui::DebugNodeWindowsList(ImVector<ImGuiWindow*>* windows, const char* la
 #else
 
 void ImGui::ShowMetricsWindow(bool*) {}
-void ImGui::DebugNodeColumns(ImGuiColumns*) {}
+void ImGui::DebugNodeColumns(ImGuiOldColumns*) {}
 void ImGui::DebugNodeDrawList(ImGuiWindow*, const ImDrawList*, const char*) {}
 void ImGui::DebugNodeDrawCmdShowMeshAndBoundingBox(ImGuiWindow*, const ImDrawList*, const ImDrawCmd*, bool, bool) {}
 void ImGui::DebugNodeStorage(ImGuiStorage*, const char*) {}

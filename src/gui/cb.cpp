@@ -222,6 +222,7 @@ VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
 	return hooked_.cb;
 }
 
+// void CommandBufferGui::hookRecord(const std::vector<CommandPtr>& commands) {
 void CommandBufferGui::hookRecord(const CommandVector<CommandPtr>& commands) {
 	auto& dev = gui_->dev();
 	for(auto& cmd : commands) {

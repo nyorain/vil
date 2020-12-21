@@ -9,7 +9,6 @@ struct Buffer : MemoryResource {
 	VkBuffer handle {};
 	VkBufferCreateInfo ci;
 
-	std::vector<DescriptorSetRef> descriptors;
 	std::vector<BufferView*> views;
 
 	~Buffer();
@@ -19,8 +18,6 @@ struct BufferView : DeviceHandle {
 	VkBufferView handle;
 	VkBufferViewCreateInfo ci;
 	Buffer* buffer {};
-
-	std::vector<DescriptorSetRef> descriptors;
 
 	~BufferView();
 };

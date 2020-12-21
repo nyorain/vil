@@ -14,6 +14,7 @@
 #include <memory>
 #include <atomic>
 #include <optional>
+#include <unordered_map>
 
 namespace fuen {
 
@@ -108,26 +109,26 @@ struct Device {
 	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
 	Swapchain* lastCreatedSwapchain {};
 
-	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
-	SyncedUniqueUnorderedMap<VkImage, Image> images;
-	SyncedUniqueUnorderedMap<VkImageView, ImageView> imageViews;
-	SyncedUniqueUnorderedMap<VkSampler, Sampler> samplers;
-	SyncedUniqueUnorderedMap<VkBuffer, Buffer> buffers;
-	SyncedUniqueUnorderedMap<VkPipeline, ComputePipeline> computePipes;
-	SyncedUniqueUnorderedMap<VkPipeline, GraphicsPipeline> graphicsPipes;
-	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
-	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
-	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
-	SyncedUniqueUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
-	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
-	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
-	SyncedUniqueUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
-	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
-	SyncedUniqueUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
-	SyncedUniqueUnorderedMap<VkEvent, Event> events;
-	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
-	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
-	SyncedUniqueUnorderedMap<VkBufferView, BufferView> bufferViews;
+	SyncedSharedUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
+	SyncedSharedUnorderedMap<VkImage, Image> images;
+	SyncedSharedUnorderedMap<VkImageView, ImageView> imageViews;
+	SyncedSharedUnorderedMap<VkSampler, Sampler> samplers;
+	SyncedSharedUnorderedMap<VkBuffer, Buffer> buffers;
+	SyncedSharedUnorderedMap<VkPipeline, ComputePipeline> computePipes;
+	SyncedSharedUnorderedMap<VkPipeline, GraphicsPipeline> graphicsPipes;
+	SyncedSharedUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
+	SyncedSharedUnorderedMap<VkRenderPass, RenderPass> renderPasses;
+	SyncedSharedUnorderedMap<VkCommandPool, CommandPool> commandPools;
+	SyncedSharedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
+	SyncedSharedUnorderedMap<VkFence, Fence> fences;
+	SyncedSharedUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
+	SyncedSharedUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
+	SyncedSharedUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
+	SyncedSharedUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
+	SyncedSharedUnorderedMap<VkEvent, Event> events;
+	SyncedSharedUnorderedMap<VkSemaphore, Semaphore> semaphores;
+	SyncedSharedUnorderedMap<VkQueryPool, QueryPool> queryPools;
+	SyncedSharedUnorderedMap<VkBufferView, BufferView> bufferViews;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still

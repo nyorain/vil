@@ -71,8 +71,7 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 	// the nearest parent we could find (maybe require an even higher
 	// threshold though since jumping to a false parent sucks).
 	// Maybe control that behavior via an external argument
-	auto findCandidates = [](const CommandVector<CommandPtr>& cmds,
-			const CommandDescription& desc) -> std::vector<Candidate> {
+	auto findCandidates = [](const auto& cmds, const CommandDescription& desc) -> std::vector<Candidate> {
 		std::vector<Candidate> candidates;
 		for(auto& cmd : cmds) {
 			if(cmd->nameDesc() != desc.command) {
@@ -156,17 +155,17 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 }
 
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb) {
-	(void) cb;
-	// TODO: graphics state and stuff
-	//cmd.state = cb.graphicsState;
+	state = copy(cb, cb.graphicsState);
+
+	// TODO: push constants
 	//if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
 	//	cmd.state.pushConstants = cb.pushConstants.map;
 	//}
 }
 
 DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) {
-	(void) cb;
-	// TODO: compute state and stuff
+	state = copy(cb, cb.computeState);
+	// TODO: push constants
 }
 
 template<typename T>
@@ -177,8 +176,8 @@ void resourceRefButton(Gui& gui, T& resource) {
 }
 
 
-template<typename H>
-auto rawHandles(const std::vector<H*>& handles) {
+template<typename C>
+auto rawHandles(const C& handles) {
 	using VkH = decltype(handles[0]->handle);
 	std::vector<VkH> ret;
 	ret.reserve(handles.size());
@@ -253,7 +252,7 @@ void addToArgumentsDesc(std::vector<std::string>& ret, const T& val) {
 	if constexpr(validExpression<FuenNameExpr, T>) {
 		ret.push_back(fuen::name(val));
 	} else if constexpr(validExpression<FuenNameExprPtr, T>) {
-		ret.push_back(fuen::name(*val));
+		ret.push_back(val ? fuen::name(*val) : "null");
 	} else if constexpr(validExpression<VkNameExpr, T>) {
 		ret.push_back(vk::name(val));
 	} else if constexpr(validExpression<ToStringExpr, T>) {
@@ -264,7 +263,7 @@ void addToArgumentsDesc(std::vector<std::string>& ret, const T& val) {
 }
 
 template<typename T>
-void addToArgumentsDesc(std::vector<std::string>& ret, span<const T> values) {
+void addToArgumentsDesc(std::vector<std::string>& ret, span<T> values) {
 	for(auto& val : values) {
 		addToArgumentsDesc(ret, val);
 	}
@@ -446,9 +445,17 @@ void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
 
 // BindVertexBuffersCmd
 void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	auto vkbuffers = rawHandles(buffers);
+	std::vector<VkBuffer> vkbuffers;
+	std::vector<VkDeviceSize> vkoffsets;
+	vkbuffers.reserve(buffers.size());
+	vkoffsets.reserve(buffers.size());
+	for(auto& b : buffers) {
+		vkbuffers.push_back(b.buffer->handle);
+		vkoffsets.push_back(b.offset);
+	}
+
 	dev.dispatch.CmdBindVertexBuffers(cb, firstBinding,
-		u32(vkbuffers.size()), vkbuffers.data(), offsets.data());
+		u32(vkbuffers.size()), vkbuffers.data(), vkoffsets.data());
 }
 
 void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {

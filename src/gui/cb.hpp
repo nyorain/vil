@@ -36,6 +36,7 @@ struct CommandBufferGui {
 	// private
 	VkCommandBuffer cbHook(CommandBuffer& cb);
 	void hookRecord(const CommandVector<CommandPtr>& commands);
+	// void hookRecord(const std::vector<CommandPtr>& commands);
 };
 
 } // namespace fuen

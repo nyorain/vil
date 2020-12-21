@@ -12,6 +12,9 @@ namespace fuen {
 
 // util
 void removeFromHandlesLocked(CommandBuffer& cb) {
+	(void) cb;
+
+	/*
 	// remove cb from all referenced resources
 	auto removeFromResource = [&](auto& res) {
 		// We have to lock the resource mutex since other commands buffers
@@ -32,6 +35,7 @@ void removeFromHandlesLocked(CommandBuffer& cb) {
 	for(auto& handle : cb.handles) {
 		removeFromResource(*handle.second.handle);
 	}
+	*/
 }
 
 void resetLocked(CommandBuffer& cb, bool invalidate = false) {
@@ -48,22 +52,49 @@ void resetLocked(CommandBuffer& cb, bool invalidate = false) {
 	cb.state = invalidate ?
 		CommandBuffer::State::invalid :
 		CommandBuffer::State::initial;
-	cb.buffers.clear();
-	cb.images.clear();
-	cb.handles.clear();
+
+
+	// lock isn't really be needed for this btw
+	// NOTE: but it's improtant we this before resetting
+	//   the used handles containers since on msvc, their
+	//   constructor allocate (which is kinda shitty but
+	//   to be expected).
+	dlg_assert(cb.pool);
+
+	auto block = cb.memBlocks;
+	cb.memBlocks = nullptr;
+	cb.memBlockOffset = 0u;
+
+	{
+		auto tmpBufs = decltype(cb.buffers)(cb);
+		auto tmpImgs = decltype(cb.images)(cb);
+		auto tmpHandles = decltype(cb.handles)(cb);
+		swap(cb.buffers, tmpBufs);
+		swap(cb.images, tmpImgs);
+		swap(cb.handles, tmpHandles);
+
+		// important to kick-start them to avoid frequent re-hashing
+		// cb.buffers.reserve(16 * 1024);
+		// cb.images.reserve(16 * 1024);
+		// cb.handles.reserve(16 * 1024);
+	}
+
+	while(block) {
+		auto next = block->next;
+		block->next = cb.pool->memBlocks;
+		cb.pool->memBlocks = block;
+		block = next;
+	}
+
+	// cb.buffers = decltype(cb.buffers)(cb);
+	// cb.images = decltype(cb.images)(cb);
+	// cb.handles = decltype(cb.handles)(cb);
+
 	cb.commands.release();
 	cb.sections.release();
 	cb.graphicsState = {};
 	cb.computeState = {};
-	cb.pushConstants = {};
-
-	// lock shouldn't really be needed for this btw
-	dlg_assert(cb.pool);
-	auto mb0 = std::make_move_iterator(cb.memBlocks.begin());
-	auto mb1 = std::make_move_iterator(cb.memBlocks.end());
-	cb.pool->memBlocks.insert(cb.pool->memBlocks.end(), mb0, mb1);
-	cb.memBlocks.clear();
-	cb.memBlockOffset = 0u;
+	// cb.pushConstants = {};
 
 	if(!invalidate) {
 		++cb.resetCount;
@@ -75,31 +106,66 @@ void reset(CommandBuffer& cb, bool invalidate = false) {
 	resetLocked(cb, invalidate);
 }
 
+std::byte* data(CommandPool::MemBlock& mem, std::size_t offset) {
+	dlg_assert(offset < mem.size);
+	return reinterpret_cast<std::byte*>(&mem) + sizeof(mem) + offset;
+}
+
+CommandPool::MemBlock& createMemBlock(std::size_t memSize, CommandPool::MemBlock* next) {
+	auto buf = new std::byte[sizeof(CommandPool::MemBlock) + memSize];
+	auto* memBlock = new(buf) CommandPool::MemBlock;
+	memBlock->size = memSize;
+	memBlock->next = next;
+	return *memBlock;
+}
+
+void freeMemBlock(CommandPool::MemBlock& block) {
+	// no need to call destructor, MemBlock is trivial
+	auto buf = reinterpret_cast<std::byte*>(&block);
+	delete[] buf;
+}
+
 std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) {
 	dlg_assert(alignment <= size);
 	dlg_assert((alignment & (alignment - 1)) == 0); // alignment must be power of two
 	dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__); // can't guarantee otherwise
 
-	if(!cb.memBlocks.empty()) {
+	if(cb.memBlocks) {
 		cb.memBlockOffset = align(cb.memBlockOffset, alignment);
-		auto remaining = i64(cb.memBlocks.back().size) - i64(cb.memBlockOffset);
-		if(remaining > i64(size)) {
-			return &cb.memBlocks.back().block[cb.memBlockOffset];
+		auto remaining = i64(cb.memBlocks->size) - i64(cb.memBlockOffset);
+		if(remaining >= i64(size)) {
+			auto ret = data(*cb.memBlocks, cb.memBlockOffset);
 			cb.memBlockOffset += size;
+			return ret;
 		}
 	}
 
-	auto blockSize = std::max<std::size_t>(CommandPool::minBlockSize, size);
-	if(!cb.pool->memBlocks.empty() && cb.pool->memBlocks.back().size >= size) {
-		auto block = std::move(cb.pool->memBlocks.back());
-		cb.pool->memBlocks.pop_back();
-		cb.memBlocks.push_back(std::move(block));
+	// NOTE: could search all mem blocks for one large enough.
+	// On the other hand, allocations larger than block size are unlikely
+	// so it's probably best to just do a quick one-block check.
+	if(cb.pool->memBlocks && cb.pool->memBlocks->size >= size) {
+		auto block = cb.pool->memBlocks;
+		cb.pool->memBlocks = block->next;
+		block->next = cb.memBlocks;
+		cb.memBlocks = block;
 	} else {
-		cb.memBlocks.push_back({std::make_unique<std::byte[]>(blockSize), blockSize});
+		auto blockSize = std::max<std::size_t>(CommandPool::minBlockSize, size);
+		cb.memBlocks = &createMemBlock(blockSize, cb.memBlocks);
 	}
 
 	cb.memBlockOffset = size;
-	return &cb.memBlocks.back().block[0];
+	return data(*cb.memBlocks, 0);
+}
+
+template<typename T>
+void ensureSize(CommandBuffer& cb, span<T>& buf, std::size_t size) {
+	if(buf.size() >= size) {
+		return;
+	}
+
+	auto newBuf = allocSpan<T>(cb, size);
+	std::copy(buf.begin(), buf.end(), newBuf.begin());
+	buf = newBuf;
 }
 
 enum class SectionType {
@@ -111,13 +177,16 @@ enum class SectionType {
 
 template<typename T, SectionType ST = SectionType::none, typename... Args>
 T& addCmd(CommandBuffer& cb, Args&&... args) {
+	static_assert(std::is_base_of_v<Command, T>);
+
 	auto& cmd = allocate<T>(cb, std::forward<Args>(args)...);
+	auto ptr = CommandPtr(&cmd);
 
 	if(!cb.sections.empty()) {
 		cmd.parent = cb.sections.back();
-		cb.sections.back()->children.emplace_back(&cmd);
+		cb.sections.back()->children.emplace_back(std::move(ptr));
 	} else {
-		cb.commands.emplace_back(&cmd);
+		cb.commands.emplace_back(std::move(ptr));
 	}
 
 	if constexpr(ST == SectionType::end || ST == SectionType::next) {
@@ -132,7 +201,9 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 	return cmd;
 }
 
-CommandBuffer::CommandBuffer() : commands(*this), sections(*this) {
+CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) : pool(&xpool),
+		handle(xhandle), commands(*this), images(*this),
+		buffers(*this), handles(*this), sections(*this) {
 }
 
 void CommandBuffer::invalidateLocked() {
@@ -177,6 +248,15 @@ CommandPool::~CommandPool() {
 		auto* cb = cbs[0];
 		eraseData(cb->handle);
 		dev->commandBuffers.mustErase(cb->handle);
+	}
+
+	// Free all memory blocks
+	// NOTE: we assume here that command buffers have been destroyed.
+	// Is there any way they are being kept alive?
+	while(memBlocks) {
+		auto next = memBlocks->next;
+		delete[] reinterpret_cast<std::byte*>(memBlocks);
+		memBlocks = next;
 	}
 }
 
@@ -238,13 +318,11 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 		return res;
 	}
 
-	auto* cp = dev.commandPools.find(pAllocateInfo->commandPool);
+	auto& cp = dev.commandPools.get(pAllocateInfo->commandPool);
 	for(auto i = 0u; i < pAllocateInfo->commandBufferCount; ++i) {
-		auto& cb = dev.commandBuffers.add(pCommandBuffers[i]);
+		auto& cb = dev.commandBuffers.add(pCommandBuffers[i], cp, pCommandBuffers[i]);
 		cb.dev = &dev;
 		cb.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
-		cb.handle = pCommandBuffers[i];
-		cb.pool = cp;
 		cb.pool->cbs.push_back(&cb);
 
 		// command buffers are dispatchable, add global data entry
@@ -300,20 +378,33 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
+using UsedImage = CommandBuffer::UsedImage;
+using UsedHandle = CommandBuffer::UsedHandle;
+using UsedBuffer = CommandBuffer::UsedBuffer;
+
 void addToHandle(CommandBuffer& cb, DeviceHandle& handle) {
-	std::lock_guard lock(cb.dev->mutex);
-	dlg_assert(std::find(handle.refCbs.begin(), handle.refCbs.end(), &cb) == handle.refCbs.end());
-	handle.refCbs.push_back(&cb);
+	(void) cb;
+	(void) handle;
+	// std::lock_guard lock(cb.dev->mutex);
+	// dlg_assert(std::find(handle.refCbs.begin(), handle.refCbs.end(), &cb) == handle.refCbs.end());
+	// handle.refCbs.push_back(&cb);
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
-	auto& uh = cb.handles[h64];
-	if(!uh.handle) {
-		uh.handle = &handle;
-		addToHandle(cb, *uh.handle);
+	(void) cb;
+	(void) cmd;
+	(void) h64;
+	(void) handle;
+	/*
+	auto it = cb.handles.find(h64);
+	if(it == cb.handles.end()) {
+		it = cb.handles.emplace(h64, UsedHandle{handle, cb}).first;
+		it->second.handle = &handle;
+		addToHandle(cb, *it->second.handle);
 	}
 
-	uh.commands.push_back(&cmd);
+	it->second.commands.push_back(&cmd);
+	*/
 }
 
 template<typename T>
@@ -322,22 +413,30 @@ void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
 	useHandle(cb, cmd, h64, handle);
 }
 
-CommandBuffer::UsedImage& useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
-	auto& img = cb.images[image.handle];
-	img.commands.push_back(&cmd);
-	if(!img.image) {
-		img.image = &image;
-		dlg_assert(img.image);
-		addToHandle(cb, image);
+/*UsedImage&*/ void useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
+	(void) cb;
+	(void) cmd;
+	(void) image;
+	/*
+	auto it = cb.images.find(image.handle);
+	if(it == cb.images.end()) {
+		it = cb.images.emplace(image.handle, UsedImage(image, cb)).first;
+		it->second.image = &image;
+		addToHandle(cb, *it->second.image);
 	}
 
-	// TODO: add swapchain in case it's a swapchain image?
+	dlg_assert(it->second.image);
+	it->second.commands.push_back(&cmd);
+
+	// NOTE: add swapchain in case it's a swapchain image?
+	// shouldn't be needed though.
 	dlg_assert(image.memory || image.swapchain);
 	if(image.memory) {
 		useHandle(cb, cmd, *image.memory);
 	}
 
-	return img;
+	return it->second;
+	*/
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = true) {
@@ -350,6 +449,30 @@ void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = t
 	}
 }
 
+/*UsedBuffer&*/ void useHandle(CommandBuffer& cb, Command& cmd, Buffer& buf) {
+	(void) cb;
+	(void) cmd;
+	(void) buf;
+	/*
+	auto it = cb.buffers.find(buf.handle);
+	if(it == cb.buffers.end()) {
+		it = cb.buffers.emplace(buf.handle, UsedBuffer{buf, cb}).first;
+		it->second.buffer = &buf;
+		addToHandle(cb, *it->second.buffer);
+	}
+
+	dlg_assert(it->second.buffer);
+	it->second.commands.push_back(&cmd);
+
+	dlg_assert(buf.memory);
+	if(buf.memory) {
+		useHandle(cb, cmd, *buf.memory);
+	}
+
+	return it->second;
+	*/
+}
+
 void useHandle(CommandBuffer& cb, Command& cmd, BufferView& view) {
 	auto h64 = handleToU64(view.handle);
 	useHandle(cb, cmd, h64, view);
@@ -360,30 +483,17 @@ void useHandle(CommandBuffer& cb, Command& cmd, BufferView& view) {
 	}
 }
 
-CommandBuffer::UsedImage& useHandle(CommandBuffer& cb, Command& cmd, Image& image,
+/*CommandBuffer::UsedImage&*/ void useHandle(CommandBuffer& cb, Command& cmd, Image& image,
 		VkImageLayout newLayout) {
-	auto& img = useHandle(cb, cmd, image);
-	img.layoutChanged = true;
-	img.finalLayout = newLayout;
-	return img;
+	// auto& img = useHandle(cb, cmd, image);
+	// img.layoutChanged = true;
+	// img.finalLayout = newLayout;
+	// return img;
+	useHandle(cb, cmd, image);
+	(void) newLayout;
 }
 
-CommandBuffer::UsedBuffer& useHandle(CommandBuffer& cb, Command& cmd, Buffer& buf) {
-	auto& useBuf = cb.buffers[buf.handle];
-	useBuf.commands.push_back(&cmd);
-	if(!useBuf.buffer) {
-		useBuf.buffer = &buf;
-		addToHandle(cb, buf);
-	}
-
-	dlg_assert(buf.memory);
-	if(buf.memory) {
-		useHandle(cb, cmd, *buf.memory);
-	}
-
-	return useBuf;
-}
-
+// commands
 void cmdBarrier(
 		CommandBuffer& cb,
 		BarrierCmdBase& cmd,
@@ -397,21 +507,25 @@ void cmdBarrier(
 		const VkImageMemoryBarrier*                 pImageMemoryBarriers) {
 	cmd.srcStageMask = srcStageMask;
 	cmd.dstStageMask = dstStageMask;
-	cmd.memBarriers = {pMemoryBarriers, pMemoryBarriers + memoryBarrierCount};
-	cmd.imgBarriers = {pImageMemoryBarriers, pImageMemoryBarriers + imageMemoryBarrierCount};
-	cmd.bufBarriers = {pBufferMemoryBarriers, pBufferMemoryBarriers + bufferMemoryBarrierCount};
+	cmd.memBarriers = copySpan(cb, pMemoryBarriers, memoryBarrierCount);
+	cmd.imgBarriers = copySpan(cb, pImageMemoryBarriers, imageMemoryBarrierCount);
+	cmd.bufBarriers = copySpan(cb, pBufferMemoryBarriers, bufferMemoryBarrierCount);
 
-	for(auto& imgb : cmd.imgBarriers) {
+	cmd.images = allocSpan<Image*>(cb, cmd.imgBarriers.size());
+	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
+		auto& imgb = cmd.imgBarriers[i];
 		imgb.pNext = nullptr;
 		auto& img = cb.dev->images.get(imgb.image);
-		// cmd.images.push_back(&img);
+		cmd.images[i] = &img;
 		useHandle(cb, cmd, img, imgb.newLayout);
 	}
 
-	for(auto& buf : cmd.bufBarriers) {
+	cmd.buffers = allocSpan<Buffer*>(cb, cmd.bufBarriers.size());
+	for(auto i = 0u; i < cmd.bufBarriers.size(); ++i) {
+		auto& buf = cmd.bufBarriers[i];
 		buf.pNext = nullptr;
 		auto& bbuf = cb.dev->buffers.get(buf.buffer);
-		// cmd.buffers.push_back(&bbuf);
+		cmd.buffers[i] = &bbuf;
 		useHandle(cb, cmd, bbuf);
 	}
 
@@ -439,9 +553,10 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		bufferMemoryBarrierCount, pBufferMemoryBarriers,
 		imageMemoryBarrierCount, pImageMemoryBarriers);
 
+	cmd.events = allocSpan<Event*>(cb, eventCount);
 	for(auto i = 0u; i < eventCount; ++i) {
 		auto& event = cb.dev->events.get(pEvents[i]);
-		cmd.events.push_back(&event);
+		cmd.events[i] = &event;
 		useHandle(cb, cmd, event);
 	}
 
@@ -484,11 +599,8 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 		VkSubpassContents              contents) {
 	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb, cb);
 
+	cmd.clearValues = copySpan(cb, pRenderPassBegin->pClearValues, pRenderPassBegin->clearValueCount);
 	cmd.info = *pRenderPassBegin;
-	cmd.clearValues = {
-		pRenderPassBegin->pClearValues,
-		pRenderPassBegin->pClearValues + pRenderPassBegin->clearValueCount
-	};
 	cmd.info.pNext = nullptr;
 	cmd.info.pClearValues = cmd.clearValues.data();
 
@@ -595,7 +707,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	cmd.firstSet = firstSet;
 	cmd.pipeBindPoint = pipelineBindPoint;
-	cmd.dynamicOffsets = {pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount};
+	cmd.dynamicOffsets = copySpan(cb, pDynamicOffsets, dynamicOffsetCount);
 
 	// NOTE: the pipeline layout is intetionally not added to used handles
 	// since the application not destroying it does not move the command
@@ -605,6 +717,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// Also like this in CmdPushConstants
 	cmd.pipeLayout = cb.dev->pipeLayouts.getPtr(layout);
 
+	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
 
@@ -616,30 +729,33 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 						continue;
 					}
 
-					if(auto* view = ds.bindings[b][e].imageInfo.imageView; view) {
-						useHandle(cb, cmd, *view);
+					auto info = std::get<DescriptorSet::ImageInfo>(ds.bindings[b][e].data);
+					if(!isEmpty(info.imageView)) {
+						useHandle(cb, cmd, *info.imageView.lock());
 					}
 
-					if(auto* sampler = ds.bindings[b][e].imageInfo.sampler; sampler) {
-						useHandle(cb, cmd, *sampler);
+					if(!isEmpty(info.sampler)) {
+						useHandle(cb, cmd, *info.sampler.lock());
 					}
 				}
 			} else if(cat == DescriptorCategory::buffer) {
 				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
-					if(!ds.bindings[b][e].valid || !ds.bindings[b][e].bufferInfo.buffer) {
+					if(!ds.bindings[b][e].valid) {
 						continue;
 					}
 
-					auto* buf = ds.bindings[b][e].bufferInfo.buffer;
-					useHandle(cb, cmd, *buf);
+					auto info = std::get<DescriptorSet::BufferInfo>(ds.bindings[b][e].data);
+					if(!isEmpty(info.buffer)) {
+						useHandle(cb, cmd, *info.buffer.lock());
+					}
 				}
 			} else if(cat == DescriptorCategory::bufferView) {
 				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
-					if(!ds.bindings[b][e].valid || !ds.bindings[b][e].bufferView) {
+					if(!ds.bindings[b][e].valid) {
 						continue;
 					}
 
-					auto* view = ds.bindings[b][e].bufferView;
+					auto view = std::get<std::weak_ptr<BufferView>>(ds.bindings[b][e].data).lock();
 					dlg_assert(view->buffer);
 					useHandle(cb, cmd, *view);
 				}
@@ -647,24 +763,24 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		}
 
 		useHandle(cb, cmd, ds);
-		cmd.sets.push_back(&ds);
+		cmd.sets[i] = &ds;
 	}
 
 	// TODO: not sure about this. The spec isn't clear about this.
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
-	if(cb.pushConstants.layout &&
-			pushConstantCompatible(*cmd.pipeLayout, *cb.pushConstants.layout)) {
-		cb.pushConstants.layout = nullptr;
-		cb.pushConstants.map.clear();
-	}
+	// if(cb.pushConstants.layout &&
+	// 		pushConstantCompatible(*cmd.pipeLayout, *cb.pushConstants.layout)) {
+	// 	cb.pushConstants.layout = nullptr;
+	// 	cb.pushConstants.map.clear();
+	// }
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState.bind(*cmd.pipeLayout, firstSet, cmd.sets,
+		cb.computeState.bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState.bind(*cmd.pipeLayout, firstSet, cmd.sets,
+		cb.graphicsState.bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else {
 		dlg_error("Unknown pipeline bind point");
@@ -712,12 +828,13 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
-	cmd.offsets = {pOffsets, pOffsets + bindingCount};
 
-	ensureSize(cb.graphicsState.vertices, firstBinding + bindingCount);
+	ensureSize(cb, cb.graphicsState.vertices, firstBinding + bindingCount);
+	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
 		auto& buf = cb.dev->buffers.get(pBuffers[i]);
-		cmd.buffers.push_back(&buf);
+		cmd.buffers[i].buffer = &buf;
+		cmd.buffers[i].offset = pOffsets[i];
 		useHandle(cb, cmd, buf);
 
 		cb.graphicsState.vertices[firstBinding + i].buffer = &buf;
@@ -939,8 +1056,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	// TODO
-	// cmd.copies = {pRegions, pRegions + regionCount};
+	cmd.copies = copySpan(cb, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -970,8 +1086,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	// TODO
-	// cmd.blits = {pRegions, pRegions + regionCount};
+	cmd.blits = copySpan(cb, pRegions, regionCount);
 	cmd.filter = filter;
 
 	useHandle(cb, cmd, src);
@@ -999,8 +1114,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	cmd.src = &src;
 	cmd.dst = &dst;
 	cmd.imgLayout = dstImageLayout;
-	// TODO
-	// cmd.copies = {pRegions, pRegions + regionCount};
+	cmd.copies = copySpan(cb, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -1025,8 +1139,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	cmd.src = &src;
 	cmd.dst = &dst;
 	cmd.imgLayout = srcImageLayout;
-	// TODO
-	// cmd.copies = {pRegions, pRegions + regionCount};
+	cmd.copies = copySpan(cb, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -1049,7 +1162,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 	cmd.dst = &dst;
 	cmd.color = *pColor;
 	cmd.imgLayout = imageLayout;
-	cmd.ranges = {pRanges, pRanges + rangeCount};
+	cmd.ranges = copySpan(cb, pRanges, rangeCount);
 
 	useHandle(cb, cmd, dst);
 
@@ -1071,7 +1184,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 	cmd.dst = &dst;
 	cmd.imgLayout = imageLayout;
 	cmd.value = *pDepthStencil;
-	cmd.ranges = {pRanges, pRanges + rangeCount};
+	cmd.ranges = copySpan(cb, pRanges, rangeCount);
 
 	useHandle(cb, cmd, dst);
 
@@ -1088,8 +1201,8 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<ClearAttachmentCmd>(cb);
 
-	cmd.attachments = {pAttachments, pAttachments + attachmentCount};
-	cmd.rects = {pRects, pRects + rectCount};
+	cmd.attachments = copySpan(cb, pAttachments, attachmentCount);
+	cmd.rects = copySpan(cb, pRects, rectCount);
 
 	// NOTE: add clears attachments handles to used handles for this cmd?
 	// but they were already used in BeginRenderPass and are just implicitly
@@ -1117,7 +1230,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	cmd.regions = {pRegions, pRegions + regionCount};
+	cmd.regions = copySpan(cb, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -1161,9 +1274,10 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
 
+	cmd.secondaries = allocSpan<CommandBuffer*>(cb, commandBufferCount);
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
-		cmd.secondaries.push_back(&secondary);
+		cmd.secondaries[i] = &secondary;
 		useHandle(cb, cmd, secondary);
 
 		for(auto& img : secondary.images) {
@@ -1201,7 +1315,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 
 	cmd.src = &srcBuf;
 	cmd.dst = &dstBuf;
-	cmd.regions = {pRegions, pRegions + regionCount};
+	cmd.regions = copySpan(cb, pRegions, regionCount);
 
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
@@ -1221,7 +1335,7 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 
 	auto& buf = cb.dev->buffers.get(dstBuffer);
 	auto dataPtr = static_cast<const std::byte*>(pData);
-	cmd.data = {dataPtr, dataPtr + dataSize};
+	cmd.data = copySpan(cb, static_cast<const std::byte*>(dataPtr), dataSize);
 	cmd.dst = &buf;
 	cmd.offset = dstOffset;
 
@@ -1403,25 +1517,27 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	cmd.stages = stageFlags;
 	cmd.offset = offset;
 	auto ptr = static_cast<const std::byte*>(pValues);
-	cmd.values = {ptr, ptr + size};
+	cmd.values = copySpan(cb, static_cast<const std::byte*>(ptr), size);
 
 	// TODO: not sure about this. The spec isn't clear about this.
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
-	if(cb.pushConstants.layout &&
-			pushConstantCompatible(*cmd.layout, *cb.pushConstants.layout)) {
-		cb.pushConstants.layout = nullptr;
-		cb.pushConstants.map.clear();
-	}
+	// if(cb.pushConstants.layout &&
+	// 		pushConstantCompatible(*cmd.layout, *cb.pushConstants.layout)) {
+	// 	cb.pushConstants.layout = nullptr;
+	// 	cb.pushConstants.map.clear();
+	// }
+	// cb.pushConstants.layout = cmd.layout.get();
 
-	cb.pushConstants.layout = cmd.layout.get();
+	// TODO
+	/*
 	for(auto i = 0u; i < 32; ++i) {
 		if((stageFlags & (1 << i)) == 0) {
 			continue;
 		}
 
 		auto& pc = cb.pushConstants.map[VkShaderStageFlagBits(1 << i)];
-		ensureSize(pc.data, offset + size);
+		ensureSize(cb, pc.data, offset + size);
 		std::memcpy(pc.data.data() + offset, pValues, size);
 
 		auto it = pc.ranges.begin();
@@ -1455,6 +1571,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 			pc.ranges.push_back({offset, size});
 		}
 	}
+	*/
 
 	cb.dev->dispatch.CmdPushConstants(commandBuffer, pipeLayout, stageFlags,
 		offset, size, pValues);
@@ -1468,9 +1585,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<SetViewportCmd>(cb);
 	cmd.first = firstViewport;
-	cmd.viewports = {pViewports, pViewports + viewportCount};
+	cmd.viewports = copySpan(cb, pViewports, viewportCount);
 
-	ensureSize(cb.graphicsState.dynamic.viewports, firstViewport + viewportCount);
+	ensureSize(cb, cb.graphicsState.dynamic.viewports, firstViewport + viewportCount);
 	std::copy(pViewports, pViewports + viewportCount,
 		cb.graphicsState.dynamic.viewports.begin() + firstViewport);
 
@@ -1485,9 +1602,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<SetScissorCmd>(cb);
 	cmd.first = firstScissor;
-	cmd.scissors = {pScissors, pScissors + scissorCount};
+	cmd.scissors = copySpan(cb, pScissors, scissorCount);
 
-	ensureSize(cb.graphicsState.dynamic.scissors, firstScissor + scissorCount);
+	ensureSize(cb, cb.graphicsState.dynamic.scissors, firstScissor + scissorCount);
 	std::copy(pScissors, pScissors + scissorCount,
 		cb.graphicsState.dynamic.scissors.begin() + firstScissor);
 
@@ -1600,9 +1717,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 }
 
 // util
-void DescriptorState::bind(PipelineLayout& layout, u32 firstSet,
+void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32>) {
-	ensureSize(descriptorSets, firstSet + sets.size());
+	ensureSize(cb, descriptorSets, firstSet + sets.size());
 
 	// TODO: the "ds disturbing" part of vulkan is hard to grasp IMO.
 	// There may be errors here.
@@ -1636,8 +1753,29 @@ void DescriptorState::bind(PipelineLayout& layout, u32 firstSet,
 	}
 
 	if(followingDisturbed) {
-		descriptorSets.resize(lastSet + 1);
+		descriptorSets = descriptorSets.subspan(0, lastSet + 1);
 	}
+}
+
+void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
+	dst.descriptorSets = copySpan(cb, src.descriptorSets);
+}
+
+GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
+	GraphicsState dst = src;
+	copy(cb, src, dst); // descriptors
+
+	dst.vertices = copySpan(cb, src.vertices);
+	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
+	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
+
+	return dst;
+}
+
+ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
+	ComputeState dst = src;
+	copy(cb, src, dst); // descriptors
+	return dst;
 }
 
 } // namespace fuen

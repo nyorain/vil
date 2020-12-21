@@ -1,7 +1,8 @@
 #pragma once
 
-#include "device.hpp"
+#include <device.hpp>
 #include <optional>
+#include <variant>
 
 namespace fuen {
 
@@ -39,37 +40,32 @@ struct DescriptorSet : DeviceHandle {
 
 	// TODO: support buffer views
 	struct ImageInfo {
-		ImageView* imageView;
-		Sampler* sampler;
+		std::weak_ptr<ImageView> imageView;
+		std::weak_ptr<Sampler> sampler;
 		VkImageLayout layout;
 	};
 
 	struct BufferInfo {
-		Buffer* buffer;
+		std::weak_ptr<Buffer> buffer;
 		VkDeviceSize offset;
 		VkDeviceSize range;
 	};
 
 	struct Binding {
 		bool valid {};
-		union {
-			ImageInfo imageInfo;
-			BufferInfo bufferInfo;
-			BufferView* bufferView;
-		};
+
+		// note: strictly speaking we wouldn't need the type tag here,
+		// we could deduce it from the layout. But we need weak_ptr's
+		// and using a union with non-trivial types is a pain in the ass.
+		std::variant<ImageInfo, BufferInfo, std::weak_ptr<BufferView>> data;
 	};
 
 	std::vector<std::vector<Binding>> bindings;
 
-	// Invalidates the given binding & element, resetting them.
-	// Will also invalidate command buffers, if needed.
-	// Expects the device mutex to be locked.
-	void invalidateLocked(unsigned binding, unsigned elem);
-
-	Sampler* getSampler(unsigned binding, unsigned elem);
-	ImageView* getImageView(unsigned binding, unsigned elem);
-	Buffer* getBuffer(unsigned binding, unsigned elem);
-	BufferView* getBufferView(unsigned binding, unsigned elem);
+	// std::weak_ptr<Sampler> getSampler(unsigned binding, unsigned elem);
+	// std::weak_ptr<ImageView> getImageView(unsigned binding, unsigned elem);
+	// std::weak_ptr<Buffer> getBuffer(unsigned binding, unsigned elem);
+	// std::weak_ptr<BufferView> getBufferView(unsigned binding, unsigned elem);
 
 	~DescriptorSet();
 };

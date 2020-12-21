@@ -36,7 +36,8 @@ v0.1, goal: end of january 2021
 - [x] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
 - [x] Remove Device::lastDevice api hack. Instead return a dev handle from fuenLoadApi
       Should probably just store it inside the api struct.
-- [ ] fix destructors: vulkan allows null handle, we don't
+- [x] fix destructors: vulkan allows null handle, we don't
+- [ ] fix push constant tracking in command buffer
 - [ ] Implement missing resource overview UIs
 - [ ] fully implement command buffer viewer
 	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)

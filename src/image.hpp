@@ -39,7 +39,6 @@ struct ImageView : DeviceHandle {
 	VkImageViewCreateInfo ci;
 
 	std::vector<Framebuffer*> fbs;
-	std::vector<DescriptorSetRef> descriptors;
 
 	~ImageView();
 };
@@ -47,8 +46,6 @@ struct ImageView : DeviceHandle {
 struct Sampler : DeviceHandle {
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
-
-	std::vector<DescriptorSetRef> descriptors;
 
 	~Sampler();
 };

@@ -149,6 +149,20 @@ public:
 		return it->second;
 	}
 
+	// Pretty much only provided for shared ptr specialization.
+	template<typename = void>
+	std::weak_ptr<T> getWeakPtrLocked(const K& key) {
+		auto it = map.find(key);
+		assert(it != map.end());
+		return std::weak_ptr(it->second);
+	}
+
+	template<typename = void>
+	std::weak_ptr<T> getWeakPtr(const K& key) {
+		std::shared_lock lock(*mutex);
+		return getWeakPtrLocked(key);
+	}
+
 	template<typename = void>
 	P<T> findPtr(const K& key) {
 		static_assert(std::is_copy_constructible_v<P<T>>);

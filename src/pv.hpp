@@ -4,7 +4,6 @@
 #include <cassert> // assert
 #include <type_traits> // std::aligned_storage_t
 #include <utility> // std::forward/std::move
-#include <new> // std::launder
 #include <stdexcept> // std::invalid_argument
 #include <cmath> // std::floor
 #include <cstring> // std::memcpy
@@ -13,7 +12,7 @@
 namespace fuen {
 
 // Returns ceil(num / denom), efficiently, only using integer division.
-inline constexpr unsigned ceilDivide(std::size_t num, std::size_t denom) {
+inline constexpr std::size_t ceilDivide(std::size_t num, std::size_t denom) {
 	return (num + denom - 1) / denom;
 }
 
@@ -41,6 +40,7 @@ inline constexpr unsigned exactLog2(std::size_t x) {
 // NOTE: could optimize for smaller allocations but not allocating a whole
 // block at a time (would remove some of the theoretical advantages gained
 // by the deque-like design tho)
+// TODO: likely not exception-safe (when allocator or constructor throws).
 template<typename T, typename Allocator = std::allocator<T>>
 class PageVector {
 public:
@@ -119,21 +119,25 @@ public:
 			return a;
 		}
 
-		pointer get() const {
+		reference get() const {
 			assert(elemID_ < elemsPerBlock);
-			return std::launder(reinterpret_cast<T*>(&block_->values[elemID_]));
+			return block_->values[elemID_];
 		}
 	};
 
-	struct ConstIterator : Iterator {
-		const_pointer operator->() const { return Iterator::get(); }
-		const_reference operator*() const { return *Iterator::get(); }
+	struct MutIterator : Iterator {
+		pointer operator->() const { return &Iterator::get(); }
+		reference operator*() const { return Iterator::get(); }
 	};
 
-	struct MutIterator : Iterator {
-		pointer operator->() const { return Iterator::get(); }
-		reference operator*() const { return *Iterator::get(); }
+	struct ConstIterator : Iterator {
+		ConstIterator(Block* block, unsigned elem) : Iterator{block, elem} {}
+		ConstIterator(MutIterator it) : Iterator(it) {}
+
+		const_pointer operator->() const { return &Iterator::get(); }
+		const_reference operator*() const { return Iterator::get(); }
 	};
+
 
 public:
 	PageVector(Allocator&& alloc = {}) : alloc_(std::move(alloc)) {
@@ -141,6 +145,16 @@ public:
 		static_assert(elemsPerBlock > 0);
 		static_assert(sizeof(Block) <= blockSize);
 	}
+
+	PageVector(PageVector&& rhs) noexcept : alloc_(rhs.alloc_) { swap(*this, rhs); }
+	PageVector& operator=(PageVector rhs) noexcept {
+		swap(*this, rhs);
+		return *this;
+	}
+
+	// TODO: could be implemented, deep-copy
+	PageVector(const PageVector&) = delete;
+	PageVector& operator=(const PageVector&) = delete;
 
 	~PageVector() {
 		release();
@@ -154,53 +168,28 @@ public:
 
 	void resize(std::size_t newSize) {
 		if(newSize > size_) {
-			// make sure we have enough storage
-			reserve(newSize);
-
-			// fill blocks; create items in range [size_, newSize)
-			auto [blockID, elemID] = offsets(size_);
-			assert(elemID < elemsPerBlock);
-			while(blockID < numBlocks_ && blockID * elemsPerBlock < newSize) {
-				auto& block = blockat(blockID);
-				auto end = std::min(elemsPerBlock, newSize - blockID * elemsPerBlock);
-				new(&*(block.values + elemID)) T[elemsPerBlock - elemID];
-
-				++blockID;
-				elemID = 0;
-			}
+			resizeGrow(newSize);
 		} else if(newSize < size_) {
-			// destroy elements in range [newSize, size_)
-			auto [blockID, elemID] = offsets(newSize);
-			while(blockID < numBlocks_ && blockID * elemsPerBlock < size_) {
-				auto& block = blockat(blockID);
-				auto end = std::min(elemsPerBlock, size_ - blockID * elemsPerBlock);
-				std::destroy(block.values + elemID, block.values + end);
-
-				++blockID;
-				elemID = 0;
-			}
+			resizeShrink(newSize);
 		}
-
-		size_ = newSize;
 	}
 
 	template<typename... Args>
 	reference emplace_back(Args&&... args) {
 		auto [blockID, elemID] = offsets(size_);
-		if(blockID > numBlocks_) {
+		if(blockID >= numBlocks_) {
 			doReserve(size_ + 1);
 		}
 
-		auto& block = blockat(blockID);
 		++size_;
+		auto& block = blockat(blockID);
 		auto& elem = block.values[elemID];
 		return *(new(&elem) T(std::forward<Args>(args)...));
 	}
 
 	value_type pop_back() {
 		assert(!empty());
-		auto [blockID, elemID] = offsets(size_);
-		auto& elem = blockat(blockID).values[elemID];
+		auto& elem = get(size_ - 1);
 		auto ret = std::move(elem);
 		std::destroy_at(&elem);
 		--size_;
@@ -231,19 +220,23 @@ public:
 	// Removes all elements and releases all memory.
 	// Basically like clear + shrink_to_fit.
 	void release() {
-		for(auto i = 0u; i < numBlocks_; ++i) {
+		for(auto i = 0u; i < numBlocks_ && i * elemsPerBlock < size_; ++i) {
 			auto& block = blockat(i);
-			auto end = std::min(elemsPerBlock, size_ - i * elemsPerBlock);
-			std::destroy(block.values + i, block.values + end);
+			auto count = std::min(elemsPerBlock, size_ - i * elemsPerBlock);
+			std::destroy(block.values, block.values + count);
+			alloc_.deallocate(block.values, elemsPerBlock);
 		}
 
 		blockAlloc().deallocate(blocks_, numBlocks_);
+		blocks_ = nullptr;
+		numBlocks_ = 0u;
+		size_ = 0u;
 	}
 
 	std::size_t size() const { return size_; }
 	std::size_t empty() const { return size_ == 0; }
 	std::size_t capacity() const { return numBlocks_ * elemsPerBlock; }
-	void clear() { resize(0); }
+	void clear() { resizeShrink(0); }
 	reference push_back(T&& value) { return emplace_back(std::move(value)); }
 	reference operator[](std::size_t pos) { return get(pos); }
 	const_reference operator[](std::size_t pos) const { return get(pos); }
@@ -257,24 +250,31 @@ public:
 	MutIterator begin() { return {blocks_, 0}; }
 	ConstIterator begin() const { return {blocks_, 0}; }
 
-	MutIterator end() { return {blocks_ + numBlocks_, 0}; }
-	ConstIterator end() const { return {blocks_ + numBlocks_, 0}; }
+	MutIterator end() { return endIter(); }
+	ConstIterator end() const { return endIter(); }
+
+	friend void swap(PageVector& a, PageVector& b) noexcept {
+		using std::swap;
+		swap(a.size_, b.size_);
+		swap(a.alloc_, b.alloc_);
+		swap(a.blocks_, b.blocks_);
+		swap(a.numBlocks_, b.numBlocks_);
+	}
 
 private:
-	// Returns [blockID, elemID]
 	struct Offsets {
 		unsigned blockID;
 		unsigned elemID;
 	};
 
-	Offsets offsets(std::size_t pos) {
+	Offsets offsets(std::size_t pos) const {
 		// Naive implementation
 		// TODO: speed this up for exact matches (which should be the
 		// case usually) using bit operations. Can be done via
 		// constexpr if switch and exactLog2
 		// auto block = pos / elemsPerBlock;
 		// auto elem = (pos % elemsPerBlock);
-		auto [block, elem] = std::ldiv(pos, elemsPerBlock);
+		auto [block, elem] = std::ldiv(long(pos), long(elemsPerBlock));
 		return {unsigned(block), unsigned(elem)};
 	}
 
@@ -310,6 +310,49 @@ private:
 	reference get(std::size_t pos) {
 		auto [blockID, elemID] = offsets(pos);
 		return blockat(blockID).values[elemID];
+	}
+
+	MutIterator endIter() const {
+		auto [block, elem] = offsets(size_);
+		return {blocks_ + block, elem};
+	}
+
+	void resizeGrow(std::size_t newSize) {
+		assert(newSize >= size_);
+
+		// make sure we have enough storage
+		reserve(newSize);
+
+		// fill blocks; create items in range [size_, newSize)
+		auto [blockID, elemID] = offsets(size_);
+		assert(elemID < elemsPerBlock);
+		while(blockID < numBlocks_ && blockID * elemsPerBlock + elemID < newSize) {
+			auto& block = blockat(blockID);
+			auto count = std::min(elemsPerBlock, newSize - blockID * elemsPerBlock) - elemID;
+			new(&*(block.values + elemID)) T[count];
+
+			++blockID;
+			elemID = 0;
+		}
+
+		size_ = newSize;
+	}
+
+	void resizeShrink(std::size_t newSize) {
+		assert(newSize <= size_);
+
+		// destroy elements in range [newSize, size_)
+		auto [blockID, elemID] = offsets(newSize);
+		while(blockID < numBlocks_ && blockID * elemsPerBlock < size_) {
+			auto& block = blockat(blockID);
+			auto end = std::min(elemsPerBlock, size_ - blockID * elemsPerBlock);
+			std::destroy(block.values + elemID, block.values + end);
+
+			++blockID;
+			elemID = 0;
+		}
+
+		size_ = newSize;
 	}
 
 private:

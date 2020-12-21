@@ -23,14 +23,18 @@
 namespace fuen {
 
 // Util
+#define BREAK_ON_ERROR
+#ifdef BREAK_ON_ERROR
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
 	if (origin->level >= dlg_level_error) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
-		std::raise(SIGABRT);
+		// std::raise(SIGABRT);
+		// DebugBreak();
 	}
 	dlg_default_output(origin, string, data);
 }
+#endif // BREAK_ON_ERROR
 
 // Classes
 Instance::~Instance() {
@@ -45,14 +49,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance) {
 
-	// TODO: don't do this. Even in debug kinda unacceptable.
+	// TODO: urgh
+	new(&dataMutex) decltype(dataMutex) {};
+
+#ifdef BREAK_ON_ERROR
+	// Even in debug kinda unacceptable.
 	// Maybe acceptable if we just reuse the old handler (and restore on DestroyInstance). Might still have problems
 	dlg_set_handler(dlgHandler, nullptr);
+#endif // BREAK_ON_ERROR
 
 	// TODO: remove/find real solution
 #ifdef _WIN32
 	AllocConsole();
-	dlg_trace("Allocated console. Creating vulkan instance");
+	// dlg_trace("Allocated console. Creating vulkan instance");
+	// dlg_error("Testing error");
 #endif // _WIN32
 
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
@@ -352,6 +362,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	// pipe.hpp
 	FUEN_DEV_HOOK(CreateGraphicsPipelines),
 	FUEN_DEV_HOOK(CreateComputePipelines),
+	FUEN_DEV_HOOK(DestroyPipeline),
 	FUEN_DEV_HOOK(CreatePipelineLayout),
 	FUEN_DEV_HOOK(DestroyPipelineLayout),
 

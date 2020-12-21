@@ -35,25 +35,11 @@ ImageView::~ImageView() {
 		dlg_assert(it != fb->attachments.end());
 		fb->attachments.erase(it);
 	}
-
-	// Don't use for-loop as the descriptors unregister themselves
-	while(!this->descriptors.empty()) {
-		auto ref = this->descriptors[0];
-		dlg_assert(ref.ds->getImageView(ref.binding, ref.elem) == this);
-		ref.ds->invalidateLocked(ref.binding, ref.elem);
-	}
 }
 
 Sampler::~Sampler() {
 	if(!dev) {
 		return;
-	}
-
-	// Don't use for-loop as the descriptors unregister themselves
-	while(!this->descriptors.empty()) {
-		auto ref = this->descriptors[0];
-		dlg_assert(ref.ds->getSampler(ref.binding, ref.elem) == this);
-		ref.ds->invalidateLocked(ref.binding, ref.elem);
 	}
 }
 

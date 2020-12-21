@@ -1,29 +1,33 @@
 #pragma once
 
-#include "fwd.hpp"
-#include "device.hpp"
+#include <fwd.hpp>
+#include <device.hpp>
 #include <vector>
 
 namespace fuen {
 
+/*
 struct PushConstantData {
-	std::vector<std::byte> data;
-	std::vector<std::pair<VkDeviceSize, VkDeviceSize>> ranges; // (offset, size)[]
+	span<std::byte> data;
+	span<std::pair<VkDeviceSize, VkDeviceSize>> ranges; // (offset, size)[]
 };
 
 using PushConstantMap = std::unordered_map<VkShaderStageFlagBits, PushConstantData>;
+*/
 
 struct BoundDescriptorSet {
 	DescriptorSet* ds {};
 	PipelineLayout* layout {};
-	std::vector<u32> dynamicOffsets;
+	span<u32> dynamicOffsets;
 };
 
 struct DescriptorState {
-	std::vector<BoundDescriptorSet> descriptorSets;
-	PushConstantMap pushConstants;
+	span<BoundDescriptorSet> descriptorSets;
 
-	void bind(PipelineLayout& layout, u32 firstSet,
+	// TODO: fix with CommandAllocator
+	// PushConstantMap pushConstants;
+
+	void bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> offsets);
 };
 
@@ -46,7 +50,7 @@ struct DynamicStateDepthBias {
 
 struct GraphicsState : DescriptorState {
 	BoundIndexBuffer indices;
-	std::vector<BoundVertexBuffer> vertices;
+	span<BoundVertexBuffer> vertices;
 	GraphicsPipeline* pipe;
 	RenderPass* rp;
 
@@ -57,8 +61,8 @@ struct GraphicsState : DescriptorState {
 	};
 
 	struct {
-		std::vector<VkViewport> viewports;
-		std::vector<VkRect2D> scissors;
+		span<VkViewport> viewports;
+		span<VkRect2D> scissors;
 		float lineWidth;
 		DynamicStateDepthBias depthBias;
 		std::array<float, 4> blendConstants;
@@ -73,5 +77,8 @@ struct GraphicsState : DescriptorState {
 struct ComputeState : DescriptorState {
 	ComputePipeline* pipe;
 };
+
+GraphicsState copy(CommandBuffer& cb, const GraphicsState& src);
+ComputeState copy(CommandBuffer& cb, const ComputeState& src);
 
 } // namespace fuen
