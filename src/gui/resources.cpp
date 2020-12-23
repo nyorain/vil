@@ -474,16 +474,139 @@ void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
 	ImGui::Columns();
 }
 
-void ResourceGui::drawDesc(Draw&, DescriptorSet&) {
-	ImGui::Text("TODO");
+void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
+	imGuiText("{}", name(ds));
+	ImGui::Spacing();
+
+	resourceRefButton(*gui_, *ds.layout);
+	resourceRefButton(*gui_, *ds.pool);
+
+	ImGui::Text("Bindings");
+	for(auto b = 0u; b < ds.bindings.size(); ++b) {
+		auto info = ds.layout->bindings[b];
+		auto& binding = ds.bindings[b];
+
+		dlg_assert(info.binding == b);
+		dlg_assert(binding.size() == info.descriptorCount);
+
+		if(info.descriptorCount == 0) { // valid?
+			continue;
+		}
+
+		auto weakButton = [&](auto& wptr) {
+			auto ptr = wptr.lock();
+			if(!ptr) {
+				imGuiText("<destroyed>");
+				return;
+			}
+
+			resourceRefButton(*gui_, *ptr);
+		};
+
+		auto print = [&](VkDescriptorType type, const DescriptorSet::Binding& binding) {
+			if(!binding.valid) {
+				imGuiText("null");
+				return;
+			}
+
+			switch(type) {
+				case VK_DESCRIPTOR_TYPE_SAMPLER: {
+					auto& img = std::get<DescriptorSet::ImageInfo>(binding.data);
+					weakButton(img.sampler);
+					break;
+				} case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+					auto& img = std::get<DescriptorSet::ImageInfo>(binding.data);
+					weakButton(img.imageView);
+					// ImGui::SameLine();
+					if(!isEmpty(img.sampler)) {
+						weakButton(img.sampler);
+						// ImGui::SameLine();
+					}
+					imGuiText("{}", vk::name(img.layout));
+					break;
+				}
+				case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+				case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+				case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
+					auto& img = std::get<DescriptorSet::ImageInfo>(binding.data);
+					weakButton(img.imageView);
+					ImGui::SameLine();
+					imGuiText("{}", vk::name(img.layout));
+					break;
+				}
+				case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+				case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER: {
+					auto& bv = std::get<std::weak_ptr<BufferView>>(binding.data);
+					weakButton(bv);
+					break;
+				}
+				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: {
+					auto& buf = std::get<DescriptorSet::BufferInfo>(binding.data);
+					weakButton(buf.buffer);
+					ImGui::SameLine();
+					imGuiText("Offset {}, Size", buf.offset);
+					ImGui::SameLine();
+					buf.range == VK_WHOLE_SIZE ? imGuiText("wholeSize") : imGuiText("{}", buf.range);
+					break;
+				}
+				default:
+					imGuiText("<Unknown type>");
+					break;
+			}
+		};
+
+		if(info.descriptorCount > 1) {
+			auto label = dlg::format("{}: {}[{}]", b,
+				vk::name(info.descriptorType), info.descriptorCount);
+			if(ImGui::TreeNode(label.c_str())) {
+				for(auto e = 0u; e < binding.size(); ++e) {
+					auto& elem = binding[e];
+
+					ImGui::Bullet();
+					imGuiText("{}: ", e);
+					ImGui::SameLine();
+
+					print(info.descriptorType, elem);
+				}
+			}
+		} else {
+			ImGui::Bullet();
+			imGuiText("{}, {}: ", b, vk::name(info.descriptorType));
+
+			ImGui::Indent();
+			ImGui::Indent();
+
+			print(info.descriptorType, binding[0]);
+
+			ImGui::Unindent();
+			ImGui::Unindent();
+		}
+	}
 }
 
-void ResourceGui::drawDesc(Draw&, DescriptorPool&) {
-	ImGui::Text("TODO");
+void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {
+	imGuiText("{}", name(dsPool));
+	ImGui::Spacing();
+
+	imGuiText("maxSets: {}", dsPool.maxSets);
+
+	ImGui::Text("Sizes");
+	for(auto& size : dsPool.poolSizes) {
+		imGuiText("{}: {}", vk::name(size.type), size.descriptorCount);
+	}
+
+	ImGui::Text("Descriptors");
+	for(auto* ds : dsPool.descriptorSets) {
+		ImGui::Bullet();
+		resourceRefButton(*gui_, *ds);
+	}
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
-	ImGui::Text("%s", name(dsl).c_str());
+	imGuiText("{}", name(dsl));
 	ImGui::Spacing();
 
 	ImGui::Text("Bindings");
@@ -504,7 +627,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 }
 
 void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
-	ImGui::Text("%s", name(pipe).c_str());
+	imGuiText("{}", name(pipe));
 	ImGui::Spacing();
 
 	// general info
@@ -792,11 +915,12 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 				}
 			}
 
-			// TODO: only show for compute shaders
-			ImGui::Text("Workgroup size: %d %d %d",
-				entryPoint.local_size.x,
-				entryPoint.local_size.y,
-				entryPoint.local_size.z);
+			if(stage.stage == VK_SHADER_STAGE_COMPUTE_BIT) {
+				ImGui::Text("Workgroup size: %d %d %d",
+					entryPoint.local_size.x,
+					entryPoint.local_size.y,
+					entryPoint.local_size.z);
+			}
 
 			/*
 			if(ImGui::Button("Open in Vim")) {
@@ -863,10 +987,11 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 	}
 }
 void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
-	ImGui::Text("%s", name(cp).c_str());
+	imGuiText("{}", name(cp));
 	ImGui::Spacing();
 
-	// TODO: display information
+	imGuiText("Queue Family: {} ({})", cp.queueFamily,
+		vk::flagNames(VkQueueFlagBits(cp.dev->queueProps[cp.queueFamily].queueFlags)));
 
 	for(auto& cb : cp.cbs) {
 		if(ImGui::Button(name(*cb).c_str())) {
@@ -876,7 +1001,7 @@ void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
 }
 
 void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
-	ImGui::Text("%s", name(mem).c_str());
+	imGuiText("{}", name(mem));
 	ImGui::Spacing();
 
 	// info

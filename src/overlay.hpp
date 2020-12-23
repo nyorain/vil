@@ -13,6 +13,8 @@ struct Overlay {
 	std::vector<RenderBuffer> buffers;
 	bool show {};
 
+	Platform* platform {};
+
 	void init(Swapchain& swapchain);
 	void initRenderBuffers(); // called from init
 	VkResult drawPresent(Queue& queue, span<const VkSemaphore>, u32 imageIdx);
@@ -26,13 +28,14 @@ struct Overlay {
 		const VkSwapchainCreateInfoKHR& b);
 };
 
-/*
 // Can be associated with a VkSurfaceKHR
-// TODO: reintroduce this when we try out per-platform child windows
 struct Platform {
 	virtual ~Platform() = default;
-	virtual void update() = 0;
+
+	virtual void init(Device& dev, unsigned width, unsigned height) = 0;
+	virtual void resize(unsigned width, unsigned height) = 0;
+	virtual bool updateShow() = 0;
+	virtual bool update(Gui& gui) = 0;
 };
-*/
 
 } // namespace fuen

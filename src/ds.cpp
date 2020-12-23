@@ -173,6 +173,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 	dsPool.objectType = VK_OBJECT_TYPE_DESCRIPTOR_POOL;
 	dsPool.dev = &dev;
 	dsPool.handle = *pDescriptorPool;
+	dsPool.maxSets = pCreateInfo->maxSets;
+	dsPool.poolSizes = {pCreateInfo->pPoolSizes, pCreateInfo->pPoolSizes + pCreateInfo->poolSizeCount};
 
 	return res;
 }
@@ -253,6 +255,34 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 		descriptorSetCount, pDescriptorSets);
 }
 
+void updateLocked(Device& dev, DescriptorSet::Binding& binding, VkBufferView bufferView) {
+	dlg_assert(bufferView);
+	binding.data = dev.bufferViews.getPtr(bufferView);
+	binding.valid = true;
+}
+
+void updateLocked(Device& dev, DescriptorSet::Binding& binding, const VkDescriptorImageInfo& img) {
+	DescriptorSet::ImageInfo info {};
+	info.layout = img.imageLayout;
+	if(img.imageView) {
+		info.imageView = dev.imageViews.getWeakPtrLocked(img.imageView);
+	}
+	if(img.sampler) {
+		info.sampler = dev.samplers.getWeakPtrLocked(img.sampler);
+	}
+	binding.data = info;
+	binding.valid = true;
+}
+
+void updateLocked(Device& dev, DescriptorSet::Binding& binding, const VkDescriptorBufferInfo& buf) {
+	DescriptorSet::BufferInfo info {};
+	info.buffer = dev.buffers.getWeakPtrLocked(buf.buffer);
+	info.offset = buf.offset;
+	info.range = buf.range;
+	binding.data = info;
+	binding.valid = true;
+}
+
 VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		VkDevice                                    device,
 		uint32_t                                    descriptorWriteCount,
@@ -277,49 +307,24 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			}
 
 			dlg_assert(write.descriptorType == ds.layout->bindings[dstBinding].descriptorType);
-
 			auto& binding = ds.bindings[dstBinding][dstElem];
 
-			// If the given handle is valid (i.e. not a vulkan null handle),
-			// retrieves the assocated object from the given map and adds
-			// this ds to the list of reference in it.
-			auto nullOrGet = [&](auto& map, auto& handle) -> decltype(map.getWeakPtr(handle)) {
-				if(!handle) {
-					return {};
-				}
-
-				auto it = map.map.find(handle);
-				dlg_assert(it != map.map.end());
-				return std::weak_ptr(it->second);
-			};
-
 			std::lock_guard lock(dev.mutex);
-
 			switch(category(write.descriptorType)) {
 				case DescriptorCategory::image: {
 					dlg_assert(write.pImageInfo);
-					DescriptorSet::ImageInfo info {};
-					info.layout = write.pImageInfo[j].imageLayout;
-					info.imageView = nullOrGet(dev.imageViews, write.pImageInfo[j].imageView);
-					info.sampler = nullOrGet(dev.samplers, write.pImageInfo[j].sampler);
-					binding.data = info;
+					updateLocked(dev, binding, write.pImageInfo[j]);
 					break;
 				} case DescriptorCategory::buffer: {
 					dlg_assert(write.pBufferInfo);
-					DescriptorSet::BufferInfo info {};
-					info.buffer = dev.buffers.getWeakPtrLocked(write.pBufferInfo[j].buffer);
-					info.offset = write.pBufferInfo[j].offset;
-					info.range = write.pBufferInfo[j].range;
-					binding.data = info;
+					updateLocked(dev, binding, write.pBufferInfo[j]);
 					break;
 				} case DescriptorCategory::bufferView:
 					dlg_assert(write.pTexelBufferView);
-					binding.data = dev.bufferViews.getWeakPtrLocked(write.pTexelBufferView[j]);
+					updateLocked(dev, binding, write.pTexelBufferView[j]);
 					break;
 				default: break;
 			}
-
-			binding.valid = true;
 		}
 
 		// TODO: change/check for descriptor indexing
@@ -362,6 +367,94 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 	return dev.dispatch.UpdateDescriptorSets(device,
 		descriptorWriteCount, pDescriptorWrites,
 		descriptorCopyCount, pDescriptorCopies);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
+		VkDevice                                    device,
+		const VkDescriptorUpdateTemplateCreateInfo* pCreateInfo,
+		const VkAllocationCallbacks*                pAllocator,
+		VkDescriptorUpdateTemplate*                 pDescriptorUpdateTemplate) {
+	auto& dev = getData<Device>(device);
+	auto res = dev.dispatch.CreateDescriptorUpdateTemplate(device, pCreateInfo,
+		pAllocator, pDescriptorUpdateTemplate);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	auto& dut = dev.dsuTemplates.add(*pDescriptorUpdateTemplate);
+	dut.objectType = VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE;
+	dut.dev = & dev;
+	dut.handle = *pDescriptorUpdateTemplate;
+
+	dut.entries = {
+		pCreateInfo->pDescriptorUpdateEntries,
+		pCreateInfo->pDescriptorUpdateEntries + pCreateInfo->descriptorUpdateEntryCount
+	};
+
+	return res;
+}
+
+VKAPI_ATTR void VKAPI_CALL DestroyDescriptorUpdateTemplate(
+		VkDevice                                    device,
+		VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
+		const VkAllocationCallbacks*                pAllocator) {
+	auto& dev = getData<Device>(device);
+	dev.dsuTemplates.mustErase(descriptorUpdateTemplate);
+	dev.dispatch.DestroyDescriptorUpdateTemplate(device, descriptorUpdateTemplate, pAllocator);
+}
+
+VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
+		VkDevice                                    device,
+		VkDescriptorSet                             descriptorSet,
+		VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
+		const void*                                 pData) {
+	auto& dev = getData<Device>(device);
+	auto& ds  = dev.descriptorSets.get(descriptorSet);
+	auto& dut = dev.dsuTemplates.get(descriptorUpdateTemplate);
+
+	auto* ptr = static_cast<const std::byte*>(pData);
+
+	for(auto& entry : dut.entries) {
+		auto dstBinding = entry.dstBinding;
+		auto dstElem = entry.dstArrayElement;
+		for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
+			dlg_assert(dstBinding < ds.layout->bindings.size());
+			while(dstElem >= ds.bindings[dstBinding].size()) {
+				++dstBinding;
+				dstElem = 0u;
+				dlg_assert(dstBinding < ds.layout->bindings.size());
+			}
+
+			auto& binding = ds.bindings[dstBinding][dstElem];
+			auto dsType = ds.layout->bindings[dstBinding].descriptorType;
+
+			// NOTE: such an assertion here would be nice. Track used
+			// layout in update?
+			// dlg_assert(write.descriptorType == type);
+
+			auto* data = ptr + (entry.offset + j * entry.stride);
+
+			std::lock_guard lock(dev.mutex);
+			switch(category(dsType)) {
+				case DescriptorCategory::image: {
+					auto& img = *reinterpret_cast<const VkDescriptorImageInfo*>(data);
+					updateLocked(dev, binding, img);
+					break;
+				} case DescriptorCategory::buffer: {
+					auto& buf = *reinterpret_cast<const VkDescriptorBufferInfo*>(data);
+					updateLocked(dev, binding, buf);
+					break;
+				} case DescriptorCategory::bufferView: {
+					auto& bufView = *reinterpret_cast<const VkBufferView*>(data);
+					updateLocked(dev, binding, bufView);
+					break;
+				} default: break;
+			}
+		}
+	}
+
+	dev.dispatch.UpdateDescriptorSetWithTemplate(device, descriptorSet,
+		descriptorUpdateTemplate, pData);
 }
 
 } // namespace fuen

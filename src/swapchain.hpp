@@ -1,7 +1,9 @@
 #pragma once
 
-#include "device.hpp"
-#include "handle.hpp"
+#include <device.hpp>
+#include <handle.hpp>
+#include <chrono>
+#include <optional>
 
 namespace fuen {
 
@@ -10,7 +12,17 @@ struct Swapchain : DeviceHandle {
 	VkSwapchainCreateInfoKHR ci;
 	std::unique_ptr<Overlay> overlay;
 
+	// The VkImages associated with this swapchain
 	std::vector<Image*> images;
+
+	// TODO: at the moment we simply track times between submissions.
+	// We could instead separate between between-present, command buffer
+	// execution and in-present timings (to give meaningful timings for
+	// applications limited by vsync or cpu).
+	using Clock = std::chrono::high_resolution_clock;
+	static constexpr auto maxFrameTimings = 1000u;
+	std::optional<Clock::time_point> lastPresent {};
+	std::vector<Clock::duration> frameTimings;
 
 	~Swapchain();
 	void destroy();

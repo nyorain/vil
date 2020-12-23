@@ -40,11 +40,24 @@ void CommandBufferGui::draw() {
 	}
 
 	if(cb_->state == CommandBuffer::State::executable) {
-		ImGui::PushID(dlg::format("{}:{}", cb_, cb_->resetCount).c_str());
+		// ImGui::PushID(dlg::format("{}:{}", cb_, cb_->resetCount).c_str());
+		ImGui::PushID(dlg::format("{}", cb_).c_str());
 
 		if(cb_->resetCount != resetCount_) {
 			// try to find a new command matching the old ones description
 			command_ = CommandDescription::find(*cb_, desc_);
+			if(!desc_.empty()) {
+				std::string indent = "  ";
+				for(auto& lvl : desc_) {
+					dlg_trace("{}{} {}", indent, lvl.command, lvl.id);
+					for(auto& arg : lvl.arguments) {
+						dlg_trace("{}    {}", indent, arg);
+					}
+					indent += " ";
+				}
+
+				dlg_trace("-> new command: {}", command_);
+			}
 			hooked_.needsUpdate = true;
 		}
 

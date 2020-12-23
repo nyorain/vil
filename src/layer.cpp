@@ -11,7 +11,11 @@
 #include <memory.hpp>
 #include <shader.hpp>
 #include <pipe.hpp>
+#include <overlay.hpp>
+
 #include <wayland.hpp>
+#include <xlib.hpp>
+
 #include <commands.hpp>
 #include <vk/dispatch_table_helper.h>
 #include <dlg/dlg.hpp>
@@ -222,7 +226,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 		return;
 	}
 
-	// auto platform = moveDataOpt<Platform>(surface); // destroy it
+	auto platform = moveDataOpt<Platform>(surface); // destroy it
 	auto& ini = getData<Instance>(instance);
 	ini.dispatch.DestroySurfaceKHR(instance, surface, pAllocator);
 }
@@ -286,6 +290,8 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 
 	// TODO: enable optionally
 	// FUEN_HOOK(CreateWaylandSurfaceKHR),
+	FUEN_INI_HOOK_EXT(CreateXlibSurfaceKHR, VK_KHR_XLIB_SURFACE_EXTENSION_NAME),
+	FUEN_INI_HOOK_EXT(CreateXcbSurfaceKHR, VK_KHR_XCB_SURFACE_EXTENSION_NAME),
 	FUEN_INI_HOOK_EXT(DestroySurfaceKHR, VK_KHR_SURFACE_EXTENSION_NAME),
 
 	// rp.hpp
@@ -359,6 +365,16 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	FUEN_DEV_HOOK(FreeDescriptorSets),
 	FUEN_DEV_HOOK(UpdateDescriptorSets),
 
+	FUEN_DEV_HOOK(CreateDescriptorUpdateTemplate),
+	FUEN_DEV_HOOK(DestroyDescriptorUpdateTemplate),
+	FUEN_DEV_HOOK(UpdateDescriptorSetWithTemplate),
+	FUEN_DEV_HOOK_ALIAS(CreateDescriptorUpdateTemplateKHR,
+		CreateDescriptorUpdateTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
+	FUEN_DEV_HOOK_ALIAS(DestroyDescriptorUpdateTemplateKHR,
+		DestroyDescriptorUpdateTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
+	FUEN_DEV_HOOK_ALIAS(UpdateDescriptorSetWithTemplateKHR,
+		UpdateDescriptorSetWithTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
+
 	// pipe.hpp
 	FUEN_DEV_HOOK(CreateGraphicsPipelines),
 	FUEN_DEV_HOOK(CreateComputePipelines),
@@ -374,6 +390,10 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	FUEN_DEV_HOOK(CreateCommandPool),
 	FUEN_DEV_HOOK(DestroyCommandPool),
 	FUEN_DEV_HOOK(ResetCommandPool),
+
+	FUEN_DEV_HOOK(TrimCommandPool),
+	FUEN_DEV_HOOK_ALIAS(TrimCommandPoolKHR, TrimCommandPool,
+		VK_KHR_MAINTENANCE1_EXTENSION_NAME),
 
 	FUEN_DEV_HOOK(AllocateCommandBuffers),
 	FUEN_DEV_HOOK(FreeCommandBuffers),

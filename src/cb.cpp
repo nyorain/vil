@@ -38,6 +38,7 @@ void removeFromHandlesLocked(CommandBuffer& cb) {
 	*/
 }
 
+/*
 void resetLocked(CommandBuffer& cb, bool invalidate = false) {
 	// make sure all submissions are done.
 	for(auto* subm : cb.pending) {
@@ -100,10 +101,83 @@ void resetLocked(CommandBuffer& cb, bool invalidate = false) {
 		++cb.resetCount;
 	}
 }
+*/
+
+void doReset(CommandBuffer& cb, bool invalidate = false) {
+	{
+		std::lock_guard lock(cb.dev->mutex);
+
+		// make sure all submissions are done.
+		for(auto* subm : cb.pending) {
+			auto res = checkLocked(*subm);
+			dlg_assert(res);
+		}
+
+		// removeFromHandlesLocked(cb);
+
+		// We have to lock our own mutex since other threads might read
+		// our data at the same time.
+		cb.state = invalidate ?
+			CommandBuffer::State::invalid :
+			CommandBuffer::State::initial;
+	}
+
+	// lock isn't really be needed for this btw
+	// NOTE: but it's improtant we this before resetting
+	//   the used handles containers since on msvc, their
+	//   constructor allocate (which is kinda shitty but
+	//   to be expected).
+	dlg_assert(cb.pool);
+
+	auto block = cb.memBlocks;
+	cb.memBlocks = nullptr;
+	cb.memBlockOffset = 0u;
+
+	{
+		auto tmpBufs = decltype(cb.buffers)(cb);
+		auto tmpImgs = decltype(cb.images)(cb);
+		auto tmpHandles = decltype(cb.handles)(cb);
+		swap(cb.buffers, tmpBufs);
+		swap(cb.images, tmpImgs);
+		swap(cb.handles, tmpHandles);
+
+		// important to kick-start them to avoid frequent re-hashing
+		// cb.buffers.reserve(16 * 1024);
+		// cb.images.reserve(16 * 1024);
+		// cb.handles.reserve(16 * 1024);
+	}
+
+	(void) block;
+	/*
+	while(block) {
+		auto next = block->next;
+		block->next = cb.pool->memBlocks;
+		cb.pool->memBlocks = block;
+		block = next;
+	}
+	*/
+
+	// cb.buffers = decltype(cb.buffers)(cb);
+	// cb.images = decltype(cb.images)(cb);
+	// cb.handles = decltype(cb.handles)(cb);
+
+	// It's important we do this outside the lock, might destroy
+	// shared handles.
+	cb.commands.release();
+	cb.sections.release();
+	cb.graphicsState = {};
+	cb.computeState = {};
+	// cb.pushConstants = {};
+
+	if(!invalidate) {
+		++cb.resetCount;
+	}
+}
 
 void reset(CommandBuffer& cb, bool invalidate = false) {
-	std::lock_guard lock(cb.dev->mutex);
-	resetLocked(cb, invalidate);
+	// std::lock_guard lock(cb.dev->mutex);
+	// resetLocked(cb, invalidate);
+	doReset(cb, invalidate);
 }
 
 std::byte* data(CommandPool::MemBlock& mem, std::size_t offset) {
@@ -207,7 +281,9 @@ CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) : pool
 }
 
 void CommandBuffer::invalidateLocked() {
-	resetLocked(*this, true);
+	// resetLocked(*this, true);
+	// TODO
+	this->state = State::invalid;
 }
 
 CommandBuffer::~CommandBuffer() {
@@ -215,11 +291,10 @@ CommandBuffer::~CommandBuffer() {
 		return;
 	}
 
-	std::lock_guard devLock(this->dev->mutex);
-
 	// Wait for completion, free all data and allocated stuff,
 	// unregister from everything
-	resetLocked(*this);
+	// resetLocked(*this);
+	doReset(*this);
 
 	// Remove ourselves from the pool we come from.
 	// A command pool can't be destroyed before its command buffers (it
@@ -229,6 +304,15 @@ CommandBuffer::~CommandBuffer() {
 	auto it = find(pool->cbs, this);
 	dlg_assert(it != pool->cbs.end());
 	pool->cbs.erase(it);
+}
+
+void freeMemBlocks(CommandPool& pool) {
+	// Free all memory blocks
+	while(pool.memBlocks) {
+		auto next = pool.memBlocks->next;
+		delete[] reinterpret_cast<std::byte*>(pool.memBlocks);
+		pool.memBlocks = next;
+	}
 }
 
 CommandPool::~CommandPool() {
@@ -250,14 +334,7 @@ CommandPool::~CommandPool() {
 		dev->commandBuffers.mustErase(cb->handle);
 	}
 
-	// Free all memory blocks
-	// NOTE: we assume here that command buffers have been destroyed.
-	// Is there any way they are being kept alive?
-	while(memBlocks) {
-		auto next = memBlocks->next;
-		delete[] reinterpret_cast<std::byte*>(memBlocks);
-		memBlocks = next;
-	}
+	freeMemBlocks(*this);
 }
 
 // api
@@ -305,6 +382,19 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandPool(
 		reset(*cb);
 	}
 	return dev.dispatch.ResetCommandPool(device, commandPool, flags);
+}
+
+VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
+		VkDevice                                    device,
+		VkCommandPool                               commandPool,
+		VkCommandPoolTrimFlags                      flags) {
+	auto& dev = getData<Device>(device);
+	auto& pool = dev.commandPools.get(commandPool);
+
+	// free all currently unused memory blocks
+	freeMemBlocks(pool);
+
+	dev.dispatch.TrimCommandPool(device, commandPool, flags);
 }
 
 // command buffer
@@ -391,11 +481,10 @@ void addToHandle(CommandBuffer& cb, DeviceHandle& handle) {
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
-	(void) cb;
-	(void) cmd;
-	(void) h64;
-	(void) handle;
-	/*
+	// (void) cb;
+	// (void) cmd;
+	// (void) h64;
+	// (void) handle;
 	auto it = cb.handles.find(h64);
 	if(it == cb.handles.end()) {
 		it = cb.handles.emplace(h64, UsedHandle{handle, cb}).first;
@@ -404,7 +493,6 @@ void useHandle(CommandBuffer& cb, Command& cmd, std::uint64_t h64, DeviceHandle&
 	}
 
 	it->second.commands.push_back(&cmd);
-	*/
 }
 
 template<typename T>
@@ -413,11 +501,10 @@ void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
 	useHandle(cb, cmd, h64, handle);
 }
 
-/*UsedImage&*/ void useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
-	(void) cb;
-	(void) cmd;
-	(void) image;
-	/*
+UsedImage& /*void*/ useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
+	// (void) cb;
+	// (void) cmd;
+	// (void) image;
 	auto it = cb.images.find(image.handle);
 	if(it == cb.images.end()) {
 		it = cb.images.emplace(image.handle, UsedImage(image, cb)).first;
@@ -436,7 +523,6 @@ void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
 	}
 
 	return it->second;
-	*/
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = true) {
@@ -450,10 +536,9 @@ void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = t
 }
 
 /*UsedBuffer&*/ void useHandle(CommandBuffer& cb, Command& cmd, Buffer& buf) {
-	(void) cb;
-	(void) cmd;
-	(void) buf;
-	/*
+	// (void) cb;
+	// (void) cmd;
+	// (void) buf;
 	auto it = cb.buffers.find(buf.handle);
 	if(it == cb.buffers.end()) {
 		it = cb.buffers.emplace(buf.handle, UsedBuffer{buf, cb}).first;
@@ -469,8 +554,7 @@ void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = t
 		useHandle(cb, cmd, *buf.memory);
 	}
 
-	return it->second;
-	*/
+	// return it->second;
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, BufferView& view) {
@@ -485,12 +569,12 @@ void useHandle(CommandBuffer& cb, Command& cmd, BufferView& view) {
 
 /*CommandBuffer::UsedImage&*/ void useHandle(CommandBuffer& cb, Command& cmd, Image& image,
 		VkImageLayout newLayout) {
-	// auto& img = useHandle(cb, cmd, image);
-	// img.layoutChanged = true;
-	// img.finalLayout = newLayout;
+	auto& img = useHandle(cb, cmd, image);
+	img.layoutChanged = true;
+	img.finalLayout = newLayout;
 	// return img;
-	useHandle(cb, cmd, image);
-	(void) newLayout;
+	// useHandle(cb, cmd, image);
+	// (void) newLayout;
 }
 
 // commands

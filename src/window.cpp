@@ -10,6 +10,7 @@
 #include <vk/enumString.hpp>
 
 namespace fuen {
+namespace {
 
 void cbClose(swa_window* win) {
 	(void) win;
@@ -58,6 +59,8 @@ void cbMouseWheel(swa_window*, float x, float y) {
 	ImGui::GetIO().MouseWheel = y;
 	ImGui::GetIO().MouseWheelH = x;
 }
+
+} // anon namespace
 
 // DisplayWindow
 DisplayWindow::~DisplayWindow() {

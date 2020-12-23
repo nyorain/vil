@@ -20,6 +20,9 @@ struct DescriptorPool : DeviceHandle {
 	VkDescriptorPool handle {};
 	std::vector<DescriptorSet*> descriptorSets;
 
+	u32 maxSets {};
+	std::vector<VkDescriptorPoolSize> poolSizes {};
+
 	~DescriptorPool();
 };
 
@@ -114,5 +117,29 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
     const VkWriteDescriptorSet*                 pDescriptorWrites,
     uint32_t                                    descriptorCopyCount,
     const VkCopyDescriptorSet*                  pDescriptorCopies);
+
+// vulkan 1.1: descriptor update templates
+struct DescriptorUpdateTemplate : DeviceHandle {
+	VkDescriptorUpdateTemplate handle {};
+
+	std::vector<VkDescriptorUpdateTemplateEntry> entries;
+};
+
+VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
+    VkDevice                                    device,
+    const VkDescriptorUpdateTemplateCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkDescriptorUpdateTemplate*                 pDescriptorUpdateTemplate);
+
+VKAPI_ATTR void VKAPI_CALL DestroyDescriptorUpdateTemplate(
+    VkDevice                                    device,
+    VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
+    const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
+    VkDevice                                    device,
+    VkDescriptorSet                             descriptorSet,
+    VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
+    const void*                                 pData);
 
 } // namespace fuen

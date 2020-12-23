@@ -136,4 +136,11 @@ private:
 	Clock::time_point lastFrame_ {};
 };
 
+template<typename T>
+void resourceRefButton(Gui& gui, T& resource) {
+	if(ImGui::Button(name(resource).c_str())) {
+		gui.selectResource(resource);
+	}
+}
+
 } // namespace fuen

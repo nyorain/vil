@@ -48,6 +48,8 @@ dep_vulkan = dep_vulkan_full.partial_dependency(
 
 subdir('src/imgui')
 
+with_x11 = true
+
 src = files(
 	# own meta sources & util
 	'src/layer.cpp',
@@ -110,6 +112,10 @@ src = files(
 	'include/fuen_api.h',
 )
 
+if with_x11
+	src += files('src/xlib.cpp')
+endif
+
 public_inc = include_directories('include/')
 private_inc = include_directories('src/')
 shader_inc = include_directories('src/data/')
@@ -127,6 +133,14 @@ deps = [
 	libimgui_core_dep,
 	dep_vulkan,
 ]
+
+if with_x11
+	dep_xcb = dependency('xcb', required: true)
+	dep_xcb_keysyms = dependency('xcb-keysyms', required: true)
+	dep_x11_xcb = dependency('x11-xcb', required: true)
+
+	deps += [dep_xcb, dep_xcb_keysyms, dep_x11_xcb]
+endif
 
 fuen_layer = shared_library(
 	'VkLayer_fuencaliente',

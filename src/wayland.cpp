@@ -1,6 +1,6 @@
-#include "wayland.hpp"
-#include "layer.hpp"
-#include "data.hpp"
+#include <wayland.hpp>
+#include <layer.hpp>
+#include <data.hpp>
 #include "gui.hpp"
 
 #include "imgui/imgui.h"
@@ -52,6 +52,8 @@ public:
 	bool mouseOver {};
 	bool focus {};
 };
+
+namespace {
 
 // pointer
 void pointerEnter(void* data, wl_pointer*, u32, wl_surface* surf, wl_fixed_t, wl_fixed_t) {
@@ -166,6 +168,8 @@ const struct wl_registry_listener registryListener = {
 	registryGlobal,
 	registryGlobalRemove,
 };
+
+} // anon namespace
 
 // WaylandPlatform
 WaylandPlatform::WaylandPlatform(wl_display* display, wl_surface* surface) {

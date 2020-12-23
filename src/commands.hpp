@@ -148,7 +148,9 @@ struct SectionCommand : Command {
 		}
 
 		const Command* ret = nullptr;
-		if(ImGui::TreeNodeEx(this, flags, "%s", toString().c_str())) {
+		// if(ImGui::TreeNodeEx(toString().c_str(), flags)) {
+		// if(ImGui::TreeNodeEx(this, flags, "%s", toString().c_str())) {
+		if(ImGui::TreeNodeEx(nameDesc().c_str(), flags, "%s", toString().c_str())) {
 			if(ImGui::IsItemClicked()) {
 				ret = this;
 			}

@@ -4,7 +4,8 @@
 #define VK_NO_PROTOTYPES
 
 // TODO: define via meson config
-// #define VK_USE_PLATFORM_XCB_KHR
+#define VK_USE_PLATFORM_XCB_KHR
+#define VK_USE_PLATFORM_XLIB_KHR
 // #define VK_USE_PLATFORM_WAYLAND_KHR
 
 #include <cstddef>
@@ -53,6 +54,7 @@ struct CommandPool;
 struct DescriptorPool;
 struct DescriptorSet;
 struct DescriptorSetLayout;
+struct DescriptorUpdateTemplate;
 struct ShaderModule;
 struct Pipeline;
 struct ComputePipeline;
@@ -68,6 +70,7 @@ struct CommandDescription;
 
 struct RenderData;
 struct DisplayWindow;
+struct Platform;
 struct Overlay;
 struct Draw;
 
@@ -83,9 +86,29 @@ using i32 = std::int32_t;
 using i64 = std::int64_t;
 
 struct DescriptorSetRef {
-	DescriptorSet* ds;
+	DescriptorSet* ds {};
 	u32 binding {};
 	u32 elem {};
+
+	struct Hash {
+		std::size_t operator()(const DescriptorSetRef& dsr) {
+			// This should be better than a raw hash_combine: we know
+			// that we usually don't have unreasonable numbers of binding
+			// or elements and that we can safely discard the first couple
+			// of a pointer in a 64-bit system without ever getting a collision.
+
+			constexpr auto bindingBits = sizeof(std::size_t) == 64 ? 8 : 6;
+			// We want to allow *a lot of* elements for bindless setups.
+			// 2^20 (~1 million) might even be on the small side here.
+			constexpr auto elemBits = sizeof(std::size_t) == 64 ? 20 : 10;
+
+			std::size_t ret = 0;
+			ret |= (dsr.elem & elemBits) << 0;
+			ret |= (dsr.binding & bindingBits) << elemBits;
+			ret |= std::uintptr_t(dsr.ds) << (bindingBits + elemBits);
+			return ret;
+		}
+	};
 };
 
 struct DrawGuiImage;

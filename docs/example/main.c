@@ -134,14 +134,15 @@ static void window_resize(struct swa_window* win, unsigned w, unsigned h) {
 		}
 
 		// query fuen layer api
-		int res = fuenLoadApi(&state->fuen_api);
-		if(res == 0) {
-			dlg_assert(state->create_overlay);
-			state->fuen_overlay = state->fuen_api.CreateOverlayForLastCreatedSwapchain(state->device);
-			dlg_trace("Created fuen overlay: %p", (void*) state->fuen_overlay);
-		} else {
-			// TODO: output more info!
-			dlg_warn("Loading fuen failed, error code %d", res);
+		if(state->create_overlay) {
+			int res = fuenLoadApi(&state->fuen_api);
+			if(res == 0) {
+				state->fuen_overlay = state->fuen_api.CreateOverlayForLastCreatedSwapchain(state->device);
+				dlg_trace("Created fuen overlay: %p", (void*) state->fuen_overlay);
+			} else {
+				// TODO: output more info!
+				dlg_warn("Loading fuen failed, error code %d", res);
+			}
 		}
 	} else {
 		state->resized = true;

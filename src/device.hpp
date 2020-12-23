@@ -129,6 +129,7 @@ struct Device {
 	SyncedSharedUnorderedMap<VkSemaphore, Semaphore> semaphores;
 	SyncedSharedUnorderedMap<VkQueryPool, QueryPool> queryPools;
 	SyncedSharedUnorderedMap<VkBufferView, BufferView> bufferViews;
+	SyncedSharedUnorderedMap<VkDescriptorUpdateTemplate, DescriptorUpdateTemplate> dsuTemplates;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still

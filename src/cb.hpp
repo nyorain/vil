@@ -15,11 +15,11 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 	u32 queueFamily {};
 
-	static constexpr auto minBlockSize = 64 * 1024;
+	static constexpr auto minBlockSize = 16; // 32 * 1024;
 	struct MemBlock {
 		MemBlock* next {};
 		std::size_t size;
-		// std::byte block[];
+		// std::byte block[size]; // following
 	};
 	MemBlock* memBlocks {}; // forward linked list
 
@@ -264,6 +264,11 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandPool(
     VkDevice                                    device,
     VkCommandPool                               commandPool,
     VkCommandPoolResetFlags                     flags);
+
+VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
+    VkDevice                                    device,
+    VkCommandPool                               commandPool,
+    VkCommandPoolTrimFlags                      flags);
 
 VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
     VkDevice                                    device,

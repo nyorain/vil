@@ -66,6 +66,7 @@ Device::~Device() {
 	dlg_assert(this->pipeLayouts.empty());
 	dlg_assert(this->queryPools.empty());
 	dlg_assert(this->bufferViews.empty());
+	dlg_assert(this->dsuTemplates.empty());
 
 	if(window) {
 		window.reset();
@@ -202,7 +203,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// Make sure we get a queue that can potentially display to our
 	// window. To check that, we first have to create a window though.
 	u32 presentQueueInfoID = u32(-1);
-	auto createWindow = true;
+	auto createWindow = false;
 	std::vector<const char*> newExts; // keep-alive
 	std::unique_ptr<DisplayWindow> window;
 	if(createWindow) {
@@ -320,6 +321,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.semaphores.mutex = &dev.mutex;
 	dev.queryPools.mutex = &dev.mutex;
 	dev.bufferViews.mutex = &dev.mutex;
+	dev.dsuTemplates.mutex = &dev.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);

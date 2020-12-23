@@ -84,19 +84,25 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 		for(auto c = 0u; c < candidates.size(); ++c) {
 			auto& cand = candidates[c];
 
+			auto args = cand.command->argumentsDesc();
+			auto maxArgs = std::max(args.size(), desc.arguments.size());
+			if(maxArgs > 0) {
+				u32 numSame = 0u;
+				for(auto i = 0u; i < std::min(args.size(), desc.arguments.size()); ++i) {
+					if(args[i] == desc.arguments[i]) {
+						++numSame;
+					}
+				}
+
+				cand.score = float(numSame) / maxArgs;
+			} else {
+				cand.score = 1.0;
+			}
+
+			// weigh by distance
 			// TODO: we can do better!
 			// This is very sensitive to just erasing large chunks of data.
 			// We can use desc.count to get a more precise score.
-			auto args = cand.command->argumentsDesc();
-			u32 numSame = 0u;
-			for(auto i = 0u; i < std::min(args.size(), desc.arguments.size()); ++i) {
-				if(args[i] == desc.arguments[i]) {
-					++numSame;
-				}
-			}
-
-			cand.score += float(numSame) / std::max(args.size(), desc.arguments.size());
-
 			float relDesc = float(desc.id) / desc.count;
 			float relCand = float(c) / candidates.size();
 
@@ -109,7 +115,7 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 		// TODO: better filter
 		auto threshold = 0.5f;
 		auto cmp = [](float threshold, const auto& cand) {
-			return threshold < cand.score;
+			return threshold <= cand.score;
 		};
 		auto it = std::upper_bound(candidates.begin(), candidates.end(), threshold, cmp);
 		candidates.erase(candidates.begin(), it);
@@ -167,14 +173,6 @@ DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) {
 	state = copy(cb, cb.computeState);
 	// TODO: push constants
 }
-
-template<typename T>
-void resourceRefButton(Gui& gui, T& resource) {
-	if(ImGui::Button(name(resource).c_str())) {
-		gui.selectResource(resource);
-	}
-}
-
 
 template<typename C>
 auto rawHandles(const C& handles) {

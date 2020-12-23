@@ -1,3 +1,9 @@
+## Design
+
+This document includes some random notes and thoughts and docs done
+while implementing various features. Most of it might be outdated,
+don't rely on it.
+
 Synchronization
 ================
 
@@ -197,3 +203,78 @@ layer that well, it might take a while before it arrives downstream. (But,
 usually, so do new vulkan versions & extensions. Hardcore users that
 quickly update for new extensions should be able to update the layer quickly
 as well/build it themselves from master).
+
+# Window input hooking
+
+This one shouldn't even be officially supported, it's such a hack. Anyways,
+useful as a super-quick dropin. When applications don't explicitly use the
+fuen api to pass input to the layer (for gui stuff) we can atempt to hijack
+the windows input using platform-specific APIs. Yes, this is super ugly
+and super evil and not guaranteed to work at all, will just ignore bugs
+regarding that. 
+
+Getting input isn't the hard part, it's doable on all platforms. The hard
+part is finding a consistent implementation for all backends of what input
+is blocked from application and what input is not. Main backends:
+
+- X11. Unsurprisingly, ugly as hell. But also, pretty flexible, allows us
+  to do all the ugliness the want. We can't directly hijack input (could do
+  so with general window-unrelated APIs but this is complicated, leads to
+  new problems and does not allow us to block it) but we can create an
+  InputOnly child window.
+  Even without that, we can check the current focus window and key states,
+  allowing us to detect a key to toggle the overlay.
+  	- One difficulty is threading with X11. We don't really need a thread tho.
+	  For x11 but most vulkan drivers do and applications not calling XInitThreads
+	  are undefined anyways.
+- Wayland. We can directly hook input but can't block it like that.
+  On some implementations (tested: weston), subsurfaces receive focus and
+  block input from the parent. That's the way I'd understand the wayland
+  spec and likely the expected & intended way. With some compositors this does
+  not work though (namely: sway, maybe it's a wlroots problem extending
+  to other compositors). See https://github.com/swaywm/sway/issues/5904
+  We might be able to reliably achieve this using xdg popup though. This might
+  result in the input capture being closed every time focus is moved from
+  the application but that's ok I guess.
+- Win32. Not implemented yet. We can likely achieve it via a child window as well
+  using the layered and transparent flags, making it fully transparent
+
+Features that are neat to have:
+
+- open the overlay via a pressed key
+	- also close it again (via that key)
+  This one is actually the easiest to achieve. We don't have to block any
+  input from reaching the actual application.
+- when overlay is open, capture input to allow user interaction with overlay
+- allow somehow giving back control to the application while still leaving
+  the overlay open. Probably best done via key. But would be neat if this
+  could be triggered when mouse is clicked outside of overlay (and then
+  the next overlay shortcut will simply give it focus again, not hide it).
+
+## Command Buffer Groups
+
+Often, command buffers over multiple frames have *almost* the same content.
+It's just that every frame contains some new objects, removes rendering
+of some old objects, potentially even add/removes whole render passes.
+It should be possible to inspect this logical group of command buffers
+continuously, even if they are rerecorded in every frame.
+
+- when a command buffer is submitted, we check the situation against all
+  existing command groups: is its contents similar enough in structure
+  (we explicitly want to ignore slightly different draw commands & descriptor
+  sets, different framebuffers etc to a certain extent; we should mainly match
+  for general data flow structure, CommandDescription is a good start).
+  We also compare the queue used to submit it (and possibly the command pool).
+  When we detect that it's part of a command group, add it there.
+  (Commands will less than N commands should probably never be part of a command
+  group. Same for commands with no structure (i.e. no labels/renderpasses?)).
+- When a command group is empty, remove it (also do this when no cb from a
+  group was submitted for N frames/time? probably not a good idea)
+- The command buffer viewer can then also display command groups (and we always
+  link to command groups in the list of submissions to avoid the flickering
+  of a new command buffer in every frame). What do to when the structure/the 
+  commands is different somewhere?
+  	- we could explicitly show this in command view and offer a selection
+	  to only show commands from one of the command buffers in that region
+	- extend the idea above: toggle display of each command buffer in the view.
+	  We display the union of them (still trying to merge what can be merged).

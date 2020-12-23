@@ -1,7 +1,8 @@
 #pragma once
 
-#include "device.hpp"
-#include "memory.hpp"
+#include <device.hpp>
+#include <memory.hpp>
+#include <unordered_set>
 
 namespace fuen {
 
@@ -39,6 +40,8 @@ struct ImageView : DeviceHandle {
 	VkImageViewCreateInfo ci;
 
 	std::vector<Framebuffer*> fbs;
+
+	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> dsRefs;
 
 	~ImageView();
 };

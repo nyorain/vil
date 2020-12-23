@@ -1030,6 +1030,8 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags?
 		imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 		// TODO: transfer queue.
 		// We currently just force concurrent mode on image/buffer creation
@@ -1057,6 +1059,9 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		imgb.subresourceRange = tabs_.resources.image_.subres;
 		imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		imgb.newLayout = finalLayout;
+		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
 		dlg_assert(
 			finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
 			finalLayout != VK_IMAGE_LAYOUT_UNDEFINED);

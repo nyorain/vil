@@ -38,15 +38,21 @@ v0.1, goal: end of january 2021
       Should probably just store it inside the api struct.
 - [x] fix destructors: vulkan allows null handle, we don't
 - [ ] fix push constant tracking in command buffer
+- [ ] fix refCbs handling. We might not be able to do it that way.
 - [ ] Implement missing resource overview UIs
 - [ ] fully implement command buffer viewer
 	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
 	- [ ] show all commands & info for commands
 	- [ ] better resource selection/collapsing etc
+- [ ] fix ui for fixed resource tracking: check for nullptr resource references
+      everywhere (and use weak/shared pointer where we can't manually reset to null)
 - [x] track dynamic graphics pipeline state
 	- [ ] show it in command ui
-- [ ] correctly handle secondary command buffers
-	- [ ] might need adaptions for render passes, bound state and such
+- [x] correctly handle secondary command buffers
+	- [x] might need adaptions for render passes, bound state and such
+		  {from a first look, no does not seem so. State is reset at cb boundary.
+		   We just can't assume that something like cmdDraw is inside a render
+		   pass for secondary cbs but we don't do that anyways}
 - [x] Switch to a more useful fork/branch of vkpp: Generate vk::name
       functions for plain vulkan enums, don't use anything else here.
 	  Probably best to not even include vkpp as subproject, just copy
@@ -57,11 +63,15 @@ v0.1, goal: end of january 2021
 			  {nah, not worth it for now, using std works fine, opt for later}
 - [x] fix our global dispatchable handle hash table. Either use the vk_layer
 	  one or remove the type hashing (dispatchable handles are globally unique).
+- [ ] we have to check in barrier commands whether the image was put into
+      concurrent mode by us, and if so, set queue families to ignored
+	  (otherwise we get a spec error)
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
 		   to make this beautiful}
 	- [ ] show graph of frame timings
+	- [ ] show enabled extensions & features
 - [x] properly shutdown everything, no leftover resources and layer warnings
 - [x] proper queue creation and querying for window display
 - [x] properly shut down rendering thread for own-window display
@@ -114,41 +124,45 @@ v0.1, goal: end of january 2021
 	- [ ] ability to directly jump to it - in the contextually inferred layout - from a command?
 	      (might be confusing, content might have changed since then)
 - [ ] improve image viewer
-	- [ ] show texel color (requires us to download texels, just like we 
+	- [ ] show texel color? (requires us to download texels, just like we 
 	      do with buffers)
 	- [ ] better display (or completely hide?) swapchain images
 - [ ] imgui styling
 	- [ ] use custom font
 	- [ ] go at least a bit away from the default imgui style
+	- [ ] see imgui style examples in imgui releases
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
 	- [ ] clearly document (maybe already in README?) that the layer
 	      can crash when extensions it does not know about/does not support
 		  are being used.
 	- [ ] update README to correctly show all current features
-- [ ] improve/cleanup pipeline time queries
+- [ ] improve/cleanup pipeline time queries from querypool
+	- [ ] query whole-cb time, and correctly support querying for full renderpass
 - [ ] properly implement layer querying functions
 	- [ ] version negotiation?
 	- [ ] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
 		  maybe allow to overwrite this via environment variable (since, technically,
 		  the layer will usually work fine even with the latest vulkan version)
-- [ ] support for buffer views in UI
+- [ ] support for buffer views (and other handles) in UI
 	- [ ] use buffer view information to infer layout in buffer viewer?
 	- [ ] support buffer views in our texture viewer (i.e. show their content)
 - [ ] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
 	  for inserting query commands (check for the queue family in general,
 	  we might not be able to use the query pool!).
 - [ ] clean up currently slightly hacky window-thread communication.
-      investigate whether we have to create the display in that thread
-	  on windows already as well
-	- [ ] related, swa/winapi: don't create dummy window when wgl is disabled?
+      (and all instance stuff in layer.cpp)
+      ~~investigate whether we have to create the display in that thread
+	  on windows already as well~~
+	- [x] related, swa/winapi: don't create dummy window when wgl is disabled?
 - [ ] allow to force overlay via environment variable. Even with go-through
       input (we might be able to just disable input for the whole window
 	  while overlay is active using platform-specific stuff), this might
 	  be useful in some cases, the extra window can be painful.
+	- [ ] generally expose own window creation and force-overlay via env vars
 - [ ] add example image to readme (with real-world application if possible)
 - [ ] move external source into extra folder
-- [ ] rename cbState.hpp -> boundState.hpp? or just bound.hpp?
+- [x] rename cbState.hpp -> boundState.hpp? or just bound.hpp?
 - [ ] A lot of sources can be moved to src/gui
 	- [ ] rename imguiutil. Move to gui
 - [ ] before release: test on windows & linux, on all owned hardware
@@ -157,6 +171,10 @@ not sure if viable for first version:
 - [ ] stress test using a real vulkan-based game. Test e.g. with doom eternal
 
 Possibly for later, new features/ideas:
+- [ ] we might be able to not lock the device mutex for all the time we lock
+      the ui (which can be a serious problem) by relying on weak/shared pointers
+	  eveywhere (making concurrently happening resource destruction no problem) 
+	  	- [ ] probably requires a lot of other reworks as well, e.g. for buffer readback
 - [ ] better installing
 	- [ ] simple wix windows installer, just needs to install prebuilt layer,
 	  	   json file and add the registry file. Should probably also install
@@ -222,16 +240,16 @@ Possibly for later, new features/ideas:
 	  easier to maintain (and make it seem less of a buggy mess to users)
 - [ ] support vulkan 1.1 (non-crash)
 	- [x] bindmemory2
-	- [ ] support descriptor set update templates
+	- [x] support descriptor set update templates
 	- [x] support vkCmdDispatchBase
-	- [ ] later (at least non-crash? can't test it tho) support device masks
+	- [ ] way later (at least non-crash? can't test it tho) support device masks
 	- [ ] support everything in UI
 		- [ ] add sampler ycbcr conversion tracking
 - [ ] support vulkan 1.2 (non-crash)
 	- [ ] support everything in UI
 	- [x] CmdDrawIndirectCount
 	- [x] CmdDrawIndexedIndirectCount
-	- [ ] other new creation and commands
+	- [x] other new creation and commands
 - [ ] support as many KHR extensions as possible (non-crash)
 	- [ ] support UI for them where not too much work
 - [ ] support khr ray tracing extension

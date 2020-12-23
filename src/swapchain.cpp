@@ -36,6 +36,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		const VkAllocationCallbacks*                pAllocator,
 		VkSwapchainKHR*                             pSwapchain) {
 	auto& devd = getData<Device>(device);
+	auto* platform = findData<Platform>(pCreateInfo->surface);
 
 	// It's important we *first* destroy our image objects coming
 	// from this swapchain since they may implicitly destroyed
@@ -45,7 +46,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	// unusable.
 	Swapchain* oldChain {};
 	std::unique_ptr<Overlay> savedOverlay {};
-	bool createOverlay {false};
+	bool recreateOverlay {false};
 	if(pCreateInfo->oldSwapchain) {
 		oldChain = &devd.swapchains.get(pCreateInfo->oldSwapchain);
 
@@ -55,7 +56,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 				oldChain->overlay->gui.finishDraws();
 				savedOverlay = std::move(oldChain->overlay);
 			} else {
-				createOverlay = true;
+				recreateOverlay = true;
 			}
 		}
 
@@ -99,10 +100,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		swapd.overlay = std::move(savedOverlay);
 		swapd.overlay->swapchain = &swapd;
 		swapd.overlay->initRenderBuffers();
-	} else if(createOverlay) {
+		if(swapd.overlay->platform) {
+			swapd.overlay->platform->resize(swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
+		}
+	} else if(recreateOverlay) {
 		// Otherwise we have to create a new renderer from scratch
 		// TODO: carry over all gui logic. Just recreate rendering logic
 		dlg_error("TODO: not implemented");
+	} else if(platform) {
+		swapd.overlay = std::make_unique<Overlay>();
+		swapd.overlay->init(swapd);
+		swapd.overlay->platform = platform;
+		platform->init(*swapd.dev, swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
 	}
 
 	return result;
@@ -130,7 +139,19 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	for(auto i = 0u; i < pPresentInfo->swapchainCount; ++i) {
 		auto& swapchain = qd.dev->swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
+
+		if(swapchain.overlay && swapchain.overlay->platform) {
+			if(!swapchain.overlay->show) {
+				swapchain.overlay->show = swapchain.overlay->platform->updateShow();
+			}
+		}
+
 		if(swapchain.overlay && swapchain.overlay->show) {
+			if(swapchain.overlay && swapchain.overlay->platform) {
+				swapchain.overlay->show =
+					swapchain.overlay->platform->update(swapchain.overlay->gui);
+			}
+
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
 		} else {
