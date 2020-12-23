@@ -278,3 +278,18 @@ continuously, even if they are rerecorded in every frame.
 	  to only show commands from one of the command buffers in that region
 	- extend the idea above: toggle display of each command buffer in the view.
 	  We display the union of them (still trying to merge what can be merged).
+	  
+# Performance
+
+First performance tests on a real game showed: basic resource tracking is
+enough to completely mess up frame times! Couple of reasons:
+
+- completely underestimated the number of resources in sample cases:
+  a descriptor set can reference many thousand resources and a resource can
+  be referenced in many thousand descriptor sets. Linear times for creation
+  and destruction are not acceptable.
+- completely underestimated the number of commands in a command buffer.
+  Games can easily have thousands of draw calls (where each draw call previously
+  has multiple bind commands) and, as it turns out, allocating memory 
+  in __EVERY SINGLE ONE OF THEM__ is a bad idea. Also, games record command
+  buffers in every frame, in practice.

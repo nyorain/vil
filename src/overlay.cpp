@@ -3,6 +3,7 @@
 #include <image.hpp>
 #include <cb.hpp>
 #include <sync.hpp>
+#include <platform.hpp>
 #include <imgui/imgui.h>
 
 namespace fuen {
@@ -10,12 +11,13 @@ namespace fuen {
 // Overlay
 void Overlay::init(Swapchain& swapchain) {
 	this->swapchain = &swapchain;
-	// this->platform = findData<Platform>(swapchain.ci.surface);
 	this->gui.init(*swapchain.dev, swapchain.ci.imageFormat, false);
 	initRenderBuffers();
 }
 
 void Overlay::initRenderBuffers() {
+	gui.finishDraws();
+
 	auto& swapchain = *this->swapchain;
 	auto& dev = *swapchain.dev;
 

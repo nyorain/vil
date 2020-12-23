@@ -15,7 +15,7 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 	u32 queueFamily {};
 
-	static constexpr auto minBlockSize = 16; // 32 * 1024;
+	static constexpr auto minBlockSize = 32 * 1024;
 	struct MemBlock {
 		MemBlock* next {};
 		std::size_t size;
@@ -25,17 +25,6 @@ struct CommandPool : DeviceHandle {
 
 	~CommandPool();
 };
-
-/// For CommandBuffers, commands are allocated in per-CommandBuffer
-/// storage to avoid the huge memory allocation over head per command.
-template<typename T>
-struct DestructorCaller {
-	void operator()(T* ptr) const noexcept {
-		ptr->~T();
-	}
-};
-
-using CommandPtr = std::unique_ptr<Command, DestructorCaller<Command>>;
 
 // Allocates a chunk of memory from the given command buffer, will use the
 // internal CommandPool memory allocator. The memory can not be freed in
@@ -71,6 +60,13 @@ span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, T* data, std::size_t co
 template<typename T>
 span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, span<T> data) {
 	return copySpan(cb, data.data(), data.size());
+}
+
+inline const char* copyString(CommandBuffer& cb, std::string_view src) {
+	auto dst = allocSpan<char>(cb, src.size() + 1);
+	std::copy(src.begin(), src.end(), dst.data());
+	dst[src.size()] = 0;
+	return dst.data();
 }
 
 template<typename T>
@@ -114,12 +110,12 @@ bool operator!=(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noex
 }
 
 template<typename T> using CommandVector = PageVector<T, CommandAllocator<T>>;
-//template<typename K, typename V> using CommandHashMap = std::unordered_map<K, V,
-//	std::hash<K>, std::equal_to<K>, CommandAllocator<std::pair<const K, V>>>;
-template<typename K, typename V> using CommandMap = std::map<K, V,
-    std::less<K>, CommandAllocator<std::pair<const K, V>>>;
+template<typename K, typename V> using CommandMap = std::unordered_map<K, V,
+	std::hash<K>, std::equal_to<K>, CommandAllocator<std::pair<const K, V>>>;
+// template<typename K, typename V> using CommandMap = std::map<K, V,
+//     std::less<K>, CommandAllocator<std::pair<const K, V>>>;
 
-// Synchronization for this one is a bitch:
+// Synchronization for this one is hard:
 // - We currently don't synchronize every single record call. A command
 //   buffer can't really be used anywhere while it's in recording
 //   state and we simply try to not show recording command buffers in the ui.
@@ -197,7 +193,7 @@ public:
 	std::vector<PendingSubmission*> pending;
 
 	// == Immutable when in executable state, otherwise private ==
-	CommandVector<CommandPtr> commands;
+	Command* commands {};
 
 	// Overview over *all* resources used or referenced in some way.
 	// This includes all transitive references, e.g. resources from a
@@ -218,7 +214,11 @@ public:
 	//   the respective states directly instead, considering stateFlags.
 	ComputeState computeState {};
 	GraphicsState graphicsState {};
-	CommandVector<SectionCommand*> sections; // stack
+	SectionCommand* section {};
+	Command* last {};
+
+	// We have to keep pipeline layouts alive for hooking.
+	CommandVector<IntrusivePtr<PipelineLayout>> pipeLayouts;
 
 	// struct {
 	// 	PushConstantMap map;

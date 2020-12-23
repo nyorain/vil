@@ -91,7 +91,9 @@ struct DescriptorSetRef {
 	u32 elem {};
 
 	struct Hash {
-		std::size_t operator()(const DescriptorSetRef& dsr) {
+		std::size_t operator()(const DescriptorSetRef& dsr) const noexcept;
+			/*
+			// NOTE: probably bullshit
 			// This should be better than a raw hash_combine: we know
 			// that we usually don't have unreasonable numbers of binding
 			// or elements and that we can safely discard the first couple
@@ -106,9 +108,13 @@ struct DescriptorSetRef {
 			ret |= (dsr.elem & elemBits) << 0;
 			ret |= (dsr.binding & bindingBits) << elemBits;
 			ret |= std::uintptr_t(dsr.ds) << (bindingBits + elemBits);
-			return ret;
-		}
+			return hash(ret) ?
+			*/
 	};
+
+	friend inline bool operator==(const DescriptorSetRef& a, const DescriptorSetRef& b) {
+		return a.ds == b.ds && a.binding == b.binding && a.elem == b.elem;
+	}
 };
 
 struct DrawGuiImage;

@@ -1,18 +1,67 @@
-#include "ds.hpp"
-#include "data.hpp"
-#include "buffer.hpp"
-#include "image.hpp"
-#include "util.hpp"
+#include <ds.hpp>
+#include <device.hpp>
+#include <data.hpp>
+#include <buffer.hpp>
+#include <image.hpp>
+#include <util.hpp>
 
 namespace fuen {
 
 // Classes
+void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
+	dlg_assert(ds.dev);
+	dlg_assert(ds.bindings.size() > binding);
+	dlg_assert(ds.bindings[binding].size() > elem);
+
+	auto& bind = ds.bindings[binding][elem];
+	dlg_assert(bind.valid);
+
+	auto removeFromHandle = [&](auto& handle) {
+		DescriptorSetRef ref = {&ds, binding, elem};
+		auto it = handle.descriptors.find(ref);
+		dlg_assert(it != handle.descriptors.end());
+		handle.descriptors.erase(it);
+	};
+
+	switch(category(ds.layout->bindings[binding].descriptorType)) {
+		case DescriptorCategory::buffer: {
+			removeFromHandle(nonNull(bind.bufferInfo.buffer));
+			break;
+		} case DescriptorCategory::image: {
+			dlg_assert(bind.imageInfo.imageView || bind.imageInfo.sampler);
+			if(bind.imageInfo.imageView) {
+				removeFromHandle(*bind.imageInfo.imageView);
+			}
+			if(bind.imageInfo.sampler) {
+				removeFromHandle(*bind.imageInfo.sampler);
+			}
+			break;
+		} case DescriptorCategory::bufferView: {
+			removeFromHandle(nonNull(bind.bufferView));
+			break;
+		} default: dlg_error("Unimplemented descriptor type"); break;
+	}
+
+	bind.valid = false;
+}
+
 DescriptorSet::~DescriptorSet() {
 	if(!dev) {
 		return;
 	}
 
 	std::lock_guard lock(dev->mutex);
+
+	for(auto b = 0u; b < bindings.size(); ++b) {
+		for(auto e = 0u; e < bindings[b].size(); ++e) {
+			if(!bindings[b][e].valid) {
+				continue;
+			}
+
+			unregisterLocked(*this, b, e);
+		}
+	}
+
 	// Remove from descriptor pool.
 	// Pools can't be destroyed before their sets as they implicitly free them.
 	dlg_assert(pool);
@@ -22,36 +71,33 @@ DescriptorSet::~DescriptorSet() {
 	pool->descriptorSets.erase(it);
 }
 
-/*
-std::weak_ptr<Sampler> DescriptorSet::getSampler(unsigned binding, unsigned elem) {
+Sampler* DescriptorSet::getSampler(unsigned binding, unsigned elem) {
 	dlg_assert(bindings.size() > binding);
 	dlg_assert(bindings[binding].size() > elem);
-	dlg_assert(bindings[binding]. > elem);
 	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::image);
 	return bindings[binding][elem].imageInfo.sampler;
 }
 
-std::weak_ptr<ImageView> DescriptorSet::getImageView(unsigned binding, unsigned elem) {
+ImageView* DescriptorSet::getImageView(unsigned binding, unsigned elem) {
 	dlg_assert(bindings.size() > binding);
 	dlg_assert(bindings[binding].size() > elem);
 	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::image);
 	return bindings[binding][elem].imageInfo.imageView;
 }
 
-std::weak_ptr<Buffer> DescriptorSet::getBuffer(unsigned binding, unsigned elem) {
+Buffer* DescriptorSet::getBuffer(unsigned binding, unsigned elem) {
 	dlg_assert(bindings.size() > binding);
 	dlg_assert(bindings[binding].size() > elem);
 	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::buffer);
 	return bindings[binding][elem].bufferInfo.buffer;
 }
 
-std::weak_ptr<BufferView> DescriptorSet::getBufferView(unsigned binding, unsigned elem) {
+BufferView* DescriptorSet::getBufferView(unsigned binding, unsigned elem) {
 	dlg_assert(bindings.size() > binding);
 	dlg_assert(bindings[binding].size() > elem);
 	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::bufferView);
 	return bindings[binding][elem].bufferView;
 }
-*/
 
 DescriptorPool::~DescriptorPool() {
 	if(!dev) {
@@ -107,6 +153,28 @@ DescriptorCategory category(VkDescriptorType type) {
 	}
 }
 
+bool needsSampler(VkDescriptorType type) {
+	switch(type) {
+		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+		case VK_DESCRIPTOR_TYPE_SAMPLER:
+			return true;
+		default:
+			return false;
+	}
+}
+
+bool needsImageView(VkDescriptorType type) {
+	switch(type) {
+		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+		case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+		case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+		case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+			return true;
+		default:
+			return false;
+	}
+}
+
 // dsLayout
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		VkDevice                                    device,
@@ -134,6 +202,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
 		dsLayout.bindings[bind.binding] = bind;
+		if(needsSampler(bind.descriptorType) && bind.pImmutableSamplers) {
+			auto& span = dsLayout.immutableSamplers.emplace_back();
+			span = {bind.pImmutableSamplers, bind.pImmutableSamplers + bind.descriptorCount};
+			dsLayout.bindings[bind.binding].pImmutableSamplers = span.data();
+		}
 	}
 
 	return res;
@@ -255,31 +328,38 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 		descriptorSetCount, pDescriptorSets);
 }
 
-void updateLocked(Device& dev, DescriptorSet::Binding& binding, VkBufferView bufferView) {
+void updateLocked(DescriptorSet& ds, DescriptorSet::Binding& binding,
+		unsigned bind, unsigned elem, VkBufferView bufferView) {
 	dlg_assert(bufferView);
-	binding.data = dev.bufferViews.getPtr(bufferView);
+	binding.bufferView = &ds.dev->bufferViews.getLocked(bufferView);
+	binding.bufferView->descriptors.insert({&ds, bind, elem});
 	binding.valid = true;
 }
 
-void updateLocked(Device& dev, DescriptorSet::Binding& binding, const VkDescriptorImageInfo& img) {
-	DescriptorSet::ImageInfo info {};
-	info.layout = img.imageLayout;
-	if(img.imageView) {
-		info.imageView = dev.imageViews.getWeakPtrLocked(img.imageView);
+void updateLocked(DescriptorSet& ds, DescriptorSet::Binding& binding,
+		unsigned bind, unsigned elem, const VkDescriptorImageInfo& img) {
+	binding.imageInfo.layout = img.imageLayout;
+
+	auto& layout = ds.layout->bindings[bind];
+	if(needsImageView(layout.descriptorType)) {
+		dlg_assert(img.imageView);
+		binding.imageInfo.imageView = &ds.dev->imageViews.getLocked(img.imageView);
+		binding.imageInfo.imageView->descriptors.insert({&ds, bind, elem});
 	}
-	if(img.sampler) {
-		info.sampler = dev.samplers.getWeakPtrLocked(img.sampler);
+	if(needsSampler(layout.descriptorType) && !layout.pImmutableSamplers) {
+		dlg_assert(img.sampler);
+		binding.imageInfo.sampler = &ds.dev->samplers.getLocked(img.sampler);
+		binding.imageInfo.sampler->descriptors.insert({&ds, bind, elem});
 	}
-	binding.data = info;
 	binding.valid = true;
 }
 
-void updateLocked(Device& dev, DescriptorSet::Binding& binding, const VkDescriptorBufferInfo& buf) {
-	DescriptorSet::BufferInfo info {};
-	info.buffer = dev.buffers.getWeakPtrLocked(buf.buffer);
-	info.offset = buf.offset;
-	info.range = buf.range;
-	binding.data = info;
+void updateLocked(DescriptorSet& ds, DescriptorSet::Binding& binding,
+		unsigned bind, unsigned elem, const VkDescriptorBufferInfo& buf) {
+	binding.bufferInfo.buffer = &ds.dev->buffers.getLocked(buf.buffer);
+	binding.bufferInfo.buffer->descriptors.insert({&ds, bind, elem});
+	binding.bufferInfo.offset = buf.offset;
+	binding.bufferInfo.range = buf.range;
 	binding.valid = true;
 }
 
@@ -310,18 +390,22 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			auto& binding = ds.bindings[dstBinding][dstElem];
 
 			std::lock_guard lock(dev.mutex);
+			if(binding.valid) {
+				unregisterLocked(ds, dstBinding, dstElem);
+			}
+
 			switch(category(write.descriptorType)) {
 				case DescriptorCategory::image: {
 					dlg_assert(write.pImageInfo);
-					updateLocked(dev, binding, write.pImageInfo[j]);
+					updateLocked(ds, binding, dstBinding, dstElem, write.pImageInfo[j]);
 					break;
 				} case DescriptorCategory::buffer: {
 					dlg_assert(write.pBufferInfo);
-					updateLocked(dev, binding, write.pBufferInfo[j]);
+					updateLocked(ds, binding, dstBinding, dstElem, write.pBufferInfo[j]);
 					break;
 				} case DescriptorCategory::bufferView:
 					dlg_assert(write.pTexelBufferView);
-					updateLocked(dev, binding, write.pTexelBufferView[j]);
+					updateLocked(ds, binding, dstBinding, dstElem, write.pTexelBufferView[j]);
 					break;
 				default: break;
 			}
@@ -356,8 +440,37 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 				dlg_assert(srcBinding < src.layout->bindings.size());
 			}
 
+			auto& srcBind = src.bindings[srcBinding][srcElem];
+			auto& dstBind = dst.bindings[dstBinding][dstElem];
+			dlg_assert(srcBind.valid);
+			dlg_assert(dst.layout->bindings[dstBinding].descriptorType ==
+				src.layout->bindings[dstBinding].descriptorType);
+
 			std::lock_guard lock(dev.mutex);
-			dst.bindings[dstBinding][dstElem] = src.bindings[srcBinding][srcElem];
+			if(dstBind.valid) {
+				unregisterLocked(dst, dstBinding, dstElem);
+			}
+
+			dstBind = srcBind;
+			switch(category(dst.layout->bindings[dstBinding].descriptorType)) {
+				case DescriptorCategory::image: {
+					if(dstBind.imageInfo.imageView) {
+						dstBind.imageInfo.imageView->descriptors.insert({&dst, dstBinding, dstElem});
+					}
+					if(dstBind.imageInfo.sampler) {
+						dstBind.imageInfo.sampler->descriptors.insert({&dst, dstBinding, dstElem});
+					}
+					break;
+				} case DescriptorCategory::buffer: {
+					dlg_assert(dstBind.bufferInfo.buffer);
+					dstBind.bufferInfo.buffer->descriptors.insert({&dst, dstBinding, dstElem});
+					break;
+				} case DescriptorCategory::bufferView:
+					dlg_assert(dstBind.bufferView);
+					dstBind.bufferView->descriptors.insert({&dst, dstBinding, dstElem});
+					break;
+				default: break;
+			}
 		}
 
 		// TODO: change/check for descriptor indexing
@@ -438,20 +551,22 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 			switch(category(dsType)) {
 				case DescriptorCategory::image: {
 					auto& img = *reinterpret_cast<const VkDescriptorImageInfo*>(data);
-					updateLocked(dev, binding, img);
+					updateLocked(ds, binding, dstBinding, dstElem, img);
 					break;
 				} case DescriptorCategory::buffer: {
 					auto& buf = *reinterpret_cast<const VkDescriptorBufferInfo*>(data);
-					updateLocked(dev, binding, buf);
+					updateLocked(ds, binding, dstBinding, dstElem, buf);
 					break;
 				} case DescriptorCategory::bufferView: {
 					auto& bufView = *reinterpret_cast<const VkBufferView*>(data);
-					updateLocked(dev, binding, bufView);
+					updateLocked(ds, binding, dstBinding, dstElem, bufView);
 					break;
 				} default: break;
 			}
 		}
 	}
+
+	ds.invalidateCbs();
 
 	dev.dispatch.UpdateDescriptorSetWithTemplate(device, descriptorSet,
 		descriptorUpdateTemplate, pData);

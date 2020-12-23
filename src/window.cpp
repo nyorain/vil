@@ -8,6 +8,7 @@
 #include <dlg/dlg.hpp>
 #include <imgui/imgui.h>
 #include <vk/enumString.hpp>
+#include <chrono>
 
 namespace fuen {
 namespace {
@@ -65,11 +66,10 @@ void cbMouseWheel(swa_window*, float x, float y) {
 // DisplayWindow
 DisplayWindow::~DisplayWindow() {
 	run_.store(false);
+	cv_.notify_all();
 	if(thread_.joinable()) {
 		thread_.join();
 	}
-
-	gui.finishDraws(); // NOTE: shouldn't be needed with current blocking rendering
 
 	if(swapchain) {
 		dev->dispatch.DestroySwapchainKHR(dev->handle, swapchain, nullptr);
@@ -186,7 +186,7 @@ bool DisplayWindow::initSwapchain() {
 	// this mode is required to be supported
 	sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
 
-	bool vsync = false;
+	bool vsync = true;
 	if(!vsync) {
 		for (size_t i = 0; i < nPresentModes; i++) {
 			if (presentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
@@ -332,6 +332,7 @@ void DisplayWindow::initBuffers() {
 }
 
 void DisplayWindow::destroyBuffers() {
+	gui.finishDraws();
 	buffers_.clear();
 }
 
@@ -353,8 +354,12 @@ void DisplayWindow::uiThread() {
 		cv_.notify_one();
 
 		// wait for step 1
-		while(state_.load() != State::createWindow) {
+		while(run_.load() && state_.load() != State::createWindow) {
 			cv_.wait(lock);
+		}
+
+		if(!run_.load()) {
+			return;
 		}
 
 		// step 1: window creation
@@ -390,8 +395,12 @@ void DisplayWindow::uiThread() {
 		cv_.notify_one();
 
 		// wait for step 2
-		while(state_.load() != State::initDevice) {
+		while(run_.load() && state_.load() != State::initDevice) {
 			cv_.wait(lock);
+		}
+
+		if(!run_.load()) {
+			return;
 		}
 
 		// step 2: swapchain creation
@@ -430,26 +439,17 @@ void DisplayWindow::uiThread() {
 	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
 	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
 
+	using Clock = std::chrono::high_resolution_clock;
+	auto timeIt = [](auto& now, auto name) {
+		auto newNow = Clock::now();
+		auto dist = newNow - now;
+		dlg_trace("time {}: {}", name,
+			std::chrono::duration_cast<std::chrono::milliseconds>(dist).count());
+		now = newNow;
+	};
+
 	while(run_.load()) {
-		/*
-		if(!show_.load()) {
-			swa_window_show(window, false);
-
-			// Block until the window is shown
-			while(!show_.load() && run_.load()) {
-				if(!swa_display_dispatch(dev.ini->display, true)) {
-					run_.store(false);
-					break;
-				}
-			}
-
-			if(!run_.load()) {
-				break;
-			}
-
-			swa_window_show(window, true);
-		}
-		*/
+		auto now = Clock::now();
 
 		if(!swa_display_dispatch(dpy, false)) {
 			run_.store(false);
@@ -464,6 +464,15 @@ void DisplayWindow::uiThread() {
 
 		u32 imageIdx;
 		// render a frame
+		// TODO: use a fence instead of a semaphore here and just wait
+		// for it (could even still dispatch events during that time)?
+		// would potentially mean less latency since that waiting for
+		// vsync currently effectively happens at the end of Gui::draw
+		// (where we wait for the submission).
+		// TODO: we also might wanna fix refreshing of this window
+		// to a maximum frame rate. We don't really need those lit 144hz
+		// but will *significantly* block other vulkan progress (due to
+		// gui mutex locking) when rendering at high rates.
 		VkResult res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain,
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
 		if(res == VK_SUBOPTIMAL_KHR) {
@@ -518,6 +527,8 @@ void DisplayWindow::uiThread() {
 		auto frameRes = gui.renderFrame(frameInfo);
 		(void) frameRes;
 
+		timeIt(now, "frame");
+
 		// NOTE: currently done in gui but may not be like this in future
 		// if(frameRes.draw && frameRes.draw->inUse) {
 		// 	// wait on finish
@@ -528,6 +539,7 @@ void DisplayWindow::uiThread() {
 		// }
 	}
 
+	gui.finishDraws(); // NOTE: shouldn't be needed with current blocking rendering
 	state_.store(State::shutdown);
 	cv_.notify_one();
 	dlg_trace("Exiting window thread");

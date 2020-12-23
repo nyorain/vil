@@ -1,7 +1,9 @@
-#include "pipe.hpp"
-#include "rp.hpp"
-#include "ds.hpp"
-#include "data.hpp"
+#include <pipe.hpp>
+#include <device.hpp>
+#include <rp.hpp>
+#include <shader.hpp>
+#include <ds.hpp>
+#include <data.hpp>
 
 namespace fuen {
 

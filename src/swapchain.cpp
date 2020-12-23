@@ -1,6 +1,7 @@
 #include <swapchain.hpp>
 #include <data.hpp>
 #include <image.hpp>
+#include <platform.hpp>
 #include <overlay.hpp>
 
 namespace fuen {
@@ -37,6 +38,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		VkSwapchainKHR*                             pSwapchain) {
 	auto& devd = getData<Device>(device);
 	auto* platform = findData<Platform>(pCreateInfo->surface);
+
+	auto env = getenv("FUEN_DISABLE_PLATFORM");
+	if(env && *env != '0') {
+		platform = nullptr;
+	}
 
 	// It's important we *first* destroy our image objects coming
 	// from this swapchain since they may implicitly destroyed
@@ -141,17 +147,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		VkResult res;
 
 		if(swapchain.overlay && swapchain.overlay->platform) {
-			if(!swapchain.overlay->show) {
-				swapchain.overlay->show = swapchain.overlay->platform->updateShow();
-			}
+			swapchain.overlay->show = swapchain.overlay->platform->update(swapchain.overlay->gui);
 		}
 
 		if(swapchain.overlay && swapchain.overlay->show) {
-			if(swapchain.overlay && swapchain.overlay->platform) {
-				swapchain.overlay->show =
-					swapchain.overlay->platform->update(swapchain.overlay->gui);
-			}
-
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
 		} else {

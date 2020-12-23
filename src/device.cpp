@@ -102,6 +102,109 @@ Device::~Device() {
 	}
 }
 
+std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
+		std::vector<const char*>& devExts,
+		std::vector<VkDeviceQueueCreateInfo>& queueCreateInfos,
+		PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr, VkPhysicalDevice phdev,
+		u32 numQueueFams, u32& presentQueueInfoID) {
+	auto env = std::getenv("FUEN_CREATE_WINDOW");
+	if(!env || *env == '0') {
+		return nullptr;
+	}
+
+	std::unique_ptr<DisplayWindow> window;
+	window = std::make_unique<DisplayWindow>();
+
+	// TODO: we could choose a specific backend given the enabled
+	// instance extensions (this matters on linux where we could hint
+	// swa whether it should use x11 or wayland; but also have to tell
+	// it whether to use xcb or xlib for window creation).
+	if(!window->createDisplay()) {
+		return nullptr;
+	}
+
+	// check if required extensions happen to be supported
+	unsigned nexts;
+	auto* exts = swa_display_vk_extensions(window->dpy, &nexts);
+
+	for(auto i = 0u; i < nexts; ++i) {
+		auto ext = std::string_view(exts[i]);
+		auto it = find(ini.extensions, ext);
+		if(it == ini.extensions.end()) {
+			dlg_warn("Can't create window since extension {} was not enabled", ext);
+			return {};
+		}
+	}
+
+	if(!window->createWindow(ini)) {
+		return nullptr;
+	}
+
+	// Find present queue
+	auto vkSurf64 = swa_window_get_vk_surface(window->window);
+	window->surface = bit_cast<VkSurfaceKHR>(vkSurf64);
+
+	auto fpGetPhysicalDeviceSurfaceSupportKHR =
+		(PFN_vkGetPhysicalDeviceSurfaceSupportKHR)
+		fpGetInstanceProcAddr(ini.handle, "vkGetPhysicalDeviceSurfaceSupportKHR");
+	dlg_assert(fpGetPhysicalDeviceSurfaceSupportKHR);
+
+	// Check queues that are already created for presentation support.
+	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
+		auto& q = queueCreateInfos[i];
+		if(presentQueueInfoID == u32(-1)) {
+			VkBool32 supported {};
+			auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
+				q.queueFamilyIndex, window->surface, &supported);
+			if(res == VK_SUCCESS && supported) {
+				presentQueueInfoID = i;
+				break;
+			}
+		}
+	}
+
+	// If none found, add our own
+	static const float prio1 = 1.f;
+	if(presentQueueInfoID == u32(-1)) {
+		// The application does not create a graphics queue, so we
+		// add one.
+		for(auto qf = 0u; qf < numQueueFams; ++qf) {
+			VkBool32 supported {};
+			auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
+				qf, window->surface, &supported);
+			if(res == VK_SUCCESS && supported) {
+				presentQueueInfoID = u32(queueCreateInfos.size());
+
+				dlg_trace("Adding new queue (for present), family {}", qf);
+				auto& q = queueCreateInfos.emplace_back();
+				q.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+				q.pQueuePriorities = &prio1;
+				q.queueFamilyIndex = qf;
+				q.queueCount = 1u;
+				break;
+			}
+		}
+	}
+
+	if(presentQueueInfoID == u32(-1)) {
+		dlg_warn("Can't create present window since no queue supports presenting to it");
+		window.reset();
+	} else {
+		// If swapchain extension wasn't enabled, enable it!
+		// TODO: we can and should probably check if the extension
+		// is supported here, first.
+		auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+		auto it = find(devExts, extName);
+		if(it == devExts.end()) {
+			devExts.push_back(extName.data());
+
+			dlg_info("Adding {} device extension", extName);
+		}
+	}
+
+	return window;
+}
+
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		VkPhysicalDevice phdev,
@@ -147,9 +250,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	// == Modify create info ==
 	auto nci = *ci;
-
-	// == Extensions ==
-	// TODO: enable extensions useful for us; if supported
 
 	// == Queues ==
 	// Make sure we get a graphics queue.
@@ -199,84 +299,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	auto extsBegin = ci->ppEnabledExtensionNames;
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
+	std::vector<const char*> newExts = {extsBegin, extsEnd};
 
 	// Make sure we get a queue that can potentially display to our
 	// window. To check that, we first have to create a window though.
 	u32 presentQueueInfoID = u32(-1);
-	auto createWindow = false;
-	std::vector<const char*> newExts; // keep-alive
-	std::unique_ptr<DisplayWindow> window;
-	if(createWindow) {
-		window = std::make_unique<DisplayWindow>();
-		if(!window->createDisplay() || !window->createWindow(ini)) {
-			window.reset();
-		} else {
-			// Find present queue
-			auto vkSurf64 = swa_window_get_vk_surface(window->window);
-			window->surface = bit_cast<VkSurfaceKHR>(vkSurf64);
+	auto window = tryCreateWindow(ini, newExts, queueCreateInfos,
+		fpGetInstanceProcAddr, phdev, nqf, presentQueueInfoID);
 
-			auto fpGetPhysicalDeviceSurfaceSupportKHR =
-				(PFN_vkGetPhysicalDeviceSurfaceSupportKHR)
-				fpGetInstanceProcAddr(ini.handle, "vkGetPhysicalDeviceSurfaceSupportKHR");
-			dlg_assert(fpGetPhysicalDeviceSurfaceSupportKHR);
-
-			// Check queues that are already created for presentation support.
-			for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
-				auto& q = queueCreateInfos[i];
-				if(presentQueueInfoID == u32(-1)) {
-					VkBool32 supported {};
-					auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
-						q.queueFamilyIndex, window->surface, &supported);
-					if(res == VK_SUCCESS && supported) {
-						presentQueueInfoID = i;
-						break;
-					}
-				}
-			}
-
-			// If none found, add our own
-			if(presentQueueInfoID == u32(-1)) {
-				// The application does not create a graphics queue, so we
-				// add one.
-				for(auto qf = 0u; qf < nqf; ++qf) {
-					VkBool32 supported {};
-					auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
-						qf, window->surface, &supported);
-					if(res == VK_SUCCESS && supported) {
-						presentQueueInfoID = u32(queueCreateInfos.size());
-
-						dlg_trace("Adding new queue (for present), family {}", qf);
-						auto& q = queueCreateInfos.emplace_back();
-						q.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-						q.pQueuePriorities = &prio1;
-						q.queueFamilyIndex = qf;
-						q.queueCount = 1u;
-						break;
-					}
-				}
-			}
-
-			if(presentQueueInfoID == u32(-1)) {
-				dlg_warn("Can't create present window since no queue supports presenting to it");
-				window.reset();
-			} else {
-				// If swapchain extension wasn't enabled, enable it!
-				// TODO: we can and should probably check if the extension
-				// is supported here, first.
-				auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-				auto it = std::find(extsBegin, extsEnd, extName);
-				if(it == extsEnd) {
-					newExts = {extsBegin, extsEnd};
-					newExts.push_back(extName.data());
-
-					dlg_info("Adding {} device extension", extName);
-
-					nci.enabledExtensionCount = u32(newExts.size());
-					nci.ppEnabledExtensionNames = newExts.data();
-				}
-			}
-		}
-	}
+	nci.enabledExtensionCount = u32(newExts.size());
+	nci.ppEnabledExtensionNames = newExts.data();
 
 	nci.pQueueCreateInfos = queueCreateInfos.data();
 	nci.queueCreateInfoCount = u32(queueCreateInfos.size());
@@ -525,6 +557,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				}
 
 				auto resetSemaphores = std::move(dev.resetSemaphores);
+				lock.unlock();
+
 				auto waitStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 				std::vector<VkPipelineStageFlags> waitFlags(resetSemaphores.size(), waitStage);
 
@@ -534,14 +568,14 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				si.pWaitSemaphores = resetSemaphores.data();
 				si.pWaitDstStageMask = waitFlags.data();
 
-				lock.unlock();
 				auto fence = getFenceFromPool(dev, checkedSubmissions);
 
 				{
 					std::lock_guard queueLock(dev.queueMutex);
 					VK_CHECK(dev.dispatch.QueueSubmit(queue, 1, &si, fence));
-					VK_CHECK(dev.dispatch.WaitForFences(dev.handle, 1, &fence, true, UINT64_MAX));
 				}
+
+				VK_CHECK(dev.dispatch.WaitForFences(dev.handle, 1, &fence, true, UINT64_MAX));
 
 				auto ret = resetSemaphores.back();
 				resetSemaphores.pop_back();
@@ -682,9 +716,14 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue vkQueue) {
 	auto& queue = getData<Queue>(vkQueue);
-	auto res = queue.dev->dispatch.QueueWaitIdle(vkQueue);
-	if(res != VK_SUCCESS) {
-		return res;
+	VkResult res;
+
+	{
+		std::lock_guard lock(queue.dev->queueMutex);
+		res = queue.dev->dispatch.QueueWaitIdle(vkQueue);
+		if(res != VK_SUCCESS) {
+			return res;
+		}
 	}
 
 	// check all submissions for completion
@@ -711,9 +750,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue vkQueue) {
 
 VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.DeviceWaitIdle(device);
-	if(res != VK_SUCCESS) {
-		return res;
+	VkResult res;
+
+	{
+		std::lock_guard lock(dev.queueMutex);
+		res = dev.dispatch.DeviceWaitIdle(device);
+		if(res != VK_SUCCESS) {
+			return res;
+		}
 	}
 
 	// check all submissions for completion

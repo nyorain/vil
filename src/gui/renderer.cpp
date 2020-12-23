@@ -55,6 +55,19 @@ void Draw::Buffer::free(Device& dev) {
 }
 
 // Draw
+void swap(Draw& a, Draw& b) noexcept {
+	using std::swap;
+	swap(a.cb, b.cb);
+	swap(a.dev, b.dev);
+	swap(a.dsSelected, b.dsSelected);
+	swap(a.fence, b.fence);
+	swap(a.inUse, b.inUse);
+	swap(a.indexBuffer, b.indexBuffer);
+	swap(a.vertexBuffer, b.vertexBuffer);
+	swap(a.semaphore, b.semaphore);
+	swap(a.usedHandles, b.usedHandles);
+}
+
 void Draw::init(Device& dev) {
 	this->dev = &dev;
 

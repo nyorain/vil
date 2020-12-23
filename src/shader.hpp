@@ -1,7 +1,11 @@
 #pragma once
 
-#include "device.hpp"
+#include <fwd.hpp>
+#include <handle.hpp>
+#include <vulkan/vulkan.h>
+
 #include <memory>
+#include <vector>
 
 typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 

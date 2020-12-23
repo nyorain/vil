@@ -174,6 +174,7 @@ static bool window_draw(struct swa_window* win) {
 		UINT64_MAX, state->acquire_sem, VK_NULL_HANDLE, &id);
 	if(res == VK_SUBOPTIMAL_KHR) {
 		dlg_warn("vkAcquireNextImageKHR: suboptimal");
+		state->resized = true; // TODO: experiment
 		// success nonetheless
 	} else if(res == VK_SUCCESS) {
 		// no-op, success
@@ -218,6 +219,7 @@ static bool window_draw(struct swa_window* win) {
 	res = vkQueuePresentKHR(state->qs.present, &present_info);
 	if(res == VK_SUBOPTIMAL_KHR) {
 		dlg_warn("vkQueuePresentKHR: suboptimal");
+		state->resized = true; // TODO: experiment
 	} else if(res != VK_SUCCESS) {
 		if(res == VK_ERROR_OUT_OF_DATE_KHR) {
 			dlg_warn("Got out of date swapchain (present)");

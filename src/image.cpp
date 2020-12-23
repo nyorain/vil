@@ -35,11 +35,29 @@ ImageView::~ImageView() {
 		dlg_assert(it != fb->attachments.end());
 		fb->attachments.erase(it);
 	}
+
+	// Can't use for loop here, as descriptor will unregsiter themselves in turn
+	while(!this->descriptors.empty()) {
+		auto& dsRef = *this->descriptors.begin();
+		dlg_assert(dsRef.ds->getImageView(dsRef.binding, dsRef.elem) == this);
+		dsRef.ds->invalidateCbsLocked();
+		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
+	}
 }
 
 Sampler::~Sampler() {
 	if(!dev) {
 		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+
+	// Can't use for loop here, as descriptor will unregsiter themselves in turn
+	while(!this->descriptors.empty()) {
+		auto& dsRef = *this->descriptors.begin();
+		dlg_assert(dsRef.ds->getSampler(dsRef.binding, dsRef.elem) == this);
+		dsRef.ds->invalidateCbsLocked();
+		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
 	}
 }
 

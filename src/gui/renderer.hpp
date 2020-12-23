@@ -43,6 +43,17 @@ struct Draw {
 	std::vector<Handle*> usedHandles;
 
 	void init(Device& dev);
+
+	Draw() = default;
+
+	Draw(Draw&& rhs) noexcept { swap(*this, rhs); }
+	Draw& operator=(Draw rhs) noexcept {
+		swap(*this, rhs);
+		return *this;
+	}
+
+	friend void swap(Draw& a, Draw& b) noexcept;
+
 	~Draw();
 };
 

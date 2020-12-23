@@ -21,7 +21,7 @@ DeviceHandle::~DeviceHandle() {
 
 void DeviceHandle::invalidateCbsLocked() {
 	while(!refCbs.empty()) {
-		auto* first = refCbs[0];
+		auto* first = *refCbs.begin();
 		first->invalidateLocked();
 	}
 }

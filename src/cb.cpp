@@ -12,14 +12,11 @@ namespace fuen {
 
 // util
 void removeFromHandlesLocked(CommandBuffer& cb) {
-	(void) cb;
-
-	/*
 	// remove cb from all referenced resources
 	auto removeFromResource = [&](auto& res) {
 		// We have to lock the resource mutex since other commands buffers
 		// might add/remove them at the same time.
-		auto it = find(res.refCbs, &cb);
+		auto it = res.refCbs.find(&cb);
 		dlg_assert(it != res.refCbs.end());
 		res.refCbs.erase(it);
 	};
@@ -35,7 +32,10 @@ void removeFromHandlesLocked(CommandBuffer& cb) {
 	for(auto& handle : cb.handles) {
 		removeFromResource(*handle.second.handle);
 	}
-	*/
+
+	cb.images.clear();
+	cb.buffers.clear();
+	cb.handles.clear();
 }
 
 /*
@@ -113,7 +113,7 @@ void doReset(CommandBuffer& cb, bool invalidate = false) {
 			dlg_assert(res);
 		}
 
-		// removeFromHandlesLocked(cb);
+		removeFromHandlesLocked(cb);
 
 		// We have to lock our own mutex since other threads might read
 		// our data at the same time.
@@ -122,13 +122,17 @@ void doReset(CommandBuffer& cb, bool invalidate = false) {
 			CommandBuffer::State::initial;
 	}
 
+	cb.pipeLayouts.release();
+	cb.graphicsState = {};
+	cb.computeState = {};
+	// cb.pushConstants = {};
+
 	// lock isn't really be needed for this btw
 	// NOTE: but it's improtant we this before resetting
 	//   the used handles containers since on msvc, their
 	//   constructor allocate (which is kinda shitty but
 	//   to be expected).
 	dlg_assert(cb.pool);
-
 	auto block = cb.memBlocks;
 	cb.memBlocks = nullptr;
 	cb.memBlockOffset = 0u;
@@ -148,14 +152,12 @@ void doReset(CommandBuffer& cb, bool invalidate = false) {
 	}
 
 	(void) block;
-	/*
 	while(block) {
 		auto next = block->next;
 		block->next = cb.pool->memBlocks;
 		cb.pool->memBlocks = block;
 		block = next;
 	}
-	*/
 
 	// cb.buffers = decltype(cb.buffers)(cb);
 	// cb.images = decltype(cb.images)(cb);
@@ -163,11 +165,12 @@ void doReset(CommandBuffer& cb, bool invalidate = false) {
 
 	// It's important we do this outside the lock, might destroy
 	// shared handles.
-	cb.commands.release();
-	cb.sections.release();
-	cb.graphicsState = {};
-	cb.computeState = {};
-	// cb.pushConstants = {};
+	// cb.commands.release();
+	// cb.sections.release();
+
+	cb.section = nullptr;
+	cb.commands = nullptr;
+	cb.last = nullptr;
 
 	if(!invalidate) {
 		++cb.resetCount;
@@ -204,6 +207,8 @@ std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) 
 	dlg_assert((alignment & (alignment - 1)) == 0); // alignment must be power of two
 	dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__); // can't guarantee otherwise
 
+	// fast path: enough memory available directly inside the command buffer,
+	// simply align and advance the offset
 	if(cb.memBlocks) {
 		cb.memBlockOffset = align(cb.memBlockOffset, alignment);
 		auto remaining = i64(cb.memBlocks->size) - i64(cb.memBlockOffset);
@@ -253,36 +258,53 @@ template<typename T, SectionType ST = SectionType::none, typename... Args>
 T& addCmd(CommandBuffer& cb, Args&&... args) {
 	static_assert(std::is_base_of_v<Command, T>);
 
-	auto& cmd = allocate<T>(cb, std::forward<Args>(args)...);
-	auto ptr = CommandPtr(&cmd);
+	// We require all commands to be trivially destructible as we
+	// never destroy them. They are only meant to store data, not hold
+	// ownership of anything.
+	static_assert(std::is_trivially_destructible_v<T>);
 
-	if(!cb.sections.empty()) {
-		cmd.parent = cb.sections.back();
-		cb.sections.back()->children.emplace_back(std::move(ptr));
-	} else {
-		cb.commands.emplace_back(std::move(ptr));
-	}
+	auto& cmd = allocate<T>(cb, std::forward<Args>(args)...);
 
 	if constexpr(ST == SectionType::end || ST == SectionType::next) {
-		dlg_assert(!cb.sections.empty());
-		cb.sections.pop_back();
+		dlg_assert(cb.section);
+		dlg_assert(!cb.last || cb.last->parent == cb.section);
+		cb.last = cb.section;
+		cb.section = cb.section->parent;
 	}
+
+	if(cb.last) {
+		dlg_assert(cb.commands);
+		dlg_assert(!cb.section || cb.section == cb.last->parent);
+		cb.last->next = &cmd;
+		cmd.parent = cb.last->parent;
+	} else if(cb.section) {
+		dlg_assert(cb.commands);
+		dlg_assert(!cb.section->children);
+		cb.section->children = &cmd;
+		cmd.parent = cb.section;
+	} else if(!cb.commands) {
+		cb.commands = &cmd;
+	}
+
+	cb.last = &cmd;
+
 	if constexpr(ST == SectionType::begin || ST == SectionType::next) {
 		static_assert(std::is_convertible_v<T*, SectionCommand*>);
-		cb.sections.push_back(&cmd);
+		cb.section = &cmd;
+		cb.last = nullptr;
 	}
 
 	return cmd;
 }
 
-CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) : pool(&xpool),
-		handle(xhandle), commands(*this), images(*this),
-		buffers(*this), handles(*this), sections(*this) {
+CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
+		pool(&xpool), handle(xhandle), images(*this), buffers(*this), handles(*this),
+		pipeLayouts(*this) {
 }
 
 void CommandBuffer::invalidateLocked() {
-	// resetLocked(*this, true);
-	// TODO
+	removeFromHandlesLocked(*this);
+	// TODO: should reset data as well
 	this->state = State::invalid;
 }
 
@@ -448,7 +470,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	dlg_assert(cb.sections.empty()); // all sections must have been popped
+	dlg_assert(cb.section == nullptr); // all sections must have been popped
 
 	{
 		std::lock_guard lock(cb.dev->mutex);
@@ -475,9 +497,10 @@ using UsedBuffer = CommandBuffer::UsedBuffer;
 void addToHandle(CommandBuffer& cb, DeviceHandle& handle) {
 	(void) cb;
 	(void) handle;
-	// std::lock_guard lock(cb.dev->mutex);
+	std::lock_guard lock(cb.dev->mutex);
 	// dlg_assert(std::find(handle.refCbs.begin(), handle.refCbs.end(), &cb) == handle.refCbs.end());
-	// handle.refCbs.push_back(&cb);
+	auto [it, success] = handle.refCbs.insert(&cb);
+	dlg_assert(success);
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
@@ -517,22 +540,23 @@ UsedImage& /*void*/ useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
 
 	// NOTE: add swapchain in case it's a swapchain image?
 	// shouldn't be needed though.
-	dlg_assert(image.memory || image.swapchain);
-	if(image.memory) {
-		useHandle(cb, cmd, *image.memory);
-	}
+	// dlg_assert(image.memory || image.swapchain);
+	// if(image.memory) {
+	// 	useHandle(cb, cmd, *image.memory);
+	// }
 
 	return it->second;
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = true) {
+	(void) useImg;
 	auto h64 = handleToU64(view.handle);
 	useHandle(cb, cmd, h64, view);
 
-	dlg_assert(view.img);
-	if(useImg && view.img) {
-		useHandle(cb, cmd, *view.img);
-	}
+	// dlg_assert(view.img);
+	// if(useImg && view.img) {
+	// 	useHandle(cb, cmd, *view.img);
+	// }
 }
 
 /*UsedBuffer&*/ void useHandle(CommandBuffer& cb, Command& cmd, Buffer& buf) {
@@ -549,10 +573,10 @@ void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = t
 	dlg_assert(it->second.buffer);
 	it->second.commands.push_back(&cmd);
 
-	dlg_assert(buf.memory);
-	if(buf.memory) {
-		useHandle(cb, cmd, *buf.memory);
-	}
+	// dlg_assert(buf.memory);
+	// if(buf.memory) {
+	// 	useHandle(cb, cmd, *buf.memory);
+	// }
 
 	// return it->second;
 }
@@ -561,10 +585,10 @@ void useHandle(CommandBuffer& cb, Command& cmd, BufferView& view) {
 	auto h64 = handleToU64(view.handle);
 	useHandle(cb, cmd, h64, view);
 
-	dlg_assert(view.buffer);
-	if(view.buffer) {
-		useHandle(cb, cmd, *view.buffer);
-	}
+	// dlg_assert(view.buffer);
+	// if(view.buffer) {
+	// 	useHandle(cb, cmd, *view.buffer);
+	// }
 }
 
 /*CommandBuffer::UsedImage&*/ void useHandle(CommandBuffer& cb, Command& cmd, Image& image,
@@ -681,7 +705,7 @@ template<typename BeginInfo>
 void cmdBeginRenderPass(CommandBuffer& cb,
 		const BeginInfo*               pRenderPassBegin,
 		VkSubpassContents              contents) {
-	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb, cb);
+	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
 
 	cmd.clearValues = copySpan(cb, pRenderPassBegin->pClearValues, pRenderPassBegin->clearValueCount);
 	cmd.info = *pRenderPassBegin;
@@ -733,7 +757,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 	// TODO; figure this out, should subpass be whole section?
 	// but then how to handle first subpass?
 	// addNextSection(cb, std::move(cmd));
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb, cb);
+	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
 	cmd.subpassContents = contents;
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
@@ -763,7 +787,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 	// TODO; figure this out, should subpass be whole section?
 	// but then how to handle first subpass?
 	// addNextSection(cb, std::move(cmd));
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb, cb);
+	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
 	cmd.subpassContents = pSubpassBeginInfo->contents;
 	cb.dev->dispatch.CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
 }
@@ -799,12 +823,15 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// alive while recording).
 	// Since we might need it lateron, we acquire shared ownership.
 	// Also like this in CmdPushConstants
-	cmd.pipeLayout = cb.dev->pipeLayouts.getPtr(layout);
+	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	cb.pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
 
+		/*
 		for(auto b = 0u; b < ds.bindings.size(); ++b) {
 			auto cat = category(ds.layout->bindings[b].descriptorType);
 			if(cat == DescriptorCategory::image) {
@@ -845,6 +872,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 				}
 			}
 		}
+		*/
 
 		useHandle(cb, cmd, ds);
 		cmd.sets[i] = &ds;
@@ -1452,11 +1480,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb, cb);
+	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb);
 
 	auto* c = pLabelInfo->color;
 	cmd.color = {c[0], c[1], c[2], c[3]};
-	cmd.name = pLabelInfo->pLabelName;
+	cmd.name = copyString(cb, pLabelInfo->pLabelName);
 
 	if(cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(commandBuffer, pLabelInfo);
@@ -1596,7 +1624,10 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	auto& cmd = addCmd<PushConstantsCmd>(cb);
 
 	// NOTE: See BindDescriptorSets for rationale on handling here.
-	cmd.layout = cb.dev->pipeLayouts.getPtr(pipeLayout);
+
+	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(pipeLayout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	cb.pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.stages = stageFlags;
 	cmd.offset = offset;

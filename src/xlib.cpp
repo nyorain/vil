@@ -4,6 +4,7 @@
 #include <swa/swa.h>
 #include <gui/gui.hpp>
 #include <overlay.hpp>
+#include <platform.hpp>
 #include <swa/x11.h>
 
 #include <X11/keysym.h>
@@ -13,68 +14,17 @@
 
 namespace fuen {
 
-struct X11Platform : Platform {
-	swa_display* dpy {};
-	swa_window* window {};
-	bool toggleDown {};
-
-	bool doGrab {};
-	bool grabDown {};
-
-	// x11 stuff
+struct X11Platform : SwaPlatform {
 	u32 surfaceWindow {};
 	xcb_connection_t* connection;
 	xcb_key_symbols_t* symbols;
-
 	xcb_connection_t* origConnection;
 
 	void init(Device& dev, unsigned width, unsigned height) override;
-	void resize(unsigned width, unsigned height) override;
-	bool updateShow() override;
+	bool pressed(u32 key) const override;
 	bool update(Gui& gui) override;
+	void activateWindow(bool doActivate) override;
 };
-
-namespace {
-
-void cbMouseMove(swa_window*, const swa_mouse_move_event* ev) {
-	// dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
-	ImGui::GetIO().MousePos.x = ev->x;
-	ImGui::GetIO().MousePos.y = ev->y;
-}
-
-void cbMouseButton(swa_window*, const swa_mouse_button_event* ev) {
-	if(ev->button > 0 && ev->button < 6) {
-		ImGui::GetIO().MouseDown[unsigned(ev->button) - 1] = ev->pressed;
-	}
-}
-
-void cbMouseCross(swa_window*, const swa_mouse_cross_event* ev) {
-	if(ev->entered) {
-		ImGui::GetIO().MousePos.x = ev->x;
-		ImGui::GetIO().MousePos.y = ev->y;
-	} else {
-		ImGui::GetIO().MousePos.x = -FLT_MAX;
-		ImGui::GetIO().MousePos.y = -FLT_MAX;
-	}
-}
-
-void cbKey(swa_window*, const swa_key_event* ev) {
-	// dlg_trace("overlay key: {} {}", ev->keycode, ev->pressed);
-	if(ev->keycode < 512) {
-		ImGui::GetIO().KeysDown[ev->keycode] = ev->pressed;
-	}
-
-	if(ev->utf8 && *ev->utf8) {
-		ImGui::GetIO().AddInputCharactersUTF8(ev->utf8);
-	}
-}
-
-void cbMouseWheel(swa_window*, float x, float y) {
-	ImGui::GetIO().MouseWheel = y;
-	ImGui::GetIO().MouseWheelH = x;
-}
-
-} // anon namespace
 
 void X11Platform::init(Device& dev, unsigned width, unsigned height) {
 	// init display
@@ -84,40 +34,19 @@ void X11Platform::init(Device& dev, unsigned width, unsigned height) {
 	this->connection = swa_display_x11_connection(dpy);
 	this->symbols = xcb_key_symbols_alloc(this->connection);
 
-	// init window
-	static swa_window_listener listener;
-	listener.mouse_move = cbMouseMove;
-	listener.mouse_cross = cbMouseCross;
-	listener.mouse_button = cbMouseButton;
-	listener.mouse_wheel = cbMouseWheel;
-	listener.key = cbKey;
-
-	swa_window_settings ws;
-	swa_window_settings_default(&ws);
-	ws.title = "fuencaliente";
-	ws.width = width;
-	ws.height = height;
-	ws.listener = &listener;
-	ws.surface = swa_surface_none;
-	ws.input_only = true;
-	ws.hide = true;
-	ws.parent = (void*)(std::uintptr_t) this->surfaceWindow;
-	ws.cursor.type = swa_cursor_left_pointer;
-	window = swa_display_create_window(dpy, &ws);
-	dlg_assert(window);
-
-	(void) dev;
+	initWindow(dev, (void*)(uintptr_t) this->surfaceWindow, width, height);
 }
 
-void X11Platform::resize(unsigned width, unsigned height) {
-	(void) width;
-	(void) height;
-	swa_window_set_size(window, width, height);
-	xcb_flush(connection);
-}
+bool X11Platform::pressed(u32 key) const {
+	auto keycode = [&]{
+		switch(key) {
+			case swa_key_backslash:	return XK_backslash;
+			case swa_key_f: return XK_F;
+			default: dlg_error("Unexpected key"); return 0;
+		}
+	}();
 
-bool X11Platform::updateShow() {
-	xcb_keycode_t* keyCodes = xcb_key_symbols_get_keycode(symbols, XK_C);
+	xcb_keycode_t* keyCodes = xcb_key_symbols_get_keycode(symbols, keycode);
 	dlg_assert(keyCodes);
 
 	xcb_query_keymap_cookie_t keymapCookie = xcb_query_keymap(connection);
@@ -133,79 +62,46 @@ bool X11Platform::updateShow() {
 	free(keyCodes);
 	free(keys);
 
-	if(pressed) {
-		toggleDown = true;
-	} else if(toggleDown) {
-		// dlg_trace("showing overlay");
-
-		swa_window_show(window, true);
-		xcb_flush(connection);
-
-		doGrab = true;
-		toggleDown = false;
-		grabDown = false;
-
-		return true;
-	}
-
-	return false;
+	return pressed;
 }
 
 bool X11Platform::update(Gui& gui) {
-	gui.makeImGuiCurrent();
-
-	if(doGrab) {
+	if(status == Status::focused) {
+		// re-activate force grab
 		xcb_ungrab_pointer(this->origConnection, XCB_TIME_CURRENT_TIME);
 		xcb_ungrab_keyboard(this->origConnection, XCB_TIME_CURRENT_TIME);
 		xcb_flush(this->origConnection);
 
 		auto xwin = (xcb_window_t)(uintptr_t) swa_window_native_handle(window);
 		auto gpc = xcb_grab_pointer(this->connection, true, xwin, 0,
-			XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, xwin,
+			XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, /*xwin*/ XCB_NONE,
 			XCB_NONE, XCB_TIME_CURRENT_TIME);
 		auto gkc = xcb_grab_keyboard(this->connection, true, xwin, XCB_TIME_CURRENT_TIME,
 			XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
 
 		auto rp = xcb_grab_pointer_reply(connection, gpc, nullptr);
-		// dlg_trace("pointer status: {}", (u32) rp->status);
-		auto rk = xcb_grab_keyboard_reply(connection, gkc, nullptr);
-		// dlg_trace("keyboard status: {}", (u32) rk->status);
-		(void) rp;
-		(void) rk;
-	}
-
-	// TODO: call multiple times?
-	swa_display_dispatch(dpy, false);
-
-	if(ImGui::GetIO().KeysDown[swa_key_f]) {
-		grabDown = true;
-	} else if(grabDown) {
-		grabDown = false;
-		doGrab = !doGrab;
-		// dlg_info("toggle grab: {}", doGrab);
-
-		if(!doGrab) {
-			xcb_ungrab_pointer(this->connection, XCB_TIME_CURRENT_TIME);
-			xcb_ungrab_keyboard(this->connection, XCB_TIME_CURRENT_TIME);
-			xcb_flush(this->connection);
+		if(rp->status != XCB_GRAB_STATUS_SUCCESS) {
+			dlg_trace("pointer grab failed: {}", (u32) rp->status);
 		}
 
-		swa_window_show(window, doGrab);
-		xcb_flush(connection);
+		auto rk = xcb_grab_keyboard_reply(connection, gkc, nullptr);
+		if(rk->status != XCB_GRAB_STATUS_SUCCESS) {
+			dlg_trace("pointer grab failed: {}", (u32) rk->status);
+		}
 	}
 
-	auto ret = true;
-	if(ImGui::GetIO().KeysDown[swa_key_c]) {
-		toggleDown = true;
-	} else if(toggleDown) {
-		dlg_trace("hiding overlay");
-		swa_window_show(window, false);
-		xcb_flush(connection);
-		ret = false;
-		toggleDown = false;
+	return SwaPlatform::update(gui);
+}
+
+void X11Platform::activateWindow(bool doActivate) {
+	if(!doActivate) {
+		// end our grab
+		xcb_ungrab_pointer(this->connection, XCB_TIME_CURRENT_TIME);
+		xcb_ungrab_keyboard(this->connection, XCB_TIME_CURRENT_TIME);
+		xcb_flush(this->connection);
 	}
 
-	return ret;
+	SwaPlatform::activateWindow(doActivate);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(

@@ -46,6 +46,8 @@ void CommandBufferGui::draw() {
 		if(cb_->resetCount != resetCount_) {
 			// try to find a new command matching the old ones description
 			command_ = CommandDescription::find(*cb_, desc_);
+
+			/*
 			if(!desc_.empty()) {
 				std::string indent = "  ";
 				for(auto& lvl : desc_) {
@@ -58,6 +60,8 @@ void CommandBufferGui::draw() {
 
 				dlg_trace("-> new command: {}", command_);
 			}
+			*/
+
 			hooked_.needsUpdate = true;
 		}
 
@@ -236,10 +240,12 @@ VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
 }
 
 // void CommandBufferGui::hookRecord(const std::vector<CommandPtr>& commands) {
-void CommandBufferGui::hookRecord(const CommandVector<CommandPtr>& commands) {
+// void CommandBufferGui::hookRecord(const CommandVector<CommandPtr>& commands) {
+void CommandBufferGui::hookRecord(const Command* cmd) {
 	auto& dev = gui_->dev();
-	for(auto& cmd : commands) {
-		if(cmd.get() == command_ && hooked_.query) {
+
+	while(cmd) {
+		if(cmd == command_ && hooked_.query) {
 			// dev.dispatch.CmdWriteTimestamp(hooked_.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, hooked_.queryPool, 0);
 			dev.dispatch.CmdWriteTimestamp(hooked_.cb, hooked_.queryEnd, hooked_.queryPool, 0);
 		}
@@ -248,15 +254,17 @@ void CommandBufferGui::hookRecord(const CommandVector<CommandPtr>& commands) {
 
 		// TODO: dynamic cast kinda ugly.
 		// We should probably have a general visitor mechanism instead
-		if(auto sectionCmd = dynamic_cast<const SectionCommand*>(cmd.get()); sectionCmd) {
+		if(auto sectionCmd = dynamic_cast<const SectionCommand*>(cmd); sectionCmd) {
 			hookRecord(sectionCmd->children);
 		}
 
-		if(cmd.get() == command_ && hooked_.query) {
+		if(cmd == command_ && hooked_.query) {
 			dev.dispatch.CmdWriteTimestamp(hooked_.cb, hooked_.queryStart, hooked_.queryPool, 1);
 			dev.dispatch.CmdWriteTimestamp(hooked_.cb, hooked_.queryEnd, hooked_.queryPool, 2);
 			// dev.dispatch.CmdWriteTimestamp(hooked_.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, hooked_.queryPool, 3);
 		}
+
+		cmd = cmd->next;
 	}
 }
 

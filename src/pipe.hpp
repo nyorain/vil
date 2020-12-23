@@ -1,13 +1,25 @@
 #pragma once
 
-#include "device.hpp"
-#include "shader.hpp"
+#include <fwd.hpp>
+#include <handle.hpp>
+#include <intrusive.hpp>
+#include <vulkan/vulkan.h>
 
 #include <memory>
 #include <cstdlib>
 #include <unordered_set>
 
 namespace fuen {
+
+struct PipelineLayout : DeviceHandle {
+	VkPipelineLayout handle;
+	std::vector<DescriptorSetLayout*> descriptors;
+	std::vector<VkPushConstantRange> pushConstants;
+
+	std::atomic<u32> refCount {0}; // intrusive ref count
+
+	~PipelineLayout();
+};
 
 struct PipelineShaderStage {
 	VkShaderStageFlagBits stage;
@@ -25,10 +37,11 @@ struct Pipeline : DeviceHandle {
 	VkPipeline handle {};
 	VkPipelineBindPoint type {};
 
-	// TODO: don't need shared ownership of the handle here, just
+	// TODO: strictly speaking don't need shared ownership of the handle here, just
 	// of the data it holds. Separate handle and description into separate
-	// shared-owned objects?
-	std::shared_ptr<PipelineLayout> layout {};
+	// shared-owned objects? On the other hand, shouldn't hurt to keep it
+	// alive here either, should be cheap.
+	IntrusivePtr<PipelineLayout> layout {};
 
 protected:
 	// Make sure Pipeline objects are not created.
@@ -65,14 +78,6 @@ struct GraphicsPipeline : Pipeline {
 
 struct ComputePipeline : Pipeline {
 	PipelineShaderStage stage;
-};
-
-struct PipelineLayout : DeviceHandle {
-	VkPipelineLayout handle;
-	std::vector<DescriptorSetLayout*> descriptors;
-	std::vector<VkPushConstantRange> pushConstants;
-
-	~PipelineLayout();
 };
 
 // See vulkan section "pipeline layout compatibility"

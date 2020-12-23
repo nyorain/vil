@@ -42,7 +42,8 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	bool canHaveView =
 		!image.swapchain &&
 		image.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
-		image.samplerType != Image::SamplerType::none;
+		image.samplerType != Image::SamplerType::none &&
+		image.ci.samples == VK_SAMPLE_COUNT_1_BIT;
 	if(image_.object != &image) {
 		if(image_.view) {
 			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
@@ -84,51 +85,48 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
 		}
 
-		// TODO: check if images supports sampling in the first place!
-		if(!image.swapchain) {
-			auto getViewType = [&]{
-				switch(image.ci.imageType) {
-					case VK_IMAGE_TYPE_1D:
-						image_.draw.type = DrawGuiImage::e1d;
-						return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
-					case VK_IMAGE_TYPE_2D:
-						image_.draw.type = DrawGuiImage::e2d;
-						return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-					case VK_IMAGE_TYPE_3D:
-						image_.draw.type = DrawGuiImage::e3d;
-						return VK_IMAGE_VIEW_TYPE_3D;
-					default:
-						dlg_error("Unsupported image type");
-						return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
-				}
-			};
+		auto getViewType = [&]{
+			switch(image.ci.imageType) {
+				case VK_IMAGE_TYPE_1D:
+					image_.draw.type = DrawGuiImage::e1d;
+					return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
+				case VK_IMAGE_TYPE_2D:
+					image_.draw.type = DrawGuiImage::e2d;
+					return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+				case VK_IMAGE_TYPE_3D:
+					image_.draw.type = DrawGuiImage::e3d;
+					return VK_IMAGE_VIEW_TYPE_3D;
+				default:
+					dlg_error("Unsupported image type");
+					return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+			}
+		};
 
-			VkImageViewCreateInfo ivi {};
-			ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-			ivi.image = image.handle;
-			ivi.viewType = getViewType();
-			ivi.format = image.ci.format;
-			ivi.subresourceRange = image_.newSubres;
+		VkImageViewCreateInfo ivi {};
+		ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		ivi.image = image.handle;
+		ivi.viewType = getViewType();
+		ivi.format = image.ci.format;
+		ivi.subresourceRange = image_.newSubres;
 
-			VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &image_.view));
-			nameHandle(dev, image_.view, "ResourceGui:image_.view");
+		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &image_.view));
+		nameHandle(dev, image_.view, "ResourceGui:image_.view");
 
-			VkDescriptorImageInfo dsii {};
-			dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			dsii.imageView = image_.view;
-			dsii.sampler = image.samplerType == Image::SamplerType::linear ?
-				dev.renderData->linearSampler :
-				dev.renderData->nearestSampler;
+		VkDescriptorImageInfo dsii {};
+		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		dsii.imageView = image_.view;
+		dsii.sampler = image.samplerType == Image::SamplerType::linear ?
+			dev.renderData->linearSampler :
+			dev.renderData->nearestSampler;
 
-			VkWriteDescriptorSet write {};
-			write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			write.descriptorCount = 1u;
-			write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			write.dstSet = draw.dsSelected;
-			write.pImageInfo = &dsii;
+		VkWriteDescriptorSet write {};
+		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write.descriptorCount = 1u;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		write.dstSet = draw.dsSelected;
+		write.pImageInfo = &dsii;
 
-			dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
-		}
+		dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 
 		image_.subres = image_.newSubres;
 	}
@@ -180,6 +178,8 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		ImGui::Text("Image can't be displayed since it's a swapchain image");
 	} else if(image.samplerType == Image::SamplerType::none) {
 		ImGui::Text("Image can't be displayed since its format does not support sampling");
+	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
+		ImGui::Text("Image can't be displayed since it has multiple samples");
 	} else if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
 		// TODO: well, we could still try to display it.
 		// But we have to modify our barrier logic a bit.
@@ -493,6 +493,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 			continue;
 		}
 
+		/*
 		auto weakButton = [&](auto& wptr) {
 			auto ptr = wptr.lock();
 			if(!ptr) {
@@ -502,6 +503,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 
 			resourceRefButton(*gui_, *ptr);
 		};
+		*/
 
 		auto print = [&](VkDescriptorType type, const DescriptorSet::Binding& binding) {
 			if(!binding.valid) {
@@ -511,45 +513,40 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 
 			switch(type) {
 				case VK_DESCRIPTOR_TYPE_SAMPLER: {
-					auto& img = std::get<DescriptorSet::ImageInfo>(binding.data);
-					weakButton(img.sampler);
+					resourceRefButton(*gui_, *binding.imageInfo.sampler);
 					break;
 				} case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
-					auto& img = std::get<DescriptorSet::ImageInfo>(binding.data);
-					weakButton(img.imageView);
-					// ImGui::SameLine();
-					if(!isEmpty(img.sampler)) {
-						weakButton(img.sampler);
-						// ImGui::SameLine();
+					resourceRefButton(*gui_, *binding.imageInfo.imageView);
+					// might be null since immutable in pipe-layout
+					if(binding.imageInfo.sampler) {
+						resourceRefButton(*gui_, *binding.imageInfo.sampler);
 					}
-					imGuiText("{}", vk::name(img.layout));
+					imGuiText("{}", vk::name(binding.imageInfo.layout));
 					break;
 				}
 				case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
 				case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
 				case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
-					auto& img = std::get<DescriptorSet::ImageInfo>(binding.data);
-					weakButton(img.imageView);
+					resourceRefButton(*gui_, *binding.imageInfo.imageView);
 					ImGui::SameLine();
-					imGuiText("{}", vk::name(img.layout));
+					imGuiText("{}", vk::name(binding.imageInfo.layout));
 					break;
 				}
 				case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
 				case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER: {
-					auto& bv = std::get<std::weak_ptr<BufferView>>(binding.data);
-					weakButton(bv);
+					resourceRefButton(*gui_, *binding.bufferView);
 					break;
 				}
 				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
 				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
 				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
 				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: {
-					auto& buf = std::get<DescriptorSet::BufferInfo>(binding.data);
-					weakButton(buf.buffer);
+					resourceRefButton(*gui_, *binding.bufferInfo.buffer);
 					ImGui::SameLine();
-					imGuiText("Offset {}, Size", buf.offset);
+					imGuiText("Offset {}, Size", binding.bufferInfo.offset);
 					ImGui::SameLine();
-					buf.range == VK_WHOLE_SIZE ? imGuiText("wholeSize") : imGuiText("{}", buf.range);
+					auto range = binding.bufferInfo.range;
+					range == VK_WHOLE_SIZE ? imGuiText("wholeSize") : imGuiText("{}", range);
 					break;
 				}
 				default:

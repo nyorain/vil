@@ -28,14 +28,4 @@ struct Overlay {
 		const VkSwapchainCreateInfoKHR& b);
 };
 
-// Can be associated with a VkSurfaceKHR
-struct Platform {
-	virtual ~Platform() = default;
-
-	virtual void init(Device& dev, unsigned width, unsigned height) = 0;
-	virtual void resize(unsigned width, unsigned height) = 0;
-	virtual bool updateShow() = 0;
-	virtual bool update(Gui& gui) = 0;
-};
-
 } // namespace fuen

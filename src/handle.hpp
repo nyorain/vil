@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include <atomic>
+#include <unordered_set>
 
 #include <vulkan/vulkan.h>
 
@@ -32,7 +33,7 @@ struct DeviceHandle : Handle {
 	// current record state.
 	// On destruction, the handle will inform all of them that they
 	// are now in an invalid state.
-	std::vector<CommandBuffer*> refCbs;
+	std::unordered_set<CommandBuffer*> refCbs;
 
 	// Expects that neither the device mutex nor its own mutex is locked.
 	~DeviceHandle();

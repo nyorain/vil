@@ -11,6 +11,12 @@
 #include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
 
+// See ~Command
+#ifdef __GNUC__
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+#endif // __GNUC__
+
 namespace fuen {
 
 // The list of commands in a CommandBuffer is organized as a tree.
@@ -39,7 +45,13 @@ struct Command {
 
 	using TypeFlags = nytl::Flags<Type>;
 
-	virtual ~Command() = default;
+	// NOTE: Commands should never have a non-trivial destructor (that is
+	// static_assert'd in addCmd) since it won't be called. We do this
+	// so that resetting command buffers does not add significant overhead
+	// as we can have *a lot* of commands in a command buffer.
+	// When special commands need resources with destructor, those should
+	// be separately stored in the command buffer.
+	~Command() = default;
 
 	// Display a one-line overview of the command via ImGui.
 	// Commands with children should display themselves as tree nodes.
@@ -80,6 +92,9 @@ struct Command {
 
 	// Might be null for toplevel commands
 	SectionCommand* parent {};
+
+	// Forms a linked list with siblings
+	Command* next {};
 };
 
 NYTL_FLAG_OPS(Command::Type)
@@ -113,32 +128,29 @@ struct CommandDescription {
 };
 
 // Expects T to be a container over Command pointers
-template<typename T>
-const Command* displayCommands(const T& container, const Command* selected,
+inline const Command* displayCommands(Command* cmd, const Command* selected,
 		Command::TypeFlags typeFlags) {
 	// TODO: should use imgui list clipper, might have *a lot* of commands here.
 	// But first we have to restrict what cmd->display can actually do.
 	// Would also have to pre-filter command for that :(
 	const Command* ret = nullptr;
-	for(auto& cmd : container) {
-		if(!(typeFlags & cmd->type())) {
-			continue;
+	while(cmd) {
+		if((typeFlags & cmd->type())) {
+			ImGui::Separator();
+			if(auto reti = cmd->display(selected, typeFlags); reti) {
+				dlg_assert(!ret);
+				ret = reti;
+			}
 		}
 
-		ImGui::Separator();
-		if(auto reti = cmd->display(selected, typeFlags); reti) {
-			dlg_assert(!ret);
-			ret = reti;
-		}
+		cmd = cmd->next;
 	}
 
 	return ret;
 }
 
 struct SectionCommand : Command {
-	CommandVector<CommandPtr> children;
-
-	SectionCommand(CommandBuffer& cb) : children(cb) {}
+	Command* children {};
 
 	const Command* display(const Command* selected, TypeFlags typeFlags) const override {
 		// auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
@@ -388,7 +400,7 @@ struct BindIndexBufferCmd : Command {
 struct BindDescriptorSetCmd : Command {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
-	std::shared_ptr<PipelineLayout> pipeLayout;
+	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
 	span<DescriptorSet*> sets;
 	span<u32> dynamicOffsets;
 
@@ -676,7 +688,7 @@ struct ExecuteCommandsCmd : Command {
 };
 
 struct BeginDebugUtilsLabelCmd : SectionCommand {
-	std::string name;
+	const char* name {};
 	std::array<float, 4> color; // TODO: could use this in UI
 
 	using SectionCommand::SectionCommand;
@@ -711,7 +723,7 @@ struct BindPipelineCmd : Command {
 };
 
 struct PushConstantsCmd : Command {
-	std::shared_ptr<PipelineLayout> layout;
+	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
 	VkShaderStageFlags stages {};
 	u32 offset {};
 	span<std::byte> values;
@@ -860,3 +872,7 @@ struct CopyQueryPoolResultsCmd : Command {
 };
 
 } // namespace fuen
+
+#ifdef __GNUC__
+	#pragma GCC diagnostic pop
+#endif // __GNUC__

@@ -66,6 +66,8 @@ v0.1, goal: end of january 2021
 - [ ] we have to check in barrier commands whether the image was put into
       concurrent mode by us, and if so, set queue families to ignored
 	  (otherwise we get a spec error)
+- [ ] correctly store pNext chain when recording command buffers.
+      (alternative: at least set them to nullptr...)
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
@@ -163,6 +165,8 @@ v0.1, goal: end of january 2021
 - [ ] add example image to readme (with real-world application if possible)
 - [ ] move external source into extra folder
 - [x] rename cbState.hpp -> boundState.hpp? or just bound.hpp?
+- [ ] related to command buffer groups: simply view all commands pushed
+      to a queue?
 - [ ] A lot of sources can be moved to src/gui
 	- [ ] rename imguiutil. Move to gui
 - [ ] before release: test on windows & linux, on all owned hardware
@@ -171,6 +175,10 @@ not sure if viable for first version:
 - [ ] stress test using a real vulkan-based game. Test e.g. with doom eternal
 
 Possibly for later, new features/ideas:
+- [ ] can we support viewing multisample images?
+      either sample them directly in shader (requires a whole lotta new 
+	  shader permuatations, not sure if supported everywhere) or resolve
+	  into temporary image first (lot of work as well)
 - [ ] we might be able to not lock the device mutex for all the time we lock
       the ui (which can be a serious problem) by relying on weak/shared pointers
 	  eveywhere (making concurrently happening resource destruction no problem) 

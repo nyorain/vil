@@ -17,11 +17,11 @@ struct Instance {
 	VkInstance handle {};
 
 	struct {
-		u32 version;
-		u32 apiVersion;
-		u32 engineVersion;
-		std::string name;
-		std::string engineName;
+		u32 version {};
+		u32 apiVersion {};
+		u32 engineVersion {};
+		std::string name {};
+		std::string engineName {};
 	} app;
 
 	// We only create one display per instance.

@@ -4,6 +4,7 @@
 #include <swapchain.hpp>
 #include <image.hpp>
 #include <rp.hpp>
+#include <platform.hpp>
 #include <cb.hpp>
 #include <sync.hpp>
 #include <ds.hpp>
@@ -39,6 +40,14 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	dlg_default_output(origin, string, data);
 }
 #endif // BREAK_ON_ERROR
+
+std::size_t DescriptorSetRef::Hash::operator()(const DescriptorSetRef& dsr) const noexcept {
+	auto h = std::size_t(0);
+	hash_combine(h, dsr.ds);
+	hash_combine(h, dsr.binding);
+	hash_combine(h, dsr.elem);
+	return h;
+}
 
 // Classes
 Instance::~Instance() {
@@ -95,15 +104,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	auto iniPtr = std::make_unique<Instance>();
 	auto& ini = *iniPtr;
 
-	// TODO: allow to disable separate window creation via compile-time
-	// flag (not even compiling/requiring swa) and environment variable.
-	// ini.display = swa_display_autocreate("fuencaliente");
-
 	auto extsBegin = ci->ppEnabledExtensionNames;
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
 
 	std::vector<const char*> newExts; // keep-alive
 	auto nci = *ci;
+
+	// TODO: remove this
 	/*
 	if(ini.display) {
 		newExts = {extsBegin, extsEnd};
@@ -184,6 +191,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		return str ? str : "";
 	};
 
+	ini.app.apiVersion = VK_API_VERSION_1_0;
 	if(ci->pApplicationInfo) {
 		ini.app.apiVersion = ci->pApplicationInfo->apiVersion;
 		ini.app.version = ci->pApplicationInfo->applicationVersion;
@@ -500,9 +508,11 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 		return inid->dispatch.GetInstanceProcAddr(ini, funcName);
 	}
 
-	// special case: functions that don't need instance
+	// special case: functions that don't need instance.
 	auto& hooked = it->second;
 	if(std::strcmp(funcName, "vkGetInstanceProcAddr") == 0 ||
+			// TODO: ??? why is this needed for dota??
+			std::strcmp(funcName, "vkCreateDevice") == 0 ||
 			std::strcmp(funcName, "vkCreateInstance") == 0) {
 		return hooked.func;
 	}

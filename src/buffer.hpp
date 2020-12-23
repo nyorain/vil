@@ -9,7 +9,8 @@ struct Buffer : MemoryResource {
 	VkBuffer handle {};
 	VkBufferCreateInfo ci;
 
-	std::vector<BufferView*> views;
+	std::vector<BufferView*> views; // TODO: unordered_set?
+	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> descriptors;
 
 	~Buffer();
 };
@@ -18,6 +19,8 @@ struct BufferView : DeviceHandle {
 	VkBufferView handle;
 	VkBufferViewCreateInfo ci;
 	Buffer* buffer {};
+
+	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> descriptors;
 
 	~BufferView();
 };

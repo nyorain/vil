@@ -11,14 +11,14 @@ void fillIn(CommandDescription& ret, const CommandBuffer& cb, const Command& cmd
 	ret.command = cmd.nameDesc();
 	ret.arguments = cmd.argumentsDesc();
 
-	auto* siblings = &cb.commands;
+	auto* sibling = cb.commands;
 	if(cmd.parent) {
-		siblings = &cmd.parent->children;
+		sibling = cmd.parent->children;
 	}
 
 	bool before = true;
-	for(auto& sibling : *siblings) {
-		if(sibling.get() == &cmd) {
+	while(sibling) {
+		if(sibling == &cmd) {
 			before = false;
 		}
 
@@ -29,6 +29,8 @@ void fillIn(CommandDescription& ret, const CommandBuffer& cb, const Command& cmd
 				++ret.id;
 			}
 		}
+
+		sibling = sibling->next;
 	}
 
 	dlg_assert(!before);
@@ -71,14 +73,14 @@ Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDes
 	// the nearest parent we could find (maybe require an even higher
 	// threshold though since jumping to a false parent sucks).
 	// Maybe control that behavior via an external argument
-	auto findCandidates = [](const auto& cmds, const CommandDescription& desc) -> std::vector<Candidate> {
+	auto findCandidates = [](Command* cmd, const CommandDescription& desc) -> std::vector<Candidate> {
 		std::vector<Candidate> candidates;
-		for(auto& cmd : cmds) {
-			if(cmd->nameDesc() != desc.command) {
-				continue;
+		while(cmd) {
+			if(cmd->nameDesc() == desc.command) {
+				candidates.push_back({cmd, 0.f});
 			}
 
-			candidates.push_back({cmd.get(), 0.f});
+			cmd = cmd->next;
 		}
 
 		for(auto c = 0u; c < candidates.size(); ++c) {
@@ -688,7 +690,7 @@ void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
 
 void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	VkDebugUtilsLabelEXT label {};
-	label.pLabelName = name.c_str();
+	label.pLabelName = this->name;
 	std::memcpy(&label.color, this->color.data(), sizeof(label.color));
 	dev.dispatch.CmdBeginDebugUtilsLabelEXT(cb, &label);
 }
@@ -711,7 +713,7 @@ void BindPipelineCmd::displayInspector(Gui& gui) const {
 }
 
 void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdPushConstants(cb, layout->handle, stages, offset,
+	dev.dispatch.CmdPushConstants(cb, pipeLayout->handle, stages, offset,
 		u32(values.size()), values.data());
 }
 

@@ -14,6 +14,14 @@ Buffer::~Buffer() {
 	for(auto* view : this->views) {
 		view->buffer = nullptr;
 	}
+
+	// Can't use for loop here, as descriptor will unregsiter themselves in turn
+	while(!this->descriptors.empty()) {
+		auto& dsRef = *this->descriptors.begin();
+		dlg_assert(dsRef.ds->getBuffer(dsRef.binding, dsRef.elem) == this);
+		dsRef.ds->invalidateCbsLocked();
+		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
+	}
 }
 
 BufferView::~BufferView() {
@@ -27,6 +35,14 @@ BufferView::~BufferView() {
 		auto it = std::find(this->buffer->views.begin(), this->buffer->views.end(), this);
 		dlg_assert(it != this->buffer->views.end());
 		this->buffer->views.erase(it);
+	}
+
+	// Can't use for loop here, as descriptor will unregsiter themselves in turn
+	while(!this->descriptors.empty()) {
+		auto& dsRef = *this->descriptors.begin();
+		dlg_assert(dsRef.ds->getBufferView(dsRef.binding, dsRef.elem) == this);
+		dsRef.ds->invalidateCbsLocked();
+		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
 	}
 }
 

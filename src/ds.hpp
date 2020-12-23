@@ -1,6 +1,10 @@
 #pragma once
 
-#include <device.hpp>
+#include <fwd.hpp>
+#include <handle.hpp>
+#include <intrusive.hpp>
+#include <vulkan/vulkan.h>
+
 #include <optional>
 #include <variant>
 
@@ -15,6 +19,8 @@ enum class DescriptorCategory {
 };
 
 DescriptorCategory category(VkDescriptorType);
+bool needsSampler(VkDescriptorType);
+bool needsImageView(VkDescriptorType);
 
 struct DescriptorPool : DeviceHandle {
 	VkDescriptorPool handle {};
@@ -31,6 +37,9 @@ struct DescriptorSetLayout : DeviceHandle {
 
 	// Static after creation. Ordered by binding.
 	std::vector<VkDescriptorSetLayoutBinding> bindings;
+	std::vector<std::vector<VkSampler>> immutableSamplers;
+
+	std::atomic<u32> refCount {0}; // intrusive ref count
 
 	// handle will be kept alive until this object is actually destroyed.
 	~DescriptorSetLayout();
@@ -38,18 +47,18 @@ struct DescriptorSetLayout : DeviceHandle {
 
 struct DescriptorSet : DeviceHandle {
 	DescriptorPool* pool {};
-	std::shared_ptr<DescriptorSetLayout> layout {};
+	IntrusivePtr<DescriptorSetLayout> layout {};
 	VkDescriptorSet handle {};
 
 	// TODO: support buffer views
 	struct ImageInfo {
-		std::weak_ptr<ImageView> imageView;
-		std::weak_ptr<Sampler> sampler;
+		ImageView* imageView;
+		Sampler* sampler;
 		VkImageLayout layout;
 	};
 
 	struct BufferInfo {
-		std::weak_ptr<Buffer> buffer;
+		Buffer* buffer;
 		VkDeviceSize offset;
 		VkDeviceSize range;
 	};
@@ -57,21 +66,29 @@ struct DescriptorSet : DeviceHandle {
 	struct Binding {
 		bool valid {};
 
+		union {
+			ImageInfo imageInfo;
+			BufferInfo bufferInfo;
+			BufferView* bufferView;
+		};
+
 		// note: strictly speaking we wouldn't need the type tag here,
-		// we could deduce it from the layout. But we need weak_ptr's
+		// we could deduce it from the layout. But we need(ed) weak_ptr's
 		// and using a union with non-trivial types is a pain in the ass.
-		std::variant<ImageInfo, BufferInfo, std::weak_ptr<BufferView>> data;
+		// std::variant<ImageInfo, BufferInfo, BufferView*> data;
 	};
 
 	std::vector<std::vector<Binding>> bindings;
 
-	// std::weak_ptr<Sampler> getSampler(unsigned binding, unsigned elem);
-	// std::weak_ptr<ImageView> getImageView(unsigned binding, unsigned elem);
-	// std::weak_ptr<Buffer> getBuffer(unsigned binding, unsigned elem);
-	// std::weak_ptr<BufferView> getBufferView(unsigned binding, unsigned elem);
+	Sampler* getSampler(unsigned binding, unsigned elem);
+	ImageView* getImageView(unsigned binding, unsigned elem);
+	Buffer* getBuffer(unsigned binding, unsigned elem);
+	BufferView* getBufferView(unsigned binding, unsigned elem);
 
 	~DescriptorSet();
 };
+
+void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem);
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
     VkDevice                                    device,

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <memory>
 #include <cassert>
+#include <intrusive.hpp>
 
 namespace fuen {
 
@@ -196,10 +197,21 @@ struct SmartPtrFactory<std::shared_ptr<T>> {
 	}
 };
 
+template<typename T>
+struct SmartPtrFactory<IntrusivePtr<T>> {
+	template<typename... Args>
+	static IntrusivePtr<T> create(Args&&... args) {
+		return IntrusivePtr<T>(new T(std::forward<Args>(args)...));
+	}
+};
+
 template<typename K, typename T>
 using SyncedUniqueUnorderedMap = SyncedUnorderedMap<K, T, std::unique_ptr>;
 
 template<typename K, typename T>
 using SyncedSharedUnorderedMap = SyncedUnorderedMap<K, T, std::shared_ptr>;
+
+template<typename K, typename T>
+using SyncedIntrusiveUnorderedMap = SyncedUnorderedMap<K, T, IntrusivePtr>;
 
 } // namespace fuen

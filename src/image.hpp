@@ -16,7 +16,7 @@ struct Image : MemoryResource {
 	VkImageLayout pendingLayout {VK_IMAGE_LAYOUT_UNDEFINED};
 
 	// resource references
-	std::vector<ImageView*> views;
+	std::vector<ImageView*> views; // TODO: unordered set?
 
 	// when images belongs to a swapchain
 	Swapchain* swapchain {};
@@ -39,9 +39,8 @@ struct ImageView : DeviceHandle {
 	VkImageView handle {};
 	VkImageViewCreateInfo ci;
 
-	std::vector<Framebuffer*> fbs;
-
-	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> dsRefs;
+	std::vector<Framebuffer*> fbs; // TODO: unordered set?
+	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> descriptors;
 
 	~ImageView();
 };
@@ -49,6 +48,8 @@ struct ImageView : DeviceHandle {
 struct Sampler : DeviceHandle {
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
+
+	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> descriptors;
 
 	~Sampler();
 };
