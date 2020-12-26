@@ -9,6 +9,20 @@ template<typename T>
 class IntrusivePtr {
 public:
 	IntrusivePtr() noexcept = default;
+
+	void reset() noexcept(std::is_nothrow_destructible_v<T>) {
+		// NOTE: fetch_sub returns the value before decrementing,
+		// so we delete the ptr when it was 1.
+		// TODO: details (order of operation, might be relevant if ~ptr_
+		// has access to this wrapper) don't match unique_ptr::reset.
+		// They probably should.
+		if(ptr_ && ptr_->refCount.fetch_sub(1) == 1) {
+			delete ptr_;
+		}
+
+		ptr_ = nullptr;
+	}
+
 	~IntrusivePtr() noexcept(noexcept(reset())) { reset(); }
 
 	explicit IntrusivePtr(T* ptr) noexcept : ptr_(ptr) {
@@ -40,19 +54,6 @@ public:
 		ptr_ = rhs.ptr_;
 		rhs.ptr_ = nullptr;
 		return *this;
-	}
-
-	void reset() noexcept(std::is_nothrow_destructible_v<T>) {
-		// NOTE: fetch_sub returns the value before decrementing,
-		// so we delete the ptr when it was 1.
-		// TODO: details (order of operation, might be relevant if ~ptr_
-		// has access to this wrapper) don't match unique_ptr::reset.
-		// They probably should.
-		if(ptr_ && ptr_->refCount.fetch_sub(1) == 1) {
-			delete ptr_;
-		}
-
-		ptr_ = nullptr;
 	}
 
 	operator bool() const noexcept { return ptr_; }

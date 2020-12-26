@@ -1,5 +1,6 @@
 #include <cb.hpp>
 #include <data.hpp>
+#include <queue.hpp>
 #include <rp.hpp>
 #include <util.hpp>
 #include <ds.hpp>
@@ -21,6 +22,17 @@ void returnBlocks(CommandPool& pool, CommandMemBlock* blocks) {
 
 	while(!pool.memBlocks.compare_exchange_weak(head, last)) {
 		last->next.store(head);
+	}
+}
+
+void freeBlocks(CommandMemBlock* blocks) {
+	// Free all memory blocks
+	auto block = blocks;
+	while(block) {
+		auto next = block->next.load();
+		// no need to call MemBlocks destructor, it's trivial
+		delete[] reinterpret_cast<std::byte*>(block);
+		block = next;
 	}
 }
 
@@ -47,7 +59,7 @@ void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 }
 
 CommandBufferRecord::CommandBufferRecord(CommandBuffer& xcb) :
-	memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.resetCount()),
+	memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
 	images(xcb), handles(xcb), pipeLayouts(xcb) {
 }
 
@@ -76,196 +88,119 @@ CommandBufferRecord::~CommandBufferRecord() {
 	}
 }
 
-/*
-void resetLocked(CommandBuffer& cb, bool invalidate = false) {
+// CommandBuffer
+void CommandBuffer::doReset(bool record) {
 	// make sure all submissions are done.
-	for(auto* subm : cb.pending) {
-		auto res = checkLocked(*subm);
-		dlg_assert(res);
-	}
-
-	removeFromHandlesLocked(cb);
-
-	// We have to lock our own mutex since other threads might read
-	// our data at the same time.
-	cb.state = invalidate ?
-		CommandBuffer::State::invalid :
-		CommandBuffer::State::initial;
-
-
-	// lock isn't really be needed for this btw
-	// NOTE: but it's improtant we this before resetting
-	//   the used handles containers since on msvc, their
-	//   constructor allocate (which is kinda shitty but
-	//   to be expected).
-	dlg_assert(cb.pool);
-
-	auto block = cb.memBlocks;
-	cb.memBlocks = nullptr;
-	cb.memBlockOffset = 0u;
-
 	{
-		auto tmpBufs = decltype(cb.buffers)(cb);
-		auto tmpImgs = decltype(cb.images)(cb);
-		auto tmpHandles = decltype(cb.handles)(cb);
-		swap(cb.buffers, tmpBufs);
-		swap(cb.images, tmpImgs);
-		swap(cb.handles, tmpHandles);
+		std::lock_guard lock(dev->mutex);
 
-		// important to kick-start them to avoid frequent re-hashing
-		// cb.buffers.reserve(16 * 1024);
-		// cb.images.reserve(16 * 1024);
-		// cb.handles.reserve(16 * 1024);
-	}
-
-	while(block) {
-		auto next = block->next;
-		block->next = cb.pool->memBlocks;
-		cb.pool->memBlocks = block;
-		block = next;
-	}
-
-	// cb.buffers = decltype(cb.buffers)(cb);
-	// cb.images = decltype(cb.images)(cb);
-	// cb.handles = decltype(cb.handles)(cb);
-
-	cb.commands.release();
-	cb.sections.release();
-	cb.graphicsState = {};
-	cb.computeState = {};
-	// cb.pushConstants = {};
-
-	if(!invalidate) {
-		++cb.resetCount;
-	}
-}
-*/
-
-void doReset(CommandBuffer& cb, bool invalidate = false) {
-	{
-		std::lock_guard lock(cb.dev->mutex);
-
-		// make sure all submissions are done.
-		for(auto* subm : cb.pending) {
+		for(auto* subm : this->pending) {
 			auto res = checkLocked(*subm);
 			dlg_assert(res);
 		}
+	}
 
-		removeFromHandlesLocked(cb);
+	graphicsState_ = {};
+	computeState_ = {};
+
+	section_ = nullptr;
+	lastCommand_ = nullptr;
+
+	// change state, potentially initialize new record state
+	{
+		std::lock_guard lock(dev->mutex);
 
 		// We have to lock our own mutex since other threads might read
 		// our data at the same time.
-		cb.state = invalidate ?
-			CommandBuffer::State::invalid :
-			CommandBuffer::State::initial;
-	}
-
-	cb.pipeLayouts.release();
-	cb.graphicsState = {};
-	cb.computeState = {};
-	// cb.pushConstants = {};
-
-	// lock isn't really be needed for this btw
-	// NOTE: but it's improtant we this before resetting
-	//   the used handles containers since on msvc, their
-	//   constructor allocate (which is kinda shitty but
-	//   to be expected).
-	dlg_assert(cb.pool);
-	auto block = cb.memBlocks;
-	cb.memBlocks = nullptr;
-	cb.memBlockOffset = 0u;
-
-	{
-		auto tmpBufs = decltype(cb.buffers)(cb);
-		auto tmpImgs = decltype(cb.images)(cb);
-		auto tmpHandles = decltype(cb.handles)(cb);
-		swap(cb.buffers, tmpBufs);
-		swap(cb.images, tmpImgs);
-		swap(cb.handles, tmpHandles);
-
-		// important to kick-start them to avoid frequent re-hashing
-		// cb.buffers.reserve(16 * 1024);
-		// cb.images.reserve(16 * 1024);
-		// cb.handles.reserve(16 * 1024);
-	}
-
-	(void) block;
-	while(block) {
-		auto next = block->next;
-		block->next = cb.pool->memBlocks;
-		cb.pool->memBlocks = block;
-		block = next;
-	}
-
-	// cb.buffers = decltype(cb.buffers)(cb);
-	// cb.images = decltype(cb.images)(cb);
-	// cb.handles = decltype(cb.handles)(cb);
-
-	// It's important we do this outside the lock, might destroy
-	// shared handles.
-	// cb.commands.release();
-	// cb.sections.release();
-
-	cb.section = nullptr;
-	cb.commands = nullptr;
-	cb.last = nullptr;
-
-	if(!invalidate) {
-		++cb.resetCount;
+		if(record) {
+			++recordCount_;
+			// TODO: with some custom IntrusivePtr deleter we could
+			// allocate the CommandBufferRecord inside its own mem block
+			// (that we first allocate here, then create the record in it,
+			// them move the block into the record).
+			record_ = IntrusivePtr(new CommandBufferRecord(*this));
+			state_ = CommandBuffer::State::recording;
+		} else {
+			state_ = CommandBuffer::State::initial;
+		}
 	}
 }
 
-void reset(CommandBuffer& cb, bool invalidate = false) {
-	// std::lock_guard lock(cb.dev->mutex);
-	// resetLocked(cb, invalidate);
-	doReset(cb, invalidate);
+void CommandBuffer::doEnd() {
+	dlg_assert(section_ == nullptr); // all sections must have been popped
+
+	std::lock_guard lock(dev->mutex);
+
+	dlg_assert(state_ == State::recording);
+	dlg_assert(record_);
+	dlg_assert(!record_->finished);
+
+	state_ = State::executable;
+	record_->finished = true;
 }
 
-std::byte* data(CommandPool::MemBlock& mem, std::size_t offset) {
+std::byte* data(CommandMemBlock& mem, std::size_t offset) {
 	dlg_assert(offset < mem.size);
 	return reinterpret_cast<std::byte*>(&mem) + sizeof(mem) + offset;
 }
 
-CommandPool::MemBlock& createMemBlock(std::size_t memSize, CommandPool::MemBlock* next) {
-	auto buf = new std::byte[sizeof(CommandPoolMemBlock) + memSize];
-	auto* memBlock = new(buf) CommandPool::MemBlock;
+CommandMemBlock& createMemBlock(std::size_t memSize, CommandMemBlock* next) {
+	auto buf = new std::byte[sizeof(CommandMemBlock) + memSize];
+	auto* memBlock = new(buf) CommandMemBlock;
 	memBlock->size = memSize;
 	memBlock->next = next;
 	return *memBlock;
 }
 
-std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) {
+CommandMemBlock& fetchMemBlock(CommandPool& pool, std::size_t size, CommandMemBlock* next) {
+	// NOTE: could search all mem blocks for one large enough.
+	// On the other hand, allocations larger than block size are unlikely
+	// so it's probably best to just do a quick one-block check.
+	if(pool.memBlocks && pool.memBlocks.load()->size >= size) {
+		auto* block = pool.memBlocks.load();
+		auto* next = block->next.load();
+		while(!pool.memBlocks.compare_exchange_weak(block, next)) {
+			next = block->next.load();
+		}
+
+		block->next = next;
+		return *block;
+	}
+
+	// create entirely new block
+	auto blockSize = std::max<std::size_t>(CommandPool::minMemBlockSize, size);
+	return createMemBlock(blockSize, next);
+}
+
+std::byte* CommandBuffer::allocate(std::size_t size, std::size_t alignment) {
 	dlg_assert(alignment <= size);
 	dlg_assert((alignment & (alignment - 1)) == 0); // alignment must be power of two
 	dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__); // can't guarantee otherwise
 
+	dlg_assert(state_ == CommandBuffer::State::recording);
+	dlg_assert(record_);
+
 	// fast path: enough memory available directly inside the command buffer,
 	// simply align and advance the offset
-	if(cb.memBlocks) {
-		cb.memBlockOffset = align(cb.memBlockOffset, alignment);
-		auto remaining = i64(cb.memBlocks->size) - i64(cb.memBlockOffset);
+	if(record_->memBlocks) {
+		memBlockOffset_ = align(memBlockOffset_, alignment);
+		auto remaining = i64(record_->memBlocks->size) - i64(memBlockOffset_);
 		if(remaining >= i64(size)) {
-			auto ret = data(*cb.memBlocks, cb.memBlockOffset);
-			cb.memBlockOffset += size;
+			auto ret = data(*record_->memBlocks, memBlockOffset_);
+			memBlockOffset_ += size;
 			return ret;
 		}
 	}
 
-	// NOTE: could search all mem blocks for one large enough.
-	// On the other hand, allocations larger than block size are unlikely
-	// so it's probably best to just do a quick one-block check.
-	if(cb.pool->memBlocks && cb.pool->memBlocks->size >= size) {
-		auto block = cb.pool->memBlocks;
-		cb.pool->memBlocks = block->next;
-		block->next = cb.memBlocks;
-		cb.memBlocks = block;
-	} else {
-		auto blockSize = std::max<std::size_t>(CommandPool::minBlockSize, size);
-		cb.memBlocks = &createMemBlock(blockSize, cb.memBlocks);
-	}
+	auto next = record_->memBlocks.release();
+	record_->memBlocks.reset(&fetchMemBlock(pool(), size, next));
 
-	cb.memBlockOffset = size;
-	return data(*cb.memBlocks, 0);
+	memBlockOffset_ = size;
+	return data(*record_->memBlocks, 0);
+}
+
+std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) {
+	return cb.allocate(size, alignment);
 }
 
 template<typename T>
@@ -295,49 +230,65 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 	// ownership of anything.
 	static_assert(std::is_trivially_destructible_v<T>);
 
-	auto& cmd = allocate<T>(cb, std::forward<Args>(args)...);
+	dlg_assert(cb.state() == CommandBuffer::State::recording);
+	dlg_assert(cb.record());
+
+	auto& cmd = fuen::allocate<T>(cb, std::forward<Args>(args)...);
 
 	if constexpr(ST == SectionType::end || ST == SectionType::next) {
-		dlg_assert(cb.section);
-		dlg_assert(!cb.last || cb.last->parent == cb.section);
-		cb.last = cb.section;
-		cb.section = cb.section->parent;
+		cb.endSection();
 	}
 
-	if(cb.last) {
-		dlg_assert(cb.commands);
-		dlg_assert(!cb.section || cb.section == cb.last->parent);
-		cb.last->next = &cmd;
-		cmd.parent = cb.last->parent;
-	} else if(cb.section) {
-		dlg_assert(cb.commands);
-		dlg_assert(!cb.section->children);
-		cb.section->children = &cmd;
-		cmd.parent = cb.section;
-	} else if(!cb.commands) {
-		cb.commands = &cmd;
-	}
-
-	cb.last = &cmd;
+	cb.addCmd(cmd);
 
 	if constexpr(ST == SectionType::begin || ST == SectionType::next) {
 		static_assert(std::is_convertible_v<T*, SectionCommand*>);
-		cb.section = &cmd;
-		cb.last = nullptr;
+		cb.beginSection(cmd);
 	}
 
 	return cmd;
 }
 
+void CommandBuffer::endSection() {
+	dlg_assert(section_);
+	dlg_assert(!lastCommand_ || lastCommand_->parent == section_);
+	lastCommand_ = section_;
+	section_ = section_->parent;
+}
+
+void CommandBuffer::beginSection(SectionCommand& cmd) {
+	section_ = &cmd;
+	lastCommand_ = nullptr;
+}
+
+void CommandBuffer::addCmd(Command& cmd) {
+	if(lastCommand_) {
+		dlg_assert(record_->commands);
+		dlg_assert(!section_ || section_ == lastCommand_->parent);
+		lastCommand_->next = &cmd;
+		cmd.parent = lastCommand_->parent;
+	} else if(section_) {
+		dlg_assert(record_->commands);
+		dlg_assert(!section_->children);
+		section_->children = &cmd;
+		cmd.parent = section_;
+	} else if(!record_->commands) {
+		record_->commands = &cmd;
+	}
+
+	lastCommand_ = &cmd;
+}
+
 CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
-		pool(&xpool), handle(xhandle), images(*this), buffers(*this), handles(*this),
-		pipeLayouts(*this) {
+		pool_(&xpool), handle_(xhandle) {
 }
 
 void CommandBuffer::invalidateLocked() {
-	removeFromHandlesLocked(*this);
-	// TODO: should reset data as well
-	this->state = State::invalid;
+	if(state_ == State::recording) {
+		doReset(false);
+	}
+
+	this->state_ = State::invalid;
 }
 
 CommandBuffer::~CommandBuffer() {
@@ -345,29 +296,23 @@ CommandBuffer::~CommandBuffer() {
 		return;
 	}
 
+	dlg_assert(pool_);
+	dlg_assert(handle_);
+	record_.reset();
+
+	// CommandBuffer is dispatchable handle, we need to remove this association
+	eraseData(handle_);
+
 	// Wait for completion, free all data and allocated stuff,
 	// unregister from everything
-	// resetLocked(*this);
-	doReset(*this);
+	doReset(false);
 
 	// Remove ourselves from the pool we come from.
 	// A command pool can't be destroyed before its command buffers (it
 	// implicitly frees them).
-	dlg_assert(pool);
-
-	auto it = find(pool->cbs, this);
-	dlg_assert(it != pool->cbs.end());
-	pool->cbs.erase(it);
-}
-
-void freeMemBlocks(CommandPool& pool) {
-	// Free all memory blocks
-	while(pool.memBlocks) {
-		auto next = pool.memBlocks->next;
-		// no need to call MemBlocks destructor, it's trivial
-		delete[] reinterpret_cast<std::byte*>(pool.memBlocks);
-		pool.memBlocks = next;
-	}
+	auto it = find(pool_->cbs, this);
+	dlg_assert(it != pool_->cbs.end());
+	pool_->cbs.erase(it);
 }
 
 CommandPool::~CommandPool() {
@@ -377,8 +322,8 @@ CommandPool::~CommandPool() {
 
 	{
 		std::lock_guard lock(dev->mutex);
-		for(auto& record : records) {
-			record.pool = nullptr;
+		for(auto& recordDeleter : records) {
+			recordDeleter->pool = nullptr;
 		}
 	}
 
@@ -392,11 +337,10 @@ CommandPool::~CommandPool() {
 	// on destruction
 	while(!cbs.empty()) {
 		auto* cb = cbs[0];
-		eraseData(cb->handle);
-		dev->commandBuffers.mustErase(cb->handle);
+		dev->commandBuffers.mustErase(cb->handle());
 	}
 
-	freeMemBlocks(*this);
+	freeBlocks(memBlocks.load());
 }
 
 // api
@@ -441,7 +385,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandPool(
 	auto& dev = getData<Device>(device);
 	auto& cp = dev.commandPools.get(commandPool);
 	for(auto* cb : cp.cbs) {
-		reset(*cb);
+		cb->doReset(false);
 	}
 	return dev.dispatch.ResetCommandPool(device, commandPool, flags);
 }
@@ -454,7 +398,9 @@ VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
 	auto& pool = dev.commandPools.get(commandPool);
 
 	// free all currently unused memory blocks
-	freeMemBlocks(pool);
+	auto* blocks = pool.memBlocks.load();
+	while(!pool.memBlocks.compare_exchange_weak(blocks, nullptr));
+	freeBlocks(blocks);
 
 	dev.dispatch.TrimCommandPool(device, commandPool, flags);
 }
@@ -475,7 +421,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 		auto& cb = dev.commandBuffers.add(pCommandBuffers[i], cp, pCommandBuffers[i]);
 		cb.dev = &dev;
 		cb.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
-		cb.pool->cbs.push_back(&cb);
+		cb.pool().cbs.push_back(&cb);
 
 		// command buffers are dispatchable, add global data entry
 		fuen::insertData(pCommandBuffers[i], &cb);
@@ -492,7 +438,6 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 	auto& dev = getData<Device>(device);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
-		eraseData(pCommandBuffers[i]);
 		dev.commandBuffers.mustErase(pCommandBuffers[i]);
 	}
 
@@ -503,20 +448,14 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		VkCommandBuffer                             commandBuffer,
 		const VkCommandBufferBeginInfo*             pBeginInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	reset(cb);
+	cb.doReset(true);
 	return cb.dev->dispatch.BeginCommandBuffer(commandBuffer, pBeginInfo);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	dlg_assert(cb.section == nullptr); // all sections must have been popped
-
-	{
-		std::lock_guard lock(cb.dev->mutex);
-		cb.state = CommandBuffer::State::executable;
-	}
-
+	cb.doEnd();
 	return cb.dev->dispatch.EndCommandBuffer(commandBuffer);
 }
 
@@ -524,43 +463,41 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 		VkCommandBuffer                             commandBuffer,
 		VkCommandBufferResetFlags                   flags) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	reset(cb);
+	cb.doReset(false);
 	return cb.dev->dispatch.ResetCommandBuffer(commandBuffer, flags);
 }
 
 // == command buffer recording ==
 // util
-void addToHandle(CommandBuffer& cb, DeviceHandle& handle) {
-	(void) cb;
-	(void) handle;
-	std::lock_guard lock(cb.dev->mutex);
-	auto [it, success] = handle.refCbs.insert(&cb);
+void addToHandle(CommandBufferRecord& rec, DeviceHandle& handle) {
+	std::lock_guard lock(rec.device().mutex);
+	auto [it, success] = handle.refCbs.insert(&rec);
 	dlg_assert(success);
 }
 
-void useHandle(CommandBuffer& cb, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
-	auto it = cb.handles.find(h64);
-	if(it == cb.handles.end()) {
-		it = cb.handles.emplace(h64, UsedHandle{handle, cb}).first;
+void useHandle(CommandBufferRecord& rec, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
+	auto it = rec.handles.find(h64);
+	if(it == rec.handles.end()) {
+		it = rec.handles.emplace(h64, UsedHandle{handle, *rec.cb}).first;
 		it->second.handle = &handle;
-		addToHandle(cb, *it->second.handle);
+		addToHandle(rec, *it->second.handle);
 	}
 
 	it->second.commands.push_back(&cmd);
 }
 
 template<typename T>
-void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
-	auto h64 = handleToU64(handle.handle);
-	useHandle(cb, cmd, h64, handle);
+void useHandle(CommandBufferRecord& rec, Command& cmd, T& handle) {
+	auto h64 = handleToU64(fuen::handle(handle));
+	useHandle(rec, cmd, h64, handle);
 }
 
-UsedImage& useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
-	auto it = cb.images.find(image.handle);
-	if(it == cb.images.end()) {
-		it = cb.images.emplace(image.handle, UsedImage(image, cb)).first;
+UsedImage& useHandle(CommandBufferRecord& rec, Command& cmd, Image& image) {
+	auto it = rec.images.find(image.handle);
+	if(it == rec.images.end()) {
+		it = rec.images.emplace(image.handle, UsedImage(image, *rec.cb)).first;
 		it->second.image = &image;
-		addToHandle(cb, *it->second.image);
+		addToHandle(rec, *it->second.image);
 	}
 
 	dlg_assert(it->second.image);
@@ -571,47 +508,54 @@ UsedImage& useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
 	// NOTE: can currently fail for sparse bindings i guess
 	dlg_assert(image.memory || image.swapchain);
 	if(image.memory) {
-		useHandle(cb, cmd, *image.memory);
+		useHandle(rec, cmd, *image.memory);
 	}
 
 	return it->second;
 }
 
-void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = true) {
+void useHandle(CommandBufferRecord& rec, Command& cmd, ImageView& view, bool useImg = true) {
 	auto h64 = handleToU64(view.handle);
-	useHandle(cb, cmd, h64, view);
+	useHandle(rec, cmd, h64, view);
 
 	dlg_assert(view.img);
 	if(useImg && view.img) {
-		useHandle(cb, cmd, *view.img);
+		useHandle(rec, cmd, *view.img);
 	}
 }
 
-void useHandle(CommandBuffer& cb, Command& cmd, Buffer& buf) {
+void useHandle(CommandBufferRecord& rec, Command& cmd, Buffer& buf) {
 	auto h64 = handleToU64(buf.handle);
-	useHandle(cb, cmd, h64, buf);
+	useHandle(rec, cmd, h64, buf);
 
 	// NOTE: can currently fail for sparse bindings i guess
 	dlg_assert(buf.memory);
 	if(buf.memory) {
-		useHandle(cb, cmd, *buf.memory);
+		useHandle(rec, cmd, *buf.memory);
 	}
 }
 
-void useHandle(CommandBuffer& cb, Command& cmd, BufferView& view) {
+void useHandle(CommandBufferRecord& rec, Command& cmd, BufferView& view) {
 	auto h64 = handleToU64(view.handle);
-	useHandle(cb, cmd, h64, view);
+	useHandle(rec, cmd, h64, view);
 
 	dlg_assert(view.buffer);
 	if(view.buffer) {
-		useHandle(cb, cmd, *view.buffer);
+		useHandle(rec, cmd, *view.buffer);
 	}
 }
 
-void useHandle(CommandBuffer& cb, Command& cmd, Image& image, VkImageLayout newLayout) {
-	auto& img = useHandle(cb, cmd, image);
+void useHandle(CommandBufferRecord& rec, Command& cmd, Image& image, VkImageLayout newLayout) {
+	auto& img = useHandle(rec, cmd, image);
 	img.layoutChanged = true;
 	img.finalLayout = newLayout;
+}
+
+template<typename... Args>
+void useHandle(CommandBuffer& cb, Args&&... args) {
+	dlg_assert(cb.state() == CommandBuffer::State::recording);
+	dlg_assert(cb.record());
+	useHandle(*cb.record(), std::forward<Args>(args)...);
 }
 
 // commands
@@ -838,7 +782,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// Also like this in CmdPushConstants
 	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
@@ -909,10 +853,10 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState.bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.computeState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState.bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.graphicsState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else {
 		dlg_error("Unknown pipeline bind point");
@@ -943,9 +887,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 	cmd.offset = offset;
 	cmd.indexType = indexType;
 
-	cb.graphicsState.indices.buffer = &buf;
-	cb.graphicsState.indices.offset = offset;
-	cb.graphicsState.indices.type = indexType;
+	cb.graphicsState().indices.buffer = &buf;
+	cb.graphicsState().indices.offset = offset;
+	cb.graphicsState().indices.type = indexType;
 
 	cb.dev->dispatch.CmdBindIndexBuffer(commandBuffer,
 		buffer, offset, indexType);
@@ -961,7 +905,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
 
-	ensureSize(cb, cb.graphicsState.vertices, firstBinding + bindingCount);
+	ensureSize(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
 	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
 		auto& buf = cb.dev->buffers.get(pBuffers[i]);
@@ -969,8 +913,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 		cmd.buffers[i].offset = pOffsets[i];
 		useHandle(cb, cmd, buf);
 
-		cb.graphicsState.vertices[firstBinding + i].buffer = &buf;
-		cb.graphicsState.vertices[firstBinding + i].offset = pOffsets[i];
+		cb.graphicsState().vertices[firstBinding + i].buffer = &buf;
+		cb.graphicsState().vertices[firstBinding + i].offset = pOffsets[i];
 	}
 
 	cb.dev->dispatch.CmdBindVertexBuffers(commandBuffer,
@@ -984,7 +928,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 		uint32_t                                    firstVertex,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawCmd>(cb, cb, graphicsState_);
+	auto& cmd = addCmd<DrawCmd>(cb, cb, cb.graphicsState());
 
 	cmd.vertexCount = vertexCount;
 	cmd.instanceCount = instanceCount;
@@ -1003,7 +947,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 		int32_t                                     vertexOffset,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb, graphicsState_);
+	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb, cb.graphicsState());
 
 	cmd.firstInstance = firstInstance;
 	cmd.instanceCount = instanceCount;
@@ -1022,7 +966,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, graphicsState_);
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1044,7 +988,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, graphicsState_);
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1068,7 +1012,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, graphicsState_);
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1097,7 +1041,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, graphicsState_);
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1123,7 +1067,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchCmd>(cb, cb, computeState_);
+	auto& cmd = addCmd<DispatchCmd>(cb, cb, cb.computeState());
 
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
@@ -1138,7 +1082,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb, computeState_);
+	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb, cb.computeState());
 	cmd.offset = offset;
 
 	auto& buf = cb.dev->buffers.get(buffer);
@@ -1157,7 +1101,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb, computeState_);
+	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb, cb.computeState());
 
 	cmd.baseGroupX = baseGroupX;
 	cmd.baseGroupY = baseGroupY;
@@ -1409,10 +1353,16 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 	cmd.secondaries = allocSpan<CommandBuffer*>(cb, commandBufferCount);
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
+		dlg_assert(secondary.state() == CommandBuffer::State::executable);
+
 		cmd.secondaries[i] = &secondary;
+
 		useHandle(cb, cmd, secondary);
 
-		for(auto& img : secondary.images) {
+		// TODO: i kidna don't like how this works at the moment. Feels
+		// like a hack. Investigate.
+		auto& rec = *secondary.record();
+		for(auto& img : rec.images) {
 			if(img.second.layoutChanged) {
 				useHandle(cb, cmd, *img.second.image, img.second.finalLayout);
 			} else {
@@ -1420,11 +1370,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 			}
 		}
 
-		for(auto& buf : secondary.buffers) {
-			useHandle(cb, cmd, *buf.second.buffer);
-		}
-
-		for(auto& handle : secondary.handles) {
+		for(auto& handle : rec.handles) {
 			useHandle(cb, cmd, handle.first, *handle.second.handle);
 		}
 	}
@@ -1531,11 +1477,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 	cmd.bindPoint = pipelineBindPoint;
 
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState.pipe = &cb.dev->computePipes.get(pipeline);
-		cmd.pipe = cb.computeState.pipe;
+		cb.computeState().pipe = &cb.dev->computePipes.get(pipeline);
+		cmd.pipe = cb.computeState().pipe;
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState.pipe = &cb.dev->graphicsPipes.get(pipeline);
-		cmd.pipe = cb.graphicsState.pipe;
+		cb.graphicsState().pipe = &cb.dev->graphicsPipes.get(pipeline);
+		cmd.pipe = cb.graphicsState().pipe;
 	} else {
 		dlg_error("unknown pipeline bind point");
 	}
@@ -1647,7 +1593,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 
 	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(pipeLayout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.stages = stageFlags;
 	cmd.offset = offset;
@@ -1722,9 +1668,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	cmd.first = firstViewport;
 	cmd.viewports = copySpan(cb, pViewports, viewportCount);
 
-	ensureSize(cb, cb.graphicsState.dynamic.viewports, firstViewport + viewportCount);
+	ensureSize(cb, cb.graphicsState().dynamic.viewports, firstViewport + viewportCount);
 	std::copy(pViewports, pViewports + viewportCount,
-		cb.graphicsState.dynamic.viewports.begin() + firstViewport);
+		cb.graphicsState().dynamic.viewports.begin() + firstViewport);
 
 	cb.dev->dispatch.CmdSetViewport(commandBuffer, firstViewport, viewportCount, pViewports);
 }
@@ -1739,9 +1685,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	cmd.first = firstScissor;
 	cmd.scissors = copySpan(cb, pScissors, scissorCount);
 
-	ensureSize(cb, cb.graphicsState.dynamic.scissors, firstScissor + scissorCount);
+	ensureSize(cb, cb.graphicsState().dynamic.scissors, firstScissor + scissorCount);
 	std::copy(pScissors, pScissors + scissorCount,
-		cb.graphicsState.dynamic.scissors.begin() + firstScissor);
+		cb.graphicsState().dynamic.scissors.begin() + firstScissor);
 
 	cb.dev->dispatch.CmdSetScissor(commandBuffer, firstScissor, scissorCount, pScissors);
 }
@@ -1753,7 +1699,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineWidth(
 	auto& cmd = addCmd<SetLineWidthCmd>(cb);
 	cmd.width = lineWidth;
 
-	cb.graphicsState.dynamic.lineWidth = lineWidth;
+	cb.graphicsState().dynamic.lineWidth = lineWidth;
 	cb.dev->dispatch.CmdSetLineWidth(commandBuffer, lineWidth);
 }
 
@@ -1765,7 +1711,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<SetDepthBiasCmd>(cb);
 	cmd.state = {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor};
-	cb.graphicsState.dynamic.depthBias = cmd.state;
+	cb.graphicsState().dynamic.depthBias = cmd.state;
 
 	cb.dev->dispatch.CmdSetDepthBias(commandBuffer,
 		depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor);
@@ -1777,8 +1723,8 @@ VKAPI_ATTR void VKAPI_CALL CmdSetBlendConstants(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<SetBlendConstantsCmd>(cb);
 	std::memcpy(cmd.values.data(), blendConstants, sizeof(cmd.values));
-	std::memcpy(cb.graphicsState.dynamic.blendConstants.data(), blendConstants,
-		sizeof(cb.graphicsState.dynamic.blendConstants));
+	std::memcpy(cb.graphicsState().dynamic.blendConstants.data(), blendConstants,
+		sizeof(cb.graphicsState().dynamic.blendConstants));
 
 	cb.dev->dispatch.CmdSetBlendConstants(commandBuffer, blendConstants);
 }
@@ -1791,8 +1737,8 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBounds(
 	auto& cmd = addCmd<SetDepthBoundsCmd>(cb);
 	cmd.min = minDepthBounds;
 	cmd.max = maxDepthBounds;
-	cb.graphicsState.dynamic.depthBoundsMin = minDepthBounds;
-	cb.graphicsState.dynamic.depthBoundsMax = maxDepthBounds;
+	cb.graphicsState().dynamic.depthBoundsMin = minDepthBounds;
+	cb.graphicsState().dynamic.depthBoundsMax = maxDepthBounds;
 
 	cb.dev->dispatch.CmdSetDepthBounds(commandBuffer, minDepthBounds, maxDepthBounds);
 }
@@ -1806,10 +1752,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilCompareMask(
 	cmd.faceMask = faceMask;
 	cmd.value = compareMask;
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
-		cb.graphicsState.dynamic.stencilFront.compareMask = compareMask;
+		cb.graphicsState().dynamic.stencilFront.compareMask = compareMask;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
-		cb.graphicsState.dynamic.stencilBack.compareMask = compareMask;
+		cb.graphicsState().dynamic.stencilBack.compareMask = compareMask;
 	}
 
 	cb.dev->dispatch.CmdSetStencilCompareMask(commandBuffer, faceMask, compareMask);
@@ -1824,10 +1770,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilWriteMask(
 	cmd.faceMask = faceMask;
 	cmd.value = writeMask;
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
-		cb.graphicsState.dynamic.stencilFront.compareMask = writeMask;
+		cb.graphicsState().dynamic.stencilFront.compareMask = writeMask;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
-		cb.graphicsState.dynamic.stencilBack.compareMask = writeMask;
+		cb.graphicsState().dynamic.stencilBack.compareMask = writeMask;
 	}
 
 	cb.dev->dispatch.CmdSetStencilWriteMask(commandBuffer, faceMask, writeMask);
@@ -1842,10 +1788,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 	cmd.faceMask = faceMask;
 	cmd.value = reference;
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
-		cb.graphicsState.dynamic.stencilFront.reference = reference;
+		cb.graphicsState().dynamic.stencilFront.reference = reference;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
-		cb.graphicsState.dynamic.stencilBack.reference = reference;
+		cb.graphicsState().dynamic.stencilBack.reference = reference;
 	}
 
 	cb.dev->dispatch.CmdSetStencilReference(commandBuffer, faceMask, reference);

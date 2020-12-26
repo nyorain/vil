@@ -82,11 +82,7 @@ struct ComputeState : DescriptorState {
 GraphicsState copy(CommandBuffer& cb, const GraphicsState& src);
 ComputeState copy(CommandBuffer& cb, const ComputeState& src);
 
-// Allocates a chunk of memory from the given command buffer, will use the
-// internal CommandPool memory allocator. The memory can not be freed in
-// any way, it will simply be reset when the command buffer (or command pool)
-// is reset (when you construct non-trivial types in the buffer, make sure
-// to call the destructor though!).
+// Free-form of CommandBuffer::allocate
 std::byte* allocate(CommandBuffer&, std::size_t size, std::size_t alignment);
 
 template<typename T, typename... Args>
@@ -222,19 +218,28 @@ struct MemBlockDeleter {
 
 struct CommandBufferRecord {
 	// We own those mem blocks, could even own them past command pool destruction.
-	// Important this is the last object to be destroyed from destructor
-	// since this is allocated on the memory.
+	// Important this is the last object to be destroyed other destructors
+	// still access that memory.
 	std::unique_ptr<CommandMemBlock, MemBlockDeleter> memBlocks {};
 
-	CommandBuffer* cb {}; // might be null when cb is destroyed
-	u32 recordID {}; // the id of the recording; together with cb uniquely identifies record
+	// Might be null when cb is destroyed.
+	// Guaranteed to be valid during recording though.
+	CommandBuffer* cb {};
+	// The id of this recording in the associated command buffers
+	// Together with cb, uniquely identifies record.
+	u32 recordID {};
 
 	Command* commands {};
 
 	CommandMap<VkImage, UsedImage> images;
 	CommandMap<u64, UsedHandle> handles;
 
+	// We store all device handles referenced by this command buffer that
+	// were destroyed since it was recorded so we can avoid deferencing
+	// them in the command state.
 	std::vector<DeviceHandle*> destroyed; // NOTE: use pool memory here, too?
+
+	// Pipeline layouts we have to keep alive.
 	CommandVector<IntrusivePtr<PipelineLayout>> pipeLayouts;
 
 	bool finished {};
@@ -248,6 +253,8 @@ struct CommandBufferRecord {
 			return handles.find(handleToU64(fuen::handle(handle))) != handles.end();
 		}
 	}
+
+	Device& device() const { return *memBlocks.get_deleter().dev; }
 
 	CommandBufferRecord(CommandBuffer& cb);
 	~CommandBufferRecord();

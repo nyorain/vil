@@ -1,7 +1,7 @@
 #pragma once
 
 #include <device.hpp>
-#include <commands.hpp> // TODO!! vector<CommandDescription> should work ffs
+#include <commandDesc.hpp>
 
 namespace fuen {
 
@@ -18,7 +18,7 @@ struct CommandBufferGui {
 	const Command* command_ {}; // the selected command inside the cb
 	u32 resetCount_ {}; // the resetCount of cb at which teh command was valid
 
-	std::vector<CommandDescription> desc_ {};
+	std::vector<CommandDesc> desc_ {};
 
 	// Hooking the command buffer means replacing it
 	struct {

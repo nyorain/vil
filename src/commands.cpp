@@ -499,7 +499,7 @@ const Command* ExecuteCommandsCmd::display(const Command* selected, TypeFlags ty
 		// In that case we show a simpler UI
 		if(secondaries.size() == 1) {
 			auto* cmd = secondaries[0];
-			auto reti = displayCommands(cmd->commands, selected, typeFlags);
+			auto reti = displayCommands(cmd->record()->commands, selected, typeFlags);
 			if(reti) {
 				dlg_assert(!ret);
 				ret = reti;
@@ -509,7 +509,7 @@ const Command* ExecuteCommandsCmd::display(const Command* selected, TypeFlags ty
 				auto cname = name(*cmd);
 				auto treeID = dlg::format("{}:{}", this, cname);
 				if(ImGui::TreeNode(treeID.c_str(), "%s", cname.c_str())) {
-					auto reti = displayCommands(cmd->commands, selected, typeFlags);
+					auto reti = displayCommands(cmd->record()->commands, selected, typeFlags);
 					if(reti) {
 						dlg_assert(!ret);
 						ret = reti;

@@ -4,6 +4,7 @@
 #include <gui/renderer.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
+#include <imgui/imgui.h>
 #include <guidraw.hpp>
 #include <variant>
 

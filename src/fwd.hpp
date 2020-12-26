@@ -66,7 +66,7 @@ struct RenderPassDesc;
 
 struct Command;
 struct SectionCommand;
-struct CommandDescription;
+struct CommandDesc;
 struct PendingSubmission;
 struct Submission;
 

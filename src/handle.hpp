@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <data.hpp> // for handleToU64
 #include <dlg/dlg.hpp>
 #include <string>
 #include <unordered_map>

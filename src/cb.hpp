@@ -61,7 +61,7 @@ public:
 	VkCommandBuffer handle() const { return handle_; }
 	CommandPool& pool() const { return *pool_; }
 	State state() const { return state_; } // synchronized via dev.mutex
-	u32 resetCount() const { return resetCount_; }
+	u32 recordCount() const { return recordCount_; }
 
 	// Can be nullptr when command buffer was never recorded.
 	// Otherwise returns the current or last recorded state.
@@ -88,6 +88,14 @@ public:
 		return record_->uses(handle);
 	}
 
+	// Allocates a chunk of memory from the given command buffer, will use the
+	// internal CommandPool memory allocator. The memory can not be freed in
+	// any way, it will simply be reset when the current command buffer recording
+	// is destroyed (destructors of non-trivial types inside the memory must
+	// be called before that!).
+	// Only allowed when in recording state, does not make sense otherwise.
+	std::byte* allocate(std::size_t size, std::size_t alignment);
+
 private:
 	CommandPool* pool_ {};
 	VkCommandBuffer handle_ {};
@@ -95,14 +103,30 @@ private:
 	// The last recorded state.
 	State state_ {State::initial}; // synchronized via dev mutex
 	IntrusivePtr<CommandBufferRecord> record_ {};
-	u32 resetCount_ {};
+	u32 recordCount_ {};
 
 	// Only needed while recording.
+	// TODO: we need some temporary memory for ComputeState and GraphicState
+	// that is only freed when the record is destroyed. We could use our
+	// own, record-independent memory blocks that can be freed on command
+	// buffer reset.
 	ComputeState computeState_ {};
 	GraphicsState graphicsState_ {};
 	SectionCommand* section_ {};
 	Command* lastCommand_ {};
 	std::size_t memBlockOffset_ {}; // offset in first (current) mem block
+
+public: // Only public for recording, should not be accessed outside api
+	void beginSection(SectionCommand& cmd);
+	void addCmd(Command& cmd);
+	void endSection();
+
+	ComputeState& computeState() { return computeState_; }
+	GraphicsState& graphicsState() { return graphicsState_; }
+
+	// Expects device mutex to be locked
+	void doReset(bool record);
+	void doEnd();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
