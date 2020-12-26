@@ -1,5 +1,6 @@
 #include <handle.hpp>
 #include <data.hpp>
+#include <queue.hpp>
 #include <device.hpp>
 #include <handles.hpp>
 
@@ -20,9 +21,13 @@ DeviceHandle::~DeviceHandle() {
 }
 
 void DeviceHandle::invalidateCbsLocked() {
-	while(!refCbs.empty()) {
-		auto* first = *refCbs.begin();
-		first->invalidateLocked();
+	// nothing can be added/removed while device mutex is locked
+	for(auto* ref : refCbs) {
+		if(ref->cb && ref->cb->record() == ref) {
+			ref->cb->invalidateLocked();
+		}
+
+		ref->destroyed.push_back(this);
 	}
 }
 
@@ -38,7 +43,7 @@ void DeviceHandle::invalidateCbs() {
 Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle) {
 	switch(objectType) {
 		case VK_OBJECT_TYPE_QUEUE:
-			// queues is dispatchable
+			// queues are dispatchable
 			return findData<Queue>((VkQueue) handle);
 		case VK_OBJECT_TYPE_SWAPCHAIN_KHR:
 			return dev.swapchains.find((VkSwapchainKHR) handle);

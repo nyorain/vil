@@ -11,7 +11,10 @@ struct swa_window;
 
 namespace fuen {
 
-// Creates a new window using swa and displays the overlay in it.
+// Creates a completely new system window using swa and displays the overlay in it.
+// Since winapi has some major thread-quirks, we need to create and initialize
+// everything inside our ui thread, requiring some synchronous
+// thread-communication during intialization.
 struct DisplayWindow {
 	swa_display* dpy {};
 	swa_window* window {};
@@ -39,7 +42,6 @@ private:
 	std::atomic<bool> run_ {true};
 	std::vector<RenderBuffer> buffers_;
 
-	// TODO: hack
 	enum class State {
 		initial,
 		createDisplay,

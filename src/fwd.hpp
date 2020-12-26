@@ -67,6 +67,12 @@ struct RenderPassDesc;
 struct Command;
 struct SectionCommand;
 struct CommandDescription;
+struct PendingSubmission;
+struct Submission;
+
+struct CommandBufferRecord;
+struct CommandBufferDesc;
+struct CommandBufferGroup;
 
 struct RenderData;
 struct DisplayWindow;

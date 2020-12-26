@@ -45,7 +45,7 @@ void CommandBufferGui::draw() {
 
 		if(cb_->resetCount != resetCount_) {
 			// try to find a new command matching the old ones description
-			command_ = CommandDescription::find(*cb_, desc_);
+			command_ = CommandDesc::find(*cb_, desc_);
 
 			/*
 			if(!desc_.empty()) {
@@ -72,7 +72,7 @@ void CommandBufferGui::draw() {
 		auto* nsel = displayCommands(cb_->commands, command_, flags);
 		if(nsel) {
 			resetCount_ = cb_->resetCount;
-			desc_ = CommandDescription::get(*cb_, *nsel);
+			desc_ = CommandDesc::get(*cb_, *nsel);
 			command_ = nsel;
 			hooked_.needsUpdate = true;
 		}
@@ -226,9 +226,15 @@ VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
 
 	auto& dev = gui_->dev();
 	if(hooked_.needsUpdate) {
+		// TODO: this might not work for simulataneous-use command buffers!
+		// we can't be sure that the command buffer isn't in use anymore.
+		// Would need to dynamically allocate a new command buffer here
+		// if that is the case (or re-use and old, now unused one from
+		// the pool (would likely need our own internal cb pool))
 		VkCommandBufferBeginInfo cbbi {};
 		cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		VK_CHECK(dev.dispatch.BeginCommandBuffer(hooked_.cb, &cbbi));
+
 		dev.dispatch.CmdResetQueryPool(hooked_.cb, hooked_.queryPool, 0, 10);
 
 		hookRecord(cb.commands);
@@ -283,7 +289,7 @@ void CommandBufferGui::select(CommandBuffer& cb) {
 	cb_ = &cb;
 	command_ = {};
 	if(!desc_.empty()) {
-		command_ = CommandDescription::find(cb, desc_);
+		command_ = CommandDesc::find(cb, desc_);
 	}
 
 	resetCount_ = cb_->resetCount;

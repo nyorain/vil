@@ -147,8 +147,9 @@ public:
 	}
 
 	PageVector(PageVector&& rhs) noexcept : alloc_(rhs.alloc_) { swap(*this, rhs); }
-	PageVector& operator=(PageVector rhs) noexcept {
-		swap(*this, rhs);
+	PageVector& operator=(PageVector&& rhs) noexcept {
+		PageVector tmp(std::move(rhs));
+		swap(*this, tmp);
 		return *this;
 	}
 

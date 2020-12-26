@@ -1,5 +1,7 @@
 #include <gui/gui.hpp>
 #include <layer.hpp>
+#include <queue.hpp>
+#include <handle.hpp>
 #include <data.hpp>
 #include <util.hpp>
 #include <handles.hpp>
@@ -811,6 +813,10 @@ void Gui::activateTab(Tab tab) {
 	activateTabCounter_ = 0u;
 }
 
+// TODO: atm, we always call this while device mutex is locked.
+// When waiting for fences, it might block application progress *a lot*,
+// we really need to unlock it while waiting for fences (or otherwise
+// blocking ourselves!)
 template<typename H>
 void Gui::waitForSubmissions(const H& handle) {
 	// find all submissions associated with this image
@@ -941,6 +947,9 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			// TODO: ugh, all of this is so expensive.
 			// Here, we could definitely try out semaphore chaining since we only
 			// need the easy way (app subm -> our subm)
+			// TODO: we probably don't wanna wait for this. Instead, retrive
+			// the written contents from the last finished draw (if it
+			// was for the same buffer).
 			waitForSubmissions(*selBuf);
 
 			// TODO: offset, sizes and stuff
@@ -966,6 +975,10 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 				return {res, &draw};
 			}
 
+			// TODO: ouch! this is really expensive.
+			// could we at least release the device mutex lock meanwhile?
+			// we would have to check for various things tho, if resource
+			// was destroyed.
 			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
 			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
 
@@ -1145,6 +1158,8 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	// For that we would have to chain future submissions using resources
 	// used by this draw via semaphores...
 	// TODO: hacky hacky
+	// TODO: code duplication with above. Should probably be moved to
+	// extra function
 	if(!draw.usedHandles.empty()) {
 		// dlg_trace("awaiting frame");
 
@@ -1159,8 +1174,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 }
 
 void Gui::finishDraws() {
-	// dlg_trace("finishDraws");
-
 	std::vector<VkFence> fences;
 	for(auto& draw : draws_) {
 		if(draw.inUse) {

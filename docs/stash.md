@@ -131,13 +131,26 @@ so, sooner or later we might need this command buffer state concept
 ```cpp
 struct CommandBufferRecord {
 	Command* commands {};
+	CommandBuffer* cb {}; // might be null when cb is destroyed
+	CommandPool* pool {}; // set to null when pool is destroyed
 
 	CommandMap<VkImage, UsedImage> images;
 	CommandMap<VkBuffer, UsedBuffer> buffers;
 	CommandMap<std::uint64_t, UsedHandle> handles;
+
+	std::vector<DeviceHandle*> destroyed;
 	CommandVector<IntrusivePtr<PipelineLayout>> pipeLayouts;
 
 	// We own those mem blocks, could even own them past command pool destruction
 	CommandPool::MemBlock* memBlocks {};
+};
+
+struct CommandBufferGroup {
+	CommandBufferRecord* lastRecord; // shared ptr? intrusive ptr? no idea about ownership yet
+
+	std::vector<CommandBuffer*> cbs;
+
+	Queue* queue {};
+	CommandBufferSection sections; // nested tree
 };
 ```

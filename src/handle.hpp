@@ -1,7 +1,6 @@
 #pragma once
 
-#include "fwd.hpp"
-#include "data.hpp"
+#include <fwd.hpp>
 #include <dlg/dlg.hpp>
 #include <string>
 #include <unordered_map>
@@ -29,11 +28,14 @@ struct Handle {
 struct DeviceHandle : Handle {
 	Device* dev {};
 
-	// A list of all command buffers referencing this handle in their
+	// A list of all command buffers recordings referencing this handle in their
 	// current record state.
 	// On destruction, the handle will inform all of them that they
 	// are now in an invalid state.
-	std::unordered_set<CommandBuffer*> refCbs;
+	// TODO: the dynamic memory allocations we do here could become a
+	// serious performance problem. In that case replace it by per-cb
+	// 2D-linked-list (linked grid), see node 1648
+	std::unordered_set<CommandBufferRecord*> refCbs;
 
 	// Expects that neither the device mutex nor its own mutex is locked.
 	~DeviceHandle();
@@ -75,13 +77,29 @@ constexpr const char* handleName() {
 	else static_assert(!std::is_same_v<T, T>, "Invalid handle type");
 }
 
+// And so He spoke:
+//  "Letteth us go into the Holy Lands of SFINAE /
+//   Where Your Souls may findeth rest /
+//   Since'o He - and only Him - in all his Glory /
+//   Has forseen this as Our Home!"
+template<typename T>
+auto handle(const T& handle) -> decltype(handle.handle()) {
+	return handle.handle();
+}
+
+template<typename T>
+auto handle(const T& handle) -> decltype(handle.handle) {
+	return handle.handle;
+}
+
 template<typename T>
 std::string name(const T& handle) {
 	constexpr auto hn = handleName<T>();
 
 	std::string name;
 	if(handle.name.empty()) {
-		name = dlg::format("{} {}{}", hn, std::hex, handleToU64(handle.handle));
+		auto id = handleToU64(fuen::handle(handle));
+		name = dlg::format("{} {}{}", hn, std::hex, id);
 	} else {
 		name = dlg::format("{} {}", hn, handle.name);
 	}

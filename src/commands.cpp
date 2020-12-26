@@ -6,164 +6,8 @@
 
 namespace fuen {
 
-// CommandDescription
-void fillIn(CommandDescription& ret, const CommandBuffer& cb, const Command& cmd) {
-	ret.command = cmd.nameDesc();
-	ret.arguments = cmd.argumentsDesc();
-
-	auto* sibling = cb.commands;
-	if(cmd.parent) {
-		sibling = cmd.parent->children;
-	}
-
-	bool before = true;
-	while(sibling) {
-		if(sibling == &cmd) {
-			before = false;
-		}
-
-		if(sibling->nameDesc() == ret.command) {
-			++ret.count;
-
-			if(before) {
-				++ret.id;
-			}
-		}
-
-		sibling = sibling->next;
-	}
-
-	dlg_assert(!before);
-}
-
-std::vector<CommandDescription> CommandDescription::get(const CommandBuffer& cb, const Command& cmd) {
-	dlg_assert(cb.state == CommandBuffer::State::executable);
-
-	std::vector<CommandDescription> ret;
-	fillIn(ret.emplace_back(), cb, cmd);
-
-	// find parents
-	auto* parent = cmd.parent;
-	while(parent) {
-		fillIn(ret.emplace_back(), cb, *parent);
-		parent = parent->parent;
-	}
-
-	std::reverse(ret.begin(), ret.end());
-	return ret;
-}
-
-Command* CommandDescription::find(const CommandBuffer& cb, span<const CommandDescription> desc) {
-	dlg_assert(cb.state == CommandBuffer::State::executable);
-
-	if(desc.empty()) {
-		return nullptr;
-	}
-
-	struct Candidate {
-		Command* command {};
-		float score {};
-
-		bool operator<(const Candidate& other) const {
-			return score < other.score;
-		}
-	};
-
-	// TODO: when we can't find an exact match, we probably want to return
-	// the nearest parent we could find (maybe require an even higher
-	// threshold though since jumping to a false parent sucks).
-	// Maybe control that behavior via an external argument
-	auto findCandidates = [](Command* cmd, const CommandDescription& desc) -> std::vector<Candidate> {
-		std::vector<Candidate> candidates;
-		while(cmd) {
-			if(cmd->nameDesc() == desc.command) {
-				candidates.push_back({cmd, 0.f});
-			}
-
-			cmd = cmd->next;
-		}
-
-		for(auto c = 0u; c < candidates.size(); ++c) {
-			auto& cand = candidates[c];
-
-			auto args = cand.command->argumentsDesc();
-			auto maxArgs = std::max(args.size(), desc.arguments.size());
-			if(maxArgs > 0) {
-				u32 numSame = 0u;
-				for(auto i = 0u; i < std::min(args.size(), desc.arguments.size()); ++i) {
-					if(args[i] == desc.arguments[i]) {
-						++numSame;
-					}
-				}
-
-				cand.score = float(numSame) / maxArgs;
-			} else {
-				cand.score = 1.0;
-			}
-
-			// weigh by distance
-			// TODO: we can do better!
-			// This is very sensitive to just erasing large chunks of data.
-			// We can use desc.count to get a more precise score.
-			float relDesc = float(desc.id) / desc.count;
-			float relCand = float(c) / candidates.size();
-
-			cand.score /= 1 + std::abs(5 * (relDesc - relCand));
-		}
-
-		// sort them in ascending order
-		std::sort(candidates.begin(), candidates.end());
-
-		// TODO: better filter
-		auto threshold = 0.5f;
-		auto cmp = [](float threshold, const auto& cand) {
-			return threshold <= cand.score;
-		};
-		auto it = std::upper_bound(candidates.begin(), candidates.end(), threshold, cmp);
-		candidates.erase(candidates.begin(), it);
-
-		return candidates;
-	};
-
-	std::vector<std::vector<Candidate>> levels;
-	levels.push_back(findCandidates(cb.commands, desc[0]));
-
-	auto i = 1u;
-	while(true) {
-		if(levels.back().empty()) {
-			levels.pop_back();
-			if(i == 1u) {
-				return nullptr;
-			}
-
-			--i;
-			continue;
-		}
-
-		// get the best parent candidate
-		auto cand = levels.back().back();
-		levels.back().pop_back();
-
-		// if we are in the last level: nice, just return the best
-		// candidate we have found
-		if(i == desc.size()) {
-			return cand.command;
-		}
-
-		// otherwise: we must have a parent command.
-		auto sectionCmd = dynamic_cast<SectionCommand*>(cand.command);
-		dlg_assert(sectionCmd);
-
-		// Find all children candidates, and push them to the stack,
-		// go one level deeper
-		auto cands = findCandidates(sectionCmd->children, desc[i]);
-		levels.push_back(cands);
-		++i;
-	}
-}
-
-DrawCmdBase::DrawCmdBase(CommandBuffer& cb) {
-	state = copy(cb, cb.graphicsState);
+DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
+	state = copy(cb, gfxState);
 
 	// TODO: push constants
 	//if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
@@ -171,18 +15,18 @@ DrawCmdBase::DrawCmdBase(CommandBuffer& cb) {
 	//}
 }
 
-DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) {
-	state = copy(cb, cb.computeState);
+DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb, const ComputeState& compState) {
+	state = copy(cb, compState);
 	// TODO: push constants
 }
 
 template<typename C>
 auto rawHandles(const C& handles) {
-	using VkH = decltype(handles[0]->handle);
+	using VkH = decltype(handle(*handles[0]));
 	std::vector<VkH> ret;
 	ret.reserve(handles.size());
 	for(auto* h : handles) {
-		ret.push_back(h->handle);
+		ret.push_back(handle(*h));
 	}
 
 	return ret;

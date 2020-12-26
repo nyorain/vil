@@ -20,6 +20,7 @@ enum class DescriptorCategory {
 
 DescriptorCategory category(VkDescriptorType);
 bool needsSampler(VkDescriptorType);
+bool needsSampler(const DescriptorSetLayout&, unsigned binding);
 bool needsImageView(VkDescriptorType);
 
 struct DescriptorPool : DeviceHandle {
@@ -50,7 +51,6 @@ struct DescriptorSet : DeviceHandle {
 	IntrusivePtr<DescriptorSetLayout> layout {};
 	VkDescriptorSet handle {};
 
-	// TODO: support buffer views
 	struct ImageInfo {
 		ImageView* imageView;
 		Sampler* sampler;

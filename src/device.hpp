@@ -5,9 +5,6 @@
 #include <handle.hpp>
 #include <span.hpp>
 
-#include <pipe.hpp>
-#include <ds.hpp>
-
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include <vk/dispatch_table.h>
@@ -20,29 +17,6 @@
 #include <unordered_map>
 
 namespace fuen {
-
-struct Submission {
-	std::vector<std::pair<VkSemaphore, VkPipelineStageFlags>> waitSemaphores;
-	std::vector<VkSemaphore> signalSemaphores;
-	std::vector<CommandBuffer*> cbs;
-
-	// We always add a signal semaphore to a submission, from the
-	// devices semaphore pool.
-	VkSemaphore ourSemaphore;
-};
-
-struct PendingSubmission {
-	Queue* queue {};
-	std::vector<Submission> submissions;
-
-	// The fence added by the caller.
-	// Might be null
-	Fence* appFence {};
-
-	// When the caller didn't add a fence, we added this one from the fence pool.
-	// When appFence is not null, this is null.
-	VkFence ourFence {};
-};
 
 struct Device {
 	Instance* ini {};
@@ -155,23 +129,6 @@ struct Device {
 	~Device();
 };
 
-struct Queue : Handle {
-	Device* dev {};
-
-	VkQueue handle {};
-	VkQueueFlags flags {};
-	u32 family {};
-	float priority {};
-};
-
-
-// Expects dev.mutex to be locked.
-// If the given submission was finished and therefore
-// removed, returns the iterator to the following pending submission.
-// Otherwise returns nullopt.
-using SubmIterator = decltype(Device::pending)::iterator;
-std::optional<SubmIterator> checkLocked(PendingSubmission& subm);
-
 Gui* getWindowGui(Device& dev);
 Gui* getOverlayGui(Swapchain& swapchain);
 
@@ -194,6 +151,10 @@ void forEachGuiLocked(Device& dev, F&& func) {
 	}
 }
 
+// Util for naming internal handles.
+// Mainly useful to get better validation layer output for stuff
+// we do inside the layer. Should never be used on any non-internal
+// handles.
 void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name);
 
 template<typename VkT>
@@ -212,17 +173,5 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	VkDevice dev,
 	const VkAllocationCallbacks* alloc);
-
-VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
-	VkQueue                                     queue,
-	uint32_t                                    submitCount,
-	const VkSubmitInfo*                         pSubmits,
-	VkFence                                     fence);
-
-VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(
-    VkQueue                                     queue);
-
-VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(
-    VkDevice                                    device);
 
 } // naemspace fuen

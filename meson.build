@@ -62,8 +62,9 @@ src = files(
 	'src/overlay.cpp',
 	'src/vk/format_utils.cpp',
 	'src/platform.cpp',
+	'src/commandDesc.cpp',
 
-	# gui
+	# gui stuff
 	'src/gui/renderer.cpp',
 	'src/gui/gui.cpp',
 	'src/gui/resources.cpp',
@@ -85,6 +86,7 @@ src = files(
 	'src/shader.cpp',
 	'src/pipe.cpp',
 	'src/queryPool.cpp',
+	'src/queue.cpp',
 
 	# external util
 	'src/spirv_reflect.c',

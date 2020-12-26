@@ -1,5 +1,6 @@
 #include <window.hpp>
 #include <layer.hpp>
+#include <queue.hpp>
 #include <cb.hpp>
 #include <sync.hpp>
 #include <image.hpp>
@@ -15,7 +16,7 @@ namespace {
 
 void cbClose(swa_window* win) {
 	(void) win;
-	// TODO
+	// TODO: make window closable? not sure if good idea
 	// DisplayWindow* dw = static_cast<DisplayWindow*>(swa_window_get_userdata(win));
 	// dw->close();
 }
@@ -470,7 +471,7 @@ void DisplayWindow::uiThread() {
 		// vsync currently effectively happens at the end of Gui::draw
 		// (where we wait for the submission).
 		// TODO: we also might wanna fix refreshing of this window
-		// to a maximum frame rate. We don't really need those lit 144hz
+		// to a maximum frame rate. We don't really need those dank 144hz
 		// but will *significantly* block other vulkan progress (due to
 		// gui mutex locking) when rendering at high rates.
 		VkResult res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain,
@@ -544,14 +545,5 @@ void DisplayWindow::uiThread() {
 	cv_.notify_one();
 	dlg_trace("Exiting window thread");
 }
-
-// void DisplayWindow::show(bool doShow) {
-// 	if(show_.load() == doShow) {
-// 		return;
-// 	}
-//
-// 	show_.store(doShow);
-// 	swa_display_wakeup(dpy);
-// }
 
 } // namespace fuen

@@ -99,34 +99,6 @@ struct Command {
 
 NYTL_FLAG_OPS(Command::Type)
 
-// Descrption of a command relative to the current recorded state.
-// Can be useful to implement heuristics identifying structurally
-// similar commands in related command buffer recordings (e.g. when
-// a command buffer is re-recorded or when comparing per-swapchain-image
-// command buffers).
-struct CommandDescription {
-	// Name of the command itself. Should not contain any arguments
-	// (except maybe in special cases where they modify the inherent
-	// meaning of the command so far that two commands with different
-	// arguments can't be considered similar).
-	std::string command;
-	// The most relevant arguments of this command, might be empty.
-	std::vector<std::string> arguments;
-
-	// How many commands with the same command came before this one
-	// and have the same parent(s)
-	u32 id {};
-	// The total number of command that have same command and parent(s)
-	u32 count {};
-
-	// Expects the given command buffer to be in executable/pending state.
-	// To synchronize with command buffer resetting, the caller likely
-	// has to lock the device mutex (to make sure cb doesn't get reset
-	// while this is executed).
-	static std::vector<CommandDescription> get(const CommandBuffer& cb, const Command& cmd);
-	static Command* find(const CommandBuffer& cb, span<const CommandDescription> desc);
-};
-
 // Expects T to be a container over Command pointers
 inline const Command* displayCommands(Command* cmd, const Command* selected,
 		Command::TypeFlags typeFlags) {
@@ -252,7 +224,7 @@ struct DrawCmdBase : Command {
 	GraphicsState state;
 
 	DrawCmdBase() = default;
-	DrawCmdBase(CommandBuffer& cb);
+	DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState);
 
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
@@ -422,7 +394,7 @@ struct DispatchCmdBase : Command {
 	ComputeState state;
 
 	DispatchCmdBase() = default;
-	DispatchCmdBase(CommandBuffer& cb);
+	DispatchCmdBase(CommandBuffer& cb, const ComputeState& compState);
 
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;

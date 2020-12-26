@@ -5,6 +5,7 @@
 #include <image.hpp>
 #include <rp.hpp>
 #include <platform.hpp>
+#include <queue.hpp>
 #include <cb.hpp>
 #include <sync.hpp>
 #include <ds.hpp>
@@ -107,68 +108,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	auto extsBegin = ci->ppEnabledExtensionNames;
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
 
-	std::vector<const char*> newExts; // keep-alive
 	auto nci = *ci;
-
-	// TODO: remove this
-	/*
-	if(ini.display) {
-		newExts = {extsBegin, extsEnd};
-
-		// NOTE: so it seems we can't enumerate all supported instance
-		// extensions here. We therefore just have to require the extensions
-		// we need to display a window at the moment. If enabling fuen
-		// ever causes an extension_not_present error, this may be the cause!
-#define CHECK_EXTENSIONS 0
-#if CHECK_EXTENSIONS
-		auto fpEnumerateInstanceExtensionProperties =
-			(PFN_vkEnumerateInstanceExtensionProperties)
-			fpGetInstanceProcAddr(nullptr, "vkEnumerateInstanceExtensionProperties");
-		dlg_assert(fpEnumerateInstanceExtensionProperties);
-
-		u32 nsup = 0;
-		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, nullptr));
-		auto supExts = std::make_unique<VkExtensionProperties[]>(nsup);
-		VK_CHECK(fpEnumerateInstanceExtensionProperties(nullptr, &nsup, supExts.get()));
-#endif // CHECK_EXTENSIONS
-
-		unsigned nexts;
-		auto exts = swa_display_vk_extensions(ini.display, &nexts);
-		auto enable = true;
-		for(auto i = 0u; i < nexts; ++i) {
-			auto ext = std::string_view(exts[i]);
-
-			// check if extension is already enabled by application
-			auto it = find(newExts, ext);
-			if(it != end(newExts)) {
-				continue;
-			}
-
-#if CHECK_EXTENSIONS
-			// Check if extension is supported.
-			// If not, we simply can't create a window.
-			auto finder = [&](auto& props){ return props.extensionName == ext; };
-			auto sit = std::find_if(supExts.get(), supExts.get() + nsup, finder);
-			if(sit == supExts.get() + nsup) {
-				dlg_warn("Won't create window since required extension '{}' is not supported", ext);
-				enable = false;
-				break;
-			}
-#endif // CHECK_EXTENSIONS
-
-			dlg_trace("Adding extension {} to instance creation", ext);
-			newExts.push_back(exts[i]);
-		}
-
-		if(enable) {
-			nci.ppEnabledExtensionNames = newExts.data();
-			nci.enabledExtensionCount = u32(newExts.size());
-		} else {
-			swa_display_destroy(ini.display);
-			ini.display = nullptr;
-		}
-	}
-	*/
 
 	// Create instance
 	VkResult result = fpCreateInstance(&nci, alloc, pInstance);
@@ -284,8 +224,10 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	FUEN_DEV_HOOK(GetDeviceProcAddr),
 	FUEN_DEV_HOOK(CreateDevice),
 	FUEN_DEV_HOOK(DestroyDevice),
+	FUEN_DEV_HOOK(DeviceWaitIdle),
 
 	FUEN_DEV_HOOK(QueueSubmit),
+	FUEN_DEV_HOOK(QueueWaitIdle),
 
 	FUEN_DEV_HOOK_EXT(CreateSwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 	FUEN_DEV_HOOK_EXT(DestroySwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),

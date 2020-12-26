@@ -37,6 +37,14 @@ bool isEmpty(const std::weak_ptr<T>& ptr) {
     return !ptr.owner_before(wt{}) && !wt{}.owner_before(ptr);
 }
 
+template<typename... Args> struct LastT;
+template<typename Head, typename... Tail> struct LastT<Head, Tail...> : LastT<Tail...> {};
+template<typename Head> struct LastT<Head> {
+	using type = Head;
+};
+
+template<typename... Args> using Last = LastT<Args...>;
+
 template<typename C, typename K>
 auto find(C&& c, K&& k) {
 	return std::find(std::begin(c), std::end(c), std::forward<K>(k));

@@ -163,6 +163,11 @@ bool needsSampler(VkDescriptorType type) {
 	}
 }
 
+bool needsSampler(const DescriptorSetLayout& dsl, unsigned binding) {
+	auto& bind = dsl.bindings[binding];
+	return needsSampler(bind.descriptorType) && !bind.pImmutableSamplers;
+}
+
 bool needsImageView(VkDescriptorType type) {
 	switch(type) {
 		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
@@ -202,7 +207,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
 		dsLayout.bindings[bind.binding] = bind;
-		if(needsSampler(bind.descriptorType) && bind.pImmutableSamplers) {
+		if(needsSampler(dsLayout, bind.binding)) {
 			auto& span = dsLayout.immutableSamplers.emplace_back();
 			span = {bind.pImmutableSamplers, bind.pImmutableSamplers + bind.descriptorCount};
 			dsLayout.bindings[bind.binding].pImmutableSamplers = span.data();

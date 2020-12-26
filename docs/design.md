@@ -293,3 +293,6 @@ enough to completely mess up frame times! Couple of reasons:
   has multiple bind commands) and, as it turns out, allocating memory 
   in __EVERY SINGLE ONE OF THEM__ is a bad idea. Also, games record command
   buffers in every frame, in practice.
+
+EDIT: nevermind, most of the performance problems came from locking the mutex
+too long when rendering ui

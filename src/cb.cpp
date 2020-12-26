@@ -10,32 +10,70 @@
 
 namespace fuen {
 
-// util
-void removeFromHandlesLocked(CommandBuffer& cb) {
+void returnBlocks(CommandPool& pool, CommandMemBlock* blocks) {
+	auto last = blocks;
+	while(last) {
+		last = last->next.load();
+	}
+
+	auto head = pool.memBlocks.load();
+	last->next.store(head);
+
+	while(!pool.memBlocks.compare_exchange_weak(head, last)) {
+		last->next.store(head);
+	}
+}
+
+// Record
+void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
+	if(!dev) {
+		dlg_assert(!blocks);
+		return;
+	}
+
+	if(blocks) {
+		std::lock_guard lock(dev->mutex);
+		if(pool) {
+			[[maybe_unused]] auto count = pool->records.erase(this);
+			dlg_assert(count > 0);
+
+			// It's important this is the last statement, as *this
+			// might be overriden by this.
+			returnBlocks(*pool, blocks);
+		} else {
+			freeBlocks(blocks);
+		}
+	}
+}
+
+CommandBufferRecord::CommandBufferRecord(CommandBuffer& xcb) :
+	memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.resetCount()),
+	images(xcb), handles(xcb), pipeLayouts(xcb) {
+}
+
+CommandBufferRecord::~CommandBufferRecord() {
+	auto dev = memBlocks.get_deleter().dev;
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+
 	// remove cb from all referenced resources
 	auto removeFromResource = [&](auto& res) {
-		// We have to lock the resource mutex since other commands buffers
+		// We have to lock the resource mutex since other records
 		// might add/remove them at the same time.
-		auto it = res.refCbs.find(&cb);
-		dlg_assert(it != res.refCbs.end());
-		res.refCbs.erase(it);
+		[[maybe_unused]] auto count = res.refCbs.erase(this);
+		dlg_assert(count > 0);
 	};
 
-	for(auto& img : cb.images) {
+	for(auto& img : images) {
 		removeFromResource(*img.second.image);
 	}
 
-	for(auto& buf : cb.buffers) {
-		removeFromResource(*buf.second.buffer);
-	}
-
-	for(auto& handle : cb.handles) {
+	for(auto& handle : handles) {
 		removeFromResource(*handle.second.handle);
 	}
-
-	cb.images.clear();
-	cb.buffers.clear();
-	cb.handles.clear();
 }
 
 /*
@@ -189,17 +227,11 @@ std::byte* data(CommandPool::MemBlock& mem, std::size_t offset) {
 }
 
 CommandPool::MemBlock& createMemBlock(std::size_t memSize, CommandPool::MemBlock* next) {
-	auto buf = new std::byte[sizeof(CommandPool::MemBlock) + memSize];
+	auto buf = new std::byte[sizeof(CommandPoolMemBlock) + memSize];
 	auto* memBlock = new(buf) CommandPool::MemBlock;
 	memBlock->size = memSize;
 	memBlock->next = next;
 	return *memBlock;
-}
-
-void freeMemBlock(CommandPool::MemBlock& block) {
-	// no need to call destructor, MemBlock is trivial
-	auto buf = reinterpret_cast<std::byte*>(&block);
-	delete[] buf;
 }
 
 std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) {
@@ -332,6 +364,7 @@ void freeMemBlocks(CommandPool& pool) {
 	// Free all memory blocks
 	while(pool.memBlocks) {
 		auto next = pool.memBlocks->next;
+		// no need to call MemBlocks destructor, it's trivial
 		delete[] reinterpret_cast<std::byte*>(pool.memBlocks);
 		pool.memBlocks = next;
 	}
@@ -340,6 +373,13 @@ void freeMemBlocks(CommandPool& pool) {
 CommandPool::~CommandPool() {
 	if(!dev) {
 		return;
+	}
+
+	{
+		std::lock_guard lock(dev->mutex);
+		for(auto& record : records) {
+			record.pool = nullptr;
+		}
 	}
 
 	// NOTE: we don't need a lock here:
@@ -490,24 +530,15 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-using UsedImage = CommandBuffer::UsedImage;
-using UsedHandle = CommandBuffer::UsedHandle;
-using UsedBuffer = CommandBuffer::UsedBuffer;
-
 void addToHandle(CommandBuffer& cb, DeviceHandle& handle) {
 	(void) cb;
 	(void) handle;
 	std::lock_guard lock(cb.dev->mutex);
-	// dlg_assert(std::find(handle.refCbs.begin(), handle.refCbs.end(), &cb) == handle.refCbs.end());
 	auto [it, success] = handle.refCbs.insert(&cb);
 	dlg_assert(success);
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
-	// (void) cb;
-	// (void) cmd;
-	// (void) h64;
-	// (void) handle;
 	auto it = cb.handles.find(h64);
 	if(it == cb.handles.end()) {
 		it = cb.handles.emplace(h64, UsedHandle{handle, cb}).first;
@@ -524,10 +555,7 @@ void useHandle(CommandBuffer& cb, Command& cmd, T& handle) {
 	useHandle(cb, cmd, h64, handle);
 }
 
-UsedImage& /*void*/ useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
-	// (void) cb;
-	// (void) cmd;
-	// (void) image;
+UsedImage& useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
 	auto it = cb.images.find(image.handle);
 	if(it == cb.images.end()) {
 		it = cb.images.emplace(image.handle, UsedImage(image, cb)).first;
@@ -539,66 +567,51 @@ UsedImage& /*void*/ useHandle(CommandBuffer& cb, Command& cmd, Image& image) {
 	it->second.commands.push_back(&cmd);
 
 	// NOTE: add swapchain in case it's a swapchain image?
-	// shouldn't be needed though.
-	// dlg_assert(image.memory || image.swapchain);
-	// if(image.memory) {
-	// 	useHandle(cb, cmd, *image.memory);
-	// }
+	// shouldn't be needed I guess.
+	// NOTE: can currently fail for sparse bindings i guess
+	dlg_assert(image.memory || image.swapchain);
+	if(image.memory) {
+		useHandle(cb, cmd, *image.memory);
+	}
 
 	return it->second;
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, ImageView& view, bool useImg = true) {
-	(void) useImg;
 	auto h64 = handleToU64(view.handle);
 	useHandle(cb, cmd, h64, view);
 
-	// dlg_assert(view.img);
-	// if(useImg && view.img) {
-	// 	useHandle(cb, cmd, *view.img);
-	// }
+	dlg_assert(view.img);
+	if(useImg && view.img) {
+		useHandle(cb, cmd, *view.img);
+	}
 }
 
-/*UsedBuffer&*/ void useHandle(CommandBuffer& cb, Command& cmd, Buffer& buf) {
-	// (void) cb;
-	// (void) cmd;
-	// (void) buf;
-	auto it = cb.buffers.find(buf.handle);
-	if(it == cb.buffers.end()) {
-		it = cb.buffers.emplace(buf.handle, UsedBuffer{buf, cb}).first;
-		it->second.buffer = &buf;
-		addToHandle(cb, *it->second.buffer);
+void useHandle(CommandBuffer& cb, Command& cmd, Buffer& buf) {
+	auto h64 = handleToU64(buf.handle);
+	useHandle(cb, cmd, h64, buf);
+
+	// NOTE: can currently fail for sparse bindings i guess
+	dlg_assert(buf.memory);
+	if(buf.memory) {
+		useHandle(cb, cmd, *buf.memory);
 	}
-
-	dlg_assert(it->second.buffer);
-	it->second.commands.push_back(&cmd);
-
-	// dlg_assert(buf.memory);
-	// if(buf.memory) {
-	// 	useHandle(cb, cmd, *buf.memory);
-	// }
-
-	// return it->second;
 }
 
 void useHandle(CommandBuffer& cb, Command& cmd, BufferView& view) {
 	auto h64 = handleToU64(view.handle);
 	useHandle(cb, cmd, h64, view);
 
-	// dlg_assert(view.buffer);
-	// if(view.buffer) {
-	// 	useHandle(cb, cmd, *view.buffer);
-	// }
+	dlg_assert(view.buffer);
+	if(view.buffer) {
+		useHandle(cb, cmd, *view.buffer);
+	}
 }
 
-/*CommandBuffer::UsedImage&*/ void useHandle(CommandBuffer& cb, Command& cmd, Image& image,
-		VkImageLayout newLayout) {
+void useHandle(CommandBuffer& cb, Command& cmd, Image& image, VkImageLayout newLayout) {
 	auto& img = useHandle(cb, cmd, image);
 	img.layoutChanged = true;
 	img.finalLayout = newLayout;
-	// return img;
-	// useHandle(cb, cmd, image);
-	// (void) newLayout;
 }
 
 // commands
@@ -831,22 +844,28 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
 
-		/*
 		for(auto b = 0u; b < ds.bindings.size(); ++b) {
-			auto cat = category(ds.layout->bindings[b].descriptorType);
+			auto descriptorType = ds.layout->bindings[b].descriptorType;
+			auto cat = category(descriptorType);
 			if(cat == DescriptorCategory::image) {
 				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
 					if(!ds.bindings[b][e].valid) {
 						continue;
 					}
 
-					auto info = std::get<DescriptorSet::ImageInfo>(ds.bindings[b][e].data);
-					if(!isEmpty(info.imageView)) {
-						useHandle(cb, cmd, *info.imageView.lock());
+					auto& info = ds.bindings[b][e].imageInfo;
+					if(needsImageView(descriptorType)) {
+						dlg_assert(info.imageView);
+						if(info.imageView) {
+							useHandle(cb, cmd, *info.imageView);
+						}
 					}
 
-					if(!isEmpty(info.sampler)) {
-						useHandle(cb, cmd, *info.sampler.lock());
+					if(needsSampler(*ds.layout, b)) {
+						dlg_assert(info.sampler);
+						if(info.sampler) {
+							useHandle(cb, cmd, *info.sampler);
+						}
 					}
 				}
 			} else if(cat == DescriptorCategory::buffer) {
@@ -855,9 +874,10 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 						continue;
 					}
 
-					auto info = std::get<DescriptorSet::BufferInfo>(ds.bindings[b][e].data);
-					if(!isEmpty(info.buffer)) {
-						useHandle(cb, cmd, *info.buffer.lock());
+					auto& info = ds.bindings[b][e].bufferInfo;
+					dlg_assert(info.buffer);
+					if(info.buffer) {
+						useHandle(cb, cmd, *info.buffer);
 					}
 				}
 			} else if(cat == DescriptorCategory::bufferView) {
@@ -866,13 +886,13 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 						continue;
 					}
 
-					auto view = std::get<std::weak_ptr<BufferView>>(ds.bindings[b][e].data).lock();
-					dlg_assert(view->buffer);
-					useHandle(cb, cmd, *view);
+					auto* bufView = ds.bindings[b][e].bufferView;
+					dlg_assert(bufView);
+					dlg_assert(bufView->buffer);
+					useHandle(cb, cmd, *bufView);
 				}
 			}
 		}
-		*/
 
 		useHandle(cb, cmd, ds);
 		cmd.sets[i] = &ds;
@@ -964,7 +984,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 		uint32_t                                    firstVertex,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawCmd>(cb, cb);
+	auto& cmd = addCmd<DrawCmd>(cb, cb, graphicsState_);
 
 	cmd.vertexCount = vertexCount;
 	cmd.instanceCount = instanceCount;
@@ -983,7 +1003,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 		int32_t                                     vertexOffset,
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb);
+	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb, graphicsState_);
 
 	cmd.firstInstance = firstInstance;
 	cmd.instanceCount = instanceCount;
@@ -1002,7 +1022,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb);
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, graphicsState_);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1024,7 +1044,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb);
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, graphicsState_);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1048,7 +1068,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb);
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, graphicsState_);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1077,7 +1097,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb);
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, graphicsState_);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1103,7 +1123,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchCmd>(cb, cb);
+	auto& cmd = addCmd<DispatchCmd>(cb, cb, computeState_);
 
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
@@ -1118,7 +1138,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb);
+	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb, computeState_);
 	cmd.offset = offset;
 
 	auto& buf = cb.dev->buffers.get(buffer);
@@ -1137,7 +1157,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb);
+	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb, computeState_);
 
 	cmd.baseGroupX = baseGroupX;
 	cmd.baseGroupY = baseGroupY;
@@ -1836,8 +1856,10 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 		span<DescriptorSet* const> sets, span<const u32>) {
 	ensureSize(cb, descriptorSets, firstSet + sets.size());
 
-	// TODO: the "ds disturbing" part of vulkan is hard to grasp IMO.
+	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
 	// There may be errors here.
+	// TODO: do we even need to track it like this? only useful if we
+	// also show it in UI which sets were disturbed.
 
 	auto lastSet = firstSet + sets.size() - 1;
 	for(auto i = 0u; i < firstSet; ++i) {
