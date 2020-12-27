@@ -124,7 +124,7 @@ DescriptorSetLayout::~DescriptorSetLayout() {
 	}
 
 	// ds layouts are never used directly by command buffers
-	dlg_assert(refCbs.empty());
+	dlg_assert(refRecords.empty());
 	dlg_assert(handle);
 
 	dev->dispatch.DestroyDescriptorSetLayout(dev->handle, handle, nullptr);
@@ -204,10 +204,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	dsLayout.handle = *pSetLayout;
 
 	for(auto i = 0u; i < pCreateInfo->bindingCount; ++i) {
-		auto& bind = pCreateInfo->pBindings[i];
+		const auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
 		dsLayout.bindings[bind.binding] = bind;
-		if(needsSampler(dsLayout, bind.binding)) {
+		if(needsSampler(dsLayout, bind.binding) && bind.pImmutableSamplers) {
 			auto& span = dsLayout.immutableSamplers.emplace_back();
 			span = {bind.pImmutableSamplers, bind.pImmutableSamplers + bind.descriptorCount};
 			dsLayout.bindings[bind.binding].pImmutableSamplers = span.data();

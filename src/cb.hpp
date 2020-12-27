@@ -60,19 +60,21 @@ public:
 
 	VkCommandBuffer handle() const { return handle_; }
 	CommandPool& pool() const { return *pool_; }
-	State state() const { return state_; } // synchronized via dev.mutex
+
+	// Synchronized via dev.mutex (must only be called while mutex is locked)
+	State state() const { return state_; }
 	u32 recordCount() const { return recordCount_; }
 
-	// Can be nullptr when command buffer was never recorded.
-	// Otherwise returns the current or last recorded state.
-	// No synchronization needed to call this, the record is guaranteed
-	// to stay valid via the shared ownership acquired via the intrusive ptr.
-	IntrusivePtr<CommandBufferRecord> recordPtr() const { return record_; }
+	// Returns the last complete recorded state.
+	// When command buffer is executable/pending, this is the current state.
+	// Otherwise it's the previous state.
+	IntrusivePtr<CommandRecord> lastRecordPtrLocked() const { return lastRecord_; }
+	IntrusivePtr<CommandRecord> lastRecordPtr() const {
+		std::lock_guard lock(dev->mutex);
+		return lastRecordPtrLocked();
+	}
 
-	// If non-null, only guaranteed to stay valid while device mutex is locked.
-	// This means calling this while device mutex isn't locked (for something
-	// other than a nullptr-comparison) is invalid.
-	CommandBufferRecord* record() const { return record_.get(); }
+	CommandRecord* lastRecordLocked() const { return lastRecord_.get(); }
 
 	// Moves the command buffer to invalid state.
 	// Expects device mutex to be locked
@@ -102,7 +104,19 @@ private:
 
 	// The last recorded state.
 	State state_ {State::initial}; // synchronized via dev mutex
-	IntrusivePtr<CommandBufferRecord> record_ {};
+
+	// The current state: only finished when in recording state, otherwise
+	// it may be null. This is reset every time the command buffer is
+	// reset (e.g. via the command pool or explicitly or implicitly via
+	// a new vkBeginCommandBuffer or when a reference resource is destroyed
+	// and the the command buffer moved to invalid state).
+	IntrusivePtr<CommandRecord> record_ {};
+
+	// The last valid state of this command buffer. We store this since
+	// it can be useful to know when inspecting a command buffer.
+	// This is only updated when a command buffer recording is finished,
+	// i.e. by vkEndCommandBuffer.
+	IntrusivePtr<CommandRecord> lastRecord_ {};
 	u32 recordCount_ {};
 
 	// Only needed while recording.
@@ -116,6 +130,8 @@ private:
 	Command* lastCommand_ {};
 	std::size_t memBlockOffset_ {}; // offset in first (current) mem block
 
+	PushConstantData pushConstants_ {};
+
 public: // Only public for recording, should not be accessed outside api
 	void beginSection(SectionCommand& cmd);
 	void addCmd(Command& cmd);
@@ -123,10 +139,23 @@ public: // Only public for recording, should not be accessed outside api
 
 	ComputeState& computeState() { return computeState_; }
 	GraphicsState& graphicsState() { return graphicsState_; }
+	PushConstantData& pushConstants() { return pushConstants_; }
 
 	// Expects device mutex to be locked
+	void clearPendingLocked();
 	void doReset(bool record);
 	void doEnd();
+
+	// Can be nullptr when command buffer was never recorded.
+	// Otherwise returns the current or last recorded state.
+	// No synchronization needed to call this, the record is guaranteed
+	// to stay valid via the shared ownership acquired via the intrusive ptr.
+	IntrusivePtr<CommandRecord> recordPtr() const { return record_; }
+
+	// If non-null, only guaranteed to stay valid while device mutex is locked.
+	// This means calling this while device mutex isn't locked (for something
+	// other than a nullptr-comparison) is invalid.
+	CommandRecord* record() const { return record_.get(); }
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(

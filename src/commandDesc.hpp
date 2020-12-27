@@ -30,8 +30,8 @@ struct CommandDesc {
 	// To synchronize with command buffer resetting, the caller likely
 	// has to lock the device mutex (to make sure cb doesn't get reset
 	// while this is executed).
-	static std::vector<CommandDesc> get(const CommandBuffer& cb, const Command& cmd);
-	static Command* find(const CommandBuffer& cb, span<const CommandDesc> desc);
+	static std::vector<CommandDesc> get(const Command& root, const Command& cmd);
+	static Command* find(Command* root, span<const CommandDesc> desc);
 };
 
 // Rough structure of a command buffer recording.

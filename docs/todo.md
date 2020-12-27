@@ -2,104 +2,51 @@
 
 v0.1, goal: end of january 2021
 
-- [x] restructure repo
-	- [x] add an example (using swa)
-	- [x] move everything else into src (maybe api.h to include/?)
-	- [x] decide on license and add it
-	      pro GPL: no one has to link this layer so it would not have a negative
-		    impact on anyone. And using GPL it would prevent abusive usage (such as 
-			forking/privately improving and selling it)
-		  pro MIT: companies are probably still wary about using GPL software
-		    and i totally don't have a problem with this being used for
-			proprietary software development (such as games). 
-			But otoh, companies not understanding licensing and open source 
-			should not be my problem.
-		  {yep, going with GPL for now}
-- [x] always try to enable swapchain extension on device creation
-- [x] name our internal handles for easier debugging
-- [x] switch to shared pointers for device handles, keeping them alive
-	  NOTE: nope, not doing that for now. Explicit resource connection tracking
-	  implemented though.
-- [x] store for handles in which command buffers they were used and set the
-      command buffer to invalid state when they are changed/destroyed
-- [x] cleanup Renderer/Gui implementation: merge back together
-	- [x] proper gui sync implementation
-	- [x] move gui tabs into own classes
-- [x] display command buffer state in resource UI
-- [x] use better enum->string helper. The vk_layer one has several problems
-	  probably best to just modify their python script and put it into docs/.
-	  Or use custom vkpp output generator?
-	  {went with custom vkpp output generator, easy to write & maintain given
-	   the extensive registry parser}
-- [x] display in UI whether resources are destroyed or not
-	  {NOTE: nvm, we decided against shared_ptr approach and never have destroyed resources}	
-- [x] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
-- [x] Remove Device::lastDevice api hack. Instead return a dev handle from fuenLoadApi
-      Should probably just store it inside the api struct.
-- [x] fix destructors: vulkan allows null handle, we don't
-- [ ] fix push constant tracking in command buffer
-- [x] fix refCbs handling. We might not be able to do it that way.
+- [ ] implement command group concept and last command buffer state viewing
+- [ ] find a way to limit number of command groups. Erase them again if not
+      used for a while. don't create group for single non-group cb submission?
+	  Or somehow quickly remove again
+- [ ] allow to view command groups per queue
+- [ ] make sure to always correctly store/forward pNext chains
+	  easier future compat, will support (non-crash) a lot of
+	  extensions naturally already.
+	- [ ] vkQueuePresentKHR is problematic atm
+	- [ ] everywhere where we hook-create handles
+- [ ] implement overview as in node 1652
+- [ ] cleanup, implement cb viewer as in node 1652
 - [ ] Implement missing resource overview UIs
+- [ ] optimize memory consumption in cbs.
+      the UsedHandle::commands vector are over-allocating *so much* currently,
+	  maybe replace them with linked lists (non-intrusive)?
+- [ ] command groups: should probably also check commonly used handles to match them.
+	  at least some handles (at least root resources like memory, samplers etc)
+	  will always be in common. Command buffers that use almost entirely the
+	  same buffers and images can be considered related
+- [ ] in overview: before showing pending submissions, we probably want to
+      check them all for finish
 - [ ] fully implement command buffer viewer
 	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
 	- [ ] show all commands & info for commands
 	- [ ] better resource selection/collapsing etc
 - [ ] fix ui for fixed resource tracking: check for nullptr resource references
-      everywhere (and use weak/shared pointer where we can't manually reset to null)
+      everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
+	- [ ] use CommandBufferRecord::destroyed to show <destroyed> instead of
+	      resource reference buttons
+- [ ] fix dummy buttons in command viewer (e.g. BeginRenderPass)
 - [x] track dynamic graphics pipeline state
 	- [ ] show it in command ui
-- [x] correctly handle secondary command buffers
-	- [x] might need adaptions for render passes, bound state and such
-		  {from a first look, no does not seem so. State is reset at cb boundary.
-		   We just can't assume that something like cmdDraw is inside a render
-		   pass for secondary cbs but we don't do that anyways}
-- [x] Switch to a more useful fork/branch of vkpp: Generate vk::name
-      functions for plain vulkan enums, don't use anything else here.
-	  Probably best to not even include vkpp as subproject, just copy
-	  /dispatch and /names here.
-	  	- [x] nvm, should probably just ditch vkpp all together and use the layer utils
-		- [x] check if we can use more of the the layer utils
-		      maybe we can replace our own hash table?
-			  {nah, not worth it for now, using std works fine, opt for later}
-- [x] fix our global dispatchable handle hash table. Either use the vk_layer
-	  one or remove the type hashing (dispatchable handles are globally unique).
-- [ ] we have to check in barrier commands whether the image was put into
-      concurrent mode by us, and if so, set queue families to ignored
-	  (otherwise we get a spec error)
-- [ ] correctly store pNext chain when recording command buffers.
-      (alternative: at least set them to nullptr...)
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
 		   to make this beautiful}
 	- [ ] show graph of frame timings
 	- [ ] show enabled extensions & features
-- [x] properly shutdown everything, no leftover resources and layer warnings
-- [x] proper queue creation and querying for window display
-- [x] properly shut down rendering thread for own-window display
-- [x] test display window for compute-only applications
-	- [x] come up with something smart to block them before they shut down. 
-	      Is there a sensible way to do this in the layer or should applications
-		  do it themselves? **write wiki post**
-		  We could simply block the application in vkDestroyDevice? but then,
-		  everything is already destroyed I guess. Don't see a way to do it rn.
-		  Applications otoh just have to insert a single std::getchar before
-		  terminating, a lot easier.
-		  {see docs/compute-only.md}
-- [x] figure out a general policy to transitive handle-adding to command buffer
-	- [x] e.g.: when an descriptor is used, is the imageView added to handles?
-	      the image as well? the memory as well?
-	      {yes, this is probably the expected and best way}
-	- [x] add handles transitively for cmdExecuteCommands?
-	      {yes, this is probably the expected and best way}
 - [ ] next ui sync rework
 	- [ ] don't lock device mutex while waiting for fences
 	- [ ] use chain semaphores for input
 	- [ ] correctly sync output, but only if it's needed (might work already)
 	- [ ] if timeline semaphores are available, use them! for all submissions (in and out)
 		- [ ] when timeline semaphore extension is available, enable it!
-- [ ] bump api version as far as possible when creating instance?
-      not sure if anything could go wrong in practice
 - [ ] proper shipping and installing
 	- [x] make the json file a config file, generated by meson
 	- [ ] write wiki post on how to build/install/use it
@@ -115,16 +62,11 @@ v0.1, goal: end of january 2021
 - [ ] improve window creation: try to match up used swa backend with enabled
 	  vulkan extensions. Could extend swa for it, if useful
 	  (e.g. swa_display_create_for_vk_extensions)
-- [x] improve UI
-	- [x] Add proper image viewer
-	- [x] Add buffer viewer
-- [x] full support of all vulkan 1.0 commands (except sparse binding I guess)
-	- [x] should probably also support the easy-to-support extensions
-	      for resource creation already. At least widely used/important extensions
-		  {yep, we should support the most critical 1.1 and 1.2 stuff, except descriptor update templates}
-	- [ ] support descriptor update templates
+	- [ ] possibly fall back to xlib surface creation in swa
 	- [ ] at least make sure it does not crash for features we don't
 	      implement yet (such as sparse binding)
+		   (could for instance test what happens when memory field of a buffer/image
+		   is not set).
 - [ ] improve buffer viewer
 	- [ ] ability to infer layouts (simply use the last known one, link to last usage in cb) from
 		- [ ] uniform and storage buffers (using spirv_inspect)
@@ -160,11 +102,6 @@ v0.1, goal: end of january 2021
 - [ ] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
 	  for inserting query commands (check for the queue family in general,
 	  we might not be able to use the query pool!).
-- [x] clean up currently slightly hacky window-thread communication.
-      (and all instance stuff in layer.cpp)
-      ~~investigate whether we have to create the display in that thread
-	  on windows already as well~~
-	- [x] related, swa/winapi: don't create dummy window when wgl is disabled?
 - [ ] limit device mutex lock by ui/overlay/window as much as possible.
     - [ ] We might have to manually throttle frame rate for window
 - [ ] allow to force overlay via environment variable. Even with go-through
@@ -174,15 +111,13 @@ v0.1, goal: end of january 2021
 	- [ ] generally expose own window creation and force-overlay via env vars
 - [ ] add example image to readme (with real-world application if possible)
 - [ ] move external source into extra folder
-- [x] rename cbState.hpp -> boundState.hpp? or just bound.hpp?
-- [ ] related to command buffer groups: simply view all commands pushed
-      to a queue?
 - [ ] A lot of sources can be moved to src/gui
 	- [ ] rename imguiutil. Move to gui
 - [ ] stop this todo-for-v0.1-list from growing at some point.
 - [ ] before release: test on windows & linux, on all owned hardware
 
-not sure if viable for first version:
+
+not sure if viable for first version but should be goal:
 - [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
 - [ ] get it to run without significant (slight (like couple of percent) increase 
 	  of frame timings even with layer in release mode is ok) overhead
@@ -191,6 +126,15 @@ not sure if viable for first version:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] bump api version as far as possible when creating instance?
+      not sure if anything could go wrong in practice
+- [ ] register own debug messenger if possible?
+- [ ] not sure if current cmdExecuteCommands implementation is the best.
+      see comment there.
+- [ ] for command descriptions, take pNext chains into account.
+	  they are rarely changed just like that (neither is their order I guess)
+- [ ] track push constant range pipe layouts; correctly invalidate & disturb
+      also track which range is bound for which stage.
 - [ ] can we support viewing multisample images?
       either sample them directly in shader (requires a whole lotta new 
 	  shader permuatations, not sure if supported everywhere) or resolve
@@ -255,6 +199,8 @@ Possibly for later, new features/ideas:
 		- [ ] give visual/explicit feedback about re-recording though.
 		      maybe show time/frames since last re-record?
 			  Show statistics, how often the cb is re-recorded?
+- [ ] related to command buffer groups: simply view all commands pushed
+      to a queue?
 - [ ] way later: support for sparse binding
 - [ ] we might be able (with checks everywhere and no assumptions at all, basically)
       to support cases where extensions we don't know about/support are used.
@@ -266,7 +212,11 @@ Possibly for later, new features/ideas:
 	- [x] bindmemory2
 	- [x] support descriptor set update templates
 	- [x] support vkCmdDispatchBase
-	- [ ] way later (at least non-crash? can't test it tho) support device masks
+	- [ ] support device mask stuff (non-crash)
+		- [ ] allow to hook command buffers containing it
+		- [ ] layer might break with this though, not sure if we can support it easily
+			  for real multi-gpu. Investigate (not supporting it for now is
+			  okay but document why).
 	- [ ] support everything in UI
 		- [ ] add sampler ycbcr conversion tracking
 - [ ] support vulkan 1.2 (non-crash)
@@ -320,3 +270,9 @@ Possibly for later, new features/ideas:
 - [ ] (low prio, experiment) allow to visualize buffers as images where it makes sense 
 	  (using a bufferView or buffer-to-image copy)
 - [ ] (low prio) can we support android?
+- [ ] (low prio, evaluate idea) allow to temporarily "freeze destruction", causing handles to be
+      moved to per-handle, per-device "destroyedX" maps/vectors.
+	  The vulkan handles probably need to be destroyed (keeping them alive
+	  has other problems, e.g. giving memory back to pools, don't wanna
+	  hook all that) but it might be useful to inspect command buffers without
+	  handles being destroyed

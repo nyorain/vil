@@ -5,11 +5,11 @@
 namespace fuen {
 
 // CommandDesc
-void fillIn(CommandDesc& ret, const CommandBuffer& cb, const Command& cmd) {
+void fillIn(CommandDesc& ret, const Command& root, const Command& cmd) {
 	ret.command = cmd.nameDesc();
 	ret.arguments = cmd.argumentsDesc();
 
-	auto* sibling = cb.commands;
+	auto* sibling = &root;
 	if(cmd.parent) {
 		sibling = cmd.parent->children;
 	}
@@ -34,16 +34,14 @@ void fillIn(CommandDesc& ret, const CommandBuffer& cb, const Command& cmd) {
 	dlg_assert(!before);
 }
 
-std::vector<CommandDesc> CommandDesc::get(const CommandBuffer& cb, const Command& cmd) {
-	dlg_assert(cb.state == CommandBuffer::State::executable);
-
+std::vector<CommandDesc> CommandDesc::get(const Command& root, const Command& cmd) {
 	std::vector<CommandDesc> ret;
-	fillIn(ret.emplace_back(), cb, cmd);
+	fillIn(ret.emplace_back(), root, cmd);
 
 	// find parents
 	auto* parent = cmd.parent;
 	while(parent) {
-		fillIn(ret.emplace_back(), cb, *parent);
+		fillIn(ret.emplace_back(), root, *parent);
 		parent = parent->parent;
 	}
 
@@ -51,10 +49,8 @@ std::vector<CommandDesc> CommandDesc::get(const CommandBuffer& cb, const Command
 	return ret;
 }
 
-Command* CommandDesc::find(const CommandBuffer& cb, span<const CommandDesc> desc) {
-	dlg_assert(cb.state == CommandBuffer::State::executable);
-
-	if(desc.empty()) {
+Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
+	if(desc.empty() || !root) {
 		return nullptr;
 	}
 
@@ -124,7 +120,7 @@ Command* CommandDesc::find(const CommandBuffer& cb, span<const CommandDesc> desc
 	};
 
 	std::vector<std::vector<Candidate>> levels;
-	levels.push_back(findCandidates(cb.commands, desc[0]));
+	levels.push_back(findCandidates(root, desc[0]));
 
 	auto i = 1u;
 	while(true) {
@@ -232,20 +228,25 @@ float CommandBufferDesc::match(const Command* cmd) {
 					break;
 				}
 			}
+
+			// TODO: should consider children present in the command buffer
+			// but not in the description. They are not considered at all atm.
+			// In general, the matching should probably be symmetric.
 		}
 
 		++desc.totalCommands;
 		processType(desc, cmd->type());
+		cmd = cmd->next;
 	}
 
-	float childFac = float(foundChildren) / children.size();
-	float avgChildMatch = foundChildren ? childMatchSum / foundChildren : 0.f;
+	float childFac = !children.empty() ? float(foundChildren) / children.size() : 1.f;
+	float avgChildMatch = foundChildren ? childMatchSum / foundChildren : childFac;
 
 	float weightSum = 0.f;
-	float matchSum = 0.f;
+	float diffSum = 0.f;
 
 	auto addMatch = [&](u32 dst, u32 src) {
-		matchSum += dst - src;
+		diffSum += std::abs(float(dst) - float(src));
 		weightSum += std::max(dst, src);
 	};
 
@@ -256,14 +257,13 @@ float CommandBufferDesc::match(const Command* cmd) {
 	addMatch(this->queryCommands, desc.queryCommands);
 
 	// When there are no commands in either, we match 100%
-	float ownMatch = weightSum > 0.0 ? matchSum / weightSum : 1.f;
+	float ownDiff = weightSum > 0.0 ? diffSum / weightSum : 0.f;
 
 	// NOTE: kinda simplistic formula, can surely be improved.
 	// We might want to value large setions that are *exactly* similar a lot
 	// more since that is a huge indicator that command buffers come from
 	// the same source, even if whole sections are missing in either of them.
-	return ownMatch * childFac * avgChildMatch;
+	return (1.f - ownDiff) * childFac * avgChildMatch;
 }
-
 
 } // namespace fuen

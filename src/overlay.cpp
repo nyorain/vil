@@ -2,6 +2,7 @@
 #include <swapchain.hpp>
 #include <image.hpp>
 #include <cb.hpp>
+#include <queue.hpp>
 #include <sync.hpp>
 #include <platform.hpp>
 #include <imgui/imgui.h>

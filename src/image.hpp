@@ -30,6 +30,7 @@ struct Image : MemoryResource {
 	};
 
 	SamplerType samplerType {SamplerType::none};
+	bool concurrent {}; // whether we moved it into concurrent sharing mode
 
 	~Image();
 };

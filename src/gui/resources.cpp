@@ -1055,8 +1055,8 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 
 	ImGui::Text("Pool: ");
 	ImGui::SameLine();
-	if(ImGui::Button(name(*cb.pool).c_str())) {
-		select(*cb.pool);
+	if(ImGui::Button(name(cb.pool()).c_str())) {
+		select(cb.pool());
 	}
 
 	auto stateName = [](auto state) {
@@ -1069,7 +1069,7 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 		}
 	};
 
-	ImGui::Text("State: %s", stateName(cb.state));
+	ImGui::Text("State: %s", stateName(cb.state()));
 
 	// maybe show commands inline (in tree node)
 	// and allow via button to switch to cb viewer?

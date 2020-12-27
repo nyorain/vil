@@ -1,8 +1,10 @@
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
+#include <queue.hpp>
 #include <imguiutil.hpp>
 #include <commands.hpp>
 #include <imgui/imgui.h>
+#include <vk/enumString.hpp>
 
 namespace fuen {
 
@@ -25,27 +27,30 @@ CommandBufferGui::~CommandBufferGui() {
 }
 
 void CommandBufferGui::draw() {
-	auto& dev = gui_->dev();
+	// auto& dev = gui_->dev();
 
 	// Command list
 	ImGui::Columns(2);
 	ImGui::BeginChild("Command list", {400, 0});
 
+#if 0
 	// We can only display the content when the command buffer is in
 	// executable state. The state of the command buffer is protected
 	// by the device mutex (also command_ and the cb itself).
-	if(!cb_) {
-		ImGui::Text("No command buffer selected");
+	if(!record_) {
+		ImGui::Text("No command record selected");
 		return;
 	}
 
-	if(cb_->state == CommandBuffer::State::executable) {
+	// auto rec = cb_->lastRecordLocked();
+	if(record_) { // might be nullptr when cb was never recorded
+	// if(cb_->state() == CommandBuffer::State::executable) {
 		// ImGui::PushID(dlg::format("{}:{}", cb_, cb_->resetCount).c_str());
 		ImGui::PushID(dlg::format("{}", cb_).c_str());
 
-		if(cb_->resetCount != resetCount_) {
+		if(rec->recordID != recordID_) {
 			// try to find a new command matching the old ones description
-			command_ = CommandDesc::find(*cb_, desc_);
+			command_ = CommandDesc::find(rec->commands, desc_);
 
 			/*
 			if(!desc_.empty()) {
@@ -69,10 +74,10 @@ void CommandBufferGui::draw() {
 		// show sections etc. Should probably pass a struct DisplayDesc
 		// to displayCommands instead of various parameters
 		auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
-		auto* nsel = displayCommands(cb_->commands, command_, flags);
+		auto* nsel = displayCommands(rec->commands, command_, flags);
 		if(nsel) {
-			resetCount_ = cb_->resetCount;
-			desc_ = CommandDesc::get(*cb_, *nsel);
+			recordID_ = rec->recordID;
+			desc_ = CommandDesc::get(*rec->commands, *nsel);
 			command_ = nsel;
 			hooked_.needsUpdate = true;
 		}
@@ -81,6 +86,27 @@ void CommandBufferGui::draw() {
 	} else {
 		ImGui::Text("[Not in exeuctable state]");
 		command_ = nullptr;
+	}
+#endif
+
+	if(group_->lastRecord.get() != record_) {
+		ImGui::PushID(dlg::format("{}", group_).c_str());
+
+		record_ = group_->lastRecord.get();
+		command_ = CommandDesc::find(record_->commands, desc_);
+
+		// TODO: add selector ui to filter out various commands/don't
+		// show sections etc. Should probably pass a struct DisplayDesc
+		// to displayCommands instead of various parameters
+		auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
+		auto* nsel = displayCommands(record_->commands, command_, flags);
+		if(nsel) {
+			desc_ = CommandDesc::get(*record_->commands, *nsel);
+			command_ = nsel;
+			// hooked_.needsUpdate = true;
+		}
+
+		ImGui::PopID();
 	}
 
 	ImGui::EndChild();
@@ -92,6 +118,7 @@ void CommandBufferGui::draw() {
 		// Inspector
 		command_->displayInspector(*gui_);
 
+		/*
 		// Show own general gui
 		ImGui::Checkbox("Query Time", &hooked_.query);
 		if(hooked_.query) {
@@ -107,7 +134,7 @@ void CommandBufferGui::draw() {
 			if(!hooked_.commandPool) {
 				VkCommandPoolCreateInfo cpci {};
 				cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-				cpci.queueFamilyIndex = cb_->pool->queueFamily;
+				cpci.queueFamilyIndex = cb_->pool().queueFamily;
 				cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 				VK_CHECK(dev.dispatch.CreateCommandPool(dev.handle, &cpci, nullptr, &hooked_.commandPool));
 				nameHandle(dev, hooked_.commandPool, "CbGui:commandPool");
@@ -211,6 +238,7 @@ void CommandBufferGui::draw() {
 				imGuiText("Time: {} {}", displayDiff, *it);
 			}
 		}
+		*/
 	}
 
 	ImGui::EndChild();
@@ -218,10 +246,15 @@ void CommandBufferGui::draw() {
 }
 
 VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
+	return cb.handle();
+
+	/*
 	dlg_assert(&cb == cb_);
 
-	if(cb.resetCount != resetCount_) {
-		return cb.handle;
+	// TODO: already try to find the new corresponding command?
+	auto rec = cb.lastRecordLocked();
+	if(rec->recordID != recordID_) {
+		return cb.handle();
 	}
 
 	auto& dev = gui_->dev();
@@ -237,12 +270,13 @@ VkCommandBuffer CommandBufferGui::cbHook(CommandBuffer& cb) {
 
 		dev.dispatch.CmdResetQueryPool(hooked_.cb, hooked_.queryPool, 0, 10);
 
-		hookRecord(cb.commands);
+		hookRecord(rec->commands);
 
 		VK_CHECK(dev.dispatch.EndCommandBuffer(hooked_.cb));
 	}
 
 	return hooked_.cb;
+	*/
 }
 
 // void CommandBufferGui::hookRecord(const std::vector<CommandPtr>& commands) {
@@ -274,6 +308,17 @@ void CommandBufferGui::hookRecord(const Command* cmd) {
 	}
 }
 
+void CommandBufferGui::select(CommandBufferGroup& group) {
+	group_ = &group;
+	command_ = {};
+	record_ = group.lastRecord.get();
+
+	if(record_ && !desc_.empty()) {
+		command_ = CommandDesc::find(record_->commands, desc_);
+	}
+}
+
+/*
 void CommandBufferGui::select(CommandBuffer& cb) {
 	if(cb_ && cb_->hook) {
 		cb_->hook = {};
@@ -288,24 +333,37 @@ void CommandBufferGui::select(CommandBuffer& cb) {
 
 	cb_ = &cb;
 	command_ = {};
+
+	// auto* rec = cb_->lastRecordLocked();
+	auto* rec = cb_->lastRecordLocked();
 	if(!desc_.empty()) {
-		command_ = CommandDesc::find(cb, desc_);
+		command_ = CommandDesc::find(rec->commands, desc_);
 	}
 
-	resetCount_ = cb_->resetCount;
+	group_ = rec->group;
+	// recordID_ = rec->recordID;
 
 	hooked_.query = false;
 	hooked_.needsUpdate = true;
 	hooked_.queryStart = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 	hooked_.queryEnd = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 }
+*/
 
 void CommandBufferGui::destroyed(const Handle& handle) {
+	(void) handle;
+	/*
 	if(&handle == cb_) {
 		cb_ = nullptr;
 		command_ = nullptr;
-		resetCount_ = {};
+		recordID_ = {};
+
+		// TODO: hacky
+		if(group_ && group_->lastRecord->cb) {
+			select(*group_->lastRecord->cb);
+		}
 	}
+	*/
 }
 
 } // namespace fuen

@@ -7,16 +7,20 @@ namespace fuen {
 
 struct CommandBufferGui {
 	void draw();
-	void select(CommandBuffer& cb);
+	// void select(CommandBuffer& cb);
+	void select(CommandBufferGroup& group);
 	void destroyed(const Handle& handle);
 
 	CommandBufferGui();
 	~CommandBufferGui();
 
 	Gui* gui_ {};
-	CommandBuffer* cb_ {}; // the selected command buffer
+	// CommandBuffer* cb_ {}; // the selected command buffer
+
+	CommandRecord* record_ {};
+	CommandBufferGroup* group_ {};
 	const Command* command_ {}; // the selected command inside the cb
-	u32 resetCount_ {}; // the resetCount of cb at which teh command was valid
+	// u32 recordID_ {}; // the recordID of the last shown cb record
 
 	std::vector<CommandDesc> desc_ {};
 

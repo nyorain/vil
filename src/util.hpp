@@ -87,6 +87,30 @@ const R* findChainInfo(const CI& ci) {
 	return nullptr;
 }
 
+// NOTE: we might be able getting away with always just calling the oldest
+// function alias (e.g. vkCmdDrawIndirectCountAMD) statically instead
+// of this check. But not sure, spec isn't 100% clear, kinda contradicts
+// itself (GetDeviceProcAddr shouldn't return ptrs for non-enabled functions
+// while aliases should have same effect as available functions).
+// See node 1651
+template<typename F>
+auto doSelectCmd(F f) {
+	dlg_assert(f);
+	return f;
+}
+
+template<typename F, typename... Rest>
+auto doSelectCmd(F f, Rest...  rest) {
+	return f ? f : doSelectCmd(rest...);
+}
+
+template<typename F, typename... Rest>
+auto selectCmd(F f, Rest...  rest) {
+	static_assert((std::is_same_v<F, Rest> && ...));
+	dlg_assert(f || (... || rest));
+	return doSelectCmd(f, rest...);
+}
+
 // Taken from vpp/util
 /// Aligns an offset to the given alignment.
 /// An alignment of 0 zero will not change the offset.
@@ -191,6 +215,8 @@ Vec4d read(VkFormat srcFormat, span<const std::byte>& src);
 void write(VkFormat dstFormat, span<std::byte>& dst, const Vec4d& color);
 void convert(VkFormat dstFormat, span<std::byte>& dst,
 		VkFormat srcFormat, span<const std::byte>& src);
+
+std::size_t structSize(VkStructureType type);
 
 template<typename V, typename T>
 decltype(auto) constexpr templatize(T&& value) {

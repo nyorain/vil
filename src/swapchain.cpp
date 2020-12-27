@@ -1,6 +1,7 @@
 #include <swapchain.hpp>
 #include <data.hpp>
 #include <image.hpp>
+#include <queue.hpp>
 #include <platform.hpp>
 #include <overlay.hpp>
 

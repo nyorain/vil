@@ -11,29 +11,62 @@
 
 namespace fuen {
 
-void returnBlocks(CommandPool& pool, CommandMemBlock* blocks) {
-	auto last = blocks;
-	while(last) {
-		last = last->next.load();
+void returnBlocks(CommandPool& pool, CommandMemBlock* head) {
+	if(!head) {
+		return;
 	}
 
-	auto head = pool.memBlocks.load();
-	last->next.store(head);
+	auto tail = head;
+	auto next = tail;
+	while((next = tail->next.load())) {
+		tail = next;
+	}
 
-	while(!pool.memBlocks.compare_exchange_weak(head, last)) {
-		last->next.store(head);
+	// auto oldHead = pool.memBlocks.load();
+	// tail->next.store(oldHead);
+
+	auto oldHead = static_cast<CommandMemBlock*>(nullptr);
+	while(!pool.memBlocks.compare_exchange_weak(oldHead, head)) {
+		tail->next.store(oldHead);
 	}
 }
 
-void freeBlocks(CommandMemBlock* blocks) {
-	// Free all memory blocks
-	auto block = blocks;
-	while(block) {
-		auto next = block->next.load();
-		// no need to call MemBlocks destructor, it's trivial
-		delete[] reinterpret_cast<std::byte*>(block);
-		block = next;
+void freeBlocks(CommandMemBlock* head) {
+	if(!head) {
+		return;
 	}
+
+	// Free all memory blocks
+	while(head) {
+		auto next = head->next.load();
+		// no need to call MemBlocks destructor, it's trivial
+		delete[] reinterpret_cast<std::byte*>(head);
+		head = next;
+	}
+}
+
+void copyChain(CommandBuffer& cb, const void*& pNext) {
+	VkBaseInStructure* last = nullptr;
+	while(pNext) {
+		auto src = static_cast<const VkBaseInStructure*>(pNext);
+		auto size = structSize(src->sType);
+		dlg_assertm(size > 0, "Unknown structure type!");
+
+		auto buf = cb.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
+		// TODO: technicallly UB to not construct object via placement new
+		// in practice, this works everywhere since its only C PODs
+		std::memcpy(dst, src, size);
+
+		if(last) {
+			last->pNext = dst;
+		}
+
+		last = dst;
+		pNext = src->pNext;
+	}
+
+	pNext = last;
 }
 
 // Record
@@ -48,9 +81,6 @@ void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 		if(pool) {
 			[[maybe_unused]] auto count = pool->records.erase(this);
 			dlg_assert(count > 0);
-
-			// It's important this is the last statement, as *this
-			// might be overriden by this.
 			returnBlocks(*pool, blocks);
 		} else {
 			freeBlocks(blocks);
@@ -58,12 +88,12 @@ void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 	}
 }
 
-CommandBufferRecord::CommandBufferRecord(CommandBuffer& xcb) :
+CommandRecord::CommandRecord(CommandBuffer& xcb) :
 	memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
 	images(xcb), handles(xcb), pipeLayouts(xcb) {
 }
 
-CommandBufferRecord::~CommandBufferRecord() {
+CommandRecord::~CommandRecord() {
 	auto dev = memBlocks.get_deleter().dev;
 	if(!dev) {
 		return;
@@ -73,10 +103,10 @@ CommandBufferRecord::~CommandBufferRecord() {
 
 	// remove cb from all referenced resources
 	auto removeFromResource = [&](auto& res) {
-		// We have to lock the resource mutex since other records
-		// might add/remove them at the same time.
-		[[maybe_unused]] auto count = res.refCbs.erase(this);
-		dlg_assert(count > 0);
+		if(destroyed.count(&res) == 0) {
+			[[maybe_unused]] auto count = res.refRecords.erase(this);
+			dlg_assert(count > 0);
+		}
 	};
 
 	for(auto& img : images) {
@@ -89,26 +119,62 @@ CommandBufferRecord::~CommandBufferRecord() {
 }
 
 // CommandBuffer
-void CommandBuffer::doReset(bool record) {
-	// make sure all submissions are done.
+CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
+		pool_(&xpool), handle_(xhandle) {
+}
+
+CommandBuffer::~CommandBuffer() {
+	if(!dev) {
+		return;
+	}
+
+	dlg_assert(pool_);
+	dlg_assert(handle_);
+
+	// Wait for completion, free all data and allocated stuff,
+	// unregister from everything
 	{
 		std::lock_guard lock(dev->mutex);
+		clearPendingLocked();
 
-		for(auto* subm : this->pending) {
-			auto res = checkLocked(*subm);
-			dlg_assert(res);
+		if(record_) {
+			dlg_assert(record_->cb == this);
+			record_->cb = nullptr;
 		}
 	}
 
-	graphicsState_ = {};
-	computeState_ = {};
+	// CommandBuffer is dispatchable handle, we need to remove this association
+	eraseData(handle_);
 
-	section_ = nullptr;
-	lastCommand_ = nullptr;
+	// Remove ourselves from the pool we come from.
+	// A command pool can't be destroyed before its command buffers (it
+	// implicitly frees them).
+	auto it = find(pool_->cbs, this);
+	dlg_assert(it != pool_->cbs.end());
+	pool_->cbs.erase(it);
+}
 
-	// change state, potentially initialize new record state
+void CommandBuffer::clearPendingLocked() {
+	// checkLocked will automtically remove it from this cb
+	while(!this->pending.empty()) {
+		auto res = checkLocked(*this->pending.front());
+		dlg_assert(res);
+	}
+}
+
+void CommandBuffer::doReset(bool record) {
+	// Make sure to never destroy a CommandBufferRecord inside the
+	// device lock.
+	IntrusivePtr<CommandRecord> keepAliveRecord;
+
 	{
 		std::lock_guard lock(dev->mutex);
+		clearPendingLocked();
+
+		if(record_) {
+			record_->cb = nullptr;
+			keepAliveRecord = std::move(record_);
+		}
 
 		// We have to lock our own mutex since other threads might read
 		// our data at the same time.
@@ -118,7 +184,12 @@ void CommandBuffer::doReset(bool record) {
 			// allocate the CommandBufferRecord inside its own mem block
 			// (that we first allocate here, then create the record in it,
 			// them move the block into the record).
-			record_ = IntrusivePtr(new CommandBufferRecord(*this));
+			record_ = IntrusivePtr(new CommandRecord(*this));
+
+			// TODO: should this be in CommandRecord constructor?
+			auto& deleter = record_->memBlocks.get_deleter();
+			pool_->records.insert(&deleter);
+
 			state_ = CommandBuffer::State::recording;
 		} else {
 			state_ = CommandBuffer::State::initial;
@@ -127,17 +198,129 @@ void CommandBuffer::doReset(bool record) {
 }
 
 void CommandBuffer::doEnd() {
+	dlg_assert(record_);
 	dlg_assert(section_ == nullptr); // all sections must have been popped
 
-	std::lock_guard lock(dev->mutex);
+	graphicsState_ = {};
+	computeState_ = {};
+	pushConstants_ = {};
 
-	dlg_assert(state_ == State::recording);
-	dlg_assert(record_);
-	dlg_assert(!record_->finished);
+	section_ = nullptr;
+	lastCommand_ = nullptr;
 
-	state_ = State::executable;
-	record_->finished = true;
+	// parse commands into description
+	record_->desc = CommandBufferDesc::get(record_->commands);
+
+	// Make sure to never call CommandBufferRecord destructor inside lock
+	auto keepAliveRecord = lastRecord_;
+
+	// Critical section
+	{
+		std::lock_guard lock(dev->mutex);
+
+		dlg_assert(state_ == State::recording);
+		dlg_assert(!record_->finished);
+
+		state_ = State::executable;
+		record_->finished = true;
+
+		for(auto& image : record_->images) {
+			image.second.image->refRecords.insert(record_.get());
+		}
+
+		for(auto& handle : record_->handles) {
+			handle.second.handle->refRecords.insert(record_.get());
+		}
+
+		lastRecord_ = record_; // std::move?
+	}
 }
+
+void CommandBuffer::endSection() {
+	dlg_assert(section_);
+	dlg_assert(!lastCommand_ || lastCommand_->parent == section_);
+	lastCommand_ = section_;
+	section_ = section_->parent;
+}
+
+void CommandBuffer::beginSection(SectionCommand& cmd) {
+	section_ = &cmd;
+	lastCommand_ = nullptr;
+}
+
+void CommandBuffer::addCmd(Command& cmd) {
+	if(lastCommand_) {
+		dlg_assert(record_->commands);
+		dlg_assert(!section_ || section_ == lastCommand_->parent);
+		lastCommand_->next = &cmd;
+		cmd.parent = lastCommand_->parent;
+	} else if(section_) {
+		dlg_assert(record_->commands);
+		dlg_assert(!section_->children);
+		section_->children = &cmd;
+		cmd.parent = section_;
+	} else if(!record_->commands) {
+		record_->commands = &cmd;
+	}
+
+	lastCommand_ = &cmd;
+}
+
+void CommandBuffer::invalidateLocked() {
+	// It's impossible that the command buffer is invalidated while
+	// recording. While it's theoretically possible per vulkan spec,
+	// it's practically the same as just never finishing the recording phase
+	// and so we treat it like that. Applications that depend on this
+	// behavior are kinda weird/broken (since that means they
+	// call BeginCommandBuffer, use a handle, destroy/change the handle
+	// and never call EndCommandBuffer). But in our case, this function
+	// can never be called in recording state since we haven't added ourself
+	// to handles yet (this assumption is important below).
+	dlg_assert(state_ == State::executable);
+	dlg_assert(record_);
+	dlg_assert(record_.get() == lastRecord_.get());
+
+	clearPendingLocked();
+
+	record_->cb = nullptr;
+
+	// We can do this safely here, without ever causing the destructor
+	// to be called (which would be a problem since this function is
+	// called when device mutex is locked) since lastRecord_ must be
+	// the same as record_ (see assert above).
+	record_ = nullptr;
+
+	this->state_ = State::invalid;
+}
+
+CommandPool::~CommandPool() {
+	if(!dev) {
+		return;
+	}
+
+	{
+		std::lock_guard lock(dev->mutex);
+		for(auto& recordDeleter : records) {
+			recordDeleter->pool = nullptr;
+		}
+	}
+
+	// NOTE: we don't need a lock here:
+	// While the command pool is being destroyed, no command buffers from it
+	// can be created or destroyed in another thread, that would always be a
+	// race. So accessing this vector is safe.
+	// (Just adding a lock here would furthermore result in deadlocks due
+	// to the mutexes locked inside the loop, don't do it!)
+	// We don't use a for loop since the command buffers remove themselves
+	// on destruction
+	while(!cbs.empty()) {
+		auto* cb = cbs[0];
+		dev->commandBuffers.mustErase(cb->handle());
+	}
+
+	freeBlocks(memBlocks.load());
+}
+
 
 std::byte* data(CommandMemBlock& mem, std::size_t offset) {
 	dlg_assert(offset < mem.size);
@@ -152,24 +335,32 @@ CommandMemBlock& createMemBlock(std::size_t memSize, CommandMemBlock* next) {
 	return *memBlock;
 }
 
-CommandMemBlock& fetchMemBlock(CommandPool& pool, std::size_t size, CommandMemBlock* next) {
+CommandMemBlock& fetchMemBlock(CommandPool& pool, std::size_t size, CommandMemBlock* bnext) {
 	// NOTE: could search all mem blocks for one large enough.
 	// On the other hand, allocations larger than block size are unlikely
-	// so it's probably best to just do a quick one-block check.
-	if(pool.memBlocks && pool.memBlocks.load()->size >= size) {
+	// so it's probably best to just do a relatively quick one-block check.
+	if(pool.memBlocks) {
 		auto* block = pool.memBlocks.load();
 		auto* next = block->next.load();
 		while(!pool.memBlocks.compare_exchange_weak(block, next)) {
 			next = block->next.load();
 		}
 
-		block->next = next;
-		return *block;
+		block->next = bnext;
+		if(block->size >= size) {
+			return *block;
+		}
+
+		// Otherwise we have to allocate a new block after all.
+		// Instead of returning the wrongly allocated (since too small)
+		// block, we simply append it, all of the allocated block is used
+		// up by this allocation anyways.
+		bnext = block;
 	}
 
 	// create entirely new block
 	auto blockSize = std::max<std::size_t>(CommandPool::minMemBlockSize, size);
-	return createMemBlock(blockSize, next);
+	return createMemBlock(blockSize, bnext);
 }
 
 std::byte* CommandBuffer::allocate(std::size_t size, std::size_t alignment) {
@@ -247,100 +438,6 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 	}
 
 	return cmd;
-}
-
-void CommandBuffer::endSection() {
-	dlg_assert(section_);
-	dlg_assert(!lastCommand_ || lastCommand_->parent == section_);
-	lastCommand_ = section_;
-	section_ = section_->parent;
-}
-
-void CommandBuffer::beginSection(SectionCommand& cmd) {
-	section_ = &cmd;
-	lastCommand_ = nullptr;
-}
-
-void CommandBuffer::addCmd(Command& cmd) {
-	if(lastCommand_) {
-		dlg_assert(record_->commands);
-		dlg_assert(!section_ || section_ == lastCommand_->parent);
-		lastCommand_->next = &cmd;
-		cmd.parent = lastCommand_->parent;
-	} else if(section_) {
-		dlg_assert(record_->commands);
-		dlg_assert(!section_->children);
-		section_->children = &cmd;
-		cmd.parent = section_;
-	} else if(!record_->commands) {
-		record_->commands = &cmd;
-	}
-
-	lastCommand_ = &cmd;
-}
-
-CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
-		pool_(&xpool), handle_(xhandle) {
-}
-
-void CommandBuffer::invalidateLocked() {
-	if(state_ == State::recording) {
-		doReset(false);
-	}
-
-	this->state_ = State::invalid;
-}
-
-CommandBuffer::~CommandBuffer() {
-	if(!dev) {
-		return;
-	}
-
-	dlg_assert(pool_);
-	dlg_assert(handle_);
-	record_.reset();
-
-	// CommandBuffer is dispatchable handle, we need to remove this association
-	eraseData(handle_);
-
-	// Wait for completion, free all data and allocated stuff,
-	// unregister from everything
-	doReset(false);
-
-	// Remove ourselves from the pool we come from.
-	// A command pool can't be destroyed before its command buffers (it
-	// implicitly frees them).
-	auto it = find(pool_->cbs, this);
-	dlg_assert(it != pool_->cbs.end());
-	pool_->cbs.erase(it);
-}
-
-CommandPool::~CommandPool() {
-	if(!dev) {
-		return;
-	}
-
-	{
-		std::lock_guard lock(dev->mutex);
-		for(auto& recordDeleter : records) {
-			recordDeleter->pool = nullptr;
-		}
-	}
-
-	// NOTE: we don't need a lock here:
-	// While the command pool is being destroyed, no command buffers from it
-	// can be created or destroyed in another thread, that would always be a
-	// race. So accessing this vector is safe.
-	// (Just adding a lock here would furthermore result in deadlocks due
-	// to the mutexes locked inside the loop, don't do it!)
-	// We don't use a for loop since the command buffers remove themselves
-	// on destruction
-	while(!cbs.empty()) {
-		auto* cb = cbs[0];
-		dev->commandBuffers.mustErase(cb->handle());
-	}
-
-	freeBlocks(memBlocks.load());
 }
 
 // api
@@ -469,36 +566,40 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-void addToHandle(CommandBufferRecord& rec, DeviceHandle& handle) {
-	std::lock_guard lock(rec.device().mutex);
-	auto [it, success] = handle.refCbs.insert(&rec);
-	dlg_assert(success);
-}
+// void addToHandle(CommandBufferRecord& rec, DeviceHandle& handle) {
+// 	std::lock_guard lock(rec.device().mutex);
+// 	auto [it, success] = handle.refCbs.insert(&rec);
+// 	dlg_assert(success);
+// }
 
-void useHandle(CommandBufferRecord& rec, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
-	auto it = rec.handles.find(h64);
-	if(it == rec.handles.end()) {
-		it = rec.handles.emplace(h64, UsedHandle{handle, *rec.cb}).first;
-		it->second.handle = &handle;
-		addToHandle(rec, *it->second.handle);
-	}
+void useHandle(CommandRecord& rec, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
+	// auto it = rec.handles.find(h64);
+	// if(it == rec.handles.end()) {
+	// 	it = rec.handles.emplace(h64, UsedHandle{handle, *rec.cb}).first;
+	// 	it->second.handle = &handle;
+	// 	addToHandle(rec, *it->second.handle);
+	// }
 
+	auto it = rec.handles.insert({h64, UsedHandle{handle, *rec.cb}}).first;
 	it->second.commands.push_back(&cmd);
 }
 
 template<typename T>
-void useHandle(CommandBufferRecord& rec, Command& cmd, T& handle) {
+void useHandle(CommandRecord& rec, Command& cmd, T& handle) {
 	auto h64 = handleToU64(fuen::handle(handle));
 	useHandle(rec, cmd, h64, handle);
 }
 
-UsedImage& useHandle(CommandBufferRecord& rec, Command& cmd, Image& image) {
-	auto it = rec.images.find(image.handle);
-	if(it == rec.images.end()) {
-		it = rec.images.emplace(image.handle, UsedImage(image, *rec.cb)).first;
-		it->second.image = &image;
-		addToHandle(rec, *it->second.image);
-	}
+UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& image) {
+	// auto it = rec.images.find(image.handle);
+	// if(it == rec.images.end()) {
+	// 	it = rec.images.emplace(image.handle, UsedImage(image, *rec.cb)).first;
+	// 	it->second.image = &image;
+	// 	addToHandle(rec, *it->second.image);
+	// }
+
+	auto it = rec.images.insert({image.handle, UsedImage{image, *rec.cb}}).first;
+	it->second.commands.push_back(&cmd);
 
 	dlg_assert(it->second.image);
 	it->second.commands.push_back(&cmd);
@@ -514,7 +615,7 @@ UsedImage& useHandle(CommandBufferRecord& rec, Command& cmd, Image& image) {
 	return it->second;
 }
 
-void useHandle(CommandBufferRecord& rec, Command& cmd, ImageView& view, bool useImg = true) {
+void useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = true) {
 	auto h64 = handleToU64(view.handle);
 	useHandle(rec, cmd, h64, view);
 
@@ -524,7 +625,7 @@ void useHandle(CommandBufferRecord& rec, Command& cmd, ImageView& view, bool use
 	}
 }
 
-void useHandle(CommandBufferRecord& rec, Command& cmd, Buffer& buf) {
+void useHandle(CommandRecord& rec, Command& cmd, Buffer& buf) {
 	auto h64 = handleToU64(buf.handle);
 	useHandle(rec, cmd, h64, buf);
 
@@ -535,7 +636,7 @@ void useHandle(CommandBufferRecord& rec, Command& cmd, Buffer& buf) {
 	}
 }
 
-void useHandle(CommandBufferRecord& rec, Command& cmd, BufferView& view) {
+void useHandle(CommandRecord& rec, Command& cmd, BufferView& view) {
 	auto h64 = handleToU64(view.handle);
 	useHandle(rec, cmd, h64, view);
 
@@ -545,7 +646,7 @@ void useHandle(CommandBufferRecord& rec, Command& cmd, BufferView& view) {
 	}
 }
 
-void useHandle(CommandBufferRecord& rec, Command& cmd, Image& image, VkImageLayout newLayout) {
+void useHandle(CommandRecord& rec, Command& cmd, Image& image, VkImageLayout newLayout) {
 	auto& img = useHandle(rec, cmd, image);
 	img.layoutChanged = true;
 	img.finalLayout = newLayout;
@@ -579,23 +680,37 @@ void cmdBarrier(
 	cmd.images = allocSpan<Image*>(cb, cmd.imgBarriers.size());
 	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
 		auto& imgb = cmd.imgBarriers[i];
-		imgb.pNext = nullptr;
+		copyChain(cb, imgb.pNext);
+
 		auto& img = cb.dev->images.get(imgb.image);
 		cmd.images[i] = &img;
 		useHandle(cb, cmd, img, imgb.newLayout);
+
+		// When the image was put into concurrent sharing mode by us,
+		// we have to make sure this does not actually define a queue
+		// family transition since those are not allowed for concurrent images
+		if(img.concurrent) {
+			imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		}
 	}
 
 	cmd.buffers = allocSpan<Buffer*>(cb, cmd.bufBarriers.size());
 	for(auto i = 0u; i < cmd.bufBarriers.size(); ++i) {
 		auto& buf = cmd.bufBarriers[i];
-		buf.pNext = nullptr;
+		copyChain(cb, buf.pNext);
 		auto& bbuf = cb.dev->buffers.get(buf.buffer);
 		cmd.buffers[i] = &bbuf;
 		useHandle(cb, cmd, bbuf);
+
+		// We put all buffers in concurrent mode so barriers must never
+		// define queue family transitions
+		buf.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		buf.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	}
 
 	for(auto& mem : cmd.memBarriers) {
-		mem.pNext = nullptr;
+		copyChain(cb, mem.pNext);
 	}
 }
 
@@ -658,20 +773,21 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 		imageMemoryBarrierCount, pImageMemoryBarriers);
 }
 
-template<typename BeginInfo>
 void cmdBeginRenderPass(CommandBuffer& cb,
-		const BeginInfo*               pRenderPassBegin,
-		VkSubpassContents              contents) {
+		const VkRenderPassBeginInfo& rpBeginInfo,
+		const VkSubpassBeginInfo& subpassBeginInfo) {
 	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
 
-	cmd.clearValues = copySpan(cb, pRenderPassBegin->pClearValues, pRenderPassBegin->clearValueCount);
-	cmd.info = *pRenderPassBegin;
-	cmd.info.pNext = nullptr;
+	cmd.clearValues = copySpan(cb, rpBeginInfo.pClearValues, rpBeginInfo.clearValueCount);
+	cmd.info = rpBeginInfo;
 	cmd.info.pClearValues = cmd.clearValues.data();
+	copyChain(cb, cmd.info.pNext);
 
-	cmd.subpassContents = contents;
-	cmd.fb = cb.dev->framebuffers.find(pRenderPassBegin->framebuffer);
-	cmd.rp = cb.dev->renderPasses.find(pRenderPassBegin->renderPass);
+	cmd.fb = cb.dev->framebuffers.find(rpBeginInfo.framebuffer);
+	cmd.rp = cb.dev->renderPasses.find(rpBeginInfo.renderPass);
+
+	cmd.subpassBeginInfo = subpassBeginInfo;
+	copyChain(cb, cmd.subpassBeginInfo.pNext);
 
 	dlg_assert(cmd.fb);
 	dlg_assert(cmd.rp);
@@ -696,6 +812,9 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 				cmd.rp->desc->attachments[i].finalLayout);
 		}
 	}
+
+	auto& subpassCmd = addCmd<FirstSubpassCmd, SectionType::begin>(cb);
+	(void) subpassCmd;
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
@@ -703,7 +822,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 		const VkRenderPassBeginInfo*                pRenderPassBegin,
 		VkSubpassContents                           contents) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	cmdBeginRenderPass(cb, pRenderPassBegin, contents);
+
+	VkSubpassBeginInfo subpassBeginInfo = {};
+	subpassBeginInfo.contents = contents;
+	subpassBeginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
+
+	cmdBeginRenderPass(cb, *pRenderPassBegin, subpassBeginInfo);
 	cb.dev->dispatch.CmdBeginRenderPass(commandBuffer, pRenderPassBegin, contents);
 }
 
@@ -711,19 +835,24 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 		VkCommandBuffer                             commandBuffer,
 		VkSubpassContents                           contents) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	// TODO; figure this out, should subpass be whole section?
-	// but then how to handle first subpass?
-	// addNextSection(cb, std::move(cmd));
 	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
-	cmd.subpassContents = contents;
+	cmd.beginInfo = {};
+	cmd.beginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
+	cmd.beginInfo.contents = contents;
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
+
+	// pop subpass section
+	cb.endSection();
+
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
-	(void) cmd;
+	cmd.endInfo = {};
+	cmd.endInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_END_INFO;
+
 	cb.dev->dispatch.CmdEndRenderPass(commandBuffer);
 }
 
@@ -732,8 +861,10 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
 		const VkRenderPassBeginInfo*                pRenderPassBegin,
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	cmdBeginRenderPass(cb, pRenderPassBegin, pSubpassBeginInfo->contents);
-	cb.dev->dispatch.CmdBeginRenderPass2(commandBuffer, pRenderPassBegin, pSubpassBeginInfo);
+	cmdBeginRenderPass(cb, *pRenderPassBegin, *pSubpassBeginInfo);
+
+	auto f = selectCmd(cb.dev->dispatch.CmdBeginRenderPass2, cb.dev->dispatch.CmdBeginRenderPass2KHR);
+	f(commandBuffer, pRenderPassBegin, pSubpassBeginInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
@@ -741,12 +872,12 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	// TODO; figure this out, should subpass be whole section?
-	// but then how to handle first subpass?
-	// addNextSection(cb, std::move(cmd));
 	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
-	cmd.subpassContents = pSubpassBeginInfo->contents;
-	cb.dev->dispatch.CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
+	cmd.beginInfo = *pSubpassBeginInfo;
+	copyChain(cb, cmd.beginInfo.pNext);
+
+	auto f = selectCmd(cb.dev->dispatch.CmdNextSubpass2, cb.dev->dispatch.CmdNextSubpass2KHR);
+	f(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
@@ -754,8 +885,11 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
-	(void) cmd;
-	cb.dev->dispatch.CmdEndRenderPass2(commandBuffer, pSubpassEndInfo);
+	cmd.endInfo = *pSubpassEndInfo;
+	copyChain(cb, cmd.endInfo.pNext);
+
+	auto f = selectCmd(cb.dev->dispatch.CmdEndRenderPass2, cb.dev->dispatch.CmdEndRenderPass2KHR);
+	f(commandBuffer, pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
@@ -846,7 +980,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
 	// if(cb.pushConstants.layout &&
-	// 		pushConstantCompatible(*cmd.pipeLayout, *cb.pushConstants.layout)) {
+	// 		!pushConstantCompatible(*cmd.pipeLayout, *cb.pushConstants.layout)) {
 	// 	cb.pushConstants.layout = nullptr;
 	// 	cb.pushConstants.map.clear();
 	// }
@@ -1028,8 +1162,12 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer,
-		buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
+	auto f = selectCmd(
+		cb.dev->dispatch.CmdDrawIndirectCountAMD,
+		cb.dev->dispatch.CmdDrawIndirectCountKHR,
+		cb.dev->dispatch.CmdDrawIndirectCount);
+	f(commandBuffer, buffer, offset, countBuffer, countBufferOffset,
+		maxDrawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
@@ -1057,8 +1195,12 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer,
-		buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
+	auto f = selectCmd(
+		cb.dev->dispatch.CmdDrawIndexedIndirectCountAMD,
+		cb.dev->dispatch.CmdDrawIndexedIndirectCountKHR,
+		cb.dev->dispatch.CmdDrawIndexedIndirectCount);
+	f(commandBuffer, buffer, offset, countBuffer, countBufferOffset,
+		maxDrawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatch(
@@ -1110,7 +1252,9 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	cb.dev->dispatch.CmdDispatch(commandBuffer,
+	auto f = selectCmd(cb.dev->dispatch.CmdDispatchBaseKHR,
+		cb.dev->dispatch.CmdDispatchBase);
+	f(commandBuffer, baseGroupX, baseGroupY, baseGroupZ,
 		groupCountX, groupCountY, groupCountZ);
 }
 
@@ -1451,6 +1595,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 	auto* c = pLabelInfo->color;
 	cmd.color = {c[0], c[1], c[2], c[3]};
 	cmd.name = copyString(cb, pLabelInfo->pLabelName);
+	// TODO: copy pNext?
 
 	if(cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(commandBuffer, pLabelInfo);
@@ -1589,8 +1734,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<PushConstantsCmd>(cb);
 
-	// NOTE: See BindDescriptorSets for rationale on handling here.
-
+	// NOTE: See BindDescriptorSets for rationale on pipe layout handling here.
 	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(pipeLayout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
@@ -1600,17 +1744,19 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	auto ptr = static_cast<const std::byte*>(pValues);
 	cmd.values = copySpan(cb, static_cast<const std::byte*>(ptr), size);
 
-	// TODO: not sure about this. The spec isn't clear about this.
+	ensureSize(cb, cb.pushConstants().data, std::max(offset + size, 128u));
+	std::memcpy(cb.pushConstants().data.data() + offset, pValues, size);
+
+	// TODO: improve pcr tracking
+	// not sure about this. The spec isn't clear about this.
 	// But this seems to be what the validation layers do.
 	// https://github.com/KhronosGroup/Vulkan-ValidationLayers/blob/57f6f2a387b37c442c4db6993eb064a1e750b30f/layers/state_tracker.cpp#L5868
 	// if(cb.pushConstants.layout &&
-	// 		pushConstantCompatible(*cmd.layout, *cb.pushConstants.layout)) {
+	// 		!pushConstantCompatible(*cmd.layout, *cb.pushConstants.layout)) {
 	// 	cb.pushConstants.layout = nullptr;
 	// 	cb.pushConstants.map.clear();
 	// }
 	// cb.pushConstants.layout = cmd.layout.get();
-
-	// TODO
 	/*
 	for(auto i = 0u; i < 32; ++i) {
 		if((stageFlags & (1 << i)) == 0) {

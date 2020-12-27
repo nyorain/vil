@@ -66,10 +66,15 @@ public:
 	}
 
 	void selectCb(CommandBuffer& cb, bool activateTab = true) {
+		// TODO
+		(void) cb;
+		(void) activateTab;
+		/*
 		tabs_.cb.select(cb);
 		if(activateTab) {
 			this->activateTab(Tab::commandBuffer);
 		}
+		*/
 	}
 
 	ImGuiIO& imguiIO() const { return *io_; }

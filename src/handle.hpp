@@ -33,10 +33,10 @@ struct DeviceHandle : Handle {
 	// current record state.
 	// On destruction, the handle will inform all of them that they
 	// are now in an invalid state.
-	// TODO: the dynamic memory allocations we do here could become a
+	// NOTE: the dynamic memory allocations we do here could become a
 	// serious performance problem. In that case replace it by per-cb
 	// 2D-linked-list (linked grid), see node 1648
-	std::unordered_set<CommandBufferRecord*> refCbs;
+	std::unordered_set<CommandRecord*> refRecords;
 
 	// Expects that neither the device mutex nor its own mutex is locked.
 	~DeviceHandle();

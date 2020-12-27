@@ -22,13 +22,20 @@ DeviceHandle::~DeviceHandle() {
 
 void DeviceHandle::invalidateCbsLocked() {
 	// nothing can be added/removed while device mutex is locked
-	for(auto* ref : refCbs) {
-		if(ref->cb && ref->cb->record() == ref) {
+	for(auto* ref : refRecords) {
+		// If the records still references it command buffer, the record
+		// is the current command buffer state. This handle being destroyed
+		// means the command buffer must be moved into invalid state.
+		if(ref->cb) {
+			dlg_assert(ref->cb->lastRecordLocked() == ref);
 			ref->cb->invalidateLocked();
 		}
 
-		ref->destroyed.push_back(this);
+		auto [_, success] = ref->destroyed.insert(this);
+		dlg_assert(success);
 	}
+
+	refRecords.clear();
 }
 
 void DeviceHandle::invalidateCbs() {

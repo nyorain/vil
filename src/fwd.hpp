@@ -70,7 +70,7 @@ struct CommandDesc;
 struct PendingSubmission;
 struct Submission;
 
-struct CommandBufferRecord;
+struct CommandRecord;
 struct CommandBufferDesc;
 struct CommandBufferGroup;
 
@@ -98,24 +98,6 @@ struct DescriptorSetRef {
 
 	struct Hash {
 		std::size_t operator()(const DescriptorSetRef& dsr) const noexcept;
-			/*
-			// NOTE: probably bullshit
-			// This should be better than a raw hash_combine: we know
-			// that we usually don't have unreasonable numbers of binding
-			// or elements and that we can safely discard the first couple
-			// of a pointer in a 64-bit system without ever getting a collision.
-
-			constexpr auto bindingBits = sizeof(std::size_t) == 64 ? 8 : 6;
-			// We want to allow *a lot of* elements for bindless setups.
-			// 2^20 (~1 million) might even be on the small side here.
-			constexpr auto elemBits = sizeof(std::size_t) == 64 ? 20 : 10;
-
-			std::size_t ret = 0;
-			ret |= (dsr.elem & elemBits) << 0;
-			ret |= (dsr.binding & bindingBits) << elemBits;
-			ret |= std::uintptr_t(dsr.ds) << (bindingBits + elemBits);
-			return hash(ret) ?
-			*/
 	};
 
 	friend inline bool operator==(const DescriptorSetRef& a, const DescriptorSetRef& b) {

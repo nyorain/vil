@@ -27,7 +27,7 @@ std::optional<SubmIterator> checkLocked(PendingSubmission& subm) {
 	dlg_assert(it != dev.pending.end());
 
 	for(auto& sub : subm.submissions) {
-		for(auto* cb : sub.cbs) {
+		for(auto [cb, group] : sub.cbs) {
 			auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &subm);
 			dlg_assert(it2 != cb->pending.end());
 			cb->pending.erase(it2);
@@ -156,6 +156,23 @@ VkSemaphore getSemaphoreFromPool(Device& dev, bool& checkedSubmissions,
 	return semaphore;
 }
 
+// WIP
+void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
+	std::string is;
+	is.resize(indent, ' ');
+
+	dlg_trace("{}{}", is, desc.name);
+	dlg_trace("{} dispatch: {}", is, desc.dispatchCommands);
+	dlg_trace("{} draw: {}", is, desc.dispatchCommands);
+	dlg_trace("{} transfer: {}", is, desc.transferCommands);
+	dlg_trace("{} sync: {}", is, desc.syncCommands);
+	dlg_trace("{} query: {}", is, desc.queryCommands);
+
+	for(auto& child : desc.children) {
+		print(child, indent + 1);
+	}
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		VkQueue                                     queue,
 		uint32_t                                    submitCount,
@@ -193,10 +210,11 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		auto& cbs = commandBuffers.emplace_back();
 		for(auto j = 0u; j < si.commandBufferCount; ++j) {
 			auto& cb = dev.commandBuffers.get(si.pCommandBuffers[j]);
-			dst.cbs.push_back(&cb);
+			dst.cbs.push_back({&cb, nullptr});
 
 			{
 				std::lock_guard lock(dev.mutex);
+				dlg_assert(cb.state() == CommandBuffer::State::executable);
 
 				// potentially hook command buffer
 				if(cb.hook) {
@@ -204,7 +222,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 				} else {
-					cbs.push_back(cb.handle);
+					cbs.push_back(cb.handle());
 				}
 			}
 		}
@@ -262,15 +280,20 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	// TODO: check res? But that would require a lot of custom logic here,
 	// resetting everything. We just always insert the submissions atm
 
+	// TODO: kinda ugly
+	std::vector<IntrusivePtr<CommandRecord>> keepAlive;
+
 	{
 		std::lock_guard lock(dev.mutex);
 
 		for(auto& sub : subm.submissions) {
-			for(auto& cb : sub.cbs) {
+			for(auto& scb : sub.cbs) {
+				auto* cb = scb.first;
 				cb->pending.push_back(&subm);
+				auto recPtr = cb->lastRecordPtrLocked();
 
 				// store pending layouts
-				for(auto& used : cb->images) {
+				for(auto& used : recPtr->images) {
 					if(res == VK_SUCCESS && used.second.layoutChanged) {
 						dlg_assert(
 							used.second.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
@@ -278,6 +301,38 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 						used.second.image->pendingLayout = used.second.finalLayout;
 					}
 				}
+
+				CommandBufferGroup* found = nullptr;
+				if(recPtr->group && recPtr->group->queue == &qd) {
+					found = recPtr->group;
+				} else {
+					float best = -1.0;
+					for(auto& group : qd.groups) {
+						constexpr auto matchThreshold = 0.5; // TODO!
+						auto match = group->desc.match(recPtr->commands);
+						best = std::max(best, match);
+						if(match > matchThreshold) {
+							found = group.get();
+							break;
+						}
+					}
+
+					// dlg_trace("best command group match {}", best);
+					if(!found) {
+						found = qd.groups.emplace_back(std::make_unique<CommandBufferGroup>()).get();
+						// dlg_trace("new command group {} (queue {})", found, qd.handle);
+						// print(recPtr->desc, 1);
+						found->queue = &qd;
+					}
+				}
+
+				keepAlive.push_back(found->lastRecord);
+				found->lastRecord = recPtr;
+				// TODO: not sure about this in case of	already existent group
+				found->desc = recPtr->desc;
+
+				recPtr->group = found;
+				scb.second = found;
 			}
 		}
 

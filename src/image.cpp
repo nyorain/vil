@@ -91,10 +91,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	// TODO: needed for our own operations on the buffer. We should
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
-	if(dev.usedQueueFamilyIndices.size() > 1) {
+	auto concurrent = false;
+	if(dev.usedQueueFamilyIndices.size() > 1 &&
+			nci.sharingMode != VK_SHARING_MODE_CONCURRENT &&
+			samplerType != Image::SamplerType::none) {
 		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
 		nci.queueFamilyIndexCount = u32(dev.usedQueueFamilyIndices.size());
 		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
+		concurrent = true;
 	}
 
 	auto res = dev.dispatch.CreateImage(device, &nci, pAllocator, pImage);
@@ -109,6 +113,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.ci = *pCreateInfo;
 	img.pendingLayout = pCreateInfo->initialLayout;
 	img.samplerType = samplerType;
+	img.concurrent = concurrent;
 
 	return res;
 }

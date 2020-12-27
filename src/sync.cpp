@@ -1,5 +1,7 @@
-#include "sync.hpp"
-#include "data.hpp"
+#include <sync.hpp>
+#include <device.hpp>
+#include <data.hpp>
+#include <queue.hpp>
 
 namespace fuen {
 

@@ -34,7 +34,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	mod.code->reflection = std::make_unique<SpvReflectShaderModule>();
 	auto reflRes = spvReflectCreateShaderModule(pCreateInfo->codeSize,
 		pCreateInfo->pCode, mod.code->reflection.get());
-	dlg_assert(reflRes == SPV_REFLECT_RESULT_SUCCESS);
+	dlg_assertl(dlg_level_info, reflRes == SPV_REFLECT_RESULT_SUCCESS);
 
 	return res;
 }

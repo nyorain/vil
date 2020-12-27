@@ -12,7 +12,7 @@
 namespace fuen {
 
 struct CommandBufferGroup;
-struct CommandBufferRecord;
+struct CommandRecord;
 
 struct Queue : Handle {
 	Device* dev {};
@@ -28,7 +28,7 @@ struct Queue : Handle {
 struct Submission {
 	std::vector<std::pair<VkSemaphore, VkPipelineStageFlags>> waitSemaphores;
 	std::vector<VkSemaphore> signalSemaphores;
-	std::vector<CommandBuffer*> cbs;
+	std::vector<std::pair<CommandBuffer*, CommandBufferGroup*>> cbs;
 
 	// We always add a signal semaphore to a submission, from the
 	// devices semaphore pool.
@@ -50,13 +50,10 @@ struct PendingSubmission {
 
 // CommandBuffer groups
 struct CommandBufferGroup {
-	IntrusivePtr<CommandBufferRecord> lastRecord;
-
-	std::vector<CommandBuffer*> cbs;
-
+	CommandBufferDesc desc;
+	IntrusivePtr<CommandRecord> lastRecord;
 	Queue* queue {};
-	CommandBufferDesc desc; // nested tree
-	u32 submissions {};
+	// u32 submissions {};
 };
 
 // Expects dev.mutex to be locked.

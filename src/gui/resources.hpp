@@ -15,13 +15,13 @@ struct ResourceGui {
 	template<typename T>
 	void select(T& handle) {
 		handle_ = {&handle};
-		// TODO: destroy image view for old handle?
 	}
 
 	Gui* gui_ {};
 	std::string search_;
 	int filter_ {0};
 
+	// TODO: use just DeviceHandle*? and then do everything else via 'objectType'
 	using HandleVariant = std::variant<
 		std::monostate, // empty
 		Image*,

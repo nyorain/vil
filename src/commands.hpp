@@ -5,10 +5,7 @@
 #include <flags.hpp>
 #include <pv.hpp>
 #include <imguiutil.hpp>
-#include <vk/enumString.hpp>
 #include <span.hpp>
-
-#include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
 
 // See ~Command
@@ -99,60 +96,13 @@ struct Command {
 
 NYTL_FLAG_OPS(Command::Type)
 
-// Expects T to be a container over Command pointers
-inline const Command* displayCommands(Command* cmd, const Command* selected,
-		Command::TypeFlags typeFlags) {
-	// TODO: should use imgui list clipper, might have *a lot* of commands here.
-	// But first we have to restrict what cmd->display can actually do.
-	// Would also have to pre-filter command for that :(
-	const Command* ret = nullptr;
-	while(cmd) {
-		if((typeFlags & cmd->type())) {
-			ImGui::Separator();
-			if(auto reti = cmd->display(selected, typeFlags); reti) {
-				dlg_assert(!ret);
-				ret = reti;
-			}
-		}
-
-		cmd = cmd->next;
-	}
-
-	return ret;
-}
+const Command* displayCommands(const Command* cmd, const Command* selected,
+		Command::TypeFlags typeFlags);
 
 struct SectionCommand : Command {
 	Command* children {};
-
-	const Command* display(const Command* selected, TypeFlags typeFlags) const override {
-		// auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-		auto flags = 0u;
-		if(this == selected) {
-			flags |= ImGuiTreeNodeFlags_Selected;
-		}
-
-		const Command* ret = nullptr;
-		// if(ImGui::TreeNodeEx(toString().c_str(), flags)) {
-		// if(ImGui::TreeNodeEx(this, flags, "%s", toString().c_str())) {
-		if(ImGui::TreeNodeEx(nameDesc().c_str(), flags, "%s", toString().c_str())) {
-			if(ImGui::IsItemClicked()) {
-				ret = this;
-			}
-
-			auto* retc = displayCommands(children, selected, typeFlags);
-			if(retc) {
-				dlg_assert(!ret);
-				ret = retc;
-			}
-
-			ImGui::TreePop();
-		} else if(ImGui::IsItemClicked()) {
-			// NOTE: not sure about this.
-			ret = this;
-		}
-
-		return ret;
-	}
+	const Command* display(const Command* selected, TypeFlags typeFlags, const Command* cmd) const;
+	const Command* display(const Command* selected, TypeFlags typeFlags) const override;
 };
 
 struct BarrierCmdBase : Command {
@@ -185,13 +135,15 @@ struct BarrierCmd : BarrierCmdBase {
 	std::vector<std::string> argumentsDesc() const override;
 };
 
+// All direct children must be of type 'NextSubpassCmd'
 struct BeginRenderPassCmd : SectionCommand {
 	VkRenderPassBeginInfo info;
 	span<VkClearValue> clearValues;
 
-	VkSubpassContents subpassContents;
 	Framebuffer* fb;
 	RenderPass* rp;
+
+	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
 
 	using SectionCommand::SectionCommand;
 
@@ -199,22 +151,40 @@ struct BeginRenderPassCmd : SectionCommand {
 		return dlg::format("BeginRenderPass({}, {})", name(*fb), name(*rp));
 	}
 
+	const Command* display(const Command* selected, TypeFlags typeFlags) const override;
 	std::string nameDesc() const override { return "BeginRenderPass"; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 };
 
-struct NextSubpassCmd : SectionCommand {
-	VkSubpassContents subpassContents;
-
+struct SubpassCmd : SectionCommand {
 	using SectionCommand::SectionCommand;
+};
 
+struct NextSubpassCmd : SubpassCmd {
+	VkSubpassEndInfo endInfo {}; // for the previous subpass
+	VkSubpassBeginInfo beginInfo; // for the new subpass
+
+	using SubpassCmd::SubpassCmd;
+
+	// toString should probably rather return the subpass number.
+	// Must be tracked while recording
 	std::string nameDesc() const override { return "NextSubpass"; }
 	void record(const Device&, VkCommandBuffer) const override;
 };
 
+// Meta command needed for correct hierachy. We want each subpass to
+// have its own section.
+struct FirstSubpassCmd : SubpassCmd {
+	using SubpassCmd::SubpassCmd;
+	std::string nameDesc() const override { return "Subpass 0"; }
+	void record(const Device&, VkCommandBuffer) const override {}
+};
+
 struct EndRenderPassCmd : Command {
+	VkSubpassEndInfo endInfo {}; // for the previous subpass
+
 	std::string nameDesc() const override { return "EndRenderPass"; }
 	Type type() const override { return Type::end; }
 	void record(const Device&, VkCommandBuffer) const override;
@@ -222,9 +192,10 @@ struct EndRenderPassCmd : Command {
 
 struct DrawCmdBase : Command {
 	GraphicsState state;
+	PushConstantData pushConstants;
 
 	DrawCmdBase() = default;
-	DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState);
+	DrawCmdBase(CommandBuffer& cb, const GraphicsState&);
 
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
@@ -392,9 +363,10 @@ struct BindDescriptorSetCmd : Command {
 
 struct DispatchCmdBase : Command {
 	ComputeState state;
+	PushConstantData pushConstants;
 
 	DispatchCmdBase() = default;
-	DispatchCmdBase(CommandBuffer& cb, const ComputeState& compState);
+	DispatchCmdBase(CommandBuffer&, const ComputeState&);
 
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;

@@ -3,21 +3,22 @@
 #include <span.hpp>
 #include <util.hpp>
 #include <gui/gui.hpp>
+#include <imgui/imgui.h>
+#include <vk/enumString.hpp>
 
 namespace fuen {
 
+// Command utility
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
 	state = copy(cb, gfxState);
-
-	// TODO: push constants
-	//if(cb.pushConstants.layout && pushConstantCompatible(*cmd.state.pipe->layout, *cb.pushConstants.layout)) {
-	//	cmd.state.pushConstants = cb.pushConstants.map;
-	//}
+	// NOTE: only do this when pipe layout matches pcr layout
+	pushConstants.data = copySpan(cb, cb.pushConstants().data);
 }
 
 DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb, const ComputeState& compState) {
 	state = copy(cb, compState);
-	// TODO: push constants
+	// NOTE: only do this when pipe layout matches pcr layout
+	pushConstants.data = copySpan(cb, cb.pushConstants().data);
 }
 
 template<typename C>
@@ -127,6 +128,78 @@ std::vector<std::string> createArgumentsDesc(const First& first, const Rest&... 
 	return ret;
 }
 
+const Command* displayCommands(const Command* cmd, const Command* selected,
+		Command::TypeFlags typeFlags) {
+	// TODO: should use imgui list clipper, might have *a lot* of commands here.
+	// But first we have to restrict what cmd->display can actually do.
+	// Would also have to pre-filter command for that :(
+	const Command* ret = nullptr;
+	while(cmd) {
+		if((typeFlags & cmd->type())) {
+			ImGui::Separator();
+			if(auto reti = cmd->display(selected, typeFlags); reti) {
+				dlg_assert(!ret);
+				ret = reti;
+			}
+		}
+
+		cmd = cmd->next;
+	}
+
+	return ret;
+}
+
+// Commands
+const Command* SectionCommand::display(const Command* selected, TypeFlags typeFlags,
+		const Command* cmd) const {
+	// auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+	auto flags = 0u;
+	if(this == selected) {
+		flags |= ImGuiTreeNodeFlags_Selected;
+	}
+
+	const Command* ret = nullptr;
+	// if(ImGui::TreeNodeEx(toString().c_str(), flags)) {
+	// if(ImGui::TreeNodeEx(this, flags, "%s", toString().c_str())) {
+	if(ImGui::TreeNodeEx(nameDesc().c_str(), flags, "%s", toString().c_str())) {
+		if(ImGui::IsItemClicked()) {
+			ret = this;
+		}
+
+		auto* retc = displayCommands(cmd, selected, typeFlags);
+		if(retc) {
+			dlg_assert(!ret);
+			ret = retc;
+		}
+
+		ImGui::TreePop();
+	} else if(ImGui::IsItemClicked()) {
+		// NOTE: not sure about this.
+		ret = this;
+	}
+
+	return ret;
+}
+
+const Command* SectionCommand::display(const Command* selected, TypeFlags typeFlags) const {
+	return this->display(selected, typeFlags, this->children);
+}
+
+const Command* BeginRenderPassCmd::display(const Command* selected,
+		TypeFlags typeFlags) const {
+	auto cmd = this->children;
+	if(cmd) {
+		// If we only have one subpass, don't give it an extra section
+		// to make everything more compact.
+		auto first = dynamic_cast<FirstSubpassCmd*>(cmd);
+		if(!first->next) {
+			cmd = first->children;
+		}
+	}
+
+	return SectionCommand::display(selected, typeFlags, cmd);
+}
+
 std::vector<std::string> WaitEventsCmd::argumentsDesc() const {
 	return createArgumentsDesc(events,
 		vk::flagNames(VkPipelineStageFlagBits(srcStageMask)),
@@ -150,11 +223,16 @@ std::vector<std::string> BarrierCmd::argumentsDesc() const {
 }
 
 void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdBeginRenderPass(cb, &this->info, this->subpassContents);
+	if(this->subpassBeginInfo.pNext) {
+		auto f = selectCmd(dev.dispatch.CmdBeginRenderPass2, dev.dispatch.CmdBeginRenderPass2KHR);
+		f(cb, &this->info, &this->subpassBeginInfo);
+	} else {
+		dev.dispatch.CmdBeginRenderPass(cb, &this->info, this->subpassBeginInfo.contents);
+	}
 }
 
 std::vector<std::string> BeginRenderPassCmd::argumentsDesc() const {
-	return createArgumentsDesc(*rp, subpassContents);
+	return createArgumentsDesc(*rp, subpassBeginInfo.contents);
 }
 
 void BeginRenderPassCmd::displayInspector(Gui& gui) const {
@@ -163,11 +241,21 @@ void BeginRenderPassCmd::displayInspector(Gui& gui) const {
 }
 
 void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdNextSubpass(cb, this->subpassContents);
+	if(this->beginInfo.pNext || this->endInfo.pNext) {
+		auto f = selectCmd(dev.dispatch.CmdNextSubpass2, dev.dispatch.CmdNextSubpass2KHR);
+		f(cb, &this->beginInfo, &this->endInfo);
+	} else {
+		dev.dispatch.CmdNextSubpass(cb, this->beginInfo.contents);
+	}
 }
 
 void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdEndRenderPass(cb);
+	if(this->endInfo.pNext) {
+		auto f = selectCmd(dev.dispatch.CmdEndRenderPass2, dev.dispatch.CmdEndRenderPass2KHR);
+		f(cb, &this->endInfo);
+	} else {
+		dev.dispatch.CmdEndRenderPass(cb);
+	}
 }
 
 void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
@@ -256,10 +344,18 @@ std::vector<std::string> DrawIndexedCmd::argumentsDesc() const {
 // DrawIndirectCountCmd
 void DrawIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(indexed) {
-		dev.dispatch.CmdDrawIndexedIndirectCount(cb, buffer->handle, offset,
-			countBuffer->handle, countBufferOffset, maxDrawCount, stride);
+		auto f = selectCmd(
+			dev.dispatch.CmdDrawIndexedIndirectCount,
+			dev.dispatch.CmdDrawIndexedIndirectCountKHR,
+			dev.dispatch.CmdDrawIndexedIndirectCountAMD);
+		f(cb, buffer->handle, offset, countBuffer->handle, countBufferOffset,
+			maxDrawCount, stride);
 	} else {
-		dev.dispatch.CmdDrawIndirectCount(cb, buffer->handle, offset,
+		auto f = selectCmd(
+			dev.dispatch.CmdDrawIndirectCount,
+			dev.dispatch.CmdDrawIndirectCountKHR,
+			dev.dispatch.CmdDrawIndirectCountAMD);
+		f(cb, buffer->handle, offset,
 			countBuffer->handle, countBufferOffset, maxDrawCount, stride);
 	}
 }
@@ -353,8 +449,8 @@ std::vector<std::string> DispatchIndirectCmd::argumentsDesc() const {
 }
 
 void DispatchBaseCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdDispatchBase(cb, baseGroupX, baseGroupY, baseGroupZ,
-		groupsX, groupsY, groupsZ);
+	auto f = selectCmd(dev.dispatch.CmdDispatchBase, dev.dispatch.CmdDispatchBaseKHR);
+	f(cb, baseGroupX, baseGroupY, baseGroupZ, groupsX, groupsY, groupsZ);
 }
 
 std::vector<std::string> DispatchBaseCmd::argumentsDesc() const {

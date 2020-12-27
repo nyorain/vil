@@ -11,6 +11,7 @@
 #include <guidraw.hpp>
 #include <spirv_reflect.h>
 #include <imgui/imgui.h>
+#include <vk/enumString.hpp>
 
 #include <set>
 #include <map>
@@ -700,12 +701,20 @@ void Gui::drawOverviewUI(Draw& draw) {
 				// 	}
 				// }
 
-				for(auto* cb : sub.cbs) {
+				for(auto [cb, group] : sub.cbs) {
 					ImGui::Bullet();
 					// We have the additional IsItemClicked here since
 					// that might change every frame
-					if(ImGui::Button(name(*cb).c_str()) || ImGui::IsItemClicked()) {
-						selectCb(*cb);
+					// if(ImGui::Button(name(*cb).c_str()) || ImGui::IsItemClicked()) {
+					// 	selectCb(*cb);
+					// }
+
+					auto label = dlg::format("Group {}", (void*) group);
+					if(ImGui::Button(label.c_str())) {
+						// dlg_assert(group->lastRecord->cb);
+						// selectCb(*group->lastRecord->cb);
+						tabs_.cb.select(*group);
+						this->activateTab(Tab::commandBuffer);
 					}
 				}
 			}
@@ -758,7 +767,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				ImGui::EndTabItem();
 			}
 
-			if(tabs_.cb.cb_) {
+			// if(tabs_.cb.cb_) {
+			if(tabs_.cb.record_) {
 				if(ImGui::BeginTabItem("Command Buffer", nullptr, checkSelectTab(Tab::commandBuffer))) {
 					tabs_.cb.draw();
 					ImGui::EndTabItem();
@@ -840,8 +850,8 @@ void Gui::waitForSubmissions(const H& handle) {
 
 		bool wait = false;
 		for(auto& sub : pending->submissions) {
-			for(auto* cb : sub.cbs) {
-				dlg_assert(cb->state == CommandBuffer::State::executable);
+			for(auto [cb, group] : sub.cbs) {
+				dlg_assert(cb->state() == CommandBuffer::State::executable);
 				if(!cb->uses(handle)) {
 					continue;
 				}
@@ -1007,6 +1017,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		// to wait for it to complete.
 		// TODO: could be optimized I guess, we might not strictly have to do this
 		// with some smart query pool management.
+		/*
 		if(tabs_.cb.cb_ && tabs_.cb.hooked_.cb) {
 			// NOTE: it's important we do a copy here since waiting for the
 			// submissions might modify cb_->pending itself, invalidating
@@ -1014,6 +1025,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			auto pendingCopy = tabs_.cb.cb_->pending;
 			waitFor(pendingCopy);
 		}
+		*/
 
 		this->draw(draw, info.fullscreen);
 		auto& drawData = *ImGui::GetDrawData();
