@@ -1,6 +1,7 @@
 #pragma once
 
-#include <device.hpp>
+#include <fwd.hpp>
+#include <gui/renderer.hpp>
 #include <gui/gui.hpp>
 
 namespace fuen {
@@ -18,6 +19,9 @@ struct Overlay {
 	void init(Swapchain& swapchain);
 	void initRenderBuffers(); // called from init
 	VkResult drawPresent(Queue& queue, span<const VkSemaphore>, u32 imageIdx);
+
+	Overlay();
+	~Overlay();
 
 	// Returns whether the two given swapchain create infos are compatible
 	// for all overlay-rendering purposes. When this returns true, the swapchain

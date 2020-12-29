@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <device.hpp>
 #include <boundState.hpp>
+#include <queue.hpp>
 #include <pv.hpp>
 #include <vector>
 #include <unordered_map>
@@ -48,11 +49,8 @@ public:
 	// Access synchronized via device mutex.
 	std::vector<PendingSubmission*> pending;
 
-	// Commandbuffer hook that allows us to forward a modified version
-	// of this command buffer down the chain.
 	// Must be synchronized via device mutex
-	using Hook = std::function<VkCommandBuffer(CommandBuffer&)>;
-	Hook hook;
+	FinishPtr<CommandHook> hook;
 
 public:
 	CommandBuffer(CommandPool& pool, VkCommandBuffer handle);

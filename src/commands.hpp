@@ -59,11 +59,28 @@ struct Command {
 			return nullptr;
 		}
 
-		ImGui::PushID(this);
-		ImGui::Bullet();
-		auto selected = (sel == this);
-		auto ret = ImGui::Selectable(toString().c_str(), selected) ? this : nullptr;
-		ImGui::PopID();
+		// ImGui::PushID(dlg::format("{}:{}", nameDesc(), relID).c_str());
+		// ImGui::PushID(nameDesc().c_str());
+		// ImGui::Bullet();
+		// auto selected = (sel == this);
+		// auto ret = ImGui::Selectable(toString().c_str(), selected) ? this : nullptr;
+		// ImGui::PopID();
+
+		int flags = ImGuiTreeNodeFlags_Leaf;
+		if(sel == this) {
+			flags |= ImGuiTreeNodeFlags_Selected;
+		}
+
+		auto idStr = dlg::format("{}:{}", nameDesc(), relID);
+		ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", toString().c_str());
+
+		const Command* ret = nullptr;
+		if(ImGui::IsItemClicked()) {
+			ret = this;
+		}
+
+		ImGui::TreePop();
+
 		return ret;
 	}
 
@@ -92,6 +109,9 @@ struct Command {
 
 	// Forms a linked list with siblings
 	Command* next {};
+
+	// How many sibilings with same nameDesc() came before this in parent
+	unsigned relID {};
 };
 
 NYTL_FLAG_OPS(Command::Type)

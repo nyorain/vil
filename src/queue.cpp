@@ -1,5 +1,6 @@
 #include <queue.hpp>
 #include <data.hpp>
+#include <util.hpp>
 #include <cb.hpp>
 #include <commands.hpp>
 #include <sync.hpp>
@@ -27,7 +28,7 @@ std::optional<SubmIterator> checkLocked(PendingSubmission& subm) {
 	dlg_assert(it != dev.pending.end());
 
 	for(auto& sub : subm.submissions) {
-		for(auto [cb, group] : sub.cbs) {
+		for(auto& [cb, group] : sub.cbs) {
 			auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &subm);
 			dlg_assert(it2 != cb->pending.end());
 			cb->pending.erase(it2);
@@ -161,9 +162,9 @@ void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
 	std::string is;
 	is.resize(indent, ' ');
 
-	dlg_trace("{}{}", is, desc.name);
+	dlg_trace("{}{} {}", is, desc.name, desc.totalCommands);
 	dlg_trace("{} dispatch: {}", is, desc.dispatchCommands);
-	dlg_trace("{} draw: {}", is, desc.dispatchCommands);
+	dlg_trace("{} draw: {}", is, desc.drawCommands);
 	dlg_trace("{} transfer: {}", is, desc.transferCommands);
 	dlg_trace("{} sync: {}", is, desc.syncCommands);
 	dlg_trace("{} query: {}", is, desc.queryCommands);
@@ -183,6 +184,12 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 	bool checkedSubmissions = false;
 	bool resettedSemaphores = false;
+
+	u32 qSubmitID;
+	{
+		std::lock_guard lock(dev.mutex);
+		qSubmitID = ++qd.submissionCount;
+	}
 
 	// hook fence
 	auto submPtr = std::make_unique<PendingSubmission>();
@@ -210,15 +217,67 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		auto& cbs = commandBuffers.emplace_back();
 		for(auto j = 0u; j < si.commandBufferCount; ++j) {
 			auto& cb = dev.commandBuffers.get(si.pCommandBuffers[j]);
-			dst.cbs.push_back({&cb, nullptr});
+			dst.cbs.push_back({});
+			auto& scb = dst.cbs.back();
+			scb.cb = &cb;
 
 			{
 				std::lock_guard lock(dev.mutex);
 				dlg_assert(cb.state() == CommandBuffer::State::executable);
 
+				// find submission group to check for hook
+				auto& rec = *cb.lastRecordLocked();
+				dlg_assert(qd.family == rec.queueFamily);
+
+				// When the CommandRecord doesn't already have a group (from
+				// previous submission), try to find an existing group
+				// that matches this submission.
+				float best = -1.0;
+				if(!rec.group) {
+					auto& qfam = dev.queueFamilies[qd.family];
+					for(auto& qgroup : qfam.commandGroups) {
+						constexpr auto matchThreshold = 0.6; // TODO: make configurable?
+						auto matchVal = match(qgroup->desc, rec.desc);
+						best = std::max(best, matchVal);
+						if(matchVal > matchThreshold) {
+							rec.group = qgroup.get();
+						}
+					}
+
+				}
+
+				// When no existing group matches, just create a new one
+				if(!rec.group) {
+					auto& qfam = dev.queueFamilies[rec.queueFamily];
+					rec.group = qfam.commandGroups.emplace_back(std::make_unique<CommandBufferGroup>()).get();
+					qd.groups.push_back(rec.group);
+					rec.group->queues = {{&qd, qSubmitID}};
+
+					dlg_info("Created new command group {} (best match {}}:", rec.group, best);
+					print(rec.desc, 1);
+				} else {
+					// Otherwise make sure it's correctly added to the group
+					// NOTE: we even do this if submission fails down the
+					// chain. Should not be a problem really
+					auto finder = [&](auto& q) { return q.first == &qd; };
+					auto it = find_if(rec.group->queues, finder);
+					if(it == rec.group->queues.end()) {
+						rec.group->queues.push_back({&qd, qSubmitID});
+					} else {
+						it->second = qSubmitID;
+					}
+				}
+
+				dlg_assert(rec.group);
+
 				// potentially hook command buffer
-				if(cb.hook) {
-					auto hooked = cb.hook(cb);
+				if(rec.group->hook) {
+					auto hooked = rec.group->hook->hook(cb, scb.hook);
+					dlg_assert(hooked);
+					cbs.push_back(hooked);
+					dlg_assertm(!cb.hook, "Hook registered for command buffer and group");
+				} else if(cb.hook) {
+					auto hooked = cb.hook->hook(cb, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 				} else {
@@ -276,11 +335,22 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 	dlg_assert(nsubmitInfos.size() == submitCount);
 	auto res = dev.dispatch.QueueSubmit(queue, u32(nsubmitInfos.size()), nsubmitInfos.data(), submFence);
+	if(res != VK_SUCCESS) {
+		if(subm.ourFence) {
+			dev.fencePool.push_back(subm.ourFence);
+		}
 
-	// TODO: check res? But that would require a lot of custom logic here,
-	// resetting everything. We just always insert the submissions atm
+		for(auto& subm : subm.submissions) {
+			if(subm.ourSemaphore) {
+				dev.semaphorePool.push_back(subm.ourSemaphore);
+			}
+		}
 
-	// TODO: kinda ugly
+		return res;
+	}
+
+	// NOTE: need to make sure CommandRecord isn't destroyed inside
+	// mutex lock.
 	std::vector<IntrusivePtr<CommandRecord>> keepAlive;
 
 	{
@@ -288,13 +358,13 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 		for(auto& sub : subm.submissions) {
 			for(auto& scb : sub.cbs) {
-				auto* cb = scb.first;
+				auto* cb = scb.cb;
 				cb->pending.push_back(&subm);
 				auto recPtr = cb->lastRecordPtrLocked();
 
 				// store pending layouts
 				for(auto& used : recPtr->images) {
-					if(res == VK_SUCCESS && used.second.layoutChanged) {
+					if(used.second.layoutChanged) {
 						dlg_assert(
 							used.second.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
 							used.second.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
@@ -302,37 +372,16 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 					}
 				}
 
-				CommandBufferGroup* found = nullptr;
-				if(recPtr->group && recPtr->group->queue == &qd) {
-					found = recPtr->group;
-				} else {
-					float best = -1.0;
-					for(auto& group : qd.groups) {
-						constexpr auto matchThreshold = 0.5; // TODO!
-						auto match = group->desc.match(recPtr->commands);
-						best = std::max(best, match);
-						if(match > matchThreshold) {
-							found = group.get();
-							break;
-						}
-					}
+				// we already set the command group before, look above
+				dlg_assert(recPtr->group);
 
-					// dlg_trace("best command group match {}", best);
-					if(!found) {
-						found = qd.groups.emplace_back(std::make_unique<CommandBufferGroup>()).get();
-						// dlg_trace("new command group {} (queue {})", found, qd.handle);
-						// print(recPtr->desc, 1);
-						found->queue = &qd;
-					}
+				if(recPtr->group->lastRecord) {
+					keepAlive.push_back(std::move(recPtr->group->lastRecord));
 				}
 
-				keepAlive.push_back(found->lastRecord);
-				found->lastRecord = recPtr;
+				recPtr->group->lastRecord = recPtr;
 				// TODO: not sure about this in case of	already existent group
-				found->desc = recPtr->desc;
-
-				recPtr->group = found;
-				scb.second = found;
+				recPtr->group->desc = recPtr->desc;
 			}
 		}
 

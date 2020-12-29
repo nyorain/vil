@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <vector>
 #include <string>
+#include <functional>
 
 namespace fuen {
 
@@ -49,15 +50,19 @@ struct CommandBufferDesc {
 	std::vector<CommandBufferDesc> children;
 
 	// Returns a description for the given set of commands.
-	// The toplevel CommandBufferDesc will always be named "root"
-	static CommandBufferDesc get(const Command* commands);
+	// The toplevel CommandBufferDesc will always be named "root".
+	// Also annotates the commands, i.e. fills in Command::relID.
+	// static CommandBufferDesc get(const Command* commands);
+	static CommandBufferDesc getAnnotate(Command* commands);
 
 	// Returns how much the given command chain matches this description.
 	// The return value is always between 0 and 1 where 1 means a 100% match
 	// and 0% means that the commands have absolutely nothing in common
 	// with this description. A good empirical threshold for considering
 	// a command buffer similar to a description is ~0.6.
-	float match(const Command* commands);
+	// float match(const Command* commands);
+
+	friend float match(const CommandBufferDesc& a, const CommandBufferDesc& b);
 };
 
 } // namespace fuen

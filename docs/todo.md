@@ -2,36 +2,37 @@
 
 v0.1, goal: end of january 2021
 
-- [ ] implement command group concept and last command buffer state viewing
+- [ ] fix ui for fixed resource tracking: check for nullptr resource references
+      everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
+	- [ ] use CommandBufferRecord::destroyed to show <destroyed> instead of
+	      resource reference buttons
 - [ ] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
-- [ ] allow to view command groups per queue
+- [ ] command groups: come up with a concept to avoid glitchy updates
+	  in viewer. Either just update every couple of seconds (lame!) or
+	  display something special there.
+- [ ] add explicit "updateFromGroup" checkbox to command viewer
+- [ ] make queues viewable handles
+	- [ ] allow to view command groups per queue
+- [ ] fix resource viewer
+	- [ ] fix filtering by type
+	- [ ] fix filtering by name
+	- [ ] more useful names for handles (e.g. some basic information)
 - [ ] make sure to always correctly store/forward pNext chains
 	  easier future compat, will support (non-crash) a lot of
 	  extensions naturally already.
 	- [ ] vkQueuePresentKHR is problematic atm
 	- [ ] everywhere where we hook-create handles
 - [ ] implement overview as in node 1652
-- [ ] cleanup, implement cb viewer as in node 1652
+- [x] cleanup, implement cb viewer as in node 1652
 - [ ] Implement missing resource overview UIs
-- [ ] optimize memory consumption in cbs.
-      the UsedHandle::commands vector are over-allocating *so much* currently,
-	  maybe replace them with linked lists (non-intrusive)?
-- [ ] command groups: should probably also check commonly used handles to match them.
-	  at least some handles (at least root resources like memory, samplers etc)
-	  will always be in common. Command buffers that use almost entirely the
-	  same buffers and images can be considered related
 - [ ] in overview: before showing pending submissions, we probably want to
       check them all for finish
 - [ ] fully implement command buffer viewer
 	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
 	- [ ] show all commands & info for commands
 	- [ ] better resource selection/collapsing etc
-- [ ] fix ui for fixed resource tracking: check for nullptr resource references
-      everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
-	- [ ] use CommandBufferRecord::destroyed to show <destroyed> instead of
-	      resource reference buttons
 - [ ] fix dummy buttons in command viewer (e.g. BeginRenderPass)
 - [x] track dynamic graphics pipeline state
 	- [ ] show it in command ui
@@ -41,8 +42,9 @@ v0.1, goal: end of january 2021
 		   to make this beautiful}
 	- [ ] show graph of frame timings
 	- [ ] show enabled extensions & features
+	- [ ] only show application info if filled out by app. collapse by default?
 - [ ] next ui sync rework
-	- [ ] don't lock device mutex while waiting for fences
+	- [ ] don't lock device mutex while waiting for fences (see waitForSubmissions)
 	- [ ] use chain semaphores for input
 	- [ ] correctly sync output, but only if it's needed (might work already)
 	- [ ] if timeline semaphores are available, use them! for all submissions (in and out)
@@ -89,8 +91,11 @@ v0.1, goal: end of january 2021
 	      can crash when extensions it does not know about/does not support
 		  are being used.
 	- [ ] update README to correctly show all current features
-- [ ] improve/cleanup pipeline time queries from querypool
-	- [ ] query whole-cb time, and correctly support querying for full renderpass
+- [x] improve/cleanup pipeline time queries from querypool
+	- [x] query whole-cb time, and correctly support querying for full renderpass
+	- [ ] we should probably show estimate of time range. The current values
+	      often become meaningless on a per-command basis.
+		  Also average them over multiple frames, avoid this glitchy look
 - [ ] properly implement layer querying functions
 	- [ ] version negotiation?
 	- [ ] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
@@ -126,6 +131,13 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] opt: even for command buffer recording we still allocate memory in a lot
+	  of places (e.g. CommandBufferDesc::getAnnotate but also in Record/Desc itself).
+	  Fix what is possible
+- [ ] command groups: should probably also check commonly used handles to match them.
+	  at least some handles (at least root resources like memory, samplers etc)
+	  will always be in common. Command buffers that use almost entirely the
+	  same buffers and images can be considered related
 - [ ] bump api version as far as possible when creating instance?
       not sure if anything could go wrong in practice
 - [ ] register own debug messenger if possible?

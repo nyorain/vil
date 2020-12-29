@@ -1,47 +1,80 @@
 #pragma once
 
 #include <device.hpp>
+#include <queue.hpp>
 #include <commandDesc.hpp>
+#include <boundState.hpp>
 
 namespace fuen {
 
+struct TimeCommandHookSubmission;
+struct TimeCommandHookRecord;
+
+// Time hooking
+struct TimeCommandHook : CommandHook {
+	u64 lastTime {};
+	u32 refCount {0};
+	u32 counter {0};
+	std::vector<CommandDesc> desc {};
+	TimeCommandHookRecord* records {}; // linked list
+
+	VkCommandBuffer hook(CommandBuffer& hooked,
+		FinishPtr<CommandHookSubmission>& data) override;
+	void finish() noexcept override;
+	~TimeCommandHook();
+};
+
+struct TimeCommandHookRecord : CommandHookRecord {
+	TimeCommandHook* hook {};
+	u32 hookCounter {};
+	CommandRecord* record {};
+
+	VkCommandBuffer cb {};
+	VkQueryPool queryPool {}; // TODO: allocate from pool
+	u32 refCount {0};
+
+	// linked list of records
+	TimeCommandHookRecord* next {};
+	TimeCommandHookRecord* prev {};
+
+	~TimeCommandHookRecord();
+	void hookRecord(Device& dev, Command* cmd, Command* hooked);
+	void finish() noexcept override;
+};
+
+struct TimeCommandHookSubmission : CommandHookSubmission {
+	IntrusivePtr<TimeCommandHookRecord> record;
+
+	TimeCommandHookSubmission(TimeCommandHookRecord& rec) : record(&rec) {}
+	~TimeCommandHookSubmission();
+	void finish() noexcept override { delete this; }
+};
+
 struct CommandBufferGui {
 	void draw();
-	// void select(CommandBuffer& cb);
 	void select(CommandBufferGroup& group);
+	void select(IntrusivePtr<CommandRecord> record);
 	void destroyed(const Handle& handle);
 
-	CommandBufferGui();
-	~CommandBufferGui();
+	CommandBufferGui() = default;
+	~CommandBufferGui() = default;
 
 	Gui* gui_ {};
-	// CommandBuffer* cb_ {}; // the selected command buffer
+	bool updateFromGroup_ {};
 
-	CommandRecord* record_ {};
-	CommandBufferGroup* group_ {};
-	const Command* command_ {}; // the selected command inside the cb
-	// u32 recordID_ {}; // the recordID of the last shown cb record
+	// The command record we are currently viewing.
+	// We keep it alive.
+	IntrusivePtr<CommandRecord> record_ {};
 
+	// The selected command inside the cb, might be null.
+	const Command* command_ {};
+	// In case we have a selected command, we store its description inside
+	// the CommandRecord here. This way we can (try to) find the logically
+	// same command in future records/cb selections.
 	std::vector<CommandDesc> desc_ {};
 
-	// Hooking the command buffer means replacing it
-	struct {
-		VkCommandPool commandPool {};
-		VkCommandBuffer cb {};
-		bool needsUpdate {true};
-		u32 qf {};
-
-		bool query {};
-		VkQueryPool queryPool {};
-		VkPipelineStageFlagBits queryStart {};
-		VkPipelineStageFlagBits queryEnd {};
-	} hooked_;
-
-	// private
-	VkCommandBuffer cbHook(CommandBuffer& cb);
-	void hookRecord(const Command* cmd);
-	// void hookRecord(const CommandVector<CommandPtr>& commands);
-	// void hookRecord(const std::vector<CommandPtr>& commands);
+	bool queryTime_ {};
+	IntrusivePtr<TimeCommandHook> timeHook_ {};
 };
 
 } // namespace fuen

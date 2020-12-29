@@ -3,8 +3,10 @@
 #include <fwd.hpp>
 #include <device.hpp>
 #include <commandDesc.hpp>
+#include <pipe.hpp>
 #include <pv.hpp>
 #include <vector>
+#include <list>
 
 namespace fuen {
 
@@ -93,8 +95,9 @@ bool operator!=(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noex
 	return a.cb != b.cb;
 }
 
-template<typename T> using CommandVector = PageVector<T, CommandAllocator<T>>;
-template<typename K, typename V> using CommandMap = std::unordered_map<K, V,
+template<typename T> using CommandAllocPageVector = PageVector<T, CommandAllocator<T>>;
+template<typename T> using CommandAllocList = std::list<T, CommandAllocator<T>>;
+template<typename K, typename V> using CommandAllocHashMap = std::unordered_map<K, V,
 	std::hash<K>, std::equal_to<K>, CommandAllocator<std::pair<const K, V>>>;
 // template<typename K, typename V> using CommandMap = std::map<K, V,
 //     std::less<K>, CommandAllocator<std::pair<const K, V>>>;
@@ -186,7 +189,7 @@ struct UsedImage {
 	Image* image {};
 	bool layoutChanged {};
 	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
-	CommandVector<Command*> commands;
+	CommandAllocList<Command*> commands;
 };
 
 // General definition covering all cases of handles not covered
@@ -197,7 +200,7 @@ struct UsedHandle {
 	UsedHandle& operator=(UsedHandle&&) noexcept = default;
 
 	DeviceHandle* handle;
-	CommandVector<Command*> commands;
+	CommandAllocList<Command*> commands;
 };
 
 struct CommandMemBlock {
@@ -206,8 +209,8 @@ struct CommandMemBlock {
 	// std::byte block[size]; // following 'this' in memory
 };
 
-void freeBlocks(const CommandMemBlock* memBlocks);
-void returnBlocks(CommandPool& pool, const CommandMemBlock* blocks);
+void freeBlocks(CommandMemBlock* memBlocks);
+void returnBlocks(CommandPool& pool, CommandMemBlock* blocks);
 
 struct MemBlockDeleter {
 	// Set to null when pool is destroyed.
@@ -232,11 +235,15 @@ struct CommandRecord {
 	// The id of this recording in the associated command buffers
 	// Together with cb, uniquely identifies record.
 	u32 recordID {};
+	// The queue family this record was recorded for. Stored here separately
+	// from CommandBuffer so that information is retained after cb destruction.
+	u32 queueFamily {};
 
+	VkCommandBufferUsageFlags usageFlags {};
 	Command* commands {};
 
-	CommandMap<VkImage, UsedImage> images;
-	CommandMap<u64, UsedHandle> handles;
+	CommandAllocHashMap<VkImage, UsedImage> images;
+	CommandAllocHashMap<u64, UsedHandle> handles;
 
 	// We store all device handles referenced by this command buffer that
 	// were destroyed since it was recorded so we can avoid deferencing
@@ -244,12 +251,16 @@ struct CommandRecord {
 	std::unordered_set<DeviceHandle*> destroyed; // NOTE: use pool memory here, too?
 
 	// Pipeline layouts we have to keep alive.
-	CommandVector<IntrusivePtr<PipelineLayout>> pipeLayouts;
+	CommandAllocList<IntrusivePtr<PipelineLayout>> pipeLayouts;
 	CommandBufferDesc desc;
 	CommandBufferGroup* group {};
 
 	bool finished {};
 	std::atomic<u32> refCount {0};
+
+	// For command hooks: they can store data associated with this
+	// recording here.
+	FinishPtr<CommandHookRecord> hook {};
 
 	template<typename H>
 	bool uses(const H& handle) const {

@@ -36,7 +36,6 @@ struct RenderBuffer;
 
 struct Device;
 struct Instance;
-struct Queue;
 struct Swapchain;
 struct Image;
 struct ImageView;
@@ -64,15 +63,20 @@ struct Sampler;
 struct MemoryResource;
 struct RenderPassDesc;
 
+struct Queue;
+struct QueueFamily;
+struct Submission;
+struct PendingSubmission;
+struct CommandHook;
+struct CommandHookSubmission;
+struct CommandHookRecord;
+struct CommandBufferGroup;
+
 struct Command;
 struct SectionCommand;
 struct CommandDesc;
-struct PendingSubmission;
-struct Submission;
-
 struct CommandRecord;
 struct CommandBufferDesc;
-struct CommandBufferGroup;
 
 struct RenderData;
 struct DisplayWindow;

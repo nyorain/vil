@@ -35,7 +35,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	if (origin->level >= dlg_level_error) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
-		std::raise(SIGABRT);
+		// std::raise(SIGABRT);
 		// DebugBreak();
 	}
 	dlg_default_output(origin, string, data);

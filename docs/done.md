@@ -90,4 +90,7 @@ For v0.1
 	      {yes, this is probably the expected and best way}
 	- [x] add handles transitively for cmdExecuteCommands?
 	      {yes, this is probably the expected and best way}
-
+- [x] optimize memory consumption in cbs.
+      the UsedHandle::commands vector are over-allocating *so much* currently,
+	  maybe replace them with linked lists (non-intrusive)?
+- [x] implement command group concept and last command buffer state viewing

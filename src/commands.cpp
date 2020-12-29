@@ -161,7 +161,8 @@ const Command* SectionCommand::display(const Command* selected, TypeFlags typeFl
 	const Command* ret = nullptr;
 	// if(ImGui::TreeNodeEx(toString().c_str(), flags)) {
 	// if(ImGui::TreeNodeEx(this, flags, "%s", toString().c_str())) {
-	if(ImGui::TreeNodeEx(nameDesc().c_str(), flags, "%s", toString().c_str())) {
+	auto idStr = dlg::format("{}:{}", nameDesc(), relID);
+	if(ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", toString().c_str())) {
 		if(ImGui::IsItemClicked()) {
 			ret = this;
 		}

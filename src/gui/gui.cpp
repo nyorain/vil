@@ -40,6 +40,14 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 
 	lastFrame_ = Clock::now();
 
+	// init command pool
+	VkCommandPoolCreateInfo cpci {};
+	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	cpci.queueFamilyIndex = dev.gfxQueue->family;
+	VK_CHECK(dev.dispatch.CreateCommandPool(dev.handle, &cpci, nullptr, &commandPool_));
+	nameHandle(dev, commandPool_, "Gui:commandPool");
+
 	// init render stuff
 	VkAttachmentDescription attachment = {};
 	attachment.format = format;
@@ -92,6 +100,7 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	rpi.pDependencies = dependencies;
 
 	VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp_));
+	nameHandle(dev, rp_, "Gui:rp");
 
 	// pipeline
 	std::vector<VkShaderModule> modules;
@@ -243,6 +252,11 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	pipes_.image2D = pipes[2];
 	pipes_.image3D = pipes[3];
 
+	nameHandle(dev, pipes_.gui, "Gui:pipeGui");
+	nameHandle(dev, pipes_.image1D, "Gui:pipeImage1D");
+	nameHandle(dev, pipes_.image2D, "Gui:pipeImage2D");
+	nameHandle(dev, pipes_.image3D, "Gui:pipeImage3D");
+
 	for(auto& mod : modules) {
 		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 	}
@@ -292,6 +306,7 @@ Gui::~Gui() {
 	if(pipes_.image3D) dev_->dispatch.DestroyPipeline(vkDev, pipes_.image3D, nullptr);
 
 	if(rp_) dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
+	if(commandPool_) dev_->dispatch.DestroyCommandPool(vkDev, commandPool_, nullptr);
 }
 
 // Renderer
@@ -701,13 +716,16 @@ void Gui::drawOverviewUI(Draw& draw) {
 				// 	}
 				// }
 
-				for(auto [cb, group] : sub.cbs) {
+				for(auto& [cb, _] : sub.cbs) {
 					ImGui::Bullet();
 					// We have the additional IsItemClicked here since
 					// that might change every frame
 					// if(ImGui::Button(name(*cb).c_str()) || ImGui::IsItemClicked()) {
 					// 	selectCb(*cb);
 					// }
+
+					auto* group = cb->lastRecordLocked()->group;
+					dlg_assert(group);
 
 					auto label = dlg::format("Group {}", (void*) group);
 					if(ImGui::Button(label.c_str())) {
@@ -850,7 +868,7 @@ void Gui::waitForSubmissions(const H& handle) {
 
 		bool wait = false;
 		for(auto& sub : pending->submissions) {
-			for(auto [cb, group] : sub.cbs) {
+			for(auto& [cb, _] : sub.cbs) {
 				dlg_assert(cb->state() == CommandBuffer::State::executable);
 				if(!cb->uses(handle)) {
 					continue;
@@ -914,7 +932,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 
 	if(!foundDraw) {
 		foundDraw = &draws_.emplace_back();
-		foundDraw->init(dev());
+		foundDraw->init(dev(), commandPool_);
 	}
 
 	auto& draw = *foundDraw;
@@ -939,6 +957,9 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		ImGui::GetIO().DeltaTime = dt;
 	}
 
+	// TODO: hacky
+	auto keepAlive = tabs_.cb.record_;
+
 	{
 		// Important we already lock this mutex here since we need to make
 		// sure no new submissions are done by application while we process
@@ -950,27 +971,26 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		std::lock_guard devMutex(dev().mutex);
 
 		// handle buffer waiting/retrieving logic
-		auto pSelBuf = std::get_if<Buffer*>(&tabs_.resources.handle_);
-		auto* selBuf = pSelBuf ? *pSelBuf : nullptr;
-
-		if(selBuf) {
+		if(tabs_.resources.handle_ &&
+				tabs_.resources.handle_->objectType == VK_OBJECT_TYPE_BUFFER) {
 			// TODO: ugh, all of this is so expensive.
 			// Here, we could definitely try out semaphore chaining since we only
 			// need the easy way (app subm -> our subm)
 			// TODO: we probably don't wanna wait for this. Instead, retrive
 			// the written contents from the last finished draw (if it
 			// was for the same buffer).
-			waitForSubmissions(*selBuf);
+			auto& buf = (Buffer&) *tabs_.resources.handle_;
+			waitForSubmissions(buf);
 
 			// TODO: offset, sizes and stuff
-			auto size = std::min(selBuf->ci.size, VkDeviceSize(1024 * 16));
+			auto size = std::min(buf.ci.size, VkDeviceSize(1024 * 16));
 			readbackBuf_.ensure(dev(), size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
 			// TODO: support srcOffset
 			// TODO: need memory barriers
 			VkBufferCopy copy {};
 			copy.size = size;
-			dev().dispatch.CmdCopyBuffer(draw.cb, selBuf->handle, readbackBuf_.buf,
+			dev().dispatch.CmdCopyBuffer(draw.cb, buf.handle, readbackBuf_.buf,
 				1, &copy);
 			dev().dispatch.EndCommandBuffer(draw.cb);
 
@@ -1012,21 +1032,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
 		}
 
-		// handle cb waiting logic:
-		// if we have hooked a command buffer to retrieve its timing, we have
-		// to wait for it to complete.
-		// TODO: could be optimized I guess, we might not strictly have to do this
-		// with some smart query pool management.
-		/*
-		if(tabs_.cb.cb_ && tabs_.cb.hooked_.cb) {
-			// NOTE: it's important we do a copy here since waiting for the
-			// submissions might modify cb_->pending itself, invalidating
-			// the span.
-			auto pendingCopy = tabs_.cb.cb_->pending;
-			waitFor(pendingCopy);
-		}
-		*/
-
 		this->draw(draw, info.fullscreen);
 		auto& drawData = *ImGui::GetDrawData();
 		this->uploadDraw(draw, drawData);
@@ -1034,16 +1039,13 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		// handle image waiting logic:
 		// if we are displaying an image we have to make sure it is not currently
 		// being written somewhere else.
-		auto pSelImg = std::get_if<Image*>(&tabs_.resources.handle_);
-		auto* selImg = pSelImg ? *pSelImg : nullptr;
-		if(selImg && !tabs_.resources.image_.view) {
-			selImg = nullptr;
-		}
+		Image* selImg = nullptr;
+		if(tabs_.resources.handle_ &&
+				tabs_.resources.handle_->objectType == VK_OBJECT_TYPE_IMAGE &&
+				tabs_.resources.image_.view) {
+			selImg = (Image*) tabs_.resources.handle_;
 
-		VkImageLayout finalLayout {};
-		if(selImg) {
 			auto& img = *selImg;
-			finalLayout = img.pendingLayout;
 			waitForSubmissions(img);
 
 			// Make sure our image is in the right layout.
@@ -1052,7 +1054,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 			imgb.image = img.handle;
 			imgb.subresourceRange = tabs_.resources.image_.subres;
-			imgb.oldLayout = finalLayout;
+			imgb.oldLayout = img.pendingLayout;
 			imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags?
 			imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -1078,19 +1080,21 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		this->recordDraw(draw, info.extent, info.fb, drawData);
 
 		if(selImg) {
+			auto& img = *selImg;
+
 			// return it to original layout
 			VkImageMemoryBarrier imgb {};
 			imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 			imgb.image = selImg->handle;
 			imgb.subresourceRange = tabs_.resources.image_.subres;
 			imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			imgb.newLayout = finalLayout;
+			imgb.newLayout = img.pendingLayout;
 			imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 			dlg_assert(
-				finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
-				finalLayout != VK_IMAGE_LAYOUT_UNDEFINED);
+				img.pendingLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
+				img.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED);
 			imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
 			imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
 
@@ -1206,6 +1210,13 @@ void Gui::finishDraws() {
 
 void Gui::makeImGuiCurrent() {
 	ImGui::SetCurrentContext(imgui_);
+}
+
+void Gui::selectCb(CommandBuffer& cb, bool activateTab) {
+	tabs_.cb.select(cb.lastRecordPtrLocked());
+	if(activateTab) {
+		this->activateTab(Tab::commandBuffer);
+	}
 }
 
 } // namespace fuen

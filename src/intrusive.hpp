@@ -1,68 +1,120 @@
 #pragma once
 
-#include <fwd.hpp>
 #include <type_traits>
+#include <utility>
 
 namespace fuen {
 
-template<typename T>
-class IntrusivePtr {
+template<typename T, typename H>
+class HandledPtr {
 public:
-	IntrusivePtr() noexcept = default;
+	static constexpr auto noexceptDec = true; // std::is_nothrow_invocable_v<decltype(&H::dec), H, T*>;
+	static constexpr auto noexceptInc = std::is_nothrow_invocable_v<decltype(&H::inc), H, T*>;
 
-	void reset() noexcept(std::is_nothrow_destructible_v<T>) {
-		// NOTE: fetch_sub returns the value before decrementing,
-		// so we delete the ptr when it was 1.
+	HandledPtr() noexcept(std::is_nothrow_constructible_v<H>) :
+			storage_{nullptr, H{}} {
+		static_assert(std::is_nothrow_invocable_v<decltype(&H::dec), H, T*>);
+	}
+
+	void reset(T* ptr = nullptr) noexcept(noexceptDec && noexceptInc) {
 		// TODO: details (order of operation, might be relevant if ~ptr_
 		// has access to this wrapper) don't match unique_ptr::reset.
 		// They probably should.
-		if(ptr_ && ptr_->refCount.fetch_sub(1) == 1) {
-			delete ptr_;
+		if(getPointer()) {
+			getHandler().dec(getPointer());
+			getPointer() = nullptr;
 		}
 
-		ptr_ = nullptr;
-	}
-
-	~IntrusivePtr() noexcept(noexcept(reset())) { reset(); }
-
-	explicit IntrusivePtr(T* ptr) noexcept : ptr_(ptr) {
-		if(ptr_) {
-			ptr_->refCount.fetch_add(1);
+		getPointer() = ptr;
+		if(ptr) {
+			getHandler().inc(ptr);
 		}
 	}
-	IntrusivePtr(std::nullptr_t) noexcept : ptr_{} {}
 
-	IntrusivePtr(const IntrusivePtr& rhs) noexcept : ptr_(rhs.ptr_) {
-		if(ptr_) {
-			ptr_->refCount.fetch_add(1);
-		}
-	}
-	IntrusivePtr& operator=(const IntrusivePtr& rhs) noexcept(noexcept(reset())) {
+	~HandledPtr() noexcept(noexceptDec && std::is_nothrow_destructible_v<H>) {
 		reset();
-		ptr_ = rhs.ptr_;
-		if(ptr_) {
-			ptr_->refCount.fetch_add(1);
+	}
+
+	explicit HandledPtr(T* ptr, H h = {})
+		noexcept(noexceptInc && std::is_nothrow_move_constructible_v<H>)
+			: storage_{ptr, std::move(h)} {
+		if(getPointer()) {
+			getHandler().inc(getPointer());
+		}
+	}
+	HandledPtr(std::nullptr_t, H h = {})
+		noexcept(std::is_nothrow_move_constructible_v<H>)
+			: storage_{nullptr, std::move(h)} {}
+
+	HandledPtr(const HandledPtr& rhs)
+		noexcept(std::is_nothrow_copy_assignable_v<H> && noexceptInc)
+			: storage_{nullptr, H{}} {
+		storage_ = rhs.storage_;
+		if(getPointer()) {
+			getHandler().inc(getPointer());
+		}
+	}
+
+	HandledPtr& operator=(const HandledPtr& rhs)
+			noexcept(std::is_nothrow_copy_assignable_v<H> && noexceptInc && noexceptDec) {
+		reset();
+		storage_ = rhs.storage_;
+		if(getPointer()) {
+			getHandler().inc(getPointer());
 		}
 		return *this;
 	}
 
-	IntrusivePtr(IntrusivePtr&& rhs) noexcept : ptr_(rhs.ptr_) {
-		rhs.ptr_ = nullptr;
+	HandledPtr(HandledPtr&& rhs) noexcept(std::is_nothrow_move_constructible_v<H>)
+			: storage_(std::move(rhs.storage_)) {
+		std::get<0>(rhs.storage_) = nullptr;
 	}
-	IntrusivePtr& operator=(IntrusivePtr&& rhs) noexcept(noexcept(reset())) {
+
+	HandledPtr& operator=(HandledPtr&& rhs)
+			noexcept(std::is_nothrow_move_assignable_v<H> && noexceptDec) {
 		reset();
-		ptr_ = rhs.ptr_;
-		rhs.ptr_ = nullptr;
+		storage_ = std::move(rhs.storage_);
+		std::get<0>(rhs.storage_) = nullptr;
 		return *this;
 	}
 
-	operator bool() const noexcept { return ptr_; }
-	T* operator->() const noexcept { return ptr_; }
-	T& operator*() const noexcept { return *ptr_; }
-	T* get() const noexcept { return ptr_; }
+	T* get() const noexcept { return std::get<0>(storage_); }
+	H& getHandler() const noexcept { return getHandler(); }
+
+	operator bool() const noexcept { return get(); }
+	T* operator->() const noexcept { return get(); }
+	T& operator*() const noexcept { return *get(); }
 
 protected:
-	T* ptr_ {};
+	T*& getPointer() noexcept { return std::get<0>(storage_); }
+	H& getHandler() noexcept { return std::get<1>(storage_); }
+
+	std::tuple<T*, H> storage_; // empty-object-optimization for H
 };
+
+template<typename T>
+struct RefCountHandler {
+	void inc(T* ptr) const noexcept { ++ptr->refCount; }
+	void dec(T* ptr) const noexcept(std::is_nothrow_destructible_v<T>) {
+		if(--ptr->refCount == 0) {
+			delete ptr;
+		}
+	}
+};
+
+template<typename T>
+struct FinishHandler {
+	FinishHandler(const FinishHandler&) = delete;
+	FinishHandler& operator=(const FinishHandler&) = delete;
+
+	FinishHandler(FinishHandler&&) = default;
+	FinishHandler& operator=(FinishHandler&&) = default;
+
+	void inc(T*) const noexcept {}
+	void dec(T* ptr) const noexcept(noexcept(ptr->finish())) { ptr->finish(); }
+};
+
+template<typename T> using IntrusivePtr = HandledPtr<T, RefCountHandler<T>>;
+template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
 } // namspace fuen

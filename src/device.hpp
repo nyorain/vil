@@ -29,7 +29,10 @@ struct Device {
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
 	VkPhysicalDeviceFeatures enabledFeatures {};
-	std::vector<VkQueueFamilyProperties> queueProps {};
+
+	// Aside from properties, only the families used by device
+	// are initialized.
+	std::vector<QueueFamily> queueFamilies;
 
 	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
 
@@ -46,7 +49,6 @@ struct Device {
 	// The queue we use for graphics submissions. Can be assumed to
 	// be non-null.
 	Queue* gfxQueue {};
-	VkCommandPool commandPool {};
 
 	u32 hostVisibleMemTypeBits {};
 	u32 deviceLocalMemTypeBits {};

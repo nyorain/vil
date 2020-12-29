@@ -10,6 +10,9 @@
 namespace fuen {
 
 // Overlay
+Overlay::Overlay() = default;
+Overlay::~Overlay() = default;
+
 void Overlay::init(Swapchain& swapchain) {
 	this->swapchain = &swapchain;
 	this->gui.init(*swapchain.dev, swapchain.ci.imageFormat, false);

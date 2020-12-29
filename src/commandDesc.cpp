@@ -178,26 +178,32 @@ void processType(CommandBufferDesc& desc, Command::Type type) {
 	}
 }
 
-CommandBufferDesc CommandBufferDesc::get(const Command* cmd) {
+// CommandBufferDesc CommandBufferDesc::get(const Command* cmd) {
+CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 	CommandBufferDesc ret;
 	ret.name = "root";
 
+	// TODO: should really use allocator
+	std::unordered_map<std::string, u32> ids;
+
 	while(cmd) {
 		if(auto section = dynamic_cast<const SectionCommand*>(cmd); section) {
-			auto child = CommandBufferDesc::get(section->children);
+			auto child = CommandBufferDesc::getAnnotate(section->children);
 			child.name = section->nameDesc();
-			ret.children.push_back(child);
+			ret.children.push_back(std::move(child));
 		}
 
 		processType(ret, cmd->type());
 
 		++ret.totalCommands;
+		cmd->relID = ids[cmd->nameDesc()]++;
 		cmd = cmd->next;
 	}
 
 	return ret;
 }
 
+/*
 float CommandBufferDesc::match(const Command* cmd) {
 	auto cit = children.begin();
 
@@ -264,6 +270,63 @@ float CommandBufferDesc::match(const Command* cmd) {
 	// more since that is a huge indicator that command buffers come from
 	// the same source, even if whole sections are missing in either of them.
 	return (1.f - ownDiff) * childFac * avgChildMatch;
+}
+*/
+
+float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
+	// compare children
+	auto bcit = b.children.begin();
+	float childMatchSum = 0u;
+
+	for(const auto& ac : a.children) {
+		// NOTE: when matching children we punish different orders
+		// *extremely* harshly, namely: (A, B) is considered 0% similar
+		// to (B, A). Intuitively, this seems ok for command buffer
+		// sections but it might be a problem in some cases; improve
+		// when need arises.
+		// NOTE: we only compare for exactly same sections here.
+		// We could also handle the case where labels e.g. include recording-
+		// specific information. Could filter out numbers or do a lexical
+		// distance check or something. Revisit if need ever arises.
+		for(auto it = bcit; it != b.children.end(); ++it) {
+			if(it->name == ac.name) {
+				// NOTE: we could weigh children with more total commands
+				// more, via it->totalCommands. Probably a good idea
+				// NOTE: when match is low, could look forward and choose
+				// child with almost full match, indicating a skip.
+				childMatchSum += match(*it, ac);
+				bcit = it + 1;
+				break;
+			}
+		}
+	}
+
+	auto maxChildren = std::max(a.children.size(), b.children.size());
+	float childMatch = maxChildren ? childMatchSum / maxChildren : 1.f;
+
+	// compare own commands
+	float weightSum = 0.f;
+	float diffSum = 0.f;
+
+	auto addMatch = [&](u32 dst, u32 src) {
+		diffSum += std::abs(float(dst) - float(src));
+		weightSum += std::max(dst, src);
+	};
+
+	addMatch(a.dispatchCommands, b.dispatchCommands);
+	addMatch(a.drawCommands, b.drawCommands);
+	addMatch(a.transferCommands, b.transferCommands);
+	addMatch(a.syncCommands, b.syncCommands);
+	addMatch(a.queryCommands, b.queryCommands);
+
+	// When there are no commands in either, we match 100%
+	float ownMatch = weightSum > 0.0 ? 1.f - diffSum / weightSum : 1.f;
+
+	// NOTE: kinda simplistic formula, can surely be improved.
+	// We might want to value large setions that are similar a lot
+	// more since that is a huge indicator that command buffers come from
+	// the same source, even if whole sections are missing in either of them.
+	return ownMatch * childMatch;
 }
 
 } // namespace fuen

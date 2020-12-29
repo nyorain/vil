@@ -96,6 +96,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		img.swapchain = &swapd;
 		img.swapchainImageID = i;
 		img.dev = &devd;
+		img.objectType = VK_OBJECT_TYPE_IMAGE;
 		img.handle = imgs[i];
 
 		swapd.images[i] = &img;

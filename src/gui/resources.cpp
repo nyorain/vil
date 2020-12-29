@@ -987,8 +987,9 @@ void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
 	imGuiText("{}", name(cp));
 	ImGui::Spacing();
 
+	const auto& qprops = cp.dev->queueFamilies[cp.queueFamily].props;
 	imGuiText("Queue Family: {} ({})", cp.queueFamily,
-		vk::flagNames(VkQueueFlagBits(cp.dev->queueProps[cp.queueFamily].queueFlags)));
+		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
 
 	for(auto& cb : cp.cbs) {
 		if(ImGui::Button(name(*cb).c_str())) {
@@ -1354,31 +1355,65 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::NextColumn();
 	ImGui::BeginChild("Resource View", {0.f, 0.f});
 
-	std::visit(Visitor{
-		[&](std::monostate) {},
-		[&](auto* selected) {
-			ImGui::PushID(selected);
-			drawDesc(draw, *selected);
-			ImGui::PopID();
-		}
-	}, handle_);
+	if(handle_) {
+		ImGui::PushID(handle_);
+		drawHandleDesc(draw, *handle_);
+		ImGui::PopID();
+	}
+
+	// TODO
+	// std::visit(Visitor{
+	// 	[&](std::monostate) {},
+	// 	[&](auto* selected) {
+	// 		ImGui::PushID(selected);
+	// 		drawDesc(draw, *selected);
+	// 		ImGui::PopID();
+	// 	}
+	// }, handle_);
 
 	ImGui::EndChild();
 	ImGui::Columns();
 }
 
-void ResourceGui::destroyed(const Handle& handle) {
-	auto same = std::visit(Visitor{
-		[&](std::monostate) {
-			return false;
-		}, [&](auto& selected) {
-			return selected == &handle;
-		}
-	}, handle_);
+void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
+	switch(handle.objectType) {
+		case VK_OBJECT_TYPE_IMAGE: return drawDesc(draw, (Image&) handle);
+		case VK_OBJECT_TYPE_IMAGE_VIEW: return drawDesc(draw, (ImageView&) handle);
+		case VK_OBJECT_TYPE_BUFFER: return drawDesc(draw, (Buffer&) handle);
+		case VK_OBJECT_TYPE_BUFFER_VIEW: return drawDesc(draw, (BufferView&) handle);
+		case VK_OBJECT_TYPE_SAMPLER: return drawDesc(draw, (Sampler&) handle);
+		case VK_OBJECT_TYPE_DESCRIPTOR_SET: return drawDesc(draw, (DescriptorSet&) handle);
+		case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT: return drawDesc(draw, (DescriptorSetLayout&) handle);
+		case VK_OBJECT_TYPE_DESCRIPTOR_POOL: return drawDesc(draw, (DescriptorPool&) handle);
+		case VK_OBJECT_TYPE_COMMAND_BUFFER: return drawDesc(draw, (CommandBuffer&) handle);
+		case VK_OBJECT_TYPE_COMMAND_POOL: return drawDesc(draw, (CommandPool&) handle);
+		case VK_OBJECT_TYPE_PIPELINE_LAYOUT: return drawDesc(draw, (PipelineLayout&) handle);
+		case VK_OBJECT_TYPE_FENCE: return drawDesc(draw, (Fence&) handle);
+		case VK_OBJECT_TYPE_EVENT: return drawDesc(draw, (Event&) handle);
+		case VK_OBJECT_TYPE_SEMAPHORE: return drawDesc(draw, (Semaphore&) handle);
+		case VK_OBJECT_TYPE_DEVICE_MEMORY: return drawDesc(draw, (DeviceMemory&) handle);
+		case VK_OBJECT_TYPE_RENDER_PASS: return drawDesc(draw, (RenderPass&) handle);
+		case VK_OBJECT_TYPE_FRAMEBUFFER: return drawDesc(draw, (Framebuffer&) handle);
+		case VK_OBJECT_TYPE_QUERY_POOL: return drawDesc(draw, (QueryPool&) handle);
+		case VK_OBJECT_TYPE_PIPELINE: {
+			Pipeline& pipe = (Pipeline&) handle;
+			if(pipe.type == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+				return drawDesc(draw, (GraphicsPipeline&) pipe);
+			} else if(pipe.type == VK_PIPELINE_BIND_POINT_COMPUTE) {
+				return drawDesc(draw, (ComputePipeline&) pipe);
+			} else {
+				dlg_error("Unimplemented pipeline bind point");
+				return;
+			}
+		} default:
+			dlg_error("Unimplemented object type");
+			break;
+	}
+}
 
+void ResourceGui::destroyed(const Handle& handle) {
 	auto& dev = gui_->dev();
-	if(same) {
-		handle_ = {};
+	if(handle_ == &handle) {
 		if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
 			if(image_.view) {
 				dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
@@ -1386,7 +1421,14 @@ void ResourceGui::destroyed(const Handle& handle) {
 
 			image_ = {};
 		}
+
+		handle_ = nullptr;
 	}
+}
+
+void ResourceGui::select(Handle& handle) {
+	handle_ = &handle;
+	dlg_assert(handle.objectType != VK_OBJECT_TYPE_UNKNOWN);
 }
 
 } // namespace fuen

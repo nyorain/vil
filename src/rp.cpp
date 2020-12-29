@@ -32,12 +32,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	}
 
 	auto& fb = dev.framebuffers.add(*pFramebuffer);
-	// fb.rp = dev.renderPasses.find(pCreateInfo->renderPass);
-	// dlg_assert(fb.rp);
 	fb.width = pCreateInfo->width;
 	fb.height = pCreateInfo->height;
 	fb.layers = pCreateInfo->layers;
 	fb.handle = *pFramebuffer;
+	fb.objectType = VK_OBJECT_TYPE_FRAMEBUFFER;
 	fb.rp = dev.renderPasses.get(pCreateInfo->renderPass).desc;
 	fb.dev = &dev;
 
@@ -145,6 +144,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	auto& rp = dev.renderPasses.add(*pRenderPass);
 	rp.dev = &dev;
 	rp.handle = *pRenderPass;
+	rp.objectType = VK_OBJECT_TYPE_RENDER_PASS;
 
 	rp.desc = std::make_shared<RenderPassDesc>();
 	downgrade(rp.desc->subpasses, span{pCreateInfo->pSubpasses, pCreateInfo->subpassCount});

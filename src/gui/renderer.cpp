@@ -1,4 +1,5 @@
 #include <gui/renderer.hpp>
+#include <queue.hpp>
 #include <util.hpp>
 #include <imgui/imgui.h>
 
@@ -68,20 +69,19 @@ void swap(Draw& a, Draw& b) noexcept {
 	swap(a.usedHandles, b.usedHandles);
 }
 
-void Draw::init(Device& dev) {
+void Draw::init(Device& dev, VkCommandPool commandPool) {
 	this->dev = &dev;
 
 	// init data
 	VkCommandBufferAllocateInfo cbai {};
 	cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 	cbai.commandBufferCount = 1u;
-	cbai.commandPool = dev.commandPool;
+	cbai.commandPool = commandPool;
 	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &cbai, &cb));
-	nameHandle(dev, this->cb, "Draw:cb");
-
 	// command buffer is a dispatchable object
 	dev.setDeviceLoaderData(dev.handle, cb);
+	nameHandle(dev, this->cb, "Draw:cb");
 
 	VkFenceCreateInfo fci {};
 	fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -122,9 +122,12 @@ Draw::~Draw() {
 		dev->dispatch.DestroySemaphore(dev->handle, semaphore, nullptr);
 	}
 
-	if(cb) {
-		dev->dispatch.FreeCommandBuffers(dev->handle, dev->commandPool, 1, &cb);
-	}
+	// We rely on the commandPool being freed to implicitly free this
+	// command buffer. Since the gui owns the command pool this isn't
+	// a problem
+	// if(cb) {
+	// 	dev->dispatch.FreeCommandBuffers(dev->handle, commandPool, 1, &cb);
+	// }
 
 	if(dsSelected) {
 		dev->dispatch.FreeDescriptorSets(dev->handle, dev->dsPool, 1, &dsSelected);

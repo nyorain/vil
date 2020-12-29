@@ -93,8 +93,10 @@ Device::~Device() {
 		dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
 	}
 
-	if(commandPool) {
-		dispatch.DestroyCommandPool(handle, commandPool, nullptr);
+	for(auto& qf : queueFamilies) {
+		if(qf.commandPool) {
+			dispatch.DestroyCommandPool(handle, qf.commandPool, nullptr);
+		}
 	}
 
 	// erase queue datas
@@ -323,7 +325,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.ini = iniData;
 	dev.phdev = phdev;
 	dev.handle = *pDevice;
-	dev.queueProps = std::move(qfprops);
 	dev.extensions = {extsBegin, extsEnd};
 	if(ci->pEnabledFeatures) {
 		dev.enabledFeatures = *ci->pEnabledFeatures;
@@ -371,7 +372,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// Get device queues
 	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
 		auto& qi = queueCreateInfos[i];
-		auto& familyProps = dev.queueProps[qi.queueFamilyIndex];
+		auto& familyProps = qfprops[qi.queueFamilyIndex];
 
 		dev.usedQueueFamilyIndices.push_back(qi.queueFamilyIndex);
 
@@ -406,6 +407,25 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	auto newEnd = std::unique(dev.usedQueueFamilyIndices.begin(), dev.usedQueueFamilyIndices.end());
 	dev.usedQueueFamilyIndices.erase(newEnd, dev.usedQueueFamilyIndices.end());
 
+	// Create queue families and their command pools
+	VkCommandPoolCreateInfo cpci {};
+	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	dev.queueFamilies.resize(nqf);
+	for(auto i = 0u; i < nqf; ++i) {
+		cpci.queueFamilyIndex = u32(i);
+
+		auto& qfam = dev.queueFamilies[i];
+		qfam.props = qfprops[i];
+
+		if(find(dev.usedQueueFamilyIndices, i) != dev.usedQueueFamilyIndices.end()) {
+			VK_CHECK(dev.dispatch.CreateCommandPool(dev.handle, &cpci, nullptr, &qfam.commandPool));
+			nameHandle(dev, qfam.commandPool,
+				dlg::format("Device:queueFam[{}].commandPool", i).c_str());
+		}
+	}
+
 	// query memory stuff
 	ini.dispatch.GetPhysicalDeviceMemoryProperties(phdev, &dev.memProps);
 	for(auto i = 0u; i < dev.memProps.memoryTypeCount; ++i) {
@@ -422,15 +442,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// == graphics-stuff ==
 	dev.renderData = std::make_unique<RenderData>();
 	dev.renderData->init(dev);
-
-	// command pool
-	VkCommandPoolCreateInfo cpci {};
-	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	cpci.queueFamilyIndex = dev.gfxQueue->family;
-	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-	VK_CHECK(dev.dispatch.CreateCommandPool(dev.handle, &cpci, nullptr, &dev.commandPool));
-	nameHandle(dev, dev.commandPool, "Device:commandPool");
 
 	// descriptor pool
 	// TODO: might need multiple pools...

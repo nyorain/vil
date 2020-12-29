@@ -63,6 +63,7 @@ src = files(
 	'src/vk/format_utils.cpp',
 	'src/platform.cpp',
 	'src/commandDesc.cpp',
+	'src/boundState.cpp',
 
 	# gui stuff
 	'src/gui/renderer.cpp',

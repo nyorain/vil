@@ -23,7 +23,7 @@ struct Draw {
 	Buffer vertexBuffer {};
 	Buffer indexBuffer {};
 	// Buffer readbackBuffer; // TODO:
-	VkCommandBuffer cb {};
+	VkCommandBuffer cb {}; // not freed, relies on command pool being freed
 
 	// Semaphore associated with the gfx submission of this rendering.
 	// Consumed by the present info.
@@ -42,7 +42,7 @@ struct Draw {
 
 	std::vector<Handle*> usedHandles;
 
-	void init(Device& dev);
+	void init(Device& dev, VkCommandPool pool);
 
 	Draw() = default;
 
