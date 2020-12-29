@@ -3,6 +3,7 @@
 #include <handles.hpp>
 #include <util.hpp>
 #include <imguiutil.hpp>
+#include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
 #include <spirv_reflect.h>
@@ -1250,26 +1251,45 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::Columns(2);
 	ImGui::BeginChild("Search settings", {0.f, 50.f});
 
-	imGuiTextInput("Search", search_);
+	// filter by object type
+	auto update = firstUpdate_;
+	firstUpdate_ = false;
 
-	auto filters = {
-		0,
-		int(VK_OBJECT_TYPE_IMAGE),
-		int(VK_OBJECT_TYPE_COMMAND_BUFFER),
-		int(VK_OBJECT_TYPE_PIPELINE),
-		int(VK_OBJECT_TYPE_SAMPLER),
-	};
-
-	auto filterName = filter_ == 0 ? "all" : vk::name(VkObjectType(filter_));
+	auto filterName = fuen::name(filter_);
 	if(ImGui::BeginCombo("Filter", filterName)) {
-		for(auto& filter : filters) {
-			auto name = filter == 0 ? "all" : vk::name(VkObjectType(filter));
+		for(auto& typeHandler : ObjectTypeHandler::handlers) {
+			auto filter = typeHandler->objectType();
+			auto name = fuen::name(filter);
 			if(ImGui::Selectable(name)) {
-				this->filter_ = filter;
+				filter_ = filter;
+				update = true;
 			}
 		}
 
 		ImGui::EndCombo();
+	}
+
+	ImGui::SameLine();
+	if(ImGui::Button("Update")) {
+		update = true;
+	}
+
+	// text search
+	if(imGuiTextInput("Search", search_)) {
+		update = true;
+	}
+
+	auto& dev = gui_->dev();
+	if(update) {
+		handles_.clear();
+		destroyed_.clear();
+
+		for(auto& typeHandler : ObjectTypeHandler::handlers) {
+			if(typeHandler->objectType() == filter_) {
+				handles_ = typeHandler->resources(dev, search_);
+				break;
+			}
+		}
 	}
 
 	ImGui::Separator();
@@ -1278,77 +1298,34 @@ void ResourceGui::draw(Draw& draw) {
 	// resource list
 	ImGui::BeginChild("Resource List", {0.f, 0.f});
 
-	auto displayResources = [&](auto& syncedResMap) {
-		auto& resMap = syncedResMap.map;
-		if(resMap.empty()) {
-			return;
-		}
+	ImGuiListClipper clipper;
+	clipper.Begin(int(handles_.size()));
 
-		if(filter_ != 0 && int(resMap.begin()->second->objectType) != filter_) {
-			// Break instead of continue since no object
-			// in this map should be displayed. TODO: kinda ugly...
-			return;
-		}
+	while(clipper.Step()) {
+		for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+			auto& handle = *handles_[i];
 
-		// ImGui::Text("Begin");
+			ImGui::PushID(&handle);
 
-		ImGuiListClipper clipper;
-		clipper.Begin(int(resMap.size()));
+			if(destroyed_.count(&handle)) {
+				// disabled button
+				ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+				ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
 
-		auto begin = resMap.begin();
-		while(clipper.Step()) {
-			for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-				// TODO: optimize
-				auto it = begin;
-				std::advance(it, i);
-				auto& entry = *it;
+				ImGui::Button("<Destroyed>");
 
-				auto label = name(*entry.second);
-
-				// TODO: better search
-				// TODO: re-enable and make it work with list clipper (probably just
-				// disable it when we are using search? might be bad tho).
-				// Should probably optimize loop, e.g. not always allocate.
-				//if(!search_.empty() && label.find(search_) == label.npos) {
-				//	continue;
-				//}
-
-				ImGui::PushID(entry.second.get());
+				ImGui::PopStyleVar();
+				ImGui::PopItemFlag();
+			} else {
+				auto label = name(handle);
 				if(ImGui::Button(label.c_str())) {
-					select(*entry.second.get());
+					select(handle);
 				}
-
-				ImGui::PopID();
 			}
+
+			ImGui::PopID();
 		}
-
-		// ImGui::Text("End");
-		ImGui::Separator();
-	};
-
-	auto& dev = gui_->dev();
-	displayResources(dev.images);
-	displayResources(dev.imageViews);
-	displayResources(dev.samplers);
-	displayResources(dev.framebuffers);
-	displayResources(dev.renderPasses);
-	displayResources(dev.buffers);
-	displayResources(dev.deviceMemories);
-	displayResources(dev.commandBuffers);
-	displayResources(dev.commandPools);
-	displayResources(dev.dsPools);
-	displayResources(dev.descriptorSets);
-	displayResources(dev.dsLayouts);
-	displayResources(dev.graphicsPipes);
-	displayResources(dev.computePipes);
-	displayResources(dev.pipeLayouts);
-	displayResources(dev.shaderModules);
-	displayResources(dev.events);
-	displayResources(dev.semaphores);
-	displayResources(dev.fences);
-	displayResources(dev.queryPools);
-	displayResources(dev.bufferViews);
-
+	}
 	ImGui::EndChild();
 
 	// resource view
@@ -1360,16 +1337,6 @@ void ResourceGui::draw(Draw& draw) {
 		drawHandleDesc(draw, *handle_);
 		ImGui::PopID();
 	}
-
-	// TODO
-	// std::visit(Visitor{
-	// 	[&](std::monostate) {},
-	// 	[&](auto* selected) {
-	// 		ImGui::PushID(selected);
-	// 		drawDesc(draw, *selected);
-	// 		ImGui::PopID();
-	// 	}
-	// }, handle_);
 
 	ImGui::EndChild();
 	ImGui::Columns();
@@ -1423,6 +1390,10 @@ void ResourceGui::destroyed(const Handle& handle) {
 		}
 
 		handle_ = nullptr;
+	}
+
+	if(handle.objectType == filter_) {
+		destroyed_.insert(&handle);
 	}
 }
 

@@ -79,6 +79,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 	auto& rp = dev.renderPasses.add(*pRenderPass);
 	rp.dev = &dev;
 	rp.handle = *pRenderPass;
+	rp.objectType = VK_OBJECT_TYPE_RENDER_PASS;
 
 	rp.desc = std::make_shared<RenderPassDesc>();
 	rp.desc->subpasses = {pCreateInfo->pSubpasses, pCreateInfo->pSubpasses + pCreateInfo->subpassCount};

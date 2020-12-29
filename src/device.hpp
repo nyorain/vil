@@ -37,7 +37,7 @@ struct Device {
 	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
 
 	// Vector of all queues.
-	// Might includes queues created by us.
+	// Might include queues created by us.
 	std::vector<std::unique_ptr<Queue>> queues;
 	// A vector of all queue family indices for which a queue exists.
 	// Needed for concurrent resources.

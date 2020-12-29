@@ -8,6 +8,7 @@
 namespace fuen {
 
 Swapchain::~Swapchain() {
+	overlay.reset();
 	destroy();
 }
 
@@ -16,7 +17,6 @@ void Swapchain::destroy() {
 		return;
 	}
 
-	overlay.reset();
 	for(auto* img : this->images) {
 		dev->images.mustErase(img->handle);
 	}
@@ -57,6 +57,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	if(pCreateInfo->oldSwapchain) {
 		oldChain = &devd.swapchains.get(pCreateInfo->oldSwapchain);
 
+		// This is important to destroy our handles of the swapchain
+		// images.
+		oldChain->destroy();
+
 		if(oldChain->overlay) {
 			if(Overlay::compatible(oldChain->ci, *pCreateInfo)) {
 				// have to make sure previous rendering has finished.
@@ -66,10 +70,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 				recreateOverlay = true;
 			}
 		}
-
-		// This is important to destroy our handles of the swapchain
-		// images.
-		oldChain->destroy();
 	}
 
 	auto result = devd.dispatch.CreateSwapchainKHR(device, pCreateInfo,

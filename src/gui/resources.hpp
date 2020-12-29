@@ -15,8 +15,13 @@ struct ResourceGui {
 
 	Gui* gui_ {};
 	std::string search_;
-	int filter_ {0};
+	VkObjectType filter_ {VK_OBJECT_TYPE_IMAGE};
 
+	// The list of currently displayed handles
+	std::vector<Handle*> handles_;
+	std::unordered_set<const Handle*> destroyed_;
+
+	bool firstUpdate_ {true};
 	Handle* handle_ {};
 	struct {
 		Image* object {};

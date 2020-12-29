@@ -29,9 +29,17 @@ extern std::shared_mutex dataMutex;
 template<typename T>
 std::uint64_t handleToU64(T handle) {
 	std::uint64_t id {};
-	dlg_assert(sizeof(handle) <= sizeof(id));
+	static_assert(sizeof(handle) <= sizeof(id));
 	std::memcpy(&id, &handle, sizeof(handle));
 	return id;
+}
+
+template<typename T>
+T u64ToHandle(u64 id) {
+	T ret {};
+	static_assert(sizeof(T) <= sizeof(id));
+	std::memcpy(&ret, &id, sizeof(T));
+	return ret;
 }
 
 template<typename T>

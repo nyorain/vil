@@ -47,36 +47,20 @@ struct DeviceHandle : Handle {
 	void invalidateCbsLocked();
 };
 
-// TODO: replace by utils from vk/object_types.h?
-template<typename T>
-constexpr const char* handleName() {
-	if constexpr(std::is_same_v<T, Device>) return "Device";
-	else if constexpr(std::is_same_v<T, Queue>) return "Queue";
-	else if constexpr(std::is_same_v<T, Image>) return "Image";
-	else if constexpr(std::is_same_v<T, ImageView>) return "ImageView";
-	else if constexpr(std::is_same_v<T, Sampler>) return "Sampler";
-	else if constexpr(std::is_same_v<T, Buffer>) return "Buffer";
-	else if constexpr(std::is_same_v<T, CommandBuffer>) return "CommandBuffer";
-	else if constexpr(std::is_same_v<T, CommandPool>) return "CommandPool";
-	else if constexpr(std::is_same_v<T, DescriptorSet>) return "DescriptorSet";
-	else if constexpr(std::is_same_v<T, DescriptorSetLayout>) return "DescriptorSetLayout";
-	else if constexpr(std::is_same_v<T, DescriptorPool>) return "DescriptorPool";
-	else if constexpr(std::is_same_v<T, PipelineLayout>) return "PipelineLayout";
-	else if constexpr(std::is_same_v<T, GraphicsPipeline>) return "GraphicsPipeline";
-	else if constexpr(std::is_same_v<T, ComputePipeline>) return "ComputePipeline";
-	else if constexpr(std::is_same_v<T, Fence>) return "Fence";
-	else if constexpr(std::is_same_v<T, Event>) return "Event";
-	else if constexpr(std::is_same_v<T, Semaphore>) return "Semaphore";
-	else if constexpr(std::is_same_v<T, RenderPass>) return "RenderPass";
-	else if constexpr(std::is_same_v<T, Swapchain>) return "Swapchain";
-	else if constexpr(std::is_same_v<T, Framebuffer>) return "Framebuffer";
-	else if constexpr(std::is_same_v<T, DeviceMemory>) return "DeviceMemory";
-	else if constexpr(std::is_same_v<T, ShaderModule>) return "ShaderModule";
-	else if constexpr(std::is_same_v<T, Pipeline>) return "Pipeline";
-	else if constexpr(std::is_same_v<T, QueryPool>) return "QueryPool";
-	else if constexpr(std::is_same_v<T, BufferView>) return "Bufferview";
-	else static_assert(!std::is_same_v<T, T>, "Invalid handle type");
-}
+const char* name(VkObjectType objectType);
+std::string name(const Handle& handle);
+
+struct ObjectTypeHandler {
+	static const span<const ObjectTypeHandler*> handlers;
+
+	virtual ~ObjectTypeHandler() = default;
+	virtual VkObjectType objectType() const = 0;
+
+	// The following functions may use the device maps directly and
+	// can expect the device mutex to be locked.
+	virtual std::vector<Handle*> resources(Device& dev, std::string_view search) const = 0;
+	virtual Handle* find(Device& dev, u64) const = 0;
+};
 
 // And so He spoke:
 //  "Letteth us go into the Holy Lands of SFINAE /
@@ -91,21 +75,6 @@ auto handle(const T& handle) -> decltype(handle.handle()) {
 template<typename T>
 auto handle(const T& handle) -> decltype(handle.handle) {
 	return handle.handle;
-}
-
-template<typename T>
-std::string name(const T& handle) {
-	constexpr auto hn = handleName<T>();
-
-	std::string name;
-	if(handle.name.empty()) {
-		auto id = handleToU64(fuen::handle(handle));
-		name = dlg::format("{} {}{}", hn, std::hex, id);
-	} else {
-		name = dlg::format("{} {}", hn, handle.name);
-	}
-
-	return name;
 }
 
 // api
