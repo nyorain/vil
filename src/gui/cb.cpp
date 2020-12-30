@@ -1,12 +1,41 @@
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
 #include <queue.hpp>
+#include <cb.hpp>
 #include <imguiutil.hpp>
 #include <commands.hpp>
 #include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 
 namespace fuen {
+
+// Those two are considered private
+struct TimeCommandHookRecord : CommandHookRecord {
+	TimeCommandHook* hook {};
+	u32 hookCounter {};
+	CommandRecord* record {};
+
+	VkCommandBuffer cb {};
+	VkQueryPool queryPool {}; // TODO: allocate from pool
+	u32 refCount {0};
+
+	// linked list of records
+	TimeCommandHookRecord* next {};
+	TimeCommandHookRecord* prev {};
+
+	~TimeCommandHookRecord();
+	void hookRecord(Device& dev, Command* cmd, Command* hooked);
+	void finish() noexcept override;
+};
+
+struct TimeCommandHookSubmission : CommandHookSubmission {
+	IntrusivePtr<TimeCommandHookRecord> record;
+
+	TimeCommandHookSubmission(TimeCommandHookRecord& rec) : record(&rec) {}
+	~TimeCommandHookSubmission();
+	void finish() noexcept override { delete this; }
+};
 
 // Time Hooking
 VkCommandBuffer TimeCommandHook::hook(CommandBuffer& hooked,
@@ -106,8 +135,15 @@ TimeCommandHook::~TimeCommandHook() {
 
 // record
 TimeCommandHookRecord::~TimeCommandHookRecord() {
-	// destroy resources
+	// We can be sure that record is still alive here since when the
+	// record is destroyed, all its submissions must have finished as well
+	// as its reference to us been destroyed, so our reference count
+	// must have been decreased to 0.
+	// NOTE: we implicitly assume here that no one else ever acquires shared
+	// ownership of us and keeps us alive.
 	auto& dev = record->device();
+
+	// destroy resources
 	auto commandPool = dev.queueFamilies[record->queueFamily].commandPool;
 
 	dev.dispatch.FreeCommandBuffers(dev.handle, commandPool, 1, &cb);
@@ -136,8 +172,8 @@ void TimeCommandHookRecord::hookRecord(Device& dev, Command* cmd, Command* hcmd)
 			dev.dispatch.CmdWriteTimestamp(this->cb, stage0, this->queryPool, 0);
 		}
 
-		if(auto sectionCmd = dynamic_cast<const SectionCommand*>(cmd); sectionCmd) {
-			hookRecord(dev, sectionCmd->children, hcmd);
+		if(auto parentCmd = dynamic_cast<const ParentCommand*>(cmd); parentCmd) {
+			hookRecord(dev, parentCmd->children(), hcmd);
 		}
 
 		if(isHooked) {
@@ -150,20 +186,14 @@ void TimeCommandHookRecord::hookRecord(Device& dev, Command* cmd, Command* hcmd)
 }
 
 void TimeCommandHookRecord::finish() noexcept {
+	// Finish is only ever called from our hook entry in the CommandRecord.
+	// If hook was unset, the TimeCommandHook is being destroyed
+	// and removed us manually. In that case references might be left
+	// in the form of submissions.
+	dlg_assert(!hook || refCount == 1);
 	if(--refCount == 0) {
 		delete this;
 	}
-
-	// EDIT: nope, nvm. See TimeCommandHook destructor. Remove below
-#if 0
-	// The finish call on the HookRecord is only done when the CommandRecord
-	// is destroyed. That can only happen when all submissions using it
-	// were finished, in that case the refCount must be 1 and this object
-	// destroyed. Otherwise we can't rely on this->record to stay valid.
-	// TODO: we don't really need the ref count, do we?
-	dlg_assert(refCount == 1);
-	delete this;
-#endif // 0
 }
 
 // submission
@@ -206,6 +236,12 @@ void CommandBufferGui::draw() {
 
 	auto& dev = gui_->dev();
 
+	if(!record_->cb) {
+		unsetDestroyedLocked(*record_);
+	} else {
+		dlg_assert(record_->destroyed.empty());
+	}
+
 	// Command list
 	ImGui::Columns(2);
 	ImGui::BeginChild("Command list", {400, 0});
@@ -224,12 +260,12 @@ void CommandBufferGui::draw() {
 	// show sections etc. Should probably pass a struct DisplayDesc
 	// to displayCommands instead of various parameters
 	auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
-	auto* nsel = displayCommands(record_->commands, command_, flags);
+	auto nsel = displayCommands(record_->commands, command_, flags);
 	auto commandChanged = false;
-	if(nsel && nsel != command_) {
+	if(!nsel.empty() && nsel.front() != command_) {
 		commandChanged = true;
-		command_ = nsel;
-		desc_ = CommandDesc::get(*record_->commands, *nsel);
+		command_ = nsel.front();
+		desc_ = CommandDesc::get(*record_->commands, nsel);
 	}
 
 	ImGui::PopID();
@@ -244,11 +280,30 @@ void CommandBufferGui::draw() {
 		command_->displayInspector(*gui_);
 
 		// Show own general gui
-		// TODO: we could query the group for a command buffer during
-		// its "end" call. Might lead to other problems tho.
+		auto resetTimeHook = false;
+		auto disabledQueryTime = [&](const auto& tooltip) {
+			ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+
+			ImGui::Checkbox("Query Time", &queryTime_);
+			if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::BeginTooltip();
+				ImGui::Text("%s", tooltip);
+				ImGui::EndTooltip();
+			}
+
+			ImGui::PopStyleVar();
+			ImGui::PopItemFlag();
+		};
+
 		if(!record_->group) {
-			ImGui::Text("Was never submitted, can't query time");
+			// NOTE: we could query the group for a command buffer during
+			// its "end" call. Might lead to other problems tho.
+			disabledQueryTime("Record was never submitted");
 			dlg_assert(!timeHook_);
+		} else if(!record_->cb && !updateFromGroup_) {
+			disabledQueryTime("Record isn't valid and viewed statically");
+			resetTimeHook = true;
 		} else {
 			ImGui::Checkbox("Query Time", &queryTime_);
 			if(queryTime_) {
@@ -278,11 +333,15 @@ void CommandBufferGui::draw() {
 
 				imGuiText("Time: {} {}", displayDiff, *it);
 			} else {
-				if(record_->group->hook.get() == timeHook_.get()) {
-					record_->group->hook.reset();
-				}
-				timeHook_.reset();
+				resetTimeHook = true;
 			}
+		}
+
+		if(resetTimeHook) {
+			if(record_->group->hook.get() == timeHook_.get()) {
+				record_->group->hook.reset();
+			}
+			timeHook_.reset();
 		}
 	}
 
@@ -290,13 +349,10 @@ void CommandBufferGui::draw() {
 	ImGui::Columns();
 }
 
-void CommandBufferGui::select(CommandBufferGroup& group) {
-	dlg_assert(group.lastRecord);
-	updateFromGroup_ = true;
-	select(group.lastRecord);
-}
+void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
+		bool updateFromGroup) {
+	updateFromGroup_ = updateFromGroup;
 
-void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 	// Reset old time hooks
 	if(record_ && record_->group && record_->group->hook.get() == timeHook_.get()) {
 		record_->group->hook.reset();
@@ -304,7 +360,8 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 	timeHook_.reset();
 
 	command_ = {};
-	// try to find new command matching old description?
+
+	// NOTE: we could try to find new command matching old description
 	// if(record_ && !desc_.empty()) {
 	// 	command_ = CommandDesc::find(record_->commands, desc_);
 	// }

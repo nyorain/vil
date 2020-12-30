@@ -701,4 +701,50 @@ std::size_t structSize(VkStructureType type) {
 	return it == structSizes.end() ? 0 : it->second;
 }
 
+std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
+	if(!pNext) {
+		return {};
+	}
+
+	// first march-through: find needed size
+	std::size_t size = 0u;
+	while(pNext) {
+		auto src = static_cast<const VkBaseInStructure*>(pNext);
+
+		auto ssize = structSize(src->sType);
+		dlg_assertm(ssize > 0, "Unknown structure type!");
+		size += ssize;
+
+		pNext = src->pNext;
+	}
+
+	auto buf = std::make_unique<std::byte[]>(size);
+	auto offset = 0u;
+
+	// second-march-through: copy structure
+	VkBaseInStructure* last = nullptr;
+	while(pNext) {
+		auto src = static_cast<const VkBaseInStructure*>(pNext);
+		auto size = structSize(src->sType);
+		dlg_assertm(size > 0, "Unknown structure type!");
+
+		auto dst = reinterpret_cast<VkBaseInStructure*>(buf.get() + offset);
+		// TODO: technicallly UB to not construct object via placement new.
+		// In practice, this works everywhere since its only C PODs
+		std::memcpy(dst, src, size);
+		offset += size;
+
+		if(last) {
+			last->pNext = dst;
+		} else {
+			pNext = dst;
+		}
+
+		last = dst;
+		pNext = src->pNext;
+	}
+
+	return buf;
+}
+
 } // namespace fuen

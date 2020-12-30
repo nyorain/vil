@@ -2,22 +2,21 @@
 
 v0.1, goal: end of january 2021
 
-- [ ] fix ui for fixed resource tracking: check for nullptr resource references
+- [x] fix ui for fixed resource tracking: check for nullptr resource references
       everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
-	- [ ] use CommandBufferRecord::destroyed to show <destroyed> instead of
+	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
 	      resource reference buttons
+- [ ] argumentsDesc for transfer commands (missing for a lot of commands rn)
 - [ ] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
-- [ ] command groups: come up with a concept to avoid glitchy updates
-	  in viewer. Either just update every couple of seconds (lame!) or
-	  display something special there.
-- [ ] add explicit "updateFromGroup" checkbox to command viewer
+- [ ] add explicit "updateFromGroup" checkbox to command viewer?
 - [ ] make queues viewable handles
 	- [ ] allow to view command groups per queue
-- [ ] fix resource viewer
-	- [ ] fix filtering by type
-	- [ ] fix filtering by name
+	- [ ] view submissions per queue?
+- [x] fix resource viewer
+	- [x] fix filtering by type
+	- [x] fix filtering by name
 	- [ ] more useful names for handles (e.g. some basic information)
 - [ ] make sure to always correctly store/forward pNext chains
 	  easier future compat, will support (non-crash) a lot of
@@ -32,8 +31,7 @@ v0.1, goal: end of january 2021
 - [ ] fully implement command buffer viewer
 	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
 	- [ ] show all commands & info for commands
-	- [ ] better resource selection/collapsing etc
-- [ ] fix dummy buttons in command viewer (e.g. BeginRenderPass)
+- [x] fix dummy buttons in command viewer (e.g. BeginRenderPass)
 - [x] track dynamic graphics pipeline state
 	- [ ] show it in command ui
 - [ ] Add more useful overview. 
@@ -131,6 +129,9 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] command groups: come up with a concept to avoid glitchy updates
+	  in viewer. Either just update every couple of seconds (lame!) or
+	  display something special there.
 - [ ] opt: even for command buffer recording we still allocate memory in a lot
 	  of places (e.g. CommandBufferDesc::getAnnotate but also in Record/Desc itself).
 	  Fix what is possible

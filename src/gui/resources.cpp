@@ -479,8 +479,8 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 	imGuiText("{}", name(ds));
 	ImGui::Spacing();
 
-	resourceRefButton(*gui_, *ds.layout);
-	resourceRefButton(*gui_, *ds.pool);
+	refButtonExpect(*gui_, ds.layout.get());
+	refButtonExpect(*gui_, ds.pool);
 
 	ImGui::Text("Bindings");
 	for(auto b = 0u; b < ds.bindings.size(); ++b) {
@@ -494,64 +494,37 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 			continue;
 		}
 
-		/*
-		auto weakButton = [&](auto& wptr) {
-			auto ptr = wptr.lock();
-			if(!ptr) {
-				imGuiText("<destroyed>");
-				return;
-			}
-
-			resourceRefButton(*gui_, *ptr);
-		};
-		*/
-
 		auto print = [&](VkDescriptorType type, const DescriptorSet::Binding& binding) {
 			if(!binding.valid) {
 				imGuiText("null");
 				return;
 			}
 
-			switch(type) {
-				case VK_DESCRIPTOR_TYPE_SAMPLER: {
-					resourceRefButton(*gui_, *binding.imageInfo.sampler);
-					break;
-				} case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
-					resourceRefButton(*gui_, *binding.imageInfo.imageView);
-					// might be null since immutable in pipe-layout
-					if(binding.imageInfo.sampler) {
-						resourceRefButton(*gui_, *binding.imageInfo.sampler);
+			switch(DescriptorCategory(type)) {
+				case DescriptorCategory::image: {
+					if(needsImageView(type)) {
+						refButtonExpect(*gui_, binding.imageInfo.imageView);
 					}
-					imGuiText("{}", vk::name(binding.imageInfo.layout));
+					if(needsImageLayout(type)) {
+						imGuiText("{}", vk::name(binding.imageInfo.layout));
+					}
+					if(needsSampler(*ds.layout, info.binding)) {
+						refButtonExpect(*gui_, binding.imageInfo.sampler);
+					}
 					break;
-				}
-				case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-				case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-				case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
-					resourceRefButton(*gui_, *binding.imageInfo.imageView);
-					ImGui::SameLine();
-					imGuiText("{}", vk::name(binding.imageInfo.layout));
-					break;
-				}
-				case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
-				case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER: {
-					resourceRefButton(*gui_, *binding.bufferView);
-					break;
-				}
-				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC: {
-					resourceRefButton(*gui_, *binding.bufferInfo.buffer);
+				} case DescriptorCategory::buffer: {
+					refButtonExpect(*gui_, binding.bufferInfo.buffer);
 					ImGui::SameLine();
 					imGuiText("Offset {}, Size", binding.bufferInfo.offset);
 					ImGui::SameLine();
 					auto range = binding.bufferInfo.range;
 					range == VK_WHOLE_SIZE ? imGuiText("wholeSize") : imGuiText("{}", range);
 					break;
-				}
+				} case DescriptorCategory::bufferView:
+					refButtonExpect(*gui_, binding.bufferView);
+					break;
 				default:
-					imGuiText("<Unknown type>");
+					dlg_warn("Unimplemented descriptor category");
 					break;
 			}
 		};
@@ -599,7 +572,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {
 	ImGui::Text("Descriptors");
 	for(auto* ds : dsPool.descriptorSets) {
 		ImGui::Bullet();
-		resourceRefButton(*gui_, *ds);
+		refButtonExpect(*gui_, ds);
 	}
 }
 
@@ -1075,8 +1048,12 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 
 	// maybe show commands inline (in tree node)
 	// and allow via button to switch to cb viewer?
-	if(ImGui::Button("View Content")) {
-		gui_->selectCb(cb);
+	if(cb.lastRecordLocked()) {
+		if(ImGui::Button("View Content")) {
+			gui_->selectCommands(cb.lastRecordPtrLocked(), false);
+		}
+	} else {
+		imGuiText("CommandBuffer was never recorded");
 	}
 }
 
@@ -1107,13 +1084,7 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 	// data
 	ImGui::NextColumn();
 
-	if(view.img) {
-		if(ImGui::Button(name(*view.img).c_str())) {
-			select(*view.img);
-		}
-	} else {
-		ImGui::Text("Associated Image was destroyed");
-	}
+	refButtonD(*gui_, view.img);
 
 	ImGui::Text("%s", vk::name(ci.viewType));
 	imguiPrintRange(ci.subresourceRange.baseArrayLayer, ci.subresourceRange.layerCount);
@@ -1241,9 +1212,64 @@ void ResourceGui::drawDesc(Draw&, Semaphore&) {
 }
 void ResourceGui::drawDesc(Draw&, Fence&) {
 }
-void ResourceGui::drawDesc(Draw&, BufferView&) {
+void ResourceGui::drawDesc(Draw&, BufferView& bufView) {
+	refButtonD(*gui_, bufView.buffer);
 }
 void ResourceGui::drawDesc(Draw&, QueryPool&) {
+}
+
+void ResourceGui::drawDesc(Draw&, Queue& queue) {
+	const auto& qprops = queue.dev->queueFamilies[queue.family].props;
+
+	imGuiText("Queue Family: {} ({})", queue.family,
+		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
+	imGuiText("Priority: {}", queue.priority);
+
+	for(auto* group : queue.groups) {
+		// TODO: display desc?
+		if(ImGui::Button("View command group")) {
+			gui_->selectCommands(group->lastRecord, true);
+		}
+	}
+}
+
+void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
+	auto& sci = swapchain.ci;
+	asColumns2({{
+		{"Format", vk::name(sci.imageFormat)},
+		{"Color Space", vk::name(sci.imageColorSpace)},
+		{"Width", sci.imageExtent.width},
+		{"Height", sci.imageExtent.height},
+		{"Present Mode", vk::name(sci.presentMode)},
+		{"Transform", vk::name(sci.preTransform)},
+		{"Alpha", vk::name(sci.compositeAlpha)},
+		{"Image Usage", vk::flagNames(VkImageUsageFlagBits(sci.imageUsage))},
+		{"Array Layers", sci.imageArrayLayers},
+		{"Min Image Count", sci.minImageCount},
+		{"Clipped", sci.clipped},
+	}});
+
+	ImGui::Spacing();
+	ImGui::Text("Images");
+
+	for(auto& image : swapchain.images) {
+		ImGui::Bullet();
+		refButtonExpect(*gui_, image);
+	}
+}
+
+void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
+	switch(pipe.type) {
+		case VK_PIPELINE_BIND_POINT_GRAPHICS:
+			drawDesc(draw, (GraphicsPipeline&) pipe);
+			return;
+		case VK_PIPELINE_BIND_POINT_COMPUTE:
+			drawDesc(draw, (ComputePipeline&) pipe);
+			return;
+		default:
+			dlg_warn("Unimplemented pipeline bind point");
+			return;
+	}
 }
 
 void ResourceGui::draw(Draw& draw) {
@@ -1343,38 +1369,14 @@ void ResourceGui::draw(Draw& draw) {
 }
 
 void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
-	switch(handle.objectType) {
-		case VK_OBJECT_TYPE_IMAGE: return drawDesc(draw, (Image&) handle);
-		case VK_OBJECT_TYPE_IMAGE_VIEW: return drawDesc(draw, (ImageView&) handle);
-		case VK_OBJECT_TYPE_BUFFER: return drawDesc(draw, (Buffer&) handle);
-		case VK_OBJECT_TYPE_BUFFER_VIEW: return drawDesc(draw, (BufferView&) handle);
-		case VK_OBJECT_TYPE_SAMPLER: return drawDesc(draw, (Sampler&) handle);
-		case VK_OBJECT_TYPE_DESCRIPTOR_SET: return drawDesc(draw, (DescriptorSet&) handle);
-		case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT: return drawDesc(draw, (DescriptorSetLayout&) handle);
-		case VK_OBJECT_TYPE_DESCRIPTOR_POOL: return drawDesc(draw, (DescriptorPool&) handle);
-		case VK_OBJECT_TYPE_COMMAND_BUFFER: return drawDesc(draw, (CommandBuffer&) handle);
-		case VK_OBJECT_TYPE_COMMAND_POOL: return drawDesc(draw, (CommandPool&) handle);
-		case VK_OBJECT_TYPE_PIPELINE_LAYOUT: return drawDesc(draw, (PipelineLayout&) handle);
-		case VK_OBJECT_TYPE_FENCE: return drawDesc(draw, (Fence&) handle);
-		case VK_OBJECT_TYPE_EVENT: return drawDesc(draw, (Event&) handle);
-		case VK_OBJECT_TYPE_SEMAPHORE: return drawDesc(draw, (Semaphore&) handle);
-		case VK_OBJECT_TYPE_DEVICE_MEMORY: return drawDesc(draw, (DeviceMemory&) handle);
-		case VK_OBJECT_TYPE_RENDER_PASS: return drawDesc(draw, (RenderPass&) handle);
-		case VK_OBJECT_TYPE_FRAMEBUFFER: return drawDesc(draw, (Framebuffer&) handle);
-		case VK_OBJECT_TYPE_QUERY_POOL: return drawDesc(draw, (QueryPool&) handle);
-		case VK_OBJECT_TYPE_PIPELINE: {
-			Pipeline& pipe = (Pipeline&) handle;
-			if(pipe.type == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-				return drawDesc(draw, (GraphicsPipeline&) pipe);
-			} else if(pipe.type == VK_PIPELINE_BIND_POINT_COMPUTE) {
-				return drawDesc(draw, (ComputePipeline&) pipe);
-			} else {
-				dlg_error("Unimplemented pipeline bind point");
-				return;
-			}
-		} default:
-			dlg_error("Unimplemented object type");
-			break;
+	auto visitor = TemplateResourceVisitor([&](auto& res) {
+		this->drawDesc(draw, res);
+	});
+
+	for(auto& handler : ObjectTypeHandler::handlers) {
+		if(handler->objectType() == handle.objectType) {
+			handler->visit(visitor, handle);
+		}
 	}
 }
 

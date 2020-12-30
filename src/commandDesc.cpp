@@ -1,20 +1,17 @@
 #include <commandDesc.hpp>
 #include <commands.hpp>
+#include <util.hpp>
 #include <cb.hpp>
 
 namespace fuen {
 
 // CommandDesc
-void fillIn(CommandDesc& ret, const Command& root, const Command& cmd) {
+void fillIn(CommandDesc& ret, const Command* siblings, const Command& cmd) {
 	ret.command = cmd.nameDesc();
 	ret.arguments = cmd.argumentsDesc();
 
-	auto* sibling = &root;
-	if(cmd.parent) {
-		sibling = cmd.parent->children;
-	}
-
 	bool before = true;
+	auto sibling = siblings;
 	while(sibling) {
 		if(sibling == &cmd) {
 			before = false;
@@ -31,10 +28,26 @@ void fillIn(CommandDesc& ret, const Command& root, const Command& cmd) {
 		sibling = sibling->next;
 	}
 
-	dlg_assert(!before);
+	dlg_assertm(!before, "Inconsistent sibling/cmd (broken command hierachy)");
 }
 
-std::vector<CommandDesc> CommandDesc::get(const Command& root, const Command& cmd) {
+std::vector<CommandDesc> CommandDesc::get(const Command& root, span<const Command*> hierachy) {
+	std::vector<CommandDesc> ret;
+
+	auto* siblingList = &root;
+	for(auto* lvl : reversed(hierachy)) {
+		dlg_assert(siblingList);
+		fillIn(ret.emplace_back(), siblingList, *lvl);
+
+		siblingList = nullptr;
+		if(auto* parent = dynamic_cast<const ParentCommand*>(lvl); parent) {
+			siblingList = parent->children();
+		}
+	}
+
+	return ret;
+
+	/*
 	std::vector<CommandDesc> ret;
 	fillIn(ret.emplace_back(), root, cmd);
 
@@ -47,6 +60,7 @@ std::vector<CommandDesc> CommandDesc::get(const Command& root, const Command& cm
 
 	std::reverse(ret.begin(), ret.end());
 	return ret;
+	*/
 }
 
 Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
@@ -138,19 +152,19 @@ Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
 		auto cand = levels.back().back();
 		levels.back().pop_back();
 
-		// if we are in the last level: nice, just return the best
+		// if we are in the last level: good, just return the best
 		// candidate we have found
 		if(i == desc.size()) {
 			return cand.command;
 		}
 
 		// otherwise: we must have a parent command.
-		auto sectionCmd = dynamic_cast<SectionCommand*>(cand.command);
-		dlg_assert(sectionCmd);
+		auto parentCmd = dynamic_cast<ParentCommand*>(cand.command);
+		dlg_assert(parentCmd);
 
 		// Find all children candidates, and push them to the stack,
 		// go one level deeper
-		auto cands = findCandidates(sectionCmd->children, desc[i]);
+		auto cands = findCandidates(parentCmd->children(), desc[i]);
 		levels.push_back(cands);
 		++i;
 	}
@@ -187,9 +201,9 @@ CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 	std::unordered_map<std::string, u32> ids;
 
 	while(cmd) {
-		if(auto section = dynamic_cast<const SectionCommand*>(cmd); section) {
-			auto child = CommandBufferDesc::getAnnotate(section->children);
-			child.name = section->nameDesc();
+		if(auto parentCmd = dynamic_cast<const ParentCommand*>(cmd); parentCmd) {
+			auto child = CommandBufferDesc::getAnnotate(parentCmd->children());
+			child.name = parentCmd->nameDesc();
 			ret.children.push_back(std::move(child));
 		}
 

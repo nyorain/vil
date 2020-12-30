@@ -15,6 +15,15 @@ struct Row {
 	Row(const char* rname, const char* fmt, Args&&... args) :
 			name(rname), content(dlg::format(fmt, std::forward<Args>(args)...)) {
 	}
+
+	template<typename Arg>
+	Row(const char* rname, const Arg& arg) :
+			name(rname), content(dlg::format("{}", arg)) {
+	}
+
+	Row(const char* rname, std::string rcontent) :
+			name(rname), content(std::move(rcontent)) {
+	}
 };
 
 template<typename... Args>

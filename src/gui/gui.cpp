@@ -11,6 +11,7 @@
 #include <guidraw.hpp>
 #include <spirv_reflect.h>
 #include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 
 #include <set>
@@ -272,7 +273,7 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	// ImGui::GetStyle().FramePadding = {5, 5};
 	// ImGui::GetStyle().ItemSpacing = {8, 8};
 	// ImGui::GetStyle().ItemInnerSpacing = {6, 6};
-	ImGui::GetStyle().Alpha = 0.9f;
+	// ImGui::GetStyle().Alpha = 0.9f;
 
 	// effectively disable imgui key repeat, we rely on it as input events.
 	// ImGui::GetIO().KeyRepeatDelay = 100000000.f;
@@ -729,9 +730,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 					auto label = dlg::format("Group {}", (void*) group);
 					if(ImGui::Button(label.c_str())) {
-						// dlg_assert(group->lastRecord->cb);
-						// selectCb(*group->lastRecord->cb);
-						tabs_.cb.select(*group);
+						tabs_.cb.select(group->lastRecord, true);
 						this->activateTab(Tab::commandBuffer);
 					}
 				}
@@ -1212,10 +1211,53 @@ void Gui::makeImGuiCurrent() {
 	ImGui::SetCurrentContext(imgui_);
 }
 
-void Gui::selectCb(CommandBuffer& cb, bool activateTab) {
-	tabs_.cb.select(cb.lastRecordPtrLocked());
+void Gui::selectCommands(IntrusivePtr<CommandRecord> record,
+		bool updateFromGroup, bool activateTab) {
+	tabs_.cb.select(record, updateFromGroup);
 	if(activateTab) {
 		this->activateTab(Tab::commandBuffer);
+	}
+}
+
+void Gui::selectResource(Handle& handle, bool activateTab) {
+	tabs_.resources.select(handle);
+	if(activateTab) {
+		this->activateTab(Tab::resources);
+	}
+}
+
+// util
+void refButton(Gui& gui, Handle& handle) {
+	if(ImGui::Button(name(handle).c_str())) {
+		gui.selectResource(handle);
+	}
+}
+
+void refButtonOpt(Gui& gui, Handle* handle) {
+	if(handle) {
+		refButton(gui, *handle);
+	}
+}
+
+void refButtonExpect(Gui& gui, Handle* handle) {
+	dlg_assert(handle);
+	if(handle) {
+		refButton(gui, *handle);
+	}
+}
+
+void refButtonD(Gui& gui, Handle* handle, const char* str) {
+	if(handle) {
+		refButton(gui, *handle);
+	} else {
+		ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+
+		// NOTE: could add popup to button further explaining what's going on
+		ImGui::Button(str);
+
+		ImGui::PopStyleVar();
+		ImGui::PopItemFlag();
 	}
 }
 

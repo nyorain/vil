@@ -2,12 +2,7 @@
 
 #include <fwd.hpp>
 #include <device.hpp>
-#include <boundState.hpp>
-#include <queue.hpp>
-#include <pv.hpp>
-#include <vector>
-#include <unordered_map>
-#include <map>
+#include <record.hpp>
 
 namespace fuen {
 
@@ -27,14 +22,13 @@ struct CommandPool : DeviceHandle {
 // Synchronization for this one is hard:
 // - We currently don't synchronize every single record call. A command
 //   buffer can't really be used anywhere while it's in recording
-//   state and we simply try to not show recording command buffers in the ui.
+//   state and we don't show unfinished recordings via ui.
 //   The situation that a command buffer is recorded using resource A while
 //   the resource is destroyed/changed at the same time (moving the command
 //   buffer to invalidate state) is not allowed since this is race situation
 //   and the command buffer might be in invalid state before/during the
 //   record command, which is invalid.
-// - state changes must always acquire a lock. When the command buffer isn't
-//   in recording state, changing the commands must also acquire the device mutex.
+// - state changes are synchronized via the device mutex.
 struct CommandBuffer : DeviceHandle {
 public:
 	enum class State {
@@ -124,7 +118,7 @@ private:
 	// buffer reset.
 	ComputeState computeState_ {};
 	GraphicsState graphicsState_ {};
-	SectionCommand* section_ {};
+	CommandAllocList<SectionCommand*> sections_;
 	Command* lastCommand_ {};
 	std::size_t memBlockOffset_ {}; // offset in first (current) mem block
 

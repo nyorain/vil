@@ -372,15 +372,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// Get device queues
 	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
 		auto& qi = queueCreateInfos[i];
-		auto& familyProps = qfprops[qi.queueFamilyIndex];
-
 		dev.usedQueueFamilyIndices.push_back(qi.queueFamilyIndex);
 
 		for(auto j = 0u; j < qi.queueCount; ++j) {
 			auto& q = *dev.queues.emplace_back(std::make_unique<Queue>());
 			q.dev = &dev;
 			q.objectType = VK_OBJECT_TYPE_QUEUE;
-			q.flags = familyProps.queueFlags;
 			q.priority = qi.pQueuePriorities[j];
 			dev.dispatch.GetDeviceQueue(dev.handle, qi.queueFamilyIndex, j, &q.handle);
 

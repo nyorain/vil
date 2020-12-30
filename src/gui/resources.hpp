@@ -51,6 +51,7 @@ struct ResourceGui {
 	void drawDesc(Draw&, DescriptorSet&);
 	void drawDesc(Draw&, DescriptorPool&);
 	void drawDesc(Draw&, DescriptorSetLayout&);
+	void drawDesc(Draw&, Pipeline&);
 	void drawDesc(Draw&, GraphicsPipeline&);
 	void drawDesc(Draw&, ComputePipeline&);
 	void drawDesc(Draw&, PipelineLayout&);
@@ -63,6 +64,8 @@ struct ResourceGui {
 	void drawDesc(Draw&, Fence&);
 	void drawDesc(Draw&, BufferView&);
 	void drawDesc(Draw&, QueryPool&);
+	void drawDesc(Draw&, Queue&);
+	void drawDesc(Draw&, Swapchain&);
 
 	void drawHandleDesc(Draw&, Handle& handle);
 };

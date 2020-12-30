@@ -1,5 +1,6 @@
-#include <boundState.hpp>
+#include <record.hpp>
 #include <util.hpp>
+#include <commands.hpp>
 #include <image.hpp>
 #include <cb.hpp>
 
@@ -41,26 +42,27 @@ void freeBlocks(CommandMemBlock* head) {
 
 void copyChain(CommandBuffer& cb, const void*& pNext) {
 	VkBaseInStructure* last = nullptr;
-	while(pNext) {
+	auto it = pNext;
+	while(it) {
 		auto src = static_cast<const VkBaseInStructure*>(pNext);
 		auto size = structSize(src->sType);
 		dlg_assertm(size > 0, "Unknown structure type!");
 
 		auto buf = cb.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
-		// TODO: technicallly UB to not construct object via placement new
-		// in practice, this works everywhere since its only C PODs
+		// TODO: technicallly UB to not construct object via placement new.
+		// In practice, this works everywhere since its only C PODs
 		std::memcpy(dst, src, size);
 
 		if(last) {
 			last->pNext = dst;
+		} else {
+			pNext = dst;
 		}
 
 		last = dst;
 		pNext = src->pNext;
 	}
-
-	pNext = last;
 }
 
 // Record
@@ -84,7 +86,8 @@ void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
 	memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
-	queueFamily(xcb.pool().queueFamily), images(xcb), handles(xcb), pipeLayouts(xcb) {
+	queueFamily(xcb.pool().queueFamily), images(xcb), handles(xcb),
+	pipeLayouts(xcb), secondaries(xcb) {
 }
 
 CommandRecord::~CommandRecord() {
@@ -110,6 +113,49 @@ CommandRecord::~CommandRecord() {
 	for(auto& handle : handles) {
 		removeFromResource(*handle.second.handle);
 	}
+
+	// just to be safe, its destructor might reference this
+	hook.reset();
+}
+
+void unsetDestroyedLocked(CommandRecord& record) {
+	if(record.destroyed.empty()) {
+		return;
+	}
+
+	// unset in commands
+	// NOTE: we could query commands where handles are used via usedHandles
+	// maps. Might give speedup for large command buffers. But introduces
+	// new complexity and problems, maybe not worth it.
+	// Same optimization below when removing from usedHandles.
+	// Would need the raw vulkan handle though, we don't access to that
+	// here anyways at the moment. But that should be doable if really
+	// needed, might be good idea to move the usedHandles maps to use
+	// our Handles (i.e. Image*) as key anyways.
+	auto* cmd = record.commands;
+	while(cmd) {
+		cmd->unset(record.destroyed);
+		cmd = cmd->next;
+	}
+
+	// remove from handles
+	for(auto it = record.handles.begin(); it != record.handles.end(); ) {
+		if(record.destroyed.count(it->second.handle)) {
+			it = record.handles.erase(it);
+		} else {
+			++it;
+		}
+	}
+
+	for(auto it = record.images.begin(); it != record.images.end(); ) {
+		if(record.destroyed.count(it->second.image)) {
+			it = record.images.erase(it);
+		} else {
+			++it;
+		}
+	}
+
+	record.destroyed.clear();
 }
 
 } // namespace fuen

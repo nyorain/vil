@@ -1,19 +1,15 @@
 #include <cb.hpp>
 #include <data.hpp>
 #include <queue.hpp>
-#include <rp.hpp>
+#include <handles.hpp>
 #include <util.hpp>
-#include <ds.hpp>
-#include <buffer.hpp>
 #include <commands.hpp>
-#include <pipe.hpp>
-#include <image.hpp>
 
 namespace fuen {
 
 // CommandBuffer
 CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
-		pool_(&xpool), handle_(xhandle) {
+		pool_(&xpool), handle_(xhandle), sections_(*this) {
 }
 
 CommandBuffer::~CommandBuffer() {
@@ -53,6 +49,11 @@ void CommandBuffer::clearPendingLocked() {
 		auto res = checkLocked(*this->pending.front());
 		dlg_assert(res);
 	}
+
+	// NOTE: may be unexpected to do this here.
+	// But in all places where we can be sure all submissions were
+	// finished, we have to make sure to invalidate primary cbs.
+	this->invalidateCbsLocked();
 }
 
 void CommandBuffer::doReset(bool record) {
@@ -92,13 +93,19 @@ void CommandBuffer::doReset(bool record) {
 
 void CommandBuffer::doEnd() {
 	dlg_assert(record_);
-	dlg_assert(section_ == nullptr); // all sections must have been popped
+	dlg_assert(sections_.empty()); // all sections must have been popped
 
 	graphicsState_ = {};
 	computeState_ = {};
 	pushConstants_ = {};
 
-	section_ = nullptr;
+	{
+		// make sure to clear all cached memory in sections as well. Clear isn't
+		// enough for that
+		decltype(sections_) newSections(*this);
+		swap(sections_, newSections);
+	}
+
 	lastCommand_ = nullptr;
 
 	// parse commands into description
@@ -131,28 +138,30 @@ void CommandBuffer::doEnd() {
 }
 
 void CommandBuffer::endSection() {
-	dlg_assert(section_);
-	dlg_assert(!lastCommand_ || lastCommand_->parent == section_);
-	lastCommand_ = section_;
-	section_ = section_->parent;
+	dlg_assert(!sections_.empty());
+	// dlg_assert(!lastCommand_ || lastCommand_->parent == section_);
+	lastCommand_ = sections_.back();
+	sections_.pop_back();
+	// section_ = section_->parent;
 }
 
 void CommandBuffer::beginSection(SectionCommand& cmd) {
-	section_ = &cmd;
+	// section_ = &cmd;
+	sections_.push_back(&cmd);
 	lastCommand_ = nullptr;
 }
 
 void CommandBuffer::addCmd(Command& cmd) {
 	if(lastCommand_) {
 		dlg_assert(record_->commands);
-		dlg_assert(!section_ || section_ == lastCommand_->parent);
+		// dlg_assert(!section_ || section_ == lastCommand_->parent);
 		lastCommand_->next = &cmd;
-		cmd.parent = lastCommand_->parent;
-	} else if(section_) {
+		// cmd.parent = lastCommand_->parent;
+	} else if(!sections_.empty()) {
 		dlg_assert(record_->commands);
-		dlg_assert(!section_->children);
-		section_->children = &cmd;
-		cmd.parent = section_;
+		// dlg_assert(!section_->children);
+		sections_.back()->children_ = &cmd;
+		// cmd.parent = section_;
 	} else if(!record_->commands) {
 		record_->commands = &cmd;
 	}
@@ -392,7 +401,8 @@ VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
 	while(!pool.memBlocks.compare_exchange_weak(blocks, nullptr));
 	freeBlocks(blocks);
 
-	dev.dispatch.TrimCommandPool(device, commandPool, flags);
+	auto f = selectCmd(dev.dispatch.TrimCommandPoolKHR, dev.dispatch.TrimCommandPool);
+	f(device, commandPool, flags);
 }
 
 // command buffer
@@ -1387,18 +1397,34 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
+	auto* last = cmd.children_;
 
-	cmd.secondaries = allocSpan<CommandBuffer*>(cb, commandBufferCount);
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
 		dlg_assert(secondary.state() == CommandBuffer::State::executable);
 
-		cmd.secondaries[i] = &secondary;
+		// We don't have to lock the mutex here because the command buffer
+		// state is not allowed to change while it is used here.
+		auto recordPtr = secondary.lastRecordPtrLocked();
 
+		auto& childCmd = fuen::allocate<ExecuteCommandsChildCmd>(cb);
+		childCmd.id_ = i;
+		childCmd.record_ = recordPtr.get();
+
+		if(!last) {
+			dlg_assert(!cmd.children_);
+			cmd.children_ = &childCmd;
+		} else {
+			dlg_assert(cmd.children_);
+			last->next = &childCmd;
+		}
+
+		cb.record()->secondaries.push_back(std::move(recordPtr));
+
+		// Needed to correctly invalidate cb when a secondary buffer is
+		// reset/destroyed.
 		useHandle(cb, cmd, secondary);
 
-		// TODO: i kidna don't like how this works at the moment. Feels
-		// like a hack. Investigate.
 		auto& rec = *secondary.record();
 		for(auto& img : rec.images) {
 			if(img.second.layoutChanged) {

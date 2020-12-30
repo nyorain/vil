@@ -50,11 +50,68 @@ struct DeviceHandle : Handle {
 const char* name(VkObjectType objectType);
 std::string name(const Handle& handle);
 
+struct ResourceVisitor {
+	virtual ~ResourceVisitor() = default;
+	virtual void visit(Image&) = 0;
+	virtual void visit(ImageView&) = 0;
+	virtual void visit(Sampler&) = 0;
+	virtual void visit(Buffer&) = 0;
+	virtual void visit(BufferView&) = 0;
+	virtual void visit(CommandBuffer&) = 0;
+	virtual void visit(CommandPool&) = 0;
+	virtual void visit(DeviceMemory&) = 0;
+	virtual void visit(Pipeline&) = 0;
+	virtual void visit(PipelineLayout&) = 0;
+	virtual void visit(DescriptorSet&) = 0;
+	virtual void visit(DescriptorPool&) = 0;
+	virtual void visit(DescriptorSetLayout&) = 0;
+	virtual void visit(Framebuffer&) = 0;
+	virtual void visit(RenderPass&) = 0;
+	virtual void visit(QueryPool&) = 0;
+	virtual void visit(Fence&) = 0;
+	virtual void visit(Semaphore&) = 0;
+	virtual void visit(Event&) = 0;
+	virtual void visit(Queue&) = 0;
+	virtual void visit(Swapchain&) = 0;
+};
+
+template<typename F>
+struct TemplateResourceVisitor : ResourceVisitor {
+	F impl;
+
+	TemplateResourceVisitor(F&& f) : impl(std::move(f)) {}
+
+	void visit(Image& res) override { impl(res); }
+	void visit(ImageView& res) override { impl(res); }
+	void visit(Sampler& res) override { impl(res); }
+	void visit(Buffer& res) override { impl(res); }
+	void visit(BufferView& res) override { impl(res); }
+	void visit(CommandBuffer& res) override { impl(res); }
+	void visit(CommandPool& res) override { impl(res); }
+	void visit(DeviceMemory& res) override { impl(res); }
+	void visit(Pipeline& res) override { impl(res); }
+	void visit(PipelineLayout& res) override { impl(res); }
+	void visit(DescriptorSet& res) override { impl(res); }
+	void visit(DescriptorPool& res) override { impl(res); }
+	void visit(DescriptorSetLayout& res) override { impl(res); }
+	void visit(Framebuffer& res) override { impl(res); }
+	void visit(RenderPass& res) override { impl(res); }
+	void visit(QueryPool& res) override { impl(res); }
+	void visit(Fence& res) override { impl(res); }
+	void visit(Semaphore& res) override { impl(res); }
+	void visit(Event& res) override { impl(res); }
+	void visit(Queue& res) override { impl(res); }
+	void visit(Swapchain& res) override { impl(res); }
+};
+
 struct ObjectTypeHandler {
 	static const span<const ObjectTypeHandler*> handlers;
 
 	virtual ~ObjectTypeHandler() = default;
 	virtual VkObjectType objectType() const = 0;
+
+	// Expects handle.objectType == this->objectType()
+	virtual void visit(ResourceVisitor& visitor, Handle& handle) const = 0;
 
 	// The following functions may use the device maps directly and
 	// can expect the device mutex to be locked.

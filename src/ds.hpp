@@ -22,6 +22,7 @@ DescriptorCategory category(VkDescriptorType);
 bool needsSampler(VkDescriptorType);
 bool needsSampler(const DescriptorSetLayout&, unsigned binding);
 bool needsImageView(VkDescriptorType);
+bool needsImageLayout(VkDescriptorType);
 
 struct DescriptorPool : DeviceHandle {
 	VkDescriptorPool handle {};

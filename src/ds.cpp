@@ -180,6 +180,18 @@ bool needsImageView(VkDescriptorType type) {
 	}
 }
 
+bool needsImageLayout(VkDescriptorType type) {
+	switch(type) {
+		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+		case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+		case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+		case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+			return true;
+		default:
+			return false;
+	}
+}
+
 // dsLayout
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		VkDevice                                    device,
@@ -493,8 +505,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
 		const VkAllocationCallbacks*                pAllocator,
 		VkDescriptorUpdateTemplate*                 pDescriptorUpdateTemplate) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateDescriptorUpdateTemplate(device, pCreateInfo,
-		pAllocator, pDescriptorUpdateTemplate);
+
+	auto f = selectCmd(
+		dev.dispatch.CreateDescriptorUpdateTemplate,
+		dev.dispatch.CreateDescriptorUpdateTemplateKHR);
+	auto res = f(device, pCreateInfo, pAllocator, pDescriptorUpdateTemplate);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -518,7 +533,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorUpdateTemplate(
 		const VkAllocationCallbacks*                pAllocator) {
 	auto& dev = getData<Device>(device);
 	dev.dsuTemplates.mustErase(descriptorUpdateTemplate);
-	dev.dispatch.DestroyDescriptorUpdateTemplate(device, descriptorUpdateTemplate, pAllocator);
+
+	auto f = selectCmd(
+		dev.dispatch.DestroyDescriptorUpdateTemplate,
+		dev.dispatch.DestroyDescriptorUpdateTemplateKHR);
+	f(device, descriptorUpdateTemplate, pAllocator);
 }
 
 VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
@@ -573,8 +592,10 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 
 	ds.invalidateCbs();
 
-	dev.dispatch.UpdateDescriptorSetWithTemplate(device, descriptorSet,
-		descriptorUpdateTemplate, pData);
+	auto f = selectCmd(
+		dev.dispatch.UpdateDescriptorSetWithTemplate,
+		dev.dispatch.UpdateDescriptorSetWithTemplateKHR);
+	f(device, descriptorSet, descriptorUpdateTemplate, pData);
 }
 
 } // namespace fuen

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <device.hpp>
+#include <queue.hpp>
 #include <commandDesc.hpp>
 #include <pipe.hpp>
-#include <pv.hpp>
+#include <span.hpp>
 #include <vector>
 #include <list>
 
@@ -49,6 +49,7 @@ inline const char* copyString(CommandBuffer& cb, std::string_view src) {
 	return dst.data();
 }
 
+// Allocates the memory from the command buffer.
 void copyChain(CommandBuffer& cb, const void*& pNext);
 
 template<typename T>
@@ -57,10 +58,6 @@ struct CommandAllocator {
 	using value_type = T;
 
 	CommandBuffer* cb;
-
-#ifdef DEBUG
-	u32 allocated {};
-#endif // DEBUG
 
 	CommandAllocator(CommandBuffer& xcb) noexcept : cb(&xcb) {}
 
@@ -95,7 +92,7 @@ bool operator!=(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noex
 	return a.cb != b.cb;
 }
 
-template<typename T> using CommandAllocPageVector = PageVector<T, CommandAllocator<T>>;
+// template<typename T> using CommandAllocPageVector = PageVector<T, CommandAllocator<T>>;
 template<typename T> using CommandAllocList = std::list<T, CommandAllocator<T>>;
 template<typename K, typename V> using CommandAllocHashMap = std::unordered_map<K, V,
 	std::hash<K>, std::equal_to<K>, CommandAllocator<std::pair<const K, V>>>;
@@ -223,6 +220,12 @@ struct MemBlockDeleter {
 	void operator()(CommandMemBlock* blocks);
 };
 
+// Represents the recorded state of a command buffer.
+// We represent it as extra, reference-counted object so we can display
+// old records as well.
+// TODO: we could store the name of the command buffer this record originated
+// from (if any) for better display in gui, e.g. when executed as secondary
+// command buffer.
 struct CommandRecord {
 	// We own those mem blocks, could even own them past command pool destruction.
 	// Important this is the last object to be destroyed other destructors
@@ -242,6 +245,7 @@ struct CommandRecord {
 	VkCommandBufferUsageFlags usageFlags {};
 	Command* commands {};
 
+	// TODO: Should the key rather be Handle*?
 	CommandAllocHashMap<VkImage, UsedImage> images;
 	CommandAllocHashMap<u64, UsedHandle> handles;
 
@@ -252,10 +256,12 @@ struct CommandRecord {
 
 	// Pipeline layouts we have to keep alive.
 	CommandAllocList<IntrusivePtr<PipelineLayout>> pipeLayouts;
+	CommandAllocList<IntrusivePtr<CommandRecord>> secondaries;
+
 	CommandBufferDesc desc;
 	CommandBufferGroup* group {};
 
-	bool finished {};
+	bool finished {}; // whether the recording is finished (i.e. EndCommandBuffer called)
 	std::atomic<u32> refCount {0};
 
 	// For command hooks: they can store data associated with this
@@ -276,5 +282,9 @@ struct CommandRecord {
 	CommandRecord(CommandBuffer& cb);
 	~CommandRecord();
 };
+
+// Unsets all handles in record.destroyed in all of its commands and used
+// handle entries. Must only be called while device mutex is locked
+void unsetDestroyedLocked(CommandRecord& record);
 
 } // namespace fuen

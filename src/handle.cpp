@@ -133,6 +133,10 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
 		return findHandles((dev.*DevMapPtr).map, search);
 	}
+	void visit(ResourceVisitor& visitor, Handle& handle) const override {
+		dlg_assert(handle.objectType == objectType());
+		return visitor.visit(static_cast<HT&>(handle));
+	}
 };
 
 struct PipelineTypeImpl : ObjectTypeHandler {
@@ -177,6 +181,11 @@ struct PipelineTypeImpl : ObjectTypeHandler {
 		std::sort(ret.begin(), ret.end());
 		return ret;
 	}
+
+	void visit(ResourceVisitor& visitor, Handle& handle) const override {
+		dlg_assert(handle.objectType == objectType());
+		return visitor.visit(static_cast<Pipeline&>(handle));
+	}
 };
 
 struct QueueTypeImpl : ObjectTypeHandler {
@@ -205,6 +214,10 @@ struct QueueTypeImpl : ObjectTypeHandler {
 		}
 
 		return ret;
+	}
+	void visit(ResourceVisitor& visitor, Handle& handle) const override {
+		dlg_assert(handle.objectType == objectType());
+		return visitor.visit(static_cast<Queue&>(handle));
 	}
 };
 

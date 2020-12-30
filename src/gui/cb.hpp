@@ -1,9 +1,9 @@
 #pragma once
 
-#include <device.hpp>
+#include <fwd.hpp>
 #include <queue.hpp>
 #include <commandDesc.hpp>
-#include <boundState.hpp>
+#include <record.hpp>
 
 namespace fuen {
 
@@ -24,36 +24,9 @@ struct TimeCommandHook : CommandHook {
 	~TimeCommandHook();
 };
 
-struct TimeCommandHookRecord : CommandHookRecord {
-	TimeCommandHook* hook {};
-	u32 hookCounter {};
-	CommandRecord* record {};
-
-	VkCommandBuffer cb {};
-	VkQueryPool queryPool {}; // TODO: allocate from pool
-	u32 refCount {0};
-
-	// linked list of records
-	TimeCommandHookRecord* next {};
-	TimeCommandHookRecord* prev {};
-
-	~TimeCommandHookRecord();
-	void hookRecord(Device& dev, Command* cmd, Command* hooked);
-	void finish() noexcept override;
-};
-
-struct TimeCommandHookSubmission : CommandHookSubmission {
-	IntrusivePtr<TimeCommandHookRecord> record;
-
-	TimeCommandHookSubmission(TimeCommandHookRecord& rec) : record(&rec) {}
-	~TimeCommandHookSubmission();
-	void finish() noexcept override { delete this; }
-};
-
 struct CommandBufferGui {
 	void draw();
-	void select(CommandBufferGroup& group);
-	void select(IntrusivePtr<CommandRecord> record);
+	void select(IntrusivePtr<CommandRecord> record, bool updateFromGroup);
 	void destroyed(const Handle& handle);
 
 	CommandBufferGui() = default;

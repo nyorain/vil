@@ -18,7 +18,6 @@ struct Queue : Handle {
 	Device* dev {};
 
 	VkQueue handle {};
-	VkQueueFlags flags {};
 	u32 family {};
 	float priority {};
 

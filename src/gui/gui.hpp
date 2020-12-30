@@ -57,15 +57,9 @@ public:
 	void finishDraws();
 	void activateTab(Tab);
 
-	template<typename T>
-	void selectResource(T& handle, bool activateTab = true) {
-		tabs_.resources.select(handle);
-		if(activateTab) {
-			this->activateTab(Tab::resources);
-		}
-	}
-
-	void selectCb(CommandBuffer& cb, bool activateTab = true);
+	void selectResource(Handle& handle, bool activateTab = true);
+	void selectCommands(IntrusivePtr<CommandRecord> record,
+		bool updateFromGroup, bool activateTab = true);
 
 	ImGuiIO& imguiIO() const { return *io_; }
 
@@ -132,11 +126,18 @@ private:
 	Clock::time_point lastFrame_ {};
 };
 
-template<typename T>
-void resourceRefButton(Gui& gui, T& resource) {
-	if(ImGui::Button(name(resource).c_str())) {
-		gui.selectResource(resource);
-	}
-}
+// Inserts an imgui button towards the given handle.
+// When clicked, selects the handle in the given gui.
+void refButton(Gui& gui, Handle& handle);
+
+// If handle isn't null, adds the button as with refButton.
+void refButtonOpt(Gui& gui, Handle* handle);
+
+// Asserts that image isn't null and if so, adds the button as with refButton.
+void refButtonExpect(Gui& gui, Handle* handle);
+
+// If the given handle is null, inserts a disabled "<Destroyed>" button.
+// Otherwise, normally inserts the button as with refButton.
+void refButtonD(Gui& gui, Handle* handle, const char* str = "<Destroyed>");
 
 } // namespace fuen

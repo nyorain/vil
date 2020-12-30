@@ -2,17 +2,9 @@
 #include <util.hpp>
 #include <data.hpp>
 #include <swapchain.hpp>
-#include <image.hpp>
-#include <rp.hpp>
+#include <handles.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
-#include <cb.hpp>
-#include <sync.hpp>
-#include <ds.hpp>
-#include <buffer.hpp>
-#include <memory.hpp>
-#include <shader.hpp>
-#include <pipe.hpp>
 #include <overlay.hpp>
 
 #include <wayland.hpp>

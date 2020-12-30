@@ -8,9 +8,18 @@
 namespace fuen {
 
 struct RenderPassDesc {
-	std::vector<VkAttachmentDescription> attachments;
-	std::vector<VkSubpassDescription> subpasses;
-	std::vector<VkSubpassDependency> dependencies;
+	std::vector<std::unique_ptr<std::byte[]>> exts; // pNext chains
+
+	std::vector<std::vector<VkAttachmentReference2>> attachmentRefs;
+	std::vector<std::vector<u32>> attachmentIDs;
+
+	std::vector<VkAttachmentDescription2> attachments;
+	std::vector<VkSubpassDescription2> subpasses;
+	std::vector<VkSubpassDependency2> dependencies;
+
+	// main pNext chain
+	const void* pNext {};
+	VkRenderPassCreateFlags flags {};
 };
 
 struct RenderPass : DeviceHandle {
