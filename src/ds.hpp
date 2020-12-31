@@ -72,11 +72,6 @@ struct DescriptorSet : DeviceHandle {
 			BufferInfo bufferInfo;
 			BufferView* bufferView;
 		};
-
-		// note: strictly speaking we wouldn't need the type tag here,
-		// we could deduce it from the layout. But we need(ed) weak_ptr's
-		// and using a union with non-trivial types is a pain in the ass.
-		// std::variant<ImageInfo, BufferInfo, BufferView*> data;
 	};
 
 	std::vector<std::vector<Binding>> bindings;

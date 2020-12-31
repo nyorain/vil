@@ -1,7 +1,7 @@
 #pragma once
 
 #include <device.hpp>
-#include <overlay.hpp>
+#include <vulkan/vulkan.h>
 
 // TODO: Xlib, trying to immitate the winapi terribleness.
 // Should be fixed more globally.
@@ -58,5 +58,10 @@ struct SwaPlatform : Platform {
 	// original window.
 	virtual bool pressed(u32 key) const = 0;
 };
+
+VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
+	VkInstance                                  instance,
+	VkSurfaceKHR                                surface,
+	const VkAllocationCallbacks*                pAllocator);
 
 } // namespace fuen

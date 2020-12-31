@@ -1,4 +1,6 @@
 #include <platform.hpp>
+#include <layer.hpp>
+#include <gui/gui.hpp>
 #include <swa/swa.h>
 
 namespace fuen {
@@ -120,6 +122,20 @@ bool SwaPlatform::update(Gui& gui) {
 
 void SwaPlatform::activateWindow(bool doActivate) {
 	swa_window_show(this->window, doActivate);
+}
+
+// api
+VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
+		VkInstance                                  instance,
+		VkSurfaceKHR                                surface,
+		const VkAllocationCallbacks*                pAllocator) {
+	if(!surface) {
+		return;
+	}
+
+	auto platform = moveDataOpt<Platform>(surface); // destroy it
+	auto& ini = getData<Instance>(instance);
+	ini.dispatch.DestroySurfaceKHR(instance, surface, pAllocator);
 }
 
 } // namespace fuen

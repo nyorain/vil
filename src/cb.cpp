@@ -139,10 +139,8 @@ void CommandBuffer::doEnd() {
 
 void CommandBuffer::endSection() {
 	dlg_assert(!sections_.empty());
-	// dlg_assert(!lastCommand_ || lastCommand_->parent == section_);
 	lastCommand_ = sections_.back();
 	sections_.pop_back();
-	// section_ = section_->parent;
 }
 
 void CommandBuffer::beginSection(SectionCommand& cmd) {
@@ -154,14 +152,11 @@ void CommandBuffer::beginSection(SectionCommand& cmd) {
 void CommandBuffer::addCmd(Command& cmd) {
 	if(lastCommand_) {
 		dlg_assert(record_->commands);
-		// dlg_assert(!section_ || section_ == lastCommand_->parent);
 		lastCommand_->next = &cmd;
-		// cmd.parent = lastCommand_->parent;
 	} else if(!sections_.empty()) {
 		dlg_assert(record_->commands);
-		// dlg_assert(!section_->children);
+		dlg_assert(!sections_.back()->children_);
 		sections_.back()->children_ = &cmd;
-		// cmd.parent = section_;
 	} else if(!record_->commands) {
 		record_->commands = &cmd;
 	}
