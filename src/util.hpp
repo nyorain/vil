@@ -99,6 +99,7 @@ const R* findChainInfo(const CI& ci) {
 }
 
 std::unique_ptr<std::byte[]> copyChain(const void*& pNext);
+void copyChain(const void*& pNext, std::vector<std::unique_ptr<std::byte[]>>& bufs);
 
 // NOTE: we might be able getting away with always just calling the oldest
 // function alias (e.g. vkCmdDrawIndirectCountAMD) statically instead

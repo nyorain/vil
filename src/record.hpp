@@ -137,9 +137,9 @@ struct BoundIndexBuffer {
 };
 
 struct DynamicStateDepthBias {
-	float constant;
-	float clamp;
-	float slope;
+	float constant {};
+	float clamp {};
+	float slope {};
 };
 
 struct GraphicsState : DescriptorState {
@@ -149,9 +149,9 @@ struct GraphicsState : DescriptorState {
 	RenderPass* rp;
 
 	struct StencilState {
-		u32 writeMask;
-		u32 compareMask;
-		u32 reference;
+		u32 writeMask {};
+		u32 compareMask {};
+		u32 reference {};
 	};
 
 	struct {

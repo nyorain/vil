@@ -708,14 +708,15 @@ std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
 
 	// first march-through: find needed size
 	std::size_t size = 0u;
-	while(pNext) {
-		auto src = static_cast<const VkBaseInStructure*>(pNext);
+	auto it = pNext;
+	while(it) {
+		auto src = static_cast<const VkBaseInStructure*>(it);
 
 		auto ssize = structSize(src->sType);
 		dlg_assertm(ssize > 0, "Unknown structure type!");
 		size += ssize;
 
-		pNext = src->pNext;
+		it = src->pNext;
 	}
 
 	auto buf = std::make_unique<std::byte[]>(size);
@@ -723,8 +724,9 @@ std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
 
 	// second-march-through: copy structure
 	VkBaseInStructure* last = nullptr;
-	while(pNext) {
-		auto src = static_cast<const VkBaseInStructure*>(pNext);
+	it = pNext;
+	while(it) {
+		auto src = static_cast<const VkBaseInStructure*>(it);
 		auto size = structSize(src->sType);
 		dlg_assertm(size > 0, "Unknown structure type!");
 
@@ -741,10 +743,19 @@ std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
 		}
 
 		last = dst;
-		pNext = src->pNext;
+		it = src->pNext;
 	}
 
+	dlg_assert(offset == size);
 	return buf;
+}
+
+void copyChain(const void*& pNext, std::vector<std::unique_ptr<std::byte[]>>& bufs) {
+	if(!pNext) {
+		return;
+	}
+
+	bufs.push_back(copyChain(pNext));
 }
 
 } // namespace fuen

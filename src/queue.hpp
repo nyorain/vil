@@ -71,6 +71,7 @@ struct PendingSubmission {
 	VkFence ourFence {};
 };
 
+/*
 // Commandbuffer hook that allows us to forward a modified version
 // of this command buffer down the chain. Only called during submission,
 // when the given CommandBuffer has a valid recording.
@@ -112,6 +113,7 @@ struct CommandHookRecord {
 	// Might delete itself (or decrement reference count or something).
 	virtual void finish() noexcept = 0;
 };
+*/
 
 // CommandBuffer groups
 struct CommandBufferGroup {

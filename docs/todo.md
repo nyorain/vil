@@ -6,10 +6,13 @@ v0.1, goal: end of january 2021
       everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
 	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
 	      resource reference buttons
-- [ ] argumentsDesc for transfer commands (missing for a lot of commands rn)
+- [x] argumentsDesc for transfer commands (missing for a lot of commands rn)
 - [ ] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
+- [ ] optimization: when CommandRecord is invalidated (rather: removed as current
+      recording from cb), it should destroy (reset) its hook as it 
+	  will never be used again anyways
 - [ ] add explicit "updateFromGroup" checkbox to command viewer?
 - [ ] make queues viewable handles
 	- [ ] allow to view command groups per queue
@@ -30,10 +33,10 @@ v0.1, goal: end of january 2021
       check them all for finish
 - [ ] fully implement command buffer viewer
 	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
-	- [ ] show all commands & info for commands
+	- [x] show all commands & info for commands
 - [x] fix dummy buttons in command viewer (e.g. BeginRenderPass)
 - [x] track dynamic graphics pipeline state
-	- [ ] show it in command ui
+	- [x] show it in command ui
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
@@ -280,6 +283,8 @@ Possibly for later, new features/ideas:
 	- [ ] use heuristics to identify interesting constants in ubo/pcr/shader itself
 		  (interesting as in: big effect on the output). Expose them as parameters
 		  in the gui.
+- [ ] include copy regions in argumentsDesc of transfer commands?
+      would probably make sense but they should not be weighted too much
 - [ ] (low prio, experiment) allow to visualize buffers as images where it makes sense 
 	  (using a bufferView or buffer-to-image copy)
 - [ ] (low prio) can we support android?

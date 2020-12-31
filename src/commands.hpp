@@ -292,15 +292,10 @@ struct DrawIndirectCountCmd : DrawCmdBase {
 
 	using DrawCmdBase::DrawCmdBase;
 
-	std::string toString() const override {
-		// NOTE: we intentionally don't display any extra information here
-		// since that's hard to do inuitively
-		return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
-	}
+	std::string toString() const override;
 	std::string nameDesc() const override {
 		return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
 	}
-
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
@@ -377,11 +372,7 @@ struct DispatchIndirectCmd : DispatchCmdBase {
 
 	using DispatchCmdBase::DispatchCmdBase;
 
-	std::string toString() const override {
-		// TODO: show buffer
-		return "DispatchIndirect";
-	}
-
+	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "DispatchIndirect"; }
 	void record(const Device&, VkCommandBuffer) const override;
@@ -417,6 +408,7 @@ struct CopyImageCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyImage"; }
+	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
 };
@@ -431,6 +423,7 @@ struct CopyBufferToImageCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyBufferToImage"; }
+	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
 };
@@ -445,6 +438,7 @@ struct CopyImageToBufferCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyImageToBuffer"; }
+	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
 };
@@ -461,6 +455,7 @@ struct BlitImageCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "BlitImage"; }
+	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
 };
@@ -473,8 +468,9 @@ struct ResolveImageCmd : Command {
 	span<VkImageResolve> regions;
 
 	std::string toString() const override;
-	std::string nameDesc() const override { return "ResolveImage"; }
 	void displayInspector(Gui& gui) const override;
+	std::string nameDesc() const override { return "ResolveImage"; }
+	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
@@ -488,6 +484,7 @@ struct CopyBufferCmd : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyBuffer"; }
+	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
@@ -499,11 +496,12 @@ struct UpdateBufferCmd : Command {
 	span<std::byte> data;
 
 	std::string toString() const override;
+	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "UpdateBuffer"; }
+	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
-	// TODO: inspector
 };
 
 struct FillBufferCmd : Command {
@@ -513,11 +511,12 @@ struct FillBufferCmd : Command {
 	u32 data {};
 
 	std::string toString() const override;
+	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "FillBuffer"; }
+	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
-	// TODO: inspector
 };
 
 struct ClearColorImageCmd : Command {
@@ -527,10 +526,12 @@ struct ClearColorImageCmd : Command {
 	span<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override;
+	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
+	std::string nameDesc() const override { return "ClearColorImage"; }
+	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
-	// TODO: inspector
 };
 
 struct ClearDepthStencilImageCmd : Command {
@@ -540,11 +541,12 @@ struct ClearDepthStencilImageCmd : Command {
 	span<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override;
+	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
 	std::string nameDesc() const override { return "ClearDepthStencilImage"; }
+	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
-	// TODO: inspector
 };
 
 struct ClearAttachmentCmd : Command {
@@ -552,33 +554,36 @@ struct ClearAttachmentCmd : Command {
 	span<VkClearRect> rects;
 
 	std::string nameDesc() const override { return "ClearAttachment"; }
+	std::vector<std::string> argumentsDesc() const override;
+	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	// TODO: inspector
 };
 
 struct SetEventCmd : Command {
 	Event* event {};
 	VkPipelineStageFlags stageMask {};
 
-	std::string toString() const override { return "SetEvent"; }
-	std::string nameDesc() const override { return "ResolveImage"; }
+	std::string toString() const override;
+	void displayInspector(Gui& gui) const override;
+	std::string nameDesc() const override { return "SetEvent"; }
+	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
-	// TODO: inspector
 };
 
 struct ResetEventCmd : Command {
 	Event* event {};
 	VkPipelineStageFlags stageMask {};
 
-	std::string toString() const override { return "ResetEvent"; }
-	std::string nameDesc() const override { return "ResolveImage"; }
+	std::string toString() const override;
+	void displayInspector(Gui& gui) const override;
+	std::string nameDesc() const override { return "ResetEvent"; }
+	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
-	// TODO: inspector
 };
 
 struct ExecuteCommandsCmd : ParentCommand {
@@ -604,7 +609,7 @@ struct ExecuteCommandsChildCmd : ParentCommand {
 
 struct BeginDebugUtilsLabelCmd : SectionCommand {
 	const char* name {};
-	std::array<float, 4> color; // TODO: could use this in UI
+	std::array<float, 4> color; // NOTE: could use this in UI
 
 	std::string toString() const override { return dlg::format("Label: {}", name); }
 	void record(const Device&, VkCommandBuffer) const override;

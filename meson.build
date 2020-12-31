@@ -21,11 +21,14 @@ args = cc.get_supported_arguments([
 	'/wd4127', # conditional expression is constant (might be useful but not really for us)
 	'/wd4456', # delecaration hides previous local declaration (sorry, too used to rust's beauty)
 
-	# TODO: msvc slow as fuck in debug build.
-	'-D_ITERATOR_DEBUG_LEVEL=0',
+	# TODO: msvc really slow in debug build without this
+	# '-D_ITERATOR_DEBUG_LEVEL=0',
 
 	# TODO: those should be fixed in code, really.
 	'/wd4458', # declaration hides class member
+
+	# for clang
+	'-Wno-missing-braces',
 ])
 
 dep_threads = dependency('threads', required: false)

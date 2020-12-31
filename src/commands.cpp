@@ -140,11 +140,85 @@ std::vector<std::string> createArgumentsDesc(const First& first, const Rest&... 
 	return ret;
 }
 
+// copy util
+std::string printImageOffset(Image* img, const VkOffset3D& offset) {
+	if(img && img->ci.imageType == VK_IMAGE_TYPE_1D) {
+		return dlg::format("{}", offset.x);
+	} else if(img && img->ci.imageType == VK_IMAGE_TYPE_2D) {
+		return dlg::format("{}, {}", offset.x, offset.y);
+	} else {
+		return dlg::format("{}, {}, {}", offset.x, offset.y, offset.z);
+	}
+}
+
+std::string printImageSubresLayers(Image* img, const VkImageSubresourceLayers& subres) {
+	std::string subresStr;
+	auto sepStr = "";
+	if(!img || img->ci.mipLevels > 1) {
+		subresStr = dlg::format("{}mip {}", sepStr, subres.mipLevel);
+		sepStr = ", ";
+	}
+
+	if(!img || img->ci.arrayLayers > 1) {
+		if(subres.layerCount > 1) {
+			subresStr = dlg::format("{}layers {}..{}", sepStr,
+				subres.baseArrayLayer, subres.baseArrayLayer + subres.layerCount - 1);
+		} else {
+			subresStr = dlg::format("{}layer {}", sepStr, subres.baseArrayLayer);
+		}
+
+		sepStr = ", ";
+	}
+
+	return subresStr;
+}
+
+std::string printImageRegion(Image* img, const VkOffset3D& offset,
+		const VkImageSubresourceLayers& subres) {
+
+	auto offsetStr = printImageOffset(img, offset);
+	auto subresStr = printImageSubresLayers(img, subres);
+
+	auto sep = subresStr.empty() ? "" : ", ";
+	return dlg::format("({}{}{})", offsetStr, sep, subresStr);
+}
+
+std::string printBufferImageCopy(Image* image,
+		const VkBufferImageCopy& copy, bool bufferToImage) {
+	auto imgString = printImageRegion(image, copy.imageOffset, copy.imageSubresource);
+
+	std::string sizeString;
+	if(image && image->ci.imageType == VK_IMAGE_TYPE_1D) {
+		sizeString = dlg::format("{}", copy.imageExtent.width);
+	} else if(image && image->ci.imageType <= VK_IMAGE_TYPE_2D) {
+		sizeString = dlg::format("{} x {}", copy.imageExtent.width,
+			copy.imageExtent.height);
+	} else {
+		sizeString = dlg::format("{} x {} x {}", copy.imageExtent.width,
+			copy.imageExtent.height, copy.imageExtent.depth);
+	}
+
+	auto bufString = dlg::format("offset {}", copy.bufferOffset);
+	if(copy.bufferRowLength || copy.bufferImageHeight) {
+		bufString += dlg::format(", rowLength {}, imageHeight {}",
+			copy.bufferRowLength, copy.bufferImageHeight);
+	}
+
+	if(bufferToImage) {
+		return dlg::format("({}) -> {} [{}]", bufString, imgString, sizeString);
+	} else {
+		return dlg::format("({}) -> {} [{}]", imgString, bufString, sizeString);
+	}
+}
+
+// API
 std::vector<const Command*> displayCommands(const Command* cmd,
 		const Command* selected, Command::TypeFlags typeFlags) {
 	// TODO: should use imgui list clipper, might have *a lot* of commands here.
 	// But first we have to restrict what cmd->display can actually do.
-	// Would also have to pre-filter command for that.
+	// Would also have to pre-filter commands for that. And stop at every
+	// (expanded) parent command (but it's hard to tell whether they are
+	// expanded).
 	std::vector<const Command*> ret;
 	while(cmd) {
 		if((typeFlags & cmd->type())) {
@@ -361,7 +435,7 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 
 	refButtonD(gui, state.pipe);
 
-	imGuiText("Verex buffers");
+	imGuiText("Vertex buffers");
 	for(auto& vertBuf : state.vertices) {
 		if(!vertBuf.buffer) {
 			imGuiText("null");
@@ -371,6 +445,85 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		refButtonD(gui, vertBuf.buffer);
 		ImGui::SameLine();
 		imGuiText("Offset {}", vertBuf.offset);
+	}
+
+	// dynamic state
+	if(state.pipe && ) {
+		imGuiText("DynamicState");
+		ImGui::Indent();
+
+		// viewport
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
+			auto count = state.pipe->viewportState.viewportCount;
+			dlg_assert(state.dynamic.viewports.size() >= count);
+			if(count > 0) {
+				imGuiText("Viewports");
+				auto count = state.pipe->viewportState.viewportCount;
+				for(auto& vp : state.dynamic.viewports.first(count)) {
+					imGuiText("x {}, y {}, width {}, height {}, minDepth {}, maxDepth {}",
+						vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth);
+				}
+			}
+		}
+		// scissor
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_SCISSOR)) {
+			auto count = state.pipe->viewportState.scissorCount;
+			dlg_assert(state.dynamic.scissors.size() >= count);
+			if(count > 0) {
+				imGuiText("Scissors");
+				for(auto& sc : state.dynamic.scissors.first(count)) {
+					imGuiText("offset {} {}, extent {} {}",
+						sc.offset.x, sc.offset.y, sc.extent.width, sc.extent.height);
+				}
+			}
+		}
+
+		// line width
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_LINE_WIDTH)) {
+			imGuiText("Line width: {}", state.dynamic.lineWidth);
+		}
+
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_DEPTH_BIAS)) {
+			auto& db = state.dynamic.depthBias;
+			imGuiText("Depth bias: constant {}, clamp {}, slope {}",
+				db.constant, db.clamp, db.slope);
+		}
+
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_BLEND_CONSTANTS)) {
+			auto& bc = state.dynamic.blendConstants;
+			imGuiText("Blend Constants: {} {} {} {}",
+				bc[0], bc[1], bc[2], bc[3]);
+		}
+
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_DEPTH_BOUNDS)) {
+			imGuiText("Depth bounds: [{}, {}]",
+				state.dynamic.depthBoundsMin, state.dynamic.depthBoundsMax);
+		}
+
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK)) {
+			imGuiText("Stencil compare mask front: {}{}", std::hex,
+				state.dynamic.stencilFront.compareMask);
+			imGuiText("Stencil compare mask back: {}{}", std::hex,
+				state.dynamic.stencilBack.compareMask);
+		}
+
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK)) {
+			imGuiText("Stencil write mask front: {}{}", std::hex,
+				state.dynamic.stencilFront.writeMask);
+			imGuiText("Stencil write mask back: {}{}", std::hex,
+				state.dynamic.stencilBack.writeMask);
+		}
+
+		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_REFERENCE)) {
+			imGuiText("Stencil reference front: {}{}", std::hex,
+				state.dynamic.stencilFront.reference);
+			imGuiText("Stencil reference back: {}{}", std::hex,
+				state.dynamic.stencilBack.reference);
+		}
+
+		ImGui::Unindent();
+	} else if(!state.pipe) {
+		imGuiText("Can't display dynamic state, pipeline was destroyed");
 	}
 
 	imGuiText("Descriptors");
@@ -448,8 +601,14 @@ std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
 
 void DrawIndirectCmd::displayInspector(Gui& gui) const {
 	// TODO: display effective draw command
+
+	imGuiText("Indirect buffer: {}");
+	ImGui::SameLine();
 	refButtonD(gui, buffer);
-	DrawCmdBase::displayGrahpicsState(gui, false);
+	ImGui::SameLine();
+	imGuiText("Offset {}", offset);
+
+	DrawCmdBase::displayGrahpicsState(gui, indexed);
 }
 
 void DrawIndirectCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
@@ -462,8 +621,10 @@ std::string DrawIndirectCmd::toString() const {
 	auto cmdName = indexed ? "DrawIndexedIndirect" : "DrawIndirect";
 	if(bufNameRes == NameType::named) {
 		return dlg::format("{}({}, {})", cmdName, bufName, drawCount);
+	} else if(drawCount > 1) {
+		return dlg::format("{}(drawCount: {})", cmdName, drawCount);
 	} else {
-		return dlg::format("{}({})", cmdName, drawCount);
+		return cmdName;
 	}
 }
 
@@ -514,6 +675,12 @@ void DrawIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	}
 }
 
+std::string DrawIndirectCountCmd::toString() const {
+	// NOTE: we intentionally don't display any extra information here
+	// since that's hard to do inuitively
+	return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
+}
+
 std::vector<std::string> DrawIndirectCountCmd::argumentsDesc() const {
 	auto ret = createArgumentsDesc(buffer, offset, countBuffer, countBufferOffset,
 		maxDrawCount, stride, state.pipe, state.vertices, state.descriptorSets);
@@ -525,16 +692,20 @@ std::vector<std::string> DrawIndirectCountCmd::argumentsDesc() const {
 }
 
 void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
-	// TODO: display effective draw command
+	// TODO: display effective draw commands
 	imGuiText("Indirect buffer:");
 	ImGui::SameLine();
 	refButtonD(gui, buffer);
+	ImGui::SameLine();
+	imGuiText("Offset {}, Stride {}", offset, stride);
 
 	imGuiText("Count buffer:");
 	ImGui::SameLine();
 	refButtonD(gui, countBuffer);
+	ImGui::SameLine();
+	imGuiText("Offset {}", countBufferOffset);
 
-	DrawCmdBase::displayGrahpicsState(gui, false);
+	DrawCmdBase::displayGrahpicsState(gui, indexed);
 }
 
 void DrawIndirectCountCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
@@ -562,9 +733,9 @@ std::string BindVertexBuffersCmd::toString() const {
 	if(buffers.size() == 1) {
 		auto [buf0NameRes, buf0Name] = name(buffers[0].buffer);
 		if(buf0NameRes == NameType::named) {
-			return dlg::format("BindVertexBuffers({}: {})", firstBinding, buf0Name);
+			return dlg::format("BindVertexBuffer({}: {})", firstBinding, buf0Name);
 		} else {
-			return dlg::format("BindVertexBuffers({})", firstBinding);
+			return dlg::format("BindVertexBuffer({})", firstBinding);
 		}
 	} else {
 		return dlg::format("BindVertexBuffers({}..{})", firstBinding,
@@ -608,9 +779,9 @@ std::string BindDescriptorSetCmd::toString() const {
 	if(sets.size() == 1) {
 		auto [ds0Res, ds0Name] = name(sets[0]);
 		if(ds0Res == NameType::named) {
-			return dlg::format("BindDescriptorSets({}: {})", firstSet, ds0Name);
+			return dlg::format("BindDescriptorSet({}: {})", firstSet, ds0Name);
 		} else {
-			return dlg::format("BindDescriptorSets({})", firstSet);
+			return dlg::format("BindDescriptorSet({})", firstSet);
 		}
 	} else {
 		return dlg::format("BindDescriptorSets({}..{})",
@@ -683,6 +854,15 @@ void DispatchIndirectCmd::displayInspector(Gui& gui) const {
 	DispatchCmdBase::displayComputeState(gui);
 }
 
+std::string DispatchIndirectCmd::toString() const {
+	auto [bufNameRes, bufName] = name(buffer);
+	if(bufNameRes == NameType::named) {
+		return dlg::format("DispatchIndirect({})", bufName);
+	}
+
+	return "DispatchIndirect";
+}
+
 std::vector<std::string> DispatchIndirectCmd::argumentsDesc() const {
 	return createArgumentsDesc(buffer, offset, state.pipe, state.descriptorSets);
 }
@@ -742,7 +922,29 @@ void CopyImageCmd::displayInspector(Gui& gui) const {
 	ImGui::SameLine();
 	refButtonD(gui, dst);
 
-	// TODO: copies
+	ImGui::Spacing();
+	imGuiText("Copies");
+
+	for(auto& copy : copies) {
+		auto srcRegion = printImageRegion(src, copy.srcOffset, copy.srcSubresource);
+		auto dstRegion = printImageRegion(dst, copy.dstOffset, copy.dstSubresource);
+
+		std::string sizeString;
+		if(src && dst && src->ci.imageType == VK_IMAGE_TYPE_1D && dst->ci.imageType == VK_IMAGE_TYPE_1D) {
+			sizeString = dlg::format("{}", copy.extent.width);
+		} else if(src && dst && src->ci.imageType <= VK_IMAGE_TYPE_2D && dst->ci.imageType <= VK_IMAGE_TYPE_2D) {
+			sizeString = dlg::format("{} x {}", copy.extent.width, copy.extent.height);
+		} else {
+			sizeString = dlg::format("{} x {} x {}", copy.extent.width, copy.extent.height, copy.extent.depth);
+		}
+
+		ImGui::Bullet();
+		imGuiText("{} -> {} [{}]", srcRegion, dstRegion, sizeString);
+	}
+}
+
+std::vector<std::string> CopyImageCmd::argumentsDesc() const {
+	return createArgumentsDesc(src, dst);
 }
 
 // CopyBufferToImageCmd
@@ -758,7 +960,13 @@ void CopyBufferToImageCmd::displayInspector(Gui& gui) const {
 	ImGui::SameLine();
 	refButtonD(gui, dst);
 
-	// TODO: copies
+	ImGui::Spacing();
+	imGuiText("Copies");
+
+	for(auto& copy : copies) {
+		ImGui::Bullet();
+		imGuiText("{}", printBufferImageCopy(dst, copy, true));
+	}
 }
 
 std::string CopyBufferToImageCmd::toString() const {
@@ -776,6 +984,10 @@ void CopyBufferToImageCmd::unset(const std::unordered_set<DeviceHandle*>& destro
 	checkUnset(dst, destroyed);
 }
 
+std::vector<std::string> CopyBufferToImageCmd::argumentsDesc() const {
+	return createArgumentsDesc(src, dst);
+}
+
 // CopyImageToBufferCmd
 void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyImageToBuffer(cb, src->handle, imgLayout, dst->handle,
@@ -789,7 +1001,13 @@ void CopyImageToBufferCmd::displayInspector(Gui& gui) const {
 	ImGui::SameLine();
 	refButtonD(gui, dst);
 
-	// TODO: copies
+	ImGui::Spacing();
+	imGuiText("Copies");
+
+	for(auto& copy : copies) {
+		ImGui::Bullet();
+		imGuiText("{}", printBufferImageCopy(src, copy, false));
+	}
 }
 
 std::string CopyImageToBufferCmd::toString() const {
@@ -807,6 +1025,10 @@ void CopyImageToBufferCmd::unset(const std::unordered_set<DeviceHandle*>& destro
 	checkUnset(dst, destroyed);
 }
 
+std::vector<std::string> CopyImageToBufferCmd::argumentsDesc() const {
+	return createArgumentsDesc(src, dst);
+}
+
 // BlitImageCmd
 void BlitImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBlitImage(cb, src->handle, srcLayout, dst->handle, dstLayout,
@@ -820,8 +1042,28 @@ void BlitImageCmd::displayInspector(Gui& gui) const {
 	ImGui::SameLine();
 	refButtonD(gui, dst);
 
-	// TODO: filter
-	// TODO: blits
+	imGuiText("Filter {}", vk::name(filter));
+
+	ImGui::Spacing();
+	imGuiText("Blits");
+
+	for(auto& blit : blits) {
+		auto srcSubres = printImageSubresLayers(src, blit.srcSubresource);
+		auto src0 = printImageOffset(src, blit.srcOffsets[0]);
+		auto src1 = printImageOffset(src, blit.srcOffsets[1]);
+
+		auto dstSubres = printImageSubresLayers(dst, blit.dstSubresource);
+		auto dst0 = printImageOffset(dst, blit.dstOffsets[0]);
+		auto dst1 = printImageOffset(dst, blit.dstOffsets[1]);
+
+		auto srcSep = srcSubres.empty() ? "" : ": ";
+		auto dstSep = dstSubres.empty() ? "" : ": ";
+
+		ImGui::Bullet();
+		imGuiText("({}{}({})..({}) -> ({}{}({})..({}))",
+			srcSubres, srcSep, src0, src1,
+			dstSubres, dstSep, dst0, dst1);
+	}
 }
 
 std::string BlitImageCmd::toString() const {
@@ -839,6 +1081,10 @@ void BlitImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(dst, destroyed);
 }
 
+std::vector<std::string> BlitImageCmd::argumentsDesc() const {
+	return createArgumentsDesc(src, dst);
+}
+
 // ResolveImageCmd
 void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdResolveImage(cb, src->handle, srcLayout,
@@ -852,7 +1098,26 @@ void ResolveImageCmd::displayInspector(Gui& gui) const {
 	ImGui::SameLine();
 	refButtonD(gui, dst);
 
-	// TODO: regions & layouts
+	ImGui::Spacing();
+	imGuiText("Regions");
+
+	// Basically same as CopyImageCmd
+	for(auto& copy : regions) {
+		auto srcRegion = printImageRegion(src, copy.srcOffset, copy.srcSubresource);
+		auto dstRegion = printImageRegion(dst, copy.dstOffset, copy.dstSubresource);
+
+		std::string sizeString;
+		if(src && dst && src->ci.imageType == VK_IMAGE_TYPE_1D && dst->ci.imageType == VK_IMAGE_TYPE_1D) {
+			sizeString = dlg::format("{}", copy.extent.width);
+		} else if(src && dst && src->ci.imageType <= VK_IMAGE_TYPE_2D && dst->ci.imageType <= VK_IMAGE_TYPE_2D) {
+			sizeString = dlg::format("{} x {}", copy.extent.width, copy.extent.height);
+		} else {
+			sizeString = dlg::format("{} x {} x {}", copy.extent.width, copy.extent.height, copy.extent.depth);
+		}
+
+		ImGui::Bullet();
+		imGuiText("{} -> {} [{}]", srcRegion, dstRegion, sizeString);
+	}
 }
 
 std::string ResolveImageCmd::toString() const {
@@ -870,6 +1135,10 @@ void ResolveImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) 
 	checkUnset(dst, destroyed);
 }
 
+std::vector<std::string> ResolveImageCmd::argumentsDesc() const {
+	return createArgumentsDesc(src, dst);
+}
+
 // CopyBufferCmd
 void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyBuffer(cb, src->handle, dst->handle,
@@ -883,7 +1152,13 @@ void CopyBufferCmd::displayInspector(Gui& gui) const {
 	ImGui::SameLine();
 	refButtonD(gui, dst);
 
-	// TODO: copies
+	ImGui::Spacing();
+	imGuiText("Regions");
+
+	for(auto& region : regions) {
+		ImGui::Bullet();
+		imGuiText("offsets {} -> {}, size {}", region.srcOffset, region.dstOffset, region.size);
+	}
 }
 
 std::string CopyBufferCmd::toString() const {
@@ -899,6 +1174,10 @@ std::string CopyBufferCmd::toString() const {
 void CopyBufferCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(src, destroyed);
 	checkUnset(dst, destroyed);
+}
+
+std::vector<std::string> CopyBufferCmd::argumentsDesc() const {
+	return createArgumentsDesc(src, dst);
 }
 
 // UpdateBufferCmd
@@ -919,6 +1198,18 @@ std::string UpdateBufferCmd::toString() const {
 	}
 }
 
+void UpdateBufferCmd::displayInspector(Gui& gui) const {
+	refButtonD(gui, dst);
+	ImGui::SameLine();
+	imGuiText("Offset {}", offset);
+
+	// TODO: display data?
+}
+
+std::vector<std::string> UpdateBufferCmd::argumentsDesc() const {
+	return createArgumentsDesc(dst, offset, data.size());
+}
+
 // FillBufferCmd
 void FillBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdFillBuffer(cb, dst->handle, offset, size, data);
@@ -935,6 +1226,18 @@ std::string FillBufferCmd::toString() const {
 	} else {
 		return "FillBuffer";
 	}
+}
+
+void FillBufferCmd::displayInspector(Gui& gui) const {
+	refButtonD(gui, dst);
+	ImGui::SameLine();
+	imGuiText("Offset {}, Size {}", offset, size);
+
+	imGuiText("Filled with {}{}", std::hex, data);
+}
+
+std::vector<std::string> FillBufferCmd::argumentsDesc() const {
+	return createArgumentsDesc(dst, offset, size, data);
 }
 
 // ClearColorImageCmd
@@ -956,6 +1259,16 @@ void ClearColorImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroye
 	checkUnset(dst, destroyed);
 }
 
+void ClearColorImageCmd::displayInspector(Gui& gui) const {
+	refButtonD(gui, dst);
+	// TODO: color, layout, ranges
+}
+
+std::vector<std::string> ClearColorImageCmd::argumentsDesc() const {
+	// including color does not seem like a good idea
+	return createArgumentsDesc(dst);
+}
+
 // ClearDepthStencilImageCmd
 void ClearDepthStencilImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearDepthStencilImage(cb, dst->handle, imgLayout, &value,
@@ -975,10 +1288,34 @@ void ClearDepthStencilImageCmd::unset(const std::unordered_set<DeviceHandle*>& d
 	checkUnset(dst, destroyed);
 }
 
+void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
+	refButtonD(gui, dst);
+	// TODO: value, layout, ranges
+}
+
+std::vector<std::string> ClearDepthStencilImageCmd::argumentsDesc() const {
+	// including color does not seem like a good idea
+	return createArgumentsDesc(dst);
+}
+
 // Clear AttachhmentCmd
 void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearAttachments(cb, u32(attachments.size()),
 		attachments.data(), u32(rects.size()), rects.data());
+}
+
+void ClearAttachmentCmd::displayInspector(Gui& gui) const {
+	// TODO: we probably need to refer to used render pass/fb here
+	(void) gui;
+}
+
+std::vector<std::string> ClearAttachmentCmd::argumentsDesc() const {
+	std::vector<std::string> ret;
+	for(auto& att : attachments) {
+		addToArgumentsDesc(ret, att.colorAttachment);
+		addToArgumentsDesc(ret, u32(att.aspectMask));
+	}
+	return ret;
 }
 
 // SetEventCmd
@@ -986,8 +1323,26 @@ void SetEventCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetEvent(cb, event->handle, stageMask);
 }
 
+std::string SetEventCmd::toString() const {
+	auto [nameRes, eventName] = name(event);
+	if(nameRes == NameType::named) {
+		return dlg::format("SetEvent({})", eventName);
+	}
+
+	return "SetEvent";
+}
+
 void SetEventCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(event, destroyed);
+}
+
+void SetEventCmd::displayInspector(Gui& gui) const {
+	refButtonD(gui, event);
+	imGuiText("Stages: {}", vk::flagNames(VkPipelineStageFlagBits(stageMask)));
+}
+
+std::vector<std::string> SetEventCmd::argumentsDesc() const {
+	return createArgumentsDesc(event, u32(stageMask));
 }
 
 // ResetEventCmd
@@ -995,10 +1350,29 @@ void ResetEventCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdResetEvent(cb, event->handle, stageMask);
 }
 
+std::string ResetEventCmd::toString() const {
+	auto [nameRes, eventName] = name(event);
+	if(nameRes == NameType::named) {
+		return dlg::format("ResetEvent({})", eventName);
+	}
+
+	return "ResetEvent";
+}
+
 void ResetEventCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(event, destroyed);
 }
 
+void ResetEventCmd::displayInspector(Gui& gui) const {
+	refButtonD(gui, event);
+	imGuiText("Stages: {}", vk::flagNames(VkPipelineStageFlagBits(stageMask)));
+}
+
+std::vector<std::string> ResetEventCmd::argumentsDesc() const {
+	return createArgumentsDesc(event, u32(stageMask));
+}
+
+// ExecuteCommandsCmd
 void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	std::vector<VkCommandBuffer> vkcbs;
 	auto child = children_;

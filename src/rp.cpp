@@ -142,95 +142,6 @@ void downgrade(std::vector<D>& dst, span<const T> src) {
 	}
 }
 
-// tmp dummy test TODO
-// VkRenderPass recreate(const RenderPassDesc& desc) {
-// 	Device dev; // todo
-// 	bool have2 = true;
-// 	VkRenderPass rp;
-//
-// 	if(have2) {
-// 		VkRenderPassCreateInfo2 rpi {};
-// 		rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
-// 		rpi.pNext = desc.pNext;
-// 		rpi.flags = desc.flags;
-// 		rpi.subpassCount = desc.subpasses.size();
-// 		rpi.pSubpasses = desc.subpasses.data();
-// 		rpi.attachmentCount = desc.attachments.size();
-// 		rpi.pAttachments = desc.attachments.data();
-// 		rpi.dependencyCount = desc.dependencies.size();
-// 		rpi.pDependencies = desc.dependencies.data();
-//
-// 		VK_CHECK(dev.dispatch.CreateRenderPass2(dev.handle, &rpi, nullptr, &rp));
-// 	} else {
-// 		std::vector<VkAttachmentDescription> attachments;
-// 		downgrade(attachments, span<const VkAttachmentDescription2>(desc.attachments));
-//
-// 		std::vector<VkSubpassDependency> dependencies;
-// 		downgrade(dependencies, span<const VkSubpassDependency2>(desc.dependencies));
-//
-// 		std::vector<VkSubpassDescription> subpasses;
-// 		std::vector<std::vector<VkAttachmentReference>> references;
-//
-// 		auto downgradeAttRefs = [&](const VkAttachmentReference2* refs, std::size_t count) {
-// 			if(count == 0) {
-// 				return u32(0);
-// 			}
-//
-// 			auto off = references.back().size();
-// 			for(auto i = 0u; i < count; ++i) {
-// 				auto& attSrc = refs[i];
-// 				auto& attDst = references.back().emplace_back();
-// 				attDst.attachment = attSrc.attachment;
-// 				attDst.layout = attSrc.layout;
-// 			}
-//
-// 			return u32(off);
-// 		};
-//
-// 		for(auto& src : desc.subpasses) {
-// 			auto& dst = subpasses.emplace_back();
-// 			dst = {};
-// 			dst.flags = src.flags;
-// 			dst.colorAttachmentCount = src.colorAttachmentCount;
-// 			dst.inputAttachmentCount = src.colorAttachmentCount;
-//
-// 			dst.preserveAttachmentCount = src.preserveAttachmentCount;
-// 			dst.pPreserveAttachments = src.pPreserveAttachments;
-//
-// 			auto& atts = references.emplace_back();
-// 			auto colorOff = downgradeAttRefs(src.pColorAttachments, src.colorAttachmentCount);
-// 			auto depthOff = downgradeAttRefs(src.pDepthStencilAttachment, src.pDepthStencilAttachment ? 1 : 0);
-// 			auto inputOff = downgradeAttRefs(src.pInputAttachments, src.inputAttachmentCount);
-//
-// 			if(src.pResolveAttachments) {
-// 				auto resolveOff = downgradeAttRefs(src.pResolveAttachments, src.colorAttachmentCount);
-// 				dst.pResolveAttachments = &atts[resolveOff];
-// 			}
-//
-// 			dst.pColorAttachments = &atts[colorOff];
-// 			dst.pInputAttachments = &atts[inputOff];
-// 			if(src.pDepthStencilAttachment) {
-// 				dst.pDepthStencilAttachment = &atts[depthOff];
-// 			}
-// 		}
-//
-// 		VkRenderPassCreateInfo rpi {};
-// 		rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-// 		rpi.pNext = desc.pNext;
-// 		rpi.flags = desc.flags;
-// 		rpi.subpassCount = subpasses.size();
-// 		rpi.pSubpasses = subpasses.data();
-// 		rpi.attachmentCount = attachments.size();
-// 		rpi.pAttachments = attachments.data();
-// 		rpi.dependencyCount = dependencies.size();
-// 		rpi.pDependencies = dependencies.data();
-//
-// 		VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp));
-// 	}
-//
-// 	return rp;
-// }
-
 VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		VkDevice                                    device,
 		const VkRenderPassCreateInfo*               pCreateInfo,
@@ -343,8 +254,57 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	rp.handle = *pRenderPass;
 	rp.objectType = VK_OBJECT_TYPE_RENDER_PASS;
 
+	auto& rpi = *pCreateInfo;
 	rp.desc = std::make_shared<RenderPassDesc>();
-	dlg_error("Not implemented");
+	rp.desc->flags = rpi.flags;
+	rp.desc->pNext = rpi.pNext;
+	rp.desc->exts.push_back(copyChain(rp.desc->pNext));
+
+	rp.desc->attachments = {rpi.pAttachments, rpi.pAttachments + rpi.attachmentCount};
+	rp.desc->subpasses = {rpi.pSubpasses, rpi.pSubpasses + rpi.subpassCount};
+	rp.desc->dependencies = {rpi.pDependencies, rpi.pDependencies + rpi.dependencyCount};
+
+	for(auto& att : rp.desc->attachments) {
+		copyChain(att.pNext, rp.desc->exts);
+	}
+
+	for(auto& dep : rp.desc->dependencies) {
+		copyChain(dep.pNext, rp.desc->exts);
+	}
+
+	auto addAtts = [&](const VkAttachmentReference2* refs, std::size_t count) {
+		auto& atts = rp.desc->attachmentRefs.back();
+		auto ret = atts.size();
+		atts.insert(atts.end(), refs, refs + count);
+		return ret;
+	};
+
+	for(auto& subp : rp.desc->subpasses) {
+		copyChain(subp.pNext, rp.desc->exts);
+
+		auto& atts = rp.desc->attachmentRefs.emplace_back();
+		auto colorOff = addAtts(subp.pColorAttachments, subp.colorAttachmentCount);
+		auto depthOff = addAtts(subp.pDepthStencilAttachment, subp.pDepthStencilAttachment ? 1 : 0);
+		auto inputOff = addAtts(subp.pInputAttachments, subp.inputAttachmentCount);
+
+		if(subp.pResolveAttachments) {
+			auto resolveOff = addAtts(subp.pResolveAttachments, subp.colorAttachmentCount);
+			subp.pResolveAttachments = &atts[resolveOff];
+		}
+
+		subp.pColorAttachments = &atts[colorOff];
+		subp.pInputAttachments = &atts[inputOff];
+
+		if(subp.pDepthStencilAttachment) {
+			subp.pDepthStencilAttachment = &atts[depthOff];
+		}
+
+		if(subp.preserveAttachmentCount) {
+			auto& ids = rp.desc->attachmentIDs.emplace_back(subp.pPreserveAttachments,
+				subp.pPreserveAttachments + subp.preserveAttachmentCount);
+			subp.pPreserveAttachments = ids.data();
+		}
+	}
 
 	return res;
 }

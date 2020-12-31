@@ -17,8 +17,11 @@ struct TimeCommandHookRecord : CommandHookRecord {
 	CommandRecord* record {};
 
 	VkCommandBuffer cb {};
-	VkQueryPool queryPool {}; // TODO: allocate from pool
-	u32 refCount {0};
+
+	// TODO: allocate queries from pool in hook instead of giving each
+	// record its own pool.
+	VkQueryPool queryPool {};
+	u32 submissionCount {0}; // comparable to ref count
 
 	// linked list of records
 	TimeCommandHookRecord* next {};
@@ -30,7 +33,7 @@ struct TimeCommandHookRecord : CommandHookRecord {
 };
 
 struct TimeCommandHookSubmission : CommandHookSubmission {
-	IntrusivePtr<TimeCommandHookRecord> record;
+	TimeCommandHookRecord* record {};
 
 	TimeCommandHookSubmission(TimeCommandHookRecord& rec) : record(&rec) {}
 	~TimeCommandHookSubmission();
@@ -53,17 +56,29 @@ VkCommandBuffer TimeCommandHook::hook(CommandBuffer& hooked,
 	if(record->hook) {
 		auto* our = dynamic_cast<TimeCommandHookRecord*>(record->hook.get());
 
-		// TODO: optimization. When only counter does not match we
+		// TODO, optimization: When only counter does not match we
 		// could re-use all resources (and the object itself) given
 		// that there are no pending submissions for it.
 		if(our && our->hook == this && our->hookCounter == counter) {
+			// In this case there is already a pending submission for this
+			// record (can happen for simulataneous command buffers).
+			// This is a problem since we can't write (and then, when
+			// the submission finishes: read) the pool from multiple
+			// places. We simply return the original cb in that case,
+			// there is a pending submission querying that information after all.
+			// NOTE: alternatively, we could create and store a new Record
+			// (with a new query pool)
+			if(our->submissionCount != 0) {
+				dlg_assert(our->submissionCount == 1);
+				return hooked.handle();
+			}
+
 			data.reset(new TimeCommandHookSubmission(*our));
 			return our->cb;
 		}
 	}
 
 	auto hook = new TimeCommandHookRecord();
-	++hook->refCount;
 	record->hook.reset(hook);
 
 	hook->next = this->records;
@@ -94,14 +109,15 @@ VkCommandBuffer TimeCommandHook::hook(CommandBuffer& hooked,
 	qci.queryCount = 2u;
 	qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
 	VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &hook->queryPool));
-	nameHandle(dev, hook->cb, "TimeCommandHook:queryPool");
+	nameHandle(dev, hook->queryPool, "TimeCommandHook:queryPool");
 
 	// record
 	VkCommandBufferBeginInfo cbbi {};
 	cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	// if we have to expect the original command buffer being submitted multiple
-	// times simulataneously, this hooked buffer might be as well.
-	cbbi.flags = record->usageFlags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+	// NOTE: we can never submit the cb simulataneously anyways, see the
+	// 'submissionCount' branch we take when finding an already existent
+	// record.
+	// cbbi.flags = record->usageFlags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 	VK_CHECK(dev.dispatch.BeginCommandBuffer(hook->cb, &cbbi));
 
 	dev.dispatch.CmdResetQueryPool(hook->cb, hook->queryPool, 0, 2);
@@ -110,7 +126,9 @@ VkCommandBuffer TimeCommandHook::hook(CommandBuffer& hooked,
 
 	VK_CHECK(dev.dispatch.EndCommandBuffer(hook->cb));
 
+	++hook->submissionCount;
 	data.reset(new TimeCommandHookSubmission(*hook));
+
 	return hook->cb;
 }
 
@@ -127,8 +145,11 @@ TimeCommandHook::~TimeCommandHook() {
 
 		rec->hook = nullptr;
 		if(rec->record->hook.get() == rec) {
+			// This will delete our record hook if there are no pending
+			// submissions of it left. See TimeCommandHookRecord::finish
 			rec->record->hook.reset();
 		}
+
 		rec = next;
 	}
 }
@@ -136,11 +157,12 @@ TimeCommandHook::~TimeCommandHook() {
 // record
 TimeCommandHookRecord::~TimeCommandHookRecord() {
 	// We can be sure that record is still alive here since when the
-	// record is destroyed, all its submissions must have finished as well
-	// as its reference to us been destroyed, so our reference count
-	// must have been decreased to 0.
-	// NOTE: we implicitly assume here that no one else ever acquires shared
-	// ownership of us and keeps us alive.
+	// record is destroyed, all its submissions must have finished as well.
+	// And then we would have been destroyed via the finish() command (see
+	// the assertions there)
+	dlg_assert(record);
+	dlg_assert(submissionCount == 0);
+
 	auto& dev = record->device();
 
 	// destroy resources
@@ -188,18 +210,28 @@ void TimeCommandHookRecord::hookRecord(Device& dev, Command* cmd, Command* hcmd)
 void TimeCommandHookRecord::finish() noexcept {
 	// Finish is only ever called from our hook entry in the CommandRecord.
 	// If hook was unset, the TimeCommandHook is being destroyed
-	// and removed us manually. In that case references might be left
-	// in the form of submissions.
-	dlg_assert(!hook || refCount == 1);
-	if(--refCount == 0) {
+	// and removed us manually. Only in that case submissions might be left.
+	dlg_assert(!hook || submissionCount == 0);
+	if(submissionCount == 0) {
 		delete this;
 	}
 }
 
 // submission
 TimeCommandHookSubmission::~TimeCommandHookSubmission() {
+	dlg_assert(record && record->record);
+
+	// We must be the only pending submission.
+	dlg_assert(record->submissionCount == 1u);
+	--record->submissionCount;
+
 	auto& dev = record->record->device();
+
+	// In this case the hook was removed, no longer interested in results.
+	// Since we are the only submission left to the record, it can be
+	// destroyed.
 	if(!record->hook) {
+		delete record;
 		return;
 	}
 
