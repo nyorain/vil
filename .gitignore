@@ -1,6 +1,6 @@
 .clangd/
 compile_commands.json
-subprojects/**
+subprojects/*/
 build/
 buildwin/
 .cache
