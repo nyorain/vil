@@ -142,6 +142,190 @@ void downgrade(std::vector<D>& dst, span<const T> src) {
 	}
 }
 
+RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
+	RenderPassDesc desc0 {};
+	RenderPassDesc desc1 {};
+	RenderPassDesc desc2 {};
+
+	desc0.flags = desc.flags;
+	desc1.flags = desc.flags;
+	desc2.flags = desc.flags;
+
+	// copy subpasses
+	auto copyRefs = [](auto* refs, std::size_t count, auto& attRefs) {
+		if(!count) {
+			return (VkAttachmentReference2*) nullptr;
+		}
+
+		auto& atts = attRefs.emplace_back(refs, refs + count);
+		for(auto& att : atts) {
+			att.pNext = nullptr;
+		}
+
+		return atts.data();
+	};
+
+	auto fixSubpasses = [&copyRefs](auto& desc) {
+		auto& attRefs = desc.attachmentRefs;
+		for(auto& subp : desc.subpasses) {
+			subp.pNext = nullptr;
+			subp.pColorAttachments = copyRefs(subp.pColorAttachments,
+				subp.colorAttachmentCount, attRefs);
+			subp.pInputAttachments = copyRefs(subp.pInputAttachments,
+				subp.inputAttachmentCount, attRefs);
+			subp.pDepthStencilAttachment = copyRefs(subp.pDepthStencilAttachment,
+				subp.pDepthStencilAttachment ? 1 : 0, attRefs);
+			subp.pResolveAttachments = copyRefs(subp.pResolveAttachments,
+				subp.pResolveAttachments ? subp.colorAttachmentCount : 0, attRefs);
+
+			if(subp.preserveAttachmentCount) {
+				auto& ids = desc.attachmentIDs.emplace_back(subp.pPreserveAttachments,
+					subp.pPreserveAttachments + subp.preserveAttachmentCount);
+				subp.pPreserveAttachments = ids.data();
+			}
+		}
+	};
+
+	desc0.subpasses = desc.subpasses;
+	desc1.subpasses = desc.subpasses;
+	desc2.subpasses = desc.subpasses;
+
+	fixSubpasses(desc0);
+	fixSubpasses(desc1);
+	fixSubpasses(desc2);
+
+	// Copy dependencies
+	desc0.dependencies = desc.dependencies;
+	desc1.dependencies = desc.dependencies;
+	desc2.dependencies = desc.dependencies;
+
+	for(auto& dep : desc0.dependencies) dep.pNext = nullptr;
+	for(auto& dep : desc1.dependencies) dep.pNext = nullptr;
+	for(auto& dep : desc2.dependencies) dep.pNext = nullptr;
+
+	// Copy attachments.
+	// When an attachment is used in both splitted renderpasses, we transition
+	// them to a certain layout in between and make sure to preserve
+	// the contents via store/load ops
+	auto betweenLayout = VK_IMAGE_LAYOUT_GENERAL;
+	desc0.attachments = desc.attachments;
+	for(auto& att : desc0.attachments) {
+		att.pNext = nullptr;
+		att.finalLayout = betweenLayout;
+		att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+	}
+
+	desc1.attachments = desc.attachments;
+	for(auto& att : desc1.attachments) {
+		att.pNext = nullptr;
+		att.initialLayout = betweenLayout;
+		att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+	}
+
+	desc2.attachments = desc.attachments;
+	for(auto& att : desc2.attachments) {
+		att.pNext = nullptr;
+		att.initialLayout = betweenLayout;
+		att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	}
+
+	return {std::move(desc0), std::move(desc1), std::move(desc2)};
+}
+
+VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
+	auto create2 = selectCmd(
+		dev.dispatch.CreateRenderPass2KHR,
+		dev.dispatch.CreateRenderPass2);
+	VkRenderPass rp {};
+
+	if(create2) {
+		VkRenderPassCreateInfo2 rpi {};
+		rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
+		rpi.pNext = desc.pNext;
+		rpi.flags = desc.flags;
+		rpi.subpassCount = desc.subpasses.size();
+		rpi.pSubpasses = desc.subpasses.data();
+		rpi.attachmentCount = desc.attachments.size();
+		rpi.pAttachments = desc.attachments.data();
+		rpi.dependencyCount = desc.dependencies.size();
+		rpi.pDependencies = desc.dependencies.data();
+
+		VK_CHECK(create2(dev.handle, &rpi, nullptr, &rp));
+	} else {
+		std::vector<VkAttachmentDescription> attachments;
+		downgrade(attachments, span<const VkAttachmentDescription2>(desc.attachments));
+
+		std::vector<VkSubpassDependency> dependencies;
+		downgrade(dependencies, span<const VkSubpassDependency2>(desc.dependencies));
+
+		std::vector<VkSubpassDescription> subpasses;
+		std::vector<std::vector<VkAttachmentReference>> references;
+
+		auto downgradeAttRefs = [&](const VkAttachmentReference2* refs, std::size_t count) {
+			if(count == 0) {
+				return u32(0);
+			}
+
+			auto off = references.back().size();
+			for(auto i = 0u; i < count; ++i) {
+				auto& attSrc = refs[i];
+				auto& attDst = references.back().emplace_back();
+				attDst.attachment = attSrc.attachment;
+				attDst.layout = attSrc.layout;
+			}
+
+			return u32(off);
+		};
+
+		for(auto& src : desc.subpasses) {
+			auto& dst = subpasses.emplace_back();
+			dst = {};
+			dst.flags = src.flags;
+			dst.colorAttachmentCount = src.colorAttachmentCount;
+			dst.inputAttachmentCount = src.colorAttachmentCount;
+
+			dst.preserveAttachmentCount = src.preserveAttachmentCount;
+			dst.pPreserveAttachments = src.pPreserveAttachments;
+
+			auto& atts = references.emplace_back();
+			auto colorOff = downgradeAttRefs(src.pColorAttachments, src.colorAttachmentCount);
+			auto depthOff = downgradeAttRefs(src.pDepthStencilAttachment, src.pDepthStencilAttachment ? 1 : 0);
+			auto inputOff = downgradeAttRefs(src.pInputAttachments, src.inputAttachmentCount);
+
+			if(src.pResolveAttachments) {
+				auto resolveOff = downgradeAttRefs(src.pResolveAttachments, src.colorAttachmentCount);
+				dst.pResolveAttachments = &atts[resolveOff];
+			}
+
+			dst.pColorAttachments = &atts[colorOff];
+			dst.pInputAttachments = &atts[inputOff];
+			if(src.pDepthStencilAttachment) {
+				dst.pDepthStencilAttachment = &atts[depthOff];
+			}
+		}
+
+		VkRenderPassCreateInfo rpi {};
+		rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+		rpi.pNext = desc.pNext;
+		rpi.flags = desc.flags;
+		rpi.subpassCount = subpasses.size();
+		rpi.pSubpasses = subpasses.data();
+		rpi.attachmentCount = attachments.size();
+		rpi.pAttachments = attachments.data();
+		rpi.dependencyCount = dependencies.size();
+		rpi.pDependencies = dependencies.data();
+
+		VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp));
+	}
+
+	return rp;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		VkDevice                                    device,
 		const VkRenderPassCreateInfo*               pCreateInfo,

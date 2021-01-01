@@ -33,6 +33,8 @@ struct CommandDesc {
 	// while this is executed).
 	// static std::vector<CommandDesc> get(const Command& root, const Command& cmd);
 	static std::vector<CommandDesc> get(const Command& root, span<const Command*> hierachy);
+
+	static std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc);
 	static Command* find(Command* root, span<const CommandDesc> desc);
 };
 

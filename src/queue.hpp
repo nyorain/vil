@@ -4,6 +4,7 @@
 #include <handle.hpp>
 #include <intrusive.hpp>
 #include <commandDesc.hpp>
+// #include <commandHook.hpp>
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <optional>
@@ -42,6 +43,7 @@ struct QueueFamily {
 
 struct SubmittedCommandBuffer {
 	CommandBuffer* cb {};
+	// std::unique_ptr<CommandHookSubmission> hook {}; // TODO: could be plain member, no pointer
 	FinishPtr<CommandHookSubmission> hook {};
 };
 
@@ -71,7 +73,6 @@ struct PendingSubmission {
 	VkFence ourFence {};
 };
 
-/*
 // Commandbuffer hook that allows us to forward a modified version
 // of this command buffer down the chain. Only called during submission,
 // when the given CommandBuffer has a valid recording.
@@ -113,7 +114,6 @@ struct CommandHookRecord {
 	// Might delete itself (or decrement reference count or something).
 	virtual void finish() noexcept = 0;
 };
-*/
 
 // CommandBuffer groups
 struct CommandBufferGroup {

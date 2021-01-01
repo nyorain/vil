@@ -307,28 +307,6 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 	return this->display(selected, typeFlags, children());
 }
 
-std::vector<const Command*> BeginRenderPassCmd::display(const Command* selected,
-		TypeFlags typeFlags) const {
-	auto cmd = this->children_;
-	auto first = static_cast<FirstSubpassCmd*>(nullptr);
-	if(cmd) {
-		// If we only have one subpass, don't give it an extra section
-		// to make everything more compact.
-		first = dynamic_cast<FirstSubpassCmd*>(cmd);
-		dlg_assert(first);
-		if(!first->next) {
-			cmd = first->children_;
-		}
-	}
-
-	auto ret = ParentCommand::display(selected, typeFlags, cmd);
-	if(ret.size() > 1 && first) {
-		ret.insert(ret.end() - 1, first);
-	}
-
-	return ret;
-}
-
 void BarrierCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(buffers, destroyed);
 	checkUnset(images, destroyed);
@@ -377,10 +355,33 @@ std::string BeginRenderPassCmd::toString() const {
 void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(this->subpassBeginInfo.pNext) {
 		auto f = selectCmd(dev.dispatch.CmdBeginRenderPass2, dev.dispatch.CmdBeginRenderPass2KHR);
+		dlg_assert(f);
 		f(cb, &this->info, &this->subpassBeginInfo);
 	} else {
 		dev.dispatch.CmdBeginRenderPass(cb, &this->info, this->subpassBeginInfo.contents);
 	}
+}
+
+std::vector<const Command*> BeginRenderPassCmd::display(const Command* selected,
+		TypeFlags typeFlags) const {
+	auto cmd = this->children_;
+	auto first = static_cast<FirstSubpassCmd*>(nullptr);
+	if(cmd) {
+		// If we only have one subpass, don't give it an extra section
+		// to make everything more compact.
+		first = dynamic_cast<FirstSubpassCmd*>(cmd);
+		dlg_assert(first);
+		if(!first->next) {
+			cmd = first->children_;
+		}
+	}
+
+	auto ret = ParentCommand::display(selected, typeFlags, cmd);
+	if(ret.size() > 1 && cmd != children_) {
+		ret.insert(ret.end() - 1, first);
+	}
+
+	return ret;
 }
 
 std::vector<std::string> BeginRenderPassCmd::argumentsDesc() const {
@@ -448,7 +449,7 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	}
 
 	// dynamic state
-	if(state.pipe && ) {
+	if(state.pipe && !state.pipe->dynamicState.empty()) {
 		imGuiText("DynamicState");
 		ImGui::Indent();
 
@@ -524,6 +525,8 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		ImGui::Unindent();
 	} else if(!state.pipe) {
 		imGuiText("Can't display dynamic state, pipeline was destroyed");
+	} else if(state.pipe->dynamicState.empty()) {
+		// imGuiText("No relevant dynamic state");
 	}
 
 	imGuiText("Descriptors");
@@ -602,7 +605,7 @@ std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
 void DrawIndirectCmd::displayInspector(Gui& gui) const {
 	// TODO: display effective draw command
 
-	imGuiText("Indirect buffer: {}");
+	imGuiText("Indirect buffer");
 	ImGui::SameLine();
 	refButtonD(gui, buffer);
 	ImGui::SameLine();
@@ -1403,7 +1406,7 @@ std::vector<const Command*> ExecuteCommandsCmd::display(const Command* selected,
 	}
 
 	auto ret = ParentCommand::display(selected, typeFlags, cmd);
-	if(ret.size() > 1 && first) {
+	if(ret.size() > 1 && cmd != this->children_) {
 		ret.insert(ret.end() - 1, first);
 	}
 

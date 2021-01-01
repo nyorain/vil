@@ -271,13 +271,15 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				dlg_assert(rec.group);
 
 				// potentially hook command buffer
-				if(rec.group->hook) {
-					auto hooked = rec.group->hook->hook(cb, scb.hook);
+				if(rec.group->hook.active()) {
+					scb.hook = std::make_unique<CommandHookSubmission>();
+					auto hooked = rec.group->hook.hook(cb, *scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
-					dlg_assertm(!cb.hook, "Hook registered for command buffer and group");
-				} else if(cb.hook) {
-					auto hooked = cb.hook->hook(cb, scb.hook);
+					dlg_assertm(!cb.hook.active(), "Hook registered for command buffer and group");
+				} else if(cb.hook.active()) {
+					scb.hook = std::make_unique<CommandHookSubmission>();
+					auto hooked = cb.hook.hook(cb, *scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 				} else {

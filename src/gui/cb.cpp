@@ -1,5 +1,7 @@
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
+// #include <gui/bufferRead.hpp>
+#include <bytes.hpp>
 #include <queue.hpp>
 #include <cb.hpp>
 #include <imguiutil.hpp>
@@ -10,228 +12,80 @@
 
 namespace fuen {
 
-// Those two are considered private
-struct TimeCommandHookRecord : CommandHookRecord {
-	TimeCommandHook* hook {};
-	u32 hookCounter {};
-	CommandRecord* record {};
-
-	VkCommandBuffer cb {};
-
-	// TODO: allocate queries from pool in hook instead of giving each
-	// record its own pool.
-	VkQueryPool queryPool {};
-	u32 submissionCount {0}; // comparable to ref count
-
-	// linked list of records
-	TimeCommandHookRecord* next {};
-	TimeCommandHookRecord* prev {};
-
-	~TimeCommandHookRecord();
-	void hookRecord(Device& dev, Command* cmd, Command* hooked);
-	void finish() noexcept override;
+// TimeCommandHook
+/*
+struct TimeCommandHook : CommandHookImpl {
+	u64 lastTime {};
+	std::unique_ptr<CommandHookRecordImpl> createRecord(CommandBuffer&, Command&) override;
 };
 
-struct TimeCommandHookSubmission : CommandHookSubmission {
+struct TimeCommandHookRecord : CommandHookRecordImpl {
+	TimeCommandHook* hook {};
+	VkQueryPool queryPool {};
+
+	TimeCommandHookRecord(TimeCommandHook& hook, CommandBuffer& cb);
+	void recordBeforeHooked(Device&, VkCommandBuffer, Command&) override;
+	void recordAfterHookedChildren(Device&, VkCommandBuffer, Command&) override;
+	void finish(Device& dev) noexcept override;
+	std::unique_ptr<CommandHookSubmissionImpl> submit() override;
+	void invalidate() override { hook = nullptr; }
+	SimultaneousSubmitHook simulataneousBehavior() const override {
+		return SimultaneousSubmitHook::skip;
+	}
+};
+
+struct TimeCommandHookSubmission : CommandHookSubmissionImpl {
 	TimeCommandHookRecord* record {};
 
 	TimeCommandHookSubmission(TimeCommandHookRecord& rec) : record(&rec) {}
-	~TimeCommandHookSubmission();
-	void finish() noexcept override { delete this; }
+	void finish(Device& dev) noexcept override;
 };
 
-// Time Hooking
-VkCommandBuffer TimeCommandHook::hook(CommandBuffer& hooked,
-		FinishPtr<CommandHookSubmission>& data) {
-	dlg_assert(hooked.state() == CommandBuffer::State::executable);
+// TimeCommandHook
+std::unique_ptr<CommandHookRecordImpl> TimeCommandHook::createRecord(
+		CommandBuffer& cb, Command&) {
+	return std::make_unique<TimeCommandHookRecord>(*this, cb);
+}
 
-	// Check if it already has a valid record associated
-	auto* record = hooked.lastRecordLocked();
-	auto* hcommand = CommandDesc::find(record->commands, this->desc);
-	if(!hcommand) {
-		dlg_warn("Can't hook cb, can't find hooked command");
-		return hooked.handle();
-	}
+// TimeCommandHookRecord
+TimeCommandHookRecord::TimeCommandHookRecord(TimeCommandHook& xhook, CommandBuffer& cb) {
+	hook = &xhook;
 
-	if(record->hook) {
-		auto* our = dynamic_cast<TimeCommandHookRecord*>(record->hook.get());
-
-		// TODO, optimization: When only counter does not match we
-		// could re-use all resources (and the object itself) given
-		// that there are no pending submissions for it.
-		if(our && our->hook == this && our->hookCounter == counter) {
-			// In this case there is already a pending submission for this
-			// record (can happen for simulataneous command buffers).
-			// This is a problem since we can't write (and then, when
-			// the submission finishes: read) the pool from multiple
-			// places. We simply return the original cb in that case,
-			// there is a pending submission querying that information after all.
-			// NOTE: alternatively, we could create and store a new Record
-			// (with a new query pool)
-			if(our->submissionCount != 0) {
-				dlg_assert(our->submissionCount == 1);
-				return hooked.handle();
-			}
-
-			data.reset(new TimeCommandHookSubmission(*our));
-			return our->cb;
-		}
-	}
-
-	auto hook = new TimeCommandHookRecord();
-	record->hook.reset(hook);
-
-	hook->next = this->records;
-	if(this->records) {
-		this->records->prev = hook;
-	}
-	this->records = hook;
-
-	hook->hook = this;
-	hook->hookCounter = counter;
-	hook->record = record;
-
-	auto& dev = *hooked.dev;
-
-	VkCommandBufferAllocateInfo allocInfo {};
-	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	allocInfo.commandPool = dev.queueFamilies[record->queueFamily].commandPool;
-	allocInfo.commandBufferCount = 1;
-
-	VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &allocInfo, &hook->cb));
-	// command buffer is a dispatchable object
-	dev.setDeviceLoaderData(dev.handle, hook->cb);
-	nameHandle(dev, hook->cb, "TimeCommandHook:cb");
+	auto& dev = *cb.dev;
 
 	VkQueryPoolCreateInfo qci {};
 	qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 	qci.queryCount = 2u;
 	qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-	VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &hook->queryPool));
-	nameHandle(dev, hook->queryPool, "TimeCommandHook:queryPool");
-
-	// record
-	VkCommandBufferBeginInfo cbbi {};
-	cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	// NOTE: we can never submit the cb simulataneously anyways, see the
-	// 'submissionCount' branch we take when finding an already existent
-	// record.
-	// cbbi.flags = record->usageFlags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-	VK_CHECK(dev.dispatch.BeginCommandBuffer(hook->cb, &cbbi));
-
-	dev.dispatch.CmdResetQueryPool(hook->cb, hook->queryPool, 0, 2);
-
-	hook->hookRecord(dev, record->commands, hcommand);
-
-	VK_CHECK(dev.dispatch.EndCommandBuffer(hook->cb));
-
-	++hook->submissionCount;
-	data.reset(new TimeCommandHookSubmission(*hook));
-
-	return hook->cb;
+	VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool));
+	nameHandle(dev, this->queryPool, "TimeCommandHookRecord:queryPool");
 }
 
-void TimeCommandHook::finish() noexcept {
-	if(--refCount == 0) {
-		delete this;
-	}
+void TimeCommandHookRecord::recordBeforeHooked(Device& dev, VkCommandBuffer cb, Command&) {
+	dev.dispatch.CmdResetQueryPool(cb, this->queryPool, 0, 2);
+
+	auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
 }
 
-TimeCommandHook::~TimeCommandHook() {
-	auto* rec = records;
-	while(rec) {
-		auto* next = rec->next;
-
-		rec->hook = nullptr;
-		if(rec->record->hook.get() == rec) {
-			// This will delete our record hook if there are no pending
-			// submissions of it left. See TimeCommandHookRecord::finish
-			rec->record->hook.reset();
-		}
-
-		rec = next;
-	}
+void TimeCommandHookRecord::recordAfterHookedChildren(Device& dev, VkCommandBuffer cb, Command&) {
+	auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	dev.dispatch.CmdWriteTimestamp(cb, stage1, this->queryPool, 1);
 }
 
-// record
-TimeCommandHookRecord::~TimeCommandHookRecord() {
-	// We can be sure that record is still alive here since when the
-	// record is destroyed, all its submissions must have finished as well.
-	// And then we would have been destroyed via the finish() command (see
-	// the assertions there)
-	dlg_assert(record);
-	dlg_assert(submissionCount == 0);
+std::unique_ptr<CommandHookSubmissionImpl> TimeCommandHookRecord::submit() {
+	return std::make_unique<TimeCommandHookSubmission>(*this);
+}
 
-	auto& dev = record->device();
-
-	// destroy resources
-	auto commandPool = dev.queueFamilies[record->queueFamily].commandPool;
-
-	dev.dispatch.FreeCommandBuffers(dev.handle, commandPool, 1, &cb);
+void TimeCommandHookRecord::finish(Device& dev) noexcept {
 	dev.dispatch.DestroyQueryPool(dev.handle, queryPool, nullptr);
-
-	// unlink
-	if(next) {
-		next->prev = prev;
-	}
-	if(prev) {
-		prev->next = next;
-	}
-	if(hook && this == hook->records) {
-		dlg_assert(!prev);
-		hook->records = next;
-	}
+	queryPool = {};
 }
 
-void TimeCommandHookRecord::hookRecord(Device& dev, Command* cmd, Command* hcmd) {
-	while(cmd) {
-		cmd->record(dev, this->cb);
-
-		auto isHooked = cmd == hcmd;
-		if(isHooked) {
-			auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-			dev.dispatch.CmdWriteTimestamp(this->cb, stage0, this->queryPool, 0);
-		}
-
-		if(auto parentCmd = dynamic_cast<const ParentCommand*>(cmd); parentCmd) {
-			hookRecord(dev, parentCmd->children(), hcmd);
-		}
-
-		if(isHooked) {
-			auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-			dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
-		}
-
-		cmd = cmd->next;
-	}
-}
-
-void TimeCommandHookRecord::finish() noexcept {
-	// Finish is only ever called from our hook entry in the CommandRecord.
-	// If hook was unset, the TimeCommandHook is being destroyed
-	// and removed us manually. Only in that case submissions might be left.
-	dlg_assert(!hook || submissionCount == 0);
-	if(submissionCount == 0) {
-		delete this;
-	}
-}
-
-// submission
-TimeCommandHookSubmission::~TimeCommandHookSubmission() {
-	dlg_assert(record && record->record);
-
-	// We must be the only pending submission.
-	dlg_assert(record->submissionCount == 1u);
-	--record->submissionCount;
-
-	auto& dev = record->record->device();
-
-	// In this case the hook was removed, no longer interested in results.
-	// Since we are the only submission left to the record, it can be
-	// destroyed.
+void TimeCommandHookSubmission::finish(Device& dev) noexcept {
+	// Hook was removed or record invalidated. We cannot return
+	// our results back to the hook.
 	if(!record->hook) {
-		delete record;
 		return;
 	}
 
@@ -254,7 +108,7 @@ TimeCommandHookSubmission::~TimeCommandHookSubmission() {
 	auto diff = after - before;
 	record->hook->lastTime = diff;
 }
-
+*/
 
 // CommandBufferGui
 // CommandBufferGui::CommandBufferGui() = default;
@@ -283,6 +137,7 @@ void CommandBufferGui::draw() {
 		if(lastRecord != record_.get()) {
 			record_ = record_->group->lastRecord;
 			command_ = CommandDesc::find(record_->commands, desc_);
+			// TODO: reset hooks/update desc?
 		}
 	}
 
@@ -298,6 +153,41 @@ void CommandBufferGui::draw() {
 		commandChanged = true;
 		command_ = nsel.front();
 		desc_ = CommandDesc::get(*record_->commands, nsel);
+
+		if(record_->group) {
+			record_->group->hook.desc(desc_);
+		}
+	}
+
+	if(commandChanged) {
+		auto* drawIndirect = dynamic_cast<const DrawIndirectCmd*>(command_);
+		if(drawIndirect && drawIndirect->indexed) {
+			drawIndirect = nullptr;
+		}
+		if(indirectHook_ && !drawIndirect) {
+			record_->group->hook.remove(*indirectHook_);
+			indirectHook_ = nullptr;
+		} else if(drawIndirect && !indirectHook_) {
+			if(!record_->group) {
+				// TODO
+				// NOTE: we could query the group for a command buffer during
+				// its "end" call. Might lead to other problems tho.
+				// disabledQueryTime("Record was never submitted");
+				dlg_warn("Record was never submitted");
+				dlg_assert(!timeHook_);
+			} else if(!record_->cb && !updateFromGroup_) {
+				// TODO
+				// disabledQueryTime("Record isn't valid and viewed statically");
+				dlg_warn("Record isn't valid and viewed statically");
+				// resetTimeHook = true;
+			} else {
+				auto impl = std::make_unique<IndirectCommandHook>(IndirectCommandHook::Type::draw);
+				indirectHook_ = impl.get();
+				record_->group->hook.add(std::move(impl));
+			}
+		}
+
+		record_->group->hook.desc(desc_);
 	}
 
 	ImGui::PopID();
@@ -310,6 +200,21 @@ void CommandBufferGui::draw() {
 	if(command_) {
 		// Inspector
 		command_->displayInspector(*gui_);
+
+		// TODO: restructure!
+		auto* drawIndirect = dynamic_cast<const DrawIndirectCmd*>(command_);
+		if(drawIndirect) {
+			if(indirectHook_ && indirectHook_->count) {
+				auto span = ReadBuf(indirectHook_->data);
+				auto cmd = read<VkDrawIndirectCommand>(span);
+				record_->group->hook.desc(desc_);
+
+				imGuiText("firstVertex: {}", cmd.firstVertex);
+				imGuiText("vertexCount: {}", cmd.vertexCount);
+				imGuiText("firstInstance: {}", cmd.firstInstance);
+				imGuiText("instanceCount: {}", cmd.instanceCount);
+			}
+		}
 
 		// Show own general gui
 		auto resetTimeHook = false;
@@ -340,17 +245,11 @@ void CommandBufferGui::draw() {
 			ImGui::Checkbox("Query Time", &queryTime_);
 			if(queryTime_) {
 				if(!timeHook_) {
-					timeHook_.reset(new TimeCommandHook());
-					timeHook_->desc = desc_;
+					auto impl = std::make_unique<TimeCommandHook>();
+					timeHook_ = impl.get();
 
-					++timeHook_->refCount;
-					record_->group->hook.reset(timeHook_.get());
-				}
-
-				dlg_assert(record_->group->hook.get() == timeHook_.get());
-				if(commandChanged) {
-					++timeHook_->counter;
-					timeHook_->desc = desc_;
+					record_->group->hook.add(std::move(impl));
+					record_->group->hook.desc(desc_);
 				}
 
 				auto displayDiff = timeHook_->lastTime * dev.props.limits.timestampPeriod;
@@ -370,10 +269,10 @@ void CommandBufferGui::draw() {
 		}
 
 		if(resetTimeHook) {
-			if(record_->group->hook.get() == timeHook_.get()) {
-				record_->group->hook.reset();
+			if(timeHook_) {
+				record_->group->hook.remove(*timeHook_);
+				timeHook_ = nullptr;
 			}
-			timeHook_.reset();
 		}
 	}
 
@@ -386,10 +285,20 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 	updateFromGroup_ = updateFromGroup;
 
 	// Reset old time hooks
-	if(record_ && record_->group && record_->group->hook.get() == timeHook_.get()) {
-		record_->group->hook.reset();
+	if(record_) {
+		if(timeHook_) {
+			record_->group->hook.remove(*timeHook_);
+			timeHook_ = nullptr;
+		}
+
+		if(indirectHook_) {
+			record_->group->hook.remove(*indirectHook_);
+			indirectHook_ = nullptr;
+		}
+	} else {
+		dlg_assert(!timeHook_);
+		dlg_assert(!indirectHook_);
 	}
-	timeHook_.reset();
 
 	command_ = {};
 

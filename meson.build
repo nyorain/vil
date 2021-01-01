@@ -67,6 +67,7 @@ src = files(
 	'src/platform.cpp',
 	'src/commandDesc.cpp',
 	'src/record.cpp',
+	# 'src/commandHook.cpp',
 
 	# gui stuff
 	'src/gui/renderer.cpp',
@@ -75,6 +76,7 @@ src = files(
 	'src/gui/image.cpp',
 	'src/gui/buffer.cpp',
 	'src/gui/cb.cpp',
+	# 'src/gui/bufferRead.cpp',
 
 	# vulkan api entrypoints
 	'src/handle.cpp',

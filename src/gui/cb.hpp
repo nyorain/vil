@@ -7,22 +7,9 @@
 
 namespace fuen {
 
-struct TimeCommandHookSubmission;
-struct TimeCommandHookRecord;
-
-// Time hooking
-struct TimeCommandHook : CommandHook {
-	u64 lastTime {};
-	u32 refCount {0};
-	u32 counter {0};
-	std::vector<CommandDesc> desc {};
-	TimeCommandHookRecord* records {}; // linked list
-
-	VkCommandBuffer hook(CommandBuffer& hooked,
-		FinishPtr<CommandHookSubmission>& data) override;
-	void finish() noexcept override;
-	~TimeCommandHook();
-};
+// struct TimeCommandHook;
+// struct IndirectCommandHook;
+struct CommandHookImpl;
 
 struct CommandBufferGui {
 	void draw();
@@ -47,7 +34,10 @@ struct CommandBufferGui {
 	std::vector<CommandDesc> desc_ {};
 
 	bool queryTime_ {};
-	IntrusivePtr<TimeCommandHook> timeHook_ {};
+
+	// TimeCommandHook* timeHook_ {};
+	// IndirectCommandHook* indirectHook_ {};
+	CommandHookImpl* hook_ {};
 };
 
 } // namespace fuen

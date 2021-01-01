@@ -46,26 +46,11 @@ std::vector<CommandDesc> CommandDesc::get(const Command& root, span<const Comman
 	}
 
 	return ret;
-
-	/*
-	std::vector<CommandDesc> ret;
-	fillIn(ret.emplace_back(), root, cmd);
-
-	// find parents
-	auto* parent = cmd.parent;
-	while(parent) {
-		fillIn(ret.emplace_back(), root, *parent);
-		parent = parent->parent;
-	}
-
-	std::reverse(ret.begin(), ret.end());
-	return ret;
-	*/
 }
 
-Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
+std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc) {
 	if(desc.empty() || !root) {
-		return nullptr;
+		return {};
 	}
 
 	struct Candidate {
@@ -133,6 +118,7 @@ Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
 		return candidates;
 	};
 
+	std::vector<Command*> ret;
 	std::vector<std::vector<Candidate>> levels;
 	levels.push_back(findCandidates(root, desc[0]));
 
@@ -140,8 +126,9 @@ Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
 	while(true) {
 		if(levels.back().empty()) {
 			levels.pop_back();
+			ret.pop_back();
 			if(i == 1u) {
-				return nullptr;
+				return ret;
 			}
 
 			--i;
@@ -150,12 +137,13 @@ Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
 
 		// get the best parent candidate
 		auto cand = levels.back().back();
+		ret.push_back(cand.command);
 		levels.back().pop_back();
 
 		// if we are in the last level: good, just return the best
 		// candidate we have found
 		if(i == desc.size()) {
-			return cand.command;
+			return ret;
 		}
 
 		// otherwise: we must have a parent command.
@@ -168,6 +156,13 @@ Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
 		levels.push_back(cands);
 		++i;
 	}
+
+	// dlg_error("unreachable");
+}
+
+Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
+	auto chain = findHierarchy(root, desc);
+	return chain.back();
 }
 
 void processType(CommandBufferDesc& desc, Command::Type type) {

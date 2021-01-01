@@ -8,10 +8,12 @@
 namespace fuen {
 
 struct RenderPassDesc {
+	// NOTE: probably not useful to just copy the pNext chains.
+	// We instead have to fix this on per-extension basis
 	std::vector<std::unique_ptr<std::byte[]>> exts; // pNext chains
 
 	std::vector<std::vector<VkAttachmentReference2>> attachmentRefs;
-	std::vector<std::vector<u32>> attachmentIDs;
+	std::vector<std::vector<u32>> attachmentIDs; // preserve attachment arrays
 
 	std::vector<VkAttachmentDescription2> attachments;
 	std::vector<VkSubpassDescription2> subpasses;
@@ -44,6 +46,25 @@ struct Framebuffer : DeviceHandle {
 
 	~Framebuffer();
 };
+
+// Creates two RenderPassDescriptions compatible to the given one where
+// the only differences are:
+// - the first renderpass stores all attachments in the end
+// - the second renderpass loads all attachments in the beginning
+// This way, one renderpass can be split into two, e.g. to insert
+// non-renderpass commands in between.
+// NOTE: the pNext chains are currently simple forwarded to both.
+// are lost at the moment (needs fix for each extension we want to support)
+// TODO: we could probably just forward pNext chains. Evaluate!
+struct RenderPassSplitDesc {
+	RenderPassDesc desc0;
+	RenderPassDesc desc1;
+	RenderPassDesc desc2;
+};
+RenderPassSplitDesc splitInterruptable(const RenderPassDesc&);
+
+// Creates a new renderpass for the given device with the given description.
+VkRenderPass create(Device&, const RenderPassDesc&);
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
     VkDevice                                    device,

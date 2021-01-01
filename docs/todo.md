@@ -132,6 +132,12 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] the way we currently split render passes does not work for resolve
+	  attachments (except when they are in the last subpass) since
+	  the resolve might be done multiple times, overwriting old results :(
+	  In that case: either just don't allow command hooking (for now) or
+	  just do the expensive solution: completely modify the render passes
+	  and recreate all framebuffers and graphics pipelines ugh
 - [ ] command groups: come up with a concept to avoid glitchy updates
 	  in viewer. Either just update every couple of seconds (lame!) or
 	  display something special there.

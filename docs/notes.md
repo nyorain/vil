@@ -12,3 +12,9 @@ The talk in there seems like it is not. The old non-core extension does
 not have to be exposed when vulkan 1.2 is used. But maybe the loader
 does the magic for the aliases and we can retrieve it via vkGetDeviceProcAddr
 nonetheless? I'm not sure. For now, we should use our `selectCmd` stuff everywhere.
+
+---
+
+Adding a `Command* parent` to Command would make a lot of things easier
+in terms of hierarchy traversal. But we can't to that, mainly because
+of secondary command buffers, as they are effectively inlined.

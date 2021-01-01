@@ -44,6 +44,7 @@ public:
 	void desc(std::vector<CommandDesc> desc);
 	span<const CommandDesc> desc() const { return desc_; }
 	void invalidateRecordings();
+	bool active() const { return !impls_.empty(); }
 
 	// helpers
 	void recordHook(CommandHookRecord& record, Command* cmd, Command& hooked);
@@ -75,22 +76,31 @@ struct CommandHookRecord {
 	CommandHookRecord* next {};
 	CommandHookRecord* prev {};
 
-	void finish(); // called when unset in associated CommandRecord
+	void finish() noexcept;// called when unset in associated CommandRecord
+
+	CommandHookRecord() = default;
 	~CommandHookRecord();
+
+	CommandHookRecord(const CommandHookRecord&) = delete;
+	CommandHookRecord& operator=(const CommandHookRecord&) = delete;
 };
 
 struct CommandHookSubmission {
 	std::vector<std::unique_ptr<CommandHookSubmissionImpl>> impls;
 	CommandHookRecord* record {};
 
+	CommandHookSubmission() = default;
 	~CommandHookSubmission();
+
+	CommandHookSubmission(const CommandHookSubmission&) = delete;
+	CommandHookSubmission& operator=(const CommandHookSubmission&) = delete;
 };
 
 // Impls
 struct CommandHookSubmissionImpl {
 	// Called when the submission is finished.
 	// It will be destroyed after this.
-	virtual void finish(Device&) {}
+	virtual void finish(Device&) noexcept {}
 	virtual ~CommandHookSubmissionImpl() = default;
 };
 
@@ -117,7 +127,7 @@ struct CommandHookRecordImpl {
 	}
 
 	// Called before the recording is destroyed.
-	virtual void finish(Device&) {}
+	virtual void finish(Device&) noexcept {}
 
 	// Called when the record is invalidated. It should no longer connect
 	// back to its hook, cannot assume its existence anymore.

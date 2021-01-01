@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <device.hpp>
+// #include <commandHook.hpp>
 #include <record.hpp>
 
 namespace fuen {

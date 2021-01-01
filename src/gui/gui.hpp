@@ -61,6 +61,8 @@ public:
 	void selectCommands(IntrusivePtr<CommandRecord> record,
 		bool updateFromGroup, bool activateTab = true);
 
+	auto& cbGui() { return tabs_.cb; }
+
 	ImGuiIO& imguiIO() const { return *io_; }
 
 	Device& dev() const { return *dev_; }
