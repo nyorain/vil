@@ -1,5 +1,6 @@
 #include <gui/commandHook.hpp>
 #include <commandDesc.hpp>
+#include <image.hpp>
 #include <rp.hpp>
 #include <util.hpp>
 #include <cb.hpp>
@@ -9,6 +10,69 @@
 
 namespace fuen {
 
+// util
+ViewableImageCopy::ViewableImageCopy(Device& dev, VkFormat format, u32 width, u32 height) {
+	this->dev = &dev;
+	this->width = width;
+	this->height = height;
+
+	// TODO: copy multiple layers?
+	// TODO: support multisampling
+	VkImageCreateInfo ici {};
+	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	ici.arrayLayers = 1u;
+	ici.extent = {width, height, 1u};
+	ici.format = format;
+	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ici.mipLevels = 1;
+	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &image));
+	nameHandle(dev, this->image, "ViewableImageCopy:image");
+
+	VkMemoryRequirements memReqs;
+	dev.dispatch.GetImageMemoryRequirements(dev.handle, image, &memReqs);
+
+	// new memory
+	VkMemoryAllocateInfo allocInfo {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memReqs.size;
+	// TODO: create on hostVisible memory for easier image viewing?
+	//   revisit this when implenting texel-values-in-gui feature
+	auto memBits = memReqs.memoryTypeBits & dev.deviceLocalMemTypeBits;
+	allocInfo.memoryTypeIndex = findLSB(memBits);
+	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &memory));
+	nameHandle(dev, this->memory, "ViewableImageCopy:memory");
+
+	VK_CHECK(dev.dispatch.BindImageMemory(dev.handle, image, memory, 0));
+
+	VkImageViewCreateInfo vci {};
+	vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	vci.image = image;
+	vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+	vci.format = format;
+	vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	vci.subresourceRange.layerCount = 1u;
+	vci.subresourceRange.levelCount = 1u;
+	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &imageView));
+	nameHandle(dev, this->imageView, "ViewableImageCopy:imageView");
+}
+
+ViewableImageCopy::~ViewableImageCopy() {
+	if(!dev) {
+		return;
+	}
+
+	dev->dispatch.DestroyImageView(dev->handle, imageView, nullptr);
+	dev->dispatch.DestroyImage(dev->handle, image, nullptr);
+	dev->dispatch.FreeMemory(dev->handle, memory, nullptr);
+}
+
+// CommandHookImpl
 VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
 		FinishPtr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
@@ -60,6 +124,8 @@ VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
 
 void CommandHookImpl::desc(std::vector<CommandDesc> desc) {
 	desc_ = std::move(desc);
+	invalidateRecordings();
+	invalidateData();
 }
 
 void CommandHookImpl::invalidateRecordings() {
@@ -128,17 +194,28 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 	nameHandle(dev, this->queryPool, "CommandHookRecordImpl:queryPool");
 
 	// dstBuffer
-	VkDeviceSize dstSize {};
-
+	auto dstSize = VkDeviceSize(0);
 	auto* hookDst = hcommand.back();
-	if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(hookDst)) {
+	auto splitRenderPass = false;
+	auto createViewImage = false;
+
+	if(dynamic_cast<DrawCmd*>(hookDst)) {
+		createViewImage = true;
+	} else if(dynamic_cast<DrawIndexedCmd*>(hookDst)) {
+		createViewImage = true;
+	} else if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(hookDst)) {
 		VkDeviceSize stride = cmd->indexed ?
 			sizeof(VkDrawIndexedIndirectCommand) :
 			sizeof(VkDrawIndirectCommand);
 		stride = cmd->stride ? cmd->stride : stride;
 		dstSize = cmd->drawCount * stride;
+		splitRenderPass = true;
+		createViewImage = true;
 	} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(hookDst)) {
+		(void) cmd;
 		dstSize = sizeof(VkDispatchIndirectCommand);
+		splitRenderPass = true;
+		createViewImage = true;
 	} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(hookDst)) {
 		VkDeviceSize stride = cmd->indexed ?
 			sizeof(VkDrawIndexedIndirectCommand) :
@@ -149,9 +226,10 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 		auto remSize = cmd->buffer->ci.size - cmd->offset;
 		dstSize = std::min(cmd->maxDrawCount * stride, remSize);
 		dstSize += sizeof(u32); // for the count
+		splitRenderPass = true;
+		createViewImage = true;
 	}
 
-	auto splitRenderPass = false;
 	if(dstSize > 0) {
 		VkBufferCreateInfo bci {};
 		bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -177,8 +255,6 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 
 		// map memory
 		VK_CHECK(dev.dispatch.MapMemory(dev.handle, dstMemory, 0, VK_WHOLE_SIZE, 0, &bufferMap));
-
-		splitRenderPass = true;
 	}
 
 	RecordInfo info;
@@ -189,14 +265,48 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 			if(auto rpCmd = dynamic_cast<BeginRenderPassCmd*>(cmd)) {
 				dlg_assert(found == false);
 				found = true;
-				info.beginRenderPassCmd = rpCmd;
+				auto& desc = *rpCmd->rp->desc;
 
-				auto [rpi0, rpi1, rpi2] = splitInterruptable(*rpCmd->rp->desc);
+				info.beginRenderPassCmd = rpCmd;
+				info.hookedSubpass = rpCmd->subpassOfDescendant(*hcommand.back());
+				dlg_assert(info.hookedSubpass != u32(-1));
+				dlg_assert(info.hookedSubpass < desc.subpasses.size());
+
+				auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
 				rp0 = create(dev, rpi0);
 				rp1 = create(dev, rpi1);
 				rp2 = create(dev, rpi2);
+
+				if(createViewImage) {
+					auto& subpass = desc.subpasses[info.hookedSubpass];
+
+					// TODO: allow display of all attachments, not just
+					// the first color attachment
+					if(!subpass.colorAttachmentCount) {
+						createViewImage = false;
+						dlg_debug("Can't create view image; no color attachment");
+					} else {
+						auto& fb = *rpCmd->fb;
+						auto attID = subpass.pColorAttachments[0].attachment;
+						auto& attDesc = desc.attachments[attID];
+
+						// TODO: support multisampling
+						if(attDesc.samples != VK_SAMPLE_COUNT_1_BIT) {
+							dlg_debug("Can't create view image for multisampled attachment");
+						} else {
+							// TODO: this should definitely not be created for
+							//   each recording!
+							// TODO: only use render pass area as size?
+							auto* vimg = new ViewableImageCopy(dev, attDesc.format,
+								fb.width, fb.height);
+							dstImage.reset(vimg);
+						}
+					}
+				}
 			}
 		}
+
+		dlg_assert(found);
 	}
 
 	// record
@@ -208,6 +318,9 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 	// TODO: depending on the active hooks, we might be able to this
 	// cbbi.flags = record->usageFlags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 	VK_CHECK(dev.dispatch.BeginCommandBuffer(this->cb, &cbbi));
+
+	// initial cmd stuff
+	dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, 2);
 
 	info.splitRenderPass = splitRenderPass;
 	this->hookRecord(record->commands, info);
@@ -250,20 +363,17 @@ CommandHookRecordImpl::~CommandHookRecordImpl() {
 	}
 }
 
+// TODO: this function is way too long. Factor out into
+// - timing-related functions
+// - renderpass splitting functions
 void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
-	dlg_info(info.nextHookLevel < hcommand.size());
-
 	auto& dev = record->device();
 	while(cmd) {
-		if(dynamic_cast<NextSubpassCmd*>(cmd) && info.beginRenderPassCmd) {
-			++info.rpSubpass;
-		}
-
 		auto nextInfo = info;
 
 		// check if command is on hooking chain
-		if(cmd == hcommand[info.nextHookLevel]) {
-			auto hookDst = info.nextHookLevel == hcommand.size();
+		if(info.nextHookLevel < hcommand.size() && cmd == hcommand[info.nextHookLevel]) {
+			auto hookDst = (info.nextHookLevel == hcommand.size() - 1);
 			auto skipRecord = false;
 
 			auto* beginRpCmd = dynamic_cast<BeginRenderPassCmd*>(cmd);
@@ -283,8 +393,9 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 						beginRpCmd->subpassBeginInfo.contents);
 				}
 
-				dlg_assert(!nextInfo.beginRenderPassCmd);
-				nextInfo.beginRenderPassCmd = beginRpCmd;
+				// dlg_assert(!nextInfo.beginRenderPassCmd);
+				// nextInfo.beginRenderPassCmd = beginRpCmd;
+				dlg_assert(nextInfo.beginRenderPassCmd == beginRpCmd);
 				skipRecord = true;
 			}
 
@@ -294,34 +405,34 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 
 				// TODO: missing potential forward of pNext chain here
 				auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
-				for(auto i = info.rpSubpass; i + 1 < numSubpasses; ++i) {
+				for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
 					// TODO: missing potential forward of pNext chain here
 					// TODO: subpass contents relevant?
 					dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 				}
 				dev.dispatch.CmdEndRenderPass(cb);
 
-				beforeDstOutsideRp(*cmd);
+				beforeDstOutsideRp(*cmd, info);
 
 				dlg_assert(rp1);
-				auto rpBeginInfo = beginRpCmd->info;
+				auto rpBeginInfo = info.beginRenderPassCmd->info;
 				rpBeginInfo.renderPass = rp1;
 				// we don't clear anything when starting this rp
 				rpBeginInfo.pClearValues = nullptr;
 				rpBeginInfo.clearValueCount = 0u;
 
-				if(beginRpCmd->subpassBeginInfo.pNext) {
+				if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
 					auto beginRp2 = selectCmd(
 						dev.dispatch.CmdBeginRenderPass2,
 						dev.dispatch.CmdBeginRenderPass2KHR);
 					dlg_assert(beginRp2);
-					beginRp2(cb, &rpBeginInfo, &beginRpCmd->subpassBeginInfo);
+					beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
 				} else {
 					dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
-						beginRpCmd->subpassBeginInfo.contents);
+						info.beginRenderPassCmd->subpassBeginInfo.contents);
 				}
 
-				for(auto i = 0u; i < info.rpSubpass; ++i) {
+				for(auto i = 0u; i < info.hookedSubpass; ++i) {
 					// TODO: missing potential forward of pNext chain here
 					// TODO: subpass contents relevant?
 					dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
@@ -336,7 +447,6 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 			if(hookDst) {
 				// timing 0
 				auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-				dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, 2);
 				dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
 
 				// render pass split
@@ -345,34 +455,34 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 
 					// TODO: missing potential forward of pNext chain here
 					auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
-					for(auto i = info.rpSubpass; i + 1 < numSubpasses; ++i) {
+					for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
 						// TODO: missing potential forward of pNext chain here
 						// TODO: subpass contents relevant?
 						dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 					}
 					dev.dispatch.CmdEndRenderPass(cb);
 
-					afterDstOutsideRp(*cmd);
+					afterDstOutsideRp(*cmd, info);
 
 					dlg_assert(rp2);
-					auto rpBeginInfo = beginRpCmd->info;
+					auto rpBeginInfo = info.beginRenderPassCmd->info;
 					rpBeginInfo.renderPass = rp2;
 					// we don't clear anything when starting this rp
 					rpBeginInfo.pClearValues = nullptr;
 					rpBeginInfo.clearValueCount = 0u;
 
-					if(beginRpCmd->subpassBeginInfo.pNext) {
+					if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
 						auto beginRp2 = selectCmd(
 							dev.dispatch.CmdBeginRenderPass2,
 							dev.dispatch.CmdBeginRenderPass2KHR);
 						dlg_assert(beginRp2);
-						beginRp2(cb, &rpBeginInfo, &beginRpCmd->subpassBeginInfo);
+						beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
 					} else {
 						dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
-							beginRpCmd->subpassBeginInfo.contents);
+							info.beginRenderPassCmd->subpassBeginInfo.contents);
 					}
 
-					for(auto i = 0u; i < info.rpSubpass; ++i) {
+					for(auto i = 0u; i < info.hookedSubpass; ++i) {
 						// TODO: missing potential forward of pNext chain here
 						// TODO: subpass contents relevant?
 						dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
@@ -381,7 +491,7 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 			}
 
 			auto parentCmd = dynamic_cast<const ParentCommand*>(cmd);
-			dlg_assert(hookDst || parentCmd && parentCmd->children());
+			dlg_assert(hookDst || (parentCmd && parentCmd->children()));
 			if(parentCmd) {
 				++nextInfo.nextHookLevel;
 				hookRecord(parentCmd->children(), nextInfo);
@@ -403,7 +513,7 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 	}
 }
 
-void CommandHookRecordImpl::beforeDstOutsideRp(Command& bcmd) {
+void CommandHookRecordImpl::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
 	auto& dev = record->device();
 	auto doBarrierCopy = [this, &dev](const VkBufferCopy& copy, VkBuffer buffer) {
 		VkBufferMemoryBarrier barrier {};
@@ -449,12 +559,87 @@ void CommandHookRecordImpl::beforeDstOutsideRp(Command& bcmd) {
 		copy.size = sizeof(VkDispatchIndirectCommand);
 		doBarrierCopy(copy, cmd->buffer->handle);
 	} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
+		(void) cmd;
 		dlg_error("not implemented");
 	}
 }
 
-void CommandHookRecordImpl::afterDstOutsideRp(Command& cmd) {
+void CommandHookRecordImpl::afterDstOutsideRp(Command& cmd, const RecordInfo& info) {
 	(void) cmd;
+
+	auto& dev = record->device();
+	if(dstImage) {
+		dlg_assert(info.beginRenderPassCmd);
+		auto& desc = *info.beginRenderPassCmd->rp->desc;
+
+		auto& subpass = desc.subpasses[info.hookedSubpass];
+		auto& fb = *info.beginRenderPassCmd->fb;
+		auto attID = subpass.pColorAttachments[0].attachment;
+
+		dlg_assert(attID < fb.attachments.size());
+		auto& imgView = *fb.attachments[attID];
+		dlg_assert(imgView.img);
+
+		auto& srcImg = *imgView.img;
+
+		VkImageMemoryBarrier imgBarriers[2] {};
+
+		auto& srcBarrier = imgBarriers[0];
+		srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		srcBarrier.image = srcImg.handle;
+		srcBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
+		srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		srcBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+		srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		srcBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		srcBarrier.subresourceRange.layerCount = 1u;
+		srcBarrier.subresourceRange.levelCount = 1u;
+
+		auto& dstBarrier = imgBarriers[1];
+		dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		dstBarrier.image = dstImage->image;
+		dstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // discard
+		dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		dstBarrier.srcAccessMask = 0u;
+		dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		dstBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		dstBarrier.subresourceRange.layerCount = 1u;
+		dstBarrier.subresourceRange.levelCount = 1u;
+
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno, NOTE: probably could
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			0, 0, nullptr, 0, nullptr, 2, imgBarriers);
+
+		VkImageCopy copy {};
+		copy.dstOffset = {};
+		copy.srcOffset = {};
+		copy.extent = {fb.width, fb.height, 1u};
+		copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copy.srcSubresource.layerCount = 1u;
+		copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copy.dstSubresource.layerCount = 1u;
+
+		dev.dispatch.CmdCopyImage(cb,
+			srcImg.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			dstImage->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &copy);
+
+		srcBarrier.oldLayout = srcBarrier.newLayout;
+		srcBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		srcBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		srcBarrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+
+		dstBarrier.oldLayout = dstBarrier.newLayout;
+		dstBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		dstBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		dstBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could
+			0, 0, nullptr, 0, nullptr, 2, imgBarriers);
+	}
 }
 
 void CommandHookRecordImpl::finish() noexcept {
@@ -481,6 +666,10 @@ CommandHookSubmissionImpl::~CommandHookSubmissionImpl() {
 
 	transmitTiming();
 	transmitIndirect();
+
+	if(record->dstImage) {
+		record->hook->image = record->dstImage;
+	}
 }
 
 void CommandHookSubmissionImpl::transmitTiming() {
@@ -539,11 +728,13 @@ void CommandHookSubmissionImpl::transmitIndirect() {
 			std::memcpy(dst, src, cmdSize);
 		}
 	} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(hookDst)) {
+		(void) cmd;
 		auto size = sizeof(VkDispatchIndirectCommand);
 		dstIndirect.count = 1u;
 		dstIndirect.data.resize(size);
 		std::memcpy(record->hook->indirect.data.data(), record->bufferMap, size);
 	} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(hookDst)) {
+		(void) cmd;
 		dlg_error("Not implemented");
 	}
 }

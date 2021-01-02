@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <queue.hpp>
+#include <guidraw.hpp>
 #include <commandDesc.hpp>
 #include <record.hpp>
 
@@ -12,7 +13,7 @@ namespace fuen {
 struct CommandHookImpl;
 
 struct CommandBufferGui {
-	void draw();
+	void draw(Draw& draw);
 	void select(IntrusivePtr<CommandRecord> record, bool updateFromGroup);
 	void destroyed(const Handle& handle);
 
@@ -38,6 +39,8 @@ struct CommandBufferGui {
 	// TimeCommandHook* timeHook_ {};
 	// IndirectCommandHook* indirectHook_ {};
 	CommandHookImpl* hook_ {};
+
+	DrawGuiImage imgDraw_ {};
 };
 
 } // namespace fuen

@@ -220,6 +220,7 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 	for(auto& att : desc1.attachments) {
 		att.pNext = nullptr;
 		att.initialLayout = betweenLayout;
+		att.finalLayout = betweenLayout;
 		att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -238,7 +239,7 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 }
 
 VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
-	auto create2 = selectCmd(
+	auto create2 = selectCmdOpt(
 		dev.dispatch.CreateRenderPass2KHR,
 		dev.dispatch.CreateRenderPass2);
 	VkRenderPass rp {};
@@ -287,7 +288,7 @@ VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
 			dst = {};
 			dst.flags = src.flags;
 			dst.colorAttachmentCount = src.colorAttachmentCount;
-			dst.inputAttachmentCount = src.colorAttachmentCount;
+			dst.inputAttachmentCount = src.inputAttachmentCount;
 
 			dst.preserveAttachmentCount = src.preserveAttachmentCount;
 			dst.pPreserveAttachments = src.pPreserveAttachments;
@@ -323,6 +324,7 @@ VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
 		VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp));
 	}
 
+	dlg_assert(rp);
 	return rp;
 }
 

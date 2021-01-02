@@ -28,27 +28,23 @@ void fillIn(CommandDesc& ret, const Command* siblings, const Command& cmd) {
 		sibling = sibling->next;
 	}
 
-	dlg_assertm(!before, "Inconsistent sibling/cmd (broken command hierachy)");
+	dlg_assertm(!before, "Inconsistent sibling/cmd (broken command hierarchy)");
 }
 
-std::vector<CommandDesc> CommandDesc::get(const Command& root, span<const Command*> hierachy) {
+std::vector<CommandDesc> CommandDesc::get(const Command& root, span<const Command*> hierarchy) {
 	std::vector<CommandDesc> ret;
 
 	auto* siblingList = &root;
-	for(auto* lvl : reversed(hierachy)) {
+	for(auto* lvl : reversed(hierarchy)) {
 		dlg_assert(siblingList);
 		fillIn(ret.emplace_back(), siblingList, *lvl);
-
-		siblingList = nullptr;
-		if(auto* parent = dynamic_cast<const ParentCommand*>(lvl); parent) {
-			siblingList = parent->children();
-		}
+		siblingList = lvl->children();
 	}
 
 	return ret;
 }
 
-std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc) {
+std::vector<Command*> CommandDesc::findHierarchy(Command* root, span<const CommandDesc> desc) {
 	if(desc.empty() || !root) {
 		return {};
 	}
@@ -146,13 +142,10 @@ std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc)
 			return ret;
 		}
 
-		// otherwise: we must have a parent command.
-		auto parentCmd = dynamic_cast<ParentCommand*>(cand.command);
-		dlg_assert(parentCmd);
-
+		// otherwise: We must have a parent command.
 		// Find all children candidates, and push them to the stack,
 		// go one level deeper
-		auto cands = findCandidates(parentCmd->children(), desc[i]);
+		auto cands = findCandidates(cand.command->children(), desc[i]);
 		levels.push_back(cands);
 		++i;
 	}
@@ -162,7 +155,7 @@ std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc)
 
 Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
 	auto chain = findHierarchy(root, desc);
-	return chain.back();
+	return chain.empty() ? nullptr : chain.back();
 }
 
 void processType(CommandBufferDesc& desc, Command::Type type) {
@@ -196,9 +189,9 @@ CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 	std::unordered_map<std::string, u32> ids;
 
 	while(cmd) {
-		if(auto parentCmd = dynamic_cast<const ParentCommand*>(cmd); parentCmd) {
-			auto child = CommandBufferDesc::getAnnotate(parentCmd->children());
-			child.name = parentCmd->nameDesc();
+		if(auto children = cmd->children()) {
+			auto child = CommandBufferDesc::getAnnotate(children);
+			child.name = cmd->nameDesc();
 			ret.children.push_back(std::move(child));
 		}
 
@@ -211,76 +204,6 @@ CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 
 	return ret;
 }
-
-/*
-float CommandBufferDesc::match(const Command* cmd) {
-	auto cit = children.begin();
-
-	auto foundChildren = 0u;
-	auto childMatchSum = 0.f;
-
-	CommandBufferDesc desc;
-
-	while(cmd) {
-		// try to match chilren
-		if(auto section = dynamic_cast<const SectionCommand*>(cmd); section) {
-			// NOTE: when matching children we punish different orders
-			// *extremely* harshly, namely: (A, B) is considered 0% similar
-			// to (B, A). Intuitively, this seems ok for command buffer
-			// sections but it might be a problem in some cases; improve
-			// when need arises.
-			// NOTE: we only compare for exactly same sections here.
-			// We could also handle the case where labels e.g. include recording-
-			// specific information. Could filter out numbers or do a lexical
-			// distance check or something. Revisit if need ever arises.
-			for(auto it = cit; it != children.end(); ++it) {
-				if(it->name == section->nameDesc()) {
-					cit = it;
-					// NOTE: we could weigh children with more total commands
-					// more, via it->totalCommands. Not sure is sensible
-					childMatchSum += it->match(section->children);
-					++foundChildren;
-					break;
-				}
-			}
-
-			// TODO: should consider children present in the command buffer
-			// but not in the description. They are not considered at all atm.
-			// In general, the matching should probably be symmetric.
-		}
-
-		++desc.totalCommands;
-		processType(desc, cmd->type());
-		cmd = cmd->next;
-	}
-
-	float childFac = !children.empty() ? float(foundChildren) / children.size() : 1.f;
-	float avgChildMatch = foundChildren ? childMatchSum / foundChildren : childFac;
-
-	float weightSum = 0.f;
-	float diffSum = 0.f;
-
-	auto addMatch = [&](u32 dst, u32 src) {
-		diffSum += std::abs(float(dst) - float(src));
-		weightSum += std::max(dst, src);
-	};
-
-	addMatch(this->dispatchCommands, desc.dispatchCommands);
-	addMatch(this->drawCommands, desc.drawCommands);
-	addMatch(this->transferCommands, desc.transferCommands);
-	addMatch(this->syncCommands, desc.syncCommands);
-	addMatch(this->queryCommands, desc.queryCommands);
-
-	// When there are no commands in either, we match 100%
-	float ownDiff = weightSum > 0.0 ? diffSum / weightSum : 0.f;
-
-	// NOTE: kinda simplistic formula, can surely be improved.
-	// We might want to value large setions that are *exactly* similar a lot
-	// more since that is a huge indicator that command buffers come from
-	// the same source, even if whole sections are missing in either of them.
-	return (1.f - ownDiff) * childFac * avgChildMatch;
-}
-*/
 
 float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	// compare children

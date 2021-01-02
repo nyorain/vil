@@ -72,8 +72,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		}
 	}
 
-	auto result = devd.dispatch.CreateSwapchainKHR(device, pCreateInfo,
-		pAllocator, pSwapchain);
+	// TODO: might not be supported, check for that!
+	auto sci = *pCreateInfo;
+	sci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
+	auto result = devd.dispatch.CreateSwapchainKHR(device, &sci, pAllocator, pSwapchain);
 	if(result != VK_SUCCESS) {
 		return result;
 	}

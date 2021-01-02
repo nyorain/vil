@@ -260,6 +260,32 @@ std::vector<const Command*> Command::display(const Command* sel, TypeFlags typeF
 	return ret;
 }
 
+bool Command::isChild(const Command& cmd) const {
+	auto* it = children();
+	while(it) {
+		if(it == &cmd) {
+			return true;
+		}
+
+		it = it->next;
+	}
+
+	return false;
+}
+
+bool Command::isDescendant(const Command& cmd) const {
+	auto* it = children();
+	while(it) {
+		if(it == &cmd || it->isDescendant(cmd)) {
+			return true;
+		}
+
+		it = it->next;
+	}
+
+	return false;
+}
+
 // WaitEventsCmd
 void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	auto vkEvents = rawHandles(this->events);
@@ -340,6 +366,17 @@ std::vector<std::string> BarrierCmd::argumentsDesc() const {
 }
 
 // BeginRenderPassCmd
+unsigned BeginRenderPassCmd::subpassOfDescendant(const Command& cmd) const {
+	auto subpass = this->children();
+	for(auto i = 0u; subpass; ++i, subpass = subpass->next) {
+		if(subpass->isDescendant(cmd)) {
+			return i;
+		}
+	}
+
+	return u32(-1);
+}
+
 std::string BeginRenderPassCmd::toString() const {
 	auto [fbRes, fbName] = name(fb);
 	auto [rpRes, rpName] = name(rp);

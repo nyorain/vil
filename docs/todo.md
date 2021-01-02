@@ -7,6 +7,9 @@ v0.1, goal: end of january 2021
 	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
 	      resource reference buttons
 - [x] argumentsDesc for transfer commands (missing for a lot of commands rn)
+- [ ] before copying image in renderpass in commandHook, check if transferSrc
+      is supported for image (we might not be able to set it in some cases)
+	  	- [ ] check for support in swapchain and image creation
 - [ ] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
@@ -78,10 +81,16 @@ v0.1, goal: end of january 2021
 		- [ ] texel data from a buffer/image copy
 	- [ ] ability to directly jump to it - in the contextually inferred layout - from a command?
 	      (might be confusing, content might have changed since then)
+	- [ ] move to own tab/panel? needed in multiple cases
 - [ ] improve image viewer
+	- [ ] move to own tab/panel? needed in multiple cases
 	- [ ] show texel color? (requires us to download texels, just like we 
 	      do with buffers)
 	- [ ] better display (or completely hide?) swapchain images
+	      We should probably fill-in Image::ci for them.
+- [ ] fix "unimplemented descriptor category" bug (not sure when it appears)
+- [ ] automatically update resource lists in resource gui when tab is re-entered
+      from somewhere else
 - [ ] imgui styling
 	- [ ] use custom font
 	- [ ] go at least a bit away from the default imgui style

@@ -24,6 +24,9 @@ args = cc.get_supported_arguments([
 	# TODO: msvc really slow in debug build without this
 	# '-D_ITERATOR_DEBUG_LEVEL=0',
 
+	# highly useful for debugging on linux
+	'-D_GLIBCXX_DEBUG',
+
 	# TODO: those should be fixed in code, really.
 	'/wd4458', # declaration hides class member
 
@@ -77,6 +80,7 @@ src = files(
 	'src/gui/buffer.cpp',
 	'src/gui/cb.cpp',
 	# 'src/gui/bufferRead.cpp',
+	'src/gui/commandHook.cpp',
 
 	# vulkan api entrypoints
 	'src/handle.cpp',

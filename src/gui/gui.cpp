@@ -787,7 +787,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			// if(tabs_.cb.cb_) {
 			if(tabs_.cb.record_) {
 				if(ImGui::BeginTabItem("Command Buffer", nullptr, checkSelectTab(Tab::commandBuffer))) {
-					tabs_.cb.draw();
+					tabs_.cb.draw(draw);
 					ImGui::EndTabItem();
 				}
 			}

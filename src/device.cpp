@@ -496,13 +496,12 @@ void notifyDestruction(Device& dev, Handle& handle) {
 }
 
 void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name) {
-	if(!dev.ini->debugUtilsEnabled) {
+	if(!dev.ini->debugUtilsEnabled || !dev.dispatch.SetDebugUtilsObjectNameEXT) {
 		return;
 	}
 
 	auto name2 = "fuen:" + std::string(name);
 
-	dlg_assert(dev.dispatch.SetDebugUtilsObjectNameEXT);
 	VkDebugUtilsObjectNameInfoEXT nameInfo {};
 	nameInfo.objectHandle = handle;
 	nameInfo.objectType = objType;

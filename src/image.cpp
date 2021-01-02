@@ -88,7 +88,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		}
 	}
 
-	// TODO: needed for our own operations on the buffer. We should
+	// NOTE: needed for our own operations on the buffer. We should
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
 	auto concurrent = false;
@@ -100,6 +100,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
 		concurrent = true;
 	}
+
+	// NOTE: Currently only needed for framebuffer attachments, only set
+	// for colorattachment usage images?
+	// TODO: might not be supported, check for that!
+	nci.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
 	auto res = dev.dispatch.CreateImage(device, &nci, pAllocator, pImage);
 	if(res != VK_SUCCESS) {

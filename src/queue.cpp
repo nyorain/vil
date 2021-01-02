@@ -271,15 +271,14 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				dlg_assert(rec.group);
 
 				// potentially hook command buffer
-				if(rec.group->hook.active()) {
-					scb.hook = std::make_unique<CommandHookSubmission>();
-					auto hooked = rec.group->hook.hook(cb, *scb.hook);
+				if(rec.group->hook) {
+					// scb.hook = std::make_unique<CommandHookSubmission>();
+					auto hooked = rec.group->hook->hook(cb, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
-					dlg_assertm(!cb.hook.active(), "Hook registered for command buffer and group");
-				} else if(cb.hook.active()) {
-					scb.hook = std::make_unique<CommandHookSubmission>();
-					auto hooked = cb.hook.hook(cb, *scb.hook);
+					dlg_assertm(!cb.hook, "Hook registered for command buffer and group");
+				} else if(cb.hook) {
+					auto hooked = cb.hook->hook(cb, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 				} else {
@@ -447,12 +446,13 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 	std::lock_guard lock(dev.mutex);
 	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
 		auto& subm = *it;
-		auto res = checkLocked(*subm);
-		if(!res) {
+		auto nit = checkLocked(*subm);
+		if(!nit) {
 			dlg_error("Expected submission to be completed after vkDeviceWaitIdle");
 			++it;
 		}
-		// otherwise, don't increase it, since the current element was removed
+
+		it = *nit;
 	}
 
 	return res;

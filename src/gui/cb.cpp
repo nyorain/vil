@@ -1,5 +1,6 @@
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
+#include <gui/commandHook.hpp>
 // #include <gui/bufferRead.hpp>
 #include <bytes.hpp>
 #include <queue.hpp>
@@ -12,109 +13,11 @@
 
 namespace fuen {
 
-// TimeCommandHook
-/*
-struct TimeCommandHook : CommandHookImpl {
-	u64 lastTime {};
-	std::unique_ptr<CommandHookRecordImpl> createRecord(CommandBuffer&, Command&) override;
-};
-
-struct TimeCommandHookRecord : CommandHookRecordImpl {
-	TimeCommandHook* hook {};
-	VkQueryPool queryPool {};
-
-	TimeCommandHookRecord(TimeCommandHook& hook, CommandBuffer& cb);
-	void recordBeforeHooked(Device&, VkCommandBuffer, Command&) override;
-	void recordAfterHookedChildren(Device&, VkCommandBuffer, Command&) override;
-	void finish(Device& dev) noexcept override;
-	std::unique_ptr<CommandHookSubmissionImpl> submit() override;
-	void invalidate() override { hook = nullptr; }
-	SimultaneousSubmitHook simulataneousBehavior() const override {
-		return SimultaneousSubmitHook::skip;
-	}
-};
-
-struct TimeCommandHookSubmission : CommandHookSubmissionImpl {
-	TimeCommandHookRecord* record {};
-
-	TimeCommandHookSubmission(TimeCommandHookRecord& rec) : record(&rec) {}
-	void finish(Device& dev) noexcept override;
-};
-
-// TimeCommandHook
-std::unique_ptr<CommandHookRecordImpl> TimeCommandHook::createRecord(
-		CommandBuffer& cb, Command&) {
-	return std::make_unique<TimeCommandHookRecord>(*this, cb);
-}
-
-// TimeCommandHookRecord
-TimeCommandHookRecord::TimeCommandHookRecord(TimeCommandHook& xhook, CommandBuffer& cb) {
-	hook = &xhook;
-
-	auto& dev = *cb.dev;
-
-	VkQueryPoolCreateInfo qci {};
-	qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-	qci.queryCount = 2u;
-	qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-	VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool));
-	nameHandle(dev, this->queryPool, "TimeCommandHookRecord:queryPool");
-}
-
-void TimeCommandHookRecord::recordBeforeHooked(Device& dev, VkCommandBuffer cb, Command&) {
-	dev.dispatch.CmdResetQueryPool(cb, this->queryPool, 0, 2);
-
-	auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-	dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
-}
-
-void TimeCommandHookRecord::recordAfterHookedChildren(Device& dev, VkCommandBuffer cb, Command&) {
-	auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-	dev.dispatch.CmdWriteTimestamp(cb, stage1, this->queryPool, 1);
-}
-
-std::unique_ptr<CommandHookSubmissionImpl> TimeCommandHookRecord::submit() {
-	return std::make_unique<TimeCommandHookSubmission>(*this);
-}
-
-void TimeCommandHookRecord::finish(Device& dev) noexcept {
-	dev.dispatch.DestroyQueryPool(dev.handle, queryPool, nullptr);
-	queryPool = {};
-}
-
-void TimeCommandHookSubmission::finish(Device& dev) noexcept {
-	// Hook was removed or record invalidated. We cannot return
-	// our results back to the hook.
-	if(!record->hook) {
-		return;
-	}
-
-	// Store the query pool results.
-	// Since the submission finished, we can expect them to be available
-	// soon, so we wait for them.
-	u64 data[2];
-	auto res = dev.dispatch.GetQueryPoolResults(dev.handle, record->queryPool, 0, 2,
-		sizeof(data), data, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
-
-	// check if query is available
-	if(res != VK_SUCCESS) {
-		dlg_error("GetQueryPoolResults failed: {}", res);
-		return;
-	}
-
-	u64 before = data[0];
-	u64 after = data[1];
-
-	auto diff = after - before;
-	record->hook->lastTime = diff;
-}
-*/
-
 // CommandBufferGui
 // CommandBufferGui::CommandBufferGui() = default;
 // CommandBufferGui::~CommandBufferGui() = default;
 
-void CommandBufferGui::draw() {
+void CommandBufferGui::draw(Draw& draw) {
 	if(!record_) {
 		ImGui::Text("No record selected");
 		return;
@@ -137,8 +40,12 @@ void CommandBufferGui::draw() {
 		if(lastRecord != record_.get()) {
 			record_ = record_->group->lastRecord;
 			command_ = CommandDesc::find(record_->commands, desc_);
-			// TODO: reset hooks/update desc?
+			// TODO: reset hook/update desc?
 		}
+	} else if(!updateFromGroup_ && record_->group && (record_->group->hook || hook_)) {
+		dlg_assert(record_->group->hook.get() == hook_);
+		record_->group->hook.reset();
+		hook_ = nullptr;
 	}
 
 	ImGui::PushID(dlg::format("{}", record_->group).c_str());
@@ -148,46 +55,22 @@ void CommandBufferGui::draw() {
 	// to displayCommands instead of various parameters
 	auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
 	auto nsel = displayCommands(record_->commands, command_, flags);
-	auto commandChanged = false;
+	// auto commandChanged = false;
 	if(!nsel.empty() && nsel.front() != command_) {
-		commandChanged = true;
+		// commandChanged = true;
 		command_ = nsel.front();
 		desc_ = CommandDesc::get(*record_->commands, nsel);
 
-		if(record_->group) {
-			record_->group->hook.desc(desc_);
-		}
-	}
-
-	if(commandChanged) {
-		auto* drawIndirect = dynamic_cast<const DrawIndirectCmd*>(command_);
-		if(drawIndirect && drawIndirect->indexed) {
-			drawIndirect = nullptr;
-		}
-		if(indirectHook_ && !drawIndirect) {
-			record_->group->hook.remove(*indirectHook_);
-			indirectHook_ = nullptr;
-		} else if(drawIndirect && !indirectHook_) {
-			if(!record_->group) {
-				// TODO
-				// NOTE: we could query the group for a command buffer during
-				// its "end" call. Might lead to other problems tho.
-				// disabledQueryTime("Record was never submitted");
-				dlg_warn("Record was never submitted");
-				dlg_assert(!timeHook_);
-			} else if(!record_->cb && !updateFromGroup_) {
-				// TODO
-				// disabledQueryTime("Record isn't valid and viewed statically");
-				dlg_warn("Record isn't valid and viewed statically");
-				// resetTimeHook = true;
-			} else {
-				auto impl = std::make_unique<IndirectCommandHook>(IndirectCommandHook::Type::draw);
-				indirectHook_ = impl.get();
-				record_->group->hook.add(std::move(impl));
+		if(!hook_) {
+			if(record_->group) {
+				hook_ = new CommandHookImpl();
+				record_->group->hook.reset(hook_);
 			}
 		}
 
-		record_->group->hook.desc(desc_);
+		if(hook_) {
+			hook_->desc(desc_);
+		}
 	}
 
 	ImGui::PopID();
@@ -201,58 +84,35 @@ void CommandBufferGui::draw() {
 		// Inspector
 		command_->displayInspector(*gui_);
 
-		// TODO: restructure!
-		auto* drawIndirect = dynamic_cast<const DrawIndirectCmd*>(command_);
-		if(drawIndirect) {
-			if(indirectHook_ && indirectHook_->count) {
-				auto span = ReadBuf(indirectHook_->data);
-				auto cmd = read<VkDrawIndirectCommand>(span);
-				record_->group->hook.desc(desc_);
-
-				imGuiText("firstVertex: {}", cmd.firstVertex);
-				imGuiText("vertexCount: {}", cmd.vertexCount);
-				imGuiText("firstInstance: {}", cmd.firstInstance);
-				imGuiText("instanceCount: {}", cmd.instanceCount);
-			}
-		}
-
 		// Show own general gui
-		auto resetTimeHook = false;
-		auto disabledQueryTime = [&](const auto& tooltip) {
-			ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+		if(hook_) {
+			// TODO: separate count and valid flag
+			if(hook_->indirect.count) {
+				auto span = ReadBuf(hook_->indirect.data);
+				if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_)) {
+					if(dcmd->indexed) {
+						auto cmd = read<VkDrawIndexedIndirectCommand>(span);
+						imGuiText("firstIndex: {}", cmd.firstIndex);
+						imGuiText("indexCount: {}", cmd.indexCount);
+						imGuiText("vertexOffset: {}", cmd.vertexOffset);
+						imGuiText("firstInstance: {}", cmd.firstInstance);
+						imGuiText("instanceCount: {}", cmd.instanceCount);
+					} else {
+						auto cmd = read<VkDrawIndirectCommand>(span);
+						imGuiText("firstVertex: {}", cmd.firstVertex);
+						imGuiText("vertexCount: {}", cmd.vertexCount);
+						imGuiText("firstInstance: {}", cmd.firstInstance);
+						imGuiText("instanceCount: {}", cmd.instanceCount);
+					}
+				} else if(dynamic_cast<const DispatchIndirectCmd*>(command_)) {
+					auto cmd = read<VkDispatchIndirectCommand>(span);
+					imGuiText("groups X: {}", cmd.x);
+					imGuiText("groups Y: {}", cmd.y);
+					imGuiText("groups Z: {}", cmd.z);
+				} /* TODO: drawIndirectCount */
 
-			ImGui::Checkbox("Query Time", &queryTime_);
-			if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-				ImGui::BeginTooltip();
-				ImGui::Text("%s", tooltip);
-				ImGui::EndTooltip();
-			}
-
-			ImGui::PopStyleVar();
-			ImGui::PopItemFlag();
-		};
-
-		if(!record_->group) {
-			// NOTE: we could query the group for a command buffer during
-			// its "end" call. Might lead to other problems tho.
-			disabledQueryTime("Record was never submitted");
-			dlg_assert(!timeHook_);
-		} else if(!record_->cb && !updateFromGroup_) {
-			disabledQueryTime("Record isn't valid and viewed statically");
-			resetTimeHook = true;
-		} else {
-			ImGui::Checkbox("Query Time", &queryTime_);
-			if(queryTime_) {
-				if(!timeHook_) {
-					auto impl = std::make_unique<TimeCommandHook>();
-					timeHook_ = impl.get();
-
-					record_->group->hook.add(std::move(impl));
-					record_->group->hook.desc(desc_);
-				}
-
-				auto displayDiff = timeHook_->lastTime * dev.props.limits.timestampPeriod;
+				auto lastTime = hook_->lastTime;
+				auto displayDiff = lastTime * dev.props.limits.timestampPeriod;
 				auto timeNames = {"ns", "mus", "ms", "s"};
 
 				auto it = timeNames.begin();
@@ -263,15 +123,63 @@ void CommandBufferGui::draw() {
 				}
 
 				imGuiText("Time: {} {}", displayDiff, *it);
-			} else {
-				resetTimeHook = true;
-			}
-		}
 
-		if(resetTimeHook) {
-			if(timeHook_) {
-				record_->group->hook.remove(*timeHook_);
-				timeHook_ = nullptr;
+				if(hook_->image) {
+					VkDescriptorImageInfo dsii {};
+					dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					dsii.imageView = hook_->image->imageView;
+					dsii.sampler = dev.renderData->nearestSampler;
+
+					VkWriteDescriptorSet write {};
+					write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+					write.descriptorCount = 1u;
+					write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					write.dstSet = draw.dsSelected;
+					write.pImageInfo = &dsii;
+
+					dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
+
+					// TODO
+					ImGui::Spacing();
+					ImGui::Spacing();
+
+					ImVec2 pos = ImGui::GetCursorScreenPos();
+
+					float aspect = float(hook_->image->width) / hook_->image->height;
+
+					// TODO: this logic might lead to problems for 1xHUGE images
+					float regW = ImGui::GetContentRegionAvail().x - 20.f;
+					float regH = regW / aspect;
+
+					// TODO
+					imgDraw_.type = DrawGuiImage::Type::e2d;
+					imgDraw_.flags =
+						DrawGuiImage::flagMaskR |
+						DrawGuiImage::flagMaskG |
+						DrawGuiImage::flagMaskB |
+						DrawGuiImage::flagMaskA;
+					ImGui::Image((void*) &imgDraw_, {regW, regH});
+
+					// Taken pretty much just from the imgui demo
+					auto& io = gui_->imguiIO();
+					if (ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+						float region_sz = 64.0f;
+						float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
+						float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
+						float zoom = 4.0f;
+						if (region_x < 0.0f) { region_x = 0.0f; }
+						else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
+						if (region_y < 0.0f) { region_y = 0.0f; }
+						else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
+						ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
+						ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
+						ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
+						ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
+						ImGui::Image((void*) &imgDraw_, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
+						ImGui::EndTooltip();
+					}
+				}
 			}
 		}
 	}
@@ -286,18 +194,12 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 
 	// Reset old time hooks
 	if(record_) {
-		if(timeHook_) {
-			record_->group->hook.remove(*timeHook_);
-			timeHook_ = nullptr;
-		}
-
-		if(indirectHook_) {
-			record_->group->hook.remove(*indirectHook_);
-			indirectHook_ = nullptr;
+		if(record_->group) {
+			record_->group->hook = {};
+			hook_ = nullptr;
 		}
 	} else {
-		dlg_assert(!timeHook_);
-		dlg_assert(!indirectHook_);
+		dlg_assert(!hook_);
 	}
 
 	command_ = {};

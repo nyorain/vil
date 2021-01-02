@@ -8,6 +8,20 @@ namespace fuen {
 struct CommandHookRecordImpl;
 struct BeginRenderPassCmd;
 
+struct ViewableImageCopy {
+	Device* dev {};
+	u32 refCount {};
+	VkImage image {};
+	VkImageView imageView {};
+	VkDeviceMemory memory {};
+
+	u32 width {};
+	u32 height {};
+
+	ViewableImageCopy(Device& dev, VkFormat, u32 width, u32 height);
+	~ViewableImageCopy();
+};
+
 struct CommandHookImpl : CommandHook {
 public:
 	// timing
@@ -15,12 +29,11 @@ public:
 
 	// indirect commands
 	struct {
-		u32 count;
+		u32 count {};
 		std::vector<std::byte> data;
 	} indirect;
 
-	// image before command
-	// VkImageView lastImageView {};
+	IntrusivePtr<ViewableImageCopy> image;
 
 public:
 	VkCommandBuffer hook(CommandBuffer& hooked,
@@ -28,6 +41,10 @@ public:
 
 	void desc(std::vector<CommandDesc> desc);
 	void invalidateRecordings();
+	void invalidateData() {
+		lastTime = {};
+		indirect = {};
+	}
 
 	void finish() noexcept override { delete this; }
 
@@ -61,8 +78,8 @@ struct CommandHookRecordImpl : CommandHookRecord {
 	VkRenderPass rp1 {};
 	VkRenderPass rp2 {};
 
-	VkImage dstImage {};
-	VkImageView dstImageView {};
+	IntrusivePtr<ViewableImageCopy> dstImage {};
+
 	VkBuffer dstBuffer {};
 	void* bufferMap {};
 	VkDeviceMemory dstMemory {};
@@ -77,7 +94,7 @@ struct CommandHookRecordImpl : CommandHookRecord {
 
 	struct RecordInfo {
 		bool splitRenderPass {}; // whether we have to hook the renderpass
-		unsigned rpSubpass {}; // current subpass
+		u32 hookedSubpass {};
 		BeginRenderPassCmd* beginRenderPassCmd {};
 
 		unsigned nextHookLevel {}; // on hcommand, hook hierarchy
@@ -85,8 +102,8 @@ struct CommandHookRecordImpl : CommandHookRecord {
 
 	void hookRecord(Command* cmdChain, RecordInfo info);
 
-	void beforeDstOutsideRp(Command& cmd);
-	void afterDstOutsideRp(Command& cmd);
+	void beforeDstOutsideRp(Command& cmd, const RecordInfo& info);
+	void afterDstOutsideRp(Command& cmd, const RecordInfo& info);
 
 	void finish() noexcept override;
 };

@@ -82,6 +82,20 @@ struct Command {
 	// Should forward the call to all potential children.
 	virtual void unset(const std::unordered_set<DeviceHandle*>&) {}
 
+	// Returns the children command list. For non-parent commands, this
+	// is simply null.
+	virtual Command* children() const { return nullptr; }
+
+	// Returns whether the given command is a child of this one.
+	// Complexity is linear in the number of child commands.
+	// Returns false for itself.
+	virtual bool isChild(const Command& cmd) const;
+
+	// Returns whether the given command is a descendant of this one.
+	// Complexity is linear in the number of descendants.
+	// Returns false for itself.
+	virtual bool isDescendant(const Command& cmd) const;
+
 	// Forms a forward linked list with siblings
 	Command* next {};
 
@@ -115,9 +129,6 @@ std::vector<const Command*> displayCommands(const Command* cmd,
 		const Command* selected, Command::TypeFlags typeFlags);
 
 struct ParentCommand : Command {
-	// Returns the children command list.
-	virtual Command* children() const = 0;
-
 	std::vector<const Command*> display(const Command* selected,
 		TypeFlags typeFlags, const Command* cmd) const;
 	std::vector<const Command*> display(const Command* selected,
@@ -179,6 +190,10 @@ struct BeginRenderPassCmd : SectionCommand {
 	RenderPass* rp;
 
 	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
+
+	// Returns the subpass that contains the given command.
+	// Returns u32(-1) if no subpass is ancestor of the given command.
+	u32 subpassOfDescendant(const Command& cmd) const;
 
 	std::string toString() const override;
 	std::vector<const Command*> display(const Command*, TypeFlags) const override;

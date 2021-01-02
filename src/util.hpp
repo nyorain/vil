@@ -109,7 +109,6 @@ void copyChain(const void*& pNext, std::vector<std::unique_ptr<std::byte[]>>& bu
 // See node 1651
 template<typename F>
 auto doSelectCmd(F f) {
-	dlg_assert(f);
 	return f;
 }
 
@@ -119,10 +118,17 @@ auto doSelectCmd(F f, Rest...  rest) {
 }
 
 template<typename F, typename... Rest>
+auto selectCmdOpt(F f, Rest...  rest) {
+	static_assert((std::is_same_v<F, Rest> && ...));
+	return doSelectCmd(f, rest...);
+}
+
+template<typename F, typename... Rest>
 auto selectCmd(F f, Rest...  rest) {
 	static_assert((std::is_same_v<F, Rest> && ...));
-	dlg_assert(f || (... || rest));
-	return doSelectCmd(f, rest...);
+	auto ret = doSelectCmd(f, rest...);
+	dlg_assert(ret);
+	return ret;
 }
 
 // Taken from vpp/util

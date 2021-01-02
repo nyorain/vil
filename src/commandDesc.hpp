@@ -31,8 +31,7 @@ struct CommandDesc {
 	// To synchronize with command buffer resetting, the caller likely
 	// has to lock the device mutex (to make sure cb doesn't get reset
 	// while this is executed).
-	// static std::vector<CommandDesc> get(const Command& root, const Command& cmd);
-	static std::vector<CommandDesc> get(const Command& root, span<const Command*> hierachy);
+	static std::vector<CommandDesc> get(const Command& root, span<const Command*> hierarchy);
 
 	static std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc);
 	static Command* find(Command* root, span<const CommandDesc> desc);
@@ -58,13 +57,11 @@ struct CommandBufferDesc {
 	// static CommandBufferDesc get(const Command* commands);
 	static CommandBufferDesc getAnnotate(Command* commands);
 
-	// Returns how much the given command chain matches this description.
-	// The return value is always between 0 and 1 where 1 means a 100% match
-	// and 0% means that the commands have absolutely nothing in common
-	// with this description. A good empirical threshold for considering
-	// a command buffer similar to a description is ~0.6.
-	// float match(const Command* commands);
-
+	// Returns how similar the two given command buffer descriptions are.
+	// The returned value is always between 0 and 1 where 1 means a 100% match
+	// and 0% means that the descriptions have absolutely nothing in common.
+	// An empirical threshold for considering two command buffers similar
+	// is ~0.6-0.9.
 	friend float match(const CommandBufferDesc& a, const CommandBufferDesc& b);
 };
 
