@@ -93,15 +93,16 @@ Device::~Device() {
 		dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
 	}
 
-	for(auto& qf : queueFamilies) {
-		if(qf.commandPool) {
-			dispatch.DestroyCommandPool(handle, qf.commandPool, nullptr);
-		}
-	}
-
 	// erase queue datas
 	for(auto& queue : this->queues) {
 		eraseData(queue->handle);
+	}
+
+	for(auto& qf : queueFamilies) {
+		qf.commandGroups.clear();
+		if(qf.commandPool) {
+			dispatch.DestroyCommandPool(handle, qf.commandPool, nullptr);
+		}
 	}
 }
 

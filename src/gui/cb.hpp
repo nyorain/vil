@@ -8,17 +8,16 @@
 
 namespace fuen {
 
-// struct TimeCommandHook;
-// struct IndirectCommandHook;
 struct CommandHookImpl;
+struct ViewableImageCopy;
 
 struct CommandBufferGui {
 	void draw(Draw& draw);
 	void select(IntrusivePtr<CommandRecord> record, bool updateFromGroup);
 	void destroyed(const Handle& handle);
 
-	CommandBufferGui() = default;
-	~CommandBufferGui() = default;
+	CommandBufferGui();
+	~CommandBufferGui();
 
 	Gui* gui_ {};
 	bool updateFromGroup_ {};
@@ -40,6 +39,7 @@ struct CommandBufferGui {
 	// IndirectCommandHook* indirectHook_ {};
 	CommandHookImpl* hook_ {};
 
+	IntrusivePtr<ViewableImageCopy> imageCopy_;
 	DrawGuiImage imgDraw_ {};
 };
 

@@ -1210,15 +1210,36 @@ void ResourceGui::drawDesc(Draw&, Event&) {
 }
 void ResourceGui::drawDesc(Draw&, Semaphore&) {
 }
-void ResourceGui::drawDesc(Draw&, Fence&) {
+void ResourceGui::drawDesc(Draw&, Fence& fence) {
+	ImGui::Text("%s", name(fence).c_str());
+	ImGui::Spacing();
+
+	// TODO: display associated submission, if any
 }
 void ResourceGui::drawDesc(Draw&, BufferView& bufView) {
+	ImGui::Text("%s", name(bufView).c_str());
+	ImGui::Spacing();
+
 	refButtonD(*gui_, bufView.buffer);
+	ImGui::SameLine();
+	imGuiText("Offset {}, Size {}", bufView.ci.offset, bufView.ci.range);
+
+	imGuiText("{}", vk::name(bufView.ci.format));
 }
-void ResourceGui::drawDesc(Draw&, QueryPool&) {
+void ResourceGui::drawDesc(Draw&, QueryPool& pool) {
+	ImGui::Text("%s", name(pool).c_str());
+	ImGui::Spacing();
+
+	imGuiText("Query type: {}", vk::name(pool.ci.queryType));
+	imGuiText("Query count: {}", pool.ci.queryCount);
+	imGuiText("Pipeline statistics: {}",
+		vk::flagNames(VkQueryPipelineStatisticFlagBits(pool.ci.pipelineStatistics)));
 }
 
 void ResourceGui::drawDesc(Draw&, Queue& queue) {
+	ImGui::Text("%s", name(queue).c_str());
+	ImGui::Spacing();
+
 	const auto& qprops = queue.dev->queueFamilies[queue.family].props;
 
 	imGuiText("Queue Family: {} ({})", queue.family,
@@ -1234,6 +1255,9 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 }
 
 void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
+	ImGui::Text("%s", name(swapchain).c_str());
+	ImGui::Spacing();
+
 	auto& sci = swapchain.ci;
 	asColumns2({{
 		{"Format", vk::name(sci.imageFormat)},

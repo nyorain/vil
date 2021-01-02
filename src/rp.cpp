@@ -142,6 +142,285 @@ void downgrade(std::vector<D>& dst, span<const T> src) {
 	}
 }
 
+bool splittable(const RenderPassDesc& desc, unsigned split) {
+	// We basically perform symbolic execution of the render pass.
+	// Symbolic state per attachment:
+	// (attachmentID, subpassID, sequenceID)
+	// When an attachment A is written in subpass S, it is moved to
+	// state (A, I, 0). Initially all attachments A start in state (A, u32(-1), 0).
+	// 'sequenceID' is only used to seperate between partially executed
+	// render passes, when the split is performed.
+	// Splitting is mainly a problem for certain ordering of resolve attachments.
+	// When attachment A is resolved into B, the current state of A becomes the
+	// current state of B as well.
+	// We basically compare a subpass-by-subpass reference execution of the
+	// render pass (with current states symbAttsRef) with our splitted
+	// execution of the render pass (with current states symbAtts).
+	// If a read attachment is in a different state in our split-execution
+	// than in the reference execution, unexpected values would be visible
+	// to the application and therefore our approach not viable.
+	using AttState = std::tuple<u32, u32, u32>;
+	std::vector<AttState> symbAttsRef;
+	symbAttsRef.resize(desc.attachments.size());
+	for(auto a = 0u; a < desc.attachments.size(); ++a) {
+		// NOTE: could respect initial layout.
+		// Initial content might be undefined, might be relevant.
+		// But on the other hand, renderpasses using undefined content
+		// are broken anyways.
+		symbAttsRef[a] = {u32(a), u32(-1), 0};
+	}
+
+	// TODO: consider preserve attachments?
+	// can we really set all unused non-preserve attachments to undefined?
+
+	// Start real render pass, [0, split).
+	// Both executions are the same so far.
+	for(auto s = 0u; s < split; ++s) {
+		auto& subp = desc.subpasses[s];
+		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+			auto attID = subp.pColorAttachments[i].attachment;
+			symbAttsRef[attID] = {attID, s, 0};
+		}
+
+		if(subp.pDepthStencilAttachment) {
+			auto attID = subp.pDepthStencilAttachment->attachment;
+			symbAttsRef[attID] = {attID, s, 0};
+		}
+
+		if(subp.pResolveAttachments) {
+			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+				auto srcID = subp.pColorAttachments[i].attachment;
+				auto dstID = subp.pResolveAttachments[i].attachment;
+				symbAttsRef[dstID] = symbAttsRef[srcID];
+			}
+		}
+	}
+
+	// perform the split
+	auto symbAtts = symbAttsRef;
+
+	// correct symbolic id as the render pass isn't finishe yet
+	auto& subp = desc.subpasses[split];
+	for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+		auto attID = subp.pColorAttachments[i].attachment;
+		symbAttsRef[attID] = {attID, split, 0};
+		symbAtts[attID] = {attID, split, 2};
+	}
+
+	if(subp.pDepthStencilAttachment) {
+		auto attID = subp.pDepthStencilAttachment->attachment;
+		symbAttsRef[attID] = {attID, split, 0};
+		symbAtts[attID] = {attID, split, 2};
+	}
+
+	if(subp.pResolveAttachments) {
+		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+			auto srcID = subp.pColorAttachments[i].attachment;
+			auto dstID = subp.pResolveAttachments[i].attachment;
+			symbAttsRef[dstID] = symbAttsRef[srcID];
+			symbAtts[dstID] = symbAtts[srcID];
+		}
+	}
+
+	// finish rp0 (split, end)
+	for(auto s = split + 1; s < desc.subpasses.size(); ++s) {
+		auto& subp = desc.subpasses[s];
+		// We don't do anything to color/depthStencil attachments here.
+		// Unfortunately, resolve operations are automatically done
+		if(subp.pResolveAttachments) {
+			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+				auto srcID = subp.pColorAttachments[i].attachment;
+				auto dstID = subp.pResolveAttachments[i].attachment;
+				symbAtts[dstID] = symbAtts[srcID];
+			}
+		}
+	}
+
+	// start rp1 [0, split)
+	for(auto s = 0u; s < split; ++s) {
+		auto& subp = desc.subpasses[s];
+		// We don't do anything to color/depthStencil attachments here.
+		// Unfortunately, resolve operations are automatically done
+		if(subp.pResolveAttachments) {
+			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+				auto srcID = subp.pColorAttachments[i].attachment;
+				auto dstID = subp.pResolveAttachments[i].attachment;
+				symbAtts[dstID] = symbAtts[srcID];
+			}
+		}
+	}
+
+	// execute our hooked:dst command
+	for(auto i = 0u; i < subp.inputAttachmentCount; ++i) {
+		auto attID = subp.pInputAttachments[i].attachment;
+		if(symbAtts[attID] != symbAttsRef[attID]) {
+			dlg_trace("splittable({}): subpass {} input {} ({})", split, split, i, attID);
+			return false;
+		}
+	}
+
+	for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+		auto attID = subp.pColorAttachments[i].attachment;
+		if(symbAtts[attID] != AttState{attID, split, 2}) {
+			dlg_trace("splittable({}): Unexpected color ({}) state for seq 1", split, i);
+			return false;
+		}
+
+		symbAtts[attID] = {attID, split, 1};
+	}
+
+	if(subp.pDepthStencilAttachment) {
+		auto attID = subp.pDepthStencilAttachment->attachment;
+		if(symbAtts[attID] != AttState{attID, split, 2}) {
+			dlg_trace("splittable({}): Unexpected depthStencil state for seq 1", split);
+			return false;
+		}
+
+		symbAtts[attID] = {attID, split, 1};
+	}
+
+	if(subp.pResolveAttachments) {
+		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+			auto srcID = subp.pColorAttachments[i].attachment;
+			auto dstID = subp.pResolveAttachments[i].attachment;
+			symbAtts[dstID] = symbAtts[srcID];
+		}
+	}
+
+	// end rp1 (split, end)
+	for(auto s = split + 1; s < desc.subpasses.size(); ++s) {
+		auto& subp = desc.subpasses[s];
+		// We don't do anything to color/depthStencil attachments here.
+		// Unfortunately, resolve operations are automatically done
+		if(subp.pResolveAttachments) {
+			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+				auto srcID = subp.pColorAttachments[i].attachment;
+				auto dstID = subp.pResolveAttachments[i].attachment;
+				symbAtts[dstID] = symbAtts[srcID];
+			}
+		}
+	}
+
+	// start rp2, [0, split)
+	for(auto s = 0u; s < split; ++s) {
+		auto& subp = desc.subpasses[s];
+		// We don't do anything to color/depthStencil attachments here.
+		// Unfortunately, resolve operations are automatically done
+		if(subp.pResolveAttachments) {
+			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+				auto srcID = subp.pColorAttachments[i].attachment;
+				auto dstID = subp.pResolveAttachments[i].attachment;
+				symbAtts[dstID] = symbAtts[srcID];
+			}
+		}
+	}
+
+	// execute rest of split (everything after hooked)
+	for(auto i = 0u; i < subp.inputAttachmentCount; ++i) {
+		auto attID = subp.pInputAttachments[i].attachment;
+		if(symbAtts[attID] != symbAttsRef[attID]) {
+			dlg_trace("splittable({}): subpass {} input {} ({})", split, split, i, attID);
+			return false;
+		}
+	}
+
+	for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+		auto attID = subp.pColorAttachments[i].attachment;
+		if(symbAtts[attID] != AttState{attID, split, 1}) {
+			dlg_trace("splittable({}): Unexpected color ({}) state for seq 0", split, i);
+			return false;
+		}
+
+		symbAtts[attID] = {attID, split, 0};
+	}
+
+	if(subp.pDepthStencilAttachment) {
+		auto attID = subp.pDepthStencilAttachment->attachment;
+		if(symbAtts[attID] != AttState{attID, split, 1}) {
+			dlg_trace("splittable({}): Unexpected depthStencil state for seq 0", split);
+			return false;
+		}
+
+		symbAtts[attID] = {attID, split, 0};
+	}
+
+	if(subp.pResolveAttachments) {
+		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+			auto srcID = subp.pColorAttachments[i].attachment;
+			auto dstID = subp.pResolveAttachments[i].attachment;
+			symbAtts[dstID] = symbAtts[srcID];
+		}
+	}
+
+	// finish real render pass (split, end)
+	for(auto s = split + 1; s < desc.subpasses.size(); ++s) {
+		auto& subp = desc.subpasses[s];
+		for(auto i = 0u; i < subp.inputAttachmentCount; ++i) {
+			auto attID = subp.pInputAttachments[i].attachment;
+			if(symbAtts[attID] != symbAttsRef[attID]) {
+				dlg_trace("splittable({}): subpass {} input {} ({})", split, s, i, attID);
+				return false;
+			}
+		}
+
+		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+			auto attID = subp.pColorAttachments[i].attachment;
+			if(symbAtts[attID] != symbAttsRef[attID]) {
+				dlg_trace("splittable({}): subpass {} color {} ({})", split, s, i, attID);
+				return false;
+			}
+
+			symbAtts[attID] = {attID, s, 0};
+			symbAttsRef[attID] = {attID, s, 0};
+		}
+
+		if(subp.pResolveAttachments) {
+			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+				// Already checked this for color attachments
+				// auto attID = subp.pColorAttachments[i].attachment;
+				// if(symbAtts[attID] != symbAttsRef[attID]) {
+				// 	return false;
+				// }
+
+				auto srcID = subp.pColorAttachments[i].attachment;
+				auto dstID = subp.pResolveAttachments[i].attachment;
+				symbAtts[dstID] = symbAtts[srcID];
+				symbAttsRef[dstID] = symbAtts[srcID]; // same as symbAttsRef[srcID]
+			}
+		}
+
+		if(subp.pDepthStencilAttachment) {
+			auto attID = subp.pDepthStencilAttachment->attachment;
+			if(symbAtts[attID] != symbAttsRef[attID]) {
+				dlg_trace("splittable({}): subpass {} depthStencil ({})", split, s, attID);
+				return false;
+			}
+
+			symbAtts[attID] = {attID, s, 0};
+			symbAttsRef[attID] = {attID, s, 0};
+		}
+	}
+
+	// Check final state of attachments
+	for(auto a = 0u; a < desc.attachments.size(); ++a) {
+		auto& att = desc.attachments[a];
+		auto hasStencil = FormatHasStencil(att.format);
+
+		// final state is only relevant if attachment is stored.
+		if(att.storeOp != VK_ATTACHMENT_STORE_OP_STORE &&
+				(!hasStencil || att.stencilStoreOp != VK_ATTACHMENT_STORE_OP_STORE)) {
+			continue;
+		}
+
+		if(symbAtts[a] != symbAttsRef[a]) {
+			dlg_trace("splittable({}): final state attachment {}", split, a);
+			return false;
+		}
+	}
+
+	return true;
+}
+
 RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 	RenderPassDesc desc0 {};
 	RenderPassDesc desc1 {};

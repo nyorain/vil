@@ -7,6 +7,7 @@ v0.1, goal: end of january 2021
 	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
 	      resource reference buttons
 - [x] argumentsDesc for transfer commands (missing for a lot of commands rn)
+- [ ] move old commandHook concept to docs/stash. Or just delete
 - [ ] before copying image in renderpass in commandHook, check if transferSrc
       is supported for image (we might not be able to set it in some cases)
 	  	- [ ] check for support in swapchain and image creation
@@ -16,7 +17,10 @@ v0.1, goal: end of january 2021
 - [ ] optimization: when CommandRecord is invalidated (rather: removed as current
       recording from cb), it should destroy (reset) its hook as it 
 	  will never be used again anyways
-- [ ] add explicit "updateFromGroup" checkbox to command viewer?
+- [ ] add explicit "updateFromGroup" checkbox to command viewer
+	- [ ] we definitely need a "freeze" button. Would be same as unchecking
+	      checkbox, so go with checkbox i guess
+- [ ] allow to select in cb viewer which commands are shown
 - [ ] make queues viewable handles
 	- [ ] allow to view command groups per queue
 	- [ ] view submissions per queue?
@@ -29,6 +33,8 @@ v0.1, goal: end of january 2021
 	  extensions naturally already.
 	- [ ] vkQueuePresentKHR is problematic atm
 	- [ ] everywhere where we hook-create handles
+	- [ ] nvm, we likely cannot/shouldn't do it without deciding on per-extension
+	      basis. Just forwarding random pNexts will likely not work.
 - [ ] implement overview as in node 1652
 - [x] cleanup, implement cb viewer as in node 1652
 - [ ] Implement missing resource overview UIs
@@ -111,7 +117,7 @@ v0.1, goal: end of january 2021
 	- [ ] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
 		  maybe allow to overwrite this via environment variable (since, technically,
 		  the layer will usually work fine even with the latest vulkan version)
-- [ ] support for buffer views (and other handles) in UI
+- [x] support for buffer views (and other handles) in UI
 	- [ ] use buffer view information to infer layout in buffer viewer?
 	- [ ] support buffer views in our texture viewer (i.e. show their content)
 - [ ] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
@@ -309,3 +315,7 @@ Possibly for later, new features/ideas:
 	  has other problems, e.g. giving memory back to pools, don't wanna
 	  hook all that) but it might be useful to inspect command buffers without
 	  handles being destroyed
+- [ ] all this dynamic_cast'ing on Command's isn't good. There is a limited
+      number of commands (and we never absolutely need something like
+	  dynamic_cast<DrawCmdBase*> i guess?) so we could enum it away.
+	  But otoh dynamic_cast and hierachy is probably better for maintainability

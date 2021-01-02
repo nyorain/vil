@@ -63,6 +63,12 @@ struct RenderPassSplitDesc {
 };
 RenderPassSplitDesc splitInterruptable(const RenderPassDesc&);
 
+// Returns whether the given renderpass can be split in the given render pass.
+// While this is usually possible, there are some combinations of resolve
+// attachment placements (when using subpasses after resolving) that make
+// this impossible.
+bool splittable(const RenderPassDesc&, unsigned split);
+
 // Creates a new renderpass for the given device with the given description.
 VkRenderPass create(Device&, const RenderPassDesc&);
 

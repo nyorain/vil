@@ -310,3 +310,52 @@ VkRenderPass recreate(const RenderPassDesc& desc) {
 
 	return rp;
 }
+
+---
+
+```
+	/*
+	// find all resolve attachments and the subpasses that resolve content
+	// into them (as well as the resolve src attachment ids).
+	std::vector<u32> srcResolveOps; // maps src attachmentsID -> subpassID
+	std::vector<u32> dstResolveOps; // maps dst attachmentsID -> subpassID
+	srcResolveOps.resize(desc.attachments.size(), u32(-1));
+	dstResolveOps.resize(desc.attachments.size(), u32(-1));
+
+	for(auto s = 0u; s < desc.subpasses.size(); ++s) {
+		auto& subp = desc.subpasses[s];
+		if(!subp.pResolveAttachments) {
+			continue;
+		}
+
+		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
+			if(subp.pResolveAttachments[i].attachment == VK_ATTACHMENT_UNUSED) {
+				continue;
+			}
+
+			auto srcID = subp.pColorAttachments[i].attachment;
+			auto dstID = subp.pResolveAttachments[i].attachment;
+			srcResolveOps[srcID] = std::min(srcResolveOps[srcID], s);
+			dstResolveOps[dstID] = std::min(dstResolveOps[dstID], s);
+		}
+	}
+
+	// if one of the attachments resolved into is potentially
+	// read before or written to afterwards (also counts for src for writing),
+	// splitting the renderpass does not work.
+	for(auto s = 0u; s < desc.subpasses.size(); ++s) {
+		auto& subp = desc.subpasses[s];
+		for(auto a = 0u; a < subp.colorAttachmentCount; ++a) {
+			auto attID = subp.pColorAttachments[a].attachment;
+
+			// when the attachment is written in this subpass s but
+			// was read or written before in a resolve operation, then splitting
+			// the renderpass (at a subpass >= s) will potentially result
+			// in different contents in this attachment.
+			if(srcResolveOps[attID] < s || dstResolveOps[attID] < s) {
+				return false;
+			}
+		}
+	}
+	*/
+```

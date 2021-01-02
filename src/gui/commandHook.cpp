@@ -163,6 +163,7 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
 
 	dlg_assert(!hcommand.empty());
+	// this->dev = &xrecord.device();
 
 	this->next = hook->records_;
 	if(hook->records_) {
@@ -172,7 +173,7 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 
 	hookCounter = hook->counter_;
 
-	auto& dev = record->device();
+	auto& dev = xrecord.device();
 
 	VkCommandBufferAllocateInfo allocInfo {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -215,7 +216,6 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 		(void) cmd;
 		dstSize = sizeof(VkDispatchIndirectCommand);
 		splitRenderPass = true;
-		createViewImage = true;
 	} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(hookDst)) {
 		VkDeviceSize stride = cmd->indexed ?
 			sizeof(VkDrawIndexedIndirectCommand) :
@@ -229,6 +229,8 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 		splitRenderPass = true;
 		createViewImage = true;
 	}
+
+	splitRenderPass |= createViewImage;
 
 	if(dstSize > 0) {
 		VkBufferCreateInfo bci {};
@@ -271,6 +273,12 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 				info.hookedSubpass = rpCmd->subpassOfDescendant(*hcommand.back());
 				dlg_assert(info.hookedSubpass != u32(-1));
 				dlg_assert(info.hookedSubpass < desc.subpasses.size());
+
+				if(!splittable(desc, info.hookedSubpass)) {
+					splitRenderPass = false;
+					dlg_trace("Can't split render pass");
+					break;
+				}
 
 				auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
 				rp0 = create(dev, rpi0);
@@ -643,6 +651,8 @@ void CommandHookRecordImpl::afterDstOutsideRp(Command& cmd, const RecordInfo& in
 }
 
 void CommandHookRecordImpl::finish() noexcept {
+	// TODO: do this?
+	// record = nullptr;
 	if(submissionCount == 0) {
 		delete this;
 	}

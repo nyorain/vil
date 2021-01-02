@@ -14,8 +14,8 @@
 namespace fuen {
 
 // CommandBufferGui
-// CommandBufferGui::CommandBufferGui() = default;
-// CommandBufferGui::~CommandBufferGui() = default;
+CommandBufferGui::CommandBufferGui() = default;
+CommandBufferGui::~CommandBufferGui() = default;
 
 void CommandBufferGui::draw(Draw& draw) {
 	if(!record_) {
@@ -53,7 +53,8 @@ void CommandBufferGui::draw(Draw& draw) {
 	// TODO: add selector ui to filter out various commands/don't
 	// show sections etc. Should probably pass a struct DisplayDesc
 	// to displayCommands instead of various parameters
-	auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
+	// auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
+	auto flags = Command::Type(~(Command::Type::end | Command::Type::bind));
 	auto nsel = displayCommands(record_->commands, command_, flags);
 	// auto commandChanged = false;
 	if(!nsel.empty() && nsel.front() != command_) {
@@ -110,75 +111,84 @@ void CommandBufferGui::draw(Draw& draw) {
 					imGuiText("groups Y: {}", cmd.y);
 					imGuiText("groups Z: {}", cmd.z);
 				} /* TODO: drawIndirectCount */
+			}
 
-				auto lastTime = hook_->lastTime;
-				auto displayDiff = lastTime * dev.props.limits.timestampPeriod;
-				auto timeNames = {"ns", "mus", "ms", "s"};
+			auto lastTime = hook_->lastTime;
+			auto displayDiff = lastTime * dev.props.limits.timestampPeriod;
+			auto timeNames = {"ns", "mus", "ms", "s"};
 
-				auto it = timeNames.begin();
-				while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
-					++it;
-					displayDiff /= 1000.f;
+			auto it = timeNames.begin();
+			while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
+				++it;
+				displayDiff /= 1000.f;
 
-				}
+			}
 
-				imGuiText("Time: {} {}", displayDiff, *it);
+			imGuiText("Time: {} {}", displayDiff, *it);
 
-				if(hook_->image) {
-					VkDescriptorImageInfo dsii {};
-					dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-					dsii.imageView = hook_->image->imageView;
-					dsii.sampler = dev.renderData->nearestSampler;
+			if(hook_->image) {
+				// TODO: unset at some point...
+				// TODO: we can't be certain the previous cb using the
+				//   old imageCopy_ has been finished
+				// we should unset this when its no longer needed and the
+				// last command needing it has finished.
+				// Should probably add a mechanism for associating
+				// this resource with the draw.
+				imageCopy_ = hook_->image;
 
-					VkWriteDescriptorSet write {};
-					write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-					write.descriptorCount = 1u;
-					write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-					write.dstSet = draw.dsSelected;
-					write.pImageInfo = &dsii;
+				VkDescriptorImageInfo dsii {};
+				dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				dsii.imageView = hook_->image->imageView;
+				dsii.sampler = dev.renderData->nearestSampler;
 
-					dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
+				VkWriteDescriptorSet write {};
+				write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				write.descriptorCount = 1u;
+				write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+				write.dstSet = draw.dsSelected;
+				write.pImageInfo = &dsii;
 
-					// TODO
-					ImGui::Spacing();
-					ImGui::Spacing();
+				dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 
-					ImVec2 pos = ImGui::GetCursorScreenPos();
+				// TODO
+				ImGui::Spacing();
+				ImGui::Spacing();
 
-					float aspect = float(hook_->image->width) / hook_->image->height;
+				ImVec2 pos = ImGui::GetCursorScreenPos();
 
-					// TODO: this logic might lead to problems for 1xHUGE images
-					float regW = ImGui::GetContentRegionAvail().x - 20.f;
-					float regH = regW / aspect;
+				float aspect = float(hook_->image->width) / hook_->image->height;
 
-					// TODO
-					imgDraw_.type = DrawGuiImage::Type::e2d;
-					imgDraw_.flags =
-						DrawGuiImage::flagMaskR |
-						DrawGuiImage::flagMaskG |
-						DrawGuiImage::flagMaskB |
-						DrawGuiImage::flagMaskA;
-					ImGui::Image((void*) &imgDraw_, {regW, regH});
+				// TODO: this logic might lead to problems for 1xHUGE images
+				float regW = ImGui::GetContentRegionAvail().x - 20.f;
+				float regH = regW / aspect;
 
-					// Taken pretty much just from the imgui demo
-					auto& io = gui_->imguiIO();
-					if (ImGui::IsItemHovered()) {
-						ImGui::BeginTooltip();
-						float region_sz = 64.0f;
-						float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
-						float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
-						float zoom = 4.0f;
-						if (region_x < 0.0f) { region_x = 0.0f; }
-						else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
-						if (region_y < 0.0f) { region_y = 0.0f; }
-						else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
-						ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
-						ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
-						ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
-						ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
-						ImGui::Image((void*) &imgDraw_, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
-						ImGui::EndTooltip();
-					}
+				// TODO
+				imgDraw_.type = DrawGuiImage::Type::e2d;
+				imgDraw_.flags =
+					DrawGuiImage::flagMaskR |
+					DrawGuiImage::flagMaskG |
+					DrawGuiImage::flagMaskB; // |
+					// DrawGuiImage::flagMaskA;
+				ImGui::Image((void*) &imgDraw_, {regW, regH});
+
+				// Taken pretty much just from the imgui demo
+				auto& io = gui_->imguiIO();
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					float region_sz = 64.0f;
+					float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
+					float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
+					float zoom = 4.0f;
+					if (region_x < 0.0f) { region_x = 0.0f; }
+					else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
+					if (region_y < 0.0f) { region_y = 0.0f; }
+					else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
+					ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
+					ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
+					ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
+					ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
+					ImGui::Image((void*) &imgDraw_, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
+					ImGui::EndTooltip();
 				}
 			}
 		}

@@ -44,6 +44,7 @@ public:
 	void invalidateData() {
 		lastTime = {};
 		indirect = {};
+		image = {};
 	}
 
 	void finish() noexcept override { delete this; }
@@ -58,8 +59,13 @@ private:
 };
 
 struct CommandHookRecordImpl : CommandHookRecord {
-	CommandHookImpl* hook {};
-	CommandRecord* record {}; // the record we hook
+	CommandHookImpl* hook {}; // Associated hook. Might be null if this was invalidated
+
+	// TODO: we should unset this in finish. And not rely on it not
+	// being null. Or store it as IntrusivePtr (but then make sure we don't
+	// get a leak via cycle, i.e. correctly unset the HookRecord when
+	// the record is invalidated).
+	CommandRecord* record {}; // the record we hook. /*Might be null if this was reset*/
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
 	std::vector<Command*> hcommand; // hierachy of the hooked command
 
