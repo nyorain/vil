@@ -1,7 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 
 namespace fuen {
 

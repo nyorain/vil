@@ -2,27 +2,44 @@
 
 v0.1, goal: end of january 2021
 
+- [ ] figure out "instance_extensions" in the layer json.
+      Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
+- [x] figure out why we can't name handles from inside the layer
+	  {eh, see ugly workaround for now in device creation} 
 - [x] fix ui for fixed resource tracking: check for nullptr resource references
       everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
 	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
 	      resource reference buttons
 - [x] argumentsDesc for transfer commands (missing for a lot of commands rn)
-- [ ] move old commandHook concept to docs/stash. Or just delete
-- [ ] before copying image in renderpass in commandHook, check if transferSrc
+- [x] fix nonCoherentAtom mapped memory flushing
+- [x] fix/disable render pass splitting for transient attachments
+	- [x] think of other cases where it might not work.
+- [x] move old commandHook concept to docs/stash. Or just delete
+      {last commit before remove: f140de13aed126311fb740530181af05cbc7a651}
+- [x] before copying image in renderpass in commandHook, check if transferSrc
       is supported for image (we might not be able to set it in some cases)
-	  	- [ ] check for support in swapchain and image creation
-- [ ] find a way to limit number of command groups. Erase them again if not
+	  	- [x] check for support in swapchain and image creation
+- [ ] show more information in command viewer. Stuff downloaded from
+      device before/after command
+	- [ ] new per-command input/output overview, allowing to view *all* resources
+- [ ] copy vulkan headers to vk/. So we don't rely on system headers
+- [ ] Allow to freeze state for current displayed command, i.e. don't
+      update data from hook
+- [x] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
-- [ ] optimization: when CommandRecord is invalidated (rather: removed as current
+	  - [ ] IMPORTANT! keep command group (or at least the hook?) alive 
+	        while it is viewed in cb viewer? Can lead to problems currently.
+- [x] optimization (important): when CommandRecord is invalidated (rather: removed as current
       recording from cb), it should destroy (reset) its hook as it 
 	  will never be used again anyways
-- [ ] add explicit "updateFromGroup" checkbox to command viewer
-	- [ ] we definitely need a "freeze" button. Would be same as unchecking
+	  	- [x] see TODOs in CommandHookRecord (e.g. finish)
+- [x] add explicit "updateFromGroup" checkbox to command viewer
+	- [x] we definitely need a "freeze" button. Would be same as unchecking
 	      checkbox, so go with checkbox i guess
-- [ ] allow to select in cb viewer which commands are shown
-- [ ] make queues viewable handles
-	- [ ] allow to view command groups per queue
+- [x] allow to select in cb viewer which commands are shown
+- [x] make queues viewable handles
+	- [x] allow to view command groups per queue
 	- [ ] view submissions per queue?
 - [x] fix resource viewer
 	- [x] fix filtering by type
@@ -33,24 +50,32 @@ v0.1, goal: end of january 2021
 	  extensions naturally already.
 	- [ ] vkQueuePresentKHR is problematic atm
 	- [ ] everywhere where we hook-create handles
-	- [ ] nvm, we likely cannot/shouldn't do it without deciding on per-extension
+	  nvm, we likely cannot/shouldn't do it without deciding on per-extension
 	      basis. Just forwarding random pNexts will likely not work.
 - [ ] implement overview as in node 1652
-- [x] cleanup, implement cb viewer as in node 1652
+- [x] rework dev/gui so that there is never more than one gui. Supporting
+      multiple guis at the same time is not worth the trouble (think
+	  about command buffer hooking from multiple cb viewers...)
+	- [ ] what to do when window *and* overlay is created? or multiple overlays?
+		  Should probably close the previous one (move gui object)
+		  See todo in Gui::init
+- [ ] remove PageVector when not used anymore. Maybe move to docs or nodes
 - [ ] Implement missing resource overview UIs
-- [ ] in overview: before showing pending submissions, we probably want to
+- [x] cleanup, implement cb viewer as in node 1652
+- [x] in overview: before showing pending submissions, we probably want to
       check them all for finish
-- [ ] fully implement command buffer viewer
+- [x] fully implement command buffer viewer
 	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
 	- [x] show all commands & info for commands
 - [x] fix dummy buttons in command viewer (e.g. BeginRenderPass)
 - [x] track dynamic graphics pipeline state
 	- [x] show it in command ui
+- [ ] Remove virtual stuff from this whole CommandBufferHook 
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
 		   to make this beautiful}
-	- [ ] show graph of frame timings
+	- [ ] show graph of frame timings (see swapchain)
 	- [ ] show enabled extensions & features
 	- [ ] only show application info if filled out by app. collapse by default?
 - [ ] next ui sync rework
@@ -58,7 +83,13 @@ v0.1, goal: end of january 2021
 	- [ ] use chain semaphores for input
 	- [ ] correctly sync output, but only if it's needed (might work already)
 	- [ ] if timeline semaphores are available, use them! for all submissions (in and out)
-		- [ ] when timeline semaphore extension is available, enable it!
+		- [x] when timeline semaphore extension is available, enable it!
+	- [ ] when a resource is only read by us we don't have to make future
+	      submissions that also only read it wait.
+		- [ ] requires us to track (in CommandRecord::usedX i guess) whether
+		      a resource might be written by cb
+	- [ ] insert barrier at end of each submission, optimize case where application
+	      uses same queue as gui
 - [ ] proper shipping and installing
 	- [x] make the json file a config file, generated by meson
 	- [ ] write wiki post on how to build/install/use it
@@ -97,6 +128,8 @@ v0.1, goal: end of january 2021
 - [ ] fix "unimplemented descriptor category" bug (not sure when it appears)
 - [ ] automatically update resource lists in resource gui when tab is re-entered
       from somewhere else
+- [ ] when we select a resource of type X should we set the current filter to X
+      in the resource gui?
 - [ ] imgui styling
 	- [ ] use custom font
 	- [ ] go at least a bit away from the default imgui style
@@ -109,14 +142,15 @@ v0.1, goal: end of january 2021
 	- [ ] update README to correctly show all current features
 - [x] improve/cleanup pipeline time queries from querypool
 	- [x] query whole-cb time, and correctly support querying for full renderpass
-	- [ ] we should probably show estimate of time range. The current values
+	- [x] we should probably show estimate of time range. The current values
 	      often become meaningless on a per-command basis.
 		  Also average them over multiple frames, avoid this glitchy look
-- [ ] properly implement layer querying functions
-	- [ ] version negotiation?
-	- [ ] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
+- [x] properly implement layer querying functions
+	- [x] version negotiation?
+	- [x] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
 		  maybe allow to overwrite this via environment variable (since, technically,
 		  the layer will usually work fine even with the latest vulkan version)
+		  EDIT: nope, that's not how it is done.	
 - [x] support for buffer views (and other handles) in UI
 	- [ ] use buffer view information to infer layout in buffer viewer?
 	- [ ] support buffer views in our texture viewer (i.e. show their content)
@@ -134,6 +168,19 @@ v0.1, goal: end of january 2021
 - [ ] move external source into extra folder
 - [ ] A lot of sources can be moved to src/gui
 	- [ ] rename imguiutil. Move to gui
+- [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support
+      is being enabled. I remember renderdoc doing this, sounds like a good idea.
+	- [ ] or an unexpectly high api version
+		  (allow to disable that behavior via env variable tho, layer might work
+		   with it)
+	- [ ] overwrite pre-instance functions vkEnumerateInstanceExtensionProperties?
+	      then also use the vkGetPhysicalDeviceProcAddr from the loader to
+		  overwrite extension enumeration for the device.
+		  And filter the supported extensions by the ones that we also support.
+		  Evaluate whether this is right approach though. Renderdoc does it like
+		  this. Alternatvely, we could simply fail on device/instance creation
+		  as mentioned above (probably want to do both approaches, both disableable 
+		  (just found a new favorite word!) via env variable
 - [ ] stop this todo-for-v0.1-list from growing at some point.
 - [ ] before release: test on windows & linux, on all owned hardware
 
@@ -147,6 +194,14 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] optimization: use custom memory management in QueueSubmit impl
+	- [ ] investigate other potential bottleneck places where we
+	      allocate a lot
+- [ ] internal statistics tab
+	- [ ] number of hooked command buffer records (alive records)
+	- [ ] time spent in certain critical sections?
+	- [ ] memory allocated in commandpools?
+	- [ ] total number of handles or something, giving an estimate of memory consumption
 - [ ] the way we currently split render passes does not work for resolve
 	  attachments (except when they are in the last subpass) since
 	  the resolve might be done multiple times, overwriting old results :(
@@ -163,7 +218,7 @@ Possibly for later, new features/ideas:
 	  at least some handles (at least root resources like memory, samplers etc)
 	  will always be in common. Command buffers that use almost entirely the
 	  same buffers and images can be considered related
-- [ ] bump api version as far as possible when creating instance?
+- [x] bump api version as far as possible when creating instance?
       not sure if anything could go wrong in practice
 - [ ] register own debug messenger if possible?
 - [ ] not sure if current cmdExecuteCommands implementation is the best.
@@ -287,6 +342,10 @@ Possibly for later, new features/ideas:
 	  (Just show something like "image/buffer is in use in the ui")
 	  -> sync rework/semaphore chaining, i guess (but note how it's **not**
 		 solved with semaphore chaining alone!)
+- [ ] all this dynamic_cast'ing on Command's isn't good. There is a limited
+      number of commands (and we never absolutely need something like
+	  dynamic_cast<DrawCmdBase*> i guess?) so we could enum it away.
+	  But otoh dynamic_cast and hierachy is probably better for maintainability
 - [ ] explore what random stuff we are able to do
 	- [ ] Visualize models (drawcalls) on its own by inferring
 	  	  position (and possibly other attribs; hard to infer though, could use heuristics
@@ -315,7 +374,11 @@ Possibly for later, new features/ideas:
 	  has other problems, e.g. giving memory back to pools, don't wanna
 	  hook all that) but it might be useful to inspect command buffers without
 	  handles being destroyed
-- [ ] all this dynamic_cast'ing on Command's isn't good. There is a limited
-      number of commands (and we never absolutely need something like
-	  dynamic_cast<DrawCmdBase*> i guess?) so we could enum it away.
-	  But otoh dynamic_cast and hierachy is probably better for maintainability
+- [ ] (low prio, non-problem) when using timeline semaphores, check for wrap-around?
+      would be undefined behavior. But I can't imagine a case in which
+	  we reuse a semaphore 2^64 times tbh. An application would have to
+	  run millions of years with >1000 submissions per second.
+	  Probably more error prone to check for this in the first place.
+- [ ] (low prio), optimization: in `Draw`, we don't need presentSemaphore when
+	  we have timeline semaphores, can simply use futureSemaphore for
+	  present as well

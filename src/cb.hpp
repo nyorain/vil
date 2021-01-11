@@ -83,14 +83,6 @@ public:
 		return record_->uses(handle);
 	}
 
-	// Allocates a chunk of memory from the given command buffer, will use the
-	// internal CommandPool memory allocator. The memory can not be freed in
-	// any way, it will simply be reset when the current command buffer recording
-	// is destroyed (destructors of non-trivial types inside the memory must
-	// be called before that!).
-	// Only allowed when in recording state, does not make sense otherwise.
-	std::byte* allocate(std::size_t size, std::size_t alignment);
-
 private:
 	CommandPool* pool_ {};
 	VkCommandBuffer handle_ {};
@@ -119,9 +111,15 @@ private:
 	// buffer reset.
 	ComputeState computeState_ {};
 	GraphicsState graphicsState_ {};
-	CommandAllocList<SectionCommand*> sections_;
-	Command* lastCommand_ {};
-	std::size_t memBlockOffset_ {}; // offset in first (current) mem block
+
+    struct Section {
+        SectionCommand* cmd;
+        Section* parent {}; // one level up. Null only for root node
+        Section* next {}; // might be != null even when this is the last section. Re-using allocations
+    };
+
+	Section* section_ {}; // the last, lowest, deepest-down section
+	Command* lastCommand_ {}; // the last added command in current section (might be null)
 
 	PushConstantData pushConstants_ {};
 

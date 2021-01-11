@@ -95,7 +95,9 @@ Device::~Device() {
 
 	// erase queue datas
 	for(auto& queue : this->queues) {
-		eraseData(queue->handle);
+		if(!queue->createdByUs) {
+			eraseData(queue->handle);
+		}
 	}
 
 	for(auto& qf : queueFamilies) {
@@ -106,11 +108,22 @@ Device::~Device() {
 	}
 }
 
+bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
+	for(auto& prop : extProps) {
+		if(!std::strcmp(prop.extensionName, name)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		std::vector<const char*>& devExts,
 		std::vector<VkDeviceQueueCreateInfo>& queueCreateInfos,
 		PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr, VkPhysicalDevice phdev,
-		u32 numQueueFams, u32& presentQueueInfoID) {
+		u32 numQueueFams, u32& presentQueueInfoID,
+		span<const VkExtensionProperties> extProps) {
 	auto env = std::getenv("FUEN_CREATE_WINDOW");
 	if(!env || *env == '0') {
 		return nullptr;
@@ -191,18 +204,20 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 	}
 
 	if(presentQueueInfoID == u32(-1)) {
-		dlg_warn("Can't create present window since no queue supports presenting to it");
+		dlg_warn("Can't create gui window since no queue supports presenting to it");
 		window.reset();
 	} else {
-		// If swapchain extension wasn't enabled, enable it!
-		// TODO: we can and should probably check if the extension
-		// is supported here, first.
+		// If swapchain extension wasn't enabled, enable it.
 		auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 		auto it = find(devExts, extName);
 		if(it == devExts.end()) {
-			devExts.push_back(extName.data());
-
-			dlg_info("Adding {} device extension", extName);
+			if(hasExt(extProps, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+				devExts.push_back(extName.data());
+				dlg_info("Adding {} device extension", extName);
+			} else {
+				dlg_warn("Can't create gui window since swapchain extension is not supported");
+				window.reset();
+			}
 		}
 	}
 
@@ -231,16 +246,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	auto fpGetInstanceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
 	auto fpGetDeviceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetDeviceProcAddr;
-	auto fpCreateDevice = (PFN_vkCreateDevice)fpGetInstanceProcAddr(ini.handle, "vkCreateDevice");
+	auto fpCreateDevice = (PFN_vkCreateDevice) fpGetInstanceProcAddr(ini.handle, "vkCreateDevice");
+
 	if(!fpCreateDevice) {
 		dlg_error("could not load vkCreateDevice");
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
-
-	auto fpGetPhysicalDeviceQueueFamilyProperties =
-		(PFN_vkGetPhysicalDeviceQueueFamilyProperties)
-		fpGetInstanceProcAddr(ini.handle, "vkGetPhysicalDeviceQueueFamilyProperties");
-	dlg_assert(fpGetPhysicalDeviceQueueFamilyProperties);
 
   	// Advance the link info for the next element on the chain
 	auto mutLinkInfo = const_cast<VkLayerDeviceCreateInfo*>(linkInfo);
@@ -248,9 +259,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
    	// query queues
 	u32 nqf;
-	fpGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, nullptr);
+	ini.dispatch.GetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, nullptr);
 	std::vector<VkQueueFamilyProperties> qfprops(nqf);
-	fpGetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, qfprops.data());
+	ini.dispatch.GetPhysicalDeviceQueueFamilyProperties(phdev, &nqf, qfprops.data());
+
+	// query supported device extensions
+	u32 numExts;
+	ini.dispatch.EnumerateDeviceExtensionProperties(phdev, nullptr, &numExts, nullptr);
+	std::vector<VkExtensionProperties> supportedExts(numExts);
+	ini.dispatch.EnumerateDeviceExtensionProperties(phdev, nullptr, &numExts,
+		supportedExts.data());
 
 	// == Modify create info ==
 	auto nci = *ci;
@@ -309,7 +327,100 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// window. To check that, we first have to create a window though.
 	u32 presentQueueInfoID = u32(-1);
 	auto window = tryCreateWindow(ini, newExts, queueCreateInfos,
-		fpGetInstanceProcAddr, phdev, nqf, presentQueueInfoID);
+		fpGetInstanceProcAddr, phdev, nqf, presentQueueInfoID,
+		supportedExts);
+
+	// Enabled features
+	// We try to additionally enable a couple of features we need:
+	// - timeline semaphores
+	VkPhysicalDeviceProperties phdevProps;
+	ini.dispatch.GetPhysicalDeviceProperties(phdev, &phdevProps);
+
+	auto fpPhdevFeatures2 = PFN_vkGetPhysicalDeviceFeatures2(nullptr);
+	auto fpPhdevProps2 = PFN_vkGetPhysicalDeviceProperties2(nullptr);
+	if(ini.vulkan11 && phdevProps.apiVersion >= VK_API_VERSION_1_1) {
+		dlg_assert(ini.dispatch.GetPhysicalDeviceFeatures2);
+		dlg_assert(ini.dispatch.GetPhysicalDeviceProperties2);
+		fpPhdevFeatures2 = ini.dispatch.GetPhysicalDeviceFeatures2;
+		fpPhdevProps2 = ini.dispatch.GetPhysicalDeviceProperties2;
+	} else if(contains(ini.extensions, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME)) {
+		dlg_assert(ini.dispatch.GetPhysicalDeviceFeatures2KHR);
+		dlg_assert(ini.dispatch.GetPhysicalDeviceProperties2KHR);
+		fpPhdevFeatures2 = ini.dispatch.GetPhysicalDeviceFeatures2KHR;
+		fpPhdevProps2 = ini.dispatch.GetPhysicalDeviceProperties2KHR;
+	}
+
+	auto hasTimelineSemaphoresApi =
+		(ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
+		hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+
+	auto hasTimelineSemaphores = false;
+	u64 maxTimelineSemaphoreValueDifference {};
+	std::unique_ptr<std::byte[]> copiedChain;
+	VkPhysicalDeviceTimelineSemaphoreFeatures tsFeatures {};
+	if(fpPhdevFeatures2 && hasTimelineSemaphoresApi) {
+		// query support
+		VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemFeatures {};
+		timelineSemFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+
+		VkPhysicalDeviceFeatures2 features2 {};
+		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		features2.pNext = &timelineSemFeatures;
+
+		fpPhdevFeatures2(phdev, &features2);
+
+		if(timelineSemFeatures.timelineSemaphore) {
+			hasTimelineSemaphores = true;
+			auto* pNext = copyChain(nci.pNext, copiedChain);
+
+			// check if application already has a feature struct holding it
+			auto* link = static_cast<VkBaseInStructure*>(pNext);
+			auto addLink = true;
+			while(link) {
+				if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+					addLink = false;
+					auto* vulkan12Features = reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
+					vulkan12Features->timelineSemaphore = true;
+					break;
+				} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
+					addLink = false;
+					auto* tsFeat = reinterpret_cast<VkPhysicalDeviceTimelineSemaphoreFeatures*>(link);
+					tsFeat->timelineSemaphore = true;
+					break;
+				}
+
+				link = const_cast<VkBaseInStructure*>(static_cast<const VkBaseInStructure*>(link->pNext));
+			}
+
+			if(addLink) {
+				tsFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+				tsFeatures.timelineSemaphore = true;
+				tsFeatures.pNext = const_cast<void*>(nci.pNext);
+				nci.pNext = &tsFeatures;
+			}
+
+			// we might need to enable the extension
+			if(!ini.vulkan12 || phdevProps.apiVersion < VK_API_VERSION_1_2) {
+				dlg_assert(hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));
+				newExts.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+			}
+
+			// find out props
+			// NOTE: we don't really need this, the spec guarantee of 2^32-1
+			// should be good enough.
+			dlg_assert(fpPhdevProps2);
+
+			VkPhysicalDeviceTimelineSemaphoreProperties tsProps {};
+			tsProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_PROPERTIES;
+
+			VkPhysicalDeviceProperties2 phProps2 {};
+			phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+			phProps2.pNext = &tsProps;
+
+			fpPhdevProps2(phdev, &phProps2);
+			maxTimelineSemaphoreValueDifference = tsProps.maxTimelineSemaphoreValueDifference;
+		}
+	}
 
 	nci.enabledExtensionCount = u32(newExts.size());
 	nci.ppEnabledExtensionNames = newExts.data();
@@ -317,6 +428,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	nci.pQueueCreateInfos = queueCreateInfos.data();
 	nci.queueCreateInfoCount = u32(queueCreateInfos.size());
 
+	// == Create Device! ==
 	VkResult result = fpCreateDevice(phdev, &nci, alloc, pDevice);
 	if(result != VK_SUCCESS) {
 		return result;
@@ -326,12 +438,37 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.ini = iniData;
 	dev.phdev = phdev;
 	dev.handle = *pDevice;
+	dev.props = phdevProps;
+
+	dev.timelineSemaphores = hasTimelineSemaphores;
+	dev.maxTimelineSemaphoreValueDifference = maxTimelineSemaphoreValueDifference;
+
 	dev.extensions = {extsBegin, extsEnd};
 	if(ci->pEnabledFeatures) {
 		dev.enabledFeatures = *ci->pEnabledFeatures;
 	}
 
 	layer_init_device_dispatch_table(*pDevice, &dev.dispatch, fpGetDeviceProcAddr);
+
+	// TODO: no idea exactly why this is needed. I guess they should not be
+	// part of the device loader table in the first place?
+	// Might be related: https://github.com/KhronosGroup/Vulkan-Loader/issues/116
+	dev.dispatch.QueueBeginDebugUtilsLabelEXT = (PFN_vkQueueBeginDebugUtilsLabelEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkQueueBeginDebugUtilsLabelEXT");
+	dev.dispatch.QueueEndDebugUtilsLabelEXT = (PFN_vkQueueEndDebugUtilsLabelEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkQueueEndDebugUtilsLabelEXT");
+	dev.dispatch.CmdInsertDebugUtilsLabelEXT = (PFN_vkCmdInsertDebugUtilsLabelEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkCmdInsertDebugUtilsLabelEXT");
+	dev.dispatch.CmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkCmdBeginDebugUtilsLabelEXT");
+	dev.dispatch.CmdEndDebugUtilsLabelEXT = (PFN_vkCmdEndDebugUtilsLabelEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkCmdEndDebugUtilsLabelEXT");
+	dev.dispatch.SetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkSetDebugUtilsObjectNameEXT");
+	dev.dispatch.SetDebugUtilsObjectTagEXT = (PFN_vkSetDebugUtilsObjectTagEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkSetDebugUtilsObjectTagEXT");
+	dev.dispatch.QueueInsertDebugUtilsLabelEXT = (PFN_vkQueueInsertDebugUtilsLabelEXT)
+		fpGetInstanceProcAddr(ini.handle, "vkQueueInsertDebugUtilsLabelEXT");
 
 	dev.swapchains.mutex = &dev.mutex;
 	dev.images.mutex = &dev.mutex;
@@ -367,9 +504,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dlg_assert(loaderData);
 	dev.setDeviceLoaderData = loaderData->u.pfnSetDeviceLoaderData;
 
-	// Other properties
-	dev.ini->dispatch.GetPhysicalDeviceProperties(dev.phdev, &dev.props);
-
 	// Get device queues
 	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
 		auto& qi = queueCreateInfos[i];
@@ -380,6 +514,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			q.dev = &dev;
 			q.objectType = VK_OBJECT_TYPE_QUEUE;
 			q.priority = qi.pQueuePriorities[j];
+			q.family = qi.queueFamilyIndex;
+			q.createdByUs = (i >= ci->queueCreateInfoCount);
 			dev.dispatch.GetDeviceQueue(dev.handle, qi.queueFamilyIndex, j, &q.handle);
 
 			// Queue is a dispatchable handle.
@@ -388,7 +524,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			// We will also have to get our queue-data just from the VkQueue
 			// later on (e.g. vkQueueSubmit) so associate data with it.
 			dev.setDeviceLoaderData(dev.handle, q.handle);
-			insertData(q.handle, &q);
+
+			// We can never get calls from the application using queues
+			// that we created.
+			if(!q.createdByUs) {
+				insertData(q.handle, &q);
+			}
 
 			if(i == gfxQueueInfoID && j == 0u) {
 				dlg_assert(!dev.gfxQueue);
@@ -489,11 +630,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	destroyDev(dev, alloc);
 }
 
+// util
 void notifyDestruction(Device& dev, Handle& handle) {
 	std::lock_guard lock(dev.mutex);
-	forEachGuiLocked(dev, [&](auto& gui) {
-		gui.destroyed(handle);
-	});
+	if(dev.gui) {
+		dev.gui->destroyed(handle);
+	}
 }
 
 void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name) {

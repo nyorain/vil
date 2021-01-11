@@ -5,6 +5,7 @@
 #include <commands.hpp>
 #include <sync.hpp>
 #include <image.hpp>
+#include <vk/enumString.hpp>
 
 namespace fuen {
 
@@ -28,16 +29,31 @@ std::optional<SubmIterator> checkLocked(PendingSubmission& subm) {
 	dlg_assert(it != dev.pending.end());
 
 	for(auto& sub : subm.submissions) {
-		for(auto& [cb, group] : sub.cbs) {
+		for(auto& [cb, _] : sub.cbs) {
 			auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &subm);
 			dlg_assert(it2 != cb->pending.end());
 			cb->pending.erase(it2);
 		}
 
-		// We don't immediately reset the semaphore since it's not that cheap.
-		// We will do it with the next rendering or when there are a lot
-		// of semaphores pending.
-		dev.resetSemaphores.push_back(sub.ourSemaphore);
+		for(auto& [sem, stage] : sub.waitSemaphores) {
+			dlg_assert(sem->waitFrom == &subm);
+			sem->waitFrom = nullptr;
+		}
+
+		for(auto* sem : sub.signalSemaphores) {
+			dlg_assert(sem->signalFrom == &subm);
+			sem->signalFrom = nullptr;
+		}
+
+		// For a non-timeline semaphore (that was not waited upon), we
+		// have to issue a vkQueueSubmit to reset them, we don't do that
+		// immediately. We will do it with the next rendering or
+		// when there are a lot of semaphores pending.
+		if(sub.ourSemaphore && !dev.timelineSemaphores) {
+			dev.resetSemaphores.push_back(sub.ourSemaphore);
+		} else if(sub.ourSemaphore && dev.timelineSemaphores) {
+			dev.semaphorePool.push_back(sub.ourSemaphore);
+		}
 	}
 
 	if(subm.ourFence) {
@@ -97,9 +113,11 @@ VkSemaphore getSemaphoreFromPool(Device& dev, bool& checkedSubmissions,
 
 	// If there are enough semaphores in the reset pool, it's worth
 	// resetting it.
-	// TODO: this is somewhat error-prone. But without it, we
-	// might create a shitload of semaphore when the application submits
-	// a lot of command buffers without us ever rendering the overlay.
+	// NOTE: this is somewhat ugly. But without it, we might create a
+	// shitload of semaphore when the application submits
+	// a lot of command buffers without us ever getting another chance
+	// to reset them. We don't need this ugliness with timeline semaphores anyways.
+	dlg_assert(dev.resetSemaphores.empty() || !dev.timelineSemaphores);
 	constexpr auto minResetSemCount = 10u;
 	if(!resettedSemaphores && dev.resetSemaphores.size() > minResetSemCount) {
 		if(!checkedSubmissions) {
@@ -151,6 +169,15 @@ VkSemaphore getSemaphoreFromPool(Device& dev, bool& checkedSubmissions,
 	// create new semaphore
 	VkSemaphore semaphore;
 	VkSemaphoreCreateInfo sci {};
+
+	VkSemaphoreTypeCreateInfo tsci {}; // keep-alive
+	if(dev.timelineSemaphores) {
+		tsci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+		tsci.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+		tsci.initialValue = 0u;
+		sci.pNext = &tsci;
+	}
+
 	sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
 	nameHandle(dev, semaphore, "Device:[pool semaphore]");
@@ -196,6 +223,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	auto& subm = *submPtr;
 	subm.queue = &qd;
 
+	// TODO(perf): we make a lot of allocations here and this is something
+	// that can be called multiple times per frame. Should likely use
+	// an allocator
+
 	// We might have to modify the submission:
 	// - command buffers can be hooked (to allow us inserting/removing/changing
 	//   commands), meaning we use an internal command buffer as replacement
@@ -205,13 +236,21 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	std::vector<VkSubmitInfo> nsubmitInfos;
 	std::vector<std::vector<VkSemaphore>> signalSemaphores;
 	std::vector<std::vector<VkCommandBuffer>> commandBuffers;
+	std::vector<std::unique_ptr<std::byte[]>> copiedChains;
+
+	std::vector<std::vector<u64>> tsValues;
+	std::vector<VkTimelineSemaphoreSubmitInfo> tsSubmitInfos;
 
 	for(auto i = 0u; i < submitCount; ++i) {
 		auto si = pSubmits[i]; // copy it
 		auto& dst = subm.submissions.emplace_back();
 
 		for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
-			dst.signalSemaphores.push_back(si.pSignalSemaphores[j]);
+			auto& sem = dev.semaphores.get(si.pSignalSemaphores[j]);
+			dst.signalSemaphores.push_back(&sem);
+
+			std::lock_guard lock(dev.mutex);
+			sem.signalFrom = &subm;
 		}
 
 		auto& cbs = commandBuffers.emplace_back();
@@ -243,18 +282,17 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 							rec.group = qgroup.get();
 						}
 					}
-
 				}
 
 				// When no existing group matches, just create a new one
 				if(!rec.group) {
 					auto& qfam = dev.queueFamilies[rec.queueFamily];
 					rec.group = qfam.commandGroups.emplace_back(std::make_unique<CommandBufferGroup>()).get();
-					qd.groups.push_back(rec.group);
+					qd.groups.insert(rec.group);
 					rec.group->queues = {{&qd, qSubmitID}};
 
-					dlg_info("Created new command group {} (best match {}}:", rec.group, best);
-					print(rec.desc, 1);
+					// dlg_info("Created new command group {} (best match {}}:", rec.group, best);
+					// print(rec.desc, 1);
 				} else {
 					// Otherwise make sure it's correctly added to the group
 					// NOTE: we even do this if submission fails down the
@@ -263,6 +301,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 					auto it = find_if(rec.group->queues, finder);
 					if(it == rec.group->queues.end()) {
 						rec.group->queues.push_back({&qd, qSubmitID});
+						qd.groups.insert(rec.group);
 					} else {
 						it->second = qSubmitID;
 					}
@@ -273,12 +312,12 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				// potentially hook command buffer
 				if(rec.group->hook) {
 					// scb.hook = std::make_unique<CommandHookSubmission>();
-					auto hooked = rec.group->hook->hook(cb, scb.hook);
+					auto hooked = rec.group->hook->hook(cb, subm, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 					dlg_assertm(!cb.hook, "Hook registered for command buffer and group");
 				} else if(cb.hook) {
-					auto hooked = cb.hook->hook(cb, scb.hook);
+					auto hooked = cb.hook->hook(cb, subm, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 				} else {
@@ -288,9 +327,12 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		}
 
 		for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
-			dst.waitSemaphores.emplace_back(
-				si.pWaitSemaphores[j],
-				si.pWaitDstStageMask[j]);
+			auto& semaphore = dev.semaphores.get(si.pWaitSemaphores[j]);
+			dlg_assert(!semaphore.waitFrom);
+			dst.waitSemaphores.emplace_back(&semaphore, si.pWaitDstStageMask[j]);
+
+			std::lock_guard lock(dev.mutex);
+			semaphore.waitFrom = &subm;
 		}
 
 		// We need to add a semaphore for device synchronization.
@@ -299,14 +341,55 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		dst.ourSemaphore = getSemaphoreFromPool(dev, checkedSubmissions,
 			resettedSemaphores, queue);
 
-		signalSemaphores.emplace_back(dst.signalSemaphores);
+		signalSemaphores.emplace_back(si.pSignalSemaphores,
+			si.pSignalSemaphores + si.signalSemaphoreCount);
 		signalSemaphores.back().push_back(dst.ourSemaphore);
+
+		if(dev.timelineSemaphores) {
+			u64 ourValue;
+			VK_CHECK(dev.dispatch.GetSemaphoreCounterValue(dev.handle, dst.ourSemaphore, &ourValue));
+			++ourValue;
+
+			dst.ourSemaphoreValue = ourValue;
+
+			// If the application has already appended a timeline semaphore
+			// structure, we must re-use it, inserting our value.
+			// Otherwise, simply create a new link chain.
+			if(hasChain(si, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)) {
+				copyChain(si.pNext, copiedChains.emplace_back());
+				auto* tsInfo = const_cast<VkTimelineSemaphoreSubmitInfo*>(findChainInfo<
+					VkTimelineSemaphoreSubmitInfo,
+					VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO>(si));
+				dlg_assert(tsInfo);
+
+				auto& signalVals = tsValues.emplace_back(tsInfo->pSignalSemaphoreValues,
+					tsInfo->pSignalSemaphoreValues + tsInfo->signalSemaphoreValueCount);
+				signalVals.push_back(ourValue);
+
+				tsInfo->signalSemaphoreValueCount = signalVals.size();
+				tsInfo->pSignalSemaphoreValues = signalVals.data();
+			} else {
+				auto& signalVals = tsValues.emplace_back();
+				signalVals.resize(si.signalSemaphoreCount); // ignored
+				signalVals.push_back(ourValue);
+
+				auto& tsInfo = tsSubmitInfos.emplace_back();
+				tsInfo = {};
+				tsInfo.pNext = si.pNext;
+				tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+				tsInfo.signalSemaphoreValueCount = signalVals.size();
+				tsInfo.pSignalSemaphoreValues = signalVals.data();
+
+				si.pNext = &tsInfo;
+			}
+		}
 
 		si.signalSemaphoreCount = u32(signalSemaphores.back().size());
 		si.pSignalSemaphores = signalSemaphores.back().data();
 
 		si.commandBufferCount = u32(commandBuffers.back().size());
 		si.pCommandBuffers = commandBuffers.back().data();
+
 		nsubmitInfos.push_back(si);
 	}
 
@@ -337,8 +420,13 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	dlg_assert(nsubmitInfos.size() == submitCount);
 	auto res = dev.dispatch.QueueSubmit(queue, u32(nsubmitInfos.size()), nsubmitInfos.data(), submFence);
 	if(res != VK_SUCCESS) {
+		dlg_trace("QueueSubmit returned {}", vk::name(res));
+
 		if(subm.ourFence) {
 			dev.fencePool.push_back(subm.ourFence);
+		} else {
+			dlg_assert(subm.appFence);
+			subm.appFence->submission = nullptr;
 		}
 
 		for(auto& subm : subm.submissions) {
@@ -387,6 +475,30 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		}
 
 		dev.pending.push_back(std::move(submPtr));
+
+		// reset old comamnad groups
+		// TODO: arbitrary atm! Can be improved.
+		auto& qf = dev.queueFamilies[qd.family];
+		for(auto it = qf.commandGroups.begin(); it != qf.commandGroups.end();) {
+			auto rem = true;
+			for(auto& [squeue, lastSubm] : (*it)->queues) {
+				if(squeue->submissionCount - lastSubm < 10) {
+					rem = false;
+					break;
+				}
+			}
+
+			if(rem) {
+				for(auto& [squeue, _] : (*it)->queues) {
+					squeue->groups.erase(it->get());
+				}
+
+				keepAlive.push_back(std::move((*it)->lastRecord));
+				it = qf.commandGroups.erase(it);
+			} else {
+				++it;
+			}
+		}
 	}
 
 	return res;

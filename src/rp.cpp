@@ -528,11 +528,11 @@ VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
 		rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2;
 		rpi.pNext = desc.pNext;
 		rpi.flags = desc.flags;
-		rpi.subpassCount = desc.subpasses.size();
+		rpi.subpassCount = u32(desc.subpasses.size());
 		rpi.pSubpasses = desc.subpasses.data();
-		rpi.attachmentCount = desc.attachments.size();
+		rpi.attachmentCount = u32(desc.attachments.size());
 		rpi.pAttachments = desc.attachments.data();
-		rpi.dependencyCount = desc.dependencies.size();
+		rpi.dependencyCount = u32(desc.dependencies.size());
 		rpi.pDependencies = desc.dependencies.data();
 
 		VK_CHECK(create2(dev.handle, &rpi, nullptr, &rp));
@@ -593,11 +593,11 @@ VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
 		rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 		rpi.pNext = desc.pNext;
 		rpi.flags = desc.flags;
-		rpi.subpassCount = subpasses.size();
+		rpi.subpassCount = u32(subpasses.size());
 		rpi.pSubpasses = subpasses.data();
-		rpi.attachmentCount = attachments.size();
+		rpi.attachmentCount = u32(attachments.size());
 		rpi.pAttachments = attachments.data();
-		rpi.dependencyCount = dependencies.size();
+		rpi.dependencyCount = u32(dependencies.size());
 		rpi.pDependencies = dependencies.data();
 
 		VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp));
@@ -730,11 +730,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	rp.desc->dependencies = {rpi.pDependencies, rpi.pDependencies + rpi.dependencyCount};
 
 	for(auto& att : rp.desc->attachments) {
-		copyChain(att.pNext, rp.desc->exts);
+		copyChain(att.pNext, rp.desc->exts.emplace_back());
 	}
 
 	for(auto& dep : rp.desc->dependencies) {
-		copyChain(dep.pNext, rp.desc->exts);
+		copyChain(dep.pNext, rp.desc->exts.emplace_back());
 	}
 
 	auto addAtts = [&](const VkAttachmentReference2* refs, std::size_t count) {
@@ -745,7 +745,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	};
 
 	for(auto& subp : rp.desc->subpasses) {
-		copyChain(subp.pNext, rp.desc->exts);
+		copyChain(subp.pNext, rp.desc->exts.emplace_back());
 
 		auto& atts = rp.desc->attachmentRefs.emplace_back();
 		auto colorOff = addAtts(subp.pColorAttachments, subp.colorAttachmentCount);

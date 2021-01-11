@@ -71,40 +71,48 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 
 	auto nci = *pCreateInfo;
 
+	bool linearSampling {};
+	bool nearestSampling {};
+
 	// If supported, we add the sampled flags to usage so we can
 	// display it directly in our gui.
 	VkFormatProperties props {};
 	dev.ini->dispatch.GetPhysicalDeviceFormatProperties(dev.phdev,
 		nci.format, &props);
 	auto features = nci.tiling == VK_IMAGE_TILING_OPTIMAL ? props.optimalTilingFeatures : props.linearTilingFeatures;
-	auto samplerType = Image::SamplerType::none;
 	if(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
 		nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-		samplerType = Image::SamplerType::nearest;
+		nearestSampling = true;
 
 		if(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) {
-			nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
-			samplerType = Image::SamplerType::linear;
+			linearSampling = true;
 		}
 	}
 
-	// NOTE: needed for our own operations on the buffer. We should
+	// NOTE: needed for our own operations on the buffer. Might be better to
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
 	auto concurrent = false;
 	if(dev.usedQueueFamilyIndices.size() > 1 &&
 			nci.sharingMode != VK_SHARING_MODE_CONCURRENT &&
-			samplerType != Image::SamplerType::none) {
+			nearestSampling) {
 		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
 		nci.queueFamilyIndexCount = u32(dev.usedQueueFamilyIndices.size());
 		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
 		concurrent = true;
 	}
 
-	// NOTE: Currently only needed for framebuffer attachments, only set
-	// for colorattachment usage images?
-	// TODO: might not be supported, check for that!
-	nci.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	// The transferSrc format feature was only added in vulkan 1.1.
+	// For vulkan 1.0 we can just assume it I guess.
+	// We don't simply unset the transient attachment bit (it would make
+	// sense as the memory needs to be non-transient anyways when we hook
+	// the renderpass) since that makes things complicated: the memory
+	// type changes, GetMemoryCommitment cannot be called and so on.
+	// Would have to do a lot of work to fix the aftermath of that change.
+	if((!dev.ini->vulkan11 || features & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)
+			&& !(nci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)) {
+		nci.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	}
 
 	auto res = dev.dispatch.CreateImage(device, &nci, pAllocator, pImage);
 	if(res != VK_SUCCESS) {
@@ -117,8 +125,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.handle = *pImage;
 	img.ci = *pCreateInfo;
 	img.pendingLayout = pCreateInfo->initialLayout;
-	img.samplerType = samplerType;
-	img.concurrent = concurrent;
+	img.allowsNearestSampling = nearestSampling;
+	img.allowsLinearSampling = linearSampling;
+	img.concurrentHooked = concurrent;
+	img.hasTransferSrc = nci.usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
 	return res;
 }

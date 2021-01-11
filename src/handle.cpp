@@ -206,7 +206,9 @@ struct QueueTypeImpl : ObjectTypeHandler {
 	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
 		std::vector<Handle*> ret;
 		for(auto& queue : dev.queues) {
-			if(!matchesSearch(*queue, search)) {
+			// We never return queues created by us, they don't count as
+			// resources.
+			if(queue->createdByUs || !matchesSearch(*queue, search)) {
 				continue;
 			}
 

@@ -7,6 +7,7 @@
 #include <imgui/imgui.h>
 #include <guidraw.hpp>
 #include <variant>
+#include <deque>
 
 struct ImGuiContext;
 struct ImGuiIO;
@@ -56,6 +57,7 @@ public:
 	// is drawing at the same time (externally synchronized).
 	void finishDraws();
 	void activateTab(Tab);
+	std::vector<Draw*> pendingDraws();
 
 	void selectResource(Handle& handle, bool activateTab = true);
 	void selectCommands(IntrusivePtr<CommandRecord> record,
@@ -79,7 +81,7 @@ private:
 	// Functions expect device mutex to be locked
 	template<typename H>
 	void waitForSubmissions(const H& handle);
-	void waitFor(span<PendingSubmission*> submsisions);
+	void waitFor(span<PendingSubmission* const> submsisions);
 
 private:
 	Device* dev_ {};
@@ -89,7 +91,7 @@ private:
 	Tab activeTab_ {};
 	u32 activateTabCounter_ {};
 
-	std::vector<Draw> draws_;
+	std::deque<Draw> draws_;
 
 	struct {
 		ResourceGui resources;

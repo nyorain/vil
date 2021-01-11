@@ -9,7 +9,7 @@
 #include <atomic>
 #include <unordered_set>
 
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 
 namespace fuen {
 

@@ -7,8 +7,17 @@
 #include <queue.hpp>
 #include <overlay.hpp>
 
-#include <wayland.hpp>
-#include <xlib.hpp>
+#ifdef FUEN_WITH_WAYLAND
+  #include <wayland.hpp>
+#endif // FUEN_WITH_WAYLAND
+
+#ifdef FUEN_WITH_X11
+  #include <xlib.hpp>
+#endif // FUEN_WITH_X11
+
+#ifdef FUEN_WITH_WIN32
+  #include <win32.hpp>
+#endif // FUEN_WITH_WIN32
 
 #include <commands.hpp>
 #include <vk/dispatch_table_helper.h>
@@ -31,6 +40,8 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		// DebugBreak();
 	}
 	dlg_default_output(origin, string, data);
+	// (void) string;
+	// (void) data;
 }
 #endif // BREAK_ON_ERROR
 
@@ -42,11 +53,16 @@ std::size_t DescriptorSetRef::Hash::operator()(const DescriptorSetRef& dsr) cons
 	return h;
 }
 
+std::array<unsigned int, 3> apiVersion(uint32_t v) {
+	return {
+		VK_VERSION_MAJOR(v),
+		VK_VERSION_MINOR(v),
+		VK_VERSION_PATCH(v)
+	};
+}
+
 // Classes
 Instance::~Instance() {
-	//if(display) {
-	//	swa_display_destroy(display);
-	//}
 }
 
 // Instance
@@ -54,9 +70,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkInstanceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance) {
-
-	// TODO: urgh
-	new(&dataMutex) decltype(dataMutex) {};
 
 #ifdef BREAK_ON_ERROR
 	// Even in debug kinda unacceptable.
@@ -67,9 +80,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// TODO: remove/find real solution
 #ifdef _WIN32
 	AllocConsole();
-	// dlg_trace("Allocated console. Creating vulkan instance");
-	// dlg_error("Testing error");
+	dlg_trace("Allocated console. Creating vulkan instance");
 #endif // _WIN32
+
+	dlg_trace("CreateInstance");
 
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
 	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
@@ -93,29 +107,59 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	mutLinkInfo->u.pLayerInfo = linkInfo->u.pLayerInfo->pNext;
 
 	// Init instance data
-	// Add additionally requiresd extensions
+	// NOTE: we cannot add extensions here, sadly.
+	// See https://github.com/KhronosGroup/Vulkan-Loader/issues/51
+	auto nci = *ci;
+
+	// TODO: we can't call vkEnumerateInstanceVersion ourselves.
+	// So we just trial-and-error to possibly bump up the version.
+	// When instance creation fails just turn it down to original again.
+	auto originalApiVersion = VK_API_VERSION_1_0;
+	auto ourApiVersion = VK_API_VERSION_1_2;
+
+	VkApplicationInfo ourAppInfo {};
+	if(!nci.pApplicationInfo) {
+		dlg_debug("Trying to manually increase instance apiVersion");
+		ourAppInfo.apiVersion = ourApiVersion;
+		nci.pApplicationInfo = &ourAppInfo;
+	} else {
+		originalApiVersion = nci.pApplicationInfo->apiVersion;
+		if(nci.pApplicationInfo->apiVersion < ourApiVersion) {
+			dlg_debug("Trying to manually increase instance apiVersion");
+			ourAppInfo = *nci.pApplicationInfo;
+			ourAppInfo.apiVersion = ourApiVersion;
+			nci.pApplicationInfo = &ourAppInfo;
+		}
+	}
+
+	// == Create instance ==
+	VkResult result = fpCreateInstance(&nci, alloc, pInstance);
+	if(result != VK_SUCCESS) {
+		if(ourApiVersion <= originalApiVersion) {
+			return result;
+		}
+
+		dlg_debug("Bumping up instance API version failed, trying without");
+		dlg_assert(nci.pApplicationInfo == &ourAppInfo);
+		ourApiVersion = originalApiVersion;
+		ourAppInfo.apiVersion = originalApiVersion;
+		result = fpCreateInstance(&nci, alloc, pInstance);
+
+		if(result != VK_SUCCESS) {
+			return result;
+		}
+	}
+
 	auto iniPtr = std::make_unique<Instance>();
 	auto& ini = *iniPtr;
 
-	auto extsBegin = ci->ppEnabledExtensionNames;
-	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
-
-	auto nci = *ci;
-
-	// Create instance
-	VkResult result = fpCreateInstance(&nci, alloc, pInstance);
-	if(result != VK_SUCCESS) {
-		return result;
-	}
-
 	insertData(*pInstance, iniPtr.release());
 	ini.handle = *pInstance;
+
+	auto extsBegin = ci->ppEnabledExtensionNames;
+	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
 	ini.extensions = {extsBegin, extsEnd};
 
-	// TODO: could enable it ourselves. Might be useful even if
-	// application does not want it.
-	// But we can't check whether it's available, see extension
-	// checks above :(
 	auto debugUtilsName = std::string_view(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 	ini.debugUtilsEnabled = (std::find(extsBegin, extsEnd, debugUtilsName) != extsEnd);
 
@@ -131,6 +175,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		ini.app.engineName = strOrEmpty(ci->pApplicationInfo->pEngineName);
 		ini.app.engineVersion = ci->pApplicationInfo->engineVersion;
 	}
+
+	ini.vulkan11 = (ourApiVersion >= VK_API_VERSION_1_1);
+	ini.vulkan12 = (ourApiVersion >= VK_API_VERSION_1_2);
 
 	layer_init_instance_dispatch_table(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
 
@@ -164,6 +211,7 @@ VKAPI_ATTR PFN_vkVoidFunction GetDeviceProcAddr(VkDevice, const char*);
 struct HookedFunction {
 	PFN_vkVoidFunction func {};
 	bool device {}; // device-level function
+	// TODO: we never need both fields i guess, just merge them into 'ext'?
 	std::string_view iniExt {}; // name of extension that has to be enabled
 	std::string_view devExt {}; // name of extension that has to be enabled
 };
@@ -217,10 +265,21 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	FUEN_DEV_HOOK_EXT(CmdBeginDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 	FUEN_DEV_HOOK_EXT(CmdEndDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 
-	// TODO: enable optionally
-	// FUEN_HOOK(CreateWaylandSurfaceKHR),
+#ifdef FUEN_WITH_WAYLAND
+	FUEN_HOOK(CreateWaylandSurfaceKHR),
+#endif // FUEN_WITH_WAYLAND
+
+#ifdef FUEN_WITH_X11
 	FUEN_INI_HOOK_EXT(CreateXlibSurfaceKHR, VK_KHR_XLIB_SURFACE_EXTENSION_NAME),
 	FUEN_INI_HOOK_EXT(CreateXcbSurfaceKHR, VK_KHR_XCB_SURFACE_EXTENSION_NAME),
+#endif // FUEN_WITH_X11
+
+#ifdef FUEN_WITH_WIN32
+	// We do everything to not include the platform-specific header
+	// FUEN_INI_HOOK_EXT(CreateWin32SurfaceKHR, VK_KHR_WIN32_SURFACE_EXTENSION_NAME),
+	{"vkCreateWin32SurfaceKHR", HookedFunction{(PFN_vkVoidFunction) CreateWin32SurfaceKHR, false, "VK_KHR_win32_surface"}},
+#endif // FUEN_WITH_WIN32
+
 	FUEN_INI_HOOK_EXT(DestroySurfaceKHR, VK_KHR_SURFACE_EXTENSION_NAME),
 
 	// rp.hpp
@@ -533,3 +592,20 @@ vkGetDeviceProcAddr(VkDevice dev, const char* funcName) {
 	// dlg_trace("fuen get device proc addr");
 	return fuen::GetDeviceProcAddr(dev, funcName);
 }
+
+/*
+extern "C" FUEN_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVersionStruct) {
+	dlg_trace("vkNegotiateLoaderLayerInterfaceVersion");
+
+	pVersionStruct->pfnGetDeviceProcAddr = &vkGetDeviceProcAddr;
+	pVersionStruct->pfnGetInstanceProcAddr = &vkGetInstanceProcAddr;
+	pVersionStruct->pfnGetPhysicalDeviceProcAddr = nullptr;
+	// This whole function was introduced in version 2, so it can't
+	// be below that.
+	dlg_assert(pVersionStruct->loaderLayerInterfaceVersion >= 2);
+	pVersionStruct->loaderLayerInterfaceVersion = 2;
+
+	return VK_SUCCESS;
+}
+*/

@@ -9,7 +9,7 @@ namespace fuen {
 
 // CommandBuffer
 CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
-		pool_(&xpool), handle_(xhandle), sections_(*this) {
+		pool_(&xpool), handle_(xhandle) {
 }
 
 CommandBuffer::~CommandBuffer() {
@@ -28,6 +28,7 @@ CommandBuffer::~CommandBuffer() {
 
 		if(record_) {
 			dlg_assert(record_->cb == this);
+			record_->cb->hook.reset();
 			record_->cb = nullptr;
 		}
 	}
@@ -66,6 +67,7 @@ void CommandBuffer::doReset(bool record) {
 		clearPendingLocked();
 
 		if(record_) {
+			record_->cb->hook.reset();
 			record_->cb = nullptr;
 			keepAliveRecord = std::move(record_);
 		}
@@ -93,19 +95,13 @@ void CommandBuffer::doReset(bool record) {
 
 void CommandBuffer::doEnd() {
 	dlg_assert(record_);
-	dlg_assert(sections_.empty()); // all sections must have been popped
+	dlg_assert(!section_);
 
 	graphicsState_ = {};
 	computeState_ = {};
 	pushConstants_ = {};
 
-	{
-		// make sure to clear all cached memory in sections as well. Clear isn't
-		// enough for that
-		decltype(sections_) newSections(*this);
-		swap(sections_, newSections);
-	}
-
+	section_ = nullptr;
 	lastCommand_ = nullptr;
 
 	// parse commands into description
@@ -123,7 +119,6 @@ void CommandBuffer::doEnd() {
 		dlg_assert(!record_->finished);
 
 		state_ = State::executable;
-		record_->finished = true;
 
 		for(auto& image : record_->images) {
 			image.second.image->refRecords.insert(record_.get());
@@ -133,19 +128,37 @@ void CommandBuffer::doEnd() {
 			handle.second.handle->refRecords.insert(record_.get());
 		}
 
+		record_->finished = true;
 		lastRecord_ = record_; // std::move?
 	}
 }
 
 void CommandBuffer::endSection() {
-	dlg_assert(!sections_.empty());
-	lastCommand_ = sections_.back();
-	sections_.pop_back();
+	dlg_assert(section_);
+	lastCommand_ = section_->cmd;
+	section_->cmd = nullptr;
+
+	// Don't unset section_->next, we can re-use the allocation
+	// later on. We unset 'cmd' above to signal its unused (as debug check)
+	section_ = section_->parent;
 }
 
 void CommandBuffer::beginSection(SectionCommand& cmd) {
-	// section_ = &cmd;
-	sections_.push_back(&cmd);
+	if(section_) {
+		if(section_->next) {
+			dlg_assert(!section_->next->cmd);
+			section_ = section_->next;
+		} else {
+			auto nextSection = &fuen::allocate<Section>(*this);
+			nextSection->parent = section_;
+			section_->next = nextSection;
+			section_ = nextSection;
+		}
+	} else {
+		section_ = &fuen::allocate<Section>(*this);
+	}
+
+	section_->cmd = &cmd;
 	lastCommand_ = nullptr;
 }
 
@@ -153,10 +166,11 @@ void CommandBuffer::addCmd(Command& cmd) {
 	if(lastCommand_) {
 		dlg_assert(record_->commands);
 		lastCommand_->next = &cmd;
-	} else if(!sections_.empty()) {
+	} else if(section_) {
 		dlg_assert(record_->commands);
-		dlg_assert(!sections_.back()->children_);
-		sections_.back()->children_ = &cmd;
+		dlg_assert(section_->cmd);
+		dlg_assert(!section_->cmd->children_);
+		section_->cmd->children_ = &cmd;
 	} else if(!record_->commands) {
 		record_->commands = &cmd;
 	}
@@ -180,6 +194,7 @@ void CommandBuffer::invalidateLocked() {
 
 	clearPendingLocked();
 
+	record_->hook.reset();
 	record_->cb = nullptr;
 
 	// We can do this safely here, without ever causing the destructor
@@ -217,78 +232,6 @@ CommandPool::~CommandPool() {
 	}
 
 	freeBlocks(memBlocks.load());
-}
-
-std::byte* data(CommandMemBlock& mem, std::size_t offset) {
-	dlg_assert(offset < mem.size);
-	return reinterpret_cast<std::byte*>(&mem) + sizeof(mem) + offset;
-}
-
-CommandMemBlock& createMemBlock(std::size_t memSize, CommandMemBlock* next) {
-	auto buf = new std::byte[sizeof(CommandMemBlock) + memSize];
-	auto* memBlock = new(buf) CommandMemBlock;
-	memBlock->size = memSize;
-	memBlock->next = next;
-	return *memBlock;
-}
-
-CommandMemBlock& fetchMemBlock(CommandPool& pool, std::size_t size, CommandMemBlock* bnext) {
-	// NOTE: could search all mem blocks for one large enough.
-	// On the other hand, allocations larger than block size are unlikely
-	// so it's probably best to just do a relatively quick one-block check.
-	if(pool.memBlocks) {
-		auto* block = pool.memBlocks.load();
-		auto* next = block->next.load();
-		while(!pool.memBlocks.compare_exchange_weak(block, next)) {
-			next = block->next.load();
-		}
-
-		block->next = bnext;
-		if(block->size >= size) {
-			return *block;
-		}
-
-		// Otherwise we have to allocate a new block after all.
-		// Instead of returning the wrongly allocated (since too small)
-		// block, we simply append it, all of the allocated block is used
-		// up by this allocation anyways.
-		bnext = block;
-	}
-
-	// create entirely new block
-	auto blockSize = std::max<std::size_t>(CommandPool::minMemBlockSize, size);
-	return createMemBlock(blockSize, bnext);
-}
-
-std::byte* CommandBuffer::allocate(std::size_t size, std::size_t alignment) {
-	dlg_assert(alignment <= size);
-	dlg_assert((alignment & (alignment - 1)) == 0); // alignment must be power of two
-	dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__); // can't guarantee otherwise
-
-	dlg_assert(state_ == CommandBuffer::State::recording);
-	dlg_assert(record_);
-
-	// fast path: enough memory available directly inside the command buffer,
-	// simply align and advance the offset
-	if(record_->memBlocks) {
-		memBlockOffset_ = align(memBlockOffset_, alignment);
-		auto remaining = i64(record_->memBlocks->size) - i64(memBlockOffset_);
-		if(remaining >= i64(size)) {
-			auto ret = data(*record_->memBlocks, memBlockOffset_);
-			memBlockOffset_ += size;
-			return ret;
-		}
-	}
-
-	auto next = record_->memBlocks.release();
-	record_->memBlocks.reset(&fetchMemBlock(pool(), size, next));
-
-	memBlockOffset_ = size;
-	return data(*record_->memBlocks, 0);
-}
-
-std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) {
-	return cb.allocate(size, alignment);
 }
 
 template<typename T>
@@ -471,7 +414,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 // 	dlg_assert(success);
 // }
 
-void useHandle(CommandRecord& rec, Command& cmd, std::uint64_t h64, DeviceHandle& handle) {
+void useHandle(CommandRecord& rec, Command& cmd, u64 h64, DeviceHandle& handle) {
 	// auto it = rec.handles.find(h64);
 	// if(it == rec.handles.end()) {
 	// 	it = rec.handles.emplace(h64, UsedHandle{handle, *rec.cb}).first;
@@ -479,7 +422,7 @@ void useHandle(CommandRecord& rec, Command& cmd, std::uint64_t h64, DeviceHandle
 	// 	addToHandle(rec, *it->second.handle);
 	// }
 
-	auto it = rec.handles.insert({h64, UsedHandle{handle, *rec.cb}}).first;
+	auto it = rec.handles.emplace(h64, UsedHandle{handle, rec}).first;
 	it->second.commands.push_back(&cmd);
 }
 
@@ -497,7 +440,7 @@ UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& image) {
 	// 	addToHandle(rec, *it->second.image);
 	// }
 
-	auto it = rec.images.insert({image.handle, UsedImage{image, *rec.cb}}).first;
+	auto it = rec.images.emplace(image.handle, UsedImage{image, rec}).first;
 	it->second.commands.push_back(&cmd);
 
 	dlg_assert(it->second.image);
@@ -588,7 +531,7 @@ void cmdBarrier(
 		// When the image was put into concurrent sharing mode by us,
 		// we have to make sure this does not actually define a queue
 		// family transition since those are not allowed for concurrent images
-		if(img.concurrent) {
+		if(img.concurrentHooked) {
 			imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		}
@@ -821,6 +764,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
 
+		/*
 		for(auto b = 0u; b < ds.bindings.size(); ++b) {
 			auto descriptorType = ds.layout->bindings[b].descriptorType;
 			auto cat = category(descriptorType);
@@ -870,6 +814,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 				}
 			}
 		}
+		*/
 
 		useHandle(cb, cmd, ds);
 		cmd.sets[i] = &ds;

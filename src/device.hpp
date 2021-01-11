@@ -5,7 +5,7 @@
 #include <handle.hpp>
 #include <span.hpp>
 
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
@@ -29,6 +29,9 @@ struct Device {
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
 	VkPhysicalDeviceFeatures enabledFeatures {};
+
+	bool timelineSemaphores {}; // whether we have timeline smeaphores
+	u64 maxTimelineSemaphoreValueDifference {};
 
 	// Aside from properties, only the families used by device
 	// are initialized.
@@ -57,6 +60,10 @@ struct Device {
 	std::unique_ptr<RenderData> renderData;
 
 	std::unique_ptr<DisplayWindow> window;
+
+	// The currently active gui. Might be null. There is never more than
+	// one gui associated with a device.
+	Gui* gui {};
 
 	std::vector<VkFence> fencePool; // currently unused fences
 
@@ -137,26 +144,12 @@ Gui* getOverlayGui(Swapchain& swapchain);
 // Does not expect mutex to be locked
 void notifyDestruction(Device& dev, Handle& handle);
 
-// Expects dev.mutex to be locked
-template<typename F>
-void forEachGuiLocked(Device& dev, F&& func) {
-	for(auto& swapchain : dev.swapchains.map) {
-		auto* renderer = getOverlayGui(*swapchain.second);
-		if(renderer) {
-			func(*renderer);
-		}
-	}
-
-	auto* gui = getWindowGui(dev);
-	if(gui) {
-		func(*gui);
-	}
-}
-
 // Util for naming internal handles.
 // Mainly useful to get better validation layer output for stuff
 // we do inside the layer. Should never be used on any non-internal
 // handles.
+// TODO: does not seem to work inside layer, investigate. Likely
+//   vulkan loader limitation.
 void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name);
 
 template<typename VkT>

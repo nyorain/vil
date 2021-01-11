@@ -9,11 +9,12 @@ template<typename T, typename H>
 class HandledPtr {
 public:
 	static constexpr auto noexceptDec = true; // std::is_nothrow_invocable_v<decltype(&H::dec), H, T*>;
-	static constexpr auto noexceptInc = std::is_nothrow_invocable_v<decltype(&H::inc), H, T*>;
+	static constexpr auto noexceptInc = true; // std::is_nothrow_invocable_v<decltype(&H::inc), H, T*>;
 
 	HandledPtr() noexcept(std::is_nothrow_constructible_v<H>) :
 			storage_{nullptr, H{}} {
 		static_assert(std::is_nothrow_invocable_v<decltype(&H::dec), H, T*>);
+		static_assert(std::is_nothrow_invocable_v<decltype(&H::inc), H, T*>);
 	}
 
 	void reset(T* ptr = nullptr) noexcept(noexceptDec && noexceptInc) {
@@ -38,6 +39,7 @@ public:
 	explicit HandledPtr(T* ptr, H h = {})
 		noexcept(noexceptInc && std::is_nothrow_move_constructible_v<H>)
 			: storage_{ptr, std::move(h)} {
+
 		if(getPointer()) {
 			getHandler().inc(getPointer());
 		}
@@ -94,8 +96,11 @@ protected:
 
 template<typename T>
 struct RefCountHandler {
+	// NOTE: we assume that increasing/decreasing ref count is noexcept
 	void inc(T* ptr) const noexcept { ++ptr->refCount; }
-	void dec(T* ptr) const noexcept(std::is_nothrow_destructible_v<T>) {
+	// void dec(T* ptr) const noexcept(std::is_nothrow_destructible_v<T>) {
+	void dec(T* ptr) const noexcept {
+		static_assert(std::is_nothrow_destructible_v<T>);
 		if(--ptr->refCount == 0) {
 			delete ptr;
 		}
@@ -111,7 +116,11 @@ struct FinishHandler {
 	FinishHandler& operator=(FinishHandler&&) = default;
 
 	void inc(T*) const noexcept {}
-	void dec(T* ptr) const noexcept(noexcept(ptr->finish())) { ptr->finish(); }
+	// void dec(T* ptr) const noexcept(noexcept(ptr->finish())) { 
+	void dec(T* ptr) const noexcept {
+		static_assert(std::is_nothrow_invocable_v<decltype(&T::finish), T>);
+		ptr->finish(); 
+	}
 };
 
 template<typename T> using IntrusivePtr = HandledPtr<T, RefCountHandler<T>>;

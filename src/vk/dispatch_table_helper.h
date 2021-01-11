@@ -24,7 +24,7 @@
  * Author: Mark Lobodzinski <mark@lunarg.com>
  */
 
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include <cstring>
 #include <string>

@@ -36,6 +36,12 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	dev_ = &dev;
 	clear_ = clear;
 
+	// TODO: likely needs a lock. Shouldn't be done here in first place
+	// i guess but at Gui creation, where an existing gui object could
+	// be moved.
+	dlg_assert(dev.gui == nullptr);
+	dev.gui = this;
+
 	tabs_.cb.gui_ = this;
 	tabs_.resources.gui_ = this;
 
@@ -267,6 +273,7 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	ImGui::SetCurrentContext(imgui_);
 	this->io_ = &ImGui::GetIO();
 	this->io_->IniFilename = nullptr;
+	this->io_->MouseDrawCursor = true; // TODO: test, only optionally on windows
 	ImGui::GetStyle().WindowRounding = 0.f;
 	ImGui::GetStyle().WindowBorderSize = 0.f;
 	ImGui::GetStyle().ScrollbarRounding = 0.f;
@@ -284,6 +291,10 @@ Gui::~Gui() {
 	if(!dev_) {
 		return;
 	}
+
+	// TODO: needs a lock. Likely also shouldn't be here.
+	dlg_assert(dev_->gui == this);
+	dev_->gui = nullptr;
 
 	finishDraws();
 	draws_.clear();
@@ -696,10 +707,21 @@ void Gui::drawOverviewUI(Draw& draw) {
 	// pretty much just own debug stuff
 	ImGui::Separator();
 
+	// Clear pending submissions
+	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
+		auto& subm = *it;
+		if(auto nit = checkLocked(*subm); nit) {
+			it = *nit;
+			continue;
+		}
+
+		++it; // already increment to next one so we can't miss it
+	}
+
 	auto pending = dlg::format("Pending submissions: {}", dev.pending.size());
 	if(ImGui::TreeNode(&dev.pending, "%s", pending.c_str())) {
 		for(auto& subm : dev.pending) {
-			// TODO: make button?
+			// TODO: make button
 			imGuiText("To queue {}", name(*subm->queue));
 			if(subm->appFence) {
 				imGuiText("Using Fence");
@@ -710,7 +732,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 			ImGui::Indent();
 			for(auto& sub : subm->submissions) {
-				// TODO: show semaphores
+				// TODO: show semaphores?
 				// should probably store Semaphore instead of VkSemaphore!
 				// if(!sub.waitSemaphores.empty()) {
 				// 	for(auto [sem, flag] : sub.waitSemaphores) {
@@ -797,6 +819,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 	}
 
 	ImGui::End();
+
 	ImGui::EndFrame();
 	ImGui::Render();
 }
@@ -888,7 +911,7 @@ void Gui::waitForSubmissions(const H& handle) {
 	waitFor(toComplete);
 }
 
-void Gui::waitFor(span<PendingSubmission*> toComplete) {
+void Gui::waitFor(span<PendingSubmission* const> toComplete) {
 	if(toComplete.empty()) {
 		return;
 	}
@@ -1035,6 +1058,15 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		auto& drawData = *ImGui::GetDrawData();
 		this->uploadDraw(draw, drawData);
 
+		// TODO: bad
+		// TODO: could be changed in this frame. Really need mechanisms for gui elements
+		//   to add these handles to a wait list as they are used.
+		if(tabs_.cb.imageCopy_ && tabs_.cb.imageCopy_->writer) {
+			dlg_info("wait for submission for image copy write");
+			waitFor({{tabs_.cb.imageCopy_->writer}});
+			dlg_assert(!tabs_.cb.imageCopy_->writer);
+		}
+
 		// handle image waiting logic:
 		// if we are displaying an image we have to make sure it is not currently
 		// being written somewhere else.
@@ -1126,12 +1158,29 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		// And move their vector into Draw. And when the draw fence is ready,
 		// move them back into the semaphore pool.
 
+		// TODO: tmp
+		// for(auto* handle : draw.usedHandles) {
+		// 	// TODO
+		// 	auto* devHandle = static_cast<DeviceHandle*>(handle);
+		// 	std::unordered_set<Submission*> submissions;
+		// 	for(auto& rec : devHandle->refRecords) {
+		// 		if(rec->cb) {
+		// 			for(auto* subm : rec->cb->pending) {
+		// 				for(auto& sub : subm->submissions) {
+		// 					submissions.insert(&sub);
+		// 				}
+		// 			}
+		// 		}
+		// 	}
+		// }
+
+
 		VkSubmitInfo submitInfo {};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.commandBufferCount = 1u;
 		submitInfo.pCommandBuffers = &draw.cb;
 		submitInfo.signalSemaphoreCount = 1u;
-		submitInfo.pSignalSemaphores = &draw.semaphore;
+		submitInfo.pSignalSemaphores = &draw.presentSemaphore;
 		submitInfo.pWaitDstStageMask = waitStages.get();
 		submitInfo.pWaitSemaphores = info.waitSemaphores.data();
 		submitInfo.waitSemaphoreCount = u32(info.waitSemaphores.size());
@@ -1147,23 +1196,27 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	VkPresentInfoKHR presentInfo {};
 	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	presentInfo.pImageIndices = &info.imageIdx;
-	presentInfo.pWaitSemaphores = &draw.semaphore;
+	presentInfo.pWaitSemaphores = &draw.presentSemaphore;
 	presentInfo.waitSemaphoreCount = 1u;
 	presentInfo.pSwapchains = &info.swapchain;
 	presentInfo.swapchainCount = 1u;
 	// TODO: might be bad to not forward this pi.pNext (for overlay)
 
-	auto res = dev().dispatch.QueuePresentKHR(info.presentQueue, &presentInfo);
-	if(res != VK_SUCCESS) {
-		dlg_error("vkQueuePresentKHR error: {}", vk::name(res));
+	{
+		std::lock_guard queueLock(dev().queueMutex);
 
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
-		VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+		auto res = dev().dispatch.QueuePresentKHR(info.presentQueue, &presentInfo);
+		if(res != VK_SUCCESS) {
+			dlg_error("vkQueuePresentKHR error: {}", vk::name(res));
 
-		draw.usedHandles.clear();
-		draw.inUse = false;
+			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
+			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
 
-		return {res, &draw};
+			draw.usedHandles.clear();
+			draw.inUse = false;
+
+			return {res, &draw};
+		}
 	}
 
 	foundDraw->inUse = true;
@@ -1224,6 +1277,17 @@ void Gui::selectResource(Handle& handle, bool activateTab) {
 	if(activateTab) {
 		this->activateTab(Tab::resources);
 	}
+}
+
+std::vector<Draw*> Gui::pendingDraws() {
+	std::vector<Draw*> ret;
+	for(auto& draw : draws_) {
+		if(draw.inUse) {
+			ret.push_back(&draw);
+		}
+	}
+
+	return ret;
 }
 
 // util

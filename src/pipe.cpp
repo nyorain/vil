@@ -101,7 +101,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				pci.pDynamicState->pDynamicStates + pci.pDynamicState->dynamicStateCount};
 		}
 
-		if(pci.pRasterizationState->rasterizerDiscardEnable) {
+		if(!pci.pRasterizationState->rasterizerDiscardEnable) {
 			pipe.multisampleState = *pci.pMultisampleState;
 			pipe.viewportState = *pci.pViewportState;
 

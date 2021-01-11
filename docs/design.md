@@ -292,7 +292,82 @@ enough to completely mess up frame times! Couple of reasons:
   Games can easily have thousands of draw calls (where each draw call previously
   has multiple bind commands) and, as it turns out, allocating memory 
   in __EVERY SINGLE ONE OF THEM__ is a bad idea. Also, games record command
-  buffers in every frame, in practice.
+  buffers in every frame, in practice (we at least have to be ready
+  for this case).
 
-EDIT: nevermind, most of the performance problems came from locking the mutex
-too long when rendering ui
+EDIT: a lot of the performance problems came from locking the mutex
+too long when rendering ui.
+But also from our handling of `vkCmdBindDescriptorSets`. We simply cannot
+afford to iterate through all bindings in a descriptor set, games might
+use bindless techniques (even without the descriptor indexing extension,
+a descriptor set might hold hundreds/thousands of images for instance).
+We simply store the descriptor sets. And when someone is interested in the
+images used by a command buffer, for instance, they also have to iterate
+over the used descriptor sets. But this query isn't really ever needed.
+Much rather we want to see if, for a given handle, there is a command buffer
+that uses it. And we can do that via the handle->refCbs and
+handle->descriptors->refCbs referenced command buffer sets.
+
+# On the Vertex Viewer
+
+Getting vertex processing insights, such as in renderdoc, is actually
+fairly complicated.
+
+1. The input can simply be read from bound index/vertex buffers directly,
+   this is the easy part. But nowadays, vertex shader can use storage
+   buffers/images/whatever perfectly well and not only rely on vertex input,
+   so...
+2. As renderdoc, we want - and need - to show the output of the vertex
+   stage. This is difficult. Options are:
+   	- Use transform feedback. Might not be supported everywhere, really
+	  ugly and in conflict with other things the application might do
+	- Transform the vertex shader into a compute shader that writes its
+	  output into an SSBO inside the layer and let that run to get output.
+	  Lots of work, modifying spirv. Might be error-prone as well, think
+	  of complicated use-cases such as multiview renderpasses.
+	- modify the vertex shaders to (optionally) write out stuff to a
+	  ssbo. The spirv changes should be minimal. Could be problematic as we 
+	  need an additional descriptor though.
+3. The problems don't stop with the vertex stage. To allow debugging
+   of geometry and tessellation stages, we need their output as well.
+   Ugh. Re-implementing that logic in compute shaders is a bad idea.
+   We likely just need to use transform feedback here.
+
+# Submission synchronization
+
+When application submits to a queue:
+- we have to check all pending gui submissions we did and make sure
+  the application commands wait for our submissions to complete, if
+  it writes any resource we read.
+  Except, when the application submission is on same queue as our gui
+  submissions, we don't need this, a cmdBarrier (that we always insert
+  at the end of our gui submission) is enough.
+  	- if we don't have timeline semaphores and we already waiting upon
+	  the gui submission from another application submission (and they
+	  haven't finished yet), things get kinda ugly.
+	  Technically, we could chain the second application submission
+	  to the first one with a semaphore (and so on in future) but
+	  this can create huge chains. Sounds like a nightmare to debug
+	  and quite error-prone on the long run.
+	  We just bite the bullet and wait for the submission for now.
+	  Most workstations have timeline semaphores anyways, making
+	  the non-timeline-semaphore codepath *significantly* more complicated
+	  seems like a bad idea.
+
+When we submit our gui rendering commands:
+- check all pending application submissions and make sure our submission
+  waits upon all submissions that write application resources we read.
+  	- if we don't have timeline semaphores and a previous gui submission
+	  already waited upon the application submission (and both still
+	  are not finished), we simply wait upon the submission. This shouldn't
+	  be a big hit as the gpu is blocked right now anyways by another
+	  gui submission.
+	- unrelated from all of this we might not want to allow multiple
+	  parallel in-flight gui submissions anyways, automatically solving
+	  the above problem. But not sure about it, have to see.
+
+When application destroys a resource:
+- check all pending gui submissions and make sure that all submissions
+  using this handle have finished.
+  Furthermore, the gui needs to be informed about destruction anyways
+  to change its logical state, e.g. might have to unselect the handle.

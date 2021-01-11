@@ -3,8 +3,8 @@
 #include <fwd.hpp>
 #include <bytes.hpp>
 #include <dlg/dlg.hpp>
-#include <vulkan/vulkan.h>
-#include <array>
+#include <vk/vulkan.h>
+#include <util/vec.hpp>
 #include <cstring>
 #include <memory>
 
@@ -63,6 +63,11 @@ auto find(C&& c, K&& k) {
 	return std::find(std::begin(c), std::end(c), std::forward<K>(k));
 }
 
+template<typename C, typename K>
+bool contains(C&& c, K&& k) {
+	return find(c, k) != c.end();
+}
+
 template<typename C, typename F>
 auto find_if(C&& c, F&& f) {
 	return std::find_if(std::begin(c), std::end(c), std::forward<F>(f));
@@ -84,6 +89,20 @@ void ensureSize(C& container, std::size_t size) {
 	}
 }
 
+template<typename CI>
+bool hasChain(const CI& ci, VkStructureType sType) {
+	auto* link = static_cast<const VkBaseInStructure*>(ci.pNext);
+	while(link) {
+		if(link->sType == sType) {
+			return true;
+		}
+
+		link = static_cast<const VkBaseInStructure*>(link->pNext);
+	}
+
+	return false;
+}
+
 template<typename R, VkStructureType SType, typename CI>
 const R* findChainInfo(const CI& ci) {
 	auto* link = static_cast<const VkBaseInStructure*>(ci.pNext);
@@ -99,7 +118,7 @@ const R* findChainInfo(const CI& ci) {
 }
 
 std::unique_ptr<std::byte[]> copyChain(const void*& pNext);
-void copyChain(const void*& pNext, std::vector<std::unique_ptr<std::byte[]>>& bufs);
+void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
 
 // NOTE: we might be able getting away with always just calling the oldest
 // function alias (e.g. vkCmdDrawIndirectCountAMD) statically instead
@@ -145,77 +164,6 @@ constexpr A align(A offset, B alignment) {
 	auto rest = offset % alignment;
 	return rest ? A(offset + (alignment - rest)) : A(offset);
 }
-
-// nytl/vec
-template<size_t D, typename T>
-class Vec : public std::array<T, D> {
-public:
-	/// The (static/fixed) size of the type
-	static constexpr size_t size() { return D; }
-
-	/// Explicitly casts the Vec to another Vec that may have
-	/// a different precision or dimension. Will default construct
-	/// any values that cannot be filled (e.g. vec3 -> vec4) or leave
-	/// out the last values when the size of vector is shrinked (e.g.
-	/// {1, 2, 3} -> {1, 2}).
-	template<size_t OD, typename OT>
-	constexpr explicit operator Vec<OD, OT>() const {
-		auto ret = Vec<OD, OT> {};
-		for(auto i = 0u; i < std::min(D, OD); ++i)
-			ret[i] = (*this)[i];
-		return ret;
-	}
-};
-
-template<typename... Args>
-Vec(Args&&... args) ->
-	Vec<sizeof...(Args), std::common_type_t<Args...>>;
-
-template<typename T> using Vec2 = Vec<2, T>;
-template<typename T> using Vec3 = Vec<3, T>;
-template<typename T> using Vec4 = Vec<4, T>;
-
-using Vec2f = Vec2<float>;
-using Vec2i = Vec2<int>;
-using Vec2ui = Vec2<unsigned int>;
-using Vec2d = Vec2<double>;
-using Vec2b = Vec2<bool>;
-using Vec2u8 = Vec2<std::uint8_t>;
-using Vec2u16 = Vec2<std::uint16_t>;
-using Vec2u32 = Vec2<std::uint32_t>;
-using Vec2u64 = Vec2<std::uint64_t>;
-using Vec2i8 = Vec2<std::int8_t>;
-using Vec2i16 = Vec2<std::int16_t>;
-using Vec2i32 = Vec2<std::int32_t>;
-using Vec2i64 = Vec2<std::int64_t>;
-
-using Vec3f = Vec3<float>;
-using Vec3i = Vec3<int>;
-using Vec3ui = Vec3<unsigned int>;
-using Vec3d = Vec3<double>;
-using Vec3c = Vec3<bool>;
-using Vec3u8 = Vec3<std::uint8_t>;
-using Vec3u16 = Vec3<std::uint16_t>;
-using Vec3u32 = Vec3<std::uint32_t>;
-using Vec3u64 = Vec3<std::uint64_t>;
-using Vec3i8 = Vec3<std::int8_t>;
-using Vec3i16 = Vec3<std::int16_t>;
-using Vec3i32 = Vec3<std::int32_t>;
-using Vec3i64 = Vec3<std::int64_t>;
-
-using Vec4f = Vec4<float>;
-using Vec4i = Vec4<int>;
-using Vec4ui = Vec4<unsigned int>;
-using Vec4d = Vec4<double>;
-using Vec4b = Vec4<bool>;
-using Vec4u8 = Vec4<std::uint8_t>;
-using Vec4u16 = Vec4<std::uint16_t>;
-using Vec4u32 = Vec4<std::uint32_t>;
-using Vec4u64 = Vec4<std::uint64_t>;
-using Vec4i8 = Vec4<std::int8_t>;
-using Vec4i16 = Vec4<std::int16_t>;
-using Vec4i32 = Vec4<std::int32_t>;
-using Vec4i64 = Vec4<std::int64_t>;
 
 // Mainly taken from tkn/formats
 bool isDepthFormat(VkFormat);

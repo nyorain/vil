@@ -35,7 +35,7 @@ void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
 	// new memory
 	VkMemoryAllocateInfo allocInfo {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memReqs.size;
+	allocInfo.allocationSize = align(memReqs.size, dev.props.limits.nonCoherentAtomSize);
 	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
 	nameHandle(dev, this->mem, "Draw:Buffer:mem");
@@ -46,14 +46,12 @@ void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
 }
 
 void Draw::Buffer::free(Device& dev) {
-	if(buf) {
-		dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);
-	}
-
-	if(mem) {
-		dev.dispatch.FreeMemory(dev.handle, mem, nullptr);
-	}
+	dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);
+	dev.dispatch.FreeMemory(dev.handle, mem, nullptr);
 }
+
+template<int>
+struct TestInt;
 
 // Draw
 void swap(Draw& a, Draw& b) noexcept {
@@ -65,9 +63,17 @@ void swap(Draw& a, Draw& b) noexcept {
 	swap(a.inUse, b.inUse);
 	swap(a.indexBuffer, b.indexBuffer);
 	swap(a.vertexBuffer, b.vertexBuffer);
-	swap(a.semaphore, b.semaphore);
+	swap(a.presentSemaphore, b.presentSemaphore);
+	swap(a.futureSemaphore, b.futureSemaphore);
+	swap(a.futureSemaphoreValue, b.futureSemaphoreValue);
 	swap(a.usedHandles, b.usedHandles);
+	swap(a.keepAliveImageCopy, b.keepAliveImageCopy);
+	swap(a.waitedUpon, b.waitedUpon);
+
+	static_assert(sizeof(Draw) == 232);
 }
+
+Draw::Draw() = default;
 
 void Draw::init(Device& dev, VkCommandPool commandPool) {
 	this->dev = &dev;
@@ -90,8 +96,18 @@ void Draw::init(Device& dev, VkCommandPool commandPool) {
 
 	VkSemaphoreCreateInfo sci {};
 	sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
-	nameHandle(dev, this->semaphore, "Draw:semaphore");
+	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &presentSemaphore));
+	nameHandle(dev, this->presentSemaphore, "Draw:presentSemaphore");
+
+	VkSemaphoreTypeCreateInfo tsInfo {};
+	if(dev.timelineSemaphores) {
+		tsInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+		tsInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+		sci.pNext = &tsInfo;
+	}
+
+	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &futureSemaphore));
+	nameHandle(dev, this->futureSemaphore, "Draw:futureSemaphore");
 
 	VkDescriptorSetAllocateInfo dsai {};
 	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -118,13 +134,12 @@ Draw::~Draw() {
 		dev->dispatch.DestroyFence(dev->handle, fence, nullptr);
 	}
 
-	if(semaphore) {
-		dev->dispatch.DestroySemaphore(dev->handle, semaphore, nullptr);
-	}
+	dev->dispatch.DestroySemaphore(dev->handle, presentSemaphore, nullptr);
+	dev->dispatch.DestroySemaphore(dev->handle, futureSemaphore, nullptr);
 
 	// We rely on the commandPool being freed to implicitly free this
 	// command buffer. Since the gui owns the command pool this isn't
-	// a problem
+	// a problem.
 	// if(cb) {
 	// 	dev->dispatch.FreeCommandBuffers(dev->handle, commandPool, 1, &cb);
 	// }

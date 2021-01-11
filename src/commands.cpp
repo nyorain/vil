@@ -301,8 +301,7 @@ void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 // Commands
 std::vector<const Command*> ParentCommand::display(const Command* selected,
 		TypeFlags typeFlags, const Command* cmd) const {
-	// auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
-	auto flags = 0u;
+	auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
 	if(this == selected) {
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}
@@ -311,7 +310,8 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 	auto idStr = dlg::format("{}:{}", nameDesc(), relID);
 	auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", toString().c_str());
 	if(ImGui::IsItemClicked()) {
-		ret = {this};
+		// TODO
+		// ret = {this};
 	}
 
 	if(open) {
@@ -494,11 +494,15 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
 			auto count = state.pipe->viewportState.viewportCount;
 			dlg_assert(state.dynamic.viewports.size() >= count);
-			if(count > 0) {
+			if(count == 1) {
+				auto& vp = state.dynamic.viewports[0];
+				imGuiText("Viewport: pos ({}, {}), size ({}, {}), depth [{}, {}]",
+					vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth);
+			} else if(count > 1) {
 				imGuiText("Viewports");
-				auto count = state.pipe->viewportState.viewportCount;
 				for(auto& vp : state.dynamic.viewports.first(count)) {
-					imGuiText("x {}, y {}, width {}, height {}, minDepth {}, maxDepth {}",
+					ImGui::Bullet();
+					imGuiText("pos ({}, {}), size ({}, {}), depth [{}, {}]",
 						vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth);
 				}
 			}
@@ -507,10 +511,15 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_SCISSOR)) {
 			auto count = state.pipe->viewportState.scissorCount;
 			dlg_assert(state.dynamic.scissors.size() >= count);
-			if(count > 0) {
+			if(count == 1) {
+				auto& sc = state.dynamic.scissors[0];
+				imGuiText("Scissor: offset ({}, {}), extent ({} {})",
+					sc.offset.x, sc.offset.y, sc.extent.width, sc.extent.height);
+			} else if(count > 1) {
 				imGuiText("Scissors");
 				for(auto& sc : state.dynamic.scissors.first(count)) {
-					imGuiText("offset {} {}, extent {} {}",
+					ImGui::Bullet();
+					imGuiText("offset ({} {}), extent ({} {})",
 						sc.offset.x, sc.offset.y, sc.extent.width, sc.extent.height);
 				}
 			}
@@ -561,7 +570,7 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 
 		ImGui::Unindent();
 	} else if(!state.pipe) {
-		imGuiText("Can't display dynamic state, pipeline was destroyed");
+		imGuiText("Can't display relevant dynamic state, pipeline was destroyed");
 	} else if(state.pipe->dynamicState.empty()) {
 		// imGuiText("No relevant dynamic state");
 	}

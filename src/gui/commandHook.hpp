@@ -14,6 +14,7 @@ struct ViewableImageCopy {
 	VkImage image {};
 	VkImageView imageView {};
 	VkDeviceMemory memory {};
+	PendingSubmission* writer {};
 
 	u32 width {};
 	u32 height {};
@@ -37,6 +38,7 @@ public:
 
 public:
 	VkCommandBuffer hook(CommandBuffer& hooked,
+		PendingSubmission& subm,
 		FinishPtr<CommandHookSubmission>& data) override;
 
 	void desc(std::vector<CommandDesc> desc);
@@ -58,14 +60,16 @@ private:
 	CommandHookRecordImpl* records_ {}; // linked list
 };
 
+// Is kept alive only as long as the associated Record is referencing this
+// (since it might resubmitted again, making this useful) or there are
+// pending submission. When the record is invalidated, it no longer references
+// the record.
+// Since the record must stay alive and valid until all submissions have
+// completed, we can assume the Record this hook was created for remains
+// valid throughout its lifetime.
 struct CommandHookRecordImpl : CommandHookRecord {
 	CommandHookImpl* hook {}; // Associated hook. Might be null if this was invalidated
-
-	// TODO: we should unset this in finish. And not rely on it not
-	// being null. Or store it as IntrusivePtr (but then make sure we don't
-	// get a leak via cycle, i.e. correctly unset the HookRecord when
-	// the record is invalidated).
-	CommandRecord* record {}; // the record we hook. /*Might be null if this was reset*/
+	CommandRecord* record {}; // the record we hook. Always valid.
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
 	std::vector<Command*> hcommand; // hierachy of the hooked command
 
@@ -117,7 +121,7 @@ struct CommandHookRecordImpl : CommandHookRecord {
 struct CommandHookSubmissionImpl : CommandHookSubmission {
 	CommandHookRecordImpl* record {};
 
-	CommandHookSubmissionImpl(CommandHookRecordImpl& rec) : record(&rec) {}
+	CommandHookSubmissionImpl(CommandHookRecordImpl&, PendingSubmission&);
 	~CommandHookSubmissionImpl();
 
 	void finish() noexcept override { delete this; }

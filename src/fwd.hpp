@@ -3,11 +3,6 @@
 // Make sure to *never* include them
 #define VK_NO_PROTOTYPES
 
-// TODO: define via meson config
-#define VK_USE_PLATFORM_XCB_KHR
-#define VK_USE_PLATFORM_XLIB_KHR
-// #define VK_USE_PLATFORM_WAYLAND_KHR
-
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -15,6 +10,7 @@
 namespace nytl {
 
 // span
+// C++20: replace with std::span
 constexpr const std::size_t dynamic_extent = std::size_t(-1);
 template<typename T, std::size_t N = dynamic_extent> class span;
 template<typename T, std::size_t N = dynamic_extent>
@@ -27,9 +23,16 @@ template<typename T, typename U = std::underlying_type_t<T>> class Flags;
 
 namespace fuen {
 
-// C++20: replace with std::span
-using nytl::span;
-using nytl::Flags;
+using namespace nytl;
+
+using u8 = std::uint8_t;
+using u16 = std::uint16_t;
+using u32 = std::uint32_t;
+using u64 = std::uint64_t;
+
+using i16 = std::int16_t;
+using i32 = std::int32_t;
+using i64 = std::int64_t;
 
 class Gui;
 struct RenderBuffer;
@@ -78,6 +81,9 @@ struct CommandDesc;
 struct CommandRecord;
 struct CommandBufferDesc;
 
+enum class CommandType : u32;
+using CommandTypeFlags = nytl::Flags<CommandType>;
+
 struct RenderData;
 struct DisplayWindow;
 struct Platform;
@@ -85,15 +91,6 @@ struct Overlay;
 struct Draw;
 
 struct SpirvData;
-
-using u8 = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
-
-using i16 = std::int16_t;
-using i32 = std::int32_t;
-using i64 = std::int64_t;
 
 struct DescriptorSetRef {
 	DescriptorSet* ds {};

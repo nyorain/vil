@@ -43,7 +43,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	bool canHaveView =
 		!image.swapchain &&
 		image.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
-		image.samplerType != Image::SamplerType::none &&
+		image.allowsNearestSampling &&
 		image.ci.samples == VK_SAMPLE_COUNT_1_BIT;
 	if(image_.object != &image) {
 		if(image_.view) {
@@ -116,7 +116,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		VkDescriptorImageInfo dsii {};
 		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		dsii.imageView = image_.view;
-		dsii.sampler = image.samplerType == Image::SamplerType::linear ?
+		dsii.sampler = image.allowsLinearSampling ?
 			dev.renderData->linearSampler :
 			dev.renderData->nearestSampler;
 
@@ -177,7 +177,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	// content
 	if(image.swapchain) {
 		ImGui::Text("Image can't be displayed since it's a swapchain image");
-	} else if(image.samplerType == Image::SamplerType::none) {
+	} else if(!image.allowsNearestSampling) {
 		ImGui::Text("Image can't be displayed since its format does not support sampling");
 	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
 		ImGui::Text("Image can't be displayed since it has multiple samples");
@@ -1208,8 +1208,10 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 
 void ResourceGui::drawDesc(Draw&, Event&) {
 }
+
 void ResourceGui::drawDesc(Draw&, Semaphore&) {
 }
+
 void ResourceGui::drawDesc(Draw&, Fence& fence) {
 	ImGui::Text("%s", name(fence).c_str());
 	ImGui::Spacing();

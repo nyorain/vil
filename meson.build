@@ -15,11 +15,12 @@ cc = meson.get_compiler('cpp')
 args = cc.get_supported_arguments([
 	# silence various msvc warnings, we still wanna compile with werror
 	'/wd4065', # switch has no case, just default
-	'/wd26812', # prefer 'enum class' over 'enum'
+	'/wd26812', # prefer 'enum class' over 'enum'. Warning isn't wrong but can't change external code
 	'/wd4244', # lossy type conversion (e.g. double -> int)
 	'/wd4305', # truncating type conversion (e.g. double -> float)
 	'/wd4127', # conditional expression is constant (might be useful but not really for us)
 	'/wd4456', # delecaration hides previous local declaration (sorry, too used to rust's beauty)
+	'-D_CRT_SECURE_NO_WARNINGS',
 
 	# TODO: msvc really slow in debug build without this
 	# '-D_ITERATOR_DEBUG_LEVEL=0',
@@ -54,7 +55,9 @@ dep_vulkan = dep_vulkan_full.partial_dependency(
 
 subdir('src/imgui')
 
-with_x11 = true
+# TODO: yeah, this needs some love
+with_win32 = build_machine.system() == 'windows'
+with_x11 = not with_win32
 
 src = files(
 	# own meta sources & util
@@ -125,10 +128,6 @@ src = files(
 	'include/fuen_api.h',
 )
 
-if with_x11
-	src += files('src/xlib.cpp')
-endif
-
 public_inc = include_directories('include/')
 private_inc = include_directories('src/')
 shader_inc = include_directories('src/data/')
@@ -148,11 +147,19 @@ deps = [
 ]
 
 if with_x11
+	src += files('src/xlib.cpp')
+
 	dep_xcb = dependency('xcb', required: true)
 	dep_xcb_keysyms = dependency('xcb-keysyms', required: true)
 	dep_x11_xcb = dependency('x11-xcb', required: true)
 
 	deps += [dep_xcb, dep_xcb_keysyms, dep_x11_xcb]
+	args += ['-DFUEN_WITH_X11']
+endif
+
+if with_win32
+	src += files('src/win32.cpp')
+	args += ['-DFUEN_WITH_WIN32']
 endif
 
 fuen_layer = shared_library(

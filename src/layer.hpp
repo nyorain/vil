@@ -2,7 +2,7 @@
 
 #include "fwd.hpp"
 
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include <vk/dispatch_table.h>
 #include <string>
@@ -24,14 +24,15 @@ struct Instance {
 		std::string engineName {};
 	} app;
 
-	// We only create one display per instance.
-	// We need to create it before we create the device (and initialize
-	// all related data) to query for extensions and queue support.
-	// swa_display* display {};
-
 	// info about enabled extensions
 	std::vector<std::string> extensions;
 	bool debugUtilsEnabled {};
+
+	// NOTE: this just means that the instance supports them.
+	// Usually need to check in device for features, might still not
+	// support them!
+	bool vulkan11 {};
+	bool vulkan12 {};
 
 	~Instance();
 };

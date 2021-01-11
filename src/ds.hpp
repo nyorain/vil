@@ -3,7 +3,7 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <intrusive.hpp>
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 
 #include <optional>
 #include <variant>
@@ -19,7 +19,7 @@ enum class DescriptorCategory {
 };
 
 DescriptorCategory category(VkDescriptorType);
-bool needsSampler(VkDescriptorType);
+bool needsSampler(VkDescriptorType); // NOTE: sampler might be immutable in ds layout
 bool needsSampler(const DescriptorSetLayout&, unsigned binding);
 bool needsImageView(VkDescriptorType);
 bool needsImageLayout(VkDescriptorType);

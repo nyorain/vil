@@ -3465,6 +3465,7 @@ void ImGui::RenderMouseCursor(ImDrawList* draw_list, ImVec2 pos, float scale, Im
 {
     if (mouse_cursor == ImGuiMouseCursor_None)
         return;
+
     IM_ASSERT(mouse_cursor > ImGuiMouseCursor_None && mouse_cursor < ImGuiMouseCursor_COUNT);
 
     ImFontAtlas* font_atlas = draw_list->_Data->Font->ContainerAtlas;
@@ -3479,6 +3480,8 @@ void ImGui::RenderMouseCursor(ImDrawList* draw_list, ImVec2 pos, float scale, Im
         draw_list->AddImage(tex_id, pos,                        pos + size * scale,                     uv[2], uv[3], col_border);
         draw_list->AddImage(tex_id, pos,                        pos + size * scale,                     uv[0], uv[1], col_fill);
         draw_list->PopTextureID();
+    } else {
+        // IM_ASSERT(false);
     }
 }
 

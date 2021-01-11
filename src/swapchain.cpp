@@ -1,9 +1,11 @@
 #include <swapchain.hpp>
 #include <data.hpp>
+#include <layer.hpp>
 #include <image.hpp>
 #include <queue.hpp>
 #include <platform.hpp>
 #include <overlay.hpp>
+#include <vk/enumString.hpp>
 
 namespace fuen {
 
@@ -37,7 +39,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		const VkSwapchainCreateInfoKHR*             pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkSwapchainKHR*                             pSwapchain) {
-	auto& devd = getData<Device>(device);
+	auto& dev = getData<Device>(device);
 	auto* platform = findData<Platform>(pCreateInfo->surface);
 
 	auto env = getenv("FUEN_DISABLE_PLATFORM");
@@ -55,7 +57,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	std::unique_ptr<Overlay> savedOverlay {};
 	bool recreateOverlay {false};
 	if(pCreateInfo->oldSwapchain) {
-		oldChain = &devd.swapchains.get(pCreateInfo->oldSwapchain);
+		oldChain = &dev.swapchains.get(pCreateInfo->oldSwapchain);
 
 		// This is important to destroy our handles of the swapchain
 		// images.
@@ -72,40 +74,50 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		}
 	}
 
-	// TODO: might not be supported, check for that!
+	// check surface capabilities to see if we can sneak in transferSrc
+	// for our command hook copies
 	auto sci = *pCreateInfo;
-	sci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
-	auto result = devd.dispatch.CreateSwapchainKHR(device, &sci, pAllocator, pSwapchain);
+	VkSurfaceCapabilitiesKHR caps;
+	auto res = dev.ini->dispatch.GetPhysicalDeviceSurfaceCapabilitiesKHR(dev.phdev,
+		pCreateInfo->surface, &caps);
+	if(res != VK_SUCCESS) {
+		dlg_error("vkGetPhysicalDeviceSurfaceCapabilitiesKHR: {} ({})", vk::name(res), res);
+	} else if(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+		sci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	}
+
+	auto result = dev.dispatch.CreateSwapchainKHR(device, &sci, pAllocator, pSwapchain);
 	if(result != VK_SUCCESS) {
 		return result;
 	}
 
-	auto& swapd = devd.swapchains.add(*pSwapchain);
+	auto& swapd = dev.swapchains.add(*pSwapchain);
 	swapd.objectType = VK_OBJECT_TYPE_SWAPCHAIN_KHR;
-	swapd.dev = &devd;
+	swapd.dev = &dev;
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
 
 	// add swapchain images to tracked images
 	u32 imgCount = 0u;
-	VK_CHECK(devd.dispatch.GetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, nullptr));
+	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapd.handle, &imgCount, nullptr));
 	auto imgs = std::make_unique<VkImage[]>(imgCount);
-	VK_CHECK(devd.dispatch.GetSwapchainImagesKHR(devd.handle, swapd.handle, &imgCount, imgs.get()));
+	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapd.handle, &imgCount, imgs.get()));
 
 	swapd.images.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
-		auto& img = devd.images.add(imgs[i]);
+		auto& img = dev.images.add(imgs[i]);
 		img.swapchain = &swapd;
 		img.swapchainImageID = i;
-		img.dev = &devd;
+		img.dev = &dev;
 		img.objectType = VK_OBJECT_TYPE_IMAGE;
 		img.handle = imgs[i];
+		img.hasTransferSrc = (sci.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 
 		swapd.images[i] = &img;
 	}
 
-	devd.lastCreatedSwapchain = &swapd;
+	dev.lastCreatedSwapchain = &swapd;
 
 	if(savedOverlay) {
 		swapd.overlay = std::move(savedOverlay);
@@ -115,8 +127,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 			swapd.overlay->platform->resize(swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
 		}
 	} else if(recreateOverlay) {
-		// Otherwise we have to create a new renderer from scratch
-		// TODO: carry over all gui logic. Just recreate rendering logic
+		// Otherwise we have to create a new renderer from scratch.
+		// Carry over all gui logic. Just recreate rendering logic
 		dlg_error("TODO: not implemented");
 	} else if(platform) {
 		swapd.overlay = std::make_unique<Overlay>();

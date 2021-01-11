@@ -442,11 +442,15 @@ void DisplayWindow::uiThread() {
 
 	using Clock = std::chrono::high_resolution_clock;
 	auto timeIt = [](auto& now, auto name) {
+		(void) now;
+		(void) name;
+		/*
 		auto newNow = Clock::now();
 		auto dist = newNow - now;
 		dlg_trace("time {}: {}", name,
 			std::chrono::duration_cast<std::chrono::milliseconds>(dist).count());
 		now = newNow;
+		*/
 	};
 
 	while(run_.load()) {

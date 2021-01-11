@@ -1,4 +1,5 @@
 #include <fwd.hpp>
+#include <vk/vulkan.h>
 #include <fuen_api.h>
 #include <data.hpp>
 #include <device.hpp>

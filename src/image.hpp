@@ -22,15 +22,11 @@ struct Image : MemoryResource {
 	Swapchain* swapchain {};
 	u32 swapchainImageID {};
 
-	// Which samples should be used to display it.
-	enum class SamplerType {
-		none, // when an image can't be sampled
-		linear,
-		nearest,
-	};
-
-	SamplerType samplerType {SamplerType::none};
-	bool concurrent {}; // whether we moved it into concurrent sharing mode
+	// Properties related to our changes
+	bool allowsNearestSampling {};
+	bool allowsLinearSampling {};
+	bool concurrentHooked {}; // whether we moved it into concurrent sharing mode
+	bool hasTransferSrc {}; // whether we were able to set transferSrc usage
 
 	~Image();
 };

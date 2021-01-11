@@ -18,6 +18,24 @@ Fence::~Fence() {
 	}
 }
 
+Semaphore::~Semaphore() {
+	if(!dev) {
+		return;
+	}
+
+	// per spec, we can assume all associated payload to be finished
+	std::lock_guard lock(dev->mutex);
+	if(this->signalFrom) {
+		auto finished = checkLocked(*this->signalFrom);
+		dlg_assert(finished);
+	}
+
+	if(this->waitFrom) {
+		auto finished = checkLocked(*this->waitFrom);
+		dlg_assert(finished);
+	}
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 		VkDevice                                    device,
 		const VkFenceCreateInfo*                    pCreateInfo,

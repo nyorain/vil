@@ -1,7 +1,7 @@
 #pragma once
 
-#include <device.hpp>
-#include <vulkan/vulkan.h>
+#include <fwd.hpp>
+#include <vk/vulkan.h>
 
 struct VkXlibSurfaceCreateInfoKHR;
 struct VkXcbSurfaceCreateInfoKHR;

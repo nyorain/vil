@@ -1,16 +1,17 @@
 #pragma once
 
-#include <device.hpp>
+#include <fwd.hpp>
 #include <vk/vulkan.h>
 
-struct VkWaylandSurfaceCreateInfoKHR;
+struct VkWin32SurfaceCreateInfoKHR;
 
 namespace fuen {
 
-VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
+VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 	VkInstance                                  instance,
-	const VkWaylandSurfaceCreateInfoKHR*        pCreateInfo,
+	const VkWin32SurfaceCreateInfoKHR*          pCreateInfo,
 	const VkAllocationCallbacks*                pAllocator,
 	VkSurfaceKHR*                               pSurface);
 
 } // namespace fuen
+

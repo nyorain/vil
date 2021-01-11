@@ -14,7 +14,10 @@
 namespace fuen {
 
 // CommandBufferGui
-CommandBufferGui::CommandBufferGui() = default;
+CommandBufferGui::CommandBufferGui() {
+	commandFlags_ = CommandType(~(CommandType::end | CommandType::bind));
+}
+
 CommandBufferGui::~CommandBufferGui() = default;
 
 void CommandBufferGui::draw(Draw& draw) {
@@ -30,6 +33,42 @@ void CommandBufferGui::draw(Draw& draw) {
 	} else {
 		dlg_assert(record_->destroyed.empty());
 	}
+
+	if(record_->group) {
+		ImGui::Checkbox("Update", &updateFromGroup_);
+	} else {
+		// disabled button
+		ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+
+		ImGui::Checkbox("Update", &updateFromGroup_);
+		if(ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			ImGui::BeginTooltip();
+			ImGui::Text("Recording does not have a group");
+			ImGui::EndTooltip();
+		}
+
+		ImGui::PopStyleVar();
+		ImGui::PopItemFlag();
+	}
+
+	auto val = commandFlags_.value();
+	ImGui::CheckboxFlags("Bind", &val, u32(CommandType::bind));
+	ImGui::SameLine();
+	ImGui::CheckboxFlags("Draw", &val, u32(CommandType::draw));
+	ImGui::SameLine();
+	ImGui::CheckboxFlags("Dispatch", &val, u32(CommandType::dispatch));
+	ImGui::SameLine();
+	ImGui::CheckboxFlags("Transfer", &val, u32(CommandType::transfer));
+	ImGui::SameLine();
+	ImGui::CheckboxFlags("Sync", &val, u32(CommandType::sync));
+	ImGui::SameLine();
+	ImGui::CheckboxFlags("End", &val, u32(CommandType::end));
+	ImGui::SameLine();
+	ImGui::CheckboxFlags("Query", &val, u32(CommandType::query));
+	ImGui::SameLine();
+	ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
+	commandFlags_ = CommandType(val);
 
 	// Command list
 	ImGui::Columns(2);
@@ -54,11 +93,8 @@ void CommandBufferGui::draw(Draw& draw) {
 	// show sections etc. Should probably pass a struct DisplayDesc
 	// to displayCommands instead of various parameters
 	// auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
-	auto flags = Command::Type(~(Command::Type::end | Command::Type::bind));
-	auto nsel = displayCommands(record_->commands, command_, flags);
-	// auto commandChanged = false;
+	auto nsel = displayCommands(record_->commands, command_, commandFlags_);
 	if(!nsel.empty() && nsel.front() != command_) {
-		// commandChanged = true;
 		command_ = nsel.front();
 		desc_ = CommandDesc::get(*record_->commands, nsel);
 
@@ -135,6 +171,7 @@ void CommandBufferGui::draw(Draw& draw) {
 				// Should probably add a mechanism for associating
 				// this resource with the draw.
 				imageCopy_ = hook_->image;
+				draw.keepAliveImageCopy = imageCopy_;
 
 				VkDescriptorImageInfo dsii {};
 				dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

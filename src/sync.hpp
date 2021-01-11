@@ -17,6 +17,13 @@ struct Fence : DeviceHandle {
 
 struct Semaphore : DeviceHandle {
 	VkSemaphore handle {};
+
+	// NOTE: eventually, we'll want to support other kinds of payloads here.
+	// Can be signaled/waited upon in QueuePresent, AcquireImage and more.
+	PendingSubmission* signalFrom {};
+	PendingSubmission* waitFrom {};
+
+	~Semaphore();
 };
 
 struct Event : DeviceHandle {

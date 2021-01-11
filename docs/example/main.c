@@ -713,8 +713,6 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 	application_info.applicationVersion = 1;
 	application_info.pEngineName = "swa-example-vulkan";
 	application_info.engineVersion = 1;
-	// will only run on the latest drivers anyways so we can require
-	// vulkan 1.1 without problems
 	application_info.apiVersion = VK_MAKE_VERSION(1,1,0);
 
 	// layer reports error in api usage to debug callback

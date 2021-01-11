@@ -6,6 +6,83 @@
 
 namespace fuen {
 
+std::byte* data(CommandMemBlock& mem, std::size_t offset) {
+	dlg_assert(offset < mem.size);
+	return reinterpret_cast<std::byte*>(&mem) + sizeof(mem) + offset;
+}
+
+CommandMemBlock& createMemBlock(std::size_t memSize, CommandMemBlock* next) {
+	auto buf = new std::byte[sizeof(CommandMemBlock) + memSize];
+	auto* memBlock = new(buf) CommandMemBlock;
+	memBlock->size = memSize;
+	memBlock->next = next;
+	return *memBlock;
+}
+
+CommandMemBlock& fetchMemBlock(CommandPool& pool, std::size_t size, CommandMemBlock* bnext) {
+	// NOTE: could search all mem blocks for one large enough.
+	// On the other hand, allocations larger than block size are unlikely
+	// so it's probably best to just do a relatively quick one-block check.
+	if(pool.memBlocks) {
+		auto* block = pool.memBlocks.load();
+		auto* next = block->next.load();
+		while(!pool.memBlocks.compare_exchange_weak(block, next)) {
+			next = block->next.load();
+		}
+
+		block->next = bnext;
+		if(block->size >= size) {
+			return *block;
+		}
+
+		// Otherwise we have to allocate a new block after all.
+		// Instead of returning the wrongly allocated (since too small)
+		// block, we simply append it, all of the allocated block is used
+		// up by this allocation anyways.
+		bnext = block;
+	}
+
+	// create entirely new block
+	auto blockSize = std::max<std::size_t>(CommandPool::minMemBlockSize, size);
+	return createMemBlock(blockSize, bnext);
+}
+
+std::byte* CommandRecord::allocate(std::size_t size, std::size_t alignment) {
+	dlg_assert(alignment <= size);
+	dlg_assert((alignment & (alignment - 1)) == 0); // alignment must be power of two
+	dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__); // can't guarantee otherwise
+
+	dlg_assert(this->cb);
+	dlg_assert(!this->finished);
+
+	// fast path: enough memory available directly inside the command buffer,
+	// simply align and advance the offset
+	if(memBlocks.get()) {
+		memBlockOffset = align(memBlockOffset, alignment);
+		auto remaining = i64(memBlocks->size) - i64(memBlockOffset);
+		if(remaining >= i64(size)) {
+			auto ret = data(*memBlocks, memBlockOffset);
+			memBlockOffset += size;
+			return ret;
+		}
+	}
+
+	auto next = memBlocks.release();
+	memBlocks.reset(&fetchMemBlock(cb->pool(), size, next));
+
+	memBlockOffset = size;
+	return data(*memBlocks, 0);
+}
+
+std::byte* allocate(CommandRecord& rec, std::size_t size, std::size_t alignment) {
+	return rec.allocate(size, alignment);
+}
+
+std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) {
+	dlg_assert(cb.state() == CommandBuffer::State::recording);
+	return cb.record()->allocate(size, alignment);
+}
+
 void returnBlocks(CommandPool& pool, CommandMemBlock* head) {
 	if(!head) {
 		return;
@@ -13,7 +90,7 @@ void returnBlocks(CommandPool& pool, CommandMemBlock* head) {
 
 	auto tail = head;
 	auto next = tail;
-	while((next = tail->next.load())) {
+	while((next = tail->next.load()) != nullptr) {
 		tail = next;
 	}
 
@@ -48,7 +125,7 @@ void copyChain(CommandBuffer& cb, const void*& pNext) {
 		auto size = structSize(src->sType);
 		dlg_assertm(size > 0, "Unknown structure type!");
 
-		auto buf = cb.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto buf = allocate(cb, size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs
@@ -86,8 +163,8 @@ void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
 	memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
-	queueFamily(xcb.pool().queueFamily), images(xcb), handles(xcb),
-	pipeLayouts(xcb), secondaries(xcb) {
+	queueFamily(xcb.pool().queueFamily), images(*this), handles(*this),
+	pipeLayouts(*this), secondaries(*this) {
 }
 
 CommandRecord::~CommandRecord() {
@@ -114,7 +191,8 @@ CommandRecord::~CommandRecord() {
 		removeFromResource(*handle.second.handle);
 	}
 
-	// just to be safe, its destructor might reference this
+	// Just to be safe, its destructor might reference this.
+	// And must be called while mutex is locked.
 	hook.reset();
 }
 

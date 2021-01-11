@@ -24,7 +24,7 @@
 #include <vector>
 #include <map>
 #include <set>
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 #include <vk/format_utils.h>
 
 struct VULKAN_FORMAT_INFO {

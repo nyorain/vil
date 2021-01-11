@@ -359,3 +359,286 @@ VkRenderPass recreate(const RenderPassDesc& desc) {
 	}
 	*/
 ```
+
+
+For Buffer layout detection:
+
+```
+struct BufferLayoutInfo {
+	// Where the information comes from
+	enum class Source {
+		uniform,
+		storage,
+		vertex,
+		index,
+		copy,
+		texelBuffer,
+	};
+
+	enum class Type {
+		plain,
+		struct
+	};
+
+	struct BaseType {
+		Type type;	
+		VkFormat plainFormat;
+		std::vector<BaseType> structEntries;
+	};
+
+	struct Entry {
+		BaseType* type;
+		u32 arraySize {}; // 0: no array, u32(-1): dynamic sized
+		std::string name {}; // might be empty
+		VkDeviceSize offset {};
+		VkDeviceSize stride {};
+	};
+
+	Source source;
+	VkDeviceSize offset;
+	VkDeviceSize range;
+	std::vector<Entry> entries;
+};
+```
+
+hm does it make sense in the first place to develop such a meta description
+for all sources? Layout of vertex data looks very different than layout
+of image src data. But hard to keep track of what is in there without
+this. Maybe something like this?
+
+```
+struct BufferSection {
+	// What kind of section this is
+	enum class Type {
+		storageUniform,
+		vertex,
+		index,
+		imageCopy,
+		bufferCopy,
+		texelBuffer,
+	};
+
+	Type type;
+	VkDeviceSize offset;
+	VkDeviceSize size;
+};
+
+struct IndexBufferSection : BufferSection {
+	VkIndexType indexType;
+};
+
+struct VertexBufferSection : BufferSection {
+	std::vector<VkVertexInputAttributeDescription> attribs;
+};
+
+struct StorageUniformBufferSection : BufferSection {
+	// here basically the nested entry-thing from above?
+};
+
+struct ImageCopyBufferSection : BufferSection {
+	VkBufferImageCopy copy;
+};
+
+// eh, this is not really useful.
+// ImageCopyBufferSection at least tells us format of pixel data.
+// This could tell us something if we knew how the other buffer is used tho
+struct BufferCopyBufferSection : BufferSection {
+	VkBufferCopy copy;
+};
+
+struct TexelBufferSection : BufferSection {
+	VkFormat format;
+};
+
+// in buffer:
+std::vector<std::unique_ptr<BufferLayoutInfo>> sections;
+```
+
+---
+
+```
+select(ds, binding, elem, offset) {
+	auto dstype = ds.layout->bindings[binding].descriptorType;
+	auto dscat = category(dstype);
+
+	if(dstype == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || 
+			dstype == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC) {
+		commandHook->copyBufferBefore = binding.buffer;
+	} else if(dstype == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER || 
+			dstype == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) {
+		commandHook->copyImageBefore = binding.image;
+	}
+
+	// for storage images/buffers (that are not readonly) we likely
+	// want to copy before *and* after, right?
+	// We need both at once if we want to show "changed regions"
+	// something like that
+}
+
+commandIO {
+	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
+		auto& ds = state.descriptorSets[i];
+		if(!ds.ds) {
+			imGuiText("ds {}: null", i);
+			continue;
+		}
+
+		// TODO: try use ds name
+		auto name = dlg::format("ds {}", i);
+		if(!ImGui::TreeNode(name.c_str())) {
+			continue;
+		}
+
+		for(auto b = 0u; b < ds.ds->bindings.size(); +=b) {
+			auto& bindings = ds.ds->bindings[b];
+			if(bindings.size() == 1) {
+				int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
+
+				// TODO: show information about binding
+				auto name = dlg::format("binding {}", b);
+				ImGui::TreeNode(name.c_str(), flags);
+				if(ImGui::IsItemClicked()) {
+					select(*ds.ds, b, 0, TODO: offset);
+				}
+
+				ImGui::TreePop();
+			} else {
+				// TODO
+			}
+		}
+
+		ImGui::TreePop();
+	}
+}
+```
+
+The main difficulty here atm: how to let the command hook know what
+resource(s) exactly the ui wants to show.
+Also, how to pool the copy dst resources in the command pool to not recreate
+them for every new record.
+
+Generic approach, where the hook itself has no idea what it is copying:
+
+```
+enum class CopyPoint {
+	beforeCmd = 1 << 0,
+	afterCmd = 1 << 1,
+	both = (beforeCmd | afterCmd),
+};
+
+struct BufferCopyOp {
+	VkBuffer buffer;
+	VkDeviceSize offset;
+	VkDeviceSize size;
+	CopyPoint point;	
+};
+
+struct ImageCopyOp {
+	VkImage image;
+	VkOffset3D offset;
+	VkExtent3D extent;
+	VkImageSubresource subres;
+	CopyPoint point;
+};
+
+// Always created on host visible memory
+struct CopiedBuffer {
+	Device* dev;
+
+	VkDeviceSize size;
+	VkBuffer buffer
+	VkDeviceMemory memory;
+	void* map;
+
+	std::vector<Allocation> free;
+};
+
+struct CopiedBufferSpan {
+	CopiedBuffer* buf;
+	VkDeviceSize offset;
+	VkDeviceSize size;
+};
+
+struct CopiedImage {
+	Device* dev {};
+	VkImage image {};
+	VkImageView imageView {};
+	VkDeviceMemory memory {};
+
+	u32 width {};
+	u32 height {};
+	VkFormat format {};
+};
+
+struct CommandHookState {
+	std::vector<CopiedImage*> imageOps;
+	std::vector<CopiedBufferSpan> bufferOps;
+
+	~CommandState();
+};
+
+struct CommandHook {
+	std::vector<ImageCopyOp> imageOps;	
+	std::vector<BufferCopyOp> bufferOps;	
+
+	// ...
+};
+```
+
+less generic but probably better idea, easier allowing for descriptor_indexing,
+dynamic offsets and such stuff.
+
+```
+struct CommandHookState {
+	std::variant<CopiedImage*, CopiedBufferAlloc> dsCopy;
+	std::vector<CopiedBufferAlloc> vertexBufCopies;
+	CopiedImage* attachmentCopy;
+	CopiedBufferAlloc indirectCopy;
+	u64 neededTime;
+};
+
+struct CommandHook {
+	bool copyVertexBuffers; // could specify the needed subset in future
+	bool copyIndirectDrawCmd; // always do that?
+	// TODO: could add before/after specifiers
+	std::optional<std::pair<unsigned, unsigned, unsigned>> copyDsState;
+	std::optional<unsigned> copyAttachment; // only for cmd inside renderpass
+	bool queryTime;
+};
+```
+
+sketch for supporting descriptor indexing (update after bind feature)
+in these command hooks:
+
+idea 1:
+- in each CommandHookRecord, store for each relevant ds (usecd by hooked cmd)
+  the current updateCounter
+- on submission: when there is a CommandHookRecord we could use, check if the
+  updateCounter for all relevant descriptorSets (used by hooked command)
+  still matches their latest updateCounter.
+  If not, we have to create a new record.
+
+idea 2: on UpdateDescriptor set on update-after-bind sets, we could inform
+	the record that a ds was changed (maybe add it to list of ds's/commands
+	that were changed). But idea 1 seems a lot better, we don't need
+	this in 99% of the cases.
+
+---
+we probably want to access the returned values from CommandHook directly
+in Command::displayInspect. Maybe add base class for draw/dispatch commands,
+something like "StateUseCommand"?
+> nah, we don't really need a class for that. Simply add function that
+  display a DescriptorState object.
+  For draw commands we add attachments (input, color, depthStencil)
+  and vertex input as additional inputs/outputs.
+
+---
+
+idea for the various draw command display modes from renderdoc:
+simply re-use the vertex shader and bind our own fragment shader
+that draws stuff? (or, to visualize scissor/viewport just use
+our own full pipelines).
+We could generate the spirv manually since we don't know a priori
+how many color attachments there are?
+> nah, overkill. We only ever visualize one attachment so only need
+  to draw to one attachment!

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <device.hpp>
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 
 // TODO: Xlib, trying to immitate the winapi terribleness.
 // Should be fixed more globally.

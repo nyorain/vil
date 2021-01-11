@@ -5,7 +5,7 @@
 #include <intrusive.hpp>
 #include <commandDesc.hpp>
 // #include <commandHook.hpp>
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 #include <vector>
 #include <optional>
 #include <memory>
@@ -22,8 +22,11 @@ struct Queue : Handle {
 	u32 family {};
 	float priority {};
 
+	// Whether the queue was created by us, for internal use.
+	bool createdByUs {};
+
 	// All groups associated with this queue
-	std::vector<CommandBufferGroup*> groups;
+	std::unordered_set<CommandBufferGroup*> groups;
 
 	// Counted up each time this queue is submitted to.
 	// Might wrap around.
@@ -43,26 +46,27 @@ struct QueueFamily {
 
 struct SubmittedCommandBuffer {
 	CommandBuffer* cb {};
-	// std::unique_ptr<CommandHookSubmission> hook {}; // TODO: could be plain member, no pointer
 	FinishPtr<CommandHookSubmission> hook {};
 };
 
 struct Submission {
-	std::vector<std::pair<VkSemaphore, VkPipelineStageFlags>> waitSemaphores;
-	std::vector<VkSemaphore> signalSemaphores;
+	std::vector<std::pair<Semaphore*, VkPipelineStageFlags>> waitSemaphores;
+	std::vector<Semaphore*> signalSemaphores;
 
 	// The CommandBuffer record must stay valid while the submission
 	// is still pending (anything else is an application error).
 	std::vector<SubmittedCommandBuffer> cbs;
 
 	// We always add a signal semaphore to a submission, from the
-	// devices semaphore pool.
+	// devices semaphore pool. When we have timeline semaphores, we also
+	// store the associated value this semaphore is set to by this submission.
 	VkSemaphore ourSemaphore {};
+	u64 ourSemaphoreValue {};
 };
 
 struct PendingSubmission {
 	Queue* queue {};
-	std::vector<Submission> submissions;
+	std::vector<Submission> submissions; // immutable after creation
 
 	// The fence added by the caller.
 	// Might be null
@@ -76,6 +80,8 @@ struct PendingSubmission {
 // Commandbuffer hook that allows us to forward a modified version
 // of this command buffer down the chain. Only called during submission,
 // when the given CommandBuffer has a valid recording.
+// TODO: we don't really need all this virtual stuff here. Only have
+// one implementation anyways!
 struct CommandHook {
 	virtual ~CommandHook() = default;
 
@@ -89,6 +95,7 @@ struct CommandHook {
 	// gets associated with the lifetime of the submission (i.e. is destroyed
 	// when the submission is finished).
 	virtual VkCommandBuffer hook(CommandBuffer& hooked,
+		PendingSubmission& subm,
 		FinishPtr<CommandHookSubmission>& data) = 0;
 
 	// Called when hook is removed from command buffer or command group.

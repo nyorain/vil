@@ -1,10 +1,14 @@
 #pragma once
 
-#include "device.hpp"
+#include <device.hpp>
+#include <intrusive.hpp>
+#include <gui/commandHook.hpp>
 
 struct ImDrawData;
 
 namespace fuen {
+
+struct ViewableImageCopy;
 
 struct Draw {
 	struct Buffer {
@@ -22,12 +26,18 @@ struct Draw {
 	Device* dev {};
 	Buffer vertexBuffer {};
 	Buffer indexBuffer {};
-	// Buffer readbackBuffer; // TODO:
-	VkCommandBuffer cb {}; // not freed, relies on command pool being freed
+	VkCommandBuffer cb {}; // not freed here, relies on command pool being freed
 
 	// Semaphore associated with the gfx submission of this rendering.
 	// Consumed by the present info.
-	VkSemaphore semaphore {};
+	VkSemaphore presentSemaphore {};
+
+	// Semaphore associated with the gfx submission that can be used later
+	// on to make application submissions to a different queue that write
+	// to memory we read here wait. When supported by device, this is a timeline
+	// semaphore that will be set to the given value by this submission.
+	VkSemaphore futureSemaphore {};
+	u64 futureSemaphoreValue {};
 
 	// Fence associated with the gfx submission of this rendering.
 	// Used to check if frame has completed and Draw can be used again.
@@ -40,11 +50,21 @@ struct Draw {
 	// descriptor set for selected image view.
 	VkDescriptorSet dsSelected {};
 
+	// A list of handles that are referenced by this draw, i.e. are used in
+	// the submission. While the associated submission is pending, we must
+	// make sure that non of the handles are destroyed or written.
 	std::vector<Handle*> usedHandles;
+	IntrusivePtr<ViewableImageCopy> keepAliveImageCopy;
+
+	// All the semaphores of submissions (Submission::ourSemaphore) we
+	// waited upon. When the draw finishes, they should be returned
+	// to the Devices semaphore pool (they are already reset).
+	std::vector<VkSemaphore> waitedUpon;
 
 	void init(Device& dev, VkCommandPool pool);
 
-	Draw() = default;
+	Draw();
+	~Draw();
 
 	Draw(Draw&& rhs) noexcept { swap(*this, rhs); }
 	Draw& operator=(Draw rhs) noexcept {
@@ -53,8 +73,6 @@ struct Draw {
 	}
 
 	friend void swap(Draw& a, Draw& b) noexcept;
-
-	~Draw();
 };
 
 // Static, immutable rendering data shared by all renderers.

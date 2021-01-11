@@ -6,11 +6,14 @@
 #include <pipe.hpp>
 #include <span.hpp>
 #include <vector>
+#include <unordered_map>
+#include <utility>
 #include <list>
 
 namespace fuen {
 
 // Free-form of CommandBuffer::allocate
+std::byte* allocate(CommandRecord&, std::size_t size, std::size_t alignment);
 std::byte* allocate(CommandBuffer&, std::size_t size, std::size_t alignment);
 
 template<typename T, typename... Args>
@@ -57,22 +60,22 @@ struct CommandAllocator {
 	using is_always_equal = std::false_type;
 	using value_type = T;
 
-	CommandBuffer* cb;
+	CommandRecord* rec;
 
-	CommandAllocator(CommandBuffer& xcb) noexcept : cb(&xcb) {}
+	CommandAllocator(CommandRecord& xrec) noexcept : rec(&xrec) {}
 
 	template<typename O>
-	CommandAllocator(const CommandAllocator<O>& rhs) noexcept : cb(rhs.cb) {}
+	CommandAllocator(const CommandAllocator<O>& rhs) noexcept : rec(rhs.rec) {}
 
 	template<typename O>
 	CommandAllocator& operator=(const CommandAllocator<O>& rhs) noexcept {
-		this->cb = rhs.cb;
+		this->rec = rhs.rec;
 		return *this;
 	}
 
 	T* allocate(std::size_t n) {
-		dlg_assert(cb);
-		auto* ptr = fuen::allocate(*cb, n * sizeof(T), alignof(T));
+		dlg_assert(rec);
+		auto* ptr = fuen::allocate(*rec, n * sizeof(T), alignof(T));
         // TODO: strictly speaking we need the first line but it doesn't compile
         // under msvc for non-default-constructibe T
 		// return new(ptr) T[n]; // creates the array but not the objects
@@ -179,7 +182,11 @@ ComputeState copy(CommandBuffer& cb, const ComputeState& src);
 // We don't use shared pointers here, they are used in the
 // commands referencing the handles.
 struct UsedImage {
-	UsedImage(Image& img, CommandBuffer& cb) noexcept : image(&img), commands(cb) {}
+	UsedImage(Image& img, CommandRecord& rec) noexcept : image(&img), commands(rec) {}
+
+	// NOTE: copy constructors shouldn't be needed, msvc bullshittery
+	UsedImage(const UsedImage&) = default;
+	UsedImage& operator=(const UsedImage&) = default;
 	UsedImage(UsedImage&&) noexcept = default;
 	UsedImage& operator=(UsedImage&&) noexcept = default;
 
@@ -192,7 +199,11 @@ struct UsedImage {
 // General definition covering all cases of handles not covered
 // above.
 struct UsedHandle {
-	UsedHandle(DeviceHandle& h, CommandBuffer& cb) noexcept : handle(&h), commands(cb) {}
+	UsedHandle(DeviceHandle& h, CommandRecord& rec) noexcept : handle(&h), commands(rec) {}
+
+	// NOTE: copy constructors shouldn't be needed, msvc bullshittery
+	UsedHandle(const UsedHandle&) = default;
+	UsedHandle& operator=(const UsedHandle&) = default;
 	UsedHandle(UsedHandle&&) noexcept = default;
 	UsedHandle& operator=(UsedHandle&&) noexcept = default;
 
@@ -231,6 +242,7 @@ struct CommandRecord {
 	// Important this is the last object to be destroyed other destructors
 	// still access that memory.
 	std::unique_ptr<CommandMemBlock, MemBlockDeleter> memBlocks {};
+	std::size_t memBlockOffset {}; // offset in first (current) mem block
 
 	// Might be null when this isn't the current command buffer recording.
 	// Guaranteed to be valid during recording.
@@ -242,6 +254,7 @@ struct CommandRecord {
 	// from CommandBuffer so that information is retained after cb destruction.
 	u32 queueFamily {};
 
+	bool finished {}; // whether the recording is finished (i.e. EndCommandBuffer called)
 	VkCommandBufferUsageFlags usageFlags {};
 	Command* commands {};
 
@@ -252,7 +265,10 @@ struct CommandRecord {
 	// We store all device handles referenced by this command buffer that
 	// were destroyed since it was recorded so we can avoid deferencing
 	// them in the command state.
-	std::unordered_set<DeviceHandle*> destroyed; // NOTE: use pool memory here, too?
+	// NOTE: use pool memory here, too? could use alternate allocation function
+	// that just allocates blocks on its own (but still returns them to pool
+	// in the end?).
+	std::unordered_set<DeviceHandle*> destroyed;
 
 	// Pipeline layouts we have to keep alive.
 	CommandAllocList<IntrusivePtr<PipelineLayout>> pipeLayouts;
@@ -261,12 +277,18 @@ struct CommandRecord {
 	CommandBufferDesc desc;
 	CommandBufferGroup* group {};
 
-	bool finished {}; // whether the recording is finished (i.e. EndCommandBuffer called)
 	std::atomic<u32> refCount {0};
 
 	// For command hooks: they can store data associated with this
 	// recording here.
 	FinishPtr<CommandHookRecord> hook {};
+
+	// Allocates a chunk of memory from the given command record, will use the
+	// internal CommandPool memory allocator. The memory can not be freed in
+	// any way, it will simply be reset when the record is destroyed (destructors 
+	// of non-trivial types inside the memory must be called before that!).
+	// Only allowed to call in recording state (i.e. while record is not finished).
+	std::byte* allocate(std::size_t size, std::size_t alignment);
 
 	template<typename H>
 	bool uses(const H& handle) const {

@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <queue.hpp>
+#include <flags.hpp>
 #include <guidraw.hpp>
 #include <commandDesc.hpp>
 #include <record.hpp>
@@ -20,7 +21,9 @@ struct CommandBufferGui {
 	~CommandBufferGui();
 
 	Gui* gui_ {};
+
 	bool updateFromGroup_ {};
+	CommandTypeFlags commandFlags_ {};
 
 	// The command record we are currently viewing.
 	// We keep it alive.
@@ -35,10 +38,7 @@ struct CommandBufferGui {
 
 	bool queryTime_ {};
 
-	// TimeCommandHook* timeHook_ {};
-	// IndirectCommandHook* indirectHook_ {};
 	CommandHookImpl* hook_ {};
-
 	IntrusivePtr<ViewableImageCopy> imageCopy_;
 	DrawGuiImage imgDraw_ {};
 };

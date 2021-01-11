@@ -4,6 +4,7 @@
 #include <dlg/dlg.hpp>
 #include <cmath>
 #include <vk/typemap_helper.h>
+#include <vulkan/vk_layer.h>
 
 namespace fuen {
 
@@ -268,8 +269,8 @@ std::size_t structSize(VkStructureType type) {
     	ENTRY(VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER),
     	ENTRY(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER),
     	ENTRY(VK_STRUCTURE_TYPE_MEMORY_BARRIER),
-    	// ENTRY(VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO),
-    	// ENTRY(VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO),
+		{VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO, sizeof(VkLayerInstanceCreateInfo)},
+		{VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO, sizeof(VkLayerDeviceCreateInfo)},
     	ENTRY(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES),
     	ENTRY(VK_STRUCTURE_TYPE_BIND_BUFFER_MEMORY_INFO),
     	ENTRY(VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO),
@@ -713,14 +714,14 @@ std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
 		auto src = static_cast<const VkBaseInStructure*>(it);
 
 		auto ssize = structSize(src->sType);
-		dlg_assertm(ssize > 0, "Unknown structure type!");
+		dlg_assertm(ssize > 0, "Unknown structure type: {}", src->sType);
 		size += ssize;
 
 		it = src->pNext;
 	}
 
 	auto buf = std::make_unique<std::byte[]>(size);
-	auto offset = 0u;
+	auto offset = std::size_t(0u);
 
 	// second-march-through: copy structure
 	VkBaseInStructure* last = nullptr;
@@ -728,7 +729,7 @@ std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
 	while(it) {
 		auto src = static_cast<const VkBaseInStructure*>(it);
 		auto size = structSize(src->sType);
-		dlg_assertm(size > 0, "Unknown structure type!");
+		dlg_assertm(size > 0, "Unknown structure type: {}", src->sType);
 
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf.get() + offset);
 		// TODO: technicallly UB to not construct object via placement new.
@@ -750,12 +751,13 @@ std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
 	return buf;
 }
 
-void copyChain(const void*& pNext, std::vector<std::unique_ptr<std::byte[]>>& bufs) {
+void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
 	if(!pNext) {
-		return;
+		return nullptr;
 	}
 
-	bufs.push_back(copyChain(pNext));
+	buf = copyChain(pNext);
+	return static_cast<void*>(buf.get());
 }
 
 } // namespace fuen

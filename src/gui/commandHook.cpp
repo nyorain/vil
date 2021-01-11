@@ -16,6 +16,8 @@ ViewableImageCopy::ViewableImageCopy(Device& dev, VkFormat format, u32 width, u3
 	this->width = width;
 	this->height = height;
 
+	// dlg_trace("Creating image copy {} {} {}", this, width, height);
+
 	// TODO: copy multiple layers?
 	// TODO: support multisampling
 	VkImageCreateInfo ici {};
@@ -67,6 +69,8 @@ ViewableImageCopy::~ViewableImageCopy() {
 		return;
 	}
 
+	// dlg_trace("Destroying image copy {} {} {}", this, width, height);
+
 	dev->dispatch.DestroyImageView(dev->handle, imageView, nullptr);
 	dev->dispatch.DestroyImage(dev->handle, image, nullptr);
 	dev->dispatch.FreeMemory(dev->handle, memory, nullptr);
@@ -74,6 +78,7 @@ ViewableImageCopy::~ViewableImageCopy() {
 
 // CommandHookImpl
 VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
+		PendingSubmission& subm,
 		FinishPtr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
 
@@ -90,9 +95,6 @@ VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
 	if(record->hook) {
 		auto* our = dynamic_cast<CommandHookRecordImpl*>(record->hook.get());
 
-		// TODO, optimization: When only counter does not match we
-		// could re-use all resources (and the object itself) given
-		// that there are no pending submissions for it.
 		if(our && our->hook == this && our->hookCounter == counter_) {
 			// In this case there is already a pending submission for this
 			// record (can happen for simulataneous command buffers).
@@ -101,13 +103,12 @@ VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
 			// places. We simply return the original cb in that case,
 			// there is a pending submission querying that information after all.
 			// NOTE: alternatively, we could create and store a new Record
-			// (with a new query pool)
 			if(our->submissionCount != 0) {
 				dlg_assert(our->submissionCount == 1);
 				return hooked.handle();
 			}
 
-			data.reset(new CommandHookSubmissionImpl(*our));
+			data.reset(new CommandHookSubmissionImpl(*our, subm));
 			++our->submissionCount;
 			return our->cb;
 		}
@@ -117,7 +118,7 @@ VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
 	record->hook.reset(hook);
 
 	++hook->submissionCount;
-	data.reset(new CommandHookSubmissionImpl(*hook));
+	data.reset(new CommandHookSubmissionImpl(*hook, subm));
 
 	return hook->cb;
 }
@@ -297,13 +298,27 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 						auto& fb = *rpCmd->fb;
 						auto attID = subpass.pColorAttachments[0].attachment;
 						auto& attDesc = desc.attachments[attID];
+						auto& imageView = fb.attachments[attID];
+						dlg_assert(imageView);
+						auto* image = imageView->img;
 
-						// TODO: support multisampling
-						if(attDesc.samples != VK_SAMPLE_COUNT_1_BIT) {
+						if(!image) {
+							dlg_warn("ImageView has no associated image");
+						} else if(attDesc.samples != VK_SAMPLE_COUNT_1_BIT) {
+							// TODO: support multisampling via vkCmdResolveImage
+							//   alternatively we could check if the image is
+							//   resolved at the end of the subpass and then simply
+							//   copy that.
+							dlg_debug("Can't create view image for multisampled attachment");
+						} else if(!image->hasTransferSrc) {
+							// There are only very specific cases where this can happen,
+							// we could work around some of them (e.g. transient
+							// attachment images or swapchain images that don't
+							// support transferSrc).
 							dlg_debug("Can't create view image for multisampled attachment");
 						} else {
 							// TODO: this should definitely not be created for
-							//   each recording!
+							//   each recording! Use a pool or something.
 							// TODO: only use render pass area as size?
 							auto* vimg = new ViewableImageCopy(dev, attDesc.format,
 								fb.width, fb.height);
@@ -451,13 +466,32 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 				cmd->record(dev, this->cb);
 			}
 
-			// after hook
-			if(hookDst) {
-				// timing 0
-				auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-				dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
+			auto parentCmd = dynamic_cast<const ParentCommand*>(cmd);
+			dlg_assert(hookDst || (parentCmd && parentCmd->children()));
 
-				// render pass split
+			if(parentCmd) {
+				if(hookDst) {
+					// timing 0
+					auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+					dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
+				}
+
+				++nextInfo.nextHookLevel;
+				hookRecord(parentCmd->children(), nextInfo);
+			}
+
+			if(hookDst) {
+				if(!parentCmd) {
+					// timing 0
+					auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+					dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
+				}
+
+				// timing 1
+				auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+				dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
+
+				// render pass split: rp2
 				if(info.splitRenderPass) {
 					dlg_assert(info.beginRenderPassCmd);
 
@@ -496,19 +530,6 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 						dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 					}
 				}
-			}
-
-			auto parentCmd = dynamic_cast<const ParentCommand*>(cmd);
-			dlg_assert(hookDst || (parentCmd && parentCmd->children()));
-			if(parentCmd) {
-				++nextInfo.nextHookLevel;
-				hookRecord(parentCmd->children(), nextInfo);
-			}
-
-			// timing 1
-			if(hookDst) {
-				auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-				dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
 			}
 		} else {
 			cmd->record(dev, this->cb);
@@ -602,6 +623,8 @@ void CommandHookRecordImpl::afterDstOutsideRp(Command& cmd, const RecordInfo& in
 		srcBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		srcBarrier.subresourceRange.layerCount = 1u;
 		srcBarrier.subresourceRange.levelCount = 1u;
+		srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 		auto& dstBarrier = imgBarriers[1];
 		dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -613,11 +636,25 @@ void CommandHookRecordImpl::afterDstOutsideRp(Command& cmd, const RecordInfo& in
 		dstBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		dstBarrier.subresourceRange.layerCount = 1u;
 		dstBarrier.subresourceRange.levelCount = 1u;
+		dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 		dev.dispatch.CmdPipelineBarrier(cb,
 			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno, NOTE: probably could
 			VK_PIPELINE_STAGE_TRANSFER_BIT,
 			0, 0, nullptr, 0, nullptr, 2, imgBarriers);
+
+		// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
+		// between the render passes.
+		VkMemoryBarrier memBarrier {};
+		memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+		memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0, 1, &memBarrier, 0, nullptr, 0, nullptr);
 
 		VkImageCopy copy {};
 		copy.dstOffset = {};
@@ -645,20 +682,32 @@ void CommandHookRecordImpl::afterDstOutsideRp(Command& cmd, const RecordInfo& in
 
 		dev.dispatch.CmdPipelineBarrier(cb,
 			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could know
 			0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 	}
 }
 
 void CommandHookRecordImpl::finish() noexcept {
-	// TODO: do this?
+	// NOTE: We don't do this since we can assume the record to remain
+	// valid until all submissions are finished. We can assume it to
+	// be valid throughout the entire lifetime of *this.
 	// record = nullptr;
+
 	if(submissionCount == 0) {
 		delete this;
 	}
 }
 
 // submission
+CommandHookSubmissionImpl::CommandHookSubmissionImpl(CommandHookRecordImpl& rec, PendingSubmission& subm)
+		: record(&rec) {
+
+	if(rec.dstImage) {
+		dlg_assert(!rec.dstImage->writer);
+		rec.dstImage->writer = &subm;
+	}
+}
+
 CommandHookSubmissionImpl::~CommandHookSubmissionImpl() {
 	dlg_assert(record && record->record);
 
@@ -678,6 +727,8 @@ CommandHookSubmissionImpl::~CommandHookSubmissionImpl() {
 	transmitIndirect();
 
 	if(record->dstImage) {
+		dlg_assert(record->dstImage->writer); // TODO: check that it's this submission
+		record->dstImage->writer = nullptr;
 		record->hook->image = record->dstImage;
 	}
 }

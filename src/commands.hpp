@@ -13,31 +13,34 @@
 
 namespace fuen {
 
+// The type of a command is used e.g. to hide them in the UI.
+enum class CommandType : u32 {
+	other = (1u << 0u),
+	// Commands that bind state, buffers, push constants etc
+	bind = (1u << 1u),
+	// States that are responsible for synchronization, events,
+	// barriers etc.
+	sync = (1u << 2u),
+	// Draw commands
+	draw = (1u << 3u),
+	// Dispatch commdnas
+	dispatch = (1u << 4u),
+	// Copies, clears and blits
+	transfer = (1u << 5u),
+	// Commands that end a section
+	end = (1u << 6u),
+	// Query pool commands
+	query = (1u << 7u),
+};
+
+using CommandTypeFlags = nytl::Flags<CommandType>;
+
 // The list of commands in a CommandBuffer is organized as a tree.
 // Section-like commands (e.g. cmdBeginRenderPass) have all their commands
 // stored as children
 struct Command {
-	// The type of a command is used e.g. to hide them in the UI.
-	enum class Type : u32 {
-		other = (1u << 0u),
-		// Commands that bind state, buffers, push constants etc
-		bind = (1u << 1u),
-		// States that are responsible for synchronization, events,
-		// barriers etc.
-		sync = (1u << 2u),
-		// Draw commands
-		draw = (1u << 3u),
-		// Dispatch commdnas
-		dispatch = (1u << 4u),
-		// Copies, clears and blits
-		transfer = (1u << 5u),
-		// Commands that end a section
-		end = (1u << 6u),
-		// Query pool commands
-		query = (1u << 7u),
-	};
-
-	using TypeFlags = nytl::Flags<Type>;
+	using Type = CommandType;
+	using TypeFlags = CommandTypeFlags;
 
 	// NOTE: Commands should never have a non-trivial destructor (that is
 	// static_assert'd in addCmd) since it won't be called. We do this
