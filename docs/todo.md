@@ -2,23 +2,20 @@
 
 v0.1, goal: end of january 2021
 
+- Cleanup
+- Docs
+- Command-introspection
+- Sync rework
+- Testing, Profiling, Needed optimization
+
+- [ ] remove src/bytes in favor of util/bytes.
+- [ ] move other util headers to util
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
+- [ ] A lot of sources can be moved to src/gui
+	- [ ] rename imguiutil. Move to gui
 - [x] figure out why we can't name handles from inside the layer
 	  {eh, see ugly workaround for now in device creation} 
-- [x] fix ui for fixed resource tracking: check for nullptr resource references
-      everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
-	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
-	      resource reference buttons
-- [x] argumentsDesc for transfer commands (missing for a lot of commands rn)
-- [x] fix nonCoherentAtom mapped memory flushing
-- [x] fix/disable render pass splitting for transient attachments
-	- [x] think of other cases where it might not work.
-- [x] move old commandHook concept to docs/stash. Or just delete
-      {last commit before remove: f140de13aed126311fb740530181af05cbc7a651}
-- [x] before copying image in renderpass in commandHook, check if transferSrc
-      is supported for image (we might not be able to set it in some cases)
-	  	- [x] check for support in swapchain and image creation
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [ ] new per-command input/output overview, allowing to view *all* resources
@@ -30,6 +27,9 @@ v0.1, goal: end of january 2021
 	  Or somehow quickly remove again
 	  - [ ] IMPORTANT! keep command group (or at least the hook?) alive 
 	        while it is viewed in cb viewer? Can lead to problems currently.
+			Unset group in kept-alive records? We should probably keep the
+			group alive while a record of it is alive (but adding intrusive
+			pointer from record to group would create cycle)
 - [x] optimization (important): when CommandRecord is invalidated (rather: removed as current
       recording from cb), it should destroy (reset) its hook as it 
 	  will never be used again anyways
@@ -37,14 +37,16 @@ v0.1, goal: end of january 2021
 - [x] add explicit "updateFromGroup" checkbox to command viewer
 	- [x] we definitely need a "freeze" button. Would be same as unchecking
 	      checkbox, so go with checkbox i guess
+	- [ ] do we also need an updateFromCb button?
 - [x] allow to select in cb viewer which commands are shown
+	- [ ] make that more compact/intuitive if possible
 - [x] make queues viewable handles
 	- [x] allow to view command groups per queue
 	- [ ] view submissions per queue?
 - [x] fix resource viewer
 	- [x] fix filtering by type
 	- [x] fix filtering by name
-	- [ ] more useful names for handles (e.g. some basic information)
+	- [ ] more useful names for handles (e.g. some basic information for images)
 - [ ] make sure to always correctly store/forward pNext chains
 	  easier future compat, will support (non-crash) a lot of
 	  extensions naturally already.
@@ -61,15 +63,6 @@ v0.1, goal: end of january 2021
 		  See todo in Gui::init
 - [ ] remove PageVector when not used anymore. Maybe move to docs or nodes
 - [ ] Implement missing resource overview UIs
-- [x] cleanup, implement cb viewer as in node 1652
-- [x] in overview: before showing pending submissions, we probably want to
-      check them all for finish
-- [x] fully implement command buffer viewer
-	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
-	- [x] show all commands & info for commands
-- [x] fix dummy buttons in command viewer (e.g. BeginRenderPass)
-- [x] track dynamic graphics pipeline state
-	- [x] show it in command ui
 - [ ] Remove virtual stuff from this whole CommandBufferHook 
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
@@ -140,17 +133,6 @@ v0.1, goal: end of january 2021
 	      can crash when extensions it does not know about/does not support
 		  are being used.
 	- [ ] update README to correctly show all current features
-- [x] improve/cleanup pipeline time queries from querypool
-	- [x] query whole-cb time, and correctly support querying for full renderpass
-	- [x] we should probably show estimate of time range. The current values
-	      often become meaningless on a per-command basis.
-		  Also average them over multiple frames, avoid this glitchy look
-- [x] properly implement layer querying functions
-	- [x] version negotiation?
-	- [x] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
-		  maybe allow to overwrite this via environment variable (since, technically,
-		  the layer will usually work fine even with the latest vulkan version)
-		  EDIT: nope, that's not how it is done.	
 - [x] support for buffer views (and other handles) in UI
 	- [ ] use buffer view information to infer layout in buffer viewer?
 	- [ ] support buffer views in our texture viewer (i.e. show their content)
@@ -166,8 +148,6 @@ v0.1, goal: end of january 2021
 	- [ ] generally expose own window creation and force-overlay via env vars
 - [ ] add example image to readme (with real-world application if possible)
 - [ ] move external source into extra folder
-- [ ] A lot of sources can be moved to src/gui
-	- [ ] rename imguiutil. Move to gui
 - [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support
       is being enabled. I remember renderdoc doing this, sounds like a good idea.
 	- [ ] or an unexpectly high api version
@@ -382,3 +362,4 @@ Possibly for later, new features/ideas:
 - [ ] (low prio), optimization: in `Draw`, we don't need presentSemaphore when
 	  we have timeline semaphores, can simply use futureSemaphore for
 	  present as well
+

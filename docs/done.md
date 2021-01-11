@@ -1,5 +1,38 @@
 For v0.1
 
+- [x] fix ui for fixed resource tracking: check for nullptr resource references
+      everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
+	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
+	      resource reference buttons
+- [x] argumentsDesc for transfer commands (missing for a lot of commands rn)
+- [x] fix nonCoherentAtom mapped memory flushing
+- [x] fix/disable render pass splitting for transient attachments
+	- [x] think of other cases where it might not work.
+- [x] move old commandHook concept to docs/stash. Or just delete
+      {last commit before remove: f140de13aed126311fb740530181af05cbc7a651}
+- [x] before copying image in renderpass in commandHook, check if transferSrc
+      is supported for image (we might not be able to set it in some cases)
+	  	- [x] check for support in swapchain and image creation
+- [x] cleanup, implement cb viewer as in node 1652
+- [x] in overview: before showing pending submissions, we probably want to
+      check them all for finish
+- [x] fully implement command buffer viewer
+	- [x] support all vulkan 1.0 commands (add to cb.h and commands.h)
+	- [x] show all commands & info for commands
+- [x] fix dummy buttons in command viewer (e.g. BeginRenderPass)
+- [x] track dynamic graphics pipeline state
+	- [x] show it in command ui
+- [x] improve/cleanup pipeline time queries from querypool
+	- [x] query whole-cb time, and correctly support querying for full renderpass
+	- [x] we should probably show estimate of time range. The current values
+	      often become meaningless on a per-command basis.
+		  Also average them over multiple frames, avoid this glitchy look
+- [x] properly implement layer querying functions
+	- [x] version negotiation?
+	- [x] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
+		  maybe allow to overwrite this via environment variable (since, technically,
+		  the layer will usually work fine even with the latest vulkan version)
+		  EDIT: nope, that's not how it is done.	
 - [x] restructure repo
 	- [x] add an example (using swa)
 	- [x] move everything else into src (maybe api.h to include/?)
