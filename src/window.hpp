@@ -1,7 +1,8 @@
 #pragma once
 
-#include <device.hpp>
+#include <fwd.hpp>
 #include <gui/gui.hpp>
+#include <gui/render.hpp>
 #include <thread>
 #include <mutex>
 #include <atomic>

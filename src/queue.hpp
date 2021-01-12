@@ -2,9 +2,8 @@
 
 #include <fwd.hpp>
 #include <handle.hpp>
-#include <intrusive.hpp>
 #include <commandDesc.hpp>
-// #include <commandHook.hpp>
+#include <util/intrusive.hpp>
 #include <vk/vulkan.h>
 #include <vector>
 #include <optional>
@@ -47,9 +46,16 @@ struct QueueFamily {
 struct SubmittedCommandBuffer {
 	CommandBuffer* cb {};
 	FinishPtr<CommandHookSubmission> hook {};
+
+	SubmittedCommandBuffer();
+	SubmittedCommandBuffer(SubmittedCommandBuffer&&) noexcept = default;
+	SubmittedCommandBuffer& operator=(SubmittedCommandBuffer&&) noexcept = default;
+	~SubmittedCommandBuffer();
 };
 
 struct Submission {
+	PendingSubmission* parent {};
+
 	std::vector<std::pair<Semaphore*, VkPipelineStageFlags>> waitSemaphores;
 	std::vector<Semaphore*> signalSemaphores;
 
@@ -64,6 +70,9 @@ struct Submission {
 	u64 ourSemaphoreValue {};
 };
 
+bool potentiallyWritesLocked(Submission&, DeviceHandle&);
+std::unordered_set<Submission*> needsSyncLocked(PendingSubmission&, Draw&);
+
 struct PendingSubmission {
 	Queue* queue {};
 	std::vector<Submission> submissions; // immutable after creation
@@ -75,51 +84,6 @@ struct PendingSubmission {
 	// When the caller didn't add a fence, we added this one from the fence pool.
 	// When appFence is not null, this is null.
 	VkFence ourFence {};
-};
-
-// Commandbuffer hook that allows us to forward a modified version
-// of this command buffer down the chain. Only called during submission,
-// when the given CommandBuffer has a valid recording.
-// TODO: we don't really need all this virtual stuff here. Only have
-// one implementation anyways!
-struct CommandHook {
-	virtual ~CommandHook() = default;
-
-	// Called from inside QueueSubmit with the command buffer the hook has
-	// been installed for. Can therefore expect the command buffer to be
-	// in executable state.
-	// Can return the command buffer handle itself or a hooked one but
-	// must return a valid command buffer.
-	// Called while device mutex is locked.
-	// Additionally has the possibility to return something in 'data' that
-	// gets associated with the lifetime of the submission (i.e. is destroyed
-	// when the submission is finished).
-	virtual VkCommandBuffer hook(CommandBuffer& hooked,
-		PendingSubmission& subm,
-		FinishPtr<CommandHookSubmission>& data) = 0;
-
-	// Called when hook is removed from command buffer or command group.
-	// Called while device mutex is locked.
-	// Might delete itself (or decrement reference count or something).
-	virtual void finish() noexcept = 0;
-};
-
-struct CommandHookSubmission {
-	virtual ~CommandHookSubmission() = default;
-
-	// Called when the submission is finished.
-	// Called while device mutex is locked.
-	// Might delete itself (or decrement reference count or something).
-	virtual void finish() noexcept = 0;
-};
-
-struct CommandHookRecord {
-	virtual ~CommandHookRecord() = default;
-
-	// Called when associated record is destroyed or hook replaced.
-	// Called while device mutex is locked.
-	// Might delete itself (or decrement reference count or something).
-	virtual void finish() noexcept = 0;
 };
 
 // CommandBuffer groups
@@ -135,6 +99,9 @@ struct CommandBufferGroup {
 
 	// Can be used to hook all command buffers in this group.
 	FinishPtr<CommandHook> hook;
+
+	CommandBufferGroup();
+	~CommandBufferGroup();
 };
 
 // Expects dev.mutex to be locked.

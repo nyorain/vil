@@ -3,7 +3,7 @@
 #include <data.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
-#include <util.hpp>
+#include <util/util.hpp>
 
 namespace fuen {
 

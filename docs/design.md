@@ -340,7 +340,7 @@ When application submits to a queue:
   the application commands wait for our submissions to complete, if
   it writes any resource we read.
   Except, when the application submission is on same queue as our gui
-  submissions, we don't need this, a cmdBarrier (that we always insert
+  submissions, we don't need this, a cmdBarrier (that we insert
   at the end of our gui submission) is enough.
   	- if we don't have timeline semaphores and we already waiting upon
 	  the gui submission from another application submission (and they
@@ -353,10 +353,19 @@ When application submits to a queue:
 	  Most workstations have timeline semaphores anyways, making
 	  the non-timeline-semaphore codepath *significantly* more complicated
 	  seems like a bad idea.
+	- a bit tricky: if the gui submission is hooked, we have to know if it will
+	  write any of our own copies (of images) that are read by pending
+	  draws. If so, we also have to chain them.
+	  We cannot simply "use the last available image copy and then block
+	  that from begin written" when rendering the gui as that would 
+	  require potentially a new hook-record for each submission or 
+	  skipping many (potentially all) submission hooks.
 
 When we submit our gui rendering commands:
 - check all pending application submissions and make sure our submission
   waits upon all submissions that write application resources we read.
+  Except, when they were submitted to same queue. Then the barrier
+  we insert at the beginning of gui rendering is enough.
   	- if we don't have timeline semaphores and a previous gui submission
 	  already waited upon the application submission (and both still
 	  are not finished), we simply wait upon the submission. This shouldn't
@@ -365,6 +374,9 @@ When we submit our gui rendering commands:
 	- unrelated from all of this we might not want to allow multiple
 	  parallel in-flight gui submissions anyways, automatically solving
 	  the above problem. But not sure about it, have to see.
+	- once again a bit tricky: if any of the pending application
+	  submissions is hooked by us and writes an image copy we are reading,
+	  we have to chain them via semaphore (if not on same queue)
 
 When application destroys a resource:
 - check all pending gui submissions and make sure that all submissions

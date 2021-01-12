@@ -1,9 +1,10 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <syncedMap.hpp>
 #include <handle.hpp>
-#include <span.hpp>
+#include <data.hpp>
+#include <util/syncedMap.hpp>
+#include <util/span.hpp>
 
 #include <vk/vulkan.h>
 #include <vulkan/vk_layer.h>

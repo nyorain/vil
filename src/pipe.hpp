@@ -2,11 +2,12 @@
 
 #include <fwd.hpp>
 #include <handle.hpp>
-#include <intrusive.hpp>
+#include <util/intrusive.hpp>
 #include <vk/vulkan.h>
 
 #include <memory>
 #include <cstdlib>
+#include <atomic>
 #include <unordered_set>
 
 namespace fuen {

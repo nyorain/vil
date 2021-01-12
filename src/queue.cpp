@@ -1,10 +1,15 @@
 #include <queue.hpp>
 #include <data.hpp>
-#include <util.hpp>
 #include <cb.hpp>
+#include <ds.hpp>
 #include <commands.hpp>
 #include <sync.hpp>
+#include <buffer.hpp>
 #include <image.hpp>
+#include <deque>
+#include <gui/gui.hpp>
+#include <gui/commandHook.hpp>
+#include <util/util.hpp>
 #include <vk/enumString.hpp>
 
 namespace fuen {
@@ -65,6 +70,12 @@ std::optional<SubmIterator> checkLocked(PendingSubmission& subm) {
 
 	return dev.pending.erase(it);
 }
+
+SubmittedCommandBuffer::SubmittedCommandBuffer() = default;
+SubmittedCommandBuffer::~SubmittedCommandBuffer() = default;
+
+CommandBufferGroup::CommandBufferGroup() = default;
+CommandBufferGroup::~CommandBufferGroup() = default;
 
 VkFence getFenceFromPool(Device& dev, bool& checkedSubmissions) {
 	{
@@ -184,7 +195,6 @@ VkSemaphore getSemaphoreFromPool(Device& dev, bool& checkedSubmissions,
 	return semaphore;
 }
 
-// WIP
 void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
 	std::string is;
 	is.resize(indent, ' ');
@@ -201,6 +211,89 @@ void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
 	}
 }
 
+// Returns whether the given submission potentially writes the given
+// DeviceHandle.
+bool potentiallyWritesLocked(Submission& subm, DeviceHandle& handle) {
+	// TODO(perf): we only need to do this if a record
+	// can potentially write the handle. Could track
+	// during recording and check below in ds refs.
+
+	Image* img = nullptr;
+	Buffer* buf = nullptr;
+
+	if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
+		img = static_cast<Image*>(&handle);
+	} else if(handle.objectType == VK_OBJECT_TYPE_BUFFER) {
+		buf = static_cast<Buffer*>(&handle);
+	}
+
+	for(auto& [cb, _] : subm.cbs) {
+		auto& rec = *cb->lastRecordLocked();
+		if(handle.refRecords.find(&rec) != handle.refRecords.end()) {
+			return true;
+			break;
+		}
+
+		if(img) {
+			for(auto* view : img->views) {
+				for(auto& ds : view->descriptors) {
+					// TODO: could check here if it is bound as writeable image
+					if(ds.ds->refRecords.find(&rec) != ds.ds->refRecords.end()) {
+						return true;
+					}
+				}
+			}
+		}
+
+		if(buf) {
+			for(auto& ds : buf->descriptors) {
+				// TODO: could check here if it is bound as writeable buffer
+				if(ds.ds->refRecords.find(&rec) != ds.ds->refRecords.end()) {
+					return true;
+				}
+			}
+
+			// NOTE: we don't have to care for buffer views as they
+			// are always readonly.
+		}
+	}
+
+	return false;
+}
+
+std::unordered_set<Submission*> needsSyncLocked(PendingSubmission& pending, Draw& draw) {
+	auto& dev = *pending.queue->dev;
+	if(pending.queue == dev.gfxQueue) {
+		return {};
+	}
+
+	std::unordered_set<Submission*> subs;
+	for(auto& subm : pending.submissions) {
+		auto added = false;
+		for(auto* handle : draw.usedHandles) {
+			if(potentiallyWritesLocked(subm, *handle)) {
+				subs.insert(&subm);
+				added = true;
+				break;
+			}
+		}
+
+		if(added) {
+			continue;
+		}
+
+		for(auto& [_, hookPtr] : subm.cbs) {
+			if(hookPtr && hookPtr->record->state.get() == draw.usedHookState.get()) {
+				subs.insert(&subm);
+			}
+		}
+	}
+
+	return subs;
+}
+
+// TODO: function is becoming way too big and complicated, create
+// SubmissionBuilder class.
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		VkQueue                                     queue,
 		uint32_t                                    submitCount,
@@ -234,16 +327,18 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	//   when they are finished (we can use that in the gui to use the resources
 	//   ourselves without having to wait on cpu for the submissions to complete)
 	std::vector<VkSubmitInfo> nsubmitInfos;
-	std::vector<std::vector<VkSemaphore>> signalSemaphores;
+	std::vector<std::vector<VkSemaphore>> semaphores;
+	std::vector<std::vector<VkPipelineStageFlags>> waitStages;
 	std::vector<std::vector<VkCommandBuffer>> commandBuffers;
 	std::vector<std::unique_ptr<std::byte[]>> copiedChains;
 
 	std::vector<std::vector<u64>> tsValues;
-	std::vector<VkTimelineSemaphoreSubmitInfo> tsSubmitInfos;
+	std::deque<VkTimelineSemaphoreSubmitInfo> tsSubmitInfos;
 
 	for(auto i = 0u; i < submitCount; ++i) {
 		auto si = pSubmits[i]; // copy it
 		auto& dst = subm.submissions.emplace_back();
+		dst.parent = &subm;
 
 		for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
 			auto& sem = dev.semaphores.get(si.pSignalSemaphores[j]);
@@ -256,8 +351,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		auto& cbs = commandBuffers.emplace_back();
 		for(auto j = 0u; j < si.commandBufferCount; ++j) {
 			auto& cb = dev.commandBuffers.get(si.pCommandBuffers[j]);
-			dst.cbs.push_back({});
-			auto& scb = dst.cbs.back();
+			auto& scb = dst.cbs.emplace_back();
 			scb.cb = &cb;
 
 			{
@@ -311,7 +405,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 				// potentially hook command buffer
 				if(rec.group->hook) {
-					// scb.hook = std::make_unique<CommandHookSubmission>();
 					auto hooked = rec.group->hook->hook(cb, subm, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
@@ -326,6 +419,27 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			}
 		}
 
+		// For wait & present semaphores: if we have timeline semaphores
+		// and application added a timeline semaphore submission info to
+		// pNext, we have to hook that instead of adding our own.
+		VkTimelineSemaphoreSubmitInfo* tsInfo = nullptr;
+		if(dev.timelineSemaphores) {
+			if(hasChain(si, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)) {
+				copyChain(si.pNext, copiedChains.emplace_back());
+				tsInfo = const_cast<VkTimelineSemaphoreSubmitInfo*>(findChainInfo<
+					VkTimelineSemaphoreSubmitInfo,
+					VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO>(si));
+				dlg_assert(tsInfo);
+			} else {
+				tsInfo = &tsSubmitInfos.emplace_back();
+				*tsInfo = {};
+				tsInfo->sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+				tsInfo->pNext = si.pNext;
+				si.pNext = tsInfo;
+			}
+		}
+
+		// = wait semaphores =
 		for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
 			auto& semaphore = dev.semaphores.get(si.pWaitSemaphores[j]);
 			dlg_assert(!semaphore.waitFrom);
@@ -335,57 +449,116 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			semaphore.waitFrom = &subm;
 		}
 
+		{
+			// TODO: local lock isn't really sufficient here. If gui
+			// is destructed after this critical section but before
+			// vkQueueSubmit bad things might happen?
+			// Figure out sync here!
+			std::lock_guard lock(dev.mutex);
+
+			// When there is an active gui that submits to a different queue
+			// than this one, we have to make sure this submission waits
+			// on draws reading resources this submission writes.
+			// When the gfxQueue (that the gui uses) is the same as the
+			// one for this submission, the barrier at the end of the gui
+			// submission is enough.
+			if(dev.gui && dev.gfxQueue != &qd) {
+				auto waitDraws = dev.gui->pendingDraws();
+				erase_if(waitDraws, [&](auto* draw) {
+					return needsSyncLocked(subm, *draw).empty();
+				});
+
+				if(!waitDraws.empty()) {
+					auto& waitSems = semaphores.emplace_back(
+						si.pWaitSemaphores,
+						si.pWaitSemaphores + si.waitSemaphoreCount);
+					auto& stages = waitStages.emplace_back(
+						si.pWaitDstStageMask,
+						si.pWaitDstStageMask + si.waitSemaphoreCount);
+
+					if(tsInfo) {
+						auto& waitVals = tsValues.emplace_back(
+							tsInfo->pWaitSemaphoreValues,
+							tsInfo->pWaitSemaphoreValues + tsInfo->waitSemaphoreValueCount);
+						waitVals.resize(si.waitSemaphoreCount); // ignored
+
+						for(auto* draw : waitDraws) {
+							waitVals.push_back(draw->futureSemaphoreValue);
+							waitSems.push_back(draw->futureSemaphore);
+						}
+
+						tsInfo->waitSemaphoreValueCount = waitVals.size();
+						tsInfo->pWaitSemaphoreValues = waitVals.data();
+					} else {
+						// if there are draws with already used semaphores,
+						// we have to simply block.
+						// TODO: just wait for all draws if we have to wait
+						//   for one? for simplicity?
+						// TODO: when at least one semaphore was already used
+						//   we could simply insert a new one to the gfx queue
+						//   (at the current position) and wait for that.
+						std::vector<VkFence> fences;
+						erase_if(waitDraws, [&](Draw* draw) {
+							if(draw->futureSemaphoreUsed) {
+								fences.push_back(draw->fence);
+								return true;
+							}
+							return false;
+						});
+
+						if(!fences.empty()) {
+							// NOTE waiting inside lock :(
+							dlg_trace("Have to wait for gui draws on cpu");
+							VK_CHECK(dev.dispatch.WaitForFences(dev.handle,
+								u32(fences.size()), fences.data(), true, UINT64_MAX));
+							// NOTE: could mark draws as finished in gui.
+						}
+
+						for(auto* draw : waitDraws) {
+							dlg_assert(!draw->futureSemaphoreUsed);
+							draw->futureSemaphoreUsed = true;
+							waitSems.push_back(draw->futureSemaphore);
+						}
+					}
+
+					si.waitSemaphoreCount = waitSems.size();
+					si.pWaitSemaphores = waitSems.data();
+					si.pWaitDstStageMask = stages.data();
+				}
+			}
+		}
+
+		// = signal semaphores =
 		// We need to add a semaphore for device synchronization.
 		// We might wanna read from resources that are potentially written
 		// by this submission in the future, we need to be able to gpu-sync them.
 		dst.ourSemaphore = getSemaphoreFromPool(dev, checkedSubmissions,
 			resettedSemaphores, queue);
 
-		signalSemaphores.emplace_back(si.pSignalSemaphores,
+		auto& signalSems = semaphores.emplace_back(
+			si.pSignalSemaphores,
 			si.pSignalSemaphores + si.signalSemaphoreCount);
-		signalSemaphores.back().push_back(dst.ourSemaphore);
+		signalSems.push_back(dst.ourSemaphore);
 
-		if(dev.timelineSemaphores) {
+		if(tsInfo) {
 			u64 ourValue;
 			VK_CHECK(dev.dispatch.GetSemaphoreCounterValue(dev.handle, dst.ourSemaphore, &ourValue));
 			++ourValue;
 
 			dst.ourSemaphoreValue = ourValue;
 
-			// If the application has already appended a timeline semaphore
-			// structure, we must re-use it, inserting our value.
-			// Otherwise, simply create a new link chain.
-			if(hasChain(si, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)) {
-				copyChain(si.pNext, copiedChains.emplace_back());
-				auto* tsInfo = const_cast<VkTimelineSemaphoreSubmitInfo*>(findChainInfo<
-					VkTimelineSemaphoreSubmitInfo,
-					VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO>(si));
-				dlg_assert(tsInfo);
+			auto& signalVals = tsValues.emplace_back(
+				tsInfo->pSignalSemaphoreValues,
+				tsInfo->pSignalSemaphoreValues + tsInfo->signalSemaphoreValueCount);
+			signalVals.resize(si.signalSemaphoreCount); // ignored
+			signalVals.push_back(ourValue);
 
-				auto& signalVals = tsValues.emplace_back(tsInfo->pSignalSemaphoreValues,
-					tsInfo->pSignalSemaphoreValues + tsInfo->signalSemaphoreValueCount);
-				signalVals.push_back(ourValue);
-
-				tsInfo->signalSemaphoreValueCount = signalVals.size();
-				tsInfo->pSignalSemaphoreValues = signalVals.data();
-			} else {
-				auto& signalVals = tsValues.emplace_back();
-				signalVals.resize(si.signalSemaphoreCount); // ignored
-				signalVals.push_back(ourValue);
-
-				auto& tsInfo = tsSubmitInfos.emplace_back();
-				tsInfo = {};
-				tsInfo.pNext = si.pNext;
-				tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-				tsInfo.signalSemaphoreValueCount = signalVals.size();
-				tsInfo.pSignalSemaphoreValues = signalVals.data();
-
-				si.pNext = &tsInfo;
-			}
+			tsInfo->signalSemaphoreValueCount = signalVals.size();
+			tsInfo->pSignalSemaphoreValues = signalVals.data();
 		}
 
-		si.signalSemaphoreCount = u32(signalSemaphores.back().size());
-		si.pSignalSemaphores = signalSemaphores.back().data();
+		si.signalSemaphoreCount = u32(signalSems.size());
+		si.pSignalSemaphores = signalSems.data();
 
 		si.commandBufferCount = u32(commandBuffers.back().size());
 		si.pCommandBuffers = commandBuffers.back().data();
@@ -478,6 +651,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 		// reset old comamnad groups
 		// TODO: arbitrary atm! Can be improved.
+		/*
 		auto& qf = dev.queueFamilies[qd.family];
 		for(auto it = qf.commandGroups.begin(); it != qf.commandGroups.end();) {
 			auto rem = true;
@@ -499,6 +673,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				++it;
 			}
 		}
+		*/
 	}
 
 	return res;

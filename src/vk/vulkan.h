@@ -15,7 +15,29 @@
     #define VK_USE_PLATFORM_XCB_KHR
 #endif // FUEN_WITH_X11
 
-#include <vulkan/vulkan.h>
+// Basically vulkan.h, only using the platforms we support
+#include "vk_platform.h"
+#include "vulkan_core.h"
+
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+#include <wayland-client.h>
+#include "vulkan_wayland.h"
+#endif
+
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+#include <windows.h>
+#include "vulkan_win32.h"
+#endif
+
+#ifdef VK_USE_PLATFORM_XCB_KHR
+#include <xcb/xcb.h>
+#include "vulkan_xcb.h"
+#endif
+
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+#include <X11/Xlib.h>
+#include "vulkan_xlib.h"
+#endif
 
 #ifdef FUEN_WITH_WIN32
     // thanks bill

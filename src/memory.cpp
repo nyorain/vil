@@ -1,6 +1,7 @@
 #include <memory.hpp>
+#include <device.hpp>
 #include <data.hpp>
-#include <util.hpp>
+#include <util/util.hpp>
 
 namespace fuen {
 

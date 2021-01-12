@@ -1,40 +1,53 @@
 #include <gui/commandHook.hpp>
+#include <device.hpp>
 #include <commandDesc.hpp>
+#include <ds.hpp>
 #include <image.hpp>
 #include <rp.hpp>
-#include <util.hpp>
 #include <cb.hpp>
 #include <buffer.hpp>
 #include <commands.hpp>
-#include <device.hpp>
+#include <util/util.hpp>
+#include <vk/format_utils.h>
 
 namespace fuen {
 
 // util
-ViewableImageCopy::ViewableImageCopy(Device& dev, VkFormat format, u32 width, u32 height) {
+void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
 	this->dev = &dev;
-	this->width = width;
-	this->height = height;
+	this->extent = extent;
 
-	// dlg_trace("Creating image copy {} {} {}", this, width, height);
+	// TODO: support stencil
+	// TODO: support non-float images
+	// TODO: check if format supports sampling (and transfer_dst!)
+	//   otherwise we could blit to an equivalent format.
+	//   Or at least fail.
+
+	if(FormatIsColor(format)) {
+		aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+	} else if(FormatHasDepth(format)) {
+		aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+	} else {
+		dlg_error("unimplemented");
+	}
 
 	// TODO: copy multiple layers?
-	// TODO: support multisampling
+	// TODO: support multisampling?
+	// TODO: support non-2d images
 	VkImageCreateInfo ici {};
 	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	ici.arrayLayers = 1u;
-	ici.extent = {width, height, 1u};
+	ici.extent = extent;
 	ici.format = format;
 	ici.imageType = VK_IMAGE_TYPE_2D;
-	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
-		VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
 	ici.mipLevels = 1;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	ici.samples = VK_SAMPLE_COUNT_1_BIT;
 	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &image));
-	nameHandle(dev, this->image, "ViewableImageCopy:image");
+	nameHandle(dev, this->image, "CopiedImage:image");
 
 	VkMemoryRequirements memReqs;
 	dev.dispatch.GetImageMemoryRequirements(dev.handle, image, &memReqs);
@@ -48,7 +61,7 @@ ViewableImageCopy::ViewableImageCopy(Device& dev, VkFormat format, u32 width, u3
 	auto memBits = memReqs.memoryTypeBits & dev.deviceLocalMemTypeBits;
 	allocInfo.memoryTypeIndex = findLSB(memBits);
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &memory));
-	nameHandle(dev, this->memory, "ViewableImageCopy:memory");
+	nameHandle(dev, this->memory, "CopiedImage:memory");
 
 	VK_CHECK(dev.dispatch.BindImageMemory(dev.handle, image, memory, 0));
 
@@ -57,14 +70,14 @@ ViewableImageCopy::ViewableImageCopy(Device& dev, VkFormat format, u32 width, u3
 	vci.image = image;
 	vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
 	vci.format = format;
-	vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	vci.subresourceRange.aspectMask = aspect;
 	vci.subresourceRange.layerCount = 1u;
 	vci.subresourceRange.levelCount = 1u;
 	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &imageView));
-	nameHandle(dev, this->imageView, "ViewableImageCopy:imageView");
+	nameHandle(dev, this->imageView, "CopiedImage:imageView");
 }
 
-ViewableImageCopy::~ViewableImageCopy() {
+CopiedImage::~CopiedImage() {
 	if(!dev) {
 		return;
 	}
@@ -76,8 +89,16 @@ ViewableImageCopy::~ViewableImageCopy() {
 	dev->dispatch.FreeMemory(dev->handle, memory, nullptr);
 }
 
-// CommandHookImpl
-VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
+void CopiedBuffer::init(Device& dev, VkDeviceSize size) {
+	this->buffer.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+	dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, size, 0, &this->map);
+
+	// NOTE: destructor for copied buffer is not needed as memory mapping
+	// is implicitly unmapped when memory of buffer is destroyed.
+}
+
+// CommandHook
+VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		PendingSubmission& subm,
 		FinishPtr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
@@ -93,7 +114,7 @@ VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
 	}
 
 	if(record->hook) {
-		auto* our = dynamic_cast<CommandHookRecordImpl*>(record->hook.get());
+		auto* our = dynamic_cast<CommandHookRecord*>(record->hook.get());
 
 		if(our && our->hook == this && our->hookCounter == counter_) {
 			// In this case there is already a pending submission for this
@@ -103,33 +124,34 @@ VkCommandBuffer CommandHookImpl::hook(CommandBuffer& hooked,
 			// places. We simply return the original cb in that case,
 			// there is a pending submission querying that information after all.
 			// NOTE: alternatively, we could create and store a new Record
+			// NOTE: alternatively, we could add a semaphore chaining
+			//   this submission to the previous one.
 			if(our->submissionCount != 0) {
 				dlg_assert(our->submissionCount == 1);
 				return hooked.handle();
 			}
 
-			data.reset(new CommandHookSubmissionImpl(*our, subm));
+			data.reset(new CommandHookSubmission(*our, subm));
 			++our->submissionCount;
 			return our->cb;
 		}
 	}
 
-	auto hook = new CommandHookRecordImpl(*this, *record, std::move(hcommand));
+	auto hook = new CommandHookRecord(*this, *record, std::move(hcommand));
 	record->hook.reset(hook);
 
 	++hook->submissionCount;
-	data.reset(new CommandHookSubmissionImpl(*hook, subm));
+	data.reset(new CommandHookSubmission(*hook, subm));
 
 	return hook->cb;
 }
 
-void CommandHookImpl::desc(std::vector<CommandDesc> desc) {
+void CommandHook::desc(std::vector<CommandDesc> desc) {
 	desc_ = std::move(desc);
-	invalidateRecordings();
-	invalidateData();
+	unsetHookOps();
 }
 
-void CommandHookImpl::invalidateRecordings() {
+void CommandHook::invalidateRecordings() {
 	// We have to increase the counter to invalidate all past recordings
 	++counter_;
 
@@ -154,12 +176,23 @@ void CommandHookImpl::invalidateRecordings() {
 	records_ = nullptr;
 }
 
-CommandHookImpl::~CommandHookImpl() {
+void CommandHook::unsetHookOps() {
+	this->copyIndexBuffers = false;
+	this->copyVertexBuffers = false;
+	this->queryTime = false;
+	this->copyIndirectCmd = false;
+	this->copyAttachment = {};
+	this->copyDS = {};
+	invalidateRecordings();
+	invalidateData();
+}
+
+CommandHook::~CommandHook() {
 	invalidateRecordings();
 }
 
 // record
-CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
+CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	CommandRecord& xrecord, std::vector<Command*> hooked) :
 		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
 
@@ -185,173 +218,41 @@ CommandHookRecordImpl::CommandHookRecordImpl(CommandHookImpl& xhook,
 	VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &allocInfo, &this->cb));
 	// command buffer is a dispatchable object
 	dev.setDeviceLoaderData(dev.handle, this->cb);
-	nameHandle(dev, this->cb, "CommandHookRecordImpl:cb");
+	nameHandle(dev, this->cb, "CommandHookRecord:cb");
 
 	// query pool
-	VkQueryPoolCreateInfo qci {};
-	qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-	qci.queryCount = 2u;
-	qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-	VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool));
-	nameHandle(dev, this->queryPool, "CommandHookRecordImpl:queryPool");
-
-	// dstBuffer
-	auto dstSize = VkDeviceSize(0);
-	auto* hookDst = hcommand.back();
-	auto splitRenderPass = false;
-	auto createViewImage = false;
-
-	if(dynamic_cast<DrawCmd*>(hookDst)) {
-		createViewImage = true;
-	} else if(dynamic_cast<DrawIndexedCmd*>(hookDst)) {
-		createViewImage = true;
-	} else if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(hookDst)) {
-		VkDeviceSize stride = cmd->indexed ?
-			sizeof(VkDrawIndexedIndirectCommand) :
-			sizeof(VkDrawIndirectCommand);
-		stride = cmd->stride ? cmd->stride : stride;
-		dstSize = cmd->drawCount * stride;
-		splitRenderPass = true;
-		createViewImage = true;
-	} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(hookDst)) {
-		(void) cmd;
-		dstSize = sizeof(VkDispatchIndirectCommand);
-		splitRenderPass = true;
-	} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(hookDst)) {
-		VkDeviceSize stride = cmd->indexed ?
-			sizeof(VkDrawIndexedIndirectCommand) :
-			sizeof(VkDrawIndirectCommand);
-		stride = cmd->stride ? cmd->stride : stride;
-		// we get the maximum copy size via maxDrawCount but also
-		// via the remaining buffer size.
-		auto remSize = cmd->buffer->ci.size - cmd->offset;
-		dstSize = std::min(cmd->maxDrawCount * stride, remSize);
-		dstSize += sizeof(u32); // for the count
-		splitRenderPass = true;
-		createViewImage = true;
+	if(hook->queryTime) {
+		VkQueryPoolCreateInfo qci {};
+		qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+		qci.queryCount = 2u;
+		qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool));
+		nameHandle(dev, this->queryPool, "CommandHookRecord:queryPool");
 	}
 
-	splitRenderPass |= createViewImage;
-
-	if(dstSize > 0) {
-		VkBufferCreateInfo bci {};
-		bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-		bci.size = dstSize;
-		bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-		VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bci, nullptr, &dstBuffer));
-		nameHandle(dev, this->dstBuffer, "CommandHookRecordImpl:dstBuffer");
-
-		VkMemoryRequirements memReqs;
-		dev.dispatch.GetBufferMemoryRequirements(dev.handle, dstBuffer, &memReqs);
-
-		// new memory
-		VkMemoryAllocateInfo allocInfo {};
-		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize = memReqs.size;
-		auto memBits = memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits;
-		allocInfo.memoryTypeIndex = findLSB(memBits);
-		VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &dstMemory));
-		nameHandle(dev, this->dstMemory, "CommandHookRecordImpl:dstMemory");
-
-		VK_CHECK(dev.dispatch.BindBufferMemory(dev.handle, dstBuffer, dstMemory, 0));
-
-		// map memory
-		VK_CHECK(dev.dispatch.MapMemory(dev.handle, dstMemory, 0, VK_WHOLE_SIZE, 0, &bufferMap));
-	}
-
-	RecordInfo info;
-	if(splitRenderPass) {
-		// find the command that starts the render pass
-		auto found = false;
-		for(auto* cmd : hcommand) {
-			if(auto rpCmd = dynamic_cast<BeginRenderPassCmd*>(cmd)) {
-				dlg_assert(found == false);
-				found = true;
-				auto& desc = *rpCmd->rp->desc;
-
-				info.beginRenderPassCmd = rpCmd;
-				info.hookedSubpass = rpCmd->subpassOfDescendant(*hcommand.back());
-				dlg_assert(info.hookedSubpass != u32(-1));
-				dlg_assert(info.hookedSubpass < desc.subpasses.size());
-
-				if(!splittable(desc, info.hookedSubpass)) {
-					splitRenderPass = false;
-					dlg_trace("Can't split render pass");
-					break;
-				}
-
-				auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
-				rp0 = create(dev, rpi0);
-				rp1 = create(dev, rpi1);
-				rp2 = create(dev, rpi2);
-
-				if(createViewImage) {
-					auto& subpass = desc.subpasses[info.hookedSubpass];
-
-					// TODO: allow display of all attachments, not just
-					// the first color attachment
-					if(!subpass.colorAttachmentCount) {
-						createViewImage = false;
-						dlg_debug("Can't create view image; no color attachment");
-					} else {
-						auto& fb = *rpCmd->fb;
-						auto attID = subpass.pColorAttachments[0].attachment;
-						auto& attDesc = desc.attachments[attID];
-						auto& imageView = fb.attachments[attID];
-						dlg_assert(imageView);
-						auto* image = imageView->img;
-
-						if(!image) {
-							dlg_warn("ImageView has no associated image");
-						} else if(attDesc.samples != VK_SAMPLE_COUNT_1_BIT) {
-							// TODO: support multisampling via vkCmdResolveImage
-							//   alternatively we could check if the image is
-							//   resolved at the end of the subpass and then simply
-							//   copy that.
-							dlg_debug("Can't create view image for multisampled attachment");
-						} else if(!image->hasTransferSrc) {
-							// There are only very specific cases where this can happen,
-							// we could work around some of them (e.g. transient
-							// attachment images or swapchain images that don't
-							// support transferSrc).
-							dlg_debug("Can't create view image for multisampled attachment");
-						} else {
-							// TODO: this should definitely not be created for
-							//   each recording! Use a pool or something.
-							// TODO: only use render pass area as size?
-							auto* vimg = new ViewableImageCopy(dev, attDesc.format,
-								fb.width, fb.height);
-							dstImage.reset(vimg);
-						}
-					}
-				}
-			}
-		}
-
-		dlg_assert(found);
-	}
+	RecordInfo info {};
+	initState(info);
 
 	// record
 	VkCommandBufferBeginInfo cbbi {};
 	cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	// NOTE: we can never submit the cb simulataneously anyways, see the
+	// we can never submit the cb simulataneously anyways, see the
 	// 'submissionCount' branch we take when finding an already existent
 	// record.
-	// TODO: depending on the active hooks, we might be able to this
 	// cbbi.flags = record->usageFlags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 	VK_CHECK(dev.dispatch.BeginCommandBuffer(this->cb, &cbbi));
 
 	// initial cmd stuff
-	dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, 2);
+	if(hook->queryTime) {
+		dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, 2);
+	}
 
-	info.splitRenderPass = splitRenderPass;
 	this->hookRecord(record->commands, info);
 
 	VK_CHECK(dev.dispatch.EndCommandBuffer(this->cb));
 }
 
-CommandHookRecordImpl::~CommandHookRecordImpl() {
+CommandHookRecord::~CommandHookRecord() {
 	// We can be sure that record is still alive here since when the
 	// record is destroyed, all its submissions must have finished as well.
 	// And then we would have been destroyed via the finish() command (see
@@ -366,8 +267,6 @@ CommandHookRecordImpl::~CommandHookRecordImpl() {
 
 	dev.dispatch.FreeCommandBuffers(dev.handle, commandPool, 1, &cb);
 	dev.dispatch.DestroyQueryPool(dev.handle, queryPool, nullptr);
-	dev.dispatch.FreeMemory(dev.handle, dstMemory, nullptr);
-	dev.dispatch.DestroyBuffer(dev.handle, dstBuffer, nullptr);
 
 	dev.dispatch.DestroyRenderPass(dev.handle, rp0, nullptr);
 	dev.dispatch.DestroyRenderPass(dev.handle, rp1, nullptr);
@@ -386,10 +285,63 @@ CommandHookRecordImpl::~CommandHookRecordImpl() {
 	}
 }
 
+void CommandHookRecord::initState(RecordInfo& info) {
+	auto& dev = record->device();
+	state.reset(new CommandHookState());
+
+	// Find out if final hooked command is inside render pass
+	auto preEnd = hcommand.end() - 1;
+	for(auto it = hcommand.begin(); it != preEnd; ++it) {
+		auto* cmd = *it;
+		if((info.beginRenderPassCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd))) {
+			break;
+		}
+	}
+
+	dlg_assert(info.beginRenderPassCmd ||
+		(!hook->copyVertexBuffers && !hook->copyIndexBuffers && !hook->copyAttachment));
+
+	info.splitRenderPass = info.beginRenderPassCmd &&
+		(hook->copyVertexBuffers ||
+		 hook->copyIndexBuffers ||
+		 hook->copyAttachment ||
+		 hook->copyDS ||
+		 hook->copyIndirectCmd);
+
+	if(info.splitRenderPass) {
+		auto& rp = *info.beginRenderPassCmd->rp;
+
+		// TODO: we could likely support this
+		if(hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) {
+			dlg_trace("Can't split multiview renderpass");
+			info.splitRenderPass = false;
+		}
+	}
+
+	if(info.splitRenderPass) {
+		auto& desc = *info.beginRenderPassCmd->rp->desc;
+
+		info.beginRenderPassCmd = info.beginRenderPassCmd;
+		info.hookedSubpass = info.beginRenderPassCmd->subpassOfDescendant(*hcommand.back());
+		dlg_assert(info.hookedSubpass != u32(-1));
+		dlg_assert(info.hookedSubpass < desc.subpasses.size());
+
+		if(!splittable(desc, info.hookedSubpass)) {
+			info.splitRenderPass = false;
+			dlg_trace("Can't split render pass");
+		} else {
+			auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
+			rp0 = create(dev, rpi0);
+			rp1 = create(dev, rpi1);
+			rp2 = create(dev, rpi2);
+		}
+	}
+}
+
 // TODO: this function is way too long. Factor out into
 // - timing-related functions
 // - renderpass splitting functions
-void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
+void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 	auto& dev = record->device();
 	while(cmd) {
 		auto nextInfo = info;
@@ -423,6 +375,8 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 			}
 
 			// before hook
+			// TODO: also call beforeDstOutsideRp when there is no rp to split,
+			// e.g. for dispatch or transfer commands.
 			if(hookDst && info.splitRenderPass) {
 				dlg_assert(info.beginRenderPassCmd);
 
@@ -460,6 +414,8 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 					// TODO: subpass contents relevant?
 					dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 				}
+			} else if(hookDst && !info.splitRenderPass && !info.beginRenderPassCmd) {
+				beforeDstOutsideRp(*cmd, info);
 			}
 
 			if(!skipRecord) {
@@ -470,7 +426,7 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 			dlg_assert(hookDst || (parentCmd && parentCmd->children()));
 
 			if(parentCmd) {
-				if(hookDst) {
+				if(hookDst && queryPool) {
 					// timing 0
 					auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 					dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
@@ -481,15 +437,17 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 			}
 
 			if(hookDst) {
-				if(!parentCmd) {
-					// timing 0
-					auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-					dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
-				}
+				if(queryPool) {
+					if(!parentCmd) {
+						// timing 0
+						auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+						dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
+					}
 
-				// timing 1
-				auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-				dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
+					// timing 1
+					auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+					dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
+				}
 
 				// render pass split: rp2
 				if(info.splitRenderPass) {
@@ -529,6 +487,8 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 						// TODO: subpass contents relevant?
 						dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 					}
+				} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
+					afterDstOutsideRp(*cmd, info);
 				}
 			}
 		} else {
@@ -542,12 +502,119 @@ void CommandHookRecordImpl::hookRecord(Command* cmd, RecordInfo info) {
 	}
 }
 
-void CommandHookRecordImpl::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
+void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
+		VkImageLayout srcLayout) {
+	if(src.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
+		// TODO: support multisampling via vkCmdResolveImage
+		//   alternatively we could check if the image is
+		//   resolved at the end of the subpass and then simply
+		//   copy that.
+		dlg_debug("Can't copy/display multisampled attachment");
+		return;
+	} else if(!src.hasTransferSrc) {
+		// There are only very specific cases where this can happen,
+		// we could work around some of them (e.g. transient
+		// attachment images or swapchain images that don't
+		// support transferSrc).
+		dlg_debug("Can't display image copy; original can't be copied");
+		return;
+	}
+
+	dst.init(dev, src.ci.format, src.ci.extent);
+
+	// perform copy
+	VkImageMemoryBarrier imgBarriers[2] {};
+
+	auto& srcBarrier = imgBarriers[0];
+	srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	srcBarrier.image = src.handle;
+	srcBarrier.oldLayout = srcLayout;
+	srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	srcBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+	srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	srcBarrier.subresourceRange.aspectMask = dst.aspect; // TODO: change when potentially blitting!
+	srcBarrier.subresourceRange.layerCount = 1u;
+	srcBarrier.subresourceRange.levelCount = 1u;
+	srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	auto& dstBarrier = imgBarriers[1];
+	dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	dstBarrier.image = dst.image;
+	dstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // discard
+	dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	dstBarrier.srcAccessMask = 0u;
+	dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	dstBarrier.subresourceRange.aspectMask = dst.aspect;
+	dstBarrier.subresourceRange.layerCount = 1u;
+	dstBarrier.subresourceRange.levelCount = 1u;
+	dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno, NOTE: probably could
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
+
+	// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
+	// between the render passes.
+	VkMemoryBarrier memBarrier {};
+	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+	memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+
+	VkImageCopy copy {};
+	copy.dstOffset = {};
+	copy.srcOffset = {};
+	copy.extent = src.ci.extent;
+	copy.srcSubresource.aspectMask = dst.aspect; // TODO: change when potentially blitting!
+	copy.srcSubresource.layerCount = 1u;
+	copy.dstSubresource.aspectMask = dst.aspect;
+	copy.dstSubresource.layerCount = 1u;
+
+	dev.dispatch.CmdCopyImage(cb,
+		src.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1, &copy);
+
+	srcBarrier.oldLayout = srcBarrier.newLayout;
+	srcBarrier.newLayout = srcLayout;
+	srcBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	srcBarrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+
+	dstBarrier.oldLayout = dstBarrier.newLayout;
+	dstBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	dstBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	dstBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could know
+		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
+}
+
+void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
 	auto& dev = record->device();
-	auto doBarrierCopy = [this, &dev](const VkBufferCopy& copy, VkBuffer buffer) {
+
+	auto copyBuffer = [this, &dev](CopiedBuffer& dst, VkBuffer src,
+			VkDeviceSize offset, VkDeviceSize size) {
+		// init dst
+		dst.init(dev, size);
+
+		// perform copy
+		VkBufferCopy copy {};
+		copy.srcOffset = offset;
+		copy.dstOffset = 0u;
+		copy.size = size;
+
 		VkBufferMemoryBarrier barrier {};
 		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		barrier.buffer = buffer;
+		barrier.buffer = src;
 		barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 		barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 		barrier.size = copy.size;
@@ -558,7 +625,7 @@ void CommandHookRecordImpl::beforeDstOutsideRp(Command& bcmd, const RecordInfo&)
 			VK_PIPELINE_STAGE_TRANSFER_BIT,
 			0, 0, nullptr, 1, &barrier, 0, nullptr);
 
-		dev.dispatch.CmdCopyBuffer(cb, buffer, dstBuffer, 1, &copy);
+		dev.dispatch.CmdCopyBuffer(cb, src, dst.buffer.buf, 1, &copy);
 
 		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 		barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
@@ -568,126 +635,137 @@ void CommandHookRecordImpl::beforeDstOutsideRp(Command& bcmd, const RecordInfo&)
 			0, 0, nullptr, 1, &barrier, 0, nullptr);
 	};
 
-	if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(&bcmd)) {
-		VkDeviceSize stride = cmd->indexed ?
-			sizeof(VkDrawIndexedIndirectCommand) :
-			sizeof(VkDrawIndirectCommand);
-		stride = cmd->stride ? cmd->stride : stride;
-		auto dstSize = cmd->drawCount * stride;
+	// indirect copy
+	if(hook->copyIndirectCmd) {
+		if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(&bcmd)) {
+			VkDeviceSize stride = cmd->indexed ?
+				sizeof(VkDrawIndexedIndirectCommand) :
+				sizeof(VkDrawIndirectCommand);
+			stride = cmd->stride ? cmd->stride : stride;
+			auto dstSize = cmd->drawCount * stride;
+			copyBuffer(state->indirectCopy, cmd->buffer->handle, cmd->offset, dstSize);
+		} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
+			auto size = sizeof(VkDispatchIndirectCommand);
+			copyBuffer(state->indirectCopy, cmd->buffer->handle, cmd->offset, size);
+		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
+			(void) cmd;
+			dlg_error("not implemented");
+		} else {
+			dlg_error("unsupported indirect command");
+		}
+	}
 
-		VkBufferCopy copy;
-		copy.srcOffset = cmd->offset;
-		copy.dstOffset = 0u;
-		copy.size = dstSize;
+	// descriptor state
+	if(hook->copyDS) {
+		DescriptorState* dsState = nullptr;
+		if(auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd)) {
+			dsState = &drawCmd->state;
+		} else if(auto* dispatchCmd = dynamic_cast<DispatchCmdBase*>(&bcmd)) {
+			dsState = &dispatchCmd->state;
+		} else {
+			dlg_error("unsupported descriptor command");
+		}
 
-		doBarrierCopy(copy, cmd->buffer->handle);
-	} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
-		VkBufferCopy copy;
-		copy.srcOffset = cmd->offset;
-		copy.dstOffset = 0u;
-		copy.size = sizeof(VkDispatchIndirectCommand);
-		doBarrierCopy(copy, cmd->buffer->handle);
-	} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
-		(void) cmd;
-		dlg_error("not implemented");
+		if(dsState) {
+			auto [setID, bindingID, elemID] = *hook->copyDS;
+			dlg_assert(dsState->descriptorSets.size() > setID);
+			auto& set = dsState->descriptorSets[setID];
+			dlg_assert(set.ds->bindings.size() > bindingID);
+			auto& binding = set.ds->bindings[bindingID];
+			dlg_assert(binding.size() > elemID);
+			auto& elem = binding[elemID];
+
+			dlg_assert(elem.valid);
+			auto lbinding = set.ds->layout->bindings[bindingID];
+			auto cat = category(lbinding.descriptorType);
+			if(cat == DescriptorCategory::image) {
+				if(needsImageView(lbinding.descriptorType)) {
+					auto* imgView = elem.imageInfo.imageView;
+					dlg_assert(imgView);
+					dlg_assert(imgView->img);
+					if(imgView->img) {
+						auto& dst = state->dsCopy.emplace<CopiedImage>();
+						initAndCopy(dev, cb, dst, *imgView->img, elem.imageInfo.layout);
+					}
+				} else {
+					dlg_warn("Nothing to copy");
+				}
+			} else if(cat == DescriptorCategory::buffer) {
+				auto& dst = state->dsCopy.emplace<CopiedBuffer>();
+				copyBuffer(dst, elem.bufferInfo.buffer->handle,
+					elem.bufferInfo.offset, elem.bufferInfo.range);
+			} else if(cat == DescriptorCategory::bufferView) {
+				// TODO: copy as buffer or image? maybe best to copy
+				//   as buffer but then create bufferView on our own?
+				// auto& dst = state->dsCopy.emplace<CopiedBuffer>();
+				// dlg_assert(elem.bufferView->buffer);
+				// copyBuffer(dst, elem.bufferView->buffer->handle,
+				// 	elem.bufferView->ci.offset, elem.bufferView->ci.range);
+				dlg_error("unimplemented");
+			}
+		}
+	}
+
+	// TODO: kinda arbitrary, allow more. Configurable via settings?
+	// In general, the problem is that we can't know the relevant
+	// size for sub-allocated buffers. Theoretically, we could analyze
+	// previous index/indirect data for this. Not sure if good idea.
+	constexpr auto maxBufCopySize = VkDeviceSize(16 * 1024);
+
+	auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd);
+
+	// TODO: for non-indirect, non-indexed commands we know the exact number
+	// of indices to copy
+	if(hook->copyVertexBuffers) {
+		dlg_assert(drawCmd);
+		for(auto& vertbuf : drawCmd->state.vertices) {
+			auto& dst = state->vertexBufCopies.emplace_back();
+			if(!vertbuf.buffer) {
+				continue;
+			}
+
+			auto size = std::min(maxBufCopySize, vertbuf.buffer->ci.size - vertbuf.offset);
+			copyBuffer(dst, vertbuf.buffer->handle, vertbuf.offset, size);
+		}
+	}
+
+	// TODO: for non-indirect commands we know the exact number of indices to copy
+	if(hook->copyIndexBuffers) {
+		dlg_assert(drawCmd);
+		auto& inds = drawCmd->state.indices;
+		if(inds.buffer) {
+			auto size = std::min(maxBufCopySize, inds.buffer->ci.size - inds.offset);
+			copyBuffer(state->indexBufCopy, inds.buffer->handle, inds.offset, size);
+		}
 	}
 }
 
-void CommandHookRecordImpl::afterDstOutsideRp(Command& cmd, const RecordInfo& info) {
-	(void) cmd;
-
+void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
 	auto& dev = record->device();
-	if(dstImage) {
+
+	if(hook->copyAttachment) {
+		// initialize dst image
 		dlg_assert(info.beginRenderPassCmd);
-		auto& desc = *info.beginRenderPassCmd->rp->desc;
-
-		auto& subpass = desc.subpasses[info.hookedSubpass];
 		auto& fb = *info.beginRenderPassCmd->fb;
-		auto attID = subpass.pColorAttachments[0].attachment;
-
+		auto attID = *hook->copyAttachment;
 		dlg_assert(attID < fb.attachments.size());
-		auto& imgView = *fb.attachments[attID];
-		dlg_assert(imgView.img);
 
-		auto& srcImg = *imgView.img;
+		auto& imageView = fb.attachments[attID];
+		dlg_assert(imageView);
+		dlg_assert(imageView->img);
+		auto* image = imageView->img;
 
-		VkImageMemoryBarrier imgBarriers[2] {};
-
-		auto& srcBarrier = imgBarriers[0];
-		srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		srcBarrier.image = srcImg.handle;
-		srcBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
-		srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-		srcBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
-		srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		srcBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		srcBarrier.subresourceRange.layerCount = 1u;
-		srcBarrier.subresourceRange.levelCount = 1u;
-		srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		auto& dstBarrier = imgBarriers[1];
-		dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		dstBarrier.image = dstImage->image;
-		dstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // discard
-		dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-		dstBarrier.srcAccessMask = 0u;
-		dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		dstBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		dstBarrier.subresourceRange.layerCount = 1u;
-		dstBarrier.subresourceRange.levelCount = 1u;
-		dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		dev.dispatch.CmdPipelineBarrier(cb,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno, NOTE: probably could
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			0, 0, nullptr, 0, nullptr, 2, imgBarriers);
-
-		// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
-		// between the render passes.
-		VkMemoryBarrier memBarrier {};
-		memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
-		memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-
-		dev.dispatch.CmdPipelineBarrier(cb,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			0, 1, &memBarrier, 0, nullptr, 0, nullptr);
-
-		VkImageCopy copy {};
-		copy.dstOffset = {};
-		copy.srcOffset = {};
-		copy.extent = {fb.width, fb.height, 1u};
-		copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		copy.srcSubresource.layerCount = 1u;
-		copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		copy.dstSubresource.layerCount = 1u;
-
-		dev.dispatch.CmdCopyImage(cb,
-			srcImg.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			dstImage->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			1, &copy);
-
-		srcBarrier.oldLayout = srcBarrier.newLayout;
-		srcBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-		srcBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		srcBarrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
-
-		dstBarrier.oldLayout = dstBarrier.newLayout;
-		dstBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		dstBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-		dstBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-		dev.dispatch.CmdPipelineBarrier(cb,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could know
-			0, 0, nullptr, 0, nullptr, 2, imgBarriers);
+		if(!image) {
+			dlg_warn("ImageView has no associated image");
+		} else {
+			auto& srcImg = *image;
+			auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
+			initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout);
+		}
 	}
 }
 
-void CommandHookRecordImpl::finish() noexcept {
+void CommandHookRecord::finish() noexcept {
 	// NOTE: We don't do this since we can assume the record to remain
 	// valid until all submissions are finished. We can assume it to
 	// be valid throughout the entire lifetime of *this.
@@ -699,16 +777,11 @@ void CommandHookRecordImpl::finish() noexcept {
 }
 
 // submission
-CommandHookSubmissionImpl::CommandHookSubmissionImpl(CommandHookRecordImpl& rec, PendingSubmission& subm)
+CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec, PendingSubmission&)
 		: record(&rec) {
-
-	if(rec.dstImage) {
-		dlg_assert(!rec.dstImage->writer);
-		rec.dstImage->writer = &subm;
-	}
 }
 
-CommandHookSubmissionImpl::~CommandHookSubmissionImpl() {
+CommandHookSubmission::~CommandHookSubmission() {
 	dlg_assert(record && record->record);
 
 	// We must be the only pending submission.
@@ -723,18 +796,21 @@ CommandHookSubmissionImpl::~CommandHookSubmissionImpl() {
 		return;
 	}
 
-	transmitTiming();
-	transmitIndirect();
-
-	if(record->dstImage) {
-		dlg_assert(record->dstImage->writer); // TODO: check that it's this submission
-		record->dstImage->writer = nullptr;
-		record->hook->image = record->dstImage;
+	dlg_assert(record->state);
+	if(record->state) {
+		// transmitIndirect();
+		transmitTiming();
+		record->hook->state = record->state;
 	}
 }
 
-void CommandHookSubmissionImpl::transmitTiming() {
+void CommandHookSubmission::transmitTiming() {
 	auto& dev = record->record->device();
+
+	dlg_assert(bool(record->queryPool) == record->hook->queryTime);
+	if(!record->queryPool || !record->hook->queryTime) {
+		return;
+	}
 
 	// Store the query pool results.
 	// Since the submission finished, we can expect them to be available
@@ -753,10 +829,11 @@ void CommandHookSubmissionImpl::transmitTiming() {
 	u64 after = data[1];
 
 	auto diff = after - before;
-	record->hook->lastTime = diff;
+	record->hook->state->neededTime = diff;
 }
 
-void CommandHookSubmissionImpl::transmitIndirect() {
+/*
+void CommandHookSubmission::transmitIndirect() {
 	if(!record->bufferMap) {
 		return;
 	}
@@ -799,5 +876,6 @@ void CommandHookSubmissionImpl::transmitIndirect() {
 		dlg_error("Not implemented");
 	}
 }
+*/
 
 } // namespace fuen

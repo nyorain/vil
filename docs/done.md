@@ -1,5 +1,11 @@
 For v0.1
 
+- [x] remove src/bytes in favor of util/bytes.
+- [x] move other util headers to util
+- [x] A lot of sources can be moved to src/gui
+	- [x] rename imguiutil. Move to gui
+- [x] figure out why we can't name handles from inside the layer
+	  {eh, see ugly workaround for now in device creation} 
 - [x] fix ui for fixed resource tracking: check for nullptr resource references
       everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
 	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of

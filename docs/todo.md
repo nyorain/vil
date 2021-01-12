@@ -8,28 +8,39 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
-- [ ] remove src/bytes in favor of util/bytes.
-- [ ] move other util headers to util
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
-- [ ] A lot of sources can be moved to src/gui
-	- [ ] rename imguiutil. Move to gui
-- [x] figure out why we can't name handles from inside the layer
-	  {eh, see ugly workaround for now in device creation} 
+- [ ] barrier command inspectors: show information about all barriers, stage masks etc
+	- [ ] CmdPipelineBarrier
+	- [ ] CmdSetEvent
+	- [ ] CmdWaitEvents
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [ ] new per-command input/output overview, allowing to view *all* resources
-- [ ] copy vulkan headers to vk/. So we don't rely on system headers
+	- [ ] fix code flow. Really bad at the moment, with Commands calling
+	      that displayAction function and optionally append to child.
+	- [ ] improve the new overview. See all the various todos
+	- [ ] chose sensible default sizes/layouts
+	- [ ] implement buffer viewer (infer information from shaders)
+	- [ ] factor out image viewer from resources into own component; use it here.
+- [x] copy vulkan headers to vk/. So we don't rely on system headers
 - [ ] Allow to freeze state for current displayed command, i.e. don't
       update data from hook
+- [ ] fix Gui::draws_ synchronization issue
+	  See Gui::pendingDraws (called from queue while locked) but also
+	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
+	  potential race!)
+	  {NOTE: there are likely a couple more sync issues for Gui stuff}
 - [x] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
-	  - [ ] IMPORTANT! keep command group (or at least the hook?) alive 
-	        while it is viewed in cb viewer? Can lead to problems currently.
-			Unset group in kept-alive records? We should probably keep the
-			group alive while a record of it is alive (but adding intrusive
-			pointer from record to group would create cycle)
+- [ ] IMPORTANT! keep command group (or at least the hook?) alive 
+	  while it is viewed in cb viewer? Can lead to problems currently.
+	  Unset group in kept-alive records? We should probably keep the
+	  group alive while a record of it is alive (but adding intrusive
+	  pointer from record to group would create cycle).
+	  Are currently getting crashed from this.
+	  - [ ] re-enable discarding old command groups when this is figured out.
 - [x] optimization (important): when CommandRecord is invalidated (rather: removed as current
       recording from cb), it should destroy (reset) its hook as it 
 	  will never be used again anyways
@@ -40,6 +51,9 @@ v0.1, goal: end of january 2021
 	- [ ] do we also need an updateFromCb button?
 - [x] allow to select in cb viewer which commands are shown
 	- [ ] make that more compact/intuitive if possible
+	- [ ] looks really ugly at the moment, improve that.
+	      maybe move to own settings tab? Wouldn't expect people to change
+		  it often tbh
 - [x] make queues viewable handles
 	- [x] allow to view command groups per queue
 	- [ ] view submissions per queue?
@@ -55,13 +69,18 @@ v0.1, goal: end of january 2021
 	  nvm, we likely cannot/shouldn't do it without deciding on per-extension
 	      basis. Just forwarding random pNexts will likely not work.
 - [ ] implement overview as in node 1652
+	- [ ] associate CommandGroup with swapchain (and the other way around?)
+- [ ] implement additional command buffer viewer mode: per-frame-commands
+      basically shows all commands submitted to queue between two present calls.
+	  similar to renderdoc
+	- [ ] or just show the most important submission for now? (based on "main
+	      submission" heuristics)
 - [x] rework dev/gui so that there is never more than one gui. Supporting
       multiple guis at the same time is not worth the trouble (think
 	  about command buffer hooking from multiple cb viewers...)
 	- [ ] what to do when window *and* overlay is created? or multiple overlays?
 		  Should probably close the previous one (move gui object)
 		  See todo in Gui::init
-- [ ] remove PageVector when not used anymore. Maybe move to docs or nodes
 - [ ] Implement missing resource overview UIs
 - [ ] Remove virtual stuff from this whole CommandBufferHook 
 - [ ] Add more useful overview. 
@@ -126,7 +145,11 @@ v0.1, goal: end of january 2021
 - [ ] imgui styling
 	- [ ] use custom font
 	- [ ] go at least a bit away from the default imgui style
+	      The grey is hella ugly, make black instead.
+		  Use custom accent color. Configurable?
+	- [ ] Figure out transparency. Make it a setting?
 	- [ ] see imgui style examples in imgui releases
+- [ ] improve handling of transprent images
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
 	- [ ] clearly document (maybe already in README?) that the layer
@@ -174,6 +197,22 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] optimize: suballocate and CopiedBuffer
+- [ ] optimize: reuse CopiedImage and CopiedBuffer
+- [ ] support multiple imgui themes via settings
+- [ ] remove PageVector when not used anymore. Maybe move to docs or nodes
+- [ ] in cb viewer: allow to set collapse mode, e.g. allow more linear layout?
+      and other settings
+- [ ] make gui more comfortable to use
+	- [ ] add shortcuts for important features
+	- [ ] investigate if we can make it vim-like navigatable keyboard-only
+	- [ ] make "back" button work (and add one it gui itself?)
+- [ ] investigate the vulkan layer providing the timeline semaphore feature.
+      We could advise its usage when a native implementation is not available.
+	  Eventually we could (either by requiring use of the layer when ext not
+	  implemented by driver or by implementing it inside our layer) expect
+	  timeline semaphores to be available, removing the legacy code path.
+- [ ] fix warning 4458, see meson.build, we currently disable it.
 - [ ] optimization: use custom memory management in QueueSubmit impl
 	- [ ] investigate other potential bottleneck places where we
 	      allocate a lot
@@ -188,6 +227,11 @@ Possibly for later, new features/ideas:
 	  In that case: either just don't allow command hooking (for now) or
 	  just do the expensive solution: completely modify the render passes
 	  and recreate all framebuffers and graphics pipelines ugh
+- [ ] somehow display submissions and their dependencies as a general
+      frame-graph like overview (could go down to renderpass-level, to
+	  provide a full frame graph).
+	- [ ] Maybe start with something that simply writes a dot file for a frame or two?
+	      Getting this right interactively with imgui will be... hard
 - [ ] command groups: come up with a concept to avoid glitchy updates
 	  in viewer. Either just update every couple of seconds (lame!) or
 	  display something special there.

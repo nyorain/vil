@@ -1,6 +1,6 @@
 #include <xlib.hpp>
 #include <layer.hpp>
-#include <util.hpp>
+#include <util/util.hpp>
 #include <swa/swa.h>
 #include <gui/gui.hpp>
 #include <overlay.hpp>

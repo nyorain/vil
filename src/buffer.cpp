@@ -1,6 +1,7 @@
-#include "buffer.hpp"
-#include "data.hpp"
-#include "ds.hpp"
+#include <buffer.hpp>
+#include <device.hpp>
+#include <data.hpp>
+#include <ds.hpp>
 
 namespace fuen {
 
@@ -57,15 +58,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	auto nci = *pCreateInfo;
 
 	// Needed so we can copy from it for show its contents.
+	// AFAIK this should always be supported, for all buffers.
 	nci.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
-	// TODO: needed for our own operations on the buffer. We should
+	// NOTE: needed for our own operations on the buffer. Might be better to
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
-	if(dev.usedQueueFamilyIndices.size() > 1) {
+	auto concurrent = false;
+	if(dev.usedQueueFamilyIndices.size() > 1 && nci.sharingMode != VK_SHARING_MODE_CONCURRENT) {
 		nci.sharingMode = VK_SHARING_MODE_CONCURRENT;
 		nci.queueFamilyIndexCount = u32(dev.usedQueueFamilyIndices.size());
 		nci.pQueueFamilyIndices = dev.usedQueueFamilyIndices.data();
+		concurrent = true;
 	}
 
 	auto res = dev.dispatch.CreateBuffer(device, &nci, pAllocator, pBuffer);
@@ -78,6 +82,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	buf.dev = &dev;
 	buf.ci = *pCreateInfo;
 	buf.handle = *pBuffer;
+	buf.concurrentHooked = concurrent;
 
 	return res;
 }

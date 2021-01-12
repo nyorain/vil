@@ -1,13 +1,16 @@
-#include <gui/renderer.hpp>
+#include <gui/render.hpp>
+#include <gui/commandHook.hpp>
+#include <util/util.hpp>
+#include <device.hpp>
 #include <queue.hpp>
-#include <util.hpp>
 #include <imgui/imgui.h>
 
 namespace fuen {
 
 // Draw
-void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
+void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 		VkBufferUsageFlags usage) {
+	dlg_assert(!this->dev || this->dev == &dev);
 	if(size >= reqSize) {
 		return;
 	}
@@ -26,7 +29,7 @@ void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
 	bufInfo.size = reqSize;
 	bufInfo.usage = usage;
 	VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf));
-	nameHandle(dev, this->buf, "Draw:Buffer:buf");
+	nameHandle(dev, this->buf, "OwnBuffer:buf");
 
 	// get memory props
 	VkMemoryRequirements memReqs;
@@ -38,20 +41,29 @@ void Draw::Buffer::ensure(Device& dev, VkDeviceSize reqSize,
 	allocInfo.allocationSize = align(memReqs.size, dev.props.limits.nonCoherentAtomSize);
 	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
-	nameHandle(dev, this->mem, "Draw:Buffer:mem");
+	nameHandle(dev, this->mem, "OwnBuffer:mem");
 
 	// bind
 	VK_CHECK(dev.dispatch.BindBufferMemory(dev.handle, buf, mem, 0));
 	this->size = reqSize;
 }
 
-void Draw::Buffer::free(Device& dev) {
-	dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);
-	dev.dispatch.FreeMemory(dev.handle, mem, nullptr);
+OwnBuffer::~OwnBuffer() {
+	if(!dev) {
+		return;
+	}
+
+	dev->dispatch.DestroyBuffer(dev->handle, buf, nullptr);
+	dev->dispatch.FreeMemory(dev->handle, mem, nullptr);
 }
 
-template<int>
-struct TestInt;
+void swap(OwnBuffer& a, OwnBuffer& b) noexcept {
+	using std::swap;
+	swap(a.dev, b.dev);
+	swap(a.buf, b.buf);
+	swap(a.mem, b.mem);
+	swap(a.size, b.size);
+}
 
 // Draw
 void swap(Draw& a, Draw& b) noexcept {
@@ -63,17 +75,25 @@ void swap(Draw& a, Draw& b) noexcept {
 	swap(a.inUse, b.inUse);
 	swap(a.indexBuffer, b.indexBuffer);
 	swap(a.vertexBuffer, b.vertexBuffer);
+	swap(a.readback.copy, b.readback.copy);
 	swap(a.presentSemaphore, b.presentSemaphore);
 	swap(a.futureSemaphore, b.futureSemaphore);
 	swap(a.futureSemaphoreValue, b.futureSemaphoreValue);
 	swap(a.usedHandles, b.usedHandles);
-	swap(a.keepAliveImageCopy, b.keepAliveImageCopy);
+	swap(a.usedHookState, b.usedHookState);
 	swap(a.waitedUpon, b.waitedUpon);
-
-	static_assert(sizeof(Draw) == 232);
 }
 
 Draw::Draw() = default;
+
+Draw::Draw(Draw&& rhs) noexcept {
+	swap(*this, rhs);
+}
+
+Draw& Draw::operator=(Draw rhs) noexcept {
+	swap(*this, rhs);
+	return *this;
+}
 
 void Draw::init(Device& dev, VkCommandPool commandPool) {
 	this->dev = &dev;
@@ -122,9 +142,6 @@ Draw::~Draw() {
 	if(!dev) {
 		return;
 	}
-
-	vertexBuffer.free(*dev);
-	indexBuffer.free(*dev);
 
 	if(fence) {
 		if(inUse) {

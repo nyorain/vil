@@ -22,7 +22,7 @@ args = cc.get_supported_arguments([
 	'/wd4456', # delecaration hides previous local declaration (sorry, too used to rust's beauty)
 	'-D_CRT_SECURE_NO_WARNINGS',
 
-	# TODO: msvc really slow in debug build without this
+	# msvc really slow in debug build without this
 	# '-D_ITERATOR_DEBUG_LEVEL=0',
 
 	# highly useful for debugging on linux
@@ -48,10 +48,11 @@ dep_swa = dependency('swa',
 # the same way it's done in swa when not linking vulkan:
 # we only want the headers and definitions, not link anything.
 # we currently carefully only use the header-only vk_layer utilities
-dep_vulkan_full = dependency('vulkan')
-dep_vulkan = dep_vulkan_full.partial_dependency(
-	compile_args: true,
-	includes: true)
+# TODO: remove this, we don't rely on installed vulkan headers anymore
+# dep_vulkan_full = dependency('vulkan')
+# dep_vulkan = dep_vulkan_full.partial_dependency(
+# 	compile_args: true,
+# 	includes: true)
 
 subdir('src/imgui')
 
@@ -64,26 +65,15 @@ src = files(
 	'src/layer.cpp',
 	'src/data.cpp',
 	'src/window.cpp',
-	'src/util.cpp',
-	'src/f16.cpp',
 	'src/api.cpp',
 	'src/commands.cpp',
 	'src/overlay.cpp',
-	'src/vk/format_utils.cpp',
 	'src/platform.cpp',
 	'src/commandDesc.cpp',
 	'src/record.cpp',
-	# 'src/commandHook.cpp',
-
-	# gui stuff
-	'src/gui/renderer.cpp',
-	'src/gui/gui.cpp',
-	'src/gui/resources.cpp',
-	'src/gui/image.cpp',
-	'src/gui/buffer.cpp',
-	'src/gui/cb.cpp',
-	# 'src/gui/bufferRead.cpp',
-	'src/gui/commandHook.cpp',
+	'src/vk/format_utils.cpp',
+	'src/util/util.cpp',
+	'src/util/f16.cpp',
 
 	# vulkan api entrypoints
 	'src/handle.cpp',
@@ -100,6 +90,15 @@ src = files(
 	'src/pipe.cpp',
 	'src/queryPool.cpp',
 	'src/queue.cpp',
+
+	# gui stuff
+	'src/gui/render.cpp',
+	'src/gui/gui.cpp',
+	'src/gui/resources.cpp',
+	'src/gui/image.cpp',
+	'src/gui/buffer.cpp',
+	'src/gui/cb.cpp',
+	'src/gui/commandHook.cpp',
 
 	# external util
 	'src/spirv_reflect.c',
@@ -118,12 +117,23 @@ src = files(
 	'src/ds.hpp',
 	'src/window.hpp',
 	'src/overlay.hpp',
+	'src/queue.hpp',
+	'src/platform.hpp',
+	'src/win32.hpp',
+	'src/data.hpp',
+	'src/vk/vulkan.h',
+	'src/vk/typemap_helper.h',
+	'src/vk/dispatch_table.h',
 	'src/gui/gui.hpp',
 	'src/gui/resources.hpp',
 	'src/gui/cb.hpp',
-	'src/gui/renderer.hpp',
-	'src/util.hpp',
-	'src/data.hpp',
+	'src/gui/render.hpp',
+	'src/gui/util.hpp',
+	'src/util/util.hpp',
+	'src/util/span.hpp',
+	'src/util/flags.hpp',
+	'src/util/f16.hpp',
+	'src/util/syncedMap.hpp',
 	'src/imgui/imgui.h',
 	'include/fuen_api.h',
 )
@@ -143,7 +153,7 @@ deps = [
 	dep_dlg,
 	dep_swa,
 	libimgui_core_dep,
-	dep_vulkan,
+	# dep_vulkan,
 ]
 
 if with_x11

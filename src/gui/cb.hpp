@@ -1,21 +1,22 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <queue.hpp>
-#include <flags.hpp>
-#include <guidraw.hpp>
+#include <gui/render.hpp>
+#include <util/flags.hpp>
 #include <commandDesc.hpp>
-#include <record.hpp>
 
 namespace fuen {
 
-struct CommandHookImpl;
-struct ViewableImageCopy;
+struct CopiedImage;
 
 struct CommandBufferGui {
 	void draw(Draw& draw);
 	void select(IntrusivePtr<CommandRecord> record, bool updateFromGroup);
 	void destroyed(const Handle& handle);
+
+	// TODO: quite hacky, can only be called once per frame.
+	void displayImage(const CopiedImage& img);
+	Draw* draw_ {};
 
 	CommandBufferGui();
 	~CommandBufferGui();
@@ -38,8 +39,7 @@ struct CommandBufferGui {
 
 	bool queryTime_ {};
 
-	CommandHookImpl* hook_ {};
-	IntrusivePtr<ViewableImageCopy> imageCopy_;
+	CommandHook* hook_ {}; // TODO: we can't know for sure it remains valid. Should probably be owned here
 	DrawGuiImage imgDraw_ {};
 };
 

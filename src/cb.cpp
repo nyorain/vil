@@ -2,8 +2,10 @@
 #include <data.hpp>
 #include <queue.hpp>
 #include <handles.hpp>
-#include <util.hpp>
 #include <commands.hpp>
+#include <record.hpp>
+#include <gui/commandHook.hpp>
+#include <util/util.hpp>
 
 namespace fuen {
 
@@ -539,16 +541,16 @@ void cmdBarrier(
 
 	cmd.buffers = allocSpan<Buffer*>(cb, cmd.bufBarriers.size());
 	for(auto i = 0u; i < cmd.bufBarriers.size(); ++i) {
-		auto& buf = cmd.bufBarriers[i];
-		copyChain(cb, buf.pNext);
-		auto& bbuf = cb.dev->buffers.get(buf.buffer);
-		cmd.buffers[i] = &bbuf;
-		useHandle(cb, cmd, bbuf);
+		auto& bufb = cmd.bufBarriers[i];
+		copyChain(cb, bufb.pNext);
+		auto& buf = cb.dev->buffers.get(bufb.buffer);
+		cmd.buffers[i] = &buf;
+		useHandle(cb, cmd, buf);
 
-		// We put all buffers in concurrent mode so barriers must never
-		// define queue family transitions
-		buf.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		buf.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		if(buf.concurrentHooked) {
+			bufb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			bufb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		}
 	}
 
 	for(auto& mem : cmd.memBarriers) {

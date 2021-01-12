@@ -65,7 +65,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 
 		if(oldChain->overlay) {
 			if(Overlay::compatible(oldChain->ci, *pCreateInfo)) {
-				// have to make sure previous rendering has finished.
+				// Have to make sure previous rendering has finished.
+				// We can be sure gui isn't starting new draws in another
+				// thread.
 				oldChain->overlay->gui.finishDraws();
 				savedOverlay = std::move(oldChain->overlay);
 			} else {
@@ -113,6 +115,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		img.objectType = VK_OBJECT_TYPE_IMAGE;
 		img.handle = imgs[i];
 		img.hasTransferSrc = (sci.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+
+		img.ci.arrayLayers = sci.imageArrayLayers;
+		img.ci.imageType = VK_IMAGE_TYPE_2D;
+		img.ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		img.ci.extent = {sci.imageExtent.width, sci.imageExtent.height, 1u};
+		img.ci.format = sci.imageFormat;
+		img.ci.mipLevels = 1u;
+		img.ci.samples = VK_SAMPLE_COUNT_1_BIT;
+		img.ci.sharingMode = sci.imageSharingMode;
+		img.ci.usage = sci.imageUsage;
+		img.ci.tiling = VK_IMAGE_TILING_OPTIMAL; // don't really know
+		// TODO: make local copy
+		// img.ci.pQueueFamilyIndices = sci.pQueueFamilyIndices;
+		// img.ci.queueFamilyIndexCount = sci.queueFamilyIndexCount;
 
 		swapd.images[i] = &img;
 	}

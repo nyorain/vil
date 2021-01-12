@@ -5,6 +5,7 @@
 #include <queue.hpp>
 #include <sync.hpp>
 #include <platform.hpp>
+#include <dlg/dlg.hpp>
 #include <imgui/imgui.h>
 
 namespace fuen {

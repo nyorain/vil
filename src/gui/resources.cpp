@@ -1,8 +1,9 @@
 #include <gui/resources.hpp>
 #include <gui/gui.hpp>
+#include <gui/util.hpp>
+#include <device.hpp>
 #include <handles.hpp>
-#include <util.hpp>
-#include <imguiutil.hpp>
+#include <util/util.hpp>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
@@ -195,6 +196,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
 	} else {
 		dlg_assert(image_.view);
+		draw.usedHandles.push_back(image_.object);
 
 		ImGui::Spacing();
 		ImGui::Spacing();
@@ -1428,6 +1430,135 @@ void ResourceGui::destroyed(const Handle& handle) {
 void ResourceGui::select(Handle& handle) {
 	handle_ = &handle;
 	dlg_assert(handle.objectType != VK_OBJECT_TYPE_UNKNOWN);
+}
+
+void ResourceGui::recordPreRender(Draw& draw) {
+	auto& dev = gui_->dev();
+
+	// image waiting logic
+	// if we are displaying an image we have to make sure it is not currently
+	// being written somewhere else.
+	if(handle_ && handle_ == image_.object && image_.view) {
+		auto& img = *image_.object;
+
+		// Make sure our image is in the right layout.
+		// And we are allowed to read it
+		VkImageMemoryBarrier imgb {};
+		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imgb.image = img.handle;
+		imgb.subresourceRange = image_.subres;
+		imgb.oldLayout = img.pendingLayout;
+		imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags?
+		imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+		// TODO: transfer queue ownership.
+		// We currently just force concurrent mode on image/buffer creation
+		// but that might have performance impact.
+		// Requires additional submissions to the other queues.
+		// We should first check whether the queue is different in first place.
+		// if(img.ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
+		// }
+
+		dev.dispatch.CmdPipelineBarrier(draw.cb,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
+			0, 0, nullptr, 0, nullptr, 1, &imgb);
+	}
+
+	// TODO
+	// copy buffer if needed
+	/*
+	if(handle_ && handle_ == buffer_.handle) {
+			// TODO: offset, sizes and stuff
+			auto size = std::min(buf.ci.size, VkDeviceSize(1024 * 16));
+			readbackBuf_.ensure(dev(), size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
+			// TODO: support srcOffset
+			// TODO: need memory barriers
+			VkBufferCopy copy {};
+			copy.size = size;
+			dev().dispatch.CmdCopyBuffer(draw.cb, buf.handle, readbackBuf_.buf,
+				1, &copy);
+			dev().dispatch.EndCommandBuffer(draw.cb);
+
+			VkSubmitInfo submitInfo {};
+			submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+			submitInfo.commandBufferCount = 1u;
+			submitInfo.pCommandBuffers = &draw.cb;
+
+			auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
+			if(res != VK_SUCCESS) {
+				dlg_error("vkSubmit error: {}", vk::name(res));
+				return {res, &draw};
+			}
+
+			// TODO: ouch! this is really expensive.
+			// could we at least release the device mutex lock meanwhile?
+			// we would have to check for various things tho, if resource
+			// was destroyed.
+			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
+			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+
+			void* mapped {};
+			VK_CHECK(dev().dispatch.MapMemory(dev().handle, readbackBuf_.mem, 0, size, {}, &mapped));
+
+			VkMappedMemoryRange range {};
+			range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+			range.memory = readbackBuf_.mem;
+			range.offset = 0u;
+			range.size = size;
+			VK_CHECK(dev().dispatch.InvalidateMappedMemoryRanges(dev().handle, 1, &range));
+
+			tabs_.resources.buffer_.lastRead.resize(size);
+			std::memcpy(tabs_.resources.buffer_.lastRead.data(), mapped, size);
+
+			dev().dispatch.UnmapMemory(dev().handle, readbackBuf_.mem);
+
+			VkCommandBufferBeginInfo cbBegin {};
+			cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+			VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
+	}
+	*/
+}
+
+void ResourceGui::recoredPostRender(Draw& draw) {
+	auto& dev = gui_->dev();
+
+	if(handle_ && handle_ == image_.object && image_.view) {
+		auto& img = *image_.object;
+
+		// return it to original layout
+		VkImageMemoryBarrier imgb {};
+		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imgb.image = img.handle;
+		imgb.subresourceRange = image_.subres;
+		imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imgb.newLayout = img.pendingLayout;
+		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+		dlg_assert(
+			img.pendingLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
+			img.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED);
+		imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
+
+		// TODO: transfer queue ownership.
+		// We currently just force concurrent mode on image/buffer creation
+		// but that might have performance impact.
+		// Requires additional submissions to the other queues.
+		// We should first check whether the queue is different in first place.
+		// if(selImg->ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
+		// }
+
+		dev.dispatch.CmdPipelineBarrier(draw.cb,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // wait in everything
+			0, 0, nullptr, 0, nullptr, 1, &imgb);
+	}
 }
 
 } // namespace fuen

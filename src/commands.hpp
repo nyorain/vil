@@ -1,8 +1,8 @@
 #pragma once
 
 #include <record.hpp>
-#include <flags.hpp>
-#include <span.hpp>
+#include <util/flags.hpp>
+#include <util/span.hpp>
 #include <dlg/dlg.hpp>
 
 // See ~Command
@@ -152,8 +152,8 @@ struct SectionCommand : ParentCommand {
 };
 
 struct BarrierCmdBase : Command {
-    VkPipelineStageFlags srcStageMask;
-    VkPipelineStageFlags dstStageMask;
+    VkPipelineStageFlags srcStageMask {};
+    VkPipelineStageFlags dstStageMask {};
 
 	span<VkMemoryBarrier> memBarriers;
 	span<VkBufferMemoryBarrier> bufBarriers;
@@ -176,7 +176,7 @@ struct WaitEventsCmd : BarrierCmdBase {
 };
 
 struct BarrierCmd : BarrierCmdBase {
-    VkDependencyFlags dependencyFlags;
+    VkDependencyFlags dependencyFlags {};
 
 	std::string nameDesc() const override { return "PipelineBarrier"; }
 	Type type() const override { return Type::sync; }

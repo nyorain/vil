@@ -1,14 +1,16 @@
 #include <gui/gui.hpp>
+#include <gui/util.hpp>
+#include <gui/render.hpp>
+#include <gui/commandHook.hpp>
 #include <layer.hpp>
 #include <queue.hpp>
 #include <handle.hpp>
 #include <data.hpp>
-#include <util.hpp>
 #include <handles.hpp>
 #include <commands.hpp>
-#include <bytes.hpp>
-#include <imguiutil.hpp>
-#include <guidraw.hpp>
+#include <util/util.hpp>
+#include <util/bytes.hpp>
+
 #include <spirv_reflect.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
@@ -302,8 +304,6 @@ Gui::~Gui() {
 	if(imgui_) {
 		ImGui::DestroyContext(imgui_);
 	}
-
-	readbackBuf_.free(dev());
 
 	auto vkDev = dev_->handle;
 	if(font_.uploadBuf) dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
@@ -768,6 +768,8 @@ void Gui::drawOverviewUI(Draw& draw) {
 }
 
 void Gui::draw(Draw& draw, bool fullscreen) {
+	resourcesTabDrawn_ = false;
+
 	ImGui::NewFrame();
 
 	unsigned flags = 0u;
@@ -804,6 +806,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			if(ImGui::BeginTabItem("Resources", nullptr, checkSelectTab(Tab::resources))) {
 				tabs_.resources.draw(draw);
 				ImGui::EndTabItem();
+				resourcesTabDrawn_ = true;
 			}
 
 			// if(tabs_.cb.cb_) {
@@ -850,90 +853,16 @@ void Gui::destroyed(const Handle& handle) {
 
 	VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
 		fences.data(), true, UINT64_MAX));
-	VK_CHECK(dev().dispatch.ResetFences(dev().handle, u32(fences.size()), fences.data()));
 
-	for(auto* draw : draws) {
-		draw->usedHandles.clear();
-		draw->inUse = false;
-	}
+	// TODO: would have to lock mutex
+	// for(auto* draw : draws) {
+	// 	finished(*draw);
+	// }
 }
 
 void Gui::activateTab(Tab tab) {
 	activeTab_ = tab;
 	activateTabCounter_ = 0u;
-}
-
-// TODO: atm, we always call this while device mutex is locked.
-// When waiting for fences, it might block application progress *a lot*,
-// we really need to unlock it while waiting for fences (or otherwise
-// blocking ourselves!)
-template<typename H>
-void Gui::waitForSubmissions(const H& handle) {
-	// find all submissions associated with this image
-	std::vector<PendingSubmission*> toComplete;
-
-	// We can implement this in two possible way: either check
-	// for all command buffers using the handle whether they are
-	// pending or check for all pending submissions whether they
-	// use the handle.
-	for(auto it = dev().pending.begin(); it != dev().pending.end();) {
-		auto& pending = *it;
-
-		// remove finished pending submissions.
-		// important to do this before accessing them.
-		if(auto nit = checkLocked(*pending); nit) {
-			// don't increase iterator as the current one
-			// was erased.
-			it = *nit;
-			continue;
-		}
-
-		bool wait = false;
-		for(auto& sub : pending->submissions) {
-			for(auto& [cb, _] : sub.cbs) {
-				dlg_assert(cb->state() == CommandBuffer::State::executable);
-				if(!cb->uses(handle)) {
-					continue;
-				}
-
-				wait = true;
-				break;
-			}
-		}
-
-		if(wait) {
-			toComplete.push_back(pending.get());
-		}
-
-		++it;
-	}
-
-	waitFor(toComplete);
-}
-
-void Gui::waitFor(span<PendingSubmission* const> toComplete) {
-	if(toComplete.empty()) {
-		return;
-	}
-
-	std::vector<VkFence> fences;
-	for(auto* pending : toComplete) {
-		if(pending->appFence) {
-			fences.push_back(pending->appFence->handle);
-		} else {
-			fences.push_back(pending->ourFence);
-		}
-	}
-
-	VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
-		u32(fences.size()), fences.data(), true, UINT64_MAX));
-
-	for(auto* pending : toComplete) {
-		auto res = checkLocked(*pending);
-		// we waited for it above. It should really
-		// be completed now.
-		dlg_assert(res);
-	}
 }
 
 Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
@@ -946,7 +875,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		}
 
 		if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
-			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+			finished(draw);
 			foundDraw = &draw;
 			break;
 		}
@@ -979,7 +908,8 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		ImGui::GetIO().DeltaTime = dt;
 	}
 
-	// TODO: hacky
+	// TODO: hacky but we have to keep the record alive, making sure
+	// it's not destroyed inside the lock.
 	auto keepAlive = tabs_.cb.record_;
 
 	{
@@ -987,72 +917,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		// sure no new submissions are done by application while we process
 		// and evaluate the pending submissions
 		std::lock_guard queueLock(dev().queueMutex);
-
-		// TODO: device mutex should probably be unlocked for our
-		// queue calls in the end. Care must be taken though!
 		std::lock_guard devMutex(dev().mutex);
-
-		// handle buffer waiting/retrieving logic
-		if(tabs_.resources.handle_ &&
-				tabs_.resources.handle_->objectType == VK_OBJECT_TYPE_BUFFER) {
-			// TODO: ugh, all of this is so expensive.
-			// Here, we could definitely try out semaphore chaining since we only
-			// need the easy way (app subm -> our subm)
-			// TODO: we probably don't wanna wait for this. Instead, retrive
-			// the written contents from the last finished draw (if it
-			// was for the same buffer).
-			auto& buf = (Buffer&) *tabs_.resources.handle_;
-			waitForSubmissions(buf);
-
-			// TODO: offset, sizes and stuff
-			auto size = std::min(buf.ci.size, VkDeviceSize(1024 * 16));
-			readbackBuf_.ensure(dev(), size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-
-			// TODO: support srcOffset
-			// TODO: need memory barriers
-			VkBufferCopy copy {};
-			copy.size = size;
-			dev().dispatch.CmdCopyBuffer(draw.cb, buf.handle, readbackBuf_.buf,
-				1, &copy);
-			dev().dispatch.EndCommandBuffer(draw.cb);
-
-			VkSubmitInfo submitInfo {};
-			submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-			submitInfo.commandBufferCount = 1u;
-			submitInfo.pCommandBuffers = &draw.cb;
-
-			auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
-			if(res != VK_SUCCESS) {
-				dlg_error("vkSubmit error: {}", vk::name(res));
-				return {res, &draw};
-			}
-
-			// TODO: ouch! this is really expensive.
-			// could we at least release the device mutex lock meanwhile?
-			// we would have to check for various things tho, if resource
-			// was destroyed.
-			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
-			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
-
-			void* mapped {};
-			VK_CHECK(dev().dispatch.MapMemory(dev().handle, readbackBuf_.mem, 0, size, {}, &mapped));
-
-			VkMappedMemoryRange range {};
-			range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-			range.memory = readbackBuf_.mem;
-			range.offset = 0u;
-			range.size = size;
-			VK_CHECK(dev().dispatch.InvalidateMappedMemoryRanges(dev().handle, 1, &range));
-
-			tabs_.resources.buffer_.lastRead.resize(size);
-			std::memcpy(tabs_.resources.buffer_.lastRead.data(), mapped, size);
-
-			dev().dispatch.UnmapMemory(dev().handle, readbackBuf_.mem);
-
-			VkCommandBufferBeginInfo cbBegin {};
-			cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
-		}
 
 		this->draw(draw, info.fullscreen);
 		auto& drawData = *ImGui::GetDrawData();
@@ -1061,129 +926,180 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		// TODO: bad
 		// TODO: could be changed in this frame. Really need mechanisms for gui elements
 		//   to add these handles to a wait list as they are used.
-		if(tabs_.cb.imageCopy_ && tabs_.cb.imageCopy_->writer) {
-			dlg_info("wait for submission for image copy write");
-			waitFor({{tabs_.cb.imageCopy_->writer}});
-			dlg_assert(!tabs_.cb.imageCopy_->writer);
-		}
+		// if(tabs_.cb.imageCopy_ && tabs_.cb.imageCopy_->writer) {
+		// 	dlg_info("wait for submission for image copy write");
+		// 	waitFor({{tabs_.cb.imageCopy_->writer}});
+		// 	dlg_assert(!tabs_.cb.imageCopy_->writer);
+		// }
 
-		// handle image waiting logic:
-		// if we are displaying an image we have to make sure it is not currently
-		// being written somewhere else.
-		Image* selImg = nullptr;
-		if(tabs_.resources.handle_ &&
-				tabs_.resources.handle_->objectType == VK_OBJECT_TYPE_IMAGE &&
-				tabs_.resources.image_.view) {
-			selImg = (Image*) tabs_.resources.handle_;
-
-			auto& img = *selImg;
-			waitForSubmissions(img);
-
-			// Make sure our image is in the right layout.
-			// And we are allowed to read it
-			VkImageMemoryBarrier imgb {};
-			imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			imgb.image = img.handle;
-			imgb.subresourceRange = tabs_.resources.image_.subres;
-			imgb.oldLayout = img.pendingLayout;
-			imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags?
-			imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-			// TODO: transfer queue.
-			// We currently just force concurrent mode on image/buffer creation
-			// but that might have performance impact.
-			// Requires additional submissions to the other queues.
-			// We should first check whether the queue is different in first place.
-			// if(img.ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
-			// }
+		// General barrier to make sure all past submissions writing resources
+		// we read are done. Not needed when we don't read a device resource.
+		// TODO could likely at least give a better srcAccessMask
+		if(!draw.usedHandles.empty()) {
+			VkMemoryBarrier memb {};
+			memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			memb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+			memb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
 			dev().dispatch.CmdPipelineBarrier(draw.cb,
-				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
-				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
-				0, 0, nullptr, 0, nullptr, 1, &imgb);
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+				0, 1, &memb, 0, nullptr, 0, nullptr);
+		}
 
-			draw.usedHandles.push_back(selImg);
+		if(resourcesTabDrawn_) {
+			tabs_.resources.recordPreRender(draw);
 		}
 
 		this->recordDraw(draw, info.extent, info.fb, drawData);
 
-		if(selImg) {
-			auto& img = *selImg;
+		if(resourcesTabDrawn_) {
+			tabs_.resources.recoredPostRender(draw);
+		}
 
-			// return it to original layout
-			VkImageMemoryBarrier imgb {};
-			imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-			imgb.image = selImg->handle;
-			imgb.subresourceRange = tabs_.resources.image_.subres;
-			imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			imgb.newLayout = img.pendingLayout;
-			imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-			dlg_assert(
-				img.pendingLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
-				img.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED);
-			imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
-
-			// TODO: transfer queue.
-			// We currently just force concurrent mode on image/buffer creation
-			// but that might have performance impact.
-			// Requires additional submissions to the other queues.
-			// We should first check whether the queue is different in first place.
-			// if(selImg->ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
-			// }
+		// General barrier to make sure all our reading is done before
+		// future application submissions to this queue.
+		// Not needed when we don't read a device resource.
+		// TODO could likely at least give a better srcAccessMask
+		if(!draw.usedHandles.empty()) {
+			VkMemoryBarrier memb {};
+			memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			memb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			memb.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
 
 			dev().dispatch.CmdPipelineBarrier(draw.cb,
-				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
-				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // wait in everything
-				0, 0, nullptr, 0, nullptr, 1, &imgb);
+				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+				0, 1, &memb, 0, nullptr, 0, nullptr);
 		}
 
 		dev().dispatch.EndCommandBuffer(draw.cb);
 
 		// submit batch
-		// TODO: clean this up.
-		// handle case where application doesn't give us semaphore
-		// (and different queues are used?)
-		auto waitStages = std::make_unique<VkPipelineStageFlags[]>(info.waitSemaphores.size());
-		for(auto i = 0u; i < info.waitSemaphores.size(); ++i) {
-			waitStages[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-		}
-
-		// TODO: we could add dev.resetSemaphores here as wait semaphores.
-		// And move their vector into Draw. And when the draw fence is ready,
-		// move them back into the semaphore pool.
-
-		// TODO: tmp
-		// for(auto* handle : draw.usedHandles) {
-		// 	// TODO
-		// 	auto* devHandle = static_cast<DeviceHandle*>(handle);
-		// 	std::unordered_set<Submission*> submissions;
-		// 	for(auto& rec : devHandle->refRecords) {
-		// 		if(rec->cb) {
-		// 			for(auto* subm : rec->cb->pending) {
-		// 				for(auto& sub : subm->submissions) {
-		// 					submissions.insert(&sub);
-		// 				}
-		// 			}
-		// 		}
-		// 	}
-		// }
-
-
 		VkSubmitInfo submitInfo {};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.commandBufferCount = 1u;
 		submitInfo.pCommandBuffers = &draw.cb;
-		submitInfo.signalSemaphoreCount = 1u;
-		submitInfo.pSignalSemaphores = &draw.presentSemaphore;
-		submitInfo.pWaitDstStageMask = waitStages.get();
-		submitInfo.pWaitSemaphores = info.waitSemaphores.data();
-		submitInfo.waitSemaphoreCount = u32(info.waitSemaphores.size());
+
+		std::unordered_set<Submission*> waitSubmissions;
+
+		// NOTE: could alternatively retrieve all submissions via
+		// handle->refRecords->cb->pending (and handle->descriptos->...)
+		// but this should be faster, there are usually only a small
+		// number of pending submissions while there might be more recordings
+		// referencing a handle.
+
+		for(auto& pending : dev().pending) {
+			auto subs = needsSyncLocked(*pending, draw);
+			waitSubmissions.insert(subs.begin(), subs.end());
+		}
+
+		u64 signalValues[2];
+		std::vector<u64> waitValues;
+		VkTimelineSemaphoreSubmitInfo tsInfo {};
+
+		auto waitSems = std::vector(info.waitSemaphores.begin(), info.waitSemaphores.end());
+
+		std::vector<VkPipelineStageFlags> waitStages;
+		for(auto i = 0u; i < info.waitSemaphores.size(); ++i) {
+			// TODO: we might be able to do better
+			waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+		}
+
+		if(dev().timelineSemaphores) {
+			dlg_assert(dev().resetSemaphores.empty());
+
+			tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+			tsInfo.pNext = submitInfo.pNext;
+
+			// wait
+			waitValues.resize(waitSems.size());
+			for(auto* sub : waitSubmissions) {
+				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT); // TODO: guess we could do better
+				waitSems.push_back(sub->ourSemaphore);
+				waitValues.push_back(sub->ourSemaphoreValue);
+
+				draw.waitedUpon.push_back(sub->ourSemaphore);
+			}
+
+			// signal
+			// signalValues[0] is uninitialized by design, should be
+			// ignored by driver as signalSemaphores[0] is binary
+			VK_CHECK(dev().dispatch.GetSemaphoreCounterValue(dev().handle,
+				draw.futureSemaphore, &signalValues[1]));
+			++signalValues[1];
+			draw.futureSemaphoreValue = signalValues[1];
+
+			tsInfo.signalSemaphoreValueCount = 2u;
+			tsInfo.pSignalSemaphoreValues = signalValues;
+
+			submitInfo.pNext = &tsInfo;
+		} else {
+			// add dev.resetSemaphores while we are at it
+			for(auto sem : dev().resetSemaphores) {
+				waitSems.push_back(sem);
+				waitStages.push_back(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+				draw.waitedUpon.push_back(sem);
+			}
+
+			dev().resetSemaphores.clear();
+
+			// if we have to wait for one submission, we wait for all,
+			// for simplicity's sake. NOTE: could be improved for a potential
+			// performance gain but JUST UPDATE YOUR DRIVERS AND GET
+			// TIMELINE SEMAPHORES ffs.
+			// TODO, more reasonable improvement: instead of ever
+			// waiting on cpu side, simply insert new semaphores to
+			// respective queues, where needed.
+			auto waitCpu = false;
+			for(auto* sub : waitSubmissions) {
+				if(!sub->ourSemaphore) {
+					waitCpu = true;
+					break;
+				}
+			}
+
+			if(waitCpu) {
+				std::unordered_set<PendingSubmission*> subs;
+				for(auto* sub : waitSubmissions) {
+					subs.insert(sub->parent);
+				}
+
+				std::vector<VkFence> fences;
+				for(auto* pending : subs) {
+					if(pending->appFence) {
+						fences.push_back(pending->appFence->handle);
+					} else {
+						fences.push_back(pending->ourFence);
+					}
+				}
+
+				// TODO: waiting inside lock :(
+				VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
+					u32(fences.size()), fences.data(), true, UINT64_MAX));
+
+				for(auto* pending : subs) {
+					auto res = checkLocked(*pending);
+					dlg_assert(res);
+				}
+			} else {
+				for(auto* sub : waitSubmissions) {
+					waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT); // TODO: guess we could do better
+					waitSems.push_back(sub->ourSemaphore);
+
+					draw.waitedUpon.push_back(sub->ourSemaphore);
+				}
+			}
+		}
+
+		dlg_assert(waitStages.size() == waitSems.size());
+
+		auto signalSems = std::array{draw.presentSemaphore, draw.futureSemaphore};
+		submitInfo.signalSemaphoreCount = signalSems.size();
+		submitInfo.pSignalSemaphores = signalSems.data();
+		submitInfo.pWaitDstStageMask = waitStages.data();
+		submitInfo.pWaitSemaphores = waitSems.data();
+		submitInfo.waitSemaphoreCount = waitSems.size();
 
 		auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
 		if(res != VK_SUCCESS) {
@@ -1191,6 +1107,8 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			return {res, &draw};
 		}
 	}
+
+	draw.inUse = true;
 
 	// call down
 	VkPresentInfoKHR presentInfo {};
@@ -1200,7 +1118,9 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	presentInfo.waitSemaphoreCount = 1u;
 	presentInfo.pSwapchains = &info.swapchain;
 	presentInfo.swapchainCount = 1u;
-	// TODO: might be bad to not forward this pi.pNext (for overlay)
+	// TODO: forward pNext for all extensions we know. Really important
+	// here, might contain important information.
+	// Maybe just forward everything? Warn for unknown types?
 
 	{
 		std::lock_guard queueLock(dev().queueMutex);
@@ -1209,33 +1129,12 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		if(res != VK_SUCCESS) {
 			dlg_error("vkQueuePresentKHR error: {}", vk::name(res));
 
+			// TODO: not sure how to handle this the best
 			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
-			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+			finished(draw);
 
-			draw.usedHandles.clear();
-			draw.inUse = false;
-
-			return {res, &draw};
+			return {res, nullptr};
 		}
-	}
-
-	foundDraw->inUse = true;
-
-	// TODO: do we have to lock the mutex while waiting?
-	// TODO: support not doing this.
-	// For that we would have to chain future submissions using resources
-	// used by this draw via semaphores...
-	// TODO: hacky hacky
-	// TODO: code duplication with above. Should probably be moved to
-	// extra function
-	if(!draw.usedHandles.empty()) {
-		// dlg_trace("awaiting frame");
-
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
-		VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
-
-		draw.usedHandles.clear();
-		draw.inUse = false;
 	}
 
 	return {VK_SUCCESS, &draw};
@@ -1251,11 +1150,8 @@ void Gui::finishDraws() {
 
 	if(!fences.empty()) {
 		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()), fences.data(), true, UINT64_MAX));
-		VK_CHECK(dev().dispatch.ResetFences(dev().handle, u32(fences.size()), fences.data()));
-
 		for(auto& draw : draws_) {
-			draw.inUse = false;
-			draw.usedHandles.clear();
+			finished(draw);
 		}
 	}
 }
@@ -1288,6 +1184,49 @@ std::vector<Draw*> Gui::pendingDraws() {
 	}
 
 	return ret;
+}
+
+void Gui::finished(Draw& draw) {
+	dlg_assert(draw.inUse);
+	dlg_assert(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS);
+
+	{
+		std::lock_guard lock(dev().mutex);
+		for(auto semaphore : draw.waitedUpon) {
+			dev().semaphorePool.push_back(semaphore);
+		}
+	}
+
+	auto& rb = tabs_.resources.buffer_;
+	// NOTE: handle case where offset isn't the same? could patch-in
+	// relevant data nonetheless
+	if(rb.handle &&
+			rb.handle->handle == draw.readback.src &&
+			rb.offset == draw.readback.offset) {
+		ensureSize(rb.lastRead, draw.readback.size);
+
+		VkMappedMemoryRange range {};
+		range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+		range.memory = draw.readback.copy.mem;
+		range.size = VK_WHOLE_SIZE;
+		range.offset = 0u;
+		VK_CHECK(dev().dispatch.FlushMappedMemoryRanges(dev().handle, 0, &range));
+
+		// TODO(perf): with some clever syncing we could probably get around
+		// the copy here and instead read from the mapped memory directly.
+		auto src = static_cast<std::byte*>(draw.readback.map);
+		std::copy(src, src + draw.readback.size, rb.lastRead.begin());
+	}
+
+	draw.waitedUpon.clear();
+	draw.usedHandles.clear();
+	draw.usedHookState.reset();
+
+	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+
+	draw.inUse = false;
+	draw.futureSemaphoreUsed = 0u;
+	draw.futureSemaphoreValue = 0u;
 }
 
 // util

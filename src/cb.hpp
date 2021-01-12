@@ -2,7 +2,6 @@
 
 #include <fwd.hpp>
 #include <device.hpp>
-// #include <commandHook.hpp>
 #include <record.hpp>
 
 namespace fuen {
@@ -72,16 +71,6 @@ public:
 	// Moves the command buffer to invalid state.
 	// Expects device mutex to be locked
 	void invalidateLocked();
-
-	// Returns whether the command buffer in its current recorded state (only
-	// really makes sense to call on executable command buffers, you probably
-	// want to lock the device mutex to prevent state change) uses the
-	// given handle. Returns true for transitively used handles of any kind.
-	template<typename H>
-	bool uses(const H& handle) const {
-		dlg_assert(state_ == State::executable);
-		return record_->uses(handle);
-	}
 
 private:
 	CommandPool* pool_ {};

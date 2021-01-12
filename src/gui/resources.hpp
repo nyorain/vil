@@ -1,8 +1,11 @@
 #pragma once
 
-#include <device.hpp>
-#include <guidraw.hpp>
+#include <fwd.hpp>
+#include <gui/render.hpp>
+#include <vk/vulkan.h>
 #include <variant>
+#include <vector>
+#include <unordered_set>
 #include <string>
 
 namespace fuen {
@@ -11,6 +14,10 @@ struct ResourceGui {
 	void select(Handle& handle);
 	void draw(Draw&);
 	void destroyed(const Handle&);
+
+	void recordPreRender(Draw&);
+	void recoredPostRender(Draw&);
+
 	~ResourceGui();
 
 	Gui* gui_ {};
@@ -36,6 +43,9 @@ struct ResourceGui {
 
 	struct {
 		Buffer* handle {};
+		VkDeviceSize offset {};
+		VkDeviceSize size {};
+
 		std::vector<std::byte> lastRead;
 		std::string layoutText;
 		std::vector<std::pair<std::string, VkFormat>> layout;

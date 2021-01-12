@@ -2,13 +2,13 @@
 
 #include <fwd.hpp>
 #include <queue.hpp>
-#include <commandDesc.hpp>
-#include <pipe.hpp>
-#include <span.hpp>
+#include <util/span.hpp>
+
 #include <vector>
 #include <unordered_map>
 #include <utility>
 #include <list>
+#include <cassert>
 
 namespace fuen {
 
@@ -74,7 +74,7 @@ struct CommandAllocator {
 	}
 
 	T* allocate(std::size_t n) {
-		dlg_assert(rec);
+		assert(rec);
 		auto* ptr = fuen::allocate(*rec, n * sizeof(T), alignof(T));
         // TODO: strictly speaking we need the first line but it doesn't compile
         // under msvc for non-default-constructibe T
@@ -285,7 +285,7 @@ struct CommandRecord {
 
 	// Allocates a chunk of memory from the given command record, will use the
 	// internal CommandPool memory allocator. The memory can not be freed in
-	// any way, it will simply be reset when the record is destroyed (destructors 
+	// any way, it will simply be reset when the record is destroyed (destructors
 	// of non-trivial types inside the memory must be called before that!).
 	// Only allowed to call in recording state (i.e. while record is not finished).
 	std::byte* allocate(std::size_t size, std::size_t alignment);

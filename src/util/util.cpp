@@ -1,6 +1,6 @@
-#include <util.hpp>
-#include <bytes.hpp>
-#include <f16.hpp>
+#include <util/util.hpp>
+#include <util/bytes.hpp>
+#include <util/f16.hpp>
 #include <dlg/dlg.hpp>
 #include <cmath>
 #include <vk/typemap_helper.h>
@@ -28,6 +28,36 @@ bool isDepthFormat(VkFormat format) {
 			return true;
 		default:
 			return false;
+	}
+}
+
+VkImageType minImageType(VkExtent3D size, unsigned minDim) {
+	if(size.depth > 1 || minDim > 2) {
+		return VK_IMAGE_TYPE_3D;
+	} else if(size.height > 1 || minDim > 1) {
+		return VK_IMAGE_TYPE_2D;
+	} else {
+		return VK_IMAGE_TYPE_1D;
+	}
+}
+
+VkImageViewType minImageViewType(VkExtent3D size, unsigned layers,
+		bool cubemap, unsigned minDim) {
+	if(size.depth > 1 || minDim > 2) {
+		dlg_assertm(layers <= 1 && cubemap == 0,
+			"Layered or cube 3D images are not allowed");
+		return VK_IMAGE_VIEW_TYPE_3D;
+	}
+
+	if(cubemap) {
+		dlg_assert(layers % 6 == 0u);
+		return (layers > 6 ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_CUBE);
+	}
+
+	if(size.height > 1 || minDim > 1) {
+		return layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	} else {
+		return layers > 1 ? VK_IMAGE_VIEW_TYPE_1D_ARRAY : VK_IMAGE_VIEW_TYPE_1D;
 	}
 }
 

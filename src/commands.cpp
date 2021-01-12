@@ -1,10 +1,11 @@
 #include <commands.hpp>
 #include <handles.hpp>
 #include <cb.hpp>
-#include <span.hpp>
-#include <util.hpp>
+#include <util/span.hpp>
+#include <util/util.hpp>
 #include <gui/gui.hpp>
-#include <imguiutil.hpp>
+#include <gui/util.hpp>
+#include <gui/commandHook.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
@@ -93,6 +94,126 @@ void addToArgumentsDesc(std::vector<std::string>& ret, const BoundDescriptorSet&
 	}
 
 	ret.push_back(name(set.ds).name);
+}
+
+// If it returns true, should display own command stuff in second window
+bool displayActionInspector(Gui& gui, const Command& cmd) {
+	if(!gui.cbGui().hook_) {
+		return true;
+	}
+
+	ImGui::Columns(2);
+	ImGui::BeginChild("Command IO list", {200, 0});
+
+	auto& hook = *gui.cbGui().hook_;
+
+	auto* dispathCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
+	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+	dlg_assert(dispathCmd || drawCmd);
+
+	if(ImGui::Selectable("Command")) {
+		hook.unsetHookOps();
+	}
+
+	// TODO: get descriptor set names from shaders, if possible
+	auto dss = dispathCmd ? dispathCmd->state.descriptorSets : drawCmd->state.descriptorSets;
+	ImGui::Text("Descriptors");
+	for(auto i = 0u; i < dss.size(); ++i) {
+		auto& ds = dss[i];
+		if(!ds.ds) {
+			// TODO: don't display them in first place? especially not
+			// when it's only the leftovers?
+			auto label = dlg::format("Descriptor Set {}: null", i);
+			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+			ImGui::TreeNodeEx(label.c_str(), flags);
+			continue;
+		}
+
+		auto label = dlg::format("Descriptor Set {}", i);
+		if(ImGui::TreeNode(label.c_str())) {
+			for(auto b = 0u; b < ds.ds->bindings.size(); ++b) {
+				// TODO: support descriptor array
+				auto label = dlg::format("Binding {}", b);
+				auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+				if(hook.copyDS && hook.copyDS->set == i && hook.copyDS->binding == b) {
+					flags |= ImGuiTreeNodeFlags_Selected;
+				}
+
+				ImGui::TreeNodeEx(label.c_str(), flags);
+				if(ImGui::IsItemClicked()) {
+					hook.unsetHookOps();
+					hook.copyDS = {i, b, 0};
+				}
+			}
+
+			ImGui::TreePop();
+		}
+	}
+
+	if(drawCmd) {
+		ImGui::Text("Attachments");
+
+		// TODO: get rp and stuff for real attachments
+		auto i = 0u;
+		auto label = dlg::format("Attachment {}", i);
+		auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+		if(hook.copyAttachment && *hook.copyAttachment == i) {
+			flags |= ImGuiTreeNodeFlags_Selected;
+		}
+
+		ImGui::TreeNodeEx(label.c_str(), flags);
+		if(ImGui::IsItemClicked()) {
+			hook.unsetHookOps();
+			hook.copyAttachment = i;
+		}
+	}
+
+	// TODO: display index/vertex buffers for draw command
+	// TODO: display push constants
+
+	ImGui::EndChild();
+	ImGui::NextColumn();
+	ImGui::BeginChild("Command IO Inspector", {400, 0});
+
+	// TODO: display more information, not just raw data
+	//   e.g. link to the respective resources, descriptor sets etc
+	auto cmdInfo = true;
+	if(hook.copyDS) {
+		if(hook.state) {
+			auto& dsc = hook.state->dsCopy;
+			if(auto* buf = std::get_if<CopiedBuffer>(&dsc)) {
+				// TODO
+				ImGui::Text("TODO: show buffer content");
+				(void) buf;
+			} else if(auto* img = std::get_if<CopiedImage>(&dsc)) {
+				gui.cbGui().displayImage(*img);
+			} else {
+				ImGui::Text("Something went wrong");
+			}
+		} else {
+			ImGui::Text("Waiting for a submission...");
+		}
+
+		cmdInfo = false;
+	} else if(hook.copyVertexBuffers) {
+		ImGui::Text("TODO: show vertex buffer viewer");
+		cmdInfo = false;
+	} else if(hook.copyAttachment) {
+		if(hook.state) {
+			if(hook.state->attachmentCopy.image) {
+				gui.cbGui().displayImage(hook.state->attachmentCopy);
+			} else {
+				ImGui::Text("Something went wrong");
+			}
+		} else {
+			ImGui::Text("Waiting for a submission...");
+		}
+		cmdInfo = false;
+	}
+
+	ImGui::EndChild();
+
+	return cmdInfo;
 }
 
 template<typename H> using FuenNameExpr = decltype(std::declval<H>().objectType);
@@ -301,7 +422,7 @@ void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 // Commands
 std::vector<const Command*> ParentCommand::display(const Command* selected,
 		TypeFlags typeFlags, const Command* cmd) const {
-	auto flags = ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_OpenOnArrow;
+	int flags = ImGuiTreeNodeFlags_OpenOnArrow;
 	if(this == selected) {
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}
@@ -310,8 +431,10 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 	auto idStr = dlg::format("{}:{}", nameDesc(), relID);
 	auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", toString().c_str());
 	if(ImGui::IsItemClicked()) {
-		// TODO
-		// ret = {this};
+		// don't select when only clicked on arrow
+		if(ImGui::GetMousePos().x > ImGui::GetItemRectMin().x + 30) {
+			ret = {this};
+		}
 	}
 
 	if(open) {
@@ -351,8 +474,7 @@ void WaitEventsCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 
 void BarrierCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdPipelineBarrier(cb,
-		this->dependencyFlags,
-		this->srcStageMask, this->dstStageMask,
+		this->srcStageMask, this->dstStageMask, this->dependencyFlags,
 		u32(this->memBarriers.size()), this->memBarriers.data(),
 		u32(this->bufBarriers.size()), this->bufBarriers.data(),
 		u32(this->imgBarriers.size()), this->imgBarriers.data());
@@ -619,14 +741,21 @@ std::string DrawCmd::toString() const {
 }
 
 void DrawCmd::displayInspector(Gui& gui) const {
-	asColumns2({{
-		{"vertexCount", "{}", vertexCount},
-		{"instanceCount", "{}", instanceCount},
-		{"firstVertex", "{}", firstVertex},
-		{"firstInstance", "{}", firstInstance},
-	}});
+	auto drawOwn = displayActionInspector(gui, *this);
+	if(drawOwn) {
+		ImGui::BeginChild("Command IO Inspector", {400, 0});
 
-	DrawCmdBase::displayGrahpicsState(gui, false);
+		asColumns2({{
+			{"vertexCount", "{}", vertexCount},
+			{"instanceCount", "{}", instanceCount},
+			{"firstVertex", "{}", firstVertex},
+			{"firstInstance", "{}", firstInstance},
+		}});
+
+		DrawCmdBase::displayGrahpicsState(gui, false);
+
+		ImGui::EndChild();
+	}
 }
 
 // DrawIndirectCmd
@@ -649,15 +778,20 @@ std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
 }
 
 void DrawIndirectCmd::displayInspector(Gui& gui) const {
-	// TODO: display effective draw command
+	auto drawOwn = displayActionInspector(gui, *this);
+	if(drawOwn) {
+		ImGui::BeginChild("Command IO Inspector", {400, 0});
 
-	imGuiText("Indirect buffer");
-	ImGui::SameLine();
-	refButtonD(gui, buffer);
-	ImGui::SameLine();
-	imGuiText("Offset {}", offset);
+		imGuiText("Indirect buffer");
+		ImGui::SameLine();
+		refButtonD(gui, buffer);
+		ImGui::SameLine();
+		imGuiText("Offset {}", offset);
 
-	DrawCmdBase::displayGrahpicsState(gui, indexed);
+		DrawCmdBase::displayGrahpicsState(gui, indexed);
+
+		ImGui::EndChild();
+	}
 }
 
 void DrawIndirectCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
@@ -888,8 +1022,15 @@ std::string DispatchCmd::toString() const {
 }
 
 void DispatchCmd::displayInspector(Gui& gui) const {
-	imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
-	DispatchCmdBase::displayComputeState(gui);
+	auto drawOwn = displayActionInspector(gui, *this);
+	if(drawOwn) {
+		ImGui::BeginChild("Command IO Inspector", {400, 0});
+
+		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
+		DispatchCmdBase::displayComputeState(gui);
+
+		ImGui::EndChild();
+	}
 }
 
 // DispatchIndirectCmd
@@ -1484,6 +1625,7 @@ void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
 // BeginDebugUtilsLabelCmd
 void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	VkDebugUtilsLabelEXT label {};
+	label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
 	label.pLabelName = this->name;
 	std::memcpy(&label.color, this->color.data(), sizeof(label.color));
 	dev.dispatch.CmdBeginDebugUtilsLabelEXT(cb, &label);

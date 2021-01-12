@@ -39,6 +39,8 @@ struct RenderBuffer;
 
 struct Device;
 struct Instance;
+struct Handle;
+struct DeviceHandle;
 struct Swapchain;
 struct Image;
 struct ImageView;
@@ -73,13 +75,18 @@ struct PendingSubmission;
 struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;
+struct CommandHookState;
 struct CommandBufferGroup;
+
+struct ViewableImageCopy;
 
 struct Command;
 struct SectionCommand;
 struct CommandDesc;
 struct CommandRecord;
 struct CommandBufferDesc;
+struct CommandMemBlock;
+struct MemBlockDeleter;
 
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;

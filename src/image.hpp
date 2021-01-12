@@ -1,6 +1,6 @@
 #pragma once
 
-#include <device.hpp>
+#include <fwd.hpp>
 #include <memory.hpp>
 #include <unordered_set>
 

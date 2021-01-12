@@ -1,14 +1,10 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <data.hpp> // for handleToU64
-#include <dlg/dlg.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <atomic>
 #include <unordered_set>
-
 #include <vk/vulkan.h>
 
 namespace fuen {

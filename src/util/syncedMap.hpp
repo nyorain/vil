@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <memory>
 #include <cassert>
-#include <intrusive.hpp>
+#include <util/intrusive.hpp>
 
 namespace fuen {
 

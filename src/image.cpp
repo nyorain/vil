@@ -1,5 +1,6 @@
 #include <image.hpp>
 #include <layer.hpp>
+#include <device.hpp>
 #include <data.hpp>
 #include <ds.hpp>
 #include <rp.hpp>

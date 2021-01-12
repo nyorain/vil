@@ -1,32 +1,50 @@
 #pragma once
 
-#include <device.hpp>
-#include <intrusive.hpp>
-#include <gui/commandHook.hpp>
+#include <fwd.hpp>
+#include <util/intrusive.hpp>
+#include <vk/vulkan.h>
+#include <vector>
 
 struct ImDrawData;
 
 namespace fuen {
 
-struct ViewableImageCopy;
+struct OwnBuffer {
+	Device* dev {};
+	VkBuffer buf {};
+	VkDeviceMemory mem {};
+	VkDeviceSize size {};
+
+	// Will ensure the buffer has at least the given size.
+	// If not, will recreate it with the given size and usage.
+	// Always uses host visible memory.
+	void ensure(Device&, VkDeviceSize, VkBufferUsageFlags);
+
+	OwnBuffer() = default;
+	~OwnBuffer();
+
+	OwnBuffer(OwnBuffer&& rhs) noexcept { swap(*this, rhs); }
+	OwnBuffer& operator=(OwnBuffer rhs) noexcept {
+		swap(*this, rhs);
+		return *this;
+	}
+
+	friend void swap(OwnBuffer& a, OwnBuffer& b) noexcept;
+};
 
 struct Draw {
-	struct Buffer {
-		VkBuffer buf {};
-		VkDeviceMemory mem {};
-		VkDeviceSize size {};
-
-		// Will ensure the buffer has at least the given size.
-		// If not, will recreate it with the given size and usage.
-		// Always uses host visible memory.
-		void ensure(Device&, VkDeviceSize, VkBufferUsageFlags);
-		void free(Device&);
-	};
-
 	Device* dev {};
-	Buffer vertexBuffer {};
-	Buffer indexBuffer {};
+	OwnBuffer vertexBuffer {};
+	OwnBuffer indexBuffer {};
 	VkCommandBuffer cb {}; // not freed here, relies on command pool being freed
+
+	struct {
+		OwnBuffer copy;
+		VkBuffer src {};
+		VkDeviceSize offset {};
+		VkDeviceSize size {};
+		void* map {};
+	} readback;
 
 	// Semaphore associated with the gfx submission of this rendering.
 	// Consumed by the present info.
@@ -37,7 +55,8 @@ struct Draw {
 	// to memory we read here wait. When supported by device, this is a timeline
 	// semaphore that will be set to the given value by this submission.
 	VkSemaphore futureSemaphore {};
-	u64 futureSemaphoreValue {};
+	u64 futureSemaphoreValue {}; // only for timeline semaphores
+	bool futureSemaphoreUsed {}; // only for binary semaphores
 
 	// Fence associated with the gfx submission of this rendering.
 	// Used to check if frame has completed and Draw can be used again.
@@ -53,8 +72,8 @@ struct Draw {
 	// A list of handles that are referenced by this draw, i.e. are used in
 	// the submission. While the associated submission is pending, we must
 	// make sure that non of the handles are destroyed or written.
-	std::vector<Handle*> usedHandles;
-	IntrusivePtr<ViewableImageCopy> keepAliveImageCopy;
+	std::vector<DeviceHandle*> usedHandles;
+	IntrusivePtr<CommandHookState> usedHookState;
 
 	// All the semaphores of submissions (Submission::ourSemaphore) we
 	// waited upon. When the draw finishes, they should be returned
@@ -66,11 +85,8 @@ struct Draw {
 	Draw();
 	~Draw();
 
-	Draw(Draw&& rhs) noexcept { swap(*this, rhs); }
-	Draw& operator=(Draw rhs) noexcept {
-		swap(*this, rhs);
-		return *this;
-	}
+	Draw(Draw&& rhs) noexcept;
+	Draw& operator=(Draw rhs) noexcept;
 
 	friend void swap(Draw& a, Draw& b) noexcept;
 };
@@ -95,6 +111,32 @@ struct RenderBuffer {
 
 	void init(Device& dev, VkImage img, VkFormat format, VkExtent2D extent, VkRenderPass rp);
 	~RenderBuffer();
+};
+
+struct DrawGuiImage {
+	enum Type {
+		font,
+		// custom, uses draw.dsSelected
+		e1d,
+		e2d,
+		e3d,
+	};
+
+	// Must match flags in image.frag
+	enum Flags : u32 {
+		flagMaskR = (1u << 0u),
+		flagMaskG = (1u << 1u),
+		flagMaskB = (1u << 2u),
+		flagMaskA = (1u << 3u),
+		flagGrayscale = (1u << 4u),
+	};
+
+	Type type;
+	// Only relevant when not font
+	float layer {};
+	float minValue {0.f};
+	float maxValue {1.f};
+	u32 flags {};
 };
 
 } // namespace fuen

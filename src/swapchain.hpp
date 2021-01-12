@@ -1,9 +1,11 @@
 #pragma once
 
-#include <device.hpp>
+#include <fwd.hpp>
 #include <handle.hpp>
+#include <vk/vulkan.h>
 #include <chrono>
 #include <optional>
+#include <memory>
 
 namespace fuen {
 

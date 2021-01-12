@@ -1,7 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <bytes.hpp>
+#include <util/bytes.hpp>
 #include <dlg/dlg.hpp>
 #include <vk/vulkan.h>
 #include <util/vec.hpp>
@@ -71,6 +71,15 @@ bool contains(C&& c, K&& k) {
 template<typename C, typename F>
 auto find_if(C&& c, F&& f) {
 	return std::find_if(std::begin(c), std::end(c), std::forward<F>(f));
+}
+
+// C++20: std::erase_if. Impl from cppreference
+template<class T, class Alloc, class Pred>
+std::size_t erase_if(std::vector<T,Alloc>& c, Pred pred) {
+	auto it = std::remove_if(c.begin(), c.end(), pred);
+	auto r = std::distance(it, c.end());
+	c.erase(it, c.end());
+	return r;
 }
 
 // C++20: std::bit_cast

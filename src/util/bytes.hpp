@@ -1,6 +1,6 @@
 #pragma once
 
-#include <span.hpp>
+#include <util/span.hpp>
 #include <cstdlib>
 #include <type_traits>
 #include <vector>
@@ -162,7 +162,7 @@ read(ReadBuf& src, T& dst) {
 
 // Example for writing a fixed-size data segment:
 //
-// WriteBuf dst;
+// WriteBuf dst = ...;
 // nytl::write(dst, 1.f);
 // nytl::write(dst, someStdLayoutStruct);
 // nytl::write(dst, nytl::Vec3f{5.f, 6.f, 1.f});

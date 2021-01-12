@@ -1,6 +1,7 @@
 #pragma once
 
-#include "device.hpp"
+#include <fwd.hpp>
+#include <handle.hpp>
 #include <atomic>
 
 namespace fuen {

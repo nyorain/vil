@@ -2,12 +2,12 @@
 #include <queue.hpp>
 #include <layer.hpp>
 #include <data.hpp>
-#include <util.hpp>
 #include <swapchain.hpp>
 #include <window.hpp>
 #include <commands.hpp>
 #include <handles.hpp>
 #include <overlay.hpp>
+#include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <swa/swa.h>
 #include <vk/dispatch_table_helper.h>
@@ -87,6 +87,7 @@ Device::~Device() {
 
 	if(renderData) {
 		renderData->free(*this);
+		renderData.reset();
 	}
 
 	if(dsPool) {
@@ -106,6 +107,9 @@ Device::~Device() {
 			dispatch.DestroyCommandPool(handle, qf.commandPool, nullptr);
 		}
 	}
+
+	queueFamilies.clear();
+	queues.clear();
 }
 
 bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
@@ -469,6 +473,39 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		fpGetInstanceProcAddr(ini.handle, "vkSetDebugUtilsObjectTagEXT");
 	dev.dispatch.QueueInsertDebugUtilsLabelEXT = (PFN_vkQueueInsertDebugUtilsLabelEXT)
 		fpGetInstanceProcAddr(ini.handle, "vkQueueInsertDebugUtilsLabelEXT");
+
+	// TODO: not sure if this is needed actually.
+	// Should be do it for all commands that need it?
+	// Could abolish selectCmd function (and all its usages) in that case.
+	// Yeah, probably cleaner to do it here.
+	auto aliasCmd = [&](auto list) {
+		std::remove_reference_t<decltype(**list.begin())> found = nullptr;
+		for(auto& fn : list) {
+			if(*fn) {
+				found = *fn;
+				break;
+			}
+		}
+
+		if(!found) {
+			return;
+		}
+
+		for(auto& fn : list) {
+			*fn = *found;
+		}
+	};
+
+	aliasCmd(std::array{
+		&dev.dispatch.GetSemaphoreCounterValue,
+		&dev.dispatch.GetSemaphoreCounterValueKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.SignalSemaphore,
+		&dev.dispatch.SignalSemaphoreKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.WaitSemaphores,
+		&dev.dispatch.WaitSemaphoresKHR});
+
 
 	dev.swapchains.mutex = &dev.mutex;
 	dev.images.mutex = &dev.mutex;

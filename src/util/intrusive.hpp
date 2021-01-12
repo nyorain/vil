@@ -2,6 +2,7 @@
 
 #include <type_traits>
 #include <utility>
+#include <tuple>
 
 namespace fuen {
 
@@ -116,10 +117,10 @@ struct FinishHandler {
 	FinishHandler& operator=(FinishHandler&&) = default;
 
 	void inc(T*) const noexcept {}
-	// void dec(T* ptr) const noexcept(noexcept(ptr->finish())) { 
+	// void dec(T* ptr) const noexcept(noexcept(ptr->finish())) {
 	void dec(T* ptr) const noexcept {
 		static_assert(std::is_nothrow_invocable_v<decltype(&T::finish), T>);
-		ptr->finish(); 
+		ptr->finish();
 	}
 };
 

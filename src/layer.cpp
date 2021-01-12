@@ -1,11 +1,12 @@
 #include <layer.hpp>
-#include <util.hpp>
 #include <data.hpp>
 #include <swapchain.hpp>
 #include <handles.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
 #include <overlay.hpp>
+#include <commands.hpp>
+#include <util/util.hpp>
 
 #ifdef FUEN_WITH_WAYLAND
   #include <wayland.hpp>
@@ -19,10 +20,8 @@
   #include <win32.hpp>
 #endif // FUEN_WITH_WIN32
 
-#include <commands.hpp>
 #include <vk/dispatch_table_helper.h>
 #include <dlg/dlg.hpp>
-#include <swa/swa.h>
 #include <csignal>
 
 #include <fuen_api.h>
@@ -36,7 +35,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	if (origin->level >= dlg_level_error) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
-		// std::raise(SIGABRT);
+		std::raise(SIGABRT);
 		// DebugBreak();
 	}
 	dlg_default_output(origin, string, data);

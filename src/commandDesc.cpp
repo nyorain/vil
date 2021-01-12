@@ -1,7 +1,7 @@
 #include <commandDesc.hpp>
 #include <commands.hpp>
-#include <util.hpp>
 #include <cb.hpp>
+#include <util/util.hpp>
 
 namespace fuen {
 
@@ -118,16 +118,15 @@ std::vector<Command*> CommandDesc::findHierarchy(Command* root, span<const Comma
 	std::vector<std::vector<Candidate>> levels;
 	levels.push_back(findCandidates(root, desc[0]));
 
-	auto i = 1u;
 	while(true) {
 		if(levels.back().empty()) {
-			levels.pop_back();
-			ret.pop_back();
-			if(i == 1u) {
+			if(ret.empty()) {
+				// didn't find a matching command
 				return ret;
 			}
 
-			--i;
+			levels.pop_back();
+			ret.pop_back();
 			continue;
 		}
 
@@ -138,16 +137,15 @@ std::vector<Command*> CommandDesc::findHierarchy(Command* root, span<const Comma
 
 		// if we are in the last level: good, just return the best
 		// candidate we have found
-		if(i == desc.size()) {
+		if(ret.size() == desc.size()) {
 			return ret;
 		}
 
 		// otherwise: We must have a parent command.
 		// Find all children candidates, and push them to the stack,
 		// go one level deeper
-		auto cands = findCandidates(cand.command->children(), desc[i]);
+		auto cands = findCandidates(cand.command->children(), desc[ret.size()]);
 		levels.push_back(cands);
-		++i;
 	}
 
 	// dlg_error("unreachable");

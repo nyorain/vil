@@ -1,7 +1,8 @@
 #pragma once
 
-#include "device.hpp"
-#include "memory.hpp"
+#include <fwd.hpp>
+#include <memory.hpp>
+#include <unordered_set>
 
 namespace fuen {
 
@@ -11,6 +12,8 @@ struct Buffer : MemoryResource {
 
 	std::vector<BufferView*> views; // TODO: unordered_set?
 	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> descriptors;
+
+	bool concurrentHooked {}; // whether we set it to concurrent mode
 
 	~Buffer();
 };

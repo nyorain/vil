@@ -1,8 +1,10 @@
 #include <record.hpp>
-#include <util.hpp>
 #include <commands.hpp>
 #include <image.hpp>
+#include <pipe.hpp>
 #include <cb.hpp>
+#include <util/util.hpp>
+#include <gui/commandHook.hpp>
 
 namespace fuen {
 

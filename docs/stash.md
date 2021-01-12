@@ -611,7 +611,7 @@ sketch for supporting descriptor indexing (update after bind feature)
 in these command hooks:
 
 idea 1:
-- in each CommandHookRecord, store for each relevant ds (usecd by hooked cmd)
+- in each CommandHookRecord, store for each relevant ds (used by hooked cmd)
   the current updateCounter
 - on submission: when there is a CommandHookRecord we could use, check if the
   updateCounter for all relevant descriptorSets (used by hooked command)

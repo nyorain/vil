@@ -1,11 +1,10 @@
 #pragma once
 
 #include <device.hpp>
-#include <gui/renderer.hpp>
+#include <gui/render.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
 #include <imgui/imgui.h>
-#include <guidraw.hpp>
 #include <variant>
 #include <deque>
 
@@ -64,6 +63,7 @@ public:
 		bool updateFromGroup, bool activateTab = true);
 
 	auto& cbGui() { return tabs_.cb; }
+	void finished(Draw&);
 
 	ImGuiIO& imguiIO() const { return *io_; }
 
@@ -79,9 +79,9 @@ private:
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, const ImDrawData&);
 
 	// Functions expect device mutex to be locked
-	template<typename H>
-	void waitForSubmissions(const H& handle);
-	void waitFor(span<PendingSubmission* const> submsisions);
+	// template<typename H>
+	// void waitForSubmissions(const H& handle);
+	// void waitFor(span<PendingSubmission* const> submsisions);
 
 private:
 	Device* dev_ {};
@@ -124,10 +124,11 @@ private:
 		DrawGuiImage drawImage {};
 	} font_;
 
-	Draw::Buffer readbackBuf_;
-
 	using Clock = std::chrono::high_resolution_clock;
 	Clock::time_point lastFrame_ {};
+
+	// drawing/sync logic
+	bool resourcesTabDrawn_ {};
 };
 
 // Inserts an imgui button towards the given handle.

@@ -1,7 +1,10 @@
 #include <platform.hpp>
 #include <layer.hpp>
+#include <data.hpp>
 #include <gui/gui.hpp>
+#include <util/util.hpp>
 #include <swa/swa.h>
+#include <dlg/dlg.hpp>
 
 namespace fuen {
 namespace {

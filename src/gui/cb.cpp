@@ -1,12 +1,12 @@
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
 #include <gui/commandHook.hpp>
-// #include <gui/bufferRead.hpp>
-#include <bytes.hpp>
+#include <gui/util.hpp>
 #include <queue.hpp>
 #include <cb.hpp>
-#include <imguiutil.hpp>
 #include <commands.hpp>
+#include <record.hpp>
+#include <util/bytes.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
@@ -26,7 +26,8 @@ void CommandBufferGui::draw(Draw& draw) {
 		return;
 	}
 
-	auto& dev = gui_->dev();
+	draw_ = &draw;
+	// auto& dev = gui_->dev();
 
 	if(!record_->cb) {
 		unsetDestroyedLocked(*record_);
@@ -35,6 +36,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	if(record_->group) {
+		// TODO: (un)install hook when toggled
 		ImGui::Checkbox("Update", &updateFromGroup_);
 	} else {
 		// disabled button
@@ -80,6 +82,7 @@ void CommandBufferGui::draw(Draw& draw) {
 			record_ = record_->group->lastRecord;
 			command_ = CommandDesc::find(record_->commands, desc_);
 			// TODO: reset hook/update desc?
+			//   probably have to
 		}
 	} else if(!updateFromGroup_ && record_->group && (record_->group->hook || hook_)) {
 		dlg_assert(record_->group->hook.get() == hook_);
@@ -100,7 +103,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 		if(!hook_) {
 			if(record_->group) {
-				hook_ = new CommandHookImpl();
+				hook_ = new CommandHook();
 				record_->group->hook.reset(hook_);
 			}
 		}
@@ -121,6 +124,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		// Inspector
 		command_->displayInspector(*gui_);
 
+		/*
 		// Show own general gui
 		if(hook_) {
 			// TODO: separate count and valid flag
@@ -146,7 +150,7 @@ void CommandBufferGui::draw(Draw& draw) {
 					imGuiText("groups X: {}", cmd.x);
 					imGuiText("groups Y: {}", cmd.y);
 					imGuiText("groups Z: {}", cmd.z);
-				} /* TODO: drawIndirectCount */
+				} // TODO: drawIndirectCount
 			}
 
 			auto lastTime = hook_->lastTime;
@@ -229,6 +233,7 @@ void CommandBufferGui::draw(Draw& draw) {
 				}
 			}
 		}
+		*/
 	}
 
 	ImGui::EndChild();
@@ -264,6 +269,68 @@ void CommandBufferGui::destroyed(const Handle& handle) {
 	(void) handle;
 	// we don't care as we only deal with recordings that have shared
 	// ownership, i.e. are kept alive by us.
+}
+
+void CommandBufferGui::displayImage(const CopiedImage& img) {
+	auto& dev = gui_->dev();
+	auto& draw = *draw_;
+
+	draw.usedHookState = hook_->state;
+
+	VkDescriptorImageInfo dsii {};
+	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	dsii.imageView = img.imageView;
+	dsii.sampler = dev.renderData->nearestSampler;
+
+	VkWriteDescriptorSet write {};
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.descriptorCount = 1u;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.dstSet = draw.dsSelected;
+	write.pImageInfo = &dsii;
+
+	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
+
+	// TODO
+	ImGui::Spacing();
+	ImGui::Spacing();
+
+	ImVec2 pos = ImGui::GetCursorScreenPos();
+
+	float aspect = float(img.extent.width) / img.extent.height;
+
+	// TODO: this logic might lead to problems for 1xHUGE images
+	float regW = ImGui::GetContentRegionAvail().x - 20.f;
+	float regH = regW / aspect;
+
+	// TODO
+	imgDraw_.type = DrawGuiImage::Type::e2d;
+	imgDraw_.flags =
+		DrawGuiImage::flagMaskR |
+		DrawGuiImage::flagMaskG |
+		DrawGuiImage::flagMaskB; // |
+		// DrawGuiImage::flagMaskA;
+	ImGui::Image((void*) &imgDraw_, {regW, regH});
+
+	// Taken pretty much just from the imgui demo
+	auto& io = gui_->imguiIO();
+	if (ImGui::IsItemHovered()) {
+		ImGui::BeginTooltip();
+		float region_sz = 64.0f;
+		float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
+		float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
+		float zoom = 4.0f;
+		if (region_x < 0.0f) { region_x = 0.0f; }
+		else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
+		if (region_y < 0.0f) { region_y = 0.0f; }
+		else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
+		ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
+		ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
+		ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
+		ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
+		ImGui::Image((void*) &imgDraw_, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
+		ImGui::EndTooltip();
+	}
 }
 
 } // namespace fuen

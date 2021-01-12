@@ -1,7 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <gui/renderer.hpp>
+#include <gui/render.hpp>
 #include <gui/gui.hpp>
 
 namespace fuen {
