@@ -74,13 +74,19 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	// Command list
 	ImGui::Columns(2);
-	ImGui::BeginChild("Command list", {400, 0});
+	if(!columnWidth0_) {
+		ImGui::SetColumnWidth(-1, 250.f);
+		columnWidth0_ = true;
+	}
+
+	ImGui::BeginChild("Command list", {250, 0});
 
 	if(updateFromGroup_ && record_->group) {
 		auto lastRecord = record_->group->lastRecord.get();
 		if(lastRecord != record_.get()) {
 			record_ = record_->group->lastRecord;
-			command_ = CommandDesc::find(record_->commands, desc_);
+			auto hierarchy = CommandDesc::findHierarchy(record_->commands, desc_);
+			command_ = {hierarchy.begin(), hierarchy.end()};
 			// TODO: reset hook/update desc?
 			//   probably have to
 		}
@@ -92,14 +98,11 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	ImGui::PushID(dlg::format("{}", record_->group).c_str());
 
-	// TODO: add selector ui to filter out various commands/don't
-	// show sections etc. Should probably pass a struct DisplayDesc
-	// to displayCommands instead of various parameters
-	// auto flags = Command::TypeFlags(nytl::invertFlags, Command::Type::end);
-	auto nsel = displayCommands(record_->commands, command_, commandFlags_);
-	if(!nsel.empty() && nsel.front() != command_) {
-		command_ = nsel.front();
-		desc_ = CommandDesc::get(*record_->commands, nsel);
+	auto* selected = command_.empty() ? nullptr : command_.back();
+	auto nsel = displayCommands(record_->commands, selected, commandFlags_);
+	if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
+		command_ = std::move(nsel);
+		desc_ = CommandDesc::get(*record_->commands, command_);
 
 		if(!hook_) {
 			if(record_->group) {
@@ -119,10 +122,10 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::NextColumn();
 
 	// command info
-	ImGui::BeginChild("Command Info", {600, 0});
-	if(command_) {
+	ImGui::BeginChild("Command Info", {0, 0});
+	if(!command_.empty()) {
 		// Inspector
-		command_->displayInspector(*gui_);
+		command_.back()->displayInspector(*gui_);
 
 		/*
 		// Show own general gui

@@ -30,8 +30,10 @@ struct CommandBufferGui {
 	// We keep it alive.
 	IntrusivePtr<CommandRecord> record_ {};
 
-	// The selected command inside the cb, might be null.
-	const Command* command_ {};
+	// The selected command (hierarchy) inside the cb.
+	// Might be empty, signalling that no command is secleted.
+	std::vector<const Command*> command_ {};
+
 	// In case we have a selected command, we store its description inside
 	// the CommandRecord here. This way we can (try to) find the logically
 	// same command in future records/cb selections.
@@ -41,6 +43,10 @@ struct CommandBufferGui {
 
 	CommandHook* hook_ {}; // TODO: we can't know for sure it remains valid. Should probably be owned here
 	DrawGuiImage imgDraw_ {};
+
+	// hacky. See https://github.com/ocornut/imgui/issues/1655
+	bool columnWidth0_ {};
+	bool columnWidth1_ {};
 };
 
 } // namespace fuen

@@ -20,19 +20,21 @@ args = cc.get_supported_arguments([
 	'/wd4305', # truncating type conversion (e.g. double -> float)
 	'/wd4127', # conditional expression is constant (might be useful but not really for us)
 	'/wd4456', # delecaration hides previous local declaration (sorry, too used to rust's beauty)
+	'/wd4458', # declaration hides class member, TODO: should be fixed in code, valid warning
 	'-D_CRT_SECURE_NO_WARNINGS',
 
 	# msvc really slow in debug build without this
-	# '-D_ITERATOR_DEBUG_LEVEL=0',
+	'-D_ITERATOR_DEBUG_LEVEL=0',
 
 	# highly useful for debugging on linux
 	'-D_GLIBCXX_DEBUG',
 
-	# TODO: those should be fixed in code, really.
-	'/wd4458', # declaration hides class member
-
 	# for clang
 	'-Wno-missing-braces',
+
+	# unix
+	'-Wl,-Bsymbolic-functions',
+	'-Wl,-z,relro',
 ])
 
 dep_threads = dependency('threads', required: false)
@@ -121,19 +123,29 @@ src = files(
 	'src/platform.hpp',
 	'src/win32.hpp',
 	'src/data.hpp',
+
 	'src/vk/vulkan.h',
+	'src/vk/vulkan_core.h',
+	'src/vk/vulkan_win32.h',
 	'src/vk/typemap_helper.h',
 	'src/vk/dispatch_table.h',
+	'src/vk/dispatch_table_helper.h',
+	'src/vk/vk_layer.h',
+	'src/vk/format_utils.h',
+
 	'src/gui/gui.hpp',
 	'src/gui/resources.hpp',
 	'src/gui/cb.hpp',
 	'src/gui/render.hpp',
 	'src/gui/util.hpp',
+	'src/gui/commandHook.hpp',
+
 	'src/util/util.hpp',
 	'src/util/span.hpp',
 	'src/util/flags.hpp',
 	'src/util/f16.hpp',
 	'src/util/syncedMap.hpp',
+
 	'src/imgui/imgui.h',
 	'include/fuen_api.h',
 )
@@ -178,7 +190,6 @@ fuen_layer = shared_library(
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
-	# link_args: cc.get_supported_link_arguments(['-Wl,-Bsymbolic-functions', '-Wl,-z,relro']),
 	cpp_args: args,
 	install: true
 )

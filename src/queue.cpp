@@ -487,7 +487,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 							waitSems.push_back(draw->futureSemaphore);
 						}
 
-						tsInfo->waitSemaphoreValueCount = waitVals.size();
+						tsInfo->waitSemaphoreValueCount = u32(waitVals.size());
 						tsInfo->pWaitSemaphoreValues = waitVals.data();
 					} else {
 						// if there are draws with already used semaphores,
@@ -521,7 +521,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 						}
 					}
 
-					si.waitSemaphoreCount = waitSems.size();
+					si.waitSemaphoreCount = u32(waitSems.size());
 					si.pWaitSemaphores = waitSems.data();
 					si.pWaitDstStageMask = stages.data();
 				}
@@ -553,7 +553,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			signalVals.resize(si.signalSemaphoreCount); // ignored
 			signalVals.push_back(ourValue);
 
-			tsInfo->signalSemaphoreValueCount = signalVals.size();
+			tsInfo->signalSemaphoreValueCount = u32(signalVals.size());
 			tsInfo->pSignalSemaphoreValues = signalVals.data();
 		}
 
@@ -735,7 +735,8 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 		auto& subm = *it;
 		auto nit = checkLocked(*subm);
 		if(!nit) {
-			dlg_error("Expected submission to be completed after vkDeviceWaitIdle");
+			// TODO: apparently this can happen?
+			// dlg_error("Expected submission to be completed after vkDeviceWaitIdle");
 			++it;
 		}
 

@@ -35,9 +35,6 @@ struct ResourceGui {
 		VkImageSubresourceRange newSubres {};
 		VkImageSubresourceRange subres {};
 		VkImageView view {};
-
-		u32 flags {};
-
 		DrawGuiImage draw {};
 	} image_;
 

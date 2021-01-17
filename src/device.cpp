@@ -690,4 +690,28 @@ void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name)
 	VK_CHECK(dev.dispatch.SetDebugUtilsObjectNameEXT(dev.handle, &nameInfo));
 }
 
+DebugLabel::DebugLabel(Device& dev, VkCommandBuffer cb, const char* name,
+		std::array<float, 4> color) {
+	if(!dev.ini->debugUtilsEnabled || !dev.dispatch.CmdBeginDebugUtilsLabelEXT) {
+		return;
+	}
+
+	dev_ = &dev;
+	cb_ = cb;
+
+	VkDebugUtilsLabelEXT labelInfo {};
+	labelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+	labelInfo.pLabelName = name;
+	std::copy(color.begin(), color.end(), labelInfo.color);
+	dev.dispatch.CmdBeginDebugUtilsLabelEXT(cb, &labelInfo);
+}
+
+DebugLabel::~DebugLabel() {
+	if(dev_) {
+		dlg_assert(cb_);
+		dlg_assert(dev_->dispatch.CmdEndDebugUtilsLabelEXT);
+		dev_->dispatch.CmdEndDebugUtilsLabelEXT(cb_);
+	}
+}
+
 } // namespace fuen

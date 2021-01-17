@@ -35,7 +35,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	if (origin->level >= dlg_level_error) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
-		std::raise(SIGABRT);
+		// std::raise(SIGABRT);
 		// DebugBreak();
 	}
 	dlg_default_output(origin, string, data);
@@ -60,7 +60,6 @@ std::array<unsigned int, 3> apiVersion(uint32_t v) {
 	};
 }
 
-// Classes
 Instance::~Instance() {
 }
 
@@ -78,7 +77,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	// TODO: remove/find real solution
 #ifdef _WIN32
-	AllocConsole();
+	// AllocConsole();
 	dlg_trace("Allocated console. Creating vulkan instance");
 #endif // _WIN32
 
@@ -594,8 +593,8 @@ vkGetDeviceProcAddr(VkDevice dev, const char* funcName) {
 
 /*
 extern "C" FUEN_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
-vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVersionStruct) {
-	dlg_trace("vkNegotiateLoaderLayerInterfaceVersion");
+fuen_NegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVersionStruct) {
+	// dlg_trace("vkNegotiateLoaderLayerInterfaceVersion");
 
 	pVersionStruct->pfnGetDeviceProcAddr = &vkGetDeviceProcAddr;
 	pVersionStruct->pfnGetInstanceProcAddr = &vkGetInstanceProcAddr;

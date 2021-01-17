@@ -3,7 +3,7 @@
 #include "fwd.hpp"
 
 #include <vk/vulkan.h>
-#include <vulkan/vk_layer.h>
+#include <vk/vk_layer.h>
 #include <vk/dispatch_table.h>
 #include <string>
 #include <vector>

@@ -35,7 +35,7 @@ std::vector<CommandDesc> CommandDesc::get(const Command& root, span<const Comman
 	std::vector<CommandDesc> ret;
 
 	auto* siblingList = &root;
-	for(auto* lvl : reversed(hierarchy)) {
+	for(auto* lvl : hierarchy) {
 		dlg_assert(siblingList);
 		fillIn(ret.emplace_back(), siblingList, *lvl);
 		siblingList = lvl->children();

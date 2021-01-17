@@ -687,11 +687,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 			dst.pResolveAttachments = &atts[resolveOff];
 		}
 
-		dst.pColorAttachments = &atts[colorOff];
-		dst.pInputAttachments = &atts[inputOff];
-		if(src.pDepthStencilAttachment) {
-			dst.pDepthStencilAttachment = &atts[depthOff];
-		}
+		dst.pColorAttachments = src.colorAttachmentCount ? &atts[colorOff] : nullptr;
+		dst.pInputAttachments = src.inputAttachmentCount ? &atts[inputOff] : nullptr;
+		dst.pDepthStencilAttachment = src.pDepthStencilAttachment ? &atts[depthOff] : nullptr;
 
 		if(src.preserveAttachmentCount) {
 			rp.desc->attachmentIDs.emplace_back(src.pPreserveAttachments,

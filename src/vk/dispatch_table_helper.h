@@ -25,7 +25,7 @@
  */
 
 #include <vk/vulkan.h>
-#include <vulkan/vk_layer.h>
+#include <vk/vk_layer.h>
 #include <cstring>
 #include <string>
 #include <vk/dispatch_table.h>

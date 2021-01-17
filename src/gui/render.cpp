@@ -15,8 +15,9 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 		return;
 	}
 
-	// over-allocate
-	reqSize *= 2;
+	this->dev = &dev;
+	// over-allocate? Should probably be up to called to decide
+	// reqSize *= 2;
 
 	if(buf) {
 		dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);

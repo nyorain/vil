@@ -7,7 +7,7 @@
 #include <util/span.hpp>
 
 #include <vk/vulkan.h>
-#include <vulkan/vk_layer.h>
+#include <vk/vk_layer.h>
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
 
@@ -158,6 +158,17 @@ void nameHandle(Device& dev, VkT handle, const char* name) {
 	auto objType = VkHandleInfo<VkT>::kVkObjectType;
 	nameHandle(dev, objType, handleToU64(handle), name);
 }
+
+class DebugLabel {
+public:
+	DebugLabel(Device& dev, VkCommandBuffer, const char* name,
+		std::array<float, 4> color = {});
+	~DebugLabel();
+
+protected:
+	VkCommandBuffer cb_ {};
+	const Device* dev_ {};
+};
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(

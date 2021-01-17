@@ -1,5 +1,6 @@
 #include <commands.hpp>
 #include <handles.hpp>
+#include <shader.hpp>
 #include <cb.hpp>
 #include <util/span.hpp>
 #include <util/util.hpp>
@@ -8,6 +9,7 @@
 #include <gui/commandHook.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
+#include <spirv_reflect.h>
 #include <vk/enumString.hpp>
 
 namespace fuen {
@@ -96,6 +98,88 @@ void addToArgumentsDesc(std::vector<std::string>& ret, const BoundDescriptorSet&
 	ret.push_back(name(set.ds).name);
 }
 
+void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
+	// TODO
+	// - support non-32-bit scalars
+	// - better vector formatting
+	// - matrices
+	// - arrays
+
+	auto& type = nonNull(bvar.type_description);
+	data = data.subspan(bvar.offset);
+
+	if(type.type_flags == SPV_REFLECT_TYPE_FLAG_BOOL) {
+		dlg_assert(type.traits.numeric.scalar.width == 32);
+		auto var = copy<u32>(data.first(bvar.size));
+		imGuiText("{} (bool): {}", bvar.name, bool(var));
+	} else if(type.type_flags == SPV_REFLECT_TYPE_FLAG_FLOAT) {
+		dlg_assert(type.traits.numeric.scalar.width == 32);
+		auto var = copy<float>(data.first(bvar.size));
+		imGuiText("{} (float): {}", bvar.name, var);
+	} else if(type.type_flags == SPV_REFLECT_TYPE_FLAG_INT) {
+		dlg_assert(type.traits.numeric.scalar.width == 32);
+		if(type.traits.numeric.scalar.signedness) {
+			auto var = copy<i32>(data.first(bvar.size));
+			imGuiText("{} (i32): {}", bvar.name, var);
+		} else {
+			auto var = copy<u32>(data.first(bvar.size));
+			imGuiText("{} (u32): {}", bvar.name, var);
+		}
+	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_VECTOR &&
+			!(type.type_flags & SPV_REFLECT_TYPE_FLAG_MATRIX)) {
+		auto comps = type.traits.numeric.vector.component_count;
+		auto stype = "?";
+		std::string varStr = "(";
+		if(type.type_flags & SPV_REFLECT_TYPE_FLAG_FLOAT) {
+			dlg_assert(type.traits.numeric.scalar.width == 32);
+			stype = "float";
+			for(auto i = 0u; i < comps; ++i) {
+				auto var = copy<float>(data.subspan(i * 4, 4));
+				varStr += dlg::format("{}, ", var);
+			}
+		} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_BOOL) {
+			dlg_assert(type.traits.numeric.scalar.width == 32);
+			stype = "bool";
+			for(auto i = 0u; i < comps; ++i) {
+				auto var = copy<u32>(data.subspan(i * 4, 4));
+				varStr += dlg::format("{}, ", bool(var));
+			}
+		} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_INT) {
+			dlg_assert(type.traits.numeric.scalar.width == 32);
+			if(type.traits.numeric.scalar.signedness) {
+				stype = "i32";
+				for(auto i = 0u; i < comps; ++i) {
+					auto var = copy<i32>(data.subspan(i * 4, 4));
+					varStr += dlg::format("{}, ", var);
+				}
+			} else {
+				stype = "u32";
+				for(auto i = 0u; i < comps; ++i) {
+					auto var = copy<u32>(data.subspan(i * 4, 4));
+					varStr += dlg::format("{}, ", var);
+				}
+			}
+		}
+
+		varStr += ")";
+
+		imGuiText("{} (vec<{}, {}>): {}", bvar.name, comps, stype, varStr);
+	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_MATRIX) {
+		imGuiText("{}: TODO matrix output not implemented", bvar.name);
+	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
+		imGuiText("{}", bvar.name);
+	} else {
+		imGuiText("{}: TODO not implemented", bvar.name);
+	}
+
+	for(auto m = 0u; m < bvar.member_count; ++m) {
+		auto& member = bvar.members[m];
+		ImGui::Indent();
+		display(member, data);
+		ImGui::Unindent();
+	}
+}
+
 // If it returns true, should display own command stuff in second window
 bool displayActionInspector(Gui& gui, const Command& cmd) {
 	if(!gui.cbGui().hook_) {
@@ -103,20 +187,25 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 	}
 
 	ImGui::Columns(2);
+	if(gui.cbGui().columnWidth1_) {
+		ImGui::SetColumnWidth(-1, 200.f);
+		gui.cbGui().columnWidth1_ = true;
+	}
+
 	ImGui::BeginChild("Command IO list", {200, 0});
 
 	auto& hook = *gui.cbGui().hook_;
 
-	auto* dispathCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
+	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
-	dlg_assert(dispathCmd || drawCmd);
+	dlg_assert(dispatchCmd || drawCmd);
 
 	if(ImGui::Selectable("Command")) {
 		hook.unsetHookOps();
 	}
 
 	// TODO: get descriptor set names from shaders, if possible
-	auto dss = dispathCmd ? dispathCmd->state.descriptorSets : drawCmd->state.descriptorSets;
+	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
 	ImGui::Text("Descriptors");
 	for(auto i = 0u; i < dss.size(); ++i) {
 		auto& ds = dss[i];
@@ -153,27 +242,94 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 	if(drawCmd) {
 		ImGui::Text("Attachments");
 
-		// TODO: get rp and stuff for real attachments
-		auto i = 0u;
-		auto label = dlg::format("Attachment {}", i);
-		auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-		if(hook.copyAttachment && *hook.copyAttachment == i) {
-			flags |= ImGuiTreeNodeFlags_Selected;
+		const BeginRenderPassCmd* rpCmd = nullptr;
+		for(auto* cmd : gui.cbGui().command_) {
+			if((rpCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd))) {
+				break;
+			}
 		}
 
-		ImGui::TreeNodeEx(label.c_str(), flags);
-		if(ImGui::IsItemClicked()) {
-			hook.unsetHookOps();
-			hook.copyAttachment = i;
+		dlg_assert(rpCmd);
+		if(rpCmd && rpCmd->rp) {
+			auto& desc = nonNull(nonNull(rpCmd->rp).desc);
+			auto subpassID = rpCmd->subpassOfDescendant(*gui.cbGui().command_.back());
+			auto& subpass = desc.subpasses[subpassID];
+
+			auto addAttachment = [&](auto label, auto id) {
+				auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+				if(hook.copyAttachment && *hook.copyAttachment == id) {
+					flags |= ImGuiTreeNodeFlags_Selected;
+				}
+
+				ImGui::TreeNodeEx(label.c_str(), flags);
+				if(ImGui::IsItemClicked()) {
+					hook.unsetHookOps();
+					hook.copyAttachment = id;
+				}
+			};
+
+			for(auto c = 0u; c < subpass.colorAttachmentCount; ++c) {
+				auto label = dlg::format("Color Attachment {}", c);
+				addAttachment(label, subpass.pColorAttachments[c].attachment);
+			}
+
+			for(auto i = 0u; i < subpass.inputAttachmentCount; ++i) {
+				auto label = dlg::format("Input Attachment {}", i);
+				addAttachment(label, subpass.pInputAttachments[i].attachment);
+			}
+
+			if(subpass.pDepthStencilAttachment) {
+				auto label = dlg::format("Depth Stencil Attachment");
+				addAttachment(label, subpass.pDepthStencilAttachment->attachment);
+			}
+
+			// NOTE: display preserve attachments? resolve attachments?
 		}
 	}
 
 	// TODO: display index/vertex buffers for draw command
-	// TODO: display push constants
+
+	// display push constants
+	if(dispatchCmd && dispatchCmd->state.pipe) {
+		auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
+		if(refl.push_constant_block_count) {
+			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+			if(hook.pcr == VK_SHADER_STAGE_COMPUTE_BIT) {
+				flags |= ImGuiTreeNodeFlags_Selected;
+			}
+
+			ImGui::TreeNodeEx("Push Constants", flags);
+			if(ImGui::IsItemClicked()) {
+				hook.unsetHookOps();
+				hook.pcr = VK_SHADER_STAGE_COMPUTE_BIT;
+			}
+		}
+	} else if(drawCmd && drawCmd->state.pipe) {
+		auto& pipe = nonNull(drawCmd->state.pipe);
+		for(auto& stage : pipe.stages) {
+			auto& refl = nonNull(nonNull(stage.spirv).reflection);
+			if(!refl.push_constant_block_count) {
+				continue;
+			}
+
+			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+			if(hook.pcr == stage.stage) {
+				flags |= ImGuiTreeNodeFlags_Selected;
+			}
+
+			auto stageName = vk::name(stage.stage);
+			auto label = dlg::format("Push Constants {}", stageName);
+			ImGui::TreeNodeEx(label.c_str(), flags);
+			if(ImGui::IsItemClicked()) {
+				hook.unsetHookOps();
+				hook.pcr = stage.stage;
+			}
+		}
+	}
 
 	ImGui::EndChild();
 	ImGui::NextColumn();
-	ImGui::BeginChild("Command IO Inspector", {400, 0});
+	ImGui::BeginChild("Command IO Inspector", {0, 0});
 
 	// TODO: display more information, not just raw data
 	//   e.g. link to the respective resources, descriptor sets etc
@@ -182,9 +338,26 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 		if(hook.state) {
 			auto& dsc = hook.state->dsCopy;
 			if(auto* buf = std::get_if<CopiedBuffer>(&dsc)) {
-				// TODO
-				ImGui::Text("TODO: show buffer content");
-				(void) buf;
+				auto [setID, bindingID, elemID] = *hook.copyDS;
+
+				if(dispatchCmd) {
+					auto& pipe = nonNull(dispatchCmd->state.pipe);
+					auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
+					dlg_assert(refl.descriptor_set_count > setID);
+					auto& set = refl.descriptor_sets[setID];
+					dlg_assert(set.binding_count > bindingID);
+					auto& binding = set.bindings[bindingID];
+
+					auto* ptr = buf->copy.get();
+					display(binding->block, {ptr, buf->buffer.size});
+				} else {
+					// TODO: just use first matching shader?
+					// or maybe use the shader with the largest range?
+					// If shaders have different blocks allow to choose which
+					// one is displayed?
+					dlg_assert(drawCmd);
+					ImGui::Text("TODO: buffer blocks for graphics state");
+				}
 			} else if(auto* img = std::get_if<CopiedImage>(&dsc)) {
 				gui.cbGui().displayImage(*img);
 			} else {
@@ -196,6 +369,7 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 
 		cmdInfo = false;
 	} else if(hook.copyVertexBuffers) {
+		// TODO
 		ImGui::Text("TODO: show vertex buffer viewer");
 		cmdInfo = false;
 	} else if(hook.copyAttachment) {
@@ -209,6 +383,31 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 			ImGui::Text("Waiting for a submission...");
 		}
 		cmdInfo = false;
+	} else if(hook.pcr) {
+		if(dispatchCmd && dispatchCmd->state.pipe && hook.pcr == dispatchCmd->state.pipe->stage.stage) {
+			auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
+			dlg_assert(refl.push_constant_block_count);
+			if(refl.push_constant_block_count) {
+				display(*refl.push_constant_blocks, dispatchCmd->pushConstants.data);
+			}
+
+			cmdInfo = false;
+		} else if(drawCmd && drawCmd->state.pipe) {
+			for(auto& stage : drawCmd->state.pipe->stages) {
+				if(stage.stage != hook.pcr) {
+					continue;
+				}
+
+				auto& refl = nonNull(nonNull(stage.spirv).reflection);
+				dlg_assert(refl.push_constant_block_count);
+				if(refl.push_constant_block_count) {
+					display(*refl.push_constant_blocks, drawCmd->pushConstants.data);
+				}
+
+				cmdInfo = false;
+				break;
+			}
+		}
 	}
 
 	ImGui::EndChild();
@@ -363,7 +562,7 @@ std::vector<const Command*> Command::display(const Command* sel, TypeFlags typeF
 		return {};
 	}
 
-	int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
+	int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 	if(sel == this) {
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}
@@ -375,8 +574,6 @@ std::vector<const Command*> Command::display(const Command* sel, TypeFlags typeF
 	if(ImGui::IsItemClicked()) {
 		ret = {this};
 	}
-
-	ImGui::TreePop();
 
 	return ret;
 }
@@ -442,7 +639,7 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 		if(!retc.empty()) {
 			dlg_assert(ret.empty());
 			ret = std::move(retc);
-			ret.push_back(this);
+			ret.insert(ret.begin(), this);
 		}
 
 		ImGui::TreePop();
@@ -537,7 +734,7 @@ std::vector<const Command*> BeginRenderPassCmd::display(const Command* selected,
 
 	auto ret = ParentCommand::display(selected, typeFlags, cmd);
 	if(ret.size() > 1 && cmd != children_) {
-		ret.insert(ret.end() - 1, first);
+		ret.insert(ret.begin() + 1, first);
 	}
 
 	return ret;
@@ -1594,7 +1791,7 @@ std::vector<const Command*> ExecuteCommandsCmd::display(const Command* selected,
 
 	auto ret = ParentCommand::display(selected, typeFlags, cmd);
 	if(ret.size() > 1 && cmd != this->children_) {
-		ret.insert(ret.end() - 1, first);
+		ret.insert(ret.begin() + 1, first);
 	}
 
 	return ret;

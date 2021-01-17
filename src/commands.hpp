@@ -53,7 +53,8 @@ struct Command {
 	// Display a one-line overview of the command via ImGui.
 	// Commands with children should display themselves as tree nodes.
 	// Gets the command that is currently selected and should return
-	// itself or one of its children, if selected, otherwise nullptr.
+	// the hierachy of children selected in this frame (or an empty vector
+	// if none is).
 	virtual std::vector<const Command*> display(const Command* sel, TypeFlags typeFlags) const;
 
 	// The name of the command as string (might include parameter information).

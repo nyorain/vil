@@ -1,7 +1,7 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
   // Thanks, microsoft.
@@ -26,6 +26,9 @@
   #include <dlfcn.h>
   #include <errno.h>
 #endif
+
+// Forward delcartion from vulkan.h to not include it here.
+typedef struct VkDevice_T* VkDevice;
 
 #ifdef __cplusplus
 extern "C" {
@@ -132,8 +135,8 @@ static inline int fuenLoadApi(FuenApi* api) {
 
 	fuenCloseLib();
 
-#undef mdlsym
-#undef mdlclose
+#undef fuenCloseLib
+#undef fuenLoadSym
 
 	return 0;
 }

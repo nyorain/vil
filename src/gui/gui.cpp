@@ -275,7 +275,7 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	ImGui::SetCurrentContext(imgui_);
 	this->io_ = &ImGui::GetIO();
 	this->io_->IniFilename = nullptr;
-	this->io_->MouseDrawCursor = true; // TODO: test, only optionally on windows
+	this->io_->MouseDrawCursor = false;
 	ImGui::GetStyle().WindowRounding = 0.f;
 	ImGui::GetStyle().WindowBorderSize = 0.f;
 	ImGui::GetStyle().ScrollbarRounding = 0.f;
@@ -866,6 +866,8 @@ void Gui::activateTab(Tab tab) {
 }
 
 Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
+	makeImGuiCurrent();
+
 	// find a free draw objectg
 	Draw* foundDraw = nullptr;
 	for(auto& draw : draws_) {
@@ -1095,11 +1097,11 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		dlg_assert(waitStages.size() == waitSems.size());
 
 		auto signalSems = std::array{draw.presentSemaphore, draw.futureSemaphore};
-		submitInfo.signalSemaphoreCount = signalSems.size();
+		submitInfo.signalSemaphoreCount = u32(signalSems.size());
 		submitInfo.pSignalSemaphores = signalSems.data();
 		submitInfo.pWaitDstStageMask = waitStages.data();
+		submitInfo.waitSemaphoreCount = u32(waitSems.size());
 		submitInfo.pWaitSemaphores = waitSems.data();
-		submitInfo.waitSemaphoreCount = waitSems.size();
 
 		auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
 		if(res != VK_SUCCESS) {

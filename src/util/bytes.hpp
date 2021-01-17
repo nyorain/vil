@@ -160,6 +160,21 @@ read(ReadBuf& src, T& dst) {
 	read(src, bytes(dst));
 }
 
+// Does not advance any of the buffers
+inline void copy(ReadBuf src, WriteBuf dst) {
+	NYTL_BYTES_ASSERT(src.size() == dst.size());
+	std::memcpy(dst.data(), src.data(), dst.size());
+}
+
+template<typename T>
+std::enable_if_t<BytesConvertible<T>, T>
+copy(ReadBuf src) {
+	T ret;
+	NYTL_BYTES_ASSERT(src.size() >= sizeof(ret));
+	std::memcpy(&ret, src.data(), sizeof(ret));
+	return ret;
+}
+
 // Example for writing a fixed-size data segment:
 //
 // WriteBuf dst = ...;

@@ -2,6 +2,7 @@
 #include <device.hpp>
 #include <commandDesc.hpp>
 #include <ds.hpp>
+#include <buffer.hpp>
 #include <image.hpp>
 #include <rp.hpp>
 #include <cb.hpp>
@@ -11,6 +12,17 @@
 #include <vk/format_utils.h>
 
 namespace fuen {
+
+// TODO
+struct ImageCopyOp {
+	unsigned layer {}; // the layer to be copied
+	unsigned mip {}; // the mip level to be copied
+	VkImageAspectFlagBits aspect {}; // the aspect to be copied
+
+	// If this isn't nullopt, will read the content of the specified
+	// texel into a buffer, to be read on cpu.
+	std::optional<VkOffset3D> readTexel {};
+};
 
 // util
 void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
@@ -92,9 +104,24 @@ CopiedImage::~CopiedImage() {
 void CopiedBuffer::init(Device& dev, VkDeviceSize size) {
 	this->buffer.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 	dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, size, 0, &this->map);
+	this->copy = std::make_unique<std::byte[]>(size);
 
 	// NOTE: destructor for copied buffer is not needed as memory mapping
 	// is implicitly unmapped when memory of buffer is destroyed.
+}
+
+void CopiedBuffer::cpuCopy() {
+	if(!buffer.mem) {
+		return;
+	}
+
+	// TODO: only invalidate when on non-coherent memory
+	VkMappedMemoryRange range[1] {};
+	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+	range[0].memory = buffer.mem;
+	range[0].size = VK_WHOLE_SIZE;
+	VK_CHECK(buffer.dev->dispatch.InvalidateMappedMemoryRanges(buffer.dev->handle, 1, range));
+	std::memcpy(copy.get(), map, buffer.size);
 }
 
 // CommandHook
@@ -183,6 +210,7 @@ void CommandHook::unsetHookOps() {
 	this->copyIndirectCmd = false;
 	this->copyAttachment = {};
 	this->copyDS = {};
+	this->pcr = {};
 	invalidateRecordings();
 	invalidateData();
 }
@@ -293,7 +321,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	auto preEnd = hcommand.end() - 1;
 	for(auto it = hcommand.begin(); it != preEnd; ++it) {
 		auto* cmd = *it;
-		if((info.beginRenderPassCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd))) {
+		if(info.beginRenderPassCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd); info.beginRenderPassCmd) {
 			break;
 		}
 	}
@@ -503,7 +531,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 }
 
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
-		VkImageLayout srcLayout) {
+		VkImageLayout srcLayout, const VkImageSubresource& srcSubres) {
 	if(src.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
 		// TODO: support multisampling via vkCmdResolveImage
 		//   alternatively we could check if the image is
@@ -520,7 +548,20 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		return;
 	}
 
-	dst.init(dev, src.ci.format, src.ci.extent);
+	auto extent = src.ci.extent;
+	for(auto i = 0u; i < srcSubres.mipLevel; ++i) {
+		extent.width = std::max(extent.width >> 1, 1u);
+
+		if(extent.height) {
+			extent.height = std::max(extent.height >> 1, 1u);
+		}
+
+		if(extent.depth) {
+			extent.depth = std::max(extent.depth >> 1, 1u);
+		}
+	}
+
+	dst.init(dev, src.ci.format, extent);
 
 	// perform copy
 	VkImageMemoryBarrier imgBarriers[2] {};
@@ -532,7 +573,9 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	srcBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 	srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	srcBarrier.subresourceRange.aspectMask = dst.aspect; // TODO: change when potentially blitting!
+	srcBarrier.subresourceRange.aspectMask = srcSubres.aspectMask;
+	srcBarrier.subresourceRange.baseArrayLayer = srcSubres.arrayLayer;
+	srcBarrier.subresourceRange.baseMipLevel = srcSubres.mipLevel;
 	srcBarrier.subresourceRange.layerCount = 1u;
 	srcBarrier.subresourceRange.levelCount = 1u;
 	srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -571,9 +614,12 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	VkImageCopy copy {};
 	copy.dstOffset = {};
 	copy.srcOffset = {};
-	copy.extent = src.ci.extent;
-	copy.srcSubresource.aspectMask = dst.aspect; // TODO: change when potentially blitting!
+	copy.extent = extent;
+	copy.srcSubresource.aspectMask = srcSubres.aspectMask;
+	copy.srcSubresource.baseArrayLayer = srcSubres.arrayLayer;
+	copy.srcSubresource.mipLevel = srcSubres.mipLevel;
 	copy.srcSubresource.layerCount = 1u;
+
 	copy.dstSubresource.aspectMask = dst.aspect;
 	copy.dstSubresource.layerCount = 1u;
 
@@ -598,42 +644,149 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 }
 
-void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
+void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst, VkBuffer src,
+		VkDeviceSize offset, VkDeviceSize size) {
+	// init dst
+	dst.init(dev, size);
+
+	// perform copy
+	VkBufferCopy copy {};
+	copy.srcOffset = offset;
+	copy.dstOffset = 0u;
+	copy.size = size;
+
+	VkBufferMemoryBarrier barrier {};
+	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	barrier.buffer = src;
+	barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+	barrier.size = copy.size;
+	barrier.offset = copy.srcOffset;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		0, 0, nullptr, 1, &barrier, 0, nullptr);
+
+	dev.dispatch.CmdCopyBuffer(cb, src, dst.buffer.buf, 1, &copy);
+
+	barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // dunno
+		0, 0, nullptr, 1, &barrier, 0, nullptr);
+}
+
+void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	auto& dev = record->device();
 
-	auto copyBuffer = [this, &dev](CopiedBuffer& dst, VkBuffer src,
-			VkDeviceSize offset, VkDeviceSize size) {
-		// init dst
-		dst.init(dev, size);
+	DescriptorState* dsState = nullptr;
+	if(auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd)) {
+		dsState = &drawCmd->state;
+	} else if(auto* dispatchCmd = dynamic_cast<DispatchCmdBase*>(&bcmd)) {
+		dsState = &dispatchCmd->state;
+	} else {
+		dlg_error("unsupported descriptor command");
+	}
 
-		// perform copy
-		VkBufferCopy copy {};
-		copy.srcOffset = offset;
-		copy.dstOffset = 0u;
-		copy.size = size;
+	if(!dsState) {
+		return;
+	}
 
-		VkBufferMemoryBarrier barrier {};
-		barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		barrier.buffer = src;
-		barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
-		barrier.size = copy.size;
-		barrier.offset = copy.srcOffset;
+	auto [setID, bindingID, elemID] = *hook->copyDS;
 
-		dev.dispatch.CmdPipelineBarrier(cb,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			0, 0, nullptr, 1, &barrier, 0, nullptr);
+	// NOTE: we have to check for correct sizes here since the
+	// actual command might have changed (for an updated record)
+	// and the selected one not valid anymore.
+	if(setID >= dsState->descriptorSets.size()) {
+		dlg_trace("setID out of range");
+		dsState->descriptorSets = {};
+		return;
+	}
 
-		dev.dispatch.CmdCopyBuffer(cb, src, dst.buffer.buf, 1, &copy);
+	auto& set = dsState->descriptorSets[setID];
 
-		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
-		dev.dispatch.CmdPipelineBarrier(cb,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // dunno
-			0, 0, nullptr, 1, &barrier, 0, nullptr);
-	};
+	if(bindingID >= nonNull(set.ds).bindings.size()) {
+		dlg_trace("bindingID out of range");
+		dsState->descriptorSets = {};
+		return;
+	}
+
+	auto& binding = set.ds->bindings[bindingID];
+
+	if(elemID >= binding.size()) {
+		dlg_trace("elemID out of range");
+		dsState->descriptorSets = {};
+		return;
+	}
+
+	auto& elem = binding[elemID];
+
+	dlg_assert(elem.valid);
+	auto lbinding = set.ds->layout->bindings[bindingID];
+	auto cat = category(lbinding.descriptorType);
+	if(cat == DescriptorCategory::image) {
+		if(needsImageView(lbinding.descriptorType)) {
+			auto* imgView = elem.imageInfo.imageView;
+			dlg_assert(imgView);
+			dlg_assert(imgView->img);
+			if(imgView->img) {
+				auto& dst = state->dsCopy.emplace<CopiedImage>();
+
+				// We have to handle the special case where a renderpass
+				// attachment is bound in a descriptor set (e.g. as
+				// input attachment). In that case, it will be
+				// in general layout (via our render pass splitting),
+				// not in the layout of the ds.
+				auto layout = elem.imageInfo.layout;
+				if(info.splitRenderPass) {
+					auto& fb = nonNull(nonNull(info.beginRenderPassCmd).fb);
+					for(auto* att : fb.attachments) {
+						dlg_assert(att->img);
+						if(att->img == imgView->img) {
+							layout = VK_IMAGE_LAYOUT_GENERAL;
+							break;
+						}
+					}
+				}
+
+				// TODO: select exact layer/mip in view range via gui
+				VkImageSubresource subres {};
+				subres.aspectMask = imgView->ci.subresourceRange.aspectMask;
+				subres.arrayLayer = imgView->ci.subresourceRange.baseArrayLayer;
+				subres.mipLevel = imgView->ci.subresourceRange.baseMipLevel;
+				initAndCopy(dev, cb, dst, *imgView->img, layout, subres);
+			}
+		} else {
+			// TODO: bad message, maybe just show a link to the sampler
+			//   in the commands.cpp functions?
+			dlg_warn("Nothing to copy: just a sampler bound");
+		}
+	} else if(cat == DescriptorCategory::buffer) {
+		auto& dst = state->dsCopy.emplace<CopiedBuffer>();
+		auto range = elem.bufferInfo.range;
+		if(range == VK_WHOLE_SIZE) {
+			range = elem.bufferInfo.buffer->ci.size - elem.bufferInfo.offset;
+		}
+
+		auto size = std::min(maxBufCopySize, range);
+		initAndCopy(dev, cb, dst, elem.bufferInfo.buffer->handle,
+			elem.bufferInfo.offset, size);
+	} else if(cat == DescriptorCategory::bufferView) {
+		// TODO: copy as buffer or image? maybe best to copy
+		//   as buffer but then create bufferView on our own?
+		// auto& dst = state->dsCopy.emplace<CopiedBuffer>();
+		// dlg_assert(elem.bufferView->buffer);
+		// copyBuffer(dst, elem.bufferView->buffer->handle,
+		// 	elem.bufferView->ci.offset, elem.bufferView->ci.range);
+		dlg_error("bufferview ds copy unimplemented");
+	}
+}
+
+void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info) {
+	auto& dev = record->device();
+	DebugLabel lbl(dev, cb, "beforeDstOutsideRp");
 
 	// indirect copy
 	if(hook->copyIndirectCmd) {
@@ -643,10 +796,10 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
 				sizeof(VkDrawIndirectCommand);
 			stride = cmd->stride ? cmd->stride : stride;
 			auto dstSize = cmd->drawCount * stride;
-			copyBuffer(state->indirectCopy, cmd->buffer->handle, cmd->offset, dstSize);
+			initAndCopy(dev, cb, state->indirectCopy, cmd->buffer->handle, cmd->offset, dstSize);
 		} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
 			auto size = sizeof(VkDispatchIndirectCommand);
-			copyBuffer(state->indirectCopy, cmd->buffer->handle, cmd->offset, size);
+			initAndCopy(dev, cb, state->indirectCopy, cmd->buffer->handle, cmd->offset, size);
 		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
 			(void) cmd;
 			dlg_error("not implemented");
@@ -657,60 +810,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
 
 	// descriptor state
 	if(hook->copyDS) {
-		DescriptorState* dsState = nullptr;
-		if(auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd)) {
-			dsState = &drawCmd->state;
-		} else if(auto* dispatchCmd = dynamic_cast<DispatchCmdBase*>(&bcmd)) {
-			dsState = &dispatchCmd->state;
-		} else {
-			dlg_error("unsupported descriptor command");
-		}
-
-		if(dsState) {
-			auto [setID, bindingID, elemID] = *hook->copyDS;
-			dlg_assert(dsState->descriptorSets.size() > setID);
-			auto& set = dsState->descriptorSets[setID];
-			dlg_assert(set.ds->bindings.size() > bindingID);
-			auto& binding = set.ds->bindings[bindingID];
-			dlg_assert(binding.size() > elemID);
-			auto& elem = binding[elemID];
-
-			dlg_assert(elem.valid);
-			auto lbinding = set.ds->layout->bindings[bindingID];
-			auto cat = category(lbinding.descriptorType);
-			if(cat == DescriptorCategory::image) {
-				if(needsImageView(lbinding.descriptorType)) {
-					auto* imgView = elem.imageInfo.imageView;
-					dlg_assert(imgView);
-					dlg_assert(imgView->img);
-					if(imgView->img) {
-						auto& dst = state->dsCopy.emplace<CopiedImage>();
-						initAndCopy(dev, cb, dst, *imgView->img, elem.imageInfo.layout);
-					}
-				} else {
-					dlg_warn("Nothing to copy");
-				}
-			} else if(cat == DescriptorCategory::buffer) {
-				auto& dst = state->dsCopy.emplace<CopiedBuffer>();
-				copyBuffer(dst, elem.bufferInfo.buffer->handle,
-					elem.bufferInfo.offset, elem.bufferInfo.range);
-			} else if(cat == DescriptorCategory::bufferView) {
-				// TODO: copy as buffer or image? maybe best to copy
-				//   as buffer but then create bufferView on our own?
-				// auto& dst = state->dsCopy.emplace<CopiedBuffer>();
-				// dlg_assert(elem.bufferView->buffer);
-				// copyBuffer(dst, elem.bufferView->buffer->handle,
-				// 	elem.bufferView->ci.offset, elem.bufferView->ci.range);
-				dlg_error("unimplemented");
-			}
-		}
+		copyDs(bcmd, info);
 	}
-
-	// TODO: kinda arbitrary, allow more. Configurable via settings?
-	// In general, the problem is that we can't know the relevant
-	// size for sub-allocated buffers. Theoretically, we could analyze
-	// previous index/indirect data for this. Not sure if good idea.
-	constexpr auto maxBufCopySize = VkDeviceSize(16 * 1024);
 
 	auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd);
 
@@ -725,7 +826,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
 			}
 
 			auto size = std::min(maxBufCopySize, vertbuf.buffer->ci.size - vertbuf.offset);
-			copyBuffer(dst, vertbuf.buffer->handle, vertbuf.offset, size);
+			initAndCopy(dev, cb, dst, vertbuf.buffer->handle, vertbuf.offset, size);
 		}
 	}
 
@@ -735,32 +836,42 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo&) {
 		auto& inds = drawCmd->state.indices;
 		if(inds.buffer) {
 			auto size = std::min(maxBufCopySize, inds.buffer->ci.size - inds.offset);
-			copyBuffer(state->indexBufCopy, inds.buffer->handle, inds.offset, size);
+			initAndCopy(dev, cb, state->indexBufCopy, inds.buffer->handle, inds.offset, size);
 		}
 	}
 }
 
 void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
 	auto& dev = record->device();
+	DebugLabel lbl(dev, cb, "afterDsOutsideRp");
 
 	if(hook->copyAttachment) {
 		// initialize dst image
 		dlg_assert(info.beginRenderPassCmd);
-		auto& fb = *info.beginRenderPassCmd->fb;
+		auto& fb = nonNull(info.beginRenderPassCmd->fb);
 		auto attID = *hook->copyAttachment;
-		dlg_assert(attID < fb.attachments.size());
-
-		auto& imageView = fb.attachments[attID];
-		dlg_assert(imageView);
-		dlg_assert(imageView->img);
-		auto* image = imageView->img;
-
-		if(!image) {
-			dlg_warn("ImageView has no associated image");
+		if(attID >= fb.attachments.size()) {
+			hook->copyAttachment = {};
+			dlg_trace("copyAttachment out of range");
 		} else {
-			auto& srcImg = *image;
-			auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
-			initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout);
+			auto& imageView = fb.attachments[attID];
+			dlg_assert(imageView);
+			dlg_assert(imageView->img);
+			auto* image = imageView->img;
+
+			if(!image) {
+				dlg_warn("ImageView has no associated image");
+			} else {
+				auto& srcImg = *image;
+				auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
+
+				// TODO: select exact layer/mip in view range via gui
+				VkImageSubresource subres {};
+				subres.aspectMask = imageView->ci.subresourceRange.aspectMask;
+				subres.arrayLayer = imageView->ci.subresourceRange.baseArrayLayer;
+				subres.mipLevel = imageView->ci.subresourceRange.baseMipLevel;
+				initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout, subres);
+			}
 		}
 	}
 }
@@ -801,6 +912,17 @@ CommandHookSubmission::~CommandHookSubmission() {
 		// transmitIndirect();
 		transmitTiming();
 		record->hook->state = record->state;
+
+		// copy potentiall buffers
+		// TODO: messy, ugly, shouldn't be here like this.
+		if(auto* buf = std::get_if<CopiedBuffer>(&record->state->dsCopy)) {
+			buf->cpuCopy();
+		}
+		record->state->indexBufCopy.cpuCopy();
+		record->state->indirectCopy.cpuCopy();
+		for(auto& vbuf : record->state->vertexBufCopies) {
+			vbuf.cpuCopy();
+		}
 	}
 }
 

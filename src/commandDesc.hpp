@@ -28,9 +28,6 @@ struct CommandDesc {
 	u32 count {};
 
 	// Expects the given command buffer to be in executable/pending state.
-	// To synchronize with command buffer resetting, the caller likely
-	// has to lock the device mutex (to make sure cb doesn't get reset
-	// while this is executed).
 	static std::vector<CommandDesc> get(const Command& root, span<const Command*> hierarchy);
 
 	static std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc);

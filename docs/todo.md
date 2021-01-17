@@ -8,12 +8,17 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
+- [ ] setup CI for windows (msvc and mingw) and linux
+- [ ] when checking if handle is used by cb, consider descriptor sets for images, buffers & bufferViews!
+      when it's checked for an image/buffer, consider all descriptor of views as well.
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
 - [ ] barrier command inspectors: show information about all barriers, stage masks etc
 	- [ ] CmdPipelineBarrier
 	- [ ] CmdSetEvent
 	- [ ] CmdWaitEvents
+- [ ] I/O inspector for transfer commands
+- [ ] support CmdDrawIndirectCount in gui
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [ ] new per-command input/output overview, allowing to view *all* resources
@@ -23,9 +28,15 @@ v0.1, goal: end of january 2021
 	- [ ] chose sensible default sizes/layouts
 	- [ ] implement buffer viewer (infer information from shaders)
 	- [ ] factor out image viewer from resources into own component; use it here.
+	- [ ] re-add timing display in command inspector
+- [ ] proper layout of child windows with resizing
+      See https://github.com/ocornut/imgui/issues/319
+- [ ] better enumString.hpp. Remove prefixes
 - [x] copy vulkan headers to vk/. So we don't rely on system headers
 - [ ] Allow to freeze state for current displayed command, i.e. don't
       update data from hook
+	- [ ] figure out how to communicate this via gui.
+	      This is a distinct option form "updateFromGroup" or "updateFromCb".
 - [ ] fix Gui::draws_ synchronization issue
 	  See Gui::pendingDraws (called from queue while locked) but also
 	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
@@ -70,6 +81,11 @@ v0.1, goal: end of january 2021
 	      basis. Just forwarding random pNexts will likely not work.
 - [ ] implement overview as in node 1652
 	- [ ] associate CommandGroup with swapchain (and the other way around?)
+	- [ ] allow something like "update from swapchain" in command buffer viewer?
+	      It seems to me we want a more general "command source" concept
+		  for the command buffer viewer. Could be queue/command buffer/command group/
+		  swapchain/identified per-frame submission/fence-association or 
+		  something like that.
 - [ ] implement additional command buffer viewer mode: per-frame-commands
       basically shows all commands submitted to queue between two present calls.
 	  similar to renderdoc
@@ -137,7 +153,9 @@ v0.1, goal: end of january 2021
 	      do with buffers)
 	- [ ] better display (or completely hide?) swapchain images
 	      We should probably fill-in Image::ci for them.
-- [ ] fix "unimplemented descriptor category" bug (not sure when it appears)
+- [x] fix "unimplemented descriptor category" bug (not sure when it appears)
+      {we were casting from descriptor type to descriptor category in stead
+	   of using the function...}
 - [ ] automatically update resource lists in resource gui when tab is re-entered
       from somewhere else
 - [ ] when we select a resource of type X should we set the current filter to X
@@ -197,6 +215,18 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] use new imgui tables api where useful
+- [ ] should support image-less framebuffer extension as soon as possible,
+      might need a lot of changes
+- [ ] add "save to ktx" feature on images? Personally, I'd consider this
+      useful but this will likely scream LETS ABUSE PROPRIETARY IMAGES to some
+	  evil creatures out there so not sure if this is a good idea.
+	  Maybe just don't enable it in default build config?
+	- [ ] pretty much same for writing out buffer contents to a file
+	- [ ] could export full models from drawcalls via gltf
+		  (without textures or at unassigned textures or maybe even
+		   try to connect them to gltf properties via heuristics)
+- [ ] support for compressed image formats
 - [ ] optimize: suballocate and CopiedBuffer
 - [ ] optimize: reuse CopiedImage and CopiedBuffer
 - [ ] support multiple imgui themes via settings

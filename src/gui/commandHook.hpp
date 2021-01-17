@@ -5,6 +5,7 @@
 #include <gui/render.hpp>
 #include <vk/vulkan.h>
 #include <vector>
+#include <memory>
 #include <variant>
 #include <optional>
 
@@ -29,14 +30,19 @@ struct CopiedImage {
 struct CopiedBuffer {
 	OwnBuffer buffer {};
 	void* map {};
+	std::unique_ptr<std::byte[]> copy;
 
 	CopiedBuffer() = default;
 	void init(Device& dev, VkDeviceSize size);
 	CopiedBuffer(CopiedBuffer&&) noexcept = default;
 	CopiedBuffer& operator=(CopiedBuffer&&) noexcept = default;
 	~CopiedBuffer() = default;
+
+	void cpuCopy();
 };
 
+// TODO: we shouldn't store CopiedBuffer here i guess? just the cpu copy,
+// move that out of CopiedBuffer itself?
 struct CommandHookState {
 	// We need a reference count here since this object is conceptually owned by
 	// CommandRecord but may be read by the gui even when the record
@@ -71,6 +77,8 @@ public:
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
+	// TODO: allow specifying offsets and max sizes. We currently
+	//   have a rather arbirtrary static limit on buffer copy size.
 	bool copyVertexBuffers {}; // could specify the needed subset in future
 	bool copyIndexBuffers {};
 	bool copyIndirectCmd {}; // always do that?
@@ -80,6 +88,10 @@ public:
 
 	// The last received copied state of a finished submission
 	IntrusivePtr<CommandHookState> state;
+
+	// TODO: shouldn't be here! See displayActionInspector.
+	//   We need a better place to store this general state. CbGui?
+	VkShaderStageFlagBits pcr {};
 
 public:
 	// Called from inside QueueSubmit with the command buffer the hook has
@@ -170,6 +182,7 @@ struct CommandHookRecord {
 
 	void hookRecord(Command* cmdChain, RecordInfo);
 
+	void copyDs(Command& bcmd, const RecordInfo&);
 	void beforeDstOutsideRp(Command&, const RecordInfo&);
 	void afterDstOutsideRp(Command&, const RecordInfo&);
 
@@ -177,6 +190,12 @@ struct CommandHookRecord {
 	// Called while device mutex is locked.
 	// Might delete itself (or decrement reference count or something).
 	void finish() noexcept;
+
+	// TODO: kinda arbitrary, allow more. Configurable via settings?
+	// In general, the problem is that we can't know the relevant
+	// size for sub-allocated buffers. Theoretically, we could analyze
+	// previous index/indirect data for this. Not sure if good idea.
+	static constexpr auto maxBufCopySize = VkDeviceSize(16 * 1024);
 };
 
 struct CommandHookSubmission {

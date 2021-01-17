@@ -502,7 +502,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 				return;
 			}
 
-			switch(DescriptorCategory(type)) {
+			switch(category(type)) {
 				case DescriptorCategory::image: {
 					if(needsImageView(type)) {
 						refButtonExpect(*gui_, binding.imageInfo.imageView);

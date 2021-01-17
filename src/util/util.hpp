@@ -12,7 +12,7 @@ namespace fuen {
 
 // util
 template<typename T>
-T& nonNull(T* ptr) {
+auto& nonNull(T&& ptr) {
 	dlg_assert(ptr);
 	return *ptr;
 }

@@ -383,3 +383,67 @@ When application destroys a resource:
   using this handle have finished.
   Furthermore, the gui needs to be informed about destruction anyways
   to change its logical state, e.g. might have to unselect the handle.
+
+# On copied image memory
+
+Placing the copied images on the cpu has certain advantages, e.g. for displaying
+texel values in the gui. We could also perform more complicated operations
+(like computing a histogram) directly on the cpu. 
+But vulkan guarantees for cpu-side image support (with linear tiling) is
+fairly limited. It might furthermore have a *serious* performance impact.
+We therefore try to perform as many operations as possible on the gpu
+(e.g. using a compute shader to generate a histogram or finding min/max vals)
+and only copy the data to the cpu that is really, absolutely needed there
+(e.g. the value of the currently shown texel).
+
+# I/O inspector behavior
+
+Ok, let's figure this out. How should the I/O inspector actually behave?
+- What should happen when we continuously update from a command
+  buffer/command buffer group? Do we want to try to keep the current
+  selection?
+  	- YES, this is likely the desired behavior. Everything else makes
+	  it fairly useless, possibly deselecting every frame.
+- What should happen in the new recording does not have a matching
+  I/O slot?
+  	- Just deselect. Either show the command or just nothing.
+- How to handle the "no matching I/O slot in the command hook"?
+  There will be situations where we e.g. say from the inspector "copy
+  us descriptor element (4, 1, 5)" but that then does not exist in the
+  actual recording.
+  Option A: we detect this in the command hook and unset the state
+  Option B: we leave the state (allowing the hook to retry in future)
+    but simply don't copy/set an appropriate error message somewhere.
+  Option C: never match commands for similarity for which that could happen
+  	NOTE: i don't think this is a good idea.
+	- let's go with option A for now. Option B might have advantages but
+	  might result in more flickering. A clean deselect shouldn't lead
+	  to problems. Make sure to log something out though, in case this
+	  leads to unforeseen unexpected behavior later on.
+- What should happen when viewing a CommandRecord that was invalidated,
+  possibly referencing invalid data?
+  Important to note that the the I/O viewer is not useless in that case
+  as this might currently be the latest recording (that just happens to
+  have already finished and is invalid) and there may be a new submission
+  immediately following.
+  	- Imagine a case where all application submissions always already finish
+	  and the application destroys the cb/a record-referenced resource 
+	  before we draw our gui. In that case we could still provide a fully
+	  functional and working I/O viewer.
+  	- We likely really have to code fore that. When drawing the inspector,
+	  just always check whether resources are still valid.
+- Display the I/O inspector when not updating from cb/group?
+	- Yes! Often one record is submitted multiple times
+	  As long as the record *might* be submitted in future, we have hope
+	  that this *might* work. In practice, applications will rarely
+	  leave valid records just laying around.
+- Display the I/O inspector when a not updating from cb and viewing
+  an invalidated record?
+  	- No! In that case we know it's never submitted again and we won't
+	  be able to make the i/o inspector work. Of course, if we already
+	  received a CommandHookState, it can be viewed further.
+	  But we won't be able to e.g. change the selected I/O slot, we can't
+	  retrieve an update. We could signal that via making the gui elements
+	  inactive or just outputting an error message when they are selected.
+	  In future, we could introduce a setting/mode in which always *all* I/O
+	  resources are fetched into the CommandHookState, allowing this.
