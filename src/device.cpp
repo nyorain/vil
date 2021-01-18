@@ -277,7 +277,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// == Modify create info ==
 	auto nci = *ci;
 
-	// == Queues ==
+	// = Queues =
 	// Make sure we get a graphics queue.
 	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos = {
 		nci.pQueueCreateInfos,
@@ -334,7 +334,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		fpGetInstanceProcAddr, phdev, nqf, presentQueueInfoID,
 		supportedExts);
 
-	// Enabled features
+	// = Enabled features =
 	// We try to additionally enable a couple of features we need:
 	// - timeline semaphores
 	VkPhysicalDeviceProperties phdevProps;
@@ -406,7 +406,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			// we might need to enable the extension
 			if(!ini.vulkan12 || phdevProps.apiVersion < VK_API_VERSION_1_2) {
 				dlg_assert(hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));
-				newExts.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+				if(!contains(newExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
+					newExts.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+				}
 			}
 
 			// find out props
@@ -426,13 +428,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		}
 	}
 
+	// = Useful extensions =
+	auto hasShaderInfoAMD = false;
+	if(hasExt(supportedExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
+		hasShaderInfoAMD = true;
+		if(!contains(newExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
+			newExts.push_back(VK_AMD_SHADER_INFO_EXTENSION_NAME);
+		}
+	}
+
+	// == Create Device! ==
 	nci.enabledExtensionCount = u32(newExts.size());
 	nci.ppEnabledExtensionNames = newExts.data();
 
 	nci.pQueueCreateInfos = queueCreateInfos.data();
 	nci.queueCreateInfoCount = u32(queueCreateInfos.size());
 
-	// == Create Device! ==
 	VkResult result = fpCreateDevice(phdev, &nci, alloc, pDevice);
 	if(result != VK_SUCCESS) {
 		return result;
@@ -446,6 +457,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	dev.timelineSemaphores = hasTimelineSemaphores;
 	dev.maxTimelineSemaphoreValueDifference = maxTimelineSemaphoreValueDifference;
+
+	dev.hasShaderInfoAMD = hasShaderInfoAMD;
 
 	dev.extensions = {extsBegin, extsEnd};
 	if(ci->pEnabledFeatures) {

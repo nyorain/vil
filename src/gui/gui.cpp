@@ -925,15 +925,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		auto& drawData = *ImGui::GetDrawData();
 		this->uploadDraw(draw, drawData);
 
-		// TODO: bad
-		// TODO: could be changed in this frame. Really need mechanisms for gui elements
-		//   to add these handles to a wait list as they are used.
-		// if(tabs_.cb.imageCopy_ && tabs_.cb.imageCopy_->writer) {
-		// 	dlg_info("wait for submission for image copy write");
-		// 	waitFor({{tabs_.cb.imageCopy_->writer}});
-		// 	dlg_assert(!tabs_.cb.imageCopy_->writer);
-		// }
-
 		// General barrier to make sure all past submissions writing resources
 		// we read are done. Not needed when we don't read a device resource.
 		// TODO could likely at least give a better srcAccessMask

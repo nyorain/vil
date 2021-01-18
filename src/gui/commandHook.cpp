@@ -825,6 +825,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 				continue;
 			}
 
+			// TODO: add vertex buffer usage flag
 			auto size = std::min(maxBufCopySize, vertbuf.buffer->ci.size - vertbuf.offset);
 			initAndCopy(dev, cb, dst, vertbuf.buffer->handle, vertbuf.offset, size);
 		}
@@ -836,6 +837,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 		auto& inds = drawCmd->state.indices;
 		if(inds.buffer) {
 			auto size = std::min(maxBufCopySize, inds.buffer->ci.size - inds.offset);
+			// TODO: add index buffer usage flag
 			initAndCopy(dev, cb, state->indexBufCopy, inds.buffer->handle, inds.offset, size);
 		}
 	}

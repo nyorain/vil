@@ -76,6 +76,8 @@ struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;
 struct CommandHookState;
+struct CopiedBuffer;
+struct CopiedImage;
 struct CommandBufferGroup;
 
 struct ViewableImageCopy;

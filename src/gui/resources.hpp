@@ -30,6 +30,7 @@ struct ResourceGui {
 
 	bool firstUpdate_ {true};
 	Handle* handle_ {};
+
 	struct {
 		Image* object {};
 		VkImageSubresourceRange newSubres {};

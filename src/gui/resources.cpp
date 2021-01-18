@@ -603,6 +603,8 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	imGuiText("{}", name(pipe));
 	ImGui::Spacing();
 
+	auto& dev = gui_->dev();
+
 	// general info
 	// text
 	ImGui::Columns(2);
@@ -617,10 +619,13 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	if(ImGui::Button(name(*pipe.layout).c_str())) {
 		select(*pipe.layout);
 	}
+
 	// TODO: allow to display RenderPassDesc
 	// if(ImGui::Button(name(*pipe.renderPass).c_str())) {
 	// 	select(*pipe.renderPass);
 	// }
+
+	ImGui::Text("TODO: link to render pass desc");
 	ImGui::Text("%d", pipe.subpass);
 
 	ImGui::Columns();
@@ -925,6 +930,33 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 			*/
 
 			// TODO: used push constants
+
+			if(dev.hasShaderInfoAMD) {
+				if(ImGui::TreeNode("AMD shader info")) {
+					VkShaderStatisticsInfoAMD info {};
+					auto size = sizeof(info);
+
+					VK_CHECK(dev.dispatch.GetShaderInfoAMD(dev.handle, pipe.handle,
+						stage.stage, VK_SHADER_INFO_TYPE_STATISTICS_AMD,
+						&size, &info));
+
+					// TODO: info.computeWorkGroupSize?
+					asColumns2({{
+						{"Available SGPR", "{}", info.numAvailableSgprs},
+						{"Available VGPR", "{}", info.numAvailableVgprs},
+						{"Physical SGPR", "{}", info.numPhysicalSgprs},
+						{"Physical VGPR", "{}", info.numPhysicalVgprs},
+						{"Used SGPR", "{}", info.resourceUsage.numUsedSgprs},
+						{"Used VGPR", "{}", info.resourceUsage.numUsedVgprs},
+						{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
+						{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
+						{"lds Usage", "{}", info.resourceUsage.ldsUsageSizeInBytes},
+						{"lds Per Local Workgroup", "{}", info.resourceUsage.ldsSizePerLocalWorkGroup},
+					}});
+
+					ImGui::TreePop();
+				}
+			}
 
 			ImGui::TreePop();
 		}

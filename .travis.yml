@@ -1,0 +1,21 @@
+arch: amd64
+os: linux
+dist: focal
+language: python
+
+matrix:
+  include:
+    - env: CC=gcc
+    - env: CC=clang
+
+install:
+  - pip3 install meson ninja
+  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils
+
+script:
+  - meson build
+  - ninja -C build
+  # yeah, we can't test it, sadly.
+  # Would need provided GPUs for that (or a CPU implementation but
+  # I won't spend months trying to get this running on travis...)
+

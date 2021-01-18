@@ -8,7 +8,9 @@ overlay_shaders = {
 		'1DArray.': ['-DTEX_TYPE_1D_ARRAY'],
 		'2DArray.': ['-DTEX_TYPE_2D_ARRAY'],
 		'3D.': ['-DTEX_TYPE_3D'],
-	}
+	},
+	'vertices.vert': {'': [] },
+	'vertices.frag': {'': [] },
 }
 
 spv = []

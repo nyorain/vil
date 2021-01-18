@@ -34,6 +34,8 @@ struct Device {
 	bool timelineSemaphores {}; // whether we have timeline smeaphores
 	u64 maxTimelineSemaphoreValueDifference {};
 
+	bool hasShaderInfoAMD {};
+
 	// Aside from properties, only the families used by device
 	// are initialized.
 	std::vector<QueueFamily> queueFamilies;

@@ -92,6 +92,8 @@ struct Draw {
 };
 
 // Static, immutable rendering data shared by all renderers.
+// TODO: this should probably just be moved inside Gui, we don't
+// have multiple gui objects.
 struct RenderData {
 	VkDescriptorSetLayout dsLayout {};
 	VkPipelineLayout pipeLayout {};
