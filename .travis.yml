@@ -10,10 +10,11 @@ matrix:
 
 install:
   - pip3 install meson ninja
-  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils
+  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang
 
 script:
-  - meson build
+  # TODO: fetch x11 deps
+  - meson build -Dwith_x11=false
   - ninja -C build
   # yeah, we can't test it, sadly.
   # Would need provided GPUs for that (or a CPU implementation but

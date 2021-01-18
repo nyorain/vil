@@ -1,0 +1,2 @@
+# option('with_x11', type: 'feature', value: 'disabled')
+option('with_x11', type: 'boolean', value: true)

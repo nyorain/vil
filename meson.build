@@ -60,7 +60,8 @@ subdir('src/imgui')
 
 # TODO: yeah, this needs some love
 with_win32 = build_machine.system() == 'windows'
-with_x11 = not with_win32
+# with_x11 = not with_win32
+with_x11 = not with_win32 and get_option('with_x11')
 
 src = files(
 	# own meta sources & util
