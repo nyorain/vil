@@ -10,7 +10,7 @@ matrix:
 
 install:
   - pip3 install meson ninja
-  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang
+  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
 
 script:
   # TODO: fetch x11 deps
