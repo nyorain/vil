@@ -10,10 +10,10 @@ matrix:
 
 install:
   - pip3 install meson ninja
-  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools \
-      libxkbcommon-dev wayland-dev libxcb-dev wayland-protocols mesa-dev libxcb-ewmh-dev \
-      libxcb-icccm-dev libxcb-shm-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev \
-      libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
+  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+    libxkbcommon-dev wayland-dev libxcb-dev wayland-protocols mesa-dev libxcb-ewmh-dev
+    libxcb-icccm-dev libxcb-shm-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
+    libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
 
 script:
   # TODO: fetch x11 deps
