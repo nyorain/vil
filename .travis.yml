@@ -12,7 +12,7 @@ install:
   - pip3 install meson ninja
   - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
     libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
-    libxcb1-icccm-dev libxcb-shm-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
+    libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
     libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
 
 script:
