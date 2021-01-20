@@ -45,9 +45,7 @@ install:
     libxkbcommon-x11-dev libx11-dev libx11-xcb-dev; fi
 
 script:
-  - if [ "$TRAVIS_OS_NAME" == "windows" ]; then cmd.exe //C 'C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64 && meson build --backend=ninja; fi
-  - if [ "$TRAVIS_OS_NAME" == "windows" ]; then cmd.exe //C 'C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64 && ninja -C build; fi
-  # TODO: fix for x11 deps
+  - if [ "$TRAVIS_OS_NAME" == "windows" ]; then ./build.bat; fi
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then meson build -Dwith_x11=false --backend=ninja; fi
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then ninja -C build; fi
   # yeah, we can't test it, sadly.
