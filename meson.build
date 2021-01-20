@@ -22,6 +22,7 @@ args = cc.get_supported_arguments([
 	'/wd4127', # conditional expression is constant (might be useful but not really for us)
 	'/wd4456', # delecaration hides previous local declaration (sorry, too used to rust's beauty)
 	'/wd4458', # declaration hides class member, TODO: should be fixed in code, valid warning
+	'/wd5105', # needed to fix an issue in winbase.h on a specific windows version (wtf microsoft)
 	'-D_CRT_SECURE_NO_WARNINGS',
 
 	# msvc really slow in debug build without this
