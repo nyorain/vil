@@ -34,9 +34,9 @@ args = cc.get_supported_arguments([
 ])
 
 link_args = cc.get_supported_arguments([
-	# unix
-	'-Wl,-Bsymbolic-functions',
-	'-Wl,-z,relro',
+	# unix, TODO: this caused problems on clang
+	# '-Wl,-Bsymbolic-functions',
+	# '-Wl,-z,relro',
 ])
 
 dep_threads = dependency('threads', required: false)

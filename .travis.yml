@@ -1,22 +1,47 @@
-arch: amd64
-os: linux
-dist: focal
-language: python
+# TODO:
+# - test debug and release builds
+# - test 32-bit build? Not sure if we even want to support it though.
+# - add some basic testing, not needing a gpu
+# - build mingw and visual studio
+# - test meson visual studio backend, msbuild
+# - use apt addons instead of apt-get?
 
 matrix:
   include:
-    - env: CC=gcc
-    - env: CC=clang
+    # linux, gcc
+    - name: "Linux GCC"
+      env: CC=gcc
+      arch: amd64
+      os: linux
+      dist: focal
+      language: python
+    # linux, clang
+    - name: "Linux clang"
+      env: CC=clang
+      arch: amd64
+      os: linux
+      dist: focal
+      language: python
+    # windows
+    - name: "Windows"
+      os: windows           # Windows 10.0.17134 N/A Build 17134
+      language: shell       # 'language: python' is an error on Travis CI Windows
+      before_install:
+        - choco install python --version 3.7.4
+        - choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+        - python --version
+        - python -m pip install --upgrade pip
+      env: PATH="/c:/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/MSBuild/Current/Bin":/c/Python37:/c/Python37/Scripts:$PATH
 
 install:
   - pip3 install meson ninja
-  - sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+  - if ["$TRAVIS_OS_NAME" == "linux"]; then sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
     libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
     libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
-    libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
+    libxkbcommon-x11-dev libx11-dev libx11-xcb-dev fi
 
 script:
-  # TODO: fetch x11 deps
+  # TODO: fix for x11 deps
   - meson build -Dwith_x11=false
   - ninja -C build
   # yeah, we can't test it, sadly.
