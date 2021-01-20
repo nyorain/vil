@@ -4,12 +4,14 @@
 #include <cb.hpp>
 #include <util/span.hpp>
 #include <util/util.hpp>
+#include <util/f16.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/commandHook.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <spirv_reflect.h>
+#include <vk/format_utils.h>
 #include <vk/enumString.hpp>
 #include <iomanip>
 
@@ -105,21 +107,29 @@ std::string formatScalar(SpvReflectTypeFlags type,
 	// - support non-32-bit scalars
 	if(type == SPV_REFLECT_TYPE_FLAG_INT) {
 		dlg_assert(traits.scalar.width == 32);
-		if(traits.scalar.signedness) {
-			auto var = copy<i32>(data);
-			return dlg::format("{}", var);
-		} else {
-			auto var = copy<u32>(data);
-			return dlg::format("{}", var);
+		auto sgn = traits.scalar.signedness;
+		switch(traits.scalar.width) {
+			case 8:  return dlg::format("{}", sgn ? copy<i8> (data) : copy<u8> (data));
+			case 16: return dlg::format("{}", sgn ? copy<i16>(data) : copy<u16>(data));
+			case 32: return dlg::format("{}", sgn ? copy<i32>(data) : copy<u32>(data));
+			case 64: return dlg::format("{}", sgn ? copy<i64>(data) : copy<u64>(data));
+			default: break;
 		}
 	} else if(type == SPV_REFLECT_TYPE_FLAG_FLOAT) {
-		dlg_assert(traits.scalar.width == 32);
-		auto var = copy<float>(data);
-		return dlg::format("{}", var);
+		switch(traits.scalar.width) {
+			case 16: return dlg::format("{}", copy<f16>(data));
+			case 32: return dlg::format("{}", copy<float>(data));
+			case 64: return dlg::format("{}", copy<double>(data));
+			default: break;
+		}
 	} else if(type == SPV_REFLECT_TYPE_FLAG_BOOL) {
-		dlg_assert(traits.scalar.width == 32);
-		auto var = copy<u32>(data);
-		return dlg::format("{}", bool(var));
+		switch(traits.scalar.width) {
+			case 8: return dlg::format("{}", bool(copy<u8>(data)));
+			case 16: return dlg::format("{}", bool(copy<u16>(data)));
+			case 32: return dlg::format("{}", bool(copy<u32>(data)));
+			case 64: return dlg::format("{}", bool(copy<u64>(data)));
+			default: break;
+		}
 	}
 
 	dlg_warn("Unsupported scalar type");
@@ -138,7 +148,6 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		SPV_REFLECT_TYPE_FLAG_INT;
 	if((type.type_flags & ~scalarFlags) == 0) { // must be scalar
 		auto val = formatScalar(type.type_flags, type.traits.numeric, data.first(bvar.size));
-		// imGuiText("{}: {}", bvar.name, val);
 
 		ImGui::Columns(2);
 		imGuiText("{}:", bvar.name);
@@ -160,9 +169,6 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 			sep = ", ";
 		}
 
-		// varStr += ")";
-		// imGuiText("{}: {}", bvar.name, varStr);
-
 		ImGui::Columns(2);
 		imGuiText("{}:", bvar.name);
 
@@ -174,7 +180,6 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 			SPV_REFLECT_TYPE_FLAG_MATRIX | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
 		auto& mt = type.traits.numeric.matrix;
 		auto compSize = type.traits.numeric.scalar.width / 8;
-		// auto varStr = std::string{};
 		auto scalarType = type.type_flags & scalarFlags;
 		auto rowMajor = bvar.decoration_flags & SPV_REFLECT_DECORATION_ROW_MAJOR;
 
@@ -189,29 +194,18 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		imGuiText("{}{}:", bvar.name, deco);
 
 		ImGui::NextColumn();
-		// imGuiText("{}", varStr);
 
 		if(ImGui::BeginTable("Matrix", mt.column_count)) {
 			for(auto r = 0u; r < mt.row_count; ++r) {
 				ImGui::TableNextRow();
 
-				// auto* sep = "";
 				for(auto c = 0u; c < mt.column_count; ++c) {
 					auto offset = rowMajor ? r * mt.stride + c * compSize : c * mt.stride + r * compSize;
 					auto d = data.subspan(offset, compSize);
 					auto var = formatScalar(scalarType, type.traits.numeric, d);
-					// ugh, does not work with imgui. Non-monospace font
-					// varStr += dlg::format("{}{}{}{}{}{}{}{}", sep, std::fixed, std::setfill(' '), std::right,
-					// 	std::showpos, std::setprecision(5), std::setw(5), var);
-					// varStr += dlg::format("{}{}{}{}{}", sep, std::fixed, std::setprecision(5), std::setw(5), var);
-					// varStr += dlg::format("{}{}", sep, var);
-					// sep = ", ";
-
 					ImGui::TableNextColumn();
 					imGuiText("{}", var);
 				}
-
-				// varStr += "\n";
 			}
 
 			ImGui::EndTable();
@@ -264,6 +258,230 @@ void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 	} else {
 		displayNonArray(bvar, data);
 	}
+}
+
+template<typename T>
+std::string readFormat(u32 count, span<const std::byte> src) {
+	auto ret = std::string {};
+	auto sep = "";
+	for(auto i = 0u; i < count; ++i) {
+		ret += dlg::format("{}{}", sep, read<T>(src));
+		sep = ", ";
+	}
+
+	dlg_assert(src.empty());
+	return ret;
+}
+
+template<typename T>
+std::string readFormatNorm(u32 count, span<const std::byte> src, float mult,
+		float clampMin, float clampMax) {
+	auto ret = std::string {};
+	auto sep = "";
+	for(auto i = 0u; i < count; ++i) {
+		auto val = std::clamp(read<T>(src) * mult, clampMin, clampMax);
+		ret += dlg::format("{}{}", sep, val);
+		sep = ", ";
+	}
+
+	dlg_assert(src.empty());
+	return ret;
+}
+
+// TODO: support compresssed formats!
+// TODO: we only use this for vertex input. Does rgb/bgr order matter?
+//   in that case we need to seriously rework this, more something
+//   like the format read function in util/util.hpp
+std::string readFormat(VkFormat format, span<const std::byte> src) {
+	u32 numChannels = FormatChannelCount(format);
+	u32 componentSize = FormatElementSize(format) / numChannels;
+
+	if(FormatIsFloat(format)) {
+		switch(componentSize) {
+			case 2: return readFormat<f16>(numChannels, src);
+			case 4: return readFormat<float>(numChannels, src);
+			case 8: return readFormat<double>(numChannels, src);
+			default: break;
+		}
+	} else if(FormatIsUInt(format) || FormatIsUScaled(format)) {
+		switch(componentSize) {
+			case 1: return readFormat<u8>(numChannels, src);
+			case 2: return readFormat<u16>(numChannels, src);
+			case 4: return readFormat<u32>(numChannels, src);
+			case 8: return readFormat<u64>(numChannels, src);
+			default: break;
+		}
+	} else if(FormatIsInt(format) || FormatIsSScaled(format)) {
+		switch(componentSize) {
+			case 1: return readFormat<i8>(numChannels, src);
+			case 2: return readFormat<i16>(numChannels, src);
+			case 4: return readFormat<i32>(numChannels, src);
+			case 8: return readFormat<i64>(numChannels, src);
+			default: break;
+		}
+	} else if(FormatIsUNorm(format)) {
+		switch(componentSize) {
+			case 1: return readFormatNorm<u8> (numChannels, src, 1 / 255.f, 0.f, 1.f);
+			case 2: return readFormatNorm<u16>(numChannels, src, 1 / 65536.f, 0.f, 1.f);
+			default: break;
+		}
+	} else if(FormatIsSNorm(format)) {
+		switch(componentSize) {
+			case 1: return readFormatNorm<i8> (numChannels, src, 1 / 127.f, -1.f, 1.f);
+			case 2: return readFormatNorm<i16>(numChannels, src, 1 / 32767.f, -1.f, 1.f);
+			default: break;
+		}
+	} else if(format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) {
+		auto rgb = e5b9g9r9ToRgb(read<u32>(src));
+		return dlg::format("{}", rgb[0], rgb[1], rgb[2]);
+	}
+
+	// TODO: a lot of formats not supported yet!
+
+	dlg_warn("Format {} not supported", vk::name(format));
+	return "<Unsupported format>";
+}
+
+void displayDs(Gui& gui, const Command& cmd) {
+	dlg_assert(gui.cbGui().hook_);
+	auto& hook = *gui.cbGui().hook_;
+	if(!hook.state) {
+		ImGui::Text("Waiting for a submission...");
+		return;
+	}
+
+	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
+	if((dispatchCmd && !dispatchCmd->state.pipe) || (drawCmd && !drawCmd->state.pipe)) {
+		ImGui::Text("Pipeline was destroyed, can't interpret content");
+		return;
+	}
+
+	dlg_assert(hook.copyDS);
+	auto [setID, bindingID, elemID] = *hook.copyDS;
+
+	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
+	if(setID >= dss.size()) {
+		ImGui::Text("Set not bound");
+		dlg_warn("Set not bound? Shouldn't happen");
+		return;
+	}
+
+	auto* set = dss[setID].ds;
+	if(!set) {
+		ImGui::Text("Set was destroyed/invalidated");
+		return;
+	}
+
+	if(bindingID >= set->bindings.size()) {
+		ImGui::Text("Binding not bound");
+		dlg_warn("Binding not bound? Shouldn't happen");
+		return;
+	}
+
+	auto& binding = set->bindings[bindingID];
+	if(elemID >= binding.size()) {
+		ImGui::Text("Element not bound");
+		dlg_warn("Element not bound? Shouldn't happen");
+		return;
+	}
+
+	auto& elem = binding[elemID];
+	if(!elem.valid) {
+		ImGui::Text("Binding element not valid");
+		// NOTE: i guess this can happen with descriptor indexing
+		// dlg_warn("Binding element not valid? Shouldn't happen");
+		return;
+	}
+
+	dlg_assert(bindingID < set->layout->bindings.size());
+	auto bindingLayout = set->layout->bindings[bindingID];
+	auto dsType = bindingLayout.descriptorType;
+	auto dsCat = category(dsType);
+
+	auto& dsc = hook.state->dsCopy;
+
+	// == Buffer ==
+	if(dsCat == DescriptorCategory::buffer) {
+		auto* buf = std::get_if<CopiedBuffer>(&dsc);
+		if(!buf) {
+			dlg_assert(dsc.index() == 0);
+			imGuiText("Error: {}", hook.state->errorMessage);
+			return;
+		}
+
+		// general info
+		auto& srcBuf = nonNull(elem.bufferInfo.buffer);
+		refButton(gui, srcBuf);
+		ImGui::SameLine();
+		drawOffsetSize(elem.bufferInfo);
+
+		// interpret content
+		if(dispatchCmd) {
+			auto& pipe = nonNull(dispatchCmd->state.pipe);
+			auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
+			if(setID < refl.descriptor_set_count) {
+				auto& set = refl.descriptor_sets[setID];
+				if(bindingID < set.binding_count) {
+					auto& binding = *set.bindings[bindingID];
+					auto* ptr = buf->copy.get();
+					display(binding.block, {ptr, buf->buffer.size});
+				} else {
+					ImGui::Text("Binding not used in pipeline");
+				}
+			} else {
+				ImGui::Text("Binding not used in pipeline");
+			}
+		} else {
+			dlg_assert(drawCmd);
+			SpvReflectBlockVariable* bestVar = nullptr;
+
+			// In all graphics pipeline stages, find the block with
+			// that covers the most of the buffer
+			// NOTE: could add explicit dropdown, selecting the
+			// stage to view.
+			for(auto& stage : drawCmd->state.pipe->stages) {
+				auto& refl = nonNull(nonNull(stage.spirv).reflection);
+				if(setID < refl.descriptor_set_count) {
+					auto& set = refl.descriptor_sets[setID];
+					if(bindingID < set.binding_count) {
+						auto& binding = *set.bindings[bindingID];
+						if(binding.block.type_description && (
+								!bestVar || binding.block.size > bestVar->size)) {
+							bestVar = &binding.block;
+						}
+					}
+				}
+			}
+
+			if(bestVar) {
+				auto* ptr = buf->copy.get();
+				display(*bestVar, {ptr, buf->buffer.size});
+			} else {
+				ImGui::Text("Binding not used in pipeline");
+			}
+		}
+	}
+
+	// == Image ==
+	if(needsImageView(dsType)) {
+		auto* img = std::get_if<CopiedImage>(&dsc);
+		if(!img) {
+			dlg_assert(dsc.index() == 0);
+			imGuiText("Error: {}", hook.state->errorMessage);
+			return;
+		}
+
+		// TODO: display additional information, proper image viewer
+		//   but also link original image/imageView
+		gui.cbGui().displayImage(*img);
+	}
+
+	// == Sampler ==
+	// TODO
+
+	// == BufferView ==
+	// TODO
 }
 
 // If it returns true, should display own command stuff in second window
@@ -424,7 +642,27 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 		}
 	}
 
-	// TODO: display index/vertex buffers for draw command
+	if(drawCmd) {
+		auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+		if(hook.copyAttachment && hook.copyVertexBuffers) {
+			flags |= ImGuiTreeNodeFlags_Selected;
+		}
+
+		ImGui::TreeNodeEx("Vertex input", flags);
+		if(ImGui::IsItemClicked()) {
+			hook.unsetHookOps();
+			hook.copyVertexBuffers = true;
+
+			auto indexedCmd = dynamic_cast<const DrawIndexedCmd*>(drawCmd);
+			auto indirectCmd = dynamic_cast<const DrawIndirectCmd*>(drawCmd);
+			auto indirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(drawCmd);
+			if(indexedCmd ||
+					(indirectCmd && indirectCmd->indexed) ||
+					(indirectCountCmd && indirectCountCmd->indexed)) {
+				hook.copyIndexBuffers = true;
+			}
+		}
+	}
 
 	// display push constants
 	if(dispatchCmd && dispatchCmd->state.pipe) {
@@ -472,56 +710,110 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 	//   e.g. link to the respective resources, descriptor sets etc
 	auto cmdInfo = true;
 	if(hook.copyDS) {
-		if(hook.state) {
-			auto& dsc = hook.state->dsCopy;
-			if(auto* buf = std::get_if<CopiedBuffer>(&dsc)) {
-				auto [setID, bindingID, elemID] = *hook.copyDS;
-
-				if(dispatchCmd) {
-					auto& pipe = nonNull(dispatchCmd->state.pipe);
-					auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
-					dlg_assert(refl.descriptor_set_count > setID);
-					auto& set = refl.descriptor_sets[setID];
-					dlg_assert(set.binding_count > bindingID);
-					auto& binding = set.bindings[bindingID];
-
-					auto* ptr = buf->copy.get();
-					display(binding->block, {ptr, buf->buffer.size});
-				} else {
-					// TODO: just use first matching shader?
-					// or maybe use the shader with the largest range?
-					// If shaders have different blocks allow to choose which
-					// one is displayed?
-					dlg_assert(drawCmd);
-					ImGui::Text("TODO: buffer blocks for graphics state");
-				}
-			} else if(auto* img = std::get_if<CopiedImage>(&dsc)) {
-				// TODO: display additional information, proper image viewer
-				gui.cbGui().displayImage(*img);
-			} else {
-				// TODO: show *what* went wrong. This only happens for
-				// a very specific reason, transmit if from command hook!
-				ImGui::Text("Something went wrong");
-			}
-		} else {
-			ImGui::Text("Waiting for a submission...");
-		}
-
+		displayDs(gui, cmd);
 		cmdInfo = false;
 	} else if(hook.copyVertexBuffers) {
-		// TODO: implement
-		// TODO: maybe no vertex buffers are bound? maybe just
-		//   index buffers/no buffers at all?
-		ImGui::Text("TODO: show vertex buffer viewer");
+		dlg_assert(drawCmd);
+		if(!drawCmd || !drawCmd->state.pipe) {
+			ImGui::Text("Pipeline was destroyed, can't interpret state");
+		} else if(!hook.state) {
+			ImGui::Text("Waiting for a submission...");
+		} else if(hook.state->vertexBufCopies.size() < drawCmd->state.pipe->vertexBindings.size()) {
+			if(!hook.state->errorMessage.empty()) {
+				imGuiText("Error: {}", hook.state->errorMessage);
+			} else {
+				ImGui::Text("Error: not enough vertex buffers bound");
+			}
+		} else {
+			// TODO: display binding information
+			// TODO: how to display indices?
+			// TODO: only show vertex range used for draw call
+
+			auto& pipe = *drawCmd->state.pipe;
+
+			SpvReflectShaderModule* vertStage = nullptr;
+			for(auto& stage : pipe.stages) {
+				if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
+					vertStage = &nonNull(nonNull(stage.spirv).reflection);
+					break;
+				}
+			}
+
+			if(!vertStage) {
+				ImGui::Text("Grahpics Pipeline has no vertex stage :o");
+			} else {
+				auto flags = ImGuiTableFlags_Borders;
+
+				// match bindings to input variables into
+				// (pipe.vertexAttrib, vertStage->input_variables) id pairs
+				std::vector<std::pair<u32, u32>> attribs;
+				for(auto a = 0u; a < pipe.vertexAttribs.size(); ++a) {
+					auto& attrib = pipe.vertexAttribs[a];
+					for(auto i = 0u; i < vertStage->input_variable_count; ++i) {
+						auto& iv = *vertStage->input_variables[i];
+						if(iv.location == attrib.location) {
+							attribs.push_back({a, i});
+						}
+					}
+				}
+
+				// TODO sort by input location?
+
+				if(attribs.empty()) {
+					ImGui::Text("No Vertex input");
+				} else if(ImGui::BeginTable("Vertices", attribs.size(), flags)) {
+					for(auto& attrib : attribs) {
+						ImGui::NextColumn();
+						auto& iv = *vertStage->input_variables[attrib.second];
+						ImGui::TableSetupColumn(iv.name);
+					}
+
+					ImGui::TableHeadersRow();
+					ImGui::TableNextRow();
+
+					auto finished = false;
+					auto id = 0u;
+					while(!finished) {
+						for(auto& [aID, _] : attribs) {
+							auto& attrib = pipe.vertexAttribs[aID];
+							ImGui::TableNextColumn();
+
+							auto& binding = pipe.vertexBindings[attrib.binding];
+							auto& buf = hook.state->vertexBufCopies[attrib.binding];
+							auto off = binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX ?
+								id * binding.stride : 0u;
+							off += attrib.offset;
+
+							// TODO: compressed support?
+							auto size = FormatElementSize(attrib.format);
+
+							if(off + size > buf.buffer.size) {
+								finished = true;
+								break;
+							}
+
+							auto* ptr = buf.copy.get() + off;
+							auto str = readFormat(attrib.format, {ptr, size});
+
+							imGuiText("{}", str);
+						}
+
+						++id;
+						ImGui::TableNextRow();
+					}
+
+					ImGui::EndTable();
+				}
+			}
+		}
+
 		cmdInfo = false;
 	} else if(hook.copyAttachment) {
 		if(hook.state) {
 			if(hook.state->attachmentCopy.image) {
 				gui.cbGui().displayImage(hook.state->attachmentCopy);
 			} else {
-				// TODO: show *what* went wrong. This only happens for
-				// a very specific reason, transmit if from command hook!
-				ImGui::Text("Something went wrong");
+				imGuiText("Error: {}", hook.state->errorMessage);
 			}
 		} else {
 			ImGui::Text("Waiting for a submission...");

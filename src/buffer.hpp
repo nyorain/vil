@@ -28,6 +28,12 @@ struct BufferView : DeviceHandle {
 	~BufferView();
 };
 
+// util
+// When range isn't VK_WHOLE_SIZE, simply returns range.
+// Otherwise returns fullSize - offset.
+VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize range);
+
+// API
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
     VkDevice                                    device,
     const VkBufferCreateInfo*                   pCreateInfo,

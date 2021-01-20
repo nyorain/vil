@@ -18,19 +18,6 @@ u32 findLSB(u32 v) {
 	return blackMagic[((u32)((v & (~v + 1)) * 0x077CB531U)) >> 27];
 }
 
-bool isDepthFormat(VkFormat format) {
-	switch(format) {
-		case VK_FORMAT_D32_SFLOAT:
-		case VK_FORMAT_D32_SFLOAT_S8_UINT:
-		case VK_FORMAT_D24_UNORM_S8_UINT:
-		case VK_FORMAT_D16_UNORM:
-		case VK_FORMAT_D16_UNORM_S8_UINT:
-			return true;
-		default:
-			return false;
-	}
-}
-
 VkImageType minImageType(VkExtent3D size, unsigned minDim) {
 	if(size.depth > 1 || minDim > 2) {
 		return VK_IMAGE_TYPE_3D;

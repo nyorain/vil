@@ -5,6 +5,11 @@
 
 namespace fuen {
 
+VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize range) {
+	dlg_assert(offset <= fullSize);
+	return range == VK_WHOLE_SIZE ? fullSize - offset : range;
+}
+
 // Classes
 Buffer::~Buffer() {
 	if(!dev) {

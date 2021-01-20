@@ -8,6 +8,7 @@
 #include <memory>
 #include <variant>
 #include <optional>
+#include <string>
 
 namespace fuen {
 
@@ -61,6 +62,10 @@ struct CommandHookState {
 	std::vector<CopiedBuffer> vertexBufCopies {}; // draw cmd: Copy of all vertex buffers
 	CopiedBuffer indexBufCopy {}; // draw cmd: Copy of index buffer
 	CopiedImage attachmentCopy {}; // Copy of selected attachment
+
+	// When a requested resource cannot be retrieved, this holds the reason.
+	// TODO: kinda messy, should likely be provided per-resource
+	std::string errorMessage;
 };
 
 // Commandbuffer hook that allows us to forward a modified version

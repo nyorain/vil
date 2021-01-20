@@ -175,8 +175,7 @@ constexpr A align(A offset, B alignment) {
 }
 
 // Mainly taken from tkn/formats
-bool isDepthFormat(VkFormat);
-// bool isStencilFormat(VkFormat);
+// TODO: most can be removed
 VkImageType minImageType(VkExtent3D, unsigned minDim = 1u);
 VkImageViewType minImageViewType(VkExtent3D, unsigned layers,
 	bool cubemap, unsigned minDim = 1u);

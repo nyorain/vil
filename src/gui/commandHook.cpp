@@ -341,7 +341,8 @@ void CommandHookRecord::initState(RecordInfo& info) {
 
 		// TODO: we could likely support this
 		if(hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) {
-			dlg_trace("Can't split multiview renderpass");
+			state->errorMessage = "Splitting multiview renderpass not implemented";
+			dlg_trace(state->errorMessage);
 			info.splitRenderPass = false;
 		}
 	}
@@ -356,7 +357,8 @@ void CommandHookRecord::initState(RecordInfo& info) {
 
 		if(!splittable(desc, info.hookedSubpass)) {
 			info.splitRenderPass = false;
-			dlg_trace("Can't split render pass");
+			state->errorMessage = "Can't split render pass (due to resolve attachments)";
+			dlg_trace(state->errorMessage);
 		} else {
 			auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
 			rp0 = create(dev, rpi0);
@@ -531,20 +533,23 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 }
 
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
-		VkImageLayout srcLayout, const VkImageSubresource& srcSubres) {
+		VkImageLayout srcLayout, const VkImageSubresource& srcSubres,
+		std::string& errorMessage) {
 	if(src.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
 		// TODO: support multisampling via vkCmdResolveImage
 		//   alternatively we could check if the image is
 		//   resolved at the end of the subpass and then simply
 		//   copy that.
-		dlg_debug("Can't copy/display multisampled attachment");
+		errorMessage = "Can't copy/display multisampled attachment";
+		dlg_trace(errorMessage);
 		return;
 	} else if(!src.hasTransferSrc) {
 		// There are only very specific cases where this can happen,
 		// we could work around some of them (e.g. transient
 		// attachment images or swapchain images that don't
 		// support transferSrc).
-		dlg_debug("Can't display image copy; original can't be copied");
+		errorMessage = "Can't display image copy; original can't be copied";
+		dlg_trace(errorMessage);
 		return;
 	}
 
@@ -687,7 +692,8 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	} else if(auto* dispatchCmd = dynamic_cast<DispatchCmdBase*>(&bcmd)) {
 		dsState = &dispatchCmd->state;
 	} else {
-		dlg_error("unsupported descriptor command");
+		state->errorMessage = "Unsupported descriptor command";
+		dlg_error("{}", state->errorMessage);
 	}
 
 	if(!dsState) {
@@ -756,12 +762,13 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 				subres.aspectMask = imgView->ci.subresourceRange.aspectMask;
 				subres.arrayLayer = imgView->ci.subresourceRange.baseArrayLayer;
 				subres.mipLevel = imgView->ci.subresourceRange.baseMipLevel;
-				initAndCopy(dev, cb, dst, *imgView->img, layout, subres);
+				initAndCopy(dev, cb, dst, *imgView->img, layout, subres, state->errorMessage);
 			}
 		} else {
 			// TODO: bad message, maybe just show a link to the sampler
 			//   in the commands.cpp functions?
-			dlg_warn("Nothing to copy: just a sampler bound");
+			state->errorMessage = "Just a sampler bound";
+			dlg_warn(state->errorMessage);
 		}
 	} else if(cat == DescriptorCategory::buffer) {
 		auto& dst = state->dsCopy.emplace<CopiedBuffer>();
@@ -780,7 +787,8 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		// dlg_assert(elem.bufferView->buffer);
 		// copyBuffer(dst, elem.bufferView->buffer->handle,
 		// 	elem.bufferView->ci.offset, elem.bufferView->ci.range);
-		dlg_error("bufferview ds copy unimplemented");
+		state->errorMessage = "BufferView ds copy unimplemented";
+		dlg_error(state->errorMessage);
 	}
 }
 
@@ -802,9 +810,11 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 			initAndCopy(dev, cb, state->indirectCopy, cmd->buffer->handle, cmd->offset, size);
 		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
 			(void) cmd;
-			dlg_error("not implemented");
+			state->errorMessage = "DrawIndirectCount hook not implemented";
+			dlg_error(state->errorMessage);
 		} else {
-			dlg_error("unsupported indirect command");
+			state->errorMessage = "Unsupported indirect command";
+			dlg_error(state->errorMessage);
 		}
 	}
 
@@ -862,7 +872,8 @@ void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
 			auto* image = imageView->img;
 
 			if(!image) {
-				dlg_warn("ImageView has no associated image");
+				// NOTE: this should not happen, not a regular error.
+				dlg_error("ImageView has no associated image");
 			} else {
 				auto& srcImg = *image;
 				auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
@@ -872,7 +883,8 @@ void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
 				subres.aspectMask = imageView->ci.subresourceRange.aspectMask;
 				subres.arrayLayer = imageView->ci.subresourceRange.baseArrayLayer;
 				subres.mipLevel = imageView->ci.subresourceRange.baseMipLevel;
-				initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout, subres);
+				initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout, subres,
+					state->errorMessage);
 			}
 		}
 	}

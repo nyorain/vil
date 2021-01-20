@@ -87,12 +87,12 @@ struct CommandAllocator {
 
 template<typename T>
 bool operator==(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noexcept {
-	return a.cb == b.cb;
+	return a.rec == b.rec;
 }
 
 template<typename T>
 bool operator!=(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noexcept {
-	return a.cb != b.cb;
+	return a.rec != b.rec;
 }
 
 // template<typename T> using CommandAllocPageVector = PageVector<T, CommandAllocator<T>>;
@@ -184,11 +184,10 @@ ComputeState copy(CommandBuffer& cb, const ComputeState& src);
 struct UsedImage {
 	UsedImage(Image& img, CommandRecord& rec) noexcept : image(&img), commands(rec) {}
 
-	// NOTE: copy constructors shouldn't be needed, msvc bullshittery
-	UsedImage(const UsedImage&) = default;
-	UsedImage& operator=(const UsedImage&) = default;
-	UsedImage(UsedImage&&) noexcept = default;
-	UsedImage& operator=(UsedImage&&) noexcept = default;
+	// UsedImage(const UsedImage&) = default;
+	// UsedImage& operator=(const UsedImage&) = default;
+	UsedImage(UsedImage&&) noexcept;
+	UsedImage& operator=(UsedImage&&) noexcept;
 
 	Image* image {};
 	bool layoutChanged {};
@@ -201,11 +200,10 @@ struct UsedImage {
 struct UsedHandle {
 	UsedHandle(DeviceHandle& h, CommandRecord& rec) noexcept : handle(&h), commands(rec) {}
 
-	// NOTE: copy constructors shouldn't be needed, msvc bullshittery
-	UsedHandle(const UsedHandle&) = default;
-	UsedHandle& operator=(const UsedHandle&) = default;
-	UsedHandle(UsedHandle&&) noexcept = default;
-	UsedHandle& operator=(UsedHandle&&) noexcept = default;
+	// UsedHandle(const UsedHandle&) = default;
+	// UsedHandle& operator=(const UsedHandle&) = default;
+	UsedHandle(UsedHandle&&) noexcept;
+	UsedHandle& operator=(UsedHandle&&) noexcept;
 
 	DeviceHandle* handle;
 	CommandAllocList<Command*> commands;

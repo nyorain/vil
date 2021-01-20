@@ -517,10 +517,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 				} case DescriptorCategory::buffer: {
 					refButtonExpect(*gui_, binding.bufferInfo.buffer);
 					ImGui::SameLine();
-					imGuiText("Offset {}, Size", binding.bufferInfo.offset);
-					ImGui::SameLine();
-					auto range = binding.bufferInfo.range;
-					range == VK_WHOLE_SIZE ? imGuiText("wholeSize") : imGuiText("{}", range);
+					drawOffsetSize(binding.bufferInfo);
 					break;
 				} case DescriptorCategory::bufferView:
 					refButtonExpect(*gui_, binding.bufferView);

@@ -144,6 +144,37 @@ void copyChain(CommandBuffer& cb, const void*& pNext) {
 	}
 }
 
+// NOTE: We need them to be noexcept. We can't rely on the internal
+//   std::list to be noexcept movable though. So we implement it ourselves,
+//   effectively intentionally crashing the program (throwing from noexcept)
+//   when an stl throws from the move operation.
+//   Could be fixed later on with our own linked-list/grid.
+UsedImage::UsedImage(UsedImage&& rhs) noexcept :
+		image(rhs.image),
+		layoutChanged(rhs.layoutChanged),
+		finalLayout(rhs.finalLayout),
+		commands(std::move(rhs.commands)) {
+}
+
+UsedImage& UsedImage::operator=(UsedImage&& rhs) noexcept {
+	image = rhs.image;
+	layoutChanged = rhs.layoutChanged;
+	finalLayout = rhs.finalLayout;
+	commands = std::move(rhs.commands);
+	return *this;
+}
+
+UsedHandle::UsedHandle(UsedHandle&& rhs) noexcept :
+		handle(rhs.handle),
+		commands(std::move(rhs.commands)) {
+}
+
+UsedHandle& UsedHandle::operator=(UsedHandle&& rhs) noexcept {
+	handle = rhs.handle;
+	commands = std::move(rhs.commands);
+	return *this;
+}
+
 // Record
 void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 	if(!dev) {

@@ -175,6 +175,15 @@ copy(ReadBuf src) {
 	return ret;
 }
 
+template<typename T>
+std::enable_if_t<BytesConvertible<T>, T>
+copyExact(ReadBuf src) {
+	T ret;
+	NYTL_BYTES_ASSERT(src.size() == sizeof(ret));
+	std::memcpy(&ret, src.data(), sizeof(ret));
+	return ret;
+}
+
 // Example for writing a fixed-size data segment:
 //
 // WriteBuf dst = ...;

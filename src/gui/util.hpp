@@ -3,6 +3,8 @@
 #include <fwd.hpp>
 #include <imgui/imgui.h>
 #include <dlg/dlg.hpp>
+#include <ds.hpp>
+#include <buffer.hpp>
 #include <string>
 
 namespace fuen {
@@ -66,6 +68,20 @@ inline bool imGuiTextMultiline(const char* label, std::string& output) {
 	auto ret = ImGui::InputTextMultiline(label, (char*) output.c_str(), output.capacity() + 1,
 		{0, 0}, ImGuiInputTextFlags_CallbackResize, imGuiTextStringCallback, (void*) &output);
 	return ret;
+}
+
+inline void drawOffsetSize(const DescriptorSet::BufferInfo& info) {
+	if(info.range == VK_WHOLE_SIZE) {
+		if(info.buffer) {
+			dlg_assert(info.buffer->ci.size >= info.offset);
+			auto range = info.buffer->ci.size - info.offset;
+			imGuiText("Offset {}, whole size ({})", info.offset, range);
+		} else {
+			imGuiText("Offset {}, whole size", info.offset);
+		}
+	} else {
+		imGuiText("Offset {}, Size {}", info.offset, info.range);
+	}
 }
 
 } // namesapce fuen
