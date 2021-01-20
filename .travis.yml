@@ -2,7 +2,7 @@
 # - test debug and release builds
 # - test 32-bit build? Not sure if we even want to support it though.
 # - add some basic testing, not needing a gpu
-# - build mingw and visual studio
+# - build mingw and visual studio, just use https://chocolatey.org/packages/mingw
 # - test meson visual studio backend, msbuild
 # - use apt addons instead of apt-get?
 
@@ -35,10 +35,10 @@ matrix:
 
 install:
   - pip3 install meson ninja
-  - if ["$TRAVIS_OS_NAME" == "linux"]; then sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get -y install valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
     libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
     libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
-    libxkbcommon-x11-dev libx11-dev libx11-xcb-dev fi
+    libxkbcommon-x11-dev libx11-dev libx11-xcb-dev; fi
 
 script:
   # TODO: fix for x11 deps
