@@ -9,6 +9,16 @@
 
 matrix:
   include:
+    # windows
+    - name: "Windows"
+      os: windows           # Windows 10.0.17134 N/A Build 17134
+      language: shell
+      env: PATH="/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/MSBuild/Current/Bin:/c/Python39:/c/Python39/Scripts:$PATH"
+      before_install:
+        - choco install python --version 3.9.0
+        - choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+        - python --version
+        - python -m pip install --upgrade pip
     # linux, gcc
     - name: "Linux GCC"
       env: 
@@ -27,18 +37,6 @@ matrix:
       os: linux
       dist: focal
       language: python
-    # windows
-    - name: "Windows"
-      os: windows           # Windows 10.0.17134 N/A Build 17134
-      language: shell
-      env: PATH="/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/MSBuild/Current/Bin:/c/Python39:/c/Python39/Scripts:$PATH"
-      before_install:
-        - choco install python --version 3.9.0
-        - choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
-        - python --version
-        - python -m pip install --upgrade pip
-        - call "/c/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Auxiliary/Build/vcvarsall.bat" x64
-
 install:
   - pip3 install meson ninja
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get -y install clang-10 valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
@@ -47,9 +45,11 @@ install:
     libxkbcommon-x11-dev libx11-dev libx11-xcb-dev; fi
 
 script:
+  - if [ "$TRAVIS_OS_NAME" == "windows" ]; then cmd.exe //C 'C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64 && meson build --backend=ninja; fi
+  - if [ "$TRAVIS_OS_NAME" == "windows" ]; then cmd.exe //C 'C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat' x64 && ninja -C build; fi
   # TODO: fix for x11 deps
-  - meson build -Dwith_x11=false
-  - ninja -C build
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then meson build -Dwith_x11=false --backend=ninja; fi
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then ninja -C build; fi
   # yeah, we can't test it, sadly.
   # Would need provided GPUs for that (or a CPU implementation but
   # I won't spend months trying to get this running on travis...)
