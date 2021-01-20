@@ -1,2 +1,5 @@
 # option('with_x11', type: 'feature', value: 'disabled')
 option('with_x11', type: 'boolean', value: true)
+
+option('with_example', type: 'boolean', value: false)
+option('with_tests', type: 'boolean', value: false)

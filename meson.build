@@ -217,5 +217,10 @@ configure_file(
 	configuration: conf_data
 )
 
-subdir('docs/example')
-subdir('docs/test')
+if get_option('with_example')
+	subdir('docs/example')
+endif
+
+if get_option('with_tests')
+	subdir('docs/test')
+endif
