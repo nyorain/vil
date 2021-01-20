@@ -31,7 +31,9 @@ args = cc.get_supported_arguments([
 
 	# for clang
 	'-Wno-missing-braces',
+])
 
+link_args = cc.get_supported_arguments([
 	# unix
 	'-Wl,-Bsymbolic-functions',
 	'-Wl,-z,relro',
@@ -192,6 +194,7 @@ fuen_layer = shared_library(
 	dependencies: deps,
 	include_directories: inc,
 	cpp_args: args,
+	link_args: link_args,
 	install: true
 )
 
