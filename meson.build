@@ -8,6 +8,7 @@ project('fuencaliente', ['c', 'cpp'],
 	]
 )
 
+shader_inc = []
 subdir('src/data') # compile shaders
 
 cc = meson.get_compiler('cpp')
@@ -155,7 +156,6 @@ src = files(
 
 public_inc = include_directories('include/')
 private_inc = include_directories('src/')
-shader_inc = include_directories('src/data/')
 
 inc = [
 	public_inc,
