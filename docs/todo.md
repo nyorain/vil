@@ -10,6 +10,7 @@ v0.1, goal: end of january 2021
 
 - [ ] setup CI for windows (msvc and mingw) and linux
 - [ ] better pipeline display in resource viewer
+	- [ ] especially inputs/outputs of shaders
 - [x] when checking if handle is used by cb, consider descriptor sets for images, buffers & bufferViews!
       when it's checked for an image/buffer, consider all descriptor of views as well.
 - [ ] figure out "instance_extensions" in the layer json.
@@ -19,7 +20,7 @@ v0.1, goal: end of january 2021
 	- [ ] CmdSetEvent
 	- [ ] CmdWaitEvents
 - [ ] I/O inspector for transfer commands
-- [ ] support CmdDrawIndirectCount in gui
+- [ ] full support CmdDrawIndirectCount in gui (most stuff not implement in CommandHook)
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [ ] new per-command input/output overview, allowing to view *all* resources
@@ -30,6 +31,8 @@ v0.1, goal: end of january 2021
 	- [ ] implement buffer viewer (infer information from shaders)
 	- [ ] factor out image viewer from resources into own component; use it here.
 	- [ ] re-add timing display in command inspector
+	- [ ] for storage buffers/storage images, a before/after/change
+	      view would be really nice. We can do that.
 - [ ] proper layout of child windows with resizing
       See https://github.com/ocornut/imgui/issues/319
 - [ ] better enumString.hpp. Remove prefixes

@@ -11,6 +11,7 @@
 #include <imgui/imgui_internal.h>
 #include <spirv_reflect.h>
 #include <vk/enumString.hpp>
+#include <iomanip>
 
 namespace fuen {
 
@@ -98,85 +99,170 @@ void addToArgumentsDesc(std::vector<std::string>& ret, const BoundDescriptorSet&
 	ret.push_back(name(set.ds).name);
 }
 
-void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
+std::string formatScalar(SpvReflectTypeFlags type,
+		const SpvReflectNumericTraits& traits, span<const std::byte> data) {
 	// TODO
 	// - support non-32-bit scalars
-	// - better vector formatting
-	// - matrices
-	// - arrays
+	if(type == SPV_REFLECT_TYPE_FLAG_INT) {
+		dlg_assert(traits.scalar.width == 32);
+		if(traits.scalar.signedness) {
+			auto var = copy<i32>(data);
+			return dlg::format("{}", var);
+		} else {
+			auto var = copy<u32>(data);
+			return dlg::format("{}", var);
+		}
+	} else if(type == SPV_REFLECT_TYPE_FLAG_FLOAT) {
+		dlg_assert(traits.scalar.width == 32);
+		auto var = copy<float>(data);
+		return dlg::format("{}", var);
+	} else if(type == SPV_REFLECT_TYPE_FLAG_BOOL) {
+		dlg_assert(traits.scalar.width == 32);
+		auto var = copy<u32>(data);
+		return dlg::format("{}", bool(var));
+	}
 
+	dlg_warn("Unsupported scalar type");
+	return "";
+}
+
+void display(SpvReflectBlockVariable& bvar, span<const std::byte> data);
+
+void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 	auto& type = nonNull(bvar.type_description);
 	data = data.subspan(bvar.offset);
 
-	if(type.type_flags == SPV_REFLECT_TYPE_FLAG_BOOL) {
-		dlg_assert(type.traits.numeric.scalar.width == 32);
-		auto var = copy<u32>(data.first(bvar.size));
-		imGuiText("{} (bool): {}", bvar.name, bool(var));
-	} else if(type.type_flags == SPV_REFLECT_TYPE_FLAG_FLOAT) {
-		dlg_assert(type.traits.numeric.scalar.width == 32);
-		auto var = copy<float>(data.first(bvar.size));
-		imGuiText("{} (float): {}", bvar.name, var);
-	} else if(type.type_flags == SPV_REFLECT_TYPE_FLAG_INT) {
-		dlg_assert(type.traits.numeric.scalar.width == 32);
-		if(type.traits.numeric.scalar.signedness) {
-			auto var = copy<i32>(data.first(bvar.size));
-			imGuiText("{} (i32): {}", bvar.name, var);
-		} else {
-			auto var = copy<u32>(data.first(bvar.size));
-			imGuiText("{} (u32): {}", bvar.name, var);
-		}
-	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_VECTOR &&
-			!(type.type_flags & SPV_REFLECT_TYPE_FLAG_MATRIX)) {
+	auto scalarFlags =
+		SPV_REFLECT_TYPE_FLAG_BOOL |
+		SPV_REFLECT_TYPE_FLAG_FLOAT |
+		SPV_REFLECT_TYPE_FLAG_INT;
+	if((type.type_flags & ~scalarFlags) == 0) { // must be scalar
+		auto val = formatScalar(type.type_flags, type.traits.numeric, data.first(bvar.size));
+		// imGuiText("{}: {}", bvar.name, val);
+
+		ImGui::Columns(2);
+		imGuiText("{}:", bvar.name);
+
+		ImGui::NextColumn();
+		imGuiText("{}", val);
+		ImGui::Columns();
+	} else if((type.type_flags & ~(scalarFlags | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
 		auto comps = type.traits.numeric.vector.component_count;
-		auto stype = "?";
-		std::string varStr = "(";
-		if(type.type_flags & SPV_REFLECT_TYPE_FLAG_FLOAT) {
-			dlg_assert(type.traits.numeric.scalar.width == 32);
-			stype = "float";
-			for(auto i = 0u; i < comps; ++i) {
-				auto var = copy<float>(data.subspan(i * 4, 4));
-				varStr += dlg::format("{}, ", var);
-			}
-		} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_BOOL) {
-			dlg_assert(type.traits.numeric.scalar.width == 32);
-			stype = "bool";
-			for(auto i = 0u; i < comps; ++i) {
-				auto var = copy<u32>(data.subspan(i * 4, 4));
-				varStr += dlg::format("{}, ", bool(var));
-			}
-		} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_INT) {
-			dlg_assert(type.traits.numeric.scalar.width == 32);
-			if(type.traits.numeric.scalar.signedness) {
-				stype = "i32";
-				for(auto i = 0u; i < comps; ++i) {
-					auto var = copy<i32>(data.subspan(i * 4, 4));
-					varStr += dlg::format("{}, ", var);
-				}
-			} else {
-				stype = "u32";
-				for(auto i = 0u; i < comps; ++i) {
-					auto var = copy<u32>(data.subspan(i * 4, 4));
-					varStr += dlg::format("{}, ", var);
-				}
-			}
+		auto* sep = "";
+		auto compSize = type.traits.numeric.scalar.width / 8;
+		auto varStr = std::string("");
+		auto scalarType = type.type_flags & scalarFlags;
+
+		for(auto i = 0u; i < comps; ++i) {
+			auto d = data.subspan(i * compSize, compSize);
+			auto var = formatScalar(scalarType, type.traits.numeric, d);
+			varStr += dlg::format("{}{}", sep, var);
+			sep = ", ";
 		}
 
-		varStr += ")";
+		// varStr += ")";
+		// imGuiText("{}: {}", bvar.name, varStr);
 
-		imGuiText("{} (vec<{}, {}>): {}", bvar.name, comps, stype, varStr);
-	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_MATRIX) {
-		imGuiText("{}: TODO matrix output not implemented", bvar.name);
+		ImGui::Columns(2);
+		imGuiText("{}:", bvar.name);
+
+		ImGui::NextColumn();
+		imGuiText("{}", varStr);
+		ImGui::Columns();
+
+	} else if((type.type_flags & ~(scalarFlags |
+			SPV_REFLECT_TYPE_FLAG_MATRIX | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
+		auto& mt = type.traits.numeric.matrix;
+		auto compSize = type.traits.numeric.scalar.width / 8;
+		// auto varStr = std::string{};
+		auto scalarType = type.type_flags & scalarFlags;
+		auto rowMajor = bvar.decoration_flags & SPV_REFLECT_DECORATION_ROW_MAJOR;
+
+		auto deco = "";
+		if(rowMajor) {
+			deco = " [row major memory]";
+		} else {
+			deco = " [column major memory]";
+		}
+
+		ImGui::Columns(2);
+		imGuiText("{}{}:", bvar.name, deco);
+
+		ImGui::NextColumn();
+		// imGuiText("{}", varStr);
+
+		if(ImGui::BeginTable("Matrix", mt.column_count)) {
+			for(auto r = 0u; r < mt.row_count; ++r) {
+				ImGui::TableNextRow();
+
+				// auto* sep = "";
+				for(auto c = 0u; c < mt.column_count; ++c) {
+					auto offset = rowMajor ? r * mt.stride + c * compSize : c * mt.stride + r * compSize;
+					auto d = data.subspan(offset, compSize);
+					auto var = formatScalar(scalarType, type.traits.numeric, d);
+					// ugh, does not work with imgui. Non-monospace font
+					// varStr += dlg::format("{}{}{}{}{}{}{}{}", sep, std::fixed, std::setfill(' '), std::right,
+					// 	std::showpos, std::setprecision(5), std::setw(5), var);
+					// varStr += dlg::format("{}{}{}{}{}", sep, std::fixed, std::setprecision(5), std::setw(5), var);
+					// varStr += dlg::format("{}{}", sep, var);
+					// sep = ", ";
+
+					ImGui::TableNextColumn();
+					imGuiText("{}", var);
+				}
+
+				// varStr += "\n";
+			}
+
+			ImGui::EndTable();
+		}
+
+		ImGui::Columns();
 	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
 		imGuiText("{}", bvar.name);
 	} else {
 		imGuiText("{}: TODO not implemented", bvar.name);
 	}
 
+	ImGui::Separator();
+
 	for(auto m = 0u; m < bvar.member_count; ++m) {
 		auto& member = bvar.members[m];
 		ImGui::Indent();
 		display(member, data);
 		ImGui::Unindent();
+	}
+}
+
+void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
+	auto& type = nonNull(bvar.type_description);
+
+	if(type.type_flags & SPV_REFLECT_TYPE_FLAG_ARRAY) {
+		auto& at = type.traits.array;
+		if(at.dims_count != 1u) {
+			// TODO: fix this
+			imGuiText("{}: TODO: multiple array dimensions not supported", bvar.name);
+		} else {
+			if(at.dims[0] == 0xFFFFFFFF) {
+				// TODO: needs spirv reflect support, see issue there
+				imGuiText("{}: TODO: specialization constant array size not supported", bvar.name);
+			} else if(at.dims[0] == 0u) {
+				// TODO: needs spirv reflect support, see issue there
+				imGuiText("{}: TODO: runtime array not supported", bvar.name);
+			} else {
+				for(auto i = 0u; i < at.dims[0]; ++i) {
+					auto d = data.subspan(i * at.stride);
+
+					imGuiText("[{}]", i);
+
+					ImGui::Indent();
+					displayNonArray(bvar, d);
+					ImGui::Unindent();
+				}
+			}
+		}
+	} else {
+		displayNonArray(bvar, data);
 	}
 }
 
@@ -204,7 +290,56 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 		hook.unsetHookOps();
 	}
 
-	// TODO: get descriptor set names from shaders, if possible
+	// TODO: this seems to need special treatment for arrays?
+	// debug with tkn/deferred gbuf pass
+	auto modBindingName = [&](const SpvReflectShaderModule& refl, u32 setID, u32 bindingID) -> const char* {
+		if(setID < refl.descriptor_binding_count) {
+			auto& set = refl.descriptor_sets[setID];
+			if(bindingID < set.binding_count) {
+				auto& binding = *set.bindings[bindingID];
+				if(binding.name && *binding.name != '\0') {
+					return binding.name;
+				} else if(binding.type_description &&
+						binding.type_description->type_name &&
+						*binding.type_description->type_name != '\0') {
+					return binding.type_description->type_name;
+				}
+
+			}
+		}
+
+		return nullptr;
+	};
+
+	auto bindingName = [&](u32 setID, u32 bindingID) -> std::string {
+		if(dispatchCmd && dispatchCmd->state.pipe) {
+			auto& refl = nonNull(nonNull(dispatchCmd->state.pipe->stage.spirv).reflection);
+			return std::string(modBindingName(refl, setID, bindingID));
+		} else if(drawCmd && drawCmd->state.pipe) {
+			for(auto& stage : drawCmd->state.pipe->stages) {
+				auto& refl = nonNull(nonNull(stage.spirv).reflection);
+				if(auto name = modBindingName(refl, setID, bindingID); name) {
+					return std::string(name);
+				}
+			}
+		}
+
+		// We come here if no shader has a valid name for the reosurce.
+		// TODO: explicitly detect and mark (hide) unused bindings here?
+		// No point in displaying them, really.
+		// Maybe add option (checkbox or something) for whether to show
+		// hidden bindings.
+		// BUT TAKE CARE TO ONLY DO IT FOR REALLY UNUSED HANDLES AND
+		// NOT JUST BECAUSE SPIRV REFLECT HAS NO NAME FOR US! seperate
+		// the two cases.
+		// TODO: could try name of bound resource if we really want to show it.
+		// TODO: additionally indicate type? Just add a small UBO, SSBO, Image,
+		//   Sampler, StorageImage etc prefix?
+		// TODO: Previews would be the best on the long run but hard to get
+		//   right I guess (also: preview of buffers?)
+		return dlg::format("Binding {}", bindingID);
+	};
+
 	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
 	ImGui::Text("Descriptors");
 	for(auto i = 0u; i < dss.size(); ++i) {
@@ -219,10 +354,11 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 		}
 
 		auto label = dlg::format("Descriptor Set {}", i);
+		ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 		if(ImGui::TreeNode(label.c_str())) {
 			for(auto b = 0u; b < ds.ds->bindings.size(); ++b) {
-				// TODO: support descriptor array
-				auto label = dlg::format("Binding {}", b);
+				// TODO: support & display descriptor array
+				auto label = bindingName(i, b);
 				auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 				if(hook.copyDS && hook.copyDS->set == i && hook.copyDS->binding == b) {
 					flags |= ImGuiTreeNodeFlags_Selected;
@@ -268,6 +404,7 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 				}
 			};
 
+			// TODO: name them if possible. Could use names in (fragment) shader.
 			for(auto c = 0u; c < subpass.colorAttachmentCount; ++c) {
 				auto label = dlg::format("Color Attachment {}", c);
 				addAttachment(label, subpass.pColorAttachments[c].attachment);
@@ -359,8 +496,11 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 					ImGui::Text("TODO: buffer blocks for graphics state");
 				}
 			} else if(auto* img = std::get_if<CopiedImage>(&dsc)) {
+				// TODO: display additional information, proper image viewer
 				gui.cbGui().displayImage(*img);
 			} else {
+				// TODO: show *what* went wrong. This only happens for
+				// a very specific reason, transmit if from command hook!
 				ImGui::Text("Something went wrong");
 			}
 		} else {
@@ -369,7 +509,9 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 
 		cmdInfo = false;
 	} else if(hook.copyVertexBuffers) {
-		// TODO
+		// TODO: implement
+		// TODO: maybe no vertex buffers are bound? maybe just
+		//   index buffers/no buffers at all?
 		ImGui::Text("TODO: show vertex buffer viewer");
 		cmdInfo = false;
 	} else if(hook.copyAttachment) {
@@ -377,6 +519,8 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 			if(hook.state->attachmentCopy.image) {
 				gui.cbGui().displayImage(hook.state->attachmentCopy);
 			} else {
+				// TODO: show *what* went wrong. This only happens for
+				// a very specific reason, transmit if from command hook!
 				ImGui::Text("Something went wrong");
 			}
 		} else {
@@ -1025,15 +1169,17 @@ std::string DrawIndexedCmd::toString() const {
 }
 
 void DrawIndexedCmd::displayInspector(Gui& gui) const {
-	asColumns2({{
-		{"indexCount", "{}", indexCount},
-		{"instanceCount", "{}", instanceCount},
-		{"firstIndex", "{}", firstIndex},
-		{"vertexOffset", "{}", vertexOffset},
-		{"firstInstance", "{}", firstInstance},
-	}});
+	if(displayActionInspector(gui, *this)) {
+		asColumns2({{
+			{"indexCount", "{}", indexCount},
+			{"instanceCount", "{}", instanceCount},
+			{"firstIndex", "{}", firstIndex},
+			{"vertexOffset", "{}", vertexOffset},
+			{"firstInstance", "{}", firstInstance},
+		}});
 
-	DrawCmdBase::displayGrahpicsState(gui, true);
+		DrawCmdBase::displayGrahpicsState(gui, true);
+	}
 }
 
 // DrawIndirectCountCmd
@@ -1236,9 +1382,10 @@ void DispatchIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 }
 
 void DispatchIndirectCmd::displayInspector(Gui& gui) const {
-	// TODO: display effective dispatch command
-	refButtonD(gui, buffer);
-	DispatchCmdBase::displayComputeState(gui);
+	if(displayActionInspector(gui, *this)) {
+		refButtonD(gui, buffer);
+		DispatchCmdBase::displayComputeState(gui);
+	}
 }
 
 std::string DispatchIndirectCmd::toString() const {
@@ -1276,9 +1423,11 @@ std::string DispatchBaseCmd::toString() const {
 }
 
 void DispatchBaseCmd::displayInspector(Gui& gui) const {
-	imGuiText("Base: {} {} {}", baseGroupX, baseGroupY, baseGroupZ);
-	imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
-	DispatchCmdBase::displayComputeState(gui);
+	if(displayActionInspector(gui, *this)) {
+		imGuiText("Base: {} {} {}", baseGroupX, baseGroupY, baseGroupZ);
+		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
+		DispatchCmdBase::displayComputeState(gui);
+	}
 }
 
 // CopyImageCmd

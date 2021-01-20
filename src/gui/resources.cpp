@@ -843,7 +843,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 			ImGui::Text("Entry Point %s:", entryPoint.name);
 			ImGui::Text("Input variables");
 			for(auto i = 0u; i < entryPoint.input_variable_count; ++i) {
-				auto& iv = entryPoint.input_variables[i];
+				auto& iv = *entryPoint.input_variables[i];
 
 				if(ImGui::TreeNode(&iv, "%d: %s", iv.location, iv.name)) {
 					asColumns2({{
@@ -857,7 +857,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 			ImGui::Text("Output variables");
 			for(auto i = 0u; i < entryPoint.output_variable_count; ++i) {
-				auto& ov = entryPoint.output_variables[i];
+				auto& ov = *entryPoint.output_variables[i];
 
 				if(ImGui::TreeNode(&ov, "%d: %s", ov.location, ov.name)) {
 					asColumns2({{

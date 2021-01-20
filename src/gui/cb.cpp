@@ -72,6 +72,8 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
 	commandFlags_ = CommandType(val);
 
+	ImGui::Separator();
+
 	// Command list
 	ImGui::Columns(2);
 	if(!columnWidth0_) {
@@ -79,7 +81,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		columnWidth0_ = true;
 	}
 
-	ImGui::BeginChild("Command list", {250, 0});
+	ImGui::BeginChild("Command list", {0, 0});
 
 	if(updateFromGroup_ && record_->group) {
 		auto lastRecord = record_->group->lastRecord.get();
