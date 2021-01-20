@@ -767,6 +767,96 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Columns();
 }
 
+void Gui::drawMemoryUI(Draw&) {
+	// TODO:
+	// - display graphs instead of just the table
+	// - show memory types?
+	// - show the biggest actual allocations; some more statistics in general
+
+	// accumulate allocation sizes per heap
+	// TODO: cache this.
+	auto& memProps = dev().memProps;
+	VkDeviceSize heapAlloc[VK_MAX_MEMORY_HEAPS] {};
+
+	for(auto& [_, mem] : dev().deviceMemories.map) {
+		auto heap = memProps.memoryTypes[mem->typeIndex].heapIndex;
+		heapAlloc[heap] += mem->size;
+	}
+
+	VkPhysicalDeviceMemoryBudgetPropertiesEXT memBudget {};
+	auto hasMemBudget = contains(dev().allExts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+	auto cols = 3u;
+	if(hasMemBudget) {
+		auto& ini = nonNull(dev().ini);
+		dlg_assert(ini.dispatch.GetPhysicalDeviceMemoryProperties2);
+
+		memBudget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+
+		VkPhysicalDeviceMemoryProperties2 memProps2 {};
+		memProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+		memProps2.pNext = &memBudget;
+
+		ini.dispatch.GetPhysicalDeviceMemoryProperties2(dev().phdev, &memProps2);
+
+		cols += 2;
+	}
+
+	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_Borders;
+	if(ImGui::BeginTable("Memory Heaps", cols, flags)) {
+		ImGui::TableSetupColumn("Heap");
+
+		ImGui::TableSetupColumn("Heap Size");
+		ImGui::TableSetupColumn("Sum of Allocs");
+
+		if(hasMemBudget) {
+			ImGui::TableSetupColumn("Heap Budget");
+			ImGui::TableSetupColumn("Heap Own Usage");
+		}
+
+		ImGui::TableHeadersRow();
+
+		auto printVal = [&](auto val) {
+			// TODO: not always use MB, switch dynamically based on size
+			auto block = 1024.f * 1024.f;
+			auto prec = block > 10.f ? 0u : 2u;
+			imGuiText("{}{}{} MB", std::fixed, std::setprecision(prec), val / block);
+		};
+
+		for(auto i = 0u; i < memProps.memoryHeapCount; ++i) {
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			auto add = "";
+			if(memProps.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+				add = " [dev]";
+			}
+
+			imGuiText("{}{}", i, add);
+
+
+			ImGui::TableNextColumn();
+			auto sizeMB = memProps.memoryHeaps[i].size;
+			printVal(sizeMB);
+
+			ImGui::TableNextColumn();
+			auto allocMB = heapAlloc[i];
+			printVal(allocMB);
+
+			if(hasMemBudget) {
+				ImGui::TableNextColumn();
+				auto budgetMB = memBudget.heapBudget[i];
+				printVal(budgetMB);
+
+				ImGui::TableNextColumn();
+				auto usageMB = memBudget.heapUsage[i];
+				printVal(usageMB);
+			}
+		}
+
+		ImGui::EndTable();
+	}
+}
+
 void Gui::draw(Draw& draw, bool fullscreen) {
 	resourcesTabDrawn_ = false;
 
@@ -809,7 +899,11 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				resourcesTabDrawn_ = true;
 			}
 
-			// if(tabs_.cb.cb_) {
+			if(ImGui::BeginTabItem("Memory", nullptr, checkSelectTab(Tab::memory))) {
+				drawMemoryUI(draw);
+				ImGui::EndTabItem();
+			}
+
 			if(tabs_.cb.record_) {
 				if(ImGui::BeginTabItem("Command Buffer", nullptr, checkSelectTab(Tab::commandBuffer))) {
 					tabs_.cb.draw(draw);

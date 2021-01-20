@@ -1,8 +1,14 @@
 #pragma once
 
 #ifdef FUEN_WITH_WIN32
-    #define WIN32_LEAN_AND_MEAN
-    #define NOMINMAX
+	#ifndef NOMINMAX
+    	#define NOMINMAX
+	#endif // NOMINMAX
+
+	#ifndef WIN32_LEAN_AND_MEAN
+    	#define WIN32_LEAN_AND_MEAN
+	#endif // WIN32_LEAN_AND_MEAN
+
     #define VK_USE_PLATFORM_WIN32_KHR
 #endif // FUEN_WITH_WIN32
 

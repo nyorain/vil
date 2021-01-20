@@ -129,6 +129,7 @@ const R* findChainInfo(const CI& ci) {
 std::unique_ptr<std::byte[]> copyChain(const void*& pNext);
 void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
 
+/*
 // NOTE: we might be able getting away with always just calling the oldest
 // function alias (e.g. vkCmdDrawIndirectCountAMD) statically instead
 // of this check. But not sure, spec isn't 100% clear, kinda contradicts
@@ -157,6 +158,26 @@ auto selectCmd(F f, Rest...  rest) {
 	auto ret = doSelectCmd(f, rest...);
 	dlg_assert(ret);
 	return ret;
+}
+*/
+
+template<typename T>
+auto aliasCmd(T&& list) {
+	std::remove_reference_t<decltype(**list.begin())> found = nullptr;
+	for(auto& fn : list) {
+		if(*fn) {
+			found = *fn;
+			break;
+		}
+	}
+
+	if(found) {
+		for(auto& fn : list) {
+			*fn = *found;
+		}
+	}
+
+	return found;
 }
 
 // Taken from vpp/util

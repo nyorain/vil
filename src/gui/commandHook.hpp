@@ -21,7 +21,7 @@ struct CopiedImage {
 	VkImageView imageView {};
 	VkDeviceMemory memory {};
 	VkExtent3D extent {};
-	VkImageAspectFlagBits aspect {};
+	VkImageSubresourceRange subresources {};
 
 	CopiedImage() = default;
 	void init(Device& dev, VkFormat, const VkExtent3D&);

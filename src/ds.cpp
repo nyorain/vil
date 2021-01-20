@@ -506,9 +506,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
 		VkDescriptorUpdateTemplate*                 pDescriptorUpdateTemplate) {
 	auto& dev = getData<Device>(device);
 
-	auto f = selectCmd(
-		dev.dispatch.CreateDescriptorUpdateTemplate,
-		dev.dispatch.CreateDescriptorUpdateTemplateKHR);
+	auto f = dev.dispatch.CreateDescriptorUpdateTemplate;
 	auto res = f(device, pCreateInfo, pAllocator, pDescriptorUpdateTemplate);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -534,9 +532,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorUpdateTemplate(
 	auto& dev = getData<Device>(device);
 	dev.dsuTemplates.mustErase(descriptorUpdateTemplate);
 
-	auto f = selectCmd(
-		dev.dispatch.DestroyDescriptorUpdateTemplate,
-		dev.dispatch.DestroyDescriptorUpdateTemplateKHR);
+	auto f = dev.dispatch.DestroyDescriptorUpdateTemplate;
 	f(device, descriptorUpdateTemplate, pAllocator);
 }
 
@@ -592,9 +588,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 
 	ds.invalidateCbs();
 
-	auto f = selectCmd(
-		dev.dispatch.UpdateDescriptorSetWithTemplate,
-		dev.dispatch.UpdateDescriptorSetWithTemplateKHR);
+	auto f = dev.dispatch.UpdateDescriptorSetWithTemplate;
 	f(device, descriptorSet, descriptorUpdateTemplate, pData);
 }
 

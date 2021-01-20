@@ -179,6 +179,25 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	layer_init_instance_dispatch_table(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
 
+	// NOTE: not sure if this is needed actually.
+	// Should do it for all commands that need it for now.
+	// We are also doing this in device.
+	aliasCmd(std::array{
+		&ini.dispatch.GetPhysicalDeviceProperties2,
+		&ini.dispatch.GetPhysicalDeviceProperties2KHR});
+	aliasCmd(std::array{
+		&ini.dispatch.GetPhysicalDeviceMemoryProperties2,
+		&ini.dispatch.GetPhysicalDeviceMemoryProperties2KHR});
+	aliasCmd(std::array{
+		&ini.dispatch.GetPhysicalDeviceImageFormatProperties2,
+		&ini.dispatch.GetPhysicalDeviceImageFormatProperties2KHR});
+	aliasCmd(std::array{
+		&ini.dispatch.GetPhysicalDeviceFormatProperties2,
+		&ini.dispatch.GetPhysicalDeviceFormatProperties2KHR});
+	aliasCmd(std::array{
+		&ini.dispatch.GetPhysicalDeviceFeatures2,
+		&ini.dispatch.GetPhysicalDeviceFeatures2KHR});
+
 	// add instance data to all physical devices so we can retrieve
 	// it in CreateDevice
 	u32 phdevCount = 0;
@@ -556,8 +575,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 	}
 
 	if(!hooked.devExt.empty()) {
-		auto it = find(dev->extensions, hooked.devExt);
-		if(it == dev->extensions.end()) {
+		auto it = find(dev->appExts, hooked.devExt);
+		if(it == dev->appExts.end()) {
 			// dlg_trace("tried to load dev proc addr {} for disabled ext {}",
 			// 	funcName, hooked.devExt);
 			// TODO: not sure what is better

@@ -429,12 +429,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	// = Useful extensions =
-	auto hasShaderInfoAMD = false;
-	if(hasExt(supportedExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
-		hasShaderInfoAMD = true;
-		if(!contains(newExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
-			newExts.push_back(VK_AMD_SHADER_INFO_EXTENSION_NAME);
+	auto checkEnable = [&](const char* name) {
+		if(hasExt(supportedExts, name)) {
+			if(!contains(newExts, name)) {
+				newExts.push_back(name);
+			}
+
+			return true;
 		}
+
+		return false;
+	};
+
+	checkEnable(VK_AMD_SHADER_INFO_EXTENSION_NAME);
+
+	if(fpPhdevProps2) {
+		checkEnable(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 	}
 
 	// == Create Device! ==
@@ -458,9 +468,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.timelineSemaphores = hasTimelineSemaphores;
 	dev.maxTimelineSemaphoreValueDifference = maxTimelineSemaphoreValueDifference;
 
-	dev.hasShaderInfoAMD = hasShaderInfoAMD;
+	dev.appExts = {extsBegin, extsEnd};
+	dev.allExts = {newExts.begin(), newExts.end()};
 
-	dev.extensions = {extsBegin, extsEnd};
 	if(ci->pEnabledFeatures) {
 		dev.enabledFeatures = *ci->pEnabledFeatures;
 	}
@@ -487,28 +497,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.dispatch.QueueInsertDebugUtilsLabelEXT = (PFN_vkQueueInsertDebugUtilsLabelEXT)
 		fpGetInstanceProcAddr(ini.handle, "vkQueueInsertDebugUtilsLabelEXT");
 
-	// TODO: not sure if this is needed actually.
-	// Should be do it for all commands that need it?
-	// Could abolish selectCmd function (and all its usages) in that case.
-	// Yeah, probably cleaner to do it here.
-	auto aliasCmd = [&](auto list) {
-		std::remove_reference_t<decltype(**list.begin())> found = nullptr;
-		for(auto& fn : list) {
-			if(*fn) {
-				found = *fn;
-				break;
-			}
-		}
-
-		if(!found) {
-			return;
-		}
-
-		for(auto& fn : list) {
-			*fn = *found;
-		}
-	};
-
+	// NOTE: not sure if this is needed actually.
+	// Should do it for all commands that need it for now.
+	// We are also doing this in instance.
 	aliasCmd(std::array{
 		&dev.dispatch.GetSemaphoreCounterValue,
 		&dev.dispatch.GetSemaphoreCounterValueKHR});
@@ -518,7 +509,34 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.WaitSemaphores,
 		&dev.dispatch.WaitSemaphoresKHR});
-
+	aliasCmd(std::array{
+		&dev.dispatch.CmdDispatchBase,
+		&dev.dispatch.CmdDispatchBaseKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdDrawIndexedIndirectCount,
+		&dev.dispatch.CmdDrawIndexedIndirectCountKHR,
+		&dev.dispatch.CmdDrawIndexedIndirectCountAMD});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdBeginRenderPass2,
+		&dev.dispatch.CmdBeginRenderPass2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdNextSubpass2,
+		&dev.dispatch.CmdNextSubpass2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdEndRenderPass2,
+		&dev.dispatch.CmdEndRenderPass2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.TrimCommandPool,
+		&dev.dispatch.TrimCommandPoolKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CreateDescriptorUpdateTemplate,
+		&dev.dispatch.CreateDescriptorUpdateTemplateKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.DestroyDescriptorUpdateTemplate,
+		&dev.dispatch.DestroyDescriptorUpdateTemplateKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.UpdateDescriptorSetWithTemplate,
+		&dev.dispatch.UpdateDescriptorSetWithTemplateKHR});
 
 	dev.swapchains.mutex = &dev.mutex;
 	dev.images.mutex = &dev.mutex;

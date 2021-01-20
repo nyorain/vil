@@ -39,6 +39,8 @@ struct CommandBufferGui {
 	// same command in future records/cb selections.
 	std::vector<CommandDesc> desc_ {};
 
+	DrawGuiImage ioImage_ {};
+
 	bool queryTime_ {};
 
 	CommandHook* hook_ {}; // TODO: we can't know for sure it remains valid. Should probably be owned here

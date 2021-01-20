@@ -341,7 +341,7 @@ VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
 	while(!pool.memBlocks.compare_exchange_weak(blocks, nullptr));
 	freeBlocks(blocks);
 
-	auto f = selectCmd(dev.dispatch.TrimCommandPoolKHR, dev.dispatch.TrimCommandPool);
+	auto f = dev.dispatch.TrimCommandPool;
 	f(device, commandPool, flags);
 }
 
@@ -707,7 +707,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	cmdBeginRenderPass(cb, *pRenderPassBegin, *pSubpassBeginInfo);
 
-	auto f = selectCmd(cb.dev->dispatch.CmdBeginRenderPass2, cb.dev->dispatch.CmdBeginRenderPass2KHR);
+	auto f = cb.dev->dispatch.CmdBeginRenderPass2;
 	f(commandBuffer, pRenderPassBegin, pSubpassBeginInfo);
 }
 
@@ -720,7 +720,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 	cmd.beginInfo = *pSubpassBeginInfo;
 	copyChain(cb, cmd.beginInfo.pNext);
 
-	auto f = selectCmd(cb.dev->dispatch.CmdNextSubpass2, cb.dev->dispatch.CmdNextSubpass2KHR);
+	auto f = cb.dev->dispatch.CmdNextSubpass2;
 	f(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
 }
 
@@ -732,7 +732,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 	cmd.endInfo = *pSubpassEndInfo;
 	copyChain(cb, cmd.endInfo.pNext);
 
-	auto f = selectCmd(cb.dev->dispatch.CmdEndRenderPass2, cb.dev->dispatch.CmdEndRenderPass2KHR);
+	auto f = cb.dev->dispatch.CmdEndRenderPass2;
 	f(commandBuffer, pSubpassEndInfo);
 }
 
@@ -1008,10 +1008,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	auto f = selectCmd(
-		cb.dev->dispatch.CmdDrawIndirectCountAMD,
-		cb.dev->dispatch.CmdDrawIndirectCountKHR,
-		cb.dev->dispatch.CmdDrawIndirectCount);
+	auto f = cb.dev->dispatch.CmdDrawIndirectCount;
 	f(commandBuffer, buffer, offset, countBuffer, countBufferOffset,
 		maxDrawCount, stride);
 }
@@ -1041,10 +1038,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	auto f = selectCmd(
-		cb.dev->dispatch.CmdDrawIndexedIndirectCountAMD,
-		cb.dev->dispatch.CmdDrawIndexedIndirectCountKHR,
-		cb.dev->dispatch.CmdDrawIndexedIndirectCount);
+	auto f = cb.dev->dispatch.CmdDrawIndexedIndirectCount;
 	f(commandBuffer, buffer, offset, countBuffer, countBufferOffset,
 		maxDrawCount, stride);
 }
@@ -1098,8 +1092,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	auto f = selectCmd(cb.dev->dispatch.CmdDispatchBaseKHR,
-		cb.dev->dispatch.CmdDispatchBase);
+	auto f = cb.dev->dispatch.CmdDispatchBase;
 	f(commandBuffer, baseGroupX, baseGroupY, baseGroupZ,
 		groupCountX, groupCountY, groupCountZ);
 }

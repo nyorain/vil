@@ -15,9 +15,7 @@ namespace fuen {
 
 // TODO
 struct ImageCopyOp {
-	unsigned layer {}; // the layer to be copied
-	unsigned mip {}; // the mip level to be copied
-	VkImageAspectFlagBits aspect {}; // the aspect to be copied
+	VkImageSubresourceRange subresources {};
 
 	// If this isn't nullopt, will read the content of the specified
 	// texel into a buffer, to be read on cpu.
@@ -36,9 +34,9 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
 	//   Or at least fail.
 
 	if(FormatIsColor(format)) {
-		aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+		subresources.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	} else if(FormatHasDepth(format)) {
-		aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		subresources.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 	} else {
 		dlg_error("unimplemented");
 	}
@@ -82,7 +80,7 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
 	vci.image = image;
 	vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
 	vci.format = format;
-	vci.subresourceRange.aspectMask = aspect;
+	vci.subresourceRange.aspectMask = subresources.aspectMask;
 	vci.subresourceRange.layerCount = 1u;
 	vci.subresourceRange.levelCount = 1u;
 	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &imageView));
@@ -93,8 +91,6 @@ CopiedImage::~CopiedImage() {
 	if(!dev) {
 		return;
 	}
-
-	// dlg_trace("Destroying image copy {} {} {}", this, width, height);
 
 	dev->dispatch.DestroyImageView(dev->handle, imageView, nullptr);
 	dev->dispatch.DestroyImage(dev->handle, image, nullptr);
@@ -388,9 +384,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 				rpBeginInfo.renderPass = rp0;
 
 				if(beginRpCmd->subpassBeginInfo.pNext) {
-					auto beginRp2 = selectCmd(
-						dev.dispatch.CmdBeginRenderPass2,
-						dev.dispatch.CmdBeginRenderPass2KHR);
+					auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
 					dlg_assert(beginRp2);
 					beginRp2(cb, &rpBeginInfo, &beginRpCmd->subpassBeginInfo);
 				} else {
@@ -429,9 +423,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 				rpBeginInfo.clearValueCount = 0u;
 
 				if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
-					auto beginRp2 = selectCmd(
-						dev.dispatch.CmdBeginRenderPass2,
-						dev.dispatch.CmdBeginRenderPass2KHR);
+					auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
 					dlg_assert(beginRp2);
 					beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
 				} else {
@@ -502,9 +494,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 					rpBeginInfo.clearValueCount = 0u;
 
 					if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
-						auto beginRp2 = selectCmd(
-							dev.dispatch.CmdBeginRenderPass2,
-							dev.dispatch.CmdBeginRenderPass2KHR);
+						auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
 						dlg_assert(beginRp2);
 						beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
 					} else {
@@ -593,7 +583,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	dstBarrier.srcAccessMask = 0u;
 	dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	dstBarrier.subresourceRange.aspectMask = dst.aspect;
+	dstBarrier.subresourceRange.aspectMask = dst.subresources.aspectMask;
 	dstBarrier.subresourceRange.layerCount = 1u;
 	dstBarrier.subresourceRange.levelCount = 1u;
 	dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -625,7 +615,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	copy.srcSubresource.mipLevel = srcSubres.mipLevel;
 	copy.srcSubresource.layerCount = 1u;
 
-	copy.dstSubresource.aspectMask = dst.aspect;
+	copy.dstSubresource.aspectMask = dst.subresources.aspectMask;
 	copy.dstSubresource.layerCount = 1u;
 
 	dev.dispatch.CmdCopyImage(cb,
@@ -967,51 +957,5 @@ void CommandHookSubmission::transmitTiming() {
 	auto diff = after - before;
 	record->hook->state->neededTime = diff;
 }
-
-/*
-void CommandHookSubmission::transmitIndirect() {
-	if(!record->bufferMap) {
-		return;
-	}
-
-	auto& dev = record->record->device();
-
-	// TODO: only call on non-coherent memory
-	VkMappedMemoryRange range {};
-	range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	range.offset = 0;
-	range.size = VK_WHOLE_SIZE;
-	range.memory = record->dstMemory;
-	VK_CHECK(dev.dispatch.InvalidateMappedMemoryRanges(dev.handle, 1, &range));
-
-	auto* hookDst = record->hcommand.back();
-	auto& dstIndirect = record->hook->indirect;
-
-	if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(hookDst)) {
-		VkDeviceSize cmdSize = cmd->indexed ?
-			sizeof(VkDrawIndexedIndirectCommand) :
-			sizeof(VkDrawIndirectCommand);
-		auto stride = cmd->stride ? cmd->stride : cmdSize;
-
-		dstIndirect.count = cmd->drawCount;
-		dstIndirect.data.resize(cmd->drawCount * cmdSize);
-
-		for(auto i = 0u; i < cmd->drawCount; ++i) {
-			auto src = reinterpret_cast<std::byte*>(record->bufferMap) + i * stride;
-			auto dst = dstIndirect.data.data() + i * cmdSize;
-			std::memcpy(dst, src, cmdSize);
-		}
-	} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(hookDst)) {
-		(void) cmd;
-		auto size = sizeof(VkDispatchIndirectCommand);
-		dstIndirect.count = 1u;
-		dstIndirect.data.resize(size);
-		std::memcpy(record->hook->indirect.data.data(), record->bufferMap, size);
-	} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(hookDst)) {
-		(void) cmd;
-		dlg_error("Not implemented");
-	}
-}
-*/
 
 } // namespace fuen

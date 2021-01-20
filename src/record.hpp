@@ -279,7 +279,7 @@ struct CommandRecord {
 
 	// For command hooks: they can store data associated with this
 	// recording here.
-	FinishPtr<CommandHookRecord> hook {};
+	FinishPtr<CommandHookRecord> hook;
 
 	// Allocates a chunk of memory from the given command record, will use the
 	// internal CommandPool memory allocator. The memory can not be freed in

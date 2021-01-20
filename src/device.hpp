@@ -25,7 +25,8 @@ struct Device {
 	VkPhysicalDevice phdev;
 	VkLayerDispatchTable dispatch;
 
-	std::vector<std::string> extensions;
+	std::vector<std::string> appExts; // only extensions enabled by application
+	std::vector<std::string> allExts; // all extensions; also the ones enabled by us
 
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
@@ -33,8 +34,6 @@ struct Device {
 
 	bool timelineSemaphores {}; // whether we have timeline smeaphores
 	u64 maxTimelineSemaphoreValueDifference {};
-
-	bool hasShaderInfoAMD {};
 
 	// Aside from properties, only the families used by device
 	// are initialized.

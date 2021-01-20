@@ -84,13 +84,13 @@ private:
 	// reset (e.g. via the command pool or explicitly or implicitly via
 	// a new vkBeginCommandBuffer or when a reference resource is destroyed
 	// and the the command buffer moved to invalid state).
-	IntrusivePtr<CommandRecord> record_ {};
+	IntrusivePtr<CommandRecord> record_;
 
 	// The last valid state of this command buffer. We store this since
 	// it can be useful to know when inspecting a command buffer.
 	// This is only updated when a command buffer recording is finished,
 	// i.e. by vkEndCommandBuffer.
-	IntrusivePtr<CommandRecord> lastRecord_ {};
+	IntrusivePtr<CommandRecord> lastRecord_;
 	u32 recordCount_ {};
 
 	// Only needed while recording.

@@ -463,6 +463,18 @@ void displayDs(Gui& gui, const Command& cmd) {
 		}
 	}
 
+	// == Sampler ==
+	if(needsSampler(dsType)) {
+		if(bindingLayout.pImmutableSamplers) {
+			// TODO: display all samplers?
+			auto& vksampler = bindingLayout.pImmutableSamplers[0];
+			auto& sampler = gui.dev().samplers.getLocked(vksampler);
+			refButton(gui, sampler);
+		} else {
+			refButtonD(gui, elem.imageInfo.sampler);
+		}
+	}
+
 	// == Image ==
 	if(needsImageView(dsType)) {
 		auto* img = std::get_if<CopiedImage>(&dsc);
@@ -476,9 +488,6 @@ void displayDs(Gui& gui, const Command& cmd) {
 		//   but also link original image/imageView
 		gui.cbGui().displayImage(*img);
 	}
-
-	// == Sampler ==
-	// TODO
 
 	// == BufferView ==
 	// TODO
@@ -742,7 +751,7 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 			if(!vertStage) {
 				ImGui::Text("Grahpics Pipeline has no vertex stage :o");
 			} else {
-				auto flags = ImGuiTableFlags_Borders;
+				auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
 
 				// match bindings to input variables into
 				// (pipe.vertexAttrib, vertStage->input_variables) id pairs
@@ -843,6 +852,26 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 				cmdInfo = false;
 				break;
 			}
+		}
+	}
+
+	if(cmdInfo) {
+		hook.queryTime = true;
+		if(hook.state) {
+			auto lastTime = hook.state->neededTime;
+			auto displayDiff = lastTime * gui.dev().props.limits.timestampPeriod;
+
+			// auto timeNames = {"ns", "mus", "ms", "s"};
+			auto timeNames = {"ms"};
+
+			auto it = timeNames.begin();
+			while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
+				++it;
+				displayDiff /= 1000.f;
+
+			}
+
+			imGuiText("Needed time: {} {}", displayDiff, *it);
 		}
 	}
 
@@ -1146,7 +1175,7 @@ std::string BeginRenderPassCmd::toString() const {
 
 void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(this->subpassBeginInfo.pNext) {
-		auto f = selectCmd(dev.dispatch.CmdBeginRenderPass2, dev.dispatch.CmdBeginRenderPass2KHR);
+		auto f = dev.dispatch.CmdBeginRenderPass2;
 		dlg_assert(f);
 		f(cb, &this->info, &this->subpassBeginInfo);
 	} else {
@@ -1193,7 +1222,7 @@ void BeginRenderPassCmd::displayInspector(Gui& gui) const {
 
 void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(this->beginInfo.pNext || this->endInfo.pNext) {
-		auto f = selectCmd(dev.dispatch.CmdNextSubpass2, dev.dispatch.CmdNextSubpass2KHR);
+		auto f = dev.dispatch.CmdNextSubpass2;
 		f(cb, &this->beginInfo, &this->endInfo);
 	} else {
 		dev.dispatch.CmdNextSubpass(cb, this->beginInfo.contents);
@@ -1202,7 +1231,7 @@ void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(this->endInfo.pNext) {
-		auto f = selectCmd(dev.dispatch.CmdEndRenderPass2, dev.dispatch.CmdEndRenderPass2KHR);
+		auto f = dev.dispatch.CmdEndRenderPass2;
 		f(cb, &this->endInfo);
 	} else {
 		dev.dispatch.CmdEndRenderPass(cb);
@@ -1477,17 +1506,11 @@ void DrawIndexedCmd::displayInspector(Gui& gui) const {
 // DrawIndirectCountCmd
 void DrawIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(indexed) {
-		auto f = selectCmd(
-			dev.dispatch.CmdDrawIndexedIndirectCount,
-			dev.dispatch.CmdDrawIndexedIndirectCountKHR,
-			dev.dispatch.CmdDrawIndexedIndirectCountAMD);
+		auto f = dev.dispatch.CmdDrawIndexedIndirectCount;
 		f(cb, buffer->handle, offset, countBuffer->handle, countBufferOffset,
 			maxDrawCount, stride);
 	} else {
-		auto f = selectCmd(
-			dev.dispatch.CmdDrawIndirectCount,
-			dev.dispatch.CmdDrawIndirectCountKHR,
-			dev.dispatch.CmdDrawIndirectCountAMD);
+		auto f = dev.dispatch.CmdDrawIndirectCount;
 		f(cb, buffer->handle, offset,
 			countBuffer->handle, countBufferOffset, maxDrawCount, stride);
 	}
@@ -1700,7 +1723,7 @@ void DispatchIndirectCmd::unset(const std::unordered_set<DeviceHandle*>& destroy
 
 // DispatchBaseCmd
 void DispatchBaseCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	auto f = selectCmd(dev.dispatch.CmdDispatchBase, dev.dispatch.CmdDispatchBaseKHR);
+	auto f = dev.dispatch.CmdDispatchBase;
 	f(cb, baseGroupX, baseGroupY, baseGroupZ, groupsX, groupsY, groupsZ);
 }
 

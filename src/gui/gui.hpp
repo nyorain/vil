@@ -19,6 +19,7 @@ public:
 		overview,
 		resources,
 		commandBuffer,
+		memory,
 	};
 
 public:
@@ -73,6 +74,7 @@ public:
 private:
 	void draw(Draw&, bool fullscreen);
 	void drawOverviewUI(Draw&);
+	void drawMemoryUI(Draw&);
 	void ensureFontAtlas(VkCommandBuffer cb);
 
 	void uploadDraw(Draw&, const ImDrawData&);

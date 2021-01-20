@@ -44,8 +44,8 @@ struct QueueFamily {
 };
 
 struct SubmittedCommandBuffer {
-	CommandBuffer* cb {};
-	FinishPtr<CommandHookSubmission> hook {};
+	CommandBuffer* cb;
+	FinishPtr<CommandHookSubmission> hook;
 
 	SubmittedCommandBuffer();
 	SubmittedCommandBuffer(SubmittedCommandBuffer&&) noexcept = default;

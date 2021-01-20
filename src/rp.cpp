@@ -519,9 +519,7 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 }
 
 VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
-	auto create2 = selectCmdOpt(
-		dev.dispatch.CreateRenderPass2KHR,
-		dev.dispatch.CreateRenderPass2);
+	auto create2 = dev.dispatch.CreateRenderPass2;
 	VkRenderPass rp {};
 
 	if(create2) {
@@ -707,7 +705,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 		const VkAllocationCallbacks*                pAllocator,
 		VkRenderPass*                               pRenderPass) {
 	auto& dev = getData<Device>(device);
-	auto f = selectCmd(dev.dispatch.CreateRenderPass2, dev.dispatch.CreateRenderPass2KHR);
+	auto f = dev.dispatch.CreateRenderPass2;
 	auto res = f(device, pCreateInfo, pAllocator, pRenderPass);
 	if(res != VK_SUCCESS) {
 		return res;

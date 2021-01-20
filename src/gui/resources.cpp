@@ -928,7 +928,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 			// TODO: used push constants
 
-			if(dev.hasShaderInfoAMD) {
+			if(contains(dev.allExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
 				if(ImGui::TreeNode("AMD shader info")) {
 					VkShaderStatisticsInfoAMD info {};
 					auto size = sizeof(info);
