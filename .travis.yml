@@ -3,6 +3,7 @@
 # - test 32-bit build? Not sure if we even want to support it though.
 # - add some basic testing, not needing a gpu
 # - build mingw and visual studio, just use https://chocolatey.org/packages/mingw
+#   Just not calling vs vars script actually already calls mingw! fix that up.
 # - test meson visual studio backend, msbuild
 # - use apt addons instead of apt-get?
 
@@ -36,6 +37,7 @@ matrix:
         - choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
         - python --version
         - python -m pip install --upgrade pip
+        - call "/c/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Auxiliary/Build/vcvarsall.bat" x64
 
 install:
   - pip3 install meson ninja
