@@ -34,11 +34,13 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
 	//   Or at least fail.
 
 	if(FormatIsColor(format)) {
-		subresources.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	} else if(FormatHasDepth(format)) {
-		subresources.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-	} else {
-		dlg_error("unimplemented");
+		subresources.aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
+	} 
+	if(FormatHasDepth(format)) {
+		subresources.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
+	}
+	if(FormatHasStencil(format)) {
+		subresources.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 	}
 
 	// TODO: copy multiple layers?
@@ -657,6 +659,8 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst, VkBuffer sr
 	barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 	barrier.size = copy.size;
 	barrier.offset = copy.srcOffset;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 	dev.dispatch.CmdPipelineBarrier(cb,
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno
@@ -913,7 +917,6 @@ CommandHookSubmission::~CommandHookSubmission() {
 
 	dlg_assert(record->state);
 	if(record->state) {
-		// transmitIndirect();
 		transmitTiming();
 		record->hook->state = record->state;
 
@@ -955,7 +958,7 @@ void CommandHookSubmission::transmitTiming() {
 	u64 after = data[1];
 
 	auto diff = after - before;
-	record->hook->state->neededTime = diff;
+	record->state->neededTime = diff;
 }
 
 } // namespace fuen

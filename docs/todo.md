@@ -8,9 +8,22 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
-- [ ] setup CI for windows (msvc and mingw) and linux
+- [x] setup CI for windows (msvc and mingw) and linux
+- [ ] fix command hook synchronization issue where we use a CommandHookState that is currently
+      written to by a new application submission. I guess we simply have to add something like
+	  "PendingSubmission* writerSubmission {}" to CommandHookState that is set every time
+	  the state is used in a hooked submission and unset when the submission is finished.
+- [ ] IMPORTANT! keep command group (or at least the hook?) alive 
+	  while it is viewed in cb viewer? Can lead to problems currently.
+	  Unset group in kept-alive records? We should probably keep the
+	  group alive while a record of it is alive (but adding intrusive
+	  pointer from record to group would create cycle).
+	  Are currently getting crashed from this.
+	  - [ ] re-enable discarding old command groups when this is figured out.
+- [ ] implement copy_commands2 extension
+- [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
 - [ ] better pipeline display in resource viewer
-	- [ ] especially inputs/outputs of shaders
+	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 - [x] when checking if handle is used by cb, consider descriptor sets for images, buffers & bufferViews!
       when it's checked for an image/buffer, consider all descriptor of views as well.
 - [ ] figure out "instance_extensions" in the layer json.
@@ -49,14 +62,6 @@ v0.1, goal: end of january 2021
 - [x] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
-- [ ] IMPORTANT! keep command group (or at least the hook?) alive 
-	  while it is viewed in cb viewer? Can lead to problems currently.
-	  Unset group in kept-alive records? We should probably keep the
-	  group alive while a record of it is alive (but adding intrusive
-	  pointer from record to group would create cycle).
-	  Are currently getting crashed from this.
-	  - [ ] re-enable discarding old command groups when this is figured out.
-- [ ] implement copy_commands2 extension
 - [x] optimization (important): when CommandRecord is invalidated (rather: removed as current
       recording from cb), it should destroy (reset) its hook as it 
 	  will never be used again anyways
@@ -91,11 +96,6 @@ v0.1, goal: end of january 2021
 		  for the command buffer viewer. Could be queue/command buffer/command group/
 		  swapchain/identified per-frame submission/fence-association or 
 		  something like that.
-- [ ] implement additional command buffer viewer mode: per-frame-commands
-      basically shows all commands submitted to queue between two present calls.
-	  similar to renderdoc
-	- [ ] or just show the most important submission for now? (based on "main
-	      submission" heuristics)
 - [x] rework dev/gui so that there is never more than one gui. Supporting
       multiple guis at the same time is not worth the trouble (think
 	  about command buffer hooking from multiple cb viewers...)
@@ -144,6 +144,8 @@ v0.1, goal: end of january 2021
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
 - [ ] improve buffer viewer
+	- [ ] NEW: evaluate whether static buffer viewer makes much sense.
+	      Maybe it's not too useful at the moment.
 	- [ ] ability to infer layouts (simply use the last known one, link to last usage in cb) from
 		- [ ] uniform and storage buffers (using spirv_inspect)
 		- [ ] vertex buffer (using the pipeline layout)
@@ -172,7 +174,7 @@ v0.1, goal: end of january 2021
 		  Use custom accent color. Configurable?
 	- [ ] Figure out transparency. Make it a setting?
 	- [ ] see imgui style examples in imgui releases
-- [ ] improve handling of transprent images
+- [ ] improve handling of transparent images
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
 	- [ ] clearly document (maybe already in README?) that the layer
@@ -217,9 +219,17 @@ not sure if viable for first version but should be goal:
 	  of frame timings even with layer in release mode is ok) overhead
 	- [ ] vkQuake2
 	- [ ] doom eternal
+		- [ ] figure out how to make multi-submission drawing easily viewable
+		      -> per-frame-commands cb viewer mode
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] fix overlay for wayland. Use xdg popup
+- [ ] implement additional command buffer viewer mode: per-frame-commands
+      basically shows all commands submitted to queue between two present calls.
+	  similar to renderdoc
+	- [ ] or just show the most important submission for now? (based on "main
+	      submission" heuristics)
 - [ ] use new imgui tables api where useful
 - [ ] should support image-less framebuffer extension as soon as possible,
       might need a lot of changes

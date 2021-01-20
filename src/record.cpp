@@ -195,9 +195,13 @@ void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 }
 
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
-	memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
-	queueFamily(xcb.pool().queueFamily), images(*this), handles(*this),
-	pipeLayouts(*this), secondaries(*this) {
+		memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
+		queueFamily(xcb.pool().queueFamily), images(*this), handles(*this),
+		pipeLayouts(*this), secondaries(*this) {
+
+	// TODO: testing
+	// images.reserve(16 * 1024);
+	// handles.reserve(16 * 1024);
 }
 
 CommandRecord::~CommandRecord() {

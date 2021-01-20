@@ -141,6 +141,7 @@ void display(SpvReflectBlockVariable& bvar, span<const std::byte> data);
 void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 	auto& type = nonNull(bvar.type_description);
 	data = data.subspan(bvar.offset);
+	auto varName = bvar.name ? bvar.name : "?";
 
 	auto scalarFlags =
 		SPV_REFLECT_TYPE_FLAG_BOOL |
@@ -150,7 +151,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		auto val = formatScalar(type.type_flags, type.traits.numeric, data.first(bvar.size));
 
 		ImGui::Columns(2);
-		imGuiText("{}:", bvar.name);
+		imGuiText("{}:", varName);
 
 		ImGui::NextColumn();
 		imGuiText("{}", val);
@@ -170,7 +171,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		}
 
 		ImGui::Columns(2);
-		imGuiText("{}:", bvar.name);
+		imGuiText("{}:", varName);
 
 		ImGui::NextColumn();
 		imGuiText("{}", varStr);
@@ -191,7 +192,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		}
 
 		ImGui::Columns(2);
-		imGuiText("{}{}:", bvar.name, deco);
+		imGuiText("{}{}:", varName, deco);
 
 		ImGui::NextColumn();
 
@@ -213,9 +214,9 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 
 		ImGui::Columns();
 	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
-		imGuiText("{}", bvar.name);
+		imGuiText("{}", varName);
 	} else {
-		imGuiText("{}: TODO not implemented", bvar.name);
+		imGuiText("{}: TODO not implemented", varName);
 	}
 
 	ImGui::Separator();
@@ -230,19 +231,20 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 
 void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 	auto& type = nonNull(bvar.type_description);
+	auto varName = bvar.name ? bvar.name : "?";
 
 	if(type.type_flags & SPV_REFLECT_TYPE_FLAG_ARRAY) {
 		auto& at = type.traits.array;
 		if(at.dims_count != 1u) {
 			// TODO: fix this
-			imGuiText("{}: TODO: multiple array dimensions not supported", bvar.name);
+			imGuiText("{}: TODO: multiple array dimensions not supported", varName);
 		} else {
 			if(at.dims[0] == 0xFFFFFFFF) {
 				// TODO: needs spirv reflect support, see issue there
-				imGuiText("{}: TODO: specialization constant array size not supported", bvar.name);
+				imGuiText("{}: TODO: specialization constant array size not supported", varName);
 			} else if(at.dims[0] == 0u) {
 				// TODO: needs spirv reflect support, see issue there
-				imGuiText("{}: TODO: runtime array not supported", bvar.name);
+				imGuiText("{}: TODO: runtime array not supported", varName);
 			} else {
 				for(auto i = 0u; i < at.dims[0]; ++i) {
 					auto d = data.subspan(i * at.stride);
@@ -505,7 +507,7 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 		gui.cbGui().columnWidth1_ = true;
 	}
 
-	ImGui::BeginChild("Command IO list", {200, 0});
+	ImGui::BeginChild("Command IO list");
 
 	auto& hook = *gui.cbGui().hook_;
 
@@ -520,10 +522,18 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 	// TODO: this seems to need special treatment for arrays?
 	// debug with tkn/deferred gbuf pass
 	auto modBindingName = [&](const SpvReflectShaderModule& refl, u32 setID, u32 bindingID) -> const char* {
-		if(setID < refl.descriptor_binding_count) {
-			auto& set = refl.descriptor_sets[setID];
-			if(bindingID < set.binding_count) {
-				auto& binding = *set.bindings[bindingID];
+		for(auto s = 0u; s < refl.descriptor_set_count; ++s) {
+			auto& set = refl.descriptor_sets[s];
+			if(set.set != setID) {
+				continue;
+			}
+
+			for(auto b = 0u; b < set.binding_count; ++b) {
+				auto& binding = *set.bindings[b];
+				if (binding.binding != bindingID) {
+					continue;
+				}
+
 				if(binding.name && *binding.name != '\0') {
 					return binding.name;
 				} else if(binding.type_description &&
@@ -531,7 +541,6 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 						*binding.type_description->type_name != '\0') {
 					return binding.type_description->type_name;
 				}
-
 			}
 		}
 
@@ -541,7 +550,9 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 	auto bindingName = [&](u32 setID, u32 bindingID) -> std::string {
 		if(dispatchCmd && dispatchCmd->state.pipe) {
 			auto& refl = nonNull(nonNull(dispatchCmd->state.pipe->stage.spirv).reflection);
-			return std::string(modBindingName(refl, setID, bindingID));
+			if(auto name = modBindingName(refl, setID, bindingID); name) {
+				return std::string(name);
+			}
 		} else if(drawCmd && drawCmd->state.pipe) {
 			for(auto& stage : drawCmd->state.pipe->stages) {
 				auto& refl = nonNull(nonNull(stage.spirv).reflection);
@@ -606,8 +617,8 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 		ImGui::Text("Attachments");
 
 		const BeginRenderPassCmd* rpCmd = nullptr;
-		for(auto* cmd : gui.cbGui().command_) {
-			if((rpCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd))) {
+		for(auto* cmdi : gui.cbGui().command_) {
+			if(rpCmd = dynamic_cast<const BeginRenderPassCmd*>(cmdi); rpCmd) {
 				break;
 			}
 		}
@@ -713,7 +724,7 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 
 	ImGui::EndChild();
 	ImGui::NextColumn();
-	ImGui::BeginChild("Command IO Inspector", {0, 0});
+	ImGui::BeginChild("Command IO Inspector");
 
 	// TODO: display more information, not just raw data
 	//   e.g. link to the respective resources, descriptor sets etc
@@ -770,7 +781,7 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 
 				if(attribs.empty()) {
 					ImGui::Text("No Vertex input");
-				} else if(ImGui::BeginTable("Vertices", attribs.size(), flags)) {
+				} else if(ImGui::BeginTable("Vertices", int(attribs.size()), flags)) {
 					for(auto& attrib : attribs) {
 						ImGui::NextColumn();
 						auto& iv = *vertStage->input_variables[attrib.second];
@@ -1405,7 +1416,7 @@ std::string DrawCmd::toString() const {
 void DrawCmd::displayInspector(Gui& gui) const {
 	auto drawOwn = displayActionInspector(gui, *this);
 	if(drawOwn) {
-		ImGui::BeginChild("Command IO Inspector", {400, 0});
+		ImGui::BeginChild("Command IO Inspector");
 
 		asColumns2({{
 			{"vertexCount", "{}", vertexCount},
@@ -1442,7 +1453,7 @@ std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
 void DrawIndirectCmd::displayInspector(Gui& gui) const {
 	auto drawOwn = displayActionInspector(gui, *this);
 	if(drawOwn) {
-		ImGui::BeginChild("Command IO Inspector", {400, 0});
+		ImGui::BeginChild("Command IO Inspector");
 
 		imGuiText("Indirect buffer");
 		ImGui::SameLine();
@@ -1682,7 +1693,7 @@ std::string DispatchCmd::toString() const {
 void DispatchCmd::displayInspector(Gui& gui) const {
 	auto drawOwn = displayActionInspector(gui, *this);
 	if(drawOwn) {
-		ImGui::BeginChild("Command IO Inspector", {400, 0});
+		ImGui::BeginChild("Command IO Inspector");
 
 		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
 		DispatchCmdBase::displayComputeState(gui);

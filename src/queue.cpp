@@ -593,7 +593,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	dlg_assert(nsubmitInfos.size() == submitCount);
 	auto res = dev.dispatch.QueueSubmit(queue, u32(nsubmitInfos.size()), nsubmitInfos.data(), submFence);
 	if(res != VK_SUCCESS) {
-		dlg_trace("QueueSubmit returned {}", vk::name(res));
+		auto resName = vk::name(res);
+		dlg_trace("QueueSubmit returned {}", resName ? resName : "<Unknown>");
 
 		if(subm.ourFence) {
 			dev.fencePool.push_back(subm.ourFence);
@@ -651,7 +652,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 		// reset old comamnad groups
 		// TODO: arbitrary atm! Can be improved.
-		/*
+		// TODO: FIX deletion of groups, causing problems elsewhere
 		auto& qf = dev.queueFamilies[qd.family];
 		for(auto it = qf.commandGroups.begin(); it != qf.commandGroups.end();) {
 			auto rem = true;
@@ -673,7 +674,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				++it;
 			}
 		}
-		*/
 	}
 
 	return res;

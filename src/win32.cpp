@@ -224,15 +224,6 @@ void Win32Platform::initWindow() {
 
 	// make transparent
 	// SetLayeredWindowAttributes(overlayWindow, 0, 0, LWA_ALPHA);
-
-	// register for raw input on mouse
-	// TODO: messed with applications raw input. Move this to overlay-show time (and unregsiter when hidden)
-	RAWINPUTDEVICE Rid[1];
-	Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
-	Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
-	Rid[0].dwFlags = RIDEV_INPUTSINK;   
-	Rid[0].hwndTarget = overlayWindow;
-	RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
 }
 
 void Win32Platform::updateWindowRect() {
@@ -305,8 +296,16 @@ bool Win32Platform::doUpdate() {
 	// update overlay window position
 	if(state != State::focused) {
 		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
-			dlg_trace("showing overlay window (state: shown)");
+			dlg_trace("showing overlay; grabbing input");
 			state = State::focused;
+
+			// register for raw input on mouse
+			RAWINPUTDEVICE Rid[1];
+			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
+			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
+			Rid[0].dwFlags = RIDEV_INPUTSINK;   
+			Rid[0].hwndTarget = overlayWindow;
+			RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
 
 			globalPlatform = this;
 			auto threadID = GetWindowThreadProcessId(surfaceWindow, nullptr);
@@ -332,10 +331,6 @@ bool Win32Platform::doUpdate() {
 		}
 	}
 
-	if(state == State::focused) {
-		// updateWindowRect();
-	}
-
 	// dispatch all pending messages
 	MSG msg;
 	while(PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) {
@@ -346,13 +341,21 @@ bool Win32Platform::doUpdate() {
 	// update status
 	if(state == State::focused) {
 		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
-			dlg_trace("hiding overlay window (state: hidden)");
+			dlg_trace("hiding overlay window, ungrabbing input");
 			// ShowWindowAsync(overlayWindow, SW_HIDE);
 			UnhookWindowsHookEx(mouseHook);
+
+			RAWINPUTDEVICE Rid[1];
+			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
+			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
+			Rid[0].dwFlags = RIDEV_REMOVE;
+			Rid[0].hwndTarget = overlayWindow;
+			RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+
 			mouseHook = nullptr;
 			state = State::hidden;
 		} else if(updateEdge(focusPressed, this->checkPressed(focusKey))) {
-			dlg_trace("hiding overlay window (state: shown)");
+			dlg_trace("ungrabbing input (overlay still shown)");
 			// ShowWindowAsync(overlayWindow, SW_HIDE);
 			UnhookWindowsHookEx(mouseHook);
 			mouseHook = nullptr;
