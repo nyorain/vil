@@ -287,7 +287,7 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	dlg_assert(gpis.size() == sizeof(pipes) / sizeof(pipes[0]));
 
 	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
-		VK_NULL_HANDLE, gpis.size(), gpis.data(), nullptr, pipes));
+		VK_NULL_HANDLE, u32(gpis.size()), gpis.data(), nullptr, pipes));
 
 	pipes_.gui = pipes[0];
 
