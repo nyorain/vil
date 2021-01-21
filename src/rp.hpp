@@ -9,8 +9,6 @@
 namespace fuen {
 
 struct RenderPassDesc {
-	// NOTE: probably not useful to just copy the pNext chains.
-	// We instead have to fix this on per-extension basis
 	std::vector<std::unique_ptr<std::byte[]>> exts; // pNext chains
 
 	std::vector<std::vector<VkAttachmentReference2>> attachmentRefs;
@@ -48,15 +46,14 @@ struct Framebuffer : DeviceHandle {
 	~Framebuffer();
 };
 
-// Creates two RenderPassDescriptions compatible to the given one where
+// Creates 3 RenderPassDescriptions compatible to the given one where
 // the only differences are:
-// - the first renderpass stores all attachments in the end
-// - the second renderpass loads all attachments in the beginning
-// This way, one renderpass can be split into two, e.g. to insert
-// non-renderpass commands in between.
-// NOTE: the pNext chains are currently simple forwarded to both.
-// are lost at the moment (needs fix for each extension we want to support)
-// TODO: we could probably just forward pNext chains. Evaluate!
+// - the first and second renderpasses stores all attachments in the end
+// - the second and third renderpasses loads all attachments in the beginning
+// This way, one renderpass can be split into three, e.g. to insert
+// non-renderpass commands in between (at two points).
+// NOTE: the pNext chains are currently lost (needs fix for each extension we want to support)
+//   we could probably just forward pNext chains. Evaluate!
 struct RenderPassSplitDesc {
 	RenderPassDesc desc0;
 	RenderPassDesc desc1;
@@ -64,11 +61,11 @@ struct RenderPassSplitDesc {
 };
 RenderPassSplitDesc splitInterruptable(const RenderPassDesc&);
 
-// Returns whether the given renderpass can be split in the given render pass.
+// Returns whether the given renderpass can be split in the given subpass.
 // While this is usually possible, there are some combinations of resolve
-// attachment placements (when using subpasses after resolving) that make
+// attachment placements (when using attachment after resolving) that make
 // this impossible.
-bool splittable(const RenderPassDesc&, unsigned split);
+bool splittable(const RenderPassDesc&, unsigned splitSubpass);
 
 // Creates a new renderpass for the given device with the given description.
 VkRenderPass create(Device&, const RenderPassDesc&);

@@ -1,5 +1,8 @@
 For v0.1
 
+- [x] cleanup comments in rp.hpp. Currently a mess for splitting
+- [x] debug gui.cpp:1316,1317 asserts sometimes failing (on window resize)
+	  {we forget to check draw.inUse again before calling it in Gui::finishDraws)
 - [x] setup CI for windows (msvc and mingw) and linux
 - [x] better display (or completely hide?) swapchain images
 	  We should probably fill-in Image::ci for them.

@@ -447,3 +447,50 @@ Ok, let's figure this out. How should the I/O inspector actually behave?
 	  inactive or just outputting an error message when they are selected.
 	  In future, we could introduce a setting/mode in which always *all* I/O
 	  resources are fetched into the CommandHookState, allowing this.
+
+# Tracking submissions and groups
+
+We need to support various features for showing submissions in the GUI.
+
+- Get all submissions that happened between two QueuePresent calls.
+	- we could implement this by either adding submission IDs or the
+	  time of submission to every PendingSubmission.
+	- But we furthermore need to keep a PendingSubmission (and the
+	  actually submitted records) alive for a while.
+	  We could implement that by making PendingSubmission shared and
+	  adding a shared (impl: intrusive) pointer to the viewed swapchain
+	  on every submission. In QueuePresent then, clear the vector
+	  of submissions (impl: we need to buffer frames, release the vector
+	  of the last frame so that we always have one valid vector to view).
+	  That would even remove the need for submission timestamps/IDs
+- how to clean up command groups. Or: what should happen when a command group
+  is destroyed even though one of its records is still alive, e.g. being
+  viewed in gui?
+  	- currently, we crash :(
+	- A: don't destroy command groups while they are being viewed
+	- B: remember all records associated with command group and unset them.
+	- I think A is the sensible variant. We only forget the command groups
+	  to not cause a memory leak. Keeping one alive for gui is not a problem.
+	  How to implement it:
+	  	- I: every CommandRecord holds its group via IntrusivePtr.
+		  This creates a cycle since a CommandGroup holds the last associated
+		  record via IntrusivePtr as well. So when cleaning up groups
+		  (currently in QueueSubmit), we can simply detect that cycle
+		  and then delete the group (and its record) if both are not
+		  referenced anywhere else.
+		- II: alternatively, just take an IntrusivePtr (or, basically just a
+		  new `bool CommandGroup::viewedInGui` to just not invalidate the
+		  Group if it's needed by the gui. I don't think we ever need
+		  the group of a record somewhere else at the moment?
+		- I think I is better. As long as a record of a group is alive,
+		  we don't even want to destroy that group as chances are high
+		  the record is submitted again (if it's being kept alive/valid).
+		  Avoids future problems, too, if we one day use CommandRecord::group
+		  somewhere else, not aware that it might have been destroyed.
+- how closely should CommandHook and I/O inspector be connected?
+  Only possible to use inspector when a hook is active?
+  	- No, see previous section, last question. When we already have a
+	  CommandHookState, the user might want to continue viewing it.
+	  The hook might furthermore change in strange ways.
+	  We should store I/O inspector state in the cb gui.
+	  

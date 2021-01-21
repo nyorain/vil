@@ -987,7 +987,7 @@ void Gui::destroyed(const Handle& handle) {
 	VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
 		fences.data(), true, UINT64_MAX));
 
-	// TODO: would have to lock mutex
+	// TODO: call locks mutex, we can't do that here tho
 	// for(auto* draw : draws) {
 	// 	finished(*draw);
 	// }
@@ -1277,7 +1277,9 @@ void Gui::finishDraws() {
 	if(!fences.empty()) {
 		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()), fences.data(), true, UINT64_MAX));
 		for(auto& draw : draws_) {
-			finished(draw);
+			if(draw.inUse) {
+				finished(draw);
+			}
 		}
 	}
 }

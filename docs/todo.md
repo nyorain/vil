@@ -8,7 +8,10 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
-- [ ] cleanup comments in rp.hpp. Currently a mess for splitting
+- [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
+      input.
+	- [ ] implement further messages, keyboard, mouse wheel
+	- [ ] clean the implementation up
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [x] new per-command input/output overview, allowing to view *all* resources
@@ -40,20 +43,21 @@ v0.1, goal: end of january 2021
 	- [ ] make sure to never read layout.pImmutableSamplers of an invalidated
 	      record then. Destroying the immutable sampler would invalidate the
 		  ds, causing the ds to be removed from the record.
-- [ ] debug gui.cpp:1316,1317 asserts sometimes failing (on window resize)
-      draw.inUse
 - [ ] in CopiedImage::init: check for image usage support
 - [ ] fix command hook synchronization issue where we use a CommandHookState that is currently
       written to by a new application submission. I guess we simply have to add something like
 	  "PendingSubmission* writerSubmission {}" to CommandHookState that is set every time
 	  the state is used in a hooked submission and unset when the submission is finished.
+	  When we then display (reading a buffer is fine, we copied them to separate memory
+	  and are not using the mapped memory directly anyways) from a CommandHookState
+	  and `writeSubmission` is set, we chain our gui draw behind it.
 - [ ] IMPORTANT! keep command group (or at least the hook?) alive 
 	  while it is viewed in cb viewer? Can lead to problems currently.
 	  Unset group in kept-alive records? We should probably keep the
 	  group alive while a record of it is alive (but adding intrusive
 	  pointer from record to group would create cycle).
 	  Are currently getting crashed from this.
-	  - [ ] re-enable discarding old command groups when this is figured out.
+	- [ ] re-enable discarding old command groups when this is figured out.
 - [ ] fix Gui::draws_ synchronization issue
 	  See Gui::pendingDraws (called from queue while locked) but also
 	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
@@ -87,7 +91,7 @@ v0.1, goal: end of january 2021
 		  it often tbh
 - [x] make queues viewable handles
 	- [x] allow to view command groups per queue
-	- [ ] view submissions per queue?
+	- [ ] view submissions per queue somehow?
 - [x] fix resource viewer
 	- [x] fix filtering by type
 	- [x] fix filtering by name
@@ -166,7 +170,7 @@ v0.1, goal: end of january 2021
 - [ ] improve image viewer
 	- [ ] move to own tab/panel? needed in multiple cases
 	- [ ] show texel color? (requires us to download texels, just like we 
-	      do with buffers)
+	      do with buffers). See gui.cpp, bottom, CopyTexel sketch
 - [ ] Link to swapchain in swapchain images
 - [ ] automatically update resource lists in resource gui when tab is re-entered
       from somewhere else
@@ -229,6 +233,8 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] experiment with transparent overlay windows in which we render the
+      overlay, to not be dependent on application refresh rate.
 - [ ] support compressed/block formats
 - [ ] implement at least extensions that record to command buffer to allow hooking when they are used
 	- [ ] push descriptors
