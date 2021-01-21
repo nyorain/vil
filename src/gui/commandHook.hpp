@@ -18,13 +18,22 @@ struct CopiedImage {
 	Device* dev {};
 	u32 refCount {};
 	VkImage image {};
-	VkImageView imageView {};
+	VkImageView imageView {}; // color/depth view
+	VkImageView stencilView {}; // Only valid if image has stencil aspect
 	VkDeviceMemory memory {};
-	VkExtent3D extent {};
-	VkImageSubresourceRange subresources {};
+	VkExtent3D extent {}; // extent of the first level in this image
+	u32 layerCount {};
+	u32 levelCount {};
+	VkImageAspectFlags aspectMask {};
+
+	// TODO: shouldn't be here. Subresource range of original src image,
+	// this was created from.
+	VkImageSubresourceRange srcSubresRange {};
+	VkFormat format {};
 
 	CopiedImage() = default;
-	void init(Device& dev, VkFormat, const VkExtent3D&);
+	void init(Device& dev, VkFormat, const VkExtent3D&, u32 layers, u32 levels,
+		VkImageAspectFlags aspects, u32 srcQueueFam);
 	~CopiedImage();
 };
 

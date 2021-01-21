@@ -106,9 +106,18 @@ private:
 
 	struct {
 		VkPipeline gui;
+
 		VkPipeline image1D;
+		VkPipeline uimage1D;
+		VkPipeline iimage1D;
+
 		VkPipeline image2D;
+		VkPipeline uimage2D;
+		VkPipeline iimage2D;
+
 		VkPipeline image3D;
+		VkPipeline uimage3D;
+		VkPipeline iimage3D;
 	} pipes_;
 
 	bool clear_ {};
@@ -146,5 +155,9 @@ void refButtonExpect(Gui& gui, Handle* handle);
 // If the given handle is null, inserts a disabled "<Destroyed>" button.
 // Otherwise, normally inserts the button as with refButton.
 void refButtonD(Gui& gui, Handle* handle, const char* str = "<Destroyed>");
+
+void displayImage(Gui& gui, DrawGuiImage& imgDraw,
+	const VkExtent3D& extent, VkImageType imgType, VkFormat format,
+	const VkImageSubresourceRange& subresources);
 
 } // namespace fuen

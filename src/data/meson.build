@@ -7,9 +7,17 @@ if glslang.found()
 		'gui.frag': { '': [] },
 		'gui.vert': { '': [] },
 		'image.frag': {
-			'1DArray.': ['-DTEX_TYPE_1D_ARRAY'],
-			'2DArray.': ['-DTEX_TYPE_2D_ARRAY'],
-			'3D.': ['-DTEX_TYPE_3D'],
+			'1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_FLOAT'],
+			'u1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_UINT'],
+			'i1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_INT'],
+
+			'2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_FLOAT'],
+			'u2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_UINT'],
+			'i2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_INT'],
+
+			'3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_FLOAT'],
+			'u3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_UINT'],
+			'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
 		},
 		'vertices.vert': {'': [] },
 		'vertices.frag': {'': [] },

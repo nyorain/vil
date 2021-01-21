@@ -138,16 +138,19 @@ std::string formatScalar(SpvReflectTypeFlags type,
 
 void display(SpvReflectBlockVariable& bvar, span<const std::byte> data);
 
-void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
+// TODO: probably cleaner to use a table for display here
+void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
+		const char* varName) {
 	auto& type = nonNull(bvar.type_description);
 	data = data.subspan(bvar.offset);
-	auto varName = bvar.name ? bvar.name : "?";
+	varName = varName ? varName : (bvar.name ? bvar.name : "?");
 
+	auto typeFlags = type.type_flags & (~SPV_REFLECT_TYPE_FLAG_ARRAY);
 	auto scalarFlags =
 		SPV_REFLECT_TYPE_FLAG_BOOL |
 		SPV_REFLECT_TYPE_FLAG_FLOAT |
 		SPV_REFLECT_TYPE_FLAG_INT;
-	if((type.type_flags & ~scalarFlags) == 0) { // must be scalar
+	if((typeFlags & ~scalarFlags) == 0) { // must be scalar
 		auto val = formatScalar(type.type_flags, type.traits.numeric, data.first(bvar.size));
 
 		ImGui::Columns(2);
@@ -156,7 +159,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		ImGui::NextColumn();
 		imGuiText("{}", val);
 		ImGui::Columns();
-	} else if((type.type_flags & ~(scalarFlags | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
+	} else if((typeFlags & ~(scalarFlags | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
 		auto comps = type.traits.numeric.vector.component_count;
 		auto* sep = "";
 		auto compSize = type.traits.numeric.scalar.width / 8;
@@ -177,7 +180,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		imGuiText("{}", varStr);
 		ImGui::Columns();
 
-	} else if((type.type_flags & ~(scalarFlags |
+	} else if((typeFlags & ~(scalarFlags |
 			SPV_REFLECT_TYPE_FLAG_MATRIX | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
 		auto& mt = type.traits.numeric.matrix;
 		auto compSize = type.traits.numeric.scalar.width / 8;
@@ -213,7 +216,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data) 
 		}
 
 		ImGui::Columns();
-	} else if(type.type_flags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
+	} else if(typeFlags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
 		imGuiText("{}", varName);
 	} else {
 		imGuiText("{}: TODO not implemented", varName);
@@ -246,19 +249,20 @@ void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 				// TODO: needs spirv reflect support, see issue there
 				imGuiText("{}: TODO: runtime array not supported", varName);
 			} else {
+				auto varName = bvar.name ? bvar.name : "?";
 				for(auto i = 0u; i < at.dims[0]; ++i) {
 					auto d = data.subspan(i * at.stride);
 
-					imGuiText("[{}]", i);
+					auto name = dlg::format("{}[{}]", varName, i);
 
 					ImGui::Indent();
-					displayNonArray(bvar, d);
+					displayNonArray(bvar, d, name.c_str());
 					ImGui::Unindent();
 				}
 			}
 		}
 	} else {
-		displayNonArray(bvar, data);
+		displayNonArray(bvar, data, nullptr);
 	}
 }
 
@@ -469,6 +473,7 @@ void displayDs(Gui& gui, const Command& cmd) {
 	if(needsSampler(dsType)) {
 		if(bindingLayout.pImmutableSamplers) {
 			// TODO: display all samplers?
+			// TODO: Sampler might destroyed, causing crash here :( see todo list.
 			auto& vksampler = bindingLayout.pImmutableSamplers[0];
 			auto& sampler = gui.dev().samplers.getLocked(vksampler);
 			refButton(gui, sampler);
@@ -872,17 +877,18 @@ bool displayActionInspector(Gui& gui, const Command& cmd) {
 			auto lastTime = hook.state->neededTime;
 			auto displayDiff = lastTime * gui.dev().props.limits.timestampPeriod;
 
-			// auto timeNames = {"ns", "mus", "ms", "s"};
-			auto timeNames = {"ms"};
-
+			/*
+			auto timeNames = {"ns", "mus", "ms", "s"};
 			auto it = timeNames.begin();
 			while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
 				++it;
 				displayDiff /= 1000.f;
-
 			}
+			imGuiText("Time: {} {}", displayDiff, *it);
+			*/
 
-			imGuiText("Needed time: {} {}", displayDiff, *it);
+			displayDiff /= 1000.f * 1000.f;
+			imGuiText("Time: {} ms", displayDiff);
 		}
 	}
 

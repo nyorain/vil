@@ -15,6 +15,7 @@
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
+#include <vk/format_utils.h>
 
 #include <set>
 #include <map>
@@ -26,8 +27,16 @@
 #include <gui.vert.spv.h>
 
 #include <image.frag.1DArray.spv.h>
+#include <image.frag.u1DArray.spv.h>
+#include <image.frag.i1DArray.spv.h>
+
 #include <image.frag.2DArray.spv.h>
+#include <image.frag.u2DArray.spv.h>
+#include <image.frag.i2DArray.spv.h>
+
 #include <image.frag.3D.spv.h>
+#include <image.frag.u3D.spv.h>
+#include <image.frag.i3D.spv.h>
 
 thread_local ImGuiContext* __LayerImGui;
 
@@ -112,16 +121,16 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	nameHandle(dev, rp_, "Gui:rp");
 
 	// pipeline
+	VkShaderModule vertModule;
+	VkShaderModuleCreateInfo vertShaderInfo {};
+	vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	vertShaderInfo.codeSize = sizeof(gui_vert_spv_data);
+	vertShaderInfo.pCode = gui_vert_spv_data;
+	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertModule));
+
 	std::vector<VkShaderModule> modules;
-	auto initStages = [&](span<const u32> vertSpv, span<const u32> fragSpv) {
-		VkShaderModule vertModule, fragModule;
-
-		VkShaderModuleCreateInfo vertShaderInfo {};
-		vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		vertShaderInfo.codeSize = vertSpv.size() * 4;
-		vertShaderInfo.pCode = vertSpv.data();
-		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertModule));
-
+	auto initStages = [&](span<const u32> fragSpv) {
+		VkShaderModule fragModule;
 		VkShaderModuleCreateInfo fragShaderInfo {};
 		fragShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		fragShaderInfo.codeSize = fragSpv.size() * 4;
@@ -129,7 +138,6 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &fragShaderInfo, NULL, &fragModule));
 
 		// store them for destruction later on
-		modules.push_back(vertModule);
 		modules.push_back(fragModule);
 
 		std::array<VkPipelineShaderStageCreateInfo, 2> ret {};
@@ -146,10 +154,19 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 		return ret;
 	};
 
-	auto guiStages = initStages(gui_vert_spv_data, gui_frag_spv_data);
-	auto image1DStages = initStages(gui_vert_spv_data, image_frag_1DArray_spv_data);
-	auto image2DStages = initStages(gui_vert_spv_data, image_frag_2DArray_spv_data);
-	auto image3DStages = initStages(gui_vert_spv_data, image_frag_3D_spv_data);
+	auto guiStages = initStages(gui_frag_spv_data);
+
+	auto image1DStages = initStages(image_frag_1DArray_spv_data);
+	auto uimage1DStages = initStages(image_frag_u1DArray_spv_data);
+	auto iimage1DStages = initStages(image_frag_i1DArray_spv_data);
+
+	auto image2DStages = initStages(image_frag_2DArray_spv_data);
+	auto uimage2DStages = initStages(image_frag_u2DArray_spv_data);
+	auto iimage2DStages = initStages(image_frag_i2DArray_spv_data);
+
+	auto image3DStages = initStages(image_frag_3D_spv_data);
+	auto uimage3DStages = initStages(image_frag_u3D_spv_data);
+	auto iimage3DStages = initStages(image_frag_i3D_spv_data);
 
 	VkVertexInputBindingDescription bindingDesc[1] = {};
 	bindingDesc[0].stride = sizeof(ImDrawVert);
@@ -223,49 +240,84 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	dynState.dynamicStateCount = 2;
 	dynState.pDynamicStates = dynStates;
 
-	VkGraphicsPipelineCreateInfo gpi[4] {};
+	std::vector<VkGraphicsPipelineCreateInfo> gpis;
 
-	gpi[0].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	gpi[0].flags = 0;
-	gpi[0].stageCount = 2;
-	gpi[0].pStages = guiStages.data();
-	gpi[0].pVertexInputState = &vertexInfo;
-	gpi[0].pInputAssemblyState = &iaInfo;
-	gpi[0].pViewportState = &viewportInfo;
-	gpi[0].pRasterizationState = &rasterInfo;
-	gpi[0].pMultisampleState = &msInfo;
-	gpi[0].pDepthStencilState = &depthInfo;
-	gpi[0].pColorBlendState = &blendInfo;
-	gpi[0].pDynamicState = &dynState;
-	gpi[0].layout = dev.renderData->pipeLayout;
-	gpi[0].renderPass = rp_;
-	gpi[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
+	auto& guiGpi = gpis.emplace_back();
+	guiGpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	guiGpi.flags = 0;
+	guiGpi.stageCount = 2;
+	guiGpi.pStages = guiStages.data();
+	guiGpi.pVertexInputState = &vertexInfo;
+	guiGpi.pInputAssemblyState = &iaInfo;
+	guiGpi.pViewportState = &viewportInfo;
+	guiGpi.pRasterizationState = &rasterInfo;
+	guiGpi.pMultisampleState = &msInfo;
+	guiGpi.pDepthStencilState = &depthInfo;
+	guiGpi.pColorBlendState = &blendInfo;
+	guiGpi.pDynamicState = &dynState;
+	guiGpi.layout = dev.renderData->pipeLayout;
+	guiGpi.renderPass = rp_;
+	guiGpi.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
-	gpi[1] = gpi[0];
-	gpi[1].flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
-	gpi[1].basePipelineIndex = 0u;
-	gpi[1].pStages = image1DStages.data();
+	auto& imgGpi = gpis.emplace_back(guiGpi);
+	imgGpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
+	imgGpi.basePipelineIndex = 0u;
+	imgGpi.pStages = image1DStages.data();
 
-	gpi[2] = gpi[1];
-	gpi[2].pStages = image2DStages.data();
+	auto addImGpi = [&](auto& stages) {
+		auto& gpi = gpis.emplace_back(imgGpi);
+		imgGpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+		imgGpi.basePipelineIndex = 1u;
+		gpi.pStages = stages.data();
+		return gpi;
+	};
 
-	gpi[3] = gpi[1];
-	gpi[3].pStages = image3DStages.data();
+	addImGpi(uimage1DStages);
+	addImGpi(iimage1DStages);
 
-	VkPipeline pipes[4];
+	addImGpi(image2DStages);
+	addImGpi(uimage2DStages);
+	addImGpi(iimage2DStages);
+
+	addImGpi(image3DStages);
+	addImGpi(uimage3DStages);
+	addImGpi(iimage3DStages);
+
+	VkPipeline pipes[10];
+	dlg_assert(gpis.size() == sizeof(pipes) / sizeof(pipes[0]));
+
 	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
-		VK_NULL_HANDLE, 4, gpi, nullptr, pipes));
+		VK_NULL_HANDLE, gpis.size(), gpis.data(), nullptr, pipes));
 
 	pipes_.gui = pipes[0];
+
 	pipes_.image1D = pipes[1];
-	pipes_.image2D = pipes[2];
-	pipes_.image3D = pipes[3];
+	pipes_.uimage1D = pipes[2];
+	pipes_.iimage1D = pipes[3];
+
+	pipes_.image2D = pipes[4];
+	pipes_.uimage2D = pipes[5];
+	pipes_.iimage2D = pipes[6];
+
+	pipes_.image3D = pipes[7];
+	pipes_.uimage3D = pipes[8];
+	pipes_.iimage3D = pipes[9];
 
 	nameHandle(dev, pipes_.gui, "Gui:pipeGui");
-	nameHandle(dev, pipes_.image1D, "Gui:pipeImage1D");
-	nameHandle(dev, pipes_.image2D, "Gui:pipeImage2D");
-	nameHandle(dev, pipes_.image3D, "Gui:pipeImage3D");
 
+	nameHandle(dev, pipes_.image1D, "Gui:pipeImage1D");
+	nameHandle(dev, pipes_.uimage1D, "Gui:pipeUImage1D");
+	nameHandle(dev, pipes_.iimage1D, "Gui:pipeIImage1D");
+
+	nameHandle(dev, pipes_.image2D, "Gui:pipeImage2D");
+	nameHandle(dev, pipes_.uimage2D, "Gui:pipeUImage2D");
+	nameHandle(dev, pipes_.iimage2D, "Gui:pipeIImage2D");
+
+	nameHandle(dev, pipes_.image3D, "Gui:pipeImage3D");
+	nameHandle(dev, pipes_.uimage3D, "Gui:pipeUImage3D");
+	nameHandle(dev, pipes_.iimage3D, "Gui:pipeIImage3D");
+
+	dev.dispatch.DestroyShaderModule(dev.handle, vertModule, nullptr);
 	for(auto& mod : modules) {
 		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 	}
@@ -283,9 +335,6 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	// ImGui::GetStyle().ItemSpacing = {8, 8};
 	// ImGui::GetStyle().ItemInnerSpacing = {6, 6};
 	// ImGui::GetStyle().Alpha = 0.9f;
-
-	// effectively disable imgui key repeat, we rely on it as input events.
-	// ImGui::GetIO().KeyRepeatDelay = 100000000.f;
 }
 
 // ~Gui
@@ -576,57 +625,47 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 			for(auto j = 0; j < cmds.CmdBuffer.Size; ++j) {
 				auto& cmd = cmds.CmdBuffer[j];
 
-				VkDescriptorSet ds;
-				VkPipeline pipe;
+				VkDescriptorSet ds = dsFont_;
+				VkPipeline pipe = pipes_.gui;
 				auto img = (DrawGuiImage*) cmd.TextureId;
-				if(img) {
-					switch(img->type) {
-						case DrawGuiImage::font:
-							ds = dsFont_;
-							pipe = pipes_.gui;
-							break;
-						case DrawGuiImage::e1d:
-							ds = draw.dsSelected;
-							pipe = pipes_.image1D;
-							break;
-						case DrawGuiImage::e2d:
-							ds = draw.dsSelected;
-							pipe = pipes_.image2D;
-							break;
-						case DrawGuiImage::e3d:
-							ds = draw.dsSelected;
-							pipe = pipes_.image3D;
-							break;
-						default:
-							dlg_error("Invalid DrawGuiImage");
-							pipe = {};
-							ds =  {};
-							break;
-					}
+				if(img && img->type != DrawGuiImage::font) {
+					ds = draw.dsSelected;
+					pipe = [&]{
+						switch(img->type) {
+							case DrawGuiImage::f1d: return pipes_.image1D;
+							case DrawGuiImage::u1d: return pipes_.uimage1D;
+							case DrawGuiImage::i1d: return pipes_.iimage1D;
 
-					if(img->type != DrawGuiImage::font) {
-						// bind push constant data
-						struct PcrImageData {
-							float layer;
-							float valMin;
-							float valMax;
-							u32 flags;
-						} pcr = {
-							img->layer,
-							img->minValue,
-							img->maxValue,
-							img->flags
-						};
+							case DrawGuiImage::f2d: return pipes_.image2D;
+							case DrawGuiImage::u2d: return pipes_.uimage2D;
+							case DrawGuiImage::i2d: return pipes_.iimage2D;
 
-						dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
-							VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
-							sizeof(pcr), &pcr);
-					}
-				} else {
-					// default: drawing imgui stuff.
-					// Use gui pipe and font texture
-					ds = dsFont_;
-					pipe = pipes_.gui;
+							case DrawGuiImage::f3d: return pipes_.image3D;
+							case DrawGuiImage::u3d: return pipes_.uimage3D;
+							case DrawGuiImage::i3d: return pipes_.iimage3D;
+
+							default:
+								dlg_error("unreachable");
+								return VkPipeline {};
+						}
+					}();
+
+					// bind push constant data
+					struct PcrImageData {
+						float layer;
+						float valMin;
+						float valMax;
+						u32 flags;
+					} pcr = {
+						img->layer,
+						img->minValue,
+						img->maxValue,
+						img->flags
+					};
+
+					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
+						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
+						sizeof(pcr), &pcr);
 				}
 
 				dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
@@ -1350,5 +1389,192 @@ void refButtonD(Gui& gui, Handle* handle, const char* str) {
 		ImGui::PopItemFlag();
 	}
 }
+
+void displayImage(Gui& gui, DrawGuiImage& imgDraw,
+		const VkExtent3D& extent, VkImageType imgType, VkFormat format,
+		const VkImageSubresourceRange& subresources) {
+	ImVec2 pos = ImGui::GetCursorScreenPos();
+	float aspect = float(extent.width) / extent.height;
+
+	// TODO: this logic might lead to problems for 1xHUGE images
+	float regW = ImGui::GetContentRegionAvail().x - 20.f;
+	float regH = regW / aspect;
+
+	ImGui::Image((void*) &imgDraw, {regW, regH});
+
+	// Taken pretty much just from the imgui demo
+	auto& io = gui.imguiIO();
+	if (ImGui::IsItemHovered()) {
+		ImGui::BeginTooltip();
+		float region_sz = 64.0f;
+		float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
+		float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
+		float zoom = 4.0f;
+		if (region_x < 0.0f) { region_x = 0.0f; }
+		else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
+		if (region_y < 0.0f) { region_y = 0.0f; }
+		else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
+		ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
+		ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
+		ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
+		ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
+		ImGui::Image((void*) &imgDraw, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
+		ImGui::EndTooltip();
+	}
+
+	// Row 1: components
+	if(subresources.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
+		auto numComponents = FormatChannelCount(format);
+		imgDraw.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+		ImGui::CheckboxFlags("R", &imgDraw.flags, DrawGuiImage::flagMaskR);
+		if(numComponents > 1) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("G", &imgDraw.flags, DrawGuiImage::flagMaskG);
+		} else {
+			imgDraw.flags &= ~(DrawGuiImage::flagMaskG);
+		}
+
+		if(numComponents > 2) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("B", &imgDraw.flags, DrawGuiImage::flagMaskB);
+		} else {
+			imgDraw.flags &= ~(DrawGuiImage::flagMaskB);
+		}
+
+		if(numComponents > 3) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("A", &imgDraw.flags, DrawGuiImage::flagMaskA);
+		} else {
+			imgDraw.flags &= ~(DrawGuiImage::flagMaskA);
+		}
+
+		ImGui::SameLine();
+		ImGui::CheckboxFlags("Gray", &imgDraw.flags, DrawGuiImage::flagGrayscale);
+	} else {
+		VkFlags depthStencil = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+		imgDraw.flags = DrawGuiImage::flagMaskR | DrawGuiImage::flagGrayscale;
+		if((subresources.aspectMask & depthStencil) == depthStencil) {
+			if(ImGui::RadioButton("Depth", imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT)) {
+				imgDraw.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+			}
+
+			ImGui::SameLine();
+			if(ImGui::RadioButton("Stencil", imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT)) {
+				imgDraw.aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
+			}
+		} else if(subresources.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) {
+			imgDraw.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		} else if(subresources.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) {
+			imgDraw.aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
+		} else {
+			dlg_error("Unsupported image format");
+		}
+	}
+
+	// Row 2: layer and mip
+	if(extent.depth > 1) {
+		// TODO: not very convenient to use for a lot of slices.
+		//   make sensitivity absolute, i.e. not dependent on number of slices?
+		ImGui::SliderFloat("slice", &imgDraw.layer, 0, extent.depth - 1);
+	} else if(subresources.layerCount > 1) {
+		int layer = int(imgDraw.layer);
+		ImGui::SliderInt("Layer", &layer, subresources.baseArrayLayer,
+			subresources.baseArrayLayer + subresources.layerCount - 1);
+		imgDraw.layer = layer;
+	}
+
+	if(subresources.levelCount > 1) {
+		ImGui::SameLine();
+		int mip = int(imgDraw.level);
+		ImGui::SliderInt("Mip", &mip, subresources.baseMipLevel,
+			subresources.baseMipLevel + subresources.levelCount - 1);
+		imgDraw.level = mip;
+	}
+
+	// Row 3: min/max values
+	ImGui::DragFloat("Min", &imgDraw.minValue, 0.01);
+	ImGui::DragFloat("Max", &imgDraw.maxValue, 0.01);
+	// TODO: add power?
+
+	// ugh, this could be done a bit cleaner...
+	if(imgType == VK_IMAGE_TYPE_1D) {
+		if(imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
+			auto numt = FormatDepthNumericalType(format);
+			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
+
+			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i1d;
+			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u1d;
+			else imgDraw.type = DrawGuiImage::f1d;
+		} else if(imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
+			auto numt = FormatStencilNumericalType(format);
+			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
+
+			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i1d;
+			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u1d;
+			else imgDraw.type = DrawGuiImage::f1d;
+		} else {
+			if(FormatIsSampledFloat(format)) imgDraw.type = DrawGuiImage::f1d;
+			if(FormatIsInt(format)) imgDraw.type = DrawGuiImage::i1d;
+			if(FormatIsUInt(format)) imgDraw.type = DrawGuiImage::u1d;
+		}
+	} else if(imgType == VK_IMAGE_TYPE_2D) {
+		if(imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
+			auto numt = FormatDepthNumericalType(format);
+			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
+
+			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i2d;
+			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u2d;
+			else imgDraw.type = DrawGuiImage::f2d;
+		} else if(imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
+			auto numt = FormatStencilNumericalType(format);
+			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
+
+			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i2d;
+			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u2d;
+			else imgDraw.type = DrawGuiImage::f2d;
+		} else {
+			if(FormatIsSampledFloat(format)) imgDraw.type = DrawGuiImage::f2d;
+			if(FormatIsInt(format)) imgDraw.type = DrawGuiImage::i2d;
+			if(FormatIsUInt(format)) imgDraw.type = DrawGuiImage::u2d;
+		}
+	} else if(imgType == VK_IMAGE_TYPE_3D) {
+		if(imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
+			auto numt = FormatDepthNumericalType(format);
+			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
+
+			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i3d;
+			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u3d;
+			else imgDraw.type = DrawGuiImage::f3d;
+		} else if(imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
+			auto numt = FormatStencilNumericalType(format);
+			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
+
+			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i3d;
+			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u3d;
+			else imgDraw.type = DrawGuiImage::f1d;
+		} else {
+			if(FormatIsSampledFloat(format)) imgDraw.type = DrawGuiImage::f3d;
+			if(FormatIsInt(format)) imgDraw.type = DrawGuiImage::i3d;
+			if(FormatIsUInt(format)) imgDraw.type = DrawGuiImage::u3d;
+		}
+	}
+
+	dlg_assertm(imgDraw.type != DrawGuiImage::font,
+		"imgType {}, format {}", vk::name(imgType), vk::name(format));
+
+	// TODO: display format and aspect?
+}
+
+// TODO: use something like this to copy the currently focused texel
+// in image viewer
+// void copyTexel(Device& dev, VkCommandBuffer cb, VkImage src,
+// 		VkImageLayout layout, VkBuffer dst, VkOffset3D pixel) {
+// 	VkBufferImageCopy copy {};
+// 	copy.imageExtent = {1, 1, 1};
+// 	copy.imageOffset = pixel;
+//
+// 	dev.dispatch.CmdCopyImageToBuffer(cb, src, layout, dst, 1, &copy);
+// }
 
 } // namespace fuen

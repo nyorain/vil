@@ -20,14 +20,24 @@ layout(push_constant) uniform PCR {
 	layout(offset = 28) uint flags;
 } pcr;
 
+#ifdef TEX_FORMAT_UINT
+	#define SamplerType(Dim) usampler##Dim
+#elif defined(TEX_FORMAT_INT)
+	#define SamplerType(Dim) isampler##Dim
+#elif defined(TEX_FORMAT_FLOAT)
+	#define SamplerType(Dim) sampler##Dim
+#else
+	#error No valid TEX_FORMAT definition
+#endif
+
 #ifdef TEX_TYPE_1D_ARRAY
-	layout(set = 0, binding = 0) uniform sampler1DArray sTexture;
+	layout(set = 0, binding = 0) uniform SamplerType(1DArray) sTexture;
 
 	vec4 sampleTex() {
 		return texture(sTexture, vec2(In.uv.x, pcr.layer));
 	}
 #elif defined(TEX_TYPE_2D_ARRAY)
-	layout(set = 0, binding = 0) uniform sampler2DArray sTexture;
+	layout(set = 0, binding = 0) uniform SamplerType(2DArray) sTexture;
 
 	vec4 sampleTex() {
 		return texture(sTexture, vec3(In.uv.xy, pcr.layer));
@@ -36,11 +46,13 @@ layout(push_constant) uniform PCR {
 // TODO: cubearray?
 // layout(set = 0, binding = 0) uniform samplerCube sTexture;
 #elif defined(TEX_TYPE_3D)
-	layout(set = 0, binding = 0) uniform sampler3D sTexture;
+	layout(set = 0, binding = 0) uniform SamplerType(3D) sTexture;
 
 	vec4 sampleTex() {
 		return texture(sTexture, vec3(In.uv.xy, pcr.layer));
 	}
+#else
+	#error No valid TEX_TYPE definition
 #endif
 
 vec4 remap(vec4 val, float oldLow, float oldHigh, float newLow, float newHigh) {
@@ -59,7 +71,7 @@ void main() {
 	// TODO: add additional luminance mode? might be what some people
 	// expect from grayscale
 	if((pcr.flags & flagGrayscale) != 0) {
-		texCol = vec4(dot(texCol.rgb, 1.f.xxx));
+		texCol.rgb = vec3(dot(texCol.rgb, 1.f.xxx));
 	}
 
     fragColor = In.color * texCol;

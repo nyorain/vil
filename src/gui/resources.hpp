@@ -33,10 +33,11 @@ struct ResourceGui {
 
 	struct {
 		Image* object {};
-		VkImageSubresourceRange newSubres {};
-		VkImageSubresourceRange subres {};
 		VkImageView view {};
 		DrawGuiImage draw {};
+
+		unsigned level {};
+		VkImageAspectFlagBits aspect {};
 	} image_;
 
 	struct {

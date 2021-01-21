@@ -57,23 +57,20 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 
 	recreateView |= (!image_.view && canHaveView);
 	recreateView |= image_.view && (
-		(image_.newSubres.aspectMask != image_.subres.aspectMask) ||
-		(image_.newSubres.baseArrayLayer != image_.subres.baseArrayLayer) ||
-		(image_.newSubres.baseMipLevel != image_.subres.baseMipLevel));
+		(image_.aspect != image_.draw.aspect) ||
+		(image_.level != image_.draw.level));
 
 	if(recreateView) {
 		if(!image_.view) {
-			if(FormatIsDepthAndStencil(image.ci.format) || FormatIsDepthOnly(image.ci.format)) {
-				image_.subres.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+			if(FormatHasDepth(image.ci.format)) {
+				image_.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
 			} else if(FormatIsStencilOnly(image.ci.format)) {
-				image_.subres.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+				image_.aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
 			} else {
-				image_.subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				image_.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 			}
 
-			image_.subres.levelCount = 1;
-			image_.subres.layerCount = 1;
-			image_.newSubres = image_.subres;
+			image_.level = 0u;
 
 			auto numComponents = FormatChannelCount(image_.object->ci.format);
 			if(numComponents == 1) {
@@ -90,13 +87,10 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		auto getViewType = [&]{
 			switch(image.ci.imageType) {
 				case VK_IMAGE_TYPE_1D:
-					image_.draw.type = DrawGuiImage::e1d;
 					return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
 				case VK_IMAGE_TYPE_2D:
-					image_.draw.type = DrawGuiImage::e2d;
 					return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
 				case VK_IMAGE_TYPE_3D:
-					image_.draw.type = DrawGuiImage::e3d;
 					return VK_IMAGE_VIEW_TYPE_3D;
 				default:
 					dlg_error("Unsupported image type");
@@ -109,7 +103,10 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		ivi.image = image.handle;
 		ivi.viewType = getViewType();
 		ivi.format = image.ci.format;
-		ivi.subresourceRange = image_.newSubres;
+		ivi.subresourceRange.aspectMask = image_.aspect;
+		ivi.subresourceRange.baseMipLevel = image_.level;
+		ivi.subresourceRange.layerCount = image_.object->ci.arrayLayers;
+		ivi.subresourceRange.levelCount = 1u;
 
 		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &image_.view));
 		nameHandle(dev, image_.view, "ResourceGui:image_.view");
@@ -130,7 +127,8 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 
 		dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 
-		image_.subres = image_.newSubres;
+		image_.level = image_.draw.level;
+		image_.draw.aspect = image_.draw.aspect;
 	}
 
 	// info
@@ -201,75 +199,14 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		ImGui::Spacing();
 		ImGui::Spacing();
 
-        ImVec2 pos = ImGui::GetCursorScreenPos();
+		VkImageSubresourceRange subres {};
+		subres.layerCount = image_.object->ci.arrayLayers;
+		subres.levelCount = image_.object->ci.mipLevels;
+		subres.aspectMask = image_.aspect;
 
-		float aspect = float(image.ci.extent.width) / image.ci.extent.height;
-
-		// TODO: this logic might lead to problems for 1xHUGE images
-		float regW = ImGui::GetContentRegionAvail().x - 20.f;
-		float regH = regW / aspect;
-
-		ImGui::Image((void*) &image_.draw, {regW, regH});
-
-		// Taken pretty much just from the imgui demo
-		auto& io = gui_->imguiIO();
-		if (ImGui::IsItemHovered()) {
-			ImGui::BeginTooltip();
-			float region_sz = 64.0f;
-			float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
-			float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
-			float zoom = 4.0f;
-			if (region_x < 0.0f) { region_x = 0.0f; }
-			else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
-			if (region_y < 0.0f) { region_y = 0.0f; }
-			else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
-			ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
-			ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
-			ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
-			ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
-			ImGui::Image((void*) &image_.draw, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
-			ImGui::EndTooltip();
-		}
-
-		// Row 1: components
-		auto numComponents = FormatChannelCount(image_.object->ci.format);
-
-		ImGui::CheckboxFlags("R", &image_.draw.flags, DrawGuiImage::flagMaskR);
-		if(numComponents > 1) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("G", &image_.draw.flags, DrawGuiImage::flagMaskG);
-		}
-		if(numComponents > 2) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("B", &image_.draw.flags, DrawGuiImage::flagMaskB);
-		}
-		if(numComponents > 3) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("A", &image_.draw.flags, DrawGuiImage::flagMaskA);
-		}
-
-		ImGui::SameLine();
-		ImGui::CheckboxFlags("Gray", &image_.draw.flags, DrawGuiImage::flagGrayscale);
-
-		// Row 2: layer and mip
-		if(image.ci.extent.depth > 1) {
-			ImGui::SliderFloat("slice", &image_.draw.layer, 0, image.ci.extent.depth - 1);
-		} else if(image.ci.arrayLayers > 1) {
-			int layer = image_.newSubres.baseArrayLayer;
-			ImGui::SliderInt("Layer", &layer, 0, image.ci.arrayLayers - 1);
-			image_.newSubres.baseArrayLayer = layer;
-		}
-
-		if(image.ci.mipLevels > 1) {
-			ImGui::SameLine();
-			int mip = image_.newSubres.baseMipLevel;
-			ImGui::SliderInt("Mip", &mip, 0, image.ci.mipLevels - 1);
-			image_.newSubres.baseMipLevel = mip;
-		}
-
-		// Row 3: min/max values
-		ImGui::DragFloat("Min", &image_.draw.minValue, 0.01);
-		ImGui::DragFloat("Max", &image_.draw.maxValue, 0.01);
+		auto format = image_.object->ci.format;
+		displayImage(*gui_, image_.draw, image_.object->ci.extent,
+			image_.object->ci.imageType, format, subres);
 	}
 
 	// TODO: display pending layout?
@@ -1475,7 +1412,10 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		VkImageMemoryBarrier imgb {};
 		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		imgb.image = img.handle;
-		imgb.subresourceRange = image_.subres;
+		imgb.subresourceRange.aspectMask = image_.aspect;
+		imgb.subresourceRange.baseMipLevel = image_.level;
+		imgb.subresourceRange.levelCount = 1u;
+		imgb.subresourceRange.layerCount = image_.object->ci.arrayLayers;
 		imgb.oldLayout = img.pendingLayout;
 		imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags?
@@ -1563,7 +1503,10 @@ void ResourceGui::recoredPostRender(Draw& draw) {
 		VkImageMemoryBarrier imgb {};
 		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		imgb.image = img.handle;
-		imgb.subresourceRange = image_.subres;
+		imgb.subresourceRange.aspectMask = image_.aspect;
+		imgb.subresourceRange.baseMipLevel = image_.level;
+		imgb.subresourceRange.levelCount = 1u;
+		imgb.subresourceRange.layerCount = image_.object->ci.arrayLayers;
 		imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		imgb.newLayout = img.pendingLayout;
 		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;

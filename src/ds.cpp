@@ -219,7 +219,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		const auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
 		dsLayout.bindings[bind.binding] = bind;
-		if(needsSampler(dsLayout, bind.binding) && bind.pImmutableSamplers) {
+		if(needsSampler(bind.descriptorType) && bind.pImmutableSamplers) {
 			auto& span = dsLayout.immutableSamplers.emplace_back();
 			span = {bind.pImmutableSamplers, bind.pImmutableSamplers + bind.descriptorCount};
 			dsLayout.bindings[bind.binding].pImmutableSamplers = span.data();

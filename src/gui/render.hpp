@@ -116,12 +116,25 @@ struct RenderBuffer {
 };
 
 struct DrawGuiImage {
+	// TODO: maybe cleaner to just store
+	// - VkFormat
+	// - VkExtent
+	// - VkAspectFlags
+	// - ImageView (or directly the descriptor?)
 	enum Type {
 		font,
 		// custom, uses draw.dsSelected
-		e1d,
-		e2d,
-		e3d,
+		f1d,
+		u1d,
+		i1d,
+
+		f2d,
+		u2d,
+		i2d,
+
+		f3d,
+		u3d,
+		i3d,
 	};
 
 	// Must match flags in image.frag
@@ -136,9 +149,11 @@ struct DrawGuiImage {
 	Type type;
 	// Only relevant when not font
 	float layer {};
+	float level {};
 	float minValue {0.f};
 	float maxValue {1.f};
 	u32 flags {};
+	VkImageAspectFlagBits aspect {};
 };
 
 } // namespace fuen

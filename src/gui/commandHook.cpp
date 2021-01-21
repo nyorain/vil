@@ -13,49 +13,38 @@
 
 namespace fuen {
 
-// TODO
-struct ImageCopyOp {
-	VkImageSubresourceRange subresources {};
-
-	// If this isn't nullopt, will read the content of the specified
-	// texel into a buffer, to be read on cpu.
-	std::optional<VkOffset3D> readTexel {};
-};
-
 // util
-void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
+void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
+		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam) {
 	this->dev = &dev;
 	this->extent = extent;
+	this->levelCount = levels;
+	this->layerCount = layers;
+	this->aspectMask = aspects;
+	this->format = format;
 
-	// TODO: support stencil
-	// TODO: support non-float images
-	// TODO: check if format supports sampling (and transfer_dst!)
-	//   otherwise we could blit to an equivalent format.
-	//   Or at least fail.
-
-	if(FormatIsColor(format)) {
-		subresources.aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
-	} 
-	if(FormatHasDepth(format)) {
-		subresources.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
-	}
-	if(FormatHasStencil(format)) {
-		subresources.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-	}
-
-	// TODO: copy multiple layers?
+	// TODO: evaluate if the image can be used for everything we want
+	//   to use it for. Could blit to related format if not.
 	// TODO: support multisampling?
-	// TODO: support non-2d images
 	VkImageCreateInfo ici {};
 	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	ici.arrayLayers = 1u;
+	ici.arrayLayers = layerCount;
 	ici.extent = extent;
 	ici.format = format;
-	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.imageType = minImageType(this->extent);
 	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-	ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if(srcQueueFam == dev.gfxQueue->family) {
+		ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	} else {
+		std::array<u32, 2> qfams = {dev.gfxQueue->family, srcQueueFam};
+		ici.sharingMode = VK_SHARING_MODE_CONCURRENT;
+		ici.pQueueFamilyIndices = qfams.data();
+		ici.queueFamilyIndexCount = qfams.size();
+	}
+
 	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-	ici.mipLevels = 1;
+	ici.mipLevels = levelCount;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	ici.samples = VK_SAMPLE_COUNT_1_BIT;
 	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &image));
@@ -68,8 +57,9 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
 	VkMemoryAllocateInfo allocInfo {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = memReqs.size;
-	// TODO: create on hostVisible memory for easier image viewing?
-	//   revisit this when implenting texel-values-in-gui feature
+	// NOTE: even though using host visible memory would make some operations
+	//   eaiser (such as showing a specific texel value in gui), the guarantees
+	//   vulkan gives for support of linear images are quite small.
 	auto memBits = memReqs.memoryTypeBits & dev.deviceLocalMemTypeBits;
 	allocInfo.memoryTypeIndex = findLSB(memBits);
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &memory));
@@ -80,13 +70,32 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent) {
 	VkImageViewCreateInfo vci {};
 	vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	vci.image = image;
-	vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+	switch(ici.imageType) {
+		case VK_IMAGE_TYPE_1D:
+			vci.viewType = VK_IMAGE_VIEW_TYPE_1D_ARRAY;
+			break;
+		case VK_IMAGE_TYPE_2D:
+			vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+			break;
+		case VK_IMAGE_TYPE_3D:
+			vci.viewType = VK_IMAGE_VIEW_TYPE_3D;
+			break;
+		default:
+			dlg_error("unreachable");
+			break;
+	}
 	vci.format = format;
-	vci.subresourceRange.aspectMask = subresources.aspectMask;
-	vci.subresourceRange.layerCount = 1u;
-	vci.subresourceRange.levelCount = 1u;
+	vci.subresourceRange.aspectMask = aspectMask & ~(VK_IMAGE_ASPECT_STENCIL_BIT);
+	vci.subresourceRange.layerCount = layerCount;
+	vci.subresourceRange.levelCount = levelCount;
 	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &imageView));
 	nameHandle(dev, this->imageView, "CopiedImage:imageView");
+
+	if(aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) {
+		vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
+		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &stencilView));
+		nameHandle(dev, this->stencilView, "CopiedImage:stencilView");
+	}
 }
 
 CopiedImage::~CopiedImage() {
@@ -95,6 +104,7 @@ CopiedImage::~CopiedImage() {
 	}
 
 	dev->dispatch.DestroyImageView(dev->handle, imageView, nullptr);
+	dev->dispatch.DestroyImageView(dev->handle, stencilView, nullptr);
 	dev->dispatch.DestroyImage(dev->handle, image, nullptr);
 	dev->dispatch.FreeMemory(dev->handle, memory, nullptr);
 }
@@ -525,8 +535,8 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 }
 
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
-		VkImageLayout srcLayout, const VkImageSubresource& srcSubres,
-		std::string& errorMessage) {
+		VkImageLayout srcLayout, const VkImageSubresourceRange& srcSubres,
+		std::string& errorMessage, u32 srcQueueFam) {
 	if(src.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
 		// TODO: support multisampling via vkCmdResolveImage
 		//   alternatively we could check if the image is
@@ -546,7 +556,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	}
 
 	auto extent = src.ci.extent;
-	for(auto i = 0u; i < srcSubres.mipLevel; ++i) {
+	for(auto i = 0u; i < srcSubres.baseMipLevel; ++i) {
 		extent.width = std::max(extent.width >> 1, 1u);
 
 		if(extent.height) {
@@ -558,7 +568,9 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		}
 	}
 
-	dst.init(dev, src.ci.format, extent);
+	dst.init(dev, src.ci.format, extent, srcSubres.layerCount,
+		srcSubres.levelCount, srcSubres.aspectMask, srcQueueFam);
+	dst.srcSubresRange = srcSubres;
 
 	// perform copy
 	VkImageMemoryBarrier imgBarriers[2] {};
@@ -570,11 +582,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	srcBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 	srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	srcBarrier.subresourceRange.aspectMask = srcSubres.aspectMask;
-	srcBarrier.subresourceRange.baseArrayLayer = srcSubres.arrayLayer;
-	srcBarrier.subresourceRange.baseMipLevel = srcSubres.mipLevel;
-	srcBarrier.subresourceRange.layerCount = 1u;
-	srcBarrier.subresourceRange.levelCount = 1u;
+	srcBarrier.subresourceRange = srcSubres;
 	srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
@@ -585,9 +593,9 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	dstBarrier.srcAccessMask = 0u;
 	dstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	dstBarrier.subresourceRange.aspectMask = dst.subresources.aspectMask;
-	dstBarrier.subresourceRange.layerCount = 1u;
-	dstBarrier.subresourceRange.levelCount = 1u;
+	dstBarrier.subresourceRange.aspectMask = dst.aspectMask;
+	dstBarrier.subresourceRange.layerCount = dst.layerCount;
+	dstBarrier.subresourceRange.levelCount = dst.levelCount;
 	dstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
@@ -596,34 +604,31 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 
-	// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
-	// between the render passes.
-	VkMemoryBarrier memBarrier {};
-	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-	memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
-	memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	std::vector<VkImageCopy> copies;
+	for(auto m = 0u; m < srcSubres.levelCount; ++m) {
+		auto& copy = copies.emplace_back();
+		copy.dstOffset = {};
+		copy.srcOffset = {};
+		copy.extent = extent;
+		copy.srcSubresource.aspectMask = srcSubres.aspectMask;
+		copy.srcSubresource.baseArrayLayer = srcSubres.baseArrayLayer;
+		copy.srcSubresource.layerCount = srcSubres.layerCount;
+		copy.srcSubresource.mipLevel = srcSubres.baseMipLevel + m;
 
-	dev.dispatch.CmdPipelineBarrier(cb,
-		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+		copy.dstSubresource.aspectMask = dst.aspectMask;
+		copy.dstSubresource.baseArrayLayer = 0u;
+		copy.dstSubresource.layerCount = srcSubres.layerCount;
+		copy.dstSubresource.mipLevel = m;
 
-	VkImageCopy copy {};
-	copy.dstOffset = {};
-	copy.srcOffset = {};
-	copy.extent = extent;
-	copy.srcSubresource.aspectMask = srcSubres.aspectMask;
-	copy.srcSubresource.baseArrayLayer = srcSubres.arrayLayer;
-	copy.srcSubresource.mipLevel = srcSubres.mipLevel;
-	copy.srcSubresource.layerCount = 1u;
-
-	copy.dstSubresource.aspectMask = dst.subresources.aspectMask;
-	copy.dstSubresource.layerCount = 1u;
+		extent.width = std::max(extent.width >> 1u, 1u);
+		extent.height = std::max(extent.height >> 1u, 1u);
+		extent.depth = std::max(extent.depth >> 1u, 1u);
+	}
 
 	dev.dispatch.CmdCopyImage(cb,
 		src.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		1, &copy);
+		copies.size(), copies.data());
 
 	srcBarrier.oldLayout = srcBarrier.newLayout;
 	srcBarrier.newLayout = srcLayout;
@@ -752,11 +757,9 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 				}
 
 				// TODO: select exact layer/mip in view range via gui
-				VkImageSubresource subres {};
-				subres.aspectMask = imgView->ci.subresourceRange.aspectMask;
-				subres.arrayLayer = imgView->ci.subresourceRange.baseArrayLayer;
-				subres.mipLevel = imgView->ci.subresourceRange.baseMipLevel;
-				initAndCopy(dev, cb, dst, *imgView->img, layout, subres, state->errorMessage);
+				auto subres = imgView->ci.subresourceRange;
+				initAndCopy(dev, cb, dst, *imgView->img, layout, subres,
+					state->errorMessage, record->queueFamily);
 			}
 		} else {
 			// TODO: bad message, maybe just show a link to the sampler
@@ -789,6 +792,20 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info) {
 	auto& dev = record->device();
 	DebugLabel lbl(dev, cb, "beforeDstOutsideRp");
+
+	// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
+	// between the render passes to make sure the first render pass really
+	// has finished (with *everything*, not just the stuff we are interested
+	// in here) before we start the second one.
+	VkMemoryBarrier memBarrier {};
+	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+	memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		0, 1, &memBarrier, 0, nullptr, 0, nullptr);
 
 	// indirect copy
 	if(hook->copyIndirectCmd) {
@@ -851,6 +868,20 @@ void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
 	auto& dev = record->device();
 	DebugLabel lbl(dev, cb, "afterDsOutsideRp");
 
+	// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
+	// between the render passes to make sure the second render pass really
+	// has finished (with *everything*, not just the stuff we are interested
+	// in here) before we start the third one.
+	VkMemoryBarrier memBarrier {};
+	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+	memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+
 	if(hook->copyAttachment) {
 		// initialize dst image
 		dlg_assert(info.beginRenderPassCmd);
@@ -873,12 +904,9 @@ void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
 				auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
 
 				// TODO: select exact layer/mip in view range via gui
-				VkImageSubresource subres {};
-				subres.aspectMask = imageView->ci.subresourceRange.aspectMask;
-				subres.arrayLayer = imageView->ci.subresourceRange.baseArrayLayer;
-				subres.mipLevel = imageView->ci.subresourceRange.baseMipLevel;
+				auto& subres = imageView->ci.subresourceRange;
 				initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout, subres,
-					state->errorMessage);
+					state->errorMessage, record->queueFamily);
 			}
 		}
 	}

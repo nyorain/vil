@@ -9,6 +9,42 @@ v0.1, goal: end of january 2021
 - Testing, Profiling, Needed optimization
 
 - [x] setup CI for windows (msvc and mingw) and linux
+- [ ] show more information in command viewer. Stuff downloaded from
+      device before/after command
+	- [x] new per-command input/output overview, allowing to view *all* resources
+	- [ ] full support CmdDrawIndirectCount in gui (most stuff not implement in CommandHook)
+	- [ ] I/O inspector for transfer commands
+	- [ ] add more information to I/O viewer (especially for images)
+	- [ ] fix code flow. Really bad at the moment, with Commands calling
+	      that displayAction function and optionally append to child.
+	- [ ] improve the new overview. See all the various todos
+	- [ ] chose sensible default sizes/layouts
+	- [x] implement buffer viewer (infer information from shaders)
+	- [x] factor out image viewer from resources into own component; use it here.
+	      Allow layer/mip selection
+	- [x] re-add timing display in command inspector
+	- [ ] for storage buffers/storage images, a before/after/change
+	      view would be really nice. We can do that.
+- [ ] proper layout of child windows with resizing
+      See https://github.com/ocornut/imgui/issues/319
+- [ ] make enumString.hpp return some deafult value ("" or "<?>") instead of nullptr.
+      Could cause crashed for future values atm
+- [ ] destroying a sampler should also invalidate all records that use 
+      a descriptor set allocated from a layout with that sampler bound as
+	  immutable sampler. No idea how to properly do that, we need a link
+	  sampler -> descriptorSetLayout and additionally 
+	  descriptorSetLayout -> descriptorSet. Or maybe implicitly link
+	  the sampler as soon as the descriptor set is created (from the layout,
+	  in which it is linked) and then treat it as normal binding (that
+	  is never invalidated, treat as special case)
+	- [ ] make sure to never read layout.pImmutableSamplers of an invalidated
+	      record then. Destroying the immutable sampler would invalidate the
+		  ds, causing the ds to be removed from the record.
+- [ ] debug gui.cpp:1316,1317 asserts sometimes failing (on window resize)
+      draw.inUse
+- [ ] support integer-format images (needs different image display shader)
+- [ ] support compressed/block formats
+- [ ] in CopiedImage::init: check for image usage support
 - [ ] fix command hook synchronization issue where we use a CommandHookState that is currently
       written to by a new application submission. I guess we simply have to add something like
 	  "PendingSubmission* writerSubmission {}" to CommandHookState that is set every time
@@ -32,22 +68,6 @@ v0.1, goal: end of january 2021
 	- [ ] CmdPipelineBarrier
 	- [ ] CmdSetEvent
 	- [ ] CmdWaitEvents
-- [ ] I/O inspector for transfer commands
-- [ ] full support CmdDrawIndirectCount in gui (most stuff not implement in CommandHook)
-- [ ] show more information in command viewer. Stuff downloaded from
-      device before/after command
-	- [ ] new per-command input/output overview, allowing to view *all* resources
-	- [ ] fix code flow. Really bad at the moment, with Commands calling
-	      that displayAction function and optionally append to child.
-	- [ ] improve the new overview. See all the various todos
-	- [ ] chose sensible default sizes/layouts
-	- [ ] implement buffer viewer (infer information from shaders)
-	- [ ] factor out image viewer from resources into own component; use it here.
-	- [ ] re-add timing display in command inspector
-	- [ ] for storage buffers/storage images, a before/after/change
-	      view would be really nice. We can do that.
-- [ ] proper layout of child windows with resizing
-      See https://github.com/ocornut/imgui/issues/319
 - [ ] better enumString.hpp. Remove prefixes
 - [x] copy vulkan headers to vk/. So we don't rely on system headers
 - [ ] Allow to freeze state for current displayed command, i.e. don't

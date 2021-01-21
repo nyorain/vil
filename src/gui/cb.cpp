@@ -7,6 +7,7 @@
 #include <commands.hpp>
 #include <record.hpp>
 #include <util/bytes.hpp>
+#include <util/util.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
@@ -15,7 +16,10 @@ namespace fuen {
 
 // CommandBufferGui
 CommandBufferGui::CommandBufferGui() {
-	commandFlags_ = CommandType(~(CommandType::end | CommandType::bind));
+	commandFlags_ = CommandType(~(CommandType::end | CommandType::bind | CommandType::query));
+	ioImage_.flags = DrawGuiImage::flagMaskR |
+		DrawGuiImage::flagMaskG |
+		DrawGuiImage::flagMaskB;
 }
 
 CommandBufferGui::~CommandBufferGui() = default;
@@ -124,121 +128,9 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::NextColumn();
 
 	// command info
-	ImGui::BeginChild("Command Info", {0, 0});
+	ImGui::BeginChild("Command Info");
 	if(!command_.empty()) {
-		// Inspector
 		command_.back()->displayInspector(*gui_);
-
-		/*
-		// Show own general gui
-		if(hook_) {
-			// TODO: separate count and valid flag
-			if(hook_->indirect.count) {
-				auto span = ReadBuf(hook_->indirect.data);
-				if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_)) {
-					if(dcmd->indexed) {
-						auto cmd = read<VkDrawIndexedIndirectCommand>(span);
-						imGuiText("firstIndex: {}", cmd.firstIndex);
-						imGuiText("indexCount: {}", cmd.indexCount);
-						imGuiText("vertexOffset: {}", cmd.vertexOffset);
-						imGuiText("firstInstance: {}", cmd.firstInstance);
-						imGuiText("instanceCount: {}", cmd.instanceCount);
-					} else {
-						auto cmd = read<VkDrawIndirectCommand>(span);
-						imGuiText("firstVertex: {}", cmd.firstVertex);
-						imGuiText("vertexCount: {}", cmd.vertexCount);
-						imGuiText("firstInstance: {}", cmd.firstInstance);
-						imGuiText("instanceCount: {}", cmd.instanceCount);
-					}
-				} else if(dynamic_cast<const DispatchIndirectCmd*>(command_)) {
-					auto cmd = read<VkDispatchIndirectCommand>(span);
-					imGuiText("groups X: {}", cmd.x);
-					imGuiText("groups Y: {}", cmd.y);
-					imGuiText("groups Z: {}", cmd.z);
-				} // TODO: drawIndirectCount
-			}
-
-			auto lastTime = hook_->lastTime;
-			auto displayDiff = lastTime * dev.props.limits.timestampPeriod;
-			auto timeNames = {"ns", "mus", "ms", "s"};
-
-			auto it = timeNames.begin();
-			while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
-				++it;
-				displayDiff /= 1000.f;
-
-			}
-
-			imGuiText("Time: {} {}", displayDiff, *it);
-
-			if(hook_->image) {
-				// TODO: unset at some point...
-				// TODO: we can't be certain the previous cb using the
-				//   old imageCopy_ has been finished
-				// we should unset this when its no longer needed and the
-				// last command needing it has finished.
-				// Should probably add a mechanism for associating
-				// this resource with the draw.
-				imageCopy_ = hook_->image;
-				draw.keepAliveImageCopy = imageCopy_;
-
-				VkDescriptorImageInfo dsii {};
-				dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				dsii.imageView = hook_->image->imageView;
-				dsii.sampler = dev.renderData->nearestSampler;
-
-				VkWriteDescriptorSet write {};
-				write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-				write.descriptorCount = 1u;
-				write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-				write.dstSet = draw.dsSelected;
-				write.pImageInfo = &dsii;
-
-				dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
-
-				// TODO
-				ImGui::Spacing();
-				ImGui::Spacing();
-
-				ImVec2 pos = ImGui::GetCursorScreenPos();
-
-				float aspect = float(hook_->image->width) / hook_->image->height;
-
-				// TODO: this logic might lead to problems for 1xHUGE images
-				float regW = ImGui::GetContentRegionAvail().x - 20.f;
-				float regH = regW / aspect;
-
-				// TODO
-				imgDraw_.type = DrawGuiImage::Type::e2d;
-				imgDraw_.flags =
-					DrawGuiImage::flagMaskR |
-					DrawGuiImage::flagMaskG |
-					DrawGuiImage::flagMaskB; // |
-					// DrawGuiImage::flagMaskA;
-				ImGui::Image((void*) &imgDraw_, {regW, regH});
-
-				// Taken pretty much just from the imgui demo
-				auto& io = gui_->imguiIO();
-				if (ImGui::IsItemHovered()) {
-					ImGui::BeginTooltip();
-					float region_sz = 64.0f;
-					float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
-					float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
-					float zoom = 4.0f;
-					if (region_x < 0.0f) { region_x = 0.0f; }
-					else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
-					if (region_y < 0.0f) { region_y = 0.0f; }
-					else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
-					ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
-					ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
-					ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
-					ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
-					ImGui::Image((void*) &imgDraw_, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
-					ImGui::EndTooltip();
-				}
-			}
-		}
-		*/
 	}
 
 	ImGui::EndChild();
@@ -282,9 +174,16 @@ void CommandBufferGui::displayImage(const CopiedImage& img) {
 
 	draw.usedHookState = hook_->state;
 
+	// TODO: when a new CopiedImage is displayed we could reset the
+	//   color mask flags. In some cases this is desired but probably
+	//   not in all.
+
+	fuen::displayImage(*gui_, ioImage_, img.extent, minImageType(img.extent),
+		img.format, img.srcSubresRange);
+
 	VkDescriptorImageInfo dsii {};
 	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	dsii.imageView = img.imageView;
+	dsii.imageView = (ioImage_.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) ? img.stencilView : img.imageView;
 	dsii.sampler = dev.renderData->nearestSampler;
 
 	VkWriteDescriptorSet write {};
@@ -295,47 +194,6 @@ void CommandBufferGui::displayImage(const CopiedImage& img) {
 	write.pImageInfo = &dsii;
 
 	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
-
-	// TODO
-	ImGui::Spacing();
-	ImGui::Spacing();
-
-	ImVec2 pos = ImGui::GetCursorScreenPos();
-
-	float aspect = float(img.extent.width) / img.extent.height;
-
-	// TODO: this logic might lead to problems for 1xHUGE images
-	float regW = ImGui::GetContentRegionAvail().x - 20.f;
-	float regH = regW / aspect;
-
-	// TODO
-	imgDraw_.type = DrawGuiImage::Type::e2d;
-	imgDraw_.flags =
-		DrawGuiImage::flagMaskR |
-		DrawGuiImage::flagMaskG |
-		DrawGuiImage::flagMaskB; // |
-		// DrawGuiImage::flagMaskA;
-	ImGui::Image((void*) &imgDraw_, {regW, regH});
-
-	// Taken pretty much just from the imgui demo
-	auto& io = gui_->imguiIO();
-	if (ImGui::IsItemHovered()) {
-		ImGui::BeginTooltip();
-		float region_sz = 64.0f;
-		float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
-		float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
-		float zoom = 4.0f;
-		if (region_x < 0.0f) { region_x = 0.0f; }
-		else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
-		if (region_y < 0.0f) { region_y = 0.0f; }
-		else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
-		ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
-		ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
-		ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
-		ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
-		ImGui::Image((void*) &imgDraw_, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
-		ImGui::EndTooltip();
-	}
 }
 
 } // namespace fuen
