@@ -40,7 +40,7 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		std::array<u32, 2> qfams = {dev.gfxQueue->family, srcQueueFam};
 		ici.sharingMode = VK_SHARING_MODE_CONCURRENT;
 		ici.pQueueFamilyIndices = qfams.data();
-		ici.queueFamilyIndexCount = qfams.size();
+		ici.queueFamilyIndexCount = u32(qfams.size());
 	}
 
 	ici.tiling = VK_IMAGE_TILING_OPTIMAL;

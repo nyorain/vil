@@ -1,5 +1,20 @@
 For v0.1
 
+- [x] setup CI for windows (msvc and mingw) and linux
+- [x] better display (or completely hide?) swapchain images
+	  We should probably fill-in Image::ci for them.
+- [x] fix "unimplemented descriptor category" bug (not sure when it appears)
+      {we were casting from descriptor type to descriptor category in stead
+	   of using the function...}
+- [x] Remove virtual stuff from CommandBufferHook 
+- [x] optimization (important): when CommandRecord is invalidated (rather: removed as current
+      recording from cb), it should destroy (reset) its hook as it 
+	  will never be used again anyways
+	  	- [x] see TODOs in CommandHookRecord (e.g. finish)
+- [x] support integer-format images (needs different image display shader)
+- [x] when checking if handle is used by cb, consider descriptor sets for images, buffers & bufferViews!
+      when it's checked for an image/buffer, consider all descriptor of views as well.
+- [x] copy vulkan headers to vk/. So we don't rely on system headers
 - [x] remove src/bytes in favor of util/bytes.
 - [x] move other util headers to util
 - [x] A lot of sources can be moved to src/gui

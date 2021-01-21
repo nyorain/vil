@@ -8,7 +8,6 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
-- [x] setup CI for windows (msvc and mingw) and linux
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [x] new per-command input/output overview, allowing to view *all* resources
@@ -18,7 +17,7 @@ v0.1, goal: end of january 2021
 	- [ ] fix code flow. Really bad at the moment, with Commands calling
 	      that displayAction function and optionally append to child.
 	- [ ] improve the new overview. See all the various todos
-	- [ ] chose sensible default sizes/layouts
+	- [x] chose sensible default sizes/layouts
 	- [x] implement buffer viewer (infer information from shaders)
 	- [x] factor out image viewer from resources into own component; use it here.
 	      Allow layer/mip selection
@@ -42,8 +41,6 @@ v0.1, goal: end of january 2021
 		  ds, causing the ds to be removed from the record.
 - [ ] debug gui.cpp:1316,1317 asserts sometimes failing (on window resize)
       draw.inUse
-- [ ] support integer-format images (needs different image display shader)
-- [ ] support compressed/block formats
 - [ ] in CopiedImage::init: check for image usage support
 - [ ] fix command hook synchronization issue where we use a CommandHookState that is currently
       written to by a new application submission. I guess we simply have to add something like
@@ -56,12 +53,14 @@ v0.1, goal: end of january 2021
 	  pointer from record to group would create cycle).
 	  Are currently getting crashed from this.
 	  - [ ] re-enable discarding old command groups when this is figured out.
-- [ ] implement copy_commands2 extension
+- [ ] fix Gui::draws_ synchronization issue
+	  See Gui::pendingDraws (called from queue while locked) but also
+	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
+	  potential race!)
+	  {NOTE: there are likely a couple more sync issues for Gui stuff}
 - [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
-- [ ] better pipeline display in resource viewer
+- [ ] better pipeline/shader module display in resource viewer
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
-- [x] when checking if handle is used by cb, consider descriptor sets for images, buffers & bufferViews!
-      when it's checked for an image/buffer, consider all descriptor of views as well.
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
 - [ ] barrier command inspectors: show information about all barriers, stage masks etc
@@ -69,23 +68,13 @@ v0.1, goal: end of january 2021
 	- [ ] CmdSetEvent
 	- [ ] CmdWaitEvents
 - [ ] better enumString.hpp. Remove prefixes
-- [x] copy vulkan headers to vk/. So we don't rely on system headers
 - [ ] Allow to freeze state for current displayed command, i.e. don't
       update data from hook
 	- [ ] figure out how to communicate this via gui.
 	      This is a distinct option form "updateFromGroup" or "updateFromCb".
-- [ ] fix Gui::draws_ synchronization issue
-	  See Gui::pendingDraws (called from queue while locked) but also
-	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
-	  potential race!)
-	  {NOTE: there are likely a couple more sync issues for Gui stuff}
 - [x] find a way to limit number of command groups. Erase them again if not
       used for a while. don't create group for single non-group cb submission?
 	  Or somehow quickly remove again
-- [x] optimization (important): when CommandRecord is invalidated (rather: removed as current
-      recording from cb), it should destroy (reset) its hook as it 
-	  will never be used again anyways
-	  	- [x] see TODOs in CommandHookRecord (e.g. finish)
 - [x] add explicit "updateFromGroup" checkbox to command viewer
 	- [x] we definitely need a "freeze" button. Would be same as unchecking
 	      checkbox, so go with checkbox i guess
@@ -121,9 +110,8 @@ v0.1, goal: end of january 2021
 	  about command buffer hooking from multiple cb viewers...)
 	- [ ] what to do when window *and* overlay is created? or multiple overlays?
 		  Should probably close the previous one (move gui object)
-		  See todo in Gui::init
+		  See todo in Gui::init. Make sure there never is more than one
 - [ ] Implement missing resource overview UIs
-- [ ] Remove virtual stuff from this whole CommandBufferHook 
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
@@ -178,11 +166,7 @@ v0.1, goal: end of january 2021
 	- [ ] move to own tab/panel? needed in multiple cases
 	- [ ] show texel color? (requires us to download texels, just like we 
 	      do with buffers)
-	- [ ] better display (or completely hide?) swapchain images
-	      We should probably fill-in Image::ci for them.
-- [x] fix "unimplemented descriptor category" bug (not sure when it appears)
-      {we were casting from descriptor type to descriptor category in stead
-	   of using the function...}
+- [ ] Link to swapchain in swapchain images
 - [ ] automatically update resource lists in resource gui when tab is re-entered
       from somewhere else
 - [ ] when we select a resource of type X should we set the current filter to X
@@ -194,7 +178,7 @@ v0.1, goal: end of january 2021
 		  Use custom accent color. Configurable?
 	- [ ] Figure out transparency. Make it a setting?
 	- [ ] see imgui style examples in imgui releases
-- [ ] improve handling of transparent images
+- [ ] improve handling of transparent images. Checkerboard background?
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
 	- [ ] clearly document (maybe already in README?) that the layer
@@ -244,6 +228,27 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] support compressed/block formats
+- [ ] implement at least extensions that record to command buffer to allow hooking when they are used
+	- [ ] push descriptors
+	- [ ] device masks (core vulkan by now)
+	- [ ] extended dynamic state
+	- [ ] line rasterization
+	- [ ] nv device diagnostic checkpoint
+	- [ ] nv exclusive scissor
+	- [ ] nv mesh shaders
+	- [ ] amd buffer marker
+	- [ ] intel performance metrics
+	- [ ] ray tracing
+	- [ ] nv shading rate image
+	- [ ] ext sample locations
+	- [ ] ext discard rectangles
+	- [ ] nv viewport scaling
+	- [ ] ext conditional rendering
+	- [ ] transform feedback (?)
+	- [ ] implement khr copy_commands2 extension
+	- [ ] khr fragment shading rate
+	- [ ] nv shading rate enums
 - [ ] fix overlay for wayland. Use xdg popup
 - [ ] implement additional command buffer viewer mode: per-frame-commands
       basically shows all commands submitted to queue between two present calls.
