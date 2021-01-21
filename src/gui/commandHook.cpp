@@ -628,7 +628,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	dev.dispatch.CmdCopyImage(cb,
 		src.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		copies.size(), copies.data());
+		u32(copies.size()), copies.data());
 
 	srcBarrier.oldLayout = srcBarrier.newLayout;
 	srcBarrier.newLayout = srcLayout;

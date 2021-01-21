@@ -8,6 +8,7 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
+- [ ] cleanup comments in rp.hpp. Currently a mess for splitting
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [x] new per-command input/output overview, allowing to view *all* resources
