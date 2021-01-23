@@ -1,5 +1,15 @@
 For v0.1
 
+- [x] next ui sync rework
+	- [x] don't lock device mutex while waiting for fences (see waitForSubmissions)
+	- [x] use chain semaphores for input
+	- [x] correctly sync output, but only if it's needed (might work already)
+	      {i guess is application calls vkQueuePresentKHR we trust it knows
+		   what it is doing?}
+	- [x] if timeline semaphores are available, use them! for all submissions (in and out)
+		- [x] when timeline semaphore extension is available, enable it!
+	- [x] insert barrier at end of each submission, optimize case where application
+	      uses same queue as gui
 - [x] implement overview as in node 1652
       {didn't implement all of it, multiple swapchains is a feature for later}
 	- [x] associate CommandGroup with swapchain (and the other way around?)
