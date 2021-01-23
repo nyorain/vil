@@ -312,13 +312,14 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32
 			// immutable samplers
 			if(ba.binding == VK_DESCRIPTOR_TYPE_SAMPLER ||
 					ba.binding == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-				if(bool(ba.pImmutableSamplers) != bool(bb.pImmutableSamplers)) {
+				if(bool(ba.immutableSamplers) != bool(bb.immutableSamplers)) {
 					return false;
 				}
 
-				if(ba.pImmutableSamplers) {
+				if(ba.immutableSamplers) {
+					dlg_assert(ba.descriptorCount == bb.descriptorCount);
 					for(auto e = 0u; e < ba.descriptorCount; ++e) {
-						if(ba.pImmutableSamplers[e] != bb.pImmutableSamplers[e]) {
+						if(ba.immutableSamplers[e] != bb.immutableSamplers[e]) {
 							return false;
 						}
 					}

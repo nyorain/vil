@@ -196,6 +196,8 @@ void CommandBuffer::invalidateLocked() {
 
 	clearPendingLocked();
 
+	// Free the hook data (as soon as possible), it's no longer
+	// needed as this record will never be submitted again.
 	record_->hook.reset();
 	record_->cb = nullptr;
 

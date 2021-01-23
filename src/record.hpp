@@ -275,6 +275,12 @@ struct CommandRecord {
 	CommandBufferDesc desc;
 	CommandBufferGroup* group {};
 
+	// Ownership of this CommandRecord is shared: while generally it is
+	// not needed anymore as soon as the associated CommandBuffer is
+	// destroyed or a new record completed in it, it may be kept alive
+	// as last representative of a command group or when viewed by
+	// gui. We can't just transfer ownership in these cases in general
+	// though since it may still be in use by command buffer.
 	std::atomic<u32> refCount {0};
 
 	// For command hooks: they can store data associated with this

@@ -134,11 +134,13 @@ void CopiedBuffer::cpuCopy() {
 
 // CommandHook
 VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
-		PendingSubmission& subm,
-		FinishPtr<CommandHookSubmission>& data) {
+		Submission& subm, std::unique_ptr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
 
-	// TODO: only hook when there is something to do
+	// TODO: only hook when there is something to do.
+	// Hook might have no actively needed queries.
+	// TODO: in gui, make sure remove hooks when currently no inside
+	// cb viewer?
 
 	// Check if it already has a valid record associated
 	auto* record = hooked.lastRecordLocked();
@@ -161,13 +163,11 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			// NOTE: alternatively, we could create and store a new Record
 			// NOTE: alternatively, we could add a semaphore chaining
 			//   this submission to the previous one.
-			if(our->submissionCount != 0) {
-				dlg_assert(our->submissionCount == 1);
+			if(our->state->writer) {
 				return hooked.handle();
 			}
 
 			data.reset(new CommandHookSubmission(*our, subm));
-			++our->submissionCount;
 			return our->cb;
 		}
 	}
@@ -175,7 +175,6 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	auto hook = new CommandHookRecord(*this, *record, std::move(hcommand));
 	record->hook.reset(hook);
 
-	++hook->submissionCount;
 	data.reset(new CommandHookSubmission(*hook, subm));
 
 	return hook->cb;
@@ -294,7 +293,7 @@ CommandHookRecord::~CommandHookRecord() {
 	// And then we would have been destroyed via the finish() command (see
 	// the assertions there)
 	dlg_assert(record);
-	dlg_assert(submissionCount == 0);
+	dlg_assert(!state || !state->writer);
 
 	auto& dev = record->device();
 
@@ -729,7 +728,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	auto& elem = binding[elemID];
 
 	dlg_assert(elem.valid);
-	auto lbinding = set.ds->layout->bindings[bindingID];
+	auto& lbinding = set.ds->layout->bindings[bindingID];
 	auto cat = category(lbinding.descriptorType);
 	if(cat == DescriptorCategory::image) {
 		if(needsImageView(lbinding.descriptorType)) {
@@ -918,22 +917,34 @@ void CommandHookRecord::finish() noexcept {
 	// be valid throughout the entire lifetime of *this.
 	// record = nullptr;
 
-	if(submissionCount == 0) {
+	// Keep alive when there still a pending submission.
+	// It will delete this record then instead.
+	if(!nonNull(state).writer) {
 		delete this;
+	} else {
+		// no other reason for this record to be finished except
+		// invalidation
+		dlg_assert(!hook);
 	}
 }
 
 // submission
-CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec, PendingSubmission&)
+CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec, Submission& subm)
 		: record(&rec) {
+	dlg_assert(rec.state);
+	dlg_assert(!rec.state->writer);
+	rec.state->writer = &subm;
 }
 
 CommandHookSubmission::~CommandHookSubmission() {
+}
+
+void CommandHookSubmission::finish(Submission& subm) {
 	dlg_assert(record && record->record);
 
-	// We must be the only pending submission.
-	dlg_assert(record->submissionCount == 1u);
-	--record->submissionCount;
+	dlg_assert(record->state);
+	dlg_assert(record->state->writer == &subm);
+	record->state->writer = nullptr;
 
 	// In this case the hook was removed, no longer interested in results.
 	// Since we are the only submission left to the record, it can be
@@ -943,21 +954,18 @@ CommandHookSubmission::~CommandHookSubmission() {
 		return;
 	}
 
-	dlg_assert(record->state);
-	if(record->state) {
-		transmitTiming();
-		record->hook->state = record->state;
+	transmitTiming();
+	record->hook->state = record->state;
 
-		// copy potentiall buffers
-		// TODO: messy, ugly, shouldn't be here like this.
-		if(auto* buf = std::get_if<CopiedBuffer>(&record->state->dsCopy)) {
-			buf->cpuCopy();
-		}
-		record->state->indexBufCopy.cpuCopy();
-		record->state->indirectCopy.cpuCopy();
-		for(auto& vbuf : record->state->vertexBufCopies) {
-			vbuf.cpuCopy();
-		}
+	// copy potentiall buffers
+	// TODO: messy, ugly, shouldn't be here like this.
+	if(auto* buf = std::get_if<CopiedBuffer>(&record->state->dsCopy)) {
+		buf->cpuCopy();
+	}
+	record->state->indexBufCopy.cpuCopy();
+	record->state->indirectCopy.cpuCopy();
+	for(auto& vbuf : record->state->vertexBufCopies) {
+		vbuf.cpuCopy();
 	}
 }
 

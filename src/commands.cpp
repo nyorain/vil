@@ -401,7 +401,7 @@ void displayDs(Gui& gui, const Command& cmd) {
 	}
 
 	dlg_assert(bindingID < set->layout->bindings.size());
-	auto bindingLayout = set->layout->bindings[bindingID];
+	auto& bindingLayout = set->layout->bindings[bindingID];
 	auto dsType = bindingLayout.descriptorType;
 	auto dsCat = category(dsType);
 
@@ -471,12 +471,9 @@ void displayDs(Gui& gui, const Command& cmd) {
 
 	// == Sampler ==
 	if(needsSampler(dsType)) {
-		if(bindingLayout.pImmutableSamplers) {
-			// TODO: display all samplers?
-			// TODO: Sampler might destroyed, causing crash here :( see todo list.
-			auto& vksampler = bindingLayout.pImmutableSamplers[0];
-			auto& sampler = gui.dev().samplers.getLocked(vksampler);
-			refButton(gui, sampler);
+		if(bindingLayout.immutableSamplers) {
+			// TODO: display all samplers, for all elements
+			refButton(gui, nonNull(bindingLayout.immutableSamplers[0]));
 		} else {
 			refButtonD(gui, elem.imageInfo.sampler);
 		}
@@ -1086,18 +1083,6 @@ bool Command::isDescendant(const Command& cmd) const {
 	return false;
 }
 
-// WaitEventsCmd
-void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	auto vkEvents = rawHandles(this->events);
-	dev.dispatch.CmdWaitEvents(cb,
-		u32(vkEvents.size()), vkEvents.data(),
-		this->srcStageMask, this->dstStageMask,
-		u32(this->memBarriers.size()), this->memBarriers.data(),
-		u32(this->bufBarriers.size()), this->bufBarriers.data(),
-		u32(this->imgBarriers.size()), this->imgBarriers.data());
-
-}
-
 // Commands
 std::vector<const Command*> ParentCommand::display(const Command* selected,
 		TypeFlags typeFlags, const Command* cmd) const {
@@ -1135,9 +1120,93 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 	return this->display(selected, typeFlags, children());
 }
 
+// BarrierCmdBase
+std::string formatQueueFam(u32 fam) {
+	if(fam == VK_QUEUE_FAMILY_IGNORED) {
+		return "ignored";
+	} else if(fam == VK_QUEUE_FAMILY_EXTERNAL) {
+		return "external";
+	} else if(fam == VK_QUEUE_FAMILY_FOREIGN_EXT) {
+		return "foreign";
+	}
+
+	return std::to_string(fam);
+}
+
 void BarrierCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(buffers, destroyed);
 	checkUnset(images, destroyed);
+}
+
+void BarrierCmdBase::displayInspector(Gui& gui) const {
+	imGuiText("srcStage: {}", vk::flagNames(VkPipelineStageFlagBits(srcStageMask)));
+	imGuiText("dstStage: {}", vk::flagNames(VkPipelineStageFlagBits(dstStageMask)));
+
+	if(!memBarriers.empty()) {
+		imGuiText("Memory Barriers");
+		ImGui::Indent();
+		for(auto i = 0u; i < memBarriers.size(); ++i) {
+			auto& memb = memBarriers[i];
+			imGuiText("srcAccess: {}", vk::flagNames(VkAccessFlagBits(memb.srcAccessMask)));
+			imGuiText("dstAccess: {}", vk::flagNames(VkAccessFlagBits(memb.dstAccessMask)));
+			ImGui::Separator();
+		}
+		ImGui::Unindent();
+	}
+
+	if(!bufBarriers.empty()) {
+		imGuiText("Buffer Barriers");
+		ImGui::Indent();
+		for(auto i = 0u; i < bufBarriers.size(); ++i) {
+			auto& memb = bufBarriers[i];
+			refButtonD(gui, buffers[i]);
+			imGuiText("offset: {}", memb.offset);
+			imGuiText("size: {}", memb.size);
+			imGuiText("srcAccess: {}", vk::flagNames(VkAccessFlagBits(memb.srcAccessMask)));
+			imGuiText("dstAccess: {}", vk::flagNames(VkAccessFlagBits(memb.dstAccessMask)));
+			imGuiText("srcQueueFamily: {}", formatQueueFam(memb.srcQueueFamilyIndex));
+			imGuiText("dstQueueFamily: {}", formatQueueFam(memb.dstQueueFamilyIndex));
+			ImGui::Separator();
+		}
+		ImGui::Unindent();
+	}
+
+	if(!imgBarriers.empty()) {
+		imGuiText("Image Barriers");
+		ImGui::Indent();
+		for(auto i = 0u; i < imgBarriers.size(); ++i) {
+			auto& imgb = imgBarriers[i];
+			refButtonD(gui, images[i]);
+
+			auto& subres = imgb.subresourceRange;
+			imGuiText("aspectMask: {}", vk::flagNames(VkImageAspectFlagBits(subres.aspectMask)));
+			imGuiText("baseArrayLayer: {}", subres.baseArrayLayer);
+			imGuiText("layerCount: {}", subres.layerCount);
+			imGuiText("baseMipLevel: {}", subres.baseMipLevel);
+			imGuiText("levelCount: {}", subres.levelCount);
+
+			imGuiText("srcAccess: {}", vk::flagNames(VkAccessFlagBits(imgb.srcAccessMask)));
+			imGuiText("dstAccess: {}", vk::flagNames(VkAccessFlagBits(imgb.dstAccessMask)));
+			imGuiText("oldLayout: {}", vk::name(imgb.oldLayout));
+			imGuiText("newLayout: {}", vk::name(imgb.newLayout));
+			imGuiText("srcQueueFamily: {}", formatQueueFam(imgb.srcQueueFamilyIndex));
+			imGuiText("dstQueueFamily: {}", formatQueueFam(imgb.dstQueueFamilyIndex));
+			ImGui::Separator();
+		}
+		ImGui::Unindent();
+	}
+}
+
+// WaitEventsCmd
+void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	auto vkEvents = rawHandles(this->events);
+	dev.dispatch.CmdWaitEvents(cb,
+		u32(vkEvents.size()), vkEvents.data(),
+		this->srcStageMask, this->dstStageMask,
+		u32(this->memBarriers.size()), this->memBarriers.data(),
+		u32(this->bufBarriers.size()), this->bufBarriers.data(),
+		u32(this->imgBarriers.size()), this->imgBarriers.data());
+
 }
 
 std::vector<std::string> WaitEventsCmd::argumentsDesc() const {
@@ -1151,6 +1220,15 @@ void WaitEventsCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(events, destroyed);
 }
 
+void WaitEventsCmd::displayInspector(Gui& gui) const {
+	for(auto& event : events) {
+		refButtonD(gui, event);
+	}
+
+	BarrierCmdBase::displayInspector(gui);
+}
+
+// BarrierCmd
 void BarrierCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdPipelineBarrier(cb,
 		this->srcStageMask, this->dstStageMask, this->dependencyFlags,
@@ -1164,6 +1242,11 @@ std::vector<std::string> BarrierCmd::argumentsDesc() const {
 	return createArgumentsDesc(
 		vk::flagNames(VkPipelineStageFlagBits(srcStageMask)),
 		vk::flagNames(VkPipelineStageFlagBits(dstStageMask)));
+}
+
+void BarrierCmd::displayInspector(Gui& gui) const {
+	imGuiText("dependencyFlags: {}", vk::flagNames(VkDependencyFlagBits(dependencyFlags)));
+	BarrierCmdBase::displayInspector(gui);
 }
 
 // BeginRenderPassCmd

@@ -493,4 +493,7 @@ We need to support various features for showing submissions in the GUI.
 	  CommandHookState, the user might want to continue viewing it.
 	  The hook might furthermore change in strange ways.
 	  We should store I/O inspector state in the cb gui.
+
+NOTE: final implementation turned out a bit different, but is still based
+on the same concepts decided here.
 	  

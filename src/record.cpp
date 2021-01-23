@@ -198,10 +198,6 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
 		queueFamily(xcb.pool().queueFamily), images(*this), handles(*this),
 		pipeLayouts(*this), secondaries(*this) {
-
-	// TODO: testing
-	// images.reserve(16 * 1024);
-	// handles.reserve(16 * 1024);
 }
 
 CommandRecord::~CommandRecord() {
@@ -211,6 +207,11 @@ CommandRecord::~CommandRecord() {
 	}
 
 	std::lock_guard lock(dev->mutex);
+
+	if(group) {
+		auto count = group->aliveRecords.erase(this);
+		dlg_assertm(count, "CommandRecord not found in its group");
+	}
 
 	// remove cb from all referenced resources
 	auto removeFromResource = [&](auto& res) {

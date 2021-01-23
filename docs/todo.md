@@ -32,7 +32,9 @@ v0.1, goal: end of january 2021
       See https://github.com/ocornut/imgui/issues/319
 - [ ] make enumString.hpp return some deafult value ("" or "<?>") instead of nullptr.
       Could cause crashed for future values atm
-- [ ] destroying a sampler should also invalidate all records that use 
+- [ ] better enumString.hpp. Remove prefixes
+- [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
+- [x] destroying a sampler should also invalidate all records that use 
       a descriptor set allocated from a layout with that sampler bound as
 	  immutable sampler. No idea how to properly do that, we need a link
 	  sampler -> descriptorSetLayout and additionally 
@@ -40,39 +42,38 @@ v0.1, goal: end of january 2021
 	  the sampler as soon as the descriptor set is created (from the layout,
 	  in which it is linked) and then treat it as normal binding (that
 	  is never invalidated, treat as special case)
-	- [ ] make sure to never read layout.pImmutableSamplers of an invalidated
+	- [x] make sure to never read layout.pImmutableSamplers of an invalidated
 	      record then. Destroying the immutable sampler would invalidate the
 		  ds, causing the ds to be removed from the record.
 - [ ] in CopiedImage::init: check for image usage support
-- [ ] fix command hook synchronization issue where we use a CommandHookState that is currently
+	- [ ] generally: allow the image copy operation to fail.
+- [x] fix command hook synchronization issue where we use a CommandHookState that is currently
       written to by a new application submission. I guess we simply have to add something like
 	  "PendingSubmission* writerSubmission {}" to CommandHookState that is set every time
 	  the state is used in a hooked submission and unset when the submission is finished.
 	  When we then display (reading a buffer is fine, we copied them to separate memory
 	  and are not using the mapped memory directly anyways) from a CommandHookState
 	  and `writeSubmission` is set, we chain our gui draw behind it.
-- [ ] IMPORTANT! keep command group (or at least the hook?) alive 
+- [x] IMPORTANT! keep command group (or at least the hook?) alive 
 	  while it is viewed in cb viewer? Can lead to problems currently.
 	  Unset group in kept-alive records? We should probably keep the
 	  group alive while a record of it is alive (but adding intrusive
 	  pointer from record to group would create cycle).
 	  Are currently getting crashed from this.
-	- [ ] re-enable discarding old command groups when this is figured out.
+	- [x] re-enable discarding old command groups when this is figured out.
 - [ ] fix Gui::draws_ synchronization issue
 	  See Gui::pendingDraws (called from queue while locked) but also
 	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
 	  potential race!)
 	  {NOTE: there are likely a couple more sync issues for Gui stuff}
-- [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
 - [ ] better pipeline/shader module display in resource viewer
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
-- [ ] barrier command inspectors: show information about all barriers, stage masks etc
-	- [ ] CmdPipelineBarrier
-	- [ ] CmdSetEvent
-	- [ ] CmdWaitEvents
-- [ ] better enumString.hpp. Remove prefixes
+- [x] barrier command inspectors: show information about all barriers, stage masks etc
+	- [x] CmdPipelineBarrier
+	- [x] CmdSetEvent
+	- [x] CmdWaitEvents
 - [ ] Allow to freeze state for current displayed command, i.e. don't
       update data from hook
 	- [ ] figure out how to communicate this via gui.
@@ -190,9 +191,6 @@ v0.1, goal: end of january 2021
 	      can crash when extensions it does not know about/does not support
 		  are being used.
 	- [ ] update README to correctly show all current features
-- [x] support for buffer views (and other handles) in UI
-	- [ ] use buffer view information to infer layout in buffer viewer?
-	- [ ] support buffer views in our texture viewer (i.e. show their content)
 - [ ] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
 	  for inserting query commands (check for the queue family in general,
 	  we might not be able to use the query pool!).
@@ -223,6 +221,8 @@ v0.1, goal: end of january 2021
 
 
 not sure if viable for first version but should be goal:
+- [ ] clean and split up QueueSubmit implementation. It's way too long,
+      does way too much. And will probably further grow
 - [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
 - [ ] get it to run without significant (slight (like couple of percent) increase 
 	  of frame timings even with layer in release mode is ok) overhead
@@ -233,6 +233,14 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] Allow modifying resources (temporarily or permanently)
+	- [ ] in command viewer or resource viewer
+	- [ ] over such a mechanism we could implement a forced camera
+- [ ] include vkpp enumString generator here?
+      allows easier updates, maintaining
+- [x] support for buffer views (and other handles) in UI
+	- [ ] use buffer view information to infer layout in buffer viewer?
+	- [ ] support buffer views in our texture viewer (i.e. show their content)
 - [ ] experiment with transparent overlay windows in which we render the
       overlay, to not be dependent on application refresh rate.
 - [ ] support compressed/block formats

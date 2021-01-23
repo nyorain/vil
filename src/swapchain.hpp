@@ -25,6 +25,7 @@ struct Swapchain : DeviceHandle {
 	static constexpr auto maxFrameTimings = 1000u;
 	std::optional<Clock::time_point> lastPresent {};
 	std::vector<Clock::duration> frameTimings;
+	// std::vector<IntrusivePtr<SubmissionBatch>> frameSubmissions;
 
 	~Swapchain();
 	void destroy();

@@ -423,7 +423,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 
 	ImGui::Text("Bindings");
 	for(auto b = 0u; b < ds.bindings.size(); ++b) {
-		auto info = ds.layout->bindings[b];
+		auto& info = ds.layout->bindings[b];
 		auto& binding = ds.bindings[b];
 
 		dlg_assert(info.binding == b);
@@ -447,7 +447,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 					if(needsImageLayout(type)) {
 						imGuiText("{}", vk::name(binding.imageInfo.layout));
 					}
-					if(needsSampler(*ds.layout, info.binding)) {
+					if(needsSampler(type)) {
 						refButtonExpect(*gui_, binding.imageInfo.sampler);
 					}
 					break;
@@ -803,27 +803,29 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 				}
 			}
 
-			ImGui::Text("Descriptor Sets");
-			for(auto i = 0u; i < entryPoint.descriptor_set_count; ++i) {
-				auto& ds = entryPoint.descriptor_sets[i];
+			if(entryPoint.descriptor_set_count) {
+				ImGui::Text("Descriptor Sets");
+				for(auto i = 0u; i < entryPoint.descriptor_set_count; ++i) {
+					auto& ds = entryPoint.descriptor_sets[i];
 
-				if(ImGui::TreeNode(&ds, "Set %d", ds.set)) {
-					for(auto b = 0u; b < ds.binding_count; ++b) {
-						auto& binding = *ds.bindings[b];
+					if(ImGui::TreeNode(&ds, "Set %d", ds.set)) {
+						for(auto b = 0u; b < ds.binding_count; ++b) {
+							auto& binding = *ds.bindings[b];
 
-						std::string name = dlg::format("{}: {}",
-							binding.binding,
-							vk::name(VkDescriptorType(binding.descriptor_type)));
-						if(binding.count > 1) {
-							name += dlg::format("[{}]", binding.count);
+							std::string name = dlg::format("{}: {}",
+								binding.binding,
+								vk::name(VkDescriptorType(binding.descriptor_type)));
+							if(binding.count > 1) {
+								name += dlg::format("[{}]", binding.count);
+							}
+							name += " ";
+							name += binding.name;
+
+							ImGui::BulletText("%s", name.c_str());
 						}
-						name += " ";
-						name += binding.name;
 
-						ImGui::BulletText("%s", name.c_str());
+						ImGui::TreePop();
 					}
-
-					ImGui::TreePop();
 				}
 			}
 

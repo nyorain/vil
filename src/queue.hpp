@@ -44,8 +44,8 @@ struct QueueFamily {
 };
 
 struct SubmittedCommandBuffer {
-	CommandBuffer* cb;
-	FinishPtr<CommandHookSubmission> hook;
+	CommandBuffer* cb {};
+	std::unique_ptr<CommandHookSubmission> hook; // optional
 
 	SubmittedCommandBuffer();
 	SubmittedCommandBuffer(SubmittedCommandBuffer&&) noexcept = default;
@@ -53,6 +53,11 @@ struct SubmittedCommandBuffer {
 	~SubmittedCommandBuffer();
 };
 
+// TODO: Submission, PendingSubmission are badly named.
+// They are both pending. Submission is basically a batch of cbs synced
+// by a set of semaphores while PendingSubmission is a set of submissions
+// (to one queue, that came in via a single vkQueueSubmit).
+// Rework names when doing the Submission inspection/lifetimes rework.
 struct Submission {
 	PendingSubmission* parent {};
 
@@ -88,7 +93,20 @@ struct PendingSubmission {
 
 // CommandBuffer groups
 struct CommandBufferGroup {
+	// Abstract description of this group. Used to determine whether new
+	// recording belong to it.
 	CommandBufferDesc desc;
+
+	// A list of all representatives of this group that are alive.
+	// Synchronized via dev.mutex. As long as more than one CommandRecord
+	// of this group is still alive, it is not being destroyed.
+	// (One is always kept alive via lastRecord, that does not count
+	// as it would create a lifetime circle, never causing us to free
+	// command buffer groups).
+	std::unordered_set<CommandRecord*> aliveRecords;
+
+	// We make sure at least the last representative of this command buffer
+	// group is not being destroyed. This allows to e.g. inspect it in gui.
 	IntrusivePtr<CommandRecord> lastRecord;
 
 	// All Queues this command buffer group was ever used on.

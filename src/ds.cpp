@@ -23,7 +23,9 @@ void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
 		handle.descriptors.erase(it);
 	};
 
-	switch(category(ds.layout->bindings[binding].descriptorType)) {
+	auto& bindingLayout = ds.layout->bindings[binding];
+	auto dsType = bindingLayout.descriptorType;
+	switch(category(dsType)) {
 		case DescriptorCategory::buffer: {
 			removeFromHandle(nonNull(bind.bufferInfo.buffer));
 			break;
@@ -32,9 +34,11 @@ void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
 			if(bind.imageInfo.imageView) {
 				removeFromHandle(*bind.imageInfo.imageView);
 			}
+
 			if(bind.imageInfo.sampler) {
 				removeFromHandle(*bind.imageInfo.sampler);
 			}
+
 			break;
 		} case DescriptorCategory::bufferView: {
 			removeFromHandle(nonNull(bind.bufferView));
@@ -42,7 +46,7 @@ void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
 		} default: dlg_error("Unimplemented descriptor type"); break;
 	}
 
-	bind.valid = false;
+	bind = {};
 }
 
 DescriptorSet::~DescriptorSet() {
@@ -163,9 +167,9 @@ bool needsSampler(VkDescriptorType type) {
 	}
 }
 
-bool needsSampler(const DescriptorSetLayout& dsl, unsigned binding) {
+bool needsBoundSampler(const DescriptorSetLayout& dsl, unsigned binding) {
 	auto& bind = dsl.bindings[binding];
-	return needsSampler(bind.descriptorType) && !bind.pImmutableSamplers;
+	return needsSampler(bind.descriptorType) && !bind.immutableSamplers;
 }
 
 bool needsImageView(VkDescriptorType type) {
@@ -218,11 +222,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	for(auto i = 0u; i < pCreateInfo->bindingCount; ++i) {
 		const auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
-		dsLayout.bindings[bind.binding] = bind;
+
+		auto& dst = dsLayout.bindings[bind.binding];
+		dst.binding = bind.binding;
+		dst.descriptorCount = bind.descriptorCount;
+		dst.descriptorType = bind.descriptorType;
+		dst.stageFlags = bind.stageFlags;
+
 		if(needsSampler(bind.descriptorType) && bind.pImmutableSamplers) {
-			auto& span = dsLayout.immutableSamplers.emplace_back();
-			span = {bind.pImmutableSamplers, bind.pImmutableSamplers + bind.descriptorCount};
-			dsLayout.bindings[bind.binding].pImmutableSamplers = span.data();
+			dst.immutableSamplers = std::make_unique<Sampler*[]>(dst.descriptorCount);
+			for(auto e = 0u; e < dst.descriptorCount; ++e) {
+				dst.immutableSamplers[e] = &dev.samplers.get(bind.pImmutableSamplers[e]);
+			}
 		}
 	}
 
@@ -363,9 +374,19 @@ void updateLocked(DescriptorSet& ds, DescriptorSet::Binding& binding,
 		binding.imageInfo.imageView = &ds.dev->imageViews.getLocked(img.imageView);
 		binding.imageInfo.imageView->descriptors.insert({&ds, bind, elem});
 	}
-	if(needsSampler(layout.descriptorType) && !layout.pImmutableSamplers) {
-		dlg_assert(img.sampler);
-		binding.imageInfo.sampler = &ds.dev->samplers.getLocked(img.sampler);
+
+	if(needsSampler(layout.descriptorType)) {
+		// Even when we have an immutable sampler here, we still add it
+		// to the binding and add this ds as reference for the given sampler.
+		// This is needed so that this descriptor gets properly invalidated
+		// when the immutable sampler is destroyed.
+		if(layout.immutableSamplers) {
+			binding.imageInfo.sampler = layout.immutableSamplers[elem];
+		} else {
+			binding.imageInfo.sampler = &ds.dev->samplers.getLocked(img.sampler);
+		}
+
+		dlg_assert(binding.imageInfo.sampler);
 		binding.imageInfo.sampler->descriptors.insert({&ds, bind, elem});
 	}
 	binding.valid = true;

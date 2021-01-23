@@ -164,6 +164,7 @@ struct BarrierCmdBase : Command {
 	span<Buffer*> buffers;
 
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void displayInspector(Gui& gui) const override;
 };
 
 struct WaitEventsCmd : BarrierCmdBase {
@@ -171,6 +172,7 @@ struct WaitEventsCmd : BarrierCmdBase {
 
 	std::string nameDesc() const override { return "WaitEvents"; }
 	Type type() const override { return Type::sync; }
+	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
@@ -181,6 +183,7 @@ struct BarrierCmd : BarrierCmdBase {
 
 	std::string nameDesc() const override { return "PipelineBarrier"; }
 	Type type() const override { return Type::sync; }
+	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 };

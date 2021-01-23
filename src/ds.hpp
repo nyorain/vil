@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <variant>
+#include <memory>
 #include <atomic>
 
 namespace fuen {
@@ -20,8 +21,12 @@ enum class DescriptorCategory {
 };
 
 DescriptorCategory category(VkDescriptorType);
-bool needsSampler(VkDescriptorType); // NOTE: sampler might be immutable in ds layout
-bool needsSampler(const DescriptorSetLayout&, unsigned binding);
+// Returns just whether the given descriptor type requires a sampler in general.
+// The sampler might still be bound immutably in ds layout.
+bool needsSampler(VkDescriptorType);
+// This returns false if the DescriptorSetLayout has the sampler
+// already statically bound as immutable sampler.
+bool needsBoundSampler(const DescriptorSetLayout&, unsigned binding);
 bool needsImageView(VkDescriptorType);
 bool needsImageLayout(VkDescriptorType);
 
@@ -38,10 +43,17 @@ struct DescriptorPool : DeviceHandle {
 struct DescriptorSetLayout : DeviceHandle {
 	VkDescriptorSetLayout handle {};
 
-	// Static after creation. Ordered by binding.
-	std::vector<VkDescriptorSetLayoutBinding> bindings;
-	std::vector<std::vector<VkSampler>> immutableSamplers;
+	// VkDescriptorSetLayoutBinding copy
+	struct Binding {
+		uint32_t binding;
+		VkDescriptorType descriptorType;
+		uint32_t descriptorCount;
+		VkShaderStageFlags stageFlags;
+		std::unique_ptr<Sampler*[]> immutableSamplers;
+	};
 
+	// Static after creation. Ordered by binding.
+	std::vector<Binding> bindings;
 	std::atomic<u32> refCount {0}; // intrusive ref count
 
 	// handle will be kept alive until this object is actually destroyed.
@@ -55,7 +67,7 @@ struct DescriptorSet : DeviceHandle {
 
 	struct ImageInfo {
 		ImageView* imageView;
-		Sampler* sampler;
+		Sampler* sampler; // even stored here if immutable in layout
 		VkImageLayout layout;
 	};
 
@@ -85,8 +97,19 @@ struct DescriptorSet : DeviceHandle {
 	~DescriptorSet();
 };
 
+// Invalidates the given (binding, elem) slot in the given descriptor
+// set. Must only be called while device mutex is locked.
+// Will NOT invalidate the cbs connected to the ds, that must be done
+// by caller manually.
 void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem);
 
+struct DescriptorUpdateTemplate : DeviceHandle {
+	VkDescriptorUpdateTemplate handle {};
+
+	std::vector<VkDescriptorUpdateTemplateEntry> entries;
+};
+
+// API
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
     VkDevice                                    device,
     const VkDescriptorSetLayoutCreateInfo*      pCreateInfo,
@@ -133,12 +156,6 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
     const VkCopyDescriptorSet*                  pDescriptorCopies);
 
 // vulkan 1.1: descriptor update templates
-struct DescriptorUpdateTemplate : DeviceHandle {
-	VkDescriptorUpdateTemplate handle {};
-
-	std::vector<VkDescriptorUpdateTemplateEntry> entries;
-};
-
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
     VkDevice                                    device,
     const VkDescriptorUpdateTemplateCreateInfo* pCreateInfo,

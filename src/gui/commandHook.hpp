@@ -75,6 +75,10 @@ struct CommandHookState {
 	// When a requested resource cannot be retrieved, this holds the reason.
 	// TODO: kinda messy, should likely be provided per-resource
 	std::string errorMessage;
+
+	// When there is currently a (hook) submission writing this state,
+	// it is stored here. Synchronized via device mutex.
+	Submission* writer {};
 };
 
 // Commandbuffer hook that allows us to forward a modified version
@@ -118,8 +122,7 @@ public:
 	// gets associated with the lifetime of the submission (i.e. is destroyed
 	// when the submission is finished).
 	VkCommandBuffer hook(CommandBuffer& hooked,
-		PendingSubmission& subm,
-		FinishPtr<CommandHookSubmission>& data);
+		Submission& subm, std::unique_ptr<CommandHookSubmission>& data);
 
 	// Called when hook is removed from command buffer or command group.
 	// Called while device mutex is locked.
@@ -154,10 +157,6 @@ struct CommandHookRecord {
 	CommandRecord* record {}; // the record we hook. Always valid.
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
 	std::vector<Command*> hcommand; // hierachy of the hooked command
-
-	// Currently we rely on there being at most 1 submission, so this is 0 or 1.
-	// While there is a pending submission, this record is kept alive.
-	u32 submissionCount {};
 
 	// == Resources ==
 	VkCommandBuffer cb {};
@@ -215,14 +214,10 @@ struct CommandHookRecord {
 struct CommandHookSubmission {
 	CommandHookRecord* record {};
 
-	CommandHookSubmission(CommandHookRecord&, PendingSubmission&);
+	CommandHookSubmission(CommandHookRecord&, Submission&);
 	~CommandHookSubmission();
 
-	// Called when the submission is finished.
-	// Called while device mutex is locked.
-	// Might delete itself (or decrement reference count or something).
-	void finish() noexcept { delete this; }
-
+	void finish(Submission&);
 	void transmitTiming();
 	void transmitIndirect();
 };

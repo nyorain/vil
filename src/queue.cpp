@@ -34,7 +34,11 @@ std::optional<SubmIterator> checkLocked(PendingSubmission& subm) {
 	dlg_assert(it != dev.pending.end());
 
 	for(auto& sub : subm.submissions) {
-		for(auto& [cb, _] : sub.cbs) {
+		for(auto& [cb, hookData] : sub.cbs) {
+			if(hookData) {
+				hookData->finish(sub);
+			}
+
 			auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &subm);
 			dlg_assert(it2 != cb->pending.end());
 			cb->pending.erase(it2);
@@ -283,6 +287,8 @@ std::unordered_set<Submission*> needsSyncLocked(PendingSubmission& pending, Draw
 		}
 
 		for(auto& [_, hookPtr] : subm.cbs) {
+			// TODO: we might not need sync in all cases. Pretty much only
+			// for images I guess
 			if(hookPtr && hookPtr->record->state.get() == draw.usedHookState.get()) {
 				subs.insert(&subm);
 			}
@@ -319,6 +325,9 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	// TODO(perf): we make a lot of allocations here and this is something
 	// that can be called multiple times per frame. Should likely use
 	// an allocator
+	// TODO: before even starting to do anything, we should likely check
+	// all pending submissions for completion. Might change hooking behavior
+	// and we might do it anyways later on to return fences/semaphores to the pools
 
 	// We might have to modify the submission:
 	// - command buffers can be hooked (to allow us inserting/removing/changing
@@ -369,11 +378,15 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				if(!rec.group) {
 					auto& qfam = dev.queueFamilies[qd.family];
 					for(auto& qgroup : qfam.commandGroups) {
-						constexpr auto matchThreshold = 0.6; // TODO: make configurable?
+						// TODO: make configurable? This determines how
+						// much we allow a CommandRecord to differ from the groups
+						// description while still recognizing it as group member.
+						constexpr auto matchThreshold = 0.6;
 						auto matchVal = match(qgroup->desc, rec.desc);
 						best = std::max(best, matchVal);
 						if(matchVal > matchThreshold) {
 							rec.group = qgroup.get();
+							rec.group->aliveRecords.insert(&rec);
 						}
 					}
 				}
@@ -384,9 +397,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 					rec.group = qfam.commandGroups.emplace_back(std::make_unique<CommandBufferGroup>()).get();
 					qd.groups.insert(rec.group);
 					rec.group->queues = {{&qd, qSubmitID}};
-
-					// dlg_info("Created new command group {} (best match {}}:", rec.group, best);
-					// print(rec.desc, 1);
+					rec.group->aliveRecords.insert(&rec);
 				} else {
 					// Otherwise make sure it's correctly added to the group
 					// NOTE: we even do this if submission fails down the
@@ -405,12 +416,12 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 				// potentially hook command buffer
 				if(rec.group->hook) {
-					auto hooked = rec.group->hook->hook(cb, subm, scb.hook);
+					auto hooked = rec.group->hook->hook(cb, dst, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 					dlg_assertm(!cb.hook, "Hook registered for command buffer and group");
 				} else if(cb.hook) {
-					auto hooked = cb.hook->hook(cb, subm, scb.hook);
+					auto hooked = cb.hook->hook(cb, dst, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 				} else {
@@ -612,9 +623,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		return res;
 	}
 
-	// NOTE: need to make sure CommandRecord isn't destroyed inside
+	// NOTE: needed to make sure CommandRecord isn't destroyed inside
 	// mutex lock.
-	std::vector<IntrusivePtr<CommandRecord>> keepAlive;
+	std::vector<std::unique_ptr<CommandBufferGroup>> keepAliveGroups;
+	std::vector<IntrusivePtr<CommandRecord>> keepAliveRecs;
 
 	{
 		std::lock_guard lock(dev.mutex);
@@ -639,36 +651,63 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				dlg_assert(recPtr->group);
 
 				if(recPtr->group->lastRecord) {
-					keepAlive.push_back(std::move(recPtr->group->lastRecord));
+					keepAliveRecs.push_back(std::move(recPtr->group->lastRecord));
 				}
 
 				recPtr->group->lastRecord = recPtr;
-				// TODO: not sure about this in case of	already existent group
+				// NOTE: not 100% sure about this in case of already existent group.
+				// Do we continuously want to update the description?
+				// It sounds like a good idea though, allowing small changes
+				// from submission to submission, e.g. when camera is
+				// looking around.
 				recPtr->group->desc = recPtr->desc;
 			}
 		}
 
 		dev.pending.push_back(std::move(submPtr));
 
-		// reset old comamnad groups
-		// TODO: arbitrary atm! Can be improved.
-		// TODO: FIX deletion of groups, causing problems elsewhere
+		// Remove old command groups, making sure we don't just leak them.
 		auto& qf = dev.queueFamilies[qd.family];
 		for(auto it = qf.commandGroups.begin(); it != qf.commandGroups.end();) {
 			auto rem = true;
-			for(auto& [squeue, lastSubm] : (*it)->queues) {
-				if(squeue->submissionCount - lastSubm < 10) {
+
+			auto& group = **it;
+
+			// When there is still a record of this group kept alive
+			// elsewhere don't destroy the group. It is either in use by some
+			// gui/high-level component or still valid in command buffer.
+			// When the application is keeping a record alive, the chances are
+			// high it will be used again. Since gui and application can only
+			// keep a limited number of records alive, this should not result
+			// in an effective leak.
+			if(group.aliveRecords.size() > 1 || group.lastRecord->refCount.load() > 1) {
+				++it;
+				continue;
+			}
+
+			// Otherwise, remove the group if there have been a lot of submission
+			// on all its known queues since the last time a cb of the group
+			// itself was submitted.
+			// NOTE: could alternatively also factor in time. Or the number
+			// of existent command groups, i.e. only start this when we have
+			// more than X groups already and just throw out the ones not used
+			// for the longest time/submissions. Then only do this when
+			// a new group is actually added.
+			constexpr auto submissionCountThreshold = 100u;
+			for(auto& [squeue, lastSubm] : group.queues) {
+				if(squeue->submissionCount - lastSubm < submissionCountThreshold) {
 					rem = false;
 					break;
 				}
 			}
 
 			if(rem) {
-				for(auto& [squeue, _] : (*it)->queues) {
+				for(auto& [squeue, _] : group.queues) {
 					squeue->groups.erase(it->get());
 				}
 
-				keepAlive.push_back(std::move((*it)->lastRecord));
+				keepAliveRecs.push_back(std::move(group.lastRecord));
+				keepAliveGroups.push_back(std::move(*it));
 				it = qf.commandGroups.erase(it);
 			} else {
 				++it;

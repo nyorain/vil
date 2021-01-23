@@ -355,19 +355,25 @@ Gui::~Gui() {
 	}
 
 	auto vkDev = dev_->handle;
-	if(font_.uploadBuf) dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
-	if(font_.uploadMem) dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
-	if(font_.view) dev_->dispatch.DestroyImageView(vkDev, font_.view, nullptr);
-	if(font_.image) dev_->dispatch.DestroyImage(vkDev, font_.image, nullptr);
-	if(font_.mem) dev_->dispatch.FreeMemory(vkDev, font_.mem, nullptr);
+	dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
+	dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
+	dev_->dispatch.DestroyImageView(vkDev, font_.view, nullptr);
+	dev_->dispatch.DestroyImage(vkDev, font_.image, nullptr);
+	dev_->dispatch.FreeMemory(vkDev, font_.mem, nullptr);
 
-	if(pipes_.gui) dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
-	if(pipes_.image1D) dev_->dispatch.DestroyPipeline(vkDev, pipes_.image1D, nullptr);
-	if(pipes_.image2D) dev_->dispatch.DestroyPipeline(vkDev, pipes_.image2D, nullptr);
-	if(pipes_.image3D) dev_->dispatch.DestroyPipeline(vkDev, pipes_.image3D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.image1D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.uimage1D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.iimage1D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.image2D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.uimage2D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.iimage2D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.image3D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.uimage3D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.iimage3D, nullptr);
 
-	if(rp_) dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
-	if(commandPool_) dev_->dispatch.DestroyCommandPool(vkDev, commandPool_, nullptr);
+	dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
+	dev_->dispatch.DestroyCommandPool(vkDev, commandPool_, nullptr);
 }
 
 // Renderer
@@ -743,19 +749,29 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 	ImGui::Columns();
 
+	// Enabled instance extensions
+	auto iniExtLbl = dlg::format("{} instance extensions enabled", dev.ini->extensions.size());
+	if(ImGui::TreeNode(iniExtLbl.c_str())) {
+		ImGui::Indent();
+		for(auto& ext : dev.ini->extensions) {
+			imGuiText("{}", ext);
+		}
+		ImGui::Unindent();
+		ImGui::TreePop();
+	}
+
+	auto devExtLbj = dlg::format("{} device extensions enabled", dev.appExts.size());
+	if(ImGui::TreeNode(devExtLbj.c_str())) {
+		ImGui::Indent();
+		for(auto& ext : dev.appExts) {
+			imGuiText("{}", ext);
+		}
+		ImGui::Unindent();
+		ImGui::TreePop();
+	}
+
 	// pretty much just own debug stuff
 	ImGui::Separator();
-
-	// Clear pending submissions
-	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
-		auto& subm = *it;
-		if(auto nit = checkLocked(*subm); nit) {
-			it = *nit;
-			continue;
-		}
-
-		++it; // already increment to next one so we can't miss it
-	}
 
 	auto pending = dlg::format("Pending submissions: {}", dev.pending.size());
 	if(ImGui::TreeNode(&dev.pending, "%s", pending.c_str())) {
@@ -803,7 +819,16 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::TreePop();
 	}
 
-	ImGui::Columns();
+	if(ImGui::TreeNode("Statistics")) {
+		auto numGroups = 0u;
+		for(auto& qf : dev.queueFamilies) {
+			numGroups += qf.commandGroups.size();
+		}
+
+		imGuiText("Number of command groups: {}", numGroups);
+
+		ImGui::TreePop();
+	}
 }
 
 void Gui::drawMemoryUI(Draw&) {
@@ -1054,6 +1079,17 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		std::lock_guard queueLock(dev().queueMutex);
 		std::lock_guard devMutex(dev().mutex);
 
+		// Clear pending submissions
+		for(auto it = dev().pending.begin(); it != dev().pending.end();) {
+			auto& subm = *it;
+			if(auto nit = checkLocked(*subm); nit) {
+				it = *nit;
+				continue;
+			}
+
+			++it; // already increment to next one so we can't miss it
+		}
+
 		this->draw(draw, info.fullscreen);
 		auto& drawData = *ImGui::GetDrawData();
 		this->uploadDraw(draw, drawData);
@@ -1120,6 +1156,13 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			waitSubmissions.insert(subs.begin(), subs.end());
 		}
 
+		// Also check if the used HookState is currently being written
+		// by a submission. If so, we need to wait for it so we don't
+		// read an image while it writes it.
+		if(draw.usedHookState && draw.usedHookState->writer) {
+			waitSubmissions.insert(draw.usedHookState->writer);
+		}
+
 		u64 signalValues[2];
 		std::vector<u64> waitValues;
 		VkTimelineSemaphoreSubmitInfo tsInfo {};
@@ -1171,9 +1214,9 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			dev().resetSemaphores.clear();
 
 			// if we have to wait for one submission, we wait for all,
-			// for simplicity's sake. NOTE: could be improved for a potential
-			// performance gain but JUST UPDATE YOUR DRIVERS AND GET
-			// TIMELINE SEMAPHORES ffs.
+			// for simplicity's sake.
+			// NOTE: yep, could be improved for a potential performance gain but
+			// just update your drivers and get timeline semaphores
 			// TODO, more reasonable improvement: instead of ever
 			// waiting on cpu side, simply insert new semaphores to
 			// respective queues, where needed.
@@ -1200,7 +1243,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 					}
 				}
 
-				// TODO: waiting inside lock :(
+				dlg_warn("Having to wait inside lock");
 				VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
 					u32(fences.size()), fences.data(), true, UINT64_MAX));
 
