@@ -1202,7 +1202,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			}
 
 			dlg_assert(waitValues.size() == waitSems.size());
-			tsInfo.waitSemaphoreValueCount = waitValues.size();
+			tsInfo.waitSemaphoreValueCount = u32(waitValues.size());
 			tsInfo.pWaitSemaphoreValues = waitValues.data();
 
 			// signal
