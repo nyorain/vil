@@ -965,23 +965,17 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 	ImGui::Text("Bound Resources:");
 
 	ImGui::Columns(3);
-	ImGui::SetColumnWidth(0, 100);
-	ImGui::SetColumnWidth(1, 300);
+	// ImGui::SetColumnWidth(0, 100);
+	// ImGui::SetColumnWidth(1, 300);
 
+	// TODO: use table here instead
 	for(auto& resource : mem.allocations) {
 		imGuiText("{}: ", resource->allocationOffset);
 
 		ImGui::NextColumn();
 
-		if(resource->objectType == VK_OBJECT_TYPE_BUFFER) {
-			Buffer& buffer = static_cast<Buffer&>(*resource);
-			auto label = name(buffer);
-			ImGui::Button(label.c_str());
-		} else if(resource->objectType == VK_OBJECT_TYPE_IMAGE) {
-			Image& img = static_cast<Image&>(*resource);
-			auto label = name(img);
-			ImGui::Button(label.c_str());
-		}
+		dlg_assert(resource);
+		refButton(*gui_, *resource);
 
 		ImGui::NextColumn();
 		imGuiText("size {}", resource->allocationSize);
@@ -1020,7 +1014,8 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 	// and allow via button to switch to cb viewer?
 	if(cb.lastRecordLocked()) {
 		if(ImGui::Button("View Content")) {
-			gui_->selectCommands(cb.lastRecordPtrLocked(), false);
+			gui_->cbGui().select(cb.lastRecordPtrLocked(), cb);
+			gui_->activateTab(Gui::Tab::commandBuffer);
 		}
 	} else {
 		imGuiText("CommandBuffer was never recorded");
@@ -1221,7 +1216,8 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 	for(auto* group : queue.groups) {
 		// TODO: display desc?
 		if(ImGui::Button("View command group")) {
-			gui_->selectCommands(group->lastRecord, true);
+			gui_->cbGui().selectGroup(group->lastRecord);
+			gui_->activateTab(Gui::Tab::commandBuffer);
 		}
 	}
 }

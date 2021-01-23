@@ -137,13 +137,24 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
 
+	auto* record = hooked.lastRecordLocked();
+	dlg_assert(record && record->group);
+
+	// Check whether we should attempt to hook this particular record
+	bool validTarget =
+		record == target.record ||
+		&hooked == target.cb ||
+		record->group == target.group;
+	if(!validTarget || desc_.empty()) {
+		return hooked.handle();
+	}
+
 	// TODO: only hook when there is something to do.
 	// Hook might have no actively needed queries.
 	// TODO: in gui, make sure remove hooks when currently no inside
 	// cb viewer?
 
 	// Check if it already has a valid record associated
-	auto* record = hooked.lastRecordLocked();
 	auto hcommand = CommandDesc::findHierarchy(record->commands, desc_);
 	if(hcommand.empty()) {
 		dlg_warn("Can't hook cb, can't find hooked command");
@@ -182,6 +193,9 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 void CommandHook::desc(std::vector<CommandDesc> desc) {
 	desc_ = std::move(desc);
+
+	// TODO: this can have many false positives. Only do this
+	// when desc *really* changed.
 	unsetHookOps();
 }
 

@@ -11,7 +11,7 @@ struct Fence : DeviceHandle {
 
 	// The pending submission this fence is currently associated to.
 	// Synced via device mutex.
-	PendingSubmission* submission {};
+	SubmissionBatch* submission {};
 
 	~Fence();
 };
@@ -21,8 +21,8 @@ struct Semaphore : DeviceHandle {
 
 	// NOTE: eventually, we'll want to support other kinds of payloads here.
 	// Can be signaled/waited upon in QueuePresent, AcquireImage and more.
-	PendingSubmission* signalFrom {};
-	PendingSubmission* waitFrom {};
+	SubmissionBatch* signalFrom {};
+	SubmissionBatch* waitFrom {};
 
 	~Semaphore();
 };

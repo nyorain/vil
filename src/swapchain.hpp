@@ -2,12 +2,18 @@
 
 #include <fwd.hpp>
 #include <handle.hpp>
+#include <util/intrusive.hpp>
 #include <vk/vulkan.h>
 #include <chrono>
 #include <optional>
 #include <memory>
 
 namespace fuen {
+
+struct RecordBatch {
+	Queue* queue;
+	std::vector<IntrusivePtr<CommandRecord>> submissions;
+};
 
 struct Swapchain : DeviceHandle {
 	VkSwapchainKHR handle {};
@@ -25,8 +31,12 @@ struct Swapchain : DeviceHandle {
 	static constexpr auto maxFrameTimings = 1000u;
 	std::optional<Clock::time_point> lastPresent {};
 	std::vector<Clock::duration> frameTimings;
-	// std::vector<IntrusivePtr<SubmissionBatch>> frameSubmissions;
 
+	u32 presentCounter {};
+	std::vector<RecordBatch> frameSubmissions; // finished
+	std::vector<RecordBatch> nextFrameSubmissions; // being built
+
+	Swapchain() = default;
 	~Swapchain();
 	void destroy();
 };

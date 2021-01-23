@@ -33,6 +33,16 @@
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 #include <windows.h>
 #include "vulkan_win32.h"
+
+// thanks bill
+#undef near
+#undef far
+#undef ERROR
+#undef MemoryBarrier
+#undef CreateEvent
+#undef CreateSemaphore
+// #undef WIN32_LEAN_AND_MEAN
+// #undef NOMINMAX
 #endif
 
 #ifdef VK_USE_PLATFORM_XCB_KHR
@@ -42,17 +52,28 @@
 
 #ifdef VK_USE_PLATFORM_XLIB_KHR
 #include <X11/Xlib.h>
-#include "vulkan_xlib.h"
-#endif
 
-#ifdef FUEN_WITH_WIN32
-    // thanks bill
-    #undef near
-    #undef far
-    #undef ERROR
-    #undef MemoryBarrier
-    #undef CreateEvent
-    #undef CreateSemaphore
-    // #undef WIN32_LEAN_AND_MEAN
-    // #undef NOMINMAX
-#endif // FUEN_WITH_WIN32
+typedef unsigned long Window;
+typedef struct _XDisplay Display;
+
+#include "vulkan_xlib.h"
+
+// ugh, xlib is terrible
+// #undef None
+// #undef ParentRelative
+// #undef CopyFromParent
+// #undef PointerWindow
+// #undef InputFocus
+// #undef PointerRoot
+// #undef AnyPropertyType
+// #undef AnyKey
+// #undef AnyButton
+// #undef AllTemporary
+// #undef CurrentTime
+// #undef NoSymbol
+// #undef KeyPress
+// #undef KeyRelease
+// #undef ButtonPress
+// #undef ButtonRelease
+
+#endif

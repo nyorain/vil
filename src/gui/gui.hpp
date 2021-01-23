@@ -60,8 +60,6 @@ public:
 	std::vector<Draw*> pendingDraws();
 
 	void selectResource(Handle& handle, bool activateTab = true);
-	void selectCommands(IntrusivePtr<CommandRecord> record,
-		bool updateFromGroup, bool activateTab = true);
 
 	auto& cbGui() { return tabs_.cb; }
 	void finished(Draw&);
@@ -79,11 +77,6 @@ private:
 
 	void uploadDraw(Draw&, const ImDrawData&);
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, const ImDrawData&);
-
-	// Functions expect device mutex to be locked
-	// template<typename H>
-	// void waitForSubmissions(const H& handle);
-	// void waitFor(span<PendingSubmission* const> submsisions);
 
 private:
 	Device* dev_ {};

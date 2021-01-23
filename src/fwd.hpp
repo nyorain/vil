@@ -72,7 +72,7 @@ struct RenderPassDesc;
 struct Queue;
 struct QueueFamily;
 struct Submission;
-struct PendingSubmission;
+struct SubmissionBatch;
 struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;

@@ -452,6 +452,8 @@ Ok, let's figure this out. How should the I/O inspector actually behave?
 
 We need to support various features for showing submissions in the GUI.
 
+(NOTE: previously, SubmissionBatch was badly named PendingSubmission).
+
 - Get all submissions that happened between two QueuePresent calls.
 	- we could implement this by either adding submission IDs or the
 	  time of submission to every PendingSubmission.

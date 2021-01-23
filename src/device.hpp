@@ -63,16 +63,19 @@ struct Device {
 
 	std::unique_ptr<DisplayWindow> window;
 
+	std::unique_ptr<CommandHook> commandHook {};
+
 	// The currently active gui. Might be null. There is never more than
 	// one gui associated with a device.
 	Gui* gui {};
+	Swapchain* swapchain {};
 
 	std::vector<VkFence> fencePool; // currently unused fences
 
 	std::vector<VkSemaphore> semaphorePool; // currently used semaphores
 	std::vector<VkSemaphore> resetSemaphores; // list of semaphores that are waiting to be reset
 
-	std::vector<std::unique_ptr<PendingSubmission>> pending;
+	std::vector<std::unique_ptr<SubmissionBatch>> pending;
 
 	// Mutex for general shared access.
 	// While this mutex is locked, resources won't be inserted or

@@ -22,7 +22,6 @@
 #include <fstream>
 #include <filesystem>
 
-// kinda hacky, done for shaders
 #include <gui.frag.spv.h>
 #include <gui.vert.spv.h>
 
@@ -748,6 +747,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 		VK_VERSION_PATCH(dev.props.driverVersion));
 
 	ImGui::Columns();
+	ImGui::Separator();
 
 	// Enabled instance extensions
 	auto iniExtLbl = dlg::format("{} instance extensions enabled", dev.ini->extensions.size());
@@ -770,9 +770,17 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::TreePop();
 	}
 
+	ImGui::Separator();
+
+	if(dev.swapchain && ImGui::Button("View per-frame submissions")) {
+		cbGui().showSwapchainSubmissions();
+		activateTab(Tab::commandBuffer);
+	}
+
 	// pretty much just own debug stuff
 	ImGui::Separator();
 
+	/*
 	auto pending = dlg::format("Pending submissions: {}", dev.pending.size());
 	if(ImGui::TreeNode(&dev.pending, "%s", pending.c_str())) {
 		for(auto& subm : dev.pending) {
@@ -818,11 +826,12 @@ void Gui::drawOverviewUI(Draw& draw) {
 		}
 		ImGui::TreePop();
 	}
+	*/
 
 	if(ImGui::TreeNode("Statistics")) {
 		auto numGroups = 0u;
 		for(auto& qf : dev.queueFamilies) {
-			numGroups += qf.commandGroups.size();
+			numGroups += unsigned(qf.commandGroups.size());
 		}
 
 		imGuiText("Number of command groups: {}", numGroups);
@@ -968,7 +977,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				ImGui::EndTabItem();
 			}
 
-			if(tabs_.cb.record_) {
+			if(tabs_.cb.record_ || tabs_.cb.mode_ == CommandBufferGui::UpdateMode::swapchain) {
 				if(ImGui::BeginTabItem("Command Buffer", nullptr, checkSelectTab(Tab::commandBuffer))) {
 					tabs_.cb.draw(draw);
 					ImGui::EndTabItem();
@@ -1070,7 +1079,8 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 
 	// TODO: hacky but we have to keep the record alive, making sure
 	// it's not destroyed inside the lock.
-	auto keepAlive = tabs_.cb.record_;
+	auto keepAliveRec = tabs_.cb.record_;
+	auto keepAliveBatches = tabs_.cb.records_;
 
 	{
 		// Important we already lock this mutex here since we need to make
@@ -1182,7 +1192,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			tsInfo.pNext = submitInfo.pNext;
 
 			// wait
-			waitValues.resize(waitSems.size());
+			waitValues.resize(waitSems.size()); // initial ones, ignored
 			for(auto* sub : waitSubmissions) {
 				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT); // TODO: guess we could do better
 				waitSems.push_back(sub->ourSemaphore);
@@ -1190,6 +1200,10 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 
 				draw.waitedUpon.push_back(sub->ourSemaphore);
 			}
+
+			dlg_assert(waitValues.size() == waitSems.size());
+			tsInfo.waitSemaphoreValueCount = waitValues.size();
+			tsInfo.pWaitSemaphoreValues = waitValues.data();
 
 			// signal
 			// signalValues[0] is uninitialized by design, should be
@@ -1229,7 +1243,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			}
 
 			if(waitCpu) {
-				std::unordered_set<PendingSubmission*> subs;
+				std::unordered_set<SubmissionBatch*> subs;
 				for(auto* sub : waitSubmissions) {
 					subs.insert(sub->parent);
 				}
@@ -1329,14 +1343,6 @@ void Gui::finishDraws() {
 
 void Gui::makeImGuiCurrent() {
 	ImGui::SetCurrentContext(imgui_);
-}
-
-void Gui::selectCommands(IntrusivePtr<CommandRecord> record,
-		bool updateFromGroup, bool activateTab) {
-	tabs_.cb.select(record, updateFromGroup);
-	if(activateTab) {
-		this->activateTab(Tab::commandBuffer);
-	}
 }
 
 void Gui::selectResource(Handle& handle, bool activateTab) {

@@ -30,7 +30,6 @@ CommandBuffer::~CommandBuffer() {
 
 		if(record_) {
 			dlg_assert(record_->cb == this);
-			record_->cb->hook.reset();
 			record_->cb = nullptr;
 		}
 	}
@@ -69,7 +68,6 @@ void CommandBuffer::doReset(bool record) {
 		clearPendingLocked();
 
 		if(record_) {
-			record_->cb->hook.reset();
 			record_->cb = nullptr;
 			keepAliveRecord = std::move(record_);
 		}

@@ -8,10 +8,14 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
+- [ ] in io & resource viewer: mip slider broken
+	- [ ] Also move to own line? or just make half width?
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
 	- [ ] clean the implementation up
+- [ ] might be better to determine command group at EndCommandBuffer
+      instead of first submission. We can't use the used queue though...
 - [ ] show more information in command viewer. Stuff downloaded from
       device before/after command
 	- [x] new per-command input/output overview, allowing to view *all* resources
@@ -34,33 +38,8 @@ v0.1, goal: end of january 2021
       Could cause crashed for future values atm
 - [ ] better enumString.hpp. Remove prefixes
 - [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
-- [x] destroying a sampler should also invalidate all records that use 
-      a descriptor set allocated from a layout with that sampler bound as
-	  immutable sampler. No idea how to properly do that, we need a link
-	  sampler -> descriptorSetLayout and additionally 
-	  descriptorSetLayout -> descriptorSet. Or maybe implicitly link
-	  the sampler as soon as the descriptor set is created (from the layout,
-	  in which it is linked) and then treat it as normal binding (that
-	  is never invalidated, treat as special case)
-	- [x] make sure to never read layout.pImmutableSamplers of an invalidated
-	      record then. Destroying the immutable sampler would invalidate the
-		  ds, causing the ds to be removed from the record.
 - [ ] in CopiedImage::init: check for image usage support
 	- [ ] generally: allow the image copy operation to fail.
-- [x] fix command hook synchronization issue where we use a CommandHookState that is currently
-      written to by a new application submission. I guess we simply have to add something like
-	  "PendingSubmission* writerSubmission {}" to CommandHookState that is set every time
-	  the state is used in a hooked submission and unset when the submission is finished.
-	  When we then display (reading a buffer is fine, we copied them to separate memory
-	  and are not using the mapped memory directly anyways) from a CommandHookState
-	  and `writeSubmission` is set, we chain our gui draw behind it.
-- [x] IMPORTANT! keep command group (or at least the hook?) alive 
-	  while it is viewed in cb viewer? Can lead to problems currently.
-	  Unset group in kept-alive records? We should probably keep the
-	  group alive while a record of it is alive (but adding intrusive
-	  pointer from record to group would create cycle).
-	  Are currently getting crashed from this.
-	- [x] re-enable discarding old command groups when this is figured out.
 - [ ] fix Gui::draws_ synchronization issue
 	  See Gui::pendingDraws (called from queue while locked) but also
 	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
@@ -70,21 +49,10 @@ v0.1, goal: end of january 2021
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
-- [x] barrier command inspectors: show information about all barriers, stage masks etc
-	- [x] CmdPipelineBarrier
-	- [x] CmdSetEvent
-	- [x] CmdWaitEvents
 - [ ] Allow to freeze state for current displayed command, i.e. don't
       update data from hook
 	- [ ] figure out how to communicate this via gui.
 	      This is a distinct option form "updateFromGroup" or "updateFromCb".
-- [x] find a way to limit number of command groups. Erase them again if not
-      used for a while. don't create group for single non-group cb submission?
-	  Or somehow quickly remove again
-- [x] add explicit "updateFromGroup" checkbox to command viewer
-	- [x] we definitely need a "freeze" button. Would be same as unchecking
-	      checkbox, so go with checkbox i guess
-	- [ ] do we also need an updateFromCb button?
 - [x] allow to select in cb viewer which commands are shown
 	- [ ] make that more compact/intuitive if possible
 	- [ ] looks really ugly at the moment, improve that.
@@ -93,6 +61,7 @@ v0.1, goal: end of january 2021
 - [x] make queues viewable handles
 	- [x] allow to view command groups per queue
 	- [ ] view submissions per queue somehow?
+	      {probably for later}
 - [x] fix resource viewer
 	- [x] fix filtering by type
 	- [x] fix filtering by name
@@ -104,13 +73,6 @@ v0.1, goal: end of january 2021
 	- [ ] everywhere where we hook-create handles
 	  nvm, we likely cannot/shouldn't do it without deciding on per-extension
 	      basis. Just forwarding random pNexts will likely not work.
-- [ ] implement overview as in node 1652
-	- [ ] associate CommandGroup with swapchain (and the other way around?)
-	- [ ] allow something like "update from swapchain" in command buffer viewer?
-	      It seems to me we want a more general "command source" concept
-		  for the command buffer viewer. Could be queue/command buffer/command group/
-		  swapchain/identified per-frame submission/fence-association or 
-		  something like that.
 - [x] rework dev/gui so that there is never more than one gui. Supporting
       multiple guis at the same time is not worth the trouble (think
 	  about command buffer hooking from multiple cb viewers...)
@@ -125,14 +87,17 @@ v0.1, goal: end of january 2021
 	- [ ] show graph of frame timings (see swapchain)
 	- [ ] show enabled extensions & features
 	- [ ] only show application info if filled out by app. collapse by default?
-- [ ] next ui sync rework
+- [x] next ui sync rework
 	- [x] don't lock device mutex while waiting for fences (see waitForSubmissions)
 	- [x] use chain semaphores for input
-	- [ ] correctly sync output, but only if it's needed (might work already)
+	- [x] correctly sync output, but only if it's needed (might work already)
+	      {i guess is application calls vkQueuePresentKHR we trust it knows
+		   what it is doing?}
 	- [x] if timeline semaphores are available, use them! for all submissions (in and out)
 		- [x] when timeline semaphore extension is available, enable it!
 	- [ ] when a resource is only read by us we don't have to make future
 	      submissions that also only read it wait.
+		  {NOTE: optimization not important for v0.1}
 		- [ ] requires us to track (in CommandRecord::usedX i guess) whether
 		      a resource might be written by cb
 	- [x] insert barrier at end of each submission, optimize case where application
@@ -184,6 +149,9 @@ v0.1, goal: end of january 2021
 		  Use custom accent color. Configurable?
 	- [ ] Figure out transparency. Make it a setting?
 	- [ ] see imgui style examples in imgui releases
+	- [ ] lots of places where we should replace column usage with tables
+	- [ ] fix stupid looking duplicate header-seperator for commands in 
+	      command viewer (command viewer header UI is a mess anyways)
 - [ ] improve handling of transparent images. Checkerboard background?
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
@@ -233,6 +201,12 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] optimization: we don't really need to always track refCbs and store
+      the destroyed handles. Only do it for submissions viewed in gui?
+	  Could just require commandRecords to be valid while selected and
+	  then just handle the unsetting logic in CommandBufferGui::destroyed
+- [ ] better support for multiple swapchains
+	- [ ] in submission viewing, we assume there is just one atm
 - [ ] Allow modifying resources (temporarily or permanently)
 	- [ ] in command viewer or resource viewer
 	- [ ] over such a mechanism we could implement a forced camera

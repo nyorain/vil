@@ -3,6 +3,7 @@
 #include <cb.hpp>
 #include <ds.hpp>
 #include <commands.hpp>
+#include <swapchain.hpp>
 #include <sync.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
@@ -14,7 +15,7 @@
 
 namespace fuen {
 
-std::optional<SubmIterator> checkLocked(PendingSubmission& subm) {
+std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	auto& dev = *subm.queue->dev;
 
 	if(subm.appFence) {
@@ -265,7 +266,7 @@ bool potentiallyWritesLocked(Submission& subm, DeviceHandle& handle) {
 	return false;
 }
 
-std::unordered_set<Submission*> needsSyncLocked(PendingSubmission& pending, Draw& draw) {
+std::unordered_set<Submission*> needsSyncLocked(SubmissionBatch& pending, Draw& draw) {
 	auto& dev = *pending.queue->dev;
 	if(pending.queue == dev.gfxQueue) {
 		return {};
@@ -318,7 +319,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	}
 
 	// hook fence
-	auto submPtr = std::make_unique<PendingSubmission>();
+	auto submPtr = std::make_unique<SubmissionBatch>();
 	auto& subm = *submPtr;
 	subm.queue = &qd;
 
@@ -415,13 +416,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 				dlg_assert(rec.group);
 
 				// potentially hook command buffer
-				if(rec.group->hook) {
-					auto hooked = rec.group->hook->hook(cb, dst, scb.hook);
-					dlg_assert(hooked);
-					cbs.push_back(hooked);
-					dlg_assertm(!cb.hook, "Hook registered for command buffer and group");
-				} else if(cb.hook) {
-					auto hooked = cb.hook->hook(cb, dst, scb.hook);
+				if(dev.commandHook) {
+					auto hooked = dev.commandHook->hook(cb, dst, scb.hook);
 					dlg_assert(hooked);
 					cbs.push_back(hooked);
 				} else {
@@ -631,11 +627,22 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	{
 		std::lock_guard lock(dev.mutex);
 
+		RecordBatch* batch = nullptr;
+		if(dev.swapchain) {
+			batch = &dev.swapchain->nextFrameSubmissions.emplace_back();
+			batch->queue = &qd;
+		}
+
 		for(auto& sub : subm.submissions) {
+
 			for(auto& scb : sub.cbs) {
 				auto* cb = scb.cb;
 				cb->pending.push_back(&subm);
 				auto recPtr = cb->lastRecordPtrLocked();
+
+				if(batch) {
+					batch->submissions.push_back(recPtr);
+				}
 
 				// store pending layouts
 				for(auto& used : recPtr->images) {

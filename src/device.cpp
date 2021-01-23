@@ -9,6 +9,7 @@
 #include <overlay.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
+#include <gui/commandHook.hpp>
 #include <swa/swa.h>
 #include <vk/dispatch_table_helper.h>
 
@@ -476,6 +477,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	layer_init_device_dispatch_table(*pDevice, &dev.dispatch, fpGetDeviceProcAddr);
+
+	dev.commandHook = std::make_unique<CommandHook>();
 
 	// TODO: no idea exactly why this is needed. I guess they should not be
 	// part of the device loader table in the first place?

@@ -92,6 +92,14 @@ public:
 		unsigned elem {};
 	};
 
+	// Defines what to hook. Can either hook a specific record, a specifc
+	// CommandBuffer or a specific CommandGroup.
+	struct {
+		CommandBufferGroup* group {};
+		CommandBuffer* cb {};
+		CommandRecord* record {};
+	} target;
+
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!

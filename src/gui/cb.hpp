@@ -8,27 +8,54 @@
 namespace fuen {
 
 struct CopiedImage;
+struct RecordBatch;
 
 struct CommandBufferGui {
-	void draw(Draw& draw);
-	void select(IntrusivePtr<CommandRecord> record, bool updateFromGroup);
-	void destroyed(const Handle& handle);
+public:
+	// Defines from which source the displayed commands are updated.
+	enum class UpdateMode {
+		none, // does not update them at all. Displays static record
+		commandBuffer, // always displays current record of commandBuffer
+		commandGroup, // always displayed last record of command group
+		swapchain, // displays all commands between two swapchain presents
+	};
 
-	// TODO: quite hacky, can only be called once per frame.
-	void displayImage(const CopiedImage& img);
-	Draw* draw_ {};
-
+public:
 	CommandBufferGui();
 	~CommandBufferGui();
 
+	void draw(Draw& draw);
+
+	void showSwapchainSubmissions();
+	void select(IntrusivePtr<CommandRecord> record);
+	void select(IntrusivePtr<CommandRecord> record, CommandBuffer& cb);
+	void selectGroup(IntrusivePtr<CommandRecord> record);
+
+	void destroyed(const Handle& handle);
+
+	bool displayActionInspector(const Command&);
+	void displayDs(const Command&);
+
+	// TODO: hacky, can only be called once per frame.
+	void displayImage(const CopiedImage& img);
+
+public: // TODO: make private
 	Gui* gui_ {};
 
-	bool updateFromGroup_ {};
-	CommandTypeFlags commandFlags_ {};
+	UpdateMode mode_ {};
+	CommandBuffer* cb_ {}; // when updating from cb
 
 	// The command record we are currently viewing.
-	// We keep it alive.
+	// We make sure it stays alive.
 	IntrusivePtr<CommandRecord> record_ {};
+
+	// For swapchain
+	std::vector<RecordBatch> records_;
+	u32 swapchainCounter_ {};
+	bool freezePresentBatches_ {};
+
+	// The commands to display
+	CommandTypeFlags commandFlags_ {};
 
 	// The selected command (hierarchy) inside the cb.
 	// Might be empty, signalling that no command is secleted.
@@ -39,16 +66,13 @@ struct CommandBufferGui {
 	// same command in future records/cb selections.
 	std::vector<CommandDesc> desc_ {};
 
-	DrawGuiImage ioImage_ {};
+	// HACKY SECTION OF SHAME
+	DrawGuiImage ioImage_ {}; // TODO
 
-	bool queryTime_ {};
-
-	CommandHook* hook_ {}; // TODO: we can't know for sure it remains valid. Should probably be owned here
-	DrawGuiImage imgDraw_ {};
-
-	// hacky. See https://github.com/ocornut/imgui/issues/1655
+	// TODO hacky. See https://github.com/ocornut/imgui/issues/1655
 	bool columnWidth0_ {};
 	bool columnWidth1_ {};
+	Draw* draw_ {}; // TODO
 };
 
 } // namespace fuen

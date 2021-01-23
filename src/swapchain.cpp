@@ -1,5 +1,6 @@
 #include <swapchain.hpp>
 #include <data.hpp>
+#include <record.hpp>
 #include <layer.hpp>
 #include <image.hpp>
 #include <queue.hpp>
@@ -17,6 +18,10 @@ Swapchain::~Swapchain() {
 void Swapchain::destroy() {
 	if(!dev) {
 		return;
+	}
+
+	if(dev->swapchain == this) {
+		dev->swapchain = nullptr;
 	}
 
 	for(auto* img : this->images) {
@@ -126,7 +131,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		img.ci.sharingMode = sci.imageSharingMode;
 		img.ci.usage = sci.imageUsage;
 		img.ci.tiling = VK_IMAGE_TILING_OPTIMAL; // don't really know
-		// TODO: make local copy
+		// TODO: make local copy and store them here
 		// img.ci.pQueueFamilyIndices = sci.pQueueFamilyIndices;
 		// img.ci.queueFamilyIndexCount = sci.queueFamilyIndexCount;
 
@@ -152,6 +157,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		swapd.overlay->platform = platform;
 		platform->init(*swapd.dev, swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
 	}
+
+	// TODO: hacky, see cb gui
+	dev.swapchain = &swapd;
 
 	return result;
 }
@@ -182,6 +190,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		if(swapchain.overlay && swapchain.overlay->platform) {
 			swapchain.overlay->show = swapchain.overlay->platform->update(swapchain.overlay->gui);
 		}
+
+		++swapchain.presentCounter;
+		std::swap(swapchain.frameSubmissions, swapchain.nextFrameSubmissions);
+		swapchain.nextFrameSubmissions.clear();
 
 		if(swapchain.overlay && swapchain.overlay->show) {
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};

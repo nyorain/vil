@@ -53,13 +53,9 @@ struct SubmittedCommandBuffer {
 	~SubmittedCommandBuffer();
 };
 
-// TODO: Submission, PendingSubmission are badly named.
-// They are both pending. Submission is basically a batch of cbs synced
-// by a set of semaphores while PendingSubmission is a set of submissions
-// (to one queue, that came in via a single vkQueueSubmit).
-// Rework names when doing the Submission inspection/lifetimes rework.
+// A single Submission done via one VkSubmitInfo in vkQueueSubmit.
 struct Submission {
-	PendingSubmission* parent {};
+	SubmissionBatch* parent {};
 
 	std::vector<std::pair<Semaphore*, VkPipelineStageFlags>> waitSemaphores;
 	std::vector<Semaphore*> signalSemaphores;
@@ -76,9 +72,10 @@ struct Submission {
 };
 
 bool potentiallyWritesLocked(Submission&, DeviceHandle&);
-std::unordered_set<Submission*> needsSyncLocked(PendingSubmission&, Draw&);
+std::unordered_set<Submission*> needsSyncLocked(SubmissionBatch&, Draw&);
 
-struct PendingSubmission {
+// Batch of Submissions, represents and tracks one vkQueueSubmit call.
+struct SubmissionBatch {
 	Queue* queue {};
 	std::vector<Submission> submissions; // immutable after creation
 
@@ -115,9 +112,6 @@ struct CommandBufferGroup {
 	// Note that all queues will have the same queue family.
 	std::vector<std::pair<Queue*, u64>> queues {};
 
-	// Can be used to hook all command buffers in this group.
-	FinishPtr<CommandHook> hook;
-
 	CommandBufferGroup();
 	~CommandBufferGroup();
 };
@@ -126,8 +120,8 @@ struct CommandBufferGroup {
 // If the given submission was finished and therefore
 // removed, returns the iterator to the following pending submission.
 // Otherwise returns nullopt.
-using SubmIterator = std::vector<std::unique_ptr<PendingSubmission>>::iterator;
-std::optional<SubmIterator> checkLocked(PendingSubmission& subm);
+using SubmIterator = std::vector<std::unique_ptr<SubmissionBatch>>::iterator;
+std::optional<SubmIterator> checkLocked(SubmissionBatch& subm);
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(

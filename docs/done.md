@@ -1,5 +1,50 @@
 For v0.1
 
+- [x] implement overview as in node 1652
+      {didn't implement all of it, multiple swapchains is a feature for later}
+	- [x] associate CommandGroup with swapchain (and the other way around?)
+	- [x] allow something like "update from swapchain" in command buffer viewer?
+	      It seems to me we want a more general "command source" concept
+		  for the command buffer viewer. Could be queue/command buffer/command group/
+		  swapchain/identified per-frame submission/fence-association or 
+		  something like that.
+- [x] add explicit "updateFromGroup" checkbox to command viewer
+	- [x] we definitely need a "freeze" button. Would be same as unchecking
+	      checkbox, so go with checkbox i guess
+	- [x] do we also need an updateFromCb button?
+		  {nvm, reworked cb update settings ui}
+- [x] find a way to limit number of command groups. Erase them again if not
+      used for a while. don't create group for single non-group cb submission?
+	  Or somehow quickly remove again
+- [x] barrier command inspectors: show information about all barriers, stage masks etc
+	- [x] CmdPipelineBarrier
+	- [x] CmdSetEvent
+	- [x] CmdWaitEvents
+- [x] destroying a sampler should also invalidate all records that use 
+      a descriptor set allocated from a layout with that sampler bound as
+	  immutable sampler. No idea how to properly do that, we need a link
+	  sampler -> descriptorSetLayout and additionally 
+	  descriptorSetLayout -> descriptorSet. Or maybe implicitly link
+	  the sampler as soon as the descriptor set is created (from the layout,
+	  in which it is linked) and then treat it as normal binding (that
+	  is never invalidated, treat as special case)
+	- [x] make sure to never read layout.pImmutableSamplers of an invalidated
+	      record then. Destroying the immutable sampler would invalidate the
+		  ds, causing the ds to be removed from the record.
+- [x] fix command hook synchronization issue where we use a CommandHookState that is currently
+      written to by a new application submission. I guess we simply have to add something like
+	  "PendingSubmission* writerSubmission {}" to CommandHookState that is set every time
+	  the state is used in a hooked submission and unset when the submission is finished.
+	  When we then display (reading a buffer is fine, we copied them to separate memory
+	  and are not using the mapped memory directly anyways) from a CommandHookState
+	  and `writeSubmission` is set, we chain our gui draw behind it.
+- [x] IMPORTANT! keep command group (or at least the hook?) alive 
+	  while it is viewed in cb viewer? Can lead to problems currently.
+	  Unset group in kept-alive records? We should probably keep the
+	  group alive while a record of it is alive (but adding intrusive
+	  pointer from record to group would create cycle).
+	  Are currently getting crashed from this.
+	- [x] re-enable discarding old command groups when this is figured out.
 - [x] cleanup comments in rp.hpp. Currently a mess for splitting
 - [x] debug gui.cpp:1316,1317 asserts sometimes failing (on window resize)
 	  {we forget to check draw.inUse again before calling it in Gui::finishDraws)
