@@ -24,6 +24,7 @@ Semaphore::~Semaphore() {
 	}
 
 	// per spec, we can assume all associated payload to be finished
+	/*
 	std::lock_guard lock(dev->mutex);
 	if(this->signalFrom) {
 		auto finished = checkLocked(*this->signalFrom);
@@ -34,6 +35,7 @@ Semaphore::~Semaphore() {
 		auto finished = checkLocked(*this->waitFrom);
 		dlg_assert(finished);
 	}
+	*/
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateFence(

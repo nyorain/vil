@@ -21,8 +21,14 @@ struct Semaphore : DeviceHandle {
 
 	// NOTE: eventually, we'll want to support other kinds of payloads here.
 	// Can be signaled/waited upon in QueuePresent, AcquireImage and more.
-	SubmissionBatch* signalFrom {};
-	SubmissionBatch* waitFrom {};
+    // NOTE: it's not that easy to represent these chains. Semaphores can have
+    // multiple wait and signal operations pending as long as they are guaranteed
+    // to happen strictly in signal->wait, signal->wait, ... order.
+    // We can probably detect at submission time which signal belongs to which wait,
+    // represent it via new "SemaphoreLink" struct or something and allow to store
+    // multiple ocurrences of that hrere? -> submission rework/display
+	// SubmissionBatch* signalFrom {};
+	// SubmissionBatch* waitFrom {};
 
 	~Semaphore();
 };

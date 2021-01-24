@@ -77,7 +77,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	// TODO: remove/find real solution
 #ifdef _WIN32
-	// AllocConsole();
+	AllocConsole();
 	dlg_trace("Allocated console. Creating vulkan instance");
 #endif // _WIN32
 

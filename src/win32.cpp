@@ -236,7 +236,6 @@ void Win32Platform::updateWindowRect() {
 }
 
 LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
-	dlg_trace("wparam: {}, nCode {}", wParam, nCode);
 	if (nCode >= 0 && wParam == WM_MOUSEMOVE) {
 		/*
 		dlg_assert(globalPlatform);
@@ -345,11 +344,12 @@ bool Win32Platform::doUpdate() {
 			// ShowWindowAsync(overlayWindow, SW_HIDE);
 			UnhookWindowsHookEx(mouseHook);
 
+			// ToDO: probably have to destroy window, this does no seem to work
 			RAWINPUTDEVICE Rid[1];
 			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
 			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
 			Rid[0].dwFlags = RIDEV_REMOVE;
-			Rid[0].hwndTarget = overlayWindow;
+			Rid[0].hwndTarget = /*overlayWindow*/ nullptr;
 			RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
 
 			mouseHook = nullptr;
@@ -357,6 +357,7 @@ bool Win32Platform::doUpdate() {
 		} else if(updateEdge(focusPressed, this->checkPressed(focusKey))) {
 			dlg_trace("ungrabbing input (overlay still shown)");
 			// ShowWindowAsync(overlayWindow, SW_HIDE);
+			// TODO: remove input device as well!
 			UnhookWindowsHookEx(mouseHook);
 			mouseHook = nullptr;
 			state = State::shown;

@@ -45,15 +45,16 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 			cb->pending.erase(it2);
 		}
 
-		for(auto& [sem, stage] : sub.waitSemaphores) {
-			dlg_assert(sem->waitFrom == &subm);
-			sem->waitFrom = nullptr;
-		}
+		// TODO: submission rework/display
+		// for(auto& [sem, stage] : sub.waitSemaphores) {
+			// dlg_assert(sem->waitFrom == &subm);
+			// sem->waitFrom = nullptr;
+		// }
 
-		for(auto* sem : sub.signalSemaphores) {
-			dlg_assert(sem->signalFrom == &subm);
-			sem->signalFrom = nullptr;
-		}
+		// for(auto* sem : sub.signalSemaphores) {
+			// dlg_assert(sem->signalFrom == &subm);
+			// sem->signalFrom = nullptr;
+		// }
 
 		// For a non-timeline semaphore (that was not waited upon), we
 		// have to issue a vkQueueSubmit to reset them, we don't do that
@@ -354,8 +355,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			auto& sem = dev.semaphores.get(si.pSignalSemaphores[j]);
 			dst.signalSemaphores.push_back(&sem);
 
-			std::lock_guard lock(dev.mutex);
-			sem.signalFrom = &subm;
+			// std::lock_guard lock(dev.mutex);
+			// dlg_assert(!sem.signalFrom);
+			// dlg_assert(!sem.waitFrom);
+			// sem.signalFrom = &subm;
 		}
 
 		auto& cbs = commandBuffers.emplace_back();
@@ -387,8 +390,11 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 						best = std::max(best, matchVal);
 						if(matchVal > matchThreshold) {
 							rec.group = qgroup.get();
-							rec.group->aliveRecords.insert(&rec);
 						}
+					}
+
+					if(rec.group) {
+						rec.group->aliveRecords.insert(&rec);
 					}
 				}
 
@@ -449,11 +455,12 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		// = wait semaphores =
 		for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
 			auto& semaphore = dev.semaphores.get(si.pWaitSemaphores[j]);
-			dlg_assert(!semaphore.waitFrom);
 			dst.waitSemaphores.emplace_back(&semaphore, si.pWaitDstStageMask[j]);
 
-			std::lock_guard lock(dev.mutex);
-			semaphore.waitFrom = &subm;
+			// std::lock_guard lock(dev.mutex);
+			// dlg_assert(!semaphore.waitFrom);
+			// dlg_assert(semaphore.signalFrom);
+			// semaphore.waitFrom = &subm;
 		}
 
 		{
@@ -700,7 +707,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			// more than X groups already and just throw out the ones not used
 			// for the longest time/submissions. Then only do this when
 			// a new group is actually added.
-			constexpr auto submissionCountThreshold = 100u;
+			constexpr auto submissionCountThreshold = 10u;
 			for(auto& [squeue, lastSubm] : group.queues) {
 				if(squeue->submissionCount - lastSubm < submissionCountThreshold) {
 					rem = false;
@@ -713,7 +720,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 					squeue->groups.erase(it->get());
 				}
 
-				keepAliveRecs.push_back(std::move(group.lastRecord));
 				keepAliveGroups.push_back(std::move(*it));
 				it = qf.commandGroups.erase(it);
 			} else {

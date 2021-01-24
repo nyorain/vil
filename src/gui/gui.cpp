@@ -1408,9 +1408,13 @@ void Gui::finished(Draw& draw) {
 
 // util
 void refButton(Gui& gui, Handle& handle) {
+	// We need the PushID/PopID since there may be multiple
+	// ref buttons with the same label (e.g. for unnamed handles)
+	ImGui::PushID(&handle);
 	if(ImGui::Button(name(handle).c_str())) {
 		gui.selectResource(handle);
 	}
+	ImGui::PopID();
 }
 
 void refButtonOpt(Gui& gui, Handle* handle) {

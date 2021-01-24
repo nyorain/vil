@@ -194,6 +194,8 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] we assume binary semaphores for applications at the moment. See e.g. the waitFrom/signalFrom
+      assertions in queue.cpp
 - [ ] support for the spirv primites in block variables that are still missing
  	  See https://github.com/KhronosGroup/SPIRV-Reflect/issues/110
 	- [ ] runtime arrays (based on buffer range size)

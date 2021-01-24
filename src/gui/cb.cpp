@@ -466,9 +466,14 @@ void CommandBufferGui::draw(Draw& draw) {
 	if(mode_ == UpdateMode::swapchain) {
 		auto* selected = record_ && !command_.empty() ? command_.back() : nullptr;
 
-		for(auto& batch : records_) {
-			if(ImGui::TreeNode("vkQueueSubmit")) {
-				for(auto& rec : batch.submissions) {
+		for(auto b = 0u; b < records_.size(); ++b) {
+			auto& batch = records_[b];
+			auto id = dlg::format("vkQueueSubmit:{}", b);
+
+			if(ImGui::TreeNode(id.c_str(), "vkQueueSubmit")) {
+				for(auto r = 0u; r < batch.submissions.size(); ++r) {
+					auto& rec = batch.submissions[r];
+
 					// When the record isn't valid anymore (cb is unset), we have to
 					// be careful to not actually reference any destroyed resources.
 					if(!rec->cb) {
@@ -479,9 +484,11 @@ void CommandBufferGui::draw(Draw& draw) {
 
 					// extra tree node for every submission
 					// TODO: only show this when there is more than one and
-					// then show index as well? might mess with ids.
+					// then show index as well? might mess with ids though.
 					auto flags = 0u;
-					if(ImGui::TreeNodeEx(rec->group, flags, "Commands")) {
+					// auto id = rec->group;
+					auto id = dlg::format("Commands:{}", r);
+					if(ImGui::TreeNodeEx(id.c_str(), flags, "Commands")) {
 						auto nsel = displayCommands(rec->commands, selected, commandFlags_);
 						if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
 							record_ = rec;

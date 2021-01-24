@@ -86,6 +86,10 @@ std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) 
 }
 
 void returnBlocks(CommandPool& pool, CommandMemBlock* head) {
+	// TODO
+	// freeBlocks(head);
+	// (void) pool;
+
 	if(!head) {
 		return;
 	}

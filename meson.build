@@ -128,6 +128,7 @@ src = files(
 	'src/platform.hpp',
 	'src/win32.hpp',
 	'src/data.hpp',
+	'src/record.hpp',
 
 	'src/vk/vulkan.h',
 	'src/vk/vulkan_core.h',
@@ -149,6 +150,7 @@ src = files(
 	'src/util/span.hpp',
 	'src/util/flags.hpp',
 	'src/util/f16.hpp',
+	'src/util/intrusive.hpp',
 	'src/util/syncedMap.hpp',
 
 	'src/imgui/imgui.h',

@@ -129,7 +129,7 @@ void CommandBuffer::doEnd() {
 		}
 
 		record_->finished = true;
-		lastRecord_ = record_; // std::move?
+		lastRecord_ = record_; // could use std::move, record_ is only really used while recording
 	}
 }
 

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <queue.hpp>
 #include <util/span.hpp>
+#include <util/intrusive.hpp>
 
 #include <vector>
 #include <unordered_map>

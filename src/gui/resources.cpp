@@ -1213,12 +1213,36 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
 	imGuiText("Priority: {}", queue.priority);
 
+	imGuiText("Submission Counter: {}", queue.submissionCount);
+
 	for(auto* group : queue.groups) {
 		// TODO: display desc?
 		if(ImGui::Button("View command group")) {
 			gui_->cbGui().selectGroup(group->lastRecord);
 			gui_->activateTab(Gui::Tab::commandBuffer);
 		}
+
+		// TODO: mainly debug data, remove!
+		ImGui::SameLine();
+		imGuiText("Num queues: {}", group->queues.size());
+
+		ImGui::SameLine();
+		imGuiText(", Alive records: {}", group->aliveRecords.size());
+
+		ImGui::SameLine();
+		imGuiText(", Last record refCount: {}", group->lastRecord->refCount);
+
+		u64* foundID = nullptr;
+		for (auto& [q, id] : group->queues) {
+			if (q == &queue) {
+				foundID = &id;
+				break;
+			}
+		}
+
+		dlg_assert(foundID);
+		ImGui::SameLine();
+		imGuiText(", Last Submitted: {}",  *foundID);
 	}
 }
 
