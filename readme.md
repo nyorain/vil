@@ -1,6 +1,6 @@
 # Fuencaliente
 
-Relatively small vulkan in-app debugging layer that is able to provide
+Vulkan in-app debugging layer that is able to provide
 live introspection via a debug window/overlay.
 
 ![Example of command viewer 1](docs/pics/sponza-ssao.png)
