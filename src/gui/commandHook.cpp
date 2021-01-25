@@ -712,7 +712,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		return;
 	}
 
-	auto [setID, bindingID, elemID] = *hook->copyDS;
+	auto [setID, bindingID, elemID, _] = *hook->copyDS;
 
 	// NOTE: we have to check for correct sizes here since the
 	// actual command might have changed (for an updated record)
@@ -802,6 +802,35 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	}
 }
 
+void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID) {
+	auto& dev = record->device();
+
+	dlg_assert(info.beginRenderPassCmd);
+	auto& fb = nonNull(info.beginRenderPassCmd->fb);
+	if(attID >= fb.attachments.size()) {
+		hook->copyAttachment = {};
+		dlg_trace("copyAttachment out of range");
+	} else {
+		auto& imageView = fb.attachments[attID];
+		dlg_assert(imageView);
+		dlg_assert(imageView->img);
+		auto* image = imageView->img;
+
+		if(!image) {
+			// NOTE: this should not happen at all, not a regular error.
+			dlg_error("ImageView has no associated image");
+		} else {
+			auto& srcImg = *image;
+			auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
+
+			// TODO: select exact layer/mip in view range via gui
+			auto& subres = imageView->ci.subresourceRange;
+			initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout, subres,
+				state->errorMessage, record->queueFamily);
+		}
+	}
+}
+
 void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info) {
 	auto& dev = record->device();
 	DebugLabel lbl(dev, cb, "beforeDstOutsideRp");
@@ -842,8 +871,13 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 		}
 	}
 
+	// attachment
+	if(hook->copyAttachment && hook->copyAttachment->before) {
+		copyAttachment(info, hook->copyAttachment->id);
+	}
+
 	// descriptor state
-	if(hook->copyDS) {
+	if(hook->copyDS && hook->copyDS->before) {
 		copyDs(bcmd, info);
 	}
 
@@ -877,7 +911,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 	}
 }
 
-void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
+void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info) {
 	auto& dev = record->device();
 	DebugLabel lbl(dev, cb, "afterDsOutsideRp");
 
@@ -895,33 +929,14 @@ void CommandHookRecord::afterDstOutsideRp(Command&, const RecordInfo& info) {
 		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 		0, 1, &memBarrier, 0, nullptr, 0, nullptr);
 
-	if(hook->copyAttachment) {
-		// initialize dst image
-		dlg_assert(info.beginRenderPassCmd);
-		auto& fb = nonNull(info.beginRenderPassCmd->fb);
-		auto attID = *hook->copyAttachment;
-		if(attID >= fb.attachments.size()) {
-			hook->copyAttachment = {};
-			dlg_trace("copyAttachment out of range");
-		} else {
-			auto& imageView = fb.attachments[attID];
-			dlg_assert(imageView);
-			dlg_assert(imageView->img);
-			auto* image = imageView->img;
+	// attachment
+	if(hook->copyAttachment && !hook->copyAttachment->before) {
+		copyAttachment(info, hook->copyAttachment->id);
+	}
 
-			if(!image) {
-				// NOTE: this should not happen, not a regular error.
-				dlg_error("ImageView has no associated image");
-			} else {
-				auto& srcImg = *image;
-				auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
-
-				// TODO: select exact layer/mip in view range via gui
-				auto& subres = imageView->ci.subresourceRange;
-				initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout, subres,
-					state->errorMessage, record->queueFamily);
-			}
-		}
+	// descriptor state
+	if(hook->copyDS && !hook->copyDS->before) {
+		copyDs(bcmd, info);
 	}
 }
 

@@ -720,7 +720,7 @@ void CommandBufferGui::displayDs(const Command& cmd) {
 	}
 
 	dlg_assert(hook.copyDS);
-	auto [setID, bindingID, elemID] = *hook.copyDS;
+	auto [setID, bindingID, elemID, _] = *hook.copyDS;
 
 	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
 	if(setID >= dss.size()) {
@@ -988,7 +988,7 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 				ImGui::TreeNodeEx(label.c_str(), flags);
 				if(ImGui::IsItemClicked()) {
 					hook.unsetHookOps();
-					hook.copyDS = {i, b, 0};
+					hook.copyDS = {i, b, 0, true};
 				}
 			}
 
@@ -1014,14 +1014,14 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 
 				auto addAttachment = [&](auto label, auto id) {
 					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-					if(hook.copyAttachment && *hook.copyAttachment == id) {
+					if(hook.copyAttachment && hook.copyAttachment->id == id) {
 						flags |= ImGuiTreeNodeFlags_Selected;
 					}
 
 					ImGui::TreeNodeEx(label.c_str(), flags);
 					if(ImGui::IsItemClicked()) {
 						hook.unsetHookOps();
-						hook.copyAttachment = id;
+						hook.copyAttachment = {id, false};
 					}
 				};
 
@@ -1116,6 +1116,13 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 	//   e.g. link to the respective resources, descriptor sets etc
 	auto cmdInfo = true;
 	if(hook.copyDS) {
+		// TODO: only show this for bound resources that may be written,
+		// i.e. storage buffers/images
+		if(ImGui::Checkbox("Before Command", &hook.copyDS->before)) {
+			hook.invalidateRecordings();
+			hook.invalidateData();
+		}
+
 		displayDs(cmd);
 		cmdInfo = false;
 	} else if(hook.copyVertexBuffers) {
@@ -1214,7 +1221,15 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 
 		cmdInfo = false;
 	} else if(hook.copyAttachment) {
+		// TODO: only show for output attachments (color, depthStencil)
+		if(ImGui::Checkbox("Before Command", &hook.copyAttachment->before)) {
+			hook.invalidateRecordings();
+			hook.invalidateData();
+		}
+
 		if(hook.state) {
+			// TODO: display information/refButtons to framebuffer and imageview, image used!
+
 			if(hook.state->attachmentCopy.image) {
 				gui.cbGui().displayImage(hook.state->attachmentCopy);
 			} else {

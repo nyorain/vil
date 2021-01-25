@@ -9,6 +9,8 @@ v0.1, goal: end of january 2021
 - Testing, Profiling, Needed optimization
 
 - [ ] Fix the (due to table now broken) append child logic in displayInspector
+	- [ ] should likely call displayActionInspector directly from inside cbGui
+	      and only show command inspector itself when "Command" is selected
 - [ ] in io & resource viewer: mip slider broken
 	- [ ] Also move to own line? or just make half width?
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
@@ -33,10 +35,11 @@ v0.1, goal: end of january 2021
 	- [x] factor out image viewer from resources into own component; use it here.
 	      Allow layer/mip selection
 	- [x] re-add timing display in command inspector
-	- [ ] display arrays correctly
-	- [ ] fix vertex buffer layout reader
-	- [ ] for storage buffers/storage images, a before/after/change
+	- [ ] display arrays in buffers correctly
+	- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
+	- [x] for storage buffers/storage images, a before/after/change
 	      view would be really nice. We can do that.
+	- [ ] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
 	- [ ] attempt to retain previous selection in io viewer when selecting
 	      new command
 	- [ ] adapt ioImage_ to selected image (e.g. channels)
@@ -105,7 +108,7 @@ v0.1, goal: end of january 2021
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
 		   to make this beautiful}
-	- [ ] show graph of frame timings (see swapchain)
+	- [ ] show graph of frame timings (see first sketch swapchain header)
 	- [x] show enabled extensions
 	- [ ] show enabled features
 	- [ ] only show application info if filled out by app. collapse by default?
@@ -146,13 +149,14 @@ v0.1, goal: end of january 2021
 	- [ ] move to own tab/panel? needed in multiple cases
 - [ ] improve image viewer
 	- [ ] move to own tab/panel? needed in multiple cases
+	      {nah, viewing it inline is better for now}
 	- [ ] show texel color? (requires us to download texels, just like we 
 	      do with buffers). See gui.cpp, bottom, CopyTexel sketch
-- [ ] Link to swapchain in swapchain images
+- [x] Link to swapchain in swapchain images
 - [ ] automatically update resource lists in resource gui when tab is re-entered
       from somewhere else
 - [ ] when we select a resource of type X should we set the current filter to X
-      in the resource gui?
+      in the resource gui? Somewhat confusing at the moment
 - [ ] imgui styling
 	- [ ] use custom font
 	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
@@ -177,6 +181,8 @@ v0.1, goal: end of january 2021
 		  even be shown in command list when its type is hidden (maybe
 		  make it a bit transparent, "ghost-command")
 - [ ] improve handling of transparent images. Checkerboard background?
+	- [ ] when viewing image as grayscale they become transparent atm.
+	      no idea why
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
 	- [ ] clearly document (maybe already in README?) that the layer
@@ -224,6 +230,11 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] write tests for some common functionality
+	- [ ] format reading/writing; conversion
+- [ ] clean up/unify usage of struct/class
+	  struct for POD (with no public/private classifiers and member functions),
+	  class otherwise I guess
 - [ ] move external source into extra folder
 - [ ] we should likely switch to spirv-cross instead of spirv-reflect
 	- [ ] we will probably need some its functionality later on anyways
@@ -243,8 +254,10 @@ Possibly for later, new features/ideas:
       the destroyed handles. Only do it for submissions viewed in gui?
 	  Could just require commandRecords to be valid while selected and
 	  then just handle the unsetting logic in CommandBufferGui::destroyed
-- [ ] better support for multiple swapchains
+- [ ] support for multiple swapchains
 	- [ ] in submission viewing, we assume there is just one atm
+	- [ ] currently basically leaking memory (leaving all records alive)
+	      when application has a swapchain it does not present to?
 - [ ] Allow modifying resources (temporarily or permanently)
 	- [ ] in command viewer or resource viewer
 	- [ ] over such a mechanism we could implement a forced camera

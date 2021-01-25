@@ -670,8 +670,6 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 						img->level,
 					};
 
-					dlg_info(img->level);
-
 					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
 						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
 						sizeof(pcr), &pcr);

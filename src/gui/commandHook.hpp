@@ -86,10 +86,16 @@ struct CommandHookState {
 // when the given CommandBuffer has a valid recording.
 struct CommandHook {
 public:
-	struct DescriptorID {
+	struct DescriptorCopy {
 		unsigned set {};
 		unsigned binding {};
 		unsigned elem {};
+		bool before {}; // whether to copy before or after target command
+	};
+
+	struct AttachmentCopy {
+		unsigned id;
+		bool before {}; // whether to copy before or after target command
 	};
 
 	// Defines what to hook. Can either hook a specific record, a specifc
@@ -108,8 +114,8 @@ public:
 	bool copyVertexBuffers {}; // could specify the needed subset in future
 	bool copyIndexBuffers {};
 	bool copyIndirectCmd {}; // always do that?
-	std::optional<DescriptorID> copyDS;
-	std::optional<unsigned> copyAttachment; // only for cmd inside renderpass
+	std::optional<DescriptorCopy> copyDS;
+	std::optional<AttachmentCopy> copyAttachment; // only for cmd inside renderpass
 	bool queryTime {};
 
 	// The last received copied state of a finished submission
@@ -204,6 +210,7 @@ struct CommandHookRecord {
 	void hookRecord(Command* cmdChain, RecordInfo);
 
 	void copyDs(Command& bcmd, const RecordInfo&);
+	void copyAttachment(const RecordInfo&, unsigned id);
 	void beforeDstOutsideRp(Command&, const RecordInfo&);
 	void afterDstOutsideRp(Command&, const RecordInfo&);
 
