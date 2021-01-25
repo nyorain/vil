@@ -62,7 +62,7 @@ Downsides:
   frame and viewing that is just the better approach.
 
 ![Example of command viewer 2](docs/pics/sponza-buf.png)
-![Example of resource viewer](docs/pics/sponza-scatter.png)
+![Example of resource viewer](docs/pics/sponza-scatter-res.png)
 
 # Building & Installing
 
