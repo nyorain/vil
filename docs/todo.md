@@ -8,6 +8,7 @@ v0.1, goal: end of january 2021
 - Sync rework
 - Testing, Profiling, Needed optimization
 
+- [ ] Fix the (due to table now broken) append child logic in displayInspector
 - [ ] in io & resource viewer: mip slider broken
 	- [ ] Also move to own line? or just make half width?
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking

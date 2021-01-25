@@ -3,7 +3,7 @@
 Relatively small vulkan in-app debugging layer that is able to provide
 live introspection via a debug window/overlay.
 
-![Example of overlay](docs/pics/sponza.png)
+![Example of command viewer 1](docs/pics/sponza-ssao.png)
 
 This is still in a very early stage of development. Bug reports are welcome.
 There are various known issues and some of the features below are work-in-progess.
@@ -60,6 +60,9 @@ Downsides:
   where state you would want to inspect (from a specific frame) is just
   not available anymore. Keep in mind that sometimes, capturing a single
   frame and viewing that is just the better approach.
+
+![Example of command viewer 2](docs/pics/sponza-buf.png)
+![Example of resource viewer](docs/pics/sponza-scatter.png)
 
 # Building & Installing
 
@@ -119,7 +122,7 @@ There are multiple reasons for this:
 
 - It can be expected that the layer will cause issues in quite some games,
   especially in this early stage of development. Bug reports of the
-  form "Game XY crashes when enabled this layer" are not too useful since
+  form "Game XY crashes when enabling this layer" are not too useful since
   it would require installing Game XY and then trying to reverse-engineer
   what it does to cause a crash in the layer. Sometimes, the result would
   be that the game/application simply does not follow the vulkan spec
