@@ -3,13 +3,13 @@
 Vulkan in-app debugging layer that is able to provide
 live introspection via a debug window/overlay.
 
-![Example of command viewer 1](docs/pics/sponza-ssao.png)
-
 This is still in a very early stage of development. Bug reports are welcome.
 There are various known issues and some of the features below are work-in-progess.
 See the [rough overview](docs/features.md) over the currently implemented vulkan 
 commands/extensions. Keep in mind that using extensions/features not supported
 by the layer at the moment might cause crashes.
+
+![Example of command viewer 1](docs/pics/sponza-ssao.png)
 
 Features:
 
@@ -146,7 +146,7 @@ There are multiple reasons for this:
 
 With that out of the way, there is nothing per se wrong with using the
 layer in retail products and games you have not written yourself. As long as you
-don't expect us to make it to work or distribute the results in any form.
+don't expect us to make it to work or distribute the results.
 When you can point out what *exactly* is causing the layer to crash with a
 specific game or fix a problem inside the layer to allow using it with
 a retail product, we definitely want to hear of it. But additional code paths
