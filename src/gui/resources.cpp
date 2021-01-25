@@ -82,6 +82,9 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 			}
 		} else if(image_.view) {
 			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
+
+			image_.level = image_.draw.level;
+			image_.draw.aspect = image_.draw.aspect;
 		}
 
 		auto getViewType = [&]{
@@ -114,9 +117,10 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		VkDescriptorImageInfo dsii {};
 		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		dsii.imageView = image_.view;
-		dsii.sampler = image.allowsLinearSampling ?
-			dev.renderData->linearSampler :
-			dev.renderData->nearestSampler;
+		dsii.sampler = dev.renderData->nearestSampler;
+		// dsii.sampler = image.allowsLinearSampling ?
+		// 	dev.renderData->linearSampler :
+		// 	dev.renderData->nearestSampler;
 
 		VkWriteDescriptorSet write {};
 		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -126,9 +130,6 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		write.pImageInfo = &dsii;
 
 		dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
-
-		image_.level = image_.draw.level;
-		image_.draw.aspect = image_.draw.aspect;
 	}
 
 	// info
@@ -164,18 +165,27 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	drawMemoryResDesc(draw, image);
 
 	ImGui::Spacing();
-	ImGui::Text("Image Views:");
 
-	for(auto* view : image.views) {
-		ImGui::Bullet();
-		if(ImGui::Button(name(*view).c_str())) {
-			select(*view);
+	if(image.views.empty()) {
+		ImGui::Text("No image views");
+	} else if(image.views.size() == 1) {
+		ImGui::Text("Image View");
+		ImGui::SameLine();
+		refButton(*gui_, nonNull(image.views[0]));
+	} else if(image.views.size() > 1) {
+		ImGui::Text("Image Views:");
+
+		for(auto* view : image.views) {
+			ImGui::Bullet();
+			refButton(*gui_, nonNull(view));
 		}
 	}
 
 	// content
 	if(image.swapchain) {
-		ImGui::Text("Image can't be displayed since it's a swapchain image");
+		ImGui::Text("Image can't be displayed since it's a swapchain image of");
+		ImGui::SameLine();
+		refButton(*gui_, *image.swapchain);
 	} else if(!image.allowsNearestSampling) {
 		ImGui::Text("Image can't be displayed since its format does not support sampling");
 	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
@@ -1108,7 +1118,7 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 	// attachments
 	for(auto i = 0u; i < rp.desc->attachments.size(); ++i) {
 		const auto& att = rp.desc->attachments[i];
-		if(ImGui::TreeNode(&rp.desc->attachments[i], "Attachment %d: %s", i, vk::name(att.format))) {
+		if(ImGui::TreeNode(&att, "Attachment %d: %s", i, vk::name(att.format))) {
 			asColumns2({{
 				{"Samples", "{}", vk::name(att.samples)},
 				{"Initial Layout", "{}", vk::name(att.initialLayout)},
@@ -1127,7 +1137,7 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 	// subpasses
 	for(auto i = 0u; i < rp.desc->subpasses.size(); ++i) {
 		const auto& subp = rp.desc->subpasses[i];
-		if(ImGui::TreeNode(&rp.desc->subpasses[i], "Subpass %d", i)) {
+		if(ImGui::TreeNode(&subp, "Subpass %d", i)) {
 			asColumns2({{
 				{"Pipeline Bind Point", "{}", vk::name(subp.pipelineBindPoint)},
 				{"Flags", "{}", vk::flagNames(VkSubpassDescriptionFlagBits(subp.flags)).c_str()},
@@ -1168,13 +1178,42 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 		}
 	}
 
-	// TODO: dependencies
+	// dependencies
+	auto formatSubpass = [](const u32 subpass) {
+		if(subpass == VK_SUBPASS_EXTERNAL) {
+			return std::string("external");
+		}
+
+		return std::to_string(subpass);
+	};
+
+	for(auto i = 0u; i < rp.desc->dependencies.size(); ++i) {
+		const auto& dep = rp.desc->dependencies[i];
+		if(ImGui::TreeNode(&dep, "Dependency %d", i)) {
+			asColumns2({{
+				{"srcSubpass", formatSubpass(dep.srcSubpass)},
+				{"srcAccessMask", vk::flagNames(VkAccessFlagBits(dep.srcAccessMask))},
+				{"srcStageMask", vk::flagNames(VkPipelineStageFlagBits(dep.srcStageMask))},
+				{"dstSubpass", formatSubpass(dep.dstSubpass)},
+				{"dstAccessMask", vk::flagNames(VkAccessFlagBits(dep.dstAccessMask))},
+				{"dstStageMask", vk::flagNames(VkPipelineStageFlagBits(dep.dstStageMask))},
+				{"dependencyFlags", vk::flagNames(VkDependencyFlagBits(dep.dependencyFlags))},
+				{"viewOffset", dep.viewOffset},
+			}});
+
+			ImGui::TreePop();
+		}
+	}
+
+	// TODO: ext data
 }
 
 void ResourceGui::drawDesc(Draw&, Event&) {
+	// TODO: submission rework/display
 }
 
 void ResourceGui::drawDesc(Draw&, Semaphore&) {
+	// TODO: submission rework/display
 }
 
 void ResourceGui::drawDesc(Draw&, Fence& fence) {
@@ -1289,9 +1328,18 @@ void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
 }
 
 void ResourceGui::draw(Draw& draw) {
-	// search settings
-	ImGui::Columns(2);
-	ImGui::BeginChild("Search settings", {0.f, 50.f});
+	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+	if(!ImGui::BeginTable("Resource viewer", 2, flags, ImGui::GetContentRegionAvail())) {
+		return;
+	}
+
+	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+
+	ImGui::BeginChild("Search settings", {0.f, 50.f}, false);
 
 	// filter by object type
 	auto update = firstUpdate_;
@@ -1338,7 +1386,7 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::EndChild();
 
 	// resource list
-	ImGui::BeginChild("Resource List", {0.f, 0.f});
+	ImGui::BeginChild("Resource List", {0.f, 0.f}, false);
 
 	ImGuiListClipper clipper;
 	clipper.Begin(int(handles_.size()));
@@ -1368,11 +1416,13 @@ void ResourceGui::draw(Draw& draw) {
 			ImGui::PopID();
 		}
 	}
-	ImGui::EndChild();
+
+	ImGui::EndChild(); // Resource List
+
+	ImGui::TableNextColumn();
 
 	// resource view
-	ImGui::NextColumn();
-	ImGui::BeginChild("Resource View", {0.f, 0.f});
+	ImGui::BeginChild("Resource View", {0.f, 0.f}, false);
 
 	if(handle_) {
 		ImGui::PushID(handle_);
@@ -1381,7 +1431,7 @@ void ResourceGui::draw(Draw& draw) {
 	}
 
 	ImGui::EndChild();
-	ImGui::Columns();
+	ImGui::EndTable();
 }
 
 void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {

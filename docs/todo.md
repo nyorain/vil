@@ -22,24 +22,40 @@ v0.1, goal: end of january 2021
 	- [ ] full support CmdDrawIndirectCount in gui (most stuff not implemented atm in CommandHook)
 	      {probably not for v0.1} 
 	- [ ] I/O inspector for transfer commands
-	- [ ] add more information to I/O viewer (especially for images)
+	- [x] add more information to I/O viewer (especially for images)
 	- [ ] fix code flow. Really bad at the moment, with Commands calling
 	      that displayAction function and optionally append to child.
-	- [ ] improve the new overview. See all the various todos
+	- [x] improve the new overview. See all the various todos
+	      {still lots of TODOs left though, just most important ones fixed now}
 	- [x] chose sensible default sizes/layouts
 	- [x] implement buffer viewer (infer information from shaders)
 	- [x] factor out image viewer from resources into own component; use it here.
 	      Allow layer/mip selection
 	- [x] re-add timing display in command inspector
+	- [ ] display arrays correctly
+	- [ ] fix vertex buffer layout reader
 	- [ ] for storage buffers/storage images, a before/after/change
 	      view would be really nice. We can do that.
-- [ ] proper layout of child windows with resizing
+	- [ ] attempt to retain previous selection in io viewer when selecting
+	      new command
+	- [ ] adapt ioImage_ to selected image (e.g. channels)
+		- [ ] also fix logic for depthStencil images. Select depth by default.
+- [ ] attempt to minimize level depth in cb viewer
+	- [ ] when a parent has only one child, combine them in some cases?
+	      mainly for Labels, they are currently not too helpful as they
+		  make the hierachy just deeper...
+	- [ ] maybe allow per-app shortcuts?
+- [x] proper layout of child windows with resizing
       See https://github.com/ocornut/imgui/issues/319
+	  {just switched to the new imgui tables, they fix issues}
 - [ ] improve enumString
 	- [ ] make enumString.hpp return some deafult value ("" or "<?>") instead of nullptr.
 		  Could cause crashed for future values atm
 	- [ ] better enumString.hpp. Remove prefixes
 	- [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
+- [ ] always use nearest sampling for images?
+- [ ] test `splittable` impl for render passes. There are very likely issues.
+      (especially for the cases where render pass can't be split)
 - [ ] in CopiedImage::init: check for image usage support
 	- [ ] generally: allow the image copy operation to fail.
 - [ ] fix Gui::draws_ synchronization issue
@@ -55,6 +71,7 @@ v0.1, goal: end of january 2021
       update data from hook
 	- [ ] figure out how to communicate this via gui.
 	      This is a distinct option form the "displayed commands source" and UpdateMode
+	- [ ] While at it, clean up all the hook logic for io viewer
 - [x] allow to select in cb viewer which commands are shown
 	- [ ] make that more compact/intuitive if possible
 	- [ ] looks really ugly at the moment, improve that.
@@ -137,6 +154,10 @@ v0.1, goal: end of january 2021
       in the resource gui?
 - [ ] imgui styling
 	- [ ] use custom font
+	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
+	      are really overwhelming and hard to read at the moment.
+		  Can be improved to grasp information for intuitively
+	- [ ] add tooltips where it makes sense
 	- [ ] go at least a bit away from the default imgui style
 	      The grey is hella ugly, make black instead.
 		  Use custom accent color. Configurable?
@@ -145,6 +166,15 @@ v0.1, goal: end of january 2021
 	- [ ] lots of places where we should replace column usage with tables
 	- [ ] fix stupid looking duplicate header-seperator for commands in 
 	      command viewer (command viewer header UI is a mess anyways)
+- [ ] should probably not possible to ever unselect ParentCommands in
+      cb viewer (CommandTypeFlags)
+- [ ] add feature to see all commands that use a certain handle.
+      we already have the references, just need to add it to command viewer.
+	  Just add a new command viewer mode that allows to cycle through them.
+	- [ ] make sure to select (and scroll towards) the commands when selecting
+	      them. Not exactly sure how to implement but that command should
+		  even be shown in command list when its type is hidden (maybe
+		  make it a bit transparent, "ghost-command")
 - [ ] improve handling of transparent images. Checkerboard background?
 - [ ] probably rather important to have a clear documentation on supported
       feature set, extensions and so on
@@ -162,8 +192,7 @@ v0.1, goal: end of january 2021
 	  while overlay is active using platform-specific stuff), this might
 	  be useful in some cases, the extra window can be painful.
 	- [ ] generally expose own window creation and force-overlay via env vars
-- [ ] add example image to readme (with real-world application if possible)
-- [ ] move external source into extra folder
+- [x] add example image to readme (with real-world application if possible)
 - [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support
       is being enabled. I remember renderdoc doing this, sounds like a good idea.
 	- [ ] or an unexpectly high api version
@@ -194,6 +223,11 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] move external source into extra folder
+- [ ] we should likely switch to spirv-cross instead of spirv-reflect
+	- [ ] we will probably need some its functionality later on anyways
+	- [ ] already hit some hard limitations of spirv-cross that would require
+	      a lot of changes
 - [ ] we assume binary semaphores for applications at the moment. See e.g. the waitFrom/signalFrom
       assertions in queue.cpp
 - [ ] support for the spirv primites in block variables that are still missing

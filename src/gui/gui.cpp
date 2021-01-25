@@ -329,11 +329,11 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	this->io_->MouseDrawCursor = false;
 	ImGui::GetStyle().WindowRounding = 0.f;
 	ImGui::GetStyle().WindowBorderSize = 0.f;
-	ImGui::GetStyle().ScrollbarRounding = 0.f;
+	// ImGui::GetStyle().ScrollbarRounding = 0.f;
 	// ImGui::GetStyle().FramePadding = {5, 5};
 	// ImGui::GetStyle().ItemSpacing = {8, 8};
 	// ImGui::GetStyle().ItemInnerSpacing = {6, 6};
-	// ImGui::GetStyle().Alpha = 0.9f;
+	ImGui::GetStyle().Alpha = 1.f;
 }
 
 // ~Gui
@@ -661,12 +661,16 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 						float valMin;
 						float valMax;
 						u32 flags;
+						float level;
 					} pcr = {
 						img->layer,
 						img->minValue,
 						img->maxValue,
-						img->flags
+						img->flags,
+						img->level,
 					};
+
+					dlg_info(img->level);
 
 					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
 						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
@@ -1540,7 +1544,6 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 	}
 
 	if(subresources.levelCount > 1) {
-		ImGui::SameLine();
 		int mip = int(imgDraw.level);
 		ImGui::SliderInt("Mip", &mip, subresources.baseMipLevel,
 			subresources.baseMipLevel + subresources.levelCount - 1);
@@ -1550,9 +1553,9 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 	// Row 3: min/max values
 	ImGui::DragFloat("Min", &imgDraw.minValue, 0.01);
 	ImGui::DragFloat("Max", &imgDraw.maxValue, 0.01);
-	// TODO: add power?
+	// NOTE: could add power/gamma slider here.
 
-	// ugh, this could be done a bit cleaner...
+	// TODO: ugh, this could be done a bit cleaner...
 	if(imgType == VK_IMAGE_TYPE_1D) {
 		if(imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
 			auto numt = FormatDepthNumericalType(format);

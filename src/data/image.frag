@@ -18,6 +18,7 @@ layout(push_constant) uniform PCR {
 	layout(offset = 20) float valMin;
 	layout(offset = 24) float valMax;
 	layout(offset = 28) uint flags;
+	layout(offset = 32) float level;
 } pcr;
 
 #ifdef TEX_FORMAT_UINT
@@ -34,13 +35,13 @@ layout(push_constant) uniform PCR {
 	layout(set = 0, binding = 0) uniform SamplerType(1DArray) sTexture;
 
 	vec4 sampleTex() {
-		return texture(sTexture, vec2(In.uv.x, pcr.layer));
+		return textureLod(sTexture, vec2(In.uv.x, pcr.layer), 0 * pcr.level);
 	}
 #elif defined(TEX_TYPE_2D_ARRAY)
 	layout(set = 0, binding = 0) uniform SamplerType(2DArray) sTexture;
 
 	vec4 sampleTex() {
-		return texture(sTexture, vec3(In.uv.xy, pcr.layer));
+		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), 0 * pcr.level);
 	}
 // #elif TEX_TYPE_CUBE
 // TODO: cubearray?
@@ -49,7 +50,7 @@ layout(push_constant) uniform PCR {
 	layout(set = 0, binding = 0) uniform SamplerType(3D) sTexture;
 
 	vec4 sampleTex() {
-		return texture(sTexture, vec3(In.uv.xy, pcr.layer));
+		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), 0 * pcr.level);
 	}
 #else
 	#error No valid TEX_TYPE definition

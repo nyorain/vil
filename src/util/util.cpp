@@ -59,88 +59,50 @@ Vec<N, T> read(span<const std::byte>& src) {
 
 Vec4d read(VkFormat srcFormat, span<const std::byte>& src) {
 	switch(srcFormat) {
-		case VK_FORMAT_R16_SFLOAT:
-			return Vec4d(read<1, f16>(src));
-		case VK_FORMAT_R16G16_SFLOAT:
-			return Vec4d(read<2, f16>(src));
-		case VK_FORMAT_R16G16B16_SFLOAT:
-			return Vec4d(read<3, f16>(src));
-		case VK_FORMAT_R16G16B16A16_SFLOAT:
-			return Vec4d(read<4, f16>(src));
+		case VK_FORMAT_R16_SFLOAT: return Vec4d(read<1, f16>(src));
+		case VK_FORMAT_R16G16_SFLOAT: return Vec4d(read<2, f16>(src));
+		case VK_FORMAT_R16G16B16_SFLOAT: return Vec4d(read<3, f16>(src));
+		case VK_FORMAT_R16G16B16A16_SFLOAT: return Vec4d(read<4, f16>(src));
 
-		case VK_FORMAT_R32_SFLOAT:
-			return Vec4d(read<1, float>(src));
-		case VK_FORMAT_R32G32_SFLOAT:
-			return Vec4d(read<2, float>(src));
-		case VK_FORMAT_R32G32B32_SFLOAT:
-			return Vec4d(read<3, float>(src));
-		case VK_FORMAT_R32G32B32A32_SFLOAT:
-			return Vec4d(read<4, float>(src));
+		case VK_FORMAT_R32_SFLOAT: return Vec4d(read<1, float>(src));
+		case VK_FORMAT_R32G32_SFLOAT: return Vec4d(read<2, float>(src));
+		case VK_FORMAT_R32G32B32_SFLOAT: return Vec4d(read<3, float>(src));
+		case VK_FORMAT_R32G32B32A32_SFLOAT: return Vec4d(read<4, float>(src));
 
-		case VK_FORMAT_R64_SFLOAT:
-			return Vec4d(read<1, double>(src));
-		case VK_FORMAT_R64G64_SFLOAT:
-			return Vec4d(read<2, double>(src));
-		case VK_FORMAT_R64G64B64_SFLOAT:
-			return Vec4d(read<3, double>(src));
-		case VK_FORMAT_R64G64B64A64_SFLOAT:
-			return Vec4d(read<4, double>(src));
+		case VK_FORMAT_R64_SFLOAT: return Vec4d(read<1, double>(src));
+		case VK_FORMAT_R64G64_SFLOAT: return Vec4d(read<2, double>(src));
+		case VK_FORMAT_R64G64B64_SFLOAT: return Vec4d(read<3, double>(src));
+		case VK_FORMAT_R64G64B64A64_SFLOAT: return Vec4d(read<4, double>(src));
 
-		case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:
-			return Vec4d(e5b9g9r9ToRgb(read<u32>(src)));
+		case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32: return Vec4d(e5b9g9r9ToRgb(read<u32>(src)));
 
 		default:
-			throw std::logic_error("Format not supported for CPU reading");
+            dlg_error("Format not supported for CPU reading");
+            return {};
 	}
 }
 
 void write(VkFormat dstFormat, span<std::byte>& dst, const Vec4d& color) {
 	switch(dstFormat) {
-		case VK_FORMAT_R32_SFLOAT:
-			write(dst, float(color[0]));
-			break;
-		case VK_FORMAT_R32G32_SFLOAT:
-			write(dst, Vec2f(color));
-			break;
-		case VK_FORMAT_R32G32B32_SFLOAT:
-			write(dst, Vec3f(color));
-			break;
-		case VK_FORMAT_R32G32B32A32_SFLOAT:
-			write(dst, Vec4f(color));
-			break;
+		case VK_FORMAT_R32_SFLOAT: return write(dst, float(color[0]));
+		case VK_FORMAT_R32G32_SFLOAT: return write(dst, Vec2f(color));
+		case VK_FORMAT_R32G32B32_SFLOAT: return write(dst, Vec3f(color));
+		case VK_FORMAT_R32G32B32A32_SFLOAT: return write(dst, Vec4f(color));
 
-		case VK_FORMAT_R64_SFLOAT:
-			write(dst, double(color[0]));
-			break;
-		case VK_FORMAT_R64G64_SFLOAT:
-			write(dst, Vec2d(color));
-			break;
-		case VK_FORMAT_R64G64B64_SFLOAT:
-			write(dst, Vec3d(color));
-			break;
-		case VK_FORMAT_R64G64B64A64_SFLOAT:
-			write(dst, Vec4d(color));
-			break;
+		case VK_FORMAT_R64_SFLOAT: return write(dst, double(color[0]));
+		case VK_FORMAT_R64G64_SFLOAT: return write(dst, Vec2d(color));
+		case VK_FORMAT_R64G64B64_SFLOAT: return write(dst, Vec3d(color));
+		case VK_FORMAT_R64G64B64A64_SFLOAT: return write(dst, Vec4d(color));
 
-		case VK_FORMAT_R16_SFLOAT:
-			write(dst, f16(color[0]));
-			break;
-		case VK_FORMAT_R16G16_SFLOAT:
-			write(dst, Vec2<f16>(color));
-			break;
-		case VK_FORMAT_R16G16B16_SFLOAT:
-			write(dst, Vec3<f16>(color));
-			break;
-		case VK_FORMAT_R16G16B16A16_SFLOAT:
-			write(dst, Vec4<f16>(color));
-			break;
+		case VK_FORMAT_R16_SFLOAT: return write(dst, f16(color[0]));
+		case VK_FORMAT_R16G16_SFLOAT: return write(dst, Vec2<f16>(color));
+		case VK_FORMAT_R16G16B16_SFLOAT: return write(dst, Vec3<f16>(color));
+		case VK_FORMAT_R16G16B16A16_SFLOAT: return write(dst, Vec4<f16>(color));
 
-		case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:
-			write(dst, e5b9g9r9FromRgb(Vec3f(color)));
-			break;
+		case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32: return write(dst, e5b9g9r9FromRgb(Vec3f(color)));
 
 		default:
-			throw std::logic_error("Format not supported for CPU writing");
+            dlg_error("Format not supported for CPU writing");
 	}
 }
 

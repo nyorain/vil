@@ -45,7 +45,6 @@ inline void asColumns2(span<const Row> rows) {
 	ImGui::Columns();
 }
 
-
 // Yes, there is a lot of ugliness here.
 inline int imGuiTextStringCallback(ImGuiInputTextCallbackData* data) {
 	if(data->EventFlag == ImGuiInputTextFlags_CallbackResize) {

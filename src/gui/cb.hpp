@@ -66,13 +66,9 @@ public: // TODO: make private
 	// same command in future records/cb selections.
 	std::vector<CommandDesc> desc_ {};
 
-	// HACKY SECTION OF SHAME
-	DrawGuiImage ioImage_ {}; // TODO
-
-	// TODO hacky. See https://github.com/ocornut/imgui/issues/1655
-	bool columnWidth0_ {};
-	bool columnWidth1_ {};
-	Draw* draw_ {}; // TODO
+	// TODO HACKY SECTION OF SHAME
+	DrawGuiImage ioImage_ {};
+	Draw* draw_ {};
 };
 
 } // namespace fuen

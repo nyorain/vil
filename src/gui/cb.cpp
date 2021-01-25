@@ -19,6 +19,7 @@
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <spirv_reflect.h>
+#include <bitset>
 
 namespace fuen {
 
@@ -52,8 +53,8 @@ std::string formatScalar(SpvReflectTypeFlags type,
 		}
 	}
 
-	dlg_warn("Unsupported scalar type");
-	return "";
+	dlg_warn("Unsupported scalar type (flags {})", std::bitset<32>(u32(type)));
+	return "<Unsupported type>";
 }
 
 void display(SpvReflectBlockVariable& bvar, span<const std::byte> data);
@@ -215,8 +216,8 @@ std::string readFormatNorm(u32 count, span<const std::byte> src, float mult,
 }
 
 // TODO: support compresssed formats!
-// TODO: we only use this for vertex input. Does rgb/bgr order matter?
-//   in that case we need to seriously rework this, more something
+// TODO: rgb/bgr order matters here! Fix that.
+//   We need to seriously rework this, more something
 //   like the format read function in util/util.hpp
 std::string readFormat(VkFormat format, span<const std::byte> src) {
 	u32 numChannels = FormatChannelCount(format);
@@ -455,11 +456,16 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::Separator();
 
 	// Command list
-	ImGui::Columns(2);
-	if(!columnWidth0_) {
-		ImGui::SetColumnWidth(-1, 250.f);
-		columnWidth0_ = true;
+	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+	if(!ImGui::BeginTable("RecordViewer", 2, flags, ImGui::GetContentRegionAvail())) {
+		return;
 	}
+
+	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
 
 	ImGui::BeginChild("Command list", {0, 0});
 
@@ -554,7 +560,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	ImGui::EndChild();
-	ImGui::NextColumn();
+	ImGui::TableNextColumn();
 
 	// command info
 	ImGui::BeginChild("Command Info");
@@ -563,7 +569,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	ImGui::EndChild();
-	ImGui::Columns();
+	ImGui::EndTable();
 }
 
 // TODO: some code duplication here...
@@ -755,6 +761,8 @@ void CommandBufferGui::displayDs(const Command& cmd) {
 	auto dsType = bindingLayout.descriptorType;
 	auto dsCat = category(dsType);
 
+	imGuiText("{}", vk::name(dsType));
+
 	auto& dsc = hook.state->dsCopy;
 
 	// == Buffer ==
@@ -822,7 +830,7 @@ void CommandBufferGui::displayDs(const Command& cmd) {
 	// == Sampler ==
 	if(needsSampler(dsType)) {
 		if(bindingLayout.immutableSamplers) {
-			// TODO: display all samplers, for all elements
+			// TODO: display all samplers?, for all elements
 			refButton(gui, nonNull(bindingLayout.immutableSamplers[0]));
 		} else {
 			refButtonD(gui, elem.imageInfo.sampler);
@@ -838,9 +846,23 @@ void CommandBufferGui::displayDs(const Command& cmd) {
 			return;
 		}
 
-		// TODO: display additional information, proper image viewer
-		//   but also link original image/imageView
-		gui.cbGui().displayImage(*img);
+		dlg_assert(elem.imageInfo.imageView);
+		auto& imgView = *elem.imageInfo.imageView;
+		refButton(gui, imgView);
+
+		dlg_assert(imgView.img);
+		ImGui::SameLine();
+		refButton(gui, *imgView.img);
+
+		imGuiText("Format: {}", vk::name(imgView.ci.format));
+		auto& extent = imgView.img->ci.extent;
+		imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
+
+		if(needsImageLayout(dsType)) {
+			imGuiText("Layout: {}", vk::name(elem.imageInfo.layout));
+		}
+
+		displayImage(*img);
 	}
 
 	// == BufferView ==
@@ -852,15 +874,23 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 	auto& gui = *gui_;
 	auto& hook = *gui.dev().commandHook;
 
+	// TODO: don't even display the inspect when we are viewing a static
+	// record and that record is invalidated.
+	// (or other cases where we know it will never be submitted again)
 	// if(hook ... invalid?)
 	// 	return true;
 	// }
 
-	ImGui::Columns(2);
-	if(gui.cbGui().columnWidth1_) {
-		ImGui::SetColumnWidth(-1, 200.f);
-		gui.cbGui().columnWidth1_ = true;
+	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+	if(!ImGui::BeginTable("IO inspector", 2, flags, ImGui::GetContentRegionAvail())) {
+		return false; // clipped anyways
 	}
+
+	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
 
 	ImGui::BeginChild("Command IO list");
 
@@ -967,51 +997,54 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 	}
 
 	if(drawCmd) {
-		ImGui::Text("Attachments");
-
-		const BeginRenderPassCmd* rpCmd = nullptr;
-		for(auto* cmdi : gui.cbGui().command_) {
-			if(rpCmd = dynamic_cast<const BeginRenderPassCmd*>(cmdi); rpCmd) {
-				break;
+		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
+		if(ImGui::TreeNodeEx("Attachments")) {
+			const BeginRenderPassCmd* rpCmd = nullptr;
+			for(auto* cmdi : gui.cbGui().command_) {
+				if(rpCmd = dynamic_cast<const BeginRenderPassCmd*>(cmdi); rpCmd) {
+					break;
+				}
 			}
-		}
 
-		dlg_assert(rpCmd);
-		if(rpCmd && rpCmd->rp) {
-			auto& desc = nonNull(nonNull(rpCmd->rp).desc);
-			auto subpassID = rpCmd->subpassOfDescendant(*gui.cbGui().command_.back());
-			auto& subpass = desc.subpasses[subpassID];
+			dlg_assert(rpCmd);
+			if(rpCmd && rpCmd->rp) {
+				auto& desc = nonNull(nonNull(rpCmd->rp).desc);
+				auto subpassID = rpCmd->subpassOfDescendant(*gui.cbGui().command_.back());
+				auto& subpass = desc.subpasses[subpassID];
 
-			auto addAttachment = [&](auto label, auto id) {
-				auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-				if(hook.copyAttachment && *hook.copyAttachment == id) {
-					flags |= ImGuiTreeNodeFlags_Selected;
+				auto addAttachment = [&](auto label, auto id) {
+					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+					if(hook.copyAttachment && *hook.copyAttachment == id) {
+						flags |= ImGuiTreeNodeFlags_Selected;
+					}
+
+					ImGui::TreeNodeEx(label.c_str(), flags);
+					if(ImGui::IsItemClicked()) {
+						hook.unsetHookOps();
+						hook.copyAttachment = id;
+					}
+				};
+
+				// TODO: name them if possible. Could use names in (fragment) shader.
+				for(auto c = 0u; c < subpass.colorAttachmentCount; ++c) {
+					auto label = dlg::format("Color Attachment {}", c);
+					addAttachment(label, subpass.pColorAttachments[c].attachment);
 				}
 
-				ImGui::TreeNodeEx(label.c_str(), flags);
-				if(ImGui::IsItemClicked()) {
-					hook.unsetHookOps();
-					hook.copyAttachment = id;
+				for(auto i = 0u; i < subpass.inputAttachmentCount; ++i) {
+					auto label = dlg::format("Input Attachment {}", i);
+					addAttachment(label, subpass.pInputAttachments[i].attachment);
 				}
-			};
 
-			// TODO: name them if possible. Could use names in (fragment) shader.
-			for(auto c = 0u; c < subpass.colorAttachmentCount; ++c) {
-				auto label = dlg::format("Color Attachment {}", c);
-				addAttachment(label, subpass.pColorAttachments[c].attachment);
+				if(subpass.pDepthStencilAttachment) {
+					auto label = dlg::format("Depth Stencil Attachment");
+					addAttachment(label, subpass.pDepthStencilAttachment->attachment);
+				}
+
+				// NOTE: display preserve attachments? resolve attachments?
 			}
 
-			for(auto i = 0u; i < subpass.inputAttachmentCount; ++i) {
-				auto label = dlg::format("Input Attachment {}", i);
-				addAttachment(label, subpass.pInputAttachments[i].attachment);
-			}
-
-			if(subpass.pDepthStencilAttachment) {
-				auto label = dlg::format("Depth Stencil Attachment");
-				addAttachment(label, subpass.pDepthStencilAttachment->attachment);
-			}
-
-			// NOTE: display preserve attachments? resolve attachments?
+			ImGui::TreePop();
 		}
 	}
 
@@ -1076,7 +1109,7 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 	}
 
 	ImGui::EndChild();
-	ImGui::NextColumn();
+	ImGui::TableNextColumn();
 	ImGui::BeginChild("Command IO Inspector");
 
 	// TODO: display more information, not just raw data
@@ -1136,7 +1169,6 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 					ImGui::Text("No Vertex input");
 				} else if(ImGui::BeginTable("Vertices", int(attribs.size()), flags)) {
 					for(auto& attrib : attribs) {
-						ImGui::NextColumn();
 						auto& iv = *vertStage->input_variables[attrib.second];
 						ImGui::TableSetupColumn(iv.name);
 					}
@@ -1241,6 +1273,7 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 	}
 
 	ImGui::EndChild();
+	ImGui::EndTable();
 
 	return cmdInfo;
 }

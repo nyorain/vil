@@ -520,6 +520,7 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 
 VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
 	auto create2 = dev.dispatch.CreateRenderPass2;
+	create2 = {};
 	VkRenderPass rp {};
 
 	if(create2) {

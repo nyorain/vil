@@ -86,10 +86,6 @@ std::byte* allocate(CommandBuffer& cb, std::size_t size, std::size_t alignment) 
 }
 
 void returnBlocks(CommandPool& pool, CommandMemBlock* head) {
-	// TODO
-	// freeBlocks(head);
-	// (void) pool;
-
 	if(!head) {
 		return;
 	}
@@ -99,9 +95,6 @@ void returnBlocks(CommandPool& pool, CommandMemBlock* head) {
 	while((next = tail->next.load()) != nullptr) {
 		tail = next;
 	}
-
-	// auto oldHead = pool.memBlocks.load();
-	// tail->next.store(oldHead);
 
 	auto oldHead = static_cast<CommandMemBlock*>(nullptr);
 	while(!pool.memBlocks.compare_exchange_weak(oldHead, head)) {

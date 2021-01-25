@@ -31,6 +31,8 @@ struct ResourceGui {
 	bool firstUpdate_ {true};
 	Handle* handle_ {};
 
+	float listWidth_ {200.f};
+
 	struct {
 		Image* object {};
 		VkImageView view {};
