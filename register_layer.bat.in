@@ -1,13 +1,18 @@
 @echo off
 
-cd %~dp0
+echo "This script needs admin permissions to install the required registry key."
+if not "%1"=="am_admin" (powershell start -verb runas '%0' am_admin & exit /b)
+
+cd /d "%~dp0"
 echo %cd%
 
-IF NOT EXIST %cd%\VKLayer_fuencaliente.json. (
-    echo "Error: Must be called in build/downloaded directory, including VkLayer_fuencaliente.json"
+REM "We just check here that the layer config file we register actually exists"
+IF NOT EXIST %cd%\VKLayer_vlid.json. (
+    echo "Error: Must be called in build/downloaded directory, including VkLayer_vlid.json"
     pause
     exit 1
 )
 
-REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v %cd%\VKLayer_fuencaliente.json /t REG_DWORD
+echo "Installing registry key"
+REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v %cd%\VKLayer_vlid.json /t REG_DWORD /d 0
 pause

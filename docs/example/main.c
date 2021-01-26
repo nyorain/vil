@@ -722,7 +722,7 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 	// We always fuen fuen *before* the validation layer so our calls
 	// in fuen can be validated as well.
 	if(use_fuen) {
-		layers[nlayers++] = "VK_LAYER_fuencaliente";
+		layers[nlayers++] = "VK_LAYER_vlid";
 	}
 	if(use_validation) {
 		layers[nlayers++] = "VK_LAYER_KHRONOS_validation";

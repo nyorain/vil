@@ -68,7 +68,7 @@ void SwaPlatform::initWindow(Device& dev, void* nativeParent,
 
 	swa_window_settings ws;
 	swa_window_settings_default(&ws);
-	ws.title = "fuencaliente";
+	ws.title = "vlid";
 	ws.width = width;
 	ws.height = height;
 	ws.listener = &listener;

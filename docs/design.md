@@ -108,7 +108,7 @@ weird situations and additional cast and an additional dependency.
 
 # On vulkan host allocators
 
-A known issue of the fuencaliente design: host allocators might not
+A known issue of the vlid design: host allocators might not
 work a 100% correctly in all cases, consider this case:
 We have to keep a handle alive inside the layer while the application
 logically destroyed it. When we destroy the handle later on (after

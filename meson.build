@@ -1,4 +1,4 @@
-project('fuencaliente', ['c', 'cpp'],
+project('vlid', ['c', 'cpp'],
 	version: '0.1.0',
 	default_options: [
 		'werror=true',
@@ -154,7 +154,7 @@ src = files(
 	'src/util/syncedMap.hpp',
 
 	'src/imgui/imgui.h',
-	'include/fuen_api.h',
+	'include/vlid_api.h',
 )
 
 public_inc = include_directories('include/')
@@ -182,16 +182,16 @@ if with_x11
 	dep_x11_xcb = dependency('x11-xcb', required: true)
 
 	deps += [dep_xcb, dep_xcb_keysyms, dep_x11_xcb]
-	args += ['-DFUEN_WITH_X11']
+	args += ['-DVLID_WITH_X11']
 endif
 
 if with_win32
 	src += files('src/win32.cpp')
-	args += ['-DFUEN_WITH_WIN32']
+	args += ['-DVLID_WITH_WIN32']
 endif
 
-fuen_layer = shared_library(
-	'VkLayer_fuencaliente',
+vlid_layer = shared_library(
+	'VkLayer_vlid',
 	[src, spv],
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
@@ -202,10 +202,10 @@ fuen_layer = shared_library(
 )
 
 conf_data = configuration_data()
-conf_data.set('fuen_version', meson.project_version())
+conf_data.set('vlid_version', meson.project_version())
 
 # TODO: this is terrible... needed for windows
-libpath = fuen_layer.full_path()
+libpath = vlid_layer.full_path()
 if libpath.contains('\\')
 	conf_data.set('lib_path', '.\\\\' + libpath.split('\\')[-1])
 else
@@ -213,8 +213,8 @@ else
 endif
 
 configure_file(
-	input: 'VkLayer_fuencaliente.json.in',
-	output: 'VkLayer_fuencaliente.json',
+	input: 'VkLayer_vlid.json.in',
+	output: 'VkLayer_vlid.json',
 	install: true,
 	install_dir: join_paths(get_option('datadir'), 'vulkan', 'explicit_layer.d'),
 	configuration: conf_data

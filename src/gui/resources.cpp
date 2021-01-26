@@ -850,7 +850,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 			if(ImGui::Button("Open in Vim")) {
 				namespace fs = std::filesystem;
 
-				auto fileName = dlg::format("fuencaliente.{}.spv", (std::uint64_t) stage.spirv.get());
+				auto fileName = dlg::format("vlid.{}.spv", (std::uint64_t) stage.spirv.get());
 				auto tmpPath = fs::temp_directory_path() / fileName;
 
 				bool launch = false;

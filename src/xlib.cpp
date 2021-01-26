@@ -28,7 +28,7 @@ struct X11Platform : SwaPlatform {
 
 void X11Platform::init(Device& dev, unsigned width, unsigned height) {
 	// init display
-	dpy = swa_display_x11_create("fuencaliente");
+	dpy = swa_display_x11_create("vlid");
 	dlg_assert(dpy);
 
 	this->connection = swa_display_x11_connection(dpy);

@@ -1,3 +1,16 @@
+// vlid: Vulkan Live Introspection & Debugging Layer.
+// Copyright (C) 2020-2021 Jan Kelling
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, version 3.
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// SPDX-License-Identifier: GPL-3.0-only
+
 #pragma once
 
 #include <stdbool.h>
@@ -99,14 +112,14 @@ static inline int fuenLoadApi(FuenApi* api) {
 #if defined(_WIN32) || defined(__CYGWIN__)
 	// TODO: name of dll depends on compiler used. For MSC it does not
 	// have the lib prefix, for gcc/mingw it does.
-	HMODULE handle = GetModuleHandleA("VkLayer_fuencaliente.dll");
+	HMODULE handle = GetModuleHandleA("VkLayer_vlid.dll");
 
 	// We don't have to call FreeLibrary since GetModuleHandle does not increase ref count
 	#define fuenCloseLib()
 	#define fuenLoadSym(procName) *(FARPROC*) (&api->procName) = GetProcAddress(handle, "fuen" #procName)
 	// #define fuenError() GetLastError()
 #else
-	void* handle = dlopen("libVkLayer_fuencaliente.so", RTLD_NOLOAD | RTLD_LAZY);
+	void* handle = dlopen("libVkLayer_vlid.so", RTLD_NOLOAD | RTLD_LAZY);
 
 	// We have to call dlclose since our dlopen increases the reference count.
 	#define fuenCloseLib() dlclose(handle)

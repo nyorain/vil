@@ -1,4 +1,4 @@
-# Using fuencaliente with compute-only vulkan applications
+# Using vlid with compute-only vulkan applications
 
 So in theory, this works perfectly well, without issues. The layer will
 create a window to display all state. In practice, there are a couple of things

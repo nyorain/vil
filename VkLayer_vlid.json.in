@@ -1,12 +1,12 @@
 {
   "file_format_version": "1.1.0",
   "layer": {
-    "name": "VK_LAYER_fuencaliente",
+    "name": "VK_LAYER_vlid",
     "type": "GLOBAL",
     "library_path": "@lib_path@",
     "api_version": "1.2.162",
-    "implementation_version": "@fuen_version@",
-    "description": "Vulkan debugging gui layer",
+    "implementation_version": "@vlid_version@",
+    "description": "Vulkan Live Introspection & Debugging gui layer",
     "instance_extensions": [
       {
         "name": "VK_EXT_debug_utils",

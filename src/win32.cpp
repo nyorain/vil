@@ -86,7 +86,7 @@ bool Win32Platform::checkPressed(u32 key) const {
 // from platform.cpp
 bool updateEdge(bool& val, bool pressed);
 
-constexpr auto windowClassName = L"fuencaliente";
+constexpr auto windowClassName = L"vlid";
 
 // from swa
 #define print_winapi_error(func) do { \
@@ -204,7 +204,7 @@ void Win32Platform::initWindow() {
 	auto height = 5;
 	auto hinstance = GetModuleHandle(NULL);
 
-	overlayWindow = CreateWindowEx(exstyle, windowClassName, L"fuencaliente", style, 
+	overlayWindow = CreateWindowEx(exstyle, windowClassName, L"vlid", style, 
 		x, y, width, height, NULL, NULL, hinstance, NULL);
 	if(!overlayWindow) {
 		print_winapi_error("CreateWindowEx");

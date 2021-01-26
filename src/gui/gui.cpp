@@ -961,7 +961,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		return flags;
 	};
 
-	if(ImGui::Begin("Fuencaliente", nullptr, flags)) {
+	if(ImGui::Begin("vlid", nullptr, flags)) {
 		if(ImGui::BeginTabBar("MainTabBar")) {
 			if(ImGui::BeginTabItem("Overview")) {
 				drawOverviewUI(draw);

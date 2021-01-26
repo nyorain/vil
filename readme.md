@@ -1,4 +1,4 @@
-# Fuencaliente
+# vlid: Vulkan Live Introspection & Debugging
 
 Vulkan in-app debugging layer that is able to provide
 live introspection via a debug window/overlay.
@@ -92,16 +92,16 @@ to install the library and layer config.
 
 On **windows**, layers are installed via registry entries, you have to add
 a registry entry in `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers` pointing to the generated layer config 
-json (that must be located in the same folder as `VkLayer_fuencaliente.dll`).
+json (that must be located in the same folder as `VkLayer_vlid.dll`).
 You can simply run the `register_layer.bat` script in the build directory. Note that it will require admin privileges
 to add the registry key. You should usually not run random batch scripts from the internet that require admin privileges,
 so feel free to do it manually in an admin prompt:
 
 ```
-REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath of VKLayer_fuencaliente.json> /t REG_DWORD /d 0
+REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath of VKLayer_vlid.json> /t REG_DWORD /d 0
 ```
 
-Where you replace `<filepath of VKLayer_fuencaliente.json>` with full file path of the generated `VKLayer_fuencaliente.json` file, e.g. `D:\code\vlid\build\vs19\VKLayer_fuencaliente.json`.
+Where you replace `<filepath of VKLayer_vlid.json>` with full file path of the generated `VKLayer_vlid.json` file, e.g. `D:\code\vlid\build\vs19\VKLayer_vlid.json`.
 
 Once installed, you have to make sure vulkan applications load `VK_LAYER_vlid`.
 Either pass it to your `VkInstanceCreateInfo` or enable it via environment variable `VK_INSTANCE_LAYERS=VK_LAYER_vlid`.
@@ -115,10 +115,10 @@ There are multiple ways of using this layer:
 
 - Make the layer create a new window holding the debug gui when the application starts.
   This is the current default, you can control it via the environment variable
-  'FUEN_CREATE_WINDOW={0, 1}'.
+  'VLID_CREATE_WINDOW={0, 1}'.
 - Make the layer draw an overlay over you application
 	- Since the layer gui still needs input you have to supply it via
-	  a non-vulkan api. See [include/fuen_api.h](include/fuen_api.h).
+	  a non-vulkan api. See [include/vlid_api.h](include/vlid_api.h).
 	  As soon as you call the API to create an overlay on a swapchain,
 	  the extra debug window will be closed (if there was one).
 	- Experimental: Make the layer hook the application's input
@@ -127,7 +127,7 @@ There are multiple ways of using this layer:
 	  not work with certain platforms/applications.
 	  This is not enabled by default (and might be disabled from the default
 	  build config or even completely removed from the layer in future).
-	  You can force it via the environment variable 'FUEN_HOOK_OVERLAY=1'.
+	  You can force it via the environment variable 'VLID_HOOK_OVERLAY=1'.
 
 The layer running gui inside an extra window in doom eternal:
 
@@ -177,9 +177,10 @@ Using the layer via an overlay inside the demo level of [vkQuake2](https://githu
 
 # License
 
+SPDX-License-Identifier: GPL-3.0-only
+
 Unless stated otherwise, code and assets in this repository are licensed under 
-GPLv3. Contributors [don't have to sign a CLA](https://drewdevault.com/2018/10/05/Dont-sign-a-CLA.html), 
-you own what you contribute back.
+GPLv3. Contributors [don't have to sign a CLA](https://drewdevault.com/2018/10/05/Dont-sign-a-CLA.html).
 
 Note that since this is a dynamically loaded vulkan layer and not a library 
 you link your application against, using this in production of proprietary 
