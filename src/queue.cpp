@@ -786,13 +786,13 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
 		auto& subm = *it;
 		auto nit = checkLocked(*subm);
-		if(!nit) {
-			// TODO: apparently this can happen?
-			// dlg_error("Expected submission to be completed after vkDeviceWaitIdle");
-			++it;
+		if(nit) {
+			it = *nit;
+			continue;
 		}
 
-		it = *nit;
+		dlg_error("Expected submission to be completed after vkDeviceWaitIdle");
+		++it;
 	}
 
 	return res;

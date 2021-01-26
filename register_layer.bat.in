@@ -1,0 +1,13 @@
+@echo off
+
+cd %~dp0
+echo %cd%
+
+IF NOT EXIST %cd%\VKLayer_fuencaliente.json. (
+    echo "Error: Must be called in build/downloaded directory, including VkLayer_fuencaliente.json"
+    pause
+    exit 1
+)
+
+REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v %cd%\VKLayer_fuencaliente.json /t REG_DWORD
+pause

@@ -220,6 +220,16 @@ configure_file(
 	configuration: conf_data
 )
 
+if build_machine.system() == 'windows'
+	# TODO add as install script via meson.add_install_script?
+	configure_file(
+		input: 'register_layer.bat.in',
+		output: 'register_layer.bat',
+		install: false,
+		copy: true,
+	)
+endif
+
 if get_option('with_example')
 	subdir('docs/example')
 endif

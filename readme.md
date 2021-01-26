@@ -91,8 +91,23 @@ and also might adjust the install prefix to /usr/lib, depending on your system)
 to install the library and layer config.
 
 On **windows**, layers are installed via registry entries, you have to add
-a registry entry pointing to the layer config json.
-TODO: provide a command for installation here, add batch script in repo.
+a registry entry in `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers` pointing to the generated layer config 
+json (that must be located in the same folder as `VkLayer_fuencaliente.dll`).
+You can simply run the `register_layer.bat` script in the build directory. Note that it will require admin privileges
+to add the registry key. You should usually not run random batch scripts from the internet that require admin privileges,
+so feel free to do it manually in an admin prompt:
+
+```
+REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath of VKLayer_fuencaliente.json> /t REG_DWORD /d 0
+```
+
+Where you replace `<filepath of VKLayer_fuencaliente.json>` with full file path of the generated `VKLayer_fuencaliente.json` file, e.g. `D:\code\vlid\build\vs19\VKLayer_fuencaliente.json`.
+
+Once installed, you have to make sure vulkan applications load `VK_LAYER_vlid`.
+Either pass it to your `VkInstanceCreateInfo` or enable it via environment variable `VK_INSTANCE_LAYERS=VK_LAYER_vlid`.
+During the early stages of this project, you likely want to load it *before* any validation layer. If
+your application then causes triggers validation errors with `vlid` that are not there without it,
+make sure to report them here!
 
 # Using it
 
@@ -113,6 +128,10 @@ There are multiple ways of using this layer:
 	  This is not enabled by default (and might be disabled from the default
 	  build config or even completely removed from the layer in future).
 	  You can force it via the environment variable 'FUEN_HOOK_OVERLAY=1'.
+
+The layer running gui inside an extra window in doom eternal:
+
+![Extra window doom eternal example](docs/pics/doom-eternal-window.png)
 
 ## About retail games
 
@@ -153,8 +172,8 @@ a retail product, we definitely want to hear of it. But additional code paths
 inside the layer that work around specific *game issues* will not
 be accepted.
 
-Using the layer inside the demo level of [vkQuake2](https://github.com/kondrak/vkQuake2).
-![Running inside vkQuake2](TODO)
+Using the layer via an overlay inside the demo level of [vkQuake2](https://github.com/kondrak/vkQuake2):
+![Running inside vkQuake2](docs/pics/vkQuake2.png)
 
 # License
 

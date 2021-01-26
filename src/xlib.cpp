@@ -115,6 +115,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(
 		return res;
 	}
 
+	auto env = std::getenv("FUEN_HOOK_OVERLAY");
+	if(!env || *env == '0') {
+		return res;
+	}
+
 	auto& platform = createData<X11Platform>(*pSurface);
 	platform.surfaceWindow = pCreateInfo->window;
 	platform.origConnection = XGetXCBConnection(pCreateInfo->dpy);
@@ -130,6 +135,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXcbSurfaceKHR(
 	auto& ini = getData<Instance>(instance);
 	auto res = ini.dispatch.CreateXcbSurfaceKHR(instance, pCreateInfo, pAllocator, pSurface);
 	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	auto env = std::getenv("FUEN_HOOK_OVERLAY");
+	if(!env || *env == '0') {
 		return res;
 	}
 

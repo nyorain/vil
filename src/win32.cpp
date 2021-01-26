@@ -449,6 +449,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 		return res;
 	}
 
+	auto env = std::getenv("FUEN_HOOK_OVERLAY");
+	if(!env || *env == '0') {
+		return res;
+	}
+
 	auto& platform = createData<Win32Platform>(*pSurface);
 	platform.surfaceWindow = pCreateInfo->hwnd;
 
