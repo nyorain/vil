@@ -115,7 +115,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(
 		return res;
 	}
 
-	auto env = std::getenv("FUEN_HOOK_OVERLAY");
+	auto env = std::getenv("VIL_HOOK_OVERLAY");
 	if(!env || *env == '0') {
 		return res;
 	}
@@ -138,7 +138,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXcbSurfaceKHR(
 		return res;
 	}
 
-	auto env = std::getenv("FUEN_HOOK_OVERLAY");
+	auto env = std::getenv("VIL_HOOK_OVERLAY");
 	if(!env || *env == '0') {
 		return res;
 	}

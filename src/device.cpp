@@ -129,7 +129,7 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr, VkPhysicalDevice phdev,
 		u32 numQueueFams, u32& presentQueueInfoID,
 		span<const VkExtensionProperties> extProps) {
-	auto env = std::getenv("FUEN_CREATE_WINDOW");
+	auto env = std::getenv("VIL_CREATE_WINDOW");
 	if(!env || *env == '0') {
 		return nullptr;
 	}

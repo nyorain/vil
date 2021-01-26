@@ -2,14 +2,15 @@
 
 v0.1, goal: end of january 2021
 
-- Cleanup
-- Docs
+- [x] Docs
 - [x] Command-introspection
 - [x] Sync rework
+- Cleanup
 - Testing, Profiling, Needed optimization
 
 - [ ] in io & resource viewer: mip slider broken
 	- [ ] Also move to own line? or just make half width?
+- [ ] Rename FUEN_ macros into VIL_
 - [ ] automatically update resource lists in resource gui when tab is re-entered
       from somewhere else
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
