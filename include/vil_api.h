@@ -1,4 +1,4 @@
-// vlid: Vulkan Live Introspection & Debugging Layer.
+// VIL: Vulkan Live Introspection & Debugging Layer.
 // Copyright (C) 2020-2021 Jan Kelling
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -52,7 +52,7 @@ extern "C" {
 // The functions must be externally synchronized for a given overaly.
 // NOTE: header-only by design, no library needs to be linked besides
 // 'dl' on unix and 'kernel32' on windows (usually automatically done).
-// This will automatically call symbols from the vlid layer, if it is loaded.
+// This will automatically call symbols from the VIL layer, if it is loaded.
 
 typedef struct VilOverlayT* VilOverlay;
 
@@ -63,7 +63,7 @@ typedef struct VilOverlayT* VilOverlay;
 /// The overlay will automatically be moved to a new swapchain if it is created
 /// with the swapchain associated to this layer in the oldSwapchain
 /// member of the VkSwapchainCreateInfoKHR.
-/// By default, it is hidden but you could immediately call vlidOverlayShow
+/// By default, it is hidden but you could immediately call vilOverlayShow
 /// after this function to make it visible.
 ///
 /// The name is intentionally horribly long to state as much of the terribleness

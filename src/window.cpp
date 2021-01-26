@@ -344,7 +344,7 @@ void DisplayWindow::uiThread() {
 
 		// step 0: display creation
 		dlg_assert(state_.load() == State::createDisplay);
-		dpy = swa_display_autocreate("vlid");
+		dpy = swa_display_autocreate("VIL");
 		if (!dpy) {
 			state_.store(State::shutdown);
 			cv_.notify_one();
@@ -377,7 +377,7 @@ void DisplayWindow::uiThread() {
 
 		swa_window_settings ws;
 		swa_window_settings_default(&ws);
-		ws.title = "vlid";
+		ws.title = "VIL: Vulkan Introspection";
 		ws.listener = &listener;
 		ws.surface = swa_surface_vk;
 		ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(this->ini->handle);
