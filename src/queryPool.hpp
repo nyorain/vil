@@ -3,7 +3,7 @@
 #include <device.hpp>
 #include <handle.hpp>
 
-namespace fuen {
+namespace vil {
 
 struct QueryPool : DeviceHandle {
 	VkQueryPool handle {};
@@ -24,4 +24,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(
 // No need to hook:
 // - GetQueryPoolResults
 
-} // namespace fuen
+} // namespace vil

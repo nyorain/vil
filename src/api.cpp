@@ -1,6 +1,6 @@
 #include <fwd.hpp>
 #include <vk/vulkan.h>
-#include <vlid_api.h>
+#include <vil_api.h>
 #include <data.hpp>
 #include <device.hpp>
 #include <window.hpp>
@@ -11,21 +11,21 @@
 #include <swa/swa.h>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
-  #define FUEN_API __declspec(dllexport)
+  #define VIL_API __declspec(dllexport)
 #elif __GNUC__ >= 4
-  #define FUEN_API __attribute__((visibility ("default")))
+  #define VIL_API __attribute__((visibility ("default")))
 #else
-  #define FUEN_API // just pray it works.
+  #define VIL_API // just pray it works.
 #endif
 
-using namespace fuen;
+using namespace vil;
 
 // TODO: we probably have to lock the mutex for every input call
 
-extern "C" FUEN_API FuenOverlay fuenCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
+extern "C" VIL_API VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
 	auto& dev = getDeviceByLoader(vkDevice);
 
-	FuenOverlay ret {};
+	VilOverlay ret {};
 	{
 		std::lock_guard lock(dev.mutex);
 		if(!dev.lastCreatedSwapchain) {
@@ -39,9 +39,9 @@ extern "C" FUEN_API FuenOverlay fuenCreateOverlayForLastCreatedSwapchain(VkDevic
 			return {};
 		}
 
-		sc.overlay = std::make_unique<fuen::Overlay>();
+		sc.overlay = std::make_unique<vil::Overlay>();
 		sc.overlay->init(sc);
-		ret = reinterpret_cast<FuenOverlay>(sc.overlay.get());
+		ret = reinterpret_cast<VilOverlay>(sc.overlay.get());
 	}
 
 	// TODO: race.
@@ -53,21 +53,21 @@ extern "C" FUEN_API FuenOverlay fuenCreateOverlayForLastCreatedSwapchain(VkDevic
 	return ret;
 }
 
-extern "C" FUEN_API void fuenOverlayShow(FuenOverlay overlay, bool show) {
-	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+extern "C" VIL_API void vilOverlayShow(VilOverlay overlay, bool show) {
+	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	ov.show = show;
 }
 
-extern "C" FUEN_API void fuenOverlayMouseMoveEvent(FuenOverlay overlay, int x, int y) {
-	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+extern "C" VIL_API void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int y) {
+	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(ov.show) {
 		ov.gui.imguiIO().MousePos = {float(x), float(y)};
 	}
 }
 
 // They return whether the event was processed by the overlay
-extern "C" FUEN_API bool fuenOverlayMouseButtonEvent(FuenOverlay overlay, unsigned button, bool press) {
-	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+extern "C" VIL_API bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned button, bool press) {
+	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(ov.show && button < 5) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseDown[button] = press;
@@ -76,8 +76,8 @@ extern "C" FUEN_API bool fuenOverlayMouseButtonEvent(FuenOverlay overlay, unsign
 
 	return false;
 }
-extern "C" FUEN_API bool fuenOverlayMouseWheelEvent(FuenOverlay overlay, float x, float y) {
-	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+extern "C" VIL_API bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x, float y) {
+	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(ov.show) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseWheel += y;
@@ -88,8 +88,8 @@ extern "C" FUEN_API bool fuenOverlayMouseWheelEvent(FuenOverlay overlay, float x
 	return false;
 }
 
-extern "C" FUEN_API bool fuenOverlayKeyEvent(FuenOverlay overlay, uint32_t keycode, bool pressed) {
-	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+extern "C" VIL_API bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keycode, bool pressed) {
+	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 
 	// TODO; remove hardcoded toggle.
 	if(keycode == swa_key_backslash && pressed) {
@@ -126,8 +126,8 @@ extern "C" FUEN_API bool fuenOverlayKeyEvent(FuenOverlay overlay, uint32_t keyco
 	return io.WantCaptureKeyboard;
 }
 
-extern "C" FUEN_API bool fuenOverlayTextEvent(FuenOverlay overlay, const char* utf8) {
-	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+extern "C" VIL_API bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8) {
+	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(!ov.show || !utf8) {
 		return false;
 	}
@@ -137,8 +137,8 @@ extern "C" FUEN_API bool fuenOverlayTextEvent(FuenOverlay overlay, const char* u
 	return io.WantCaptureKeyboard || io.WantTextInput;
 }
 
-extern "C" FUEN_API void fuenOverlayKeyboardModifier(FuenOverlay overlay, uint32_t mod, bool active) {
-	auto& ov = *reinterpret_cast<fuen::Overlay*>(overlay);
+extern "C" VIL_API void vilOverlayKeyboardModifier(VilOverlay overlay, uint32_t mod, bool active) {
+	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(!ov.show) {
 		return;
 	}

@@ -1,6 +1,6 @@
 #include <queryPool.hpp>
 
-namespace fuen {
+namespace vil {
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(
 		VkDevice                                    device,
@@ -35,4 +35,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(
 	dev.dispatch.DestroyQueryPool(device, queryPool, pAllocator);
 }
 
-} // namspace fuen
+} // namespace vil

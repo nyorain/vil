@@ -21,7 +21,7 @@
 #include <spirv_reflect.h>
 #include <bitset>
 
-namespace fuen {
+namespace vil {
 
 // util
 std::string formatScalar(SpvReflectTypeFlags type,
@@ -687,7 +687,7 @@ void CommandBufferGui::displayImage(Draw& draw, const CopiedImage& img) {
 	//   color mask flags. In some cases this is desired but probably
 	//   not in all.
 
-	fuen::displayImage(*gui_, ioImage_, img.extent, minImageType(img.extent),
+	vil::displayImage(*gui_, ioImage_, img.extent, minImageType(img.extent),
 		img.format, img.srcSubresRange);
 
 	VkDescriptorImageInfo dsii {};
@@ -1411,4 +1411,4 @@ void CommandBufferGui::displayActionInspector(Draw& draw, const Command& cmd) {
 	ImGui::EndTable();
 }
 
-} // namespace fuen
+} // namespace vil

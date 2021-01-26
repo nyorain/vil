@@ -4,7 +4,7 @@
 #include <utility>
 #include <tuple>
 
-namespace fuen {
+namespace vil {
 
 template<typename T, typename H>
 class HandledPtr {
@@ -127,4 +127,4 @@ struct FinishHandler {
 template<typename T> using IntrusivePtr = HandledPtr<T, RefCountHandler<T>>;
 template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
-} // namspace fuen
+} // namspace vil

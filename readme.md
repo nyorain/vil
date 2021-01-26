@@ -1,7 +1,7 @@
-# vlid: Vulkan Live Introspection & Debugging
+# VIL: Vulkan Introspection Layer
 
 Vulkan in-app debugging layer that is able to provide
-live introspection via a debug window/overlay.
+live introspection and debugging via an overlay or window GUI.
 
 This is still in a very early stage of development. Bug reports are welcome.
 There are various known issues and some of the features below are work-in-progess.
@@ -92,21 +92,21 @@ to install the library and layer config.
 
 On **windows**, layers are installed via registry entries, you have to add
 a registry entry in `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers` pointing to the generated layer config 
-json (that must be located in the same folder as `VkLayer_vlid.dll`).
+json (that must be located in the same folder as `VkLayer_live_introspection.dll`).
 You can simply run the `register_layer.bat` script in the build directory. Note that it will require admin privileges
 to add the registry key. You should usually not run random batch scripts from the internet that require admin privileges,
 so feel free to do it manually in an admin prompt:
 
 ```
-REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath of VKLayer_vlid.json> /t REG_DWORD /d 0
+REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath of VkLayer_live_introspection.json> /t REG_DWORD /d 0
 ```
 
-Where you replace `<filepath of VKLayer_vlid.json>` with full file path of the generated `VKLayer_vlid.json` file, e.g. `D:\code\vlid\build\vs19\VKLayer_vlid.json`.
+Where you replace `<filepath of VkLayer_live_introspection.json>` with full file path of the generated `VkLayer_live_introspection.json` file, e.g. `D:\code\vil\build\vs19\VkLayer_live_introspection.json`.
 
-Once installed, you have to make sure vulkan applications load `VK_LAYER_vlid`.
-Either pass it to your `VkInstanceCreateInfo` or enable it via environment variable `VK_INSTANCE_LAYERS=VK_LAYER_vlid`.
+Once installed, you have to make sure vulkan applications load `VK_LAYER_live_introspection`.
+Either pass it to your `VkInstanceCreateInfo` or enable it via environment variable `VK_INSTANCE_LAYERS=VK_LAYER_live_introspection`.
 During the early stages of this project, you likely want to load it *before* any validation layer. If
-your application then causes triggers validation errors with `vlid` that are not there without it,
+your application then causes triggers validation errors with *vil* that are not there without it,
 make sure to report them here!
 
 # Using it
@@ -115,10 +115,10 @@ There are multiple ways of using this layer:
 
 - Make the layer create a new window holding the debug gui when the application starts.
   This is the current default, you can control it via the environment variable
-  'VLID_CREATE_WINDOW={0, 1}'.
+  'VIL_CREATE_WINDOW={0, 1}'.
 - Make the layer draw an overlay over you application
 	- Since the layer gui still needs input you have to supply it via
-	  a non-vulkan api. See [include/vlid_api.h](include/vlid_api.h).
+	  a separate api. See [include/vil_api.h](include/vil_api.h).
 	  As soon as you call the API to create an overlay on a swapchain,
 	  the extra debug window will be closed (if there was one).
 	- Experimental: Make the layer hook the application's input
@@ -127,7 +127,7 @@ There are multiple ways of using this layer:
 	  not work with certain platforms/applications.
 	  This is not enabled by default (and might be disabled from the default
 	  build config or even completely removed from the layer in future).
-	  You can force it via the environment variable 'VLID_HOOK_OVERLAY=1'.
+	  You can force it via the environment variable 'VIL_HOOK_OVERLAY=1'.
 
 The layer running gui inside an extra window in doom eternal:
 

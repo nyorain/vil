@@ -5,7 +5,7 @@
 #include <queue.hpp>
 #include <imgui/imgui.h>
 
-namespace fuen {
+namespace vil {
 
 // Draw
 void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
@@ -276,4 +276,4 @@ void RenderData::free(Device& dev) {
 	*this = {};
 }
 
-} // namespace fuen
+} // namespace vil

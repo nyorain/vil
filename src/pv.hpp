@@ -9,7 +9,7 @@
 #include <cstring> // std::memcpy
 #include <memory> // std::allocator_traits
 
-namespace fuen {
+namespace vil {
 
 // Returns ceil(num / denom), efficiently, only using integer division.
 inline constexpr std::size_t ceilDivide(std::size_t num, std::size_t denom) {
@@ -364,4 +364,4 @@ private:
 	BlockPtr blocks_ {};
 };
 
-} // namespace fuen
+} // namespace vil

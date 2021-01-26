@@ -4,7 +4,7 @@
 #include <handle.hpp>
 #include <atomic>
 
-namespace fuen {
+namespace vil {
 
 struct Fence : DeviceHandle {
 	VkFence handle {};
@@ -102,4 +102,4 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetEvent(
     VkDevice                                    device,
     VkEvent                                     event);
 
-} // namespace fuen
+} // namespace vil

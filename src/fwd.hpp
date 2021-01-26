@@ -21,7 +21,7 @@ template<typename T, typename U = std::underlying_type_t<T>> class Flags;
 
 } // namespace nytl
 
-namespace fuen {
+namespace vil {
 
 using namespace nytl;
 
@@ -118,7 +118,7 @@ struct DescriptorSetRef {
 
 struct DrawGuiImage;
 
-} // namespace fuen
+} // namespace vil
 
 #define VK_CHECK(x) do {\
 		auto result = (x);\

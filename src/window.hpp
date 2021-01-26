@@ -10,7 +10,7 @@
 struct swa_display;
 struct swa_window;
 
-namespace fuen {
+namespace vil {
 
 // Creates a completely new system window using swa and displays the overlay in it.
 // Since winapi has some major thread-quirks, we need to create and initialize
@@ -64,4 +64,4 @@ private:
 	void uiThread();
 };
 
-} // namespace fuen
+} // namespace vil

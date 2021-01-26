@@ -10,7 +10,7 @@
 #include <optional>
 #include <string>
 
-namespace fuen {
+namespace vil {
 
 struct BeginRenderPassCmd;
 
@@ -248,4 +248,4 @@ struct CommandHookSubmission {
 	void transmitIndirect();
 };
 
-} // namespace fuen
+} // namespace vil

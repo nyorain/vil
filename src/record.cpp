@@ -6,7 +6,7 @@
 #include <util/util.hpp>
 #include <gui/commandHook.hpp>
 
-namespace fuen {
+namespace vil {
 
 std::byte* data(CommandMemBlock& mem, std::size_t offset) {
 	dlg_assert(offset < mem.size);
@@ -271,4 +271,4 @@ void unsetDestroyedLocked(CommandRecord& record) {
 	record.destroyed.clear();
 }
 
-} // namespace fuen
+} // namespace vil

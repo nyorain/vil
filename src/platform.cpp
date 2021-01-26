@@ -6,7 +6,7 @@
 #include <swa/swa.h>
 #include <dlg/dlg.hpp>
 
-namespace fuen {
+namespace vil {
 namespace {
 
 constexpr auto toggleKey = swa_key_backslash;
@@ -142,4 +142,4 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 	ini.dispatch.DestroySurfaceKHR(instance, surface, pAllocator);
 }
 
-} // namespace fuen
+} // namespace vil

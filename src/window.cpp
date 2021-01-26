@@ -11,7 +11,7 @@
 #include <vk/enumString.hpp>
 #include <chrono>
 
-namespace fuen {
+namespace vil {
 namespace {
 
 void cbClose(swa_window* win) {
@@ -548,4 +548,4 @@ void DisplayWindow::uiThread() {
 	dlg_trace("Exiting window thread");
 }
 
-} // namespace fuen
+} // namespace vil

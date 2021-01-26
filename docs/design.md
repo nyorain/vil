@@ -108,7 +108,7 @@ weird situations and additional cast and an additional dependency.
 
 # On vulkan host allocators
 
-A known issue of the vlid design: host allocators might not
+A known issue of the VIL design: host allocators might not
 work a 100% correctly in all cases, consider this case:
 We have to keep a handle alive inside the layer while the application
 logically destroyed it. When we destroy the handle later on (after
@@ -208,7 +208,7 @@ as well/build it themselves from master).
 
 This one shouldn't even be officially supported, it's such a hack. Anyways,
 useful as a super-quick dropin. When applications don't explicitly use the
-fuen api to pass input to the layer (for gui stuff) we can atempt to hijack
+vil api to pass input to the layer (for gui stuff) we can atempt to hijack
 the windows input using platform-specific APIs. Yes, this is super ugly
 and super evil and not guaranteed to work at all, will just ignore bugs
 regarding that. 

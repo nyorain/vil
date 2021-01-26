@@ -8,7 +8,7 @@
 #include <cstring>
 #include <memory>
 
-namespace fuen {
+namespace vil {
 
 // util
 template<typename T>
@@ -236,4 +236,4 @@ struct ValidExpressionT<E, std::void_t<E<T...>>, T...> {
 template<template<typename...> typename E, typename... T>
 constexpr auto validExpression = detail::ValidExpressionT<E, void, T...>::value;
 
-} // namespace fuen
+} // namespace vil

@@ -4,7 +4,7 @@
 #include <memory.hpp>
 #include <unordered_set>
 
-namespace fuen {
+namespace vil {
 
 struct Buffer : MemoryResource {
 	VkBuffer handle {};
@@ -67,4 +67,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
     VkBufferView                                bufferView,
     const VkAllocationCallbacks*                pAllocator);
 
-} // namespace fuen
+} // namespace vil

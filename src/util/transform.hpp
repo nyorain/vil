@@ -10,7 +10,7 @@
 
 // Taken from tkn/transform
 
-namespace fuen {
+namespace vil {
 
 // Returns a lookAt matrix for the given position and orientation.
 // The returned matrix will just move 'pos' into the origin and
@@ -74,4 +74,4 @@ nytl::SquareMat<4, P> lookAt(const nytl::Vec3<P>& pos,
 	return ret;
 }
 
-} // namespace fuen
+} // namespace vil

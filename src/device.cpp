@@ -13,7 +13,7 @@
 #include <swa/swa.h>
 #include <vk/dispatch_table_helper.h>
 
-namespace fuen {
+namespace vil {
 
 // util
 Gui* getWindowGui(Device& dev) {
@@ -714,7 +714,7 @@ void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name)
 		return;
 	}
 
-	auto name2 = "fuen:" + std::string(name);
+	auto name2 = "vil:" + std::string(name);
 
 	VkDebugUtilsObjectNameInfoEXT nameInfo {};
 	nameInfo.objectHandle = handle;
@@ -748,4 +748,4 @@ DebugLabel::~DebugLabel() {
 	}
 }
 
-} // namespace fuen
+} // namespace vil

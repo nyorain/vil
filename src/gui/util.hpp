@@ -7,7 +7,7 @@
 #include <buffer.hpp>
 #include <string>
 
-namespace fuen {
+namespace vil {
 
 struct Row {
 	const char* name;
@@ -83,4 +83,4 @@ inline void drawOffsetSize(const DescriptorSet::BufferInfo& info) {
 	}
 }
 
-} // namesapce fuen
+} // namesapce vil

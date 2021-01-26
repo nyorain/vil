@@ -6,7 +6,7 @@
 #include <cassert>
 #include <util/intrusive.hpp>
 
-namespace fuen {
+namespace vil {
 
 template<typename T>
 struct SmartPtrFactory;
@@ -214,4 +214,4 @@ using SyncedSharedUnorderedMap = SyncedUnorderedMap<K, T, std::shared_ptr>;
 template<typename K, typename T>
 using SyncedIntrusiveUnorderedMap = SyncedUnorderedMap<K, T, IntrusivePtr>;
 
-} // namespace fuen
+} // namespace vil

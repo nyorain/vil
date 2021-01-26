@@ -9,7 +9,7 @@
 #include <wayland-client-protocol.h>
 #include <linux/input-event-codes.h>
 
-namespace fuen {
+namespace vil {
 
 struct WaylandPlatform : Platform {
 public:
@@ -219,4 +219,4 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
 	return res;
 }
 
-} // namespace fuen
+} // namespace vil

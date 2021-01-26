@@ -5,7 +5,7 @@
 #include <util/util.hpp>
 #include <vk/format_utils.h>
 
-namespace fuen {
+namespace vil {
 
 // Classes
 Framebuffer::~Framebuffer() {
@@ -785,4 +785,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 	dev.renderPasses.mustErase(renderPass);
 }
 
-} // namespace fuen
+} // namespace vil

@@ -10,7 +10,7 @@
 #include <memory>
 #include <atomic>
 
-namespace fuen {
+namespace vil {
 
 // Which member in descriptor binding is valid
 enum class DescriptorCategory {
@@ -173,4 +173,4 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
     VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
     const void*                                 pData);
 
-} // namespace fuen
+} // namespace vil

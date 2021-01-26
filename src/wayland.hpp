@@ -5,7 +5,7 @@
 
 struct VkWaylandSurfaceCreateInfoKHR;
 
-namespace fuen {
+namespace vil {
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
 	VkInstance                                  instance,
@@ -13,4 +13,4 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWaylandSurfaceKHR(
 	const VkAllocationCallbacks*                pAllocator,
 	VkSurfaceKHR*                               pSurface);
 
-} // namespace fuen
+} // namespace vil

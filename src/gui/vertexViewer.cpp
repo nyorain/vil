@@ -8,7 +8,7 @@
 #include <vertices.vert.spv.h>
 #include <vertices.frag.spv.h>
 
-namespace fuen {
+namespace vil {
 
 void VertexViewer::init(Device& dev, VkRenderPass rp) {
 	dev_ = &dev;
@@ -239,4 +239,4 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 	}
 }
 
-} // namespace fuen
+} // namespace vil

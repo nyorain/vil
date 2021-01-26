@@ -5,7 +5,7 @@
 
 struct VkWin32SurfaceCreateInfoKHR;
 
-namespace fuen {
+namespace vil {
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 	VkInstance                                  instance,
@@ -13,5 +13,5 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 	const VkAllocationCallbacks*                pAllocator,
 	VkSurfaceKHR*                               pSurface);
 
-} // namespace fuen
+} // namespace vil
 

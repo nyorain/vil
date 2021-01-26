@@ -1,10 +1,14 @@
-project('vlid', ['c', 'cpp'],
+project('VIL', ['c', 'cpp'],
 	version: '0.1.0',
 	default_options: [
 		'werror=true',
 		'warning_level=3',
 		'cpp_std=c++17',
 		'c_std=c11',
+		# We need this to build the subprojects as static libraries. No
+		# other way to do this apparently.
+		# And we force the layer to be shared library anyways.
+		'default_library=static',
 	]
 )
 
@@ -42,9 +46,12 @@ link_args = cc.get_supported_arguments([
 ])
 
 dep_threads = dependency('threads', required: false)
-dep_dlg = dependency('dlg', fallback: ['dlg', 'dlg_dep'])
+dep_dlg = dependency('dlg',
+	static: true,
+	fallback: ['dlg', 'dlg_dep'])
 dep_swa = dependency('swa',
 	fallback: ['swa', 'swa_dep'],
+	static: true,
 	default_options: [
 		'with-gl=disabled',
 		'link-vulkan=false',
@@ -102,8 +109,6 @@ src = files(
 	'src/gui/render.cpp',
 	'src/gui/gui.cpp',
 	'src/gui/resources.cpp',
-	'src/gui/image.cpp',
-	'src/gui/buffer.cpp',
 	'src/gui/cb.cpp',
 	'src/gui/commandHook.cpp',
 
@@ -154,7 +159,7 @@ src = files(
 	'src/util/syncedMap.hpp',
 
 	'src/imgui/imgui.h',
-	'include/vlid_api.h',
+	'include/vil_api.h',
 )
 
 public_inc = include_directories('include/')
@@ -182,16 +187,16 @@ if with_x11
 	dep_x11_xcb = dependency('x11-xcb', required: true)
 
 	deps += [dep_xcb, dep_xcb_keysyms, dep_x11_xcb]
-	args += ['-DVLID_WITH_X11']
+	args += ['-DFUEN_WITH_X11']
 endif
 
 if with_win32
 	src += files('src/win32.cpp')
-	args += ['-DVLID_WITH_WIN32']
+	args += ['-DFUEN_WITH_WIN32']
 endif
 
-vlid_layer = shared_library(
-	'VkLayer_vlid',
+vil_layer = shared_library(
+	'VkLayer_live_introspection',
 	[src, spv],
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
@@ -202,10 +207,10 @@ vlid_layer = shared_library(
 )
 
 conf_data = configuration_data()
-conf_data.set('vlid_version', meson.project_version())
+conf_data.set('vil_version', meson.project_version())
 
 # TODO: this is terrible... needed for windows
-libpath = vlid_layer.full_path()
+libpath = vil_layer.full_path()
 if libpath.contains('\\')
 	conf_data.set('lib_path', '.\\\\' + libpath.split('\\')[-1])
 else
@@ -213,8 +218,8 @@ else
 endif
 
 configure_file(
-	input: 'VkLayer_vlid.json.in',
-	output: 'VkLayer_vlid.json',
+	input: 'VkLayer_live_introspection.json.in',
+	output: 'VkLayer_live_introspection.json',
 	install: true,
 	install_dir: join_paths(get_option('datadir'), 'vulkan', 'explicit_layer.d'),
 	configuration: conf_data

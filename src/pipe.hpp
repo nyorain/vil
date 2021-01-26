@@ -10,7 +10,7 @@
 #include <atomic>
 #include <unordered_set>
 
-namespace fuen {
+namespace vil {
 
 struct PipelineLayout : DeviceHandle {
 	VkPipelineLayout handle;
@@ -119,4 +119,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
 
 // No need to hook VkPipelineCache at all at the moment.
 
-} // namespace fuen
+} // namespace vil

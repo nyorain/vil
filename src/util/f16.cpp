@@ -5,7 +5,7 @@
 #include <cmath>
 #include <dlg/dlg.hpp> // todo
 
-namespace fuen {
+namespace vil {
 
 f16::f16(float val) {
 	u32 uval;

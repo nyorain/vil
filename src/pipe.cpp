@@ -5,7 +5,7 @@
 #include <ds.hpp>
 #include <data.hpp>
 
-namespace fuen {
+namespace vil {
 
 PipelineLayout::~PipelineLayout() {
 	if(!dev) {
@@ -331,4 +331,4 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32
 	return true;
 }
 
-} // namespace fuen
+} // namespace vil

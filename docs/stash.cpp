@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-namespace fuen {
+namespace vil {
 
 struct CommandHookSubmissionData {
 	std::unique_ptr<CommandHookSubmissionData> next;
@@ -161,4 +161,4 @@ struct IndirectBufferReadHookSubmission : CommandHookSubmissionData {
 	virtual ~IndirectBufferReadHookSubmission();
 };
 
-} // namespace fuen
+} // namespace vil

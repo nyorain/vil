@@ -12,7 +12,7 @@
 
 // taken from nytl/bytes.hpp
 
-namespace fuen {
+namespace vil {
 
 // Define NYTL_BYTES_ASSERT before including this header to define a custom
 // assert handler, e.g. like this:
@@ -210,5 +210,5 @@ copyExact(ReadBuf src) {
 // buffer is desired for writing, just use nytl::DynWriteBuf. Works
 // exactly the same and can be converted to ReadBuf as well.
 
-} // namespace fuen
+} // namespace vil
 

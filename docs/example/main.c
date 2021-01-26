@@ -1,4 +1,4 @@
-#include <fuen_api.h>
+#include <vil_api.h>
 #include <swa/swa.h> // swa: window creation and input abstraction
 #include <swa/key.h> // swa keycode definitions
 #include <dlg/dlg.h> // dlg: logging & assertion library
@@ -51,13 +51,13 @@ struct state {
 	struct swa_display* dpy;
 
 	bool create_overlay;
-	FuenApi fuen_api;
-	FuenOverlay fuen_overlay;
+	VilApi vil_api;
+	VilOverlay vil_overlay;
 };
 
 // fwd decls of vulkan bits
 static bool init_instance(struct state* state, unsigned n_dpy_exts,
-	const char** dpy_exts, bool use_fuen);
+	const char** dpy_exts, bool use_vil);
 static bool init_renderer(struct state* state);
 static bool init_render_buffers(struct state* state);
 static void destroy_render_buffers(struct state* state);
@@ -133,15 +133,15 @@ static void window_resize(struct swa_window* win, unsigned w, unsigned h) {
 			return;
 		}
 
-		// query fuen layer api
+		// query vil layer api
 		if(state->create_overlay) {
-			int res = fuenLoadApi(&state->fuen_api);
+			int res = vilLoadApi(&state->vil_api);
 			if(res == 0) {
-				state->fuen_overlay = state->fuen_api.CreateOverlayForLastCreatedSwapchain(state->device);
-				dlg_trace("Created fuen overlay: %p", (void*) state->fuen_overlay);
+				state->vil_overlay = state->vil_api.CreateOverlayForLastCreatedSwapchain(state->device);
+				dlg_trace("Created vil overlay: %p", (void*) state->vil_overlay);
 			} else {
 				// TODO: output more info!
-				dlg_warn("Loading fuen failed, error code %d", res);
+				dlg_warn("Loading vil failed, error code %d", res);
 			}
 		}
 	} else {
@@ -246,35 +246,35 @@ static void window_key(struct swa_window* win, const struct swa_key_event* ev) {
 		state->run = false;
 	}
 
-	if(state->fuen_overlay) {
-		state->fuen_api.OverlayKeyEvent(state->fuen_overlay, ev->keycode, ev->pressed);
+	if(state->vil_overlay) {
+		state->vil_api.OverlayKeyEvent(state->vil_overlay, ev->keycode, ev->pressed);
 
 		if(ev->utf8) {
-			state->fuen_api.OverlayTextEvent(state->fuen_overlay, ev->utf8);
+			state->vil_api.OverlayTextEvent(state->vil_overlay, ev->utf8);
 		}
 	}
 }
 
 static void mouse_move(struct swa_window* win, const struct swa_mouse_move_event* ev) {
 	struct state* state = swa_window_get_userdata(win);
-	if(state->fuen_overlay) {
-		state->fuen_api.OverlayMouseMoveEvent(state->fuen_overlay, ev->x, ev->y);
+	if(state->vil_overlay) {
+		state->vil_api.OverlayMouseMoveEvent(state->vil_overlay, ev->x, ev->y);
 	}
 }
 
 static void mouse_wheel(struct swa_window* win, float dx, float dy) {
 	dlg_trace("mouse wheel: %f %f", dx, dy);
 	struct state* state = swa_window_get_userdata(win);
-	if(state->fuen_overlay) {
-		state->fuen_api.OverlayMouseWheelEvent(state->fuen_overlay, dx, dy);
+	if(state->vil_overlay) {
+		state->vil_api.OverlayMouseWheelEvent(state->vil_overlay, dx, dy);
 	}
 }
 
 static void mouse_button(struct swa_window* win, const struct swa_mouse_button_event* ev) {
 	struct state* state = swa_window_get_userdata(win);
 	dlg_trace("button %d, pressed %d", ev->button, ev->pressed);
-	if(state->fuen_overlay && ev->button > 0 && ev->button < 6) {
-		state->fuen_api.OverlayMouseButtonEvent(state->fuen_overlay, ev->button - 1, ev->pressed);
+	if(state->vil_overlay && ev->button > 0 && ev->button < 6) {
+		state->vil_api.OverlayMouseButtonEvent(state->vil_overlay, ev->button - 1, ev->pressed);
 	}
 }
 
@@ -323,16 +323,16 @@ int main(int argc, const char** argv) {
 	unsigned n_exts;
 	const char** exts = swa_display_vk_extensions(dpy, &n_exts);
 
-	bool use_fuen = true;
-	bool fuen_overlay = true;
+	bool use_vil = true;
+	bool vil_overlay = true;
 
 	for(int i = 1; i < argc; ++i) {
-		if(strcmp(argv[i], "--no-fuen") == 0) {
-			use_fuen = false;
+		if(strcmp(argv[i], "--no-vil") == 0) {
+			use_vil = false;
 		}
 
 		if(strcmp(argv[i], "--no-overlay") == 0) {
-			fuen_overlay = false;
+			vil_overlay = false;
 		}
 	}
 
@@ -341,8 +341,8 @@ int main(int argc, const char** argv) {
 	// the queues we need depend on the created vulkan surface which
 	// in turn depens on the vulkan instance.
 	struct state state = {0};
-	state.create_overlay = fuen_overlay;
-	if(!init_instance(&state, n_exts, exts, use_fuen)) {
+	state.create_overlay = vil_overlay;
+	if(!init_instance(&state, n_exts, exts, use_vil)) {
 		ret = EXIT_FAILURE;
 		goto cleanup_state;
 	}
@@ -389,7 +389,7 @@ int main(int argc, const char** argv) {
 			resize(&state);
 		}
 
-		if(state.fuen_overlay) {
+		if(state.vil_overlay) {
 			enum swa_keyboard_mod mods = swa_display_active_keyboard_mods(dpy);
 			static const enum swa_keyboard_mod all_mods[] = {
 				swa_keyboard_mod_alt,
@@ -399,7 +399,7 @@ int main(int argc, const char** argv) {
 			};
 
 			for(int i = 0u; i < 4; ++i) {
-				state.fuen_api.OverlayKeyboardModifier(state.fuen_overlay,
+				state.vil_api.OverlayKeyboardModifier(state.vil_overlay,
 					all_mods[i], mods & all_mods[i]);
 			}
 		}
@@ -659,7 +659,7 @@ end_images:
 }
 
 bool init_instance(struct state* state, unsigned n_dpy_exts,
-		const char** dpy_exts, bool use_fuen) {
+		const char** dpy_exts, bool use_vil) {
 	// setup vulkan instance
 	// query extension support
 	uint32_t avail_extc = 0;
@@ -719,10 +719,10 @@ bool init_instance(struct state* state, unsigned n_dpy_exts,
 	unsigned nlayers = 0;
 	const char* layers[2];
 
-	// We always fuen fuen *before* the validation layer so our calls
-	// in fuen can be validated as well.
-	if(use_fuen) {
-		layers[nlayers++] = "VK_LAYER_vlid";
+	// We always load vil *before* the validation layer so our calls
+	// in vil can be validated as well.
+	if(use_vil) {
+		layers[nlayers++] = "VK_LAYER_live_introspection";
 	}
 	if(use_validation) {
 		layers[nlayers++] = "VK_LAYER_KHRONOS_validation";

@@ -4,7 +4,7 @@
 #include <gui/render.hpp>
 #include <gui/gui.hpp>
 
-namespace fuen {
+namespace vil {
 
 // Displays the ImGui window directly in the application window, on
 // a given swapchain.
@@ -32,4 +32,4 @@ struct Overlay {
 		const VkSwapchainCreateInfoKHR& b);
 };
 
-} // namespace fuen
+} // namespace vil

@@ -4,7 +4,7 @@
 dep_vulkan_full = dependency('vulkan')
 lib_dl = cc.find_library('dl', required: false)
 
-executable('fuen-example',
+executable('vil-example',
 	files('main.c'),
 	include_directories: public_inc,
 	c_args: args,

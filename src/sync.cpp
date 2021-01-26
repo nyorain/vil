@@ -3,7 +3,7 @@
 #include <data.hpp>
 #include <queue.hpp>
 
-namespace fuen {
+namespace vil {
 
 Fence::~Fence() {
 	if(!dev) {
@@ -236,4 +236,4 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetEvent(
 	return dev.dispatch.ResetEvent(device, event);
 }
 
-} // namespace fuen
+} // namespace vil

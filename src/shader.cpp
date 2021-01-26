@@ -4,7 +4,7 @@
 
 #include "spirv_reflect.h"
 
-namespace fuen {
+namespace vil {
 
 // ShaderModule
 SpirvData::~SpirvData() {
@@ -52,4 +52,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
 	dev.dispatch.DestroyShaderModule(device, shaderModule, pAllocator);
 }
 
-} // namespace fuen
+} // namespace vil

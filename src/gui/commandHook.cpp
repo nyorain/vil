@@ -11,7 +11,7 @@
 #include <util/util.hpp>
 #include <vk/format_utils.h>
 
-namespace fuen {
+namespace vil {
 
 // util
 void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
@@ -1164,4 +1164,4 @@ void CommandHookSubmission::transmitTiming() {
 	record->state->neededTime = diff;
 }
 
-} // namespace fuen
+} // namespace vil

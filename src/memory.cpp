@@ -3,7 +3,7 @@
 #include <data.hpp>
 #include <util/util.hpp>
 
-namespace fuen {
+namespace vil {
 
 // MemoryResource
 MemoryResource::~MemoryResource() {
@@ -123,4 +123,4 @@ VKAPI_ATTR void VKAPI_CALL UnmapMemory(
 	dev.dispatch.UnmapMemory(device, memory);
 }
 
-} // namespace fuen
+} // namespace vil

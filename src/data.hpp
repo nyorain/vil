@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <shared_mutex>
 
-namespace fuen {
+namespace vil {
 
 // TODO: use small buffer optimization for those (especially
 //   devices & instances, optimizing for the common case of just one
@@ -130,4 +130,4 @@ inline void storeDeviceByLoader(VkDevice vkDev, Device* dev) {
 	dlg_assert(success);
 }
 
-} // namespace fuen
+} // namespace vil

@@ -8,7 +8,7 @@
 #include <overlay.hpp>
 #include <vk/enumString.hpp>
 
-namespace fuen {
+namespace vil {
 
 Swapchain::~Swapchain() {
 	overlay.reset();
@@ -226,4 +226,4 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	return combinedResult;
 }
 
-} // namespace fuen
+} // namespace vil

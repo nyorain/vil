@@ -10,7 +10,7 @@
 
 struct swa_display;
 
-namespace fuen {
+namespace vil {
 
 struct Instance {
 	VkLayerInstanceDispatchTable dispatch;
@@ -37,4 +37,4 @@ struct Instance {
 	~Instance();
 };
 
-} // namespace fuen
+} // namespace vil

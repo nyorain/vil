@@ -7,7 +7,7 @@
 
 // Taken from tkn/camera
 
-namespace fuen {
+namespace vil {
 
 struct Camera {
 	Vec3f pos {0.f, 0.f, 1.f}; // position of camera in world space
@@ -35,4 +35,4 @@ struct Camera {
 	return lookAt(c.rot, nytl::Vec3f{});
 }
 
-} // namespace fuen
+} // namespace vil

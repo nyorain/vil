@@ -11,7 +11,7 @@
 struct ImGuiContext;
 struct ImGuiIO;
 
-namespace fuen {
+namespace vil {
 
 class Gui {
 public:
@@ -153,4 +153,4 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 	const VkExtent3D& extent, VkImageType imgType, VkFormat format,
 	const VkImageSubresourceRange& subresources);
 
-} // namespace fuen
+} // namespace vil

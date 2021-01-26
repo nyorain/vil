@@ -8,7 +8,7 @@
 #include <optional>
 #include <memory>
 
-namespace fuen {
+namespace vil {
 
 struct RecordBatch {
 	Queue* queue;
@@ -57,4 +57,4 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	VkQueue                                     queue,
 	const VkPresentInfoKHR*                     pPresentInfo);
 
-} // namespace fuen
+} // namespace vil

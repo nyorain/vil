@@ -3,8 +3,10 @@
 #include <list>
 #include <vector>
 
+using namespace vil;
+
 TEST(basic) {
-	fuen::PageVector<int> vec;
+	PageVector<int> vec;
 	vec.push_back(3);
 	vec.emplace_back(4);
 	vec.emplace_back(5);
@@ -43,7 +45,7 @@ TEST(destructor) {
 		}
 	};
 
-	fuen::PageVector<Des> vec;
+	PageVector<Des> vec;
 	vec.emplace_back(7);
 	EXPECT(gValue, 1u);
 
@@ -80,10 +82,10 @@ TEST(nested) {
 
 	struct Nest {
 		unsigned value;
-		fuen::PageVector<Complex> vec;
+		PageVector<Complex> vec;
 	};
 
-	fuen::PageVector<Nest> nest;
+	PageVector<Nest> nest;
 
 	auto& a = nest.emplace_back();
 	a.value = 1;

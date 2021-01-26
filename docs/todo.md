@@ -16,6 +16,8 @@ v0.1, goal: end of january 2021
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
 	- [ ] clean the implementation up
+	- [ ] when not showing own cursor, just use GetCursorPos over
+	      raw input. Causes problems at the moment
 - [ ] might be better to determine command group at EndCommandBuffer
       instead of first submission. We can't use the used queue though...
 - [ ] remaining IO viewer fixes:

@@ -44,7 +44,7 @@
 // 	Quaternion::axisAngle(1, 0, 0, pitch) *
 // 	Quaternion::axisAngle(0, 0, 1, roll).
 
-namespace fuen {
+namespace vil {
 
 // fwd
 class Quaternion;

@@ -5,7 +5,7 @@
 #include <ds.hpp>
 #include <rp.hpp>
 
-namespace fuen {
+namespace vil {
 
 // Classes
 Image::~Image() {
@@ -268,4 +268,4 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 	dev.dispatch.DestroySampler(device, sampler, pAllocator);
 }
 
-} // namespace fuen
+} // namespace vil

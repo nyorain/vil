@@ -5,7 +5,7 @@
 #include <image.hpp>
 #include <util/util.hpp>
 
-namespace fuen {
+namespace vil {
 
 // Classes
 void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
@@ -613,4 +613,4 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	f(device, descriptorSet, descriptorUpdateTemplate, pData);
 }
 
-} // namespace fuen
+} // namespace vil

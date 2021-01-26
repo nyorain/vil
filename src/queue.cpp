@@ -13,7 +13,7 @@
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
 
-namespace fuen {
+namespace vil {
 
 std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	auto& dev = *subm.queue->dev;
@@ -798,4 +798,4 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 	return res;
 }
 
-} // namespace fuen
+} // namespace vil

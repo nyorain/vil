@@ -12,7 +12,7 @@
 struct swa_display;
 struct swa_window;
 
-namespace fuen {
+namespace vil {
 
 // Can be associated with a VkSurfaceKHR
 struct Platform {
@@ -64,4 +64,4 @@ VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(
 	VkSurfaceKHR                                surface,
 	const VkAllocationCallbacks*                pAllocator);
 
-} // namespace fuen
+} // namespace vil

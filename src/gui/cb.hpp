@@ -5,7 +5,7 @@
 #include <util/flags.hpp>
 #include <commandDesc.hpp>
 
-namespace fuen {
+namespace vil {
 
 struct CopiedImage;
 struct RecordBatch;
@@ -75,4 +75,4 @@ private:
 	DrawGuiImage ioImage_ {};
 };
 
-} // namespace fuen
+} // namespace vil

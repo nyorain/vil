@@ -6,7 +6,7 @@
 #include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>
 
-namespace fuen {
+namespace vil {
 
 // high-level stuff
 u32 findLSB(u32 v) {
@@ -739,4 +739,4 @@ void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
 	return static_cast<void*>(buf.get());
 }
 
-} // namespace fuen
+} // namespace vil

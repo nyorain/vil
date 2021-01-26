@@ -9,7 +9,7 @@
 
 typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 
-namespace fuen {
+namespace vil {
 
 struct SpirvData {
 	std::vector<u32> spv;
@@ -37,4 +37,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
     VkShaderModule                              shaderModule,
     const VkAllocationCallbacks*                pAllocator);
 
-} // namespace fuen
+} // namespace vil

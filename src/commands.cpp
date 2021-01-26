@@ -12,7 +12,7 @@
 #include <vk/enumString.hpp>
 #include <iomanip>
 
-namespace fuen {
+namespace vil {
 
 // Command utility
 template<typename C>
@@ -53,7 +53,7 @@ NameResult name(DeviceHandle* handle, NullName nullName) {
 		}
 	}
 
-	auto name = fuen::name(*handle);
+	auto name = vil::name(*handle);
 	if(handle->name.empty()) {
 		return {NameType::unnamed, name};
 	}
@@ -112,9 +112,9 @@ template<typename T, typename = std::enable_if_t<
 	validExpression<VkNameExpr, T>>>
 void addToArgumentsDesc(std::vector<std::string>& ret, const T& val) {
 	if constexpr(validExpression<FuenNameExpr, T>) {
-		ret.push_back(fuen::name(val));
+		ret.push_back(vil::name(val));
 	} else if constexpr(validExpression<FuenNameExprPtr, T>) {
-		ret.push_back(val ? fuen::name(*val) : "null");
+		ret.push_back(val ? vil::name(*val) : "null");
 	} else if constexpr(validExpression<VkNameExpr, T>) {
 		ret.push_back(vk::name(val));
 	} else if constexpr(validExpression<ToStringExpr, T>) {
@@ -1691,4 +1691,4 @@ void CopyQueryPoolResultsCmd::unset(const std::unordered_set<DeviceHandle*>& des
 	checkUnset(dstBuffer, destroyed);
 }
 
-} // namespace fuen
+} // namespace vil

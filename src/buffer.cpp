@@ -3,7 +3,7 @@
 #include <data.hpp>
 #include <ds.hpp>
 
-namespace fuen {
+namespace vil {
 
 VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize range) {
 	dlg_assert(offset <= fullSize);
@@ -189,4 +189,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
 	dev.dispatch.DestroyBufferView(device, bufferView, pAllocator);
 }
 
-} // namespace fuen
+} // namespace vil

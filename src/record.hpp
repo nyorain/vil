@@ -11,7 +11,7 @@
 #include <list>
 #include <cassert>
 
-namespace fuen {
+namespace vil {
 
 // Free-form of CommandBuffer::allocate
 std::byte* allocate(CommandRecord&, std::size_t size, std::size_t alignment);
@@ -76,7 +76,7 @@ struct CommandAllocator {
 
 	T* allocate(std::size_t n) {
 		assert(rec);
-		auto* ptr = fuen::allocate(*rec, n * sizeof(T), alignof(T));
+		auto* ptr = vil::allocate(*rec, n * sizeof(T), alignof(T));
         // TODO: strictly speaking we need the first line but it doesn't compile
         // under msvc for non-default-constructibe T
 		// return new(ptr) T[n]; // creates the array but not the objects
@@ -300,7 +300,7 @@ struct CommandRecord {
 		if constexpr(std::is_same_v<H, Image>) {
 			return images.find(handle.handle) != images.end();
 		} else {
-			return handles.find(handleToU64(fuen::handle(handle))) != handles.end();
+			return handles.find(handleToU64(vil::handle(handle))) != handles.end();
 		}
 	}
 
@@ -314,4 +314,4 @@ struct CommandRecord {
 // handle entries. Must only be called while device mutex is locked
 void unsetDestroyedLocked(CommandRecord& record);
 
-} // namespace fuen
+} // namespace vil

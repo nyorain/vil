@@ -14,7 +14,7 @@
 #include <mutex>
 #include <hidusage.h>
 
-namespace fuen {
+namespace vil {
 
 constexpr auto toggleKey = swa_key_backslash;
 constexpr auto focusKey = swa_key_rightbrace;
@@ -110,7 +110,7 @@ static void handleKey(Win32Platform* platform, bool pressed,
 
 static LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 	Win32Platform* platform = (Win32Platform*) GetWindowLongPtr(hwnd, GWLP_USERDATA);
-	
+
 	switch(msg) {
 		case WM_CREATE: {
 			return 0;
@@ -135,7 +135,7 @@ static LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 				platform->gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
 				platform->gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
 				// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
-			} 
+			}
 
 			break;
 		} case WM_ERASEBKGND:
@@ -204,7 +204,7 @@ void Win32Platform::initWindow() {
 	auto height = 5;
 	auto hinstance = GetModuleHandle(NULL);
 
-	overlayWindow = CreateWindowEx(exstyle, windowClassName, L"vlid", style, 
+	overlayWindow = CreateWindowEx(exstyle, windowClassName, L"vlid", style,
 		x, y, width, height, NULL, NULL, hinstance, NULL);
 	if(!overlayWindow) {
 		print_winapi_error("CreateWindowEx");
@@ -300,9 +300,9 @@ bool Win32Platform::doUpdate() {
 
 			// register for raw input on mouse
 			RAWINPUTDEVICE Rid[1];
-			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
-			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
-			Rid[0].dwFlags = RIDEV_INPUTSINK;   
+			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
+			Rid[0].dwFlags = RIDEV_INPUTSINK;
 			Rid[0].hwndTarget = overlayWindow;
 			RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
 
@@ -346,8 +346,8 @@ bool Win32Platform::doUpdate() {
 
 			// ToDO: probably have to destroy window, this does no seem to work
 			RAWINPUTDEVICE Rid[1];
-			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC; 
-			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE; 
+			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
 			Rid[0].dwFlags = RIDEV_REMOVE;
 			Rid[0].hwndTarget = /*overlayWindow*/ nullptr;
 			RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
@@ -628,4 +628,4 @@ static unsigned key_to_winapi(enum swa_key key) {
 	return 0x0;
 }
 
-} // namespace fuen
+} // namespace vil

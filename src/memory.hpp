@@ -4,7 +4,7 @@
 #include <handle.hpp>
 #include <set>
 
-namespace fuen {
+namespace vil {
 
 // TODO: support sparse binding
 struct MemoryResource : DeviceHandle {
@@ -69,4 +69,4 @@ VKAPI_ATTR void VKAPI_CALL UnmapMemory(
     VkDevice                                    device,
     VkDeviceMemory                              memory);
 
-} // namespace fuen
+} // namespace vil

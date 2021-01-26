@@ -6,7 +6,7 @@
 
 // Taken from tkn/f16.hpp
 
-namespace fuen {
+namespace vil {
 
 // 16-bit IEEE floating point value, compatible with gpu representations.
 // Often called "half".
@@ -82,15 +82,15 @@ namespace f16_literal {
 inline f16 operator ""_f16(long double val) { return f16(float(val)); }
 
 } // namespace literals
-} // namespace fuen
+} // namespace vil
 
 namespace std {
 
-template<> class numeric_limits<::fuen::f16> {
+template<> class numeric_limits<::vil::f16> {
 public:
 	static const bool is_specialized = true;
-	static fuen::f16 min () { return fuen::f16(0, 1, 0); }
-	static fuen::f16 max () { return fuen::f16(0, 30, 0xFFFFu); }
+	static vil::f16 min () { return vil::f16(0, 1, 0); }
+	static vil::f16 max () { return vil::f16(0, 30, 0xFFFFu); }
 	static const int radix = 2;
 	static const int digits = 10;
 	static const int digits10 = 2;
@@ -102,8 +102,8 @@ public:
 	static const bool is_bounded = true;
 
 	// from https://en.wikipedia.org/wiki/Machine_epsilon
-	static fuen::f16 epsilon () { return 0.0009765625f; } // 2^-10
-	static fuen::f16 round_error () { return 0.00048828125; } // 2^-11
+	static vil::f16 epsilon () { return 0.0009765625f; } // 2^-10
+	static vil::f16 round_error () { return 0.00048828125; } // 2^-11
 	static const int min_exponent10 = -9;
 	static const int max_exponent10 = 9;
 	static const int min_exponent = -15;
@@ -117,13 +117,13 @@ public:
 	static const bool tinyness_before = false;
 	static const float_round_style round_style = round_to_nearest;
 
-	static fuen::f16 denorm_min() { return fuen::f16(1, 0, 1); }
-	static fuen::f16 infinity() { return fuen::f16(0, 31, 0); }
-	static fuen::f16 quiet_NaN() { return fuen::f16(0, 31, 1); }
-	static fuen::f16 signaling_NaN() { return fuen::f16(0, 31, 1); }
+	static vil::f16 denorm_min() { return vil::f16(1, 0, 1); }
+	static vil::f16 infinity() { return vil::f16(0, 31, 0); }
+	static vil::f16 quiet_NaN() { return vil::f16(0, 31, 1); }
+	static vil::f16 signaling_NaN() { return vil::f16(0, 31, 1); }
 };
 
-template<> struct is_floating_point<::fuen::f16> : std::true_type {};
+template<> struct is_floating_point<::vil::f16> : std::true_type {};
 
 } // namespace std
 

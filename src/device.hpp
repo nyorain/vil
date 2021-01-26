@@ -17,7 +17,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace fuen {
+namespace vil {
 
 struct Device {
 	Instance* ini {};
@@ -185,4 +185,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 	VkDevice dev,
 	const VkAllocationCallbacks* alloc);
 
-} // naemspace fuen
+} // naemspace vil

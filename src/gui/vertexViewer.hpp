@@ -7,7 +7,7 @@
 #include <vector>
 #include <optional>
 
-namespace fuen {
+namespace vil {
 
 struct VertexViewer {
 	Device* dev_ {};
@@ -47,5 +47,5 @@ struct VertexViewer {
 			u32 offset, u32 drawCount, u32 vertexOffset);
 };
 
-} // namespace fuen
+} // namespace vil
 

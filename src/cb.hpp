@@ -4,7 +4,7 @@
 #include <device.hpp>
 #include <record.hpp>
 
-namespace fuen {
+namespace vil {
 
 struct CommandPool : DeviceHandle {
 	VkCommandPool handle {};
@@ -521,4 +521,4 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
     VkCommandBuffer                             commandBuffer);
 
-} // namespace fuen
+} // namespace vil

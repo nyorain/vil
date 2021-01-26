@@ -6,7 +6,7 @@
 struct VkXlibSurfaceCreateInfoKHR;
 struct VkXcbSurfaceCreateInfoKHR;
 
-namespace fuen {
+namespace vil {
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(
 	VkInstance                                  instance,
@@ -20,5 +20,5 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXcbSurfaceKHR(
 	const VkAllocationCallbacks*                pAllocator,
 	VkSurfaceKHR*                               pSurface);
 
-} // namespace fuen
+} // namespace vil
 

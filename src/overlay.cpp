@@ -8,7 +8,7 @@
 #include <dlg/dlg.hpp>
 #include <imgui/imgui.h>
 
-namespace fuen {
+namespace vil {
 
 // Overlay
 Overlay::Overlay() = default;
@@ -56,4 +56,4 @@ bool Overlay::compatible(const VkSwapchainCreateInfoKHR& a,
 	return a.imageFormat == b.imageFormat;
 }
 
-} // namespace fuen
+} // namespace vil

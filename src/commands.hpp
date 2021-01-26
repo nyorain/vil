@@ -11,7 +11,7 @@
 	#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #endif // __GNUC__
 
-namespace fuen {
+namespace vil {
 
 // The type of a command is used e.g. to hide them in the UI.
 enum class CommandType : u32 {
@@ -813,7 +813,7 @@ struct CopyQueryPoolResultsCmd : Command {
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
 };
 
-} // namespace fuen
+} // namespace vil
 
 #ifdef __GNUC__
 	#pragma GCC diagnostic pop

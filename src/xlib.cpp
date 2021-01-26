@@ -12,7 +12,7 @@
 #include <xcb/xcb.h>
 #include <xcb/xcb_keysyms.h>
 
-namespace fuen {
+namespace vil {
 
 struct X11Platform : SwaPlatform {
 	u32 surfaceWindow {};
@@ -150,4 +150,4 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateXcbSurfaceKHR(
 	return res;
 }
 
-} // namespac fuen
+} // namespac vil

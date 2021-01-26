@@ -39,7 +39,7 @@
 
 thread_local ImGuiContext* __LayerImGui;
 
-namespace fuen {
+namespace vil {
 
 // Gui
 void Gui::init(Device& dev, VkFormat format, bool clear) {
@@ -321,22 +321,37 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 	}
 
-	// init imgui
+	// Init imgui
 	this->imgui_ = ImGui::CreateContext();
 	ImGui::SetCurrentContext(imgui_);
 	this->io_ = &ImGui::GetIO();
 	this->io_->IniFilename = nullptr;
 	this->io_->MouseDrawCursor = false;
-	ImGui::GetStyle().WindowRounding = 0.f;
-	ImGui::GetStyle().WindowBorderSize = 0.f;
-	ImGui::GetStyle().TabRounding = 0.f;
-	ImGui::GetStyle().PopupRounding = 0.f;
-	ImGui::GetStyle().GrabRounding = 0.f;
-	// ImGui::GetStyle().ScrollbarRounding = 0.f;
-	// ImGui::GetStyle().FramePadding = {5, 5};
-	// ImGui::GetStyle().ItemSpacing = {8, 8};
-	// ImGui::GetStyle().ItemInnerSpacing = {6, 6};
-	ImGui::GetStyle().Alpha = 1.f;
+
+	// TODO: support custom fonts. Just embed them directly in lib?
+	// this->io_->Fonts->AddFontFromFileTTF("font.ttf", 16.f);
+
+	// Apply style
+	auto& style = ImGui::GetStyle();
+
+	// Disable all rounding
+	style.WindowRounding = 0.f;
+	style.WindowBorderSize = 0.f;
+	style.TabRounding = 0.f;
+	style.PopupRounding = 0.f;
+	style.GrabRounding = 0.f;
+	style.ScrollbarRounding = 0.f;
+
+	// Space a bit more vertically, makes information look less overwhelming.
+	// Don't overdo it though, we intentionally want it compact.
+	// Reduce horizontal spacing a bit.
+	style.ItemSpacing = {8, 6};
+	style.FramePadding = {6, 4};
+	style.ItemInnerSpacing = {2, 4};
+
+	// Center window title
+	style.WindowTitleAlign = {0.5f, 0.5f};
+	style.Alpha = 1.f;
 }
 
 // ~Gui
@@ -946,7 +961,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 		flags = ImGuiWindowFlags_NoDecoration;
 	} else {
-		// ImGui::ShowDemoWindow();
+		ImGui::ShowDemoWindow();
 		// ImGui::ShowAboutWindow();
 		// ImGui::ShowMetricsWindow();
 		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
@@ -964,7 +979,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		return flags;
 	};
 
-	if(ImGui::Begin("vlid", nullptr, flags)) {
+	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
 		if(ImGui::BeginTabBar("MainTabBar")) {
 			if(ImGui::BeginTabItem("Overview")) {
 				drawOverviewUI(draw);
@@ -1637,4 +1652,4 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 // 	dev.dispatch.CmdCopyImageToBuffer(cb, src, layout, dst, 1, &copy);
 // }
 
-} // namespace fuen
+} // namespace vil

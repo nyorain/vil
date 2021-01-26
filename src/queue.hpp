@@ -10,7 +10,7 @@
 #include <memory>
 #include <atomic>
 
-namespace fuen {
+namespace vil {
 
 // Queue handles can't be created or destroyed. They are existent
 // for the entire time the Device exists.
@@ -136,4 +136,4 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(
 VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(
     VkDevice                                    device);
 
-} // namespace fuen
+} // namespace vil

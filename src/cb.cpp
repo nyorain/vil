@@ -7,7 +7,7 @@
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
 
-namespace fuen {
+namespace vil {
 
 // CommandBuffer
 CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
@@ -149,13 +149,13 @@ void CommandBuffer::beginSection(SectionCommand& cmd) {
 			dlg_assert(!section_->next->cmd);
 			section_ = section_->next;
 		} else {
-			auto nextSection = &fuen::allocate<Section>(*this);
+			auto nextSection = &vil::allocate<Section>(*this);
 			nextSection->parent = section_;
 			section_->next = nextSection;
 			section_ = nextSection;
 		}
 	} else {
-		section_ = &fuen::allocate<Section>(*this);
+		section_ = &vil::allocate<Section>(*this);
 	}
 
 	section_->cmd = &cmd;
@@ -266,7 +266,7 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 	dlg_assert(cb.state() == CommandBuffer::State::recording);
 	dlg_assert(cb.record());
 
-	auto& cmd = fuen::allocate<T>(cb, std::forward<Args>(args)...);
+	auto& cmd = vil::allocate<T>(cb, std::forward<Args>(args)...);
 
 	if constexpr(ST == SectionType::end || ST == SectionType::next) {
 		cb.endSection();
@@ -364,7 +364,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 		cb.pool().cbs.push_back(&cb);
 
 		// command buffers are dispatchable, add global data entry
-		fuen::insertData(pCommandBuffers[i], &cb);
+		vil::insertData(pCommandBuffers[i], &cb);
 	}
 
 	return res;
@@ -430,7 +430,7 @@ void useHandle(CommandRecord& rec, Command& cmd, u64 h64, DeviceHandle& handle) 
 
 template<typename T>
 void useHandle(CommandRecord& rec, Command& cmd, T& handle) {
-	auto h64 = handleToU64(fuen::handle(handle));
+	auto h64 = handleToU64(vil::handle(handle));
 	useHandle(rec, cmd, h64, handle);
 }
 
@@ -1342,7 +1342,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		// state is not allowed to change while it is used here.
 		auto recordPtr = secondary.lastRecordPtrLocked();
 
-		auto& childCmd = fuen::allocate<ExecuteCommandsChildCmd>(cb);
+		auto& childCmd = vil::allocate<ExecuteCommandsChildCmd>(cb);
 		childCmd.id_ = i;
 		childCmd.record_ = recordPtr.get();
 
@@ -1862,4 +1862,4 @@ ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
 	return dst;
 }
 
-} // namespace fuen
+} // namespace vil

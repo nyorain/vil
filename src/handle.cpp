@@ -4,7 +4,7 @@
 #include <device.hpp>
 #include <handles.hpp>
 
-namespace fuen {
+namespace vil {
 
 DeviceHandle::~DeviceHandle() {
 	if(!dev) {
@@ -80,7 +80,7 @@ std::string name(const Handle& handle) {
 
 	std::string name;
 	if(handle.name.empty()) {
-		// auto id = handleToU64(fuen::handle(handle));
+		// auto id = handleToU64(vil::handle(handle));
 		// name = dlg::format("{} {}{}", hn, std::hex, id);
 		name = dlg::format("{}", hn);
 	} else {
@@ -123,7 +123,7 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 
 	VkObjectType objectType() const override { return OT; }
 	Handle* find(Device& dev, u64 id) const override {
-		using VKHT = decltype(fuen::handle(std::declval<HT>()));
+		using VKHT = decltype(vil::handle(std::declval<HT>()));
 		auto vkht = u64ToHandle<VKHT>(id);
 
 		auto& map = (dev.*DevMapPtr).map;
@@ -309,4 +309,4 @@ VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectTagEXT(
 	return devd.dispatch.SetDebugUtilsObjectTagEXT(device, pTagInfo);
 }
 
-} // namespace fuen
+} // namespace vil

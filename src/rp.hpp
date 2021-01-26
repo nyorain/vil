@@ -6,7 +6,7 @@
 #include <vector>
 #include <memory>
 
-namespace fuen {
+namespace vil {
 
 struct RenderPassDesc {
 	std::vector<std::unique_ptr<std::byte[]>> exts; // pNext chains
@@ -100,4 +100,4 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 
 // No need to hook GetRenderAreaGranularity
 
-} // namespace fuen
+} // namespace vil

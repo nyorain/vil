@@ -7,7 +7,7 @@
 #include <unordered_set>
 #include <vk/vulkan.h>
 
-namespace fuen {
+namespace vil {
 
 struct Handle {
 	std::string name;
@@ -139,4 +139,4 @@ VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectTagEXT(
 	VkDevice                                    device,
 	const VkDebugUtilsObjectTagInfoEXT*         pTagInfo);
 
-} // namespace fuen
+} // namespace vil

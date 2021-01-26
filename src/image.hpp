@@ -4,7 +4,7 @@
 #include <memory.hpp>
 #include <unordered_set>
 
-namespace fuen {
+namespace vil {
 
 struct Image : MemoryResource {
 	VkImage handle {};
@@ -98,4 +98,4 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
     VkSampler                                   sampler,
     const VkAllocationCallbacks*                pAllocator);
 
-} // namespace fuen
+} // namespace vil

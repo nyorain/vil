@@ -10,7 +10,7 @@
 #include <spirv_reflect.h>
 #include <map>
 
-namespace fuen {
+namespace vil {
 
 ResourceGui::~ResourceGui() {
 	if(image_.view) {
@@ -1339,17 +1339,24 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
 
-	ImGui::BeginChild("Search settings", {0.f, 50.f}, false);
+	// ImGui::BeginChild("Search settings", {0.f, 0.f}, false, ImGuiWindowFlags_AlwaysAutoResize);
+	ImGui::BeginChild("Search settings", {0.f, 0.f}, false);
 
 	// filter by object type
 	auto update = firstUpdate_;
 	firstUpdate_ = false;
 
-	auto filterName = fuen::name(filter_);
-	if(ImGui::BeginCombo("Filter", filterName)) {
+	if(ImGui::Button("Update")) {
+		update = true;
+	}
+
+	ImGui::SameLine();
+	auto filterName = vil::name(filter_);
+	// ImGui::SetNextItemWidth(150.f);
+	if(ImGui::BeginCombo("", filterName)) {
 		for(auto& typeHandler : ObjectTypeHandler::handlers) {
 			auto filter = typeHandler->objectType();
-			auto name = fuen::name(filter);
+			auto name = vil::name(filter);
 			if(ImGui::Selectable(name)) {
 				filter_ = filter;
 				update = true;
@@ -1357,11 +1364,6 @@ void ResourceGui::draw(Draw& draw) {
 		}
 
 		ImGui::EndCombo();
-	}
-
-	ImGui::SameLine();
-	if(ImGui::Button("Update")) {
-		update = true;
 	}
 
 	// text search
@@ -1383,7 +1385,7 @@ void ResourceGui::draw(Draw& draw) {
 	}
 
 	ImGui::Separator();
-	ImGui::EndChild();
+	// ImGui::EndChild();
 
 	// resource list
 	ImGui::BeginChild("Resource List", {0.f, 0.f}, false);
@@ -1418,6 +1420,7 @@ void ResourceGui::draw(Draw& draw) {
 	}
 
 	ImGui::EndChild(); // Resource List
+	ImGui::EndChild(); // left column child
 
 	ImGui::TableNextColumn();
 
@@ -1605,4 +1608,4 @@ void ResourceGui::recoredPostRender(Draw& draw) {
 	}
 }
 
-} // namespace fuen
+} // namespace vil

@@ -5,7 +5,7 @@
 #include <string>
 #include <functional>
 
-namespace fuen {
+namespace vil {
 
 // Descrption of a command relative to the current recorded state.
 // Can be useful to implement heuristics identifying structurally
@@ -62,4 +62,4 @@ struct CommandBufferDesc {
 	friend float match(const CommandBufferDesc& a, const CommandBufferDesc& b);
 };
 
-} // namespace fuen
+} // namespace vil

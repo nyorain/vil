@@ -7,7 +7,7 @@
 
 struct ImDrawData;
 
-namespace fuen {
+namespace vil {
 
 struct OwnBuffer {
 	Device* dev {};
@@ -156,4 +156,4 @@ struct DrawGuiImage {
 	VkImageAspectFlagBits aspect {};
 };
 
-} // namespace fuen
+} // namespace vil

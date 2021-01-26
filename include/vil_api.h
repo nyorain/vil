@@ -52,9 +52,9 @@ extern "C" {
 // The functions must be externally synchronized for a given overaly.
 // NOTE: header-only by design, no library needs to be linked besides
 // 'dl' on unix and 'kernel32' on windows (usually automatically done).
-// This will automatically call symbols from the fuen layer, if it is loaded.
+// This will automatically call symbols from the vlid layer, if it is loaded.
 
-typedef struct FuenOverlayT* FuenOverlay; // Opaque
+typedef struct VilOverlayT* VilOverlay;
 
 /// Creates an overlay for the swapchain last created for the given device.
 /// Return NULL on failure. Note that there might be a data race when you
@@ -63,7 +63,7 @@ typedef struct FuenOverlayT* FuenOverlay; // Opaque
 /// The overlay will automatically be moved to a new swapchain if it is created
 /// with the swapchain associated to this layer in the oldSwapchain
 /// member of the VkSwapchainCreateInfoKHR.
-/// By default, it is hidden but you could immediately call fuenOverlayShow
+/// By default, it is hidden but you could immediately call vlidOverlayShow
 /// after this function to make it visible.
 ///
 /// The name is intentionally horribly long to state as much of the terribleness
@@ -73,58 +73,58 @@ typedef struct FuenOverlayT* FuenOverlay; // Opaque
 /// and layer. Therefore the function to create an overlay is designed like
 /// this.
 /// TODO: allow to destroy overlay again.
-typedef FuenOverlay (*PFN_fuenCreateOverlayForLastCreatedSwapchain)(VkDevice);
+typedef VilOverlay (*PFN_vilCreateOverlayForLastCreatedSwapchain)(VkDevice);
 
-typedef void (*PFN_fuenOverlayShow)(FuenOverlay, bool show);
+typedef void (*PFN_vilOverlayShow)(VilOverlay, bool show);
 
-typedef void (*PFN_fuenOverlayMouseMoveEvent)(FuenOverlay, int x, int y);
+typedef void (*PFN_vilOverlayMouseMoveEvent)(VilOverlay, int x, int y);
 
 // They return whether the event was processed by the overlay
-typedef bool (*PFN_fuenOverlayMouseButtonEvent)(FuenOverlay, unsigned button, bool press);
-typedef bool (*PFN_fuenOverlayMouseWheelEvent)(FuenOverlay, float x, float y);
+typedef bool (*PFN_vilOverlayMouseButtonEvent)(VilOverlay, unsigned button, bool press);
+typedef bool (*PFN_vilOverlayMouseWheelEvent)(VilOverlay, float x, float y);
 
-// TODO: keycode and modifiers enum
-typedef bool (*PFN_fuenOverlayKeyEvent)(FuenOverlay, uint32_t keycode, bool pressed);
-typedef bool (*PFN_fuenOverlayTextEvent)(FuenOverlay, const char* utf8);
-typedef void (*PFN_fuenOverlayKeyboardModifier)(FuenOverlay, uint32_t mod, bool active);
+// TODO: add keycode (expecting linux.h keycodes) and modifiers enums
+typedef bool (*PFN_vilOverlayKeyEvent)(VilOverlay, uint32_t keycode, bool pressed);
+typedef bool (*PFN_vilOverlayTextEvent)(VilOverlay, const char* utf8);
+typedef void (*PFN_vilOverlayKeyboardModifier)(VilOverlay, uint32_t mod, bool active);
 
-typedef struct FuenApi {
-	PFN_fuenCreateOverlayForLastCreatedSwapchain CreateOverlayForLastCreatedSwapchain;
+typedef struct VilApi {
+	PFN_vilCreateOverlayForLastCreatedSwapchain CreateOverlayForLastCreatedSwapchain;
 
-	PFN_fuenOverlayShow OverlayShow;
+	PFN_vilOverlayShow OverlayShow;
 
-	PFN_fuenOverlayMouseMoveEvent OverlayMouseMoveEvent;
-	PFN_fuenOverlayMouseButtonEvent OverlayMouseButtonEvent;
-	PFN_fuenOverlayMouseWheelEvent OverlayMouseWheelEvent;
-	PFN_fuenOverlayKeyEvent OverlayKeyEvent;
-	PFN_fuenOverlayTextEvent OverlayTextEvent;
-	PFN_fuenOverlayKeyboardModifier OverlayKeyboardModifier;
-} FuenApi;
+	PFN_vilOverlayMouseMoveEvent OverlayMouseMoveEvent;
+	PFN_vilOverlayMouseButtonEvent OverlayMouseButtonEvent;
+	PFN_vilOverlayMouseWheelEvent OverlayMouseWheelEvent;
+	PFN_vilOverlayKeyEvent OverlayKeyEvent;
+	PFN_vilOverlayTextEvent OverlayTextEvent;
+	PFN_vilOverlayKeyboardModifier OverlayKeyboardModifier;
+} VilApi;
 
 /// Must be called only *after* a vulkan device was created.
-/// Will remain valid only as long as the vulkan device is valid.
+/// The loaded api will remain valid only as long as the vulkan device is valid.
 /// Returns 0 on success, an error code otherwise.
-static inline int fuenLoadApi(FuenApi* api) {
-	// We don't actually load a library here. If fuen was loaded as a
+static inline int vilLoadApi(VilApi* api) {
+	// We don't actually load a library here. If vil was loaded as a
 	// layer, the shared library must already be present. Otherwise,
 	// we want this to fail anyways.
 
 #if defined(_WIN32) || defined(__CYGWIN__)
 	// TODO: name of dll depends on compiler used. For MSC it does not
 	// have the lib prefix, for gcc/mingw it does.
-	HMODULE handle = GetModuleHandleA("VkLayer_vlid.dll");
+	HMODULE handle = GetModuleHandleA("VkLayer_live_introspection.dll");
 
 	// We don't have to call FreeLibrary since GetModuleHandle does not increase ref count
-	#define fuenCloseLib()
-	#define fuenLoadSym(procName) *(FARPROC*) (&api->procName) = GetProcAddress(handle, "fuen" #procName)
-	// #define fuenError() GetLastError()
+	#define vilCloseLib()
+	#define vilLoadSym(procName) *(FARPROC*) (&api->procName) = GetProcAddress(handle, "vil" #procName)
+	// #define vilError() GetLastError()
 #else
-	void* handle = dlopen("libVkLayer_vlid.so", RTLD_NOLOAD | RTLD_LAZY);
+	void* handle = dlopen("libVkLayer_live_introspection.so", RTLD_NOLOAD | RTLD_LAZY);
 
 	// We have to call dlclose since our dlopen increases the reference count.
-	#define fuenCloseLib() dlclose(handle)
-	#define fuenLoadSym(procName) *(void**) &(api->procName) = dlsym(handle, "fuen" #procName)
-	// #define fuenError() errno
+	#define vilCloseLib() dlclose(handle)
+	#define vilLoadSym(procName) *(void**) &(api->procName) = dlsym(handle, "vil" #procName)
+	// #define vilError() errno
 #endif
 
 	if(!handle) {
@@ -132,24 +132,24 @@ static inline int fuenLoadApi(FuenApi* api) {
 		return -1;
 	}
 
-	fuenLoadSym(CreateOverlayForLastCreatedSwapchain);
+	vilLoadSym(CreateOverlayForLastCreatedSwapchain);
 	if(!api->CreateOverlayForLastCreatedSwapchain) {
 		return -2;
 	}
 
 	// yeah well just assume they'll load fine if overlayShow loaded.
-	fuenLoadSym(OverlayShow);
-	fuenLoadSym(OverlayMouseMoveEvent);
-	fuenLoadSym(OverlayMouseButtonEvent);
-	fuenLoadSym(OverlayMouseWheelEvent);
-	fuenLoadSym(OverlayKeyEvent);
-	fuenLoadSym(OverlayTextEvent);
-	fuenLoadSym(OverlayKeyboardModifier);
+	vilLoadSym(OverlayShow);
+	vilLoadSym(OverlayMouseMoveEvent);
+	vilLoadSym(OverlayMouseButtonEvent);
+	vilLoadSym(OverlayMouseWheelEvent);
+	vilLoadSym(OverlayKeyEvent);
+	vilLoadSym(OverlayTextEvent);
+	vilLoadSym(OverlayKeyboardModifier);
 
-	fuenCloseLib();
+	vilCloseLib();
 
-#undef fuenCloseLib
-#undef fuenLoadSym
+#undef vilCloseLib
+#undef vilLoadSym
 
 	return 0;
 }

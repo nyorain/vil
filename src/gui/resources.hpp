@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include <string>
 
-namespace fuen {
+namespace vil {
 
 struct ResourceGui {
 	void select(Handle& handle);
@@ -81,4 +81,4 @@ struct ResourceGui {
 	void drawHandleDesc(Draw&, Handle& handle);
 };
 
-} // namespace fuen
+} // namespace vil

@@ -3,7 +3,7 @@
 #include <cb.hpp>
 #include <util/util.hpp>
 
-namespace fuen {
+namespace vil {
 
 // CommandDesc
 void fillIn(CommandDesc& ret, const Command* siblings, const Command& cmd) {
@@ -259,4 +259,4 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	return ownMatch * childMatch;
 }
 
-} // namespace fuen
+} // namespace vil
