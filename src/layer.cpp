@@ -24,7 +24,7 @@
 #include <dlg/dlg.hpp>
 #include <csignal>
 
-#include <fuen_api.h>
+#include <vlid_api.h>
 
 namespace fuen {
 

@@ -329,6 +329,9 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	this->io_->MouseDrawCursor = false;
 	ImGui::GetStyle().WindowRounding = 0.f;
 	ImGui::GetStyle().WindowBorderSize = 0.f;
+	ImGui::GetStyle().TabRounding = 0.f;
+	ImGui::GetStyle().PopupRounding = 0.f;
+	ImGui::GetStyle().GrabRounding = 0.f;
 	// ImGui::GetStyle().ScrollbarRounding = 0.f;
 	// ImGui::GetStyle().FramePadding = {5, 5};
 	// ImGui::GetStyle().ItemSpacing = {8, 8};
