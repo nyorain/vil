@@ -42,10 +42,6 @@ void checkUnset(span<H*> handlePtr, const std::unordered_set<DeviceHandle*>& des
 	}
 }
 
-bool displayActionInspector(Gui& gui, const Command& cmd) {
-	return gui.cbGui().displayActionInspector(cmd);
-}
-
 // ArgumentsDesc
 NameResult name(DeviceHandle* handle, NullName nullName) {
 	if(!handle) {
@@ -679,8 +675,6 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		refButtonD(gui, ds.ds, "<Invalid>");
 		// TODO: dynamic offsets
 	}
-
-	// TODO: push constants
 }
 
 void DrawCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
@@ -713,21 +707,14 @@ std::string DrawCmd::toString() const {
 }
 
 void DrawCmd::displayInspector(Gui& gui) const {
-	auto drawOwn = displayActionInspector(gui, *this);
-	if(drawOwn) {
-		ImGui::BeginChild("Command IO Inspector");
+	asColumns2({{
+		{"vertexCount", "{}", vertexCount},
+		{"instanceCount", "{}", instanceCount},
+		{"firstVertex", "{}", firstVertex},
+		{"firstInstance", "{}", firstInstance},
+	}});
 
-		asColumns2({{
-			{"vertexCount", "{}", vertexCount},
-			{"instanceCount", "{}", instanceCount},
-			{"firstVertex", "{}", firstVertex},
-			{"firstInstance", "{}", firstInstance},
-		}});
-
-		DrawCmdBase::displayGrahpicsState(gui, false);
-
-		ImGui::EndChild();
-	}
+	DrawCmdBase::displayGrahpicsState(gui, false);
 }
 
 // DrawIndirectCmd
@@ -750,20 +737,13 @@ std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
 }
 
 void DrawIndirectCmd::displayInspector(Gui& gui) const {
-	auto drawOwn = displayActionInspector(gui, *this);
-	if(drawOwn) {
-		ImGui::BeginChild("Command IO Inspector");
+	imGuiText("Indirect buffer");
+	ImGui::SameLine();
+	refButtonD(gui, buffer);
+	ImGui::SameLine();
+	imGuiText("Offset {}", offset);
 
-		imGuiText("Indirect buffer");
-		ImGui::SameLine();
-		refButtonD(gui, buffer);
-		ImGui::SameLine();
-		imGuiText("Offset {}", offset);
-
-		DrawCmdBase::displayGrahpicsState(gui, indexed);
-
-		ImGui::EndChild();
-	}
+	DrawCmdBase::displayGrahpicsState(gui, indexed);
 }
 
 void DrawIndirectCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
@@ -800,17 +780,15 @@ std::string DrawIndexedCmd::toString() const {
 }
 
 void DrawIndexedCmd::displayInspector(Gui& gui) const {
-	if(displayActionInspector(gui, *this)) {
-		asColumns2({{
-			{"indexCount", "{}", indexCount},
-			{"instanceCount", "{}", instanceCount},
-			{"firstIndex", "{}", firstIndex},
-			{"vertexOffset", "{}", vertexOffset},
-			{"firstInstance", "{}", firstInstance},
-		}});
+	asColumns2({{
+		{"indexCount", "{}", indexCount},
+		{"instanceCount", "{}", instanceCount},
+		{"firstIndex", "{}", firstIndex},
+		{"vertexOffset", "{}", vertexOffset},
+		{"firstInstance", "{}", firstInstance},
+	}});
 
-		DrawCmdBase::displayGrahpicsState(gui, true);
-	}
+	DrawCmdBase::displayGrahpicsState(gui, true);
 }
 
 // DrawIndirectCountCmd
@@ -843,7 +821,6 @@ std::vector<std::string> DrawIndirectCountCmd::argumentsDesc() const {
 }
 
 void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
-	// TODO: display effective draw commands
 	imGuiText("Indirect buffer:");
 	ImGui::SameLine();
 	refButtonD(gui, buffer);
@@ -964,8 +941,6 @@ void DispatchCmdBase::displayComputeState(Gui& gui) const {
 		refButtonD(gui, ds.ds, "<Invalid>");
 		// TODO: dynamic offsets
 	}
-
-	// TODO: push constants
 }
 
 void DispatchCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
@@ -990,15 +965,8 @@ std::string DispatchCmd::toString() const {
 }
 
 void DispatchCmd::displayInspector(Gui& gui) const {
-	auto drawOwn = displayActionInspector(gui, *this);
-	if(drawOwn) {
-		ImGui::BeginChild("Command IO Inspector");
-
-		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
-		DispatchCmdBase::displayComputeState(gui);
-
-		ImGui::EndChild();
-	}
+	imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
+	DispatchCmdBase::displayComputeState(gui);
 }
 
 // DispatchIndirectCmd
@@ -1007,10 +975,8 @@ void DispatchIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 }
 
 void DispatchIndirectCmd::displayInspector(Gui& gui) const {
-	if(displayActionInspector(gui, *this)) {
-		refButtonD(gui, buffer);
-		DispatchCmdBase::displayComputeState(gui);
-	}
+	refButtonD(gui, buffer);
+	DispatchCmdBase::displayComputeState(gui);
 }
 
 std::string DispatchIndirectCmd::toString() const {
@@ -1048,11 +1014,9 @@ std::string DispatchBaseCmd::toString() const {
 }
 
 void DispatchBaseCmd::displayInspector(Gui& gui) const {
-	if(displayActionInspector(gui, *this)) {
-		imGuiText("Base: {} {} {}", baseGroupX, baseGroupY, baseGroupZ);
-		imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
-		DispatchCmdBase::displayComputeState(gui);
-	}
+	imGuiText("Base: {} {} {}", baseGroupX, baseGroupY, baseGroupZ);
+	imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
+	DispatchCmdBase::displayComputeState(gui);
 }
 
 // CopyImageCmd
@@ -1111,7 +1075,7 @@ std::vector<std::string> CopyImageCmd::argumentsDesc() const {
 // CopyBufferToImageCmd
 void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyBufferToImage(cb, src->handle, dst->handle,
-		imgLayout, u32(copies.size()), copies.data());
+		dstLayout, u32(copies.size()), copies.data());
 }
 
 void CopyBufferToImageCmd::displayInspector(Gui& gui) const {
@@ -1151,7 +1115,7 @@ std::vector<std::string> CopyBufferToImageCmd::argumentsDesc() const {
 
 // CopyImageToBufferCmd
 void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdCopyImageToBuffer(cb, src->handle, imgLayout, dst->handle,
+	dev.dispatch.CmdCopyImageToBuffer(cb, src->handle, srcLayout, dst->handle,
 		u32(copies.size()), copies.data());
 }
 
@@ -1403,7 +1367,7 @@ std::vector<std::string> FillBufferCmd::argumentsDesc() const {
 
 // ClearColorImageCmd
 void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdClearColorImage(cb, dst->handle, imgLayout, &color,
+	dev.dispatch.CmdClearColorImage(cb, dst->handle, dstLayout, &color,
 		u32(ranges.size()), ranges.data());
 }
 
@@ -1432,7 +1396,7 @@ std::vector<std::string> ClearColorImageCmd::argumentsDesc() const {
 
 // ClearDepthStencilImageCmd
 void ClearDepthStencilImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdClearDepthStencilImage(cb, dst->handle, imgLayout, &value,
+	dev.dispatch.CmdClearDepthStencilImage(cb, dst->handle, dstLayout, &value,
 		u32(ranges.size()), ranges.data());
 }
 

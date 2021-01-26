@@ -1172,7 +1172,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 
 	cmd.src = &src;
 	cmd.dst = &dst;
-	cmd.imgLayout = dstImageLayout;
+	cmd.dstLayout = dstImageLayout;
 	cmd.copies = copySpan(cb, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
@@ -1197,7 +1197,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 
 	cmd.src = &src;
 	cmd.dst = &dst;
-	cmd.imgLayout = srcImageLayout;
+	cmd.srcLayout = srcImageLayout;
 	cmd.copies = copySpan(cb, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
@@ -1220,7 +1220,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 	auto& dst = cb.dev->images.get(image);
 	cmd.dst = &dst;
 	cmd.color = *pColor;
-	cmd.imgLayout = imageLayout;
+	cmd.dstLayout = imageLayout;
 	cmd.ranges = copySpan(cb, pRanges, rangeCount);
 
 	useHandle(cb, cmd, dst);
@@ -1241,7 +1241,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 
 	auto& dst = cb.dev->images.get(image);
 	cmd.dst = &dst;
-	cmd.imgLayout = imageLayout;
+	cmd.dstLayout = imageLayout;
 	cmd.value = *pDepthStencil;
 	cmd.ranges = copySpan(cb, pRanges, rangeCount);
 

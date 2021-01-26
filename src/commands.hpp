@@ -438,7 +438,7 @@ struct CopyImageCmd : Command {
 struct CopyBufferToImageCmd : Command {
 	Buffer* src {};
 	Image* dst {};
-	VkImageLayout imgLayout {};
+	VkImageLayout dstLayout {};
 	span<VkBufferImageCopy> copies;
 
 	std::string toString() const override;
@@ -453,7 +453,7 @@ struct CopyBufferToImageCmd : Command {
 struct CopyImageToBufferCmd : Command {
 	Image* src {};
 	Buffer* dst {};
-	VkImageLayout imgLayout {};
+	VkImageLayout srcLayout {};
 	span<VkBufferImageCopy> copies;
 
 	std::string toString() const override;
@@ -544,7 +544,7 @@ struct FillBufferCmd : Command {
 struct ClearColorImageCmd : Command {
 	Image* dst {};
 	VkClearColorValue color;
-	VkImageLayout imgLayout {};
+	VkImageLayout dstLayout {};
 	span<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override;
@@ -559,7 +559,7 @@ struct ClearColorImageCmd : Command {
 struct ClearDepthStencilImageCmd : Command {
 	Image* dst {};
 	VkClearDepthStencilValue value {};
-	VkImageLayout imgLayout {};
+	VkImageLayout dstLayout {};
 	span<VkImageSubresourceRange> ranges;
 
 	std::string toString() const override;

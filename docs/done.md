@@ -1,5 +1,44 @@
 For v0.1
 
+- [x] always use nearest sampling for images?
+- [x] add example image to readme (with real-world application if possible)
+- [x] probably rather important to have a clear documentation on supported
+      feature set, extensions and so on
+	  {see docs/features.md}
+	- [x] clearly document (maybe already in README?) that the layer
+	      can crash when extensions it does not know about/does not support
+		  are being used.
+	- [x] update README to correctly show all current features
+- [x] proper layout of child windows with resizing
+      See https://github.com/ocornut/imgui/issues/319
+	  {just switched to the new imgui tables, they fix issues}
+- [x] show more information in command viewer. Stuff downloaded from
+      device before/after command
+	  {some TODOs of this feature moved to after v0.1}
+	- [x] new per-command input/output overview, allowing to view *all* resources
+	- [x] I/O inspector for transfer commands
+	      {left buffer gui io support for later}
+	- [x] add more information to I/O viewer (especially for images)
+	- [x] fix code flow. Really bad at the moment, with Commands calling
+	      that displayAction function and optionally append to child.
+	- [x] improve the new overview. See all the various todos
+	      {still lots of TODOs left though, just most important ones fixed now}
+	- [x] chose sensible default sizes/layouts
+	- [x] implement buffer viewer (infer information from shaders)
+	- [x] factor out image viewer from resources into own component; use it here.
+	      Allow layer/mip selection
+	- [x] re-add timing display in command inspector
+	- [x] display arrays in buffers correctly
+	      {moved to spirv todo}
+	- [x] for storage buffers/storage images, a before/after/change
+	      view would be really nice. We can do that.
+- [x] Fix the (due to table now broken) append child logic in displayInspector
+	- [x] should likely call displayActionInspector directly from inside cbGui
+	      and only show command inspector itself when "Command" is selected
+- [x] selecting cmdBeginRp in gui gives validation layer error.
+      I suspect we try to split it or something?
+	  {nope we didn't split but still inserted splitting barrier, not allowed}
+- [x] Link to swapchain in swapchain images
 - [x] next ui sync rework
 	- [x] don't lock device mutex while waiting for fences (see waitForSubmissions)
 	- [x] use chain semaphores for input

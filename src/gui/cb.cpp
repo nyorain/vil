@@ -286,7 +286,6 @@ void CommandBufferGui::draw(Draw& draw) {
 		return;
 	}
 
-	draw_ = &draw;
 	auto& dev = gui_->dev();
 	auto& hook = *dev.commandHook;
 
@@ -565,7 +564,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	// command info
 	ImGui::BeginChild("Command Info");
 	if(!command_.empty()) {
-		command_.back()->displayInspector(*gui_);
+		displayInspector(draw, *command_.back());
 	}
 
 	ImGui::EndChild();
@@ -674,9 +673,12 @@ void CommandBufferGui::destroyed(const Handle& handle) {
 	// ownership, i.e. are kept alive by us.
 }
 
-void CommandBufferGui::displayImage(const CopiedImage& img) {
+void CommandBufferGui::displayImage(Draw& draw, const CopiedImage& img) {
 	auto& dev = gui_->dev();
-	auto& draw = *draw_;
+
+	dlg_assert(img.aspectMask);
+	dlg_assert(img.image);
+	dlg_assert(img.imageView);
 
 	draw.usedHookState = dev.commandHook->state;
 	dlg_assert(draw.usedHookState);
@@ -703,7 +705,18 @@ void CommandBufferGui::displayImage(const CopiedImage& img) {
 	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 }
 
-void CommandBufferGui::displayDs(const Command& cmd) {
+void CommandBufferGui::displayInspector(Draw& draw, const Command& bcmd) {
+	if(bcmd.type() == CommandType::dispatch ||
+			bcmd.type() == CommandType::draw ||
+			bcmd.type() == CommandType::transfer) {
+		displayActionInspector(draw, bcmd);
+		return;
+	}
+
+	bcmd.displayInspector(*gui_);
+}
+
+void CommandBufferGui::displayDs(Draw& draw, const Command& cmd) {
 	auto& gui = *this->gui_;
 
 	auto& hook = *gui.dev().commandHook;
@@ -714,6 +727,11 @@ void CommandBufferGui::displayDs(const Command& cmd) {
 
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
 	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
+	if(!drawCmd && !dispatchCmd) {
+		dlg_error("Unreachable");
+		return;
+	}
+
 	if((dispatchCmd && !dispatchCmd->state.pipe) || (drawCmd && !drawCmd->state.pipe)) {
 		ImGui::Text("Pipeline was destroyed, can't interpret content");
 		return;
@@ -862,44 +880,20 @@ void CommandBufferGui::displayDs(const Command& cmd) {
 			imGuiText("Layout: {}", vk::name(elem.imageInfo.layout));
 		}
 
-		displayImage(*img);
+		displayImage(draw, *img);
 	}
 
 	// == BufferView ==
 	// TODO
 }
 
-// If it returns true, cmd should display own command stuff in second window
-bool CommandBufferGui::displayActionInspector(const Command& cmd) {
-	auto& gui = *gui_;
-	auto& hook = *gui.dev().commandHook;
-
-	// TODO: don't even display the inspect when we are viewing a static
-	// record and that record is invalidated.
-	// (or other cases where we know it will never be submitted again)
-	// if(hook ... invalid?)
-	// 	return true;
-	// }
-
-	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
-	if(!ImGui::BeginTable("IO inspector", 2, flags, ImGui::GetContentRegionAvail())) {
-		return false; // clipped anyways
-	}
-
-	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
-	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
-
-	ImGui::TableNextRow();
-	ImGui::TableNextColumn();
-
-	ImGui::BeginChild("Command IO list");
+void CommandBufferGui::displayDsList(const Command& cmd) {
+	auto& hook = *gui_->dev().commandHook;
 
 	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
-	dlg_assert(dispatchCmd || drawCmd);
-
-	if(ImGui::Selectable("Command")) {
-		hook.unsetHookOps();
+	if(!drawCmd && !dispatchCmd) {
+		return;
 	}
 
 	// TODO: this seems to need special treatment for arrays?
@@ -996,11 +990,104 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 		}
 	}
 
+}
+
+void CommandBufferGui::displayIOList(const Command& cmd) {
+	auto& hook = *gui_->dev().commandHook;
+	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
+	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+
+	if(ImGui::Selectable("Command", hook.queryTime)) {
+		hook.unsetHookOps(true);
+	}
+
+	// Transfer commands:
+	if(!drawCmd && !dispatchCmd) {
+		// TODO: add support for viewing buffers here.
+		// Hard to do in a meaningful way though.
+		auto found = false;
+		auto addSrc = [&](auto* cmd) {
+			if(!cmd) {
+				return;
+			}
+
+			found = true;
+			if(ImGui::Selectable("Source", hook.copyTransferSrc)) {
+				hook.unsetHookOps();
+				hook.copyTransferSrc = true;
+			}
+		};
+
+		auto addDst = [&](auto* cmd) {
+			if(!cmd) {
+				return;
+			}
+
+			found = true;
+			if(ImGui::Selectable("Destination", hook.copyTransferDst)) {
+				hook.unsetHookOps();
+				hook.copyTransferDst = true;
+			}
+		};
+
+		auto addSrcDst = [&](auto* cmd) {
+			if(!cmd) {
+				return;
+			}
+			addSrc(cmd);
+			addDst(cmd);
+		};
+
+		addSrcDst(dynamic_cast<const CopyImageCmd*>(&cmd));
+		addDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
+		addSrc(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
+		addSrcDst(dynamic_cast<const BlitImageCmd*>(&cmd));
+		addSrcDst(dynamic_cast<const ResolveImageCmd*>(&cmd));
+		// addSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
+		// addDst(dynamic_cast<const UpdateBufferCmd*>(&cmd));
+		// addDst(dynamic_cast<const FillBufferCmd*>(&cmd));
+		addDst(dynamic_cast<const ClearColorImageCmd*>(&cmd));
+		addDst(dynamic_cast<const ClearDepthStencilImageCmd*>(&cmd));
+
+		// TODO: add support for selecting one of the multiple
+		//   cleared attachments
+		addDst(dynamic_cast<const ClearAttachmentCmd*>(&cmd));
+
+		dlg_assertm(found, "IO inspector unimplemented for command");
+		return;
+	}
+
+	// Vertex IO
+	if(drawCmd) {
+		auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+		if(hook.copyAttachment && hook.copyVertexBuffers) {
+			flags |= ImGuiTreeNodeFlags_Selected;
+		}
+
+		ImGui::TreeNodeEx("Vertex input", flags);
+		if(ImGui::IsItemClicked()) {
+			hook.unsetHookOps();
+			hook.copyVertexBuffers = true;
+
+			auto indexedCmd = dynamic_cast<const DrawIndexedCmd*>(drawCmd);
+			auto indirectCmd = dynamic_cast<const DrawIndirectCmd*>(drawCmd);
+			auto indirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(drawCmd);
+			if(indexedCmd ||
+					(indirectCmd && indirectCmd->indexed) ||
+					(indirectCountCmd && indirectCountCmd->indexed)) {
+				hook.copyIndexBuffers = true;
+			}
+		}
+	}
+
+	displayDsList(cmd);
+
+	// Attachments
 	if(drawCmd) {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
 		if(ImGui::TreeNodeEx("Attachments")) {
 			const BeginRenderPassCmd* rpCmd = nullptr;
-			for(auto* cmdi : gui.cbGui().command_) {
+			for(auto* cmdi : command_) {
 				if(rpCmd = dynamic_cast<const BeginRenderPassCmd*>(cmdi); rpCmd) {
 					break;
 				}
@@ -1009,7 +1096,7 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 			dlg_assert(rpCmd);
 			if(rpCmd && rpCmd->rp) {
 				auto& desc = nonNull(nonNull(rpCmd->rp).desc);
-				auto subpassID = rpCmd->subpassOfDescendant(*gui.cbGui().command_.back());
+				auto subpassID = rpCmd->subpassOfDescendant(*command_.back());
 				auto& subpass = desc.subpasses[subpassID];
 
 				auto addAttachment = [&](auto label, auto id) {
@@ -1045,28 +1132,6 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 			}
 
 			ImGui::TreePop();
-		}
-	}
-
-	if(drawCmd) {
-		auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-		if(hook.copyAttachment && hook.copyVertexBuffers) {
-			flags |= ImGuiTreeNodeFlags_Selected;
-		}
-
-		ImGui::TreeNodeEx("Vertex input", flags);
-		if(ImGui::IsItemClicked()) {
-			hook.unsetHookOps();
-			hook.copyVertexBuffers = true;
-
-			auto indexedCmd = dynamic_cast<const DrawIndexedCmd*>(drawCmd);
-			auto indirectCmd = dynamic_cast<const DrawIndirectCmd*>(drawCmd);
-			auto indirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(drawCmd);
-			if(indexedCmd ||
-					(indirectCmd && indirectCmd->indexed) ||
-					(indirectCountCmd && indirectCountCmd->indexed)) {
-				hook.copyIndexBuffers = true;
-			}
 		}
 	}
 
@@ -1107,13 +1172,17 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 			}
 		}
 	}
+}
 
-	ImGui::EndChild();
-	ImGui::TableNextColumn();
-	ImGui::BeginChild("Command IO Inspector");
+void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
+	auto& hook = *gui_->dev().commandHook;
+
+	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
 
 	// TODO: display more information, not just raw data
 	//   e.g. link to the respective resources, descriptor sets etc
+	//   maybe allow to select the descriptorSet entry to get to the ds?
 	auto cmdInfo = true;
 	if(hook.copyDS) {
 		// TODO: only show this for bound resources that may be written,
@@ -1123,7 +1192,7 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 			hook.invalidateData();
 		}
 
-		displayDs(cmd);
+		displayDs(draw, cmd);
 		cmdInfo = false;
 	} else if(hook.copyVertexBuffers) {
 		dlg_assert(drawCmd);
@@ -1231,7 +1300,7 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 			// TODO: display information/refButtons to framebuffer and imageview, image used!
 
 			if(hook.state->attachmentCopy.image) {
-				gui.cbGui().displayImage(hook.state->attachmentCopy);
+				displayImage(draw, hook.state->attachmentCopy);
 			} else {
 				imGuiText("Error: {}", hook.state->errorMessage);
 			}
@@ -1264,33 +1333,82 @@ bool CommandBufferGui::displayActionInspector(const Command& cmd) {
 				break;
 			}
 		}
+	} else if(hook.copyTransferSrc || hook.copyTransferDst) {
+		if(hook.state) {
+			if(ImGui::Checkbox("Before Command", &hook.copyTransferBefore)) {
+				hook.invalidateRecordings();
+				hook.invalidateData();
+			}
+
+			// TODO: display information/refButtons to framebuffer and imageview, image used!
+
+			if(hook.state->transferImgCopy.image) {
+				displayImage(draw, hook.state->transferImgCopy);
+			} else {
+				imGuiText("Error: {}", hook.state->errorMessage);
+			}
+		} else {
+			ImGui::Text("Waiting for a submission...");
+		}
+
+		cmdInfo = false;
 	}
 
 	if(cmdInfo) {
 		hook.queryTime = true;
 		if(hook.state) {
 			auto lastTime = hook.state->neededTime;
-			auto displayDiff = lastTime * gui.dev().props.limits.timestampPeriod;
+			auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
 
-			/*
-			auto timeNames = {"ns", "mus", "ms", "s"};
-			auto it = timeNames.begin();
-			while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
-				++it;
-				displayDiff /= 1000.f;
-			}
-			imGuiText("Time: {} {}", displayDiff, *it);
-			*/
+			// auto timeNames = {"ns", "mus", "ms", "s"};
+			// auto it = timeNames.begin();
+			// while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
+			// 	++it;
+			// 	displayDiff /= 1000.f;
+			// }
+			// imGuiText("Time: {} {}", displayDiff, *it);
 
 			displayDiff /= 1000.f * 1000.f;
 			imGuiText("Time: {} ms", displayDiff);
 		}
+
+		cmd.displayInspector(*gui_);
 	}
+}
+
+// If it returns true, cmd should display own command stuff in second window
+void CommandBufferGui::displayActionInspector(Draw& draw, const Command& cmd) {
+	// TODO: don't even display the inspect when we are viewing a static
+	// record and that record is invalidated.
+	// (or other cases where we know it will never be submitted again)
+	// auto& hook = *gui.dev().commandHook;
+	// if(hook ... invalid?)
+	// 	return true;
+	// }
+
+	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+	if(!ImGui::BeginTable("IO inspector", 2, flags, ImGui::GetContentRegionAvail())) {
+		return;
+	}
+
+	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+
+	ImGui::BeginChild("Command IO list");
+
+	displayIOList(cmd);
+
+	ImGui::EndChild();
+	ImGui::TableNextColumn();
+	ImGui::BeginChild("Command IO Inspector");
+
+	displaySelectedIO(draw, cmd);
 
 	ImGui::EndChild();
 	ImGui::EndTable();
-
-	return cmdInfo;
 }
 
 } // namespace fuen

@@ -72,6 +72,10 @@ struct CommandHookState {
 	CopiedBuffer indexBufCopy {}; // draw cmd: Copy of index buffer
 	CopiedImage attachmentCopy {}; // Copy of selected attachment
 
+	// Only for transfer commands
+	// CopiedBuffer transferBufCopy {}; // TODO: support transfer buffers in IO viewer
+	CopiedImage transferImgCopy {};
+
 	// When a requested resource cannot be retrieved, this holds the reason.
 	// TODO: kinda messy, should likely be provided per-resource
 	std::string errorMessage;
@@ -118,6 +122,12 @@ public:
 	std::optional<AttachmentCopy> copyAttachment; // only for cmd inside renderpass
 	bool queryTime {};
 
+	// transfer
+	// NOTE: copySrc and copyDst can't be true at same time, atm
+	bool copyTransferSrc {};
+	bool copyTransferDst {};
+	bool copyTransferBefore {};
+
 	// The last received copied state of a finished submission
 	IntrusivePtr<CommandHookState> state;
 
@@ -148,7 +158,7 @@ public:
 
 	// automatically call invalidateRecordings and invalidateData
 	void desc(std::vector<CommandDesc> desc);
-	void unsetHookOps();
+	void unsetHookOps(bool doQueryTime = false);
 
 	~CommandHook();
 
@@ -209,6 +219,7 @@ struct CommandHookRecord {
 
 	void hookRecord(Command* cmdChain, RecordInfo);
 
+	void copyTransfer(Command& bcmd, const RecordInfo&);
 	void copyDs(Command& bcmd, const RecordInfo&);
 	void copyAttachment(const RecordInfo&, unsigned id);
 	void beforeDstOutsideRp(Command&, const RecordInfo&);

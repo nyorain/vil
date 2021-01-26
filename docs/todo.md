@@ -4,60 +4,32 @@ v0.1, goal: end of january 2021
 
 - Cleanup
 - Docs
-- Command-introspection
-- Sync rework
+- [x] Command-introspection
+- [x] Sync rework
 - Testing, Profiling, Needed optimization
 
-- [ ] Fix the (due to table now broken) append child logic in displayInspector
-	- [ ] should likely call displayActionInspector directly from inside cbGui
-	      and only show command inspector itself when "Command" is selected
 - [ ] in io & resource viewer: mip slider broken
 	- [ ] Also move to own line? or just make half width?
+- [ ] automatically update resource lists in resource gui when tab is re-entered
+      from somewhere else
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
 	- [ ] clean the implementation up
 - [ ] might be better to determine command group at EndCommandBuffer
       instead of first submission. We can't use the used queue though...
-- [ ] show more information in command viewer. Stuff downloaded from
-      device before/after command
-	- [x] new per-command input/output overview, allowing to view *all* resources
-	- [ ] full support CmdDrawIndirectCount in gui (most stuff not implemented atm in CommandHook)
-	      {probably not for v0.1} 
-	- [ ] I/O inspector for transfer commands
-	- [x] add more information to I/O viewer (especially for images)
-	- [ ] fix code flow. Really bad at the moment, with Commands calling
-	      that displayAction function and optionally append to child.
-	- [x] improve the new overview. See all the various todos
-	      {still lots of TODOs left though, just most important ones fixed now}
-	- [x] chose sensible default sizes/layouts
-	- [x] implement buffer viewer (infer information from shaders)
-	- [x] factor out image viewer from resources into own component; use it here.
-	      Allow layer/mip selection
-	- [x] re-add timing display in command inspector
-	- [ ] display arrays in buffers correctly
+- [ ] remaining IO viewer fixes:
 	- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
-	- [x] for storage buffers/storage images, a before/after/change
-	      view would be really nice. We can do that.
 	- [ ] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
-	- [ ] attempt to retain previous selection in io viewer when selecting
-	      new command
+	- [ ] when viewing transfer img, show image refButton
 	- [ ] adapt ioImage_ to selected image (e.g. channels)
 		- [ ] also fix logic for depthStencil images. Select depth by default.
-- [ ] attempt to minimize level depth in cb viewer
-	- [ ] when a parent has only one child, combine them in some cases?
-	      mainly for Labels, they are currently not too helpful as they
-		  make the hierachy just deeper...
-	- [ ] maybe allow per-app shortcuts?
-- [x] proper layout of child windows with resizing
-      See https://github.com/ocornut/imgui/issues/319
-	  {just switched to the new imgui tables, they fix issues}
+		      (can be tested with doom)
 - [ ] improve enumString
 	- [ ] make enumString.hpp return some deafult value ("" or "<?>") instead of nullptr.
 		  Could cause crashed for future values atm
 	- [ ] better enumString.hpp. Remove prefixes
 	- [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
-- [ ] always use nearest sampling for images?
 - [ ] test `splittable` impl for render passes. There are very likely issues.
       (especially for the cases where render pass can't be split)
 - [ ] in CopiedImage::init: check for image usage support
@@ -81,6 +53,8 @@ v0.1, goal: end of january 2021
 	- [ ] looks really ugly at the moment, improve that.
 	      maybe move to own settings tab? Wouldn't expect people to change
 		  it often tbh
+	- [ ] cleanest would probably a button that spawns a popup/dialog
+	      in which this can be selected.
 - [x] make queues viewable handles
 	- [x] allow to view command groups per queue
 	- [ ] view submissions per queue somehow?
@@ -89,13 +63,6 @@ v0.1, goal: end of january 2021
 	- [x] fix filtering by type
 	- [x] fix filtering by name
 	- [ ] more useful names for handles (e.g. some basic information for images)
-- [ ] make sure to always correctly store/forward pNext chains
-	  easier future compat, will support (non-crash) a lot of
-	  extensions naturally already.
-	- [ ] vkQueuePresentKHR is problematic atm
-	- [ ] everywhere where we hook-create handles
-	  nvm, we likely cannot/shouldn't do it without deciding on per-extension
-	      basis. Just forwarding random pNexts will likely not work.
 - [x] rework dev/gui so that there is never more than one gui. Supporting
       multiple guis at the same time is not worth the trouble (think
 	  about command buffer hooking from multiple cb viewers...)
@@ -132,29 +99,6 @@ v0.1, goal: end of january 2021
 	      implement yet (such as sparse binding)
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
-- [ ] improve buffer viewer
-	- [ ] NOTE: evaluate whether static buffer viewer makes much sense.
-	      Maybe it's not too useful at the moment.
-		  {pretty sure it won't make v0.1}
-	- [ ] static buffer viewer currently broken, see resources.cpp recordPreRender
-	      for old code (that was terrible, we would have to rework it to
-		  chain readbacks to a future frame, when a previous draw is finished)
-	- [ ] ability to infer layouts (simply use the last known one, link to last usage in cb) from
-		- [ ] uniform and storage buffers (using spirv_inspect)
-		- [ ] vertex buffer (using the pipeline layout)
-		- [ ] index buffer
-		- [ ] texel data from a buffer/image copy
-	- [ ] ability to directly jump to it - in the contextually inferred layout - from a command?
-	      (might be confusing, content might have changed since then)
-	- [ ] move to own tab/panel? needed in multiple cases
-- [ ] improve image viewer
-	- [ ] move to own tab/panel? needed in multiple cases
-	      {nah, viewing it inline is better for now}
-	- [ ] show texel color? (requires us to download texels, just like we 
-	      do with buffers). See gui.cpp, bottom, CopyTexel sketch
-- [x] Link to swapchain in swapchain images
-- [ ] automatically update resource lists in resource gui when tab is re-entered
-      from somewhere else
 - [ ] when we select a resource of type X should we set the current filter to X
       in the resource gui? Somewhat confusing at the moment
 - [ ] imgui styling
@@ -171,24 +115,11 @@ v0.1, goal: end of january 2021
 	- [ ] lots of places where we should replace column usage with tables
 	- [ ] fix stupid looking duplicate header-seperator for commands in 
 	      command viewer (command viewer header UI is a mess anyways)
-- [ ] should probably not possible to ever unselect ParentCommands in
-      cb viewer (CommandTypeFlags)
-- [ ] add feature to see all commands that use a certain handle.
-      we already have the references, just need to add it to command viewer.
-	  Just add a new command viewer mode that allows to cycle through them.
-	- [ ] make sure to select (and scroll towards) the commands when selecting
-	      them. Not exactly sure how to implement but that command should
-		  even be shown in command list when its type is hidden (maybe
-		  make it a bit transparent, "ghost-command")
+- [ ] should probably not be possible to ever unselect ParentCommands in
+      cb viewer (CommandTypeFlags). Just always display them?
 - [ ] improve handling of transparent images. Checkerboard background?
 	- [ ] when viewing image as grayscale they become transparent atm.
 	      no idea why
-- [ ] probably rather important to have a clear documentation on supported
-      feature set, extensions and so on
-	- [ ] clearly document (maybe already in README?) that the layer
-	      can crash when extensions it does not know about/does not support
-		  are being used.
-	- [ ] update README to correctly show all current features
 - [ ] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
 	  for inserting query commands (check for the queue family in general,
 	  we might not be able to use the query pool!).
@@ -199,7 +130,33 @@ v0.1, goal: end of january 2021
 	  while overlay is active using platform-specific stuff), this might
 	  be useful in some cases, the extra window can be painful.
 	- [ ] generally expose own window creation and force-overlay via env vars
-- [x] add example image to readme (with real-world application if possible)
+	- [ ] do as specified in readme
+- [ ] stop this todo-for-v0.1-list from growing at some point.
+- [ ] before release: test on windows & linux, on all owned hardware
+
+
+not sure if viable for first version but should be goal:
+- [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
+- [ ] get it to run without significant (slight (like couple of percent) increase 
+	  of frame timings even with layer in release mode is ok) overhead
+	- [x] vkQuake2
+	- [x] doom eternal
+		- [x] figure out how to make multi-submission drawing easily viewable
+		      -> per-frame-commands cb viewer mode
+	- [ ] dota 2 (linux)
+
+Possibly for later, new features/ideas:
+- [ ] show histogram to image in ui. Generate histogram together with min/max
+      values to allow auto-min-max as in renderdoc
+	- [ ] Using the histogram, we could add something even better, adjusting
+	      tonemapping/gamma/min-max to histogram instead just min-max
+- [ ] displaying high-res images in small viewer gives bad artefacts
+      since we don't use mips. Could generate mips on our own (this requires
+	  just copying the currently vieweed mip and then generating our own mips)
+- [ ] clean and split up QueueSubmit implementation. It's way too long,
+      does way too much. And will probably further grow
+- [ ] attempt to retain previous selection in io viewer when selecting
+	  new command
 - [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support
       is being enabled. I remember renderdoc doing this, sounds like a good idea.
 	- [ ] or an unexpectly high api version
@@ -213,23 +170,60 @@ v0.1, goal: end of january 2021
 		  this. Alternatvely, we could simply fail on device/instance creation
 		  as mentioned above (probably want to do both approaches, both disableable 
 		  (just found a new favorite word!) via env variable
-- [ ] stop this todo-for-v0.1-list from growing at some point.
-- [ ] before release: test on windows & linux, on all owned hardware
-
-
-not sure if viable for first version but should be goal:
-- [ ] clean and split up QueueSubmit implementation. It's way too long,
-      does way too much. And will probably further grow
-- [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
-- [ ] get it to run without significant (slight (like couple of percent) increase 
-	  of frame timings even with layer in release mode is ok) overhead
-	- [ ] vkQuake2
-	- [ ] doom eternal
-		- [ ] figure out how to make multi-submission drawing easily viewable
-		      -> per-frame-commands cb viewer mode
-	- [ ] dota 2 (linux)
-
-Possibly for later, new features/ideas:
+- [ ] add feature to see all commands that use a certain handle.
+      we already have the references, just need to add it to command viewer.
+	  Just add a new command viewer mode that allows to cycle through them.
+	- [ ] make sure to select (and scroll towards) the commands when selecting
+	      them. Not exactly sure how to implement but that command should
+		  even be shown in command list when its type is hidden (maybe
+		  make it a bit transparent, "ghost-command")
+- [ ] in some places we likely want to forward pNext chains by default, even
+      if we don't know them. E.g. QueuePresent, render pass splitting?
+	  Whatever gives the highest chance of success for unknown extensions.
+	  (Could even try to toggle it via runtime option)
+- [ ] full support CmdDrawIndirectCount in gui (most stuff not implemented atm in CommandHook)
+	  {probably not for v0.1} 
+- [ ] improve buffer viewer {postponed to after v0.1}
+	- [ ] NOTE: evaluate whether static buffer viewer makes much sense.
+	      Maybe it's not too useful at the moment.
+	- [ ] static buffer viewer currently broken, see resources.cpp recordPreRender
+	      for old code (that was terrible, we would have to rework it to
+		  chain readbacks to a future frame, when a previous draw is finished)
+	- [ ] ability to infer layouts (simply use the last known one, link to last usage in cb) from
+		- [ ] uniform and storage buffers (using spirv_inspect)
+		- [ ] vertex buffer (using the pipeline layout)
+		- [ ] index buffer
+		- [ ] texel data from a buffer/image copy
+	- [ ] ability to directly jump to it - in the contextually inferred layout - from a command?
+	      (might be confusing, content might have changed since then)
+	- [ ] move to own tab/panel? needed in multiple cases
+- [ ] improve image viewer
+	- [ ] move to own tab/panel? needed in multiple cases
+	      {nah, viewing it inline is better for now}
+	- [ ] show texel color? (requires us to download texels, just like we 
+	      do with buffers). See gui.cpp, bottom, CopyTexel sketch
+- [ ] attempt to minimize level depth in cb viewer
+	- [ ] when a parent has only one child, combine them in some cases?
+	      mainly for Labels, they are currently not too helpful as they
+		  make the hierachy just deeper...
+	- [ ] allow per-app shortcuts to specific commands?
+- [ ] look into imgui shortcuts to allow quick interaction.
+      vim-like!
+- [ ] we might be able to improve the accuracy of the queried timings (in hooked cbs)
+      with inserted pipeline barriers. That will cause certain stages/commands
+	  to stall so we can measure the per-stage time in a more isolated environment
+- [ ] transfer command IO inspector for buffers
+- [ ] transfer commands IO insepctor for ClearAttachmentCmd: allow to select
+      the attachment to be shown in IO list and then copy that in commandHook
+- [ ] support multiple subresources for transfer commands, images
+	- [ ] pain in the ass regarding layout transitions as the range of
+	      subresources does not have to be continuous (and we can't assume
+		  all of them to be in same layout)
+- [ ] important optimization, low hanging fruit:
+      CopiedImage: don't ever use concurrent sharing mode.
+	  We can explicitly transition the image when first copying it.
+- [ ] we currently copy more levels/layers in commandHook than are shown
+      in i/o inspector. Could just copy the currently shown subresource.
 - [ ] write tests for some common functionality
 	- [ ] format reading/writing; conversion
 - [ ] clean up/unify usage of struct/class

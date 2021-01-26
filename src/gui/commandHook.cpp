@@ -37,6 +37,8 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	if(srcQueueFam == dev.gfxQueue->family) {
 		ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	} else {
+		// TODO: we could just perform an explicit transition in this case,
+		//   it's really not hard here. Could add mass
 		std::array<u32, 2> qfams = {dev.gfxQueue->family, srcQueueFam};
 		ici.sharingMode = VK_SHARING_MODE_CONCURRENT;
 		ici.pQueueFamilyIndices = qfams.data();
@@ -195,7 +197,7 @@ void CommandHook::desc(std::vector<CommandDesc> desc) {
 	desc_ = std::move(desc);
 
 	// TODO: this can have many false positives. Only do this
-	// when desc *really* changed.
+	// when desc *really* changed I guess?
 	unsetHookOps();
 }
 
@@ -224,14 +226,16 @@ void CommandHook::invalidateRecordings() {
 	records_ = nullptr;
 }
 
-void CommandHook::unsetHookOps() {
+void CommandHook::unsetHookOps(bool doQueryTime) {
 	this->copyIndexBuffers = false;
 	this->copyVertexBuffers = false;
-	this->queryTime = false;
+	this->queryTime = doQueryTime;
 	this->copyIndirectCmd = false;
 	this->copyAttachment = {};
 	this->copyDS = {};
 	this->pcr = {};
+	this->copyTransferSrc = false;
+	this->copyTransferDst = false;
 	invalidateRecordings();
 	invalidateData();
 }
@@ -337,6 +341,7 @@ CommandHookRecord::~CommandHookRecord() {
 void CommandHookRecord::initState(RecordInfo& info) {
 	auto& dev = record->device();
 	state.reset(new CommandHookState());
+	dlg_assert(!hcommand.empty());
 
 	// Find out if final hooked command is inside render pass
 	auto preEnd = hcommand.end() - 1;
@@ -355,12 +360,13 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		 hook->copyIndexBuffers ||
 		 hook->copyAttachment ||
 		 hook->copyDS ||
-		 hook->copyIndirectCmd);
+		 hook->copyIndirectCmd ||
+		 (hook->copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
 
 	if(info.splitRenderPass) {
 		auto& rp = *info.beginRenderPassCmd->rp;
 
-		// TODO: we could likely support this
+		// TODO: we could likely just directly support this
 		if(hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) {
 			state->errorMessage = "Splitting multiview renderpass not implemented";
 			dlg_trace(state->errorMessage);
@@ -775,10 +781,11 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 					state->errorMessage, record->queueFamily);
 			}
 		} else {
-			// TODO: bad message, maybe just show a link to the sampler
-			//   in the commands.cpp functions?
+			// TODO: we should not land here at all! Check state in
+			//   cb gui before registring hook. Don't register a hook
+			//   just to find out *here* that we don't need it
 			state->errorMessage = "Just a sampler bound";
-			dlg_warn(state->errorMessage);
+			// dlg_warn(state->errorMessage);
 		}
 	} else if(cat == DescriptorCategory::buffer) {
 		auto& dst = state->dsCopy.emplace<CopiedBuffer>();
@@ -831,23 +838,142 @@ void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID) {
 	}
 }
 
+VkImageSubresourceRange fullSubresRange(const Image& img) {
+	VkImageSubresourceRange ret {};
+	if(FormatIsColor(img.ci.format)) {
+		ret.aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
+	}
+	if(FormatHasDepth(img.ci.format)) {
+		ret.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
+	}
+	if(FormatHasStencil(img.ci.format)) {
+		ret.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	}
+
+	ret.levelCount = img.ci.mipLevels;
+	ret.layerCount = img.ci.arrayLayers;
+	return ret;
+}
+
+VkImageSubresourceRange toRange(const VkImageSubresourceLayers& subres) {
+	VkImageSubresourceRange ret {};
+	ret.aspectMask = subres.aspectMask;
+	ret.baseArrayLayer = subres.baseArrayLayer;
+	ret.layerCount = subres.layerCount;
+	ret.baseMipLevel = subres.mipLevel;
+	ret.levelCount = 1u;
+
+	return ret;
+}
+
+void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
+	dlg_assert(hook->copyTransferDst != hook->copyTransferSrc);
+	auto& dev = record->device();
+
+	if(hook->copyTransferSrc) {
+		VkImageSubresourceRange subres {};
+		VkImageLayout layout {};
+		Image* src {};
+
+		if(auto* cmd = dynamic_cast<const CopyImageCmd*>(&bcmd); cmd) {
+			src = cmd->src;
+			layout = cmd->srcLayout;
+			subres = toRange(cmd->copies[0].srcSubresource);
+		} else if(auto* cmd = dynamic_cast<const BlitImageCmd*>(&bcmd); cmd) {
+			src = cmd->src;
+			layout = cmd->srcLayout;
+			subres = toRange(cmd->blits[0].srcSubresource);
+		} else if(auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&bcmd); cmd) {
+			src = cmd->src;
+			layout = cmd->srcLayout;
+			subres = toRange(cmd->copies[0].imageSubresource);
+		} else if(auto* cmd = dynamic_cast<const ResolveImageCmd*>(&bcmd); cmd) {
+			src = cmd->src;
+			layout = cmd->srcLayout;
+			subres = toRange(cmd->regions[0].srcSubresource);
+		}
+
+		dlg_assert(src);
+		initAndCopy(dev, cb, state->transferImgCopy, *src,
+			layout, subres, state->errorMessage, record->queueFamily);
+	} else if(hook->copyTransferDst) {
+		VkImageSubresourceRange subres {};
+		VkImageLayout layout {};
+		Image* src {};
+
+		if(auto* cmd = dynamic_cast<const CopyImageCmd*>(&bcmd); cmd) {
+			src = cmd->dst;
+			layout = cmd->dstLayout;
+			subres = toRange(cmd->copies[0].dstSubresource);
+		} else if(auto* cmd = dynamic_cast<const BlitImageCmd*>(&bcmd); cmd) {
+			src = cmd->dst;
+			layout = cmd->dstLayout;
+			subres = toRange(cmd->blits[0].dstSubresource);
+		} else if(auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&bcmd); cmd) {
+			src = cmd->dst;
+			layout = cmd->dstLayout;
+			subres = toRange(cmd->copies[0].imageSubresource);
+		} else if(auto* cmd = dynamic_cast<const ResolveImageCmd*>(&bcmd); cmd) {
+			src = cmd->dst;
+			layout = cmd->dstLayout;
+			subres = toRange(cmd->regions[0].dstSubresource);
+		} else if(auto* cmd = dynamic_cast<const ClearColorImageCmd*>(&bcmd); cmd) {
+			src = cmd->dst;
+			layout = cmd->dstLayout;
+			subres = cmd->ranges[0];
+		} else if(auto* cmd = dynamic_cast<const ClearDepthStencilImageCmd*>(&bcmd); cmd) {
+			src = cmd->dst;
+			layout = cmd->dstLayout;
+			subres = cmd->ranges[0];
+		} else if(auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&bcmd)) {
+			auto& rp = nonNull(info.beginRenderPassCmd->rp);
+			auto& fb = nonNull(info.beginRenderPassCmd->fb);
+
+			// TODO: support showing multiple cleared attachments in gui,
+			//   allowing to select here which one is copied.
+			auto& clearAtt = cmd->attachments[0];
+			u32 attID = clearAtt.colorAttachment;
+			if(clearAtt.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT) {
+				auto& depthStencil = nonNull(rp.desc->subpasses[info.hookedSubpass].pDepthStencilAttachment);
+				attID = depthStencil.attachment;
+			}
+
+			dlg_assert(fb.attachments.size() > attID);
+			auto& imgView = nonNull(fb.attachments[attID]);
+			auto& img = nonNull(imgView.img);
+
+			// image must be in general layout because we are just between
+			// the split render passes
+			src = &img;
+			layout = VK_IMAGE_LAYOUT_GENERAL;
+			subres = imgView.ci.subresourceRange;
+		}
+
+		dlg_assert(src);
+		initAndCopy(dev, cb, state->transferImgCopy, *src,
+			layout, subres, state->errorMessage, record->queueFamily);
+	}
+}
+
 void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info) {
 	auto& dev = record->device();
 	DebugLabel lbl(dev, cb, "beforeDstOutsideRp");
 
-	// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
-	// between the render passes to make sure the first render pass really
-	// has finished (with *everything*, not just the stuff we are interested
-	// in here) before we start the second one.
-	VkMemoryBarrier memBarrier {};
-	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-	memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
-	memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	if(info.splitRenderPass) {
+		// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
+		// between the render passes to make sure the first render pass really
+		// has finished (with *everything*, not just the stuff we are interested
+		// in here) before we start the second one.
+		VkMemoryBarrier memBarrier {};
+		memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+		memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 
-	dev.dispatch.CmdPipelineBarrier(cb,
-		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+	}
 
 	// indirect copy
 	if(hook->copyIndirectCmd) {
@@ -909,25 +1035,32 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 			initAndCopy(dev, cb, state->indexBufCopy, inds.buffer->handle, inds.offset, size);
 		}
 	}
+
+	// transfer
+	if(hook->copyTransferBefore && (hook->copyTransferDst || hook->copyTransferSrc)) {
+		copyTransfer(bcmd, info);
+	}
 }
 
 void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info) {
 	auto& dev = record->device();
 	DebugLabel lbl(dev, cb, "afterDsOutsideRp");
 
-	// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
-	// between the render passes to make sure the second render pass really
-	// has finished (with *everything*, not just the stuff we are interested
-	// in here) before we start the third one.
-	VkMemoryBarrier memBarrier {};
-	memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-	memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
-	memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	if(info.splitRenderPass) {
+		// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
+		// between the render passes to make sure the second render pass really
+		// has finished (with *everything*, not just the stuff we are interested
+		// in here) before we start the third one.
+		VkMemoryBarrier memBarrier {};
+		memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+		memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 
-	dev.dispatch.CmdPipelineBarrier(cb,
-		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+	}
 
 	// attachment
 	if(hook->copyAttachment && !hook->copyAttachment->before) {
@@ -937,6 +1070,11 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info)
 	// descriptor state
 	if(hook->copyDS && !hook->copyDS->before) {
 		copyDs(bcmd, info);
+	}
+
+	// transfer
+	if(!hook->copyTransferBefore && (hook->copyTransferDst || hook->copyTransferSrc)) {
+		copyTransfer(bcmd, info);
 	}
 }
 

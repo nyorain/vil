@@ -25,21 +25,26 @@ public:
 	~CommandBufferGui();
 
 	void draw(Draw& draw);
+	void destroyed(const Handle& handle);
 
 	void showSwapchainSubmissions();
 	void select(IntrusivePtr<CommandRecord> record);
 	void select(IntrusivePtr<CommandRecord> record, CommandBuffer& cb);
 	void selectGroup(IntrusivePtr<CommandRecord> record);
 
-	void destroyed(const Handle& handle);
+private:
+	void displayDsList(const Command&);
+	void displayIOList(const Command&);
+	void displaySelectedIO(Draw& draw, const Command&);
+	void displayInspector(Draw& draw, const Command&);
+	void displayActionInspector(Draw& cmd, const Command&);
+	void displayDs(Draw& draw, const Command&);
 
-	bool displayActionInspector(const Command&);
-	void displayDs(const Command&);
+	// Can only be called once per frame.
+	void displayImage(Draw& draw, const CopiedImage& img);
 
-	// TODO: hacky, can only be called once per frame.
-	void displayImage(const CopiedImage& img);
-
-public: // TODO: make private
+private:
+	friend class Gui;
 	Gui* gui_ {};
 
 	UpdateMode mode_ {};
@@ -66,9 +71,8 @@ public: // TODO: make private
 	// same command in future records/cb selections.
 	std::vector<CommandDesc> desc_ {};
 
-	// TODO HACKY SECTION OF SHAME
+	// For the one image we potentially display
 	DrawGuiImage ioImage_ {};
-	Draw* draw_ {};
 };
 
 } // namespace fuen

@@ -1525,7 +1525,8 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 		} else if(subresources.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) {
 			imgDraw.aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
 		} else {
-			dlg_error("Unsupported image format");
+			dlg_error("Unsupported image format, aspect mask: '{}'",
+				vk::flagNames(VkImageAspectFlagBits(subresources.aspectMask)));
 		}
 	}
 
