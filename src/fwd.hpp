@@ -1,8 +1,5 @@
 #pragma once
 
-// Make sure to *never* include them
-#define VK_NO_PROTOTYPES
-
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>

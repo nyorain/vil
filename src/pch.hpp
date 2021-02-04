@@ -40,9 +40,6 @@
 #include <future>
 #include <type_traits>
 
-#include <span>
-#include <bit>
-
 #include <vk/vulkan.h>
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>

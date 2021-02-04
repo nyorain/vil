@@ -37,6 +37,9 @@ args = cc.get_supported_arguments([
 
 	# for clang
 	'-Wno-missing-braces',
+
+	# Make sure to *never* include them
+	'-DVK_NO_PROTOTYPES',
 ])
 
 link_args = cc.get_supported_arguments([
