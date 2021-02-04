@@ -203,7 +203,8 @@ vil_layer = shared_library(
 	include_directories: inc,
 	cpp_args: args,
 	link_args: link_args,
-	install: true
+	install: true,
+	cpp_pch: 'src/pch.hpp',
 )
 
 conf_data = configuration_data()

@@ -219,6 +219,5 @@ constexpr auto operator!=(const Mat<R, C, T1>& a, const Mat<R, C, T2>& b) {
 
 } // namespace nytl
 
-#undef nytl_assure
 #endif // header guard
 

@@ -468,7 +468,7 @@ eulerAngles(const Quaternion& q, RotationSequence seq) {
 }
 
 
-} // namespace tkn
+} // namespace iro
 
 // NOTE: implementation sources:
 // - https://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles

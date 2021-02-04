@@ -11,6 +11,8 @@
 #include <util/util.hpp>
 #include <util/bytes.hpp>
 
+#include <swa/key.h>
+
 #include <spirv_reflect.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
@@ -222,8 +224,11 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	colorAttach[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
 	colorAttach[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 	colorAttach[0].alphaBlendOp = VK_BLEND_OP_ADD;
-	colorAttach[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
-		VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorAttach[0].colorWriteMask =
+		VK_COLOR_COMPONENT_R_BIT |
+		VK_COLOR_COMPONENT_G_BIT |
+		VK_COLOR_COMPONENT_B_BIT |
+		VK_COLOR_COMPONENT_A_BIT;
 
 	VkPipelineDepthStencilStateCreateInfo depthInfo {};
 	depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -327,6 +332,24 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	this->io_ = &ImGui::GetIO();
 	this->io_->IniFilename = nullptr;
 	this->io_->MouseDrawCursor = false;
+
+	auto& io = *this->io_;
+	io.KeyMap[ImGuiKey_A] = swa_key_a;
+	io.KeyMap[ImGuiKey_C] = swa_key_c;
+	io.KeyMap[ImGuiKey_V] = swa_key_v;
+	io.KeyMap[ImGuiKey_X] = swa_key_x;
+	io.KeyMap[ImGuiKey_Y] = swa_key_y;
+	io.KeyMap[ImGuiKey_Z] = swa_key_z;
+	io.KeyMap[ImGuiKey_Enter] = swa_key_enter;
+	io.KeyMap[ImGuiKey_Delete] = swa_key_del;
+	io.KeyMap[ImGuiKey_Space] = swa_key_space;
+	io.KeyMap[ImGuiKey_LeftArrow] = swa_key_left;
+	io.KeyMap[ImGuiKey_DownArrow] = swa_key_down;
+	io.KeyMap[ImGuiKey_RightArrow] = swa_key_right;
+	io.KeyMap[ImGuiKey_UpArrow] = swa_key_up;
+	io.KeyMap[ImGuiKey_Escape] = swa_key_escape;
+	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
+	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
 
 	// TODO: support custom fonts. Just embed them directly in lib?
 	// this->io_->Fonts->AddFontFromFileTTF("font.ttf", 16.f);
@@ -961,7 +984,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 		flags = ImGuiWindowFlags_NoDecoration;
 	} else {
-		ImGui::ShowDemoWindow();
+		// ImGui::ShowDemoWindow();
 		// ImGui::ShowAboutWindow();
 		// ImGui::ShowMetricsWindow();
 		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);

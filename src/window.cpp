@@ -423,22 +423,6 @@ void DisplayWindow::uiThread() {
 
 	gui.makeImGuiCurrent();
 	auto& io = ImGui::GetIO();
-	io.KeyMap[ImGuiKey_A] = swa_key_a;
-	io.KeyMap[ImGuiKey_C] = swa_key_c;
-	io.KeyMap[ImGuiKey_V] = swa_key_v;
-	io.KeyMap[ImGuiKey_X] = swa_key_x;
-	io.KeyMap[ImGuiKey_Y] = swa_key_y;
-	io.KeyMap[ImGuiKey_Z] = swa_key_z;
-	io.KeyMap[ImGuiKey_Enter] = swa_key_enter;
-	io.KeyMap[ImGuiKey_Delete] = swa_key_del;
-	io.KeyMap[ImGuiKey_Space] = swa_key_space;
-	io.KeyMap[ImGuiKey_LeftArrow] = swa_key_left;
-	io.KeyMap[ImGuiKey_DownArrow] = swa_key_down;
-	io.KeyMap[ImGuiKey_RightArrow] = swa_key_right;
-	io.KeyMap[ImGuiKey_UpArrow] = swa_key_up;
-	io.KeyMap[ImGuiKey_Escape] = swa_key_escape;
-	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
-	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
 
 	using Clock = std::chrono::high_resolution_clock;
 	auto timeIt = [](auto& now, auto name) {
