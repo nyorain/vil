@@ -37,10 +37,12 @@ args = cc.get_supported_arguments([
 
 	# for clang
 	'-Wno-missing-braces',
+])
 
+layer_args = [
 	# Make sure to *never* include them
 	'-DVK_NO_PROTOTYPES',
-])
+]
 
 link_args = cc.get_supported_arguments([
 	# unix, TODO: this caused problems on clang
@@ -61,19 +63,11 @@ dep_swa = dependency('swa',
 		'with-kms=disabled'
 	])
 
-# the same way it's done in swa when not linking vulkan:
-# we only want the headers and definitions, not link anything.
-# we currently carefully only use the header-only vk_layer utilities
-# TODO: remove this, we don't rely on installed vulkan headers anymore
-# dep_vulkan_full = dependency('vulkan')
-# dep_vulkan = dep_vulkan_full.partial_dependency(
-# 	compile_args: true,
-# 	includes: true)
-
-subdir('src/imgui')
+# subdir('src/imgui')
 
 # TODO: yeah, this needs some love
 with_win32 = build_machine.system() == 'windows'
+
 # with_x11 = not with_win32
 with_x11 = not with_win32 and get_option('with_x11')
 
@@ -163,6 +157,12 @@ src = files(
 
 	'src/imgui/imgui.h',
 	'include/vil_api.h',
+
+	'src/imgui/imgui.cpp',
+	'src/imgui/imgui_draw.cpp',
+	'src/imgui/imgui_widgets.cpp',
+	'src/imgui/imgui_demo.cpp',
+	'src/imgui/imgui_tables.cpp',
 )
 
 public_inc = include_directories('include/')
@@ -178,7 +178,7 @@ deps = [
 	dep_threads,
 	dep_dlg,
 	dep_swa,
-	libimgui_core_dep,
+	# libimgui_core_dep,
 	# dep_vulkan,
 ]
 
@@ -196,6 +196,7 @@ endif
 if with_win32
 	src += files('src/win32.cpp')
 	args += ['-DFUEN_WITH_WIN32']
+	layer_args += '-DUNICODE'
 endif
 
 vil_layer = shared_library(
@@ -204,7 +205,7 @@ vil_layer = shared_library(
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
-	cpp_args: args,
+	cpp_args: args + layer_args,
 	link_args: link_args,
 	install: true,
 	cpp_pch: 'src/pch.hpp',

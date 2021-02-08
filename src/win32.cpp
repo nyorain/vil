@@ -1,5 +1,3 @@
-#define UNICODE
-
 #include <win32.hpp>
 #include <gui/gui.hpp>
 #include <vk/vulkan.h>
@@ -176,7 +174,7 @@ static LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 
 void Win32Platform::initWindow() {
 	// register window class
-	WNDCLASSEX wcx = {0};
+	WNDCLASSEXW wcx = {0};
 	wcx.cbSize = sizeof(wcx);
 	wcx.style = CS_VREDRAW | CS_HREDRAW;
 	wcx.lpfnWndProc = winProc;
