@@ -1815,8 +1815,9 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 		}
 
 		dlg_assert(descriptorSets[i].layout);
-		if(!compatibleForSetN(*descriptorSets[i].layout, layout, u32(lastSet))) {
+		if(!compatibleForSetN(*descriptorSets[i].layout, layout, i)) {
 			// disturbed!
+			// dlg_debug("disturbed ds {}", i);
 			descriptorSets[i] = {};
 		}
 	}
@@ -1837,6 +1838,7 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 	}
 
 	if(followingDisturbed) {
+		// dlg_debug("disturbed following descriptorSets, from {}", lastSet + 1);
 		descriptorSets = descriptorSets.subspan(0, lastSet + 1);
 	}
 }

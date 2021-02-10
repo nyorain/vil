@@ -282,17 +282,25 @@ bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b) {
 
 bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32 N) {
 	if(!pushConstantCompatible(pl1, pl2)) {
+		// dlg_trace("!compatible({}): push constants", N);
 		return false;
 	}
 
 	if(pl1.descriptors.size() <= N || pl2.descriptors.size() <= N) {
+		// dlg_trace("!compatible({}): sizes ({}, {})", N, pl1.descriptors.size(), pl2.descriptors.size());
 		return false;
 	}
 
-	for(auto s = 0u; s < N; ++s) {
+	for(auto s = 0u; s <= N; ++s) {
 		auto& da = *pl1.descriptors[s];
 		auto& db = *pl2.descriptors[s];
+		if(&da == &db) {
+			continue; // layout always compatible with itself
+		}
+
 		if(da.bindings.size() != db.bindings.size()) {
+			// dlg_trace("!compatible({}): binding count {} vs {} (set {})", N,
+			// 	da.bindings.size(), db.bindings.size(), s);
 			return false;
 		}
 
@@ -306,6 +314,7 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32
 					ba.descriptorCount != bb.descriptorCount ||
 					ba.descriptorType != bb.descriptorType ||
 					ba.stageFlags != bb.stageFlags) {
+				// dlg_trace("!compatible({}): binding {} (set {})", N, b, s);
 				return false;
 			}
 
@@ -313,13 +322,16 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32
 			if(ba.binding == VK_DESCRIPTOR_TYPE_SAMPLER ||
 					ba.binding == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
 				if(bool(ba.immutableSamplers) != bool(bb.immutableSamplers)) {
+					// dlg_trace("!compatible({}): immutable samplers, binding {} (set {})", N, b, s);
 					return false;
 				}
 
 				if(ba.immutableSamplers) {
 					dlg_assert(ba.descriptorCount == bb.descriptorCount);
 					for(auto e = 0u; e < ba.descriptorCount; ++e) {
+						// TODO: what if the samplers are compatible?
 						if(ba.immutableSamplers[e] != bb.immutableSamplers[e]) {
+							// dlg_trace("!compatible({}): immutable samplers(2), binding {} (set {})", N, b, s);
 							return false;
 						}
 					}

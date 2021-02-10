@@ -8,6 +8,8 @@ v0.1, goal: end of january 2021
 - Cleanup
 - Testing, Profiling, Needed optimization
 
+- [ ] clean up logging system
+- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer
 - [ ] in io & resource viewer: mip slider broken
 	- [ ] Also move to own line? or just make half width?
 - [ ] Rename FUEN_ macros into VIL_

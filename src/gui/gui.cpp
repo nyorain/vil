@@ -1107,7 +1107,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 
 	ensureFontAtlas(draw.cb);
 
-	makeImGuiCurrent();
 	ImGui::GetIO().DisplaySize.x = info.extent.width;
 	ImGui::GetIO().DisplaySize.y = info.extent.height;
 

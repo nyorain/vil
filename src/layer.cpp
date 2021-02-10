@@ -29,7 +29,7 @@
 namespace vil {
 
 // Util
-#define BREAK_ON_ERROR
+// #define BREAK_ON_ERROR
 #ifdef BREAK_ON_ERROR
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
 	if (origin->level >= dlg_level_error) {
