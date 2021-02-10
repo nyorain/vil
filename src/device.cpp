@@ -34,8 +34,6 @@ Gui* getOverlayGui(Swapchain& swapchain) {
 
 // deivce
 Device::~Device() {
-	dlg_trace("Destroying Device");
-
 	// Vulkan spec requires that all pending submissions have finished.
 	while(!pending.empty()) {
 		// We don't have to lock the mutex at checkLocked here since

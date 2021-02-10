@@ -81,8 +81,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	dlg_trace("Allocated console. Creating vulkan instance");
 #endif // _WIN32
 
-	dlg_trace("CreateInstance");
-
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
 	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
 		linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*linkInfo);
