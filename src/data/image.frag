@@ -35,13 +35,13 @@ layout(push_constant) uniform PCR {
 	layout(set = 0, binding = 0) uniform SamplerType(1DArray) sTexture;
 
 	vec4 sampleTex() {
-		return textureLod(sTexture, vec2(In.uv.x, pcr.layer), 0 * pcr.level);
+		return textureLod(sTexture, vec2(In.uv.x, pcr.layer), pcr.level);
 	}
 #elif defined(TEX_TYPE_2D_ARRAY)
 	layout(set = 0, binding = 0) uniform SamplerType(2DArray) sTexture;
 
 	vec4 sampleTex() {
-		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), 0 * pcr.level);
+		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), pcr.level);
 	}
 // #elif TEX_TYPE_CUBE
 // TODO: cubearray?
@@ -50,7 +50,7 @@ layout(push_constant) uniform PCR {
 	layout(set = 0, binding = 0) uniform SamplerType(3D) sTexture;
 
 	vec4 sampleTex() {
-		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), 0 * pcr.level);
+		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), pcr.level);
 	}
 #else
 	#error No valid TEX_TYPE definition

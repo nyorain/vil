@@ -688,7 +688,7 @@ void CommandBufferGui::displayImage(Draw& draw, const CopiedImage& img) {
 	//   not in all.
 
 	vil::displayImage(*gui_, ioImage_, img.extent, minImageType(img.extent),
-		img.format, img.srcSubresRange);
+		img.format, img.srcSubresRange, nullptr, {});
 
 	VkDescriptorImageInfo dsii {};
 	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1053,7 +1053,7 @@ void CommandBufferGui::displayIOList(const Command& cmd) {
 		//   cleared attachments
 		addDst(dynamic_cast<const ClearAttachmentCmd*>(&cmd));
 
-		dlg_assertm(found, "IO inspector unimplemented for command");
+		dlg_assertlm(dlg_level_warn, found, "IO inspector unimplemented for command");
 		return;
 	}
 
@@ -1357,19 +1357,28 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 	if(cmdInfo) {
 		hook.queryTime = true;
 		if(hook.state) {
+			dlg_assert(record_);
 			auto lastTime = hook.state->neededTime;
-			auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
+			auto validBits = gui_->dev().queueFamilies[record_->queueFamily].props.timestampValidBits;
+			if(validBits == 0u) {
+				dlg_assert(lastTime == u64(-1));
+				imGuiText("Time: unavailable (Queue family does not support timing queries)");
+			} else {
+				// not needed, as vulkan guarantees that other bits are 0
+				// lastTime &= (1 << validBits) - 1;
+				auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
 
-			// auto timeNames = {"ns", "mus", "ms", "s"};
-			// auto it = timeNames.begin();
-			// while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
-			// 	++it;
-			// 	displayDiff /= 1000.f;
-			// }
-			// imGuiText("Time: {} {}", displayDiff, *it);
+				// auto timeNames = {"ns", "mus", "ms", "s"};
+				// auto it = timeNames.begin();
+				// while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
+				// 	++it;
+				// 	displayDiff /= 1000.f;
+				// }
+				// imGuiText("Time: {} {}", displayDiff, *it);
 
-			displayDiff /= 1000.f * 1000.f;
-			imGuiText("Time: {} ms", displayDiff);
+				displayDiff /= 1000.f * 1000.f;
+				imGuiText("Time: {} ms", displayDiff);
+			}
 		}
 
 		cmd.displayInspector(*gui_);

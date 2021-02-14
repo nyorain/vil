@@ -8,13 +8,8 @@ v0.1, goal: end of january 2021
 - Cleanup
 - Testing, Profiling, Needed optimization
 
-- [ ] clean up logging system
+- [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 - [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer
-- [ ] in io & resource viewer: mip slider broken
-	- [ ] Also move to own line? or just make half width?
-- [ ] Rename FUEN_ macros into VIL_
-- [ ] automatically update resource lists in resource gui when tab is re-entered
-      from somewhere else
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
@@ -30,11 +25,6 @@ v0.1, goal: end of january 2021
 	- [ ] adapt ioImage_ to selected image (e.g. channels)
 		- [ ] also fix logic for depthStencil images. Select depth by default.
 		      (can be tested with doom)
-- [ ] improve enumString
-	- [ ] make enumString.hpp return some deafult value ("" or "<?>") instead of nullptr.
-		  Could cause crashed for future values atm
-	- [ ] better enumString.hpp. Remove prefixes
-	- [ ] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
 - [ ] test `splittable` impl for render passes. There are very likely issues.
       (especially for the cases where render pass can't be split)
 - [ ] in CopiedImage::init: check for image usage support
@@ -60,10 +50,6 @@ v0.1, goal: end of january 2021
 		  it often tbh
 	- [ ] cleanest would probably a button that spawns a popup/dialog
 	      in which this can be selected.
-- [x] make queues viewable handles
-	- [x] allow to view command groups per queue
-	- [ ] view submissions per queue somehow?
-	      {probably for later}
 - [x] fix resource viewer
 	- [x] fix filtering by type
 	- [x] fix filtering by name
@@ -74,8 +60,6 @@ v0.1, goal: end of january 2021
 	- [ ] what to do when window *and* overlay is created? or multiple overlays?
 		  Should probably close the previous one (move gui object)
 		  See todo in Gui::init. Make sure there never is more than one
-- [ ] Implement missing resource overview UIs
-	- [ ] sync primitives (-> submission rework & display, after v0.1)
 - [ ] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
@@ -104,8 +88,9 @@ v0.1, goal: end of january 2021
 	      implement yet (such as sparse binding)
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
-- [ ] when we select a resource of type X should we set the current filter to X
-      in the resource gui? Somewhat confusing at the moment
+- [ ] support texel reading implementation for cb-viewed-images and clean
+      up color format presentation, support depth and packed formats.
+	  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
 - [ ] imgui styling
 	- [ ] use custom font
 	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
@@ -125,9 +110,6 @@ v0.1, goal: end of january 2021
 - [ ] improve handling of transparent images. Checkerboard background?
 	- [ ] when viewing image as grayscale they become transparent atm.
 	      no idea why
-- [ ] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
-	  for inserting query commands (check for the queue family in general,
-	  we might not be able to use the query pool!).
 - [ ] limit device mutex lock by ui/overlay/window as much as possible.
     - [ ] We might have to manually throttle frame rate for window
 - [ ] allow to force overlay via environment variable. Even with go-through
@@ -137,6 +119,10 @@ v0.1, goal: end of january 2021
 	- [ ] generally expose own window creation and force-overlay via env vars
 	- [ ] do as specified in readme
 - [ ] stop this todo-for-v0.1-list from growing at some point.
+- [ ] when viewing live command submissions, clicking on resource buttons
+	  that change every frame/frequently (e.g. the backbuffer framebuffer)
+	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
+	  we could fix it by not imgui-pushing the resource ID before showing the button.
 - [ ] before release: test on windows & linux, on all owned hardware
 
 
@@ -151,6 +137,14 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] when we select a resource of type X should we set the current filter to X
+      in the resource gui? Can be somewhat confusing at the moment
+- [ ] the gui code is currently rather messy. Think of a general concept
+      on how to handle tabs, image draws and custom pipelines/draws inside imgui
+- [ ] reading 64-bit int formats might have precision problems, see the format
+      io in util.cpp
+- [ ] Implement missing resource overview UIs
+	- [ ] sync primitives (-> submission rework & display, after v0.1)
 - [ ] show histogram to image in ui. Generate histogram together with min/max
       values to allow auto-min-max as in renderdoc
 	- [ ] Using the histogram, we could add something even better, adjusting
@@ -205,8 +199,6 @@ Possibly for later, new features/ideas:
 - [ ] improve image viewer
 	- [ ] move to own tab/panel? needed in multiple cases
 	      {nah, viewing it inline is better for now}
-	- [ ] show texel color? (requires us to download texels, just like we 
-	      do with buffers). See gui.cpp, bottom, CopyTexel sketch
 - [ ] attempt to minimize level depth in cb viewer
 	- [ ] when a parent has only one child, combine them in some cases?
 	      mainly for Labels, they are currently not too helpful as they
@@ -268,6 +260,7 @@ Possibly for later, new features/ideas:
 - [ ] experiment with transparent overlay windows in which we render the
       overlay, to not be dependent on application refresh rate.
 - [ ] support compressed/block formats
+- [ ] allow to view submissions to a queue
 - [ ] implement at least extensions that record to command buffer to allow hooking when they are used
 	- [ ] push descriptors
 	- [ ] device masks (core vulkan by now)

@@ -190,12 +190,12 @@ if with_x11
 	dep_x11_xcb = dependency('x11-xcb', required: true)
 
 	deps += [dep_xcb, dep_xcb_keysyms, dep_x11_xcb]
-	args += ['-DFUEN_WITH_X11']
+	args += ['-DVIL_WITH_X11']
 endif
 
 if with_win32
 	src += files('src/win32.cpp')
-	args += ['-DFUEN_WITH_WIN32']
+	args += ['-DVIL_WITH_WIN32']
 	layer_args += '-DUNICODE'
 endif
 

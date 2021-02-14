@@ -10,6 +10,7 @@
 #include <commands.hpp>
 #include <util/util.hpp>
 #include <util/bytes.hpp>
+#include <util/vecOps.hpp>
 
 #include <swa/key.h>
 
@@ -1005,23 +1006,33 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
 		if(ImGui::BeginTabBar("MainTabBar")) {
 			if(ImGui::BeginTabItem("Overview")) {
+				activeTab_ = Tab::overview;
 				drawOverviewUI(draw);
 				ImGui::EndTabItem();
 			}
 
 			if(ImGui::BeginTabItem("Resources", nullptr, checkSelectTab(Tab::resources))) {
+				// When switching towards the resources tab, make sure to refresh
+				// the list of available resources, not showing "<Destroyed>"
+				if(activeTab_ != Tab::resources) {
+					tabs_.resources.firstUpdate_ = true;
+					activeTab_ = Tab::resources;
+				}
+
 				tabs_.resources.draw(draw);
 				ImGui::EndTabItem();
 				resourcesTabDrawn_ = true;
 			}
 
 			if(ImGui::BeginTabItem("Memory", nullptr, checkSelectTab(Tab::memory))) {
+				activeTab_ = Tab::memory;
 				drawMemoryUI(draw);
 				ImGui::EndTabItem();
 			}
 
 			if(tabs_.cb.record_ || tabs_.cb.mode_ == CommandBufferGui::UpdateMode::swapchain) {
 				if(ImGui::BeginTabItem("Command Buffer", nullptr, checkSelectTab(Tab::commandBuffer))) {
+					activeTab_ = Tab::commandBuffer;
 					tabs_.cb.draw(draw);
 					ImGui::EndTabItem();
 				}
@@ -1073,6 +1084,12 @@ void Gui::destroyed(const Handle& handle) {
 void Gui::activateTab(Tab tab) {
 	activeTab_ = tab;
 	activateTabCounter_ = 0u;
+
+	// When switching towards the resources tab, make sure to refresh
+	// the list of available resources, not showing "<Destroyed>"
+	if(tab == Tab::resources) {
+		tabs_.resources.firstUpdate_ = true;
+	}
 }
 
 Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
@@ -1489,7 +1506,8 @@ void refButtonD(Gui& gui, Handle* handle, const char* str) {
 
 void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 		const VkExtent3D& extent, VkImageType imgType, VkFormat format,
-		const VkImageSubresourceRange& subresources) {
+		const VkImageSubresourceRange& subresources,
+		VkOffset3D* viewedTexel, ReadBuf texelData) {
 	ImVec2 pos = ImGui::GetCursorScreenPos();
 	float aspect = float(extent.width) / extent.height;
 
@@ -1504,15 +1522,38 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 	if (ImGui::IsItemHovered()) {
 		ImGui::BeginTooltip();
 		float region_sz = 64.0f;
-		float region_x = io.MousePos.x - pos.x - region_sz * 0.5f;
-		float region_y = io.MousePos.y - pos.y - region_sz * 0.5f;
+		float center_x = io.MousePos.x - pos.x;
+		float center_y = io.MousePos.y - pos.y;
+		float region_x = center_x - region_sz * 0.5f;
+		float region_y = center_y - region_sz * 0.5f;
 		float zoom = 4.0f;
 		if (region_x < 0.0f) { region_x = 0.0f; }
 		else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
 		if (region_y < 0.0f) { region_y = 0.0f; }
 		else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
-		ImGui::Text("Min: (%.2f, %.2f)", region_x, region_y);
-		ImGui::Text("Max: (%.2f, %.2f)", region_x + region_sz, region_y + region_sz);
+		ImGui::Text("Min: (%d, %d)",
+			int(extent.width * region_x / regW),
+			int(extent.height * region_y / regH)
+		);
+		ImGui::Text("Max: (%d, %d)",
+			int(extent.width * (region_x + region_sz) / regW),
+			int(extent.height * (region_y + region_sz) / regH)
+		);
+
+		auto px = int(extent.width * center_x / regW);
+		auto py = int(extent.width * center_y / regH);
+		if(viewedTexel) {
+			viewedTexel->x = px;
+			viewedTexel->y = py;
+			viewedTexel->z = extent.depth > 1 ? imgDraw.layer : 0;
+		}
+		if(!texelData.empty()) {
+			// TODO: better formatting of color
+			// - based on image format, show int or float
+			// - when using float, always have fixed length, avoid flickering
+			imGuiText("({}, {}): {}", px, py, read(format, texelData));
+		}
+
 		ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
 		ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
 		ImGui::Image((void*) &imgDraw, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
@@ -1662,16 +1703,5 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 
 	// TODO: display format and aspect?
 }
-
-// TODO: use something like this to copy the currently focused texel
-// in image viewer
-// void copyTexel(Device& dev, VkCommandBuffer cb, VkImage src,
-// 		VkImageLayout layout, VkBuffer dst, VkOffset3D pixel) {
-// 	VkBufferImageCopy copy {};
-// 	copy.imageExtent = {1, 1, 1};
-// 	copy.imageOffset = pixel;
-//
-// 	dev.dispatch.CmdCopyImageToBuffer(cb, src, layout, dst, 1, &copy);
-// }
 
 } // namespace vil

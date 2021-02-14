@@ -1,5 +1,22 @@
 For v0.1
 
+- [x] make queues viewable handles
+	- [x] allow to view command groups per queue
+- [x] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account
+	  for inserting query commands (check for the queue family in general,
+	  we might not be able to use the query pool!).
+	  {we don't need that limit, it's a general guarantee. We just check per-qfam}
+- [x] in io & resource viewer: mip slider broken
+	- [x] Also move to own line? or just make half width?
+- [x] Rename FUEN_ macros into VIL_
+- [x] automatically update resource lists in resource gui when tab is re-entered
+      from somewhere else
+- [x] improve enumString
+	- [x] make enumString.hpp return some deafult value ("" or "<?>") instead of nullptr.
+		  Could cause crashed for future values atm
+	- [x] better enumString.hpp. Remove prefixes
+	- [x] get VK_ERROR_UNKNOWN into enumString.hpp (and check if other enum values are missing for some reason)
+	      (the vk.xml we used was just too old. Shows how important updating it)
 - [x] always use nearest sampling for images?
 - [x] add example image to readme (with real-world application if possible)
 - [x] probably rather important to have a clear documentation on supported

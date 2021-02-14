@@ -151,6 +151,7 @@ void refButtonD(Gui& gui, Handle* handle, const char* str = "<Destroyed>");
 
 void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 	const VkExtent3D& extent, VkImageType imgType, VkFormat format,
-	const VkImageSubresourceRange& subresources);
+	const VkImageSubresourceRange& subresources,
+	VkOffset3D* viewedTexel, ReadBuf texelData);
 
 } // namespace vil

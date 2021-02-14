@@ -62,7 +62,7 @@ struct CommandHookState {
 
 	// Copy of the selected viewed descriptor set
 	std::variant<std::monostate, CopiedImage, CopiedBuffer> dsCopy;
-	u64 neededTime {}; // time needed for the given command
+	u64 neededTime {u64(-1)}; // time needed for the given command
 
 	// For indirect commands: holds a copy of the indirect command(s)
 	CopiedBuffer indirectCopy {};

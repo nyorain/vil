@@ -225,7 +225,7 @@ template<std::size_t N, typename T = float>
 	ret[2][2] = 1 - 2 * (xx + yy);
 
 	// Make sure the remaining rows/cols are initialized like identiy matrix
-	for(auto i = 3; i < N; ++i) {
+	for(auto i = 3u; i < N; ++i) {
 		ret[i][i] = 1.f;
 	}
 

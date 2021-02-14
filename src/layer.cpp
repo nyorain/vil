@@ -8,17 +8,17 @@
 #include <commands.hpp>
 #include <util/util.hpp>
 
-#ifdef FUEN_WITH_WAYLAND
+#ifdef VIL_WITH_WAYLAND
   #include <wayland.hpp>
-#endif // FUEN_WITH_WAYLAND
+#endif // VIL_WITH_WAYLAND
 
-#ifdef FUEN_WITH_X11
+#ifdef VIL_WITH_X11
   #include <xlib.hpp>
-#endif // FUEN_WITH_X11
+#endif // VIL_WITH_X11
 
-#ifdef FUEN_WITH_WIN32
+#ifdef VIL_WITH_WIN32
   #include <win32.hpp>
-#endif // FUEN_WITH_WIN32
+#endif // VIL_WITH_WIN32
 
 #include <vk/dispatch_table_helper.h>
 #include <dlg/dlg.hpp>

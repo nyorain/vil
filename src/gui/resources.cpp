@@ -113,23 +113,6 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 
 		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &image_.view));
 		nameHandle(dev, image_.view, "ResourceGui:image_.view");
-
-		VkDescriptorImageInfo dsii {};
-		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		dsii.imageView = image_.view;
-		dsii.sampler = dev.renderData->nearestSampler;
-		// dsii.sampler = image.allowsLinearSampling ?
-		// 	dev.renderData->linearSampler :
-		// 	dev.renderData->nearestSampler;
-
-		VkWriteDescriptorSet write {};
-		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		write.descriptorCount = 1u;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		write.dstSet = draw.dsSelected;
-		write.pImageInfo = &dsii;
-
-		dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 	}
 
 	// info
@@ -214,9 +197,44 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		subres.levelCount = image_.object->ci.mipLevels;
 		subres.aspectMask = image_.aspect;
 
+		ReadBuf texelData;
+		if(image_.readPixelBuffer.size) {
+			// TODO: keep buffer mapped
+			// TODO: invalidate and stuff
+			void* map;
+			VK_CHECK(dev.dispatch.MapMemory(dev.handle, image_.readPixelBuffer.mem,
+				0, image_.readPixelBuffer.size, 0, &map));
+			texelData = {reinterpret_cast<const std::byte*>(map), image_.readPixelBuffer.size};
+		}
+
 		auto format = image_.object->ci.format;
 		displayImage(*gui_, image_.draw, image_.object->ci.extent,
-			image_.object->ci.imageType, format, subres);
+			image_.object->ci.imageType, format, subres,
+			&image_.readPixelOffset, texelData);
+
+		if(!texelData.empty()) {
+			dev.dispatch.UnmapMemory(dev.handle, image_.readPixelBuffer.mem);
+		}
+
+		// We always update the descriptor set, not only when we recreate
+		// a view, since we can never know about the used draw.
+		// Could store whether this is actually needed but not worth it.
+		VkDescriptorImageInfo dsii {};
+		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		dsii.imageView = image_.view;
+		dsii.sampler = dev.renderData->nearestSampler;
+		// dsii.sampler = image.allowsLinearSampling ?
+		// 	dev.renderData->linearSampler :
+		// 	dev.renderData->nearestSampler;
+
+		VkWriteDescriptorSet write {};
+		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write.descriptorCount = 1u;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		write.dstSet = draw.dsSelected;
+		write.pImageInfo = &dsii;
+
+		dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 	}
 
 	// TODO: display pending layout?
@@ -1339,7 +1357,6 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
 
-	// ImGui::BeginChild("Search settings", {0.f, 0.f}, false, ImGuiWindowFlags_AlwaysAutoResize);
 	ImGui::BeginChild("Search settings", {0.f, 0.f}, false);
 
 	// filter by object type
@@ -1385,7 +1402,6 @@ void ResourceGui::draw(Draw& draw) {
 	}
 
 	ImGui::Separator();
-	// ImGui::EndChild();
 
 	// resource list
 	ImGui::BeginChild("Resource List", {0.f, 0.f}, false);
@@ -1492,9 +1508,13 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		imgb.subresourceRange.levelCount = 1u;
 		imgb.subresourceRange.layerCount = image_.object->ci.arrayLayers;
 		imgb.oldLayout = img.pendingLayout;
-		imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imgb.newLayout = img.hasTransferSrc ?
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL :
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // our rendering
 		imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags?
-		imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		imgb.dstAccessMask = img.hasTransferSrc ?
+			VK_ACCESS_TRANSFER_READ_BIT :
+			VK_ACCESS_SHADER_READ_BIT;
 		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
@@ -1506,10 +1526,53 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		// if(img.ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
 		// }
 
+		auto dstStage = img.hasTransferSrc ?
+			VK_PIPELINE_STAGE_TRANSFER_BIT :
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT; // our rendering
 		dev.dispatch.CmdPipelineBarrier(draw.cb,
 			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
-			0, 0, nullptr, 0, nullptr, 1, &imgb);
+			dstStage, 0, 0, nullptr, 0, nullptr, 1, &imgb);
+
+		// image texel copy
+		// TODO: should only copy this when the cursor is hovering the image
+		if(img.hasTransferSrc) {
+			VkBufferImageCopy copy {};
+			copy.imageExtent = {1, 1, 1};
+			copy.imageSubresource.aspectMask = image_.draw.aspect;
+			copy.imageSubresource.baseArrayLayer = image_.draw.layer;
+			copy.imageSubresource.mipLevel = image_.draw.level;
+			copy.imageSubresource.layerCount = 1u;
+			dlg_assert(
+				image_.readPixelOffset.x >= 0 &&
+				image_.readPixelOffset.y >= 0 &&
+				image_.readPixelOffset.z >= 0);
+			[[maybe_unused]] auto w = std::max(img.ci.extent.width >> u32(image_.draw.level), 1u);
+			[[maybe_unused]] auto h = std::max(img.ci.extent.height >> u32(image_.draw.level), 1u);
+			[[maybe_unused]] auto d = std::max(img.ci.extent.depth >> u32(image_.draw.level), 1u);
+			dlg_assert(
+				u32(image_.readPixelOffset.x) < w &&
+				u32(image_.readPixelOffset.y) < h &&
+				u32(image_.readPixelOffset.z) < d);
+
+			copy.imageOffset = image_.readPixelOffset;
+
+			auto dstBufUsage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+			image_.readPixelBuffer.ensure(dev, FormatElementSize(img.ci.format), dstBufUsage);
+
+			dev.dispatch.CmdCopyImageToBuffer(draw.cb, img.handle,
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image_.readPixelBuffer.buf, 1, &copy);
+
+			imgb.oldLayout = imgb.newLayout;
+			imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			imgb.srcAccessMask = imgb.srcAccessMask;
+			imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+			// TODO: probably also need barrier for stuff done by app on image in future submissions
+			dev.dispatch.CmdPipelineBarrier(draw.cb,
+				VK_PIPELINE_STAGE_TRANSFER_BIT, // wait for everything
+				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+				0, 0, nullptr, 0, nullptr, 1, &imgb);
+		}
 	}
 
 	// TODO

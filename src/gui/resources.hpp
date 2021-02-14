@@ -40,6 +40,9 @@ struct ResourceGui {
 
 		unsigned level {};
 		VkImageAspectFlagBits aspect {};
+
+		OwnBuffer readPixelBuffer {};
+		VkOffset3D readPixelOffset {};
 	} image_;
 
 	struct {

@@ -47,11 +47,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	auto& dev = getData<Device>(device);
 	auto* platform = findData<Platform>(pCreateInfo->surface);
 
-	auto env = getenv("FUEN_DISABLE_PLATFORM");
-	if(env && *env != '0') {
-		platform = nullptr;
-	}
-
 	// It's important we *first* destroy our image objects coming
 	// from this swapchain since they may implicitly destroyed
 	// inside the CreateSwapchain call.

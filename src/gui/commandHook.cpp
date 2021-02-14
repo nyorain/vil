@@ -113,7 +113,7 @@ CopiedImage::~CopiedImage() {
 
 void CopiedBuffer::init(Device& dev, VkDeviceSize size) {
 	this->buffer.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-	dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, size, 0, &this->map);
+	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, size, 0, &this->map));
 	this->copy = std::make_unique<std::byte[]>(size);
 
 	// NOTE: destructor for copied buffer is not needed as memory mapping
@@ -275,12 +275,17 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 
 	// query pool
 	if(hook->queryTime) {
-		VkQueryPoolCreateInfo qci {};
-		qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-		qci.queryCount = 2u;
-		qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-		VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool));
-		nameHandle(dev, this->queryPool, "CommandHookRecord:queryPool");
+		auto validBits = dev.queueFamilies[xrecord.queueFamily].props.timestampValidBits;
+		if(validBits == 0u) {
+			dlg_warn("Queue family {} does not support timing queries", xrecord.queueFamily);
+		} else {
+			VkQueryPoolCreateInfo qci {};
+			qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+			qci.queryCount = 2u;
+			qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+			VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool));
+			nameHandle(dev, this->queryPool, "CommandHookRecord:queryPool");
+		}
 	}
 
 	RecordInfo info {};

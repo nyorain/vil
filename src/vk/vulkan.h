@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef FUEN_WITH_WIN32
+#ifdef VIL_WITH_WIN32
 	#ifndef NOMINMAX
     	#define NOMINMAX
 	#endif // NOMINMAX
@@ -10,16 +10,16 @@
 	#endif // WIN32_LEAN_AND_MEAN
 
     #define VK_USE_PLATFORM_WIN32_KHR
-#endif // FUEN_WITH_WIN32
+#endif // VIL_WITH_WIN32
 
-#ifdef FUEN_WITH_WAYLAND
+#ifdef VIL_WITH_WAYLAND
     #define VK_USE_PLATFORM_WAYLAND_KHR
-#endif // FUEN_WITH_WAYLAND
+#endif // VIL_WITH_WAYLAND
 
-#ifdef FUEN_WITH_X11
+#ifdef VIL_WITH_X11
     #define VK_USE_PLATFORM_XLIB_KHR
     #define VK_USE_PLATFORM_XCB_KHR
-#endif // FUEN_WITH_X11
+#endif // VIL_WITH_X11
 
 // Basically vulkan.h, only using the platforms we support
 #include "vk_platform.h"
