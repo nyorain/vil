@@ -7,7 +7,7 @@ layer isn't practical; being able to quickly extend it and add support for
 new features and extensions is more important.
 
 But there are a couple of goals:
-- Programs that are usable without layer should stay playable with layer.
+- Programs that are usable without layer should stay usable with layer.
   This means increasing frame timings by something like 5% is acceptable,
   while 50%, for instance, is not. For initialization/creation times, a
   more significant overhead is acceptable.
@@ -17,7 +17,7 @@ But there are a couple of goals:
   be considered issues.
 
 In practice, the worst performance impact possible comes likely from
-the serialization of many commands done in the layer: per-resource
+the central mutex locking of many commands done in the layer: per-resource
 synchronization is hard/not possible in general and so synchronization
 is mostly done on a per-device level (that also involves the gui, while
 it is being drawn no resources can be created or destroyed). 
