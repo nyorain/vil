@@ -1509,6 +1509,8 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 		const VkImageSubresourceRange& subresources,
 		VkOffset3D* viewedTexel, ReadBuf texelData) {
 	ImVec2 pos = ImGui::GetCursorScreenPos();
+
+	// respect current mip level?
 	float aspect = float(extent.width) / extent.height;
 
 	// TODO: this logic might lead to problems for 1xHUGE images
@@ -1531,17 +1533,21 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 		else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
 		if (region_y < 0.0f) { region_y = 0.0f; }
 		else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
-		ImGui::Text("Min: (%d, %d)",
-			int(extent.width * region_x / regW),
-			int(extent.height * region_y / regH)
-		);
-		ImGui::Text("Max: (%d, %d)",
-			int(extent.width * (region_x + region_sz) / regW),
-			int(extent.height * (region_y + region_sz) / regH)
-		);
 
-		auto px = int(extent.width * center_x / regW);
-		auto py = int(extent.width * center_y / regH);
+		// ImGui::Text("Min: (%d, %d)",
+		// 	int(extent.width * region_x / regW),
+		// 	int(extent.height * region_y / regH)
+		// );
+		// ImGui::Text("Max: (%d, %d)",
+		// 	int(extent.width * (region_x + region_sz) / regW),
+		// 	int(extent.height * (region_y + region_sz) / regH)
+		// );
+
+		auto w = std::max(extent.width >> u32(imgDraw.level), 1u);
+		auto h = std::max(extent.height >> u32(imgDraw.level), 1u);
+
+		auto px = int(w * center_x / regW);
+		auto py = int(h * center_y / regH);
 		if(viewedTexel) {
 			viewedTexel->x = px;
 			viewedTexel->y = py;
@@ -1615,7 +1621,9 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 	if(extent.depth > 1) {
 		// TODO: not very convenient to use for a lot of slices.
 		//   make sensitivity absolute, i.e. not dependent on number of slices?
-		ImGui::SliderFloat("slice", &imgDraw.layer, 0, extent.depth - 1);
+		// TODO: this is weird when the image also has mip levels
+		auto maxDepth = std::max((extent.depth >> u32(imgDraw.level)), 1u) - 1u;
+		ImGui::SliderFloat("slice", &imgDraw.layer, 0, maxDepth);
 	} else if(subresources.layerCount > 1) {
 		int layer = int(imgDraw.layer);
 		ImGui::SliderInt("Layer", &layer, subresources.baseArrayLayer,

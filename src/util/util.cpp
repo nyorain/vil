@@ -49,6 +49,38 @@ VkImageViewType minImageViewType(VkExtent3D size, unsigned layers,
 	}
 }
 
+// - https://en.wikipedia.org/wiki/SRGB (conversion matrices from here)
+// - https://www.w3.org/Graphics/Color/srgb
+double linearToSRGB(double linear) {
+	if(linear < 0.0031308) {
+		return 12.92 * linear;
+	} else {
+		return 1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
+	}
+}
+
+double srgbToLinear(double srgb) {
+	if(srgb < 0.04045) {
+		return srgb / 12.92;
+	} else {
+		return pow((srgb + 0.055) / 1.055, 2.4);
+	}
+}
+
+Vec4d linearToSRGB(Vec4d v) {
+	v[0] = linearToSRGB(v[0]);
+	v[1] = linearToSRGB(v[1]);
+	v[2] = linearToSRGB(v[2]);
+	return v;
+}
+
+Vec4d srgbToLinear(Vec4d v) {
+	v[0] = srgbToLinear(v[0]);
+	v[1] = srgbToLinear(v[1]);
+	v[2] = srgbToLinear(v[2]);
+	return v;
+}
+
 template<std::size_t N, typename T>
 Vec<N, T> read(span<const std::byte>& src) {
 	Vec<N, T> ret;
@@ -59,42 +91,47 @@ Vec<N, T> read(span<const std::byte>& src) {
 }
 
 struct FormatReader {
-	template<std::size_t N, typename T, u32 Fac = 1>
+	template<std::size_t N, typename T, u32 Fac, bool SRGB>
 	static void call(span<const std::byte>& src, Vec4d& dst) {
 		using nytl::vec::operators::operator/;
-		Vec<N, T> ret;
-		for(auto& val : ret) {
-			read<T>(src, val);
-		}
+		auto ret = read<Vec<N, T>>(src);
 		dst = Vec4d(ret) / double(Fac);
+		if constexpr(SRGB) {
+			dst = srgbToLinear(dst);
+		}
 	}
 };
 
 struct FormatWriter {
-	template<std::size_t N, typename T, u32 factor = 1>
-	static void call(span<std::byte>& dst, const Vec4d& src) {
-		write(dst, bytes(src));
+	template<std::size_t N, typename T, u32 Fac, bool SRGB>
+	static void call(span<std::byte>& dst, Vec4d src) {
+		if constexpr(SRGB) {
+			src = linearToSRGB(src);
+		}
+
+		for(auto i = 0u; i < N; ++i) {
+			write<T>(dst, T(Fac * src[i]));
+		}
 	}
 };
 
-template<bool Write, std::size_t N, typename T, u32 Fac = 1, typename Span, typename Vec>
+template<bool Write, std::size_t N, typename T, u32 Fac = 1, bool SRGB = false, typename Span, typename Vec>
 void iofmt(Span& span, Vec& vec) {
 	if constexpr(Write) {
-		FormatWriter::call<N, T, Fac>(span, vec);
+		FormatWriter::call<N, T, Fac, SRGB>(span, vec);
 	} else {
-		FormatReader::call<N, T, Fac>(span, vec);
+		FormatReader::call<N, T, Fac, SRGB>(span, vec);
 	}
 }
 
 template<bool W, typename Span, typename Vec>
 void ioFormat(VkFormat format, Span& span, Vec& vec) {
 	// TODO: missing:
-	// - packed formats (including < 8bit formats like 5-6-5)
+	// - packed formats (including < 8bit formats like 5-6-5, also packed depth/stencil)
 	// - reversed formats (bgra, argb)
 	// - 2-10-10-10 formats
-	// - srgb formats (could support them, convert from/to linear)
-	// - depth formats
 	// - compressed formats (can't be supported with this api anyways i guess)
+	// Also properly test this!
 
 	switch(format) {
 		case VK_FORMAT_R16_SFLOAT: return iofmt<W, 1, f16>(span, vec);
@@ -116,6 +153,11 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 		case VK_FORMAT_R8G8_UNORM: return iofmt<W, 2, u8, 255>(span, vec);
 		case VK_FORMAT_R8G8B8_UNORM: return iofmt<W, 3, u8, 255>(span, vec);
 		case VK_FORMAT_R8G8B8A8_UNORM: return iofmt<W, 4, u8, 255>(span, vec);
+
+		case VK_FORMAT_R8_SRGB: return iofmt<W, 1, u8, 255, true>(span, vec);
+		case VK_FORMAT_R8G8_SRGB: return iofmt<W, 2, u8, 255, true>(span, vec);
+		case VK_FORMAT_R8G8B8_SRGB: return iofmt<W, 3, u8, 255, true>(span, vec);
+		case VK_FORMAT_R8G8B8A8_SRGB: return iofmt<W, 4, u8, 255, true>(span, vec);
 
 		case VK_FORMAT_R16_UNORM: return iofmt<W, 1, u16, 65535>(span, vec);
 		case VK_FORMAT_R16G16_UNORM: return iofmt<W, 2, u16, 65535>(span, vec);
@@ -189,6 +231,45 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 		case VK_FORMAT_R64G64_SINT: return iofmt<W, 2, i64>(span, vec);
 		case VK_FORMAT_R64G64B64_SINT: return iofmt<W, 3, i64>(span, vec);
 		case VK_FORMAT_R64G64B64A64_SINT: return iofmt<W, 4, i64>(span, vec);
+
+		// depth-stencil formats.
+		case VK_FORMAT_S8_UINT: return iofmt<W, 1, u8, 255>(span, vec);
+		case VK_FORMAT_D16_UNORM: return iofmt<W, 1, u16, 65535>(span, vec);
+		case VK_FORMAT_D16_UNORM_S8_UINT:
+			if constexpr(W) {
+				write(span, u16(vec[0] * 65535));
+				write(span, u8(vec[1]));
+			} else {
+				vec = {};
+				vec[0] = read<u16>(span) / 65535.0;
+				vec[1] = read<u8>(span);
+			}
+			break;
+		case VK_FORMAT_D24_UNORM_S8_UINT:
+			if constexpr(W) {
+				u32 d = 65535 * vec[0];
+				write(span, u8((d >> 16) & 0xFF));
+				write(span, u8((d >> 8) & 0xFF));
+				write(span, u8((d) & 0xFF));
+				write(span, u8(vec[1]));
+			} else {
+				vec = {};
+				auto d = read<std::array<u8, 3>>(span);
+				vec[0] = ((u32(d[0]) << 16) | (u32(d[1]) << 8) | u32(d[3])) / 16777215.0;
+				vec[1] = read<u8>(span);
+			}
+			break;
+		case VK_FORMAT_D32_SFLOAT: return iofmt<W, 1, float>(span, vec);
+		case VK_FORMAT_D32_SFLOAT_S8_UINT:
+			if constexpr(W) {
+				write(span, float(vec[0]));
+				write(span, u8(vec[1]));
+			} else {
+				vec = {};
+				vec[0] = read<float>(span);
+				vec[1] = read<u8>(span);
+			}
+			break;
 
 		case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:
 			if constexpr(W) {

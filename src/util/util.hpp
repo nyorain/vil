@@ -213,6 +213,14 @@ void write(VkFormat dstFormat, span<std::byte>& dst, const Vec4d& color);
 void convert(VkFormat dstFormat, span<std::byte>& dst,
 		VkFormat srcFormat, span<const std::byte>& src);
 
+// does the correct conversion, no pow(2.2) approximation
+double linearToSRGB(double linear);
+double srgbToLinear(double srgb);
+
+// preserves alpha component, as per vulkan
+Vec4d linearToSRGB(Vec4d);
+Vec4d srgbToLinear(Vec4d);
+
 std::size_t structSize(VkStructureType type);
 
 template<typename V, typename T>
