@@ -1356,6 +1356,13 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 
 	if(cmdInfo) {
 		hook.queryTime = true;
+
+		if(dynamic_cast<const DispatchIndirectCmd*>(&cmd) ||
+				dynamic_cast<const DrawIndirectCmd*>(&cmd) ||
+				dynamic_cast<const DrawIndirectCountCmd*>(&cmd)) {
+			hook.copyIndirectCmd = true;
+		}
+
 		if(hook.state) {
 			dlg_assert(record_);
 			auto lastTime = hook.state->neededTime;
@@ -1378,6 +1385,33 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 
 				displayDiff /= 1000.f * 1000.f;
 				imGuiText("Time: {} ms", displayDiff);
+			}
+
+			// for indirect commands, show effective command
+			if(hook.copyIndirectCmd && hook.state->indirectCopy.buffer.size) {
+				auto& ic = hook.state->indirectCopy;
+				auto span = ReadBuf(ic.copy.get(), ic.buffer.size);
+				if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd)) {
+					if(dcmd->indexed) {
+						auto cmd = read<VkDrawIndexedIndirectCommand>(span);
+						imGuiText("firstIndex: {}", cmd.firstIndex);
+						imGuiText("indexCount: {}", cmd.indexCount);
+						imGuiText("vertexOffset: {}", cmd.vertexOffset);
+						imGuiText("firstInstance: {}", cmd.firstInstance);
+						imGuiText("instanceCount: {}", cmd.instanceCount);
+					} else {
+						auto cmd = read<VkDrawIndirectCommand>(span);
+						imGuiText("firstVertex: {}", cmd.firstVertex);
+						imGuiText("vertexCount: {}", cmd.vertexCount);
+						imGuiText("firstInstance: {}", cmd.firstInstance);
+						imGuiText("instanceCount: {}", cmd.instanceCount);
+					}
+				} else if(dynamic_cast<const DispatchIndirectCmd*>(&cmd)) {
+					auto cmd = read<VkDispatchIndirectCommand>(span);
+					imGuiText("groups X: {}", cmd.x);
+					imGuiText("groups Y: {}", cmd.y);
+					imGuiText("groups Z: {}", cmd.z);
+				} // TODO: drawIndirectCount
 			}
 		}
 
