@@ -95,6 +95,13 @@ void CommandBuffer::doReset(bool record) {
 
 void CommandBuffer::doEnd() {
 	dlg_assert(record_);
+
+	// NOTE: debug utils labels can be unterminated
+	while(section_) {
+		dlg_assert(dynamic_cast<const BeginDebugUtilsLabelCmd*>(section_->cmd));
+		section_ = section_->parent;
+	}
+
 	dlg_assert(!section_);
 
 	graphicsState_ = {};
@@ -134,7 +141,13 @@ void CommandBuffer::doEnd() {
 }
 
 void CommandBuffer::endSection() {
+	// TODO: this is allowed e.g. for EndDebugUtilsLabel
 	dlg_assert(section_);
+	if(!section_)
+	{
+		return;
+	}
+
 	lastCommand_ = section_->cmd;
 	section_->cmd = nullptr;
 

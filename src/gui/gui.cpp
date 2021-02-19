@@ -264,17 +264,18 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	guiGpi.renderPass = rp_;
 	guiGpi.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
-	auto& imgGpi = gpis.emplace_back(guiGpi);
+	VkGraphicsPipelineCreateInfo imgGpi = guiGpi;
 	imgGpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 	imgGpi.basePipelineIndex = 0u;
 	imgGpi.pStages = image1DStages.data();
+	gpis.push_back(imgGpi);
 
 	auto addImGpi = [&](auto& stages) {
-		auto& gpi = gpis.emplace_back(imgGpi);
-		imgGpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
-		imgGpi.basePipelineIndex = 1u;
+		VkGraphicsPipelineCreateInfo gpi = imgGpi;
+		gpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+		gpi.basePipelineIndex = 1u;
 		gpi.pStages = stages.data();
-		return gpi;
+		gpis.push_back(gpi);
 	};
 
 	addImGpi(uimage1DStages);

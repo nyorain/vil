@@ -1393,24 +1393,24 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 				auto span = ReadBuf(ic.copy.get(), ic.buffer.size);
 				if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd)) {
 					if(dcmd->indexed) {
-						auto cmd = read<VkDrawIndexedIndirectCommand>(span);
-						imGuiText("firstIndex: {}", cmd.firstIndex);
-						imGuiText("indexCount: {}", cmd.indexCount);
-						imGuiText("vertexOffset: {}", cmd.vertexOffset);
-						imGuiText("firstInstance: {}", cmd.firstInstance);
-						imGuiText("instanceCount: {}", cmd.instanceCount);
+						auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
+						imGuiText("firstIndex: {}", ecmd.firstIndex);
+						imGuiText("indexCount: {}", ecmd.indexCount);
+						imGuiText("vertexOffset: {}", ecmd.vertexOffset);
+						imGuiText("firstInstance: {}", ecmd.firstInstance);
+						imGuiText("instanceCount: {}", ecmd.instanceCount);
 					} else {
-						auto cmd = read<VkDrawIndirectCommand>(span);
-						imGuiText("firstVertex: {}", cmd.firstVertex);
-						imGuiText("vertexCount: {}", cmd.vertexCount);
-						imGuiText("firstInstance: {}", cmd.firstInstance);
-						imGuiText("instanceCount: {}", cmd.instanceCount);
+						auto ecmd = read<VkDrawIndirectCommand>(span);
+						imGuiText("firstVertex: {}", ecmd.firstVertex);
+						imGuiText("vertexCount: {}", ecmd.vertexCount);
+						imGuiText("firstInstance: {}", ecmd.firstInstance);
+						imGuiText("instanceCount: {}", ecmd.instanceCount);
 					}
 				} else if(dynamic_cast<const DispatchIndirectCmd*>(&cmd)) {
-					auto cmd = read<VkDispatchIndirectCommand>(span);
-					imGuiText("groups X: {}", cmd.x);
-					imGuiText("groups Y: {}", cmd.y);
-					imGuiText("groups Z: {}", cmd.z);
+					auto ecmd = read<VkDispatchIndirectCommand>(span);
+					imGuiText("groups X: {}", ecmd.x);
+					imGuiText("groups Y: {}", ecmd.y);
+					imGuiText("groups Z: {}", ecmd.z);
 				} // TODO: drawIndirectCount
 			}
 		}
