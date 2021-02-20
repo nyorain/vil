@@ -190,6 +190,17 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		std::swap(swapchain.frameSubmissions, swapchain.nextFrameSubmissions);
 		swapchain.nextFrameSubmissions.clear();
 
+		auto now = Swapchain::Clock::now();
+		if(swapchain.lastPresent) {
+			if(swapchain.frameTimings.size() == swapchain.maxFrameTimings) {
+				swapchain.frameTimings.erase(swapchain.frameTimings.begin());
+			}
+
+			auto timing = now - *swapchain.lastPresent;
+			swapchain.frameTimings.push_back(timing);
+		}
+		swapchain.lastPresent = now;
+
 		if(swapchain.overlay && swapchain.overlay->show) {
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);

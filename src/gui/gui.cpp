@@ -820,72 +820,43 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 	ImGui::Separator();
 
-	if(dev.swapchain && ImGui::Button("View per-frame submissions")) {
-		cbGui().showSwapchainSubmissions();
-		activateTab(Tab::commandBuffer);
+	if(dev.swapchain) {
+		if(ImGui::Button("View per-frame submissions")) {
+			cbGui().showSwapchainSubmissions();
+			activateTab(Tab::commandBuffer);
+		}
+
+		// show timings
+		std::vector<float> hist;
+		for(auto& timing : dev.swapchain->frameTimings) {
+			using MS = std::chrono::duration<float, std::ratio<1, 1000>>;
+			hist.push_back(std::chrono::duration_cast<MS>(timing).count());
+		}
+
+		// TODO: the histogram has several problems:
+		// - very high outliers will render all other timings useless (since
+		//   they are scaled down too much)
+		// - the variable scaling the make it weird to get an absolute
+		//   idea of the timings, only relative is possible
+		if(!hist.empty()) {
+			ImGui::PlotHistogram("Present timings", hist.data(), hist.size(),
+				0, nullptr, FLT_MAX, FLT_MAX, {0, 150});
+		}
 	}
 
 	// pretty much just own debug stuff
-	ImGui::Separator();
+	// ImGui::Separator();
 
-	/*
-	auto pending = dlg::format("Pending submissions: {}", dev.pending.size());
-	if(ImGui::TreeNode(&dev.pending, "%s", pending.c_str())) {
-		for(auto& subm : dev.pending) {
-			// TODO: make button
-			imGuiText("To queue {}", name(*subm->queue));
-			if(subm->appFence) {
-				imGuiText("Using Fence");
-				if(ImGui::Button(name(*subm->appFence).c_str())) {
-					selectResource(*subm->appFence);
-				}
-			}
-
-			ImGui::Indent();
-			for(auto& sub : subm->submissions) {
-				// TODO: show semaphores?
-				// should probably store Semaphore instead of VkSemaphore!
-				// if(!sub.waitSemaphores.empty()) {
-				// 	for(auto [sem, flag] : sub.waitSemaphores) {
-				// 	}
-				// }
-
-				for(auto& [cb, _] : sub.cbs) {
-					ImGui::Bullet();
-					// We have the additional IsItemClicked here since
-					// that might change every frame
-					// if(ImGui::Button(name(*cb).c_str()) || ImGui::IsItemClicked()) {
-					// 	selectCb(*cb);
-					// }
-
-					auto* group = cb->lastRecordLocked()->group;
-					dlg_assert(group);
-
-					auto label = dlg::format("Group {}", (void*) group);
-					if(ImGui::Button(label.c_str())) {
-						tabs_.cb.select(group->lastRecord, true);
-						this->activateTab(Tab::commandBuffer);
-					}
-				}
-			}
-			ImGui::Unindent();
-
-			// ImGui::Separator();
-		}
-		ImGui::TreePop();
-	}
-	*/
-
-	if(ImGui::TreeNode("Statistics")) {
-		auto numGroups = 0u;
-		for(auto& qf : dev.queueFamilies) {
-			numGroups += unsigned(qf.commandGroups.size());
-		}
-
-		imGuiText("Number of command groups: {}", numGroups);
-
-		ImGui::TreePop();
-	}
+	// if(ImGui::TreeNode("Statistics")) {
+	// 	auto numGroups = 0u;
+	// 	for(auto& qf : dev.queueFamilies) {
+	// 		numGroups += unsigned(qf.commandGroups.size());
+	// 	}
+//
+	// 	imGuiText("Number of command groups: {}", numGroups);
+//
+	// 	ImGui::TreePop();
+	// }
 }
 
 void Gui::drawMemoryUI(Draw&) {

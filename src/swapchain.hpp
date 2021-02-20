@@ -23,7 +23,7 @@ struct Swapchain : DeviceHandle {
 	// The VkImages associated with this swapchain
 	std::vector<Image*> images;
 
-	// TODO: at the moment we simply track times between submissions.
+	// TODO: at the moment we simply track times between presents.
 	// We could instead separate between between-present, command buffer
 	// execution and in-present timings (to give meaningful timings for
 	// applications limited by vsync or cpu).
