@@ -87,6 +87,8 @@ struct CommandRecord;
 struct CommandBufferDesc;
 struct CommandMemBlock;
 struct MemBlockDeleter;
+struct DrawCmdBase;
+struct DispatchCommand;
 
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;

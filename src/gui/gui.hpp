@@ -28,7 +28,7 @@ public:
 	Gui& operator=(Gui&&) = delete;
 	~Gui();
 
-	void init(Device& dev, VkFormat format, bool clear);
+	void init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear);
 
 	struct FrameInfo {
 		VkSwapchainKHR swapchain {};
@@ -68,6 +68,7 @@ public:
 
 	Device& dev() const { return *dev_; }
 	VkRenderPass rp() const { return rp_; }
+	float dt() const { return dt_; }
 
 private:
 	void draw(Draw&, bool fullscreen);
@@ -130,6 +131,8 @@ private:
 
 	using Clock = std::chrono::high_resolution_clock;
 	Clock::time_point lastFrame_ {};
+
+	float dt_ {};
 
 	// drawing/sync logic
 	bool resourcesTabDrawn_ {};

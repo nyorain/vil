@@ -41,6 +41,12 @@ struct DisplayWindow {
 private:
 	std::thread thread_;
 	std::atomic<bool> run_ {true};
+
+	VkFormat depthFormat_ {};
+	VkImage depthImage_ {};
+	VkImageView depthView_ {};
+	VkDeviceMemory depthMemory_ {};
+
 	std::vector<RenderBuffer> buffers_;
 
 	enum class State {

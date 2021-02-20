@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <gui/render.hpp>
+#include <gui/vertexViewer.hpp>
 #include <util/flags.hpp>
 #include <commandDesc.hpp>
 
@@ -21,8 +22,10 @@ public:
 	};
 
 public:
-	CommandBufferGui();
+	CommandBufferGui() = default;
 	~CommandBufferGui();
+
+	void init(Gui& gui);
 
 	void draw(Draw& draw);
 	void destroyed(const Handle& handle);
@@ -35,6 +38,7 @@ public:
 private:
 	void displayDsList(const Command&);
 	void displayIOList(const Command&);
+	void displayVertexViewer(Draw& draw, const Command&);
 	void displaySelectedIO(Draw& draw, const Command&);
 	void displayInspector(Draw& draw, const Command&);
 	void displayActionInspector(Draw& cmd, const Command&);
@@ -73,6 +77,16 @@ private:
 
 	// For the one image we potentially display
 	DrawGuiImage ioImage_ {};
+
+	VertexViewer vertexViewer_ {};
+
+	struct VertexDrawData {
+		CommandBufferGui* self;
+		VkCommandBuffer cb;
+		Vec2f offset;
+		Vec2f size;
+		const DrawCmdBase* cmd;
+	} vertexDrawData_;
 };
 
 } // namespace vil

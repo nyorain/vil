@@ -2,6 +2,8 @@
 #include <gui/commandHook.hpp>
 #include <vk/format_utils.h>
 #include <device.hpp>
+#include <commandDesc.hpp>
+#include <commands.hpp>
 #include <pipe.hpp>
 #include <imgui/imgui.h>
 
@@ -9,6 +11,18 @@
 #include <vertices.frag.spv.h>
 
 namespace vil {
+
+VertexViewer::~VertexViewer() {
+	if(!dev_) {
+		return;
+	}
+
+	for(auto& pipe : pipes_) {
+		dev_->dispatch.DestroyPipeline(dev_->handle, pipe.pipe, nullptr);
+	}
+
+	dev_->dispatch.DestroyPipelineLayout(dev_->handle, pipeLayout_, nullptr);
+}
 
 void VertexViewer::init(Device& dev, VkRenderPass rp) {
 	dev_ = &dev;
@@ -183,14 +197,6 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 
 	auto& dev = *this->dev_;
 
-	// update input
-	auto& io = ImGui::GetIO();
-
-	auto mousePos = Vec2f{io.MousePos.x, io.MousePos.y};
-	auto delta = lastMousPos_ - mousePos; // TODO: ignore the first time
-	// TODO
-	lastMousPos_ = mousePos;
-
 	// try to find position by heuristics
 	// TODO: cache this! But should likely not implemented here in first place.
 	// TODO: implement a serious heuristic. Inspect the spv code,
@@ -236,6 +242,30 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 		dev.dispatch.CmdDrawIndexed(cb, drawCount, 1, offset, vertexOffset, 0);
 	} else {
 		dev.dispatch.CmdDraw(cb, drawCount, 1, offset, 0);
+	}
+}
+
+void VertexViewer::updateInput(float dt) {
+	// update input
+	auto& io = ImGui::GetIO();
+
+	if(ImGui::IsItemHovered()) {
+		if(io.MouseDown[0]) {
+			auto mousePos = Vec2f{io.MousePos.x, io.MousePos.y};
+			if(rotating_) {
+				auto delta = lastMousPos_ - mousePos;
+				(void) delta; // TODO: move cam
+			}
+
+			lastMousPos_ = mousePos;
+		}
+
+		rotating_ = io.MouseDown[0];
+	}
+
+	if(ImGui::IsItemFocused()) {
+		// TODO: process keyword input
+		(void) dt;
 	}
 }
 

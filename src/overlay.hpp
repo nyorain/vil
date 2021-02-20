@@ -11,6 +11,7 @@ namespace vil {
 struct Overlay {
 	Swapchain* swapchain;
 	Gui gui;
+
 	std::vector<RenderBuffer> buffers;
 	bool show {};
 
@@ -23,6 +24,8 @@ struct Overlay {
 	Overlay();
 	~Overlay();
 
+	void destroyDepth();
+
 	// Returns whether the two given swapchain create infos are compatible
 	// for all overlay-rendering purposes. When this returns true, the swapchain
 	// may be changed for an existing overlay later on to another,
@@ -30,6 +33,12 @@ struct Overlay {
 	static bool compatible(
 		const VkSwapchainCreateInfoKHR& a,
 		const VkSwapchainCreateInfoKHR& b);
+
+private:
+	VkFormat depthFormat_ {};
+	VkImage depthImage_ {};
+	VkImageView depthView_ {};
+	VkDeviceMemory depthMemory_ {};
 };
 
 } // namespace vil

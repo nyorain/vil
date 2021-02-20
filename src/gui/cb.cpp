@@ -271,11 +271,15 @@ std::string readFormat(VkFormat format, span<const std::byte> src) {
 
 
 // CommandBufferGui
-CommandBufferGui::CommandBufferGui() {
+void CommandBufferGui::init(Gui& gui) {
+	gui_ = &gui;
+
 	commandFlags_ = CommandType(~(CommandType::end | CommandType::bind | CommandType::query));
 	ioImage_.flags = DrawGuiImage::flagMaskR |
 		DrawGuiImage::flagMaskG |
 		DrawGuiImage::flagMaskB;
+
+	vertexViewer_.init(gui.dev(), gui.rp());
 }
 
 CommandBufferGui::~CommandBufferGui() = default;
@@ -711,6 +715,24 @@ void CommandBufferGui::displayInspector(Draw& draw, const Command& bcmd) {
 			bcmd.type() == CommandType::transfer) {
 		displayActionInspector(draw, bcmd);
 		return;
+	}
+
+	// TODO: slight code duplication with IO inspector. Might be able to
+	// refactor it
+	auto& hook = *gui_->dev().commandHook;
+	hook.queryTime = true;
+	if(hook.state) {
+		dlg_assert(record_);
+		auto lastTime = hook.state->neededTime;
+		auto validBits = gui_->dev().queueFamilies[record_->queueFamily].props.timestampValidBits;
+		if(validBits == 0u) {
+			dlg_assert(lastTime == u64(-1));
+			imGuiText("Time: unavailable (Queue family does not support timing queries)");
+		} else {
+			auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
+			displayDiff /= 1000.f * 1000.f;
+			imGuiText("Time: {} ms", displayDiff);
+		}
 	}
 
 	bcmd.displayInspector(*gui_);
@@ -1174,6 +1196,149 @@ void CommandBufferGui::displayIOList(const Command& cmd) {
 	}
 }
 
+void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
+	auto& hook = *gui_->dev().commandHook;
+	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+	dlg_assert(drawCmd);
+
+	if(!drawCmd || !drawCmd->state.pipe) {
+		ImGui::Text("Pipeline was destroyed, can't interpret state");
+		return;
+	} else if(!hook.state) {
+		ImGui::Text("Waiting for a submission...");
+		return;
+	} else if(hook.state->vertexBufCopies.size() < drawCmd->state.pipe->vertexBindings.size()) {
+		if(!hook.state->errorMessage.empty()) {
+			imGuiText("Error: {}", hook.state->errorMessage);
+		} else {
+			ImGui::Text("Error: not enough vertex buffers bound");
+		}
+
+		return;
+	}
+
+	// TODO: display binding information
+	// TODO: how to display indices?
+	// TODO: only show vertex range used for draw call
+
+	auto& pipe = *drawCmd->state.pipe;
+
+	SpvReflectShaderModule* vertStage = nullptr;
+	for(auto& stage : pipe.stages) {
+		if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
+			vertStage = &nonNull(nonNull(stage.spirv).reflection);
+			break;
+		}
+	}
+
+	if(!vertStage) {
+		// TODO: yeah this can happen with mesh shaders now
+		ImGui::Text("Grahpics Pipeline has no vertex stage :o");
+		return;
+	}
+
+	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
+
+	// match bindings to input variables into
+	// (pipe.vertexAttrib, vertStage->input_variables) id pairs
+	std::vector<std::pair<u32, u32>> attribs;
+	for(auto a = 0u; a < pipe.vertexAttribs.size(); ++a) {
+		auto& attrib = pipe.vertexAttribs[a];
+		for(auto i = 0u; i < vertStage->input_variable_count; ++i) {
+			auto& iv = *vertStage->input_variables[i];
+			if(iv.location == attrib.location) {
+				attribs.push_back({a, i});
+			}
+		}
+	}
+
+	// TODO sort by input location?
+
+	// 1: table
+	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
+		if(attribs.empty()) {
+			ImGui::Text("No Vertex input");
+		} else if(ImGui::BeginTable("Vertices", int(attribs.size()), flags)) {
+			for(auto& attrib : attribs) {
+				auto& iv = *vertStage->input_variables[attrib.second];
+				ImGui::TableSetupColumn(iv.name);
+			}
+
+			ImGui::TableHeadersRow();
+			ImGui::TableNextRow();
+
+			auto finished = false;
+			auto id = 0u;
+			while(!finished) {
+				for(auto& [aID, _] : attribs) {
+					auto& attrib = pipe.vertexAttribs[aID];
+					ImGui::TableNextColumn();
+
+					auto& binding = pipe.vertexBindings[attrib.binding];
+					auto& buf = hook.state->vertexBufCopies[attrib.binding];
+					auto off = binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX ?
+						id * binding.stride : 0u;
+					off += attrib.offset;
+
+					// TODO: compressed support?
+					auto size = FormatElementSize(attrib.format);
+
+					if(off + size > buf.buffer.size) {
+						finished = true;
+						break;
+					}
+
+					auto* ptr = buf.copy.get() + off;
+					auto str = readFormat(attrib.format, {ptr, size});
+
+					imGuiText("{}", str);
+				}
+
+				++id;
+				ImGui::TableNextRow();
+			}
+
+			ImGui::EndTable();
+		}
+	}
+
+	ImGui::EndChild();
+
+	// 2: viewer
+	if(ImGui::BeginChild("vertexViewer")) {
+		auto avail = ImGui::GetContentRegionAvail();
+		auto pos = ImGui::GetCursorScreenPos();
+
+		vertexDrawData_.self = this;
+		vertexDrawData_.cb = draw.cb;
+		vertexDrawData_.offset = {pos.x, pos.y};
+		vertexDrawData_.size = {avail.x, avail.y};
+		vertexDrawData_.size = {avail.x, avail.y};
+		vertexDrawData_.cmd = drawCmd;
+
+		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+			auto* data = static_cast<VertexDrawData*>(cmd->UserCallbackData);
+			auto& hook = *data->self->gui_->dev().commandHook;
+			auto& pipe = *data->cmd->state.pipe;
+
+			std::optional<VkIndexType> indexType;
+			u32 offset {};
+			u32 drawCount {};
+			u32 vertexOffset {};
+
+			data->self->vertexViewer_.imGuiDraw(data->cb, pipe,
+				*hook.state, indexType, offset, drawCount, vertexOffset);
+		};
+
+		ImGui::GetWindowDrawList()->AddCallback(cb, &vertexDrawData_);
+		ImGui::InvisibleButton("Canvas", avail);
+
+		vertexViewer_.updateInput(gui_->dt());
+	}
+
+	ImGui::EndChild();
+}
+
 void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 	auto& hook = *gui_->dev().commandHook;
 
@@ -1195,99 +1360,7 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 		displayDs(draw, cmd);
 		cmdInfo = false;
 	} else if(hook.copyVertexBuffers) {
-		dlg_assert(drawCmd);
-		if(!drawCmd || !drawCmd->state.pipe) {
-			ImGui::Text("Pipeline was destroyed, can't interpret state");
-		} else if(!hook.state) {
-			ImGui::Text("Waiting for a submission...");
-		} else if(hook.state->vertexBufCopies.size() < drawCmd->state.pipe->vertexBindings.size()) {
-			if(!hook.state->errorMessage.empty()) {
-				imGuiText("Error: {}", hook.state->errorMessage);
-			} else {
-				ImGui::Text("Error: not enough vertex buffers bound");
-			}
-		} else {
-			// TODO: display binding information
-			// TODO: how to display indices?
-			// TODO: only show vertex range used for draw call
-
-			auto& pipe = *drawCmd->state.pipe;
-
-			SpvReflectShaderModule* vertStage = nullptr;
-			for(auto& stage : pipe.stages) {
-				if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
-					vertStage = &nonNull(nonNull(stage.spirv).reflection);
-					break;
-				}
-			}
-
-			if(!vertStage) {
-				ImGui::Text("Grahpics Pipeline has no vertex stage :o");
-			} else {
-				auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
-
-				// match bindings to input variables into
-				// (pipe.vertexAttrib, vertStage->input_variables) id pairs
-				std::vector<std::pair<u32, u32>> attribs;
-				for(auto a = 0u; a < pipe.vertexAttribs.size(); ++a) {
-					auto& attrib = pipe.vertexAttribs[a];
-					for(auto i = 0u; i < vertStage->input_variable_count; ++i) {
-						auto& iv = *vertStage->input_variables[i];
-						if(iv.location == attrib.location) {
-							attribs.push_back({a, i});
-						}
-					}
-				}
-
-				// TODO sort by input location?
-
-				if(attribs.empty()) {
-					ImGui::Text("No Vertex input");
-				} else if(ImGui::BeginTable("Vertices", int(attribs.size()), flags)) {
-					for(auto& attrib : attribs) {
-						auto& iv = *vertStage->input_variables[attrib.second];
-						ImGui::TableSetupColumn(iv.name);
-					}
-
-					ImGui::TableHeadersRow();
-					ImGui::TableNextRow();
-
-					auto finished = false;
-					auto id = 0u;
-					while(!finished) {
-						for(auto& [aID, _] : attribs) {
-							auto& attrib = pipe.vertexAttribs[aID];
-							ImGui::TableNextColumn();
-
-							auto& binding = pipe.vertexBindings[attrib.binding];
-							auto& buf = hook.state->vertexBufCopies[attrib.binding];
-							auto off = binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX ?
-								id * binding.stride : 0u;
-							off += attrib.offset;
-
-							// TODO: compressed support?
-							auto size = FormatElementSize(attrib.format);
-
-							if(off + size > buf.buffer.size) {
-								finished = true;
-								break;
-							}
-
-							auto* ptr = buf.copy.get() + off;
-							auto str = readFormat(attrib.format, {ptr, size});
-
-							imGuiText("{}", str);
-						}
-
-						++id;
-						ImGui::TableNextRow();
-					}
-
-					ImGui::EndTable();
-				}
-			}
-		}
-
+		displayVertexViewer(draw, cmd);
 		cmdInfo = false;
 	} else if(hook.copyAttachment) {
 		// TODO: only show for output attachments (color, depthStencil)

@@ -746,4 +746,103 @@ DebugLabel::~DebugLabel() {
 	}
 }
 
+bool supportedUsage(VkFormatFeatureFlags features, VkImageUsageFlags usages, bool has11) {
+	static constexpr struct {
+		VkImageUsageFlagBits usage;
+		VkFormatFeatureFlagBits feature;
+	} maps[] = {
+		{VK_IMAGE_USAGE_SAMPLED_BIT, VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT},
+		{VK_IMAGE_USAGE_STORAGE_BIT, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT},
+		{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT},
+		{VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT},
+	};
+
+	for(const auto& map : maps) {
+		if((usages & map.usage) && !(features & map.feature)) {
+			return false;
+		}
+	}
+
+	// The transfer features were only added in vulkan 1.1
+	if(has11) {
+		if((usages & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) && !(features & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) {
+			return false;
+		}
+
+		if((usages & VK_IMAGE_USAGE_TRANSFER_DST_BIT) && !(features & VK_FORMAT_FEATURE_TRANSFER_DST_BIT)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool supported(const Device& dev, const VkImageCreateInfo& info, VkFormatFeatureFlags additional) {
+	VkFormatProperties props;
+	dev.ini->dispatch.GetPhysicalDeviceFormatProperties(dev.phdev, info.format, &props);
+	auto features = (info.tiling == VK_IMAGE_TILING_LINEAR) ?
+		props.linearTilingFeatures : props.optimalTilingFeatures;
+
+	VkImageFormatProperties formatProps;
+	auto res = dev.ini->dispatch.GetPhysicalDeviceImageFormatProperties(
+		dev.phdev, info.format, info.imageType, info.tiling,
+		info.usage, info.flags, &formatProps);
+	if(res == VK_ERROR_FORMAT_NOT_SUPPORTED) {
+		return false;
+	} else if(res != VK_SUCCESS) {
+		dlg_error("Unexpected error from getPhysicalDeviceImageFormatProperties: {}",
+			unsigned(res));
+		return false;
+	}
+
+	auto vulkan11 = dev.ini->vulkan11 && (dev.props.apiVersion > VK_API_VERSION_1_1);
+	return ((features & additional) == additional &&
+		supportedUsage(features, info.usage, vulkan11) &&
+		info.extent.width <= formatProps.maxExtent.width &&
+		info.extent.height <= formatProps.maxExtent.height &&
+		info.extent.depth <= formatProps.maxExtent.depth &&
+		info.mipLevels <= formatProps.maxMipLevels &&
+		info.arrayLayers <= formatProps.maxArrayLayers &&
+		(formatProps.sampleCounts & info.samples));
+}
+
+VkFormat findSupported(const Device& dev, span<const VkFormat> formats,
+		const VkImageCreateInfo& info, VkFormatFeatureFlags additional) {
+	auto copy = info;
+	for(auto format : formats) {
+		copy.format = format;
+		if(supported(dev, copy, additional)) {
+			return format;
+		}
+	}
+
+	return VK_FORMAT_UNDEFINED;
+}
+
+VkFormat findDepthFormat(const Device& dev) {
+	VkImageCreateInfo img {}; // dummy for property checking
+	img.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	img.extent = {64, 64, 1};
+	img.mipLevels = 1;
+	img.arrayLayers = 1;
+	img.imageType = VK_IMAGE_TYPE_2D;
+	img.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	img.tiling = VK_IMAGE_TILING_OPTIMAL;
+	img.samples = VK_SAMPLE_COUNT_1_BIT;
+	img.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	img.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	auto fmts = {
+		VK_FORMAT_D32_SFLOAT,
+		VK_FORMAT_D32_SFLOAT_S8_UINT,
+		VK_FORMAT_D24_UNORM_S8_UINT,
+		VK_FORMAT_D16_UNORM,
+		VK_FORMAT_D16_UNORM_S8_UINT,
+	};
+	auto features =
+		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
+		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+	return findSupported(dev, fmts, img, features);
+}
+
 } // namespace vil

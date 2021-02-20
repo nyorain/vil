@@ -169,7 +169,7 @@ Draw::~Draw() {
 
 // RenderBuffer
 void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
-		VkExtent2D extent, VkRenderPass rp) {
+		VkExtent2D extent, VkRenderPass rp, VkImageView depthView) {
 	this->dev = &dev;
 	this->image = img;
 
@@ -185,10 +185,13 @@ void RenderBuffer::init(Device& dev, VkImage img, VkFormat format,
 	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &view));
 	nameHandle(dev, this->view, "RenderBuffer:view");
 
+	dlg_assert(depthView);
+	VkImageView atts[] = {view, depthView};
+
 	VkFramebufferCreateInfo fbi {};
 	fbi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-	fbi.attachmentCount = 1u;
-	fbi.pAttachments = &view;
+	fbi.attachmentCount = 2u;
+	fbi.pAttachments = atts;
 	fbi.layers = 1u;
 	fbi.width = extent.width;
 	fbi.height = extent.height;

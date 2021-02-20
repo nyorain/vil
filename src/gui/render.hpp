@@ -111,7 +111,8 @@ struct RenderBuffer {
 	VkImageView view {};
 	VkFramebuffer fb {};
 
-	void init(Device& dev, VkImage img, VkFormat format, VkExtent2D extent, VkRenderPass rp);
+	void init(Device& dev, VkImage img, VkFormat format, VkExtent2D extent,
+		VkRenderPass rp, VkImageView depthView);
 	~RenderBuffer();
 };
 

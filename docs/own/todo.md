@@ -9,6 +9,11 @@ v0.1, goal: end of january 2021
 - Testing, Profiling, Needed optimization
 
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
+	- [ ] also: intercept debug callback? can currently cause problems
+	      e.g. when the application controlled debug callback is called
+		  from *our* internal thread (which it might not be prepared for).
+		  In interception, could check whether it involves one of our
+		  handles or is called from our window thread.
 - [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
@@ -36,6 +41,7 @@ v0.1, goal: end of january 2021
 	  {NOTE: there are likely a couple more sync issues for Gui stuff}
 - [ ] better pipeline/shader module display in resource viewer
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
+	- [ ] maybe display each stage (the shader and associated information) as its own tab
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
 - [ ] Allow to freeze state for current displayed command, i.e. don't

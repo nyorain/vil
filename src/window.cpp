@@ -71,18 +71,6 @@ DisplayWindow::~DisplayWindow() {
 	if(thread_.joinable()) {
 		thread_.join();
 	}
-
-	if(swapchain) {
-		dev->dispatch.DestroySwapchainKHR(dev->handle, swapchain, nullptr);
-	}
-
-	if(window) {
-		swa_window_destroy(window);
-	}
-
-	if(acquireSem) {
-		dev->dispatch.DestroySemaphore(dev->handle, acquireSem, nullptr);
-	}
 }
 
 bool DisplayWindow::createDisplay() {
@@ -271,7 +259,9 @@ bool DisplayWindow::initSwapchain() {
 		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &acquireSem));
 	}
 
-	this->gui.init(dev, sci.imageFormat, true);
+	depthFormat_ = findDepthFormat(dev);
+	dlg_assert(depthFormat_ != VK_FORMAT_UNDEFINED);
+	this->gui.init(dev, sci.imageFormat, depthFormat_, true);
 	initBuffers();
 
 	return true;
@@ -320,6 +310,47 @@ void DisplayWindow::resize(unsigned w, unsigned h) {
 void DisplayWindow::initBuffers() {
 	auto& dev = *this->dev;
 
+	// depth
+	VkImageCreateInfo ici {};
+	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	ici.extent = {swapchainCreateInfo.imageExtent.width, swapchainCreateInfo.imageExtent.height, 1u};
+	ici.mipLevels = 1;
+	ici.arrayLayers = 1;
+	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	ici.usage = /*VK_IMAGE_USAGE_SAMPLED_BIT |*/ VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	ici.format = depthFormat_;
+
+	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &depthImage_));
+	nameHandle(dev, depthImage_, "overlayDepth");
+
+	VkMemoryRequirements memReqs;
+	dev.dispatch.GetImageMemoryRequirements(dev.handle, depthImage_, &memReqs);
+
+	VkMemoryAllocateInfo mai {};
+	mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	mai.memoryTypeIndex = findLSB(dev.deviceLocalMemTypeBits & memReqs.memoryTypeBits);
+	mai.allocationSize = memReqs.size;
+	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &mai, nullptr, &depthMemory_));
+	nameHandle(dev, depthMemory_, "overlayDepthMemory");
+
+	VK_CHECK(dev.dispatch.BindImageMemory(dev.handle, depthImage_, depthMemory_, 0u));
+
+	VkImageViewCreateInfo ivi {};
+	ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	ivi.image = depthImage_;
+	ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	ivi.format = depthFormat_;
+	ivi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	ivi.subresourceRange.layerCount = 1u;
+	ivi.subresourceRange.levelCount = 1u;
+
+	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &depthView_));
+	nameHandle(dev, depthView_, "overlayDepthView");
+
 	u32 imgCount = 0u;
 	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapchain, &imgCount, nullptr));
 	auto imgs = std::make_unique<VkImage[]>(imgCount);
@@ -328,12 +359,17 @@ void DisplayWindow::initBuffers() {
 	buffers_.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
 		buffers_[i].init(dev, imgs[i], swapchainCreateInfo.imageFormat,
-			swapchainCreateInfo.imageExtent, gui.rp());
+			swapchainCreateInfo.imageExtent, gui.rp(), depthView_);
 	}
 }
 
 void DisplayWindow::destroyBuffers() {
 	gui.finishDraws();
+
+	dev->dispatch.DestroyImageView(dev->handle, depthView_, nullptr);
+	dev->dispatch.DestroyImage(dev->handle, depthImage_, nullptr);
+	dev->dispatch.FreeMemory(dev->handle, depthMemory_, nullptr);
+
 	buffers_.clear();
 }
 
@@ -530,6 +566,20 @@ void DisplayWindow::uiThread() {
 	state_.store(State::shutdown);
 	cv_.notify_one();
 	dlg_trace("Exiting window thread");
+
+	// cleanup
+	destroyBuffers();
+	if(swapchain) {
+		dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, nullptr);
+	}
+
+	if(window) {
+		swa_window_destroy(window);
+	}
+
+	if(acquireSem) {
+		dev.dispatch.DestroySemaphore(dev.handle, acquireSem, nullptr);
+	}
 }
 
 } // namespace vil

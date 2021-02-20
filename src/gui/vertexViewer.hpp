@@ -4,6 +4,7 @@
 #include <gui/render.hpp>
 #include <vk/vulkan.h>
 #include <util/vec.hpp>
+#include <util/camera.hpp>
 #include <vector>
 #include <optional>
 
@@ -13,7 +14,11 @@ struct VertexViewer {
 	Device* dev_ {};
 	VkRenderPass rp_ {};
 
-	nytl::Vec2f lastMousPos_ {};
+	bool rotating_ {};
+	Vec2f lastMousPos_ {};
+
+	Camera camera_ {};
+	Mat4f projMtx_ {};
 
 	// OwnBuffer ubo_;
 	// void* uboMap_ {};
@@ -26,13 +31,15 @@ struct VertexViewer {
 	// to assemble the vertices from in our vertex shader.
 	// TODO: could at least cache shader modules.
 	struct Pipe {
-		VkFormat format;
-		u32 stride;
-		VkPrimitiveTopology topology;
-		VkPipeline pipe;
+		VkFormat format {};
+		u32 stride {};
+		VkPrimitiveTopology topology {};
+		VkPipeline pipe {};
 	};
 
 	std::vector<Pipe> pipes_ {};
+
+	~VertexViewer();
 
 	void init(Device& dev, VkRenderPass rp);
 	VkPipeline createPipe(VkFormat format, u32 stride, VkPrimitiveTopology topo);
@@ -45,6 +52,7 @@ struct VertexViewer {
 	void imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 			const CommandHookState& copies, std::optional<VkIndexType>,
 			u32 offset, u32 drawCount, u32 vertexOffset);
+	void updateInput(float dt);
 };
 
 } // namespace vil

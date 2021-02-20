@@ -108,9 +108,17 @@ src = files(
 	'src/gui/resources.cpp',
 	'src/gui/cb.cpp',
 	'src/gui/commandHook.cpp',
+	'src/gui/vertexViewer.cpp',
 
 	# external util
 	'src/spirv_reflect.c',
+
+	# imgui
+	'src/imgui/imgui.cpp',
+	'src/imgui/imgui_draw.cpp',
+	'src/imgui/imgui_widgets.cpp',
+	'src/imgui/imgui_demo.cpp',
+	'src/imgui/imgui_tables.cpp',
 
 	# useful for visual studio build to include headers here
 	'src/fwd.hpp',
@@ -131,6 +139,7 @@ src = files(
 	'src/win32.hpp',
 	'src/data.hpp',
 	'src/record.hpp',
+	'src/queryPool.hpp',
 
 	'src/vk/vulkan.h',
 	'src/vk/vulkan_core.h',
@@ -147,6 +156,7 @@ src = files(
 	'src/gui/render.hpp',
 	'src/gui/util.hpp',
 	'src/gui/commandHook.hpp',
+	'src/gui/vertexViewer.hpp',
 
 	'src/util/util.hpp',
 	'src/util/span.hpp',
@@ -157,12 +167,7 @@ src = files(
 
 	'src/imgui/imgui.h',
 	'include/vil_api.h',
-
-	'src/imgui/imgui.cpp',
-	'src/imgui/imgui_draw.cpp',
-	'src/imgui/imgui_widgets.cpp',
-	'src/imgui/imgui_demo.cpp',
-	'src/imgui/imgui_tables.cpp',
+	'src/spirv_reflect.h',
 )
 
 public_inc = include_directories('include/')

@@ -174,6 +174,12 @@ protected:
 	const Device* dev_ {};
 };
 
+bool supportedUsage(VkFormatFeatureFlags features, VkImageUsageFlags usages, bool has11);
+bool supported(Device& dev, const VkImageCreateInfo& info, VkFormatFeatureFlags additional);
+VkFormat findSupported(const Device& dev, span<const VkFormat> formats,
+		const VkImageCreateInfo& info, VkFormatFeatureFlags additional);
+VkFormat findDepthFormat(const Device& dev);
+
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	VkPhysicalDevice phdev,

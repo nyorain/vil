@@ -45,7 +45,7 @@ thread_local ImGuiContext* __LayerImGui;
 namespace vil {
 
 // Gui
-void Gui::init(Device& dev, VkFormat format, bool clear) {
+void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear) {
 	dev_ = &dev;
 	clear_ = clear;
 
@@ -54,9 +54,6 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	// be moved.
 	dlg_assert(dev.gui == nullptr);
 	dev.gui = this;
-
-	tabs_.cb.gui_ = this;
-	tabs_.resources.gui_ = this;
 
 	lastFrame_ = Clock::now();
 
@@ -69,55 +66,52 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	nameHandle(dev, commandPool_, "Gui:commandPool");
 
 	// init render stuff
-	VkAttachmentDescription attachment = {};
-	attachment.format = format;
-	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-	attachment.loadOp = clear ?
+	VkAttachmentDescription atts[2] {};
+
+	auto& colorAtt = atts[0];
+	colorAtt.format = colorFormat;
+	colorAtt.samples = VK_SAMPLE_COUNT_1_BIT;
+	colorAtt.loadOp = clear ?
 		VK_ATTACHMENT_LOAD_OP_CLEAR :
 		VK_ATTACHMENT_LOAD_OP_LOAD;
-	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-	attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachment.initialLayout = clear ?
+	colorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	colorAtt.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	colorAtt.initialLayout = clear ?
 		VK_IMAGE_LAYOUT_UNDEFINED :
 		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	colorAtt.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-	VkAttachmentReference colorAttachment = {};
-	colorAttachment.attachment = 0;
-	colorAttachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	auto& depthAtt = atts[1];
+	depthAtt.format = depthFormat;
+	depthAtt.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	depthAtt.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depthAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAtt.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depthAtt.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL; // don't really care atm
+
+	VkAttachmentReference colorRef = {};
+	colorRef.attachment = 0;
+	colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference depthRef = {};
+	depthRef.attachment = 1;
+	depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 	VkSubpassDescription subpass = {};
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	subpass.colorAttachmentCount = 1;
-	subpass.pColorAttachments = &colorAttachment;
-
-	VkSubpassDependency dependencies[2] = {};
-
-	// in-dependency
-	dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-	dependencies[0].dstSubpass = 0;
-	dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-	// out-dependency
-	dependencies[1].srcSubpass = 0;
-	dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-	dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependencies[1].dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-	dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	dependencies[1].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+	subpass.pColorAttachments = &colorRef;
+	subpass.pDepthStencilAttachment = &depthRef;
 
 	VkRenderPassCreateInfo rpi {};
 	rpi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	rpi.attachmentCount = 1;
-	rpi.pAttachments = &attachment;
+	rpi.attachmentCount = 2;
+	rpi.pAttachments = atts;
 	rpi.subpassCount = 1;
 	rpi.pSubpasses = &subpass;
-	rpi.dependencyCount = 2;
-	rpi.pDependencies = dependencies;
 
 	VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp_));
 	nameHandle(dev, rp_, "Gui:rp");
@@ -377,6 +371,10 @@ void Gui::init(Device& dev, VkFormat format, bool clear) {
 	// Center window title
 	style.WindowTitleAlign = {0.5f, 0.5f};
 	style.Alpha = 1.f;
+
+	// init tabs
+	tabs_.resources.gui_ = this;
+	tabs_.cb.init(*this);
 }
 
 // ~Gui
@@ -635,12 +633,17 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 	rpBegin.renderPass = rp_;
 	rpBegin.framebuffer = fb;
 
-	VkClearValue clearValue;
-	if(clear_) {
-		clearValue.color = {{0.f, 0.f, 0.f, 1.f}};
-		rpBegin.clearValueCount = 1u;
-		rpBegin.pClearValues = &clearValue;
-	}
+	VkClearValue clearValues[2] {};
+
+	// color attachment (if we don't clear it, this value is ignored).
+	// see render pass creation
+	clearValues[0].color = {{0.f, 0.f, 0.f, 1.f}};
+
+	// our depth attachment, always clear that.
+	clearValues[1].depthStencil = {1.f, 0u};
+
+	rpBegin.pClearValues = clearValues;
+	rpBegin.clearValueCount = 2u;
 
 	dev.dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -1104,7 +1107,11 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			break;
 		}
 
-		if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
+		// NOTE: since we start using shared resources between draws (e.g.
+		// the depth buffers), we can't ever really have more than one draw
+		// at a time. Should probably remove the vector, just have one draw_
+		// if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
+		if(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX) == VK_SUCCESS) {
 			finished(draw);
 			foundDraw = &draw;
 			break;
@@ -1115,6 +1122,8 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		foundDraw = &draws_.emplace_back();
 		foundDraw->init(dev(), commandPool_);
 	}
+
+	dlg_assert(draws_.size() == 1);
 
 	auto& draw = *foundDraw;
 	draw.usedHandles.clear();
@@ -1132,9 +1141,9 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 	auto now = Clock::now();
 	auto diff = now - lastFrame_;
 	lastFrame_ = now;
-	auto dt = std::chrono::duration_cast<Secf>(diff).count();
-	if(dt > 0.f) {
-		ImGui::GetIO().DeltaTime = dt;
+	dt_ = std::chrono::duration_cast<Secf>(diff).count();
+	if(dt_ > 0.f) {
+		ImGui::GetIO().DeltaTime = dt_;
 	}
 
 	// TODO: hacky but we have to keep the record alive, making sure
