@@ -60,7 +60,7 @@ handle wrapping is used.
 Instead, `vil::Device` has tables mapping the vulkan handles to their
 representations inside the layer. For dispatchable handles (Instance, Device, 
 CommandBuffer, Queue; we also use it for VkSurfaceKHR), there is a global 
-table in [src/data.hpp](!).
+table in [src/data.hpp](src/data.hpp).
 
 Synchronization is currently done mainly over a single mutex in `vil::Device`.
 Accesses that are not guaranteed to be externally synchronized by vulkan
@@ -92,7 +92,7 @@ to call queue operations from multiple threads at the same time).
 
 ## Command
 
-`vil::Command` (see [src/command.hpp](!)) is our internal representation
+`vil::Command` (see [src/command.hpp](src/command.hpp)) is our internal representation
 of a single command added to a command buffer. When the application
 records a command buffer, we build a list (in truth: rather a hierachy) of
 these objects for multiple purposes:
@@ -103,7 +103,7 @@ these objects for multiple purposes:
 
 ## CommandRecord
 
-`vil::CommandRecord` (see [src/record.hpp](!)) holds all state for a recorded command buffer, i.e.
+`vil::CommandRecord` (see [src/record.hpp](src/record.hpp)) holds all state for a recorded command buffer, i.e.
 all commands, the usage flags with which the record was begun, which handles are used.
 It's disconnected from the command buffer itself and can outlive it.
 It's used in multiple places and ownership is shared via an intrusive reference count.
@@ -120,11 +120,11 @@ that re-record command buffers every frame. Defining this concept by
 the actually recorded data instead of just the used CommandBuffer makes this
 work for games that recreate or dynamically recycle command buffers
 in every frame as well.
-See `vil::CommandBufferGroup` in [src/queue.hpp](!).
+See `vil::CommandBufferGroup` in [src/queue.hpp](src/queue.hpp).
 
 ## CommandHook
 
-`vil::CommandHook` (in [src/gui/commandHook.hpp](!)) and the associated
+`vil::CommandHook` (in [src/gui/commandHook.hpp](src/gui/commandHook.hpp)) and the associated
 classes `CommandHookRecord`, `CommandHookSubmission` allow us to insert
 commands into the submissions done by the application.
 A `CommandHook` can be installed in the `vil::Device` and will be considered
@@ -178,7 +178,7 @@ multiple subpasses where an attachment is first used as resolve attachment
 and then later on used in specific different ways. There is no solution
 for this at the moment, we simply don't allow command inspection in this case.
 
-See [src/rp.hpp](!) for the details. `vil::splittable(...)` returns
+See [src/rp.hpp](src/rp.hpp) for the details. `vil::splittable(...)` returns
 whether the splitting approach is possible for the given render pass
 description (TODO: this needs massive testing, we basically use symbolic
 execution here but never tested it which screams for trouble. Also, a simpler
