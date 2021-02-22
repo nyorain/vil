@@ -257,6 +257,8 @@ static void window_key(struct swa_window* win, const struct swa_key_event* ev) {
 
 static void mouse_move(struct swa_window* win, const struct swa_mouse_move_event* ev) {
 	struct state* state = swa_window_get_userdata(win);
+	// useful to check for overlay input blocking
+	// dlg_trace("mouse move %d %d", ev->x, ev->y);
 	if(state->vil_overlay) {
 		state->vil_api.OverlayMouseMoveEvent(state->vil_overlay, ev->x, ev->y);
 	}

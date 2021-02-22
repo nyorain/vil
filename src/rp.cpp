@@ -642,10 +642,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		auto off = rp.desc->attachmentRefs.back().size();
 		for(auto i = 0u; i < count; ++i) {
 			auto& attSrc = refs[i];
+
 			auto& attDst = rp.desc->attachmentRefs.back().emplace_back();
 			attDst.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
 			attDst.attachment = attSrc.attachment;
 			attDst.layout = attSrc.layout;
+
+			if(attSrc.attachment == VK_ATTACHMENT_UNUSED) {
+				continue;
+			}
 
 			auto format = rp.desc->attachments[attDst.attachment].format;
 			if(FormatHasDepth(format)) {

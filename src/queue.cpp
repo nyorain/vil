@@ -322,6 +322,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	// hook fence
 	auto submPtr = std::make_unique<SubmissionBatch>();
 	auto& subm = *submPtr;
+	subm.submissions.reserve(submitCount); // make sure it's never re-allocated
+
 	subm.queue = &qd;
 
 	// TODO(perf): we make a lot of allocations here and this is something

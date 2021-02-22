@@ -20,7 +20,7 @@ constexpr auto focusKey = swa_key_rightbrace;
 static enum swa_key winapi_to_key(unsigned vkcode);
 static unsigned key_to_winapi(enum swa_key key);
 
-// TODO: rather create on thread for all platforms.
+// TODO: rather create one thread for all platforms.
 
 struct Win32Platform : Platform {
 	enum class State {
@@ -234,6 +234,11 @@ void Win32Platform::updateWindowRect() {
 }
 
 LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
+	MOUSEHOOKSTRUCT* data = (MOUSEHOOKSTRUCT*) lParam;
+
+	POINT winPos = data->pt;
+	ScreenToClient(globalPlatform->surfaceWindow, &winPos);
+
 	if (nCode >= 0 && wParam == WM_MOUSEMOVE) {
 		/*
 		dlg_assert(globalPlatform);
@@ -252,34 +257,64 @@ LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		globalPlatform->lastY = yPos;
 
 		*/
+
+		// dlg_trace("move {} {} {}", winPos.x, winPos.y, data->wHitTestCode);
+		if(winPos.y < 0 || winPos.x < 0) {
+			return CallNextHookEx(nullptr, nCode, wParam, lParam);
+		}
+
 		return 1;
 	} else if(nCode >= 0) {
 		switch(wParam) {
 			case WM_LBUTTONDOWN:
-				dlg_trace("lbuttondown");
+				// dlg_trace("lbuttondown {} {} {}", data->pt.x, data->pt.y, data->wHitTestCode);
 				globalPlatform->gui->imguiIO().MouseDown[0] = true;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			case WM_LBUTTONUP:
-				dlg_trace("lbuttonup");
+				// dlg_trace("lbuttonup {} {} {} | {} {}", data->pt.x, data->pt.y, data->wHitTestCode, winPos.x, winPos.y);
 				globalPlatform->gui->imguiIO().MouseDown[0] = false;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			case WM_RBUTTONDOWN:
 				globalPlatform->gui->imguiIO().MouseDown[1] = true;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			case WM_RBUTTONUP:
 				globalPlatform->gui->imguiIO().MouseDown[1] = false;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			case WM_MBUTTONDOWN:
 				globalPlatform->gui->imguiIO().MouseDown[2] = true;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			case WM_MBUTTONUP:
 				globalPlatform->gui->imguiIO().MouseDown[2] = false;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			case WM_XBUTTONDOWN:
 				// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = true;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			case WM_XBUTTONUP:
 				// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = false;
+				if(winPos.y < 0 || winPos.x < 0) {
+					break;
+				}
 				return 1;
 			default:
 				break;
@@ -297,6 +332,7 @@ bool Win32Platform::doUpdate() {
 			state = State::focused;
 
 			// register for raw input on mouse
+			// TODO: not needed if cursor is being shown
 			RAWINPUTDEVICE Rid[1];
 			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
 			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
@@ -311,6 +347,7 @@ bool Win32Platform::doUpdate() {
 			if (!mouseHook) {
 				print_winapi_error("SetWindowsHookEx");
 			}
+			
 
 			// updateWindowRect();
 			// ShowWindow(overlayWindow, SW_SHOW);
@@ -319,7 +356,6 @@ bool Win32Platform::doUpdate() {
 			// SetFocus(overlayWindow);
 			// SetActiveWindow(overlayWindow);
 			// SetWindowPos(surfaceWindow, overlayWindow, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS);
-
 
 			POINT point;
 			GetCursorPos(&point);
@@ -342,7 +378,7 @@ bool Win32Platform::doUpdate() {
 			// ShowWindowAsync(overlayWindow, SW_HIDE);
 			UnhookWindowsHookEx(mouseHook);
 
-			// ToDO: probably have to destroy window, this does no seem to work
+			// TODO: probably have to destroy window, this does no seem to work
 			RAWINPUTDEVICE Rid[1];
 			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
 			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
@@ -369,17 +405,30 @@ bool Win32Platform::doUpdate() {
 
 		// when the overlay is focused and the application does not show a
 		// cursor, we show our own software cursor.
-		// TODO: is application shows cursor we should use that cursor
-		//   position instead of getting our own with raw input...
+		// TODO: don't need raw input if application is showing cursor...
 		if(state == State::focused) {
 			CURSORINFO ci {};
 			ci.cbSize = sizeof(ci);
 			if(!GetCursorInfo(&ci) || ci.flags == 0) {
+				// dlg_trace("showing custom cursor");
 				drawCursor = true;
 			}
 		}
 
 		gui->imguiIO().MouseDrawCursor = drawCursor;
+
+		if(!drawCursor) {
+			// TODO: error handling
+			// TODO: could use the mouse hook instead (but make sure to
+			//  only enable that when the cursor isn't shown as otherwise we must
+			//  rely on raw input and it will mess with that).
+			POINT pos;
+			GetCursorPos(&pos);
+			ScreenToClient(surfaceWindow, &pos);
+			
+			gui->imguiIO().MousePos.x = pos.x;
+			gui->imguiIO().MousePos.y = pos.y;
+		}
 	}
 
 	return state != State::hidden;

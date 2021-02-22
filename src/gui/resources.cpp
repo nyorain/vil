@@ -1273,6 +1273,8 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 	imGuiText("Submission Counter: {}", queue.submissionCount);
 
 	for(auto* group : queue.groups) {
+		ImGui::PushID(group);
+
 		// TODO: display desc?
 		if(ImGui::Button("View command group")) {
 			gui_->cbGui().selectGroup(group->lastRecord);
@@ -1300,6 +1302,8 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 		dlg_assert(foundID);
 		ImGui::SameLine();
 		imGuiText(", Last Submitted: {}",  *foundID);
+
+		ImGui::PopID();
 	}
 }
 

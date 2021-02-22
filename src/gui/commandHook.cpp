@@ -674,7 +674,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	srcBarrier.oldLayout = srcBarrier.newLayout;
 	srcBarrier.newLayout = srcLayout;
 	srcBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	srcBarrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+	srcBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 
 	dstBarrier.oldLayout = dstBarrier.newLayout;
 	dstBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
