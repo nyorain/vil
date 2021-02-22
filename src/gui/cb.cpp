@@ -738,6 +738,25 @@ void CommandBufferGui::displayInspector(Draw& draw, const Command& bcmd) {
 	bcmd.displayInspector(*gui_);
 }
 
+SpvReflectDescriptorBinding* getReflectBinding(const SpvReflectShaderModule& mod,
+		unsigned setID, unsigned bindingID) {
+	for(auto s = 0u; s < mod.descriptor_set_count; ++s) {
+		auto& set = mod.descriptor_sets[s];
+		if(set.set != setID) {
+			continue;
+		}
+
+		for(auto b = 0u; b < set.binding_count; ++b) {
+			auto* binding = set.bindings[b];
+			if(binding->binding == bindingID) {
+				return binding;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
 void CommandBufferGui::displayDs(Draw& draw, const Command& cmd) {
 	auto& gui = *this->gui_;
 
@@ -824,17 +843,12 @@ void CommandBufferGui::displayDs(Draw& draw, const Command& cmd) {
 		if(dispatchCmd) {
 			auto& pipe = nonNull(dispatchCmd->state.pipe);
 			auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
-			if(setID < refl.descriptor_set_count) {
-				auto& set = refl.descriptor_sets[setID];
-				if(bindingID < set.binding_count) {
-					auto& binding = *set.bindings[bindingID];
-					auto* ptr = buf->copy.get();
-					display(binding.block, {ptr, buf->buffer.size});
-				} else {
-					ImGui::Text("Binding not used in pipeline");
-				}
-			} else {
+			auto* binding = getReflectBinding(refl, setID, bindingID);
+			if(!binding) {
 				ImGui::Text("Binding not used in pipeline");
+			} else {
+				auto* ptr = buf->copy.get();
+				display(binding->block, {ptr, buf->buffer.size});
 			}
 		} else {
 			dlg_assert(drawCmd);
@@ -842,19 +856,14 @@ void CommandBufferGui::displayDs(Draw& draw, const Command& cmd) {
 
 			// In all graphics pipeline stages, find the block with
 			// that covers the most of the buffer
-			// NOTE: could add explicit dropdown, selecting the
-			// stage to view.
+			// TODO: add explicit dropdown, selecting the stage to view.
 			for(auto& stage : drawCmd->state.pipe->stages) {
 				auto& refl = nonNull(nonNull(stage.spirv).reflection);
-				if(setID < refl.descriptor_set_count) {
-					auto& set = refl.descriptor_sets[setID];
-					if(bindingID < set.binding_count) {
-						auto& binding = *set.bindings[bindingID];
-						if(binding.block.type_description && (
-								!bestVar || binding.block.size > bestVar->size)) {
-							bestVar = &binding.block;
-						}
-					}
+				auto* binding = getReflectBinding(refl, setID, bindingID);
+
+				if(binding && binding->block.type_description && (
+						!bestVar || binding->block.size > bestVar->size)) {
+					bestVar = &binding->block;
 				}
 			}
 
@@ -921,26 +930,13 @@ void CommandBufferGui::displayDsList(const Command& cmd) {
 	// TODO: this seems to need special treatment for arrays?
 	// debug with tkn/deferred gbuf pass
 	auto modBindingName = [&](const SpvReflectShaderModule& refl, u32 setID, u32 bindingID) -> const char* {
-		for(auto s = 0u; s < refl.descriptor_set_count; ++s) {
-			auto& set = refl.descriptor_sets[s];
-			if(set.set != setID) {
-				continue;
-			}
-
-			for(auto b = 0u; b < set.binding_count; ++b) {
-				auto& binding = *set.bindings[b];
-				if (binding.binding != bindingID) {
-					continue;
-				}
-
-				if(binding.name && *binding.name != '\0') {
-					return binding.name;
-				} else if(binding.type_description &&
-						binding.type_description->type_name &&
-						*binding.type_description->type_name != '\0') {
-					return binding.type_description->type_name;
-				}
-			}
+		auto* binding = getReflectBinding(refl, setID, bindingID);
+		if(binding && binding->name && *binding->name != '\0') {
+			return binding->name;
+		} else if(binding && binding->type_description &&
+				binding->type_description->type_name &&
+				*binding->type_description->type_name != '\0') {
+			return binding->type_description->type_name;
 		}
 
 		return nullptr;
