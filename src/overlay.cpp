@@ -7,6 +7,7 @@
 #include <platform.hpp>
 #include <dlg/dlg.hpp>
 #include <imgui/imgui.h>
+#include <util/util.hpp>
 
 namespace vil {
 

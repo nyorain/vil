@@ -675,65 +675,75 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 
 			for(auto j = 0; j < cmds.CmdBuffer.Size; ++j) {
 				auto& cmd = cmds.CmdBuffer[j];
+				if(cmd.UserCallback) {
+					dlg_assert(cmd.UserCallback != ImDrawCallback_ResetRenderState);
+					cmd.UserCallback(&cmds, &cmd);
 
-				VkDescriptorSet ds = dsFont_;
-				VkPipeline pipe = pipes_.gui;
-				auto img = (DrawGuiImage*) cmd.TextureId;
-				if(img && img->type != DrawGuiImage::font) {
-					ds = draw.dsSelected;
-					pipe = [&]{
-						switch(img->type) {
-							case DrawGuiImage::f1d: return pipes_.image1D;
-							case DrawGuiImage::u1d: return pipes_.uimage1D;
-							case DrawGuiImage::i1d: return pipes_.iimage1D;
-
-							case DrawGuiImage::f2d: return pipes_.image2D;
-							case DrawGuiImage::u2d: return pipes_.uimage2D;
-							case DrawGuiImage::i2d: return pipes_.iimage2D;
-
-							case DrawGuiImage::f3d: return pipes_.image3D;
-							case DrawGuiImage::u3d: return pipes_.uimage3D;
-							case DrawGuiImage::i3d: return pipes_.iimage3D;
-
-							default:
-								dlg_error("unreachable");
-								return VkPipeline {};
-						}
-					}();
-
-					// bind push constant data
-					struct PcrImageData {
-						float layer;
-						float valMin;
-						float valMax;
-						u32 flags;
-						float level;
-					} pcr = {
-						img->layer,
-						img->minValue,
-						img->maxValue,
-						img->flags,
-						img->level,
-					};
-
+					// reset state we need
+					dev.dispatch.CmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
+					dev.dispatch.CmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
 					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
-						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
-						sizeof(pcr), &pcr);
+						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
+				} else {
+					VkDescriptorSet ds = dsFont_;
+					VkPipeline pipe = pipes_.gui;
+					auto img = (DrawGuiImage*) cmd.TextureId;
+					if(img && img->type != DrawGuiImage::font) {
+						ds = draw.dsSelected;
+						pipe = [&]{
+							switch(img->type) {
+								case DrawGuiImage::f1d: return pipes_.image1D;
+								case DrawGuiImage::u1d: return pipes_.uimage1D;
+								case DrawGuiImage::i1d: return pipes_.iimage1D;
+
+								case DrawGuiImage::f2d: return pipes_.image2D;
+								case DrawGuiImage::u2d: return pipes_.uimage2D;
+								case DrawGuiImage::i2d: return pipes_.iimage2D;
+
+								case DrawGuiImage::f3d: return pipes_.image3D;
+								case DrawGuiImage::u3d: return pipes_.uimage3D;
+								case DrawGuiImage::i3d: return pipes_.iimage3D;
+
+								default:
+									dlg_error("unreachable");
+									return VkPipeline {};
+							}
+						}();
+
+						// bind push constant data
+						struct PcrImageData {
+							float layer;
+							float valMin;
+							float valMax;
+							u32 flags;
+							float level;
+						} pcr = {
+							img->layer,
+							img->minValue,
+							img->maxValue,
+							img->flags,
+							img->level,
+						};
+
+						dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
+							VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
+							sizeof(pcr), &pcr);
+					}
+
+					dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+					dev.dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+						dev.renderData->pipeLayout, 0, 1, &ds, 0, nullptr);
+
+					VkRect2D scissor {};
+					scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
+					scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
+					scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
+					scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
+					dev.dispatch.CmdSetScissor(draw.cb, 0, 1, &scissor);
+
+					dev.dispatch.CmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);
+					idxOff += cmd.ElemCount;
 				}
-
-				dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-				dev.dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-					dev.renderData->pipeLayout, 0, 1, &ds, 0, nullptr);
-
-				VkRect2D scissor {};
-				scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
-				scissor.offset.y = std::max<int>(cmd.ClipRect.y - drawData.DisplayPos.y, 0);
-				scissor.extent.width = cmd.ClipRect.z - cmd.ClipRect.x;
-				scissor.extent.height = cmd.ClipRect.w - cmd.ClipRect.y;
-				dev.dispatch.CmdSetScissor(draw.cb, 0, 1, &scissor);
-
-				dev.dispatch.CmdDrawIndexed(draw.cb, cmd.ElemCount, 1, idxOff, vtxOff, 0);
-				idxOff += cmd.ElemCount;
 			}
 
 			vtxOff += cmds.VtxBuffer.Size;
@@ -839,7 +849,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 		// - the variable scaling the make it weird to get an absolute
 		//   idea of the timings, only relative is possible
 		if(!hist.empty()) {
-			ImGui::PlotHistogram("Present timings", hist.data(), hist.size(),
+			ImGui::PlotHistogram("Present timings", hist.data(), int(hist.size()),
 				0, nullptr, FLT_MAX, FLT_MAX, {0, 150});
 		}
 	}

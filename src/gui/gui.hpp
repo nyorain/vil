@@ -4,6 +4,7 @@
 #include <gui/render.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
+#include <util/bytes.hpp>
 #include <imgui/imgui.h>
 #include <variant>
 #include <deque>

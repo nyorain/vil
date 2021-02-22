@@ -1099,6 +1099,10 @@ void CommandBufferGui::displayIOList(const Command& cmd) {
 					(indirectCountCmd && indirectCountCmd->indexed)) {
 				hook.copyIndexBuffers = true;
 			}
+
+			if(indirectCmd || indirectCountCmd) {
+				hook.copyIndirectCmd = true;
+			}
 		}
 	}
 
@@ -1269,7 +1273,7 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 
 			auto finished = false;
 			auto id = 0u;
-			while(!finished) {
+			while(!finished && id < 100) {
 				for(auto& [aID, _] : attribs) {
 					auto& attrib = pipe.vertexAttribs[aID];
 					ImGui::TableNextColumn();
@@ -1313,7 +1317,6 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 		vertexDrawData_.cb = draw.cb;
 		vertexDrawData_.offset = {pos.x, pos.y};
 		vertexDrawData_.size = {avail.x, avail.y};
-		vertexDrawData_.size = {avail.x, avail.y};
 		vertexDrawData_.cmd = drawCmd;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
@@ -1326,8 +1329,44 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 			u32 drawCount {};
 			u32 vertexOffset {};
 
+			if(auto* dcmd = dynamic_cast<const DrawCmd*>(data->cmd); dcmd) {
+				offset = dcmd->firstVertex;
+				drawCount = dcmd->vertexCount;
+			} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(data->cmd); dcmd) {
+				offset = dcmd->firstIndex;
+				vertexOffset = dcmd->vertexOffset;
+				drawCount = dcmd->indexCount;
+				indexType = dcmd->state.indices.type;
+			} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(data->cmd); dcmd) {
+				dlg_assert(hook.copyIndirectCmd);
+				if(!hook.state) {
+					ImGui::Text("Indirect command not loaded yet...");
+					return;
+				}
+
+				auto& ic = hook.state->indirectCopy;
+				auto span = ReadBuf(ic.copy.get(), ic.buffer.size);
+				if(dcmd->indexed) {
+					auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
+					offset = ecmd.firstIndex;
+					drawCount = ecmd.indexCount;
+					vertexOffset = ecmd.vertexOffset;
+					indexType = dcmd->state.indices.type;
+				} else {
+					auto ecmd = read<VkDrawIndirectCommand>(span);
+					offset = ecmd.firstVertex;
+					drawCount = ecmd.vertexCount;
+				}
+
+			} else {
+				// TODO: DrawIndirectCount
+				dlg_info("Vertex viewer unimplemented for command type");
+				return;
+			}
+
 			data->self->vertexViewer_.imGuiDraw(data->cb, pipe,
-				*hook.state, indexType, offset, drawCount, vertexOffset);
+				*hook.state, indexType, offset, drawCount, vertexOffset,
+				data->offset, data->size);
 		};
 
 		ImGui::GetWindowDrawList()->AddCallback(cb, &vertexDrawData_);

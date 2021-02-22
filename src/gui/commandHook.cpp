@@ -112,7 +112,13 @@ CopiedImage::~CopiedImage() {
 }
 
 void CopiedBuffer::init(Device& dev, VkDeviceSize size) {
-	this->buffer.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+	// TODO: vertex/index usage required for vertex viewer atm.
+	// Should probably only set it for those buffers.
+	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+		VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+
+	this->buffer.ensure(dev, size, usage);
 	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, size, 0, &this->map));
 	this->copy = std::make_unique<std::byte[]>(size);
 

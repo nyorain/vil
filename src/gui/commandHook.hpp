@@ -234,7 +234,7 @@ struct CommandHookRecord {
 	// In general, the problem is that we can't know the relevant
 	// size for sub-allocated buffers. Theoretically, we could analyze
 	// previous index/indirect data for this. Not sure if good idea.
-	static constexpr auto maxBufCopySize = VkDeviceSize(16 * 1024);
+	static constexpr auto maxBufCopySize = VkDeviceSize(256 * 1024);
 };
 
 struct CommandHookSubmission {

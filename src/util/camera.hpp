@@ -4,6 +4,7 @@
 #include <util/vec.hpp>
 #include <util/quaternion.hpp>
 #include <util/transform.hpp>
+#include <swa/swa.h> // only needed for key defs
 
 // Taken from tkn/camera
 
@@ -29,10 +30,6 @@ struct Camera {
 
 [[nodiscard]] inline nytl::Mat4f viewMatrix(const Camera& c) {
 	return lookAt(c.rot, c.pos);
-}
-
-[[nodiscard]] inline nytl::Mat4f fixedViewMatrix(const Camera& c) {
-	return lookAt(c.rot, nytl::Vec3f{});
 }
 
 } // namespace vil

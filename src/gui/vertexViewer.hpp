@@ -14,11 +14,16 @@ struct VertexViewer {
 	Device* dev_ {};
 	VkRenderPass rp_ {};
 
+	VkShaderModule vertShader_ {};
+	VkShaderModule fragShader_ {};
+
+	Camera cam_ {};
 	bool rotating_ {};
 	Vec2f lastMousPos_ {};
+	float yaw_ {};
+	float pitch_ {};
 
-	Camera camera_ {};
-	Mat4f projMtx_ {};
+	Mat4f viewProjMtx_ {};
 
 	// OwnBuffer ubo_;
 	// void* uboMap_ {};
@@ -51,7 +56,8 @@ struct VertexViewer {
 	// Uses the current imgui context.
 	void imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 			const CommandHookState& copies, std::optional<VkIndexType>,
-			u32 offset, u32 drawCount, u32 vertexOffset);
+			u32 offset, u32 drawCount, u32 vertexOffset,
+			Vec2f canvasOffset, Vec2f canvasSize);
 	void updateInput(float dt);
 };
 
