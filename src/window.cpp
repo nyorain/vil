@@ -364,7 +364,7 @@ void DisplayWindow::initBuffers() {
 }
 
 void DisplayWindow::destroyBuffers() {
-	gui.finishDraws();
+	gui.waitForDraws();
 
 	dev->dispatch.DestroyImageView(dev->handle, depthView_, nullptr);
 	dev->dispatch.DestroyImage(dev->handle, depthImage_, nullptr);
@@ -464,15 +464,20 @@ void DisplayWindow::uiThread() {
 	auto timeIt = [](auto& now, auto name) {
 		(void) now;
 		(void) name;
-		auto newNow = Clock::now();
-		auto dist = newNow - now;
-		dlg_trace("time {}: {}", name,
-			std::chrono::duration_cast<std::chrono::milliseconds>(dist).count());
-		now = newNow;
+		// auto newNow = Clock::now();
+		// auto dist = newNow - now;
+		// dlg_trace("time {}: {}", name,
+		// 	std::chrono::duration_cast<std::chrono::milliseconds>(dist).count());
+		// now = newNow;
 	};
+
+	const auto maxFramerate = 30.f;
+	const auto minIterationTime = std::chrono::milliseconds(u32(1000.f / maxFramerate));
+	const auto limitRefreshRate = true;
 
 	while(run_.load()) {
 		auto now = Clock::now();
+		auto nextIterationTime = now + minIterationTime;
 
 		if(!swa_display_dispatch(dpy, false)) {
 			run_.store(false);
@@ -492,10 +497,6 @@ void DisplayWindow::uiThread() {
 		// would potentially mean less latency since that waiting for
 		// vsync currently effectively happens at the end of Gui::draw
 		// (where we wait for the submission).
-		// TODO: we also might wanna fix refreshing of this window
-		// to a maximum frame rate. We don't really need those dank 144hz
-		// but will *significantly* block other vulkan progress (due to
-		// gui mutex locking) when rendering at high rates.
 		VkResult res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain,
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
 		if(res == VK_SUBOPTIMAL_KHR) {
@@ -547,22 +548,25 @@ void DisplayWindow::uiThread() {
 		auto sems = {acquireSem};
 		frameInfo.waitSemaphores = sems;
 
-		auto frameRes = gui.renderFrame(frameInfo);
-		(void) frameRes;
+		gui.renderFrame(frameInfo);
 
 		timeIt(now, "frame");
 
-		// NOTE: currently done in gui but may not be like this in future
-		// if(frameRes.draw && frameRes.draw->inUse) {
-		// 	// wait on finish
-		// 	VK_CHECK(dev.dispatch.WaitForFences(dev.handle, 1, &frameRes.draw->fence, true, UINT64_MAX));
-		// 	VK_CHECK(dev.dispatch.ResetFences(dev.handle, 1, &frameRes.draw->fence));
-		// 	frameRes.draw->inUse = false;
-		// 	frameRes.draw->usedHandles.clear();
-		// }
+		// There is no advantage in having multiple draws pending at
+		// the same time, we don't need to squeeze ever last fps
+		// out of the debug window. Waiting here is better than potentially
+		// somewhere in a critical section.
+		gui.waitForDraws();
+
+		// NOTE(experimental): we also might wanna limit refreshing of this window
+		// to a maximum frame rate. We don't really need those dank 144hz
+		// but will *significantly* block other vulkan progress (due to
+		// gui mutex locking) when rendering at high rates.
+		if(limitRefreshRate) {
+			std::this_thread::sleep_until(nextIterationTime);
+		}
 	}
 
-	gui.finishDraws(); // NOTE: shouldn't be needed with current blocking rendering
 	state_.store(State::shutdown);
 	cv_.notify_one();
 	dlg_trace("Exiting window thread");

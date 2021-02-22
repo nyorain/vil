@@ -23,14 +23,6 @@ public:
 		memory,
 	};
 
-public:
-	Gui() = default;
-	Gui(Gui&&) = delete;
-	Gui& operator=(Gui&&) = delete;
-	~Gui();
-
-	void init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear);
-
 	struct FrameInfo {
 		VkSwapchainKHR swapchain {};
 		u32 imageIdx {};
@@ -42,29 +34,34 @@ public:
 		span<const VkSemaphore> waitSemaphores;
 	};
 
-	struct FrameResult {
-		VkResult result;
-		Draw* draw;
-	};
+public:
+	Gui() = default;
+	Gui(Gui&&) = delete;
+	Gui& operator=(Gui&&) = delete;
+	~Gui();
 
-	FrameResult renderFrame(FrameInfo& info);
-
+	void init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear);
 	void makeImGuiCurrent();
+	VkResult renderFrame(FrameInfo& info);
 
 	// Must only be called while device mutex is locked.
 	void destroyed(const Handle& handle);
 
+	// Blocks until all pending draws have finished execution.
+	// Does not modify any internal state.
 	// Must only be called when it is guaranteed that no other thread
 	// is drawing at the same time (externally synchronized).
-	void finishDraws();
-	void activateTab(Tab);
-	std::vector<Draw*> pendingDraws();
+	void waitForDraws();
 
+	// Returns all draws that are pending.
+	// Must only be called and the draw resources only be accessed while
+	// the device mutex is locked.
+	std::vector<Draw*> pendingDrawsLocked();
+
+	void activateTab(Tab);
 	void selectResource(Handle& handle, bool activateTab = true);
 
 	auto& cbGui() { return tabs_.cb; }
-	void finished(Draw&);
-
 	ImGuiIO& imguiIO() const { return *io_; }
 
 	Device& dev() const { return *dev_; }
@@ -79,6 +76,7 @@ private:
 
 	void uploadDraw(Draw&, const ImDrawData&);
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, const ImDrawData&);
+	void finishedLocked(Draw&);
 
 private:
 	Device* dev_ {};
@@ -89,6 +87,7 @@ private:
 	u32 activateTabCounter_ {};
 
 	std::deque<Draw> draws_;
+	Draw* lastDraw_ {};
 
 	struct {
 		ResourceGui resources;

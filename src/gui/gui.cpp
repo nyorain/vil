@@ -387,7 +387,7 @@ Gui::~Gui() {
 	dlg_assert(dev_->gui == this);
 	dev_->gui = nullptr;
 
-	finishDraws();
+	waitForDraws();
 	draws_.clear();
 
 	if(imgui_) {
@@ -1077,25 +1077,27 @@ void Gui::activateTab(Tab tab) {
 	}
 }
 
-Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
+VkResult Gui::renderFrame(FrameInfo& info) {
 	makeImGuiCurrent();
 
-	// find a free draw objectg
-	Draw* foundDraw = nullptr;
+	// TODO: hacky but we have to keep the record alive, making sure
+	// it's not destroyed inside the lock.
+	auto keepAliveRec = tabs_.cb.record_;
+	auto keepAliveBatches = tabs_.cb.records_;
+
+	Draw* foundDraw {};
+
+	// find a free draw object
 	for(auto& draw : draws_) {
 		if(!draw.inUse) {
 			foundDraw = &draw;
-			break;
+			continue;
 		}
 
-		// NOTE: since we start using shared resources between draws (e.g.
-		// the depth buffers), we can't ever really have more than one draw
-		// at a time. Should probably remove the vector, just have one draw_
-		// if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
-		if(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX) == VK_SUCCESS) {
-			finished(draw);
+		if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
+			std::lock_guard devMutex(dev().mutex);
+			finishedLocked(draw);
 			foundDraw = &draw;
-			break;
 		}
 	}
 
@@ -1103,8 +1105,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		foundDraw = &draws_.emplace_back();
 		foundDraw->init(dev(), commandPool_);
 	}
-
-	dlg_assert(draws_.size() == 1);
 
 	auto& draw = *foundDraw;
 	draw.usedHandles.clear();
@@ -1127,15 +1127,12 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		ImGui::GetIO().DeltaTime = dt_;
 	}
 
-	// TODO: hacky but we have to keep the record alive, making sure
-	// it's not destroyed inside the lock.
-	auto keepAliveRec = tabs_.cb.record_;
-	auto keepAliveBatches = tabs_.cb.records_;
-
 	{
 		// Important we already lock this mutex here since we need to make
 		// sure no new submissions are done by application while we process
 		// and evaluate the pending submissions
+		// TODO(PERF): we lock this for a long time here. Pretty sure
+		// this could be optimized.
 		std::lock_guard queueLock(dev().queueMutex);
 		std::lock_guard devMutex(dev().mutex);
 
@@ -1228,6 +1225,7 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		VkTimelineSemaphoreSubmitInfo tsInfo {};
 
 		auto waitSems = std::vector(info.waitSemaphores.begin(), info.waitSemaphores.end());
+		auto signalSems = std::vector{draw.presentSemaphore, draw.futureSemaphore};
 
 		std::vector<VkPipelineStageFlags> waitStages;
 		for(auto i = 0u; i < info.waitSemaphores.size(); ++i) {
@@ -1251,6 +1249,15 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 				draw.waitedUpon.push_back(sub->ourSemaphore);
 			}
 
+			// Chain this behind the last pending draw to make sure the
+			// shared resources (e.g. depth buffer) aren't used by multiple
+			// draws in parallel
+			if(lastDraw_) {
+				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+				waitSems.push_back(lastDraw_->futureSemaphore);
+				waitValues.push_back(lastDraw_->futureSemaphoreValue);
+			}
+
 			dlg_assert(waitValues.size() == waitSems.size());
 			tsInfo.waitSemaphoreValueCount = u32(waitValues.size());
 			tsInfo.pWaitSemaphoreValues = waitValues.data();
@@ -1258,10 +1265,8 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			// signal
 			// signalValues[0] is uninitialized by design, should be
 			// ignored by driver as signalSemaphores[0] is binary
-			VK_CHECK(dev().dispatch.GetSemaphoreCounterValue(dev().handle,
-				draw.futureSemaphore, &signalValues[1]));
-			++signalValues[1];
-			draw.futureSemaphoreValue = signalValues[1];
+			++draw.futureSemaphoreValue;
+			signalValues[1] = draw.futureSemaphoreValue;
 
 			tsInfo.signalSemaphoreValueCount = 2u;
 			tsInfo.pSignalSemaphoreValues = signalValues;
@@ -1276,6 +1281,27 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			}
 
 			dev().resetSemaphores.clear();
+
+			// Chain this behind the last pending draw to make sure the
+			// shared resources (e.g. depth buffer) aren't used by multiple
+			// draws in parallel
+			if(lastDraw_) {
+				waitSems.push_back(lastDraw_->futureDrawSemaphore);
+				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+			}
+
+			dlg_assert(draw.futureDrawSemaphore);
+			signalSems.push_back(draw.futureDrawSemaphore);
+
+			// When this draw's futureSemaphore wasn't used, make sure
+			// to reset it before we signal it again. This shouldn't acutally
+			// cause an additional wait, we already wait for the last draw.
+			if(!draw.futureSemaphoreUsed && draw.futureSemaphoreSignaled) {
+				waitSems.push_back(draw.futureSemaphore);
+				waitStages.push_back(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+			}
+
+			draw.futureSemaphoreSignaled = true;
 
 			// if we have to wait for one submission, we wait for all,
 			// for simplicity's sake.
@@ -1327,7 +1353,6 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 
 		dlg_assert(waitStages.size() == waitSems.size());
 
-		auto signalSems = std::array{draw.presentSemaphore, draw.futureSemaphore};
 		submitInfo.signalSemaphoreCount = u32(signalSems.size());
 		submitInfo.pSignalSemaphores = signalSems.data();
 		submitInfo.pWaitDstStageMask = waitStages.data();
@@ -1337,17 +1362,18 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 		auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
 		if(res != VK_SUCCESS) {
 			dlg_error("vkSubmit error: {}", vk::name(res));
-			return {res, &draw};
+			return res;
 		}
-	}
 
-	draw.inUse = true;
+		draw.inUse = true;
+		lastDraw_ = foundDraw;
+	}
 
 	// call down
 	VkPresentInfoKHR presentInfo {};
 	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	presentInfo.pImageIndices = &info.imageIdx;
-	presentInfo.pWaitSemaphores = &draw.presentSemaphore;
+	presentInfo.pWaitSemaphores = &foundDraw->presentSemaphore;
 	presentInfo.waitSemaphoreCount = 1u;
 	presentInfo.pSwapchains = &info.swapchain;
 	presentInfo.swapchainCount = 1u;
@@ -1363,17 +1389,19 @@ Gui::FrameResult Gui::renderFrame(FrameInfo& info) {
 			dlg_error("vkQueuePresentKHR error: {}", vk::name(res));
 
 			// TODO: not sure how to handle this the best
-			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
-			finished(draw);
+			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &foundDraw->fence, true, UINT64_MAX));
 
-			return {res, nullptr};
+			std::lock_guard lock(dev().mutex);
+			finishedLocked(*foundDraw);
+
+			return res;
 		}
 	}
 
-	return {VK_SUCCESS, &draw};
+	return VK_SUCCESS;
 }
 
-void Gui::finishDraws() {
+void Gui::waitForDraws() {
 	std::vector<VkFence> fences;
 	for(auto& draw : draws_) {
 		if(draw.inUse) {
@@ -1382,12 +1410,9 @@ void Gui::finishDraws() {
 	}
 
 	if(!fences.empty()) {
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()), fences.data(), true, UINT64_MAX));
-		for(auto& draw : draws_) {
-			if(draw.inUse) {
-				finished(draw);
-			}
-		}
+		VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
+			u32(fences.size()), fences.data(), true, UINT64_MAX));
+		// we can't reset the draws here
 	}
 }
 
@@ -1402,10 +1427,10 @@ void Gui::selectResource(Handle& handle, bool activateTab) {
 	}
 }
 
-std::vector<Draw*> Gui::pendingDraws() {
+std::vector<Draw*> Gui::pendingDrawsLocked() {
 	std::vector<Draw*> ret;
 	for(auto& draw : draws_) {
-		if(draw.inUse) {
+		if(draw.inUse && dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
 			ret.push_back(&draw);
 		}
 	}
@@ -1413,15 +1438,12 @@ std::vector<Draw*> Gui::pendingDraws() {
 	return ret;
 }
 
-void Gui::finished(Draw& draw) {
+void Gui::finishedLocked(Draw& draw) {
 	dlg_assert(draw.inUse);
 	dlg_assert(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS);
 
-	{
-		std::lock_guard lock(dev().mutex);
-		for(auto semaphore : draw.waitedUpon) {
-			dev().semaphorePool.push_back(semaphore);
-		}
+	for(auto semaphore : draw.waitedUpon) {
+		dev().semaphorePool.push_back(semaphore);
 	}
 
 	auto& rb = tabs_.resources.buffer_;
@@ -1452,8 +1474,7 @@ void Gui::finished(Draw& draw) {
 	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
 
 	draw.inUse = false;
-	draw.futureSemaphoreUsed = 0u;
-	draw.futureSemaphoreValue = 0u;
+	draw.futureSemaphoreUsed = false;
 }
 
 // util

@@ -353,9 +353,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		fpPhdevProps2 = ini.dispatch.GetPhysicalDeviceProperties2KHR;
 	}
 
-	auto hasTimelineSemaphoresApi =
+	// enableTimelineSemaphoreUsage: useful to test the non-timeline semaphore codepaths
+	constexpr auto enableTimelineSemaphoreUsage = true;
+	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage && (
 		(ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
-		hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+		hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));
 
 	auto hasTimelineSemaphores = false;
 	u64 maxTimelineSemaphoreValueDifference {};

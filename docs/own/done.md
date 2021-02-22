@@ -1,5 +1,10 @@
 For v0.1
 
+- [x] fix Gui::draws_ synchronization issue
+	  See Gui::pendingDraws (called from queue while locked) but also
+	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
+	  potential race!)
+	  {NOTE: there are likely a couple more sync issues for Gui stuff}
 - [x] make queues viewable handles
 	- [x] allow to view command groups per queue
 - [x] take VkPhysicalDeviceLimits::timestampComputeAndGraphics into account

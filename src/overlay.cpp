@@ -37,7 +37,7 @@ void Overlay::destroyDepth() {
 }
 
 void Overlay::initRenderBuffers() {
-	gui.finishDraws();
+	gui.waitForDraws();
 
 	auto& swapchain = *this->swapchain;
 	auto& dev = *swapchain.dev;
@@ -109,8 +109,7 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	frameInfo.presentQueue = queue.handle;
 	frameInfo.swapchain = swapchain->handle;
 
-	auto res = gui.renderFrame(frameInfo);
-	return res.result;
+	return gui.renderFrame(frameInfo);
 }
 
 bool Overlay::compatible(const VkSwapchainCreateInfoKHR& a,

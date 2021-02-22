@@ -393,6 +393,17 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		dlg_assert(info.hookedSubpass != u32(-1));
 		dlg_assert(info.hookedSubpass < desc.subpasses.size());
 
+		// TODO: possible solution for allowing command viewing in this case:
+		// - just split up the subpasses into individual renderpasses,
+		//   recreate affected pipelines inside the layer and use them
+		//   when hooking
+		// super ugly and lots of work to implement, could be really
+		// expensive and just stall for multiple seconds at worst in large
+		// games. Would need extensive testing.
+		// This case should only happen anyways when a resolve attachments
+		// is used later on (in specific ways, i.e. written and then read
+		// or the resolve source written to). Niche feature, looking forward
+		// to the reported issue in 5 years.
 		if(!splittable(desc, info.hookedSubpass)) {
 			info.splitRenderPass = false;
 			state->errorMessage = "Can't split render pass (due to resolve attachments)";
@@ -1021,7 +1032,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 	auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd);
 
 	// TODO: for non-indirect, non-indexed commands we know the exact number
-	// of indices to copy
+	// of vertices to copy
 	if(hook->copyVertexBuffers) {
 		dlg_assert(drawCmd);
 		for(auto& vertbuf : drawCmd->state.vertices) {

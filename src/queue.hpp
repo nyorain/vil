@@ -89,6 +89,7 @@ struct SubmissionBatch {
 };
 
 // CommandBuffer groups
+// TODO: rename to CommandGroup? CommandRecordGroup? RecordGroup?
 struct CommandBufferGroup {
 	// Abstract description of this group. Used to determine whether new
 	// recording belong to it.

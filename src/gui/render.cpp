@@ -124,11 +124,17 @@ void Draw::init(Device& dev, VkCommandPool commandPool) {
 	if(dev.timelineSemaphores) {
 		tsInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
 		tsInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+		tsInfo.initialValue = 0u;
 		sci.pNext = &tsInfo;
 	}
 
 	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &futureSemaphore));
 	nameHandle(dev, this->futureSemaphore, "Draw:futureSemaphore");
+
+	if(!dev.timelineSemaphores) {
+		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &futureDrawSemaphore));
+		nameHandle(dev, this->futureDrawSemaphore, "Draw:futureDrawSemaphore");
+	}
 
 	VkDescriptorSetAllocateInfo dsai {};
 	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -154,6 +160,7 @@ Draw::~Draw() {
 
 	dev->dispatch.DestroySemaphore(dev->handle, presentSemaphore, nullptr);
 	dev->dispatch.DestroySemaphore(dev->handle, futureSemaphore, nullptr);
+	dev->dispatch.DestroySemaphore(dev->handle, futureDrawSemaphore, nullptr);
 
 	// We rely on the commandPool being freed to implicitly free this
 	// command buffer. Since the gui owns the command pool this isn't
@@ -164,6 +171,11 @@ Draw::~Draw() {
 
 	if(dsSelected) {
 		dev->dispatch.FreeDescriptorSets(dev->handle, dev->dsPool, 1, &dsSelected);
+	}
+
+	// NOTE: could return them to the device pool alternatively
+	for(auto sem : waitedUpon) {
+		dev->dispatch.DestroySemaphore(dev->handle, sem, nullptr);
 	}
 }
 

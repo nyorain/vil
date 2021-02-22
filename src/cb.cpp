@@ -643,6 +643,10 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cmd.fb = cb.dev->framebuffers.find(rpBeginInfo.framebuffer);
 	cmd.rp = cb.dev->renderPasses.find(rpBeginInfo.renderPass);
 
+	dlg_assert(!cb.graphicsState().rp && !cb.graphicsState().fb);
+	cb.graphicsState().fb = cmd.fb;
+	cb.graphicsState().rp = cmd.rp;
+
 	cmd.subpassBeginInfo = subpassBeginInfo;
 	copyChain(cb, cmd.subpassBeginInfo.pNext);
 
@@ -709,6 +713,10 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = {};
 	cmd.endInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_END_INFO;
+
+	dlg_assert(cb.graphicsState().fb && cb.graphicsState().rp);
+	cb.graphicsState().fb = nullptr;
+	cb.graphicsState().rp = nullptr;
 
 	cb.dev->dispatch.CmdEndRenderPass(commandBuffer);
 }

@@ -109,7 +109,7 @@ During the early stages of this project, you likely want to load it *before* any
 your application then causes triggers validation errors with *vil* that are not there without it,
 make sure to report them here!
 
-# Using it
+# Using vil
 
 There are multiple ways of using this layer:
 

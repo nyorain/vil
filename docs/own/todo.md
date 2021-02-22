@@ -25,20 +25,21 @@ v0.1, goal: end of january 2021
       instead of first submission. We can't use the used queue though...
 - [ ] remaining IO viewer fixes:
 	- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
-	- [ ] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
-	- [ ] when viewing transfer img, show image refButton
+	- [ ] fix descriptor arrays
+	- [ ] fix transfer buffer introspection
+	- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
+	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
+	- [x] when viewing transfer img, show image refButton
 	- [ ] adapt ioImage_ to selected image (e.g. channels)
 		- [ ] also fix logic for depthStencil images. Select depth by default.
 		      (can be tested with doom)
+- [ ] support texel reading implementation for cb-viewed-images and clean
+      up color format presentation, support depth and packed formats.
+	  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
 - [ ] test `splittable` impl for render passes. There are very likely issues.
       (especially for the cases where render pass can't be split)
 - [ ] in CopiedImage::init: check for image usage support
 	- [ ] generally: allow the image copy operation to fail.
-- [ ] fix Gui::draws_ synchronization issue
-	  See Gui::pendingDraws (called from queue while locked) but also
-	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,
-	  potential race!)
-	  {NOTE: there are likely a couple more sync issues for Gui stuff}
 - [ ] better pipeline/shader module display in resource viewer
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
@@ -70,7 +71,7 @@ v0.1, goal: end of january 2021
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
 		   to make this beautiful}
-	- [ ] show graph of frame timings (see first sketch swapchain header)
+	- [x] show graph of frame timings (see first sketch swapchain header)
 	- [x] show enabled extensions
 	- [ ] show enabled features
 	- [ ] only show application info if filled out by app. collapse by default?
@@ -94,9 +95,6 @@ v0.1, goal: end of january 2021
 	      implement yet (such as sparse binding)
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
-- [ ] support texel reading implementation for cb-viewed-images and clean
-      up color format presentation, support depth and packed formats.
-	  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
 - [ ] imgui styling
 	- [ ] use custom font
 	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
@@ -143,6 +141,19 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] improve frame graph layout in overview. Looks not nice atm
+	- [ ] maybe try out implot lib
+	- [ ] instead of limiting by number of frames maybe limit by time?
+		  the 1000 last timings (as it is right now) is bad, not enough for high-fps applications
+- [ ] implement clipboard, cursor style and other feature support for imgui
+	- [ ] in window.cpp, for our external debug window
+	- [ ] where useful (and really needed) incorporate it into the public API
+- [ ] add own normals to vertex viewer (either somehow on-the-fly on gpu or
+      pre-calculate them on cpu) and add basic shading.
+	  maybe we can reuse existing normals in some cases but i doubt it,
+	  no idea for good heuristics
+- [ ] when selecting a draw call, allow to color it in final render
+	- [ ] would require us to modify shader/pipeline. lots of work
 - [ ] when we select a resource of type X should we set the current filter to X
       in the resource gui? Can be somewhat confusing at the moment
 - [ ] the gui code is currently rather messy. Think of a general concept
@@ -160,6 +171,7 @@ Possibly for later, new features/ideas:
 	  just copying the currently vieweed mip and then generating our own mips)
 - [ ] clean and split up QueueSubmit implementation. It's way too long,
       does way too much. And will probably further grow
+	- [ ] also: always check in the beginning for finished submissions
 - [ ] attempt to retain previous selection in io viewer when selecting
 	  new command
 - [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support

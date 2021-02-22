@@ -31,21 +31,6 @@ void VertexViewer::init(Device& dev, VkRenderPass rp) {
 	dev_ = &dev;
 	rp_ = rp;
 
-	/*
-	VkDescriptorSetLayoutBinding binding {};
-	binding.binding = 0u;
-	binding.descriptorCount = 1u;
-	binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-	binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-	VkDescriptorSetLayoutCreateInfo dslci {};
-	dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	dslci.bindingCount = 1u;
-	dslci.pBindings = &binding;
-	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &dsLayout_));
-	nameHandle(dev, this->dsLayout_, "VertexViewer:dsLayout");
-	*/
-
 	// pipeline layout
 	// We just allocate the full push constant range that all implementations
 	// must support.
@@ -122,8 +107,10 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 
 	VkPipelineRasterizationStateCreateInfo rasterInfo {};
 	rasterInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-	// rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
-	rasterInfo.polygonMode = VK_POLYGON_MODE_LINE;
+	// TODO: line mode could be useful. Allow to toggle?
+	// Need to enable nonSolidFill device feature though
+	rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
+	// rasterInfo.polygonMode = VK_POLYGON_MODE_LINE;
 	rasterInfo.cullMode = VK_CULL_MODE_NONE;
 	rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	rasterInfo.lineWidth = 1.0f;
@@ -233,7 +220,6 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 	}
 
 	if(!foundPipe) {
-		dlg_trace("creating new vertex viewer pipe");
 		foundPipe = createPipe(attrib.format, binding.stride, src.inputAssemblyState.topology);
 	}
 
@@ -310,7 +296,6 @@ void VertexViewer::updateInput(float dt) {
 				}
 
 				cam_.rot = Quaternion::yxz(yaw_, pitch_, 0.f);
-				dlg_trace("cam yaw {}, pitch {}", yaw_, pitch_);
 			}
 
 			lastMousPos_ = mousePos;
@@ -366,10 +351,6 @@ void VertexViewer::updateInput(float dt) {
 		// need to inform application that we have captured keyboard
 		// input right now (when input comes from application)
 		io.WantCaptureKeyboard = true;
-
-		if(std::abs(accel.x) > 0.00001 || std::abs(accel.y) > 0.00001) {
-			dlg_trace("cam pos: {}", cam_.pos);
-		}
 	}
 
 	auto rect = ImGui::GetItemRectSize();

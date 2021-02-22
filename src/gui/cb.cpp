@@ -1402,15 +1402,27 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 		displayVertexViewer(draw, cmd);
 		cmdInfo = false;
 	} else if(hook.copyAttachment) {
-		// TODO: only show for output attachments (color, depthStencil)
+		dlg_assert(drawCmd);
+
+		// TODO: only show this button for output attachments (color, depthStencil)
+		// does not make sense otherwise as it stays the same i guess
 		if(ImGui::Checkbox("Before Command", &hook.copyAttachment->before)) {
 			hook.invalidateRecordings();
 			hook.invalidateData();
 		}
 
-		if(hook.state) {
-			// TODO: display information/refButtons to framebuffer and imageview, image used!
+		// information
+		auto aid = hook.copyAttachment->id;
+		auto& fb = nonNull(drawCmd->state.fb);
+		dlg_assert(aid < fb.attachments.size());
+		auto& view = nonNull(fb.attachments[aid]);
+		auto& img = nonNull(view.img);
 
+		refButton(*gui_, fb);
+		refButton(*gui_, view);
+		refButton(*gui_, img);
+
+		if(hook.state) {
 			if(hook.state->attachmentCopy.image) {
 				displayImage(draw, hook.state->attachmentCopy);
 			} else {
@@ -1447,12 +1459,61 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 		}
 	} else if(hook.copyTransferSrc || hook.copyTransferDst) {
 		if(hook.state) {
+			// TODO: only show where it makes sense?
+			// shouldn't be here for src resources i guess
 			if(ImGui::Checkbox("Before Command", &hook.copyTransferBefore)) {
 				hook.invalidateRecordings();
 				hook.invalidateData();
 			}
 
-			// TODO: display information/refButtons to framebuffer and imageview, image used!
+			auto refSrcDst = [&](auto* ccmd) {
+				if(!ccmd) {
+					return;
+				}
+
+				if(hook.copyTransferSrc) {
+					refButtonExpect(*gui_, ccmd->src);
+				} else  {
+					refButtonExpect(*gui_, ccmd->dst);
+				}
+			};
+
+			auto refDst = [&](auto* ccmd) {
+				if(!ccmd) {
+					return;
+				}
+
+				dlg_assert(!hook.copyTransferSrc);
+				refButtonExpect(*gui_, ccmd->dst);
+			};
+
+			auto refSrc = [&](auto* ccmd) {
+				if(!ccmd) {
+					return;
+				}
+
+				dlg_assert(hook.copyTransferSrc);
+				refButtonExpect(*gui_, ccmd->src);
+			};
+
+			refSrcDst(dynamic_cast<const CopyImageCmd*>(&cmd));
+			refDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
+			refSrc(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
+			refSrcDst(dynamic_cast<const BlitImageCmd*>(&cmd));
+			refSrcDst(dynamic_cast<const ResolveImageCmd*>(&cmd));
+
+			// addSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
+			// addDst(dynamic_cast<const UpdateBufferCmd*>(&cmd));
+			// addDst(dynamic_cast<const FillBufferCmd*>(&cmd));
+			refDst(dynamic_cast<const ClearColorImageCmd*>(&cmd));
+			refDst(dynamic_cast<const ClearDepthStencilImageCmd*>(&cmd));
+
+			// TODO: add support for selecting one of the multiple
+			//   cleared attachments
+			if(auto* ccmd = dynamic_cast<const ClearAttachmentCmd*>(&cmd); ccmd) {
+				// TODO
+				(void) ccmd;
+			}
 
 			if(hook.state->transferImgCopy.image) {
 				displayImage(draw, hook.state->transferImgCopy);
@@ -1483,18 +1544,7 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 				dlg_assert(lastTime == u64(-1));
 				imGuiText("Time: unavailable (Queue family does not support timing queries)");
 			} else {
-				// not needed, as vulkan guarantees that other bits are 0
-				// lastTime &= (1 << validBits) - 1;
 				auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
-
-				// auto timeNames = {"ns", "mus", "ms", "s"};
-				// auto it = timeNames.begin();
-				// while(displayDiff > 1000.f && (it + 1) != timeNames.end()) {
-				// 	++it;
-				// 	displayDiff /= 1000.f;
-				// }
-				// imGuiText("Time: {} {}", displayDiff, *it);
-
 				displayDiff /= 1000.f * 1000.f;
 				imGuiText("Time: {} ms", displayDiff);
 			}
@@ -1533,7 +1583,7 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 
 // If it returns true, cmd should display own command stuff in second window
 void CommandBufferGui::displayActionInspector(Draw& draw, const Command& cmd) {
-	// TODO: don't even display the inspect when we are viewing a static
+	// TODO: don't even display the inspector when we are viewing a static
 	// record and that record is invalidated.
 	// (or other cases where we know it will never be submitted again)
 	// auto& hook = *gui.dev().commandHook;

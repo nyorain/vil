@@ -44,7 +44,6 @@ extern "C" VIL_API VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice v
 		ret = reinterpret_cast<VilOverlay>(sc.overlay.get());
 	}
 
-	// TODO: race.
 	// When the application creates an overlay, we can close the window
 	if(dev.window) {
 		dev.window.reset();

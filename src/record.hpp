@@ -151,6 +151,7 @@ struct GraphicsState : DescriptorState {
 	span<BoundVertexBuffer> vertices;
 	GraphicsPipeline* pipe;
 	RenderPass* rp;
+	Framebuffer* fb;
 
 	struct StencilState {
 		u32 writeMask {};

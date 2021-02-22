@@ -477,7 +477,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 			// one for this submission, the barrier at the end of the gui
 			// submission is enough.
 			if(dev.gui && dev.gfxQueue != &qd) {
-				auto waitDraws = dev.gui->pendingDraws();
+				auto waitDraws = dev.gui->pendingDrawsLocked();
 				erase_if(waitDraws, [&](auto* draw) {
 					return needsSyncLocked(subm, *draw).empty();
 				});
@@ -511,6 +511,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 						// TODO: when at least one semaphore was already used
 						//   we could simply insert a new one to the gfx queue
 						//   (at the current position) and wait for that.
+						//   better than waiting for fences...
 						std::vector<VkFence> fences;
 						erase_if(waitDraws, [&](Draw* draw) {
 							if(draw->futureSemaphoreUsed) {

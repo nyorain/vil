@@ -68,7 +68,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 				// Have to make sure previous rendering has finished.
 				// We can be sure gui isn't starting new draws in another
 				// thread.
-				oldChain->overlay->gui.finishDraws();
+				oldChain->overlay->gui.waitForDraws();
 				savedOverlay = std::move(oldChain->overlay);
 			} else {
 				recreateOverlay = true;
@@ -138,7 +138,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	if(savedOverlay) {
 		swapd.overlay = std::move(savedOverlay);
 		swapd.overlay->swapchain = &swapd;
-		swapd.overlay->initRenderBuffers();
+
+		{
+			std::lock_guard lock(dev.mutex);
+			swapd.overlay->initRenderBuffers();
+		}
+
 		if(swapd.overlay->platform) {
 			swapd.overlay->platform->resize(swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
 		}
@@ -149,6 +154,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	} else if(platform) {
 		swapd.overlay = std::make_unique<Overlay>();
 		swapd.overlay->init(swapd);
+
 		swapd.overlay->platform = platform;
 		platform->init(*swapd.dev, swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
 	}
