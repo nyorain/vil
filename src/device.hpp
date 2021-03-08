@@ -33,7 +33,7 @@ struct Device {
 	VkPhysicalDeviceFeatures enabledFeatures {};
 
 	bool timelineSemaphores {}; // whether we have timeline smeaphores
-	u64 maxTimelineSemaphoreValueDifference {};
+	bool transformFeedback {}; // whether we have transformFeedback
 
 	// Aside from properties, only the families used by device
 	// are initialized.

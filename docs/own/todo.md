@@ -129,7 +129,6 @@ v0.1, goal: end of january 2021
 	  we could fix it by not imgui-pushing the resource ID before showing the button.
 - [ ] before release: test on windows & linux, on all owned hardware
 
-
 not sure if viable for first version but should be goal:
 - [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
 - [ ] get it to run without significant (slight (like couple of percent) increase 
@@ -141,6 +140,14 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] proper rasterization introspection using transform feedback.
+      we already query in the device whether it's supported
+	- [ ] requires SPIR-V hooking (only execution mode setting and adding xfb to outputs)
+	      have to do it to all pipelines though I guess.
+		  Not supported with multiview, respect that (via renderpass)
+	- [ ] capture in on our side into buffers
+	- [ ] not sure if we need the transform feedback queries or if we
+	      can always deduce that information statically
 - [ ] improve frame graph layout in overview. Looks not nice atm
 	- [ ] maybe try out implot lib
 	- [ ] instead of limiting by number of frames maybe limit by time?

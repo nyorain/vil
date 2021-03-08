@@ -334,8 +334,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		supportedExts);
 
 	// = Enabled features =
-	// We try to additionally enable a couple of features we need:
+	// We try to additionally enable a couple of features/exts we need:
 	// - timeline semaphores
+	// - transform feedback
 	VkPhysicalDeviceProperties phdevProps;
 	ini.dispatch.GetPhysicalDeviceProperties(phdev, &phdevProps);
 
@@ -353,30 +354,48 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		fpPhdevProps2 = ini.dispatch.GetPhysicalDeviceProperties2KHR;
 	}
 
-	// enableTimelineSemaphoreUsage: useful to test the non-timeline semaphore codepaths
+	// useful to test fallback code paths
 	constexpr auto enableTimelineSemaphoreUsage = true;
+	constexpr auto enableTransformFeedback = true;
+
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage && (
 		(ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
 		hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));
+	auto hasTransformFeedbackApi = enableTransformFeedback &&
+		hasExt(supportedExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
 
 	auto hasTimelineSemaphores = false;
-	u64 maxTimelineSemaphoreValueDifference {};
+	auto hasTransformFeedback = false;
+
 	std::unique_ptr<std::byte[]> copiedChain;
 	VkPhysicalDeviceTimelineSemaphoreFeatures tsFeatures {};
-	if(fpPhdevFeatures2 && hasTimelineSemaphoresApi) {
-		// query support
-		VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemFeatures {};
-		timelineSemFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+	VkPhysicalDeviceTransformFeedbackFeaturesEXT tfFeatures {};
+	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi) {
+		dlg_assert(fpPhdevFeatures2);
+		dlg_assert(fpPhdevProps2);
 
+		// query features support
 		VkPhysicalDeviceFeatures2 features2 {};
 		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-		features2.pNext = &timelineSemFeatures;
+
+		VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemFeatures {};
+		if(hasTimelineSemaphoresApi) {
+			timelineSemFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+			features2.pNext = &timelineSemFeatures;
+		}
+
+		VkPhysicalDeviceTransformFeedbackFeaturesEXT transformFeedbackFeatures {};
+		if(hasTransformFeedbackApi) {
+			transformFeedbackFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
+			transformFeedbackFeatures.pNext = features2.pNext;
+			features2.pNext = &transformFeedbackFeatures;
+		}
 
 		fpPhdevFeatures2(phdev, &features2);
 
+		auto* pNext = copyChain(nci.pNext, copiedChain);
 		if(timelineSemFeatures.timelineSemaphore) {
 			hasTimelineSemaphores = true;
-			auto* pNext = copyChain(nci.pNext, copiedChain);
 
 			// check if application already has a feature struct holding it
 			auto* link = static_cast<VkBaseInStructure*>(pNext);
@@ -384,6 +403,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			while(link) {
 				if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
 					addLink = false;
+					dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_2);
 					auto* vulkan12Features = reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
 					vulkan12Features->timelineSemaphore = true;
 					break;
@@ -411,22 +431,42 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 					newExts.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
 				}
 			}
-
-			// find out props
-			// NOTE: we don't really need this, the spec guarantee of 2^32-1
-			// should be good enough.
-			dlg_assert(fpPhdevProps2);
-
-			VkPhysicalDeviceTimelineSemaphoreProperties tsProps {};
-			tsProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_PROPERTIES;
-
-			VkPhysicalDeviceProperties2 phProps2 {};
-			phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-			phProps2.pNext = &tsProps;
-
-			fpPhdevProps2(phdev, &phProps2);
-			maxTimelineSemaphoreValueDifference = tsProps.maxTimelineSemaphoreValueDifference;
 		}
+
+		if(transformFeedbackFeatures.transformFeedback) {
+			hasTransformFeedback = true;
+
+			// check if application already has a feature struct holding it
+			auto* link = static_cast<VkBaseInStructure*>(pNext);
+			auto addLink = true;
+			while(link) {
+				if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT) {
+					addLink = false;
+					auto* tfFeatures = reinterpret_cast<VkPhysicalDeviceTransformFeedbackFeaturesEXT*>(link);
+					tfFeatures->transformFeedback = true;
+					break;
+				}
+
+				link = const_cast<VkBaseInStructure*>(static_cast<const VkBaseInStructure*>(link->pNext));
+			}
+
+			if(addLink) {
+				tfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
+				tfFeatures.transformFeedback = true;
+				tfFeatures.pNext = const_cast<void*>(nci.pNext);
+				nci.pNext = &tfFeatures;
+			}
+
+			// also need to enable extension
+			if(!contains(newExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) {
+				newExts.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+			}
+		}
+
+		// TODO: find out props, e.g. for transform feedback
+		// VkPhysicalDeviceProperties2 phProps2 {};
+		// phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+		// fpPhdevProps2(phdev, &phProps2);
 	}
 
 	// = Useful extensions =
@@ -467,7 +507,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.props = phdevProps;
 
 	dev.timelineSemaphores = hasTimelineSemaphores;
-	dev.maxTimelineSemaphoreValueDifference = maxTimelineSemaphoreValueDifference;
+	dev.transformFeedback = hasTransformFeedback;
 
 	dev.appExts = {extsBegin, extsEnd};
 	dev.allExts = {newExts.begin(), newExts.end()};

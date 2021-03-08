@@ -333,6 +333,8 @@ fairly complicated.
    Ugh. Re-implementing that logic in compute shaders is a bad idea.
    We likely just need to use transform feedback here.
 
+TODO: investigate vkCmdDrawIndirectByteCountEXT, might be useful for us.
+
 # Submission synchronization
 
 When application submits to a queue:

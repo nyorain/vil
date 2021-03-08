@@ -72,7 +72,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
 		SPV_REFLECT_TYPE_FLAG_FLOAT |
 		SPV_REFLECT_TYPE_FLAG_INT;
 	if((typeFlags & ~scalarFlags) == 0) { // must be scalar
-		auto val = formatScalar(type.type_flags, type.traits.numeric, data.first(bvar.size));
+		auto val = formatScalar(typeFlags, type.traits.numeric, data.first(bvar.size));
 
 		ImGui::Columns(2);
 		imGuiText("{}:", varName);
@@ -85,7 +85,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
 		auto* sep = "";
 		auto compSize = type.traits.numeric.scalar.width / 8;
 		auto varStr = std::string("");
-		auto scalarType = type.type_flags & scalarFlags;
+		auto scalarType = typeFlags & scalarFlags;
 
 		for(auto i = 0u; i < comps; ++i) {
 			auto d = data.subspan(i * compSize, compSize);
@@ -105,7 +105,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
 			SPV_REFLECT_TYPE_FLAG_MATRIX | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
 		auto& mt = type.traits.numeric.matrix;
 		auto compSize = type.traits.numeric.scalar.width / 8;
-		auto scalarType = type.type_flags & scalarFlags;
+		auto scalarType = typeFlags & scalarFlags;
 		auto rowMajor = bvar.decoration_flags & SPV_REFLECT_DECORATION_ROW_MAJOR;
 
 		auto deco = "";
@@ -157,6 +157,9 @@ void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 	auto& type = nonNull(bvar.type_description);
 	auto varName = bvar.name ? bvar.name : "?";
 
+	// TODO: arrays (but pretty much the whole buffer display thing) could
+	// profit from good ImGui-based clipping. E.g. skip all formatting when
+	// not visible. And for arrays we can use ListClip i guess
 	if(type.type_flags & SPV_REFLECT_TYPE_FLAG_ARRAY) {
 		auto& at = type.traits.array;
 		if(at.dims_count != 1u) {
@@ -167,9 +170,24 @@ void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 				// TODO: needs spirv reflect support, see issue there
 				imGuiText("{}: TODO: specialization constant array size not supported", varName);
 			} else if(at.dims[0] == 0u) {
-				// TODO: needs spirv reflect support, see issue there
-				imGuiText("{}: TODO: runtime array not supported", varName);
+				// runtime array
+				// TODO: implement paging
+				constexpr auto maxCount = 100;
+
+				auto varName = bvar.name ? bvar.name : "?";
+				auto i = 0u;
+				while(data.size() >= at.stride && i < maxCount) {
+					auto d = data.subspan(0, at.stride);
+					auto name = dlg::format("{}[{}]", varName, i++);
+
+					ImGui::Indent();
+					displayNonArray(bvar, d, name.c_str());
+					ImGui::Unindent();
+
+					data = data.subspan(at.stride);
+				}
 			} else {
+				// TODO: limit somehow, might be huge
 				auto varName = bvar.name ? bvar.name : "?";
 				for(auto i = 0u; i < at.dims[0]; ++i) {
 					auto d = data.subspan(i * at.stride);
