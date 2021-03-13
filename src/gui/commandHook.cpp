@@ -119,7 +119,7 @@ void CopiedBuffer::init(Device& dev, VkDeviceSize size) {
 		VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 
 	this->buffer.ensure(dev, size, usage);
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, size, 0, &this->map));
+	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, VK_WHOLE_SIZE, 0, &this->map));
 	this->copy = std::make_unique<std::byte[]>(size);
 
 	// NOTE: destructor for copied buffer is not needed as memory mapping
@@ -645,7 +645,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	dstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 	dev.dispatch.CmdPipelineBarrier(cb,
-		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno, NOTE: probably could
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 

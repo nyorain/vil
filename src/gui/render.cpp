@@ -16,8 +16,6 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	}
 
 	this->dev = &dev;
-	// over-allocate? Should probably be up to called to decide
-	// reqSize *= 2;
 
 	if(buf) {
 		dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);
@@ -35,6 +33,7 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	// get memory props
 	VkMemoryRequirements memReqs;
 	dev.dispatch.GetBufferMemoryRequirements(dev.handle, buf, &memReqs);
+	memReqs.size = align(memReqs.size, dev.props.limits.nonCoherentAtomSize);
 
 	// new memory
 	VkMemoryAllocateInfo allocInfo {};

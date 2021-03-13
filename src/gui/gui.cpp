@@ -488,7 +488,7 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 
 	// Upload to Buffer
 	char* map = NULL;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, font_.uploadMem, 0, uploadSize, 0, (void**)(&map)));
+	VK_CHECK(dev.dispatch.MapMemory(dev.handle, font_.uploadMem, 0, VK_WHOLE_SIZE, 0, (void**)(&map)));
 	std::memcpy(map, pixels, uploadSize);
 
 	VkMappedMemoryRange range[1] {};
@@ -594,10 +594,10 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 
 	// map
 	ImDrawVert* verts;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, draw.vertexBuffer.mem, 0, vertexSize, 0, (void**) &verts));
+	VK_CHECK(dev.dispatch.MapMemory(dev.handle, draw.vertexBuffer.mem, 0, VK_WHOLE_SIZE, 0, (void**) &verts));
 
 	ImDrawIdx* inds;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, draw.indexBuffer.mem, 0, indexSize, 0, (void**) &inds));
+	VK_CHECK(dev.dispatch.MapMemory(dev.handle, draw.indexBuffer.mem, 0, VK_WHOLE_SIZE, 0, (void**) &inds));
 
 	for(auto i = 0; i < drawData.CmdListsCount; ++i) {
 		auto& cmds = *drawData.CmdLists[i];
