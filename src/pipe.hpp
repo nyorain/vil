@@ -75,6 +75,7 @@ struct GraphicsPipeline : Pipeline {
 	bool hasTessellation : 1;
 	bool hasDepthStencil : 1;
 	bool hasMeshShader : 1;
+	bool supportsXfb : 1;
 };
 
 struct ComputePipeline : Pipeline {

@@ -20,7 +20,12 @@ constexpr auto focusKey = swa_key_rightbrace;
 static enum swa_key winapi_to_key(unsigned vkcode);
 static unsigned key_to_winapi(enum swa_key key);
 
-// TODO: rather create one thread for all platforms.
+// TODO: rather create one thread for all platform objects.
+// TODO: we probably just want to use WH_GETMESSAGE.
+//  Since that is the only real way to access WM_TEXT.
+//  Simply set msg->msg = WM_NULL when we want to block them.
+// TODO: we might be able to block raw input using the low-level hooks.
+//  investigate!
 
 struct Win32Platform : Platform {
 	enum class State {
@@ -234,7 +239,7 @@ void Win32Platform::updateWindowRect() {
 }
 
 LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
-	MOUSEHOOKSTRUCT* data = (MOUSEHOOKSTRUCT*) lParam;
+	MOUSEHOOKSTRUCTEX* data = (MOUSEHOOKSTRUCTEX*) lParam;
 
 	POINT winPos = data->pt;
 	ScreenToClient(globalPlatform->surfaceWindow, &winPos);
@@ -315,6 +320,14 @@ LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 				if(winPos.y < 0 || winPos.x < 0) {
 					break;
 				}
+				return 1;
+			case WM_MOUSEWHEEL:
+				// TODO: accumulate?
+				globalPlatform->gui->imguiIO().MouseWheel = GET_WHEEL_DELTA_WPARAM(data->mouseData) / 120.f;
+				return 1;
+			case WM_MOUSEHWHEEL:
+				// TODO: accumulate?
+				globalPlatform->gui->imguiIO().MouseWheelH = GET_WHEEL_DELTA_WPARAM(data->mouseData) / 120.f;
 				return 1;
 			default:
 				break;

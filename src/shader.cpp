@@ -11,6 +11,13 @@ SpirvData::~SpirvData() {
 	spvReflectDestroyShaderModule(reflection.get());
 }
 
+ShaderModule::~ShaderModule() {
+	if(xfbVertShader) {
+		dlg_assert(dev);
+		dev->dispatch.DestroyShaderModule(dev->handle, xfbVertShader, nullptr);
+	}
+}
+
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 		VkDevice                                    device,

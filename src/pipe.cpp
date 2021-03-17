@@ -4,9 +4,215 @@
 #include <shader.hpp>
 #include <ds.hpp>
 #include <data.hpp>
+#include <util/spirv.hpp>
+#include <dlg/dlg.hpp>
+#include <vk/enumString.hpp>
 
 namespace vil {
 
+// util
+std::string extractString(span<const u32> spirv, u32 offset, u32 wordCount) {
+	dlg_assert(wordCount <= spirv.size() - offset);
+
+	std::string ret;
+	for(auto i = offset; i < wordCount; i++) {
+		uint32_t w = spirv[i];
+		for (uint32_t j = 0; j < 4; j++, w >>= 8) {
+			char c = w & 0xff;
+			if(c == '\0') {
+				return ret;
+			}
+
+			ret += c;
+		}
+	}
+
+	dlg_error("Unterminated SPIR-V string");
+	return {};
+}
+
+bool opComesBeforeSection8(spv::Op op) {
+	using namespace spv;
+	switch(op) {
+		case spv::Op::OpCapability:
+		case spv::Op::OpExtension:
+		case spv::Op::OpExtInstImport:
+		case spv::Op::OpMemoryModel:
+		case spv::Op::OpEntryPoint:
+		case spv::Op::OpExecutionMode:
+		case spv::Op::OpString:
+		case spv::Op::OpSourceExtension:
+		case spv::Op::OpSource:
+		case spv::Op::OpSourceContinued:
+		case spv::Op::OpName:
+		case spv::Op::OpMemberName:
+		case spv::Op::OpModuleProcessed:
+			return true;
+		default:
+			return false;
+	}
+}
+
+VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
+		const char* entryPoint) {
+	// parse spirv
+	if(spirv.size() < 5) {
+		dlg_error("spirv to small");
+		return {};
+	}
+
+	if(spirv[0] != 0x07230203) {
+		dlg_error("Invalid spirv magic number. Endianess troubles?");
+		return {};
+	}
+
+	// auto version = spirv[1];
+	// auto generator = spirv[2];
+	// auto bound = spirv[3];
+
+	std::vector<u32> newDecos;
+	std::vector<u32> patched;
+	patched.reserve(spirv.size());
+
+	auto addedCap = false;
+	auto addedExecutionMode = false;
+
+	auto section = 0u;
+	auto entryPointID = u32(-1);
+	auto insertDecosPos = u32(-1);
+
+	auto offset = 5u;
+	while(offset < spirv.size()) {
+		auto first = spirv[offset];
+		auto op = spv::Op(first & 0xFFFFu);
+		auto wordCount = first >> 16u;
+
+		if(section == 5u && op != spv::Op::OpEntryPoint) {
+			dlg_assert_or(entryPointID != u32(-1), return {});
+
+			section = 6u;
+			patched.push_back(3u << 16 | u32(spv::Op::OpExecutionMode));
+			patched.push_back(entryPointID);
+			patched.push_back(u32(spv::ExecutionMode::Xfb));
+
+			addedExecutionMode = true;
+		}
+
+		// check if we have reached section 8
+		// TODO: this is somewhat brittle as extensions could add
+		//   new instructions. Have to be added to opComesBeforeSection8.
+		//   The inherent problem here is that we can't detect section 8
+		//   by anything *in* section 8 since it might not exist at all.
+		if(section <= 8u && insertDecosPos == u32(-1) &&
+				!opComesBeforeSection8(op)) {
+			section = 8u;
+			insertDecosPos = patched.size();
+		}
+
+		dlg_assert(section == 8u ||
+			op != spv::Op::OpDecorate &&
+			op != spv::Op::OpMemberDecorate &&
+			op != spv::Op::OpGroupDecorate &&
+			op != spv::Op::OpGroupMemberDecorate &&
+			op != spv::Op::OpDecorationGroup);
+
+		for(auto i = 0u; i < wordCount; ++i) {
+			patched.push_back(spirv[offset + i]);
+		}
+
+		// We need to add the TransformFeedback capability
+		if(op == spv::Op::OpCapability) {
+			dlg_assert(section <= 1u);
+			section = 1u;
+
+			dlg_assert(wordCount == 2);
+			auto cap = spv::Capability(spirv[offset + 1]);
+
+			// The shader *must* declare shader capability exactly once.
+			// We add the transformFeedback cap just immediately after that.
+			if(cap == spv::Capability::Shader) {
+				dlg_assert(!addedCap);
+				patched.push_back(2u << 16 | (u32(spv::Op::OpCapability) << 16));
+				patched.push_back(u32(spv::Capability::TransformFeedback));
+				addedCap = true;
+			}
+
+			// When the shader itself declared that capability, there is
+			// nothing we can do.
+			// TODO: maybe in some cases shaders just declare that cap but
+			// don't use it? In that case we could still patch in our own values
+			if(cap == spv::Capability::TransformFeedback) {
+				dlg_debug("Shader is already using transform feedback!");
+				return {};
+			}
+		}
+
+		// We need to find the id of the entry point
+		if(op == spv::Op::OpEntryPoint) {
+			dlg_assert(section <= 5u);
+			section = 5u;
+
+			dlg_assert(wordCount >= 4);
+			auto length = wordCount - 3;
+			auto name = extractString(spirv, offset, length);
+			if(!name.empty() && name == entryPoint) {
+				entryPointID = spirv[offset + 2];
+			}
+		}
+
+		// We need to add our xfb decorations to outputs from the shader stage
+		if(op == spv::Op::OpVariable) {
+			dlg_assert_or(wordCount >= 4, return {});
+			// auto resType = spirv[offset + 1];
+			auto resID = spirv[offset + 2];
+			auto storage = spv::StorageClass(spirv[offset + 3]);
+			if(storage == spv::StorageClass::Output) {
+				// TODO: values. Also store them somewhere
+				newDecos.push_back(4u << 16 | (u32(spv::Op::OpDecorate) << 16));
+				newDecos.push_back(resID);
+				newDecos.push_back(u32(spv::Decoration::XfbBuffer));
+				newDecos.push_back(0u);
+
+				newDecos.push_back(4u << 16 | u32(spv::Op::OpDecorate));
+				newDecos.push_back(resID);
+				newDecos.push_back(u32(spv::Decoration::XfbStride));
+				newDecos.push_back(4u);
+
+				newDecos.push_back(4u << 16 | u32(spv::Op::OpDecorate));
+				newDecos.push_back(resID);
+				newDecos.push_back(u32(spv::Decoration::Offset));
+				newDecos.push_back(0u);
+			}
+		}
+
+		// We need to add the Xfb Execution mode to our entry point.
+
+		offset += wordCount;
+	}
+
+	if(!addedCap || !addedExecutionMode || newDecos.empty() || insertDecosPos == u32(-1)) {
+		dlg_warn("Could not inject xfb into shader. Likely a logical error");
+		return {};
+	}
+
+	patched.insert(patched.begin() + insertDecosPos, newDecos.begin(), newDecos.end());
+
+	VkShaderModuleCreateInfo ci {};
+	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	ci.pCode = patched.data();
+	ci.codeSize = patched.size();
+
+	VkShaderModule mod;
+	auto res = dev.dispatch.CreateShaderModule(dev.handle, &ci, nullptr, &mod);
+	if(res != VK_SUCCESS) {
+		dlg_error("xfb CreateShaderModule: {} (res)", vk::name(res), res);
+		return {};
+	}
+
+	return mod;
+}
+
+// PipelineLayout
 PipelineLayout::~PipelineLayout() {
 	if(!dev) {
 		return;
@@ -33,6 +239,7 @@ PipelineShaderStage::PipelineShaderStage(Device& dev, const VkPipelineShaderStag
 	entryPoint = sci.pName;
 }
 
+// API
 VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		VkDevice                                    device,
 		VkPipelineCache                             pipelineCache,
@@ -41,15 +248,64 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
 	auto& dev = getData<Device>(device);
+
+	// We can't create the pipelines one-by-one since that would mess
+	// with the derivation fields.
+
+	struct PreData {
+		bool useXfb {};
+	};
+
+	std::vector<VkGraphicsPipelineCreateInfo> ncis;
+	std::vector<PreData> pres;
+	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
+
+	for(auto i = 0u; i < createInfoCount; ++i) {
+		dlg_assert(pPipelines[i]);
+
+		auto& nci = ncis.emplace_back();
+		nci = pCreateInfos[i];
+
+		auto& pre = pres.emplace_back();
+
+		// transform feedback isn't supported for multiview graphics pipelines
+		auto& rp = dev.renderPasses.get(nci.renderPass);
+		pre.useXfb = dev.transformFeedback &&
+			!hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
+		bool foundVertexStage = false;
+
+		auto& stages = stagesVecs.emplace_back();
+		for(auto s = 0u; s < nci.stageCount; ++s) {
+			auto src = nci.pStages[s];
+			if(src.stage == VK_SHADER_STAGE_VERTEX_BIT && pre.useXfb) {
+				dlg_assert(!foundVertexStage);
+				foundVertexStage = true;
+
+				auto& mod = dev.shaderModules.get(src.module);
+				if(!mod.xfbVertShader) {
+					mod.xfbVertShader = patchVertexShaderXfb(dev, mod.code->spv);
+				}
+
+				if(mod.xfbVertShader) {
+					src.module = mod.xfbVertShader;
+				}
+			}
+
+			stages.push_back(src);
+		}
+
+		pre.useXfb &= foundVertexStage;
+		nci.pStages = stages.data();
+	}
+
 	auto res = dev.dispatch.CreateGraphicsPipelines(device, pipelineCache,
-		createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if(res != VK_SUCCESS) {
+		u32(ncis.size()), ncis.data(), pAllocator, pPipelines);
+	if (res != VK_SUCCESS) {
 		return res;
 	}
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
-		dlg_assert(pPipelines[i]);
-		auto& pci = pCreateInfos[i];
+		auto& pci = ncis[i];
 
 		auto& pipe = dev.graphicsPipes.add(pPipelines[i]);
 		pipe.dev = &dev;
@@ -65,6 +321,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.hasTessellation = false;
 		pipe.hasMeshShader = false;
 		pipe.hasDepthStencil = false;
+		pipe.hasTessellation = pres[i].useXfb;
 
 		for(auto s = 0u; s < pci.stageCount; ++s) {
 			pipe.stages.emplace_back(dev, pci.pStages[s]);

@@ -24,6 +24,12 @@ struct ShaderModule : DeviceHandle {
 	// Managed via shared ptr since it may outlive the shader module in
 	// (possibly multiple) pipeline objects.
 	std::shared_ptr<SpirvData> code;
+
+	// Owend by us.
+	// When the shader module is a vertex shader, we lazily create
+	// a transform-feedback version of it.
+	VkShaderModule xfbVertShader {};
+	~ShaderModule();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
