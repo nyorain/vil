@@ -5,19 +5,17 @@
 #include <ds.hpp>
 #include <data.hpp>
 #include <util/spirv.hpp>
+#include <util/util.hpp>
 #include <dlg/dlg.hpp>
 #include <vk/enumString.hpp>
 
 namespace vil {
 
 // util
-std::string extractString(span<const u32> spirv, u32 offset, u32 wordCount) {
-	dlg_assert(wordCount <= spirv.size() - offset);
-
+std::string extractString(span<const u32> spirv) {
 	std::string ret;
-	for(auto i = offset; i < wordCount; i++) {
-		uint32_t w = spirv[i];
-		for (uint32_t j = 0; j < 4; j++, w >>= 8) {
+	for(auto w : spirv) {
+		for (auto j = 0u; j < 4; j++, w >>= 8) {
 			char c = w & 0xff;
 			if(c == '\0') {
 				return ret;
@@ -31,22 +29,16 @@ std::string extractString(span<const u32> spirv, u32 offset, u32 wordCount) {
 	return {};
 }
 
-bool opComesBeforeSection8(spv::Op op) {
-	using namespace spv;
+bool isOpInSection8(spv::Op op) {
 	switch(op) {
-		case spv::Op::OpCapability:
-		case spv::Op::OpExtension:
-		case spv::Op::OpExtInstImport:
-		case spv::Op::OpMemoryModel:
-		case spv::Op::OpEntryPoint:
-		case spv::Op::OpExecutionMode:
-		case spv::Op::OpString:
-		case spv::Op::OpSourceExtension:
-		case spv::Op::OpSource:
-		case spv::Op::OpSourceContinued:
-		case spv::Op::OpName:
-		case spv::Op::OpMemberName:
-		case spv::Op::OpModuleProcessed:
+		case spv::Op::OpDecorate:
+		case spv::Op::OpMemberDecorate:
+		case spv::Op::OpDecorationGroup:
+		case spv::Op::OpGroupDecorate:
+		case spv::Op::OpGroupMemberDecorate:
+		case spv::Op::OpDecorateId:
+		case spv::Op::OpDecorateString:
+		case spv::Op::OpMemberDecorateString:
 			return true;
 		default:
 			return false;
@@ -71,7 +63,7 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 	// auto bound = spirv[3];
 
 	std::vector<u32> newDecos;
-	std::vector<u32> patched;
+	std::vector<u32> patched {spirv.begin(), spirv.begin() + 5};
 	patched.reserve(spirv.size());
 
 	auto addedCap = false;
@@ -87,11 +79,12 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 		auto op = spv::Op(first & 0xFFFFu);
 		auto wordCount = first >> 16u;
 
+		// We need to add the Xfb Execution mode to our entry point.
 		if(section == 5u && op != spv::Op::OpEntryPoint) {
 			dlg_assert_or(entryPointID != u32(-1), return {});
 
 			section = 6u;
-			patched.push_back(3u << 16 | u32(spv::Op::OpExecutionMode));
+			patched.push_back((3u << 16) | u32(spv::Op::OpExecutionMode));
 			patched.push_back(entryPointID);
 			patched.push_back(u32(spv::ExecutionMode::Xfb));
 
@@ -99,22 +92,11 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 		}
 
 		// check if we have reached section 8
-		// TODO: this is somewhat brittle as extensions could add
-		//   new instructions. Have to be added to opComesBeforeSection8.
-		//   The inherent problem here is that we can't detect section 8
-		//   by anything *in* section 8 since it might not exist at all.
-		if(section <= 8u && insertDecosPos == u32(-1) &&
-				!opComesBeforeSection8(op)) {
+		if(isOpInSection8(op) && insertDecosPos == u32(-1)) {
+			dlg_assert(section < 8);
 			section = 8u;
 			insertDecosPos = patched.size();
 		}
-
-		dlg_assert(section == 8u ||
-			op != spv::Op::OpDecorate &&
-			op != spv::Op::OpMemberDecorate &&
-			op != spv::Op::OpGroupDecorate &&
-			op != spv::Op::OpGroupMemberDecorate &&
-			op != spv::Op::OpDecorationGroup);
 
 		for(auto i = 0u; i < wordCount; ++i) {
 			patched.push_back(spirv[offset + i]);
@@ -132,7 +114,7 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 			// We add the transformFeedback cap just immediately after that.
 			if(cap == spv::Capability::Shader) {
 				dlg_assert(!addedCap);
-				patched.push_back(2u << 16 | (u32(spv::Op::OpCapability) << 16));
+				patched.push_back((2u << 16) | u32(spv::Op::OpCapability));
 				patched.push_back(u32(spv::Capability::TransformFeedback));
 				addedCap = true;
 			}
@@ -154,13 +136,16 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 
 			dlg_assert(wordCount >= 4);
 			auto length = wordCount - 3;
-			auto name = extractString(spirv, offset, length);
+			auto name = extractString(span(spirv).subspan(offset + 3, length));
+			dlg_info("Found entry point '{}'", name);
 			if(!name.empty() && name == entryPoint) {
 				entryPointID = spirv[offset + 2];
 			}
 		}
 
 		// We need to add our xfb decorations to outputs from the shader stage
+		// TODO: we just capture the Position BuiltIn for now
+		/*
 		if(op == spv::Op::OpVariable) {
 			dlg_assert_or(wordCount >= 4, return {});
 			// auto resType = spirv[offset + 1];
@@ -184,14 +169,65 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 				newDecos.push_back(0u);
 			}
 		}
+		*/
 
-		// We need to add the Xfb Execution mode to our entry point.
+		if(op == spv::Op::OpDecorate) {
+			dlg_assert(section <= 8u);
+			section = 8u;
+
+			dlg_assert(wordCount >= 3);
+			auto target = spirv[offset + 1];
+			auto decoration = spv::Decoration(spirv[offset + 2]);
+			if(decoration == spv::Decoration::BuiltIn) {
+				dlg_assert(wordCount == 4);
+				auto builtin = spv::BuiltIn(spirv[offset + 3]);
+				if(builtin == spv::BuiltIn::Position) {
+					auto addDeco = [&](spv::Decoration deco, u32 value) {
+						newDecos.push_back((4u << 16) | u32(spv::Op::OpDecorate));
+						newDecos.push_back(target);
+						newDecos.push_back(u32(deco));
+						newDecos.push_back(value);
+					};
+
+					addDeco(spv::Decoration::XfbBuffer, 0u);
+					addDeco(spv::Decoration::XfbStride, 16u); // vec4
+					addDeco(spv::Decoration::Offset, 0u);
+				}
+			}
+		} else if(op == spv::Op::OpMemberDecorate) {
+			dlg_assert(section <= 8u);
+			section = 8u;
+
+			dlg_assert(wordCount >= 4);
+			auto structType = spirv[offset + 1];
+			auto member = spirv[offset + 2];
+			auto decoration = spv::Decoration(spirv[offset + 3]);
+			if(decoration == spv::Decoration::BuiltIn) {
+				dlg_assert(wordCount == 5);
+				auto builtin = spv::BuiltIn(spirv[offset + 4]);
+				if(builtin == spv::BuiltIn::Position) {
+					auto addMemberDeco = [&](spv::Decoration deco, u32 value) {
+						newDecos.push_back((5u << 16) | u32(spv::Op::OpMemberDecorate));
+						newDecos.push_back(structType);
+						newDecos.push_back(member);
+						newDecos.push_back(u32(deco));
+						newDecos.push_back(value);
+					};
+
+					addMemberDeco(spv::Decoration::XfbBuffer, 0u);
+					addMemberDeco(spv::Decoration::XfbStride, 16u); // vec4
+					addMemberDeco(spv::Decoration::Offset, 0u);
+				}
+			}
+		}
 
 		offset += wordCount;
 	}
 
 	if(!addedCap || !addedExecutionMode || newDecos.empty() || insertDecosPos == u32(-1)) {
-		dlg_warn("Could not inject xfb into shader. Likely a logical error");
+		dlg_warn("Could not inject xfb into shader. Likely error inside vil. "
+			"capability: {}, executionMode: {}, newDecos.size(): {}, decosPos: {}",
+			addedCap, addedExecutionMode, newDecos.size(), insertDecosPos);
 		return {};
 	}
 
@@ -200,7 +236,7 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 	VkShaderModuleCreateInfo ci {};
 	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 	ci.pCode = patched.data();
-	ci.codeSize = patched.size();
+	ci.codeSize = patched.size() * 4;
 
 	VkShaderModule mod;
 	auto res = dev.dispatch.CreateShaderModule(dev.handle, &ci, nullptr, &mod);
@@ -254,6 +290,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 	struct PreData {
 		bool useXfb {};
+		span<const VkPipelineShaderStageCreateInfo> stages;
 	};
 
 	std::vector<VkGraphicsPipelineCreateInfo> ncis;
@@ -261,8 +298,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
-		dlg_assert(pPipelines[i]);
-
 		auto& nci = ncis.emplace_back();
 		nci = pCreateInfos[i];
 
@@ -270,6 +305,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		// transform feedback isn't supported for multiview graphics pipelines
 		auto& rp = dev.renderPasses.get(nci.renderPass);
+		pre.stages = {nci.pStages, nci.stageCount};
 		pre.useXfb = dev.transformFeedback &&
 			!hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
 		bool foundVertexStage = false;
@@ -283,7 +319,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 				auto& mod = dev.shaderModules.get(src.module);
 				if(!mod.xfbVertShader) {
-					mod.xfbVertShader = patchVertexShaderXfb(dev, mod.code->spv);
+					mod.xfbVertShader = patchVertexShaderXfb(dev,
+						mod.code->spv, src.pName);
 				}
 
 				if(mod.xfbVertShader) {
@@ -305,6 +342,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 	}
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
+		dlg_assert(pPipelines[i]);
 		auto& pci = ncis[i];
 
 		auto& pipe = dev.graphicsPipes.add(pPipelines[i]);
@@ -321,16 +359,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.hasTessellation = false;
 		pipe.hasMeshShader = false;
 		pipe.hasDepthStencil = false;
-		pipe.hasTessellation = pres[i].useXfb;
+		pipe.xfbPatched = pres[i].useXfb;
 
-		for(auto s = 0u; s < pci.stageCount; ++s) {
-			pipe.stages.emplace_back(dev, pci.pStages[s]);
-			dlg_assert((pci.pStages[s].stage & VK_SHADER_STAGE_ALL_GRAPHICS) != 0);
+		for(auto stage : pres[i].stages) {
+			pipe.stages.emplace_back(dev, stage);
+			dlg_assert((stage.stage & VK_SHADER_STAGE_ALL_GRAPHICS) != 0);
 
 			// vulkan spec requires that if one tessellation stage is present,
 			// both must be present.
-			pipe.hasTessellation |= (pci.pStages[s].stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
-			pipe.hasMeshShader |= (pci.pStages[s].stage == VK_SHADER_STAGE_MESH_BIT_NV);
+			pipe.hasTessellation |= (stage.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+			pipe.hasMeshShader |= (stage.stage == VK_SHADER_STAGE_MESH_BIT_NV);
 		}
 
 		pipe.rasterizationState = *pci.pRasterizationState;

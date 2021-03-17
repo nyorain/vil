@@ -26,8 +26,8 @@ struct CopiedImage {
 	u32 levelCount {};
 	VkImageAspectFlags aspectMask {};
 
-	// TODO: shouldn't be here. Subresource range of original src image,
-	// this was created from.
+	// TODO(io-rework): shouldn't be here. Subresource range of original src image,
+	// that this copy was created from.
 	VkImageSubresourceRange srcSubresRange {};
 	VkFormat format {};
 
@@ -43,7 +43,7 @@ struct CopiedBuffer {
 	std::unique_ptr<std::byte[]> copy;
 
 	CopiedBuffer() = default;
-	void init(Device& dev, VkDeviceSize size);
+	void init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFlags);
 	CopiedBuffer(CopiedBuffer&&) noexcept = default;
 	CopiedBuffer& operator=(CopiedBuffer&&) noexcept = default;
 	~CopiedBuffer() = default;
@@ -51,8 +51,9 @@ struct CopiedBuffer {
 	void cpuCopy();
 };
 
-// TODO: we shouldn't store CopiedBuffer here i guess? just the cpu copy,
-// move that out of CopiedBuffer itself?
+// NOTE: in most cases (except for xfb) we don't actually need CopiedBuffer
+// itself and just the cpu data. The mapped data must not be used on cpu
+// since the state might have an active gpu-side writer submission.
 struct CommandHookState {
 	// We need a reference count here since this object is conceptually owned by
 	// CommandRecord but may be read by the gui even when the record
@@ -70,10 +71,12 @@ struct CommandHookState {
 	// Only for draw commands
 	std::vector<CopiedBuffer> vertexBufCopies {}; // draw cmd: Copy of all vertex buffers
 	CopiedBuffer indexBufCopy {}; // draw cmd: Copy of index buffer
+	CopiedBuffer transformFeedback {}; // draw cmd: position output of vertex stage
+
 	CopiedImage attachmentCopy {}; // Copy of selected attachment
 
 	// Only for transfer commands
-	// CopiedBuffer transferBufCopy {}; // TODO: support transfer buffers in IO viewer
+	// CopiedBuffer transferBufCopy {}; // TODO(io-rework): support transfer buffers in IO viewer
 	CopiedImage transferImgCopy {};
 
 	// When a requested resource cannot be retrieved, this holds the reason.
@@ -113,7 +116,7 @@ public:
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
-	// TODO: allow specifying offsets and max sizes. We currently
+	// TODO(io-rework): allow specifying offsets and max sizes. We currently
 	//   have a rather arbirtrary static limit on buffer copy size.
 	bool copyVertexBuffers {}; // could specify the needed subset in future
 	bool copyIndexBuffers {};
@@ -131,7 +134,7 @@ public:
 	// The last received copied state of a finished submission
 	IntrusivePtr<CommandHookState> state;
 
-	// TODO: shouldn't be here! See displayActionInspector.
+	// TODO(io-rework): shouldn't be here! See displayActionInspector.
 	//   We need a better place to store this general state. CbGui?
 	VkShaderStageFlagBits pcr {};
 

@@ -7,6 +7,7 @@
 #include <util/vec.hpp>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 namespace vil {
 

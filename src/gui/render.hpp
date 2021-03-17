@@ -32,6 +32,12 @@ struct OwnBuffer {
 	friend void swap(OwnBuffer& a, OwnBuffer& b) noexcept;
 };
 
+struct BufferSpan {
+	VkBuffer buffer {};
+	VkDeviceSize offset {};
+	VkDeviceSize size {};
+};
+
 struct Draw {
 	Device* dev {};
 	OwnBuffer vertexBuffer {};

@@ -106,8 +106,15 @@ void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem);
 struct DescriptorUpdateTemplate : DeviceHandle {
 	VkDescriptorUpdateTemplate handle {};
 
+	// Intrusive ref count. Needed e.g. for command buffer recording
+	std::atomic<u32> refCount {0};
+
 	std::vector<VkDescriptorUpdateTemplateEntry> entries;
 };
+
+// calculates the total size in bytes the data of a descriptor set update
+// with the given template must have.
+u32 totalUpdateDataSize(const DescriptorUpdateTemplate&);
 
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(

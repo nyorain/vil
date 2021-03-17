@@ -1215,7 +1215,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 
 		// Also check if the used HookState is currently being written
 		// by a submission. If so, we need to wait for it so we don't
-		// read an image while it writes it.
+		// read an image/buffer while it writes it.
 		if(draw.usedHookState && draw.usedHookState->writer) {
 			waitSubmissions.insert(draw.usedHookState->writer);
 		}

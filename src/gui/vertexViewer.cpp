@@ -187,54 +187,78 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 		const CommandHookState& copies, std::optional<VkIndexType> indexType,
 		u32 offset, u32 drawCount, u32 vertexOffset,
 		Vec2f canvasOffset, Vec2f canvasSize) {
+	DrawData data;
+	data.topology = src.inputAssemblyState.topology;
+	data.vertexInfo = src.vertexInputState;
 
+	std::vector<BufferSpan> vertexBuffers;
+	for(auto& buf : copies.vertexBufCopies) {
+		vertexBuffers.push_back({buf.buffer.buf, 0u, buf.buffer.size});
+	}
+
+	data.vertexBuffers = vertexBuffers;
+	data.offset = offset;
+	data.drawCount = drawCount;
+	data.indexType = indexType;
+
+	if(indexType) {
+		data.indexBuffer = {copies.indexBufCopy.buffer.buf, 0u, copies.indexBufCopy.buffer.size};
+	}
+
+	data.vertexOffset = vertexOffset;
+	data.canvasOffset = canvasOffset;
+	data.canvasSize = canvasSize;
+
+	imGuiDraw(cb, data);
+}
+
+void VertexViewer::imGuiDraw(VkCommandBuffer cb, const DrawData& data) {
 	auto& dev = *this->dev_;
 
 	// try to find position by heuristics
 	// TODO: cache this! But should likely not implemented here in first place.
 	// TODO: implement a serious heuristic. Inspect the spv code,
 	//   and try to find which input influences the Position output
-	if(src.vertexAttribs.empty()) {
+	if(data.vertexInfo.vertexAttributeDescriptionCount == 0u) {
 		dlg_info("Can't display vertices, no vertex attribs");
 		return;
 	}
 
-	auto& attrib = src.vertexAttribs[0];
-	auto& binding = src.vertexBindings[attrib.binding];
+	dlg_assert(data.vertexInfo.vertexBindingDescriptionCount > 0);
 
-	dlg_assert(binding.binding < copies.vertexBufCopies.size());
-	if(binding.binding > copies.vertexBufCopies.size()) {
-		return;
-	}
+	auto& attrib = data.vertexInfo.pVertexAttributeDescriptions[0];
+	auto& binding = data.vertexInfo.pVertexBindingDescriptions[attrib.binding];
 
-	auto& buf = copies.vertexBufCopies[binding.binding];
+	dlg_assert_or(binding.binding < data.vertexBuffers.size(), return);
+	auto& vbuf = data.vertexBuffers[binding.binding];
+	auto voffset = VkDeviceSize(vbuf.offset + attrib.offset);
 
 	// try to find matching pipeline
 	VkPipeline foundPipe {};
 	for(auto& pipe : pipes_) {
 		if(pipe.format == attrib.format &&
 				pipe.stride == binding.stride &&
-				pipe.topology == src.inputAssemblyState.topology) {
+				pipe.topology == data.topology) {
 			foundPipe = pipe.pipe;
 		}
 	}
 
 	if(!foundPipe) {
-		foundPipe = createPipe(attrib.format, binding.stride, src.inputAssemblyState.topology);
+		foundPipe = createPipe(attrib.format, binding.stride, data.topology);
 	}
 
 	VkRect2D scissor {};
-	scissor.offset.x = canvasOffset.x;
-	scissor.offset.y = canvasOffset.y;
-	scissor.extent.width = canvasSize.x;
-	scissor.extent.height = canvasSize.y;
+	scissor.offset.x = data.canvasOffset.x;
+	scissor.offset.y = data.canvasOffset.y;
+	scissor.extent.width = data.canvasSize.x;
+	scissor.extent.height = data.canvasSize.y;
 	dev.dispatch.CmdSetScissor(cb, 0, 1, &scissor);
 
 	VkViewport viewport {};
-	viewport.width = canvasSize.x;
-	viewport.height = canvasSize.y;
-	viewport.x = canvasOffset.x;
-	viewport.y = canvasOffset.y;
+	viewport.width = data.canvasSize.x;
+	viewport.height = data.canvasSize.y;
+	viewport.x = data.canvasOffset.x;
+	viewport.y = data.canvasOffset.y;
 	viewport.maxDepth = 1.f;
 	dev.dispatch.CmdSetViewport(cb, 0, 1, &viewport);
 
@@ -243,32 +267,33 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		0, sizeof(viewProjMtx_), &viewProjMtx_);
 
-	VkDeviceSize voffset = attrib.offset;
-	dev.dispatch.CmdBindVertexBuffers(cb, 0, 1, &buf.buffer.buf, &voffset);
+	dev.dispatch.CmdBindVertexBuffers(cb, 0, 1, &vbuf.buffer, &voffset);
 
 	// clear canvas color
-	// TODO: make sure it's contained in the current render pass instance!
+	// TODO: make sure clearRect is contained in the current render pass instance area!
 	VkClearAttachment clearAtt {};
 	clearAtt.clearValue.color = {0.f, 0.f, 0.f, 1.f};
 	clearAtt.colorAttachment = 0u;
 	clearAtt.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
 	VkClearRect clearRect {};
-	clearRect.rect.offset.x = canvasOffset.x;
-	clearRect.rect.offset.y = canvasOffset.y;
-	clearRect.rect.extent.width = canvasSize.x;
-	clearRect.rect.extent.height = canvasSize.y;
+	clearRect.rect.offset.x = data.canvasOffset.x;
+	clearRect.rect.offset.y = data.canvasOffset.y;
+	clearRect.rect.extent.width = data.canvasSize.x;
+	clearRect.rect.extent.height = data.canvasSize.y;
 	clearRect.layerCount = 1u;
 
 	dev.dispatch.CmdClearAttachments(cb, 1u, &clearAtt, 1u, &clearRect);
 
-	if(indexType) {
-		dlg_assert_or(copies.indexBufCopy.buffer.buf, return);
-		dev.dispatch.CmdBindIndexBuffer(cb, copies.indexBufCopy.buffer.buf,
-			0, *indexType);
-		dev.dispatch.CmdDrawIndexed(cb, drawCount, 1, offset, vertexOffset, 0);
+	if(data.indexType) {
+		dlg_assert_or(data.indexBuffer.buffer, return);
+		dlg_assert_or(data.indexBuffer.size, return);
+
+		dev.dispatch.CmdBindIndexBuffer(cb, data.indexBuffer.buffer,
+			0, *data.indexType);
+		dev.dispatch.CmdDrawIndexed(cb, data.drawCount, 1, data.offset, data.vertexOffset, 0);
 	} else {
-		dev.dispatch.CmdDraw(cb, drawCount, 1, offset, 0);
+		dev.dispatch.CmdDraw(cb, data.drawCount, 1, data.offset, 0);
 	}
 }
 

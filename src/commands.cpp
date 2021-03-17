@@ -4,6 +4,7 @@
 #include <cb.hpp>
 #include <util/span.hpp>
 #include <util/util.hpp>
+#include <util/ext.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/commandHook.hpp>
@@ -189,7 +190,7 @@ std::string printImageRegion(Image* img, const VkOffset3D& offset,
 }
 
 std::string printBufferImageCopy(Image* image,
-		const VkBufferImageCopy& copy, bool bufferToImage) {
+		const VkBufferImageCopy2KHR& copy, bool bufferToImage) {
 	auto imgString = printImageRegion(image, copy.imageOffset, copy.imageSubresource);
 
 	std::string sizeString;
@@ -1021,8 +1022,25 @@ void DispatchBaseCmd::displayInspector(Gui& gui) const {
 
 // CopyImageCmd
 void CopyImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdCopyImage(cb, src->handle, srcLayout, dst->handle, dstLayout,
-		u32(copies.size()), copies.data());
+	if(dev.dispatch.CmdCopyImage2KHR) {
+		VkCopyImageInfo2KHR info = {
+			VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2_KHR,
+			pNext,
+			src->handle,
+			srcLayout,
+			dst->handle,
+			dstLayout,
+			u32(copies.size()),
+			copies.data(),
+		};
+
+		dev.dispatch.CmdCopyImage2KHR(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		auto copiesD = downgrade<VkImageCopy>(copies);
+		dev.dispatch.CmdCopyImage(cb, src->handle, srcLayout, dst->handle, dstLayout,
+			u32(copiesD.size()), copiesD.data());
+	}
 }
 
 std::string CopyImageCmd::toString() const {
@@ -1074,8 +1092,24 @@ std::vector<std::string> CopyImageCmd::argumentsDesc() const {
 
 // CopyBufferToImageCmd
 void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdCopyBufferToImage(cb, src->handle, dst->handle,
-		dstLayout, u32(copies.size()), copies.data());
+	if(dev.dispatch.CmdCopyBufferToImage2KHR) {
+		VkCopyBufferToImageInfo2KHR info = {
+			VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2_KHR,
+			pNext,
+			src->handle,
+			dst->handle,
+			dstLayout,
+			u32(copies.size()),
+			copies.data(),
+		};
+
+		dev.dispatch.CmdCopyBufferToImage2KHR(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		auto copiesD = downgrade<VkBufferImageCopy>(copies);
+		dev.dispatch.CmdCopyBufferToImage(cb, src->handle, dst->handle,
+			dstLayout, u32(copiesD.size()), copiesD.data());
+	}
 }
 
 void CopyBufferToImageCmd::displayInspector(Gui& gui) const {
@@ -1115,8 +1149,24 @@ std::vector<std::string> CopyBufferToImageCmd::argumentsDesc() const {
 
 // CopyImageToBufferCmd
 void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdCopyImageToBuffer(cb, src->handle, srcLayout, dst->handle,
-		u32(copies.size()), copies.data());
+	if(dev.dispatch.CmdCopyImageToBuffer2KHR) {
+		VkCopyImageToBufferInfo2KHR info = {
+			VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2_KHR,
+			pNext,
+			src->handle,
+			srcLayout,
+			dst->handle,
+			u32(copies.size()),
+			copies.data(),
+		};
+
+		dev.dispatch.CmdCopyImageToBuffer2KHR(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		auto copiesD = downgrade<VkBufferImageCopy>(copies);
+		dev.dispatch.CmdCopyImageToBuffer(cb, src->handle, srcLayout, dst->handle,
+			u32(copiesD.size()), copiesD.data());
+	}
 }
 
 void CopyImageToBufferCmd::displayInspector(Gui& gui) const {
@@ -1156,8 +1206,26 @@ std::vector<std::string> CopyImageToBufferCmd::argumentsDesc() const {
 
 // BlitImageCmd
 void BlitImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdBlitImage(cb, src->handle, srcLayout, dst->handle, dstLayout,
-		u32(blits.size()), blits.data(), filter);
+	if(dev.dispatch.CmdBlitImage2KHR) {
+		VkBlitImageInfo2KHR info = {
+			VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2_KHR,
+			pNext,
+			src->handle,
+			srcLayout,
+			dst->handle,
+			dstLayout,
+			u32(blits.size()),
+			blits.data(),
+			filter,
+		};
+
+		dev.dispatch.CmdBlitImage2KHR(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		auto blitsD = downgrade<VkImageBlit>(blits);
+		dev.dispatch.CmdBlitImage(cb, src->handle, srcLayout, dst->handle, dstLayout,
+			u32(blitsD.size()), blitsD.data(), filter);
+	}
 }
 
 void BlitImageCmd::displayInspector(Gui& gui) const {
@@ -1212,8 +1280,25 @@ std::vector<std::string> BlitImageCmd::argumentsDesc() const {
 
 // ResolveImageCmd
 void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdResolveImage(cb, src->handle, srcLayout,
-		dst->handle, dstLayout, u32(regions.size()), regions.data());
+	if(dev.dispatch.CmdResolveImage2KHR) {
+		VkResolveImageInfo2KHR info = {
+			VK_STRUCTURE_TYPE_RESOLVE_IMAGE_INFO_2_KHR,
+			pNext,
+			src->handle,
+			srcLayout,
+			dst->handle,
+			dstLayout,
+			u32(regions.size()),
+			regions.data(),
+		};
+
+		dev.dispatch.CmdResolveImage2KHR(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		auto regionsD = downgrade<VkImageResolve>(regions);
+		dev.dispatch.CmdResolveImage(cb, src->handle, srcLayout,
+			dst->handle, dstLayout, u32(regionsD.size()), regionsD.data());
+	}
 }
 
 void ResolveImageCmd::displayInspector(Gui& gui) const {
@@ -1266,8 +1351,23 @@ std::vector<std::string> ResolveImageCmd::argumentsDesc() const {
 
 // CopyBufferCmd
 void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdCopyBuffer(cb, src->handle, dst->handle,
-		u32(regions.size()), regions.data());
+	if(dev.dispatch.CmdCopyBuffer2KHR) {
+		VkCopyBufferInfo2KHR info = {
+			VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2_KHR,
+			pNext,
+			src->handle,
+			dst->handle,
+			u32(regions.size()),
+			regions.data(),
+		};
+
+		dev.dispatch.CmdCopyBuffer2KHR(cb, &info);
+	} else {
+		dlg_assert(!pNext);
+		auto regionsD = downgrade<VkBufferCopy>(regions);
+		dev.dispatch.CmdCopyBuffer(cb, src->handle, dst->handle,
+			u32(regionsD.size()), regionsD.data());
+	}
 }
 
 void CopyBufferCmd::displayInspector(Gui& gui) const {
@@ -1689,6 +1789,18 @@ void CopyQueryPoolResultsCmd::record(const Device& dev, VkCommandBuffer cb) cons
 void CopyQueryPoolResultsCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(pool, destroyed);
 	checkUnset(dstBuffer, destroyed);
+}
+
+// PushDescriptorSet
+void PushDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdPushDescriptorSetKHR(cb, bindPoint, pipeLayout->handle,
+		set, descriptorWrites.size(), descriptorWrites.data());
+}
+
+// PushDescriptorSetWithTemplate
+void PushDescriptorSetWithTemplateCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdPushDescriptorSetWithTemplateKHR(cb, updateTemplate->handle,
+		pipeLayout->handle, set, static_cast<const void*>(data.data()));
 }
 
 } // namespace vil

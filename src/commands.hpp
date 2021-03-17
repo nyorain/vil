@@ -419,12 +419,14 @@ struct DispatchBaseCmd : DispatchCmdBase {
 	std::vector<std::string> argumentsDesc() const override;
 };
 
+// transfer commands
 struct CopyImageCmd : Command {
 	Image* src {};
 	Image* dst {};
 	VkImageLayout srcLayout {};
 	VkImageLayout dstLayout {};
-	span<VkImageCopy> copies;
+	span<VkImageCopy2KHR> copies;
+	const void* pNext {};
 
 	std::string toString() const override;
 	Type type() const override { return Type::transfer; }
@@ -439,7 +441,8 @@ struct CopyBufferToImageCmd : Command {
 	Buffer* src {};
 	Image* dst {};
 	VkImageLayout dstLayout {};
-	span<VkBufferImageCopy> copies;
+	span<VkBufferImageCopy2KHR> copies;
+	const void* pNext {};
 
 	std::string toString() const override;
 	Type type() const override { return Type::transfer; }
@@ -454,7 +457,8 @@ struct CopyImageToBufferCmd : Command {
 	Image* src {};
 	Buffer* dst {};
 	VkImageLayout srcLayout {};
-	span<VkBufferImageCopy> copies;
+	span<VkBufferImageCopy2KHR> copies;
+	const void* pNext {};
 
 	std::string toString() const override;
 	Type type() const override { return Type::transfer; }
@@ -470,8 +474,9 @@ struct BlitImageCmd : Command {
 	Image* dst {};
 	VkImageLayout srcLayout {};
 	VkImageLayout dstLayout {};
-	span<VkImageBlit> blits;
+	span<VkImageBlit2KHR> blits;
 	VkFilter filter {};
+	const void* pNext {};
 
 	std::string toString() const override;
 	Type type() const override { return Type::transfer; }
@@ -487,7 +492,8 @@ struct ResolveImageCmd : Command {
 	VkImageLayout srcLayout {};
 	Image* dst {};
 	VkImageLayout dstLayout {};
-	span<VkImageResolve> regions;
+	span<VkImageResolve2KHR> regions;
+	const void* pNext {};
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
@@ -501,7 +507,8 @@ struct ResolveImageCmd : Command {
 struct CopyBufferCmd : Command {
 	Buffer* src {};
 	Buffer* dst {};
-	span<VkBufferCopy> regions;
+	span<VkBufferCopy2KHR> regions;
+	const void* pNext {};
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
@@ -811,6 +818,31 @@ struct CopyQueryPoolResultsCmd : Command {
 	std::string nameDesc() const override { return "CopyQueryPoolResults"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+};
+
+struct PushDescriptorSetCmd : Command {
+	VkPipelineBindPoint bindPoint {};
+	PipelineLayout* pipeLayout {};
+	u32 set {};
+
+	// The individual pImageInfo, pBufferInfo, pTexelBufferView arrays
+	// are allocated in the CommandRecord-owned memory as well.
+	span<VkWriteDescriptorSet> descriptorWrites;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "PushDescriptorSet"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct PushDescriptorSetWithTemplateCmd : Command {
+	DescriptorUpdateTemplate* updateTemplate {};
+	PipelineLayout* pipeLayout {};
+	u32 set {};
+	span<const std::byte> data;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "PushDescriptorSetWithTemplate"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
 } // namespace vil

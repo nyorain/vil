@@ -408,7 +408,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		refButton(*gui_, sc);
 
 		ImGui::SameLine();
-		ImGui::Checkbox("Freeze", &freezePresentBatches_);
+		ImGui::Checkbox("Freeze Commands", &freezePresentBatches_);
 
 		if(swapchainCounter_ != sc.presentCounter && !freezePresentBatches_) {
 			// if we have a record selected, try to find its match in the
@@ -1214,18 +1214,13 @@ void CommandBufferGui::displayIOList(const Command& cmd) {
 	}
 }
 
-void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
-	auto& hook = *gui_->dev().commandHook;
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
-	dlg_assert(drawCmd);
+void CommandBufferGui::displayVertexInput(Draw& draw, const DrawCmdBase& cmd) {
+	// TODO: display binding information
+	// TODO: how to display indices?
+	// TODO: only show vertex range used for draw call
 
-	if(!drawCmd || !drawCmd->state.pipe) {
-		ImGui::Text("Pipeline was destroyed, can't interpret state");
-		return;
-	} else if(!hook.state) {
-		ImGui::Text("Waiting for a submission...");
-		return;
-	} else if(hook.state->vertexBufCopies.size() < drawCmd->state.pipe->vertexBindings.size()) {
+	auto& hook = *gui_->dev().commandHook;
+	if(hook.state->vertexBufCopies.size() < cmd.state.pipe->vertexBindings.size()) {
 		if(!hook.state->errorMessage.empty()) {
 			imGuiText("Error: {}", hook.state->errorMessage);
 		} else {
@@ -1235,11 +1230,8 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 		return;
 	}
 
-	// TODO: display binding information
-	// TODO: how to display indices?
-	// TODO: only show vertex range used for draw call
 
-	auto& pipe = *drawCmd->state.pipe;
+	auto& pipe = *cmd.state.pipe;
 
 	SpvReflectShaderModule* vertStage = nullptr;
 	for(auto& stage : pipe.stages) {
@@ -1255,8 +1247,6 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 		return;
 	}
 
-	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
-
 	// match bindings to input variables into
 	// (pipe.vertexAttrib, vertStage->input_variables) id pairs
 	std::vector<std::pair<u32, u32>> attribs;
@@ -1270,9 +1260,9 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 		}
 	}
 
-	// TODO sort by input location?
+	// TODO sort attribs by input location?
 
-	// 1: table
+	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
 		if(attribs.empty()) {
 			ImGui::Text("No Vertex input");
@@ -1331,7 +1321,7 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 		vertexDrawData_.cb = draw.cb;
 		vertexDrawData_.offset = {pos.x, pos.y};
 		vertexDrawData_.size = {avail.x, avail.y};
-		vertexDrawData_.cmd = drawCmd;
+		vertexDrawData_.cmd = &cmd;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* data = static_cast<VertexDrawData*>(cmd->UserCallbackData);
@@ -1390,6 +1380,159 @@ void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
 	}
 
 	ImGui::EndChild();
+}
+
+void CommandBufferGui::displayVertexOutput(Draw& draw, const DrawCmdBase& cmd) {
+	auto& hook = *gui_->dev().commandHook;
+	if(!cmd.state.pipe->xfbPatched) {
+		imGuiText("Error: couldn't inject transform feedback code to shader");
+		return;
+	} else if(!hook.state->transformFeedback.buffer.size) {
+		if(!hook.state->errorMessage.empty()) {
+			imGuiText("Transform feedback error: {}", hook.state->errorMessage);
+		} else {
+			ImGui::Text("Error: no transform feedback");
+		}
+
+		return;
+	}
+
+	u32 vertexCount {};
+	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
+		vertexCount = dcmd->vertexCount * dcmd->instanceCount;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
+		vertexCount = dcmd->indexCount * dcmd->instanceCount;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
+		dlg_assert(hook.copyIndirectCmd);
+		if(!hook.state) {
+			ImGui::Text("Indirect command not loaded yet...");
+			return;
+		}
+
+		auto& ic = hook.state->indirectCopy;
+		auto span = ReadBuf(ic.copy.get(), ic.buffer.size);
+		if(dcmd->indexed) {
+			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
+			vertexCount = ecmd.indexCount * ecmd.instanceCount;
+		} else {
+			auto ecmd = read<VkDrawIndirectCommand>(span);
+			vertexCount = ecmd.vertexCount * ecmd.instanceCount;
+		}
+
+	} else {
+		// TODO: DrawIndirectCount
+		imGuiText("Vertex viewer unimplemented for command type");
+		return;
+	}
+
+	auto& xfbBuf = hook.state->transformFeedback.buffer;
+	vertexCount = std::min<unsigned>(vertexCount, xfbBuf.size / 16u);
+
+	// 1: table
+	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
+	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
+		if(ImGui::BeginTable("Vertices", 1, flags)) {
+			ImGui::TableSetupColumn("Builtin Position");
+			ImGui::TableHeadersRow();
+			ImGui::TableNextRow();
+
+			auto data = ReadBuf(hook.state->transformFeedback.copy.get(), xfbBuf.size);
+			for(auto i = 0u; i < std::min<unsigned>(100, vertexCount); ++i) {
+				ImGui::TableNextColumn();
+
+				auto pos = read<Vec4f>(data);
+				imGuiText("{}", pos);
+
+				ImGui::TableNextRow();
+			}
+
+			ImGui::EndTable();
+		}
+	}
+
+	ImGui::EndChild();
+
+	// 2: viewer
+	if(ImGui::BeginChild("vertexViewer")) {
+		auto avail = ImGui::GetContentRegionAvail();
+		auto pos = ImGui::GetCursorScreenPos();
+
+		vertexDrawData_.self = this;
+		vertexDrawData_.cb = draw.cb;
+		vertexDrawData_.offset = {pos.x, pos.y};
+		vertexDrawData_.size = {avail.x, avail.y};
+		vertexDrawData_.cmd = &cmd;
+		vertexDrawData_.vertexCount = vertexCount;
+
+		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+			auto* data = static_cast<VertexDrawData*>(cmd->UserCallbackData);
+			auto& hook = *data->self->gui_->dev().commandHook;
+
+			auto& xfbBuf = hook.state->transformFeedback.buffer;
+
+			VkVertexInputBindingDescription vertexBinding {
+				0u, sizeof(Vec4f), VK_VERTEX_INPUT_RATE_VERTEX,
+			};
+
+			VkVertexInputAttributeDescription vertexAttrib {
+				0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
+			};
+
+			VertexViewer::DrawData drawData {};
+			drawData.drawCount = data->vertexCount;
+			drawData.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
+			drawData.vertexInfo.vertexAttributeDescriptionCount = 1u;
+			drawData.vertexInfo.pVertexAttributeDescriptions = &vertexAttrib;
+			drawData.vertexInfo.vertexBindingDescriptionCount = 1u;
+			drawData.vertexInfo.pVertexBindingDescriptions = &vertexBinding;
+			drawData.canvasOffset = data->offset;
+			drawData.canvasSize = data->size;
+			drawData.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+			data->self->vertexViewer_.imGuiDraw(data->cb, drawData);
+		};
+
+		ImGui::GetWindowDrawList()->AddCallback(cb, &vertexDrawData_);
+		ImGui::InvisibleButton("Canvas", avail);
+
+		vertexViewer_.updateInput(gui_->dt());
+
+		// we read from the buffer that is potentially written again
+		// by the hook so we need barriers.
+		draw.usedHookState = gui_->dev().commandHook->state;
+		dlg_assert(draw.usedHookState);
+	}
+
+	ImGui::EndChild();
+}
+
+void CommandBufferGui::displayVertexViewer(Draw& draw, const Command& cmd) {
+	auto& hook = *gui_->dev().commandHook;
+	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+	dlg_assert(drawCmd);
+
+	if(!drawCmd || !drawCmd->state.pipe) {
+		ImGui::Text("Pipeline was destroyed, can't interpret state");
+		return;
+	} else if(!hook.state) {
+		ImGui::Text("Waiting for a submission...");
+		return;
+	}
+
+	// 1: table
+	if(ImGui::BeginTabBar("Stage")) {
+		if(ImGui::BeginTabItem("Vertex input")) {
+			displayVertexInput(draw, *drawCmd);
+			ImGui::EndTabItem();
+		}
+
+		if(ImGui::BeginTabItem("Vertex Output")) {
+			displayVertexOutput(draw, *drawCmd);
+			ImGui::EndTabItem();
+		}
+
+		ImGui::EndTabBar();
+	}
 }
 
 void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {

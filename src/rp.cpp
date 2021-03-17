@@ -3,6 +3,7 @@
 #include <data.hpp>
 #include <image.hpp>
 #include <util/util.hpp>
+#include <util/ext.hpp>
 #include <vk/format_utils.h>
 
 namespace vil {
@@ -67,83 +68,9 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 }
 
 // RenderPass
-VkAttachmentDescription2 upgrade(const VkAttachmentDescription& x) {
-	VkAttachmentDescription2 ret {};
-	ret.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
-	ret.finalLayout = x.finalLayout;
-	ret.initialLayout = x.initialLayout;
-	ret.flags = x.flags;
-	ret.format = x.format;
-	ret.loadOp = x.loadOp;
-	ret.storeOp = x.storeOp;
-	ret.stencilLoadOp = x.stencilLoadOp;
-	ret.stencilStoreOp = x.stencilStoreOp;
-	ret.samples = x.samples;
-	return ret;
-}
-
-VkSubpassDependency2 upgrade(const VkSubpassDependency& x) {
-	VkSubpassDependency2 ret {};
-	ret.sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
-	ret.dstSubpass = x.dstSubpass;
-	ret.srcSubpass = x.srcSubpass;
-	ret.srcAccessMask = x.srcAccessMask;
-	ret.dstAccessMask = x.dstAccessMask;
-	ret.viewOffset = {};
-	ret.dependencyFlags = x.dependencyFlags;
-	ret.srcStageMask = x.srcStageMask;
-	ret.dstStageMask = x.dstStageMask;
-	return ret;
-}
-
-template<typename D, typename T>
-void upgrade(std::vector<D>& dst, span<const T> src) {
-	dst.reserve(dst.size() + src.size());
-	for(auto& x : src) {
-		dst.push_back(upgrade(x));
-	}
-}
-
-template<typename D, typename T>
-void upgrade(std::vector<D>& dst, const T* ptr, std::size_t count) {
-	upgrade(dst, span<const T>(ptr, count));
-}
-
-VkAttachmentDescription downgrade(const VkAttachmentDescription2& x) {
-	VkAttachmentDescription ret {};
-	ret.finalLayout = x.finalLayout;
-	ret.initialLayout = x.initialLayout;
-	ret.flags = x.flags;
-	ret.format = x.format;
-	ret.loadOp = x.loadOp;
-	ret.storeOp = x.storeOp;
-	ret.stencilLoadOp = x.stencilLoadOp;
-	ret.stencilStoreOp = x.stencilStoreOp;
-	ret.samples = x.samples;
-	return ret;
-}
-
-VkSubpassDependency downgrade(const VkSubpassDependency2& x) {
-	VkSubpassDependency ret {};
-	ret.dstSubpass = x.dstSubpass;
-	ret.srcSubpass = x.srcSubpass;
-	ret.srcAccessMask = x.srcAccessMask;
-	ret.dstAccessMask = x.dstAccessMask;
-	ret.dependencyFlags = x.dependencyFlags;
-	ret.srcStageMask = x.srcStageMask;
-	ret.dstStageMask = x.dstStageMask;
-	return ret;
-}
-
-template<typename D, typename T>
-void downgrade(std::vector<D>& dst, span<const T> src) {
-	dst.reserve(dst.size() + src.size());
-	for(auto& x : src) {
-		dst.push_back(downgrade(x));
-	}
-}
-
 bool splittable(const RenderPassDesc& desc, unsigned split) {
+	dlg_assert(split < desc.subpasses.size());
+
 	// We basically perform symbolic execution of the render pass.
 	// Symbolic state per attachment:
 	// (attachmentID, subpassID, sequenceID)
@@ -172,6 +99,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	}
 
 	// TODO: consider preserve attachments?
+	// TODO: we never respect VK_ATTACHMENT_UNUSED, needs urgent fix!
 	// can we really set all unused non-preserve attachments to undefined?
 
 	// Start real render pass, [0, split).
@@ -200,7 +128,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	// perform the split
 	auto symbAtts = symbAttsRef;
 
-	// correct symbolic id as the render pass isn't finishe yet
+	// correct symbolic id as the render pass isn't finished yet
 	auto& subp = desc.subpasses[split];
 	for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 		auto attID = subp.pColorAttachments[i].attachment;

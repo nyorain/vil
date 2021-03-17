@@ -120,7 +120,6 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
 	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
 	SyncedUniqueUnorderedMap<VkBufferView, BufferView> bufferViews;
-	SyncedUniqueUnorderedMap<VkDescriptorUpdateTemplate, DescriptorUpdateTemplate> dsuTemplates;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still
@@ -137,6 +136,8 @@ struct Device {
 	// buffer is recorded without it becoming invalid. But we still need
 	// the handle for internal hooked-recording.
 	SyncedIntrusiveUnorderedMap<VkPipelineLayout, PipelineLayout> pipeLayouts;
+	// Needs to be ref-counted only for PushDescriptorSetWithTemplateCmd
+	SyncedIntrusiveUnorderedMap<VkDescriptorUpdateTemplate, DescriptorUpdateTemplate> dsuTemplates;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 

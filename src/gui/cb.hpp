@@ -11,7 +11,7 @@ namespace vil {
 struct CopiedImage;
 struct RecordBatch;
 
-struct CommandBufferGui {
+class CommandBufferGui {
 public:
 	// Defines from which source the displayed commands are updated.
 	enum class UpdateMode {
@@ -38,11 +38,14 @@ public:
 private:
 	void displayDsList(const Command&);
 	void displayIOList(const Command&);
-	void displayVertexViewer(Draw& draw, const Command&);
 	void displaySelectedIO(Draw& draw, const Command&);
 	void displayInspector(Draw& draw, const Command&);
 	void displayActionInspector(Draw& cmd, const Command&);
 	void displayDs(Draw& draw, const Command&);
+
+	void displayVertexInput(Draw& draw, const DrawCmdBase&);
+	void displayVertexOutput(Draw& draw, const DrawCmdBase&);
+	void displayVertexViewer(Draw& draw, const Command&);
 
 	// Can only be called once per frame.
 	void displayImage(Draw& draw, const CopiedImage& img);
@@ -86,6 +89,7 @@ private:
 		Vec2f offset;
 		Vec2f size;
 		const DrawCmdBase* cmd;
+		u32 vertexCount;
 	} vertexDrawData_;
 };
 

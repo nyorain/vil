@@ -1,6 +1,6 @@
-pv = executable('pv', 'pv.cpp',
+rpsplit = executable('rpsplit', 'rpsplit.cpp',
 	include_directories: inc,
 	cpp_args: args,
 	link_with: vil_layer)
-test('pv', pv)
+test('rpsplit', rpsplit)
 

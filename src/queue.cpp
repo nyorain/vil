@@ -289,8 +289,8 @@ std::unordered_set<Submission*> needsSyncLocked(SubmissionBatch& pending, Draw& 
 		}
 
 		for(auto& [_, hookPtr] : subm.cbs) {
-			// TODO: we might not need sync in all cases. Pretty much only
-			// for images I guess
+			// TODO(perf): we might not need sync in all cases. Pretty much only
+			// for images and xfb buffers I guess.
 			if(hookPtr && hookPtr->record->state.get() == draw.usedHookState.get()) {
 				subs.insert(&subm);
 			}

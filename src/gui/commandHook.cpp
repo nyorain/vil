@@ -4,6 +4,7 @@
 #include <ds.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
+#include <pipe.hpp>
 #include <rp.hpp>
 #include <cb.hpp>
 #include <buffer.hpp>
@@ -111,12 +112,12 @@ CopiedImage::~CopiedImage() {
 	dev->dispatch.FreeMemory(dev->handle, memory, nullptr);
 }
 
-void CopiedBuffer::init(Device& dev, VkDeviceSize size) {
+void CopiedBuffer::init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFlags) {
 	// TODO: vertex/index usage required for vertex viewer atm.
 	// Should probably only set it for those buffers.
-	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-		VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | addFlags;
+		// VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+		// VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 
 	this->buffer.ensure(dev, size, usage);
 	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, VK_WHOLE_SIZE, 0, &this->map));
@@ -493,8 +494,38 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 				beforeDstOutsideRp(*cmd, info);
 			}
 
+			// transform feedback
+			auto endXfb = false;
+			if(auto drawCmd = dynamic_cast<DrawCmdBase*>(cmd); drawCmd && hookDst) {
+				if(drawCmd->state.pipe->xfbPatched) {
+					dlg_assert(dev.transformFeedback);
+					dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
+					dlg_assert(dev.dispatch.CmdBindTransformFeedbackBuffersEXT);
+					dlg_assert(dev.dispatch.CmdEndTransformFeedbackEXT);
+
+					// init xfb buffer
+					auto xfbSize = 1024 * 1024; // TODO
+					auto usage =
+						VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
+						VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+					state->transformFeedback.init(dev, xfbSize, usage);
+
+					auto offset = VkDeviceSize(0u);
+					dev.dispatch.CmdBindTransformFeedbackBuffersEXT(cb, 0u, 1u,
+						&state->transformFeedback.buffer.buf, &offset,
+						&state->transformFeedback.buffer.size);
+					dev.dispatch.CmdBeginTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
+
+					endXfb = true;
+				}
+			}
+
 			if(!skipRecord) {
 				cmd->record(dev, this->cb);
+			}
+
+			if(endXfb) {
+				dev.dispatch.CmdEndTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
 			}
 
 			auto parentCmd = dynamic_cast<const ParentCommand*>(cmd);
@@ -695,10 +726,12 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 }
 
-void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst, VkBuffer src,
+void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
+		VkBufferUsageFlags addFlags, VkBuffer src,
 		VkDeviceSize offset, VkDeviceSize size) {
+
 	// init dst
-	dst.init(dev, size);
+	dst.init(dev, size, addFlags);
 
 	// perform copy
 	VkBufferCopy copy {};
@@ -825,7 +858,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		}
 
 		auto size = std::min(maxBufCopySize, range);
-		initAndCopy(dev, cb, dst, elem.bufferInfo.buffer->handle,
+		initAndCopy(dev, cb, dst, 0u, elem.bufferInfo.buffer->handle,
 			elem.bufferInfo.offset, size);
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
@@ -1013,10 +1046,12 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 				sizeof(VkDrawIndirectCommand);
 			stride = cmd->stride ? cmd->stride : stride;
 			auto dstSize = cmd->drawCount * stride;
-			initAndCopy(dev, cb, state->indirectCopy, cmd->buffer->handle, cmd->offset, dstSize);
+			initAndCopy(dev, cb, state->indirectCopy,  0u,
+				cmd->buffer->handle, cmd->offset, dstSize);
 		} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
 			auto size = sizeof(VkDispatchIndirectCommand);
-			initAndCopy(dev, cb, state->indirectCopy, cmd->buffer->handle, cmd->offset, size);
+			initAndCopy(dev, cb, state->indirectCopy, 0u,
+				cmd->buffer->handle, cmd->offset, size);
 		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
 			(void) cmd;
 			state->errorMessage = "DrawIndirectCount hook not implemented";
@@ -1051,7 +1086,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 
 			// TODO: add vertex buffer usage flag
 			auto size = std::min(maxBufCopySize, vertbuf.buffer->ci.size - vertbuf.offset);
-			initAndCopy(dev, cb, dst, vertbuf.buffer->handle, vertbuf.offset, size);
+			initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+				vertbuf.buffer->handle, vertbuf.offset, size);
 		}
 	}
 
@@ -1062,7 +1098,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 		if(inds.buffer) {
 			auto size = std::min(maxBufCopySize, inds.buffer->ci.size - inds.offset);
 			// TODO: add index buffer usage flag
-			initAndCopy(dev, cb, state->indexBufCopy, inds.buffer->handle, inds.offset, size);
+			initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+				inds.buffer->handle, inds.offset, size);
 		}
 	}
 
@@ -1154,13 +1191,15 @@ void CommandHookSubmission::finish(Submission& subm) {
 	transmitTiming();
 	record->hook->state = record->state;
 
-	// copy potentiall buffers
-	// TODO: messy, ugly, shouldn't be here like this.
+	// copy potential buffers
+	// TODO: only copy the requested region, what we are currently
+	// viewing and therefore *absolutely* need on cpu.
 	if(auto* buf = std::get_if<CopiedBuffer>(&record->state->dsCopy)) {
 		buf->cpuCopy();
 	}
 	record->state->indexBufCopy.cpuCopy();
 	record->state->indirectCopy.cpuCopy();
+	record->state->transformFeedback.cpuCopy();
 	for(auto& vbuf : record->state->vertexBufCopies) {
 		vbuf.cpuCopy();
 	}

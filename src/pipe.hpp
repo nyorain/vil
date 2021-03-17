@@ -17,7 +17,8 @@ struct PipelineLayout : DeviceHandle {
 	std::vector<DescriptorSetLayout*> descriptors;
 	std::vector<VkPushConstantRange> pushConstants;
 
-	std::atomic<u32> refCount {0}; // intrusive ref count
+	// Intrusive ref count. Needed e.g. for command buffer recording
+	std::atomic<u32> refCount {0};
 
 	~PipelineLayout();
 };
@@ -75,7 +76,7 @@ struct GraphicsPipeline : Pipeline {
 	bool hasTessellation : 1;
 	bool hasDepthStencil : 1;
 	bool hasMeshShader : 1;
-	bool supportsXfb : 1;
+	bool xfbPatched : 1; // whether we injected our xfb code
 };
 
 struct ComputePipeline : Pipeline {

@@ -5,6 +5,7 @@
 #include <vk/vulkan.h>
 #include <util/vec.hpp>
 #include <util/camera.hpp>
+#include <util/span.hpp>
 #include <vector>
 #include <optional>
 
@@ -54,10 +55,29 @@ struct VertexViewer {
 	// - a single color attachment
 	// - viewport and scissor dynamic state bound
 	// Uses the current imgui context.
+	// TODO: deprecate?
 	void imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
-			const CommandHookState& copies, std::optional<VkIndexType>,
-			u32 offset, u32 drawCount, u32 vertexOffset,
-			Vec2f canvasOffset, Vec2f canvasSize);
+		const CommandHookState& copies, std::optional<VkIndexType>,
+		u32 offset, u32 drawCount, u32 vertexOffset,
+		Vec2f canvasOffset, Vec2f canvasSize);
+
+	struct DrawData {
+		VkPrimitiveTopology topology;
+		VkPipelineVertexInputStateCreateInfo vertexInfo;
+		span<const BufferSpan> vertexBuffers;
+
+		u32 offset; // firstVertex or firstIndex
+		u32 drawCount; // vertexCount or instanceCount
+
+		std::optional<VkIndexType> indexType; // nullopt for non-indexed draw
+		BufferSpan indexBuffer; // only for indexed drawing
+		u32 vertexOffset; // only for indexed drawing
+
+		Vec2f canvasOffset;
+		Vec2f canvasSize;
+	};
+
+	void imGuiDraw(VkCommandBuffer cb, const DrawData& data);
 	void updateInput(float dt);
 };
 

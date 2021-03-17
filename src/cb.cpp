@@ -1,11 +1,13 @@
 #include <cb.hpp>
 #include <data.hpp>
+#include <ds.hpp>
 #include <queue.hpp>
 #include <handles.hpp>
 #include <commands.hpp>
 #include <record.hpp>
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
+#include <util/ext.hpp>
 
 namespace vil {
 
@@ -260,6 +262,81 @@ void ensureSize(CommandBuffer& cb, span<T>& buf, std::size_t size) {
 	buf = newBuf;
 }
 
+template<typename D, typename T>
+void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, std::size_t count) {
+	dst = allocSpan<D>(cb, count);
+	for(auto i = 0u; i < count; ++i) {
+		dst[i] = upgrade(data[i]);
+	}
+}
+
+// util
+void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
+		span<DescriptorSet* const> sets, span<const u32>) {
+	ensureSize(cb, descriptorSets, firstSet + sets.size());
+
+	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
+	// There may be errors here.
+	// TODO: do we even need to track it like this? only useful if we
+	// also show it in UI which sets were disturbed.
+
+	auto lastSet = firstSet + sets.size() - 1;
+	for(auto i = 0u; i < firstSet; ++i) {
+		if(!descriptorSets[i].ds) {
+			continue;
+		}
+
+		dlg_assert(descriptorSets[i].layout);
+		if(!compatibleForSetN(*descriptorSets[i].layout, layout, i)) {
+			// disturbed!
+			// dlg_debug("disturbed ds {}", i);
+			descriptorSets[i] = {};
+		}
+	}
+
+	// bind descriptors and check if future bindings are disturbed
+	auto followingDisturbed = false;
+	for(auto i = 0u; i < sets.size(); ++i) {
+		auto s = firstSet + i;
+		if(!descriptorSets[s].ds || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
+			followingDisturbed = true;
+		}
+
+		descriptorSets[s].layout = &layout;
+		descriptorSets[s].ds = sets[i];
+		// TODO: use given offsets. We have to analyze the layout and
+		// count the offset into the offsets array.
+		descriptorSets[s].dynamicOffsets = {};
+	}
+
+	if(followingDisturbed) {
+		// dlg_debug("disturbed following descriptorSets, from {}", lastSet + 1);
+		descriptorSets = descriptorSets.subspan(0, lastSet + 1);
+	}
+}
+
+void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
+	dst.descriptorSets = copySpan(cb, src.descriptorSets);
+}
+
+GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
+	GraphicsState dst = src;
+	copy(cb, src, dst); // descriptors
+
+	dst.vertices = copySpan(cb, src.vertices);
+	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
+	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
+
+	return dst;
+}
+
+ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
+	ComputeState dst = src;
+	copy(cb, src, dst); // descriptors
+	return dst;
+}
+
+// recording
 enum class SectionType {
 	none,
 	begin,
@@ -537,7 +614,7 @@ void cmdBarrier(
 	cmd.images = allocSpan<Image*>(cb, cmd.imgBarriers.size());
 	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
 		auto& imgb = cmd.imgBarriers[i];
-		copyChain(cb, imgb.pNext);
+		copyChainInPlace(cb, imgb.pNext);
 
 		auto& img = cb.dev->images.get(imgb.image);
 		cmd.images[i] = &img;
@@ -555,7 +632,7 @@ void cmdBarrier(
 	cmd.buffers = allocSpan<Buffer*>(cb, cmd.bufBarriers.size());
 	for(auto i = 0u; i < cmd.bufBarriers.size(); ++i) {
 		auto& bufb = cmd.bufBarriers[i];
-		copyChain(cb, bufb.pNext);
+		copyChainInPlace(cb, bufb.pNext);
 		auto& buf = cb.dev->buffers.get(bufb.buffer);
 		cmd.buffers[i] = &buf;
 		useHandle(cb, cmd, buf);
@@ -567,7 +644,7 @@ void cmdBarrier(
 	}
 
 	for(auto& mem : cmd.memBarriers) {
-		copyChain(cb, mem.pNext);
+		copyChainInPlace(cb, mem.pNext);
 	}
 }
 
@@ -638,7 +715,7 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cmd.clearValues = copySpan(cb, rpBeginInfo.pClearValues, rpBeginInfo.clearValueCount);
 	cmd.info = rpBeginInfo;
 	cmd.info.pClearValues = cmd.clearValues.data();
-	copyChain(cb, cmd.info.pNext);
+	copyChainInPlace(cb, cmd.info.pNext);
 
 	cmd.fb = cb.dev->framebuffers.find(rpBeginInfo.framebuffer);
 	cmd.rp = cb.dev->renderPasses.find(rpBeginInfo.renderPass);
@@ -648,7 +725,7 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cb.graphicsState().rp = cmd.rp;
 
 	cmd.subpassBeginInfo = subpassBeginInfo;
-	copyChain(cb, cmd.subpassBeginInfo.pNext);
+	copyChainInPlace(cb, cmd.subpassBeginInfo.pNext);
 
 	dlg_assert(cmd.fb);
 	dlg_assert(cmd.rp);
@@ -739,7 +816,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
 	cmd.beginInfo = *pSubpassBeginInfo;
-	copyChain(cb, cmd.beginInfo.pNext);
+	copyChainInPlace(cb, cmd.beginInfo.pNext);
 
 	auto f = cb.dev->dispatch.CmdNextSubpass2;
 	f(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
@@ -751,7 +828,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = *pSubpassEndInfo;
-	copyChain(cb, cmd.endInfo.pNext);
+	copyChainInPlace(cb, cmd.endInfo.pNext);
 
 	auto f = cb.dev->dispatch.CmdEndRenderPass2;
 	f(commandBuffer, pSubpassEndInfo);
@@ -1136,7 +1213,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	cmd.copies = copySpan(cb, pRegions, regionCount);
+	upgradeSpan(cb, cmd.copies, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
@@ -1145,6 +1222,28 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 		srcImage, srcImageLayout,
 		dstImage, dstImageLayout,
 		regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2KHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkCopyImageInfo2KHR*                  info) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cmd = addCmd<CopyImageCmd>(cb);
+
+	auto& src = cb.dev->images.get(info->srcImage);
+	auto& dst = cb.dev->images.get(info->dstImage);
+
+	cmd.pNext = copyChain(cb, info->pNext);
+	cmd.src = &src;
+	cmd.srcLayout = info->srcImageLayout;
+	cmd.dst = &dst;
+	cmd.dstLayout = info->dstImageLayout;
+	cmd.copies = copySpan(cb, info->pRegions, info->regionCount);
+
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
+
+	cb.dev->dispatch.CmdCopyImage2KHR(commandBuffer, info);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
@@ -1166,7 +1265,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	cmd.blits = copySpan(cb, pRegions, regionCount);
+	upgradeSpan(cb, cmd.blits, pRegions, regionCount);
 	cmd.filter = filter;
 
 	useHandle(cb, cmd, src);
@@ -1177,6 +1276,30 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 		dstImage, dstImageLayout,
 		regionCount, pRegions, filter);
 }
+
+VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2KHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkBlitImageInfo2KHR*                  info) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cmd = addCmd<BlitImageCmd>(cb);
+
+	auto& src = cb.dev->images.get(info->srcImage);
+	auto& dst = cb.dev->images.get(info->dstImage);
+
+	cmd.pNext = copyChain(cb, info->pNext);
+	cmd.src = &src;
+	cmd.srcLayout = info->srcImageLayout;
+	cmd.dst = &dst;
+	cmd.dstLayout = info->dstImageLayout;
+	cmd.blits = copySpan(cb, info->pRegions, info->regionCount);
+	cmd.filter = info->filter;
+
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
+
+	cb.dev->dispatch.CmdBlitImage2KHR(commandBuffer, info);
+}
+
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 		VkCommandBuffer                             commandBuffer,
@@ -1194,13 +1317,34 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	cmd.src = &src;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	cmd.copies = copySpan(cb, pRegions, regionCount);
+	upgradeSpan(cb, cmd.copies, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
 	cb.dev->dispatch.CmdCopyBufferToImage(commandBuffer,
 		srcBuffer, dstImage, dstImageLayout, regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2KHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkCopyBufferToImageInfo2KHR*          info) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cmd = addCmd<CopyBufferToImageCmd>(cb);
+
+	auto& src = cb.dev->buffers.get(info->srcBuffer);
+	auto& dst = cb.dev->images.get(info->dstImage);
+
+	cmd.pNext = copyChain(cb, info->pNext);
+	cmd.src = &src;
+	cmd.dst = &dst;
+	cmd.dstLayout = info->dstImageLayout;
+	cmd.copies = copySpan(cb, info->pRegions, info->regionCount);
+
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
+
+	cb.dev->dispatch.CmdCopyBufferToImage2KHR(commandBuffer, info);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
@@ -1219,13 +1363,34 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	cmd.src = &src;
 	cmd.dst = &dst;
 	cmd.srcLayout = srcImageLayout;
-	cmd.copies = copySpan(cb, pRegions, regionCount);
+	upgradeSpan(cb, cmd.copies, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
 	cb.dev->dispatch.CmdCopyImageToBuffer(commandBuffer,
 		srcImage, srcImageLayout, dstBuffer, regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2KHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkCopyImageToBufferInfo2KHR*          info) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cmd = addCmd<CopyImageToBufferCmd>(cb);
+
+	auto& src = cb.dev->images.get(info->srcImage);
+	auto& dst = cb.dev->buffers.get(info->dstBuffer);
+
+	cmd.pNext = copyChain(cb, info->pNext);
+	cmd.src = &src;
+	cmd.dst = &dst;
+	cmd.srcLayout = info->srcImageLayout;
+	cmd.copies = copySpan(cb, info->pRegions, info->regionCount);
+
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
+
+	cb.dev->dispatch.CmdCopyImageToBuffer2KHR(commandBuffer, info);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
@@ -1310,13 +1475,35 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	cmd.srcLayout = srcImageLayout;
 	cmd.dst = &dst;
 	cmd.dstLayout = dstImageLayout;
-	cmd.regions = copySpan(cb, pRegions, regionCount);
+	upgradeSpan(cb, cmd.regions, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
 	cb.dev->dispatch.CmdResolveImage(commandBuffer, srcImage, srcImageLayout,
 		dstImage, dstImageLayout, regionCount, pRegions);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2KHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkResolveImageInfo2KHR*               info) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& src = cb.dev->images.get(info->srcImage);
+	auto& dst = cb.dev->images.get(info->dstImage);
+
+	auto& cmd = addCmd<ResolveImageCmd>(cb);
+
+	cmd.pNext = copyChain(cb, info->pNext);
+	cmd.src = &src;
+	cmd.srcLayout = info->srcImageLayout;
+	cmd.dst = &dst;
+	cmd.dstLayout = info->dstImageLayout;
+	cmd.regions = copySpan(cb, info->pRegions, info->regionCount);
+
+	useHandle(cb, cmd, src);
+	useHandle(cb, cmd, dst);
+
+	cb.dev->dispatch.CmdResolveImage2KHR(commandBuffer, info);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
@@ -1413,13 +1600,34 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 
 	cmd.src = &srcBuf;
 	cmd.dst = &dstBuf;
-	cmd.regions = copySpan(cb, pRegions, regionCount);
+	upgradeSpan(cb, cmd.regions, pRegions, regionCount);
 
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
 
 	cb.dev->dispatch.CmdCopyBuffer(commandBuffer,
 		srcBuffer, dstBuffer, regionCount, pRegions);
+}
+
+
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2KHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkCopyBufferInfo2KHR*                 info) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cmd = addCmd<CopyBufferCmd>(cb);
+
+	auto& srcBuf = cb.dev->buffers.get(info->srcBuffer);
+	auto& dstBuf = cb.dev->buffers.get(info->dstBuffer);
+
+	cmd.pNext = copyChain(cb, info->pNext);
+	cmd.src = &srcBuf;
+	cmd.dst = &dstBuf;
+	cmd.regions = copySpan(cb, info->pRegions, info->regionCount);
+
+	useHandle(cb, cmd, srcBuf);
+	useHandle(cb, cmd, dstBuf);
+
+	cb.dev->dispatch.CmdCopyBuffer2KHR(commandBuffer, info);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
@@ -1819,70 +2027,78 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 	cb.dev->dispatch.CmdSetStencilReference(commandBuffer, faceMask, reference);
 }
 
-// util
-void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
-		span<DescriptorSet* const> sets, span<const u32>) {
-	ensureSize(cb, descriptorSets, firstSet + sets.size());
+VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetKHR(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipelineLayout                            layout,
+		uint32_t                                    set,
+		uint32_t                                    descriptorWriteCount,
+		const VkWriteDescriptorSet*                 pDescriptorWrites) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cmd = addCmd<PushDescriptorSetCmd>(cb);
+	cmd.bindPoint = pipelineBindPoint;
+	cmd.set = set;
+	cmd.descriptorWrites = copySpan(cb, pDescriptorWrites, descriptorWriteCount);
 
-	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
-	// There may be errors here.
-	// TODO: do we even need to track it like this? only useful if we
-	// also show it in UI which sets were disturbed.
-
-	auto lastSet = firstSet + sets.size() - 1;
-	for(auto i = 0u; i < firstSet; ++i) {
-		if(!descriptorSets[i].ds) {
+	// deep-copy cmd.descriptorWrites.
+	// The allocation done by copySpan is bound to the lifetime of the record
+	// and we don't need to store the span itself anywhere since we don't
+	// directly have ownership
+	for(auto& write : cmd.descriptorWrites) {
+		if(!write.descriptorCount) {
 			continue;
 		}
 
-		dlg_assert(descriptorSets[i].layout);
-		if(!compatibleForSetN(*descriptorSets[i].layout, layout, i)) {
-			// disturbed!
-			// dlg_debug("disturbed ds {}", i);
-			descriptorSets[i] = {};
+		switch(category(write.descriptorType)) {
+			case DescriptorCategory::buffer:
+				dlg_assert(write.pBufferInfo);
+				write.pBufferInfo = copySpan(cb, write.pBufferInfo, write.descriptorCount).data();
+				break;
+			case DescriptorCategory::image:
+				dlg_assert(write.pImageInfo);
+				write.pImageInfo = copySpan(cb, write.pImageInfo, write.descriptorCount).data();
+				break;
+			case DescriptorCategory::bufferView:
+				dlg_assert(write.pTexelBufferView);
+				write.pTexelBufferView = copySpan(cb, write.pTexelBufferView, write.descriptorCount).data();
+				break;
+			default:
+				dlg_error("Invalid/unknown descriptor type");
+				break;
 		}
 	}
 
-	// bind descriptors and check if future bindings are disturbed
-	auto followingDisturbed = false;
-	for(auto i = 0u; i < sets.size(); ++i) {
-		auto s = firstSet + i;
-		if(!descriptorSets[s].ds || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
-			followingDisturbed = true;
-		}
+	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
-		descriptorSets[s].layout = &layout;
-		descriptorSets[s].ds = sets[i];
-		// TODO: use given offsets. We have to analyze the layout and
-		// count the offset into the offsets array.
-		descriptorSets[s].dynamicOffsets = {};
-	}
-
-	if(followingDisturbed) {
-		// dlg_debug("disturbed following descriptorSets, from {}", lastSet + 1);
-		descriptorSets = descriptorSets.subspan(0, lastSet + 1);
-	}
+	cb.dev->dispatch.CmdPushDescriptorSetKHR(commandBuffer,
+		pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites);
 }
 
-void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
-	dst.descriptorSets = copySpan(cb, src.descriptorSets);
-}
+VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetWithTemplateKHR(
+		VkCommandBuffer                             commandBuffer,
+		VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
+		VkPipelineLayout                            layout,
+		uint32_t                                    set,
+		const void*                                 pData) {
+	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cmd = addCmd<PushDescriptorSetWithTemplateCmd>(cb);
+	cmd.set = set;
 
-GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
-	GraphicsState dst = src;
-	copy(cb, src, dst); // descriptors
+	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
+	cmd.pipeLayout = pipeLayoutPtr.get();
+	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
-	dst.vertices = copySpan(cb, src.vertices);
-	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
-	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
+	auto dsUpdateTemplate = cb.dev->dsuTemplates.getPtr(descriptorUpdateTemplate);
+	cmd.updateTemplate = dsUpdateTemplate.get();
+	cb.record()->dsUpdateTemplates.emplace_back(std::move(dsUpdateTemplate));
 
-	return dst;
-}
+	auto dataSize = totalUpdateDataSize(*cmd.updateTemplate);
+	cmd.data = copySpan(cb, reinterpret_cast<const std::byte*>(pData), dataSize);
 
-ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
-	ComputeState dst = src;
-	copy(cb, src, dst); // descriptors
-	return dst;
+	cb.dev->dispatch.CmdPushDescriptorSetWithTemplateKHR(commandBuffer,
+		descriptorUpdateTemplate, layout, set, pData);
 }
 
 } // namespace vil

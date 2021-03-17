@@ -333,6 +333,22 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		ds.bindings.resize(ds.layout->bindings.size());
 		for(auto b = 0u; b < ds.bindings.size(); ++b) {
 			ds.bindings[b].resize(ds.layout->bindings[b].descriptorCount);
+
+			// If the binding holds immutable samplers, fill them in.
+			// We do this so we don't have to check for immutable samplers
+			// every time we read a binding. Also needed for correct
+			// invalidation tracking.
+			if(ds.layout->bindings[b].immutableSamplers.get()) {
+				dlg_assert(needsSampler(ds.layout->bindings[b].descriptorType));
+				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
+					auto sampler = ds.layout->bindings[b].immutableSamplers[e];
+					dlg_assert(sampler);
+
+					ds.bindings[b][e].imageInfo.sampler = sampler;
+					ds.bindings[b][e].valid = true;
+					sampler->descriptors.insert({&ds, b, e});
+				}
+			}
 		}
 
 		pool.descriptorSets.push_back(&ds);
@@ -602,7 +618,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 					auto& bufView = *reinterpret_cast<const VkBufferView*>(data);
 					updateLocked(ds, binding, dstBinding, dstElem, bufView);
 					break;
-				} default: break;
+				} default:
+					dlg_error("Invalid/unknown descriptor type");
+					break;
 			}
 		}
 	}
@@ -611,6 +629,31 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 
 	auto f = dev.dispatch.UpdateDescriptorSetWithTemplate;
 	f(device, descriptorSet, descriptorUpdateTemplate, pData);
+}
+
+u32 totalUpdateDataSize(const DescriptorUpdateTemplate& dut) {
+	u32 ret = 0u;
+	for(auto& entry : dut.entries) {
+		auto off = entry.offset + entry.descriptorCount * entry.stride;
+		switch(category(entry.descriptorType)) {
+			case DescriptorCategory::image:
+				off += sizeof(VkDescriptorImageInfo);
+				break;
+			case DescriptorCategory::buffer:
+				off += sizeof(VkDescriptorBufferInfo);
+				break;
+			case DescriptorCategory::bufferView:
+				off += sizeof(VkBufferView*);
+				break;
+			default:
+				dlg_error("Invalid/unknown descriptor type");
+				break;
+		}
+
+		ret = std::max<u32>(ret, off);
+	}
+
+	return ret;
 }
 
 } // namespace vil

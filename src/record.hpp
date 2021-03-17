@@ -54,7 +54,8 @@ inline const char* copyString(CommandBuffer& cb, std::string_view src) {
 }
 
 // Allocates the memory from the command buffer.
-void copyChain(CommandBuffer& cb, const void*& pNext);
+void copyChainInPlace(CommandBuffer& cb, const void*& pNext);
+[[nodiscard]] const void* copyChain(CommandBuffer& cb, const void* pNext);
 
 template<typename T>
 struct CommandAllocator {
@@ -270,8 +271,15 @@ struct CommandRecord {
 	// in the end?).
 	std::unordered_set<DeviceHandle*> destroyed;
 
-	// Pipeline layouts we have to keep alive.
+	// We have to keep certain object alive that vulkan allows to be destroyed
+	// after recording even if the command buffer is used in the future.
 	CommandAllocList<IntrusivePtr<PipelineLayout>> pipeLayouts;
+	// only needed for PushDescriptorSetWithTemplate
+	CommandAllocList<IntrusivePtr<DescriptorUpdateTemplate>> dsUpdateTemplates;
+
+	// We have to keep the secondary records (via cmdExecuteCommands) alive
+	// since the command buffers can be reused by the application and
+	// we only reference the CommandRecord objects, don't copy them.
 	CommandAllocList<IntrusivePtr<CommandRecord>> secondaries;
 
 	CommandBufferDesc desc;

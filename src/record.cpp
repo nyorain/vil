@@ -3,6 +3,7 @@
 #include <image.hpp>
 #include <pipe.hpp>
 #include <cb.hpp>
+#include <ds.hpp>
 #include <util/util.hpp>
 #include <gui/commandHook.hpp>
 
@@ -116,7 +117,7 @@ void freeBlocks(CommandMemBlock* head) {
 	}
 }
 
-void copyChain(CommandBuffer& cb, const void*& pNext) {
+void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 	VkBaseInStructure* last = nullptr;
 	auto it = pNext;
 	while(it) {
@@ -139,6 +140,12 @@ void copyChain(CommandBuffer& cb, const void*& pNext) {
 		last = dst;
 		pNext = src->pNext;
 	}
+}
+
+const void* copyChain(CommandBuffer& cb, const void* pNext) {
+	auto ret = pNext;
+	copyChainInPlace(cb, ret);
+	return ret;
 }
 
 // NOTE: We need them to be noexcept. We can't rely on the internal
@@ -192,9 +199,15 @@ void MemBlockDeleter::operator()(CommandMemBlock* blocks) {
 }
 
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
-		memBlocks(nullptr, {xcb.dev, &xcb.pool()}), cb(&xcb), recordID(xcb.recordCount()),
-		queueFamily(xcb.pool().queueFamily), images(*this), handles(*this),
-		pipeLayouts(*this), secondaries(*this) {
+		memBlocks(nullptr, {xcb.dev, &xcb.pool()}),
+		cb(&xcb),
+		recordID(xcb.recordCount()),
+		queueFamily(xcb.pool().queueFamily),
+		images(*this),
+		handles(*this),
+		pipeLayouts(*this),
+		dsUpdateTemplates(*this),
+		secondaries(*this) {
 }
 
 CommandRecord::~CommandRecord() {
@@ -226,8 +239,8 @@ CommandRecord::~CommandRecord() {
 		removeFromResource(*handle.second.handle);
 	}
 
-	// Just to be safe, its destructor might reference this.
-	// And must be called while mutex is locked.
+	// Its destructor might reference this.
+	// And it must be called while mutex is locked.
 	hook.reset();
 }
 

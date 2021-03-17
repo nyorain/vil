@@ -85,6 +85,7 @@ src = files(
 	'src/vk/format_utils.cpp',
 	'src/util/util.cpp',
 	'src/util/f16.cpp',
+	'src/util/ext.cpp',
 
 	# vulkan api entrypoints
 	'src/handle.cpp',
@@ -164,6 +165,7 @@ src = files(
 	'src/util/f16.hpp',
 	'src/util/intrusive.hpp',
 	'src/util/syncedMap.hpp',
+	'src/util/ext.hpp',
 
 	'src/imgui/imgui.h',
 	'include/vil_api.h',
@@ -207,13 +209,14 @@ endif
 vil_layer = shared_library(
 	'VkLayer_live_introspection',
 	[src, spv],
-	gnu_symbol_visibility: 'hidden',
+	# disable this for testing
+	# gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
 	cpp_args: args + layer_args,
 	link_args: link_args,
 	install: true,
-	cpp_pch: 'src/pch.hpp',
+	# cpp_pch: 'src/pch.hpp',
 )
 
 conf_data = configuration_data()

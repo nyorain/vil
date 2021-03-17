@@ -14,7 +14,6 @@ v0.1, goal: end of january 2021
 		  from *our* internal thread (which it might not be prepared for).
 		  In interception, could check whether it involves one of our
 		  handles or is called from our window thread.
-- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
@@ -23,23 +22,36 @@ v0.1, goal: end of january 2021
 	      raw input. Causes problems at the moment
 - [ ] might be better to determine command group at EndCommandBuffer
       instead of first submission. We can't use the used queue though...
-- [ ] remaining IO viewer fixes:
-	- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
-	- [ ] fix descriptor arrays
-	- [ ] fix transfer buffer introspection
-	- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
-	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
-	- [x] when viewing transfer img, show image refButton
-	- [ ] adapt ioImage_ to selected image (e.g. channels)
-		- [ ] also fix logic for depthStencil images. Select depth by default.
-		      (can be tested with doom)
-- [ ] support texel reading implementation for cb-viewed-images and clean
-      up color format presentation, support depth and packed formats.
-	  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
-- [ ] test `splittable` impl for render passes. There are very likely issues.
-      (especially for the cases where render pass can't be split)
+- [ ] IO rework
+	- [ ] start using src/gui/command.hpp
+	- [ ] clean up current vertex viewer mess
+	- [ ] remaining IO viewer fixes:
+		- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
+			- [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
+			- [ ] don't even attempt to display non-float formats in 3D vertex viewer
+		- [ ] fix descriptor arrays
+		- [ ] fix transfer buffer introspection
+		- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
+		- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
+		- [x] when viewing transfer img, show image refButton
+		- [ ] adapt ioImage_ to selected image (e.g. channels)
+			- [ ] also fix logic for depthStencil images. Select depth by default.
+				  (can be tested with doom)
+	- [ ] support texel reading implementation for cb-viewed-images and clean
+		  up color format presentation, support depth and packed formats.
+		  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
+	- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
+	      i.e. support buffer IO viewing for transfer commands
 - [ ] in CopiedImage::init: check for image usage support
 	- [ ] generally: allow the image copy operation to fail.
+- [ ] xfb: support custom outputs, not just the Position Builtin
+	- [ ] xfb: check whether format is supported
+- [ ] xfb: use heuristic to figure out if ortho or perspective projection is used
+	- [ ] and then use the matching shader (i.e. scaled w vs scaled z as view-space z coord)
+	- [ ] probably best to have one vertex shader controlled via push constant
+- [x] test `splittable` impl for render passes. There are very likely issues.
+      (especially for the cases where render pass can't be split)
+	  {see docs/test/rpsplit.cpp, seems to work in basic cases}
 - [ ] better pipeline/shader module display in resource viewer
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
@@ -114,14 +126,9 @@ v0.1, goal: end of january 2021
 - [ ] improve handling of transparent images. Checkerboard background?
 	- [ ] when viewing image as grayscale they become transparent atm.
 	      no idea why
-- [ ] limit device mutex lock by ui/overlay/window as much as possible.
-    - [ ] We might have to manually throttle frame rate for window
-- [ ] allow to force overlay via environment variable. Even with go-through
-      input (we might be able to just disable input for the whole window
-	  while overlay is active using platform-specific stuff), this might
-	  be useful in some cases, the extra window can be painful.
-	- [ ] generally expose own window creation and force-overlay via env vars
-	- [ ] do as specified in readme
+- [ ] fix overlay for wayland. Use xdg popup
+- [ ] make sure the environment variables for overlays/window creation work
+      as specified in readme everywhere
 - [ ] stop this todo-for-v0.1-list from growing at some point.
 - [ ] when viewing live command submissions, clicking on resource buttons
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
@@ -140,6 +147,15 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] support descriptor indexing. Shouldn't even be too much work
+- [ ] functions that allocate CommandRecord-memory should not take
+      a CommandBuffer& as first argument but rather something like
+	  CommandRecordAllocator (or just CommandRecord), for clarity.
+- [ ] limit device mutex lock by ui/overlay/window as much as possible.
+    - [ ] We might have to manually throttle frame rate for window
+	- [ ] add tracy (or something like it) to the layer (in debug mode or via 
+	      meson_options var) so we can properly profile the bottlenecks and
+		  problems
 - [ ] proper rasterization introspection using transform feedback.
       we already query in the device whether it's supported
 	- [ ] requires SPIR-V hooking (only execution mode setting and adding xfb to outputs)
@@ -287,7 +303,7 @@ Possibly for later, new features/ideas:
 - [ ] support compressed/block formats
 - [ ] allow to view submissions to a queue
 - [ ] implement at least extensions that record to command buffer to allow hooking when they are used
-	- [ ] push descriptors
+	- [x] push descriptors
 	- [ ] device masks (core vulkan by now)
 	- [ ] extended dynamic state
 	- [ ] line rasterization
@@ -303,10 +319,9 @@ Possibly for later, new features/ideas:
 	- [ ] nv viewport scaling
 	- [ ] ext conditional rendering
 	- [ ] transform feedback (?)
-	- [ ] implement khr copy_commands2 extension
+	- [x] implement khr_copy_commands2 extension
 	- [ ] khr fragment shading rate
 	- [ ] nv shading rate enums
-- [ ] fix overlay for wayland. Use xdg popup
 - [ ] implement additional command buffer viewer mode: per-frame-commands
       basically shows all commands submitted to queue between two present calls.
 	  similar to renderdoc
