@@ -95,7 +95,7 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 		if(isOpInSection8(op) && insertDecosPos == u32(-1)) {
 			dlg_assert(section < 8);
 			section = 8u;
-			insertDecosPos = patched.size();
+			insertDecosPos = u32(patched.size());
 		}
 
 		for(auto i = 0u; i < wordCount; ++i) {
@@ -604,6 +604,7 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32
 			auto& ba = da.bindings[b];
 			auto& bb = db.bindings[b];
 
+			// TODO: look up how this works for variable descriptor count layouts.
 			if(ba.binding != bb.binding ||
 					ba.descriptorCount != bb.descriptorCount ||
 					ba.descriptorType != bb.descriptorType ||

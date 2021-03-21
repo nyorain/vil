@@ -455,9 +455,8 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 		auto& binding = ds.bindings[b];
 
 		dlg_assert(info.binding == b);
-		dlg_assert(binding.size() == info.descriptorCount);
 
-		if(info.descriptorCount == 0) { // valid?
+		if(binding.empty()) { // valid?
 			continue;
 		}
 
@@ -493,9 +492,9 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 			}
 		};
 
-		if(info.descriptorCount > 1) {
+		if(binding.size() > 1) {
 			auto label = dlg::format("{}: {}[{}]", b,
-				vk::name(info.descriptorType), info.descriptorCount);
+				vk::name(info.descriptorType), binding.size());
 			if(ImGui::TreeNode(label.c_str())) {
 				for(auto e = 0u; e < binding.size(); ++e) {
 					auto& elem = binding[e];
@@ -548,6 +547,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 
 	for(auto& binding : dsl.bindings) {
 		// TODO: immutable samplers
+		// TODO: ext_descriptor_indexing flags
 		if(binding.descriptorCount > 1) {
 			ImGui::BulletText("%s[%d] in (%s)",
 				vk::name(binding.descriptorType),

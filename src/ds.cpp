@@ -219,6 +219,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	dsLayout.dev = &dev;
 	dsLayout.handle = *pSetLayout;
 
+	auto* flagsInfo = findChainInfo<VkDescriptorSetLayoutBindingFlagsCreateInfo, 
+		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO>(*pCreateInfo);
+	flagsInfo = (flagsInfo && flagsInfo->bindingCount == 0u) ? nullptr : flagsInfo;
+	dlg_assert(!flagsInfo || flagsInfo->bindingCount == pCreateInfo->bindingCount);
+
 	for(auto i = 0u; i < pCreateInfo->bindingCount; ++i) {
 		const auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
@@ -228,6 +233,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		dst.descriptorCount = bind.descriptorCount;
 		dst.descriptorType = bind.descriptorType;
 		dst.stageFlags = bind.stageFlags;
+		dst.flags = flagsInfo ? flagsInfo->pBindingFlags[i] : 0u;
 
 		if(needsSampler(bind.descriptorType) && bind.pImmutableSamplers) {
 			dst.immutableSamplers = std::make_unique<Sampler*[]>(dst.descriptorCount);
@@ -322,6 +328,15 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 	}
 
 	auto& pool = dev.dsPools.get(pAllocateInfo->descriptorPool);
+
+	auto* variableCountInfo = findChainInfo<VkDescriptorSetVariableDescriptorCountAllocateInfo, 
+		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO>(*pAllocateInfo);
+	if (variableCountInfo && variableCountInfo->descriptorSetCount == 0u) {
+		variableCountInfo = nullptr;
+	}
+	dlg_assert(!variableCountInfo || 
+		variableCountInfo->descriptorSetCount == pAllocateInfo->descriptorSetCount);
+
 	for(auto i = 0u; i < pAllocateInfo->descriptorSetCount; ++i) {
 		auto& ds = dev.descriptorSets.add(pDescriptorSets[i]);
 		ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
@@ -332,7 +347,14 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 
 		ds.bindings.resize(ds.layout->bindings.size());
 		for(auto b = 0u; b < ds.bindings.size(); ++b) {
-			ds.bindings[b].resize(ds.layout->bindings[b].descriptorCount);
+			// check for variable descriptor count
+			auto elemCount = ds.layout->bindings[b].descriptorCount;
+			if (ds.layout->bindings[b].flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+				// per spec variable counts are zero by default, if no other value is provided
+				elemCount = variableCountInfo ? variableCountInfo->pDescriptorCounts[b] : 0u;
+			}
+
+			ds.bindings[b].resize(elemCount);
 
 			// If the binding holds immutable samplers, fill them in.
 			// We do this so we don't have to check for immutable samplers
@@ -634,7 +656,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 u32 totalUpdateDataSize(const DescriptorUpdateTemplate& dut) {
 	u32 ret = 0u;
 	for(auto& entry : dut.entries) {
-		auto off = entry.offset + entry.descriptorCount * entry.stride;
+		auto off = u32(entry.offset + entry.descriptorCount * entry.stride);
 		switch(category(entry.descriptorType)) {
 			case DescriptorCategory::image:
 				off += sizeof(VkDescriptorImageInfo);

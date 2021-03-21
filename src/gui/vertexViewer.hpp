@@ -75,6 +75,9 @@ struct VertexViewer {
 
 		Vec2f canvasOffset;
 		Vec2f canvasSize;
+
+		float scale {1.f};
+		bool useW {false};
 	};
 
 	void imGuiDraw(VkCommandBuffer cb, const DrawData& data);

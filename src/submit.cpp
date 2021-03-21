@@ -288,9 +288,9 @@ void cleanupOnError(QueueSubmitter& subm) {
 		subm.syncedGuiDraw->futureSemaphoreUsed = false;
 	}
 
-	for(auto& subm : batch.submissions) {
-		if(subm.ourSemaphore) {
-			dev.semaphorePool.push_back(subm.ourSemaphore);
+	for(auto& sub : batch.submissions) {
+		if(sub.ourSemaphore) {
+			dev.semaphorePool.push_back(sub.ourSemaphore);
 		}
 	}
 }

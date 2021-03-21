@@ -1424,7 +1424,7 @@ void CommandBufferGui::displayVertexOutput(Draw& draw, const DrawCmdBase& cmd) {
 	}
 
 	auto xfbData = ReadBuf(hook.state->transformFeedback.copy);
-	vertexCount = std::min<unsigned>(vertexCount, xfbData.size() / 16u);
+	vertexCount = std::min(vertexCount, u32(xfbData.size() / 16u));
 
 	// 1: table
 	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
@@ -1434,7 +1434,7 @@ void CommandBufferGui::displayVertexOutput(Draw& draw, const DrawCmdBase& cmd) {
 			ImGui::TableHeadersRow();
 			ImGui::TableNextRow();
 
-			for(auto i = 0u; i < std::min<unsigned>(100, vertexCount); ++i) {
+			for(auto i = 0u; i < std::min(u32(100u), vertexCount); ++i) {
 				ImGui::TableNextColumn();
 
 				auto pos = read<Vec4f>(xfbData);

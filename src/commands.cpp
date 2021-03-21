@@ -1796,7 +1796,7 @@ void CopyQueryPoolResultsCmd::unset(const std::unordered_set<DeviceHandle*>& des
 // PushDescriptorSet
 void PushDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdPushDescriptorSetKHR(cb, bindPoint, pipeLayout->handle,
-		set, descriptorWrites.size(), descriptorWrites.data());
+		set, u32(descriptorWrites.size()), descriptorWrites.data());
 }
 
 // PushDescriptorSetWithTemplate

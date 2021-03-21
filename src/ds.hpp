@@ -43,13 +43,16 @@ struct DescriptorPool : DeviceHandle {
 struct DescriptorSetLayout : DeviceHandle {
 	VkDescriptorSetLayout handle {};
 
-	// VkDescriptorSetLayoutBinding copy
+	// VkDescriptorSetLayoutBinding, with extra data
 	struct Binding {
-		uint32_t binding;
+		u32 binding;
 		VkDescriptorType descriptorType;
-		uint32_t descriptorCount;
+		// You almost never want to use descriptorCount when dealing with a
+		// descriptorSet, just use binding.size() to account for variable count bindings.
+		u32 descriptorCount;
 		VkShaderStageFlags stageFlags;
 		std::unique_ptr<Sampler*[]> immutableSamplers;
+		VkDescriptorBindingFlags flags; // for descriptor indexing
 	};
 
 	// Static after creation. Ordered by binding.

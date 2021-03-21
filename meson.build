@@ -142,6 +142,7 @@ src = files(
 	'src/data.hpp',
 	'src/record.hpp',
 	'src/queryPool.hpp',
+	'src/submit.hpp',
 
 	'src/vk/vulkan.h',
 	'src/vk/vulkan_core.h',
