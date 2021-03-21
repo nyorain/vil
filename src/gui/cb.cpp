@@ -865,8 +865,7 @@ void CommandBufferGui::displayDs(Draw& draw, const Command& cmd) {
 			if(!binding) {
 				ImGui::Text("Binding not used in pipeline");
 			} else {
-				auto* ptr = buf->copy.get();
-				display(binding->block, {ptr, buf->buffer.size});
+				display(binding->block, buf->copy);
 			}
 		} else {
 			dlg_assert(drawCmd);
@@ -886,8 +885,7 @@ void CommandBufferGui::displayDs(Draw& draw, const Command& cmd) {
 			}
 
 			if(bestVar) {
-				auto* ptr = buf->copy.get();
-				display(*bestVar, {ptr, buf->buffer.size});
+				display(*bestVar, buf->copy);
 			} else {
 				ImGui::Text("Binding not used in pipeline");
 			}
@@ -1291,12 +1289,12 @@ void CommandBufferGui::displayVertexInput(Draw& draw, const DrawCmdBase& cmd) {
 					// TODO: compressed support?
 					auto size = FormatElementSize(attrib.format);
 
-					if(off + size > buf.buffer.size) {
+					if(off + size > buf.copy.size()) {
 						finished = true;
 						break;
 					}
 
-					auto* ptr = buf.copy.get() + off;
+					auto* ptr = buf.copy.data() + off;
 					auto str = readFormat(attrib.format, {ptr, size});
 
 					imGuiText("{}", str);
@@ -1349,7 +1347,7 @@ void CommandBufferGui::displayVertexInput(Draw& draw, const DrawCmdBase& cmd) {
 				}
 
 				auto& ic = hook.state->indirectCopy;
-				auto span = ReadBuf(ic.copy.get(), ic.buffer.size);
+				auto span = ReadBuf(ic.copy);
 				if(dcmd->indexed) {
 					auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
 					offset = ecmd.firstIndex;
@@ -1410,7 +1408,7 @@ void CommandBufferGui::displayVertexOutput(Draw& draw, const DrawCmdBase& cmd) {
 		}
 
 		auto& ic = hook.state->indirectCopy;
-		auto span = ReadBuf(ic.copy.get(), ic.buffer.size);
+		auto span = ReadBuf(ic.copy);
 		if(dcmd->indexed) {
 			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
 			vertexCount = ecmd.indexCount * ecmd.instanceCount;
@@ -1425,8 +1423,8 @@ void CommandBufferGui::displayVertexOutput(Draw& draw, const DrawCmdBase& cmd) {
 		return;
 	}
 
-	auto& xfbBuf = hook.state->transformFeedback.buffer;
-	vertexCount = std::min<unsigned>(vertexCount, xfbBuf.size / 16u);
+	auto xfbData = ReadBuf(hook.state->transformFeedback.copy);
+	vertexCount = std::min<unsigned>(vertexCount, xfbData.size() / 16u);
 
 	// 1: table
 	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
@@ -1436,11 +1434,10 @@ void CommandBufferGui::displayVertexOutput(Draw& draw, const DrawCmdBase& cmd) {
 			ImGui::TableHeadersRow();
 			ImGui::TableNextRow();
 
-			auto data = ReadBuf(hook.state->transformFeedback.copy.get(), xfbBuf.size);
 			for(auto i = 0u; i < std::min<unsigned>(100, vertexCount); ++i) {
 				ImGui::TableNextColumn();
 
-				auto pos = read<Vec4f>(data);
+				auto pos = read<Vec4f>(xfbData);
 				imGuiText("{}", pos);
 
 				ImGui::TableNextRow();
@@ -1566,6 +1563,11 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 		if(ImGui::Checkbox("Before Command", &hook.copyAttachment->before)) {
 			hook.invalidateRecordings();
 			hook.invalidateData();
+		}
+
+		if(!drawCmd->state.fb) {
+			imGuiText("Framebuffer was destroyed");
+			return;
 		}
 
 		// information
@@ -1709,7 +1711,7 @@ void CommandBufferGui::displaySelectedIO(Draw& draw, const Command& cmd) {
 			// for indirect commands, show effective command
 			if(hook.copyIndirectCmd && hook.state->indirectCopy.buffer.size) {
 				auto& ic = hook.state->indirectCopy;
-				auto span = ReadBuf(ic.copy.get(), ic.buffer.size);
+				auto span = ReadBuf(ic.copy);
 				if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd)) {
 					if(dcmd->indexed) {
 						auto ecmd = read<VkDrawIndexedIndirectCommand>(span);

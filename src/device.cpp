@@ -355,9 +355,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	// useful to test fallback code paths
-	constexpr auto enableTimelineSemaphoreUsage = true;
-	constexpr auto enableTransformFeedback = true;
-
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage && (
 		(ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
 		hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));

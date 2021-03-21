@@ -72,7 +72,13 @@ v0.1, goal: end of january 2021
 - [x] fix resource viewer
 	- [x] fix filtering by type
 	- [x] fix filtering by name
-	- [ ] more useful names for handles (e.g. some basic information for images)
+- [ ] more useful names for handles (e.g. some basic information for images)
+	- [ ] also: atm we always prepend the resource type leading to something
+	      like "Buffer terrainBuffer". Add a parameter to the function whether
+		  this should be done, it some contexts (e.g. CmdCopyBuffer,
+		  resource viewer only viewing buffers) its very redundant.
+		  In most cases, it's redundant, only useful for some buttons (but
+		  even then we likely should rather have `Image: |terrainHeightmap|`.
 - [x] rework dev/gui so that there is never more than one gui. Supporting
       multiple guis at the same time is not worth the trouble (think
 	  about command buffer hooking from multiple cb viewers...)

@@ -50,7 +50,7 @@ CommandBuffer::~CommandBuffer() {
 void CommandBuffer::clearPendingLocked() {
 	// checkLocked will automtically remove it from this cb
 	while(!this->pending.empty()) {
-		auto res = checkLocked(*this->pending.front());
+		auto res = checkLocked(*this->pending.front()->parent);
 		dlg_assert(res);
 	}
 

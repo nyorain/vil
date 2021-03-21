@@ -71,13 +71,23 @@ struct Submission {
 	u64 ourSemaphoreValue {};
 };
 
-bool potentiallyWritesLocked(Submission&, DeviceHandle&);
-std::unordered_set<Submission*> needsSyncLocked(SubmissionBatch&, Draw&);
+// Checks all pending submissions of the given device, processing
+// the finished ones. Must only be called while dev mutex is locked.
+void checkPendingSubmissionsLocked(Device&);
+
+// Implemented in submit.cpp
+bool potentiallyWritesLocked(const Submission&, const DeviceHandle&);
+std::vector<const Submission*> needsSyncLocked(const SubmissionBatch&, const Draw&);
+VkResult submitSemaphore(Queue&, VkSemaphore, bool timeline = false);
+VkSemaphore getSemaphoreFromPool(Device& dev);
+VkSemaphore getSemaphoreFromPoolLocked(Device& dev);
+VkFence getFenceFromPool(Device& dev);
 
 // Batch of Submissions, represents and tracks one vkQueueSubmit call.
 struct SubmissionBatch {
 	Queue* queue {};
 	std::vector<Submission> submissions; // immutable after creation
+	u64 submitID {};
 
 	// The fence added by the caller.
 	// Might be null
@@ -86,6 +96,10 @@ struct SubmissionBatch {
 	// When the caller didn't add a fence, we added this one from the fence pool.
 	// When appFence is not null, this is null.
 	VkFence ourFence {};
+
+	// Device pool semaphores that should be re-added to the pool after this.
+	// Only currently used when timeline semaphores aren't available.
+	std::vector<VkSemaphore> poolSemaphores {};
 };
 
 // CommandBuffer groups

@@ -137,7 +137,6 @@ VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 			dlg_assert(wordCount >= 4);
 			auto length = wordCount - 3;
 			auto name = extractString(span(spirv).subspan(offset + 3, length));
-			dlg_info("Found entry point '{}'", name);
 			if(!name.empty() && name == entryPoint) {
 				entryPointID = spirv[offset + 2];
 			}

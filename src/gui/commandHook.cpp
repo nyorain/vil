@@ -38,8 +38,8 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	if(srcQueueFam == dev.gfxQueue->family) {
 		ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	} else {
-		// TODO: we could just perform an explicit transition in this case,
-		//   it's really not hard here. Could add mass
+		// PERF: we could just perform an explicit transition in this case,
+		//   it's really not hard here
 		std::array<u32, 2> qfams = {dev.gfxQueue->family, srcQueueFam};
 		ici.sharingMode = VK_SHARING_MODE_CONCURRENT;
 		ici.pQueueFamilyIndices = qfams.data();
@@ -113,24 +113,28 @@ CopiedImage::~CopiedImage() {
 }
 
 void CopiedBuffer::init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFlags) {
-	// TODO: vertex/index usage required for vertex viewer atm.
-	// Should probably only set it for those buffers.
 	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | addFlags;
-		// VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-		// VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
 
 	this->buffer.ensure(dev, size, usage);
 	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, VK_WHOLE_SIZE, 0, &this->map));
-	this->copy = std::make_unique<std::byte[]>(size);
 
 	// NOTE: destructor for copied buffer is not needed as memory mapping
 	// is implicitly unmapped when memory of buffer is destroyed.
 }
 
-void CopiedBuffer::cpuCopy() {
+void CopiedBuffer::cpuCopy(u64 offset, u64 size) {
 	if(!buffer.mem) {
 		return;
 	}
+
+	if(size == VK_WHOLE_SIZE) {
+		dlg_assert(offset <= buffer.size);
+		size = buffer.size - offset;
+	}
+
+	dlg_assertlm(dlg_level_warn, size < 1024 * 1024, "Large data copies (> 1MB) "
+		"will significantly impact performance");
+	dlg_assert(offset + size <= buffer.size);
 
 	// TODO: only invalidate when on non-coherent memory
 	VkMappedMemoryRange range[1] {};
@@ -138,7 +142,11 @@ void CopiedBuffer::cpuCopy() {
 	range[0].memory = buffer.mem;
 	range[0].size = VK_WHOLE_SIZE;
 	VK_CHECK(buffer.dev->dispatch.InvalidateMappedMemoryRanges(buffer.dev->handle, 1, range));
-	std::memcpy(copy.get(), map, buffer.size);
+
+	copy.resize(size);
+	std::memcpy(copy.data(), static_cast<const std::byte*>(map) + offset, size);
+
+	copyOffset = offset;
 }
 
 // CommandHook
@@ -418,10 +426,155 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	}
 }
 
-// TODO: this function is way too long. Factor out into
-// - timing-related functions
-// - renderpass splitting functions
-void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
+void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info) {
+	auto& dev = record->device();
+	dlg_assert(&dst == hcommand.back());
+
+	if(info.splitRenderPass) {
+		dlg_assert(info.beginRenderPassCmd);
+
+		// TODO: missing potential forward of pNext chain here
+		auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
+		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
+			// TODO: missing potential forward of pNext chain here
+			// TODO: subpass contents relevant?
+			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
+		}
+		dev.dispatch.CmdEndRenderPass(cb);
+
+		beforeDstOutsideRp(dst, info);
+
+		dlg_assert(rp1);
+		auto rpBeginInfo = info.beginRenderPassCmd->info;
+		rpBeginInfo.renderPass = rp1;
+		// we don't clear anything when starting this rp
+		rpBeginInfo.pClearValues = nullptr;
+		rpBeginInfo.clearValueCount = 0u;
+
+		if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
+			auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
+			dlg_assert(beginRp2);
+			beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
+		} else {
+			dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
+				info.beginRenderPassCmd->subpassBeginInfo.contents);
+		}
+
+		for(auto i = 0u; i < info.hookedSubpass; ++i) {
+			// TODO: missing potential forward of pNext chain here
+			// TODO: subpass contents relevant?
+			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
+		}
+	} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
+		beforeDstOutsideRp(dst, info);
+	}
+}
+
+void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info) {
+	auto& dev = record->device();
+	dlg_assert(&dst == hcommand.back());
+
+	if(info.splitRenderPass) {
+		dlg_assert(info.beginRenderPassCmd);
+
+		// TODO: missing potential forward of pNext chain here
+		auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
+		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
+			// TODO: missing potential forward of pNext chain here
+			// TODO: subpass contents relevant?
+			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
+		}
+		dev.dispatch.CmdEndRenderPass(cb);
+
+		afterDstOutsideRp(dst, info);
+
+		dlg_assert(rp2);
+		auto rpBeginInfo = info.beginRenderPassCmd->info;
+		rpBeginInfo.renderPass = rp2;
+		// we don't clear anything when starting this rp
+		rpBeginInfo.pClearValues = nullptr;
+		rpBeginInfo.clearValueCount = 0u;
+
+		if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
+			auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
+			dlg_assert(beginRp2);
+			beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
+		} else {
+			dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
+				info.beginRenderPassCmd->subpassBeginInfo.contents);
+		}
+
+		for(auto i = 0u; i < info.hookedSubpass; ++i) {
+			// TODO: missing potential forward of pNext chain here
+			// TODO: subpass contents relevant?
+			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
+		}
+	} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
+		afterDstOutsideRp(dst, info);
+	}
+}
+
+void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
+	auto& dev = record->device();
+
+	hookRecordBeforeDst(cmd, info);
+
+	// transform feedback
+	auto endXfb = false;
+	if(auto drawCmd = dynamic_cast<DrawCmdBase*>(&cmd); drawCmd) {
+		if(drawCmd->state.pipe->xfbPatched) {
+			dlg_assert(dev.transformFeedback);
+			dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
+			dlg_assert(dev.dispatch.CmdBindTransformFeedbackBuffersEXT);
+			dlg_assert(dev.dispatch.CmdEndTransformFeedbackEXT);
+
+			// init xfb buffer
+			auto xfbSize = 1024 * 1024; // TODO
+			auto usage =
+				VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+			state->transformFeedback.init(dev, xfbSize, usage);
+
+			auto offset = VkDeviceSize(0u);
+			dev.dispatch.CmdBindTransformFeedbackBuffersEXT(cb, 0u, 1u,
+				&state->transformFeedback.buffer.buf, &offset,
+				&state->transformFeedback.buffer.size);
+			dev.dispatch.CmdBeginTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
+
+			endXfb = true;
+		}
+	}
+
+	cmd.record(dev, this->cb);
+
+	if(endXfb) {
+		dev.dispatch.CmdEndTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
+	}
+
+	auto parentCmd = dynamic_cast<const ParentCommand*>(&cmd);
+	auto nextInfo = info;
+	if(parentCmd) {
+		++nextInfo.nextHookLevel;
+		hookRecord(parentCmd->children(), nextInfo);
+	}
+
+	if(queryPool) {
+		if(!parentCmd) {
+			// timing 0
+			auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
+		}
+
+		// timing 1
+		auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
+	}
+
+	// render pass split: rp2
+	hookRecordAfterDst(cmd, info);
+}
+
+void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 	auto& dev = record->device();
 	while(cmd) {
 		auto nextInfo = info;
@@ -434,6 +587,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 			auto* beginRpCmd = dynamic_cast<BeginRenderPassCmd*>(cmd);
 			if(info.splitRenderPass && beginRpCmd) {
 				dlg_assert(rp0);
+				dlg_assert(!hookDst);
 				auto rpBeginInfo = beginRpCmd->info;
 				rpBeginInfo.renderPass = rp0;
 
@@ -452,147 +606,20 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo info) {
 				skipRecord = true;
 			}
 
-			// before hook
-			// TODO: also call beforeDstOutsideRp when there is no rp to split,
-			// e.g. for dispatch or transfer commands.
-			if(hookDst && info.splitRenderPass) {
-				dlg_assert(info.beginRenderPassCmd);
-
-				// TODO: missing potential forward of pNext chain here
-				auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
-				for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
-					// TODO: missing potential forward of pNext chain here
-					// TODO: subpass contents relevant?
-					dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
-				}
-				dev.dispatch.CmdEndRenderPass(cb);
-
-				beforeDstOutsideRp(*cmd, info);
-
-				dlg_assert(rp1);
-				auto rpBeginInfo = info.beginRenderPassCmd->info;
-				rpBeginInfo.renderPass = rp1;
-				// we don't clear anything when starting this rp
-				rpBeginInfo.pClearValues = nullptr;
-				rpBeginInfo.clearValueCount = 0u;
-
-				if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
-					auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
-					dlg_assert(beginRp2);
-					beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
-				} else {
-					dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
-						info.beginRenderPassCmd->subpassBeginInfo.contents);
-				}
-
-				for(auto i = 0u; i < info.hookedSubpass; ++i) {
-					// TODO: missing potential forward of pNext chain here
-					// TODO: subpass contents relevant?
-					dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
-				}
-			} else if(hookDst && !info.splitRenderPass && !info.beginRenderPassCmd) {
-				beforeDstOutsideRp(*cmd, info);
-			}
-
-			// transform feedback
-			auto endXfb = false;
-			if(auto drawCmd = dynamic_cast<DrawCmdBase*>(cmd); drawCmd && hookDst) {
-				if(drawCmd->state.pipe->xfbPatched) {
-					dlg_assert(dev.transformFeedback);
-					dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
-					dlg_assert(dev.dispatch.CmdBindTransformFeedbackBuffersEXT);
-					dlg_assert(dev.dispatch.CmdEndTransformFeedbackEXT);
-
-					// init xfb buffer
-					auto xfbSize = 1024 * 1024; // TODO
-					auto usage =
-						VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
-						VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-					state->transformFeedback.init(dev, xfbSize, usage);
-
-					auto offset = VkDeviceSize(0u);
-					dev.dispatch.CmdBindTransformFeedbackBuffersEXT(cb, 0u, 1u,
-						&state->transformFeedback.buffer.buf, &offset,
-						&state->transformFeedback.buffer.size);
-					dev.dispatch.CmdBeginTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
-
-					endXfb = true;
-				}
-			}
-
-			if(!skipRecord) {
-				cmd->record(dev, this->cb);
-			}
-
-			if(endXfb) {
-				dev.dispatch.CmdEndTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
-			}
-
-			auto parentCmd = dynamic_cast<const ParentCommand*>(cmd);
-			dlg_assert(hookDst || (parentCmd && parentCmd->children()));
-
-			if(parentCmd) {
-				if(hookDst && queryPool) {
-					// timing 0
-					auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-					dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
-				}
-
-				++nextInfo.nextHookLevel;
-				hookRecord(parentCmd->children(), nextInfo);
-			}
-
 			if(hookDst) {
-				if(queryPool) {
-					if(!parentCmd) {
-						// timing 0
-						auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-						dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
-					}
+				dlg_assert(!skipRecord);
+				hookRecordDst(*cmd, info);
+			} else {
+				auto parentCmd = dynamic_cast<const ParentCommand*>(cmd);
+				dlg_assert(hookDst || (parentCmd && parentCmd->children()));
 
-					// timing 1
-					auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-					dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
+				if(!skipRecord) {
+					cmd->record(dev, this->cb);
 				}
 
-				// render pass split: rp2
-				if(info.splitRenderPass) {
-					dlg_assert(info.beginRenderPassCmd);
-
-					// TODO: missing potential forward of pNext chain here
-					auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
-					for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
-						// TODO: missing potential forward of pNext chain here
-						// TODO: subpass contents relevant?
-						dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
-					}
-					dev.dispatch.CmdEndRenderPass(cb);
-
-					afterDstOutsideRp(*cmd, info);
-
-					dlg_assert(rp2);
-					auto rpBeginInfo = info.beginRenderPassCmd->info;
-					rpBeginInfo.renderPass = rp2;
-					// we don't clear anything when starting this rp
-					rpBeginInfo.pClearValues = nullptr;
-					rpBeginInfo.clearValueCount = 0u;
-
-					if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
-						auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
-						dlg_assert(beginRp2);
-						beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
-					} else {
-						dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
-							info.beginRenderPassCmd->subpassBeginInfo.contents);
-					}
-
-					for(auto i = 0u; i < info.hookedSubpass; ++i) {
-						// TODO: missing potential forward of pNext chain here
-						// TODO: subpass contents relevant?
-						dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
-					}
-				} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
-					afterDstOutsideRp(*cmd, info);
+				if(parentCmd) {
+					++nextInfo.nextHookLevel;
+					hookRecord(parentCmd->children(), nextInfo);
 				}
 			}
 		} else {
@@ -1074,8 +1101,13 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 
 	auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd);
 
-	// TODO: for non-indirect, non-indexed commands we know the exact number
-	// of vertices to copy
+	// PERF: we could support tighter buffer bounds for indirect/indexed draw
+	// calls. See node 1749 for a sketch using a couple of compute shaders,
+	// basically emulating an indirect transfer.
+	// PERF: for non-indexed/non-indirect draw calls we know the exact
+	// sizes of vertex/index buffers to copy, we could use that.
+	auto maxVertIndSize = maxBufCopySize;
+
 	if(hook->copyVertexBuffers) {
 		dlg_assert(drawCmd);
 		for(auto& vertbuf : drawCmd->state.vertices) {
@@ -1084,20 +1116,17 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 				continue;
 			}
 
-			// TODO: add vertex buffer usage flag
-			auto size = std::min(maxBufCopySize, vertbuf.buffer->ci.size - vertbuf.offset);
+			auto size = std::min(maxVertIndSize, vertbuf.buffer->ci.size - vertbuf.offset);
 			initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
 				vertbuf.buffer->handle, vertbuf.offset, size);
 		}
 	}
 
-	// TODO: for non-indirect commands we know the exact number of indices to copy
 	if(hook->copyIndexBuffers) {
 		dlg_assert(drawCmd);
 		auto& inds = drawCmd->state.indices;
 		if(inds.buffer) {
-			auto size = std::min(maxBufCopySize, inds.buffer->ci.size - inds.offset);
-			// TODO: add index buffer usage flag
+			auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
 			initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
 				inds.buffer->handle, inds.offset, size);
 		}
@@ -1191,17 +1220,26 @@ void CommandHookSubmission::finish(Submission& subm) {
 	transmitTiming();
 	record->hook->state = record->state;
 
+	auto maxCopySize = 64 * 1024;
+
+	auto cpuCopyMin = [&](auto& buf) {
+		auto size = std::min<VkDeviceSize>(buf.buffer.size, maxCopySize);
+		buf.cpuCopy(0, size);
+	};
+
 	// copy potential buffers
 	// TODO: only copy the requested region, what we are currently
 	// viewing and therefore *absolutely* need on cpu.
 	if(auto* buf = std::get_if<CopiedBuffer>(&record->state->dsCopy)) {
-		buf->cpuCopy();
+		cpuCopyMin(*buf);
 	}
-	record->state->indexBufCopy.cpuCopy();
-	record->state->indirectCopy.cpuCopy();
-	record->state->transformFeedback.cpuCopy();
+
+	cpuCopyMin(record->state->indexBufCopy);
+	cpuCopyMin(record->state->indirectCopy);
+	cpuCopyMin(record->state->transformFeedback);
+
 	for(auto& vbuf : record->state->vertexBufCopies) {
-		vbuf.cpuCopy();
+		cpuCopyMin(vbuf);
 	}
 }
 

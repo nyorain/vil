@@ -65,15 +65,6 @@ struct Draw {
 	bool futureSemaphoreUsed {}; // only for binary semaphores
 	bool futureSemaphoreSignaled {}; // only false when draw is used first
 
-	// Used to synchronize with the next following draw.
-	// We can't ever have multiple Draws begin executed in parallel
-	// since they are using shared resources (e.g. the depth buffer).
-	// At the same time we don't want to wait for draws on CPU since
-	// that could influence the application's timing a lot.
-	// When timeline semaphores are avaiable, this is null and we
-	// use futureSemaphore for that usecase as well.
-	VkSemaphore futureDrawSemaphore {};
-
 	// Fence associated with the gfx submission of this rendering.
 	// Used to check if frame has completed and Draw can be used again.
 	// Iff inUse is true, the fence has payload associated with it (that might
@@ -95,6 +86,9 @@ struct Draw {
 	// waited upon. When the draw finishes, they should be returned
 	// to the Devices semaphore pool (they are already reset).
 	std::vector<VkSemaphore> waitedUpon;
+
+	// frame number in which this draw was last used
+	u64 lastUsed {};
 
 	void init(Device& dev, VkCommandPool pool);
 

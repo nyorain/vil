@@ -40,7 +40,9 @@ struct CopiedImage {
 struct CopiedBuffer {
 	OwnBuffer buffer {};
 	void* map {};
-	std::unique_ptr<std::byte[]> copy;
+
+	std::vector<std::byte> copy;
+	u64 copyOffset;
 
 	CopiedBuffer() = default;
 	void init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFlags);
@@ -48,7 +50,7 @@ struct CopiedBuffer {
 	CopiedBuffer& operator=(CopiedBuffer&&) noexcept = default;
 	~CopiedBuffer() = default;
 
-	void cpuCopy();
+	void cpuCopy(u64 offset = 0, u64 size = VK_WHOLE_SIZE);
 };
 
 // NOTE: in most cases (except for xfb) we don't actually need CopiedBuffer
@@ -220,7 +222,10 @@ struct CommandHookRecord {
 
 	void initState(RecordInfo&);
 
-	void hookRecord(Command* cmdChain, RecordInfo);
+	void hookRecordBeforeDst(Command& dst, const RecordInfo&);
+	void hookRecordAfterDst(Command& dst, const RecordInfo&);
+	void hookRecordDst(Command& dst, const RecordInfo&);
+	void hookRecord(Command* cmdChain, const RecordInfo&);
 
 	void copyTransfer(Command& bcmd, const RecordInfo&);
 	void copyDs(Command& bcmd, const RecordInfo&);
@@ -237,7 +242,7 @@ struct CommandHookRecord {
 	// In general, the problem is that we can't know the relevant
 	// size for sub-allocated buffers. Theoretically, we could analyze
 	// previous index/indirect data for this. Not sure if good idea.
-	static constexpr auto maxBufCopySize = VkDeviceSize(256 * 1024);
+	static constexpr auto maxBufCopySize = VkDeviceSize(128 * 1024 * 1024);
 };
 
 struct CommandHookSubmission {

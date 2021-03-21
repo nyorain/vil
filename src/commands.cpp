@@ -681,6 +681,8 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 void DrawCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(state.pipe, destroyed);
 	checkUnset(state.indices.buffer, destroyed);
+	checkUnset(state.rp, destroyed);
+	checkUnset(state.fb, destroyed);
 
 	for(auto& verts : state.vertices) {
 		checkUnset(verts.buffer, destroyed);

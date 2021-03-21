@@ -53,10 +53,10 @@ public:
 	// is drawing at the same time (externally synchronized).
 	void waitForDraws();
 
-	// Returns all draws that are pending.
-	// Must only be called and the draw resources only be accessed while
-	// the device mutex is locked.
-	std::vector<Draw*> pendingDrawsLocked();
+	// Returns the latest pending Draw that needs to be synchronized
+	// with the given submission batch. In case there is no such Draw,
+	// returns nullptr.
+	Draw* latestPendingDrawSyncLocked(SubmissionBatch&);
 
 	void activateTab(Tab);
 	void selectResource(Handle& handle, bool activateTab = true);
@@ -133,6 +133,7 @@ private:
 	Clock::time_point lastFrame_ {};
 
 	float dt_ {};
+	u64 drawCounter_ {};
 
 	// drawing/sync logic
 	bool resourcesTabDrawn_ {};

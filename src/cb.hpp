@@ -41,7 +41,7 @@ public:
 public:
 	// List of pending submissions including this cb.
 	// Access synchronized via device mutex.
-	std::vector<SubmissionBatch*> pending;
+	std::vector<Submission*> pending;
 
 public:
 	CommandBuffer(CommandPool& pool, VkCommandBuffer handle);
