@@ -127,4 +127,14 @@ struct FinishHandler {
 template<typename T> using IntrusivePtr = HandledPtr<T, RefCountHandler<T>>;
 template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
+template<typename T, typename H>
+bool operator==(const HandledPtr<T, H>& a, const HandledPtr<T, H>& b) {
+	return a.get() == b.get();
+}
+
+template<typename T, typename H>
+bool operator!=(const HandledPtr<T, H>& a, const HandledPtr<T, H>& b) {
+	return a.get() != b.get();
+}
+
 } // namspace vil

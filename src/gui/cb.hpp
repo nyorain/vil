@@ -3,12 +3,12 @@
 #include <fwd.hpp>
 #include <gui/render.hpp>
 #include <gui/vertexViewer.hpp>
+#include <gui/command.hpp>
 #include <util/flags.hpp>
 #include <commandDesc.hpp>
 
 namespace vil {
 
-struct CopiedImage;
 struct RecordBatch;
 
 class CommandBufferGui {
@@ -36,19 +36,7 @@ public:
 	void selectGroup(IntrusivePtr<CommandRecord> record);
 
 private:
-	void displayDsList(const Command&);
-	void displayIOList(const Command&);
-	void displaySelectedIO(Draw& draw, const Command&);
-	void displayInspector(Draw& draw, const Command&);
-	void displayActionInspector(Draw& cmd, const Command&);
-	void displayDs(Draw& draw, const Command&);
-
-	void displayVertexInput(Draw& draw, const DrawCmdBase&);
-	void displayVertexOutput(Draw& draw, const DrawCmdBase&);
-	void displayVertexViewer(Draw& draw, const Command&);
-
-	// Can only be called once per frame.
-	void displayImage(Draw& draw, const CopiedImage& img);
+	void updateHookTarget();
 
 private:
 	friend class Gui;
@@ -78,19 +66,7 @@ private:
 	// same command in future records/cb selections.
 	std::vector<CommandDesc> desc_ {};
 
-	// For the one image we potentially display
-	DrawGuiImage ioImage_ {};
-
-	VertexViewer vertexViewer_ {};
-
-	struct VertexDrawData {
-		CommandBufferGui* self;
-		VkCommandBuffer cb;
-		Vec2f offset;
-		Vec2f size;
-		const DrawCmdBase* cmd;
-		u32 vertexCount;
-	} vertexDrawData_;
+	CommandViewer commandViewer_ {};
 };
 
 } // namespace vil

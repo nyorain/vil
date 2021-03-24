@@ -720,9 +720,9 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cmd.fb = cb.dev->framebuffers.find(rpBeginInfo.framebuffer);
 	cmd.rp = cb.dev->renderPasses.find(rpBeginInfo.renderPass);
 
-	dlg_assert(!cb.graphicsState().rp && !cb.graphicsState().fb);
-	cb.graphicsState().fb = cmd.fb;
-	cb.graphicsState().rp = cmd.rp;
+	dlg_assert(!cb.graphicsState().rpi);
+	cb.graphicsState().rpi = &cmd;
+	cb.graphicsState().subpass = 0u;
 
 	cmd.subpassBeginInfo = subpassBeginInfo;
 	copyChainInPlace(cb, cmd.subpassBeginInfo.pNext);
@@ -777,6 +777,10 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 	cmd.beginInfo = {};
 	cmd.beginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
 	cmd.beginInfo.contents = contents;
+
+	dlg_assert(cb.graphicsState().rpi);
+	++cb.graphicsState().subpass;
+
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
 
@@ -791,9 +795,8 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 	cmd.endInfo = {};
 	cmd.endInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_END_INFO;
 
-	dlg_assert(cb.graphicsState().fb && cb.graphicsState().rp);
-	cb.graphicsState().fb = nullptr;
-	cb.graphicsState().rp = nullptr;
+	dlg_assert(cb.graphicsState().rpi);
+	cb.graphicsState().rpi = nullptr;
 
 	cb.dev->dispatch.CmdEndRenderPass(commandBuffer);
 }
@@ -818,6 +821,9 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 	cmd.beginInfo = *pSubpassBeginInfo;
 	copyChainInPlace(cb, cmd.beginInfo.pNext);
 
+	dlg_assert(cb.graphicsState().rpi);
+	++cb.graphicsState().subpass;
+
 	auto f = cb.dev->dispatch.CmdNextSubpass2;
 	f(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
 }
@@ -829,6 +835,9 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = *pSubpassEndInfo;
 	copyChainInPlace(cb, cmd.endInfo.pNext);
+
+	dlg_assert(cb.graphicsState().rpi);
+	cb.graphicsState().rpi = nullptr;
 
 	auto f = cb.dev->dispatch.CmdEndRenderPass2;
 	f(commandBuffer, pSubpassEndInfo);
@@ -854,7 +863,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// since the application not destroying it does not move the command
 	// buffer into invalid state (and vulkan requires that it's kept
 	// alive while recording).
-	// Since we might need it lateron, we acquire shared ownership.
+	// Since we might need it later on, we acquire shared ownership.
 	// Also like this in CmdPushConstants
 	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
@@ -863,58 +872,6 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
-
-		/*
-		for(auto b = 0u; b < ds.bindings.size(); ++b) {
-			auto descriptorType = ds.layout->bindings[b].descriptorType;
-			auto cat = category(descriptorType);
-			if(cat == DescriptorCategory::image) {
-				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
-					if(!ds.bindings[b][e].valid) {
-						continue;
-					}
-
-					auto& info = ds.bindings[b][e].imageInfo;
-					if(needsImageView(descriptorType)) {
-						dlg_assert(info.imageView);
-						if(info.imageView) {
-							useHandle(cb, cmd, *info.imageView);
-						}
-					}
-
-					if(needsSampler(*ds.layout, b)) {
-						dlg_assert(info.sampler);
-						if(info.sampler) {
-							useHandle(cb, cmd, *info.sampler);
-						}
-					}
-				}
-			} else if(cat == DescriptorCategory::buffer) {
-				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
-					if(!ds.bindings[b][e].valid) {
-						continue;
-					}
-
-					auto& info = ds.bindings[b][e].bufferInfo;
-					dlg_assert(info.buffer);
-					if(info.buffer) {
-						useHandle(cb, cmd, *info.buffer);
-					}
-				}
-			} else if(cat == DescriptorCategory::bufferView) {
-				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
-					if(!ds.bindings[b][e].valid) {
-						continue;
-					}
-
-					auto* bufView = ds.bindings[b][e].bufferView;
-					dlg_assert(bufView);
-					dlg_assert(bufView->buffer);
-					useHandle(cb, cmd, *bufView);
-				}
-			}
-		}
-		*/
 
 		useHandle(cb, cmd, ds);
 		cmd.sets[i] = &ds;
@@ -1448,6 +1405,9 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 
 	cmd.attachments = copySpan(cb, pAttachments, attachmentCount);
 	cmd.rects = copySpan(cb, pRects, rectCount);
+
+	dlg_assert(cb.graphicsState().rpi);
+	cmd.rpi = cb.graphicsState().rpi;
 
 	// NOTE: add clears attachments handles to used handles for this cmd?
 	// but they were already used in BeginRenderPass and are just implicitly

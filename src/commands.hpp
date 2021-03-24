@@ -190,11 +190,11 @@ struct BarrierCmd : BarrierCmdBase {
 
 // All direct children must be of type 'NextSubpassCmd'
 struct BeginRenderPassCmd : SectionCommand {
-	VkRenderPassBeginInfo info;
+	VkRenderPassBeginInfo info {};
 	span<VkClearValue> clearValues;
 
-	Framebuffer* fb;
-	RenderPass* rp;
+	Framebuffer* fb {};
+	RenderPass* rp {};
 
 	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
 
@@ -581,6 +581,7 @@ struct ClearDepthStencilImageCmd : Command {
 struct ClearAttachmentCmd : Command {
 	span<VkClearAttachment> attachments;
 	span<VkClearRect> rects;
+	BeginRenderPassCmd* rpi {};
 
 	std::string nameDesc() const override { return "ClearAttachment"; }
 	std::vector<std::string> argumentsDesc() const override;

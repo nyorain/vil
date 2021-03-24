@@ -1,18 +1,136 @@
 #include <gui/vertexViewer.hpp>
 #include <gui/commandHook.hpp>
+#include <gui/util.hpp>
+#include <util/f16.hpp>
 #include <util/transform.hpp>
+#include <util/util.hpp>
 #include <device.hpp>
+#include <shader.hpp>
 #include <commandDesc.hpp>
 #include <commands.hpp>
 #include <pipe.hpp>
 #include <imgui/imgui.h>
 #include <vk/format_utils.h>
+#include <vk/enumString.hpp>
+#include <spirv_reflect.h>
 
 #include <vertices.vert.spv.h>
 #include <vertices.frag.spv.h>
 
 namespace vil {
 
+// util
+template<typename T>
+std::string readFormat(u32 count, span<const std::byte> src) {
+	auto ret = std::string {};
+	auto sep = "";
+	for(auto i = 0u; i < count; ++i) {
+		ret += dlg::format("{}{}", sep, read<T>(src));
+		sep = ", ";
+	}
+
+	dlg_assert(src.empty());
+	return ret;
+}
+
+template<typename T>
+std::string readFormatNorm(u32 count, span<const std::byte> src, float mult,
+		float clampMin, float clampMax) {
+	auto ret = std::string {};
+	auto sep = "";
+	for(auto i = 0u; i < count; ++i) {
+		auto val = std::clamp(read<T>(src) * mult, clampMin, clampMax);
+		ret += dlg::format("{}{}", sep, val);
+		sep = ", ";
+	}
+
+	dlg_assert(src.empty());
+	return ret;
+}
+
+// TODO: support compresssed formats!
+// TODO: rgb/bgr order matters here! Fix that.
+//   We need to seriously rework this, more something
+//   like the format read function in util/util.hpp
+std::string readFormat(VkFormat format, span<const std::byte> src) {
+	u32 numChannels = FormatChannelCount(format);
+	u32 componentSize = FormatElementSize(format) / numChannels;
+
+	if(FormatIsFloat(format)) {
+		switch(componentSize) {
+			case 2: return readFormat<f16>(numChannels, src);
+			case 4: return readFormat<float>(numChannels, src);
+			case 8: return readFormat<double>(numChannels, src);
+			default: break;
+		}
+	} else if(FormatIsUInt(format) || FormatIsUScaled(format)) {
+		switch(componentSize) {
+			case 1: return readFormat<u8>(numChannels, src);
+			case 2: return readFormat<u16>(numChannels, src);
+			case 4: return readFormat<u32>(numChannels, src);
+			case 8: return readFormat<u64>(numChannels, src);
+			default: break;
+		}
+	} else if(FormatIsInt(format) || FormatIsSScaled(format)) {
+		switch(componentSize) {
+			case 1: return readFormat<i8>(numChannels, src);
+			case 2: return readFormat<i16>(numChannels, src);
+			case 4: return readFormat<i32>(numChannels, src);
+			case 8: return readFormat<i64>(numChannels, src);
+			default: break;
+		}
+	} else if(FormatIsUNorm(format)) {
+		switch(componentSize) {
+			case 1: return readFormatNorm<u8> (numChannels, src, 1 / 255.f, 0.f, 1.f);
+			case 2: return readFormatNorm<u16>(numChannels, src, 1 / 65536.f, 0.f, 1.f);
+			default: break;
+		}
+	} else if(FormatIsSNorm(format)) {
+		switch(componentSize) {
+			case 1: return readFormatNorm<i8> (numChannels, src, 1 / 127.f, -1.f, 1.f);
+			case 2: return readFormatNorm<i16>(numChannels, src, 1 / 32767.f, -1.f, 1.f);
+			default: break;
+		}
+	} else if(format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) {
+		auto rgb = e5b9g9r9ToRgb(read<u32>(src));
+		return dlg::format("{}", rgb[0], rgb[1], rgb[2]);
+	}
+
+	// TODO: a lot of formats not supported yet!
+
+	dlg_warn("Format {} not supported", vk::name(format));
+	return "<Unsupported format>";
+}
+
+// NOTE: this could probably be improved
+bool perspectiveHeuristic(span<const Vec4f> clipSpaceVerts) {
+	if(clipSpaceVerts.empty()) {
+		dlg_warn("no data for orthogonal/perspective heuristic");
+		return false;
+	}
+
+	float firstW = clipSpaceVerts[0][3];
+	bool nonConstW = false;
+	bool nonOneW = false;
+
+	for(auto i = 0u; i < std::min<u32>(20, clipSpaceVerts.size()); ++i) {
+		if(std::abs(clipSpaceVerts[i][3] - 1.f) > 0.001) {
+			nonOneW = true;
+		}
+
+		if(std::abs(clipSpaceVerts[i][3] - firstW) > 0.001) {
+			nonConstW = true;
+		}
+	}
+
+	if(nonConstW != nonOneW) {
+		dlg_warn("conflicting data for orthogonal/perspective heuristic");
+	}
+
+	return nonOneW;
+}
+
+// VertexViewer
 VertexViewer::~VertexViewer() {
 	if(!dev_) {
 		return;
@@ -107,10 +225,8 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 
 	VkPipelineRasterizationStateCreateInfo rasterInfo {};
 	rasterInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-	// TODO: line mode could be useful. Allow to toggle?
-	// Need to enable nonSolidFill device feature though
-	rasterInfo.polygonMode = VK_POLYGON_MODE_FILL;
-	// rasterInfo.polygonMode = VK_POLYGON_MODE_LINE;
+	// TODO: Allow to toggle? Or draw both?
+	rasterInfo.polygonMode = dev.nonSolidFill ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
 	rasterInfo.cullMode = VK_CULL_MODE_NONE;
 	rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	rasterInfo.lineWidth = 1.0f;
@@ -263,9 +379,20 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const DrawData& data) {
 	dev.dispatch.CmdSetViewport(cb, 0, 1, &viewport);
 
 	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, foundPipe);
+
+	struct {
+		Mat4f matrix;
+		u32 useW;
+		float scale;
+	} pcData = {
+		viewProjMtx_,
+		data.useW,
+		data.scale,
+	};
+
 	dev.dispatch.CmdPushConstants(cb, pipeLayout_,
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-		0, sizeof(viewProjMtx_), &viewProjMtx_);
+		0, sizeof(pcData), &pcData);
 
 	dev.dispatch.CmdBindVertexBuffers(cb, 0, 1, &vbuf.buffer, &voffset);
 
@@ -390,6 +517,332 @@ void VertexViewer::updateInput(float dt) {
 
 	auto viewMtx = viewMatrix(cam_);
 	viewProjMtx_ = projMtx * viewMtx;
+}
+
+void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
+		const CommandHookState& state, float dt) {
+	// TODO: display binding information
+	// TODO: how to display indices?
+	// TODO: only show vertex range used for draw call
+
+	dlg_assert_or(cmd.state.pipe, return);
+	if(state.vertexBufCopies.size() < cmd.state.pipe->vertexBindings.size()) {
+		if(!state.errorMessage.empty()) {
+			imGuiText("Error: {}", state.errorMessage);
+		} else {
+			ImGui::Text("Error: not enough vertex buffers bound");
+		}
+
+		return;
+	}
+
+
+	auto& pipe = *cmd.state.pipe;
+
+	SpvReflectShaderModule* vertStage = nullptr;
+	for(auto& stage : pipe.stages) {
+		if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
+			vertStage = &nonNull(nonNull(stage.spirv).reflection);
+			break;
+		}
+	}
+
+	if(!vertStage) {
+		// TODO: yeah this can happen with mesh shaders now
+		ImGui::Text("Grahpics Pipeline has no vertex stage :o");
+		return;
+	}
+
+	// match bindings to input variables into
+	// (pipe.vertexAttrib, vertStage->input_variables) id pairs
+	std::vector<std::pair<u32, u32>> attribs;
+	for(auto a = 0u; a < pipe.vertexAttribs.size(); ++a) {
+		auto& attrib = pipe.vertexAttribs[a];
+		for(auto i = 0u; i < vertStage->input_variable_count; ++i) {
+			auto& iv = *vertStage->input_variables[i];
+			if(iv.location == attrib.location) {
+				attribs.push_back({a, i});
+			}
+		}
+	}
+
+	// TODO sort attribs by input location?
+
+	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
+	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
+		if(attribs.empty()) {
+			ImGui::Text("No Vertex input");
+		} else if(ImGui::BeginTable("Vertices", int(attribs.size()), flags)) {
+			for(auto& attrib : attribs) {
+				auto& iv = *vertStage->input_variables[attrib.second];
+				ImGui::TableSetupColumn(iv.name);
+			}
+
+			ImGui::TableHeadersRow();
+			ImGui::TableNextRow();
+
+			auto finished = false;
+			auto id = 0u;
+			while(!finished && id < 100) {
+				for(auto& [aID, _] : attribs) {
+					auto& attrib = pipe.vertexAttribs[aID];
+					ImGui::TableNextColumn();
+
+					auto& binding = pipe.vertexBindings[attrib.binding];
+					auto& buf = state.vertexBufCopies[attrib.binding];
+					auto off = binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX ?
+						id * binding.stride : 0u;
+					off += attrib.offset;
+
+					// TODO: compressed support?
+					auto size = FormatElementSize(attrib.format);
+
+					if(off + size > buf.copy.size()) {
+						finished = true;
+						break;
+					}
+
+					auto* ptr = buf.copy.data() + off;
+					auto str = readFormat(attrib.format, {ptr, size});
+
+					imGuiText("{}", str);
+				}
+
+				++id;
+				ImGui::TableNextRow();
+			}
+
+			ImGui::EndTable();
+		}
+	}
+
+	ImGui::EndChild();
+
+	// 2: viewer
+	if(ImGui::BeginChild("vertexViewer")) {
+		auto avail = ImGui::GetContentRegionAvail();
+		auto pos = ImGui::GetCursorScreenPos();
+
+		vertexDrawData_.self = this;
+		vertexDrawData_.state = &state;
+		vertexDrawData_.cb = draw.cb;
+		vertexDrawData_.offset = {pos.x, pos.y};
+		vertexDrawData_.size = {avail.x, avail.y};
+		vertexDrawData_.cmd = &cmd;
+
+		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+			auto* data = static_cast<VertexDrawData*>(cmd->UserCallbackData);
+			auto& hook = *data->self->dev_->commandHook;
+			auto& pipe = *data->cmd->state.pipe;
+
+			std::optional<VkIndexType> indexType;
+			u32 offset {};
+			u32 drawCount {};
+			u32 vertexOffset {};
+
+			if(auto* dcmd = dynamic_cast<const DrawCmd*>(data->cmd); dcmd) {
+				offset = dcmd->firstVertex;
+				drawCount = dcmd->vertexCount;
+			} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(data->cmd); dcmd) {
+				offset = dcmd->firstIndex;
+				vertexOffset = dcmd->vertexOffset;
+				drawCount = dcmd->indexCount;
+				indexType = dcmd->state.indices.type;
+			} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(data->cmd); dcmd) {
+				dlg_assert(hook.copyIndirectCmd);
+				dlg_assert(hook.state);
+
+				auto& ic = data->state->indirectCopy;
+				auto span = ReadBuf(ic.copy);
+				if(dcmd->indexed) {
+					auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
+					offset = ecmd.firstIndex;
+					drawCount = ecmd.indexCount;
+					vertexOffset = ecmd.vertexOffset;
+					indexType = dcmd->state.indices.type;
+				} else {
+					auto ecmd = read<VkDrawIndirectCommand>(span);
+					offset = ecmd.firstVertex;
+					drawCount = ecmd.vertexCount;
+				}
+
+			} else {
+				// TODO: DrawIndirectCount
+				dlg_info("Vertex viewer unimplemented for command type");
+				return;
+			}
+
+			data->self->imGuiDraw(data->cb, pipe,
+				*data->state, indexType, offset, drawCount, vertexOffset,
+				data->offset, data->size);
+		};
+
+		ImGui::GetWindowDrawList()->AddCallback(cb, &vertexDrawData_);
+		ImGui::InvisibleButton("Canvas", avail);
+		updateInput(dt);
+	}
+
+	ImGui::EndChild();
+}
+
+u32 topologyOutputCount(VkPrimitiveTopology topo, i32 in) {
+	switch(topo) {
+		case VK_PRIMITIVE_TOPOLOGY_POINT_LIST:
+		case VK_PRIMITIVE_TOPOLOGY_LINE_LIST:
+		case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST:
+			return u32(in);
+
+		case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP:
+			return u32(2 * std::max(0, in - 1));
+
+		case VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY:
+			return u32(in / 2);
+		case VK_PRIMITIVE_TOPOLOGY_LINE_STRIP_WITH_ADJACENCY:
+			return u32(2 * std::max(0, in - 3));
+
+		case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP:
+		case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN:
+			return u32(3 * std::max(0, in - 2));
+
+		case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST_WITH_ADJACENCY:
+			return u32(in / 2);
+		case VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP_WITH_ADJACENCY:
+		case VK_PRIMITIVE_TOPOLOGY_PATCH_LIST:
+			dlg_warn("Not implemeneted"); // ugh, no idea
+			return 0u;
+
+		default:
+			dlg_error("Invalid topology {}", u32(topo));
+			return 0u;
+	}
+}
+
+void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
+		const CommandHookState& state, float dt) {
+	dlg_assert_or(cmd.state.pipe, return);
+
+	if(!cmd.state.pipe->xfbPatched) {
+		imGuiText("Error: couldn't inject transform feedback code to shader");
+		return;
+	} else if(!state.transformFeedback.buffer.size) {
+		if(!state.errorMessage.empty()) {
+			imGuiText("Transform feedback error: {}", state.errorMessage);
+		} else {
+			ImGui::Text("Error: no transform feedback");
+		}
+
+		return;
+	}
+
+	u32 vertexCount {};
+	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
+		vertexCount = dcmd->vertexCount * dcmd->instanceCount;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
+		vertexCount = dcmd->indexCount * dcmd->instanceCount;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
+		dlg_assert(dev_->commandHook->copyIndirectCmd);
+		dlg_assert(state.indirectCopy.buffer.size);
+
+		auto& ic = state.indirectCopy;
+		auto span = ReadBuf(ic.copy);
+		if(dcmd->indexed) {
+			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
+			vertexCount = ecmd.indexCount * ecmd.instanceCount;
+		} else {
+			auto ecmd = read<VkDrawIndirectCommand>(span);
+			vertexCount = ecmd.vertexCount * ecmd.instanceCount;
+		}
+
+	} else {
+		// TODO: DrawIndirectCount
+		imGuiText("Vertex viewer unimplemented for command type");
+		return;
+	}
+
+	vertexCount = topologyOutputCount(cmd.state.pipe->inputAssemblyState.topology, vertexCount);
+	vertexCount = std::min(vertexCount, u32(state.transformFeedback.buffer.size / 16u));
+
+	// 1: table
+	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
+	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
+		if(ImGui::BeginTable("Vertices", 1, flags)) {
+			ImGui::TableSetupColumn("Builtin Position");
+			ImGui::TableHeadersRow();
+			ImGui::TableNextRow();
+
+			auto xfbData = ReadBuf(state.transformFeedback.copy);
+			auto vCount = std::min(vertexCount, u32(xfbData.size() / 16u));
+
+			for(auto i = 0u; i < std::min(u32(100u), vCount); ++i) {
+				ImGui::TableNextColumn();
+
+				auto pos = read<Vec4f>(xfbData);
+				imGuiText("{}", pos);
+
+				ImGui::TableNextRow();
+			}
+
+			ImGui::EndTable();
+		}
+	}
+
+	ImGui::EndChild();
+
+	// 2: viewer
+	if(ImGui::BeginChild("vertexViewer")) {
+		auto avail = ImGui::GetContentRegionAvail();
+		auto pos = ImGui::GetCursorScreenPos();
+
+		vertexDrawData_.self = this;
+		vertexDrawData_.state = &state;
+		vertexDrawData_.cb = draw.cb;
+		vertexDrawData_.offset = {pos.x, pos.y};
+		vertexDrawData_.size = {avail.x, avail.y};
+		vertexDrawData_.cmd = &cmd;
+		vertexDrawData_.vertexCount = vertexCount;
+
+		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+			auto* data = static_cast<VertexDrawData*>(cmd->UserCallbackData);
+			auto& xfbBuf = data->state->transformFeedback.buffer;
+
+			VkVertexInputBindingDescription vertexBinding {
+				0u, sizeof(Vec4f), VK_VERTEX_INPUT_RATE_VERTEX,
+			};
+
+			VkVertexInputAttributeDescription vertexAttrib {
+				0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
+			};
+
+			VertexViewer::DrawData drawData {};
+			drawData.drawCount = data->vertexCount;
+			drawData.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
+			drawData.vertexInfo.vertexAttributeDescriptionCount = 1u;
+			drawData.vertexInfo.pVertexAttributeDescriptions = &vertexAttrib;
+			drawData.vertexInfo.vertexBindingDescriptionCount = 1u;
+			drawData.vertexInfo.pVertexBindingDescriptions = &vertexBinding;
+			drawData.canvasOffset = data->offset;
+			drawData.canvasSize = data->size;
+			drawData.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+			auto xfbData = ReadBuf(data->state->transformFeedback.copy);
+			auto ptr = reinterpret_cast<const Vec4f*>(xfbData.data());
+			drawData.useW = perspectiveHeuristic({ptr, xfbData.size() / 16u});
+			drawData.scale = 100.f; // TODO
+
+			data->self->imGuiDraw(data->cb, drawData);
+		};
+
+		ImGui::GetWindowDrawList()->AddCallback(cb, &vertexDrawData_);
+		ImGui::InvisibleButton("Canvas", avail);
+		updateInput(dt);
+
+		// we read from the buffer that is potentially written again
+		// by the hook so we need barriers.
+		draw.usedHookState = IntrusivePtr<CommandHookState>(const_cast<CommandHookState*>(&state));
+		dlg_assert(draw.usedHookState);
+	}
+
+	ImGui::EndChild();
 }
 
 } // namespace vil

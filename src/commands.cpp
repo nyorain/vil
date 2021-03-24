@@ -11,6 +11,7 @@
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
+#include <vk/format_utils.h>
 #include <iomanip>
 
 namespace vil {
@@ -525,6 +526,45 @@ void BeginRenderPassCmd::unset(const std::unordered_set<DeviceHandle*>& destroye
 void BeginRenderPassCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, fb);
 	refButtonD(gui, rp);
+
+	// area
+	imGuiText("offset: {}, {}", info.renderArea.offset.x, info.renderArea.offset.y);
+	imGuiText("extent: {}, {}", info.renderArea.extent.width,
+		info.renderArea.extent.height);
+
+	// clear values
+	if(rp) {
+		for(auto i = 0u; i < clearValues.size(); ++i) {
+			dlg_assert_or(i < rp->desc->attachments.size(), break);
+			auto& clearValue = clearValues[i];
+			auto& att = rp->desc->attachments[i];
+
+			if(att.loadOp != VK_ATTACHMENT_LOAD_OP_CLEAR) {
+				continue;
+			}
+
+			imGuiText("Attachment {} clear value:", i);
+			ImGui::SameLine();
+
+			if(FormatIsDepthOrStencil(att.format)) {
+				imGuiText("Depth {}, Stencil {}",
+					clearValue.depthStencil.depth,
+					clearValue.depthStencil.stencil);
+			} else {
+				auto print = [](auto& val) {
+					imGuiText("({}, {}, {}, {})", val[0], val[1], val[2], val[3]);
+				};
+
+				if(FormatIsSampledFloat(att.format)) {
+					print(clearValue.color.float32);
+				} else if(FormatIsInt(att.format)) {
+					print(clearValue.color.int32);
+				} else if(FormatIsUInt(att.format)) {
+					print(clearValue.color.uint32);
+				}
+			}
+		}
+	}
 }
 
 void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -681,8 +721,6 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 void DrawCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(state.pipe, destroyed);
 	checkUnset(state.indices.buffer, destroyed);
-	checkUnset(state.rp, destroyed);
-	checkUnset(state.fb, destroyed);
 
 	for(auto& verts : state.vertices) {
 		checkUnset(verts.buffer, destroyed);

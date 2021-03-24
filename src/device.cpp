@@ -276,6 +276,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// == Modify create info ==
 	auto nci = *ci;
 
+	// copy the pNext chain so we can modify it.
+	std::unique_ptr<std::byte[]> copiedChain;
+	auto* pNext = copyChain(nci.pNext, copiedChain);
+	nci.pNext = pNext;
+
 	// = Queues =
 	// Make sure we get a graphics queue.
 	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos = {
@@ -337,6 +342,38 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// We try to additionally enable a couple of features/exts we need:
 	// - timeline semaphores
 	// - transform feedback
+	// - nonSolidFill mode (for vertex viewer lines)
+
+	// core 1.0 features
+	VkPhysicalDeviceFeatures supFeatures10 {};
+	ini.dispatch.GetPhysicalDeviceFeatures(phdev, &supFeatures10);
+
+	// when the application adds a PhysicalDeviceFeatures2 to pNext
+	// we must use it instead of nci.pEnabledFeatures
+	VkPhysicalDeviceFeatures enabledFeatures10 {};
+	VkPhysicalDeviceFeatures* pEnabledFeatures10 {};
+
+	auto* features2 = findChainInfo<VkPhysicalDeviceFeatures2,
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2>(nci);
+	if(features2) {
+		// const_cast is allowed since we coied the pNext chain above
+		pEnabledFeatures10 = const_cast<VkPhysicalDeviceFeatures*>(&features2->features);
+		dlg_assert(!ci->pEnabledFeatures);
+	} else {
+		if(ci->pEnabledFeatures) {
+			enabledFeatures10 = *ci->pEnabledFeatures;
+		}
+		pEnabledFeatures10 = &enabledFeatures10;
+		nci.pEnabledFeatures = &enabledFeatures10;
+	}
+
+	if(supFeatures10.fillModeNonSolid)  {
+		pEnabledFeatures10->fillModeNonSolid = true;
+	} else {
+		dlg_warn("fillModeNonSolid not supported, will get ugly vertex viewer");
+	}
+
+	// ext features
 	VkPhysicalDeviceProperties phdevProps;
 	ini.dispatch.GetPhysicalDeviceProperties(phdev, &phdevProps);
 
@@ -364,7 +401,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	auto hasTimelineSemaphores = false;
 	auto hasTransformFeedback = false;
 
-	std::unique_ptr<std::byte[]> copiedChain;
 	VkPhysicalDeviceTimelineSemaphoreFeatures tsFeatures {};
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT tfFeatures {};
 	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi) {
@@ -390,7 +426,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 		fpPhdevFeatures2(phdev, &features2);
 
-		auto* pNext = copyChain(nci.pNext, copiedChain);
 		if(timelineSemFeatures.timelineSemaphore) {
 			hasTimelineSemaphores = true;
 
@@ -505,6 +540,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	dev.timelineSemaphores = hasTimelineSemaphores;
 	dev.transformFeedback = hasTransformFeedback;
+	dev.nonSolidFill = pEnabledFeatures10->fillModeNonSolid;
 
 	dev.appExts = {extsBegin, extsEnd};
 	dev.allExts = {newExts.begin(), newExts.end()};

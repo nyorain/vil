@@ -850,7 +850,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 		//   idea of the timings, only relative is possible
 		if(!hist.empty()) {
 			ImGui::PlotHistogram("Present timings", hist.data(), int(hist.size()),
-				0, nullptr, FLT_MAX, FLT_MAX, {0, 150});
+				0, nullptr, 0.f, FLT_MAX, {0, 150});
 		}
 	}
 
@@ -862,9 +862,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 	// 	for(auto& qf : dev.queueFamilies) {
 	// 		numGroups += unsigned(qf.commandGroups.size());
 	// 	}
-//
 	// 	imGuiText("Number of command groups: {}", numGroups);
-//
 	// 	ImGui::TreePop();
 	// }
 }
@@ -1016,7 +1014,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			}
 
 			if(tabs_.cb.record_ || tabs_.cb.mode_ == CommandBufferGui::UpdateMode::swapchain) {
-				if(ImGui::BeginTabItem("Command Buffer", nullptr, checkSelectTab(Tab::commandBuffer))) {
+				if(ImGui::BeginTabItem("Commands", nullptr, checkSelectTab(Tab::commandBuffer))) {
 					activeTab_ = Tab::commandBuffer;
 					tabs_.cb.draw(draw);
 					ImGui::EndTabItem();

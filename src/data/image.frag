@@ -56,13 +56,14 @@ layout(push_constant) uniform PCR {
 	#error No valid TEX_TYPE definition
 #endif
 
-vec4 remap(vec4 val, float oldLow, float oldHigh, float newLow, float newHigh) {
-	vec4 t = (val - oldLow) / (oldHigh - oldLow);
-	return mix(vec4(newLow), vec4(newHigh), t);
+vec3 remap(vec3 val, float oldLow, float oldHigh, float newLow, float newHigh) {
+	vec3 t = (val - oldLow) / (oldHigh - oldLow);
+	return mix(vec3(newLow), vec3(newHigh), t);
 }
 
 void main() {
-	vec4 texCol = remap(sampleTex(), pcr.valMin, pcr.valMax, 0, 1);
+	vec4 texCol = sampleTex();
+	texCol.rgb = remap(texCol.rgb, pcr.valMin, pcr.valMax, 0, 1);
 
 	texCol.r *= float((pcr.flags & flagMaskR) != 0);
 	texCol.g *= float((pcr.flags & flagMaskG) != 0);

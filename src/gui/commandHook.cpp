@@ -166,9 +166,10 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		return hooked.handle();
 	}
 
-	// TODO: only hook when there is something to do.
-	// Hook might have no actively needed queries.
-	// TODO: in gui, make sure remove hooks when currently no inside
+	// PERF: only hook when there is something to do.
+	// Hook might have no actively needed queries. (Not sure this is
+	// really ever the case, we always query time i guess)
+	// PERF: in gui, make sure remove hooks when currently not inside
 	// cb viewer?
 
 	// Check if it already has a valid record associated
@@ -179,6 +180,14 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	}
 
 	if(record->hook) {
+		// The record was already submitted - i.e. has a valid state - and
+		// the hook is frozen. Nothing to do.
+		// PERF: only really just check this here? Likely inefficient,
+		// we hook records that are never read by cbGui when it's frozen
+		if(freeze) {
+			return hooked.handle();
+		}
+
 		auto* our = dynamic_cast<CommandHookRecord*>(record->hook.get());
 
 		if(our && our->hook == this && our->hookCounter == counter_) {
@@ -211,9 +220,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 void CommandHook::desc(std::vector<CommandDesc> desc) {
 	desc_ = std::move(desc);
 
-	// TODO: this can have many false positives. Only do this
-	// when desc *really* changed I guess?
-	unsetHookOps();
+	invalidateRecordings();
+	invalidateData();
 }
 
 void CommandHook::invalidateRecordings() {
@@ -244,11 +252,11 @@ void CommandHook::invalidateRecordings() {
 void CommandHook::unsetHookOps(bool doQueryTime) {
 	this->copyIndexBuffers = false;
 	this->copyVertexBuffers = false;
+	this->copyXfb = false;
 	this->queryTime = doQueryTime;
 	this->copyIndirectCmd = false;
 	this->copyAttachment = {};
 	this->copyDS = {};
-	this->pcr = {};
 	this->copyTransferSrc = false;
 	this->copyTransferDst = false;
 	invalidateRecordings();
@@ -522,14 +530,14 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 	// transform feedback
 	auto endXfb = false;
 	if(auto drawCmd = dynamic_cast<DrawCmdBase*>(&cmd); drawCmd) {
-		if(drawCmd->state.pipe->xfbPatched) {
+		if(drawCmd->state.pipe->xfbPatched && hook->copyXfb) {
 			dlg_assert(dev.transformFeedback);
 			dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
 			dlg_assert(dev.dispatch.CmdBindTransformFeedbackBuffersEXT);
 			dlg_assert(dev.dispatch.CmdEndTransformFeedbackEXT);
 
 			// init xfb buffer
-			auto xfbSize = 1024 * 1024; // TODO
+			auto xfbSize = 32 * 1024 * 1024; // TODO
 			auto usage =
 				VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
 				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -555,6 +563,12 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 	auto nextInfo = info;
 	if(parentCmd) {
 		++nextInfo.nextHookLevel;
+		if(queryPool) {
+			// timing 0
+			auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
+		}
+
 		hookRecord(parentCmd->children(), nextInfo);
 	}
 

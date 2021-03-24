@@ -12,38 +12,6 @@
 namespace vil {
 
 struct VertexViewer {
-	Device* dev_ {};
-	VkRenderPass rp_ {};
-
-	VkShaderModule vertShader_ {};
-	VkShaderModule fragShader_ {};
-
-	Camera cam_ {};
-	bool rotating_ {};
-	Vec2f lastMousPos_ {};
-	float yaw_ {};
-	float pitch_ {};
-
-	Mat4f viewProjMtx_ {};
-
-	// OwnBuffer ubo_;
-	// void* uboMap_ {};
-
-	// VkDescriptorSetLayout dsLayout_ {};
-	// VkDescriptorSet ds_ {};
-	VkPipelineLayout pipeLayout_ {};
-
-	// NOTE: could use way less pipes and instead just use a storage buffer
-	// to assemble the vertices from in our vertex shader.
-	// TODO: could at least cache shader modules.
-	struct Pipe {
-		VkFormat format {};
-		u32 stride {};
-		VkPrimitiveTopology topology {};
-		VkPipeline pipe {};
-	};
-
-	std::vector<Pipe> pipes_ {};
 
 	~VertexViewer();
 
@@ -80,8 +48,55 @@ struct VertexViewer {
 		bool useW {false};
 	};
 
+	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+
 	void imGuiDraw(VkCommandBuffer cb, const DrawData& data);
 	void updateInput(float dt);
+
+private:
+	Device* dev_ {};
+	VkRenderPass rp_ {};
+
+	VkShaderModule vertShader_ {};
+	VkShaderModule fragShader_ {};
+
+	Camera cam_ {};
+	bool rotating_ {};
+	Vec2f lastMousPos_ {};
+	float yaw_ {};
+	float pitch_ {};
+
+	Mat4f viewProjMtx_ {};
+
+	// OwnBuffer ubo_;
+	// void* uboMap_ {};
+
+	// VkDescriptorSetLayout dsLayout_ {};
+	// VkDescriptorSet ds_ {};
+	VkPipelineLayout pipeLayout_ {};
+
+	// NOTE: could use way less pipes and instead just use a storage buffer
+	// to assemble the vertices from in our vertex shader.
+	// TODO: could at least cache shader modules.
+	struct Pipe {
+		VkFormat format {};
+		u32 stride {};
+		VkPrimitiveTopology topology {};
+		VkPipeline pipe {};
+	};
+
+	std::vector<Pipe> pipes_ {};
+
+	struct VertexDrawData {
+		VertexViewer* self;
+		const CommandHookState* state;
+		VkCommandBuffer cb;
+		Vec2f offset;
+		Vec2f size;
+		const DrawCmdBase* cmd;
+		u32 vertexCount;
+	} vertexDrawData_;
 };
 
 } // namespace vil

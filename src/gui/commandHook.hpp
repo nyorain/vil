@@ -115,6 +115,8 @@ public:
 		CommandRecord* record {};
 	} target;
 
+	bool freeze {}; // temporarily don't resubmit states
+
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
@@ -122,7 +124,8 @@ public:
 	//   have a rather arbirtrary static limit on buffer copy size.
 	bool copyVertexBuffers {}; // could specify the needed subset in future
 	bool copyIndexBuffers {};
-	bool copyIndirectCmd {}; // always do that?
+	bool copyXfb {}; // transform feedback
+	bool copyIndirectCmd {};
 	std::optional<DescriptorCopy> copyDS;
 	std::optional<AttachmentCopy> copyAttachment; // only for cmd inside renderpass
 	bool queryTime {};
@@ -135,10 +138,6 @@ public:
 
 	// The last received copied state of a finished submission
 	IntrusivePtr<CommandHookState> state;
-
-	// TODO(io-rework): shouldn't be here! See displayActionInspector.
-	//   We need a better place to store this general state. CbGui?
-	VkShaderStageFlagBits pcr {};
 
 public:
 	// Called from inside QueueSubmit with the command buffer the hook has
@@ -161,7 +160,7 @@ public:
 	void invalidateRecordings();
 	void invalidateData() { state = {}; }
 
-	// automatically call invalidateRecordings and invalidateData
+	// Automatically invalidates data and recordings
 	void desc(std::vector<CommandDesc> desc);
 	void unsetHookOps(bool doQueryTime = false);
 

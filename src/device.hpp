@@ -30,10 +30,11 @@ struct Device {
 
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
-	VkPhysicalDeviceFeatures enabledFeatures {};
+	VkPhysicalDeviceFeatures enabledFeatures {}; // features by application
 
 	bool timelineSemaphores {}; // whether we have timeline smeaphores
 	bool transformFeedback {}; // whether we have transformFeedback
+	bool nonSolidFill {}; // whether we have nonSolidFill mode
 
 	// Aside from properties, only the families used by device
 	// are initialized.
@@ -63,6 +64,7 @@ struct Device {
 
 	std::unique_ptr<DisplayWindow> window;
 
+	// Always valid, initialized on device creation.
 	std::unique_ptr<CommandHook> commandHook {};
 
 	// The currently active gui. Might be null. There is never more than

@@ -109,6 +109,7 @@ src = files(
 	'src/gui/gui.cpp',
 	'src/gui/resources.cpp',
 	'src/gui/cb.cpp',
+	'src/gui/command.cpp',
 	'src/gui/commandHook.cpp',
 	'src/gui/vertexViewer.cpp',
 
@@ -156,6 +157,7 @@ src = files(
 	'src/gui/gui.hpp',
 	'src/gui/resources.hpp',
 	'src/gui/cb.hpp',
+	'src/gui/command.hpp',
 	'src/gui/render.hpp',
 	'src/gui/util.hpp',
 	'src/gui/commandHook.hpp',

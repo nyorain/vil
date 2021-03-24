@@ -6,8 +6,6 @@
 
 namespace vil {
 
-// XXX: just a concept atm
-
 class CommandViewer {
 public:
 	enum class IOView {
@@ -15,14 +13,13 @@ public:
 		mesh, // vertex I/O
 		ds, // descriptor sets
 		pushConstants,
-		colorAttachment,
-		depthStencilAttachment,
+		attachment,
 		transferSrc,
 		transferDst,
 	};
 
-	IOView view;
-	bool beforeCommand {}; // whether state is viewed before cmd
+	IOView view_;
+	bool beforeCommand_ {}; // whether state is viewed before cmd
 
 	union {
 		struct {
@@ -35,7 +32,7 @@ public:
 		} ds;
 
 		struct {
-			bool input; // vertex input or output
+			bool output; // vertex input or output
 		} mesh;
 
 		struct {
@@ -43,20 +40,59 @@ public:
 		} pushConstants;
 
 		struct {
-			unsigned id;
-		} colorAttachment;
-	} viewData;
+			unsigned id; // color attachment id
+		} attachment;
+	} viewData_;
 
 public:
-	void command(IntrusivePtr<CommandRecord>, Command&);
+	CommandViewer();
+	~CommandViewer();
+
+	void init(Gui& gui);
+	void draw(Draw& draw);
+
+	void unselect();
+	void select(IntrusivePtr<CommandRecord>, const Command&, bool resetState);
 	void state(IntrusivePtr<CommandHookState>);
+
+	CommandHookState* state() const { return state_.get(); }
+
+private:
+	Device& dev() const;
+
+	void updateHook();
+	void displayCommand();
+
+	// IO list display
+	void displayIOList();
+	void displayTransferIOList();
+	void displayDsList();
+
+	// selected IO display
+	void displaySelectedIO(Draw&);
+	void displayBeforeCheckbox();
+	void displayDs(Draw&);
+	void displayActionInspector(Draw&);
+	void displayAttachment(Draw&);
+	void displayPushConstants();
+	void displayTransferData(Draw&);
+
+	void displayVertexInput(Draw& draw, const DrawCmdBase&);
+	void displayVertexOutput(Draw& draw, const DrawCmdBase&);
+	void displayVertexViewer(Draw& draw);
+
+	// Can only be called once per frame
+	void displayImage(Draw& draw, const CopiedImage& img);
 
 private:
 	Gui* gui_ {};
 
 	IntrusivePtr<CommandRecord> record_ {}; // the selected record
-	Command* command_ {}; // the selected command
+	const Command* command_ {}; // the selected command
 	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
+
+	// For the one image we potentially display
+	DrawGuiImage ioImage_ {};
 
 	VertexViewer vertexViewer_ {};
 };

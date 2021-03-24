@@ -148,11 +148,12 @@ struct DynamicStateDepthBias {
 };
 
 struct GraphicsState : DescriptorState {
-	BoundIndexBuffer indices;
+	BoundIndexBuffer indices {};
 	span<BoundVertexBuffer> vertices;
-	GraphicsPipeline* pipe;
-	RenderPass* rp;
-	Framebuffer* fb;
+	GraphicsPipeline* pipe {};
+
+	BeginRenderPassCmd* rpi {}; // render pass instance
+	unsigned subpass {};
 
 	struct StencilState {
 		u32 writeMask {};
@@ -171,7 +172,7 @@ struct GraphicsState : DescriptorState {
 
 		StencilState stencilFront;
 		StencilState stencilBack;
-	} dynamic;
+	} dynamic {};
 };
 
 struct ComputeState : DescriptorState {

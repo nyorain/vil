@@ -20,11 +20,11 @@ v0.1, goal: end of january 2021
 	- [ ] clean the implementation up
 	- [ ] when not showing own cursor, just use GetCursorPos over
 	      raw input. Causes problems at the moment
-- [ ] might be better to determine command group at EndCommandBuffer
-      instead of first submission. We can't use the used queue though...
+- [ ] cb/command viewer: when viewing a batch from a swapchain,
+      show the semaphores/fences with from a vkQueueSubmit.
+	  When selecting the vkQueueSubmit just show an overview.
 - [ ] IO rework
-	- [ ] start using src/gui/command.hpp
-	- [ ] clean up current vertex viewer mess
+	- [x] start using src/gui/command.hpp
 	- [ ] remaining IO viewer fixes:
 		- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
 			- [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
@@ -47,8 +47,8 @@ v0.1, goal: end of january 2021
 - [ ] xfb: support custom outputs, not just the Position Builtin
 	- [ ] xfb: check whether format is supported
 - [ ] xfb: use heuristic to figure out if ortho or perspective projection is used
-	- [ ] and then use the matching shader (i.e. scaled w vs scaled z as view-space z coord)
-	- [ ] probably best to have one vertex shader controlled via push constant
+	- [x] and then use the matching shader (i.e. scaled w vs scaled z as view-space z coord)
+	- [x] probably best to have one vertex shader controlled via push constant
 - [x] test `splittable` impl for render passes. There are very likely issues.
       (especially for the cases where render pass can't be split)
 	  {see docs/test/rpsplit.cpp, seems to work in basic cases}
@@ -57,18 +57,23 @@ v0.1, goal: end of january 2021
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
-- [ ] Allow to freeze state for current displayed command, i.e. don't
+- [x] Allow to freeze state for current displayed command, i.e. don't
       update data from hook
-	- [ ] figure out how to communicate this via gui.
+	- [x] figure out how to communicate this via gui.
 	      This is a distinct option form the "displayed commands source" and UpdateMode
-	- [ ] While at it, clean up all the hook logic for io viewer
+	- [x] While at it, clean up all the hook logic for io viewer
+		  {refactored to gui CommandViewer}
 - [x] allow to select in cb viewer which commands are shown
 	- [ ] make that more compact/intuitive if possible
 	- [ ] looks really ugly at the moment, improve that.
 	      maybe move to own settings tab? Wouldn't expect people to change
 		  it often tbh
 	- [ ] cleanest would probably a button that spawns a popup/dialog
-	      in which this can be selected.
+	      in which this can be selected. That is possible with ImGui,
+		  see BeginPopup.
+		  Alternatively move it to a general settings tab (that we kind of
+		  need by now).
+	- [ ] Improve the "Freeze state" checkbox, it vastly out of place rn
 - [x] fix resource viewer
 	- [x] fix filtering by type
 	- [x] fix filtering by name
@@ -130,8 +135,9 @@ v0.1, goal: end of january 2021
 - [ ] should probably not be possible to ever unselect ParentCommands in
       cb viewer (CommandTypeFlags). Just always display them?
 - [ ] improve handling of transparent images. Checkerboard background?
-	- [ ] when viewing image as grayscale they become transparent atm.
+	- [x] when viewing image as grayscale they become transparent atm.
 	      no idea why
+	- [ ] also don't apply scale for alpha
 - [ ] fix overlay for wayland. Use xdg popup
 - [ ] make sure the environment variables for overlays/window creation work
       as specified in readme everywhere
@@ -153,6 +159,8 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] might be better to determine command group at EndCommandBuffer
+      instead of first submission. We can't use the used queue though...
 - [ ] support descriptor indexing. Shouldn't even be too much work
 - [ ] functions that allocate CommandRecord-memory should not take
       a CommandBuffer& as first argument but rather something like
@@ -198,9 +206,9 @@ Possibly for later, new features/ideas:
 - [ ] displaying high-res images in small viewer gives bad artefacts
       since we don't use mips. Could generate mips on our own (this requires
 	  just copying the currently vieweed mip and then generating our own mips)
-- [ ] clean and split up QueueSubmit implementation. It's way too long,
+- [x] clean and split up QueueSubmit implementation. It's way too long,
       does way too much. And will probably further grow
-	- [ ] also: always check in the beginning for finished submissions
+	- [x] also: always check in the beginning for finished submissions
 - [ ] attempt to retain previous selection in io viewer when selecting
 	  new command
 - [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support
