@@ -310,6 +310,10 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 	}
 
 	if(open) {
+		// we don't want as much space as tree nodes
+		auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+		ImGui::Unindent(s);
+
 		auto retc = displayCommands(cmd, selected, typeFlags);
 		if(!retc.empty()) {
 			dlg_assert(ret.empty());
@@ -317,6 +321,7 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 			ret.insert(ret.begin(), this);
 		}
 
+		ImGui::Indent(s);
 		ImGui::TreePop();
 	}
 

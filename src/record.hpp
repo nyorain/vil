@@ -104,8 +104,8 @@ template<typename K, typename V> using CommandAllocHashMap = std::unordered_map<
 // template<typename K, typename V> using CommandMap = std::map<K, V,
 //     std::less<K>, CommandAllocator<std::pair<const K, V>>>;
 
-// TODO: use something like this, track valid segments in push constant ranges
-// TODO: we should care about pipeline layouts for push constants.
+// IDEA: use something like this, track valid segments in push constant ranges
+// IDEA: we should care about pipeline layouts for push constants.
 // Not sure what the rules for disturbing them are though.
 // struct PushConstantSegment {
 // 	PushConstantSegment* next {};
@@ -267,14 +267,22 @@ struct CommandRecord {
 	VkCommandBufferUsageFlags usageFlags {};
 	Command* commands {};
 
-	// TODO: Should the key rather be Handle*?
+	// DebugUtils labels can span across multiple records.
+	// - numPopLables: the number of labels popped from the queue stack
+	// - pushLabels: the labels to push to the queue after execution
+	// For a command buffer that closes all label it opens and open all
+	// label it closes, numPopLabels is 0 and pushLabels empty.
+	u32 numPopLabels {};
+	std::vector<const char*> pushLables {}; // PERF: use pool memory
+
+	// IDEA: Should the key rather be Handle*?
 	CommandAllocHashMap<VkImage, UsedImage> images;
 	CommandAllocHashMap<u64, UsedHandle> handles;
 
 	// We store all device handles referenced by this command buffer that
 	// were destroyed since it was recorded so we can avoid deferencing
 	// them in the command state.
-	// NOTE: use pool memory here, too? could use alternate allocation function
+	// PERF: use pool memory here, too? could use alternate allocation function
 	// that just allocates blocks on its own (but still returns them to pool
 	// in the end?).
 	std::unordered_set<DeviceHandle*> destroyed;

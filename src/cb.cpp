@@ -98,9 +98,12 @@ void CommandBuffer::doReset(bool record) {
 void CommandBuffer::doEnd() {
 	dlg_assert(record_);
 
-	// NOTE: debug utils labels can be unterminated
+	// debug utils labels can be unterminated, see docs/debug-utils-label-nesting.md
 	while(section_) {
-		dlg_assert(dynamic_cast<const BeginDebugUtilsLabelCmd*>(section_->cmd));
+		auto lblCmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(section_->cmd);
+		dlg_assert(lblCmd);
+		dlg_assert(!section_->pop);
+		record_->pushLables.push_back(lblCmd->name);
 		section_ = section_->parent;
 	}
 
@@ -112,6 +115,7 @@ void CommandBuffer::doEnd() {
 
 	section_ = nullptr;
 	lastCommand_ = nullptr;
+	ignoreEndDebugLabels_ = 0u;
 
 	// parse commands into description
 	// record_->desc = CommandBufferDesc::get(record_->commands);
@@ -142,27 +146,60 @@ void CommandBuffer::doEnd() {
 	}
 }
 
-void CommandBuffer::endSection() {
-	// TODO: this is allowed e.g. for EndDebugUtilsLabel
-	dlg_assert(section_);
-	if(!section_)
-	{
+void CommandBuffer::endSection(Command* cmd) {
+	if(!section_) {
+		// Debug utils commands can span multiple command buffers, they
+		// are only queue-local.
+		// See docs/debug-utils-label-nesting.md
+		dlg_assert(dynamic_cast<EndDebugUtilsLabelCmd*>(cmd));
+		++record_->numPopLabels;
 		return;
 	}
 
 	lastCommand_ = section_->cmd;
+	dlg_assert(!section_->pop); // we shouldn't be able to land here
+
+	// reset it for future use
 	section_->cmd = nullptr;
+	section_->pop = false;
 
 	// Don't unset section_->next, we can re-use the allocation
 	// later on. We unset 'cmd' above to signal its unused (as debug check)
 	section_ = section_->parent;
+
+	// We pop the label sections here that were previously ended by
+	// the application but not in the same nesting level they were created.
+	while(section_ && section_->pop) {
+		dlg_assert(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd));
+		lastCommand_ = section_->cmd;
+
+		// reset it for future use
+		section_->cmd = nullptr;
+		section_->pop = false;
+
+		section_ = section_->parent;
+	}
+}
+
+void CommandBuffer::popLabelSections() {
+	// See docs/debug-utils-label-nesting.md
+	while(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd)) {
+		dlg_assert(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd));
+		dlg_trace("Problematic debug utils label nesting detected "
+			"(Begin without end in scope)");
+		section_ = section_->parent;
+		++ignoreEndDebugLabels_;
+	}
 }
 
 void CommandBuffer::beginSection(SectionCommand& cmd) {
 	if(section_) {
+		// re-use a previously allocated section that isn't in use anymore
 		if(section_->next) {
 			dlg_assert(!section_->next->cmd);
 			section_ = section_->next;
+			section_->cmd = nullptr;
+			section_->pop = false;
 		} else {
 			auto nextSection = &vil::allocate<Section>(*this);
 			nextSection->parent = section_;
@@ -359,7 +396,7 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 	auto& cmd = vil::allocate<T>(cb, std::forward<Args>(args)...);
 
 	if constexpr(ST == SectionType::end || ST == SectionType::next) {
-		cb.endSection();
+		cb.endSection(&cmd);
 	}
 
 	cb.addCmd(cmd);
@@ -742,10 +779,6 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 				continue;
 			}
 
-			// TODO: can there be a transition inside the renderpass on
-			//   an attachment? probably not...
-			//   maybe better move this to RenderPassEnd nonetheless?
-			// TODO: handle secondary command buffers and stuff
 			useHandle(cb, cmd, *attachment, false);
 			useHandle(cb, cmd, *attachment->img,
 				cmd.rp->desc->attachments[i].finalLayout);
@@ -774,6 +807,10 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 		VkCommandBuffer                             commandBuffer,
 		VkSubpassContents                           contents) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
+
+	cb.popLabelSections();
+	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+
 	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
 	cmd.beginInfo = {};
 	cmd.beginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
@@ -789,8 +826,11 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 
-	// pop subpass section
-	cb.endSection();
+	cb.popLabelSections();
+	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+
+	cb.endSection(nullptr); // pop subpass section
+	dlg_assert(cb.section() && dynamic_cast<BeginRenderPassCmd*>(cb.section()->cmd));
 
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = {};
@@ -818,6 +858,10 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
+
+	cb.popLabelSections();
+	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+
 	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
 	cmd.beginInfo = *pSubpassBeginInfo;
 	copyChainInPlace(cb, cmd.beginInfo.pNext);
@@ -833,6 +877,13 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 		VkCommandBuffer                             commandBuffer,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
+
+	cb.popLabelSections();
+	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+
+	cb.endSection(nullptr); // pop subpass section
+	dlg_assert(cb.section() && dynamic_cast<BeginRenderPassCmd*>(cb.section()->cmd));
+
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = *pSubpassEndInfo;
 	copyChainInPlace(cb, cmd.endInfo.pNext);
@@ -1650,8 +1701,37 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<EndDebugUtilsLabelCmd, SectionType::end>(cb);
-	(void) cmd;
+
+	// See docs/debug-utils-label-nesting.md
+	// When the last section isn't a BeginDebugUtilsLabelCmd, we have to
+	// find the last one in the cb.section_ stack and mark it for pop.
+	if(cb.ignoreEndDebugLabels() > 0) {
+		--cb.ignoreEndDebugLabels();
+	} else if(cb.section() && dynamic_cast<BeginDebugUtilsLabelCmd*>(cb.section()->cmd)) {
+		cb.endSection(nullptr);
+	} else {
+		auto* it = cb.section();
+		while(it) {
+			auto lcmd = dynamic_cast<BeginDebugUtilsLabelCmd*>(it->cmd);
+			if(lcmd && !it->pop) {
+				dlg_trace("Problematic debug utils label nesting detected (End)");
+				it->pop = true;
+				break;
+			}
+
+			it = it->parent;
+		}
+
+		// If there is no active label section at all, the command buffer
+		// effectively pops it from the queue.
+		if(!it) {
+			++cb.record()->numPopLabels;
+		}
+	}
+
+	// Create without SectionType::end, we ended the section above
+	// manually if possible.
+	addCmd<EndDebugUtilsLabelCmd/*, SectionType::end*/>(cb);
 
 	if(cb.dev->dispatch.CmdEndDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(commandBuffer);

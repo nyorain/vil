@@ -1176,7 +1176,8 @@ void CommandViewer::displayCommand() {
 		} else if(count == 1u) {
 			sel = 0u;
 		} else {
-			optSliderRange("Command", sel, count);
+			auto lbl = dlg::format("Commands: {}", count);
+			optSliderRange(lbl.c_str(), sel, count);
 		}
 
 		if(indexed) {

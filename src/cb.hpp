@@ -102,17 +102,22 @@ private:
         SectionCommand* cmd;
         Section* parent {}; // one level up. Null only for root node
         Section* next {}; // might be != null even when this is the last section. Re-using allocations
+		bool pop {}; // See docs/debug-utils-label-nesting.md
     };
 
 	Section* section_ {}; // the last, lowest, deepest-down section
 	Command* lastCommand_ {}; // the last added command in current section (might be null)
+	u32 ignoreEndDebugLabels_ {}; // See docs/debug-utils-label-nesting.md
 
 	PushConstantData pushConstants_ {};
 
 public: // Only public for recording, should not be accessed outside api
 	void beginSection(SectionCommand& cmd);
 	void addCmd(Command& cmd);
-	void endSection();
+	void endSection(Command*);
+	void popLabelSections();
+	auto& section() { return section_; }
+	auto& ignoreEndDebugLabels() { return ignoreEndDebugLabels_; }
 
 	ComputeState& computeState() { return computeState_; }
 	GraphicsState& graphicsState() { return graphicsState_; }

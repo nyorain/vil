@@ -2,13 +2,7 @@
 
 v0.1, goal: end of january 2021
 
-- [x] Docs
-- [x] Command-introspection
-- [x] Sync rework
-- Cleanup
-- Testing, Profiling, Needed optimization
-
-- [ ] fix debug utils label hierachy. They could have been started/completed
+- [x] fix debug utils label hierachy. They could have been started/completed
       in different command buffer
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
@@ -16,6 +10,10 @@ v0.1, goal: end of january 2021
 		  from *our* internal thread (which it might not be prepared for).
 		  In interception, could check whether it involves one of our
 		  handles or is called from our window thread.
+	- [ ] show failed asserts and potential errors in imgui UI?
+	      probably best to do this in addition to command line
+	- [ ] log assertions to debug console in visual studio
+	      somehow signal they are coming from us though, use a VIL prefix or smth
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
@@ -28,9 +26,6 @@ v0.1, goal: end of january 2021
 - [ ] IO rework
 	- [x] start using src/gui/command.hpp
 	- [ ] remaining IO viewer fixes:
-		- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
-			- [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
-			- [ ] don't even attempt to display non-float formats in 3D vertex viewer
 		- [x] fix descriptor arrays
 		- [ ] fix transfer buffer introspection
 		- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
@@ -44,6 +39,12 @@ v0.1, goal: end of january 2021
 		  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
 	- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
 	      i.e. support buffer IO viewing for transfer commands
+- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
+	- [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
+	- [ ] don't even attempt to display non-float formats in 3D vertex viewer
+	- [ ] support drawIndirectCount
+		- [ ] #43, probably for later: also support just showing a single draw command
+			  (see the other todo - #42)
 - [ ] in CopiedImage::init: check for image usage support
 	- [ ] generally: allow the image copy operation to fail.
 - [ ] xfb: support custom outputs, not just the Position Builtin
@@ -161,11 +162,14 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] support debug utils labels across command buffer boundaries
+	  we already have the information of popped and pushed lables per record
 - [ ] cmdDrawIndirectCount: allow to view state (especially attachments
       but i guess could be useful for ds state as well) before/after each
 	  individual draw command. Same for cmdDrawIndirect with multiple
 	  draw counts. Could likely use the same mechanism to do the same for
-	  instances.
+	  instances - #42
+	  See - #43
 - [ ] might be better to determine command group at EndCommandBuffer
       instead of first submission. We can't use the used queue though...
 - [ ] support descriptor indexing. Shouldn't even be too much work

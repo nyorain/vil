@@ -259,7 +259,16 @@ void CommandBufferGui::draw(Draw& draw) {
 			auto& batch = records_[b];
 			auto id = dlg::format("vkQueueSubmit:{}", b);
 
-			if(ImGui::TreeNode(id.c_str(), "vkQueueSubmit")) {
+			auto flags = 0u;
+			if(batch.submissions.empty()) {
+				flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
+			}
+
+			if(ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit")) {
+				// we don't want as much space as tree nodes
+				auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+				ImGui::Unindent(s);
+
 				for(auto r = 0u; r < batch.submissions.size(); ++r) {
 					auto& rec = batch.submissions[r];
 
@@ -278,6 +287,10 @@ void CommandBufferGui::draw(Draw& draw) {
 					// auto id = rec->group;
 					auto id = dlg::format("Commands:{}", r);
 					if(ImGui::TreeNodeEx(id.c_str(), flags, "Commands")) {
+						// we don't want as much space as tree nodes
+						auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+						ImGui::Unindent(s);
+
 						auto nsel = displayCommands(rec->commands, selected, commandFlags_);
 						if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
 							record_ = rec;
@@ -292,10 +305,12 @@ void CommandBufferGui::draw(Draw& draw) {
 							}
 						}
 
+						ImGui::Indent(s);
 						ImGui::TreePop();
 					}
 				}
 
+				ImGui::Indent(s);
 				ImGui::TreePop();
 			}
 		}
