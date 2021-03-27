@@ -581,7 +581,7 @@ struct ClearDepthStencilImageCmd : Command {
 struct ClearAttachmentCmd : Command {
 	span<VkClearAttachment> attachments;
 	span<VkClearRect> rects;
-	BeginRenderPassCmd* rpi {};
+	RenderPassInstanceState rpi;
 
 	std::string nameDesc() const override { return "ClearAttachment"; }
 	std::vector<std::string> argumentsDesc() const override;

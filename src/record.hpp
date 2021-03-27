@@ -147,13 +147,20 @@ struct DynamicStateDepthBias {
 	float slope {};
 };
 
+struct RenderPassInstanceState {
+	RenderPass* rp {};
+	Framebuffer* fb {};
+	unsigned subpass {};
+};
+
 struct GraphicsState : DescriptorState {
 	BoundIndexBuffer indices {};
 	span<BoundVertexBuffer> vertices;
 	GraphicsPipeline* pipe {};
 
-	BeginRenderPassCmd* rpi {}; // render pass instance
-	unsigned subpass {};
+	// We can't store a BeginRenderPassCmd* here because that would not
+	// work with secondary command buffers inside a render pass
+	RenderPassInstanceState rpi {};
 
 	struct StencilState {
 		u32 writeMask {};

@@ -275,17 +275,17 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 
 			auto id = viewData_.attachment.id;
 			auto* lastDrawCmd = dynamic_cast<const DrawCmdBase*>(command_);
-			dlg_assert(lastDrawCmd && lastDrawCmd->state.rpi);
+			dlg_assert(lastDrawCmd && lastDrawCmd->state.rpi.rp);
 
 			// when the newly select command uses a different renderpass,
 			// we reset the selection, otherwise we keep it.
 			// NOTE: would probably be better to compare for render pass
 			// compatibility instead of identity equality?
-			if(!lastDrawCmd->state.rpi->rp || !drawCmd->state.rpi->rp ||
-					lastDrawCmd->state.rpi->rp != drawCmd->state.rpi->rp) {
+			if(!lastDrawCmd->state.rpi.rp || !drawCmd->state.rpi.rp ||
+					lastDrawCmd->state.rpi.rp != drawCmd->state.rpi.rp) {
 				selectCommandView = true;
 			} else {
-				dlg_assert(id < drawCmd->state.rpi->rp->desc->attachments.size());
+				dlg_assert(id < drawCmd->state.rpi.rp->desc->attachments.size());
 			}
 			break;
 		} case IOView::ds: {
@@ -609,11 +609,9 @@ void CommandViewer::displayIOList() {
 	if(drawCmd) {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
 		if(ImGui::TreeNodeEx("Attachments")) {
-			auto rpi = drawCmd->state.rpi;
-			dlg_assert(rpi);
-			if(rpi && rpi->rp) {
-				auto& desc = nonNull(nonNull(rpi->rp).desc);
-				auto subpassID = rpi->subpassOfDescendant(cmd);
+			if(drawCmd->state.rpi.rp) {
+				auto& desc = nonNull(drawCmd->state.rpi.rp->desc);
+				auto subpassID = drawCmd->state.rpi.subpass;
 				dlg_assert(subpassID < desc.subpasses.size());
 
 				auto& subpass = desc.subpasses[subpassID];
@@ -898,15 +896,14 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	// But could be useful for debugging nonetheless
 	displayBeforeCheckbox();
 
-	dlg_assert(drawCmd->state.rpi);
-	if(!drawCmd->state.rpi->fb) {
+	if(!drawCmd->state.rpi.fb) {
 		imGuiText("Framebuffer was destroyed");
 		return;
 	}
 
 	// information
 	auto aid = viewData_.attachment.id;
-	auto& fb = nonNull(drawCmd->state.rpi->fb);
+	auto& fb = *drawCmd->state.rpi.fb;
 	dlg_assert(aid < fb.attachments.size());
 	if(!fb.attachments[aid] || !fb.attachments[aid]->img) {
 		imGuiText(" Image or View were destroyed");

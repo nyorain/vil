@@ -720,9 +720,10 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cmd.fb = cb.dev->framebuffers.find(rpBeginInfo.framebuffer);
 	cmd.rp = cb.dev->renderPasses.find(rpBeginInfo.renderPass);
 
-	dlg_assert(!cb.graphicsState().rpi);
-	cb.graphicsState().rpi = &cmd;
-	cb.graphicsState().subpass = 0u;
+	dlg_assert(!cb.graphicsState().rpi.rp);
+	cb.graphicsState().rpi.rp = cmd.rp;
+	cb.graphicsState().rpi.fb = cmd.fb;
+	cb.graphicsState().rpi.subpass = 0u;
 
 	cmd.subpassBeginInfo = subpassBeginInfo;
 	copyChainInPlace(cb, cmd.subpassBeginInfo.pNext);
@@ -778,8 +779,8 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 	cmd.beginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
 	cmd.beginInfo.contents = contents;
 
-	dlg_assert(cb.graphicsState().rpi);
-	++cb.graphicsState().subpass;
+	dlg_assert(cb.graphicsState().rpi.rp);
+	++cb.graphicsState().rpi.subpass;
 
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
@@ -795,8 +796,8 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 	cmd.endInfo = {};
 	cmd.endInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_END_INFO;
 
-	dlg_assert(cb.graphicsState().rpi);
-	cb.graphicsState().rpi = nullptr;
+	dlg_assert(cb.graphicsState().rpi.rp);
+	cb.graphicsState().rpi = {};
 
 	cb.dev->dispatch.CmdEndRenderPass(commandBuffer);
 }
@@ -821,8 +822,8 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 	cmd.beginInfo = *pSubpassBeginInfo;
 	copyChainInPlace(cb, cmd.beginInfo.pNext);
 
-	dlg_assert(cb.graphicsState().rpi);
-	++cb.graphicsState().subpass;
+	dlg_assert(cb.graphicsState().rpi.rp);
+	++cb.graphicsState().rpi.subpass;
 
 	auto f = cb.dev->dispatch.CmdNextSubpass2;
 	f(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
@@ -836,8 +837,8 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 	cmd.endInfo = *pSubpassEndInfo;
 	copyChainInPlace(cb, cmd.endInfo.pNext);
 
-	dlg_assert(cb.graphicsState().rpi);
-	cb.graphicsState().rpi = nullptr;
+	dlg_assert(cb.graphicsState().rpi.rp);
+	cb.graphicsState().rpi = {};
 
 	auto f = cb.dev->dispatch.CmdEndRenderPass2;
 	f(commandBuffer, pSubpassEndInfo);
@@ -1406,7 +1407,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	cmd.attachments = copySpan(cb, pAttachments, attachmentCount);
 	cmd.rects = copySpan(cb, pRects, rectCount);
 
-	dlg_assert(cb.graphicsState().rpi);
+	dlg_assert(cb.graphicsState().rpi.rp);
 	cmd.rpi = cb.graphicsState().rpi;
 
 	// NOTE: add clears attachments handles to used handles for this cmd?
