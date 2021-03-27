@@ -574,8 +574,9 @@ bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b) {
 	return check(a, b) && check(b, a);
 }
 
-bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2, u32 N) {
-	if(!pushConstantCompatible(pl1, pl2)) {
+bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2,
+		u32 N, bool considerPushConstants) {
+	if(considerPushConstants && !pushConstantCompatible(pl1, pl2)) {
 		// dlg_trace("!compatible({}): push constants", N);
 		return false;
 	}

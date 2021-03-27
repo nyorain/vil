@@ -93,6 +93,30 @@ void CommandBufferGui::draw(Draw& draw) {
 	// when we are viewing an invalidated record without updating.
 	ImGui::Checkbox("Freeze State", &hook.freeze);
 
+	ImGui::SameLine();
+
+	// Selector for visible commands
+	ImGui::SameLine();
+	if(ImGui::Button("Visible Commands")) {
+		ImGui::OpenPopup("Command Selector");
+	}
+
+	if(ImGui::BeginPopup("Command Selector")) {
+		auto val = commandFlags_.value();
+
+		ImGui::CheckboxFlags("Bind", &val, u32(CommandType::bind));
+		ImGui::CheckboxFlags("Draw", &val, u32(CommandType::draw));
+		ImGui::CheckboxFlags("Dispatch", &val, u32(CommandType::dispatch));
+		ImGui::CheckboxFlags("Transfer", &val, u32(CommandType::transfer));
+		ImGui::CheckboxFlags("Sync", &val, u32(CommandType::sync));
+		ImGui::CheckboxFlags("End", &val, u32(CommandType::end));
+		ImGui::CheckboxFlags("Query", &val, u32(CommandType::query));
+		ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
+		commandFlags_ = CommandType(val);
+
+		ImGui::EndPopup();
+	}
+
 	if(mode_ == UpdateMode::none) {
 		imGuiText("Showing static record");
 	} else if(mode_ == UpdateMode::commandBuffer) {
@@ -211,24 +235,6 @@ void CommandBufferGui::draw(Draw& draw) {
 			swapchainCounter_ = sc.presentCounter;
 		}
 	}
-
-	auto val = commandFlags_.value();
-	ImGui::CheckboxFlags("Bind", &val, u32(CommandType::bind));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Draw", &val, u32(CommandType::draw));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Dispatch", &val, u32(CommandType::dispatch));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Transfer", &val, u32(CommandType::transfer));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Sync", &val, u32(CommandType::sync));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("End", &val, u32(CommandType::end));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Query", &val, u32(CommandType::query));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
-	commandFlags_ = CommandType(val);
 
 	ImGui::Separator();
 

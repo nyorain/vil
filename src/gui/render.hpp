@@ -163,7 +163,10 @@ struct DrawGuiImage {
 	float level {};
 	float minValue {0.f};
 	float maxValue {1.f};
-	u32 flags {};
+	u32 flags {
+		DrawGuiImage::flagMaskR |
+		DrawGuiImage::flagMaskG |
+		DrawGuiImage::flagMaskB};
 	VkImageAspectFlagBits aspect {};
 };
 

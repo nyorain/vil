@@ -83,4 +83,25 @@ inline void drawOffsetSize(const DescriptorSet::BufferInfo& info) {
 	}
 }
 
+// If count > 1, displays an int slider for val. Always makes sure val is
+// in range [0, count). count must not be 0.
+template<typename T = u32>
+bool optSliderRange(const char* name, T& val, std::size_t count) {
+	dlg_assert(count != 0u);
+	if(count <= 1u) {
+		val = 0u;
+		return false;
+	}
+
+	int v = int(val);
+	auto ret = ImGui::SliderInt(name, &v, 0, int(count - 1));
+
+	// clamping is needed since SliderInt might go out of range
+	// when pressing CTRL
+	v = std::clamp<int>(v, 0, int(count - 1));
+	val = T(v);
+
+	return ret;
+}
+
 } // namesapce vil

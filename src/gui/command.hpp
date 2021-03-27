@@ -23,6 +23,10 @@ public:
 
 	union {
 		struct {
+			int selected; // for multidraw
+		} command;
+
+		struct {
 			unsigned set;
 			unsigned binding;
 			unsigned elem;
