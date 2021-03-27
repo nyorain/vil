@@ -23,6 +23,113 @@
 
 namespace vil {
 
+// util
+std::vector<CommandLink> display(const Command* start, const Command* end,
+		const Command* selected, Command::TypeFlags typeFlags);
+
+std::vector<CommandLink> displayCmd(const BeginRenderPassCmd& cmd,
+		const Command* selected, Command::TypeFlags typeFlags) {
+	int flags = ImGuiTreeNodeFlags_OpenOnArrow;
+	if(&cmd == selected) {
+		flags |= ImGuiTreeNodeFlags_Selected;
+	}
+
+	std::vector<CommandLink> ret {};
+	auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
+	auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
+	if(ImGui::IsItemClicked()) {
+		// don't select when only clicked on arrow
+		if(ImGui::GetMousePos().x > ImGui::GetItemRectMin().x + 30) {
+			ret = {{&cmd, u32(-1)}};
+		}
+	}
+
+	if(open) {
+		if(cmd.subpasses) {
+			auto sub = cmd.subpasses;
+			auto start = cmd.next;
+			auto end = static_cast<Command*>(sub);
+			auto subID = u32(0u);
+
+			while(start != cmd.end->next) {
+				auto lbl = dlg::format("Subpass {}", subID);
+				if(ImGui::TreeNode(lbl.c_str())) {
+					auto retc = display(start, end, selected, typeFlags);
+					if(!retc.empty()) {
+						dlg_assert(ret.empty());
+						ret = std::move(retc);
+						ret.insert(ret.begin(), {&cmd, subID});
+					}
+				}
+
+				start = end;
+				end = sub->nextSubpass ? sub->nextSubpass : cmd.end->next;
+				++subID;
+			}
+		} else {
+			auto retc = display(cmd.next, cmd.end->next, selected, typeFlags);
+			if(!retc.empty()) {
+				dlg_assert(ret.empty());
+				ret = std::move(retc);
+				ret.insert(ret.begin(), {&cmd, u32(0)});
+			}
+		}
+
+		ImGui::TreePop();
+	}
+
+	return ret;
+}
+
+std::vector<CommandLink> displayCmd(const Command*& cmd, const Command* selected,
+		Command::TypeFlags typeFlags) {
+	dlg_assert(cmd);
+
+	if(auto* rpCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd); rpCmd) {
+		cmd = rpCmd->end->next;
+		return displayCmd(*rpCmd, selected, typeFlags);
+	} else if(auto* ccmd = dynamic_cast<const ExecuteCommandsCmd*>(cmd); ccmd) {
+		dlg_error("TODO");
+		return {};
+	}
+
+	// display atomic command
+	if(!(typeFlags & cmd->type())) {
+		return {};
+	}
+
+	int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+	if(selected == cmd) {
+		flags |= ImGuiTreeNodeFlags_Selected;
+	}
+
+	auto idStr = dlg::format("{}:{}", cmd->nameDesc(), cmd->relID);
+	ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd->toString().c_str());
+
+	std::vector<CommandLink> ret;
+	if(ImGui::IsItemClicked()) {
+		ret = {{cmd, 0u}};
+	}
+
+	return ret;
+}
+
+std::vector<CommandLink> display(const Command* cmd, const Command* end,
+		const Command* selected, Command::TypeFlags typeFlags) {
+	std::vector<CommandLink> ret;
+	while(cmd != end) {
+		if((typeFlags & cmd->type())) {
+			ImGui::Separator();
+			if(auto reti = displayCmd(cmd, selected, typeFlags); !reti.empty()) {
+				dlg_assert(ret.empty());
+				ret = reti;
+			}
+		}
+	}
+
+	return ret;
+}
+
 // CommandBufferGui
 void CommandBufferGui::init(Gui& gui) {
 	gui_ = &gui;
@@ -92,6 +199,30 @@ void CommandBufferGui::draw(Draw& draw) {
 	// TODO: don't show this checkbox (or set it to true and disable?)
 	// when we are viewing an invalidated record without updating.
 	ImGui::Checkbox("Freeze State", &hook.freeze);
+
+	ImGui::SameLine();
+
+	// Selector for visible commands
+	ImGui::SameLine();
+	if(ImGui::Button("Visible Commands")) {
+		ImGui::OpenPopup("Command Selector");
+	}
+
+	if(ImGui::BeginPopup("Command Selector")) {
+		auto val = commandFlags_.value();
+
+		ImGui::CheckboxFlags("Bind", &val, u32(CommandType::bind));
+		ImGui::CheckboxFlags("Draw", &val, u32(CommandType::draw));
+		ImGui::CheckboxFlags("Dispatch", &val, u32(CommandType::dispatch));
+		ImGui::CheckboxFlags("Transfer", &val, u32(CommandType::transfer));
+		ImGui::CheckboxFlags("Sync", &val, u32(CommandType::sync));
+		ImGui::CheckboxFlags("End", &val, u32(CommandType::end));
+		ImGui::CheckboxFlags("Query", &val, u32(CommandType::query));
+		ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
+		commandFlags_ = CommandType(val);
+
+		ImGui::EndPopup();
+	}
 
 	if(mode_ == UpdateMode::none) {
 		imGuiText("Showing static record");
@@ -211,24 +342,6 @@ void CommandBufferGui::draw(Draw& draw) {
 			swapchainCounter_ = sc.presentCounter;
 		}
 	}
-
-	auto val = commandFlags_.value();
-	ImGui::CheckboxFlags("Bind", &val, u32(CommandType::bind));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Draw", &val, u32(CommandType::draw));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Dispatch", &val, u32(CommandType::dispatch));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Transfer", &val, u32(CommandType::transfer));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Sync", &val, u32(CommandType::sync));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("End", &val, u32(CommandType::end));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Query", &val, u32(CommandType::query));
-	ImGui::SameLine();
-	ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
-	commandFlags_ = CommandType(val);
 
 	ImGui::Separator();
 

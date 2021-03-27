@@ -68,6 +68,7 @@ struct CommandHookState {
 	u64 neededTime {u64(-1)}; // time needed for the given command
 
 	// For indirect commands: holds a copy of the indirect command(s)
+	u32 indirectCommandCount {};
 	CopiedBuffer indirectCopy {};
 
 	// Only for draw commands
@@ -241,7 +242,7 @@ struct CommandHookRecord {
 	// In general, the problem is that we can't know the relevant
 	// size for sub-allocated buffers. Theoretically, we could analyze
 	// previous index/indirect data for this. Not sure if good idea.
-	static constexpr auto maxBufCopySize = VkDeviceSize(128 * 1024 * 1024);
+	static constexpr auto maxBufCopySize = VkDeviceSize(32 * 1024 * 1024);
 };
 
 struct CommandHookSubmission {

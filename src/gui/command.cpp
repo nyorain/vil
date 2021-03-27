@@ -17,6 +17,10 @@
 #include <spirv_reflect.h>
 #include <bitset>
 
+// NOTE: since we might view invalidated command records, we can't assume
+//   any handles in Command objects to be not null (they are unset to null
+//   when the cooresponding handle is destroyed/invalidated).
+
 namespace vil {
 
 // util
@@ -87,7 +91,9 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
 		SPV_REFLECT_TYPE_FLAG_FLOAT |
 		SPV_REFLECT_TYPE_FLAG_INT;
 	if((typeFlags & ~scalarFlags) == 0) { // must be scalar
-		auto val = formatScalar(typeFlags, type.traits.numeric, data.first(bvar.size));
+		auto nBytes = bvar.numeric.scalar.width / 8;
+		dlg_assert(data.size() >= nBytes);
+		auto val = formatScalar(typeFlags, type.traits.numeric, data.first(nBytes));
 
 		ImGui::Columns(2);
 		imGuiText("{}:", varName);
@@ -230,9 +236,6 @@ Device& CommandViewer::dev() const {
 
 void CommandViewer::init(Gui& gui) {
 	gui_ = &gui;
-	ioImage_.flags = DrawGuiImage::flagMaskR |
-		DrawGuiImage::flagMaskG |
-		DrawGuiImage::flagMaskB;
 	vertexViewer_.init(gui.dev(), gui.rp());
 }
 
@@ -242,78 +245,79 @@ void CommandViewer::unselect() {
 	command_ = nullptr;
 
 	view_ = IOView::command;
-	viewData_ = {};
+	viewData_.command.selected = 0;
 }
 
 void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 		bool resetState) {
 	auto drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
 	auto dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
+	auto selectCommandView = false;
 
 	// update view_, only keep it if it still makes sense
 	switch(view_) {
 		case IOView::command:
 			// will always stay valid
 			if(!command_) {
-				updateHook();
-				resetState = true;
+				selectCommandView = true;
 			}
 			break;
 		case IOView::mesh:
 			if(!drawCmd) {
-				view_ = IOView::command;
-				resetState = true;
-				updateHook();
+				selectCommandView = true;
 			}
 			break;
 		case IOView::attachment: {
 			if(!drawCmd) {
-				view_ = IOView::command;
-				updateHook();
-				resetState = true;
+				selectCommandView = true;
 				break;
 			}
 
 			auto id = viewData_.attachment.id;
 			auto* lastDrawCmd = dynamic_cast<const DrawCmdBase*>(command_);
 			dlg_assert(lastDrawCmd && lastDrawCmd->state.rpi);
-			dlg_assert(id < lastDrawCmd->state.rpi->fb->attachments.size());
 
 			// when the newly select command uses a different renderpass,
 			// we reset the selection, otherwise we keep it.
-			if(lastDrawCmd->state.rpi->rp != drawCmd->state.rpi->rp) {
-				view_ = IOView::command;
-				updateHook();
-				resetState = true;
+			// NOTE: would probably be better to compare for render pass
+			// compatibility instead of identity equality?
+			if(!lastDrawCmd->state.rpi->rp || !drawCmd->state.rpi->rp ||
+					lastDrawCmd->state.rpi->rp != drawCmd->state.rpi->rp) {
+				selectCommandView = true;
+			} else {
+				dlg_assert(id < drawCmd->state.rpi->rp->desc->attachments.size());
 			}
 			break;
 		} case IOView::ds: {
 			if(!drawCmd && !dispatchCmd) {
-				view_ = IOView::command;
-				updateHook();
-				resetState = true;
+				selectCommandView = true;
 				break;
 			}
 
 			auto* lastDrawCmd = dynamic_cast<const DrawCmdBase*>(command_);
 			auto* lastDispatchCmd = dynamic_cast<const DispatchCmdBase*>(command_);
 			dlg_assert(lastDrawCmd || lastDispatchCmd);
-			auto setID = viewData_.ds.set;
-			auto& oldDSs = lastDrawCmd ?
-				lastDrawCmd->state.descriptorSets :
-				lastDispatchCmd->state.descriptorSets;
-			dlg_assert(setID < oldDSs.size());
-			auto& newDSs = drawCmd ?
-				drawCmd->state.descriptorSets :
-				dispatchCmd->state.descriptorSets;
 
 			// when the newly select command uses a descriptor set with different
-			// layout at the selected set we reset the selection.
-			// Otherwise we keep it.
-			if (setID >= newDSs.size() || oldDSs[setID].ds->layout != newDSs[setID].ds->layout) {
-				view_ = IOView::command;
-				updateHook();
-				resetState = true;
+			// layout at the selected set we reset the selection. We don't
+			// compare cmd->state.descriptorSets as that is often invalidated.
+			// Using the layout of the bound pipe is more robust.
+			PipelineLayout* newPL {};
+			if(dispatchCmd && dispatchCmd->state.pipe) {
+				newPL = dispatchCmd->state.pipe->layout.get();
+			} else if(drawCmd&& drawCmd->state.pipe) {
+				newPL = drawCmd->state.pipe->layout.get();
+			}
+
+			PipelineLayout* oldPL {};
+			if(lastDispatchCmd && lastDispatchCmd->state.pipe) {
+				oldPL = lastDispatchCmd->state.pipe->layout.get();
+			} else if(lastDrawCmd&& lastDrawCmd->state.pipe) {
+				oldPL = lastDrawCmd->state.pipe->layout.get();
+			}
+
+			if (!oldPL || !newPL || !compatibleForSetN(*oldPL, *newPL, viewData_.ds.set)) {
+				selectCommandView = true;
 			}
 			break;
 		}
@@ -322,27 +326,23 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			// Only keep transferSrc/Dst selection when the command type
 			// is exactly the same
 			if(!command_ || typeid(*command_) != typeid(cmd)) {
-				view_ = IOView::command;
-				updateHook();
-				resetState = true;
+				selectCommandView = true;
 			}
 			break;
 		case IOView::pushConstants:
 			// we keep the selection if pcr in the selected stage exists in
 			// the new command
-			if(dispatchCmd) {
-				auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
+			if(dispatchCmd && dispatchCmd->state.pipe) {
+				auto& refl = nonNull(nonNull(dispatchCmd->state.pipe->stage.spirv).reflection);
 				if(refl.push_constant_block_count == 0 ||
 						viewData_.pushConstants.stage != VK_SHADER_STAGE_COMPUTE_BIT) {
-					view_ = IOView::command;
-					updateHook();
-					resetState = true;
+					selectCommandView = true;
 				}
-			} else if(drawCmd) {
-				auto& pipe = nonNull(drawCmd->state.pipe);
+			} else if(drawCmd && dispatchCmd->state.pipe) {
+				auto& pipe = *drawCmd->state.pipe;
 				auto found = false;
 				for(auto& stage : pipe.stages) {
-					auto& refl = nonNull(nonNull(stage.spirv).reflection);
+					auto& refl = nonNull(stage.spirv->reflection);
 					if(refl.push_constant_block_count &&
 							viewData_.pushConstants.stage == stage.stage) {
 						found = true;
@@ -351,14 +351,10 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 				}
 
 				if(!found) {
-					view_ = IOView::command;
-					updateHook();
-					resetState = true;
+					selectCommandView = true;
 				}
 			} else {
-				view_ = IOView::command;
-				resetState = true;
-				updateHook();
+				selectCommandView = true;
 			}
 			break;
 	}
@@ -366,8 +362,21 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 	record_ = rec;
 	command_ = &cmd;
 
+	if(selectCommandView) {
+		view_ = IOView::command;
+		viewData_.command = {};
+		resetState = true;
+	}
+
 	if(resetState) {
 		state_ = {};
+		ioImage_ = {};
+
+		// Even when we could keep our selection, when resetState is true
+		// the command might have potentially changed (e.g. from a Draw
+		// command to a DrawIndirect command), requiring us to update
+		// the hook ops.
+		updateHook();
 	}
 }
 
@@ -399,6 +408,7 @@ void CommandViewer::displayTransferIOList() {
 		ImGui::TreeNodeEx("Source", flags);
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferSrc;
+			ioImage_ = {};
 			updateHook();
 		}
 	};
@@ -418,6 +428,7 @@ void CommandViewer::displayTransferIOList() {
 		ImGui::TreeNodeEx("Destination", flags);
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferDst;
+			ioImage_ = {};
 			updateHook();
 		}
 	};
@@ -459,11 +470,10 @@ void CommandViewer::displayDsList() {
 	}
 
 	// TODO: make this a runtime setting
+	static constexpr auto showUnboundSets = true;
 	static constexpr auto showUnusedBindings = false;
 	static constexpr auto unnamedName = "<unnamed>";
 
-	// TODO: this seems to need special treatment for arrays?
-	// debug with tkn/deferred gbuf pass
 	auto modBindingName = [&](const SpvReflectShaderModule& refl, u32 setID, u32 bindingID) -> const char* {
 		auto* binding = getReflectBinding(refl, setID, bindingID);
 		if(binding) {
@@ -514,11 +524,14 @@ void CommandViewer::displayDsList() {
 	for(auto i = 0u; i < dss.size(); ++i) {
 		auto& ds = dss[i];
 		if(!ds.ds) {
-			// TODO: don't display them in first place? especially not
-			// when it's only the leftovers?
-			auto label = dlg::format("Descriptor Set {}: null", i);
-			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-			ImGui::TreeNodeEx(label.c_str(), flags);
+			if(showUnboundSets) {
+				auto label = dlg::format("Descriptor Set {}: null", i);
+				auto flags = ImGuiTreeNodeFlags_Bullet |
+					ImGuiTreeNodeFlags_Leaf |
+					ImGuiTreeNodeFlags_NoTreePushOnOpen;
+				ImGui::TreeNodeEx(label.c_str(), flags);
+			}
+
 			continue;
 		}
 
@@ -526,7 +539,6 @@ void CommandViewer::displayDsList() {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 		if(ImGui::TreeNode(label.c_str())) {
 			for(auto b = 0u; b < ds.ds->bindings.size(); ++b) {
-				// TODO: support & display descriptor array
 				auto oLabel = bindingName(i, b);
 				if(!oLabel) {
 					continue;
@@ -540,7 +552,7 @@ void CommandViewer::displayDsList() {
 
 				// NOTE
 				// - additionally indicate type? Just add a small UBO, SSBO, Image,
-				//   Sampler, StorageImage etc prefix?
+				//   Sampler, StorageImage etc prefix? Also array bounds
 				// - Previews would be the best on the long run but hard to get
 				//   right I guess (also: preview of buffers?)
 				// - could show name of bound resource
@@ -549,6 +561,7 @@ void CommandViewer::displayDsList() {
 				if(ImGui::IsItemClicked()) {
 					view_ = IOView::ds;
 					viewData_.ds = {i, b, 0};
+					ioImage_ = {};
 					updateHook();
 				}
 			}
@@ -601,6 +614,8 @@ void CommandViewer::displayIOList() {
 			if(rpi && rpi->rp) {
 				auto& desc = nonNull(nonNull(rpi->rp).desc);
 				auto subpassID = rpi->subpassOfDescendant(cmd);
+				dlg_assert(subpassID < desc.subpasses.size());
+
 				auto& subpass = desc.subpasses[subpassID];
 
 				auto addAttachment = [&](auto label, auto id) {
@@ -613,6 +628,7 @@ void CommandViewer::displayIOList() {
 					if(ImGui::IsItemClicked()) {
 						view_ = IOView::attachment;
 						viewData_.attachment = {id};
+						ioImage_ = {};
 						updateHook();
 					}
 				};
@@ -701,11 +717,6 @@ void CommandViewer::displayDs(Draw& draw) {
 	auto& cmd = nonNull(command_);
 	displayBeforeCheckbox();
 
-	if(!state_) {
-		ImGui::Text("Waiting for a submission...");
-		return;
-	}
-
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
 	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
 	if(!drawCmd && !dispatchCmd) {
@@ -719,18 +730,18 @@ void CommandViewer::displayDs(Draw& draw) {
 	}
 
 	dlg_assert(view_ == IOView::ds);
-	auto [setID, bindingID, elemID] = viewData_.ds;
+	auto [setID, bindingID, _] = viewData_.ds;
 
 	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
 	if(setID >= dss.size()) {
-		ImGui::Text("Set not bound");
-		dlg_warn("Set not bound? Shouldn't happen");
+		ImGui::Text("DescriptorSet not bound");
+		dlg_warn("DescriptorSet not bound? Shouldn't happen");
 		return;
 	}
 
 	auto* set = dss[setID].ds;
 	if(!set) {
-		ImGui::Text("Set was destroyed/invalidated");
+		ImGui::Text("DescriptorSet was destroyed/invalidated");
 		return;
 	}
 
@@ -741,6 +752,18 @@ void CommandViewer::displayDs(Draw& draw) {
 	}
 
 	auto& binding = set->bindings[bindingID];
+	if(binding.empty()) {
+		ImGui::Text("Empty binding, no elements");
+		dlg_warn("Empty binding? Shouldn't happen");
+		return;
+	}
+
+	auto& elemID = viewData_.ds.elem;
+	if(optSliderRange("Element", elemID, binding.size())) {
+		updateHook();
+		state_ = {};
+	}
+
 	if(elemID >= binding.size()) {
 		ImGui::Text("Element not bound");
 		dlg_warn("Element not bound? Shouldn't happen");
@@ -762,17 +785,11 @@ void CommandViewer::displayDs(Draw& draw) {
 
 	imGuiText("{}", vk::name(dsType));
 
-	auto& dsc = state_->dsCopy;
+	// TODO: we expect descriptors to be valid here. Needs rework
+	// for descriptor indexing
 
 	// == Buffer ==
 	if(dsCat == DescriptorCategory::buffer) {
-		auto* buf = std::get_if<CopiedBuffer>(&dsc);
-		if(!buf) {
-			dlg_assert(dsc.index() == 0);
-			imGuiText("Error: {}", state_->errorMessage);
-			return;
-		}
-
 		// general info
 		auto& srcBuf = nonNull(elem.bufferInfo.buffer);
 		refButton(gui, srcBuf);
@@ -780,6 +797,18 @@ void CommandViewer::displayDs(Draw& draw) {
 		drawOffsetSize(elem.bufferInfo);
 
 		// interpret content
+		if(!state_) {
+			ImGui::Text("Waiting for a submission...");
+			return;
+		}
+
+		auto* buf = std::get_if<CopiedBuffer>(&state_->dsCopy);
+		if(!buf) {
+			dlg_assert(state_->dsCopy.index() == 0);
+			imGuiText("Error: {}", state_->errorMessage);
+			return;
+		}
+
 		if(dispatchCmd) {
 			auto& pipe = nonNull(dispatchCmd->state.pipe);
 			auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
@@ -817,29 +846,20 @@ void CommandViewer::displayDs(Draw& draw) {
 	// == Sampler ==
 	if(needsSampler(dsType)) {
 		if(bindingLayout.immutableSamplers) {
-			// TODO: display all samplers?, for all elements
-			refButton(gui, nonNull(bindingLayout.immutableSamplers[0]));
+			refButtonExpect(gui, bindingLayout.immutableSamplers[elemID]);
 		} else {
-			refButtonD(gui, elem.imageInfo.sampler);
+			refButtonExpect(gui, elem.imageInfo.sampler);
 		}
 	}
 
 	// == Image ==
 	if(needsImageView(dsType)) {
-		auto* img = std::get_if<CopiedImage>(&dsc);
-		if(!img) {
-			dlg_assert(dsc.index() == 0);
-			imGuiText("Error: {}", state_->errorMessage);
-			return;
-		}
-
-		dlg_assert(elem.imageInfo.imageView);
-		auto& imgView = *elem.imageInfo.imageView;
+		// general info
+		auto& imgView = nonNull(elem.imageInfo.imageView);
 		refButton(gui, imgView);
 
-		dlg_assert(imgView.img);
 		ImGui::SameLine();
-		refButton(gui, *imgView.img);
+		refButton(gui, nonNull(imgView.img));
 
 		imGuiText("Format: {}", vk::name(imgView.ci.format));
 		auto& extent = imgView.img->ci.extent;
@@ -847,6 +867,19 @@ void CommandViewer::displayDs(Draw& draw) {
 
 		if(needsImageLayout(dsType)) {
 			imGuiText("Layout: {}", vk::name(elem.imageInfo.layout));
+		}
+
+		// content
+		if(!state_) {
+			ImGui::Text("Waiting for a submission...");
+			return;
+		}
+
+		auto* img = std::get_if<CopiedImage>(&state_->dsCopy);
+		if(!img) {
+			dlg_assert(state_->dsCopy.index() == 0);
+			imGuiText("Error: {}", state_->errorMessage);
+			return;
 		}
 
 		displayImage(draw, *img);
@@ -860,7 +893,7 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(command_);
 	dlg_assert(drawCmd);
 
-	// NOTE: only show this button for output attachments (color, depthStencil)?
+	// NOTE: maybe only show this button for output attachments (color, depthStencil)?
 	// Does not make sense otherwise as it stays the same i guess.
 	// But could be useful for debugging nonetheless
 	displayBeforeCheckbox();
@@ -875,8 +908,13 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	auto aid = viewData_.attachment.id;
 	auto& fb = nonNull(drawCmd->state.rpi->fb);
 	dlg_assert(aid < fb.attachments.size());
-	auto& view = nonNull(fb.attachments[aid]);
-	auto& img = nonNull(view.img);
+	if(!fb.attachments[aid] || !fb.attachments[aid]->img) {
+		imGuiText(" Image or View were destroyed");
+		return;
+	}
+
+	auto& view = *fb.attachments[aid];
+	auto& img = *view.img;
 
 	refButton(*gui_, fb);
 	refButton(*gui_, view);
@@ -898,19 +936,34 @@ void CommandViewer::displayPushConstants() {
 	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(command_);
 	auto viewStage = viewData_.pushConstants.stage;
 
-	if(dispatchCmd && dispatchCmd->state.pipe &&
-			viewStage == dispatchCmd->state.pipe->stage.stage) {
+	if(dispatchCmd) {
+		if(!dispatchCmd->state.pipe) {
+			ImGui::Text("Pipeline was destroyed, can't interpret content");
+			return;
+		} else if(viewStage != dispatchCmd->state.pipe->stage.stage) {
+			dlg_warn("Invalid push constants stage? Should not happen! (compute)");
+			ImGui::Text("Error: Invalid push constants stage selected");
+			return;
+		}
+
 		auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
 		dlg_assert(refl.push_constant_block_count);
 		if(refl.push_constant_block_count) {
 			display(*refl.push_constant_blocks, dispatchCmd->pushConstants.data);
 		}
 	} else if(drawCmd && drawCmd->state.pipe) {
+		if(!drawCmd->state.pipe) {
+			ImGui::Text("Pipeline was destroyed, can't interpret content");
+			return;
+		}
+
+		auto found = false;
 		for(auto& stage : drawCmd->state.pipe->stages) {
 			if(stage.stage != viewStage) {
 				continue;
 			}
 
+			found = true;
 			auto& refl = nonNull(nonNull(stage.spirv).reflection);
 			dlg_assert(refl.push_constant_block_count);
 			if(refl.push_constant_block_count) {
@@ -918,6 +971,12 @@ void CommandViewer::displayPushConstants() {
 			}
 
 			break;
+		}
+
+		if(!found) {
+			dlg_warn("Invalid push constants stage? Should not happen! (graphics)");
+			ImGui::Text("Error: Invalid push constants stage selected");
+			return;
 		}
 	}
 }
@@ -943,9 +1002,9 @@ void CommandViewer::displayTransferData(Draw& draw) {
 		}
 
 		if(view_ == IOView::transferSrc) {
-			refButtonExpect(*gui_, ccmd->src);
+			refButtonD(*gui_, ccmd->src);
 		} else  {
-			refButtonExpect(*gui_, ccmd->dst);
+			refButtonD(*gui_, ccmd->dst);
 		}
 	};
 
@@ -955,7 +1014,7 @@ void CommandViewer::displayTransferData(Draw& draw) {
 		}
 
 		dlg_assert(view_ == IOView::transferDst);
-		refButtonExpect(*gui_, ccmd->dst);
+		refButtonD(*gui_, ccmd->dst);
 	};
 
 	auto refSrc = [&](auto* ccmd) {
@@ -964,7 +1023,7 @@ void CommandViewer::displayTransferData(Draw& draw) {
 		}
 
 		dlg_assert(view_ == IOView::transferSrc);
-		refButtonExpect(*gui_, ccmd->src);
+		refButtonD(*gui_, ccmd->src);
 	};
 
 	refSrcDst(dynamic_cast<const CopyImageCmd*>(&cmd));
@@ -1110,30 +1169,54 @@ void CommandViewer::displayCommand() {
 		}
 	}
 
+	auto displayMultidraw = [&](u32 count, bool indexed, ReadBuf cmds) {
+		auto& sel = viewData_.command.selected;
+
+		if(count == 0u) {
+			imGuiText("No commands (drawCount = 0)");
+			sel = 0u;
+			return;
+		} else if(count == 1u) {
+			sel = 0u;
+		} else {
+			optSliderRange("Command", sel, count);
+		}
+
+		if(indexed) {
+			dlg_assert(cmds.size() == sizeof(VkDrawIndexedIndirectCommand) * count);
+			skip(cmds, sel * sizeof(VkDrawIndexedIndirectCommand));
+
+			auto ecmd = read<VkDrawIndexedIndirectCommand>(cmds);
+			imGuiText("firstIndex: {}", ecmd.firstIndex);
+			imGuiText("indexCount: {}", ecmd.indexCount);
+			imGuiText("vertexOffset: {}", ecmd.vertexOffset);
+			imGuiText("firstInstance: {}", ecmd.firstInstance);
+			imGuiText("instanceCount: {}", ecmd.instanceCount);
+		} else {
+			dlg_assert(cmds.size() == sizeof(VkDrawIndirectCommand) * count);
+			skip(cmds, sel * sizeof(VkDrawIndirectCommand));
+
+			auto ecmd = read<VkDrawIndirectCommand>(cmds);
+			imGuiText("firstVertex: {}", ecmd.firstVertex);
+			imGuiText("vertexCount: {}", ecmd.vertexCount);
+			imGuiText("firstInstance: {}", ecmd.firstInstance);
+			imGuiText("instanceCount: {}", ecmd.instanceCount);
+		}
+	};
+
 	if(state_ && state_->indirectCopy.buffer.size) {
 		auto& ic = state_->indirectCopy;
 		auto span = ReadBuf(ic.copy);
-		if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_)) {
-			if(dcmd->indexed) {
-				auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
-				imGuiText("firstIndex: {}", ecmd.firstIndex);
-				imGuiText("indexCount: {}", ecmd.indexCount);
-				imGuiText("vertexOffset: {}", ecmd.vertexOffset);
-				imGuiText("firstInstance: {}", ecmd.firstInstance);
-				imGuiText("instanceCount: {}", ecmd.instanceCount);
-			} else {
-				auto ecmd = read<VkDrawIndirectCommand>(span);
-				imGuiText("firstVertex: {}", ecmd.firstVertex);
-				imGuiText("vertexCount: {}", ecmd.vertexCount);
-				imGuiText("firstInstance: {}", ecmd.firstInstance);
-				imGuiText("instanceCount: {}", ecmd.instanceCount);
-			}
+		if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_); dcmd) {
+			displayMultidraw(dcmd->drawCount, dcmd->indexed, span);
 		} else if(dynamic_cast<const DispatchIndirectCmd*>(command_)) {
 			auto ecmd = read<VkDispatchIndirectCommand>(span);
 			imGuiText("groups X: {}", ecmd.x);
 			imGuiText("groups Y: {}", ecmd.y);
 			imGuiText("groups Z: {}", ecmd.z);
-		} // TODO: drawIndirectCount
+		} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(command_); dcmd) {
+			displayMultidraw(state_->indirectCommandCount, dcmd->indexed, span);
+		}
 	}
 
 	command_->displayInspector(*gui_);
@@ -1166,8 +1249,8 @@ void CommandViewer::updateHook() {
 
 	auto drawIndexedCmd = dynamic_cast<const DrawIndexedCmd*>(command_);
 	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(command_);
-	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(command_);
 	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(command_);
+	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(command_);
 
 	auto indirectCmd = dispatchIndirectCmd || drawIndirectCmd || drawIndirectCountCmd;
 	auto indexedCmd = drawIndexedCmd ||

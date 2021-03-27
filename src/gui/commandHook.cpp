@@ -12,6 +12,10 @@
 #include <util/util.hpp>
 #include <vk/format_utils.h>
 
+// TODO: instead of doing memory barrier per-resource when copying to
+//   our readback buffers, we should probably do just do general memory
+//   barriers.
+
 namespace vil {
 
 // util
@@ -767,22 +771,21 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 }
 
-void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
-		VkBufferUsageFlags addFlags, VkBuffer src,
-		VkDeviceSize offset, VkDeviceSize size) {
-
-	// init dst
-	dst.init(dev, size, addFlags);
+void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
+		VkDeviceSize srcOffset, CopiedBuffer& dst, VkDeviceSize dstOffset,
+		VkDeviceSize size) {
+	dlg_assert(dstOffset + size <= dst.buffer.size);
+	dlg_assert(srcOffset + size <= src.ci.size);
 
 	// perform copy
 	VkBufferCopy copy {};
-	copy.srcOffset = offset;
-	copy.dstOffset = 0u;
+	copy.srcOffset = srcOffset;
+	copy.dstOffset = dstOffset;
 	copy.size = size;
 
 	VkBufferMemoryBarrier barrier {};
 	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	barrier.buffer = src;
+	barrier.buffer = src.handle;
 	barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 	barrier.size = copy.size;
@@ -795,7 +798,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 1, &barrier, 0, nullptr);
 
-	dev.dispatch.CmdCopyBuffer(cb, src, dst.buffer.buf, 1, &copy);
+	dev.dispatch.CmdCopyBuffer(cb, src.handle, dst.buffer.buf, 1, &copy);
 
 	barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
@@ -803,6 +806,13 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // dunno
 		0, 0, nullptr, 1, &barrier, 0, nullptr);
+}
+
+void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
+		VkBufferUsageFlags addFlags, Buffer& src,
+		VkDeviceSize offset, VkDeviceSize size) {
+	dst.init(dev, size, addFlags);
+	performCopy(dev, cb, src, offset, dst, 0, size);
 }
 
 void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
@@ -899,7 +909,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		}
 
 		auto size = std::min(maxBufCopySize, range);
-		initAndCopy(dev, cb, dst, 0u, elem.bufferInfo.buffer->handle,
+		initAndCopy(dev, cb, dst, 0u, nonNull(elem.bufferInfo.buffer),
 			elem.bufferInfo.offset, size);
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
@@ -1088,18 +1098,32 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 			stride = cmd->stride ? cmd->stride : stride;
 			auto dstSize = cmd->drawCount * stride;
 			initAndCopy(dev, cb, state->indirectCopy,  0u,
-				cmd->buffer->handle, cmd->offset, dstSize);
+				nonNull(cmd->buffer), cmd->offset, dstSize);
 		} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
 			auto size = sizeof(VkDispatchIndirectCommand);
 			initAndCopy(dev, cb, state->indirectCopy, 0u,
-				cmd->buffer->handle, cmd->offset, size);
+				nonNull(cmd->buffer), cmd->offset, size);
 		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
-			(void) cmd;
-			state->errorMessage = "DrawIndirectCount hook not implemented";
-			dlg_error(state->errorMessage);
+			auto cmdSize = cmd->indexed ?
+				sizeof(VkDrawIndexedIndirectCommand) :
+				sizeof(VkDrawIndirectCommand);
+			auto size = 4 + cmd->maxDrawCount * cmdSize;
+			state->indirectCopy.init(dev, size, 0u);
+
+			// copy count
+			performCopy(dev, cb, nonNull(cmd->countBuffer), cmd->countBufferOffset,
+				state->indirectCopy, 0u, 4u);
+			// copy commands
+			// NOTE: using an indirect-transfer-emulation approach (see
+			// below, same problem as for indirect draw vertex/index bufs)
+			// we could avoid copying too much data here. Likely not worth
+			// it here though unless application pass *huge* maxDrawCount
+			// values (which they shouldn't).
+			performCopy(dev, cb, nonNull(cmd->buffer), cmd->offset,
+				state->indirectCopy, 4u, cmd->maxDrawCount * cmdSize);
 		} else {
 			state->errorMessage = "Unsupported indirect command";
-			dlg_error(state->errorMessage);
+			dlg_warn(state->errorMessage);
 		}
 	}
 
@@ -1132,7 +1156,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 
 			auto size = std::min(maxVertIndSize, vertbuf.buffer->ci.size - vertbuf.offset);
 			initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-				vertbuf.buffer->handle, vertbuf.offset, size);
+				nonNull(vertbuf.buffer), vertbuf.offset, size);
 		}
 	}
 
@@ -1142,7 +1166,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 		if(inds.buffer) {
 			auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
 			initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-				inds.buffer->handle, inds.offset, size);
+				nonNull(inds.buffer), inds.offset, size);
 		}
 	}
 
@@ -1241,7 +1265,9 @@ void CommandHookSubmission::finish(Submission& subm) {
 		buf.cpuCopy(0, size);
 	};
 
-	// copy potential buffers
+	// Copy potential buffers. We don't check for hookOps here as
+	// buffers aren't created in the first place (making cpuCopy a noop)
+	// when the readback op isn't active.
 	// TODO: only copy the requested region, what we are currently
 	// viewing and therefore *absolutely* need on cpu.
 	if(auto* buf = std::get_if<CopiedBuffer>(&record->state->dsCopy)) {
@@ -1249,11 +1275,50 @@ void CommandHookSubmission::finish(Submission& subm) {
 	}
 
 	cpuCopyMin(record->state->indexBufCopy);
-	cpuCopyMin(record->state->indirectCopy);
 	cpuCopyMin(record->state->transformFeedback);
 
 	for(auto& vbuf : record->state->vertexBufCopies) {
 		cpuCopyMin(vbuf);
+	}
+
+	// indirect command readback
+	if(record->hook->copyIndirectCmd) {
+		auto& bcmd = *record->hcommand.back();
+
+		if(auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&bcmd)) {
+			dlg_assert(record->state->indirectCopy.buffer.size >= 4u);
+			auto* count = static_cast<const u32*>(record->state->indirectCopy.map);
+			record->state->indirectCommandCount = *count;
+			dlg_assert(record->state->indirectCommandCount <= cmd->maxDrawCount);
+
+			auto cmdSize = cmd->indexed ?
+				sizeof(VkDrawIndexedIndirectCommand) :
+				sizeof(VkDrawIndirectCommand);
+			dlg_assertlm(dlg_level_warn,
+				record->state->indirectCopy.buffer.size >= 4 + *count * cmdSize,
+				"Indirect command readback buffer too small; commands missing");
+
+			auto cmdsSize = cmdSize * record->state->indirectCommandCount;
+			record->state->indirectCopy.cpuCopy(4u, cmdsSize);
+			record->state->indirectCopy.copyOffset = 0u;
+		} else if(auto* cmd = dynamic_cast<const DrawIndirectCmd*>(&bcmd)) {
+			[[maybe_unused]] auto cmdSize = cmd->indexed ?
+				sizeof(VkDrawIndexedIndirectCommand) :
+				sizeof(VkDrawIndirectCommand);
+			dlg_assert(record->state->indirectCopy.buffer.size ==
+				cmd->drawCount * cmdSize);
+
+			record->state->indirectCommandCount = cmd->drawCount;
+			record->state->indirectCopy.cpuCopy();
+		} else if(dynamic_cast<const DispatchIndirectCmd*>(&bcmd)) {
+			dlg_assert(record->state->indirectCopy.buffer.size ==
+				sizeof(VkDispatchIndirectCommand));
+
+			record->state->indirectCommandCount = 1u;
+			record->state->indirectCopy.cpuCopy();
+		} else {
+			dlg_warn("Unsupported indirect command (readback)");
+		}
 	}
 }
 

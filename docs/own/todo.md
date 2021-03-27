@@ -8,6 +8,8 @@ v0.1, goal: end of january 2021
 - Cleanup
 - Testing, Profiling, Needed optimization
 
+- [ ] fix debug utils label hierachy. They could have been started/completed
+      in different command buffer
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
 	      e.g. when the application controlled debug callback is called
@@ -29,12 +31,12 @@ v0.1, goal: end of january 2021
 		- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
 			- [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
 			- [ ] don't even attempt to display non-float formats in 3D vertex viewer
-		- [ ] fix descriptor arrays
+		- [x] fix descriptor arrays
 		- [ ] fix transfer buffer introspection
 		- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
 		- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
 		- [x] when viewing transfer img, show image refButton
-		- [ ] adapt ioImage_ to selected image (e.g. channels)
+		- [x] adapt ioImage_ to selected image (e.g. channels)
 			- [ ] also fix logic for depthStencil images. Select depth by default.
 				  (can be tested with doom)
 	- [ ] support texel reading implementation for cb-viewed-images and clean
@@ -64,16 +66,16 @@ v0.1, goal: end of january 2021
 	- [x] While at it, clean up all the hook logic for io viewer
 		  {refactored to gui CommandViewer}
 - [x] allow to select in cb viewer which commands are shown
-	- [ ] make that more compact/intuitive if possible
-	- [ ] looks really ugly at the moment, improve that.
+	- [x] make that more compact/intuitive if possible
+	- [x] looks really ugly at the moment, improve that.
 	      maybe move to own settings tab? Wouldn't expect people to change
 		  it often tbh
-	- [ ] cleanest would probably a button that spawns a popup/dialog
+	- [x] cleanest would probably a button that spawns a popup/dialog
 	      in which this can be selected. That is possible with ImGui,
 		  see BeginPopup.
 		  Alternatively move it to a general settings tab (that we kind of
 		  need by now).
-	- [ ] Improve the "Freeze state" checkbox, it vastly out of place rn
+	- [x] Improve the "Freeze state" checkbox, it vastly out of place rn
 - [x] fix resource viewer
 	- [x] fix filtering by type
 	- [x] fix filtering by name
@@ -159,6 +161,11 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] cmdDrawIndirectCount: allow to view state (especially attachments
+      but i guess could be useful for ds state as well) before/after each
+	  individual draw command. Same for cmdDrawIndirect with multiple
+	  draw counts. Could likely use the same mechanism to do the same for
+	  instances.
 - [ ] might be better to determine command group at EndCommandBuffer
       instead of first submission. We can't use the used queue though...
 - [ ] support descriptor indexing. Shouldn't even be too much work

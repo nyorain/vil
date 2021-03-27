@@ -85,7 +85,8 @@ struct ComputePipeline : Pipeline {
 
 // See vulkan section "pipeline layout compatibility"
 bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b);
-bool compatibleForSetN(const PipelineLayout& a, const PipelineLayout& b, u32 N);
+bool compatibleForSetN(const PipelineLayout& a, const PipelineLayout& b,
+		u32 N, bool considerPushConstants = true);
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
     VkDevice                                    device,

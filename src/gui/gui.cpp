@@ -1480,10 +1480,8 @@ void refButtonOpt(Gui& gui, Handle* handle) {
 }
 
 void refButtonExpect(Gui& gui, Handle* handle) {
-	dlg_assert(handle);
-	if(handle) {
-		refButton(gui, *handle);
-	}
+	dlg_assert_or(handle, return);
+	refButton(gui, *handle);
 }
 
 void refButtonD(Gui& gui, Handle* handle, const char* str) {
