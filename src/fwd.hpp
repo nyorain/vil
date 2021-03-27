@@ -98,6 +98,7 @@ struct MemBlockDeleter;
 struct DrawCmdBase;
 struct DispatchCommand;
 struct BeginRenderPassCmd;
+struct BeginDebugUtilsLabelCmd;
 
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;

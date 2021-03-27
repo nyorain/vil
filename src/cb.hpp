@@ -98,21 +98,28 @@ private:
 	ComputeState computeState_ {};
 	GraphicsState graphicsState_ {};
 
-    struct Section {
-        SectionCommand* cmd;
-        Section* parent {}; // one level up. Null only for root node
-        Section* next {}; // might be != null even when this is the last section. Re-using allocations
-    };
+	BeginRenderPassCmd* rpi_ {};
 
-	Section* section_ {}; // the last, lowest, deepest-down section
-	Command* lastCommand_ {}; // the last added command in current section (might be null)
+	struct DebugLabel {
+		BeginDebugUtilsLabelCmd* cmd {};
+		// NOTE: when we have more hierachy-like commands with Begin/End
+		// that we want to put into a hierachy e.g. for UI or CommandDesc,
+		// we should replace this with a more general "u32 depth, void* parent"
+		// description
+		BeginRenderPassCmd* rpi {};
+		u32 subpass {};
+	};
+
+	std::vector<DebugLabel> labels_ {};
+	Command* lastCommand_ {}; // the last added
 
 	PushConstantData pushConstants_ {};
 
 public: // Only public for recording, should not be accessed outside api
-	void beginSection(SectionCommand& cmd);
 	void addCmd(Command& cmd);
-	void endSection();
+
+	auto& rpi() { return rpi_; }
+	auto& labels() { return labels_; }
 
 	ComputeState& computeState() { return computeState_; }
 	GraphicsState& graphicsState() { return graphicsState_; }

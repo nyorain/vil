@@ -178,7 +178,6 @@ void processType(CommandBufferDesc& desc, Command::Type type) {
 	}
 }
 
-// CommandBufferDesc CommandBufferDesc::get(const Command* cmd) {
 CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 	CommandBufferDesc ret;
 	ret.name = "root";

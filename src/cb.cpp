@@ -50,6 +50,10 @@ CommandBuffer::~CommandBuffer() {
 void CommandBuffer::clearPendingLocked() {
 	// checkLocked will automtically remove it from this cb
 	while(!this->pending.empty()) {
+		// TODO: if checkLocked does not succeed we should probably wait
+		// for it. It should not happen but when it happens (e.g. with
+		// unsupported extensions) we would effectively have a spin lock
+		// here which is bad.
 		auto res = checkLocked(*this->pending.front()->parent);
 		dlg_assert(res);
 	}
@@ -98,23 +102,28 @@ void CommandBuffer::doReset(bool record) {
 void CommandBuffer::doEnd() {
 	dlg_assert(record_);
 
-	// NOTE: debug utils labels can be unterminated
-	while(section_) {
-		dlg_assert(dynamic_cast<const BeginDebugUtilsLabelCmd*>(section_->cmd));
-		section_ = section_->parent;
+	if(!labels_.empty()) {
+		record_->pushLables = allocSpan<const char*>(*this, labels_.size());
+		for(auto i = 0u; i < labels_.size(); ++i) {
+			// label cmd->name is allocated in the same memory block as
+			// the record so just using it here without copy should be fine
+			record_->pushLables[i] = labels_[i].cmd->name;
+		}
 	}
 
-	dlg_assert(!section_);
+	if(!labels_.empty() || record_->numPopLabels) {
+		dlg_trace("record pushes {} labels, pops {}",
+			labels_.size(), record_->numPopLabels);
+	}
 
 	graphicsState_ = {};
 	computeState_ = {};
 	pushConstants_ = {};
 
-	section_ = nullptr;
 	lastCommand_ = nullptr;
+	labels_.clear();
 
 	// parse commands into description
-	// record_->desc = CommandBufferDesc::get(record_->commands);
 	record_->desc = CommandBufferDesc::getAnnotate(record_->commands);
 
 	// Make sure to never call CommandBufferRecord destructor inside lock
@@ -142,51 +151,12 @@ void CommandBuffer::doEnd() {
 	}
 }
 
-void CommandBuffer::endSection() {
-	// TODO: this is allowed e.g. for EndDebugUtilsLabel
-	dlg_assert(section_);
-	if(!section_)
-	{
-		return;
-	}
-
-	lastCommand_ = section_->cmd;
-	section_->cmd = nullptr;
-
-	// Don't unset section_->next, we can re-use the allocation
-	// later on. We unset 'cmd' above to signal its unused (as debug check)
-	section_ = section_->parent;
-}
-
-void CommandBuffer::beginSection(SectionCommand& cmd) {
-	if(section_) {
-		if(section_->next) {
-			dlg_assert(!section_->next->cmd);
-			section_ = section_->next;
-		} else {
-			auto nextSection = &vil::allocate<Section>(*this);
-			nextSection->parent = section_;
-			section_->next = nextSection;
-			section_ = nextSection;
-		}
-	} else {
-		section_ = &vil::allocate<Section>(*this);
-	}
-
-	section_->cmd = &cmd;
-	lastCommand_ = nullptr;
-}
-
 void CommandBuffer::addCmd(Command& cmd) {
 	if(lastCommand_) {
 		dlg_assert(record_->commands);
 		lastCommand_->next = &cmd;
-	} else if(section_) {
-		dlg_assert(record_->commands);
-		dlg_assert(section_->cmd);
-		dlg_assert(!section_->cmd->children_);
-		section_->cmd->children_ = &cmd;
-	} else if(!record_->commands) {
+	} else {
+		dlg_assert(!record_->commands);
 		record_->commands = &cmd;
 	}
 
@@ -337,14 +307,7 @@ ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
 }
 
 // recording
-enum class SectionType {
-	none,
-	begin,
-	next,
-	end,
-};
-
-template<typename T, SectionType ST = SectionType::none, typename... Args>
+template<typename T, typename... Args>
 T& addCmd(CommandBuffer& cb, Args&&... args) {
 	static_assert(std::is_base_of_v<Command, T>);
 
@@ -357,17 +320,7 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 	dlg_assert(cb.record());
 
 	auto& cmd = vil::allocate<T>(cb, std::forward<Args>(args)...);
-
-	if constexpr(ST == SectionType::end || ST == SectionType::next) {
-		cb.endSection();
-	}
-
 	cb.addCmd(cmd);
-
-	if constexpr(ST == SectionType::begin || ST == SectionType::next) {
-		static_assert(std::is_convertible_v<T*, SectionCommand*>);
-		cb.beginSection(cmd);
-	}
 
 	return cmd;
 }
@@ -499,21 +452,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 }
 
 // == command buffer recording ==
-// util
-// void addToHandle(CommandBufferRecord& rec, DeviceHandle& handle) {
-// 	std::lock_guard lock(rec.device().mutex);
-// 	auto [it, success] = handle.refCbs.insert(&rec);
-// 	dlg_assert(success);
-// }
-
 void useHandle(CommandRecord& rec, Command& cmd, u64 h64, DeviceHandle& handle) {
-	// auto it = rec.handles.find(h64);
-	// if(it == rec.handles.end()) {
-	// 	it = rec.handles.emplace(h64, UsedHandle{handle, *rec.cb}).first;
-	// 	it->second.handle = &handle;
-	// 	addToHandle(rec, *it->second.handle);
-	// }
-
 	auto it = rec.handles.emplace(h64, UsedHandle{handle, rec}).first;
 	it->second.commands.push_back(&cmd);
 }
@@ -525,13 +464,6 @@ void useHandle(CommandRecord& rec, Command& cmd, T& handle) {
 }
 
 UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& image) {
-	// auto it = rec.images.find(image.handle);
-	// if(it == rec.images.end()) {
-	// 	it = rec.images.emplace(image.handle, UsedImage(image, *rec.cb)).first;
-	// 	it->second.image = &image;
-	// 	addToHandle(rec, *it->second.image);
-	// }
-
 	auto it = rec.images.emplace(image.handle, UsedImage{image, rec}).first;
 	it->second.commands.push_back(&cmd);
 
@@ -540,7 +472,7 @@ UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& image) {
 
 	// NOTE: add swapchain in case it's a swapchain image?
 	// shouldn't be needed I guess.
-	// NOTE: can currently fail for sparse bindings i guess
+	// NOTE: assertion can currently fail for sparse bindings i guess
 	dlg_assert(image.memory || image.swapchain);
 	if(image.memory) {
 		useHandle(rec, cmd, *image.memory);
@@ -710,7 +642,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 void cmdBeginRenderPass(CommandBuffer& cb,
 		const VkRenderPassBeginInfo& rpBeginInfo,
 		const VkSubpassBeginInfo& subpassBeginInfo) {
-	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
+	auto& cmd = addCmd<BeginRenderPassCmd>(cb);
 
 	cmd.clearValues = copySpan(cb, rpBeginInfo.pClearValues, rpBeginInfo.clearValueCount);
 	cmd.info = rpBeginInfo;
@@ -720,9 +652,9 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cmd.fb = cb.dev->framebuffers.find(rpBeginInfo.framebuffer);
 	cmd.rp = cb.dev->renderPasses.find(rpBeginInfo.renderPass);
 
-	dlg_assert(!cb.graphicsState().rpi);
-	cb.graphicsState().rpi = &cmd;
-	cb.graphicsState().subpass = 0u;
+	cb.graphicsState().rpi.subpass = 0u;
+	cb.graphicsState().rpi.fb = cmd.fb;
+	cb.graphicsState().rpi.rp = cmd.rp;
 
 	cmd.subpassBeginInfo = subpassBeginInfo;
 	copyChainInPlace(cb, cmd.subpassBeginInfo.pNext);
@@ -733,6 +665,9 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	useHandle(cb, cmd, *cmd.fb);
 	useHandle(cb, cmd, *cmd.rp);
 
+	dlg_assert(!cb.rpi());
+	cb.rpi() = &cmd;
+
 	if(cmd.fb && cmd.rp) {
 		dlg_assert(cmd.rp->desc->attachments.size() == cmd.fb->attachments.size());
 		for(auto i = 0u; i < cmd.fb->attachments.size(); ++i) {
@@ -741,18 +676,11 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 				continue;
 			}
 
-			// TODO: can there be a transition inside the renderpass on
-			//   an attachment? probably not...
-			//   maybe better move this to RenderPassEnd nonetheless?
-			// TODO: handle secondary command buffers and stuff
 			useHandle(cb, cmd, *attachment, false);
 			useHandle(cb, cmd, *attachment->img,
 				cmd.rp->desc->attachments[i].finalLayout);
 		}
 	}
-
-	auto& subpassCmd = addCmd<FirstSubpassCmd, SectionType::begin>(cb);
-	(void) subpassCmd;
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
@@ -773,13 +701,13 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 		VkCommandBuffer                             commandBuffer,
 		VkSubpassContents                           contents) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
+	auto& cmd = addCmd<NextSubpassCmd>(cb);
 	cmd.beginInfo = {};
 	cmd.beginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
 	cmd.beginInfo.contents = contents;
 
-	dlg_assert(cb.graphicsState().rpi);
-	++cb.graphicsState().subpass;
+	dlg_assert(cb.rpi());
+	++cb.graphicsState().rpi.subpass;
 
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
@@ -788,15 +716,13 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 
-	// pop subpass section
-	cb.endSection();
-
-	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
+	auto& cmd = addCmd<EndRenderPassCmd>(cb);
 	cmd.endInfo = {};
 	cmd.endInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_END_INFO;
 
-	dlg_assert(cb.graphicsState().rpi);
-	cb.graphicsState().rpi = nullptr;
+	dlg_assert(cb.rpi());
+	cb.rpi() = nullptr;
+	cb.graphicsState().rpi = {};
 
 	cb.dev->dispatch.CmdEndRenderPass(commandBuffer);
 }
@@ -817,12 +743,12 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
+	auto& cmd = addCmd<NextSubpassCmd>(cb);
 	cmd.beginInfo = *pSubpassBeginInfo;
 	copyChainInPlace(cb, cmd.beginInfo.pNext);
 
-	dlg_assert(cb.graphicsState().rpi);
-	++cb.graphicsState().subpass;
+	dlg_assert(cb.rpi());
+	++cb.graphicsState().rpi.subpass;
 
 	auto f = cb.dev->dispatch.CmdNextSubpass2;
 	f(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
@@ -832,12 +758,13 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 		VkCommandBuffer                             commandBuffer,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
+	auto& cmd = addCmd<EndRenderPassCmd>(cb);
 	cmd.endInfo = *pSubpassEndInfo;
 	copyChainInPlace(cb, cmd.endInfo.pNext);
 
-	dlg_assert(cb.graphicsState().rpi);
-	cb.graphicsState().rpi = nullptr;
+	dlg_assert(cb.rpi());
+	cb.graphicsState().rpi = {};
+	cb.rpi() = nullptr;
 
 	auto f = cb.dev->dispatch.CmdEndRenderPass2;
 	f(commandBuffer, pSubpassEndInfo);
@@ -964,6 +891,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<DrawCmd>(cb, cb, cb.graphicsState());
+	dlg_assert(cb.rpi() && cb.graphicsState().rpi.rp);
 
 	cmd.vertexCount = vertexCount;
 	cmd.instanceCount = instanceCount;
@@ -983,6 +911,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 		uint32_t                                    firstInstance) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb, cb.graphicsState());
+	dlg_assert(cb.rpi() && cb.graphicsState().rpi.rp);
 
 	cmd.firstInstance = firstInstance;
 	cmd.instanceCount = instanceCount;
@@ -1002,6 +931,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
+	dlg_assert(cb.rpi() && cb.graphicsState().rpi.rp);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1024,6 +954,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
+	dlg_assert(cb.rpi() && cb.graphicsState().rpi.rp);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1048,6 +979,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
+	dlg_assert(cb.rpi() && cb.graphicsState().rpi.rp);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1078,6 +1010,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 		uint32_t                                    stride) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
+	dlg_assert(cb.rpi() && cb.graphicsState().rpi.rp);
 
 	auto& buf = cb.dev->buffers.get(buffer);
 	cmd.buffer = &buf;
@@ -1406,13 +1339,12 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	cmd.attachments = copySpan(cb, pAttachments, attachmentCount);
 	cmd.rects = copySpan(cb, pRects, rectCount);
 
-	dlg_assert(cb.graphicsState().rpi);
+	dlg_assert(cb.rpi() && cb.graphicsState().rpi.rp);
 	cmd.rpi = cb.graphicsState().rpi;
 
 	// NOTE: add clears attachments handles to used handles for this cmd?
 	// but they were already used in BeginRenderPass and are just implicitly
-	// used here (as in many other render pass cmds). So we probably should
-	// not do it.
+	// used here (as in many other render pass cmds). So we don't do it.
 
 	cb.dev->dispatch.CmdClearAttachments(commandBuffer, attachmentCount,
 		pAttachments, rectCount, pRects);
@@ -1500,7 +1432,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
-	auto* last = cmd.children_;
+	cmd.records = allocSpan<CommandRecord*>(cb, commandBufferCount);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
@@ -1509,27 +1441,13 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		// We don't have to lock the mutex here because the command buffer
 		// state is not allowed to change while it is used here.
 		auto recordPtr = secondary.lastRecordPtrLocked();
-
-		auto& childCmd = vil::allocate<ExecuteCommandsChildCmd>(cb);
-		childCmd.id_ = i;
-		childCmd.record_ = recordPtr.get();
-
-		if(!last) {
-			dlg_assert(!cmd.children_);
-			cmd.children_ = &childCmd;
-		} else {
-			dlg_assert(cmd.children_);
-			last->next = &childCmd;
-		}
-
-		cb.record()->secondaries.push_back(std::move(recordPtr));
+		cmd.records[i] = recordPtr.get();
 
 		// Needed to correctly invalidate cb when a secondary buffer is
 		// reset/destroyed.
 		useHandle(cb, cmd, secondary);
 
-		auto& rec = *secondary.record();
-		for(auto& img : rec.images) {
+		for(auto& img : recordPtr->images) {
 			if(img.second.layoutChanged) {
 				useHandle(cb, cmd, *img.second.image, img.second.finalLayout);
 			} else {
@@ -1537,9 +1455,13 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 			}
 		}
 
-		for(auto& handle : rec.handles) {
+		for(auto& handle : recordPtr->handles) {
 			useHandle(cb, cmd, handle.first, *handle.second.handle);
 		}
+
+		// make sure secondary record is being kept alive while primary
+		// one is alive
+		cb.record()->secondaries.push_back(std::move(recordPtr));
 	}
 
 	cb.dev->dispatch.CmdExecuteCommands(commandBuffer,
@@ -1634,12 +1556,17 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb);
+	auto& cmd = addCmd<BeginDebugUtilsLabelCmd>(cb);
 
 	auto* c = pLabelInfo->color;
 	cmd.color = {c[0], c[1], c[2], c[3]};
 	cmd.name = copyString(cb, pLabelInfo->pLabelName);
 	// TODO: copy pNext?
+
+	auto& lbl = cb.labels().emplace_back();
+	lbl.cmd = &cmd;
+	lbl.rpi = cb.rpi();
+	lbl.subpass = cb.rpi() ? cb.graphicsState().rpi.subpass : 0u;
 
 	if(cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(commandBuffer, pLabelInfo);
@@ -1649,8 +1576,27 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getData<CommandBuffer>(commandBuffer);
-	auto& cmd = addCmd<EndDebugUtilsLabelCmd, SectionType::end>(cb);
+	auto& cmd = addCmd<EndDebugUtilsLabelCmd>(cb);
 	(void) cmd;
+
+	if(cb.labels().empty()) {
+		++cb.record()->numPopLabels;
+	} else {
+		auto& lbl = cb.labels().back();
+		if(lbl.rpi != cb.rpi() || (lbl.rpi &&
+				lbl.subpass != cb.graphicsState().rpi.subpass)) {
+			// TODO: document this in detail somewhere. Application authors
+			// should understand when exactly this happens, why the way they
+			// use the api is broken (for the usecase of the layer at least)
+			// and how they can fix it.
+			dlg_info("Detected unsupported, inconsistent debug-utils label "
+				"nesting by application. UI and command matching might "
+				"be broken in certain situations");
+			cb.record()->brokenLabelNesting = true;
+		}
+
+		cb.labels().pop_back();
+	}
 
 	if(cb.dev->dispatch.CmdEndDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(commandBuffer);

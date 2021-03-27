@@ -147,13 +147,20 @@ struct DynamicStateDepthBias {
 	float slope {};
 };
 
+struct RenderPassInstanceState {
+	RenderPass* rp {};
+	Framebuffer* fb {};
+	unsigned subpass {};
+};
+
 struct GraphicsState : DescriptorState {
 	BoundIndexBuffer indices {};
 	span<BoundVertexBuffer> vertices;
 	GraphicsPipeline* pipe {};
 
-	BeginRenderPassCmd* rpi {}; // render pass instance
-	unsigned subpass {};
+	// We can't store a BeginRenderPassCmd* here because that would not
+	// work with secondary command buffers inside a render pass
+	RenderPassInstanceState rpi {};
 
 	struct StencilState {
 		u32 writeMask {};
@@ -255,6 +262,18 @@ struct CommandRecord {
 	// The queue family this record was recorded for. Stored here separately
 	// from CommandBuffer so that information is retained after cb destruction.
 	u32 queueFamily {};
+
+	// DebugUtils labels can span across multiple records.
+	// - numPopLables: the number of labels popped from the queue stack
+	// - pushLabels: the labels to push to the queue after execution
+	// For a command buffer that closes all label it opens and open all
+	// label it closes, numPopLabels is 0 and pushLabels empty.
+	u32 numPopLabels {};
+	span<const char*> pushLables {};
+
+	// whether this record incorrectly nests labels (e.g. begins them inside
+	// a render pass end ends them outisde).
+	bool brokenLabelNesting {};
 
 	bool finished {}; // whether the recording is finished (i.e. EndCommandBuffer called)
 	VkCommandBufferUsageFlags usageFlags {};

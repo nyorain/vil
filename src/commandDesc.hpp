@@ -7,6 +7,11 @@
 
 namespace vil {
 
+struct CommandLink {
+	const Command* cmd {};
+	u32 id {};
+};
+
 // Descrption of a command relative to the current recorded state.
 // Can be useful to implement heuristics identifying structurally
 // similar commands in related command buffer recordings (e.g. when
@@ -29,9 +34,7 @@ struct CommandDesc {
 
 	// Expects the given command buffer to be in executable/pending state.
 	static std::vector<CommandDesc> get(const Command& root, span<const Command*> hierarchy);
-
 	static std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc);
-	static Command* find(Command* root, span<const CommandDesc> desc);
 };
 
 // Rough structure of a command buffer recording.
@@ -51,7 +54,6 @@ struct CommandBufferDesc {
 	// Returns a description for the given set of commands.
 	// The toplevel CommandBufferDesc will always be named "root".
 	// Also annotates the commands, i.e. fills in Command::relID.
-	// static CommandBufferDesc get(const Command* commands);
 	static CommandBufferDesc getAnnotate(Command* commands);
 
 	// Returns how similar the two given command buffer descriptions are.

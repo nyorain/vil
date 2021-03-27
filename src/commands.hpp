@@ -50,13 +50,6 @@ struct Command {
 	// be separately stored in the command buffer.
 	~Command() = default;
 
-	// Display a one-line overview of the command via ImGui.
-	// Commands with children should display themselves as tree nodes.
-	// Gets the command that is currently selected and should return
-	// the hierachy of children selected in this frame (or an empty vector
-	// if none is).
-	virtual std::vector<const Command*> display(const Command* sel, TypeFlags typeFlags) const;
-
 	// The name of the command as string (might include parameter information).
 	// Used by the default 'display' implementation.
 	// Gets a list of destroyed handled, might include referenced handles
@@ -86,26 +79,14 @@ struct Command {
 	// Should forward the call to all potential children.
 	virtual void unset(const std::unordered_set<DeviceHandle*>&) {}
 
-	// Returns the children command list. For non-parent commands, this
-	// is simply null.
-	virtual Command* children() const { return nullptr; }
-
-	// Returns whether the given command is a child of this one.
-	// Complexity is linear in the number of child commands.
-	// Returns false for itself.
-	virtual bool isChild(const Command& cmd) const;
-
-	// Returns whether the given command is a descendant of this one.
-	// Complexity is linear in the number of descendants.
-	// Returns false for itself.
-	virtual bool isDescendant(const Command& cmd) const;
-
 	// Forms a forward linked list with siblings
 	Command* next {};
 
 	// How many sibilings with same nameDesc() came before this in parent
 	// NOTE: i don't like this here. Not sure how to properly solve this.
-	// It's needed by displayCommands to generate proper imgui ids
+	// It's needed by displayCommands to generate proper imgui ids.
+	// Guess we should move this to CommandBufferGui although
+	// it will get a bit more complicated.
 	unsigned relID {};
 };
 
@@ -129,28 +110,10 @@ struct NameResult {
 };
 
 NameResult name(DeviceHandle*, NullName = NullName::null);
-std::vector<const Command*> displayCommands(const Command* cmd,
-		const Command* selected, Command::TypeFlags typeFlags);
 
-struct ParentCommand : Command {
-	std::vector<const Command*> display(const Command* selected,
-		TypeFlags typeFlags, const Command* cmd) const;
-	std::vector<const Command*> display(const Command* selected,
-		TypeFlags typeFlags) const override;
-
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override {
-		auto* cmd = children();
-		while(cmd) {
-			cmd->unset(destroyed);
-			cmd = cmd->next;
-		}
-	}
-};
-
-struct SectionCommand : ParentCommand {
-	Command* children_ {};
-	Command* children() const override { return children_; }
-};
+struct EndRenderPassCmd;
+struct NextSubpassCmd;
+struct EndDebugUtilsLabelCmd;
 
 struct BarrierCmdBase : Command {
     VkPipelineStageFlags srcStageMask {};
@@ -189,7 +152,7 @@ struct BarrierCmd : BarrierCmdBase {
 };
 
 // All direct children must be of type 'NextSubpassCmd'
-struct BeginRenderPassCmd : SectionCommand {
+struct BeginRenderPassCmd : Command {
 	VkRenderPassBeginInfo info {};
 	span<VkClearValue> clearValues;
 
@@ -198,12 +161,13 @@ struct BeginRenderPassCmd : SectionCommand {
 
 	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
 
-	// Returns the subpass that contains the given command.
-	// Returns u32(-1) if no subpass is ancestor of the given command.
-	u32 subpassOfDescendant(const Command& cmd) const;
+	NextSubpassCmd* subpasses {}; // linked list
+	EndRenderPassCmd* end {};
+
+	// Returns nullptr for i == 0 or i >= numSubpasses
+	NextSubpassCmd* subpass(u32 i) const;
 
 	std::string toString() const override;
-	std::vector<const Command*> display(const Command*, TypeFlags) const override;
 	std::string nameDesc() const override { return "BeginRenderPass"; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
@@ -211,13 +175,12 @@ struct BeginRenderPassCmd : SectionCommand {
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
 };
 
-struct SubpassCmd : SectionCommand {};
-
-struct NextSubpassCmd : SubpassCmd {
+struct NextSubpassCmd : Command {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 	VkSubpassBeginInfo beginInfo; // for the new subpass
 
-	using SubpassCmd::SubpassCmd;
+	BeginRenderPassCmd* rpi {};
+	NextSubpassCmd* nextSubpass {};
 
 	// toString should probably rather return the subpass number.
 	// Must be tracked while recording
@@ -225,16 +188,10 @@ struct NextSubpassCmd : SubpassCmd {
 	void record(const Device&, VkCommandBuffer) const override;
 };
 
-// Meta command needed for correct hierachy. We want each subpass to
-// have its own section.
-struct FirstSubpassCmd : SubpassCmd {
-	using SubpassCmd::SubpassCmd;
-	std::string nameDesc() const override { return "Subpass 0"; }
-	void record(const Device&, VkCommandBuffer) const override {}
-};
-
 struct EndRenderPassCmd : Command {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
+
+	BeginRenderPassCmd* rpi {};
 
 	std::string nameDesc() const override { return "EndRenderPass"; }
 	Type type() const override { return Type::end; }
@@ -581,7 +538,7 @@ struct ClearDepthStencilImageCmd : Command {
 struct ClearAttachmentCmd : Command {
 	span<VkClearAttachment> attachments;
 	span<VkClearRect> rects;
-	BeginRenderPassCmd* rpi {};
+	RenderPassInstanceState rpi;
 
 	std::string nameDesc() const override { return "ClearAttachment"; }
 	std::vector<std::string> argumentsDesc() const override;
@@ -616,40 +573,35 @@ struct ResetEventCmd : Command {
 	void unset(const std::unordered_set<DeviceHandle*>&) override;
 };
 
-struct ExecuteCommandsCmd : ParentCommand {
-	Command* children_ {};
+struct ExecuteCommandsCmd : Command {
+	span<CommandRecord*> records {}; // kept alive in parent CommandRecord
 
-	Command* children() const override { return children_; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "ExecuteCommands"; }
-	std::vector<const Command*> display(const Command*, TypeFlags) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 };
 
-// Meta-command
-struct ExecuteCommandsChildCmd : ParentCommand {
-	CommandRecord* record_ {}; // kept alive in parent CommandRecord
-	unsigned id_ {};
-
-	std::string nameDesc() const override { return "ExecuteCommandsChild"; }
-	std::string toString() const override;
-	Command* children() const override { return record_->commands; }
-	void record(const Device&, VkCommandBuffer) const override {}
-};
-
-struct BeginDebugUtilsLabelCmd : SectionCommand {
+struct BeginDebugUtilsLabelCmd : Command {
 	const char* name {};
 	std::array<float, 4> color; // NOTE: could use this in UI
+
+	// NOTE: might be nullptr since begin/end debugUtilsLabels must only
+	// be matched per-queue, not per-command-buffer
+	EndDebugUtilsLabelCmd* end {};
 
 	std::string toString() const override { return dlg::format("Label: {}", name); }
 	void record(const Device&, VkCommandBuffer) const override;
 
-	// NOTE: yes, we return more than just the command here.
+	// NOTE: we return more than just the command here, unlike other commands.
 	// But that's because the command itself isn't of any use without the label.
 	std::string nameDesc() const override { return toString(); }
 };
 
 struct EndDebugUtilsLabelCmd : Command {
+	// NOTE: might be nullptr since begin/end debugUtilsLabels must only
+	// be matched per-queue, not per-command-buffer
+	BeginDebugUtilsLabelCmd* begin {};
+
 	std::string nameDesc() const override { return dlg::format("EndLabel"); }
 	Type type() const override { return Type::end; }
 	void record(const Device&, VkCommandBuffer) const override;
