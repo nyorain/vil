@@ -192,6 +192,8 @@ void CommandBufferGui::draw(Draw& draw) {
 					for(auto& rec : batch.submissions) {
 						// TODO: there may be multiple records with same group.
 						// not sure how to handle that case.
+						// We should probably find the *best* match instead of the first one.
+						// We have additional information here (submission order) that we can use.
 						if(rec->group == record_->group) {
 							newRec = rec;
 							break;
@@ -199,36 +201,40 @@ void CommandBufferGui::draw(Draw& draw) {
 					}
 				}
 
-				record_ = newRec;
-			}
+				if(newRec) {
+					record_ = newRec;
+					auto hierarchy = CommandDesc::findHierarchy(record_->commands, desc_);
+					command_ = {hierarchy.begin(), hierarchy.end()};
+					desc_ = CommandDesc::get(*record_->commands, command_);
 
-			if(record_) {
-				auto hierarchy = CommandDesc::findHierarchy(record_->commands, desc_);
-				command_ = {hierarchy.begin(), hierarchy.end()};
-				desc_ = CommandDesc::get(*record_->commands, command_);
+					dlg_assert(record_->group);
+					dlg_assert(hook.target.group == record_->group);
+					// dlg_assert(desc_.size() <= record_->group->desc.children.size() + 1); // would need to track max depth
 
-				dlg_assert(hook.target.group == record_->group);
-				if(desc_.empty()) {
-					hook.desc({});
-					hook.target = {};
+					if(desc_.empty()) {
+						dlg_assert(command_.empty());
+
+						// don't unselect, we might find the command in future again.
+						// hook.target = {};
+						// hook.desc({});
+						// record_ = {};
+						// command_ = {};
+						// commandViewer_.unselect();
+					} else {
+						dlg_assert(!command_.empty());
+						hook.target = {};
+						hook.target.group = record_->group;
+						hook.desc(desc_, false);
+						commandViewer_.select(record_, *command_.back(), false);
+					}
 				} else {
-					// TODO: we should do this! But without invalidating
-					// records I guess. Probably counts for all desc() calls
-					// where a command was found
-					// hook.desc(desc_);
+					// don't unselect, we might find the command in future again.
+					// desc_ = {};
+					// command_ = {};
+					// hook.target = {};
+					// hook.desc({});
+					// commandViewer_.unselect();
 				}
-
-				if(command_.empty()) {
-					commandViewer_.unselect();
-				} else {
-					commandViewer_.select(record_, *command_.back(), false);
-				}
-			} else {
-				desc_ = {};
-				command_ = {};
-				hook.target = {};
-				hook.desc({});
-				commandViewer_.unselect();
 			}
 
 			records_ = sc.frameSubmissions;
@@ -299,10 +305,11 @@ void CommandBufferGui::draw(Draw& draw) {
 							commandViewer_.select(record_, *command_.back(), true);
 
 							dev.commandHook->target = {};
-							if(record_->group) {
-								dev.commandHook->target.group = record_->group;
-								dev.commandHook->desc(desc_);
-							}
+							dlg_assert(record_->group);
+							// dlg_assert(desc_.size() <= record_->group->desc.children.size() + 1);
+
+							dev.commandHook->target.group = record_->group;
+							dev.commandHook->desc(desc_);
 						}
 
 						ImGui::Indent(s);
@@ -330,11 +337,8 @@ void CommandBufferGui::draw(Draw& draw) {
 		auto* selected = command_.empty() ? nullptr : command_.back();
 		auto nsel = displayCommands(record_->commands, selected, commandFlags_);
 		if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
-			command_ = std::move(nsel);
-			desc_ = CommandDesc::get(*record_->commands, command_);
-			commandViewer_.select(record_, *command_.back(), true);
-
 			// when nothing was selected before, register the hook
+			/*
 			if(command_.empty()) {
 				dlg_assert(
 					!dev.commandHook->target.cb &&
@@ -351,6 +355,21 @@ void CommandBufferGui::draw(Draw& draw) {
 					dev.commandHook->target.group = record_->group;
 				}
 			}
+			*/
+
+			if(mode_ == UpdateMode::none) {
+				dlg_assert(dev.commandHook->target.record == record_.get());
+			} else if(mode_ == UpdateMode::commandBuffer) {
+				dlg_assert(cb_);
+				dlg_assert(dev.commandHook->target.cb == cb_);
+			} else if(mode_ == UpdateMode::commandGroup) {
+				dlg_assert(record_->group);
+				dlg_assert(dev.commandHook->target.group == record_->group);
+			}
+
+			command_ = std::move(nsel);
+			desc_ = CommandDesc::get(*record_->commands, command_);
+			commandViewer_.select(record_, *command_.back(), true);
 
 			// in any case, update the hook
 			dev.commandHook->desc(desc_);
@@ -462,6 +481,8 @@ void CommandBufferGui::selectGroup(IntrusivePtr<CommandRecord> record) {
 	command_ = {};
 	record_ = std::move(record);
 	desc_ = {};
+
+	updateHookTarget();
 
 	commandViewer_.unselect();
 }

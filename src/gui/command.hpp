@@ -89,6 +89,7 @@ private:
 	void displayImage(Draw& draw, const CopiedImage& img);
 
 private:
+	friend class Gui;
 	Gui* gui_ {};
 
 	IntrusivePtr<CommandRecord> record_ {}; // the selected record

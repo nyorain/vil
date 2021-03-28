@@ -104,7 +104,7 @@ std::vector<Command*> CommandDesc::findHierarchy(Command* root, span<const Comma
 		std::sort(candidates.begin(), candidates.end());
 
 		// TODO: better filter
-		auto threshold = 0.5f;
+		auto threshold = 0.29f;
 		auto cmp = [](float threshold, const auto& cand) {
 			return threshold <= cand.score;
 		};

@@ -221,11 +221,13 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	return hook->cb;
 }
 
-void CommandHook::desc(std::vector<CommandDesc> desc) {
+void CommandHook::desc(std::vector<CommandDesc> desc, bool invalidate) {
 	desc_ = std::move(desc);
 
-	invalidateRecordings();
-	invalidateData();
+	if(invalidate) {
+		invalidateRecordings();
+		invalidateData();
+	}
 }
 
 void CommandHook::invalidateRecordings() {
@@ -928,9 +930,11 @@ void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID) {
 
 	dlg_assert(info.beginRenderPassCmd);
 	auto& fb = nonNull(info.beginRenderPassCmd->fb);
+
 	if(attID >= fb.attachments.size()) {
+		state->errorMessage = "attachment out of range";
+		dlg_trace("copyAttachment {} out of range ({})", attID, fb.attachments.size());
 		hook->copyAttachment = {};
-		dlg_trace("copyAttachment out of range");
 	} else {
 		auto& imageView = fb.attachments[attID];
 		dlg_assert(imageView);

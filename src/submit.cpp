@@ -40,11 +40,11 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 				// TODO: make configurable? This determines how
 				// much we allow a CommandRecord to differ from the groups
 				// description while still recognizing it as group member.
-				constexpr auto matchThreshold = 0.6;
+				constexpr auto matchThreshold = 0.98;
 				auto matchVal = match(qgroup->desc, rec.desc);
-				best = std::max(best, matchVal);
-				if(matchVal > matchThreshold) {
+				if(matchVal > best && matchVal > matchThreshold) {
 					rec.group = qgroup.get();
+					best = matchVal;
 				}
 			}
 
@@ -72,6 +72,8 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 			} else {
 				it->second = subm.submitID;
 			}
+
+			dlg_assert(contains(rec.group->aliveRecords, &rec));
 		}
 
 		dlg_assert(rec.group);

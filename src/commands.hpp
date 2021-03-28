@@ -360,6 +360,7 @@ struct BindDescriptorSetCmd : Command {
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void displayInspector(Gui& gui) const override;
 };
 
 struct DispatchCmdBase : Command {
@@ -588,6 +589,7 @@ struct ClearAttachmentCmd : Command {
 	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
+	void unset(const std::unordered_set<DeviceHandle*>&) override;
 };
 
 struct SetEventCmd : Command {

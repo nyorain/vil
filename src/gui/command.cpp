@@ -338,7 +338,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 						viewData_.pushConstants.stage != VK_SHADER_STAGE_COMPUTE_BIT) {
 					selectCommandView = true;
 				}
-			} else if(drawCmd && dispatchCmd->state.pipe) {
+			} else if(drawCmd && drawCmd->state.pipe) {
 				auto& pipe = *drawCmd->state.pipe;
 				auto found = false;
 				for(auto& stage : pipe.stages) {
@@ -509,7 +509,7 @@ void CommandViewer::displayDsList() {
 			}
 		}
 
-		if(best && best != unnamedName) {
+		if(best) {
 			return best;
 		}
 
@@ -617,6 +617,10 @@ void CommandViewer::displayIOList() {
 				auto& subpass = desc.subpasses[subpassID];
 
 				auto addAttachment = [&](auto label, auto id) {
+					if(id == VK_ATTACHMENT_UNUSED) {
+						return;
+					}
+
 					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 					if(view_ == IOView::attachment && viewData_.attachment.id == id) {
 						flags |= ImGuiTreeNodeFlags_Selected;
@@ -788,6 +792,8 @@ void CommandViewer::displayDs(Draw& draw) {
 
 	// == Buffer ==
 	if(dsCat == DescriptorCategory::buffer) {
+		// TODO: take dynamic offset into account for dynamic bufs
+
 		// general info
 		auto& srcBuf = nonNull(elem.bufferInfo.buffer);
 		refButton(gui, srcBuf);

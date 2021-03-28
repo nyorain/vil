@@ -29,18 +29,19 @@
 namespace vil {
 
 // Util
-// #define BREAK_ON_ERROR
+#define BREAK_ON_ERROR
 #ifdef BREAK_ON_ERROR
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
+	dlg_default_output(origin, string, data);
+	// (void) string;
+	// (void) data;
+
 	if (origin->level >= dlg_level_error) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
 		// std::raise(SIGABRT);
-		// DebugBreak();
+		DebugBreak();
 	}
-	dlg_default_output(origin, string, data);
-	// (void) string;
-	// (void) data;
 }
 #endif // BREAK_ON_ERROR
 

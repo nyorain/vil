@@ -84,7 +84,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
 
 			image_.level = image_.draw.level;
-			image_.draw.aspect = image_.draw.aspect;
+			image_.aspect = image_.draw.aspect;
 		}
 
 		auto getViewType = [&]{

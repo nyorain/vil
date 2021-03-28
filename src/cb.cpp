@@ -517,6 +517,25 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	cb.doReset(true);
 	cb.record()->usageFlags = pBeginInfo->flags;
+
+	if(pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
+		dlg_assert(pBeginInfo->pInheritanceInfo);
+		dlg_assert(pBeginInfo->pInheritanceInfo->framebuffer);
+		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
+
+		auto& fb = cb.dev->framebuffers.get(pBeginInfo->pInheritanceInfo->framebuffer);
+		auto& rp = cb.dev->renderPasses.get(pBeginInfo->pInheritanceInfo->renderPass);
+
+		cb.graphicsState().rpi.fb = &fb;
+		cb.graphicsState().rpi.rp = &rp;
+		cb.graphicsState().rpi.subpass = pBeginInfo->pInheritanceInfo->subpass;
+
+		// TODO: use handles here? would have to allow using handles without command
+		// Pretty sure we'd have to do it for correctness.
+		// useHandle(cb, cmd, *cmd.fb);
+		// useHandle(cb, cmd, *cmd.rp);
+	}
+
 	return cb.dev->dispatch.BeginCommandBuffer(commandBuffer, pBeginInfo);
 }
 

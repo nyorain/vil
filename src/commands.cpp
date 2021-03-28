@@ -727,6 +727,9 @@ void DrawCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
 	checkUnset(state.pipe, destroyed);
 	checkUnset(state.indices.buffer, destroyed);
 
+	checkUnset(state.rpi.fb, destroyed);
+	checkUnset(state.rpi.rp, destroyed);
+
 	for(auto& verts : state.vertices) {
 		checkUnset(verts.buffer, destroyed);
 	}
@@ -960,6 +963,25 @@ std::string BindDescriptorSetCmd::toString() const {
 	} else {
 		return dlg::format("BindDescriptorSets({}..{})",
 			firstSet, firstSet + sets.size() - 1);
+	}
+}
+
+void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
+	imGuiText("Bind point: {}", vk::name(pipeBindPoint));
+	imGuiText("First set: {}", firstSet);
+
+	refButtonD(gui, pipeLayout);
+
+	// TODO: dynamic offsets
+
+	for (auto* ds : sets) {
+		ImGui::Bullet();
+
+		if(!ds) {
+			imGuiText("null or destroyed");
+		} else {
+			refButton(gui, *ds);
+		}
 	}
 }
 
@@ -1586,6 +1608,11 @@ std::vector<std::string> ClearAttachmentCmd::argumentsDesc() const {
 		addToArgumentsDesc(ret, u32(att.aspectMask));
 	}
 	return ret;
+}
+
+void ClearAttachmentCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
+	checkUnset(rpi.fb, destroyed);
+	checkUnset(rpi.rp, destroyed);
 }
 
 // SetEventCmd

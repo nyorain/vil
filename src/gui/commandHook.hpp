@@ -161,8 +161,8 @@ public:
 	void invalidateRecordings();
 	void invalidateData() { state = {}; }
 
-	// Automatically invalidates data and recordings
-	void desc(std::vector<CommandDesc> desc);
+	// invalidate: Automatically invalidates data and recordings?
+	void desc(std::vector<CommandDesc> desc, bool invalidate = true);
 	void unsetHookOps(bool doQueryTime = false);
 
 	~CommandHook();

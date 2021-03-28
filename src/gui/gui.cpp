@@ -1079,8 +1079,11 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	makeImGuiCurrent();
 
 	// TODO: hacky but we have to keep the record alive, making sure
-	// it's not destroyed inside the lock.
-	auto keepAliveRec = tabs_.cb.record_;
+	// it's not destroyed inside the lock. Might need more here for correctness.
+	// Should probably come up with better mechanism.
+	auto keepAliveRec0 = tabs_.cb.record_;
+	auto keepAliveRec1 = tabs_.cb.commandViewer_.record_;
+	auto keepAliveState = tabs_.cb.commandViewer_.state_;
 	auto keepAliveBatches = tabs_.cb.records_;
 
 	Draw* foundDraw {};
@@ -1593,6 +1596,14 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 	} else {
 		VkFlags depthStencil = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 		imgDraw.flags = DrawGuiImage::flagMaskR | DrawGuiImage::flagGrayscale;
+
+		// init
+		if(imgDraw.aspect != VK_IMAGE_ASPECT_DEPTH_BIT && imgDraw.aspect != VK_IMAGE_ASPECT_STENCIL_BIT) {
+			imgDraw.aspect = (subresources.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) ? 
+				VK_IMAGE_ASPECT_DEPTH_BIT : 
+				VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+
 		if((subresources.aspectMask & depthStencil) == depthStencil) {
 			if(ImGui::RadioButton("Depth", imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT)) {
 				imgDraw.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;

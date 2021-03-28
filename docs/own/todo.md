@@ -162,8 +162,24 @@ not sure if viable for first version but should be goal:
 	- [ ] dota 2 (linux)
 
 Possibly for later, new features/ideas:
+- [ ] when there is more than one record of the same group in one RecordBatch we get
+      into troubles when viewing it in swapchain commands mode.
+	  The problem is that *all* group submissions update hook.state and we might end
+	  up viewing one of those states, not really the one we want.
+	  Which can lead to weird issues, e.g. the gui shows a depthStencil attachment
+	  but when we click it we see a color attachment. Not sure how to really fix this,
+	  probably use more information in swapchain mode (e.g. submission order) and
+	  improve matching in general (e.g. make sure that render pass attachments *must* match
+	  for command group/records matching)
 - [ ] support debug utils labels across command buffer boundaries
 	  we already have the information of popped and pushed lables per record
+      NOTE: this isn't 100% correct at the moment though, e.g. when we end
+	  a debug label manually to fix the hierachy, it's only ended to the "ignoreEnd"
+	  counter but if that end is never called (to be ignored) the label would
+	  effectively be pushed onto the queue stack which we currently don't
+	  store anywhere. Not sure how to correctly do this though atm, depends
+	  on how we use it later on (since the label isn't effectively on the
+	  queue stack for our fixed hierachy...)
 - [ ] cmdDrawIndirectCount: allow to view state (especially attachments
       but i guess could be useful for ds state as well) before/after each
 	  individual draw command. Same for cmdDrawIndirect with multiple

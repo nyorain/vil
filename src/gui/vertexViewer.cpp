@@ -113,7 +113,7 @@ bool perspectiveHeuristic(span<const Vec4f> clipSpaceVerts) {
 	bool nonConstW = false;
 	bool nonOneW = false;
 
-	for(auto i = 0u; i < std::min<u32>(20, clipSpaceVerts.size()); ++i) {
+	for(auto i = 0u; i < std::min<u32>(20, u32(clipSpaceVerts.size())); ++i) {
 		if(std::abs(clipSpaceVerts[i][3] - 1.f) > 0.001) {
 			nonOneW = true;
 		}

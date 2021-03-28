@@ -108,19 +108,25 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 		auto& subp = desc.subpasses[s];
 		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 			auto attID = subp.pColorAttachments[i].attachment;
-			symbAttsRef[attID] = {attID, s, 0};
+			if(attID != VK_ATTACHMENT_UNUSED) {
+				symbAttsRef[attID] = {attID, s, 0};
+			}
 		}
 
 		if(subp.pDepthStencilAttachment) {
 			auto attID = subp.pDepthStencilAttachment->attachment;
-			symbAttsRef[attID] = {attID, s, 0};
+			if(attID != VK_ATTACHMENT_UNUSED) {
+				symbAttsRef[attID] = {attID, s, 0};
+			}
 		}
 
 		if(subp.pResolveAttachments) {
 			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 				auto srcID = subp.pColorAttachments[i].attachment;
 				auto dstID = subp.pResolveAttachments[i].attachment;
-				symbAttsRef[dstID] = symbAttsRef[srcID];
+				if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+					symbAttsRef[dstID] = symbAttsRef[srcID];
+				}
 			}
 		}
 	}
@@ -132,22 +138,28 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	auto& subp = desc.subpasses[split];
 	for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 		auto attID = subp.pColorAttachments[i].attachment;
-		symbAttsRef[attID] = {attID, split, 0};
-		symbAtts[attID] = {attID, split, 2};
+		if(attID != VK_ATTACHMENT_UNUSED) {
+			symbAttsRef[attID] = {attID, split, 0};
+			symbAtts[attID] = {attID, split, 2};
+		}
 	}
 
 	if(subp.pDepthStencilAttachment) {
 		auto attID = subp.pDepthStencilAttachment->attachment;
-		symbAttsRef[attID] = {attID, split, 0};
-		symbAtts[attID] = {attID, split, 2};
+		if(attID != VK_ATTACHMENT_UNUSED) {
+			symbAttsRef[attID] = {attID, split, 0};
+			symbAtts[attID] = {attID, split, 2};
+		}
 	}
 
 	if(subp.pResolveAttachments) {
 		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 			auto srcID = subp.pColorAttachments[i].attachment;
 			auto dstID = subp.pResolveAttachments[i].attachment;
-			symbAttsRef[dstID] = symbAttsRef[srcID];
-			symbAtts[dstID] = symbAtts[srcID];
+			if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+				symbAttsRef[dstID] = symbAttsRef[srcID];
+				symbAtts[dstID] = symbAtts[srcID];
+			}
 		}
 	}
 
@@ -160,7 +172,9 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 				auto srcID = subp.pColorAttachments[i].attachment;
 				auto dstID = subp.pResolveAttachments[i].attachment;
-				symbAtts[dstID] = symbAtts[srcID];
+				if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+					symbAtts[dstID] = symbAtts[srcID];
+				}
 			}
 		}
 	}
@@ -174,7 +188,9 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 				auto srcID = subp.pColorAttachments[i].attachment;
 				auto dstID = subp.pResolveAttachments[i].attachment;
-				symbAtts[dstID] = symbAtts[srcID];
+				if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+					symbAtts[dstID] = symbAtts[srcID];
+				}
 			}
 		}
 	}
@@ -182,6 +198,10 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	// execute our hooked:dst command
 	for(auto i = 0u; i < subp.inputAttachmentCount; ++i) {
 		auto attID = subp.pInputAttachments[i].attachment;
+		if(attID == VK_ATTACHMENT_UNUSED) {
+			continue;
+		}
+
 		if(symbAtts[attID] != symbAttsRef[attID]) {
 			dlg_trace("splittable({}): subpass {} input {} ({})", split, split, i, attID);
 			return false;
@@ -190,6 +210,10 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 
 	for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 		auto attID = subp.pColorAttachments[i].attachment;
+		if(attID == VK_ATTACHMENT_UNUSED) {
+			continue;
+		}
+
 		if(symbAtts[attID] != AttState{attID, split, 2}) {
 			dlg_trace("splittable({}): Unexpected color ({}) state for seq 1", split, i);
 			return false;
@@ -200,19 +224,23 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 
 	if(subp.pDepthStencilAttachment) {
 		auto attID = subp.pDepthStencilAttachment->attachment;
-		if(symbAtts[attID] != AttState{attID, split, 2}) {
-			dlg_trace("splittable({}): Unexpected depthStencil state for seq 1", split);
-			return false;
-		}
+		if(attID != VK_ATTACHMENT_UNUSED) {
+			if(symbAtts[attID] != AttState{attID, split, 2}) {
+				dlg_trace("splittable({}): Unexpected depthStencil state for seq 1", split);
+				return false;
+			}
 
-		symbAtts[attID] = {attID, split, 1};
+			symbAtts[attID] = {attID, split, 1};
+		}
 	}
 
 	if(subp.pResolveAttachments) {
 		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 			auto srcID = subp.pColorAttachments[i].attachment;
 			auto dstID = subp.pResolveAttachments[i].attachment;
-			symbAtts[dstID] = symbAtts[srcID];
+			if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+				symbAtts[dstID] = symbAtts[srcID];
+			}
 		}
 	}
 
@@ -225,7 +253,9 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 				auto srcID = subp.pColorAttachments[i].attachment;
 				auto dstID = subp.pResolveAttachments[i].attachment;
-				symbAtts[dstID] = symbAtts[srcID];
+				if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+					symbAtts[dstID] = symbAtts[srcID];
+				}
 			}
 		}
 	}
@@ -239,7 +269,9 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 			for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 				auto srcID = subp.pColorAttachments[i].attachment;
 				auto dstID = subp.pResolveAttachments[i].attachment;
-				symbAtts[dstID] = symbAtts[srcID];
+				if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+					symbAtts[dstID] = symbAtts[srcID];
+				}
 			}
 		}
 	}
@@ -247,7 +279,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	// execute rest of split (everything after hooked)
 	for(auto i = 0u; i < subp.inputAttachmentCount; ++i) {
 		auto attID = subp.pInputAttachments[i].attachment;
-		if(symbAtts[attID] != symbAttsRef[attID]) {
+		if(attID != VK_ATTACHMENT_UNUSED && symbAtts[attID] != symbAttsRef[attID]) {
 			dlg_trace("splittable({}): subpass {} input {} ({})", split, split, i, attID);
 			return false;
 		}
@@ -255,6 +287,10 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 
 	for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 		auto attID = subp.pColorAttachments[i].attachment;
+		if(attID == VK_ATTACHMENT_UNUSED) {
+			continue;
+		}
+
 		if(symbAtts[attID] != AttState{attID, split, 1}) {
 			dlg_trace("splittable({}): Unexpected color ({}) state for seq 0", split, i);
 			return false;
@@ -265,19 +301,23 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 
 	if(subp.pDepthStencilAttachment) {
 		auto attID = subp.pDepthStencilAttachment->attachment;
-		if(symbAtts[attID] != AttState{attID, split, 1}) {
-			dlg_trace("splittable({}): Unexpected depthStencil state for seq 0", split);
-			return false;
-		}
+		if(attID != VK_ATTACHMENT_UNUSED) {
+			if(symbAtts[attID] != AttState{attID, split, 1}) {
+				dlg_trace("splittable({}): Unexpected depthStencil state for seq 0", split);
+				return false;
+			}
 
-		symbAtts[attID] = {attID, split, 0};
+			symbAtts[attID] = {attID, split, 0};
+		}
 	}
 
 	if(subp.pResolveAttachments) {
 		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 			auto srcID = subp.pColorAttachments[i].attachment;
 			auto dstID = subp.pResolveAttachments[i].attachment;
-			symbAtts[dstID] = symbAtts[srcID];
+			if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+				symbAtts[dstID] = symbAtts[srcID];
+			}
 		}
 	}
 
@@ -286,6 +326,10 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 		auto& subp = desc.subpasses[s];
 		for(auto i = 0u; i < subp.inputAttachmentCount; ++i) {
 			auto attID = subp.pInputAttachments[i].attachment;
+			if (attID == VK_ATTACHMENT_UNUSED) {
+				continue;
+			}
+
 			if(symbAtts[attID] != symbAttsRef[attID]) {
 				dlg_trace("splittable({}): subpass {} input {} ({})", split, s, i, attID);
 				return false;
@@ -294,6 +338,10 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 
 		for(auto i = 0u; i < subp.colorAttachmentCount; ++i) {
 			auto attID = subp.pColorAttachments[i].attachment;
+			if (attID == VK_ATTACHMENT_UNUSED) {
+				continue;
+			}
+
 			if(symbAtts[attID] != symbAttsRef[attID]) {
 				dlg_trace("splittable({}): subpass {} color {} ({})", split, s, i, attID);
 				return false;
@@ -313,20 +361,24 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 
 				auto srcID = subp.pColorAttachments[i].attachment;
 				auto dstID = subp.pResolveAttachments[i].attachment;
-				symbAtts[dstID] = symbAtts[srcID];
-				symbAttsRef[dstID] = symbAtts[srcID]; // same as symbAttsRef[srcID]
+				if(srcID != VK_ATTACHMENT_UNUSED && dstID != VK_ATTACHMENT_UNUSED) {
+					symbAtts[dstID] = symbAtts[srcID];
+					symbAttsRef[dstID] = symbAtts[srcID]; // same as symbAttsRef[srcID]
+				}
 			}
 		}
 
 		if(subp.pDepthStencilAttachment) {
 			auto attID = subp.pDepthStencilAttachment->attachment;
-			if(symbAtts[attID] != symbAttsRef[attID]) {
-				dlg_trace("splittable({}): subpass {} depthStencil ({})", split, s, attID);
-				return false;
-			}
+			if(attID != VK_ATTACHMENT_UNUSED) {
+				if(symbAtts[attID] != symbAttsRef[attID]) {
+					dlg_trace("splittable({}): subpass {} depthStencil ({})", split, s, attID);
+					return false;
+				}
 
-			symbAtts[attID] = {attID, s, 0};
-			symbAttsRef[attID] = {attID, s, 0};
+				symbAtts[attID] = {attID, s, 0};
+				symbAttsRef[attID] = {attID, s, 0};
+			}
 		}
 	}
 

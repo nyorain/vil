@@ -368,6 +368,8 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 
 					ds.bindings[b][e].imageInfo.sampler = sampler;
 					ds.bindings[b][e].valid = true;
+
+					std::lock_guard lock(dev.mutex);
 					sampler->descriptors.insert({&ds, b, e});
 				}
 			}

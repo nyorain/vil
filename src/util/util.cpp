@@ -6,6 +6,7 @@
 #include <cmath>
 #include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>
+#include <vk/enumString.hpp>
 
 namespace vil {
 
@@ -279,7 +280,7 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 			}
 			break;
 		default:
-			dlg_error("Format not supported for CPU reading");
+			dlg_error("Format '{}' not supported for CPU reading/writing", vk::name(format));
 			break;
 	}
 }
@@ -388,7 +389,7 @@ Vec3f e5b9g9r9ToRgb(u32 ebgr) {
 }
 
 std::size_t structSize(VkStructureType type) {
-	std::unordered_map<VkStructureType, std::size_t> structSizes = {
+	static const std::unordered_map<VkStructureType, std::size_t> structSizes = {
 #define ENTRY(stype) {stype, sizeof(LvlSTypeMap<stype>::Type)}
     	ENTRY(VK_STRUCTURE_TYPE_APPLICATION_INFO),
     	ENTRY(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO),
@@ -867,7 +868,12 @@ std::size_t structSize(VkStructureType type) {
 	};
 
 	auto it = structSizes.find(type);
-	return it == structSizes.end() ? 0 : it->second;
+    if (it == structSizes.end()) {
+        dlg_error("Unknown pNext chain sType '{}'", u64(type));
+        return 0u;
+    }
+
+	return it->second;
 }
 
 std::unique_ptr<std::byte[]> copyChain(const void*& pNext) {
