@@ -7,9 +7,9 @@
 #include <memory>
 #include <vector>
 
-typedef struct SpvReflectShaderModule SpvReflectShaderModule;
-
 namespace vil {
+
+typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 
 struct SpirvData {
 	std::vector<u32> spv;

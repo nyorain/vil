@@ -817,7 +817,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			auto& pipe = nonNull(dispatchCmd->state.pipe);
 			auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
 			auto* binding = getReflectBinding(refl, setID, bindingID);
-			if(!binding) {
+			if(!binding || !binding->block.type_description) {
 				ImGui::Text("Binding not used in pipeline");
 			} else {
 				display(binding->block, buf->copy);
@@ -950,9 +950,9 @@ void CommandViewer::displayPushConstants() {
 		}
 
 		auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
-		dlg_assert(refl.push_constant_block_count);
+		dlg_assert(refl.push_constant_block_count == 1);
 		if(refl.push_constant_block_count) {
-			display(*refl.push_constant_blocks, dispatchCmd->pushConstants.data);
+			display(nonNull(refl.push_constant_blocks), dispatchCmd->pushConstants.data);
 		}
 	} else if(drawCmd && drawCmd->state.pipe) {
 		if(!drawCmd->state.pipe) {
@@ -970,7 +970,7 @@ void CommandViewer::displayPushConstants() {
 			auto& refl = nonNull(nonNull(stage.spirv).reflection);
 			dlg_assert(refl.push_constant_block_count);
 			if(refl.push_constant_block_count) {
-				display(*refl.push_constant_blocks, drawCmd->pushConstants.data);
+				display(nonNull(refl.push_constant_blocks), drawCmd->pushConstants.data);
 			}
 
 			break;

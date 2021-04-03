@@ -35,6 +35,11 @@ VERSION HISTORY
 #include <stdint.h>
 #include <string.h>
 
+// It's important that we wrap it into our own namespace and don't use
+// extern "C" since otherwise the symbols might mess with applications already
+// using spirv_reflect. Yep, that was fun to debug.
+namespace vil {
+
 #ifdef _MSC_VER
   #define SPV_REFLECT_DEPRECATED(msg_str) __declspec(deprecated("This symbol is deprecated. Details: " msg_str))
 #elif defined(__clang__)
@@ -457,10 +462,6 @@ typedef struct SpvReflectShaderModule {
   } * _internal;
 
 } SpvReflectShaderModule;
-
-#if defined(__cplusplus)
-extern "C" {
-#endif
 
 /*! @fn spvReflectCreateShaderModule
 
@@ -1359,7 +1360,7 @@ SpvReflectResult spvReflectChangeOutputVariableLocation(
 const char* spvReflectSourceLanguage(SpvSourceLanguage source_lang);
 
 #if defined(__cplusplus)
-}
+} // namespace vil
 #endif
 
 #if defined(__cplusplus)
@@ -1367,7 +1368,7 @@ const char* spvReflectSourceLanguage(SpvSourceLanguage source_lang);
 #include <string>
 #include <vector>
 
-namespace spv_reflect {
+namespace vil::spv_reflect {
 
 /*! \class ShaderModule
 

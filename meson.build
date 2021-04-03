@@ -114,7 +114,7 @@ src = files(
 	'src/gui/vertexViewer.cpp',
 
 	# external util
-	'src/spirv_reflect.c',
+	'src/spirv_reflect.cpp',
 
 	# imgui
 	'src/imgui/imgui.cpp',

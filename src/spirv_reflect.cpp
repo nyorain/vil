@@ -34,6 +34,8 @@
 #define SPV_REFLECT_ASSERT(COND)
 #endif
 
+namespace vil {
+
 // Temporary enums until these make it into SPIR-V/Vulkan
 // clang-format off
 enum {
@@ -3496,7 +3498,11 @@ SpvReflectResult spvReflectCreateShaderModule(
   }
   memcpy(p_module->_internal->spirv_code, p_code, size);
 
+#ifdef __cplusplus
+  Parser parser {};
+#else // __cplusplus
   Parser parser = { 0 };
+#endif // __cplusplus
   SpvReflectResult result = CreateParser(p_module->_internal->spirv_size,
                                          p_module->_internal->spirv_code,
                                          &parser);
@@ -4857,4 +4863,6 @@ const char* spvReflectSourceLanguage(SpvSourceLanguage source_lang)
       break;
   }
   return "";
+}
+
 }
