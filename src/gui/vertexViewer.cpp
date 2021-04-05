@@ -21,82 +21,66 @@ namespace vil {
 
 // util
 template<typename T>
-std::string readFormat(u32 count, span<const std::byte> src) {
+std::string printFormat(u32 count, Vec4d val) {
 	auto ret = std::string {};
 	auto sep = "";
 	for(auto i = 0u; i < count; ++i) {
-		ret += dlg::format("{}{}", sep, read<T>(src));
+		ret += dlg::format("{}{}", sep, T(val[i]));
 		sep = ", ";
 	}
 
-	dlg_assert(src.empty());
 	return ret;
 }
 
-template<typename T>
-std::string readFormatNorm(u32 count, span<const std::byte> src, float mult,
-		float clampMin, float clampMax) {
-	auto ret = std::string {};
-	auto sep = "";
-	for(auto i = 0u; i < count; ++i) {
-		auto val = std::clamp(read<T>(src) * mult, clampMin, clampMax);
-		ret += dlg::format("{}{}", sep, val);
-		sep = ", ";
-	}
-
-	dlg_assert(src.empty());
-	return ret;
-}
-
-// TODO: support compresssed formats!
-// TODO: rgb/bgr order matters here! Fix that.
-//   We need to seriously rework this, more something
-//   like the format read function in util/util.hpp
 std::string readFormat(VkFormat format, span<const std::byte> src) {
 	u32 numChannels = FormatChannelCount(format);
 	u32 componentSize = FormatElementSize(format) / numChannels;
 
+	// TODO: not all formats covered
+	//   support compresssed formats! See ioFormat in util.cpp
+
+	Vec4d val = read(format, src);
+	dlg_assert(numChannels < 4);
+
 	if(FormatIsFloat(format)) {
 		switch(componentSize) {
-			case 2: return readFormat<f16>(numChannels, src);
-			case 4: return readFormat<float>(numChannels, src);
-			case 8: return readFormat<double>(numChannels, src);
+			case 2: return printFormat<f16>(numChannels, val);
+			case 4: return printFormat<float>(numChannels, val);
+			case 8: return printFormat<double>(numChannels, val);
 			default: break;
 		}
 	} else if(FormatIsUInt(format) || FormatIsUScaled(format)) {
 		switch(componentSize) {
-			case 1: return readFormat<u8>(numChannels, src);
-			case 2: return readFormat<u16>(numChannels, src);
-			case 4: return readFormat<u32>(numChannels, src);
-			case 8: return readFormat<u64>(numChannels, src);
+			case 1: return printFormat<u8>(numChannels, val);
+			case 2: return printFormat<u16>(numChannels, val);
+			case 4: return printFormat<u32>(numChannels, val);
+			case 8: return printFormat<u64>(numChannels, val);
 			default: break;
 		}
 	} else if(FormatIsInt(format) || FormatIsSScaled(format)) {
 		switch(componentSize) {
-			case 1: return readFormat<i8>(numChannels, src);
-			case 2: return readFormat<i16>(numChannels, src);
-			case 4: return readFormat<i32>(numChannels, src);
-			case 8: return readFormat<i64>(numChannels, src);
+			case 1: return printFormat<i8>(numChannels, val);
+			case 2: return printFormat<i16>(numChannels, val);
+			case 4: return printFormat<i32>(numChannels, val);
+			case 8: return printFormat<i64>(numChannels, val);
 			default: break;
 		}
 	} else if(FormatIsUNorm(format)) {
 		switch(componentSize) {
-			case 1: return readFormatNorm<u8> (numChannels, src, 1 / 255.f, 0.f, 1.f);
-			case 2: return readFormatNorm<u16>(numChannels, src, 1 / 65536.f, 0.f, 1.f);
+			case 1: return printFormat<u8> (numChannels, val);
+			case 2: return printFormat<u16>(numChannels, val);
 			default: break;
 		}
 	} else if(FormatIsSNorm(format)) {
 		switch(componentSize) {
-			case 1: return readFormatNorm<i8> (numChannels, src, 1 / 127.f, -1.f, 1.f);
-			case 2: return readFormatNorm<i16>(numChannels, src, 1 / 32767.f, -1.f, 1.f);
+			case 1: return printFormat<i8> (numChannels, val);
+			case 2: return printFormat<i16>(numChannels, val);
 			default: break;
 		}
 	} else if(format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) {
 		auto rgb = e5b9g9r9ToRgb(read<u32>(src));
 		return dlg::format("{}", rgb[0], rgb[1], rgb[2]);
 	}
-
-	// TODO: a lot of formats not supported yet!
 
 	dlg_warn("Format {} not supported", vk::name(format));
 	return "<Unsupported format>";
@@ -128,6 +112,56 @@ bool perspectiveHeuristic(span<const Vec4f> clipSpaceVerts) {
 	}
 
 	return nonOneW;
+}
+
+struct AABB3f {
+	Vec3f pos;
+	Vec3f extent; // 0.5 * size
+};
+
+AABB3f bounds(VkFormat format, ReadBuf data) {
+	auto size = FormatElementSize(format);
+	auto inf = std::numeric_limits<float>::infinity();
+	auto min = Vec3f{inf, inf, inf};
+	auto max = Vec3f{-inf, -inf, -inf};
+
+	while(data.size() > size) {
+		auto pos = Vec3f(read(format, data));
+
+		min = vec::cw::min(min, pos);
+		max = vec::cw::max(max, pos);
+	}
+
+	// can probaby happen due to copied buffer truncation
+	dlg_assertm(data.empty(), "Unexpected (unaligned) amount of vertex data");
+
+	AABB3f ret;
+	ret.pos = 0.5f * (min + max);
+	ret.extent = 0.5f * (max - max);
+
+	return ret;
+}
+
+AABB3f bounds(span<const Vec4f> points, bool useW) {
+	auto inf = std::numeric_limits<float>::infinity();
+	auto min = Vec3f{inf, inf, inf};
+	auto max = Vec3f{-inf, -inf, -inf};
+
+	for(auto& point : points) {
+		Vec3f pos3 = Vec3f(point);
+		if(useW) {
+			pos3.z = point[3];
+		}
+
+		min = vec::cw::min(min, pos3);
+		max = vec::cw::max(max, pos3);
+	}
+
+	AABB3f ret;
+	ret.pos = 0.5f * (min + max);
+	ret.extent = 0.5f * (max - max);
+
+	return ret;
 }
 
 // VertexViewer

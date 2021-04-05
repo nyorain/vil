@@ -96,6 +96,8 @@ struct FormatReader {
 	static void call(span<const std::byte>& src, Vec4d& dst) {
 		using nytl::vec::operators::operator/;
 		auto ret = read<Vec<N, T>>(src);
+		// TODO: strictly speaking we have to clamp for normed formats
+		// (so that we can't ever get 1.0..01 for SNORM formats)
 		dst = Vec4d(ret) / double(Fac);
 		if constexpr(SRGB) {
 			dst = srgbToLinear(dst);
@@ -116,7 +118,8 @@ struct FormatWriter {
 	}
 };
 
-template<bool Write, std::size_t N, typename T, u32 Fac = 1, bool SRGB = false, typename Span, typename Vec>
+template<bool Write, std::size_t N, typename T, u32 Fac = 1, bool SRGB = false,
+	typename Span, typename Vec>
 void iofmt(Span& span, Vec& vec) {
 	if constexpr(Write) {
 		FormatWriter::call<N, T, Fac, SRGB>(span, vec);
@@ -125,15 +128,34 @@ void iofmt(Span& span, Vec& vec) {
 	}
 }
 
+// swizzle
+template<bool Reverse, unsigned A, unsigned B = 1u, unsigned C = 2u, unsigned D = 3u>
+Vec4d swizzle(Vec4d x) {
+	static_assert(A <= 3 && B <= 3 && C <= 3 && D <= 3);
+
+	if constexpr(Reverse) {
+		Vec4d ret;
+		ret[A] = x[0];
+		ret[B] = x[1];
+		ret[C] = x[2];
+		ret[D] = x[3];
+		return ret;
+	} else {
+		return Vec4d{x[A], x[B], x[C], x[D]};
+	}
+}
+
 template<bool W, typename Span, typename Vec>
 void ioFormat(VkFormat format, Span& span, Vec& vec) {
 	// TODO: missing:
-	// - packed formats (including < 8bit formats like 5-6-5, also packed depth/stencil)
-	// - reversed formats (bgra, argb)
+	// - packed formats (including < 8bit formats like 5-6-5,
+	//   also packed depth/stencil and ABGR)
 	// - 2-10-10-10 formats
 	// - compressed formats (can't be supported with this api anyways i guess)
 	// Also properly test this!
 
+	// We swizzle separately (in the calling function), so rgba here is the
+	// same as bgra
 	switch(format) {
 		case VK_FORMAT_R16_SFLOAT: return iofmt<W, 1, f16>(span, vec);
 		case VK_FORMAT_R16G16_SFLOAT: return iofmt<W, 2, f16>(span, vec);
@@ -152,13 +174,21 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 
 		case VK_FORMAT_R8_UNORM: return iofmt<W, 1, u8, 255>(span, vec);
 		case VK_FORMAT_R8G8_UNORM: return iofmt<W, 2, u8, 255>(span, vec);
-		case VK_FORMAT_R8G8B8_UNORM: return iofmt<W, 3, u8, 255>(span, vec);
-		case VK_FORMAT_R8G8B8A8_UNORM: return iofmt<W, 4, u8, 255>(span, vec);
+		case VK_FORMAT_B8G8R8_UNORM:
+		case VK_FORMAT_R8G8B8_UNORM:
+			return iofmt<W, 3, u8, 255>(span, vec);
+		case VK_FORMAT_R8G8B8A8_UNORM:
+		case VK_FORMAT_B8G8R8A8_UNORM:
+			return iofmt<W, 4, u8, 255>(span, vec);
 
 		case VK_FORMAT_R8_SRGB: return iofmt<W, 1, u8, 255, true>(span, vec);
 		case VK_FORMAT_R8G8_SRGB: return iofmt<W, 2, u8, 255, true>(span, vec);
-		case VK_FORMAT_R8G8B8_SRGB: return iofmt<W, 3, u8, 255, true>(span, vec);
-		case VK_FORMAT_R8G8B8A8_SRGB: return iofmt<W, 4, u8, 255, true>(span, vec);
+		case VK_FORMAT_B8G8R8_SRGB:
+		case VK_FORMAT_R8G8B8_SRGB:
+			return iofmt<W, 3, u8, 255, true>(span, vec);
+		case VK_FORMAT_R8G8B8A8_SRGB:
+		case VK_FORMAT_B8G8R8A8_SRGB:
+			return iofmt<W, 4, u8, 255, true>(span, vec);
 
 		case VK_FORMAT_R16_UNORM: return iofmt<W, 1, u16, 65535>(span, vec);
 		case VK_FORMAT_R16G16_UNORM: return iofmt<W, 2, u16, 65535>(span, vec);
@@ -167,8 +197,12 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 
 		case VK_FORMAT_R8_SNORM: return iofmt<W, 1, i8, 127>(span, vec);
 		case VK_FORMAT_R8G8_SNORM: return iofmt<W, 2, i8, 127>(span, vec);
-		case VK_FORMAT_R8G8B8_SNORM: return iofmt<W, 3, i8, 127>(span, vec);
-		case VK_FORMAT_R8G8B8A8_SNORM: return iofmt<W, 4, i8, 127>(span, vec);
+		case VK_FORMAT_B8G8R8_SNORM:
+		case VK_FORMAT_R8G8B8_SNORM:
+			return iofmt<W, 3, i8, 127>(span, vec);
+		case VK_FORMAT_R8G8B8A8_SNORM:
+		case VK_FORMAT_B8G8R8A8_SNORM:
+			return iofmt<W, 4, i8, 127>(span, vec);
 
 		case VK_FORMAT_R16_SNORM: return iofmt<W, 1, i16, 32767>(span, vec);
 		case VK_FORMAT_R16G16_SNORM: return iofmt<W, 2, i16, 32767>(span, vec);
@@ -180,9 +214,13 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 		case VK_FORMAT_R8G8_USCALED:
 		case VK_FORMAT_R8G8_UINT: return iofmt<W, 2, u8>(span, vec);
 		case VK_FORMAT_R8G8B8_USCALED:
-		case VK_FORMAT_R8G8B8_UINT: return iofmt<W, 3, u8>(span, vec);
+		case VK_FORMAT_R8G8B8_UINT:
+		case VK_FORMAT_B8G8R8_UINT:
+			return iofmt<W, 3, u8>(span, vec);
 		case VK_FORMAT_R8G8B8A8_USCALED:
-		case VK_FORMAT_R8G8B8A8_UINT: return iofmt<W, 4, u8>(span, vec);
+		case VK_FORMAT_R8G8B8A8_UINT:
+		case VK_FORMAT_B8G8R8A8_UINT:
+			return iofmt<W, 4, u8>(span, vec);
 
 		case VK_FORMAT_R16_USCALED:
 		case VK_FORMAT_R16_UINT: return iofmt<W, 1, u16>(span, vec);
@@ -203,9 +241,13 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 		case VK_FORMAT_R8G8_SSCALED:
 		case VK_FORMAT_R8G8_SINT: return iofmt<W, 2, i8>(span, vec);
 		case VK_FORMAT_R8G8B8_SSCALED:
-		case VK_FORMAT_R8G8B8_SINT: return iofmt<W, 3, i8>(span, vec);
+		case VK_FORMAT_R8G8B8_SINT:
+		case VK_FORMAT_B8G8R8_SINT:
+			return iofmt<W, 3, i8>(span, vec);
 		case VK_FORMAT_R8G8B8A8_SSCALED:
-		case VK_FORMAT_R8G8B8A8_SINT: return iofmt<W, 4, i8>(span, vec);
+		case VK_FORMAT_R8G8B8A8_SINT:
+		case VK_FORMAT_B8G8R8A8_SINT:
+			return iofmt<W, 4, i8>(span, vec);
 
 		case VK_FORMAT_R16_SSCALED:
 		case VK_FORMAT_R16_SINT: return iofmt<W, 1, i16>(span, vec);
@@ -221,13 +263,13 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 		case VK_FORMAT_R32G32B32_SINT: return iofmt<W, 3, i32>(span, vec);
 		case VK_FORMAT_R32G32B32A32_SINT: return iofmt<W, 4, i32>(span, vec);
 
-		// NOTE: precision for 64-bit int formats can be problematics
+		// NOTE: precision for 64-bit int formats can be problematic
 		case VK_FORMAT_R64_UINT: return iofmt<W, 1, u64>(span, vec);
 		case VK_FORMAT_R64G64_UINT: return iofmt<W, 2, u64>(span, vec);
 		case VK_FORMAT_R64G64B64_UINT: return iofmt<W, 3, u64>(span, vec);
 		case VK_FORMAT_R64G64B64A64_UINT: return iofmt<W, 4, u64>(span, vec);
 
-		// NOTE: precision for 64-bit int formats can be problematics
+		// NOTE: precision for 64-bit int formats can be problematic
 		case VK_FORMAT_R64_SINT: return iofmt<W, 1, i64>(span, vec);
 		case VK_FORMAT_R64G64_SINT: return iofmt<W, 2, i64>(span, vec);
 		case VK_FORMAT_R64G64B64_SINT: return iofmt<W, 3, i64>(span, vec);
@@ -285,15 +327,37 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 	}
 }
 
+template<bool W>
+Vec4d formatSwizzle(VkFormat format, Vec4d x) {
+	switch(format) {
+		case VK_FORMAT_B8G8R8A8_UNORM:
+		case VK_FORMAT_B8G8R8A8_SRGB:
+		case VK_FORMAT_B8G8R8A8_SINT:
+		case VK_FORMAT_B8G8R8A8_UINT:
+		case VK_FORMAT_B8G8R8A8_SSCALED:
+		case VK_FORMAT_B8G8R8A8_USCALED:
+		case VK_FORMAT_B8G8R8_UNORM:
+		case VK_FORMAT_B8G8R8_SRGB:
+		case VK_FORMAT_B8G8R8_SINT:
+		case VK_FORMAT_B8G8R8_UINT:
+		case VK_FORMAT_B8G8R8_SSCALED:
+		case VK_FORMAT_B8G8R8_USCALED:
+			return swizzle<W, 2, 1, 0, 3>(x);
+		default:
+			return x;
+	}
+}
 
 Vec4d read(VkFormat srcFormat, span<const std::byte>& src) {
 	Vec4d ret {};
 	ioFormat<false>(srcFormat, src, ret);
+	ret = formatSwizzle<false>(srcFormat, ret);
 	return ret;
 }
 
 void write(VkFormat dstFormat, span<std::byte>& dst, const Vec4d& color) {
-	ioFormat<true>(dstFormat, dst, color);
+	const auto sc = formatSwizzle<true>(dstFormat, color);
+	ioFormat<true>(dstFormat, dst, sc);
 }
 
 void convert(VkFormat dstFormat, span<std::byte>& dst,

@@ -28,7 +28,9 @@ struct Swapchain : DeviceHandle {
 	// execution and in-present timings (to give meaningful timings for
 	// applications limited by vsync or cpu).
 	using Clock = std::chrono::high_resolution_clock;
-	static constexpr auto maxFrameTimings = 1000u;
+	// TODO: maybe rather make this dependent on time it takes to display
+	// them? e.g. store frames from the last X seconds
+	static constexpr auto maxFrameTimings = 300u;
 	std::optional<Clock::time_point> lastPresent {};
 	std::vector<Clock::duration> frameTimings;
 
