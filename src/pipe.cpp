@@ -307,30 +307,42 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pre.stages = {nci.pStages, nci.stageCount};
 		pre.useXfb = dev.transformFeedback &&
 			!hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
-		bool foundVertexStage = false;
+		u32 xfbVertexStageID = u32(-1);
 
 		auto& stages = stagesVecs.emplace_back();
 		for(auto s = 0u; s < nci.stageCount; ++s) {
 			auto src = nci.pStages[s];
 			if(src.stage == VK_SHADER_STAGE_VERTEX_BIT && pre.useXfb) {
-				dlg_assert(!foundVertexStage);
-				foundVertexStage = true;
+				dlg_assert(xfbVertexStageID == u32(-1));
+				xfbVertexStageID = u32(stages.size());
+			}
 
-				auto& mod = dev.shaderModules.get(src.module);
-				if(!mod.xfbVertShader) {
-					mod.xfbVertShader = patchVertexShaderXfb(dev,
-						mod.code->spv, src.pName);
-				}
-
-				if(mod.xfbVertShader) {
-					src.module = mod.xfbVertShader;
-				}
+			if(src.stage == VK_SHADER_STAGE_GEOMETRY_BIT ||
+					src.stage == VK_SHADER_STAGE_MESH_BIT_NV ||
+					src.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT ||
+					src.stage == VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) {
+				// Builtin Position might not be present
+				dlg_trace("xfb currently not supported for mesh/geometry/tessellation pipes");
+				pre.useXfb = false;
 			}
 
 			stages.push_back(src);
 		}
 
-		pre.useXfb &= foundVertexStage;
+		pre.useXfb &= xfbVertexStageID != u32(-1);
+		if (pre.useXfb) {
+			auto& stage = stages[xfbVertexStageID];
+			auto& mod = dev.shaderModules.get(stage.module);
+			if(!mod.xfbVertShader) {
+				mod.xfbVertShader = patchVertexShaderXfb(dev,
+					mod.code->spv, stage.pName);
+			}
+
+			if(mod.xfbVertShader) {
+				stage.module = mod.xfbVertShader;
+			}
+		}
+
 		nci.pStages = stages.data();
 	}
 

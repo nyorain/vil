@@ -36,7 +36,10 @@ struct CommandDesc {
 
 // Rough structure of a command buffer recording.
 struct CommandBufferDesc {
-	std::string name; // command/label name information
+	// Command/label name information. Name and params match exactly for two
+	// sections to be considered a match
+	std::string name;
+	std::vector<std::string> params;
 
 	// statistics about number of command types
 	u32 transferCommands {};

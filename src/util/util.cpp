@@ -298,7 +298,7 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 			} else {
 				vec = {};
 				auto d = read<std::array<u8, 3>>(span);
-				vec[0] = ((u32(d[0]) << 16) | (u32(d[1]) << 8) | u32(d[3])) / 16777215.0;
+				vec[0] = ((u32(d[0]) << 16) | (u32(d[1]) << 8) | u32(d[2])) / 16777215.0;
 				vec[1] = read<u8>(span);
 			}
 			break;

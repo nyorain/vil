@@ -40,7 +40,7 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 				// TODO: make configurable? This determines how
 				// much we allow a CommandRecord to differ from the groups
 				// description while still recognizing it as group member.
-				constexpr auto matchThreshold = 0.98;
+				constexpr auto matchThreshold = 0.8;
 				auto matchVal = match(qgroup->desc, rec.desc);
 				if(matchVal > best && matchVal > matchThreshold) {
 					rec.group = qgroup.get();

@@ -51,7 +51,20 @@ private:
 
 	// For swapchain
 	std::vector<RecordBatch> records_;
-	u32 swapchainCounter_ {};
+	u32 swapchainCounter_ {}; // counter of last processed batch
+	// How many records of same group come before target.
+	// We need this in case there are multiple records of the same group
+	// in a single frame.
+	// TODO: this is not very stable. It can break for instance if the
+	// number of submissions belonging to the same group changes between
+	// frames.
+	// We should:
+	// - improve the matching/grouping algorithm. Especially make groups a better
+	//   representation of the actual records.
+	// - maybe still select the *best* match when there are multiple submission
+	//   of same group in a frame. This matching can include submission order
+	//   (what we do here exclusively) but can use additional information.
+	u32 groupCounter_ {};
 	bool freezePresentBatches_ {};
 
 	// The commands to display

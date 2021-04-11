@@ -32,12 +32,19 @@ args = cc.get_supported_arguments([
 	# msvc really slow in debug build without this
 	'-D_ITERATOR_DEBUG_LEVEL=0',
 
-	# highly useful for debugging on linux
-	'-D_GLIBCXX_DEBUG',
-
 	# for clang
 	'-Wno-missing-braces',
+
+	# to be compatible with msvc warning level on gcc/clang
+	# debatable whether the warnings are actually useful
+	# '-Wconversion',
+	# '-Wno-float-conversion',
 ])
+
+if get_option('buildtype') == 'debug'
+	# highly useful for debugging
+	args += '-D_GLIBCXX_DEBUG'
+endif
 
 layer_args = [
 	# Make sure to *never* include them

@@ -1,7 +1,9 @@
 #include <commandDesc.hpp>
 #include <commands.hpp>
 #include <cb.hpp>
+#include <rp.hpp>
 #include <util/util.hpp>
+#include <vk/enumString.hpp>
 
 namespace vil {
 
@@ -191,6 +193,15 @@ CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 			auto child = CommandBufferDesc::getAnnotate(children);
 			child.name = cmd->nameDesc();
 			ret.children.push_back(std::move(child));
+
+			// TODO: kinda hacky, should find general mechanism
+			if(auto rpc = dynamic_cast<BeginRenderPassCmd*>(cmd); rpc) {
+				dlg_assert(rpc->rp);
+
+				for(auto& attachment : rpc->rp->desc->attachments) {
+					child.params.push_back(vk::name(attachment.format));
+				}
+			}
 		}
 
 		processType(ret, cmd->type());
@@ -219,7 +230,8 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 		// specific information. Could filter out numbers or do a lexical
 		// distance check or something. Revisit if need ever arises.
 		for(auto it = bcit; it != b.children.end(); ++it) {
-			if(it->name == ac.name) {
+			if(it->name == ac.name && std::equal(it->params.begin(), it->params.end(),
+					ac.params.begin(), ac.params.end())) {
 				// NOTE: we could weigh children with more total commands
 				// more, via it->totalCommands. Probably a good idea
 				// NOTE: when match is low, could look forward and choose
@@ -232,7 +244,6 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	}
 
 	auto maxChildren = std::max(a.children.size(), b.children.size());
-	float childMatch = maxChildren ? childMatchSum / maxChildren : 1.f;
 
 	// compare own commands
 	float weightSum = 0.f;
@@ -256,7 +267,12 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	// We might want to value large setions that are similar a lot
 	// more since that is a huge indicator that command buffers come from
 	// the same source, even if whole sections are missing in either of them.
-	return ownMatch * childMatch;
+	// NOTE: we currently value child sections a lot since
+	// we are much more interested in the *structure* of a record than
+	// the actual commands (since we don't correctly match them anyways,
+	// only the numbers). Should be changed when doing better per-command
+	// matching
+	return (ownMatch + childMatchSum) / (1 + maxChildren);
 }
 
 } // namespace vil

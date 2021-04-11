@@ -188,21 +188,28 @@ void CommandBufferGui::draw(Draw& draw) {
 			// new submission list
 			if(record_) {
 				auto newRec = IntrusivePtr<CommandRecord> {};
+				auto newCounter = u32(0);
 				for(auto& batch : sc.frameSubmissions) {
 					for(auto& rec : batch.submissions) {
-						// TODO: there may be multiple records with same group.
-						// not sure how to handle that case.
-						// We should probably find the *best* match instead of the first one.
-						// We have additional information here (submission order) that we can use.
 						if(rec->group == record_->group) {
-							newRec = rec;
-							break;
+							if(newCounter == groupCounter_) {
+								newRec = rec;
+								break;
+							}
+
+							++newCounter;
 						}
+					}
+
+					if(newRec) {
+						break;
 					}
 				}
 
 				if(newRec) {
 					record_ = newRec;
+					groupCounter_ = newCounter;
+
 					auto hierarchy = CommandDesc::findHierarchy(record_->commands, desc_);
 					command_ = {hierarchy.begin(), hierarchy.end()};
 					desc_ = CommandDesc::get(*record_->commands, command_);
@@ -260,6 +267,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	if(mode_ == UpdateMode::swapchain) {
 		auto* selected = record_ && !command_.empty() ? command_.back() : nullptr;
+		auto updateGroupCounter = false;
 
 		for(auto b = 0u; b < records_.size(); ++b) {
 			auto& batch = records_[b];
@@ -310,6 +318,8 @@ void CommandBufferGui::draw(Draw& draw) {
 
 							dev.commandHook->target.group = record_->group;
 							dev.commandHook->desc(desc_);
+
+							updateGroupCounter = true;
 						}
 
 						ImGui::Indent(s);
@@ -320,6 +330,32 @@ void CommandBufferGui::draw(Draw& draw) {
 				ImGui::Indent(s);
 				ImGui::TreePop();
 			}
+		}
+
+		if (updateGroupCounter) {
+			dlg_assert(record_);
+
+			groupCounter_ = u32(-1);
+			auto counter = u32(0);
+
+			for(auto& batch : records_) {
+				for(auto& rec : batch.submissions) {
+					if(rec->group == record_->group) {
+						if(rec == record_) {
+							groupCounter_ = counter;
+							break;
+						}
+
+						++counter;
+					}
+				}
+
+				if(groupCounter_ != u32(-1)) {
+					break;
+				}
+			}
+
+			dlg_assert(groupCounter_ != u32(-1));
 		}
 	} else {
 		dlg_assert(record_);
