@@ -2,8 +2,15 @@
 
 v0.1, goal: end of january 2021
 
-- [x] fix debug utils label hierachy. They could have been started/completed
-      in different command buffer
+- [x] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
+- [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
+- [ ] don't even attempt to display non-float formats in 3D vertex viewer
+- [ ] support drawIndirectCount in vertex viewer
+	- [ ] #43, probably for later: also support just showing a single draw command
+		  (see the other todo - #42)
+- [ ] vertex viewer improvements
+	- [ ] automatically compute bounding box of data and center camera
+	- [ ] allow showing active frustum
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
 	      e.g. when the application controlled debug callback is called
@@ -13,7 +20,8 @@ v0.1, goal: end of january 2021
 	- [ ] show failed asserts and potential errors in imgui UI?
 	      probably best to do this in addition to command line
 	- [ ] log assertions to debug console in visual studio
-	      somehow signal they are coming from us though, use a VIL prefix or smth
+	      somehow signal they are coming from us though, use a VIL prefix or smth.
+		  Stop allocating a console.
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
@@ -39,47 +47,15 @@ v0.1, goal: end of january 2021
 		  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
 	- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
 	      i.e. support buffer IO viewing for transfer commands
-- [ ] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
-	- [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
-	- [ ] don't even attempt to display non-float formats in 3D vertex viewer
-	- [ ] support drawIndirectCount
-		- [ ] #43, probably for later: also support just showing a single draw command
-			  (see the other todo - #42)
 - [ ] in CopiedImage::init: check for image usage support
 	- [ ] generally: allow the image copy operation to fail.
 - [ ] xfb: support custom outputs, not just the Position Builtin
 	- [ ] xfb: check whether format is supported
-- [ ] xfb: use heuristic to figure out if ortho or perspective projection is used
-	- [x] and then use the matching shader (i.e. scaled w vs scaled z as view-space z coord)
-	- [x] probably best to have one vertex shader controlled via push constant
-- [x] test `splittable` impl for render passes. There are very likely issues.
-      (especially for the cases where render pass can't be split)
-	  {see docs/test/rpsplit.cpp, seems to work in basic cases}
 - [ ] better pipeline/shader module display in resource viewer
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
-- [x] Allow to freeze state for current displayed command, i.e. don't
-      update data from hook
-	- [x] figure out how to communicate this via gui.
-	      This is a distinct option form the "displayed commands source" and UpdateMode
-	- [x] While at it, clean up all the hook logic for io viewer
-		  {refactored to gui CommandViewer}
-- [x] allow to select in cb viewer which commands are shown
-	- [x] make that more compact/intuitive if possible
-	- [x] looks really ugly at the moment, improve that.
-	      maybe move to own settings tab? Wouldn't expect people to change
-		  it often tbh
-	- [x] cleanest would probably a button that spawns a popup/dialog
-	      in which this can be selected. That is possible with ImGui,
-		  see BeginPopup.
-		  Alternatively move it to a general settings tab (that we kind of
-		  need by now).
-	- [x] Improve the "Freeze state" checkbox, it vastly out of place rn
-- [x] fix resource viewer
-	- [x] fix filtering by type
-	- [x] fix filtering by name
 - [ ] more useful names for handles (e.g. some basic information for images)
 	- [ ] also: atm we always prepend the resource type leading to something
 	      like "Buffer terrainBuffer". Add a parameter to the function whether
@@ -121,8 +97,10 @@ v0.1, goal: end of january 2021
 	      implement yet (such as sparse binding)
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
-- [ ] imgui styling
+- [ ] imgui styling. It's really not beautiful at the moment, compare with
+      other imgui applications
 	- [ ] use custom font
+	- [ ] also use icons where useful (via icon font, like e.g. tracy does)
 	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
 	      are really overwhelming and hard to read at the moment.
 		  Can be improved to grasp information for intuitively
@@ -144,24 +122,24 @@ v0.1, goal: end of january 2021
 - [ ] fix overlay for wayland. Use xdg popup
 - [ ] make sure the environment variables for overlays/window creation work
       as specified in readme everywhere
-- [ ] stop this todo-for-v0.1-list from growing at some point.
 - [ ] when viewing live command submissions, clicking on resource buttons
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
 	  we could fix it by not imgui-pushing the resource ID before showing the button.
-- [ ] before release: test on windows & linux, on all owned hardware
-
-not sure if viable for first version but should be goal:
-- [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
-- [ ] get it to run without significant (slight (like couple of percent) increase 
-	  of frame timings even with layer in release mode is ok) overhead
-	- [x] vkQuake2
-	- [x] doom eternal
-		- [x] figure out how to make multi-submission drawing easily viewable
-		      -> per-frame-commands cb viewer mode
-	- [ ] dota 2 (linux)
+- [ ] stop this todo-for-v0.1-list from growing at some point.
 
 Possibly for later, new features/ideas:
+- [ ] get it to run without significant (slight (like couple of percent) increase 
+	  of frame timings even with layer in release mode is ok) overhead.
+	  Just tests with the usual suspects of games
+- [ ] make vertex viewer useful
+	- [ ] allow to select vertices, render them as points in the viewport
+	- [ ] allow to visualize primitives
+	- [ ] allow to visualize non-builtin attributes somewhow
+	      maybe also allow to manually pick an attribute to use as position
+		  for the input?
+- [ ] alternative view of DeviceMemory showing a better visualization of
+      the resources placed in it (and the empty space)
 - [ ] when there is more than one record of the same group in one RecordBatch we get
       into troubles when viewing it in swapchain commands mode.
 	  The problem is that *all* group submissions update hook.state and we might end
@@ -267,7 +245,7 @@ Possibly for later, new features/ideas:
 - [ ] improve buffer viewer {postponed to after v0.1}
 	- [ ] NOTE: evaluate whether static buffer viewer makes much sense.
 	      Maybe it's not too useful at the moment.
-	- [ ] static buffer viewer currently broken, see resources.cpp recordPreRender
+	- [x] static buffer viewer currently broken, see resources.cpp recordPreRender
 	      for old code (that was terrible, we would have to rework it to
 		  chain readbacks to a future frame, when a previous draw is finished)
 	- [ ] ability to infer layouts (simply use the last known one, link to last usage in cb) from

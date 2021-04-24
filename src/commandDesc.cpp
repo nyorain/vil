@@ -275,4 +275,31 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	return (ownMatch + childMatchSum) / (1 + maxChildren);
 }
 
+// WIP
+/*
+struct Match {
+	std::vector<std::pair<unsigned, unsigned>> map;
+	std::vector<Match> children;
+};
+
+bool matchCommand(const Command& a, const Command& b);
+
+Match matchRecord(const Command* a, const Command* b) {
+	// notes:
+	// - https://en.wikipedia.org/wiki/Hirschberg%27s_algorithm
+	// - bundle together multiple consecutive dispatch/draw commands
+	//   as long as state isn't changed in between I guess it does not
+	//   matter too much?
+	//   Hm maybe it does, when we have a draw command selected.
+	//   Usually, programs don't use a high number of consecutive
+	//   dispatch calls.
+	//   Maybe rely on our hierachy again and only match for the children
+	//   (i.e. render passes) that are relevant (i.e. in selected hierachy)?
+	//   The n^2 number of comparisons might still be a problem, we must
+	//   expect >1000 draw calls in a render pass.
+	// nevm, likely not scalable enough. All diff algorithms have
+	// O(n^2) which does not work for ~ n >= 1000
+}
+*/
+
 } // namespace vil

@@ -10,7 +10,10 @@
 
 namespace vil {
 
-struct ResourceGui {
+class ResourceGui {
+public:
+	~ResourceGui();
+
 	void select(Handle& handle);
 	void draw(Draw&);
 	void destroyed(const Handle&);
@@ -18,7 +21,8 @@ struct ResourceGui {
 	void recordPreRender(Draw&);
 	void recoredPostRender(Draw&);
 
-	~ResourceGui();
+private:
+	friend class Gui;
 
 	Gui* gui_ {};
 	std::string search_;
@@ -55,6 +59,7 @@ struct ResourceGui {
 		std::vector<std::pair<std::string, VkFormat>> layout;
 	} buffer_;
 
+	// Draws an ImGui overview for a resource.
 	void drawMemoryResDesc(Draw&, MemoryResource&);
 	void drawDesc(Draw&, Image&);
 	void drawDesc(Draw&, ImageView&);

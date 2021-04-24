@@ -99,3 +99,23 @@ TEST(input_att) {
 
 	EXPECT(splittable(desc, 0u), false);
 }
+
+TEST(unused) {
+	// make that VK_ATTACHMENT_UNUSED does not cause an error, as
+	// it previously did
+	RenderPassDesc desc;
+	addAttachment(desc); // attachment 0
+	addAttachment(desc); // attachment 1
+	addAttachment(desc, true); // attachment 2
+	addSubpass(desc, {{0u, 1u}}); // subpass 0
+	EXPECT(splittable(desc, 0u), true);
+
+	addSubpass(desc, {{0u, 1u}}); // subpass 1
+	addSubpass(desc, {{1u, VK_ATTACHMENT_UNUSED}}); // subpass 2
+	addSubpass(desc, {{0u, VK_ATTACHMENT_UNUSED}}, {{2u}}); // subpass 3
+
+	EXPECT(splittable(desc, 0u), true);
+	EXPECT(splittable(desc, 1u), true);
+	EXPECT(splittable(desc, 2u), true);
+	EXPECT(splittable(desc, 3u), true);
+}

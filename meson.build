@@ -4,7 +4,7 @@ project('VIL', ['c', 'cpp'],
 		'werror=true',
 		'warning_level=3',
 		'cpp_std=c++17',
-		'c_std=c11',
+		'c_std=c99',
 		# We need this to build the subprojects as static libraries. No
 		# other way to do this apparently.
 		# And we force the layer to be shared library anyways.

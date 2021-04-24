@@ -1448,7 +1448,7 @@ void Gui::finishedLocked(Draw& draw) {
 		range.memory = draw.readback.copy.mem;
 		range.size = VK_WHOLE_SIZE;
 		range.offset = 0u;
-		VK_CHECK(dev().dispatch.FlushMappedMemoryRanges(dev().handle, 0, &range));
+		VK_CHECK(dev().dispatch.InvalidateMappedMemoryRanges(dev().handle, 1u, &range));
 
 		// PERF: with some clever syncing we could probably get around
 		// the copy here and instead read from the mapped memory directly.
@@ -1459,6 +1459,10 @@ void Gui::finishedLocked(Draw& draw) {
 	draw.waitedUpon.clear();
 	draw.usedHandles.clear();
 	draw.usedHookState.reset();
+
+	draw.readback.offset = 0u;
+	draw.readback.size = 0u;
+	draw.readback.src = {};
 
 	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
 
@@ -1599,8 +1603,8 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 
 		// init
 		if(imgDraw.aspect != VK_IMAGE_ASPECT_DEPTH_BIT && imgDraw.aspect != VK_IMAGE_ASPECT_STENCIL_BIT) {
-			imgDraw.aspect = (subresources.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) ? 
-				VK_IMAGE_ASPECT_DEPTH_BIT : 
+			imgDraw.aspect = (subresources.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) ?
+				VK_IMAGE_ASPECT_DEPTH_BIT :
 				VK_IMAGE_ASPECT_STENCIL_BIT;
 		}
 

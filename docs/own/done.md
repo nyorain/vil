@@ -1,5 +1,44 @@
 For v0.1
 
+not sure if viable for first version but should be goal:
+- [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
+	- [x] vkQuake2
+	- [x] doom eternal
+		- [x] figure out how to make multi-submission drawing easily viewable
+		      -> per-frame-commands cb viewer mode
+	- [x] dota 2 (linux)
+	- (also tried out rdr2 in the meantime)
+- [x] before release: test on windows & linux, on all owned hardware
+- [x] Allow to freeze state for current displayed command, i.e. don't
+      update data from hook
+	- [x] figure out how to communicate this via gui.
+	      This is a distinct option form the "displayed commands source" and UpdateMode
+	- [x] While at it, clean up all the hook logic for io viewer
+		  {refactored to gui CommandViewer}
+- [x] test `splittable` impl for render passes. There are very likely issues.
+      (especially for the cases where render pass can't be split)
+	  {see docs/test/rpsplit.cpp, seems to work in basic cases}
+- [x] fix debug utils label hierachy. They could have been started/completed
+      in different command buffer
+	  {note that there is still a remaning issue as we can't currently
+	   track queue-pushed/popped lables correctly, see todo.md}
+- [x] allow to select in cb viewer which commands are shown
+	- [x] make that more compact/intuitive if possible
+	- [x] looks really ugly at the moment, improve that.
+	      maybe move to own settings tab? Wouldn't expect people to change
+		  it often tbh
+	- [x] cleanest would probably a button that spawns a popup/dialog
+	      in which this can be selected. That is possible with ImGui,
+		  see BeginPopup.
+		  Alternatively move it to a general settings tab (that we kind of
+		  need by now).
+	- [x] Improve the "Freeze state" checkbox, it vastly out of place rn
+- [x] fix resource viewer
+	- [x] fix filtering by type
+	- [x] fix filtering by name
+- [x] xfb: use heuristic to figure out if ortho or perspective projection is used
+	- [x] and then use the matching shader (i.e. scaled w vs scaled z as view-space z coord)
+	- [x] probably best to have one vertex shader controlled via push constant
 - [x] fix Gui::draws_ synchronization issue
 	  See Gui::pendingDraws (called from queue while locked) but also
 	  Gui::finishDraws (e.g. called from CreateSwapchain without lock,

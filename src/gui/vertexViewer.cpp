@@ -21,7 +21,7 @@ namespace vil {
 
 // util
 template<typename T>
-std::string printFormat(u32 count, Vec4d val) {
+std::string printFormat(u32 count, const Vec4d& val) {
 	auto ret = std::string {};
 	auto sep = "";
 	for(auto i = 0u; i < count; ++i) {
@@ -366,7 +366,7 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const DrawData& data) {
 	auto& dev = *this->dev_;
 
 	// try to find position by heuristics
-	// TODO: cache this! But should likely not implemented here in first place.
+	// TODO: cache this! But should likely not be implemented here in first place.
 	// TODO: implement a serious heuristic. Inspect the spv code,
 	//   and try to find which input influences the Position output
 	if(data.vertexInfo.vertexAttributeDescriptionCount == 0u) {

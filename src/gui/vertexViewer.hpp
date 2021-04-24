@@ -32,7 +32,7 @@ struct VertexViewer {
 	struct DrawData {
 		VkPrimitiveTopology topology;
 		VkPipelineVertexInputStateCreateInfo vertexInfo;
-		span<const BufferSpan> vertexBuffers;
+		std::vector<BufferSpan> vertexBuffers;
 
 		u32 offset; // firstVertex or firstIndex
 		u32 drawCount; // vertexCount or instanceCount

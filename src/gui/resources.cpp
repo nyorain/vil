@@ -283,7 +283,6 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 			constexpr auto whitespace = "\n\t\f\r\v "; // as by std::isspace
 			constexpr auto whitespaceSemic = "\n\t\f\r\v; ";
 
-			// TODO: extend
 			const std::unordered_map<std::string_view, VkFormat> layoutMap = {
 				{"float", VK_FORMAT_R32_SFLOAT},
 				{"f32", VK_FORMAT_R32_SFLOAT},
@@ -307,6 +306,24 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 				{"half3", VK_FORMAT_R16G16B16_SFLOAT},
 				{"f16vec4", VK_FORMAT_R16G16B16A16_SFLOAT},
 				{"half4", VK_FORMAT_R16G16B16A16_SFLOAT},
+
+				{"uint", VK_FORMAT_R32_UINT},
+				{"uint2", VK_FORMAT_R32G32_UINT},
+				{"uint3", VK_FORMAT_R32G32B32_UINT},
+				{"uint4", VK_FORMAT_R32G32B32A32_UINT},
+				{"uvec1", VK_FORMAT_R32_UINT},
+				{"uvec2", VK_FORMAT_R32G32_UINT},
+				{"uvec3", VK_FORMAT_R32G32B32_UINT},
+				{"uvec4", VK_FORMAT_R32G32B32A32_UINT},
+
+				{"int", VK_FORMAT_R32_SINT},
+				{"int2", VK_FORMAT_R32G32_SINT},
+				{"int3", VK_FORMAT_R32G32B32_SINT},
+				{"int4", VK_FORMAT_R32G32B32A32_SINT},
+				{"ivec1", VK_FORMAT_R32_SINT},
+				{"ivec2", VK_FORMAT_R32G32_SINT},
+				{"ivec3", VK_FORMAT_R32G32B32_SINT},
+				{"ivec4", VK_FORMAT_R32G32B32A32_SINT},
 			};
 
 			auto lt = std::string_view(buffer_.layoutText);
@@ -337,7 +354,9 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 
 			if(!lt.empty()) {
 				auto start = lt.find_first_not_of(whitespace);
-				lt = lt.substr(start);
+				if (start != lt.npos) {
+					lt = lt.substr(start);
+				}
 			}
 
 			dlg_assertm(lt.empty(), "Invalid buffer layout ending: {}", lt);
@@ -1502,7 +1521,7 @@ void ResourceGui::recordPreRender(Draw& draw) {
 	if(handle_ && handle_ == image_.object && image_.view) {
 		auto& img = *image_.object;
 
-		// Make sure our image is in the right layout.
+		// Make sure the image is in the right layout.
 		// And we are allowed to read it
 		VkImageMemoryBarrier imgb {};
 		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1515,7 +1534,7 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		imgb.newLayout = img.hasTransferSrc ?
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL :
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // our rendering
-		imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags?
+		imgb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 		imgb.dstAccessMask = img.hasTransferSrc ?
 			VK_ACCESS_TRANSFER_READ_BIT :
 			VK_ACCESS_SHADER_READ_BIT;
@@ -1566,12 +1585,12 @@ void ResourceGui::recordPreRender(Draw& draw) {
 			dev.dispatch.CmdCopyImageToBuffer(draw.cb, img.handle,
 				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image_.readPixelBuffer.buf, 1, &copy);
 
+			// Add barrier for our gui read from the image later on
 			imgb.oldLayout = imgb.newLayout;
 			imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			imgb.srcAccessMask = imgb.srcAccessMask;
 			imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-			// TODO: probably also need barrier for stuff done by app on image in future submissions
 			dev.dispatch.CmdPipelineBarrier(draw.cb,
 				VK_PIPELINE_STAGE_TRANSFER_BIT, // wait for everything
 				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -1579,60 +1598,58 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		}
 	}
 
-	// TODO
 	// copy buffer if needed
-	/*
 	if(handle_ && handle_ == buffer_.handle) {
-			// TODO: offset, sizes and stuff
-			auto size = std::min(buf.ci.size, VkDeviceSize(1024 * 16));
-			readbackBuf_.ensure(dev(), size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+		auto& buf = *buffer_.handle;
+		auto offset = 0u; // TODO: allow to set in gui
+		auto size = std::min(buf.ci.size - offset, VkDeviceSize(1024 * 16));
 
-			// TODO: support srcOffset
-			// TODO: need memory barriers
-			VkBufferCopy copy {};
-			copy.size = size;
-			dev().dispatch.CmdCopyBuffer(draw.cb, buf.handle, readbackBuf_.buf,
-				1, &copy);
-			dev().dispatch.EndCommandBuffer(draw.cb);
+		if(size > draw.readback.copy.size) {
+			draw.readback.copy.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+			VK_CHECK(dev.dispatch.MapMemory(dev.handle,
+				draw.readback.copy.mem, 0u, VK_WHOLE_SIZE, 0u, &draw.readback.map));
+		}
 
-			VkSubmitInfo submitInfo {};
-			submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-			submitInfo.commandBufferCount = 1u;
-			submitInfo.pCommandBuffers = &draw.cb;
+		VkBufferMemoryBarrier bufb {};
+		bufb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		bufb.buffer = buf.handle;
+		bufb.offset = offset;
+		bufb.size = size;
+		bufb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		bufb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 
-			auto res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
-			if(res != VK_SUCCESS) {
-				dlg_error("vkSubmit error: {}", vk::name(res));
-				return {res, &draw};
-			}
+		dev.dispatch.CmdPipelineBarrier(draw.cb,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+			0, nullptr, 1u, &bufb, 0, nullptr);
 
-			// TODO: ouch! this is really expensive.
-			// could we at least release the device mutex lock meanwhile?
-			// we would have to check for various things tho, if resource
-			// was destroyed.
-			VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1, &draw.fence, true, UINT64_MAX));
-			VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+		VkBufferCopy copy {};
+		copy.srcOffset = offset;
+		copy.dstOffset = 0u;
+		copy.size = size;
+		dev.dispatch.CmdCopyBuffer(draw.cb, buf.handle, draw.readback.copy.buf,
+			1, &copy);
 
-			void* mapped {};
-			VK_CHECK(dev().dispatch.MapMemory(dev().handle, readbackBuf_.mem, 0, size, {}, &mapped));
+		bufb.srcAccessMask = bufb.dstAccessMask;
+		bufb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 
-			VkMappedMemoryRange range {};
-			range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-			range.memory = readbackBuf_.mem;
-			range.offset = 0u;
-			range.size = size;
-			VK_CHECK(dev().dispatch.InvalidateMappedMemoryRanges(dev().handle, 1, &range));
+		dev.dispatch.CmdPipelineBarrier(draw.cb,
+			VK_PIPELINE_STAGE_TRANSFER_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+			0, nullptr, 1u, &bufb, 0, nullptr);
 
-			tabs_.resources.buffer_.lastRead.resize(size);
-			std::memcpy(tabs_.resources.buffer_.lastRead.data(), mapped, size);
+		// The copied data will be received when the draw finishes, Gui::finishedLocked(Draw&)
+		// We have to set this data correctly to the currently selected buffer,
+		// it will be compared then so that we only retrieve data we are
+		// still interested in.
+		draw.readback.offset = offset;
+		draw.readback.size = size;
+		draw.readback.src = buf.handle;
 
-			dev().dispatch.UnmapMemory(dev().handle, readbackBuf_.mem);
-
-			VkCommandBufferBeginInfo cbBegin {};
-			cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
+		// make sure this submission properly synchronized with submissions
+		// that also use the buffer (especially on other queues).
+		draw.usedHandles.push_back(&buf);
 	}
-	*/
 }
 
 void ResourceGui::recoredPostRender(Draw& draw) {
@@ -1658,11 +1675,11 @@ void ResourceGui::recoredPostRender(Draw& draw) {
 			img.pendingLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
 			img.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED);
 		imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		imgb.srcAccessMask = {}; // TODO: dunno. Track/figure out possible flags
+		imgb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 
 		// TODO: transfer queue ownership.
 		// We currently just force concurrent mode on image/buffer creation
-		// but that might have performance impact.
+		// but that might have performance (and correctness) impact.
 		// Requires additional submissions to the other queues.
 		// We should first check whether the queue is different in first place.
 		// if(selImg->ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
