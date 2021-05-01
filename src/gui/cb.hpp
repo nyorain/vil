@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <commandDesc.hpp>
 #include <gui/render.hpp>
 #include <gui/vertexViewer.hpp>
 #include <gui/command.hpp>
@@ -73,11 +74,7 @@ private:
 	// The selected command (hierarchy) inside the cb.
 	// Might be empty, signalling that no command is secleted.
 	std::vector<const Command*> command_ {};
-
-	// In case we have a selected command, we store its description inside
-	// the CommandRecord here. This way we can (try to) find the logically
-	// same command in future records/cb selections.
-	std::vector<CommandDesc> desc_ {};
+	CommandDescriptorState dsState_ {};
 
 	CommandViewer commandViewer_ {};
 };

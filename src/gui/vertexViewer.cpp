@@ -684,7 +684,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 				indexType = dcmd->state.indices.type;
 			} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(data->cmd); dcmd) {
 				dlg_assert(hook.copyIndirectCmd);
-				dlg_assert(hook.state);
+				dlg_assert(data->state);
 
 				auto& ic = data->state->indirectCopy;
 				auto span = ReadBuf(ic.copy);

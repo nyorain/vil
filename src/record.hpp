@@ -119,7 +119,7 @@ struct PushConstantData {
 
 struct BoundDescriptorSet {
 	DescriptorSet* ds {};
-	PipelineLayout* layout {};
+	PipelineLayout* layout {}; // TODO: remove
 	span<u32> dynamicOffsets;
 };
 

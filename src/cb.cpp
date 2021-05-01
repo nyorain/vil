@@ -838,6 +838,8 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 	dlg_assert(cb.graphicsState().rpi.rp);
 	++cb.graphicsState().rpi.subpass;
 
+	cmd.subpassID = cb.graphicsState().rpi.subpass;
+
 	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
 }
 
@@ -868,8 +870,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	cmdBeginRenderPass(cb, *pRenderPassBegin, *pSubpassBeginInfo);
 
-	auto f = cb.dev->dispatch.CmdBeginRenderPass2;
-	f(commandBuffer, pRenderPassBegin, pSubpassBeginInfo);
+	cb.dev->dispatch.CmdBeginRenderPass2(commandBuffer, pRenderPassBegin, pSubpassBeginInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
@@ -888,8 +889,9 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 	dlg_assert(cb.graphicsState().rpi.rp);
 	++cb.graphicsState().rpi.subpass;
 
-	auto f = cb.dev->dispatch.CmdNextSubpass2;
-	f(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
+	cmd.subpassID = cb.graphicsState().rpi.subpass;
+
+	cb.dev->dispatch.CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
@@ -910,8 +912,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 	dlg_assert(cb.graphicsState().rpi.rp);
 	cb.graphicsState().rpi = {};
 
-	auto f = cb.dev->dispatch.CmdEndRenderPass2;
-	f(commandBuffer, pSubpassEndInfo);
+	cb.dev->dispatch.CmdEndRenderPass2(commandBuffer, pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(

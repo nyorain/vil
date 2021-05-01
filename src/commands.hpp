@@ -59,8 +59,6 @@ struct Command {
 
 	// The name of the command as string (might include parameter information).
 	// Used by the default 'display' implementation.
-	// Gets a list of destroyed handled, might include referenced handles
-	// by this command. Must not dereference them.
 	virtual std::string toString() const { return nameDesc(); }
 
 	// Should return the most important arguments as strings.
@@ -100,6 +98,11 @@ struct Command {
 	// Returns false for itself.
 	virtual bool isDescendant(const Command& cmd) const;
 
+	// Returns how much this commands matches with the given one.
+	// Should always return 0.f for two commands that don't have the
+	// same type. Should not consider child commands, just itself.
+	virtual float match(const Command& cmd) const;
+
 	// Forms a forward linked list with siblings
 	Command* next {};
 
@@ -131,6 +134,8 @@ struct NameResult {
 NameResult name(DeviceHandle*, NullName = NullName::null);
 std::vector<const Command*> displayCommands(const Command* cmd,
 		const Command* selected, Command::TypeFlags typeFlags);
+
+struct Matcher;
 
 struct ParentCommand : Command {
 	std::vector<const Command*> display(const Command* selected,
@@ -165,6 +170,7 @@ struct BarrierCmdBase : Command {
 
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
 	void displayInspector(Gui& gui) const override;
+	Matcher doMatch(const BarrierCmdBase& rhs) const;
 };
 
 struct WaitEventsCmd : BarrierCmdBase {
@@ -176,6 +182,7 @@ struct WaitEventsCmd : BarrierCmdBase {
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	float match(const Command& rhs) const override;
 };
 
 struct BarrierCmd : BarrierCmdBase {
@@ -186,6 +193,7 @@ struct BarrierCmd : BarrierCmdBase {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
+	float match(const Command& rhs) const override;
 };
 
 // All direct children must be of type 'NextSubpassCmd'
@@ -209,6 +217,7 @@ struct BeginRenderPassCmd : SectionCommand {
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	float match(const Command& rhs) const override;
 };
 
 struct SubpassCmd : SectionCommand {};
@@ -216,6 +225,7 @@ struct SubpassCmd : SectionCommand {};
 struct NextSubpassCmd : SubpassCmd {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 	VkSubpassBeginInfo beginInfo; // for the new subpass
+	u32 subpassID {};
 
 	using SubpassCmd::SubpassCmd;
 
@@ -223,6 +233,7 @@ struct NextSubpassCmd : SubpassCmd {
 	// Must be tracked while recording
 	std::string nameDesc() const override { return "NextSubpass"; }
 	void record(const Device&, VkCommandBuffer) const override;
+	float match(const Command& rhs) const override;
 };
 
 // Meta command needed for correct hierachy. We want each subpass to
@@ -251,6 +262,7 @@ struct DrawCmdBase : Command {
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
 };
 
 struct DrawCmd : DrawCmdBase {
@@ -266,6 +278,7 @@ struct DrawCmd : DrawCmdBase {
 	std::string nameDesc() const override { return "Draw"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
+	float match(const Command&) const override;
 };
 
 struct DrawIndirectCmd : DrawCmdBase {
@@ -285,6 +298,7 @@ struct DrawIndirectCmd : DrawCmdBase {
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	float match(const Command&) const override;
 };
 
 struct DrawIndexedCmd : DrawCmdBase {
@@ -301,6 +315,7 @@ struct DrawIndexedCmd : DrawCmdBase {
 	std::string nameDesc() const override { return "DrawIndexed"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
+	float match(const Command&) const override;
 };
 
 struct DrawIndirectCountCmd : DrawCmdBase {
@@ -322,6 +337,7 @@ struct DrawIndirectCountCmd : DrawCmdBase {
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	float match(const Command&) const override;
 };
 
 struct BindVertexBuffersCmd : Command {
@@ -373,6 +389,7 @@ struct DispatchCmdBase : Command {
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	Matcher doMatch(const DispatchCmdBase&) const;
 };
 
 struct DispatchCmd : DispatchCmdBase {
@@ -387,6 +404,7 @@ struct DispatchCmd : DispatchCmdBase {
 	std::string nameDesc() const override { return "Dispatch"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
+	float match(const Command&) const override;
 };
 
 struct DispatchIndirectCmd : DispatchCmdBase {
@@ -401,6 +419,7 @@ struct DispatchIndirectCmd : DispatchCmdBase {
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
 	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	float match(const Command&) const override;
 };
 
 struct DispatchBaseCmd : DispatchCmdBase {
@@ -418,6 +437,7 @@ struct DispatchBaseCmd : DispatchCmdBase {
 	std::string nameDesc() const override { return "DispatchBase"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
+	float match(const Command&) const override;
 };
 
 // transfer commands

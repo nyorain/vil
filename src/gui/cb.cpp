@@ -3,6 +3,7 @@
 #include <gui/commandHook.hpp>
 #include <gui/util.hpp>
 #include <queue.hpp>
+#include <ds.hpp>
 #include <swapchain.hpp>
 #include <image.hpp>
 #include <rp.hpp>
@@ -117,6 +118,29 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::EndPopup();
 	}
 
+	auto updateDsState = [this]{
+		dsState_ = {};
+		if(command_.empty()) {
+			return;
+		}
+
+		auto* dst = command_.back();
+		span<const BoundDescriptorSet> bound;
+		if(auto* cmd = dynamic_cast<const DrawCmdBase*>(dst)) {
+			bound = cmd->state.descriptorSets;
+		} else if(auto* cmd = dynamic_cast<const DispatchCmdBase*>(dst)) {
+			bound = cmd->state.descriptorSets;
+		}
+
+		for(auto& ds : bound) {
+			auto& dst = dsState_.descriptors.emplace_back();
+			dst.ds = ds.ds;
+			dst.dsLayout = ds.ds->layout;
+		}
+	};
+
+	auto baseThreshold = 0.0;
+
 	if(mode_ == UpdateMode::none) {
 		imGuiText("Showing static record");
 	} else if(mode_ == UpdateMode::commandBuffer) {
@@ -129,9 +153,9 @@ void CommandBufferGui::draw(Draw& draw) {
 
 		if(cb_->lastRecordPtrLocked() != record_) {
 			record_ = cb_->lastRecordPtrLocked();
-			auto hierarchy = CommandDesc::findHierarchy(record_->commands, desc_);
-			command_ = {hierarchy.begin(), hierarchy.end()};
-			desc_ = CommandDesc::get(*record_->commands, command_);
+			auto findRes = find(record_->commands, command_, dsState_, baseThreshold);
+			command_ = std::move(findRes.hierachy);
+			updateDsState();
 
 			// TODO: update hook.desc?
 
@@ -149,9 +173,9 @@ void CommandBufferGui::draw(Draw& draw) {
 		auto lastRecord = record_->group->lastRecord.get();
 		if(lastRecord != record_.get()) {
 			record_ = record_->group->lastRecord;
-			auto hierarchy = CommandDesc::findHierarchy(record_->commands, desc_);
-			command_ = {hierarchy.begin(), hierarchy.end()};
-			desc_ = CommandDesc::get(*record_->commands, command_);
+			auto findRes = find(record_->commands, command_, dsState_, baseThreshold);
+			command_ = std::move(findRes.hierachy);
+			updateDsState();
 
 			// TODO: update hook.desc?
 
@@ -166,10 +190,10 @@ void CommandBufferGui::draw(Draw& draw) {
 			record_ = {};
 			records_ = {};
 			swapchainCounter_ = {};
-			desc_ = {};
+			dsState_ = {};
 			command_ = {};
 			hook.target = {};
-			hook.desc({});
+			hook.desc({}, {});
 			hook.unsetHookOps();
 			return;
 		}
@@ -210,17 +234,16 @@ void CommandBufferGui::draw(Draw& draw) {
 					record_ = newRec;
 					groupCounter_ = newCounter;
 
-					auto hierarchy = CommandDesc::findHierarchy(record_->commands, desc_);
-					command_ = {hierarchy.begin(), hierarchy.end()};
-					desc_ = CommandDesc::get(*record_->commands, command_);
+					auto findRes = find(record_->commands, command_, dsState_, baseThreshold);
+
+					command_ = std::move(findRes.hierachy);
+					updateDsState();
 
 					dlg_assert(record_->group);
 					dlg_assert(hook.target.group == record_->group);
 					// dlg_assert(desc_.size() <= record_->group->desc.children.size() + 1); // would need to track max depth
 
-					if(desc_.empty()) {
-						dlg_assert(command_.empty());
-
+					if(command_.empty()) {
 						// don't unselect, we might find the command in future again.
 						// hook.target = {};
 						// hook.desc({});
@@ -231,7 +254,7 @@ void CommandBufferGui::draw(Draw& draw) {
 						dlg_assert(!command_.empty());
 						hook.target = {};
 						hook.target.group = record_->group;
-						hook.desc(desc_, false);
+						hook.desc(command_, dsState_, false);
 						commandViewer_.select(record_, *command_.back(), false);
 					}
 				} else {
@@ -309,7 +332,8 @@ void CommandBufferGui::draw(Draw& draw) {
 						if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
 							record_ = rec;
 							command_ = std::move(nsel);
-							desc_ = CommandDesc::get(*record_->commands, command_);
+							updateDsState();
+
 							commandViewer_.select(record_, *command_.back(), true);
 
 							dev.commandHook->target = {};
@@ -317,7 +341,7 @@ void CommandBufferGui::draw(Draw& draw) {
 							// dlg_assert(desc_.size() <= record_->group->desc.children.size() + 1);
 
 							dev.commandHook->target.group = record_->group;
-							dev.commandHook->desc(desc_);
+							dev.commandHook->desc(command_, dsState_);
 
 							updateGroupCounter = true;
 						}
@@ -404,18 +428,41 @@ void CommandBufferGui::draw(Draw& draw) {
 			}
 
 			command_ = std::move(nsel);
-			desc_ = CommandDesc::get(*record_->commands, command_);
 			commandViewer_.select(record_, *command_.back(), true);
+			updateDsState();
 
 			// in any case, update the hook
-			dev.commandHook->desc(desc_);
+			dev.commandHook->desc(command_, dsState_);
 		}
 
 		ImGui::PopID();
 	}
 
-	if(hook.state && (!hook.freeze || !commandViewer_.state())) {
-		commandViewer_.state(hook.state);
+	if(!hook.completed.empty() && (!hook.freeze || !commandViewer_.state())) {
+		// find the best match
+		auto* best = &hook.completed[0];
+		if(hook.completed.size() > 1) {
+			dlg_info("multiple matches!");
+			for(auto& res : hook.completed) {
+				dlg_info(">> {}", res.match);
+				if(res.match > best->match) {
+					best = &res;
+				}
+			}
+		}
+
+		dlg_assert(!best->state->writer);
+
+		// update internal state from hook match
+		// TODO: somewhat shady to do it here like that
+		command_ = best->command;
+		record_ = best->record;
+		updateDsState();
+		commandViewer_.select(record_, *command_.back(), false);
+
+		commandViewer_.state(best->state);
+
+		hook.completed.clear();
 	}
 
 	ImGui::EndChild();
@@ -445,11 +492,11 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({});
+	hook.desc({}, {});
 
 	command_ = {};
 	record_ = std::move(record);
-	desc_ = {};
+	dsState_ = {};
 
 	updateHookTarget();
 
@@ -470,11 +517,11 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({});
+	hook.desc({}, {});
 
 	command_ = {};
 	record_ = std::move(record);
-	desc_ = {};
+	dsState_ = {};
 
 	updateHookTarget();
 
@@ -487,12 +534,12 @@ void CommandBufferGui::showSwapchainSubmissions() {
 
 	command_ = {};
 	record_ = {};
-	desc_ = {};
+	dsState_ = {};
 
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({});
+	hook.desc({}, {});
 	hook.target = {};
 
 	commandViewer_.unselect();
@@ -511,12 +558,12 @@ void CommandBufferGui::selectGroup(IntrusivePtr<CommandRecord> record) {
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({});
+	hook.desc({}, {});
 	hook.target = {};
 
 	command_ = {};
 	record_ = std::move(record);
-	desc_ = {};
+	dsState_ = {};
 
 	updateHookTarget();
 
@@ -540,9 +587,58 @@ void CommandBufferGui::destroyed(const Handle& handle) {
 			}
 		}
 	}
-
 	// otherwise we don't care as we only deal with recordings that have shared
 	// ownership, i.e. are kept alive by us.
+
+	// manually invalidate saved descriptor state
+	for(auto& ds : dsState_.descriptors) {
+		if(ds.ds == &handle) {
+			// save the state
+			ds.state = ds.ds->bindings;
+			ds.dsLayout = ds.ds->layout;
+			ds.ds = nullptr;
+			return;
+		}
+
+		for(auto b = 0u; b < ds.state.size(); ++b) {
+			dlg_assert(ds.dsLayout);
+			dlg_assert(b < ds.dsLayout->bindings.size());
+			auto& binding = ds.state[b];
+			auto& layout = ds.dsLayout->bindings[b];
+			auto dsCat = category(layout.descriptorType);
+
+			for(auto e = 0u; e < binding.size(); ++e) {
+				auto& elem = binding[e];
+				if(!elem.valid) {
+					continue;
+				}
+
+				if(dsCat == DescriptorCategory::image) {
+					if(needsImageView(layout.descriptorType) &&
+							elem.imageInfo.imageView == &handle) {
+						elem.imageInfo.imageView = nullptr;
+						return;
+					}
+
+					if(needsSampler(layout.descriptorType) &&
+							elem.imageInfo.sampler == &handle) {
+						elem.imageInfo.sampler = nullptr;
+						return;
+					}
+				} else if(dsCat == DescriptorCategory::buffer &&
+						elem.bufferInfo.buffer == &handle) {
+					elem.bufferInfo.buffer = nullptr;
+					return;
+				} else if(dsCat == DescriptorCategory::bufferView &&
+						elem.bufferView == &handle) {
+					elem.bufferView = nullptr;
+					return;
+				} else {
+					dlg_error("unreachable");
+				}
+			}
+		}
+	}
 }
 
 void CommandBufferGui::updateHookTarget() {

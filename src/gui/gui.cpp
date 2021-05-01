@@ -1085,6 +1085,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	auto keepAliveRec1 = tabs_.cb.commandViewer_.record_;
 	auto keepAliveState = tabs_.cb.commandViewer_.state_;
 	auto keepAliveBatches = tabs_.cb.records_;
+	auto keepAliveHookRecords = dev().commandHook->completed; // UGH OUCHIE
 
 	Draw* foundDraw {};
 

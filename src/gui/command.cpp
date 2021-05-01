@@ -1164,6 +1164,7 @@ void CommandViewer::displayCommand() {
 
 	if(state_) {
 		dlg_assert(record_);
+
 		auto lastTime = state_->neededTime;
 		auto validBits = gui_->dev().queueFamilies[record_->queueFamily].props.timestampValidBits;
 		if(validBits == 0u) {
@@ -1315,7 +1316,7 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 	dlg_assert(img.image);
 	dlg_assert(img.imageView);
 
-	draw.usedHookState = dev.commandHook->state;
+	draw.usedHookState = state_;
 	dlg_assert(draw.usedHookState);
 
 	// TODO: when a new CopiedImage is displayed we could reset the

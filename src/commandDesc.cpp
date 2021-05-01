@@ -1,6 +1,7 @@
 #include <commandDesc.hpp>
 #include <commands.hpp>
 #include <cb.hpp>
+#include <pipe.hpp>
 #include <rp.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
@@ -8,6 +9,7 @@
 namespace vil {
 
 // CommandDesc
+/*
 void fillIn(CommandDesc& ret, const Command* siblings, const Command& cmd) {
 	ret.command = cmd.nameDesc();
 	ret.arguments = cmd.argumentsDesc();
@@ -157,6 +159,7 @@ Command* CommandDesc::find(Command* root, span<const CommandDesc> desc) {
 	auto chain = findHierarchy(root, desc);
 	return chain.empty() ? nullptr : chain.back();
 }
+*/
 
 void processType(CommandBufferDesc& desc, Command::Type type) {
 	switch(type) {
@@ -301,5 +304,157 @@ Match matchRecord(const Command* a, const Command* b) {
 	// O(n^2) which does not work for ~ n >= 1000
 }
 */
+
+bool match(const vil::DescriptorSet::Binding& a, const vil::DescriptorSet::Binding& b,
+		const DescriptorSetLayout::Binding& layout) {
+	if(!a.valid || !b.valid) {
+		return a.valid == b.valid;
+	}
+
+	// TODO: if samplers or image/buffers views are different we could
+	// check them for semantic equality as well. But who would do something
+	// as terrible as create multiple equal samplers/imageView? /s
+
+	auto dsCat = category(layout.descriptorType);
+	if(dsCat == DescriptorCategory::image) {
+
+		if(needsSampler(layout.descriptorType) &&
+				!layout.immutableSamplers.get() &&
+				a.imageInfo.sampler != b.imageInfo.sampler) {
+			return false;
+		}
+
+		if(needsImageView(layout.descriptorType) &&
+				a.imageInfo.imageView != b.imageInfo.imageView) {
+			return false;
+		}
+
+		// NOTE: consider image layout? not too relevant I guess
+
+		return true;
+	} else if(dsCat == DescriptorCategory::bufferView) {
+		return a.bufferView == b.bufferView;
+	} else if(dsCat == DescriptorCategory::buffer) {
+		// NOTE: consider offset? not too relevant I guess
+		return a.bufferInfo.buffer == b.bufferInfo.buffer &&
+			a.bufferInfo.range == b.bufferInfo.range;
+	}
+
+	dlg_error("unreachable! bogus descriptor type");
+	return false;
+}
+
+FindResult find(const Command* root, span<const Command*> dst,
+		const CommandDescriptorState& dsState, float threshold) {
+	dlg_assert_or(!dst.empty(), return {});
+	dlg_assert(root);
+
+	std::vector<const Command*> bestCmds;
+	float bestMatch = threshold;
+
+	for(auto it = root; it; it = it->next) {
+		auto m = it->match(*dst[0]);
+		if(m > 0.f && m > bestMatch) {
+			std::vector<const Command*> restCmds;
+
+			if(dst.size() > 1) {
+				dlg_assert(it->children());
+				auto newThresh = bestMatch / m;
+				auto restResult = find(it->children(), dst.subspan(1), dsState, newThresh);
+				if(restResult.hierachy.empty()) {
+					continue;
+				}
+
+				restCmds = std::move(restResult.hierachy);
+				m *= restResult.match;
+			} else if(!dsState.descriptors.empty()) {
+				// match descriptors, if any
+				span<const BoundDescriptorSet> bound;
+				if(auto* cmd = dynamic_cast<const DrawCmdBase*>(dst[0])) {
+					dlg_assert_or(cmd->state.pipe, continue);
+					bound = cmd->state.descriptorSets;
+					bound = bound.first(cmd->state.pipe->layout->descriptors.size());
+				} else if(auto* cmd = dynamic_cast<const DispatchCmdBase*>(dst[0])) {
+					dlg_assert_or(cmd->state.pipe, continue);
+					bound = cmd->state.descriptorSets;
+					bound = bound.first(cmd->state.pipe->layout->descriptors.size());
+				} else {
+					// unreachable
+					dlg_error("Unexepcted command type; does not have descriptors");
+					continue;
+				}
+
+				dlg_assertm_or(bound.size() == dsState.descriptors.size(),
+					continue, "Descriptor count does not match");
+
+				// compare descriptor state
+				unsigned count {};
+				unsigned match {};
+
+				for(auto s = 0u; s < bound.size(); ++s) {
+					dlg_assert(bound[s].ds);
+					count += bound[s].ds->layout->totalNumBindings;
+
+					// TODO: consider dynamic offsets?
+					// TODO: additional bonus matching points when the *same*
+					//   ds is used?
+					if(bound[s].ds == dsState.descriptors[s].ds) {
+						// fasth path: full match since same descriptorSet
+						match += bound[s].ds->layout->totalNumBindings;
+						continue;
+					}
+
+					if(dsState.descriptors[s].ds) {
+						dlg_assert_or(bound[s].ds->bindings.size() ==
+							dsState.descriptors[s].ds->bindings.size(), continue);
+					} else {
+						dlg_assert_or(bound[s].ds->bindings.size() ==
+							dsState.descriptors[s].state.size(), continue);
+					}
+
+					// iterate over bindings
+					for(auto b = 0u; b < bound[s].ds->bindings.size(); ++b) {
+						auto& binding1 = bound[s].ds->bindings[b];
+						auto& layout = bound[s].ds->layout->bindings[b];
+
+						std::vector<vil::DescriptorSet::Binding>* binding0 {};
+						if(dsState.descriptors[s].ds) {
+							dlg_assert_or(bound[s].ds->bindings.size() ==
+								dsState.descriptors[s].ds->bindings.size(), continue);
+							binding1 = dsState.descriptors[s].ds->bindings[b];
+						} else {
+							dlg_assert_or(bound[s].ds->bindings.size() ==
+								dsState.descriptors[s].state.size(), continue);
+							binding1 = dsState.descriptors[s].state[b];
+						}
+
+						dlg_assert_or(binding1.size() == binding0->size(), continue);
+
+						for(auto e = 0u; e < binding1.size(); ++e) {
+							auto& elem0 = (*binding0)[e];
+							auto& elem1 = binding1[e];
+
+							if(vil::match(elem0, elem1, layout)) {
+								++match;
+							}
+						}
+					}
+				}
+
+				float dsMatch = float(match) / count;
+				m *= dsMatch;
+			}
+
+			if(m > bestMatch) {
+				bestCmds.clear();
+				bestCmds.push_back(it);
+				bestCmds.insert(bestCmds.end(), restCmds.begin(), restCmds.end());
+				bestMatch = m;
+			}
+		}
+	}
+
+	return {bestCmds, bestMatch};
+}
 
 } // namespace vil

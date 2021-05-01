@@ -1,12 +1,14 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <ds.hpp>
 #include <vector>
 #include <string>
 #include <functional>
 
 namespace vil {
 
+	/*
 // Descrption of a command relative to the current recorded state.
 // Can be useful to implement heuristics identifying structurally
 // similar commands in related command buffer recordings (e.g. when
@@ -33,6 +35,28 @@ struct CommandDesc {
 	static std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc);
 	static Command* find(Command* root, span<const CommandDesc> desc);
 };
+*/
+
+struct CommandDescriptorState {
+	struct DescriptorSet {
+		vil::DescriptorSet* ds; // for quick-compare, if still alive & valid
+		std::vector<std::vector<vil::DescriptorSet::Binding>> state; // valid otherwise
+		IntrusivePtr<DescriptorSetLayout> dsLayout;
+		// TODO: consider dynamic offsets?
+	};
+
+	std::vector<DescriptorSet> descriptors;
+};
+
+struct FindResult {
+	std::vector<const Command*> hierachy;
+	float match;
+};
+
+// Assumes that 'root' is a command tree where all handles are still valid.
+FindResult find(const Command* root, span<const Command*> dst,
+		const CommandDescriptorState& dsState, float threshold = 0.0);
+
 
 // Rough structure of a command buffer recording.
 struct CommandBufferDesc {

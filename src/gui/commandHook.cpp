@@ -166,7 +166,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		record == target.record ||
 		&hooked == target.cb ||
 		record->group == target.group;
-	if(!validTarget || desc_.empty()) {
+	if(!validTarget || hierachy_.empty()) {
 		return hooked.handle();
 	}
 
@@ -177,11 +177,16 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// cb viewer?
 
 	// Check if it already has a valid record associated
-	auto hcommand = CommandDesc::findHierarchy(record->commands, desc_);
-	if(hcommand.empty()) {
-		dlg_warn("Can't hook cb, can't find hooked command");
+	// TODO, PERF: when record->hook is true, we don't have to query this here
+	// I guess?
+	auto findRes = find(record->commands, hierachy_, dsState_);
+	if(findRes.hierachy.empty()) {
+		// Can't find command
+		// dlg_warn("Can't hook cb, can't find hooked command");
 		return hooked.handle();
 	}
+
+	dlg_assert(findRes.hierachy.size() == hierachy_.size());
 
 	if(record->hook) {
 		// The record was already submitted - i.e. has a valid state - and
@@ -192,37 +197,45 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			return hooked.handle();
 		}
 
-		auto* our = dynamic_cast<CommandHookRecord*>(record->hook.get());
-
-		if(our && our->hook == this && our->hookCounter == counter_) {
+		auto* hookRecord = record->hook.get();
+		if(hookRecord->hook == this && hookRecord->hookCounter == counter_) {
 			// In this case there is already a pending submission for this
 			// record (can happen for simulataneous command buffers).
-			// This is a problem since we can't write (and then, when
-			// the submission finishes: read) the pool from multiple
+			// This is a problem since we can't write the pool (and then, when
+			// the submission finishes: read buffers) from multiple
 			// places. We simply return the original cb in that case,
 			// there is a pending submission querying that information after all.
 			// NOTE: alternatively, we could create and store a new Record
 			// NOTE: alternatively, we could add a semaphore chaining
 			//   this submission to the previous one.
-			if(our->state->writer) {
+			if(hookRecord->state->writer) {
 				return hooked.handle();
 			}
 
-			data.reset(new CommandHookSubmission(*our, subm));
-			return our->cb;
+			dlg_assert(std::equal(
+				hookRecord->hcommand.begin(), hookRecord->hcommand.end(),
+				findRes.hierachy.begin(), findRes.hierachy.end()));
+
+			// TODO: check whether the 'completed' list already contains
+			// this record, see the comment at the list.
+
+			data.reset(new CommandHookSubmission(*hookRecord, subm, findRes.match));
+			return hookRecord->cb;
 		}
 	}
 
-	auto hook = new CommandHookRecord(*this, *record, std::move(hcommand));
+	auto hook = new CommandHookRecord(*this, *record, std::move(findRes.hierachy));
 	record->hook.reset(hook);
 
-	data.reset(new CommandHookSubmission(*hook, subm));
+	data.reset(new CommandHookSubmission(*hook, subm, findRes.match));
 
 	return hook->cb;
 }
 
-void CommandHook::desc(std::vector<CommandDesc> desc, bool invalidate) {
-	desc_ = std::move(desc);
+void CommandHook::desc(std::vector<const Command*> hierachy,
+		CommandDescriptorState dsState, bool invalidate) {
+	hierachy_ = std::move(hierachy);
+	dsState_ = std::move(dsState);
 
 	if(invalidate) {
 		invalidateRecordings();
@@ -275,7 +288,7 @@ CommandHook::~CommandHook() {
 
 // record
 CommandHookRecord::CommandHookRecord(CommandHook& xhook,
-	CommandRecord& xrecord, std::vector<Command*> hooked) :
+	CommandRecord& xrecord, std::vector<const Command*> hooked) :
 		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
 
 	dlg_assert(!hcommand.empty());
@@ -334,8 +347,12 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 		dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, 2);
 	}
 
+	unsigned maxHookLevel {};
+	info.maxHookLevel = &maxHookLevel;
+
 	this->hookRecord(record->commands, info);
 
+	dlg_assert(maxHookLevel == hcommand.size() - 1);
 	VK_CHECK(dev.dispatch.EndCommandBuffer(this->cb));
 }
 
@@ -569,6 +586,7 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 	auto nextInfo = info;
 	if(parentCmd) {
 		++nextInfo.nextHookLevel;
+
 		if(queryPool) {
 			// timing 0
 			auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -595,6 +613,8 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 }
 
 void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
+	*info.maxHookLevel = std::max(*info.maxHookLevel, info.nextHookLevel);
+
 	auto& dev = record->device();
 	while(cmd) {
 		auto nextInfo = info;
@@ -1234,8 +1254,8 @@ void CommandHookRecord::finish() noexcept {
 }
 
 // submission
-CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec, Submission& subm)
-		: record(&rec) {
+CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec,
+		Submission& subm, float xmatch) : record(&rec), match(xmatch) {
 	dlg_assert(rec.state);
 	dlg_assert(!rec.state->writer);
 	rec.state->writer = &subm;
@@ -1260,7 +1280,15 @@ void CommandHookSubmission::finish(Submission& subm) {
 	}
 
 	transmitTiming();
-	record->hook->state = record->state;
+
+	auto& state = record->hook->completed.emplace_back();
+	state.record = IntrusivePtr<CommandRecord>(record->record);
+	state.match = this->match;
+	state.state = record->state;
+	state.command = record->hcommand;
+
+	dlg_assertm(record->hook->completed.size() < 32,
+		"Hook state overflow detected");
 
 	auto maxCopySize = 64 * 1024;
 

@@ -49,6 +49,8 @@ v0.1, goal: end of january 2021
 	      i.e. support buffer IO viewing for transfer commands
 - [ ] in CopiedImage::init: check for image usage support
 	- [ ] generally: allow the image copy operation to fail.
+- [ ] figure out general approach to fix flickering data, especially
+      in command viewer (but also e.g. on image hover in resource viewer)
 - [ ] xfb: support custom outputs, not just the Position Builtin
 	- [ ] xfb: check whether format is supported
 - [ ] better pipeline/shader module display in resource viewer
@@ -129,6 +131,10 @@ v0.1, goal: end of january 2021
 - [ ] stop this todo-for-v0.1-list from growing at some point.
 
 Possibly for later, new features/ideas:
+- [ ] optionally capture callstacks for each command
+      immediately jumping to the point the command was recorded sounds
+	  useful. Could build in support for vim and visual studio I guess.
+	  See https://github.com/bombela/backward-cpp/blob/master/backward.hpp
 - [ ] get it to run without significant (slight (like couple of percent) increase 
 	  of frame timings even with layer in release mode is ok) overhead.
 	  Just tests with the usual suspects of games

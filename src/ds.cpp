@@ -219,7 +219,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	dsLayout.dev = &dev;
 	dsLayout.handle = *pSetLayout;
 
-	auto* flagsInfo = findChainInfo<VkDescriptorSetLayoutBindingFlagsCreateInfo, 
+	auto* flagsInfo = findChainInfo<VkDescriptorSetLayoutBindingFlagsCreateInfo,
 		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO>(*pCreateInfo);
 	flagsInfo = (flagsInfo && flagsInfo->bindingCount == 0u) ? nullptr : flagsInfo;
 	dlg_assert(!flagsInfo || flagsInfo->bindingCount == pCreateInfo->bindingCount);
@@ -241,6 +241,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 				dst.immutableSamplers[e] = &dev.samplers.get(bind.pImmutableSamplers[e]);
 			}
 		}
+
+		dsLayout.totalNumBindings += bind.descriptorCount;
 	}
 
 	return res;
@@ -329,12 +331,12 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 
 	auto& pool = dev.dsPools.get(pAllocateInfo->descriptorPool);
 
-	auto* variableCountInfo = findChainInfo<VkDescriptorSetVariableDescriptorCountAllocateInfo, 
+	auto* variableCountInfo = findChainInfo<VkDescriptorSetVariableDescriptorCountAllocateInfo,
 		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO>(*pAllocateInfo);
 	if (variableCountInfo && variableCountInfo->descriptorSetCount == 0u) {
 		variableCountInfo = nullptr;
 	}
-	dlg_assert(!variableCountInfo || 
+	dlg_assert(!variableCountInfo ||
 		variableCountInfo->descriptorSetCount == pAllocateInfo->descriptorSetCount);
 
 	for(auto i = 0u; i < pAllocateInfo->descriptorSetCount; ++i) {

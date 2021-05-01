@@ -1,6 +1,8 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <commandDesc.hpp>
+#include <record.hpp>
 #include <util/intrusive.hpp>
 #include <gui/render.hpp>
 #include <vk/vulkan.h>
@@ -54,7 +56,7 @@ struct CopiedBuffer {
 };
 
 // NOTE: in most cases (except for xfb) we don't actually need CopiedBuffer
-// itself and just the cpu data. The mapped data must not be used on cpu
+// itself and just the cpu data. The mapped data *must not* be used on cpu
 // since the state might have an active gpu-side writer submission.
 struct CommandHookState {
 	// We need a reference count here since this object is conceptually owned by
@@ -137,8 +139,28 @@ public:
 	bool copyTransferDst {};
 	bool copyTransferBefore {};
 
-	// The last received copied state of a finished submission
-	IntrusivePtr<CommandHookState> state;
+	// A vector of the last received states of finished submissions.
+	// Must be reset manually when retrieved.
+	struct CompletedHook {
+		IntrusivePtr<CommandRecord> record;
+		IntrusivePtr<CommandHookState> state;
+		std::vector<const Command*> command;
+		float match; // how much the command matched
+	};
+
+	// TODO: this is a problem when there are command records being
+	// submitted multiple times before we retrieve/reset this since
+	// then the old CommandHookState will be overwritten but still in
+	// this list. Fix by either
+	// 1. when a command buffer that should be hooked is submitted
+	//    that already has a finished hooked submission in this list,
+	//    don't hook it.
+	// 2. allow that there are multiple CommandHookState (CommandHookRecord)
+	//    object per original CommandRecord. This is probably the proper
+	//    variant but requires some changes to the way we connect CommandRecord
+	//    and CommandHookRecord, e.g. a vector of CommandHookRecords FinishPtrs
+	//    in CommandRecord.
+	std::vector<CompletedHook> completed;
 
 public:
 	// Called from inside QueueSubmit with the command buffer the hook has
@@ -159,10 +181,11 @@ public:
 	void finish() noexcept { delete this; }
 
 	void invalidateRecordings();
-	void invalidateData() { state = {}; }
+	void invalidateData() { completed.clear(); }
 
 	// invalidate: Automatically invalidates data and recordings?
-	void desc(std::vector<CommandDesc> desc, bool invalidate = true);
+	void desc(std::vector<const Command*> hierachy, CommandDescriptorState,
+		bool invalidate = true);
 	void unsetHookOps(bool doQueryTime = false);
 
 	~CommandHook();
@@ -170,8 +193,11 @@ public:
 private:
 	friend struct CommandHookRecord;
 	u32 counter_ {0};
-	std::vector<CommandDesc> desc_ {};
-	CommandHookRecord* records_ {}; // linked list
+	CommandHookRecord* records_ {}; // intrusive linked list
+
+	// description of command to be hooked
+	CommandDescriptorState dsState_;
+	std::vector<const Command*> hierachy_;
 };
 
 // Is kept alive only as long as the associated Record is referencing this
@@ -185,7 +211,7 @@ struct CommandHookRecord {
 	CommandHook* hook {}; // Associated hook. Might be null if this was invalidated
 	CommandRecord* record {}; // the record we hook. Always valid.
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
-	std::vector<Command*> hcommand; // hierachy of the hooked command
+	std::vector<const Command*> hcommand; // hierachy of the hooked command
 
 	// == Resources ==
 	VkCommandBuffer cb {};
@@ -209,7 +235,7 @@ struct CommandHookRecord {
 	CommandHookRecord* prev {};
 
 	CommandHookRecord(CommandHook& hook, CommandRecord& record,
-		std::vector<Command*> hooked);
+		std::vector<const Command*> hooked);
 	~CommandHookRecord();
 
 	struct RecordInfo {
@@ -218,6 +244,7 @@ struct CommandHookRecord {
 		const BeginRenderPassCmd* beginRenderPassCmd {};
 
 		unsigned nextHookLevel {}; // on hcommand, hook hierarchy
+		unsigned* maxHookLevel {};
 	};
 
 	void initState(RecordInfo&);
@@ -247,8 +274,9 @@ struct CommandHookRecord {
 
 struct CommandHookSubmission {
 	CommandHookRecord* record {};
+	float match {}; // original match of the searched-for command
 
-	CommandHookSubmission(CommandHookRecord&, Submission&);
+	CommandHookSubmission(CommandHookRecord&, Submission&, float match);
 	~CommandHookSubmission();
 
 	void finish(Submission&);

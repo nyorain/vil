@@ -59,6 +59,9 @@ struct DescriptorSetLayout : DeviceHandle {
 	std::vector<Binding> bindings;
 	std::atomic<u32> refCount {0}; // intrusive ref count
 
+	// Total number of bindings, including array elements
+	std::size_t totalNumBindings {};
+
 	// handle will be kept alive until this object is actually destroyed.
 	~DescriptorSetLayout();
 };
