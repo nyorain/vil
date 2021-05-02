@@ -41,8 +41,7 @@ ImageView::~ImageView() {
 	while(!this->descriptors.empty()) {
 		auto& dsRef = *this->descriptors.begin();
 		dlg_assert(dsRef.ds->getImageView(dsRef.binding, dsRef.elem) == this);
-		dsRef.ds->invalidateCbsLocked();
-		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
+		notifyDestroyLocked(*dsRef.ds, dsRef.binding, dsRef.elem, *this);
 	}
 }
 
@@ -57,8 +56,7 @@ Sampler::~Sampler() {
 	while(!this->descriptors.empty()) {
 		auto& dsRef = *this->descriptors.begin();
 		dlg_assert(dsRef.ds->getSampler(dsRef.binding, dsRef.elem) == this);
-		dsRef.ds->invalidateCbsLocked();
-		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
+		notifyDestroyLocked(*dsRef.ds, dsRef.binding, dsRef.elem, *this);
 	}
 }
 

@@ -4,6 +4,10 @@ v0.1, goal: end of january 2021
 
 - [x] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
 - [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
+- [ ] completely rethink the concept of CommandGroups
+	- [ ] improve CommandBufferDesc (rename to RecordDesc or RecordStructure),
+		  see desc2.hpp. Or abolish groups completely. We can't rely
+		  on used handles either since there is update_after_bind
 - [ ] don't even attempt to display non-float formats in 3D vertex viewer
 - [ ] support drawIndirectCount in vertex viewer
 	- [ ] #43, probably for later: also support just showing a single draw command
@@ -131,6 +135,13 @@ v0.1, goal: end of january 2021
 - [ ] stop this todo-for-v0.1-list from growing at some point.
 
 Possibly for later, new features/ideas:
+- [ ] (low prio) our descriptor matching fails in some cases when handles are abused
+	  as temporary, e.g. imageViews, samplers, bufferViews (ofc also for
+	  stuff like images and buffers).
+	  Probably a wontfix since applications
+	  should fix their shit but in some cases this might not be too hard
+	  to support properly with some additional tracking and there might
+	  be valid usecases for using transient image views
 - [ ] optionally capture callstacks for each command
       immediately jumping to the point the command was recorded sounds
 	  useful. Could build in support for vim and visual studio I guess.
@@ -297,8 +308,7 @@ Possibly for later, new features/ideas:
 	- [ ] we will probably need some its functionality later on anyways
 	- [ ] already hit some hard limitations of spirv-cross that would require
 	      a lot of changes
-- [ ] we assume binary semaphores for applications at the moment. See e.g. the waitFrom/signalFrom
-      assertions in queue.cpp
+- [ ] support timeline semaphores (submission rework/display)
 - [ ] support for the spirv primites in block variables that are still missing
  	  See https://github.com/KhronosGroup/SPIRV-Reflect/issues/110
 	- [ ] runtime arrays (based on buffer range size)
@@ -307,10 +317,6 @@ Possibly for later, new features/ideas:
 	  submissions that also only read it wait.
 	- [ ] requires us to track (in CommandRecord::usedX i guess) whether
 		  a resource might be written by cb
-- [ ] optimization: we don't really need to always track refCbs and store
-      the destroyed handles. Only do it for submissions viewed in gui?
-	  Could just require commandRecords to be valid while selected and
-	  then just handle the unsetting logic in CommandBufferGui::destroyed
 - [ ] support for multiple swapchains
 	- [ ] in submission viewing, we assume there is just one atm
 	- [ ] currently basically leaking memory (leaving all records alive)
@@ -574,3 +580,12 @@ Possibly for later, new features/ideas:
 	  we have timeline semaphores, can simply use futureSemaphore for
 	  present as well
 
+old:
+- [ ] optimization: we don't really need to always track refCbs and store
+      the destroyed handles. Only do it for submissions viewed in gui?
+	  Could just require commandRecords to be valid while selected and
+	  then just handle the unsetting logic in CommandBufferGui::destroyed
+	    Hm, on a second thought, this won't work so easily since we might
+		select a new record that is already invalidated (useful in some
+		cases I guess). Also, we want to support showing every command
+		for a given handle at some point, where we need this tracking as well.

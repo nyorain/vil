@@ -21,6 +21,9 @@ DeviceHandle::~DeviceHandle() {
 }
 
 void DeviceHandle::invalidateCbsLocked() {
+	dlg_assert(dev);
+	dlg_assert(dev->mutex.owned());
+
 	// nothing can be added/removed while device mutex is locked
 	for(auto* ref : refRecords) {
 		// If the records still references it command buffer, the record
@@ -31,7 +34,8 @@ void DeviceHandle::invalidateCbsLocked() {
 			ref->cb->invalidateLocked();
 		}
 
-		auto [_, success] = ref->destroyed.insert(this);
+		dlg_assert(!ref->cb);
+		auto [_, success] = ref->replace.insert({this, nullptr});
 		dlg_assert(success);
 	}
 

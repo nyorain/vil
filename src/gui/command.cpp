@@ -1239,8 +1239,10 @@ void CommandViewer::draw(Draw& draw) {
 
 	dlg_assert(record_);
 
+	// we read a lot of data from commands in the given record, so make
+	// sure there aren't any invalid handles in there.
 	if(!record_->cb) {
-		unsetDestroyedLocked(*record_);
+		replaceInvalidatedLocked(*record_);
 	}
 
 	dlg_assert(record_->destroyed.empty());

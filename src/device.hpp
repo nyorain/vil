@@ -5,6 +5,7 @@
 #include <data.hpp>
 #include <util/syncedMap.hpp>
 #include <util/span.hpp>
+#include <util/debugMutex.hpp>
 
 #include <vk/vulkan.h>
 #include <vk/vk_layer.h>
@@ -84,7 +85,7 @@ struct Device {
 	// erased from the resource tables below (and therefore can't
 	// logically be created or destroyed). Also used to synchronize
 	// shared access to most resources (that can be mutated).
-	std::shared_mutex mutex;
+	DebugSharedMutex mutex;
 
 	// Mutex that is locked *while* doing a submission. The general mutex
 	// won't be locked for that time. So when we want to do submissions

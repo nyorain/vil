@@ -49,6 +49,23 @@ void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
 	bind = {};
 }
 
+void notifyDestroyLocked(DescriptorSet& ds, unsigned binding, unsigned elem,
+		const Handle& handle) {
+	(void) handle;
+	unregisterLocked(ds, binding, elem);
+
+	if(ds.handle) {
+		ds.invalidateCbsLocked();
+	} else {
+		// in this case, ds is a dummy DescriptorSet created by a CommandRecord
+		// to store the state after invalidation
+		// TODO: we could use 'handle' to only unset (binding, elem) partially,
+		// e.g. when the sampler was destroyed but not the imageView.
+		// not sure if it's worth it/useful.
+		dlg_assert(ds.refRecords.size() == 0u);
+	}
+}
+
 DescriptorSet::~DescriptorSet() {
 	if(!dev) {
 		return;
@@ -454,10 +471,14 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 	// handle writes
 	for(auto i = 0u; i < descriptorWriteCount; ++i) {
 		auto& write = pDescriptorWrites[i];
+		dlg_assert(write.descriptorCount > 0u); // per vulkan spec
+
 		auto& ds = dev.descriptorSets.get(write.dstSet);
+		dlg_assert(ds.handle);
 
 		auto dstBinding = write.dstBinding;
 		auto dstElem = write.dstArrayElement;
+		auto invalidate = false;
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
 			dlg_assert(dstBinding < ds.layout->bindings.size());
 			while(dstElem >= ds.bindings[dstBinding].size()) {
@@ -466,8 +487,16 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 				dlg_assert(dstBinding < ds.layout->bindings.size());
 			}
 
-			dlg_assert(write.descriptorType == ds.layout->bindings[dstBinding].descriptorType);
+			auto& layout = ds.layout->bindings[dstBinding];
+			dlg_assert(write.descriptorType == layout.descriptorType);
 			auto& binding = ds.bindings[dstBinding][dstElem];
+
+			// TODO: when VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+			// is set, only invalidate the cbs that use it
+			// (rules depend on whether PARTIALLY_BOUND_BIT is set as well).
+			if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
+				invalidate = true;
+			}
 
 			std::lock_guard lock(dev.mutex);
 			if(binding.valid) {
@@ -491,8 +520,14 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 			}
 		}
 
-		// TODO: change/check for descriptor indexing
-		ds.invalidateCbs();
+		if(invalidate) {
+			ds.invalidateCbs();
+		} else {
+			// we still need to inform the refRecord that the descriptors
+			// content changed
+			for(auto& refRecord : ds.refRecords) {
+			}
+		}
 	}
 
 	// handle copies

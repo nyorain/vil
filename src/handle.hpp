@@ -30,7 +30,7 @@ struct DeviceHandle : Handle {
 	// On destruction, the handle will inform all of them that they
 	// are now in an invalid state.
 	// NOTE: the dynamic memory allocations we do here could become a
-	// serious performance problem. In that case replace it by per-cb
+	// performance problem. In that case replace it by per-cb
 	// 2D-linked-list (linked grid), see node 1648
 	std::unordered_set<CommandRecord*> refRecords;
 

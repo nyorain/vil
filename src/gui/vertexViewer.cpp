@@ -6,9 +6,9 @@
 #include <util/util.hpp>
 #include <device.hpp>
 #include <shader.hpp>
-#include <commandDesc.hpp>
-#include <commands.hpp>
 #include <pipe.hpp>
+#include <command/desc.hpp>
+#include <command/commands.hpp>
 #include <imgui/imgui.h>
 #include <vk/format_utils.h>
 #include <vk/enumString.hpp>

@@ -5,6 +5,7 @@
 #include <memory>
 #include <cassert>
 #include <util/intrusive.hpp>
+#include <util/debugMutex.hpp>
 
 namespace vil {
 
@@ -177,7 +178,7 @@ public:
 	}
 
 	// Can also be used directly, but take care!
-	std::shared_mutex* mutex;
+	DebugSharedMutex* mutex;
 	UnorderedMap map;
 };
 

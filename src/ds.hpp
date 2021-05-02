@@ -66,10 +66,43 @@ struct DescriptorSetLayout : DeviceHandle {
 	~DescriptorSetLayout();
 };
 
+// State of a descriptor set. Disconnected from the DescriptorSet itself
+// since for submission, we want to know the state of the descriptor at
+// submission time even if the descriptor set itself has been changed or
+// destroyed later on.
+struct DescriptorSetState {
+	struct ImageInfo {
+		ImageView* imageView;
+		Sampler* sampler; // even stored here if immutable in layout
+		VkImageLayout layout;
+	};
+
+	struct BufferInfo {
+		Buffer* buffer;
+		VkDeviceSize offset;
+		VkDeviceSize range;
+	};
+
+	struct Binding {
+		bool valid {};
+
+		union {
+			ImageInfo imageInfo;
+			BufferInfo bufferInfo;
+			BufferView* bufferView;
+		};
+	};
+
+	std::vector<std::vector<Binding>> bindings;
+	u32 refCount {};
+};
+
 struct DescriptorSet : DeviceHandle {
 	DescriptorPool* pool {};
 	IntrusivePtr<DescriptorSetLayout> layout {};
 	VkDescriptorSet handle {};
+
+	IntrusivePtr<DescriptorSetState> state;
 
 	struct ImageInfo {
 		ImageView* imageView;
@@ -103,11 +136,12 @@ struct DescriptorSet : DeviceHandle {
 	~DescriptorSet();
 };
 
-// Invalidates the given (binding, elem) slot in the given descriptor
-// set. Must only be called while device mutex is locked.
-// Will NOT invalidate the cbs connected to the ds, that must be done
-// by caller manually.
-void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem);
+// Notifies the given descriptor that 'handle' - bound in the
+// descriptor at binding, elem - was destroyed.
+// Must only be called while device mutex is locked.
+// Will invalidate the command records connected to the ds.
+void notifyDestroyLocked(DescriptorSet& ds, unsigned binding, unsigned elem,
+		const Handle& handle);
 
 struct DescriptorUpdateTemplate : DeviceHandle {
 	VkDescriptorUpdateTemplate handle {};

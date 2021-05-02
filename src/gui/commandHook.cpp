@@ -1,6 +1,5 @@
 #include <gui/commandHook.hpp>
 #include <device.hpp>
-#include <commandDesc.hpp>
 #include <ds.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
@@ -8,7 +7,8 @@
 #include <rp.hpp>
 #include <cb.hpp>
 #include <buffer.hpp>
-#include <commands.hpp>
+#include <command/desc.hpp>
+#include <command/commands.hpp>
 #include <util/util.hpp>
 #include <vk/format_utils.h>
 

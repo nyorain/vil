@@ -3,8 +3,7 @@
 #include <ds.hpp>
 #include <queue.hpp>
 #include <handles.hpp>
-#include <commands.hpp>
-#include <record.hpp>
+#include <command/commands.hpp>
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
@@ -60,7 +59,7 @@ void CommandBuffer::clearPendingLocked() {
 	this->invalidateCbsLocked();
 }
 
-void CommandBuffer::doReset(bool record) {
+void CommandBuffer::doReset(bool startRecord) {
 	// Make sure to never destroy a CommandBufferRecord inside the
 	// device lock.
 	IntrusivePtr<CommandRecord> keepAliveRecord;
@@ -76,18 +75,10 @@ void CommandBuffer::doReset(bool record) {
 
 		// We have to lock our own mutex since other threads might read
 		// our data at the same time.
-		if(record) {
+		if(startRecord) {
 			++recordCount_;
-			// TODO: with some custom IntrusivePtr deleter we could
-			// allocate the CommandBufferRecord inside its own mem block
-			// (that we first allocate here, then create the record in it,
-			// them move the block into the record).
+
 			record_ = IntrusivePtr<CommandRecord>(new CommandRecord(*this));
-
-			// TODO: should this be in CommandRecord constructor?
-			auto& deleter = record_->memBlocks.get_deleter();
-			pool_->records.insert(&deleter);
-
 			state_ = CommandBuffer::State::recording;
 		} else {
 			state_ = CommandBuffer::State::initial;
@@ -265,13 +256,8 @@ CommandPool::~CommandPool() {
 		return;
 	}
 
-	{
-		std::lock_guard lock(dev->mutex);
-		for(auto& recordDeleter : records) {
-			recordDeleter->pool = nullptr;
-		}
-	}
-
+	// When a CommandPool is destroyed, all command buffers created from
+	// it are automatically freed.
 	// NOTE: we don't need a lock here:
 	// While the command pool is being destroyed, no command buffers from it
 	// can be created or destroyed in another thread, that would always be a
@@ -284,74 +270,9 @@ CommandPool::~CommandPool() {
 		auto* cb = cbs[0];
 		dev->commandBuffers.mustErase(cb->handle());
 	}
-
-	freeBlocks(memBlocks.load());
-}
-
-template<typename T>
-void ensureSize(CommandBuffer& cb, span<T>& buf, std::size_t size) {
-	if(buf.size() >= size) {
-		return;
-	}
-
-	auto newBuf = allocSpan<T>(cb, size);
-	std::copy(buf.begin(), buf.end(), newBuf.begin());
-	buf = newBuf;
-}
-
-template<typename D, typename T>
-void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, std::size_t count) {
-	dst = allocSpan<D>(cb, count);
-	for(auto i = 0u; i < count; ++i) {
-		dst[i] = upgrade(data[i]);
-	}
 }
 
 // util
-void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
-		span<DescriptorSet* const> sets, span<const u32>) {
-	ensureSize(cb, descriptorSets, firstSet + sets.size());
-
-	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
-	// There may be errors here.
-	// TODO: do we even need to track it like this? only useful if we
-	// also show it in UI which sets were disturbed.
-
-	auto lastSet = firstSet + sets.size() - 1;
-	for(auto i = 0u; i < firstSet; ++i) {
-		if(!descriptorSets[i].ds) {
-			continue;
-		}
-
-		dlg_assert(descriptorSets[i].layout);
-		if(!compatibleForSetN(*descriptorSets[i].layout, layout, i)) {
-			// disturbed!
-			// dlg_debug("disturbed ds {}", i);
-			descriptorSets[i] = {};
-		}
-	}
-
-	// bind descriptors and check if future bindings are disturbed
-	auto followingDisturbed = false;
-	for(auto i = 0u; i < sets.size(); ++i) {
-		auto s = firstSet + i;
-		if(!descriptorSets[s].ds || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
-			followingDisturbed = true;
-		}
-
-		descriptorSets[s].layout = &layout;
-		descriptorSets[s].ds = sets[i];
-		// TODO: use given offsets. We have to analyze the layout and
-		// count the offset into the offsets array.
-		descriptorSets[s].dynamicOffsets = {};
-	}
-
-	if(followingDisturbed) {
-		// dlg_debug("disturbed following descriptorSets, from {}", lastSet + 1);
-		descriptorSets = descriptorSets.subspan(0, lastSet + 1);
-	}
-}
-
 void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
 	dst.descriptorSets = copySpan(cb, src.descriptorSets);
 }

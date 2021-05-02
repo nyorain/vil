@@ -2,7 +2,7 @@
 
 #include <fwd.hpp>
 #include <handle.hpp>
-#include <commandDesc.hpp>
+#include <command/desc.hpp>
 #include <util/intrusive.hpp>
 #include <vk/vulkan.h>
 #include <vector>

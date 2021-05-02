@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <queue.hpp>
+#include <command/alloc.hpp>
 #include <util/span.hpp>
 #include <util/intrusive.hpp>
 
@@ -12,97 +13,6 @@
 #include <cassert>
 
 namespace vil {
-
-// Free-form of CommandBuffer::allocate
-std::byte* allocate(CommandRecord&, std::size_t size, std::size_t alignment);
-std::byte* allocate(CommandBuffer&, std::size_t size, std::size_t alignment);
-
-template<typename T, typename... Args>
-T& allocate(CommandBuffer& cb, Args&&... args) {
-	auto* raw = allocate(cb, sizeof(T), alignof(T));
-	return *(new(raw) T(std::forward<Args>(args)...));
-}
-
-template<typename T>
-span<T> allocSpan(CommandBuffer& cb, std::size_t count) {
-	if(count == 0) {
-		return {};
-	}
-
-	auto* raw = allocate(cb, sizeof(T) * count, alignof(T));
-	auto* arr = new(raw) T[count];
-	return span<T>(arr, count);
-}
-
-template<typename T>
-span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, T* data, std::size_t count) {
-	auto span = allocSpan<std::remove_const_t<T>>(cb, count);
-	std::copy(data, data + count, span.data());
-	return span;
-}
-
-template<typename T>
-span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, span<T> data) {
-	return copySpan(cb, data.data(), data.size());
-}
-
-inline const char* copyString(CommandBuffer& cb, std::string_view src) {
-	auto dst = allocSpan<char>(cb, src.size() + 1);
-	std::copy(src.begin(), src.end(), dst.data());
-	dst[src.size()] = 0;
-	return dst.data();
-}
-
-// Allocates the memory from the command buffer.
-void copyChainInPlace(CommandBuffer& cb, const void*& pNext);
-[[nodiscard]] const void* copyChain(CommandBuffer& cb, const void* pNext);
-
-template<typename T>
-struct CommandAllocator {
-	using is_always_equal = std::false_type;
-	using value_type = T;
-
-	CommandRecord* rec;
-
-	CommandAllocator(CommandRecord& xrec) noexcept : rec(&xrec) {}
-
-	template<typename O>
-	CommandAllocator(const CommandAllocator<O>& rhs) noexcept : rec(rhs.rec) {}
-
-	template<typename O>
-	CommandAllocator& operator=(const CommandAllocator<O>& rhs) noexcept {
-		this->rec = rhs.rec;
-		return *this;
-	}
-
-	T* allocate(std::size_t n) {
-		assert(rec);
-		auto* ptr = vil::allocate(*rec, n * sizeof(T), alignof(T));
-        // TODO: strictly speaking we need the first line but it doesn't compile
-        // under msvc for non-default-constructibe T
-		// return new(ptr) T[n]; // creates the array but not the objects
-        return reinterpret_cast<T*>(ptr);
-	}
-
-	void deallocate(T*, std::size_t) const noexcept {}
-};
-
-template<typename T>
-bool operator==(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noexcept {
-	return a.rec == b.rec;
-}
-
-template<typename T>
-bool operator!=(const CommandAllocator<T>& a, const CommandAllocator<T>& b) noexcept {
-	return a.rec != b.rec;
-}
-
-// template<typename T> using CommandAllocPageVector = PageVector<T, CommandAllocator<T>>;
-template<typename T> using CommandAllocList = std::list<T, CommandAllocator<T>>;
-template<typename K, typename V> using CommandAllocHashMap = std::unordered_map<K, V,
-	std::hash<K>, std::equal_to<K>, CommandAllocator<std::pair<const K, V>>>;
-// template<typename K, typename V> using CommandMap = std::map<K, V,
-//     std::less<K>, CommandAllocator<std::pair<const K, V>>>;
 
 // IDEA: use something like this, track valid segments in push constant ranges
 // IDEA: we should care about pipeline layouts for push constants.
@@ -119,7 +29,7 @@ struct PushConstantData {
 
 struct BoundDescriptorSet {
 	DescriptorSet* ds {};
-	PipelineLayout* layout {}; // TODO: remove
+	PipelineLayout* layout {}; // TODO: not sure if needed
 	span<u32> dynamicOffsets;
 };
 
@@ -189,7 +99,6 @@ struct ComputeState : DescriptorState {
 GraphicsState copy(CommandBuffer& cb, const GraphicsState& src);
 ComputeState copy(CommandBuffer& cb, const ComputeState& src);
 
-
 // We don't use shared pointers here, they are used in the
 // commands referencing the handles.
 struct UsedImage {
@@ -220,37 +129,20 @@ struct UsedHandle {
 	CommandAllocList<Command*> commands;
 };
 
-struct CommandMemBlock {
-	std::atomic<CommandMemBlock*> next {};
-	std::size_t size {};
-	// std::byte block[size]; // following 'this' in memory
-};
-
-void freeBlocks(CommandMemBlock* memBlocks);
-void returnBlocks(CommandPool& pool, CommandMemBlock* blocks);
-
-struct MemBlockDeleter {
-	// Set to null when pool is destroyed.
-	// Remembered separately from cb so that this can return the allocated
-	// memory blocks on destruction even if the command buffer this comes
-	// from was already freed.
-	// Synced via device mutex.
-	Device* dev {};
-	CommandPool* pool {};
-	void operator()(CommandMemBlock* blocks);
+struct CommandDecriptorSnapshot {
+	CommandAllocHashMap<void*, IntrusivePtr<DescriptorSetState>> invalidated;
 };
 
 // Represents the recorded state of a command buffer.
 // We represent it as extra, reference-counted object so we can display
 // old records as well.
-// TODO: we could store the name of the command buffer this record originated
-// from (if any) for better display in gui, e.g. when executed as secondary
-// command buffer.
 struct CommandRecord {
+	Device* dev {};
+
 	// We own those mem blocks, could even own them past command pool destruction.
 	// Important this is the last object to be destroyed other destructors
 	// still access that memory.
-	std::unique_ptr<CommandMemBlock, MemBlockDeleter> memBlocks {};
+	CommandMemBlock* memBlocks {};
 	std::size_t memBlockOffset {}; // offset in first (current) mem block
 
 	// Might be null when this isn't the current command buffer recording.
@@ -260,11 +152,16 @@ struct CommandRecord {
 	// Together with cb, uniquely identifies record.
 	u32 recordID {};
 	// The queue family this record was recorded for. Stored here separately
-	// from CommandBuffer so that information is retained after cb destruction.
+	// from CommandBuffer so that information is retained when cb is unset.
 	u32 queueFamily {};
+	// Name of commmand buffer in which this record originated.
+	// Stored separately from cb so that information is retained when cb is unset.
+	const char* cbName {};
 
 	bool finished {}; // whether the recording is finished (i.e. EndCommandBuffer called)
 	VkCommandBufferUsageFlags usageFlags {};
+
+	// The hierachy of commands recording into this record.
 	Command* commands {};
 
 	// DebugUtils labels can span across multiple records.
@@ -273,19 +170,31 @@ struct CommandRecord {
 	// For a command buffer that closes all label it opens and open all
 	// label it closes, numPopLabels is 0 and pushLabels empty.
 	u32 numPopLabels {};
-	std::vector<const char*> pushLables {}; // PERF: use pool memory
+	CommandAllocList<const char*> pushLables {};
 
-	// IDEA: Should the key rather be Handle*?
+	// IDEA: Should the key rather be Handle*? Also, maybe we rather
+	// use a non-hash map here since rehashing might be a problem, especially
+	// considering the memory waste through our custom allocator
 	CommandAllocHashMap<VkImage, UsedImage> images;
 	CommandAllocHashMap<u64, UsedHandle> handles;
 
 	// We store all device handles referenced by this command buffer that
 	// were destroyed since it was recorded so we can avoid deferencing
 	// them in the command state.
-	// PERF: use pool memory here, too? could use alternate allocation function
-	// that just allocates blocks on its own (but still returns them to pool
-	// in the end?).
-	std::unordered_set<DeviceHandle*> destroyed;
+	// We unset
+	CommandAllocHashMap<DeviceHandle*, DeviceHandle*> invalidated;
+
+	// We might be interested in the bound descriptors even after the record
+	// was invalidated. If the 'keepDescriptorInformation' bool is set,
+	// descriptor state is copied into dummy 'DescriptorSet' objects that
+	// are referenced instead in the Command objects so we can at least
+	// retrieve the bound state later on.
+	bool keepDescriptorInformation {};
+	// TODO: allocate memory for those descriptor set bindings from
+	// memBlocks, needs a change in DescirptorSet. We should probably
+	// pool memory needed for DescriptorSet anyways, either from here
+	// or from DescriptorPool depending on whether its a dummy set or not.
+	CommandAllocList<DescriptorSet> keptDescriptors;
 
 	// We have to keep certain object alive that vulkan allows to be destroyed
 	// after recording even if the command buffer is used in the future.
@@ -313,30 +222,27 @@ struct CommandRecord {
 	// recording here.
 	FinishPtr<CommandHookRecord> hook;
 
-	// Allocates a chunk of memory from the given command record, will use the
-	// internal CommandPool memory allocator. The memory can not be freed in
-	// any way, it will simply be reset when the record is destroyed (destructors
-	// of non-trivial types inside the memory must be called before that!).
-	// Only allowed to call in recording state (i.e. while record is not finished).
-	std::byte* allocate(std::size_t size, std::size_t alignment);
-
-	template<typename H>
-	bool uses(const H& handle) const {
-		if constexpr(std::is_same_v<H, Image>) {
-			return images.find(handle.handle) != images.end();
-		} else {
-			return handles.find(handleToU64(vil::handle(handle))) != handles.end();
-		}
-	}
-
-	Device& device() const { return *memBlocks.get_deleter().dev; }
-
 	CommandRecord(CommandBuffer& cb);
 	~CommandRecord();
 };
 
+// Returns whether the given CommandRecord uses the given handle.
+// Keep in mind that handles only used via descriptor sets won't appear here,
+// one must iterate through all used descriptor sets to find them.
+template<typename H>
+bool uses(const CommandRecord& rec, const H& handle) {
+	if constexpr(std::is_same_v<H, Image>) {
+		return rec.images.find(handle.handle) != rec.images.end();
+	} else {
+		return rec.handles.find(handleToU64(vil::handle(handle))) != rec.handles.end();
+	}
+}
+
 // Unsets all handles in record.destroyed in all of its commands and used
 // handle entries. Must only be called while device mutex is locked
-void unsetDestroyedLocked(CommandRecord& record);
+void replaceInvalidatedLocked(CommandRecord& record);
+
+// Notifies the given record that the given ds was destroyed/invalidated.
+void notifyInvalidateLocked(CommandRecord& record, const DescriptorSet& ds);
 
 } // namespace vil

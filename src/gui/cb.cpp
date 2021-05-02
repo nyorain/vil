@@ -127,13 +127,19 @@ void CommandBufferGui::draw(Draw& draw) {
 		auto* dst = command_.back();
 		span<const BoundDescriptorSet> bound;
 		if(auto* cmd = dynamic_cast<const DrawCmdBase*>(dst)) {
-			bound = cmd->state.descriptorSets;
+			if(cmd->state.pipe) {
+				auto count = cmd->state.pipe->layout->descriptors.size();
+				bound = cmd->state.descriptorSets.first(count);
+			}
 		} else if(auto* cmd = dynamic_cast<const DispatchCmdBase*>(dst)) {
-			bound = cmd->state.descriptorSets;
+			if(cmd->state.pipe) {
+				auto count = cmd->state.pipe->layout->descriptors.size();
+				bound = cmd->state.descriptorSets.first(count);
+			}
 		}
 
 		for(auto& ds : bound) {
-			auto& dst = dsState_.descriptors.emplace_back();
+			auto& dst = dsState_.emplace_back();
 			dst.ds = ds.ds;
 			dst.dsLayout = ds.ds->layout;
 		}
@@ -312,7 +318,7 @@ void CommandBufferGui::draw(Draw& draw) {
 					// When the record isn't valid anymore (cb is unset), we have to
 					// be careful to not actually reference any destroyed resources.
 					if(!rec->cb) {
-						unsetDestroyedLocked(*rec);
+						replaceInvalidatedLocked(*rec);
 					}
 
 					dlg_assert(rec->destroyed.empty());
@@ -387,7 +393,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		// When the record isn't valid anymore (cb is unset), we have to
 		// be careful to not actually reference any destroyed resources.
 		if(record_ && !record_->cb) {
-			unsetDestroyedLocked(*record_);
+			replaceInvalidatedLocked(*record_);
 		}
 
 		dlg_assert(record_->destroyed.empty());
@@ -591,11 +597,10 @@ void CommandBufferGui::destroyed(const Handle& handle) {
 	// ownership, i.e. are kept alive by us.
 
 	// manually invalidate saved descriptor state
-	for(auto& ds : dsState_.descriptors) {
+	for(auto& ds : dsState_) {
 		if(ds.ds == &handle) {
 			// save the state
 			ds.state = ds.ds->bindings;
-			ds.dsLayout = ds.ds->layout;
 			ds.ds = nullptr;
 			return;
 		}

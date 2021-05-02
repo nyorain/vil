@@ -1,6 +1,6 @@
 #pragma once
 
-#include <record.hpp>
+#include <command/record.hpp>
 #include <util/flags.hpp>
 #include <util/span.hpp>
 #include <dlg/dlg.hpp>
@@ -79,10 +79,12 @@ struct Command {
 	// by this command. Must not dereference them.
 	virtual void displayInspector(Gui&) const {}
 
-	// Informs this command that the given handles were destroyed.
-	// Should unset all internal handles that are among them.
+	// Should replace all internal handles that are among the keys of
+	// the given map with the values they are mapped to.
 	// Should forward the call to all potential children.
-	virtual void unset(const std::unordered_set<DeviceHandle*>&) {}
+	// In practice, this is used mostly to inform Commands about destroyed
+	// handles.
+	virtual void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>&) {}
 
 	// Returns the children command list. For non-parent commands, this
 	// is simply null.
@@ -143,10 +145,10 @@ struct ParentCommand : Command {
 	std::vector<const Command*> display(const Command* selected,
 		TypeFlags typeFlags) const override;
 
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override {
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override {
 		auto* cmd = children();
 		while(cmd) {
-			cmd->unset(destroyed);
+			cmd->replace(map);
 			cmd = cmd->next;
 		}
 	}
@@ -168,7 +170,7 @@ struct BarrierCmdBase : Command {
 	span<Image*> images;
 	span<Buffer*> buffers;
 
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void displayInspector(Gui& gui) const override;
 	Matcher doMatch(const BarrierCmdBase& rhs) const;
 };
@@ -181,7 +183,7 @@ struct WaitEventsCmd : BarrierCmdBase {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command& rhs) const override;
 };
 
@@ -216,7 +218,7 @@ struct BeginRenderPassCmd : SectionCommand {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command& rhs) const override;
 };
 
@@ -261,7 +263,7 @@ struct DrawCmdBase : Command {
 
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
 };
 
@@ -297,7 +299,7 @@ struct DrawIndirectCmd : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command&) const override;
 };
 
@@ -336,7 +338,7 @@ struct DrawIndirectCountCmd : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command&) const override;
 };
 
@@ -350,7 +352,7 @@ struct BindVertexBuffersCmd : Command {
 	std::string nameDesc() const override { return "BindVertexBuffers"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct BindIndexBufferCmd : Command {
@@ -361,7 +363,7 @@ struct BindIndexBufferCmd : Command {
 	std::string nameDesc() const override { return "BindIndexBuffer"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct BindDescriptorSetCmd : Command {
@@ -375,7 +377,7 @@ struct BindDescriptorSetCmd : Command {
 	std::string nameDesc() const override { return "BindDescriptorSets"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void displayInspector(Gui& gui) const override;
 };
 
@@ -388,7 +390,7 @@ struct DispatchCmdBase : Command {
 
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher doMatch(const DispatchCmdBase&) const;
 };
 
@@ -418,7 +420,7 @@ struct DispatchIndirectCmd : DispatchCmdBase {
 	std::string nameDesc() const override { return "DispatchIndirect"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	std::vector<std::string> argumentsDesc() const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command&) const override;
 };
 
@@ -455,7 +457,7 @@ struct CopyImageCmd : Command {
 	std::string nameDesc() const override { return "CopyImage"; }
 	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct CopyBufferToImageCmd : Command {
@@ -471,7 +473,7 @@ struct CopyBufferToImageCmd : Command {
 	std::string nameDesc() const override { return "CopyBufferToImage"; }
 	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct CopyImageToBufferCmd : Command {
@@ -487,7 +489,7 @@ struct CopyImageToBufferCmd : Command {
 	std::string nameDesc() const override { return "CopyImageToBuffer"; }
 	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct BlitImageCmd : Command {
@@ -505,7 +507,7 @@ struct BlitImageCmd : Command {
 	std::string nameDesc() const override { return "BlitImage"; }
 	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct ResolveImageCmd : Command {
@@ -522,7 +524,7 @@ struct ResolveImageCmd : Command {
 	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct CopyBufferCmd : Command {
@@ -537,7 +539,7 @@ struct CopyBufferCmd : Command {
 	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct UpdateBufferCmd : Command {
@@ -551,7 +553,7 @@ struct UpdateBufferCmd : Command {
 	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct FillBufferCmd : Command {
@@ -566,7 +568,7 @@ struct FillBufferCmd : Command {
 	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct ClearColorImageCmd : Command {
@@ -581,7 +583,7 @@ struct ClearColorImageCmd : Command {
 	std::string nameDesc() const override { return "ClearColorImage"; }
 	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct ClearDepthStencilImageCmd : Command {
@@ -596,7 +598,7 @@ struct ClearDepthStencilImageCmd : Command {
 	std::string nameDesc() const override { return "ClearDepthStencilImage"; }
 	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct ClearAttachmentCmd : Command {
@@ -609,7 +611,7 @@ struct ClearAttachmentCmd : Command {
 	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct SetEventCmd : Command {
@@ -622,7 +624,7 @@ struct SetEventCmd : Command {
 	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct ResetEventCmd : Command {
@@ -635,7 +637,7 @@ struct ResetEventCmd : Command {
 	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>&) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct ExecuteCommandsCmd : ParentCommand {
@@ -686,7 +688,7 @@ struct BindPipelineCmd : Command {
 	std::string nameDesc() const override { return "BindPipeline"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct PushConstantsCmd : Command {
@@ -789,7 +791,7 @@ struct BeginQueryCmd : Command {
 	std::string toString() const override { return "BeginQuery"; }
 	std::string nameDesc() const override { return "BeginQuery"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct EndQueryCmd : Command {
@@ -800,7 +802,7 @@ struct EndQueryCmd : Command {
 	std::string toString() const override { return "EndQuery"; }
 	std::string nameDesc() const override { return "EndQuery"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct ResetQueryPoolCmd : Command {
@@ -812,7 +814,7 @@ struct ResetQueryPoolCmd : Command {
 	std::string toString() const override { return "ResetQueryPool"; }
 	std::string nameDesc() const override { return "ResetQueryPool"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct WriteTimestampCmd : Command {
@@ -824,7 +826,7 @@ struct WriteTimestampCmd : Command {
 	std::string toString() const override { return "WriteTimestamp"; }
 	std::string nameDesc() const override { return "WriteTimestamp"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct CopyQueryPoolResultsCmd : Command {
@@ -840,7 +842,7 @@ struct CopyQueryPoolResultsCmd : Command {
 	std::string toString() const override { return "CopyQueryPoolResults"; }
 	std::string nameDesc() const override { return "CopyQueryPoolResults"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void unset(const std::unordered_set<DeviceHandle*>& destroyed) override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct PushDescriptorSetCmd : Command {

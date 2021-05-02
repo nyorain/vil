@@ -32,6 +32,8 @@ using i16 = std::int16_t;
 using i32 = std::int32_t;
 using i64 = std::int64_t;
 
+using std::size_t;
+
 // settings (should probably add a config.hpp or something)
 constexpr auto enableTimelineSemaphoreUsage = false;
 constexpr auto enableTransformFeedback = true;

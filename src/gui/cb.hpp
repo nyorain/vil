@@ -1,12 +1,12 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <commandDesc.hpp>
+#include <command/desc.hpp>
 #include <gui/render.hpp>
 #include <gui/vertexViewer.hpp>
 #include <gui/command.hpp>
 #include <util/flags.hpp>
-#include <commandDesc.hpp>
+#include <command/desc.hpp>
 
 namespace vil {
 

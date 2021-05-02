@@ -1,4 +1,4 @@
-#include <commands.hpp>
+#include <command/commands.hpp>
 #include <handles.hpp>
 #include <shader.hpp>
 #include <cb.hpp>
@@ -41,16 +41,21 @@ auto rawHandles(const C& handles) {
 
 // checkUnset
 template<typename H>
-void checkUnset(H*& handlePtr, const std::unordered_set<DeviceHandle*>& destroyed) {
-	if(handlePtr&& destroyed.count(handlePtr)) {
-		handlePtr = nullptr;
+void checkReplace(H*& handlePtr, const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	if(!handlePtr) {
+		return;
+	}
+
+	auto it = map.find(handlePtr);
+	if(it != map.end()) {
+		handlePtr = static_cast<H*>(it->second);
 	}
 }
 
 template<typename H>
-void checkUnset(span<H*> handlePtr, const std::unordered_set<DeviceHandle*>& destroyed) {
+void checkReplace(span<H*> handlePtr, const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	for(auto& ptr : handlePtr) {
-		checkUnset(ptr, destroyed);
+		checkReplace(ptr, map);
 	}
 }
 
@@ -360,9 +365,9 @@ std::string formatQueueFam(u32 fam) {
 	return std::to_string(fam);
 }
 
-void BarrierCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(buffers, destroyed);
-	checkUnset(images, destroyed);
+void BarrierCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(buffers, map);
+	checkReplace(images, map);
 }
 
 void BarrierCmdBase::displayInspector(Gui& gui) const {
@@ -577,9 +582,9 @@ std::vector<std::string> WaitEventsCmd::argumentsDesc() const {
 		vk::flagNames(VkPipelineStageFlagBits(dstStageMask)));
 }
 
-void WaitEventsCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	BarrierCmdBase::unset(destroyed);
-	checkUnset(events, destroyed);
+void WaitEventsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	BarrierCmdBase::replace(map);
+	checkReplace(events, map);
 }
 
 void WaitEventsCmd::displayInspector(Gui& gui) const {
@@ -695,10 +700,10 @@ std::vector<std::string> BeginRenderPassCmd::argumentsDesc() const {
 	return createArgumentsDesc(rp, subpassBeginInfo.contents);
 }
 
-void BeginRenderPassCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(rp, destroyed);
-	checkUnset(fb, destroyed);
-	ParentCommand::unset(destroyed);
+void BeginRenderPassCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(rp, map);
+	checkReplace(fb, map);
+	ParentCommand::replace(map);
 }
 
 void BeginRenderPassCmd::displayInspector(Gui& gui) const {
@@ -1027,19 +1032,19 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	}
 }
 
-void DrawCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(state.pipe, destroyed);
-	checkUnset(state.indices.buffer, destroyed);
+void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(state.pipe, map);
+	checkReplace(state.indices.buffer, map);
 
-	checkUnset(state.rpi.fb, destroyed);
-	checkUnset(state.rpi.rp, destroyed);
+	checkReplace(state.rpi.fb, map);
+	checkReplace(state.rpi.rp, map);
 
 	for(auto& verts : state.vertices) {
-		checkUnset(verts.buffer, destroyed);
+		checkReplace(verts.buffer, map);
 	}
 
 	for(auto& ds : state.descriptorSets) {
-		checkUnset(ds.ds, destroyed);
+		checkReplace(ds.ds, map);
 		// ds.layout is kept alive
 	}
 }
@@ -1167,9 +1172,9 @@ void DrawIndirectCmd::displayInspector(Gui& gui) const {
 	DrawCmdBase::displayGrahpicsState(gui, indexed);
 }
 
-void DrawIndirectCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(buffer, destroyed);
-	DrawCmdBase::unset(destroyed);
+void DrawIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(buffer, map);
+	DrawCmdBase::replace(map);
 }
 
 std::string DrawIndirectCmd::toString() const {
@@ -1302,10 +1307,10 @@ void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
 	DrawCmdBase::displayGrahpicsState(gui, indexed);
 }
 
-void DrawIndirectCountCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(buffer, destroyed);
-	checkUnset(countBuffer, destroyed);
-	DrawCmdBase::unset(destroyed);
+void DrawIndirectCountCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(buffer, map);
+	checkReplace(countBuffer, map);
+	DrawCmdBase::replace(map);
 }
 
 float DrawIndirectCountCmd::match(const Command& base) const {
@@ -1375,9 +1380,9 @@ void BindVertexBuffersCmd::displayInspector(Gui& gui) const {
 	}
 }
 
-void BindVertexBuffersCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
+void BindVertexBuffersCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	for(auto& buf : buffers) {
-		checkUnset(buf.buffer, destroyed);
+		checkReplace(buf.buffer, map);
 	}
 }
 
@@ -1386,8 +1391,8 @@ void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBindIndexBuffer(cb, buffer->handle, offset, indexType);
 }
 
-void BindIndexBufferCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(buffer, destroyed);
+void BindIndexBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(buffer, map);
 }
 
 // BindDescriptorSetCmd
@@ -1424,15 +1429,15 @@ void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
 		ImGui::Bullet();
 
 		if(!ds) {
-			imGuiText("null or destroyed");
+			imGuiText("null or map");
 		} else {
 			refButton(gui, *ds);
 		}
 	}
 }
 
-void BindDescriptorSetCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(sets, destroyed);
+void BindDescriptorSetCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(sets, map);
 }
 
 // DispatchCmdBase
@@ -1457,10 +1462,10 @@ void DispatchCmdBase::displayComputeState(Gui& gui) const {
 	}
 }
 
-void DispatchCmdBase::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(state.pipe, destroyed);
+void DispatchCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(state.pipe, map);
 	for(auto& ds : state.descriptorSets) {
-		checkUnset(ds.ds, destroyed);
+		checkReplace(ds.ds, map);
 		// ds.layout kept alive
 	}
 }
@@ -1553,9 +1558,9 @@ std::vector<std::string> DispatchIndirectCmd::argumentsDesc() const {
 	return createArgumentsDesc(buffer, offset, state.pipe, state.descriptorSets);
 }
 
-void DispatchIndirectCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(buffer, destroyed);
-	DispatchCmdBase::unset(destroyed);
+void DispatchIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(buffer, map);
+	DispatchCmdBase::replace(map);
 }
 
 float DispatchIndirectCmd::match(const Command& base) const {
@@ -1656,9 +1661,9 @@ std::string CopyImageCmd::toString() const {
 	}
 }
 
-void CopyImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(src, destroyed);
-	checkUnset(dst, destroyed);
+void CopyImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
+	checkReplace(dst, map);
 }
 
 void CopyImageCmd::displayInspector(Gui& gui) const {
@@ -1741,9 +1746,9 @@ std::string CopyBufferToImageCmd::toString() const {
 	}
 }
 
-void CopyBufferToImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(src, destroyed);
-	checkUnset(dst, destroyed);
+void CopyBufferToImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
+	checkReplace(dst, map);
 }
 
 std::vector<std::string> CopyBufferToImageCmd::argumentsDesc() const {
@@ -1798,9 +1803,9 @@ std::string CopyImageToBufferCmd::toString() const {
 	}
 }
 
-void CopyImageToBufferCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(src, destroyed);
-	checkUnset(dst, destroyed);
+void CopyImageToBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
+	checkReplace(dst, map);
 }
 
 std::vector<std::string> CopyImageToBufferCmd::argumentsDesc() const {
@@ -1872,9 +1877,9 @@ std::string BlitImageCmd::toString() const {
 	}
 }
 
-void BlitImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(src, destroyed);
-	checkUnset(dst, destroyed);
+void BlitImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
+	checkReplace(dst, map);
 }
 
 std::vector<std::string> BlitImageCmd::argumentsDesc() const {
@@ -1943,9 +1948,9 @@ std::string ResolveImageCmd::toString() const {
 	}
 }
 
-void ResolveImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(src, destroyed);
-	checkUnset(dst, destroyed);
+void ResolveImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
+	checkReplace(dst, map);
 }
 
 std::vector<std::string> ResolveImageCmd::argumentsDesc() const {
@@ -1999,9 +2004,9 @@ std::string CopyBufferCmd::toString() const {
 	}
 }
 
-void CopyBufferCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(src, destroyed);
-	checkUnset(dst, destroyed);
+void CopyBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
+	checkReplace(dst, map);
 }
 
 std::vector<std::string> CopyBufferCmd::argumentsDesc() const {
@@ -2013,8 +2018,8 @@ void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdUpdateBuffer(cb, dst->handle, offset, data.size(), data.data());
 }
 
-void UpdateBufferCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(dst, destroyed);
+void UpdateBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(dst, map);
 }
 
 std::string UpdateBufferCmd::toString() const {
@@ -2043,8 +2048,8 @@ void FillBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdFillBuffer(cb, dst->handle, offset, size, data);
 }
 
-void FillBufferCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(dst, destroyed);
+void FillBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(dst, map);
 }
 
 std::string FillBufferCmd::toString() const {
@@ -2083,8 +2088,8 @@ std::string ClearColorImageCmd::toString() const {
 	}
 }
 
-void ClearColorImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(dst, destroyed);
+void ClearColorImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(dst, map);
 }
 
 void ClearColorImageCmd::displayInspector(Gui& gui) const {
@@ -2112,8 +2117,8 @@ std::string ClearDepthStencilImageCmd::toString() const {
 	}
 }
 
-void ClearDepthStencilImageCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(dst, destroyed);
+void ClearDepthStencilImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(dst, map);
 }
 
 void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
@@ -2146,9 +2151,9 @@ std::vector<std::string> ClearAttachmentCmd::argumentsDesc() const {
 	return ret;
 }
 
-void ClearAttachmentCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(rpi.fb, destroyed);
-	checkUnset(rpi.rp, destroyed);
+void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(rpi.fb, map);
+	checkReplace(rpi.rp, map);
 }
 
 // SetEventCmd
@@ -2165,8 +2170,8 @@ std::string SetEventCmd::toString() const {
 	return "SetEvent";
 }
 
-void SetEventCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(event, destroyed);
+void SetEventCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(event, map);
 }
 
 void SetEventCmd::displayInspector(Gui& gui) const {
@@ -2192,8 +2197,8 @@ std::string ResetEventCmd::toString() const {
 	return "ResetEvent";
 }
 
-void ResetEventCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(event, destroyed);
+void ResetEventCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(event, map);
 }
 
 void ResetEventCmd::displayInspector(Gui& gui) const {
@@ -2307,8 +2312,8 @@ std::string BindPipelineCmd::toString() const {
 	}
 }
 
-void BindPipelineCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(pipe, destroyed);
+void BindPipelineCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(pipe, map);
 }
 
 void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -2357,8 +2362,8 @@ void BeginQueryCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBeginQuery(cb, pool->handle, query, flags);
 }
 
-void BeginQueryCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(pool, destroyed);
+void BeginQueryCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(pool, map);
 }
 
 // EndQuery
@@ -2366,8 +2371,8 @@ void EndQueryCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdEndQuery(cb, pool->handle, query);
 }
 
-void EndQueryCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(pool, destroyed);
+void EndQueryCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(pool, map);
 }
 
 // ResetQuery
@@ -2375,8 +2380,8 @@ void ResetQueryPoolCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdResetQueryPool(cb, pool->handle, first, count);
 }
 
-void ResetQueryPoolCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(pool, destroyed);
+void ResetQueryPoolCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(pool, map);
 }
 
 // WriteTimestamp
@@ -2384,8 +2389,8 @@ void WriteTimestampCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdWriteTimestamp(cb, stage, pool->handle, query);
 }
 
-void WriteTimestampCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(pool, destroyed);
+void WriteTimestampCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(pool, map);
 }
 
 // CopyQueryPool
@@ -2394,9 +2399,9 @@ void CopyQueryPoolResultsCmd::record(const Device& dev, VkCommandBuffer cb) cons
 		dstBuffer->handle, dstOffset, stride, flags);
 }
 
-void CopyQueryPoolResultsCmd::unset(const std::unordered_set<DeviceHandle*>& destroyed) {
-	checkUnset(pool, destroyed);
-	checkUnset(dstBuffer, destroyed);
+void CopyQueryPoolResultsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(pool, map);
+	checkReplace(dstBuffer, map);
 }
 
 // PushDescriptorSet

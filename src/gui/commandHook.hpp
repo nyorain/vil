@@ -1,8 +1,8 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <commandDesc.hpp>
-#include <record.hpp>
+#include <command/desc.hpp>
+#include <command/record.hpp>
 #include <util/intrusive.hpp>
 #include <gui/render.hpp>
 #include <vk/vulkan.h>

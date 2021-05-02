@@ -130,38 +130,6 @@ const R* findChainInfo(const CI& ci) {
 std::unique_ptr<std::byte[]> copyChain(const void*& pNext);
 void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
 
-/*
-// NOTE: we might be able getting away with always just calling the oldest
-// function alias (e.g. vkCmdDrawIndirectCountAMD) statically instead
-// of this check. But not sure, spec isn't 100% clear, kinda contradicts
-// itself (GetDeviceProcAddr shouldn't return ptrs for non-enabled functions
-// while aliases should have same effect as available functions).
-// See node 1651
-template<typename F>
-auto doSelectCmd(F f) {
-	return f;
-}
-
-template<typename F, typename... Rest>
-auto doSelectCmd(F f, Rest...  rest) {
-	return f ? f : doSelectCmd(rest...);
-}
-
-template<typename F, typename... Rest>
-auto selectCmdOpt(F f, Rest...  rest) {
-	static_assert((std::is_same_v<F, Rest> && ...));
-	return doSelectCmd(f, rest...);
-}
-
-template<typename F, typename... Rest>
-auto selectCmd(F f, Rest...  rest) {
-	static_assert((std::is_same_v<F, Rest> && ...));
-	auto ret = doSelectCmd(f, rest...);
-	dlg_assert(ret);
-	return ret;
-}
-*/
-
 template<typename T>
 auto aliasCmd(T&& list) {
 	std::remove_reference_t<decltype(**list.begin())> found = nullptr;
@@ -197,7 +165,6 @@ constexpr A align(A offset, B alignment) {
 }
 
 // Mainly taken from tkn/formats
-// TODO: most can be removed
 VkImageType minImageType(VkExtent3D, unsigned minDim = 1u);
 VkImageViewType minImageViewType(VkExtent3D, unsigned layers,
 	bool cubemap, unsigned minDim = 1u);

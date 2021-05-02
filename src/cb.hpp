@@ -2,7 +2,7 @@
 
 #include <fwd.hpp>
 #include <device.hpp>
-#include <record.hpp>
+#include <command/record.hpp>
 
 namespace vil {
 
@@ -10,16 +10,13 @@ struct CommandPool : DeviceHandle {
 	VkCommandPool handle {};
 	u32 queueFamily {};
 
-	static constexpr auto minMemBlockSize = 64 * 1024 - sizeof(CommandMemBlock);
-	std::atomic<CommandMemBlock*> memBlocks {}; // forward linked list
-
 	std::vector<CommandBuffer*> cbs;
 	std::unordered_set<MemBlockDeleter*> records;
 
 	~CommandPool();
 };
 
-// Synchronization for this one is hard:
+// Synchronization:
 // - We currently don't synchronize every single record call. A command
 //   buffer can't really be used anywhere while it's in recording
 //   state and we don't show unfinished recordings via ui.
@@ -28,7 +25,7 @@ struct CommandPool : DeviceHandle {
 //   buffer to invalidate state) is not allowed since this is race situation
 //   and the command buffer might be in invalid state before/during the
 //   record command, which is invalid.
-// - state changes are synchronized via the device mutex.
+// - State changes are synchronized via the device mutex.
 struct CommandBuffer : DeviceHandle {
 public:
 	enum class State {
@@ -66,6 +63,7 @@ public:
 	CommandRecord* lastRecordLocked() const { return lastRecord_.get(); }
 
 	// Moves the command buffer to invalid state.
+	// Will disconnect this CommandBuffer from the CommandRecord.
 	// Expects device mutex to be locked
 	void invalidateLocked();
 
@@ -91,10 +89,6 @@ private:
 	u32 recordCount_ {};
 
 	// Only needed while recording.
-	// TODO: we need some temporary memory for ComputeState and GraphicState
-	// that is only freed when the record is destroyed. We could use our
-	// own, record-independent memory blocks that can be freed on command
-	// buffer reset.
 	ComputeState computeState_ {};
 	GraphicsState graphicsState_ {};
 

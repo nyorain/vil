@@ -8,45 +8,14 @@
 
 namespace vil {
 
-	/*
-// Descrption of a command relative to the current recorded state.
-// Can be useful to implement heuristics identifying structurally
-// similar commands in related command buffer recordings (e.g. when
-// a command buffer is re-recorded or when comparing per-swapchain-image
-// command buffers).
-struct CommandDesc {
-	// Name of the command itself. Should not contain any arguments
-	// (except maybe in special cases where they modify the inherent
-	// meaning of the command so far that two commands with different
-	// arguments can't be considered similar).
-	std::string command;
-	// The most relevant arguments of this command, might be empty.
-	std::vector<std::string> arguments;
-
-	// How many commands with the same command came before this one
-	// and have the same parent(s)
-	u32 id {};
-	// The total number of command that have same command and parent(s)
-	u32 count {};
-
-	// Expects the given command buffer to be in executable/pending state.
-	static std::vector<CommandDesc> get(const Command& root, span<const Command*> hierarchy);
-
-	static std::vector<Command*> findHierarchy(Command* root, span<const CommandDesc> desc);
-	static Command* find(Command* root, span<const CommandDesc> desc);
+struct DescriptorSetState {
+	vil::DescriptorSet* ds; // for quick-compare, if still alive & valid
+	std::vector<std::vector<vil::DescriptorSet::Binding>> state; // valid otherwise
+	IntrusivePtr<DescriptorSetLayout> dsLayout;
+	// TODO: consider dynamic offsets?
 };
-*/
 
-struct CommandDescriptorState {
-	struct DescriptorSet {
-		vil::DescriptorSet* ds; // for quick-compare, if still alive & valid
-		std::vector<std::vector<vil::DescriptorSet::Binding>> state; // valid otherwise
-		IntrusivePtr<DescriptorSetLayout> dsLayout;
-		// TODO: consider dynamic offsets?
-	};
-
-	std::vector<DescriptorSet> descriptors;
-};
+using CommandDescriptorState = std::vector<DescriptorSetState>;
 
 struct FindResult {
 	std::vector<const Command*> hierachy;

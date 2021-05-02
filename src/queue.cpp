@@ -2,7 +2,7 @@
 #include <data.hpp>
 #include <cb.hpp>
 #include <ds.hpp>
-#include <commands.hpp>
+#include <command/commands.hpp>
 #include <swapchain.hpp>
 #include <sync.hpp>
 #include <buffer.hpp>
@@ -18,6 +18,7 @@ namespace vil {
 
 std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	auto& dev = *subm.queue->dev;
+	dlg_assert(dev.mutex.owned());
 
 	if(subm.appFence) {
 		if(dev.dispatch.GetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
@@ -104,6 +105,8 @@ void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
 }
 
 void checkPendingSubmissionsLocked(Device& dev) {
+	dlg_assert(dev.mutex.owned());
+
 	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
 		auto& subm = *it;
 		auto nit = checkLocked(*subm);
