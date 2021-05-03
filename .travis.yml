@@ -39,6 +39,7 @@ matrix:
       language: python
 install:
   - pip3 install meson ninja
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get update
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get -y install clang-10 valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
     libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
     libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
