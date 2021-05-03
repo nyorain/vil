@@ -21,8 +21,7 @@
 //   links in addition to 'next' is already enough? probably not,
 //   the commands itself also should not do the iteration, should not
 //   know about other commands.
-// - when the new match implementation is working, remove this whole
-//   nameDesc/argumentsDesc terribleness
+// - when the new match implementation is working, remove nameDesc
 
 namespace vil {
 
@@ -76,82 +75,6 @@ NameResult name(DeviceHandle* handle, NullName nullName) {
 	}
 
 	return {NameType::named, name};
-}
-
-std::vector<std::string> createArgumentsDesc() {
-	return {};
-}
-
-void addToArgumentsDesc(std::vector<std::string>& ret, const char* str) {
-	ret.push_back(str);
-}
-
-void addToArgumentsDesc(std::vector<std::string>& ret, const std::string& str) {
-	ret.push_back(str);
-}
-
-void addToArgumentsDesc(std::vector<std::string>& ret, const BoundVertexBuffer& buf) {
-	if(!buf.buffer) {
-		return;
-	}
-
-	auto str = dlg::format("v {}[{}]", name(buf.buffer).name, buf.offset);
-	ret.push_back(str);
-}
-
-void addToArgumentsDesc(std::vector<std::string>& ret, const BoundIndexBuffer& buf) {
-	if(!buf.buffer) {
-		return;
-	}
-
-	auto str = dlg::format("{}[{}]", name(buf.buffer).name, buf.offset);
-	ret.push_back(str);
-	ret.push_back(vk::name(buf.type));
-}
-
-template<typename H> using FuenNameExpr = decltype(std::declval<H>().objectType);
-template<typename H> using FuenNameExprPtr = decltype(std::declval<H>()->objectType);
-template<typename H> using VkNameExpr = decltype(vk::name(std::declval<H>()));
-template<typename H> using ToStringExpr = decltype(std::to_string(std::declval<H>()));
-
-template<typename T, typename = std::enable_if_t<
-	validExpression<FuenNameExpr, T> ||
-	validExpression<FuenNameExprPtr, T> ||
-	validExpression<ToStringExpr, T> ||
-	validExpression<VkNameExpr, T>>>
-void addToArgumentsDesc(std::vector<std::string>& ret, const T& val) {
-	if constexpr(validExpression<FuenNameExpr, T>) {
-		ret.push_back(vil::name(val));
-	} else if constexpr(validExpression<FuenNameExprPtr, T>) {
-		ret.push_back(val ? vil::name(*val) : "null");
-	} else if constexpr(validExpression<VkNameExpr, T>) {
-		ret.push_back(vk::name(val));
-	} else if constexpr(validExpression<ToStringExpr, T>) {
-		ret.push_back(std::to_string(val));
-	} else {
-		static_assert(templatize<T>(false), "Invalid type");
-	}
-}
-
-template<typename T>
-void addToArgumentsDesc(std::vector<std::string>& ret, span<T> values) {
-	for(auto& val : values) {
-		addToArgumentsDesc(ret, val);
-	}
-}
-
-template<typename T>
-void addToArgumentsDesc(std::vector<std::string>& ret, const std::vector<T>& values) {
-	for(auto& val : values) {
-		addToArgumentsDesc(ret, val);
-	}
-}
-
-template<typename First, typename... Rest>
-std::vector<std::string> createArgumentsDesc(const First& first, const Rest&... rest) {
-	auto ret = createArgumentsDesc(rest...);
-	addToArgumentsDesc(ret, first);
-	return ret;
 }
 
 // copy util
@@ -568,12 +491,6 @@ void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 }
 
-std::vector<std::string> WaitEventsCmd::argumentsDesc() const {
-	return createArgumentsDesc(events,
-		vk::flagNames(VkPipelineStageFlagBits(srcStageMask)),
-		vk::flagNames(VkPipelineStageFlagBits(dstStageMask)));
-}
-
 void WaitEventsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	BarrierCmdBase::replace(map);
 	checkReplace(events, map);
@@ -607,12 +524,6 @@ void BarrierCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		u32(this->bufBarriers.size()), this->bufBarriers.data(),
 		u32(this->imgBarriers.size()), this->imgBarriers.data());
 
-}
-
-std::vector<std::string> BarrierCmd::argumentsDesc() const {
-	return createArgumentsDesc(
-		vk::flagNames(VkPipelineStageFlagBits(srcStageMask)),
-		vk::flagNames(VkPipelineStageFlagBits(dstStageMask)));
 }
 
 void BarrierCmd::displayInspector(Gui& gui) const {
@@ -686,10 +597,6 @@ std::vector<const Command*> BeginRenderPassCmd::display(const Command* selected,
 	}
 
 	return ret;
-}
-
-std::vector<std::string> BeginRenderPassCmd::argumentsDesc() const {
-	return createArgumentsDesc(rp, subpassBeginInfo.contents);
 }
 
 void BeginRenderPassCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
@@ -1085,11 +992,6 @@ void DrawCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdDraw(cb, vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
-std::vector<std::string> DrawCmd::argumentsDesc() const {
-	return createArgumentsDesc(state.pipe, state.vertices,
-		vertexCount, instanceCount, firstInstance, firstVertex);
-}
-
 std::string DrawCmd::toString() const {
 	return dlg::format("Draw({}, {}, {}, {})",
 		vertexCount, instanceCount, firstVertex, firstInstance);
@@ -1130,16 +1032,6 @@ void DrawIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	} else {
 		dev.dispatch.CmdDrawIndirect(cb, buffer->handle, offset, drawCount, stride);
 	}
-}
-
-std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
-	auto ret = createArgumentsDesc(buffer, offset, drawCount, stride,
-		state.pipe, state.vertices);
-	if(indexed) {
-		addToArgumentsDesc(ret, state.indices);
-	}
-
-	return ret;
 }
 
 void DrawIndirectCmd::displayInspector(Gui& gui) const {
@@ -1201,11 +1093,6 @@ void DrawIndexedCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdDrawIndexed(cb, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
-std::vector<std::string> DrawIndexedCmd::argumentsDesc() const {
-	return createArgumentsDesc(state.pipe, state.indices,
-		state.vertices, indexCount, instanceCount, firstInstance, firstIndex);
-}
-
 std::string DrawIndexedCmd::toString() const {
 	return dlg::format("DrawIndexed({}, {}, {}, {}, {})",
 		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
@@ -1258,16 +1145,6 @@ std::string DrawIndirectCountCmd::toString() const {
 	// NOTE: we intentionally don't display any extra information here
 	// since that's hard to do inuitively
 	return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
-}
-
-std::vector<std::string> DrawIndirectCountCmd::argumentsDesc() const {
-	auto ret = createArgumentsDesc(buffer, offset, countBuffer, countBufferOffset,
-		maxDrawCount, stride, state.pipe, state.vertices);
-	if(indexed) {
-		addToArgumentsDesc(ret, state.indices);
-	}
-
-	return ret;
 }
 
 void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
@@ -1468,10 +1345,6 @@ void DispatchCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdDispatch(cb, groupsX, groupsY, groupsZ);
 }
 
-std::vector<std::string> DispatchCmd::argumentsDesc() const {
-	return createArgumentsDesc(state.pipe, groupsX, groupsY, groupsZ);
-}
-
 std::string DispatchCmd::toString() const {
 	return dlg::format("Dispatch({}, {}, {})", groupsX, groupsY, groupsZ);
 }
@@ -1522,10 +1395,6 @@ std::string DispatchIndirectCmd::toString() const {
 	return "DispatchIndirect";
 }
 
-std::vector<std::string> DispatchIndirectCmd::argumentsDesc() const {
-	return createArgumentsDesc(buffer, offset, state.pipe);
-}
-
 void DispatchIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(buffer, map);
 	DispatchCmdBase::replace(map);
@@ -1552,11 +1421,6 @@ float DispatchIndirectCmd::match(const Command& base) const {
 void DispatchBaseCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	auto f = dev.dispatch.CmdDispatchBase;
 	f(cb, baseGroupX, baseGroupY, baseGroupZ, groupsX, groupsY, groupsZ);
-}
-
-std::vector<std::string> DispatchBaseCmd::argumentsDesc() const {
-	return createArgumentsDesc(baseGroupX, baseGroupY, baseGroupZ,
-		groupsX, groupsY, groupsZ);
 }
 
 std::string DispatchBaseCmd::toString() const {
@@ -1662,10 +1526,6 @@ void CopyImageCmd::displayInspector(Gui& gui) const {
 	}
 }
 
-std::vector<std::string> CopyImageCmd::argumentsDesc() const {
-	return createArgumentsDesc(src, dst);
-}
-
 // CopyBufferToImageCmd
 void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdCopyBufferToImage2KHR) {
@@ -1719,10 +1579,6 @@ void CopyBufferToImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	checkReplace(dst, map);
 }
 
-std::vector<std::string> CopyBufferToImageCmd::argumentsDesc() const {
-	return createArgumentsDesc(src, dst);
-}
-
 // CopyImageToBufferCmd
 void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdCopyImageToBuffer2KHR) {
@@ -1774,10 +1630,6 @@ std::string CopyImageToBufferCmd::toString() const {
 void CopyImageToBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(src, map);
 	checkReplace(dst, map);
-}
-
-std::vector<std::string> CopyImageToBufferCmd::argumentsDesc() const {
-	return createArgumentsDesc(src, dst);
 }
 
 // BlitImageCmd
@@ -1850,10 +1702,6 @@ void BlitImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle
 	checkReplace(dst, map);
 }
 
-std::vector<std::string> BlitImageCmd::argumentsDesc() const {
-	return createArgumentsDesc(src, dst);
-}
-
 // ResolveImageCmd
 void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdResolveImage2KHR) {
@@ -1921,10 +1769,6 @@ void ResolveImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHan
 	checkReplace(dst, map);
 }
 
-std::vector<std::string> ResolveImageCmd::argumentsDesc() const {
-	return createArgumentsDesc(src, dst);
-}
-
 // CopyBufferCmd
 void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdCopyBuffer2KHR) {
@@ -1977,10 +1821,6 @@ void CopyBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandl
 	checkReplace(dst, map);
 }
 
-std::vector<std::string> CopyBufferCmd::argumentsDesc() const {
-	return createArgumentsDesc(src, dst);
-}
-
 // UpdateBufferCmd
 void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdUpdateBuffer(cb, dst->handle, offset, data.size(), data.data());
@@ -2005,10 +1845,6 @@ void UpdateBufferCmd::displayInspector(Gui& gui) const {
 	imGuiText("Offset {}", offset);
 
 	// TODO: display data?
-}
-
-std::vector<std::string> UpdateBufferCmd::argumentsDesc() const {
-	return createArgumentsDesc(dst, offset, data.size());
 }
 
 // FillBufferCmd
@@ -2037,10 +1873,6 @@ void FillBufferCmd::displayInspector(Gui& gui) const {
 	imGuiText("Filled with {}{}", std::hex, data);
 }
 
-std::vector<std::string> FillBufferCmd::argumentsDesc() const {
-	return createArgumentsDesc(dst, offset, size, data);
-}
-
 // ClearColorImageCmd
 void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearColorImage(cb, dst->handle, dstLayout, &color,
@@ -2063,11 +1895,6 @@ void ClearColorImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, Device
 void ClearColorImageCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, dst);
 	// TODO: color, layout, ranges
-}
-
-std::vector<std::string> ClearColorImageCmd::argumentsDesc() const {
-	// including color does not seem like a good idea
-	return createArgumentsDesc(dst);
 }
 
 // ClearDepthStencilImageCmd
@@ -2094,11 +1921,6 @@ void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
 	// TODO: value, layout, ranges
 }
 
-std::vector<std::string> ClearDepthStencilImageCmd::argumentsDesc() const {
-	// including color does not seem like a good idea
-	return createArgumentsDesc(dst);
-}
-
 // Clear AttachhmentCmd
 void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearAttachments(cb, u32(attachments.size()),
@@ -2108,15 +1930,6 @@ void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb) const {
 void ClearAttachmentCmd::displayInspector(Gui& gui) const {
 	// TODO: we probably need to refer to used render pass/fb here
 	(void) gui;
-}
-
-std::vector<std::string> ClearAttachmentCmd::argumentsDesc() const {
-	std::vector<std::string> ret;
-	for(auto& att : attachments) {
-		addToArgumentsDesc(ret, att.colorAttachment);
-		addToArgumentsDesc(ret, u32(att.aspectMask));
-	}
-	return ret;
 }
 
 void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
@@ -2147,10 +1960,6 @@ void SetEventCmd::displayInspector(Gui& gui) const {
 	imGuiText("Stages: {}", vk::flagNames(VkPipelineStageFlagBits(stageMask)));
 }
 
-std::vector<std::string> SetEventCmd::argumentsDesc() const {
-	return createArgumentsDesc(event, u32(stageMask));
-}
-
 // ResetEventCmd
 void ResetEventCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdResetEvent(cb, event->handle, stageMask);
@@ -2172,10 +1981,6 @@ void ResetEventCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandl
 void ResetEventCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, event);
 	imGuiText("Stages: {}", vk::flagNames(VkPipelineStageFlagBits(stageMask)));
-}
-
-std::vector<std::string> ResetEventCmd::argumentsDesc() const {
-	return createArgumentsDesc(event, u32(stageMask));
 }
 
 // ExecuteCommandsCmd

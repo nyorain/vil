@@ -61,10 +61,7 @@ struct Command {
 	// Used by the default 'display' implementation.
 	virtual std::string toString() const { return nameDesc(); }
 
-	// TODO: can be removed, I guess
-	// Should return the most important arguments as strings.
-	// Used to build a CommandDescription.
-	virtual std::vector<std::string> argumentsDesc() const { return {}; }
+	// TODO: can and should be removed, eventually
 	virtual std::string nameDesc() const { return "<unknown>"; }
 
 	// Whether this command is empty. Empty commands are usually hidden.
@@ -183,7 +180,6 @@ struct WaitEventsCmd : BarrierCmdBase {
 	Type type() const override { return Type::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command& rhs) const override;
 };
@@ -195,7 +191,6 @@ struct BarrierCmd : BarrierCmdBase {
 	Type type() const override { return Type::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	float match(const Command& rhs) const override;
 };
 
@@ -218,7 +213,6 @@ struct BeginRenderPassCmd : SectionCommand {
 	std::string nameDesc() const override { return "BeginRenderPass"; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command& rhs) const override;
 };
@@ -280,7 +274,6 @@ struct DrawCmd : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "Draw"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	float match(const Command&) const override;
 };
 
@@ -299,7 +292,6 @@ struct DrawIndirectCmd : DrawCmdBase {
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command&) const override;
 };
@@ -317,7 +309,6 @@ struct DrawIndexedCmd : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "DrawIndexed"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	float match(const Command&) const override;
 };
 
@@ -338,7 +329,6 @@ struct DrawIndirectCountCmd : DrawCmdBase {
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command&) const override;
 };
@@ -406,7 +396,6 @@ struct DispatchCmd : DispatchCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "Dispatch"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	float match(const Command&) const override;
 };
 
@@ -420,7 +409,6 @@ struct DispatchIndirectCmd : DispatchCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "DispatchIndirect"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	float match(const Command&) const override;
 };
@@ -439,7 +427,6 @@ struct DispatchBaseCmd : DispatchCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "DispatchBase"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	std::vector<std::string> argumentsDesc() const override;
 	float match(const Command&) const override;
 };
 
@@ -456,7 +443,6 @@ struct CopyImageCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyImage"; }
-	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
@@ -472,7 +458,6 @@ struct CopyBufferToImageCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyBufferToImage"; }
-	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
@@ -488,7 +473,6 @@ struct CopyImageToBufferCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyImageToBuffer"; }
-	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
@@ -506,7 +490,6 @@ struct BlitImageCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "BlitImage"; }
-	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
@@ -522,7 +505,6 @@ struct ResolveImageCmd : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "ResolveImage"; }
-	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -537,7 +519,6 @@ struct CopyBufferCmd : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "CopyBuffer"; }
-	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -551,7 +532,6 @@ struct UpdateBufferCmd : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "UpdateBuffer"; }
-	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -566,7 +546,6 @@ struct FillBufferCmd : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "FillBuffer"; }
-	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -582,7 +561,6 @@ struct ClearColorImageCmd : Command {
 	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
 	std::string nameDesc() const override { return "ClearColorImage"; }
-	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
@@ -597,7 +575,6 @@ struct ClearDepthStencilImageCmd : Command {
 	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
 	std::string nameDesc() const override { return "ClearDepthStencilImage"; }
-	std::vector<std::string> argumentsDesc() const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
@@ -608,7 +585,6 @@ struct ClearAttachmentCmd : Command {
 	RenderPassInstanceState rpi;
 
 	std::string nameDesc() const override { return "ClearAttachment"; }
-	std::vector<std::string> argumentsDesc() const override;
 	void displayInspector(Gui& gui) const override;
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
@@ -622,7 +598,6 @@ struct SetEventCmd : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "SetEvent"; }
-	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -635,7 +610,6 @@ struct ResetEventCmd : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "ResetEvent"; }
-	std::vector<std::string> argumentsDesc() const override;
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;

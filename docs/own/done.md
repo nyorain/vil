@@ -1,6 +1,31 @@
-For v0.1
-
-not sure if viable for first version but should be goal:
+- [x] clean and split up QueueSubmit implementation. It's way too long,
+      does way too much. And will probably further grow
+	- [x] also: always check in the beginning for finished submissions
+- [x] when there is more than one record of the same group in one RecordBatch we get
+      into troubles when viewing it in swapchain commands mode.
+	  The problem is that *all* group submissions update hook.state and we might end
+	  up viewing one of those states, not really the one we want.
+	  Which can lead to weird issues, e.g. the gui shows a depthStencil attachment
+	  but when we click it we see a color attachment. Not sure how to really fix this,
+	  probably use more information in swapchain mode (e.g. submission order) and
+	  improve matching in general (e.g. make sure that render pass attachments *must* match
+	  for command group/records matching)
+	  {~semi-done with the new command matching system, still missing
+	   better command groups and command group sequence matching, but
+	   there are new todos for that}
+- [x] proper rasterization introspection using transform feedback.
+      we already query in the device whether it's supported
+	- [x] requires SPIR-V hooking (only execution mode setting and adding xfb to outputs)
+	      have to do it to all pipelines though I guess.
+		  Not supported with multiview, respect that (via renderpass)
+	- [x] capture in on our side into buffers
+	- [x] not sure if we need the transform feedback queries or if we
+	      can always deduce that information statically
+		  {we have the information statically in all cases so far}
+- [~] might be better to determine command group at EndCommandBuffer
+      instead of first submission. We can't use the used queue though...
+	  {nope, it's not, the command group concept is mainly a hack in the
+	   first place}
 - [x] stress test using a real vulkan-based game. Test e.g. with doom eternal
 	- [x] vkQuake2
 	- [x] doom eternal

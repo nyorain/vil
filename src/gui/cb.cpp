@@ -277,6 +277,9 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	if(!hook.completed.empty() && (!hook.freeze || !commandViewer_.state())) {
 		// find the best match
+		// TODO: when in swapchain mode, we should match the context, i.e.
+		// that the new record appeared in roughly the same position on
+		// the queue as our old one. See command group LCS in todo.md
 		auto* best = &hook.completed[0];
 		if(hook.completed.size() > 1) {
 			dlg_info("multiple matches!");
