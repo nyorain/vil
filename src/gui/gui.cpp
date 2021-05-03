@@ -7,7 +7,7 @@
 #include <handle.hpp>
 #include <data.hpp>
 #include <handles.hpp>
-#include <commands.hpp>
+#include <command/commands.hpp>
 #include <util/util.hpp>
 #include <util/bytes.hpp>
 #include <util/vecOps.hpp>
@@ -1085,7 +1085,11 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	auto keepAliveRec1 = tabs_.cb.commandViewer_.record_;
 	auto keepAliveState = tabs_.cb.commandViewer_.state_;
 	auto keepAliveBatches = tabs_.cb.records_;
-	auto keepAliveHookRecords = dev().commandHook->completed; // UGH OUCHIE
+	// UGH OUCHIE: this is also terrible performance-wise, we need to
+	// approach this differently.
+	auto keepAliveHookRecords = dev().commandHook->completed;
+	auto keepAliveDsSnapshots0 = tabs_.cb.dsState_;
+	auto keepAliveDsSnapshots1 = tabs_.cb.commandViewer_.dsState_;
 
 	Draw* foundDraw {};
 

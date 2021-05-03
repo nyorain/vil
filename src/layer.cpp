@@ -5,7 +5,6 @@
 #include <platform.hpp>
 #include <queue.hpp>
 #include <overlay.hpp>
-#include <commands.hpp>
 #include <util/util.hpp>
 
 #ifdef VIL_WITH_WAYLAND
@@ -39,7 +38,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	if (origin->level >= dlg_level_error) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
-		#ifdef _MSC_VER 
+		#ifdef _MSC_VER
 			DebugBreak();
 		#else
 			std::raise(SIGABRT);
@@ -48,9 +47,9 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 }
 #endif // BREAK_ON_ERROR
 
-std::size_t DescriptorSetRef::Hash::operator()(const DescriptorSetRef& dsr) const noexcept {
+std::size_t DescriptorStateRef::Hash::operator()(const DescriptorStateRef& dsr) const noexcept {
 	auto h = std::size_t(0);
-	hash_combine(h, dsr.ds);
+	hash_combine(h, dsr.state);
 	hash_combine(h, dsr.binding);
 	hash_combine(h, dsr.elem);
 	return h;
@@ -510,7 +509,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	// special case: functions that don't need instance.
 	auto& hooked = it->second;
 	if(std::strcmp(funcName, "vkGetInstanceProcAddr") == 0 ||
-			// TODO: ??? why is this needed for dota??
+			// TODO: why is this needed for dota??
 			std::strcmp(funcName, "vkCreateDevice") == 0 ||
 			std::strcmp(funcName, "vkCreateInstance") == 0) {
 		return hooked.func;

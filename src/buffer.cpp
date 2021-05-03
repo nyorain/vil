@@ -24,9 +24,8 @@ Buffer::~Buffer() {
 	// Can't use for loop here, as descriptor will unregsiter themselves in turn
 	while(!this->descriptors.empty()) {
 		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(dsRef.ds->getBuffer(dsRef.binding, dsRef.elem) == this);
-		dsRef.ds->invalidateCbsLocked();
-		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
+		dlg_assert(getBuffer(*dsRef.state, dsRef.binding, dsRef.elem) == this);
+		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
 	}
 }
 
@@ -46,9 +45,8 @@ BufferView::~BufferView() {
 	// Can't use for loop here, as descriptor will unregsiter themselves in turn
 	while(!this->descriptors.empty()) {
 		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(dsRef.ds->getBufferView(dsRef.binding, dsRef.elem) == this);
-		dsRef.ds->invalidateCbsLocked();
-		unregisterLocked(*dsRef.ds, dsRef.binding, dsRef.elem);
+		dlg_assert(getBufferView(*dsRef.state, dsRef.binding, dsRef.elem) == this);
+		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
 	}
 }
 

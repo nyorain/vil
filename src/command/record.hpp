@@ -28,9 +28,18 @@ struct PushConstantData {
 };
 
 struct BoundDescriptorSet {
-	DescriptorSet* ds {};
-	PipelineLayout* layout {}; // TODO: not sure if needed
+	// At record time, this points to the DescriptorSet object.
+	// But since the descriptor set might get invalid later on, this
+	// should not be accessed directly, unless we know for certain
+	// that the descriptorSet must be valid, e.g. at submission time.
+	// See CommandDescriptorSnapshot that maps these pointers
+	// to the DescriptorState at submission time.
+	// Unlike other handles, we don't unset these pointer even when the ds
+	// is invalidated or destroyed since we need descriptor information about
+	// potentially invalidated records for matching.
+	void* ds {};
 	span<u32> dynamicOffsets;
+	PipelineLayout* layout {}; // TODO: not sure if needed
 };
 
 struct DescriptorState {
@@ -129,8 +138,8 @@ struct UsedHandle {
 	CommandAllocList<Command*> commands;
 };
 
-struct CommandDecriptorSnapshot {
-	CommandAllocHashMap<void*, IntrusivePtr<DescriptorSetState>> invalidated;
+struct CommandDescriptorSnapshot {
+	std::unordered_map<void*, DescriptorSetStatePtr> states;
 };
 
 // Represents the recorded state of a command buffer.
@@ -170,7 +179,7 @@ struct CommandRecord {
 	// For a command buffer that closes all label it opens and open all
 	// label it closes, numPopLabels is 0 and pushLabels empty.
 	u32 numPopLabels {};
-	CommandAllocList<const char*> pushLables {};
+	CommandAllocList<const char*> pushLables;
 
 	// IDEA: Should the key rather be Handle*? Also, maybe we rather
 	// use a non-hash map here since rehashing might be a problem, especially
@@ -181,20 +190,9 @@ struct CommandRecord {
 	// We store all device handles referenced by this command buffer that
 	// were destroyed since it was recorded so we can avoid deferencing
 	// them in the command state.
-	// We unset
+	// TODO: we can change this back to an unordered set, don't ever
+	// replace anymore.
 	CommandAllocHashMap<DeviceHandle*, DeviceHandle*> invalidated;
-
-	// We might be interested in the bound descriptors even after the record
-	// was invalidated. If the 'keepDescriptorInformation' bool is set,
-	// descriptor state is copied into dummy 'DescriptorSet' objects that
-	// are referenced instead in the Command objects so we can at least
-	// retrieve the bound state later on.
-	bool keepDescriptorInformation {};
-	// TODO: allocate memory for those descriptor set bindings from
-	// memBlocks, needs a change in DescirptorSet. We should probably
-	// pool memory needed for DescriptorSet anyways, either from here
-	// or from DescriptorPool depending on whether its a dummy set or not.
-	CommandAllocList<DescriptorSet> keptDescriptors;
 
 	// We have to keep certain object alive that vulkan allows to be destroyed
 	// after recording even if the command buffer is used in the future.
@@ -209,6 +207,11 @@ struct CommandRecord {
 
 	CommandBufferDesc desc;
 	CommandBufferGroup* group {};
+
+	// descriptor state at the last submission of this command
+	// TODO: really always copy this? This is kinda costly, we will likely
+	// get away with only doing it in some cases
+	CommandDescriptorSnapshot lastDescriptorState;
 
 	// Ownership of this CommandRecord is shared: while generally it is
 	// not needed anymore as soon as the associated CommandBuffer is
@@ -241,8 +244,5 @@ bool uses(const CommandRecord& rec, const H& handle) {
 // Unsets all handles in record.destroyed in all of its commands and used
 // handle entries. Must only be called while device mutex is locked
 void replaceInvalidatedLocked(CommandRecord& record);
-
-// Notifies the given record that the given ds was destroyed/invalidated.
-void notifyInvalidateLocked(CommandRecord& record, const DescriptorSet& ds);
 
 } // namespace vil

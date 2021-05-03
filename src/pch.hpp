@@ -48,6 +48,7 @@
 #include <util/span.hpp>
 #include <util/syncedMap.hpp>
 #include <util/intrusive.hpp>
+#include <util/debugMutex.hpp>
 #include <util/flags.hpp>
 
 #include <dlg/dlg.hpp>

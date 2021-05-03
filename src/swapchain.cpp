@@ -1,6 +1,6 @@
 #include <swapchain.hpp>
 #include <data.hpp>
-#include <record.hpp>
+#include <command/record.hpp>
 #include <layer.hpp>
 #include <image.hpp>
 #include <queue.hpp>
@@ -192,10 +192,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 			swapchain.overlay->show = swapchain.overlay->platform->update(swapchain.overlay->gui);
 		}
 
-		++swapchain.presentCounter;
-		std::swap(swapchain.frameSubmissions, swapchain.nextFrameSubmissions);
-		swapchain.nextFrameSubmissions.clear();
-
 		auto now = Swapchain::Clock::now();
 		if(swapchain.lastPresent) {
 			if(swapchain.frameTimings.size() == swapchain.maxFrameTimings) {
@@ -233,6 +229,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		if(res != VK_SUCCESS && combinedResult == VK_SUCCESS) {
 			combinedResult = res;
 		}
+
+		++swapchain.presentCounter;
+		std::swap(swapchain.frameSubmissions, swapchain.nextFrameSubmissions);
+		swapchain.nextFrameSubmissions.clear();
 	}
 
 	return combinedResult;

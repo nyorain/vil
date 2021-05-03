@@ -109,14 +109,6 @@ void addToArgumentsDesc(std::vector<std::string>& ret, const BoundIndexBuffer& b
 	ret.push_back(vk::name(buf.type));
 }
 
-void addToArgumentsDesc(std::vector<std::string>& ret, const BoundDescriptorSet& set) {
-	if(!set.ds) {
-		return;
-	}
-
-	ret.push_back(name(set.ds).name);
-}
-
 template<typename H> using FuenNameExpr = decltype(std::declval<H>().objectType);
 template<typename H> using FuenNameExprPtr = decltype(std::declval<H>()->objectType);
 template<typename H> using VkNameExpr = decltype(vk::name(std::declval<H>()));
@@ -1019,17 +1011,6 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	} else if(state.pipe->dynamicState.empty()) {
 		// imGuiText("No relevant dynamic state");
 	}
-
-	imGuiText("Descriptors");
-	for(auto& ds : state.descriptorSets) {
-		if(!ds.ds) {
-			imGuiText("null");
-			continue;
-		}
-
-		refButtonD(gui, ds.ds, "<Invalid>");
-		// TODO: dynamic offsets
-	}
 }
 
 void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
@@ -1043,10 +1024,9 @@ void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*
 		checkReplace(verts.buffer, map);
 	}
 
-	for(auto& ds : state.descriptorSets) {
-		checkReplace(ds.ds, map);
-		// ds.layout is kept alive
-	}
+	// we don't ever unset descriptor sets, they are accessed via
+	// snapshots anyways and we need the original pointer as key into
+	// the snapshot map
 }
 
 Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
@@ -1106,7 +1086,7 @@ void DrawCmd::record(const Device& dev, VkCommandBuffer cb) const {
 }
 
 std::vector<std::string> DrawCmd::argumentsDesc() const {
-	return createArgumentsDesc(state.pipe, state.vertices, state.descriptorSets,
+	return createArgumentsDesc(state.pipe, state.vertices,
 		vertexCount, instanceCount, firstInstance, firstVertex);
 }
 
@@ -1154,7 +1134,7 @@ void DrawIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 std::vector<std::string> DrawIndirectCmd::argumentsDesc() const {
 	auto ret = createArgumentsDesc(buffer, offset, drawCount, stride,
-		state.pipe, state.vertices, state.descriptorSets);
+		state.pipe, state.vertices);
 	if(indexed) {
 		addToArgumentsDesc(ret, state.indices);
 	}
@@ -1223,8 +1203,7 @@ void DrawIndexedCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 std::vector<std::string> DrawIndexedCmd::argumentsDesc() const {
 	return createArgumentsDesc(state.pipe, state.indices,
-		state.vertices, state.descriptorSets,
-		indexCount, instanceCount, firstInstance, firstIndex);
+		state.vertices, indexCount, instanceCount, firstInstance, firstIndex);
 }
 
 std::string DrawIndexedCmd::toString() const {
@@ -1283,7 +1262,7 @@ std::string DrawIndirectCountCmd::toString() const {
 
 std::vector<std::string> DrawIndirectCountCmd::argumentsDesc() const {
 	auto ret = createArgumentsDesc(buffer, offset, countBuffer, countBufferOffset,
-		maxDrawCount, stride, state.pipe, state.vertices, state.descriptorSets);
+		maxDrawCount, stride, state.pipe, state.vertices);
 	if(indexed) {
 		addToArgumentsDesc(ret, state.indices);
 	}
@@ -1449,25 +1428,14 @@ DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb, const ComputeState& compStat
 
 void DispatchCmdBase::displayComputeState(Gui& gui) const {
 	refButtonD(gui, state.pipe);
-
-	imGuiText("Descriptors");
-	for(auto& ds : state.descriptorSets) {
-		if(!ds.ds) {
-			imGuiText("null");
-			continue;
-		}
-
-		refButtonD(gui, ds.ds, "<Invalid>");
-		// TODO: dynamic offsets
-	}
 }
 
 void DispatchCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(state.pipe, map);
-	for(auto& ds : state.descriptorSets) {
-		checkReplace(ds.ds, map);
-		// ds.layout kept alive
-	}
+
+	// we don't ever unset descriptor sets, they are accessed via
+	// snapshots anyways and we need the original pointer as key into
+	// the snapshot map
 }
 
 Matcher DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
@@ -1501,7 +1469,7 @@ void DispatchCmd::record(const Device& dev, VkCommandBuffer cb) const {
 }
 
 std::vector<std::string> DispatchCmd::argumentsDesc() const {
-	return createArgumentsDesc(state.pipe, state.descriptorSets, groupsX, groupsY, groupsZ);
+	return createArgumentsDesc(state.pipe, groupsX, groupsY, groupsZ);
 }
 
 std::string DispatchCmd::toString() const {
@@ -1555,7 +1523,7 @@ std::string DispatchIndirectCmd::toString() const {
 }
 
 std::vector<std::string> DispatchIndirectCmd::argumentsDesc() const {
-	return createArgumentsDesc(buffer, offset, state.pipe, state.descriptorSets);
+	return createArgumentsDesc(buffer, offset, state.pipe);
 }
 
 void DispatchIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {

@@ -14,7 +14,7 @@ namespace vil {
 
 struct PipelineLayout : DeviceHandle {
 	VkPipelineLayout handle;
-	std::vector<DescriptorSetLayout*> descriptors;
+	std::vector<IntrusivePtr<DescriptorSetLayout>> descriptors;
 	std::vector<VkPushConstantRange> pushConstants;
 
 	// Intrusive ref count. Needed e.g. for command buffer recording

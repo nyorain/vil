@@ -1,10 +1,16 @@
-#include <commandDesc.hpp>
-#include <commands.hpp>
+#include <command/desc.hpp>
+#include <command/commands.hpp>
+#include <command/record.hpp>
 #include <cb.hpp>
 #include <pipe.hpp>
 #include <rp.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
+
+// TODO: the whole CommandBufferDesc code is moot, really.
+// See desc2.hpp and ideas in match.md and todo.md. We might want to
+// abolish the CommandGroup concepet completely, when our
+// Command matching works good enough.
 
 namespace vil {
 
@@ -125,26 +131,24 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	return (ownMatch + childMatchSum) / (1 + maxChildren);
 }
 
-bool match(const vil::DescriptorSet::Binding& a, const vil::DescriptorSet::Binding& b,
-		const DescriptorSetLayout::Binding& layout) {
+bool match(const DescriptorBinding& a, const DescriptorBinding& b,
+		VkDescriptorType dsType) {
 	if(!a.valid || !b.valid) {
 		return a.valid == b.valid;
 	}
 
 	// TODO: if samplers or image/buffers views are different we could
-	// check them for semantic equality as well. But who would do something
+	// check them for semantic equality as well. But who would ever do something
 	// as terrible as create multiple equal samplers/imageView? /s
 
-	auto dsCat = category(layout.descriptorType);
+	auto dsCat = category(dsType);
 	if(dsCat == DescriptorCategory::image) {
-
-		if(needsSampler(layout.descriptorType) &&
-				!layout.immutableSamplers.get() &&
+		if(needsSampler(dsType) &&
 				a.imageInfo.sampler != b.imageInfo.sampler) {
 			return false;
 		}
 
-		if(needsImageView(layout.descriptorType) &&
+		if(needsImageView(dsType) &&
 				a.imageInfo.imageView != b.imageInfo.imageView) {
 			return false;
 		}
@@ -164,74 +168,51 @@ bool match(const vil::DescriptorSet::Binding& a, const vil::DescriptorSet::Bindi
 	return false;
 }
 
-float matchDescriptors(span<const BoundDescriptorSet> ds1,
-		const CommandDescriptorState& ds2) {
-	dlg_assert(ds1.size() == ds2.size());
+float match(const DescriptorSetState& a, const DescriptorSetState& b) {
+	dlg_assert(a.layout);
+	dlg_assert(b.layout);
 
-	// compare descriptor state
+	// TODO: additional bonus matching points when the *same*
+	//   ds is used? Probably bad idea.
+
+	if(&a == &b) {
+		// fast path: full match since same descriptorSet
+		return 1.f;
+	}
+
+	// we expect them to have the same layout since they must
+	// be bound for commands with the same pipeline
+	dlg_assert_or(compatible(*a.layout, *b.layout), return 0.f);
+
+	// iterate over bindings
 	unsigned count {};
 	unsigned match {};
+	for(auto bindingID = 0u; bindingID < a.layout->bindings.size(); ++bindingID) {
+		auto ba = bindings(a, bindingID);
+		auto bb = bindings(b, bindingID);
 
-	for(auto s = 0u; s < ds1.size(); ++s) {
-		dlg_assert(ds2[s].dsLayout);
-		count += ds2[s].ds->layout->totalNumBindings;
+		auto dsType = a.layout->bindings[bindingID].descriptorType;
+		dlg_assert(a.layout->bindings[bindingID].descriptorType ==
+			b.layout->bindings[bindingID].descriptorType);
 
-		if(!ds1[s].ds) {
-			continue;
-		}
+		// they can have different size, when variable descriptor count is used
+		count += std::max(ba.size(), bb.size());
 
-		// TODO: consider dynamic offsets?
-		// TODO: additional bonus matching points when the *same*
-		//   ds is used?
-		if(bound[s].ds == dsState.descriptors[s].ds) {
-			// fasth path: full match since same descriptorSet
-			match += bound[s].ds->layout->totalNumBindings;
-			continue;
-		}
+		for(auto e = 0u; e < std::min(ba.size(), bb.size()); ++e) {
+			auto& elem0 = ba[e];
+			auto& elem1 = bb[e];
 
-		if(dsState.descriptors[s].ds) {
-			dlg_assert_or(bound[s].ds->bindings.size() ==
-				dsState.descriptors[s].ds->bindings.size(), continue);
-		} else {
-			dlg_assert_or(bound[s].ds->bindings.size() ==
-				dsState.descriptors[s].state.size(), continue);
-		}
-
-		// iterate over bindings
-		for(auto b = 0u; b < bound[s].ds->bindings.size(); ++b) {
-			auto& binding1 = bound[s].ds->bindings[b];
-			auto& layout = bound[s].ds->layout->bindings[b];
-
-			std::vector<vil::DescriptorSet::Binding>* binding0 {};
-			if(dsState.descriptors[s].ds) {
-				dlg_assert_or(bound[s].ds->bindings.size() ==
-					dsState.descriptors[s].ds->bindings.size(), continue);
-				binding1 = dsState.descriptors[s].ds->bindings[b];
-			} else {
-				dlg_assert_or(bound[s].ds->bindings.size() ==
-					dsState.descriptors[s].state.size(), continue);
-				binding1 = dsState.descriptors[s].state[b];
-			}
-
-			dlg_assert_or(binding1.size() == binding0->size(), continue);
-
-			for(auto e = 0u; e < binding1.size(); ++e) {
-				auto& elem0 = (*binding0)[e];
-				auto& elem1 = binding1[e];
-
-				if(vil::match(elem0, elem1, layout)) {
-					++match;
-				}
+			if(vil::match(elem0, elem1, dsType)) {
+				++match;
 			}
 		}
 	}
 
-	float dsMatch = float(match) / count;
-	m *= dsMatch;
+	return float(match) / count;
 }
 
 FindResult find(const Command* root, span<const Command*> dst,
-		const CommandDescriptorState& dsState, float threshold) {
+		const CommandDescriptorSnapshot& dstDsState, float threshold) {
 	dlg_assert_or(!dst.empty(), return {});
 	dlg_assert(root);
 
@@ -246,33 +227,51 @@ FindResult find(const Command* root, span<const Command*> dst,
 			if(dst.size() > 1) {
 				dlg_assert(it->children());
 				auto newThresh = bestMatch / m;
-				auto restResult = find(it->children(), dst.subspan(1), dsState, newThresh);
+				auto restResult = find(it->children(), dst.subspan(1), dstDsState, newThresh);
 				if(restResult.hierachy.empty()) {
 					continue;
 				}
 
 				restCmds = std::move(restResult.hierachy);
 				m *= restResult.match;
-			} else if(!dsState.descriptors.empty()) {
+			} else {
 				// match descriptors, if any
-				span<const BoundDescriptorSet> bound;
-				if(auto* cmd = dynamic_cast<const DrawCmdBase*>(dst[0])) {
-					dlg_assert_or(cmd->state.pipe, continue);
-					bound = cmd->state.descriptorSets;
-					bound = bound.first(cmd->state.pipe->layout->descriptors.size());
-				} else if(auto* cmd = dynamic_cast<const DispatchCmdBase*>(dst[0])) {
-					dlg_assert_or(cmd->state.pipe, continue);
-					bound = cmd->state.descriptorSets;
-					bound = bound.first(cmd->state.pipe->layout->descriptors.size());
-				} else {
-					// unreachable
-					dlg_error("Unexepcted command type; does not have descriptors");
-					continue;
+				// TODO: only consider descriptors statically used by pipeline
+				span<const BoundDescriptorSet> dstBound;
+				span<const BoundDescriptorSet> srcBound;
+				if(auto* dstCmd = dynamic_cast<const DrawCmdBase*>(dst[0])) {
+					dlg_assert_or(dstCmd->state.pipe, continue);
+					auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
+					dstBound = dstCmd->state.descriptorSets.first(dsCount);
+
+					auto* srcCmd = dynamic_cast<const DrawCmdBase*>(it);
+					dlg_assert_or(srcCmd, continue);
+					dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
+					srcBound = srcCmd->state.descriptorSets.first(dsCount);
+				} else if(auto* dstCmd = dynamic_cast<const DispatchCmdBase*>(dst[0])) {
+					dlg_assert_or(dstCmd->state.pipe, continue);
+					auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
+					dstBound = dstCmd->state.descriptorSets.first(dsCount);
+
+					auto* srcCmd = dynamic_cast<const DispatchCmdBase*>(it);
+					dlg_assert_or(srcCmd, continue);
+					dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
+					srcBound = srcCmd->state.descriptorSets.first(dsCount);
 				}
 
-				dlg_assertm_or(bound.size() == dsState.descriptors.size(),
-					continue, "Descriptor count does not match");
+				if(!dstBound.empty()) {
+					// TODO: consider dynamic offsets?
 
+					unsigned match {};
+					for(auto i = 0u; i < srcBound.size(); ++i) {
+						auto& src = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
+						auto dst = dstDsState.states.find(dstBound[i].ds);
+						dlg_assert_or(dst != dstDsState.states.end(), continue);
+						match += vil::match(nonNull(src), nonNull(dst->second));
+					}
+
+					m *= float(match) / srcBound.size();
+				}
 			}
 
 			if(m > bestMatch) {

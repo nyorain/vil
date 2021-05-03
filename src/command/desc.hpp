@@ -8,24 +8,14 @@
 
 namespace vil {
 
-struct DescriptorSetState {
-	vil::DescriptorSet* ds; // for quick-compare, if still alive & valid
-	std::vector<std::vector<vil::DescriptorSet::Binding>> state; // valid otherwise
-	IntrusivePtr<DescriptorSetLayout> dsLayout;
-	// TODO: consider dynamic offsets?
-};
-
-using CommandDescriptorState = std::vector<DescriptorSetState>;
-
 struct FindResult {
 	std::vector<const Command*> hierachy;
 	float match;
 };
 
 // Assumes that 'root' is a command tree where all handles are still valid.
-FindResult find(const Command* root, span<const Command*> dst,
-		const CommandDescriptorState& dsState, float threshold = 0.0);
-
+FindResult find(const Command* srcRoot, span<const Command*> dstHierachyToFind,
+	const CommandDescriptorSnapshot& dstDescriptors, float threshold = 0.0);
 
 // Rough structure of a command buffer recording.
 struct CommandBufferDesc {

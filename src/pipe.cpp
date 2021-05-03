@@ -333,6 +333,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		if (pre.useXfb) {
 			auto& stage = stages[xfbVertexStageID];
 			auto& mod = dev.shaderModules.get(stage.module);
+
+			// PERF: we lock the device mutex here for too long,
+			// shader patching and module creation can take a long time
+			// and pipeline creation is often parallelized. Maybe create a
+			// per-shader-module mutex just for this place? Or handle
+			// the case where we patch the vertex shader and then find
+			// it's already been set by another thread in the meantime.
+			std::lock_guard lock(dev.mutex);
 			if(!mod.xfbVertShader) {
 				mod.xfbVertShader = patchVertexShaderXfb(dev,
 					mod.code->spv, stage.pName);
@@ -521,7 +529,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 	pl.handle = *pPipelineLayout;
 
 	for(auto i = 0u; i < pCreateInfo->setLayoutCount; ++i) {
-		pl.descriptors.push_back(&dev.dsLayouts.get(pCreateInfo->pSetLayouts[i]));
+		pl.descriptors.push_back(dev.dsLayouts.getPtr(pCreateInfo->pSetLayouts[i]));
 	}
 
 	for(auto i = 0u; i < pCreateInfo->pushConstantRangeCount; ++i) {
@@ -605,46 +613,8 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2,
 			continue; // layout always compatible with itself
 		}
 
-		if(da.bindings.size() != db.bindings.size()) {
-			// dlg_trace("!compatible({}): binding count {} vs {} (set {})", N,
-			// 	da.bindings.size(), db.bindings.size(), s);
+		if(!compatible(da, db)) {
 			return false;
-		}
-
-		// bindings are sorted by binding number so we can simply compare
-		// them in order
-		for(auto b = 0u; b < da.bindings.size(); ++b) {
-			auto& ba = da.bindings[b];
-			auto& bb = db.bindings[b];
-
-			// TODO: look up how this works for variable descriptor count layouts.
-			if(ba.binding != bb.binding ||
-					ba.descriptorCount != bb.descriptorCount ||
-					ba.descriptorType != bb.descriptorType ||
-					ba.stageFlags != bb.stageFlags) {
-				// dlg_trace("!compatible({}): binding {} (set {})", N, b, s);
-				return false;
-			}
-
-			// immutable samplers
-			if(ba.binding == VK_DESCRIPTOR_TYPE_SAMPLER ||
-					ba.binding == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-				if(bool(ba.immutableSamplers) != bool(bb.immutableSamplers)) {
-					// dlg_trace("!compatible({}): immutable samplers, binding {} (set {})", N, b, s);
-					return false;
-				}
-
-				if(ba.immutableSamplers) {
-					dlg_assert(ba.descriptorCount == bb.descriptorCount);
-					for(auto e = 0u; e < ba.descriptorCount; ++e) {
-						// TODO: what if the samplers are compatible?
-						if(ba.immutableSamplers[e] != bb.immutableSamplers[e]) {
-							// dlg_trace("!compatible({}): immutable samplers(2), binding {} (set {})", N, b, s);
-							return false;
-						}
-					}
-				}
-			}
 		}
 	}
 

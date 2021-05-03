@@ -35,7 +35,9 @@ void DeviceHandle::invalidateCbsLocked() {
 		}
 
 		dlg_assert(!ref->cb);
-		auto [_, success] = ref->replace.insert({this, nullptr});
+
+		// we never insert descriptor sets into the list of destroyed objects
+		auto [_, success] = ref->invalidated.insert({this, nullptr});
 		dlg_assert(success);
 	}
 

@@ -144,6 +144,7 @@ public:
 	struct CompletedHook {
 		IntrusivePtr<CommandRecord> record;
 		IntrusivePtr<CommandHookState> state;
+		CommandDescriptorSnapshot descriptorSnapshot;
 		std::vector<const Command*> command;
 		float match; // how much the command matched
 	};
@@ -184,7 +185,7 @@ public:
 	void invalidateData() { completed.clear(); }
 
 	// invalidate: Automatically invalidates data and recordings?
-	void desc(std::vector<const Command*> hierachy, CommandDescriptorState,
+	void desc(std::vector<const Command*> hierachy, CommandDescriptorSnapshot,
 		bool invalidate = true);
 	void unsetHookOps(bool doQueryTime = false);
 
@@ -196,7 +197,7 @@ private:
 	CommandHookRecord* records_ {}; // intrusive linked list
 
 	// description of command to be hooked
-	CommandDescriptorState dsState_;
+	CommandDescriptorSnapshot dsState_;
 	std::vector<const Command*> hierachy_;
 };
 
@@ -274,6 +275,7 @@ struct CommandHookRecord {
 
 struct CommandHookSubmission {
 	CommandHookRecord* record {};
+	CommandDescriptorSnapshot descriptorSnapshot {};
 	float match {}; // original match of the searched-for command
 
 	CommandHookSubmission(CommandHookRecord&, Submission&, float match);

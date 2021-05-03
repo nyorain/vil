@@ -7,62 +7,319 @@
 
 namespace vil {
 
-// Classes
-void unregisterLocked(DescriptorSet& ds, unsigned binding, unsigned elem) {
-	dlg_assert(ds.dev);
-	dlg_assert(ds.bindings.size() > binding);
-	dlg_assert(ds.bindings[binding].size() > elem);
+// util
+size_t totalNumBindings(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
+	dlg_assert(!layout.bindings.empty());
+	auto& last = layout.bindings.back();
+	size_t ret = last.offset;
 
-	auto& bind = ds.bindings[binding][elem];
-	dlg_assert(bind.valid);
+	if(last.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+		ret += variableDescriptorCount;
+	} else {
+		ret += last.descriptorCount;
+	}
 
+	return ret;
+}
+
+bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
+	if(da.bindings.size() != db.bindings.size()) {
+		return false;
+	}
+
+	// bindings are sorted by binding number so we can simply compare
+	// them in order
+	for(auto b = 0u; b < da.bindings.size(); ++b) {
+		auto& ba = da.bindings[b];
+		auto& bb = db.bindings[b];
+
+		if(ba.binding != bb.binding ||
+				ba.descriptorCount != bb.descriptorCount ||
+				ba.descriptorType != bb.descriptorType ||
+				ba.stageFlags != bb.stageFlags) {
+			return false;
+		}
+
+		// immutable samplers
+		if(ba.binding == VK_DESCRIPTOR_TYPE_SAMPLER ||
+				ba.binding == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+			if(bool(ba.immutableSamplers) != bool(bb.immutableSamplers)) {
+				return false;
+			}
+
+			if(ba.immutableSamplers) {
+				dlg_assert(ba.descriptorCount == bb.descriptorCount);
+				for(auto e = 0u; e < ba.descriptorCount; ++e) {
+					// TODO: consider compatible (instead of just same)
+					// samplers as well?
+					if(ba.immutableSamplers[e] != bb.immutableSamplers[e]) {
+						return false;
+					}
+				}
+			}
+		}
+	}
+
+	return true;
+}
+
+void unregisterLocked(DescriptorSetState& state, unsigned bindingID,
+		unsigned elemID, bool unregisterStaticSampler = false) {
 	auto removeFromHandle = [&](auto& handle) {
-		DescriptorSetRef ref = {&ds, binding, elem};
+		DescriptorStateRef ref = {&state, bindingID, elemID};
 		auto it = handle.descriptors.find(ref);
 		dlg_assert(it != handle.descriptors.end());
 		handle.descriptors.erase(it);
 	};
 
-	auto& bindingLayout = ds.layout->bindings[binding];
+	auto& bind = binding(state, bindingID, elemID);
+
+	auto& bindingLayout = state.layout->bindings[bindingID];
 	auto dsType = bindingLayout.descriptorType;
 	switch(category(dsType)) {
 		case DescriptorCategory::buffer: {
+			dlg_assert(bind.valid);
 			removeFromHandle(nonNull(bind.bufferInfo.buffer));
+			bind.bufferInfo = {};
 			break;
 		} case DescriptorCategory::image: {
-			dlg_assert(bind.imageInfo.imageView || bind.imageInfo.sampler);
+			// may not be true, e.g. if first the sampler is destroyed
+			// and unsets both, then the image view is destroyed.
+			// dlg_assert(bind.imageInfo.imageView || bind.imageInfo.sampler);
 			if(bind.imageInfo.imageView) {
+				dlg_assert(bind.valid);
 				removeFromHandle(*bind.imageInfo.imageView);
+				bind.imageInfo.imageView = {};
+				bind.imageInfo.layout = {};
 			}
 
-			if(bind.imageInfo.sampler) {
+			if(bind.imageInfo.sampler &&
+					(!bindingLayout.immutableSamplers.get() || unregisterStaticSampler)) {
+				dlg_assert(bind.valid || unregisterStaticSampler);
 				removeFromHandle(*bind.imageInfo.sampler);
+				bind.imageInfo.sampler = {};
 			}
 
 			break;
 		} case DescriptorCategory::bufferView: {
+			dlg_assert(bind.valid);
 			removeFromHandle(nonNull(bind.bufferView));
+			bind.bufferView = {};
 			break;
 		} default: dlg_error("Unimplemented descriptor type"); break;
 	}
 
-	bind = {};
+	bind.valid = false;
 }
 
-void notifyDestroyLocked(DescriptorSet& ds, unsigned binding, unsigned elem,
+void notifyDestroyLocked(DescriptorSetState& state, unsigned binding, unsigned elem,
 		const Handle& handle) {
-	(void) handle;
-	unregisterLocked(ds, binding, elem);
 
-	if(ds.handle) {
-		ds.invalidateCbsLocked();
-	} else {
-		// in this case, ds is a dummy DescriptorSet created by a CommandRecord
-		// to store the state after invalidation
-		// TODO: we could use 'handle' to only unset (binding, elem) partially,
-		// e.g. when the sampler was destroyed but not the imageView.
-		// not sure if it's worth it/useful.
-		dlg_assert(ds.refRecords.size() == 0u);
+	unregisterLocked(state, binding, elem, handle.objectType == VK_OBJECT_TYPE_SAMPLER);
+	if(state.ds) {
+		auto& layout = state.layout->bindings[binding];
+
+		// TODO: I couldn't find in the spec what happens in this situation:
+		// a view/sampler/buffer bound to a binding with update_after_bind
+		// was destroyed. Will command buffers using that ds be invalidated?
+		// My intuition says it won't be invalidated, could be updated
+		// later on with valid view again, the order (update binding or
+		// destroy view first) should really not matter. But the spec does not
+		// explicitly state this, so not sure.
+		if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
+			// TODO: also respect the other flags (e.g. update_unused_while_pending)
+			// see notes in other invalidation places.
+			state.ds->invalidateCbsLocked();
+		}
+	}
+}
+
+DescriptorSetStatePtr newDescriptorSetState(
+		IntrusivePtr<DescriptorSetLayout> layout, u32 variableDescriptorCount) {
+	auto numBindings = totalNumBindings(*layout, variableDescriptorCount);
+	auto memSize = sizeof(DescriptorSetState) +
+		numBindings * sizeof(DescriptorBinding);
+	auto mem = new std::byte[memSize]();
+
+	auto* state = new(mem) DescriptorSetState();
+	state->layout = std::move(layout);
+	state->variableDescriptorCount = variableDescriptorCount;
+
+	auto* base = mem + sizeof(DescriptorSetState);
+	auto* bindings = reinterpret_cast<DescriptorBinding*>(base);
+	new(bindings) DescriptorBinding[numBindings]();
+
+	return DescriptorSetStatePtr(state);
+}
+
+void copyLocked(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
+		const DescriptorSetState& src, unsigned srcBindID, unsigned srcElemID) {
+	auto& srcBind = binding(src, srcBindID, srcElemID);
+	auto& dstBind = binding(dst, dstBindID, dstElemID);
+	if(!srcBind.valid) {
+		return;
+	}
+
+	auto& srcLayout = src.layout->bindings[srcBindID];
+	auto& dstLayout = dst.layout->bindings[dstBindID];
+	dlg_assert(srcLayout.descriptorType == dstLayout.descriptorType);
+
+	if(dstBind.valid) {
+		unregisterLocked(dst, dstBindID, dstElemID);
+	}
+
+	switch(category(dstLayout.descriptorType)) {
+		case DescriptorCategory::image: {
+			dstBind.imageInfo = {};
+			dstBind.imageInfo.layout = srcBind.imageInfo.layout;
+
+			if(srcBind.imageInfo.imageView) {
+				dstBind.imageInfo.imageView = srcBind.imageInfo.imageView;
+				dstBind.imageInfo.imageView->descriptors.insert({&dst, dstBindID, dstElemID});
+			}
+			if(srcBind.imageInfo.sampler && !dstLayout.immutableSamplers.get()) {
+				dstBind.imageInfo.sampler = srcBind.imageInfo.sampler;
+				dstBind.imageInfo.sampler->descriptors.insert({&dst, dstBindID, dstElemID});
+			}
+			break;
+		} case DescriptorCategory::buffer: {
+			dlg_assert(srcBind.bufferInfo.buffer);
+			dstBind.bufferInfo = srcBind.bufferInfo;
+			dstBind.bufferInfo.buffer->descriptors.insert({&dst, dstBindID, dstElemID});
+			break;
+		} case DescriptorCategory::bufferView:
+			dlg_assert(srcBind.bufferView);
+			dstBind.bufferView = srcBind.bufferView;
+			dstBind.bufferView->descriptors.insert({&dst, dstBindID, dstElemID});
+			break;
+		default: break;
+	}
+
+	dstBind.valid = true;
+}
+
+void initImmutableSamplersLocked(DescriptorSetState& state) {
+	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
+		// If the binding holds immutable samplers, fill them in.
+		// We do this so we don't have to check for immutable samplers
+		// every time we read a binding. Also needed for correct
+		// invalidation tracking.
+		if(state.layout->bindings[b].immutableSamplers.get()) {
+			dlg_assert(needsSampler(state.layout->bindings[b].descriptorType));
+			auto binds = bindings(state, b);
+
+			for(auto e = 0u; e < binds.size(); ++e) {
+				auto sampler = state.layout->bindings[b].immutableSamplers[e];
+				dlg_assert(sampler);
+
+				binds[e].imageInfo.sampler = sampler;
+
+				// when the bindings contains only a sampler, it's already valid.
+				if(state.layout->bindings[b].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) {
+					binds[e].valid = true;
+				}
+
+				sampler->descriptors.insert({&state, b, e});
+			}
+		}
+	}
+}
+
+DescriptorSetStatePtr copyDescriptorSetStateLocked(const DescriptorSetState& state) {
+	dlg_assert(state.layout->dev->mutex.owned());
+	auto ret = newDescriptorSetState(state.layout, state.variableDescriptorCount);
+
+	initImmutableSamplersLocked(*ret);
+
+	// copy descriptors
+	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
+		for(auto e = 0u; e < descriptorCount(state, b); ++e) {
+			copyLocked(*ret, b, e, state, b, e);
+		}
+	}
+
+	return ret;
+}
+
+u32 descriptorCount(const DescriptorSetState& state, unsigned binding) {
+	dlg_assert(state.layout);
+	dlg_assert(binding < state.layout->bindings.size());
+	auto& layout = state.layout->bindings[binding];
+	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
+		return state.variableDescriptorCount;
+	}
+
+	return layout.descriptorCount;
+}
+
+span<DescriptorBinding> bindings(DescriptorSetState& state, unsigned binding) {
+	dlg_assert(state.layout);
+	dlg_assert(binding < state.layout->bindings.size());
+	auto& layout = state.layout->bindings[binding];
+	auto count = layout.descriptorCount;
+	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
+		count = state.variableDescriptorCount;
+	}
+
+	auto* base = reinterpret_cast<std::byte*>(&state) + sizeof(DescriptorSetState);
+	auto* bindings = std::launder(reinterpret_cast<DescriptorBinding*>(base));
+	return {bindings + layout.offset, count};
+}
+
+span<const DescriptorBinding> bindings(const DescriptorSetState& state, unsigned binding) {
+	dlg_assert(state.layout);
+	dlg_assert(binding < state.layout->bindings.size());
+	auto& layout = state.layout->bindings[binding];
+	auto count = layout.descriptorCount;
+	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
+		count = state.variableDescriptorCount;
+	}
+
+	auto* base = reinterpret_cast<const std::byte*>(&state) + sizeof(DescriptorSetState);
+	auto* bindings = std::launder(reinterpret_cast<const DescriptorBinding*>(base));
+	return {bindings + layout.offset, count};
+}
+
+DescriptorBinding& binding(DescriptorSetState& state,
+		unsigned binding, unsigned elem) {
+	auto bs = bindings(state, binding);
+	dlg_assert(elem < bs.size());
+	return bs[elem];
+}
+
+const DescriptorBinding& binding(const DescriptorSetState& state,
+		unsigned binding, unsigned elem) {
+	auto bs = bindings(state, binding);
+	dlg_assert(elem < bs.size());
+	return bs[elem];
+}
+
+void DescriptorSetState::Deleter::operator()(DescriptorSetState* state) const {
+	// call destructor manually
+	state->~DescriptorSetState();
+
+	// we allocated the memory as std::byte array, so we have to free
+	// it like that. We don't have to call any other destructors of
+	// Binding elements since they are all trivial
+	auto ptr = reinterpret_cast<std::byte*>(state);
+	delete[] ptr;
+}
+
+DescriptorSetState::~DescriptorSetState() {
+	dlg_assert(layout);
+	auto& dev = layout->dev;
+
+	std::lock_guard lock(dev->mutex);
+
+	for(auto b = 0u; b < layout->bindings.size(); ++b) {
+		auto bs = bindings(*this, b);
+		for(auto e = 0u; e < bs.size(); ++e) {
+			if(!bs[e].valid && !layout->bindings[b].immutableSamplers.get()) {
+				continue;
+			}
+
+			unregisterLocked(*this, b, e, true);
+		}
 	}
 }
 
@@ -71,53 +328,53 @@ DescriptorSet::~DescriptorSet() {
 		return;
 	}
 
-	std::lock_guard lock(dev->mutex);
+	{
+		std::lock_guard lock(dev->mutex);
 
-	for(auto b = 0u; b < bindings.size(); ++b) {
-		for(auto e = 0u; e < bindings[b].size(); ++e) {
-			if(!bindings[b][e].valid) {
-				continue;
-			}
+		dlg_assert(state);
+		state->ds = nullptr;
 
-			unregisterLocked(*this, b, e);
-		}
+		// Remove from descriptor pool.
+		// Pools can't be destroyed before their sets as they implicitly free them.
+		dlg_assert(pool);
+
+		auto it = find(pool->descriptorSets, this);
+		dlg_assert(it != pool->descriptorSets.end());
+		pool->descriptorSets.erase(it);
 	}
 
-	// Remove from descriptor pool.
-	// Pools can't be destroyed before their sets as they implicitly free them.
-	dlg_assert(pool);
-
-	auto it = find(pool->descriptorSets, this);
-	dlg_assert(it != pool->descriptorSets.end());
-	pool->descriptorSets.erase(it);
+	// make sure to potentially run state destructor outside critical section
+	state.reset();
 }
 
-Sampler* DescriptorSet::getSampler(unsigned binding, unsigned elem) {
-	dlg_assert(bindings.size() > binding);
-	dlg_assert(bindings[binding].size() > elem);
-	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::image);
-	return bindings[binding][elem].imageInfo.sampler;
+Sampler* getSampler(DescriptorSetState& state, unsigned bindingID, unsigned elemID) {
+	dlg_assert(state.layout->bindings.size() > bindingID);
+	dlg_assert(needsSampler(state.layout->bindings[bindingID].descriptorType));
+	auto& binding = vil::binding(state, bindingID, elemID);
+	return binding.imageInfo.sampler;
 }
 
-ImageView* DescriptorSet::getImageView(unsigned binding, unsigned elem) {
-	dlg_assert(bindings.size() > binding);
-	dlg_assert(bindings[binding].size() > elem);
-	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::image);
-	return bindings[binding][elem].imageInfo.imageView;
+ImageView* getImageView(DescriptorSetState& state, unsigned bindingID, unsigned elemID) {
+	dlg_assert(state.layout->bindings.size() > bindingID);
+	dlg_assert(needsImageView(state.layout->bindings[bindingID].descriptorType));
+	auto& binding = vil::binding(state, bindingID, elemID);
+	return binding.imageInfo.imageView;
 }
 
-Buffer* DescriptorSet::getBuffer(unsigned binding, unsigned elem) {
-	dlg_assert(bindings.size() > binding);
-	dlg_assert(bindings[binding].size() > elem);
-	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::buffer);
-	return bindings[binding][elem].bufferInfo.buffer;
+Buffer* getBuffer(DescriptorSetState& state, unsigned bindingID, unsigned elemID) {
+	dlg_assert(state.layout->bindings.size() > bindingID);
+	dlg_assert(category(state.layout->bindings[bindingID].descriptorType)
+		== DescriptorCategory::buffer);
+	auto& binding = vil::binding(state, bindingID, elemID);
+	return binding.bufferInfo.buffer;
 }
 
-BufferView* DescriptorSet::getBufferView(unsigned binding, unsigned elem) {
-	dlg_assert(bindings.size() > binding);
-	dlg_assert(bindings[binding].size() > elem);
-	dlg_assert(category(this->layout->bindings[binding].descriptorType) == DescriptorCategory::bufferView);
-	return bindings[binding][elem].bufferView;
+BufferView* getBufferView(DescriptorSetState& state, unsigned bindingID, unsigned elemID) {
+	dlg_assert(state.layout->bindings.size() > bindingID);
+	dlg_assert(category(state.layout->bindings[bindingID].descriptorType)
+		== DescriptorCategory::bufferView);
+	auto& binding = vil::binding(state, bindingID, elemID);
+	return binding.bufferView;
 }
 
 DescriptorPool::~DescriptorPool() {
@@ -241,6 +498,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	flagsInfo = (flagsInfo && flagsInfo->bindingCount == 0u) ? nullptr : flagsInfo;
 	dlg_assert(!flagsInfo || flagsInfo->bindingCount == pCreateInfo->bindingCount);
 
+	u32 off = 0u;
 	for(auto i = 0u; i < pCreateInfo->bindingCount; ++i) {
 		const auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
@@ -251,15 +509,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		dst.descriptorType = bind.descriptorType;
 		dst.stageFlags = bind.stageFlags;
 		dst.flags = flagsInfo ? flagsInfo->pBindingFlags[i] : 0u;
+		dst.offset = off;
 
 		if(needsSampler(bind.descriptorType) && bind.pImmutableSamplers) {
+			// Couldn't find in the spec whether this is allowed or not.
+			// But it seems incorrect to me, we might not handle it correctly
+			// everywhere.
+			dlg_assert(!(dst.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT));
 			dst.immutableSamplers = std::make_unique<Sampler*[]>(dst.descriptorCount);
 			for(auto e = 0u; e < dst.descriptorCount; ++e) {
 				dst.immutableSamplers[e] = &dev.samplers.get(bind.pImmutableSamplers[e]);
 			}
 		}
 
-		dsLayout.totalNumBindings += bind.descriptorCount;
+		off += bind.descriptorCount;
 	}
 
 	return res;
@@ -361,40 +624,29 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
 		ds.dev = &dev;
 		ds.handle = pDescriptorSets[i];
-		ds.layout = dev.dsLayouts.getPtr(pAllocateInfo->pSetLayouts[i]);
-		ds.pool = &pool;
 
-		ds.bindings.resize(ds.layout->bindings.size());
-		for(auto b = 0u; b < ds.bindings.size(); ++b) {
-			// check for variable descriptor count
-			auto elemCount = ds.layout->bindings[b].descriptorCount;
-			if (ds.layout->bindings[b].flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-				// per spec variable counts are zero by default, if no other value is provided
-				elemCount = variableCountInfo ? variableCountInfo->pDescriptorCounts[b] : 0u;
-			}
+		auto layoutPtr = dev.dsLayouts.getPtr(pAllocateInfo->pSetLayouts[i]);
+		auto& layout = *layoutPtr;
+		dlg_assert(!layout.bindings.empty());
 
-			ds.bindings[b].resize(elemCount);
-
-			// If the binding holds immutable samplers, fill them in.
-			// We do this so we don't have to check for immutable samplers
-			// every time we read a binding. Also needed for correct
-			// invalidation tracking.
-			if(ds.layout->bindings[b].immutableSamplers.get()) {
-				dlg_assert(needsSampler(ds.layout->bindings[b].descriptorType));
-				for(auto e = 0u; e < ds.bindings[b].size(); ++e) {
-					auto sampler = ds.layout->bindings[b].immutableSamplers[e];
-					dlg_assert(sampler);
-
-					ds.bindings[b][e].imageInfo.sampler = sampler;
-					ds.bindings[b][e].valid = true;
-
-					std::lock_guard lock(dev.mutex);
-					sampler->descriptors.insert({&ds, b, e});
-				}
-			}
+		// per spec variable counts are zero by default, if no other value is provided
+		auto varCount = u32(0);
+		if(layout.bindings.back().flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+			varCount = variableCountInfo->pDescriptorCounts[i];
 		}
 
+		ds.state = newDescriptorSetState(std::move(layoutPtr), varCount);
+		ds.state->ds = &ds;
+		ds.pool = &pool;
+
+		std::lock_guard lock(dev.mutex);
+		// the application cannot access 'pool' from another thread during
+		// this calls (sync guarantee per vulkan spec). But we might
+		// be reading it during gui rendering at the moment (e.g. listing
+		// all descriptor sets for a given pool), that's why we put
+		// it inside the critical section.
 		pool.descriptorSets.push_back(&ds);
+		initImmutableSamplersLocked(*ds.state);
 	}
 
 	return res;
@@ -415,49 +667,63 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 		descriptorSetCount, pDescriptorSets);
 }
 
-void updateLocked(DescriptorSet& ds, DescriptorSet::Binding& binding,
+void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
 		unsigned bind, unsigned elem, VkBufferView bufferView) {
 	dlg_assert(bufferView);
-	binding.bufferView = &ds.dev->bufferViews.getLocked(bufferView);
-	binding.bufferView->descriptors.insert({&ds, bind, elem});
+	binding.bufferView = &state.layout->dev->bufferViews.getLocked(bufferView);
+	binding.bufferView->descriptors.insert({&state, bind, elem});
 	binding.valid = true;
 }
 
-void updateLocked(DescriptorSet& ds, DescriptorSet::Binding& binding,
+void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
 		unsigned bind, unsigned elem, const VkDescriptorImageInfo& img) {
+	auto* dev = state.layout->dev;
 	binding.imageInfo.layout = img.imageLayout;
 
-	auto& layout = ds.layout->bindings[bind];
+	auto& layout = state.layout->bindings[bind];
 	if(needsImageView(layout.descriptorType)) {
 		dlg_assert(img.imageView);
-		binding.imageInfo.imageView = &ds.dev->imageViews.getLocked(img.imageView);
-		binding.imageInfo.imageView->descriptors.insert({&ds, bind, elem});
+		binding.imageInfo.imageView = &dev->imageViews.getLocked(img.imageView);
+		binding.imageInfo.imageView->descriptors.insert({&state, bind, elem});
 	}
 
 	if(needsSampler(layout.descriptorType)) {
-		// Even when we have an immutable sampler here, we still add it
-		// to the binding and add this ds as reference for the given sampler.
-		// This is needed so that this descriptor gets properly invalidated
-		// when the immutable sampler is destroyed.
 		if(layout.immutableSamplers) {
-			binding.imageInfo.sampler = layout.immutableSamplers[elem];
+			// immutable samplers are initialized at the beginning and
+			// never unset.
+			dlg_assert(binding.imageInfo.sampler);
+			dlg_assert(binding.imageInfo.sampler == layout.immutableSamplers[elem]);
 		} else {
-			binding.imageInfo.sampler = &ds.dev->samplers.getLocked(img.sampler);
+			binding.imageInfo.sampler = &dev->samplers.getLocked(img.sampler);
+			dlg_assert(binding.imageInfo.sampler);
+			binding.imageInfo.sampler->descriptors.insert({&state, bind, elem});
 		}
-
-		dlg_assert(binding.imageInfo.sampler);
-		binding.imageInfo.sampler->descriptors.insert({&ds, bind, elem});
 	}
+
 	binding.valid = true;
 }
 
-void updateLocked(DescriptorSet& ds, DescriptorSet::Binding& binding,
+void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
 		unsigned bind, unsigned elem, const VkDescriptorBufferInfo& buf) {
-	binding.bufferInfo.buffer = &ds.dev->buffers.getLocked(buf.buffer);
-	binding.bufferInfo.buffer->descriptors.insert({&ds, bind, elem});
+	binding.bufferInfo.buffer = &state.layout->dev->buffers.getLocked(buf.buffer);
+	binding.bufferInfo.buffer->descriptors.insert({&state, bind, elem});
 	binding.bufferInfo.offset = buf.offset;
 	binding.bufferInfo.range = buf.range;
 	binding.valid = true;
+}
+
+DescriptorBinding& advanceUntilValid(DescriptorSetState& state,
+		unsigned& binding, unsigned& elem) {
+	dlg_assert(binding < state.layout->bindings.size());
+	auto binds = bindings(state, binding);
+	while(elem >= binds.size()) {
+		++binding;
+		elem = 0u;
+		dlg_assert(binding < state.layout->bindings.size());
+		binds = bindings(state, binding);
+	}
+
+	return binds[elem];
 }
 
 VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
@@ -476,57 +742,63 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		auto& ds = dev.descriptorSets.get(write.dstSet);
 		dlg_assert(ds.handle);
 
+		// The whole update process must be atomic
+		std::lock_guard lock(dev.mutex);
+
+		// We are updating the descriptorSets state, if someone
+		// else holds on to it, we need to allocate a new one.
+		// This basically implements copy-on-write
+		if(ds.state->refCount > 1) {
+			ds.state->ds = nullptr;
+			ds.state = copyDescriptorSetStateLocked(*ds.state);
+			ds.state->ds = &ds;
+		}
+
 		auto dstBinding = write.dstBinding;
 		auto dstElem = write.dstArrayElement;
 		auto invalidate = false;
+
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
-			dlg_assert(dstBinding < ds.layout->bindings.size());
-			while(dstElem >= ds.bindings[dstBinding].size()) {
-				++dstBinding;
-				dstElem = 0u;
-				dlg_assert(dstBinding < ds.layout->bindings.size());
-			}
-
-			auto& layout = ds.layout->bindings[dstBinding];
+			auto& binding = advanceUntilValid(*ds.state, dstBinding, dstElem);
+			auto& layout = ds.state->layout->bindings[dstBinding];
 			dlg_assert(write.descriptorType == layout.descriptorType);
-			auto& binding = ds.bindings[dstBinding][dstElem];
 
-			// TODO: when VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-			// is set, only invalidate the cbs that use it
-			// (rules depend on whether PARTIALLY_BOUND_BIT is set as well).
 			if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
+				// TODO: when VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+				// is set, only invalidate the record that use the binding
+				// (rules depend on whether PARTIALLY_BOUND_BIT is set as well).
+				// This needs some additional tracking (probably to be done
+				// while recording the record).
+				// Same issue in 'copy' and 'updateWithTemplate' below
+				// TODO: even though we don't invalidate the record, we
+				// still need to inform it that an update_after_bind descriptor
+				// changed, might need to invalidate a command hook record.
 				invalidate = true;
 			}
 
-			std::lock_guard lock(dev.mutex);
 			if(binding.valid) {
-				unregisterLocked(ds, dstBinding, dstElem);
+				unregisterLocked(*ds.state, dstBinding, dstElem);
 			}
 
 			switch(category(write.descriptorType)) {
 				case DescriptorCategory::image: {
 					dlg_assert(write.pImageInfo);
-					updateLocked(ds, binding, dstBinding, dstElem, write.pImageInfo[j]);
+					updateLocked(*ds.state, binding, dstBinding, dstElem, write.pImageInfo[j]);
 					break;
 				} case DescriptorCategory::buffer: {
 					dlg_assert(write.pBufferInfo);
-					updateLocked(ds, binding, dstBinding, dstElem, write.pBufferInfo[j]);
+					updateLocked(*ds.state, binding, dstBinding, dstElem, write.pBufferInfo[j]);
 					break;
 				} case DescriptorCategory::bufferView:
 					dlg_assert(write.pTexelBufferView);
-					updateLocked(ds, binding, dstBinding, dstElem, write.pTexelBufferView[j]);
+					updateLocked(*ds.state, binding, dstBinding, dstElem, write.pTexelBufferView[j]);
 					break;
 				default: break;
 			}
 		}
 
 		if(invalidate) {
-			ds.invalidateCbs();
-		} else {
-			// we still need to inform the refRecord that the descriptors
-			// content changed
-			for(auto& refRecord : ds.refRecords) {
-			}
+			ds.invalidateCbsLocked();
 		}
 	}
 
@@ -536,60 +808,44 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		auto& src = dev.descriptorSets.get(copy.srcSet);
 		auto& dst = dev.descriptorSets.get(copy.dstSet);
 
+		// The whole update process must be atomic
+		std::lock_guard lock(dev.mutex);
+
+		// We are updating the descriptorSets state, if someone
+		// else holds on to it, we need to allocate a new one.
+		// This basically implements copy-on-write
+		if(dst.state->refCount > 1) {
+			dst.state->ds = nullptr;
+			dst.state = copyDescriptorSetStateLocked(*dst.state);
+			dst.state->ds = &dst;
+		}
+
 		auto dstBinding = copy.dstBinding;
 		auto dstElem = copy.dstArrayElement;
 		auto srcBinding = copy.srcBinding;
 		auto srcElem = copy.srcArrayElement;
+		auto invalidate = false;
+
 		for(auto j = 0u; j < copy.descriptorCount; ++j, ++srcElem, ++dstElem) {
-			dlg_assert(dstBinding < dst.layout->bindings.size());
-			while(dstElem >= dst.bindings[dstBinding].size()) {
-				++dstBinding;
-				dstElem = 0u;
-				dlg_assert(dstBinding < dst.layout->bindings.size());
-			}
+			auto& dstBind = advanceUntilValid(*dst.state, dstBinding, dstElem);
+			auto& srcBind = advanceUntilValid(*src.state, srcBinding, srcElem);
 
-			dlg_assert(srcBinding < src.layout->bindings.size());
-			while(srcElem >= src.bindings[srcBinding].size()) {
-				++srcBinding;
-				srcElem = 0u;
-				dlg_assert(srcBinding < src.layout->bindings.size());
-			}
-
-			auto& srcBind = src.bindings[srcBinding][srcElem];
-			auto& dstBind = dst.bindings[dstBinding][dstElem];
 			dlg_assert(srcBind.valid);
-			dlg_assert(dst.layout->bindings[dstBinding].descriptorType ==
-				src.layout->bindings[dstBinding].descriptorType);
+			(void) dstBind;
 
-			std::lock_guard lock(dev.mutex);
-			if(dstBind.valid) {
-				unregisterLocked(dst, dstBinding, dstElem);
+			auto& layout = dst.state->layout->bindings[dstBinding];
+			if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
+				// TODO: see above (VkWriteDescriptor) for the issue
+				// with update_unused_while_pending
+				invalidate = true;
 			}
 
-			dstBind = srcBind;
-			switch(category(dst.layout->bindings[dstBinding].descriptorType)) {
-				case DescriptorCategory::image: {
-					if(dstBind.imageInfo.imageView) {
-						dstBind.imageInfo.imageView->descriptors.insert({&dst, dstBinding, dstElem});
-					}
-					if(dstBind.imageInfo.sampler) {
-						dstBind.imageInfo.sampler->descriptors.insert({&dst, dstBinding, dstElem});
-					}
-					break;
-				} case DescriptorCategory::buffer: {
-					dlg_assert(dstBind.bufferInfo.buffer);
-					dstBind.bufferInfo.buffer->descriptors.insert({&dst, dstBinding, dstElem});
-					break;
-				} case DescriptorCategory::bufferView:
-					dlg_assert(dstBind.bufferView);
-					dstBind.bufferView->descriptors.insert({&dst, dstBinding, dstElem});
-					break;
-				default: break;
-			}
+			copyLocked(*dst.state, dstBinding, dstElem, *src.state, srcBinding, srcElem);
 		}
 
-		// TODO: change/check for descriptor indexing
-		dst.invalidateCbs();
+		if(invalidate) {
+			dst.invalidateCbsLocked();
+		}
 	}
 
 	return dev.dispatch.UpdateDescriptorSets(device,
@@ -644,49 +900,58 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	auto& dut = dev.dsuTemplates.get(descriptorUpdateTemplate);
 
 	auto* ptr = static_cast<const std::byte*>(pData);
+	bool invalidate = false;
 
-	for(auto& entry : dut.entries) {
-		auto dstBinding = entry.dstBinding;
-		auto dstElem = entry.dstArrayElement;
-		for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
-			dlg_assert(dstBinding < ds.layout->bindings.size());
-			while(dstElem >= ds.bindings[dstBinding].size()) {
-				++dstBinding;
-				dstElem = 0u;
-				dlg_assert(dstBinding < ds.layout->bindings.size());
-			}
+	{
+		// The whole update process must be atomic
+		std::lock_guard lock(dev.mutex);
 
-			auto& binding = ds.bindings[dstBinding][dstElem];
-			auto dsType = ds.layout->bindings[dstBinding].descriptorType;
+		// We are updating the descriptorSets state, if someone
+		// else holds on to it, we need to allocate a new one.
+		// This basically implements copy-on-write
+		if(ds.state->refCount > 1) {
+			ds.state->ds = nullptr;
+			ds.state = copyDescriptorSetStateLocked(*ds.state);
+			ds.state->ds = &ds;
+		}
 
-			// NOTE: such an assertion here would be nice. Track used
-			// layout in update?
-			// dlg_assert(write.descriptorType == type);
+		for(auto& entry : dut.entries) {
+			auto dstBinding = entry.dstBinding;
+			auto dstElem = entry.dstArrayElement;
+			for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
+				auto& binding = advanceUntilValid(*ds.state, dstBinding, dstElem);
+				auto dsType = ds.state->layout->bindings[dstBinding].descriptorType;
 
-			auto* data = ptr + (entry.offset + j * entry.stride);
+				// NOTE: such an assertion here would be nice. Track used
+				// layout in update?
+				// dlg_assert(write.descriptorType == type);
 
-			std::lock_guard lock(dev.mutex);
-			switch(category(dsType)) {
-				case DescriptorCategory::image: {
-					auto& img = *reinterpret_cast<const VkDescriptorImageInfo*>(data);
-					updateLocked(ds, binding, dstBinding, dstElem, img);
-					break;
-				} case DescriptorCategory::buffer: {
-					auto& buf = *reinterpret_cast<const VkDescriptorBufferInfo*>(data);
-					updateLocked(ds, binding, dstBinding, dstElem, buf);
-					break;
-				} case DescriptorCategory::bufferView: {
-					auto& bufView = *reinterpret_cast<const VkBufferView*>(data);
-					updateLocked(ds, binding, dstBinding, dstElem, bufView);
-					break;
-				} default:
-					dlg_error("Invalid/unknown descriptor type");
-					break;
+				auto* data = ptr + (entry.offset + j * entry.stride);
+
+				switch(category(dsType)) {
+					case DescriptorCategory::image: {
+						auto& img = *reinterpret_cast<const VkDescriptorImageInfo*>(data);
+						updateLocked(*ds.state, binding, dstBinding, dstElem, img);
+						break;
+					} case DescriptorCategory::buffer: {
+						auto& buf = *reinterpret_cast<const VkDescriptorBufferInfo*>(data);
+						updateLocked(*ds.state, binding, dstBinding, dstElem, buf);
+						break;
+					} case DescriptorCategory::bufferView: {
+						auto& bufView = *reinterpret_cast<const VkBufferView*>(data);
+						updateLocked(*ds.state, binding, dstBinding, dstElem, bufView);
+						break;
+					} default:
+						dlg_error("Invalid/unknown descriptor type");
+						break;
+				}
 			}
 		}
 	}
 
-	ds.invalidateCbs();
+	if(invalidate) {
+		ds.invalidateCbs();
+	}
 
 	auto f = dev.dispatch.UpdateDescriptorSetWithTemplate;
 	f(device, descriptorSet, descriptorUpdateTemplate, pData);

@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <util/span.hpp>
+#include <util/ext.hpp>
 #include <dlg/dlg.hpp>
 
 namespace vil {
@@ -53,6 +54,17 @@ template<typename T>
 }
 
 template<typename T>
+[[nodiscard]] span<T> allocSpan(CommandRecord& rec, size_t count) {
+	if(count == 0) {
+		return {};
+	}
+
+	auto* raw = allocate(rec, sizeof(T) * count, alignof(T));
+	auto* arr = new(raw) T[count];
+	return span<T>(arr, count);
+}
+
+template<typename T>
 [[nodiscard]] span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, T* data, size_t count) {
 	auto span = allocSpan<std::remove_const_t<T>>(cb, count);
 	std::copy(data, data + count, span.data());
@@ -62,6 +74,13 @@ template<typename T>
 template<typename T>
 [[nodiscard]] span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, span<T> data) {
 	return copySpan(cb, data.data(), data.size());
+}
+
+inline const char* copyString(CommandRecord& rec, std::string_view src) {
+	auto dst = allocSpan<char>(rec, src.size() + 1);
+	std::copy(src.begin(), src.end(), dst.data());
+	dst[src.size()] = 0;
+	return dst.data();
 }
 
 inline const char* copyString(CommandBuffer& cb, std::string_view src) {

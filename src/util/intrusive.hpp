@@ -3,6 +3,7 @@
 #include <type_traits>
 #include <utility>
 #include <tuple>
+#include <memory>
 
 namespace vil {
 
@@ -95,7 +96,7 @@ protected:
 	std::tuple<T*, H> storage_; // empty-object-optimization for H
 };
 
-template<typename T>
+template<typename T, typename Deleter = std::default_delete<T>>
 struct RefCountHandler {
 	// NOTE: we assume that increasing/decreasing ref count is noexcept
 	void inc(T* ptr) const noexcept { ++ptr->refCount; }
@@ -103,7 +104,7 @@ struct RefCountHandler {
 	void dec(T* ptr) const noexcept {
 		static_assert(std::is_nothrow_destructible_v<T>);
 		if(--ptr->refCount == 0) {
-			delete ptr;
+			Deleter()(ptr);
 		}
 	}
 };
@@ -117,14 +118,15 @@ struct FinishHandler {
 	FinishHandler& operator=(FinishHandler&&) = default;
 
 	void inc(T*) const noexcept {}
-	// void dec(T* ptr) const noexcept(noexcept(ptr->finish())) {
 	void dec(T* ptr) const noexcept {
 		static_assert(std::is_nothrow_invocable_v<decltype(&T::finish), T>);
 		ptr->finish();
 	}
 };
 
-template<typename T> using IntrusivePtr = HandledPtr<T, RefCountHandler<T>>;
+template<typename T, typename D = std::default_delete<T>>
+	using IntrusivePtr = HandledPtr<T, RefCountHandler<T, D>>;
+
 template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
 template<typename T, typename H>

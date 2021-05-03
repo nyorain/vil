@@ -177,8 +177,12 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// cb viewer?
 
 	// Check if it already has a valid record associated
-	// TODO, PERF: when record->hook is true, we don't have to query this here
-	// I guess?
+	// TODO(important): before calling find, we'd need to unset the
+	// invalidated handles from the commands in hierachy_, might lead
+	// to problems at the moment. Make sure we get the CommandRecord in desc().
+	// TODO, PERF: when record->hook is true, we only query this
+	// to get the new 'match' value (and for debug checks below).
+	// Kinda wasted to do all that work.
 	auto findRes = find(record->commands, hierachy_, dsState_);
 	if(findRes.hierachy.empty()) {
 		// Can't find command
@@ -188,6 +192,9 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 	dlg_assert(findRes.hierachy.size() == hierachy_.size());
 
+	// TODO: not possible to reuse the hook-recorded cb when the command
+	// buffer uses any update_after_bind descriptors that changed. Track
+	// that somehow. See notes in ds.cpp on 'invalidate'.
 	if(record->hook) {
 		// The record was already submitted - i.e. has a valid state - and
 		// the hook is frozen. Nothing to do.
@@ -233,7 +240,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 }
 
 void CommandHook::desc(std::vector<const Command*> hierachy,
-		CommandDescriptorState dsState, bool invalidate) {
+		CommandDescriptorSnapshot dsState, bool invalidate) {
 	hierachy_ = std::move(hierachy);
 	dsState_ = std::move(dsState);
 
@@ -302,7 +309,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 
 	hookCounter = hook->counter_;
 
-	auto& dev = xrecord.device();
+	auto& dev = *xrecord.dev;
 
 	VkCommandBufferAllocateInfo allocInfo {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -364,7 +371,7 @@ CommandHookRecord::~CommandHookRecord() {
 	dlg_assert(record);
 	dlg_assert(!state || !state->writer);
 
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 
 	// destroy resources
 	auto commandPool = dev.queueFamilies[record->queueFamily].commandPool;
@@ -390,7 +397,7 @@ CommandHookRecord::~CommandHookRecord() {
 }
 
 void CommandHookRecord::initState(RecordInfo& info) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 	state.reset(new CommandHookState());
 	dlg_assert(!hcommand.empty());
 
@@ -458,7 +465,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 }
 
 void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 	dlg_assert(&dst == hcommand.back());
 
 	if(info.splitRenderPass) {
@@ -502,7 +509,7 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 }
 
 void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 	dlg_assert(&dst == hcommand.back());
 
 	if(info.splitRenderPass) {
@@ -546,7 +553,7 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info)
 }
 
 void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 
 	hookRecordBeforeDst(cmd, info);
 
@@ -615,7 +622,7 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 	*info.maxHookLevel = std::max(*info.maxHookLevel, info.nextHookLevel);
 
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 	while(cmd) {
 		auto nextInfo = info;
 
@@ -838,7 +845,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
 }
 
 void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 
 	DescriptorState* dsState = nullptr;
 	if(auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd)) {
@@ -865,26 +872,33 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		return;
 	}
 
-	auto& set = dsState->descriptorSets[setID];
+	auto& dsSnapshot = record->lastDescriptorState;
 
-	if(bindingID >= nonNull(set.ds).bindings.size()) {
+	auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
+	if(it == dsSnapshot.states.end()) {
+		dlg_error("Could not find descriptor in snapshot??");
+		dsState->descriptorSets = {};
+		return;
+	}
+
+	auto& ds = nonNull(it->second);
+	if(bindingID >= ds.layout->bindings.size()) {
 		dlg_trace("bindingID out of range");
 		dsState->descriptorSets = {};
 		return;
 	}
 
-	auto& binding = set.ds->bindings[bindingID];
-
-	if(elemID >= binding.size()) {
+	auto bindings = vil::bindings(ds, bindingID);
+	if(elemID >= bindings.size()) {
 		dlg_trace("elemID out of range");
 		dsState->descriptorSets = {};
 		return;
 	}
 
-	auto& elem = binding[elemID];
+	auto& elem = bindings[elemID];
 
 	dlg_assert(elem.valid);
-	auto& lbinding = set.ds->layout->bindings[bindingID];
+	auto& lbinding = ds.layout->bindings[bindingID];
 	auto cat = category(lbinding.descriptorType);
 	if(cat == DescriptorCategory::image) {
 		if(needsImageView(lbinding.descriptorType)) {
@@ -917,11 +931,11 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 					state->errorMessage, record->queueFamily);
 			}
 		} else {
-			// TODO: we should not land here at all! Check state in
-			//   cb gui before registring hook. Don't register a hook
-			//   just to find out *here* that we don't need it
+			// we should not land here at all! Check state in
+			// cb gui before registring hook. Don't register a hook
+			// just to find out *here* that we don't need it
 			state->errorMessage = "Just a sampler bound";
-			// dlg_warn(state->errorMessage);
+			dlg_error(state->errorMessage);
 		}
 	} else if(cat == DescriptorCategory::buffer) {
 		auto& dst = state->dsCopy.emplace<CopiedBuffer>();
@@ -946,7 +960,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 }
 
 void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 
 	dlg_assert(info.beginRenderPassCmd);
 	auto& fb = nonNull(info.beginRenderPassCmd->fb);
@@ -1006,7 +1020,7 @@ VkImageSubresourceRange toRange(const VkImageSubresourceLayers& subres) {
 
 void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 	dlg_assert(hook->copyTransferDst != hook->copyTransferSrc);
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 
 	if(hook->copyTransferSrc) {
 		VkImageSubresourceRange subres {};
@@ -1094,7 +1108,7 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 }
 
 void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "beforeDstOutsideRp");
 
 	if(info.splitRenderPass) {
@@ -1201,7 +1215,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 }
 
 void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info) {
-	auto& dev = record->device();
+	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "afterDsOutsideRp");
 
 	if(info.splitRenderPass) {
@@ -1259,6 +1273,7 @@ CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec,
 	dlg_assert(rec.state);
 	dlg_assert(!rec.state->writer);
 	rec.state->writer = &subm;
+	descriptorSnapshot = rec.record->lastDescriptorState;
 }
 
 CommandHookSubmission::~CommandHookSubmission() {
@@ -1286,6 +1301,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	state.match = this->match;
 	state.state = record->state;
 	state.command = record->hcommand;
+	state.descriptorSnapshot = std::move(this->descriptorSnapshot);
 
 	dlg_assertm(record->hook->completed.size() < 32,
 		"Hook state overflow detected");
@@ -1355,7 +1371,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 }
 
 void CommandHookSubmission::transmitTiming() {
-	auto& dev = record->record->device();
+	auto& dev = *record->record->dev;
 
 	dlg_assert(bool(record->queryPool) == record->hook->queryTime);
 	if(!record->queryPool || !record->hook->queryTime) {

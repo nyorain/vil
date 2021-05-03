@@ -4,7 +4,6 @@
 #include <data.hpp>
 #include <swapchain.hpp>
 #include <window.hpp>
-#include <commands.hpp>
 #include <handles.hpp>
 #include <overlay.hpp>
 #include <util/util.hpp>
@@ -68,9 +67,9 @@ Device::~Device() {
 	dlg_assert(this->bufferViews.empty());
 	dlg_assert(this->dsuTemplates.empty());
 
-	if(window) {
-		window.reset();
-	}
+	// their (transitive) destructors may use device resources
+	commandHook.reset();
+	window.reset();
 
 	for(auto& fence : fencePool) {
 		dispatch.DestroyFence(handle, fence, nullptr);

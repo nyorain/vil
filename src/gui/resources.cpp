@@ -465,21 +465,22 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 	imGuiText("{}", name(ds));
 	ImGui::Spacing();
 
-	refButtonExpect(*gui_, ds.layout.get());
+	dlg_assert(ds.state);
+	refButtonExpect(*gui_, ds.state->layout.get());
 	refButtonExpect(*gui_, ds.pool);
 
 	ImGui::Text("Bindings");
-	for(auto b = 0u; b < ds.bindings.size(); ++b) {
-		auto& info = ds.layout->bindings[b];
-		auto& binding = ds.bindings[b];
+	for(auto b = 0u; b < ds.state->layout->bindings.size(); ++b) {
+		auto& layout = ds.state->layout->bindings[b];
+		auto binding = bindings(*ds.state, b);
 
-		dlg_assert(info.binding == b);
+		dlg_assert(layout.binding == b);
 
 		if(binding.empty()) { // valid?
 			continue;
 		}
 
-		auto print = [&](VkDescriptorType type, const DescriptorSet::Binding& binding) {
+		auto print = [&](VkDescriptorType type, const DescriptorBinding& binding) {
 			if(!binding.valid) {
 				imGuiText("null");
 				return;
@@ -513,7 +514,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 
 		if(binding.size() > 1) {
 			auto label = dlg::format("{}: {}[{}]", b,
-				vk::name(info.descriptorType), binding.size());
+				vk::name(layout.descriptorType), binding.size());
 			if(ImGui::TreeNode(label.c_str())) {
 				for(auto e = 0u; e < binding.size(); ++e) {
 					auto& elem = binding[e];
@@ -522,17 +523,17 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 					imGuiText("{}: ", e);
 					ImGui::SameLine();
 
-					print(info.descriptorType, elem);
+					print(layout.descriptorType, elem);
 				}
 			}
 		} else {
 			ImGui::Bullet();
-			imGuiText("{}, {}: ", b, vk::name(info.descriptorType));
+			imGuiText("{}, {}: ", b, vk::name(layout.descriptorType));
 
 			ImGui::Indent();
 			ImGui::Indent();
 
-			print(info.descriptorType, binding[0]);
+			print(layout.descriptorType, binding[0]);
 
 			ImGui::Unindent();
 			ImGui::Unindent();
@@ -967,10 +968,10 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 	}
 
 	ImGui::Text("Descriptor Set Layouts");
-	for(auto* ds : pipeLayout.descriptors) {
+	for(auto& dsl : pipeLayout.descriptors) {
 		ImGui::Bullet();
-		if(ImGui::Button(name(*ds).c_str())) {
-			select(*ds);
+		if(ImGui::Button(name(*dsl).c_str())) {
+			select(*dsl);
 		}
 	}
 }

@@ -6,8 +6,8 @@
 #include <util/f16.hpp>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
-#include <commands.hpp>
-#include <record.hpp>
+#include <command/commands.hpp>
+#include <command/record.hpp>
 #include <pipe.hpp>
 #include <image.hpp>
 #include <buffer.hpp>
@@ -249,7 +249,7 @@ void CommandViewer::unselect() {
 }
 
 void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
-		bool resetState) {
+		CommandDescriptorSnapshot dsState, bool resetState) {
 	auto drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
 	auto dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
 	auto selectCommandView = false;
@@ -361,6 +361,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 
 	record_ = rec;
 	command_ = &cmd;
+	dsState_ = std::move(dsState);
 
 	if(selectCommandView) {
 		view_ = IOView::command;
@@ -527,6 +528,7 @@ void CommandViewer::displayDsList() {
 	// NOTE: better to iterate over sets/bindings in shader stages?
 	for(auto i = 0u; i < dss.size(); ++i) {
 		auto& ds = dss[i];
+
 		if(!ds.ds) {
 			if(showUnboundSets) {
 				auto label = dlg::format("Descriptor Set {}: null", i);
@@ -539,10 +541,16 @@ void CommandViewer::displayDsList() {
 			continue;
 		}
 
+		auto stateIt = dsState_.states.find(ds.ds);
+		dlg_assert_or(stateIt != dsState_.states.end(), continue);
+
+		auto& state = *stateIt->second;
+		dlg_assert(state.layout);
+
 		auto label = dlg::format("Descriptor Set {}", i);
 		ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 		if(ImGui::TreeNode(label.c_str())) {
-			for(auto b = 0u; b < ds.ds->bindings.size(); ++b) {
+			for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 				auto oLabel = bindingName(i, b);
 				if(!oLabel) {
 					continue;
@@ -747,36 +755,42 @@ void CommandViewer::displayDs(Draw& draw) {
 
 	auto* set = dss[setID].ds;
 	if(!set) {
-		ImGui::Text("DescriptorSet was destroyed/invalidated");
+		ImGui::Text("DescriptorSet was not bound or destroyed/invalidated");
 		return;
 	}
 
-	if(bindingID >= set->bindings.size()) {
+	auto stateIt = dsState_.states.find(set);
+	dlg_assert_or(stateIt != dsState_.states.end(), return);
+
+	auto& state = *stateIt->second;
+	dlg_assert(state.layout);
+
+	if(bindingID >= state.layout->bindings.size()) {
 		ImGui::Text("Binding not bound");
 		dlg_warn("Binding not bound? Shouldn't happen");
 		return;
 	}
 
-	auto& binding = set->bindings[bindingID];
-	if(binding.empty()) {
+	auto bindings = vil::bindings(state, bindingID);
+	if(bindings.empty()) {
 		ImGui::Text("Empty binding, no elements");
 		dlg_warn("Empty binding? Shouldn't happen");
 		return;
 	}
 
 	auto& elemID = viewData_.ds.elem;
-	if(optSliderRange("Element", elemID, binding.size())) {
+	if(optSliderRange("Element", elemID, bindings.size())) {
 		updateHook();
 		state_ = {};
 	}
 
-	if(elemID >= binding.size()) {
+	if(elemID >= bindings.size()) {
 		ImGui::Text("Element not bound");
 		dlg_warn("Element not bound? Shouldn't happen");
 		return;
 	}
 
-	auto& elem = binding[elemID];
+	auto& elem = bindings[elemID];
 	if(!elem.valid) {
 		ImGui::Text("Binding element not valid");
 		// NOTE: i guess this can happen with descriptor indexing
@@ -784,8 +798,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		return;
 	}
 
-	dlg_assert(bindingID < set->layout->bindings.size());
-	auto& bindingLayout = set->layout->bindings[bindingID];
+	auto& bindingLayout = state.layout->bindings[bindingID];
 	auto dsType = bindingLayout.descriptorType;
 	auto dsCat = category(dsType);
 
@@ -1245,7 +1258,7 @@ void CommandViewer::draw(Draw& draw) {
 		replaceInvalidatedLocked(*record_);
 	}
 
-	dlg_assert(record_->destroyed.empty());
+	dlg_assert(record_->invalidated.empty());
 
 	auto& bcmd = nonNull(command_);
 	auto actionCmd = bcmd.type() == CommandType::dispatch ||

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
 #include <gui/vertexViewer.hpp>
+#include <command/record.hpp>
 
 namespace vil {
 
@@ -56,7 +57,8 @@ public:
 	void draw(Draw& draw);
 
 	void unselect();
-	void select(IntrusivePtr<CommandRecord>, const Command&, bool resetState);
+	void select(IntrusivePtr<CommandRecord>, const Command&,
+		CommandDescriptorSnapshot, bool resetState);
 	void state(IntrusivePtr<CommandHookState>);
 
 	CommandHookState* state() const { return state_.get(); }
@@ -94,6 +96,7 @@ private:
 
 	IntrusivePtr<CommandRecord> record_ {}; // the selected record
 	const Command* command_ {}; // the selected command
+	CommandDescriptorSnapshot dsState_ {};
 	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
 
 	// For the one image we potentially display

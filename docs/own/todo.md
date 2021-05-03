@@ -3,11 +3,12 @@
 v0.1, goal: end of january 2021
 
 - [x] fix vertex buffer layout reader (for non rgba-ordered formats. See TODO there)
+- [ ] make sure we fulfill multithreading requirements for
+      VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT and friends
 - [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
-- [ ] completely rethink the concept of CommandGroups
-	- [ ] improve CommandBufferDesc (rename to RecordDesc or RecordStructure),
-		  see desc2.hpp. Or abolish groups completely. We can't rely
-		  on used handles either since there is update_after_bind
+- [ ] remove CommandGroups? Just rely on command matching instead?
+      figure out how to properly do matching across command buffer
+	  boundaries; taking the context - the position inside a frame - into account
 - [ ] don't even attempt to display non-float formats in 3D vertex viewer
 - [ ] support drawIndirectCount in vertex viewer
 	- [ ] #43, probably for later: also support just showing a single draw command
@@ -135,6 +136,11 @@ v0.1, goal: end of january 2021
 - [ ] stop this todo-for-v0.1-list from growing at some point.
 
 Possibly for later, new features/ideas:
+- [ ] could write patched shader spirv data into a pipeline cache I guess
+      or maintain own shader cache directory with patched spirv
+	  not sure if worth it at all though, the spirv patching is probably
+	  not that expensive (and could even be further optimized, skip
+	  the code sections).
 - [ ] (low prio) our descriptor matching fails in some cases when handles are abused
 	  as temporary, e.g. imageViews, samplers, bufferViews (ofc also for
 	  stuff like images and buffers).

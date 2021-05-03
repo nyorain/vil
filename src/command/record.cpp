@@ -99,7 +99,7 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		dsUpdateTemplates(*this),
 		secondaries(*this) {
 	if(!cb->name.empty()) {
-		cbName = copyString(*cb, cb->name);
+		cbName = copyString(*this, cb->name);
 	}
 }
 
@@ -177,16 +177,6 @@ void replaceInvalidatedLocked(CommandRecord& record) {
 	}
 
 	record.invalidated.clear();
-}
-
-void notifyInvalidateLocked(CommandRecord& record, const DescriptorSet& ds) {
-	if(record.keepDescriptorInformation) {
-		// TODO: many memory copies, memory allocations, too expensive here
-		auto& newDS = record.keptDescriptors.emplace_back();
-		newDS.layout = ds.layout;
-		newDS.bindings = ds.bindings;
-		newDS.name = ds.name; // TODO: needed?
-	}
 }
 
 } // namespace vil

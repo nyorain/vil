@@ -11,7 +11,7 @@ struct Buffer : MemoryResource {
 	VkBufferCreateInfo ci;
 
 	std::vector<BufferView*> views; // TODO: unordered_set?
-	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> descriptors;
+	std::unordered_set<DescriptorStateRef, DescriptorStateRef::Hash> descriptors;
 
 	bool concurrentHooked {}; // whether we set it to concurrent mode
 
@@ -23,7 +23,7 @@ struct BufferView : DeviceHandle {
 	VkBufferViewCreateInfo ci;
 	Buffer* buffer {};
 
-	std::unordered_set<DescriptorSetRef, DescriptorSetRef::Hash> descriptors;
+	std::unordered_set<DescriptorStateRef, DescriptorStateRef::Hash> descriptors;
 
 	~BufferView();
 };

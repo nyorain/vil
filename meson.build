@@ -84,15 +84,16 @@ src = files(
 	'src/data.cpp',
 	'src/window.cpp',
 	'src/api.cpp',
-	'src/commands.cpp',
 	'src/overlay.cpp',
 	'src/platform.cpp',
-	'src/commandDesc.cpp',
-	'src/record.cpp',
 	'src/vk/format_utils.cpp',
 	'src/util/util.cpp',
 	'src/util/f16.cpp',
 	'src/util/ext.cpp',
+	'src/command/alloc.cpp',
+	'src/command/desc.cpp',
+	'src/command/record.cpp',
+	'src/command/commands.cpp',
 
 	# vulkan api entrypoints
 	'src/handle.cpp',
@@ -136,7 +137,6 @@ src = files(
 	'src/layer.hpp',
 	'src/cb.hpp',
 	'src/handles.hpp',
-	'src/commands.hpp',
 	'src/rp.hpp',
 	'src/sync.hpp',
 	'src/pipe.hpp',
@@ -148,9 +148,12 @@ src = files(
 	'src/platform.hpp',
 	'src/win32.hpp',
 	'src/data.hpp',
-	'src/record.hpp',
 	'src/queryPool.hpp',
 	'src/submit.hpp',
+	'src/command/commands.hpp',
+	'src/command/record.hpp',
+	'src/command/alloc.hpp',
+	'src/command/desc.hpp',
 
 	'src/vk/vulkan.h',
 	'src/vk/vulkan_core.h',
@@ -177,6 +180,7 @@ src = files(
 	'src/util/intrusive.hpp',
 	'src/util/syncedMap.hpp',
 	'src/util/ext.hpp',
+	'src/util/debugMutex.hpp',
 
 	'src/imgui/imgui.h',
 	'include/vil_api.h',
@@ -227,7 +231,7 @@ vil_layer = shared_library(
 	cpp_args: args + layer_args,
 	link_args: link_args,
 	install: true,
-	# cpp_pch: 'src/pch.hpp',
+	cpp_pch: 'src/pch.hpp',
 )
 
 conf_data = configuration_data()

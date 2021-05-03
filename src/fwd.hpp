@@ -65,6 +65,7 @@ struct Semaphore;
 struct CommandPool;
 struct DescriptorPool;
 struct DescriptorSet;
+struct DescriptorSetState;
 struct DescriptorSetLayout;
 struct DescriptorUpdateTemplate;
 struct ShaderModule;
@@ -92,10 +93,10 @@ struct ViewableImageCopy;
 
 struct Command;
 struct SectionCommand;
-struct CommandDesc;
 struct CommandRecord;
 struct CommandBufferDesc;
 struct CommandMemBlock;
+struct CommandDescriptorSnapshot;
 struct MemBlockDeleter;
 struct DrawCmdBase;
 struct DispatchCommand;
@@ -112,17 +113,17 @@ struct Draw;
 
 struct SpirvData;
 
-struct DescriptorSetRef {
-	DescriptorSet* ds {};
+struct DescriptorStateRef {
+	DescriptorSetState* state {};
 	u32 binding {};
 	u32 elem {};
 
 	struct Hash {
-		std::size_t operator()(const DescriptorSetRef& dsr) const noexcept;
+		std::size_t operator()(const DescriptorStateRef& dsr) const noexcept;
 	};
 
-	friend inline bool operator==(const DescriptorSetRef& a, const DescriptorSetRef& b) {
-		return a.ds == b.ds && a.binding == b.binding && a.elem == b.elem;
+	friend inline bool operator==(const DescriptorStateRef& a, const DescriptorStateRef& b) {
+		return a.state == b.state && a.binding == b.binding && a.elem == b.elem;
 	}
 };
 

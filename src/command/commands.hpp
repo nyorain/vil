@@ -47,7 +47,7 @@ struct Command {
 	// so that resetting command buffers does not add significant overhead
 	// as we can have *a lot* of commands in a command buffer.
 	// When special commands need resources with destructor, those should
-	// be separately stored in the command buffer.
+	// be separately stored in the command record.
 	~Command() = default;
 
 	// Display a one-line overview of the command via ImGui.
@@ -61,6 +61,7 @@ struct Command {
 	// Used by the default 'display' implementation.
 	virtual std::string toString() const { return nameDesc(); }
 
+	// TODO: can be removed, I guess
 	// Should return the most important arguments as strings.
 	// Used to build a CommandDescription.
 	virtual std::vector<std::string> argumentsDesc() const { return {}; }

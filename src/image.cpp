@@ -40,8 +40,8 @@ ImageView::~ImageView() {
 	// Can't use for loop here, as descriptor will unregsiter themselves in turn
 	while(!this->descriptors.empty()) {
 		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(dsRef.ds->getImageView(dsRef.binding, dsRef.elem) == this);
-		notifyDestroyLocked(*dsRef.ds, dsRef.binding, dsRef.elem, *this);
+		dlg_assert(getImageView(*dsRef.state, dsRef.binding, dsRef.elem) == this);
+		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
 	}
 }
 
@@ -55,8 +55,8 @@ Sampler::~Sampler() {
 	// Can't use for loop here, as descriptor will unregsiter themselves in turn
 	while(!this->descriptors.empty()) {
 		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(dsRef.ds->getSampler(dsRef.binding, dsRef.elem) == this);
-		notifyDestroyLocked(*dsRef.ds, dsRef.binding, dsRef.elem, *this);
+		dlg_assert(getSampler(*dsRef.state, dsRef.binding, dsRef.elem) == this);
+		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
 	}
 }
 

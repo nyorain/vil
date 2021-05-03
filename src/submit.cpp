@@ -26,10 +26,22 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 		std::lock_guard lock(dev.mutex);
 		dlg_assert(cb.state() == CommandBuffer::State::executable);
 
-		// find submission group to check for hook
 		auto& rec = *cb.lastRecordLocked();
 		dlg_assert(subm.queue->family == rec.queueFamily);
 
+		// update the descriptor state of the record
+		// TODO, PERF: we only need to do this when update_after_bind
+		// descriptors in the record changed since the last submission
+		rec.lastDescriptorState.states.clear();
+		for(auto& pair : rec.handles) {
+			auto& handle = nonNull(pair.second.handle);
+			if(handle.objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+				auto& ds = static_cast<const DescriptorSet&>(handle);
+				rec.lastDescriptorState.states[static_cast<void*>(&handle)] = ds.state;
+			}
+		}
+
+		// find submission group to check for hook
 		// When the CommandRecord doesn't already have a group (from
 		// previous submission), try to find an existing group
 		// that matches this submission.
@@ -496,6 +508,8 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 	// can potentially write the handle. Could track
 	// during recording and check below in ds refs.
 
+	dlg_assert(handle.dev->mutex.owned());
+
 	const Image* img = nullptr;
 	const Buffer* buf = nullptr;
 
@@ -515,8 +529,13 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 		if(img) {
 			for(auto* view : img->views) {
 				for(auto& ds : view->descriptors) {
+					dlg_assert(ds.state);
+					if(!ds.state->ds) {
+						continue;
+					}
+
 					// TODO: could check here if it is bound as writeable image
-					if(ds.ds->refRecords.find(&rec) != ds.ds->refRecords.end()) {
+					if(ds.state->ds->refRecords.find(&rec) != ds.state->ds->refRecords.end()) {
 						return true;
 					}
 				}
@@ -525,8 +544,13 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 
 		if(buf) {
 			for(auto& ds : buf->descriptors) {
+				dlg_assert(ds.state);
+				if(!ds.state->ds) {
+					continue;
+				}
+
 				// TODO: could check here if it is bound as writeable buffer
-				if(ds.ds->refRecords.find(&rec) != ds.ds->refRecords.end()) {
+				if(ds.state->ds->refRecords.find(&rec) != ds.state->ds->refRecords.end()) {
 					return true;
 				}
 			}

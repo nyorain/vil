@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <util/intrusive.hpp>
+#include <util/span.hpp>
 #include <vk/vulkan.h>
 
 #include <optional>
@@ -46,6 +47,7 @@ struct DescriptorSetLayout : DeviceHandle {
 	// VkDescriptorSetLayoutBinding, with extra data
 	struct Binding {
 		u32 binding;
+		u32 offset; // total offset in bindings array of DescriptorSetState
 		VkDescriptorType descriptorType;
 		// You almost never want to use descriptorCount when dealing with a
 		// descriptorSet, just use binding.size() to account for variable count bindings.
@@ -59,88 +61,95 @@ struct DescriptorSetLayout : DeviceHandle {
 	std::vector<Binding> bindings;
 	std::atomic<u32> refCount {0}; // intrusive ref count
 
-	// Total number of bindings, including array elements
-	std::size_t totalNumBindings {};
-
 	// handle will be kept alive until this object is actually destroyed.
 	~DescriptorSetLayout();
+};
+
+size_t totalNumBindings(const DescriptorSetLayout&, u32 variableDescriptorCount);
+bool compatible(const DescriptorSetLayout&, const DescriptorSetLayout& b);
+
+// Information about a single binding in a DescriptorSet.
+struct DescriptorBinding {
+	bool valid {};
+
+	struct ImageInfo {
+		ImageView* imageView;
+		Sampler* sampler; // even stored here if immutable in layout
+		VkImageLayout layout;
+	};
+
+	struct BufferInfo {
+		Buffer* buffer;
+		VkDeviceSize offset;
+		VkDeviceSize range;
+	};
+
+	union {
+		ImageInfo imageInfo;
+		BufferInfo bufferInfo;
+		BufferView* bufferView;
+	};
 };
 
 // State of a descriptor set. Disconnected from the DescriptorSet itself
 // since for submission, we want to know the state of the descriptor at
 // submission time even if the descriptor set itself has been changed or
 // destroyed later on.
+// The memory for the DescriptorBindings will be allocated together with
+// the DescriptorSetState object, directly after it in memory.
+// See the 'binding' functions below to access it.
 struct DescriptorSetState {
-	struct ImageInfo {
-		ImageView* imageView;
-		Sampler* sampler; // even stored here if immutable in layout
-		VkImageLayout layout;
+	struct Deleter {
+		void operator()(DescriptorSetState*) const;
 	};
 
-	struct BufferInfo {
-		Buffer* buffer;
-		VkDeviceSize offset;
-		VkDeviceSize range;
-	};
+	// If the state has a variable_descriptor_count binding, this
+	// holds its count.
+	u32 variableDescriptorCount {};
 
-	struct Binding {
-		bool valid {};
+	// The ds with which this state is associated.
+	// If the ds the state originated from was changed or destroyed,
+	// this will be null.
+	DescriptorSet* ds {};
 
-		union {
-			ImageInfo imageInfo;
-			BufferInfo bufferInfo;
-			BufferView* bufferView;
-		};
-	};
+	// The layout associated with this state. Always valid.
+	IntrusivePtr<DescriptorSetLayout> layout {};
+	std::atomic<u32> refCount {}; // intrusive ref count
 
-	std::vector<std::vector<Binding>> bindings;
-	u32 refCount {};
+	~DescriptorSetState();
 };
 
+using DescriptorSetStatePtr = IntrusivePtr<DescriptorSetState, DescriptorSetState::Deleter>;
+
+u32 descriptorCount(const DescriptorSetState&, unsigned binding);
+
+span<DescriptorBinding> bindings(DescriptorSetState&, unsigned binding);
+span<const DescriptorBinding> bindings(const DescriptorSetState&, unsigned binding);
+
+DescriptorBinding& binding(DescriptorSetState&,
+		unsigned binding, unsigned elem);
+const DescriptorBinding& binding(const DescriptorSetState&,
+		unsigned binding, unsigned elem);
+
+Sampler* getSampler(DescriptorSetState&, unsigned binding, unsigned elem);
+ImageView* getImageView(DescriptorSetState&, unsigned binding, unsigned elem);
+Buffer* getBuffer(DescriptorSetState&, unsigned binding, unsigned elem);
+BufferView* getBufferView(DescriptorSetState&, unsigned binding, unsigned elem);
+
+// Vulkan descriptor set handle
 struct DescriptorSet : DeviceHandle {
 	DescriptorPool* pool {};
-	IntrusivePtr<DescriptorSetLayout> layout {};
 	VkDescriptorSet handle {};
-
-	IntrusivePtr<DescriptorSetState> state;
-
-	struct ImageInfo {
-		ImageView* imageView;
-		Sampler* sampler; // even stored here if immutable in layout
-		VkImageLayout layout;
-	};
-
-	struct BufferInfo {
-		Buffer* buffer;
-		VkDeviceSize offset;
-		VkDeviceSize range;
-	};
-
-	struct Binding {
-		bool valid {};
-
-		union {
-			ImageInfo imageInfo;
-			BufferInfo bufferInfo;
-			BufferView* bufferView;
-		};
-	};
-
-	std::vector<std::vector<Binding>> bindings;
-
-	Sampler* getSampler(unsigned binding, unsigned elem);
-	ImageView* getImageView(unsigned binding, unsigned elem);
-	Buffer* getBuffer(unsigned binding, unsigned elem);
-	BufferView* getBufferView(unsigned binding, unsigned elem);
+	DescriptorSetStatePtr state;
 
 	~DescriptorSet();
 };
 
-// Notifies the given descriptor that 'handle' - bound in the
+// Notifies the given descriptor state that 'handle' - bound in the
 // descriptor at binding, elem - was destroyed.
 // Must only be called while device mutex is locked.
 // Will invalidate the command records connected to the ds.
-void notifyDestroyLocked(DescriptorSet& ds, unsigned binding, unsigned elem,
+void notifyDestroyLocked(DescriptorSetState& ds, unsigned binding, unsigned elem,
 		const Handle& handle);
 
 struct DescriptorUpdateTemplate : DeviceHandle {

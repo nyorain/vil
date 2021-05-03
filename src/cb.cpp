@@ -382,15 +382,7 @@ VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
 		VkCommandPool                               commandPool,
 		VkCommandPoolTrimFlags                      flags) {
 	auto& dev = getData<Device>(device);
-	auto& pool = dev.commandPools.get(commandPool);
-
-	// free all currently unused memory blocks
-	auto* blocks = pool.memBlocks.load();
-	while(!pool.memBlocks.compare_exchange_weak(blocks, nullptr));
-	freeBlocks(blocks);
-
-	auto f = dev.dispatch.TrimCommandPool;
-	f(device, commandPool, flags);
+	dev.dispatch.TrimCommandPool(device, commandPool, flags);
 }
 
 // command buffer
@@ -1056,9 +1048,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	auto f = cb.dev->dispatch.CmdDrawIndirectCount;
-	f(commandBuffer, buffer, offset, countBuffer, countBufferOffset,
-		maxDrawCount, stride);
+	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer, buffer, offset,
+		countBuffer, countBufferOffset, maxDrawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
@@ -1086,9 +1077,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	auto f = cb.dev->dispatch.CmdDrawIndexedIndirectCount;
-	f(commandBuffer, buffer, offset, countBuffer, countBufferOffset,
-		maxDrawCount, stride);
+	cb.dev->dispatch.CmdDrawIndexedIndirectCount(commandBuffer, buffer,
+		offset, countBuffer, countBufferOffset, maxDrawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatch(
@@ -1140,8 +1130,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	auto f = cb.dev->dispatch.CmdDispatchBase;
-	f(commandBuffer, baseGroupX, baseGroupY, baseGroupZ,
+	cb.dev->dispatch.CmdDispatchBase(commandBuffer,
+		baseGroupX, baseGroupY, baseGroupZ,
 		groupCountX, groupCountY, groupCountZ);
 }
 
