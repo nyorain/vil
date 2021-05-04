@@ -189,6 +189,8 @@ public:
 		bool invalidate = true);
 	void unsetHookOps(bool doQueryTime = false);
 
+	const auto& dsState() const { return dsState_; }
+
 	~CommandHook();
 
 private:

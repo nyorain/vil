@@ -17,6 +17,7 @@
 #include <util/f16.hpp>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
+#include <tracy/Tracy.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <spirv_reflect.h>
@@ -34,6 +35,8 @@ void CommandBufferGui::init(Gui& gui) {
 CommandBufferGui::~CommandBufferGui() = default;
 
 void CommandBufferGui::draw(Draw& draw) {
+	ZoneScoped;
+
 	if(!record_ && mode_ != UpdateMode::swapchain) {
 		ImGui::Text("No record selected");
 		return;
@@ -301,9 +304,11 @@ void CommandBufferGui::draw(Draw& draw) {
 		commandViewer_.select(record_, *command_.back(), dsState_, false);
 		commandViewer_.state(best->state);
 
+		dev.commandHook->desc(command_, dsState_, false);
+
 		hook.completed.clear();
 
-		if(mode_ == UpdateMode::swapchain) {
+		if(mode_ == UpdateMode::swapchain && !freezePresentBatches_) {
 			if(!gui_->dev().swapchain->frameSubmissions.empty()) {
 				records_ = std::move(gui_->dev().swapchain->frameSubmissions);
 

@@ -47,6 +47,8 @@ bool isOpInSection8(spv::Op op) {
 
 VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
 		const char* entryPoint) {
+	ZoneScoped;
+
 	// parse spirv
 	if(spirv.size() < 5) {
 		dlg_error("spirv to small");
@@ -282,6 +284,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		const VkGraphicsPipelineCreateInfo*         pCreateInfos,
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
+	ZoneScoped;
 	auto& dev = getData<Device>(device);
 
 	// We can't create the pipelines one-by-one since that would mess
@@ -354,10 +357,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		nci.pStages = stages.data();
 	}
 
-	auto res = dev.dispatch.CreateGraphicsPipelines(device, pipelineCache,
-		u32(ncis.size()), ncis.data(), pAllocator, pPipelines);
-	if (res != VK_SUCCESS) {
-		return res;
+	{
+		ZoneScopedN("dispatch");
+		auto res = dev.dispatch.CreateGraphicsPipelines(device, pipelineCache,
+			u32(ncis.size()), ncis.data(), pAllocator, pPipelines);
+		if (res != VK_SUCCESS) {
+			return res;
+		}
 	}
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
@@ -457,7 +463,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		}
 	}
 
-	return res;
+	return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
@@ -467,11 +473,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		const VkComputePipelineCreateInfo*          pCreateInfos,
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
+	ZoneScoped;
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateComputePipelines(device, pipelineCache,
-		createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if(res != VK_SUCCESS) {
-		return res;
+
+	{
+		ZoneScopedN("dispatch");
+		auto res = dev.dispatch.CreateComputePipelines(device, pipelineCache,
+			createInfoCount, pCreateInfos, pAllocator, pPipelines);
+		if(res != VK_SUCCESS) {
+			return res;
+		}
 	}
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
@@ -487,7 +498,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		dlg_assert(pipe.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 	}
 
-	return res;
+	return VK_SUCCESS;
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroyPipeline(

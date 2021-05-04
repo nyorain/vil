@@ -7,6 +7,7 @@
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace vil {
 
@@ -47,6 +48,8 @@ CommandBuffer::~CommandBuffer() {
 }
 
 void CommandBuffer::clearPendingLocked() {
+	ZoneScoped;
+
 	// checkLocked will automtically remove it from this cb
 	while(!this->pending.empty()) {
 		auto res = checkLocked(*this->pending.front()->parent);
@@ -60,6 +63,8 @@ void CommandBuffer::clearPendingLocked() {
 }
 
 void CommandBuffer::doReset(bool startRecord) {
+	ZoneScoped;
+
 	// Make sure to never destroy a CommandBufferRecord inside the
 	// device lock.
 	IntrusivePtr<CommandRecord> keepAliveRecord;
@@ -87,6 +92,7 @@ void CommandBuffer::doReset(bool startRecord) {
 }
 
 void CommandBuffer::doEnd() {
+	ZoneScoped;
 	dlg_assert(record_);
 
 	// debug utils labels can be unterminated, see docs/debug-utils-label-nesting.md
@@ -837,6 +843,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		const VkDescriptorSet*                      pDescriptorSets,
 		uint32_t                                    dynamicOffsetCount,
 		const uint32_t*                             pDynamicOffsets) {
+	ZoneScoped;
+
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<BindDescriptorSetCmd>(cb);
 
@@ -1787,6 +1795,8 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 		uint32_t                                    offset,
 		uint32_t                                    size,
 		const void*                                 pValues) {
+	ZoneScoped;
+
 	auto& cb = getData<CommandBuffer>(commandBuffer);
 	auto& cmd = addCmd<PushConstantsCmd>(cb);
 

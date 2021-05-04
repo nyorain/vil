@@ -108,6 +108,7 @@ CommandRecord::~CommandRecord() {
 		return;
 	}
 
+	ZoneScoped;
 	std::lock_guard lock(dev->mutex);
 
 	if(group) {
@@ -137,6 +138,8 @@ CommandRecord::~CommandRecord() {
 }
 
 void replaceInvalidatedLocked(CommandRecord& record) {
+	ZoneScoped;
+
 	if(record.invalidated.empty()) {
 		return;
 	}

@@ -36,6 +36,14 @@ struct CommandMemBlock {
 [[nodiscard]] std::byte* allocate(CommandRecord&, size_t size, unsigned align);
 [[nodiscard]] std::byte* allocate(CommandBuffer&, size_t size, unsigned align);
 
+void freeBlocks(CommandMemBlock* head);
+
+struct MemBlocksListDeleter {
+	void operator()(CommandMemBlock* head) const {
+		freeBlocks(head);
+	}
+};
+
 template<typename T, typename... Args>
 [[nodiscard]] T& allocate(CommandBuffer& cb, Args&&... args) {
 	auto* raw = allocate(cb, sizeof(T), alignof(T));

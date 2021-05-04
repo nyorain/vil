@@ -4,7 +4,7 @@ project('VIL', ['c', 'cpp'],
 		'werror=true',
 		'warning_level=3',
 		'cpp_std=c++17',
-		'c_std=c99',
+		'c_std=c11',
 		# We need this to build the subprojects as static libraries. No
 		# other way to do this apparently.
 		# And we force the layer to be shared library anyways.
@@ -46,6 +46,25 @@ if get_option('buildtype') == 'debug'
 	args += '-D_GLIBCXX_DEBUG'
 endif
 
+# TODO: yeah, this needs some love
+with_win32 = build_machine.system() == 'windows'
+
+# with_x11 = not with_win32
+with_x11 = not with_win32 and get_option('with_x11')
+
+tracy_deps = []
+with_tracy = true
+
+if with_tracy
+	args += '-DTRACY_ENABLE'
+	if build_machine.system() == 'windows'
+		tracy_deps += cc.find_library('Ws2_32')
+		tracy_deps += cc.find_library('Dbghelp')
+	else
+		tracy_deps += cc.find_library('dl')
+	endif
+endif
+
 layer_args = [
 	# Make sure to *never* include them
 	'-DVK_NO_PROTOTYPES',
@@ -71,12 +90,6 @@ dep_swa = dependency('swa',
 	])
 
 # subdir('src/imgui')
-
-# TODO: yeah, this needs some love
-with_win32 = build_machine.system() == 'windows'
-
-# with_x11 = not with_win32
-with_x11 = not with_win32 and get_option('with_x11')
 
 src = files(
 	# own meta sources & util
@@ -155,6 +168,8 @@ src = files(
 	'src/command/alloc.hpp',
 	'src/command/desc.hpp',
 
+	'src/tracy/TracyClient.cpp',
+
 	'src/vk/vulkan.h',
 	'src/vk/vulkan_core.h',
 	'src/vk/vulkan_win32.h',
@@ -182,8 +197,8 @@ src = files(
 	'src/util/ext.hpp',
 	'src/util/debugMutex.hpp',
 
-	'src/imgui/imgui.h',
 	'include/vil_api.h',
+	'src/imgui/imgui.h',
 	'src/spirv_reflect.h',
 )
 
@@ -200,6 +215,7 @@ deps = [
 	dep_threads,
 	dep_dlg,
 	dep_swa,
+	tracy_deps,
 	# libimgui_core_dep,
 	# dep_vulkan,
 ]

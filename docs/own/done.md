@@ -1,3 +1,4 @@
+- [x] add tracy for profiling
 - [x] clean and split up QueueSubmit implementation. It's way too long,
       does way too much. And will probably further grow
 	- [x] also: always check in the beginning for finished submissions

@@ -6,6 +6,7 @@
 #include <rp.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
+#include <tracy/Tracy.hpp>
 
 // TODO: the whole CommandBufferDesc code is moot, really.
 // See desc2.hpp and ideas in match.md and todo.md. We might want to
@@ -213,6 +214,8 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 
 FindResult find(const Command* root, span<const Command*> dst,
 		const CommandDescriptorSnapshot& dstDsState, float threshold) {
+	ZoneScoped;
+
 	dlg_assert_or(!dst.empty(), return {});
 	dlg_assert(root);
 
@@ -264,6 +267,14 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 					unsigned match {};
 					for(auto i = 0u; i < srcBound.size(); ++i) {
+						if(!srcBound[i].ds || !dstBound[i].ds) {
+							// TODO: not sure if this can happen. Do sets
+							// that are statically not used by pipeline
+							// have to be bound?
+							dlg_warn("ds not bound? shouldn't happen");
+							continue;
+						}
+
 						auto& src = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
 						auto dst = dstDsState.states.find(dstBound[i].ds);
 						dlg_assert_or(dst != dstDsState.states.end(), continue);

@@ -13,10 +13,13 @@
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace vil {
 
 std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
+	ZoneScoped;
+
 	auto& dev = *subm.queue->dev;
 	dlg_assert(dev.mutex.owned());
 
@@ -124,6 +127,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		uint32_t                                    submitCount,
 		const VkSubmitInfo*                         pSubmits,
 		VkFence                                     fence) {
+	ZoneScoped;
 	auto& qd = getData<Queue>(queue);
 	auto& dev = *qd.dev;
 
@@ -188,6 +192,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		}
 
 		{
+			ZoneScopedN("dispatch.QueueSubmit");
+
 			std::lock_guard queueLock(dev.queueMutex);
 			res = dev.dispatch.QueueSubmit(qd.handle,
 				u32(submitter.submitInfos.size()), submitter.submitInfos.data(),

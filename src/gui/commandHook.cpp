@@ -11,6 +11,7 @@
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <vk/format_utils.h>
+#include <tracy/Tracy.hpp>
 
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
@@ -21,6 +22,8 @@ namespace vil {
 // util
 void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam) {
+	ZoneScoped;
+
 	this->dev = &dev;
 	this->extent = extent;
 	this->levelCount = levels;
@@ -127,6 +130,8 @@ void CopiedBuffer::init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFl
 }
 
 void CopiedBuffer::cpuCopy(u64 offset, u64 size) {
+	ZoneScoped;
+
 	if(!buffer.mem) {
 		return;
 	}
@@ -157,6 +162,7 @@ void CopiedBuffer::cpuCopy(u64 offset, u64 size) {
 VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
+	ZoneScoped;
 
 	auto* record = hooked.lastRecordLocked();
 	dlg_assert(record && record->group);
@@ -357,6 +363,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	unsigned maxHookLevel {};
 	info.maxHookLevel = &maxHookLevel;
 
+	ZoneScopedN("HookRecord");
 	this->hookRecord(record->commands, info);
 
 	dlg_assert(maxHookLevel == hcommand.size() - 1);
@@ -364,6 +371,8 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 }
 
 CommandHookRecord::~CommandHookRecord() {
+	ZoneScoped;
+
 	// We can be sure that record is still alive here since when the
 	// record is destroyed, all its submissions must have finished as well.
 	// And then we would have been destroyed via the finish() command (see
@@ -1280,6 +1289,8 @@ CommandHookSubmission::~CommandHookSubmission() {
 }
 
 void CommandHookSubmission::finish(Submission& subm) {
+	ZoneScoped;
+
 	dlg_assert(record && record->record);
 
 	dlg_assert(record->state);
@@ -1371,6 +1382,8 @@ void CommandHookSubmission::finish(Submission& subm) {
 }
 
 void CommandHookSubmission::transmitTiming() {
+	ZoneScoped;
+
 	auto& dev = *record->record->dev;
 
 	dlg_assert(bool(record->queryPool) == record->hook->queryTime);

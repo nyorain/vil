@@ -13,12 +13,12 @@
 #include <util/vecOps.hpp>
 
 #include <swa/key.h>
-
 #include <spirv_reflect.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
+#include <tracy/Tracy.hpp>
 
 #include <set>
 #include <map>
@@ -578,6 +578,7 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 }
 
 void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
+	ZoneScoped;
 	auto& dev = *this->dev_;
 	if(drawData.TotalIdxCount == 0) {
 		return;
@@ -622,6 +623,8 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 
 void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 		const ImDrawData& drawData) {
+	ZoneScoped;
+
 	auto& dev = *dev_;
 	if(drawData.TotalIdxCount == 0 && !clear_) {
 		return;
@@ -958,6 +961,7 @@ void Gui::drawMemoryUI(Draw&) {
 }
 
 void Gui::draw(Draw& draw, bool fullscreen) {
+	ZoneScoped;
 	resourcesTabDrawn_ = false;
 
 	ImGui::NewFrame();
@@ -1032,6 +1036,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 }
 
 void Gui::destroyed(const Handle& handle) {
+	ZoneScoped;
+
 	tabs_.resources.destroyed(handle);
 	tabs_.cb.destroyed(handle);
 
@@ -1076,6 +1082,7 @@ void Gui::activateTab(Tab tab) {
 }
 
 VkResult Gui::renderFrame(FrameInfo& info) {
+	ZoneScoped;
 	makeImGuiCurrent();
 
 	// TODO: hacky but we have to keep the record alive, making sure
@@ -1090,6 +1097,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	auto keepAliveHookRecords = dev().commandHook->completed;
 	auto keepAliveDsSnapshots0 = tabs_.cb.dsState_;
 	auto keepAliveDsSnapshots1 = tabs_.cb.commandViewer_.dsState_;
+	auto keepAliveDsSnapshots2 = dev().commandHook->dsState();
 
 	Draw* foundDraw {};
 
@@ -1203,6 +1211,8 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		dev().dispatch.EndCommandBuffer(draw.cb);
 
 		// == Submit batch ==
+		ZoneScopedN("BuildSubmission");
+
 		VkSubmitInfo submitInfo {};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.commandBufferCount = 1u;
@@ -1341,6 +1351,8 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		submitInfo.pWaitSemaphores = waitSems.data();
 
 		{
+			ZoneScopedN("dispatch.QueueSubmit");
+
 			// PERF: when using timeline semaphores we don't need a
 			// fence and can just use the timeline semaphore
 			std::lock_guard queueLock(dev().queueMutex);
@@ -1371,6 +1383,8 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	// Maybe just forward everything? Warn for unknown types?
 
 	{
+		ZoneScopedN("dispatch.QueuePresent");
+
 		std::lock_guard queueLock(dev().queueMutex);
 		res = dev().dispatch.QueuePresentKHR(info.presentQueue, &presentInfo);
 	}

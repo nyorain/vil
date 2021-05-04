@@ -15,6 +15,11 @@ command group rework:
 - [ ] remove CommandGroups? Just rely on command matching instead?
       figure out how to properly do matching across command buffer
 	  boundaries; taking the context - the position inside a frame - into account
+- [ ] currently command groups *interfer* with our new, improved command matching
+      since it may not recognize two records as being in the same group
+	  when they should be (and we would find a perfect command match).
+	  Another point for removing them in their current form; as a requirement
+	  for command matching
 - [ ] implement LCS and better general strategy when in swapchain mode for
 
 descriptor indexing extension:
@@ -75,7 +80,42 @@ window/overlay
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
 
+performance/profiling:
+- [ ] identified bottleneck (e.g. with dota): the device mutex for DescriptorSetState.
+      Should be possible to give each DescriptorSetState its own mutex.
+	  Hm, might still be a problem that we update so many links between
+	  resources (ds <-> cb and ds <-> view).
+	  Could still try to use a linked grid for those links, could possibly
+	  even make that completely lockfree.
+	  Maybe we can even get rid of ds <-> cb links? That would help.
+	  - [ ] ideally, we would have no (non-local) locks during descriptor
+	        set updating.
+- [ ] {high prio} also don't always copy DescriptorSetState on submission.
+      Leads to lot of DescriptorSetState copies, destructors.
+	  We only need to do it when currently in swapchain mode *and* inside
+	  the cb tab. (maybe we can even get around always doing it in that
+	  case but that's not too important).
+- [ ] {high prio} the many shared locks when recording a cb can be harmful as well.
+      We could get around this when wrapping handles, should probably
+	  look into that eventually (maybe allow to switch dynamically at
+	  runtime since wrapping makes supporting new extensions out of the
+	  box highly unlikely so users could fall back to hash tables at
+	  the cost of some performance).
+	- [ ] ideally, we would have *no* locks during command recording at all
+- [ ] {high prio} most of the notes in CommandHook::hook are highly relevant.
+      Especially handling of hook state overflow. Happens quickly when switching
+	  out of command viewer tab. We shouldn't do any hooking when we
+	  are not currently in that tab.
+
 gui stuff
+- [ ] resource viewer: we don't know which handle is currently selected
+      (in the window on the left), can get confusing when they don't have names.
+	  Should probably be an ImGui::Selectable (that stays selected) instead
+	  of a button
+- [ ] resource viewer: basic filtering by properties, e.g. allow to just
+      show all images with 'width > 1920 && layers > 3' or something.
+	  Could start with images for now and add for other handles as needed.
+	  Definitely useful for images, when exploring the resource space
 - [ ] cb/command viewer: when viewing a batch from a swapchain,
       show the semaphores/fences with from a vkQueueSubmit.
 	  When selecting the vkQueueSubmit just show an overview.

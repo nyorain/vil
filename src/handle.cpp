@@ -21,6 +21,8 @@ DeviceHandle::~DeviceHandle() {
 }
 
 void DeviceHandle::invalidateCbsLocked() {
+	ZoneScoped;
+
 	dlg_assert(dev);
 	dlg_assert(dev->mutex.owned());
 

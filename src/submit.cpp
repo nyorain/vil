@@ -12,10 +12,13 @@
 #include <gui/commandHook.hpp>
 #include <gui/gui.hpp>
 #include <vk/enumString.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace vil {
 
 void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
+	ZoneScoped;
+
 	auto& dev = *subm.dev;
 
 	auto& cb = dev.commandBuffers.get(vkcb);
@@ -188,6 +191,8 @@ VkResult submitSemaphore(Queue& q, VkSemaphore sem, bool timeline) {
 }
 
 void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
+	ZoneScoped;
+
 	auto& dev = *subm.dev;
 
 	auto si = info;
@@ -310,6 +315,8 @@ void cleanupOnError(QueueSubmitter& subm) {
 }
 
 VkResult addGuiSyncLocked(QueueSubmitter& subm) {
+	ZoneScoped;
+
 	auto& dev = *subm.dev;
 	auto& batch = *subm.dstBatch;
 
@@ -400,6 +407,7 @@ VkResult addGuiSyncLocked(QueueSubmitter& subm) {
 }
 
 std::vector<std::unique_ptr<CommandBufferGroup>> cleanCommandGroups(Device& dev, u32 qfam) {
+	ZoneScoped;
 	std::vector<std::unique_ptr<CommandBufferGroup>> ret;
 
 	// Remove old command groups, making sure we don't just leak them.
@@ -453,6 +461,8 @@ std::vector<std::unique_ptr<CommandBufferGroup>> cleanCommandGroups(Device& dev,
 }
 
 void postProcessLocked(QueueSubmitter& subm) {
+	ZoneScoped;
+
 	RecordBatch* recordBatch = nullptr;
 	if(subm.dev->swapchain) {
 		recordBatch = &subm.dev->swapchain->nextFrameSubmissions.emplace_back();
@@ -564,6 +574,8 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 }
 
 std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, const Draw& draw) {
+	ZoneScoped;
+
 	auto& dev = *pending.queue->dev;
 	if(pending.queue == dev.gfxQueue && !forceGfxQueueSemaphores) {
 		return {};

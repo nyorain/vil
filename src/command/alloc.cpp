@@ -57,7 +57,7 @@ std::byte* allocate(CommandRecord& rec, size_t size, unsigned alignment) {
 	}
 
 	// not enough memory available in last block, allocate new one
-	rec.memBlocks = &createMemBlock(newBlockSize, rec.memBlocks);
+	rec.memBlocks.reset(&createMemBlock(newBlockSize, rec.memBlocks.release()));
 	rec.memBlockOffset = size;
 	return data(*rec.memBlocks, 0);
 }
@@ -97,6 +97,5 @@ const void* copyChain(CommandBuffer& cb, const void* pNext) {
 	copyChainInPlace(cb, ret);
 	return ret;
 }
-
 
 } // namespace vil

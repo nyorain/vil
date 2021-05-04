@@ -5,6 +5,7 @@
 #include <thread>
 #include <atomic>
 #include <dlg/dlg.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace vil {
 
@@ -15,7 +16,8 @@ namespace vil {
 // assumptions/guarantees for vil functions.
 // TODO: only execute debugging instructions in debug mode. Adding the
 // extra mutex is expensive.
-struct DebugSharedMutex : public std::shared_mutex {
+struct DebugSharedMutex {
+	TracySharedLockable(std::shared_mutex, mtx_) // like std::shared_mutex mtx_;
 	std::atomic<std::thread::id> owner_ {};
 	std::unordered_set<std::thread::id> shared_ {};
 	mutable std::mutex sharedMutex_ {};
@@ -23,7 +25,7 @@ struct DebugSharedMutex : public std::shared_mutex {
 	void lock() {
 		dlg_assert(!owned());
 		dlg_assert(!ownedShared());
-		std::shared_mutex::lock();
+		mtx_.lock();
 		owner_.store(std::this_thread::get_id());
 	}
 
@@ -36,13 +38,13 @@ struct DebugSharedMutex : public std::shared_mutex {
 		}
 
 		owner_.store({});
-		std::shared_mutex::unlock();
+		mtx_.unlock();
 	}
 
 	bool try_lock() {
 		dlg_assert(!owned());
 		dlg_assert(!ownedShared());
-		auto ret = std::shared_mutex::try_lock();
+		auto ret = mtx_.try_lock();
 		if(ret) {
 			dlg_assert(shared_.empty());
 			owner_ = std::this_thread::get_id();
@@ -53,7 +55,7 @@ struct DebugSharedMutex : public std::shared_mutex {
 	void lock_shared() {
 		dlg_assert(!owned());
 		dlg_assert(!ownedShared());
-		std::shared_mutex::lock_shared();
+		mtx_.lock_shared();
 		dlg_assert(owner_.load() == std::thread::id{});
 
 		std::lock_guard lock(sharedMutex_);
@@ -69,13 +71,13 @@ struct DebugSharedMutex : public std::shared_mutex {
 			shared_.erase(std::this_thread::get_id());
 		}
 
-		std::shared_mutex::unlock_shared();
+		mtx_.unlock_shared();
 	}
 
 	bool try_lock_shared() {
 		dlg_assert(!owned());
 		dlg_assert(!ownedShared());
-		auto ret = std::shared_mutex::try_lock_shared();
+		auto ret = mtx_.try_lock_shared();
 		if(ret) {
 			std::lock_guard lock(sharedMutex_);
 			dlg_assert(owner_.load() == std::thread::id{});

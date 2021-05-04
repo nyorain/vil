@@ -52,3 +52,4 @@
 #include <util/flags.hpp>
 
 #include <dlg/dlg.hpp>
+#include <tracy/Tracy.hpp>

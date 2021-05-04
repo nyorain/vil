@@ -57,7 +57,7 @@ struct DescriptorSetLayout : DeviceHandle {
 		VkDescriptorBindingFlags flags; // for descriptor indexing
 	};
 
-	// Static after creation. Ordered by binding.
+	// Static after creation. Ordered by binding. Can be empty per vulkan spec.
 	std::vector<Binding> bindings;
 	std::atomic<u32> refCount {0}; // intrusive ref count
 
@@ -85,7 +85,7 @@ struct DescriptorBinding {
 	};
 
 	union {
-		ImageInfo imageInfo;
+		ImageInfo imageInfo {};
 		BufferInfo bufferInfo;
 		BufferView* bufferView;
 	};

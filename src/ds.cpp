@@ -4,12 +4,16 @@
 #include <buffer.hpp>
 #include <image.hpp>
 #include <util/util.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace vil {
 
 // util
 size_t totalNumBindings(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
-	dlg_assert(!layout.bindings.empty());
+	if(layout.bindings.empty()) {
+		return 0;
+	}
+
 	auto& last = layout.bindings.back();
 	size_t ret = last.offset;
 
@@ -66,6 +70,7 @@ bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
 void unregisterLocked(DescriptorSetState& state, unsigned bindingID,
 		unsigned elemID, bool unregisterStaticSampler = false) {
 	auto removeFromHandle = [&](auto& handle) {
+		ZoneScopedN("removeFromHandle");
 		DescriptorStateRef ref = {&state, bindingID, elemID};
 		auto it = handle.descriptors.find(ref);
 		dlg_assert(it != handle.descriptors.end());
@@ -114,6 +119,7 @@ void unregisterLocked(DescriptorSetState& state, unsigned bindingID,
 
 void notifyDestroyLocked(DescriptorSetState& state, unsigned binding, unsigned elem,
 		const Handle& handle) {
+	ZoneScoped;
 
 	unregisterLocked(state, binding, elem, handle.objectType == VK_OBJECT_TYPE_SAMPLER);
 	if(state.ds) {
@@ -170,7 +176,6 @@ void copyLocked(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
 
 	switch(category(dstLayout.descriptorType)) {
 		case DescriptorCategory::image: {
-			dstBind.imageInfo = {};
 			dstBind.imageInfo.layout = srcBind.imageInfo.layout;
 
 			if(srcBind.imageInfo.imageView) {
@@ -212,6 +217,7 @@ void initImmutableSamplersLocked(DescriptorSetState& state) {
 				auto sampler = state.layout->bindings[b].immutableSamplers[e];
 				dlg_assert(sampler);
 
+				binds[e].imageInfo = {};
 				binds[e].imageInfo.sampler = sampler;
 
 				// when the bindings contains only a sampler, it's already valid.
@@ -226,6 +232,8 @@ void initImmutableSamplersLocked(DescriptorSetState& state) {
 }
 
 DescriptorSetStatePtr copyDescriptorSetStateLocked(const DescriptorSetState& state) {
+	ZoneScoped;
+
 	dlg_assert(state.layout->dev->mutex.owned());
 	auto ret = newDescriptorSetState(state.layout, state.variableDescriptorCount);
 
@@ -306,6 +314,8 @@ void DescriptorSetState::Deleter::operator()(DescriptorSetState* state) const {
 }
 
 DescriptorSetState::~DescriptorSetState() {
+	ZoneScoped;
+
 	dlg_assert(layout);
 	auto& dev = layout->dev;
 
@@ -498,7 +508,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	flagsInfo = (flagsInfo && flagsInfo->bindingCount == 0u) ? nullptr : flagsInfo;
 	dlg_assert(!flagsInfo || flagsInfo->bindingCount == pCreateInfo->bindingCount);
 
-	u32 off = 0u;
 	for(auto i = 0u; i < pCreateInfo->bindingCount; ++i) {
 		const auto& bind = pCreateInfo->pBindings[i];
 		ensureSize(dsLayout.bindings, bind.binding + 1);
@@ -509,9 +518,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		dst.descriptorType = bind.descriptorType;
 		dst.stageFlags = bind.stageFlags;
 		dst.flags = flagsInfo ? flagsInfo->pBindingFlags[i] : 0u;
-		dst.offset = off;
 
-		if(needsSampler(bind.descriptorType) && bind.pImmutableSamplers) {
+		if(needsSampler(bind.descriptorType) &&
+				dst.descriptorCount > 0 && bind.pImmutableSamplers) {
 			// Couldn't find in the spec whether this is allowed or not.
 			// But it seems incorrect to me, we might not handle it correctly
 			// everywhere.
@@ -521,8 +530,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 				dst.immutableSamplers[e] = &dev.samplers.get(bind.pImmutableSamplers[e]);
 			}
 		}
+	}
 
+	// number offsets
+	auto off = 0u;
+	for(auto b = 0u; b < dsLayout.bindings.size(); ++b) {
+		auto& bind = dsLayout.bindings[b];
+		bind.offset = off;
 		off += bind.descriptorCount;
+
+		dlg_assert(b + 1 == dsLayout.bindings.size() ||
+			!(bind.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT));
 	}
 
 	return res;
@@ -626,12 +644,12 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		ds.handle = pDescriptorSets[i];
 
 		auto layoutPtr = dev.dsLayouts.getPtr(pAllocateInfo->pSetLayouts[i]);
-		auto& layout = *layoutPtr;
-		dlg_assert(!layout.bindings.empty());
+		auto& layout = nonNull(layoutPtr);
 
 		// per spec variable counts are zero by default, if no other value is provided
 		auto varCount = u32(0);
-		if(layout.bindings.back().flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+		if(variableCountInfo && !layout.bindings.empty() &&
+				layout.bindings.back().flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
 			varCount = variableCountInfo->pDescriptorCounts[i];
 		}
 
@@ -705,6 +723,7 @@ void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
 
 void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
 		unsigned bind, unsigned elem, const VkDescriptorBufferInfo& buf) {
+	binding.bufferInfo = {};
 	binding.bufferInfo.buffer = &state.layout->dev->buffers.getLocked(buf.buffer);
 	binding.bufferInfo.buffer->descriptors.insert({&state, bind, elem});
 	binding.bufferInfo.offset = buf.offset;
@@ -732,6 +751,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		const VkWriteDescriptorSet*                 pDescriptorWrites,
 		uint32_t                                    descriptorCopyCount,
 		const VkCopyDescriptorSet*                  pDescriptorCopies) {
+	ZoneScoped;
 	auto& dev = getData<Device>(device);
 
 	// handle writes
@@ -848,9 +868,12 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		}
 	}
 
-	return dev.dispatch.UpdateDescriptorSets(device,
-		descriptorWriteCount, pDescriptorWrites,
-		descriptorCopyCount, pDescriptorCopies);
+	{
+		ZoneScopedN("dispatch.UpdateDescriptorSets");
+		return dev.dispatch.UpdateDescriptorSets(device,
+			descriptorWriteCount, pDescriptorWrites,
+			descriptorCopyCount, pDescriptorCopies);
+	}
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
@@ -895,6 +918,8 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 		VkDescriptorSet                             descriptorSet,
 		VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
 		const void*                                 pData) {
+	ZoneScoped;
+
 	auto& dev = getData<Device>(device);
 	auto& ds  = dev.descriptorSets.get(descriptorSet);
 	auto& dut = dev.dsuTemplates.get(descriptorUpdateTemplate);
@@ -953,8 +978,12 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 		ds.invalidateCbs();
 	}
 
-	auto f = dev.dispatch.UpdateDescriptorSetWithTemplate;
-	f(device, descriptorSet, descriptorUpdateTemplate, pData);
+
+	{
+		ZoneScopedN("dispatch.UpdateDescriptorSetWithTemplate");
+		dev.dispatch.UpdateDescriptorSetWithTemplate(device, descriptorSet,
+			descriptorUpdateTemplate, pData);
+	}
 }
 
 u32 totalUpdateDataSize(const DescriptorUpdateTemplate& dut) {

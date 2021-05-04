@@ -149,9 +149,9 @@ struct CommandRecord {
 	Device* dev {};
 
 	// We own those mem blocks, could even own them past command pool destruction.
-	// Important this is the last object to be destroyed other destructors
-	// still access that memory.
-	CommandMemBlock* memBlocks {};
+	// Important this is the last object to be destroyed as other destructors
+	// might still access that memory we free in this destructor.
+	std::unique_ptr<CommandMemBlock, MemBlocksListDeleter> memBlocks {};
 	std::size_t memBlockOffset {}; // offset in first (current) mem block
 
 	// Might be null when this isn't the current command buffer recording.

@@ -15,6 +15,7 @@
 #include <shader.hpp>
 #include <rp.hpp>
 #include <spirv_reflect.h>
+#include <tracy/Tracy.hpp>
 #include <bitset>
 
 // NOTE: since we might view invalidated command records, we can't assume
@@ -1147,6 +1148,8 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 	// 	return true;
 	// }
 
+	ZoneScoped;
+
 	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
 	if(!ImGui::BeginTable("IO inspector", 2, flags, ImGui::GetContentRegionAvail())) {
 		return;
@@ -1245,6 +1248,8 @@ void CommandViewer::displayCommand() {
 }
 
 void CommandViewer::draw(Draw& draw) {
+	ZoneScoped;
+
 	if(!command_) {
 		imGuiText("No command selected");
 		return;

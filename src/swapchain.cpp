@@ -7,6 +7,7 @@
 #include <platform.hpp>
 #include <overlay.hpp>
 #include <vk/enumString.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace vil {
 
@@ -181,6 +182,9 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		VkQueue                                     queue,
 		const VkPresentInfoKHR*                     pPresentInfo) {
+	ZoneScoped;
+	FrameMark;
+
 	auto& qd = getData<Queue>(queue);
 
 	auto combinedResult = VK_SUCCESS;
@@ -219,6 +223,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 			// pi.pNext
 
 			std::lock_guard queueLock(qd.dev->queueMutex);
+			ZoneScopedN("dispatch");
 			res = qd.dev->dispatch.QueuePresentKHR(queue, &pi);
 		}
 
