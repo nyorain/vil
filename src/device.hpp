@@ -52,7 +52,7 @@ struct Device {
 	// are initialized.
 	std::vector<QueueFamily> queueFamilies;
 
-	PFN_vkSetDeviceLoaderData setDeviceLoaderData;
+	PFN_vkSetDeviceLoaderData setDeviceLoaderData {};
 
 	// Vector of all queues.
 	// Might include queues created by us.

@@ -207,6 +207,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	layer_init_instance_dispatch_table(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
 
+	// find vkSetInstanceLoaderData callback
+	auto* loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
+	while(loaderData && loaderData->function != VK_LAYER_LINK_INFO) {
+		loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*loaderData);
+	}
+
+	dlg_assert(loaderData);
+	ini.setInstanceLoaderData = loaderData->u.pfnSetInstanceLoaderData;
+
 	// NOTE: not sure if this is needed actually.
 	// Should do it for all commands that need it for now.
 	// We are also doing this in device.

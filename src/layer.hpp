@@ -15,6 +15,7 @@ namespace vil {
 struct Instance {
 	VkLayerInstanceDispatchTable dispatch;
 	VkInstance handle {};
+	PFN_vkSetInstanceLoaderData setInstanceLoaderData {};
 
 	struct {
 		bool valid {};
