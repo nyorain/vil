@@ -37,7 +37,6 @@ struct ImageView : DeviceHandle {
 	VkImageViewCreateInfo ci;
 
 	std::vector<Framebuffer*> fbs; // TODO: unordered set?
-	std::unordered_set<DescriptorStateRef, DescriptorStateRef::Hash> descriptors;
 
 	~ImageView();
 };
@@ -45,8 +44,6 @@ struct ImageView : DeviceHandle {
 struct Sampler : DeviceHandle {
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
-
-	std::unordered_set<DescriptorStateRef, DescriptorStateRef::Hash> descriptors;
 
 	~Sampler();
 };

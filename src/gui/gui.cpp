@@ -1083,6 +1083,8 @@ void Gui::activateTab(Tab tab) {
 
 VkResult Gui::renderFrame(FrameInfo& info) {
 	ZoneScoped;
+	FrameMark;
+
 	makeImGuiCurrent();
 
 	// TODO: hacky but we have to keep the record alive, making sure

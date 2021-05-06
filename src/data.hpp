@@ -10,7 +10,7 @@
 
 namespace vil {
 
-// TODO: use small buffer optimization for those (especially
+// PERF(low prio): use small buffer optimization for those (especially
 //   devices & instances, optimizing for the common case of just one
 //   instance/device here would likely reduce the overhead quite a bit).
 //   Look into using the vk_layer small-buffer hashtable implementation
@@ -25,6 +25,8 @@ extern std::unordered_map<std::uint64_t, void*> dispatchableTable;
 extern std::unordered_map<void*, Device*> devByLoaderTable;
 // Synchronizes access to those global tables
 extern std::shared_mutex dataMutex;
+// Whether we use object wrapping or not.
+extern bool wrapObjects;
 
 template<typename T>
 std::uint64_t handleToU64(T handle) {

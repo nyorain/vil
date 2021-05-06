@@ -99,7 +99,7 @@ inline const char* copyString(CommandBuffer& cb, std::string_view src) {
 }
 
 template<typename T>
-void ensureSize(CommandBuffer& cb, span<T>& buf, std::size_t size) {
+void ensureSize(CommandBuffer& cb, span<T>& buf, size_t size) {
 	if(buf.size() >= size) {
 		return;
 	}
@@ -110,7 +110,7 @@ void ensureSize(CommandBuffer& cb, span<T>& buf, std::size_t size) {
 }
 
 template<typename D, typename T>
-void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, std::size_t count) {
+void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
 	dst = allocSpan<D>(cb, count);
 	for(auto i = 0u; i < count; ++i) {
 		dst[i] = upgrade(data[i]);
@@ -141,7 +141,7 @@ struct CommandAllocator {
 		return *this;
 	}
 
-	T* allocate(std::size_t n) {
+	T* allocate(size_t n) {
 		auto* ptr = vil::allocate(*rec, n * sizeof(T), alignof(T));
         // strictly speaking we need the first line but it doesn't compile
         // under msvc for non-default-constructible T
@@ -149,7 +149,7 @@ struct CommandAllocator {
         return reinterpret_cast<T*>(ptr);
 	}
 
-	void deallocate(T*, std::size_t) const noexcept {
+	void deallocate(T*, size_t) const noexcept {
 		// nothing to do here, we never deallocate individual allocations,
 		// we'll just all the blocks in the CommandRecord when it's destroyed.
 	}

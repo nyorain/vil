@@ -9,11 +9,11 @@ namespace vil {
 struct Buffer : MemoryResource {
 	VkBuffer handle {};
 	VkBufferCreateInfo ci;
+	bool concurrentHooked {}; // whether we set it to concurrent mode
 
 	std::vector<BufferView*> views; // TODO: unordered_set?
-	std::unordered_set<DescriptorStateRef, DescriptorStateRef::Hash> descriptors;
 
-	bool concurrentHooked {}; // whether we set it to concurrent mode
+	std::atomic<u32> refCount;
 
 	~Buffer();
 };
@@ -23,7 +23,7 @@ struct BufferView : DeviceHandle {
 	VkBufferViewCreateInfo ci;
 	Buffer* buffer {};
 
-	std::unordered_set<DescriptorStateRef, DescriptorStateRef::Hash> descriptors;
+	std::atomic<u32> refCount;
 
 	~BufferView();
 };

@@ -183,7 +183,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		VkQueue                                     queue,
 		const VkPresentInfoKHR*                     pPresentInfo) {
 	ZoneScoped;
-	FrameMark;
 
 	auto& qd = getData<Queue>(queue);
 

@@ -36,27 +36,11 @@ ImageView::~ImageView() {
 		dlg_assert(it != fb->attachments.end());
 		fb->attachments.erase(it);
 	}
-
-	// Can't use for loop here, as descriptor will unregsiter themselves in turn
-	while(!this->descriptors.empty()) {
-		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(getImageView(*dsRef.state, dsRef.binding, dsRef.elem) == this);
-		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
-	}
 }
 
 Sampler::~Sampler() {
 	if(!dev) {
 		return;
-	}
-
-	std::lock_guard lock(dev->mutex);
-
-	// Can't use for loop here, as descriptor will unregsiter themselves in turn
-	while(!this->descriptors.empty()) {
-		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(getSampler(*dsRef.state, dsRef.binding, dsRef.elem) == this);
-		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
 	}
 }
 
@@ -229,7 +213,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 	}
 
 	auto& dev = getData<Device>(device);
-	dev.imageViews.mustErase(imageView);
+	auto ptr = dev.imageViews.mustMove(imageView);
+	ptr->handle = {};
 	dev.dispatch.DestroyImageView(device, imageView, pAllocator);
 }
 
@@ -262,7 +247,8 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 	}
 
 	auto& dev = getData<Device>(device);
-	dev.samplers.mustErase(sampler);
+	auto ptr = dev.samplers.mustMove(sampler);
+	ptr->handle = {};
 	dev.dispatch.DestroySampler(device, sampler, pAllocator);
 }
 

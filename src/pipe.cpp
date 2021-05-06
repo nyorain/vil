@@ -563,7 +563,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
 
 	// NOTE: We intenntionally don't destruct the handle here, handle might
 	// need to be kept alive, they have shared ownership. Destroyed
-	// in handle destructor.
+	// in handle destructor. See e.g. the pipeLayouts hash map in Device
+	// for justification why we need this.
 	// dev.dispatch.DestroyPipelineLayout(device, pipelineLayout, pAllocator);
 	(void) pAllocator;
 }

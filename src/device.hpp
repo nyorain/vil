@@ -11,6 +11,7 @@
 #include <vk/vk_layer.h>
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
+#include <tracy/Tracy.hpp>
 
 #include <shared_mutex>
 #include <memory>
@@ -85,7 +86,7 @@ struct Device {
 	// erased from the resource tables below (and therefore can't
 	// logically be created or destroyed). Also used to synchronize
 	// shared access to most resources (that can be mutated).
-	DebugSharedMutex mutex;
+	TracySharedLockable(SharedMutex, mutex)
 
 	// Mutex that is locked *while* doing a submission. The general mutex
 	// won't be locked for that time. So when we want to do submissions
@@ -94,7 +95,7 @@ struct Device {
 	// with application submissions (as well as with our own).
 	// Note that in vulkan submission synchronization happens on per-device,
 	// *not* on per-queue basis.
-	std::mutex queueMutex;
+	TracyLockable(Mutex, queueMutex)
 
 	// NOTE: hacky as hell but can't work around it. Needed only by the
 	// public API to communicate with the application.
@@ -105,9 +106,6 @@ struct Device {
 
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
-	SyncedUniqueUnorderedMap<VkImageView, ImageView> imageViews;
-	SyncedUniqueUnorderedMap<VkSampler, Sampler> samplers;
-	SyncedUniqueUnorderedMap<VkBuffer, Buffer> buffers;
 	SyncedUniqueUnorderedMap<VkPipeline, ComputePipeline> computePipes;
 	SyncedUniqueUnorderedMap<VkPipeline, GraphicsPipeline> graphicsPipes;
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
@@ -122,7 +120,6 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkEvent, Event> events;
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
 	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
-	SyncedUniqueUnorderedMap<VkBufferView, BufferView> bufferViews;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still
@@ -142,6 +139,14 @@ struct Device {
 	// Needs to be ref-counted only for PushDescriptorSetWithTemplateCmd
 	SyncedIntrusiveUnorderedMap<VkDescriptorUpdateTemplate, DescriptorUpdateTemplate> dsuTemplates;
 
+	// Resources stored in descriptors need shared ownership since so that
+	// we don't have to track ds <-> resource links which would be a massive
+	// bottleneck.
+	SyncedIntrusiveUnorderedMap<VkImageView, ImageView> imageViews;
+	SyncedIntrusiveUnorderedMap<VkSampler, Sampler> samplers;
+	SyncedIntrusiveUnorderedMap<VkBuffer, Buffer> buffers;
+	SyncedIntrusiveUnorderedMap<VkBufferView, BufferView> bufferViews;
+
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 
 	~Device();
@@ -152,6 +157,96 @@ Gui* getOverlayGui(Swapchain& swapchain);
 
 // Does not expect mutex to be locked
 void notifyDestruction(Device& dev, Handle& handle);
+
+template<typename H> struct HandleMapperT;
+template<typename H> using HandleMapper = typename HandleMapperT<H>::type;
+
+template<> struct HandleMapperT<VkImageView> { using type = ImageView; };
+template<> struct HandleMapperT<VkBufferView> { using type = BufferView; };
+template<> struct HandleMapperT<VkBuffer> { using type = Buffer; };
+template<> struct HandleMapperT<VkSampler> { using type = Sampler; };
+template<> struct HandleMapperT<VkDescriptorSet> { using type = DescriptorSet; };
+template<> struct HandleMapperT<VkCommandBuffer> { using type = CommandBuffer; };
+template<> struct HandleMapperT<VkDeviceMemory> { using type = DeviceMemory; };
+template<> struct HandleMapperT<VkDescriptorPool> { using type = DescriptorPool; };
+template<> struct HandleMapperT<VkDescriptorSetLayout> { using type = DescriptorSetLayout; };
+template<> struct HandleMapperT<VkDescriptorUpdateTemplate> { using type = DescriptorUpdateTemplate; };
+template<> struct HandleMapperT<VkPipelineLayout> { using type = PipelineLayout; };
+
+template<typename T> auto& getMap(Device& dev);
+template<> inline auto& getMap<VkDescriptorSet>(Device& dev) { return dev.descriptorSets; }
+template<> inline auto& getMap<VkCommandBuffer>(Device& dev) { return dev.commandBuffers; }
+template<> inline auto& getMap<VkImageView>(Device& dev) { return dev.imageViews; }
+template<> inline auto& getMap<VkImage>(Device& dev) { return dev.images; }
+template<> inline auto& getMap<VkSampler>(Device& dev) { return dev.samplers; }
+template<> inline auto& getMap<VkBuffer>(Device& dev) { return dev.buffers; }
+template<> inline auto& getMap<VkDeviceMemory>(Device& dev) { return dev.deviceMemories; }
+template<> inline auto& getMap<VkDescriptorPool>(Device& dev) { return dev.dsPools; }
+template<> inline auto& getMap<VkDescriptorSetLayout>(Device& dev) { return dev.dsLayouts; }
+template<> inline auto& getMap<VkDescriptorUpdateTemplate>(Device& dev) { return dev.dsuTemplates; }
+template<> inline auto& getMap<VkPipelineLayout>(Device& dev) { return dev.pipeLayouts; }
+
+template<typename T> WrappedHandle<T>* castWrapped(std::uint64_t ptr) {
+	return reinterpret_cast<WrappedHandle<T>*>(static_cast<std::uintptr_t>(ptr));
+}
+
+template<typename T, typename H> WrappedHandle<T>* castWrapped(H* ptr) {
+	return reinterpret_cast<WrappedHandle<T>*>(ptr);
+}
+
+template<typename H, typename T>
+H castDispatch(Device& dev, WrappedHandle<T>& ptr) {
+	dev.setDeviceLoaderData(dev.handle, static_cast<void*>(&ptr));
+	if constexpr(std::is_same_v<H, std::uint64_t>) {
+		return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&ptr));
+	} else {
+		return reinterpret_cast<H>(&ptr);
+	}
+}
+
+inline Device& getDevice(VkDevice handle) {
+	if(wrapObjects) {
+		return castWrapped<Device>(handle)->obj;
+	}
+
+	return getData<Device>(handle);
+}
+
+template<typename H> HandleMapper<H>& get(Device& dev, H handle) {
+	if(wrapObjects) {
+		return castWrapped<HandleMapper<H>>(handle)->obj;
+	}
+
+	return getMap<H>(dev).get(handle);
+}
+
+template<typename H> HandleMapper<H>& get(VkDevice vkDev, H handle) {
+	if(wrapObjects) {
+		return castWrapped<HandleMapper<H>>(handle)->obj;
+	}
+
+	auto& dev = getData<Device>(vkDev);
+	return getMap<H>(dev).get(handle);
+}
+
+template<typename H> IntrusiveHandlePtr<HandleMapper<H>> getPtr(Device& dev, H handle) {
+	using OurHandle = HandleMapper<H>;
+	if(wrapObjects) {
+		return IntrusivePtr<OurHandle>(&castWrapped<OurHandle>(handle)->obj);
+	}
+
+	return getMap<H>(dev).getPtr(handle);
+}
+
+template<typename H> IntrusiveHandlePtr<HandleMapper<H>> getPtr(VkDevice vkDev, H handle) {
+	using OurHandle = HandleMapper<H>;
+	if(wrapObjects) {
+		return IntrusivePtr<OurHandle>(&castWrapped<OurHandle>(handle)->obj);
+	}
+
+	auto& dev = getData<Device>(vkDev);
+	return getMap<H>(dev).getPtr(handle);
+}
 
 // Util for naming internal handles.
 // Mainly useful to get better validation layer output for stuff

@@ -24,7 +24,7 @@ void DeviceHandle::invalidateCbsLocked() {
 	ZoneScoped;
 
 	dlg_assert(dev);
-	dlg_assert(dev->mutex.owned());
+	vil_assert_owned(dev->mutex);
 
 	// nothing can be added/removed while device mutex is locked
 	for(auto* ref : refRecords) {

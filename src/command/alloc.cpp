@@ -57,6 +57,7 @@ std::byte* allocate(CommandRecord& rec, size_t size, unsigned alignment) {
 	}
 
 	// not enough memory available in last block, allocate new one
+	newBlockSize = std::max<size_t>(newBlockSize, size);
 	rec.memBlocks.reset(&createMemBlock(newBlockSize, rec.memBlocks.release()));
 	rec.memBlockOffset = size;
 	return data(*rec.memBlocks, 0);

@@ -220,6 +220,11 @@ public:
         m_ctx.CustomName( name, size );
     }
 
+	const T& inner() const
+	{
+		return m_lockable;
+	}
+
 private:
     T m_lockable;
     LockableCtx m_ctx;
@@ -537,11 +542,15 @@ public:
         m_ctx.CustomName( name, size );
     }
 
+	const T& inner() const
+	{
+		return m_lockable;
+	}
+
 private:
     T m_lockable;
     SharedLockableCtx m_ctx;
 };
-
 
 }
 

@@ -6,11 +6,79 @@
 #include <cassert>
 #include <util/intrusive.hpp>
 #include <util/debugMutex.hpp>
+#include <tracy/Tracy.hpp>
 
 namespace vil {
 
 template<typename T>
-struct SmartPtrFactory;
+struct HandlePtrFactory;
+
+template<typename T>
+struct WrappedHandle {
+	void* dispatch {};
+	T obj;
+
+	template<typename... Args>
+	WrappedHandle(Args&&... args) : obj(std::forward<Args>(args)...) {
+		static_assert(std::is_standard_layout_v<WrappedHandle<T>>);
+	}
+};
+
+template<typename T, typename Deleter = std::default_delete<WrappedHandle<T>>>
+struct WrappedRefCount {
+	void inc(WrappedHandle<T>& wrapped) const noexcept { ++wrapped.obj.refCount; }
+	void dec(WrappedHandle<T>& wrapped) const noexcept {
+		if(--wrapped.obj.refCount == 0) {
+			Deleter()(&wrapped);
+		}
+	}
+};
+
+template<typename T>
+struct IntrusiveHandlePtr : HandledPtr<WrappedHandle<T>, WrappedRefCount<T>> {
+	using Base = HandledPtr<WrappedHandle<T>, WrappedRefCount<T>>;
+	using Base::Base;
+
+	T* get() const noexcept {
+		auto ptr = Base::get();
+		return ptr ? &ptr->obj : nullptr;
+	}
+
+	T* operator->() const noexcept {
+		return &Base::get()->obj;
+	}
+
+	T& operator*() const noexcept {
+		return Base::get()->obj;
+	}
+
+	WrappedHandle<T>* wrapped() const noexcept {
+		return Base::get();
+	}
+};
+
+template<typename T>
+struct UniqueHandlePtr : std::unique_ptr<WrappedHandle<T>> {
+	using Base = std::unique_ptr<WrappedHandle<T>>;
+	using Base::Base;
+
+	T* get() const noexcept {
+		auto ptr = Base::get();
+		return ptr ? &ptr->obj : nullptr;
+	}
+
+	T* operator->() const noexcept {
+		return *get();
+	}
+
+	T& operator*() const noexcept {
+		return Base::get()->obj;
+	}
+
+	WrappedHandle<T>* wrapped() const noexcept {
+		return Base::get();
+	}
+};
 
 // Synchronized unordered map.
 // Elements are stored in P<T>'s (where P should be a smart pointer type such
@@ -109,14 +177,14 @@ public:
 	// You must actually pass a P<T> as value.
 	// Might wanna use add() instead.
 	template<class... Args>
-	std::pair<T*, bool> emplace(Args&&... args) {
+	std::pair<P<T>*, bool> emplace(Args&&... args) {
 		std::lock_guard lock(*mutex);
 		auto [it, success] = map.emplace(std::forward<Args>(args)...);
-		return {it->second.get(), success};
+		return {&it->second, success};
 	}
 
 	template<class... Args>
-	T& mustEmplace(Args&&... args) {
+	P<T>& mustEmplace(Args&&... args) {
 		auto [ptr, success] = this->emplace(std::forward<Args>(args)...);
 		assert(success);
 		return *ptr;
@@ -124,9 +192,15 @@ public:
 
 	// Asserts that element is really new
 	template<typename V = T, class... Args>
-	T& add(const K& key, Args&&... args) {
-		auto elem = SmartPtrFactory<P<V>>::create(std::forward<Args>(args)...);
+	P<T>& addPtr(const K& key, Args&&... args) {
+		auto elem = HandlePtrFactory<P<V>>::create(std::forward<Args>(args)...);
 		return this->mustEmplace(key, std::move(elem));
+	}
+
+	template<typename V = T, class... Args>
+	T& add(const K& key, Args&&... args) {
+		auto elem = HandlePtrFactory<P<V>>::create(std::forward<Args>(args)...);
+		return *this->mustEmplace(key, std::move(elem));
 	}
 
 	// Keep in mind they can immediately be out-of-date.
@@ -152,6 +226,7 @@ public:
 	}
 
 	// Pretty much only provided for shared ptr specialization.
+	/*
 	template<typename = void>
 	std::weak_ptr<T> getWeakPtrLocked(const K& key) {
 		auto it = map.find(key);
@@ -164,6 +239,7 @@ public:
 		std::shared_lock lock(*mutex);
 		return getWeakPtrLocked(key);
 	}
+	*/
 
 	template<typename = void>
 	P<T> findPtr(const K& key) {
@@ -178,41 +254,30 @@ public:
 	}
 
 	// Can also be used directly, but take care!
-	DebugSharedMutex* mutex;
+	SharedLockableBase(SharedMutex)* mutex;
 	UnorderedMap map;
 };
 
 template<typename T>
-struct SmartPtrFactory<std::unique_ptr<T>> {
+struct HandlePtrFactory<UniqueHandlePtr<T>> {
 	template<typename... Args>
-	static std::unique_ptr<T> create(Args&&... args) {
-		return std::make_unique<T>(std::forward<Args>(args)...);
+	static UniqueHandlePtr<T> create(Args&&... args) {
+		return UniqueHandlePtr<T>(new WrappedHandle<T>(std::forward<Args>(args)...));
 	}
 };
 
 template<typename T>
-struct SmartPtrFactory<std::shared_ptr<T>> {
+struct HandlePtrFactory<IntrusiveHandlePtr<T>> {
 	template<typename... Args>
-	static std::shared_ptr<T> create(Args&&... args) {
-		return std::make_shared<T>(std::forward<Args>(args)...);
-	}
-};
-
-template<typename T>
-struct SmartPtrFactory<IntrusivePtr<T>> {
-	template<typename... Args>
-	static IntrusivePtr<T> create(Args&&... args) {
-		return IntrusivePtr<T>(new T(std::forward<Args>(args)...));
+	static IntrusiveHandlePtr<T> create(Args&&... args) {
+		return IntrusiveHandlePtr<T>(new WrappedHandle<T>(std::forward<Args>(args)...));
 	}
 };
 
 template<typename K, typename T>
-using SyncedUniqueUnorderedMap = SyncedUnorderedMap<K, T, std::unique_ptr>;
+using SyncedUniqueUnorderedMap = SyncedUnorderedMap<K, T, UniqueHandlePtr>;
 
 template<typename K, typename T>
-using SyncedSharedUnorderedMap = SyncedUnorderedMap<K, T, std::shared_ptr>;
-
-template<typename K, typename T>
-using SyncedIntrusiveUnorderedMap = SyncedUnorderedMap<K, T, IntrusivePtr>;
+using SyncedIntrusiveUnorderedMap = SyncedUnorderedMap<K, T, IntrusiveHandlePtr>;
 
 } // namespace vil

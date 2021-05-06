@@ -21,7 +21,7 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	ZoneScoped;
 
 	auto& dev = *subm.queue->dev;
-	dlg_assert(dev.mutex.owned());
+	vil_assert_owned(dev.mutex);
 
 	if(subm.appFence) {
 		if(dev.dispatch.GetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
@@ -186,6 +186,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	// Lock order is important here, lock dev mutex before queue mutex.
 	// We lock the dev mutex to sync with gui.
 	{
+		// TODO PERF: locking the dev mutex here is terrible for performance,
+		// queueSubmit can take a long time and applications might parallelize
+		// arond it.
+		// Maybe we can handle this with a separate gui/submission sync mutex?
 		std::lock_guard devLock(dev.mutex);
 		if(res = addGuiSyncLocked(submitter); res != VK_SUCCESS) {
 			return res;

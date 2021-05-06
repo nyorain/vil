@@ -3,12 +3,25 @@
 #include <data.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
+#include <pipe.hpp>
+#include <threadContext.hpp>
 #include <util/util.hpp>
 #include <tracy/Tracy.hpp>
 
 namespace vil {
 
 // util
+size_t descriptorSize(VkDescriptorType dsType) {
+	switch(category(dsType)) {
+		case DescriptorCategory::buffer: return sizeof(BufferDescriptor);
+		case DescriptorCategory::image: return sizeof(ImageDescriptor);
+		case DescriptorCategory::bufferView: return sizeof(BufferViewDescriptor);
+		case DescriptorCategory::none:
+			dlg_error("unreachable: Invalid descriptor category");
+			return 0u;
+	}
+}
+
 size_t totalNumBindings(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
 	if(layout.bindings.empty()) {
 		return 0;
@@ -23,6 +36,23 @@ size_t totalNumBindings(const DescriptorSetLayout& layout, u32 variableDescripto
 		ret += last.descriptorCount;
 	}
 
+	return ret;
+}
+
+size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
+	if(layout.bindings.empty()) {
+		return 0;
+	}
+
+	auto& last = layout.bindings.back();
+	size_t ret = last.offset;
+	auto lastCount = last.descriptorCount;
+
+	if(last.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+		ret += variableDescriptorCount;
+	}
+
+	ret += lastCount * descriptorSize(last.descriptorType);
 	return ret;
 }
 
@@ -67,140 +97,93 @@ bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
 	return true;
 }
 
-void unregisterLocked(DescriptorSetState& state, unsigned bindingID,
-		unsigned elemID, bool unregisterStaticSampler = false) {
-	auto removeFromHandle = [&](auto& handle) {
-		ZoneScopedN("removeFromHandle");
-		DescriptorStateRef ref = {&state, bindingID, elemID};
-		auto it = handle.descriptors.find(ref);
-		dlg_assert(it != handle.descriptors.end());
-		handle.descriptors.erase(it);
-	};
-
-	auto& bind = binding(state, bindingID, elemID);
-
-	auto& bindingLayout = state.layout->bindings[bindingID];
-	auto dsType = bindingLayout.descriptorType;
-	switch(category(dsType)) {
-		case DescriptorCategory::buffer: {
-			dlg_assert(bind.valid);
-			removeFromHandle(nonNull(bind.bufferInfo.buffer));
-			bind.bufferInfo = {};
-			break;
-		} case DescriptorCategory::image: {
-			// may not be true, e.g. if first the sampler is destroyed
-			// and unsets both, then the image view is destroyed.
-			// dlg_assert(bind.imageInfo.imageView || bind.imageInfo.sampler);
-			if(bind.imageInfo.imageView) {
-				dlg_assert(bind.valid);
-				removeFromHandle(*bind.imageInfo.imageView);
-				bind.imageInfo.imageView = {};
-				bind.imageInfo.layout = {};
-			}
-
-			if(bind.imageInfo.sampler &&
-					(!bindingLayout.immutableSamplers.get() || unregisterStaticSampler)) {
-				dlg_assert(bind.valid || unregisterStaticSampler);
-				removeFromHandle(*bind.imageInfo.sampler);
-				bind.imageInfo.sampler = {};
-			}
-
-			break;
-		} case DescriptorCategory::bufferView: {
-			dlg_assert(bind.valid);
-			removeFromHandle(nonNull(bind.bufferView));
-			bind.bufferView = {};
-			break;
-		} default: dlg_error("Unimplemented descriptor type"); break;
-	}
-
-	bind.valid = false;
-}
-
-void notifyDestroyLocked(DescriptorSetState& state, unsigned binding, unsigned elem,
-		const Handle& handle) {
-	ZoneScoped;
-
-	unregisterLocked(state, binding, elem, handle.objectType == VK_OBJECT_TYPE_SAMPLER);
-	if(state.ds) {
-		auto& layout = state.layout->bindings[binding];
-
-		// TODO: I couldn't find in the spec what happens in this situation:
-		// a view/sampler/buffer bound to a binding with update_after_bind
-		// was destroyed. Will command buffers using that ds be invalidated?
-		// My intuition says it won't be invalidated, could be updated
-		// later on with valid view again, the order (update binding or
-		// destroy view first) should really not matter. But the spec does not
-		// explicitly state this, so not sure.
-		if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
-			// TODO: also respect the other flags (e.g. update_unused_while_pending)
-			// see notes in other invalidation places.
-			state.ds->invalidateCbsLocked();
-		}
-	}
-}
-
 DescriptorSetStatePtr newDescriptorSetState(
-		IntrusivePtr<DescriptorSetLayout> layout, u32 variableDescriptorCount) {
-	auto numBindings = totalNumBindings(*layout, variableDescriptorCount);
+		IntrusiveHandlePtr<DescriptorSetLayout> layout, u32 variableDescriptorCount) {
 	auto memSize = sizeof(DescriptorSetState) +
-		numBindings * sizeof(DescriptorBinding);
+		totalDescriptorMemSize(*layout, variableDescriptorCount);
 	auto mem = new std::byte[memSize]();
 
 	auto* state = new(mem) DescriptorSetState();
 	state->layout = std::move(layout);
 	state->variableDescriptorCount = variableDescriptorCount;
 
-	auto* base = mem + sizeof(DescriptorSetState);
-	auto* bindings = reinterpret_cast<DescriptorBinding*>(base);
-	new(bindings) DescriptorBinding[numBindings]();
+	// initialize descriptors
+	auto it = mem + sizeof(DescriptorSetState);
+	for(auto& binding : state->layout->bindings) {
+		auto count = binding.descriptorCount;
+		if(binding.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
+			count = variableDescriptorCount;
+		}
+
+		switch(category(binding.descriptorType)) {
+			case DescriptorCategory::buffer:
+				new(it) BufferDescriptor[count];
+				it += count * sizeof(BufferDescriptor);
+				break;
+			case DescriptorCategory::bufferView:
+				new(it) ImageDescriptor[count];
+				it += count * sizeof(BufferViewDescriptor);
+				break;
+			case DescriptorCategory::image:
+				new(it) ImageDescriptor[count];
+				it += count * sizeof(ImageDescriptor);
+				break;
+			case DescriptorCategory::none:
+				dlg_error("unreachable: invalid descriptor type");
+				break;
+		}
+	}
 
 	return DescriptorSetStatePtr(state);
 }
 
-void copyLocked(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
+void copy(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
 		const DescriptorSetState& src, unsigned srcBindID, unsigned srcElemID) {
-	auto& srcBind = binding(src, srcBindID, srcElemID);
-	auto& dstBind = binding(dst, dstBindID, dstElemID);
-	if(!srcBind.valid) {
-		return;
-	}
-
 	auto& srcLayout = src.layout->bindings[srcBindID];
 	auto& dstLayout = dst.layout->bindings[dstBindID];
 	dlg_assert(srcLayout.descriptorType == dstLayout.descriptorType);
 
-	if(dstBind.valid) {
-		unregisterLocked(dst, dstBindID, dstElemID);
-	}
-
 	switch(category(dstLayout.descriptorType)) {
 		case DescriptorCategory::image: {
-			dstBind.imageInfo.layout = srcBind.imageInfo.layout;
-
-			if(srcBind.imageInfo.imageView) {
-				dstBind.imageInfo.imageView = srcBind.imageInfo.imageView;
-				dstBind.imageInfo.imageView->descriptors.insert({&dst, dstBindID, dstElemID});
+			ImageDescriptor srcCopy;
+			{
+				std::lock_guard lock(src.mutex);
+				srcCopy = image(src, srcBindID, srcElemID);
 			}
-			if(srcBind.imageInfo.sampler && !dstLayout.immutableSamplers.get()) {
-				dstBind.imageInfo.sampler = srcBind.imageInfo.sampler;
-				dstBind.imageInfo.sampler->descriptors.insert({&dst, dstBindID, dstElemID});
+
+			std::lock_guard lock(dst.mutex);
+			auto& dstBind = image(dst, dstBindID, dstElemID);
+			dstBind.imageView = std::move(srcCopy.imageView);
+			dstBind.layout = srcCopy.layout;
+
+			if(!dstLayout.immutableSamplers.get()) {
+				dstBind.sampler = std::move(srcCopy.sampler);
 			}
 			break;
 		} case DescriptorCategory::buffer: {
-			dlg_assert(srcBind.bufferInfo.buffer);
-			dstBind.bufferInfo = srcBind.bufferInfo;
-			dstBind.bufferInfo.buffer->descriptors.insert({&dst, dstBindID, dstElemID});
-			break;
-		} case DescriptorCategory::bufferView:
-			dlg_assert(srcBind.bufferView);
-			dstBind.bufferView = srcBind.bufferView;
-			dstBind.bufferView->descriptors.insert({&dst, dstBindID, dstElemID});
-			break;
-		default: break;
-	}
+			BufferDescriptor srcCopy;
+			{
+				std::lock_guard lock(src.mutex);
+				srcCopy = buffer(src, srcBindID, srcElemID);
+			}
 
-	dstBind.valid = true;
+			std::lock_guard lock(dst.mutex);
+			buffer(dst, dstBindID, dstElemID) = srcCopy;
+			break;
+		} case DescriptorCategory::bufferView: {
+			BufferViewDescriptor srcCopy;
+			{
+				std::lock_guard lock(src.mutex);
+				srcCopy = bufferView(src, srcBindID, srcElemID);
+			}
+
+			std::lock_guard lock(dst.mutex);
+			bufferView(dst, dstBindID, dstElemID) = srcCopy;
+			break;
+		} case DescriptorCategory::none:
+			dlg_error("unreachable: Invalid descriptor type");
+			break;
+	}
 }
 
 void initImmutableSamplersLocked(DescriptorSetState& state) {
@@ -210,22 +193,17 @@ void initImmutableSamplersLocked(DescriptorSetState& state) {
 		// every time we read a binding. Also needed for correct
 		// invalidation tracking.
 		if(state.layout->bindings[b].immutableSamplers.get()) {
+			std::lock_guard lock(state.mutex);
+
 			dlg_assert(needsSampler(state.layout->bindings[b].descriptorType));
-			auto binds = bindings(state, b);
+			auto binds = images(state, b);
 
 			for(auto e = 0u; e < binds.size(); ++e) {
 				auto sampler = state.layout->bindings[b].immutableSamplers[e];
 				dlg_assert(sampler);
+				dlg_assert(sampler->handle);
 
-				binds[e].imageInfo = {};
-				binds[e].imageInfo.sampler = sampler;
-
-				// when the bindings contains only a sampler, it's already valid.
-				if(state.layout->bindings[b].descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) {
-					binds[e].valid = true;
-				}
-
-				sampler->descriptors.insert({&state, b, e});
+				binds[e].sampler = sampler;
 			}
 		}
 	}
@@ -233,8 +211,8 @@ void initImmutableSamplersLocked(DescriptorSetState& state) {
 
 DescriptorSetStatePtr copyDescriptorSetStateLocked(const DescriptorSetState& state) {
 	ZoneScoped;
+	vil_assert_owned(state.mutex);
 
-	dlg_assert(state.layout->dev->mutex.owned());
 	auto ret = newDescriptorSetState(state.layout, state.variableDescriptorCount);
 
 	initImmutableSamplersLocked(*ret);
@@ -242,7 +220,7 @@ DescriptorSetStatePtr copyDescriptorSetStateLocked(const DescriptorSetState& sta
 	// copy descriptors
 	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 		for(auto e = 0u; e < descriptorCount(state, b); ++e) {
-			copyLocked(*ret, b, e, state, b, e);
+			copy(*ret, b, e, state, b, e);
 		}
 	}
 
@@ -260,6 +238,7 @@ u32 descriptorCount(const DescriptorSetState& state, unsigned binding) {
 	return layout.descriptorCount;
 }
 
+/*
 span<DescriptorBinding> bindings(DescriptorSetState& state, unsigned binding) {
 	dlg_assert(state.layout);
 	dlg_assert(binding < state.layout->bindings.size());
@@ -301,37 +280,7 @@ const DescriptorBinding& binding(const DescriptorSetState& state,
 	dlg_assert(elem < bs.size());
 	return bs[elem];
 }
-
-void DescriptorSetState::Deleter::operator()(DescriptorSetState* state) const {
-	// call destructor manually
-	state->~DescriptorSetState();
-
-	// we allocated the memory as std::byte array, so we have to free
-	// it like that. We don't have to call any other destructors of
-	// Binding elements since they are all trivial
-	auto ptr = reinterpret_cast<std::byte*>(state);
-	delete[] ptr;
-}
-
-DescriptorSetState::~DescriptorSetState() {
-	ZoneScoped;
-
-	dlg_assert(layout);
-	auto& dev = layout->dev;
-
-	std::lock_guard lock(dev->mutex);
-
-	for(auto b = 0u; b < layout->bindings.size(); ++b) {
-		auto bs = bindings(*this, b);
-		for(auto e = 0u; e < bs.size(); ++e) {
-			if(!bs[e].valid && !layout->bindings[b].immutableSamplers.get()) {
-				continue;
-			}
-
-			unregisterLocked(*this, b, e, true);
-		}
-	}
-}
+*/
 
 DescriptorSet::~DescriptorSet() {
 	if(!dev) {
@@ -357,6 +306,7 @@ DescriptorSet::~DescriptorSet() {
 	state.reset();
 }
 
+/*
 Sampler* getSampler(DescriptorSetState& state, unsigned bindingID, unsigned elemID) {
 	dlg_assert(state.layout->bindings.size() > bindingID);
 	dlg_assert(needsSampler(state.layout->bindings[bindingID].descriptorType));
@@ -386,6 +336,7 @@ BufferView* getBufferView(DescriptorSetState& state, unsigned bindingID, unsigne
 	auto& binding = vil::binding(state, bindingID, elemID);
 	return binding.bufferView;
 }
+*/
 
 DescriptorPool::~DescriptorPool() {
 	if(!dev) {
@@ -418,6 +369,18 @@ DescriptorSetLayout::~DescriptorSetLayout() {
 	dev->dispatch.DestroyDescriptorSetLayout(dev->handle, handle, nullptr);
 }
 
+DescriptorUpdateTemplate::~DescriptorUpdateTemplate() {
+	if(!dev) {
+		return;
+	}
+
+	// never used directly by command buffers
+	dlg_assert(refRecords.empty());
+	dlg_assert(handle);
+
+	dev->dispatch.DestroyDescriptorUpdateTemplate(dev->handle, handle, nullptr);
+}
+
 // util
 DescriptorCategory category(VkDescriptorType type) {
 	switch(type) {
@@ -437,7 +400,7 @@ DescriptorCategory category(VkDescriptorType type) {
 			return DescriptorCategory::bufferView;
 		default:
 			dlg_trace("Unknown descriptor type: {}", type);
-			return {};
+			return DescriptorCategory::none;
 	}
 }
 
@@ -492,16 +455,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	// See design.md on allocators.
 	(void) pAllocator;
 
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateDescriptorSetLayout(device, pCreateInfo, nullptr, pSetLayout);
+	auto& dev = getDevice(device);
+
+	VkDescriptorSetLayout handle;
+	auto res = dev.dispatch.CreateDescriptorSetLayout(dev.handle, pCreateInfo, nullptr, &handle);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& dsLayout = dev.dsLayouts.add(*pSetLayout);
+	auto& dsLayoutPtr = dev.dsLayouts.addPtr(*pSetLayout);
+	auto& dsLayout = *dsLayoutPtr;
 	dsLayout.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT;
 	dsLayout.dev = &dev;
-	dsLayout.handle = *pSetLayout;
+	dsLayout.handle = handle;
 
 	auto* flagsInfo = findChainInfo<VkDescriptorSetLayoutBindingFlagsCreateInfo,
 		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO>(*pCreateInfo);
@@ -525,9 +491,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 			// But it seems incorrect to me, we might not handle it correctly
 			// everywhere.
 			dlg_assert(!(dst.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT));
-			dst.immutableSamplers = std::make_unique<Sampler*[]>(dst.descriptorCount);
+			dst.immutableSamplers = std::make_unique<IntrusiveHandlePtr<Sampler>[]>(dst.descriptorCount);
 			for(auto e = 0u; e < dst.descriptorCount; ++e) {
-				dst.immutableSamplers[e] = &dev.samplers.get(bind.pImmutableSamplers[e]);
+				dst.immutableSamplers[e] = getPtr(dev, bind.pImmutableSamplers[e]);
 			}
 		}
 	}
@@ -537,11 +503,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	for(auto b = 0u; b < dsLayout.bindings.size(); ++b) {
 		auto& bind = dsLayout.bindings[b];
 		bind.offset = off;
-		off += bind.descriptorCount;
+
+		off += bind.descriptorCount * descriptorSize(bind.descriptorType);
 
 		dlg_assert(b + 1 == dsLayout.bindings.size() ||
 			!(bind.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT));
 	}
+
+	*pSetLayout = castDispatch<VkDescriptorSetLayout>(dev, *dsLayoutPtr.wrapped());
 
 	return res;
 }
@@ -554,13 +523,13 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorSetLayout(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.dsLayouts.mustErase(descriptorSetLayout);
 
 	// NOTE: We intenntionally don't destruct the handle here, handle might
 	// need to be kept alive, they have shared ownership. Destroyed
 	// in handle destructor.
-	// dev.dispatch.DestroyDescriptorSetLayout(device, descriptorSetLayout, pAllocator);
+	// dev.dispatch.DestroyDescriptorSetLayout(dev.handle, dsl.handle, pAllocator);
 	(void) pAllocator;
 }
 
@@ -571,17 +540,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 		const VkAllocationCallbacks*                pAllocator,
 		VkDescriptorPool*                           pDescriptorPool) {
 	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateDescriptorPool(device, pCreateInfo, pAllocator, pDescriptorPool);
+
+	VkDescriptorPool handle;
+	auto res = dev.dispatch.CreateDescriptorPool(dev.handle, pCreateInfo, pAllocator, &handle);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& dsPool = dev.dsPools.add(*pDescriptorPool);
+	auto& dsPoolPtr = dev.dsPools.addPtr(*pDescriptorPool);
+	auto& dsPool = *dsPoolPtr;
 	dsPool.objectType = VK_OBJECT_TYPE_DESCRIPTOR_POOL;
 	dsPool.dev = &dev;
-	dsPool.handle = *pDescriptorPool;
+	dsPool.handle = handle;
 	dsPool.maxSets = pCreateInfo->maxSets;
 	dsPool.poolSizes = {pCreateInfo->pPoolSizes, pCreateInfo->pPoolSizes + pCreateInfo->poolSizeCount};
+
+	*pDescriptorPool = castDispatch<VkDescriptorPool>(dev, *dsPoolPtr.wrapped());
 
 	return res;
 }
@@ -594,17 +568,17 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorPool(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	dev.dsPools.mustErase(descriptorPool);
-	dev.dispatch.DestroyDescriptorPool(device, descriptorPool, pAllocator);
+	auto& dev = getDevice(device);
+	auto handle = dev.dsPools.mustMove(descriptorPool)->handle;
+	dev.dispatch.DestroyDescriptorPool(dev.handle, handle, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 		VkDevice                                    device,
 		VkDescriptorPool                            descriptorPool,
 		VkDescriptorPoolResetFlags                  flags) {
-	auto& dev = getData<Device>(device);
-	auto& dsPool = dev.dsPools.get(descriptorPool);
+	auto& dsPool = get(device, descriptorPool);
+	auto& dev = *dsPool.dev;
 
 	// We don't use a for loop since the descriptors remove themselves
 	// on destruction
@@ -613,7 +587,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 		dev.descriptorSets.mustErase(ds->handle);
 	}
 
-	return dev.dispatch.ResetDescriptorPool(device, descriptorPool, flags);
+	return dev.dispatch.ResetDescriptorPool(dev.handle, dsPool.handle, flags);
 }
 
 // descriptor set
@@ -621,13 +595,22 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		VkDevice                                    device,
 		const VkDescriptorSetAllocateInfo*          pAllocateInfo,
 		VkDescriptorSet*                            pDescriptorSets) {
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.AllocateDescriptorSets(device, pAllocateInfo, pDescriptorSets);
+	auto& pool = get(device, pAllocateInfo->descriptorPool);
+	auto& dev = *pool.dev;
+
+	auto nci = *pAllocateInfo;
+	nci.descriptorPool = pool.handle;
+
+	auto dsLayouts = LocalVector<VkDescriptorSetLayout>(pAllocateInfo->descriptorSetCount);
+	for(auto i = 0u; i < nci.descriptorSetCount; ++i) {
+		dsLayouts[i] = get(dev, pAllocateInfo->pSetLayouts[i]).handle;
+	}
+
+	auto handles = LocalVector<VkDescriptorSet>(pAllocateInfo->descriptorSetCount);
+	auto res = dev.dispatch.AllocateDescriptorSets(dev.handle, &nci, handles.data());
 	if(res != VK_SUCCESS) {
 		return res;
 	}
-
-	auto& pool = dev.dsPools.get(pAllocateInfo->descriptorPool);
 
 	auto* variableCountInfo = findChainInfo<VkDescriptorSetVariableDescriptorCountAllocateInfo,
 		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO>(*pAllocateInfo);
@@ -638,12 +621,13 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		variableCountInfo->descriptorSetCount == pAllocateInfo->descriptorSetCount);
 
 	for(auto i = 0u; i < pAllocateInfo->descriptorSetCount; ++i) {
-		auto& ds = dev.descriptorSets.add(pDescriptorSets[i]);
+		auto& dsPtr = dev.descriptorSets.addPtr(pDescriptorSets[i]);
+		auto& ds = *dsPtr;
 		ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
 		ds.dev = &dev;
-		ds.handle = pDescriptorSets[i];
+		ds.handle = handles[i];
 
-		auto layoutPtr = dev.dsLayouts.getPtr(pAllocateInfo->pSetLayouts[i]);
+		auto layoutPtr = getPtr(dev, pAllocateInfo->pSetLayouts[i]);
 		auto& layout = nonNull(layoutPtr);
 
 		// per spec variable counts are zero by default, if no other value is provided
@@ -656,6 +640,8 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		ds.state = newDescriptorSetState(std::move(layoutPtr), varCount);
 		ds.state->ds = &ds;
 		ds.pool = &pool;
+
+		pDescriptorSets[i] = castDispatch<VkDescriptorSet>(dev, *dsPtr.wrapped());
 
 		std::lock_guard lock(dev.mutex);
 		// the application cannot access 'pool' from another thread during
@@ -675,74 +661,151 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 		VkDescriptorPool                            descriptorPool,
 		uint32_t                                    descriptorSetCount,
 		const VkDescriptorSet*                      pDescriptorSets) {
-	auto& dev = getData<Device>(device);
+	auto& pool = get(device, descriptorPool);
+	auto& dev = *pool.dev;
+	auto handles = LocalVector<VkDescriptorSet>(descriptorSetCount);
 
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
-		dev.descriptorSets.mustErase(pDescriptorSets[i]);
+		auto ptr = dev.descriptorSets.mustMove(pDescriptorSets[i]);
+		handles[i] = ptr->handle;
 	}
 
-	return dev.dispatch.FreeDescriptorSets(device, descriptorPool,
-		descriptorSetCount, pDescriptorSets);
+	return dev.dispatch.FreeDescriptorSets(dev.handle, pool.handle,
+		u32(handles.size()), handles.data());
 }
 
-void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
-		unsigned bind, unsigned elem, VkBufferView bufferView) {
-	dlg_assert(bufferView);
-	binding.bufferView = &state.layout->dev->bufferViews.getLocked(bufferView);
-	binding.bufferView->descriptors.insert({&state, bind, elem});
-	binding.valid = true;
+void update(DescriptorSetState& state, unsigned bind, unsigned elem,
+		VkBufferView& handle) {
+	dlg_assert(handle);
+
+	auto& binding = bufferView(state, bind, elem);
+	auto ptr = getPtr(*state.layout->dev, handle);
+	handle = ptr->handle;
+
+	std::lock_guard lock(state.mutex);
+	binding = std::move(ptr);
 }
 
-void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
-		unsigned bind, unsigned elem, const VkDescriptorImageInfo& img) {
-	auto* dev = state.layout->dev;
-	binding.imageInfo.layout = img.imageLayout;
+void update(DescriptorSetState& state, unsigned bind, unsigned elem,
+		VkDescriptorImageInfo& img) {
+	auto& dev = *state.layout->dev;
+
+	auto& binding = image(state, bind, elem);
+	binding.layout = img.imageLayout;
 
 	auto& layout = state.layout->bindings[bind];
 	if(needsImageView(layout.descriptorType)) {
 		dlg_assert(img.imageView);
-		binding.imageInfo.imageView = &dev->imageViews.getLocked(img.imageView);
-		binding.imageInfo.imageView->descriptors.insert({&state, bind, elem});
+		auto ptr = getPtr(dev, img.imageView);
+		img.imageView = ptr->handle;
+
+		std::lock_guard lock(state.mutex);
+		binding.imageView = std::move(ptr);
 	}
 
 	if(needsSampler(layout.descriptorType)) {
 		if(layout.immutableSamplers) {
 			// immutable samplers are initialized at the beginning and
 			// never unset.
-			dlg_assert(binding.imageInfo.sampler);
-			dlg_assert(binding.imageInfo.sampler == layout.immutableSamplers[elem]);
+			dlg_assert(binding.sampler);
+			dlg_assert(binding.sampler.get() == layout.immutableSamplers[elem].get());
 		} else {
-			binding.imageInfo.sampler = &dev->samplers.getLocked(img.sampler);
-			dlg_assert(binding.imageInfo.sampler);
-			binding.imageInfo.sampler->descriptors.insert({&state, bind, elem});
+			dlg_assert(img.sampler);
+			auto ptr = getPtr(dev, img.sampler);
+			img.sampler = ptr->handle;
+
+			std::lock_guard lock(state.mutex);
+			binding.sampler = std::move(ptr);
 		}
 	}
-
-	binding.valid = true;
 }
 
-void updateLocked(DescriptorSetState& state, DescriptorBinding& binding,
-		unsigned bind, unsigned elem, const VkDescriptorBufferInfo& buf) {
-	binding.bufferInfo = {};
-	binding.bufferInfo.buffer = &state.layout->dev->buffers.getLocked(buf.buffer);
-	binding.bufferInfo.buffer->descriptors.insert({&state, bind, elem});
-	binding.bufferInfo.offset = buf.offset;
-	binding.bufferInfo.range = buf.range;
-	binding.valid = true;
+void update(DescriptorSetState& state, unsigned bind, unsigned elem,
+		VkDescriptorBufferInfo& buf) {
+	auto& binding = buffer(state, bind, elem);
+	auto ptr = getPtr(*state.layout->dev, buf.buffer);
+	buf.buffer = ptr->handle;
+
+	std::lock_guard lock(state.mutex);
+	binding.buffer = std::move(ptr);
+	binding.offset = buf.offset;
+	binding.range = evalRange(binding.buffer->ci.size, buf.offset, buf.range);
 }
 
-DescriptorBinding& advanceUntilValid(DescriptorSetState& state,
-		unsigned& binding, unsigned& elem) {
+void advanceUntilValid(DescriptorSetState& state, unsigned& binding, unsigned& elem) {
 	dlg_assert(binding < state.layout->bindings.size());
-	auto binds = bindings(state, binding);
-	while(elem >= binds.size()) {
+	auto count = descriptorCount(state, binding);
+	while(elem >= count) {
 		++binding;
 		elem = 0u;
 		dlg_assert(binding < state.layout->bindings.size());
-		binds = bindings(state, binding);
+		count = descriptorCount(state, binding);
+	}
+}
+
+void DescriptorSetState::PtrHandler::inc(DescriptorSetState& obj) const noexcept {
+	std::lock_guard lock(obj.mutex);
+	++obj.refCount;
+}
+
+void DescriptorSetState::PtrHandler::dec(DescriptorSetState& obj) const noexcept {
+	{
+		std::lock_guard lock(obj.mutex);
+		dlg_assert(obj.refCount > 0);
+		if(--obj.refCount > 0) {
+			return;
+		}
 	}
 
-	return binds[elem];
+	// ref count is zero, free it
+	obj.~DescriptorSetState();
+
+	// we allocated the memory as std::byte array, so we have to free
+	// it like that. We don't have to call any other destructors of
+	// Binding elements since they are all trivial
+	auto ptr = reinterpret_cast<std::byte*>(&obj);
+	delete[] ptr;
+}
+
+void checkCopyState(DescriptorSet& ds) {
+	// This is called when we are updating the descriptorSets state.
+	// If someone else holds a reference to to it, we need to allocate a new one.
+	// This basically implements copy-on-write.
+	// Edge case:
+	// since we release the lock right after checking the reference count,
+	// we won't correctly implement copy-on-write for copies that
+	// are made *during* the following update. Fixing this isn't easily possbile
+	// due to synchronization issues. But this isn't a real issue:
+	// Making a copy of a state retrieved from a descriptor set should
+	// only happen during submission. The only case in which another
+	// thread can - at the same time - be updating a descriptor in
+	// a set that is being submitted is an update_unused_while_pending
+	// descriptor that would be meaningless in the referenced state anyways.
+
+	DescriptorSetStatePtr newState;
+
+	{
+		std::lock_guard lock(ds.state->mutex);
+		if(ds.state->refCount == 1) {
+			return;
+		}
+
+		ds.state->ds = nullptr;
+		newState = copyDescriptorSetStateLocked(*ds.state);
+	}
+
+	newState->ds = &ds;
+
+	{
+		// PERF: we might get away with not involving the
+		// device mutex here, just make ds.state atomic and make
+		// sure we first make an IntrusivePtr copy whereever we read
+		// it (probably already do this everywhere).
+		// NOTE important we never hold 'ds.mutex' and 'dev.mutex' at once,
+		// careful when moving code around here.
+		std::lock_guard lock(ds.dev->mutex);
+		ds.state = std::move(newState);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
@@ -752,34 +815,37 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		uint32_t                                    descriptorCopyCount,
 		const VkCopyDescriptorSet*                  pDescriptorCopies) {
 	ZoneScoped;
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
+
+	auto writes = LocalVector<VkWriteDescriptorSet>(descriptorWriteCount);
+	auto imageInfos = LocalVector<LocalVector<VkDescriptorImageInfo>>(descriptorWriteCount);
+	auto bufferInfos = LocalVector<LocalVector<VkDescriptorBufferInfo>>(descriptorWriteCount);
+	auto bufferViews = LocalVector<LocalVector<VkBufferView>>(descriptorWriteCount);
 
 	// handle writes
 	for(auto i = 0u; i < descriptorWriteCount; ++i) {
 		auto& write = pDescriptorWrites[i];
 		dlg_assert(write.descriptorCount > 0u); // per vulkan spec
 
-		auto& ds = dev.descriptorSets.get(write.dstSet);
+		auto& ds = get(dev, write.dstSet);
 		dlg_assert(ds.handle);
+		dlg_assert(ds.state);
 
-		// The whole update process must be atomic
-		std::lock_guard lock(dev.mutex);
+		writes[i] = write;
+		writes[i].dstSet = ds.handle;
 
-		// We are updating the descriptorSets state, if someone
-		// else holds on to it, we need to allocate a new one.
-		// This basically implements copy-on-write
-		if(ds.state->refCount > 1) {
-			ds.state->ds = nullptr;
-			ds.state = copyDescriptorSetStateLocked(*ds.state);
-			ds.state->ds = &ds;
-		}
+		imageInfos[i] = LocalVector<VkDescriptorImageInfo>(write.descriptorCount);
+		bufferInfos[i] = LocalVector<VkDescriptorBufferInfo>(write.descriptorCount);
+		bufferViews[i] = LocalVector<VkBufferView>(write.descriptorCount);
+
+		checkCopyState(ds);
 
 		auto dstBinding = write.dstBinding;
 		auto dstElem = write.dstArrayElement;
 		auto invalidate = false;
 
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
-			auto& binding = advanceUntilValid(*ds.state, dstBinding, dstElem);
+			advanceUntilValid(*ds.state, dstBinding, dstElem);
 			auto& layout = ds.state->layout->bindings[dstBinding];
 			dlg_assert(write.descriptorType == layout.descriptorType);
 
@@ -796,26 +862,34 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 				invalidate = true;
 			}
 
-			if(binding.valid) {
-				unregisterLocked(*ds.state, dstBinding, dstElem);
-			}
-
 			switch(category(write.descriptorType)) {
 				case DescriptorCategory::image: {
 					dlg_assert(write.pImageInfo);
-					updateLocked(*ds.state, binding, dstBinding, dstElem, write.pImageInfo[j]);
+					auto& info = imageInfos[i][j];
+					info = write.pImageInfo[j];
+					update(*ds.state, dstBinding, dstElem, info);
 					break;
 				} case DescriptorCategory::buffer: {
 					dlg_assert(write.pBufferInfo);
-					updateLocked(*ds.state, binding, dstBinding, dstElem, write.pBufferInfo[j]);
+					auto& info = bufferInfos[i][j];
+					info = write.pBufferInfo[j];
+					update(*ds.state, dstBinding, dstElem, info);
 					break;
-				} case DescriptorCategory::bufferView:
+				} case DescriptorCategory::bufferView: {
 					dlg_assert(write.pTexelBufferView);
-					updateLocked(*ds.state, binding, dstBinding, dstElem, write.pTexelBufferView[j]);
+					auto& info = bufferViews[i][j];
+					info = write.pTexelBufferView[j];
+					update(*ds.state, dstBinding, dstElem, info);
 					break;
-				default: break;
+				} case DescriptorCategory::none:
+					dlg_error("unreachable: Invalid descriptor type");
+					break;
 			}
 		}
+
+		writes[i].pImageInfo = imageInfos[i].data();
+		writes[i].pBufferInfo = bufferInfos[i].data();
+		writes[i].pTexelBufferView = bufferViews[i].data();
 
 		if(invalidate) {
 			ds.invalidateCbsLocked();
@@ -823,22 +897,18 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 	}
 
 	// handle copies
+	auto copies = LocalVector<VkCopyDescriptorSet>(descriptorCopyCount);
+
 	for(auto i = 0u; i < descriptorCopyCount; ++i) {
 		auto& copy = pDescriptorCopies[i];
 		auto& src = dev.descriptorSets.get(copy.srcSet);
 		auto& dst = dev.descriptorSets.get(copy.dstSet);
 
-		// The whole update process must be atomic
-		std::lock_guard lock(dev.mutex);
+		copies[i] = copy;
+		copies[i].srcSet = src.handle;
+		copies[i].dstSet = dst.handle;
 
-		// We are updating the descriptorSets state, if someone
-		// else holds on to it, we need to allocate a new one.
-		// This basically implements copy-on-write
-		if(dst.state->refCount > 1) {
-			dst.state->ds = nullptr;
-			dst.state = copyDescriptorSetStateLocked(*dst.state);
-			dst.state->ds = &dst;
-		}
+		checkCopyState(dst);
 
 		auto dstBinding = copy.dstBinding;
 		auto dstElem = copy.dstArrayElement;
@@ -847,11 +917,8 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		auto invalidate = false;
 
 		for(auto j = 0u; j < copy.descriptorCount; ++j, ++srcElem, ++dstElem) {
-			auto& dstBind = advanceUntilValid(*dst.state, dstBinding, dstElem);
-			auto& srcBind = advanceUntilValid(*src.state, srcBinding, srcElem);
-
-			dlg_assert(srcBind.valid);
-			(void) dstBind;
+			advanceUntilValid(*dst.state, dstBinding, dstElem);
+			advanceUntilValid(*src.state, srcBinding, srcElem);
 
 			auto& layout = dst.state->layout->bindings[dstBinding];
 			if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
@@ -860,7 +927,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 				invalidate = true;
 			}
 
-			copyLocked(*dst.state, dstBinding, dstElem, *src.state, srcBinding, srcElem);
+			vil::copy(*dst.state, dstBinding, dstElem, *src.state, srcBinding, srcElem);
 		}
 
 		if(invalidate) {
@@ -870,9 +937,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 
 	{
 		ZoneScopedN("dispatch.UpdateDescriptorSets");
-		return dev.dispatch.UpdateDescriptorSets(device,
-			descriptorWriteCount, pDescriptorWrites,
-			descriptorCopyCount, pDescriptorCopies);
+		return dev.dispatch.UpdateDescriptorSets(dev.handle,
+			u32(writes.size()), writes.data(),
+			u32(copies.size()), copies.data());
 	}
 }
 
@@ -881,24 +948,39 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
 		const VkDescriptorUpdateTemplateCreateInfo* pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkDescriptorUpdateTemplate*                 pDescriptorUpdateTemplate) {
-	auto& dev = getData<Device>(device);
+	// NOTE: we don't use host allocators here since this handle is potentially
+	// kept alive inside the layer, preventing us from passing an application
+	// allocator to the destruction function.
+	// See design.md on allocators.
+	(void) pAllocator;
 
-	auto f = dev.dispatch.CreateDescriptorUpdateTemplate;
-	auto res = f(device, pCreateInfo, pAllocator, pDescriptorUpdateTemplate);
+	auto& dsLayout = get(device, pCreateInfo->descriptorSetLayout);
+	auto& dev = *dsLayout.dev;
+	auto& pipeLayout = get(dev, pCreateInfo->pipelineLayout);
+
+	auto nci = *pCreateInfo;
+	nci.descriptorSetLayout = dsLayout.handle;
+	nci.pipelineLayout = pipeLayout.handle;
+
+	VkDescriptorUpdateTemplate handle;
+	auto res = dev.dispatch.CreateDescriptorUpdateTemplate(dev.handle, &nci,
+		nullptr, &handle);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& dut = dev.dsuTemplates.add(*pDescriptorUpdateTemplate);
+	auto& dutPtr = dev.dsuTemplates.addPtr(*pDescriptorUpdateTemplate);
+	auto& dut = *dutPtr;
 	dut.objectType = VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE;
-	dut.dev = & dev;
-	dut.handle = *pDescriptorUpdateTemplate;
+	dut.dev = &dev;
+	dut.handle = handle;
 
 	dut.entries = {
 		pCreateInfo->pDescriptorUpdateEntries,
 		pCreateInfo->pDescriptorUpdateEntries + pCreateInfo->descriptorUpdateEntryCount
 	};
 
+	*pDescriptorUpdateTemplate = castDispatch<VkDescriptorUpdateTemplate>(dev, *dutPtr.wrapped());
 	return res;
 }
 
@@ -906,11 +988,16 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorUpdateTemplate(
 		VkDevice                                    device,
 		VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
 		const VkAllocationCallbacks*                pAllocator) {
-	auto& dev = getData<Device>(device);
+	if(!descriptorUpdateTemplate) {
+		return;
+	}
+
+	auto& dev = getDevice(device);
 	dev.dsuTemplates.mustErase(descriptorUpdateTemplate);
 
-	auto f = dev.dispatch.DestroyDescriptorUpdateTemplate;
-	f(device, descriptorUpdateTemplate, pAllocator);
+	// Don't destroy it here, handle has shared ownership, see e.g.
+	// the dsuTemplates hash map in Device for justification
+	(void) pAllocator;
 }
 
 VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
@@ -920,56 +1007,53 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 		const void*                                 pData) {
 	ZoneScoped;
 
-	auto& dev = getData<Device>(device);
-	auto& ds  = dev.descriptorSets.get(descriptorSet);
-	auto& dut = dev.dsuTemplates.get(descriptorUpdateTemplate);
+	auto& ds  = get(device, descriptorSet);
+	auto& dev = *ds.dev;
+	auto& dut = get(dev, descriptorUpdateTemplate);
 
-	auto* ptr = static_cast<const std::byte*>(pData);
 	bool invalidate = false;
 
-	{
-		// The whole update process must be atomic
-		std::lock_guard lock(dev.mutex);
+	checkCopyState(ds);
 
-		// We are updating the descriptorSets state, if someone
-		// else holds on to it, we need to allocate a new one.
-		// This basically implements copy-on-write
-		if(ds.state->refCount > 1) {
-			ds.state->ds = nullptr;
-			ds.state = copyDescriptorSetStateLocked(*ds.state);
-			ds.state->ds = &ds;
-		}
+	auto totalSize = totalUpdateDataSize(dut);
+	auto fwdData = LocalVector<std::byte>(totalSize);
+	std::memcpy(fwdData.data(), pData, totalSize);
+	auto* ptr = fwdData.data();
 
-		for(auto& entry : dut.entries) {
-			auto dstBinding = entry.dstBinding;
-			auto dstElem = entry.dstArrayElement;
-			for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
-				auto& binding = advanceUntilValid(*ds.state, dstBinding, dstElem);
-				auto dsType = ds.state->layout->bindings[dstBinding].descriptorType;
+	for(auto& entry : dut.entries) {
+		auto dstBinding = entry.dstBinding;
+		auto dstElem = entry.dstArrayElement;
+		for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
+			advanceUntilValid(*ds.state, dstBinding, dstElem);
+			auto dsType = ds.state->layout->bindings[dstBinding].descriptorType;
 
-				// NOTE: such an assertion here would be nice. Track used
-				// layout in update?
-				// dlg_assert(write.descriptorType == type);
+			// TODO: such an assertion here would be nice. Track used
+			// layout in update?
+			// dlg_assert(write.descriptorType == type);
 
-				auto* data = ptr + (entry.offset + j * entry.stride);
+			auto* data = ptr + (entry.offset + j * entry.stride);
 
-				switch(category(dsType)) {
-					case DescriptorCategory::image: {
-						auto& img = *reinterpret_cast<const VkDescriptorImageInfo*>(data);
-						updateLocked(*ds.state, binding, dstBinding, dstElem, img);
-						break;
-					} case DescriptorCategory::buffer: {
-						auto& buf = *reinterpret_cast<const VkDescriptorBufferInfo*>(data);
-						updateLocked(*ds.state, binding, dstBinding, dstElem, buf);
-						break;
-					} case DescriptorCategory::bufferView: {
-						auto& bufView = *reinterpret_cast<const VkBufferView*>(data);
-						updateLocked(*ds.state, binding, dstBinding, dstElem, bufView);
-						break;
-					} default:
-						dlg_error("Invalid/unknown descriptor type");
-						break;
-				}
+			// TODO: the reinterpret_cast here is UB in C++ I guess.
+			// Assuming the caller did it correctly (really creating
+			// the objects e.g. via placement new) we could probably also
+			// do it correctly by using placement new (copy) into fwdData
+			// instead of the memcpy above.
+			switch(category(dsType)) {
+				case DescriptorCategory::image: {
+					auto& img = *reinterpret_cast<VkDescriptorImageInfo*>(data);
+					update(*ds.state, dstBinding, dstElem, img);
+					break;
+				} case DescriptorCategory::buffer: {
+					auto& buf = *reinterpret_cast<VkDescriptorBufferInfo*>(data);
+					update(*ds.state, dstBinding, dstElem, buf);
+					break;
+				} case DescriptorCategory::bufferView: {
+					auto& bufView = *reinterpret_cast<VkBufferView*>(data);
+					update(*ds.state, dstBinding, dstElem, bufView);
+					break;
+				} case DescriptorCategory::none:
+					dlg_error("Invalid/unknown descriptor type");
+					break;
 			}
 		}
 	}
@@ -978,11 +1062,10 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 		ds.invalidateCbs();
 	}
 
-
 	{
 		ZoneScopedN("dispatch.UpdateDescriptorSetWithTemplate");
-		dev.dispatch.UpdateDescriptorSetWithTemplate(device, descriptorSet,
-			descriptorUpdateTemplate, pData);
+		dev.dispatch.UpdateDescriptorSetWithTemplate(dev.handle, ds.handle,
+			dut.handle, static_cast<const void*>(fwdData.data()));
 	}
 }
 
@@ -1000,8 +1083,8 @@ u32 totalUpdateDataSize(const DescriptorUpdateTemplate& dut) {
 			case DescriptorCategory::bufferView:
 				off += sizeof(VkBufferView*);
 				break;
-			default:
-				dlg_error("Invalid/unknown descriptor type");
+			case DescriptorCategory::none:
+				dlg_error("unreachable: Invalid/unknown descriptor type");
 				break;
 		}
 

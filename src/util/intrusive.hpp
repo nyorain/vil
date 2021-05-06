@@ -15,8 +15,8 @@ public:
 
 	HandledPtr() noexcept(std::is_nothrow_constructible_v<H>) :
 			storage_{nullptr, H{}} {
-		static_assert(std::is_nothrow_invocable_v<decltype(&H::dec), H, T*>);
-		static_assert(std::is_nothrow_invocable_v<decltype(&H::inc), H, T*>);
+		static_assert(std::is_nothrow_invocable_v<decltype(&H::dec), H, T&>);
+		static_assert(std::is_nothrow_invocable_v<decltype(&H::inc), H, T&>);
 	}
 
 	void reset(T* ptr = nullptr) noexcept(noexceptDec && noexceptInc) {
@@ -24,13 +24,13 @@ public:
 		// has access to this wrapper) don't match unique_ptr::reset.
 		// They probably should.
 		if(getPointer()) {
-			getHandler().dec(getPointer());
+			getHandler().dec(*getPointer());
 			getPointer() = nullptr;
 		}
 
 		getPointer() = ptr;
 		if(ptr) {
-			getHandler().inc(ptr);
+			getHandler().inc(*ptr);
 		}
 	}
 
@@ -43,7 +43,7 @@ public:
 			: storage_{ptr, std::move(h)} {
 
 		if(getPointer()) {
-			getHandler().inc(getPointer());
+			getHandler().inc(*getPointer());
 		}
 	}
 	HandledPtr(std::nullptr_t, H h = {})
@@ -55,7 +55,7 @@ public:
 			: storage_{nullptr, H{}} {
 		storage_ = rhs.storage_;
 		if(getPointer()) {
-			getHandler().inc(getPointer());
+			getHandler().inc(*getPointer());
 		}
 	}
 
@@ -64,7 +64,7 @@ public:
 		reset();
 		storage_ = rhs.storage_;
 		if(getPointer()) {
-			getHandler().inc(getPointer());
+			getHandler().inc(*getPointer());
 		}
 		return *this;
 	}
@@ -99,12 +99,11 @@ protected:
 template<typename T, typename Deleter = std::default_delete<T>>
 struct RefCountHandler {
 	// NOTE: we assume that increasing/decreasing ref count is noexcept
-	void inc(T* ptr) const noexcept { ++ptr->refCount; }
+	void inc(T& obj) const noexcept { ++obj.refCount; }
 	// void dec(T* ptr) const noexcept(std::is_nothrow_destructible_v<T>) {
-	void dec(T* ptr) const noexcept {
-		static_assert(std::is_nothrow_destructible_v<T>);
-		if(--ptr->refCount == 0) {
-			Deleter()(ptr);
+	void dec(T& obj) const noexcept {
+		if(--obj.refCount == 0) {
+			Deleter()(&obj);
 		}
 	}
 };
@@ -117,10 +116,10 @@ struct FinishHandler {
 	FinishHandler(FinishHandler&&) = default;
 	FinishHandler& operator=(FinishHandler&&) = default;
 
-	void inc(T*) const noexcept {}
-	void dec(T* ptr) const noexcept {
+	void inc(T&) const noexcept {}
+	void dec(T& obj) const noexcept {
 		static_assert(std::is_nothrow_invocable_v<decltype(&T::finish), T>);
-		ptr->finish();
+		obj.finish();
 	}
 };
 

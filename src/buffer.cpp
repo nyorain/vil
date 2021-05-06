@@ -2,6 +2,7 @@
 #include <device.hpp>
 #include <data.hpp>
 #include <ds.hpp>
+#include <threadContext.hpp>
 
 namespace vil {
 
@@ -20,13 +21,6 @@ Buffer::~Buffer() {
 	for(auto* view : this->views) {
 		view->buffer = nullptr;
 	}
-
-	// Can't use for loop here, as descriptor will unregsiter themselves in turn
-	while(!this->descriptors.empty()) {
-		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(getBuffer(*dsRef.state, dsRef.binding, dsRef.elem) == this);
-		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
-	}
 }
 
 BufferView::~BufferView() {
@@ -41,13 +35,6 @@ BufferView::~BufferView() {
 		dlg_assert(it != this->buffer->views.end());
 		this->buffer->views.erase(it);
 	}
-
-	// Can't use for loop here, as descriptor will unregsiter themselves in turn
-	while(!this->descriptors.empty()) {
-		auto& dsRef = *this->descriptors.begin();
-		dlg_assert(getBufferView(*dsRef.state, dsRef.binding, dsRef.elem) == this);
-		notifyDestroyLocked(*dsRef.state, dsRef.binding, dsRef.elem, *this);
-	}
 }
 
 // API
@@ -56,7 +43,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 		const VkBufferCreateInfo*                   pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkBuffer*                                   pBuffer) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 
 	auto nci = *pCreateInfo;
 
@@ -75,18 +62,21 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 		concurrent = true;
 	}
 
-	auto res = dev.dispatch.CreateBuffer(device, &nci, pAllocator, pBuffer);
+	VkBuffer handle;
+	auto res = dev.dispatch.CreateBuffer(dev.handle, &nci, pAllocator, &handle);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& buf = dev.buffers.add(*pBuffer);
+	auto& bufPtr = dev.buffers.addPtr(*pBuffer);
+	auto& buf = *bufPtr;
 	buf.objectType = VK_OBJECT_TYPE_BUFFER;
 	buf.dev = &dev;
 	buf.ci = *pCreateInfo;
-	buf.handle = *pBuffer;
+	buf.handle = handle;
 	buf.concurrentHooked = concurrent;
 
+	*pBuffer = castDispatch<VkBuffer>(dev, *bufPtr.wrapped());
 	return res;
 }
 
@@ -98,29 +88,34 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	dev.buffers.mustErase(buffer);
-	dev.dispatch.DestroyBuffer(device, buffer, pAllocator);
+	auto& dev = getDevice(device);
+	VkBuffer handle;
+
+	{
+		std::lock_guard lock(dev.mutex);
+		auto ptr = dev.buffers.mustMoveLocked(buffer);
+		handle = ptr->handle;
+		ptr->handle = {};
+	}
+
+	dev.dispatch.DestroyBuffer(dev.handle, handle, pAllocator);
 }
 
-void bindBufferMemory(Device& dev, const VkBindBufferMemoryInfo& bind) {
-	auto& buf = dev.buffers.get(bind.buffer);
-	auto& mem = dev.deviceMemories.get(bind.memory);
-
+void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
+	auto& dev = *buf.dev;
 	dlg_assert(!buf.memory);
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.GetBufferMemoryRequirements(dev.handle, bind.buffer, &memReqs);
-
-	buf.memory = &mem;
-	buf.allocationOffset = bind.memoryOffset;
-	buf.allocationSize = memReqs.size;
+	dev.dispatch.GetBufferMemoryRequirements(dev.handle, buf.handle, &memReqs);
 
 	{
 		// access to the given memory must be internally synced
 		std::lock_guard lock(dev.mutex);
-		// mem.allocations.insert(&buf);
+		buf.memory = &mem;
+		buf.allocationOffset = offset;
+		buf.allocationSize = memReqs.size;
+
 		mem.allocations.push_back(&buf);
 	}
 }
@@ -130,22 +125,31 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 		VkBuffer                                    buffer,
 		VkDeviceMemory                              memory,
 		VkDeviceSize                                memoryOffset) {
-	auto& dev = getData<Device>(device);
-	bindBufferMemory(dev, {{}, {}, buffer, memory, memoryOffset});
-	return dev.dispatch.BindBufferMemory(device, buffer, memory, memoryOffset);
+	auto& buf = get(device, buffer);
+	auto& mem = get(*buf.dev, memory);
+	bindBufferMemory(buf, mem, memoryOffset);
+	return buf.dev->dispatch.BindBufferMemory(buf.dev->handle,
+		buf.handle, memory, memoryOffset);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 		VkDevice                                    device,
 		uint32_t                                    bindInfoCount,
 		const VkBindBufferMemoryInfo*               pBindInfos) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
+	auto fwd = LocalVector<VkBindBufferMemoryInfo>(bindInfoCount);
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
-		bindBufferMemory(dev, bind);
+		auto& buf = get(dev, bind.buffer);
+		auto& mem = get(dev, bind.memory);
+		bindBufferMemory(buf, mem, bind.memoryOffset);
+
+		fwd[i] = bind;
+		fwd[i].buffer = buf.handle;
+		fwd[i].memory = mem.handle;
 	}
 
-	return dev.dispatch.BindBufferMemory2(device, bindInfoCount, pBindInfos);
+	return dev.dispatch.BindBufferMemory2(dev.handle, u32(fwd.size()), fwd.data());
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
@@ -153,17 +157,24 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
 		const VkBufferViewCreateInfo*               pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkBufferView*                               pView) {
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateBufferView(device, pCreateInfo, pAllocator, pView);
+	auto& buf = get(device, pCreateInfo->buffer);
+	auto& dev = *buf.dev;
+
+	auto ci = *pCreateInfo;
+	ci.buffer = buf.handle;
+
+	VkBufferView handle;
+	auto res = dev.dispatch.CreateBufferView(dev.handle, &ci, pAllocator, &handle);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& view = dev.bufferViews.add(*pView);
+	auto& viewPtr = dev.bufferViews.addPtr(handle);
+	auto& view = *viewPtr;
 	view.dev = &dev;
 	view.objectType = VK_OBJECT_TYPE_BUFFER_VIEW;
-	view.handle = *pView;
-	view.buffer = &dev.buffers.get(pCreateInfo->buffer);
+	view.handle = handle;
+	view.buffer = &buf;
 	view.ci = *pCreateInfo;
 
 	{
@@ -171,6 +182,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
 		view.buffer->views.push_back(&view);
 	}
 
+	*pView = castDispatch<VkBufferView>(dev, *viewPtr.wrapped());
 	return res;
 }
 
@@ -182,9 +194,17 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	dev.bufferViews.mustErase(bufferView);
-	dev.dispatch.DestroyBufferView(device, bufferView, pAllocator);
+	auto& dev = getDevice(device);
+	VkBufferView handle;
+
+	{
+		std::lock_guard lock(dev.mutex);
+		auto ptr = dev.bufferViews.mustMoveLocked(bufferView);
+		handle = ptr->handle;
+		ptr->handle = {}; // mark as destroyed
+	}
+
+	dev.dispatch.DestroyBufferView(dev.handle, handle, pAllocator);
 }
 
 } // namespace vil

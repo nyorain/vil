@@ -845,7 +845,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		const uint32_t*                             pDynamicOffsets) {
 	ZoneScoped;
 
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindDescriptorSetCmd>(cb);
 
 	cmd.firstSet = firstSet;
@@ -864,7 +864,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
-		auto& ds = cb.dev->descriptorSets.get(pDescriptorSets[i]);
+		auto& ds = get(*cb.dev, pDescriptorSets[i]);
 
 		useHandle(cb, cmd, ds);
 		cmd.sets[i] = &ds;
@@ -878,6 +878,10 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// 	cb.pushConstants.layout = nullptr;
 	// 	cb.pushConstants.map.clear();
 	// }
+
+	// TODO: we probably don't want to track all this invalidation stuff
+	// not meaningful in UI, we should just assume it's valid.
+	// Then we also don't need to track the pipeline layout
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {

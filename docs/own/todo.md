@@ -95,17 +95,29 @@ performance/profiling:
 	  We only need to do it when currently in swapchain mode *and* inside
 	  the cb tab. (maybe we can even get around always doing it in that
 	  case but that's not too important).
+	- [ ] ideally, we would have *no* locks during command recording at all
+- [ ] {high prio} most of the notes in CommandHook::hook are highly relevant.
+      Especially handling of hook state overflow. Happens quickly when switching
+	  out of command viewer tab. We shouldn't do any hooking when we
+	  are not currently in that tab.
+- [ ] holding the device mutex while submitting is really bad, see queue.cpp.
+      We only need it for gui sync I think, we might be able to use
+	  a separate gui/sync mutex for that. Basically a mutex that (when locked)
+	  makes sure our tracked state (e.g. dev.pending) really includes everything
+	  that has been submitted so far. That mutex would have to be
+	  locked before locking the device mutex, never the other way around.
+
+
+object wrapping:
 - [ ] {high prio} the many shared locks when recording a cb can be harmful as well.
       We could get around this when wrapping handles, should probably
 	  look into that eventually (maybe allow to switch dynamically at
 	  runtime since wrapping makes supporting new extensions out of the
 	  box highly unlikely so users could fall back to hash tables at
 	  the cost of some performance).
-	- [ ] ideally, we would have *no* locks during command recording at all
-- [ ] {high prio} most of the notes in CommandHook::hook are highly relevant.
-      Especially handling of hook state overflow. Happens quickly when switching
-	  out of command viewer tab. We shouldn't do any hooking when we
-	  are not currently in that tab.
+- [ ] (low prio) only use the hash maps in Device when we are not using object 
+      wrapping. Otherwise a linked list is enough/better.
+	  Could always use the linked list and the hash maps just optionally
 
 gui stuff
 - [ ] resource viewer: we don't know which handle is currently selected
@@ -147,6 +159,18 @@ gui stuff
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
+- [ ] with the ds changes, we don't correctly track commandRecord invalidation
+      by destroyed handles anymore. But with e.g. update_unused_while_pending +
+	  partially_bound, we can't track that anyways and must just assume
+	  the records stays valid. 
+	  We should just not expose any information about that in the gui or
+	  state it's limitation (e.g. on hover).
+	- [ ] if we absolutely need this information (e.g. if it's really useful
+	      for some usecase) we could manually track it. Either by iterating
+		  over all alive records on view/sampler/buffer destruction or
+		  (e.g. triggered by explicit "query" button) by just checking
+		  for all descriptors in a record whether it has views/sampler
+		  with NULL handles (in not partially_bound descriptors I guess)
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
 	      e.g. when the application controlled debug callback is called
