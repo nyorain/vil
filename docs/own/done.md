@@ -1,3 +1,22 @@
+- [x] {high prio} the many shared locks when recording a cb can be harmful as well.
+      We could get around this when wrapping handles, should probably
+	  look into that eventually (maybe allow to switch dynamically at
+	  runtime since wrapping makes supporting new extensions out of the
+	  box highly unlikely so users could fall back to hash tables at
+	  the cost of some performance).
+- [x] identified bottleneck (e.g. with dota): the device mutex for DescriptorSetState.
+      Should be possible to give each DescriptorSetState its own mutex.
+	  Hm, might still be a problem that we update so many links between
+	  resources (ds <-> cb and ds <-> view).
+	  Could still try to use a linked grid for those links, could possibly
+	  even make that completely lockfree.
+	  Maybe we can even get rid of ds <-> cb links? That would help.
+	  - [x] ideally, we would have no (non-local) locks during descriptor
+			set updating {well, duh, we still have to lock when creating
+			a new state object but that should be fine as it shouldn't
+			happen often}
+	- [x] ideally, we would have *no* locks during command recording at all
+	      {almost there, have no locks for most commands}
 - [x] add tracy for profiling
 - [x] clean and split up QueueSubmit implementation. It's way too long,
       does way too much. And will probably further grow

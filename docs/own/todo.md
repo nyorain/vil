@@ -3,16 +3,18 @@
 v0.1, goal: end of january 2021 (edit may 2021: lmao) 
 
 urgent, bugs:
-- [ ] Figure out how to correctly handle the maps in Device when using 
-	  wrapping. Many ugly situations atm, see e.g. (important!) the
-	  terrible hack in ~CommandPool and ~DescriptorPool
 - [ ] (important) the way we copy/modify descriptor set states might have
       a data race at the moment. When copying, we might try to increase
 	  the reference count of an already destroyed State object (when it is
 	  currently being replaced?)
 - [ ] (important) the way we currently copy vectors of IntrusivePtr handles
       outside the lock (e.g. in Gui) to make they don't get destroyed inside
-	  isn't threadsafe...
+	  isn't threadsafe
+- [ ] clean up the current mess of command groups. There are multiple
+      items in here related to that, most of it commented out atm.
+- [ ] Figure out how to correctly handle the maps in Device when using 
+	  wrapping. Many ugly situations atm, see e.g. (important!) the
+	  terrible hack in ~CommandPool and ~DescriptorPool
 
 matching:
 - [ ] implement 'match' for missing commands
@@ -33,6 +35,7 @@ command group rework:
 	  Another point for removing them in their current form; as a requirement
 	  for command matching
 - [ ] implement LCS and better general strategy when in swapchain mode for
+      command matching/finding the best hook from last frame
 
 descriptor indexing extension:
 - [ ] make sure we fulfill multithreading requirements for
@@ -93,50 +96,46 @@ window/overlay
 		   is not set).
 
 performance/profiling:
-- [ ] identified bottleneck (e.g. with dota): the device mutex for DescriptorSetState.
-      Should be possible to give each DescriptorSetState its own mutex.
-	  Hm, might still be a problem that we update so many links between
-	  resources (ds <-> cb and ds <-> view).
-	  Could still try to use a linked grid for those links, could possibly
-	  even make that completely lockfree.
-	  Maybe we can even get rid of ds <-> cb links? That would help.
-	  - [ ] ideally, we would have no (non-local) locks during descriptor
-	        set updating.
 - [ ] {high prio} also don't always copy DescriptorSetState on submission.
       Leads to lot of DescriptorSetState copies, destructors.
 	  We only need to do it when currently in swapchain mode *and* inside
 	  the cb tab. (maybe we can even get around always doing it in that
 	  case but that's not too important).
-	- [ ] ideally, we would have *no* locks during command recording at all
+	  For non-update-after-bind (& update_unused_while_pending) descriptors,
+	  we could copy the state on BindDescriptorSet time? not sure that's
+	  better though.
 - [ ] {high prio} most of the notes in CommandHook::hook are highly relevant.
       Especially handling of hook state overflow. Happens quickly when switching
 	  out of command viewer tab. We shouldn't do any hooking when we
 	  are not currently in that tab.
-- [ ] holding the device mutex while submitting is really bad, see queue.cpp.
+- [ ] {high prio} holding the device mutex while submitting is really bad, see queue.cpp.
       We only need it for gui sync I think, we might be able to use
 	  a separate gui/sync mutex for that. Basically a mutex that (when locked)
 	  makes sure our tracked state (e.g. dev.pending) really includes everything
 	  that has been submitted so far. That mutex would have to be
 	  locked before locking the device mutex, never the other way around.
+- [ ] don't lock the dev mutex during our spirv xfb injection
+- [ ] add (extensive) time zone to basically every entry point so we
+	  can quickly figure out why an application is slow
 
 
 object wrapping:
-- [ ] {high prio} the many shared locks when recording a cb can be harmful as well.
-      We could get around this when wrapping handles, should probably
-	  look into that eventually (maybe allow to switch dynamically at
-	  runtime since wrapping makes supporting new extensions out of the
-	  box highly unlikely so users could fall back to hash tables at
-	  the cost of some performance).
-- [ ] (low prio) only use the hash maps in Device when we are not using object 
+- [ ] implement mechanism for deciding per-handle-type whether object wrapping
+      should be done. Performance-wise it's only really important for
+	  CommandBuffers and DescriptorSets (technically also for Device but
+	  that pretty much guarantees that 50% of new extensions will crash).
+- [ ] only use the hash maps in Device when we are not using object 
       wrapping. Otherwise a linked list is enough/better.
-	  Could always use the linked list and the hash maps just optionally
+	  Could always use the linked list and the hash maps just optionally.
+	  Maybe we can even spin up some lockfree linked list for this? We'd only
+	  ever insert at one end, order is irrelevant.
 
 gui stuff
 - [ ] resource viewer: we don't know which handle is currently selected
       (in the window on the left), can get confusing when they don't have names.
 	  Should probably be an ImGui::Selectable (that stays selected) instead
 	  of a button
-- [ ] resource viewer: basic filtering by properties, e.g. allow to just
+- [ ] (low prio) resource viewer: basic filtering by properties, e.g. allow to just
       show all images with 'width > 1920 && layers > 3' or something.
 	  Could start with images for now and add for other handles as needed.
 	  Definitely useful for images, when exploring the resource space
@@ -177,6 +176,7 @@ other
 	  Handle it as we do in ThreadMemBlock
 - [ ] correctly track stuff from push descriptors. Need to add handles and stuff,
       make sure destruction is tracked correctly. Also show in gui.
+	  See the commands in cb.cpp
 - [ ] with the ds changes, we don't correctly track commandRecord invalidation
       by destroyed handles anymore. But with e.g. update_unused_while_pending +
 	  partially_bound, we can't track that anyways and must just assume
