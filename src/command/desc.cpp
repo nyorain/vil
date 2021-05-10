@@ -6,7 +6,7 @@
 #include <rp.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
-#include <tracy/Tracy.hpp>
+#include <util/profiling.hpp>
 
 // TODO: the whole CommandBufferDesc code is moot, really.
 // See desc2.hpp and ideas in match.md and todo.md. We might want to

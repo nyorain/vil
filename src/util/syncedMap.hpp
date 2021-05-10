@@ -6,7 +6,7 @@
 #include <cassert>
 #include <util/intrusive.hpp>
 #include <util/debugMutex.hpp>
-#include <tracy/Tracy.hpp>
+#include <util/profiling.hpp>
 
 namespace vil {
 

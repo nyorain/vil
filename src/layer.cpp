@@ -6,6 +6,7 @@
 #include <queue.hpp>
 #include <overlay.hpp>
 #include <util/util.hpp>
+#include <util/profiling.hpp>
 
 #ifdef VIL_WITH_WAYLAND
   #include <wayland.hpp>

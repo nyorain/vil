@@ -101,6 +101,8 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 	if(!cb->name.empty()) {
 		cbName = copyString(*this, cb->name);
 	}
+
+	++dev->stats.aliveRecords;
 }
 
 CommandRecord::~CommandRecord() {
@@ -137,6 +139,9 @@ CommandRecord::~CommandRecord() {
 	// Its destructor might reference this.
 	// And it must be called while mutex is locked.
 	hook.reset();
+
+	dlg_assert(dev->stats.aliveRecords > 0);
+	--dev->stats.aliveRecords;
 }
 
 void replaceInvalidatedLocked(CommandRecord& record) {

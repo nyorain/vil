@@ -5,8 +5,8 @@
 #include <util/intrusive.hpp>
 #include <util/span.hpp>
 #include <util/debugMutex.hpp>
+#include <util/profiling.hpp>
 #include <vk/vulkan.h>
-#include <tracy/Tracy.hpp>
 
 #include <optional>
 #include <variant>

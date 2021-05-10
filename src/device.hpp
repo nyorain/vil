@@ -6,12 +6,12 @@
 #include <util/syncedMap.hpp>
 #include <util/span.hpp>
 #include <util/debugMutex.hpp>
+#include <util/profiling.hpp>
 
 #include <vk/vulkan.h>
 #include <vk/vk_layer.h>
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
-#include <tracy/Tracy.hpp>
 
 #include <shared_mutex>
 #include <memory>
@@ -20,6 +20,14 @@
 #include <unordered_map>
 
 namespace vil {
+
+struct DebugStats {
+	std::atomic<u32> aliveRecords {};
+	std::atomic<u32> aliveDescriptorStates {};
+	std::atomic<u32> aliveDescriptorSets {};
+	std::atomic<u32> aliveBuffers {};
+	std::atomic<u32> aliveImagesViews {};
+};
 
 struct Device {
 	Instance* ini {};
@@ -37,6 +45,8 @@ struct Device {
 	bool timelineSemaphores {}; // whether we have timeline smeaphores
 	bool transformFeedback {}; // whether we have transformFeedback
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
+
+	DebugStats stats;
 
 	// Aside from properties, only the families used by device
 	// are initialized.
@@ -158,7 +168,7 @@ Gui* getOverlayGui(Swapchain& swapchain);
 // Does not expect mutex to be locked
 void notifyDestruction(Device& dev, Handle& handle);
 
-static constexpr auto enableHandleWrapping = false;
+static constexpr auto enableHandleWrapping = true;
 template<typename H> struct HandleDesc;
 
 #define DefHandleDesc(VkHandle, OurHandle, devMap, isDispatchable, wrapDefault) \
@@ -191,7 +201,7 @@ DefHandleDesc(VkDeviceMemory, DeviceMemory, deviceMemories, false, false);
 template<> struct HandleDesc<VkDevice> {
 	using type = Device;
 	static constexpr bool dispatchable = true;
-	static inline bool wrap = false;
+	static inline bool wrap = false; // TODO: enable when fixed everywhere?
 };
 
 template<typename H> auto& unwrapWrapped(H handle) {

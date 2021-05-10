@@ -11,6 +11,7 @@
 #include <util/util.hpp>
 #include <util/bytes.hpp>
 #include <util/vecOps.hpp>
+#include <util/profiling.hpp>
 
 #include <swa/key.h>
 #include <spirv_reflect.h>
@@ -18,7 +19,6 @@
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
-#include <tracy/Tracy.hpp>
 
 #include <set>
 #include <map>
@@ -858,7 +858,13 @@ void Gui::drawOverviewUI(Draw& draw) {
 	}
 
 	// pretty much just own debug stuff
-	// ImGui::Separator();
+	ImGui::Separator();
+
+	imGuiText("alive records: {}", dev.stats.aliveRecords);
+	imGuiText("alive descriptor sets: {}", dev.stats.aliveDescriptorSets);
+	imGuiText("alive descriptor states: {}", dev.stats.aliveDescriptorStates);
+	imGuiText("alive buffers: {}", dev.stats.aliveBuffers);
+	imGuiText("alive image views: {}", dev.stats.aliveImagesViews);
 
 	// if(ImGui::TreeNode("Statistics")) {
 	// 	auto numGroups = 0u;
@@ -1036,7 +1042,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 }
 
 void Gui::destroyed(const Handle& handle) {
-	ZoneScoped;
+	ExtZoneScoped;
 
 	tabs_.resources.destroyed(handle);
 	tabs_.cb.destroyed(handle);

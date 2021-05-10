@@ -100,7 +100,7 @@ Device::~Device() {
 	}
 
 	for(auto& qf : queueFamilies) {
-		qf.commandGroups.clear();
+		// qf.commandGroups.clear();
 		if(qf.commandPool) {
 			dispatch.DestroyCommandPool(handle, qf.commandPool, nullptr);
 		}

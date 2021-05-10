@@ -13,13 +13,13 @@ constexpr auto toggleKey = swa_key_backslash;
 constexpr auto focusKey = swa_key_rightbrace;
 
 void cbMouseMove(swa_window*, const swa_mouse_move_event* ev) {
-	dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
+	// dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
 	ImGui::GetIO().MousePos.x = ev->x;
 	ImGui::GetIO().MousePos.y = ev->y;
 }
 
 void cbMouseButton(swa_window*, const swa_mouse_button_event* ev) {
-	dlg_trace("overlay mouse button");
+	// dlg_trace("overlay mouse button");
 	if(ev->button > 0 && ev->button < 6) {
 		ImGui::GetIO().MouseDown[unsigned(ev->button) - 1] = ev->pressed;
 	}
@@ -36,7 +36,7 @@ void cbMouseCross(swa_window*, const swa_mouse_cross_event* ev) {
 }
 
 void cbKey(swa_window*, const swa_key_event* ev) {
-	dlg_trace("overlay key: {} {}", ev->keycode, ev->pressed);
+	// dlg_trace("overlay key: {} {}", ev->keycode, ev->pressed);
 	if(ev->keycode < 512) {
 		ImGui::GetIO().KeysDown[ev->keycode] = ev->pressed;
 	}

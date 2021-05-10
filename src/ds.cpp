@@ -6,7 +6,7 @@
 #include <pipe.hpp>
 #include <threadContext.hpp>
 #include <util/util.hpp>
-#include <tracy/Tracy.hpp>
+#include <util/profiling.hpp>
 
 namespace vil {
 
@@ -105,10 +105,15 @@ DescriptorSetStatePtr newDescriptorSetState(
 	auto memSize = sizeof(DescriptorSetState) +
 		totalDescriptorMemSize(*layout, variableDescriptorCount);
 	auto mem = new std::byte[memSize]();
+	TracyAllocS(mem, memSize, 8);
 
 	auto* state = new(mem) DescriptorSetState();
+	dlg_assert(reinterpret_cast<std::byte*>(state) == mem);
+
 	state->layout = std::move(layout);
 	state->variableDescriptorCount = variableDescriptorCount;
+
+	++state->layout->dev->stats.aliveDescriptorStates;
 
 	// initialize descriptors
 	auto it = mem + sizeof(DescriptorSetState);
@@ -263,6 +268,9 @@ DescriptorSet::~DescriptorSet() {
 
 	// make sure to potentially run state destructor outside critical section
 	state.reset();
+
+	dlg_assert(dev->stats.aliveDescriptorSets > 0);
+	--dev->stats.aliveDescriptorSets;
 }
 
 /*
@@ -432,8 +440,14 @@ DescriptorPool::~DescriptorPool() {
 	// We don't use a for loop since the descriptors remove themselves
 	// on destruction
 	while(!descriptorSets.empty()) {
-		auto* ds = descriptorSets[0];
-		dev->descriptorSets.mustErase(ds->handle);
+		if(HandleDesc<VkDescriptorSet>::wrap) {
+			// TODO: ugh, this is terrible, not sure how to handle the case properly
+			auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(descriptorSets[0]));
+			dev->descriptorSets.mustErase(h);
+		} else {
+			auto* ds = descriptorSets[0];
+			dev->descriptorSets.mustErase(ds->handle);
+		}
 	}
 }
 
@@ -685,7 +699,13 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 	// on destruction
 	while(!dsPool.descriptorSets.empty()) {
 		auto* ds = dsPool.descriptorSets[0];
-		dev.descriptorSets.mustErase(ds->handle);
+		if(HandleDesc<VkDescriptorSet>::wrap) {
+			// TODO: ugh, this is terrible, not sure how to handle the case properly
+			auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(ds));
+			dev.descriptorSets.mustErase(h);
+		} else {
+			dev.descriptorSets.mustErase(ds->handle);
+		}
 	}
 
 	return dev.dispatch.ResetDescriptorPool(dev.handle, dsPool.handle, flags);
@@ -696,6 +716,8 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		VkDevice                                    device,
 		const VkDescriptorSetAllocateInfo*          pAllocateInfo,
 		VkDescriptorSet*                            pDescriptorSets) {
+	ZoneScoped;
+
 	auto& pool = get(device, pAllocateInfo->descriptorPool);
 	auto& dev = *pool.dev;
 
@@ -709,9 +731,12 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 
 	nci.pSetLayouts = dsLayouts.data();
 
-	auto res = dev.dispatch.AllocateDescriptorSets(dev.handle, &nci, pDescriptorSets);
-	if(res != VK_SUCCESS) {
-		return res;
+	{
+		ZoneScopedN("dispatch");
+		auto res = dev.dispatch.AllocateDescriptorSets(dev.handle, &nci, pDescriptorSets);
+		if(res != VK_SUCCESS) {
+			return res;
+		}
 	}
 
 	auto* variableCountInfo = findChainInfo<VkDescriptorSetVariableDescriptorCountAllocateInfo,
@@ -746,6 +771,8 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		pDescriptorSets[i] = castDispatch<VkDescriptorSet>(ds);
 		dev.descriptorSets.mustEmplace(pDescriptorSets[i], std::move(dsPtr));
 
+		++dev.stats.aliveDescriptorSets;
+
 		std::lock_guard lock(dev.mutex);
 		// the application cannot access 'pool' from another thread during
 		// this calls (sync guarantee per vulkan spec). But we might
@@ -756,7 +783,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		initImmutableSamplersLocked(*ds.state);
 	}
 
-	return res;
+	return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
@@ -764,6 +791,8 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 		VkDescriptorPool                            descriptorPool,
 		uint32_t                                    descriptorSetCount,
 		const VkDescriptorSet*                      pDescriptorSets) {
+	ZoneScoped;
+
 	auto& pool = get(device, descriptorPool);
 	auto& dev = *pool.dev;
 	auto handles = LocalVector<VkDescriptorSet>(descriptorSetCount);
@@ -859,6 +888,7 @@ void DescriptorSetState::PtrHandler::dec(DescriptorSetState& state) const noexce
 		}
 	}
 
+	// ref count is zero, destroy state
 	// destroy bindings, mainly to release intrusive ptrs
 	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 		auto& binding = state.layout->bindings[b];
@@ -885,13 +915,16 @@ void DescriptorSetState::PtrHandler::dec(DescriptorSetState& state) const noexce
 		}
 	}
 
-	// ref count is zero, free it
+	dlg_assert(state.layout->dev->stats.aliveDescriptorStates > 0);
+	--state.layout->dev->stats.aliveDescriptorStates;
+
 	state.~DescriptorSetState();
 
 	// we allocated the memory as std::byte array, so we have to free
 	// it like that. We don't have to call any other destructors of
 	// Binding elements since they are all trivial
 	auto ptr = reinterpret_cast<std::byte*>(&state);
+	TracyFreeS(ptr, 8);
 	delete[] ptr;
 }
 
@@ -1015,7 +1048,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		writes[i].pTexelBufferView = bufferViews.data() + writeOff;
 
 		if(invalidate) {
-			ds.invalidateCbs();
+			// TODO: not sure if needed/useful here as we don't directly
+			// reference descriptor sets in a record anyways
+			// ds.invalidateCbs();
 		}
 
 		writeOff += writes[i].descriptorCount;
@@ -1056,7 +1091,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		}
 
 		if(invalidate) {
-			dst.invalidateCbs();
+			// TODO: not sure if needed/useful here as we don't directly
+			// reference descriptor sets in a record anyways
+			// dst.invalidateCbs();
 		}
 	}
 
@@ -1185,7 +1222,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	}
 
 	if(invalidate) {
-		ds.invalidateCbs();
+		// TODO: not sure if needed/useful here as we don't directly
+		// reference descriptor sets in a record anyways
+		// ds.invalidateCbs();
 	}
 
 	{

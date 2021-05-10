@@ -6,8 +6,8 @@
 #include <queue.hpp>
 #include <platform.hpp>
 #include <overlay.hpp>
+#include <util/profiling.hpp>
 #include <vk/enumString.hpp>
-#include <tracy/Tracy.hpp>
 
 namespace vil {
 

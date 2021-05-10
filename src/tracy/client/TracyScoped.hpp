@@ -166,7 +166,8 @@ private:
     const bool m_active;
 
 #ifdef TRACY_ON_DEMAND
-    uint64_t m_connectionId;
+	// See https://github.com/wolfpld/tracy/issues/126
+    uint64_t m_connectionId {};
 #endif
 };
 

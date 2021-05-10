@@ -57,6 +57,8 @@ with_tracy = true
 
 if with_tracy
 	args += '-DTRACY_ENABLE'
+	# we always want on-demand profiling
+	args += '-DTRACY_ON_DEMAND'
 	if build_machine.system() == 'windows'
 		tracy_deps += cc.find_library('Ws2_32')
 		tracy_deps += cc.find_library('Dbghelp')

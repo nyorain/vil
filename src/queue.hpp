@@ -25,7 +25,7 @@ struct Queue : Handle {
 	bool createdByUs {};
 
 	// All groups associated with this queue
-	std::unordered_set<CommandBufferGroup*> groups;
+	// std::unordered_set<CommandBufferGroup*> groups;
 
 	// Counted up each time this queue is submitted to.
 	// Might wrap around.
@@ -40,7 +40,7 @@ struct QueueFamily {
 	VkCommandPool commandPool {};
 
 	// Command groups used in this queue family.
-	std::vector<std::unique_ptr<CommandBufferGroup>> commandGroups;
+	// std::vector<std::unique_ptr<CommandBufferGroup>> commandGroups;
 };
 
 struct SubmittedCommandBuffer {

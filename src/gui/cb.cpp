@@ -15,9 +15,9 @@
 #include <util/bytes.hpp>
 #include <util/util.hpp>
 #include <util/f16.hpp>
+#include <util/profiling.hpp>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
-#include <tracy/Tracy.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <spirv_reflect.h>

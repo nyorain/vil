@@ -12,7 +12,7 @@
 #include <gui/commandHook.hpp>
 #include <gui/gui.hpp>
 #include <vk/enumString.hpp>
-#include <tracy/Tracy.hpp>
+#include <util/profiling.hpp>
 
 namespace vil {
 
@@ -412,6 +412,7 @@ VkResult addGuiSyncLocked(QueueSubmitter& subm) {
 	return VK_SUCCESS;
 }
 
+/*
 std::vector<std::unique_ptr<CommandBufferGroup>> cleanCommandGroups(Device& dev, u32 qfam) {
 	ZoneScoped;
 	std::vector<std::unique_ptr<CommandBufferGroup>> ret;
@@ -465,6 +466,7 @@ std::vector<std::unique_ptr<CommandBufferGroup>> cleanCommandGroups(Device& dev,
 
 	return ret;
 }
+*/
 
 void postProcessLocked(QueueSubmitter& subm) {
 	ZoneScoped;
@@ -516,7 +518,7 @@ void postProcessLocked(QueueSubmitter& subm) {
 		}
 	}
 
-	subm.keepAliveGroups = cleanCommandGroups(*subm.dev, subm.queue->family);
+	// subm.keepAliveGroups = cleanCommandGroups(*subm.dev, subm.queue->family);
 }
 
 // Returns whether the given submission potentially writes the given

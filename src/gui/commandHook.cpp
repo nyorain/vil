@@ -10,8 +10,8 @@
 #include <command/desc.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
+#include <util/profiling.hpp>
 #include <vk/format_utils.h>
-#include <tracy/Tracy.hpp>
 
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
@@ -174,7 +174,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		// record->group == target.group;
 		target.all;
 
-	if(!validTarget || hierachy_.empty()) {
+	if(!validTarget || hierachy_.empty() || !record->commands) {
 		return hooked.handle();
 	}
 

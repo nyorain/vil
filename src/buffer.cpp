@@ -17,6 +17,9 @@ Buffer::~Buffer() {
 		return;
 	}
 
+	dlg_assert(dev->stats.aliveBuffers > 0);
+	--dev->stats.aliveBuffers;
+
 	std::lock_guard lock(dev->mutex);
 	for(auto* view : this->views) {
 		view->buffer = nullptr;
@@ -74,6 +77,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	buf.ci = *pCreateInfo;
 	buf.handle = *pBuffer;
 	buf.concurrentHooked = concurrent;
+
+	++dev.stats.aliveBuffers;
 
 	*pBuffer = castDispatch<VkBuffer>(buf);
 	dev.buffers.mustEmplace(*pBuffer, std::move(bufPtr));

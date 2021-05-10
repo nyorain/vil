@@ -50,6 +50,6 @@
 #include <util/intrusive.hpp>
 #include <util/debugMutex.hpp>
 #include <util/flags.hpp>
+#include <util/profiling.hpp>
 
 #include <dlg/dlg.hpp>
-#include <tracy/Tracy.hpp>

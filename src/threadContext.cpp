@@ -17,6 +17,7 @@ void freeBlocks(ThreadMemBlock* head) {
 	while(head) {
 		auto next = head->next;
 		// no need to call MemBlocks destructor, it's trivial
+		TracyFreeS(head, 8);
 		delete[] reinterpret_cast<std::byte*>(head);
 		head = next;
 	}
@@ -25,6 +26,7 @@ void freeBlocks(ThreadMemBlock* head) {
 ThreadMemBlock& createMemBlock(size_t memSize, ThreadMemBlock* prev) {
 	auto totalSize = align(sizeof(ThreadMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__) + memSize;
 	auto buf = new std::byte[totalSize];
+	TracyAllocS(buf, totalSize, 8);
 	auto* memBlock = new(buf) ThreadMemBlock;
 	memBlock->size = memSize;
 	memBlock->prev = prev;
@@ -48,15 +50,28 @@ std::byte* allocate(ThreadContext& tc, size_t size) {
 		return ret;
 	}
 
+	if(tc.memCurrent->next) {
+		if(tc.memCurrent->next->size >= size) {
+			tc.memCurrent = tc.memCurrent->next;
+			tc.memOffset = size;
+			return data(*tc.memCurrent, 0);
+		}
+
+		dlg_warn("Giant local allocation; have to free previous blocks");
+		freeBlocks(tc.memCurrent->next);
+		tc.memCurrent->next = nullptr;
+	}
+
 	// not enough memory available in last block, allocate new one
 	newBlockSize = std::min<size_t>(tc.blockGrowFac * tc.memCurrent->size, tc.maxBlockSize);
 	newBlockSize = std::max<size_t>(newBlockSize, size);
 
+	dlg_assert(!tc.memCurrent->next);
 	auto& newBlock = createMemBlock(newBlockSize, tc.memCurrent);
 	tc.memCurrent->next = &newBlock;
 
-	tc.memOffset = size;
 	tc.memCurrent = &newBlock;
+	tc.memOffset = size;
 	return data(*tc.memCurrent, 0);
 }
 
@@ -64,15 +79,20 @@ void free(ThreadContext& tc, const std::byte* ptr, size_t size) {
 	dlg_assert(tc.memCurrent);
 	size = align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
-	dlg_assert(tc.memOffset >= size);
-	auto curr = data(*tc.memCurrent, tc.memOffset);
-	dlg_assert(ptr + size == curr);
-	tc.memOffset -= size;
-
+	dlg_assert(tc.memCurrent->prev || tc.memCurrent == tc.memRoot);
+	bool lastAlloc = false;
 	if(tc.memOffset == 0u && tc.memCurrent->prev) {
 		tc.memCurrent = tc.memCurrent->prev;
 		tc.memOffset = tc.memCurrent->size;
+		lastAlloc = true;
 	}
+
+	dlg_assert(tc.memOffset >= size);
+	auto curr = data(*tc.memCurrent, tc.memOffset);
+	dlg_assert(ptr + size <= curr);
+	dlg_assert(lastAlloc || ptr + size == curr);
+
+	tc.memOffset -= size;
 }
 
 ThreadContext& ThreadContext::get() {
@@ -87,7 +107,7 @@ ThreadContext::ThreadContext() {
 }
 
 ThreadContext::~ThreadContext() {
-	dlg_assert(memOffset == 0u);
+	dlg_assertm(memOffset == 0u, "{}", memOffset);
 	dlg_assert(memCurrent == memRoot);
 	freeBlocks(memRoot);
 }

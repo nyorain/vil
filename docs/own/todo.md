@@ -5,7 +5,7 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 urgent, bugs:
 - [ ] Figure out how to correctly handle the maps in Device when using 
 	  wrapping. Many ugly situations atm, see e.g. (important!) the
-	  terrible hack in ~CommandPool
+	  terrible hack in ~CommandPool and ~DescriptorPool
 - [ ] (important) the way we copy/modify descriptor set states might have
       a data race at the moment. When copying, we might try to increase
 	  the reference count of an already destroyed State object (when it is

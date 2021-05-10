@@ -5,7 +5,7 @@
 #include <thread>
 #include <atomic>
 #include <dlg/dlg.hpp>
-#include <tracy/Tracy.hpp>
+#include <util/profiling.hpp>
 
 namespace vil {
 
@@ -146,9 +146,11 @@ inline bool owned(const Mutex& m) { return m.owned(); }
 inline bool owned(const SharedMutex& m) { return m.owned(); }
 inline bool ownedShared(const SharedMutex& m) { return m.ownedShared(); }
 
+#ifdef TRACY_ENABLE
 inline bool owned(const tracy::Lockable<Mutex>& m) { return m.inner().owned(); }
 inline bool owned(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().owned(); }
 inline bool ownedShared(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().ownedShared(); }
+#endif // TRACY_ENABLE
 
 #define vil_assert_owned(x) dlg_assert(owned(x))
 #define vil_assert_not_owned(x) dlg_assert(!owned(x))

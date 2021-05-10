@@ -1283,6 +1283,7 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 
 	imGuiText("Submission Counter: {}", queue.submissionCount);
 
+	/*
 	for(auto* group : queue.groups) {
 		ImGui::PushID(group);
 
@@ -1316,6 +1317,7 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 
 		ImGui::PopID();
 	}
+	*/
 }
 
 void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {

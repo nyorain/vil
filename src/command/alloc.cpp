@@ -1,5 +1,6 @@
 #include <command/alloc.hpp>
 #include <util/util.hpp>
+#include <util/profiling.hpp>
 #include <cb.hpp>
 
 namespace vil {
@@ -18,6 +19,7 @@ void freeBlocks(CommandMemBlock* head) {
 	while(head) {
 		auto next = head->next;
 		// no need to call MemBlocks destructor, it's trivial
+		TracyFreeS(head, 8);
 		delete[] reinterpret_cast<std::byte*>(head);
 		head = next;
 	}
@@ -25,6 +27,8 @@ void freeBlocks(CommandMemBlock* head) {
 
 CommandMemBlock& createMemBlock(size_t memSize, CommandMemBlock* next) {
 	auto buf = new std::byte[sizeof(CommandMemBlock) + memSize];
+	TracyAllocS(buf, sizeof(CommandMemBlock) + memSize, 8);
+
 	auto* memBlock = new(buf) CommandMemBlock;
 	memBlock->size = memSize;
 	memBlock->next = next;

@@ -8,7 +8,7 @@
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
-#include <tracy/Tracy.hpp>
+#include <util/profiling.hpp>
 
 namespace vil {
 
@@ -1015,6 +1015,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 		uint32_t                                    instanceCount,
 		uint32_t                                    firstVertex,
 		uint32_t                                    firstInstance) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawCmd>(cb, cb, cb.graphicsState());
 
@@ -1023,8 +1025,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	cmd.firstVertex = firstVertex;
 	cmd.firstInstance = firstInstance;
 
-	cb.dev->dispatch.CmdDraw(cb.handle(),
-		vertexCount, instanceCount, firstVertex, firstInstance);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDraw(cb.handle(),
+			vertexCount, instanceCount, firstVertex, firstInstance);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
@@ -1034,6 +1039,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 		uint32_t                                    firstIndex,
 		int32_t                                     vertexOffset,
 		uint32_t                                    firstInstance) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb, cb.graphicsState());
 
@@ -1043,8 +1050,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	cmd.vertexOffset = vertexOffset;
 	cmd.firstIndex = firstIndex;
 
-	cb.dev->dispatch.CmdDrawIndexed(cb.handle(),
-		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawIndexed(cb.handle(),
+			indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
@@ -1053,6 +1063,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 		VkDeviceSize                                offset,
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
@@ -1065,8 +1077,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndirect(cb.handle(),
-		buf.handle, offset, drawCount, stride);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawIndirect(cb.handle(),
+			buf.handle, offset, drawCount, stride);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
@@ -1075,6 +1090,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 		VkDeviceSize                                offset,
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
@@ -1087,8 +1104,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndexedIndirect(cb.handle(),
-		buf.handle, offset, drawCount, stride);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawIndexedIndirect(cb.handle(),
+			buf.handle, offset, drawCount, stride);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
@@ -1099,6 +1119,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 		VkDeviceSize                                countBufferOffset,
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
 
@@ -1116,8 +1138,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndirectCount(cb.handle(), buf.handle, offset,
-		countBuf.handle, countBufferOffset, maxDrawCount, stride);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawIndirectCount(cb.handle(), buf.handle, offset,
+			countBuf.handle, countBufferOffset, maxDrawCount, stride);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
@@ -1128,6 +1153,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 		VkDeviceSize                                countBufferOffset,
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
 
@@ -1145,8 +1172,11 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndexedIndirectCount(cb.handle(), buf.handle,
-		offset, countBuf.handle, countBufferOffset, maxDrawCount, stride);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawIndexedIndirectCount(cb.handle(), buf.handle,
+			offset, countBuf.handle, countBufferOffset, maxDrawCount, stride);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatch(
@@ -1154,6 +1184,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 		uint32_t                                    groupCountX,
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DispatchCmd>(cb, cb, cb.computeState());
 
@@ -1161,13 +1193,18 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	cb.dev->dispatch.CmdDispatch(cb.handle(), groupCountX, groupCountY, groupCountZ);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDispatch(cb.handle(), groupCountX, groupCountY, groupCountZ);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 		VkCommandBuffer                             commandBuffer,
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb, cb.computeState());
 	cmd.offset = offset;
@@ -1176,7 +1213,10 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
-	cb.dev->dispatch.CmdDispatchIndirect(cb.handle(), buf.handle, offset);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDispatchIndirect(cb.handle(), buf.handle, offset);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
@@ -1187,6 +1227,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 		uint32_t                                    groupCountX,
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb, cb.computeState());
 
@@ -1197,9 +1239,12 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	cb.dev->dispatch.CmdDispatchBase(cb.handle(),
-		baseGroupX, baseGroupY, baseGroupZ,
-		groupCountX, groupCountY, groupCountZ);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDispatchBase(cb.handle(),
+			baseGroupX, baseGroupY, baseGroupZ,
+			groupCountX, groupCountY, groupCountZ);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyImage(

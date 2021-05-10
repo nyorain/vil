@@ -13,7 +13,7 @@
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
-#include <tracy/Tracy.hpp>
+#include <util/profiling.hpp>
 
 namespace vil {
 
