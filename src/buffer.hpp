@@ -56,6 +56,16 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
     uint32_t                                    bindInfoCount,
     const VkBindBufferMemoryInfo*               pBindInfos);
 
+VKAPI_ATTR void VKAPI_CALL GetBufferMemoryRequirements(
+    VkDevice                                    device,
+    VkBuffer                                    buffer,
+    VkMemoryRequirements*                       pMemoryRequirements);
+
+VKAPI_ATTR void VKAPI_CALL GetBufferMemoryRequirements2(
+    VkDevice                                    device,
+    const VkBufferMemoryRequirementsInfo2*      pInfo,
+    VkMemoryRequirements2*                      pMemoryRequirements);
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
     VkDevice                                    device,
     const VkBufferViewCreateInfo*               pCreateInfo,

@@ -4,7 +4,8 @@ namespace  vil {
 
 std::byte* data(ThreadMemBlock& mem, size_t offset) {
 	dlg_assert(offset <= mem.size);
-	return reinterpret_cast<std::byte*>(&mem) + sizeof(mem) + offset;
+	auto objSize = align(sizeof(mem), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+	return reinterpret_cast<std::byte*>(&mem) + objSize + offset;
 }
 
 void freeBlocks(ThreadMemBlock* head) {
@@ -22,7 +23,8 @@ void freeBlocks(ThreadMemBlock* head) {
 }
 
 ThreadMemBlock& createMemBlock(size_t memSize, ThreadMemBlock* prev) {
-	auto buf = new std::byte[sizeof(ThreadMemBlock) + memSize];
+	auto totalSize = align(sizeof(ThreadMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__) + memSize;
+	auto buf = new std::byte[totalSize];
 	auto* memBlock = new(buf) ThreadMemBlock;
 	memBlock->size = memSize;
 	memBlock->prev = prev;
@@ -35,35 +37,23 @@ std::byte* allocate(ThreadContext& tc, size_t size) {
 	dlg_assert(!tc.memCurrent || tc.memOffset <= tc.memCurrent->size);
 	size = align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
-	// We grow block sizes exponentially, up to a maximum
-	constexpr auto minBlockSize = 16 * 1024;
-	constexpr auto maxBlockSize = 16 * 1024 * 1024;
-	constexpr auto blockGrowFac = 2;
-
 	// fast path: enough memory available directly inside the command buffer,
 	// simply align and advance the offset
-	auto newBlockSize = size_t(minBlockSize);
-	if(tc.memCurrent) {
-		dlg_assert(tc.memOffset == align(tc.memOffset, __STDCPP_DEFAULT_NEW_ALIGNMENT__));
-		auto remaining = i64(tc.memCurrent->size) - i64(tc.memOffset);
-		if(remaining >= i64(size)) {
-			auto ret = data(*tc.memCurrent, tc.memOffset);
-			tc.memOffset += size;
-			return ret;
-		}
-
-		newBlockSize = std::min<size_t>(blockGrowFac * tc.memCurrent->size, maxBlockSize);
+	auto newBlockSize = size_t(tc.minBlockSize);
+	dlg_assert(tc.memCurrent && tc.memRoot);
+	dlg_assert(tc.memOffset % __STDCPP_DEFAULT_NEW_ALIGNMENT__ == 0u);
+	if(tc.memOffset + size <= tc.memCurrent->size) {
+		auto ret = data(*tc.memCurrent, tc.memOffset);
+		tc.memOffset += size;
+		return ret;
 	}
 
 	// not enough memory available in last block, allocate new one
+	newBlockSize = std::min<size_t>(tc.blockGrowFac * tc.memCurrent->size, tc.maxBlockSize);
 	newBlockSize = std::max<size_t>(newBlockSize, size);
-	auto newBlock = createMemBlock(newBlockSize, tc.memCurrent);
-	if(tc.memCurrent) {
-		tc.memCurrent->next = &newBlock;
-	} else {
-		dlg_assert(!tc.memRoot);
-		tc.memRoot = &newBlock;
-	}
+
+	auto& newBlock = createMemBlock(newBlockSize, tc.memCurrent);
+	tc.memCurrent->next = &newBlock;
 
 	tc.memOffset = size;
 	tc.memCurrent = &newBlock;
@@ -81,12 +71,56 @@ void free(ThreadContext& tc, const std::byte* ptr, size_t size) {
 
 	if(tc.memOffset == 0u && tc.memCurrent->prev) {
 		tc.memCurrent = tc.memCurrent->prev;
+		tc.memOffset = tc.memCurrent->size;
 	}
 }
 
 ThreadContext& ThreadContext::get() {
 	static thread_local ThreadContext tc;
 	return tc;
+}
+
+ThreadContext::ThreadContext() {
+	// already allocate the first block, others may rely on it
+	// See e.g. ThreadMemScope.
+	memRoot = memCurrent = &createMemBlock(minBlockSize, nullptr);
+}
+
+ThreadContext::~ThreadContext() {
+	dlg_assert(memOffset == 0u);
+	dlg_assert(memCurrent == memRoot);
+	freeBlocks(memRoot);
+}
+
+ThreadMemScope::ThreadMemScope() {
+	auto& tc = ThreadContext::get();
+	block = tc.memCurrent;
+	offset = tc.memOffset;
+}
+
+ThreadMemScope::~ThreadMemScope() {
+	auto& tc = ThreadContext::get();
+
+	// make sure that all memory in between did come from this
+	dlg_check({
+		auto off = offset;
+		auto size = sizeAllocated;
+		auto it = block;
+		while(off + size > block->size) {
+			dlg_assert(it->next);
+			dlg_assert(off <= block->size);
+			size -= block->size - off;
+			off = 0u;
+			it = it->next;
+		}
+
+		dlg_assert(it == tc.memCurrent);
+		dlg_assertm(tc.memOffset == off + size,
+			"{} != {} (off {}, size {})", tc.memOffset, off + size, off, size);
+	});
+
+	tc.memCurrent = block;
+	tc.memOffset = offset;
 }
 
 } // namespace vil

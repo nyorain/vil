@@ -531,10 +531,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		return result;
 	}
 
-	auto& dev = createData<Device>(*pDevice);
+	auto devHandle = *pDevice;
+	Device* pDev;
+	if(HandleDesc<VkDevice>::wrap) {
+		auto* wrapped = new WrappedHandle<Device>();
+		pDev = &wrapped->obj();
+		*pDevice = castDispatch<VkDevice>(*pDev, *wrapped);
+	} else {
+		pDev = &createData<Device>(*pDevice);
+	}
+
+	auto& dev = *pDev;
 	dev.ini = iniData;
 	dev.phdev = phdev;
-	dev.handle = *pDevice;
+	dev.handle = devHandle;
 	dev.props = phdevProps;
 
 	dev.timelineSemaphores = hasTimelineSemaphores;
@@ -548,7 +558,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		dev.enabledFeatures = *ci->pEnabledFeatures;
 	}
 
-	layer_init_device_dispatch_table(*pDevice, &dev.dispatch, fpGetDeviceProcAddr);
+	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 
 	dev.commandHook = std::make_unique<CommandHook>();
 
@@ -757,20 +767,33 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroyDevice(
-		VkDevice dev,
+		VkDevice vkDevice,
 		const VkAllocationCallbacks* alloc) {
-	if(!dev) {
+	if(!vkDevice) {
 		return;
 	}
 
-	auto devd = moveData<Device>(dev);
-	dlg_assert(devd);
+	if(HandleDesc<VkDevice>::wrap) {
+		auto& wrapped = unwrapWrapped(vkDevice);
+		auto& dev = wrapped.obj();
 
-	// destroy our logical device before we call the function.
-	auto* destroyDev = devd->dispatch.DestroyDevice;
-	devd.reset();
+		// destroy our logical device before we forward the call
+		auto handle = dev.handle;
+		auto* destroyDev = dev.dispatch.DestroyDevice;
+		delete &wrapped;
 
-	destroyDev(dev, alloc);
+		destroyDev(handle, alloc);
+	} else {
+		auto devd = moveData<Device>(vkDevice);
+		dlg_assert(devd);
+
+		// destroy our logical device before we forward the call
+		auto handle = devd->handle;
+		auto* destroyDev = devd->dispatch.DestroyDevice;
+		devd.reset();
+
+		destroyDev(handle, alloc);
+	}
 }
 
 // util

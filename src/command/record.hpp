@@ -42,8 +42,25 @@ struct BoundDescriptorSet {
 	PipelineLayout* layout {}; // TODO: not sure if needed
 };
 
+struct ImageDescriptorRef {
+	ImageView* imageView;
+	Sampler* sampler; // even stored here if immutable in layout
+	VkImageLayout layout {};
+};
+
+struct BufferDescriptorRef {
+	Buffer* buffer;
+	VkDeviceSize offset {};
+	VkDeviceSize range {};
+};
+
+using BufferViewDescriptorRef = BufferView*;
+
 struct DescriptorState {
 	span<BoundDescriptorSet> descriptorSets;
+
+	// TODO: we don't track this correctly atm.
+	span<std::byte> pushDescriptors;
 
 	void bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> offsets);
@@ -206,7 +223,7 @@ struct CommandRecord {
 	CommandAllocList<IntrusivePtr<CommandRecord>> secondaries;
 
 	CommandBufferDesc desc;
-	CommandBufferGroup* group {};
+	// CommandBufferGroup* group {};
 
 	// descriptor state at the last submission of this command
 	// TODO: really always copy this? This is kinda costly, we will likely

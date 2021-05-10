@@ -113,7 +113,8 @@ public:
 	// Defines what to hook. Can either hook a specific record, a specifc
 	// CommandBuffer or a specific CommandGroup.
 	struct {
-		CommandBufferGroup* group {};
+		bool all {};
+		// CommandBufferGroup* group {};
 		CommandBuffer* cb {};
 		CommandRecord* record {};
 	} target;

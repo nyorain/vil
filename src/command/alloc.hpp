@@ -74,6 +74,10 @@ template<typename T>
 
 template<typename T>
 [[nodiscard]] span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, T* data, size_t count) {
+	if(count == 0u) {
+		return {};
+	}
+
 	auto span = allocSpan<std::remove_const_t<T>>(cb, count);
 	std::copy(data, data + count, span.data());
 	return span;

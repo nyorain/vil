@@ -132,43 +132,6 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	return (ownMatch + childMatchSum) / (1 + maxChildren);
 }
 
-bool match(const DescriptorBinding& a, const DescriptorBinding& b,
-		VkDescriptorType dsType) {
-	if(!a.valid || !b.valid) {
-		return a.valid == b.valid;
-	}
-
-	// TODO: if samplers or image/buffers views are different we could
-	// check them for semantic equality as well. But who would ever do something
-	// as terrible as create multiple equal samplers/imageView? /s
-
-	auto dsCat = category(dsType);
-	if(dsCat == DescriptorCategory::image) {
-		if(needsSampler(dsType) &&
-				a.imageInfo.sampler != b.imageInfo.sampler) {
-			return false;
-		}
-
-		if(needsImageView(dsType) &&
-				a.imageInfo.imageView != b.imageInfo.imageView) {
-			return false;
-		}
-
-		// NOTE: consider image layout? not too relevant I guess
-
-		return true;
-	} else if(dsCat == DescriptorCategory::bufferView) {
-		return a.bufferView == b.bufferView;
-	} else if(dsCat == DescriptorCategory::buffer) {
-		// NOTE: consider offset? not too relevant I guess
-		return a.bufferInfo.buffer == b.bufferInfo.buffer &&
-			a.bufferInfo.range == b.bufferInfo.range;
-	}
-
-	dlg_error("unreachable! bogus descriptor type");
-	return false;
-}
-
 float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 	dlg_assert(a.layout);
 	dlg_assert(b.layout);
@@ -189,22 +152,57 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 	unsigned count {};
 	unsigned match {};
 	for(auto bindingID = 0u; bindingID < a.layout->bindings.size(); ++bindingID) {
-		auto ba = bindings(a, bindingID);
-		auto bb = bindings(b, bindingID);
-
-		auto dsType = a.layout->bindings[bindingID].descriptorType;
-		dlg_assert(a.layout->bindings[bindingID].descriptorType ==
-			b.layout->bindings[bindingID].descriptorType);
-
 		// they can have different size, when variable descriptor count is used
-		count += std::max(ba.size(), bb.size());
+		auto sizeA = descriptorCount(a, bindingID);
+		auto sizeB = descriptorCount(b, bindingID);
+		count += std::max(sizeA, sizeB);
 
-		for(auto e = 0u; e < std::min(ba.size(), bb.size()); ++e) {
-			auto& elem0 = ba[e];
-			auto& elem1 = bb[e];
+		// must have the same type
+		auto dsType = a.layout->bindings[bindingID].descriptorType;
+		auto dsCat = vil::category(dsType);
+		dlg_assert_or(a.layout->bindings[bindingID].descriptorType ==
+			b.layout->bindings[bindingID].descriptorType, continue);
 
-			if(vil::match(elem0, elem1, dsType)) {
+		// TODO: if samplers or image/buffers views are different we could
+		// check them for semantic equality as well. But who would ever do something
+		// as terrible as create multiple equal samplers/imageView? /s
+
+		if(dsCat == DescriptorCategory::image) {
+			auto bindingsA = images(a, bindingID);
+			auto bindingsB = images(b, bindingID);
+			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
+				auto& bindA = bindingsA[e];
+				auto& bindB = bindingsB[e];
+				if(needsSampler(dsType) &&
+						bindA.sampler != bindB.sampler) {
+					continue;
+				}
+
+				if(needsImageView(dsType) &&
+						bindA.imageView != bindB.imageView) {
+					continue;
+				}
+
+				// NOTE: consider image layout? not too relevant I guess
 				++match;
+			}
+		} else if(dsCat == DescriptorCategory::buffer) {
+			auto bindingsA = buffers(a, bindingID);
+			auto bindingsB = buffers(b, bindingID);
+			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
+				auto& bindA = bindingsA[e];
+				auto& bindB = bindingsB[e];
+				// NOTE: consider offset? not too relevant I guess
+				return bindA.buffer == bindB.buffer &&
+					bindA.range == bindB.range;
+			}
+		} else if(dsCat == DescriptorCategory::bufferView) {
+			auto bindingsA = bufferViews(a, bindingID);
+			auto bindingsB = bufferViews(b, bindingID);
+			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
+				if(bindingsA[e] == bindingsB[e]) {
+					++match;
+				}
 			}
 		}
 	}

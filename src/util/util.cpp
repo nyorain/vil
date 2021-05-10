@@ -1,3 +1,4 @@
+#include <threadContext.hpp>
 #include <util/util.hpp>
 #include <util/bytes.hpp>
 #include <util/f16.hpp>
@@ -996,6 +997,74 @@ void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
 
 	buf = copyChain(pNext);
 	return static_cast<void*>(buf.get());
+}
+
+LocalChainCopy copyChainLocal(const void* pNext) {
+	auto& tc = ThreadContext::get();
+	LocalChainCopy ret {};
+
+	// first march-through: find needed size
+	auto it = pNext;
+	while(it) {
+		auto src = static_cast<const VkBaseInStructure*>(it);
+
+		auto ssize = structSize(src->sType);
+		dlg_assertm(ssize > 0, "Unknown structure type: {}", src->sType);
+		ret.totalSize += ssize;
+
+		it = src->pNext;
+	}
+
+	if(ret.totalSize == 0u) {
+		return ret;
+	}
+
+	auto buf = vil::allocate(tc, ret.totalSize);
+	auto offset = 0u;
+
+	VkBaseInStructure* last = nullptr;
+	it = pNext;
+
+	while(it) {
+		auto src = static_cast<const VkBaseInStructure*>(it);
+		auto size = structSize(src->sType);
+		dlg_assertm_or(size > 0, it = src->pNext; continue,
+			"Unknown structure type: {}");
+
+		auto dst = reinterpret_cast<VkBaseInStructure*>(buf + offset);
+		offset += size;
+
+		// TODO: technicallly UB to not construct object via placement new.
+		// In practice, this works everywhere since its only C PODs
+		std::memcpy(dst, src, size);
+		dst->pNext = nullptr;
+
+		if(!last) {
+			dlg_assert(!ret.pNext);
+			ret.pNext = static_cast<void*>(dst);
+		} else {
+			last->pNext = dst;
+		}
+
+		last = dst;
+		it = src->pNext;
+	}
+
+	return ret;
+}
+
+LocalChainCopy::~LocalChainCopy() {
+	if(totalSize > 0) {
+		auto& tc = ThreadContext::get();
+		free(tc, reinterpret_cast<const std::byte*>(pNext), totalSize);
+	}
+}
+
+LocalChainCopy::LocalChainCopy(LocalChainCopy&& rhs) noexcept {
+	totalSize = rhs.totalSize;
+	pNext = rhs.pNext;
+	rhs.pNext = {};
+	rhs.totalSize = {};
 }
 
 } // namespace vil

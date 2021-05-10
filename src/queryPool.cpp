@@ -7,7 +7,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(
 		const VkQueryPoolCreateInfo*                pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkQueryPool*                                pQueryPool) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto res = dev.dispatch.CreateQueryPool(device, pCreateInfo, pAllocator, pQueryPool);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -30,7 +30,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.queryPools.mustErase(queryPool);
 	dev.dispatch.DestroyQueryPool(device, queryPool, pAllocator);
 }

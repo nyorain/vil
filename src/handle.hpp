@@ -112,7 +112,7 @@ struct ObjectTypeHandler {
 	// The following functions may use the device maps directly and
 	// can expect the device mutex to be locked.
 	virtual std::vector<Handle*> resources(Device& dev, std::string_view search) const = 0;
-	virtual Handle* find(Device& dev, u64) const = 0;
+	virtual Handle* find(Device& dev, u64, u64& fwdID) const = 0;
 };
 
 // And so He spoke:

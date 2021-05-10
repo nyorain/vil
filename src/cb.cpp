@@ -3,6 +3,7 @@
 #include <ds.hpp>
 #include <queue.hpp>
 #include <handles.hpp>
+#include <threadContext.hpp>
 #include <command/commands.hpp>
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
@@ -37,7 +38,9 @@ CommandBuffer::~CommandBuffer() {
 	}
 
 	// CommandBuffer is dispatchable handle, we need to remove this association
-	eraseData(handle_);
+	if(!HandleDesc<VkCommandBuffer>::wrap) {
+		eraseData(handle_);
+	}
 
 	// Remove ourselves from the pool we come from.
 	// A command pool can't be destroyed before its command buffers (it
@@ -272,15 +275,26 @@ CommandPool::~CommandPool() {
 	// to the mutexes locked inside the loop, don't do it!)
 	// We don't use a for loop since the command buffers remove themselves
 	// on destruction
+
 	while(!cbs.empty()) {
-		auto* cb = cbs[0];
-		dev->commandBuffers.mustErase(cb->handle());
+		if(HandleDesc<VkCommandBuffer>::wrap) {
+			// TODO: ugh, this is terrible, not sure how to handle the case when
+			// we wrap command buffers.
+			auto* cbp = reinterpret_cast<std::byte*>(cbs[0]);
+			cbp -= offsetof(WrappedHandle<CommandBuffer>, obj_);
+			auto h = u64ToHandle<VkCommandBuffer>(reinterpret_cast<std::uintptr_t>(cbp));
+			dev->commandBuffers.mustErase(h);
+		} else {
+			auto* cb = cbs[0];
+			dev->commandBuffers.mustErase(cb->handle());
+		}
 	}
 }
 
 // util
 void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
 	dst.descriptorSets = copySpan(cb, src.descriptorSets);
+	dst.pushDescriptors = copySpan(cb, src.pushDescriptors);
 }
 
 GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
@@ -343,17 +357,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
 		const VkCommandPoolCreateInfo*              pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkCommandPool*                              pCommandPool) {
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateCommandPool(device, pCreateInfo, pAllocator, pCommandPool);
+	auto& dev = getDevice(device);
+
+	auto res = dev.dispatch.CreateCommandPool(dev.handle, pCreateInfo, pAllocator, pCommandPool);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& cp = dev.commandPools.add(*pCommandPool);
+	auto cpPtr = std::make_unique<CommandPool>();
+	auto& cp = *cpPtr;
 	cp.objectType = VK_OBJECT_TYPE_COMMAND_POOL;
 	cp.dev = &dev;
 	cp.handle = *pCommandPool;
 	cp.queueFamily = pCreateInfo->queueFamilyIndex;
+
+	*pCommandPool = castDispatch<VkCommandPool>(cp);
+	dev.commandPools.mustEmplace(*pCommandPool, std::move(cpPtr));
 
 	return res;
 }
@@ -366,29 +385,29 @@ VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	dev.commandPools.mustErase(commandPool);
-	dev.dispatch.DestroyCommandPool(device, commandPool, pAllocator);
+	auto& dev = getDevice(device);
+	auto handle = dev.commandPools.mustMove(commandPool)->handle;
+	dev.dispatch.DestroyCommandPool(dev.handle, handle, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandPool(
 		VkDevice                                    device,
 		VkCommandPool                               commandPool,
 		VkCommandPoolResetFlags                     flags) {
-	auto& dev = getData<Device>(device);
-	auto& cp = dev.commandPools.get(commandPool);
+	auto& cp = get(device, commandPool);
 	for(auto* cb : cp.cbs) {
 		cb->doReset(false);
 	}
-	return dev.dispatch.ResetCommandPool(device, commandPool, flags);
+
+	return cp.dev->dispatch.ResetCommandPool(cp.dev->handle, cp.handle, flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
 		VkDevice                                    device,
 		VkCommandPool                               commandPool,
 		VkCommandPoolTrimFlags                      flags) {
-	auto& dev = getData<Device>(device);
-	dev.dispatch.TrimCommandPool(device, commandPool, flags);
+	auto& dev = getDevice(device);
+	dev.dispatch.TrimCommandPool(dev.handle, commandPool, flags);
 }
 
 // command buffer
@@ -396,21 +415,35 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 		VkDevice                                    device,
 		const VkCommandBufferAllocateInfo*          pAllocateInfo,
 		VkCommandBuffer*                            pCommandBuffers) {
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.AllocateCommandBuffers(device, pAllocateInfo, pCommandBuffers);
+	auto& pool = get(device, pAllocateInfo->commandPool);
+	auto& dev = *pool.dev;
+
+	auto nci = *pAllocateInfo;
+	nci.commandPool = pool.handle;
+
+	auto res = dev.dispatch.AllocateCommandBuffers(dev.handle, &nci, pCommandBuffers);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& cp = dev.commandPools.get(pAllocateInfo->commandPool);
 	for(auto i = 0u; i < pAllocateInfo->commandBufferCount; ++i) {
-		auto& cb = dev.commandBuffers.add(pCommandBuffers[i], cp, pCommandBuffers[i]);
+		auto handle = pCommandBuffers[i];
+
+		auto cbPtr = UniqueWrappedPtr<CommandBuffer>(new WrappedHandle<CommandBuffer>(pool, handle));
+		auto& cb = *cbPtr;
 		cb.dev = &dev;
 		cb.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
 		cb.pool().cbs.push_back(&cb);
 
 		// command buffers are dispatchable, add global data entry
-		vil::insertData(pCommandBuffers[i], &cb);
+		if(!HandleDesc<VkCommandBuffer>::wrap) {
+			vil::insertData(cb.handle(), &cb);
+		} else {
+			dev.setDeviceLoaderData(dev.handle, pCommandBuffers[i]);
+			pCommandBuffers[i] = castDispatch<VkCommandBuffer>(dev, *cbPtr.wrapped());
+		}
+
+		dev.commandBuffers.mustEmplace(pCommandBuffers[i], std::move(cbPtr));
 	}
 
 	return res;
@@ -421,21 +454,27 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 		VkCommandPool                               commandPool,
 		uint32_t                                    commandBufferCount,
 		const VkCommandBuffer*                      pCommandBuffers) {
-	auto& dev = getData<Device>(device);
+	auto& pool = get(device, commandPool);
+	auto& dev = *pool.dev;
+	auto handles = LocalVector<VkCommandBuffer>(commandBufferCount);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
-		dev.commandBuffers.mustErase(pCommandBuffers[i]);
+		handles[i] = dev.commandBuffers.mustMove(pCommandBuffers[i])->handle();
 	}
 
-	dev.dispatch.FreeCommandBuffers(device, commandPool, commandBufferCount, pCommandBuffers);
+	dev.dispatch.FreeCommandBuffers(dev.handle, pool.handle,
+		commandBufferCount, handles.data());
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		VkCommandBuffer                             commandBuffer,
 		const VkCommandBufferBeginInfo*             pBeginInfo) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	cb.doReset(true);
 	cb.record()->usageFlags = pBeginInfo->flags;
+
+	VkCommandBufferInheritanceInfo inherit;
+	auto beginInfo = *pBeginInfo;
 
 	if(pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
 		dlg_assert(pBeginInfo->pInheritanceInfo);
@@ -449,28 +488,33 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		cb.graphicsState().rpi.rp = &rp;
 		cb.graphicsState().rpi.subpass = pBeginInfo->pInheritanceInfo->subpass;
 
+		inherit = *pBeginInfo->pInheritanceInfo;
+		inherit.framebuffer = fb.handle;
+		inherit.renderPass = rp.handle;
+		beginInfo.pInheritanceInfo = &inherit;
+
 		// TODO: use handles here? would have to allow using handles without command
 		// Pretty sure we'd have to do it for correctness.
 		// useHandle(cb, cmd, *cmd.fb);
 		// useHandle(cb, cmd, *cmd.rp);
 	}
 
-	return cb.dev->dispatch.BeginCommandBuffer(commandBuffer, pBeginInfo);
+	return cb.dev->dispatch.BeginCommandBuffer(cb.handle(), &beginInfo);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
 		VkCommandBuffer                             commandBuffer) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	cb.doEnd();
-	return cb.dev->dispatch.EndCommandBuffer(commandBuffer);
+	return cb.dev->dispatch.EndCommandBuffer(cb.handle());
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 		VkCommandBuffer                             commandBuffer,
 		VkCommandBufferResetFlags                   flags) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	cb.doReset(false);
-	return cb.dev->dispatch.ResetCommandBuffer(commandBuffer, flags);
+	return cb.dev->dispatch.ResetCommandBuffer(cb.handle(), flags);
 }
 
 // == command buffer recording ==
@@ -570,21 +614,12 @@ void useHandle(CommandBuffer& cb, Args&&... args) {
 
 // commands
 void cmdBarrier(
-		CommandBuffer& cb,
-		BarrierCmdBase& cmd,
+		CommandBuffer& 								cb,
+		BarrierCmdBase& 							cmd,
 		VkPipelineStageFlags                        srcStageMask,
-		VkPipelineStageFlags                        dstStageMask,
-		uint32_t                                    memoryBarrierCount,
-		const VkMemoryBarrier*                      pMemoryBarriers,
-		uint32_t                                    bufferMemoryBarrierCount,
-		const VkBufferMemoryBarrier*                pBufferMemoryBarriers,
-		uint32_t                                    imageMemoryBarrierCount,
-		const VkImageMemoryBarrier*                 pImageMemoryBarriers) {
+		VkPipelineStageFlags                        dstStageMask) {
 	cmd.srcStageMask = srcStageMask;
 	cmd.dstStageMask = dstStageMask;
-	cmd.memBarriers = copySpan(cb, pMemoryBarriers, memoryBarrierCount);
-	cmd.imgBarriers = copySpan(cb, pImageMemoryBarriers, imageMemoryBarrierCount);
-	cmd.bufBarriers = copySpan(cb, pBufferMemoryBarriers, bufferMemoryBarrierCount);
 
 	cmd.images = allocSpan<Image*>(cb, cmd.imgBarriers.size());
 	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
@@ -602,12 +637,15 @@ void cmdBarrier(
 			imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		}
+
+		imgb.image = img.handle;
 	}
 
 	cmd.buffers = allocSpan<Buffer*>(cb, cmd.bufBarriers.size());
 	for(auto i = 0u; i < cmd.bufBarriers.size(); ++i) {
 		auto& bufb = cmd.bufBarriers[i];
 		copyChainInPlace(cb, bufb.pNext);
+
 		auto& buf = cb.dev->buffers.get(bufb.buffer);
 		cmd.buffers[i] = &buf;
 		useHandle(cb, cmd, buf);
@@ -616,6 +654,8 @@ void cmdBarrier(
 			bufb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			bufb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		}
+
+		bufb.buffer = buf.handle;
 	}
 
 	for(auto& mem : cmd.memBarriers) {
@@ -635,12 +675,14 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		const VkBufferMemoryBarrier*                pBufferMemoryBarriers,
 		uint32_t                                    imageMemoryBarrierCount,
 		const VkImageMemoryBarrier*                 pImageMemoryBarriers) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<WaitEventsCmd>(cb);
-	cmdBarrier(cb, cmd, srcStageMask, dstStageMask,
-		memoryBarrierCount, pMemoryBarriers,
-		bufferMemoryBarrierCount, pBufferMemoryBarriers,
-		imageMemoryBarrierCount, pImageMemoryBarriers);
+
+	cmd.memBarriers = copySpan(cb, pMemoryBarriers, memoryBarrierCount);
+	cmd.imgBarriers = copySpan(cb, pImageMemoryBarriers, imageMemoryBarrierCount);
+	cmd.bufBarriers = copySpan(cb, pBufferMemoryBarriers, bufferMemoryBarrierCount);
+
+	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
 
 	cmd.events = allocSpan<Event*>(cb, eventCount);
 	for(auto i = 0u; i < eventCount; ++i) {
@@ -649,11 +691,11 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		useHandle(cb, cmd, event);
 	}
 
-	cb.dev->dispatch.CmdWaitEvents(commandBuffer, eventCount, pEvents,
+	cb.dev->dispatch.CmdWaitEvents(cb.handle(), eventCount, pEvents,
 		srcStageMask, dstStageMask,
-		memoryBarrierCount, pMemoryBarriers,
-		bufferMemoryBarrierCount, pBufferMemoryBarriers,
-		imageMemoryBarrierCount, pImageMemoryBarriers);
+		u32(cmd.memBarriers.size()), cmd.memBarriers.data(),
+		u32(cmd.bufBarriers.size()), cmd.bufBarriers.data(),
+		u32(cmd.imgBarriers.size()), cmd.imgBarriers.data());
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
@@ -667,23 +709,25 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 		const VkBufferMemoryBarrier*                pBufferMemoryBarriers,
 		uint32_t                                    imageMemoryBarrierCount,
 		const VkImageMemoryBarrier*                 pImageMemoryBarriers) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BarrierCmd>(cb);
 	cmd.dependencyFlags = dependencyFlags;
-	cmdBarrier(cb, cmd, srcStageMask, dstStageMask,
-		memoryBarrierCount, pMemoryBarriers,
-		bufferMemoryBarrierCount, pBufferMemoryBarriers,
-		imageMemoryBarrierCount, pImageMemoryBarriers);
 
-	cb.dev->dispatch.CmdPipelineBarrier(commandBuffer,
+	cmd.memBarriers = copySpan(cb, pMemoryBarriers, memoryBarrierCount);
+	cmd.imgBarriers = copySpan(cb, pImageMemoryBarriers, imageMemoryBarrierCount);
+	cmd.bufBarriers = copySpan(cb, pBufferMemoryBarriers, bufferMemoryBarrierCount);
+
+	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
+
+	cb.dev->dispatch.CmdPipelineBarrier(cb.handle(),
 		srcStageMask, dstStageMask, dependencyFlags,
-		memoryBarrierCount, pMemoryBarriers,
-		bufferMemoryBarrierCount, pBufferMemoryBarriers,
-		imageMemoryBarrierCount, pImageMemoryBarriers);
+		u32(cmd.memBarriers.size()), cmd.memBarriers.data(),
+		u32(cmd.bufBarriers.size()), cmd.bufBarriers.data(),
+		u32(cmd.imgBarriers.size()), cmd.imgBarriers.data());
 }
 
 void cmdBeginRenderPass(CommandBuffer& cb,
-		const VkRenderPassBeginInfo& rpBeginInfo,
+		VkRenderPassBeginInfo& rpBeginInfo,
 		const VkSubpassBeginInfo& subpassBeginInfo) {
 	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
 
@@ -725,26 +769,31 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 	auto& subpassCmd = addCmd<FirstSubpassCmd, SectionType::begin>(cb);
 	(void) subpassCmd;
+
+	rpBeginInfo.framebuffer = cmd.fb->handle;
+	rpBeginInfo.renderPass = cmd.rp->handle;
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 		VkCommandBuffer                             commandBuffer,
 		const VkRenderPassBeginInfo*                pRenderPassBegin,
 		VkSubpassContents                           contents) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 
 	VkSubpassBeginInfo subpassBeginInfo = {};
 	subpassBeginInfo.contents = contents;
 	subpassBeginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
 
-	cmdBeginRenderPass(cb, *pRenderPassBegin, subpassBeginInfo);
-	cb.dev->dispatch.CmdBeginRenderPass(commandBuffer, pRenderPassBegin, contents);
+	auto beginInfo = *pRenderPassBegin;
+	cmdBeginRenderPass(cb, beginInfo, subpassBeginInfo);
+
+	cb.dev->dispatch.CmdBeginRenderPass(cb.handle(), &beginInfo, contents);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 		VkCommandBuffer                             commandBuffer,
 		VkSubpassContents                           contents) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 
 	cb.popLabelSections();
 	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
@@ -759,12 +808,12 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 
 	cmd.subpassID = cb.graphicsState().rpi.subpass;
 
-	cb.dev->dispatch.CmdNextSubpass(commandBuffer, contents);
+	cb.dev->dispatch.CmdNextSubpass(cb.handle(), contents);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 		VkCommandBuffer                             commandBuffer) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 
 	cb.popLabelSections();
 	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
@@ -779,24 +828,26 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 	dlg_assert(cb.graphicsState().rpi.rp);
 	cb.graphicsState().rpi = {};
 
-	cb.dev->dispatch.CmdEndRenderPass(commandBuffer);
+	cb.dev->dispatch.CmdEndRenderPass(cb.handle());
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
 		VkCommandBuffer                             commandBuffer,
 		const VkRenderPassBeginInfo*                pRenderPassBegin,
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
-	cmdBeginRenderPass(cb, *pRenderPassBegin, *pSubpassBeginInfo);
+	auto& cb = getCommandBuffer(commandBuffer);
 
-	cb.dev->dispatch.CmdBeginRenderPass2(commandBuffer, pRenderPassBegin, pSubpassBeginInfo);
+	auto beginInfo = *pRenderPassBegin;
+	cmdBeginRenderPass(cb, beginInfo, *pSubpassBeginInfo);
+
+	cb.dev->dispatch.CmdBeginRenderPass2(cb.handle(), &beginInfo, pSubpassBeginInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 		VkCommandBuffer                             commandBuffer,
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 
 	cb.popLabelSections();
 	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
@@ -810,13 +861,13 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 
 	cmd.subpassID = cb.graphicsState().rpi.subpass;
 
-	cb.dev->dispatch.CmdNextSubpass2(commandBuffer, pSubpassBeginInfo, pSubpassEndInfo);
+	cb.dev->dispatch.CmdNextSubpass2(cb.handle(), pSubpassBeginInfo, pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 		VkCommandBuffer                             commandBuffer,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 
 	cb.popLabelSections();
 	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
@@ -831,7 +882,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 	dlg_assert(cb.graphicsState().rpi.rp);
 	cb.graphicsState().rpi = {};
 
-	cb.dev->dispatch.CmdEndRenderPass2(commandBuffer, pSubpassEndInfo);
+	cb.dev->dispatch.CmdEndRenderPass2(cb.handle(), pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
@@ -858,16 +909,19 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// alive while recording).
 	// Since we might need it later on, we acquire shared ownership.
 	// Also like this in CmdPushConstants
-	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
+	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
+	auto setHandles = LocalVector<VkDescriptorSet>(descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = get(*cb.dev, pDescriptorSets[i]);
 
 		useHandle(cb, cmd, ds);
 		cmd.sets[i] = &ds;
+
+		setHandles[i] = ds.handle;
 	}
 
 	// TODO: not sure about this. The spec isn't clear about this.
@@ -894,12 +948,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		dlg_error("Unknown pipeline bind point");
 	}
 
-	cb.dev->dispatch.CmdBindDescriptorSets(commandBuffer,
+	cb.dev->dispatch.CmdBindDescriptorSets(cb.handle(),
 		pipelineBindPoint,
-		layout,
+		cmd.pipeLayout->handle,
 		firstSet,
 		descriptorSetCount,
-		pDescriptorSets,
+		setHandles.data(),
 		dynamicOffsetCount,
 		pDynamicOffsets);
 }
@@ -909,10 +963,10 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset,
 		VkIndexType                                 indexType) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindIndexBufferCmd>(cb);
 
-	auto& buf = cb.dev->buffers.get(buffer);
+	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
@@ -923,8 +977,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 	cb.graphicsState().indices.offset = offset;
 	cb.graphicsState().indices.type = indexType;
 
-	cb.dev->dispatch.CmdBindIndexBuffer(commandBuffer,
-		buffer, offset, indexType);
+	cb.dev->dispatch.CmdBindIndexBuffer(cb.handle(), buf.handle, offset, indexType);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
@@ -933,24 +986,27 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 		uint32_t                                    bindingCount,
 		const VkBuffer*                             pBuffers,
 		const VkDeviceSize*                         pOffsets) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
 
 	ensureSize(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
 	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
+	auto bufHandles = LocalVector<VkBuffer>(bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
-		auto& buf = cb.dev->buffers.get(pBuffers[i]);
+		auto& buf = get(*cb.dev, pBuffers[i]);
 		cmd.buffers[i].buffer = &buf;
 		cmd.buffers[i].offset = pOffsets[i];
 		useHandle(cb, cmd, buf);
 
 		cb.graphicsState().vertices[firstBinding + i].buffer = &buf;
 		cb.graphicsState().vertices[firstBinding + i].offset = pOffsets[i];
+
+		bufHandles[i] = buf.handle;
 	}
 
-	cb.dev->dispatch.CmdBindVertexBuffers(commandBuffer,
-		firstBinding, bindingCount, pBuffers, pOffsets);
+	cb.dev->dispatch.CmdBindVertexBuffers(cb.handle(),
+		firstBinding, bindingCount, bufHandles.data(), pOffsets);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDraw(
@@ -959,7 +1015,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 		uint32_t                                    instanceCount,
 		uint32_t                                    firstVertex,
 		uint32_t                                    firstInstance) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawCmd>(cb, cb, cb.graphicsState());
 
 	cmd.vertexCount = vertexCount;
@@ -967,7 +1023,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	cmd.firstVertex = firstVertex;
 	cmd.firstInstance = firstInstance;
 
-	cb.dev->dispatch.CmdDraw(commandBuffer,
+	cb.dev->dispatch.CmdDraw(cb.handle(),
 		vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
@@ -978,7 +1034,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 		uint32_t                                    firstIndex,
 		int32_t                                     vertexOffset,
 		uint32_t                                    firstInstance) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb, cb.graphicsState());
 
 	cmd.firstInstance = firstInstance;
@@ -987,7 +1043,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	cmd.vertexOffset = vertexOffset;
 	cmd.firstIndex = firstIndex;
 
-	cb.dev->dispatch.CmdDrawIndexed(commandBuffer,
+	cb.dev->dispatch.CmdDrawIndexed(cb.handle(),
 		indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
@@ -997,7 +1053,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 		VkDeviceSize                                offset,
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
 	auto& buf = cb.dev->buffers.get(buffer);
@@ -1009,8 +1065,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndirect(commandBuffer,
-		buffer, offset, drawCount, stride);
+	cb.dev->dispatch.CmdDrawIndirect(cb.handle(),
+		buf.handle, offset, drawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
@@ -1019,7 +1075,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 		VkDeviceSize                                offset,
 		uint32_t                                    drawCount,
 		uint32_t                                    stride) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
 	auto& buf = cb.dev->buffers.get(buffer);
@@ -1031,8 +1087,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndexedIndirect(commandBuffer,
-		buffer, offset, drawCount, stride);
+	cb.dev->dispatch.CmdDrawIndexedIndirect(cb.handle(),
+		buf.handle, offset, drawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
@@ -1043,14 +1099,14 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 		VkDeviceSize                                countBufferOffset,
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
 
-	auto& buf = cb.dev->buffers.get(buffer);
+	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
-	auto& countBuf = cb.dev->buffers.get(countBuffer);
+	auto& countBuf = get(*cb.dev, countBuffer);
 	cmd.countBuffer = &countBuf;
 	useHandle(cb, cmd, countBuf);
 
@@ -1060,8 +1116,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndirectCount(commandBuffer, buffer, offset,
-		countBuffer, countBufferOffset, maxDrawCount, stride);
+	cb.dev->dispatch.CmdDrawIndirectCount(cb.handle(), buf.handle, offset,
+		countBuf.handle, countBufferOffset, maxDrawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
@@ -1072,14 +1128,14 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 		VkDeviceSize                                countBufferOffset,
 		uint32_t                                    maxDrawCount,
 		uint32_t                                    stride) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
 
-	auto& buf = cb.dev->buffers.get(buffer);
+	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
-	auto& countBuf = cb.dev->buffers.get(countBuffer);
+	auto& countBuf = get(*cb.dev, countBuffer);
 	cmd.countBuffer = &countBuf;
 	useHandle(cb, cmd, countBuf);
 
@@ -1089,8 +1145,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	cb.dev->dispatch.CmdDrawIndexedIndirectCount(commandBuffer, buffer,
-		offset, countBuffer, countBufferOffset, maxDrawCount, stride);
+	cb.dev->dispatch.CmdDrawIndexedIndirectCount(cb.handle(), buf.handle,
+		offset, countBuf.handle, countBufferOffset, maxDrawCount, stride);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatch(
@@ -1098,22 +1154,21 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 		uint32_t                                    groupCountX,
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DispatchCmd>(cb, cb, cb.computeState());
 
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	cb.dev->dispatch.CmdDispatch(commandBuffer,
-		groupCountX, groupCountY, groupCountZ);
+	cb.dev->dispatch.CmdDispatch(cb.handle(), groupCountX, groupCountY, groupCountZ);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 		VkCommandBuffer                             commandBuffer,
 		VkBuffer                                    buffer,
 		VkDeviceSize                                offset) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb, cb.computeState());
 	cmd.offset = offset;
 
@@ -1121,7 +1176,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
-	cb.dev->dispatch.CmdDispatchIndirect(commandBuffer, buffer, offset);
+	cb.dev->dispatch.CmdDispatchIndirect(cb.handle(), buf.handle, offset);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
@@ -1132,7 +1187,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 		uint32_t                                    groupCountX,
 		uint32_t                                    groupCountY,
 		uint32_t                                    groupCountZ) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb, cb.computeState());
 
 	cmd.baseGroupX = baseGroupX;
@@ -1142,7 +1197,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	cb.dev->dispatch.CmdDispatchBase(commandBuffer,
+	cb.dev->dispatch.CmdDispatchBase(cb.handle(),
 		baseGroupX, baseGroupY, baseGroupZ,
 		groupCountX, groupCountY, groupCountZ);
 }
@@ -1155,7 +1210,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 		VkImageLayout                               dstImageLayout,
 		uint32_t                                    regionCount,
 		const VkImageCopy*                          pRegions) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageCmd>(cb);
 
 	auto& src = cb.dev->images.get(srcImage);
@@ -1170,16 +1225,16 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyImage(commandBuffer,
-		srcImage, srcImageLayout,
-		dstImage, dstImageLayout,
+	cb.dev->dispatch.CmdCopyImage(cb.handle(),
+		src.handle, srcImageLayout,
+		dst.handle, dstImageLayout,
 		regionCount, pRegions);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyImageInfo2KHR*                  info) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageCmd>(cb);
 
 	auto& src = cb.dev->images.get(info->srcImage);
@@ -1195,7 +1250,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2KHR(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyImage2KHR(commandBuffer, info);
+	auto copy = *info;
+	copy.dstImage = dst.handle;
+	copy.srcImage = src.handle;
+	cb.dev->dispatch.CmdCopyImage2KHR(cb.handle(), &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
@@ -1207,7 +1265,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 		uint32_t                                    regionCount,
 		const VkImageBlit*                          pRegions,
 		VkFilter                                    filter) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BlitImageCmd>(cb);
 
 	auto& src = cb.dev->images.get(srcImage);
@@ -1223,16 +1281,16 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdBlitImage(commandBuffer,
-		srcImage, srcImageLayout,
-		dstImage, dstImageLayout,
+	cb.dev->dispatch.CmdBlitImage(cb.handle(),
+		src.handle, srcImageLayout,
+		dst.handle, dstImageLayout,
 		regionCount, pRegions, filter);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkBlitImageInfo2KHR*                  info) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BlitImageCmd>(cb);
 
 	auto& src = cb.dev->images.get(info->srcImage);
@@ -1249,9 +1307,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2KHR(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdBlitImage2KHR(commandBuffer, info);
+	auto copy = *info;
+	copy.srcImage = src.handle;
+	copy.dstImage = dst.handle;
+	cb.dev->dispatch.CmdBlitImage2KHR(cb.handle(), &copy);
 }
-
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 		VkCommandBuffer                             commandBuffer,
@@ -1260,7 +1320,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 		VkImageLayout                               dstImageLayout,
 		uint32_t                                    regionCount,
 		const VkBufferImageCopy*                    pRegions) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyBufferToImageCmd>(cb);
 
 	auto& src = cb.dev->buffers.get(srcBuffer);
@@ -1274,14 +1334,14 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyBufferToImage(commandBuffer,
-		srcBuffer, dstImage, dstImageLayout, regionCount, pRegions);
+	cb.dev->dispatch.CmdCopyBufferToImage(cb.handle(),
+		src.handle, dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyBufferToImageInfo2KHR*          info) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyBufferToImageCmd>(cb);
 
 	auto& src = cb.dev->buffers.get(info->srcBuffer);
@@ -1296,7 +1356,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2KHR(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyBufferToImage2KHR(commandBuffer, info);
+	auto copy = *info;
+	copy.srcBuffer = src.handle;
+	copy.dstImage = dst.handle;
+	cb.dev->dispatch.CmdCopyBufferToImage2KHR(cb.handle(), &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
@@ -1306,7 +1369,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 		VkBuffer                                    dstBuffer,
 		uint32_t                                    regionCount,
 		const VkBufferImageCopy*                    pRegions) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageToBufferCmd>(cb);
 
 	auto& src = cb.dev->images.get(srcImage);
@@ -1320,14 +1383,14 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyImageToBuffer(commandBuffer,
-		srcImage, srcImageLayout, dstBuffer, regionCount, pRegions);
+	cb.dev->dispatch.CmdCopyImageToBuffer(cb.handle(),
+		src.handle, srcImageLayout, dst.handle, regionCount, pRegions);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyImageToBufferInfo2KHR*          info) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageToBufferCmd>(cb);
 
 	auto& src = cb.dev->images.get(info->srcImage);
@@ -1342,7 +1405,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2KHR(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyImageToBuffer2KHR(commandBuffer, info);
+	auto copy = *info;
+	copy.dstBuffer = dst.handle;
+	copy.srcImage = src.handle;
+	cb.dev->dispatch.CmdCopyImageToBuffer2KHR(cb.handle(), &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
@@ -1352,7 +1418,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 		const VkClearColorValue*                    pColor,
 		uint32_t                                    rangeCount,
 		const VkImageSubresourceRange*              pRanges) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ClearColorImageCmd>(cb);
 
 	auto& dst = cb.dev->images.get(image);
@@ -1363,8 +1429,8 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdClearColorImage(commandBuffer,
-		image, imageLayout, pColor, rangeCount, pRanges);
+	cb.dev->dispatch.CmdClearColorImage(cb.handle(),
+		dst.handle, imageLayout, pColor, rangeCount, pRanges);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
@@ -1374,7 +1440,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 		const VkClearDepthStencilValue*             pDepthStencil,
 		uint32_t                                    rangeCount,
 		const VkImageSubresourceRange*              pRanges) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ClearDepthStencilImageCmd>(cb);
 
 	auto& dst = cb.dev->images.get(image);
@@ -1385,7 +1451,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdClearDepthStencilImage(commandBuffer, image,
+	cb.dev->dispatch.CmdClearDepthStencilImage(cb.handle(), dst.handle,
 		imageLayout, pDepthStencil, rangeCount, pRanges);
 }
 
@@ -1395,7 +1461,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 		const VkClearAttachment*                    pAttachments,
 		uint32_t                                    rectCount,
 		const VkClearRect*                          pRects) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ClearAttachmentCmd>(cb);
 
 	cmd.attachments = copySpan(cb, pAttachments, attachmentCount);
@@ -1409,7 +1475,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	// used here (as in many other render pass cmds). So we probably should
 	// not do it.
 
-	cb.dev->dispatch.CmdClearAttachments(commandBuffer, attachmentCount,
+	cb.dev->dispatch.CmdClearAttachments(cb.handle(), attachmentCount,
 		pAttachments, rectCount, pRects);
 }
 
@@ -1421,7 +1487,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 		VkImageLayout                               dstImageLayout,
 		uint32_t                                    regionCount,
 		const VkImageResolve*                       pRegions) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& src = cb.dev->images.get(srcImage);
 	auto& dst = cb.dev->images.get(dstImage);
 
@@ -1435,14 +1501,14 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdResolveImage(commandBuffer, srcImage, srcImageLayout,
-		dstImage, dstImageLayout, regionCount, pRegions);
+	cb.dev->dispatch.CmdResolveImage(cb.handle(), src.handle, srcImageLayout,
+		dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkResolveImageInfo2KHR*               info) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& src = cb.dev->images.get(info->srcImage);
 	auto& dst = cb.dev->images.get(info->dstImage);
 
@@ -1458,47 +1524,51 @@ VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2KHR(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdResolveImage2KHR(commandBuffer, info);
+	auto copy = *info;
+	copy.dstImage = dst.handle;
+	copy.srcImage = src.handle;
+	cb.dev->dispatch.CmdResolveImage2KHR(cb.handle(), &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
 		VkCommandBuffer                             commandBuffer,
 		VkEvent                                     event,
 		VkPipelineStageFlags                        stageMask) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetEventCmd>(cb);
 	cmd.event = &cb.dev->events.get(event);
 	cmd.stageMask = stageMask;
 
 	useHandle(cb, cmd, *cmd.event);
 
-	cb.dev->dispatch.CmdSetEvent(commandBuffer, event, stageMask);
+	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
 		VkCommandBuffer                             commandBuffer,
 		VkEvent                                     event,
 		VkPipelineStageFlags                        stageMask) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ResetEventCmd>(cb);
 	cmd.event = &cb.dev->events.get(event);
 	cmd.stageMask = stageMask;
 
 	useHandle(cb, cmd, *cmd.event);
 
-	cb.dev->dispatch.CmdSetEvent(commandBuffer, event, stageMask);
+	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    commandBufferCount,
 		const VkCommandBuffer*                      pCommandBuffers) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
 	auto* last = cmd.children_;
 
+	auto cbHandles = LocalVector<VkCommandBuffer>(commandBufferCount);
 	for(auto i = 0u; i < commandBufferCount; ++i) {
-		auto& secondary = cb.dev->commandBuffers.get(pCommandBuffers[i]);
+		auto& secondary = getCommandBuffer(pCommandBuffers[i]);
 		dlg_assert(secondary.state() == CommandBuffer::State::executable);
 
 		// We don't have to lock the mutex here because the command buffer
@@ -1535,10 +1605,12 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		for(auto& handle : rec.handles) {
 			useHandle(cb, cmd, handle.first, *handle.second.handle);
 		}
+
+		cbHandles[i] = secondary.handle();
 	}
 
-	cb.dev->dispatch.CmdExecuteCommands(commandBuffer,
-		commandBufferCount, pCommandBuffers);
+	cb.dev->dispatch.CmdExecuteCommands(cb.handle(),
+		commandBufferCount, cbHandles.data());
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
@@ -1547,11 +1619,11 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 		VkBuffer                                    dstBuffer,
 		uint32_t                                    regionCount,
 		const VkBufferCopy*                         pRegions) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyBufferCmd>(cb);
 
-	auto& srcBuf = cb.dev->buffers.get(srcBuffer);
-	auto& dstBuf = cb.dev->buffers.get(dstBuffer);
+	auto& srcBuf = get(*cb.dev, srcBuffer);
+	auto& dstBuf = get(*cb.dev, dstBuffer);
 
 	cmd.src = &srcBuf;
 	cmd.dst = &dstBuf;
@@ -1560,19 +1632,19 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
 
-	cb.dev->dispatch.CmdCopyBuffer(commandBuffer,
-		srcBuffer, dstBuffer, regionCount, pRegions);
+	cb.dev->dispatch.CmdCopyBuffer(cb.handle(),
+		srcBuf.handle, dstBuf.handle, regionCount, pRegions);
 }
 
 
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyBufferInfo2KHR*                 info) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyBufferCmd>(cb);
 
-	auto& srcBuf = cb.dev->buffers.get(info->srcBuffer);
-	auto& dstBuf = cb.dev->buffers.get(info->dstBuffer);
+	auto& srcBuf = get(*cb.dev, info->srcBuffer);
+	auto& dstBuf = get(*cb.dev, info->dstBuffer);
 
 	cmd.pNext = copyChain(cb, info->pNext);
 	cmd.src = &srcBuf;
@@ -1582,7 +1654,11 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2KHR(
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
 
-	cb.dev->dispatch.CmdCopyBuffer2KHR(commandBuffer, info);
+	auto copy = *info;
+	copy.srcBuffer = srcBuf.handle;
+	copy.dstBuffer = dstBuf.handle;
+
+	cb.dev->dispatch.CmdCopyBuffer2KHR(cb.handle(), &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
@@ -1591,10 +1667,10 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 		VkDeviceSize                                dstOffset,
 		VkDeviceSize                                dataSize,
 		const void*                                 pData) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<UpdateBufferCmd>(cb);
 
-	auto& buf = cb.dev->buffers.get(dstBuffer);
+	auto& buf = get(*cb.dev, dstBuffer);
 	auto dataPtr = static_cast<const std::byte*>(pData);
 	cmd.data = copySpan(cb, static_cast<const std::byte*>(dataPtr), dataSize);
 	cmd.dst = &buf;
@@ -1602,7 +1678,7 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 
 	useHandle(cb, cmd, buf);
 
-	cb.dev->dispatch.CmdUpdateBuffer(commandBuffer, dstBuffer, dstOffset, dataSize, pData);
+	cb.dev->dispatch.CmdUpdateBuffer(cb.handle(), buf.handle, dstOffset, dataSize, pData);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
@@ -1611,10 +1687,10 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 		VkDeviceSize                                dstOffset,
 		VkDeviceSize                                size,
 		uint32_t                                    data) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<FillBufferCmd>(cb);
 
-	auto& buf = cb.dev->buffers.get(dstBuffer);
+	auto& buf = get(*cb.dev, dstBuffer);
 	cmd.dst = &buf;
 	cmd.offset = dstOffset;
 	cmd.size = size;
@@ -1622,13 +1698,13 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 
 	useHandle(cb, cmd, buf);
 
-	cb.dev->dispatch.CmdFillBuffer(commandBuffer, dstBuffer, dstOffset, size, data);
+	cb.dev->dispatch.CmdFillBuffer(cb.handle(), buf.handle, dstOffset, size, data);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb);
 
 	auto* c = pLabelInfo->color;
@@ -1637,13 +1713,13 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 	// TODO: copy pNext?
 
 	if(cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT) {
-		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(commandBuffer, pLabelInfo);
+		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(cb.handle(), pLabelInfo);
 	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 
 	// See docs/debug-utils-label-nesting.md
 	// When the last section isn't a BeginDebugUtilsLabelCmd, we have to
@@ -1674,10 +1750,10 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 
 	// Create without SectionType::end, we ended the section above
 	// manually if possible.
-	addCmd<EndDebugUtilsLabelCmd/*, SectionType::end*/>(cb);
+	addCmd<EndDebugUtilsLabelCmd>(cb);
 
 	if(cb.dev->dispatch.CmdEndDebugUtilsLabelEXT) {
-		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(commandBuffer);
+		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(cb.handle());
 	}
 }
 
@@ -1685,7 +1761,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 		VkCommandBuffer                             commandBuffer,
 		VkPipelineBindPoint                         pipelineBindPoint,
 		VkPipeline                                  pipeline) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindPipelineCmd>(cb);
 	cmd.bindPoint = pipelineBindPoint;
 
@@ -1701,7 +1777,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 
 	useHandle(cb, cmd, *cmd.pipe);
 
-	cb.dev->dispatch.CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
+	cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, cmd.pipe->handle);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
@@ -1709,7 +1785,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
 		VkQueryPool                                 queryPool,
 		uint32_t                                    query,
 		VkQueryControlFlags                         flags) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BeginQueryCmd>(cb);
 	cmd.pool = &cb.dev->queryPools.get(queryPool);
 	cmd.query = query;
@@ -1717,21 +1793,21 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdBeginQuery(commandBuffer, queryPool, query, flags);
+	cb.dev->dispatch.CmdBeginQuery(cb.handle(), cmd.pool->handle, query, flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndQuery(
 		VkCommandBuffer                             commandBuffer,
 		VkQueryPool                                 queryPool,
 		uint32_t                                    query) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<EndQueryCmd>(cb);
 	cmd.pool = &cb.dev->queryPools.get(queryPool);
 	cmd.query = query;
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdEndQuery(commandBuffer, queryPool, query);
+	cb.dev->dispatch.CmdEndQuery(cb.handle(), cmd.pool->handle, query);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(
@@ -1739,7 +1815,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(
 		VkQueryPool                                 queryPool,
 		uint32_t                                    firstQuery,
 		uint32_t                                    queryCount) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ResetQueryPoolCmd>(cb);
 	cmd.pool = &cb.dev->queryPools.get(queryPool);
 	cmd.first = firstQuery;
@@ -1747,7 +1823,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdResetQueryPool(commandBuffer, queryPool, firstQuery, queryCount);
+	cb.dev->dispatch.CmdResetQueryPool(cb.handle(), cmd.pool->handle, firstQuery, queryCount);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
@@ -1755,7 +1831,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
 		VkPipelineStageFlagBits                     pipelineStage,
 		VkQueryPool                                 queryPool,
 		uint32_t                                    query) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<WriteTimestampCmd>(cb);
 	cmd.pool = &cb.dev->queryPools.get(queryPool);
 	cmd.stage = pipelineStage;
@@ -1763,7 +1839,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdWriteTimestamp(commandBuffer, pipelineStage, queryPool, query);
+	cb.dev->dispatch.CmdWriteTimestamp(cb.handle(), pipelineStage, cmd.pool->handle, query);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
@@ -1775,12 +1851,12 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
 		VkDeviceSize                                dstOffset,
 		VkDeviceSize                                stride,
 		VkQueryResultFlags                          flags) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyQueryPoolResultsCmd>(cb);
 	cmd.pool = &cb.dev->queryPools.get(queryPool);
 	cmd.first = firstQuery;
 	cmd.count = queryCount;
-	cmd.dstBuffer = &cb.dev->buffers.get(dstBuffer);
+	cmd.dstBuffer = &get(*cb.dev, dstBuffer);
 	cmd.dstOffset = dstOffset;
 	cmd.stride = stride;
 	cmd.flags = flags;
@@ -1788,8 +1864,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
 	useHandle(cb, cmd, *cmd.pool);
 	useHandle(cb, cmd, *cmd.dstBuffer);
 
-	cb.dev->dispatch.CmdCopyQueryPoolResults(commandBuffer, queryPool,
-		firstQuery, queryCount, dstBuffer, dstOffset, stride, flags);
+	cb.dev->dispatch.CmdCopyQueryPoolResults(cb.handle(), cmd.pool->handle,
+		firstQuery, queryCount, cmd.dstBuffer->handle, dstOffset, stride, flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
@@ -1801,11 +1877,11 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 		const void*                                 pValues) {
 	ZoneScoped;
 
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<PushConstantsCmd>(cb);
 
 	// NOTE: See BindDescriptorSets for rationale on pipe layout handling here.
-	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(pipeLayout);
+	auto pipeLayoutPtr = getPtr(*cb.dev, pipeLayout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
@@ -1870,8 +1946,8 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	}
 	*/
 
-	cb.dev->dispatch.CmdPushConstants(commandBuffer, pipeLayout, stageFlags,
-		offset, size, pValues);
+	cb.dev->dispatch.CmdPushConstants(cb.handle(), cmd.pipeLayout->handle,
+		stageFlags, offset, size, pValues);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
@@ -1879,7 +1955,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 		uint32_t                                    firstViewport,
 		uint32_t                                    viewportCount,
 		const VkViewport*                           pViewports) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetViewportCmd>(cb);
 	cmd.first = firstViewport;
 	cmd.viewports = copySpan(cb, pViewports, viewportCount);
@@ -1888,7 +1964,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	std::copy(pViewports, pViewports + viewportCount,
 		cb.graphicsState().dynamic.viewports.begin() + firstViewport);
 
-	cb.dev->dispatch.CmdSetViewport(commandBuffer, firstViewport, viewportCount, pViewports);
+	cb.dev->dispatch.CmdSetViewport(cb.handle(), firstViewport, viewportCount, pViewports);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
@@ -1896,7 +1972,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 		uint32_t                                    firstScissor,
 		uint32_t                                    scissorCount,
 		const VkRect2D*                             pScissors) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetScissorCmd>(cb);
 	cmd.first = firstScissor;
 	cmd.scissors = copySpan(cb, pScissors, scissorCount);
@@ -1905,18 +1981,18 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	std::copy(pScissors, pScissors + scissorCount,
 		cb.graphicsState().dynamic.scissors.begin() + firstScissor);
 
-	cb.dev->dispatch.CmdSetScissor(commandBuffer, firstScissor, scissorCount, pScissors);
+	cb.dev->dispatch.CmdSetScissor(cb.handle(), firstScissor, scissorCount, pScissors);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetLineWidth(
 		VkCommandBuffer                             commandBuffer,
 		float                                       lineWidth) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetLineWidthCmd>(cb);
 	cmd.width = lineWidth;
 
 	cb.graphicsState().dynamic.lineWidth = lineWidth;
-	cb.dev->dispatch.CmdSetLineWidth(commandBuffer, lineWidth);
+	cb.dev->dispatch.CmdSetLineWidth(cb.handle(), lineWidth);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias(
@@ -1924,46 +2000,46 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias(
 		float                                       depthBiasConstantFactor,
 		float                                       depthBiasClamp,
 		float                                       depthBiasSlopeFactor) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetDepthBiasCmd>(cb);
 	cmd.state = {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor};
 	cb.graphicsState().dynamic.depthBias = cmd.state;
 
-	cb.dev->dispatch.CmdSetDepthBias(commandBuffer,
+	cb.dev->dispatch.CmdSetDepthBias(cb.handle(),
 		depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetBlendConstants(
 		VkCommandBuffer                             commandBuffer,
 		const float                                 blendConstants[4]) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetBlendConstantsCmd>(cb);
 	std::memcpy(cmd.values.data(), blendConstants, sizeof(cmd.values));
 	std::memcpy(cb.graphicsState().dynamic.blendConstants.data(), blendConstants,
 		sizeof(cb.graphicsState().dynamic.blendConstants));
 
-	cb.dev->dispatch.CmdSetBlendConstants(commandBuffer, blendConstants);
+	cb.dev->dispatch.CmdSetBlendConstants(cb.handle(), blendConstants);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthBounds(
 		VkCommandBuffer                             commandBuffer,
 		float                                       minDepthBounds,
 		float                                       maxDepthBounds) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetDepthBoundsCmd>(cb);
 	cmd.min = minDepthBounds;
 	cmd.max = maxDepthBounds;
 	cb.graphicsState().dynamic.depthBoundsMin = minDepthBounds;
 	cb.graphicsState().dynamic.depthBoundsMax = maxDepthBounds;
 
-	cb.dev->dispatch.CmdSetDepthBounds(commandBuffer, minDepthBounds, maxDepthBounds);
+	cb.dev->dispatch.CmdSetDepthBounds(cb.handle(), minDepthBounds, maxDepthBounds);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilCompareMask(
 		VkCommandBuffer                             commandBuffer,
 		VkStencilFaceFlags                          faceMask,
 		uint32_t                                    compareMask) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetStencilCompareMaskCmd>(cb);
 	cmd.faceMask = faceMask;
 	cmd.value = compareMask;
@@ -1974,14 +2050,14 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilCompareMask(
 		cb.graphicsState().dynamic.stencilBack.compareMask = compareMask;
 	}
 
-	cb.dev->dispatch.CmdSetStencilCompareMask(commandBuffer, faceMask, compareMask);
+	cb.dev->dispatch.CmdSetStencilCompareMask(cb.handle(), faceMask, compareMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilWriteMask(
 		VkCommandBuffer                             commandBuffer,
 		VkStencilFaceFlags                          faceMask,
 		uint32_t                                    writeMask) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetStencilWriteMaskCmd>(cb);
 	cmd.faceMask = faceMask;
 	cmd.value = writeMask;
@@ -1992,14 +2068,14 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilWriteMask(
 		cb.graphicsState().dynamic.stencilBack.compareMask = writeMask;
 	}
 
-	cb.dev->dispatch.CmdSetStencilWriteMask(commandBuffer, faceMask, writeMask);
+	cb.dev->dispatch.CmdSetStencilWriteMask(cb.handle(), faceMask, writeMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 		VkCommandBuffer                             commandBuffer,
 		VkStencilFaceFlags                          faceMask,
 		uint32_t                                    reference) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetStencilReferenceCmd>(cb);
 	cmd.faceMask = faceMask;
 	cmd.value = reference;
@@ -2010,7 +2086,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 		cb.graphicsState().dynamic.stencilBack.reference = reference;
 	}
 
-	cb.dev->dispatch.CmdSetStencilReference(commandBuffer, faceMask, reference);
+	cb.dev->dispatch.CmdSetStencilReference(cb.handle(), faceMask, reference);
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetKHR(
@@ -2020,46 +2096,77 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetKHR(
 		uint32_t                                    set,
 		uint32_t                                    descriptorWriteCount,
 		const VkWriteDescriptorSet*                 pDescriptorWrites) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<PushDescriptorSetCmd>(cb);
 	cmd.bindPoint = pipelineBindPoint;
 	cmd.set = set;
 	cmd.descriptorWrites = copySpan(cb, pDescriptorWrites, descriptorWriteCount);
+
+	// TODO: need to track the state in graphicsState/computeState.
 
 	// deep-copy cmd.descriptorWrites.
 	// The allocation done by copySpan is bound to the lifetime of the record
 	// and we don't need to store the span itself anywhere since we don't
 	// directly have ownership
 	for(auto& write : cmd.descriptorWrites) {
+		write.pNext = copyChain(cb, write.pNext);
 		if(!write.descriptorCount) {
 			continue;
 		}
 
 		switch(category(write.descriptorType)) {
-			case DescriptorCategory::buffer:
+			case DescriptorCategory::buffer: {
 				dlg_assert(write.pBufferInfo);
-				write.pBufferInfo = copySpan(cb, write.pBufferInfo, write.descriptorCount).data();
+				auto copies = allocSpan<VkDescriptorBufferInfo>(cb, write.descriptorCount);
+				for(auto i = 0u; i < write.descriptorCount; ++i) {
+					auto& buf = get(*cb.dev, write.pBufferInfo[i].buffer);
+					copies[i] = write.pBufferInfo[i];
+					copies[i].buffer = buf.handle;
+					useHandle(cb, cmd, buf);
+				}
+				write.pBufferInfo = copies.data();
 				break;
-			case DescriptorCategory::image:
+			} case DescriptorCategory::image: {
 				dlg_assert(write.pImageInfo);
-				write.pImageInfo = copySpan(cb, write.pImageInfo, write.descriptorCount).data();
+				auto copies = allocSpan<VkDescriptorImageInfo>(cb, write.descriptorCount);
+				for(auto i = 0u; i < write.descriptorCount; ++i) {
+					copies[i] = write.pImageInfo[i];
+					if(copies[i].imageView) {
+						auto& iv = get(*cb.dev, write.pImageInfo[i].imageView);
+						copies[i].imageView = iv.handle;
+						useHandle(cb, cmd, iv);
+					}
+					if(copies[i].sampler) {
+						auto& sampler = get(*cb.dev, write.pImageInfo[i].sampler);
+						copies[i].sampler = sampler.handle;
+						useHandle(cb, cmd, sampler);
+					}
+				}
+				write.pImageInfo = copies.data();
 				break;
-			case DescriptorCategory::bufferView:
+			} case DescriptorCategory::bufferView: {
 				dlg_assert(write.pTexelBufferView);
-				write.pTexelBufferView = copySpan(cb, write.pTexelBufferView, write.descriptorCount).data();
+				auto copies = allocSpan<VkBufferView>(cb, write.descriptorCount);
+				for(auto i = 0u; i < write.descriptorCount; ++i) {
+					auto& bv = get(*cb.dev, write.pTexelBufferView[i]);
+					copies[i] = bv.handle;
+					useHandle(cb, cmd, bv);
+				}
+				write.pTexelBufferView = copies.data();
 				break;
-			default:
+			} default:
 				dlg_error("Invalid/unknown descriptor type");
 				break;
 		}
 	}
 
-	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
+	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
-	cb.dev->dispatch.CmdPushDescriptorSetKHR(commandBuffer,
-		pipelineBindPoint, layout, set, descriptorWriteCount, pDescriptorWrites);
+	cb.dev->dispatch.CmdPushDescriptorSetKHR(cb.handle(),
+		pipelineBindPoint, cmd.pipeLayout->handle, set,
+		descriptorWriteCount, cmd.descriptorWrites.data());
 }
 
 VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetWithTemplateKHR(
@@ -2068,23 +2175,82 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetWithTemplateKHR(
 		VkPipelineLayout                            layout,
 		uint32_t                                    set,
 		const void*                                 pData) {
-	auto& cb = getData<CommandBuffer>(commandBuffer);
+	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<PushDescriptorSetWithTemplateCmd>(cb);
 	cmd.set = set;
 
-	auto pipeLayoutPtr = cb.dev->pipeLayouts.getPtr(layout);
+	// TODO: need to track the state in graphicsState/computeState.
+
+	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
-	auto dsUpdateTemplate = cb.dev->dsuTemplates.getPtr(descriptorUpdateTemplate);
+	dlg_assert(set < cmd.pipeLayout->descriptors.size());
+	auto& dsLayout = *cmd.pipeLayout->descriptors[set];
+
+	auto dsUpdateTemplate = getPtr(*cb.dev, descriptorUpdateTemplate);
 	cmd.updateTemplate = dsUpdateTemplate.get();
 	cb.record()->dsUpdateTemplates.emplace_back(std::move(dsUpdateTemplate));
 
+	auto& dut = get(*cb.dev, descriptorUpdateTemplate);
 	auto dataSize = totalUpdateDataSize(*cmd.updateTemplate);
-	cmd.data = copySpan(cb, reinterpret_cast<const std::byte*>(pData), dataSize);
+	auto copied = copySpan(cb, reinterpret_cast<const std::byte*>(pData), dataSize);
+	auto ptr = copied.data();
 
-	cb.dev->dispatch.CmdPushDescriptorSetWithTemplateKHR(commandBuffer,
-		descriptorUpdateTemplate, layout, set, pData);
+	for(auto& entry : dut.entries) {
+		auto dstBinding = entry.dstBinding;
+		auto dstElem = entry.dstArrayElement;
+		for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
+			// advanceUntilValid(?, dstBinding, dstElem);
+			auto dsType = dsLayout.bindings[dstBinding].descriptorType;
+
+			// TODO: such an assertion here would be nice. Track used
+			// layout in update?
+			// dlg_assert(write.descriptorType == type);
+
+			auto* data = ptr + (entry.offset + j * entry.stride);
+
+			// TODO: the reinterpret_cast here is UB in C++ I guess.
+			// Assuming the caller did it correctly (really creating
+			// the objects e.g. via placement new) we could probably also
+			// do it correctly by using placement new (copy) into 'copied'
+			// instead of the memcpy above.
+			switch(category(dsType)) {
+				case DescriptorCategory::image: {
+					auto& imgInfo = *reinterpret_cast<VkDescriptorImageInfo*>(data);
+					if(imgInfo.imageView) {
+						auto& iv = get(*cb.dev, imgInfo.imageView);
+						imgInfo.imageView = iv.handle;
+						useHandle(cb, cmd, iv);
+					}
+					if(imgInfo.sampler) {
+						auto& sampler = get(*cb.dev, imgInfo.sampler);
+						imgInfo.sampler = sampler.handle;
+						useHandle(cb, cmd, sampler);
+					}
+					break;
+				} case DescriptorCategory::buffer: {
+					auto& bufInfo = *reinterpret_cast<VkDescriptorBufferInfo*>(data);
+					auto& buf = get(*cb.dev, bufInfo.buffer);
+					bufInfo.buffer = buf.handle;
+					useHandle(cb, cmd, buf);
+					break;
+				} case DescriptorCategory::bufferView: {
+					auto& vkBufView = *reinterpret_cast<VkBufferView*>(data);
+					auto& bv = get(*cb.dev, vkBufView);
+					vkBufView = bv.handle;
+					useHandle(cb, cmd, bv);
+					break;
+				} case DescriptorCategory::none:
+					dlg_error("Invalid/unknown descriptor type");
+					break;
+			}
+		}
+	}
+
+	cmd.data = copied;
+	cb.dev->dispatch.CmdPushDescriptorSetWithTemplateKHR(cb.handle(),
+		dut.handle, cmd.pipeLayout->handle, set, cmd.data.data());
 }
 
 } // namespace vil

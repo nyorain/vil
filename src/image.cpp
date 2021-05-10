@@ -50,7 +50,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		const VkImageCreateInfo*                    pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkImage*                                    pImage) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 
 	auto nci = *pCreateInfo;
 
@@ -124,9 +124,9 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	dev.images.mustErase(image);
-	dev.dispatch.DestroyImage(device, image, pAllocator);
+	auto& dev = getDevice(device);
+	auto handle = dev.images.mustMove(image)->handle;
+	dev.dispatch.DestroyImage(device, handle, pAllocator);
 }
 
 void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
@@ -147,7 +147,7 @@ void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
 	{
 		// access to the given memory must be internally synced
 		std::lock_guard lock(dev.mutex);
-		// mem.allocations.insert(&img);
+		// mem.allocations.insert(&img); // TODO: insert ordered
 		mem.allocations.push_back(&img);
 	}
 
@@ -158,7 +158,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
 		VkDevice                                    device,
 		uint32_t                                    bindInfoCount,
 		const VkBindImageMemoryInfo*                pBindInfos) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
 		bindImageMemory(dev, bind);
@@ -172,7 +172,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 		VkImage                                     image,
 		VkDeviceMemory                              memory,
 		VkDeviceSize                                memoryOffset) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	bindImageMemory(dev, {{}, {}, image, memory, memoryOffset});
 	return dev.dispatch.BindImageMemory(device, image, memory, memoryOffset);
 }
@@ -183,13 +183,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 		const VkImageViewCreateInfo*                pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkImageView*                                pView) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
+
 	auto res = dev.dispatch.CreateImageView(device, pCreateInfo, pAllocator, pView);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& view = dev.imageViews.add(*pView);
+	auto viewPtr = IntrusivePtr<ImageView>(new ImageView());
+	auto& view = *viewPtr;
 	view.objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
 	view.handle = *pView;
 	view.img = &dev.images.get(pCreateInfo->image);
@@ -200,6 +202,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 		std::lock_guard lock(dev.mutex);
 		view.img->views.push_back(&view);
 	}
+
+	*pView = castDispatch<VkImageView>(view);
+	dev.imageViews.mustEmplace(*pView, std::move(viewPtr));
 
 	return res;
 }
@@ -212,9 +217,16 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	auto ptr = dev.imageViews.mustMove(imageView);
-	ptr->handle = {};
+	auto& dev = getDevice(device);
+	IntrusivePtr<ImageView> ptr;
+
+	{
+		auto lock = std::lock_guard(dev.mutex);
+		ptr = dev.imageViews.mustMoveLocked(imageView);
+		imageView = ptr->handle;
+		ptr->handle = {};
+	}
+
 	dev.dispatch.DestroyImageView(device, imageView, pAllocator);
 }
 
@@ -223,17 +235,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
 		const VkSamplerCreateInfo*                  pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkSampler*                                  pSampler) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
+
 	auto res = dev.dispatch.CreateSampler(device, pCreateInfo, pAllocator, pSampler);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& view = dev.samplers.add(*pSampler);
-	view.dev = &dev;
-	view.handle = *pSampler;
-	view.ci = *pCreateInfo;
-	view.objectType = VK_OBJECT_TYPE_SAMPLER;
+	auto samplerPtr = IntrusivePtr<Sampler>(new Sampler());
+	auto& sampler = *samplerPtr;
+	sampler.dev = &dev;
+	sampler.handle = *pSampler;
+	sampler.ci = *pCreateInfo;
+	sampler.objectType = VK_OBJECT_TYPE_SAMPLER;
+
+	*pSampler = castDispatch<VkSampler>(sampler);
+	dev.samplers.mustEmplace(*pSampler, std::move(samplerPtr));
 
 	return res;
 }
@@ -246,9 +263,16 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	auto ptr = dev.samplers.mustMove(sampler);
-	ptr->handle = {};
+	auto& dev = getDevice(device);
+	IntrusivePtr<Sampler> ptr;
+
+	{
+		auto lock = std::lock_guard(dev.mutex);
+		ptr = dev.samplers.mustMoveLocked(sampler);
+		sampler = ptr->handle;
+		ptr->handle = {};
+	}
+
 	dev.dispatch.DestroySampler(device, sampler, pAllocator);
 }
 

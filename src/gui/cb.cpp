@@ -61,7 +61,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	if(mode_ != UpdateMode::swapchain) {
 		// only show combo if at least one update option is available
 		auto showCombo =
-			(record_ && record_->group) ||
+			// (record_ && record_->group) ||
 			(cb_ || record_->cb);
 
 		if(showCombo && ImGui::BeginCombo("Update Source", modeName(mode_))) {
@@ -71,11 +71,13 @@ void CommandBufferGui::draw(Draw& draw) {
 				hook.target.record = record_.get();
 			}
 
+			/*
 			if(record_ && record_->group && ImGui::Selectable("CommandGroup")) {
 				mode_ = UpdateMode::commandGroup;
 				hook.target = {};
 				hook.target.group = record_->group;
 			}
+			*/
 
 			if((mode_ == UpdateMode::commandBuffer && cb_) || record_->cb) {
 				if(ImGui::Selectable("CommandBuffer")) {
@@ -131,9 +133,9 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::SameLine();
 		refButton(*gui_, *cb_);
 	} else if(mode_ == UpdateMode::commandGroup) {
-		dlg_assert(record_->group);
-
-		imGuiText("Updating from Command Group");
+		dlg_assert(false);
+		// dlg_assert(record_->group);
+		// imGuiText("Updating from Command Group");
 	} else if(mode_ == UpdateMode::swapchain) {
 		if(!gui_->dev().swapchain) {
 			record_ = {};
@@ -225,10 +227,11 @@ void CommandBufferGui::draw(Draw& draw) {
 							commandViewer_.select(record_, *command_.back(), dsState_, true);
 
 							dev.commandHook->target = {};
-							dlg_assert(record_->group);
+							// dlg_assert(record_->group);
 							// dlg_assert(desc_.size() <= record_->group->desc.children.size() + 1);
 
-							dev.commandHook->target.group = record_->group;
+							// dev.commandHook->target.group = record_->group;
+							dev.commandHook->target.all = true;
 							dev.commandHook->desc(command_, dsState_);
 						}
 
@@ -252,7 +255,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 		dlg_assert(record_->invalidated.empty());
 
-		ImGui::PushID(dlg::format("{}", record_->group).c_str());
+		// ImGui::PushID(dlg::format("{}", record_->group).c_str());
 
 		auto* selected = command_.empty() ? nullptr : command_.back();
 		auto nsel = displayCommands(record_->commands, selected, commandFlags_);
@@ -263,8 +266,9 @@ void CommandBufferGui::draw(Draw& draw) {
 				dlg_assert(cb_);
 				dlg_assert(dev.commandHook->target.cb == cb_);
 			} else if(mode_ == UpdateMode::commandGroup) {
-				dlg_assert(record_->group);
-				dlg_assert(dev.commandHook->target.group == record_->group);
+				dlg_assert(false);
+				// dlg_assert(record_->group);
+				// dlg_assert(dev.commandHook->target.group == record_->group);
 			}
 
 			command_ = std::move(nsel);
@@ -470,7 +474,8 @@ void CommandBufferGui::updateHookTarget() {
 			break;
 		case UpdateMode::commandGroup:
 		case UpdateMode::swapchain:
-			hook.target.group = nonNull(record_).group;
+			// hook.target.group = nonNull(record_).group;
+			hook.target.all = true;
 			break;
 		case UpdateMode::commandBuffer:
 			hook.target.cb = cb_;

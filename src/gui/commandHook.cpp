@@ -165,13 +165,15 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	ZoneScoped;
 
 	auto* record = hooked.lastRecordLocked();
-	dlg_assert(record && record->group);
+	// dlg_assert(record && record->group);
 
 	// Check whether we should attempt to hook this particular record
 	bool validTarget =
 		record == target.record ||
 		&hooked == target.cb ||
-		record->group == target.group;
+		// record->group == target.group;
+		target.all;
+
 	if(!validTarget || hierachy_.empty()) {
 		return hooked.handle();
 	}
@@ -897,21 +899,18 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		return;
 	}
 
-	auto bindings = vil::bindings(ds, bindingID);
-	if(elemID >= bindings.size()) {
+	if(elemID >= descriptorCount(*it->second, bindingID)) {
 		dlg_trace("elemID out of range");
 		dsState->descriptorSets = {};
 		return;
 	}
 
-	auto& elem = bindings[elemID];
-
-	dlg_assert(elem.valid);
 	auto& lbinding = ds.layout->bindings[bindingID];
 	auto cat = category(lbinding.descriptorType);
 	if(cat == DescriptorCategory::image) {
+		auto& elem = images(*it->second, bindingID)[elemID];
 		if(needsImageView(lbinding.descriptorType)) {
-			auto* imgView = elem.imageInfo.imageView;
+			auto& imgView = elem.imageView;
 			dlg_assert(imgView);
 			dlg_assert(imgView->img);
 			if(imgView->img) {
@@ -922,7 +921,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 				// input attachment). In that case, it will be
 				// in general layout (via our render pass splitting),
 				// not in the layout of the ds.
-				auto layout = elem.imageInfo.layout;
+				auto layout = elem.layout;
 				if(info.splitRenderPass) {
 					auto& fb = nonNull(nonNull(info.beginRenderPassCmd).fb);
 					for(auto* att : fb.attachments) {
@@ -947,15 +946,18 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 			dlg_error(state->errorMessage);
 		}
 	} else if(cat == DescriptorCategory::buffer) {
+		auto& elem = buffers(*it->second, bindingID)[elemID];
+		dlg_assert(elem.buffer);
+
 		auto& dst = state->dsCopy.emplace<CopiedBuffer>();
-		auto range = elem.bufferInfo.range;
+		auto range = elem.range;
 		if(range == VK_WHOLE_SIZE) {
-			range = elem.bufferInfo.buffer->ci.size - elem.bufferInfo.offset;
+			range = elem.buffer->ci.size - elem.offset;
 		}
 
 		auto size = std::min(maxBufCopySize, range);
-		initAndCopy(dev, cb, dst, 0u, nonNull(elem.bufferInfo.buffer),
-			elem.bufferInfo.offset, size);
+		initAndCopy(dev, cb, dst, 0u, nonNull(elem.buffer),
+			elem.offset, size);
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
 		//   as buffer but then create bufferView on our own?

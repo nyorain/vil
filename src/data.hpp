@@ -25,8 +25,6 @@ extern std::unordered_map<std::uint64_t, void*> dispatchableTable;
 extern std::unordered_map<void*, Device*> devByLoaderTable;
 // Synchronizes access to those global tables
 extern std::shared_mutex dataMutex;
-// Whether we use object wrapping or not.
-extern bool wrapObjects;
 
 template<typename T>
 std::uint64_t handleToU64(T handle) {

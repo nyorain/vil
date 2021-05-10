@@ -2,6 +2,18 @@
 
 v0.1, goal: end of january 2021 (edit may 2021: lmao) 
 
+urgent, bugs:
+- [ ] Figure out how to correctly handle the maps in Device when using 
+	  wrapping. Many ugly situations atm, see e.g. (important!) the
+	  terrible hack in ~CommandPool
+- [ ] (important) the way we copy/modify descriptor set states might have
+      a data race at the moment. When copying, we might try to increase
+	  the reference count of an already destroyed State object (when it is
+	  currently being replaced?)
+- [ ] (important) the way we currently copy vectors of IntrusivePtr handles
+      outside the lock (e.g. in Gui) to make they don't get destroyed inside
+	  isn't threadsafe...
+
 matching:
 - [ ] implement 'match' for missing commands
 - [ ] fix command matching for sync/bind commands
@@ -159,6 +171,12 @@ gui stuff
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
+- [ ] CommandMemBlock alignment handling might currently be wrong since
+      we don't take the alignment of the beginning of the mem block into account,
+	  might be less than __STDCPP_DEFAULT_NEW_ALIGNMENT__ due to obj size.
+	  Handle it as we do in ThreadMemBlock
+- [ ] correctly track stuff from push descriptors. Need to add handles and stuff,
+      make sure destruction is tracked correctly. Also show in gui.
 - [ ] with the ds changes, we don't correctly track commandRecord invalidation
       by destroyed handles anymore. But with e.g. update_unused_while_pending +
 	  partially_bound, we can't track that anyways and must just assume

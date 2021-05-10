@@ -37,6 +37,7 @@ struct ImageView : DeviceHandle {
 	VkImageViewCreateInfo ci;
 
 	std::vector<Framebuffer*> fbs; // TODO: unordered set?
+	std::atomic<u32> refCount {};
 
 	~ImageView();
 };
@@ -44,6 +45,7 @@ struct ImageView : DeviceHandle {
 struct Sampler : DeviceHandle {
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
+	std::atomic<u32> refCount {};
 
 	~Sampler();
 };

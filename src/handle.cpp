@@ -130,13 +130,23 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 	static const ObjectTypeImpl instance;
 
 	VkObjectType objectType() const override { return OT; }
-	Handle* find(Device& dev, u64 id) const override {
+	Handle* find(Device& dev, u64 id, u64& fwdID) const override {
 		using VKHT = decltype(vil::handle(std::declval<HT>()));
 		auto vkht = u64ToHandle<VKHT>(id);
 
 		auto& map = (dev.*DevMapPtr).map;
 		auto it = map.find(vkht);
-		return it == map.end() ? nullptr : &*it->second;
+		if(it == map.end()) {
+			return nullptr;
+		}
+
+		if constexpr(OT == VK_OBJECT_TYPE_COMMAND_BUFFER) {
+			fwdID = handleToU64(it->second->handle());
+		} else {
+			fwdID = handleToU64(it->second->handle);
+		}
+
+		return &*it->second;
 	}
 	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
 		return findHandles((dev.*DevMapPtr).map, search);
@@ -151,15 +161,17 @@ struct PipelineTypeImpl : ObjectTypeHandler {
 	static const PipelineTypeImpl instance;
 
 	VkObjectType objectType() const override { return VK_OBJECT_TYPE_PIPELINE; }
-	Handle* find(Device& dev, u64 id) const override {
+	Handle* find(Device& dev, u64 id, u64& outID) const override {
 		auto vkpipe = u64ToHandle<VkPipeline>(id);
 		auto it = dev.graphicsPipes.map.find(vkpipe);
 		if(it != dev.graphicsPipes.map.end()) {
+			outID = handleToU64(it->second->handle);
 			return &*it->second;
 		}
 
 		auto it2 = dev.computePipes.map.find(vkpipe);
 		if(it2 != dev.computePipes.map.end()) {
+			outID = handleToU64(it2->second->handle);
 			return &*it2->second;
 		}
 
@@ -200,11 +212,12 @@ struct QueueTypeImpl : ObjectTypeHandler {
 	static const QueueTypeImpl instance;
 
 	VkObjectType objectType() const override { return VK_OBJECT_TYPE_QUEUE; }
-	Handle* find(Device& dev, u64 id) const override {
+	Handle* find(Device& dev, u64 id, u64& fwdID) const override {
 		// NOTE: alternatively (maybe faster but does not really matter)
 		// we could use findData<Queue>((VkQueue) id)
 		for(auto& queue : dev.queues) {
 			if(handleToU64(queue->handle) == id) {
+				fwdID = handleToU64(queue->handle);
 				return queue.get();
 			}
 		}
@@ -262,10 +275,10 @@ static const ObjectTypeHandler* typeHandlers[] = {
 
 const span<const ObjectTypeHandler*> ObjectTypeHandler::handlers = typeHandlers;
 
-Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle) {
+Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle, u64& fwdID) {
 	for(auto& handler : ObjectTypeHandler::handlers) {
 		if(handler->objectType() == objectType) {
-			auto* ptr = handler->find(dev, handle);
+			auto* ptr = handler->find(dev, handle, fwdID);
 			if(ptr) {
 				return ptr;
 			}
@@ -278,11 +291,13 @@ Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle) {
 VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectNameEXT(
 		VkDevice                                    device,
 		const VkDebugUtilsObjectNameInfoEXT*        pNameInfo) {
-	auto& devd = getData<Device>(device);
+	auto& devd = getDevice(device);
+	auto fwd = *pNameInfo;
 
 	{
 		std::lock_guard lock(devd.mutex);
-		auto* handle = findHandle(devd, pNameInfo->objectType, pNameInfo->objectHandle);
+		auto* handle = findHandle(devd, pNameInfo->objectType,
+			pNameInfo->objectHandle, fwd.objectHandle);
 		if(handle) {
 			handle->name = pNameInfo->pObjectName;
 		}
@@ -292,17 +307,19 @@ VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectNameEXT(
 		return VK_SUCCESS;
 	}
 
-	return devd.dispatch.SetDebugUtilsObjectNameEXT(device, pNameInfo);
+	return devd.dispatch.SetDebugUtilsObjectNameEXT(device, &fwd);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectTagEXT(
 		VkDevice                                    device,
 		const VkDebugUtilsObjectTagInfoEXT*         pTagInfo) {
-	auto& devd = getData<Device>(device);
+	auto& devd = getDevice(device);
+	auto fwd = *pTagInfo;
 
 	{
 		std::lock_guard lock(devd.mutex);
-		auto* handle = findHandle(devd, pTagInfo->objectType, pTagInfo->objectHandle);
+		auto* handle = findHandle(devd, pTagInfo->objectType,
+			pTagInfo->objectHandle, fwd.objectHandle);
 		if(handle) {
 			auto& data = handle->tags[pTagInfo->tagName];
 			auto ptr = reinterpret_cast<const std::byte*>(pTagInfo->pTag);

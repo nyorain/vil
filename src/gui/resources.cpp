@@ -472,58 +472,49 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 	ImGui::Text("Bindings");
 	for(auto b = 0u; b < ds.state->layout->bindings.size(); ++b) {
 		auto& layout = ds.state->layout->bindings[b];
-		auto binding = bindings(*ds.state, b);
-
 		dlg_assert(layout.binding == b);
 
-		if(binding.empty()) { // valid?
-			continue;
-		}
-
-		auto print = [&](VkDescriptorType type, const DescriptorBinding& binding) {
-			if(!binding.valid) {
-				imGuiText("null");
-				return;
-			}
-
+		auto print = [&](VkDescriptorType type, unsigned b, unsigned e) {
 			switch(category(type)) {
 				case DescriptorCategory::image: {
+					auto& binding = images(*ds.state, b)[e];
 					if(needsImageView(type)) {
-						refButtonExpect(*gui_, binding.imageInfo.imageView);
+						refButtonExpect(*gui_, binding.imageView.get());
 					}
 					if(needsImageLayout(type)) {
-						imGuiText("{}", vk::name(binding.imageInfo.layout));
+						imGuiText("{}", vk::name(binding.layout));
 					}
 					if(needsSampler(type)) {
-						refButtonExpect(*gui_, binding.imageInfo.sampler);
+						refButtonExpect(*gui_, binding.sampler.get());
 					}
 					break;
 				} case DescriptorCategory::buffer: {
-					refButtonExpect(*gui_, binding.bufferInfo.buffer);
+					auto& binding = buffers(*ds.state, b)[e];
+					refButtonExpect(*gui_, binding.buffer.get());
 					ImGui::SameLine();
-					drawOffsetSize(binding.bufferInfo);
+					drawOffsetSize(binding);
 					break;
-				} case DescriptorCategory::bufferView:
-					refButtonExpect(*gui_, binding.bufferView);
+				} case DescriptorCategory::bufferView: {
+					auto& binding = bufferViews(*ds.state, b)[e];
+					refButtonExpect(*gui_, binding.get());
 					break;
-				default:
+				} default:
 					dlg_warn("Unimplemented descriptor category");
 					break;
 			}
 		};
 
-		if(binding.size() > 1) {
+		auto elemCount = descriptorCount(*ds.state, b);
+		if(elemCount > 1) {
 			auto label = dlg::format("{}: {}[{}]", b,
-				vk::name(layout.descriptorType), binding.size());
+				vk::name(layout.descriptorType), elemCount);
 			if(ImGui::TreeNode(label.c_str())) {
-				for(auto e = 0u; e < binding.size(); ++e) {
-					auto& elem = binding[e];
-
+				for(auto e = 0u; e < elemCount; ++e) {
 					ImGui::Bullet();
 					imGuiText("{}: ", e);
 					ImGui::SameLine();
 
-					print(layout.descriptorType, elem);
+					print(layout.descriptorType, b, e);
 				}
 			}
 		} else {
@@ -533,7 +524,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 			ImGui::Indent();
 			ImGui::Indent();
 
-			print(layout.descriptorType, binding[0]);
+			print(layout.descriptorType, b, 0);
 
 			ImGui::Unindent();
 			ImGui::Unindent();

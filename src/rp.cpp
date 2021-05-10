@@ -2,6 +2,7 @@
 #include <device.hpp>
 #include <data.hpp>
 #include <image.hpp>
+#include <threadContext.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
 #include <vk/format_utils.h>
@@ -28,8 +29,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		const VkFramebufferCreateInfo*              pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkFramebuffer*                              pFramebuffer) {
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreateFramebuffer(device, pCreateInfo, pAllocator, pFramebuffer);
+	auto& dev = getDevice(device);
+
+	LocalVector<VkImageView> viewHandles(pCreateInfo->attachmentCount);
+	std::vector<ImageView*> views(pCreateInfo->attachmentCount);
+	for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
+		views[i] = &get(dev, pCreateInfo->pAttachments[i]);
+		viewHandles[i] = views[i]->handle;
+	}
+
+	auto nci = *pCreateInfo;
+	nci.pAttachments = viewHandles.data();
+
+	auto res = dev.dispatch.CreateFramebuffer(device, &nci, pAllocator, pFramebuffer);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -42,13 +54,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	fb.objectType = VK_OBJECT_TYPE_FRAMEBUFFER;
 	fb.rp = dev.renderPasses.get(pCreateInfo->renderPass).desc;
 	fb.dev = &dev;
+	fb.attachments = std::move(views);
 
-	for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
-		auto& view = dev.imageViews.get(pCreateInfo->pAttachments[i]);
-		fb.attachments.emplace_back(&view);
-
+	for(auto* view : fb.attachments) {
 		std::lock_guard lock(dev.mutex);
-		view.fbs.push_back(&fb);
+		view->fbs.push_back(&fb);
 	}
 
 	return res;
@@ -62,7 +72,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.framebuffers.mustErase(framebuffer);
 	dev.dispatch.DestroyFramebuffer(device, framebuffer, pAllocator);
 }
@@ -592,7 +602,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		const VkRenderPassCreateInfo*               pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkRenderPass*                               pRenderPass) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto res = dev.dispatch.CreateRenderPass(device, pCreateInfo, pAllocator, pRenderPass);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -690,7 +700,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 		const VkRenderPassCreateInfo2*              pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkRenderPass*                               pRenderPass) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto f = dev.dispatch.CreateRenderPass2;
 	auto res = f(device, pCreateInfo, pAllocator, pRenderPass);
 	if(res != VK_SUCCESS) {
@@ -765,7 +775,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.dispatch.DestroyRenderPass(device, renderPass, pAllocator);
 	dev.renderPasses.mustErase(renderPass);
 }

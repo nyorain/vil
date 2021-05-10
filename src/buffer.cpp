@@ -62,21 +62,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 		concurrent = true;
 	}
 
-	VkBuffer handle;
-	auto res = dev.dispatch.CreateBuffer(dev.handle, &nci, pAllocator, &handle);
+	auto res = dev.dispatch.CreateBuffer(dev.handle, &nci, pAllocator, pBuffer);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& bufPtr = dev.buffers.addPtr(*pBuffer);
+	auto bufPtr = IntrusivePtr<Buffer>(new Buffer);
 	auto& buf = *bufPtr;
 	buf.objectType = VK_OBJECT_TYPE_BUFFER;
 	buf.dev = &dev;
 	buf.ci = *pCreateInfo;
-	buf.handle = handle;
+	buf.handle = *pBuffer;
 	buf.concurrentHooked = concurrent;
 
-	*pBuffer = castDispatch<VkBuffer>(dev, *bufPtr.wrapped());
+	*pBuffer = castDispatch<VkBuffer>(buf);
+	dev.buffers.mustEmplace(*pBuffer, std::move(bufPtr));
+
 	return res;
 }
 
@@ -89,16 +90,38 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 	}
 
 	auto& dev = getDevice(device);
-	VkBuffer handle;
+	IntrusivePtr<Buffer> ptr;
 
 	{
 		std::lock_guard lock(dev.mutex);
-		auto ptr = dev.buffers.mustMoveLocked(buffer);
-		handle = ptr->handle;
+		ptr = dev.buffers.mustMoveLocked(buffer);
+		buffer = ptr->handle;
 		ptr->handle = {};
 	}
 
-	dev.dispatch.DestroyBuffer(dev.handle, handle, pAllocator);
+	dev.dispatch.DestroyBuffer(dev.handle, buffer, pAllocator);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetBufferMemoryRequirements(
+		VkDevice                                    device,
+		VkBuffer                                    buffer,
+		VkMemoryRequirements*                       pMemoryRequirements) {
+	auto& buf = get(device, buffer);
+	auto& dev = *buf.dev;
+	dev.dispatch.GetBufferMemoryRequirements(dev.handle, buf.handle, pMemoryRequirements);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetBufferMemoryRequirements2(
+		VkDevice                                    device,
+		const VkBufferMemoryRequirementsInfo2*      pInfo,
+		VkMemoryRequirements2*                      pMemoryRequirements) {
+	auto& buf = get(device, pInfo->buffer);
+	auto& dev = *buf.dev;
+
+	auto copy = *pInfo;
+	copy.buffer = buf.handle;
+
+	dev.dispatch.GetBufferMemoryRequirements2(dev.handle, &copy, pMemoryRequirements);
 }
 
 void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
@@ -126,7 +149,8 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 		VkDeviceMemory                              memory,
 		VkDeviceSize                                memoryOffset) {
 	auto& buf = get(device, buffer);
-	auto& mem = get(*buf.dev, memory);
+	// auto& mem = get(*buf.dev, memory);
+	auto& mem = buf.dev->deviceMemories.get(memory);
 	bindBufferMemory(buf, mem, memoryOffset);
 	return buf.dev->dispatch.BindBufferMemory(buf.dev->handle,
 		buf.handle, memory, memoryOffset);
@@ -141,7 +165,8 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
 		auto& buf = get(dev, bind.buffer);
-		auto& mem = get(dev, bind.memory);
+		// auto& mem = get(dev, bind.memory);
+		auto& mem = buf.dev->deviceMemories.get(bind.memory);
 		bindBufferMemory(buf, mem, bind.memoryOffset);
 
 		fwd[i] = bind;
@@ -163,17 +188,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
 	auto ci = *pCreateInfo;
 	ci.buffer = buf.handle;
 
-	VkBufferView handle;
-	auto res = dev.dispatch.CreateBufferView(dev.handle, &ci, pAllocator, &handle);
+	auto res = dev.dispatch.CreateBufferView(dev.handle, &ci, pAllocator, pView);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& viewPtr = dev.bufferViews.addPtr(handle);
+	auto viewPtr = IntrusivePtr<BufferView>(new BufferView());
 	auto& view = *viewPtr;
 	view.dev = &dev;
 	view.objectType = VK_OBJECT_TYPE_BUFFER_VIEW;
-	view.handle = handle;
+	view.handle = *pView;
 	view.buffer = &buf;
 	view.ci = *pCreateInfo;
 
@@ -182,7 +206,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
 		view.buffer->views.push_back(&view);
 	}
 
-	*pView = castDispatch<VkBufferView>(dev, *viewPtr.wrapped());
+	*pView = castDispatch<VkBufferView>(view);
+	dev.bufferViews.mustEmplace(*pView, std::move(viewPtr));
+
 	return res;
 }
 
@@ -195,16 +221,16 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
 	}
 
 	auto& dev = getDevice(device);
-	VkBufferView handle;
+	IntrusivePtr<BufferView> ptr;
 
 	{
 		std::lock_guard lock(dev.mutex);
-		auto ptr = dev.bufferViews.mustMoveLocked(bufferView);
-		handle = ptr->handle;
+		ptr = dev.bufferViews.mustMoveLocked(bufferView);
+		bufferView = ptr->handle;
 		ptr->handle = {}; // mark as destroyed
 	}
 
-	dev.dispatch.DestroyBufferView(dev.handle, handle, pAllocator);
+	dev.dispatch.DestroyBufferView(dev.handle, bufferView, pAllocator);
 }
 
 } // namespace vil

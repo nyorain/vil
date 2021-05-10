@@ -127,8 +127,38 @@ const R* findChainInfo(const CI& ci) {
 	return nullptr;
 }
 
+template<VkStructureType SType>
+void* findChainInfo2(void* pNext) {
+	auto* link = static_cast<VkBaseOutStructure*>(pNext);
+	while(link) {
+		if(link->sType == SType) {
+			return static_cast<void*>(link);
+		}
+
+		link = static_cast<VkBaseOutStructure*>(link->pNext);
+	}
+
+	return nullptr;
+}
+
 std::unique_ptr<std::byte[]> copyChain(const void*& pNext);
 void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
+
+struct LocalChainCopy {
+	void* pNext {};
+	std::size_t totalSize {};
+
+	LocalChainCopy() = default;
+	~LocalChainCopy();
+
+	LocalChainCopy(LocalChainCopy&) = delete;
+	LocalChainCopy& operator=(LocalChainCopy&) = delete;
+
+	LocalChainCopy(LocalChainCopy&&) noexcept;
+	LocalChainCopy& operator=(LocalChainCopy&&) noexcept = delete;
+};
+
+LocalChainCopy copyChainLocal(const void* pNext);
 
 template<typename T>
 auto aliasCmd(T&& list) {

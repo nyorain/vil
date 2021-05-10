@@ -43,7 +43,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 		const VkFenceCreateInfo*                    pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkFence*                                    pFence) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto res = dev.dispatch.CreateFence(device, pCreateInfo, pAllocator, pFence);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -65,7 +65,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.fences.mustErase(fence);
 	dev.dispatch.DestroyFence(device, fence, pAllocator);
 }
@@ -82,7 +82,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 		VkDevice                                    device,
 		uint32_t                                    fenceCount,
 		const VkFence*                              pFences) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 
 	// Per spec, we can assume all associated payload to be finished.
 	// It's important we do this *before* resetting the fence since otherwise
@@ -107,7 +107,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
 		VkDevice                                    device,
 		VkFence                                     fence) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto& fenceD = dev.fences.get(fence);
 
 	VkResult res = dev.dispatch.GetFenceStatus(device, fence);
@@ -132,7 +132,7 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 		const VkFence*                              pFences,
 		VkBool32                                    waitAll,
 		uint64_t                                    timeout) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	VkResult res = dev.dispatch.WaitForFences(device, fenceCount, pFences, waitAll, timeout);
 
 	if(res == VK_SUCCESS || !waitAll) {
@@ -155,7 +155,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
 		const VkSemaphoreCreateInfo*                pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkSemaphore*                                pSemaphore) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto res = dev.dispatch.CreateSemaphore(device, pCreateInfo, pAllocator, pSemaphore);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -177,7 +177,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.semaphores.mustErase(semaphore);
 	dev.dispatch.DestroySemaphore(device, semaphore, pAllocator);
 }
@@ -188,7 +188,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
 		const VkEventCreateInfo*                    pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkEvent*                                    pEvent) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto res = dev.dispatch.CreateEvent(device, pCreateInfo, pAllocator, pEvent);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -210,7 +210,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyEvent(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.events.mustErase(event);
 	dev.dispatch.DestroyEvent(device, event, pAllocator);
 }
@@ -218,21 +218,21 @@ VKAPI_ATTR void VKAPI_CALL DestroyEvent(
 VKAPI_ATTR VkResult VKAPI_CALL GetEventStatus(
 		VkDevice                                    device,
 		VkEvent                                     event) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	return dev.dispatch.GetEventStatus(device, event);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL SetEvent(
 		VkDevice                                    device,
 		VkEvent                                     event) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	return dev.dispatch.SetEvent(device, event);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetEvent(
 		VkDevice                                    device,
 		VkEvent                                     event) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	return dev.dispatch.ResetEvent(device, event);
 }
 

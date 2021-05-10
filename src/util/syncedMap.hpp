@@ -16,40 +16,50 @@ struct HandlePtrFactory;
 template<typename T>
 struct WrappedHandle {
 	void* dispatch {};
-	T obj;
+	std::aligned_storage_t<sizeof(T), alignof(T)> obj_;
 
 	template<typename... Args>
-	WrappedHandle(Args&&... args) : obj(std::forward<Args>(args)...) {
+	WrappedHandle(Args&&... args) {
+		// This is important so that the loader can correctly access the
+		// dispatch table. That's why we use std::aligned_storage_t instead
+		// of directly holding the object.
 		static_assert(std::is_standard_layout_v<WrappedHandle<T>>);
+		new(&obj_) T(std::forward<Args>(args)...);
 	}
+
+	~WrappedHandle() {
+		obj().~T();
+	}
+
+	T& obj() { return *std::launder(reinterpret_cast<T*>(&obj_)); }
 };
 
 template<typename T, typename Deleter = std::default_delete<WrappedHandle<T>>>
 struct WrappedRefCount {
-	void inc(WrappedHandle<T>& wrapped) const noexcept { ++wrapped.obj.refCount; }
+	void inc(WrappedHandle<T>& wrapped) const noexcept { ++wrapped.obj().refCount; }
 	void dec(WrappedHandle<T>& wrapped) const noexcept {
-		if(--wrapped.obj.refCount == 0) {
+		if(--wrapped.obj().refCount == 0) {
 			Deleter()(&wrapped);
 		}
 	}
 };
 
 template<typename T>
-struct IntrusiveHandlePtr : HandledPtr<WrappedHandle<T>, WrappedRefCount<T>> {
+struct IntrusiveWrappedPtr : HandledPtr<WrappedHandle<T>, WrappedRefCount<T>> {
 	using Base = HandledPtr<WrappedHandle<T>, WrappedRefCount<T>>;
 	using Base::Base;
 
 	T* get() const noexcept {
 		auto ptr = Base::get();
-		return ptr ? &ptr->obj : nullptr;
+		return ptr ? &ptr->obj() : nullptr;
 	}
 
 	T* operator->() const noexcept {
-		return &Base::get()->obj;
+		return &Base::get()->obj();
 	}
 
 	T& operator*() const noexcept {
-		return Base::get()->obj;
+		return Base::get()->obj();
 	}
 
 	WrappedHandle<T>* wrapped() const noexcept {
@@ -58,21 +68,21 @@ struct IntrusiveHandlePtr : HandledPtr<WrappedHandle<T>, WrappedRefCount<T>> {
 };
 
 template<typename T>
-struct UniqueHandlePtr : std::unique_ptr<WrappedHandle<T>> {
+struct UniqueWrappedPtr : std::unique_ptr<WrappedHandle<T>> {
 	using Base = std::unique_ptr<WrappedHandle<T>>;
 	using Base::Base;
 
 	T* get() const noexcept {
 		auto ptr = Base::get();
-		return ptr ? &ptr->obj : nullptr;
+		return ptr ? &ptr->obj() : nullptr;
 	}
 
 	T* operator->() const noexcept {
-		return *get();
+		return get();
 	}
 
 	T& operator*() const noexcept {
-		return Base::get()->obj;
+		return Base::get()->obj();
 	}
 
 	WrappedHandle<T>* wrapped() const noexcept {
@@ -225,22 +235,6 @@ public:
 		return it->second;
 	}
 
-	// Pretty much only provided for shared ptr specialization.
-	/*
-	template<typename = void>
-	std::weak_ptr<T> getWeakPtrLocked(const K& key) {
-		auto it = map.find(key);
-		assert(it != map.end());
-		return std::weak_ptr(it->second);
-	}
-
-	template<typename = void>
-	std::weak_ptr<T> getWeakPtr(const K& key) {
-		std::shared_lock lock(*mutex);
-		return getWeakPtrLocked(key);
-	}
-	*/
-
 	template<typename = void>
 	P<T> findPtr(const K& key) {
 		static_assert(std::is_copy_constructible_v<P<T>>);
@@ -259,25 +253,47 @@ public:
 };
 
 template<typename T>
-struct HandlePtrFactory<UniqueHandlePtr<T>> {
+struct HandlePtrFactory<std::unique_ptr<T>> {
 	template<typename... Args>
-	static UniqueHandlePtr<T> create(Args&&... args) {
-		return UniqueHandlePtr<T>(new WrappedHandle<T>(std::forward<Args>(args)...));
+	static std::unique_ptr<T> create(Args&&... args) {
+		return std::make_unique<T>(std::forward<Args>(args)...);
 	}
 };
 
 template<typename T>
-struct HandlePtrFactory<IntrusiveHandlePtr<T>> {
+struct HandlePtrFactory<UniqueWrappedPtr<T>> {
 	template<typename... Args>
-	static IntrusiveHandlePtr<T> create(Args&&... args) {
-		return IntrusiveHandlePtr<T>(new WrappedHandle<T>(std::forward<Args>(args)...));
+	static UniqueWrappedPtr<T> create(Args&&... args) {
+		return UniqueWrappedPtr<T>(new WrappedHandle<T>(std::forward<Args>(args)...));
+	}
+};
+
+template<typename T>
+struct HandlePtrFactory<IntrusivePtr<T>> {
+	template<typename... Args>
+	static IntrusivePtr<T> create(Args&&... args) {
+		return IntrusivePtr<T>(new T(std::forward<Args>(args)...));
+	}
+};
+
+template<typename T>
+struct HandlePtrFactory<IntrusiveWrappedPtr<T>> {
+	template<typename... Args>
+	static IntrusiveWrappedPtr<T> create(Args&&... args) {
+		return IntrusiveWrappedPtr<T>(new WrappedHandle<T>(std::forward<Args>(args)...));
 	}
 };
 
 template<typename K, typename T>
-using SyncedUniqueUnorderedMap = SyncedUnorderedMap<K, T, UniqueHandlePtr>;
+using SyncedUniqueUnorderedMap = SyncedUnorderedMap<K, T, std::unique_ptr>;
 
 template<typename K, typename T>
-using SyncedIntrusiveUnorderedMap = SyncedUnorderedMap<K, T, IntrusiveHandlePtr>;
+using SyncedUniqueWrappedUnorderedMap = SyncedUnorderedMap<K, T, UniqueWrappedPtr>;
+
+template<typename K, typename T>
+using SyncedIntrusiveUnorderedMap = SyncedUnorderedMap<K, T, IntrusivePtr>;
+
+template<typename K, typename T>
+using SyncedIntrusiveWrappedUnorderedMap = SyncedUnorderedMap<K, T, IntrusiveWrappedPtr>;
 
 } // namespace vil

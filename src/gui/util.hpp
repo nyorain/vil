@@ -69,7 +69,7 @@ inline bool imGuiTextMultiline(const char* label, std::string& output) {
 	return ret;
 }
 
-inline void drawOffsetSize(const DescriptorBinding::BufferInfo& info) {
+inline void drawOffsetSize(const BufferDescriptor& info) {
 	if(info.range == VK_WHOLE_SIZE) {
 		if(info.buffer) {
 			dlg_assert(info.buffer->ci.size >= info.offset);

@@ -104,6 +104,7 @@ struct Device {
 	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
 	Swapchain* lastCreatedSwapchain {};
 
+	SyncedUniqueWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
 	SyncedUniqueUnorderedMap<VkPipeline, ComputePipeline> computePipes;
@@ -111,7 +112,6 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
 	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
-	SyncedUniqueUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
 	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
 	SyncedUniqueUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
@@ -158,94 +158,151 @@ Gui* getOverlayGui(Swapchain& swapchain);
 // Does not expect mutex to be locked
 void notifyDestruction(Device& dev, Handle& handle);
 
-template<typename H> struct HandleMapperT;
-template<typename H> using HandleMapper = typename HandleMapperT<H>::type;
+static constexpr auto enableHandleWrapping = false;
+template<typename H> struct HandleDesc;
 
-template<> struct HandleMapperT<VkImageView> { using type = ImageView; };
-template<> struct HandleMapperT<VkBufferView> { using type = BufferView; };
-template<> struct HandleMapperT<VkBuffer> { using type = Buffer; };
-template<> struct HandleMapperT<VkSampler> { using type = Sampler; };
-template<> struct HandleMapperT<VkDescriptorSet> { using type = DescriptorSet; };
-template<> struct HandleMapperT<VkCommandBuffer> { using type = CommandBuffer; };
-template<> struct HandleMapperT<VkDeviceMemory> { using type = DeviceMemory; };
-template<> struct HandleMapperT<VkDescriptorPool> { using type = DescriptorPool; };
-template<> struct HandleMapperT<VkDescriptorSetLayout> { using type = DescriptorSetLayout; };
-template<> struct HandleMapperT<VkDescriptorUpdateTemplate> { using type = DescriptorUpdateTemplate; };
-template<> struct HandleMapperT<VkPipelineLayout> { using type = PipelineLayout; };
+#define DefHandleDesc(VkHandle, OurHandle, devMap, isDispatchable, wrapDefault) \
+	template<> struct HandleDesc<VkHandle> { \
+		using type = OurHandle; \
+		static auto& map(Device& dev) { return dev.devMap; } \
+		static constexpr bool dispatchable = isDispatchable; \
+		static inline bool wrap = wrapDefault && enableHandleWrapping; \
+	}
 
-template<typename T> auto& getMap(Device& dev);
-template<> inline auto& getMap<VkDescriptorSet>(Device& dev) { return dev.descriptorSets; }
-template<> inline auto& getMap<VkCommandBuffer>(Device& dev) { return dev.commandBuffers; }
-template<> inline auto& getMap<VkImageView>(Device& dev) { return dev.imageViews; }
-template<> inline auto& getMap<VkImage>(Device& dev) { return dev.images; }
-template<> inline auto& getMap<VkSampler>(Device& dev) { return dev.samplers; }
-template<> inline auto& getMap<VkBuffer>(Device& dev) { return dev.buffers; }
-template<> inline auto& getMap<VkDeviceMemory>(Device& dev) { return dev.deviceMemories; }
-template<> inline auto& getMap<VkDescriptorPool>(Device& dev) { return dev.dsPools; }
-template<> inline auto& getMap<VkDescriptorSetLayout>(Device& dev) { return dev.dsLayouts; }
-template<> inline auto& getMap<VkDescriptorUpdateTemplate>(Device& dev) { return dev.dsuTemplates; }
-template<> inline auto& getMap<VkPipelineLayout>(Device& dev) { return dev.pipeLayouts; }
+DefHandleDesc(VkImageView, ImageView, imageViews, false, true);
+DefHandleDesc(VkBufferView, BufferView, bufferViews, false, true);
+DefHandleDesc(VkBuffer, Buffer, buffers, false, true);
+DefHandleDesc(VkSampler, Sampler, samplers, false, true);
+DefHandleDesc(VkDescriptorSet, DescriptorSet, descriptorSets, false, true);
+DefHandleDesc(VkDescriptorPool, DescriptorPool, dsPools, false, true);
+DefHandleDesc(VkDescriptorSetLayout, DescriptorSetLayout, dsLayouts, false, true);
+DefHandleDesc(VkDescriptorUpdateTemplate, DescriptorUpdateTemplate, dsuTemplates, false, true);
+DefHandleDesc(VkCommandPool, CommandPool, commandPools, false, true);
+DefHandleDesc(VkPipelineLayout, PipelineLayout, pipeLayouts, false, true);
 
-template<typename T> WrappedHandle<T>* castWrapped(std::uint64_t ptr) {
-	return reinterpret_cast<WrappedHandle<T>*>(static_cast<std::uintptr_t>(ptr));
+DefHandleDesc(VkCommandBuffer, CommandBuffer, commandBuffers, true, true);
+
+// TODO: enable wrapping for these as well
+DefHandleDesc(VkImage, Image, images, false, false);
+DefHandleDesc(VkDeviceMemory, DeviceMemory, deviceMemories, false, false);
+
+#undef DefHandleDesc
+
+template<> struct HandleDesc<VkDevice> {
+	using type = Device;
+	static constexpr bool dispatchable = true;
+	static inline bool wrap = false;
+};
+
+template<typename H> auto& unwrapWrapped(H handle) {
+	static_assert(HandleDesc<H>::dispatchable);
+	using T = typename HandleDesc<H>::type;
+	auto u = std::uintptr_t(handleToU64(handle));
+	return *reinterpret_cast<WrappedHandle<T>*>(u);
 }
 
-template<typename T, typename H> WrappedHandle<T>* castWrapped(H* ptr) {
-	return reinterpret_cast<WrappedHandle<T>*>(ptr);
-}
-
-template<typename H, typename T>
-H castDispatch(Device& dev, WrappedHandle<T>& ptr) {
-	dev.setDeviceLoaderData(dev.handle, static_cast<void*>(&ptr));
-	if constexpr(std::is_same_v<H, std::uint64_t>) {
-		return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&ptr));
+template<typename H> auto& unwrap(H handle) {
+	using T = typename HandleDesc<H>::type;
+	auto u = std::uintptr_t(handleToU64(handle));
+	if constexpr(HandleDesc<H>::dispatchable) {
+		return reinterpret_cast<WrappedHandle<T>*>(u)->obj();
 	} else {
-		return reinterpret_cast<H>(&ptr);
+		return *reinterpret_cast<T*>(u);
 	}
 }
 
+template<typename H, typename T>
+H castDispatch(Device& dev, WrappedHandle<T>& wrapped) {
+	static_assert(HandleDesc<H>::dispatchable);
+	static_assert(std::is_same_v<typename HandleDesc<H>::type, T>);
+
+	if(!HandleDesc<H>::wrap) {
+		if constexpr(std::is_same_v<T, CommandBuffer>) {
+			return wrapped.obj().handle();
+		} else {
+			return wrapped.obj().handle;
+		}
+	}
+
+	std::memcpy(&wrapped.dispatch, reinterpret_cast<void*>(dev.handle), sizeof(wrapped.dispatch));
+	// dev.setDeviceLoaderData(dev.handle, static_cast<void*>(&ptr));
+
+	return u64ToHandle<H>(reinterpret_cast<std::uintptr_t>(&wrapped));
+}
+
+template<typename H, typename T>
+H castDispatch(T& obj) {
+	static_assert(!HandleDesc<H>::dispatchable);
+	static_assert(std::is_same_v<typename HandleDesc<H>::type, T>);
+
+	if(!HandleDesc<H>::wrap) {
+		return obj.handle;
+	}
+
+	return u64ToHandle<H>(reinterpret_cast<std::uintptr_t>(&obj));
+}
+
 inline Device& getDevice(VkDevice handle) {
-	if(wrapObjects) {
-		return castWrapped<Device>(handle)->obj;
+	if(HandleDesc<VkDevice>::wrap) {
+		return unwrap(handle);
 	}
 
 	return getData<Device>(handle);
 }
 
-template<typename H> HandleMapper<H>& get(Device& dev, H handle) {
-	if(wrapObjects) {
-		return castWrapped<HandleMapper<H>>(handle)->obj;
+template<typename H> using MapHandle = typename HandleDesc<H>::type;
+
+template<typename H> MapHandle<H>& get(Device& dev, H handle) {
+	if(HandleDesc<H>::wrap) {
+		return unwrap(handle);
 	}
 
-	return getMap<H>(dev).get(handle);
+	return HandleDesc<H>::map(dev).get(handle);
 }
 
-template<typename H> HandleMapper<H>& get(VkDevice vkDev, H handle) {
-	if(wrapObjects) {
-		return castWrapped<HandleMapper<H>>(handle)->obj;
+template<typename H> MapHandle<H>& get(VkDevice vkDev, H handle) {
+	if(HandleDesc<H>::wrap) {
+		return unwrap(handle);
 	}
 
 	auto& dev = getData<Device>(vkDev);
-	return getMap<H>(dev).get(handle);
+	return HandleDesc<H>::map(dev).get(handle);
 }
 
-template<typename H> IntrusiveHandlePtr<HandleMapper<H>> getPtr(Device& dev, H handle) {
-	using OurHandle = HandleMapper<H>;
-	if(wrapObjects) {
-		return IntrusivePtr<OurHandle>(&castWrapped<OurHandle>(handle)->obj);
+
+template<typename H> auto getPtr(Device& dev, H handle) {
+	using OurHandle = MapHandle<H>;
+	if(HandleDesc<H>::wrap) {
+		// TODO: I guess dispatchable handles should never be retrieved
+		// like this in the first place but directly instead?
+		// Change this here (and in the function below)
+		// static_assert(!HandleDesc<H>::dispatchable);
+		if constexpr(HandleDesc<H>::dispatchable) {
+			auto u = std::uintptr_t(handleToU64(handle));
+			auto* wrapped = reinterpret_cast<WrappedHandle<OurHandle*>>(u);
+			return IntrusiveWrappedPtr<WrappedHandle<OurHandle>>(wrapped);
+		} else {
+			return IntrusivePtr<OurHandle>(&unwrap(handle));
+		}
 	}
 
-	return getMap<H>(dev).getPtr(handle);
+	return HandleDesc<H>::map(dev).getPtr(handle);
 }
 
-template<typename H> IntrusiveHandlePtr<HandleMapper<H>> getPtr(VkDevice vkDev, H handle) {
-	using OurHandle = HandleMapper<H>;
-	if(wrapObjects) {
-		return IntrusivePtr<OurHandle>(&castWrapped<OurHandle>(handle)->obj);
+template<typename H> auto getPtr(VkDevice vkDev, H handle) {
+	using OurHandle = MapHandle<H>;
+	if(HandleDesc<H>::wrap) {
+		if constexpr(HandleDesc<H>::dispatchable) {
+			auto u = std::uintptr_t(handleToU64(handle));
+			auto* wrapped = reinterpret_cast<WrappedHandle<OurHandle*>>(u);
+			return IntrusiveWrappedPtr<WrappedHandle<OurHandle>>(wrapped);
+		} else {
+			return IntrusivePtr<OurHandle>(&unwrap(handle));
+		}
 	}
 
-	auto& dev = getData<Device>(vkDev);
-	return getMap<H>(dev).getPtr(handle);
+	auto& dev = getDevice(vkDev);
+	return HandleDesc<H>::map(dev).getPtr(handle);
 }
 
 // Util for naming internal handles.

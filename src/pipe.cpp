@@ -4,6 +4,7 @@
 #include <shader.hpp>
 #include <ds.hpp>
 #include <data.hpp>
+#include <threadContext.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <dlg/dlg.hpp>
@@ -285,7 +286,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
 	ZoneScoped;
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 
 	// We can't create the pipelines one-by-one since that would mess
 	// with the derivation fields.
@@ -295,15 +296,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		span<const VkPipelineShaderStageCreateInfo> stages;
 	};
 
-	std::vector<VkGraphicsPipelineCreateInfo> ncis;
-	std::vector<PreData> pres;
+	auto ncis = LocalVector<VkGraphicsPipelineCreateInfo>(createInfoCount);
+	auto pres = LocalVector<PreData>(createInfoCount);
 	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
-		auto& nci = ncis.emplace_back();
+		auto& nci = ncis[i];
 		nci = pCreateInfos[i];
+		nci.layout = get(dev, nci.layout).handle;
 
-		auto& pre = pres.emplace_back();
+		auto& pre = pres[i];
 
 		// transform feedback isn't supported for multiview graphics pipelines
 		auto& rp = dev.renderPasses.get(nci.renderPass);
@@ -359,7 +361,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 	{
 		ZoneScopedN("dispatch");
-		auto res = dev.dispatch.CreateGraphicsPipelines(device, pipelineCache,
+		auto res = dev.dispatch.CreateGraphicsPipelines(dev.handle, pipelineCache,
 			u32(ncis.size()), ncis.data(), pAllocator, pPipelines);
 		if (res != VK_SUCCESS) {
 			return res;
@@ -375,9 +377,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		pipe.handle = pPipelines[i];
-		pipe.layout = dev.pipeLayouts.getPtr(pci.layout);
+		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
 		pipe.renderPass = dev.renderPasses.get(pci.renderPass).desc;
 		pipe.subpass = pci.subpass;
+
+		pci.layout = pipe.layout->handle;
 
 		auto& subpassInfo = pipe.renderPass->subpasses[pipe.subpass];
 
@@ -474,12 +478,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
 	ZoneScoped;
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
+
+	auto ncis = LocalVector<VkComputePipelineCreateInfo>(createInfoCount);
+	for(auto i = 0u; i < createInfoCount; ++i) {
+		auto& nci = ncis[i];
+		nci = pCreateInfos[i];
+		nci.layout = get(device, nci.layout).handle;
+	}
 
 	{
 		ZoneScopedN("dispatch");
-		auto res = dev.dispatch.CreateComputePipelines(device, pipelineCache,
-			createInfoCount, pCreateInfos, pAllocator, pPipelines);
+		auto res = dev.dispatch.CreateComputePipelines(dev.handle, pipelineCache,
+			createInfoCount, ncis.data(), pAllocator, pPipelines);
 		if(res != VK_SUCCESS) {
 			return res;
 		}
@@ -509,12 +520,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipeline(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 
 	auto count = dev.graphicsPipes.erase(pipeline) + dev.computePipes.erase(pipeline);
 	dlg_assert(count == 1);
 
-	dev.dispatch.DestroyPipeline(device, pipeline, pAllocator);
+	dev.dispatch.DestroyPipeline(dev.handle, pipeline, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
@@ -528,24 +539,36 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 	// See design.md on allocators.
 	(void) pAllocator;
 
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.CreatePipelineLayout(device, pCreateInfo, nullptr, pPipelineLayout);
+	auto& dev = getDevice(device);
+
+	auto dslHandles = LocalVector<VkDescriptorSetLayout>(pCreateInfo->setLayoutCount);
+	auto dsls = std::vector<IntrusivePtr<DescriptorSetLayout>>(pCreateInfo->setLayoutCount);
+	for(auto i = 0u; i < pCreateInfo->setLayoutCount; ++i) {
+		dsls[i] = getPtr(dev, pCreateInfo->pSetLayouts[i]);
+		dslHandles[i] = dsls[i]->handle;
+	}
+
+	auto nci = *pCreateInfo;
+	nci.pSetLayouts = dslHandles.data();
+
+	auto res = dev.dispatch.CreatePipelineLayout(dev.handle, &nci, nullptr, pPipelineLayout);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& pl = dev.pipeLayouts.add(*pPipelineLayout);
+	auto plPtr = IntrusivePtr<PipelineLayout>(new PipelineLayout());
+	auto& pl = *plPtr;
 	pl.objectType = VK_OBJECT_TYPE_PIPELINE_LAYOUT;
 	pl.dev = &dev;
 	pl.handle = *pPipelineLayout;
-
-	for(auto i = 0u; i < pCreateInfo->setLayoutCount; ++i) {
-		pl.descriptors.push_back(dev.dsLayouts.getPtr(pCreateInfo->pSetLayouts[i]));
-	}
+	pl.descriptors = std::move(dsls);
 
 	for(auto i = 0u; i < pCreateInfo->pushConstantRangeCount; ++i) {
 		pl.pushConstants.push_back(pCreateInfo->pPushConstantRanges[i]);
 	}
+
+	*pPipelineLayout = castDispatch<VkPipelineLayout>(pl);
+	dev.pipeLayouts.mustEmplace(*pPipelineLayout, std::move(plPtr));
 
 	return res;
 }
@@ -558,7 +581,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	dev.pipeLayouts.mustErase(pipelineLayout);
 
 	// NOTE: We intenntionally don't destruct the handle here, handle might

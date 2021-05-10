@@ -30,6 +30,7 @@
 #include <stdexcept>
 #include <type_traits> // for enable_if_t, declval, is_convertible, inte...
 #include <utility>
+#include <cassert>
 
 namespace nytl {
 
@@ -227,6 +228,7 @@ public:
     }
     constexpr bool empty() const noexcept { return size() == 0; }
     constexpr reference operator[](index_type idx) const {
+		assert(idx < size());
         return data()[idx];
     }
 

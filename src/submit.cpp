@@ -21,7 +21,7 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 
 	auto& dev = *subm.dev;
 
-	auto& cb = dev.commandBuffers.get(vkcb);
+	auto& cb = getCommandBuffer(vkcb);
 	auto& scb = dst.cbs.emplace_back();
 	scb.cb = &cb;
 
@@ -35,12 +35,15 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 		// update the descriptor state of the record
 		// TODO, PERF: we only need to do this when update_after_bind
 		// descriptors in the record changed since the last submission
-		rec.lastDescriptorState.states.clear();
-		for(auto& pair : rec.handles) {
-			auto& handle = nonNull(pair.second.handle);
-			if(handle.objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-				auto& ds = static_cast<const DescriptorSet&>(handle);
-				rec.lastDescriptorState.states[static_cast<void*>(&handle)] = ds.state;
+		{
+			ZoneScopedN("Copy Descriptor State");
+			rec.lastDescriptorState.states.clear();
+			for(auto& pair : rec.handles) {
+				auto& handle = nonNull(pair.second.handle);
+				if(handle.objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+					auto& ds = static_cast<const DescriptorSet&>(handle);
+					rec.lastDescriptorState.states[static_cast<void*>(&handle)] = ds.state;
+				}
 			}
 		}
 
@@ -48,8 +51,10 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 		// When the CommandRecord doesn't already have a group (from
 		// previous submission), try to find an existing group
 		// that matches this submission.
+		/*
 		float best = -1.0;
 		if(!rec.group) {
+			ZoneScopedN("Find group");
 			auto& qfam = dev.queueFamilies[subm.queue->family];
 			for(auto& qgroup : qfam.commandGroups) {
 				// TODO: make configurable? This determines how
@@ -92,6 +97,7 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 		}
 
 		dlg_assert(rec.group);
+		*/
 
 		// potentially hook command buffer
 		if(dev.commandHook) {
@@ -492,6 +498,7 @@ void postProcessLocked(QueueSubmitter& subm) {
 			}
 
 			// we already set the command group before, look above
+			/*
 			dlg_assert(recPtr->group);
 
 			if(recPtr->group->lastRecord) {
@@ -505,6 +512,7 @@ void postProcessLocked(QueueSubmitter& subm) {
 			// from submission to submission, e.g. when camera is
 			// looking around.
 			recPtr->group->desc = recPtr->desc;
+			*/
 		}
 	}
 
@@ -518,7 +526,7 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 	// can potentially write the handle. Could track
 	// during recording and check below in ds refs.
 
-	dlg_assert(handle.dev->mutex.owned());
+	vil_assert_owned(handle.dev->mutex);
 
 	const Image* img = nullptr;
 	const Buffer* buf = nullptr;
@@ -533,40 +541,29 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 		auto& rec = *cb->lastRecordLocked();
 		if(handle.refRecords.find(&rec) != handle.refRecords.end()) {
 			return true;
-			break;
 		}
 
-		if(img) {
-			for(auto* view : img->views) {
-				for(auto& ds : view->descriptors) {
-					dlg_assert(ds.state);
-					if(!ds.state->ds) {
-						continue;
+		for(auto& pair : rec.lastDescriptorState.states) {
+			auto& state = *pair.second;
+			for(auto& binding : state.layout->bindings) {
+				auto dsCat = DescriptorCategory(binding.descriptorType);
+				if(img && dsCat == DescriptorCategory::image) {
+					for(auto& elem : images(state, binding.binding)) {
+						if(elem.imageView && elem.imageView->img == img) {
+							return true;
+						}
 					}
-
-					// TODO: could check here if it is bound as writeable image
-					if(ds.state->ds->refRecords.find(&rec) != ds.state->ds->refRecords.end()) {
-						return true;
+				} else if(buf && dsCat == DescriptorCategory::buffer) {
+					for(auto& elem : buffers(state, binding.binding)) {
+						if(elem.buffer && elem.buffer.get() == buf) {
+							return true;
+						}
 					}
 				}
+
+				// NOTE: we don't have to care for buffer views as they
+				// are always readonly.
 			}
-		}
-
-		if(buf) {
-			for(auto& ds : buf->descriptors) {
-				dlg_assert(ds.state);
-				if(!ds.state->ds) {
-					continue;
-				}
-
-				// TODO: could check here if it is bound as writeable buffer
-				if(ds.state->ds->refRecords.find(&rec) != ds.state->ds->refRecords.end()) {
-					return true;
-				}
-			}
-
-			// NOTE: we don't have to care for buffer views as they
-			// are always readonly.
 		}
 	}
 

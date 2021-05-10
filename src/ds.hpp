@@ -55,7 +55,7 @@ struct DescriptorSetLayout : DeviceHandle {
 		// descriptorSet, just use binding.size() to account for variable count bindings.
 		u32 descriptorCount;
 		VkShaderStageFlags stageFlags;
-		std::unique_ptr<IntrusiveHandlePtr<Sampler>[]> immutableSamplers;
+		std::unique_ptr<IntrusivePtr<Sampler>[]> immutableSamplers;
 		VkDescriptorBindingFlags flags; // for descriptor indexing
 	};
 
@@ -72,19 +72,18 @@ bool compatible(const DescriptorSetLayout&, const DescriptorSetLayout& b);
 
 // Information about a single binding in a DescriptorSet.
 struct ImageDescriptor {
-	IntrusiveHandlePtr<ImageView> imageView;
-	IntrusiveHandlePtr<Sampler> sampler; // even stored here if immutable in layout
+	IntrusivePtr<ImageView> imageView;
+	IntrusivePtr<Sampler> sampler; // even stored here if immutable in layout
 	VkImageLayout layout {};
 };
 
 struct BufferDescriptor {
-	IntrusiveHandlePtr<Buffer> buffer;
+	IntrusivePtr<Buffer> buffer;
 	VkDeviceSize offset {};
 	VkDeviceSize range {};
 };
 
-// for bufer views, we simply store IntrusivePtr<BufferView>
-using BufferViewDescriptor = IntrusiveHandlePtr<BufferView>;
+using BufferViewDescriptor = IntrusivePtr<BufferView>;
 
 // State of a descriptor set. Disconnected from the DescriptorSet itself
 // since for submission, we want to know the state of the descriptor at
@@ -109,17 +108,17 @@ struct DescriptorSetState {
 	DescriptorSet* ds {};
 
 	// The layout associated with this state. Always valid.
-	IntrusiveHandlePtr<DescriptorSetLayout> layout {};
+	IntrusivePtr<DescriptorSetLayout> layout {};
 
-	u32 refCount {}; // intrusive ref count, protected by mutex
-	Mutex mutex;
+	std::atomic<u32> refCount {}; // intrusive reference count
+	TracyLockable(Mutex, mutex)
 };
 
 using DescriptorSetStatePtr = HandledPtr<DescriptorSetState, DescriptorSetState::PtrHandler>;
 
 u32 descriptorCount(const DescriptorSetState&, unsigned binding);
 
-// NOTEwhile retrieving the span itself does not need to look the state's
+// NOTE: while retrieving the span itself does not need to lock the state's
 // mutex. The caller must manually synchronize access to the bindings by locking
 // the state's mutex.
 span<BufferDescriptor> buffers(DescriptorSetState&, unsigned binding);
@@ -128,14 +127,6 @@ span<ImageDescriptor> images(DescriptorSetState&, unsigned binding);
 span<const ImageDescriptor> images(const DescriptorSetState&, unsigned binding);
 span<BufferViewDescriptor> bufferViews(DescriptorSetState&, unsigned binding);
 span<const BufferViewDescriptor> bufferViews(const DescriptorSetState&, unsigned binding);
-
-// b: binding, e: element
-BufferDescriptor& buffer(DescriptorSetState&, unsigned b, unsigned e);
-const BufferDescriptor& buffer(const DescriptorSetState&, unsigned b, unsigned e);
-ImageDescriptor& image(DescriptorSetState&, unsigned b, unsigned e);
-const ImageDescriptor& image(const DescriptorSetState&, unsigned b, unsigned e);
-BufferViewDescriptor& bufferView(DescriptorSetState&, unsigned b, unsigned e);
-const BufferViewDescriptor& bufferView(const DescriptorSetState&, unsigned b, unsigned e);
 
 // Vulkan descriptor set handle
 struct DescriptorSet : DeviceHandle {

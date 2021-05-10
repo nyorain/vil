@@ -111,10 +111,12 @@ CommandRecord::~CommandRecord() {
 	ZoneScoped;
 	std::lock_guard lock(dev->mutex);
 
+	/*
 	if(group) {
 		auto count = group->aliveRecords.erase(this);
 		dlg_assertm(count, "CommandRecord not found in its group");
 	}
+	*/
 
 	// remove cb from all referenced resources
 	auto removeFromResource = [&](auto& res) {

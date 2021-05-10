@@ -142,13 +142,13 @@ struct Mutex {
 	}
 };
 
-bool owned(const Mutex& m) { return m.owned(); }
-bool owned(const SharedMutex& m) { return m.owned(); }
-bool ownedShared(const SharedMutex& m) { return m.ownedShared(); }
+inline bool owned(const Mutex& m) { return m.owned(); }
+inline bool owned(const SharedMutex& m) { return m.owned(); }
+inline bool ownedShared(const SharedMutex& m) { return m.ownedShared(); }
 
-bool owned(const tracy::Lockable<Mutex>& m) { return m.inner().owned(); }
-bool owned(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().owned(); }
-bool ownedShared(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().ownedShared(); }
+inline bool owned(const tracy::Lockable<Mutex>& m) { return m.inner().owned(); }
+inline bool owned(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().owned(); }
+inline bool ownedShared(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().ownedShared(); }
 
 #define vil_assert_owned(x) dlg_assert(owned(x))
 #define vil_assert_not_owned(x) dlg_assert(!owned(x))

@@ -108,7 +108,7 @@ void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
 }
 
 void checkPendingSubmissionsLocked(Device& dev) {
-	dlg_assert(dev.mutex.owned());
+	vil_assert_owned(dev.mutex);
 
 	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
 		auto& subm = *it;
@@ -254,7 +254,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue vkQueue) {
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	VkResult res;
 
 	{

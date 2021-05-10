@@ -45,7 +45,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		const VkSwapchainCreateInfoKHR*             pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkSwapchainKHR*                             pSwapchain) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto* platform = findData<Platform>(pCreateInfo->surface);
 
 	// It's important we *first* destroy our image objects coming
@@ -174,7 +174,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		return;
 	}
 
-	auto& devd = getData<Device>(device);
+	auto& devd = getDevice(device);
 	devd.swapchains.mustErase(swapchain);
 	devd.dispatch.DestroySwapchainKHR(device, swapchain, pAllocator);
 }

@@ -1,6 +1,8 @@
 #include <memory.hpp>
 #include <device.hpp>
 #include <data.hpp>
+#include <image.hpp>
+#include <buffer.hpp>
 #include <util/util.hpp>
 
 namespace vil {
@@ -60,18 +62,41 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 		const VkMemoryAllocateInfo*                 pAllocateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkDeviceMemory*                             pMemory) {
-	auto& dev = getData<Device>(device);
-	auto res = dev.dispatch.AllocateMemory(device, pAllocateInfo, pAllocator, pMemory);
+	auto& dev = getDevice(device);
+
+	auto chainCopy = copyChainLocal(pAllocateInfo->pNext);
+	auto allocInfo = *pAllocateInfo;
+	allocInfo.pNext = chainCopy.pNext;
+
+	// unwrap handles in VkMemoryDedicatedAllocateInfo
+	auto* dedicatedv = findChainInfo2<VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO>(chainCopy.pNext);
+	if(dedicatedv) {
+		auto* dedicated = static_cast<VkMemoryDedicatedAllocateInfo*>(dedicatedv);
+		dlg_assert(!dedicated->buffer || !dedicated->image);
+		if(dedicated->buffer) {
+			auto& buf = get(dev, dedicated->buffer);
+			dedicated->buffer = buf.handle;
+		} else if(dedicated->image) {
+			auto& img = get(dev, dedicated->image);
+			dedicated->image = img.handle;
+		}
+	}
+
+	auto res = dev.dispatch.AllocateMemory(dev.handle, &allocInfo, pAllocator, pMemory);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& memory = dev.deviceMemories.add(*pMemory);
+	auto memPtr = std::make_unique<DeviceMemory>();
+	auto& memory = *memPtr;
 	memory.objectType = VK_OBJECT_TYPE_DEVICE_MEMORY;
 	memory.dev = &dev;
 	memory.handle = *pMemory;
 	memory.typeIndex = pAllocateInfo->memoryTypeIndex;
 	memory.size = pAllocateInfo->allocationSize;
+
+	*pMemory = castDispatch<VkDeviceMemory>(memory);
+	dev.deviceMemories.mustEmplace(memory.handle, std::move(memPtr));
 
 	return res;
 }
@@ -84,9 +109,9 @@ VKAPI_ATTR void VKAPI_CALL FreeMemory(
 		return;
 	}
 
-	auto& dev = getData<Device>(device);
-	dev.deviceMemories.mustErase(memory);
-	dev.dispatch.FreeMemory(device, memory, pAllocator);
+	auto& dev = getDevice(device);
+	auto handle = dev.deviceMemories.mustMove(memory)->handle;
+	dev.dispatch.FreeMemory(dev.handle, handle, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
@@ -96,7 +121,7 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 		VkDeviceSize                                size,
 		VkMemoryMapFlags                            flags,
 		void**                                      ppData) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto res = dev.dispatch.MapMemory(device, memory, offset, size, flags, ppData);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -113,7 +138,7 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 VKAPI_ATTR void VKAPI_CALL UnmapMemory(
 		VkDevice                                    device,
 		VkDeviceMemory                              memory) {
-	auto& dev = getData<Device>(device);
+	auto& dev = getDevice(device);
 	auto& mem = dev.deviceMemories.get(memory);
 
 	mem.map = nullptr;

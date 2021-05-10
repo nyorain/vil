@@ -772,25 +772,20 @@ void CommandViewer::displayDs(Draw& draw) {
 		return;
 	}
 
-	auto bindings = vil::bindings(state, bindingID);
-	if(bindings.empty()) {
-		ImGui::Text("Empty binding, no elements");
-		dlg_warn("Empty binding? Shouldn't happen");
-		return;
-	}
-
+	auto bindingCount = descriptorCount(state, bindingID);
 	auto& elemID = viewData_.ds.elem;
-	if(optSliderRange("Element", elemID, bindings.size())) {
+	if(optSliderRange("Element", elemID, bindingCount)) {
 		updateHook();
 		state_ = {};
 	}
 
-	if(elemID >= bindings.size()) {
+	if(elemID >= bindingCount) {
 		ImGui::Text("Element not bound");
 		dlg_warn("Element not bound? Shouldn't happen");
 		return;
 	}
 
+	/*
 	auto& elem = bindings[elemID];
 	if(!elem.valid) {
 		ImGui::Text("Binding element not valid");
@@ -798,6 +793,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		// dlg_warn("Binding element not valid? Shouldn't happen");
 		return;
 	}
+	*/
 
 	auto& bindingLayout = state.layout->bindings[bindingID];
 	auto dsType = bindingLayout.descriptorType;
@@ -813,10 +809,11 @@ void CommandViewer::displayDs(Draw& draw) {
 		// TODO: take dynamic offset into account for dynamic bufs
 
 		// general info
-		auto& srcBuf = nonNull(elem.bufferInfo.buffer);
+		auto& elem = buffers(state, bindingID)[elemID];
+		auto& srcBuf = nonNull(elem.buffer);
 		refButton(gui, srcBuf);
 		ImGui::SameLine();
-		drawOffsetSize(elem.bufferInfo);
+		drawOffsetSize(elem);
 
 		// interpret content
 		if(!state_) {
@@ -868,16 +865,18 @@ void CommandViewer::displayDs(Draw& draw) {
 	// == Sampler ==
 	if(needsSampler(dsType)) {
 		if(bindingLayout.immutableSamplers) {
-			refButtonExpect(gui, bindingLayout.immutableSamplers[elemID]);
+			refButtonExpect(gui, bindingLayout.immutableSamplers[elemID].get());
 		} else {
-			refButtonExpect(gui, elem.imageInfo.sampler);
+			auto& elem = images(state, bindingID)[elemID];
+			refButtonExpect(gui, elem.sampler.get());
 		}
 	}
 
 	// == Image ==
 	if(needsImageView(dsType)) {
 		// general info
-		auto& imgView = nonNull(elem.imageInfo.imageView);
+		auto& elem = images(state, bindingID)[elemID];
+		auto& imgView = nonNull(elem.imageView);
 		refButton(gui, imgView);
 
 		ImGui::SameLine();
@@ -888,7 +887,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
 
 		if(needsImageLayout(dsType)) {
-			imGuiText("Layout: {}", vk::name(elem.imageInfo.layout));
+			imGuiText("Layout: {}", vk::name(elem.layout));
 		}
 
 		// content
