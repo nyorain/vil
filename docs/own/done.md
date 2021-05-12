@@ -1,3 +1,28 @@
+- [x] make sure the environment variables for overlays/window creation work
+      as specified in readme everywhere
+- [x] resource viewer: we don't know which handle is currently selected
+      (in the window on the left), can get confusing when they don't have names.
+	  Should probably be an ImGui::Selectable (that stays selected) instead
+	  of a button
+- [x] remove CommandGroups? Just rely on command matching instead?
+      figure out how to properly do matching across command buffer
+	  boundaries; taking the context - the position inside a frame - into account
+- [x] currently command groups *interfer* with our new, improved command matching
+      since it may not recognize two records as being in the same group
+	  when they should be (and we would find a perfect command match).
+	  Another point for removing them in their current form; as a requirement
+	  for command matching
+	  {yep, just removed them}
+- [x] make sure we fulfill multithreading requirements for
+      VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT and friends
+	  {should work with out current DescriptorSet, State separation}
+- [x] (important) the way we copy/modify descriptor set states might have
+      a data race at the moment. When copying, we might try to increase
+	  the reference count of an already destroyed State object (when it is
+	  currently being replaced?)
+- [x] (important) the way we currently copy vectors of IntrusivePtr handles
+      outside the lock (e.g. in Gui) to make they don't get destroyed inside
+	  isn't threadsafe
 - [x] {high prio} the many shared locks when recording a cb can be harmful as well.
       We could get around this when wrapping handles, should probably
 	  look into that eventually (maybe allow to switch dynamically at

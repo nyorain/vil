@@ -221,9 +221,7 @@ struct CommandRecord {
 	// since the command buffers can be reused by the application and
 	// we only reference the CommandRecord objects, don't copy them.
 	CommandAllocList<IntrusivePtr<CommandRecord>> secondaries;
-
 	CommandBufferDesc desc;
-	// CommandBufferGroup* group {};
 
 	// descriptor state at the last submission of this command
 	// TODO: really always copy this? This is kinda costly, we will likely
@@ -243,6 +241,10 @@ struct CommandRecord {
 	FinishPtr<CommandHookRecord> hook;
 
 	CommandRecord(CommandBuffer& cb);
+
+	// NOTE: destructor expects that dev.mutex is locked.
+	// This might seem weird but since access to CommandRecord references
+	// is inherently synchronized by dev.mutex, it's the easiest way.
 	~CommandRecord();
 };
 

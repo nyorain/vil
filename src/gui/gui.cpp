@@ -1092,21 +1092,6 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	FrameMark;
 
 	makeImGuiCurrent();
-
-	// TODO: hacky but we have to keep the record alive, making sure
-	// it's not destroyed inside the lock. Might need more here for correctness.
-	// Should probably come up with better mechanism.
-	auto keepAliveRec0 = tabs_.cb.record_;
-	auto keepAliveRec1 = tabs_.cb.commandViewer_.record_;
-	auto keepAliveState = tabs_.cb.commandViewer_.state_;
-	auto keepAliveBatches = tabs_.cb.records_;
-	// UGH OUCHIE: this is also terrible performance-wise, we need to
-	// approach this differently.
-	auto keepAliveHookRecords = dev().commandHook->completed;
-	auto keepAliveDsSnapshots0 = tabs_.cb.dsState_;
-	auto keepAliveDsSnapshots1 = tabs_.cb.commandViewer_.dsState_;
-	auto keepAliveDsSnapshots2 = dev().commandHook->dsState();
-
 	Draw* foundDraw {};
 
 	// find a free draw object
@@ -1152,6 +1137,15 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 
 	VkResult res;
 
+	// TODO: hacky but we have to keep the records alive, making sure
+	// it's not destroyed inside the lock. Might need more here for correctness.
+	// Should probably come up with better mechanism.
+	auto keepAliveBatches = tabs_.cb.records_;
+	std::vector<IntrusivePtr<CommandRecord>> keepAliveRecs {
+		tabs_.cb.record_,
+		tabs_.cb.commandViewer_.record_,
+	};
+
 	{
 		// Important we already lock this mutex here since we need to make
 		// sure no new submissions are done by application while we process
@@ -1169,6 +1163,14 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			}
 
 			++it; // already increment to next one so we can't miss it
+		}
+
+		// TODO UGH OUCHIE: related to the hack of keeping records alive
+		// mentioned above. Yes, this is also terrible, even more so.
+		// But we need to make sure they are not destructed (via shared refCount
+		// decrease) while we hold the lock.
+		for(auto& completed : dev().commandHook->completed) {
+			keepAliveRecs.push_back(completed.record);
 		}
 
 		this->draw(draw, info.fullscreen);

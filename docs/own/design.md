@@ -333,7 +333,9 @@ fairly complicated.
    Ugh. Re-implementing that logic in compute shaders is a bad idea.
    We likely just need to use transform feedback here.
 
-TODO: investigate vkCmdDrawIndirectByteCountEXT, might be useful for us.
+We don't really need vkCmdDrawIndirectByteCountEXT, we all the extra
+information this provides. This might change when we support tessellation
+and geometry shaders.
 
 # Submission synchronization
 

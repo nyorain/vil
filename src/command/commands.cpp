@@ -172,7 +172,6 @@ std::vector<const Command*> displayCommands(const Command* cmd,
 	return ret;
 }
 
-
 // Command
 std::vector<const Command*> Command::display(const Command* sel, TypeFlags typeFlags) const {
 	if(!(typeFlags & this->type())) {
@@ -351,6 +350,13 @@ struct Matcher {
 	static Matcher noMatch() { return {0.f, -1.f}; }
 };
 
+bool operator==(const VkImageSubresourceLayers& a, const VkImageSubresourceLayers& b) {
+	return a.aspectMask == b.aspectMask &&
+		a.baseArrayLayer == b.baseArrayLayer &&
+		a.layerCount == b.layerCount &&
+		a.mipLevel == b.mipLevel;
+}
+
 template<typename T>
 void add(Matcher& m, const T& a, const T& b, float weight = 1.0) {
 	m.total += weight;
@@ -358,9 +364,106 @@ void add(Matcher& m, const T& a, const T& b, float weight = 1.0) {
 }
 
 template<typename T>
+void addMemcmp(Matcher& m, const T& a, const T& b, float weight = 1.0) {
+	m.total += weight;
+	m.match += std::memcmp(&a, &b, sizeof(T)) == 0 ? weight : 0.f;
+}
+
+template<typename T>
 void addNonNull(Matcher& m, T* a, T* b, float weight = 1.0) {
 	m.total += weight;
 	m.match += (a == b && a != nullptr) ? weight : 0.f;
+}
+
+float eval(const Matcher& m) {
+	dlg_assertm(m.match <= m.total, "match {}, total {}", m.match, m.total);
+	return m.total == 0.f ? 1.f : m.match / m.total;
+}
+
+float match(const VkBufferCopy2KHR& a, const VkBufferCopy2KHR& b) {
+	Matcher m;
+	add(m, a.size, b.size);
+	add(m, a.srcOffset, b.srcOffset, 0.2);
+	add(m, a.dstOffset, b.dstOffset, 0.2);
+	return eval(m);
+}
+
+float match(const VkImageCopy2KHR& a, const VkImageCopy2KHR& b) {
+	Matcher m;
+	addMemcmp(m, a.dstOffset, b.dstOffset);
+	addMemcmp(m, a.srcOffset, b.srcOffset);
+	addMemcmp(m, a.extent, b.extent);
+	add(m, a.dstSubresource, b.dstSubresource);
+	add(m, a.srcSubresource, b.srcSubresource);
+
+	return eval(m);
+}
+
+float match(const VkImageBlit2KHR& a, const VkImageBlit2KHR& b) {
+	Matcher m;
+	add(m, a.srcSubresource, b.srcSubresource);
+	add(m, a.dstSubresource, b.dstSubresource);
+	addMemcmp(m, a.srcOffsets, b.srcOffsets);
+	addMemcmp(m, a.dstOffsets, b.dstOffsets);
+
+	return eval(m);
+}
+
+float match(const VkImageResolve2KHR& a, const VkImageResolve2KHR& b) {
+	Matcher m;
+	add(m, a.srcSubresource, b.srcSubresource);
+	add(m, a.dstSubresource, b.dstSubresource);
+	addMemcmp(m, a.srcOffset, b.srcOffset);
+	addMemcmp(m, a.dstOffset, b.dstOffset);
+	addMemcmp(m, a.extent, b.extent);
+
+	return eval(m);
+}
+
+float match(const VkBufferImageCopy2KHR& a, const VkBufferImageCopy2KHR& b) {
+	Matcher m;
+	add(m, a.bufferImageHeight, b.bufferImageHeight);
+	add(m, a.bufferOffset, b.bufferOffset);
+	add(m, a.bufferRowLength, b.bufferRowLength);
+	addMemcmp(m, a.imageOffset, b.imageOffset);
+	addMemcmp(m, a.imageExtent, b.imageExtent);
+	add(m, a.imageSubresource, b.imageSubresource);
+	return eval(m);
+}
+
+float match(const VkImageSubresourceRange& a, const VkImageSubresourceRange& b) {
+	Matcher m;
+	add(m, a.aspectMask, b.aspectMask);
+	add(m, a.baseArrayLayer, b.baseArrayLayer);
+	add(m, a.baseMipLevel, b.baseMipLevel);
+	add(m, a.levelCount, b.levelCount);
+	return eval(m) > 0.99f ? 1.f : 0.f;
+}
+
+float match(const VkClearAttachment& a, const VkClearAttachment& b) {
+	if(a.aspectMask != b.aspectMask || a.colorAttachment != b.colorAttachment) {
+		return 0.f;
+	}
+
+	return std::memcmp(&a.clearValue, &b.clearValue, sizeof(a.clearValue)) == 0 ? 1.f : 0.5f;
+}
+
+float match(const VkClearRect& a, const VkClearRect& b) {
+	Matcher m;
+	add(m, a.rect.offset.x, b.rect.offset.x);
+	add(m, a.rect.offset.y, b.rect.offset.y);
+	add(m, a.rect.extent.width, b.rect.extent.width);
+	add(m, a.rect.extent.height, b.rect.extent.height);
+	add(m, a.baseArrayLayer, b.baseArrayLayer);
+	add(m, a.layerCount, b.layerCount);
+	return eval(m);
+}
+
+float match(const BoundVertexBuffer& a, const BoundVertexBuffer& b) {
+	Matcher m;
+	addNonNull(m, a.buffer, b.buffer);
+	add(m, a.offset, b.offset, 0.1);
+	return eval(m);
 }
 
 bool operator==(const VkMemoryBarrier& a, const VkMemoryBarrier& b) {
@@ -422,6 +525,7 @@ bool operator==(const VkBufferMemoryBarrier& a, const VkBufferMemoryBarrier& b) 
 		a.size == b.size;
 }
 
+
 template<typename T>
 void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 	if(a.empty() && b.empty()) {
@@ -453,9 +557,22 @@ void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 	m.total += weight;
 }
 
-float eval(const Matcher& m) {
-	dlg_assertm(m.match <= m.total, "match {}, total {}", m.match, m.total);
-	return m.total == 0.f ? 1.f : m.match / m.total;
+template<typename T>
+void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
+	m.match += weight;
+
+	if(a.size() != b.size()) {
+		return;
+	}
+
+	if(a.empty()) {
+		m.total += weight;
+		return;
+	}
+
+	for(auto i = 0u; i < a.size(); ++i) {
+		m.total += match(a[i], b[i]);
+	}
 }
 
 // match ideas:
@@ -1242,6 +1359,21 @@ void BindVertexBuffersCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	}
 }
 
+float BindVertexBuffersCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const BindVertexBuffersCmd*>(&rhs);
+	if(!cmd || firstBinding != cmd->firstBinding) {
+		return 0.f;
+	}
+
+	Matcher m;
+	m.match += 1.0;
+	m.total += 1.0;
+
+	addSpanOrderedStrict(m, buffers, cmd->buffers);
+
+	return eval(m);
+}
+
 // BindIndexBufferCmd
 void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBindIndexBuffer(cb, buffer->handle, offset, indexType);
@@ -1249,6 +1381,21 @@ void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 void BindIndexBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(buffer, map);
+}
+
+float BindIndexBufferCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const BindIndexBufferCmd*>(&rhs);
+	if(!cmd || indexType != cmd->indexType) {
+		return 0.f;
+	}
+
+	Matcher m;
+	m.match += 1.0;
+	m.total += 1.0;
+	addNonNull(m, buffer, cmd->buffer);
+	add(m, offset, cmd->offset, 0.2);
+
+	return eval(m);
 }
 
 // BindDescriptorSetCmd
@@ -1294,6 +1441,19 @@ void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
 
 void BindDescriptorSetCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(sets, map);
+}
+
+float BindDescriptorSetCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const BindDescriptorSetCmd*>(&rhs);
+	if(!cmd || firstSet != cmd->firstSet ||
+			pipeBindPoint != cmd->pipeBindPoint || pipeLayout != cmd->pipeLayout) {
+		return 0.f;
+	}
+
+	// NOTE: evaluating the used descriptor sets or dynamic offsets
+	// is likely of no use as they are too instable.
+
+	return 1.f;
 }
 
 // DispatchCmdBase
@@ -1526,6 +1686,23 @@ void CopyImageCmd::displayInspector(Gui& gui) const {
 	}
 }
 
+float CopyImageCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const CopyImageCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, dst, cmd->dst, 5);
+	addNonNull(m, dst, cmd->dst, 5);
+	add(m, srcLayout, cmd->srcLayout);
+	add(m, dstLayout, cmd->dstLayout);
+
+	addSpanOrderedStrict(m, copies, cmd->copies);
+
+	return eval(m);
+}
+
 // CopyBufferToImageCmd
 void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdCopyBufferToImage2KHR) {
@@ -1579,6 +1756,21 @@ void CopyBufferToImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	checkReplace(dst, map);
 }
 
+float CopyBufferToImageCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, src, cmd->src);
+	addNonNull(m, dst, cmd->dst);
+	add(m, dstLayout, cmd->dstLayout);
+	addSpanOrderedStrict(m, copies, cmd->copies);
+
+	return eval(m);
+}
+
 // CopyImageToBufferCmd
 void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdCopyImageToBuffer2KHR) {
@@ -1630,6 +1822,21 @@ std::string CopyImageToBufferCmd::toString() const {
 void CopyImageToBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(src, map);
 	checkReplace(dst, map);
+}
+
+float CopyImageToBufferCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, src, cmd->src);
+	addNonNull(m, dst, cmd->dst);
+	add(m, srcLayout, cmd->srcLayout);
+	addSpanOrderedStrict(m, copies, cmd->copies);
+
+	return eval(m);
 }
 
 // BlitImageCmd
@@ -1702,6 +1909,23 @@ void BlitImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle
 	checkReplace(dst, map);
 }
 
+float BlitImageCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const BlitImageCmd*>(&rhs);
+	if(!cmd || filter != cmd->filter) {
+		return 0.f;
+	}
+
+	Matcher m;
+
+	addNonNull(m, src, cmd->src, 5.0);
+	addNonNull(m, dst, cmd->dst, 5.0);
+	add(m, srcLayout, cmd->srcLayout);
+	add(m, dstLayout, cmd->dstLayout);
+	addSpanOrderedStrict(m, blits, cmd->blits);
+
+	return eval(m);
+}
+
 // ResolveImageCmd
 void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdResolveImage2KHR) {
@@ -1769,6 +1993,23 @@ void ResolveImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHan
 	checkReplace(dst, map);
 }
 
+float ResolveImageCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const ResolveImageCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+
+	addNonNull(m, src, cmd->src, 5.0);
+	addNonNull(m, dst, cmd->dst, 5.0);
+	add(m, srcLayout, cmd->srcLayout);
+	add(m, dstLayout, cmd->dstLayout);
+	addSpanOrderedStrict(m, regions, cmd->regions);
+
+	return eval(m);
+}
+
 // CopyBufferCmd
 void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	if(dev.dispatch.CmdCopyBuffer2KHR) {
@@ -1821,6 +2062,21 @@ void CopyBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandl
 	checkReplace(dst, map);
 }
 
+float CopyBufferCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const CopyBufferCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, dst, cmd->dst);
+	addNonNull(m, dst, cmd->dst);
+
+	addSpanOrderedStrict(m, regions, cmd->regions);
+
+	return eval(m);
+}
+
 // UpdateBufferCmd
 void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdUpdateBuffer(cb, dst->handle, offset, data.size(), data.data());
@@ -1845,6 +2101,19 @@ void UpdateBufferCmd::displayInspector(Gui& gui) const {
 	imGuiText("Offset {}", offset);
 
 	// TODO: display data?
+}
+
+float UpdateBufferCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const UpdateBufferCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, dst, cmd->dst, 5.0);
+	add(m, data.size(), cmd->data.size());
+	add(m, offset, cmd->offset, 0.2);
+	return eval(m);
 }
 
 // FillBufferCmd
@@ -1873,6 +2142,20 @@ void FillBufferCmd::displayInspector(Gui& gui) const {
 	imGuiText("Filled with {}{}", std::hex, data);
 }
 
+float FillBufferCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const FillBufferCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, dst, cmd->dst, 5.0);
+	add(m, data, cmd->data);
+	add(m, size, cmd->size);
+	add(m, offset, cmd->offset, 0.1);
+	return eval(m);
+}
+
 // ClearColorImageCmd
 void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearColorImage(cb, dst->handle, dstLayout, &color,
@@ -1895,6 +2178,25 @@ void ClearColorImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, Device
 void ClearColorImageCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, dst);
 	// TODO: color, layout, ranges
+}
+
+float ClearColorImageCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const ClearColorImageCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, dst, cmd->dst, 5.0);
+	add(m, dstLayout, cmd->dstLayout, 2.0);
+	addSpanOrderedStrict(m, ranges, cmd->ranges);
+
+	m.total += 1;
+	if(std::memcmp(&color, &cmd->color, sizeof(color)) == 0u) {
+		m.match += 1;
+	}
+
+	return eval(m);
 }
 
 // ClearDepthStencilImageCmd
@@ -1921,6 +2223,25 @@ void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
 	// TODO: value, layout, ranges
 }
 
+float ClearDepthStencilImageCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const ClearDepthStencilImageCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addNonNull(m, dst, cmd->dst, 5.0);
+	add(m, dstLayout, cmd->dstLayout, 2.0);
+	addSpanOrderedStrict(m, ranges, cmd->ranges);
+
+	m.total += 1;
+	if(std::memcmp(&value, &cmd->value, sizeof(value)) == 0u) {
+		m.match += 1;
+	}
+
+	return eval(m);
+}
+
 // Clear AttachhmentCmd
 void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdClearAttachments(cb, u32(attachments.size()),
@@ -1935,6 +2256,18 @@ void ClearAttachmentCmd::displayInspector(Gui& gui) const {
 void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(rpi.fb, map);
 	checkReplace(rpi.rp, map);
+}
+
+float ClearAttachmentCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&rhs);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	Matcher m;
+	addSpanOrderedStrict(m, attachments, cmd->attachments, 5.0);
+	addSpanOrderedStrict(m, rects, cmd->rects);
+	return eval(m);
 }
 
 // SetEventCmd
@@ -2056,6 +2389,15 @@ void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb) cons
 	dev.dispatch.CmdBeginDebugUtilsLabelEXT(cb, &label);
 }
 
+float BeginDebugUtilsLabelCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(&rhs);
+	if(!cmd || std::strcmp(cmd->name, this->name) != 0) {
+		return 0.f;
+	}
+
+	return 1.f;
+}
+
 // EndDebugUtilsLabelCmd
 void EndDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdEndDebugUtilsLabelEXT(cb);
@@ -2089,11 +2431,33 @@ void BindPipelineCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHan
 	checkReplace(pipe, map);
 }
 
+float BindPipelineCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const BindPipelineCmd*>(&rhs);
+	if(!cmd || cmd->bindPoint != this->bindPoint || cmd->pipe != this->pipe) {
+		return 0.f;
+	}
+
+	return 1.f;
+}
+
+// PushConstantsCmd
 void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdPushConstants(cb, pipeLayout->handle, stages, offset,
 		u32(values.size()), values.data());
 }
 
+float PushConstantsCmd::match(const Command& rhs) const {
+	auto* cmd = dynamic_cast<const PushConstantsCmd*>(&rhs);
+	if(!cmd || pipeLayout != cmd->pipeLayout || stages != cmd->stages ||
+			offset != cmd->offset || values.size() != cmd->values.size()) {
+		return 0.f;
+	}
+
+	auto sameData = std::memcmp(values.data(), cmd->values.data(), values.size()) == 0u;
+	return 0.5f + (sameData ? 0.5f : 0.0f);
+}
+
+// other cmds
 void SetViewportCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetViewport(cb, first, u32(viewports.size()), viewports.data());
 }

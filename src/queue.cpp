@@ -88,9 +88,6 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 SubmittedCommandBuffer::SubmittedCommandBuffer() = default;
 SubmittedCommandBuffer::~SubmittedCommandBuffer() = default;
 
-CommandBufferGroup::CommandBufferGroup() = default;
-CommandBufferGroup::~CommandBufferGroup() = default;
-
 void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
 	std::string is;
 	is.resize(indent, ' ');

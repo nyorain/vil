@@ -111,6 +111,7 @@ CommandRecord::~CommandRecord() {
 	}
 
 	ZoneScoped;
+
 	std::lock_guard lock(dev->mutex);
 
 	/*

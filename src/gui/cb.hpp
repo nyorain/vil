@@ -19,6 +19,8 @@ public:
 	enum class UpdateMode {
 		none, // does not update them at all. Displays static record
 		commandBuffer, // always displays current record of commandBuffer
+		// TODO: rename that mode and cleanup the code. The command groups
+		// concept was garbage apparently.
 		commandGroup, // always displayed last record of command group
 		swapchain, // displays all commands between two swapchain presents
 	};

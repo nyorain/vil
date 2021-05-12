@@ -43,12 +43,6 @@ struct QueueSubmitter {
 	// used for gui synchronization so we can reset futureSemaphoreUsed
 	// on error.
 	Draw* syncedGuiDraw {};
-
-	// NOTE: needed to make sure CommandRecord isn't destroyed inside
-	// mutex lock. Maybe we should just assume the mutex is locked
-	// inside the destructors of these classes?
-	std::vector<std::unique_ptr<CommandBufferGroup>> keepAliveGroups;
-	std::vector<IntrusivePtr<CommandRecord>> keepAliveRecs;
 };
 
 void process(QueueSubmitter&, const VkSubmitInfo&);

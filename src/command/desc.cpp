@@ -2,6 +2,7 @@
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <cb.hpp>
+#include <swapchain.hpp>
 #include <pipe.hpp>
 #include <rp.hpp>
 #include <util/util.hpp>
@@ -293,6 +294,98 @@ FindResult find(const Command* root, span<const Command*> dst,
 	}
 
 	return {bestCmds, bestMatch};
+}
+
+
+// WIP
+// Basically just a LCS implementation, see
+// https://en.wikipedia.org/wiki/Longest_common_subsequence_problem
+struct MatchResult {
+	std::vector<std::pair<const RecordBatch*, const RecordBatch*>> matches;
+};
+
+float match(const RecordBatch& a, const RecordBatch& b) {
+	if(a.queue != b.queue) {
+		return 0.f;
+	}
+
+	if(a.submissions.size() == 0u && b.submissions.size() == 0u) {
+		return 1.f;
+	}
+
+	std::vector<float> entries(a.submissions.size() * b.submissions.size());
+	auto entry = [&](auto ia, auto ib) -> decltype(auto) {
+		return entries[ia * b.submissions.size() + ib];
+	};
+
+	for(auto ia = 0u; ia < a.submissions.size(); ++ia) {
+		for(auto ib = 0u; ib < b.submissions.size(); ++ib) {
+			auto fac = match(a.submissions[ia]->desc, b.submissions[ib]->desc);
+			auto valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1) + fac;
+			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib);
+			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1);
+
+			auto& dst = entry(ia, ib);
+			dst = std::max(valDiag, std::max(valUp, valLeft));
+		}
+	}
+
+	return entries.back() / std::max(a.submissions.size(), b.submissions.size());
+}
+
+MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b) {
+	struct Entry {
+		float match {};
+		unsigned dir {};
+	};
+
+	std::vector<Entry> entries(a.size() * b.size());
+	auto entry = [&](auto ia, auto ib) -> decltype(auto) {
+		return entries[ia * b.size() + ib];
+	};
+
+	for(auto ia = 0u; ia < a.size(); ++ia) {
+		for(auto ib = 0u; ib < b.size(); ++ib) {
+			auto fac = match(a[ia], b[ib]);
+			auto valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match + fac;
+			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
+			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1).match;
+
+			auto& dst = entry(ia, ib);
+			dst.match = std::max(valDiag, std::max(valUp, valLeft));
+			if(dst.match == valDiag) {
+				dst.dir = 1u;
+			} else if(dst.match == valUp) {
+				dst.dir = 2u;
+			} else if(dst.match == valLeft) {
+				dst.dir = 3u;
+			}
+		}
+	}
+
+	// backtrack
+	MatchResult res;
+	auto ia = a.size();
+	auto ib = b.size();
+	while(ia != 0u || ib != 0u) {
+		auto& src = entry(ia, ib);
+		if(src.dir == 1u) {
+			dlg_assert(ia > 0 && ib > 0);
+			res.matches.push_back({&a[ia], &b[ib]});
+			--ia;
+			--ib;
+		} else if(src.dir == 2u) {
+			dlg_assert(ia > 0);
+			--ia;
+		} else if(src.dir == 3u) {
+			dlg_assert(ib > 0);
+			--ib;
+		} else {
+			dlg_fatal("unreachable");
+		}
+	}
+
+	return res;
 }
 
 } // namespace vil

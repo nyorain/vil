@@ -1429,23 +1429,21 @@ void ResourceGui::draw(Draw& draw) {
 	while(clipper.Step()) {
 		for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			auto& handle = *handles_[i];
+			auto selected = (&handle == handle_);
+			auto flags = 0u;
 
 			ImGui::PushID(&handle);
+			std::string label;
 
 			if(destroyed_.count(&handle)) {
-				// disabled button
-				ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-				ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
-
-				ImGui::Button("<Destroyed>");
-
-				ImGui::PopStyleVar();
-				ImGui::PopItemFlag();
+				flags = ImGuiSelectableFlags_Disabled;
+				label = "<Destroyed>";
 			} else {
-				auto label = name(handle);
-				if(ImGui::Button(label.c_str())) {
-					select(handle);
-				}
+				label = name(handle);
+			}
+
+			if(ImGui::Selectable(label.c_str(), selected, flags)) {
+				select(handle);
 			}
 
 			ImGui::PopID();

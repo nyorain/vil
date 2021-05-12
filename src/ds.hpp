@@ -132,6 +132,9 @@ span<const BufferViewDescriptor> bufferViews(const DescriptorSetState&, unsigned
 struct DescriptorSet : DeviceHandle {
 	DescriptorPool* pool {};
 	VkDescriptorSet handle {};
+
+	// synchronized via dev.mutex, i.e. pointer must only be changed/copied
+	// while dev.mutex is locked.
 	DescriptorSetStatePtr state;
 
 	~DescriptorSet();

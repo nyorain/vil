@@ -262,7 +262,7 @@ struct DrawCmdBase : Command {
 	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
 };
 
-struct DrawCmd : DrawCmdBase {
+struct DrawCmd final : DrawCmdBase {
 	u32 vertexCount;
 	u32 instanceCount;
 	u32 firstVertex;
@@ -277,7 +277,7 @@ struct DrawCmd : DrawCmdBase {
 	float match(const Command&) const override;
 };
 
-struct DrawIndirectCmd : DrawCmdBase {
+struct DrawIndirectCmd final : DrawCmdBase {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	u32 drawCount {};
@@ -296,7 +296,7 @@ struct DrawIndirectCmd : DrawCmdBase {
 	float match(const Command&) const override;
 };
 
-struct DrawIndexedCmd : DrawCmdBase {
+struct DrawIndexedCmd final : DrawCmdBase {
 	u32 indexCount;
 	u32 instanceCount;
 	u32 firstIndex;
@@ -312,7 +312,7 @@ struct DrawIndexedCmd : DrawCmdBase {
 	float match(const Command&) const override;
 };
 
-struct DrawIndirectCountCmd : DrawCmdBase {
+struct DrawIndirectCountCmd final : DrawCmdBase {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	u32 maxDrawCount {};
@@ -333,7 +333,7 @@ struct DrawIndirectCountCmd : DrawCmdBase {
 	float match(const Command&) const override;
 };
 
-struct BindVertexBuffersCmd : Command {
+struct BindVertexBuffersCmd final : Command {
 	u32 firstBinding;
 	span<BoundVertexBuffer> buffers;
 
@@ -344,9 +344,10 @@ struct BindVertexBuffersCmd : Command {
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct BindIndexBufferCmd : Command {
+struct BindIndexBufferCmd final : Command {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	VkIndexType indexType {};
@@ -355,9 +356,10 @@ struct BindIndexBufferCmd : Command {
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct BindDescriptorSetCmd : Command {
+struct BindDescriptorSetCmd final : Command {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
 	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
@@ -370,6 +372,7 @@ struct BindDescriptorSetCmd : Command {
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void displayInspector(Gui& gui) const override;
+	float match(const Command&) const override;
 };
 
 struct DispatchCmdBase : Command {
@@ -385,7 +388,7 @@ struct DispatchCmdBase : Command {
 	Matcher doMatch(const DispatchCmdBase&) const;
 };
 
-struct DispatchCmd : DispatchCmdBase {
+struct DispatchCmd final : DispatchCmdBase {
 	u32 groupsX {};
 	u32 groupsY {};
 	u32 groupsZ {};
@@ -399,7 +402,7 @@ struct DispatchCmd : DispatchCmdBase {
 	float match(const Command&) const override;
 };
 
-struct DispatchIndirectCmd : DispatchCmdBase {
+struct DispatchIndirectCmd final : DispatchCmdBase {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 
@@ -413,7 +416,7 @@ struct DispatchIndirectCmd : DispatchCmdBase {
 	float match(const Command&) const override;
 };
 
-struct DispatchBaseCmd : DispatchCmdBase {
+struct DispatchBaseCmd final : DispatchCmdBase {
 	u32 baseGroupX {};
 	u32 baseGroupY {};
 	u32 baseGroupZ {};
@@ -431,7 +434,7 @@ struct DispatchBaseCmd : DispatchCmdBase {
 };
 
 // transfer commands
-struct CopyImageCmd : Command {
+struct CopyImageCmd final : Command {
 	Image* src {};
 	Image* dst {};
 	VkImageLayout srcLayout {};
@@ -445,9 +448,10 @@ struct CopyImageCmd : Command {
 	std::string nameDesc() const override { return "CopyImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct CopyBufferToImageCmd : Command {
+struct CopyBufferToImageCmd final : Command {
 	Buffer* src {};
 	Image* dst {};
 	VkImageLayout dstLayout {};
@@ -460,9 +464,10 @@ struct CopyBufferToImageCmd : Command {
 	std::string nameDesc() const override { return "CopyBufferToImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct CopyImageToBufferCmd : Command {
+struct CopyImageToBufferCmd final : Command {
 	Image* src {};
 	Buffer* dst {};
 	VkImageLayout srcLayout {};
@@ -475,9 +480,10 @@ struct CopyImageToBufferCmd : Command {
 	std::string nameDesc() const override { return "CopyImageToBuffer"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct BlitImageCmd : Command {
+struct BlitImageCmd final : Command {
 	Image* src {};
 	Image* dst {};
 	VkImageLayout srcLayout {};
@@ -492,9 +498,10 @@ struct BlitImageCmd : Command {
 	std::string nameDesc() const override { return "BlitImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct ResolveImageCmd : Command {
+struct ResolveImageCmd final : Command {
 	Image* src {};
 	VkImageLayout srcLayout {};
 	Image* dst {};
@@ -508,9 +515,10 @@ struct ResolveImageCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct CopyBufferCmd : Command {
+struct CopyBufferCmd final : Command {
 	Buffer* src {};
 	Buffer* dst {};
 	span<VkBufferCopy2KHR> regions;
@@ -522,9 +530,10 @@ struct CopyBufferCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct UpdateBufferCmd : Command {
+struct UpdateBufferCmd final : Command {
 	Buffer* dst {};
 	VkDeviceSize offset {};
 	span<std::byte> data;
@@ -535,9 +544,10 @@ struct UpdateBufferCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct FillBufferCmd : Command {
+struct FillBufferCmd final : Command {
 	Buffer* dst {};
 	VkDeviceSize offset {};
 	VkDeviceSize size {};
@@ -549,9 +559,10 @@ struct FillBufferCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct ClearColorImageCmd : Command {
+struct ClearColorImageCmd final : Command {
 	Image* dst {};
 	VkClearColorValue color;
 	VkImageLayout dstLayout {};
@@ -563,9 +574,10 @@ struct ClearColorImageCmd : Command {
 	std::string nameDesc() const override { return "ClearColorImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct ClearDepthStencilImageCmd : Command {
+struct ClearDepthStencilImageCmd final : Command {
 	Image* dst {};
 	VkClearDepthStencilValue value {};
 	VkImageLayout dstLayout {};
@@ -577,9 +589,10 @@ struct ClearDepthStencilImageCmd : Command {
 	std::string nameDesc() const override { return "ClearDepthStencilImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct ClearAttachmentCmd : Command {
+struct ClearAttachmentCmd final : Command {
 	span<VkClearAttachment> attachments;
 	span<VkClearRect> rects;
 	RenderPassInstanceState rpi;
@@ -589,9 +602,10 @@ struct ClearAttachmentCmd : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct SetEventCmd : Command {
+struct SetEventCmd final : Command {
 	Event* event {};
 	VkPipelineStageFlags stageMask {};
 
@@ -603,7 +617,7 @@ struct SetEventCmd : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct ResetEventCmd : Command {
+struct ResetEventCmd final : Command {
 	Event* event {};
 	VkPipelineStageFlags stageMask {};
 
@@ -615,7 +629,7 @@ struct ResetEventCmd : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct ExecuteCommandsCmd : ParentCommand {
+struct ExecuteCommandsCmd final : ParentCommand {
 	Command* children_ {};
 
 	Command* children() const override { return children_; }
@@ -626,7 +640,7 @@ struct ExecuteCommandsCmd : ParentCommand {
 };
 
 // Meta-command
-struct ExecuteCommandsChildCmd : ParentCommand {
+struct ExecuteCommandsChildCmd final : ParentCommand {
 	CommandRecord* record_ {}; // kept alive in parent CommandRecord
 	unsigned id_ {};
 
@@ -636,25 +650,26 @@ struct ExecuteCommandsChildCmd : ParentCommand {
 	void record(const Device&, VkCommandBuffer) const override {}
 };
 
-struct BeginDebugUtilsLabelCmd : SectionCommand {
+struct BeginDebugUtilsLabelCmd final : SectionCommand {
 	const char* name {};
 	std::array<float, 4> color; // NOTE: could use this in UI
 
 	std::string toString() const override { return dlg::format("Label: {}", name); }
 	void record(const Device&, VkCommandBuffer) const override;
+	float match(const Command&) const override;
 
 	// NOTE: yes, we return more than just the command here.
 	// But that's because the command itself isn't of any use without the label.
 	std::string nameDesc() const override { return toString(); }
 };
 
-struct EndDebugUtilsLabelCmd : Command {
+struct EndDebugUtilsLabelCmd final : Command {
 	std::string nameDesc() const override { return dlg::format("EndLabel"); }
 	Type type() const override { return Type::end; }
 	void record(const Device&, VkCommandBuffer) const override;
 };
 
-struct BindPipelineCmd : Command {
+struct BindPipelineCmd final : Command {
 	VkPipelineBindPoint bindPoint {};
 	Pipeline* pipe {};
 
@@ -664,9 +679,10 @@ struct BindPipelineCmd : Command {
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	float match(const Command&) const override;
 };
 
-struct PushConstantsCmd : Command {
+struct PushConstantsCmd final : Command {
 	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
 	VkShaderStageFlags stages {};
 	u32 offset {};
@@ -675,10 +691,11 @@ struct PushConstantsCmd : Command {
 	std::string nameDesc() const override { return "PushConstants"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
+	float match(const Command&) const override;
 };
 
 // dynamic state
-struct SetViewportCmd : Command {
+struct SetViewportCmd final : Command {
 	u32 first {};
 	span<VkViewport> viewports;
 
@@ -687,7 +704,7 @@ struct SetViewportCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetScissorCmd : Command {
+struct SetScissorCmd final : Command {
 	u32 first {};
 	span<VkRect2D> scissors;
 
@@ -696,7 +713,7 @@ struct SetScissorCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetLineWidthCmd : Command {
+struct SetLineWidthCmd final : Command {
 	float width {};
 
 	Type type() const override { return Type::bind; }
@@ -704,7 +721,7 @@ struct SetLineWidthCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetDepthBiasCmd : Command {
+struct SetDepthBiasCmd final : Command {
 	DynamicStateDepthBias state {};
 
 	Type type() const override { return Type::bind; }
@@ -712,7 +729,7 @@ struct SetDepthBiasCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetDepthBoundsCmd : Command {
+struct SetDepthBoundsCmd final : Command {
 	float min {};
 	float max {};
 
@@ -721,7 +738,7 @@ struct SetDepthBoundsCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetBlendConstantsCmd : Command {
+struct SetBlendConstantsCmd final : Command {
 	std::array<float, 4> values {};
 
 	Type type() const override { return Type::bind; }
@@ -729,7 +746,7 @@ struct SetBlendConstantsCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetStencilCompareMaskCmd : Command {
+struct SetStencilCompareMaskCmd final : Command {
 	VkStencilFaceFlags faceMask {};
 	u32 value {};
 
@@ -738,7 +755,7 @@ struct SetStencilCompareMaskCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetStencilWriteMaskCmd : Command {
+struct SetStencilWriteMaskCmd final : Command {
 	VkStencilFaceFlags faceMask {};
 	u32 value {};
 
@@ -747,7 +764,7 @@ struct SetStencilWriteMaskCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct SetStencilReferenceCmd : Command {
+struct SetStencilReferenceCmd final : Command {
 	VkStencilFaceFlags faceMask {};
 	u32 value {};
 
@@ -757,7 +774,7 @@ struct SetStencilReferenceCmd : Command {
 };
 
 // query pool
-struct BeginQueryCmd : Command {
+struct BeginQueryCmd final : Command {
 	QueryPool* pool {};
 	u32 query {};
 	VkQueryControlFlags flags {};
@@ -769,7 +786,7 @@ struct BeginQueryCmd : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct EndQueryCmd : Command {
+struct EndQueryCmd final : Command {
 	QueryPool* pool {};
 	u32 query {};
 
@@ -780,7 +797,7 @@ struct EndQueryCmd : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct ResetQueryPoolCmd : Command {
+struct ResetQueryPoolCmd final : Command {
 	QueryPool* pool {};
 	u32 first {};
 	u32 count {};
@@ -792,7 +809,7 @@ struct ResetQueryPoolCmd : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct WriteTimestampCmd : Command {
+struct WriteTimestampCmd final : Command {
 	QueryPool* pool {};
 	VkPipelineStageFlagBits stage {};
 	u32 query {};
@@ -804,7 +821,7 @@ struct WriteTimestampCmd : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct CopyQueryPoolResultsCmd : Command {
+struct CopyQueryPoolResultsCmd final : Command {
 	QueryPool* pool {};
 	u32 first {};
 	u32 count {};
@@ -820,7 +837,7 @@ struct CopyQueryPoolResultsCmd : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct PushDescriptorSetCmd : Command {
+struct PushDescriptorSetCmd final : Command {
 	VkPipelineBindPoint bindPoint {};
 	PipelineLayout* pipeLayout {};
 	u32 set {};
@@ -834,7 +851,7 @@ struct PushDescriptorSetCmd : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct PushDescriptorSetWithTemplateCmd : Command {
+struct PushDescriptorSetWithTemplateCmd final : Command {
 	DescriptorUpdateTemplate* updateTemplate {};
 	PipelineLayout* pipeLayout {};
 	u32 set {};

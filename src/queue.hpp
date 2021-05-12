@@ -24,9 +24,6 @@ struct Queue : Handle {
 	// Whether the queue was created by us, for internal use.
 	bool createdByUs {};
 
-	// All groups associated with this queue
-	// std::unordered_set<CommandBufferGroup*> groups;
-
 	// Counted up each time this queue is submitted to.
 	// Might wrap around.
 	u64 submissionCount {};
@@ -38,9 +35,6 @@ struct QueueFamily {
 
 	// Resettable command pool.
 	VkCommandPool commandPool {};
-
-	// Command groups used in this queue family.
-	// std::vector<std::unique_ptr<CommandBufferGroup>> commandGroups;
 };
 
 struct SubmittedCommandBuffer {
@@ -100,35 +94,6 @@ struct SubmissionBatch {
 	// Device pool semaphores that should be re-added to the pool after this.
 	// Only currently used when timeline semaphores aren't available.
 	std::vector<VkSemaphore> poolSemaphores {};
-};
-
-// CommandBuffer groups
-// TODO: rename to CommandGroup? CommandRecordGroup? RecordGroup?
-struct CommandBufferGroup {
-	// Abstract description of this group. Used to determine whether new
-	// recording belong to it.
-	CommandBufferDesc desc;
-
-	// A list of all representatives of this group that are alive.
-	// Synchronized via dev.mutex. As long as more than one CommandRecord
-	// of this group is still alive, it is not being destroyed.
-	// (One is always kept alive via lastRecord, that does not count
-	// as it would create a lifetime circle, never causing us to free
-	// command buffer groups).
-	std::unordered_set<CommandRecord*> aliveRecords;
-
-	// We make sure at least the last representative of this command buffer
-	// group is not being destroyed. This allows to e.g. inspect it in gui.
-	IntrusivePtr<CommandRecord> lastRecord;
-
-	// All Queues this command buffer group was ever used on.
-	// Also stores the last submission ID a submission with this group
-	// was used on the given queue (used for cleanup).
-	// Note that all queues will have the same queue family.
-	std::vector<std::pair<Queue*, u64>> queues {};
-
-	CommandBufferGroup();
-	~CommandBufferGroup();
 };
 
 // Expects dev.mutex to be locked.

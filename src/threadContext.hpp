@@ -49,6 +49,7 @@ struct ThreadContextAllocator {
 	using value_type = T;
 
 	T* allocate(size_t n) {
+		static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto ptr = vil::allocate(ThreadContext::get(), sizeof(T) * n);
 		return reinterpret_cast<T*>(ptr);
 	}

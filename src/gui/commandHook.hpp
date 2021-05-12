@@ -110,11 +110,9 @@ public:
 		bool before {}; // whether to copy before or after target command
 	};
 
-	// Defines what to hook. Can either hook a specific record, a specifc
-	// CommandBuffer or a specific CommandGroup.
+	// Defines what to hook
 	struct {
 		bool all {};
-		// CommandBufferGroup* group {};
 		CommandBuffer* cb {};
 		CommandRecord* record {};
 	} target;

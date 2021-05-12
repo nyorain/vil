@@ -3,47 +3,28 @@
 v0.1, goal: end of january 2021 (edit may 2021: lmao) 
 
 urgent, bugs:
-- [ ] (important) the way we copy/modify descriptor set states might have
-      a data race at the moment. When copying, we might try to increase
-	  the reference count of an already destroyed State object (when it is
-	  currently being replaced?)
-- [ ] (important) the way we currently copy vectors of IntrusivePtr handles
-      outside the lock (e.g. in Gui) to make they don't get destroyed inside
-	  isn't threadsafe
-- [ ] clean up the current mess of command groups. There are multiple
-      items in here related to that, most of it commented out atm.
-- [ ] Figure out how to correctly handle the maps in Device when using 
-	  wrapping. Many ugly situations atm, see e.g. (important!) the
-	  terrible hack in ~CommandPool and ~DescriptorPool
+- [ ] {high prio} most of the notes in CommandHook::hook are highly relevant.
+      Especially handling of hook state overflow. Happens quickly when switching
+	  out of command viewer tab. We shouldn't do any hooking when we
+	  are not currently in that tab.
 
 matching:
-- [ ] implement 'match' for missing commands
-- [ ] fix command matching for sync/bind commands
+- [ ] figure out how to correctly match swapchain.frameSubmissions to the
+	  commandHook state. See TODO in cb.cpp `dlg_assert(found)`
+- [ ] (low prio, later) implement 'match' for missing commands, e.g.
+      for queryPool/event/dynamic state commands
+- [ ] (for later) fix/improve command matching for sync/bind commands
 	- [ ] bind: match via next draw/dispatch that uses this bind
 	- [ ] sync: match previous and next draw/dispatch and try to find
 	      matching sync in between? or something like that
-- [ ] figure out how to correctly match swapchain.frameSubmissions to the
-	  commandHook state. See TODO in cb.cpp `dlg_assert(found)`
-
-command group rework:
-- [ ] remove CommandGroups? Just rely on command matching instead?
-      figure out how to properly do matching across command buffer
-	  boundaries; taking the context - the position inside a frame - into account
-- [ ] currently command groups *interfer* with our new, improved command matching
-      since it may not recognize two records as being in the same group
-	  when they should be (and we would find a perfect command match).
-	  Another point for removing them in their current form; as a requirement
-	  for command matching
-- [ ] implement LCS and better general strategy when in swapchain mode for
+- [ ] use/implement LCS and better general strategy when in swapchain mode for
       command matching/finding the best hook from last frame
 
 descriptor indexing extension:
-- [ ] make sure we fulfill multithreading requirements for
-      VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT and friends
 - [ ] fix handling of update_unused_while_pending descriptors, see ds.cpp
       also consider partially_bound flag
 - [ ] (for later) investigate whether our current approach really
-      works for descriptor sets with many thousand bindings
+      scales for descriptor sets with many thousand bindings
 
 vertex viewer/xfb:
 - [ ] really attempt to display non-float formats in 3D vertex viewer?
@@ -74,6 +55,10 @@ docs
 		  {see docs/compute-only.md}
 
 window/overlay
+- [ ] dota: figure out why hooked overlay does not work anymore when in game
+      probably something to do with the way we grab input over x11
+- [ ] fix/implement input pass-through when the hooked overlay does not have
+      focus. Does not work atm.
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
@@ -94,6 +79,7 @@ window/overlay
 	      implement yet (such as sparse binding)
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
+- [ ] fix overlay for wayland. Use xdg popup
 
 performance/profiling:
 - [ ] {high prio} also don't always copy DescriptorSetState on submission.
@@ -104,10 +90,6 @@ performance/profiling:
 	  For non-update-after-bind (& update_unused_while_pending) descriptors,
 	  we could copy the state on BindDescriptorSet time? not sure that's
 	  better though.
-- [ ] {high prio} most of the notes in CommandHook::hook are highly relevant.
-      Especially handling of hook state overflow. Happens quickly when switching
-	  out of command viewer tab. We shouldn't do any hooking when we
-	  are not currently in that tab.
 - [ ] {high prio} holding the device mutex while submitting is really bad, see queue.cpp.
       We only need it for gui sync I think, we might be able to use
 	  a separate gui/sync mutex for that. Basically a mutex that (when locked)
@@ -121,7 +103,8 @@ performance/profiling:
 
 object wrapping:
 - [ ] implement mechanism for deciding per-handle-type whether object wrapping
-      should be done. Performance-wise it's only really important for
+      should be done. Either via GUI or env var. 
+	  Performance-wise it's only really important for
 	  CommandBuffers and DescriptorSets (technically also for Device but
 	  that pretty much guarantees that 50% of new extensions will crash).
 - [ ] only use the hash maps in Device when we are not using object 
@@ -129,16 +112,12 @@ object wrapping:
 	  Could always use the linked list and the hash maps just optionally.
 	  Maybe we can even spin up some lockfree linked list for this? We'd only
 	  ever insert at one end, order is irrelevant.
+	- [ ] Figure out how to correctly handle the maps in Device when using 
+		  wrapping. Many ugly situations atm, see e.g. the
+		  hack in ~CommandPool and ~DescriptorPool.
+		  And we don't really need maps in the first place, see below.
 
 gui stuff
-- [ ] resource viewer: we don't know which handle is currently selected
-      (in the window on the left), can get confusing when they don't have names.
-	  Should probably be an ImGui::Selectable (that stays selected) instead
-	  of a button
-- [ ] (low prio) resource viewer: basic filtering by properties, e.g. allow to just
-      show all images with 'width > 1920 && layers > 3' or something.
-	  Could start with images for now and add for other handles as needed.
-	  Definitely useful for images, when exploring the resource space
 - [ ] cb/command viewer: when viewing a batch from a swapchain,
       show the semaphores/fences with from a vkQueueSubmit.
 	  When selecting the vkQueueSubmit just show an overview.
@@ -168,13 +147,17 @@ gui stuff
 	- [ ] lots of places where we should replace column usage with tables
 	- [ ] fix stupid looking duplicate header-seperator for commands in 
 	      command viewer (command viewer header UI is a mess anyways)
+- [ ] (low prio, later?) resource viewer: basic filtering by properties, e.g. allow to just
+      show all images with 'width > 1920 && layers > 3' or something.
+	  Could start with images for now and add for other handles as needed.
+	  Definitely useful for images, when exploring the resource space
 
 other
 - [ ] CommandMemBlock alignment handling might currently be wrong since
       we don't take the alignment of the beginning of the mem block into account,
 	  might be less than __STDCPP_DEFAULT_NEW_ALIGNMENT__ due to obj size.
 	  Handle it as we do in ThreadMemBlock
-- [ ] correctly track stuff from push descriptors. Need to add handles and stuff,
+- [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
       make sure destruction is tracked correctly. Also show in gui.
 	  See the commands in cb.cpp
 - [ ] with the ds changes, we don't correctly track commandRecord invalidation
@@ -236,9 +219,6 @@ other
 	- [x] when viewing image as grayscale they become transparent atm.
 	      no idea why
 	- [ ] also don't apply scale for alpha
-- [ ] fix overlay for wayland. Use xdg popup
-- [ ] make sure the environment variables for overlays/window creation work
-      as specified in readme everywhere
 - [ ] when viewing live command submissions, clicking on resource buttons
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
@@ -248,6 +228,13 @@ other
 
 
 Possibly for later, new features/ideas:
+- [ ] The way we have to keep CommandRecord objects alive (keepAlive) in various places
+      (e.g. Gui::renderFrame, CommandBuffer::doReset, CommandBuffer::doEnd),
+      to make sure they are not destroyed while we hold the lock (and possibly
+	  reset an IntrusiverPtr) is a terrible hack. But no idea how to solve
+	  this properly. We can't require that the mutex is locked while ~CommandRecord
+	  is called, that leads to other problems (since it possibly destroys other
+	  objects)
 - [ ] could write patched shader spirv data into a pipeline cache I guess
       or maintain own shader cache directory with patched spirv
 	  not sure if worth it at all though, the spirv patching is probably

@@ -180,7 +180,7 @@ for this at the moment, we simply don't allow command inspection in this case.
 
 See [src/rp.hpp](src/rp.hpp) for the details. `vil::splittable(...)` returns
 whether the splitting approach is possible for the given render pass
-description (TODO: this needs massive testing, we basically use symbolic
-execution here but never tested it which screams for trouble. Also, a simpler
-implementation is probably possible). `vil::splitIterrutable(...)` then spits
-out render pass create infos that can be used to create the new render passes.
+description. We have a small test [rpsplit.cpp](docs/test/rpsplit.cpp) that
+should be extended when issues with that are found in the future.
+`vil::splitIterrutable(...)` then spits out render pass create infos 
+that can be used to create the new render passes.

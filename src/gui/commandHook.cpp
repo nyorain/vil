@@ -165,13 +165,11 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	ZoneScoped;
 
 	auto* record = hooked.lastRecordLocked();
-	// dlg_assert(record && record->group);
 
 	// Check whether we should attempt to hook this particular record
 	bool validTarget =
 		record == target.record ||
 		&hooked == target.cb ||
-		// record->group == target.group;
 		target.all;
 
 	if(!validTarget || hierachy_.empty() || !record->commands) {
@@ -182,7 +180,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// Hook might have no actively needed queries. (Not sure this is
 	// really ever the case, we always query time i guess)
 	// PERF: in gui, make sure remove hooks when currently not inside
-	// cb viewer?
+	// cb viewer? or when the gui is closed
 
 	// Check if it already has a valid record associated
 	// TODO(important): before calling find, we'd need to unset the

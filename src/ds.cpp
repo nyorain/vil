@@ -441,7 +441,7 @@ DescriptorPool::~DescriptorPool() {
 	// on destruction
 	while(!descriptorSets.empty()) {
 		if(HandleDesc<VkDescriptorSet>::wrap) {
-			// TODO: ugh, this is terrible, not sure how to handle the case properly
+			// TODO: ugh, this is terrible, should find a cleaner solution
 			auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(descriptorSets[0]));
 			dev->descriptorSets.mustErase(h);
 		} else {
@@ -700,7 +700,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 	while(!dsPool.descriptorSets.empty()) {
 		auto* ds = dsPool.descriptorSets[0];
 		if(HandleDesc<VkDescriptorSet>::wrap) {
-			// TODO: ugh, this is terrible, not sure how to handle the case properly
+			// TODO: ugh, this is terrible, should find a cleaner solution
 			auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(ds));
 			dev.descriptorSets.mustErase(h);
 		} else {

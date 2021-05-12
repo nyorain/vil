@@ -41,63 +41,14 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 			for(auto& pair : rec.handles) {
 				auto& handle = nonNull(pair.second.handle);
 				if(handle.objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+
+					// important that dev.mutex is locked while we access (copy)
+					// ds.state
 					auto& ds = static_cast<const DescriptorSet&>(handle);
 					rec.lastDescriptorState.states[static_cast<void*>(&handle)] = ds.state;
 				}
 			}
 		}
-
-		// find submission group to check for hook
-		// When the CommandRecord doesn't already have a group (from
-		// previous submission), try to find an existing group
-		// that matches this submission.
-		/*
-		float best = -1.0;
-		if(!rec.group) {
-			ZoneScopedN("Find group");
-			auto& qfam = dev.queueFamilies[subm.queue->family];
-			for(auto& qgroup : qfam.commandGroups) {
-				// TODO: make configurable? This determines how
-				// much we allow a CommandRecord to differ from the groups
-				// description while still recognizing it as group member.
-				constexpr auto matchThreshold = 0.8;
-				auto matchVal = match(qgroup->desc, rec.desc);
-				if(matchVal > best && matchVal > matchThreshold) {
-					rec.group = qgroup.get();
-					best = matchVal;
-				}
-			}
-
-			if(rec.group) {
-				rec.group->aliveRecords.insert(&rec);
-			}
-		}
-
-		// When no existing group matches, just create a new one
-		if(!rec.group) {
-			auto& qfam = dev.queueFamilies[rec.queueFamily];
-			rec.group = qfam.commandGroups.emplace_back(std::make_unique<CommandBufferGroup>()).get();
-			subm.queue->groups.insert(rec.group);
-			rec.group->queues = {{subm.queue, subm.submitID}};
-			rec.group->aliveRecords.insert(&rec);
-		} else {
-			// Otherwise make sure it's correctly added to the group
-			// NOTE: we even do this if submission fails down the
-			// chain. Should not be a problem really
-			auto finder = [&](auto& q) { return q.first == subm.queue; };
-			auto it = find_if(rec.group->queues, finder);
-			if(it == rec.group->queues.end()) {
-				rec.group->queues.push_back({subm.queue, subm.submitID});
-				subm.queue->groups.insert(rec.group);
-			} else {
-				it->second = subm.submitID;
-			}
-
-			dlg_assert(contains(rec.group->aliveRecords, &rec));
-		}
-
-		dlg_assert(rec.group);
-		*/
 
 		// potentially hook command buffer
 		if(dev.commandHook) {
@@ -412,62 +363,6 @@ VkResult addGuiSyncLocked(QueueSubmitter& subm) {
 	return VK_SUCCESS;
 }
 
-/*
-std::vector<std::unique_ptr<CommandBufferGroup>> cleanCommandGroups(Device& dev, u32 qfam) {
-	ZoneScoped;
-	std::vector<std::unique_ptr<CommandBufferGroup>> ret;
-
-	// Remove old command groups, making sure we don't just leak them.
-	auto& qf = dev.queueFamilies[qfam];
-	for(auto it = qf.commandGroups.begin(); it != qf.commandGroups.end();) {
-		auto rem = true;
-
-		auto& group = **it;
-
-		// When there is still a record of this group kept alive
-		// elsewhere don't destroy the group. It is either in use by some
-		// gui/high-level component or still valid in command buffer.
-		// When the application is keeping a record alive, the chances are
-		// high it will be used again. Since gui and application can only
-		// keep a limited number of records alive, this should not result
-		// in an effective leak.
-		if(group.aliveRecords.size() > 1 || group.lastRecord->refCount.load() > 1) {
-			++it;
-			continue;
-		}
-
-		// Otherwise, remove the group if there have been a lot of submission
-		// on all its known queues since the last time a cb of the group
-		// itself was submitted.
-		// NOTE: could alternatively also factor in time. Or the number
-		// of existent command groups, i.e. only start this when we have
-		// more than X groups already and just throw out the ones not used
-		// for the longest time/submissions. Then only do this when
-		// a new group is actually added.
-		constexpr auto submissionCountThreshold = 10u;
-		for(auto& [squeue, lastSubm] : group.queues) {
-			if(squeue->submissionCount - lastSubm < submissionCountThreshold) {
-				rem = false;
-				break;
-			}
-		}
-
-		if(rem) {
-			for(auto& [squeue, _] : group.queues) {
-				squeue->groups.erase(it->get());
-			}
-
-			ret.push_back(std::move(*it));
-			it = qf.commandGroups.erase(it);
-		} else {
-			++it;
-		}
-	}
-
-	return ret;
-}
-*/
-
 void postProcessLocked(QueueSubmitter& subm) {
 	ZoneScoped;
 
@@ -498,27 +393,8 @@ void postProcessLocked(QueueSubmitter& subm) {
 					used.second.image->pendingLayout = used.second.finalLayout;
 				}
 			}
-
-			// we already set the command group before, look above
-			/*
-			dlg_assert(recPtr->group);
-
-			if(recPtr->group->lastRecord) {
-				subm.keepAliveRecs.push_back(std::move(recPtr->group->lastRecord));
-			}
-
-			recPtr->group->lastRecord = recPtr;
-			// NOTE: not 100% sure about this in case of already existent group.
-			// Do we continuously want to update the description?
-			// It sounds like a good idea though, allowing small changes
-			// from submission to submission, e.g. when camera is
-			// looking around.
-			recPtr->group->desc = recPtr->desc;
-			*/
 		}
 	}
-
-	// subm.keepAliveGroups = cleanCommandGroups(*subm.dev, subm.queue->family);
 }
 
 // Returns whether the given submission potentially writes the given

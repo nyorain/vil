@@ -278,8 +278,7 @@ CommandPool::~CommandPool() {
 
 	while(!cbs.empty()) {
 		if(HandleDesc<VkCommandBuffer>::wrap) {
-			// TODO: ugh, this is terrible, not sure how to handle the case when
-			// we wrap command buffers.
+			// TODO: ugh, this is terrible, should find a cleaner solution
 			auto* cbp = reinterpret_cast<std::byte*>(cbs[0]);
 			cbp -= offsetof(WrappedHandle<CommandBuffer>, obj_);
 			auto h = u64ToHandle<VkCommandBuffer>(reinterpret_cast<std::uintptr_t>(cbp));
