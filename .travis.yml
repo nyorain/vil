@@ -31,17 +31,26 @@ matrix:
     # linux, clang
     - name: "Linux clang"
       env:
-        - CC=clang-10
-        - CXX=clang++-10
+        - CC=clang
+        - CXX=clang++
       arch: amd64
       os: linux
       dist: focal
       language: python
-before_install:
-  - sudo apt-get update
+
+addons:
+  apt:
+    sources:
+    - sourceline: 'ppa:ubuntu-toolchain-r/test'
+    packages:
+    - clang
+    - gcc-10
+    - g++-10
+    update: true
+
 install:
   - pip3 install meson ninja
-  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get -y -f install clang-10 valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
     libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
     libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
     libxkbcommon-x11-dev libx11-dev libx11-xcb-dev; fi
