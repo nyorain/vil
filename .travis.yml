@@ -37,12 +37,14 @@ matrix:
       os: linux
       dist: focal
       language: python
+before_install:
+  - sudo apt-get update
 install:
   - pip3 install meson ninja
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then sudo apt-get -y -f install clang-10 valgrind libvulkan-dev libvulkan1 vulkan-utils glslang-tools
     libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
     libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
-    libxkbcommon-x11-dev libx11-dev libx11-xcb-dev libclang-common-10-dev libc6-dbg; fi
+    libxkbcommon-x11-dev libx11-dev libx11-xcb-dev; fi
 
 script:
   - if [ "$TRAVIS_OS_NAME" == "windows" ]; then ./build.bat; fi
