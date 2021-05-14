@@ -29,8 +29,10 @@
 namespace vil {
 
 // Util
-// #define BREAK_ON_ERROR
+#define BREAK_ON_ERROR
 #ifdef BREAK_ON_ERROR
+volatile int a = 0u;
+
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
 	dlg_default_output(origin, string, data);
 	// (void) string;
@@ -42,8 +44,10 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		#ifdef _MSC_VER
 			DebugBreak();
 		#else
-			std::raise(SIGABRT);
+			// std::raise(SIGABRT);
 		#endif
+
+		a = 42;
 	}
 }
 #endif // BREAK_ON_ERROR

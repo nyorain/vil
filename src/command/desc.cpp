@@ -223,74 +223,85 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 	for(auto it = root; it; it = it->next) {
 		auto m = it->match(*dst[0]);
-		if(m > 0.f && m > bestMatch) {
-			std::vector<const Command*> restCmds;
+		if(m == 0.f || m < bestMatch) {
+			continue;
+		}
 
-			if(dst.size() > 1) {
-				dlg_assert(it->children());
-				auto newThresh = bestMatch / m;
-				auto restResult = find(it->children(), dst.subspan(1), dstDsState, newThresh);
-				if(restResult.hierachy.empty()) {
-					continue;
-				}
+		std::vector<const Command*> currCmds {it};
 
-				restCmds = std::move(restResult.hierachy);
-				m *= restResult.match;
-			} else {
-				// match descriptors, if any
-				// TODO: only consider descriptors statically used by pipeline
-				span<const BoundDescriptorSet> dstBound;
-				span<const BoundDescriptorSet> srcBound;
-				if(auto* dstCmd = dynamic_cast<const DrawCmdBase*>(dst[0])) {
-					dlg_assert_or(dstCmd->state.pipe, continue);
-					auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
-					dstBound = dstCmd->state.descriptorSets.first(dsCount);
+		if(dst.size() > 1) {
+			dlg_assert(it->children());
+			auto newThresh = bestMatch / m;
+			auto restResult = find(it->children(), dst.subspan(1), dstDsState, newThresh);
+			if(restResult.hierachy.empty()) {
+				continue;
+			}
 
-					auto* srcCmd = dynamic_cast<const DrawCmdBase*>(it);
-					dlg_assert_or(srcCmd, continue);
-					dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
-					srcBound = srcCmd->state.descriptorSets.first(dsCount);
-				} else if(auto* dstCmd = dynamic_cast<const DispatchCmdBase*>(dst[0])) {
-					dlg_assert_or(dstCmd->state.pipe, continue);
-					auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
-					dstBound = dstCmd->state.descriptorSets.first(dsCount);
+			auto& rest = restResult.hierachy;
+			currCmds.insert(currCmds.end(), rest.begin(), rest.end());
+			m *= restResult.match;
+		} else {
+			// match descriptors, if any
+			// TODO: only consider descriptors statically used by pipeline
+			span<const BoundDescriptorSet> dstBound;
+			span<const BoundDescriptorSet> srcBound;
+			if(auto* dstCmd = dynamic_cast<const DrawCmdBase*>(dst[0])) {
+				dlg_assert_or(dstCmd->state.pipe, continue);
+				auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
+				dstBound = dstCmd->state.descriptorSets.first(dsCount);
 
-					auto* srcCmd = dynamic_cast<const DispatchCmdBase*>(it);
-					dlg_assert_or(srcCmd, continue);
-					dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
-					srcBound = srcCmd->state.descriptorSets.first(dsCount);
-				}
+				auto* srcCmd = dynamic_cast<const DrawCmdBase*>(it);
+				dlg_assert_or(srcCmd, continue);
+				dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
+				srcBound = srcCmd->state.descriptorSets.first(dsCount);
+			} else if(auto* dstCmd = dynamic_cast<const DispatchCmdBase*>(dst[0])) {
+				dlg_assert_or(dstCmd->state.pipe, continue);
+				auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
+				dstBound = dstCmd->state.descriptorSets.first(dsCount);
 
-				if(!dstBound.empty()) {
-					// TODO: consider dynamic offsets?
+				auto* srcCmd = dynamic_cast<const DispatchCmdBase*>(it);
+				dlg_assert_or(srcCmd, continue);
+				dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
+				srcBound = srcCmd->state.descriptorSets.first(dsCount);
+			}
 
-					unsigned match {};
-					for(auto i = 0u; i < srcBound.size(); ++i) {
-						if(!srcBound[i].ds || !dstBound[i].ds) {
-							// TODO: not sure if this can happen. Do sets
-							// that are statically not used by pipeline
-							// have to be bound?
-							dlg_warn("ds not bound? shouldn't happen");
-							continue;
-						}
+			if(!dstBound.empty()) {
+				// TODO: consider dynamic offsets?
 
-						auto& src = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
-						auto dst = dstDsState.states.find(dstBound[i].ds);
-						dlg_assert_or(dst != dstDsState.states.end(), continue);
-						match += vil::match(nonNull(src), nonNull(dst->second));
+				unsigned match {};
+				for(auto i = 0u; i < srcBound.size(); ++i) {
+					if(!srcBound[i].ds || !dstBound[i].ds) {
+						// TODO: not sure if this can happen. Do sets
+						// that are statically not used by pipeline
+						// have to be bound?
+						dlg_warn("ds not bound? shouldn't happen");
+						continue;
 					}
 
-					m *= float(match) / srcBound.size();
+					auto& src = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
+					auto dst = dstDsState.states.find(dstBound[i].ds);
+					dlg_assert_or(dst != dstDsState.states.end(), continue);
+					match += vil::match(nonNull(src), nonNull(dst->second));
 				}
-			}
 
-			if(m > bestMatch) {
-				bestCmds.clear();
-				bestCmds.push_back(it);
-				bestCmds.insert(bestCmds.end(), restCmds.begin(), restCmds.end());
-				bestMatch = m;
+				m *= float(match) / srcBound.size();
 			}
 		}
+
+		if(m == 0.f || m < bestMatch) {
+			continue;
+		} else if(m == bestMatch && !bestCmds.empty()) {
+			// when the match values of two commands are equal, choose
+			// simply by order in current hierachy level.
+			if(std::abs(int(currCmds.front()->relID) - int(dst.front()->relID)) >=
+					std::abs(int(bestCmds.front()->relID) - int(dst.front()->relID))) {
+				continue;
+			}
+		}
+
+		bestCmds.clear();
+		bestCmds = std::move(currCmds);
+		bestMatch = m;
 	}
 
 	return {bestCmds, bestMatch};

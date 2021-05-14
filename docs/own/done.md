@@ -1,3 +1,21 @@
+- [x] bump api version as far as possible when creating instance?
+      not sure if anything could go wrong in practice
+- [x] insert command buffer timing queries
+- [x] track query pools
+- [x] track buffer views
+- [x] should probably not be possible to ever unselect ParentCommands in
+      cb viewer (CommandTypeFlags). Just always display them?
+- [x] CommandMemBlock alignment handling might currently be wrong since
+      we don't take the alignment of the beginning of the mem block into account,
+	  might be less than __STDCPP_DEFAULT_NEW_ALIGNMENT__ due to obj size.
+	  Handle it as we do in ThreadMemBlock
+- [x] when we select a resource of type X should we set the current filter to X
+      in the resource gui? Can be somewhat confusing at the moment
+- [x] figure out how to correctly match swapchain.frameSubmissions to the
+	  commandHook state. See TODO in cb.cpp `dlg_assert(found)`
+- [x] when there are multiple commands with the same match value, choose
+      the one with the smaller difference in Command.relID?
+	  Or (more properly; harder to determine) just go by order then.
 - [x] make sure the environment variables for overlays/window creation work
       as specified in readme everywhere
 - [x] resource viewer: we don't know which handle is currently selected

@@ -11,9 +11,7 @@ namespace vil {
 struct Overlay {
 	Swapchain* swapchain;
 	Gui gui;
-
 	std::vector<RenderBuffer> buffers;
-	bool show {};
 
 	Platform* platform {};
 

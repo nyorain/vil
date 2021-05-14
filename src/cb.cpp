@@ -617,6 +617,8 @@ void cmdBarrier(
 		BarrierCmdBase& 							cmd,
 		VkPipelineStageFlags                        srcStageMask,
 		VkPipelineStageFlags                        dstStageMask) {
+	ExtZoneScoped;
+
 	cmd.srcStageMask = srcStageMask;
 	cmd.dstStageMask = dstStageMask;
 
@@ -893,7 +895,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		const VkDescriptorSet*                      pDescriptorSets,
 		uint32_t                                    dynamicOffsetCount,
 		const uint32_t*                             pDynamicOffsets) {
-	ZoneScoped;
+	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindDescriptorSetCmd>(cb);
@@ -917,10 +919,10 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = get(*cb.dev, pDescriptorSets[i]);
 
-		useHandle(cb, cmd, ds);
 		cmd.sets[i] = &ds;
-
 		setHandles[i] = ds.handle;
+
+		useHandle(cb, cmd, ds);
 	}
 
 	// TODO: not sure about this. The spec isn't clear about this.
@@ -947,14 +949,17 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 		dlg_error("Unknown pipeline bind point");
 	}
 
-	cb.dev->dispatch.CmdBindDescriptorSets(cb.handle(),
-		pipelineBindPoint,
-		cmd.pipeLayout->handle,
-		firstSet,
-		descriptorSetCount,
-		setHandles.data(),
-		dynamicOffsetCount,
-		pDynamicOffsets);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdBindDescriptorSets(cb.handle(),
+			pipelineBindPoint,
+			cmd.pipeLayout->handle,
+			firstSet,
+			descriptorSetCount,
+			setHandles.data(),
+			dynamicOffsetCount,
+			pDynamicOffsets);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
@@ -1919,7 +1924,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 		uint32_t                                    offset,
 		uint32_t                                    size,
 		const void*                                 pValues) {
-	ZoneScoped;
+	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<PushConstantsCmd>(cb);
@@ -1990,8 +1995,11 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	}
 	*/
 
-	cb.dev->dispatch.CmdPushConstants(cb.handle(), cmd.pipeLayout->handle,
-		stageFlags, offset, size, pValues);
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdPushConstants(cb.handle(), cmd.pipeLayout->handle,
+			stageFlags, offset, size, pValues);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetViewport(

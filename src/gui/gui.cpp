@@ -2,6 +2,7 @@
 #include <gui/util.hpp>
 #include <gui/render.hpp>
 #include <gui/commandHook.hpp>
+#include <gui/arimo.hpp>
 #include <layer.hpp>
 #include <queue.hpp>
 #include <handle.hpp>
@@ -347,8 +348,17 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
 	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
 
-	// TODO: support custom fonts. Just embed them directly in lib?
-	// this->io_->Fonts->AddFontFromFileTTF("font.ttf", 16.f);
+	static const ImWchar rangesBasic[] = {
+		0x0020, 0x00FF, // Basic Latin + Latin Supplement
+		0x03BC, 0x03BC, // micro
+		0x03C3, 0x03C3, // small sigma
+		0x2013, 0x2013, // en dash
+		0x2264, 0x2264, // less-than or equal to
+		0,
+	};
+
+	io.Fonts->AddFontFromMemoryCompressedTTF(Arimo_compressed_data,
+		Arimo_compressed_size, 15.f, nullptr, rangesBasic);
 
 	// Apply style
 	auto& style = ImGui::GetStyle();
@@ -1250,7 +1260,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			auto found = false;
 			for(auto& sub : waitSubmissions) {
 				if(sub->parent->queue == pending->queue) {
-					dlg_assert(sub->parent->submitID > pending->submitID);
+					dlg_assert(sub->parent->queueSubmitID > pending->queueSubmitID);
 					found = true;
 					break;
 				}
@@ -1436,6 +1446,8 @@ void Gui::makeImGuiCurrent() {
 
 void Gui::selectResource(Handle& handle, bool activateTab) {
 	tabs_.resources.select(handle);
+	tabs_.resources.filter_ = handle.objectType;
+
 	if(activateTab) {
 		this->activateTab(Tab::resources);
 	}

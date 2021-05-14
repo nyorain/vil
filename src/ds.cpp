@@ -962,6 +962,12 @@ void checkCopyState(DescriptorSet& ds) {
 	}
 }
 
+// NOTE: is UpdateDescriptorSets(WithTemplate), we don't invalidate
+// command records even more, even though it would be needed in most
+// cases (excluding update_after_bind stuff) but we don't need that
+// information and can save some work this way.
+// DescriptorSets
+
 VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		VkDevice                                    device,
 		uint32_t                                    descriptorWriteCount,
@@ -998,25 +1004,11 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 
 		auto dstBinding = write.dstBinding;
 		auto dstElem = write.dstArrayElement;
-		auto invalidate = false;
 
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
 			advanceUntilValid(*ds.state, dstBinding, dstElem);
 			auto& layout = ds.state->layout->bindings[dstBinding];
 			dlg_assert(write.descriptorType == layout.descriptorType);
-
-			if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
-				// TODO: when VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-				// is set, only invalidate the record that use the binding
-				// (rules depend on whether PARTIALLY_BOUND_BIT is set as well).
-				// This needs some additional tracking (probably to be done
-				// while recording the record).
-				// Same issue in 'copy' and 'updateWithTemplate' below
-				// TODO: even though we don't invalidate the record, we
-				// still need to inform it that an update_after_bind descriptor
-				// changed, might need to invalidate a command hook record.
-				invalidate = true;
-			}
 
 			switch(category(write.descriptorType)) {
 				case DescriptorCategory::image: {
@@ -1047,12 +1039,6 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		writes[i].pBufferInfo = bufferInfos.data() + writeOff;
 		writes[i].pTexelBufferView = bufferViews.data() + writeOff;
 
-		if(invalidate) {
-			// TODO: not sure if needed/useful here as we don't directly
-			// reference descriptor sets in a record anyways
-			// ds.invalidateCbs();
-		}
-
 		writeOff += writes[i].descriptorCount;
 	}
 
@@ -1074,26 +1060,12 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		auto dstElem = copy.dstArrayElement;
 		auto srcBinding = copy.srcBinding;
 		auto srcElem = copy.srcArrayElement;
-		auto invalidate = false;
 
 		for(auto j = 0u; j < copy.descriptorCount; ++j, ++srcElem, ++dstElem) {
 			advanceUntilValid(*dst.state, dstBinding, dstElem);
 			advanceUntilValid(*src.state, srcBinding, srcElem);
 
-			auto& layout = dst.state->layout->bindings[dstBinding];
-			if(!(layout.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT)) {
-				// TODO: see above (VkWriteDescriptor) for the issue
-				// with update_unused_while_pending
-				invalidate = true;
-			}
-
 			vil::copy(*dst.state, dstBinding, dstElem, *src.state, srcBinding, srcElem);
-		}
-
-		if(invalidate) {
-			// TODO: not sure if needed/useful here as we don't directly
-			// reference descriptor sets in a record anyways
-			// dst.invalidateCbs();
 		}
 	}
 
@@ -1174,8 +1146,6 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	auto& dev = *ds.dev;
 	auto& dut = get(dev, descriptorUpdateTemplate);
 
-	bool invalidate = false;
-
 	checkCopyState(ds);
 
 	auto totalSize = totalUpdateDataSize(dut);
@@ -1219,12 +1189,6 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 					break;
 			}
 		}
-	}
-
-	if(invalidate) {
-		// TODO: not sure if needed/useful here as we don't directly
-		// reference descriptor sets in a record anyways
-		// ds.invalidateCbs();
 	}
 
 	{

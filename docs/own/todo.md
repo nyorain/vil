@@ -3,14 +3,8 @@
 v0.1, goal: end of january 2021 (edit may 2021: lmao) 
 
 urgent, bugs:
-- [ ] {high prio} most of the notes in CommandHook::hook are highly relevant.
-      Especially handling of hook state overflow. Happens quickly when switching
-	  out of command viewer tab. We shouldn't do any hooking when we
-	  are not currently in that tab.
 
 matching:
-- [ ] figure out how to correctly match swapchain.frameSubmissions to the
-	  commandHook state. See TODO in cb.cpp `dlg_assert(found)`
 - [ ] (low prio, later) implement 'match' for missing commands, e.g.
       for queryPool/event/dynamic state commands
 - [ ] (for later) fix/improve command matching for sync/bind commands
@@ -21,8 +15,12 @@ matching:
       command matching/finding the best hook from last frame
 
 descriptor indexing extension:
-- [ ] fix handling of update_unused_while_pending descriptors, see ds.cpp
-      also consider partially_bound flag
+- [ ] support partially_bound. Also not sure we have update_after_bind in
+      mind everywhere. We would at least have to lock the descriptorSetState mutex
+	  when reading it in Gui to support this, might get a race otherwise.
+- [ ] fix commandHook for updateAfterBind, updateUnusedWhilePending.
+      We might need to invalidate the hooked records when a used descriptor
+	  was changed
 - [ ] (for later) investigate whether our current approach really
       scales for descriptor sets with many thousand bindings
 
@@ -55,6 +53,7 @@ docs
 		  {see docs/compute-only.md}
 
 window/overlay
+- [ ] make the key to toggle/focus overlay configurable
 - [ ] dota: figure out why hooked overlay does not work anymore when in game
       probably something to do with the way we grab input over x11
 - [ ] fix/implement input pass-through when the hooked overlay does not have
@@ -82,7 +81,7 @@ window/overlay
 - [ ] fix overlay for wayland. Use xdg popup
 
 performance/profiling:
-- [ ] {high prio} also don't always copy DescriptorSetState on submission.
+- [ ] also don't always copy DescriptorSetState on submission.
       Leads to lot of DescriptorSetState copies, destructors.
 	  We only need to do it when currently in swapchain mode *and* inside
 	  the cb tab. (maybe we can even get around always doing it in that
@@ -97,6 +96,7 @@ performance/profiling:
 	  that has been submitted so far. That mutex would have to be
 	  locked before locking the device mutex, never the other way around.
 - [ ] don't lock the dev mutex during our spirv xfb injection
+- [ ] the performance notes in CommandHook::hook are relevant
 - [ ] add (extensive) time zone to basically every entry point so we
 	  can quickly figure out why an application is slow
 
@@ -133,7 +133,7 @@ gui stuff
 	- [ ] only show application info if filled out by app. collapse by default?
 - [ ] imgui styling. It's really not beautiful at the moment, compare with
       other imgui applications
-	- [ ] use custom font
+	- [x] use custom font
 	- [ ] also use icons where useful (via icon font, like e.g. tracy does)
 	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
 	      are really overwhelming and hard to read at the moment.
@@ -153,13 +153,10 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
-- [ ] CommandMemBlock alignment handling might currently be wrong since
-      we don't take the alignment of the beginning of the mem block into account,
-	  might be less than __STDCPP_DEFAULT_NEW_ALIGNMENT__ due to obj size.
-	  Handle it as we do in ThreadMemBlock
 - [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
       make sure destruction is tracked correctly. Also show in gui.
 	  See the commands in cb.cpp
+- [ ] commandHook: See the TODO on 'completed'. Might create problems atm.
 - [ ] with the ds changes, we don't correctly track commandRecord invalidation
       by destroyed handles anymore. But with e.g. update_unused_while_pending +
 	  partially_bound, we can't track that anyways and must just assume
@@ -213,8 +210,6 @@ other
 		  resource viewer only viewing buffers) its very redundant.
 		  In most cases, it's redundant, only useful for some buttons (but
 		  even then we likely should rather have `Image: |terrainHeightmap|`.
-- [ ] should probably not be possible to ever unselect ParentCommands in
-      cb viewer (CommandTypeFlags). Just always display them?
 - [ ] improve handling of transparent images. Checkerboard background?
 	- [x] when viewing image as grayscale they become transparent atm.
 	      no idea why
@@ -298,8 +293,6 @@ Possibly for later, new features/ideas:
 	  no idea for good heuristics
 - [ ] when selecting a draw call, allow to color it in final render
 	- [ ] would require us to modify shader/pipeline. lots of work
-- [ ] when we select a resource of type X should we set the current filter to X
-      in the resource gui? Can be somewhat confusing at the moment
 - [ ] the gui code is currently rather messy. Think of a general concept
       on how to handle tabs, image draws and custom pipelines/draws inside imgui
 - [ ] reading 64-bit int formats might have precision problems, see the format
@@ -497,8 +490,6 @@ Possibly for later, new features/ideas:
 	  at least some handles (at least root resources like memory, samplers etc)
 	  will always be in common. Command buffers that use almost entirely the
 	  same buffers and images can be considered related
-- [x] bump api version as far as possible when creating instance?
-      not sure if anything could go wrong in practice
 - [ ] register own debug messenger if possible?
 - [ ] not sure if current cmdExecuteCommands implementation is the best.
       see comment there.
@@ -601,15 +592,12 @@ Possibly for later, new features/ideas:
 - [ ] support all other extensions (non-crash)
 - [ ] interactive 3D cubemap viewer
 - [ ] interactive 3D model viewer
-- [x] insert command buffer timing queries
 - [ ] per-drawcall image visualization using the inserted subpass + 
       input attachment shader copy idea, if possible
 - [ ] event log showing all queue submits
 	- [ ] optionally show resource creations/destructions there as well
 - [ ] resource and queue freezing
 	- [ ] something like "freeze on next frame/next submission"
-- [x] track query pools
-- [x] track buffer views
 - [ ] better pipeline state overview of inputs, stages, outputs
 	- [ ] maybe via a graph?
 - [ ] we might be able to properly hook input (without needing the public api)
@@ -624,7 +612,9 @@ Possibly for later, new features/ideas:
 - [ ] all this dynamic_cast'ing on Command's isn't good. There is a limited
       number of commands (and we never absolutely need something like
 	  dynamic_cast<DrawCmdBase*> i guess?) so we could enum it away.
-	  But otoh dynamic_cast and hierachy is probably better for maintainability
+	  But otoh dynamic_cast and hierachy is probably better for maintainability.
+	  But we should replace DrawCmdBase dynamic_casts with checks for
+	  type() == CommandType::draw
 - [ ] explore what random stuff we are able to do
 	- [ ] Visualize models (drawcalls) on its own by inferring
 	  	  position (and possibly other attribs; hard to infer though, could use heuristics

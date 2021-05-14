@@ -837,6 +837,7 @@ struct CopyQueryPoolResultsCmd final : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
+// Push descriptor commands
 struct PushDescriptorSetCmd final : Command {
 	VkPipelineBindPoint bindPoint {};
 	PipelineLayout* pipeLayout {};
@@ -859,6 +860,142 @@ struct PushDescriptorSetWithTemplateCmd final : Command {
 
 	Type type() const override { return Type::bind; }
 	std::string nameDesc() const override { return "PushDescriptorSetWithTemplate"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// TODO: everything below is WIP
+// TODO: support VK_KHR_device_group? I guess we would have to consider it
+//   in gui rendering as well which might not be trivial.
+
+// VK_KHR_fragment_shading_rate
+struct SetFragmentShadingRateCmd final : Command {
+	VkExtent2D fragmentSize;
+	std::array<VkFragmentShadingRateCombinerOpKHR, 2> combinerOps;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetFragmentShadingRateCmd"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// VK_EXT_conditional_rendering
+struct BeginConditionalRenderingCmd final : SectionCommand {
+	Buffer* buffer;
+	VkDeviceSize offset;
+	VkConditionalRenderingFlagsEXT flags;
+
+	Type type() const override { return Type::other; }
+	std::string nameDesc() const override { return "BeginConditionalRendering"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct EndConditionalRenderingCmd final : Command {
+	Type type() const override { return Type::end; }
+	std::string nameDesc() const override { return "EndConditionalRendering"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// VK_EXT_line_rasterization
+struct SetLineStippleCmd final : Command {
+	u32 stippleFactor;
+	u16 stipplePattern;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetLineStipple"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// VK_EXT_extended_dynamic_state
+struct SetCullModeCmd final : Command {
+	VkCullModeFlags cullMode;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetCullMode"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetFrontFaceCmd final : Command {
+	VkFrontFace frontFace;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetFrontFace"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetPrimitiveTopologyCmd final : Command {
+	VkFrontFace frontFace;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetPrimitiveTopology"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetViewportWithCountCmd final : Command {
+	span<VkViewport> viewports;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetViewportWithCount"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetScissorWithCountCmd final : Command {
+	span<VkRect2D> scissors;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetScissorWithCount"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// BindVertexBuffers2Cmd is mapped via BindVertexBuffers
+
+struct SetDepthTestEnableCmd final : Command {
+	bool enable;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetDepthTestEnable"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetDepthWriteEnableCmd final : Command {
+	bool enable;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetDepthWriteEnable"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetDepthCompareOpCmd final : Command {
+	VkCompareOp op;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetDepthCompareOp"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetDepthBoundsTestEnableCmd final : Command {
+	bool enable;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetDepthBoundsTestEnable"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetStencilTestEnableCmd final : Command {
+	bool enable;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetStencilTestEnable"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetStencilOpCmd final : Command {
+    VkStencilFaceFlags faceMask;
+    VkStencilOp failOp;
+    VkStencilOp passOp;
+    VkStencilOp depthFailOp;
+    VkCompareOp compareOp;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetStencilOp"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 

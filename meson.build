@@ -192,6 +192,9 @@ src = files(
 	'src/gui/commandHook.hpp',
 	'src/gui/vertexViewer.hpp',
 
+	# fonts
+	'src/gui/arimo.cpp',
+
 	'src/util/util.hpp',
 	'src/util/span.hpp',
 	'src/util/flags.hpp',

@@ -1037,10 +1037,13 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 		select(cb.pool());
 	}
 
+	// NOTE: we don't show "invalid" anymore since we don't track
+	// that correctly in all cases (mainly descriptors). It's not
+	// very important anyways.
 	auto stateName = [](auto state) {
 		switch(state) {
+			case CommandBuffer::State::invalid: /*return "invalid";*/
 			case CommandBuffer::State::executable: return "executable";
-			case CommandBuffer::State::invalid: return "invalid";
 			case CommandBuffer::State::initial: return "initial";
 			case CommandBuffer::State::recording: return "recording";
 			default: return "unknonw";
@@ -1052,7 +1055,7 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 	// maybe show commands inline (in tree node)
 	// and allow via button to switch to cb viewer?
 	if(cb.lastRecordLocked()) {
-		if(ImGui::Button("View Content")) {
+		if(ImGui::Button("View Last Recording")) {
 			gui_->cbGui().select(cb.lastRecordPtrLocked(), cb);
 			gui_->activateTab(Gui::Tab::commandBuffer);
 		}
@@ -1281,43 +1284,7 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
 	imGuiText("Priority: {}", queue.priority);
 
-	imGuiText("Submission Counter: {}", queue.submissionCount);
-
-	/*
-	for(auto* group : queue.groups) {
-		ImGui::PushID(group);
-
-		// TODO: display desc?
-		if(ImGui::Button("View command group")) {
-			gui_->cbGui().selectGroup(group->lastRecord);
-			gui_->activateTab(Gui::Tab::commandBuffer);
-		}
-
-		// TODO: mainly debug data, remove!
-		ImGui::SameLine();
-		imGuiText("Num queues: {}", group->queues.size());
-
-		ImGui::SameLine();
-		imGuiText(", Alive records: {}", group->aliveRecords.size());
-
-		ImGui::SameLine();
-		imGuiText(", Last record refCount: {}", group->lastRecord->refCount);
-
-		u64* foundID = nullptr;
-		for (auto& [q, id] : group->queues) {
-			if (q == &queue) {
-				foundID = &id;
-				break;
-			}
-		}
-
-		dlg_assert(foundID);
-		ImGui::SameLine();
-		imGuiText(", Last Submitted: {}",  *foundID);
-
-		ImGui::PopID();
-	}
-	*/
+	imGuiText("Submission Counter: {}", queue.submissionCounter);
 }
 
 void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {

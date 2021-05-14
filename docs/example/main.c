@@ -904,10 +904,9 @@ bool init_renderer(struct state* state) {
 	}
 
 	state->phdev = phdevs[0];
-	// TODO: temporary workaround for my amdgpu kernel driver crashing
-	// all the time... advanced penguin devices
-	if(count > 1) {
-		state->phdev = phdevs[1];
+	// TODO: temporary workaround
+	if(count > 2) {
+		state->phdev = phdevs[2];
 	}
 
 	// output dev extensions

@@ -26,7 +26,7 @@ struct Queue : Handle {
 
 	// Counted up each time this queue is submitted to.
 	// Might wrap around.
-	u64 submissionCount {};
+	u64 submissionCounter {};
 };
 
 // All data we store for a queue family.
@@ -81,7 +81,8 @@ VkFence getFenceFromPool(Device& dev);
 struct SubmissionBatch {
 	Queue* queue {};
 	std::vector<Submission> submissions; // immutable after creation
-	u64 submitID {};
+	u64 queueSubmitID {};
+	u64 globalSubmitID {};
 
 	// The fence added by the caller.
 	// Might be null

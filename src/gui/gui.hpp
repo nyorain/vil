@@ -34,6 +34,8 @@ public:
 		span<const VkSemaphore> waitSemaphores;
 	};
 
+	bool visible {false};
+
 public:
 	Gui() = default;
 	Gui(Gui&&) = delete;
@@ -57,6 +59,8 @@ public:
 	// with the given submission batch. In case there is no such Draw,
 	// returns nullptr.
 	Draw* latestPendingDrawSyncLocked(SubmissionBatch&);
+
+	Tab activeTab() const { return activeTab_; }
 
 	void activateTab(Tab);
 	void selectResource(Handle& handle, bool activateTab = true);

@@ -63,6 +63,9 @@ struct Device {
 	// for every used queue index (access them via Queue::commandPool, only
 	// managed here so we don't have multiple pools per family index).
 	std::vector<u32> usedQueueFamilyIndices;
+	// Global submission counter - counts for all queues.
+	// Is increased for every VkQueueSubmit call.
+	std::atomic<u64> submissionCounter;
 
 	// The queue we use for graphics submissions. Can be assumed to
 	// be non-null.

@@ -54,12 +54,12 @@ extern "C" VIL_API VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice v
 
 extern "C" VIL_API void vilOverlayShow(VilOverlay overlay, bool show) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
-	ov.show = show;
+	ov.gui.visible = show;
 }
 
 extern "C" VIL_API void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
-	if(ov.show) {
+	if(ov.gui.visible) {
 		ov.gui.imguiIO().MousePos = {float(x), float(y)};
 	}
 }
@@ -67,7 +67,7 @@ extern "C" VIL_API void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int 
 // They return whether the event was processed by the overlay
 extern "C" VIL_API bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned button, bool press) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
-	if(ov.show && button < 5) {
+	if(ov.gui.visible && button < 5) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseDown[button] = press;
 		return io.WantCaptureMouse;
@@ -77,7 +77,7 @@ extern "C" VIL_API bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned 
 }
 extern "C" VIL_API bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x, float y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
-	if(ov.show) {
+	if(ov.gui.visible) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseWheel += y;
 		io.MouseWheelH += x;
@@ -92,11 +92,11 @@ extern "C" VIL_API bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keycode,
 
 	// TODO; remove hardcoded toggle.
 	if(keycode == swa_key_backslash && pressed) {
-		ov.show ^= true;
+		ov.gui.visible ^= true;
 		return true;
 	}
 
-	if(!ov.show) {
+	if(!ov.gui.visible) {
 		return false;
 	}
 
@@ -108,7 +108,7 @@ extern "C" VIL_API bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keycode,
 
 extern "C" VIL_API bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
-	if(!ov.show || !utf8) {
+	if(!ov.gui.visible || !utf8) {
 		return false;
 	}
 
@@ -119,7 +119,7 @@ extern "C" VIL_API bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8
 
 extern "C" VIL_API void vilOverlayKeyboardModifier(VilOverlay overlay, uint32_t mod, bool active) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
-	if(!ov.show) {
+	if(!ov.gui.visible) {
 		return;
 	}
 

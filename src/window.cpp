@@ -262,6 +262,7 @@ bool DisplayWindow::initSwapchain() {
 	depthFormat_ = findDepthFormat(dev);
 	dlg_assert(depthFormat_ != VK_FORMAT_UNDEFINED);
 	this->gui.init(dev, sci.imageFormat, depthFormat_, true);
+	this->gui.visible = true;
 	initBuffers();
 
 	return true;

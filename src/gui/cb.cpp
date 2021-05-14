@@ -144,7 +144,7 @@ void CommandBufferGui::draw(Draw& draw) {
 			dsState_ = {};
 			command_ = {};
 			hook.target = {};
-			hook.desc({}, {});
+			hook.desc({}, {}, {});
 			hook.unsetHookOps();
 			return;
 		}
@@ -177,7 +177,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	if(mode_ == UpdateMode::swapchain) {
 		if(records_.empty() && !gui_->dev().swapchain->frameSubmissions.empty()) {
-			records_ = std::move(gui_->dev().swapchain->frameSubmissions);
+			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
 		}
 
 		auto* selected = record_ && !command_.empty() ? command_.back() : nullptr;
@@ -232,7 +232,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 							// dev.commandHook->target.group = record_->group;
 							dev.commandHook->target.all = true;
-							dev.commandHook->desc(command_, dsState_);
+							dev.commandHook->desc(record_, command_, dsState_);
 						}
 
 						ImGui::Indent(s);
@@ -276,7 +276,7 @@ void CommandBufferGui::draw(Draw& draw) {
 			commandViewer_.select(record_, *command_.back(), dsState_, true);
 
 			// in any case, update the hook
-			dev.commandHook->desc(command_, dsState_);
+			dev.commandHook->desc(record_, command_, dsState_);
 		}
 
 		ImGui::PopID();
@@ -300,40 +300,44 @@ void CommandBufferGui::draw(Draw& draw) {
 
 		dlg_assert(!best->state->writer);
 
-		// update internal state from hook match
-		command_ = best->command;
-		record_ = std::move(best->record);
-		dsState_ = std::move(best->descriptorSnapshot);
-
-		commandViewer_.select(record_, *command_.back(), dsState_, false);
+		// update command viewer state from hook match
+		commandViewer_.select(best->record, *best->command.back(),
+			best->descriptorSnapshot, false);
 		commandViewer_.state(best->state);
 
-		dev.commandHook->desc(command_, dsState_, false);
+		// we alwyas update the commandHook desc (even if we don't
+		// update the internal state below) since this record is newer
+		// than the old one and might have valid handles/state that is
+		// already unset in the old one.
+		dev.commandHook->desc(best->record, best->command,
+			best->descriptorSnapshot, false);
 
+		// update internal state state from hook match
+		if(mode_ != UpdateMode::swapchain || !freezePresentBatches_) {
+			record_ = std::move(best->record);
+			command_ = best->command;
+			dsState_ = std::move(best->descriptorSnapshot);
+		}
+
+		auto bestSubID = best->submissionID;
 		hook.completed.clear();
 
 		if(mode_ == UpdateMode::swapchain && !freezePresentBatches_) {
-			if(!gui_->dev().swapchain->frameSubmissions.empty()) {
-				records_ = std::move(gui_->dev().swapchain->frameSubmissions);
+			dlg_assert(gui_->dev().swapchain);
 
-				// TODO: strictly speaking, this isn't guaranteed. We would
-				// need to know in which swapchain-frame-number record_
-				// was hooked and then retrieve the records for that frame.
-				// Or maybe clear all valid hook states on present? but
-				// that's bad as well.
-				auto found = false;
-				for(auto& b : records_) {
-					for(auto& s : b.submissions) {
-						if(record_ == s) {
-							found = true;
-							goto breakLoop;
-						}
-					}
+			// TODO: handle the case when we don't find it.
+			// Can happen if the completed hook is from too long ago, e.g.
+			// when just opening gui again/switching to cb tab again.
+			auto found = false;
+			for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
+				if(bestSubID >= frame.submissionStart && bestSubID <= frame.submissionEnd) {
+					records_ = frame.batches;
+					found = true;
+					break;
 				}
-
-breakLoop:
-				dlg_assert(found);
 			}
+
+			dlg_assert(found);
 		}
 	}
 
@@ -364,7 +368,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({}, {});
+	hook.desc({}, {}, {});
 
 	command_ = {};
 	record_ = std::move(record);
@@ -389,7 +393,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({}, {});
+	hook.desc({}, {}, {});
 
 	command_ = {};
 	record_ = std::move(record);
@@ -411,7 +415,7 @@ void CommandBufferGui::showSwapchainSubmissions() {
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({}, {});
+	hook.desc({}, {}, {});
 	hook.target = {};
 
 	commandViewer_.unselect();
@@ -430,7 +434,7 @@ void CommandBufferGui::selectGroup(IntrusivePtr<CommandRecord> record) {
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
 	hook.unsetHookOps();
-	hook.desc({}, {});
+	hook.desc({}, {}, {});
 	hook.target = {};
 
 	command_ = {};

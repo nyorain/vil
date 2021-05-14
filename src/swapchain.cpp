@@ -101,6 +101,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
 
+	// use data from old swapchain
+	if(oldChain) {
+		swapd.presentCounter = oldChain->presentCounter;
+		swapd.lastPresent = std::move(oldChain->lastPresent);
+		swapd.frameTimings = std::move(oldChain->frameTimings);
+		swapd.frameSubmissions = std::move(oldChain->frameSubmissions);
+	}
+
 	// add swapchain images to tracked images
 	u32 imgCount = 0u;
 	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapd.handle, &imgCount, nullptr));
@@ -179,6 +187,38 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 	devd.dispatch.DestroySwapchainKHR(device, swapchain, pAllocator);
 }
 
+void swapchainPresent(Swapchain& swapchain) {
+	// update swapchain data
+	FrameSubmissions keepAliveFrameSubmissions;
+
+	auto lock = std::lock_guard(swapchain.dev->mutex);
+	++swapchain.presentCounter;
+	keepAliveFrameSubmissions = std::move(swapchain.frameSubmissions.back());
+
+	for(auto i = swapchain.frameSubmissions.size(); i >= 2u; --i) {
+		swapchain.frameSubmissions[i - 1] = std::move(swapchain.frameSubmissions[i - 2]);
+	}
+
+	swapchain.frameSubmissions[0] = std::move(swapchain.nextFrameSubmissions);
+	swapchain.frameSubmissions[0].presentID = swapchain.presentCounter;
+	swapchain.frameSubmissions[0].submissionEnd = swapchain.dev->submissionCounter;
+
+	swapchain.nextFrameSubmissions = {};
+	swapchain.nextFrameSubmissions.submissionStart = swapchain.dev->submissionCounter + 1;
+
+	// timing
+	auto now = Swapchain::Clock::now();
+	if(swapchain.lastPresent) {
+		if(swapchain.frameTimings.size() == swapchain.maxFrameTimings) {
+			swapchain.frameTimings.erase(swapchain.frameTimings.begin());
+		}
+
+		auto timing = now - *swapchain.lastPresent;
+		swapchain.frameTimings.push_back(timing);
+	}
+	swapchain.lastPresent = now;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		VkQueue                                     queue,
 		const VkPresentInfoKHR*                     pPresentInfo) {
@@ -192,21 +232,15 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		VkResult res;
 
 		if(swapchain.overlay && swapchain.overlay->platform) {
-			swapchain.overlay->show = swapchain.overlay->platform->update(swapchain.overlay->gui);
+			swapchain.overlay->gui.visible = swapchain.overlay->platform->update(swapchain.overlay->gui);
 		}
 
-		auto now = Swapchain::Clock::now();
-		if(swapchain.lastPresent) {
-			if(swapchain.frameTimings.size() == swapchain.maxFrameTimings) {
-				swapchain.frameTimings.erase(swapchain.frameTimings.begin());
-			}
+		// update tracked frameSubmissions and timings before drawing
+		// the potential overlay is important so that the new state
+		// can already be displayed.
+		swapchainPresent(swapchain);
 
-			auto timing = now - *swapchain.lastPresent;
-			swapchain.frameTimings.push_back(timing);
-		}
-		swapchain.lastPresent = now;
-
-		if(swapchain.overlay && swapchain.overlay->show) {
+		if(swapchain.overlay && swapchain.overlay->gui.visible) {
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
 		} else {
@@ -218,8 +252,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 			pi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
 			pi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
 			pi.swapchainCount = 1u;
-			// TODO: might be bad to not forward this
-			// pi.pNext
+			pi.pNext = pPresentInfo->pNext;
 
 			std::lock_guard queueLock(qd.dev->queueMutex);
 			ZoneScopedN("dispatch");
@@ -233,10 +266,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		if(res != VK_SUCCESS && combinedResult == VK_SUCCESS) {
 			combinedResult = res;
 		}
-
-		++swapchain.presentCounter;
-		std::swap(swapchain.frameSubmissions, swapchain.nextFrameSubmissions);
-		swapchain.nextFrameSubmissions.clear();
 	}
 
 	return combinedResult;

@@ -7,6 +7,7 @@
 #include <rp.hpp>
 #include <cb.hpp>
 #include <buffer.hpp>
+#include <gui/gui.hpp>
 #include <command/desc.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
@@ -176,16 +177,17 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		return hooked.handle();
 	}
 
-	// PERF: only hook when there is something to do.
-	// Hook might have no actively needed queries. (Not sure this is
-	// really ever the case, we always query time i guess)
-	// PERF: in gui, make sure remove hooks when currently not inside
-	// cb viewer? or when the gui is closed
+	// When there is no gui viewing the submissions at the moment, we don't
+	// need/want to hook the submission.
+	auto& dev = *hooked.dev;
+	if(!dev.gui || !dev.gui->visible || dev.gui->activeTab() != Gui::Tab::commandBuffer) {
+		return hooked.handle();
+	}
 
-	// Check if it already has a valid record associated
-	// TODO(important): before calling find, we'd need to unset the
-	// invalidated handles from the commands in hierachy_, might lead
-	// to problems at the moment. Make sure we get the CommandRecord in desc().
+	// Before calling find, we need to unset the invalidated handles from the
+	// commands in hierachy_, find relies on all of them being valid.
+	replaceInvalidatedLocked(nonNull(record_));
+
 	// TODO, PERF: when record->hook is true, we only query this
 	// to get the new 'match' value (and for debug checks below).
 	// Kinda wasted to do all that work.
@@ -198,6 +200,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 	dlg_assert(findRes.hierachy.size() == hierachy_.size());
 
+	// Check if it already has a valid record associated
 	// TODO: not possible to reuse the hook-recorded cb when the command
 	// buffer uses any update_after_bind descriptors that changed. Track
 	// that somehow. See notes in ds.cpp on 'invalidate'.
@@ -245,8 +248,10 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	return hook->cb;
 }
 
-void CommandHook::desc(std::vector<const Command*> hierachy,
+void CommandHook::desc(IntrusivePtr<CommandRecord> rec,
+		std::vector<const Command*> hierachy,
 		CommandDescriptorSnapshot dsState, bool invalidate) {
+	record_ = std::move(rec);
 	hierachy_ = std::move(hierachy);
 	dsState_ = std::move(dsState);
 
@@ -366,7 +371,8 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	ZoneScopedN("HookRecord");
 	this->hookRecord(record->commands, info);
 
-	dlg_assert(maxHookLevel == hcommand.size() - 1);
+	dlg_assert(maxHookLevel >= hcommand.size() - 1);
+	dlg_assert(hcommand.back()->children() || maxHookLevel == hcommand.size() - 1);
 	VK_CHECK(dev.dispatch.EndCommandBuffer(this->cb));
 }
 
@@ -480,11 +486,10 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 	if(info.splitRenderPass) {
 		dlg_assert(info.beginRenderPassCmd);
 
-		// TODO: missing potential forward of pNext chain here
 		auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
 		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
 			// TODO: missing potential forward of pNext chain here
-			// TODO: subpass contents relevant?
+			// Subpass contents irrelevant.
 			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 		}
 		dev.dispatch.CmdEndRenderPass(cb);
@@ -509,7 +514,7 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 
 		for(auto i = 0u; i < info.hookedSubpass; ++i) {
 			// TODO: missing potential forward of pNext chain here
-			// TODO: subpass contents relevant?
+			// Subpass contents irrelevant.
 			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 		}
 	} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
@@ -1313,6 +1318,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	state.state = record->state;
 	state.command = record->hcommand;
 	state.descriptorSnapshot = std::move(this->descriptorSnapshot);
+	state.submissionID = subm.parent->globalSubmitID;
 
 	dlg_assertm(record->hook->completed.size() < 32,
 		"Hook state overflow detected");

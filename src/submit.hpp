@@ -37,7 +37,8 @@ struct QueueSubmitter {
 	Device* dev;
 	Queue* queue;
 	SubmissionBatch* dstBatch;
-	u32 submitID;
+	u64 queueSubmitID; // queue.submissionCounter
+	u64 globalSubmitID; // dev.submissionCounter
 
 	// When we don't have timeline semaphores, we remember the gui draw we
 	// used for gui synchronization so we can reset futureSemaphoreUsed

@@ -15,6 +15,21 @@ struct RecordBatch {
 	std::vector<IntrusivePtr<CommandRecord>> submissions;
 };
 
+struct FrameSubmissions {
+	// presentID (swapchain.presentCounter) associated with this frame.
+	u64 presentID;
+
+	// global submission id (dev.submissionCounter) of the first
+	// submission associated with this frame.
+	u64 submissionStart;
+
+	// global submission id (dev.submissionCounter) of the last
+	// submission associated with this frame.
+	u64 submissionEnd;
+
+	std::vector<RecordBatch> batches;
+};
+
 struct Swapchain : DeviceHandle {
 	VkSwapchainKHR handle {};
 	VkSwapchainCreateInfoKHR ci;
@@ -23,20 +38,30 @@ struct Swapchain : DeviceHandle {
 	// The VkImages associated with this swapchain
 	std::vector<Image*> images;
 
-	// TODO: at the moment we simply track times between presents.
+	// NOTE: at the moment we simply track times between presents.
 	// We could instead separate between between-present, command buffer
 	// execution and in-present timings (to give meaningful timings for
 	// applications limited by vsync or cpu).
 	using Clock = std::chrono::high_resolution_clock;
-	// TODO: maybe rather make this dependent on time it takes to display
-	// them? e.g. store frames from the last X seconds
+	// NOTE: maybe rather make this dependent on time it takes to display
+	// them? e.g. store frames from the last X seconds. And then
+	// maybe take median over N frames so we always also get the
+	// same total sample count (which is important for UI).
+	// e.g. Always show results from the last 10 seconds with 5 bars
+	// per second. Could even make those numbrs configurable in UI,
+	// add a "pure" mode or something (because this accumulation
+	// might show misleading numbers; no real frame timings)
 	static constexpr auto maxFrameTimings = 300u;
 	std::optional<Clock::time_point> lastPresent {};
 	std::vector<Clock::duration> frameTimings;
 
-	u32 presentCounter {};
-	std::vector<RecordBatch> frameSubmissions; // finished
-	std::vector<RecordBatch> nextFrameSubmissions; // being built
+	// Counter that is increased each time VkQueuePresentKHR on this
+	// swapchain is called. Not reset on swapchain recreation.
+	u64 presentCounter {};
+
+	static constexpr auto frameSubmissionCount = 4u;
+	std::array<FrameSubmissions, frameSubmissionCount> frameSubmissions;
+	FrameSubmissions nextFrameSubmissions; // currently being built
 
 	Swapchain() = default;
 	~Swapchain();

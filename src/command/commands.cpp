@@ -158,7 +158,8 @@ std::vector<const Command*> displayCommands(const Command* cmd,
 	// expanded).
 	std::vector<const Command*> ret;
 	while(cmd) {
-		if((typeFlags & cmd->type())) {
+		// No matter the flags, we never want to hide parent commands.
+		if((typeFlags & cmd->type()) || cmd->children()) {
 			ImGui::Separator();
 			if(auto reti = cmd->display(selected, typeFlags); !reti.empty()) {
 				dlg_assert(ret.empty());
@@ -376,6 +377,10 @@ void addNonNull(Matcher& m, T* a, T* b, float weight = 1.0) {
 }
 
 float eval(const Matcher& m) {
+	if(m.total == -1.f) { // no match
+		return 0.f;
+	}
+
 	dlg_assertm(m.match <= m.total, "match {}, total {}", m.match, m.total);
 	return m.total == 0.f ? 1.f : m.match / m.total;
 }
@@ -571,7 +576,7 @@ void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) 
 	}
 
 	for(auto i = 0u; i < a.size(); ++i) {
-		m.total += match(a[i], b[i]);
+		m.match += match(a[i], b[i]);
 	}
 }
 
@@ -2421,7 +2426,7 @@ std::string BindPipelineCmd::toString() const {
 	auto bp = (bindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) ? "compute" : "graphics";
 	auto [nameRes, pipeName] = name(pipe);
 	if(nameRes == NameType::named) {
-		return dlg::format("BindPipeline({}, {})", bp, pipeName);
+		return dlg::format("BindPipeline({}: {})", bp, pipeName);
 	} else {
 		return dlg::format("BindPipeline({})", bp);
 	}

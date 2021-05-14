@@ -1,3 +1,5 @@
+#pragma once
+
 #include <tracy/Tracy.hpp>
 
 #ifdef VIL_EXTENSIVE_ZONES

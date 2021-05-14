@@ -135,7 +135,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	{
 		// Get a new submission ID for this queue
 		std::lock_guard lock(dev.mutex);
-		submitter.submitID = ++qd.submissionCount;
+		submitter.queueSubmitID = ++qd.submissionCounter;
+		submitter.globalSubmitID = ++dev.submissionCounter;
 
 		// Check all pending submissions for completion, to possibly return
 		// resources to fence/semaphore pools
@@ -147,7 +148,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	auto& batch = *batchPtr;
 	batch.submissions.reserve(submitCount); // make sure it's never re-allocated
 	batch.queue = &qd;
-	batch.submitID = submitter.submitID;
+	batch.queueSubmitID = submitter.queueSubmitID;
+	batch.globalSubmitID = submitter.globalSubmitID;
 
 	submitter.dstBatch = &batch;
 

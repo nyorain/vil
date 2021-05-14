@@ -141,6 +141,7 @@ public:
 	// A vector of the last received states of finished submissions.
 	// Must be reset manually when retrieved.
 	struct CompletedHook {
+		u64 submissionID; // global submission id (dev.submissionCounter)
 		IntrusivePtr<CommandRecord> record;
 		IntrusivePtr<CommandHookState> state;
 		CommandDescriptorSnapshot descriptorSnapshot;
@@ -184,8 +185,8 @@ public:
 	void invalidateData() { completed.clear(); }
 
 	// invalidate: Automatically invalidates data and recordings?
-	void desc(std::vector<const Command*> hierachy, CommandDescriptorSnapshot,
-		bool invalidate = true);
+	void desc(IntrusivePtr<CommandRecord> rec, std::vector<const Command*> hierachy,
+		CommandDescriptorSnapshot, bool invalidate = true);
 	void unsetHookOps(bool doQueryTime = false);
 
 	const auto& dsState() const { return dsState_; }
@@ -198,6 +199,7 @@ private:
 	CommandHookRecord* records_ {}; // intrusive linked list
 
 	// description of command to be hooked
+	IntrusivePtr<CommandRecord> record_;
 	CommandDescriptorSnapshot dsState_;
 	std::vector<const Command*> hierachy_;
 };

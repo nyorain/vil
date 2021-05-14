@@ -368,7 +368,7 @@ void postProcessLocked(QueueSubmitter& subm) {
 
 	RecordBatch* recordBatch = nullptr;
 	if(subm.dev->swapchain) {
-		recordBatch = &subm.dev->swapchain->nextFrameSubmissions.emplace_back();
+		recordBatch = &subm.dev->swapchain->nextFrameSubmissions.batches.emplace_back();
 		recordBatch->queue = subm.queue;
 	}
 

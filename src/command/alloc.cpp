@@ -7,7 +7,8 @@ namespace vil {
 
 std::byte* data(CommandMemBlock& mem, size_t offset) {
 	dlg_assert(offset < mem.size);
-	return reinterpret_cast<std::byte*>(&mem) + sizeof(mem) + offset;
+	auto alignedObjSize = align(sizeof(mem), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+	return reinterpret_cast<std::byte*>(&mem) + alignedObjSize + offset;
 }
 
 void freeBlocks(CommandMemBlock* head) {
@@ -27,7 +28,8 @@ void freeBlocks(CommandMemBlock* head) {
 
 CommandMemBlock& createMemBlock(size_t memSize, CommandMemBlock* next) {
 	auto buf = new std::byte[sizeof(CommandMemBlock) + memSize];
-	TracyAllocS(buf, sizeof(CommandMemBlock) + memSize, 8);
+	auto alignedObjSize = align(sizeof(CommandMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+	TracyAllocS(buf, alignedObjSize + memSize, 8);
 
 	auto* memBlock = new(buf) CommandMemBlock;
 	memBlock->size = memSize;
