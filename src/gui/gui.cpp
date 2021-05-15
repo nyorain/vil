@@ -874,11 +874,21 @@ void Gui::drawOverviewUI(Draw& draw) {
 	// pretty much just own debug stuff
 	ImGui::Separator();
 
-	imGuiText("alive records: {}", dev.stats.aliveRecords);
-	imGuiText("alive descriptor sets: {}", dev.stats.aliveDescriptorSets);
-	imGuiText("alive descriptor states: {}", dev.stats.aliveDescriptorStates);
-	imGuiText("alive buffers: {}", dev.stats.aliveBuffers);
-	imGuiText("alive image views: {}", dev.stats.aliveImagesViews);
+	if(checkEnvBinary("VIL_DEBUG", false)) {
+		imGuiText("alive records: {}", dev.stats.aliveRecords);
+		imGuiText("alive descriptor sets: {}", dev.stats.aliveDescriptorSets);
+		imGuiText("alive descriptor states: {}", dev.stats.aliveDescriptorStates);
+		imGuiText("alive buffers: {}", dev.stats.aliveBuffers);
+		imGuiText("alive image views: {}", dev.stats.aliveImagesViews);
+		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
+		imGuiText("transform feedback: {}", dev.transformFeedback);
+		imGuiText("wrap command buffers: {}", HandleDesc<VkCommandBuffer>::wrap);
+		imGuiText("wrap image view: {}", HandleDesc<VkImageView>::wrap);
+		imGuiText("wrap buffers: {}", HandleDesc<VkBuffer>::wrap);
+		imGuiText("wrap descriptor set: {}", HandleDesc<VkDescriptorSet>::wrap);
+		imGuiText("wrap samplers: {}", HandleDesc<VkSampler>::wrap);
+		imGuiText("wrap device: {}", HandleDesc<VkDevice>::wrap);
+	}
 
 	// if(ImGui::TreeNode("Statistics")) {
 	// 	auto numGroups = 0u;
