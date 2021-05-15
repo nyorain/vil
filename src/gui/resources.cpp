@@ -23,10 +23,8 @@ void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 	if(res.memory) {
 		ImGui::Text("Bound to memory ");
 		ImGui::SameLine();
-		auto label = name(*res.memory);
-		if(ImGui::Button(label.c_str())) {
-			select(*res.memory);
-		}
+
+		refButtonExpect(*gui_, res.memory);
 
 		ImGui::SameLine();
 		imGuiText(" (offset {}, size {})",
@@ -589,9 +587,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	// data
 	ImGui::NextColumn();
 
-	if(ImGui::Button(name(*pipe.layout).c_str())) {
-		select(*pipe.layout);
-	}
+	refButtonExpect(*gui_, pipe.layout.get());
 
 	// TODO: allow to display RenderPassDesc
 	// if(ImGui::Button(name(*pipe.renderPass).c_str())) {
@@ -961,9 +957,7 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 	ImGui::Text("Descriptor Set Layouts");
 	for(auto& dsl : pipeLayout.descriptors) {
 		ImGui::Bullet();
-		if(ImGui::Button(name(*dsl).c_str())) {
-			select(*dsl);
-		}
+		refButtonExpect(*gui_, dsl.get());
 	}
 }
 void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
@@ -975,9 +969,7 @@ void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
 		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
 
 	for(auto& cb : cp.cbs) {
-		if(ImGui::Button(name(*cb).c_str())) {
-			select(*cb);
-		}
+		refButtonExpect(*gui_, cb);
 	}
 }
 
@@ -1033,9 +1025,7 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 
 	ImGui::Text("Pool: ");
 	ImGui::SameLine();
-	if(ImGui::Button(name(cb.pool()).c_str())) {
-		select(cb.pool());
-	}
+	refButton(*gui_, cb.pool());
 
 	// NOTE: we don't show "invalid" anymore since we don't track
 	// that correctly in all cases (mainly descriptors). It's not
@@ -1109,9 +1099,7 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 
 		for(auto* fb : view.fbs) {
 			ImGui::Bullet();
-			if(ImGui::Button(name(*fb).c_str())) {
-				select(*fb);
-			}
+			refButtonExpect(*gui_, fb);
 		}
 	}
 }
@@ -1136,9 +1124,7 @@ void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
 
 	for(auto* view : fb.attachments) {
 		ImGui::Bullet();
-		if(ImGui::Button(name(*view).c_str())) {
-			select(*view);
-		}
+		refButtonExpect(*gui_, view);
 	}
 }
 

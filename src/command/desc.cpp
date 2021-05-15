@@ -243,33 +243,40 @@ FindResult find(const Command* root, span<const Command*> dst,
 		} else {
 			// match descriptors, if any
 			// TODO: only consider descriptors statically used by pipeline
+			// NOTE: the `min(dsCount, ...)` is used defensively here to
+			//   account for extensions that mess with bound-descriptor
+			//   requirements, e.g. push descriptors.
 			span<const BoundDescriptorSet> dstBound;
 			span<const BoundDescriptorSet> srcBound;
 			if(auto* dstCmd = dynamic_cast<const DrawCmdBase*>(dst[0])) {
 				dlg_assert_or(dstCmd->state.pipe, continue);
 				auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
-				dstBound = dstCmd->state.descriptorSets.first(dsCount);
+				dstBound = dstCmd->state.descriptorSets.first(
+					std::min(dsCount, dstCmd->state.descriptorSets.size()));
 
 				auto* srcCmd = dynamic_cast<const DrawCmdBase*>(it);
 				dlg_assert_or(srcCmd, continue);
 				dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
-				srcBound = srcCmd->state.descriptorSets.first(dsCount);
+				srcBound = srcCmd->state.descriptorSets.first(
+					std::min(dsCount, srcCmd->state.descriptorSets.size()));
 			} else if(auto* dstCmd = dynamic_cast<const DispatchCmdBase*>(dst[0])) {
 				dlg_assert_or(dstCmd->state.pipe, continue);
 				auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
-				dstBound = dstCmd->state.descriptorSets.first(dsCount);
+				dstBound = dstCmd->state.descriptorSets.first(
+					std::min(dsCount, dstCmd->state.descriptorSets.size()));
 
 				auto* srcCmd = dynamic_cast<const DispatchCmdBase*>(it);
 				dlg_assert_or(srcCmd, continue);
 				dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
-				srcBound = srcCmd->state.descriptorSets.first(dsCount);
+				srcBound = srcCmd->state.descriptorSets.first(
+					std::min(dsCount, srcCmd->state.descriptorSets.size()));
 			}
 
 			if(!dstBound.empty()) {
 				// TODO: consider dynamic offsets?
 
 				unsigned match {};
-				for(auto i = 0u; i < srcBound.size(); ++i) {
+				for(auto i = 0u; i < std::min(srcBound.size(), dstBound.size()); ++i) {
 					if(!srcBound[i].ds || !dstBound[i].ds) {
 						// TODO: not sure if this can happen. Do sets
 						// that are statically not used by pipeline

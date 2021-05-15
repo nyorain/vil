@@ -1,3 +1,16 @@
+- [x] Add more useful overview. 
+	- [x] Maybe directly link to last submitted command buffers?
+	      {this is kinda shitty though, need the concept of command buffer groups
+		   to make this beautiful}
+	- [x] show graph of frame timings (see first sketch swapchain header)
+	- [x] show enabled extensions
+	- [x] show enabled features
+	- [x] only show application info if filled out by app. collapse by default?
+- [x] implement mechanism for deciding per-handle-type whether object wrapping
+      should be done. Either via GUI or env var. 
+	  Performance-wise it's only really important for
+	  CommandBuffers and DescriptorSets (technically also for Device but
+	  that pretty much guarantees that 50% of new extensions will crash).
 - [x] bump api version as far as possible when creating instance?
       not sure if anything could go wrong in practice
 - [x] insert command buffer timing queries

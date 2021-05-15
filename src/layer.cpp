@@ -194,6 +194,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	ini.app.apiVersion = VK_API_VERSION_1_0;
 	if(ci->pApplicationInfo) {
+		ini.app.valid = true;
 		ini.app.apiVersion = ci->pApplicationInfo->apiVersion;
 		ini.app.version = ci->pApplicationInfo->applicationVersion;
 		ini.app.name = strOrEmpty(ci->pApplicationInfo->pApplicationName);

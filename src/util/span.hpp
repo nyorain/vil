@@ -195,29 +195,35 @@ public:
     // [span.sub], span subviews
     template <std::size_t Count>
     constexpr span<element_type, Count> first() const {
+		assert(Count <= size());
         return {data(), Count};
     }
 
     template <std::size_t Count>
     constexpr span<element_type, Count> last() const {
+		assert(Count <= size());
         return {data() + (size() - Count), Count};
     }
 
     template <std::size_t Offset, std::size_t Count = dynamic_extent>
     constexpr auto subspan() const -> typename details::calculate_subspan_type<ElementType, Extent, Offset, Count>::type {
+		assert(Offset <= size());
         return {data() + Offset, Count == dynamic_extent ? size() - Offset : Count};
     }
 
     constexpr span<element_type, dynamic_extent> first(index_type count) const {
+		assert(count <= size());
         return {data(), count};
     }
 
     constexpr span<element_type, dynamic_extent> last(index_type count) const {
+		assert(count <= size());
         return make_subspan(size() - count, dynamic_extent, subspan_selector<Extent>{});
     }
 
     constexpr span<element_type, dynamic_extent> subspan(index_type offset,
             index_type count = dynamic_extent) const {
+		assert(offset <= size());
         return make_subspan(offset, count, subspan_selector<Extent>{});
     }
 

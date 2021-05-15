@@ -17,6 +17,7 @@ struct Instance {
 	VkInstance handle {};
 
 	struct {
+		bool valid {};
 		u32 version {};
 		u32 apiVersion {};
 		u32 engineVersion {};

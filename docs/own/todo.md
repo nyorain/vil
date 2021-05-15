@@ -25,14 +25,14 @@ descriptor indexing extension:
       scales for descriptor sets with many thousand bindings
 
 vertex viewer/xfb:
+- [ ] vertex viewer improvements
+	- [ ] automatically compute bounding box of data and center camera
+	- [ ] allow showing active frustum
 - [ ] really attempt to display non-float formats in 3D vertex viewer?
 - [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
 - [ ] support drawIndirectCount in vertex viewer
 	- [ ] #43, probably for later: also support just showing a single draw command
 		  (see the other todo - #42)
-- [ ] vertex viewer improvements
-	- [ ] automatically compute bounding box of data and center camera
-	- [ ] allow showing active frustum
 - [ ] xfb: support custom outputs, not just the Position Builtin
 	- [ ] xfb: check whether format is supported
 - [ ] better tabular display of data; also show indices
@@ -102,11 +102,9 @@ performance/profiling:
 
 
 object wrapping:
-- [x] implement mechanism for deciding per-handle-type whether object wrapping
-      should be done. Either via GUI or env var. 
-	  Performance-wise it's only really important for
-	  CommandBuffers and DescriptorSets (technically also for Device but
-	  that pretty much guarantees that 50% of new extensions will crash).
+- [ ] (later, low prio) support wrapping for remaining handle types.
+      we can wait with this until it proves to be a bottleneck somewhere
+- [ ] (later, low prio) support wrapping for VkDevice, fix it everywhere
 - [ ] only use the hash maps in Device when we are not using object 
       wrapping. Otherwise a linked list is enough/better.
 	  Could always use the linked list and the hash maps just optionally.
@@ -123,14 +121,6 @@ gui stuff
 	  When selecting the vkQueueSubmit just show an overview.
 - [ ] figure out general approach to fix flickering data, especially
       in command viewer (but also e.g. on image hover in resource viewer)
-- [ ] Add more useful overview. 
-	- [x] Maybe directly link to last submitted command buffers?
-	      {this is kinda shitty though, need the concept of command buffer groups
-		   to make this beautiful}
-	- [x] show graph of frame timings (see first sketch swapchain header)
-	- [x] show enabled extensions
-	- [ ] show enabled features
-	- [ ] only show application info if filled out by app. collapse by default?
 - [ ] imgui styling. It's really not beautiful at the moment, compare with
       other imgui applications
 	- [x] use custom font
@@ -428,8 +418,8 @@ Possibly for later, new features/ideas:
 	- [ ] ext sample locations
 	- [ ] ext discard rectangles
 	- [ ] nv viewport scaling
-	- [ ] ext conditional rendering
-	- [ ] transform feedback (?)
+	- [x] ext conditional rendering
+	- [ ] transform feedback (not sure we want to support this at all?)
 	- [x] implement khr_copy_commands2 extension
 	- [ ] khr fragment shading rate
 	- [ ] nv shading rate enums

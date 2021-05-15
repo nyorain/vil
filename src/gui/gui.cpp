@@ -697,6 +697,9 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 					cmd.UserCallback(&cmds, &cmd);
 
 					// reset state we need
+					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
+						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
+					dev.dispatch.CmdSetViewport(draw.cb, 0, 1, &viewport);
 					dev.dispatch.CmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
 					dev.dispatch.CmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
 					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
@@ -770,34 +773,103 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 	dev.dispatch.CmdEndRenderPass(draw.cb);
 }
 
+std::vector<std::string> enabledFeatures(Device& dev) {
+	std::vector<std::string> ret;
+
+#define FEATURE(x) if(dev.enabledFeatures.x) ret.push_back(#x);
+	FEATURE(robustBufferAccess);
+	FEATURE(fullDrawIndexUint32);
+	FEATURE(imageCubeArray);
+	FEATURE(independentBlend);
+	FEATURE(geometryShader);
+	FEATURE(tessellationShader);
+	FEATURE(sampleRateShading);
+	FEATURE(dualSrcBlend);
+	FEATURE(logicOp);
+	FEATURE(multiDrawIndirect);
+	FEATURE(drawIndirectFirstInstance);
+	FEATURE(depthClamp);
+	FEATURE(depthBiasClamp);
+	FEATURE(fillModeNonSolid);
+	FEATURE(depthBounds);
+	FEATURE(wideLines);
+	FEATURE(largePoints);
+	FEATURE(alphaToOne);
+	FEATURE(multiViewport);
+	FEATURE(samplerAnisotropy);
+	FEATURE(textureCompressionETC2);
+	FEATURE(textureCompressionASTC_LDR);
+	FEATURE(textureCompressionBC);
+	FEATURE(occlusionQueryPrecise);
+	FEATURE(pipelineStatisticsQuery);
+	FEATURE(vertexPipelineStoresAndAtomics);
+	FEATURE(fragmentStoresAndAtomics);
+	FEATURE(shaderTessellationAndGeometryPointSize);
+	FEATURE(shaderImageGatherExtended);
+	FEATURE(shaderStorageImageExtendedFormats);
+	FEATURE(shaderStorageImageMultisample);
+	FEATURE(shaderStorageImageReadWithoutFormat);
+	FEATURE(shaderStorageImageWriteWithoutFormat);
+	FEATURE(shaderUniformBufferArrayDynamicIndexing);
+	FEATURE(shaderSampledImageArrayDynamicIndexing);
+	FEATURE(shaderStorageBufferArrayDynamicIndexing);
+	FEATURE(shaderStorageImageArrayDynamicIndexing);
+	FEATURE(shaderClipDistance);
+	FEATURE(shaderCullDistance);
+	FEATURE(shaderFloat64);
+	FEATURE(shaderInt64);
+	FEATURE(shaderInt16);
+	FEATURE(shaderResourceResidency);
+	FEATURE(shaderResourceMinLod);
+	FEATURE(sparseBinding);
+	FEATURE(sparseResidencyBuffer);
+	FEATURE(sparseResidencyImage2D);
+	FEATURE(sparseResidencyImage3D);
+	FEATURE(sparseResidency2Samples);
+	FEATURE(sparseResidency4Samples);
+	FEATURE(sparseResidency8Samples);
+	FEATURE(sparseResidency16Samples);
+	FEATURE(sparseResidencyAliased);
+	FEATURE(variableMultisampleRate);
+	FEATURE(inheritedQueries);
+#undef FEATURE
+
+	return ret;
+}
 
 void Gui::drawOverviewUI(Draw& draw) {
 	(void) draw;
 
 	auto& dev = *this->dev_;
+	auto& ini = *dev.ini;
 
 	// instance info
 	ImGui::Columns(2);
 
 	ImGui::Text("API Version");
-	ImGui::Text("Application");
-	ImGui::Text("Engine");
+
+	if(ini.app.valid) {
+		ImGui::Text("Application");
+		ImGui::Text("Engine");
+	}
 
 	ImGui::NextColumn();
 
-	auto& ini = *dev.ini;
 	ImGui::Text("%d.%d.%d",
 		VK_VERSION_MAJOR(ini.app.apiVersion),
 		VK_VERSION_MINOR(ini.app.apiVersion),
 		VK_VERSION_PATCH(ini.app.apiVersion));
-	ImGui::Text("%s %d.%d.%d", ini.app.name.c_str(),
-		VK_VERSION_MAJOR(ini.app.version),
-		VK_VERSION_MINOR(ini.app.version),
-		VK_VERSION_PATCH(ini.app.version));
-	ImGui::Text("%s %d.%d.%d", ini.app.engineName.c_str(),
-		VK_VERSION_MAJOR(ini.app.engineVersion),
-		VK_VERSION_MINOR(ini.app.engineVersion),
-		VK_VERSION_PATCH(ini.app.engineVersion));
+
+	if(ini.app.valid) {
+		ImGui::Text("%s %d.%d.%d", ini.app.name.c_str(),
+			VK_VERSION_MAJOR(ini.app.version),
+			VK_VERSION_MINOR(ini.app.version),
+			VK_VERSION_PATCH(ini.app.version));
+		ImGui::Text("%s %d.%d.%d", ini.app.engineName.c_str(),
+			VK_VERSION_MAJOR(ini.app.engineVersion),
+			VK_VERSION_MINOR(ini.app.engineVersion),
+			VK_VERSION_PATCH(ini.app.engineVersion));
+	}
 
 	ImGui::Columns();
 
@@ -835,11 +907,22 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::TreePop();
 	}
 
-	auto devExtLbj = dlg::format("{} device extensions enabled", dev.appExts.size());
-	if(ImGui::TreeNode(devExtLbj.c_str())) {
+	auto devExtLbl = dlg::format("{} device extensions enabled", dev.appExts.size());
+	if(ImGui::TreeNode(devExtLbl.c_str())) {
 		ImGui::Indent();
 		for(auto& ext : dev.appExts) {
 			imGuiText("{}", ext);
+		}
+		ImGui::Unindent();
+		ImGui::TreePop();
+	}
+
+	auto features = enabledFeatures(dev);
+	auto featuresLbl = dlg::format("{} device features enabled", features.size());
+	if(ImGui::TreeNode(featuresLbl.c_str())) {
+		ImGui::Indent();
+		for(auto& f : features) {
+			imGuiText("{}", f);
 		}
 		ImGui::Unindent();
 		ImGui::TreePop();

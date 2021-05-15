@@ -285,9 +285,9 @@ void CommandBufferGui::draw(Draw& draw) {
 		// the queue as our old one. See command group LCS in todo.md
 		auto* best = &hook.completed[0];
 		if(hook.completed.size() > 1) {
-			dlg_info("multiple matches!");
+			// dlg_info("multiple matches!");
 			for(auto& res : hook.completed) {
-				dlg_info(">> {}", res.match);
+				// dlg_info(">> {}", res.match);
 				if(res.match > best->match) {
 					best = &res;
 				}
