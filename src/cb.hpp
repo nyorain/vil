@@ -528,7 +528,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
     VkCommandBuffer                             commandBuffer);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetKHR(
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
     VkCommandBuffer                             commandBuffer,
     VkPipelineBindPoint                         pipelineBindPoint,
     VkPipelineLayout                            layout,
@@ -536,35 +536,42 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetKHR(
     uint32_t                                    descriptorWriteCount,
     const VkWriteDescriptorSet*                 pDescriptorWrites);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetWithTemplateKHR(
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
     VkCommandBuffer                             commandBuffer,
     VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
     VkPipelineLayout                            layout,
     uint32_t                                    set,
     const void*                                 pData);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2KHR(
     VkCommandBuffer                             commandBuffer,
     const VkCopyBufferInfo2KHR*                 pCopyBufferInfo);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImage2KHR(
     VkCommandBuffer                             commandBuffer,
     const VkCopyImageInfo2KHR*                  pCopyImageInfo);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2KHR(
     VkCommandBuffer                             commandBuffer,
     const VkCopyBufferToImageInfo2KHR*          pCopyBufferToImageInfo);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2KHR(
     VkCommandBuffer                             commandBuffer,
     const VkCopyImageToBufferInfo2KHR*          pCopyImageToBufferInfo);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdBlitImage2KHR(
     VkCommandBuffer                             commandBuffer,
     const VkBlitImageInfo2KHR*                  pBlitImageInfo);
 
-VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdResolveImage2KHR(
     VkCommandBuffer                             commandBuffer,
     const VkResolveImageInfo2KHR*               pResolveImageInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginConditionalRenderingEXT(
+    VkCommandBuffer                             commandBuffer,
+    const VkConditionalRenderingBeginInfoEXT*   pConditionalRenderingBegin);
+
+VKAPI_ATTR void VKAPI_CALL CmdEndConditionalRenderingEXT(
+    VkCommandBuffer                             commandBuffer);
 
 } // namespace vil

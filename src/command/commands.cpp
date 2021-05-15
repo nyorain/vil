@@ -2462,19 +2462,50 @@ float PushConstantsCmd::match(const Command& rhs) const {
 	return 0.5f + (sameData ? 0.5f : 0.0f);
 }
 
-// other cmds
+// SetViewportCmd
 void SetViewportCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetViewport(cb, first, u32(viewports.size()), viewports.data());
 }
 
+void SetViewportCmd::displayInspector(Gui&) const {
+	imGuiText("First: {}", first);
+	imGuiText("Viewports:");
+
+	for(auto& viewport : viewports) {
+		ImGui::Bullet();
+		imGuiText("pos: ({}, {}), size: ({}, {}), depth: {} - {}",
+			viewport.x, viewport.y, viewport.width, viewport.height,
+			viewport.minDepth, viewport.maxDepth);
+	}
+}
+
+// SetScissorCmd
 void SetScissorCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetScissor(cb, first, u32(scissors.size()), scissors.data());
 }
 
+void SetScissorCmd::displayInspector(Gui&) const {
+	imGuiText("First: {}", first);
+	imGuiText("Scissors:");
+
+	for(auto& scissor : scissors) {
+		ImGui::Bullet();
+		imGuiText("pos: ({}, {}), size: ({}, {})",
+			scissor.offset.x, scissor.offset.y,
+			scissor.extent.width, scissor.extent.height);
+	}
+}
+
+// SetLineWidthCmd
 void SetLineWidthCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetLineWidth(cb, width);
 }
 
+void SetLineWidthCmd::displayInspector(Gui&) const {
+	imGuiText("width: {}", width);
+}
+
+// other cmds
 void SetDepthBiasCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetDepthBias(cb, state.constant, state.clamp, state.slope);
 }
@@ -2556,6 +2587,25 @@ void PushDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
 void PushDescriptorSetWithTemplateCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdPushDescriptorSetWithTemplateKHR(cb, updateTemplate->handle,
 		pipeLayout->handle, set, static_cast<const void*>(data.data()));
+}
+
+// Conditional rendering
+void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	VkConditionalRenderingBeginInfoEXT info {};
+	info.sType = VK_STRUCTURE_TYPE_CONDITIONAL_RENDERING_BEGIN_INFO_EXT;
+	info.buffer = nonNull(buffer).handle;
+	info.offset = offset;
+	info.flags = flags;
+
+	dev.dispatch.CmdBeginConditionalRenderingEXT(cb, &info);
+}
+
+void BeginConditionalRenderingCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(buffer, map);
+}
+
+void EndConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdEndConditionalRenderingEXT(cb);
 }
 
 } // namespace vil

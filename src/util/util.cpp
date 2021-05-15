@@ -21,6 +21,25 @@ u32 findLSB(u32 v) {
 	return blackMagic[((u32)((v & (~v + 1)) * 0x077CB531U)) >> 27];
 }
 
+bool checkEnvBinary(const char* env, bool defaultValue) {
+	auto e = std::getenv(env);
+	if(!e) {
+		return defaultValue;
+	}
+
+	if(std::strcmp(e, "0") == 0u) {
+		return false;
+	}
+
+	if(std::strcmp(e, "1") == 0u) {
+		return true;
+	}
+
+	dlg_warn("Environment variable '{}' set to invalid value '{}'. Expected 0 or 1",
+		env, e);
+	return defaultValue;
+}
+
 VkImageType minImageType(VkExtent3D size, unsigned minDim) {
 	if(size.depth > 1 || minDim > 2) {
 		return VK_IMAGE_TYPE_3D;

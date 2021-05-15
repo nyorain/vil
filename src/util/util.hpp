@@ -59,6 +59,13 @@ template<typename Head> struct LastT<Head> {
 
 template<typename... Args> using Last = LastT<Args...>;
 
+// Checks the environment variable with the given name.
+// If not set, returns defaultValue.
+// If set to 0, returns false. If set to 1, returns true.
+// Will output a warning if set to something else and just return
+// defaultValue.
+bool checkEnvBinary(const char* env, bool defaultValue);
+
 template<typename C, typename K>
 auto find(C&& c, K&& k) {
 	return std::find(std::begin(c), std::end(c), std::forward<K>(k));

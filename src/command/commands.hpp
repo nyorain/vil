@@ -702,6 +702,7 @@ struct SetViewportCmd final : Command {
 	Type type() const override { return Type::bind; }
 	std::string nameDesc() const override { return "SetViewport"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
+	void displayInspector(Gui& gui) const override;
 };
 
 struct SetScissorCmd final : Command {
@@ -711,6 +712,7 @@ struct SetScissorCmd final : Command {
 	Type type() const override { return Type::bind; }
 	std::string nameDesc() const override { return "SetScissor"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
+	void displayInspector(Gui& gui) const override;
 };
 
 struct SetLineWidthCmd final : Command {
@@ -719,6 +721,7 @@ struct SetLineWidthCmd final : Command {
 	Type type() const override { return Type::bind; }
 	std::string nameDesc() const override { return "SetLineWidth"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
+	void displayInspector(Gui& gui) const override;
 };
 
 struct SetDepthBiasCmd final : Command {
@@ -886,6 +889,7 @@ struct BeginConditionalRenderingCmd final : SectionCommand {
 	Type type() const override { return Type::other; }
 	std::string nameDesc() const override { return "BeginConditionalRendering"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct EndConditionalRenderingCmd final : Command {

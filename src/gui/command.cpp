@@ -661,7 +661,7 @@ void CommandViewer::displayIOList() {
 				}
 
 				if(subpass.pDepthStencilAttachment) {
-					auto label = dlg::format("Depth Stencil Attachment");
+					auto label = dlg::format("Depth Stencil");
 					addAttachment(label, subpass.pDepthStencilAttachment->attachment);
 				}
 
@@ -1154,7 +1154,7 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 		return;
 	}
 
-	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 200.f);
 	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
 
 	ImGui::TableNextRow();

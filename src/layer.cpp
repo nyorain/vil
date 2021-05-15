@@ -71,6 +71,25 @@ std::array<unsigned int, 3> apiVersion(uint32_t v) {
 Instance::~Instance() {
 }
 
+void initSettings() {
+	auto enableWrapping = checkEnvBinary("VIL_WRAP", true);
+
+	auto checkSet = [&](auto& enable, const char* var) {
+		enable = checkEnvBinary(var, enableWrapping);
+	};
+
+	checkSet(HandleDesc<VkCommandBuffer>::wrap, "VIL_WRAP_COMMAND_BUFFER");
+	checkSet(HandleDesc<VkImageView>::wrap, "VIL_WRAP_IMAGE_VIEW");
+	checkSet(HandleDesc<VkBuffer>::wrap, "VIL_WRAP_BUFFER");
+	checkSet(HandleDesc<VkDescriptorSet>::wrap, "VIL_WRAP_DESCRIPTOR_SET");
+	checkSet(HandleDesc<VkDescriptorSetLayout>::wrap, "VIL_WRAP_DESCRIPTOR_SET_LAYOUT");
+	checkSet(HandleDesc<VkSampler>::wrap, "VIL_WRAP_SAMPLER");
+	checkSet(HandleDesc<VkPipelineLayout>::wrap, "VIL_WRAP_PIPELINE_LAYOUT");
+	checkSet(HandleDesc<VkCommandPool>::wrap, "VIL_WRAP_COMMAND_POOL");
+	checkSet(HandleDesc<VkBufferView>::wrap, "VIL_WRAP_BUFFER_VIEW");
+	checkSet(HandleDesc<VkDescriptorUpdateTemplate>::wrap, "VIL_WRAP_BUFFER_DESCRIPTOR_UPDATE_TEMPLATE");
+}
+
 // Instance
 VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkInstanceCreateInfo* ci,
@@ -153,6 +172,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 			return result;
 		}
 	}
+
+	initSettings();
 
 	auto iniPtr = std::make_unique<Instance>();
 	auto& ini = *iniPtr;
@@ -488,6 +509,19 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(CmdEndRenderPass2),
 	VIL_DEV_HOOK_ALIAS(CmdEndRenderPass2KHR, CmdEndRenderPass2,
 		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdCopyBuffer2KHR, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdCopyImage2KHR, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdCopyBufferToImage2KHR, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdCopyImageToBuffer2KHR, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdBlitImage2KHR, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdResolveImage2KHR, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdPushDescriptorSetKHR, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdPushDescriptorSetWithTemplateKHR, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdBeginConditionalRenderingEXT, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdEndConditionalRenderingEXT, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME),
 };
 
 #undef VIL_INI_HOOK

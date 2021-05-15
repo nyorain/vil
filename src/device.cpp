@@ -126,8 +126,7 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr, VkPhysicalDevice phdev,
 		u32 numQueueFams, u32& presentQueueInfoID,
 		span<const VkExtensionProperties> extProps) {
-	auto env = std::getenv("VIL_CREATE_WINDOW");
-	if(!env || *env == '0') {
+	if(!checkEnvBinary("VIL_CREATE_WINDOW", false)) {
 		return nullptr;
 	}
 
@@ -391,6 +390,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	// useful to test fallback code paths
+	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", true);
+	auto enableTransformFeedback = checkEnvBinary("VIL_TRANSFORM_FEEDBACK", true);
+
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage && (
 		(ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
 		hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));

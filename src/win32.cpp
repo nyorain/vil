@@ -360,7 +360,7 @@ bool Win32Platform::doUpdate() {
 			if (!mouseHook) {
 				print_winapi_error("SetWindowsHookEx");
 			}
-			
+
 
 			// updateWindowRect();
 			// ShowWindow(overlayWindow, SW_SHOW);
@@ -438,7 +438,7 @@ bool Win32Platform::doUpdate() {
 			POINT pos;
 			GetCursorPos(&pos);
 			ScreenToClient(surfaceWindow, &pos);
-			
+
 			gui->imguiIO().MousePos.x = pos.x;
 			gui->imguiIO().MousePos.y = pos.y;
 		}
@@ -509,8 +509,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 		return res;
 	}
 
-	auto env = std::getenv("VIL_HOOK_OVERLAY");
-	if(!env || *env == '0') {
+	if(!checkEnvBinary("VIL_HOOK_OVERLAY", false)) {
 		return res;
 	}
 

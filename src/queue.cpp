@@ -79,7 +79,7 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 		subm.appFence->submission = nullptr;
 	}
 
-	dev.resetSemaphores.insert(dev.resetSemaphores.end(),
+	dev.semaphorePool.insert(dev.semaphorePool.end(),
 		subm.poolSemaphores.begin(), subm.poolSemaphores.end());
 
 	return dev.pending.erase(it);

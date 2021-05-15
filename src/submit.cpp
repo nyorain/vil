@@ -277,82 +277,95 @@ VkResult addGuiSyncLocked(QueueSubmitter& subm) {
 	auto& dev = *subm.dev;
 	auto& batch = *subm.dstBatch;
 
+	Draw* insertGuiSync = nullptr;
+	bool insertResetSemaphores = false;
+
+	// first, check whether we need to insert an additional sync submission.
+
 	// When this submission uses the gfxQueue (which we also use for
 	// gui rendering) we don't have to synchronize with gui rendering
 	// via semaphores, the pipeline barrier is enough.
-	if(!dev.gui || (dev.gfxQueue == subm.queue && !forceGfxQueueSemaphores)) {
+	if(dev.gui && (dev.gfxQueue != subm.queue || forceGuiQueueSemaphores)) {
+		// since all draws are submitted to the same queue
+		// we only need to wait upon the last one pending.
+		insertGuiSync = dev.gui->latestPendingDrawSyncLocked(batch);
+	}
+
+	// When we don't use timeline semaphores, we need to reset our
+	// semaphore pool every now and then.
+	if(!dev.timelineSemaphores && dev.resetSemaphores.size() > 4) {
+		insertResetSemaphores = true;
+	}
+
+	if(!insertResetSemaphores && !insertGuiSync) {
 		return VK_SUCCESS;
 	}
 
-	// since all draws are submitted to the same queue
-	// we only need to wait upon the last one pending.
-	auto* pWaitDraw = dev.gui->latestPendingDrawSyncLocked(batch);
-	if(!pWaitDraw) {
-		return VK_SUCCESS;
-	}
-
-	auto& waitDraw = *pWaitDraw;
-	dlg_assert(waitDraw.futureSemaphoreSignaled);
-
-	// add as *first* submission
+	// at this point we know that an additional submission is needed.
+	// add it as *first* submission
 	auto& si = *subm.submitInfos.emplace(subm.submitInfos.begin());
-
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	si.pNext = nullptr;
 
 	auto& waitSems = subm.semaphores.emplace_back();
 	auto& waitStages = subm.waitStages.emplace_back();
 
-	// PERF(sync): when there are multiple submissions in the batch we could
-	// sync on a per-submission basis (instead of per-batch). This is only
-	// practical for timeline semaphores I guess since otherwise we can't
-	// use the src semaphore multiple times.
-	if(dev.timelineSemaphores) {
-		auto& tsInfo = subm.tsSubmitInfos.emplace_back();
-		tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-		tsInfo.pNext = NULL;
-
-		waitSems.push_back(waitDraw.futureSemaphore);
-		waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-
-		auto& waitVals = subm.tsValues.emplace_back();
-		waitVals.push_back(waitDraw.futureSemaphoreValue);
-
-		tsInfo.waitSemaphoreValueCount = u32(waitVals.size());
-		tsInfo.pWaitSemaphoreValues = waitVals.data();
-
-		si.pNext = &tsInfo;
-	} else {
-		// use this to reset all semaphores
+	if(insertResetSemaphores) {
+		dlg_assert(!dev.timelineSemaphores);
 		waitSems = std::move(dev.resetSemaphores);
 		waitStages.resize(waitSems.size(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-
 		batch.poolSemaphores = waitSems;
+	}
 
-		if(waitDraw.futureSemaphoreUsed) {
-			// we don't have timeline semaphores and have already
-			// chained the future semaphore of that draw somewhere, ugh.
-			// Add a new semaphore to the graphics queue.
-			auto guiSyncSemaphore = getSemaphoreFromPoolLocked(dev);
-			auto res = submitSemaphore(*subm.queue, guiSyncSemaphore);
+	if(insertGuiSync) {
+		auto& waitDraw = *insertGuiSync;
+		dlg_assert(waitDraw.futureSemaphoreSignaled);
 
-			if(res != VK_SUCCESS) {
-				dlg_trace("vkQueueSubmit error: {}", vk::name(res));
-				cleanupOnError(subm);
-				return res;
-			}
+		// PERF(sync): when there are multiple submissions in the batch we could
+		// sync on a per-submission basis (instead of per-batch). This is only
+		// practical for timeline semaphores I guess since otherwise we can't
+		// use the src semaphore multiple times.
+		if(dev.timelineSemaphores) {
+			auto& tsInfo = subm.tsSubmitInfos.emplace_back();
+			tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+			tsInfo.pNext = NULL;
 
-			waitSems.push_back(guiSyncSemaphore);
-			waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-			batch.poolSemaphores.push_back(guiSyncSemaphore);
-		} else {
-			waitDraw.futureSemaphoreUsed = true;
 			waitSems.push_back(waitDraw.futureSemaphore);
 			waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-			// DON'T add waitDraw.futureSemaphore to batch.poolSemaphores
-			// here since it's owned by the gui.
 
-			subm.syncedGuiDraw = &waitDraw;
+			auto& waitVals = subm.tsValues.emplace_back();
+			waitVals.push_back(waitDraw.futureSemaphoreValue);
+
+			tsInfo.waitSemaphoreValueCount = u32(waitVals.size());
+			tsInfo.pWaitSemaphoreValues = waitVals.data();
+
+			si.pNext = &tsInfo;
+		} else {
+			if(waitDraw.futureSemaphoreUsed) {
+				// we don't have timeline semaphores and have already
+				// chained the future semaphore of that draw somewhere, ugh.
+				// Add a new semaphore to the graphics queue.
+				auto guiSyncSemaphore = getSemaphoreFromPoolLocked(dev);
+				auto res = submitSemaphore(*subm.queue, guiSyncSemaphore);
+
+				if(res != VK_SUCCESS) {
+					dlg_trace("vkQueueSubmit error: {}", vk::name(res));
+					cleanupOnError(subm);
+					return res;
+				}
+
+				waitSems.push_back(guiSyncSemaphore);
+				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+				batch.poolSemaphores.push_back(guiSyncSemaphore);
+			} else {
+				waitDraw.futureSemaphoreUsed = true;
+				waitSems.push_back(waitDraw.futureSemaphore);
+				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+				// DON'T add waitDraw.futureSemaphore to batch.poolSemaphores
+				// here since it's owned by the gui.
+
+				subm.syncedGuiDraw = &waitDraw;
+			}
 		}
 	}
 
@@ -452,7 +465,7 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 	ZoneScoped;
 
 	auto& dev = *pending.queue->dev;
-	if(pending.queue == dev.gfxQueue && !forceGfxQueueSemaphores) {
+	if(pending.queue == dev.gfxQueue && !forceGuiQueueSemaphores) {
 		return {};
 	}
 

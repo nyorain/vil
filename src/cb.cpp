@@ -1280,7 +1280,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 		regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyImageInfo2KHR*                  info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1336,7 +1336,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 		regionCount, pRegions, filter);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdBlitImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkBlitImageInfo2KHR*                  info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1387,7 +1387,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 		src.handle, dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyBufferToImageInfo2KHR*          info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1436,7 +1436,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 		src.handle, srcImageLayout, dst.handle, regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyImageToBufferInfo2KHR*          info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1554,7 +1554,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 		dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdResolveImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdResolveImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkResolveImageInfo2KHR*               info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1686,7 +1686,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 }
 
 
-VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyBufferInfo2KHR*                 info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2141,7 +2141,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 	cb.dev->dispatch.CmdSetStencilReference(cb.handle(), faceMask, reference);
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetKHR(
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 		VkCommandBuffer                             commandBuffer,
 		VkPipelineBindPoint                         pipelineBindPoint,
 		VkPipelineLayout                            layout,
@@ -2221,7 +2221,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetKHR(
 		descriptorWriteCount, cmd.descriptorWrites.data());
 }
 
-VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetWithTemplateKHR(
+VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
 		VkCommandBuffer                             commandBuffer,
 		VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
 		VkPipelineLayout                            layout,
@@ -2303,6 +2303,32 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushDescriptorSetWithTemplateKHR(
 	cmd.data = copied;
 	cb.dev->dispatch.CmdPushDescriptorSetWithTemplateKHR(cb.handle(),
 		dut.handle, cmd.pipeLayout->handle, set, cmd.data.data());
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginConditionalRenderingEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkConditionalRenderingBeginInfoEXT*   pConditionalRenderingBegin) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BeginConditionalRenderingCmd, SectionType::begin>(cb);
+	cmd.buffer = &get(*cb.dev, pConditionalRenderingBegin->buffer);
+	cmd.offset = pConditionalRenderingBegin->offset;
+	cmd.flags = pConditionalRenderingBegin->flags;
+
+	useHandle(cb, cmd, *cmd.buffer);
+
+	auto info = *pConditionalRenderingBegin;
+	info.buffer = cmd.buffer->handle;
+
+	cb.dev->dispatch.CmdBeginConditionalRenderingEXT(cb.handle(), &info);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdEndConditionalRenderingEXT(
+		VkCommandBuffer                             commandBuffer) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<EndConditionalRenderingCmd, SectionType::end>(cb);
+	(void) cmd;
+
+	cb.dev->dispatch.CmdEndConditionalRenderingEXT(cb.handle());
 }
 
 } // namespace vil

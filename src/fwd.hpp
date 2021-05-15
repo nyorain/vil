@@ -34,13 +34,9 @@ using i64 = std::int64_t;
 
 using std::size_t;
 
-// settings (should probably add a config.hpp or something)
-constexpr auto enableTimelineSemaphoreUsage = false;
-constexpr auto enableTransformFeedback = true;
-
 // Debug setting. When true, will use the cross-queue semaphore chaining
 // logic for submissions to the same queue as well. Useful for debugging.
-constexpr auto forceGfxQueueSemaphores = false;
+constexpr auto forceGuiQueueSemaphores = false;
 
 class Gui;
 struct RenderBuffer;

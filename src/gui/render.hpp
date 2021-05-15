@@ -3,9 +3,8 @@
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
 #include <vk/vulkan.h>
+#include <imgui/imgui.h>
 #include <vector>
-
-struct ImDrawData;
 
 namespace vil {
 

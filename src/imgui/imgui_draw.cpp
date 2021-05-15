@@ -93,6 +93,8 @@ Index of this file:
 //#define IMGUI_DISABLE_STB_TRUETYPE_IMPLEMENTATION
 //#define IMGUI_DISABLE_STB_RECT_PACK_IMPLEMENTATION
 
+inline namespace imgui_vil {
+
 #ifdef IMGUI_STB_NAMESPACE
 namespace IMGUI_STB_NAMESPACE
 {
@@ -3894,6 +3896,8 @@ static const char proggy_clean_ttf_compressed_data_base85[11980 + 1] =
 static const char* GetDefaultCompressedFontDataTTFBase85()
 {
     return proggy_clean_ttf_compressed_data_base85;
+}
+
 }
 
 #endif // #ifndef IMGUI_DISABLE

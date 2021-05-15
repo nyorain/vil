@@ -41,7 +41,11 @@
 #include <image.frag.u3D.spv.h>
 #include <image.frag.i3D.spv.h>
 
+inline namespace imgui_vil {
+
 thread_local ImGuiContext* __LayerImGui;
+
+}
 
 namespace vil {
 
@@ -1233,7 +1237,19 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		// == Submit batch ==
 		ZoneScopedN("BuildSubmission");
 
-		VkSubmitInfo submitInfo {};
+		VkSubmitInfo submitInfos[2] {};
+		// NOTE: draw.futureSemaphore might not be waited upon but we need
+		// to signal it. We therefore have to reset it, see below (when not
+		// using timeline semaphores). The spec isn't clear about whether
+		// it's allowed to first wait and then signal the same semaphore
+		// in the same VkSubmitInfo (see e.g. https://www.reddit.com/r/vulkan/comments/6pwuzd).
+		// In anv, mesa 21.0.3 we encountered a deadlock when trying to do
+		// so though, so we now use 2 VkSubmitInfos when we need to reset
+		// futureSemaphore.
+		auto needPreSubmit = false;
+		auto topOfPpipeStage = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+
+		auto& submitInfo = submitInfos[1];
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.commandBufferCount = 1u;
 		submitInfo.pCommandBuffers = &draw.cb;
@@ -1249,7 +1265,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			// When the pending submission was submitted to the gfxQueue
 			// (as the gui draw submissions are), we don't need to sync
 			// via semaphore, the pipeline barrier is enough
-			if(pending->queue == dev().gfxQueue && !forceGfxQueueSemaphores) {
+			if(pending->queue == dev().gfxQueue && !forceGuiQueueSemaphores) {
 				continue;
 			}
 
@@ -1335,8 +1351,14 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			// to reset it before we signal it again. This shouldn't acutally
 			// cause an additional wait, we already wait for the last draw.
 			if(!draw.futureSemaphoreUsed && draw.futureSemaphoreSignaled) {
-				waitSems.push_back(draw.futureSemaphore);
-				waitStages.push_back(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+				// This is a bit messy, see the declaration of needPreSubmit
+				// for more details why this is needed.
+				needPreSubmit = true;
+
+				auto& preSubmitInfo = submitInfos[0];
+				preSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+				preSubmitInfo.pWaitSemaphores = &draw.futureSemaphore;
+				preSubmitInfo.pWaitDstStageMask = &topOfPpipeStage;
 			}
 
 			for(auto* sub : waitSubmissions) {
@@ -1376,7 +1398,9 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			// PERF: when using timeline semaphores we don't need a
 			// fence and can just use the timeline semaphore
 			std::lock_guard queueLock(dev().queueMutex);
-			res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle, 1u, &submitInfo, draw.fence);
+			res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle,
+				needPreSubmit ? 2u : 1u,
+				needPreSubmit ? submitInfos : &submitInfo, draw.fence);
 		}
 
 		if(res != VK_SUCCESS) {

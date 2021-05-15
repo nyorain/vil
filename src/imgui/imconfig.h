@@ -16,9 +16,13 @@
 #include <cstdint>
 
 // Have each embedded of ImGui define this symbol :
+inline namespace imgui_vil {
+
 struct ImGuiContext;
 extern thread_local ImGuiContext* __LayerImGui;
 #define GImGui __LayerImGui
+
+}
 
 //---- Define assertion handler. Defaults to calling assert().
 //#define IM_ASSERT(_EXPR)  MyAssert(_EXPR)

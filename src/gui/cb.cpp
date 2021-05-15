@@ -255,8 +255,6 @@ void CommandBufferGui::draw(Draw& draw) {
 
 		dlg_assert(record_->invalidated.empty());
 
-		// ImGui::PushID(dlg::format("{}", record_->group).c_str());
-
 		auto* selected = command_.empty() ? nullptr : command_.back();
 		auto nsel = displayCommands(record_->commands, selected, commandFlags_);
 		if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
@@ -278,8 +276,6 @@ void CommandBufferGui::draw(Draw& draw) {
 			// in any case, update the hook
 			dev.commandHook->desc(record_, command_, dsState_);
 		}
-
-		ImGui::PopID();
 	}
 
 	if(!hook.completed.empty() && (!hook.freeze || !commandViewer_.state())) {
@@ -337,7 +333,7 @@ void CommandBufferGui::draw(Draw& draw) {
 				}
 			}
 
-			dlg_assert(found);
+			dlg_assertl(dlg_level_warn, found);
 		}
 	}
 

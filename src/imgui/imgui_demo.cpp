@@ -155,7 +155,10 @@ Index of this file:
 // [SECTION] Forward Declarations, Helpers
 //-----------------------------------------------------------------------------
 
+inline namespace imgui_vil {
+
 #if !defined(IMGUI_DISABLE_DEMO_WINDOWS)
+
 
 // Forward Declarations
 static void ShowExampleAppDocuments(bool* p_open);
@@ -7529,5 +7532,7 @@ void ImGui::ShowUserGuide() {}
 void ImGui::ShowStyleEditor(ImGuiStyle*) {}
 
 #endif
+
+}
 
 #endif // #ifndef IMGUI_DISABLE

@@ -9,9 +9,6 @@
 #include <variant>
 #include <deque>
 
-struct ImGuiContext;
-struct ImGuiIO;
-
 namespace vil {
 
 class Gui {

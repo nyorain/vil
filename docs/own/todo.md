@@ -102,7 +102,7 @@ performance/profiling:
 
 
 object wrapping:
-- [ ] implement mechanism for deciding per-handle-type whether object wrapping
+- [x] implement mechanism for deciding per-handle-type whether object wrapping
       should be done. Either via GUI or env var. 
 	  Performance-wise it's only really important for
 	  CommandBuffers and DescriptorSets (technically also for Device but
@@ -223,6 +223,11 @@ other
 
 
 Possibly for later, new features/ideas:
+- [ ] the current situation using imgui_vil is terrible. We need this to make
+      sure that imgui symbols we define don't collide with the symbols
+	  from the application. The proper solution is to set symbol_visibility
+	  to hidden. But then we can't test vil. Maybe just export the stuff
+	  we test explicitly? Same for spirv_reflect basically.
 - [ ] The way we have to keep CommandRecord objects alive (keepAlive) in various places
       (e.g. Gui::renderFrame, CommandBuffer::doReset, CommandBuffer::doEnd),
       to make sure they are not destroyed while we hold the lock (and possibly

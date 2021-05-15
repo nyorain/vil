@@ -83,6 +83,8 @@ Index of this file:
 #error Use IMGUI_DISABLE_DEFAULT_MATH_FUNCTIONS
 #endif
 
+inline namespace imgui_vil {
+
 //-----------------------------------------------------------------------------
 // [SECTION] Forward declarations
 //-----------------------------------------------------------------------------
@@ -139,6 +141,7 @@ typedef void (*ImGuiErrorLogCallback)(void* user_data, const char* fmt, ...);
 // [SECTION] Context pointer
 // See implementation of this variable in imgui.cpp for comments and details.
 //-----------------------------------------------------------------------------
+
 
 #ifndef GImGui
 extern IMGUI_API ImGuiContext* GImGui;  // Current implicit context pointer
@@ -2524,5 +2527,7 @@ extern void                 ImGuiTestEngineHook_Log(ImGuiContext* ctx, const cha
 #ifdef _MSC_VER
 #pragma warning (pop)
 #endif
+
+}
 
 #endif // #ifndef IMGUI_DISABLE

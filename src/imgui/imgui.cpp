@@ -838,6 +838,8 @@ static const float WINDOWS_MOUSE_WHEEL_SCROLL_LOCK_TIMER    = 2.00f;    // Lock 
 // [SECTION] FORWARD DECLARATIONS
 //-------------------------------------------------------------------------
 
+inline namespace imgui_vil {
+
 static void             SetCurrentWindow(ImGuiWindow* window);
 static void             FindHoveredWindow();
 static ImGuiWindow*     CreateNewWindow(const char* name, ImGuiWindowFlags flags);
@@ -11139,6 +11141,8 @@ void ImGui::DebugNodeWindowSettings(ImGuiWindowSettings*) {}
 void ImGui::DebugNodeWindowsList(ImVector<ImGuiWindow*>*, const char*) {}
 
 #endif
+
+}
 
 //-----------------------------------------------------------------------------
 

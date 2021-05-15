@@ -82,6 +82,8 @@ Index of this file:
 #pragma GCC diagnostic ignored "-Wclass-memaccess"                  // [__GNUC__ >= 8] warning: 'memset/memcpy' clearing/writing an object of type 'xxxx' with no trivial copy-assignment; use assignment or value-initialization instead
 #endif
 
+inline namespace imgui_vil {
+
 //-------------------------------------------------------------------------
 // Data
 //-------------------------------------------------------------------------
@@ -144,6 +146,7 @@ static ImVec2           InputTextCalcTextSizeW(const ImWchar* text_begin, const 
 // - BulletText()
 // - BulletTextV()
 //-------------------------------------------------------------------------
+
 
 void ImGui::TextEx(const char* text, const char* text_end, ImGuiTextFlags flags)
 {
@@ -7914,5 +7917,6 @@ void ImGui::TabItemLabelAndCloseButton(ImDrawList* draw_list, const ImRect& bb, 
         *out_just_closed = close_button_pressed;
 }
 
+}
 
 #endif // #ifndef IMGUI_DISABLE
