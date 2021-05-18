@@ -2,6 +2,7 @@
 
 #include <device.hpp>
 #include <gui/render.hpp>
+#include <gui/blur.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
 #include <util/bytes.hpp>
@@ -138,6 +139,12 @@ private:
 
 	// drawing/sync logic
 	bool resourcesTabDrawn_ {};
+
+	GuiBlur blur_ {};
+	VkSwapchainKHR blurSwapchain_ {};
+	ImVec2 windowPos_ {};
+	ImVec2 windowSize_ {};
+	VkDescriptorSet blurDs_;
 };
 
 // Inserts an imgui button towards the given handle.

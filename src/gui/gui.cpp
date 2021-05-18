@@ -62,6 +62,19 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	lastFrame_ = Clock::now();
 
+	auto blurBackground = true;
+	if(!clear && blurBackground) {
+		vil::init(blur_, dev, dev.renderData->linearSampler);
+
+		VkDescriptorSetAllocateInfo dai {};
+		dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dai.descriptorSetCount = 1u;
+		dai.pSetLayouts = &dev.renderData->dsLayout;
+		dai.descriptorPool = dev.dsPool;
+		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &blurDs_));
+		nameHandle(dev, blurDs_, "Gui:blurDs");
+	}
+
 	// init command pool
 	VkCommandPoolCreateInfo cpci {};
 	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -368,18 +381,48 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	ImGui::StyleColorsDark();
 	auto& style = ImGui::GetStyle();
 
-    style.WindowBorderSize = 1.f;
-    style.FrameBorderSize = 1.f;
-    // style.FrameRounding = 5.f;
-    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4( 1, 1, 1, 0.03f );
-    style.Colors[ImGuiCol_Header] = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
-    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
-    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.26f, 0.59f, 0.98f, 0.45f);
-	// style.Colors[ImGuiCol_TitleBgActive] = style.Colors[ImGuiCol_WindowBg];
+    // style.WindowBorderSize = 1.f;
+    // style.FrameBorderSize = 1.f;
+
+    // style.Colors[ImGuiCol_ScrollbarBg] = ImVec4( 1, 1, 1, 0.03f );
+    // style.Colors[ImGuiCol_Header] = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
+    // style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
+    // style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.26f, 0.59f, 0.98f, 0.45f);
+
+	// style.Colors[ImGuiCol_WindowBg] = {1.0, 1.0, 1.0, 0.4}; // light
+	style.Colors[ImGuiCol_WindowBg] = {0.02, 0.02, 0.02, 0.6}; // dark
+
+	style.Colors[ImGuiCol_Button].w = 0.8;
+	style.Colors[ImGuiCol_ButtonHovered].w = 1.0;
+	style.Colors[ImGuiCol_ButtonActive].w = 1.0;
+
+	style.Colors[ImGuiCol_FrameBg].w = 0.3;
+	style.Colors[ImGuiCol_FrameBgHovered].w = 0.5;
+	style.Colors[ImGuiCol_FrameBgActive].w = 0.5;
+	style.Colors[ImGuiCol_ScrollbarBg].w = 0.3;
+	style.Colors[ImGuiCol_ChildBg].w = 0.0;
+
+	style.Colors[ImGuiCol_Tab].w = 0.9;
+	style.Colors[ImGuiCol_TabActive].w = 0.9;
+	style.Colors[ImGuiCol_TabHovered].w = 0.9;
+	style.Colors[ImGuiCol_TabUnfocused].w = 0.5;
+	style.Colors[ImGuiCol_TabUnfocusedActive].w = 0.5;
+
+	style.Colors[ImGuiCol_TitleBgActive] = style.Colors[ImGuiCol_WindowBg];
+	style.Colors[ImGuiCol_TitleBg] = style.Colors[ImGuiCol_WindowBg];
+	style.Colors[ImGuiCol_TitleBgCollapsed] = style.Colors[ImGuiCol_WindowBg];
+
+	style.Colors[ImGuiCol_Separator].w = 0.1;
+	style.Colors[ImGuiCol_SeparatorActive].w = 0.1;
+	style.Colors[ImGuiCol_SeparatorHovered].w = 0.1;
+
+	// style.Colors[ImGuiCol_PlotHistogram].w = 0.f;
+	// style.Colors[ImGuiCol_PlotHistogramHovered].w = 0.f;
 
 	// Disable all rounding
 	style.WindowRounding = 0.f;
-	// style.WindowBorderSize = 0.f;
+	style.WindowBorderSize = 0.f;
+	style.FrameBorderSize = 0.f;
 	style.TabRounding = 0.f;
 	style.PopupRounding = 0.f;
 	style.GrabRounding = 0.f;
@@ -644,7 +687,7 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 	dev.dispatch.UnmapMemory(dev.handle, draw.indexBuffer.mem);
 }
 
-void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
+void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 		const ImDrawData& drawData) {
 	ZoneScoped;
 
@@ -652,26 +695,6 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 	if(drawData.TotalIdxCount == 0 && !clear_) {
 		return;
 	}
-
-	VkRenderPassBeginInfo rpBegin {};
-	rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-	rpBegin.renderArea.extent = extent;
-	rpBegin.renderPass = rp_;
-	rpBegin.framebuffer = fb;
-
-	VkClearValue clearValues[2] {};
-
-	// color attachment (if we don't clear it, this value is ignored).
-	// see render pass creation
-	clearValues[0].color = {{0.f, 0.f, 0.f, 1.f}};
-
-	// our depth attachment, always clear that.
-	clearValues[1].depthStencil = {1.f, 0u};
-
-	rpBegin.pClearValues = clearValues;
-	rpBegin.clearValueCount = 2u;
-
-	dev.dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
 	if(drawData.TotalIdxCount > 0) {
 		VkViewport viewport {};
@@ -778,8 +801,6 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer fb,
 			vtxOff += cmds.VtxBuffer.Size;
 		}
 	}
-
-	dev.dispatch.CmdEndRenderPass(draw.cb);
 }
 
 std::vector<std::string> enabledFeatures(Device& dev) {
@@ -959,8 +980,18 @@ void Gui::drawOverviewUI(Draw& draw) {
 		//   idea of the timings, only relative is possible
 		if(!hist.empty()) {
 			ImGui::Text("Present timings:");
+
+			ImGui::PushStyleColor(ImGuiCol_FrameBg, {0.f, 0.f, 0.f, 0.f});
+			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, {0.f, 0.f, 0.f, 0.f});
+			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, {0.f, 0.f, 0.f, 0.f});
+
+			float w = ImGui::GetContentRegionAvail().x;
 			ImGui::PlotHistogram("", hist.data(), int(hist.size()),
-				0, nullptr, 0.f, FLT_MAX, {0, 150});
+				0, nullptr, 0.f, FLT_MAX, {w, 100});
+
+			ImGui::PopStyleColor();
+			ImGui::PopStyleColor();
+			ImGui::PopStyleColor();
 		}
 	}
 
@@ -1089,7 +1120,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 	ImGui::NewFrame();
 
-	unsigned flags = 0u;
+	unsigned flags = ImGuiWindowFlags_NoCollapse;
 	if(fullscreen) {
 		ImGui::SetNextWindowPos({0, 0});
 		ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
@@ -1115,6 +1146,9 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 	};
 
 	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
+		windowPos_ = ImGui::GetWindowPos();
+		windowSize_ = ImGui::GetWindowSize();
+
 		if(ImGui::BeginTabBar("MainTabBar")) {
 			if(ImGui::BeginTabItem("Overview")) {
 				activeTab_ = Tab::overview;
@@ -1241,6 +1275,39 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 
 	ensureFontAtlas(draw.cb);
 
+	auto blurred = false;
+	if(blur_.dev) {
+		auto& sc = dev().swapchains.get(info.swapchain);
+		if(sc.supportsSampling) {
+			if(blurSwapchain_ != info.swapchain) {
+				// TODO: would have to wait on previous draw here.
+				// Not sure if realistic, old swapchain was probably destroyed
+				// when we land here?
+				vil::resize(blur_, sc.ci.imageExtent, sc.handle, sc.ci.imageFormat);
+				blurSwapchain_ = info.swapchain;
+
+				VkDescriptorImageInfo imgInfo {};
+				imgInfo.imageView = blur_.view0;
+				imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				imgInfo.sampler = dev().renderData->linearSampler;
+
+				VkWriteDescriptorSet write {};
+				write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				write.pImageInfo = &imgInfo;
+				write.descriptorCount = 1u;
+				write.dstArrayElement = 0u;
+				write.dstSet = blurDs_;
+				write.dstBinding = 0u;
+				write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+
+				dev().dispatch.UpdateDescriptorSets(dev().handle, 1u, &write, 0u, nullptr);
+			}
+
+			vil::blur(blur_, draw.cb, info.imageIdx, {}, {});
+			blurred = true;
+		}
+	}
+
 	ImGui::GetIO().DisplaySize.x = info.extent.width;
 	ImGui::GetIO().DisplaySize.y = info.extent.height;
 
@@ -1314,7 +1381,72 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			tabs_.resources.recordPreRender(draw);
 		}
 
+		// optionally blur
+		VkRenderPassBeginInfo rpBegin {};
+		rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		rpBegin.renderArea.extent = info.extent;
+		rpBegin.renderPass = rp_;
+		rpBegin.framebuffer = info.fb;
+
+		VkClearValue clearValues[2] {};
+
+		// color attachment (if we don't clear it, this value is ignored).
+		// see render pass creation
+		clearValues[0].color = {{0.f, 0.f, 0.f, 1.f}};
+
+		// our depth attachment, always clear that.
+		clearValues[1].depthStencil = {1.f, 0u};
+
+		rpBegin.pClearValues = clearValues;
+		rpBegin.clearValueCount = 2u;
+
+		dev().dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+		if(blurred) {
+			VkRect2D scissor;
+			// scissor.offset = {};
+			// scissor.extent = info.extent;
+			scissor.offset.x = windowPos_.x;
+			scissor.offset.y = windowPos_.y;
+			scissor.extent.width = windowSize_.x;
+			scissor.extent.height = windowSize_.y;
+
+			VkViewport viewport;
+			viewport.minDepth = 0.f;
+			viewport.maxDepth = 1.f;
+			viewport.x = 0u;
+			viewport.y = 0u;
+			viewport.width = info.extent.width;
+			viewport.height = info.extent.height;
+			// viewport.x = windowPos_.x;
+			// viewport.y = windowPos_.y;
+			// viewport.width = windowSize_.x;
+			// viewport.height = windowSize_.y;
+
+			dev().dispatch.CmdSetScissor(draw.cb, 0u, 1u, &scissor);
+			dev().dispatch.CmdSetViewport(draw.cb, 0u, 1u, &viewport);
+
+			float pcr[4];
+			// scale
+			pcr[0] = 1.f;
+			pcr[1] = 1.f;
+			// translate
+			pcr[2] = 0.f;
+			pcr[3] = 0.f;
+
+			dev().dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipes_.gui);
+			dev().dispatch.CmdPushConstants(draw.cb, dev().renderData->pipeLayout,
+				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
+			dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				dev().renderData->pipeLayout, 0u, 1u, &blurDs_, 0, nullptr);
+			VkDeviceSize off = 0u;
+			dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
+			dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
+		}
+
 		this->recordDraw(draw, info.extent, info.fb, drawData);
+
+		dev().dispatch.CmdEndRenderPass(draw.cb);
 
 		if(resourcesTabDrawn_) {
 			tabs_.resources.recoredPostRender(draw);

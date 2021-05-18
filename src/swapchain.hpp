@@ -63,7 +63,10 @@ struct Swapchain : DeviceHandle {
 	std::array<FrameSubmissions, frameSubmissionCount> frameSubmissions;
 	FrameSubmissions nextFrameSubmissions; // currently being built
 
-	Swapchain() = default;
+	// Whether images from this swapchain support sampling.
+	// We will try to set this, if possible.
+	bool supportsSampling {};
+
 	~Swapchain();
 	void destroy();
 };

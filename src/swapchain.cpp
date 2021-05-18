@@ -86,8 +86,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		pCreateInfo->surface, &caps);
 	if(res != VK_SUCCESS) {
 		dlg_error("vkGetPhysicalDeviceSurfaceCapabilitiesKHR: {} ({})", vk::name(res), res);
-	} else if(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
-		sci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	} else {
+		// We always need color_attachment when drawing a gui.
+		// Vulkan guarantees that it's supported.
+		dlg_assert(caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+		sci.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+		if(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+			sci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		}
+
+		if(caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) {
+			sci.imageUsage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+		}
 	}
 
 	auto result = dev.dispatch.CreateSwapchainKHR(device, &sci, pAllocator, pSwapchain);
@@ -100,6 +111,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	swapd.dev = &dev;
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
+	swapd.supportsSampling = (sci.imageUsage & VK_IMAGE_USAGE_SAMPLED_BIT);
 
 	// use data from old swapchain
 	if(oldChain) {

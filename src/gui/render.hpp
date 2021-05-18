@@ -133,6 +133,7 @@ struct DrawGuiImage {
 	// - ImageView (or directly the descriptor?)
 	enum Type {
 		font,
+
 		// custom, uses draw.dsSelected
 		f1d,
 		u1d,

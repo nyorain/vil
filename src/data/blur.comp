@@ -1,0 +1,29 @@
+#version 450 core
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform sampler2D inTex;
+layout(set = 0, binding = 1, rgba16f) writeonly uniform image2D outTex;
+
+layout(push_constant) uniform PCR {
+	float scale;
+	float downscale;
+};
+
+void main() {
+	const ivec2 texSize = textureSize(inTex, 0);
+
+	const uvec2 id = gl_GlobalInvocationID.xy;
+	const vec2 uv = downscale * (id + 0.5) / texSize;
+
+	const vec2 x = vec2(1, 0) / texSize;
+	const vec2 y = vec2(0, 1) / texSize;
+
+	vec4 accum = textureLod(inTex, uv, 0.0);
+	accum += textureLod(inTex, uv + scale * x + scale * y, 0);
+	accum += textureLod(inTex, uv - scale * x + scale * y, 0);
+	accum += textureLod(inTex, uv - scale * x - scale * y, 0);
+	accum += textureLod(inTex, uv + scale * x - scale * y, 0);
+
+	imageStore(outTex, ivec2(id), accum / 5);
+}

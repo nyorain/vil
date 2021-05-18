@@ -141,6 +141,7 @@ src = files(
 	'src/gui/command.cpp',
 	'src/gui/commandHook.cpp',
 	'src/gui/vertexViewer.cpp',
+	'src/gui/blur.cpp',
 
 	# external util
 	'src/spirv_reflect.cpp',
@@ -196,6 +197,7 @@ src = files(
 	'src/gui/util.hpp',
 	'src/gui/commandHook.hpp',
 	'src/gui/vertexViewer.hpp',
+	'src/gui/blur.hpp',
 
 	# fonts
 	'src/gui/arimo.cpp',

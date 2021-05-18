@@ -226,9 +226,9 @@ void RenderData::init(Device& dev) {
 	sci.magFilter = VK_FILTER_NEAREST;
 	sci.minFilter = VK_FILTER_NEAREST;
 	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 	sci.minLod = -1000;
 	sci.maxLod = 1000;
 	sci.maxAnisotropy = 1.0f;
@@ -260,7 +260,7 @@ void RenderData::init(Device& dev) {
 	VkPushConstantRange pcrs[1] = {};
 	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 	pcrs[0].offset = 0;
-	pcrs[0].size = 128;
+	pcrs[0].size = 40; // needed for image.frag
 
 	VkPipelineLayoutCreateInfo plci {};
 	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

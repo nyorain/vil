@@ -1,35 +1,43 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <gui/render.hpp>
 
 namespace vil {
 
 struct GuiBlur {
-	Device* dev;
+	static constexpr auto targetFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
-	VkPipelineLayout pipeLayout;
-	VkDescriptorSetLayout dsLayout;
-	VkPipeline blurPipe;
+	Device* dev {};
 
-	VkDeviceMemory targetMemory;
-	VkImage target;
-	VkImageView views[2];
+	VkPipelineLayout pipeLayout {};
+	VkDescriptorSetLayout dsLayout {};
+	VkPipeline blurPipe {};
+
+	VkDeviceMemory targetMemory {};
+	VkImage target {};
+	VkImageView view0 {};
+	VkImageView view1 {};
 
 	struct RenderBuffer {
-		VkImageView view;
-		VkDescriptorSet input;
+		VkImage image {};
+		VkImageView view {};
+		VkDescriptorSet input {};
 	};
 
 	std::vector<RenderBuffer> renderBuffers;
 
-	VkDescriptorSet steps[2];
-	VkExtent2D size;
+	std::array<VkDescriptorSet, 2> steps {};
+	VkExtent2D size {};
+
+	OwnBuffer vertices {};
 
 	~GuiBlur();
 };
 
-void init(GuiBlur&, Device&);
-void resize(GuiBlur&, VkExtent2D, VkSwapchainKHR swapchain);
-void blur(GuiBlur& blur, u32 imageIdx, VkOffset2D offset, VkExtent2D size);
+void init(GuiBlur&, Device&, VkSampler);
+void destroy(GuiBlur&);
+void resize(GuiBlur&, VkExtent2D, VkSwapchainKHR swapchain, VkFormat swapchainFormat);
+void blur(GuiBlur& blur, VkCommandBuffer, u32 imageIdx, VkOffset2D offset, VkExtent2D size);
 
 } // namesapce vil

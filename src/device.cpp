@@ -740,14 +740,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	// descriptor pool
 	// TODO: might need multiple pools...
-	VkDescriptorPoolSize poolSize;
-	poolSize.descriptorCount = 50u;
-	poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	VkDescriptorPoolSize poolSizes[2];
+	poolSizes[0].descriptorCount = 50u;
+	poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+
+	poolSizes[1].descriptorCount = 10u;
+	poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
 	VkDescriptorPoolCreateInfo dpci {};
 	dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	dpci.pPoolSizes = &poolSize;
-	dpci.poolSizeCount = 1u;
+	dpci.poolSizeCount = 2u;
+	dpci.pPoolSizes = poolSizes;
 	dpci.maxSets = 50u;
 	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 	VK_CHECK(dev.dispatch.CreateDescriptorPool(dev.handle, &dpci, nullptr, &dev.dsPool));

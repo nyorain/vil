@@ -59,6 +59,11 @@ template<typename Head> struct LastT<Head> {
 
 template<typename... Args> using Last = LastT<Args...>;
 
+// Returns ceil(num / denom), efficiently, only using integer division.
+inline constexpr unsigned ceilDivide(unsigned num, unsigned denom) {
+	return (num + denom - 1) / denom;
+}
+
 // Checks the environment variable with the given name.
 // If not set, returns defaultValue.
 // If set to 0, returns false. If set to 1, returns true.
