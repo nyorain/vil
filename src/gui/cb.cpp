@@ -173,6 +173,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
 
+	// ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 20, 20, 255));
 	ImGui::BeginChild("Command list", {0, 0});
 
 	if(mode_ == UpdateMode::swapchain) {
@@ -338,6 +339,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	ImGui::EndChild();
+	// ImGui::PopStyleColor();
 	ImGui::TableNextColumn();
 
 	// command info

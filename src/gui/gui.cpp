@@ -365,11 +365,21 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 		Arimo_compressed_size, 15.f, nullptr, rangesBasic);
 
 	// Apply style
+	ImGui::StyleColorsDark();
 	auto& style = ImGui::GetStyle();
+
+    style.WindowBorderSize = 1.f;
+    style.FrameBorderSize = 1.f;
+    // style.FrameRounding = 5.f;
+    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4( 1, 1, 1, 0.03f );
+    style.Colors[ImGuiCol_Header] = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
+    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
+    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.26f, 0.59f, 0.98f, 0.45f);
+	// style.Colors[ImGuiCol_TitleBgActive] = style.Colors[ImGuiCol_WindowBg];
 
 	// Disable all rounding
 	style.WindowRounding = 0.f;
-	style.WindowBorderSize = 0.f;
+	// style.WindowBorderSize = 0.f;
 	style.TabRounding = 0.f;
 	style.PopupRounding = 0.f;
 	style.GrabRounding = 0.f;
@@ -377,10 +387,9 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	// Space a bit more vertically, makes information look less overwhelming.
 	// Don't overdo it though, we intentionally want it compact.
-	// Reduce horizontal spacing a bit.
 	style.ItemSpacing = {8, 6};
 	style.FramePadding = {6, 4};
-	style.ItemInnerSpacing = {2, 4};
+	style.ItemInnerSpacing = {4, 4};
 
 	// Center window title
 	style.WindowTitleAlign = {0.5f, 0.5f};
@@ -949,7 +958,8 @@ void Gui::drawOverviewUI(Draw& draw) {
 		// - the variable scaling the make it weird to get an absolute
 		//   idea of the timings, only relative is possible
 		if(!hist.empty()) {
-			ImGui::PlotHistogram("Present timings", hist.data(), int(hist.size()),
+			ImGui::Text("Present timings:");
+			ImGui::PlotHistogram("", hist.data(), int(hist.size()),
 				0, nullptr, 0.f, FLT_MAX, {0, 150});
 		}
 	}
@@ -1089,8 +1099,9 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		// ImGui::ShowAboutWindow();
 		// ImGui::ShowMetricsWindow();
 		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
-		ImGui::SetNextWindowSize({800, 500}, ImGuiCond_Once);
-		// auto flags = 0;
+		ImGui::SetNextWindowSize({900, 550}, ImGuiCond_Once);
+
+		// flags |= ImGuiWindowFlags_NoCollapse;
 	}
 
 	auto checkSelectTab = [&](Tab tab) {

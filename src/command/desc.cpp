@@ -194,8 +194,10 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 				auto& bindA = bindingsA[e];
 				auto& bindB = bindingsB[e];
 				// NOTE: consider offset? not too relevant I guess
-				return bindA.buffer == bindB.buffer &&
-					bindA.range == bindB.range;
+				if(bindA.buffer == bindB.buffer &&
+						bindA.range == bindB.range) {
+					++match;
+				}
 			}
 		} else if(dsCat == DescriptorCategory::bufferView) {
 			auto bindingsA = bufferViews(a, bindingID);
