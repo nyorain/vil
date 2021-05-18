@@ -53,7 +53,12 @@ with_win32 = build_machine.system() == 'windows'
 with_x11 = not with_win32 and get_option('with_x11')
 
 tracy_deps = []
-with_tracy = true
+
+# tracy disabled on win32 for now since we apparantly need to care
+# for include order there thanks to the glorious windows.h header.
+# how the fuck could they build a monopoly with such bullshit, jeez.
+# can fix it later on, when needed.
+with_tracy = not with_win32
 
 if with_tracy
 	args += '-DTRACY_ENABLE'
