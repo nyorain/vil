@@ -618,7 +618,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		auto& bind = dsLayout.bindings[b];
 		bind.offset = off;
 
-		off += bind.descriptorCount * descriptorSize(bind.descriptorType);
+		off += unsigned(bind.descriptorCount * descriptorSize(bind.descriptorType));
 
 		dlg_assert(b + 1 == dsLayout.bindings.size() ||
 			!(bind.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT));

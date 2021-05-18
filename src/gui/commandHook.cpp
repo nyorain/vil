@@ -43,12 +43,13 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	ici.imageType = minImageType(this->extent);
 	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
+	std::array<u32, 2> qfams = {dev.gfxQueue->family, srcQueueFam};
+
 	if(srcQueueFam == dev.gfxQueue->family) {
 		ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	} else {
 		// PERF: we could just perform an explicit transition in this case,
 		//   it's really not hard here
-		std::array<u32, 2> qfams = {dev.gfxQueue->family, srcQueueFam};
 		ici.sharingMode = VK_SHARING_MODE_CONCURRENT;
 		ici.pQueueFamilyIndices = qfams.data();
 		ici.queueFamilyIndexCount = u32(qfams.size());

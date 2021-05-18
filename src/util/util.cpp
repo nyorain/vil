@@ -1051,7 +1051,7 @@ LocalChainCopy copyChainLocal(const void* pNext) {
 			"Unknown structure type: {}");
 
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf + offset);
-		offset += size;
+		offset += unsigned(size);
 
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs

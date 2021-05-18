@@ -29,7 +29,7 @@
 namespace vil {
 
 // Util
-#define BREAK_ON_ERROR
+// #define BREAK_ON_ERROR
 #ifdef BREAK_ON_ERROR
 volatile int a = 0u;
 
@@ -210,7 +210,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// find vkSetInstanceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
 	while(loaderData && loaderData->function != VK_LAYER_LINK_INFO) {
-		loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*loaderData);
+		loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*loaderData);
 	}
 
 	dlg_assert(loaderData);

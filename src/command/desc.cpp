@@ -285,10 +285,10 @@ FindResult find(const Command* root, span<const Command*> dst,
 						continue;
 					}
 
-					auto& src = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
-					auto dst = dstDsState.states.find(dstBound[i].ds);
-					dlg_assert_or(dst != dstDsState.states.end(), continue);
-					match += vil::match(nonNull(src), nonNull(dst->second));
+					auto& srcDescriptors = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
+					auto dstDescriptors = dstDsState.states.find(dstBound[i].ds);
+					dlg_assert_or(dstDescriptors != dstDsState.states.end(), continue);
+					match += vil::match(nonNull(srcDescriptors), nonNull(dstDescriptors->second));
 				}
 
 				m *= float(match) / srcBound.size();

@@ -1452,6 +1452,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 				preSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 				preSubmitInfo.pWaitSemaphores = &draw.futureSemaphore;
 				preSubmitInfo.pWaitDstStageMask = &topOfPpipeStage;
+				preSubmitInfo.waitSemaphoreCount = 1u;
 			}
 
 			for(auto* sub : waitSubmissions) {

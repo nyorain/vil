@@ -27,8 +27,8 @@ void freeBlocks(CommandMemBlock* head) {
 }
 
 CommandMemBlock& createMemBlock(size_t memSize, CommandMemBlock* next) {
-	auto buf = new std::byte[sizeof(CommandMemBlock) + memSize];
 	auto alignedObjSize = align(sizeof(CommandMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+	auto buf = new std::byte[alignedObjSize + memSize];
 	TracyAllocS(buf, alignedObjSize + memSize, 8);
 
 	auto* memBlock = new(buf) CommandMemBlock;

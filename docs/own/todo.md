@@ -165,6 +165,7 @@ other
 		  from *our* internal thread (which it might not be prepared for).
 		  In interception, could check whether it involves one of our
 		  handles or is called from our window thread.
+	- [ ] when intercepting dlg, at least forward to old handler...
 	- [ ] show failed asserts and potential errors in imgui UI?
 	      probably best to do this in addition to command line
 	- [ ] log assertions to debug console in visual studio
