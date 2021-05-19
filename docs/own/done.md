@@ -1,3 +1,5 @@
+- [x] should support image-less framebuffer extension as soon as possible,
+	  might need a lot of changes {it didn't but uncovered a bug in secondary cbs}
 - [x] Add more useful overview. 
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups

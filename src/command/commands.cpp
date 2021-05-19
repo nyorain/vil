@@ -157,14 +157,20 @@ std::vector<const Command*> displayCommands(const Command* cmd,
 	// (expanded) parent command (but it's hard to tell whether they are
 	// expanded).
 	std::vector<const Command*> ret;
+	auto first = true;
 	while(cmd) {
 		// No matter the flags, we never want to hide parent commands.
 		if((typeFlags & cmd->type()) || cmd->children()) {
-			ImGui::Separator();
+			if(!first) {
+				ImGui::Separator();
+			}
+
 			if(auto reti = cmd->display(selected, typeFlags); !reti.empty()) {
 				dlg_assert(ret.empty());
 				ret = reti;
 			}
+
+			first = false;
 		}
 
 		cmd = cmd->next;
@@ -243,11 +249,12 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 		}
 	}
 
-	if(open) {
+	if(open && cmd) {
 		// we don't want as much space as tree nodes
 		auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
 		ImGui::Unindent(s);
 
+		ImGui::Separator();
 		auto retc = displayCommands(cmd, selected, typeFlags);
 		if(!retc.empty()) {
 			dlg_assert(ret.empty());
@@ -564,20 +571,22 @@ void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 
 template<typename T>
 void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
-	m.match += weight;
+	m.total += weight;
 
 	if(a.size() != b.size()) {
 		return;
 	}
 
 	if(a.empty()) {
-		m.total += weight;
 		return;
 	}
 
+	float sum = 0.f;
 	for(auto i = 0u; i < a.size(); ++i) {
-		m.match += match(a[i], b[i]);
+		sum += match(a[i], b[i]);
 	}
+
+	m.match += weight * sum / a.size();
 }
 
 // match ideas:
@@ -769,6 +778,9 @@ void BeginRenderPassCmd::displayInspector(Gui& gui) const {
 			}
 		}
 	}
+
+	// TODO: when using an imageless framebuffer, link to used
+	// attachments here
 }
 
 bool same(const RenderPassDesc& a, const RenderPassDesc& b) {
@@ -1046,8 +1058,11 @@ void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*
 	checkReplace(state.pipe, map);
 	checkReplace(state.indices.buffer, map);
 
-	checkReplace(state.rpi.fb, map);
 	checkReplace(state.rpi.rp, map);
+
+	for(auto& att : state.rpi.attachments) {
+		checkReplace(att, map);
+	}
 
 	for(auto& verts : state.vertices) {
 		checkReplace(verts.buffer, map);
@@ -2259,8 +2274,11 @@ void ClearAttachmentCmd::displayInspector(Gui& gui) const {
 }
 
 void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(rpi.fb, map);
 	checkReplace(rpi.rp, map);
+
+	for(auto& att : rpi.attachments) {
+		checkReplace(att, map);
+	}
 }
 
 float ClearAttachmentCmd::match(const Command& rhs) const {
@@ -2589,6 +2607,11 @@ void PushDescriptorSetWithTemplateCmd::record(const Device& dev, VkCommandBuffer
 		pipeLayout->handle, set, static_cast<const void*>(data.data()));
 }
 
+// VK_KHR_fragment_shading_rate
+void SetFragmentShadingRateCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetFragmentShadingRateKHR(cb, &fragmentSize, combinerOps.data());
+}
+
 // Conditional rendering
 void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	VkConditionalRenderingBeginInfoEXT info {};
@@ -2606,6 +2629,11 @@ void BeginConditionalRenderingCmd::replace(const CommandAllocHashMap<DeviceHandl
 
 void EndConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdEndConditionalRenderingEXT(cb);
+}
+
+// VK_EXT_line_rasterization
+void SetLineStippleCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetLineStippleEXT(cb, stippleFactor, stipplePattern);
 }
 
 } // namespace vil

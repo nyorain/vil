@@ -98,6 +98,11 @@ void CommandBufferGui::draw(Draw& draw) {
 	// TODO: don't show this checkbox (or set it to true and disable?)
 	// when we are viewing an invalidated record without updating.
 	ImGui::Checkbox("Freeze State", &hook.freeze);
+	if(gui_->showHelp && ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("This will freeze the state of the command you are viewing,\n"
+			"e.g. the image/buffer content and measured time.\n"
+			"This does not affect updating of the commands shown on the left.");
+	}
 
 	ImGui::SameLine();
 
@@ -156,7 +161,15 @@ void CommandBufferGui::draw(Draw& draw) {
 		refButton(*gui_, sc);
 
 		ImGui::SameLine();
+
 		ImGui::Checkbox("Freeze Commands", &freezePresentBatches_);
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"This will freeze the commands shown on the left.\n"
+				"Useful to avoid flickering or just to inspect the current state.\n"
+				"Note that the per-command state you are viewing (e.g. image/buffer\n"
+				"content or measured time) will still be updated, use the 'Freeze State' checkbox");
+		}
 	}
 
 	ImGui::Separator();
@@ -193,6 +206,8 @@ void CommandBufferGui::draw(Draw& draw) {
 			}
 
 			if(ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit")) {
+				ImGui::Separator();
+
 				// we don't want as much space as tree nodes
 				auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
 				ImGui::Unindent(s);
@@ -215,6 +230,8 @@ void CommandBufferGui::draw(Draw& draw) {
 					// auto id = rec->group;
 					auto id = dlg::format("Commands:{}", r);
 					if(ImGui::TreeNodeEx(id.c_str(), flags, "Commands")) {
+						ImGui::Separator();
+
 						// we don't want as much space as tree nodes
 						auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
 						ImGui::Unindent(s);
@@ -239,10 +256,18 @@ void CommandBufferGui::draw(Draw& draw) {
 						ImGui::Indent(s);
 						ImGui::TreePop();
 					}
+
+					if(r + 1 != batch.submissions.size()) {
+						ImGui::Separator();
+					}
 				}
 
 				ImGui::Indent(s);
 				ImGui::TreePop();
+
+				if(b + 1 != records_.size()) {
+					ImGui::Separator();
+				}
 			}
 		}
 	} else {

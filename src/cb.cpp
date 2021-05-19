@@ -477,19 +477,40 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 
 	if(pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
 		dlg_assert(pBeginInfo->pInheritanceInfo);
-		dlg_assert(pBeginInfo->pInheritanceInfo->framebuffer);
 		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
 
-		auto& fb = cb.dev->framebuffers.get(pBeginInfo->pInheritanceInfo->framebuffer);
 		auto& rp = cb.dev->renderPasses.get(pBeginInfo->pInheritanceInfo->renderPass);
-
-		cb.graphicsState().rpi.fb = &fb;
 		cb.graphicsState().rpi.rp = &rp;
 		cb.graphicsState().rpi.subpass = pBeginInfo->pInheritanceInfo->subpass;
 
 		inherit = *pBeginInfo->pInheritanceInfo;
-		inherit.framebuffer = fb.handle;
 		inherit.renderPass = rp.handle;
+
+		if(pBeginInfo->pInheritanceInfo->framebuffer) {
+			auto& fb = cb.dev->framebuffers.get(pBeginInfo->pInheritanceInfo->framebuffer);
+
+			// not sure if imageless framebuffers are allowed here.
+			dlg_assert(!fb.imageless);
+			if(!fb.imageless) {
+				dlg_assert(rp.desc->attachments.size() == fb.attachments.size());
+				cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, fb.attachments.size());
+
+				for(auto i = 0u; i < fb.attachments.size(); ++i) {
+					auto& attachment = fb.attachments[i];
+					dlg_assert(attachment && attachment->img);
+
+					// TODO: same issue as below, would need to allow usedHandles
+					// without commands.
+					// useHandle(cb, cmd, *attachment, false);
+
+					cb.graphicsState().rpi.attachments[i] = attachment;
+				}
+
+			}
+
+			inherit.framebuffer = fb.handle;
+		}
+
 		beginInfo.pInheritanceInfo = &inherit;
 
 		// TODO: use handles here? would have to allow using handles without command
@@ -742,7 +763,6 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 	dlg_assert(!cb.graphicsState().rpi.rp);
 	cb.graphicsState().rpi.rp = cmd.rp;
-	cb.graphicsState().rpi.fb = cmd.fb;
 	cb.graphicsState().rpi.subpass = 0u;
 
 	cmd.subpassBeginInfo = subpassBeginInfo;
@@ -754,17 +774,37 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	useHandle(cb, cmd, *cmd.fb);
 	useHandle(cb, cmd, *cmd.rp);
 
-	if(cmd.fb && cmd.rp) {
+	if(cmd.fb->imageless) {
+		constexpr auto sType = VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO;
+		auto* attInfo = findChainInfo<VkRenderPassAttachmentBeginInfo, sType>(rpBeginInfo);
+		dlg_assert(attInfo);
+
+		dlg_assert(cmd.rp->desc->attachments.size() == attInfo->attachmentCount);
+		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, attInfo->attachmentCount);
+
+		for(auto i = 0u; i < attInfo->attachmentCount; ++i) {
+			auto& attachment = get(*cb.dev, attInfo->pAttachments[i]);
+			dlg_assert(attachment.img);
+
+			useHandle(cb, cmd, attachment, false);
+			useHandle(cb, cmd, nonNull(attachment.img),
+				cmd.rp->desc->attachments[i].finalLayout);
+
+			cb.graphicsState().rpi.attachments[i] = &attachment;
+		}
+	} else {
 		dlg_assert(cmd.rp->desc->attachments.size() == cmd.fb->attachments.size());
+		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, cmd.fb->attachments.size());
+
 		for(auto i = 0u; i < cmd.fb->attachments.size(); ++i) {
 			auto& attachment = cmd.fb->attachments[i];
-			if(!attachment || !attachment->img) {
-				continue;
-			}
+			dlg_assert(attachment && attachment->img);
 
 			useHandle(cb, cmd, *attachment, false);
 			useHandle(cb, cmd, *attachment->img,
 				cmd.rp->desc->attachments[i].finalLayout);
+
+			cb.graphicsState().rpi.attachments[i] = attachment;
 		}
 	}
 
@@ -2305,6 +2345,18 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
 		dut.handle, cmd.pipeLayout->handle, set, cmd.data.data());
 }
 
+VKAPI_ATTR void VKAPI_CALL CmdSetFragmentShadingRateKHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkExtent2D*                           pFragmentSize,
+		const VkFragmentShadingRateCombinerOpKHR    combinerOps[2]) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetFragmentShadingRateCmd>(cb);
+	cmd.fragmentSize = *pFragmentSize;
+	cmd.combinerOps = {combinerOps[0], combinerOps[1]};
+
+	cb.dev->dispatch.CmdSetFragmentShadingRateKHR(cb.handle(), pFragmentSize, combinerOps);
+}
+
 VKAPI_ATTR void VKAPI_CALL CmdBeginConditionalRenderingEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkConditionalRenderingBeginInfoEXT*   pConditionalRenderingBegin) {
@@ -2330,5 +2382,91 @@ VKAPI_ATTR void VKAPI_CALL CmdEndConditionalRenderingEXT(
 
 	cb.dev->dispatch.CmdEndConditionalRenderingEXT(cb.handle());
 }
+
+VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    lineStippleFactor,
+		uint16_t                                    lineStipplePattern) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetLineStippleCmd>(cb);
+	cmd.stippleFactor = lineStippleFactor;
+	cmd.stipplePattern = lineStipplePattern;
+
+	cb.dev->dispatch.CmdSetLineStippleEXT(cb.handle(), lineStippleFactor, lineStipplePattern);
+}
+
+// TODO
+/*
+VKAPI_ATTR void VKAPI_CALL CmdSetCullModeEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkCullModeFlags                             cullMode) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetFrontFaceEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkFrontFace                                 frontFace) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopologyEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkPrimitiveTopology                         primitiveTopology) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCountEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    viewportCount,
+		const VkViewport*                           pViewports) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCountEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    scissorCount,
+		const VkRect2D*                             pScissors) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstBinding,
+		uint32_t                                    bindingCount,
+		const VkBuffer*                             pBuffers,
+		const VkDeviceSize*                         pOffsets,
+		const VkDeviceSize*                         pSizes,
+		const VkDeviceSize*                         pStrides) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    depthTestEnable) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    depthWriteEnable) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOpEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkCompareOp                                 depthCompareOp) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    depthBoundsTestEnable) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    stencilTestEnable) {
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkStencilFaceFlags                          faceMask,
+		VkStencilOp                                 failOp,
+		VkStencilOp                                 passOp,
+		VkStencilOp                                 depthFailOp,
+		VkCompareOp                                 compareOp) {
+}
+*/
 
 } // namespace vil

@@ -34,6 +34,9 @@ public:
 
 	bool visible {false};
 
+	// TODO: make this into a setting
+	static constexpr bool showHelp = true;
+
 public:
 	Gui() = default;
 	Gui(Gui&&) = delete;

@@ -30,12 +30,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		const VkAllocationCallbacks*                pAllocator,
 		VkFramebuffer*                              pFramebuffer) {
 	auto& dev = getDevice(device);
+	auto imageless = pCreateInfo->flags & VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT;
 
 	LocalVector<VkImageView> viewHandles(pCreateInfo->attachmentCount);
 	std::vector<ImageView*> views(pCreateInfo->attachmentCount);
-	for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
-		views[i] = &get(dev, pCreateInfo->pAttachments[i]);
-		viewHandles[i] = views[i]->handle;
+
+	if(!imageless) {
+		for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
+			views[i] = &get(dev, pCreateInfo->pAttachments[i]);
+			viewHandles[i] = views[i]->handle;
+		}
 	}
 
 	auto nci = *pCreateInfo;
@@ -55,6 +59,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	fb.rp = dev.renderPasses.get(pCreateInfo->renderPass).desc;
 	fb.dev = &dev;
 	fb.attachments = std::move(views);
+	fb.imageless = imageless;
 
 	for(auto* view : fb.attachments) {
 		std::lock_guard lock(dev.mutex);

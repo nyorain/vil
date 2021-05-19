@@ -397,18 +397,24 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const DrawData& data) {
 		foundPipe = createPipe(attrib.format, binding.stride, data.topology);
 	}
 
+	auto displaySize = ImGui::GetIO().DisplaySize;
+
 	VkRect2D scissor {};
-	scissor.offset.x = data.canvasOffset.x;
-	scissor.offset.y = data.canvasOffset.y;
-	scissor.extent.width = data.canvasSize.x;
-	scissor.extent.height = data.canvasSize.y;
+	scissor.offset.x = std::max<int>(data.canvasOffset.x, 0);
+	scissor.offset.y = std::max<int>(data.canvasOffset.y, 0);
+	scissor.extent.width = std::min<int>(
+		data.canvasSize.x + data.canvasOffset.x - scissor.offset.x,
+		displaySize.x - data.canvasOffset.x);
+	scissor.extent.height = std::min<int>(
+		data.canvasSize.y + data.canvasOffset.y - scissor.offset.y,
+		displaySize.y - data.canvasOffset.y);
 	dev.dispatch.CmdSetScissor(cb, 0, 1, &scissor);
 
 	VkViewport viewport {};
-	viewport.width = data.canvasSize.x;
-	viewport.height = data.canvasSize.y;
-	viewport.x = data.canvasOffset.x;
-	viewport.y = data.canvasOffset.y;
+	viewport.width = scissor.extent.width;
+	viewport.height = scissor.extent.height;
+	viewport.x = scissor.offset.x;
+	viewport.y = scissor.offset.y;
 	viewport.maxDepth = 1.f;
 	dev.dispatch.CmdSetViewport(cb, 0, 1, &viewport);
 
@@ -431,17 +437,13 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const DrawData& data) {
 	dev.dispatch.CmdBindVertexBuffers(cb, 0, 1, &vbuf.buffer, &voffset);
 
 	// clear canvas color
-	// TODO: make sure clearRect is contained in the current render pass instance area!
 	VkClearAttachment clearAtt {};
 	clearAtt.clearValue.color = {0.f, 0.f, 0.f, 1.f};
 	clearAtt.colorAttachment = 0u;
 	clearAtt.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
 	VkClearRect clearRect {};
-	clearRect.rect.offset.x = data.canvasOffset.x;
-	clearRect.rect.offset.y = data.canvasOffset.y;
-	clearRect.rect.extent.width = data.canvasSize.x;
-	clearRect.rect.extent.height = data.canvasSize.y;
+	clearRect.rect = scissor;
 	clearRect.layerCount = 1u;
 
 	dev.dispatch.CmdClearAttachments(cb, 1u, &clearAtt, 1u, &clearRect);

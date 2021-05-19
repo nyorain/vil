@@ -1,5 +1,12 @@
 # Feature support overview
 
+Even when a feature/extension isn't explicitly supported by the layer,
+there are good chances that it might just work. If you plan on using
+extensions not explicitly supported, make sure to set the `VIL_WRAP=0`
+environment variable, it will significantly increase the chance that 
+new extensions "just work", with a slight performance hit. 
+See [env.md](env.md) for more details.
+
 ## Vulkan 1.0
 
 Missing:

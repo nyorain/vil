@@ -1119,12 +1119,16 @@ void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
 	}});
 
 	// Resource references
-	ImGui::Spacing();
-	ImGui::Text("Attachments:");
+	if(fb.imageless) {
+		imGuiText("Framebuffer is imageless, has no attachments");
+	} else {
+		ImGui::Spacing();
+		ImGui::Text("Attachments:");
 
-	for(auto* view : fb.attachments) {
-		ImGui::Bullet();
-		refButtonExpect(*gui_, view);
+		for(auto* view : fb.attachments) {
+			ImGui::Bullet();
+			refButtonExpect(*gui_, view);
+		}
 	}
 }
 

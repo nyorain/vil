@@ -43,6 +43,8 @@ struct Framebuffer : DeviceHandle {
 	u32 height {};
 	u32 layers {};
 
+	bool imageless {};
+
 	~Framebuffer();
 };
 

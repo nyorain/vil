@@ -54,6 +54,8 @@ docs
 
 window/overlay
 - [ ] make the key to toggle/focus overlay configurable
+	- [ ] we should probably think of a general configuration mechanism by now
+	      just use qwe and store a file somewhere?
 - [ ] dota: figure out why hooked overlay does not work anymore when in game
       probably something to do with the way we grab input over x11
 - [ ] fix/implement input pass-through when the hooked overlay does not have
@@ -122,20 +124,19 @@ gui stuff
 - [ ] figure out general approach to fix flickering data, especially
       in command viewer (but also e.g. on image hover in resource viewer)
 - [ ] imgui styling. It's really not beautiful at the moment, compare with
-      other imgui applications
+      other imgui applications. See imgui style examples in imgui releases
 	- [x] use custom font
 	- [ ] also use icons where useful (via icon font, like e.g. tracy does)
 	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
 	      are really overwhelming and hard to read at the moment.
 		  Can be improved to grasp information for intuitively
-	- [ ] add tooltips where it makes sense
-	- [ ] go at least a bit away from the default imgui style
+	- [x] add tooltips where it makes sense
+	- [x] go at least a bit away from the default imgui style
 	      The grey is hella ugly, make black instead.
 		  Use custom accent color. Configurable?
-	- [ ] Figure out transparency. Make it a setting?
-	- [ ] see imgui style examples in imgui releases
+	- [x] Figure out transparency. Make it a setting?
 	- [ ] lots of places where we should replace column usage with tables
-	- [ ] fix stupid looking duplicate header-seperator for commands in 
+	- [x] fix stupid looking duplicate header-seperator for commands in 
 	      command viewer (command viewer header UI is a mess anyways)
 - [ ] (low prio, later?) resource viewer: basic filtering by properties, e.g. allow to just
       show all images with 'width > 1920 && layers > 3' or something.
@@ -404,34 +405,34 @@ Possibly for later, new features/ideas:
       overlay, to not be dependent on application refresh rate.
 - [ ] support compressed/block formats
 - [ ] allow to view submissions to a queue
+- [ ] implement buffer devicve address
 - [ ] implement at least extensions that record to command buffer to allow hooking when they are used
 	- [x] push descriptors
+	- [x] implement khr_copy_commands2 extension
+	- [x] khr fragment shading rate
+	- [x] ext conditional rendering
+	- [ ] khr ray tracing
 	- [ ] device masks (core vulkan by now)
-	- [ ] extended dynamic state
-	- [ ] line rasterization
+	- [ ] extended dynamic state (WIP)
+	- [x] line rasterization
 	- [ ] nv device diagnostic checkpoint
 	- [ ] nv exclusive scissor
 	- [ ] nv mesh shaders
 	- [ ] amd buffer marker
 	- [ ] intel performance metrics
-	- [ ] ray tracing
 	- [ ] nv shading rate image
 	- [ ] ext sample locations
 	- [ ] ext discard rectangles
 	- [ ] nv viewport scaling
-	- [x] ext conditional rendering
 	- [ ] transform feedback (not sure we want to support this at all?)
-	- [x] implement khr_copy_commands2 extension
-	- [ ] khr fragment shading rate
 	- [ ] nv shading rate enums
+	- [ ] khr sync commands 2
 - [ ] implement additional command buffer viewer mode: per-frame-commands
       basically shows all commands submitted to queue between two present calls.
 	  similar to renderdoc
 	- [ ] or just show the most important submission for now? (based on "main
 	      submission" heuristics)
 - [ ] use new imgui tables api where useful
-- [ ] should support image-less framebuffer extension as soon as possible,
-      might need a lot of changes
 - [ ] add "save to ktx" feature on images? Personally, I'd consider this
       useful but this will likely scream LETS ABUSE PROPRIETARY IMAGES to some
 	  evil creatures out there so not sure if this is a good idea.

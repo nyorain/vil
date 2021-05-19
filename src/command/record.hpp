@@ -85,8 +85,14 @@ struct DynamicStateDepthBias {
 
 struct RenderPassInstanceState {
 	RenderPass* rp {};
-	Framebuffer* fb {};
 	unsigned subpass {};
+
+	// NOTE: we store the attachments here instead of the framebuffer
+	// to support VK_KHR_imageless_framebuffer (core in Vulkan 1.2).
+	// Keep in mind that this may be empty for secondary command buffers,
+	// even if they execute draw commands (the framebuffer parameter in the
+	// inherited info for secondary cbs is optional).
+	span<ImageView*> attachments;
 };
 
 struct GraphicsState : DescriptorState {

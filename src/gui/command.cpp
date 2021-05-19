@@ -919,24 +919,28 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	// But could be useful for debugging nonetheless
 	displayBeforeCheckbox();
 
-	if(!drawCmd->state.rpi.fb) {
-		imGuiText("Framebuffer was destroyed");
+	if(drawCmd->state.rpi.attachments.empty()) {
+		// attachments were destroyed, or we have a secondary cb that didn't
+		// se the framebuffer in inheritInfo
+		// NOTE: for secondary records (that are only nested to the main
+		// record we are viewing) we could figure it out. Not sure if worth
+		// it.
+		imGuiText("No attachment information");
 		return;
 	}
 
 	// information
 	auto aid = viewData_.attachment.id;
-	auto& fb = *drawCmd->state.rpi.fb;
-	dlg_assert(aid < fb.attachments.size());
-	if(!fb.attachments[aid] || !fb.attachments[aid]->img) {
+	auto& attachments = drawCmd->state.rpi.attachments;
+	dlg_assert(aid < attachments.size());
+	if(!attachments[aid] || !attachments[aid]->img) {
 		imGuiText(" Image or View were destroyed");
 		return;
 	}
 
-	auto& view = *fb.attachments[aid];
+	auto& view = *attachments[aid];
 	auto& img = *view.img;
 
-	refButton(*gui_, fb);
 	refButton(*gui_, view);
 	refButton(*gui_, img);
 

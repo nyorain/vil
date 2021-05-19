@@ -260,7 +260,9 @@ void RenderData::init(Device& dev) {
 	VkPushConstantRange pcrs[1] = {};
 	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 	pcrs[0].offset = 0;
-	pcrs[0].size = 40; // needed for image.frag
+	// PERF: perf most pipelines don't need this much. Could create multiple
+	// pipe layouts.
+	pcrs[0].size = 128; // needed e.g. for vertex viewer pipeline
 
 	VkPipelineLayoutCreateInfo plci {};
 	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

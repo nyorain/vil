@@ -381,43 +381,55 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	ImGui::StyleColorsDark();
 	auto& style = ImGui::GetStyle();
 
-    // style.WindowBorderSize = 1.f;
-    // style.FrameBorderSize = 1.f;
+	auto accentHue = 0.f; // red
 
-    // style.Colors[ImGuiCol_ScrollbarBg] = ImVec4( 1, 1, 1, 0.03f );
-    // style.Colors[ImGuiCol_Header] = ImVec4(0.26f, 0.59f, 0.98f, 0.25f);
-    // style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
-    // style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.26f, 0.59f, 0.98f, 0.45f);
+	auto setAccentColorHue = [&](ImGuiCol_ col, u8 h, u8 s, u8 v, u8 a) {
+		float r, g, b;
+		ImGui::ColorConvertHSVtoRGB(h / 255.f, s / 255.f, v / 255.f, r, g, b);
+		style.Colors[col] = {r, g, b, a / 255.f};
+	};
 
-	// style.Colors[ImGuiCol_WindowBg] = {1.0, 1.0, 1.0, 0.4}; // light
+	// hsv + alpha. H will always be accentHue
+	auto setAccentColor = [&](ImGuiCol_ col, u8 s, u8 v, u8 a) {
+		setAccentColorHue(col, accentHue, s, v, a);
+	};
+
+	setAccentColor(imgui_vil::ImGuiCol_CheckMark, 187, 250, 255);
+	setAccentColor(imgui_vil::ImGuiCol_SliderGrab, 185, 224, 255);
+	setAccentColor(imgui_vil::ImGuiCol_SliderGrabActive, 187, 250, 255);
+
+	setAccentColor(imgui_vil::ImGuiCol_Button, 187, 250, 102);
+	setAccentColor(imgui_vil::ImGuiCol_ButtonHovered, 187, 250, 255);
+	setAccentColor(imgui_vil::ImGuiCol_ButtonActive, 187, 239, 255);
+
+	setAccentColor(imgui_vil::ImGuiCol_Header, 187, 250, 79);
+	setAccentColor(imgui_vil::ImGuiCol_HeaderHovered, 187, 250, 204);
+	setAccentColor(imgui_vil::ImGuiCol_HeaderActive, 187, 250, 255);
+
+	style.Colors[ImGuiCol_Separator].w = 0.1;
+	setAccentColor(imgui_vil::ImGuiCol_SeparatorHovered, 221, 191, 150);
+	setAccentColor(imgui_vil::ImGuiCol_SeparatorActive, 221, 191, 255);
+
+	setAccentColor(imgui_vil::ImGuiCol_ResizeGrip, 187, 250, 50);
+	setAccentColor(imgui_vil::ImGuiCol_ResizeGripHovered, 187, 250, 170);
+	setAccentColor(imgui_vil::ImGuiCol_ResizeGripActive, 187, 250, 240);
+
+	setAccentColor(imgui_vil::ImGuiCol_Tab, 176, 148, 100);
+	setAccentColor(imgui_vil::ImGuiCol_TabHovered, 187, 250, 200);
+	setAccentColor(imgui_vil::ImGuiCol_TabActive, 180, 173, 255);
+
+	setAccentColor(imgui_vil::ImGuiCol_FrameBg, 170, 122, 138);
+	setAccentColor(imgui_vil::ImGuiCol_FrameBgHovered, 187, 250, 150);
+	setAccentColor(imgui_vil::ImGuiCol_FrameBgActive, 187, 250, 240);
+
 	style.Colors[ImGuiCol_WindowBg] = {0.02, 0.02, 0.02, 0.6}; // dark
 
-	style.Colors[ImGuiCol_Button].w = 0.8;
-	style.Colors[ImGuiCol_ButtonHovered].w = 1.0;
-	style.Colors[ImGuiCol_ButtonActive].w = 1.0;
-
-	style.Colors[ImGuiCol_FrameBg].w = 0.3;
-	style.Colors[ImGuiCol_FrameBgHovered].w = 0.5;
-	style.Colors[ImGuiCol_FrameBgActive].w = 0.5;
-	style.Colors[ImGuiCol_ScrollbarBg].w = 0.3;
-	style.Colors[ImGuiCol_ChildBg].w = 0.0;
-
-	style.Colors[ImGuiCol_Tab].w = 0.9;
-	style.Colors[ImGuiCol_TabActive].w = 0.9;
-	style.Colors[ImGuiCol_TabHovered].w = 0.9;
-	style.Colors[ImGuiCol_TabUnfocused].w = 0.5;
-	style.Colors[ImGuiCol_TabUnfocusedActive].w = 0.5;
+	setAccentColorHue(ImGuiCol_PlotHistogram, 119, 187, 250, 240);
+	setAccentColorHue(ImGuiCol_PlotHistogramHovered, accentHue, 187, 250, 240);
 
 	style.Colors[ImGuiCol_TitleBgActive] = style.Colors[ImGuiCol_WindowBg];
 	style.Colors[ImGuiCol_TitleBg] = style.Colors[ImGuiCol_WindowBg];
 	style.Colors[ImGuiCol_TitleBgCollapsed] = style.Colors[ImGuiCol_WindowBg];
-
-	style.Colors[ImGuiCol_Separator].w = 0.1;
-	style.Colors[ImGuiCol_SeparatorActive].w = 0.1;
-	style.Colors[ImGuiCol_SeparatorHovered].w = 0.1;
-
-	// style.Colors[ImGuiCol_PlotHistogram].w = 0.f;
-	// style.Colors[ImGuiCol_PlotHistogramHovered].w = 0.f;
 
 	// Disable all rounding
 	style.WindowRounding = 0.f;
@@ -431,7 +443,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	// Space a bit more vertically, makes information look less overwhelming.
 	// Don't overdo it though, we intentionally want it compact.
 	style.ItemSpacing = {8, 6};
-	style.FramePadding = {6, 4};
+	style.FramePadding = {6, 6};
 	style.ItemInnerSpacing = {4, 4};
 
 	// Center window title
@@ -964,6 +976,11 @@ void Gui::drawOverviewUI(Draw& draw) {
 		if(ImGui::Button("View per-frame submissions")) {
 			cbGui().showSwapchainSubmissions();
 			activateTab(Tab::commandBuffer);
+		} else if(showHelp && ImGui::IsAnyItemHovered()) {
+			ImGui::SetTooltip(
+				"This will open the tab to view all submissions done between two\n"
+				"presents to the main swapchain. You can alternatively select\n"
+				"specific Command Buffers from the 'Resources' tab to view their content.");
 		}
 
 		// show timings
@@ -1406,10 +1423,14 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			VkRect2D scissor;
 			// scissor.offset = {};
 			// scissor.extent = info.extent;
-			scissor.offset.x = windowPos_.x;
-			scissor.offset.y = windowPos_.y;
-			scissor.extent.width = windowSize_.x;
-			scissor.extent.height = windowSize_.y;
+			scissor.offset.x = std::max(windowPos_.x, 0.f);
+			scissor.offset.y = std::max(windowPos_.y, 0.f);
+			scissor.extent.width = std::min(
+				windowSize_.x + windowPos_.x - scissor.offset.x,
+				info.extent.width - windowPos_.x);
+			scissor.extent.height = std::min(
+				windowSize_.y + windowPos_.y - scissor.offset.y,
+				info.extent.height - windowPos_.y);
 
 			VkViewport viewport;
 			viewport.minDepth = 0.f;

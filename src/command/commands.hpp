@@ -866,10 +866,6 @@ struct PushDescriptorSetWithTemplateCmd final : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-// TODO: everything below is WIP
-// TODO: support VK_KHR_device_group? I guess we would have to consider it
-//   in gui rendering as well which might not be trivial.
-
 // VK_KHR_fragment_shading_rate
 struct SetFragmentShadingRateCmd final : Command {
 	VkExtent2D fragmentSize;
@@ -907,6 +903,11 @@ struct SetLineStippleCmd final : Command {
 	std::string nameDesc() const override { return "SetLineStipple"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
+
+
+// TODO: everything below is WIP, not implemented yet
+// TODO: support VK_KHR_device_group? I guess we would have to consider it
+//   in gui rendering as well which might not be trivial.
 
 // VK_EXT_extended_dynamic_state
 struct SetCullModeCmd final : Command {
@@ -949,7 +950,7 @@ struct SetScissorWithCountCmd final : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-// BindVertexBuffers2Cmd is mapped via BindVertexBuffers
+// BindVertexBuffers2Cmd should be mapped via BindVertexBuffers, TODO
 
 struct SetDepthTestEnableCmd final : Command {
 	bool enable;
