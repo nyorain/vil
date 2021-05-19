@@ -1,6 +1,16 @@
 # Todo
 
 v0.1, goal: end of january 2021 (edit may 2021: lmao) 
+- lcs matching; fix dlg_assert(found) stuff
+- overlay improvements (especially win32 but also x11)
+	- wayland hooked overlay probably for later/never. Wayland
+	  is likely just too-well designed to make this hack work, which
+	  is a good thing.
+- testing & stability improvements
+- docs improvements (mainly in introduction post explaining stuff)
+- vertex viewer improvements
+- gui improvement: remove flickering data and stuff, allow to get
+  texel values in command viewer
 
 urgent, bugs:
 
@@ -56,6 +66,8 @@ window/overlay
 - [ ] make the key to toggle/focus overlay configurable
 	- [ ] we should probably think of a general configuration mechanism by now
 	      just use qwe and store a file somewhere?
+	- [ ] also remove the hardcoded check in vilOverlayKeyEvent I guess.
+	      maybe entirely leave it up to the application to show/hide it?
 - [ ] dota: figure out why hooked overlay does not work anymore when in game
       probably something to do with the way we grab input over x11
 - [ ] fix/implement input pass-through when the hooked overlay does not have
@@ -66,12 +78,6 @@ window/overlay
 	- [ ] clean the implementation up
 	- [ ] when not showing own cursor, just use GetCursorPos over
 	      raw input. Causes problems at the moment
-- [x] rework dev/gui so that there is never more than one gui. Supporting
-      multiple guis at the same time is not worth the trouble (think
-	  about command buffer hooking from multiple cb viewers...)
-	- [ ] what to do when window *and* overlay is created? or multiple overlays?
-		  Should probably close the previous one (move gui object)
-		  See todo in Gui::init. Make sure there never is more than one
 - [ ] improve window creation: try to match up used swa backend with enabled
 	  vulkan extensions. Could extend swa for it, if useful
 	  (e.g. swa_display_create_for_vk_extensions)
@@ -80,9 +86,18 @@ window/overlay
 	      implement yet (such as sparse binding)
 		   (could for instance test what happens when memory field of a buffer/image
 		   is not set).
-- [ ] fix overlay for wayland. Use xdg popup
+- [ ] add a window icon for the separate window
+      guess we need to implement it in swa for win32 first
+- [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
+- [ ] (high prio) holding the device mutex while submitting is really bad, see queue.cpp.
+      We only need it for gui sync I think, we might be able to use
+	  a separate gui/sync mutex for that. Basically a mutex that (when locked)
+	  makes sure our tracked state (e.g. dev.pending) really includes everything
+	  that has been submitted so far. That mutex would have to be
+	  locked before locking the device mutex, never the other way around.
+- [ ] the performance notes in CommandHook::hook are relevant
 - [ ] also don't always copy DescriptorSetState on submission.
       Leads to lot of DescriptorSetState copies, destructors.
 	  We only need to do it when currently in swapchain mode *and* inside
@@ -91,23 +106,15 @@ performance/profiling:
 	  For non-update-after-bind (& update_unused_while_pending) descriptors,
 	  we could copy the state on BindDescriptorSet time? not sure that's
 	  better though.
-- [ ] {high prio} holding the device mutex while submitting is really bad, see queue.cpp.
-      We only need it for gui sync I think, we might be able to use
-	  a separate gui/sync mutex for that. Basically a mutex that (when locked)
-	  makes sure our tracked state (e.g. dev.pending) really includes everything
-	  that has been submitted so far. That mutex would have to be
-	  locked before locking the device mutex, never the other way around.
-- [ ] don't lock the dev mutex during our spirv xfb injection
-- [ ] the performance notes in CommandHook::hook are relevant
-- [ ] add (extensive) time zone to basically every entry point so we
+- [ ] (easy) don't lock the dev mutex during our spirv xfb injection.
+      Could e.g. always already generate it when the shader module
+	  is created.
+- [ ] (low prio) add (extensive) time zone to basically every entry point so we
 	  can quickly figure out why an application is slow
 
 
 object wrapping:
-- [ ] (later, low prio) support wrapping for remaining handle types.
-      we can wait with this until it proves to be a bottleneck somewhere
-- [ ] (later, low prio) support wrapping for VkDevice, fix it everywhere
-- [ ] only use the hash maps in Device when we are not using object 
+- [ ] (low prio) only use the hash maps in Device when we are not using object 
       wrapping. Otherwise a linked list is enough/better.
 	  Could always use the linked list and the hash maps just optionally.
 	  Maybe we can even spin up some lockfree linked list for this? We'd only
@@ -116,12 +123,15 @@ object wrapping:
 		  wrapping. Many ugly situations atm, see e.g. the
 		  hack in ~CommandPool and ~DescriptorPool.
 		  And we don't really need maps in the first place, see below.
+- [ ] (later, low prio) support wrapping for remaining handle types.
+      we can wait with this until it proves to be a bottleneck somewhere
+- [ ] (later, low prio) support wrapping for VkDevice, fix it everywhere
 
 gui stuff
-- [ ] cb/command viewer: when viewing a batch from a swapchain,
+- [ ] (high prio) cb/command viewer: when viewing a batch from a swapchain,
       show the semaphores/fences with from a vkQueueSubmit.
 	  When selecting the vkQueueSubmit just show an overview.
-- [ ] figure out general approach to fix flickering data, especially
+- [ ] (high prio) figure out general approach to fix flickering data, especially
       in command viewer (but also e.g. on image hover in resource viewer)
 - [ ] imgui styling. It's really not beautiful at the moment, compare with
       other imgui applications. See imgui style examples in imgui releases
@@ -210,11 +220,14 @@ other
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
 	  we could fix it by not imgui-pushing the resource ID before showing the button.
-- [ ] stop this todo-for-v0.1-list from growing at some point.
 
 
 
 Possibly for later, new features/ideas:
+- [ ] the current handling when someone attempts to construct multiple guis
+      is a bit messy. Move the old gui object? At least make sure we always
+	  synchronize dev.gui, might have races atm.
+	  See TODO in Gui::init
 - [ ] the current situation using imgui_vil is terrible. We need this to make
       sure that imgui symbols we define don't collide with the symbols
 	  from the application. The proper solution is to set symbol_visibility

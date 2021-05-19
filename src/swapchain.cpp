@@ -172,7 +172,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		// Otherwise we have to create a new renderer from scratch.
 		// Carry over all gui logic. Just recreate rendering logic
 		dlg_error("TODO: not implemented");
-	} else if(platform) {
+	} else if(platform && !dev.gui) {
 		swapd.overlay = std::make_unique<Overlay>();
 		swapd.overlay->init(swapd);
 

@@ -1,3 +1,9 @@
+- [x] rework dev/gui so that there is never more than one gui. Supporting
+      multiple guis at the same time is not worth the trouble (think
+	  about command buffer hooking from multiple cb viewers...)
+	- [x] what to do when window *and* overlay is created? or multiple overlays?
+		  Should probably close the previous one (move gui object)
+		  See todo in Gui::init. Make sure there never is more than one
 - [x] should support image-less framebuffer extension as soon as possible,
 	  might need a lot of changes {it didn't but uncovered a bug in secondary cbs}
 - [x] Add more useful overview. 

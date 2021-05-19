@@ -39,6 +39,11 @@ extern "C" VIL_API VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice v
 			return {};
 		}
 
+		if(dev.gui) {
+			dlg_warn("There already is a vil gui; Can't have two of them");
+			return {};
+		}
+
 		sc.overlay = std::make_unique<vil::Overlay>();
 		sc.overlay->init(sc);
 		ret = reinterpret_cast<VilOverlay>(sc.overlay.get());

@@ -209,7 +209,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	// find vkSetInstanceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
-	while(loaderData && loaderData->function != VK_LAYER_LINK_INFO) {
+	while(loaderData && loaderData->function != VK_LOADER_DATA_CALLBACK) {
 		loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*loaderData);
 	}
 

@@ -428,7 +428,6 @@ void DisplayWindow::uiThread() {
 
 		swa_window_set_userdata(window, this);
 		this->surface = bit_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
-		this->ini->setInstanceLoaderData(this->ini->handle, this->surface);
 
 		state_.store(State::windowCreated);
 		cv_.notify_one();
