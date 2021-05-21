@@ -2,18 +2,18 @@
 
 v0.1, goal: end of january 2021 (edit may 2021: lmao) 
 - lcs matching; fix dlg_assert(found) stuff
-- overlay improvements (especially win32 but also x11)
-	- wayland hooked overlay probably for later/never. Wayland
-	  is likely just too-well designed to make this hack work, which
-	  is a good thing.
+- overlay improvements (especially win32 but also x11; leave wl out)
 - testing & stability improvements
 - docs improvements (mainly in introduction post explaining stuff)
 - vertex viewer improvements
 - gui improvement: remove flickering data and stuff, allow to get
   texel values in command viewer
+- add more tests where useful
 
 urgent, bugs:
-- [ ] fix current CopiedBuffer usage; use the mapped memory directly everywhere
+- [ ] fix cbGui freeze: temporarily unfreeze when selecting a new command
+      I guess we can only handle this in the cbGui itself. Just set a flag
+	  that commandHook.freeze is set to false until we get a new state
 - [ ] fix hooking commands inside CmdExecuteCommands
 	  I guess CmdExecuteCommands should not do anything in record()?
 	  We have to watch out for extensions there though
@@ -40,11 +40,12 @@ descriptor indexing extension:
 vertex viewer/xfb:
 - [ ] consider dynamically set stride when pipeline has that dynamic state
 - [ ] vertex viewer improvements
-	- [ ] automatically compute bounding box of data and center camera
+	- [x] automatically compute bounding box of data and center camera
 	- [ ] allow showing active frustum
 - [ ] really attempt to display non-float formats in 3D vertex viewer?
 - [ ] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
 - [ ] support drawIndirectCount in vertex viewer
+	- [ ] similar: support drawIndirect with multiple commands
 	- [ ] #43, probably for later: also support just showing a single draw command
 		  (see the other todo - #42)
 - [ ] xfb: support custom outputs, not just the Position Builtin
@@ -224,11 +225,6 @@ Possibly for later, new features/ideas:
       is a bit messy. Move the old gui object? At least make sure we always
 	  synchronize dev.gui, might have races atm.
 	  See TODO in Gui::init
-- [ ] the current situation using imgui_vil is terrible. We need this to make
-      sure that imgui symbols we define don't collide with the symbols
-	  from the application. The proper solution is to set symbol_visibility
-	  to hidden. But then we can't test vil. Maybe just export the stuff
-	  we test explicitly? Same for spirv_reflect basically.
 - [ ] The way we have to keep CommandRecord objects alive (keepAlive) in various places
       (e.g. Gui::renderFrame, CommandBuffer::doReset, CommandBuffer::doEnd),
       to make sure they are not destroyed while we hold the lock (and possibly

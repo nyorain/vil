@@ -19,9 +19,7 @@ public:
 	enum class UpdateMode {
 		none, // does not update them at all. Displays static record
 		commandBuffer, // always displays current record of commandBuffer
-		// TODO: rename that mode and cleanup the code. The command groups
-		// concept was garbage apparently.
-		commandGroup, // always displayed last record of command group
+		any, // always displays the last submission matching the selection
 		swapchain, // displays all commands between two swapchain presents
 	};
 
@@ -37,7 +35,6 @@ public:
 	void showSwapchainSubmissions();
 	void select(IntrusivePtr<CommandRecord> record);
 	void select(IntrusivePtr<CommandRecord> record, CommandBuffer& cb);
-	void selectGroup(IntrusivePtr<CommandRecord> record);
 
 private:
 	void updateHookTarget();

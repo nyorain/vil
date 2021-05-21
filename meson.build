@@ -217,6 +217,14 @@ src = files(
 	'src/spirv_reflect.h',
 )
 
+if get_option('with_tests')
+	src += files(
+		'src/test/bugged.cpp',
+		'src/test/rpsplit.cpp',
+		'src/test/localVector.cpp'
+	)
+endif
+
 public_inc = include_directories('include/')
 private_inc = include_directories('src/')
 
@@ -255,8 +263,7 @@ endif
 vil_layer = shared_library(
 	'VkLayer_live_introspection',
 	[src, spv],
-	# disable this for testing
-	# gnu_symbol_visibility: 'hidden',
+	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
 	cpp_args: args + layer_args,
@@ -299,5 +306,10 @@ if get_option('with_example')
 endif
 
 if get_option('with_tests')
-	subdir('docs/test')
+	viltest = executable('viltest', files('src/test/main.cpp'),
+		include_directories: inc,
+		cpp_args: args,
+		dependencies: dep_dlg,
+		link_with: vil_layer)
+	test('viltest', viltest)
 endif

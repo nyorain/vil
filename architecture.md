@@ -1,5 +1,8 @@
 # VIL Architecture
 
+This file outlines some of the most important concepts detailing how
+the layer works internally. Useful mainly for development on it.
+
 ## File Organization
 
 - `subprojects`: place for meson-built subprojects
@@ -20,6 +23,7 @@
 	- `pml`: [pml](https://github.com/nyorain/pml) is a lightweight C posix main loop.
 	  Dependency of swa on unix.
 - `src`: pretty much all source codes and non-public headers go here
+	- `command`: for all command-related utility
 	- `util`: utility headers that are not directly involved with the vulkan API
 	  and or used in potentially multiple places throughout the layer.
 	  Most of these utilities were imported from previous projects.
@@ -38,9 +42,16 @@
 	  which we use for our introspection gui. We use static sources instead
 	  of building it as subproject as it's easier to build this way.
 	  We compile it directly into the layer library.
+	- `tracy`: Source of the profiling tool we use, directly baked into the library.
+	  See [performance.md](docs/performance.md) for more details on profiling.
+	- `test`: To test the functions and classes not exported from the layer,
+	  we compile the tests directly into the shared library (when tests
+	  are enabled, they are off by default, but always run on the CI).
+	  The tests compiled into the shared library are defined in this folder.
+	  We also have a `main.cpp` here that is able to execute them.
 - `include`: Only the public API header lives here. Future API or otherwise public
   headers should go here.
-- `docs`: Documentation, tests, examples, pictures.
+- `docs`: Documentation, examples, pictures.
 
 ## Code organization
 
@@ -49,18 +60,19 @@ For almost every vulkan handle, there is a representation on our side.
 `VkInstance` is represented by `vil::Instance`, `VkDevice` by `vil::Device`,
 `VkImageView` by `vil::ImageView` and so on.
 
-We don't wrap handles at the moment, at the hope that this will maximize
-the layers compatibility with future extensions. See [this post](https://renderdoc.org/vulkan-layer-guide.html)
-for more details. This might change in future, there are several
-advantages to handle wrapping that we might need (performance and better
-identification of non-unique non-dispatchable handles).
-For reference: the validation layers allow to dynamically toggle whether
-handle wrapping is used.
-
-Instead, `vil::Device` has tables mapping the vulkan handles to their
+`vil::Device` has tables mapping the vulkan handles to their
 representations inside the layer. For dispatchable handles (Instance, Device, 
 CommandBuffer, Queue; we also use it for VkSurfaceKHR), there is a global 
 table in [src/data.hpp](src/data.hpp).
+
+The layer optionally wraps handles, see (env.md)[docs/env.md] for configuration, it's
+even possible to decide on a per-object-type basis whether warapping is done.
+See [this post](https://renderdoc.org/vulkan-layer-guide.html) for more details
+on handle wrapping.
+Wrapping handles allows us to bypass those (potentially large, synchronized) 
+global or per-device lookup tables and instead directly cast into
+our representation of the handles. But it also decreases the chance that the
+layer works with extensions it does not explicitly support.
 
 Synchronization is currently done mainly over a single mutex in `vil::Device`.
 Accesses that are not guaranteed to be externally synchronized by vulkan
@@ -74,16 +86,18 @@ Example cases where the mutex is needed:
   Critical section is needed since other threads could create ImageViews to the same
   image or the gui could currently be iterating over all ImageViews
   for a given Image in another thread.
-- A DescriptorSet is updated with a buffer range and stores a reference to itself
-  in the associated buffer.
-  Critical section is needed because other threads could concurrently write the
-  same buffer to other descriptor sets or the gui could read the descriptor
-  or the buffer properties in another thread.
-- When a BufferView is destroyed, it must inform all descriptor sets that have it
-  bound that they are invalid now.
-  The descriptor set could concurrently be updated in another thread.
+- When a CommandBuffer is reset (e.g. by vkBeginCommandBuffer or vkResetCommandPool),
+  we need to change its internal state that might at the same time be
+  read from another thread (e.g. by our gui rendering). So we have to
+  lock a mutex.
 
-In general, we keep track of almost all connections between handles and allow
+Since DescriptorSet updates can be a bottleneck and are often done from
+multiple threads, we have a separate synchronization mechanism for that.
+Basically, all DescriptorSet state is moved into DescriptorSetState objects
+that implement copy-on-write when a state object has more than one reference
+(i.e. someone else is interested in the descriptor state at a specific time).
+
+In general, we keep track of most connections between handles and allow
 to view them in the gui. While the gui is rendered, it locks the device mutex.
 
 In addition to the standard device mutex, there is also the device queue mutex,
@@ -92,7 +106,7 @@ to call queue operations from multiple threads at the same time).
 
 ## Command
 
-`vil::Command` (see [src/command.hpp](src/command.hpp)) is our internal representation
+`vil::Command` (see [command.hpp](src/command/command.hpp)) is our internal representation
 of a single command added to a command buffer. When the application
 records a command buffer, we build a list (in truth: rather a hierachy) of
 these objects for multiple purposes:
@@ -103,24 +117,15 @@ these objects for multiple purposes:
 
 ## CommandRecord
 
-`vil::CommandRecord` (see [src/record.hpp](src/record.hpp)) holds all state for a recorded command buffer, i.e.
+`vil::CommandRecord` (see [record.hpp](src/command/record.hpp)) holds all state for a recorded command buffer, i.e.
 all commands, the usage flags with which the record was begun, which handles are used.
 It's disconnected from the command buffer itself and can outlive it.
 It's used in multiple places and ownership is shared via an intrusive reference count.
-
-## CommandBufferGroup
-
-To allow continuous viewing of submissions in the gui, we internally abstract
-over multiple command records, grouping them together into a CommandBufferGroup.
-When command records are very similar to each other, they are placed into
-the same group. We use (at the moment very simple) heuristics to decide this.
-Without this concept, viewing the per-frame connection and actually
-staying at the same position inside the commands would be impossible for games
-that re-record command buffers every frame. Defining this concept by
-the actually recorded data instead of just the used CommandBuffer makes this
-work for games that recreate or dynamically recycle command buffers
-in every frame as well.
-See `vil::CommandBufferGroup` in [src/queue.hpp](src/queue.hpp).
+One speciality is its custom memory allocation mechanism, see [alloc.hpp](src/command/alloc.hpp).
+Since CommandBuffer recording can be a bottleneck and might involve many thousands
+commands, we don't have any time to waste there. Therefore, we always allocate larger
+blocks of memory and place all commands and command-related data into them.
+The memory is freed simply when the CommandRecord is no longer needed.
 
 ## CommandHook
 

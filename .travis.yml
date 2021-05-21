@@ -5,7 +5,7 @@
 # - build mingw and visual studio, just use https://chocolatey.org/packages/mingw
 #   Just not calling vs vars script actually already calls mingw! fix that up.
 # - test meson visual studio backend, msbuild
-# - use apt addons instead of apt-get?
+# - use apt addons instead of apt-get for packages we need?
 
 matrix:
   include:
@@ -62,9 +62,6 @@ install:
 
 script:
   - if [ "$TRAVIS_OS_NAME" == "windows" ]; then ./build.bat; fi
-  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then meson build -Dwith_x11=false --backend=ninja; fi
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then meson build -Dwith_tests=true -Dwith_x11=false --backend=ninja; fi
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then ninja -C build; fi
-  # yeah, we can't test it, sadly.
-  # Would need provided GPUs for that (or a CPU implementation but
-  # I won't spend months trying to get this running on travis...)
-
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then ./viltest; fi

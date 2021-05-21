@@ -85,7 +85,6 @@ std::string readFormat(VkFormat format, span<const std::byte> src) {
 	//   support compresssed formats! See ioFormat in util.cpp
 
 	Vec4d val = read(format, src);
-	dlg_assert(numChannels < 4);
 
 	if(FormatIsFloat(format)) {
 		switch(componentSize) {
@@ -243,8 +242,7 @@ AABB3f bounds(VkFormat vertFormat, ReadBuf vertData, u32 vertStride,
 	return ret;
 }
 
-/*
-AABB3f bounds(span<const Vec4f> points, u32 stride, bool useW) {
+AABB3f bounds(span<const Vec4f> points, bool useW) {
 	auto inf = std::numeric_limits<float>::infinity();
 	auto min = Vec3f{inf, inf, inf};
 	auto max = Vec3f{-inf, -inf, -inf};
@@ -261,11 +259,10 @@ AABB3f bounds(span<const Vec4f> points, u32 stride, bool useW) {
 
 	AABB3f ret;
 	ret.pos = 0.5f * (min + max);
-	ret.extent = 0.5f * (max - max);
+	ret.extent = 0.5f * (max - min);
 
 	return ret;
 }
-*/
 
 // VertexViewer
 VertexViewer::~VertexViewer() {
@@ -599,7 +596,7 @@ void VertexViewer::updateInput(float dt) {
 			accel += -up;
 		}
 
-		auto fac = 100.f;
+		auto fac = speed_;
 		if(io.KeyShift) {
 			fac *= 5.f;
 		}
@@ -750,6 +747,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			vertBounds = bounds(attrib.format, vertData, binding.stride);
 		}
 
+		speed_ = vertBounds.extent.x + vertBounds.extent.y + vertBounds.extent.z;
 		centerCamOnBounds(vertBounds);
 	}
 
@@ -895,6 +893,22 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	ImGui::EndChild();
 
 	// 2: viewer
+	// NOTE: strictly speaking the reinterepret_cast is UB but it's
+	// all just trivial types so who cares
+	auto bspan = state.transformFeedback.data();
+	auto ptr = reinterpret_cast<const Vec4f*>(bspan.data());
+	auto verts = span{ptr, vertexCount};
+
+	// TODO: don't evaluate this every frame, just in the beginning
+	// and when the Recenter button is pressed.
+	const bool useW = perspectiveHeuristic(verts);
+
+	if(ImGui::Button("Recenter")) {
+		auto vertBounds = bounds(verts, useW);
+		speed_ = vertBounds.extent.x + vertBounds.extent.y + vertBounds.extent.z;
+		centerCamOnBounds(vertBounds);
+	}
+
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
@@ -920,11 +934,8 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.canvasOffset = {pos.x, pos.y};
 		drawData_.canvasSize = {avail.x, avail.y};
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-		auto xfbData = state.transformFeedback.data();
-		auto ptr = reinterpret_cast<const Vec4f*>(xfbData.data());
-		drawData_.useW = perspectiveHeuristic({ptr, xfbData.size() / 16u});
-		drawData_.scale = 100.f; // TODO
+		drawData_.useW = useW;
+		drawData_.scale = 1.f; // 100.f; // TODO
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);

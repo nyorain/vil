@@ -9,10 +9,8 @@
 #include <vk/enumString.hpp>
 #include <util/profiling.hpp>
 
-// TODO: the whole CommandBufferDesc code is moot, really.
-// See desc2.hpp and ideas in match.md and todo.md. We might want to
-// abolish the CommandGroup concepet completely, when our
-// Command matching works good enough.
+// TODO: the whole CommandBufferDesc code is suboptimal, really.
+// See desc2.hpp and ideas in match.md and todo.md
 
 namespace vil {
 

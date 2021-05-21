@@ -3,7 +3,7 @@
 
 using namespace vil;
 
-TEST(basic) {
+TEST(localVector_basic) {
 	LocalVector<int> a(7);
 
 	for(auto i = 0; i < 7; ++i) {

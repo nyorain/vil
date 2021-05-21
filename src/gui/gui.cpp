@@ -394,33 +394,33 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 		setAccentColorHue(col, accentHue, s, v, a);
 	};
 
-	setAccentColor(imgui_vil::ImGuiCol_CheckMark, 187, 250, 255);
-	setAccentColor(imgui_vil::ImGuiCol_SliderGrab, 185, 224, 255);
-	setAccentColor(imgui_vil::ImGuiCol_SliderGrabActive, 187, 250, 255);
+	setAccentColor(ImGuiCol_CheckMark, 187, 250, 255);
+	setAccentColor(ImGuiCol_SliderGrab, 185, 224, 255);
+	setAccentColor(ImGuiCol_SliderGrabActive, 187, 250, 255);
 
-	setAccentColor(imgui_vil::ImGuiCol_Button, 187, 250, 102);
-	setAccentColor(imgui_vil::ImGuiCol_ButtonHovered, 187, 250, 255);
-	setAccentColor(imgui_vil::ImGuiCol_ButtonActive, 187, 239, 255);
+	setAccentColor(ImGuiCol_Button, 187, 250, 102);
+	setAccentColor(ImGuiCol_ButtonHovered, 187, 250, 255);
+	setAccentColor(ImGuiCol_ButtonActive, 187, 239, 255);
 
-	setAccentColor(imgui_vil::ImGuiCol_Header, 187, 250, 79);
-	setAccentColor(imgui_vil::ImGuiCol_HeaderHovered, 187, 250, 204);
-	setAccentColor(imgui_vil::ImGuiCol_HeaderActive, 187, 250, 255);
+	setAccentColor(ImGuiCol_Header, 187, 250, 79);
+	setAccentColor(ImGuiCol_HeaderHovered, 187, 250, 204);
+	setAccentColor(ImGuiCol_HeaderActive, 187, 250, 255);
 
 	style.Colors[ImGuiCol_Separator].w = 0.1;
-	setAccentColor(imgui_vil::ImGuiCol_SeparatorHovered, 221, 191, 150);
-	setAccentColor(imgui_vil::ImGuiCol_SeparatorActive, 221, 191, 255);
+	setAccentColor(ImGuiCol_SeparatorHovered, 221, 191, 150);
+	setAccentColor(ImGuiCol_SeparatorActive, 221, 191, 255);
 
-	setAccentColor(imgui_vil::ImGuiCol_ResizeGrip, 187, 250, 50);
-	setAccentColor(imgui_vil::ImGuiCol_ResizeGripHovered, 187, 250, 170);
-	setAccentColor(imgui_vil::ImGuiCol_ResizeGripActive, 187, 250, 240);
+	setAccentColor(ImGuiCol_ResizeGrip, 187, 250, 50);
+	setAccentColor(ImGuiCol_ResizeGripHovered, 187, 250, 170);
+	setAccentColor(ImGuiCol_ResizeGripActive, 187, 250, 240);
 
-	setAccentColor(imgui_vil::ImGuiCol_Tab, 176, 148, 100);
-	setAccentColor(imgui_vil::ImGuiCol_TabHovered, 187, 250, 200);
-	setAccentColor(imgui_vil::ImGuiCol_TabActive, 180, 173, 255);
+	setAccentColor(ImGuiCol_Tab, 176, 148, 100);
+	setAccentColor(ImGuiCol_TabHovered, 187, 250, 200);
+	setAccentColor(ImGuiCol_TabActive, 180, 173, 255);
 
-	setAccentColor(imgui_vil::ImGuiCol_FrameBg, 170, 122, 138);
-	setAccentColor(imgui_vil::ImGuiCol_FrameBgHovered, 187, 250, 150);
-	setAccentColor(imgui_vil::ImGuiCol_FrameBgActive, 187, 250, 240);
+	setAccentColor(ImGuiCol_FrameBg, 170, 122, 138);
+	setAccentColor(ImGuiCol_FrameBgHovered, 187, 250, 150);
+	setAccentColor(ImGuiCol_FrameBgActive, 187, 250, 240);
 
 	style.Colors[ImGuiCol_WindowBg] = {0.02, 0.02, 0.02, 0.6}; // dark
 

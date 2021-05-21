@@ -5,24 +5,17 @@
 #include <device.hpp>
 #include <window.hpp>
 #include <gui/gui.hpp>
+#include <util/export.hpp>
 #include <swapchain.hpp>
 #include <overlay.hpp>
 #include <imgui/imgui.h>
 #include <swa/swa.h>
 
-#if defined(_WIN32) || defined(__CYGWIN__)
-  #define VIL_API __declspec(dllexport)
-#elif __GNUC__ >= 4
-  #define VIL_API __attribute__((visibility ("default")))
-#else
-  #define VIL_API // just pray it works.
-#endif
-
 using namespace vil;
 
 // TODO: we probably have to lock the mutex for every input call
 
-extern "C" VIL_API VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
+extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
 	auto& dev = getDeviceByLoader(vkDevice);
 
 	VilOverlay ret {};
@@ -57,12 +50,12 @@ extern "C" VIL_API VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice v
 	return ret;
 }
 
-extern "C" VIL_API void vilOverlayShow(VilOverlay overlay, bool show) {
+extern "C" VIL_EXPORT void vilOverlayShow(VilOverlay overlay, bool show) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	ov.gui.visible = show;
 }
 
-extern "C" VIL_API void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int y) {
+extern "C" VIL_EXPORT void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(ov.gui.visible) {
 		ov.gui.imguiIO().MousePos = {float(x), float(y)};
@@ -70,7 +63,7 @@ extern "C" VIL_API void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int 
 }
 
 // They return whether the event was processed by the overlay
-extern "C" VIL_API bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned button, bool press) {
+extern "C" VIL_EXPORT bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned button, bool press) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(ov.gui.visible && button < 5) {
 		auto& io = ov.gui.imguiIO();
@@ -80,7 +73,7 @@ extern "C" VIL_API bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned 
 
 	return false;
 }
-extern "C" VIL_API bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x, float y) {
+extern "C" VIL_EXPORT bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x, float y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(ov.gui.visible) {
 		auto& io = ov.gui.imguiIO();
@@ -92,7 +85,7 @@ extern "C" VIL_API bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x, f
 	return false;
 }
 
-extern "C" VIL_API bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keycode, bool pressed) {
+extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keycode, bool pressed) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 
 	// TODO; remove hardcoded toggle.
@@ -111,7 +104,7 @@ extern "C" VIL_API bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keycode,
 	return io.WantCaptureKeyboard;
 }
 
-extern "C" VIL_API bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8) {
+extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(!ov.gui.visible || !utf8) {
 		return false;
@@ -122,7 +115,7 @@ extern "C" VIL_API bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8
 	return io.WantCaptureKeyboard || io.WantTextInput;
 }
 
-extern "C" VIL_API void vilOverlayKeyboardModifier(VilOverlay overlay, uint32_t mod, bool active) {
+extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, uint32_t mod, bool active) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	if(!ov.gui.visible) {
 		return;

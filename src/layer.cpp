@@ -6,6 +6,7 @@
 #include <queue.hpp>
 #include <overlay.hpp>
 #include <util/util.hpp>
+#include <util/export.hpp>
 #include <util/profiling.hpp>
 
 #ifdef VIL_WITH_WAYLAND
@@ -583,7 +584,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	// special case: functions that don't need instance.
 	auto& hooked = it->second;
 	if(std::strcmp(funcName, "vkGetInstanceProcAddr") == 0 ||
-			// TODO: why is this needed for dota??
+			// NOTE: seems that some applications need this even though
+			// it shouldn't be valid use per spec
 			std::strcmp(funcName, "vkCreateDevice") == 0 ||
 			std::strcmp(funcName, "vkCreateInstance") == 0) {
 		return hooked.func;
@@ -603,9 +605,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	if(!hooked.device && !hooked.iniExt.empty()) {
 		auto it = find(inid->extensions, hooked.iniExt);
 		if(it == inid->extensions.end()) {
-			// dlg_trace("tried to load ini proc addr {} for disabled ext {}",
-			// 	funcName, hooked.iniExt);
-			// TODO: not sure what is better
+			dlg_trace("tried to load ini proc addr {} for disabled ext {}",
+				funcName, hooked.iniExt);
 			return inid->dispatch.GetInstanceProcAddr(ini, funcName);
 			// return nullptr;
 		}
@@ -620,11 +621,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const char* funcName) {
-	//(void) vkDev;
-	//(void) funcName;
-
-	//return reinterpret_cast<PFN_vkVoidFunction>(dummyDev);
-
 	auto it = funcPtrTable.find(std::string_view(funcName));
 	if(it == funcPtrTable.end()) {
 		// If it's not hooked, just forward it to the next chain link
@@ -652,11 +648,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 	if(!hooked.devExt.empty()) {
 		auto it = find(dev->appExts, hooked.devExt);
 		if(it == dev->appExts.end()) {
-			// dlg_trace("tried to load dev proc addr {} for disabled ext {}",
-			// 	funcName, hooked.devExt);
-			// TODO: not sure what is better
+			dlg_trace("tried to load dev proc addr {} for disabled ext {}",
+				funcName, hooked.devExt);
 			return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
-			// return nullptr;
 		}
 	}
 
@@ -664,13 +658,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 }
 
 } // namespace vil
-
-// TODO: not sure why we need this on windows
-#ifdef _WIN32
-	#define VIL_EXPORT __declspec(dllexport)
-#else
-	#define VIL_EXPORT VK_LAYER_EXPORT
-#endif
 
 // Global layer entry points
 extern "C" VIL_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL

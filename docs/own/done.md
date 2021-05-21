@@ -1,3 +1,9 @@
+- [x] the current situation using imgui_vil is terrible. We need this to make
+      sure that imgui symbols we define don't collide with the symbols
+	  from the application. The proper solution is to set symbol_visibility
+	  to hidden. But then we can't test vil. Maybe just export the stuff
+	  we test explicitly? Same for spirv_reflect basically.
+	  {can be removed in future, we don't export symbols anymore}
 - [x] commandHook: See the TODO on 'completed'. Might create problems atm.
 - [x] fix commandHook for updateAfterBind, updateUnusedWhilePending.
       We might need to invalidate the hooked records when a used descriptor

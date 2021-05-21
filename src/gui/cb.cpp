@@ -50,7 +50,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		switch(mode) {
 			case UpdateMode::none: return "Static";
 			case UpdateMode::commandBuffer: return "CommandBuffer";
-			case UpdateMode::commandGroup: return "CommandGroup";
+			case UpdateMode::any: return "Any";
 			case UpdateMode::swapchain: return "Swapchain";
 			default:
 				dlg_error("unreachable");
@@ -71,13 +71,11 @@ void CommandBufferGui::draw(Draw& draw) {
 				hook.target.record = record_.get();
 			}
 
-			/*
-			if(record_ && record_->group && ImGui::Selectable("CommandGroup")) {
-				mode_ = UpdateMode::commandGroup;
+			if(record_ && ImGui::Selectable("Any")) {
+				mode_ = UpdateMode::any;
 				hook.target = {};
-				hook.target.group = record_->group;
+				hook.target.all = true;
 			}
-			*/
 
 			if((mode_ == UpdateMode::commandBuffer && cb_) || record_->cb) {
 				if(ImGui::Selectable("CommandBuffer")) {
@@ -137,10 +135,8 @@ void CommandBufferGui::draw(Draw& draw) {
 		imGuiText("Updating from Command Buffer");
 		ImGui::SameLine();
 		refButton(*gui_, *cb_);
-	} else if(mode_ == UpdateMode::commandGroup) {
-		dlg_assert(false);
-		// dlg_assert(record_->group);
-		// imGuiText("Updating from Command Group");
+	} else if(mode_ == UpdateMode::any) {
+		imGuiText("Updating from Command Group");
 	} else if(mode_ == UpdateMode::swapchain) {
 		if(!gui_->dev().swapchain) {
 			record_ = {};
@@ -289,10 +285,8 @@ void CommandBufferGui::draw(Draw& draw) {
 			} else if(mode_ == UpdateMode::commandBuffer) {
 				dlg_assert(cb_);
 				dlg_assert(dev.commandHook->target.cb == cb_);
-			} else if(mode_ == UpdateMode::commandGroup) {
-				dlg_assert(false);
-				// dlg_assert(record_->group);
-				// dlg_assert(dev.commandHook->target.group == record_->group);
+			} else if(mode_ == UpdateMode::any) {
+				dlg_assert(dev.commandHook->target.all);
 			}
 
 			command_ = std::move(nsel);
@@ -444,31 +438,6 @@ void CommandBufferGui::showSwapchainSubmissions() {
 	commandViewer_.unselect();
 }
 
-void CommandBufferGui::selectGroup(IntrusivePtr<CommandRecord> record) {
-	mode_ = UpdateMode::commandGroup;
-	cb_ = {};
-
-	// NOTE: we could try to find new command matching old description.
-	// if(record_ && !desc_.empty()) {
-	// 	command_ = CommandDesc::find(record_->commands, desc_);
-	// 	// update hooks here
-	// }
-
-	// Unset hooks
-	auto& hook = *gui_->dev().commandHook;
-	hook.unsetHookOps();
-	hook.desc({}, {}, {});
-	hook.target = {};
-
-	command_ = {};
-	record_ = std::move(record);
-	dsState_ = {};
-
-	updateHookTarget();
-
-	commandViewer_.unselect();
-}
-
 void CommandBufferGui::destroyed(const Handle& handle) {
 	(void) handle;
 
@@ -499,7 +468,7 @@ void CommandBufferGui::updateHookTarget() {
 		case UpdateMode::none:
 			hook.target.record = record_.get();
 			break;
-		case UpdateMode::commandGroup:
+		case UpdateMode::any:
 		case UpdateMode::swapchain:
 			// hook.target.group = nonNull(record_).group;
 			hook.target.all = true;

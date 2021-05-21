@@ -73,6 +73,7 @@ private:
 	Vec2f lastMousPos_ {};
 	float yaw_ {};
 	float pitch_ {};
+	float speed_ {1.f};
 
 	Mat4f viewProjMtx_ {};
 
