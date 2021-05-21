@@ -21,6 +21,43 @@
 namespace vil {
 
 // util
+const DescriptorState* getDsState(const Command& cmd) {
+	const DescriptorState* dsState = nullptr;
+	if(auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd)) {
+		dsState = &drawCmd->state;
+	} else if(auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd)) {
+		dsState = &dispatchCmd->state;
+	} else {
+		return nullptr;
+	}
+
+	return dsState;
+}
+
+bool descriptorSame(const DescriptorSetState& a, const DescriptorSetState& b,
+		unsigned bindingID, unsigned elemID) {
+	if(&a == &b) {
+		return true;
+	}
+
+	dlg_assert(a.layout == b.layout);
+	dlg_assert(bindingID < a.layout->bindings.size());
+	dlg_assert(elemID < descriptorCount(a, bindingID));
+
+	auto& lbinding = a.layout->bindings[bindingID];
+	auto cat = category(lbinding.descriptorType);
+	if(cat == DescriptorCategory::image) {
+		return images(a, bindingID)[elemID] == images(b, bindingID)[elemID];
+	} else if(cat == DescriptorCategory::buffer) {
+		return buffers(a, bindingID)[elemID] == buffers(b, bindingID)[elemID];
+	} else if(cat == DescriptorCategory::bufferView) {
+		return bufferViews(a, bindingID)[elemID] == bufferViews(b, bindingID)[elemID];
+	}
+
+	dlg_error("Invalid descriptor type");
+	return false;
+}
+
 void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam) {
 	ZoneScoped;
@@ -125,12 +162,16 @@ void CopiedBuffer::init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFl
 	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | addFlags;
 
 	this->buffer.ensure(dev, size, usage);
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, VK_WHOLE_SIZE, 0, &this->map));
+	void* pmap;
+	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, VK_WHOLE_SIZE, 0, &pmap));
+
+	this->map = static_cast<const std::byte*>(pmap);
 
 	// NOTE: destructor for copied buffer is not needed as memory mapping
 	// is implicitly unmapped when memory of buffer is destroyed.
 }
 
+/*
 void CopiedBuffer::cpuCopy(u64 offset, u64 size) {
 	ZoneScoped;
 
@@ -159,6 +200,31 @@ void CopiedBuffer::cpuCopy(u64 offset, u64 size) {
 
 	copyOffset = offset;
 }
+*/
+
+void CopiedBuffer::invalidateMap() {
+	if(!buffer.mem) {
+		return;
+	}
+
+	// TODO: only invalidate when on non-coherent memory
+	VkMappedMemoryRange range[1] {};
+	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+	range[0].memory = buffer.mem;
+	range[0].size = VK_WHOLE_SIZE;
+	VK_CHECK(buffer.dev->dispatch.InvalidateMappedMemoryRanges(buffer.dev->handle, 1, range));
+}
+
+void invalidate(CommandHookRecord& rec) {
+	rec.hook = nullptr; // notify the record that it's no longer needed
+	auto it = find(rec.record->hookRecords, &rec);
+	dlg_assert(it != rec.record->hookRecords.end());
+
+	// CommandRecord::Hook is a FinishPtr.
+	// This will delete our record hook if there are no pending
+	// submissions of it left. See CommandHookRecord::finish
+	rec.record->hookRecords.erase(it);
+}
 
 // CommandHook
 VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
@@ -181,7 +247,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// When there is no gui viewing the submissions at the moment, we don't
 	// need/want to hook the submission.
 	auto& dev = *hooked.dev;
-	if(!dev.gui || !dev.gui->visible || dev.gui->activeTab() != Gui::Tab::commandBuffer) {
+	if(!dev.gui || !dev.gui->visible ||
+			dev.gui->activeTab() != Gui::Tab::commandBuffer || freeze) {
 		return hooked.handle();
 	}
 
@@ -189,60 +256,116 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// commands in hierachy_, find relies on all of them being valid.
 	replaceInvalidatedLocked(nonNull(record_));
 
-	// TODO, PERF: when record->hook is true, we only query this
-	// to get the new 'match' value (and for debug checks below).
-	// Kinda wasted to do all that work.
+	// Check if there already is a valid CommandHookRecord we can use.
+	CommandHookRecord* foundHookRecord {};
+	CommandHookRecord* foundCompleted = nullptr;
+	auto foundCompletedIt = completed.end();
+	auto completedCount = 0u;
+
+	for(auto& hookRecord : record->hookRecords) {
+		// the record is currently pending on the device
+		if(hookRecord->state->writer) {
+			continue;
+		}
+
+		// the record has completed, its state in our completed list
+		auto completedIt = find_if(this->completed, [&](const CompletedHook& completed) {
+			return completed.state == hookRecord->state;
+		});
+		if(completedIt != completed.end()) {
+			++completedCount;
+			if(!foundCompleted) {
+				foundCompletedIt = completedIt;
+				foundCompleted = hookRecord.get();
+			}
+
+			continue;
+		}
+
+		foundHookRecord = hookRecord.get();
+		break;
+	}
+
+	// If there are already 2 versions for this record in our completed
+	// list, we can just take one of them (preferrably the older one)
+	// and reuse its state.
+	if(!foundHookRecord && completedCount > 2) {
+		dlg_assert(foundCompletedIt != completed.end());
+		dlg_assert(foundCompleted);
+		this->completed.erase(foundCompletedIt);
+		foundHookRecord = foundCompleted;
+	}
+
+	if(foundHookRecord) {
+		bool usable = true;
+
+		dlg_check({
+			auto findRes = find(record->commands, hierachy_, dsState_);
+			dlg_assert(std::equal(
+				foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
+				findRes.hierachy.begin(), findRes.hierachy.end()));
+			// NOTE: I guess we can't really rely on this. Just always call
+			// findRes? But i'm not even sure this is important. Could we ever
+			// suddenly want to hook a different command in the same record
+			// without the selection changing (in which case the hooked record
+			// would have been invalidated). In question, just remove this
+			// assert. It's useful for debugging though; was previously
+			// used to uncover new find/matching issues.
+			dlg_assertm(std::abs(findRes.match - foundHookRecord->match) < 0.1,
+				"{} -> {}", foundHookRecord->match, findRes.match);
+		});
+
+		dlg_assert(foundHookRecord->hook == this);
+		dlg_assert(foundHookRecord->hookCounter == counter_);
+		dlg_assert(!foundHookRecord->state->writer);
+
+
+		// Not possible to reuse the hook-recorded cb when the command
+		// buffer uses any update_after_bind descriptors that changed.
+		// We therefore compare them.
+		dlg_assert(!copyDS || foundHookRecord->dsState);
+		if(copyDS && foundHookRecord->dsState) {
+			auto [setID, bindingID, elemID, _] = *copyDS;
+
+			dlg_assert(!foundHookRecord->hcommand.empty());
+			auto* cmd = foundHookRecord->hcommand.back();
+			const DescriptorState* dsState = getDsState(*cmd);
+
+			auto& dsSnapshot = record->lastDescriptorState;
+			dlg_assert(setID < dsState->descriptorSets.size());
+			auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
+
+			dlg_assert(it != dsSnapshot.states.end());
+			auto& currDS = nonNull(it->second);
+
+			if(!descriptorSame(currDS, *foundHookRecord->dsState, bindingID, elemID)) {
+				usable = false;
+				invalidate(*foundHookRecord);
+				foundHookRecord = nullptr;
+			}
+		}
+
+		if(usable) {
+			dlg_assert(!foundHookRecord->state->writer);
+			data.reset(new CommandHookSubmission(*foundHookRecord, subm, foundHookRecord->match));
+			return foundHookRecord->cb;
+		}
+	}
+
 	auto findRes = find(record->commands, hierachy_, dsState_);
 	if(findRes.hierachy.empty()) {
-		// Can't find command
-		// dlg_warn("Can't hook cb, can't find hooked command");
+		// Can't find the command we are looking for in this record
 		return hooked.handle();
 	}
 
+	dlg_assertlm(dlg_level_warn, record->hookRecords.size() < 8,
+		"Alarmingly high number of hooks for a single record");
+
 	dlg_assert(findRes.hierachy.size() == hierachy_.size());
 
-	// Check if it already has a valid record associated
-	// TODO: not possible to reuse the hook-recorded cb when the command
-	// buffer uses any update_after_bind descriptors that changed. Track
-	// that somehow. See notes in ds.cpp on 'invalidate'.
-	if(record->hook) {
-		// The record was already submitted - i.e. has a valid state - and
-		// the hook is frozen. Nothing to do.
-		// PERF: only really just check this here? Likely inefficient,
-		// we hook records that are never read by cbGui when it's frozen
-		if(freeze) {
-			return hooked.handle();
-		}
-
-		auto* hookRecord = record->hook.get();
-		if(hookRecord->hook == this && hookRecord->hookCounter == counter_) {
-			// In this case there is already a pending submission for this
-			// record (can happen for simulataneous command buffers).
-			// This is a problem since we can't write the pool (and then, when
-			// the submission finishes: read buffers) from multiple
-			// places. We simply return the original cb in that case,
-			// there is a pending submission querying that information after all.
-			// NOTE: alternatively, we could create and store a new Record
-			// NOTE: alternatively, we could add a semaphore chaining
-			//   this submission to the previous one.
-			if(hookRecord->state->writer) {
-				return hooked.handle();
-			}
-
-			dlg_assert(std::equal(
-				hookRecord->hcommand.begin(), hookRecord->hcommand.end(),
-				findRes.hierachy.begin(), findRes.hierachy.end()));
-
-			// TODO: check whether the 'completed' list already contains
-			// this record, see the comment at the list.
-
-			data.reset(new CommandHookSubmission(*hookRecord, subm, findRes.match));
-			return hookRecord->cb;
-		}
-	}
-
 	auto hook = new CommandHookRecord(*this, *record, std::move(findRes.hierachy));
-	record->hook.reset(hook);
+	hook->match = findRes.match;
+	record->hookRecords.emplace_back(hook);
 
 	data.reset(new CommandHookSubmission(*hook, subm, findRes.match));
 
@@ -273,14 +396,7 @@ void CommandHook::invalidateRecordings() {
 		// important to store this before we potentially destroy rec.
 		auto* next = rec->next;
 
-		rec->hook = nullptr; // notify the record that it's no longer needed
-		if(rec->record->hook.get() == rec) {
-			// CommandRecord::Hook is a FinishPtr.
-			// This will delete our record hook if there are no pending
-			// submissions of it left. See CommandHookRecord::finish
-			rec->record->hook.reset();
-		}
-
+		invalidate(*rec);
 		rec = next;
 	}
 
@@ -862,17 +978,11 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
 void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	auto& dev = *record->dev;
 
-	DescriptorState* dsState = nullptr;
-	if(auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd)) {
-		dsState = &drawCmd->state;
-	} else if(auto* dispatchCmd = dynamic_cast<DispatchCmdBase*>(&bcmd)) {
-		dsState = &dispatchCmd->state;
-	} else {
+	const DescriptorState* dsState = getDsState(bcmd);
+	if(!dsState) {
 		state->errorMessage = "Unsupported descriptor command";
 		dlg_error("{}", state->errorMessage);
-	}
-
-	if(!dsState) {
+		hook->copyDS = {};
 		return;
 	}
 
@@ -883,7 +993,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	// and the selected one not valid anymore.
 	if(setID >= dsState->descriptorSets.size()) {
 		dlg_trace("setID out of range");
-		dsState->descriptorSets = {};
+		hook->copyDS = {};
 		return;
 	}
 
@@ -892,22 +1002,39 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
 	if(it == dsSnapshot.states.end()) {
 		dlg_error("Could not find descriptor in snapshot??");
-		dsState->descriptorSets = {};
+		hook->copyDS = {};
 		return;
 	}
 
 	auto& ds = nonNull(it->second);
 	if(bindingID >= ds.layout->bindings.size()) {
 		dlg_trace("bindingID out of range");
-		dsState->descriptorSets = {};
+		hook->copyDS = {};
+		return;
+	}
+
+	if(ds.layout->bindings[bindingID].flags & VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) {
+		// TODO: we could make this work but it's not easy. The main problem is
+		// that we have no guarantees for the handle we are reading here staying valid.
+		// At the time of the submission, a binding could e.g. contain a buffer
+		// that gets destroyed during submission (valid usage for update_unused_while_pending)
+		// so we can't just use it here.
+		// We would have to track the update_unused_while_pending handles that are used
+		// somehow and when one of them is destroyed, wait for the associated
+		// hooked submission. No way around this I guess.
+		dlg_trace("Trying to read content of UPDATE_UNUSED_WHILE_PENDING descriptor");
+		state->errorMessage = "Can't read UPDATE_UNUSED_WHILE_PENDING descriptors at the moment";
+		hook->copyDS = {};
 		return;
 	}
 
 	if(elemID >= descriptorCount(*it->second, bindingID)) {
 		dlg_trace("elemID out of range");
-		dsState->descriptorSets = {};
+		hook->copyDS = {};
 		return;
 	}
+
+	this->dsState = it->second;
 
 	auto& lbinding = ds.layout->bindings[bindingID];
 	auto cat = category(lbinding.descriptorType);
@@ -1273,7 +1400,8 @@ void CommandHookRecord::finish() noexcept {
 
 	// Keep alive when there still a pending submission.
 	// It will delete this record then instead.
-	if(!nonNull(state).writer) {
+	dlg_assert(state);
+	if(!state->writer) {
 		delete this;
 	} else {
 		// no other reason for this record to be finished except
@@ -1292,22 +1420,25 @@ CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec,
 }
 
 CommandHookSubmission::~CommandHookSubmission() {
+	if(record) {
+		dlg_assert(record->record);
+		dlg_assert(record->state);
+		record->state->writer = nullptr;
+	}
 }
 
 void CommandHookSubmission::finish(Submission& subm) {
 	ZoneScoped;
-
-	dlg_assert(record && record->record);
-
-	dlg_assert(record->state);
 	dlg_assert(record->state->writer == &subm);
-	record->state->writer = nullptr;
 
 	// In this case the hook was removed, no longer interested in results.
 	// Since we are the only submission left to the record, it can be
 	// destroyed.
 	if(!record->hook) {
+		record->state->writer = nullptr;
+		dlg_assert(!contains(record->record->hookRecords, record));
 		delete record;
+		record = nullptr;
 		return;
 	}
 
@@ -1324,6 +1455,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	dlg_assertm(record->hook->completed.size() < 32,
 		"Hook state overflow detected");
 
+	/*
 	auto maxCopySize = 64 * 1024;
 
 	auto cpuCopyMin = [&](auto& buf) {
@@ -1346,6 +1478,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	for(auto& vbuf : record->state->vertexBufCopies) {
 		cpuCopyMin(vbuf);
 	}
+	*/
 
 	// indirect command readback
 	if(record->hook->copyIndirectCmd) {
@@ -1353,7 +1486,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 		if(auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&bcmd)) {
 			dlg_assert(record->state->indirectCopy.buffer.size >= 4u);
-			auto* count = static_cast<const u32*>(record->state->indirectCopy.map);
+			auto* count = reinterpret_cast<const u32*>(record->state->indirectCopy.map);
 			record->state->indirectCommandCount = *count;
 			dlg_assert(record->state->indirectCommandCount <= cmd->maxDrawCount);
 
@@ -1364,9 +1497,10 @@ void CommandHookSubmission::finish(Submission& subm) {
 				record->state->indirectCopy.buffer.size >= 4 + *count * cmdSize,
 				"Indirect command readback buffer too small; commands missing");
 
-			auto cmdsSize = cmdSize * record->state->indirectCommandCount;
-			record->state->indirectCopy.cpuCopy(4u, cmdsSize);
-			record->state->indirectCopy.copyOffset = 0u;
+			// auto cmdsSize = cmdSize * record->state->indirectCommandCount;
+			// record->state->indirectCopy.cpuCopy(4u, cmdsSize);
+			// record->state->indirectCopy.copyOffset = 0u;
+			record->state->indirectCopy.invalidateMap();
 		} else if(auto* cmd = dynamic_cast<const DrawIndirectCmd*>(&bcmd)) {
 			[[maybe_unused]] auto cmdSize = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
@@ -1375,13 +1509,13 @@ void CommandHookSubmission::finish(Submission& subm) {
 				cmd->drawCount * cmdSize);
 
 			record->state->indirectCommandCount = cmd->drawCount;
-			record->state->indirectCopy.cpuCopy();
+			record->state->indirectCopy.invalidateMap();
 		} else if(dynamic_cast<const DispatchIndirectCmd*>(&bcmd)) {
 			dlg_assert(record->state->indirectCopy.buffer.size ==
 				sizeof(VkDispatchIndirectCommand));
 
 			record->state->indirectCommandCount = 1u;
-			record->state->indirectCopy.cpuCopy();
+			record->state->indirectCopy.invalidateMap();
 		} else {
 			dlg_warn("Unsupported indirect command (readback)");
 		}

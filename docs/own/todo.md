@@ -13,6 +13,10 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
+- [ ] fix current CopiedBuffer usage; use the mapped memory directly everywhere
+- [ ] fix hooking commands inside CmdExecuteCommands
+	  I guess CmdExecuteCommands should not do anything in record()?
+	  We have to watch out for extensions there though
 
 matching:
 - [ ] (low prio, later) implement 'match' for missing commands, e.g.
@@ -28,13 +32,13 @@ descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in
       mind everywhere. We would at least have to lock the descriptorSetState mutex
 	  when reading it in Gui to support this, might get a race otherwise.
-- [ ] fix commandHook for updateAfterBind, updateUnusedWhilePending.
-      We might need to invalidate the hooked records when a used descriptor
-	  was changed
+- [ ] (low prio) See the TODO in CommandHookRecord::copyDs to fix
+      support for updateUnusedWhilePending.
 - [ ] (for later) investigate whether our current approach really
       scales for descriptor sets with many thousand bindings
 
 vertex viewer/xfb:
+- [ ] consider dynamically set stride when pipeline has that dynamic state
 - [ ] vertex viewer improvements
 	- [ ] automatically compute bounding box of data and center camera
 	- [ ] allow showing active frustum
@@ -97,7 +101,6 @@ performance/profiling:
 	  makes sure our tracked state (e.g. dev.pending) really includes everything
 	  that has been submitted so far. That mutex would have to be
 	  locked before locking the device mutex, never the other way around.
-- [ ] the performance notes in CommandHook::hook are relevant
 - [ ] also don't always copy DescriptorSetState on submission.
       Leads to lot of DescriptorSetState copies, destructors.
 	  We only need to do it when currently in swapchain mode *and* inside
@@ -106,6 +109,9 @@ performance/profiling:
 	  For non-update-after-bind (& update_unused_while_pending) descriptors,
 	  we could copy the state on BindDescriptorSet time? not sure that's
 	  better though.
+	- [ ] also don't pass *all* the descriptorSet states around (hook submission,
+	      cbGui, CommandViewer etc). We only need the state of the hooked command, 
+		  should be easy to determine.
 - [ ] (easy) don't lock the dev mutex during our spirv xfb injection.
       Could e.g. always already generate it when the shader module
 	  is created.
@@ -157,19 +163,6 @@ other
 - [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
       make sure destruction is tracked correctly. Also show in gui.
 	  See the commands in cb.cpp
-- [ ] commandHook: See the TODO on 'completed'. Might create problems atm.
-- [ ] with the ds changes, we don't correctly track commandRecord invalidation
-      by destroyed handles anymore. But with e.g. update_unused_while_pending +
-	  partially_bound, we can't track that anyways and must just assume
-	  the records stays valid. 
-	  We should just not expose any information about that in the gui or
-	  state it's limitation (e.g. on hover).
-	- [ ] if we absolutely need this information (e.g. if it's really useful
-	      for some usecase) we could manually track it. Either by iterating
-		  over all alive records on view/sampler/buffer destruction or
-		  (e.g. triggered by explicit "query" button) by just checking
-		  for all descriptors in a record whether it has views/sampler
-		  with NULL handles (in not partially_bound descriptors I guess)
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
 	      e.g. when the application controlled debug callback is called
@@ -179,8 +172,9 @@ other
 	- [ ] when intercepting dlg, at least forward to old handler...
 	- [ ] show failed asserts and potential errors in imgui UI?
 	      probably best to do this in addition to command line
-	- [ ] log assertions to debug console in visual studio
-	      somehow signal they are coming from us though, use a VIL prefix or smth.
+	- [ ] log assertions to debug console in visual studio via OutputDebugString
+	      when we detect that there is an attached debugger.
+	      Somehow signal they are coming from us though, use a VIL prefix or smth.
 		  Stop allocating a console.
 - [ ] IO rework
 	- [x] start using src/gui/command.hpp
@@ -224,6 +218,8 @@ other
 
 
 Possibly for later, new features/ideas:
+- [ ] track ext dynamic state in graphics state
+	- [ ] show extended dynamic state in gui
 - [ ] the current handling when someone attempts to construct multiple guis
       is a bit messy. Move the old gui object? At least make sure we always
 	  synchronize dev.gui, might have races atm.
@@ -381,6 +377,18 @@ Possibly for later, new features/ideas:
 - [ ] important optimization, low hanging fruit:
       CopiedImage: don't ever use concurrent sharing mode.
 	  We can explicitly transition the image when first copying it.
+- [ ] with the ds changes, we don't correctly track commandRecord invalidation
+      by destroyed handles anymore. But with e.g. update_unused_while_pending +
+	  partially_bound, we can't track that anyways and must just assume
+	  the records stays valid. 
+	  We should just not expose any information about that in the gui or
+	  state it's limitation (e.g. on hover).
+	- [ ] if we absolutely need this information (e.g. if it's really useful
+	      for some usecase) we could manually track it. Either by iterating
+		  over all alive records on view/sampler/buffer destruction or
+		  (e.g. triggered by explicit "query" button) by just checking
+		  for all descriptors in a record whether it has views/sampler
+		  with NULL handles (in not partially_bound descriptors I guess)
 - [ ] we currently copy more levels/layers in commandHook than are shown
       in i/o inspector. Could just copy the currently shown subresource.
 - [ ] write tests for some common functionality
@@ -406,9 +414,6 @@ Possibly for later, new features/ideas:
 	- [ ] in submission viewing, we assume there is just one atm
 	- [ ] currently basically leaking memory (leaving all records alive)
 	      when application has a swapchain it does not present to?
-- [ ] Allow modifying resources (temporarily or permanently)
-	- [ ] in command viewer or resource viewer
-	- [ ] over such a mechanism we could implement a forced camera
 - [ ] include vkpp enumString generator here?
       allows easier updates, maintaining
 - [x] support for buffer views (and other handles) in UI
@@ -424,22 +429,25 @@ Possibly for later, new features/ideas:
 	- [x] implement khr_copy_commands2 extension
 	- [x] khr fragment shading rate
 	- [x] ext conditional rendering
+	- [x] ext sample locations
+	- [x] ext discard rectangles
+	- [x] extended dynamic state
+	- [x] ext line rasterization
+	- [ ] khr sync commands 2
+	- [ ] ext vertex_input_dynamic_state
+	- [ ] ext extended_dynamic_state2
+	- [ ] ext color_write_enable
 	- [ ] khr ray tracing
 	- [ ] device masks (core vulkan by now)
-	- [ ] extended dynamic state (WIP)
-	- [x] line rasterization
 	- [ ] nv device diagnostic checkpoint
 	- [ ] nv exclusive scissor
 	- [ ] nv mesh shaders
 	- [ ] amd buffer marker
 	- [ ] intel performance metrics
 	- [ ] nv shading rate image
-	- [ ] ext sample locations
-	- [ ] ext discard rectangles
 	- [ ] nv viewport scaling
 	- [ ] transform feedback (not sure we want to support this at all?)
 	- [ ] nv shading rate enums
-	- [ ] khr sync commands 2
 - [ ] implement additional command buffer viewer mode: per-frame-commands
       basically shows all commands submitted to queue between two present calls.
 	  similar to renderdoc
@@ -521,9 +529,6 @@ Possibly for later, new features/ideas:
 	       api header tho
 		   (maybe for later, >0.1.0?)
 	- [ ] write AUR package (maybe for later, >0.1.0?)
-- [ ] add example images to docs
-- [ ] in draw/dispatch commands: we might have to check that layout of bound
-      descriptors matches layout of bound pipeline
 - [ ] general buffer reading mechanism for UI. Implement e.g. to read
       indirect command from buffer and display in command UI
 - [ ] allow to display stuff (e.g. images) over swapchain, fullscreen, not just in overlay
@@ -571,8 +576,7 @@ Possibly for later, new features/ideas:
 		- [ ] give visual/explicit feedback about re-recording though.
 		      maybe show time/frames since last re-record?
 			  Show statistics, how often the cb is re-recorded?
-- [ ] related to command buffer groups: simply view all commands pushed
-      to a queue?
+- [ ] mode that allows to simply view all commands pushed to a queue?
 - [ ] way later: support for sparse binding
 - [ ] we might be able (with checks everywhere and no assumptions at all, basically)
       to support cases where extensions we don't know about/support are used.
@@ -601,13 +605,9 @@ Possibly for later, new features/ideas:
 - [ ] support khr ray tracing extension
 - [ ] support all other extensions (non-crash)
 - [ ] interactive 3D cubemap viewer
-- [ ] interactive 3D model viewer
-- [ ] per-drawcall image visualization using the inserted subpass + 
-      input attachment shader copy idea, if possible
+- [ ] interactive 3D model viewer with as many information as possible
 - [ ] event log showing all queue submits
 	- [ ] optionally show resource creations/destructions there as well
-- [ ] resource and queue freezing
-	- [ ] something like "freeze on next frame/next submission"
 - [ ] better pipeline state overview of inputs, stages, outputs
 	- [ ] maybe via a graph?
 - [ ] we might be able to properly hook input (without needing the public api)
@@ -625,34 +625,7 @@ Possibly for later, new features/ideas:
 	  But otoh dynamic_cast and hierachy is probably better for maintainability.
 	  But we should replace DrawCmdBase dynamic_casts with checks for
 	  type() == CommandType::draw
-- [ ] explore what random stuff we are able to do
-	- [ ] Visualize models (drawcalls) on its own by inferring
-	  	  position (and possibly other attribs; hard to infer though, could use heuristics
-	  	  but should probably let user just flag them explicitly)
-	- [ ] Infer projection and view matrix, allow to manipulate them.
-	      We could add our entirely own camera to any game, allowing free movement
-		  in the world (likely glitched due to culling and stuff but that's still interesting).
-		  Hard to infer the correct matrix, might rely on manual user flagging.
-	- [ ] Infer as much general information as possible. When annotations are
-		  missing automatically annotate handles and the command buffer
-		  as good as possible. We are likely able to detect depth-only (should probably
-		  even be able to develop good heuristics to decide shadow vs preZ), gbuffer,
-		  shading, post-processing passes. Might also be able to automatically infer
-		  normal/diffuse/other pbr maps (harder though).
-	- [ ] use heuristics to identify interesting constants in ubo/pcr/shader itself
-		  (interesting as in: big effect on the output). Expose them as parameters
-		  in the gui.
-- [ ] include copy regions in argumentsDesc of transfer commands?
-      would probably make sense but they should not be weighted too much
-- [ ] (low prio, experiment) allow to visualize buffers as images where it makes sense 
-	  (using a bufferView or buffer-to-image copy)
 - [ ] (low prio) can we support android?
-- [ ] (low prio, evaluate idea) allow to temporarily "freeze destruction", causing handles to be
-      moved to per-handle, per-device "destroyedX" maps/vectors.
-	  The vulkan handles probably need to be destroyed (keeping them alive
-	  has other problems, e.g. giving memory back to pools, don't wanna
-	  hook all that) but it might be useful to inspect command buffers without
-	  handles being destroyed
 - [ ] (low prio, non-problem) when using timeline semaphores, check for wrap-around?
       would be undefined behavior. But I can't imagine a case in which
 	  we reuse a semaphore 2^64 times tbh. An application would have to
@@ -661,8 +634,6 @@ Possibly for later, new features/ideas:
 - [ ] (low prio), optimization: in `Draw`, we don't need presentSemaphore when
 	  we have timeline semaphores, can simply use futureSemaphore for
 	  present as well
-
-old:
 - [ ] optimization: we don't really need to always track refCbs and store
       the destroyed handles. Only do it for submissions viewed in gui?
 	  Could just require commandRecords to be valid while selected and

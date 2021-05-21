@@ -502,4 +502,3 @@ We need to support various features for showing submissions in the GUI.
 
 NOTE: final implementation turned out a bit different, but is still based
 on the same concepts decided here.
-	  

@@ -19,7 +19,52 @@
 
 namespace vil {
 
+constexpr const auto pi = 3.14159265359;
+constexpr auto fov = float(0.48 * pi);
+constexpr auto near = -0.01f;
+constexpr auto far = -10000.f;
+
 // util
+DrawParams getDrawParams(const Command& cmd, const CommandHookState& state) {
+	DrawParams ret;
+
+	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
+		ret.offset = dcmd->firstVertex;
+		ret.drawCount = dcmd->vertexCount;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
+		ret.offset = dcmd->firstIndex;
+		ret.vertexOffset = dcmd->vertexOffset;
+		ret.drawCount = dcmd->indexCount;
+		ret.indexType = dcmd->state.indices.type;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
+		// dlg_assert(hook.copyIndirectCmd);
+		// dlg_assert(data->state);
+
+		auto& ic = state.indirectCopy;
+		auto span = ic.data();
+		dlg_assert(!span.empty());
+
+		if(dcmd->indexed) {
+			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
+			ret.offset = ecmd.firstIndex;
+			ret.drawCount = ecmd.indexCount;
+			ret.vertexOffset = ecmd.vertexOffset;
+			ret.indexType = dcmd->state.indices.type;
+		} else {
+			auto ecmd = read<VkDrawIndirectCommand>(span);
+			ret.offset = ecmd.firstVertex;
+			ret.drawCount = ecmd.vertexCount;
+		}
+
+	} else {
+		// TODO: DrawIndirectCount
+		dlg_info("Vertex viewer unimplemented for command type");
+		return {};
+	}
+
+	return ret;
+}
+
 template<typename T>
 std::string printFormat(u32 count, const Vec4d& val) {
 	auto ret = std::string {};
@@ -114,22 +159,21 @@ bool perspectiveHeuristic(span<const Vec4f> clipSpaceVerts) {
 	return nonOneW;
 }
 
-struct AABB3f {
-	Vec3f pos;
-	Vec3f extent; // 0.5 * size
-};
+AABB3f bounds(VkFormat format, ReadBuf data, u32 stride) {
+	// dlg_assert(data.size() % stride == 0u);
+	dlg_assert(data.size() >= stride);
 
-AABB3f bounds(VkFormat format, ReadBuf data) {
-	auto size = FormatElementSize(format);
 	auto inf = std::numeric_limits<float>::infinity();
 	auto min = Vec3f{inf, inf, inf};
 	auto max = Vec3f{-inf, -inf, -inf};
 
-	while(data.size() > size) {
+	while(data.size() >= stride) {
+		auto rem = data.subspan(stride);
 		auto pos = Vec3f(read(format, data));
 
 		min = vec::cw::min(min, pos);
 		max = vec::cw::max(max, pos);
+		data = rem;
 	}
 
 	// can probaby happen due to copied buffer truncation
@@ -137,12 +181,70 @@ AABB3f bounds(VkFormat format, ReadBuf data) {
 
 	AABB3f ret;
 	ret.pos = 0.5f * (min + max);
-	ret.extent = 0.5f * (max - max);
+	ret.extent = 0.5f * (max - min);
 
 	return ret;
 }
 
-AABB3f bounds(span<const Vec4f> points, bool useW) {
+u32 indexSize(VkIndexType type) {
+	// NOTE: When extending here, also extend readIndex
+	switch(type) {
+		case VK_INDEX_TYPE_UINT16: return 2;
+		case VK_INDEX_TYPE_UINT32: return 4;
+		case VK_INDEX_TYPE_UINT8_EXT: return 1;
+		case VK_INDEX_TYPE_MAX_ENUM:
+		case VK_INDEX_TYPE_NONE_KHR:
+			return 0;
+	}
+
+	return 0;
+}
+
+u32 readIndex(VkIndexType type, ReadBuf& data) {
+	switch(type) {
+		case VK_INDEX_TYPE_UINT16: return read<u16>(data);
+		case VK_INDEX_TYPE_UINT32: return read<u32>(data);
+		case VK_INDEX_TYPE_UINT8_EXT: return read<u8>(data);
+		case VK_INDEX_TYPE_MAX_ENUM:
+		case VK_INDEX_TYPE_NONE_KHR:
+			dlg_error("invalid index type");
+			return 0;
+	}
+
+	dlg_error("invalid index type");
+	return 0;
+}
+
+AABB3f bounds(VkFormat vertFormat, ReadBuf vertData, u32 vertStride,
+		VkIndexType indexType, ReadBuf indexData) {
+	auto indSize = indexSize(indexType);
+	dlg_assert(indSize > 0);
+	dlg_assert(indexData.size() % indSize == 0u);
+
+	auto inf = std::numeric_limits<float>::infinity();
+	auto min = Vec3f{inf, inf, inf};
+	auto max = Vec3f{-inf, -inf, -inf};
+
+	while(indexData.size() >= indSize) {
+		auto ind = readIndex(indexType, indexData);
+		dlg_assert_or(ind * vertStride < vertData.size(), continue);
+
+		auto vertBuf = vertData.subspan(ind * vertStride);
+		auto pos = Vec3f(read(vertFormat, vertBuf));
+
+		min = vec::cw::min(min, pos);
+		max = vec::cw::max(max, pos);
+	}
+
+	AABB3f ret;
+	ret.pos = 0.5f * (min + max);
+	ret.extent = 0.5f * (max - min);
+
+	return ret;
+}
+
+/*
+AABB3f bounds(span<const Vec4f> points, u32 stride, bool useW) {
 	auto inf = std::numeric_limits<float>::infinity();
 	auto min = Vec3f{inf, inf, inf};
 	auto max = Vec3f{-inf, -inf, -inf};
@@ -163,6 +265,7 @@ AABB3f bounds(span<const Vec4f> points, bool useW) {
 
 	return ret;
 }
+*/
 
 // VertexViewer
 VertexViewer::~VertexViewer() {
@@ -333,37 +436,9 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	return pipe;
 }
 
-void VertexViewer::imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
-		const CommandHookState& copies, std::optional<VkIndexType> indexType,
-		u32 offset, u32 drawCount, u32 vertexOffset,
-		Vec2f canvasOffset, Vec2f canvasSize) {
-	DrawData data;
-	data.topology = src.inputAssemblyState.topology;
-	data.vertexInfo = src.vertexInputState;
-
-	std::vector<BufferSpan> vertexBuffers;
-	for(auto& buf : copies.vertexBufCopies) {
-		vertexBuffers.push_back({buf.buffer.buf, 0u, buf.buffer.size});
-	}
-
-	data.vertexBuffers = vertexBuffers;
-	data.offset = offset;
-	data.drawCount = drawCount;
-	data.indexType = indexType;
-
-	if(indexType) {
-		data.indexBuffer = {copies.indexBufCopy.buffer.buf, 0u, copies.indexBufCopy.buffer.size};
-	}
-
-	data.vertexOffset = vertexOffset;
-	data.canvasOffset = canvasOffset;
-	data.canvasSize = canvasSize;
-
-	imGuiDraw(cb, data);
-}
-
-void VertexViewer::imGuiDraw(VkCommandBuffer cb, const DrawData& data) {
+void VertexViewer::imGuiDraw(const DrawData& data) {
 	auto& dev = *this->dev_;
+	auto cb = data.cb;
 
 	// try to find position by heuristics
 	// TODO: cache this! But should likely not be implemented here in first place.
@@ -448,21 +523,21 @@ void VertexViewer::imGuiDraw(VkCommandBuffer cb, const DrawData& data) {
 
 	dev.dispatch.CmdClearAttachments(cb, 1u, &clearAtt, 1u, &clearRect);
 
-	if(data.indexType) {
+	if(data.params.indexType) {
 		dlg_assert_or(data.indexBuffer.buffer, return);
 		dlg_assert_or(data.indexBuffer.size, return);
 
 		dev.dispatch.CmdBindIndexBuffer(cb, data.indexBuffer.buffer,
-			0, *data.indexType);
-		dev.dispatch.CmdDrawIndexed(cb, data.drawCount, 1, data.offset, data.vertexOffset, 0);
+			0, *data.params.indexType);
+		dev.dispatch.CmdDrawIndexed(cb, data.params.drawCount, 1,
+			data.params.offset, data.params.vertexOffset, 0);
 	} else {
-		dev.dispatch.CmdDraw(cb, data.drawCount, 1, data.offset, 0);
+		dev.dispatch.CmdDraw(cb, data.params.drawCount, 1, data.params.offset, 0);
 	}
 }
 
 void VertexViewer::updateInput(float dt) {
 	// update input
-	constexpr const auto pi = 3.14159265359;
 	auto& io = ImGui::GetIO();
 
 	if(ImGui::IsItemHovered()) {
@@ -543,10 +618,6 @@ void VertexViewer::updateInput(float dt) {
 
 	auto rect = ImGui::GetItemRectSize();
 	auto aspect = rect.x / rect.y;
-
-	constexpr auto fov = float(0.48 * pi);
-	constexpr auto near = -0.01f;
-	constexpr auto far = -10000.f;
 
 	auto projMtx = perspective(fov, aspect, near, far);
 	flipY(projMtx);
@@ -633,12 +704,12 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 					// TODO: compressed support?
 					auto size = FormatElementSize(attrib.format);
 
-					if(off + size > buf.copy.size()) {
+					if(off + size > buf.data().size()) {
 						finished = true;
 						break;
 					}
 
-					auto* ptr = buf.copy.data() + off;
+					auto* ptr = buf.data().data() + off;
 					auto str = readFormat(attrib.format, {ptr, size});
 
 					imGuiText("{}", str);
@@ -655,67 +726,66 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	ImGui::EndChild();
 
 	// 2: viewer
+	auto params = getDrawParams(cmd, state);
+
+	if(ImGui::Button("Recenter")) {
+		auto& attrib = pipe.vertexAttribs[0];
+		auto& binding = pipe.vertexBindings[attrib.binding];
+
+		AABB3f vertBounds;
+		auto vertData = state.vertexBufCopies[binding.binding].data();
+		vertData = vertData.subspan(attrib.offset);
+		if(params.indexType) {
+			vertData = vertData.subspan(params.vertexOffset * binding.stride);
+			auto indData = state.indexBufCopy.data();
+			auto offset = indexSize(*params.indexType) * params.offset;
+			auto size = indexSize(*params.indexType) * params.drawCount;
+			indData = indData.subspan(offset, size);
+			vertBounds = bounds(attrib.format, vertData, binding.stride,
+				*params.indexType, indData);
+		} else {
+			auto offset = params.offset * binding.stride;
+			auto size = params.drawCount * binding.stride;
+			vertData = vertData.subspan(offset, size);
+			vertBounds = bounds(attrib.format, vertData, binding.stride);
+		}
+
+		centerCamOnBounds(vertBounds);
+	}
+
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
 
-		vertexDrawData_.self = this;
-		vertexDrawData_.state = &state;
-		vertexDrawData_.cb = draw.cb;
-		vertexDrawData_.offset = {pos.x, pos.y};
-		vertexDrawData_.size = {avail.x, avail.y};
-		vertexDrawData_.cmd = &cmd;
+		drawData_.cb = draw.cb;
+		drawData_.params = params;
+		drawData_.vertexInfo = pipe.vertexInputState;
+		drawData_.canvasOffset = {pos.x, pos.y};
+		drawData_.canvasSize = {avail.x, avail.y};
+		drawData_.topology = pipe.inputAssemblyState.topology;
+		drawData_.vertexBuffers = {};
+		drawData_.scale = 1.f;
+		drawData_.useW = false;
+
+		for(auto& buf : state.vertexBufCopies) {
+			drawData_.vertexBuffers.push_back({buf.buffer.buf, 0u, buf.buffer.size});
+		}
+
+		if(params.indexType) {
+			drawData_.indexBuffer = {state.indexBufCopy.buffer.buf, 0u, state.indexBufCopy.buffer.size};
+		}
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
-			auto* data = static_cast<VertexDrawData*>(cmd->UserCallbackData);
-			auto& hook = *data->self->dev_->commandHook;
-			auto& pipe = *data->cmd->state.pipe;
-
-			std::optional<VkIndexType> indexType;
-			u32 offset {};
-			u32 drawCount {};
-			u32 vertexOffset {};
-
-			if(auto* dcmd = dynamic_cast<const DrawCmd*>(data->cmd); dcmd) {
-				offset = dcmd->firstVertex;
-				drawCount = dcmd->vertexCount;
-			} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(data->cmd); dcmd) {
-				offset = dcmd->firstIndex;
-				vertexOffset = dcmd->vertexOffset;
-				drawCount = dcmd->indexCount;
-				indexType = dcmd->state.indices.type;
-			} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(data->cmd); dcmd) {
-				dlg_assert(hook.copyIndirectCmd);
-				dlg_assert(data->state);
-
-				auto& ic = data->state->indirectCopy;
-				auto span = ReadBuf(ic.copy);
-				if(dcmd->indexed) {
-					auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
-					offset = ecmd.firstIndex;
-					drawCount = ecmd.indexCount;
-					vertexOffset = ecmd.vertexOffset;
-					indexType = dcmd->state.indices.type;
-				} else {
-					auto ecmd = read<VkDrawIndirectCommand>(span);
-					offset = ecmd.firstVertex;
-					drawCount = ecmd.vertexCount;
-				}
-
-			} else {
-				// TODO: DrawIndirectCount
-				dlg_info("Vertex viewer unimplemented for command type");
-				return;
-			}
-
-			data->self->imGuiDraw(data->cb, pipe,
-				*data->state, indexType, offset, drawCount, vertexOffset,
-				data->offset, data->size);
+			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
+			self->imGuiDraw(self->drawData_);
 		};
 
-		ImGui::GetWindowDrawList()->AddCallback(cb, &vertexDrawData_);
+		ImGui::GetWindowDrawList()->AddCallback(cb, this);
 		ImGui::InvisibleButton("Canvas", avail);
 		updateInput(dt);
+
+		dlg_assert(!draw.usedHookState);
+		draw.usedHookState = IntrusivePtr<CommandHookState>(const_cast<CommandHookState*>(&state));
 	}
 
 	ImGui::EndChild();
@@ -780,7 +850,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		dlg_assert(state.indirectCopy.buffer.size);
 
 		auto& ic = state.indirectCopy;
-		auto span = ReadBuf(ic.copy);
+		auto span = ic.data();
 		if(dcmd->indexed) {
 			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
 			vertexCount = ecmd.indexCount * ecmd.instanceCount;
@@ -806,7 +876,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 			ImGui::TableHeadersRow();
 			ImGui::TableNextRow();
 
-			auto xfbData = ReadBuf(state.transformFeedback.copy);
+			auto xfbData = state.transformFeedback.data();
 			auto vCount = std::min(vertexCount, u32(xfbData.size() / 16u));
 
 			for(auto i = 0u; i < std::min(u32(100u), vCount); ++i) {
@@ -829,56 +899,61 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
 
-		vertexDrawData_.self = this;
-		vertexDrawData_.state = &state;
-		vertexDrawData_.cb = draw.cb;
-		vertexDrawData_.offset = {pos.x, pos.y};
-		vertexDrawData_.size = {avail.x, avail.y};
-		vertexDrawData_.cmd = &cmd;
-		vertexDrawData_.vertexCount = vertexCount;
-
-		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
-			auto* data = static_cast<VertexDrawData*>(cmd->UserCallbackData);
-			auto& xfbBuf = data->state->transformFeedback.buffer;
-
-			VkVertexInputBindingDescription vertexBinding {
-				0u, sizeof(Vec4f), VK_VERTEX_INPUT_RATE_VERTEX,
-			};
-
-			VkVertexInputAttributeDescription vertexAttrib {
-				0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
-			};
-
-			VertexViewer::DrawData drawData {};
-			drawData.drawCount = data->vertexCount;
-			drawData.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
-			drawData.vertexInfo.vertexAttributeDescriptionCount = 1u;
-			drawData.vertexInfo.pVertexAttributeDescriptions = &vertexAttrib;
-			drawData.vertexInfo.vertexBindingDescriptionCount = 1u;
-			drawData.vertexInfo.pVertexBindingDescriptions = &vertexBinding;
-			drawData.canvasOffset = data->offset;
-			drawData.canvasSize = data->size;
-			drawData.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-			auto xfbData = ReadBuf(data->state->transformFeedback.copy);
-			auto ptr = reinterpret_cast<const Vec4f*>(xfbData.data());
-			drawData.useW = perspectiveHeuristic({ptr, xfbData.size() / 16u});
-			drawData.scale = 100.f; // TODO
-
-			data->self->imGuiDraw(data->cb, drawData);
+		const static VkVertexInputBindingDescription vertexBinding {
+			0u, sizeof(Vec4f), VK_VERTEX_INPUT_RATE_VERTEX,
 		};
 
-		ImGui::GetWindowDrawList()->AddCallback(cb, &vertexDrawData_);
+		const static VkVertexInputAttributeDescription vertexAttrib {
+			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
+		};
+
+		auto& xfbBuf = state.transformFeedback.buffer;
+		drawData_.cb = draw.cb;
+		drawData_.params = {};
+		drawData_.params.drawCount = vertexCount;
+		drawData_.indexBuffer = {};
+		drawData_.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
+		drawData_.vertexInfo.vertexAttributeDescriptionCount = 1u;
+		drawData_.vertexInfo.pVertexAttributeDescriptions = &vertexAttrib;
+		drawData_.vertexInfo.vertexBindingDescriptionCount = 1u;
+		drawData_.vertexInfo.pVertexBindingDescriptions = &vertexBinding;
+		drawData_.canvasOffset = {pos.x, pos.y};
+		drawData_.canvasSize = {avail.x, avail.y};
+		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		auto xfbData = state.transformFeedback.data();
+		auto ptr = reinterpret_cast<const Vec4f*>(xfbData.data());
+		drawData_.useW = perspectiveHeuristic({ptr, xfbData.size() / 16u});
+		drawData_.scale = 100.f; // TODO
+
+		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
+			self->imGuiDraw(self->drawData_);
+		};
+
+		ImGui::GetWindowDrawList()->AddCallback(cb, this);
 		ImGui::InvisibleButton("Canvas", avail);
 		updateInput(dt);
 
 		// we read from the buffer that is potentially written again
 		// by the hook so we need barriers.
+		dlg_assert(!draw.usedHookState);
 		draw.usedHookState = IntrusivePtr<CommandHookState>(const_cast<CommandHookState*>(&state));
-		dlg_assert(draw.usedHookState);
 	}
 
 	ImGui::EndChild();
+}
+
+void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
+	auto mxy = std::max(bounds.extent.y, bounds.extent.x);
+	auto l = mxy / std::tan(0.5f * fov);
+
+	// cam looks along -z by default
+	cam_.pos = bounds.pos + Vec3f{0.f, 0.f, bounds.extent.z} + l * Vec3f{0.f, 0.f, 1.f};
+	cam_.rot = Quaternion {};
+
+	yaw_ = {};
+	pitch_ = {};
 }
 
 } // namespace vil

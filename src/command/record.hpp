@@ -69,6 +69,8 @@ struct DescriptorState {
 struct BoundVertexBuffer {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
+	VkDeviceSize size {}; // might be 0 for unknown
+	VkDeviceSize stride {}; // might be 0
 };
 
 struct BoundIndexBuffer {
@@ -242,15 +244,10 @@ struct CommandRecord {
 	// though since it may still be in use by command buffer.
 	std::atomic<u32> refCount {0};
 
-	// For command hooks: they can store data associated with this
-	// recording here.
-	FinishPtr<CommandHookRecord> hook;
+	// For CommandHook: can store hooked versions of this record here.
+	std::vector<FinishPtr<CommandHookRecord>> hookRecords;
 
 	CommandRecord(CommandBuffer& cb);
-
-	// NOTE: destructor expects that dev.mutex is locked.
-	// This might seem weird but since access to CommandRecord references
-	// is inherently synchronized by dev.mutex, it's the easiest way.
 	~CommandRecord();
 };
 

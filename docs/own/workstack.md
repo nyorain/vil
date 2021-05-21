@@ -1,0 +1,11 @@
+- improve vertex viewer
+	- improve camera of 3D view
+		- implement recenter
+			- > implement for transform feedback
+		- make the camera speed dependent on model size
+	- show indices in vertex table, correctly index using them
+	- allow to select vertices (/indices)
+		- in input and output viewer
+		- make rows selectable
+		- render the select vertex in viewport, e.g. via point pipe
+			- later: render the selected triangle?

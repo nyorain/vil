@@ -159,11 +159,6 @@ void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
 	for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
 		auto& sem = dev.semaphores.get(si.pSignalSemaphores[j]);
 		dst.signalSemaphores.push_back(&sem);
-
-		// std::lock_guard lock(dev.mutex);
-		// dlg_assert(!sem.signalFrom);
-		// dlg_assert(!sem.waitFrom);
-		// sem.signalFrom = &subm;
 	}
 
 	auto& cbs = subm.commandBuffers.emplace_back();
@@ -195,11 +190,6 @@ void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
 	for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
 		auto& semaphore = dev.semaphores.get(si.pWaitSemaphores[j]);
 		dst.waitSemaphores.emplace_back(&semaphore, si.pWaitDstStageMask[j]);
-
-		// std::lock_guard lock(dev.mutex);
-		// dlg_assert(!semaphore.waitFrom);
-		// dlg_assert(semaphore.signalFrom);
-		// semaphore.waitFrom = &subm;
 	}
 
 	// = signal semaphores =

@@ -54,8 +54,32 @@ Missing:
 Extensions promoted to core not explicitly mentioned here, see above.
 Supported extensions:
 
-- VK_EXT_conditional_rendering
 - VK_KHR_copy_commands2
 - KHR_swapchain
+- VK_EXT_debug_utils
 - KHR_surface (tested overlay platforms: xlib, xcb, win32)
 	- other platforms should work without crash at least
+
+supported but no/incomplete gui interaction/information:
+- VK_EXT_conditional_rendering 
+- VK_EXT_extended_dynamic_state
+- VK_EXT_line_rasterization
+- VK_KHR_fragment_shading_rate
+- VK_KHR_push_descriptor
+- VK_KHR_descriptor_update_template
+- VK_KHR_draw_indirect_count
+- VK_EXT_sample_locations
+- VK_EXT_discard_rectangles
+
+## NOTES: 
+- vendor-specific extensions are generally not a focus, unless someone
+  is interested in them and writes the code or sponsors someone to do it.
+- the layer does not have support for VK_EXT_debug_report/VK_EXT_debug_marker 
+  and will likely not add it in the future, either, as it is deprecated. 
+  Just use debug_utils, it's a better replacement.
+- support VK_KHR_device_group in the near future is unlikely since making it
+  work with our concepts is not trivial
+- support VK_EXT_transform_feedback in the near future is unlikely as the
+  layer itself is using it for the vertex viewer (which would conflict with
+  an application-side use of it). It's only supposed to be used by tools/layers
+  anyways.

@@ -904,11 +904,6 @@ struct SetLineStippleCmd final : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-
-// TODO: everything below is WIP, not implemented yet
-// TODO: support VK_KHR_device_group? I guess we would have to consider it
-//   in gui rendering as well which might not be trivial.
-
 // VK_EXT_extended_dynamic_state
 struct SetCullModeCmd final : Command {
 	VkCullModeFlags cullMode;
@@ -927,7 +922,7 @@ struct SetFrontFaceCmd final : Command {
 };
 
 struct SetPrimitiveTopologyCmd final : Command {
-	VkFrontFace frontFace;
+	VkPrimitiveTopology topology;
 
 	Type type() const override { return Type::bind; }
 	std::string nameDesc() const override { return "SetPrimitiveTopology"; }
@@ -950,7 +945,7 @@ struct SetScissorWithCountCmd final : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-// BindVertexBuffers2Cmd should be mapped via BindVertexBuffers, TODO
+// BindVertexBuffers2Cmd should be mapped via BindVertexBuffers
 
 struct SetDepthTestEnableCmd final : Command {
 	bool enable;
@@ -1003,6 +998,28 @@ struct SetStencilOpCmd final : Command {
 	std::string nameDesc() const override { return "SetStencilOp"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
+
+// VK_EXT_sample_locations
+struct SetSampleLocationsCmd final : Command {
+	VkSampleLocationsInfoEXT info;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetSampleLocations"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// VK_EXT_discard_rectangles
+struct SetDiscardRectangleCmd final : Command {
+	u32 first;
+	span<VkRect2D> rects;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetDiscardRectangle"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// TODO: support VK_KHR_device_group? I guess we would have to consider it
+//   in gui rendering as well which might not be trivial.
 
 } // namespace vil
 

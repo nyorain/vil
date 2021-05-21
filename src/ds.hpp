@@ -45,6 +45,7 @@ struct DescriptorPool : DeviceHandle {
 
 struct DescriptorSetLayout : DeviceHandle {
 	VkDescriptorSetLayout handle {};
+	VkDescriptorSetLayoutCreateFlags flags {};
 
 	// VkDescriptorSetLayoutBinding, with extra data
 	struct Binding {
@@ -77,11 +78,23 @@ struct ImageDescriptor {
 	VkImageLayout layout {};
 };
 
+inline bool operator==(const ImageDescriptor& a, const ImageDescriptor& b) {
+	return a.imageView == b.imageView &&
+		a.sampler == b.sampler &&
+		a.layout == b.layout;
+}
+
 struct BufferDescriptor {
 	IntrusivePtr<Buffer> buffer;
 	VkDeviceSize offset {};
 	VkDeviceSize range {};
 };
+
+inline bool operator==(const BufferDescriptor& a, const BufferDescriptor& b) {
+	return a.buffer == b.buffer &&
+		a.offset == b.offset &&
+		a.range == b.range;
+}
 
 using BufferViewDescriptor = IntrusivePtr<BufferView>;
 

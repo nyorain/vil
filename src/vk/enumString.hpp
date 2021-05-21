@@ -362,8 +362,8 @@ inline const char* name(VkStructureType val) {
 		case VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT: return "ImageDrmFormatModifierPropertiesEXT";
 		case VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT: return "ValidationCacheCreateInfoEXT";
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT: return "ShaderModuleValidationCacheCreateInfoEXT";
-		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR: return "PhysicalDevicePortabilitySubsetFeaturesKHR";
-		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR: return "PhysicalDevicePortabilitySubsetPropertiesKHR";
+		// case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR: return "PhysicalDevicePortabilitySubsetFeaturesKHR";
+		// case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR: return "PhysicalDevicePortabilitySubsetPropertiesKHR";
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_SHADING_RATE_IMAGE_STATE_CREATE_INFO_NV: return "PipelineViewportShadingRateImageStateCreateInfoNV";
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADING_RATE_IMAGE_FEATURES_NV: return "PhysicalDeviceShadingRateImageFeaturesNV";
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADING_RATE_IMAGE_PROPERTIES_NV: return "PhysicalDeviceShadingRateImagePropertiesNV";

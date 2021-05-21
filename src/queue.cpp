@@ -50,17 +50,6 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 			cb->pending.erase(it2);
 		}
 
-		// TODO: submission rework/display
-		// for(auto& [sem, stage] : sub.waitSemaphores) {
-			// dlg_assert(sem->waitFrom == &subm);
-			// sem->waitFrom = nullptr;
-		// }
-
-		// for(auto* sem : sub.signalSemaphores) {
-			// dlg_assert(sem->signalFrom == &subm);
-			// sem->signalFrom = nullptr;
-		// }
-
 		// For a non-timeline semaphore (that was not waited upon), we
 		// have to issue a vkQueueSubmit to reset them, we don't do that
 		// immediately. We will do it with the next rendering or

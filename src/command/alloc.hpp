@@ -113,6 +113,18 @@ void ensureSize(CommandBuffer& cb, span<T>& buf, size_t size) {
 	buf = newBuf;
 }
 
+template<typename T>
+void ensureSize0(CommandBuffer& cb, span<T>& buf, size_t size) {
+	if(buf.size() >= size) {
+		return;
+	}
+
+	auto newBuf = allocSpan<T>(cb, size);
+	std::memset((void*) newBuf.data(), 0x0, size);
+	std::copy(buf.begin(), buf.end(), newBuf.begin());
+	buf = newBuf;
+}
+
 template<typename D, typename T>
 void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
 	dst = allocSpan<D>(cb, count);

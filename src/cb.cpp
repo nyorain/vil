@@ -34,6 +34,7 @@ CommandBuffer::~CommandBuffer() {
 		if(record_) {
 			dlg_assert(record_->cb == this);
 			record_->cb = nullptr;
+			record_->hookRecords.clear();
 		}
 	}
 
@@ -78,6 +79,7 @@ void CommandBuffer::doReset(bool startRecord) {
 
 		if(record_) {
 			record_->cb = nullptr;
+			record_->hookRecords.clear();
 			keepAliveRecord = std::move(record_);
 		}
 
@@ -248,7 +250,7 @@ void CommandBuffer::invalidateLocked() {
 
 	// Free the hook data (as soon as possible), it's no longer
 	// needed as this record will never be submitted again.
-	record_->hook.reset();
+	record_->hookRecords.clear();
 	record_->cb = nullptr;
 
 	// We can do this safely here, without ever causing the destructor
@@ -1034,7 +1036,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
 
-	ensureSize(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
+	ensureSize0(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
 	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
 	auto bufHandles = LocalVector<VkBuffer>(bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
@@ -1979,7 +1981,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	auto ptr = static_cast<const std::byte*>(pValues);
 	cmd.values = copySpan(cb, static_cast<const std::byte*>(ptr), size);
 
-	ensureSize(cb, cb.pushConstants().data, std::max(offset + size, 128u));
+	ensureSize0(cb, cb.pushConstants().data, std::max(offset + size, 128u));
 	std::memcpy(cb.pushConstants().data.data() + offset, pValues, size);
 
 	// TODO: improve pcr tracking
@@ -2052,7 +2054,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	cmd.first = firstViewport;
 	cmd.viewports = copySpan(cb, pViewports, viewportCount);
 
-	ensureSize(cb, cb.graphicsState().dynamic.viewports, firstViewport + viewportCount);
+	ensureSize0(cb, cb.graphicsState().dynamic.viewports, firstViewport + viewportCount);
 	std::copy(pViewports, pViewports + viewportCount,
 		cb.graphicsState().dynamic.viewports.begin() + firstViewport);
 
@@ -2069,7 +2071,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	cmd.first = firstScissor;
 	cmd.scissors = copySpan(cb, pScissors, scissorCount);
 
-	ensureSize(cb, cb.graphicsState().dynamic.scissors, firstScissor + scissorCount);
+	ensureSize0(cb, cb.graphicsState().dynamic.scissors, firstScissor + scissorCount);
 	std::copy(pScissors, pScissors + scissorCount,
 		cb.graphicsState().dynamic.scissors.begin() + firstScissor);
 
@@ -2395,33 +2397,58 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
 	cb.dev->dispatch.CmdSetLineStippleEXT(cb.handle(), lineStippleFactor, lineStipplePattern);
 }
 
-// TODO
-/*
 VKAPI_ATTR void VKAPI_CALL CmdSetCullModeEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkCullModeFlags                             cullMode) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetCullModeCmd>(cb);
+	cmd.cullMode = cullMode;
+
+	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle(), cullMode);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetFrontFaceEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkFrontFace                                 frontFace) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetFrontFaceCmd>(cb);
+	cmd.frontFace = frontFace;
+
+	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle(), frontFace);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopologyEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkPrimitiveTopology                         primitiveTopology) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetPrimitiveTopologyCmd>(cb);
+	cmd.topology = primitiveTopology;
+
+	cb.dev->dispatch.CmdSetPrimitiveTopologyEXT(cb.handle(), primitiveTopology);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCountEXT(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    viewportCount,
 		const VkViewport*                           pViewports) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetViewportWithCountCmd>(cb);
+	cmd.viewports = copySpan(cb, pViewports, viewportCount);
+
+	cb.dev->dispatch.CmdSetViewportWithCountEXT(cb.handle(), viewportCount,
+		pViewports);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCountEXT(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    scissorCount,
 		const VkRect2D*                             pScissors) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetScissorWithCountCmd>(cb);
+	cmd.scissors = copySpan(cb, pScissors, scissorCount);
+
+	cb.dev->dispatch.CmdSetScissorWithCountEXT(cb.handle(), scissorCount,
+		pScissors);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
@@ -2432,31 +2459,78 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
 		const VkDeviceSize*                         pOffsets,
 		const VkDeviceSize*                         pSizes,
 		const VkDeviceSize*                         pStrides) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
+	cmd.firstBinding = firstBinding;
+
+	ensureSize0(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
+	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
+	auto bufHandles = LocalVector<VkBuffer>(bindingCount);
+	for(auto i = 0u; i < bindingCount; ++i) {
+		auto& buf = get(*cb.dev, pBuffers[i]);
+		cmd.buffers[i].buffer = &buf;
+		cmd.buffers[i].offset = pOffsets[i];
+		cmd.buffers[i].size = pSizes ? pSizes[i] : 0u;
+		cmd.buffers[i].stride = pStrides ? pStrides[i] : 0u;
+		useHandle(cb, cmd, buf);
+
+		cb.graphicsState().vertices[firstBinding + i] = cmd.buffers[i];
+		bufHandles[i] = buf.handle;
+	}
+
+	cb.dev->dispatch.CmdBindVertexBuffers2EXT(cb.handle(),
+		firstBinding, bindingCount, bufHandles.data(), pOffsets, pSizes,
+		pStrides);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnableEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    depthTestEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthTestEnableCmd>(cb);
+	cmd.enable = depthTestEnable;
+
+	cb.dev->dispatch.CmdSetDepthTestEnableEXT(cb.handle(), depthTestEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnableEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    depthWriteEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthWriteEnableCmd>(cb);
+	cmd.enable = depthWriteEnable;
+
+	cb.dev->dispatch.CmdSetDepthWriteEnableEXT(cb.handle(), depthWriteEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOpEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkCompareOp                                 depthCompareOp) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthCompareOpCmd>(cb);
+	cmd.op = depthCompareOp;
+
+	cb.dev->dispatch.CmdSetDepthCompareOpEXT(cb.handle(), depthCompareOp);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnableEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    depthBoundsTestEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthBoundsTestEnableCmd>(cb);
+	cmd.enable = depthBoundsTestEnable;
+
+	cb.dev->dispatch.CmdSetDepthBoundsTestEnableEXT(cb.handle(), depthBoundsTestEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnableEXT(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    stencilTestEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetStencilTestEnableCmd>(cb);
+	cmd.enable = stencilTestEnable;
+
+	cb.dev->dispatch.CmdSetStencilTestEnableEXT(cb.handle(), stencilTestEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
@@ -2466,7 +2540,41 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
 		VkStencilOp                                 passOp,
 		VkStencilOp                                 depthFailOp,
 		VkCompareOp                                 compareOp) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetStencilOpCmd>(cb);
+	cmd.faceMask = faceMask;
+	cmd.failOp = failOp;
+	cmd.passOp = passOp;
+	cmd.depthFailOp = depthFailOp;
+	cmd.compareOp = compareOp;
+
+	cb.dev->dispatch.CmdSetStencilOpEXT(cb.handle(), faceMask,
+		failOp, passOp, depthFailOp, compareOp);
 }
-*/
+
+VKAPI_ATTR void VKAPI_CALL CmdSetSampleLocationsEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkSampleLocationsInfoEXT*             pSampleLocationsInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetSampleLocationsCmd>(cb);
+	cmd.info = *pSampleLocationsInfo;
+	copyChainInPlace(cb, cmd.info.pNext);
+
+	cb.dev->dispatch.CmdSetSampleLocationsEXT(cb.handle(), pSampleLocationsInfo);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDiscardRectangleEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    firstDiscardRectangle,
+		uint32_t                                    discardRectangleCount,
+		const VkRect2D*                             pDiscardRectangles) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDiscardRectangleCmd>(cb);
+	cmd.first = firstDiscardRectangle;
+	cmd.rects = copySpan(cb, pDiscardRectangles, discardRectangleCount);
+
+	cb.dev->dispatch.CmdSetDiscardRectangleEXT(cb.handle(),
+		firstDiscardRectangle, discardRectangleCount, pDiscardRectangles);
+}
 
 } // namespace vil

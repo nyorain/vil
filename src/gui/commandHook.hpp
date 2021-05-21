@@ -41,10 +41,10 @@ struct CopiedImage {
 
 struct CopiedBuffer {
 	OwnBuffer buffer {};
-	void* map {};
+	const std::byte* map {};
 
-	std::vector<std::byte> copy;
-	u64 copyOffset;
+	// std::vector<std::byte> copy;
+	// u64 copyOffset;
 
 	CopiedBuffer() = default;
 	void init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFlags);
@@ -52,7 +52,9 @@ struct CopiedBuffer {
 	CopiedBuffer& operator=(CopiedBuffer&&) noexcept = default;
 	~CopiedBuffer() = default;
 
-	void cpuCopy(u64 offset = 0, u64 size = VK_WHOLE_SIZE);
+	// void cpuCopy(u64 offset = 0, u64 size = VK_WHOLE_SIZE);
+	void invalidateMap();
+	ReadBuf data() const { return {map, buffer.size}; }
 };
 
 // NOTE: in most cases (except for xfb) we don't actually need CopiedBuffer
@@ -122,8 +124,6 @@ public:
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
-	// TODO(io-rework): allow specifying offsets and max sizes. We currently
-	//   have a rather arbirtrary static limit on buffer copy size.
 	bool copyVertexBuffers {}; // could specify the needed subset in future
 	bool copyIndexBuffers {};
 	bool copyXfb {}; // transform feedback
@@ -149,18 +149,6 @@ public:
 		float match; // how much the command matched
 	};
 
-	// TODO: this is a problem when there are command records being
-	// submitted multiple times before we retrieve/reset this since
-	// then the old CommandHookState will be overwritten but still in
-	// this list. Fix by either
-	// 1. when a command buffer that should be hooked is submitted
-	//    that already has a finished hooked submission in this list,
-	//    don't hook it.
-	// 2. allow that there are multiple CommandHookState (CommandHookRecord)
-	//    object per original CommandRecord. This is probably the proper
-	//    variant but requires some changes to the way we connect CommandRecord
-	//    and CommandHookRecord, e.g. a vector of CommandHookRecords FinishPtrs
-	//    in CommandRecord.
 	std::vector<CompletedHook> completed;
 
 public:
@@ -216,6 +204,12 @@ struct CommandHookRecord {
 	CommandRecord* record {}; // the record we hook. Always valid.
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
 	std::vector<const Command*> hcommand; // hierachy of the hooked command
+	float match {}; // how much the original command matched the searched one
+
+	// When copying state from a descriptor set, this will hold the pointer
+	// to the associated descriptor set state. Used for updateAfterBind
+	// descriptors: when they change we must recreate the CommandHookRecord.
+	DescriptorSetStatePtr dsState;
 
 	// == Resources ==
 	VkCommandBuffer cb {};
@@ -284,6 +278,8 @@ struct CommandHookSubmission {
 	CommandHookSubmission(CommandHookRecord&, Submission&, float match);
 	~CommandHookSubmission();
 
+	// Called when the associated submission (passed again as parameter)
+	// successfully completed execution on the device.
 	void finish(Submission&);
 	void transmitTiming();
 	void transmitIndirect();

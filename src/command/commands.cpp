@@ -868,10 +868,13 @@ float BeginRenderPassCmd::match(const Command& base) const {
 	}
 
 	// TODO
-	// this will currently break when render passes or framebuffers are used
-	// as temporary handles, created as needed and destroyed when submission is
-	// done. We would have to keep the renderPassDesc and framebuffer description
-	// (mainly the referenced image views) alive.
+	// - this will currently return false negatives when render passes or framebuffers are used
+	//   as temporary handles, created as needed and destroyed when submission is
+	//   done. We would have to keep the renderPassDesc and framebuffer description
+	//   (mainly the referenced image views) alive.
+	// - will break for imageless framebuffers. Should probably store
+	//   the used attachments in BeginRenderPassCmd and compare them here
+	//   instead of relying on the attachments being stored in the fb.
 
 	// match render pass description
 	if(!rp || !cmd->rp || !same(*rp->desc, *cmd->rp->desc)) {
@@ -1108,10 +1111,11 @@ Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
 		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 
-		m.total += pcr.size;
+		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
+		m.total += pcrWeight;
 		if(std::memcmp(&pushConstants.data[pcr.offset],
 				&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcr.size;
+			m.match += pcrWeight;
 		}
 	}
 
@@ -2634,6 +2638,60 @@ void EndConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) c
 // VK_EXT_line_rasterization
 void SetLineStippleCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetLineStippleEXT(cb, stippleFactor, stipplePattern);
+}
+
+// VK_EXT_extended_dynamic_state
+void SetCullModeCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetCullModeEXT(cb, cullMode);
+}
+
+void SetFrontFaceCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetFrontFaceEXT(cb, frontFace);
+}
+
+void SetPrimitiveTopologyCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetPrimitiveTopologyEXT(cb, topology);
+}
+
+void SetViewportWithCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetViewportWithCountEXT(cb, viewports.size(), viewports.data());
+}
+
+void SetScissorWithCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetScissorWithCountEXT(cb, scissors.size(), scissors.data());
+}
+
+void SetDepthTestEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetDepthTestEnableEXT(cb, enable);
+}
+
+void SetDepthWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetDepthWriteEnableEXT(cb, enable);
+}
+
+void SetDepthCompareOpCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetDepthBoundsTestEnableEXT(cb, op);
+}
+
+void SetDepthBoundsTestEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetDepthBoundsTestEnableEXT(cb, enable);
+}
+
+void SetStencilTestEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetStencilTestEnableEXT(cb, enable);
+}
+
+void SetStencilOpCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetStencilOpEXT(cb, faceMask, failOp, passOp,
+		depthFailOp, compareOp);
+}
+
+void SetSampleLocationsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetSampleLocationsEXT(cb, &this->info);
+}
+
+void SetDiscardRectangleCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetDiscardRectangleEXT(cb, first, rects.size(), rects.data());
 }
 
 } // namespace vil

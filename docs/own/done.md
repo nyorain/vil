@@ -1,3 +1,8 @@
+- [x] commandHook: See the TODO on 'completed'. Might create problems atm.
+- [x] fix commandHook for updateAfterBind, updateUnusedWhilePending.
+      We might need to invalidate the hooked records when a used descriptor
+	  was changed
+- [x] the performance notes in CommandHook::hook are relevant
 - [x] rework dev/gui so that there is never more than one gui. Supporting
       multiple guis at the same time is not worth the trouble (think
 	  about command buffer hooking from multiple cb viewers...)

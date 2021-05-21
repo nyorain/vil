@@ -11,48 +11,55 @@
 
 namespace vil {
 
-struct VertexViewer {
+struct AABB3f {
+	Vec3f pos;
+	Vec3f extent; // 0.5 * size
+};
 
+struct DrawParams {
+	std::optional<VkIndexType> indexType {}; // nullopt for non-indexed draw
+	u32 offset {}; // firstVertex or firstIndex
+	u32 drawCount {}; // vertexCount or indexCount
+	u32 vertexOffset {}; // only for indexed drawing
+};
+
+struct VertexViewer {
 	~VertexViewer();
 
 	void init(Device& dev, VkRenderPass rp);
-	VkPipeline createPipe(VkFormat format, u32 stride, VkPrimitiveTopology topo);
 
-	// Assumes to be inside a render pass with
-	// - a depth attachment
-	// - a single color attachment
-	// - viewport and scissor dynamic state bound
-	// Uses the current imgui context.
-	// TODO: deprecate?
-	void imGuiDraw(VkCommandBuffer cb, const GraphicsPipeline& src,
-		const CommandHookState& copies, std::optional<VkIndexType>,
-		u32 offset, u32 drawCount, u32 vertexOffset,
-		Vec2f canvasOffset, Vec2f canvasSize);
+	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+
+	void updateInput(float dt);
+
+private:
+	void centerCamOnBounds(const AABB3f& bounds);
+	VkPipeline createPipe(VkFormat format, u32 stride, VkPrimitiveTopology topo);
 
 	struct DrawData {
 		VkPrimitiveTopology topology;
 		VkPipelineVertexInputStateCreateInfo vertexInfo;
 		std::vector<BufferSpan> vertexBuffers;
 
-		u32 offset; // firstVertex or firstIndex
-		u32 drawCount; // vertexCount or instanceCount
-
-		std::optional<VkIndexType> indexType; // nullopt for non-indexed draw
+		DrawParams params;
 		BufferSpan indexBuffer; // only for indexed drawing
-		u32 vertexOffset; // only for indexed drawing
 
 		Vec2f canvasOffset;
 		Vec2f canvasSize;
 
 		float scale {1.f};
 		bool useW {false};
+
+		VkCommandBuffer cb {};
 	};
 
-	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
-	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
-
-	void imGuiDraw(VkCommandBuffer cb, const DrawData& data);
-	void updateInput(float dt);
+	// Assumes to be inside a render pass with
+	// - a depth attachment
+	// - a single color attachment
+	// - viewport and scissor dynamic state bound
+	// Uses the current imgui context.
+	void imGuiDraw(const DrawData& data);
 
 private:
 	Device* dev_ {};
@@ -87,16 +94,7 @@ private:
 	};
 
 	std::vector<Pipe> pipes_ {};
-
-	struct VertexDrawData {
-		VertexViewer* self;
-		const CommandHookState* state;
-		VkCommandBuffer cb;
-		Vec2f offset;
-		Vec2f size;
-		const DrawCmdBase* cmd;
-		u32 vertexCount;
-	} vertexDrawData_;
+	DrawData drawData_;
 };
 
 } // namespace vil

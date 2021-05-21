@@ -13,7 +13,6 @@ namespace vil {
 struct Camera {
 	Vec3f pos {0.f, 0.f, 1.f}; // position of camera in world space
 	Quaternion rot {}; // transforms from camera/view space to world space
-	bool update {true}; // stores whether camera was modified
 };
 
 [[nodiscard]] inline nytl::Vec3f dir(const Camera& c) {

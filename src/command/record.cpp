@@ -139,7 +139,7 @@ CommandRecord::~CommandRecord() {
 
 	// Its destructor might reference this.
 	// And it must be called while mutex is locked.
-	hook.reset();
+	hookRecords.clear();
 
 	dlg_assert(dev->stats.aliveRecords > 0);
 	--dev->stats.aliveRecords;

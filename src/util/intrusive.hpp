@@ -10,16 +10,13 @@ namespace vil {
 template<typename T, typename H>
 class HandledPtr {
 public:
-	static constexpr auto noexceptDec = true; // std::is_nothrow_invocable_v<decltype(&H::dec), H, T*>;
-	static constexpr auto noexceptInc = true; // std::is_nothrow_invocable_v<decltype(&H::inc), H, T*>;
-
 	HandledPtr() noexcept(std::is_nothrow_constructible_v<H>) :
 			storage_{nullptr, H{}} {
 		static_assert(std::is_nothrow_invocable_v<decltype(&H::dec), H, T&>);
 		static_assert(std::is_nothrow_invocable_v<decltype(&H::inc), H, T&>);
 	}
 
-	void reset(T* ptr = nullptr) noexcept(noexceptDec && noexceptInc) {
+	void reset(T* ptr = nullptr) noexcept {
 		// TODO: details (order of operation, might be relevant if ~ptr_
 		// has access to this wrapper) don't match unique_ptr::reset.
 		// They probably should.
@@ -34,33 +31,24 @@ public:
 		}
 	}
 
-	~HandledPtr() noexcept(noexceptDec && std::is_nothrow_destructible_v<H>) {
+	~HandledPtr() noexcept {
 		reset();
 	}
 
-	explicit HandledPtr(T* ptr, H h = {})
-		noexcept(noexceptInc && std::is_nothrow_move_constructible_v<H>)
-			: storage_{ptr, std::move(h)} {
-
+	explicit HandledPtr(T* ptr, H h = {}) noexcept : storage_{ptr, std::move(h)} {
 		if(getPointer()) {
 			getHandler().inc(*getPointer());
 		}
 	}
-	HandledPtr(std::nullptr_t, H h = {})
-		noexcept(std::is_nothrow_move_constructible_v<H>)
-			: storage_{nullptr, std::move(h)} {}
+	HandledPtr(std::nullptr_t, H h = {}) noexcept : storage_{nullptr, std::move(h)} {}
 
-	HandledPtr(const HandledPtr& rhs)
-		noexcept(std::is_nothrow_copy_assignable_v<H> && noexceptInc)
-			: storage_{nullptr, H{}} {
-		storage_ = rhs.storage_;
+	HandledPtr(const HandledPtr& rhs) noexcept : storage_(rhs.storage_) {
 		if(getPointer()) {
 			getHandler().inc(*getPointer());
 		}
 	}
 
-	HandledPtr& operator=(const HandledPtr& rhs)
-			noexcept(std::is_nothrow_copy_assignable_v<H> && noexceptInc && noexceptDec) {
+	HandledPtr& operator=(const HandledPtr& rhs) noexcept {
 		reset();
 		storage_ = rhs.storage_;
 		if(getPointer()) {
@@ -69,13 +57,11 @@ public:
 		return *this;
 	}
 
-	HandledPtr(HandledPtr&& rhs) noexcept(std::is_nothrow_move_constructible_v<H>)
-			: storage_(std::move(rhs.storage_)) {
+	HandledPtr(HandledPtr&& rhs) noexcept : storage_(std::move(rhs.storage_)) {
 		std::get<0>(rhs.storage_) = nullptr;
 	}
 
-	HandledPtr& operator=(HandledPtr&& rhs)
-			noexcept(std::is_nothrow_move_assignable_v<H> && noexceptDec) {
+	HandledPtr& operator=(HandledPtr&& rhs) noexcept {
 		reset();
 		storage_ = std::move(rhs.storage_);
 		std::get<0>(rhs.storage_) = nullptr;
@@ -134,8 +120,28 @@ bool operator==(const HandledPtr<T, H>& a, const HandledPtr<T, H>& b) {
 }
 
 template<typename T, typename H>
+bool operator==(const HandledPtr<T, H>& a, const T* b) {
+	return a.get() == b;
+}
+
+template<typename T, typename H>
+bool operator==(const T* b, const HandledPtr<T, H>& a) {
+	return a.get() == b;
+}
+
+template<typename T, typename H>
 bool operator!=(const HandledPtr<T, H>& a, const HandledPtr<T, H>& b) {
 	return a.get() != b.get();
+}
+
+template<typename T, typename H>
+bool operator!=(const HandledPtr<T, H>& a, const T* b) {
+	return a.get() != b;
+}
+
+template<typename T, typename H>
+bool operator!=(const T* b, const HandledPtr<T, H>& a) {
+	return a.get() != b;
 }
 
 } // namspace vil

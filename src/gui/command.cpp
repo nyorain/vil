@@ -83,7 +83,6 @@ void display(SpvReflectBlockVariable& bvar, span<const std::byte> data);
 void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
 		const char* varName) {
 	auto& type = nonNull(bvar.type_description);
-	data = data.subspan(bvar.offset);
 	varName = varName ? varName : (bvar.name ? bvar.name : "?");
 
 	auto typeFlags = type.type_flags & (~SPV_REFLECT_TYPE_FLAG_ARRAY);
@@ -178,6 +177,7 @@ void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
 void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
 	auto& type = nonNull(bvar.type_description);
 	auto varName = bvar.name ? bvar.name : "?";
+	data = data.subspan(bvar.offset);
 
 	// TODO: arrays (but pretty much the whole buffer display thing) could
 	// profit from good ImGui-based clipping. E.g. skip all formatting when
@@ -835,7 +835,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			if(!binding || !binding->block.type_description) {
 				ImGui::Text("Binding not used in pipeline");
 			} else {
-				display(binding->block, buf->copy);
+				display(binding->block, buf->data());
 			}
 		} else {
 			dlg_assert(drawCmd);
@@ -855,7 +855,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			}
 
 			if(bestVar) {
-				display(*bestVar, buf->copy);
+				display(*bestVar, buf->data());
 			} else {
 				ImGui::Text("Binding not used in pipeline");
 			}
@@ -1234,7 +1234,7 @@ void CommandViewer::displayCommand() {
 
 	if(state_ && state_->indirectCopy.buffer.size) {
 		auto& ic = state_->indirectCopy;
-		auto span = ReadBuf(ic.copy);
+		auto span = ic.data();
 		if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_); dcmd) {
 			displayMultidraw(dcmd->drawCount, dcmd->indexed, span);
 		} else if(dynamic_cast<const DispatchIndirectCmd*>(command_)) {
@@ -1243,7 +1243,12 @@ void CommandViewer::displayCommand() {
 			imGuiText("groups Y: {}", ecmd.y);
 			imGuiText("groups Z: {}", ecmd.z);
 		} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(command_); dcmd) {
-			displayMultidraw(state_->indirectCommandCount, dcmd->indexed, span);
+			auto cmdSize = dcmd->indexed ?
+				sizeof(VkDrawIndexedIndirectCommand) :
+				sizeof(VkDrawIndirectCommand);
+			auto count = state_->indirectCommandCount;
+			span = span.subspan(4, count * cmdSize); // skip the u32 count
+			displayMultidraw(count, dcmd->indexed, span);
 		}
 	}
 
