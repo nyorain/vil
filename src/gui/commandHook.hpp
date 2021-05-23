@@ -4,6 +4,7 @@
 #include <command/desc.hpp>
 #include <command/record.hpp>
 #include <util/intrusive.hpp>
+#include <util/bytes.hpp>
 #include <gui/render.hpp>
 #include <vk/vulkan.h>
 #include <vector>

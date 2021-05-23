@@ -4,7 +4,7 @@ project('VIL', ['c', 'cpp'],
 		'werror=true',
 		'warning_level=3',
 		'cpp_std=c++17',
-		'c_std=c11',
+		'c_std=c99',
 		# We need this to build the subprojects as static libraries. No
 		# other way to do this apparently.
 		# And we force the layer to be shared library anyways.
@@ -55,11 +55,7 @@ with_x11 = not with_win32 and get_option('with_x11')
 
 tracy_deps = []
 
-# tracy disabled on win32 for now since we apparantly need to care
-# for include order there thanks to the glorious windows.h header.
-# how the fuck could they build a monopoly with such bullshit, jeez.
-# can fix it later on, when needed.
-with_tracy = not with_win32
+with_tracy = true
 
 if with_tracy
 	args += '-DTRACY_ENABLE'
@@ -77,6 +73,11 @@ layer_args = [
 	# Make sure to *never* include them
 	'-DVK_NO_PROTOTYPES',
 ]
+
+# config options
+# layer_args += '-DVIL_EXTENSIVE_ZONES'
+# layer_args += '-DVIL_TRACY_MUTEX'
+layer_args += '-DVIL_DEBUG_MUTEX'
 
 link_args = cc.get_supported_arguments([
 	# unix, TODO: this caused problems on clang
@@ -211,6 +212,10 @@ src = files(
 	'src/util/syncedMap.hpp',
 	'src/util/ext.hpp',
 	'src/util/debugMutex.hpp',
+	'src/util/profiling.hpp',
+	'src/util/spirv.hpp',
+	'src/util/camera.hpp',
+	'src/util/bytes.hpp',
 
 	'include/vil_api.h',
 	'src/imgui/imgui.h',
@@ -260,6 +265,13 @@ if with_win32
 	layer_args += '-DUNICODE'
 endif
 
+# On win32, pch breaks with tracy due to some windows.h bs.
+# windows.h keeps breaking my applications and will to live
+pch = []
+if not with_win32 or not with_tracy
+	pch = 'src/pch.hpp'
+endif
+
 vil_layer = shared_library(
 	'VkLayer_live_introspection',
 	[src, spv],
@@ -269,7 +281,7 @@ vil_layer = shared_library(
 	cpp_args: args + layer_args,
 	link_args: link_args,
 	install: true,
-	cpp_pch: 'src/pch.hpp',
+	cpp_pch: pch,
 )
 
 conf_data = configuration_data()

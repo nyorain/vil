@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <memory.hpp>
 #include <unordered_set>
+#include <atomic>
 
 namespace vil {
 

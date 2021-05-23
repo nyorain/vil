@@ -42,7 +42,8 @@ ReversionAdatper<T> reversed(T&& iterable) {
 	return {iterable};
 }
 
-u32 findLSB(u32 v);
+u32 findLSB(u32);
+u32 nextPOT(u32);
 
 template<typename T>
 bool isEmpty(const std::weak_ptr<T>& ptr) {

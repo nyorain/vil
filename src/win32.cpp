@@ -4,6 +4,7 @@
 #include <device.hpp>
 #include <layer.hpp>
 #include <platform.hpp>
+#include <util/util.hpp>
 #include <swa/key.h>
 
 #include <atomic>

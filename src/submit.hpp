@@ -48,7 +48,7 @@ struct QueueSubmitter {
 
 void process(QueueSubmitter&, const VkSubmitInfo&);
 void cleanupOnError(QueueSubmitter& subm);
-VkResult addGuiSyncLocked(QueueSubmitter&);
+void addGuiSyncLocked(QueueSubmitter&);
 void postProcessLocked(QueueSubmitter&);
 
 } // namespace vil

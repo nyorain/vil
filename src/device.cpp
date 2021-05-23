@@ -108,6 +108,10 @@ Device::~Device() {
 
 	queueFamilies.clear();
 	queues.clear();
+
+	if (DebugStats::instance == &stats) {
+		DebugStats::instance = nullptr;
+	}
 }
 
 bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
@@ -390,7 +394,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	// useful to test fallback code paths
-	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", true);
+	// TODO: when the validation layer version with the timeline semaphores validation crash (it's fixed
+	// in master already) is old enough, we should enable timeline semaphores by default.
+	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", false);
 	auto enableTransformFeedback = checkEnvBinary("VIL_TRANSFORM_FEEDBACK", true);
 
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage && (
@@ -559,6 +565,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	if(ci->pEnabledFeatures) {
 		dev.enabledFeatures = *ci->pEnabledFeatures;
 	}
+
+	DebugStats::instance = &dev.stats;
 
 	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 

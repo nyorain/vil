@@ -25,7 +25,7 @@ struct PipelineLayout : DeviceHandle {
 
 struct PipelineShaderStage {
 	VkShaderStageFlagBits stage;
-	std::shared_ptr<SpirvData> spirv;
+	IntrusivePtr<SpirvData> spirv;
 	std::string entryPoint;
 
 	std::vector<VkSpecializationMapEntry> specEntries;

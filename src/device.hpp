@@ -19,14 +19,29 @@
 #include <optional>
 #include <unordered_map>
 
+#if VK_USE_64_BIT_PTR_DEFINES == 0
+	// NOTE: 32-bit platforms cause multiple problems at the moment.
+	// For instance, since vulkan handles aren't typesafe, we couldn't
+	// build HandleDesc (and the utility surrounding it) the way we do.
+	// Create an issue/pull request on github if you, dear reader, really need this.
+	#error "vil does not support 32-bit platforms at the moment"
+#endif // VK_USE_64_BIT_PTR_DEFINES
+
 namespace vil {
 
 struct DebugStats {
+	// TODO
+	inline static DebugStats* instance {};
+
 	std::atomic<u32> aliveRecords {};
 	std::atomic<u32> aliveDescriptorStates {};
 	std::atomic<u32> aliveDescriptorSets {};
 	std::atomic<u32> aliveBuffers {};
 	std::atomic<u32> aliveImagesViews {};
+
+	std::atomic<u32> threadContextMem {};
+	std::atomic<u32> commandMem {};
+	std::atomic<u32> descriptorStateMem {};
 };
 
 struct Device {
@@ -99,7 +114,8 @@ struct Device {
 	// erased from the resource tables below (and therefore can't
 	// logically be created or destroyed). Also used to synchronize
 	// shared access to most resources (that can be mutated).
-	TracySharedLockable(SharedMutex, mutex)
+	// vilDefSharedMutex(mutex);
+	TracySharedLockable(DebugSharedMutex, mutex);
 
 	// Mutex that is locked *while* doing a submission. The general mutex
 	// won't be locked for that time. So when we want to do submissions
@@ -108,7 +124,7 @@ struct Device {
 	// with application submissions (as well as with our own).
 	// Note that in vulkan submission synchronization happens on per-device,
 	// *not* on per-queue basis.
-	TracyLockable(Mutex, queueMutex)
+	vilDefMutex(queueMutex);
 
 	// NOTE: hacky as hell but can't work around it. Needed only by the
 	// public API to communicate with the application.

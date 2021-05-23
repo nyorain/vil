@@ -21,7 +21,7 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	ZoneScoped;
 
 	auto& dev = *subm.queue->dev;
-	vil_assert_owned(dev.mutex);
+	assertOwned(dev.mutex);
 
 	if(subm.appFence) {
 		if(dev.dispatch.GetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
@@ -94,7 +94,7 @@ void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
 }
 
 void checkPendingSubmissionsLocked(Device& dev) {
-	vil_assert_owned(dev.mutex);
+	assertOwned(dev.mutex);
 
 	for(auto it = dev.pending.begin(); it != dev.pending.end();) {
 		auto& subm = *it;
@@ -179,9 +179,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		// arond it.
 		// Maybe we can handle this with a separate gui/submission sync mutex?
 		std::lock_guard devLock(dev.mutex);
-		if(res = addGuiSyncLocked(submitter); res != VK_SUCCESS) {
-			return res;
-		}
+		addGuiSyncLocked(submitter);
 
 		{
 			ZoneScopedN("dispatch.QueueSubmit");

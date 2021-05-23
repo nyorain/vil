@@ -112,37 +112,32 @@ CommandRecord::~CommandRecord() {
 
 	ZoneScoped;
 
-	std::lock_guard lock(dev->mutex);
+	{
+		std::lock_guard lock(dev->mutex);
 
-	/*
-	if(group) {
-		auto count = group->aliveRecords.erase(this);
-		dlg_assertm(count, "CommandRecord not found in its group");
-	}
-	*/
+		// remove cb from all referenced resources
+		auto removeFromResource = [&](auto& res) {
+			if(invalidated.count(&res) == 0) {
+				[[maybe_unused]] auto count = res.refRecords.erase(this);
+				dlg_assert(count > 0);
+			}
+		};
 
-	// remove cb from all referenced resources
-	auto removeFromResource = [&](auto& res) {
-		if(invalidated.count(&res) == 0) {
-			[[maybe_unused]] auto count = res.refRecords.erase(this);
-			dlg_assert(count > 0);
+		for(auto& img : images) {
+			removeFromResource(*img.second.image);
 		}
-	};
 
-	for(auto& img : images) {
-		removeFromResource(*img.second.image);
+		for(auto& handle : handles) {
+			removeFromResource(*handle.second.handle);
+		}
+
+		// Its destructor might reference this.
+		// And it must be called while mutex is locked.
+		hookRecords.clear();
+
+		dlg_assert(dev->stats.aliveRecords > 0);
+		--dev->stats.aliveRecords;
 	}
-
-	for(auto& handle : handles) {
-		removeFromResource(*handle.second.handle);
-	}
-
-	// Its destructor might reference this.
-	// And it must be called while mutex is locked.
-	hookRecords.clear();
-
-	dlg_assert(dev->stats.aliveRecords > 0);
-	--dev->stats.aliveRecords;
 }
 
 void replaceInvalidatedLocked(CommandRecord& record) {

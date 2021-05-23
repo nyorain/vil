@@ -111,10 +111,6 @@ struct DescriptorSetState {
 		void dec(DescriptorSetState&) const noexcept;
 	};
 
-	// If the state has a variable_descriptor_count binding, this
-	// holds its count.
-	u32 variableDescriptorCount {};
-
 	// The ds with which this state is associated.
 	// If the ds the state originated from was changed or destroyed,
 	// this will be null.
@@ -123,8 +119,13 @@ struct DescriptorSetState {
 	// The layout associated with this state. Always valid.
 	IntrusivePtr<DescriptorSetLayout> layout {};
 
+	// If the state has a variable_descriptor_count binding, this
+	// holds its count.
+	u32 variableDescriptorCount {};
+
 	std::atomic<u32> refCount {}; // intrusive reference count
-	TracyLockable(Mutex, mutex)
+
+	vilDefMutex(mutex);
 };
 
 using DescriptorSetStatePtr = HandledPtr<DescriptorSetState, DescriptorSetState::PtrHandler>;

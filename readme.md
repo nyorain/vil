@@ -69,30 +69,54 @@ Downsides:
 Supported/Tested platforms:
 
 - Unix, gcc & clang (with solid C++17 support)
-	- xcb, xlib and wayland platforms.
+	- xcb, xlib and wayland platforms
+  - hooked overlay not supported on wayland, it is too well designed to allow hacks like that.
+    Just integrate vil with your application using the API or use `VIL_CREATE_WINDOW` for a separate
+    window (that works on native wayland). Or make your application use xcb/xlib.
 	- only actively tested on linux, bug reports and improvements for
 	  other platforms appreciated
 - MSVC 2019 (x64)
 - MinGW (this one is not tested at the moment and might give you problems
   but reported issues will be fixed. CI for this platform is WIP).
 
+**NOTE**: 32-bit platforms are currently not supported. Pull requests are welcome but you'd likely have to maintain it yourself/set up CI.
+
 Currently (as there isn't even an official release), there are no prepackaged
-binaries or build scripts, you have to build and install it yourself. Clone the
-repository and run:
+binaries or build scripts, you have to build and install it yourself. 
+You'll need an up-to-date version of [meson](https://github.com/mesonbuild/meson/releases).
+
+## Unix
+
+Just clone the repository and run:
 
 ```shell
 meson build
 ninja -C build
 ```
 
-You'll need an up-to-date version of [meson](https://github.com/mesonbuild/meson/releases).
-On **unix** you can just run `ninja install` (you might need superuser rights
-and also might adjust the install prefix to /usr/lib, depending on your system)
-to install the library and layer config.
+To install the layer you can just run `ninja -C build install` (you might need superuser rights for that).
+By default, meson will install to `/usr/local` so - depending on your system - the layer configuration file or
+layer library itself might not be found by the vulkan loader. Either make sure that `/usr/local` is properly
+included in your system's library and vulkan loader search paths or change the install prefix to `/usr` 
+via meson (e.g. run `meson --prefix=/usr build` in the beginning).
+Be warned that using the `/usr` prefix for manually built libs/applications is generally not recommended since it might mess
+with your package manager.
 
-On **windows**, layers are installed via registry entries, you have to add
+## Windows
+
+On windows, this is actively tested with MSVC 2019, older version will likely not work due to incomplete/incorrect C++17 support.
+The recommended/tested way to build it:
+
+1. open the `x64 Native Tools command prompt` for your visual studio version. You can just search for that using the start menu when you have visual studio installed.
+2. Navigate to the vil folder.
+3. Run `meson build --backend vs2019`
+4. If everything goes correctly, you will have a Visual Studio solution you can build.
+5. See below for installing the layer, i.e. making it usable for vulkan applications.
+
+On windows, layers are installed via registry entries, you have to add
 a registry entry in `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers` pointing to the generated layer config 
 json (that must be located in the same folder as `VkLayer_live_introspection.dll`).
+See [here](https://asawicki.info/news_1683_vulkan_layers_dont_work_look_at_registry.html) or [here](https://vulkan.lunarg.com/doc/view/1.1.121.1/linux/layer_configuration.html) for more details.
 You can simply run the `register_layer.bat` script in the build directory. Note that it will require admin privileges
 to add the registry key. You should usually not run random batch scripts from the internet that require admin privileges,
 so feel free to do it manually in an admin prompt:
@@ -103,17 +127,17 @@ REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath o
 
 Where you replace `<filepath of VkLayer_live_introspection.json>` with full file path of the generated `VkLayer_live_introspection.json` file, e.g. `D:\code\vil\build\vs19\VkLayer_live_introspection.json`.
 
+# Using vil
+
 Once installed, you have to make sure vulkan applications load `VK_LAYER_live_introspection`.
 Either pass it to your `VkInstanceCreateInfo` or enable it via environment variable `VK_INSTANCE_LAYERS=VK_LAYER_live_introspection`.
 During the early stages of this project, you likely want to load it *before* any validation layer. If
 your application then causes triggers validation errors with *vil* that are not there without it,
 make sure to report them here!
 
-# Using vil
+There are multiple ways of using the introspection gui:
 
-There are multiple ways of using this layer:
-
-- Make the layer create a new window holding the debug gui when the application starts.
+- Make the layer create a new window containing the debug gui when the application starts.
   This is the current default, you can control it via the environment variable
   'VIL_CREATE_WINDOW={0, 1}'.
 - Make the layer draw an overlay over you application

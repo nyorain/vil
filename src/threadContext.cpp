@@ -1,4 +1,5 @@
 #include <threadContext.hpp>
+#include <device.hpp>
 
 namespace  vil {
 
@@ -18,6 +19,11 @@ void freeBlocks(ThreadMemBlock* head) {
 		auto next = head->next;
 		// no need to call MemBlocks destructor, it's trivial
 		TracyFreeS(head, 8);
+
+		if(DebugStats::instance) {
+			DebugStats::instance->threadContextMem -= head->size;
+		}
+
 		delete[] reinterpret_cast<std::byte*>(head);
 		head = next;
 	}
@@ -31,6 +37,9 @@ ThreadMemBlock& createMemBlock(size_t memSize, ThreadMemBlock* prev) {
 	memBlock->size = memSize;
 	memBlock->prev = prev;
 	memBlock->next = nullptr;
+
+	DebugStats::instance->threadContextMem += memSize;
+
 	return *memBlock;
 }
 

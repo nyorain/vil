@@ -12,244 +12,6 @@
 
 namespace vil {
 
-// util
-std::string extractString(span<const u32> spirv) {
-	std::string ret;
-	for(auto w : spirv) {
-		for (auto j = 0u; j < 4; j++, w >>= 8) {
-			char c = w & 0xff;
-			if(c == '\0') {
-				return ret;
-			}
-
-			ret += c;
-		}
-	}
-
-	dlg_error("Unterminated SPIR-V string");
-	return {};
-}
-
-bool isOpInSection8(spv::Op op) {
-	switch(op) {
-		case spv::Op::OpDecorate:
-		case spv::Op::OpMemberDecorate:
-		case spv::Op::OpDecorationGroup:
-		case spv::Op::OpGroupDecorate:
-		case spv::Op::OpGroupMemberDecorate:
-		case spv::Op::OpDecorateId:
-		case spv::Op::OpDecorateString:
-		case spv::Op::OpMemberDecorateString:
-			return true;
-		default:
-			return false;
-	}
-}
-
-VkShaderModule patchVertexShaderXfb(Device& dev, const std::vector<u32>& spirv,
-		const char* entryPoint) {
-	ZoneScoped;
-
-	// parse spirv
-	if(spirv.size() < 5) {
-		dlg_error("spirv to small");
-		return {};
-	}
-
-	if(spirv[0] != 0x07230203) {
-		dlg_error("Invalid spirv magic number. Endianess troubles?");
-		return {};
-	}
-
-	// auto version = spirv[1];
-	// auto generator = spirv[2];
-	// auto bound = spirv[3];
-
-	std::vector<u32> newDecos;
-	std::vector<u32> patched {spirv.begin(), spirv.begin() + 5};
-	patched.reserve(spirv.size());
-
-	auto addedCap = false;
-	auto addedExecutionMode = false;
-
-	auto section = 0u;
-	auto entryPointID = u32(-1);
-	auto insertDecosPos = u32(-1);
-
-	auto offset = 5u;
-	while(offset < spirv.size()) {
-		auto first = spirv[offset];
-		auto op = spv::Op(first & 0xFFFFu);
-		auto wordCount = first >> 16u;
-
-		// We need to add the Xfb Execution mode to our entry point.
-		if(section == 5u && op != spv::Op::OpEntryPoint) {
-			dlg_assert_or(entryPointID != u32(-1), return {});
-
-			section = 6u;
-			patched.push_back((3u << 16) | u32(spv::Op::OpExecutionMode));
-			patched.push_back(entryPointID);
-			patched.push_back(u32(spv::ExecutionMode::Xfb));
-
-			addedExecutionMode = true;
-		}
-
-		// check if we have reached section 8
-		if(isOpInSection8(op) && insertDecosPos == u32(-1)) {
-			dlg_assert(section < 8);
-			section = 8u;
-			insertDecosPos = u32(patched.size());
-		}
-
-		for(auto i = 0u; i < wordCount; ++i) {
-			patched.push_back(spirv[offset + i]);
-		}
-
-		// We need to add the TransformFeedback capability
-		if(op == spv::Op::OpCapability) {
-			dlg_assert(section <= 1u);
-			section = 1u;
-
-			dlg_assert(wordCount == 2);
-			auto cap = spv::Capability(spirv[offset + 1]);
-
-			// The shader *must* declare shader capability exactly once.
-			// We add the transformFeedback cap just immediately after that.
-			if(cap == spv::Capability::Shader) {
-				dlg_assert(!addedCap);
-				patched.push_back((2u << 16) | u32(spv::Op::OpCapability));
-				patched.push_back(u32(spv::Capability::TransformFeedback));
-				addedCap = true;
-			}
-
-			// When the shader itself declared that capability, there is
-			// nothing we can do.
-			// TODO: maybe in some cases shaders just declare that cap but
-			// don't use it? In that case we could still patch in our own values
-			if(cap == spv::Capability::TransformFeedback) {
-				dlg_debug("Shader is already using transform feedback!");
-				return {};
-			}
-		}
-
-		// We need to find the id of the entry point
-		if(op == spv::Op::OpEntryPoint) {
-			dlg_assert(section <= 5u);
-			section = 5u;
-
-			dlg_assert(wordCount >= 4);
-			auto length = wordCount - 3;
-			auto name = extractString(span(spirv).subspan(offset + 3, length));
-			if(!name.empty() && name == entryPoint) {
-				entryPointID = spirv[offset + 2];
-			}
-		}
-
-		// We need to add our xfb decorations to outputs from the shader stage
-		// TODO: we just capture the Position BuiltIn for now
-		/*
-		if(op == spv::Op::OpVariable) {
-			dlg_assert_or(wordCount >= 4, return {});
-			// auto resType = spirv[offset + 1];
-			auto resID = spirv[offset + 2];
-			auto storage = spv::StorageClass(spirv[offset + 3]);
-			if(storage == spv::StorageClass::Output) {
-				// TODO: values. Also store them somewhere
-				newDecos.push_back(4u << 16 | (u32(spv::Op::OpDecorate) << 16));
-				newDecos.push_back(resID);
-				newDecos.push_back(u32(spv::Decoration::XfbBuffer));
-				newDecos.push_back(0u);
-
-				newDecos.push_back(4u << 16 | u32(spv::Op::OpDecorate));
-				newDecos.push_back(resID);
-				newDecos.push_back(u32(spv::Decoration::XfbStride));
-				newDecos.push_back(4u);
-
-				newDecos.push_back(4u << 16 | u32(spv::Op::OpDecorate));
-				newDecos.push_back(resID);
-				newDecos.push_back(u32(spv::Decoration::Offset));
-				newDecos.push_back(0u);
-			}
-		}
-		*/
-
-		if(op == spv::Op::OpDecorate) {
-			dlg_assert(section <= 8u);
-			section = 8u;
-
-			dlg_assert(wordCount >= 3);
-			auto target = spirv[offset + 1];
-			auto decoration = spv::Decoration(spirv[offset + 2]);
-			if(decoration == spv::Decoration::BuiltIn) {
-				dlg_assert(wordCount == 4);
-				auto builtin = spv::BuiltIn(spirv[offset + 3]);
-				if(builtin == spv::BuiltIn::Position) {
-					auto addDeco = [&](spv::Decoration deco, u32 value) {
-						newDecos.push_back((4u << 16) | u32(spv::Op::OpDecorate));
-						newDecos.push_back(target);
-						newDecos.push_back(u32(deco));
-						newDecos.push_back(value);
-					};
-
-					addDeco(spv::Decoration::XfbBuffer, 0u);
-					addDeco(spv::Decoration::XfbStride, 16u); // vec4
-					addDeco(spv::Decoration::Offset, 0u);
-				}
-			}
-		} else if(op == spv::Op::OpMemberDecorate) {
-			dlg_assert(section <= 8u);
-			section = 8u;
-
-			dlg_assert(wordCount >= 4);
-			auto structType = spirv[offset + 1];
-			auto member = spirv[offset + 2];
-			auto decoration = spv::Decoration(spirv[offset + 3]);
-			if(decoration == spv::Decoration::BuiltIn) {
-				dlg_assert(wordCount == 5);
-				auto builtin = spv::BuiltIn(spirv[offset + 4]);
-				if(builtin == spv::BuiltIn::Position) {
-					auto addMemberDeco = [&](spv::Decoration deco, u32 value) {
-						newDecos.push_back((5u << 16) | u32(spv::Op::OpMemberDecorate));
-						newDecos.push_back(structType);
-						newDecos.push_back(member);
-						newDecos.push_back(u32(deco));
-						newDecos.push_back(value);
-					};
-
-					addMemberDeco(spv::Decoration::XfbBuffer, 0u);
-					addMemberDeco(spv::Decoration::XfbStride, 16u); // vec4
-					addMemberDeco(spv::Decoration::Offset, 0u);
-				}
-			}
-		}
-
-		offset += wordCount;
-	}
-
-	if(!addedCap || !addedExecutionMode || newDecos.empty() || insertDecosPos == u32(-1)) {
-		dlg_warn("Could not inject xfb into shader. Likely error inside vil. "
-			"capability: {}, executionMode: {}, newDecos.size(): {}, decosPos: {}",
-			addedCap, addedExecutionMode, newDecos.size(), insertDecosPos);
-		return {};
-	}
-
-	patched.insert(patched.begin() + insertDecosPos, newDecos.begin(), newDecos.end());
-
-	VkShaderModuleCreateInfo ci {};
-	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	ci.pCode = patched.data();
-	ci.codeSize = patched.size() * 4;
-
-	VkShaderModule mod;
-	auto res = dev.dispatch.CreateShaderModule(dev.handle, &ci, nullptr, &mod);
-	if(res != VK_SUCCESS) {
-		dlg_error("xfb CreateShaderModule: {} (res)", vk::name(res), res);
-		return {};
-	}
-
-	return mod;
-}
-
 // PipelineLayout
 PipelineLayout::~PipelineLayout() {
 	if(!dev) {
@@ -339,20 +101,37 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			auto& stage = stages[xfbVertexStageID];
 			auto& mod = dev.shaderModules.get(stage.module);
 
-			// PERF: we lock the device mutex here for too long,
-			// shader patching and module creation can take a long time
-			// and pipeline creation is often parallelized. Maybe create a
-			// per-shader-module mutex just for this place? Or handle
-			// the case where we patch the vertex shader and then find
-			// it's already been set by another thread in the meantime.
-			std::lock_guard lock(dev.mutex);
-			if(!mod.xfbVertShader) {
-				mod.xfbVertShader = patchVertexShaderXfb(dev,
-					mod.code->spv, stage.pName);
-			}
+			{
+				// All we are doing here is basically lazily creating
+				// an xfb-patched version of the vertex shader. We want to
+				// avoid locking dev.mutex *while* we actually patch it since
+				// we have to iterate over the module for that (not cheap for
+				// huge modules).
+				std::unique_lock lock(dev.mutex);
 
-			if(mod.xfbVertShader) {
-				stage.module = mod.xfbVertShader;
+				auto finder = [&](auto& patched) { return patched.entryPoint == stage.pName; };
+				auto it = find_if(mod.xfb, finder);
+				if(it == mod.xfb.end()) {
+					lock.unlock();
+					auto xfb = patchVertexShaderXfb(dev, mod.spv, stage.pName);
+					lock.lock();
+
+					// check again, it might have been constructed by another thread in the meantime
+					it = find_if(mod.xfb, finder);
+					if(xfb.mod) {
+						if(it == mod.xfb.end()) {
+							stage.module = xfb.mod;
+							it = mod.xfb.emplace(it, std::move(xfb));
+						} else if(xfb.mod) {
+							dev.dispatch.DestroyShaderModule(dev.handle, xfb.mod, nullptr);
+						}
+					}
+
+				}
+
+				if(it != mod.xfb.end()) {
+					stage.module = it->mod;
+				}
 			}
 		}
 

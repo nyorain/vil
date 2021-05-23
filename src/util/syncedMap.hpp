@@ -107,6 +107,8 @@ public:
 	using UnorderedMap = std::unordered_map<K, P<T>>;
 
 	P<T> moveLocked(const K& key) {
+		assertOwned(*mutex);
+
 		auto it = map.find(key);
 		if(it == map.end()) {
 			return nullptr;
@@ -166,6 +168,8 @@ public:
 	}
 
 	T& getLocked(const K& key) {
+		assertOwnedOrShared(*mutex);
+
 		auto it = map.find(key);
 		assert(it != map.end());
 		return *it->second.get();
@@ -248,7 +252,8 @@ public:
 	}
 
 	// Can also be used directly, but take care!
-	SharedLockableBase(SharedMutex)* mutex;
+	// SharedMutex* mutex;
+	SharedLockableBase(DebugSharedMutex)* mutex;
 	UnorderedMap map;
 };
 

@@ -121,14 +121,20 @@ void CommandBuffer::doEnd() {
 
 	// parse commands into description
 	// record_->desc = CommandBufferDesc::get(record_->commands);
-	record_->desc = CommandBufferDesc::getAnnotate(record_->commands);
+	{
+		ZoneScopedN("getAnnotate");
+		record_->desc = CommandBufferDesc::getAnnotate(record_->commands);
+	}
 
-	// Make sure to never call CommandBufferRecord destructor inside lock
+	// Make sure to never call CommandBufferRecord destructor inside lock.
+	// Don't just call reset() here or move lastRecord_ so that always have a valid
+	// lastRecord_ as state (some other thread could query it before we lock)
 	auto keepAliveRecord = lastRecord_;
 
 	// Critical section
 	{
 		std::lock_guard lock(dev->mutex);
+		ZoneScopedN("addToHandles");
 
 		dlg_assert(state_ == State::recording);
 		dlg_assert(!record_->finished);
@@ -407,8 +413,8 @@ VKAPI_ATTR void VKAPI_CALL TrimCommandPool(
 		VkDevice                                    device,
 		VkCommandPool                               commandPool,
 		VkCommandPoolTrimFlags                      flags) {
-	auto& dev = getDevice(device);
-	dev.dispatch.TrimCommandPool(dev.handle, commandPool, flags);
+	auto& pool = get(device, commandPool);
+	pool.dev->dispatch.TrimCommandPool(pool.dev->handle, pool.handle, flags);
 }
 
 // command buffer
@@ -432,6 +438,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 
 		auto cbPtr = UniqueWrappedPtr<CommandBuffer>(new WrappedHandle<CommandBuffer>(pool, handle));
 		auto& cb = *cbPtr;
+
 		cb.dev = &dev;
 		cb.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
 		cb.pool().cbs.push_back(&cb);
@@ -541,20 +548,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-// void addToHandle(CommandBufferRecord& rec, DeviceHandle& handle) {
-// 	std::lock_guard lock(rec.device().mutex);
-// 	auto [it, success] = handle.refCbs.insert(&rec);
-// 	dlg_assert(success);
-// }
-
 void useHandle(CommandRecord& rec, Command& cmd, u64 h64, DeviceHandle& handle) {
-	// auto it = rec.handles.find(h64);
-	// if(it == rec.handles.end()) {
-	// 	it = rec.handles.emplace(h64, UsedHandle{handle, *rec.cb}).first;
-	// 	it->second.handle = &handle;
-	// 	addToHandle(rec, *it->second.handle);
-	// }
-
 	auto it = rec.handles.emplace(h64, UsedHandle{handle, rec}).first;
 	it->second.commands.push_back(&cmd);
 }
@@ -566,13 +560,6 @@ void useHandle(CommandRecord& rec, Command& cmd, T& handle) {
 }
 
 UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& image) {
-	// auto it = rec.images.find(image.handle);
-	// if(it == rec.images.end()) {
-	// 	it = rec.images.emplace(image.handle, UsedImage(image, *rec.cb)).first;
-	// 	it->second.image = &image;
-	// 	addToHandle(rec, *it->second.image);
-	// }
-
 	auto it = rec.images.emplace(image.handle, UsedImage{image, rec}).first;
 	it->second.commands.push_back(&cmd);
 
@@ -1655,7 +1642,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
-	auto* last = cmd.children_;
+	auto* last = cmd.children_; // nullptr
 
 	auto cbHandles = LocalVector<VkCommandBuffer>(commandBufferCount);
 	for(auto i = 0u; i < commandBufferCount; ++i) {
@@ -1698,6 +1685,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		}
 
 		cbHandles[i] = secondary.handle();
+		last = &childCmd;
 	}
 
 	cb.dev->dispatch.CmdExecuteCommands(cb.handle(),

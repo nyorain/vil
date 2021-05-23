@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <gui/render.hpp>
+#include <array>
 
 namespace vil {
 

@@ -6,6 +6,7 @@
 #include <vk/vulkan.h>
 #include <chrono>
 #include <optional>
+#include <array>
 #include <memory>
 
 namespace vil {

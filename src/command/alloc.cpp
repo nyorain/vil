@@ -5,13 +5,16 @@
 
 namespace vil {
 
+static constexpr auto alignedStructSize = align(sizeof(CommandMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+
 std::byte* data(CommandMemBlock& mem, size_t offset) {
 	dlg_assert(offset < mem.size);
-	auto alignedObjSize = align(sizeof(mem), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-	return reinterpret_cast<std::byte*>(&mem) + alignedObjSize + offset;
+	return reinterpret_cast<std::byte*>(&mem) + alignedStructSize + offset;
 }
 
 void freeBlocks(CommandMemBlock* head) {
+	ZoneScoped;
+
 	if(!head) {
 		return;
 	}
@@ -21,18 +24,23 @@ void freeBlocks(CommandMemBlock* head) {
 		auto next = head->next;
 		// no need to call MemBlocks destructor, it's trivial
 		TracyFreeS(head, 8);
+
+		DebugStats::instance->commandMem -= head->size + alignedStructSize;
 		delete[] reinterpret_cast<std::byte*>(head);
 		head = next;
 	}
 }
 
 CommandMemBlock& createMemBlock(size_t memSize, CommandMemBlock* next) {
-	auto alignedObjSize = align(sizeof(CommandMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-	auto buf = new std::byte[alignedObjSize + memSize];
-	TracyAllocS(buf, alignedObjSize + memSize, 8);
+	ZoneScoped;
+
+	auto buf = new std::byte[memSize];
+	TracyAllocS(buf, memSize, 8);
+
+	DebugStats::instance->commandMem += memSize;
 
 	auto* memBlock = new(buf) CommandMemBlock;
-	memBlock->size = memSize;
+	memBlock->size = memSize - alignedStructSize;
 	memBlock->next = next;
 	return *memBlock;
 }
@@ -43,7 +51,7 @@ std::byte* allocate(CommandRecord& rec, size_t size, unsigned alignment) {
 	dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__); // can't guarantee otherwise
 
 	// We grow block sizes exponentially, up to a maximum
-	constexpr auto minBlockSize = 16 * 1024;
+	constexpr auto minBlockSize = 16 * 1024 ;
 	constexpr auto maxBlockSize = 16 * 1024 * 1024;
 	constexpr auto blockGrowFac = 2;
 
@@ -63,7 +71,7 @@ std::byte* allocate(CommandRecord& rec, size_t size, unsigned alignment) {
 	}
 
 	// not enough memory available in last block, allocate new one
-	newBlockSize = std::max<size_t>(newBlockSize, size);
+	newBlockSize = std::max<size_t>(newBlockSize, size + alignedStructSize);
 	rec.memBlocks.reset(&createMemBlock(newBlockSize, rec.memBlocks.release()));
 	rec.memBlockOffset = size;
 	return data(*rec.memBlocks, 0);

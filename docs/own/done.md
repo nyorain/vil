@@ -1,3 +1,9 @@
+- [x] (easy) don't lock the dev mutex during our spirv xfb injection.
+      Could e.g. always already generate it when the shader module
+	  is created.
+- [x] fix hooking commands inside CmdExecuteCommands
+	  I guess CmdExecuteCommands should not do anything in record()?
+	  We have to watch out for extensions there though
 - [x] the current situation using imgui_vil is terrible. We need this to make
       sure that imgui symbols we define don't collide with the symbols
 	  from the application. The proper solution is to set symbol_visibility

@@ -606,7 +606,7 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 		auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
 		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
 			// TODO: missing potential forward of pNext chain here
-			// Subpass contents irrelevant.
+			// Subpass contents irrelevant here.
 			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 		}
 		dev.dispatch.CmdEndRenderPass(cb);
@@ -614,24 +614,29 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 		beforeDstOutsideRp(dst, info);
 
 		dlg_assert(rp1);
+
 		auto rpBeginInfo = info.beginRenderPassCmd->info;
 		rpBeginInfo.renderPass = rp1;
 		// we don't clear anything when starting this rp
 		rpBeginInfo.pClearValues = nullptr;
 		rpBeginInfo.clearValueCount = 0u;
 
+		// we never actually record CmdExecuteCommands when hook-recording,
+		// so always pass inline here.
+		auto subpassBeginInfo = info.beginRenderPassCmd->subpassBeginInfo;
+		subpassBeginInfo.contents = VK_SUBPASS_CONTENTS_INLINE;
+
 		if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
 			auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
 			dlg_assert(beginRp2);
-			beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
+			beginRp2(cb, &rpBeginInfo, &subpassBeginInfo);
 		} else {
-			dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
-				info.beginRenderPassCmd->subpassBeginInfo.contents);
+			dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo, subpassBeginInfo.contents);
 		}
 
 		for(auto i = 0u; i < info.hookedSubpass; ++i) {
-			// TODO: missing potential forward of pNext chain here
-			// Subpass contents irrelevant.
+			// TODO: missing potential forward of pNext chain here.
+			// Subpass contents irrelevant here.
 			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 		}
 	} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
@@ -664,13 +669,17 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info)
 		rpBeginInfo.pClearValues = nullptr;
 		rpBeginInfo.clearValueCount = 0u;
 
+		// we never actually record CmdExecuteCommands when hook-recording,
+		// so always pass inline here.
+		auto subpassBeginInfo = info.beginRenderPassCmd->subpassBeginInfo;
+		subpassBeginInfo.contents = VK_SUBPASS_CONTENTS_INLINE;
+
 		if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
 			auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
 			dlg_assert(beginRp2);
-			beginRp2(cb, &rpBeginInfo, &info.beginRenderPassCmd->subpassBeginInfo);
+			beginRp2(cb, &rpBeginInfo, &subpassBeginInfo);
 		} else {
-			dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
-				info.beginRenderPassCmd->subpassBeginInfo.contents);
+			dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo, subpassBeginInfo.contents);
 		}
 
 		for(auto i = 0u; i < info.hookedSubpass; ++i) {
@@ -769,13 +778,17 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 				auto rpBeginInfo = beginRpCmd->info;
 				rpBeginInfo.renderPass = rp0;
 
+				// we never actually record CmdExecuteCommands when hook-recording,
+				// so always pass inline here.
+				auto subpassBeginInfo = info.beginRenderPassCmd->subpassBeginInfo;
+				subpassBeginInfo.contents = VK_SUBPASS_CONTENTS_INLINE;
+
 				if(beginRpCmd->subpassBeginInfo.pNext) {
 					auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
 					dlg_assert(beginRp2);
-					beginRp2(cb, &rpBeginInfo, &beginRpCmd->subpassBeginInfo);
+					beginRp2(cb, &rpBeginInfo, &subpassBeginInfo);
 				} else {
-					dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo,
-						beginRpCmd->subpassBeginInfo.contents);
+					dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo, subpassBeginInfo.contents);
 				}
 
 				// dlg_assert(!nextInfo.beginRenderPassCmd);

@@ -102,10 +102,18 @@ bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
 
 DescriptorSetStatePtr newDescriptorSetState(
 		IntrusivePtr<DescriptorSetLayout> layout, u32 variableDescriptorCount) {
+	ZoneScoped;
+
+	// NOTE: when this assert fails somewhere, we have to adjust the code (storing stuff
+	// that is up-to-pointer-aligned directly behind the state object in memory).
+	static_assert(sizeof(DescriptorSetState) % alignof(void*) == 0u);
+
 	auto memSize = sizeof(DescriptorSetState) +
 		totalDescriptorMemSize(*layout, variableDescriptorCount);
 	auto mem = new std::byte[memSize]();
 	TracyAllocS(mem, memSize, 8);
+
+	DebugStats::instance->descriptorStateMem += memSize;
 
 	auto* state = new(mem) DescriptorSetState();
 	dlg_assert(reinterpret_cast<std::byte*>(state) == mem);
@@ -129,7 +137,7 @@ DescriptorSetStatePtr newDescriptorSetState(
 				it += count * sizeof(BufferDescriptor);
 				break;
 			case DescriptorCategory::bufferView:
-				new(it) ImageDescriptor[count];
+				new(it) BufferViewDescriptor[count];
 				it += count * sizeof(BufferViewDescriptor);
 				break;
 			case DescriptorCategory::image:
@@ -195,6 +203,8 @@ void copy(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
 }
 
 void initImmutableSamplersLocked(DescriptorSetState& state) {
+	ZoneScoped;
+
 	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 		// If the binding holds immutable samplers, fill them in.
 		// We do this so we don't have to check for immutable samplers
@@ -219,7 +229,7 @@ void initImmutableSamplersLocked(DescriptorSetState& state) {
 
 DescriptorSetStatePtr copyDescriptorSetState(DescriptorSetState& state) {
 	ZoneScoped;
-	vil_assert_not_owned(state.mutex);
+	assertNotOwned(state.mutex);
 
 	auto ret = newDescriptorSetState(state.layout, state.variableDescriptorCount);
 
@@ -393,7 +403,7 @@ span<BufferViewDescriptor> bufferViews(DescriptorSetState& state, unsigned bindi
 	dlg_assert(binding < state.layout->bindings.size());
 
 	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::image);
+	dlg_assert(category(layout.descriptorType) == DescriptorCategory::bufferView);
 
 	auto ptr = reinterpret_cast<std::byte*>(&state);
 	ptr += sizeof(state);
@@ -411,7 +421,7 @@ span<const BufferViewDescriptor> bufferViews(const DescriptorSetState& state, un
 	dlg_assert(binding < state.layout->bindings.size());
 
 	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::image);
+	dlg_assert(category(layout.descriptorType) == DescriptorCategory::bufferView);
 
 	auto ptr = reinterpret_cast<const std::byte*>(&state);
 	ptr += sizeof(state);
@@ -442,8 +452,9 @@ DescriptorPool::~DescriptorPool() {
 	while(!descriptorSets.empty()) {
 		if(HandleDesc<VkDescriptorSet>::wrap) {
 			// TODO: ugh, this is terrible, should find a cleaner solution
-			auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(descriptorSets[0]));
-			dev->descriptorSets.mustErase(h);
+			// auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(descriptorSets[0]));
+			// dev->descriptorSets.mustErase(h);
+			delete descriptorSets[0];
 		} else {
 			auto* ds = descriptorSets[0];
 			dev->descriptorSets.mustErase(ds->handle);
@@ -702,8 +713,9 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 		auto* ds = dsPool.descriptorSets[0];
 		if(HandleDesc<VkDescriptorSet>::wrap) {
 			// TODO: ugh, this is terrible, should find a cleaner solution
-			auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(ds));
-			dev.descriptorSets.mustErase(h);
+			// auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(ds));
+			// dev.descriptorSets.mustErase(h);
+			delete ds;
 		} else {
 			dev.descriptorSets.mustErase(ds->handle);
 		}
@@ -770,7 +782,13 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		ds.pool = &pool;
 
 		pDescriptorSets[i] = castDispatch<VkDescriptorSet>(ds);
-		dev.descriptorSets.mustEmplace(pDescriptorSets[i], std::move(dsPtr));
+
+		// WIP(ds)
+		if(!HandleDesc<VkDescriptorSet>::wrap) {
+			dev.descriptorSets.mustEmplace(pDescriptorSets[i], std::move(dsPtr));
+		} else {
+			dsPtr.release();
+		}
 
 		++dev.stats.aliveDescriptorSets;
 
@@ -799,8 +817,14 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 	auto handles = LocalVector<VkDescriptorSet>(descriptorSetCount);
 
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
-		auto ptr = dev.descriptorSets.mustMove(pDescriptorSets[i]);
-		handles[i] = ptr->handle;
+		if(!HandleDesc<VkDescriptorSet>::wrap) {
+			auto ptr = dev.descriptorSets.mustMove(pDescriptorSets[i]);
+			handles[i] = ptr->handle;
+		} else {
+			auto& ds = get(dev, pDescriptorSets[i]);
+			handles[i] = ds.handle;  
+			delete &ds;
+		}
 	}
 
 	return dev.dispatch.FreeDescriptorSets(dev.handle, pool.handle,
@@ -919,12 +943,16 @@ void DescriptorSetState::PtrHandler::dec(DescriptorSetState& state) const noexce
 	dlg_assert(state.layout->dev->stats.aliveDescriptorStates > 0);
 	--state.layout->dev->stats.aliveDescriptorStates;
 
+	auto memSize = sizeof(DescriptorSetState) + totalDescriptorMemSize(*state.layout, state.variableDescriptorCount);
+	DebugStats::instance->descriptorStateMem -= memSize;
+
 	state.~DescriptorSetState();
 
 	// we allocated the memory as std::byte array, so we have to free
 	// it like that. We don't have to call any other destructors of
 	// Binding elements since they are all trivial
 	auto ptr = reinterpret_cast<std::byte*>(&state);
+
 	TracyFreeS(ptr, 8);
 	delete[] ptr;
 }

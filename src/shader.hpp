@@ -3,17 +3,51 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <vk/vulkan.h>
+#include <util/intrusive.hpp>
 
 #include <memory>
+#include <atomic>
 #include <vector>
 
 namespace vil {
 
 typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 
+struct XfbCapture {
+	u32 size;
+	u32 offset;
+	// format?
+
+	// for OpDecorate
+	u32 spirvVar {u32(-1)};
+	u32 spirvPointerType {u32(-1)};
+
+	// for OpMemberDecorate
+	u32 structType {u32(-1)};
+	u32 member {u32(-1)};
+};
+
+// We separate the description from the patched VkShaderModule since the description
+// might be needed as long as there exists a pipe using this module.
+// But we don't want to keep the patched VkShaderModule alive when the application's original
+// module is destroyed to not waste memory.
+struct XfbPatchDesc {
+	std::vector<XfbCapture> captures;
+	u32 stride {};
+	std::atomic<u32> refCount {};
+};
+
+struct XfbPatchData {
+	VkShaderModule mod {};
+	std::string entryPoint {};
+	IntrusivePtr<XfbPatchDesc> desc {};
+};
+
+XfbPatchData patchVertexShaderXfb(Device&, span<const u32> spirv, const char* entryPoint);
+
 struct SpirvData {
-	std::vector<u32> spv;
 	std::unique_ptr<SpvReflectShaderModule> reflection;
+	std::atomic<u32> refCount {};
 
 	~SpirvData();
 };
@@ -21,14 +55,24 @@ struct SpirvData {
 struct ShaderModule : DeviceHandle {
 	VkShaderModule handle {};
 
-	// Managed via shared ptr since it may outlive the shader module in
-	// (possibly multiple) pipeline objects.
-	std::shared_ptr<SpirvData> code;
+	// TODO: should keep this alive (longer than the ShaderModule lifetime)
+	// so it's inspectable in the gui later on. But this would eat up *a lot*
+	// of memory, games can have many thousand shader modules.
+	// Maybe we could dump them to disk and read them when needed. Should also
+	// just generate the Reflection on-demand then since that eats up quite
+	// some data as well.
+	std::vector<u32> spv;
 
 	// Owend by us.
 	// When the shader module is a vertex shader, we lazily create
-	// a transform-feedback version of it.
-	VkShaderModule xfbVertShader {};
+	// transform-feedback version(s) of it. We might need multiple
+	// versions in case the module has multiple entry points.
+	std::vector<XfbPatchData> xfb;
+
+	// Managed via shared ptr since it may outlive the shader module in
+	// (possibly multiple) pipeline objects.
+	IntrusivePtr<SpirvData> code;
+
 	~ShaderModule();
 };
 

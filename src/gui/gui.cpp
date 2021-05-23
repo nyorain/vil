@@ -976,7 +976,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 		if(ImGui::Button("View per-frame submissions")) {
 			cbGui().showSwapchainSubmissions();
 			activateTab(Tab::commandBuffer);
-		} else if(showHelp && ImGui::IsAnyItemHovered()) {
+		} else if(showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
 				"This will open the tab to view all submissions done between two\n"
 				"presents to the main swapchain. You can alternatively select\n"
@@ -1015,12 +1015,15 @@ void Gui::drawOverviewUI(Draw& draw) {
 	// pretty much just own debug stuff
 	ImGui::Separator();
 
-	if(checkEnvBinary("VIL_DEBUG", false)) {
+	if(checkEnvBinary("VIL_DEBUG", true)) {
 		imGuiText("alive records: {}", dev.stats.aliveRecords);
 		imGuiText("alive descriptor sets: {}", dev.stats.aliveDescriptorSets);
 		imGuiText("alive descriptor states: {}", dev.stats.aliveDescriptorStates);
 		imGuiText("alive buffers: {}", dev.stats.aliveBuffers);
 		imGuiText("alive image views: {}", dev.stats.aliveImagesViews);
+		imGuiText("threadContext memory: {} KB", dev.stats.threadContextMem / 1024.f);
+		imGuiText("command memory: {} KB", dev.stats.commandMem / 1024.f);
+		imGuiText("dsState memory: {} KB", dev.stats.descriptorStateMem / 1024.f);
 		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
 		imGuiText("transform feedback: {}", dev.transformFeedback);
 		imGuiText("wrap command buffers: {}", HandleDesc<VkCommandBuffer>::wrap);

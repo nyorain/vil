@@ -14,19 +14,11 @@ urgent, bugs:
 - [ ] fix cbGui freeze: temporarily unfreeze when selecting a new command
       I guess we can only handle this in the cbGui itself. Just set a flag
 	  that commandHook.freeze is set to false until we get a new state
-- [ ] fix hooking commands inside CmdExecuteCommands
-	  I guess CmdExecuteCommands should not do anything in record()?
-	  We have to watch out for extensions there though
-
-matching:
-- [ ] (low prio, later) implement 'match' for missing commands, e.g.
-      for queryPool/event/dynamic state commands
-- [ ] (for later) fix/improve command matching for sync/bind commands
-	- [ ] bind: match via next draw/dispatch that uses this bind
-	- [ ] sync: match previous and next draw/dispatch and try to find
-	      matching sync in between? or something like that
-- [ ] use/implement LCS and better general strategy when in swapchain mode for
-      command matching/finding the best hook from last frame
+- [ ] fix IO viewer being stuck because we can't get a new command
+	- [ ] fix dlg_assert(found), gui/cb.cpp
+	- [ ] unselect when no new matching command can be found?
+	- [ ] use/implement LCS and better general strategy when in swapchain mode for
+		  command matching/finding the best hook from last frame
 
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in
@@ -102,6 +94,16 @@ performance/profiling:
 	  makes sure our tracked state (e.g. dev.pending) really includes everything
 	  that has been submitted so far. That mutex would have to be
 	  locked before locking the device mutex, never the other way around.
+- [ ] on windows, freeBlocks (after ~CommandRecord) can be a massive bottleneck
+      (seen on systems that were running low on memory at the time).
+	  We should not allocate/free blocks per CommandRecord but share them
+	  via the CommandPool (if possible, it's kinda tricky due to CommandRecord lifetime).
+	  Just re-add what we previously had. But this will need changes to CommandRecord::invalidated
+	  and some re-thinking in general on how to allocate *after* recording is finished.
+	  Might have to merge this with the refRecords/invalidated rework.
+- [ ] fix the optimization we have in ds.cpp where we don't store DescriptorSets into the
+      hash maps when object wrapping is active (which currently causes the gui to not
+	  show any descriptorSets in the resource viewer)
 - [ ] also don't always copy DescriptorSetState on submission.
       Leads to lot of DescriptorSetState copies, destructors.
 	  We only need to do it when currently in swapchain mode *and* inside
@@ -113,15 +115,13 @@ performance/profiling:
 	- [ ] also don't pass *all* the descriptorSet states around (hook submission,
 	      cbGui, CommandViewer etc). We only need the state of the hooked command, 
 		  should be easy to determine.
-- [ ] (easy) don't lock the dev mutex during our spirv xfb injection.
-      Could e.g. always already generate it when the shader module
-	  is created.
+	- [ ] See the commented-out condition in submit.cpp
 - [ ] (low prio) add (extensive) time zone to basically every entry point so we
 	  can quickly figure out why an application is slow
 
 
 object wrapping:
-- [ ] (low prio) only use the hash maps in Device when we are not using object 
+- [ ] only use the hash maps in Device when we are not using object 
       wrapping. Otherwise a linked list is enough/better.
 	  Could always use the linked list and the hash maps just optionally.
 	  Maybe we can even spin up some lockfree linked list for this? We'd only
@@ -143,7 +143,7 @@ gui stuff
 - [ ] imgui styling. It's really not beautiful at the moment, compare with
       other imgui applications. See imgui style examples in imgui releases
 	- [x] use custom font
-	- [ ] also use icons where useful (via icon font, like e.g. tracy does)
+	- [ ] (low prio) also use icons where useful (via icon font, like e.g. tracy does)
 	- [ ] some of the high-information widgets (barrier command, rp, pipe viewers)
 	      are really overwhelming and hard to read at the moment.
 		  Can be improved to grasp information for intuitively
@@ -197,6 +197,7 @@ other
 	- [ ] generally: allow the image copy operation to fail.
 - [ ] better pipeline/shader module display in resource viewer
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
+	- [ ] also make sure to handle in/out structs correctly. Follow SpvReflectInterfaceVariable::members
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
@@ -219,6 +220,16 @@ other
 
 
 Possibly for later, new features/ideas:
+matching:
+- [ ] (low prio, later) implement 'match' for missing commands, e.g.
+      for queryPool/event/dynamic state commands
+- [ ] (for later) fix/improve command matching for sync/bind commands
+	- [ ] bind: match via next draw/dispatch that uses this bind
+	- [ ] sync: match previous and next draw/dispatch and try to find
+	      matching sync in between? or something like that
+
+- [ ] ditch spirv_reflect for spirv_cross. Better maintained, support lots of features 
+      that we need that spirv_reflect does not
 - [ ] track ext dynamic state in graphics state
 	- [ ] show extended dynamic state in gui
 - [ ] the current handling when someone attempts to construct multiple guis
@@ -443,6 +454,9 @@ Possibly for later, new features/ideas:
 	- [ ] nv shading rate image
 	- [ ] nv viewport scaling
 	- [ ] transform feedback (not sure we want to support this at all?)
+	      we probably should support it eventually, just disable our patching
+		  for pipes/shaders that use it themselves. Vertex shader won't be available
+		  in that case.
 	- [ ] nv shading rate enums
 - [ ] implement additional command buffer viewer mode: per-frame-commands
       basically shows all commands submitted to queue between two present calls.

@@ -34,7 +34,11 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 
 		// update the descriptor state of the record
 		// TODO, PERF: we only need to do this when update_after_bind
-		// descriptors in the record changed since the last submission
+		// descriptors in the record changed since the last submission.
+		// PERF: we don't need descriptor state copies in 99% of the cases (only
+		// when relevant for gui). The simple check below breaks in some cases
+		// though, e.g. when later on viewing the recording in the gui.
+		// if(dev.gui && dev.gui->visible) 
 		{
 			ZoneScopedN("Copy Descriptor State");
 			rec.lastDescriptorState.states.clear();
@@ -261,7 +265,7 @@ void cleanupOnError(QueueSubmitter& subm) {
 	}
 }
 
-VkResult addGuiSyncLocked(QueueSubmitter& subm) {
+void addGuiSyncLocked(QueueSubmitter& subm) {
 	ZoneScoped;
 
 	auto& dev = *subm.dev;
@@ -288,7 +292,7 @@ VkResult addGuiSyncLocked(QueueSubmitter& subm) {
 	}
 
 	if(!insertResetSemaphores && !insertGuiSync) {
-		return VK_SUCCESS;
+		return;
 	}
 
 	// at this point we know that an additional submission is needed.
@@ -340,8 +344,8 @@ VkResult addGuiSyncLocked(QueueSubmitter& subm) {
 
 				if(res != VK_SUCCESS) {
 					dlg_trace("vkQueueSubmit error: {}", vk::name(res));
-					cleanupOnError(subm);
-					return res;
+					// cleanupOnError(subm);
+					return;
 				}
 
 				waitSems.push_back(guiSyncSemaphore);
@@ -362,8 +366,6 @@ VkResult addGuiSyncLocked(QueueSubmitter& subm) {
 	si.waitSemaphoreCount = u32(waitSems.size());
 	si.pWaitSemaphores = waitSems.data();
 	si.pWaitDstStageMask = waitStages.data();
-
-	return VK_SUCCESS;
 }
 
 void postProcessLocked(QueueSubmitter& subm) {
@@ -407,7 +409,7 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 	// can potentially write the handle. Could track
 	// during recording and check below in ds refs.
 
-	vil_assert_owned(handle.dev->mutex);
+	assertOwned(handle.dev->mutex);
 
 	const Image* img = nullptr;
 	const Buffer* buf = nullptr;

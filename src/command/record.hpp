@@ -146,6 +146,8 @@ struct UsedImage {
 	Image* image {};
 	bool layoutChanged {};
 	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
+
+	// use custom (non-intrusive) linked-list instead. No need to run any destructor or free nodes.
 	CommandAllocList<Command*> commands;
 };
 
@@ -160,6 +162,8 @@ struct UsedHandle {
 	UsedHandle& operator=(UsedHandle&&) noexcept;
 
 	DeviceHandle* handle;
+
+	// use custom (non-intrusive) linked-list instead. No need to run any destructor or free nodes.
 	CommandAllocList<Command*> commands;
 };
 

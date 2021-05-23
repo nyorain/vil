@@ -9,26 +9,19 @@
 
 namespace vil {
 
-// TODO: use default mutex classes in some release build.
-// We only ever use `mutex.owned()` inside dlg_assert expressions, must
-// match the switch here to that. Or maybe also introduce assert_owned,
-// assert_not_owned macros or something
-#if 0
+#ifndef VIL_DEBUG_MUTEX
 
-using SharedMutex = std::shared_mutex;
-using Mutex = std::mutex;
+using DebugSharedMutex = std::shared_mutex;
+using DebugMutex = std::mutex;
 
-#define vil_assert_owned(x)
-#define vil_assert_not_owned(x)
-
-#else // NDEBUG
+#else // VIL_DEBUG_MUTEX
 
 // std::shared_mutex that knows whether it's locked.
 // Using this information in actual code logic is a terrible idea but
 // it's useful to find issues (e.g. a mutex isn't locked when we expected
 // it to be) with the unfortunately at times complicated threading
 // assumptions/guarantees for vil functions.
-struct SharedMutex {
+struct DebugSharedMutex {
 	std::shared_mutex mtx_;
 	std::atomic<std::thread::id> owner_ {};
 	std::unordered_set<std::thread::id> shared_ {};
@@ -110,7 +103,7 @@ struct SharedMutex {
 	}
 };
 
-struct Mutex {
+struct DebugMutex {
 	std::mutex mtx_;
 	std::atomic<std::thread::id> owner_ {};
 
@@ -142,19 +135,59 @@ struct Mutex {
 	}
 };
 
-inline bool owned(const Mutex& m) { return m.owned(); }
-inline bool owned(const SharedMutex& m) { return m.owned(); }
-inline bool ownedShared(const SharedMutex& m) { return m.ownedShared(); }
+inline bool owned(const DebugMutex& m) { return m.owned(); }
+inline bool owned(const DebugSharedMutex& m) { return m.owned(); }
+inline bool ownedShared(const DebugSharedMutex& m) { return m.ownedShared(); }
 
 #ifdef TRACY_ENABLE
-inline bool owned(const tracy::Lockable<Mutex>& m) { return m.inner().owned(); }
-inline bool owned(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().owned(); }
-inline bool ownedShared(const tracy::SharedLockable<SharedMutex>& m) { return m.inner().ownedShared(); }
+inline bool owned(const tracy::Lockable<DebugMutex>& m) { return m.inner().owned(); }
+inline bool owned(const tracy::SharedLockable<DebugSharedMutex>& m) { return m.inner().owned(); }
+inline bool ownedShared(const tracy::SharedLockable<DebugSharedMutex>& m) { return m.inner().ownedShared(); }
 #endif // TRACY_ENABLE
 
-#define vil_assert_owned(x) dlg_assert(owned(x))
-#define vil_assert_not_owned(x) dlg_assert(!owned(x))
+#endif // VIL_DEBUG_MUTEX
 
-#endif // NDEBUG
+// Tracy lockables.
+// We might not want to use them in certain situations since we can have *a lot* of locks.
+// But for small testcases and applications it's a useful optimization tool.
+#if defined(TRACY_ENABLE) && defined(VIL_TRACY_MUTEX)
+	#define vilDefSharedMutex(name) TracySharedLockable(DebugSharedMutex, name)
+	#define vilDefMutex(name) TracyLockable(DebugMutex, name)
+	using Mutex = LockableBase(DebugMutex)
+	using SharedMutex = SharedLockableBase(DebugSharedMutex);
+#else
+	#define vilDefSharedMutex(name) DebugSharedMutex name
+	#define vilDefMutex(name) DebugMutex name
+	using Mutex = DebugMutex;
+	using SharedMutex = DebugSharedMutex;
+#endif
+
+template<typename M>
+void assertOwned(M& mutex) {
+#ifdef VIL_DEBUG_MUTEX
+	dlg_assert(owned(mutex));
+#endif // VIL_DEBUG_MUTEX
+}
+
+template<typename M>
+void assertOwnedOrShared(M& mutex) {
+#ifdef VIL_DEBUG_MUTEX
+	dlg_assert(owned(mutex) || ownedShared(mutex));
+#endif // VIL_DEBUG_MUTEX
+}
+
+template<typename M>
+void assertNotOwned(M& mutex) {
+#ifdef VIL_DEBUG_MUTEX
+	dlg_assert(!owned(mutex));
+#endif // VIL_DEBUG_MUTEX
+}
+
+template<typename M>
+void assertNotOwnedOrShared(M& mutex) {
+#ifdef VIL_DEBUG_MUTEX
+	dlg_assert(!owned(mutex) && !ownedShared(mutex));
+#endif // VIL_DEBUG_MUTEX
+}
 
 } // namespace vil

@@ -249,20 +249,23 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 		}
 	}
 
-	if(open && cmd) {
-		// we don't want as much space as tree nodes
-		auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
-		ImGui::Unindent(s);
+	if(open) {
+		if(cmd) {
+			// we don't want as much space as tree nodes
+			auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+			ImGui::Unindent(s);
 
-		ImGui::Separator();
-		auto retc = displayCommands(cmd, selected, typeFlags);
-		if(!retc.empty()) {
-			dlg_assert(ret.empty());
-			ret = std::move(retc);
-			ret.insert(ret.begin(), this);
+			ImGui::Separator();
+			auto retc = displayCommands(cmd, selected, typeFlags);
+			if(!retc.empty()) {
+				dlg_assert(ret.empty());
+				ret = std::move(retc);
+				ret.insert(ret.begin(), this);
+			}
+
+			ImGui::Indent(s);
 		}
 
-		ImGui::Indent(s);
 		ImGui::TreePop();
 	}
 
@@ -699,12 +702,17 @@ std::string BeginRenderPassCmd::toString() const {
 }
 
 void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	// NOTE: since we always manually re-record secondary command buffers,
+	// we must always pass VK_SUBPASS_CONTENTS_INLINE here.
+	auto info = this->subpassBeginInfo;
+	info.contents = VK_SUBPASS_CONTENTS_INLINE;
+
 	if(this->subpassBeginInfo.pNext) {
 		auto f = dev.dispatch.CmdBeginRenderPass2;
 		dlg_assert(f);
-		f(cb, &this->info, &this->subpassBeginInfo);
+		f(cb, &this->info, &info);
 	} else {
-		dev.dispatch.CmdBeginRenderPass(cb, &this->info, this->subpassBeginInfo.contents);
+		dev.dispatch.CmdBeginRenderPass(cb, &this->info, info.contents);
 	}
 }
 
@@ -909,11 +917,16 @@ float BeginRenderPassCmd::match(const Command& base) const {
 }
 
 void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	// NOTE: since we always manually re-record secondary command buffers,
+	// we must always pass VK_SUBPASS_CONTENTS_INLINE here.
+	auto beginInfo = this->beginInfo;
+	beginInfo.contents = VK_SUBPASS_CONTENTS_INLINE;
+
 	if(this->beginInfo.pNext || this->endInfo.pNext) {
 		auto f = dev.dispatch.CmdNextSubpass2;
-		f(cb, &this->beginInfo, &this->endInfo);
+		f(cb, &beginInfo, &this->endInfo);
 	} else {
-		dev.dispatch.CmdNextSubpass(cb, this->beginInfo.contents);
+		dev.dispatch.CmdNextSubpass(cb, beginInfo.contents);
 	}
 }
 
@@ -2345,6 +2358,13 @@ void ResetEventCmd::displayInspector(Gui& gui) const {
 
 // ExecuteCommandsCmd
 void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	// NOTE: we don't do anything here. When re-recording we always want to
+	// see/potentially hook all commands and therefore will manually record
+	// the secondary command records (children of this command) as well.
+	(void) dev;
+	(void) cb;
+
+	/*
 	std::vector<VkCommandBuffer> vkcbs;
 	auto child = children_;
 	while(child) {
@@ -2357,6 +2377,7 @@ void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	}
 
 	dev.dispatch.CmdExecuteCommands(cb, u32(vkcbs.size()), vkcbs.data());
+	*/
 }
 
 std::vector<const Command*> ExecuteCommandsCmd::display(const Command* selected,

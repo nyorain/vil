@@ -260,8 +260,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 	inid->dispatch.DestroyInstance(ini, alloc);
 }
 
-VKAPI_ATTR PFN_vkVoidFunction GetInstanceProcAddr(VkInstance, const char*);
-VKAPI_ATTR PFN_vkVoidFunction GetDeviceProcAddr(VkDevice, const char*);
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice, const char*);
 
 struct HookedFunction {
 	PFN_vkVoidFunction func {};
@@ -605,8 +605,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	if(!hooked.device && !hooked.iniExt.empty()) {
 		auto it = find(inid->extensions, hooked.iniExt);
 		if(it == inid->extensions.end()) {
-			dlg_trace("tried to load ini proc addr {} for disabled ext {}",
-				funcName, hooked.iniExt);
 			return inid->dispatch.GetInstanceProcAddr(ini, funcName);
 			// return nullptr;
 		}
@@ -648,8 +646,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 	if(!hooked.devExt.empty()) {
 		auto it = find(dev->appExts, hooked.devExt);
 		if(it == dev->appExts.end()) {
-			dlg_trace("tried to load dev proc addr {} for disabled ext {}",
-				funcName, hooked.devExt);
 			return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
 		}
 	}
@@ -662,13 +658,11 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 // Global layer entry points
 extern "C" VIL_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkGetInstanceProcAddr(VkInstance ini, const char* funcName) {
-	// dlg_trace("vil get ini proc addr");
 	return vil::GetInstanceProcAddr(ini, funcName);
 }
 
 extern "C" VIL_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 vkGetDeviceProcAddr(VkDevice dev, const char* funcName) {
-	// dlg_trace("vil get device proc addr");
 	return vil::GetDeviceProcAddr(dev, funcName);
 }
 
