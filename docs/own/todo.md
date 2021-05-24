@@ -24,6 +24,9 @@ urgent, bugs:
 		  command matching/finding the best hook from last frame
 - [ ] xfb: consider spec constants. Store them in created module, might
       hook xfb multiple times, for different spec constants.
+- [ ] fix vertex viewer for vec2, vec3 positions. Need new shader/pipe I guess?
+- [ ] the shown commands (of vkQueueSubmit) are not updated when no command
+      is selected?
 
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in

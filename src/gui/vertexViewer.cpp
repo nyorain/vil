@@ -618,7 +618,7 @@ void VertexViewer::updateInput(float dt) {
 		accel *= fac;
 		cam_.pos += dt * accel;
 
-		// TODO: not sure this is the right way to do this.
+		// NOTE: not sure this is the right way to do this.
 		// need to inform application that we have captured keyboard
 		// input right now (when input comes from application)
 		io.WantCaptureKeyboard = true;
@@ -636,8 +636,7 @@ void VertexViewer::updateInput(float dt) {
 
 void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
-	// TODO: display binding information
-	// TODO: how to display indices?
+	// TODO: display binding & attribs information
 	// TODO: only show vertex range used for draw call
 
 	dlg_assert_or(cmd.state.pipe, return);
@@ -682,8 +681,11 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	}
 
 	// TODO sort attribs by input location?
+	// TODO when drawing indexed, we really need to consider and display
+	//   the used indices, otherwise this is utterly useless.
 
-	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
+	auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
+		ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
 		if(attribs.empty()) {
 			ImGui::Text("No Vertex input");
@@ -832,6 +834,16 @@ u32 topologyOutputCount(VkPrimitiveTopology topo, i32 in) {
 	}
 }
 
+const char* name(spv11::BuiltIn builtin) {
+	switch(builtin) {
+		case spv11::BuiltIn::Position: return "Position";
+		case spv11::BuiltIn::PointSize: return "PointSize";
+		case spv11::BuiltIn::ClipDistance: return "ClipDistance";
+		case spv11::BuiltIn::CullDistance: return "CullDistance";
+		default: return "unknown builtin";
+	}
+}
+
 void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
 	dlg_assert_or(cmd.state.pipe, return);
@@ -878,27 +890,165 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	vertexCount = std::min(vertexCount, u32(state.transformFeedback.buffer.size / 16u));
 
 	// 1: table
-	auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable;
+	auto& xfbPatch = *cmd.state.pipe->xfbPatch;
+	auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
+		ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
-		if(ImGui::BeginTable("Vertices", 1, flags)) {
-			ImGui::TableSetupColumn("Builtin Position");
+		if(ImGui::BeginTable("Vertices", xfbPatch.captures.size(), flags)) {
+			// header
+			for(auto& capture : xfbPatch.captures) {
+				auto name = capture.name.c_str();
+				if(capture.builtin) {
+					name = vil::name(spv11::BuiltIn(*capture.builtin));
+				}
+
+				if(!capture.array.empty()) {
+					// TODO: print all array elements. Make sure to intitialize
+					// column count correctly in BeginTable!
+					auto sname = std::string(name) + "[0]";
+					ImGui::TableSetupColumn(sname.c_str());
+				} else {
+					ImGui::TableSetupColumn(name);
+				}
+			}
 			ImGui::TableHeadersRow();
 			ImGui::TableNextRow();
 
-			// TODO: fix data reading
-			/*
+			// data
 			auto xfbData = state.transformFeedback.data();
 			auto vCount = std::min(vertexCount, u32(xfbData.size() / 16u));
 
-			for(auto i = 0u; i < std::min(u32(100u), vCount); ++i) {
-				ImGui::TableNextColumn();
+			auto formatForType = [](XfbCapture& capture) {
+				auto compIDForWidth = [](u32 width) -> u32 {
+					switch(width) {
+						case 8: return 0u;
+						case 16: return 1u;
+						case 32: return 2u;
+						case 64: return 3u;
+						default: return u32(-1);
+					}
+				};
 
-				auto pos = read<Vec4f>(xfbData);
-				imGuiText("{}", pos);
+				auto compID = compIDForWidth(capture.width);
+				if(compID == u32(-1)) {
+					dlg_error("Invalid width: {}", capture.width);
+					return VK_FORMAT_UNDEFINED;
+				}
+
+				if(capture.type == XfbCapture::typeFloat) {
+					VkFormat formats[4][4] = {
+						{
+							VK_FORMAT_UNDEFINED,
+							VK_FORMAT_UNDEFINED,
+							VK_FORMAT_UNDEFINED,
+							VK_FORMAT_UNDEFINED,
+						},
+						{
+							VK_FORMAT_R16_SFLOAT,
+							VK_FORMAT_R16G16_SFLOAT,
+							VK_FORMAT_R16G16B16_SFLOAT,
+							VK_FORMAT_R16G16B16A16_SFLOAT,
+						},
+						{
+							VK_FORMAT_R32_SFLOAT,
+							VK_FORMAT_R32G32_SFLOAT,
+							VK_FORMAT_R32G32B32_SFLOAT,
+							VK_FORMAT_R32G32B32A32_SFLOAT,
+						},
+						{
+							VK_FORMAT_R64_SFLOAT,
+							VK_FORMAT_R64G64_SFLOAT,
+							VK_FORMAT_R64G64B64_SFLOAT,
+							VK_FORMAT_R64G64B64A64_SFLOAT,
+						}
+					};
+
+					dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
+					dlg_assert_or(compID != 0u, return VK_FORMAT_UNDEFINED);
+					return formats[compID][capture.vecsize - 1];
+				} else if(capture.type == XfbCapture::typeUint) {
+					VkFormat formats[4][4] = {
+						{
+							VK_FORMAT_R8_UINT,
+							VK_FORMAT_R8G8_UINT,
+							VK_FORMAT_R8G8B8_UINT,
+							VK_FORMAT_R8G8B8A8_UINT,
+						},
+						{
+							VK_FORMAT_R16_UINT,
+							VK_FORMAT_R16G16_UINT,
+							VK_FORMAT_R16G16B16_UINT,
+							VK_FORMAT_R16G16B16A16_UINT,
+						},
+						{
+							VK_FORMAT_R32_UINT,
+							VK_FORMAT_R32G32_UINT,
+							VK_FORMAT_R32G32B32_UINT,
+							VK_FORMAT_R32G32B32A32_UINT,
+						},
+						{
+							VK_FORMAT_R64_UINT,
+							VK_FORMAT_R64G64_UINT,
+							VK_FORMAT_R64G64B64_UINT,
+							VK_FORMAT_R64G64B64A64_UINT,
+						}
+					};
+
+					dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
+					return formats[compID][capture.vecsize - 1];
+				} else if(capture.type == XfbCapture::typeInt) {
+					VkFormat formats[4][4] = {
+						{
+							VK_FORMAT_R8_SINT,
+							VK_FORMAT_R8G8_SINT,
+							VK_FORMAT_R8G8B8_SINT,
+							VK_FORMAT_R8G8B8A8_SINT,
+						},
+						{
+							VK_FORMAT_R16_SINT,
+							VK_FORMAT_R16G16_SINT,
+							VK_FORMAT_R16G16B16_SINT,
+							VK_FORMAT_R16G16B16A16_SINT,
+						},
+						{
+							VK_FORMAT_R32_SINT,
+							VK_FORMAT_R32G32_SINT,
+							VK_FORMAT_R32G32B32_SINT,
+							VK_FORMAT_R32G32B32A32_SINT,
+						},
+						{
+							VK_FORMAT_R64_SINT,
+							VK_FORMAT_R64G64_SINT,
+							VK_FORMAT_R64G64B64_SINT,
+							VK_FORMAT_R64G64B64A64_SINT,
+						}
+					};
+
+					dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
+					return formats[compID][capture.vecsize - 1];
+				}
+
+				dlg_error("Invalid capture type {}", unsigned(capture.type));
+				return VK_FORMAT_UNDEFINED;
+			};
+
+			for(auto i = 0u; i < std::min(u32(100u), vCount); ++i) {
+				auto buf = xfbData.subspan(i * xfbPatch.stride, xfbPatch.stride);
+
+				for(auto& capture : xfbPatch.captures) {
+					ImGui::TableNextColumn();
+
+					auto cbuf = buf.subspan(capture.offset);
+					auto format = formatForType(capture);
+					if(format == VK_FORMAT_UNDEFINED) {
+						imGuiText("<error>");
+					} else {
+						imGuiText("{}", readFormat(format, cbuf));
+					}
+				}
 
 				ImGui::TableNextRow();
 			}
-			*/
 
 			ImGui::EndTable();
 		}
@@ -913,7 +1063,6 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	auto bspan = state.transformFeedback.data();
 
 	XfbCapture* posCapture = nullptr;
-	auto& xfbPatch = *cmd.state.pipe->xfbPatch;
 	for(auto& patch : xfbPatch.captures) {
 		if(patch.builtin && *patch.builtin == u32(spv11::BuiltIn::Position)) {
 			posCapture = &patch;
