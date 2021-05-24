@@ -8,6 +8,7 @@
 #include <memory>
 #include <atomic>
 #include <vector>
+#include <optional>
 
 namespace vil {
 

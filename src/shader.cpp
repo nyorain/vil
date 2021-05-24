@@ -266,6 +266,7 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 	}
 }
 
+// TODO: consider specialization constants! E.g. important for array sizes
 XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 		const char* entryPoint, std::string_view modName) {
 	ZoneScoped;
