@@ -4,7 +4,11 @@ project('VIL', ['c', 'cpp'],
 		'werror=true',
 		'warning_level=3',
 		'cpp_std=c++17',
-		'c_std=c99',
+		# NOTE: this will cause issues on old msvc versions, with new
+		# meson versions. You need at least visual studio 19.28, see
+		# https://github.com/mesonbuild/meson/pull/7967 (already in the last
+		# couple meson relases)
+		'c_std=c11',
 		# We need this to build the subprojects as static libraries. No
 		# other way to do this apparently.
 		# And we force the layer to be shared library anyways.

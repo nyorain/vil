@@ -9,7 +9,7 @@ See the [rough overview](docs/features.md) over the currently implemented vulkan
 commands/extensions. Keep in mind that using extensions/features not supported
 by the layer at the moment might cause crashes.
 
-![Example of command viewer 1](docs/pics/sponza-ssao.png)
+![Example of command viewer 1](docs/pics/new1-sponza.png)
 
 Features:
 
@@ -105,14 +105,15 @@ with your package manager.
 ## Windows
 
 On windows, this is actively tested with MSVC 2019, older version will likely not work due to incomplete/incorrect C++17 support.
+Since we require c11, MSVC >= 19.28 is required (visual studio 16.8).
 The recommended/tested way to build it:
 
 1. open the `x64 Native Tools command prompt` for your visual studio version. You can just search for that using the start menu when you have visual studio installed.
 2. Navigate to the vil folder.
 3. Run `meson build --backend vs2019`
 4. If everything goes correctly, you will have a Visual Studio solution you can build.
-5. See below for installing the layer, i.e. making it usable for vulkan applications.
 
+You will still need to install the layer after building it.
 On windows, layers are installed via registry entries, you have to add
 a registry entry in `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers` pointing to the generated layer config 
 json (that must be located in the same folder as `VkLayer_live_introspection.dll`).

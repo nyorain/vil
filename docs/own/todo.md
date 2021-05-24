@@ -11,6 +11,9 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 - add more tests where useful
 
 urgent, bugs:
+- [ ] SetHandleName should probably not always use the device hash map
+      when the objects are wrapped. Currently causes issues since
+	  we don't insert descriptor sets when wrapping
 - [ ] fix cbGui freeze: temporarily unfreeze when selecting a new command
       I guess we can only handle this in the cbGui itself. Just set a flag
 	  that commandHook.freeze is set to false until we get a new state
