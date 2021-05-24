@@ -25,7 +25,7 @@ void freeBlocks(CommandMemBlock* head) {
 		// no need to call MemBlocks destructor, it's trivial
 		TracyFreeS(head, 8);
 
-		DebugStats::instance->commandMem -= head->size + alignedStructSize;
+		DebugStats::get().commandMem -= head->size + alignedStructSize;
 		delete[] reinterpret_cast<std::byte*>(head);
 		head = next;
 	}
@@ -37,7 +37,7 @@ CommandMemBlock& createMemBlock(size_t memSize, CommandMemBlock* next) {
 	auto buf = new std::byte[memSize];
 	TracyAllocS(buf, memSize, 8);
 
-	DebugStats::instance->commandMem += memSize;
+	DebugStats::get().commandMem += memSize;
 
 	auto* memBlock = new(buf) CommandMemBlock;
 	memBlock->size = memSize - alignedStructSize;

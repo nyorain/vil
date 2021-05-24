@@ -20,9 +20,7 @@ void freeBlocks(ThreadMemBlock* head) {
 		// no need to call MemBlocks destructor, it's trivial
 		TracyFreeS(head, 8);
 
-		if(DebugStats::instance) {
-			DebugStats::instance->threadContextMem -= head->size;
-		}
+		DebugStats::get().threadContextMem -= head->size;
 
 		delete[] reinterpret_cast<std::byte*>(head);
 		head = next;
@@ -38,7 +36,7 @@ ThreadMemBlock& createMemBlock(size_t memSize, ThreadMemBlock* prev) {
 	memBlock->prev = prev;
 	memBlock->next = nullptr;
 
-	DebugStats::instance->threadContextMem += memSize;
+	DebugStats::get().threadContextMem += memSize;
 
 	return *memBlock;
 }

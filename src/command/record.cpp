@@ -102,7 +102,7 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		cbName = copyString(*this, cb->name);
 	}
 
-	++dev->stats.aliveRecords;
+	++DebugStats::get().aliveRecords;
 }
 
 CommandRecord::~CommandRecord() {
@@ -135,8 +135,8 @@ CommandRecord::~CommandRecord() {
 		// And it must be called while mutex is locked.
 		hookRecords.clear();
 
-		dlg_assert(dev->stats.aliveRecords > 0);
-		--dev->stats.aliveRecords;
+		dlg_assert(DebugStats::get().aliveRecords > 0);
+		--DebugStats::get().aliveRecords;
 	}
 }
 

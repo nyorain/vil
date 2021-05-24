@@ -24,8 +24,8 @@ ImageView::~ImageView() {
 		return;
 	}
 
-	dlg_assert(dev->stats.aliveImagesViews > 0);
-	--dev->stats.aliveImagesViews;
+	dlg_assert(DebugStats::get().aliveImagesViews > 0);
+	--DebugStats::get().aliveImagesViews;
 
 	std::lock_guard lock(dev->mutex);
 	if(this->img) {
@@ -209,7 +209,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	*pView = castDispatch<VkImageView>(view);
 	dev.imageViews.mustEmplace(*pView, std::move(viewPtr));
 
-	++dev.stats.aliveImagesViews;
+	++DebugStats::get().aliveImagesViews;
 
 	return res;
 }

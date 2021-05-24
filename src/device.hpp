@@ -30,8 +30,7 @@
 namespace vil {
 
 struct DebugStats {
-	// TODO
-	inline static DebugStats* instance {};
+	static DebugStats& get();
 
 	std::atomic<u32> aliveRecords {};
 	std::atomic<u32> aliveDescriptorStates {};
@@ -60,8 +59,6 @@ struct Device {
 	bool timelineSemaphores {}; // whether we have timeline smeaphores
 	bool transformFeedback {}; // whether we have transformFeedback
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
-
-	DebugStats stats;
 
 	// Aside from properties, only the families used by device
 	// are initialized.

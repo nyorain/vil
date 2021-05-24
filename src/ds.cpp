@@ -113,7 +113,7 @@ DescriptorSetStatePtr newDescriptorSetState(
 	auto mem = new std::byte[memSize]();
 	TracyAllocS(mem, memSize, 8);
 
-	DebugStats::instance->descriptorStateMem += memSize;
+	DebugStats::get().descriptorStateMem += memSize;
 
 	auto* state = new(mem) DescriptorSetState();
 	dlg_assert(reinterpret_cast<std::byte*>(state) == mem);
@@ -121,7 +121,7 @@ DescriptorSetStatePtr newDescriptorSetState(
 	state->layout = std::move(layout);
 	state->variableDescriptorCount = variableDescriptorCount;
 
-	++state->layout->dev->stats.aliveDescriptorStates;
+	++DebugStats::get().aliveDescriptorStates;
 
 	// initialize descriptors
 	auto it = mem + sizeof(DescriptorSetState);
@@ -279,8 +279,8 @@ DescriptorSet::~DescriptorSet() {
 	// make sure to potentially run state destructor outside critical section
 	state.reset();
 
-	dlg_assert(dev->stats.aliveDescriptorSets > 0);
-	--dev->stats.aliveDescriptorSets;
+	dlg_assert(DebugStats::get().aliveDescriptorSets > 0);
+	--DebugStats::get().aliveDescriptorSets;
 }
 
 /*
@@ -787,10 +787,10 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		if(!HandleDesc<VkDescriptorSet>::wrap) {
 			dev.descriptorSets.mustEmplace(pDescriptorSets[i], std::move(dsPtr));
 		} else {
-			dsPtr.release();
+			(void) dsPtr.release();
 		}
 
-		++dev.stats.aliveDescriptorSets;
+		++DebugStats::get().aliveDescriptorSets;
 
 		std::lock_guard lock(dev.mutex);
 		// the application cannot access 'pool' from another thread during
@@ -822,7 +822,7 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 			handles[i] = ptr->handle;
 		} else {
 			auto& ds = get(dev, pDescriptorSets[i]);
-			handles[i] = ds.handle;  
+			handles[i] = ds.handle;
 			delete &ds;
 		}
 	}
@@ -940,11 +940,11 @@ void DescriptorSetState::PtrHandler::dec(DescriptorSetState& state) const noexce
 		}
 	}
 
-	dlg_assert(state.layout->dev->stats.aliveDescriptorStates > 0);
-	--state.layout->dev->stats.aliveDescriptorStates;
+	dlg_assert(DebugStats::get().aliveDescriptorStates > 0);
+	--DebugStats::get().aliveDescriptorStates;
 
 	auto memSize = sizeof(DescriptorSetState) + totalDescriptorMemSize(*state.layout, state.variableDescriptorCount);
-	DebugStats::instance->descriptorStateMem -= memSize;
+	DebugStats::get().descriptorStateMem -= memSize;
 
 	state.~DescriptorSetState();
 

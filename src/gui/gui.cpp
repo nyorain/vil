@@ -1016,14 +1016,16 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Separator();
 
 	if(checkEnvBinary("VIL_DEBUG", true)) {
-		imGuiText("alive records: {}", dev.stats.aliveRecords);
-		imGuiText("alive descriptor sets: {}", dev.stats.aliveDescriptorSets);
-		imGuiText("alive descriptor states: {}", dev.stats.aliveDescriptorStates);
-		imGuiText("alive buffers: {}", dev.stats.aliveBuffers);
-		imGuiText("alive image views: {}", dev.stats.aliveImagesViews);
-		imGuiText("threadContext memory: {} KB", dev.stats.threadContextMem / 1024.f);
-		imGuiText("command memory: {} KB", dev.stats.commandMem / 1024.f);
-		imGuiText("dsState memory: {} KB", dev.stats.descriptorStateMem / 1024.f);
+		auto& stats = DebugStats::get();
+		imGuiText("alive records: {}", stats.aliveRecords);
+		imGuiText("alive descriptor sets: {}", stats.aliveDescriptorSets);
+		imGuiText("alive descriptor states: {}", stats.aliveDescriptorStates);
+		imGuiText("alive buffers: {}", stats.aliveBuffers);
+		imGuiText("alive image views: {}", stats.aliveImagesViews);
+		imGuiText("threadContext memory: {} KB", stats.threadContextMem / 1024.f);
+		imGuiText("command memory: {} KB", stats.commandMem / 1024.f);
+		imGuiText("dsState memory: {} KB", stats.descriptorStateMem / 1024.f);
+		ImGui::Separator();
 		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
 		imGuiText("transform feedback: {}", dev.transformFeedback);
 		imGuiText("wrap command buffers: {}", HandleDesc<VkCommandBuffer>::wrap);

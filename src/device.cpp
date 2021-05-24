@@ -14,6 +14,11 @@
 
 namespace vil {
 
+DebugStats& DebugStats::get() {
+	static DebugStats ret;
+	return ret;
+}
+
 // util
 Gui* getWindowGui(Device& dev) {
 	if(dev.window) {
@@ -108,10 +113,6 @@ Device::~Device() {
 
 	queueFamilies.clear();
 	queues.clear();
-
-	if (DebugStats::instance == &stats) {
-		DebugStats::instance = nullptr;
-	}
 }
 
 bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
@@ -565,8 +566,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	if(ci->pEnabledFeatures) {
 		dev.enabledFeatures = *ci->pEnabledFeatures;
 	}
-
-	DebugStats::instance = &dev.stats;
 
 	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 
