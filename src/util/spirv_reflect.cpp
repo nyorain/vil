@@ -3616,9 +3616,6 @@ SpvReflectResult spvReflectCreateShaderModule(
 
   DestroyParser(&parser);
 
-  // free code, it's not needed anymore
-  SafeFree(p_module->_internal->spirv_code);
-
   return result;
 }
 

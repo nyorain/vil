@@ -191,10 +191,9 @@ void CommandBuffer::endSection(Command* cmd) {
 
 void CommandBuffer::popLabelSections() {
 	// See docs/debug-utils-label-nesting.md
-	while(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd)) {
-		dlg_assert(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd));
+	while(auto* next = dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd)) {
 		dlg_trace("Problematic debug utils label nesting detected "
-			"(Begin without end in scope)");
+			"(Begin without end in scope): {}", next->name);
 		section_ = section_->parent;
 		++ignoreEndDebugLabels_;
 	}

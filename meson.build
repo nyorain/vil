@@ -150,7 +150,7 @@ src = files(
 	'src/gui/blur.cpp',
 
 	# external util
-	'src/spirv_reflect.cpp',
+	'src/util/spirv_reflect.cpp',
 
 	# imgui
 	'src/imgui/imgui.cpp',
@@ -223,7 +223,23 @@ src = files(
 
 	'include/vil_api.h',
 	'src/imgui/imgui.h',
-	'src/spirv_reflect.h',
+	'src/util/spirv_reflect.h',
+
+	# spirv-cross
+	'src/spirv-cross/spirv.h',
+	'src/spirv-cross/spirv.hpp',
+	'src/spirv-cross/spirv_cfg.hpp',
+	'src/spirv-cross/spirv_common.hpp',
+	'src/spirv-cross/spirv_cross.hpp',
+	'src/spirv-cross/spirv_cross_containers.hpp',
+	'src/spirv-cross/spirv_cross_error_handling.hpp',
+	'src/spirv-cross/spirv_cross_parsed_ir.hpp',
+	'src/spirv-cross/spirv_parser.hpp',
+
+	'src/spirv-cross/spirv_cfg.cpp',
+	'src/spirv-cross/spirv_cross.cpp',
+	'src/spirv-cross/spirv_parser.cpp',
+	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
 
 if get_option('with_tests')

@@ -20,7 +20,7 @@
 #include <vk/format_utils.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
-#include <spirv_reflect.h>
+#include <util/spirv_reflect.h>
 #include <bitset>
 
 namespace vil {

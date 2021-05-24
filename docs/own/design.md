@@ -502,3 +502,27 @@ We need to support various features for showing submissions in the GUI.
 
 NOTE: final implementation turned out a bit different, but is still based
 on the same concepts decided here.
+
+# Extension-defensive coding
+
+Ideally, all api call implementations are coded in a way that make them
+work without any problems for new extensions. This means
+
+- No object wrapping (can already be disabled via environment variables).
+  We could optimize the no-object-wrapping path to make it a better
+  alternative though, e.g. use a better unordered_map implementation than stl.
+- Dispatch the call down the chain exactly as we got it. Forward
+  pNext pointers, don't split up api calls on arrays, don't defer when
+  we are calling it etc. Also try not to call any other function down the chain
+  in between.
+
+- not sure if this makes sense or not: code defensively in a way that we 
+  always handle the case where the application passes us handles we don't
+  know? For instance, a future extension could add something like
+  `vkCreateGraphicPipelines2` and when we don't intercept it, we don't
+  know anything about the used handles. If they are used in `vkCmdBindPipeline`
+  and we just expect we know the passed handle, the layer will cause UB/a crash.
+  Correctly handling this is (a) a pain in the ass as the implications
+  will propagate through almost all of layer code, but also (b) a pain in
+  the ass to test, which we would have to do to really make this a useful thing.
+  So I don't know if it's a good idea at all.

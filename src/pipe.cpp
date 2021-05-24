@@ -54,7 +54,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 	// with the derivation fields.
 
 	struct PreData {
-		bool useXfb {};
+		IntrusivePtr<XfbPatchDesc> xfb {};
 		span<const VkPipelineShaderStageCreateInfo> stages;
 	};
 
@@ -69,17 +69,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		auto& pre = pres[i];
 
-		// transform feedback isn't supported for multiview graphics pipelines
 		auto& rp = dev.renderPasses.get(nci.renderPass);
 		pre.stages = {nci.pStages, nci.stageCount};
-		pre.useXfb = dev.transformFeedback &&
-			!hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
 		u32 xfbVertexStageID = u32(-1);
+
+		// transform feedback isn't supported for multiview graphics pipelines
+		auto useXfb = dev.transformFeedback &&
+			!hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
 
 		auto& stages = stagesVecs.emplace_back();
 		for(auto s = 0u; s < nci.stageCount; ++s) {
 			auto src = nci.pStages[s];
-			if(src.stage == VK_SHADER_STAGE_VERTEX_BIT && pre.useXfb) {
+			if(src.stage == VK_SHADER_STAGE_VERTEX_BIT && useXfb) {
 				dlg_assert(xfbVertexStageID == u32(-1));
 				xfbVertexStageID = u32(stages.size());
 			}
@@ -90,14 +91,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 					src.stage == VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) {
 				// Builtin Position might not be present
 				dlg_trace("xfb currently not supported for mesh/geometry/tessellation pipes");
-				pre.useXfb = false;
+				useXfb = false;
 			}
 
 			stages.push_back(src);
 		}
 
-		pre.useXfb &= xfbVertexStageID != u32(-1);
-		if (pre.useXfb) {
+		useXfb &= xfbVertexStageID != u32(-1);
+		if (useXfb) {
 			auto& stage = stages[xfbVertexStageID];
 			auto& mod = dev.shaderModules.get(stage.module);
 
@@ -113,7 +114,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				auto it = find_if(mod.xfb, finder);
 				if(it == mod.xfb.end()) {
 					lock.unlock();
-					auto xfb = patchVertexShaderXfb(dev, mod.spv, stage.pName);
+					auto xfb = patchVertexShaderXfb(dev, mod.spv, stage.pName, mod.name);
 					lock.lock();
 
 					// check again, it might have been constructed by another thread in the meantime
@@ -131,6 +132,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 				if(it != mod.xfb.end()) {
 					stage.module = it->mod;
+					pre.xfb = it->desc;
 				}
 			}
 		}
@@ -167,7 +169,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.hasTessellation = false;
 		pipe.hasMeshShader = false;
 		pipe.hasDepthStencil = false;
-		pipe.xfbPatched = pres[i].useXfb;
+		pipe.xfbPatch = std::move(pres[i].xfb);
 
 		for(auto stage : pres[i].stages) {
 			pipe.stages.emplace_back(dev, stage);
@@ -434,5 +436,7 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2,
 
 	return true;
 }
+
+GraphicsPipeline::~GraphicsPipeline() = default;
 
 } // namespace vil

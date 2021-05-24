@@ -15,7 +15,7 @@
 #include <util/profiling.hpp>
 
 #include <swa/key.h>
-#include <spirv_reflect.h>
+#include <util/spirv_reflect.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>

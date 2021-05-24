@@ -12,6 +12,8 @@
 
 namespace vil {
 
+struct XfbPatchDesc;
+
 struct PipelineLayout : DeviceHandle {
 	VkPipelineLayout handle;
 	std::vector<IntrusivePtr<DescriptorSetLayout>> descriptors;
@@ -76,7 +78,10 @@ struct GraphicsPipeline : Pipeline {
 	bool hasTessellation : 1;
 	bool hasDepthStencil : 1;
 	bool hasMeshShader : 1;
-	bool xfbPatched : 1; // whether we injected our xfb code
+
+	IntrusivePtr<XfbPatchDesc> xfbPatch; // valid when we injected xfb
+
+	~GraphicsPipeline();
 };
 
 struct ComputePipeline : Pipeline {

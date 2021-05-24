@@ -45,6 +45,9 @@ ReversionAdatper<T> reversed(T&& iterable) {
 u32 findLSB(u32);
 u32 nextPOT(u32);
 
+/// Does not throw on error, just outputs error.
+void writeFile(const char* path, span<const std::byte> buffer, bool binary = true);
+
 template<typename T>
 bool isEmpty(const std::weak_ptr<T>& ptr) {
 	// https://stackoverflow.com/questions/45507041/how-to-check-if-weak-ptr-is-empty-non-assigned

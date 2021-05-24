@@ -7,7 +7,7 @@
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
-#include <spirv_reflect.h>
+#include <util/spirv_reflect.h>
 #include <map>
 
 namespace vil {

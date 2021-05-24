@@ -5,6 +5,7 @@
 #include <util/util.hpp>
 #include <util/f16.hpp>
 #include <util/profiling.hpp>
+#include <util/spirv_reflect.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
 #include <command/commands.hpp>
@@ -15,7 +16,6 @@
 #include <ds.hpp>
 #include <shader.hpp>
 #include <rp.hpp>
-#include <spirv_reflect.h>
 #include <bitset>
 
 // NOTE: since we might view invalidated command records, we can't assume

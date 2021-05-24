@@ -4,8 +4,11 @@
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
+#include <util/spirv_reflect.h>
 
-#include "spirv_reflect.h"
+#define SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS
+#include <spirv-cross/spirv_cross.hpp>
+namespace spc = spirv_cross;
 
 namespace vil {
 
@@ -27,38 +30,38 @@ std::string extractString(span<const u32> spirv) {
 	return {};
 }
 
-bool isOpInSection8(spv::Op op) {
+bool isOpInSection8(spv11::Op op) {
 	switch(op) {
-		case spv::Op::OpDecorate:
-		case spv::Op::OpMemberDecorate:
-		case spv::Op::OpDecorationGroup:
-		case spv::Op::OpGroupDecorate:
-		case spv::Op::OpGroupMemberDecorate:
-		case spv::Op::OpDecorateId:
-		case spv::Op::OpDecorateString:
-		case spv::Op::OpMemberDecorateString:
+		case spv11::Op::OpDecorate:
+		case spv11::Op::OpMemberDecorate:
+		case spv11::Op::OpDecorationGroup:
+		case spv11::Op::OpGroupDecorate:
+		case spv11::Op::OpGroupMemberDecorate:
+		case spv11::Op::OpDecorateId:
+		case spv11::Op::OpDecorateString:
+		case spv11::Op::OpMemberDecorateString:
 			return true;
 		default:
 			return false;
 	}
 }
 
-bool isOpType(spv::Op op) {
+bool isOpType(spv11::Op op) {
 	auto opu = unsigned(op);
-	if(opu >= unsigned(spv::Op::OpTypeVoid) && opu <= unsigned(spv::Op::OpTypeForwardPointer)) {
+	if(opu >= unsigned(spv11::Op::OpTypeVoid) && opu <= unsigned(spv11::Op::OpTypeForwardPointer)) {
 		return true;
 	}
 
-	if(opu >= unsigned(spv::Op::OpTypeVmeImageINTEL) && opu <= unsigned(spv::Op::OpTypeAvcSicResultINTEL)) {
+	if(opu >= unsigned(spv11::Op::OpTypeVmeImageINTEL) && opu <= unsigned(spv11::Op::OpTypeAvcSicResultINTEL)) {
 		return true;
 	}
 
 	switch(op) {
-		case spv::Op::OpTypePipeStorage:
-		case spv::Op::OpTypeNamedBarrier:
-		case spv::Op::OpTypeRayQueryKHR:
-		case spv::Op::OpTypeAccelerationStructureKHR:
-		case spv::Op::OpTypeCooperativeMatrixNV:
+		case spv11::Op::OpTypePipeStorage:
+		case spv11::Op::OpTypeNamedBarrier:
+		case spv11::Op::OpTypeRayQueryKHR:
+		case spv11::Op::OpTypeAccelerationStructureKHR:
+		case spv11::Op::OpTypeCooperativeMatrixNV:
 			return true;
 		default:
 			break;
@@ -67,34 +70,58 @@ bool isOpType(spv::Op op) {
 	return false;
 }
 
-u32 typeSize(span<const u32> spirv, const std::unordered_map<u32, u32>& defs, u32 id) {
-	auto it = defs.find(id);
-	if(it == defs.end()) {
+bool isOpConstant(spv11::Op op) {
+	switch(op) {
+		case spv11::Op::OpConstantTrue:
+		case spv11::Op::OpConstantFalse:
+		case spv11::Op::OpConstant:
+		case spv11::Op::OpConstantComposite:
+		case spv11::Op::OpConstantSampler:
+		case spv11::Op::OpConstantNull:
+		case spv11::Op::OpConstantPipeStorage:
+
+		case spv11::Op::OpSpecConstantTrue:
+		case spv11::Op::OpSpecConstantFalse:
+		case spv11::Op::OpSpecConstant:
+		case spv11::Op::OpSpecConstantComposite:
+		case spv11::Op::OpSpecConstantOp:
+			return true;
+
+		default:
+			return false;
+	}
+}
+
+u32 typeSize(span<const u32> spirv, const std::unordered_map<u32, u32>& locs, u32 id) {
+	auto it = locs.find(id);
+	if(it == locs.end()) {
 		dlg_error("Could not find type id {}", id);
 		return u32(-1);
 	}
 
-	auto op = spv::Op(spirv[it->second] & 0xFFFFu);
+	auto op = spv11::Op(spirv[it->second] & 0xFFFFu);
+	auto wordCount = spirv[it->second] >> 16u;
+
 	switch(op) {
-		case spv::Op::OpTypeFloat:
-		case spv::Op::OpTypeInt:
-			return spirv[it->second + 2] / 32;
-		case spv::Op::OpTypeArray:
-		case spv::Op::OpTypeMatrix:
-		case spv::Op::OpTypeVector: {
-			auto nsize = typeSize(spirv, defs, spirv[it->second + 2]);
+		case spv11::Op::OpTypeFloat:
+		case spv11::Op::OpTypeInt:
+			dlg_assert(wordCount >= 3);
+			return spirv[it->second + 2] / 8;
+		case spv11::Op::OpTypeArray:
+		case spv11::Op::OpTypeMatrix:
+		case spv11::Op::OpTypeVector: {
+			dlg_assert(wordCount == 4);
+			auto nsize = typeSize(spirv, locs, spirv[it->second + 2]);
 			if(nsize == u32(-1)) {
 				return nsize;
 			}
 
 			auto count = spirv[it->second + 3];
 			return count * nsize;
-		} case spv::Op::OpTypeStruct: {
-			auto wordCount = spirv[it->second] >> 16u;
-
+		} case spv11::Op::OpTypeStruct: {
 			auto sum = 0u;
 			for(auto i = 2u; i < wordCount; ++i) {
-				auto nsize = typeSize(spirv, defs, spirv[it->second + i]);
+				auto nsize = typeSize(spirv, locs, spirv[it->second + i]);
 				if(nsize == u32(-1)) {
 					return nsize;
 				}
@@ -117,8 +144,8 @@ u32 pointerTypeSize(span<const u32> spirv, const std::unordered_map<u32, u32>& d
 		return u32(-1);
 	}
 
-	auto op = spv::Op(spirv[it->second] & 0xFFFFu);
-	if(op != spv::Op::OpTypePointer) {
+	auto op = spv11::Op(spirv[it->second] & 0xFFFFu);
+	if(op != spv11::Op::OpTypePointer) {
 		dlg_error("Expected OpTypePointer");
 		return u32(-1);
 	}
@@ -127,7 +154,120 @@ u32 pointerTypeSize(span<const u32> spirv, const std::unordered_map<u32, u32>& d
 	return typeSize(spirv, defs, typeID);
 }
 
-XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char* entryPoint) {
+u32 baseTypeSize(const spc::SPIRType& type, XfbCapture& cap) {
+	dlg_assert(!type.pointer);
+
+	switch(type.basetype) {
+		case spc::SPIRType::Float:
+		case spc::SPIRType::Half:
+		case spc::SPIRType::Double:
+			cap.type = XfbCapture::typeFloat;
+			break;
+
+		case spc::SPIRType::UInt:
+		case spc::SPIRType::UInt64:
+		case spc::SPIRType::UByte:
+		case spc::SPIRType::UShort:
+			cap.type = XfbCapture::typeUint;
+			break;
+
+		case spc::SPIRType::Int:
+		case spc::SPIRType::Int64:
+		case spc::SPIRType::SByte:
+		case spc::SPIRType::Short:
+			cap.type = XfbCapture::typeInt;
+			break;
+
+		default:
+			dlg_assert("Invalid type");
+			return u32(-1);
+	}
+
+	cap.width = type.width;
+	cap.columns = type.columns;
+	cap.vecsize = type.vecsize;
+
+	return type.vecsize * type.columns * (type.width / 8);
+}
+
+void addDeco(std::vector<u32>& newDecos, u32 target, spv11::Decoration deco, u32 value) {
+	newDecos.push_back((4u << 16) | u32(spv11::Op::OpDecorate));
+	newDecos.push_back(target);
+	newDecos.push_back(u32(deco));
+	newDecos.push_back(value);
+}
+
+void addMemberDeco(std::vector<u32>& newDecos, u32 structType, u32 member, spv11::Decoration deco, u32 value) {
+	newDecos.push_back((5u << 16) | u32(spv11::Op::OpMemberDecorate));
+	newDecos.push_back(structType);
+	newDecos.push_back(member);
+	newDecos.push_back(u32(deco));
+	newDecos.push_back(value);
+}
+
+void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structType,
+		const std::string& name, u32& bufOffset, std::vector<XfbCapture>& captures,
+		std::vector<u32>& newDecos) {
+	for(auto i = 0u; i < structType.member_types.size(); ++i) {
+		auto& member = structType.member_types[i];
+		auto& mtype = compiler.get_type(member);
+
+		auto memberName = name;
+		auto mname = compiler.get_member_name(structType.self, i);
+		if(!mname.empty()) {
+			memberName += mname;
+		} else {
+			memberName += std::to_string(i);
+		}
+
+		if(mtype.basetype == spc::SPIRType::Struct) {
+			memberName += ".";
+			annotateCapture(compiler, mtype, memberName, bufOffset, captures, newDecos);
+			continue;
+		}
+
+		XfbCapture cap {};
+		auto baseSize = baseTypeSize(mtype, cap);
+		if(baseSize == u32(-1)) {
+			continue;
+		}
+
+		auto size = baseSize;
+		for(auto j = 0u; j < mtype.array.size(); ++j) {
+			auto dim = mtype.array[j];
+			if(!mtype.array_size_literal[j]) {
+				dim = compiler.evaluate_constant_u32(dim);
+			}
+
+			cap.array.push_back(dim);
+			size *= dim;
+		}
+
+		if(!compiler.has_member_decoration(structType.self, i, spv::DecorationArrayStride) &&
+				!mtype.array.empty()) {
+			// compiler.set_member_decoration(structType.self, i, spv::DecorationArrayStride, baseSize);
+			addMemberDeco(newDecos, structType.self, i, spv11::Decoration::ArrayStride, baseSize);
+		}
+
+		dlg_assert_or(!compiler.has_member_decoration(structType.self, i, spv::DecorationOffset), continue);
+		// TODO: have to align offset properly for 64-bit types
+		// compiler.set_member_decoration(structType.self, i, spv::DecorationOffset, bufOffset);
+		addMemberDeco(newDecos, structType.self, i, spv11::Decoration::Offset, bufOffset);
+
+		if(compiler.has_member_decoration(structType.self, i, spv::DecorationBuiltIn)) {
+			cap.builtin = compiler.get_member_decoration(structType.self, i, spv::DecorationBuiltIn);
+		}
+
+		cap.name = memberName;
+		cap.offset = bufOffset;
+
+		captures.push_back(std::move(cap));
+		bufOffset += size;
+	}
+}
+
+XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
+		const char* entryPoint, std::string_view modName) {
 	ZoneScoped;
 
 	// parse spirv
@@ -152,8 +292,8 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char
 	std::vector<u32> patched {spirv.begin(), spirv.begin() + 5};
 	patched.reserve(spirv.size());
 
-	std::unordered_map<u32, u32> typedefs;
-	typedefs.reserve(idBound);
+	std::unordered_map<u32, u32> locs;
+	locs.reserve(idBound);
 
 	auto addedCap = false;
 	auto addedExecutionMode = false;
@@ -162,20 +302,23 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char
 	auto entryPointID = u32(-1);
 	auto insertDecosPos = u32(-1);
 
+	std::vector<u32> captureVars;
+
 	auto offset = 5u;
+	u32 badHash = 0u;
 	while(offset < spirv.size()) {
 		auto first = spirv[offset];
-		auto op = spv::Op(first & 0xFFFFu);
+		auto op = spv11::Op(first & 0xFFFFu);
 		auto wordCount = first >> 16u;
 
 		// We need to add the Xfb Execution mode to our entry point.
-		if(section == 5u && op != spv::Op::OpEntryPoint) {
+		if(section == 5u && op != spv11::Op::OpEntryPoint) {
 			dlg_assert_or(entryPointID != u32(-1), return {});
 
 			section = 6u;
-			patched.push_back((3u << 16) | u32(spv::Op::OpExecutionMode));
+			patched.push_back((3u << 16) | u32(spv11::Op::OpExecutionMode));
 			patched.push_back(entryPointID);
-			patched.push_back(u32(spv::ExecutionMode::Xfb));
+			patched.push_back(u32(spv11::ExecutionMode::Xfb));
 
 			addedExecutionMode = true;
 		}
@@ -189,22 +332,23 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char
 
 		for(auto i = 0u; i < wordCount; ++i) {
 			patched.push_back(spirv[offset + i]);
+			badHash ^= spirv[offset + i];
 		}
 
 		// We need to add the TransformFeedback capability
-		if(op == spv::Op::OpCapability) {
+		if(op == spv11::Op::OpCapability) {
 			dlg_assert(section <= 1u);
 			section = 1u;
 
 			dlg_assert(wordCount == 2);
-			auto cap = spv::Capability(spirv[offset + 1]);
+			auto cap = spv11::Capability(spirv[offset + 1]);
 
 			// The shader *must* declare shader capability exactly once.
 			// We add the transformFeedback cap just immediately after that.
-			if(cap == spv::Capability::Shader) {
+			if(cap == spv11::Capability::Shader) {
 				dlg_assert(!addedCap);
-				patched.push_back((2u << 16) | u32(spv::Op::OpCapability));
-				patched.push_back(u32(spv::Capability::TransformFeedback));
+				patched.push_back((2u << 16) | u32(spv11::Op::OpCapability));
+				patched.push_back(u32(spv11::Capability::TransformFeedback));
 				addedCap = true;
 			}
 
@@ -212,7 +356,7 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char
 			// nothing we can do.
 			// TODO: maybe in some cases shaders just declare that cap but
 			// don't use it? In that case we could still patch in our own values
-			if(cap == spv::Capability::TransformFeedback) {
+			if(cap == spv11::Capability::TransformFeedback) {
 				dlg_debug("Shader is already using transform feedback!");
 				return {};
 			}
@@ -220,7 +364,7 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char
 
 		// We need to find the id of the entry point.
 		// We are also interested in the variables used by the entry point
-		if(op == spv::Op::OpEntryPoint) {
+		if(op == spv11::Op::OpEntryPoint) {
 			dlg_assert(section <= 5u);
 			section = 5u;
 
@@ -243,58 +387,19 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char
 		}
 
 		// We need to add our xfb decorations to outputs from the shader stage
-		if(op == spv::Op::OpVariable) {
+		if(op == spv11::Op::OpVariable) {
 			dlg_assert(section <= 9u);
 			section = 9u;
 
 			dlg_assert_or(wordCount >= 4, return {});
-			auto resType = spirv[offset + 1];
+			// auto resType = spirv[offset + 1];
 			auto resID = spirv[offset + 2];
-			auto storage = spv::StorageClass(spirv[offset + 3]);
-			if(storage == spv::StorageClass::Output && interfaceVars.count(resID)) {
-				auto& cap = ret.desc->captures.emplace_back();
-				cap.spirvVar = resID;
-				cap.spirvPointerType = resType;
-			}
-		}
-
-		if(op == spv::Op::OpDecorate) {
-			dlg_assert(section <= 8u);
-			section = 8u;
-
-			dlg_assert(wordCount >= 3);
-			auto resID = spirv[offset + 1];
-			auto decoration = spv::Decoration(spirv[offset + 2]);
-			if(decoration == spv::Decoration::BuiltIn) {
-				dlg_assert(wordCount == 4);
-				auto builtin = spv::BuiltIn(spirv[offset + 3]);
-
-				// TODO: also capture the other builtin outputs?
-				if(builtin == spv::BuiltIn::Position) {
-					auto& cap = ret.desc->captures.emplace_back();
-					cap.spirvVar = resID;
-					cap.size = 16u; // vec4
-				}
-			}
-		} else if(op == spv::Op::OpMemberDecorate) {
-			dlg_assert(section <= 8u);
-			section = 8u;
-
-			dlg_assert(wordCount >= 4);
-			auto structType = spirv[offset + 1];
-			auto member = spirv[offset + 2];
-			auto decoration = spv::Decoration(spirv[offset + 3]);
-			if(decoration == spv::Decoration::BuiltIn) {
-				dlg_assert(wordCount == 5);
-				auto builtin = spv::BuiltIn(spirv[offset + 4]);
-
-				// TODO: also capture the other builtin outputs?
-				if(builtin == spv::BuiltIn::Position) {
-					auto& cap = ret.desc->captures.emplace_back();
-					cap.structType = structType;
-					cap.member = member;
-					cap.size = 16u; // vec4
-				}
+			auto storage = spv11::StorageClass(spirv[offset + 3]);
+			if(storage == spv11::StorageClass::Output && interfaceVars.count(resID)) {
+				// auto& cap = ret.desc->captures.emplace_back();
+				captureVars.push_back(resID);
+				// cap.spirvVar = resID;
+				// cap.spirvPointerType = resType;
 			}
 		}
 
@@ -304,73 +409,118 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv, const char
 			section = 9u;
 
 			auto resID = spirv[offset + 1];
-			auto [_, success] = typedefs.emplace(resID, offset);
+			auto [_, success] = locs.emplace(resID, offset);
 			dlg_assert(success);
 		}
 
 		offset += wordCount;
 	}
 
-	if(!addedCap || !addedExecutionMode || ret.desc->captures.empty() || insertDecosPos == u32(-1)) {
+	if(!addedCap || !addedExecutionMode || captureVars.empty() || insertDecosPos == u32(-1)) {
 		dlg_warn("Could not inject xfb into shader. Likely error inside vil. "
-			"capability: {}, executionMode: {}, captures.size(): {}, decosPos: {}",
-			addedCap, addedExecutionMode, ret.desc->captures.size(), insertDecosPos);
+			"capability: {}, executionMode: {}, captureVars.size(): {}, decosPos: {}",
+			addedCap, addedExecutionMode, captureVars.size(), insertDecosPos);
 		return {};
 	}
 
-	// parse sizes
-	auto bufOffset = 0u;
-	for(auto& cap : ret.desc->captures) {
-		if(!cap.size) {
-			dlg_assert(cap.spirvVar != u32(-1) && cap.spirvPointerType != u32(-1));
-			cap.size = pointerTypeSize(spirv, typedefs, cap.spirvPointerType);
-			if(cap.size == u32(-1)) {
-				dlg_warn("Cannot determine output variable size; Aborting xfb injection");
-				return {};
-			}
-		}
+	// parse sizes, build the vector of captured output values.
+	spc::Compiler compiler(std::vector<u32>(spirv.begin(), spirv.end()));
+	compiler.set_entry_point(entryPoint, spv::ExecutionModelVertex);
+	compiler.compile();
 
-		cap.offset = bufOffset;
-		bufOffset += cap.size;
-	}
-
-	// generate decos
 	std::vector<u32> newDecos;
 
-	auto addDeco = [&](u32 target, spv::Decoration deco, u32 value) {
-		newDecos.push_back((4u << 16) | u32(spv::Op::OpDecorate));
-		newDecos.push_back(target);
-		newDecos.push_back(u32(deco));
-		newDecos.push_back(value);
-	};
+	auto bufOffset = 0u;
+	for(auto& var : captureVars) {
+		auto& ptype = compiler.get_type_from_variable(var);
+		dlg_assert(ptype.pointer);
+		dlg_assert(ptype.parent_type);
+		auto& type = compiler.get_type(ptype.parent_type);
 
-	auto addMemberDeco = [&](u32 structType, u32 member, spv::Decoration deco, u32 value) {
-		newDecos.push_back((5u << 16) | u32(spv::Op::OpMemberDecorate));
-		newDecos.push_back(structType);
-		newDecos.push_back(member);
-		newDecos.push_back(u32(deco));
-		newDecos.push_back(value);
-	};
+		auto name = compiler.get_name(var);
+		if(name.empty()) {
+			name = dlg::format("Output{}", var);
+		}
+
+		if(type.basetype == spc::SPIRType::Struct) {
+			name += ".";
+			annotateCapture(compiler, type, name, bufOffset, ret.desc->captures, newDecos);
+		} else {
+			XfbCapture cap {};
+			auto baseSize = baseTypeSize(type, cap);
+			if(baseSize == u32(-1)) {
+				continue;
+			}
+
+			auto size = baseSize;
+			for(auto j = 0u; j < type.array.size(); ++j) {
+				auto dim = type.array[j];
+				if(!type.array_size_literal[j]) {
+					dim = compiler.evaluate_constant_u32(dim);
+				}
+
+				cap.array.push_back(dim);
+				size *= dim;
+			}
+
+			if(!compiler.has_decoration(type.self, spv::DecorationArrayStride) &&
+					!type.array.empty()) {
+				// compiler.set_decoration(type.self, spv::DecorationArrayStride, baseSize);
+				addDeco(newDecos, var, spv11::Decoration::ArrayStride, baseSize);
+			}
+
+			dlg_assert_or(!compiler.has_decoration(var, spv::DecorationOffset), continue);
+			// TODO: have to align offset properly for 64-bit types
+			// compiler.set_decoration(var, spv::DecorationOffset, bufOffset);
+			addDeco(newDecos, var, spv11::Decoration::Offset, bufOffset);
+
+			if(compiler.has_decoration(var, spv::DecorationBuiltIn)) {
+				cap.builtin = compiler.get_decoration(var, spv::DecorationBuiltIn);
+			}
+
+			cap.name = name;
+			cap.offset = bufOffset;
+
+			ret.desc->captures.push_back(std::move(cap));
+			bufOffset += size;
+		}
+	}
 
 	// PERF: stride align 8 is only needed when we have double vars,
 	// otherwise 4 would be enough. Track that somehow.
 	ret.desc->stride = align(bufOffset, 8u);
 
-	for(auto& cap : ret.desc->captures) {
-		if(cap.spirvVar != u32(-1)) {
-			addDeco(cap.spirvVar, spv::Decoration::XfbBuffer, 0u);
-			addDeco(cap.spirvVar, spv::Decoration::XfbStride, ret.desc->stride);
-			addDeco(cap.spirvVar, spv::Decoration::Offset, cap.offset);
-		} else {
-			dlg_assert(cap.structType != u32(-1) && cap.member != u32(-1));
-			addMemberDeco(cap.structType, cap.member, spv::Decoration::XfbBuffer, 0u);
-			addMemberDeco(cap.structType, cap.member, spv::Decoration::XfbStride, ret.desc->stride);
-			addMemberDeco(cap.structType, cap.member, spv::Decoration::Offset, cap.offset);
-		}
+	for(auto& var : captureVars) {
+		addDeco(newDecos, var, spv11::Decoration::XfbBuffer, 0u);
+		addDeco(newDecos, var, spv11::Decoration::XfbStride, ret.desc->stride);
+
+		// compiler.set_decoration(var, spv::DecorationXfbBuffer, 0u);
+		// compiler.set_decoration(var, spv::DecorationXfbStride, ret.desc->stride);
 	}
 
 	// insert decos into patched spirv
 	patched.insert(patched.begin() + insertDecosPos, newDecos.begin(), newDecos.end());
+
+	// TODO: tmp
+	std::string output = "vil";
+	if(!modName.empty()) {
+		output += "_";
+		output += modName;
+	}
+	output += ".";
+	output += std::to_string(badHash);
+	output += ".spv";
+	writeFile(output.c_str(), bytes(patched), true);
+
+	dlg_info("xfb: {}, stride {}", output, ret.desc->stride);
+	for(auto& cap : ret.desc->captures) {
+		dlg_info("  {}", cap.name);
+		dlg_info("  >> offset {}", cap.offset);
+		dlg_info("  >> size {}", cap.width * cap.columns * cap.vecsize);
+		if(cap.builtin) {
+			dlg_info("  >> builtin {}", *cap.builtin);
+		}
+	}
 
 	VkShaderModuleCreateInfo ci {};
 	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;

@@ -3,6 +3,7 @@
 #include <queue.hpp>
 #include <device.hpp>
 #include <handles.hpp>
+#include <vk/enumString.hpp>
 
 namespace vil {
 
@@ -270,12 +271,21 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
+	&ObjectTypeImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
 	&QueueTypeImpl::instance,
 };
 
 const span<const ObjectTypeHandler*> ObjectTypeHandler::handlers = typeHandlers;
 
 Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle, u64& fwdID) {
+	// TODO: temporary workaround for descriptor sets, see our wrap optimization
+	// is ds.cpp where we don't insert them into maps anymore.
+	if(objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET && HandleDesc<VkDescriptorSet>::wrap) {
+		auto& ds = get(dev, u64ToHandle<VkDescriptorSet>(handle));
+		fwdID = handleToU64(ds.handle);
+		return &ds;
+	}
+
 	for(auto& handler : ObjectTypeHandler::handlers) {
 		if(handler->objectType() == objectType) {
 			auto* ptr = handler->find(dev, handle, fwdID);
@@ -285,6 +295,7 @@ Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle, u64& fwdID)
 		}
 	}
 
+	dlg_info("can't find handle {}, type {}", handle, vk::name(objectType));
 	return nullptr;
 }
 

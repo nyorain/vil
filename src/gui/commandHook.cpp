@@ -700,7 +700,7 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 	// transform feedback
 	auto endXfb = false;
 	if(auto drawCmd = dynamic_cast<DrawCmdBase*>(&cmd); drawCmd) {
-		if(drawCmd->state.pipe->xfbPatched && hook->copyXfb) {
+		if(drawCmd->state.pipe->xfbPatch && hook->copyXfb) {
 			dlg_assert(dev.transformFeedback);
 			dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
 			dlg_assert(dev.dispatch.CmdBindTransformFeedbackBuffersEXT);

@@ -4,6 +4,7 @@
 #include <util/f16.hpp>
 #include <util/transform.hpp>
 #include <util/util.hpp>
+#include <util/spirv.hpp>
 #include <device.hpp>
 #include <shader.hpp>
 #include <pipe.hpp>
@@ -12,7 +13,7 @@
 #include <imgui/imgui.h>
 #include <vk/format_utils.h>
 #include <vk/enumString.hpp>
-#include <spirv_reflect.h>
+#include <util/spirv_reflect.h>
 
 #include <vertices.vert.spv.h>
 #include <vertices.frag.spv.h>
@@ -131,22 +132,27 @@ std::string readFormat(VkFormat format, span<const std::byte> src) {
 }
 
 // NOTE: this could probably be improved
-bool perspectiveHeuristic(span<const Vec4f> clipSpaceVerts) {
-	if(clipSpaceVerts.empty()) {
+bool perspectiveHeuristic(ReadBuf data, u32 stride) {
+	if(data.empty()) {
 		dlg_warn("no data for orthogonal/perspective heuristic");
 		return false;
 	}
 
-	float firstW = clipSpaceVerts[0][3];
+	auto vertBuf = data;
+	auto first = read<Vec4f>(vertBuf);
+	float firstW = first[3];
 	bool nonConstW = false;
 	bool nonOneW = false;
 
-	for(auto i = 0u; i < std::min<u32>(20, u32(clipSpaceVerts.size())); ++i) {
-		if(std::abs(clipSpaceVerts[i][3] - 1.f) > 0.001) {
+	for(auto i = 0u; i < std::min<u32>(20, u32(data.size() / stride)); ++i) {
+		auto vertBuf = data.subspan(i * stride);
+		auto vert = read<Vec4f>(vertBuf);
+
+		if(std::abs(vert[3] - 1.f) > 0.001) {
 			nonOneW = true;
 		}
 
-		if(std::abs(clipSpaceVerts[i][3] - firstW) > 0.001) {
+		if(std::abs(vert[3] - firstW) > 0.001) {
 			nonConstW = true;
 		}
 	}
@@ -158,7 +164,7 @@ bool perspectiveHeuristic(span<const Vec4f> clipSpaceVerts) {
 	return nonOneW;
 }
 
-AABB3f bounds(VkFormat format, ReadBuf data, u32 stride) {
+AABB3f bounds(VkFormat format, ReadBuf data, u32 stride, bool useW) {
 	// dlg_assert(data.size() % stride == 0u);
 	dlg_assert(data.size() >= stride);
 
@@ -168,10 +174,15 @@ AABB3f bounds(VkFormat format, ReadBuf data, u32 stride) {
 
 	while(data.size() >= stride) {
 		auto rem = data.subspan(stride);
-		auto pos = Vec3f(read(format, data));
+		auto pos4 = read(format, data);
+		auto pos3 = Vec3f(pos4);
 
-		min = vec::cw::min(min, pos);
-		max = vec::cw::max(max, pos);
+		if(useW) {
+			pos3.z = pos4[3];
+		}
+
+		min = vec::cw::min(min, pos3);
+		max = vec::cw::max(max, pos3);
 		data = rem;
 	}
 
@@ -744,7 +755,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			auto offset = params.offset * binding.stride;
 			auto size = params.drawCount * binding.stride;
 			vertData = vertData.subspan(offset, size);
-			vertBounds = bounds(attrib.format, vertData, binding.stride);
+			vertBounds = bounds(attrib.format, vertData, binding.stride, false);
 		}
 
 		speed_ = vertBounds.extent.x + vertBounds.extent.y + vertBounds.extent.z;
@@ -825,7 +836,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
 	dlg_assert_or(cmd.state.pipe, return);
 
-	if(!cmd.state.pipe->xfbPatched) {
+	if(!cmd.state.pipe->xfbPatch) {
 		imGuiText("Error: couldn't inject transform feedback code to shader");
 		return;
 	} else if(!state.transformFeedback.buffer.size) {
@@ -874,6 +885,8 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 			ImGui::TableHeadersRow();
 			ImGui::TableNextRow();
 
+			// TODO: fix data reading
+			/*
 			auto xfbData = state.transformFeedback.data();
 			auto vCount = std::min(vertexCount, u32(xfbData.size() / 16u));
 
@@ -885,6 +898,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 
 				ImGui::TableNextRow();
 			}
+			*/
 
 			ImGui::EndTable();
 		}
@@ -895,16 +909,31 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	// 2: viewer
 	// NOTE: strictly speaking the reinterepret_cast is UB but it's
 	// all just trivial types so who cares
+
 	auto bspan = state.transformFeedback.data();
-	auto ptr = reinterpret_cast<const Vec4f*>(bspan.data());
-	auto verts = span{ptr, vertexCount};
+
+	XfbCapture* posCapture = nullptr;
+	auto& xfbPatch = *cmd.state.pipe->xfbPatch;
+	for(auto& patch : xfbPatch.captures) {
+		if(patch.builtin && *patch.builtin == u32(spv11::BuiltIn::Position)) {
+			posCapture = &patch;
+			break;
+		}
+	}
+
+	if(!posCapture) {
+		dlg_error("Not BuiltIn Position in xfb data?!");
+		return;
+	}
+
+	bspan = bspan.subspan(posCapture->offset, vertexCount * xfbPatch.stride);
 
 	// TODO: don't evaluate this every frame, just in the beginning
 	// and when the Recenter button is pressed.
-	const bool useW = perspectiveHeuristic(verts);
+	const bool useW = perspectiveHeuristic(bspan, xfbPatch.stride);
 
 	if(ImGui::Button("Recenter")) {
-		auto vertBounds = bounds(verts, useW);
+		auto vertBounds = bounds(VK_FORMAT_R32G32B32A32_SFLOAT, bspan, xfbPatch.stride, useW);
 		speed_ = vertBounds.extent.x + vertBounds.extent.y + vertBounds.extent.z;
 		centerCamOnBounds(vertBounds);
 	}
@@ -914,11 +943,11 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		auto pos = ImGui::GetCursorScreenPos();
 
 		const static VkVertexInputBindingDescription vertexBinding {
-			0u, sizeof(Vec4f), VK_VERTEX_INPUT_RATE_VERTEX,
+			0u, xfbPatch.stride, VK_VERTEX_INPUT_RATE_VERTEX,
 		};
 
 		const static VkVertexInputAttributeDescription vertexAttrib {
-			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
+			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, posCapture->offset,
 		};
 
 		auto& xfbBuf = state.transformFeedback.buffer;

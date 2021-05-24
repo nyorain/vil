@@ -22,6 +22,8 @@ urgent, bugs:
 	- [ ] unselect when no new matching command can be found?
 	- [ ] use/implement LCS and better general strategy when in swapchain mode for
 		  command matching/finding the best hook from last frame
+- [ ] xfb: consider spec constants. Store them in created module, might
+      hook xfb multiple times, for different spec constants.
 
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in

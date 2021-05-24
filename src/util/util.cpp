@@ -4,10 +4,11 @@
 #include <util/f16.hpp>
 #include <util/vecOps.hpp>
 #include <dlg/dlg.hpp>
-#include <cmath>
 #include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>
 #include <vk/enumString.hpp>
+#include <cmath>
+#include <cstdio>
 
 namespace vil {
 
@@ -1098,6 +1099,24 @@ LocalChainCopy::LocalChainCopy(LocalChainCopy&& rhs) noexcept {
 	pNext = rhs.pNext;
 	rhs.pNext = {};
 	rhs.totalSize = {};
+}
+
+void writeFile(const char* path, span<const std::byte> buffer, bool binary) {
+	dlg_assert(path);
+	errno = 0;
+
+	auto* f = std::fopen(path, binary ? "wb" : "w");
+	if(!f) {
+		dlg_error("Could not open '{}' for writing: {}", path, std::strerror(errno));
+		return;
+	}
+
+	auto ret = std::fwrite(buffer.data(), 1, buffer.size(), f);
+	if(ret != buffer.size()) {
+		dlg_error("fwrite on '{}' failed: {}", path, std::strerror(errno));
+	}
+
+	std::fclose(f);
 }
 
 } // namespace vil

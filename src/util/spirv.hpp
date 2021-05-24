@@ -42,10 +42,10 @@
 // "Mask" in their name, and a parallel enum that has the shift
 // amount (1 << x) for each corresponding enumerant.
 
-#ifndef spirv_HPP
-#define spirv_HPP
+#ifndef spirv_11_HPP
+#define spirv_11_HPP
 
-namespace spv {
+namespace spv11 {
 
 typedef unsigned int Id;
 

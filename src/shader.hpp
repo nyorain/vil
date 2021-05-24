@@ -14,17 +14,21 @@ namespace vil {
 typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 
 struct XfbCapture {
-	u32 size;
-	u32 offset;
-	// format?
+	enum Type {
+		typeFloat,
+		typeInt,
+		typeUint,
+	};
 
-	// for OpDecorate
-	u32 spirvVar {u32(-1)};
-	u32 spirvPointerType {u32(-1)};
+	Type type;
+	u32 columns {1};
+	u32 vecsize {1};
+	std::vector<u32> array {};
+	u32 width;
 
-	// for OpMemberDecorate
-	u32 structType {u32(-1)};
-	u32 member {u32(-1)};
+	std::optional<u32> builtin {}; // spv11::Builtin, may be 0
+	std::string name; // might be empty
+	u32 offset; // total offset into xfb buffer
 };
 
 // We separate the description from the patched VkShaderModule since the description
@@ -43,7 +47,8 @@ struct XfbPatchData {
 	IntrusivePtr<XfbPatchDesc> desc {};
 };
 
-XfbPatchData patchVertexShaderXfb(Device&, span<const u32> spirv, const char* entryPoint);
+XfbPatchData patchVertexShaderXfb(Device&, span<const u32> spirv,
+	const char* entryPoint, std::string_view modName);
 
 struct SpirvData {
 	std::unique_ptr<SpvReflectShaderModule> reflection;
