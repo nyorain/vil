@@ -263,7 +263,6 @@ public:
 
 	// Returns the effective size of a buffer block.
 	size_t get_declared_struct_size(const SPIRType &struct_type) const;
-	size_t get_struct_size_tight(const SPIRType& type) const;
 
 	// Returns the effective size of a buffer block, with a given array size
 	// for a runtime array.
@@ -279,8 +278,6 @@ public:
 
 	// Returns the effective size of a buffer block struct member.
 	size_t get_declared_struct_member_size(const SPIRType &struct_type, uint32_t index) const;
-
-	size_t get_type_size_tight(const SPIRType& type, bool ignoreArray = false) const;
 
 	// Returns a set of all global variables which are statically accessed
 	// by the control flow graph from the current entry point.

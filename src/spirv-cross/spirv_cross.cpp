@@ -1745,20 +1745,6 @@ size_t Compiler::get_declared_struct_size(const SPIRType &type) const
 	return offset + size;
 }
 
-size_t Compiler::get_struct_size_tight(const SPIRType &type) const
-{
-	if (type.member_types.empty())
-		SPIRV_CROSS_THROW("Declared struct in block cannot be empty.");
-
-	size_t size = 0u;
-	for(auto& typeID : type.member_types) {
-		auto& type = get_type(typeID);
-		size += get_type_size_tight(type);
-	}
-
-	return size;
-}
-
 size_t Compiler::get_declared_struct_size_runtime_array(const SPIRType &type, size_t array_size) const
 {
 	if (type.member_types.empty())
@@ -1991,61 +1977,6 @@ size_t Compiler::get_declared_struct_member_size(const SPIRType &struct_type, ui
 			else
 				SPIRV_CROSS_THROW("Either row-major or column-major must be declared for matrices.");
 		}
-	}
-}
-
-size_t Compiler::get_type_size_tight(const SPIRType &type, bool ignoreArray) const
-{
-	switch (type.basetype)
-	{
-	case SPIRType::Unknown:
-	case SPIRType::Void:
-	case SPIRType::Boolean: // Bools are purely logical, and cannot be used for externally visible types.
-	case SPIRType::AtomicCounter:
-	case SPIRType::Image:
-	case SPIRType::SampledImage:
-	case SPIRType::Sampler:
-		SPIRV_CROSS_THROW("Querying size for object with opaque size.");
-
-	default:
-		break;
-	}
-
-	if (type.pointer && type.storage == StorageClassPhysicalStorageBuffer)
-	{
-		// Check if this is a top-level pointer type, and not an array of pointers.
-		if (type.pointer_depth > get<SPIRType>(type.parent_type).pointer_depth)
-			return 8;
-	}
-
-	if (!type.array.empty() && !ignoreArray)
-	{
-		// For arrays, we can use ArrayStride to get an easy check.
-		bool array_size_literal = type.array_size_literal.back();
-		uint32_t array_size = array_size_literal ? type.array.back() : evaluate_constant_u32(type.array.back());
-
-		// return type_array_stride(type) * array_size;
-		return get_type_size_tight(type, true) * array_size;
-
-		/*
-		auto cpy = type;
-		cpy.array.clear();
-		cpy.array_size_literal.clear();
-
-		return get_type_size_tight(type) * array_size;
-		*/
-	}
-	else if (type.basetype == SPIRType::Struct)
-	{
-		return get_struct_size_tight(type);
-	}
-	else
-	{
-		unsigned vecsize = type.vecsize;
-		unsigned columns = type.columns;
-
-		size_t component_size = type.width / 8;
-		return vecsize * component_size * columns;
 	}
 }
 
