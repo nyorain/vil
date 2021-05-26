@@ -1328,7 +1328,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	dlg_assert(posCapture->type == XfbCapture::typeFloat);
 	dlg_assert(posCapture->vecsize == 4u);
 	dlg_assert(posCapture->width == 32);
-	dlg_assert(posCapture->columns = 1u);
+	dlg_assert(posCapture->columns == 1u);
 	dlg_assert(posCapture->array.empty());
 
 	bspan = bspan.subspan(posCapture->offset, vertexCount * xfbPatch.stride);

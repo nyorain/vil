@@ -19,27 +19,14 @@ urgent, bugs:
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in
       mind everywhere. We would at least have to lock the descriptorSetState mutex
-	  when reading it in Gui to support this, might get a race otherwise.
+	  when reading it in Gui/match to support this, might get a race otherwise.
+	  Or, probably better: hold the per-ds mutex locked during the whole
+	  update process, sync refCount using it. For CopyDescriptorSet,
+	  we can use std::lock.
 - [ ] (low prio) See the TODO in CommandHookRecord::copyDs to fix
       support for updateUnusedWhilePending.
 - [ ] (for later) investigate whether our current approach really
       scales for descriptor sets with many thousand bindings
-
-vertex viewer/xfb:
-- [ ] detect when variables like Builtin CullDistance are present in spirv
-      but never written - we don't have to show them in the xfb tab.
-	  We don't even have to capture them in the first place.
-- [ ] (later) figure out when to flip y and when not.
-      {Not as relevant anymore now that we render the frustum. Could still
-	   be useful option. I guesse it's nothing we can just figure out}
-- [ ] (later) better perspective heurstic. Also detect near, far (and use for frustum
-      draw). Don't execute the heurstic every frame, only when something changes?
-	  (Technically, data potentially changes every frame but the assumption
-	  that drawn data doesn't suddenly change projection type seems safe).
-- [ ] (later) really attempt to display non-float formats in 3D vertex viewer?
-- [ ] (low prio) xfb: check whether a used output format is supported as input
-	- [ ] also handle matrices somehow
-- [ ] (later) support showing all draws from a render pass?
 
 docs
 - [ ] proper shipping and installing
@@ -47,8 +34,9 @@ docs
 	- [x] write wiki post on how to build/install/use it
 	- [ ] fix for vil_api.h: should probably load *real* name of library (generated
 	      via meson), not some guesswork.
-	      Important on windows, to support all compilers.
-		  See TODO on lib name there
+	      Important on windows, to support all compilers. See TODO on lib name there.
+		  OTOH this would make vil_api.h depend on some generated stuff which
+		  is bad as well.
 - [ ] write small wiki documentation post on how to use API
 	- [ ] could explain why it's needed in the first place. Maybe someone
 	      comes up with a clever idea for the hooked-input-feedback problem?
@@ -168,9 +156,6 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
-- [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
-      make sure destruction is tracked correctly. Also show in gui.
-	  See the commands in cb.cpp
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
 	      e.g. when the application controlled debug callback is called
@@ -223,8 +208,9 @@ other
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
 	  we could fix it by not imgui-pushing the resource ID before showing the button.
-
-
+- [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
+      make sure destruction is tracked correctly. Also show in gui.
+	  See the commands in cb.cpp
 
 Possibly for later, new features/ideas:
 matching:
@@ -234,6 +220,21 @@ matching:
 	- [ ] bind: match via next draw/dispatch that uses this bind
 	- [ ] sync: match previous and next draw/dispatch and try to find
 	      matching sync in between? or something like that
+
+vertex viewer/xfb:
+- [ ] (later) improve camera, probably better to not lock rotation or use arcball controls
+- [ ] (later) figure out when to flip y and when not.
+      {Not as relevant anymore now that we render the frustum. Could still
+	   be useful option. I guesse it's nothing we can just figure out}
+- [ ] (later) better perspective heurstic. Also detect near, far (and use for frustum
+      draw). Don't execute the heurstic every frame, only when something changes?
+	  (Technically, data potentially changes every frame but the assumption
+	  that drawn data doesn't suddenly change projection type seems safe).
+- [ ] (later) really attempt to display non-float formats in 3D vertex viewer?
+- [ ] (low prio) xfb: check whether a used output format is supported as input
+	- [ ] also handle matrices somehow
+- [ ] (later) support showing all draws from a render pass?
+
 
 - [ ] SetHandleName should probably not always use the device hash map
       when the objects are wrapped. Currently causes issues since

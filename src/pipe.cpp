@@ -117,7 +117,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				auto it = find_if(mod.xfb, finder);
 				if(it == mod.xfb.end()) {
 					lock.unlock();
-					auto xfb = patchVertexShaderXfb(dev, mod.spv, stage.pName,
+					auto xfb = patchShaderXfb(dev, mod.spv, stage.pName,
 						std::move(spec), mod.name);
 					lock.lock();
 

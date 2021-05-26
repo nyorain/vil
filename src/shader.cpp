@@ -175,6 +175,16 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 			continue;
 		}
 
+
+		if(compiler.has_member_decoration(structType.self, i, spv::DecorationBuiltIn)) {
+			// filter out unwritten builtins
+			auto builtin = compiler.get_member_decoration(structType.self, i, spv::DecorationBuiltIn);
+			if(!compiler.has_active_builtin(spv::BuiltIn(builtin), spv::StorageClassOutput)) {
+				continue;
+			}
+			cap.builtin = builtin;
+		}
+
 		auto size = baseSize;
 		for(auto j = 0u; j < mtype.array.size(); ++j) {
 			auto dim = mtype.array[j];
@@ -195,10 +205,6 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 		// TODO: have to align offset properly for 64-bit types
 		addMemberDeco(newDecos, structType.self, i, spv11::Decoration::Offset, bufOffset);
 
-		if(compiler.has_member_decoration(structType.self, i, spv::DecorationBuiltIn)) {
-			cap.builtin = compiler.get_member_decoration(structType.self, i, spv::DecorationBuiltIn);
-		}
-
 		cap.name = memberName;
 		cap.offset = bufOffset;
 
@@ -207,11 +213,8 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 	}
 }
 
-XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
-		const char* entryPoint, ShaderSpecialization spec,
-		std::string_view modName) {
-	ZoneScoped;
-
+XfbPatchRes patchSpirvXfb(span<const u32> spirv,
+		const char* entryPoint, const ShaderSpecialization& spec) {
 	// parse spirv
 	if(spirv.size() < 5) {
 		dlg_error("spirv to small");
@@ -223,18 +226,13 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 		return {};
 	}
 
-	XfbPatchData ret {};
-	ret.desc.reset(new XfbPatchDesc());
-
-	// TODO: we can likely remove at least some of all this manual spir-v parsing
-	// with spirv-tools now.
-	// auto version = spirv[1];
-	// auto generator = spirv[2];
-	auto idBound = spirv[3];
-
-	std::unordered_set<u32> interfaceVars;
-	std::vector<u32> patched {spirv.begin(), spirv.begin() + 5};
+	std::vector<u32> patched;
 	patched.reserve(spirv.size());
+	patched.resize(5);
+	std::copy(spirv.begin(), spirv.begin() + 5, patched.begin());
+
+	// yeah, our hashing is terrible. But we only use it for debug output
+	u32 hash = 0u;
 
 	auto addedCap = false;
 	auto addedExecutionMode = false;
@@ -243,10 +241,7 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 	auto entryPointID = u32(-1);
 	auto insertDecosPos = u32(-1);
 
-	std::vector<u32> captureVars;
-
 	auto offset = 5u;
-	u32 badHash = 0u;
 	while(offset < spirv.size()) {
 		auto first = spirv[offset];
 		auto op = spv11::Op(first & 0xFFFFu);
@@ -273,7 +268,7 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 
 		for(auto i = 0u; i < wordCount; ++i) {
 			patched.push_back(spirv[offset + i]);
-			badHash ^= spirv[offset + i];
+			hash ^= spirv[offset + i];
 		}
 
 		// We need to add the TransformFeedback capability
@@ -315,38 +310,16 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 			if(!name.empty() && name == entryPoint) {
 				dlg_assert(entryPointID == u32(-1));
 				entryPointID = spirv[offset + 2];
-
-				dlg_assert(interfaceVars.empty());
-				auto interfaceOffset = 3 + ceilDivide(name.size() + 1, 4);
-				dlg_assert(interfaceOffset <= wordCount);
-				for(auto i = interfaceOffset; i < wordCount; ++i) {
-					auto id = spirv[offset + i];
-					dlg_assert(id < idBound);
-					interfaceVars.emplace(id);
-				}
-			}
-		}
-
-		// We need to add our xfb decorations to outputs from the shader stage
-		if(op == spv11::Op::OpVariable) {
-			dlg_assert(section <= 9u);
-			section = 9u;
-
-			dlg_assert_or(wordCount >= 4, return {});
-			auto resID = spirv[offset + 2];
-			auto storage = spv11::StorageClass(spirv[offset + 3]);
-			if(storage == spv11::StorageClass::Output && interfaceVars.count(resID)) {
-				captureVars.push_back(resID);
 			}
 		}
 
 		offset += wordCount;
 	}
 
-	if(!addedCap || !addedExecutionMode || captureVars.empty() || insertDecosPos == u32(-1)) {
+	if(!addedCap || !addedExecutionMode || insertDecosPos == u32(-1)) {
 		dlg_warn("Could not inject xfb into shader. Likely error inside vil. "
 			"capability: {}, executionMode: {}, captureVars.size(): {}, decosPos: {}",
-			addedCap, addedExecutionMode, captureVars.size(), insertDecosPos);
+			addedCap, addedExecutionMode, insertDecosPos);
 		return {};
 	}
 
@@ -378,10 +351,21 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 		std::memcpy(constant.m.c[0].r, src, entry.size);
 	}
 
+	compiler.compile();
+	compiler.update_active_builtins();
+
+	std::vector<XfbCapture> captures;
 	std::vector<u32> newDecos;
 
+	auto ivars = compiler.get_active_interface_variables();
+
 	auto bufOffset = 0u;
-	for(auto& var : captureVars) {
+	for(auto& var : ivars) {
+		auto storage = compiler.get_storage_class(var);
+		if(storage != spv::StorageClassOutput) {
+			continue;
+		}
+
 		auto& ptype = compiler.get_type_from_variable(var);
 		dlg_assert(ptype.pointer);
 		dlg_assert(ptype.parent_type);
@@ -394,12 +378,21 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 
 		if(type.basetype == spc::SPIRType::Struct) {
 			name += ".";
-			annotateCapture(compiler, type, name, bufOffset, ret.desc->captures, newDecos);
+			annotateCapture(compiler, type, name, bufOffset, captures, newDecos);
 		} else {
 			XfbCapture cap {};
 			auto baseSize = baseTypeSize(type, cap);
 			if(baseSize == u32(-1)) {
 				continue;
+			}
+
+			if(compiler.has_decoration(var, spv::DecorationBuiltIn)) {
+				// filter out unwritten builtins
+				auto builtin = compiler.get_decoration(var, spv::DecorationBuiltIn);
+				if(!compiler.has_active_builtin(spv::BuiltIn(builtin), spv::StorageClassOutput)) {
+					continue;
+				}
+				cap.builtin = builtin;
 			}
 
 			auto size = baseSize;
@@ -423,31 +416,55 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 			// compiler.set_decoration(var, spv::DecorationOffset, bufOffset);
 			addDeco(newDecos, var, spv11::Decoration::Offset, bufOffset);
 
-			if(compiler.has_decoration(var, spv::DecorationBuiltIn)) {
-				cap.builtin = compiler.get_decoration(var, spv::DecorationBuiltIn);
-			}
-
 			cap.name = name;
 			cap.offset = bufOffset;
 
-			ret.desc->captures.push_back(std::move(cap));
+			captures.push_back(std::move(cap));
 			bufOffset += size;
 		}
 	}
 
-	// PERF: stride align 8 is only needed when we have double vars,
-	// otherwise 4 would be enough. Track that somehow.
-	ret.desc->stride = align(bufOffset, 8u);
+	if(captures.empty()) {
+		dlg_info("xfb: nothing to capture?! Likely a vil error");
+		return {};
+	}
 
-	for(auto& var : captureVars) {
+	// TODO: stride align 8 is only needed when we have double vars,
+	// otherwise 4 would be enough. Track that somehow. The same way
+	// we'd also have to align 64-bit types, see above.
+	// auto stride = align(bufOffset, 8u);
+	auto stride = bufOffset;
+
+	for(auto& var : ivars) {
+		auto storage = compiler.get_storage_class(var);
+		if(storage != spv::StorageClassOutput) {
+			continue;
+		}
+
 		addDeco(newDecos, var, spv11::Decoration::XfbBuffer, 0u);
-		addDeco(newDecos, var, spv11::Decoration::XfbStride, ret.desc->stride);
+		addDeco(newDecos, var, spv11::Decoration::XfbStride, stride);
 	}
 
 	// insert decos into patched spirv
 	patched.insert(patched.begin() + insertDecosPos, newDecos.begin(), newDecos.end());
 
-	// NOTE: tmp debugging
+	auto desc = IntrusivePtr<XfbPatchDesc>(new XfbPatchDesc());
+	desc->captures = std::move(captures);
+	desc->stride = stride;
+	return {patched, std::move(desc)};
+}
+
+XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
+		const char* entryPoint, ShaderSpecialization spec,
+		std::string_view modName) {
+	ZoneScoped;
+
+	auto patched = patchSpirvXfb(spirv, entryPoint, spec);
+	if(!patched.desc) {
+		return {};
+	}
+
+	// NOTE: useful for debugging
 	(void) modName;
 	/*
 	std::string output = "vil";
@@ -464,7 +481,7 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 	for(auto& cap : ret.desc->captures) {
 		dlg_info("  {}", cap.name);
 		dlg_info("  >> offset {}", cap.offset);
-		dlg_info("  >> size {}", cap.width * cap.columns * cap.vecsize);
+		dlg_info("  >> size {}", (cap.width * cap.columns * cap.vecsize) / 8);
 		if(cap.builtin) {
 			dlg_info("  >> builtin {}", *cap.builtin);
 		}
@@ -473,17 +490,23 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 
 	VkShaderModuleCreateInfo ci {};
 	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	ci.pCode = patched.data();
-	ci.codeSize = patched.size() * 4;
+	ci.pCode = patched.spirv.data();
+	ci.codeSize = patched.spirv.size() * 4;
 
+	XfbPatchData ret;
 	auto res = dev.dispatch.CreateShaderModule(dev.handle, &ci, nullptr, &ret.mod);
 	if(res != VK_SUCCESS) {
 		dlg_error("xfb CreateShaderModule: {} (res)", vk::name(res), res);
 		return {};
 	}
 
+	std::string pname = std::string(modName);
+	pname += "(vil:xfb-patched)";
+	nameHandle(dev, ret.mod, pname.c_str());
+
 	ret.entryPoint = entryPoint;
 	ret.spec = std::move(spec);
+	ret.desc = std::move(patched.desc);
 	return ret;
 }
 

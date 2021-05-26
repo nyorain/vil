@@ -39,4 +39,9 @@ struct Instance {
 	~Instance();
 };
 
+VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
+		const VkInstanceCreateInfo* ci,
+		const VkAllocationCallbacks* alloc,
+		VkInstance* pInstance);
+
 } // namespace vil

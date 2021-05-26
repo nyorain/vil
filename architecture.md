@@ -44,11 +44,23 @@ the layer works internally. Useful mainly for development on it.
 	  We compile it directly into the layer library.
 	- `tracy`: Source of the profiling tool we use, directly baked into the library.
 	  See [performance.md](docs/performance.md) for more details on profiling.
+	- `spirv-cross`: Source of [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross).
+	  We use it for SPIR-V reflection and patching. As of may 2021, we still use 
+	  spriv-reflect in most places but this will likely be replaced with
+	  SPIRV-Cross. We need SPIRV-cross for the xfb patching we have to do
+	  for the vertex viewer, doing this can involve things such as evaluating
+	  (spec-)constant shader expressions (e.g. array sizes) which isn't something
+	  we want to implement ourselves in the layer.
 	- `test`: To test the functions and classes not exported from the layer,
 	  we compile the tests directly into the shared library (when tests
 	  are enabled, they are off by default, but always run on the CI).
 	  The tests compiled into the shared library are defined in this folder.
-	  We also have a `main.cpp` here that is able to execute them.
+	  We compile them into the library itself so we can test functions that
+	  are not exported. 
+	  We also have a `main.cpp` here that is able to execute the tests.
+	  Unit tests are mainly for internal utility,
+	  end-to-end testing this way is hard to do in a useful way, should
+	  just be done manually by using the layer.
 - `include`: Only the public API header lives here. Future API or otherwise public
   headers should go here.
 - `docs`: Documentation, examples, pictures.

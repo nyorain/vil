@@ -247,7 +247,8 @@ if get_option('with_tests')
 	src += files(
 		'src/test/bugged.cpp',
 		'src/test/rpsplit.cpp',
-		'src/test/localVector.cpp'
+		'src/test/localVector.cpp',
+		'src/test/xfb.cpp',
 	)
 endif
 

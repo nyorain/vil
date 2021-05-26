@@ -58,7 +58,14 @@ struct XfbPatchData {
 	IntrusivePtr<XfbPatchDesc> desc {};
 };
 
-XfbPatchData patchVertexShaderXfb(Device&, span<const u32> spirv,
+struct XfbPatchRes {
+	std::vector<u32> spirv;
+	IntrusivePtr<XfbPatchDesc> desc {};
+};
+
+XfbPatchRes patchSpirvXfb(span<const u32> spirv,
+	const char* entryPoint, const ShaderSpecialization& spec);
+XfbPatchData patchShaderXfb(Device&, span<const u32> spirv,
 	const char* entryPoint, ShaderSpecialization sepc,
 	std::string_view modName);
 

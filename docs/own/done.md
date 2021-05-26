@@ -1,3 +1,6 @@
+- [x] detect when variables like Builtin CullDistance are present in spirv
+      but never written - we don't have to show them in the xfb tab.
+	  We don't even have to capture them in the first place.
 - [x] vertex viewer: better tabular display of data; also show indices. Respect offset
 - [x] vertex viewer improvements
 	- [x] automatically compute bounding box of data and center camera
