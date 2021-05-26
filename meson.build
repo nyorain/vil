@@ -32,6 +32,7 @@ args = cc.get_supported_arguments([
 	'/wd4458', # declaration hides class member, TODO: should be fixed in code, valid warning
 	'/wd5105', # needed to fix an issue in winbase.h on a specific windows version (wtf microsoft)
 	'/wd4267', # lossy conversion warning, way too strict.
+	'/wd4245', # signed/unsigned warning, way too strict.
 	'-D_CRT_SECURE_NO_WARNINGS',
 
 	# msvc really slow in debug build without this

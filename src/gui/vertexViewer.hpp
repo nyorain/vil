@@ -16,6 +16,10 @@ struct AABB3f {
 	Vec3f extent; // 0.5 * size
 };
 
+// TODO: the representation is counter-intuitive and makes our lives
+// harder a couple of times in the implementation. 'vertexOffset' should
+// always mean vertexOffset and 'indexOffset' (instead of offset) only be
+// available for indexed drawing.
 struct DrawParams {
 	std::optional<VkIndexType> indexType {}; // nullopt for non-indexed draw
 	u32 offset {}; // firstVertex or firstIndex
@@ -36,6 +40,7 @@ struct VertexViewer {
 private:
 	void centerCamOnBounds(const AABB3f& bounds);
 	VkPipeline createPipe(VkFormat format, u32 stride, VkPrimitiveTopology topo);
+	void createFrustumPipe();
 
 	struct DrawData {
 		VkPrimitiveTopology topology;
@@ -49,6 +54,7 @@ private:
 
 		float scale {1.f};
 		bool useW {false};
+		bool drawFrustum {false};
 
 		VkCommandBuffer cb {};
 	};
@@ -79,16 +85,12 @@ private:
 
 	Mat4f viewProjMtx_ {};
 
-	// OwnBuffer ubo_;
-	// void* uboMap_ {};
-
-	// VkDescriptorSetLayout dsLayout_ {};
-	// VkDescriptorSet ds_ {};
 	VkPipelineLayout pipeLayout_ {};
+	VkPipeline frustumPipe_ {};
 
 	// NOTE: could use way less pipes and instead just use a storage buffer
-	// to assemble the vertices from in our vertex shader.
-	// TODO: could at least cache shader modules.
+	// to assemble the vertices from in our vertex shader. Or alternatively
+	// use extended dynamic state extension.
 	struct Pipe {
 		VkFormat format {};
 		u32 stride {};

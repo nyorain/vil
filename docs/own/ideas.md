@@ -36,3 +36,7 @@ be possible or useful in the end.
   copy-on-write. Only when this submission (or some other pending one)
   is potentially writing something, copy it. Otherwise, copy it before
   future submissions that might write it (if still needed)
+
+- add anti-aliasing to vertex viewer. Should probably be beautifully
+  be doable with TAA
+  	- could also add AO to vertex viewer, when rendering faces

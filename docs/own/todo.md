@@ -4,8 +4,7 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 - lcs matching; fix dlg_assert(found) stuff
 - overlay improvements (especially win32 but also x11; leave wl out)
 - testing & stability improvements
-- docs improvements (mainly in introduction post explaining stuff)
-- vertex viewer improvements
+- docs improvements (mainly: add introduction post explaining stuff)
 - gui improvement: remove flickering data and stuff, allow to get
   texel values in command viewer
 - add more tests where useful
@@ -27,18 +26,20 @@ descriptor indexing extension:
       scales for descriptor sets with many thousand bindings
 
 vertex viewer/xfb:
-- [ ] figure out when to flip y and when not.
-- [ ] better tabular display of data; also show indices. Respect offset
-- [ ] vertex viewer improvements
-	- [x] automatically compute bounding box of data and center camera
-	- [ ] allow showing active frustum
 - [ ] detect when variables like Builtin CullDistance are present in spirv
       but never written - we don't have to show them in the xfb tab.
 	  We don't even have to capture them in the first place.
-- [ ] (low prio) really attempt to display non-float formats in 3D vertex viewer?
+- [ ] (later) figure out when to flip y and when not.
+      {Not as relevant anymore now that we render the frustum. Could still
+	   be useful option. I guesse it's nothing we can just figure out}
+- [ ] (later) better perspective heurstic. Also detect near, far (and use for frustum
+      draw). Don't execute the heurstic every frame, only when something changes?
+	  (Technically, data potentially changes every frame but the assumption
+	  that drawn data doesn't suddenly change projection type seems safe).
+- [ ] (later) really attempt to display non-float formats in 3D vertex viewer?
 - [ ] (low prio) xfb: check whether a used output format is supported as input
 	- [ ] also handle matrices somehow
-- [ ] (later) support showing all draws from a render pass?}
+- [ ] (later) support showing all draws from a render pass?
 
 docs
 - [ ] proper shipping and installing

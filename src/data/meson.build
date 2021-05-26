@@ -19,6 +19,7 @@ if glslang.found()
 			'u3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_UINT'],
 			'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
 		},
+		'frustum.vert': {'': [] },
 		'vertices.vert': {'': [] },
 		'vertices.frag': {'': [] },
 		'blur.comp': {'': [] },

@@ -337,6 +337,15 @@ We don't really need vkCmdDrawIndirectByteCountEXT, we all the extra
 information this provides. This might change when we support tessellation
 and geometry shaders.
 
+---
+
+Initially, I had to planned to automatically re-center the viewport when
+new content is selected. But it's actually nice to see objects from
+a constant position when selecting a new draw command.
+This could still be useful as an option or as something we implement
+when a draw command from a different render pass is selected? But even
+then, not changing the camera pos/rot might be nice.
+
 # Submission synchronization
 
 When application submits to a queue:

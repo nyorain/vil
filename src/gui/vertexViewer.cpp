@@ -15,6 +15,7 @@
 #include <vk/enumString.hpp>
 #include <util/spirv_reflect.h>
 
+#include <frustum.vert.spv.h>
 #include <vertices.vert.spv.h>
 #include <vertices.frag.spv.h>
 
@@ -36,7 +37,7 @@ std::string printFormat(u32 count, const Vec4d& val) {
 	return ret;
 }
 
-std::string readFormat(VkFormat format, span<const std::byte> src) {
+std::string printFormat(VkFormat format, span<const std::byte> src) {
 	u32 numChannels = FormatChannelCount(format);
 	u32 componentSize = FormatElementSize(format) / numChannels;
 
@@ -245,6 +246,7 @@ VertexViewer::~VertexViewer() {
 		dev_->dispatch.DestroyPipeline(dev_->handle, pipe.pipe, nullptr);
 	}
 
+	dev_->dispatch.DestroyPipeline(dev_->handle, frustumPipe_, nullptr);
 	dev_->dispatch.DestroyPipelineLayout(dev_->handle, pipeLayout_, nullptr);
 	dev_->dispatch.DestroyShaderModule(dev_->handle, vertShader_, nullptr);
 	dev_->dispatch.DestroyShaderModule(dev_->handle, fragShader_, nullptr);
@@ -284,6 +286,113 @@ void VertexViewer::init(Device& dev, VkRenderPass rp) {
 	fragShaderInfo.pCode = vertices_frag_spv_data;
 	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &fragShaderInfo, NULL, &fragShader_));
 
+	if(dev.nonSolidFill) {
+		createFrustumPipe();
+	}
+}
+
+void VertexViewer::createFrustumPipe() {
+	auto& dev = *dev_;
+	dlg_assert(dev.nonSolidFill);
+
+	// load shaders
+	VkShaderModule vertShader;
+
+	VkShaderModuleCreateInfo vertShaderInfo {};
+	vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	vertShaderInfo.codeSize = sizeof(frustum_vert_spv_data);
+	vertShaderInfo.pCode = frustum_vert_spv_data;
+	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertShader));
+
+	std::array<VkPipelineShaderStageCreateInfo, 2> stages {};
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	stages[0].module = vertShader;
+	stages[0].pName = "main";
+
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	stages[1].module = fragShader_;
+	stages[1].pName = "main";
+
+	VkPipelineVertexInputStateCreateInfo vertexInfo {};
+	vertexInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+	VkPipelineInputAssemblyStateCreateInfo iaInfo {};
+	iaInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	iaInfo.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+
+	VkPipelineViewportStateCreateInfo viewportInfo {};
+	viewportInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportInfo.viewportCount = 1;
+	viewportInfo.scissorCount = 1;
+
+	VkPipelineRasterizationStateCreateInfo rasterInfo {};
+	rasterInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterInfo.polygonMode = VK_POLYGON_MODE_LINE;
+	rasterInfo.cullMode = VK_CULL_MODE_NONE;
+	rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterInfo.lineWidth = 1.0f;
+
+	VkPipelineMultisampleStateCreateInfo msInfo {};
+	msInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	msInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+	VkPipelineColorBlendAttachmentState colorAttach[1] {};
+	colorAttach[0].blendEnable = VK_TRUE;
+	colorAttach[0].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	colorAttach[0].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	colorAttach[0].colorBlendOp = VK_BLEND_OP_ADD;
+	colorAttach[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorAttach[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorAttach[0].alphaBlendOp = VK_BLEND_OP_ADD;
+	colorAttach[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+		VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+	VkPipelineDepthStencilStateCreateInfo depthInfo {};
+	depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+
+	VkPipelineColorBlendStateCreateInfo blendInfo {};
+	blendInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	blendInfo.attachmentCount = 1;
+	blendInfo.pAttachments = colorAttach;
+
+	VkPipelineDepthStencilStateCreateInfo depthStencil {};
+	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencil.depthTestEnable = true;
+	depthStencil.depthWriteEnable = true;
+	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	depthStencil.stencilTestEnable = false;
+
+	VkDynamicState dynStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+	VkPipelineDynamicStateCreateInfo dynState {};
+	dynState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynState.dynamicStateCount = 2;
+	dynState.pDynamicStates = dynStates;
+
+	VkGraphicsPipelineCreateInfo gpi[1] {};
+
+	gpi[0].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	gpi[0].flags = 0;
+	gpi[0].stageCount = u32(stages.size());
+	gpi[0].pStages = stages.data();
+	gpi[0].pVertexInputState = &vertexInfo;
+	gpi[0].pInputAssemblyState = &iaInfo;
+	gpi[0].pViewportState = &viewportInfo;
+	gpi[0].pRasterizationState = &rasterInfo;
+	gpi[0].pMultisampleState = &msInfo;
+	gpi[0].pDepthStencilState = &depthInfo;
+	gpi[0].pColorBlendState = &blendInfo;
+	gpi[0].pDepthStencilState = &depthStencil;
+	gpi[0].pDynamicState = &dynState;
+	gpi[0].layout = dev.renderData->pipeLayout;
+	gpi[0].renderPass = rp_;
+	gpi[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
+
+	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
+		VK_NULL_HANDLE, 1, gpi, nullptr, &frustumPipe_));
+
+	dev.dispatch.DestroyShaderModule(dev.handle, vertShader, nullptr);
 }
 
 VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
@@ -502,6 +611,27 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	} else {
 		dev.dispatch.CmdDraw(cb, data.params.drawCount, 1, data.params.offset, 0);
 	}
+
+	if(data.drawFrustum) {
+		struct {
+			Mat4f matrix;
+			float near;
+			float far;
+			u32 useW;
+		} pcData = {
+			viewProjMtx_,
+			// TODO: we could calculate them from perspective z, w values
+			0.f,
+			data.useW ? 100000.f : 1.f,
+			data.useW,
+		};
+
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, frustumPipe_);
+		dev.dispatch.CmdPushConstants(cb, pipeLayout_,
+			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+			0, sizeof(pcData), &pcData);
+		dev.dispatch.CmdDraw(cb, 24, 1, 0, 0);
+	}
 }
 
 void VertexViewer::updateInput(float dt) {
@@ -700,12 +830,21 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	// TODO when drawing indexed, we really need to consider and display
 	//   the used indices, otherwise this is utterly useless.
 
+	auto colCount = attribs.size();
+	if(params.indexType) {
+		++colCount;
+	}
+
 	auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
-		if(attribs.empty()) {
+		if(colCount == 0u) {
 			ImGui::Text("No Vertex input");
-		} else if(ImGui::BeginTable("Vertices", int(attribs.size()), flags)) {
+		} else if(ImGui::BeginTable("Vertices", colCount, flags)) {
+			if(params.indexType) {
+				ImGui::TableSetupColumn("IDX");
+			}
+
 			for(auto& attrib : attribs) {
 				auto& iv = *vertStage->input_variables[attrib.second];
 				ImGui::TableSetupColumn(iv.name);
@@ -715,33 +854,57 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			ImGui::TableNextRow();
 
 			auto finished = false;
-			auto id = 0u;
-			while(!finished && id < 100) {
+			auto i = 0u;
+			while(!finished && i < 100) {
+				bool captured = true;
+				auto id = i;
+				if(params.indexType) {
+					ImGui::TableNextColumn();
+
+					auto is = indexSize(*params.indexType);
+					auto ib = state.indexBufCopy.data();
+					auto off = (params.offset + i) * is;
+					if(off + is > ib.size()) {
+						captured = false;
+						imGuiText("N/A");
+					} else {
+						ib = ib.subspan(off, is);
+						id = readIndex(*params.indexType, ib) + params.vertexOffset;
+						imGuiText("{}", id);
+					}
+				} else {
+					id += params.offset;
+				}
+
 				for(auto& [aID, _] : attribs) {
 					auto& attrib = pipe.vertexAttribs[aID];
 					ImGui::TableNextColumn();
 
 					auto& binding = pipe.vertexBindings[attrib.binding];
 					auto& buf = state.vertexBufCopies[attrib.binding];
+					// TODO: correctly implement multi-instance support
 					auto off = binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX ?
 						id * binding.stride : 0u;
 					off += attrib.offset;
 
 					// TODO: compressed support?
 					auto size = FormatElementSize(attrib.format);
-
 					if(off + size > buf.data().size()) {
-						finished = true;
-						break;
+						captured = false;
+					}
+
+					if(!captured) {
+						imGuiText("N/A");
+						continue;
 					}
 
 					auto* ptr = buf.data().data() + off;
-					auto str = readFormat(attrib.format, {ptr, size});
+					auto str = printFormat(attrib.format, {ptr, size});
 
 					imGuiText("{}", str);
 				}
 
-				++id;
+				++i;
 				ImGui::TableNextRow();
 			}
 
@@ -1130,7 +1293,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 					if(format == VK_FORMAT_UNDEFINED) {
 						imGuiText("<error>");
 					} else {
-						imGuiText("{}", readFormat(format, cbuf));
+						imGuiText("{}", printFormat(format, cbuf));
 					}
 				}
 
@@ -1207,6 +1370,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		drawData_.useW = useW;
 		drawData_.scale = 1.f;
+		drawData_.drawFrustum = dev_->nonSolidFill;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);

@@ -1,3 +1,7 @@
+- [x] vertex viewer: better tabular display of data; also show indices. Respect offset
+- [x] vertex viewer improvements
+	- [x] automatically compute bounding box of data and center camera
+	- [x] allow showing active frustum
 - [x] vertexViewer: support drawIndirectCount in vertex viewer
 	- [x] similar: support drawIndirect with multiple commands
 - [x] vertexViewer: also support just showing a single draw command of multiDraw
