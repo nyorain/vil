@@ -22,50 +22,8 @@ namespace vil {
 
 constexpr const auto pi = 3.14159265359;
 constexpr auto fov = float(0.48 * pi);
-constexpr auto near = -0.01f;
-constexpr auto far = -10000.f;
 
 // util
-DrawParams getDrawParams(const Command& cmd, const CommandHookState& state) {
-	DrawParams ret;
-
-	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
-		ret.offset = dcmd->firstVertex;
-		ret.drawCount = dcmd->vertexCount;
-	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
-		ret.offset = dcmd->firstIndex;
-		ret.vertexOffset = dcmd->vertexOffset;
-		ret.drawCount = dcmd->indexCount;
-		ret.indexType = dcmd->state.indices.type;
-	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
-		// dlg_assert(hook.copyIndirectCmd);
-		// dlg_assert(data->state);
-
-		auto& ic = state.indirectCopy;
-		auto span = ic.data();
-		dlg_assert(!span.empty());
-
-		if(dcmd->indexed) {
-			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
-			ret.offset = ecmd.firstIndex;
-			ret.drawCount = ecmd.indexCount;
-			ret.vertexOffset = ecmd.vertexOffset;
-			ret.indexType = dcmd->state.indices.type;
-		} else {
-			auto ecmd = read<VkDrawIndirectCommand>(span);
-			ret.offset = ecmd.firstVertex;
-			ret.drawCount = ecmd.vertexCount;
-		}
-
-	} else {
-		// TODO: DrawIndirectCount
-		dlg_info("Vertex viewer unimplemented for command type");
-		return {};
-	}
-
-	return ret;
-}
-
 template<typename T>
 std::string printFormat(u32 count, const Vec4d& val) {
 	auto ret = std::string {};
@@ -133,6 +91,8 @@ std::string readFormat(VkFormat format, span<const std::byte> src) {
 
 // NOTE: this could probably be improved
 bool perspectiveHeuristic(ReadBuf data, u32 stride) {
+	ZoneScoped;
+
 	if(data.empty()) {
 		dlg_warn("no data for orthogonal/perspective heuristic");
 		return false;
@@ -452,15 +412,15 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	// TODO: cache this! But should likely not be implemented here in first place.
 	// TODO: implement a serious heuristic. Inspect the spv code,
 	//   and try to find which input influences the Position output
-	if(data.vertexInfo.vertexAttributeDescriptionCount == 0u) {
+	if(vertexInput_.attribs.empty()) {
 		dlg_info("Can't display vertices, no vertex attribs");
 		return;
 	}
 
-	dlg_assert(data.vertexInfo.vertexBindingDescriptionCount > 0);
+	dlg_assert(!vertexInput_.bindings.empty());
 
-	auto& attrib = data.vertexInfo.pVertexAttributeDescriptions[0];
-	auto& binding = data.vertexInfo.pVertexBindingDescriptions[attrib.binding];
+	auto& attrib = vertexInput_.attribs[0];
+	auto& binding = vertexInput_.bindings[attrib.binding];
 
 	dlg_assert_or(binding.binding < data.vertexBuffers.size(), return);
 	auto& vbuf = data.vertexBuffers[binding.binding];
@@ -627,7 +587,7 @@ void VertexViewer::updateInput(float dt) {
 	auto rect = ImGui::GetItemRectSize();
 	auto aspect = rect.x / rect.y;
 
-	auto projMtx = perspective(fov, aspect, near, far);
+	auto projMtx = perspective(fov, aspect, near_, far_);
 	flipY(projMtx);
 
 	auto viewMtx = viewMatrix(cam_);
@@ -636,6 +596,8 @@ void VertexViewer::updateInput(float dt) {
 
 void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
+	ZoneScoped;
+
 	// TODO: display binding & attribs information
 	// TODO: only show vertex range used for draw call
 
@@ -649,7 +611,6 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 		return;
 	}
-
 
 	auto& pipe = *cmd.state.pipe;
 
@@ -678,6 +639,61 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 				attribs.push_back({a, i});
 			}
 		}
+	}
+
+	// first, get draw params
+	DrawParams params;
+
+	auto displayCmdSlider = [&](std::optional<VkIndexType> indices, u32 stride, u32 offset = 0u){
+		dlg_assert(dev_->commandHook->copyIndirectCmd);
+		dlg_assert(state.indirectCopy.buffer.size);
+
+		auto count = state.indirectCommandCount;
+		if(count == 0u) {
+			imGuiText("No commands (drawCount = 0)");
+			selectedID_ = -1;
+			return;
+		} else if(count == 1u) {
+			selectedID_ = 0u;
+		} else {
+			auto lbl = dlg::format("Commands: {}", count);
+			optSliderRange(lbl.c_str(), selectedID_, count);
+		}
+
+		auto& ic = state.indirectCopy;
+		auto span = ic.data().subspan(offset);
+		if(indices) {
+			auto sub = span.subspan(selectedID_ * stride);
+			auto ecmd = read<VkDrawIndexedIndirectCommand>(sub);
+			params.offset = ecmd.firstIndex;
+			params.drawCount = ecmd.indexCount;
+			params.vertexOffset = ecmd.vertexOffset;
+			params.indexType = indices;
+		} else {
+			auto sub = span.subspan(selectedID_ * stride);
+			auto ecmd = read<VkDrawIndirectCommand>(sub);
+			params.offset = ecmd.firstVertex;
+			params.drawCount = ecmd.vertexCount;
+		}
+	};
+
+	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
+		params.offset = dcmd->firstVertex;
+		params.drawCount = dcmd->vertexCount;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
+		params.offset = dcmd->firstIndex;
+		params.vertexOffset = dcmd->vertexOffset;
+		params.drawCount = dcmd->indexCount;
+		params.indexType = dcmd->state.indices.type;
+	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
+		auto i = dcmd->indexed ? std::optional(dcmd->state.indices.type) : std::nullopt;
+		displayCmdSlider(i, dcmd->stride);
+	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
+		auto i = dcmd->indexed ? std::optional(dcmd->state.indices.type) : std::nullopt;
+		displayCmdSlider(i, dcmd->stride, 4u); // skip u32 count
+	} else {
+		imGuiText("Vertex viewer unimplemented for command type");
+		return;
 	}
 
 	// TODO sort attribs by input location?
@@ -736,8 +752,6 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	ImGui::EndChild();
 
 	// 2: viewer
-	auto params = getDrawParams(cmd, state);
-
 	if(ImGui::Button("Recenter")) {
 		auto& attrib = pipe.vertexAttribs[0];
 		auto& binding = pipe.vertexBindings[attrib.binding];
@@ -760,7 +774,6 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			vertBounds = bounds(attrib.format, vertData, binding.stride, false);
 		}
 
-		speed_ = vertBounds.extent.x + vertBounds.extent.y + vertBounds.extent.z;
 		centerCamOnBounds(vertBounds);
 	}
 
@@ -768,9 +781,29 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
 
+		auto attribCount = pipe.vertexInputState.vertexAttributeDescriptionCount;
+		auto bindingCount = pipe.vertexInputState.vertexBindingDescriptionCount;
+		vertexInput_.attribs.resize(attribCount);
+		vertexInput_.bindings.resize(bindingCount);
+
+		std::copy(pipe.vertexInputState.pVertexAttributeDescriptions,
+			pipe.vertexInputState.pVertexAttributeDescriptions + attribCount,
+			vertexInput_.attribs.begin());
+		std::copy(pipe.vertexInputState.pVertexBindingDescriptions,
+			pipe.vertexInputState.pVertexBindingDescriptions + bindingCount,
+			vertexInput_.bindings.begin());
+
+		if(pipe.dynamicState.count(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT)) {
+			for(auto i = 0u; i < bindingCount; ++i) {
+				auto& buf = cmd.state.vertices[i];
+				if(buf.stride) {
+					vertexInput_.bindings[i].stride = buf.stride;
+				}
+			}
+		}
+
 		drawData_.cb = draw.cb;
 		drawData_.params = params;
-		drawData_.vertexInfo = pipe.vertexInputState;
 		drawData_.canvasOffset = {pos.x, pos.y};
 		drawData_.canvasSize = {avail.x, avail.y};
 		drawData_.topology = pipe.inputAssemblyState.topology;
@@ -846,9 +879,11 @@ const char* name(spv11::BuiltIn builtin) {
 
 void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
+	ZoneScoped;
 	dlg_assert_or(cmd.state.pipe, return);
+	auto& pipe = *cmd.state.pipe;
 
-	if(!cmd.state.pipe->xfbPatch) {
+	if(!pipe.xfbPatch) {
 		imGuiText("Error: couldn't inject transform feedback code to shader");
 		return;
 	} else if(!state.transformFeedback.buffer.size) {
@@ -861,40 +896,92 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		return;
 	}
 
+	auto& xfbPatch = *pipe.xfbPatch;
+
+	u32 vertexOffset {};
 	u32 vertexCount {};
+	auto displayCmdSlider = [&](bool indexed, u32 stride, u32 offset = 0u){
+		dlg_assert(dev_->commandHook->copyIndirectCmd);
+		dlg_assert(state.indirectCopy.buffer.size);
+
+		auto count = state.indirectCommandCount;
+		if(count == 0u) {
+			imGuiText("No commands (drawCount = 0)");
+			selectedID_ = -1;
+			return;
+		} else if(count == 1u) {
+			selectedID_ = 0u;
+		} else {
+			auto lbl = dlg::format("Commands: {}", count);
+			optSliderRange(lbl.c_str(), selectedID_, count);
+		}
+
+		auto& ic = state.indirectCopy;
+		auto span = ic.data().subspan(offset);
+		if(indexed) {
+			for(auto i = 0u; i < selectedID_; ++i) {
+				auto sub = span.subspan(i * stride);
+				auto ecmd = read<VkDrawIndexedIndirectCommand>(sub);
+				vertexOffset += ecmd.indexCount * ecmd.instanceCount;
+			}
+
+			auto sub = span.subspan(selectedID_ * stride);
+			auto ecmd = read<VkDrawIndexedIndirectCommand>(sub);
+			vertexCount = ecmd.indexCount * ecmd.instanceCount;
+		} else {
+			for(auto i = 0u; i < selectedID_; ++i) {
+				auto sub = span.subspan(i * stride);
+				auto ecmd = read<VkDrawIndirectCommand>(sub);
+				vertexOffset += ecmd.vertexCount * ecmd.instanceCount;
+			}
+
+			auto sub = span.subspan(selectedID_ * stride);
+			auto ecmd = read<VkDrawIndirectCommand>(sub);
+			vertexCount = ecmd.vertexCount * ecmd.instanceCount;
+		}
+	};
+
 	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
 		vertexCount = dcmd->vertexCount * dcmd->instanceCount;
 	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
 		vertexCount = dcmd->indexCount * dcmd->instanceCount;
 	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
-		dlg_assert(dev_->commandHook->copyIndirectCmd);
-		dlg_assert(state.indirectCopy.buffer.size);
-
-		auto& ic = state.indirectCopy;
-		auto span = ic.data();
-		if(dcmd->indexed) {
-			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
-			vertexCount = ecmd.indexCount * ecmd.instanceCount;
-		} else {
-			auto ecmd = read<VkDrawIndirectCommand>(span);
-			vertexCount = ecmd.vertexCount * ecmd.instanceCount;
+		displayCmdSlider(dcmd->indexed, dcmd->stride);
+		if(selectedID_ == u32(-1)) {
+			return;
 		}
-
+	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
+		displayCmdSlider(dcmd->indexed, dcmd->stride, 4u); // skip u32 count in the beginning
+		if(selectedID_ == u32(-1)) {
+			return;
+		}
 	} else {
-		// TODO: DrawIndirectCount
 		imGuiText("Vertex viewer unimplemented for command type");
 		return;
 	}
 
-	vertexCount = topologyOutputCount(cmd.state.pipe->inputAssemblyState.topology, vertexCount);
-	vertexCount = std::min(vertexCount, u32(state.transformFeedback.buffer.size / 16u));
+	vertexCount = topologyOutputCount(pipe.inputAssemblyState.topology, vertexCount);
+	vertexOffset = topologyOutputCount(pipe.inputAssemblyState.topology, vertexOffset);
+
+	auto capturedCount = state.transformFeedback.buffer.size / xfbPatch.stride;
+	if(vertexOffset + vertexCount > capturedCount) {
+		dlg_warn("xfb data truncated; Would need huge buffers");
+
+		if(vertexOffset >= capturedCount) {
+			imGuiText("Nothing to display; Not enough data captured");
+			return;
+		}
+
+		vertexCount = capturedCount - vertexOffset;
+	}
 
 	// 1: table
-	auto& xfbPatch = *cmd.state.pipe->xfbPatch;
 	auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
 		if(ImGui::BeginTable("Vertices", xfbPatch.captures.size(), flags)) {
+			ZoneScopedN("Table");
+
 			// header
 			for(auto& capture : xfbPatch.captures) {
 				auto name = capture.name.c_str();
@@ -916,7 +1003,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 
 			// data
 			auto xfbData = state.transformFeedback.data();
-			auto vCount = std::min(vertexCount, u32(xfbData.size() / 16u));
+			xfbData = xfbData.subspan(vertexOffset * xfbPatch.stride);
 
 			auto formatForType = [](XfbCapture& capture) {
 				auto compIDForWidth = [](u32 width) -> u32 {
@@ -1032,7 +1119,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 				return VK_FORMAT_UNDEFINED;
 			};
 
-			for(auto i = 0u; i < std::min(u32(100u), vCount); ++i) {
+			for(auto i = 0u; i < std::min(u32(100u), vertexCount); ++i) {
 				auto buf = xfbData.subspan(i * xfbPatch.stride, xfbPatch.stride);
 
 				for(auto& capture : xfbPatch.captures) {
@@ -1075,6 +1162,12 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		return;
 	}
 
+	dlg_assert(posCapture->type == XfbCapture::typeFloat);
+	dlg_assert(posCapture->vecsize == 4u);
+	dlg_assert(posCapture->width == 32);
+	dlg_assert(posCapture->columns = 1u);
+	dlg_assert(posCapture->array.empty());
+
 	bspan = bspan.subspan(posCapture->offset, vertexCount * xfbPatch.stride);
 
 	// TODO: don't evaluate this every frame, just in the beginning
@@ -1083,7 +1176,6 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 
 	if(ImGui::Button("Recenter")) {
 		auto vertBounds = bounds(VK_FORMAT_R32G32B32A32_SFLOAT, bspan, xfbPatch.stride, useW);
-		speed_ = vertBounds.extent.x + vertBounds.extent.y + vertBounds.extent.z;
 		centerCamOnBounds(vertBounds);
 	}
 
@@ -1091,11 +1183,15 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
 
-		const static VkVertexInputBindingDescription vertexBinding {
+		// we statically know the single binding and attribute
+		vertexInput_.bindings.resize(1);
+		vertexInput_.attribs.resize(1);
+
+		vertexInput_.bindings[0] = {
 			0u, xfbPatch.stride, VK_VERTEX_INPUT_RATE_VERTEX,
 		};
 
-		const static VkVertexInputAttributeDescription vertexAttrib {
+		vertexInput_.attribs[0] = {
 			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, posCapture->offset,
 		};
 
@@ -1103,17 +1199,14 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.cb = draw.cb;
 		drawData_.params = {};
 		drawData_.params.drawCount = vertexCount;
+		drawData_.params.offset = vertexOffset;
 		drawData_.indexBuffer = {};
 		drawData_.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
-		drawData_.vertexInfo.vertexAttributeDescriptionCount = 1u;
-		drawData_.vertexInfo.pVertexAttributeDescriptions = &vertexAttrib;
-		drawData_.vertexInfo.vertexBindingDescriptionCount = 1u;
-		drawData_.vertexInfo.pVertexBindingDescriptions = &vertexBinding;
 		drawData_.canvasOffset = {pos.x, pos.y};
 		drawData_.canvasSize = {avail.x, avail.y};
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		drawData_.useW = useW;
-		drawData_.scale = 1.f; // 100.f; // TODO
+		drawData_.scale = 1.f;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1143,6 +1236,11 @@ void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 
 	yaw_ = {};
 	pitch_ = {};
+
+	auto sum = bounds.extent.x + bounds.extent.y + bounds.extent.z;
+	speed_ = sum;
+	near_ = -0.001 * sum;
+	far_ = -100 * sum;
 }
 
 } // namespace vil

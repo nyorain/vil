@@ -1302,6 +1302,8 @@ void CommandViewer::updateHook() {
 		(drawIndirectCmd && drawIndirectCmd->indexed) ||
 		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
+	hook.freeze = false;
+
 	switch(view_) {
 		case IOView::command:
 			hook.queryTime = true;

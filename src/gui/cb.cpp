@@ -95,7 +95,10 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	// TODO: don't show this checkbox (or set it to true and disable?)
 	// when we are viewing an invalidated record without updating.
-	ImGui::Checkbox("Freeze State", &hook.freeze);
+	if(ImGui::Checkbox("Freeze State", &freezeState_)) {
+		hook.freeze = freezeState_;
+	}
+
 	if(gui_->showHelp && ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("This will freeze the state of the command you are viewing,\n"
 			"e.g. the image/buffer content and measured time.\n"
@@ -136,7 +139,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::SameLine();
 		refButton(*gui_, *cb_);
 	} else if(mode_ == UpdateMode::any) {
-		imGuiText("Updating from Command Group");
+		imGuiText("Updating from any records");
 	} else if(mode_ == UpdateMode::swapchain) {
 		if(!gui_->dev().swapchain) {
 			record_ = {};
@@ -156,9 +159,11 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::SameLine();
 		refButton(*gui_, sc);
 
-		ImGui::SameLine();
+	}
 
-		ImGui::Checkbox("Freeze Commands", &freezePresentBatches_);
+	if(mode_ != UpdateMode::none) {
+		ImGui::SameLine();
+		ImGui::Checkbox("Freeze Commands", &freezeCommands_);
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
 				"This will freeze the commands shown on the left.\n"
@@ -241,12 +246,9 @@ void CommandBufferGui::draw(Draw& draw) {
 							commandViewer_.select(record_, *command_.back(), dsState_, true);
 
 							dev.commandHook->target = {};
-							// dlg_assert(record_->group);
-							// dlg_assert(desc_.size() <= record_->group->desc.children.size() + 1);
-
-							// dev.commandHook->target.group = record_->group;
 							dev.commandHook->target.all = true;
 							dev.commandHook->desc(record_, command_, dsState_);
+							dev.commandHook->freeze = false;
 						}
 
 						ImGui::Indent(s);
@@ -295,10 +297,12 @@ void CommandBufferGui::draw(Draw& draw) {
 
 			// in any case, update the hook
 			dev.commandHook->desc(record_, command_, dsState_);
+			dev.commandHook->freeze = false;
 		}
 	}
 
-	if(!hook.completed.empty() && (!hook.freeze || !commandViewer_.state())) {
+	// try to update the shown commands with the best new match
+	if(!hook.completed.empty() && (!freezeCommands_ || !commandViewer_.state())) {
 		// find the best match
 		// TODO: when in swapchain mode, we should match the context, i.e.
 		// that the new record appeared in roughly the same position on
@@ -329,16 +333,14 @@ void CommandBufferGui::draw(Draw& draw) {
 			best->descriptorSnapshot, false);
 
 		// update internal state state from hook match
-		if(mode_ != UpdateMode::swapchain || !freezePresentBatches_) {
+		if(!freezeCommands_) {
 			record_ = std::move(best->record);
 			command_ = best->command;
 			dsState_ = std::move(best->descriptorSnapshot);
 		}
 
-		auto bestSubID = best->submissionID;
-		hook.completed.clear();
-
-		if(mode_ == UpdateMode::swapchain && !freezePresentBatches_) {
+		if(mode_ == UpdateMode::swapchain && !freezeCommands_) {
+			auto bestSubID = best->submissionID;
 			dlg_assert(gui_->dev().swapchain);
 
 			// TODO: handle the case when we don't find it.
@@ -355,7 +357,28 @@ void CommandBufferGui::draw(Draw& draw) {
 
 			dlg_assertl(dlg_level_warn, found);
 		}
+
+		if(!hook.freeze && freezeState_) {
+			hook.freeze = true;
+		}
 	}
+
+	// When not command was selected yet, we won't get any new records
+	// from CommandHook. But still want to show the new commands.
+	if(!freezeCommands_ && command_.empty()) {
+		if(mode_ == UpdateMode::swapchain) {
+			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
+		} else if(mode_ == UpdateMode::commandBuffer) {
+			dlg_assert(cb_);
+			record_ = cb_->lastRecordPtrLocked();
+		} else if(mode_ == UpdateMode::any) {
+			// TODO: correct updating, iterate through all submissions
+			// in the last frames and find the best record match. ouch.
+			dlg_error("TODO: shown commands not correctly updated until selected");
+		}
+	}
+
+	hook.completed.clear();
 
 	ImGui::EndChild();
 	// ImGui::PopStyleColor();
@@ -448,11 +471,8 @@ void CommandBufferGui::destroyed(const Handle& handle) {
 			mode_ = UpdateMode::none;
 
 			auto& hook = *gui_->dev().commandHook;
-			if(hook.target.cb) {
-				dlg_assert(hook.target.cb == &handle);
-				hook.target = {};
-				hook.target.record = record_.get();
-			}
+			dlg_assert(!hook.target.cb || hook.target.cb == &handle);
+			hook.target = {};
 		}
 	}
 

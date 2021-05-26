@@ -39,7 +39,6 @@ private:
 
 	struct DrawData {
 		VkPrimitiveTopology topology;
-		VkPipelineVertexInputStateCreateInfo vertexInfo;
 		std::vector<BufferSpan> vertexBuffers;
 
 		DrawParams params;
@@ -73,7 +72,10 @@ private:
 	Vec2f lastMousPos_ {};
 	float yaw_ {};
 	float pitch_ {};
+
 	float speed_ {1.f};
+	float near_ {-0.001f};
+	float far_ {-10000.f};
 
 	Mat4f viewProjMtx_ {};
 
@@ -96,6 +98,13 @@ private:
 
 	std::vector<Pipe> pipes_ {};
 	DrawData drawData_;
+
+	struct {
+		std::vector<VkVertexInputBindingDescription> bindings;
+		std::vector<VkVertexInputAttributeDescription> attribs;
+	} vertexInput_;
+
+	u32 selectedID_ {};
 };
 
 } // namespace vil

@@ -30,6 +30,57 @@ std::string extractString(span<const u32> spirv) {
 	return {};
 }
 
+ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo* info) {
+	ShaderSpecialization ret;
+	if(!info) {
+		return ret;
+	}
+
+	auto data = static_cast<const std::byte*>(info->pData);
+	ret.entries = {info->pMapEntries, info->pMapEntries + info->mapEntryCount};
+	ret.data = {data, data + info->dataSize};
+	return ret;
+}
+
+bool operator==(const ShaderSpecialization& a, const ShaderSpecialization& b) {
+	if(a.entries.size() != b.entries.size()) {
+		return false;
+	}
+
+	// since they have the same number of entries, for equality we only
+	// have to show that each entry in a has an equivalent in b.
+	for(auto& ea : a.entries) {
+		auto found = false;
+		for(auto& eb : b.entries) {
+			if(ea.constantID != eb.constantID) {
+				continue;
+			}
+
+			if(ea.size == eb.size) {
+				dlg_assert(ea.offset + ea.size <= a.data.size());
+				dlg_assert(eb.offset + eb.size <= b.data.size());
+
+				// NOTE: keep in mind this might be more strict than
+				// an equality check e.g. for floating point NaNs. But that
+				// shouldn't be a problem for any use of this function.
+				auto cmp = std::memcmp(
+					a.data.data() + ea.offset,
+					b.data.data() + eb.offset,
+					ea.size);
+				found = (cmp == 0u);
+			}
+
+			break;
+		}
+
+		if(!found) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool isOpInSection8(spv11::Op op) {
 	switch(op) {
 		case spv11::Op::OpDecorate:
@@ -44,114 +95,6 @@ bool isOpInSection8(spv11::Op op) {
 		default:
 			return false;
 	}
-}
-
-bool isOpType(spv11::Op op) {
-	auto opu = unsigned(op);
-	if(opu >= unsigned(spv11::Op::OpTypeVoid) && opu <= unsigned(spv11::Op::OpTypeForwardPointer)) {
-		return true;
-	}
-
-	if(opu >= unsigned(spv11::Op::OpTypeVmeImageINTEL) && opu <= unsigned(spv11::Op::OpTypeAvcSicResultINTEL)) {
-		return true;
-	}
-
-	switch(op) {
-		case spv11::Op::OpTypePipeStorage:
-		case spv11::Op::OpTypeNamedBarrier:
-		case spv11::Op::OpTypeRayQueryKHR:
-		case spv11::Op::OpTypeAccelerationStructureKHR:
-		case spv11::Op::OpTypeCooperativeMatrixNV:
-			return true;
-		default:
-			break;
-	}
-
-	return false;
-}
-
-bool isOpConstant(spv11::Op op) {
-	switch(op) {
-		case spv11::Op::OpConstantTrue:
-		case spv11::Op::OpConstantFalse:
-		case spv11::Op::OpConstant:
-		case spv11::Op::OpConstantComposite:
-		case spv11::Op::OpConstantSampler:
-		case spv11::Op::OpConstantNull:
-		case spv11::Op::OpConstantPipeStorage:
-
-		case spv11::Op::OpSpecConstantTrue:
-		case spv11::Op::OpSpecConstantFalse:
-		case spv11::Op::OpSpecConstant:
-		case spv11::Op::OpSpecConstantComposite:
-		case spv11::Op::OpSpecConstantOp:
-			return true;
-
-		default:
-			return false;
-	}
-}
-
-u32 typeSize(span<const u32> spirv, const std::unordered_map<u32, u32>& locs, u32 id) {
-	auto it = locs.find(id);
-	if(it == locs.end()) {
-		dlg_error("Could not find type id {}", id);
-		return u32(-1);
-	}
-
-	auto op = spv11::Op(spirv[it->second] & 0xFFFFu);
-	auto wordCount = spirv[it->second] >> 16u;
-
-	switch(op) {
-		case spv11::Op::OpTypeFloat:
-		case spv11::Op::OpTypeInt:
-			dlg_assert(wordCount >= 3);
-			return spirv[it->second + 2] / 8;
-		case spv11::Op::OpTypeArray:
-		case spv11::Op::OpTypeMatrix:
-		case spv11::Op::OpTypeVector: {
-			dlg_assert(wordCount == 4);
-			auto nsize = typeSize(spirv, locs, spirv[it->second + 2]);
-			if(nsize == u32(-1)) {
-				return nsize;
-			}
-
-			auto count = spirv[it->second + 3];
-			return count * nsize;
-		} case spv11::Op::OpTypeStruct: {
-			auto sum = 0u;
-			for(auto i = 2u; i < wordCount; ++i) {
-				auto nsize = typeSize(spirv, locs, spirv[it->second + i]);
-				if(nsize == u32(-1)) {
-					return nsize;
-				}
-
-				sum += nsize;
-			}
-
-			return sum;
-		} default:
-			dlg_error("typeSize: Unhandled op");
-			return u32(-1);
-	}
-}
-
-u32 pointerTypeSize(span<const u32> spirv, const std::unordered_map<u32, u32>& defs,
-		u32 pointerID) {
-	auto it = defs.find(pointerID);
-	if(it == defs.end()) {
-		dlg_error("Could not find initial pointer id {}", pointerID);
-		return u32(-1);
-	}
-
-	auto op = spv11::Op(spirv[it->second] & 0xFFFFu);
-	if(op != spv11::Op::OpTypePointer) {
-		dlg_error("Expected OpTypePointer");
-		return u32(-1);
-	}
-
-	auto typeID = spirv[it->second + 3];
-	return typeSize(spirv, defs, typeID);
 }
 
 u32 baseTypeSize(const spc::SPIRType& type, XfbCapture& cap) {
@@ -245,13 +188,11 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 
 		if(!compiler.has_member_decoration(structType.self, i, spv::DecorationArrayStride) &&
 				!mtype.array.empty()) {
-			// compiler.set_member_decoration(structType.self, i, spv::DecorationArrayStride, baseSize);
 			addMemberDeco(newDecos, structType.self, i, spv11::Decoration::ArrayStride, baseSize);
 		}
 
 		dlg_assert_or(!compiler.has_member_decoration(structType.self, i, spv::DecorationOffset), continue);
 		// TODO: have to align offset properly for 64-bit types
-		// compiler.set_member_decoration(structType.self, i, spv::DecorationOffset, bufOffset);
 		addMemberDeco(newDecos, structType.self, i, spv11::Decoration::Offset, bufOffset);
 
 		if(compiler.has_member_decoration(structType.self, i, spv::DecorationBuiltIn)) {
@@ -266,9 +207,9 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 	}
 }
 
-// TODO: consider specialization constants! E.g. important for array sizes
 XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
-		const char* entryPoint, std::string_view modName) {
+		const char* entryPoint, ShaderSpecialization spec,
+		std::string_view modName) {
 	ZoneScoped;
 
 	// parse spirv
@@ -285,6 +226,8 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 	XfbPatchData ret {};
 	ret.desc.reset(new XfbPatchDesc());
 
+	// TODO: we can likely remove at least some of all this manual spir-v parsing
+	// with spirv-tools now.
 	// auto version = spirv[1];
 	// auto generator = spirv[2];
 	auto idBound = spirv[3];
@@ -292,9 +235,6 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 	std::unordered_set<u32> interfaceVars;
 	std::vector<u32> patched {spirv.begin(), spirv.begin() + 5};
 	patched.reserve(spirv.size());
-
-	std::unordered_map<u32, u32> locs;
-	locs.reserve(idBound);
 
 	auto addedCap = false;
 	auto addedExecutionMode = false;
@@ -393,25 +333,11 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 			section = 9u;
 
 			dlg_assert_or(wordCount >= 4, return {});
-			// auto resType = spirv[offset + 1];
 			auto resID = spirv[offset + 2];
 			auto storage = spv11::StorageClass(spirv[offset + 3]);
 			if(storage == spv11::StorageClass::Output && interfaceVars.count(resID)) {
-				// auto& cap = ret.desc->captures.emplace_back();
 				captureVars.push_back(resID);
-				// cap.spirvVar = resID;
-				// cap.spirvPointerType = resType;
 			}
-		}
-
-		// need to store locations of type definitions
-		if(isOpType(op)) {
-			dlg_assert(section <= 9u);
-			section = 9u;
-
-			auto resID = spirv[offset + 1];
-			auto [_, success] = locs.emplace(resID, offset);
-			dlg_assert(success);
 		}
 
 		offset += wordCount;
@@ -427,7 +353,30 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 	// parse sizes, build the vector of captured output values.
 	spc::Compiler compiler(std::vector<u32>(spirv.begin(), spirv.end()));
 	compiler.set_entry_point(entryPoint, spv::ExecutionModelVertex);
-	compiler.compile();
+
+	// It's important we set the specialization entries here since
+	// they might influence output sizes, e.g. for arrays.
+	for(auto& entry : spec.entries) {
+		auto id = u32(-1);
+		for(auto& sc : compiler.get_specialization_constants()) {
+			if(sc.constant_id == entry.constantID) {
+				id = sc.id;
+				break;
+			}
+		}
+
+		dlg_assert_or(id != u32(-1), return {});
+		auto& constant = compiler.get_constant(id);
+
+		// spec constants can only be scalar: int, float or bool
+		dlg_assert(constant.m.columns == 1u);
+		dlg_assert(constant.m.c[0].vecsize == 1u);
+		dlg_assert(entry.size <= 4);
+		dlg_assert(entry.offset + entry.size <= spec.data.size());
+
+		auto* src = spec.data.data() + entry.offset;
+		std::memcpy(constant.m.c[0].r, src, entry.size);
+	}
 
 	std::vector<u32> newDecos;
 
@@ -466,7 +415,6 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 
 			if(!compiler.has_decoration(type.self, spv::DecorationArrayStride) &&
 					!type.array.empty()) {
-				// compiler.set_decoration(type.self, spv::DecorationArrayStride, baseSize);
 				addDeco(newDecos, var, spv11::Decoration::ArrayStride, baseSize);
 			}
 
@@ -494,15 +442,14 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 	for(auto& var : captureVars) {
 		addDeco(newDecos, var, spv11::Decoration::XfbBuffer, 0u);
 		addDeco(newDecos, var, spv11::Decoration::XfbStride, ret.desc->stride);
-
-		// compiler.set_decoration(var, spv::DecorationXfbBuffer, 0u);
-		// compiler.set_decoration(var, spv::DecorationXfbStride, ret.desc->stride);
 	}
 
 	// insert decos into patched spirv
 	patched.insert(patched.begin() + insertDecosPos, newDecos.begin(), newDecos.end());
 
-	// TODO: tmp
+	// NOTE: tmp debugging
+	(void) modName;
+	/*
 	std::string output = "vil";
 	if(!modName.empty()) {
 		output += "_";
@@ -522,6 +469,7 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 			dlg_info("  >> builtin {}", *cap.builtin);
 		}
 	}
+	*/
 
 	VkShaderModuleCreateInfo ci {};
 	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -535,6 +483,7 @@ XfbPatchData patchVertexShaderXfb(Device& dev, span<const u32> spirv,
 	}
 
 	ret.entryPoint = entryPoint;
+	ret.spec = std::move(spec);
 	return ret;
 }
 

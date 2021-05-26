@@ -101,6 +101,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		if (useXfb) {
 			auto& stage = stages[xfbVertexStageID];
 			auto& mod = dev.shaderModules.get(stage.module);
+			auto spec = createShaderSpecialization(stage.pSpecializationInfo);
 
 			{
 				// All we are doing here is basically lazily creating
@@ -110,11 +111,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				// huge modules).
 				std::unique_lock lock(dev.mutex);
 
-				auto finder = [&](auto& patched) { return patched.entryPoint == stage.pName; };
+				auto finder = [&](const XfbPatchData& patched) {
+					return patched.entryPoint == stage.pName && patched.spec == spec;
+				};
 				auto it = find_if(mod.xfb, finder);
 				if(it == mod.xfb.end()) {
 					lock.unlock();
-					auto xfb = patchVertexShaderXfb(dev, mod.spv, stage.pName, mod.name);
+					auto xfb = patchVertexShaderXfb(dev, mod.spv, stage.pName,
+						std::move(spec), mod.name);
 					lock.lock();
 
 					// check again, it might have been constructed by another thread in the meantime
@@ -127,7 +131,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 							dev.dispatch.DestroyShaderModule(dev.handle, xfb.mod, nullptr);
 						}
 					}
-
 				}
 
 				if(it != mod.xfb.end()) {

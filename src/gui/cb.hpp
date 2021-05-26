@@ -47,13 +47,15 @@ private:
 	CommandBuffer* cb_ {}; // when updating from cb
 
 	// The command record we are currently viewing.
-	// We make sure it stays alive.
+	// We make sure it stays alive. In swapchain mode, this is nullptr
+	// unless we have a selected command.
 	IntrusivePtr<CommandRecord> record_ {};
 
 	// For swapchain
 	std::vector<RecordBatch> records_;
 	u32 swapchainCounter_ {}; // counter of last processed batch
-	bool freezePresentBatches_ {};
+	bool freezeCommands_ {};
+	bool freezeState_ {};
 
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};

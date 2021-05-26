@@ -1,3 +1,18 @@
+- [x] vertexViewer: support drawIndirectCount in vertex viewer
+	- [x] similar: support drawIndirect with multiple commands
+- [x] vertexViewer: also support just showing a single draw command of multiDraw
+	  (see the other todo on showing attachments/ds state per-draw)
+- [x] fix cbGui freeze: temporarily unfreeze when selecting a new command
+      I guess we can only handle this in the cbGui itself. Just set a flag
+	  that commandHook.freeze is set to false until we get a new state
+- [x] the shown commands (of vkQueueSubmit) are not updated when no command
+      is selected?
+- [x] xfb: consider spec constants. Store them in created module, might
+      hook xfb multiple times, for different spec constants.
+- [x] xfb, vertex viewer: consider dynamically set stride when pipeline has that dynamic state
+- [x] xfb: support custom outputs, not just the Position Builtin
+- [x] fix 3D vertex viewer for 2D position data (needs separate shader I guess)
+	  {nope, it doesn't. Using vec4 input with r32g32_sfloat attribute is valid}
 - [x] (easy) don't lock the dev mutex during our spirv xfb injection.
       Could e.g. always already generate it when the shader module
 	  is created.

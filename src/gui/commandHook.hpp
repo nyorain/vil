@@ -94,6 +94,9 @@ struct CommandHookState {
 	// When there is currently a (hook) submission writing this state,
 	// it is stored here. Synchronized via device mutex.
 	Submission* writer {};
+
+	CommandHookState();
+	~CommandHookState();
 };
 
 // Commandbuffer hook that allows us to forward a modified version

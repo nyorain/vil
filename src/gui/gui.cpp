@@ -419,8 +419,8 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	setAccentColor(ImGuiCol_TabActive, 180, 173, 255);
 
 	setAccentColor(ImGuiCol_FrameBg, 170, 122, 138);
-	setAccentColor(ImGuiCol_FrameBgHovered, 187, 250, 150);
-	setAccentColor(ImGuiCol_FrameBgActive, 187, 250, 240);
+	setAccentColor(ImGuiCol_FrameBgHovered, 187, 170, 150);
+	setAccentColor(ImGuiCol_FrameBgActive, 187, 190, 240);
 
 	style.Colors[ImGuiCol_WindowBg] = {0.02, 0.02, 0.02, 0.6}; // dark
 
@@ -1025,6 +1025,8 @@ void Gui::drawOverviewUI(Draw& draw) {
 		imGuiText("threadContext memory: {} KB", stats.threadContextMem / 1024.f);
 		imGuiText("command memory: {} KB", stats.commandMem / 1024.f);
 		imGuiText("dsState memory: {} KB", stats.descriptorStateMem / 1024.f);
+		imGuiText("alive hook records: {}", stats.aliveHookRecords);
+		imGuiText("alive hook states: {}", stats.aliveHookStates);
 		ImGui::Separator();
 		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
 		imGuiText("transform feedback: {}", dev.transformFeedback);
@@ -1034,6 +1036,12 @@ void Gui::drawOverviewUI(Draw& draw) {
 		imGuiText("wrap descriptor set: {}", HandleDesc<VkDescriptorSet>::wrap);
 		imGuiText("wrap samplers: {}", HandleDesc<VkSampler>::wrap);
 		imGuiText("wrap device: {}", HandleDesc<VkDevice>::wrap);
+		ImGui::Separator();
+		imGuiText("submission counter: {}", dev.submissionCounter);
+		imGuiText("pending submissions: {}", dev.pending.size());
+		imGuiText("fence pool size: {}", dev.fencePool.size());
+		imGuiText("semaphore pool size: {}", dev.semaphorePool.size());
+		imGuiText("reset semaphores size: {}", dev.resetSemaphores.size());
 	}
 
 	// if(ImGui::TreeNode("Statistics")) {
@@ -1845,6 +1853,16 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 
 	// TODO: this logic might lead to problems for 1xHUGE images
 	float regW = ImGui::GetContentRegionAvail().x - 20.f;
+
+	// TODO: also kinda messy. Need this to make avoid flickering for
+	// windows that barely need a scrollbar (adding a scrollbar makes
+	// the image smaller, causing the content to not need a scrollbar
+	// anymore; we will get flickering).
+	auto* win = ImGui::GetCurrentWindowRead();
+	if(win->ScrollbarY) {
+		regW += ImGui::GetStyle().ScrollbarSize;
+	}
+
 	float regH = regW / aspect;
 
 	ImGui::Image((void*) &imgDraw, {regW, regH});

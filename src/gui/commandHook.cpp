@@ -426,6 +426,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	CommandRecord& xrecord, std::vector<const Command*> hooked) :
 		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
 
+	++DebugStats::get().aliveHookRecords;
 	dlg_assert(!hcommand.empty());
 	// this->dev = &xrecord.device();
 
@@ -495,6 +496,9 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 
 CommandHookRecord::~CommandHookRecord() {
 	ZoneScoped;
+
+	dlg_assert(DebugStats::get().aliveHookRecords > 0);
+	--DebugStats::get().aliveHookRecords;
 
 	// We can be sure that record is still alive here since when the
 	// record is destroyed, all its submissions must have finished as well.
@@ -1468,31 +1472,6 @@ void CommandHookSubmission::finish(Submission& subm) {
 	dlg_assertm(record->hook->completed.size() < 32,
 		"Hook state overflow detected");
 
-	/*
-	auto maxCopySize = 64 * 1024;
-
-	auto cpuCopyMin = [&](auto& buf) {
-		auto size = std::min<VkDeviceSize>(buf.buffer.size, maxCopySize);
-		buf.cpuCopy(0, size);
-	};
-
-	// Copy potential buffers. We don't check for hookOps here as
-	// buffers aren't created in the first place (making cpuCopy a noop)
-	// when the readback op isn't active.
-	// TODO: only copy the requested region, what we are currently
-	// viewing and therefore *absolutely* need on cpu.
-	if(auto* buf = std::get_if<CopiedBuffer>(&record->state->dsCopy)) {
-		cpuCopyMin(*buf);
-	}
-
-	cpuCopyMin(record->state->indexBufCopy);
-	cpuCopyMin(record->state->transformFeedback);
-
-	for(auto& vbuf : record->state->vertexBufCopies) {
-		cpuCopyMin(vbuf);
-	}
-	*/
-
 	// indirect command readback
 	if(record->hook->copyIndirectCmd) {
 		auto& bcmd = *record->hcommand.back();
@@ -1563,6 +1542,15 @@ void CommandHookSubmission::transmitTiming() {
 
 	auto diff = after - before;
 	record->state->neededTime = diff;
+}
+
+CommandHookState::CommandHookState() {
+	++DebugStats::get().aliveHookStates;
+}
+
+CommandHookState::~CommandHookState() {
+	dlg_assert(DebugStats::get().aliveHookStates > 0);
+	--DebugStats::get().aliveHookStates;
 }
 
 } // namespace vil

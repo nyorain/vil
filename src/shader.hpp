@@ -14,6 +14,14 @@ namespace vil {
 
 typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 
+struct ShaderSpecialization {
+	std::vector<VkSpecializationMapEntry> entries;
+	std::vector<std::byte> data {};
+};
+
+ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo*);
+bool operator==(const ShaderSpecialization& a, const ShaderSpecialization& b);
+
 struct XfbCapture {
 	enum Type {
 		typeFloat,
@@ -43,13 +51,16 @@ struct XfbPatchDesc {
 };
 
 struct XfbPatchData {
-	VkShaderModule mod {};
 	std::string entryPoint {};
+	ShaderSpecialization spec {};
+
+	VkShaderModule mod {};
 	IntrusivePtr<XfbPatchDesc> desc {};
 };
 
 XfbPatchData patchVertexShaderXfb(Device&, span<const u32> spirv,
-	const char* entryPoint, std::string_view modName);
+	const char* entryPoint, ShaderSpecialization sepc,
+	std::string_view modName);
 
 struct SpirvData {
 	std::unique_ptr<SpvReflectShaderModule> reflection;

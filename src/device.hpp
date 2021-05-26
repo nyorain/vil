@@ -37,6 +37,8 @@ struct DebugStats {
 	std::atomic<u32> aliveDescriptorSets {};
 	std::atomic<u32> aliveBuffers {};
 	std::atomic<u32> aliveImagesViews {};
+	std::atomic<u32> aliveHookRecords {};
+	std::atomic<u32> aliveHookStates {};
 
 	std::atomic<u32> threadContextMem {};
 	std::atomic<u32> commandMem {};
