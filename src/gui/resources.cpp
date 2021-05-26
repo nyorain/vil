@@ -12,6 +12,46 @@
 
 namespace vil {
 
+// NOTE: use something like this? But this actively hides information,
+// e.g. maybe the user wants to see the *exact* size, not just 122MB.
+std::string formatSize(u64 size) {
+	if(size > 10'000'000) {
+		return dlg::format("{} MB", size / 1000 * 1000);
+	}
+
+	if(size > 10'000) {
+		return dlg::format("{} KB", size / 1000);
+	}
+
+	return dlg::format("{} B", size);
+}
+
+std::string sepfmt(u64 size) {
+	std::string ret;
+	if(!size) {
+		return "0";
+	}
+
+	char nums[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+
+	auto poten = u64(1u);
+	auto counter = 0u;
+	while(size) {
+		if(++counter == 3u) {
+			counter = 0u;
+			ret.insert(0, 1, '\'');
+		}
+
+		auto rest = (size % (10 * poten)) / poten;
+		size -= rest * poten;
+		ret.insert(0, 1, nums[rest]);
+
+		poten *= 10;
+	}
+
+	return ret;
+}
+
 ResourceGui::~ResourceGui() {
 	if(image_.view) {
 		gui_->dev().dispatch.DestroyImageView(gui_->dev().handle,
@@ -28,8 +68,8 @@ void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 
 		ImGui::SameLine();
 		imGuiText(" (offset {}, size {})",
-			(unsigned long) res.allocationOffset,
-			(unsigned long) res.allocationSize);
+			sepfmt(res.allocationOffset),
+			sepfmt(res.allocationSize));
 	}
 }
 
@@ -137,7 +177,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	ImGui::Text("%s", vk::name(ci.tiling));
 	ImGui::Text("%s", vk::name(ci.samples));
 	ImGui::Text("%s", vk::name(ci.imageType));
-	ImGui::Text("%s", vk::flagNames(VkImageUsageFlagBits(ci.flags)).c_str());
+	ImGui::Text("%s", vk::flagNames(VkImageCreateFlagBits(ci.flags)).c_str());
 
 	ImGui::Columns();
 
@@ -986,8 +1026,8 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 	// data
 	ImGui::NextColumn();
 
-	imGuiText("{}", mem.size);
-	imGuiText("{}", mem.typeIndex);
+	imGuiText("{}", sepfmt(mem.size));
+	imGuiText("{}", sepfmt(mem.typeIndex));
 
 	ImGui::Columns();
 
@@ -995,26 +1035,52 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 	ImGui::Spacing();
 	ImGui::Text("Bound Resources:");
 
-	ImGui::Columns(3);
-	// ImGui::SetColumnWidth(0, 100);
-	// ImGui::SetColumnWidth(1, 300);
+	auto* drawList = ImGui::GetWindowDrawList();
 
-	// TODO: use table here instead
+	auto width = ImGui::GetContentRegionAvail().x;
+	auto height = 30.f;
+
+	auto start = ImGui::GetCursorScreenPos();
+	auto end = start;
+	end.x += width;
+	end.y += height;
+
+	ImU32 bgCol = IM_COL32(20, 20, 20, 180);
+	// ImU32 bgHoverCol = IM_COL32(35, 35, 35, 200);
+	ImU32 allocCol = IM_COL32(180, 250, 200, 255);
+	ImU32 allocHoverCol = IM_COL32(250, 180, 200, 255);
+
+	drawList->AddRectFilled(start, end, bgCol);
 	for(auto& resource : mem.allocations) {
-		imGuiText("{}: ", resource->allocationOffset);
+		auto resOff = width * float(resource->allocationOffset) / mem.size;
+		auto resSize = width * float(resource->allocationSize) / mem.size;
 
-		ImGui::NextColumn();
+		auto resPos = start;
+		resPos.x += resOff;
 
-		dlg_assert(resource);
-		refButton(*gui_, *resource);
+		auto rectSize = ImVec2(resSize, height);
 
-		ImGui::NextColumn();
-		imGuiText("size {}", resource->allocationSize);
+		auto col = allocCol;
+		auto name = dlg::format("{}", (void*) &resource);
 
-		ImGui::NextColumn();
+		ImGui::SetCursorScreenPos(resPos);
+		ImGui::InvisibleButton(name.c_str(), rectSize);
+		if(ImGui::IsItemHovered()) {
+			col = allocHoverCol;
+
+			ImGui::BeginTooltip();
+			imGuiText("{}", vil::name(*resource));
+			imGuiText("Offset: {}", sepfmt(resource->allocationOffset));
+			imGuiText("Size: {}", sepfmt(resource->allocationSize));
+			ImGui::EndTooltip();
+		}
+		if(ImGui::IsItemClicked()) {
+			select(*resource);
+		}
+
+		auto resEnd = ImVec2(resPos.x + rectSize.x, resPos.y + rectSize.y);
+		drawList->AddRectFilled(resPos, resEnd, col);
 	}
-
-	ImGui::Columns();
 }
 
 void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
@@ -1517,6 +1583,8 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		VkImageMemoryBarrier imgb {};
 		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		imgb.image = img.handle;
+		// TODO: don't just use imag_.aspect, for depthStencil images,
+		// we need to set depth & stencil
 		imgb.subresourceRange.aspectMask = image_.aspect;
 		imgb.subresourceRange.baseMipLevel = image_.level;
 		imgb.subresourceRange.levelCount = 1u;

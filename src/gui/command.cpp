@@ -393,7 +393,8 @@ void CommandViewer::displayTransferIOList() {
 	// TODO: add support for viewing buffers here.
 	// Hard to do in a meaningful way though.
 	auto found = false;
-	auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf;
+	auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
+		ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
 
 	auto addSrc = [&](auto* cmd) {
 		if(!cmd) {
@@ -413,8 +414,6 @@ void CommandViewer::displayTransferIOList() {
 			ioImage_ = {};
 			updateHook();
 		}
-
-		ImGui::TreePop();
 	};
 
 	auto addDst = [&](auto* cmd) {
@@ -435,8 +434,6 @@ void CommandViewer::displayTransferIOList() {
 			ioImage_ = {};
 			updateHook();
 		}
-
-		ImGui::TreePop();
 	};
 
 	auto addSrcDst = [&](auto* cmd) {
@@ -717,7 +714,8 @@ void CommandViewer::displayIOList() {
 				continue;
 			}
 
-			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
+				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
 			if(viewPCRStage == stage.stage) {
 				flags |= ImGuiTreeNodeFlags_Selected;
 			}

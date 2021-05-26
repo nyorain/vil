@@ -1979,7 +1979,9 @@ void displayImage(Gui& gui, DrawGuiImage& imgDraw,
 		//   make sensitivity absolute, i.e. not dependent on number of slices?
 		// TODO: this is weird when the image also has mip levels
 		auto maxDepth = std::max((extent.depth >> u32(imgDraw.level)), 1u) - 1u;
-		ImGui::SliderFloat("slice", &imgDraw.layer, 0, maxDepth);
+		float layer = imgDraw.layer * maxDepth;
+		ImGui::SliderFloat("slice", &layer, 0, maxDepth);
+		imgDraw.layer /= maxDepth;
 	} else if(subresources.layerCount > 1) {
 		int layer = int(imgDraw.layer);
 		ImGui::SliderInt("Layer", &layer, subresources.baseArrayLayer,

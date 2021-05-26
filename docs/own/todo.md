@@ -15,6 +15,7 @@ urgent, bugs:
 	- [ ] unselect when no new matching command can be found?
 	- [ ] use/implement LCS and better general strategy when in swapchain mode for
 		  command matching/finding the best hook from last frame
+- [ ] image viewer validation bug when we don't hover the image
 
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in
@@ -233,6 +234,7 @@ vertex viewer/xfb:
 
 
 - [ ] vil_api.h: Allow destroyed created overlays
+- [ ] improve DeviceMemory visualization. Also improve Memory overview tab
 - [ ] SetHandleName should probably not always use the device hash map
       when the objects are wrapped. Currently causes issues since
 	  we don't insert descriptor sets when wrapping, we need the custom hack there
@@ -276,8 +278,6 @@ vertex viewer/xfb:
 	- [ ] allow to visualize non-builtin attributes somewhow
 	      maybe also allow to manually pick an attribute to use as position
 		  for the input?
-- [ ] alternative view of DeviceMemory showing a better visualization of
-      the resources placed in it (and the empty space)
 - [ ] support debug utils labels across command buffer boundaries
 	  we already have the information of popped and pushed lables per record
       NOTE: this isn't 100% correct at the moment though, e.g. when we end
@@ -549,7 +549,7 @@ vertex viewer/xfb:
 - [ ] general buffer reading mechanism for UI. Implement e.g. to read
       indirect command from buffer and display in command UI
 - [ ] allow to display stuff (e.g. images) over swapchain, fullscreen, not just in overlay
-- [ ] memory budget overview
+- [x] memory budget overview {present but ugly as-is}
 	- [ ] show how much memory was allocated overall, per-heap
 	      make this visually appealing, easy-to-grasp. Maybe via pie-chart or something.
 		  We can probably start using ImPlot.
@@ -559,9 +559,9 @@ vertex viewer/xfb:
 	- [ ] Also allow to color memory depending on the type it is allocated for.
 	- [ ] allow to visualize by allocation size, i.e. showing the big memory blockers
 	      (but also allow showing smallest first, can be useful)
-	- [ ] visualize totally available memory as well, we can get that from
+	- [x] visualize totally available memory as well, we can get that from
 	      memory properties
-	- [ ] there are extensions for querying the real allocated/free memory
+	- [x] there are extensions for querying the real allocated/free memory
 	      size. Use them!
 - [ ] simulate device lost: Just make the layer return deviceLost from
       all (or a lot of) commands until the device is recreated.
