@@ -524,63 +524,67 @@ void CommandViewer::displayDsList() {
 	};
 
 	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
-	ImGui::Text("Descriptors");
+	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+	if(ImGui::TreeNodeEx("Descriptors", ImGuiTreeNodeFlags_FramePadding)) {
+		// NOTE: better to iterate over sets/bindings in shader stages?
+		for(auto i = 0u; i < dss.size(); ++i) {
+			auto& ds = dss[i];
 
-	// NOTE: better to iterate over sets/bindings in shader stages?
-	for(auto i = 0u; i < dss.size(); ++i) {
-		auto& ds = dss[i];
+			if(!ds.ds) {
+				if(showUnboundSets) {
+					auto label = dlg::format("Descriptor Set {}: null", i);
+					auto flags = ImGuiTreeNodeFlags_Bullet |
+						ImGuiTreeNodeFlags_Leaf |
+						ImGuiTreeNodeFlags_NoTreePushOnOpen;
+					ImGui::TreeNodeEx(label.c_str(), flags);
+				}
 
-		if(!ds.ds) {
-			if(showUnboundSets) {
-				auto label = dlg::format("Descriptor Set {}: null", i);
-				auto flags = ImGuiTreeNodeFlags_Bullet |
-					ImGuiTreeNodeFlags_Leaf |
-					ImGuiTreeNodeFlags_NoTreePushOnOpen;
-				ImGui::TreeNodeEx(label.c_str(), flags);
+				continue;
 			}
 
-			continue;
-		}
+			auto stateIt = dsState_.states.find(ds.ds);
+			dlg_assert_or(stateIt != dsState_.states.end(), continue);
 
-		auto stateIt = dsState_.states.find(ds.ds);
-		dlg_assert_or(stateIt != dsState_.states.end(), continue);
+			auto& state = *stateIt->second;
+			dlg_assert(state.layout);
 
-		auto& state = *stateIt->second;
-		dlg_assert(state.layout);
+			auto label = dlg::format("Descriptor Set {}", i);
+			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+			if(ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_FramePadding)) {
+				for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
+					auto oLabel = bindingName(i, b);
+					if(!oLabel) {
+						continue;
+					}
 
-		auto label = dlg::format("Descriptor Set {}", i);
-		ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-		if(ImGui::TreeNode(label.c_str())) {
-			for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
-				auto oLabel = bindingName(i, b);
-				if(!oLabel) {
-					continue;
+					auto label = *oLabel;
+					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
+						ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
+					if(view_ == IOView::ds && viewData_.ds.set == i && viewData_.ds.binding == b) {
+						flags |= ImGuiTreeNodeFlags_Selected;
+					}
+
+					// NOTE
+					// - additionally indicate type? Just add a small UBO, SSBO, Image,
+					//   Sampler, StorageImage etc prefix? Also array bounds
+					// - Previews would be the best on the long run but hard to get
+					//   right I guess (also: preview of buffers?)
+					// - could show name of bound resource
+					auto msg = dlg::format("{}: {}", b, label);
+					ImGui::TreeNodeEx(msg.c_str(), flags);
+					if(ImGui::IsItemClicked()) {
+						view_ = IOView::ds;
+						viewData_.ds = {i, b, 0};
+						ioImage_ = {};
+						updateHook();
+					}
 				}
 
-				auto label = *oLabel;
-				auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-				if(view_ == IOView::ds && viewData_.ds.set == i && viewData_.ds.binding == b) {
-					flags |= ImGuiTreeNodeFlags_Selected;
-				}
-
-				// NOTE
-				// - additionally indicate type? Just add a small UBO, SSBO, Image,
-				//   Sampler, StorageImage etc prefix? Also array bounds
-				// - Previews would be the best on the long run but hard to get
-				//   right I guess (also: preview of buffers?)
-				// - could show name of bound resource
-				auto msg = dlg::format("{}: {}", b, label);
-				ImGui::TreeNodeEx(msg.c_str(), flags);
-				if(ImGui::IsItemClicked()) {
-					view_ = IOView::ds;
-					viewData_.ds = {i, b, 0};
-					ioImage_ = {};
-					updateHook();
-				}
+				ImGui::TreePop();
 			}
-
-			ImGui::TreePop();
 		}
+
+		ImGui::TreePop();
 	}
 }
 
@@ -590,7 +594,14 @@ void CommandViewer::displayIOList() {
 	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
 
-	if(ImGui::Selectable("Command", view_ == IOView::command)) {
+	auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
+		ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+	if(view_ == IOView::command) {
+		flags |= ImGuiTreeNodeFlags_Selected;
+	}
+
+	ImGui::TreeNodeEx("Command", flags);
+	if(ImGui::IsItemClicked()) {
 		view_ = IOView::command;
 		updateHook();
 	}
@@ -602,7 +613,8 @@ void CommandViewer::displayIOList() {
 
 	// Vertex IO
 	if(drawCmd) {
-		auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+		auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
+			ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 		if(view_ == IOView::mesh) {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
@@ -621,7 +633,7 @@ void CommandViewer::displayIOList() {
 	// Attachments
 	if(drawCmd) {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
-		if(ImGui::TreeNodeEx("Attachments")) {
+		if(ImGui::TreeNodeEx("Attachments", ImGuiTreeNodeFlags_FramePadding)) {
 			if(drawCmd->state.rpi.rp) {
 				auto& desc = nonNull(drawCmd->state.rpi.rp->desc);
 				auto subpassID = drawCmd->state.rpi.subpass;
@@ -684,7 +696,8 @@ void CommandViewer::displayIOList() {
 		auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
 
 		if(refl.push_constant_block_count) {
-			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
+				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
 			if(viewPCRStage == VK_SHADER_STAGE_COMPUTE_BIT) {
 				flags |= ImGuiTreeNodeFlags_Selected;
 			}
@@ -1166,7 +1179,12 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 
 	ImGui::BeginChild("Command IO list");
 
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+
 	displayIOList();
+
+	ImGui::PopStyleVar(2);
 
 	ImGui::EndChild();
 	ImGui::TableNextColumn();

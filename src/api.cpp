@@ -13,7 +13,25 @@
 
 using namespace vil;
 
-// TODO: we probably have to lock the mutex for every input call
+static_assert(u32(vilKeyA) == u32(swa_key_a));
+static_assert(u32(vilKeyX) == u32(swa_key_x));
+static_assert(u32(vilKeyC) == u32(swa_key_c));
+static_assert(u32(vilKeyV) == u32(swa_key_v));
+static_assert(u32(vilKeyZ) == u32(swa_key_z));
+static_assert(u32(vilKeyY) == u32(swa_key_y));
+static_assert(u32(vilKeyEnter) == u32(swa_key_enter));
+static_assert(u32(vilKeyTab) == u32(swa_key_tab));
+static_assert(u32(vilKeyLeft) == u32(swa_key_left));
+static_assert(u32(vilKeyRight) == u32(swa_key_right));
+static_assert(u32(vilKeyDown) == u32(swa_key_down));
+static_assert(u32(vilKeyUp) == u32(swa_key_up));
+static_assert(u32(vilKeySpace) == u32(swa_key_space));
+static_assert(u32(vilKeyBackspace) == u32(swa_key_backspace));
+static_assert(u32(vilKeyPageUp) == u32(swa_key_pageup));
+static_assert(u32(vilKeyPageDown) == u32(swa_key_pagedown));
+static_assert(u32(vilKeyHome) == u32(swa_key_home));
+static_assert(u32(vilKeyEnd) == u32(swa_key_end));
+static_assert(u32(vilKeyInsert) == u32(swa_key_insert));
 
 extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
 	auto& dev = getDeviceByLoader(vkDevice);
@@ -57,6 +75,7 @@ extern "C" VIL_EXPORT void vilOverlayShow(VilOverlay overlay, bool show) {
 
 extern "C" VIL_EXPORT void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
+	std::lock_guard lock(ov.swapchain->dev->mutex);
 	if(ov.gui.visible) {
 		ov.gui.imguiIO().MousePos = {float(x), float(y)};
 	}
@@ -65,6 +84,7 @@ extern "C" VIL_EXPORT void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, i
 // They return whether the event was processed by the overlay
 extern "C" VIL_EXPORT bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned button, bool press) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
+	std::lock_guard lock(ov.swapchain->dev->mutex);
 	if(ov.gui.visible && button < 5) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseDown[button] = press;
@@ -75,6 +95,7 @@ extern "C" VIL_EXPORT bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsign
 }
 extern "C" VIL_EXPORT bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x, float y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
+	std::lock_guard lock(ov.swapchain->dev->mutex);
 	if(ov.gui.visible) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseWheel += y;
@@ -85,11 +106,12 @@ extern "C" VIL_EXPORT bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x
 	return false;
 }
 
-extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keycode, bool pressed) {
+extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum vilKey keycode, bool pressed) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
+	std::lock_guard lock(ov.swapchain->dev->mutex);
 
 	// TODO; remove hardcoded toggle.
-	if(keycode == swa_key_backslash && pressed) {
+	if(swa_key(keycode) == swa_key_backslash && pressed) {
 		ov.gui.visible ^= true;
 		return true;
 	}
@@ -106,6 +128,8 @@ extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, uint32_t keyco
 
 extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
+	std::lock_guard lock(ov.swapchain->dev->mutex);
+
 	if(!ov.gui.visible || !utf8) {
 		return false;
 	}
@@ -115,24 +139,26 @@ extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* u
 	return io.WantCaptureKeyboard || io.WantTextInput;
 }
 
-extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, uint32_t mod, bool active) {
+extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum vilKeyMod mod, bool active) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
+	std::lock_guard lock(ov.swapchain->dev->mutex);
+
 	if(!ov.gui.visible) {
 		return;
 	}
 
 	auto& io = ov.gui.imguiIO();
 	switch(mod) {
-		case swa_keyboard_mod_alt:
+		case vilKeyModAlt:
 			io.KeyAlt = active;
 			break;
-		case swa_keyboard_mod_ctrl:
+		case vilKeyModCtrl:
 			io.KeyCtrl = active;
 			break;
-		case swa_keyboard_mod_super:
+		case vilKeyModSuper:
 			io.KeySuper = active;
 			break;
-		case swa_keyboard_mod_shift:
+		case vilKeyModShift:
 			io.KeyShift = active;
 			break;
 		default:

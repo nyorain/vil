@@ -61,8 +61,8 @@ Downsides:
   not available anymore. Keep in mind that sometimes, capturing a single
   frame and viewing that is just the better approach.
 
-![Example of command viewer 2](docs/pics/sponza-buf.png)
-![Example of resource viewer](docs/pics/sponza-scatter-res.png)
+<!--- ![Example of command viewer 2](docs/pics/sponza-buf.png) -->
+<!---- ![Example of resource viewer](docs/pics/sponza-scatter-res.png) -->
 
 # Building & Installing
 
@@ -126,7 +126,9 @@ so feel free to do it manually in an admin prompt:
 REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath of VkLayer_live_introspection.json> /t REG_DWORD /d 0
 ```
 
-Where you replace `<filepath of VkLayer_live_introspection.json>` with full file path of the generated `VkLayer_live_introspection.json` file, e.g. `D:\code\vil\build\vs19\VkLayer_live_introspection.json`.
+Replace `<filepath of VkLayer_live_introspection.json>` with full file path of the generated `VkLayer_live_introspection.json` file, e.g. `D:\code\vil\build\vs19\VkLayer_live_introspection.json`.
+
+When building with something else than MSVC, you might have to adjust the name of the dll. For instance, MinGW might add a `lib` prefix. In that case, when using `vil_api.h`, you'll also have to redefine `VIL_LIB_NAME` before including the header to the name of the dll.
 
 # Using vil
 
@@ -156,12 +158,12 @@ There are multiple ways of using the introspection gui:
 
 The layer running gui inside an extra window in doom eternal:
 
-![Extra window doom eternal example](docs/pics/doom-eternal-window.png)
+<!--- ![Extra window doom eternal example](docs/pics/doom-eternal-window.png) -->
 
 ## About retail games
 
 Using this layer in retail application/games (i.e. games you don't develop yourself,
-without available source code or debugging symbols) **IS NOT SUPPORTED**.
+without available source code or debugging symbols) **IS NOT OFFICIALLY SUPPORTED**.
 There are multiple reasons for this:
 
 - It can be expected that the layer will cause issues in quite some games,
@@ -174,18 +176,18 @@ There are multiple reasons for this:
   Even for open-source games such bug reports are not useful.
 - Using this layer in games will likely trigger anti-cheat mechanisms.
   **USING THIS LAYER IN MULTIPLAYER GAMES MIGHT GET YOU BANNED AND THAT
-  IS NOT OUR FAULT**. As this layer messes with draw calls it is basically a
-  wallhack (you can literally view the final image without certain draw
+  IS NOT OUR FAULT**. This layer messes with draw calls
+  (you can literally view the final image without certain draw
   calls being made) and so games are entirely right in banning
   players for using it. Even just playing games that include
   a multiplayer mode locally with the layer might get you in trouble.
   Just don't do it. And don't blame us if it backfires.
 - Usage of this layer in retail products might be motivated by abuse.
   Keep in mind that while game developers usually have no problem with
-  players sharing videos or screenshots of the gameplay, extracing
+  players sharing videos or screenshots of the gameplay; extracting
   textures, models, raw framebuffer data or rendering techniques from the game
-  (and then distributing them) is likely not in the interest of the developer,
-  and can quickly bring legal trouble. This is not the usecase this layer 
+  (and then distributing them) might not be in the interest of the developer
+  or fair use of the material. This is not the usecase this layer 
   is intended for and not a usecase that will be supported in any way.
 
 With that out of the way, there is nothing per se wrong with using the

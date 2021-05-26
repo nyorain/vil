@@ -185,7 +185,8 @@ std::vector<const Command*> Command::display(const Command* sel, TypeFlags typeF
 		return {};
 	}
 
-	int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+	int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
+		ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
 	if(sel == this) {
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}
@@ -234,7 +235,7 @@ float Command::match(const Command& cmd) const {
 // Commands
 std::vector<const Command*> ParentCommand::display(const Command* selected,
 		TypeFlags typeFlags, const Command* cmd) const {
-	int flags = ImGuiTreeNodeFlags_OpenOnArrow;
+	int flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding;
 	if(this == selected) {
 		flags |= ImGuiTreeNodeFlags_Selected;
 	}

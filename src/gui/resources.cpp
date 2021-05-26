@@ -558,12 +558,12 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 		// TODO: immutable samplers
 		// TODO: ext_descriptor_indexing flags
 		if(binding.descriptorCount > 1) {
-			ImGui::BulletText("%s[%d] in (%s)",
+			ImGui::BulletText("%s[%d]: {%s}",
 				vk::name(binding.descriptorType),
 				binding.descriptorCount,
 				vk::flagNames(VkShaderStageFlagBits(binding.stageFlags)).c_str());
 		} else {
-			ImGui::BulletText("%s in (%s)",
+			ImGui::BulletText("%s: {%s}",
 				vk::name(binding.descriptorType),
 				vk::flagNames(VkShaderStageFlagBits(binding.stageFlags)).c_str());
 		}
@@ -1383,8 +1383,47 @@ void ResourceGui::draw(Draw& draw) {
 	ImGuiListClipper clipper;
 	clipper.Begin(int(handles_.size()));
 
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.f, 3.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+
 	while(clipper.Step()) {
 		for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+			auto& handle = *handles_[i];
+			auto selected = (&handle == handle_);
+			auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
+				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
+
+			ImGui::PushID(&handle);
+			std::string label;
+
+			auto disabled = false;
+			if(destroyed_.count(&handle)) {
+				ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+				ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+				disabled = true;
+				label = "<Destroyed>";
+			} else {
+				label = name(handle);
+			}
+
+			if(selected) {
+				flags |= ImGuiTreeNodeFlags_Selected;
+			}
+
+			if(ImGui::TreeNodeEx(label.c_str(), flags)) {
+				if(ImGui::IsItemClicked()) {
+					select(handle);
+				}
+			}
+
+			if(disabled) {
+				ImGui::PopStyleVar();
+				ImGui::PopItemFlag();
+			}
+
+			ImGui::PopID();
+
+			/*
 			auto& handle = *handles_[i];
 			auto selected = (&handle == handle_);
 			auto flags = 0u;
@@ -1399,14 +1438,17 @@ void ResourceGui::draw(Draw& draw) {
 				label = name(handle);
 			}
 
+			ImGui::AlignTextToFramePadding();
 			if(ImGui::Selectable(label.c_str(), selected, flags)) {
 				select(handle);
 			}
 
 			ImGui::PopID();
+			*/
 		}
 	}
 
+	ImGui::PopStyleVar(2);
 	ImGui::EndChild(); // Resource List
 	ImGui::EndChild(); // left column child
 

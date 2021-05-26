@@ -190,6 +190,9 @@ void CommandBufferGui::draw(Draw& draw) {
 	// ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 20, 20, 255));
 	ImGui::BeginChild("Command list", {0, 0});
 
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+
 	if(mode_ == UpdateMode::swapchain) {
 		if(records_.empty() && !gui_->dev().swapchain->frameSubmissions.empty()) {
 			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
@@ -201,7 +204,7 @@ void CommandBufferGui::draw(Draw& draw) {
 			auto& batch = records_[b];
 			auto id = dlg::format("vkQueueSubmit:{}", b);
 
-			auto flags = 0u;
+			auto flags = int(ImGuiTreeNodeFlags_FramePadding);
 			if(batch.submissions.empty()) {
 				flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
 			}
@@ -225,13 +228,12 @@ void CommandBufferGui::draw(Draw& draw) {
 					dlg_assert(rec->invalidated.empty());
 
 					// extra tree node for every submission
-					// TODO: only show this when there is more than one and
-					// then show index as well? might mess with ids though.
-					auto flags = 0u;
-					// auto id = rec->group;
+					auto flags = int(ImGuiTreeNodeFlags_FramePadding);
 					auto id = dlg::format("Commands:{}", r);
 					if(ImGui::TreeNodeEx(id.c_str(), flags, "Commands")) {
-						ImGui::Separator();
+						if(rec->commands) {
+							ImGui::Separator();
+						}
 
 						// we don't want as much space as tree nodes
 						auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
@@ -300,6 +302,8 @@ void CommandBufferGui::draw(Draw& draw) {
 			dev.commandHook->freeze = false;
 		}
 	}
+
+	ImGui::PopStyleVar(2);
 
 	// try to update the shown commands with the best new match
 	if(!hook.completed.empty() && (!freezeCommands_ || !commandViewer_.state())) {

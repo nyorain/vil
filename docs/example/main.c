@@ -247,7 +247,9 @@ static void window_key(struct swa_window* win, const struct swa_key_event* ev) {
 	}
 
 	if(state->vil_overlay) {
-		state->vil_api.OverlayKeyEvent(state->vil_overlay, ev->keycode, ev->pressed);
+		// swa and vil keycodes are both derived from linux/input-event-codes.h
+		state->vil_api.OverlayKeyEvent(state->vil_overlay,
+			(enum vilKey)ev->keycode, ev->pressed);
 
 		if(ev->utf8) {
 			state->vil_api.OverlayTextEvent(state->vil_overlay, ev->utf8);
@@ -402,7 +404,7 @@ int main(int argc, const char** argv) {
 
 			for(int i = 0u; i < 4; ++i) {
 				state.vil_api.OverlayKeyboardModifier(state.vil_overlay,
-					all_mods[i], mods & all_mods[i]);
+					(enum vilKeyMod)all_mods[i], mods & all_mods[i]);
 			}
 		}
 

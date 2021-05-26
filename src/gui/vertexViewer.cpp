@@ -1331,7 +1331,8 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	dlg_assert(posCapture->columns == 1u);
 	dlg_assert(posCapture->array.empty());
 
-	bspan = bspan.subspan(posCapture->offset, vertexCount * xfbPatch.stride);
+	bspan = bspan.subspan(vertexOffset * xfbPatch.stride + posCapture->offset,
+		vertexCount * xfbPatch.stride);
 
 	// TODO: don't evaluate this every frame, just in the beginning
 	// and when the Recenter button is pressed.
