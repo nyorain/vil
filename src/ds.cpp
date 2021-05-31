@@ -4,6 +4,7 @@
 #include <buffer.hpp>
 #include <image.hpp>
 #include <pipe.hpp>
+#include <rt.hpp>
 #include <threadContext.hpp>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
@@ -16,6 +17,8 @@ size_t descriptorSize(VkDescriptorType dsType) {
 		case DescriptorCategory::buffer: return sizeof(BufferDescriptor);
 		case DescriptorCategory::image: return sizeof(ImageDescriptor);
 		case DescriptorCategory::bufferView: return sizeof(BufferViewDescriptor);
+		case DescriptorCategory::accelStruct: return sizeof(AccelStructDescriptor);
+		case DescriptorCategory::inlineUniformBlock: return 1u;
 		case DescriptorCategory::none:
 			dlg_error("unreachable: Invalid descriptor category");
 			return 0u;
@@ -136,13 +139,21 @@ DescriptorSetStatePtr newDescriptorSetState(
 				new(it) BufferDescriptor[count];
 				it += count * sizeof(BufferDescriptor);
 				break;
+			case DescriptorCategory::image:
+				new(it) ImageDescriptor[count];
+				it += count * sizeof(ImageDescriptor);
+				break;
 			case DescriptorCategory::bufferView:
 				new(it) BufferViewDescriptor[count];
 				it += count * sizeof(BufferViewDescriptor);
 				break;
-			case DescriptorCategory::image:
-				new(it) ImageDescriptor[count];
-				it += count * sizeof(ImageDescriptor);
+			case DescriptorCategory::accelStruct:
+				new(it) AccelStructDescriptor[count];
+				it += count * sizeof(AccelStructDescriptor);
+				break;
+			case DescriptorCategory::inlineUniformBlock:
+				// nothing to initialize, just raw data here
+				it += count;
 				break;
 			case DescriptorCategory::none:
 				dlg_error("unreachable: invalid descriptor type");
@@ -184,7 +195,7 @@ void copy(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
 			}
 
 			std::lock_guard lock(dst.mutex);
-			buffers(dst, dstBindID)[dstElemID] = srcCopy;
+			buffers(dst, dstBindID)[dstElemID] = std::move(srcCopy);
 			break;
 		} case DescriptorCategory::bufferView: {
 			BufferViewDescriptor srcCopy;
@@ -194,7 +205,30 @@ void copy(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
 			}
 
 			std::lock_guard lock(dst.mutex);
-			bufferViews(dst, dstBindID)[dstElemID] = srcCopy;
+			bufferViews(dst, dstBindID)[dstElemID] = std::move(srcCopy);
+			break;
+		} case DescriptorCategory::inlineUniformBlock: {
+			// need a scoped lock here to avoid additional copy
+			std::scoped_lock lock(src.mutex, dst.mutex);
+			// NOTE: we copy byte-by-byte here which is inefficient. Would
+			// have to rework the entire code structure of 'copy'. Shouldn't
+			// be a huge problem tho, inline uniform blocks should be very
+			// small anyways.
+			auto srcBuf = inlineUniformBlock(src, srcBindID);
+			auto dstBuf = inlineUniformBlock(src, dstBindID);
+			dlg_assert(srcElemID < srcBuf.size());
+			dlg_assert(dstElemID < dstBuf.size());
+			dstBuf[dstElemID] = srcBuf[srcElemID];
+			break;
+		} case DescriptorCategory::accelStruct: {
+			AccelStructDescriptor srcCopy;
+			{
+				std::lock_guard lock(src.mutex);
+				srcCopy = accelStructs(src, srcBindID)[srcElemID];
+			}
+
+			std::lock_guard lock(dst.mutex);
+			accelStructs(dst, dstBindID)[dstElemID] = std::move(srcCopy);
 			break;
 		} case DescriptorCategory::none:
 			dlg_error("unreachable: Invalid descriptor type");
@@ -202,6 +236,8 @@ void copy(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
 	}
 }
 
+// TODO: not sure why this has to be in a locked section! it probably should
+// not be. We probably also shouldn't have to lock state.mutex
 void initImmutableSamplersLocked(DescriptorSetState& state) {
 	ZoneScoped;
 
@@ -283,50 +319,6 @@ DescriptorSet::~DescriptorSet() {
 	--DebugStats::get().aliveDescriptorSets;
 }
 
-/*
-span<DescriptorBinding> bindings(DescriptorSetState& state, unsigned binding) {
-	dlg_assert(state.layout);
-	dlg_assert(binding < state.layout->bindings.size());
-	auto& layout = state.layout->bindings[binding];
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto* base = reinterpret_cast<std::byte*>(&state) + sizeof(DescriptorSetState);
-	auto* bindings = std::launder(reinterpret_cast<DescriptorBinding*>(base));
-	return {bindings + layout.offset, count};
-}
-
-span<const DescriptorBinding> bindings(const DescriptorSetState& state, unsigned binding) {
-	dlg_assert(state.layout);
-	dlg_assert(binding < state.layout->bindings.size());
-	auto& layout = state.layout->bindings[binding];
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto* base = reinterpret_cast<const std::byte*>(&state) + sizeof(DescriptorSetState);
-	auto* bindings = std::launder(reinterpret_cast<const DescriptorBinding*>(base));
-	return {bindings + layout.offset, count};
-}
-
-DescriptorBinding& binding(DescriptorSetState& state,
-		unsigned binding, unsigned elem) {
-	auto bs = bindings(state, binding);
-	dlg_assert(elem < bs.size());
-	return bs[elem];
-}
-
-const DescriptorBinding& binding(const DescriptorSetState& state,
-		unsigned binding, unsigned elem) {
-	auto bs = bindings(state, binding);
-	dlg_assert(elem < bs.size());
-	return bs[elem];
-}
-*/
-
 span<BufferDescriptor> buffers(DescriptorSetState& state, unsigned binding) {
 	dlg_assert(binding < state.layout->bindings.size());
 
@@ -346,22 +338,7 @@ span<BufferDescriptor> buffers(DescriptorSetState& state, unsigned binding) {
 	return {d, count};
 }
 span<const BufferDescriptor> buffers(const DescriptorSetState& state, unsigned binding) {
-	dlg_assert(binding < state.layout->bindings.size());
-
-	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::buffer);
-
-	auto ptr = reinterpret_cast<const std::byte*>(&state);
-	ptr += sizeof(state);
-	ptr += layout.offset;
-
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto d = std::launder(reinterpret_cast<const BufferDescriptor*>(ptr));
-	return {d, count};
+	return buffers(const_cast<DescriptorSetState&>(state), binding);
 }
 span<ImageDescriptor> images(DescriptorSetState& state, unsigned binding) {
 	dlg_assert(binding < state.layout->bindings.size());
@@ -382,22 +359,7 @@ span<ImageDescriptor> images(DescriptorSetState& state, unsigned binding) {
 	return {d, count};
 }
 span<const ImageDescriptor> images(const DescriptorSetState& state, unsigned binding) {
-	dlg_assert(binding < state.layout->bindings.size());
-
-	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::image);
-
-	auto ptr = reinterpret_cast<const std::byte*>(&state);
-	ptr += sizeof(state);
-	ptr += layout.offset;
-
-	auto count = layout.descriptorCount;
-	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		count = state.variableDescriptorCount;
-	}
-
-	auto d = std::launder(reinterpret_cast<const ImageDescriptor*>(ptr));
-	return {d, count};
+	return images(const_cast<DescriptorSetState&>(state), binding);
 }
 span<BufferViewDescriptor> bufferViews(DescriptorSetState& state, unsigned binding) {
 	dlg_assert(binding < state.layout->bindings.size());
@@ -418,12 +380,38 @@ span<BufferViewDescriptor> bufferViews(DescriptorSetState& state, unsigned bindi
 	return {d, count};
 }
 span<const BufferViewDescriptor> bufferViews(const DescriptorSetState& state, unsigned binding) {
+	return bufferViews(const_cast<DescriptorSetState&>(state), binding);
+}
+
+span<std::byte> inlineUniformBlock(DescriptorSetState& state, unsigned binding) {
+	dlg_assert(binding < state.layout->bindings.size());
+
+	auto& layout = state.layout->bindings[binding];
+	dlg_assert(layout.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT);
+
+	auto ptr = reinterpret_cast<std::byte*>(&state);
+
+	auto count = layout.descriptorCount;
+	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+		// NOTE: not sure if variable descriptor count (i.e. size) is even
+		// allowed for inline uniform blocks but we just implement it anyways
+		count = state.variableDescriptorCount;
+	}
+
+	return {ptr, count};
+}
+
+span<const std::byte> inlineUniformBlock(const DescriptorSetState& state, unsigned binding) {
+	return inlineUniformBlock(const_cast<DescriptorSetState&>(state), binding);
+}
+
+span<AccelStructDescriptor> accelStructs(DescriptorSetState& state, unsigned binding) {
 	dlg_assert(binding < state.layout->bindings.size());
 
 	auto& layout = state.layout->bindings[binding];
 	dlg_assert(category(layout.descriptorType) == DescriptorCategory::bufferView);
 
-	auto ptr = reinterpret_cast<const std::byte*>(&state);
+	auto ptr = reinterpret_cast<std::byte*>(&state);
 	ptr += sizeof(state);
 	ptr += layout.offset;
 
@@ -432,10 +420,15 @@ span<const BufferViewDescriptor> bufferViews(const DescriptorSetState& state, un
 		count = state.variableDescriptorCount;
 	}
 
-	auto d = std::launder(reinterpret_cast<const BufferViewDescriptor*>(ptr));
+	auto d = std::launder(reinterpret_cast<AccelStructDescriptor*>(ptr));
 	return {d, count};
 }
 
+span<const AccelStructDescriptor> accelStructs(const DescriptorSetState& state, unsigned binding) {
+	return accelStructs(const_cast<DescriptorSetState&>(state), binding);
+}
+
+// DescriptorPool impl
 DescriptorPool::~DescriptorPool() {
 	if(!dev) {
 		return;
@@ -503,8 +496,12 @@ DescriptorCategory category(VkDescriptorType type) {
 		case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
 		case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
 			return DescriptorCategory::bufferView;
+		case VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT:
+			return DescriptorCategory::inlineUniformBlock;
+		case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+			return DescriptorCategory::accelStruct;
 		default:
-			dlg_trace("Unknown descriptor type: {}", type);
+			dlg_trace("Unsupported descriptor type: {}", type);
 			return DescriptorCategory::none;
 	}
 }
@@ -783,7 +780,10 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 
 		pDescriptorSets[i] = castDispatch<VkDescriptorSet>(ds);
 
-		// WIP(ds)
+		// WIP(ds): temporary optimization to not insert into dev.descriptorSets
+		// when wrapping anyways. This means we lose the ability to enumerate
+		// descriptor sets in the gui though :(
+		// But this function can be on very hot paths.
 		if(!HandleDesc<VkDescriptorSet>::wrap) {
 			dev.descriptorSets.mustEmplace(pDescriptorSets[i], std::move(dsPtr));
 		} else {
@@ -889,6 +889,31 @@ void update(DescriptorSetState& state, unsigned bind, unsigned elem,
 	binding.range = evalRange(binding.buffer->ci.size, buf.offset, buf.range);
 }
 
+void update(DescriptorSetState& state, unsigned bind, unsigned elem,
+		VkAccelerationStructureKHR& handle) {
+	dlg_assert(handle);
+
+	auto& binding = accelStructs(state, bind)[elem];
+	auto ptr = getPtr(*state.layout->dev, handle);
+	handle = ptr->handle;
+
+	std::lock_guard lock(state.mutex);
+	binding = std::move(ptr);
+}
+
+void update(DescriptorSetState& state, unsigned bind, unsigned offset,
+		std::byte src) {
+	auto buf = inlineUniformBlock(state, bind);
+	dlg_assert(offset < buf.size());
+
+	std::lock_guard lock(state.mutex);
+	// NOTE: updating uniform inline blocks byte-by-byte is inefficient
+	// but we reworking this to be more efficient would be complicated.
+	// Especially so since we still have to consider that additional bytes
+	// will update the next descriptor.
+	buf[offset] = src;
+}
+
 void advanceUntilValid(DescriptorSetState& state, unsigned& binding, unsigned& elem) {
 	dlg_assert(binding < state.layout->bindings.size());
 	auto count = descriptorCount(state, binding);
@@ -933,6 +958,13 @@ void DescriptorSetState::PtrHandler::dec(DescriptorSetState& state) const noexce
 			} case DescriptorCategory::image: {
 				auto b = images(state, binding.binding);
 				std::destroy(b.begin(), b.end());
+				break;
+			} case DescriptorCategory::accelStruct: {
+				auto b = accelStructs(state, binding.binding);
+				std::destroy(b.begin(), b.end());
+				break;
+			} case DescriptorCategory::inlineUniformBlock: {
+				// no-op, we just have raw bytes here
 				break;
 			} case DescriptorCategory::none:
 				dlg_error("unreachable: invalid descriptor type");
@@ -1012,10 +1044,13 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		totalWriteCount += pDescriptorWrites[i].descriptorCount;
 	}
 
-	auto writes = LocalVector<VkWriteDescriptorSet>(descriptorWriteCount);
-	auto imageInfos = LocalVector<VkDescriptorImageInfo>(totalWriteCount);
-	auto bufferInfos = LocalVector<VkDescriptorBufferInfo>(totalWriteCount);
-	auto bufferViews = LocalVector<VkBufferView>(totalWriteCount);
+	ThreadMemScope memScope;
+
+	auto writes = memScope.alloc<VkWriteDescriptorSet>(descriptorWriteCount);
+	auto imageInfos = memScope.alloc<VkDescriptorImageInfo>(totalWriteCount);
+	auto bufferInfos = memScope.alloc<VkDescriptorBufferInfo>(totalWriteCount);
+	auto bufferViews = memScope.alloc<VkBufferView>(totalWriteCount);
+	auto accelStructs = memScope.alloc<VkAccelerationStructureKHR>(totalWriteCount);
 
 	auto writeOff = 0u;
 	for(auto i = 0u; i < descriptorWriteCount; ++i) {
@@ -1033,6 +1068,12 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 
 		auto dstBinding = write.dstBinding;
 		auto dstElem = write.dstArrayElement;
+
+		auto* chainCopy = copyChainLocal(memScope, write.pNext);
+		auto* accelStructWrite = (VkWriteDescriptorSetAccelerationStructureKHR*) findChainInfo2<
+			VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR>(chainCopy);
+		auto* inlineUniformWrite = (VkWriteDescriptorSetInlineUniformBlockEXT*) findChainInfo2<
+			VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK_EXT>(chainCopy);
 
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
 			advanceUntilValid(*ds.state, dstBinding, dstElem);
@@ -1058,6 +1099,18 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 					info = write.pTexelBufferView[j];
 					update(*ds.state, dstBinding, dstElem, info);
 					break;
+				} case DescriptorCategory::accelStruct: {
+					dlg_assert(accelStructWrite);
+					dlg_assert(j < accelStructWrite->accelerationStructureCount);
+					auto& info = accelStructs[writeOff + j];
+					info = accelStructWrite->pAccelerationStructures[j];
+					update(*ds.state, dstBinding, dstElem, info);
+				} case DescriptorCategory::inlineUniformBlock: {
+					dlg_assert(inlineUniformWrite);
+					dlg_assert(j < inlineUniformWrite->dataSize);
+					auto ptr = reinterpret_cast<const std::byte*>(inlineUniformWrite->pData);
+					update(*ds.state, dstBinding, dstElem, ptr[j]);
+					break;
 				} case DescriptorCategory::none:
 					dlg_error("unreachable: Invalid descriptor type");
 					break;
@@ -1068,6 +1121,12 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		writes[i].pBufferInfo = bufferInfos.data() + writeOff;
 		writes[i].pTexelBufferView = bufferViews.data() + writeOff;
 
+		if(accelStructWrite) {
+			dlg_assert(category(write.descriptorType) == DescriptorCategory::accelStruct);
+			accelStructWrite->pAccelerationStructures = accelStructs.data() + writeOff;
+			writes[i].pNext = chainCopy;
+		}
+
 		writeOff += writes[i].descriptorCount;
 	}
 
@@ -1075,26 +1134,25 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 	auto copies = LocalVector<VkCopyDescriptorSet>(descriptorCopyCount);
 
 	for(auto i = 0u; i < descriptorCopyCount; ++i) {
-		auto& copy = pDescriptorCopies[i];
-		auto& src = get(dev, copy.srcSet);
-		auto& dst = get(dev, copy.dstSet);
+		auto& copyInfo = pDescriptorCopies[i];
+		auto& src = get(dev, copyInfo.srcSet);
+		auto& dst = get(dev, copyInfo.dstSet);
 
-		copies[i] = copy;
+		copies[i] = copyInfo;
 		copies[i].srcSet = src.handle;
 		copies[i].dstSet = dst.handle;
 
 		checkCopyState(dst);
 
-		auto dstBinding = copy.dstBinding;
-		auto dstElem = copy.dstArrayElement;
-		auto srcBinding = copy.srcBinding;
-		auto srcElem = copy.srcArrayElement;
+		auto dstBinding = copyInfo.dstBinding;
+		auto dstElem = copyInfo.dstArrayElement;
+		auto srcBinding = copyInfo.srcBinding;
+		auto srcElem = copyInfo.srcArrayElement;
 
-		for(auto j = 0u; j < copy.descriptorCount; ++j, ++srcElem, ++dstElem) {
+		for(auto j = 0u; j < copyInfo.descriptorCount; ++j, ++srcElem, ++dstElem) {
 			advanceUntilValid(*dst.state, dstBinding, dstElem);
 			advanceUntilValid(*src.state, srcBinding, srcElem);
-
-			vil::copy(*dst.state, dstBinding, dstElem, *src.state, srcBinding, srcElem);
+			copy(*dst.state, dstBinding, dstElem, *src.state, srcBinding, srcElem);
 		}
 	}
 
@@ -1213,6 +1271,14 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 					auto& bufView = *reinterpret_cast<VkBufferView*>(data);
 					update(*ds.state, dstBinding, dstElem, bufView);
 					break;
+				} case DescriptorCategory::accelStruct: {
+					auto& accelStruct = *reinterpret_cast<VkAccelerationStructureKHR*>(data);
+					update(*ds.state, dstBinding, dstElem, accelStruct);
+					break;
+				} case DescriptorCategory::inlineUniformBlock: {
+					auto ptr = reinterpret_cast<const std::byte*>(data);
+					update(*ds.state, dstBinding, dstElem, *ptr);
+					break;
 				} case DescriptorCategory::none:
 					dlg_error("Invalid/unknown descriptor type");
 					break;
@@ -1230,21 +1296,34 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 u32 totalUpdateDataSize(const DescriptorUpdateTemplate& dut) {
 	u32 ret = 0u;
 	for(auto& entry : dut.entries) {
-		auto off = u32(entry.offset + entry.descriptorCount * entry.stride);
+		auto stride = entry.stride;
+		auto size = 0u;
 		switch(category(entry.descriptorType)) {
 			case DescriptorCategory::image:
-				off += sizeof(VkDescriptorImageInfo);
+				size = sizeof(VkDescriptorImageInfo);
 				break;
 			case DescriptorCategory::buffer:
-				off += sizeof(VkDescriptorBufferInfo);
+				size = sizeof(VkDescriptorBufferInfo);
 				break;
 			case DescriptorCategory::bufferView:
-				off += sizeof(VkBufferView*);
+				size = sizeof(VkBufferView);
+				break;
+			case DescriptorCategory::accelStruct:
+				size = sizeof(VkAccelerationStructureKHR);
+				break;
+			case DescriptorCategory::inlineUniformBlock:
+				// this is a special case defined in VK_EXT_inline_uniform_block.
+				// entry.stride should be ignored and 1 used.
+				stride = 1u;
+				size = 1u;
 				break;
 			case DescriptorCategory::none:
 				dlg_error("unreachable: Invalid/unknown descriptor type");
 				break;
 		}
+
+		auto off = u32(entry.offset + entry.descriptorCount * stride);
+		off += size;
 
 		ret = std::max<u32>(ret, off);
 	}

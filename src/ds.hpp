@@ -15,12 +15,14 @@
 
 namespace vil {
 
-// Which member in descriptor binding is valid
+// Describes the type of the descriptor data.
 enum class DescriptorCategory {
 	none,
 	image,
 	buffer,
-	bufferView
+	bufferView,
+	inlineUniformBlock,
+	accelStruct,
 };
 
 DescriptorCategory category(VkDescriptorType);
@@ -97,6 +99,7 @@ inline bool operator==(const BufferDescriptor& a, const BufferDescriptor& b) {
 }
 
 using BufferViewDescriptor = IntrusivePtr<BufferView>;
+using AccelStructDescriptor = IntrusivePtr<AccelStruct>;
 
 // State of a descriptor set. Disconnected from the DescriptorSet itself
 // since for submission, we want to know the state of the descriptor at
@@ -141,6 +144,11 @@ span<ImageDescriptor> images(DescriptorSetState&, unsigned binding);
 span<const ImageDescriptor> images(const DescriptorSetState&, unsigned binding);
 span<BufferViewDescriptor> bufferViews(DescriptorSetState&, unsigned binding);
 span<const BufferViewDescriptor> bufferViews(const DescriptorSetState&, unsigned binding);
+span<AccelStructDescriptor> accelStructs(DescriptorSetState&, unsigned binding);
+span<const AccelStructDescriptor> accelStructs(const DescriptorSetState&, unsigned binding);
+
+span<std::byte> inlineUniformBlock(DescriptorSetState&, unsigned binding);
+span<const std::byte> inlineUniformBlock(const DescriptorSetState&, unsigned binding);
 
 // Vulkan descriptor set handle
 struct DescriptorSet : DeviceHandle {

@@ -160,21 +160,7 @@ void* findChainInfo2(void* pNext) {
 std::unique_ptr<std::byte[]> copyChain(const void*& pNext);
 void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf);
 
-struct LocalChainCopy {
-	void* pNext {};
-	std::size_t totalSize {};
-
-	LocalChainCopy() = default;
-	~LocalChainCopy();
-
-	LocalChainCopy(LocalChainCopy&) = delete;
-	LocalChainCopy& operator=(LocalChainCopy&) = delete;
-
-	LocalChainCopy(LocalChainCopy&&) noexcept;
-	LocalChainCopy& operator=(LocalChainCopy&&) noexcept = delete;
-};
-
-LocalChainCopy copyChainLocal(const void* pNext);
+void* copyChainLocal(ThreadMemScope&, const void* pNext);
 
 template<typename T>
 auto aliasCmd(T&& list) {

@@ -72,6 +72,7 @@ struct PipelineLayout;
 struct Sampler;
 struct MemoryResource;
 struct RenderPassDesc;
+struct AccelStruct;
 
 struct Queue;
 struct QueueFamily;
@@ -107,6 +108,7 @@ struct Overlay;
 struct Draw;
 
 struct SpirvData;
+struct ThreadMemScope;
 
 struct DescriptorStateRef {
 	DescriptorSetState* state {};

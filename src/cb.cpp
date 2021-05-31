@@ -3,6 +3,7 @@
 #include <ds.hpp>
 #include <queue.hpp>
 #include <handles.hpp>
+#include <rt.hpp>
 #include <threadContext.hpp>
 #include <command/commands.hpp>
 #include <gui/commandHook.hpp>
@@ -2562,6 +2563,238 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDiscardRectangleEXT(
 
 	cb.dev->dispatch.CmdSetDiscardRectangleEXT(cb.handle(),
 		firstDiscardRectangle, discardRectangleCount, pDiscardRectangles);
+}
+
+// VK_KHR_acceleration_structure
+VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    infoCount,
+		const VkAccelerationStructureBuildGeometryInfoKHR* pInfos,
+		const VkAccelerationStructureBuildRangeInfoKHR* const* ppBuildRangeInfos) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BuildAccelStructsCmd>(cb);
+
+	cmd.srcs = allocSpan0<AccelStruct*>(cb, infoCount);
+	cmd.dsts = allocSpan0<AccelStruct*>(cb, infoCount);
+	cmd.buildRangeInfos = allocSpan<VkAccelerationStructureBuildRangeInfoKHR>(cb, infoCount);
+
+	cmd.buildInfos = copySpan(cb, pInfos, infoCount);
+	for(auto i = 0u; i < infoCount; ++i) {
+		auto& buildInfo = cmd.buildInfos[i];
+		copyChainInPlace(cb, buildInfo.pNext);
+
+		if(buildInfo.srcAccelerationStructure) {
+			cmd.srcs[i] = &get(*cb.dev, buildInfo.srcAccelerationStructure);
+			buildInfo.srcAccelerationStructure = cmd.srcs[i]->handle;
+			useHandle(cb, cmd, cmd.srcs[i]);
+		}
+
+		cmd.dsts[i] = &get(*cb.dev, buildInfo.dstAccelerationStructure);
+		buildInfo.dstAccelerationStructure = cmd.dsts[i]->handle;
+		useHandle(cb, cmd, cmd.dsts[i]);
+
+		cmd.buildRangeInfos[i] = *ppBuildRangeInfos[i];
+
+		// TODO: useHandle for buffers of associated device addresses
+	}
+
+	cb.dev->dispatch.CmdBuildAccelerationStructuresKHR(cb.handle(),
+		infoCount, cmd.buildInfos.data(), ppBuildRangeInfos);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    infoCount,
+		const VkAccelerationStructureBuildGeometryInfoKHR* pInfos,
+		const VkDeviceAddress*                      pIndirectDeviceAddresses,
+		const uint32_t*                             pIndirectStrides,
+		const uint32_t* const*                      ppMaxPrimitiveCounts) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<BuildAccelStructsIndirectCmd>(cb);
+
+	cmd.srcs = allocSpan0<AccelStruct*>(cb, infoCount);
+	cmd.dsts = allocSpan0<AccelStruct*>(cb, infoCount);
+	cmd.indirectAddresses = allocSpan<VkDeviceAddress>(cb, infoCount);
+	cmd.indirectStrides = allocSpan<u32>(cb, infoCount);
+	cmd.maxPrimitiveCounts = allocSpan<u32*>(cb, infoCount);
+
+	cmd.buildInfos = copySpan(cb, pInfos, infoCount);
+	for(auto i = 0u; i < infoCount; ++i) {
+		auto& buildInfo = cmd.buildInfos[i];
+		copyChainInPlace(cb, buildInfo.pNext);
+
+		if(buildInfo.srcAccelerationStructure) {
+			cmd.srcs[i] = &get(*cb.dev, buildInfo.srcAccelerationStructure);
+			buildInfo.srcAccelerationStructure = cmd.srcs[i]->handle;
+			useHandle(cb, cmd, cmd.srcs[i]);
+		}
+
+		cmd.dsts[i] = &get(*cb.dev, buildInfo.dstAccelerationStructure);
+		buildInfo.dstAccelerationStructure = cmd.dsts[i]->handle;
+		useHandle(cb, cmd, cmd.dsts[i]);
+
+		cmd.indirectAddresses[i] = pIndirectDeviceAddresses[i];
+		cmd.indirectStrides[i] = pIndirectStrides[i];
+		cmd.maxPrimitiveCounts[i] = copySpan(cb,
+			ppMaxPrimitiveCounts[i], buildInfo.geometryCount).data();
+
+		// TODO: useHandle for buffers of associated device addresses?
+	}
+
+	cb.dev->dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb.handle(),
+		infoCount, cmd.buildInfos.data(), pIndirectDeviceAddresses,
+		pIndirectStrides, ppMaxPrimitiveCounts);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureKHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkCopyAccelerationStructureInfoKHR*   pInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<CopyAccelStructureCmd>(cb);
+	cmd.pNext = copyChain(cb, pInfo->pNext);
+	cmd.src = &get(*cb.dev, pInfo->src);
+	cmd.dst = &get(*cb.dev, pInfo->dst);
+	cmd.mode = pInfo->mode;
+
+	useHandle(cb, cmd, *cmd.src);
+	useHandle(cb, cmd, *cmd.dst);
+
+	auto fwd = *pInfo;
+	fwd.src = cmd.src->handle;
+	fwd.dst = cmd.src->handle;
+
+	cb.dev->dispatch.CmdCopyAccelerationStructureKHR(cb.handle(), &fwd);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureToMemoryKHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkCopyAccelerationStructureToMemoryInfoKHR* pInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<CopyAccelStructToMemoryCmd>(cb);
+	cmd.pNext = copyChain(cb, pInfo->pNext);
+	cmd.src = &get(*cb.dev, pInfo->src);
+	cmd.dst = pInfo->dst;
+	cmd.mode = pInfo->mode;
+
+	useHandle(cb, cmd, *cmd.src);
+	// TODO: useHandle for buffers of associated device addresses?
+
+	auto fwd = *pInfo;
+	fwd.src = cmd.src->handle;
+	cb.dev->dispatch.CmdCopyAccelerationStructureToMemoryKHR(cb.handle(), &fwd);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdCopyMemoryToAccelerationStructureKHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkCopyMemoryToAccelerationStructureInfoKHR* pInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<CopyMemoryToAccelStructCmd>(cb);
+	cmd.pNext = copyChain(cb, pInfo->pNext);
+	cmd.src = pInfo->src;
+	cmd.dst = &get(*cb.dev, pInfo->dst);
+	cmd.mode = pInfo->mode;
+
+	useHandle(cb, cmd, *cmd.dst);
+	// TODO: useHandle for buffers of associated device addresses?
+
+	auto fwd = *pInfo;
+	fwd.dst = cmd.dst->handle;
+	cb.dev->dispatch.CmdCopyMemoryToAccelerationStructureKHR(cb.handle(), &fwd);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdWriteAccelerationStructuresPropertiesKHR(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    accelerationStructureCount,
+		const VkAccelerationStructureKHR*           pAccelerationStructures,
+		VkQueryType                                 queryType,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    firstQuery) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<WriteAccelStructPropertiesCmd>(cb);
+	cmd.firstQuery = firstQuery;
+	cmd.queryType = queryType;
+	cmd.queryPool = &get(*cb.dev, queryPool);
+	useHandle(cb, cmd, cmd.queryPool);
+
+	cmd.accelStructs = allocSpan<AccelStruct*>(cb, accelerationStructureCount);
+
+	ThreadMemScope memScope;
+	auto fwd = memScope.alloc<VkAccelerationStructureKHR>(accelerationStructureCount);
+
+	for(auto i = 0u; i < accelerationStructureCount; ++i) {
+		cmd.accelStructs[i] = &get(*cb.dev, pAccelerationStructures[i]);
+		useHandle(cb, cmd, cmd.accelStructs[i]);
+		fwd[i] = cmd.accelStructs[i]->handle;
+	}
+
+	cb.dev->dispatch.CmdWriteAccelerationStructuresPropertiesKHR(cb.handle(),
+		fwd.size(), fwd.data(), queryType, cmd.queryPool->handle, firstQuery);
+}
+
+
+// VK_KHR_ray_tracing_pipeline
+VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkStridedDeviceAddressRegionKHR*      pRaygenShaderBindingTable,
+		const VkStridedDeviceAddressRegionKHR*      pMissShaderBindingTable,
+		const VkStridedDeviceAddressRegionKHR*      pHitShaderBindingTable,
+		const VkStridedDeviceAddressRegionKHR*      pCallableShaderBindingTable,
+		uint32_t                                    width,
+		uint32_t                                    height,
+		uint32_t                                    depth) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<TraceRaysCmd>(cb);
+	cmd.raygenBindingTable = *pRaygenShaderBindingTable;
+	cmd.missBindingTable = *pMissShaderBindingTable;
+	cmd.hitBindingTable = *pHitShaderBindingTable;
+	cmd.callableBindingTable = *pCallableShaderBindingTable;
+	cmd.width = width;
+	cmd.height = height;
+	cmd.depth = depth;
+
+	// TODO: useHandle for buffers of associated device addresses?
+
+	cb.dev->dispatch.CmdTraceRaysKHR(cb.handle(),
+		pRaygenShaderBindingTable,
+		pMissShaderBindingTable,
+		pHitShaderBindingTable,
+		pCallableShaderBindingTable,
+		width, height, depth);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdTraceRaysIndirectKHR(
+		VkCommandBuffer                             commandBuffer,
+		const VkStridedDeviceAddressRegionKHR*      pRaygenShaderBindingTable,
+		const VkStridedDeviceAddressRegionKHR*      pMissShaderBindingTable,
+		const VkStridedDeviceAddressRegionKHR*      pHitShaderBindingTable,
+		const VkStridedDeviceAddressRegionKHR*      pCallableShaderBindingTable,
+		VkDeviceAddress                             indirectDeviceAddress) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<TraceRaysIndirectCmd>(cb);
+	cmd.raygenBindingTable = *pRaygenShaderBindingTable;
+	cmd.missBindingTable = *pMissShaderBindingTable;
+	cmd.hitBindingTable = *pHitShaderBindingTable;
+	cmd.callableBindingTable = *pCallableShaderBindingTable;
+	cmd.indirectDeviceAddress = indirectDeviceAddress;
+
+	// TODO: useHandle for buffers of associated device addresses?
+
+	cb.dev->dispatch.CmdTraceRaysIndirectKHR(cb.handle(),
+		pRaygenShaderBindingTable,
+		pMissShaderBindingTable,
+		pHitShaderBindingTable,
+		pCallableShaderBindingTable,
+		indirectDeviceAddress);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetRayTracingPipelineStackSizeKHR(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    pipelineStackSize) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetRayTracingPipelineStackSizeCmd>(cb);
+	cmd.stackSize = pipelineStackSize;
+
+	cb.dev->dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb.handle(), pipelineStackSize);
 }
 
 } // namespace vil

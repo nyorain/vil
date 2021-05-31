@@ -62,6 +62,13 @@ template<typename T>
 }
 
 template<typename T>
+[[nodiscard]] span<T> allocSpan0(CommandBuffer& cb, size_t count) {
+	auto ret = allocSpan<T>(cb, count);
+	std::memset(ret.data(), 0x0, count * sizeof(ret[0]));
+	return ret;
+}
+
+template<typename T>
 [[nodiscard]] span<T> allocSpan(CommandRecord& rec, size_t count) {
 	if(count == 0) {
 		return {};

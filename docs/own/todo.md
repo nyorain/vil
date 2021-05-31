@@ -152,6 +152,17 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] Figure out how to correctly useHandle for stuff using DeviceAddress.
+      Or, in more general terms: figure out sync for buffers that are accessed
+	  using their buffer address. I don't think it's possible in general.
+	  We probably just have to sync gui stuff with *every* submission when
+	  e.g. reading from a buffer from which the buffer address was previously
+	  retrieved. damn
+	  	- [ ] related: figure out how to handle device address in UI.
+		      We probably want to link to the related resource. Just solve
+			  this via std::map in Device with custom comparison that
+			  checks whether an address is in-range? Think about whether
+			  this works for memory aliasing.
 - [ ] Unselect a command when new frames don't contain it any more?
       We will still view the old state at the moment. Unselecting can
 	  be a problem since we might want to continue viewing the stale

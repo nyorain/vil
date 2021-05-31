@@ -139,6 +139,7 @@ src = files(
 	'src/queryPool.cpp',
 	'src/queue.cpp',
 	'src/submit.cpp',
+	'src/rt.cpp',
 
 	# gui stuff
 	'src/gui/render.cpp',

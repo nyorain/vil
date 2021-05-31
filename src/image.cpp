@@ -100,7 +100,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		nci.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
 
-	auto res = dev.dispatch.CreateImage(device, &nci, pAllocator, pImage);
+	auto res = dev.dispatch.CreateImage(dev.handle, &nci, pAllocator, pImage);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -167,7 +167,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
 		bindImageMemory(dev, bind);
 	}
 
-	return dev.dispatch.BindImageMemory2(device, bindInfoCount, pBindInfos);
+	return dev.dispatch.BindImageMemory2(dev.handle, bindInfoCount, pBindInfos);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
@@ -177,7 +177,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 		VkDeviceSize                                memoryOffset) {
 	auto& dev = getDevice(device);
 	bindImageMemory(dev, {{}, {}, image, memory, memoryOffset});
-	return dev.dispatch.BindImageMemory(device, image, memory, memoryOffset);
+	return dev.dispatch.BindImageMemory(dev.handle, image, memory, memoryOffset);
 }
 
 // ImageView
@@ -188,7 +188,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 		VkImageView*                                pView) {
 	auto& dev = getDevice(device);
 
-	auto res = dev.dispatch.CreateImageView(device, pCreateInfo, pAllocator, pView);
+	auto res = dev.dispatch.CreateImageView(dev.handle, pCreateInfo, pAllocator, pView);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -232,7 +232,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		ptr->handle = {};
 	}
 
-	dev.dispatch.DestroyImageView(device, imageView, pAllocator);
+	dev.dispatch.DestroyImageView(dev.handle, imageView, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
@@ -242,7 +242,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
 		VkSampler*                                  pSampler) {
 	auto& dev = getDevice(device);
 
-	auto res = dev.dispatch.CreateSampler(device, pCreateInfo, pAllocator, pSampler);
+	auto res = dev.dispatch.CreateSampler(dev.handle, pCreateInfo, pAllocator, pSampler);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -278,7 +278,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 		ptr->handle = {};
 	}
 
-	dev.dispatch.DestroySampler(device, sampler, pAllocator);
+	dev.dispatch.DestroySampler(dev.handle, sampler, pAllocator);
 }
 
 } // namespace vil

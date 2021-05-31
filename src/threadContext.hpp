@@ -156,7 +156,7 @@ struct ThreadMemScope {
 	}
 
 	template<typename T>
-	span<T> copy(T* data, size_t n) {
+	span<std::remove_const_t<T>> copy(T* data, size_t n) {
 		auto ptr = ThreadContextAllocator<T>().allocate(n);
 		new(ptr) T[n]();
 		std::memcpy(ptr, data, n * sizeof(T));

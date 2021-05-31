@@ -238,4 +238,34 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
 	dev.dispatch.DestroyBufferView(dev.handle, bufferView, pAllocator);
 }
 
+VKAPI_ATTR VkDeviceAddress VKAPI_CALL GetBufferDeviceAddress(
+		VkDevice                                    device,
+		const VkBufferDeviceAddressInfo*            pInfo) {
+	auto& buf = get(device, pInfo->buffer);
+	auto fwd = *pInfo;
+	fwd.buffer = buf.handle;
+	return buf.dev->dispatch.GetBufferDeviceAddressKHR(buf.dev->handle, &fwd);
+}
+
+// NOTE: these functions are specifically designed for layers that capture
+// stuff. But we don't actually need it since we capture/show everything
+// in-process.
+VKAPI_ATTR uint64_t VKAPI_CALL GetBufferOpaqueCaptureAddress(
+		VkDevice                                    device,
+		const VkBufferDeviceAddressInfo*            pInfo) {
+	auto& buf = get(device, pInfo->buffer);
+	auto fwd = *pInfo;
+	fwd.buffer = buf.handle;
+	return buf.dev->dispatch.GetBufferOpaqueCaptureAddressKHR(buf.dev->handle, &fwd);
+}
+
+VKAPI_ATTR uint64_t VKAPI_CALL GetDeviceMemoryOpaqueCaptureAddress(
+		VkDevice                                    device,
+		const VkDeviceMemoryOpaqueCaptureAddressInfo* pInfo) {
+	auto& mem = get(device, pInfo->memory);
+	auto fwd = *pInfo;
+	fwd.memory = mem.handle;
+	return mem.dev->dispatch.GetDeviceMemoryOpaqueCaptureAddressKHR(mem.dev->handle, &fwd);
+}
+
 } // namespace vil
