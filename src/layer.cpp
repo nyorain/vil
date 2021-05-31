@@ -5,6 +5,7 @@
 #include <platform.hpp>
 #include <queue.hpp>
 #include <overlay.hpp>
+#include <rt.hpp>
 #include <util/util.hpp>
 #include <util/export.hpp>
 #include <util/profiling.hpp>
@@ -373,6 +374,18 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_ALIAS(BindBufferMemory2KHR, BindBufferMemory2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
 
+	VIL_DEV_HOOK(GetBufferDeviceAddress),
+	VIL_DEV_HOOK(GetBufferOpaqueCaptureAddress),
+	VIL_DEV_HOOK(GetDeviceMemoryOpaqueCaptureAddress),
+	VIL_DEV_HOOK_ALIAS(GetBufferDeviceAddressKHR, GetBufferDeviceAddress,
+		VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS(GetBufferOpaqueCaptureAddressKHR, GetBufferOpaqueCaptureAddress,
+		VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS(GetDeviceMemoryOpaqueCaptureAddressKHR, GetDeviceMemoryOpaqueCaptureAddress,
+		VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS(GetBufferDeviceAddressKHR, GetBufferDeviceAddress,
+		VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
+
 	VIL_DEV_HOOK(CreateBufferView),
 	VIL_DEV_HOOK(DestroyBufferView),
 
@@ -432,6 +445,22 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	// queryPool.hpp
 	VIL_DEV_HOOK(CreateQueryPool),
 	VIL_DEV_HOOK(DestroyQueryPool),
+
+	// rt.hpp
+	VIL_DEV_HOOK_EXT(CreateAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(DestroyAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(BuildAccelerationStructuresKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CopyAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CopyAccelerationStructureToMemoryKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CopyMemoryToAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(WriteAccelerationStructuresPropertiesKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetAccelerationStructureDeviceAddressKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetDeviceAccelerationStructureCompatibilityKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetAccelerationStructureBuildSizesKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CreateRayTracingPipelinesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetRayTracingCaptureReplayShaderGroupHandlesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetRayTracingShaderGroupStackSizeKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 
 	// cb.hpp
 	VIL_DEV_HOOK(CreateCommandPool),
@@ -554,6 +583,17 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdSetSampleLocationsEXT, VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME),
 
 	VIL_DEV_HOOK_EXT(CmdSetDiscardRectangleEXT, VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdBuildAccelerationStructuresKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdBuildAccelerationStructuresIndirectKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdCopyAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdCopyAccelerationStructureToMemoryKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdCopyMemoryToAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdWriteAccelerationStructuresPropertiesKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdTraceRaysKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdTraceRaysIndirectKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdSetRayTracingPipelineStackSizeKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 };
 
 #undef VIL_INI_HOOK

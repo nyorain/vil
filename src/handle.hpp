@@ -61,6 +61,7 @@ struct ResourceVisitor {
 	virtual void visit(DescriptorSet&) = 0;
 	virtual void visit(DescriptorPool&) = 0;
 	virtual void visit(DescriptorSetLayout&) = 0;
+	virtual void visit(DescriptorUpdateTemplate&) = 0;
 	virtual void visit(Framebuffer&) = 0;
 	virtual void visit(RenderPass&) = 0;
 	virtual void visit(QueryPool&) = 0;
@@ -70,6 +71,7 @@ struct ResourceVisitor {
 	virtual void visit(Queue&) = 0;
 	virtual void visit(Swapchain&) = 0;
 	virtual void visit(ShaderModule&) = 0;
+	virtual void visit(AccelStruct&) = 0;
 };
 
 template<typename F>
@@ -91,6 +93,7 @@ struct TemplateResourceVisitor : ResourceVisitor {
 	void visit(DescriptorSet& res) override { impl(res); }
 	void visit(DescriptorPool& res) override { impl(res); }
 	void visit(DescriptorSetLayout& res) override { impl(res); }
+	void visit(DescriptorUpdateTemplate& res) override { impl(res); }
 	void visit(Framebuffer& res) override { impl(res); }
 	void visit(RenderPass& res) override { impl(res); }
 	void visit(QueryPool& res) override { impl(res); }
@@ -100,6 +103,7 @@ struct TemplateResourceVisitor : ResourceVisitor {
 	void visit(Queue& res) override { impl(res); }
 	void visit(Swapchain& res) override { impl(res); }
 	void visit(ShaderModule& res) override { impl(res); }
+	void visit(AccelStruct& res) override { impl(res); }
 };
 
 struct ObjectTypeHandler {

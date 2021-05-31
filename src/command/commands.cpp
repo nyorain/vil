@@ -2,6 +2,8 @@
 #include <handles.hpp>
 #include <shader.hpp>
 #include <cb.hpp>
+#include <rt.hpp>
+#include <threadContext.hpp>
 #include <util/span.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
@@ -27,12 +29,11 @@ namespace vil {
 
 // Command utility
 template<typename C>
-auto rawHandles(const C& handles) {
+auto rawHandles(ThreadMemScope& scope, const C& handles) {
 	using VkH = decltype(handle(*handles[0]));
-	std::vector<VkH> ret;
-	ret.reserve(handles.size());
-	for(auto* h : handles) {
-		ret.push_back(handle(*h));
+	auto ret = scope.alloc<VkH>(handles.size());
+	for(auto i = 0u; i < handles.size(); ++i) {
+		ret[i] = handle(*handles[i]);
 	}
 
 	return ret;
@@ -616,7 +617,8 @@ Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
 
 // WaitEventsCmd
 void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	auto vkEvents = rawHandles(this->events);
+	ThreadMemScope memScope;
+	auto vkEvents = rawHandles(memScope, this->events);
 	dev.dispatch.CmdWaitEvents(cb,
 		u32(vkEvents.size()), vkEvents.data(),
 		this->srcStageMask, this->dstStageMask,
@@ -1438,7 +1440,8 @@ float BindIndexBufferCmd::match(const Command& rhs) const {
 
 // BindDescriptorSetCmd
 void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	auto vkds = rawHandles(sets);
+	ThreadMemScope memScope;
+	auto vkds = rawHandles(memScope, sets);
 	dev.dispatch.CmdBindDescriptorSets(cb, pipeBindPoint, pipeLayout->handle,
 		firstSet, u32(vkds.size()), vkds.data(),
 		u32(dynamicOffsets.size()), dynamicOffsets.data());
@@ -2714,6 +2717,82 @@ void SetSampleLocationsCmd::record(const Device& dev, VkCommandBuffer cb) const 
 
 void SetDiscardRectangleCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetDiscardRectangleEXT(cb, first, rects.size(), rects.data());
+}
+
+// VK_KHR_acceleration_structure
+void CopyAccelStructureCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	VkCopyAccelerationStructureInfoKHR info {};
+	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+	info.pNext = pNext;
+	info.dst = src->handle;
+	info.src = dst->handle;
+	info.mode = mode;
+	dev.dispatch.CmdCopyAccelerationStructureKHR(cb, &info);
+}
+
+void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	VkCopyAccelerationStructureToMemoryInfoKHR info {};
+	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_TO_MEMORY_INFO_KHR;
+	info.pNext = pNext;
+	info.src = src->handle;
+	info.dst = dst;
+	info.mode = mode;
+	dev.dispatch.CmdCopyAccelerationStructureToMemoryKHR(cb, &info);
+}
+
+void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	VkCopyMemoryToAccelerationStructureInfoKHR info {};
+	info.sType = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_ACCELERATION_STRUCTURE_INFO_KHR;
+	info.pNext = pNext;
+	info.src = src;
+	info.dst = dst->handle;
+	info.mode = mode;
+	dev.dispatch.CmdCopyMemoryToAccelerationStructureKHR(cb, &info);
+}
+
+void WriteAccelStructPropertiesCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	ThreadMemScope memScope;
+	auto vkAccelStructs = rawHandles(memScope, accelStructs);
+
+	dev.dispatch.CmdWriteAccelerationStructuresPropertiesKHR(cb,
+		u32(vkAccelStructs.size()), vkAccelStructs.data(), queryType,
+		queryPool->handle, firstQuery);
+}
+
+void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dlg_assert(buildInfos.size() == buildRangeInfos.size());
+
+	ThreadMemScope memScope;
+	auto ppRangeInfos = memScope.alloc<VkAccelerationStructureBuildRangeInfoKHR*>(buildRangeInfos.size());
+	for(auto i = 0u; i < buildRangeInfos.size(); ++i) {
+		ppRangeInfos[i] = &buildRangeInfos[i];
+	}
+
+	dev.dispatch.CmdBuildAccelerationStructuresKHR(cb, u32(buildInfos.size()),
+		buildInfos.data(), ppRangeInfos.data());
+}
+
+void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb, u32(buildInfos.size()),
+		buildInfos.data(), indirectAddresses.data(), indirectStrides.data(),
+		maxPrimitiveCounts.data());
+}
+
+// VK_KHR_ray_tracing_pipeline
+void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdTraceRaysKHR(cb,
+		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
+		width, height, depth);
+}
+
+void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdTraceRaysIndirectKHR(cb,
+		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
+		indirectDeviceAddress);
+}
+
+void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb, stackSize);
 }
 
 } // namespace vil

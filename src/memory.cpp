@@ -3,6 +3,7 @@
 #include <data.hpp>
 #include <image.hpp>
 #include <buffer.hpp>
+#include <threadContext.hpp>
 #include <util/util.hpp>
 
 namespace vil {
@@ -64,12 +65,13 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 		VkDeviceMemory*                             pMemory) {
 	auto& dev = getDevice(device);
 
-	auto chainCopy = copyChainLocal(pAllocateInfo->pNext);
+	ThreadMemScope memScope;
+	auto chainCopy = copyChainLocal(memScope, pAllocateInfo->pNext);
 	auto allocInfo = *pAllocateInfo;
-	allocInfo.pNext = chainCopy.pNext;
+	allocInfo.pNext = chainCopy;
 
 	// unwrap handles in VkMemoryDedicatedAllocateInfo
-	auto* dedicatedv = findChainInfo2<VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO>(chainCopy.pNext);
+	auto* dedicatedv = findChainInfo2<VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO>(chainCopy);
 	if(dedicatedv) {
 		auto* dedicated = static_cast<VkMemoryDedicatedAllocateInfo*>(dedicatedv);
 		dlg_assert(!dedicated->buffer || !dedicated->image);

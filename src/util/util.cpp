@@ -1033,31 +1033,10 @@ void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
 	return static_cast<void*>(buf.get());
 }
 
-LocalChainCopy copyChainLocal(const void* pNext) {
-	auto& tc = ThreadContext::get();
-	LocalChainCopy ret {};
-
-	// first march-through: find needed size
-	auto it = pNext;
-	while(it) {
-		auto src = static_cast<const VkBaseInStructure*>(it);
-
-		auto ssize = structSize(src->sType);
-		dlg_assertm(ssize > 0, "Unknown structure type: {}", src->sType);
-		ret.totalSize += ssize;
-
-		it = src->pNext;
-	}
-
-	if(ret.totalSize == 0u) {
-		return ret;
-	}
-
-	auto buf = vil::allocate(tc, ret.totalSize);
-	auto offset = 0u;
-
+void* copyChainLocal(ThreadMemScope& memScope, const void* pNext) {
 	VkBaseInStructure* last = nullptr;
-	it = pNext;
+	void* ret = nullptr;
+	auto it = pNext;
 
 	while(it) {
 		auto src = static_cast<const VkBaseInStructure*>(it);
@@ -1065,8 +1044,8 @@ LocalChainCopy copyChainLocal(const void* pNext) {
 		dlg_assertm_or(size > 0, it = src->pNext; continue,
 			"Unknown structure type: {}");
 
-		auto dst = reinterpret_cast<VkBaseInStructure*>(buf + offset);
-		offset += unsigned(size);
+		auto dstBuf = memScope.alloc<std::byte>(size);
+		auto* dst = reinterpret_cast<VkBaseInStructure*>(dstBuf.data());
 
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs
@@ -1074,8 +1053,8 @@ LocalChainCopy copyChainLocal(const void* pNext) {
 		dst->pNext = nullptr;
 
 		if(!last) {
-			dlg_assert(!ret.pNext);
-			ret.pNext = static_cast<void*>(dst);
+			dlg_assert(!ret);
+			ret = static_cast<void*>(dst);
 		} else {
 			last->pNext = dst;
 		}
@@ -1085,20 +1064,6 @@ LocalChainCopy copyChainLocal(const void* pNext) {
 	}
 
 	return ret;
-}
-
-LocalChainCopy::~LocalChainCopy() {
-	if(totalSize > 0) {
-		auto& tc = ThreadContext::get();
-		free(tc, reinterpret_cast<const std::byte*>(pNext), totalSize);
-	}
-}
-
-LocalChainCopy::LocalChainCopy(LocalChainCopy&& rhs) noexcept {
-	totalSize = rhs.totalSize;
-	pNext = rhs.pNext;
-	rhs.pNext = {};
-	rhs.totalSize = {};
 }
 
 void writeFile(const char* path, span<const std::byte> buffer, bool binary) {

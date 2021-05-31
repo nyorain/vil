@@ -174,6 +174,7 @@ struct Device {
 	SyncedIntrusiveUnorderedMap<VkSampler, Sampler> samplers;
 	SyncedIntrusiveUnorderedMap<VkBuffer, Buffer> buffers;
 	SyncedIntrusiveUnorderedMap<VkBufferView, BufferView> bufferViews;
+	SyncedIntrusiveUnorderedMap<VkAccelerationStructureKHR, AccelStruct> accelStructs;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 
@@ -207,12 +208,15 @@ DefHandleDesc(VkDescriptorSetLayout, DescriptorSetLayout, dsLayouts, false, true
 DefHandleDesc(VkDescriptorUpdateTemplate, DescriptorUpdateTemplate, dsuTemplates, false, true);
 DefHandleDesc(VkCommandPool, CommandPool, commandPools, false, true);
 DefHandleDesc(VkPipelineLayout, PipelineLayout, pipeLayouts, false, true);
+DefHandleDesc(VkAccelerationStructureKHR, AccelStruct, accelStructs, false, true);
 
 DefHandleDesc(VkCommandBuffer, CommandBuffer, commandBuffers, true, true);
 
-// TODO: enable wrapping for these as well
+// TODO: enable wrapping for these as well. Might need to implement some
+// additional functions first, especially for image (e.g. GetSubresourceLayout)
 DefHandleDesc(VkImage, Image, images, false, false);
 DefHandleDesc(VkDeviceMemory, DeviceMemory, deviceMemories, false, false);
+DefHandleDesc(VkQueryPool, QueryPool, queryPools, false, false);
 
 #undef DefHandleDesc
 
@@ -253,8 +257,6 @@ H castDispatch(Device& dev, WrappedHandle<T>& wrapped) {
 	}
 
 	std::memcpy(&wrapped.dispatch, reinterpret_cast<void*>(dev.handle), sizeof(wrapped.dispatch));
-	// dev.setDeviceLoaderData(dev.handle, static_cast<void*>(&ptr));
-
 	return u64ToHandle<H>(reinterpret_cast<std::uintptr_t>(&wrapped));
 }
 

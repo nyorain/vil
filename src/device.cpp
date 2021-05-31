@@ -6,6 +6,7 @@
 #include <window.hpp>
 #include <handles.hpp>
 #include <overlay.hpp>
+#include <rt.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <gui/commandHook.hpp>
@@ -622,6 +623,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.TrimCommandPool,
 		&dev.dispatch.TrimCommandPoolKHR});
+	// KHR_descriptor_update_template, vulkan 1.1
 	aliasCmd(std::array{
 		&dev.dispatch.CreateDescriptorUpdateTemplate,
 		&dev.dispatch.CreateDescriptorUpdateTemplateKHR});
@@ -631,6 +633,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.UpdateDescriptorSetWithTemplate,
 		&dev.dispatch.UpdateDescriptorSetWithTemplateKHR});
+	/// {KHR, EXT}_buffer_device_addres, Vulkan 1.2
+	aliasCmd(std::array{
+		&dev.dispatch.GetBufferDeviceAddress,
+		&dev.dispatch.GetBufferDeviceAddressKHR,
+		&dev.dispatch.GetBufferDeviceAddressEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.GetBufferOpaqueCaptureAddress,
+		&dev.dispatch.GetBufferOpaqueCaptureAddressKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.GetDeviceMemoryOpaqueCaptureAddress,
+		&dev.dispatch.GetDeviceMemoryOpaqueCaptureAddressKHR});
 
 	dev.swapchains.mutex = &dev.mutex;
 	dev.images.mutex = &dev.mutex;

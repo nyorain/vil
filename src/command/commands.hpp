@@ -5,7 +5,10 @@
 #include <util/span.hpp>
 #include <dlg/dlg.hpp>
 
-// See ~Command
+// See ~Command. Keep in mind that we use a custom per-CommandRecord allocator
+// for all Commands, that's why we can use span<> here without the referenced
+// data being owned anywhere. It's just guaranteed to stay alive as long
+// as the CommandRecord.
 #ifdef __GNUC__
 	#pragma GCC diagnostic push
 	#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
@@ -31,6 +34,8 @@ enum class CommandType : u32 {
 	end = (1u << 6u),
 	// Query pool commands
 	query = (1u << 7u),
+	// TracyRays commands
+	traceRays = (1u << 8u),
 };
 
 using CommandTypeFlags = nytl::Flags<CommandType>;
@@ -783,7 +788,6 @@ struct BeginQueryCmd final : Command {
 	VkQueryControlFlags flags {};
 
 	Type type() const override { return Type::query; }
-	std::string toString() const override { return "BeginQuery"; }
 	std::string nameDesc() const override { return "BeginQuery"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -794,7 +798,6 @@ struct EndQueryCmd final : Command {
 	u32 query {};
 
 	Type type() const override { return Type::query; }
-	std::string toString() const override { return "EndQuery"; }
 	std::string nameDesc() const override { return "EndQuery"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -806,7 +809,6 @@ struct ResetQueryPoolCmd final : Command {
 	u32 count {};
 
 	Type type() const override { return Type::query; }
-	std::string toString() const override { return "ResetQueryPool"; }
 	std::string nameDesc() const override { return "ResetQueryPool"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -818,7 +820,6 @@ struct WriteTimestampCmd final : Command {
 	u32 query {};
 
 	Type type() const override { return Type::query; }
-	std::string toString() const override { return "WriteTimestamp"; }
 	std::string nameDesc() const override { return "WriteTimestamp"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -834,7 +835,6 @@ struct CopyQueryPoolResultsCmd final : Command {
 	VkQueryResultFlags flags {};
 
 	Type type() const override { return Type::query; }
-	std::string toString() const override { return "CopyQueryPoolResults"; }
 	std::string nameDesc() const override { return "CopyQueryPoolResults"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -1018,6 +1018,120 @@ struct SetDiscardRectangleCmd final : Command {
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
+// VK_KHR_acceleration_structure
+struct CopyAccelStructureCmd final : Command {
+	const void* pNext {};
+	AccelStruct* src {};
+	AccelStruct* dst {};
+    VkCopyAccelerationStructureModeKHR mode;
+
+	Type type() const override { return Type::transfer; }
+	std::string nameDesc() const override { return "CopyAccelerationStructure"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+};
+
+struct CopyAccelStructToMemoryCmd final : Command {
+	const void* pNext {};
+	AccelStruct* src {};
+    VkDeviceOrHostAddressKHR dst {};
+    VkCopyAccelerationStructureModeKHR mode;
+
+	Type type() const override { return Type::transfer; }
+	std::string nameDesc() const override { return "CopyAccelerationStructureToMemory"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+};
+
+struct CopyMemoryToAccelStructCmd final : Command {
+	const void* pNext {};
+    VkDeviceOrHostAddressConstKHR src {};
+	AccelStruct* dst {};
+    VkCopyAccelerationStructureModeKHR mode;
+
+	Type type() const override { return Type::transfer; }
+	std::string nameDesc() const override { return "CopyMemoryToAccelerationStructure"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+};
+
+struct WriteAccelStructPropertiesCmd final : Command {
+	span<AccelStruct*> accelStructs;
+	VkQueryType queryType {};
+	QueryPool* queryPool {};
+	u32 firstQuery {};
+
+	Type type() const override { return Type::query; }
+	std::string nameDesc() const override { return "WriteAccelerationStructuresProperties"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+};
+
+struct BuildAccelStructsCmd final : Command {
+	span<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos; // already handle-fwd-patched
+	span<VkAccelerationStructureBuildRangeInfoKHR> buildRangeInfos;
+	span<AccelStruct*> srcs;
+	span<AccelStruct*> dsts;
+
+	Type type() const override { return Type::other; }
+	std::string nameDesc() const override { return "BuildAccelerationStructures"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+};
+
+struct BuildAccelStructsIndirectCmd final : Command {
+	span<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos; // already handle-fwd-patched
+	span<AccelStruct*> srcs;
+	span<AccelStruct*> dsts;
+
+	// indirect info. All span have a size equal to buildInfos.size()
+	span<VkDeviceAddress> indirectAddresses;
+	span<u32> indirectStrides;
+	span<u32*> maxPrimitiveCounts;
+
+	Type type() const override { return Type::other; }
+	std::string nameDesc() const override { return "BuildAccelerationStructuresIndirect"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+};
+
+// VK_KHR_ray_tracing_pipeline
+struct TraceRaysCmd final : Command {
+	u32 width;
+	u32 height;
+	u32 depth;
+
+	VkStridedDeviceAddressRegionKHR raygenBindingTable;
+	VkStridedDeviceAddressRegionKHR missBindingTable;
+	VkStridedDeviceAddressRegionKHR hitBindingTable;
+	VkStridedDeviceAddressRegionKHR callableBindingTable;
+
+	Type type() const override { return Type::traceRays; }
+	std::string nameDesc() const override { return "TraceRays"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct TraceRaysIndirectCmd final : Command {
+	VkDeviceAddress indirectDeviceAddress;
+	VkStridedDeviceAddressRegionKHR raygenBindingTable;
+	VkStridedDeviceAddressRegionKHR missBindingTable;
+	VkStridedDeviceAddressRegionKHR hitBindingTable;
+	VkStridedDeviceAddressRegionKHR callableBindingTable;
+
+	Type type() const override { return Type::traceRays; }
+	std::string nameDesc() const override { return "TraceRaysIndirect"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+struct SetRayTracingPipelineStackSizeCmd final : Command {
+	u32 stackSize;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetRayTracingPipelineStackSize"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+};
+
+// ---
 // TODO: support VK_KHR_device_group? I guess we would have to consider it
 //   in gui rendering as well which might not be trivial.
 

@@ -3,6 +3,7 @@
 #include <queue.hpp>
 #include <device.hpp>
 #include <handles.hpp>
+#include <rt.hpp>
 #include <vk/enumString.hpp>
 
 namespace vil {
@@ -80,6 +81,8 @@ const char* name(VkObjectType objectType) {
 		case VK_OBJECT_TYPE_SWAPCHAIN_KHR: return "Swapchain";
 		case VK_OBJECT_TYPE_RENDER_PASS: return "RenderPass";
 		case VK_OBJECT_TYPE_FRAMEBUFFER: return "Framebuffer";
+		case VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE: return "DescriptorUpdateTemplate";
+		case VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR: return "AccelerationStructure";
 		default: return "?";
 	}
 }
@@ -132,6 +135,8 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 
 	VkObjectType objectType() const override { return OT; }
 	Handle* find(Device& dev, u64 id, u64& fwdID) const override {
+		// TODO: should probably implement this using vil::get so we
+		// automatically just unwrap instead of using the map where possible.
 		using VKHT = decltype(vil::handle(std::declval<HT>()));
 		auto vkht = u64ToHandle<VKHT>(id);
 
@@ -272,6 +277,8 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
+	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
+	&ObjectTypeImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
 	&QueueTypeImpl::instance,
 };
 
