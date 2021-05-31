@@ -146,3 +146,12 @@ sync commands: Match the last and next draw/dispatch/transfer commands
 
 So, how do find a matching record, e.g. when in per-present matching mode.
 First idea: LCS matching for CommandRecords.
+
+---
+
+When considering handles for matching records/commands we should think
+about handle persistence. Very persistent handles are, for instance,
+VkPipeline and (to a lesser degree) VkImage. Short-lived handles
+are VkDescriptorSet and maybe (to a lesser degree) VkBuffer. We mainly
+want to consider the persistent handles, or at least give them a waaay
+higher weight.

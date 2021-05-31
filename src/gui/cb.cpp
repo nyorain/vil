@@ -305,84 +305,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	ImGui::PopStyleVar(2);
 
-	// try to update the shown commands with the best new match
-	if(!hook.completed.empty() && (!freezeCommands_ || !commandViewer_.state())) {
-		// find the best match
-		// TODO: when in swapchain mode, we should match the context, i.e.
-		// that the new record appeared in roughly the same position on
-		// the queue as our old one. See command group LCS in todo.md
-		auto* best = &hook.completed[0];
-		if(hook.completed.size() > 1) {
-			// dlg_info("multiple matches!");
-			for(auto& res : hook.completed) {
-				// dlg_info(">> {}", res.match);
-				if(res.match > best->match) {
-					best = &res;
-				}
-			}
-		}
-
-		dlg_assert(!best->state->writer);
-
-		// update command viewer state from hook match
-		commandViewer_.select(best->record, *best->command.back(),
-			best->descriptorSnapshot, false);
-		commandViewer_.state(best->state);
-
-		// we alwyas update the commandHook desc (even if we don't
-		// update the internal state below) since this record is newer
-		// than the old one and might have valid handles/state that is
-		// already unset in the old one.
-		dev.commandHook->desc(best->record, best->command,
-			best->descriptorSnapshot, false);
-
-		// update internal state state from hook match
-		if(!freezeCommands_) {
-			record_ = std::move(best->record);
-			command_ = best->command;
-			dsState_ = std::move(best->descriptorSnapshot);
-		}
-
-		if(mode_ == UpdateMode::swapchain && !freezeCommands_) {
-			auto bestSubID = best->submissionID;
-			dlg_assert(gui_->dev().swapchain);
-
-			// TODO: handle the case when we don't find it.
-			// Can happen if the completed hook is from too long ago, e.g.
-			// when just opening gui again/switching to cb tab again.
-			auto found = false;
-			for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
-				if(bestSubID >= frame.submissionStart && bestSubID <= frame.submissionEnd) {
-					records_ = frame.batches;
-					found = true;
-					break;
-				}
-			}
-
-			dlg_assertl(dlg_level_warn, found);
-		}
-
-		if(!hook.freeze && freezeState_) {
-			hook.freeze = true;
-		}
-	}
-
-	// When not command was selected yet, we won't get any new records
-	// from CommandHook. But still want to show the new commands.
-	if(!freezeCommands_ && command_.empty()) {
-		if(mode_ == UpdateMode::swapchain) {
-			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
-		} else if(mode_ == UpdateMode::commandBuffer) {
-			dlg_assert(cb_);
-			record_ = cb_->lastRecordPtrLocked();
-		} else if(mode_ == UpdateMode::any) {
-			// TODO: correct updating, iterate through all submissions
-			// in the last frames and find the best record match. ouch.
-			dlg_error("TODO: shown commands not correctly updated until selected");
-		}
-	}
-
-	hook.completed.clear();
+	updateState();
 
 	ImGui::EndChild();
 	// ImGui::PopStyleColor();
@@ -501,6 +424,132 @@ void CommandBufferGui::updateHookTarget() {
 			hook.target.cb = cb_;
 			break;
 	}
+}
+
+void CommandBufferGui::updateState() {
+	auto& dev = gui_->dev();
+	auto& hook = *dev.commandHook;
+
+	// try to update the shown commands with the best new match
+	bool updated = false;
+	if(!hook.completed.empty() && (!freezeState_ || !commandViewer_.state())) {
+		// find the best match
+		CommandHook::CompletedHook* best = nullptr;
+		auto bestMatch = 0.f;
+		span<const RecordBatch> bestBatches; // only for swapchain mode
+
+		for(auto& res : hook.completed) {
+			float resMatch = res.match;
+			span<const RecordBatch> foundBatches;
+
+			// When we are in swapchain mode, we need the frame associated with
+			// this submission. We will then also consider the submission in its
+			// context inside the frame.
+			if(mode_ == UpdateMode::swapchain) {
+				for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
+					if(res.submissionID >= frame.submissionStart && res.submissionID <= frame.submissionEnd) {
+						foundBatches = frame.batches;
+						break;
+					}
+				}
+
+				// when the hook is from too long ago, we won't
+				if(foundBatches.empty()) {
+					dlg_warn("Couldn't find frame associated to hooked submission");
+					continue;
+				}
+
+				dlg_assert(!records_.empty());
+				auto batchMatches = match(foundBatches, records_);
+				bool recordMatched = false;
+				for(auto& batchMatch : batchMatches.matches) {
+					if(batchMatch.a->submissionID == res.submissionID) {
+						for(auto& recMatch : batchMatch.matches) {
+							if(recMatch.a == res.record) {
+								 if(recMatch.b == record_) {
+									recordMatched = true;
+									resMatch *= recMatch.match;
+								 }
+
+								 break;
+							}
+						}
+
+						break;
+					}
+				}
+
+				// In this case, the newly hooked potentialy candidate didn
+				// not match with our previous record in content; we won't use it.
+				if(!recordMatched) {
+					dlg_info("Hooked record did not match. Total match: {}, match count {}",
+						batchMatches.match, batchMatches.matches.size());
+					continue;
+				}
+			}
+
+			if(resMatch > bestMatch) {
+				best = &res;
+				bestMatch = resMatch;
+				bestBatches = foundBatches;
+			}
+		}
+
+		if(best) {
+			updated = true;
+			dlg_assert(!best->state->writer);
+
+			// update command viewer state from hook match
+			commandViewer_.select(best->record, *best->command.back(),
+				best->descriptorSnapshot, false);
+			commandViewer_.state(best->state);
+
+			// we alwyas update the commandHook desc (even if we don't
+			// update the internal state below) since this record is newer
+			// than the old one and might have valid handles/state that is
+			// already unset in the old one.
+			dev.commandHook->desc(best->record, best->command,
+				best->descriptorSnapshot, false);
+
+			// update internal state state from hook match
+			if(!freezeCommands_) {
+				record_ = std::move(best->record);
+				command_ = best->command;
+				dsState_ = std::move(best->descriptorSnapshot);
+			}
+
+			// In swapchain mode - and when not freezing commands - make
+			// sure to also display the new frame
+			if(mode_ == UpdateMode::swapchain && !freezeCommands_) {
+				records_ = {bestBatches.begin(), bestBatches.end()};
+			}
+
+			// in this case, we want to freeze state but temporarily
+			// unfroze it to get a new CommandHookState. This happens
+			// e.g. when selecting a new command or viewed resource
+			if(!hook.freeze && freezeState_) {
+				hook.freeze = true;
+			}
+		}
+	}
+
+	// When no command was selected yet, we won't get any new records
+	// from CommandHook. But still want to show the new commands.
+	// We also do this when we didn't get a matching hooked submission.
+	if(!freezeCommands_ && command_.empty()) {
+		if(mode_ == UpdateMode::swapchain) {
+			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
+		} else if(mode_ == UpdateMode::commandBuffer) {
+			dlg_assert(cb_);
+			record_ = cb_->lastRecordPtrLocked();
+		} else if(mode_ == UpdateMode::any) {
+			// TODO: correct updating, iterate through all submissions
+			// in the last frames and find the best record match. ouch.
+			dlg_error("TODO: shown commands not correctly updated until selected");
+		}
+	}
+
+	hook.completed.clear();
 }
 
 } // namespace vil

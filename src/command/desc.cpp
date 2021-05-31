@@ -5,6 +5,7 @@
 #include <swapchain.hpp>
 #include <pipe.hpp>
 #include <rp.hpp>
+#include <threadContext.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
 #include <util/profiling.hpp>
@@ -315,23 +316,26 @@ FindResult find(const Command* root, span<const Command*> dst,
 }
 
 
-// WIP
 // Basically just a LCS implementation, see
 // https://en.wikipedia.org/wiki/Longest_common_subsequence_problem
-struct MatchResult {
-	std::vector<std::pair<const RecordBatch*, const RecordBatch*>> matches;
-};
+BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
+	ZoneScoped;
 
-float match(const RecordBatch& a, const RecordBatch& b) {
 	if(a.queue != b.queue) {
-		return 0.f;
+		return {0.f, &a, &b, {}};
 	}
 
 	if(a.submissions.size() == 0u && b.submissions.size() == 0u) {
-		return 1.f;
+		return {1.f, &a, &b, {}};
 	}
 
-	std::vector<float> entries(a.submissions.size() * b.submissions.size());
+	struct Entry {
+		float match {};
+		unsigned dir {};
+		float matchHere {};
+	};
+
+	std::vector<Entry> entries(a.submissions.size() * b.submissions.size());
 	auto entry = [&](auto ia, auto ib) -> decltype(auto) {
 		return entries[ia * b.submissions.size() + ib];
 	};
@@ -339,22 +343,67 @@ float match(const RecordBatch& a, const RecordBatch& b) {
 	for(auto ia = 0u; ia < a.submissions.size(); ++ia) {
 		for(auto ib = 0u; ib < b.submissions.size(); ++ib) {
 			auto fac = match(a.submissions[ia]->desc, b.submissions[ib]->desc);
-			auto valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1) + fac;
-			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib);
-			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1);
+			auto valDiag = ((ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match) + fac;
+			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
+			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1).match;
 
 			auto& dst = entry(ia, ib);
-			dst = std::max(valDiag, std::max(valUp, valLeft));
+			dst.match = std::max(valDiag, std::max(valUp, valLeft));
+			dst.matchHere = fac;
+			if(dst.match == valDiag) {
+				dst.dir = 1u;
+			} else if(dst.match == valUp) {
+				dst.dir = 2u;
+			} else if(dst.match == valLeft) {
+				dst.dir = 3u;
+			} else {
+				dlg_fatal("unreachable");
+			}
 		}
 	}
 
-	return entries.back() / std::max(a.submissions.size(), b.submissions.size());
+	// backtrac
+	BatchMatch res;
+	res.a = &a;
+	res.b = &b;
+	res.match = entries.back().match;
+	res.matches.reserve(std::min(a.submissions.size(), b.submissions.size()));
+
+	auto ia = a.submissions.size();
+	auto ib = b.submissions.size();
+	while(ia != 0u && ib != 0u) {
+		auto& src = entry(ia - 1, ib - 1);
+		if(src.dir == 1u) {
+			dlg_assert(ia > 0 && ib > 0);
+
+			auto& bm = res.matches.emplace_back();
+			bm.a = a.submissions[ia - 1].get();
+			bm.b = b.submissions[ib - 1].get();
+			bm.match = src.matchHere;
+
+			--ia;
+			--ib;
+		} else if(src.dir == 2u) {
+			dlg_assert(ia > 0);
+			--ia;
+		} else if(src.dir == 3u) {
+			dlg_assert(ib > 0);
+			--ib;
+		} else {
+			dlg_fatal("unreachable");
+		}
+	}
+
+	return res;
 }
 
 MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b) {
+	ZoneScoped;
+
 	struct Entry {
 		float match {};
 		unsigned dir {};
+		BatchMatch matches;
 	};
 
 	std::vector<Entry> entries(a.size() * b.size());
@@ -364,32 +413,45 @@ MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b) {
 
 	for(auto ia = 0u; ia < a.size(); ++ia) {
 		for(auto ib = 0u; ib < b.size(); ++ib) {
-			auto fac = match(a[ia], b[ib]);
-			auto valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match + fac;
+			auto valDiag = -1.f;
+			auto matchRes = match(a[ia], b[ib]);
+			if(matchRes.match > 0.f) {
+				valDiag = ((ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match) + matchRes.match;
+			}
+
 			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
 			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1).match;
 
 			auto& dst = entry(ia, ib);
 			dst.match = std::max(valDiag, std::max(valUp, valLeft));
+			dst.matches = std::move(matchRes);
 			if(dst.match == valDiag) {
 				dst.dir = 1u;
 			} else if(dst.match == valUp) {
 				dst.dir = 2u;
 			} else if(dst.match == valLeft) {
 				dst.dir = 3u;
+			} else {
+				dlg_fatal("unreachable");
 			}
 		}
 	}
 
 	// backtrack
 	MatchResult res;
+	res.matches.reserve(std::min(a.size(), b.size()));
+	res.match = entries.back().match;
+
 	auto ia = a.size();
 	auto ib = b.size();
-	while(ia != 0u || ib != 0u) {
-		auto& src = entry(ia, ib);
+	while(ia != 0u && ib != 0u) {
+		auto& src = entry(ia - 1, ib - 1);
 		if(src.dir == 1u) {
 			dlg_assert(ia > 0 && ib > 0);
-			res.matches.push_back({&a[ia], &b[ib]});
+
+			auto& bm = *res.matches.emplace(res.matches.begin());
+			bm = std::move(src.matches);
+
 			--ia;
 			--ib;
 		} else if(src.dir == 2u) {

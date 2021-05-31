@@ -38,7 +38,7 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 		// PERF: we don't need descriptor state copies in 99% of the cases (only
 		// when relevant for gui). The simple check below breaks in some cases
 		// though, e.g. when later on viewing the recording in the gui.
-		// if(dev.gui && dev.gui->visible) 
+		// if(dev.gui && dev.gui->visible)
 		{
 			ZoneScopedN("Copy Descriptor State");
 			rec.lastDescriptorState.states.clear();
@@ -375,6 +375,7 @@ void postProcessLocked(QueueSubmitter& subm) {
 	if(subm.dev->swapchain) {
 		recordBatch = &subm.dev->swapchain->nextFrameSubmissions.batches.emplace_back();
 		recordBatch->queue = subm.queue;
+		recordBatch->submissionID = subm.globalSubmitID;
 	}
 
 	auto& batch = *subm.dstBatch;

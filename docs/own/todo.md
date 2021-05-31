@@ -11,11 +11,14 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 
 urgent, bugs:
 - [ ] fix IO viewer being stuck because we can't get a new command
+      {still not fixed, even when using LCS & new update logic}
 	- [ ] fix dlg_assert(found), gui/cb.cpp
-	- [ ] unselect when no new matching command can be found?
 	- [ ] use/implement LCS and better general strategy when in swapchain mode for
 		  command matching/finding the best hook from last frame
 - [ ] image viewer validation bug when we don't hover the image
+- [ ] CommandBufferGui: separate the RecordBatches that are shown as commands
+      and the RecordBatches that the currently selected command is part of.
+	  We need to store the latter to correctly do contexted LCS
 
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in
@@ -149,6 +152,11 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] Unselect a command when new frames don't contain it any more?
+      We will still view the old state at the moment. Unselecting can
+	  be a problem since we might want to continue viewing the stale
+	  state if the command gets only submitted once every N frames.
+	  Maybe show a visual hint that the state is stale though?
 - [ ] windows: don't include windows.h in vil_api.h, instead just
       manually define LoadLibrary, GetProcAddress
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
@@ -203,9 +211,6 @@ other
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
 	  we could fix it by not imgui-pushing the resource ID before showing the button.
-- [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
-      make sure destruction is tracked correctly. Also show in gui.
-	  See the commands in cb.cpp
 
 ---
 
@@ -233,6 +238,9 @@ vertex viewer/xfb:
 - [ ] (later) support showing all draws from a render pass?
 
 
+- [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
+      make sure destruction is tracked correctly. Also show in gui.
+	  See the commands in cb.cpp
 - [ ] vil_api.h: Allow destroyed created overlays
 - [ ] improve DeviceMemory visualization. Also improve Memory overview tab
 - [ ] SetHandleName should probably not always use the device hash map

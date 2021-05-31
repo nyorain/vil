@@ -311,8 +311,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			// would have been invalidated). In question, just remove this
 			// assert. It's useful for debugging though; was previously
 			// used to uncover new find/matching issues.
-			dlg_assertm(std::abs(findRes.match - foundHookRecord->match) < 0.1,
-				"{} -> {}", foundHookRecord->match, findRes.match);
+			// dlg_assertm(std::abs(findRes.match - foundHookRecord->match) < 0.1,
+			// 	"{} -> {}", foundHookRecord->match, findRes.match);
 		});
 
 		dlg_assert(foundHookRecord->hook == this);

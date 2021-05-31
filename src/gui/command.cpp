@@ -891,30 +891,35 @@ void CommandViewer::displayDs(Draw& draw) {
 		refButton(gui, imgView);
 
 		ImGui::SameLine();
-		refButton(gui, nonNull(imgView.img));
+		refButtonD(gui, imgView.img);
 
-		imGuiText("Format: {}", vk::name(imgView.ci.format));
-		auto& extent = imgView.img->ci.extent;
-		imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
+		// imgView.img can be null if the image was destroyed. This isn't
+		// too unlikely since we might have kept the imgView alive since it's
+		// still referenced in our DescriptorState
+		if(imgView.img) {
+			imGuiText("Format: {}", vk::name(imgView.ci.format));
+			auto& extent = imgView.img->ci.extent;
+			imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
 
-		if(needsImageLayout(dsType)) {
-			imGuiText("Layout: {}", vk::name(elem.layout));
+			if(needsImageLayout(dsType)) {
+				imGuiText("Layout: {}", vk::name(elem.layout));
+			}
+
+			// content
+			if(!state_) {
+				ImGui::Text("Waiting for a submission...");
+				return;
+			}
+
+			auto* img = std::get_if<CopiedImage>(&state_->dsCopy);
+			if(!img) {
+				dlg_assert(state_->dsCopy.index() == 0);
+				imGuiText("Error: {}", state_->errorMessage);
+				return;
+			}
+
+			displayImage(draw, *img);
 		}
-
-		// content
-		if(!state_) {
-			ImGui::Text("Waiting for a submission...");
-			return;
-		}
-
-		auto* img = std::get_if<CopiedImage>(&state_->dsCopy);
-		if(!img) {
-			dlg_assert(state_->dsCopy.index() == 0);
-			imGuiText("Error: {}", state_->errorMessage);
-			return;
-		}
-
-		displayImage(draw, *img);
 	}
 
 	// == BufferView ==
@@ -945,7 +950,7 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	auto& attachments = drawCmd->state.rpi.attachments;
 	dlg_assert(aid < attachments.size());
 	if(!attachments[aid] || !attachments[aid]->img) {
-		imGuiText(" Image or View were destroyed");
+		imGuiText("Image or View were destroyed");
 		return;
 	}
 

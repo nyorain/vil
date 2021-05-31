@@ -48,4 +48,27 @@ struct CommandBufferDesc {
 	friend float match(const CommandBufferDesc& a, const CommandBufferDesc& b);
 };
 
+// WIP
+struct RecordBatch;
+
+struct RecordMatch {
+	float match {};
+	const CommandRecord* a {};
+	const CommandRecord* b {};
+};
+
+struct BatchMatch {
+	float match {};
+	const RecordBatch* a {};
+	const RecordBatch* b {};
+	std::vector<RecordMatch> matches;
+};
+
+struct MatchResult {
+	float match {};
+	std::vector<BatchMatch> matches;
+};
+
+MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b);
+
 } // namespace vil

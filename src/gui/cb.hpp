@@ -37,6 +37,7 @@ public:
 	void select(IntrusivePtr<CommandRecord> record, CommandBuffer& cb);
 
 private:
+	void updateState();
 	void updateHookTarget();
 
 private:

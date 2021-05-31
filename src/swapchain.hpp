@@ -14,6 +14,7 @@ namespace vil {
 struct RecordBatch {
 	Queue* queue;
 	std::vector<IntrusivePtr<CommandRecord>> submissions;
+	u64 submissionID; // global submission id
 };
 
 struct FrameSubmissions {
@@ -60,12 +61,12 @@ struct Swapchain : DeviceHandle {
 	// swapchain is called. Not reset on swapchain recreation.
 	u64 presentCounter {};
 
-	static constexpr auto frameSubmissionCount = 4u;
+	static constexpr auto frameSubmissionCount = 8u;
 	std::array<FrameSubmissions, frameSubmissionCount> frameSubmissions;
 	FrameSubmissions nextFrameSubmissions; // currently being built
 
 	// Whether images from this swapchain support sampling.
-	// We will try to set this, if possible.
+	// We will try to set this, if possible for overlay blur.
 	bool supportsSampling {};
 
 	~Swapchain();
