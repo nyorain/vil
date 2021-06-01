@@ -431,7 +431,6 @@ void CommandBufferGui::updateState() {
 	auto& hook = *dev.commandHook;
 
 	// try to update the shown commands with the best new match
-	bool updated = false;
 	if(!hook.completed.empty() && (!freezeState_ || !commandViewer_.state())) {
 		// find the best match
 		CommandHook::CompletedHook* best = nullptr;
@@ -496,7 +495,6 @@ void CommandBufferGui::updateState() {
 		}
 
 		if(best) {
-			updated = true;
 			dlg_assert(!best->state->writer);
 
 			// update command viewer state from hook match
