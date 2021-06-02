@@ -669,6 +669,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.queryPools.mutex = &dev.mutex;
 	dev.bufferViews.mutex = &dev.mutex;
 	dev.dsuTemplates.mutex = &dev.mutex;
+	dev.accelStructs.mutex = &dev.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);

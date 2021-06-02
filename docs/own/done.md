@@ -1,3 +1,8 @@
+- [x] fix IO viewer being stuck because we can't get a new command
+      {still not fixed, even when using LCS & new update logic}
+	- [x] fix dlg_assert(found), gui/cb.cpp
+	- [x] use/implement LCS and better general strategy when in swapchain mode for
+		  command matching/finding the best hook from last frame
 - [x] alternative view of DeviceMemory showing a better visualization of
       the resources placed in it (and the empty space)
 - [x] proper shipping and installing

@@ -532,7 +532,8 @@ void CommandViewer::displayDsList() {
 					auto label = dlg::format("Descriptor Set {}: null", i);
 					auto flags = ImGuiTreeNodeFlags_Bullet |
 						ImGuiTreeNodeFlags_Leaf |
-						ImGuiTreeNodeFlags_NoTreePushOnOpen;
+						ImGuiTreeNodeFlags_NoTreePushOnOpen |
+						ImGuiTreeNodeFlags_FramePadding;
 					ImGui::TreeNodeEx(label.c_str(), flags);
 				}
 
@@ -643,7 +644,8 @@ void CommandViewer::displayIOList() {
 						return;
 					}
 
-					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
+						ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
 					if(view_ == IOView::attachment && viewData_.attachment.id == id) {
 						flags |= ImGuiTreeNodeFlags_Selected;
 					}
@@ -783,40 +785,32 @@ void CommandViewer::displayDs(Draw& draw) {
 		return;
 	}
 
-	auto bindingCount = descriptorCount(state, bindingID);
-	auto& elemID = viewData_.ds.elem;
-	if(optSliderRange("Element", elemID, bindingCount)) {
-		updateHook();
-		state_ = {};
-	}
-
-	if(elemID >= bindingCount) {
-		ImGui::Text("Element not bound");
-		dlg_warn("Element not bound? Shouldn't happen");
-		return;
-	}
-
-	/*
-	auto& elem = bindings[elemID];
-	if(!elem.valid) {
-		ImGui::Text("Binding element not valid");
-		// NOTE: i guess this can happen with descriptor indexing
-		// dlg_warn("Binding element not valid? Shouldn't happen");
-		return;
-	}
-	*/
-
 	auto& bindingLayout = state.layout->bindings[bindingID];
 	auto dsType = bindingLayout.descriptorType;
 	auto dsCat = category(dsType);
 
-	imGuiText("{}", vk::name(dsType));
+	auto& elemID = viewData_.ds.elem;
+	if(dsCat != DescriptorCategory::inlineUniformBlock) {
+		auto bindingCount = descriptorCount(state, bindingID);
+		if(optSliderRange("Element", elemID, bindingCount)) {
+			updateHook();
+			state_ = {};
+		}
+
+		if(elemID >= bindingCount) {
+			ImGui::Text("Element not bound");
+			dlg_warn("Element not bound? Shouldn't happen");
+			return;
+		}
+	}
 
 	// TODO: we expect descriptors to be valid here. Needs rework
 	// for descriptor indexing
 
 	// == Buffer ==
 	if(dsCat == DescriptorCategory::buffer) {
+		imGuiText("{}", vk::name(dsType));
+
 		// TODO: take dynamic offset into account for dynamic bufs
 
 		// general info
@@ -871,59 +865,100 @@ void CommandViewer::displayDs(Draw& draw) {
 				ImGui::Text("Binding not used in pipeline");
 			}
 		}
-	}
+	} else if(dsCat == DescriptorCategory::image) {
+		imGuiText("{}", vk::name(dsType));
 
-	// == Sampler ==
-	if(needsSampler(dsType)) {
-		if(bindingLayout.immutableSamplers) {
-			refButtonExpect(gui, bindingLayout.immutableSamplers[elemID].get());
-		} else {
+		// == Sampler ==
+		if(needsSampler(dsType)) {
+			if(bindingLayout.immutableSamplers) {
+				refButtonExpect(gui, bindingLayout.immutableSamplers[elemID].get());
+			} else {
+				auto& elem = images(state, bindingID)[elemID];
+				refButtonExpect(gui, elem.sampler.get());
+			}
+		}
+
+		// == Image ==
+		if(needsImageView(dsType)) {
+			// general info
 			auto& elem = images(state, bindingID)[elemID];
-			refButtonExpect(gui, elem.sampler.get());
+			auto& imgView = nonNull(elem.imageView);
+			refButton(gui, imgView);
+
+			ImGui::SameLine();
+			refButtonD(gui, imgView.img);
+
+			// imgView.img can be null if the image was destroyed. This isn't
+			// too unlikely since we might have kept the imgView alive since it's
+			// still referenced in our DescriptorState
+			if(imgView.img) {
+				imGuiText("Format: {}", vk::name(imgView.ci.format));
+				auto& extent = imgView.img->ci.extent;
+				imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
+
+				if(needsImageLayout(dsType)) {
+					imGuiText("Layout: {}", vk::name(elem.layout));
+				}
+
+				// content
+				if(!state_) {
+					ImGui::Text("Waiting for a submission...");
+					return;
+				}
+
+				auto* img = std::get_if<CopiedImage>(&state_->dsCopy);
+				if(!img) {
+					dlg_assert(state_->dsCopy.index() == 0);
+					imGuiText("Error: {}", state_->errorMessage);
+					return;
+				}
+
+				displayImage(draw, *img);
+			}
 		}
-	}
+	} else if(dsCat == DescriptorCategory::bufferView) {
+		imGuiText("TODO: bufferView viewer not implemented yet");
+	} else if(dsCat == DescriptorCategory::accelStruct) {
+		imGuiText("TODO: acceleration structure viewer not implemented yet");
+	} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
+		auto blockData = inlineUniformBlock(state, bindingID);
+		imGuiText("Inline Uniform Block, Size {}", blockData.size());
 
-	// == Image ==
-	if(needsImageView(dsType)) {
-		// general info
-		auto& elem = images(state, bindingID)[elemID];
-		auto& imgView = nonNull(elem.imageView);
-		refButton(gui, imgView);
+		if(dispatchCmd) {
+			auto& pipe = nonNull(dispatchCmd->state.pipe);
+			auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
+			auto* binding = getReflectBinding(refl, setID, bindingID);
+			if(!binding || !binding->block.type_description) {
+				ImGui::Text("Binding not used in pipeline");
+			} else {
+				display(binding->block, blockData);
+			}
+		} else {
+			dlg_assert(drawCmd);
+			SpvReflectBlockVariable* bestVar = nullptr;
 
-		ImGui::SameLine();
-		refButtonD(gui, imgView.img);
+			// In all graphics pipeline stages, find the block with
+			// that covers the most of the buffer
+			// TODO: add explicit dropdown, selecting the stage to view.
+			for(auto& stage : drawCmd->state.pipe->stages) {
+				auto& refl = nonNull(nonNull(stage.spirv).reflection);
+				auto* binding = getReflectBinding(refl, setID, bindingID);
 
-		// imgView.img can be null if the image was destroyed. This isn't
-		// too unlikely since we might have kept the imgView alive since it's
-		// still referenced in our DescriptorState
-		if(imgView.img) {
-			imGuiText("Format: {}", vk::name(imgView.ci.format));
-			auto& extent = imgView.img->ci.extent;
-			imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
-
-			if(needsImageLayout(dsType)) {
-				imGuiText("Layout: {}", vk::name(elem.layout));
+				if(binding && binding->block.type_description && (
+						!bestVar || binding->block.size > bestVar->size)) {
+					bestVar = &binding->block;
+				}
 			}
 
-			// content
-			if(!state_) {
-				ImGui::Text("Waiting for a submission...");
-				return;
+			if(bestVar) {
+				display(*bestVar, blockData);
+			} else {
+				ImGui::Text("Binding not used in pipeline");
 			}
-
-			auto* img = std::get_if<CopiedImage>(&state_->dsCopy);
-			if(!img) {
-				dlg_assert(state_->dsCopy.index() == 0);
-				imGuiText("Error: {}", state_->errorMessage);
-				return;
-			}
-
-			displayImage(draw, *img);
 		}
+	} else {
+		imGuiText("Unsupported descriptoer type {}", vk::name(dsType));
 	}
-
-	// == BufferView ==
-	// TODO
 }
 
 void CommandViewer::displayAttachment(Draw& draw) {

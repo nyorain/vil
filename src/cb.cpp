@@ -464,7 +464,9 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& pool = get(device, commandPool);
 	auto& dev = *pool.dev;
-	auto handles = LocalVector<VkCommandBuffer>(commandBufferCount);
+
+	ThreadMemScope memScope;
+	auto handles = memScope.alloc<VkCommandBuffer>(commandBufferCount);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		handles[i] = dev.commandBuffers.mustMove(pCommandBuffers[i])->handle();
@@ -963,7 +965,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// 	cb.pushConstants.map.clear();
 	// }
 
-	// TODO: we probably don't want to track all this invalidation stuff
+	// TODO(perf): we probably don't want to track all this invalidation stuff
 	// not meaningful in UI, we should just assume it's valid.
 	// Then we also don't need to track the pipeline layout
 
@@ -1844,19 +1846,23 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 	auto& cmd = addCmd<BindPipelineCmd>(cb);
 	cmd.bindPoint = pipelineBindPoint;
 
+	auto handle = pipeline;
+
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
 		cb.computeState().pipe = &cb.dev->computePipes.get(pipeline);
 		cmd.pipe = cb.computeState().pipe;
+		useHandle(cb, cmd, *cmd.pipe);
+		handle = cmd.pipe->handle;
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
 		cb.graphicsState().pipe = &cb.dev->graphicsPipes.get(pipeline);
 		cmd.pipe = cb.graphicsState().pipe;
+		useHandle(cb, cmd, *cmd.pipe);
+		handle = cmd.pipe->handle;
 	} else {
 		dlg_error("unknown pipeline bind point");
 	}
 
-	useHandle(cb, cmd, *cmd.pipe);
-
-	cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, cmd.pipe->handle);
+	cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, handle);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
@@ -2323,6 +2329,15 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
 					vkBufView = bv.handle;
 					useHandle(cb, cmd, bv);
 					break;
+				} case DescriptorCategory::accelStruct: {
+					auto& vkAccelStruct = *reinterpret_cast<VkAccelerationStructureKHR*>(data);
+					auto& accelStruct = get(*cb.dev, vkAccelStruct);
+					vkAccelStruct = accelStruct.handle;
+					useHandle(cb, cmd, accelStruct);
+					break;
+				} case DescriptorCategory::inlineUniformBlock: {
+					// nothing to do, no unwrapping needed
+					break;
 				} case DescriptorCategory::none:
 					dlg_error("Invalid/unknown descriptor type");
 					break;
@@ -2586,12 +2601,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 		if(buildInfo.srcAccelerationStructure) {
 			cmd.srcs[i] = &get(*cb.dev, buildInfo.srcAccelerationStructure);
 			buildInfo.srcAccelerationStructure = cmd.srcs[i]->handle;
-			useHandle(cb, cmd, cmd.srcs[i]);
+			useHandle(cb, cmd, *cmd.srcs[i]);
 		}
 
 		cmd.dsts[i] = &get(*cb.dev, buildInfo.dstAccelerationStructure);
 		buildInfo.dstAccelerationStructure = cmd.dsts[i]->handle;
-		useHandle(cb, cmd, cmd.dsts[i]);
+		useHandle(cb, cmd, *cmd.dsts[i]);
 
 		cmd.buildRangeInfos[i] = *ppBuildRangeInfos[i];
 
@@ -2626,12 +2641,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 		if(buildInfo.srcAccelerationStructure) {
 			cmd.srcs[i] = &get(*cb.dev, buildInfo.srcAccelerationStructure);
 			buildInfo.srcAccelerationStructure = cmd.srcs[i]->handle;
-			useHandle(cb, cmd, cmd.srcs[i]);
+			useHandle(cb, cmd, *cmd.srcs[i]);
 		}
 
 		cmd.dsts[i] = &get(*cb.dev, buildInfo.dstAccelerationStructure);
 		buildInfo.dstAccelerationStructure = cmd.dsts[i]->handle;
-		useHandle(cb, cmd, cmd.dsts[i]);
+		useHandle(cb, cmd, *cmd.dsts[i]);
 
 		cmd.indirectAddresses[i] = pIndirectDeviceAddresses[i];
 		cmd.indirectStrides[i] = pIndirectStrides[i];
@@ -2710,11 +2725,11 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteAccelerationStructuresPropertiesKHR(
 		VkQueryPool                                 queryPool,
 		uint32_t                                    firstQuery) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<WriteAccelStructPropertiesCmd>(cb);
+	auto& cmd = addCmd<WriteAccelStructsPropertiesCmd>(cb);
 	cmd.firstQuery = firstQuery;
 	cmd.queryType = queryType;
 	cmd.queryPool = &get(*cb.dev, queryPool);
-	useHandle(cb, cmd, cmd.queryPool);
+	useHandle(cb, cmd, *cmd.queryPool);
 
 	cmd.accelStructs = allocSpan<AccelStruct*>(cb, accelerationStructureCount);
 
@@ -2723,7 +2738,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteAccelerationStructuresPropertiesKHR(
 
 	for(auto i = 0u; i < accelerationStructureCount; ++i) {
 		cmd.accelStructs[i] = &get(*cb.dev, pAccelerationStructures[i]);
-		useHandle(cb, cmd, cmd.accelStructs[i]);
+		useHandle(cb, cmd, *cmd.accelStructs[i]);
 		fwd[i] = cmd.accelStructs[i]->handle;
 	}
 

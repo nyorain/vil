@@ -166,7 +166,9 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 		uint32_t                                    bindInfoCount,
 		const VkBindBufferMemoryInfo*               pBindInfos) {
 	auto& dev = getDevice(device);
-	auto fwd = LocalVector<VkBindBufferMemoryInfo>(bindInfoCount);
+
+	ThreadMemScope memScope;
+	auto fwd = memScope.alloc<VkBindBufferMemoryInfo>(bindInfoCount);
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
 		auto& buf = get(dev, bind.buffer);

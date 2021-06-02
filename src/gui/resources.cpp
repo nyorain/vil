@@ -1374,15 +1374,27 @@ void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
 void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
 	switch(pipe.type) {
 		case VK_PIPELINE_BIND_POINT_GRAPHICS:
-			drawDesc(draw, (GraphicsPipeline&) pipe);
+			drawDesc(draw, static_cast<GraphicsPipeline&>(pipe));
 			return;
 		case VK_PIPELINE_BIND_POINT_COMPUTE:
-			drawDesc(draw, (ComputePipeline&) pipe);
+			drawDesc(draw, static_cast<ComputePipeline&>(pipe));
 			return;
 		default:
 			dlg_warn("Unimplemented pipeline bind point");
 			return;
 	}
+}
+
+void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
+	(void) draw;
+	(void) accelStruct;
+	imGuiText("TODO");
+}
+
+void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {
+	(void) draw;
+	(void) dut;
+	imGuiText("TODO");
 }
 
 void ResourceGui::draw(Draw& draw) {
