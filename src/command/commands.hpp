@@ -1055,7 +1055,7 @@ struct CopyMemoryToAccelStructCmd final : Command {
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
-struct WriteAccelStructPropertiesCmd final : Command {
+struct WriteAccelStructsPropertiesCmd final : Command {
 	span<AccelStruct*> accelStructs;
 	VkQueryType queryType {};
 	QueryPool* queryPool {};

@@ -85,6 +85,8 @@ private:
 	void drawDesc(Draw&, QueryPool&);
 	void drawDesc(Draw&, Queue&);
 	void drawDesc(Draw&, Swapchain&);
+	void drawDesc(Draw&, AccelStruct&);
+	void drawDesc(Draw&, DescriptorUpdateTemplate&);
 
 	void drawHandleDesc(Draw&, Handle& handle);
 };

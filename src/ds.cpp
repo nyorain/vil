@@ -390,11 +390,11 @@ span<std::byte> inlineUniformBlock(DescriptorSetState& state, unsigned binding) 
 	dlg_assert(layout.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT);
 
 	auto ptr = reinterpret_cast<std::byte*>(&state);
+	ptr += sizeof(state);
+	ptr += layout.offset;
 
 	auto count = layout.descriptorCount;
 	if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		// NOTE: not sure if variable descriptor count (i.e. size) is even
-		// allowed for inline uniform blocks but we just implement it anyways
 		count = state.variableDescriptorCount;
 	}
 
@@ -1077,6 +1077,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
 			advanceUntilValid(*ds.state, dstBinding, dstElem);
+			dlg_assert(dstBinding < ds.state->layout->bindings.size());
 			auto& layout = ds.state->layout->bindings[dstBinding];
 			dlg_assert(write.descriptorType == layout.descriptorType);
 
@@ -1105,6 +1106,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 					auto& info = accelStructs[writeOff + j];
 					info = accelStructWrite->pAccelerationStructures[j];
 					update(*ds.state, dstBinding, dstElem, info);
+					break;
 				} case DescriptorCategory::inlineUniformBlock: {
 					dlg_assert(inlineUniformWrite);
 					dlg_assert(j < inlineUniformWrite->dataSize);

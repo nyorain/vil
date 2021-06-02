@@ -2730,6 +2730,11 @@ void CopyAccelStructureCmd::record(const Device& dev, VkCommandBuffer cb) const 
 	dev.dispatch.CmdCopyAccelerationStructureKHR(cb, &info);
 }
 
+void CopyAccelStructureCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
+	checkReplace(dst, map);
+}
+
 void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	VkCopyAccelerationStructureToMemoryInfoKHR info {};
 	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_TO_MEMORY_INFO_KHR;
@@ -2738,6 +2743,10 @@ void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb) c
 	info.dst = dst;
 	info.mode = mode;
 	dev.dispatch.CmdCopyAccelerationStructureToMemoryKHR(cb, &info);
+}
+
+void CopyAccelStructToMemoryCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(src, map);
 }
 
 void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -2750,13 +2759,21 @@ void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb) c
 	dev.dispatch.CmdCopyMemoryToAccelerationStructureKHR(cb, &info);
 }
 
-void WriteAccelStructPropertiesCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyMemoryToAccelStructCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(dst, map);
+}
+
+void WriteAccelStructsPropertiesCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	ThreadMemScope memScope;
 	auto vkAccelStructs = rawHandles(memScope, accelStructs);
 
 	dev.dispatch.CmdWriteAccelerationStructuresPropertiesKHR(cb,
 		u32(vkAccelStructs.size()), vkAccelStructs.data(), queryType,
 		queryPool->handle, firstQuery);
+}
+
+void WriteAccelStructsPropertiesCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(accelStructs, map);
 }
 
 void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -2772,10 +2789,20 @@ void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		buildInfos.data(), ppRangeInfos.data());
 }
 
+void BuildAccelStructsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(srcs, map);
+	checkReplace(dsts, map);
+}
+
 void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb, u32(buildInfos.size()),
 		buildInfos.data(), indirectAddresses.data(), indirectStrides.data(),
 		maxPrimitiveCounts.data());
+}
+
+void BuildAccelStructsIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(srcs, map);
+	checkReplace(dsts, map);
 }
 
 // VK_KHR_ray_tracing_pipeline

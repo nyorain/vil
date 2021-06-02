@@ -157,8 +157,8 @@ struct ThreadMemScope {
 
 	template<typename T>
 	span<std::remove_const_t<T>> copy(T* data, size_t n) {
-		auto ptr = ThreadContextAllocator<T>().allocate(n);
-		new(ptr) T[n]();
+		auto ptr = ThreadContextAllocator<std::remove_const_t<T>>().allocate(n);
+		new(ptr) std::remove_const_t<T>[n]();
 		std::memcpy(ptr, data, n * sizeof(T));
 		sizeAllocated += align(sizeof(T) * n, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		return {ptr, n};

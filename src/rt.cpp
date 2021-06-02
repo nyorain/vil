@@ -193,6 +193,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		const VkRayTracingPipelineCreateInfoKHR*    pCreateInfos,
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
+	// need to unwrap some handles, e.g. pipeline layout
 	dlg_error("TODO: implement CreateRayTracingPipelinesKHR");
 	auto& dev = getDevice(device);
 	return dev.dispatch.CreateRayTracingPipelinesKHR(dev.handle,

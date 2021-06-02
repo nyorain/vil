@@ -347,6 +347,10 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	this->io_->IniFilename = nullptr;
 	this->io_->MouseDrawCursor = false;
 
+	// TODO: also add gamepad support
+	// TODO: figure out how to make our custom selectables (using IsItemClicked) work
+	this->io_->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
 	auto& io = *this->io_;
 	io.KeyMap[ImGuiKey_A] = swa_key_a;
 	io.KeyMap[ImGuiKey_C] = swa_key_c;

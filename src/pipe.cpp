@@ -58,8 +58,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		span<const VkPipelineShaderStageCreateInfo> stages;
 	};
 
-	auto ncis = LocalVector<VkGraphicsPipelineCreateInfo>(createInfoCount);
-	auto pres = LocalVector<PreData>(createInfoCount);
+	ThreadMemScope memScope;
+	auto ncis = memScope.alloc<VkGraphicsPipelineCreateInfo>(createInfoCount);
+	auto pres = memScope.alloc<PreData>(createInfoCount);
 	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
@@ -264,7 +265,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 	ZoneScoped;
 	auto& dev = getDevice(device);
 
-	auto ncis = LocalVector<VkComputePipelineCreateInfo>(createInfoCount);
+	ThreadMemScope memScope;
+	auto ncis = memScope.alloc<VkComputePipelineCreateInfo>(createInfoCount);
 	for(auto i = 0u; i < createInfoCount; ++i) {
 		auto& nci = ncis[i];
 		nci = pCreateInfos[i];
@@ -325,7 +327,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 
 	auto& dev = getDevice(device);
 
-	auto dslHandles = LocalVector<VkDescriptorSetLayout>(pCreateInfo->setLayoutCount);
+	ThreadMemScope memScope;
+	auto dslHandles = memScope.alloc<VkDescriptorSetLayout>(pCreateInfo->setLayoutCount);
 	auto dsls = std::vector<IntrusivePtr<DescriptorSetLayout>>(pCreateInfo->setLayoutCount);
 	for(auto i = 0u; i < pCreateInfo->setLayoutCount; ++i) {
 		dsls[i] = getPtr(dev, pCreateInfo->pSetLayouts[i]);

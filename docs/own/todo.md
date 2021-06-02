@@ -10,15 +10,11 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 - add more tests where useful
 
 urgent, bugs:
-- [ ] fix IO viewer being stuck because we can't get a new command
-      {still not fixed, even when using LCS & new update logic}
-	- [ ] fix dlg_assert(found), gui/cb.cpp
-	- [ ] use/implement LCS and better general strategy when in swapchain mode for
-		  command matching/finding the best hook from last frame
-- [ ] image viewer validation bug when we don't hover the image
 - [ ] CommandBufferGui: separate the RecordBatches that are shown as commands
       and the RecordBatches that the currently selected command is part of.
 	  We need to store the latter to correctly do contexted LCS
+- [ ] image viewer validation bug when we don't hover the image
+- [ ] respect ds dynamic offsets. Test with SW sample
 
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in

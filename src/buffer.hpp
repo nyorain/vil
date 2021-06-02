@@ -14,7 +14,7 @@ struct Buffer : MemoryResource {
 
 	std::vector<BufferView*> views; // TODO: unordered_set?
 
-	std::atomic<u32> refCount;
+	std::atomic<u32> refCount {};
 
 	~Buffer();
 };
@@ -24,7 +24,7 @@ struct BufferView : DeviceHandle {
 	VkBufferViewCreateInfo ci;
 	Buffer* buffer {};
 
-	std::atomic<u32> refCount;
+	std::atomic<u32> refCount {};
 
 	~BufferView();
 };
