@@ -205,13 +205,13 @@ VkImageViewType minImageViewType(VkExtent3D, unsigned layers,
 u32 e5b9g9r9FromRgb(Vec3f rgb);
 Vec3f e5b9g9r9ToRgb(u32 e5r9g9b9);
 
-// CPU format conversion. This is needed to support reading and writing of
-// data in formats that the GPU does not support.
-
 Vec4d read(VkFormat srcFormat, span<const std::byte>& src);
 void write(VkFormat dstFormat, span<std::byte>& dst, const Vec4d& color);
 void convert(VkFormat dstFormat, span<std::byte>& dst,
 		VkFormat srcFormat, span<const std::byte>& src);
+
+u32 indexSize(VkIndexType type);
+u32 readIndex(VkIndexType type, ReadBuf& data);
 
 // does the correct conversion, no pow(2.2) approximation
 double linearToSRGB(double linear);

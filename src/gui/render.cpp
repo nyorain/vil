@@ -8,64 +8,6 @@
 namespace vil {
 
 // Draw
-void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
-		VkBufferUsageFlags usage) {
-	dlg_assert(!this->dev || this->dev == &dev);
-	if(size >= reqSize) {
-		return;
-	}
-
-	this->dev = &dev;
-
-	if(buf) {
-		dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);
-		dev.dispatch.FreeMemory(dev.handle, mem, nullptr);
-	}
-
-	// new buffer
-	VkBufferCreateInfo bufInfo {};
-	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufInfo.size = reqSize;
-	bufInfo.usage = usage;
-	VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf));
-	nameHandle(dev, this->buf, "OwnBuffer:buf");
-
-	// get memory props
-	VkMemoryRequirements memReqs;
-	dev.dispatch.GetBufferMemoryRequirements(dev.handle, buf, &memReqs);
-	memReqs.size = align(memReqs.size, dev.props.limits.nonCoherentAtomSize);
-
-	// new memory
-	VkMemoryAllocateInfo allocInfo {};
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = align(memReqs.size, dev.props.limits.nonCoherentAtomSize);
-	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
-	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
-	nameHandle(dev, this->mem, "OwnBuffer:mem");
-
-	// bind
-	VK_CHECK(dev.dispatch.BindBufferMemory(dev.handle, buf, mem, 0));
-	this->size = reqSize;
-}
-
-OwnBuffer::~OwnBuffer() {
-	if(!dev) {
-		return;
-	}
-
-	dev->dispatch.DestroyBuffer(dev->handle, buf, nullptr);
-	dev->dispatch.FreeMemory(dev->handle, mem, nullptr);
-}
-
-void swap(OwnBuffer& a, OwnBuffer& b) noexcept {
-	using std::swap;
-	swap(a.dev, b.dev);
-	swap(a.buf, b.buf);
-	swap(a.mem, b.mem);
-	swap(a.size, b.size);
-}
-
-// Draw
 void swap(Draw& a, Draw& b) noexcept {
 	using std::swap;
 	swap(a.cb, b.cb);

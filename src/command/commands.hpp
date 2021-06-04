@@ -36,6 +36,8 @@ enum class CommandType : u32 {
 	query = (1u << 7u),
 	// TracyRays commands
 	traceRays = (1u << 8u),
+	// BuildAccelerationStructures commands
+	buildAccelStruct = (1u << 9u),
 };
 
 using CommandTypeFlags = nytl::Flags<CommandType>;
@@ -258,7 +260,6 @@ struct DrawCmdBase : Command {
 	GraphicsState state;
 	PushConstantData pushConstants;
 
-	DrawCmdBase() = default;
 	DrawCmdBase(CommandBuffer& cb, const GraphicsState&);
 
 	Type type() const override { return Type::draw; }
@@ -384,7 +385,6 @@ struct DispatchCmdBase : Command {
 	ComputeState state;
 	PushConstantData pushConstants;
 
-	DispatchCmdBase() = default;
 	DispatchCmdBase(CommandBuffer&, const ComputeState&);
 
 	Type type() const override { return Type::dispatch; }
@@ -1069,11 +1069,11 @@ struct WriteAccelStructsPropertiesCmd final : Command {
 
 struct BuildAccelStructsCmd final : Command {
 	span<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos; // already handle-fwd-patched
-	span<VkAccelerationStructureBuildRangeInfoKHR> buildRangeInfos;
+	span<span<VkAccelerationStructureBuildRangeInfoKHR>> buildRangeInfos;
 	span<AccelStruct*> srcs;
 	span<AccelStruct*> dsts;
 
-	Type type() const override { return Type::other; }
+	Type type() const override { return Type::buildAccelStruct; }
 	std::string nameDesc() const override { return "BuildAccelerationStructures"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -1089,14 +1089,22 @@ struct BuildAccelStructsIndirectCmd final : Command {
 	span<u32> indirectStrides;
 	span<u32*> maxPrimitiveCounts;
 
-	Type type() const override { return Type::other; }
+	Type type() const override { return Type::buildAccelStruct; }
 	std::string nameDesc() const override { return "BuildAccelerationStructuresIndirect"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 // VK_KHR_ray_tracing_pipeline
-struct TraceRaysCmd final : Command {
+struct TraceRaysCmdBase : Command {
+	RayTracingState state;
+	PushConstantData pushConstants;
+
+	TraceRaysCmdBase(CommandBuffer& cb, const RayTracingState&);
+	Type type() const override { return Type::traceRays; }
+};
+
+struct TraceRaysCmd final : TraceRaysCmdBase {
 	u32 width;
 	u32 height;
 	u32 depth;
@@ -1106,19 +1114,19 @@ struct TraceRaysCmd final : Command {
 	VkStridedDeviceAddressRegionKHR hitBindingTable;
 	VkStridedDeviceAddressRegionKHR callableBindingTable;
 
-	Type type() const override { return Type::traceRays; }
+	using TraceRaysCmdBase::TraceRaysCmdBase;
 	std::string nameDesc() const override { return "TraceRays"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
 
-struct TraceRaysIndirectCmd final : Command {
+struct TraceRaysIndirectCmd final : TraceRaysCmdBase {
 	VkDeviceAddress indirectDeviceAddress;
 	VkStridedDeviceAddressRegionKHR raygenBindingTable;
 	VkStridedDeviceAddressRegionKHR missBindingTable;
 	VkStridedDeviceAddressRegionKHR hitBindingTable;
 	VkStridedDeviceAddressRegionKHR callableBindingTable;
 
-	Type type() const override { return Type::traceRays; }
+	using TraceRaysCmdBase::TraceRaysCmdBase;
 	std::string nameDesc() const override { return "TraceRaysIndirect"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 };

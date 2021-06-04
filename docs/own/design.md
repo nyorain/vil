@@ -535,3 +535,32 @@ work without any problems for new extensions. This means
   will propagate through almost all of layer code, but also (b) a pain in
   the ass to test, which we would have to do to really make this a useful thing.
   So I don't know if it's a good idea at all.
+
+# On indirect copy
+
+So implementing an "indirect copy" via compute shaders seemed like a bad
+idea in the beginning. But seeing that CmdCopyBuffer itself might actually
+be implemented via a compute shader on desktop hardware (see e.g. mesas's radv driver), 
+this does not seem such a bad idea anymore.
+And we won't really get around implementing something like this for raytracing
+anyways, can't found any tricks to get around it for 
+CmdBuildAccelerationStructuresIndirect since we might not even have any
+upper bounds for data that is safe to read (like we do for indirect draw/dispatch).
+
+So, let's come up with a general indirect copy framework.
+We will built upon the first concept from node 1749.
+
+First, we always have a compute shader that prepares the command(s).
+In this case, it reads the buildRangeInfos and writes the commands into
+a buffer (we know its size beforehand). It might need to write out additional
+data.
+This command will also be able to determine the output size of the copy/copies.
+For hooked records where we need indirect copy we will allocate a large
+hostVisible buffer with a counter in the beginning into which we will
+output the copied data. Might need a second buffer with offset metadata
+(allocated at record time, opposed to the other buffer) so we can correctly 
+retrieve everything later on.
+
+Second, we simply run CmdDispatchIndirect, possibly multiple times.
+For copying indexed data (might happen with indirect draw or accelStruct triangles),
+we just have an additional level of indirection.

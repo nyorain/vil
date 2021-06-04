@@ -158,63 +158,6 @@ CopiedImage::~CopiedImage() {
 	dev->dispatch.FreeMemory(dev->handle, memory, nullptr);
 }
 
-void CopiedBuffer::init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFlags) {
-	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | addFlags;
-
-	this->buffer.ensure(dev, size, usage);
-	void* pmap;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, buffer.mem, 0, VK_WHOLE_SIZE, 0, &pmap));
-
-	this->map = static_cast<const std::byte*>(pmap);
-
-	// NOTE: destructor for copied buffer is not needed as memory mapping
-	// is implicitly unmapped when memory of buffer is destroyed.
-}
-
-/*
-void CopiedBuffer::cpuCopy(u64 offset, u64 size) {
-	ZoneScoped;
-
-	if(!buffer.mem) {
-		return;
-	}
-
-	if(size == VK_WHOLE_SIZE) {
-		dlg_assert(offset <= buffer.size);
-		size = buffer.size - offset;
-	}
-
-	dlg_assertlm(dlg_level_warn, size < 1024 * 1024, "Large data copies (> 1MB) "
-		"will significantly impact performance");
-	dlg_assert(offset + size <= buffer.size);
-
-	// TODO: only invalidate when on non-coherent memory
-	VkMappedMemoryRange range[1] {};
-	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	range[0].memory = buffer.mem;
-	range[0].size = VK_WHOLE_SIZE;
-	VK_CHECK(buffer.dev->dispatch.InvalidateMappedMemoryRanges(buffer.dev->handle, 1, range));
-
-	copy.resize(size);
-	std::memcpy(copy.data(), static_cast<const std::byte*>(map) + offset, size);
-
-	copyOffset = offset;
-}
-*/
-
-void CopiedBuffer::invalidateMap() {
-	if(!buffer.mem) {
-		return;
-	}
-
-	// TODO: only invalidate when on non-coherent memory
-	VkMappedMemoryRange range[1] {};
-	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	range[0].memory = buffer.mem;
-	range[0].size = VK_WHOLE_SIZE;
-	VK_CHECK(buffer.dev->dispatch.InvalidateMappedMemoryRanges(buffer.dev->handle, 1, range));
-}
-
 void invalidate(CommandHookRecord& rec) {
 	rec.hook = nullptr; // notify the record that it's no longer needed
 	auto it = find(rec.record->hookRecords, &rec);
@@ -227,34 +170,44 @@ void invalidate(CommandHookRecord& rec) {
 }
 
 // CommandHook
+TODO
+CommandHook::CommandHook();
+
+CommandHook::~CommandHook() {
+	invalidateRecordings();
+}
+
 VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
 	ZoneScoped;
 
-	auto* record = hooked.lastRecordLocked();
+	auto& dev = *hooked.dev;
+	auto& record = nonNull(hooked.lastRecordLocked());
 
 	// Check whether we should attempt to hook this particular record
-	bool validTarget =
-		record == target.record ||
+	bool hookNeededForCmd = true;
+	const bool validTarget =
+		&record == target.record ||
 		&hooked == target.cb ||
 		target.all;
 
-	if(!validTarget || hierachy_.empty() || !record->commands) {
-		return hooked.handle();
+	if(!validTarget || hierachy_.empty() || !record.commands) {
+		hookNeededForCmd = false;
 	}
 
 	// When there is no gui viewing the submissions at the moment, we don't
 	// need/want to hook the submission.
-	auto& dev = *hooked.dev;
 	if(!dev.gui || !dev.gui->visible ||
 			dev.gui->activeTab() != Gui::Tab::commandBuffer || freeze) {
-		return hooked.handle();
+		hookNeededForCmd = false;
 	}
 
-	// Before calling find, we need to unset the invalidated handles from the
-	// commands in hierachy_, find relies on all of them being valid.
-	replaceInvalidatedLocked(nonNull(record_));
+	// Even when we aren't interested in any command in the record, we have
+	// to hook it when it builds acceleration structures.
+	if(!hookNeededForCmd && !record.buildsAccelStructs) {
+		return hooked.handle();
+	}
 
 	// Check if there already is a valid CommandHookRecord we can use.
 	CommandHookRecord* foundHookRecord {};
@@ -262,9 +215,15 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	auto foundCompletedIt = completed.end();
 	auto completedCount = 0u;
 
-	for(auto& hookRecord : record->hookRecords) {
+	for(auto& hookRecord : record.hookRecords) {
+		// we can't use this record since it didn't hook a command and
+		// was just use for accelStruct data copying
+		if(hookNeededForCmd == hookRecord->hcommand.empty()) {
+			continue;
+		}
+
 		// the record is currently pending on the device
-		if(hookRecord->state->writer) {
+		if(hookRecord->writer) {
 			continue;
 		}
 
@@ -299,26 +258,33 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	if(foundHookRecord) {
 		bool usable = true;
 
-		dlg_check({
-			auto findRes = find(record->commands, hierachy_, dsState_);
-			dlg_assert(std::equal(
-				foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
-				findRes.hierachy.begin(), findRes.hierachy.end()));
-			// NOTE: I guess we can't really rely on this. Just always call
-			// findRes? But i'm not even sure this is important. Could we ever
-			// suddenly want to hook a different command in the same record
-			// without the selection changing (in which case the hooked record
-			// would have been invalidated). In question, just remove this
-			// assert. It's useful for debugging though; was previously
-			// used to uncover new find/matching issues.
-			// dlg_assertm(std::abs(findRes.match - foundHookRecord->match) < 0.1,
-			// 	"{} -> {}", foundHookRecord->match, findRes.match);
-		});
+		if(hookNeededForCmd) {
+			dlg_check({
+				// Before calling find, we need to unset the invalidated handles from the
+				// commands in hierachy_, find relies on all of them being valid.
+				replaceInvalidatedLocked(nonNull(record_));
+
+				auto findRes = find(record.commands, hierachy_, dsState_);
+				dlg_assert(std::equal(
+					foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
+					findRes.hierachy.begin(), findRes.hierachy.end()));
+				// NOTE: I guess we can't really rely on this. Just always call
+				// findRes? But i'm not even sure this is important. Could we ever
+				// suddenly want to hook a different command in the same record
+				// without the selection changing (in which case the hooked record
+				// would have been invalidated). In question, just remove this
+				// assert. It's useful for debugging though; was previously
+				// used to uncover new find/matching issues.
+				// dlg_assertm(std::abs(findRes.match - foundHookRecord->match) < 0.1,
+				// 	"{} -> {}", foundHookRecord->match, findRes.match);
+			});
+
+			dlg_assert(foundHookRecord->hookCounter == counter_);
+			dlg_assert(foundHookRecord->state);
+		}
 
 		dlg_assert(foundHookRecord->hook == this);
-		dlg_assert(foundHookRecord->hookCounter == counter_);
-		dlg_assert(!foundHookRecord->state->writer);
-
+		dlg_assert(!foundHookRecord->writer);
 
 		// Not possible to reuse the hook-recorded cb when the command
 		// buffer uses any update_after_bind descriptors that changed.
@@ -331,7 +297,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			auto* cmd = foundHookRecord->hcommand.back();
 			const DescriptorState* dsState = getDsState(*cmd);
 
-			auto& dsSnapshot = record->lastDescriptorState;
+			auto& dsSnapshot = record.lastDescriptorState;
 			dlg_assert(setID < dsState->descriptorSets.size());
 			auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
 
@@ -346,28 +312,34 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		}
 
 		if(usable) {
-			dlg_assert(!foundHookRecord->state->writer);
-			data.reset(new CommandHookSubmission(*foundHookRecord, subm, foundHookRecord->match));
+			data.reset(new CommandHookSubmission(*foundHookRecord, subm));
 			return foundHookRecord->cb;
 		}
 	}
 
-	auto findRes = find(record->commands, hierachy_, dsState_);
-	if(findRes.hierachy.empty()) {
-		// Can't find the command we are looking for in this record
-		return hooked.handle();
+	FindResult findRes {};
+	if(hookNeededForCmd) {
+		// Before calling find, we need to unset the invalidated handles from the
+		// commands in hierachy_, find relies on all of them being valid.
+		replaceInvalidatedLocked(nonNull(record_));
+
+		findRes = find(record.commands, hierachy_, dsState_);
+		if(findRes.hierachy.empty()) {
+			// Can't find the command we are looking for in this record
+			return hooked.handle();
+		}
+
+		dlg_assert(findRes.hierachy.size() == hierachy_.size());
 	}
 
-	dlg_assertlm(dlg_level_warn, record->hookRecords.size() < 8,
+	dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
 		"Alarmingly high number of hooks for a single record");
 
-	dlg_assert(findRes.hierachy.size() == hierachy_.size());
-
-	auto hook = new CommandHookRecord(*this, *record, std::move(findRes.hierachy));
+	auto hook = new CommandHookRecord(*this, record, std::move(findRes.hierachy));
 	hook->match = findRes.match;
-	record->hookRecords.emplace_back(hook);
+	record.hookRecords.emplace_back(hook);
 
-	data.reset(new CommandHookSubmission(*hook, subm, findRes.match));
+	data.reset(new CommandHookSubmission(*hook, subm));
 
 	return hook->cb;
 }
@@ -396,7 +368,12 @@ void CommandHook::invalidateRecordings() {
 		// important to store this before we potentially destroy rec.
 		auto* next = rec->next;
 
-		invalidate(*rec);
+		// we don't want to invalidate recordings that didn't hook a command
+		// and were only done for accelStruct builddata copying
+		if(!rec->hcommand.empty()) {
+			invalidate(*rec);
+		}
+
 		rec = next;
 	}
 
@@ -417,18 +394,12 @@ void CommandHook::unsetHookOps(bool doQueryTime) {
 	invalidateData();
 }
 
-CommandHook::~CommandHook() {
-	invalidateRecordings();
-}
-
 // record
 CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	CommandRecord& xrecord, std::vector<const Command*> hooked) :
 		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
 
 	++DebugStats::get().aliveHookRecords;
-	dlg_assert(!hcommand.empty());
-	// this->dev = &xrecord.device();
 
 	this->next = hook->records_;
 	if(hook->records_) {
@@ -470,12 +441,9 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	initState(info);
 
 	// record
+	// we can never submit the cb simulataneously anyways, see CommandHook
 	VkCommandBufferBeginInfo cbbi {};
 	cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	// we can never submit the cb simulataneously anyways, see the
-	// 'submissionCount' branch we take when finding an already existent
-	// record.
-	// cbbi.flags = record->usageFlags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 	VK_CHECK(dev.dispatch.BeginCommandBuffer(this->cb, &cbbi));
 
 	// initial cmd stuff
@@ -489,9 +457,12 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	ZoneScopedN("HookRecord");
 	this->hookRecord(record->commands, info);
 
-	dlg_assert(maxHookLevel >= hcommand.size() - 1);
-	dlg_assert(hcommand.back()->children() || maxHookLevel == hcommand.size() - 1);
 	VK_CHECK(dev.dispatch.EndCommandBuffer(this->cb));
+
+	if(!hcommand.empty()) {
+		dlg_assert(maxHookLevel >= hcommand.size() - 1);
+		dlg_assert(hcommand.back()->children() || maxHookLevel == hcommand.size() - 1);
+	}
 }
 
 CommandHookRecord::~CommandHookRecord() {
@@ -505,7 +476,7 @@ CommandHookRecord::~CommandHookRecord() {
 	// And then we would have been destroyed via the finish() command (see
 	// the assertions there)
 	dlg_assert(record);
-	dlg_assert(!state || !state->writer);
+	dlg_assert(!writer);
 
 	auto& dev = *record->dev;
 
@@ -533,9 +504,12 @@ CommandHookRecord::~CommandHookRecord() {
 }
 
 void CommandHookRecord::initState(RecordInfo& info) {
+	if(hcommand.empty()) {
+		return;
+	}
+
 	auto& dev = *record->dev;
 	state.reset(new CommandHookState());
-	dlg_assert(!hcommand.empty());
 
 	// Find out if final hooked command is inside render pass
 	auto preEnd = hcommand.end() - 1;
@@ -713,14 +687,15 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 			// init xfb buffer
 			auto xfbSize = 32 * 1024 * 1024; // TODO
 			auto usage =
+				VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 				VK_BUFFER_USAGE_TRANSFORM_FEEDBACK_BUFFER_BIT_EXT |
 				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-			state->transformFeedback.init(dev, xfbSize, usage);
+			state->transformFeedback.ensure(dev, xfbSize, usage);
 
 			auto offset = VkDeviceSize(0u);
 			dev.dispatch.CmdBindTransformFeedbackBuffersEXT(cb, 0u, 1u,
-				&state->transformFeedback.buffer.buf, &offset,
-				&state->transformFeedback.buffer.size);
+				&state->transformFeedback.buf, &offset,
+				&state->transformFeedback.size);
 			dev.dispatch.CmdBeginTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
 
 			endXfb = true;
@@ -769,6 +744,19 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 	auto& dev = *record->dev;
 	while(cmd) {
 		auto nextInfo = info;
+
+		// check if command needs additional, manual hook
+		if(cmd->type() == CommandType::buildAccelStruct) {
+			auto* basCmd = dynamic_cast<BuildAccelStructsCmd*>(cmd);
+			auto* basCmdIndirect = dynamic_cast<BuildAccelStructsCmd*>(cmd);
+			dlg_assert(basCmd || basCmdIndirect);
+
+			if(basCmd) {
+				hookBefore(*basCmd);
+			} else if(basCmdIndirect) {
+				hookBefore(*basCmdIndirect);
+			}
+		}
 
 		// check if command is on hooking chain
 		if(info.nextHookLevel < hcommand.size() && cmd == hcommand[info.nextHookLevel]) {
@@ -949,9 +937,9 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 }
 
 void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
-		VkDeviceSize srcOffset, CopiedBuffer& dst, VkDeviceSize dstOffset,
+		VkDeviceSize srcOffset, OwnBuffer& dst, VkDeviceSize dstOffset,
 		VkDeviceSize size) {
-	dlg_assert(dstOffset + size <= dst.buffer.size);
+	dlg_assert(dstOffset + size <= dst.size);
 	dlg_assert(srcOffset + size <= src.ci.size);
 
 	// perform copy
@@ -975,7 +963,7 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 1, &barrier, 0, nullptr);
 
-	dev.dispatch.CmdCopyBuffer(cb, src.handle, dst.buffer.buf, 1, &copy);
+	dev.dispatch.CmdCopyBuffer(cb, src.handle, dst.buf, 1, &copy);
 
 	barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
@@ -985,10 +973,11 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 		0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 
-void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedBuffer& dst,
+void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 		VkBufferUsageFlags addFlags, Buffer& src,
 		VkDeviceSize offset, VkDeviceSize size) {
-	dst.init(dev, size, addFlags);
+	addFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	dst.ensure(dev, size, addFlags);
 	performCopy(dev, cb, src, offset, dst, 0, size);
 }
 
@@ -1097,13 +1086,23 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		auto& elem = buffers(*it->second, bindingID)[elemID];
 		dlg_assert(elem.buffer);
 
-		auto& dst = state->dsCopy.emplace<CopiedBuffer>();
+		// calculate offset, taking dynamic offset into account
+		auto off = elem.offset;
+		if(needsDynamicOffset(lbinding.descriptorType)) {
+			auto baseOff = lbinding.dynOffset;
+			auto dynOffs = dsState->descriptorSets[setID].dynamicOffsets;
+			dlg_assert(baseOff + elemID < dynOffs.size());
+			off += dynOffs[baseOff + elemID];
+		}
+
+		// calculate size
 		auto range = elem.range;
 		if(range == VK_WHOLE_SIZE) {
 			range = elem.buffer->ci.size - elem.offset;
 		}
-
 		auto size = std::min(maxBufCopySize, range);
+
+		auto& dst = state->dsCopy.emplace<OwnBuffer>();
 		initAndCopy(dev, cb, dst, 0u, nonNull(elem.buffer),
 			elem.offset, size);
 	} else if(cat == DescriptorCategory::bufferView) {
@@ -1305,7 +1304,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
 			auto size = 4 + cmd->maxDrawCount * cmdSize;
-			state->indirectCopy.init(dev, size, 0u);
+			state->indirectCopy.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
 			// copy count
 			performCopy(dev, cb, nonNull(cmd->countBuffer), cmd->countBufferOffset,
@@ -1409,6 +1408,161 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info)
 	}
 }
 
+template<typename Off>
+struct SpanAlloc {
+	Off curr {};
+	std::size_t rem {};
+
+	Off alloc(u32 count) {
+		dlg_assert(count <= rem);
+		auto ret = curr;
+		curr += count;
+		return ret;
+	}
+
+	template<typename T>
+	T* alloc(u32 count) {
+		auto byteSize = count * sizeof(T);
+		auto ptr = alloc(byteSize);
+		new(ptr) T[count];
+		return reinterpret_cast<T*>(ptr);
+	}
+
+	template<typename T>
+	span<T> allocSpan(u32 count) {
+		auto ptr = alloc<T>(count);
+		return {ptr, count};
+	}
+};
+
+u32 neededBufSize(const VkAccelerationStructureGeometryKHR& geom,
+		const VkAccelerationStructureBuildRangeInfoKHR& range) {
+	if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+		// TODO: could pack them tightly
+		return range.primitiveCount * geom.geometry.aabbs.stride;
+	} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+		// we don't copy index data, only vertices (index-resolved)
+		auto fmtSize = FormatTexelSize(geom.geometry.triangles.vertexFormat);
+		auto ret = 3 * range.primitiveCount * fmtSize;
+		if(geom.geometry.triangles.transformData.deviceAddress) {
+			ret += sizeof(VkTransformMatrixKHR);
+		}
+		return ret;
+	} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+		return range.primitiveCount * sizeof(VkAccelerationStructureInstanceKHR);
+	} else {
+		dlg_fatal("unreachable; invalid geometry type {}", geom.geometryType);
+		return 0u;
+	}
+}
+
+Buffer& bufferAt(Device& dev, VkDeviceAddress address) {
+	auto [begin, end] = dev.bufferAddresses.equal_range(address);
+	dlg_assertm(begin != end, "Invalid VkDeviceAddress: couldn't find buffer");
+	if(std::distance(begin, end) > 1) {
+		dlg_trace("More than one buffer found for device address; will have to guess");
+	}
+
+	Buffer* best = nullptr;
+	while(begin != end) {
+		if(!best || best->deviceAddress + best->ci.size <
+				(*begin)->deviceAddress + (*begin)->ci.size) {
+			best = *begin;
+		}
+	}
+
+	dlg_assert(best);
+	return *best;
+}
+
+void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
+	auto& dev = *record->dev;
+
+	auto& build = accelStructBuilds.emplace_back();
+	build.command = &cmd;
+
+	// 1. query needed size on cpu on gpu
+	auto neededCpu = 0u;
+	auto neededDev = 0u;
+	for(auto i = 0u; i < cmd.buildInfos.size(); ++i) {
+		auto& buildInfo = cmd.buildInfos[i];
+		auto& rangeInfos = cmd.buildRangeInfos[i];
+
+		neededCpu += sizeof(AccelStructBuild::Build);
+		neededCpu += buildInfo.geometryCount *
+			sizeof(VkAccelerationStructureGeometryKHR);
+
+		for(auto g = 0u; g < buildInfo.geometryCount; ++g) {
+			auto& srcGeom = buildInfo.pGeometries ?
+				buildInfo.pGeometries[g] : *buildInfo.ppGeometries[g];
+			neededDev += neededBufSize(srcGeom, rangeInfos[g]);
+		}
+	}
+
+	build.copiedData.ensure(dev, neededDev, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+	build.data = std::make_unique<std::byte[]>(neededCpu);
+
+	SpanAlloc<std::byte*> mcpu{build.data.get(), neededCpu};
+	SpanAlloc<u32> mdev{0u, neededDev};
+
+	build.builds = mcpu.allocSpan<AccelStructBuild::Build>(cmd.buildInfos.size());
+
+	// 2. initialize data
+	for(auto i = 0u; i < cmd.buildInfos.size(); ++i) {
+		auto& srcBuildInfo = cmd.buildInfos[i];
+		auto& rangeInfos = cmd.buildRangeInfos[i];
+
+		auto& dst = build.builds[i];
+		dst.info = srcBuildInfo;
+		// safe to just reference them here, record will stay alive at least
+		// until we read it again.
+		dst.rangeInfos = cmd.buildRangeInfos[i];
+
+		auto dstGeoms = mcpu.allocSpan<VkAccelerationStructureGeometryKHR>(dst.info.geometryCount);
+		for(auto g = 0u; g < dst.info.geometryCount; ++g) {
+			auto& srcGeom = srcBuildInfo.pGeometries ?
+				srcBuildInfo.pGeometries[g] : *srcBuildInfo.ppGeometries[g];
+			auto& dstGeom = dstGeoms[g];
+			dstGeom = srcGeom;
+
+			auto& range = rangeInfos[g];
+
+			if(srcGeom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+				auto srcAddr = srcGeom.geometry.aabbs.data.deviceAddress;
+				auto& srcBuf = bufferAt(dev, srcAddr);
+				auto size = neededBufSize(srcGeom, range);
+				auto srcOff = (srcAddr + range.primitiveOffset) - srcBuf.deviceAddress;
+				auto dstOff = mdev.alloc(size);
+				performCopy(dev, cb, srcBuf, srcOff, build.copiedData, dstOff, size);
+				dstGeom.geometry.aabbs.data.hostAddress = build.copiedData.map + dstOff;
+			} else if(srcGeom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+				// copy vertices
+
+
+				// copy transform, if present
+			} else if(srcGeom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+				// TODO: resolve indirection via custom compute shader
+				dlg_assertm(!srcGeom.geometry.instances.arrayOfPointers,
+					"TODO: arrayOfPointers not supported yet");
+				auto srcAddr = srcGeom.geometry.instances.data.deviceAddress;
+				auto& srcBuf = bufferAt(dev, srcAddr);
+				auto size = neededBufSize(srcGeom, rangeInfos[g]);
+				auto srcOff = srcAddr - srcBuf.deviceAddress;
+				auto dstOff = mdev.alloc(size);
+				performCopy(dev, cb, srcBuf, srcOff, build.copiedData, dstOff, size);
+			} else {
+				dlg_fatal("unreachable; invalid geometry type {}", srcGeom.geometryType);
+			}
+		}
+	}
+}
+
+void CommandHookRecord::hookBefore(const BuildAccelStructsIndirectCmd& cmd) {
+	// TODO: implement indirect copy concept
+	(void) cmd;
+	dlg_error("TODO: implement support for copying BuildAccelStructsIndirectCmd data");
+}
+
 void CommandHookRecord::finish() noexcept {
 	// NOTE: We don't do this since we can assume the record to remain
 	// valid until all submissions are finished. We can assume it to
@@ -1417,8 +1571,7 @@ void CommandHookRecord::finish() noexcept {
 
 	// Keep alive when there still a pending submission.
 	// It will delete this record then instead.
-	dlg_assert(state);
-	if(!state->writer) {
+	if(!writer) {
 		delete this;
 	} else {
 		// no other reason for this record to be finished except
@@ -1429,33 +1582,42 @@ void CommandHookRecord::finish() noexcept {
 
 // submission
 CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec,
-		Submission& subm, float xmatch) : record(&rec), match(xmatch) {
-	dlg_assert(rec.state);
-	dlg_assert(!rec.state->writer);
-	rec.state->writer = &subm;
+		Submission& subm) : record(&rec) {
+	dlg_assert(rec.state || !rec.accelStructBuilds.empty());
+	dlg_assert(!rec.writer);
+	rec.writer = &subm;
 	descriptorSnapshot = rec.record->lastDescriptorState;
 }
 
 CommandHookSubmission::~CommandHookSubmission() {
+	// it's important we have this here (as opposed to in this->finish)
+	// for vkQueueSubmit failure cases.
 	if(record) {
 		dlg_assert(record->record);
-		dlg_assert(record->state);
-		record->state->writer = nullptr;
+		record->writer = nullptr;
 	}
 }
 
 void CommandHookSubmission::finish(Submission& subm) {
 	ZoneScoped;
-	dlg_assert(record->state->writer == &subm);
+	dlg_assert(record->writer == &subm);
 
 	// In this case the hook was removed, no longer interested in results.
 	// Since we are the only submission left to the record, it can be
 	// destroyed.
 	if(!record->hook) {
-		record->state->writer = nullptr;
+		record->writer = nullptr;
 		dlg_assert(!contains(record->record->hookRecords, record));
 		delete record;
 		record = nullptr;
+		return;
+	}
+
+	finishAccelStructBuilds();
+
+	// when the record has not state, we don't have to transmit anything
+	if(!record->state) {
+		dlg_assert(record->hcommand.empty());
 		return;
 	}
 
@@ -1463,7 +1625,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 	auto& state = record->hook->completed.emplace_back();
 	state.record = IntrusivePtr<CommandRecord>(record->record);
-	state.match = this->match;
+	state.match = record->match;
 	state.state = record->state;
 	state.command = record->hcommand;
 	state.descriptorSnapshot = std::move(this->descriptorSnapshot);
@@ -1477,7 +1639,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 		auto& bcmd = *record->hcommand.back();
 
 		if(auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&bcmd)) {
-			dlg_assert(record->state->indirectCopy.buffer.size >= 4u);
+			dlg_assert(record->state->indirectCopy.size >= 4u);
 			auto* count = reinterpret_cast<const u32*>(record->state->indirectCopy.map);
 			record->state->indirectCommandCount = *count;
 			dlg_assert(record->state->indirectCommandCount <= cmd->maxDrawCount);
@@ -1486,7 +1648,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
 			dlg_assertlm(dlg_level_warn,
-				record->state->indirectCopy.buffer.size >= 4 + *count * cmdSize,
+				record->state->indirectCopy.size >= 4 + *count * cmdSize,
 				"Indirect command readback buffer too small; commands missing");
 
 			// auto cmdsSize = cmdSize * record->state->indirectCommandCount;
@@ -1497,14 +1659,12 @@ void CommandHookSubmission::finish(Submission& subm) {
 			[[maybe_unused]] auto cmdSize = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
-			dlg_assert(record->state->indirectCopy.buffer.size ==
-				cmd->drawCount * cmdSize);
+			dlg_assert(record->state->indirectCopy.size == cmd->drawCount * cmdSize);
 
 			record->state->indirectCommandCount = cmd->drawCount;
 			record->state->indirectCopy.invalidateMap();
 		} else if(dynamic_cast<const DispatchIndirectCmd*>(&bcmd)) {
-			dlg_assert(record->state->indirectCopy.buffer.size ==
-				sizeof(VkDispatchIndirectCommand));
+			dlg_assert(record->state->indirectCopy.size == sizeof(VkDispatchIndirectCommand));
 
 			record->state->indirectCommandCount = 1u;
 			record->state->indirectCopy.invalidateMap();
@@ -1542,6 +1702,14 @@ void CommandHookSubmission::transmitTiming() {
 
 	auto diff = after - before;
 	record->state->neededTime = diff;
+}
+
+void CommandHookSubmission::finishAccelStructBuilds() {
+	// TODO: evaluate accelStruct builds
+	if(!record->accelStructBuilds.empty()) {
+		dlg_error("TODO: implement accelStruct build data copy ({} builds)",
+			record->accelStructBuilds.size());
+	}
 }
 
 CommandHookState::CommandHookState() {

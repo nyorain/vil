@@ -14,7 +14,6 @@ urgent, bugs:
       and the RecordBatches that the currently selected command is part of.
 	  We need to store the latter to correctly do contexted LCS
 - [ ] image viewer validation bug when we don't hover the image
-- [ ] respect ds dynamic offsets. Test with SW sample
 
 descriptor indexing extension:
 - [ ] support partially_bound. Also not sure we have update_after_bind in

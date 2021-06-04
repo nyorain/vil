@@ -130,8 +130,13 @@ struct ComputeState : DescriptorState {
 	ComputePipeline* pipe;
 };
 
+struct RayTracingState : DescriptorState {
+	RayTracingPipeline* pipe;
+};
+
 GraphicsState copy(CommandBuffer& cb, const GraphicsState& src);
 ComputeState copy(CommandBuffer& cb, const ComputeState& src);
+RayTracingState copy(CommandBuffer& cb, const RayTracingState& src);
 
 // We don't use shared pointers here, they are used in the
 // commands referencing the handles.
@@ -195,8 +200,13 @@ struct CommandRecord {
 	// Name of commmand buffer in which this record originated.
 	// Stored separately from cb so that information is retained when cb is unset.
 	const char* cbName {};
+	// whether the recording is finished (i.e. EndCommandBuffer called)
+	bool finished {};
+	// whether the record always needs a hook. Currently only true
+	// for records containing CmdBuildAccelerationStructures(Indirect)
+	// since we need to copy the data using for the acceleration structure.
+	bool buildsAccelStructs {};
 
-	bool finished {}; // whether the recording is finished (i.e. EndCommandBuffer called)
 	VkCommandBufferUsageFlags usageFlags {};
 
 	// The hierachy of commands recording into this record.

@@ -69,17 +69,28 @@ inline bool imGuiTextMultiline(const char* label, std::string& output) {
 	return ret;
 }
 
-inline void drawOffsetSize(const BufferDescriptor& info) {
+inline void drawOffsetSize(const BufferDescriptor& info,
+		std::optional<u32> dynOffset = std::nullopt) {
+	std::string offText;
+	auto off = info.offset;
+	if(!dynOffset) {
+		offText = dlg::format("Offset {}", info.offset);
+	} else {
+		off = info.offset + *dynOffset;
+		offText = dlg::format("Offset {} (Static {} + Dynamic {})", off,
+			info.offset, *dynOffset);
+	}
+
 	if(info.range == VK_WHOLE_SIZE) {
 		if(info.buffer) {
-			dlg_assert(info.buffer->ci.size >= info.offset);
-			auto range = info.buffer->ci.size - info.offset;
-			imGuiText("Offset {}, whole size ({})", info.offset, range);
+			dlg_assert(info.buffer->ci.size >= off);
+			auto range = info.buffer->ci.size - off;
+			imGuiText("{}, whole size ({})", offText, range);
 		} else {
-			imGuiText("Offset {}, whole size", info.offset);
+			imGuiText("{}, whole size", offText);
 		}
 	} else {
-		imGuiText("Offset {}, Size {}", info.offset, info.range);
+		imGuiText("{}, Size {}", offText, info.range);
 	}
 }
 

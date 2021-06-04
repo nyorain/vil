@@ -954,7 +954,7 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 // DrawCmdBase
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
 	state = copy(cb, gfxState);
-	// NOTE: only do this when pipe layout matches pcr layout
+	// TODO: only do this when pipe layout matches pcr layout
 	pushConstants.data = copySpan(cb, cb.pushConstants().data);
 }
 
@@ -1500,7 +1500,7 @@ float BindDescriptorSetCmd::match(const Command& rhs) const {
 // DispatchCmdBase
 DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb, const ComputeState& compState) {
 	state = copy(cb, compState);
-	// NOTE: only do this when pipe layout matches pcr layout
+	// TODO: only do this when pipe layout matches pcr layout
 	pushConstants.data = copySpan(cb, cb.pushConstants().data);
 }
 
@@ -2782,7 +2782,7 @@ void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	ThreadMemScope memScope;
 	auto ppRangeInfos = memScope.alloc<VkAccelerationStructureBuildRangeInfoKHR*>(buildRangeInfos.size());
 	for(auto i = 0u; i < buildRangeInfos.size(); ++i) {
-		ppRangeInfos[i] = &buildRangeInfos[i];
+		ppRangeInfos[i] = buildRangeInfos[i].data();
 	}
 
 	dev.dispatch.CmdBuildAccelerationStructuresKHR(cb, u32(buildInfos.size()),
@@ -2806,6 +2806,12 @@ void BuildAccelStructsIndirectCmd::replace(const CommandAllocHashMap<DeviceHandl
 }
 
 // VK_KHR_ray_tracing_pipeline
+TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb, const RayTracingState& rtState) {
+	state = copy(cb, rtState);
+	// TODO: only do this when pipe layout matches pcr layout
+	pushConstants.data = copySpan(cb, cb.pushConstants().data);
+}
+
 void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdTraceRaysKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,

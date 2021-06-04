@@ -1,10 +1,183 @@
 #include <rt.hpp>
 #include <buffer.hpp>
 #include <device.hpp>
+#include <shader.hpp>
 #include <threadContext.hpp>
+#include <util/matOps.hpp>
+#include <vk/format_utils.h>
 
 namespace vil {
 
+Mat4f toMat4f(const VkTransformMatrixKHR& src) {
+	Mat<3, 4, float> ret34;
+	static_assert(sizeof(ret34) == sizeof(src));
+	std::memcpy(&ret34, &src, sizeof(ret34));
+
+	auto ret = Mat4f(ret34);
+	ret[3][3] = 1.f;
+	return ret;
+}
+
+void writeAABBs(AccelStruct& accelStruct,
+		const VkAccelerationStructureGeometryAabbsDataKHR& src,
+		const VkAccelerationStructureBuildRangeInfoKHR& info) {
+	(void) accelStruct;
+	(void) src;
+	(void) info;
+	/*
+	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+	auto& dst = std::get<AccelAABBs>(accelStruct.data);
+
+	auto ptr = reinterpret_cast<const std::byte*>(src.data.hostAddress);
+	ptr += info.primitiveOffset;
+
+	dst.boxes.resize(info.primitiveCount);
+	for(auto i = 0u; i < info.primitiveCount; ++i) {
+		auto aabb = reinterpret_cast<const VkAabbPositionsKHR*>(ptr);
+		dst.boxes[i] = *aabb;
+		ptr += src.stride;
+	}
+	*/
+}
+
+void writeTriangles(AccelStruct& accelStruct,
+		const VkAccelerationStructureGeometryTrianglesDataKHR& src,
+		const VkAccelerationStructureBuildRangeInfoKHR& info) {
+	(void) accelStruct;
+	(void) src;
+	(void) info;
+	/*
+	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+	auto& dst = std::get<AccelTriangles>(accelStruct.data);
+
+	auto vertexData = reinterpret_cast<const std::byte*>(src.vertexData.hostAddress);
+	vertexData += info.firstVertex * src.vertexStride;
+
+	// retrieve transform
+	Mat4f transform = nytl::identity<4, float>();
+	if(src.transformData.hostAddress) {
+		auto* ptr = reinterpret_cast<const std::byte*>(src.transformData.hostAddress);
+		ptr += info.transformOffset;
+
+		auto* src = reinterpret_cast<const VkTransformMatrixKHR*>(ptr);
+		transform = toMat4f(*src);
+	}
+
+	auto vertsHaveW = (FormatChannelCount(src.vertexFormat) >= 4);
+
+	auto readVertex = [&](u32 index) {
+		dlg_assert(index <= src.maxVertex);
+
+		auto ptr = vertexData + index * src.vertexStride;
+		auto data = span{ptr, src.vertexStride};
+		auto vert = Vec4f(read(src.vertexFormat, data));
+		if(!vertsHaveW) {
+			vert[3] = 1.f;
+		}
+
+		if(src.transformData.hostAddress) {
+			vert = transform * vert;
+		}
+
+		return vert;
+	};
+
+	if(src.indexType == VK_INDEX_TYPE_NONE_KHR) {
+		vertexData += info.primitiveOffset;
+		for(auto i = 0u; i < info.primitiveCount; ++i) {
+			auto& tri = dst.triangles.emplace_back();
+			tri.a = readVertex(3 * i + 0);
+			tri.b = readVertex(3 * i + 1);
+			tri.c = readVertex(3 * i + 2);
+		}
+	} else {
+		auto indexData = reinterpret_cast<const std::byte*>(src.indexData.hostAddress);
+		indexData += info.primitiveOffset;
+		auto indSize = indexSize(src.indexType);
+		for(auto i = 0u; i < info.primitiveCount; ++i) {
+			auto& tri = dst.triangles.emplace_back();
+			auto indData = span{indexData + i * indSize, 3 * indSize};
+			tri.a = readVertex(readIndex(src.indexType, indData));
+			tri.b = readVertex(readIndex(src.indexType, indData));
+			tri.c = readVertex(readIndex(src.indexType, indData));
+		}
+	}
+	*/
+}
+
+void writeInstances(AccelStruct& accelStruct,
+		const VkAccelerationStructureGeometryInstancesDataKHR& src,
+		const VkAccelerationStructureBuildRangeInfoKHR& info) {
+	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+	auto& dst = std::get<AccelInstances>(accelStruct.data);
+
+	auto ptr = reinterpret_cast<const std::byte*>(src.data.hostAddress);
+	ptr += info.primitiveOffset;
+
+	for(auto i = 0u; i < info.primitiveCount; ++i) {
+		const VkAccelerationStructureInstanceKHR* pSrcIni;
+		if(src.arrayOfPointers) {
+			auto ptrData = reinterpret_cast<const VkDeviceOrHostAddressConstKHR*>(ptr) + i;
+			pSrcIni = reinterpret_cast<const VkAccelerationStructureInstanceKHR*>(ptrData->hostAddress);
+		} else {
+			pSrcIni = reinterpret_cast<const VkAccelerationStructureInstanceKHR*>(ptr) + i;
+		}
+
+		auto& srcIni = *pSrcIni;
+		auto& dstIni = dst.instances.emplace_back();
+
+		auto vkRef = u64ToHandle<VkAccelerationStructureKHR>(srcIni.accelerationStructureReference);
+		auto& ref = get(*accelStruct.dev, vkRef);
+		dstIni.accelStruct = &ref;
+		dstIni.bindingTableOffset = srcIni.instanceShaderBindingTableRecordOffset;
+		dstIni.flags = srcIni.flags;
+		dstIni.customIndex = srcIni.instanceCustomIndex;
+		dstIni.mask = srcIni.mask;
+		dstIni.transform = toMat4f(srcIni.transform);
+	}
+}
+
+void copyBuildData(AccelStruct& accelStruct,
+		const VkAccelerationStructureBuildGeometryInfoKHR& info,
+		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos) {
+	if(accelStruct.type == VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR) {
+		accelStruct.effectiveType = info.type;
+	}
+
+	for(auto i = 0u; i < info.geometryCount; ++i) {
+		auto& geom = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
+		auto& rangeInfo = buildRangeInfos[i];
+
+		// check if it's the first time data is added
+		if(accelStruct.geometryType == VK_GEOMETRY_TYPE_MAX_ENUM_KHR) {
+			accelStruct.geometryType = geom.geometryType;
+
+			if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+				dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+				accelStruct.data = AccelAABBs {};
+			} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+				dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+				accelStruct.data = AccelTriangles {};
+			} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+				dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+				accelStruct.data = AccelInstances {};
+			}
+		}
+
+		dlg_assert(accelStruct.geometryType == geom.geometryType);
+		if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+			writeAABBs(accelStruct, geom.geometry.aabbs, rangeInfo);
+		} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+			writeTriangles(accelStruct, geom.geometry.triangles, rangeInfo);
+		} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+			writeInstances(accelStruct, geom.geometry.instances, rangeInfo);
+		} else {
+			dlg_fatal("unreachable; invalid geometry type {}", geom.geometryType);
+		}
+	}
+}
+
+// api
 VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 		VkDevice                                    device,
 		const VkAccelerationStructureCreateInfoKHR* pCreateInfo,
@@ -193,12 +366,81 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		const VkRayTracingPipelineCreateInfoKHR*    pCreateInfos,
 		const VkAllocationCallbacks*                pAllocator,
 		VkPipeline*                                 pPipelines) {
-	// need to unwrap some handles, e.g. pipeline layout
-	dlg_error("TODO: implement CreateRayTracingPipelinesKHR");
+	ZoneScoped;
 	auto& dev = getDevice(device);
-	return dev.dispatch.CreateRayTracingPipelinesKHR(dev.handle,
-		deferredOperation, pipelineCache, createInfoCount, pCreateInfos,
-		pAllocator, pPipelines);
+
+	ThreadMemScope memScope;
+	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
+	for(auto& nci : ncis) {
+		nci.layout = get(device, nci.layout).handle;
+		if(nci.basePipelineHandle) {
+			auto& basePipe = get(dev, nci.basePipelineHandle);
+			nci.basePipelineHandle = basePipe.handle;
+		}
+
+		if(nci.pLibraryInfo) {
+			auto& copy = memScope.alloc<VkPipelineLibraryCreateInfoKHR>(1)[0];
+			copy = *nci.pLibraryInfo;
+
+			auto libHandles = memScope.alloc<VkPipeline>(copy.libraryCount);
+			for(auto i = 0u; i < copy.libraryCount; ++i) {
+				auto& lib = get(dev, copy.pLibraries[i]);
+				libHandles[i] = lib.handle;
+			}
+
+			copy.pLibraries = libHandles.data();
+		}
+	}
+
+	{
+		ZoneScopedN("dispatch");
+		auto res = dev.dispatch.CreateRayTracingPipelinesKHR(dev.handle,
+			deferredOperation, pipelineCache, createInfoCount, ncis.data(),
+			pAllocator, pPipelines);
+		if(res != VK_SUCCESS) {
+			return res;
+		}
+	}
+
+	for(auto i = 0u; i < createInfoCount; ++i) {
+		dlg_assert(pPipelines[i]);
+		auto& ci = pCreateInfos[i];
+
+		auto pipePtr = std::make_unique<RayTracingPipeline>();
+		auto& pipe = *pipePtr;
+		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
+		pipe.type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
+		pipe.dev = &dev;
+		pipe.handle = pPipelines[i];
+		pipe.layout = getPtr(dev, ci.layout);
+
+		if(ci.pDynamicState) {
+			pipe.dynamicState = {
+				ci.pDynamicState->pDynamicStates,
+				ci.pDynamicState->pDynamicStates + ci.pDynamicState->dynamicStateCount
+			};
+		}
+
+		for(auto i = 0u; i < ci.stageCount; ++i) {
+			pipe.stages.emplace_back(dev, ci.pStages[i]);
+		}
+
+		for(auto i = 0u; i < ci.groupCount; ++i) {
+			auto& src = ci.pGroups[i];
+			auto& dst = pipe.groups.emplace_back();
+
+			dst.anyHit = src.anyHitShader;
+			dst.closestHit = src.closestHitShader;
+			dst.general = src.generalShader;
+			dst.intersection = src.intersectionShader;
+			dst.type = src.type;
+		}
+
+		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
+		dev.pipes.mustEmplace(pPipelines[i], std::move(pipePtr));
+	}
+
+	return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingCaptureReplayShaderGroupHandlesKHR(

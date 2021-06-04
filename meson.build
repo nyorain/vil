@@ -118,6 +118,7 @@ src = files(
 	'src/util/util.cpp',
 	'src/util/f16.cpp',
 	'src/util/ext.cpp',
+	'src/util/ownbuf.cpp',
 	'src/command/alloc.cpp',
 	'src/command/desc.cpp',
 	'src/command/record.cpp',
@@ -168,6 +169,7 @@ src = files(
 	'src/cb.hpp',
 	'src/handles.hpp',
 	'src/rp.hpp',
+	'src/rt.hpp',
 	'src/sync.hpp',
 	'src/pipe.hpp',
 	'src/shader.hpp',
@@ -222,6 +224,7 @@ src = files(
 	'src/util/spirv.hpp',
 	'src/util/camera.hpp',
 	'src/util/bytes.hpp',
+	'src/util/ownbuf.hpp',
 
 	'include/vil_api.h',
 	'src/imgui/imgui.h',
@@ -250,6 +253,7 @@ if get_option('with_tests')
 		'src/test/rpsplit.cpp',
 		'src/test/localVector.cpp',
 		'src/test/xfb.cpp',
+		'src/test/bufferAddress.cpp',
 	)
 endif
 

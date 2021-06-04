@@ -157,35 +157,6 @@ AABB3f bounds(VkFormat format, ReadBuf data, u32 stride, bool useW) {
 	return ret;
 }
 
-u32 indexSize(VkIndexType type) {
-	// NOTE: When extending here, also extend readIndex
-	switch(type) {
-		case VK_INDEX_TYPE_UINT16: return 2;
-		case VK_INDEX_TYPE_UINT32: return 4;
-		case VK_INDEX_TYPE_UINT8_EXT: return 1;
-		case VK_INDEX_TYPE_MAX_ENUM:
-		case VK_INDEX_TYPE_NONE_KHR:
-			return 0;
-	}
-
-	return 0;
-}
-
-u32 readIndex(VkIndexType type, ReadBuf& data) {
-	switch(type) {
-		case VK_INDEX_TYPE_UINT16: return read<u16>(data);
-		case VK_INDEX_TYPE_UINT32: return read<u32>(data);
-		case VK_INDEX_TYPE_UINT8_EXT: return read<u8>(data);
-		case VK_INDEX_TYPE_MAX_ENUM:
-		case VK_INDEX_TYPE_NONE_KHR:
-			dlg_error("invalid index type");
-			return 0;
-	}
-
-	dlg_error("invalid index type");
-	return 0;
-}
-
 AABB3f bounds(VkFormat vertFormat, ReadBuf vertData, u32 vertStride,
 		VkIndexType indexType, ReadBuf indexData) {
 	auto indSize = indexSize(indexType);
@@ -776,7 +747,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 	auto displayCmdSlider = [&](std::optional<VkIndexType> indices, u32 stride, u32 offset = 0u){
 		dlg_assert(dev_->commandHook->copyIndirectCmd);
-		dlg_assert(state.indirectCopy.buffer.size);
+		dlg_assert(state.indirectCopy.size);
 
 		auto count = state.indirectCommandCount;
 		if(count == 0u) {
@@ -853,9 +824,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			ImGui::TableHeadersRow();
 			ImGui::TableNextRow();
 
-			auto finished = false;
-			auto i = 0u;
-			while(!finished && i < 100) {
+			for(auto i = 0u; i < std::min(100u, params.drawCount); ++i) {
 				bool captured = true;
 				auto id = i;
 				if(params.indexType) {
@@ -904,7 +873,6 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 					imGuiText("{}", str);
 				}
 
-				++i;
 				ImGui::TableNextRow();
 			}
 
@@ -973,13 +941,14 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.vertexBuffers = {};
 		drawData_.scale = 1.f;
 		drawData_.useW = false;
+		drawData_.drawFrustum = false;
 
 		for(auto& buf : state.vertexBufCopies) {
-			drawData_.vertexBuffers.push_back({buf.buffer.buf, 0u, buf.buffer.size});
+			drawData_.vertexBuffers.push_back({buf.buf, 0u, buf.size});
 		}
 
 		if(params.indexType) {
-			drawData_.indexBuffer = {state.indexBufCopy.buffer.buf, 0u, state.indexBufCopy.buffer.size};
+			drawData_.indexBuffer = {state.indexBufCopy.buf, 0u, state.indexBufCopy.size};
 		}
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
@@ -1049,7 +1018,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	if(!pipe.xfbPatch) {
 		imGuiText("Error: couldn't inject transform feedback code to shader");
 		return;
-	} else if(!state.transformFeedback.buffer.size) {
+	} else if(!state.transformFeedback.size) {
 		if(!state.errorMessage.empty()) {
 			imGuiText("Transform feedback error: {}", state.errorMessage);
 		} else {
@@ -1065,7 +1034,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	u32 vertexCount {};
 	auto displayCmdSlider = [&](bool indexed, u32 stride, u32 offset = 0u){
 		dlg_assert(dev_->commandHook->copyIndirectCmd);
-		dlg_assert(state.indirectCopy.buffer.size);
+		dlg_assert(state.indirectCopy.size);
 
 		auto count = state.indirectCommandCount;
 		if(count == 0u) {
@@ -1126,7 +1095,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	vertexCount = topologyOutputCount(pipe.inputAssemblyState.topology, vertexCount);
 	vertexOffset = topologyOutputCount(pipe.inputAssemblyState.topology, vertexOffset);
 
-	auto capturedCount = state.transformFeedback.buffer.size / xfbPatch.stride;
+	auto capturedCount = state.transformFeedback.size / xfbPatch.stride;
 	if(vertexOffset + vertexCount > capturedCount) {
 		dlg_warn("xfb data truncated; Would need huge buffers");
 
@@ -1359,7 +1328,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, posCapture->offset,
 		};
 
-		auto& xfbBuf = state.transformFeedback.buffer;
+		auto& xfbBuf = state.transformFeedback;
 		drawData_.cb = draw.cb;
 		drawData_.params = {};
 		drawData_.params.drawCount = vertexCount;

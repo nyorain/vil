@@ -1,0 +1,52 @@
+#version 460
+
+#extension GL_EXT_buffer_reference : require
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, std430, buffer_reference_align = 2) buffer Indices {
+	uint vals[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 2) buffer Vertices {
+	uint vals[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 2) buffer Dst {
+	uint vals[];
+};
+
+layout(push_constant) uniform PCR {
+	Indices inds;
+	Vertices verts;
+	Dst dst;
+	uint indexCount;
+	uint indexSize;
+	uint vertSize;
+	uint vertStride;
+} pcr;
+
+void main() {
+	uint id = gl_GlobalInvocationID.x;
+	if(id >= pcr.indexCount) {
+		return;
+	}
+
+	uint idx = id;
+
+	if(pcr.indexSize == 2u) {
+		idx = pcr.inds.vals[id / 2];
+		if(id % 1 == 0u) {
+			idx >>= 16u;
+		} else {
+			idx &= 0xFFFFu;
+		}
+	} else if(pcr.indexSize == 4u) {
+		idx = pcr.inds.vals[id];
+	}
+
+	uint base = pcr.vertStride * idx;
+	for(uint i = 0u; i < pcr.vertSize; ++i) {
+		pcr.dst.vals[base + i] = pcr.verts.vals[base + i];
+	}
+}

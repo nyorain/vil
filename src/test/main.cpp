@@ -7,6 +7,7 @@
 extern "C" VIL_IMPORT int vil_runUnitTests(const char* pattern);
 
 int main() {
+	// TODO: allow passing a valid pattern via command line args
 	return vil_runUnitTests(nullptr);
 }
 

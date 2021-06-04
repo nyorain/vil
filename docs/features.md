@@ -83,3 +83,8 @@ supported but no/incomplete gui interaction/information:
   layer itself is using it for the vertex viewer (which would conflict with
   an application-side use of it). It's only supposed to be used by tools/layers
   anyways.
+
+- Extensions that have significant changes to command recording (such as
+  new pipeline bind points or new commands) will very likely always lead to
+  significant problems. Implementing basic support for them isn't complicated
+  though

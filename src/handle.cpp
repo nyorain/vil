@@ -163,57 +163,6 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 	}
 };
 
-struct PipelineTypeImpl : ObjectTypeHandler {
-	static const PipelineTypeImpl instance;
-
-	VkObjectType objectType() const override { return VK_OBJECT_TYPE_PIPELINE; }
-	Handle* find(Device& dev, u64 id, u64& outID) const override {
-		auto vkpipe = u64ToHandle<VkPipeline>(id);
-		auto it = dev.graphicsPipes.map.find(vkpipe);
-		if(it != dev.graphicsPipes.map.end()) {
-			outID = handleToU64(it->second->handle);
-			return &*it->second;
-		}
-
-		auto it2 = dev.computePipes.map.find(vkpipe);
-		if(it2 != dev.computePipes.map.end()) {
-			outID = handleToU64(it2->second->handle);
-			return &*it2->second;
-		}
-
-		return nullptr;
-	}
-
-	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
-		std::vector<Handle*> ret;
-		for(auto& entry : dev.graphicsPipes.map) {
-			auto& handle = *entry.second.get();
-			if(!matchesSearch(handle, search)) {
-				continue;
-			}
-
-			ret.push_back(&handle);
-		}
-
-		for(auto& entry : dev.computePipes.map) {
-			auto& handle = *entry.second.get();
-			if(!matchesSearch(handle, search)) {
-				continue;
-			}
-
-			ret.push_back(&handle);
-		}
-
-		std::sort(ret.begin(), ret.end());
-		return ret;
-	}
-
-	void visit(ResourceVisitor& visitor, Handle& handle) const override {
-		dlg_assert(handle.objectType == objectType());
-		return visitor.visit(static_cast<Pipeline&>(handle));
-	}
-};
-
 struct QueueTypeImpl : ObjectTypeHandler {
 	static const QueueTypeImpl instance;
 
@@ -253,7 +202,6 @@ struct QueueTypeImpl : ObjectTypeHandler {
 template<VkObjectType OT, typename HT, auto DevMapPtr>
 const ObjectTypeImpl<OT, HT, DevMapPtr> ObjectTypeImpl<OT, HT, DevMapPtr>::instance;
 const QueueTypeImpl QueueTypeImpl::instance;
-const PipelineTypeImpl PipelineTypeImpl::instance;
 
 static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
@@ -263,7 +211,7 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
-	&PipelineTypeImpl::instance,
+	&ObjectTypeImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &Device::pipes>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,

@@ -68,6 +68,7 @@ struct ShaderModule;
 struct Pipeline;
 struct ComputePipeline;
 struct GraphicsPipeline;
+struct RayTracingPipeline;
 struct PipelineLayout;
 struct Sampler;
 struct MemoryResource;
@@ -82,7 +83,6 @@ struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;
 struct CommandHookState;
-struct CopiedBuffer;
 struct CopiedImage;
 
 struct ViewableImageCopy;
@@ -97,6 +97,8 @@ struct MemBlockDeleter;
 struct DrawCmdBase;
 struct DispatchCommand;
 struct BeginRenderPassCmd;
+struct BuildAccelStructsCmd;
+struct BuildAccelStructsIndirectCmd;
 
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;

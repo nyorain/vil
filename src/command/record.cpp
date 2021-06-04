@@ -10,7 +10,7 @@
 namespace vil {
 
 void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
-		span<DescriptorSet* const> sets, span<const u32>) {
+		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
 	ensureSize(cb, descriptorSets, firstSet + sets.size());
 
 	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
@@ -36,15 +36,17 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 	auto followingDisturbed = false;
 	for(auto i = 0u; i < sets.size(); ++i) {
 		auto s = firstSet + i;
+		auto& dsLayout = *layout.descriptors[i];
 		if(!descriptorSets[s].ds || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
 			followingDisturbed = true;
 		}
 
 		descriptorSets[s].layout = &layout;
 		descriptorSets[s].ds = sets[i];
-		// TODO: use given offsets. We have to analyze the layout and
-		// count the offset into the offsets array.
-		descriptorSets[s].dynamicOffsets = {};
+
+		dlg_assert(dsLayout.numDynamicBuffers <= dynOffsets.size());
+		descriptorSets[s].dynamicOffsets = copySpan(cb, dynOffsets.data(), dsLayout.numDynamicBuffers);
+		dynOffsets.subspan(dsLayout.numDynamicBuffers);
 	}
 
 	if(followingDisturbed) {

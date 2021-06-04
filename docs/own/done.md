@@ -1,3 +1,4 @@
+- [x] respect ds dynamic offsets. Test with SW sample
 - [x] fix IO viewer being stuck because we can't get a new command
       {still not fixed, even when using LCS & new update logic}
 	- [x] fix dlg_assert(found), gui/cb.cpp

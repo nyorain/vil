@@ -132,11 +132,28 @@ struct Device {
 	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
 	Swapchain* lastCreatedSwapchain {};
 
+	// === VkBufferAddress lookup ===
+	// In various places we need the buffer belonging to a given buffer address.
+	// This data structure allows efficient insert, deletion and lookup.
+	// Must be synchronized via the device mutex.
+	struct BufferAddressEntry {
+		VkDeviceAddress address;
+		Buffer* buffer;
+	};
+
+	struct BufferAddressCmp {
+		using is_transparent = struct UghWtf {};
+		bool operator()(const Buffer* a, const Buffer* b) const;
+		bool operator()(VkDeviceAddress a, const Buffer* b) const;
+		bool operator()(const Buffer* a, VkDeviceAddress b) const;
+	};
+
+	std::set<Buffer*, BufferAddressCmp> bufferAddresses;
+
+	// === Maps of all vulkan handles ===
 	SyncedUniqueWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
-	SyncedUniqueUnorderedMap<VkPipeline, ComputePipeline> computePipes;
-	SyncedUniqueUnorderedMap<VkPipeline, GraphicsPipeline> graphicsPipes;
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
 	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
@@ -148,6 +165,11 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkEvent, Event> events;
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
 	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
+	// NOTE: Even though we just store unique_ptr<Pipeline> here, the real
+	// type is GraphicsPipeline, ComputePipeline or RayTracingPipeline.
+	// When erasing from the map, mustMove should be used and the pipeline
+	// casted since the destructor is not virtual.
+	SyncedUniqueUnorderedMap<VkPipeline, Pipeline> pipes;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still
@@ -217,6 +239,7 @@ DefHandleDesc(VkCommandBuffer, CommandBuffer, commandBuffers, true, true);
 DefHandleDesc(VkImage, Image, images, false, false);
 DefHandleDesc(VkDeviceMemory, DeviceMemory, deviceMemories, false, false);
 DefHandleDesc(VkQueryPool, QueryPool, queryPools, false, false);
+DefHandleDesc(VkPipeline, Pipeline, pipes, false, false);
 
 #undef DefHandleDesc
 
@@ -348,6 +371,7 @@ void nameHandle(Device& dev, VkT handle, const char* name) {
 	auto objType = VkHandleInfo<VkT>::kVkObjectType;
 	nameHandle(dev, objType, handleToU64(handle), name);
 }
+
 
 class DebugLabel {
 public:

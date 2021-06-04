@@ -495,8 +495,6 @@ void CommandBufferGui::updateState() {
 		}
 
 		if(best) {
-			dlg_assert(!best->state->writer);
-
 			// update command viewer state from hook match
 			commandViewer_.select(best->record, *best->command.back(),
 				best->descriptorSnapshot, false);
