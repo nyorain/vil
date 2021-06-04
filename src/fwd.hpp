@@ -112,6 +112,10 @@ struct Draw;
 struct SpirvData;
 struct ThreadMemScope;
 
+struct AccelTriangles;
+struct AccelAABBs;
+struct AccelInstances;
+
 struct DescriptorStateRef {
 	DescriptorSetState* state {};
 	u32 binding {};

@@ -231,17 +231,16 @@ struct CommandHookRecord {
 
 	// accelStruct-related stuff
 	struct AccelStructBuild {
-		const Command* command;
+		const Command* command {};
 
 		struct Build {
 			AccelStruct* dst;
 			VkAccelerationStructureBuildGeometryInfoKHR info;
 			span<const VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
+			std::vector<VkAccelerationStructureGeometryKHR> geoms;
 		};
 
-		span<Build> builds;
-		std::unique_ptr<std::byte[]> data;
-		OwnBuffer copiedData;
+		std::vector<Build> builds;
 	};
 
 	std::vector<AccelStructBuild> accelStructBuilds;

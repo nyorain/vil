@@ -230,6 +230,11 @@ matching:
 	      matching sync in between? or something like that
 
 vertex viewer/xfb:
+- [ ] allow to select vertices, render them as points in the viewport
+- [ ] allow to visualize primitives (connected to vertices)
+- [ ] allow to visualize non-builtin attributes somewhow
+	  maybe also allow to manually pick an attribute to use as position
+	  for the input?
 - [ ] (later) improve camera, probably better to not lock rotation or use arcball controls
 - [ ] (later) figure out when to flip y and when not.
       {Not as relevant anymore now that we render the frustum. Could still
@@ -291,12 +296,6 @@ ext support:
 - [ ] get it to run without significant (slight (like couple of percent) increase 
 	  of frame timings even with layer in release mode is ok) overhead.
 	  Just tests with the usual suspects of games
-- [ ] make vertex viewer useful
-	- [ ] allow to select vertices, render them as points in the viewport
-	- [ ] allow to visualize primitives
-	- [ ] allow to visualize non-builtin attributes somewhow
-	      maybe also allow to manually pick an attribute to use as position
-		  for the input?
 - [ ] support debug utils labels across command buffer boundaries
 	  we already have the information of popped and pushed lables per record
       NOTE: this isn't 100% correct at the moment though, e.g. when we end

@@ -1,6 +1,7 @@
 #version 460
 
 #extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
 
 layout(local_size_x = 64) in;
 
@@ -12,19 +13,73 @@ layout(buffer_reference, std430, buffer_reference_align = 2) buffer Vertices {
 	uint vals[];
 };
 
-layout(buffer_reference, std430, buffer_reference_align = 2) buffer Dst {
-	uint vals[];
+layout(buffer_reference, std430, row_major, buffer_reference_align = 2) buffer Transform {
+	// even with row_major memory layout, mat3x4 still means a matrix with 3 rows
+	mat4x3 mat;
 };
+
+layout(buffer_reference, std430, buffer_reference_align = 2) buffer Dst {
+	vec4 vals[];
+};
+
+const uint vertTypeRG32f = 1u;
+const uint vertTypeRGB32f = 2u;
+const uint vertTypeRGBA32f = 3u;
+
+const uint vertTypeRG16f = 4u;
+const uint vertTypeRGBA16f = 5u;
+
+const uint vertTypeRG16s = 6u;
+const uint vertTypeRGBA16s = 7u;
 
 layout(push_constant) uniform PCR {
 	Indices inds;
 	Vertices verts;
 	Dst dst;
+	Transform transform;
 	uint count;
 	uint indexSize;
-	uint vertSize; // byteSize / 4
+	uint vertType;
 	uint vertStride; // byteSize / 4
 } pcr;
+
+vec2 extract16f_2(uint off) {
+	return unpackHalf2x16(pcr.verts.vals[off]);
+}
+
+vec2 extract16s_2(uint off) {
+	uint v = pcr.verts.vals[off];
+	uint x = (v & 0xFFFFu);
+	uint y = (v >> 16u);
+	return vec2(x, y) / 32767.f;
+}
+
+vec4 extractVert(uint off) {
+	switch(pcr.vertType) {
+		case vertTypeRG16f: return vec4(extract16f_2(off), 0.f, 1.f);
+		case vertTypeRGBA16f: return vec4(extract16f_2(off), extract16f_2(off + 1));
+		case vertTypeRG16s: return vec4(extract16s_2(off), 0.f, 1.f);
+		case vertTypeRGBA16s: return vec4(extract16s_2(off), 0.f, 1.f);
+
+		case vertTypeRG32f:
+			return vec4(
+				uintBitsToFloat(pcr.verts.vals[off + 0]),
+				uintBitsToFloat(pcr.verts.vals[off + 1]),
+				0.f, 1.f);
+		case vertTypeRGB32f:
+			return vec4(
+				uintBitsToFloat(pcr.verts.vals[off + 0]),
+				uintBitsToFloat(pcr.verts.vals[off + 1]),
+				uintBitsToFloat(pcr.verts.vals[off + 2]), 1.f);
+		case vertTypeRGBA32f:
+			return vec4(
+				uintBitsToFloat(pcr.verts.vals[off + 0]),
+				uintBitsToFloat(pcr.verts.vals[off + 1]),
+				uintBitsToFloat(pcr.verts.vals[off + 2]),
+				uintBitsToFloat(pcr.verts.vals[off + 3]));
+		default: return vec4(-1.f);
+	}
+}
 
 void main() {
 	uint id = gl_GlobalInvocationID.x;
@@ -49,8 +104,10 @@ void main() {
 		idx = pcr.inds.vals[id];
 	}
 
-	uint base = pcr.vertStride * idx;
-	for(uint i = 0u; i < pcr.vertSize; ++i) {
-		pcr.dst.vals[base + i] = pcr.verts.vals[base + i];
+	vec4 vert = extractVert(pcr.vertStride * idx);
+	if(uvec2(pcr.transform) != uvec2(0)) {
+		vert = vec4(pcr.transform.mat * vert, 1.0);
 	}
+
+	pcr.dst.vals[idx] = vert;
 }

@@ -155,13 +155,22 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 		// they can have different size, when variable descriptor count is used
 		auto sizeA = descriptorCount(a, bindingID);
 		auto sizeB = descriptorCount(b, bindingID);
-		count += std::max(sizeA, sizeB);
 
 		// must have the same type
 		auto dsType = a.layout->bindings[bindingID].descriptorType;
 		auto dsCat = vil::category(dsType);
 		dlg_assert_or(a.layout->bindings[bindingID].descriptorType ==
 			b.layout->bindings[bindingID].descriptorType, continue);
+
+		if(dsType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT) {
+			// This might seem like a low weight but the bytewise
+			// comparison isn't the best anyways. Counting the number
+			// of equal bytes or weighing this by the block size
+			// would be bad.
+			count += 1;
+		} else {
+			count += std::max(sizeA, sizeB);
+		}
 
 		// TODO: if samplers or image/buffers views are different we could
 		// check them for semantic equality as well. But who would ever do something
@@ -206,6 +215,23 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 					++match;
 				}
 			}
+		} else if(dsCat == DescriptorCategory::accelStruct) {
+			auto bindingsA = accelStructs(a, bindingID);
+			auto bindingsB = accelStructs(b, bindingID);
+			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
+				if(bindingsA[e] == bindingsB[e]) {
+					++match;
+				}
+			}
+		} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
+			auto bytesA = inlineUniformBlock(a, bindingID);
+			auto bytesB = inlineUniformBlock(b, bindingID);
+			if(bytesA.size() == bytesB.size() &&
+					std::memcmp(bytesA.data(), bytesB.data(), bytesA.size()) == 0) {
+				++match;
+			}
+		} else {
+			dlg_error("Unsupported descriptor type: {}", uint(dsType));
 		}
 	}
 
