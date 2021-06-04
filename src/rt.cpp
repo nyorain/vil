@@ -8,6 +8,10 @@
 
 namespace vil {
 
+// TODO:
+// - handle geometry flags and extra data
+// - handle inactive primitives
+
 // util
 AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
 	auto lock = std::lock_guard(dev.mutex);
@@ -27,37 +31,38 @@ Mat4f toMat4f(const VkTransformMatrixKHR& src) {
 	return ret;
 }
 
-void writeAABBs(AccelStruct& accelStruct,
-		const VkAccelerationStructureGeometryAabbsDataKHR& src,
+void writeAABBs(AccelStruct& accelStruct, unsigned id,
+		const VkAccelerationStructureGeometryKHR& srcGeom,
 		const VkAccelerationStructureBuildRangeInfoKHR& info) {
-	(void) accelStruct;
-	(void) src;
-	(void) info;
-	/*
+	dlg_assert(srcGeom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR);
 	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
-	auto& dst = std::get<AccelAABBs>(accelStruct.data);
+
+	auto& src = srcGeom.geometry.aabbs;
+	auto& dstAABBs = std::get<AccelAABBs>(accelStruct.data);
+	dlg_assert(id < dstAABBs.geometries.size());
+	auto& dst = dstAABBs.geometries[id];
 
 	auto ptr = reinterpret_cast<const std::byte*>(src.data.hostAddress);
 	ptr += info.primitiveOffset;
 
-	dst.boxes.resize(info.primitiveCount);
+	dlg_assert(dst.boxes.size() == info.primitiveCount);
 	for(auto i = 0u; i < info.primitiveCount; ++i) {
 		auto aabb = reinterpret_cast<const VkAabbPositionsKHR*>(ptr);
 		dst.boxes[i] = *aabb;
 		ptr += src.stride;
 	}
-	*/
 }
 
-void writeTriangles(AccelStruct& accelStruct,
-		const VkAccelerationStructureGeometryTrianglesDataKHR& src,
+void writeTriangles(AccelStruct& accelStruct, unsigned id,
+		const VkAccelerationStructureGeometryKHR& srcGeom,
 		const VkAccelerationStructureBuildRangeInfoKHR& info) {
-	(void) accelStruct;
-	(void) src;
-	(void) info;
-	/*
+	dlg_assert(srcGeom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR);
 	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
-	auto& dst = std::get<AccelTriangles>(accelStruct.data);
+
+	auto& src = srcGeom.geometry.triangles;
+	auto& dstTris = std::get<AccelTriangles>(accelStruct.data);
+	dlg_assert(id < dstTris.geometries.size());
+	auto& dst = dstTris.geometries[id];
 
 	auto vertexData = reinterpret_cast<const std::byte*>(src.vertexData.hostAddress);
 	vertexData += info.firstVertex * src.vertexStride;
@@ -91,10 +96,11 @@ void writeTriangles(AccelStruct& accelStruct,
 		return vert;
 	};
 
+	dlg_assert(dst.triangles.size() == info.primitiveCount);
 	if(src.indexType == VK_INDEX_TYPE_NONE_KHR) {
 		vertexData += info.primitiveOffset;
 		for(auto i = 0u; i < info.primitiveCount; ++i) {
-			auto& tri = dst.triangles.emplace_back();
+			auto& tri = dst.triangles[i];
 			tri.a = readVertex(3 * i + 0);
 			tri.b = readVertex(3 * i + 1);
 			tri.c = readVertex(3 * i + 2);
@@ -104,14 +110,13 @@ void writeTriangles(AccelStruct& accelStruct,
 		indexData += info.primitiveOffset;
 		auto indSize = indexSize(src.indexType);
 		for(auto i = 0u; i < info.primitiveCount; ++i) {
-			auto& tri = dst.triangles.emplace_back();
+			auto& tri = dst.triangles[i];
 			auto indData = span{indexData + i * indSize, 3 * indSize};
 			tri.a = readVertex(readIndex(src.indexType, indData));
 			tri.b = readVertex(readIndex(src.indexType, indData));
 			tri.c = readVertex(readIndex(src.indexType, indData));
 		}
 	}
-	*/
 }
 
 void writeInstances(AccelStruct& accelStruct,
@@ -158,8 +163,10 @@ void writeInstances(AccelStruct& accelStruct,
 
 void initBufs(AccelStruct& accelStruct,
 		const VkAccelerationStructureBuildGeometryInfoKHR& info,
-		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos) {
+		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
+		bool initInstanceBuffer) {
 	auto& dev = *accelStruct.dev;
+	dlg_assert(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR);
 
 	accelStruct.effectiveType = accelStruct.type;
 	if(accelStruct.type == VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR) {
@@ -182,6 +189,8 @@ void initBufs(AccelStruct& accelStruct,
 			bufSize += rangeInfo.primitiveCount * sizeof(VkAabbPositionsKHR);
 		} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
 			bufSize += rangeInfo.primitiveCount * sizeof(AccelTriangles::Triangle);
+		} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+			bufSize += rangeInfo.primitiveCount * sizeof(VkAccelerationStructureInstanceKHR);
 		}
 	}
 
@@ -206,9 +215,11 @@ void initBufs(AccelStruct& accelStruct,
 	} else if(geom0.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
 		dlg_assert(accelStruct.effectiveType =
 			VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
-		accelStruct.data = AccelInstances {};
-		dlg_assert(bufSize == 0u);
+		auto& instances = accelStruct.data.emplace<AccelInstances>();
 		dlg_assert(info.geometryCount == 1u);
+		if(initInstanceBuffer) {
+			instances.buffer.ensure(dev, bufSize, usage);
+		}
 	}
 
 	auto off = 0u;
@@ -245,9 +256,9 @@ void copyBuildData(AccelStruct& accelStruct,
 
 		dlg_assert(accelStruct.geometryType == geom.geometryType);
 		if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
-			writeAABBs(accelStruct, geom.geometry.aabbs, rangeInfo);
+			writeAABBs(accelStruct, i, geom, rangeInfo);
 		} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-			writeTriangles(accelStruct, geom.geometry.triangles, rangeInfo);
+			writeTriangles(accelStruct, i, geom, rangeInfo);
 		} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
 			dlg_assert(i == 0u);
 			writeInstances(accelStruct, geom.geometry.instances, rangeInfo,

@@ -44,6 +44,7 @@ struct AccelInstances {
 	};
 
 	std::vector<Instance> instances;
+	OwnBuffer buffer; // optional, only for readback when built on device
 };
 
 // AccelerationStructure
@@ -68,7 +69,8 @@ struct AccelStruct : DeviceHandle {
 
 void initBufs(AccelStruct&,
 	const VkAccelerationStructureBuildGeometryInfoKHR& info,
-    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos);
+    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
+	bool initInstanceBuffer = false);
 
 // Assumes that all data pointers are host addresses
 // - instancesAreHandles: whether Instances are given via their VkDeviceAddress

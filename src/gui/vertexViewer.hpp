@@ -34,6 +34,7 @@ struct VertexViewer {
 
 	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+	void displayTriangles(Draw&, const AccelTriangles&, float dt);
 
 	void updateInput(float dt);
 
@@ -55,6 +56,11 @@ private:
 		float scale {1.f};
 		bool useW {false};
 		bool drawFrustum {false};
+
+		struct {
+			std::vector<VkVertexInputBindingDescription> bindings;
+			std::vector<VkVertexInputAttributeDescription> attribs;
+		} vertexInput;
 
 		VkCommandBuffer cb {};
 	};
@@ -100,11 +106,6 @@ private:
 
 	std::vector<Pipe> pipes_ {};
 	DrawData drawData_;
-
-	struct {
-		std::vector<VkVertexInputBindingDescription> bindings;
-		std::vector<VkVertexInputAttributeDescription> attribs;
-	} vertexInput_;
 
 	u32 selectedID_ {};
 };

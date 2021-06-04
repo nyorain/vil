@@ -492,15 +492,16 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	// TODO: cache this! But should likely not be implemented here in first place.
 	// TODO: implement a serious heuristic. Inspect the spv code,
 	//   and try to find which input influences the Position output
-	if(vertexInput_.attribs.empty()) {
+	auto& vinput = data.vertexInput;
+	if(vinput.attribs.empty()) {
 		dlg_info("Can't display vertices, no vertex attribs");
 		return;
 	}
 
-	dlg_assert(!vertexInput_.bindings.empty());
+	dlg_assert(!vinput.bindings.empty());
 
-	auto& attrib = vertexInput_.attribs[0];
-	auto& binding = vertexInput_.bindings[attrib.binding];
+	auto& attrib = vinput.attribs[0];
+	auto& binding = vinput.bindings[attrib.binding];
 
 	dlg_assert_or(binding.binding < data.vertexBuffers.size(), return);
 	auto& vbuf = data.vertexBuffers[binding.binding];
@@ -914,21 +915,23 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 		auto attribCount = pipe.vertexInputState.vertexAttributeDescriptionCount;
 		auto bindingCount = pipe.vertexInputState.vertexBindingDescriptionCount;
-		vertexInput_.attribs.resize(attribCount);
-		vertexInput_.bindings.resize(bindingCount);
+
+		auto& vinput = drawData_.vertexInput;
+		vinput.attribs.resize(attribCount);
+		vinput.bindings.resize(bindingCount);
 
 		std::copy(pipe.vertexInputState.pVertexAttributeDescriptions,
 			pipe.vertexInputState.pVertexAttributeDescriptions + attribCount,
-			vertexInput_.attribs.begin());
+			vinput.attribs.begin());
 		std::copy(pipe.vertexInputState.pVertexBindingDescriptions,
 			pipe.vertexInputState.pVertexBindingDescriptions + bindingCount,
-			vertexInput_.bindings.begin());
+			vinput.bindings.begin());
 
 		if(pipe.dynamicState.count(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT)) {
 			for(auto i = 0u; i < bindingCount; ++i) {
 				auto& buf = cmd.state.vertices[i];
 				if(buf.stride) {
-					vertexInput_.bindings[i].stride = buf.stride;
+					vinput.bindings[i].stride = buf.stride;
 				}
 			}
 		}
@@ -1137,6 +1140,9 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 			auto xfbData = state.transformFeedback.data();
 			xfbData = xfbData.subspan(vertexOffset * xfbPatch.stride);
 
+			// Need to convert the captures variable type info a vulkan format
+			// so that we can read and display it.
+			// NOTE: should be a separate function.
 			auto formatForType = [](XfbCapture& capture) {
 				auto compIDForWidth = [](u32 width) -> u32 {
 					switch(width) {
@@ -1317,14 +1323,15 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		auto pos = ImGui::GetCursorScreenPos();
 
 		// we statically know the single binding and attribute
-		vertexInput_.bindings.resize(1);
-		vertexInput_.attribs.resize(1);
+		auto& vinput = drawData_.vertexInput;
+		vinput.bindings.resize(1);
+		vinput.attribs.resize(1);
 
-		vertexInput_.bindings[0] = {
+		vinput.bindings[0] = {
 			0u, xfbPatch.stride, VK_VERTEX_INPUT_RATE_VERTEX,
 		};
 
-		vertexInput_.attribs[0] = {
+		vinput.attribs[0] = {
 			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, posCapture->offset,
 		};
 
@@ -1360,6 +1367,8 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	ImGui::EndChild();
 }
 
+void displayTriangles(Draw&, const AccelTriangles&, float dt);
+
 void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 	auto mxy = std::max(bounds.extent.y, bounds.extent.x);
 	auto l = mxy / std::tan(0.5f * fov);
@@ -1375,6 +1384,55 @@ void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 	speed_ = sum;
 	near_ = -0.001 * sum;
 	far_ = -100 * sum;
+}
+
+void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, float dt) {
+	if(ImGui::BeginChild("vertexViewer")) {
+		auto avail = ImGui::GetContentRegionAvail();
+		auto pos = ImGui::GetCursorScreenPos();
+
+		// we statically know the single binding and attribute
+		auto& vinput = drawData_.vertexInput;
+		vinput.bindings.resize(1);
+		vinput.attribs.resize(1);
+
+		vinput.bindings[0] = {
+			0u, sizeof(Vec4f), VK_VERTEX_INPUT_RATE_VERTEX,
+		};
+
+		vinput.attribs[0] = {
+			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
+		};
+
+		drawData_.cb = draw.cb;
+		drawData_.params = {};
+		drawData_.params.drawCount = tris.geo
+		drawData_.params.offset = 0u;
+		drawData_.indexBuffer = {};
+		drawData_.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
+		drawData_.canvasOffset = {pos.x, pos.y};
+		drawData_.canvasSize = {avail.x, avail.y};
+		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		drawData_.useW = useW;
+		drawData_.scale = 1.f;
+		drawData_.drawFrustum = dev_->nonSolidFill;
+
+		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
+			self->imGuiDraw(self->drawData_);
+		};
+
+		ImGui::GetWindowDrawList()->AddCallback(cb, this);
+		ImGui::InvisibleButton("Canvas", avail);
+		updateInput(dt);
+
+		// we read from the buffer that is potentially written again
+		// by the hook so we need barriers.
+		dlg_assert(!draw.usedHookState);
+		draw.usedHookState = IntrusivePtr<CommandHookState>(const_cast<CommandHookState*>(&state));
+	}
+
+	ImGui::EndChild();
 }
 
 } // namespace vil
