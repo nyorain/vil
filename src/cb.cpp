@@ -321,6 +321,12 @@ ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
 	return dst;
 }
 
+RayTracingState copy(CommandBuffer& cb, const RayTracingState& src) {
+	RayTracingState dst = src;
+	copy(cb, src, dst); // descriptors
+	return dst;
+}
+
 // recording
 enum class SectionType {
 	none,
@@ -975,6 +981,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
 		cb.graphicsState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
+	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
+		cb.rayTracingState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else {
 		dlg_error("Unknown pipeline bind point");
@@ -1846,23 +1855,26 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 	auto& cmd = addCmd<BindPipelineCmd>(cb);
 	cmd.bindPoint = pipelineBindPoint;
 
-	auto handle = pipeline;
+	auto& pipe = get(*cb.dev, pipeline);
+	dlg_assert(pipe.type == pipelineBindPoint);
 
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState().pipe = &cb.dev->computePipes.get(pipeline);
+		cb.computeState().pipe = static_cast<ComputePipeline*>(&pipe);
 		cmd.pipe = cb.computeState().pipe;
 		useHandle(cb, cmd, *cmd.pipe);
-		handle = cmd.pipe->handle;
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState().pipe = &cb.dev->graphicsPipes.get(pipeline);
+		cb.graphicsState().pipe = static_cast<GraphicsPipeline*>(&pipe);
 		cmd.pipe = cb.graphicsState().pipe;
 		useHandle(cb, cmd, *cmd.pipe);
-		handle = cmd.pipe->handle;
+	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
+		cb.rayTracingState().pipe = static_cast<RayTracingPipeline*>(&pipe);
+		cmd.pipe = cb.rayTracingState().pipe;
+		useHandle(cb, cmd, *cmd.pipe);
 	} else {
 		dlg_error("unknown pipeline bind point");
 	}
 
-	cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, handle);
+	cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, pipe.handle);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
@@ -2591,7 +2603,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 
 	cmd.srcs = allocSpan0<AccelStruct*>(cb, infoCount);
 	cmd.dsts = allocSpan0<AccelStruct*>(cb, infoCount);
-	cmd.buildRangeInfos = allocSpan<VkAccelerationStructureBuildRangeInfoKHR>(cb, infoCount);
+	cmd.buildRangeInfos = allocSpan<span<VkAccelerationStructureBuildRangeInfoKHR>>(cb, infoCount);
 
 	cmd.buildInfos = copySpan(cb, pInfos, infoCount);
 	for(auto i = 0u; i < infoCount; ++i) {
@@ -2608,10 +2620,12 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 		buildInfo.dstAccelerationStructure = cmd.dsts[i]->handle;
 		useHandle(cb, cmd, *cmd.dsts[i]);
 
-		cmd.buildRangeInfos[i] = *ppBuildRangeInfos[i];
+		cmd.buildRangeInfos[i] = copySpan(cb, ppBuildRangeInfos[i], buildInfo.geometryCount);
 
 		// TODO: useHandle for buffers of associated device addresses
 	}
+
+	cb.record()->buildsAccelStructs = true;
 
 	cb.dev->dispatch.CmdBuildAccelerationStructuresKHR(cb.handle(),
 		infoCount, cmd.buildInfos.data(), ppBuildRangeInfos);
@@ -2655,6 +2669,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 
 		// TODO: useHandle for buffers of associated device addresses?
 	}
+
+	cb.record()->buildsAccelStructs = true;
 
 	cb.dev->dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb.handle(),
 		infoCount, cmd.buildInfos.data(), pIndirectDeviceAddresses,
@@ -2758,7 +2774,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(
 		uint32_t                                    height,
 		uint32_t                                    depth) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<TraceRaysCmd>(cb);
+	auto& cmd = addCmd<TraceRaysCmd>(cb, cb, cb.rayTracingState());
 	cmd.raygenBindingTable = *pRaygenShaderBindingTable;
 	cmd.missBindingTable = *pMissShaderBindingTable;
 	cmd.hitBindingTable = *pHitShaderBindingTable;
@@ -2785,7 +2801,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysIndirectKHR(
 		const VkStridedDeviceAddressRegionKHR*      pCallableShaderBindingTable,
 		VkDeviceAddress                             indirectDeviceAddress) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<TraceRaysIndirectCmd>(cb);
+	auto& cmd = addCmd<TraceRaysIndirectCmd>(cb, cb, cb.rayTracingState());
 	cmd.raygenBindingTable = *pRaygenShaderBindingTable;
 	cmd.missBindingTable = *pMissShaderBindingTable;
 	cmd.hitBindingTable = *pHitShaderBindingTable;

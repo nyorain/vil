@@ -1084,4 +1084,33 @@ void writeFile(const char* path, span<const std::byte> buffer, bool binary) {
 	std::fclose(f);
 }
 
+u32 indexSize(VkIndexType type) {
+	// NOTE: When extending here, also extend readIndex
+	switch(type) {
+		case VK_INDEX_TYPE_UINT16: return 2;
+		case VK_INDEX_TYPE_UINT32: return 4;
+		case VK_INDEX_TYPE_UINT8_EXT: return 1;
+		case VK_INDEX_TYPE_MAX_ENUM:
+		case VK_INDEX_TYPE_NONE_KHR:
+			return 0;
+	}
+
+	return 0;
+}
+
+u32 readIndex(VkIndexType type, ReadBuf& data) {
+	switch(type) {
+		case VK_INDEX_TYPE_UINT16: return read<u16>(data);
+		case VK_INDEX_TYPE_UINT32: return read<u32>(data);
+		case VK_INDEX_TYPE_UINT8_EXT: return read<u8>(data);
+		case VK_INDEX_TYPE_MAX_ENUM:
+		case VK_INDEX_TYPE_NONE_KHR:
+			dlg_error("invalid index type");
+			return 0;
+	}
+
+	dlg_error("invalid index type");
+	return 0;
+}
+
 } // namespace vil

@@ -12,7 +12,8 @@ struct Buffer : MemoryResource {
 	VkBufferCreateInfo ci;
 	bool concurrentHooked {}; // whether we set it to concurrent mode
 
-	std::vector<BufferView*> views; // TODO: unordered_set?
+	std::vector<BufferView*> views;
+	VkDeviceAddress deviceAddress {}; // null if not available
 
 	std::atomic<u32> refCount {};
 

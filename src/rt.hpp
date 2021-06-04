@@ -4,29 +4,45 @@
 #include <handle.hpp>
 #include <pipe.hpp>
 #include <util/mat.hpp>
+#include <util/ownbuf.hpp>
+#include <variant>
 
 namespace vil {
 
 struct AccelTriangles {
-	VkFormat vertexFormat;
-	std::vector<std::byte> vertexData;
-	VkIndexType indexType;
-	std::vector<std::byte> indexData;
-	Mat4f transform;
+	struct Triangle {
+		Vec4f a;
+		Vec4f b;
+		Vec4f c;
+	};
+
+	OwnBuffer buffer;
+	span<Triangle> triangles; // references the hostVisible buffer
 };
 
 struct AccelAABBs {
-	std::vector<VkAabbPositionsKHR> boxes;
+	OwnBuffer buffer;
+	span<VkAabbPositionsKHR> boxes; // references the hostVisible buffer
 };
 
 struct AccelInstances {
-	std::vector<AccelStruct*> instances;
+	struct Instance {
+		AccelStruct* accelStruct;
+		Mat4f transform;
+		u32 customIndex;
+		u32 bindingTableOffset;
+		VkGeometryInstanceFlagsKHR flags;
+		u8 mask;
+	};
+
+	std::vector<Instance> instances;
 };
 
 // AccelerationStructure
 struct AccelStruct : DeviceHandle {
 	VkAccelerationStructureKHR handle;
-	VkAccelerationStructureTypeKHR type;
+	VkAccelerationStructureTypeKHR type; // can be generic
+	VkAccelerationStructureTypeKHR effectiveType; // only relevant when type == generic
 
 	// creation info
 	Buffer* buf {};
@@ -36,7 +52,7 @@ struct AccelStruct : DeviceHandle {
 	std::atomic<u32> refCount {};
 
 	// geometry info
-	VkGeometryTypeKHR geometryType {};
+	VkGeometryTypeKHR geometryType {VK_GEOMETRY_TYPE_MAX_ENUM_KHR};
 	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
 };
 
@@ -53,6 +69,11 @@ struct RayTracingPipeline : Pipeline {
 	std::vector<Group> groups;
 	std::unordered_set<VkDynamicState> dynamicState;
 };
+
+// Assumes that all data pointers are host addresses
+void copyBuildData(AccelStruct&,
+	const VkAccelerationStructureBuildGeometryInfoKHR& info,
+    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos);
 
 // VK_KHR_acceleration_structure
 VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(

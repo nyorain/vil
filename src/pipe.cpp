@@ -4,6 +4,7 @@
 #include <shader.hpp>
 #include <ds.hpp>
 #include <data.hpp>
+#include <rt.hpp>
 #include <threadContext.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
@@ -59,14 +60,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 	};
 
 	ThreadMemScope memScope;
-	auto ncis = memScope.alloc<VkGraphicsPipelineCreateInfo>(createInfoCount);
+	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
 	auto pres = memScope.alloc<PreData>(createInfoCount);
 	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
 
 	for(auto i = 0u; i < createInfoCount; ++i) {
 		auto& nci = ncis[i];
-		nci = pCreateInfos[i];
 		nci.layout = get(dev, nci.layout).handle;
+
+		if(nci.basePipelineHandle) {
+			auto& basePipe = get(dev, nci.basePipelineHandle);
+			nci.basePipelineHandle = basePipe.handle;
+		}
 
 		auto& pre = pres[i];
 
@@ -157,7 +162,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		dlg_assert(pPipelines[i]);
 		auto& pci = ncis[i];
 
-		auto& pipe = dev.graphicsPipes.add(pPipelines[i]);
+		auto pipePtr = std::make_unique<GraphicsPipeline>();
+		auto& pipe = *pipePtr;
 		pipe.dev = &dev;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -207,7 +213,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		if(pci.pDynamicState) {
 			pipe.dynamicState = {
 				pci.pDynamicState->pDynamicStates,
-				pci.pDynamicState->pDynamicStates + pci.pDynamicState->dynamicStateCount};
+				pci.pDynamicState->pDynamicStates + pci.pDynamicState->dynamicStateCount
+			};
 		}
 
 		if(!pci.pRasterizationState->rasterizerDiscardEnable) {
@@ -250,6 +257,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			pipe.colorBlendState = *pci.pColorBlendState;
 			pipe.colorBlendState.pAttachments = pipe.blendAttachments.data();
 		}
+
+		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
+		dev.pipes.mustEmplace(pPipelines[i], std::move(pipePtr));
 	}
 
 	return VK_SUCCESS;
@@ -266,11 +276,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 	auto& dev = getDevice(device);
 
 	ThreadMemScope memScope;
-	auto ncis = memScope.alloc<VkComputePipelineCreateInfo>(createInfoCount);
-	for(auto i = 0u; i < createInfoCount; ++i) {
-		auto& nci = ncis[i];
-		nci = pCreateInfos[i];
+	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
+	for(auto& nci : ncis) {
 		nci.layout = get(device, nci.layout).handle;
+		if(nci.basePipelineHandle) {
+			auto& basePipe = get(dev, nci.basePipelineHandle);
+			nci.basePipelineHandle = basePipe.handle;
+		}
 	}
 
 	{
@@ -285,14 +297,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 	for(auto i = 0u; i < createInfoCount; ++i) {
 		dlg_assert(pPipelines[i]);
 
-		auto& pipe = dev.computePipes.add(pPipelines[i]);
+		auto pipePtr = std::make_unique<ComputePipeline>();
+		auto& pipe = *pipePtr;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_COMPUTE;
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
-		pipe.layout = dev.pipeLayouts.getPtr(pCreateInfos[i].layout);
+		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
 		pipe.stage = PipelineShaderStage(dev, pCreateInfos[i].stage);
 		dlg_assert(pipe.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT);
+
+		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
+		dev.pipes.mustEmplace(pPipelines[i], std::move(pipePtr));
 	}
 
 	return VK_SUCCESS;
@@ -308,8 +324,23 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipeline(
 
 	auto& dev = getDevice(device);
 
-	auto count = dev.graphicsPipes.erase(pipeline) + dev.computePipes.erase(pipeline);
-	dlg_assert(count == 1);
+	auto pipe = dev.pipes.mustMove(pipeline);
+	pipeline = pipe->handle;
+
+	switch(pipe->type) {
+		case VK_PIPELINE_BIND_POINT_GRAPHICS:
+			delete static_cast<GraphicsPipeline*>(pipe.release());
+			break;
+		case VK_PIPELINE_BIND_POINT_COMPUTE:
+			delete static_cast<ComputePipeline*>(pipe.release());
+			break;
+		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
+			delete static_cast<RayTracingPipeline*>(pipe.release());
+			break;
+		default:
+			dlg_error("unreachable");
+			break;
+	}
 
 	dev.dispatch.DestroyPipeline(dev.handle, pipeline, pAllocator);
 }

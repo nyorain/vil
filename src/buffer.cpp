@@ -100,6 +100,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 	{
 		std::lock_guard lock(dev.mutex);
 		ptr = dev.buffers.mustMoveLocked(buffer);
+
+		if(ptr->ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+			auto num = dev.bufferAddresses.erase(ptr.get());
+			dlg_assert(num == 1u);
+		}
+
 		buffer = ptr->handle;
 		ptr->handle = {};
 	}
@@ -137,14 +143,29 @@ void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
 	VkMemoryRequirements memReqs;
 	dev.dispatch.GetBufferMemoryRequirements(dev.handle, buf.handle, &memReqs);
 
-	{
-		// access to the given memory must be internally synced
-		std::lock_guard lock(dev.mutex);
-		buf.memory = &mem;
-		buf.allocationOffset = offset;
-		buf.allocationSize = memReqs.size;
+	// access to the given memory must be internally synced
+	std::lock_guard lock(dev.mutex);
+	buf.memory = &mem;
+	buf.allocationOffset = offset;
+	buf.allocationSize = memReqs.size;
 
-		mem.allocations.push_back(&buf);
+	mem.allocations.push_back(&buf);
+}
+
+void checkDeviceAddress(Buffer& buf) {
+	if(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+		auto& dev = *buf.dev;
+		dlg_assert(dev.dispatch.GetBufferDeviceAddress);
+		dlg_assert(!buf.deviceAddress);
+
+		VkBufferDeviceAddressInfo info {};
+		info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+		info.buffer = buf.handle;
+		auto address = dev.dispatch.GetBufferDeviceAddress(dev.handle, &info);
+
+		std::lock_guard lock(dev.mutex);
+		buf.deviceAddress = address;
+		dev.bufferAddresses.insert(&buf);
 	}
 }
 
@@ -154,11 +175,17 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
 		VkDeviceMemory                              memory,
 		VkDeviceSize                                memoryOffset) {
 	auto& buf = get(device, buffer);
-	// auto& mem = get(*buf.dev, memory);
-	auto& mem = buf.dev->deviceMemories.get(memory);
+	auto& mem = get(*buf.dev, memory);
 	bindBufferMemory(buf, mem, memoryOffset);
-	return buf.dev->dispatch.BindBufferMemory(buf.dev->handle,
+
+	auto res = buf.dev->dispatch.BindBufferMemory(buf.dev->handle,
 		buf.handle, memory, memoryOffset);
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	checkDeviceAddress(buf);
+	return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
@@ -172,8 +199,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
 		auto& buf = get(dev, bind.buffer);
-		// auto& mem = get(dev, bind.memory);
-		auto& mem = buf.dev->deviceMemories.get(bind.memory);
+		auto& mem = get(dev, bind.memory);
 		bindBufferMemory(buf, mem, bind.memoryOffset);
 
 		fwd[i] = bind;
@@ -181,7 +207,18 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 		fwd[i].memory = mem.handle;
 	}
 
-	return dev.dispatch.BindBufferMemory2(dev.handle, u32(fwd.size()), fwd.data());
+	auto res = dev.dispatch.BindBufferMemory2(dev.handle, u32(fwd.size()), fwd.data());
+	if(res != VK_SUCCESS) {
+		return res;
+	}
+
+	for(auto i = 0u; i < bindInfoCount; ++i) {
+		auto& bind = pBindInfos[i];
+		auto& buf = get(dev, bind.buffer);
+		checkDeviceAddress(buf);
+	}
+
+	return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(

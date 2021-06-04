@@ -481,7 +481,7 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 			// TODO(perf): we might not need sync in all cases. Pretty much only
 			// for images and xfb buffers I guess.
 			if(hookPtr && hookPtr->record->state.get() == draw.usedHookState.get()) {
-				dlg_assert(draw.usedHookState->writer == &subm);
+				dlg_assert(hookPtr->record->writer == &subm);
 				subs.push_back(&subm);
 			}
 		}

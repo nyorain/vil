@@ -2,34 +2,12 @@
 
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
+#include <util/ownbuf.hpp>
 #include <vk/vulkan.h>
 #include <imgui/imgui.h>
 #include <vector>
 
 namespace vil {
-
-struct OwnBuffer {
-	Device* dev {};
-	VkBuffer buf {};
-	VkDeviceMemory mem {};
-	VkDeviceSize size {};
-
-	// Will ensure the buffer has at least the given size.
-	// If not, will recreate it with the given size and usage.
-	// Always uses host visible memory.
-	void ensure(Device&, VkDeviceSize, VkBufferUsageFlags);
-
-	OwnBuffer() = default;
-	~OwnBuffer();
-
-	OwnBuffer(OwnBuffer&& rhs) noexcept { swap(*this, rhs); }
-	OwnBuffer& operator=(OwnBuffer rhs) noexcept {
-		swap(*this, rhs);
-		return *this;
-	}
-
-	friend void swap(OwnBuffer& a, OwnBuffer& b) noexcept;
-};
 
 struct BufferSpan {
 	VkBuffer buffer {};

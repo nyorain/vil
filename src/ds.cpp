@@ -28,23 +28,6 @@ size_t descriptorSize(VkDescriptorType dsType) {
 	return 0u;
 }
 
-size_t totalNumBindings(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
-	if(layout.bindings.empty()) {
-		return 0;
-	}
-
-	auto& last = layout.bindings.back();
-	size_t ret = last.offset;
-
-	if(last.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		ret += variableDescriptorCount;
-	} else {
-		ret += last.descriptorCount;
-	}
-
-	return ret;
-}
-
 size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
 	if(layout.bindings.empty()) {
 		return 0;
@@ -409,7 +392,7 @@ span<AccelStructDescriptor> accelStructs(DescriptorSetState& state, unsigned bin
 	dlg_assert(binding < state.layout->bindings.size());
 
 	auto& layout = state.layout->bindings[binding];
-	dlg_assert(category(layout.descriptorType) == DescriptorCategory::bufferView);
+	dlg_assert(category(layout.descriptorType) == DescriptorCategory::accelStruct);
 
 	auto ptr = reinterpret_cast<std::byte*>(&state);
 	ptr += sizeof(state);
@@ -545,6 +528,16 @@ bool needsImageLayout(VkDescriptorType type) {
 	}
 }
 
+bool needsDynamicOffset(VkDescriptorType type) {
+	switch(type) {
+		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+			return true;
+		default:
+			return false;
+	}
+}
+
 // dsLayout
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		VkDevice                                    device,
@@ -629,8 +622,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 
 		off += unsigned(bind.descriptorCount * descriptorSize(bind.descriptorType));
 
-		dlg_assert(b + 1 == dsLayout.bindings.size() ||
-			!(bind.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT));
+		auto varCount = !!(bind.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT);
+		dlg_assert(b + 1 == dsLayout.bindings.size() || !varCount);
+
+		if(needsDynamicOffset(bind.descriptorType)) {
+			// VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03015
+			dlg_assert(!varCount);
+			bind.dynOffset = dsLayout.numDynamicBuffers;
+			dsLayout.numDynamicBuffers += bind.descriptorCount;
+		}
 	}
 
 	*pSetLayout = castDispatch<VkDescriptorSetLayout>(dsLayout);

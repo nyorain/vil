@@ -5,6 +5,7 @@
 #include <command/record.hpp>
 #include <util/intrusive.hpp>
 #include <util/bytes.hpp>
+#include <util/ownbuf.hpp>
 #include <gui/render.hpp>
 #include <vk/vulkan.h>
 #include <vector>
@@ -40,25 +41,7 @@ struct CopiedImage {
 	~CopiedImage();
 };
 
-struct CopiedBuffer {
-	OwnBuffer buffer {};
-	const std::byte* map {};
-
-	// std::vector<std::byte> copy;
-	// u64 copyOffset;
-
-	CopiedBuffer() = default;
-	void init(Device& dev, VkDeviceSize size, VkBufferUsageFlags addFlags);
-	CopiedBuffer(CopiedBuffer&&) noexcept = default;
-	CopiedBuffer& operator=(CopiedBuffer&&) noexcept = default;
-	~CopiedBuffer() = default;
-
-	// void cpuCopy(u64 offset = 0, u64 size = VK_WHOLE_SIZE);
-	void invalidateMap();
-	ReadBuf data() const { return {map, buffer.size}; }
-};
-
-// NOTE: in most cases (except for xfb) we don't actually need CopiedBuffer
+// NOTE: in most cases (except for xfb) we don't actually need OwnBuffer
 // itself and just the cpu data. The mapped data *must not* be used on cpu
 // since the state might have an active gpu-side writer submission.
 struct CommandHookState {
@@ -69,31 +52,27 @@ struct CommandHookState {
 	u32 refCount {};
 
 	// Copy of the selected viewed descriptor set
-	std::variant<std::monostate, CopiedImage, CopiedBuffer> dsCopy;
+	std::variant<std::monostate, CopiedImage, OwnBuffer> dsCopy;
 	u64 neededTime {u64(-1)}; // time needed for the given command
 
 	// For indirect commands: holds a copy of the indirect command(s)
 	u32 indirectCommandCount {};
-	CopiedBuffer indirectCopy {};
+	OwnBuffer indirectCopy {};
 
 	// Only for draw commands
-	std::vector<CopiedBuffer> vertexBufCopies {}; // draw cmd: Copy of all vertex buffers
-	CopiedBuffer indexBufCopy {}; // draw cmd: Copy of index buffer
-	CopiedBuffer transformFeedback {}; // draw cmd: position output of vertex stage
+	std::vector<OwnBuffer> vertexBufCopies {}; // draw cmd: Copy of all vertex buffers
+	OwnBuffer indexBufCopy {}; // draw cmd: Copy of index buffer
+	OwnBuffer transformFeedback {}; // draw cmd: position output of vertex stage
 
 	CopiedImage attachmentCopy {}; // Copy of selected attachment
 
 	// Only for transfer commands
-	// CopiedBuffer transferBufCopy {}; // TODO(io-rework): support transfer buffers in IO viewer
+	// OwnBuffer transferBufCopy {}; // TODO(io-rework): support transfer buffers in IO viewer
 	CopiedImage transferImgCopy {};
 
 	// When a requested resource cannot be retrieved, this holds the reason.
 	// TODO: kinda messy, should likely be provided per-resource
 	std::string errorMessage;
-
-	// When there is currently a (hook) submission writing this state,
-	// it is stored here. Synchronized via device mutex.
-	Submission* writer {};
 
 	CommandHookState();
 	~CommandHookState();
@@ -156,6 +135,9 @@ public:
 	std::vector<CompletedHook> completed;
 
 public:
+	CommandHook();
+	~CommandHook();
+
 	// Called from inside QueueSubmit with the command buffer the hook has
 	// been installed for. Can therefore expect the command buffer to be
 	// in executable state.
@@ -183,7 +165,8 @@ public:
 
 	const auto& dsState() const { return dsState_; }
 
-	~CommandHook();
+private:
+	void initAccelStructCopy();
 
 private:
 	friend struct CommandHookRecord;
@@ -194,6 +177,10 @@ private:
 	IntrusivePtr<CommandRecord> record_;
 	CommandDescriptorSnapshot dsState_;
 	std::vector<const Command*> hierachy_;
+
+	// pipelines needed for the acceleration structure build copy
+	VkPipelineLayout accelStructPipeLayout_ {};
+	VkPipeline accelStructVertCopy_ {};
 };
 
 // Is kept alive only as long as the associated Record is referencing this
@@ -204,11 +191,19 @@ private:
 // completed, we can assume the Record this hook was created for remains
 // valid throughout its lifetime.
 struct CommandHookRecord {
-	CommandHook* hook {}; // Associated hook. Might be null if this was invalidated
+	// Associated hook. Might be null if this was invalidated
+	// TODO: we don't really need this, can just use dev->commandHook.
+	CommandHook* hook {};
 	CommandRecord* record {}; // the record we hook. Always valid.
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
-	std::vector<const Command*> hcommand; // hierachy of the hooked command
+	// Hierachy of the hooked command. May be empty when there was no
+	// selected command and this HookRecord just exists for accelStructs
+	std::vector<const Command*> hcommand;
 	float match {}; // how much the original command matched the searched one
+
+	// When there is currently a (hook) submission using this record,
+	// it is stored here. Synchronized via device mutex.
+	Submission* writer {};
 
 	// When copying state from a descriptor set, this will hold the pointer
 	// to the associated descriptor set state. Used for updateAfterBind
@@ -231,6 +226,23 @@ struct CommandHookRecord {
 	VkRenderPass rp2 {};
 
 	IntrusivePtr<CommandHookState> state {};
+
+	// accelStruct-related stuff
+	struct AccelStructBuild {
+		const Command* command;
+
+		struct Build {
+			AccelStruct* dst;
+			VkAccelerationStructureBuildGeometryInfoKHR info;
+			span<const VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
+		};
+
+		span<Build> builds;
+		std::unique_ptr<std::byte[]> data;
+		OwnBuffer copiedData;
+	};
+
+	std::vector<AccelStructBuild> accelStructBuilds;
 
 	// Linked list of all records belonging to this->hook
 	CommandHookRecord* next {};
@@ -262,6 +274,9 @@ struct CommandHookRecord {
 	void beforeDstOutsideRp(Command&, const RecordInfo&);
 	void afterDstOutsideRp(Command&, const RecordInfo&);
 
+	void hookBefore(const BuildAccelStructsCmd&);
+	void hookBefore(const BuildAccelStructsIndirectCmd&);
+
 	// Called when associated record is destroyed or hook replaced.
 	// Called while device mutex is locked.
 	// Might delete itself (or decrement reference count or something).
@@ -277,14 +292,14 @@ struct CommandHookRecord {
 struct CommandHookSubmission {
 	CommandHookRecord* record {};
 	CommandDescriptorSnapshot descriptorSnapshot {};
-	float match {}; // original match of the searched-for command
 
-	CommandHookSubmission(CommandHookRecord&, Submission&, float match);
+	CommandHookSubmission(CommandHookRecord&, Submission&);
 	~CommandHookSubmission();
 
 	// Called when the associated submission (passed again as parameter)
 	// successfully completed execution on the device.
 	void finish(Submission&);
+	void finishAccelStructBuilds();
 	void transmitTiming();
 	void transmitIndirect();
 };

@@ -34,6 +34,7 @@ bool needsSampler(VkDescriptorType);
 bool needsBoundSampler(const DescriptorSetLayout&, unsigned binding);
 bool needsImageView(VkDescriptorType);
 bool needsImageLayout(VkDescriptorType);
+bool needsDynamicOffset(VkDescriptorType);
 
 struct DescriptorPool : DeviceHandle {
 	VkDescriptorPool handle {};
@@ -51,8 +52,8 @@ struct DescriptorSetLayout : DeviceHandle {
 
 	// VkDescriptorSetLayoutBinding, with extra data
 	struct Binding {
-		u32 binding;
-		u32 offset; // total offset in bindings array of DescriptorSetState
+		u32 binding; // binding id
+		u32 offset; // total offset in bytes into binding data of DescriptorSetState
 		VkDescriptorType descriptorType;
 		// You almost never want to use descriptorCount when dealing with a
 		// descriptorSet, just use binding.size() to account for variable count bindings.
@@ -60,17 +61,24 @@ struct DescriptorSetLayout : DeviceHandle {
 		VkShaderStageFlags stageFlags;
 		std::unique_ptr<IntrusivePtr<Sampler>[]> immutableSamplers;
 		VkDescriptorBindingFlags flags; // for descriptor indexing
+		u32 dynOffset {u32(-1)}; // offset into dynamic offset array
 	};
 
-	// Static after creation. Ordered by binding. Can be empty per vulkan spec.
+	// Immutable after creation. Ordered by binding. Can be empty per vulkan spec.
 	std::vector<Binding> bindings;
 	std::atomic<u32> refCount {0}; // intrusive ref count
+
+	// The total number of dynamic buffer descriptors.
+	// Needed for quick binding in CmdBindDescriptorSets.
+	// We can know this statically since dynamic buffers can't have the
+	// variable_descriptor_count flag
+	// (VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03015)
+	u32 numDynamicBuffers {};
 
 	// handle will be kept alive until this object is actually destroyed.
 	~DescriptorSetLayout();
 };
 
-size_t totalNumBindings(const DescriptorSetLayout&, u32 variableDescriptorCount);
 bool compatible(const DescriptorSetLayout&, const DescriptorSetLayout& b);
 
 // Information about a single binding in a DescriptorSet.

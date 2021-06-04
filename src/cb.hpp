@@ -93,6 +93,7 @@ private:
 	// Only needed while recording.
 	ComputeState computeState_ {};
 	GraphicsState graphicsState_ {};
+	RayTracingState rayTracingState_ {};
 
     struct Section {
         SectionCommand* cmd;
@@ -117,6 +118,7 @@ public: // Only public for recording, should not be accessed outside api
 
 	ComputeState& computeState() { return computeState_; }
 	GraphicsState& graphicsState() { return graphicsState_; }
+	RayTracingState& rayTracingState() { return rayTracingState_; }
 	PushConstantData& pushConstants() { return pushConstants_; }
 
 	// Expects device mutex to be locked

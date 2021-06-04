@@ -66,12 +66,12 @@ Device::~Device() {
 	dlg_assert(this->deviceMemories.empty());
 	dlg_assert(this->shaderModules.empty());
 	dlg_assert(this->buffers.empty());
-	dlg_assert(this->graphicsPipes.empty());
-	dlg_assert(this->computePipes.empty());
+	dlg_assert(this->pipes.empty());
 	dlg_assert(this->pipeLayouts.empty());
 	dlg_assert(this->queryPools.empty());
 	dlg_assert(this->bufferViews.empty());
 	dlg_assert(this->dsuTemplates.empty());
+	dlg_assert(this->accelStructs.empty());
 
 	// their (transitive) destructors may use device resources
 	commandHook.reset();
@@ -570,8 +570,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 
-	dev.commandHook = std::make_unique<CommandHook>();
-
 	// TODO: no idea exactly why this is needed. I guess they should not be
 	// part of the device loader table in the first place?
 	// Might be related: https://github.com/KhronosGroup/Vulkan-Loader/issues/116
@@ -661,8 +659,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.deviceMemories.mutex = &dev.mutex;
 	dev.shaderModules.mutex = &dev.mutex;
 	dev.samplers.mutex = &dev.mutex;
-	dev.computePipes.mutex = &dev.mutex;
-	dev.graphicsPipes.mutex = &dev.mutex;
+	dev.pipes.mutex = &dev.mutex;
 	dev.pipeLayouts.mutex = &dev.mutex;
 	dev.events.mutex = &dev.mutex;
 	dev.semaphores.mutex = &dev.mutex;
@@ -760,7 +757,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.renderData->init(dev);
 
 	// descriptor pool
-	// TODO: might need multiple pools...
+	// TODO: proper resource management.
 	VkDescriptorPoolSize poolSizes[2];
 	poolSizes[0].descriptorCount = 50u;
 	poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -776,6 +773,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 	VK_CHECK(dev.dispatch.CreateDescriptorPool(dev.handle, &dpci, nullptr, &dev.dsPool));
 	nameHandle(dev, dev.dsPool, "Device:dsPool");
+
+	// init command hook
+	dev.commandHook = std::make_unique<CommandHook>();
 
 	// == window stuff ==
 	if(window) {
@@ -869,6 +869,29 @@ DebugLabel::~DebugLabel() {
 	}
 }
 
+bool Device::BufferAddressCmp::operator()(const Buffer* a, const Buffer* b) const {
+	dlg_assert(a && a->deviceAddress);
+	dlg_assert(b && b->deviceAddress);
+	if(a->deviceAddress == b->deviceAddress) {
+		// this serves as a tie breaker.
+		// This is mainly relevant for memory aliasing.
+		return a < b;
+	}
+
+	return a->deviceAddress < b->deviceAddress;
+}
+
+bool Device::BufferAddressCmp::operator()(VkDeviceAddress a, const Buffer* b) const {
+	dlg_assert(b && b->deviceAddress);
+	return a < b->deviceAddress;
+}
+
+bool Device::BufferAddressCmp::operator()(const Buffer* a, VkDeviceAddress b) const {
+	dlg_assert(a && a->deviceAddress && a->ci.size > 0u);
+	return a->deviceAddress + a->ci.size <= b;
+}
+
+// Defined here (instead of util/util.hpp) since they access Device
 bool supportedUsage(VkFormatFeatureFlags features, VkImageUsageFlags usages, bool has11) {
 	static constexpr struct {
 		VkImageUsageFlagBits usage;
@@ -967,5 +990,6 @@ VkFormat findDepthFormat(const Device& dev) {
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 	return findSupported(dev, fmts, img, features);
 }
+
 
 } // namespace vil

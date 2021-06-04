@@ -811,14 +811,19 @@ void CommandViewer::displayDs(Draw& draw) {
 	if(dsCat == DescriptorCategory::buffer) {
 		imGuiText("{}", vk::name(dsType));
 
-		// TODO: take dynamic offset into account for dynamic bufs
+		std::optional<u32> dynOffset;
+		if(needsDynamicOffset(dsType)) {
+			auto baseOff = bindingLayout.dynOffset;
+			dlg_assert(baseOff + elemID < dss[setID].dynamicOffsets.size());
+			dynOffset = dss[setID].dynamicOffsets[baseOff + elemID];
+		}
 
 		// general info
 		auto& elem = buffers(state, bindingID)[elemID];
 		auto& srcBuf = nonNull(elem.buffer);
 		refButton(gui, srcBuf);
 		ImGui::SameLine();
-		drawOffsetSize(elem);
+		drawOffsetSize(elem, dynOffset);
 
 		// interpret content
 		if(!state_) {
@@ -826,7 +831,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			return;
 		}
 
-		auto* buf = std::get_if<CopiedBuffer>(&state_->dsCopy);
+		auto* buf = std::get_if<OwnBuffer>(&state_->dsCopy);
 		if(!buf) {
 			dlg_assert(state_->dsCopy.index() == 0);
 			imGuiText("Error: {}", state_->errorMessage);
@@ -1288,7 +1293,7 @@ void CommandViewer::displayCommand() {
 		}
 	};
 
-	if(state_ && state_->indirectCopy.buffer.size) {
+	if(state_ && state_->indirectCopy.size) {
 		auto& ic = state_->indirectCopy;
 		auto span = ic.data();
 		if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_); dcmd) {

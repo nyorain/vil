@@ -162,3 +162,23 @@ struct IndirectBufferReadHookSubmission : CommandHookSubmissionData {
 };
 
 } // namespace vil
+
+----
+
+size_t totalNumBindings(const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
+	if(layout.bindings.empty()) {
+		return 0;
+	}
+
+	auto& last = layout.bindings.back();
+	size_t ret = last.offset;
+
+	if(last.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+		ret += variableDescriptorCount;
+	} else {
+		ret += last.descriptorCount;
+	}
+
+	return ret;
+}
+

@@ -667,8 +667,8 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 	}
 
 	// make sure buffers are large enough
-	auto vertexSize = drawData.TotalVtxCount * sizeof(ImDrawVert);
 	auto vertexUsage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	auto vertexSize = drawData.TotalVtxCount * sizeof(ImDrawVert);
 	draw.vertexBuffer.ensure(dev, vertexSize, vertexUsage);
 
 	auto indexUsage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
@@ -676,11 +676,8 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 	draw.indexBuffer.ensure(dev, indexSize, indexUsage);
 
 	// map
-	ImDrawVert* verts;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, draw.vertexBuffer.mem, 0, VK_WHOLE_SIZE, 0, (void**) &verts));
-
-	ImDrawIdx* inds;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, draw.indexBuffer.mem, 0, VK_WHOLE_SIZE, 0, (void**) &inds));
+	ImDrawVert* verts = reinterpret_cast<ImDrawVert*>(draw.vertexBuffer.map);
+	ImDrawIdx* inds = reinterpret_cast<ImDrawIdx*>(draw.indexBuffer.map);
 
 	for(auto i = 0; i < drawData.CmdListsCount; ++i) {
 		auto& cmds = *drawData.CmdLists[i];
@@ -690,17 +687,8 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 		inds += cmds.IdxBuffer.Size;
 	}
 
-	VkMappedMemoryRange range[2] = {};
-	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	range[0].memory = draw.vertexBuffer.mem;
-	range[0].size = VK_WHOLE_SIZE;
-	range[1].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	range[1].memory = draw.indexBuffer.mem;
-	range[1].size = VK_WHOLE_SIZE;
-
-	VK_CHECK(dev.dispatch.FlushMappedMemoryRanges(dev.handle, 2, range));
-	dev.dispatch.UnmapMemory(dev.handle, draw.vertexBuffer.mem);
-	dev.dispatch.UnmapMemory(dev.handle, draw.indexBuffer.mem);
+	draw.indexBuffer.flushMap();
+	draw.vertexBuffer.flushMap();
 }
 
 void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
