@@ -135,6 +135,8 @@ void destroyBuffers(GuiBlur& blur, VkDescriptorPool dsPool) {
 	blur.view0 = {};
 	blur.view1 = {};
 	blur.target = {};
+	blur.targetMemory = {};
+	blur.renderBuffers.resize(0);
 }
 
 void resize(GuiBlur& blur, VkExtent2D size, VkSwapchainKHR swapchain,
@@ -408,6 +410,10 @@ void destroy(GuiBlur& blur) {
 	dev.dispatch.DestroyPipeline(dev.handle, blur.blurPipe, nullptr);
 	dev.dispatch.DestroyPipelineLayout(dev.handle, blur.pipeLayout, nullptr);
 	dev.dispatch.DestroyDescriptorSetLayout(dev.handle, blur.dsLayout, nullptr);
+
+	blur.blurPipe = {};
+	blur.pipeLayout = {};
+	blur.dsLayout = {};
 }
 
 } // namespace vil

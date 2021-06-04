@@ -20,15 +20,15 @@ layout(push_constant) uniform PCR {
 	Indices inds;
 	Vertices verts;
 	Dst dst;
-	uint indexCount;
+	uint count;
 	uint indexSize;
-	uint vertSize;
-	uint vertStride;
+	uint vertSize; // byteSize / 4
+	uint vertStride; // byteSize / 4
 } pcr;
 
 void main() {
 	uint id = gl_GlobalInvocationID.x;
-	if(id >= pcr.indexCount) {
+	if(id >= pcr.count) {
 		return;
 	}
 
@@ -36,10 +36,14 @@ void main() {
 
 	if(pcr.indexSize == 2u) {
 		idx = pcr.inds.vals[id / 2];
+
+		// NOTE: we assume little endian here. Should probably just use
+		// 16-bit ints in this case, devices that support raytracing
+		// will likely also support 16-bit shader storage.
 		if(id % 1 == 0u) {
-			idx >>= 16u;
-		} else {
 			idx &= 0xFFFFu;
+		} else {
+			idx >>= 16u;
 		}
 	} else if(pcr.indexSize == 4u) {
 		idx = pcr.inds.vals[id];

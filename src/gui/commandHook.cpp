@@ -5,6 +5,7 @@
 #include <image.hpp>
 #include <pipe.hpp>
 #include <rp.hpp>
+#include <rt.hpp>
 #include <cb.hpp>
 #include <buffer.hpp>
 #include <gui/gui.hpp>
@@ -13,6 +14,7 @@
 #include <util/util.hpp>
 #include <util/profiling.hpp>
 #include <vk/format_utils.h>
+#include <accelStructVertices.comp.spv.h>
 
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
@@ -170,11 +172,57 @@ void invalidate(CommandHookRecord& rec) {
 }
 
 // CommandHook
-TODO
-CommandHook::CommandHook();
+CommandHook::CommandHook(Device& dev) {
+	dev_ = &dev;
+	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
+		initAccelStructCopy(dev);
+	}
+}
 
 CommandHook::~CommandHook() {
 	invalidateRecordings();
+}
+
+void CommandHook::initAccelStructCopy(Device& dev) {
+	// We just allocate the full push constant range that all implementations
+	// must support.
+	VkPushConstantRange pcrs[1] = {};
+	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pcrs[0].offset = 0;
+	pcrs[0].size = 128; // needed e.g. for vertex viewer pipeline
+
+	VkPipelineLayoutCreateInfo plci {};
+	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = pcrs;
+	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
+		&accelStructPipeLayout_));
+	nameHandle(dev, accelStructPipeLayout_, "CommandHook:accelStructPipeLayout");
+
+	// init pipeline
+	VkShaderModule mod {};
+
+	VkShaderModuleCreateInfo sci {};
+	sci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	sci.codeSize = sizeof(accelStructVertices_comp_spv_data);
+	sci.pCode = accelStructVertices_comp_spv_data;
+
+	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &sci, nullptr, &mod));
+
+	// create pipeline
+	VkComputePipelineCreateInfo cpi {};
+	cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	cpi.layout = accelStructPipeLayout_;
+	cpi.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	cpi.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	cpi.stage.module = mod;
+	cpi.stage.pName = "main";
+
+	VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
+		1u, &cpi, nullptr, &accelStructVertCopy_));
+	nameHandle(dev, accelStructVertCopy_, "CommandHook:accelStructVertCopy");
+
+	dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 }
 
 VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
@@ -973,6 +1021,13 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 		0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 
+void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
+		OwnBuffer& dst, VkDeviceSize dstOffset, VkDeviceSize size) {
+	auto& srcBuf = bufferAt(dev, srcPtr);
+	auto srcOff = srcPtr - srcBuf.deviceAddress;
+	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
+}
+
 void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 		VkBufferUsageFlags addFlags, Buffer& src,
 		VkDeviceSize offset, VkDeviceSize size) {
@@ -1438,7 +1493,7 @@ struct SpanAlloc {
 u32 neededBufSize(const VkAccelerationStructureGeometryKHR& geom,
 		const VkAccelerationStructureBuildRangeInfoKHR& range) {
 	if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
-		// TODO: could pack them tightly
+		// TODO: could pack them tightly, need custom copy shader though
 		return range.primitiveCount * geom.geometry.aabbs.stride;
 	} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
 		// we don't copy index data, only vertices (index-resolved)
@@ -1456,27 +1511,9 @@ u32 neededBufSize(const VkAccelerationStructureGeometryKHR& geom,
 	}
 }
 
-Buffer& bufferAt(Device& dev, VkDeviceAddress address) {
-	auto [begin, end] = dev.bufferAddresses.equal_range(address);
-	dlg_assertm(begin != end, "Invalid VkDeviceAddress: couldn't find buffer");
-	if(std::distance(begin, end) > 1) {
-		dlg_trace("More than one buffer found for device address; will have to guess");
-	}
-
-	Buffer* best = nullptr;
-	while(begin != end) {
-		if(!best || best->deviceAddress + best->ci.size <
-				(*begin)->deviceAddress + (*begin)->ci.size) {
-			best = *begin;
-		}
-	}
-
-	dlg_assert(best);
-	return *best;
-}
-
 void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 	auto& dev = *record->dev;
+	auto& cmdHook = *dev.commandHook;
 
 	auto& build = accelStructBuilds.emplace_back();
 	build.command = &cmd;
@@ -1499,10 +1536,17 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 		}
 	}
 
-	build.copiedData.ensure(dev, neededDev, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 	build.data = std::make_unique<std::byte[]>(neededCpu);
-
 	SpanAlloc<std::byte*> mcpu{build.data.get(), neededCpu};
+
+	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	build.copiedData.ensure(dev, neededDev, usage);
+
+	VkBufferDeviceAddressInfo addrInfo {};
+	addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+	addrInfo.buffer = build.copiedData.buf;
+	auto dstAddress = dev.dispatch.GetBufferDeviceAddress(dev.handle, &addrInfo);
+	dlg_assert(dstAddress);
 	SpanAlloc<u32> mdev{0u, neededDev};
 
 	build.builds = mcpu.allocSpan<AccelStructBuild::Build>(cmd.buildInfos.size());
@@ -1517,6 +1561,7 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 		// safe to just reference them here, record will stay alive at least
 		// until we read it again.
 		dst.rangeInfos = cmd.buildRangeInfos[i];
+		dst.dst = cmd.dsts[i];
 
 		auto dstGeoms = mcpu.allocSpan<VkAccelerationStructureGeometryKHR>(dst.info.geometryCount);
 		for(auto g = 0u; g < dst.info.geometryCount; ++g) {
@@ -1529,32 +1574,101 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 
 			if(srcGeom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
 				auto srcAddr = srcGeom.geometry.aabbs.data.deviceAddress;
-				auto& srcBuf = bufferAt(dev, srcAddr);
+				srcAddr += range.primitiveOffset;
 				auto size = neededBufSize(srcGeom, range);
-				auto srcOff = (srcAddr + range.primitiveOffset) - srcBuf.deviceAddress;
 				auto dstOff = mdev.alloc(size);
-				performCopy(dev, cb, srcBuf, srcOff, build.copiedData, dstOff, size);
+				performCopy(dev, cb, srcAddr, build.copiedData, dstOff, size);
 				dstGeom.geometry.aabbs.data.hostAddress = build.copiedData.map + dstOff;
 			} else if(srcGeom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-				// copy vertices
+				auto& srcTris = srcGeom.geometry.triangles;
+				auto& dstTris = dstGeom.geometry.triangles;
 
+				// copy vertices
+				dlg_assert(cmdHook.accelStructVertCopy_);
+				auto blockSize = FormatTexelBlockExtent(srcTris.vertexFormat);
+				dlg_assert(blockSize.width == 1u &&
+					blockSize.height == 1u && blockSize.depth == 1u);
+				auto fmtSize = u32(FormatTexelSize(srcTris.vertexFormat));
+				dlg_assert(fmtSize % 4u == 0u);
+				dlg_assert(srcTris.vertexStride % 4u == 0u);
+				auto vertCopySize = 3 * range.primitiveCount * fmtSize;
+				auto dstOff = mdev.alloc(vertCopySize);
+
+				dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+					cmdHook.accelStructVertCopy_);
+
+				// sizes and strides are always multiples of 4
+				struct {
+					u64 indPtr;
+					u64 vertPtr;
+					u64 dstPtr;
+					u32 count;
+					u32 indexSize;
+					u32 vertSize;
+					u32 vertStride;
+				} pcr;
+
+				pcr.indPtr = srcTris.indexData.deviceAddress;
+				pcr.vertPtr = srcTris.vertexData.deviceAddress;
+				pcr.dstPtr = dstAddress + dstOff;
+				pcr.indexSize = indexSize(srcTris.indexType);
+				pcr.vertStride = srcTris.vertexStride / 4u;
+				pcr.vertSize = fmtSize / 4u;
+				pcr.count = range.primitiveCount;
+
+				if(srcTris.indexType == VK_INDEX_TYPE_NONE_KHR) {
+					pcr.vertPtr += range.primitiveOffset;
+				} else {
+					dlg_assert(pcr.indPtr);
+					pcr.indPtr += range.primitiveOffset;
+					pcr.vertPtr += range.firstVertex * srcTris.vertexStride;
+				}
+
+				dev.dispatch.CmdPushConstants(cb, cmdHook.accelStructPipeLayout_,
+					VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), &pcr);
+
+				auto gx = ceilDivide(range.primitiveCount, 64u);
+				dev.dispatch.CmdDispatch(cb, gx, 1u, 1u);
+
+				dstTris.indexData.hostAddress = {};
+				dstTris.vertexData.hostAddress = build.copiedData.map + dstOff;
+				dstTris.indexType = VK_INDEX_TYPE_NONE_KHR;
 
 				// copy transform, if present
+				if(srcTris.transformData.deviceAddress) {
+					auto size = sizeof(VkTransformMatrixKHR);
+					auto dstOff = mdev.alloc(size);
+					auto srcAddr = srcTris.transformData.deviceAddress;
+					srcAddr += range.transformOffset;
+					performCopy(dev, cb, srcAddr, build.copiedData, dstOff, size);
+					dstTris.transformData.hostAddress = build.copiedData.map + dstOff;
+				} else {
+					dstTris.transformData.hostAddress = 0u;
+				}
 			} else if(srcGeom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
 				// TODO: resolve indirection via custom compute shader
-				dlg_assertm(!srcGeom.geometry.instances.arrayOfPointers,
+				auto& inis = srcGeom.geometry.instances;
+				dlg_assertm(!inis.arrayOfPointers,
 					"TODO: arrayOfPointers not supported yet");
-				auto srcAddr = srcGeom.geometry.instances.data.deviceAddress;
-				auto& srcBuf = bufferAt(dev, srcAddr);
-				auto size = neededBufSize(srcGeom, rangeInfos[g]);
-				auto srcOff = srcAddr - srcBuf.deviceAddress;
+
+				auto srcAddr = inis.data.deviceAddress;
+				srcAddr += range.primitiveOffset;
+				auto size = neededBufSize(srcGeom, range);
 				auto dstOff = mdev.alloc(size);
-				performCopy(dev, cb, srcBuf, srcOff, build.copiedData, dstOff, size);
+				performCopy(dev, cb, srcAddr, build.copiedData, dstOff, size);
+				dstGeom.geometry.instances.arrayOfPointers = false;
+				dstGeom.geometry.instances.data.hostAddress = build.copiedData.map + dstOff;
 			} else {
 				dlg_fatal("unreachable; invalid geometry type {}", srcGeom.geometryType);
 			}
 		}
 	}
+
+	dlg_assert(mcpu.rem == 0u);
+	dlg_assert(mdev.rem == 0u);
+
+	// TODO: also bind push constants
+	bind(dev, cb, cmd.savedComputeState);
 }
 
 void CommandHookRecord::hookBefore(const BuildAccelStructsIndirectCmd& cmd) {
@@ -1705,10 +1819,12 @@ void CommandHookSubmission::transmitTiming() {
 }
 
 void CommandHookSubmission::finishAccelStructBuilds() {
-	// TODO: evaluate accelStruct builds
-	if(!record->accelStructBuilds.empty()) {
-		dlg_error("TODO: implement accelStruct build data copy ({} builds)",
-			record->accelStructBuilds.size());
+	for(auto& buildCmd : record->accelStructBuilds) {
+		for(auto& build : buildCmd.builds) {
+			auto& dst = nonNull(build.dst);
+			dlg_assert(build.rangeInfos.size() == build.info.geometryCount);
+			copyBuildData(dst, build.info, build.rangeInfos.data(), true);
+		}
 	}
 }
 

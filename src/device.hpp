@@ -58,9 +58,11 @@ struct Device {
 	VkPhysicalDeviceMemoryProperties memProps {};
 	VkPhysicalDeviceFeatures enabledFeatures {}; // features by application
 
+	// supported features/extensions
 	bool timelineSemaphores {}; // whether we have timeline smeaphores
 	bool transformFeedback {}; // whether we have transformFeedback
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
+	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
 
 	// Aside from properties, only the families used by device
 	// are initialized.
@@ -135,7 +137,8 @@ struct Device {
 	// === VkBufferAddress lookup ===
 	// In various places we need the buffer belonging to a given buffer address.
 	// This data structure allows efficient insert, deletion and lookup.
-	// Must be synchronized via the device mutex.
+	// Must be synchronized via the device mutex, prefer the utility function
+	// in buffer.hpp.
 	struct BufferAddressEntry {
 		VkDeviceAddress address;
 		Buffer* buffer;
@@ -150,8 +153,17 @@ struct Device {
 
 	std::set<Buffer*, BufferAddressCmp> bufferAddresses;
 
+	// === VkAccelerationStructureKHR lookup ===
+	// When building top-level acceleration structured on the device, we
+	// need to retrieve the acceleration structure for a given VkDeviceAddress.
+	// This map allows it.
+	// Access must be synchronized via the device mutex, prefer the utility
+	// function in rt.hpp.
+	std::unordered_map<VkDeviceAddress, AccelStruct*> accelStructAddresses;
+
 	// === Maps of all vulkan handles ===
 	SyncedUniqueWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
+
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
@@ -165,6 +177,7 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkEvent, Event> events;
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
 	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
+
 	// NOTE: Even though we just store unique_ptr<Pipeline> here, the real
 	// type is GraphicsPipeline, ComputePipeline or RayTracingPipeline.
 	// When erasing from the map, mustMove should be used and the pipeline
@@ -389,6 +402,8 @@ bool supported(Device& dev, const VkImageCreateInfo& info, VkFormatFeatureFlags 
 VkFormat findSupported(const Device& dev, span<const VkFormat> formats,
 		const VkImageCreateInfo& info, VkFormatFeatureFlags additional);
 VkFormat findDepthFormat(const Device& dev);
+
+bool hasAppExt(Device& dev, const char* extName);
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(

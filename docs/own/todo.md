@@ -243,7 +243,12 @@ vertex viewer/xfb:
 	- [ ] also handle matrices somehow
 - [ ] (later) support showing all draws from a render pass?
 
+ext support:
+- [ ] VK_KHR_fragment_shading_rate: need to consider the additional attachment,
+      would also be nice to show in gui
 
+
+- [ ] correctly query transform feedback limits and respect them, e.g. buffer size
 - [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
       make sure destruction is tracked correctly. Also show in gui.
 	  See the commands in cb.cpp

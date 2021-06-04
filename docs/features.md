@@ -64,7 +64,6 @@ supported but no/incomplete gui interaction/information:
 - VK_EXT_conditional_rendering 
 - VK_EXT_extended_dynamic_state
 - VK_EXT_line_rasterization
-- VK_KHR_fragment_shading_rate
 - VK_KHR_push_descriptor
 - VK_KHR_descriptor_update_template
 - VK_KHR_draw_indirect_count

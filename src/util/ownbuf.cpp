@@ -35,6 +35,14 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = align(memReqs.size, dev.props.limits.nonCoherentAtomSize);
 	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
+
+	VkMemoryAllocateFlagsInfo flagsInfo {};
+	if(usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+		flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+		flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+		allocInfo.pNext = &flagsInfo;
+	}
+
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
 	nameHandle(dev, this->mem, "OwnBuffer:mem");
 
@@ -65,7 +73,7 @@ void OwnBuffer::invalidateMap() {
 		return;
 	}
 
-	// PERF: only invalidate when on non-coherent memory?
+	// PERF: only invalidate when on non-coherent memory
 	VkMappedMemoryRange range[1] {};
 	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
 	range[0].memory = mem;
@@ -79,7 +87,7 @@ void OwnBuffer::flushMap() {
 		return;
 	}
 
-	// PERF: only invalidate when on non-coherent memory?
+	// PERF: only invalidate when on non-coherent memory
 	VkMappedMemoryRange range[1] {};
 	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
 	range[0].memory = mem;

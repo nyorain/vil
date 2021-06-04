@@ -39,7 +39,7 @@ struct BoundDescriptorSet {
 	// potentially invalidated records for matching.
 	void* ds {};
 	span<u32> dynamicOffsets;
-	PipelineLayout* layout {}; // TODO: not sure if needed
+	PipelineLayout* layout {};
 };
 
 struct ImageDescriptorRef {
@@ -60,6 +60,7 @@ struct DescriptorState {
 	span<BoundDescriptorSet> descriptorSets;
 
 	// TODO: we don't track this correctly atm.
+	// important to do this, also fix in vil::bind(..., state) below then
 	span<std::byte> pushDescriptors;
 
 	void bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
@@ -137,6 +138,11 @@ struct RayTracingState : DescriptorState {
 GraphicsState copy(CommandBuffer& cb, const GraphicsState& src);
 ComputeState copy(CommandBuffer& cb, const ComputeState& src);
 RayTracingState copy(CommandBuffer& cb, const RayTracingState& src);
+
+// XXX: these must only be called while we can statically know that the record
+// associated with the given state is still valid. Otherwise its references
+// might be dangling or null (if unset).
+void bind(Device&, VkCommandBuffer, const ComputeState&);
 
 // We don't use shared pointers here, they are used in the
 // commands referencing the handles.

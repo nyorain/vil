@@ -16,13 +16,21 @@ struct AccelTriangles {
 		Vec4f c;
 	};
 
+	struct Geometry {
+		span<Triangle> triangles; // references the hostVisible buffer
+	};
+
 	OwnBuffer buffer;
-	span<Triangle> triangles; // references the hostVisible buffer
+	std::vector<Geometry> geometries;
 };
 
 struct AccelAABBs {
+	struct Geometry {
+		span<VkAabbPositionsKHR> boxes; // references the hostVisible buffer
+	};
+
 	OwnBuffer buffer;
-	span<VkAabbPositionsKHR> boxes; // references the hostVisible buffer
+	std::vector<Geometry> geometries;
 };
 
 struct AccelInstances {
@@ -49,12 +57,30 @@ struct AccelStruct : DeviceHandle {
 	VkDeviceSize offset {};
 	VkDeviceSize size {};
 
+	VkDeviceAddress deviceAddress {};
+
 	std::atomic<u32> refCount {};
 
 	// geometry info
 	VkGeometryTypeKHR geometryType {VK_GEOMETRY_TYPE_MAX_ENUM_KHR};
 	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
 };
+
+void initBufs(AccelStruct&,
+	const VkAccelerationStructureBuildGeometryInfoKHR& info,
+    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos);
+
+// Assumes that all data pointers are host addresses
+// - instancesAreHandles: whether Instances are given via their VkDeviceAddress
+//   instead of the vulkan objects.
+void copyBuildData(AccelStruct&,
+	const VkAccelerationStructureBuildGeometryInfoKHR& info,
+    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
+	bool instancesAreAddresses);
+
+// Returns the AccelStruct located at the given address. The address
+// must match exactly.
+AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address);
 
 struct RayTracingPipeline : Pipeline {
 	struct Group {
@@ -69,11 +95,6 @@ struct RayTracingPipeline : Pipeline {
 	std::vector<Group> groups;
 	std::unordered_set<VkDynamicState> dynamicState;
 };
-
-// Assumes that all data pointers are host addresses
-void copyBuildData(AccelStruct&,
-	const VkAccelerationStructureBuildGeometryInfoKHR& info,
-    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos);
 
 // VK_KHR_acceleration_structure
 VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
