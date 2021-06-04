@@ -187,4 +187,52 @@ void replaceInvalidatedLocked(CommandRecord& record) {
 	record.invalidated.clear();
 }
 
+// util
+void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
+	dst.descriptorSets = copySpan(cb, src.descriptorSets);
+	dst.pushDescriptors = copySpan(cb, src.pushDescriptors);
+}
+
+GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
+	GraphicsState dst = src;
+	copy(cb, src, dst); // descriptors
+
+	dst.vertices = copySpan(cb, src.vertices);
+	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
+	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
+
+	return dst;
+}
+
+ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
+	ComputeState dst = src;
+	copy(cb, src, dst); // descriptors
+	return dst;
+}
+
+RayTracingState copy(CommandBuffer& cb, const RayTracingState& src) {
+	RayTracingState dst = src;
+	copy(cb, src, dst); // descriptors
+	return dst;
+}
+
+void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
+	if(state.pipe) {
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			state.pipe->handle);
+	}
+
+	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
+		auto& ds = state.descriptorSets[i];
+		if(!ds.ds) {
+			continue;
+		}
+
+		dlg_assert(ds.layout);
+		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			ds.layout->handle, i, 1u, &static_cast<DescriptorSet*>(ds.ds)->handle,
+			u32(ds.dynamicOffsets.size()), ds.dynamicOffsets.data());
+	}
+}
+
 } // namespace vil

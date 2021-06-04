@@ -2776,6 +2776,11 @@ void WriteAccelStructsPropertiesCmd::replace(const CommandAllocHashMap<DeviceHan
 	checkReplace(accelStructs, map);
 }
 
+// BuildAccelStructs
+BuildAccelStructsCmd::BuildAccelStructsCmd(CommandBuffer& cb) {
+	savedComputeState = copy(cb, cb.computeState());
+}
+
 void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dlg_assert(buildInfos.size() == buildRangeInfos.size());
 
@@ -2792,6 +2797,10 @@ void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 void BuildAccelStructsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(srcs, map);
 	checkReplace(dsts, map);
+}
+
+BuildAccelStructsIndirectCmd::BuildAccelStructsIndirectCmd(CommandBuffer& cb) {
+	savedComputeState = copy(cb, cb.computeState());
 }
 
 void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {

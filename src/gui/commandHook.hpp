@@ -135,7 +135,7 @@ public:
 	std::vector<CompletedHook> completed;
 
 public:
-	CommandHook();
+	CommandHook(Device& dev);
 	~CommandHook();
 
 	// Called from inside QueueSubmit with the command buffer the hook has
@@ -166,9 +166,11 @@ public:
 	const auto& dsState() const { return dsState_; }
 
 private:
-	void initAccelStructCopy();
+	void initAccelStructCopy(Device& dev);
 
 private:
+	Device* dev_ {};
+
 	friend struct CommandHookRecord;
 	u32 counter_ {0};
 	CommandHookRecord* records_ {}; // intrusive linked list
@@ -213,7 +215,7 @@ struct CommandHookRecord {
 	// == Resources ==
 	VkCommandBuffer cb {};
 
-	// TODO: allocate resources from pool instead of giving each record
+	// PERF: allocate resources from pool instead of giving each record
 	// its entirely own set of resources (e.g. queryPool and images/buffers
 	// in CommandHookState).
 	VkQueryPool queryPool {};
@@ -248,10 +250,22 @@ struct CommandHookRecord {
 	CommandHookRecord* next {};
 	CommandHookRecord* prev {};
 
+public:
 	CommandHookRecord(CommandHook& hook, CommandRecord& record,
 		std::vector<const Command*> hooked);
 	~CommandHookRecord();
 
+	// Called when associated record is destroyed or hook replaced.
+	// Called while device mutex is locked.
+	// Might delete itself (or decrement reference count or something).
+	void finish() noexcept;
+
+	// Returns whether this command has an associated hooked command.
+	// There are HookRecord that don't have an associated hooked command
+	// if we need to perform custom commands, e.g. for accelStruct building.
+	bool hasHookedCmd() const { return !hcommand.empty(); }
+
+private:
 	struct RecordInfo {
 		bool splitRenderPass {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
@@ -276,11 +290,6 @@ struct CommandHookRecord {
 
 	void hookBefore(const BuildAccelStructsCmd&);
 	void hookBefore(const BuildAccelStructsIndirectCmd&);
-
-	// Called when associated record is destroyed or hook replaced.
-	// Called while device mutex is locked.
-	// Might delete itself (or decrement reference count or something).
-	void finish() noexcept;
 
 	// TODO: kinda arbitrary, allow more. Configurable via settings?
 	// In general, the problem is that we can't know the relevant

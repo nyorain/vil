@@ -11,6 +11,27 @@ VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize 
 	return range == VK_WHOLE_SIZE ? fullSize - offset : range;
 }
 
+Buffer& bufferAt(Device& dev, VkDeviceAddress address) {
+	auto lock = std::lock_guard(dev.mutex);
+
+	auto [begin, end] = dev.bufferAddresses.equal_range(address);
+	dlg_assertm(begin != end, "Invalid VkDeviceAddress: couldn't find buffer");
+	if(std::distance(begin, end) > 1) {
+		dlg_trace("More than one buffer found for device address; will have to guess");
+	}
+
+	Buffer* best = nullptr;
+	while(begin != end) {
+		if(!best || best->deviceAddress + best->ci.size <
+				(*begin)->deviceAddress + (*begin)->ci.size) {
+			best = *begin;
+		}
+	}
+
+	dlg_assert(best);
+	return *best;
+}
+
 // Classes
 Buffer::~Buffer() {
 	if(!dev) {

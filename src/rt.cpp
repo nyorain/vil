@@ -8,6 +8,15 @@
 
 namespace vil {
 
+// util
+AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
+	auto lock = std::lock_guard(dev.mutex);
+	auto it = dev.accelStructAddresses.find(address);
+	dlg_assert(it != dev.accelStructAddresses.end());
+	return nonNull(it->second);
+}
+
+// building
 Mat4f toMat4f(const VkTransformMatrixKHR& src) {
 	Mat<3, 4, float> ret34;
 	static_assert(sizeof(ret34) == sizeof(src));
@@ -107,7 +116,8 @@ void writeTriangles(AccelStruct& accelStruct,
 
 void writeInstances(AccelStruct& accelStruct,
 		const VkAccelerationStructureGeometryInstancesDataKHR& src,
-		const VkAccelerationStructureBuildRangeInfoKHR& info) {
+		const VkAccelerationStructureBuildRangeInfoKHR& info,
+		bool instancesAreAddresses) {
 	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
 	auto& dst = std::get<AccelInstances>(accelStruct.data);
 
@@ -124,11 +134,20 @@ void writeInstances(AccelStruct& accelStruct,
 		}
 
 		auto& srcIni = *pSrcIni;
-		auto& dstIni = dst.instances.emplace_back();
 
-		auto vkRef = u64ToHandle<VkAccelerationStructureKHR>(srcIni.accelerationStructureReference);
-		auto& ref = get(*accelStruct.dev, vkRef);
-		dstIni.accelStruct = &ref;
+		dlg_assert(i < dst.instances.size());
+		auto& dstIni = dst.instances[i];
+
+		if(instancesAreAddresses) {
+			auto addr = VkDeviceAddress(srcIni.accelerationStructureReference);
+			auto& ref = accelStructAt(*accelStruct.dev, addr);
+			dstIni.accelStruct = &ref;
+		} else {
+			auto vkRef = u64ToHandle<VkAccelerationStructureKHR>(srcIni.accelerationStructureReference);
+			auto& ref = get(*accelStruct.dev, vkRef);
+			dstIni.accelStruct = &ref;
+		}
+
 		dstIni.bindingTableOffset = srcIni.instanceShaderBindingTableRecordOffset;
 		dstIni.flags = srcIni.flags;
 		dstIni.customIndex = srcIni.instanceCustomIndex;
@@ -137,32 +156,92 @@ void writeInstances(AccelStruct& accelStruct,
 	}
 }
 
-void copyBuildData(AccelStruct& accelStruct,
+void initBufs(AccelStruct& accelStruct,
 		const VkAccelerationStructureBuildGeometryInfoKHR& info,
 		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos) {
+	auto& dev = *accelStruct.dev;
+
+	accelStruct.effectiveType = accelStruct.type;
 	if(accelStruct.type == VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR) {
 		accelStruct.effectiveType = info.type;
 	}
 
+	if(info.geometryCount == 0u) {
+		return;
+	}
+
+	auto& geom0 = info.pGeometries ? info.pGeometries[0] : *info.ppGeometries[0];
+	accelStruct.geometryType = geom0.geometryType;
+
+	auto bufSize = 0u;
 	for(auto i = 0u; i < info.geometryCount; ++i) {
 		auto& geom = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
 		auto& rangeInfo = buildRangeInfos[i];
 
-		// check if it's the first time data is added
-		if(accelStruct.geometryType == VK_GEOMETRY_TYPE_MAX_ENUM_KHR) {
-			accelStruct.geometryType = geom.geometryType;
-
-			if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
-				dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
-				accelStruct.data = AccelAABBs {};
-			} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-				dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
-				accelStruct.data = AccelTriangles {};
-			} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-				dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
-				accelStruct.data = AccelInstances {};
-			}
+		if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+			bufSize += rangeInfo.primitiveCount * sizeof(VkAabbPositionsKHR);
+		} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+			bufSize += rangeInfo.primitiveCount * sizeof(AccelTriangles::Triangle);
 		}
+	}
+
+	std::byte* mapped {};
+	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+		VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	if(geom0.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+		dlg_assert(accelStruct.effectiveType =
+			VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+		auto& aabbs = accelStruct.data.emplace<AccelAABBs>();
+		aabbs.geometries.resize(info.geometryCount);
+		aabbs.buffer.ensure(dev, bufSize, usage);
+		mapped = aabbs.buffer.map;
+	} else if(geom0.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+		dlg_assert(accelStruct.effectiveType =
+			VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+		auto& tris = accelStruct.data.emplace<AccelTriangles>();
+		tris.geometries.resize(info.geometryCount);
+		tris.buffer.ensure(dev, bufSize, usage);
+		mapped = tris.buffer.map;
+	} else if(geom0.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+		dlg_assert(accelStruct.effectiveType =
+			VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+		accelStruct.data = AccelInstances {};
+		dlg_assert(bufSize == 0u);
+		dlg_assert(info.geometryCount == 1u);
+	}
+
+	auto off = 0u;
+	for(auto i = 0u; i < info.geometryCount; ++i) {
+		auto& geom = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
+		auto& rangeInfo = buildRangeInfos[i];
+
+		if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+			auto& dst = std::get<AccelAABBs>(accelStruct.data).geometries[i];
+			auto ptr = reinterpret_cast<VkAabbPositionsKHR*>(mapped + off);
+			dst.boxes = {ptr, rangeInfo.primitiveCount};
+			off += dst.boxes.size_bytes();
+		} else if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+			auto& dst = std::get<AccelTriangles>(accelStruct.data).geometries[i];
+			auto ptr = reinterpret_cast<AccelTriangles::Triangle*>(mapped + off);
+			dst.triangles = {ptr, rangeInfo.primitiveCount};
+			off += dst.triangles.size_bytes();
+		}
+	}
+
+	dlg_assert(off == bufSize);
+}
+
+void copyBuildData(AccelStruct& accelStruct,
+		const VkAccelerationStructureBuildGeometryInfoKHR& info,
+		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
+		bool instancesAreAddresses) {
+	dlg_assertm(accelStruct.geometryType != VK_GEOMETRY_TYPE_MAX_ENUM_KHR,
+		"Acceleration struct was never initialized");
+
+	for(auto i = 0u; i < info.geometryCount; ++i) {
+		auto& geom = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
+		auto& rangeInfo = buildRangeInfos[i];
 
 		dlg_assert(accelStruct.geometryType == geom.geometryType);
 		if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
@@ -170,7 +249,9 @@ void copyBuildData(AccelStruct& accelStruct,
 		} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
 			writeTriangles(accelStruct, geom.geometry.triangles, rangeInfo);
 		} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-			writeInstances(accelStruct, geom.geometry.instances, rangeInfo);
+			dlg_assert(i == 0u);
+			writeInstances(accelStruct, geom.geometry.instances, rangeInfo,
+				instancesAreAddresses);
 		} else {
 			dlg_fatal("unreachable; invalid geometry type {}", geom.geometryType);
 		}
@@ -205,8 +286,22 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 	accelStruct.offset = pCreateInfo->offset;
 	accelStruct.size = pCreateInfo->size;
 
+	VkAccelerationStructureDeviceAddressInfoKHR devAddressInfo {};
+	devAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+	devAddressInfo.accelerationStructure = accelStruct.handle;
+	accelStruct.deviceAddress = dev.dispatch.GetAccelerationStructureDeviceAddressKHR(
+		dev.handle, &devAddressInfo);
+	dlg_assert(accelStruct.deviceAddress);
+
 	*pAccelerationStructure = castDispatch<VkAccelerationStructureKHR>(accelStruct);
 	dev.accelStructs.mustEmplace(*pAccelerationStructure, std::move(accelStructPtr));
+
+	{
+		std::lock_guard lock(dev.mutex);
+		auto [_, success] = dev.accelStructAddresses.insert({
+			accelStruct.deviceAddress, &accelStruct});
+		dlg_assert(success);
+	}
 
 	return res;
 }
@@ -225,6 +320,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyAccelerationStructureKHR(
 	{
 		auto lock = std::lock_guard(dev.mutex);
 		ptr = dev.accelStructs.mustMoveLocked(accelerationStructure);
+
+		dlg_assert(ptr->deviceAddress);
+		dev.accelStructAddresses.erase(ptr->deviceAddress);
+
 		accelerationStructure = ptr->handle;
 		ptr->handle = {};
 	}

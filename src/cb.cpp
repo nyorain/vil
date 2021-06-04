@@ -298,35 +298,6 @@ CommandPool::~CommandPool() {
 	}
 }
 
-// util
-void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
-	dst.descriptorSets = copySpan(cb, src.descriptorSets);
-	dst.pushDescriptors = copySpan(cb, src.pushDescriptors);
-}
-
-GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
-	GraphicsState dst = src;
-	copy(cb, src, dst); // descriptors
-
-	dst.vertices = copySpan(cb, src.vertices);
-	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
-	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
-
-	return dst;
-}
-
-ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
-	ComputeState dst = src;
-	copy(cb, src, dst); // descriptors
-	return dst;
-}
-
-RayTracingState copy(CommandBuffer& cb, const RayTracingState& src) {
-	RayTracingState dst = src;
-	copy(cb, src, dst); // descriptors
-	return dst;
-}
-
 // recording
 enum class SectionType {
 	none,
@@ -2599,7 +2570,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 		const VkAccelerationStructureBuildGeometryInfoKHR* pInfos,
 		const VkAccelerationStructureBuildRangeInfoKHR* const* ppBuildRangeInfos) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<BuildAccelStructsCmd>(cb);
+	auto& cmd = addCmd<BuildAccelStructsCmd>(cb, cb);
 
 	cmd.srcs = allocSpan0<AccelStruct*>(cb, infoCount);
 	cmd.dsts = allocSpan0<AccelStruct*>(cb, infoCount);
@@ -2639,7 +2610,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 		const uint32_t*                             pIndirectStrides,
 		const uint32_t* const*                      ppMaxPrimitiveCounts) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<BuildAccelStructsIndirectCmd>(cb);
+	auto& cmd = addCmd<BuildAccelStructsIndirectCmd>(cb, cb);
 
 	cmd.srcs = allocSpan0<AccelStruct*>(cb, infoCount);
 	cmd.dsts = allocSpan0<AccelStruct*>(cb, infoCount);

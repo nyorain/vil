@@ -35,6 +35,14 @@ struct BufferView : DeviceHandle {
 // Otherwise returns fullSize - offset.
 VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize range);
 
+// Returns the buffer associated with the given address (does not have to
+// be the base address, can be somewhere inside the buffer).
+// If there are multiple buffers with overlapping addresses (can happen
+// e.g. with memory aliasing I guess), will return the one that contains the
+// largest range from the given address.
+// Will lock the device mutex internally.
+Buffer& bufferAt(Device& dev, VkDeviceAddress address);
+
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
     VkDevice                                    device,

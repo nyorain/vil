@@ -37,6 +37,11 @@ Gui* getOverlayGui(Swapchain& swapchain) {
 	return nullptr;
 }
 
+bool hasAppExt(Device& dev, const char* extName) {
+	auto it = find(dev.appExts, extName);
+	return (it != dev.appExts.end());
+}
+
 // deivce
 Device::~Device() {
 	// Vulkan spec requires that all pending submissions have finished.
@@ -410,6 +415,32 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	auto hasTimelineSemaphores = false;
 	auto hasTransformFeedback = false;
 
+	// find generally relevant feature structs in chain
+	VkPhysicalDeviceVulkan12Features* inVulkan12 = nullptr;
+	VkPhysicalDeviceTimelineSemaphoreFeatures* inTS = nullptr;
+	VkPhysicalDeviceTransformFeedbackFeaturesEXT* inXFB = nullptr;
+	VkPhysicalDeviceBufferDeviceAddressFeatures* inBufAddr = nullptr;
+
+	auto* link = static_cast<VkBaseOutStructure*>(pNext);
+	while(link) {
+		if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_2);
+			inVulkan12 = reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
+			break;
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
+			inTS = reinterpret_cast<VkPhysicalDeviceTimelineSemaphoreFeatures*>(link);
+			break;
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
+			inBufAddr = reinterpret_cast<VkPhysicalDeviceBufferDeviceAddressFeatures*>(link);
+			break;
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT) {
+			inXFB = reinterpret_cast<VkPhysicalDeviceTransformFeedbackFeaturesEXT*>(link);
+			break;
+		}
+
+		link = (static_cast<VkBaseOutStructure*>(link->pNext));
+	}
+
 	VkPhysicalDeviceTimelineSemaphoreFeatures tsFeatures {};
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT tfFeatures {};
 	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi) {
@@ -439,23 +470,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			hasTimelineSemaphores = true;
 
 			// check if application already has a feature struct holding it
-			auto* link = static_cast<VkBaseInStructure*>(pNext);
 			auto addLink = true;
-			while(link) {
-				if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
-					addLink = false;
-					dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_2);
-					auto* vulkan12Features = reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
-					vulkan12Features->timelineSemaphore = true;
-					break;
-				} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
-					addLink = false;
-					auto* tsFeat = reinterpret_cast<VkPhysicalDeviceTimelineSemaphoreFeatures*>(link);
-					tsFeat->timelineSemaphore = true;
-					break;
-				}
-
-				link = const_cast<VkBaseInStructure*>(static_cast<const VkBaseInStructure*>(link->pNext));
+			if(inVulkan12) {
+				addLink = false;
+				inVulkan12->timelineSemaphore = true;
+			} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
+				addLink = false;
+				inTS->timelineSemaphore = true;
 			}
 
 			if(addLink) {
@@ -478,17 +499,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			hasTransformFeedback = true;
 
 			// check if application already has a feature struct holding it
-			auto* link = static_cast<VkBaseInStructure*>(pNext);
 			auto addLink = true;
-			while(link) {
-				if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT) {
-					addLink = false;
-					auto* tfFeatures = reinterpret_cast<VkPhysicalDeviceTransformFeedbackFeaturesEXT*>(link);
-					tfFeatures->transformFeedback = true;
-					break;
-				}
-
-				link = const_cast<VkBaseInStructure*>(static_cast<const VkBaseInStructure*>(link->pNext));
+			if(inXFB) {
+				addLink = false;
+				inXFB->transformFeedback = true;
 			}
 
 			if(addLink) {
@@ -504,7 +518,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			}
 		}
 
-		// TODO: find out props, e.g. for transform feedback
+		// TODO: could find out props, e.g. for transform feedback
 		// VkPhysicalDeviceProperties2 phProps2 {};
 		// phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
 		// fpPhdevProps2(phdev, &phProps2);
@@ -560,6 +574,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.timelineSemaphores = hasTimelineSemaphores;
 	dev.transformFeedback = hasTransformFeedback;
 	dev.nonSolidFill = pEnabledFeatures10->fillModeNonSolid;
+
+	// NOTE: we don't ever enable buffer device address and just
+	// want to track whether it's enabled.
+	if(inVulkan12) {
+		dev.bufferDeviceAddress = inVulkan12->bufferDeviceAddress;
+	} else if(inBufAddr) {
+		dev.bufferDeviceAddress = inBufAddr->bufferDeviceAddress;
+	}
 
 	dev.appExts = {extsBegin, extsEnd};
 	dev.allExts = {newExts.begin(), newExts.end()};
@@ -775,7 +797,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	nameHandle(dev, dev.dsPool, "Device:dsPool");
 
 	// init command hook
-	dev.commandHook = std::make_unique<CommandHook>();
+	dev.commandHook = std::make_unique<CommandHook>(dev);
 
 	// == window stuff ==
 	if(window) {
