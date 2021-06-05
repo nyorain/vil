@@ -231,7 +231,7 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 				++match;
 			}
 		} else {
-			dlg_error("Unsupported descriptor type: {}", uint(dsType));
+			dlg_error("Unsupported descriptor type: {}", u32(dsType));
 		}
 	}
 
