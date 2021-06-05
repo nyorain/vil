@@ -13,6 +13,7 @@
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
 
+#include <set>
 #include <shared_mutex>
 #include <memory>
 #include <atomic>

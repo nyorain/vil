@@ -147,6 +147,9 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] add support for timeline semaphores. Should just require some simple
+      changes to submission logic when we use them inside the layer.
+	  Test with official samples repo
 - [ ] Figure out how to correctly useHandle for stuff using DeviceAddress.
       Or, in more general terms: figure out sync for buffers that are accessed
 	  using their buffer address. I don't think it's possible in general.
@@ -296,6 +299,9 @@ ext support:
 - [ ] get it to run without significant (slight (like couple of percent) increase 
 	  of frame timings even with layer in release mode is ok) overhead.
 	  Just tests with the usual suspects of games
+- [ ] when available on hardware I can test it on: support using
+      VK_EXT_device_memory_report to get insights into additional memory
+	  usage; expose that information via gui.
 - [ ] support debug utils labels across command buffer boundaries
 	  we already have the information of popped and pushed lables per record
       NOTE: this isn't 100% correct at the moment though, e.g. when we end
@@ -469,7 +475,7 @@ ext support:
 	- [ ] ext vertex_input_dynamic_state
 	- [ ] ext extended_dynamic_state2
 	- [ ] ext color_write_enable
-	- [ ] khr ray tracing
+	- [x] khr ray tracing
 	- [ ] device masks (core vulkan by now)
 	- [ ] nv device diagnostic checkpoint
 	- [ ] nv exclusive scissor

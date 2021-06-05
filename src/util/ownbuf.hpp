@@ -1,6 +1,8 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <util/bytes.hpp>
+#include <vk/vulkan_core.h>
 
 namespace vil {
 
