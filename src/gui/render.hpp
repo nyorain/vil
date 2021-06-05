@@ -26,7 +26,6 @@ struct Draw {
 		VkBuffer src {};
 		VkDeviceSize offset {};
 		VkDeviceSize size {};
-		void* map {};
 	} readback;
 
 	// Semaphore associated with the gfx submission of this rendering.

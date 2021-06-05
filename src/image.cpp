@@ -56,6 +56,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	auto& dev = getDevice(device);
 
 	auto nci = *pCreateInfo;
+	auto isTransient = !!(nci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
 
 	bool linearSampling {};
 	bool nearestSampling {};
@@ -63,10 +64,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	// If supported, we add the sampled flags to usage so we can
 	// display it directly in our gui.
 	VkFormatProperties props {};
-	dev.ini->dispatch.GetPhysicalDeviceFormatProperties(dev.phdev,
-		nci.format, &props);
-	auto features = nci.tiling == VK_IMAGE_TILING_OPTIMAL ? props.optimalTilingFeatures : props.linearTilingFeatures;
-	if(features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
+	dev.ini->dispatch.GetPhysicalDeviceFormatProperties(dev.phdev, nci.format, &props);
+	auto features = nci.tiling == VK_IMAGE_TILING_OPTIMAL ?
+		props.optimalTilingFeatures :
+		props.linearTilingFeatures;
+	if((features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) && !isTransient) {
 		nci.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
 		nearestSampling = true;
 
@@ -95,8 +97,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	// the renderpass) since that makes things complicated: the memory
 	// type changes, GetMemoryCommitment cannot be called and so on.
 	// Would have to do a lot of work to fix the aftermath of that change.
-	if((!dev.ini->vulkan11 || features & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)
-			&& !(nci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT)) {
+	if((!dev.ini->vulkan11 || features & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT) && !isTransient) {
 		nci.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
 

@@ -11,8 +11,8 @@ VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize 
 	return range == VK_WHOLE_SIZE ? fullSize - offset : range;
 }
 
-Buffer& bufferAt(Device& dev, VkDeviceAddress address) {
-	auto lock = std::lock_guard(dev.mutex);
+Buffer& bufferAtLocked(Device& dev, VkDeviceAddress address) {
+	assertOwnedOrShared(dev.mutex);
 
 	auto [begin, end] = dev.bufferAddresses.equal_range(address);
 	dlg_assertm(begin != end, "Invalid VkDeviceAddress: couldn't find buffer");
@@ -22,14 +22,21 @@ Buffer& bufferAt(Device& dev, VkDeviceAddress address) {
 
 	Buffer* best = nullptr;
 	while(begin != end) {
-		if(!best || best->deviceAddress + best->ci.size <
-				(*begin)->deviceAddress + (*begin)->ci.size) {
+		if(!best || (best->deviceAddress + best->ci.size - address) <
+				((*begin)->deviceAddress + (*begin)->ci.size - address)) {
 			best = *begin;
 		}
+
+		++begin;
 	}
 
 	dlg_assert(best);
 	return *best;
+}
+
+Buffer& bufferAt(Device& dev, VkDeviceAddress address) {
+	auto lock = std::shared_lock(dev.mutex);
+	return bufferAtLocked(dev, address);
 }
 
 // Classes

@@ -11,14 +11,13 @@ namespace vil {
 
 void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
-	ensureSize(cb, descriptorSets, firstSet + sets.size());
+	ensureSize0(cb, descriptorSets, firstSet + sets.size());
 
 	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
 	// There may be errors here.
 	// TODO: do we even need to track it like this? only useful if we
 	// also show it in UI which sets were disturbed.
 
-	auto lastSet = firstSet + sets.size() - 1;
 	for(auto i = 0u; i < firstSet; ++i) {
 		if(!descriptorSets[i].ds) {
 			continue;
@@ -36,7 +35,7 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 	auto followingDisturbed = false;
 	for(auto i = 0u; i < sets.size(); ++i) {
 		auto s = firstSet + i;
-		auto& dsLayout = *layout.descriptors[i];
+		auto& dsLayout = *layout.descriptors[s];
 		if(!descriptorSets[s].ds || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
 			followingDisturbed = true;
 		}
@@ -51,7 +50,9 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 
 	if(followingDisturbed) {
 		// dlg_debug("disturbed following descriptorSets, from {}", lastSet + 1);
-		descriptorSets = descriptorSets.subspan(0, lastSet + 1);
+		for(auto i = firstSet + sets.size(); i < descriptorSets.size(); ++i) {
+			descriptorSets[i] = {};
+		}
 	}
 }
 

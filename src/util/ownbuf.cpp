@@ -15,6 +15,9 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	if(buf) {
 		dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);
 		dev.dispatch.FreeMemory(dev.handle, mem, nullptr);
+
+		mem = {};
+		buf = {};
 	}
 
 	// new buffer

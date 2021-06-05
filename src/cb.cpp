@@ -114,6 +114,7 @@ void CommandBuffer::doEnd() {
 
 	graphicsState_ = {};
 	computeState_ = {};
+	rayTracingState_ = {};
 	pushConstants_ = {};
 
 	section_ = nullptr;
@@ -2580,6 +2581,19 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 	for(auto i = 0u; i < infoCount; ++i) {
 		auto& buildInfo = cmd.buildInfos[i];
 		copyChainInPlace(cb, buildInfo.pNext);
+
+		// We have to perform a deep-copy of the geometry descriptions.
+		if(buildInfo.pGeometries) {
+			buildInfo.pGeometries = copySpan(cb, buildInfo.pGeometries, buildInfo.geometryCount).data();
+		} else if(buildInfo.geometryCount > 0) {
+			dlg_assert(buildInfo.ppGeometries);
+			auto dst = allocSpan<VkAccelerationStructureGeometryKHR>(cb, buildInfo.geometryCount);
+			for(auto g = 0u; g < buildInfo.geometryCount; ++g) {
+				dst[g] = *buildInfo.ppGeometries[g];
+			}
+
+			buildInfo.pGeometries = dst.data();
+		}
 
 		if(buildInfo.srcAccelerationStructure) {
 			cmd.srcs[i] = &get(*cb.dev, buildInfo.srcAccelerationStructure);

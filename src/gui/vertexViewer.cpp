@@ -7,6 +7,7 @@
 #include <util/spirv.hpp>
 #include <device.hpp>
 #include <shader.hpp>
+#include <rt.hpp>
 #include <pipe.hpp>
 #include <command/desc.hpp>
 #include <command/commands.hpp>
@@ -1404,18 +1405,25 @@ void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, floa
 			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
 		};
 
+		// TODO: we should multiple draw calls instead of just batching
+		// everything together. E.g. to visualize different geometry flags
+		// or to color them differently.
+		auto drawCount = 0u;
+		for(auto& geom : tris.geometries) {
+			drawCount += geom.triangles.size() * 3;
+		}
+
 		drawData_.cb = draw.cb;
 		drawData_.params = {};
-		drawData_.params.drawCount = tris.geo
-		drawData_.params.offset = 0u;
+		drawData_.params.drawCount = drawCount;
 		drawData_.indexBuffer = {};
-		drawData_.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
+		drawData_.vertexBuffers = {{{tris.buffer.buf, 0u, tris.buffer.size}}};
 		drawData_.canvasOffset = {pos.x, pos.y};
 		drawData_.canvasSize = {avail.x, avail.y};
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-		drawData_.useW = useW;
+		drawData_.useW = false;
 		drawData_.scale = 1.f;
-		drawData_.drawFrustum = dev_->nonSolidFill;
+		drawData_.drawFrustum = false;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1425,11 +1433,6 @@ void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, floa
 		ImGui::GetWindowDrawList()->AddCallback(cb, this);
 		ImGui::InvisibleButton("Canvas", avail);
 		updateInput(dt);
-
-		// we read from the buffer that is potentially written again
-		// by the hook so we need barriers.
-		dlg_assert(!draw.usedHookState);
-		draw.usedHookState = IntrusivePtr<CommandHookState>(const_cast<CommandHookState*>(&state));
 	}
 
 	ImGui::EndChild();
