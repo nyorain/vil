@@ -13,11 +13,16 @@ namespace vil {
 // - handle inactive primitives
 
 // util
-AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
-	auto lock = std::lock_guard(dev.mutex);
+AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address) {
+	assertOwnedOrShared(dev.mutex);
 	auto it = dev.accelStructAddresses.find(address);
 	dlg_assert(it != dev.accelStructAddresses.end());
 	return nonNull(it->second);
+}
+
+AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
+	auto lock = std::shared_lock(dev.mutex);
+	return accelStructAtLocked(dev, address);
 }
 
 // building
@@ -123,11 +128,13 @@ void writeInstances(AccelStruct& accelStruct,
 		const VkAccelerationStructureGeometryInstancesDataKHR& src,
 		const VkAccelerationStructureBuildRangeInfoKHR& info,
 		bool instancesAreAddresses) {
-	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+	dlg_assert(accelStruct.effectiveType == VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
 	auto& dst = std::get<AccelInstances>(accelStruct.data);
 
 	auto ptr = reinterpret_cast<const std::byte*>(src.data.hostAddress);
 	ptr += info.primitiveOffset;
+
+	dlg_assert(info.primitiveCount == dst.instances.size());
 
 	for(auto i = 0u; i < info.primitiveCount; ++i) {
 		const VkAccelerationStructureInstanceKHR* pSrcIni;
@@ -145,7 +152,10 @@ void writeInstances(AccelStruct& accelStruct,
 
 		if(instancesAreAddresses) {
 			auto addr = VkDeviceAddress(srcIni.accelerationStructureReference);
-			auto& ref = accelStructAt(*accelStruct.dev, addr);
+			// TODO: we should probably not have this option here and instead
+			// do this conversion in CommandHookSubmission.
+			// And do this (potentially expensive) operation with lock
+			auto& ref = accelStructAtLocked(*accelStruct.dev, addr);
 			dstIni.accelStruct = &ref;
 		} else {
 			auto vkRef = u64ToHandle<VkAccelerationStructureKHR>(srcIni.accelerationStructureReference);
@@ -166,13 +176,8 @@ void initBufs(AccelStruct& accelStruct,
 		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
 		bool initInstanceBuffer) {
 	auto& dev = *accelStruct.dev;
-	dlg_assert(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR);
 
-	accelStruct.effectiveType = accelStruct.type;
-	if(accelStruct.type == VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR) {
-		accelStruct.effectiveType = info.type;
-	}
-
+	accelStruct.effectiveType = info.type;
 	if(info.geometryCount == 0u) {
 		return;
 	}
@@ -213,34 +218,43 @@ void initBufs(AccelStruct& accelStruct,
 		tris.buffer.ensure(dev, bufSize, usage);
 		mapped = tris.buffer.map;
 	} else if(geom0.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-		dlg_assert(accelStruct.effectiveType =
+		dlg_assert(accelStruct.effectiveType ==
 			VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
 		auto& instances = accelStruct.data.emplace<AccelInstances>();
 		dlg_assert(info.geometryCount == 1u);
+		instances.instances.resize(buildRangeInfos[0].primitiveCount);
 		if(initInstanceBuffer) {
 			instances.buffer.ensure(dev, bufSize, usage);
 		}
+	} else {
+		dlg_error("Invalid VkGeometryTypeKHR: {}", geom0.geometryType);
 	}
 
 	auto off = 0u;
 	for(auto i = 0u; i < info.geometryCount; ++i) {
 		auto& geom = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
 		auto& rangeInfo = buildRangeInfos[i];
+		dlg_assert(geom.geometryType == accelStruct.geometryType);
 
 		if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
 			auto& dst = std::get<AccelAABBs>(accelStruct.data).geometries[i];
 			auto ptr = reinterpret_cast<VkAabbPositionsKHR*>(mapped + off);
 			dst.boxes = {ptr, rangeInfo.primitiveCount};
 			off += dst.boxes.size_bytes();
-		} else if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+		} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
 			auto& dst = std::get<AccelTriangles>(accelStruct.data).geometries[i];
 			auto ptr = reinterpret_cast<AccelTriangles::Triangle*>(mapped + off);
 			dst.triangles = {ptr, rangeInfo.primitiveCount};
 			off += dst.triangles.size_bytes();
+		} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+			// no-op
+		} else {
+			dlg_error("Invalid VkGeometryTypeKHR: {}", geom0.geometryType);
 		}
 	}
 
-	dlg_assert(off == bufSize);
+	dlg_assert(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR ||
+		off == bufSize);
 }
 
 void copyBuildData(AccelStruct& accelStruct,
@@ -264,7 +278,7 @@ void copyBuildData(AccelStruct& accelStruct,
 			writeInstances(accelStruct, geom.geometry.instances, rangeInfo,
 				instancesAreAddresses);
 		} else {
-			dlg_fatal("unreachable; invalid geometry type {}", geom.geometryType);
+			dlg_fatal("invalid geometry type {}", geom.geometryType);
 		}
 	}
 }

@@ -1,8 +1,11 @@
 #include <gui/resources.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
+#include <gui/command.hpp>
+#include <gui/vertexViewer.hpp>
 #include <device.hpp>
 #include <handles.hpp>
+#include <rt.hpp>
 #include <util/util.hpp>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
@@ -211,6 +214,8 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		ImGui::Text("Image can't be displayed since its format does not support sampling");
 	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
 		ImGui::Text("Image can't be displayed since it has multiple samples");
+	} else if(image.ci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT) {
+		ImGui::Text("Transient Image can't be displayed");
 	} else if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
 		// TODO: well, we could still try to display it.
 		// But we have to modify our barrier logic a bit.
@@ -237,22 +242,14 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 
 		ReadBuf texelData;
 		if(image_.readPixelBuffer.size) {
-			// TODO: keep buffer mapped
-			// TODO: invalidate and stuff
-			void* map;
-			VK_CHECK(dev.dispatch.MapMemory(dev.handle, image_.readPixelBuffer.mem,
-				0, image_.readPixelBuffer.size, 0, &map));
-			texelData = {reinterpret_cast<const std::byte*>(map), image_.readPixelBuffer.size};
+			image_.readPixelBuffer.invalidateMap();
+			texelData = {image_.readPixelBuffer.map, image_.readPixelBuffer.size};
 		}
 
 		auto format = image_.object->ci.format;
 		displayImage(*gui_, image_.draw, image_.object->ci.extent,
 			image_.object->ci.imageType, format, subres,
 			&image_.readPixelOffset, texelData);
-
-		if(!texelData.empty()) {
-			dev.dispatch.UnmapMemory(dev.handle, image_.readPixelBuffer.mem);
-		}
 
 		// We always update the descriptor set, not only when we recreate
 		// a view, since we can never know about the used draw.
@@ -1386,9 +1383,46 @@ void ResourceGui::drawDesc(Draw& draw, Pipeline& pipe) {
 }
 
 void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
-	(void) draw;
-	(void) accelStruct;
-	imGuiText("TODO");
+	refButtonExpect(*gui_, accelStruct.buf);
+	ImGui::SameLine();
+	imGuiText("Offset {}, Size {}", accelStruct.offset, accelStruct.size);
+
+	imGuiText("type: {}", vk::name(accelStruct.type));
+	imGuiText("effective type: {}", vk::name(accelStruct.effectiveType));
+	imGuiText("geometry type: {}", vk::name(accelStruct.geometryType));
+
+	if(accelStruct.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+		auto& tris = std::get<AccelTriangles>(accelStruct.data);
+
+		auto triCount = 0u;
+		for(auto& geom : tris.geometries) {
+			triCount += geom.triangles.size();
+		}
+
+		imGuiText("{} geometries, {} total tris", tris.geometries.size(), triCount);
+
+		// TODO
+		auto& vv = gui_->cbGui().commandViewer().vertexViewer();
+		vv.displayTriangles(draw, tris, gui_->dt());
+	} else if(accelStruct.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+		imGuiText("TODO: AABB info");
+	} else if(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+		auto& inis = std::get<AccelInstances>(accelStruct.data);
+
+		for(auto& ini : inis.instances) {
+			ImGui::Separator();
+			refButtonExpect(*gui_, ini.accelStruct);
+
+			imGuiText("tableOffset: {}", ini.bindingTableOffset);
+			imGuiText("customIndex: {}", ini.customIndex);
+			imGuiText("mask: {}", ini.mask);
+			imGuiText("flags: {}", vk::flagNames(VkGeometryInstanceFlagBitsKHR(ini.flags)));
+
+			// TODO: transform
+		}
+
+		imGuiText("TODO: visualize instances");
+	}
 }
 
 void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {
@@ -1677,8 +1711,6 @@ void ResourceGui::recordPreRender(Draw& draw) {
 
 		if(size > draw.readback.copy.size) {
 			draw.readback.copy.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-			VK_CHECK(dev.dispatch.MapMemory(dev.handle,
-				draw.readback.copy.mem, 0u, VK_WHOLE_SIZE, 0u, &draw.readback.map));
 		}
 
 		VkBufferMemoryBarrier bufb {};

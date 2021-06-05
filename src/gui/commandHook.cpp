@@ -181,13 +181,17 @@ CommandHook::CommandHook(Device& dev) {
 
 CommandHook::~CommandHook() {
 	invalidateRecordings();
+
+	auto& dev = *dev_;
+	dev.dispatch.DestroyPipelineLayout(dev.handle, accelStructPipeLayout_, nullptr);
+	dev.dispatch.DestroyPipeline(dev.handle, accelStructVertCopy_, nullptr);
 }
 
 void CommandHook::initAccelStructCopy(Device& dev) {
 	// We just allocate the full push constant range that all implementations
 	// must support.
 	VkPushConstantRange pcrs[1] = {};
-	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pcrs[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	pcrs[0].offset = 0;
 	pcrs[0].size = 128; // needed e.g. for vertex viewer pipeline
 
@@ -1023,7 +1027,7 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 
 void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
 		OwnBuffer& dst, VkDeviceSize dstOffset, VkDeviceSize size) {
-	auto& srcBuf = bufferAt(dev, srcPtr);
+	auto& srcBuf = bufferAtLocked(dev, srcPtr);
 	auto srcOff = srcPtr - srcBuf.deviceAddress;
 	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
 }
@@ -1463,7 +1467,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info)
 	}
 }
 
-// see accelStructVertices.comp
+// see accelStructVertices.comp, must match
 static const u32 vertTypeRG32f = 1u;
 static const u32 vertTypeRGB32f = 2u;
 static const u32 vertTypeRGBA32f = 3u;
@@ -1511,7 +1515,14 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 		dst.geoms.resize(dst.info.geometryCount);
 		dst.info.pGeometries = dst.geoms.data();
 
+		auto needsInit = (dst.dst->geometryType == VK_GEOMETRY_TYPE_MAX_ENUM_KHR);
 		if(dst.dst->geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+			// when the accelStruct was built before, but never on the device,
+			// we might not have a instance device buffer.
+			needsInit = !(std::get<AccelInstances>(dst.dst->data).buffer.buf);
+		}
+
+		if(needsInit) {
 			dlg_assert(cmd.buildRangeInfos[i].size() == srcBuildInfo.geometryCount);
 			initBufs(*dst.dst, srcBuildInfo, cmd.buildRangeInfos[i].data(), true);
 		}
@@ -1526,6 +1537,8 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 		} else if(dst.dst->geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
 			auto& dst = std::get<AccelInstances>(accelStruct.data);
 			dstBuffer = &dst.buffer;
+		} else {
+			dlg_error("Invalid VkGeometryTypeKHR: {}", dst.dst->geometryType);
 		}
 
 		dlg_assert(dstBuffer);
@@ -1558,6 +1571,7 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 				// which is a pain.
 				dlg_assertm(srcTris.vertexStride % 4u == 0u,
 					"Building acceleration structures with vertexStride % 4 != 0 not implemented");
+				dlg_assert(srcTris.vertexStride >= FormatElementSize(srcTris.vertexFormat));
 
 				dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 					cmdHook.accelStructVertCopy_);
@@ -1566,6 +1580,7 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 				struct {
 					u64 indPtr;
 					u64 vertPtr;
+					u64 transformPtr;
 					u64 dstPtr;
 					u32 count;
 					u32 indexSize;
@@ -1575,23 +1590,29 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 
 				pcr.indPtr = srcTris.indexData.deviceAddress;
 				pcr.vertPtr = srcTris.vertexData.deviceAddress;
+				pcr.transformPtr = srcTris.transformData.deviceAddress;
 				pcr.dstPtr = dstAddress + dstOff;
 				pcr.indexSize = indexSize(srcTris.indexType);
 				pcr.vertStride = srcTris.vertexStride / 4u;
 				pcr.vertType = getVertType(srcTris.vertexFormat);
-				pcr.count = range.primitiveCount;
+				pcr.count = 3 * range.primitiveCount;
 
+				pcr.vertPtr += range.firstVertex * srcTris.vertexStride;
 				if(srcTris.indexType == VK_INDEX_TYPE_NONE_KHR) {
 					pcr.vertPtr += range.primitiveOffset;
 				} else {
 					dlg_assert(pcr.indPtr);
 					pcr.indPtr += range.primitiveOffset;
-					pcr.vertPtr += range.firstVertex * srcTris.vertexStride;
 				}
+
+				if(pcr.transformPtr) {
+					pcr.transformPtr += range.transformOffset;
+				}
+
 				dev.dispatch.CmdPushConstants(cb, cmdHook.accelStructPipeLayout_,
 					VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), &pcr);
 
-				auto gx = ceilDivide(range.primitiveCount, 64u);
+				auto gx = ceilDivide(3 * range.primitiveCount, 64u);
 				dev.dispatch.CmdDispatch(cb, gx, 1u, 1u);
 
 				dstTris.indexData.hostAddress = {};
@@ -1614,7 +1635,7 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 
 				dstOff += size;
 			} else {
-				dlg_fatal("unreachable; invalid geometry type {}", srcGeom.geometryType);
+				dlg_fatal("invalid geometry type {}", srcGeom.geometryType);
 			}
 		}
 	}

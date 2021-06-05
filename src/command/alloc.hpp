@@ -63,8 +63,9 @@ template<typename T>
 
 template<typename T>
 [[nodiscard]] span<T> allocSpan0(CommandBuffer& cb, size_t count) {
+	static_assert(std::is_trivially_copyable_v<T>);
 	auto ret = allocSpan<T>(cb, count);
-	std::memset(ret.data(), 0x0, count * sizeof(ret[0]));
+	std::memset((void*) ret.data(), 0x0, count * sizeof(ret[0]));
 	return ret;
 }
 
@@ -126,8 +127,7 @@ void ensureSize0(CommandBuffer& cb, span<T>& buf, size_t size) {
 		return;
 	}
 
-	auto newBuf = allocSpan<T>(cb, size);
-	std::memset((void*) newBuf.data(), 0x0, size);
+	auto newBuf = allocSpan0<T>(cb, size);
 	std::copy(buf.begin(), buf.end(), newBuf.begin());
 	buf = newBuf;
 }

@@ -42,6 +42,7 @@ VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize 
 // largest range from the given address.
 // Will lock the device mutex internally.
 Buffer& bufferAt(Device& dev, VkDeviceAddress address);
+Buffer& bufferAtLocked(Device& dev, VkDeviceAddress address);
 
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(

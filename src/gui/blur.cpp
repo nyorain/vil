@@ -74,9 +74,7 @@ void init(GuiBlur& blur, Device& dev, VkSampler sampler) {
 
 	// init vertices
 	blur.vertices.ensure(dev, sizeof(ImDrawVert) * 6, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-
-	ImDrawVert* verts;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, blur.vertices.mem, 0, VK_WHOLE_SIZE, 0, (void**) &verts));
+	auto* verts = reinterpret_cast<ImDrawVert*>(blur.vertices.map);
 
 	auto col = ImColor(1.f, 1.f, 1.f, 1.f);
 	auto writeVert = [&](unsigned i, float x, float y) {
@@ -97,13 +95,7 @@ void init(GuiBlur& blur, Device& dev, VkSampler sampler) {
 	writeVert(4, 1.f, 1.f);
 	writeVert(5, -1.f, 1.f);
 
-	VkMappedMemoryRange range[1] = {};
-	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	range[0].memory = blur.vertices.mem;
-	range[0].size = VK_WHOLE_SIZE;
-
-	VK_CHECK(dev.dispatch.FlushMappedMemoryRanges(dev.handle, 1, range));
-	dev.dispatch.UnmapMemory(dev.handle, blur.vertices.mem);
+	blur.vertices.flushMap();
 }
 
 void destroyBuffers(GuiBlur& blur, VkDescriptorPool dsPool) {

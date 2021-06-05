@@ -83,6 +83,7 @@ void copyBuildData(AccelStruct&,
 // Returns the AccelStruct located at the given address. The address
 // must match exactly.
 AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address);
+AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address);
 
 struct RayTracingPipeline : Pipeline {
 	struct Group {

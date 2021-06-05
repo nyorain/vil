@@ -5,20 +5,21 @@
 
 layout(local_size_x = 64) in;
 
-layout(buffer_reference, std430, buffer_reference_align = 2) buffer Indices {
+// TODO: can we really assume alignments?
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Indices {
 	uint vals[];
 };
 
-layout(buffer_reference, std430, buffer_reference_align = 2) buffer Vertices {
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Vertices {
 	uint vals[];
 };
 
-layout(buffer_reference, std430, row_major, buffer_reference_align = 2) buffer Transform {
+layout(buffer_reference, std430, row_major, buffer_reference_align = 16) buffer Transform {
 	// even with row_major memory layout, mat3x4 still means a matrix with 3 rows
 	mat4x3 mat;
 };
 
-layout(buffer_reference, std430, buffer_reference_align = 2) buffer Dst {
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer Dst {
 	vec4 vals[];
 };
 
@@ -35,8 +36,8 @@ const uint vertTypeRGBA16s = 7u;
 layout(push_constant) uniform PCR {
 	Indices inds;
 	Vertices verts;
-	Dst dst;
 	Transform transform;
+	Dst dst;
 	uint count;
 	uint indexSize;
 	uint vertType;
@@ -59,7 +60,7 @@ vec4 extractVert(uint off) {
 		case vertTypeRG16f: return vec4(extract16f_2(off), 0.f, 1.f);
 		case vertTypeRGBA16f: return vec4(extract16f_2(off), extract16f_2(off + 1));
 		case vertTypeRG16s: return vec4(extract16s_2(off), 0.f, 1.f);
-		case vertTypeRGBA16s: return vec4(extract16s_2(off), 0.f, 1.f);
+		case vertTypeRGBA16s: return vec4(extract16s_2(off), extract16s_2(off + 1));
 
 		case vertTypeRG32f:
 			return vec4(
@@ -77,12 +78,12 @@ vec4 extractVert(uint off) {
 				uintBitsToFloat(pcr.verts.vals[off + 1]),
 				uintBitsToFloat(pcr.verts.vals[off + 2]),
 				uintBitsToFloat(pcr.verts.vals[off + 3]));
-		default: return vec4(-1.f);
+		default: return vec4(0.f, 0.f, 0.f, 1.f);
 	}
 }
 
 void main() {
-	uint id = gl_GlobalInvocationID.x;
+	const uint id = gl_GlobalInvocationID.x;
 	if(id >= pcr.count) {
 		return;
 	}
@@ -109,5 +110,5 @@ void main() {
 		vert = vec4(pcr.transform.mat * vert, 1.0);
 	}
 
-	pcr.dst.vals[idx] = vert;
+	pcr.dst.vals[id] = vert;
 }

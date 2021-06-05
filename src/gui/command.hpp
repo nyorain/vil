@@ -63,6 +63,8 @@ public:
 
 	CommandHookState* state() const { return state_.get(); }
 
+	auto& vertexViewer() { return vertexViewer_; }
+
 private:
 	Device& dev() const;
 

@@ -1770,17 +1770,11 @@ void Gui::finishedLocked(Draw& draw) {
 			rb.handle->handle == draw.readback.src &&
 			rb.offset == draw.readback.offset) {
 		ensureSize(rb.lastRead, draw.readback.size);
-
-		VkMappedMemoryRange range {};
-		range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-		range.memory = draw.readback.copy.mem;
-		range.size = VK_WHOLE_SIZE;
-		range.offset = 0u;
-		VK_CHECK(dev().dispatch.InvalidateMappedMemoryRanges(dev().handle, 1u, &range));
+		draw.readback.copy.invalidateMap();
 
 		// PERF: with some clever syncing we could probably get around
 		// the copy here and instead read from the mapped memory directly.
-		auto src = static_cast<std::byte*>(draw.readback.map);
+		auto src = static_cast<std::byte*>(draw.readback.copy.map);
 		std::copy(src, src + draw.readback.size, rb.lastRead.begin());
 	}
 
