@@ -1,4 +1,5 @@
 #include <util/ownbuf.hpp>
+#include <util/util.hpp>
 #include <device.hpp>
 
 namespace vil {
