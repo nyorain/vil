@@ -115,7 +115,7 @@ For instance:
 - VK_EXT_scalar_block_layout
 - VK_EXT_shader_subgroup_ballot
 
-### TODO, not supported yet
+## Missing extensions
 
 Using these extensions will likely cause a crash.
 
@@ -124,7 +124,6 @@ Using these extensions will likely cause a crash.
 - VK_EXT_extended_dynamic_state2
 - VK_EXT_color_write_enable
 - VK_EXT_transform_feedback
-
 - VK_AMD_buffer_marker
 - VK_NV_device_diagnostic_checkpoints
 - VK_NV_scissor_exclusive
@@ -133,7 +132,6 @@ Using these extensions will likely cause a crash.
 - VK_NV_shading_rate_image
 - VK_NV_fragment_shading_rate_enums
 - VK_NV_device_generated_commands
-
 - The old NV raytracing extensions. They also won't be supported in the future,
   use the KHR extensions instead.
 
