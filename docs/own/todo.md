@@ -14,9 +14,15 @@ urgent, bugs:
       and the RecordBatches that the currently selected command is part of.
 	  We need to store the latter to correctly do contexted LCS
 - [ ] image viewer validation bug when we don't hover the image
+- [ ] fix general commandHook synchronization, see design.md on
+      buffer_device_address, uncovered general potential race
+- [ ] Make renderPass intrusive ptr object (like imageView etc) and directly
+      embed RenderPassDesc. Correctly link to it from framebuffer/gfxPipeline
 
 descriptor indexing extension:
-- [ ] support partially_bound. Also not sure we have update_after_bind in
+- [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 
+	  expect descriptors to be valid. Might also be a problem in CommandHook.
+- [ ] Make sure we have update_after_bind in
       mind everywhere. We would at least have to lock the descriptorSetState mutex
 	  when reading it in Gui/match to support this, might get a race otherwise.
 	  Or, probably better: hold the per-ds mutex locked during the whole
@@ -256,6 +262,7 @@ ext support:
       would also be nice to show in gui
 
 
+- [ ] raytracing: proper support for pipeline libraries
 - [ ] correctly query transform feedback limits and respect them, e.g. buffer size
 - [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
       make sure destruction is tracked correctly. Also show in gui.
@@ -477,6 +484,7 @@ ext support:
 	- [ ] ext color_write_enable
 	- [x] khr ray tracing
 	- [ ] device masks (core vulkan by now)
+	      ugh, supporting this will be a MAJOR pain, especially gui rendering.
 	- [ ] nv device diagnostic checkpoint
 	- [ ] nv exclusive scissor
 	- [ ] nv mesh shaders

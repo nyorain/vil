@@ -564,3 +564,76 @@ retrieve everything later on.
 Second, we simply run CmdDispatchIndirect, possibly multiple times.
 For copying indexed data (might happen with indirect draw or accelStruct triangles),
 we just have an additional level of indirection.
+
+# Proper buffer_device_address support
+
+How to synchronize when only buffer_device_address is given?
+
+Consider the following scenario:
+- An application uses writes a storage buffer by using buffer_device_address
+  in async compute
+- we retrieve data from the buffer on the gfx queue (e.g. in CommandHook
+  or the resource buffer viewer)
+
+Currently, we wouldn't insert any synchronization, resulting in a data
+race. Can we even synchronize for this case at all though? We often
+have no idea about the buffer_device_address that is used in the end
+during submission time. So we can't know which buffer/memory is used
+and can't insert synchronization. Retrieving it via commandHook is possible
+but (a) might add a lot of overhead if many pipelines use deviceAddress and
+(b) we would only know the result after the submission finishes, not
+allowing synchronization.
+
+So, we need an alternative approach.
+- for reading application buffers during gui rendering (e.g. the buffer resource
+  viewer) we simply have to synchronize with *all* submissions that make
+  use of buffer_device_address. That hurts but there's no way around it.
+  Should only have a real performance hit for async queues.
+- commandHook buffer reading is more complicated.
+  Doesn't seem too bad at first glance: we will
+  only read addresses from state that is currently bound, so just
+  relying on the application to manage synchronization is tempting.
+  But AFAIK it's allowed to have data or device addresses *accessible* (as long
+  as it's not read in the end) in a shader that is currently written 
+  somewhere else.
+  	- Hm, wait, this is a general problem we have at the moment. We don't/can't
+	  synchronize for that at all.
+  So we probably have to sync hooked submissions with everything else, in general?
+  Might also be painful for performance, especially with async queues. We
+  could still expose an option in the settings for that (since it will usually
+  work without it I guess; enable it by default though).
+
+
+How to allow introspection in gui?
+How far do we want to follow shader references when copying state in
+commandHook? Can we even follow it at all? When we don't know the
+used device address at submission time, we can't know if it's valid
+when copying - and even if, we can't know its size. We have that information
+on the cpu but can't/shouldn't do roundtrips. Having the mapping
+from device address to buffer size on the GPU in some form could work (using
+then some size retrieval and indirect copy mechanism) but I'd rather not.
+
+Alternatively, we don't follow references at all and only resolve them
+when asked for in gui (at that point we can validate whether the address
+is valid and how much data we are allowed to read from there). Has,
+once again, the fundamental temporal issue though: data may have changed
+and might not match the state we are viewing.
+	This would be pretty much the same thing we do in the buffer resource
+	viewer. Shouldn't be hard to implement/fallback to.
+
+---
+
+Ok, maybe we really want this overly complicated reference-following
+mechanism with a gpu (hostVisible) table of all addresses and their sizes.
+Can we even really do this? 
+
+If we really follow *all* references and copy all the data, we might end up 
+with *huge* copies.
+	Could limit the copy size.
+
+The shader might have structures such a linked lists, following so many
+reference might add too much overhead
+	Could limit the maximum traversal depth.
+
+Also, we know the shader structure at submission time so can schedule/layout
+everything, don't need to do that in a shader.

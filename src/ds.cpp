@@ -4,7 +4,7 @@
 #include <buffer.hpp>
 #include <image.hpp>
 #include <pipe.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <util/util.hpp>
 #include <util/profiling.hpp>

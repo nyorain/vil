@@ -2,7 +2,7 @@
 #include <handles.hpp>
 #include <shader.hpp>
 #include <cb.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <util/span.hpp>
 #include <util/util.hpp>
@@ -1572,7 +1572,7 @@ float DispatchCmd::match(const Command& base) const {
 	// this gets though.
 	add(m, groupsX, cmd->groupsX, 2.0);
 	add(m, groupsY, cmd->groupsY, 4.0);
-	add(m, groupsZ, cmd->groupsZ, 8.0);
+	add(m, groupsZ, cmd->groupsZ, 6.0);
 
 	return eval(m);
 }
@@ -2821,16 +2821,81 @@ TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb, const RayTracingState& rtS
 	pushConstants.data = copySpan(cb, cb.pushConstants().data);
 }
 
+Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
+	// different pipelines means the draw calls are fundamentally different,
+	// no matter if similar data is bound.
+	if(!state.pipe || !cmd.state.pipe || state.pipe != cmd.state.pipe) {
+		return Matcher::noMatch();
+	}
+
+	Matcher m;
+	for(auto& pcr : state.pipe->layout->pushConstants) {
+		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
+		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
+
+		m.total += pcr.size;
+		if(std::memcmp(&pushConstants.data[pcr.offset],
+				&cmd.pushConstants.data[pcr.offset], pcr.size) == 0u) {
+			m.match += pcr.size;
+		}
+	}
+
+	// - we consider the bound descriptors somewhere else since they might
+	//   already have been unset from the command
+
+	return m;
+}
+
 void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdTraceRaysKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
 		width, height, depth);
 }
 
+float TraceRaysCmd::match(const Command& base) const {
+	auto* cmd = dynamic_cast<const TraceRaysCmd*>(&base);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	auto m = doMatch(*cmd);
+	if(m.total == -1.f) {
+		return 0.f;
+	}
+
+	// we don't hard-match on them since this may change for per-frame
+	// varying workloads (in comparison to draw parameters, which rarely
+	// change for per-frame stuff). The higher the dimension, the more unlikely
+	// this gets though.
+	add(m, width, cmd->width, 2.0);
+	add(m, height, cmd->height, 4.0);
+	add(m, depth, cmd->depth, 6.0);
+
+	// TODO: consider bound tables? At least size and stride?
+
+	return eval(m);
+}
+
 void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdTraceRaysIndirectKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
 		indirectDeviceAddress);
+}
+
+float TraceRaysIndirectCmd::match(const Command& base) const {
+	auto* cmd = dynamic_cast<const TraceRaysCmd*>(&base);
+	if(!cmd) {
+		return 0.f;
+	}
+
+	auto m = doMatch(*cmd);
+	if(m.total == -1.f) {
+		return 0.f;
+	}
+
+	// TODO: consider bound tables? At least size and stride?
+
+	return eval(m);
 }
 
 void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffer cb) const {

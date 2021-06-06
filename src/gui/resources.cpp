@@ -5,7 +5,7 @@
 #include <gui/vertexViewer.hpp>
 #include <device.hpp>
 #include <handles.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <util/util.hpp>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>

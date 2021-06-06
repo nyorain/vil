@@ -38,6 +38,8 @@ Implemented:
 - vkCmdDrawIndirectCount & vkCmdDrawIndexedIndirectCount
 - VK_KHR_create_renderpass2
 - VK_KHR_buffer_device_address (introspection support WIP)
+	- known problem: synchronization problems when using the gui on 
+	  commands/buffers using this feature. WIP
 - VK_KHR_imageless_framebuffer
 - VK_EXT_descriptor_indexing
 	- known problem: some edge cases with update_unused_while_pending

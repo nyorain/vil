@@ -140,7 +140,7 @@ src = files(
 	'src/queryPool.cpp',
 	'src/queue.cpp',
 	'src/submit.cpp',
-	'src/rt.cpp',
+	'src/accelStruct.cpp',
 
 	# gui stuff
 	'src/gui/render.cpp',
@@ -169,7 +169,7 @@ src = files(
 	'src/cb.hpp',
 	'src/handles.hpp',
 	'src/rp.hpp',
-	'src/rt.hpp',
+	'src/accelStruct.hpp',
 	'src/sync.hpp',
 	'src/pipe.hpp',
 	'src/shader.hpp',

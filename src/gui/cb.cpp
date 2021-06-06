@@ -210,7 +210,9 @@ void CommandBufferGui::draw(Draw& draw) {
 			}
 
 			if(ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit")) {
-				ImGui::Separator();
+				if(!batch.submissions.empty()) {
+					ImGui::Separator();
+				}
 
 				// we don't want as much space as tree nodes
 				auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
@@ -495,11 +497,6 @@ void CommandBufferGui::updateState() {
 		}
 
 		if(best) {
-			// update command viewer state from hook match
-			commandViewer_.select(best->record, *best->command.back(),
-				best->descriptorSnapshot, false);
-			commandViewer_.state(best->state);
-
 			// we alwyas update the commandHook desc (even if we don't
 			// update the internal state below) since this record is newer
 			// than the old one and might have valid handles/state that is
@@ -509,9 +506,9 @@ void CommandBufferGui::updateState() {
 
 			// update internal state state from hook match
 			if(!freezeCommands_) {
-				record_ = std::move(best->record);
+				record_ = best->record;
 				command_ = best->command;
-				dsState_ = std::move(best->descriptorSnapshot);
+				dsState_ = best->descriptorSnapshot;
 			}
 
 			// In swapchain mode - and when not freezing commands - make
@@ -519,6 +516,16 @@ void CommandBufferGui::updateState() {
 			if(mode_ == UpdateMode::swapchain && !freezeCommands_) {
 				records_ = {bestBatches.begin(), bestBatches.end()};
 			}
+
+			// update command viewer state from hook match
+			// TODO: this call messes with the commandHook, potentially
+			// invalidated 'best'. And messing with freeze. Should
+			// clean up responsibilities here. If we don't have
+			// to call this here, we could also move from the vectors
+			// from *best above.
+			commandViewer_.select(best->record, *best->command.back(),
+				best->descriptorSnapshot, false);
+			commandViewer_.state(best->state);
 
 			// in this case, we want to freeze state but temporarily
 			// unfroze it to get a new CommandHookState. This happens

@@ -7,7 +7,7 @@
 #include <util/spirv.hpp>
 #include <device.hpp>
 #include <shader.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <pipe.hpp>
 #include <command/desc.hpp>
 #include <command/commands.hpp>

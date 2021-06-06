@@ -11,7 +11,7 @@
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <pipe.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <image.hpp>
 #include <buffer.hpp>
 #include <ds.hpp>
@@ -252,8 +252,24 @@ void CommandViewer::unselect() {
 
 void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 		CommandDescriptorSnapshot dsState, bool resetState) {
-	auto drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
-	auto dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
+
+	const DrawCmdBase* drawCmd {};
+	const StateCmdBase* stateCmd {};
+
+	switch(cmd.type()) {
+		case CommandType::draw:
+			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
+			break;
+		case CommandType::dispatch:
+			stateCmd = deriveCast<const DispatchCmdBase*>(&cmd);
+			break;
+		case CommandType::traceRays:
+			stateCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
+			break;
+		default:
+			break;
+	}
+
 	auto selectCommandView = false;
 
 	// update view_, only keep it if it still makes sense
@@ -291,31 +307,25 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			}
 			break;
 		} case IOView::ds: {
-			if(!drawCmd && !dispatchCmd) {
+			if(!stateCmd) {
 				selectCommandView = true;
 				break;
 			}
 
-			auto* lastDrawCmd = dynamic_cast<const DrawCmdBase*>(command_);
-			auto* lastDispatchCmd = dynamic_cast<const DispatchCmdBase*>(command_);
-			dlg_assert(lastDrawCmd || lastDispatchCmd);
+			auto* lastStateCmd = deriveCast<const StateCmdBase*>(command_);
 
 			// when the newly select command uses a descriptor set with different
 			// layout at the selected set we reset the selection. We don't
 			// compare cmd->state.descriptorSets as that is often invalidated.
 			// Using the layout of the bound pipe is more robust.
 			PipelineLayout* newPL {};
-			if(dispatchCmd && dispatchCmd->state.pipe) {
-				newPL = dispatchCmd->state.pipe->layout.get();
-			} else if(drawCmd&& drawCmd->state.pipe) {
-				newPL = drawCmd->state.pipe->layout.get();
+			if(auto* pipe = stateCmd->boundPipe(); pipe) {
+				newPL = pipe->layout.get();
 			}
 
 			PipelineLayout* oldPL {};
-			if(lastDispatchCmd && lastDispatchCmd->state.pipe) {
-				oldPL = lastDispatchCmd->state.pipe->layout.get();
-			} else if(lastDrawCmd&& lastDrawCmd->state.pipe) {
-				oldPL = lastDrawCmd->state.pipe->layout.get();
+			if(auto* pipe = lastStateCmd->boundPipe()) {
+				oldPL = pipe->layout.get();
 			}
 
 			if (!oldPL || !newPL || !compatibleForSetN(*oldPL, *newPL, viewData_.ds.set)) {
@@ -332,32 +342,25 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			}
 			break;
 		case IOView::pushConstants:
+			if(!stateCmd || !stateCmd->boundPipe()) {
+				selectCommandView = true;
+				break;
+			}
+
 			// we keep the selection if pcr in the selected stage exists in
 			// the new command
-			if(dispatchCmd && dispatchCmd->state.pipe) {
-				auto& refl = nonNull(nonNull(dispatchCmd->state.pipe->stage.spirv).reflection);
-				if(refl.push_constant_block_count == 0 ||
-						viewData_.pushConstants.stage != VK_SHADER_STAGE_COMPUTE_BIT) {
-					selectCommandView = true;
-				}
-			} else if(drawCmd && drawCmd->state.pipe) {
-				auto& pipe = *drawCmd->state.pipe;
-				auto found = false;
-				for(auto& stage : pipe.stages) {
-					auto& refl = nonNull(stage.spirv->reflection);
-					if(refl.push_constant_block_count &&
-							viewData_.pushConstants.stage == stage.stage) {
-						found = true;
-						break;
-					}
-				}
+			auto pipeStages = stages(*stateCmd->boundPipe());
+			selectCommandView = true;
 
-				if(!found) {
-					selectCommandView = true;
+			for(auto& stage : pipeStages) {
+				auto& refl = nonNull(stage.spirv->reflection);
+				if(refl.push_constant_block_count &&
+						viewData_.pushConstants.stage == stage.stage) {
+					selectCommandView = false;
+					break;
 				}
-			} else {
-				selectCommandView = true;
 			}
+
 			break;
 	}
 
@@ -404,12 +407,13 @@ void CommandViewer::displayTransferIOList() {
 
 		found = true;
 
+		auto lflags = flags;
 		if(view_ == IOView::transferSrc) {
-			flags |= ImGuiTreeNodeFlags_Selected;
+			lflags |= ImGuiTreeNodeFlags_Selected;
 		}
 
 		// TODO: display more information about src
-		ImGui::TreeNodeEx("Source", flags);
+		ImGui::TreeNodeEx("Source", lflags);
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferSrc;
 			ioImage_ = {};
@@ -424,12 +428,13 @@ void CommandViewer::displayTransferIOList() {
 
 		found = true;
 
+		auto lflags = flags;
 		if(view_ == IOView::transferDst) {
-			flags |= ImGuiTreeNodeFlags_Selected;
+			lflags |= ImGuiTreeNodeFlags_Selected;
 		}
 
 		// TODO: display more information about dst
-		ImGui::TreeNodeEx("Destination", flags);
+		ImGui::TreeNodeEx("Destination", lflags);
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferDst;
 			ioImage_ = {};
@@ -467,10 +472,26 @@ void CommandViewer::displayTransferIOList() {
 void CommandViewer::displayDsList() {
 	auto& cmd = nonNull(command_);
 
-	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
-	if(!drawCmd && !dispatchCmd) {
-		return;
+	const DrawCmdBase* drawCmd {};
+	const DispatchCmdBase* dispatchCmd {};
+	const TraceRaysCmdBase* traceCmd {};
+	span<const BoundDescriptorSet> dss {};
+
+	switch(cmd.type()) {
+		case CommandType::draw:
+			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
+			dss = drawCmd->state.descriptorSets;
+			break;
+		case CommandType::dispatch:
+			dispatchCmd = deriveCast<const DispatchCmdBase*>(&cmd);
+			dss = dispatchCmd->state.descriptorSets;
+			break;
+		case CommandType::traceRays:
+			traceCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
+			dss = traceCmd->state.descriptorSets;
+			break;
+		default:
+			return;
 	}
 
 	// TODO: make this a runtime setting
@@ -511,6 +532,16 @@ void CommandViewer::displayDsList() {
 					}
 				}
 			}
+		} else if(traceCmd && traceCmd->state.pipe) {
+			for(auto& stage : traceCmd->state.pipe->stages) {
+				auto& refl = nonNull(nonNull(stage.spirv).reflection);
+				if(auto name = modBindingName(refl, setID, bindingID); name) {
+					best = name;
+					if(best != unnamedName) {
+						return best;
+					}
+				}
+			}
 		}
 
 		if(best) {
@@ -521,7 +552,6 @@ void CommandViewer::displayDsList() {
 		return showUnusedBindings ? std::optional("<unused>") : std::nullopt;
 	};
 
-	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	if(ImGui::TreeNodeEx("Descriptors", ImGuiTreeNodeFlags_FramePadding)) {
 		// NOTE: better to iterate over sets/bindings in shader stages?
@@ -590,8 +620,25 @@ void CommandViewer::displayDsList() {
 void CommandViewer::displayIOList() {
 	auto& cmd = nonNull(command_);
 
-	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+	const DrawCmdBase* drawCmd {};
+	const DispatchCmdBase* dispatchCmd {};
+	const TraceRaysCmdBase* traceCmd {};
+
+	switch(cmd.type()) {
+		case CommandType::draw:
+			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
+			break;
+		case CommandType::dispatch:
+			dispatchCmd = deriveCast<const DispatchCmdBase*>(&cmd);
+			break;
+		case CommandType::traceRays:
+			traceCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
+			break;
+		default:
+			break;
+	}
+
+	(void) traceCmd;
 
 	auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
 		ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_NoTreePushOnOpen;
@@ -733,35 +780,40 @@ void CommandViewer::displayIOList() {
 			}
 		}
 	}
+	// TODO: push constants for ray tracing. Can get complicated due to
+	// high number of shaders, need new concept for visualizing them.
 }
 
-void CommandViewer::displayBeforeCheckbox() {
+bool CommandViewer::displayBeforeCheckbox() {
 	if(ImGui::Checkbox("Before Command", &beforeCommand_)) {
 		updateHook();
+		return true;
 	}
+
+	return false;
 }
 
 void CommandViewer::displayDs(Draw& draw) {
 	auto& gui = *this->gui_;
-	auto& cmd = nonNull(command_);
-	displayBeforeCheckbox();
-
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
-	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd);
-	if(!drawCmd && !dispatchCmd) {
-		dlg_error("Unreachable");
+	if(displayBeforeCheckbox()) {
+		ImGui::Text("Updating...");
 		return;
 	}
 
-	if((dispatchCmd && !dispatchCmd->state.pipe) || (drawCmd && !drawCmd->state.pipe)) {
+	auto* cmd = deriveCast<const StateCmdBase*>(command_);
+	dlg_assert_or(cmd, return);
+
+	if(!cmd->boundPipe()) {
 		ImGui::Text("Pipeline was destroyed, can't interpret content");
 		return;
 	}
 
+	auto dss = cmd->boundDescriptors().descriptorSets;
+	auto& pipe = *cmd->boundPipe();
+
 	dlg_assert(view_ == IOView::ds);
 	auto [setID, bindingID, _] = viewData_.ds;
 
-	auto dss = dispatchCmd ? dispatchCmd->state.descriptorSets : drawCmd->state.descriptorSets;
 	if(setID >= dss.size()) {
 		ImGui::Text("DescriptorSet not bound");
 		dlg_warn("DescriptorSet not bound? Shouldn't happen");
@@ -839,37 +891,25 @@ void CommandViewer::displayDs(Draw& draw) {
 			return;
 		}
 
-		if(dispatchCmd) {
-			auto& pipe = nonNull(dispatchCmd->state.pipe);
-			auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
+		SpvReflectBlockVariable* bestVar = nullptr;
+
+		// In all graphics pipeline stages, find the block with
+		// that covers the most of the buffer
+		// TODO: add explicit dropdown, selecting the stage to view.
+		for(auto& stage : stages(pipe)) {
+			auto& refl = nonNull(nonNull(stage.spirv).reflection);
 			auto* binding = getReflectBinding(refl, setID, bindingID);
-			if(!binding || !binding->block.type_description) {
-				ImGui::Text("Binding not used in pipeline");
-			} else {
-				display(binding->block, buf->data());
+
+			if(binding && binding->block.type_description && (
+					!bestVar || binding->block.size > bestVar->size)) {
+				bestVar = &binding->block;
 			}
+		}
+
+		if(bestVar) {
+			display(*bestVar, buf->data());
 		} else {
-			dlg_assert(drawCmd);
-			SpvReflectBlockVariable* bestVar = nullptr;
-
-			// In all graphics pipeline stages, find the block with
-			// that covers the most of the buffer
-			// TODO: add explicit dropdown, selecting the stage to view.
-			for(auto& stage : drawCmd->state.pipe->stages) {
-				auto& refl = nonNull(nonNull(stage.spirv).reflection);
-				auto* binding = getReflectBinding(refl, setID, bindingID);
-
-				if(binding && binding->block.type_description && (
-						!bestVar || binding->block.size > bestVar->size)) {
-					bestVar = &binding->block;
-				}
-			}
-
-			if(bestVar) {
-				display(*bestVar, buf->data());
-			} else {
-				ImGui::Text("Binding not used in pipeline");
-			}
+			ImGui::Text("Binding not used in pipeline");
 		}
 	} else if(dsCat == DescriptorCategory::image) {
 		imGuiText("{}", vk::name(dsType));
@@ -932,37 +972,25 @@ void CommandViewer::displayDs(Draw& draw) {
 		auto blockData = inlineUniformBlock(state, bindingID);
 		imGuiText("Inline Uniform Block, Size {}", blockData.size());
 
-		if(dispatchCmd) {
-			auto& pipe = nonNull(dispatchCmd->state.pipe);
-			auto& refl = nonNull(nonNull(pipe.stage.spirv).reflection);
+		SpvReflectBlockVariable* bestVar = nullptr;
+
+		// In all graphics pipeline stages, find the block with
+		// that covers the most of the buffer
+		// TODO: add explicit dropdown, selecting the stage to view.
+		for(auto& stage : stages(pipe)) {
+			auto& refl = nonNull(nonNull(stage.spirv).reflection);
 			auto* binding = getReflectBinding(refl, setID, bindingID);
-			if(!binding || !binding->block.type_description) {
-				ImGui::Text("Binding not used in pipeline");
-			} else {
-				display(binding->block, blockData);
+
+			if(binding && binding->block.type_description && (
+					!bestVar || binding->block.size > bestVar->size)) {
+				bestVar = &binding->block;
 			}
+		}
+
+		if(bestVar) {
+			display(*bestVar, blockData);
 		} else {
-			dlg_assert(drawCmd);
-			SpvReflectBlockVariable* bestVar = nullptr;
-
-			// In all graphics pipeline stages, find the block with
-			// that covers the most of the buffer
-			// TODO: add explicit dropdown, selecting the stage to view.
-			for(auto& stage : drawCmd->state.pipe->stages) {
-				auto& refl = nonNull(nonNull(stage.spirv).reflection);
-				auto* binding = getReflectBinding(refl, setID, bindingID);
-
-				if(binding && binding->block.type_description && (
-						!bestVar || binding->block.size > bestVar->size)) {
-					bestVar = &binding->block;
-				}
-			}
-
-			if(bestVar) {
-				display(*bestVar, blockData);
-			} else {
-				ImGui::Text("Binding not used in pipeline");
-			}
+			ImGui::Text("Binding not used in pipeline");
 		}
 	} else {
 		imGuiText("Unsupported descriptoer type {}", vk::name(dsType));
@@ -971,12 +999,15 @@ void CommandViewer::displayDs(Draw& draw) {
 
 void CommandViewer::displayAttachment(Draw& draw) {
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(command_);
-	dlg_assert(drawCmd);
+	dlg_assert_or(drawCmd, return);
 
 	// NOTE: maybe only show this button for output attachments (color, depthStencil)?
 	// Does not make sense otherwise as it stays the same i guess.
 	// But could be useful for debugging nonetheless
-	displayBeforeCheckbox();
+	if(displayBeforeCheckbox()) {
+		ImGui::Text("Updating...");
+		return;
+	}
 
 	if(drawCmd->state.rpi.attachments.empty()) {
 		// attachments were destroyed, or we have a secondary cb that didn't
@@ -1075,7 +1106,10 @@ void CommandViewer::displayTransferData(Draw& draw) {
 	// NOTE: only show where it makes sense?
 	// shouldn't be here for src resources i guess.
 	// But could be useful for debugging anyways
-	displayBeforeCheckbox();
+	if(displayBeforeCheckbox()) {
+		ImGui::Text("Updating...");
+		return;
+	}
 
 	dlg_assert(view_ == IOView::transferSrc || view_ == IOView::transferDst);
 
@@ -1340,6 +1374,7 @@ void CommandViewer::draw(Draw& draw) {
 	auto& bcmd = nonNull(command_);
 	auto actionCmd = bcmd.type() == CommandType::dispatch ||
 		bcmd.type() == CommandType::draw ||
+		bcmd.type() == CommandType::traceRays ||
 		bcmd.type() == CommandType::transfer;
 
 	dlg_assert(actionCmd || view_ == IOView::command);

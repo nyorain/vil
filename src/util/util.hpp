@@ -228,6 +228,20 @@ decltype(auto) constexpr templatize(T&& value) {
 	return std::forward<T>(value);
 }
 
+// Like a mixture of static_cast and dynamic_cast.
+// Will assert (i.e. no-op in release mode) that the given pointer
+// can be casted to the requested type and then cast it.
+// If the given pointer is null, simply returns null.
+// Prefer this (or the variations below) over dynamic_cast or static_cast if
+// you are... "sure" that the given base pointer has a type.
+// It at least outputs a error in debug mode and has no overhead in release mode.
+template<typename T, typename O>
+T deriveCast(O* ptr) {
+	static_assert(std::is_base_of_v<O, std::remove_pointer_t<T>>);
+	dlg_assertt(("deriveCast"), !ptr || dynamic_cast<T>(ptr));
+	return static_cast<T>(ptr);
+}
+
 // ValidExpression impl
 namespace detail {
 template<template<class...> typename E, typename C, typename... T> struct ValidExpressionT {

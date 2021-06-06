@@ -25,6 +25,11 @@ struct PipelineLayout : DeviceHandle {
 	~PipelineLayout();
 };
 
+// See vulkan section "pipeline layout compatibility"
+bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b);
+bool compatibleForSetN(const PipelineLayout& a, const PipelineLayout& b,
+		u32 N, bool considerPushConstants = true);
+
 struct PipelineShaderStage {
 	VkShaderStageFlagBits stage;
 	IntrusivePtr<SpirvData> spirv;
@@ -52,6 +57,9 @@ protected:
 	// Should always be GraphicsPipeline or ComputePipeline
 	Pipeline() = default;
 };
+
+// Returns all shader stages a pipeline has.
+span<const PipelineShaderStage> stages(const Pipeline& pipe);
 
 struct GraphicsPipeline : Pipeline {
 	std::shared_ptr<RenderPassDesc> renderPass {};
@@ -88,10 +96,20 @@ struct ComputePipeline : Pipeline {
 	PipelineShaderStage stage;
 };
 
-// See vulkan section "pipeline layout compatibility"
-bool pushConstantCompatible(const PipelineLayout& a, const PipelineLayout& b);
-bool compatibleForSetN(const PipelineLayout& a, const PipelineLayout& b,
-		u32 N, bool considerPushConstants = true);
+struct RayTracingPipeline : Pipeline {
+	struct Group {
+		VkRayTracingShaderGroupTypeKHR type;
+		u32 general;
+		u32 closestHit;
+		u32 anyHit;
+		u32 intersection;
+	};
+
+	// TODO: does not include pipeline libraries yet
+	std::vector<PipelineShaderStage> stages;
+	std::vector<Group> groups;
+	std::unordered_set<VkDynamicState> dynamicState;
+};
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
     VkDevice                                    device,
@@ -126,5 +144,29 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipelineLayout(
     const VkAllocationCallbacks*                pAllocator);
 
 // No need to hook VkPipelineCache at all at the moment.
+
+// VK_KHR_ray_tracing_pipeline
+VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
+    VkDevice                                    device,
+    VkDeferredOperationKHR                      deferredOperation,
+    VkPipelineCache                             pipelineCache,
+    uint32_t                                    createInfoCount,
+    const VkRayTracingPipelineCreateInfoKHR*    pCreateInfos,
+    const VkAllocationCallbacks*                pAllocator,
+    VkPipeline*                                 pPipelines);
+
+VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingCaptureReplayShaderGroupHandlesKHR(
+    VkDevice                                    device,
+    VkPipeline                                  pipeline,
+    uint32_t                                    firstGroup,
+    uint32_t                                    groupCount,
+    size_t                                      dataSize,
+    void*                                       pData);
+
+VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(
+    VkDevice                                    device,
+    VkPipeline                                  pipeline,
+    uint32_t                                    group,
+    VkShaderGroupShaderKHR                      groupShader);
 
 } // namespace vil
