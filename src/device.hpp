@@ -159,7 +159,7 @@ struct Device {
 	// need to retrieve the acceleration structure for a given VkDeviceAddress.
 	// This map allows it.
 	// Access must be synchronized via the device mutex, prefer the utility
-	// function in rt.hpp.
+	// function in accelStruct.hpp.
 	std::unordered_map<VkDeviceAddress, AccelStruct*> accelStructAddresses;
 
 	// === Maps of all vulkan handles ===

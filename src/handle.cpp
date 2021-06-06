@@ -3,7 +3,7 @@
 #include <queue.hpp>
 #include <device.hpp>
 #include <handles.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <vk/enumString.hpp>
 
 namespace vil {

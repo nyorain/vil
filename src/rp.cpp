@@ -218,7 +218,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 		}
 
 		if(symbAtts[attID] != symbAttsRef[attID]) {
-			dlg_trace("splittable({}): subpass {} input {} ({})", split, split, i, attID);
+			dlg_trace("splittable({}): subpass {} inputAttachment {} ({})", split, split, i, attID);
 			return false;
 		}
 	}
@@ -230,7 +230,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 		}
 
 		if(symbAtts[attID] != AttState{attID, split, 2}) {
-			dlg_trace("splittable({}): Unexpected color ({}) state for seq 1", split, i);
+			dlg_trace("splittable({}): subpass {}, colorAttachment {} ({})", split, split, i, attID);
 			return false;
 		}
 
@@ -295,7 +295,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	for(auto i = 0u; i < subp.inputAttachmentCount; ++i) {
 		auto attID = subp.pInputAttachments[i].attachment;
 		if(attID != VK_ATTACHMENT_UNUSED && symbAtts[attID] != symbAttsRef[attID]) {
-			dlg_trace("splittable({}): subpass {} input {} ({})", split, split, i, attID);
+			dlg_trace("splittable({}): subpass {} inputAttachment {} ({})", split, split, i, attID);
 			return false;
 		}
 	}
@@ -307,7 +307,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 		}
 
 		if(symbAtts[attID] != AttState{attID, split, 1}) {
-			dlg_trace("splittable({}): Unexpected color ({}) state for seq 0", split, i);
+			dlg_trace("splittable({}): subpass {} colorAttachment {} ({})", split, split, i, attID);
 			return false;
 		}
 

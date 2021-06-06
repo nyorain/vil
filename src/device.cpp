@@ -6,7 +6,7 @@
 #include <window.hpp>
 #include <handles.hpp>
 #include <overlay.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <gui/commandHook.hpp>

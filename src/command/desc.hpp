@@ -31,6 +31,7 @@ struct CommandBufferDesc {
 	u32 syncCommands {};
 	u32 queryCommands {};
 	u32 totalCommands {};
+	u32 rayTraceCommands {};
 
 	std::vector<CommandBufferDesc> children;
 

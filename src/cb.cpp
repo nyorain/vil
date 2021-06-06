@@ -3,7 +3,7 @@
 #include <ds.hpp>
 #include <queue.hpp>
 #include <handles.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <command/commands.hpp>
 #include <gui/commandHook.hpp>

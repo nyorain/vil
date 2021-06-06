@@ -1,6 +1,7 @@
 #pragma once
 
 #include <command/record.hpp>
+#include <pipe.hpp>
 #include <util/flags.hpp>
 #include <util/span.hpp>
 #include <dlg/dlg.hpp>
@@ -256,7 +257,14 @@ struct EndRenderPassCmd : Command {
 	void record(const Device&, VkCommandBuffer) const override;
 };
 
-struct DrawCmdBase : Command {
+// Base command from which all draw, dispatch and traceRays command are derived.
+struct StateCmdBase : Command {
+	virtual const DescriptorState& boundDescriptors() const = 0;
+	virtual const Pipeline* boundPipe() const = 0;
+	virtual const PushConstantData& boundPushConstants() const = 0;
+};
+
+struct DrawCmdBase : StateCmdBase {
 	GraphicsState state;
 	PushConstantData pushConstants;
 
@@ -266,6 +274,10 @@ struct DrawCmdBase : Command {
 	void displayGrahpicsState(Gui& gui, bool indices) const;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
+
+	const DescriptorState& boundDescriptors() const override { return state; }
+	const Pipeline* boundPipe() const override { return state.pipe; }
+	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 };
 
 struct DrawCmd final : DrawCmdBase {
@@ -381,7 +393,7 @@ struct BindDescriptorSetCmd final : Command {
 	float match(const Command&) const override;
 };
 
-struct DispatchCmdBase : Command {
+struct DispatchCmdBase : StateCmdBase {
 	ComputeState state;
 	PushConstantData pushConstants;
 
@@ -391,6 +403,10 @@ struct DispatchCmdBase : Command {
 	void displayComputeState(Gui& gui) const;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher doMatch(const DispatchCmdBase&) const;
+
+	const DescriptorState& boundDescriptors() const override { return state; }
+	const Pipeline* boundPipe() const override { return state.pipe; }
+	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 };
 
 struct DispatchCmd final : DispatchCmdBase {
@@ -1108,12 +1124,17 @@ struct BuildAccelStructsIndirectCmd final : Command {
 };
 
 // VK_KHR_ray_tracing_pipeline
-struct TraceRaysCmdBase : Command {
+struct TraceRaysCmdBase : StateCmdBase {
 	RayTracingState state;
 	PushConstantData pushConstants;
 
 	TraceRaysCmdBase(CommandBuffer& cb, const RayTracingState&);
 	Type type() const override { return Type::traceRays; }
+	Matcher doMatch(const TraceRaysCmdBase& cmd) const;
+
+	const DescriptorState& boundDescriptors() const override { return state; }
+	const Pipeline* boundPipe() const override { return state.pipe; }
+	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 };
 
 struct TraceRaysCmd final : TraceRaysCmdBase {
@@ -1129,6 +1150,7 @@ struct TraceRaysCmd final : TraceRaysCmdBase {
 	using TraceRaysCmdBase::TraceRaysCmdBase;
 	std::string nameDesc() const override { return "TraceRays"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
+	float match(const Command&) const override;
 };
 
 struct TraceRaysIndirectCmd final : TraceRaysCmdBase {
@@ -1141,6 +1163,7 @@ struct TraceRaysIndirectCmd final : TraceRaysCmdBase {
 	using TraceRaysCmdBase::TraceRaysCmdBase;
 	std::string nameDesc() const override { return "TraceRaysIndirect"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
+	float match(const Command&) const override;
 };
 
 struct SetRayTracingPipelineStackSizeCmd final : Command {
@@ -1150,10 +1173,6 @@ struct SetRayTracingPipelineStackSizeCmd final : Command {
 	std::string nameDesc() const override { return "SetRayTracingPipelineStackSize"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 };
-
-// ---
-// TODO: support VK_KHR_device_group? I guess we would have to consider it
-//   in gui rendering as well which might not be trivial.
 
 } // namespace vil
 

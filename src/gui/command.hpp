@@ -78,7 +78,7 @@ private:
 
 	// selected IO display
 	void displaySelectedIO(Draw&);
-	void displayBeforeCheckbox();
+	bool displayBeforeCheckbox();
 	void displayDs(Draw&);
 	void displayActionInspector(Draw&);
 	void displayAttachment(Draw&);

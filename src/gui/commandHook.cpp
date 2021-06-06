@@ -5,7 +5,7 @@
 #include <image.hpp>
 #include <pipe.hpp>
 #include <rp.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <cb.hpp>
 #include <buffer.hpp>
 #include <gui/gui.hpp>
@@ -24,19 +24,22 @@ namespace vil {
 
 // util
 const DescriptorState* getDsState(const Command& cmd) {
-	const DescriptorState* dsState = nullptr;
-	if(auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd)) {
-		dsState = &drawCmd->state;
-	} else if(auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(&cmd)) {
-		dsState = &dispatchCmd->state;
-	} else {
-		return nullptr;
+	switch(cmd.type()) {
+		case CommandType::draw:
+			return &deriveCast<const DrawCmdBase*>(&cmd)->state;
+		case CommandType::dispatch:
+			return &deriveCast<const DispatchCmdBase*>(&cmd)->state;
+		case CommandType::traceRays:
+			return &deriveCast<const TraceRaysCmdBase*>(&cmd)->state;
+		default:
+			return nullptr;
 	}
-
-	return dsState;
 }
 
-bool descriptorSame(const DescriptorSetState& a, const DescriptorSetState& b,
+// Expects a and to have the same layout.
+// If the descriptor at (bindingID, elemID) needs to be copied by CommandHook,
+// returns whether its the same in a and b.
+bool copyableDescriptorSame(const DescriptorSetState& a, const DescriptorSetState& b,
 		unsigned bindingID, unsigned elemID) {
 	if(&a == &b) {
 		return true;
@@ -54,6 +57,12 @@ bool descriptorSame(const DescriptorSetState& a, const DescriptorSetState& b,
 		return buffers(a, bindingID)[elemID] == buffers(b, bindingID)[elemID];
 	} else if(cat == DescriptorCategory::bufferView) {
 		return bufferViews(a, bindingID)[elemID] == bufferViews(b, bindingID)[elemID];
+	} else if(cat == DescriptorCategory::accelStruct) {
+		// TODO: do we need to copy acceleration structues? Might be hard
+		// to do correctly; should use copy-on-write. Not sure if worth it at all.
+		return true;
+	} else if(cat == DescriptorCategory::inlineUniformBlock) {
+		return true;
 	}
 
 	dlg_error("Invalid descriptor type");
@@ -244,14 +253,14 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		&hooked == target.cb ||
 		target.all;
 
-	if(!validTarget || hierachy_.empty() || !record.commands) {
+	if(!validTarget || !record_ || hierachy_.empty() || !record.commands) {
 		hookNeededForCmd = false;
 	}
 
 	// When there is no gui viewing the submissions at the moment, we don't
 	// need/want to hook the submission.
-	if(!dev.gui || !dev.gui->visible ||
-			dev.gui->activeTab() != Gui::Tab::commandBuffer || freeze) {
+	if(!dev.gui || !dev.gui->visible || freeze ||
+			dev.gui->activeTab() != Gui::Tab::commandBuffer) {
 		hookNeededForCmd = false;
 	}
 
@@ -342,7 +351,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		// buffer uses any update_after_bind descriptors that changed.
 		// We therefore compare them.
 		dlg_assert(!copyDS || foundHookRecord->dsState);
-		if(copyDS && foundHookRecord->dsState) {
+		if(copyDS && foundHookRecord->dsState && hookNeededForCmd) {
 			auto [setID, bindingID, elemID, _] = *copyDS;
 
 			dlg_assert(!foundHookRecord->hcommand.empty());
@@ -356,7 +365,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			dlg_assert(it != dsSnapshot.states.end());
 			auto& currDS = nonNull(it->second);
 
-			if(!descriptorSame(currDS, *foundHookRecord->dsState, bindingID, elemID)) {
+			if(!copyableDescriptorSame(currDS, *foundHookRecord->dsState, bindingID, elemID)) {
 				usable = false;
 				invalidate(*foundHookRecord);
 				foundHookRecord = nullptr;
@@ -399,6 +408,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 void CommandHook::desc(IntrusivePtr<CommandRecord> rec,
 		std::vector<const Command*> hierachy,
 		CommandDescriptorSnapshot dsState, bool invalidate) {
+	dlg_assert(bool(rec) == !hierachy.empty());
+
 	record_ = std::move(rec);
 	hierachy_ = std::move(hierachy);
 	dsState_ = std::move(dsState);
@@ -1173,6 +1184,11 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		// 	elem.bufferView->ci.offset, elem.bufferView->ci.range);
 		state->errorMessage = "BufferView ds copy unimplemented";
 		dlg_error(state->errorMessage);
+	} else if(cat == DescriptorCategory::inlineUniformBlock) {
+		// nothing to copy, data statically bound in state.
+	} else if(cat == DescriptorCategory::accelStruct) {
+		// TODO: do we need to copy acceleration structures?
+		// If we ever change this here, also change copyableDescriptorSame
 	}
 }
 

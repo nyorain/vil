@@ -32,6 +32,9 @@ void processType(CommandBufferDesc& desc, Command::Type type) {
 		case Command::Type::query:
 			++desc.queryCommands;
 			break;
+		case Command::Type::traceRays:
+			++desc.rayTraceCommands;
+			break;
 		default:
 			break;
 	}
@@ -116,6 +119,7 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	addMatch(a.transferCommands, b.transferCommands);
 	addMatch(a.syncCommands, b.syncCommands);
 	addMatch(a.queryCommands, b.queryCommands);
+	addMatch(a.rayTraceCommands, b.rayTraceCommands);
 
 	// When there are no commands in either, we match 100%
 	float ownMatch = weightSum > 0.0 ? 1.f - diffSum / weightSum : 1.f;
@@ -267,39 +271,28 @@ FindResult find(const Command* root, span<const Command*> dst,
 			auto& rest = restResult.hierachy;
 			currCmds.insert(currCmds.end(), rest.begin(), rest.end());
 			m *= restResult.match;
-		} else {
+		} else if(auto srcCmd = dynamic_cast<const StateCmdBase*>(it); srcCmd) {
 			// match descriptors, if any
 			// TODO: only consider descriptors statically used by pipeline
 			// NOTE: the `min(dsCount, ...)` is used defensively here to
 			//   account for extensions that mess with bound-descriptor
 			//   requirements, e.g. push descriptors.
-			span<const BoundDescriptorSet> dstBound;
-			span<const BoundDescriptorSet> srcBound;
-			if(auto* dstCmd = dynamic_cast<const DrawCmdBase*>(dst[0])) {
-				dlg_assert_or(dstCmd->state.pipe, continue);
-				auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
-				dstBound = dstCmd->state.descriptorSets.first(
-					std::min(dsCount, dstCmd->state.descriptorSets.size()));
+			auto* dstCmd = dynamic_cast<const StateCmdBase*>(dst[0]);
+			dlg_assert_or(dstCmd, continue);
 
-				auto* srcCmd = dynamic_cast<const DrawCmdBase*>(it);
-				dlg_assert_or(srcCmd, continue);
-				dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
-				srcBound = srcCmd->state.descriptorSets.first(
-					std::min(dsCount, srcCmd->state.descriptorSets.size()));
-			} else if(auto* dstCmd = dynamic_cast<const DispatchCmdBase*>(dst[0])) {
-				dlg_assert_or(dstCmd->state.pipe, continue);
-				auto dsCount = dstCmd->state.pipe->layout->descriptors.size();
-				dstBound = dstCmd->state.descriptorSets.first(
-					std::min(dsCount, dstCmd->state.descriptorSets.size()));
+			auto* srcPipe = srcCmd->boundPipe();
+			auto* dstPipe = dstCmd->boundPipe();
+			dlg_assert_or(srcPipe && dstPipe, continue);
+			dlg_assert_or(srcPipe == dstPipe, continue);
 
-				auto* srcCmd = dynamic_cast<const DispatchCmdBase*>(it);
-				dlg_assert_or(srcCmd, continue);
-				dlg_assert_or(srcCmd->state.pipe == dstCmd->state.pipe, continue);
-				srcBound = srcCmd->state.descriptorSets.first(
-					std::min(dsCount, srcCmd->state.descriptorSets.size()));
-			}
+			auto srcDescriptors = srcCmd->boundDescriptors().descriptorSets;
+			auto dstDescriptors = dstCmd->boundDescriptors().descriptorSets;
 
-			if(!dstBound.empty()) {
+			auto dsCount = dstPipe->layout->descriptors.size();
+			auto srcBound = srcDescriptors.first(std::min(dsCount, srcDescriptors.size()));
+			auto dstBound = dstDescriptors.first(std::min(dsCount, dstDescriptors.size()));
+
+			if(!dstBound.empty() || !srcBound.empty()) {
 				// TODO: consider dynamic offsets?
 
 				unsigned match {};
@@ -318,7 +311,7 @@ FindResult find(const Command* root, span<const Command*> dst,
 					match += vil::match(nonNull(srcDescriptors), nonNull(dstDescriptors->second));
 				}
 
-				m *= float(match) / srcBound.size();
+				m *= float(match) / std::max(srcBound.size(), dstBound.size());
 			}
 		}
 

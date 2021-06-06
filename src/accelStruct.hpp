@@ -85,20 +85,6 @@ void copyBuildData(AccelStruct&,
 AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address);
 AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address);
 
-struct RayTracingPipeline : Pipeline {
-	struct Group {
-		VkRayTracingShaderGroupTypeKHR type;
-		u32 general;
-		u32 closestHit;
-		u32 anyHit;
-		u32 intersection;
-	};
-
-	std::vector<PipelineShaderStage> stages;
-	std::vector<Group> groups;
-	std::unordered_set<VkDynamicState> dynamicState;
-};
-
 // VK_KHR_acceleration_structure
 VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
     VkDevice                                    device,
@@ -157,29 +143,5 @@ VKAPI_ATTR void VKAPI_CALL GetAccelerationStructureBuildSizesKHR(
     const VkAccelerationStructureBuildGeometryInfoKHR* pBuildInfo,
     const uint32_t*                             pMaxPrimitiveCounts,
     VkAccelerationStructureBuildSizesInfoKHR*   pSizeInfo);
-
-// VK_KHR_ray_tracing_pipeline
-VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
-    VkDevice                                    device,
-    VkDeferredOperationKHR                      deferredOperation,
-    VkPipelineCache                             pipelineCache,
-    uint32_t                                    createInfoCount,
-    const VkRayTracingPipelineCreateInfoKHR*    pCreateInfos,
-    const VkAllocationCallbacks*                pAllocator,
-    VkPipeline*                                 pPipelines);
-
-VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingCaptureReplayShaderGroupHandlesKHR(
-    VkDevice                                    device,
-    VkPipeline                                  pipeline,
-    uint32_t                                    firstGroup,
-    uint32_t                                    groupCount,
-    size_t                                      dataSize,
-    void*                                       pData);
-
-VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(
-    VkDevice                                    device,
-    VkPipeline                                  pipeline,
-    uint32_t                                    group,
-    VkShaderGroupShaderKHR                      groupShader);
 
 } // namespace vil

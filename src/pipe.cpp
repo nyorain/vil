@@ -4,7 +4,7 @@
 #include <shader.hpp>
 #include <ds.hpp>
 #include <data.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
@@ -474,6 +474,128 @@ bool compatibleForSetN(const PipelineLayout& pl1, const PipelineLayout& pl2,
 	return true;
 }
 
+span<const PipelineShaderStage> stages(const Pipeline& pipe) {
+	switch(pipe.type) {
+		case VK_PIPELINE_BIND_POINT_GRAPHICS:
+			return static_cast<const GraphicsPipeline&>(pipe).stages;
+		case VK_PIPELINE_BIND_POINT_COMPUTE:
+			return {&static_cast<const ComputePipeline&>(pipe).stage, 1u};
+		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
+			return static_cast<const RayTracingPipeline&>(pipe).stages;
+		default:
+			dlg_error("Invalid pipeline type: {}", pipe.type);
+			return {};
+	}
+}
+
 GraphicsPipeline::~GraphicsPipeline() = default;
+
+// VK_KHR_ray_tracing_pipeline
+VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
+		VkDevice                                    device,
+		VkDeferredOperationKHR                      deferredOperation,
+		VkPipelineCache                             pipelineCache,
+		uint32_t                                    createInfoCount,
+		const VkRayTracingPipelineCreateInfoKHR*    pCreateInfos,
+		const VkAllocationCallbacks*                pAllocator,
+		VkPipeline*                                 pPipelines) {
+	ZoneScoped;
+	auto& dev = getDevice(device);
+
+	ThreadMemScope memScope;
+	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
+	for(auto& nci : ncis) {
+		nci.layout = get(device, nci.layout).handle;
+		if(nci.basePipelineHandle) {
+			auto& basePipe = get(dev, nci.basePipelineHandle);
+			nci.basePipelineHandle = basePipe.handle;
+		}
+
+		if(nci.pLibraryInfo) {
+			auto& copy = memScope.alloc<VkPipelineLibraryCreateInfoKHR>(1)[0];
+			copy = *nci.pLibraryInfo;
+
+			auto libHandles = memScope.alloc<VkPipeline>(copy.libraryCount);
+			for(auto i = 0u; i < copy.libraryCount; ++i) {
+				auto& lib = get(dev, copy.pLibraries[i]);
+				libHandles[i] = lib.handle;
+			}
+
+			copy.pLibraries = libHandles.data();
+		}
+	}
+
+	{
+		ZoneScopedN("dispatch");
+		auto res = dev.dispatch.CreateRayTracingPipelinesKHR(dev.handle,
+			deferredOperation, pipelineCache, createInfoCount, ncis.data(),
+			pAllocator, pPipelines);
+		if(res != VK_SUCCESS) {
+			return res;
+		}
+	}
+
+	for(auto i = 0u; i < createInfoCount; ++i) {
+		dlg_assert(pPipelines[i]);
+		auto& ci = pCreateInfos[i];
+
+		auto pipePtr = std::make_unique<RayTracingPipeline>();
+		auto& pipe = *pipePtr;
+		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
+		pipe.type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
+		pipe.dev = &dev;
+		pipe.handle = pPipelines[i];
+		pipe.layout = getPtr(dev, ci.layout);
+
+		if(ci.pDynamicState) {
+			pipe.dynamicState = {
+				ci.pDynamicState->pDynamicStates,
+				ci.pDynamicState->pDynamicStates + ci.pDynamicState->dynamicStateCount
+			};
+		}
+
+		for(auto i = 0u; i < ci.stageCount; ++i) {
+			pipe.stages.emplace_back(dev, ci.pStages[i]);
+		}
+
+		for(auto i = 0u; i < ci.groupCount; ++i) {
+			auto& src = ci.pGroups[i];
+			auto& dst = pipe.groups.emplace_back();
+
+			dst.anyHit = src.anyHitShader;
+			dst.closestHit = src.closestHitShader;
+			dst.general = src.generalShader;
+			dst.intersection = src.intersectionShader;
+			dst.type = src.type;
+		}
+
+		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
+		dev.pipes.mustEmplace(pPipelines[i], std::move(pipePtr));
+	}
+
+	return VK_SUCCESS;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingCaptureReplayShaderGroupHandlesKHR(
+		VkDevice                                    device,
+		VkPipeline                                  pipeline,
+		uint32_t                                    firstGroup,
+		uint32_t                                    groupCount,
+		size_t                                      dataSize,
+		void*                                       pData) {
+	auto& dev = getDevice(device);
+	return dev.dispatch.GetRayTracingCaptureReplayShaderGroupHandlesKHR(dev.handle,
+		pipeline, firstGroup, groupCount, dataSize, pData);
+}
+
+VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(
+		VkDevice                                    device,
+		VkPipeline                                  pipeline,
+		uint32_t                                    group,
+		VkShaderGroupShaderKHR                      groupShader) {
+	auto& dev = getDevice(device);
+	return dev.dispatch.GetRayTracingShaderGroupStackSizeKHR(
+		dev.handle, pipeline, group, groupShader);
+}
 
 } // namespace vil

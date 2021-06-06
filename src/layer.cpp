@@ -5,7 +5,7 @@
 #include <platform.hpp>
 #include <queue.hpp>
 #include <overlay.hpp>
-#include <rt.hpp>
+#include <accelStruct.hpp>
 #include <util/util.hpp>
 #include <util/export.hpp>
 #include <util/profiling.hpp>
@@ -46,7 +46,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		#ifdef _MSC_VER
 			DebugBreak();
 		#else
-			// std::raise(SIGABRT);
+			std::raise(SIGABRT);
 		#endif
 
 		a = 42;
@@ -446,7 +446,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(CreateQueryPool),
 	VIL_DEV_HOOK(DestroyQueryPool),
 
-	// rt.hpp
+	// accelStruct.hpp
 	VIL_DEV_HOOK_EXT(CreateAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(DestroyAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(BuildAccelerationStructuresKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
