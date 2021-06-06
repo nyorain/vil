@@ -9,7 +9,7 @@ See the [rough overview](docs/features.md) over the currently implemented vulkan
 commands/extensions. Keep in mind that using extensions/features not supported
 by the layer at the moment might cause crashes.
 
-![Example of command viewer 1](docs/pics/new1-sponza.png)
+![Example of command viewer 1](docs/pics/sponza-ssao-2.png)
 
 Features:
 
