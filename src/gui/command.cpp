@@ -11,6 +11,7 @@
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <pipe.hpp>
+#include <rt.hpp>
 #include <image.hpp>
 #include <buffer.hpp>
 #include <ds.hpp>
@@ -924,7 +925,9 @@ void CommandViewer::displayDs(Draw& draw) {
 	} else if(dsCat == DescriptorCategory::bufferView) {
 		imGuiText("TODO: bufferView viewer not implemented yet");
 	} else if(dsCat == DescriptorCategory::accelStruct) {
-		imGuiText("TODO: acceleration structure viewer not implemented yet");
+		auto& elem = accelStructs(state, bindingID)[elemID];
+		refButtonExpect(gui, elem.get());
+		// TODO: show data of acceleration structure?
 	} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
 		auto blockData = inlineUniformBlock(state, bindingID);
 		imGuiText("Inline Uniform Block, Size {}", blockData.size());

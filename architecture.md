@@ -108,6 +108,8 @@ multiple threads, we have a separate synchronization mechanism for that.
 Basically, all DescriptorSet state is moved into DescriptorSetState objects
 that implement copy-on-write when a state object has more than one reference
 (i.e. someone else is interested in the descriptor state at a specific time).
+Where needed, more fine-granular synchronization should be added as optimization
+in future.
 
 In general, we keep track of most connections between handles and allow
 to view them in the gui. While the gui is rendered, it locks the device mutex.
@@ -172,7 +174,11 @@ to do all processing and copying needed when the submission is finished.
 All that state is hold in `CommandHookState`, which is directly accessed
 when rendering the command buffer gui.
 
-## Render pass splitting
+Aside from copying state at a selected command, we also use `CommandHook`
+to capture bookkeeping data when needed, for instance in 
+`vkCmdBuildAccelerationStructuresKHR`.
+
+### Render pass splitting
 
 One of the main difficult things to figure out was how to make gpu state
 inspection inside render passes possible. Vulkan does not allow transfer

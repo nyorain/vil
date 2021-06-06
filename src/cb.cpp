@@ -2610,6 +2610,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 		// TODO: useHandle for buffers of associated device addresses
 	}
 
+	// we need to set this flag here so we can hook that record when it
+	// is submitted to the gpu to retrieve the actual data used for building.
 	cb.record()->buildsAccelStructs = true;
 
 	cb.dev->dispatch.CmdBuildAccelerationStructuresKHR(cb.handle(),
@@ -2637,6 +2639,19 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 		auto& buildInfo = cmd.buildInfos[i];
 		copyChainInPlace(cb, buildInfo.pNext);
 
+		// We have to perform a deep-copy of the geometry descriptions.
+		if(buildInfo.pGeometries) {
+			buildInfo.pGeometries = copySpan(cb, buildInfo.pGeometries, buildInfo.geometryCount).data();
+		} else if(buildInfo.geometryCount > 0) {
+			dlg_assert(buildInfo.ppGeometries);
+			auto dst = allocSpan<VkAccelerationStructureGeometryKHR>(cb, buildInfo.geometryCount);
+			for(auto g = 0u; g < buildInfo.geometryCount; ++g) {
+				dst[g] = *buildInfo.ppGeometries[g];
+			}
+
+			buildInfo.pGeometries = dst.data();
+		}
+
 		if(buildInfo.srcAccelerationStructure) {
 			cmd.srcs[i] = &get(*cb.dev, buildInfo.srcAccelerationStructure);
 			buildInfo.srcAccelerationStructure = cmd.srcs[i]->handle;
@@ -2655,6 +2670,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 		// TODO: useHandle for buffers of associated device addresses?
 	}
 
+	// we need to set this flag here so we can hook that record when it
+	// is submitted to the gpu to retrieve the actual data used for building.
 	cb.record()->buildsAccelStructs = true;
 
 	cb.dev->dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb.handle(),
@@ -2677,7 +2694,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureKHR(
 
 	auto fwd = *pInfo;
 	fwd.src = cmd.src->handle;
-	fwd.dst = cmd.src->handle;
+	fwd.dst = cmd.dst->handle;
 
 	cb.dev->dispatch.CmdCopyAccelerationStructureKHR(cb.handle(), &fwd);
 }
