@@ -40,7 +40,7 @@ void writeAABBs(AccelStruct& accelStruct, unsigned id,
 		const VkAccelerationStructureGeometryKHR& srcGeom,
 		const VkAccelerationStructureBuildRangeInfoKHR& info) {
 	dlg_assert(srcGeom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR);
-	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+	dlg_assert(accelStruct.effectiveType == VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
 
 	auto& src = srcGeom.geometry.aabbs;
 	auto& dstAABBs = std::get<AccelAABBs>(accelStruct.data);
@@ -62,7 +62,7 @@ void writeTriangles(AccelStruct& accelStruct, unsigned id,
 		const VkAccelerationStructureGeometryKHR& srcGeom,
 		const VkAccelerationStructureBuildRangeInfoKHR& info) {
 	dlg_assert(srcGeom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR);
-	dlg_assert(accelStruct.effectiveType = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
+	dlg_assert(accelStruct.effectiveType == VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
 
 	auto& src = srcGeom.geometry.triangles;
 	auto& dstTris = std::get<AccelTriangles>(accelStruct.data);
@@ -204,14 +204,14 @@ void initBufs(AccelStruct& accelStruct,
 		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
 		VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 	if(geom0.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
-		dlg_assert(accelStruct.effectiveType =
+		dlg_assert(accelStruct.effectiveType ==
 			VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
 		auto& aabbs = accelStruct.data.emplace<AccelAABBs>();
 		aabbs.geometries.resize(info.geometryCount);
 		aabbs.buffer.ensure(dev, bufSize, usage);
 		mapped = aabbs.buffer.map;
 	} else if(geom0.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-		dlg_assert(accelStruct.effectiveType =
+		dlg_assert(accelStruct.effectiveType ==
 			VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
 		auto& tris = accelStruct.data.emplace<AccelTriangles>();
 		tris.geometries.resize(info.geometryCount);
