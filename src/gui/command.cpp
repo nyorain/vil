@@ -259,6 +259,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 	switch(cmd.type()) {
 		case CommandType::draw:
 			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
+			stateCmd = drawCmd;
 			break;
 		case CommandType::dispatch:
 			stateCmd = deriveCast<const DispatchCmdBase*>(&cmd);
@@ -313,6 +314,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			}
 
 			auto* lastStateCmd = deriveCast<const StateCmdBase*>(command_);
+			dlg_assert(lastStateCmd);
 
 			// when the newly select command uses a descriptor set with different
 			// layout at the selected set we reset the selection. We don't
@@ -324,7 +326,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			}
 
 			PipelineLayout* oldPL {};
-			if(auto* pipe = lastStateCmd->boundPipe()) {
+			if(auto* pipe = lastStateCmd->boundPipe(); pipe) {
 				oldPL = pipe->layout.get();
 			}
 

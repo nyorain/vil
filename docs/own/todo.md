@@ -153,6 +153,13 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
+      we just create a second window by default?
+	  If a manual overlay is created later on, we can still close the window
+	  and move the gui. Could also wait for first submission/swapchain
+	  creation (if swapchain ext is enabled) with creating/showing the window
+- [ ] rename VIL_HOOK_OVERLAY to just VIL_OVERLAY?
+      and VIL_CREATE_WINDOW to VIL_WINDOW?
 - [ ] add support for timeline semaphores. Should just require some simple
       changes to submission logic when we use them inside the layer.
 	  Test with official samples repo

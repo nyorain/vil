@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <hidusage.h>
+#include <windowsx.h>
 
 namespace vil {
 
@@ -58,6 +59,9 @@ struct Win32Platform : Platform {
 
 	int lastX {};
 	int lastY {};
+	
+	bool moveResizing {};
+	bool rawInput {};
 
 	~Win32Platform();
 
@@ -103,13 +107,23 @@ constexpr auto windowClassName = L"VIL";
 	LocalFree(buffer); \
 } while(0)
 
-static void handleKey(Win32Platform* platform, bool pressed,
+void handleKey(Win32Platform* platform, bool pressed,
 		WPARAM wparam, LPARAM lparam) {
 	(void) lparam;
 	auto keycode = winapi_to_key((unsigned)(wparam));
 	if(keycode < 512) {
 		platform->gui->imguiIO().KeysDown[keycode] = pressed;
 	}
+}
+
+bool cursorShown() {
+	CURSORINFO ci {};
+	ci.cbSize = sizeof(ci);
+	if(!GetCursorInfo(&ci) || ci.flags == 0) {
+		return false;
+	}
+
+	return true;
 }
 
 static LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -132,9 +146,9 @@ static LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 			break;
 		} case WM_INPUT: {
 			UINT dwSize = sizeof(RAWINPUT);
-			static BYTE lpb[sizeof(RAWINPUT)];
-			GetRawInputData((HRAWINPUT)lparam, RID_INPUT, lpb, &dwSize, sizeof(RAWINPUTHEADER));
-			RAWINPUT* raw = (RAWINPUT*)lpb;
+			static std::aligned_storage_t<sizeof(RAWINPUT), 8> lpb {};
+			GetRawInputData((HRAWINPUT)lparam, RID_INPUT, &lpb, &dwSize, sizeof(RAWINPUTHEADER));
+			RAWINPUT* raw = (RAWINPUT*)&lpb;
 			if (raw->header.dwType == RIM_TYPEMOUSE) {
 				platform->gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
 				platform->gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
@@ -231,12 +245,206 @@ void Win32Platform::initWindow() {
 }
 
 void Win32Platform::updateWindowRect() {
+	/*
 	RECT topWndRect;
 	GetWindowRect(surfaceWindow, &topWndRect);
 	auto w = topWndRect.right - topWndRect.left;
 	auto h = topWndRect.bottom - topWndRect.top;
 	// dlg_info("window rect, pos {} {}, size {} {}", topWndRect.left, topWndRect.top, w, h);
 	MoveWindow(overlayWindow, topWndRect.left, topWndRect.top, w, h, false);
+	*/
+}
+
+LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
+	MSG* msg = (MSG*) lParam;
+
+	if (msg->message == WM_ENTERSIZEMOVE)
+	{
+		dlg_trace("enter size move {}", nCode);
+	}
+
+	if (globalPlatform->moveResizing || nCode < 0)
+	{
+		return CallNextHookEx(nullptr, nCode, wParam, lParam);
+	}
+
+	switch(msg->message) {
+		case WM_ENTERSIZEMOVE: {
+			dlg_trace("enter move resize");
+			globalPlatform->moveResizing = true;
+			break;
+		} case WM_EXITSIZEMOVE: {
+			dlg_trace("exit move resize");
+			globalPlatform->moveResizing = false;
+			break;
+		} case WM_MOUSEMOVE: {
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			if (!globalPlatform->rawInput) {
+				globalPlatform->gui->imguiIO().MousePos.x = x;
+				globalPlatform->gui->imguiIO().MousePos.y = y;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_LBUTTONDOWN: {
+			// dlg_trace("lbuttondown {} {} {}", data->pt.x, data->pt.y, data->wHitTestCode);
+			globalPlatform->gui->imguiIO().MouseDown[0] = true;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_LBUTTONUP: {
+			// dlg_trace("lbuttonup {} {} {} | {} {}", data->pt.x, data->pt.y, data->wHitTestCode, winPos.x, winPos.y);
+			globalPlatform->gui->imguiIO().MouseDown[0] = false;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_RBUTTONDOWN: {
+			globalPlatform->gui->imguiIO().MouseDown[1] = true;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_RBUTTONUP: {
+			globalPlatform->gui->imguiIO().MouseDown[1] = false;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_MBUTTONDOWN: {
+			globalPlatform->gui->imguiIO().MouseDown[2] = true;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_MBUTTONUP: {
+			globalPlatform->gui->imguiIO().MouseDown[2] = false;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_XBUTTONDOWN: {
+			// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = true;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_XBUTTONUP: {
+			// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = false;
+			auto x = GET_X_LPARAM(msg->lParam);
+			auto y = GET_Y_LPARAM(msg->lParam);
+			if(x < 0 || y < 0) {
+				break;
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_KEYDOWN: {
+			dlg_trace("wm keydown");
+
+			auto key = winapi_to_key(unsigned(msg->wParam));
+			if (key < 512 && key != 0) {
+				globalPlatform->gui->imguiIO().KeysDown[unsigned(key)] = true;
+			}
+
+			// oh no, this is terrible
+			TranslateMessage(msg);
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_KEYUP: {
+			dlg_trace("wm keyup");
+
+			auto key = winapi_to_key(unsigned(msg->wParam));
+			if (key < 512 && key != 0) {
+				globalPlatform->gui->imguiIO().KeysDown[unsigned(key)] = false;
+			}
+
+			// oh no, this is terrible
+			TranslateMessage(msg);
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_CHAR: {
+			dlg_trace("wm char");
+
+			if (msg->wParam > 0 && msg->wParam < 0x10000) {
+				globalPlatform->gui->imguiIO().AddInputCharacterUTF16((unsigned short)msg->wParam);
+			}
+
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_INPUT: {
+			// Shouldn't happen
+			dlg_error("wm_input");
+
+			UINT dwSize = sizeof(RAWINPUT);
+			static std::aligned_storage_t<sizeof(RAWINPUT), 8> lpb {};
+			auto ret = GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, &lpb, &dwSize, sizeof(RAWINPUTHEADER));
+			if (ret == UINT(-1)) {
+				print_winapi_error("GetRawInputData");
+				break;
+			}
+
+			RAWINPUT* raw = (RAWINPUT*) &lpb;
+			if (raw->header.dwType == RIM_TYPEMOUSE) {
+				globalPlatform->gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
+				globalPlatform->gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
+
+				// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
+			}
+
+			// msg->message = WM_NULL;
+			return 0;
+		} case WM_MOUSEWHEEL: {
+			// TODO: accumulate?
+			globalPlatform->gui->imguiIO().MouseWheel = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
+			msg->message = WM_NULL;
+			return 0;
+		} case WM_MOUSEHWHEEL: {
+			// TODO: accumulate?
+			globalPlatform->gui->imguiIO().MouseWheelH = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
+			msg->message = WM_NULL;
+			return 0;
+		} default:
+			break;
+	}
+
+	return CallNextHookEx(nullptr, nCode, wParam, lParam);
 }
 
 LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
@@ -265,11 +473,11 @@ LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		*/
 
 		// dlg_trace("move {} {} {}", winPos.x, winPos.y, data->wHitTestCode);
-		if(winPos.y < 0 || winPos.x < 0) {
+		// if(winPos.y < 0 || winPos.x < 0) {
 			return CallNextHookEx(nullptr, nCode, wParam, lParam);
-		}
+		// }
 
-		return 1;
+		// return 1;
 	} else if(nCode >= 0) {
 		switch(wParam) {
 			case WM_LBUTTONDOWN:
@@ -343,20 +551,52 @@ bool Win32Platform::doUpdate() {
 	if(state != State::focused) {
 		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
 			dlg_trace("showing overlay; grabbing input");
+			dlg_assert(!mouseHook);
+
 			state = State::focused;
+
+			globalPlatform = this;
+			rawInput = false;
 
 			// register for raw input on mouse
 			// TODO: not needed if cursor is being shown
-			RAWINPUTDEVICE Rid[1];
-			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
-			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-			Rid[0].dwFlags = RIDEV_INPUTSINK;
-			Rid[0].hwndTarget = overlayWindow;
-			RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+			if (!cursorShown()) {
+				RAWINPUTDEVICE Rid[1];
 
-			globalPlatform = this;
+				// unregister application
+				Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
+				Rid[0].dwFlags = RIDEV_REMOVE;
+				Rid[0].hwndTarget = nullptr;
+				auto r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+				if(!r) { print_winapi_error("RegisterRawInput"); }
+
+				Rid[0].usUsage = HID_USAGE_GENERIC_KEYBOARD;
+				r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+				if(!r) { print_winapi_error("RegisterRawInput"); }
+
+				// register layer
+				Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
+				Rid[0].dwFlags = 0u;
+				Rid[0].hwndTarget = overlayWindow;
+				RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+				if(!r) { print_winapi_error("RegisterRawInput"); }
+
+				rawInput = true;
+			}
+
+			/*
 			auto threadID = GetWindowThreadProcessId(surfaceWindow, nullptr);
 			mouseHook = SetWindowsHookEx(WH_MOUSE, mouseHookFunc, nullptr, threadID);
+			// mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseHookFunc, nullptr, 0);
+			if (!mouseHook) {
+				print_winapi_error("SetWindowsHookEx");
+			}
+			*/
+
+			auto threadID = GetWindowThreadProcessId(surfaceWindow, nullptr);
+			mouseHook = SetWindowsHookEx(WH_GETMESSAGE, msgHookFunc, nullptr, threadID);
 			// mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseHookFunc, nullptr, 0);
 			if (!mouseHook) {
 				print_winapi_error("SetWindowsHookEx");
@@ -393,12 +633,28 @@ bool Win32Platform::doUpdate() {
 			UnhookWindowsHookEx(mouseHook);
 
 			// TODO: probably have to destroy window, this does no seem to work
-			RAWINPUTDEVICE Rid[1];
-			Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
-			Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-			Rid[0].dwFlags = RIDEV_REMOVE;
-			Rid[0].hwndTarget = /*overlayWindow*/ nullptr;
-			RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+			if (rawInput)
+			{
+				RAWINPUTDEVICE Rid[1];
+				Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
+				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
+				Rid[0].dwFlags = RIDEV_REMOVE;
+				Rid[0].hwndTarget = nullptr;
+				auto r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+				if(!r) { print_winapi_error("RegisterRawInput"); }
+
+				// re-register for application
+				// shouldn't be a problem if not used
+				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
+				Rid[0].dwFlags = 0;
+				r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+				if(!r) { print_winapi_error("RegisterRawInput"); }
+
+				Rid[0].usUsage = HID_USAGE_GENERIC_KEYBOARD;
+				Rid[0].dwFlags = 0;
+				r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
+				if(!r) { print_winapi_error("RegisterRawInput"); }
+			}
 
 			mouseHook = nullptr;
 			state = State::hidden;
@@ -421,12 +677,7 @@ bool Win32Platform::doUpdate() {
 		// cursor, we show our own software cursor.
 		// TODO: don't need raw input if application is showing cursor...
 		if(state == State::focused) {
-			CURSORINFO ci {};
-			ci.cbSize = sizeof(ci);
-			if(!GetCursorInfo(&ci) || ci.flags == 0) {
-				// dlg_trace("showing custom cursor");
-				drawCursor = true;
-			}
+			drawCursor = !cursorShown();
 		}
 
 		gui->imguiIO().MouseDrawCursor = drawCursor;
@@ -443,6 +694,12 @@ bool Win32Platform::doUpdate() {
 			gui->imguiIO().MousePos.x = pos.x;
 			gui->imguiIO().MousePos.y = pos.y;
 		}
+
+		// Read keyboard modifiers inputs
+		gui->imguiIO().KeyCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+		gui->imguiIO().KeyShift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+		gui->imguiIO().KeyAlt = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+		gui->imguiIO().KeySuper = false;
 	}
 
 	return state != State::hidden;
