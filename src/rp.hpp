@@ -26,18 +26,20 @@ struct RenderPassDesc {
 struct RenderPass : DeviceHandle {
 	VkRenderPass handle {};
 
+	RenderPassDesc desc;
+
 	// Render passes can be destroyed after they were used to create
 	// framebuffers or pipelines, the created handles must just be
 	// compatible. To know this information, we keep the description
 	// of the render pass alive until all associated handles were destroyed.
-	std::shared_ptr<RenderPassDesc> desc;
+	std::atomic<u32> refCount {};
 };
 
 struct Framebuffer : DeviceHandle {
 	VkFramebuffer handle {};
 
 	std::vector<ImageView*> attachments;
-	std::shared_ptr<RenderPassDesc> rp {};
+	IntrusivePtr<RenderPass> rp {};
 
 	u32 width {};
 	u32 height {};

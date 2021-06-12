@@ -58,7 +58,7 @@ CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 			if(auto rpc = dynamic_cast<BeginRenderPassCmd*>(cmd); rpc) {
 				dlg_assert(rpc->rp);
 
-				for(auto& attachment : rpc->rp->desc->attachments) {
+				for(auto& attachment : rpc->rp->desc.attachments) {
 					child.params.push_back(vk::name(attachment.format));
 				}
 			}

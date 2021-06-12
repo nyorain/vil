@@ -304,7 +304,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 					lastDrawCmd->state.rpi.rp != drawCmd->state.rpi.rp) {
 				selectCommandView = true;
 			} else {
-				dlg_assert(id < drawCmd->state.rpi.rp->desc->attachments.size());
+				dlg_assert(id < drawCmd->state.rpi.rp->desc.attachments.size());
 			}
 			break;
 		} case IOView::ds: {
@@ -683,7 +683,7 @@ void CommandViewer::displayIOList() {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
 		if(ImGui::TreeNodeEx("Attachments", ImGuiTreeNodeFlags_FramePadding)) {
 			if(drawCmd->state.rpi.rp) {
-				auto& desc = nonNull(drawCmd->state.rpi.rp->desc);
+				auto& desc = drawCmd->state.rpi.rp->desc;
 				auto subpassID = drawCmd->state.rpi.subpass;
 				dlg_assert(subpassID < desc.subpasses.size());
 

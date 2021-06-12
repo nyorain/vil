@@ -759,9 +759,9 @@ void BeginRenderPassCmd::displayInspector(Gui& gui) const {
 	// clear values
 	if(rp) {
 		for(auto i = 0u; i < clearValues.size(); ++i) {
-			dlg_assert_or(i < rp->desc->attachments.size(), break);
+			dlg_assert_or(i < rp->desc.attachments.size(), break);
 			auto& clearValue = clearValues[i];
-			auto& att = rp->desc->attachments[i];
+			auto& att = rp->desc.attachments[i];
 
 			if(att.loadOp != VK_ATTACHMENT_LOAD_OP_CLEAR) {
 				continue;
@@ -888,7 +888,7 @@ float BeginRenderPassCmd::match(const Command& base) const {
 	//   instead of relying on the attachments being stored in the fb.
 
 	// match render pass description
-	if(!rp || !cmd->rp || !same(*rp->desc, *cmd->rp->desc)) {
+	if(!rp || !cmd->rp || !same(rp->desc, cmd->rp->desc)) {
 		return 0.f;
 	}
 

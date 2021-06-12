@@ -62,6 +62,6 @@ install:
 
 script:
   - if [ "$TRAVIS_OS_NAME" == "windows" ]; then ./build.bat; fi
-  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then meson build -Dwith_tests=true -Dwith_x11=false --backend=ninja; fi
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then meson build -Dtests=true -Dx11-hook=false --backend=ninja; fi
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then ninja -C build; fi
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then ./build/viltest; fi

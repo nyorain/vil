@@ -468,7 +468,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		dlg_assert(pBeginInfo->pInheritanceInfo);
 		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
 
-		auto& rp = cb.dev->renderPasses.get(pBeginInfo->pInheritanceInfo->renderPass);
+		auto& rp = get(*cb.dev, pBeginInfo->pInheritanceInfo->renderPass);
 		cb.graphicsState().rpi.rp = &rp;
 		cb.graphicsState().rpi.subpass = pBeginInfo->pInheritanceInfo->subpass;
 
@@ -476,12 +476,12 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		inherit.renderPass = rp.handle;
 
 		if(pBeginInfo->pInheritanceInfo->framebuffer) {
-			auto& fb = cb.dev->framebuffers.get(pBeginInfo->pInheritanceInfo->framebuffer);
+			auto& fb = get(*cb.dev, pBeginInfo->pInheritanceInfo->framebuffer);
 
 			// not sure if imageless framebuffers are allowed here.
 			dlg_assert(!fb.imageless);
 			if(!fb.imageless) {
-				dlg_assert(rp.desc->attachments.size() == fb.attachments.size());
+				dlg_assert(rp.desc.attachments.size() == fb.attachments.size());
 				cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, fb.attachments.size());
 
 				for(auto i = 0u; i < fb.attachments.size(); ++i) {
@@ -727,8 +727,8 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cmd.info.pClearValues = cmd.clearValues.data();
 	copyChainInPlace(cb, cmd.info.pNext);
 
-	cmd.fb = cb.dev->framebuffers.find(rpBeginInfo.framebuffer);
-	cmd.rp = cb.dev->renderPasses.find(rpBeginInfo.renderPass);
+	cmd.fb = &get(*cb.dev, rpBeginInfo.framebuffer);
+	cmd.rp = &get(*cb.dev, rpBeginInfo.renderPass);
 
 	dlg_assert(!cb.graphicsState().rpi.rp);
 	cb.graphicsState().rpi.rp = cmd.rp;
@@ -736,9 +736,6 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 	cmd.subpassBeginInfo = subpassBeginInfo;
 	copyChainInPlace(cb, cmd.subpassBeginInfo.pNext);
-
-	dlg_assert(cmd.fb);
-	dlg_assert(cmd.rp);
 
 	useHandle(cb, cmd, *cmd.fb);
 	useHandle(cb, cmd, *cmd.rp);
@@ -748,7 +745,7 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 		auto* attInfo = findChainInfo<VkRenderPassAttachmentBeginInfo, sType>(rpBeginInfo);
 		dlg_assert(attInfo);
 
-		dlg_assert(cmd.rp->desc->attachments.size() == attInfo->attachmentCount);
+		dlg_assert(cmd.rp->desc.attachments.size() == attInfo->attachmentCount);
 		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, attInfo->attachmentCount);
 
 		for(auto i = 0u; i < attInfo->attachmentCount; ++i) {
@@ -757,12 +754,12 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 			useHandle(cb, cmd, attachment, false);
 			useHandle(cb, cmd, nonNull(attachment.img),
-				cmd.rp->desc->attachments[i].finalLayout);
+				cmd.rp->desc.attachments[i].finalLayout);
 
 			cb.graphicsState().rpi.attachments[i] = &attachment;
 		}
 	} else {
-		dlg_assert(cmd.rp->desc->attachments.size() == cmd.fb->attachments.size());
+		dlg_assert(cmd.rp->desc.attachments.size() == cmd.fb->attachments.size());
 		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, cmd.fb->attachments.size());
 
 		for(auto i = 0u; i < cmd.fb->attachments.size(); ++i) {
@@ -771,7 +768,7 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 			useHandle(cb, cmd, *attachment, false);
 			useHandle(cb, cmd, *attachment->img,
-				cmd.rp->desc->attachments[i].finalLayout);
+				cmd.rp->desc.attachments[i].finalLayout);
 
 			cb.graphicsState().rpi.attachments[i] = attachment;
 		}

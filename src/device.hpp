@@ -168,7 +168,6 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedUniqueUnorderedMap<VkImage, Image> images;
 	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
-	SyncedUniqueUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
 	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
 	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
@@ -202,6 +201,9 @@ struct Device {
 	SyncedIntrusiveUnorderedMap<VkPipelineLayout, PipelineLayout> pipeLayouts;
 	// Needs to be ref-counted only for PushDescriptorSetWithTemplateCmd
 	SyncedIntrusiveUnorderedMap<VkDescriptorUpdateTemplate, DescriptorUpdateTemplate> dsuTemplates;
+	// Needs to be ref-counted so we can reference the render passes in
+	// Pipeline or Framebuffer
+	SyncedIntrusiveUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 
 	// Resources stored in descriptors need shared ownership since so that
 	// we don't have to track ds <-> resource links which would be a massive
@@ -254,6 +256,8 @@ DefHandleDesc(VkImage, Image, images, false, false);
 DefHandleDesc(VkDeviceMemory, DeviceMemory, deviceMemories, false, false);
 DefHandleDesc(VkQueryPool, QueryPool, queryPools, false, false);
 DefHandleDesc(VkPipeline, Pipeline, pipes, false, false);
+DefHandleDesc(VkRenderPass, RenderPass, renderPasses, false, false);
+DefHandleDesc(VkFramebuffer, Framebuffer, framebuffers, false, false);
 
 #undef DefHandleDesc
 
@@ -370,6 +374,14 @@ template<typename H> auto getPtr(VkDevice vkDev, H handle) {
 
 	auto& dev = getDevice(vkDev);
 	return HandleDesc<H>::map(dev).getPtr(handle);
+}
+
+template<typename H> auto mustMoveUnset(Device& dev, H& handle) {
+	auto lock = std::lock_guard(dev.mutex);
+	auto ptr = HandleDesc<H>::map(dev).mustMoveLocked(handle);
+	handle = ptr->handle;
+	ptr->handle = {};
+	return ptr;
 }
 
 // Util for naming internal handles.

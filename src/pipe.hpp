@@ -62,7 +62,7 @@ protected:
 span<const PipelineShaderStage> stages(const Pipeline& pipe);
 
 struct GraphicsPipeline : Pipeline {
-	std::shared_ptr<RenderPassDesc> renderPass {};
+	IntrusivePtr<RenderPass> renderPass {};
 	u32 subpass {};
 
 	std::vector<VkPipelineColorBlendAttachmentState> blendAttachments;

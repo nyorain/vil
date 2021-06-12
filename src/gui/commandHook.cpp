@@ -598,7 +598,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		auto& rp = *info.beginRenderPassCmd->rp;
 
 		// TODO: we could likely just directly support this
-		if(hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) {
+		if(hasChain(rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) {
 			state->errorMessage = "Splitting multiview renderpass not implemented";
 			dlg_trace(state->errorMessage);
 			info.splitRenderPass = false;
@@ -606,7 +606,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	}
 
 	if(info.splitRenderPass) {
-		auto& desc = *info.beginRenderPassCmd->rp->desc;
+		auto& desc = info.beginRenderPassCmd->rp->desc;
 
 		info.beginRenderPassCmd = info.beginRenderPassCmd;
 		info.hookedSubpass = info.beginRenderPassCmd->subpassOfDescendant(*hcommand.back());
@@ -644,7 +644,7 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 	if(info.splitRenderPass) {
 		dlg_assert(info.beginRenderPassCmd);
 
-		auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
+		auto numSubpasses = info.beginRenderPassCmd->rp->desc.subpasses.size();
 		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
 			// TODO: missing potential forward of pNext chain here
 			// Subpass contents irrelevant here.
@@ -693,7 +693,7 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info)
 		dlg_assert(info.beginRenderPassCmd);
 
 		// TODO: missing potential forward of pNext chain here
-		auto numSubpasses = info.beginRenderPassCmd->rp->desc->subpasses.size();
+		auto numSubpasses = info.beginRenderPassCmd->rp->desc.subpasses.size();
 		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
 			// TODO: missing potential forward of pNext chain here
 			// TODO: subpass contents relevant?
@@ -1319,7 +1319,8 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 			auto& clearAtt = cmd->attachments[0];
 			u32 attID = clearAtt.colorAttachment;
 			if(clearAtt.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT) {
-				auto& depthStencil = nonNull(rp.desc->subpasses[info.hookedSubpass].pDepthStencilAttachment);
+				auto& subpass = rp.desc.subpasses[info.hookedSubpass];
+				auto& depthStencil = nonNull(subpass.pDepthStencilAttachment);
 				attID = depthStencil.attachment;
 			}
 

@@ -62,7 +62,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	lastFrame_ = Clock::now();
 
-	auto blurBackground = true;
+	auto blurBackground = checkEnvBinary("VIL_BLUR", true);
 	if(!clear && blurBackground) {
 		vil::init(blur_, dev, dev.renderData->linearSampler);
 
@@ -1501,19 +1501,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		// == Submit batch ==
 		ZoneScopedN("BuildSubmission");
 
-		VkSubmitInfo submitInfos[2] {};
-		// NOTE: draw.futureSemaphore might not be waited upon but we need
-		// to signal it. We therefore have to reset it, see below (when not
-		// using timeline semaphores). The spec isn't clear about whether
-		// it's allowed to first wait and then signal the same semaphore
-		// in the same VkSubmitInfo (see e.g. https://www.reddit.com/r/vulkan/comments/6pwuzd).
-		// In anv, mesa 21.0.3 we encountered a deadlock when trying to do
-		// so though, so we now use 2 VkSubmitInfos when we need to reset
-		// futureSemaphore.
-		auto needPreSubmit = false;
-		auto topOfPpipeStage = VkPipelineStageFlags(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
-
-		auto& submitInfo = submitInfos[1];
+		VkSubmitInfo submitInfo {};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.commandBufferCount = 1u;
 		submitInfo.pCommandBuffers = &draw.cb;
@@ -1564,7 +1552,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		VkTimelineSemaphoreSubmitInfo tsInfo {};
 
 		auto waitSems = std::vector(info.waitSemaphores.begin(), info.waitSemaphores.end());
-		auto signalSems = std::vector{draw.presentSemaphore, draw.futureSemaphore};
+		auto signalSems = std::vector{draw.presentSemaphore};
 
 		std::vector<VkPipelineStageFlags> waitStages;
 		for(auto i = 0u; i < info.waitSemaphores.size(); ++i) {
@@ -1594,6 +1582,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			// signal
 			// signalValues[0] is uninitialized by design, should be
 			// ignored by driver as signalSemaphores[0] is binary
+			signalSems.push_back(draw.futureSemaphore);
 			++draw.futureSemaphoreValue;
 			signalValues[1] = draw.futureSemaphoreValue;
 
@@ -1615,16 +1604,26 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			// to reset it before we signal it again. This shouldn't acutally
 			// cause an additional wait, we already wait for the last draw.
 			if(!draw.futureSemaphoreUsed && draw.futureSemaphoreSignaled) {
-				// This is a bit messy, see the declaration of needPreSubmit
-				// for more details why this is needed.
-				needPreSubmit = true;
+				// This is a bit messy.
+				// So, 'futureSemaphore' was signaled by us but never consumed
+				// (happens when we just didn't access the anything the
+				// applicaiton used since then). We have to reset the
+				// semaphore.
+				// Initially, we simply waited on it via
+				// submitInfo.pWaitSemaphores but no one knows if this
+				// is valid or not, the spec is too vague.
+				// Since this lead to a deadlock with anv, mesa 20.3, 21.1,
+				// we just swap it out with a pool semaphore now.
+				// We can't recreate it without waiting on draw.fence
+				// which we want to avoid.
+				dev().resetSemaphores.push_back(draw.futureSemaphore);
+				draw.futureSemaphore = getSemaphoreFromPoolLocked(dev());
 
-				auto& preSubmitInfo = submitInfos[0];
-				preSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-				preSubmitInfo.pWaitSemaphores = &draw.futureSemaphore;
-				preSubmitInfo.pWaitDstStageMask = &topOfPpipeStage;
-				preSubmitInfo.waitSemaphoreCount = 1u;
+				draw.futureSemaphoreUsed = false;
+				draw.futureSemaphoreSignaled = false;
 			}
+
+			signalSems.push_back(draw.futureSemaphore);
 
 			for(auto* sub : waitSubmissions) {
 				// take ownership of sub->ourSemaphore if it's valid
@@ -1664,8 +1663,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			// fence and can just use the timeline semaphore
 			std::lock_guard queueLock(dev().queueMutex);
 			res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle,
-				needPreSubmit ? 2u : 1u,
-				needPreSubmit ? submitInfos : &submitInfo, draw.fence);
+				1u, &submitInfo, draw.fence);
 		}
 
 		if(res != VK_SUCCESS) {

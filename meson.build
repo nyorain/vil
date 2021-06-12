@@ -55,12 +55,11 @@ endif
 # TODO: yeah, this needs some love
 with_win32 = build_machine.system() == 'windows'
 
-# with_x11 = not with_win32
-with_x11 = not with_win32 and get_option('with_x11')
+with_x11_hook = not with_win32 and get_option('x11-hook')
 
 tracy_deps = []
 
-with_tracy = true
+with_tracy = get_option('tracy')
 
 if with_tracy
 	args += '-DTRACY_ENABLE'
@@ -84,12 +83,6 @@ layer_args = [
 # layer_args += '-DVIL_TRACY_MUTEX'
 layer_args += '-DVIL_DEBUG_MUTEX'
 
-link_args = cc.get_supported_arguments([
-	# unix, TODO: this caused problems on clang
-	# '-Wl,-Bsymbolic-functions',
-	# '-Wl,-z,relro',
-])
-
 dep_threads = dependency('threads', required: false)
 dep_dlg = dependency('dlg',
 	static: true,
@@ -102,8 +95,6 @@ dep_swa = dependency('swa',
 		'link-vulkan=false',
 		'with-kms=disabled'
 	])
-
-# subdir('src/imgui')
 
 src = files(
 	# own meta sources & util
@@ -247,7 +238,8 @@ src = files(
 	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
 
-if get_option('with_tests')
+with_tests = get_option('tests')
+if with_tests
 	src += files(
 		'src/test/bugged.cpp',
 		'src/test/rpsplit.cpp',
@@ -271,11 +263,9 @@ deps = [
 	dep_dlg,
 	dep_swa,
 	tracy_deps,
-	# libimgui_core_dep,
-	# dep_vulkan,
 ]
 
-if with_x11
+if with_x11_hook
 	src += files('src/xlib.cpp')
 
 	dep_xcb = dependency('xcb', required: true)
@@ -306,7 +296,6 @@ vil_layer = shared_library(
 	dependencies: deps,
 	include_directories: inc,
 	cpp_args: args + layer_args,
-	link_args: link_args,
 	install: true,
 	cpp_pch: pch,
 )
@@ -340,11 +329,11 @@ if build_machine.system() == 'windows'
 	)
 endif
 
-if get_option('with_example')
+if get_option('example')
 	subdir('docs/example')
 endif
 
-if get_option('with_tests')
+if with_tests
 	viltest = executable('viltest', files('src/test/main.cpp'),
 		include_directories: inc,
 		cpp_args: args,

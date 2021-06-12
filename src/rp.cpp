@@ -50,13 +50,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		return res;
 	}
 
-	auto& fb = dev.framebuffers.add(*pFramebuffer);
+	auto fbPtr = std::make_unique<Framebuffer>();
+	auto& fb = *fbPtr;
 	fb.width = pCreateInfo->width;
 	fb.height = pCreateInfo->height;
 	fb.layers = pCreateInfo->layers;
 	fb.handle = *pFramebuffer;
 	fb.objectType = VK_OBJECT_TYPE_FRAMEBUFFER;
-	fb.rp = dev.renderPasses.get(pCreateInfo->renderPass).desc;
+	fb.rp = getPtr(dev, pCreateInfo->renderPass);
 	fb.dev = &dev;
 	fb.attachments = std::move(views);
 	fb.imageless = imageless;
@@ -65,6 +66,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		std::lock_guard lock(dev.mutex);
 		view->fbs.push_back(&fb);
 	}
+
+	*pFramebuffer = castDispatch<VkFramebuffer>(fb);
+	dev.framebuffers.mustEmplace(*pFramebuffer, std::move(fbPtr));
 
 	return res;
 }
@@ -78,7 +82,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 	}
 
 	auto& dev = getDevice(device);
-	dev.framebuffers.mustErase(framebuffer);
+	mustMoveUnset(dev, framebuffer);
 	dev.dispatch.DestroyFramebuffer(device, framebuffer, pAllocator);
 }
 
@@ -613,20 +617,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		return res;
 	}
 
-	auto& rp = dev.renderPasses.add(*pRenderPass);
+	auto rpPtr = IntrusivePtr<RenderPass>(new RenderPass());
+	auto& rp = *rpPtr;
 	rp.dev = &dev;
 	rp.handle = *pRenderPass;
 	rp.objectType = VK_OBJECT_TYPE_RENDER_PASS;
 
-	rp.desc = std::make_shared<RenderPassDesc>();
-
-	rp.desc->flags = pCreateInfo->flags;
-	rp.desc->pNext = pCreateInfo->pNext;
-	rp.desc->exts.push_back(copyChain(rp.desc->pNext));
+	rp.desc.flags = pCreateInfo->flags;
+	rp.desc.pNext = pCreateInfo->pNext;
+	rp.desc.exts.push_back(copyChain(rp.desc.pNext));
 
 	// deep copy attachments & dependencies
-	upgrade(rp.desc->dependencies, pCreateInfo->pDependencies, pCreateInfo->dependencyCount);
-	upgrade(rp.desc->attachments, pCreateInfo->pAttachments, pCreateInfo->attachmentCount);
+	upgrade(rp.desc.dependencies, pCreateInfo->pDependencies, pCreateInfo->dependencyCount);
+	upgrade(rp.desc.attachments, pCreateInfo->pAttachments, pCreateInfo->attachmentCount);
 
 	// deep copy subpasses
 	auto upgradeAttRefs = [&](const VkAttachmentReference* refs, std::size_t count) {
@@ -634,11 +637,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 			return u32(0);
 		}
 
-		auto off = rp.desc->attachmentRefs.back().size();
+		auto off = rp.desc.attachmentRefs.back().size();
 		for(auto i = 0u; i < count; ++i) {
 			auto& attSrc = refs[i];
 
-			auto& attDst = rp.desc->attachmentRefs.back().emplace_back();
+			auto& attDst = rp.desc.attachmentRefs.back().emplace_back();
 			attDst.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
 			attDst.attachment = attSrc.attachment;
 			attDst.layout = attSrc.layout;
@@ -647,7 +650,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 				continue;
 			}
 
-			auto format = rp.desc->attachments[attDst.attachment].format;
+			auto format = rp.desc.attachments[attDst.attachment].format;
 			if(FormatHasDepth(format)) {
 				attDst.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
 			}
@@ -664,7 +667,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 
 	for(auto i = 0u; i < pCreateInfo->subpassCount; ++i) {
 		auto& src = pCreateInfo->pSubpasses[i];
-		auto& dst = rp.desc->subpasses.emplace_back();
+		auto& dst = rp.desc.subpasses.emplace_back();
 		dst = {};
 
 		dst.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
@@ -676,7 +679,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		dst.inputAttachmentCount = src.inputAttachmentCount;
 		dst.preserveAttachmentCount = src.preserveAttachmentCount;
 
-		auto& atts = rp.desc->attachmentRefs.emplace_back();
+		auto& atts = rp.desc.attachmentRefs.emplace_back();
 		auto colorOff = upgradeAttRefs(src.pColorAttachments, src.colorAttachmentCount);
 		auto depthOff = upgradeAttRefs(src.pDepthStencilAttachment, src.pDepthStencilAttachment ? 1 : 0);
 		auto inputOff = upgradeAttRefs(src.pInputAttachments, src.inputAttachmentCount);
@@ -691,11 +694,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 		dst.pDepthStencilAttachment = src.pDepthStencilAttachment ? &atts[depthOff] : nullptr;
 
 		if(src.preserveAttachmentCount) {
-			rp.desc->attachmentIDs.emplace_back(src.pPreserveAttachments,
+			rp.desc.attachmentIDs.emplace_back(src.pPreserveAttachments,
 				src.pPreserveAttachments + src.preserveAttachmentCount);
-			dst.pPreserveAttachments = rp.desc->attachmentIDs.back().data();
+			dst.pPreserveAttachments = rp.desc.attachmentIDs.back().data();
 		}
 	}
+
+	*pRenderPass = castDispatch<VkRenderPass>(rp);
+	dev.renderPasses.mustEmplace(*pRenderPass, std::move(rpPtr));
 
 	return res;
 }
@@ -706,46 +712,45 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 		const VkAllocationCallbacks*                pAllocator,
 		VkRenderPass*                               pRenderPass) {
 	auto& dev = getDevice(device);
-	auto f = dev.dispatch.CreateRenderPass2;
-	auto res = f(device, pCreateInfo, pAllocator, pRenderPass);
+	auto res = dev.dispatch.CreateRenderPass2(device, pCreateInfo, pAllocator, pRenderPass);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& rp = dev.renderPasses.add(*pRenderPass);
+	auto rpPtr = IntrusivePtr<RenderPass>(new RenderPass());
+	auto& rp = *rpPtr;
 	rp.dev = &dev;
 	rp.handle = *pRenderPass;
 	rp.objectType = VK_OBJECT_TYPE_RENDER_PASS;
 
 	auto& rpi = *pCreateInfo;
-	rp.desc = std::make_shared<RenderPassDesc>();
-	rp.desc->flags = rpi.flags;
-	rp.desc->pNext = rpi.pNext;
-	rp.desc->exts.push_back(copyChain(rp.desc->pNext));
+	rp.desc.flags = rpi.flags;
+	rp.desc.pNext = rpi.pNext;
+	rp.desc.exts.push_back(copyChain(rp.desc.pNext));
 
-	rp.desc->attachments = {rpi.pAttachments, rpi.pAttachments + rpi.attachmentCount};
-	rp.desc->subpasses = {rpi.pSubpasses, rpi.pSubpasses + rpi.subpassCount};
-	rp.desc->dependencies = {rpi.pDependencies, rpi.pDependencies + rpi.dependencyCount};
+	rp.desc.attachments = {rpi.pAttachments, rpi.pAttachments + rpi.attachmentCount};
+	rp.desc.subpasses = {rpi.pSubpasses, rpi.pSubpasses + rpi.subpassCount};
+	rp.desc.dependencies = {rpi.pDependencies, rpi.pDependencies + rpi.dependencyCount};
 
-	for(auto& att : rp.desc->attachments) {
-		copyChain(att.pNext, rp.desc->exts.emplace_back());
+	for(auto& att : rp.desc.attachments) {
+		copyChain(att.pNext, rp.desc.exts.emplace_back());
 	}
 
-	for(auto& dep : rp.desc->dependencies) {
-		copyChain(dep.pNext, rp.desc->exts.emplace_back());
+	for(auto& dep : rp.desc.dependencies) {
+		copyChain(dep.pNext, rp.desc.exts.emplace_back());
 	}
 
 	auto addAtts = [&](const VkAttachmentReference2* refs, std::size_t count) {
-		auto& atts = rp.desc->attachmentRefs.back();
+		auto& atts = rp.desc.attachmentRefs.back();
 		auto ret = atts.size();
 		atts.insert(atts.end(), refs, refs + count);
 		return ret;
 	};
 
-	for(auto& subp : rp.desc->subpasses) {
-		copyChain(subp.pNext, rp.desc->exts.emplace_back());
+	for(auto& subp : rp.desc.subpasses) {
+		copyChain(subp.pNext, rp.desc.exts.emplace_back());
 
-		auto& atts = rp.desc->attachmentRefs.emplace_back();
+		auto& atts = rp.desc.attachmentRefs.emplace_back();
 		auto colorOff = addAtts(subp.pColorAttachments, subp.colorAttachmentCount);
 		auto depthOff = addAtts(subp.pDepthStencilAttachment, subp.pDepthStencilAttachment ? 1 : 0);
 		auto inputOff = addAtts(subp.pInputAttachments, subp.inputAttachmentCount);
@@ -763,11 +768,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 		}
 
 		if(subp.preserveAttachmentCount) {
-			auto& ids = rp.desc->attachmentIDs.emplace_back(subp.pPreserveAttachments,
+			auto& ids = rp.desc.attachmentIDs.emplace_back(subp.pPreserveAttachments,
 				subp.pPreserveAttachments + subp.preserveAttachmentCount);
 			subp.pPreserveAttachments = ids.data();
 		}
 	}
+
+	*pRenderPass = castDispatch<VkRenderPass>(rp);
+	dev.renderPasses.mustEmplace(*pRenderPass, std::move(rpPtr));
 
 	return res;
 }
@@ -781,8 +789,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 	}
 
 	auto& dev = getDevice(device);
+	mustMoveUnset(dev, renderPass);
 	dev.dispatch.DestroyRenderPass(device, renderPass, pAllocator);
-	dev.renderPasses.mustErase(renderPass);
 }
 
 } // namespace vil

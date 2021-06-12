@@ -55,6 +55,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 	// with the derivation fields.
 
 	struct PreData {
+		IntrusivePtr<RenderPass> rp {};
 		IntrusivePtr<XfbPatchDesc> xfb {};
 		span<const VkPipelineShaderStageCreateInfo> stages;
 	};
@@ -75,13 +76,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		auto& pre = pres[i];
 
-		auto& rp = dev.renderPasses.get(nci.renderPass);
+		pre.rp = getPtr(dev, nci.renderPass);
 		pre.stages = {nci.pStages, nci.stageCount};
 		u32 xfbVertexStageID = u32(-1);
 
 		// transform feedback isn't supported for multiview graphics pipelines
 		auto useXfb = dev.transformFeedback &&
-			!hasChain(*rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
+			!hasChain(pre.rp->desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
 
 		auto& stages = stagesVecs.emplace_back();
 		for(auto s = 0u; s < nci.stageCount; ++s) {
@@ -169,12 +170,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		pipe.handle = pPipelines[i];
 		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
-		pipe.renderPass = dev.renderPasses.get(pci.renderPass).desc;
+		pipe.renderPass = std::move(pres[i].rp);
 		pipe.subpass = pci.subpass;
 
 		pci.layout = pipe.layout->handle;
 
-		auto& subpassInfo = pipe.renderPass->subpasses[pipe.subpass];
+		auto& subpassInfo = pipe.renderPass->desc.subpasses[pipe.subpass];
 
 		pipe.hasTessellation = false;
 		pipe.hasMeshShader = false;

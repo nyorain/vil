@@ -1,5 +1,16 @@
-# option('with_x11', type: 'feature', value: 'disabled')
-option('with_x11', type: 'boolean', value: true)
+# whether to build with support for x11 hooked overlays
+# disabled by default on windows
+# even when this is false, allows to create overlays via the API or
+# use vil in a separate window on x11
+option('x11-hook', type: 'boolean', value: true)
 
-option('with_example', type: 'boolean', value: false)
-option('with_tests', type: 'boolean', value: false)
+# whether to build the example
+option('example', type: 'boolean', value: false)
+
+# whether to build the tests
+# NOTE: due to technical reasons, the tests are compiled into the layer 
+# library itself. Disabling this should slightly decrease the size of the library
+option('tests', type: 'boolean', value: false)
+
+# whether to build with tracy for profiling
+option('tracy', type: 'boolean', value: true)

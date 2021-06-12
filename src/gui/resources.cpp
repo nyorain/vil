@@ -613,28 +613,13 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 
 	auto& dev = gui_->dev();
 
-	// general info
-	// text
-	ImGui::Columns(2);
-
-	ImGui::Text("Layout");
-	ImGui::Text("Render Pass");
-	ImGui::Text("Subpass");
-
-	// data
-	ImGui::NextColumn();
-
+	// references: layout & renderPass
 	refButtonExpect(*gui_, pipe.layout.get());
 
-	// TODO: allow to display RenderPassDesc
-	// if(ImGui::Button(name(*pipe.renderPass).c_str())) {
-	// 	select(*pipe.renderPass);
-	// }
+	refButtonExpect(*gui_, pipe.renderPass.get());
+	ImGui::SameLine();
+	ImGui::Text("Subpass %d", pipe.subpass);
 
-	ImGui::Text("TODO: link to render pass desc");
-	ImGui::Text("%d", pipe.subpass);
-
-	ImGui::Columns();
 	ImGui::Separator();
 
 	// rasterization
@@ -1181,6 +1166,8 @@ void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
 		{"Layers", "{}", fb.layers},
 	}});
 
+	refButtonExpect(*gui_, fb.rp.get());
+
 	// Resource references
 	if(fb.imageless) {
 		imGuiText("Framebuffer is imageless, has no attachments");
@@ -1200,9 +1187,11 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 	ImGui::Spacing();
 
 	// info
+	auto& desc = rp.desc;
+
 	// attachments
-	for(auto i = 0u; i < rp.desc->attachments.size(); ++i) {
-		const auto& att = rp.desc->attachments[i];
+	for(auto i = 0u; i < desc.attachments.size(); ++i) {
+		const auto& att = desc.attachments[i];
 		if(ImGui::TreeNode(&att, "Attachment %d: %s", i, vk::name(att.format))) {
 			asColumns2({{
 				{"Samples", "{}", vk::name(att.samples)},
@@ -1220,8 +1209,8 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 	}
 
 	// subpasses
-	for(auto i = 0u; i < rp.desc->subpasses.size(); ++i) {
-		const auto& subp = rp.desc->subpasses[i];
+	for(auto i = 0u; i < desc.subpasses.size(); ++i) {
+		const auto& subp = desc.subpasses[i];
 		if(ImGui::TreeNode(&subp, "Subpass %d", i)) {
 			asColumns2({{
 				{"Pipeline Bind Point", "{}", vk::name(subp.pipelineBindPoint)},
@@ -1272,8 +1261,8 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 		return std::to_string(subpass);
 	};
 
-	for(auto i = 0u; i < rp.desc->dependencies.size(); ++i) {
-		const auto& dep = rp.desc->dependencies[i];
+	for(auto i = 0u; i < desc.dependencies.size(); ++i) {
+		const auto& dep = desc.dependencies[i];
 		if(ImGui::TreeNode(&dep, "Dependency %d", i)) {
 			asColumns2({{
 				{"srcSubpass", formatSubpass(dep.srcSubpass)},

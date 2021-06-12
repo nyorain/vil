@@ -308,7 +308,7 @@ Much rather we want to see if, for a given handle, there is a command buffer
 that uses it. And we can do that via the handle->refCbs and
 handle->descriptors->refCbs referenced command buffer sets.
 
-# On the Vertex Viewer
+# On Vertex Viewing
 
 Getting vertex processing insights, such as in renderdoc, is actually
 fairly complicated.
@@ -637,3 +637,47 @@ reference might add too much overhead
 
 Also, we know the shader structure at submission time so can schedule/layout
 everything, don't need to do that in a shader.
+
+# Revisiting command groups: A better device command overview
+
+For complex applications, the per-frame submission command viewer isn't
+easy to use since the submissions done per frame can vary a lot.
+Instead, we could leverage our previous concept of command groups to
+give a better overview: Basically show all submissions ever done.
+But group them so that we can quicky find the submission we are looking for/
+quickly get an overview of all the submissions done.
+Also group by queue, making use of queues in the UI design is essential
+for complex applications with lots of async submissions, lots of work
+done over multiple frames.
+
+UI could look like this (using imgui treenodes again):
+
+_ Queue 1: Graphics (family 0)
+	- submission group 1
+		- command group 1
+		- command group 2
+		- command group 3
+		- command group 4
+		- command group 5
+	- submission group 2
+	...
+- Queue 2: Compute (family 1)
+	...
+- Queue 3: Compute (family 2)
+- Queue 4: transfer (family 3)
+
+The groups here are a bit different than our legacy CommandBufferGroup concept.
+First, we will filter out "uninteresting" command records that we can't assign
+to any meaningful group (could view that via a "rest" entry or separate command mode
+for temporary transfer submissions). Any record that uses a pipeline is meaningful,
+grouping by used pipeline will already deliver useful results.
+
+We also try to group submissions. Group them by comparing the submitted records.
+Not sure if this is useful/meaningful though.
+
+For each submitted command group, we shows metrics detailing how often (and when)
+it is submitted. We could mark entries submitted recently (e.g. this or last frame)
+green, entries submitted during the last 20 frames yellow and everything red or
+something to make this easy to grasp.
+
+We can also use command groups to figure out whether to hook a command.

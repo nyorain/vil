@@ -224,15 +224,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 	}
 
 	auto& dev = getDevice(device);
-	IntrusivePtr<ImageView> ptr;
-
-	{
-		auto lock = std::lock_guard(dev.mutex);
-		ptr = dev.imageViews.mustMoveLocked(imageView);
-		imageView = ptr->handle;
-		ptr->handle = {};
-	}
-
+	mustMoveUnset(dev, imageView);
 	dev.dispatch.DestroyImageView(dev.handle, imageView, pAllocator);
 }
 
@@ -270,15 +262,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 	}
 
 	auto& dev = getDevice(device);
-	IntrusivePtr<Sampler> ptr;
-
-	{
-		auto lock = std::lock_guard(dev.mutex);
-		ptr = dev.samplers.mustMoveLocked(sampler);
-		sampler = ptr->handle;
-		ptr->handle = {};
-	}
-
+	mustMoveUnset(dev, sampler);
 	dev.dispatch.DestroySampler(dev.handle, sampler, pAllocator);
 }
 

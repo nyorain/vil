@@ -1,3 +1,5 @@
+- [x] Make renderPass intrusive ptr object (like imageView etc) and directly
+      embed RenderPassDesc. Correctly link to it from framebuffer/gfxPipeline
 - [x] respect ds dynamic offsets. Test with SW sample
 - [x] fix IO viewer being stuck because we can't get a new command
       {still not fixed, even when using LCS & new update logic}

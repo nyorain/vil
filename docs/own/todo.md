@@ -16,8 +16,6 @@ urgent, bugs:
 - [ ] image viewer validation bug when we don't hover the image
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
-- [ ] Make renderPass intrusive ptr object (like imageView etc) and directly
-      embed RenderPassDesc. Correctly link to it from framebuffer/gfxPipeline
 
 descriptor indexing extension:
 - [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 
@@ -153,6 +151,7 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] show enabled vulkan11, vulkan12 features in gui as well
 - [ ] when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
       we just create a second window by default?
 	  If a manual overlay is created later on, we can still close the window
