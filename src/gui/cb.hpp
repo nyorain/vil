@@ -55,10 +55,11 @@ private:
 	IntrusivePtr<CommandRecord> record_ {};
 
 	// For swapchain
-	std::vector<RecordBatch> records_;
-	u32 swapchainCounter_ {}; // counter of last processed batch
+	std::vector<RecordBatch> records_; // currently viewed frame
+	u32 swapchainPresent_ {}; // present id of viewed frame
 	bool freezeCommands_ {};
 	bool freezeState_ {};
+	std::vector<RecordBatch> selectedBatch_; // frame belonging to record_, command_
 
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};

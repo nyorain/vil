@@ -1,18 +1,13 @@
 # Todo
 
 v0.1, goal: end of january 2021 (edit may 2021: lmao) 
-- lcs matching; fix dlg_assert(found) stuff
 - overlay improvements (especially win32 but also x11; leave wl out)
 - testing & stability improvements
 - docs improvements (mainly: add introduction post explaining stuff)
 - gui improvement: remove flickering data and stuff, allow to get
   texel values in command viewer
-- add more tests where useful
 
 urgent, bugs:
-- [ ] CommandBufferGui: separate the RecordBatches that are shown as commands
-      and the RecordBatches that the currently selected command is part of.
-	  We need to store the latter to correctly do contexted LCS
 - [ ] image viewer validation bug when we don't hover the image
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
@@ -68,7 +63,7 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
-- [ ] figure out a better way to do xfb. For huge draw commands
+- [ ] figure out a better way to retrieve xfb data. For huge draw commands
       (especially multi-draw where the whole scene is rendered), we would
 	  need giant buffers and the performance impact is huge
 	  	- [ ] also figure out better xfb buffer allocation strategy,
@@ -173,11 +168,6 @@ other
 			  this via std::map in Device with custom comparison that
 			  checks whether an address is in-range? Think about whether
 			  this works for memory aliasing.
-- [ ] Unselect a command when new frames don't contain it any more?
-      We will still view the old state at the moment. Unselecting can
-	  be a problem since we might want to continue viewing the stale
-	  state if the command gets only submitted once every N frames.
-	  Maybe show a visual hint that the state is stale though?
 - [ ] windows: don't include windows.h in vil_api.h, instead just
       manually define LoadLibrary, GetProcAddress
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp

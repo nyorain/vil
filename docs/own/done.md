@@ -1,3 +1,11 @@
+- [x] Unselect a command when new frames don't contain it any more?
+      We will still view the old state at the moment. Unselecting can
+	  be a problem since we might want to continue viewing the stale
+	  state if the command gets only submitted once every N frames.
+	  Maybe show a visual hint that the state is stale though?
+- [x] CommandBufferGui: separate the RecordBatches that are shown as commands
+      and the RecordBatches that the currently selected command is part of.
+	  We need to store the latter to correctly do contexted LCS
 - [x] Make renderPass intrusive ptr object (like imageView etc) and directly
       embed RenderPassDesc. Correctly link to it from framebuffer/gfxPipeline
 - [x] respect ds dynamic offsets. Test with SW sample

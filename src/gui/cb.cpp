@@ -129,6 +129,22 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::EndPopup();
 	}
 
+	// force-update shown batches when it's been too long
+	if(mode_ == UpdateMode::swapchain) {
+		auto lastPresent = dev.swapchain->frameSubmissions[0].presentID;
+		if(record_ && lastPresent > swapchainPresent_ + 3) {
+			auto diff = lastPresent - swapchainPresent_;
+
+			ImGui::SameLine();
+			imGuiText("Command not found in {} frames", diff);
+
+			// force update
+			if(!freezeCommands_) {
+				records_ = dev.swapchain->frameSubmissions[0].batches;
+			}
+		}
+	}
+
 	if(mode_ == UpdateMode::none) {
 		imGuiText("Showing static record");
 	} else if(mode_ == UpdateMode::commandBuffer) {
@@ -143,9 +159,9 @@ void CommandBufferGui::draw(Draw& draw) {
 	} else if(mode_ == UpdateMode::swapchain) {
 		if(!gui_->dev().swapchain) {
 			record_ = {};
-			records_ = {};
-			swapchainCounter_ = {};
+			selectedBatch_ = {};
 			dsState_ = {};
+			swapchainPresent_ = {};
 			command_ = {};
 			hook.target = {};
 			hook.desc({}, {}, {});
@@ -246,6 +262,7 @@ void CommandBufferGui::draw(Draw& draw) {
 							record_ = rec;
 							command_ = std::move(nsel);
 							dsState_ = record_->lastDescriptorState;
+							selectedBatch_ = records_;
 
 							commandViewer_.select(record_, *command_.back(), dsState_, true);
 
@@ -437,11 +454,13 @@ void CommandBufferGui::updateState() {
 		// find the best match
 		CommandHook::CompletedHook* best = nullptr;
 		auto bestMatch = 0.f;
+		u32 bestPresentID = {};
 		span<const RecordBatch> bestBatches; // only for swapchain mode
 
 		for(auto& res : hook.completed) {
 			float resMatch = res.match;
 			span<const RecordBatch> foundBatches;
+			u32 presentID;
 
 			// When we are in swapchain mode, we need the frame associated with
 			// this submission. We will then also consider the submission in its
@@ -450,6 +469,7 @@ void CommandBufferGui::updateState() {
 				for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
 					if(res.submissionID >= frame.submissionStart && res.submissionID <= frame.submissionEnd) {
 						foundBatches = frame.batches;
+						presentID = frame.presentID;
 						break;
 					}
 				}
@@ -460,8 +480,8 @@ void CommandBufferGui::updateState() {
 					continue;
 				}
 
-				dlg_assert(!records_.empty());
-				auto batchMatches = match(foundBatches, records_);
+				dlg_assert(!selectedBatch_.empty());
+				auto batchMatches = match(foundBatches, selectedBatch_);
 				bool recordMatched = false;
 				for(auto& batchMatch : batchMatches.matches) {
 					if(batchMatch.a->submissionID == res.submissionID) {
@@ -493,6 +513,7 @@ void CommandBufferGui::updateState() {
 				best = &res;
 				bestMatch = resMatch;
 				bestBatches = foundBatches;
+				bestPresentID = presentID;
 			}
 		}
 
@@ -511,10 +532,16 @@ void CommandBufferGui::updateState() {
 				dsState_ = best->descriptorSnapshot;
 			}
 
+			selectedBatch_ = {bestBatches.begin(), bestBatches.end()};
+
 			// In swapchain mode - and when not freezing commands - make
 			// sure to also display the new frame
-			if(mode_ == UpdateMode::swapchain && !freezeCommands_) {
-				records_ = {bestBatches.begin(), bestBatches.end()};
+			if(mode_ == UpdateMode::swapchain) {
+				swapchainPresent_ = bestPresentID;
+
+				if(!freezeCommands_) {
+					records_ = selectedBatch_;
+				}
 			}
 
 			// update command viewer state from hook match
@@ -538,7 +565,6 @@ void CommandBufferGui::updateState() {
 
 	// When no command was selected yet, we won't get any new records
 	// from CommandHook. But still want to show the new commands.
-	// We also do this when we didn't get a matching hooked submission.
 	if(!freezeCommands_ && command_.empty()) {
 		if(mode_ == UpdateMode::swapchain) {
 			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
