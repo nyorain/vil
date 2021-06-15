@@ -73,6 +73,7 @@ struct Win32Platform : Platform {
 	void uiThread(Device& dev, u32 width, u32 height);
 	void initWindow();
 	bool doUpdate();
+	bool doUpdate2();
 	void updateWindowRect();
 };
 
@@ -80,7 +81,7 @@ Win32Platform* globalPlatform = nullptr;
 
 Win32Platform::~Win32Platform() {
 	if(thread.joinable()) {
-		doStuff.store(-1);
+		doStuff.store(1);
 		cv.notify_one();
 		thread.join();
 	}
@@ -268,6 +269,12 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		return CallNextHookEx(nullptr, nCode, wParam, lParam);
 	}
 
+	auto doHitTest = [](u32 x, u32 y) {
+		u64 l = (u64(x) << 32) | u64(y);
+		auto res = SendMessage(globalPlatform->surfaceWindow, WM_NCHITTEST, 0, l);
+		return res == HTCLIENT;
+	};
+
 	switch(msg->message) {
 		case WM_ENTERSIZEMOVE: {
 			dlg_trace("enter move resize");
@@ -280,7 +287,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		} case WM_MOUSEMOVE: {
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -296,7 +304,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			globalPlatform->gui->imguiIO().MouseDown[0] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -307,7 +316,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			globalPlatform->gui->imguiIO().MouseDown[0] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -317,7 +327,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			globalPlatform->gui->imguiIO().MouseDown[1] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -327,7 +338,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			globalPlatform->gui->imguiIO().MouseDown[1] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -337,7 +349,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			globalPlatform->gui->imguiIO().MouseDown[2] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -347,7 +360,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			globalPlatform->gui->imguiIO().MouseDown[2] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -357,7 +371,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -367,7 +382,8 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			if(x < 0 || y < 0) {
+			// if(x < 0 || y < 0) {
+			if(!doHitTest(x, y)) {
 				break;
 			}
 
@@ -559,7 +575,6 @@ bool Win32Platform::doUpdate() {
 			rawInput = false;
 
 			// register for raw input on mouse
-			// TODO: not needed if cursor is being shown
 			if (!cursorShown()) {
 				RAWINPUTDEVICE Rid[1];
 
@@ -705,14 +720,85 @@ bool Win32Platform::doUpdate() {
 	return state != State::hidden;
 }
 
+LRESULT CALLBACK mouseLLHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
+	auto* data = (MSLLHOOKSTRUCT*) lParam;
+	(void) data;
+
+	if (nCode == 0 && globalPlatform->state == Win32Platform::State::focused) {
+		switch (wParam) {
+			case WM_LBUTTONDOWN:
+				dlg_trace("buttondown");
+				break;
+				// return 1;
+			case WM_MOUSEMOVE:
+				dlg_trace("mousemove");
+				break;
+				// return 1;
+			default:
+				break;
+		}
+	}
+
+	if (nCode == 0 && wParam == WM_LBUTTONDOWN)
+	{
+		PostThreadMessage(GetCurrentThreadId(), WM_USER, 0, 0);
+	}
+
+	return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
+
+bool Win32Platform::doUpdate2() {
+	if(state != State::focused) {
+		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
+			dlg_trace("showing overlay; grabbing input");
+			dlg_assert(!mouseHook);
+
+			state = State::focused;
+
+			globalPlatform = this;
+
+		}
+	}
+
+	MSG msg;
+	if(GetMessage(&msg, 0, 0, 0)) {
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+
+	if(state == State::focused) {
+		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
+			dlg_trace("hiding overlay window, ungrabbing input");
+			// UnhookWindowsHookEx(mouseHook);
+			mouseHook = nullptr;
+			state = State::hidden;
+		}
+	}
+
+	return state != State::hidden;
+}
+
 void Win32Platform::uiThread(Device& dev, u32, u32) {
 	std::unique_lock lock(mutex);
 	(void) dev;
 
-	initWindow();
+	// init hook
+	/*
+	globalPlatform = this;
+	mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseLLHookFunc, nullptr, 0);
+	if (!mouseHook) {
+		print_winapi_error("SetWindowsHookEx");
+	}
+	*/
+
+	// initWindow();
 	cv.notify_one();
 
 	while(true) {
+		// while(doStuff.load() >= 0) {
+			// ret.store(doUpdate2());
+		// }
+
 		while(doStuff.load() == 0) {
 			cv.wait(lock);
 		}
@@ -720,9 +806,9 @@ void Win32Platform::uiThread(Device& dev, u32, u32) {
 		auto stuff = doStuff.load();
 		doStuff.store(0);
 
-		if(stuff > 0) {
+		if(stuff < 0) {
 			dlg_error("unreachable");
-		} else if(stuff == -1) {
+		} else if(stuff == 1) {
 			break;
 		} else {
 			// if(status == Status::focused) {
@@ -748,9 +834,12 @@ void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
 }
 
 bool Win32Platform::update(Gui& gui) {
+	// this->gui = &gui;
+	// return ret.load();
+
 	std::unique_lock lock(mutex);
 	this->gui = &gui;
-	doStuff.store(-2);
+	doStuff.store(2);
 	cv.notify_one();
 	cv.wait(lock);
 	return ret.load();
