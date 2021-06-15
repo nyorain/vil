@@ -460,7 +460,7 @@ void CommandBufferGui::updateState() {
 		for(auto& res : hook.completed) {
 			float resMatch = res.match;
 			span<const RecordBatch> foundBatches;
-			u32 presentID;
+			u32 presentID {};
 
 			// When we are in swapchain mode, we need the frame associated with
 			// this submission. We will then also consider the submission in its

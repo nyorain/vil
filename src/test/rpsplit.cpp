@@ -25,7 +25,7 @@ auto& addSubpass(RenderPassDesc& desc, span<const u32> colorAtts,
 	subp.pNext = {};
 	subp.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
 
-	auto colorRefs = desc.attachmentRefs.emplace_back();
+	auto& colorRefs = desc.attachmentRefs.emplace_back();
 	for(auto c : colorAtts) {
 		auto& ref = colorRefs.emplace_back();
 		ref.pNext = {};
@@ -86,6 +86,7 @@ TEST(rpsplit_single_resolve) {
 TEST(rpsplit_input_att) {
 	RenderPassDesc desc;
 	addAttachment(desc); // attachment 0
+	addAttachment(desc); // attachment 1
 	addAttachment(desc, true); // attachment 2
 	auto& subpass = addSubpass(desc, {{2u}}, {{0u}}); // subpass 2
 

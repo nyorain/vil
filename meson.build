@@ -36,7 +36,7 @@ args = cc.get_supported_arguments([
 	'-D_CRT_SECURE_NO_WARNINGS',
 
 	# msvc really slow in debug build without this
-	'-D_ITERATOR_DEBUG_LEVEL=0',
+	#'-D_ITERATOR_DEBUG_LEVEL=0',
 
 	# for clang
 	'-Wno-missing-braces',
