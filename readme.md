@@ -58,8 +58,8 @@ Downsides:
   While it is already possible to freeze some state and also view e.g.
   invalidated/destroyed command records, you might run into issues
   where state you would want to inspect (from a specific frame) is just
-  not available anymore. Keep in mind that sometimes, capturing a single
-  frame and viewing that is just the better approach.
+  not available anymore. Sometimes, capturing a single
+  frame and inspecting that is the better approach.
 
 <!--- ![Example of command viewer 2](docs/pics/sponza-buf.png) -->
 <!---- ![Example of resource viewer](docs/pics/sponza-scatter-res.png) -->
