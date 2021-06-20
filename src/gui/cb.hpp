@@ -59,7 +59,9 @@ private:
 	u32 swapchainPresent_ {}; // present id of viewed frame
 	bool freezeCommands_ {};
 	bool freezeState_ {};
-	std::vector<RecordBatch> selectedBatch_; // frame belonging to record_, command_
+
+	std::vector<RecordBatch> selectedBatch_; // batch of command viewer; for matching
+	IntrusivePtr<CommandRecord> selectedRecord_ {}; // part of selectedBatch_
 
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};

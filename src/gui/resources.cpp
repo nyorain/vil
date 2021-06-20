@@ -1495,17 +1495,10 @@ void ResourceGui::draw(Draw& draw) {
 				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
 
 			ImGui::PushID(&handle);
-			std::string label;
 
-			auto disabled = false;
-			if(destroyed_.count(&handle)) {
-				ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-				ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
-				disabled = true;
-				label = "<Destroyed>";
-			} else {
-				label = name(handle);
-			}
+			auto disabled = (destroyed_.count(&handle) > 0);
+			std::string label = disabled ? "<Destroyed>" : name(handle);
+			pushDisabled(disabled);
 
 			if(selected) {
 				flags |= ImGuiTreeNodeFlags_Selected;
@@ -1517,35 +1510,8 @@ void ResourceGui::draw(Draw& draw) {
 				}
 			}
 
-			if(disabled) {
-				ImGui::PopStyleVar();
-				ImGui::PopItemFlag();
-			}
-
+			popDisabled(disabled);
 			ImGui::PopID();
-
-			/*
-			auto& handle = *handles_[i];
-			auto selected = (&handle == handle_);
-			auto flags = 0u;
-
-			ImGui::PushID(&handle);
-			std::string label;
-
-			if(destroyed_.count(&handle)) {
-				flags = ImGuiSelectableFlags_Disabled;
-				label = "<Destroyed>";
-			} else {
-				label = name(handle);
-			}
-
-			ImGui::AlignTextToFramePadding();
-			if(ImGui::Selectable(label.c_str(), selected, flags)) {
-				select(handle);
-			}
-
-			ImGui::PopID();
-			*/
 		}
 	}
 

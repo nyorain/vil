@@ -5,10 +5,7 @@
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
 #include <util/spirv_reflect.h>
-
-#define SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS
 #include <spirv-cross/spirv_cross.hpp>
-namespace spc = spirv_cross;
 
 namespace vil {
 
@@ -324,6 +321,8 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 	}
 
 	// parse sizes, build the vector of captured output values.
+	// TODO: use spc::Compiler from SpirvData. Hard to synchronize though,
+	// we need to set entry point and spec constants :(
 	spc::Compiler compiler(std::vector<u32>(spirv.begin(), spirv.end()));
 	compiler.set_entry_point(entryPoint, spv::ExecutionModelVertex);
 
@@ -553,6 +552,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	auto reflRes = spvReflectCreateShaderModule(pCreateInfo->codeSize,
 		pCreateInfo->pCode, mod.code->reflection.get());
 	dlg_assertl(dlg_level_info, reflRes == SPV_REFLECT_RESULT_SUCCESS);
+
+	// TODO: catch errors here
+	mod.code->compiled = std::make_unique<spc::Compiler>(
+		pCreateInfo->pCode, pCreateInfo->codeSize / 4);
 
 	return res;
 }

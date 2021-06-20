@@ -5,6 +5,7 @@
 #include <util/util.hpp>
 #include <util/f16.hpp>
 #include <util/profiling.hpp>
+#include <util/buffmt.hpp>
 #include <util/spirv_reflect.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
@@ -17,6 +18,7 @@
 #include <ds.hpp>
 #include <shader.hpp>
 #include <rp.hpp>
+#include <spirv-cross/spirv_cross.hpp>
 #include <bitset>
 
 // NOTE: since we might view invalidated command records, we can't assume
@@ -893,6 +895,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			return;
 		}
 
+		/*
 		SpvReflectBlockVariable* bestVar = nullptr;
 
 		// In all graphics pipeline stages, find the block with
@@ -910,6 +913,58 @@ void CommandViewer::displayDs(Draw& draw) {
 
 		if(bestVar) {
 			display(*bestVar, buf->data());
+		} else {
+			ImGui::Text("Binding not used in pipeline");
+		}
+		*/
+
+		u32 bestSize = 0u;
+		spc::Resource bestBuf {};
+		const PipelineShaderStage* bestStage = nullptr;
+
+		for(auto& stage : stages(pipe)) {
+			auto& compiled = nonNull(nonNull(stage.spirv).compiled);
+			// TODO: set spec constants
+			auto resources = compiled.get_shader_resources();
+			auto isUniform =
+				dsType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
+				dsType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+			auto& bufs = isUniform ? resources.uniform_buffers : resources.storage_buffers;
+			for(auto& buf : bufs) {
+				auto set = compiled.get_decoration(buf.id, spv::DecorationDescriptorSet);
+				auto binding = compiled.get_decoration(buf.id, spv::DecorationBinding);
+				if(set != setID || binding != bindingID) {
+					continue;
+				}
+
+				auto& type = compiled.get_type(buf.base_type_id);
+				auto typeSize = compiled.get_declared_struct_size(type);
+				if(typeSize >= bestSize) {
+					bestSize = typeSize;
+					bestBuf = buf;
+					bestStage = &stage;
+				}
+
+				break;
+			}
+		}
+
+		if(bestStage) {
+			auto& compiled = nonNull(nonNull(bestStage->spirv).compiled);
+			auto name = compiled.get_name(bestBuf.id);
+			if(name.empty()) {
+				name = compiled.get_name(bestBuf.base_type_id);
+				if(name.empty()) {
+					name = "?";
+				}
+			}
+
+			auto flags = ImGuiTableFlags_BordersInner |
+				ImGuiTableFlags_SizingStretchProp;
+			if(ImGui::BeginTable("Values", 2u, flags)) {
+				display(compiled, bestBuf.type_id, name.c_str(), buf->data());
+				ImGui::EndTable();
+			}
 		} else {
 			ImGui::Text("Binding not used in pipeline");
 		}

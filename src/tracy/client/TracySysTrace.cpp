@@ -1276,6 +1276,7 @@ void SysTraceSendExternalName( uint64_t thread )
     }
 
     sprintf( fn, "/proc/%" PRIu64 "/status", thread );
+	printf("opening %s\n", fn);
     f = fopen( fn, "rb" );
     if( f )
     {
@@ -1293,6 +1294,7 @@ void SysTraceSendExternalName( uint64_t thread )
             }
         }
         tracy_free( line );
+		printf("closing %s again\n", fn);
         fclose( f );
         if( pid >= 0 )
         {

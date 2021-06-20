@@ -1146,7 +1146,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 					state->errorMessage, record->queueFamily);
 			}
 		} else {
-			// we should not land here at all! Check state in
+			// TODO we should not land here at all! Check state in
 			// cb gui before registring hook. Don't register a hook
 			// just to find out *here* that we don't need it
 			state->errorMessage = "Just a sampler bound";

@@ -8,9 +8,12 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
+- [ ] correctly integrate spirv-cross everywhere, remove spirv_reflect
 - [ ] image viewer validation bug when we don't hover the image
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
+- [ ] windows: don't include windows.h in vil_api.h, instead just
+      manually define LoadLibrary, GetProcAddress
 
 descriptor indexing extension:
 - [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 
@@ -63,7 +66,8 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
-- [ ] figure out a better way to retrieve xfb data. For huge draw commands
+- [ ] figure out a better way to retrieve xfb data (and data in general, same
+      problem for huge structured buffers). For huge draw commands
       (especially multi-draw where the whole scene is rendered), we would
 	  need giant buffers and the performance impact is huge
 	  	- [ ] also figure out better xfb buffer allocation strategy,
@@ -146,8 +150,8 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
-- [ ] show enabled vulkan11, vulkan12 features in gui as well
-- [ ] when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
+- [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
+- [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
       we just create a second window by default?
 	  If a manual overlay is created later on, we can still close the window
 	  and move the gui. Could also wait for first submission/swapchain
@@ -157,19 +161,6 @@ other
 - [ ] add support for timeline semaphores. Should just require some simple
       changes to submission logic when we use them inside the layer.
 	  Test with official samples repo
-- [ ] Figure out how to correctly useHandle for stuff using DeviceAddress.
-      Or, in more general terms: figure out sync for buffers that are accessed
-	  using their buffer address. I don't think it's possible in general.
-	  We probably just have to sync gui stuff with *every* submission when
-	  e.g. reading from a buffer from which the buffer address was previously
-	  retrieved. damn
-	  	- [ ] related: figure out how to handle device address in UI.
-		      We probably want to link to the related resource. Just solve
-			  this via std::map in Device with custom comparison that
-			  checks whether an address is in-range? Think about whether
-			  this works for memory aliasing.
-- [ ] windows: don't include windows.h in vil_api.h, instead just
-      manually define LoadLibrary, GetProcAddress
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
 	      e.g. when the application controlled debug callback is called
@@ -183,17 +174,16 @@ other
 	      when we detect that there is an attached debugger.
 	      Somehow signal they are coming from us though, use a VIL prefix or smth.
 		  Stop allocating a console.
-- [ ] IO rework
+- [ ] IO viewer additions
 	- [x] start using src/gui/command.hpp
-	- [ ] remaining IO viewer fixes:
-		- [x] fix descriptor arrays
-		- [ ] fix transfer buffer introspection
-		- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
-		- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
-		- [x] when viewing transfer img, show image refButton
-		- [x] adapt ioImage_ to selected image (e.g. channels)
-			- [ ] also fix logic for depthStencil images. Select depth by default.
-				  (can be tested with doom)
+	- [x] fix descriptor arrays
+	- [ ] fix transfer buffer introspection
+	- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
+	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
+	- [x] when viewing transfer img, show image refButton
+	- [x] adapt ioImage_ to selected image (e.g. channels)
+		- [ ] also fix logic for depthStencil images. Select depth by default.
+			  (can be tested with doom)
 	- [ ] support texel reading implementation for cb-viewed-images and clean
 		  up color format presentation, support depth and packed formats.
 		  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
@@ -258,6 +248,21 @@ ext support:
       would also be nice to show in gui
 
 
+- [ ] figure out how to handle device address in UI.
+	  We probably want to link to the related resource. Just solve
+	  this via std::map in Device with custom comparison that
+	  checks whether an address is in-range? Think about whether
+	  this works for memory aliasing.
+- [ ] cbGui: freezing state will currently also freeze the shown commands,
+      might not be expected/desired. Reworking this is hard:
+	  when freezing state we don't execute any hooks and therefore would need
+	  new mechanism to correctly match new records.
+	  Fix this when doing the next match/cbGui update iteration (related: next 
+	  command group impl iteration)
+- [ ] memory overhead from using spirv-cross may be too large.
+      Create the reflection modules only on-demand then, shouldn't be
+	  too expensive. And/or page them and/or the stored spirv data
+	  itself out to disk.
 - [ ] raytracing: proper support for pipeline libraries
 - [ ] correctly query transform feedback limits and respect them, e.g. buffer size
 - [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,

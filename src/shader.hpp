@@ -10,6 +10,9 @@
 #include <vector>
 #include <optional>
 
+// fwd
+namespace spc { class Compiler; }
+
 namespace vil {
 
 typedef struct SpvReflectShaderModule SpvReflectShaderModule;
@@ -70,7 +73,8 @@ XfbPatchData patchShaderXfb(Device&, span<const u32> spirv,
 	std::string_view modName);
 
 struct SpirvData {
-	std::unique_ptr<SpvReflectShaderModule> reflection;
+	std::unique_ptr<spc::Compiler> compiled;
+	std::unique_ptr<SpvReflectShaderModule> reflection; // TODO: use spc instead
 	std::atomic<u32> refCount {};
 
 	~SpirvData();

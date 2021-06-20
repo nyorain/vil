@@ -13,7 +13,8 @@ struct CommandPool : DeviceHandle {
 	std::vector<CommandBuffer*> cbs;
 	std::unordered_set<MemBlockDeleter*> records;
 
-    std::atomic<CommandMemBlock*> memBlocks {}; // forward linked list
+	// TODO: make use of this again
+    // std::atomic<CommandMemBlock*> memBlocks {}; // forward linked list
 
 	~CommandPool();
 };

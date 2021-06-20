@@ -21,8 +21,6 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT.
  */
 
-#define SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS
-
 #include "spirv_cross.hpp"
 #include "GLSL.std.450.h"
 #include "spirv_cfg.hpp"

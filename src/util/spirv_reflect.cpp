@@ -1556,7 +1556,7 @@ static SpvReflectResult ParseType(
         // Parse component type
         Node* p_next_node = FindNode(p_parser, component_type_id);
         if (IsNotNull(p_next_node)) {
-          result = ParseType(p_parser, p_next_node, NULL, p_module, p_type);
+          result = ParseType(p_parser, p_next_node, p_struct_member_decorations, p_module, p_type);
         }
         else {
           result = SPV_REFLECT_RESULT_ERROR_SPIRV_INVALID_ID_REFERENCE;
@@ -1572,7 +1572,7 @@ static SpvReflectResult ParseType(
         IF_READU32(result, p_parser, p_node->word_offset + 3, p_type->traits.numeric.matrix.column_count);
         Node* p_next_node = FindNode(p_parser, column_type_id);
         if (IsNotNull(p_next_node)) {
-          result = ParseType(p_parser, p_next_node, NULL, p_module, p_type);
+          result = ParseType(p_parser, p_next_node, p_struct_member_decorations, p_module, p_type);
         }
         else {
           result = SPV_REFLECT_RESULT_ERROR_SPIRV_INVALID_ID_REFERENCE;
@@ -1609,7 +1609,7 @@ static SpvReflectResult ParseType(
         IF_READU32(result, p_parser, p_node->word_offset + 2, image_type_id);
         Node* p_next_node = FindNode(p_parser, image_type_id);
         if (IsNotNull(p_next_node)) {
-          result = ParseType(p_parser, p_next_node, NULL, p_module, p_type);
+          result = ParseType(p_parser, p_next_node, p_struct_member_decorations, p_module, p_type);
         }
         else {
           result = SPV_REFLECT_RESULT_ERROR_SPIRV_INVALID_ID_REFERENCE;
@@ -1651,7 +1651,7 @@ static SpvReflectResult ParseType(
             // Parse next dimension or element type
             Node* p_next_node = FindNode(p_parser, element_type_id);
             if (IsNotNull(p_next_node)) {
-              result = ParseType(p_parser, p_next_node, NULL, p_module, p_type);
+              result = ParseType(p_parser, p_next_node, p_struct_member_decorations, p_module, p_type);
             }
           }
           else {
@@ -1674,7 +1674,7 @@ static SpvReflectResult ParseType(
         // Parse next dimension or element type
         Node* p_next_node = FindNode(p_parser, element_type_id);
         if (IsNotNull(p_next_node)) {
-          result = ParseType(p_parser, p_next_node, NULL, p_module, p_type);
+          result = ParseType(p_parser, p_next_node, p_struct_member_decorations, p_module, p_type);
         }
         else {
           result = SPV_REFLECT_RESULT_ERROR_SPIRV_INVALID_ID_REFERENCE;
@@ -1727,7 +1727,7 @@ static SpvReflectResult ParseType(
         // Parse type
         Node* p_next_node = FindNode(p_parser, type_id);
         if (IsNotNull(p_next_node)) {
-          result = ParseType(p_parser, p_next_node, NULL, p_module, p_type);
+          result = ParseType(p_parser, p_next_node, p_struct_member_decorations, p_module, p_type);
         }
         else {
           result = SPV_REFLECT_RESULT_ERROR_SPIRV_INVALID_ID_REFERENCE;

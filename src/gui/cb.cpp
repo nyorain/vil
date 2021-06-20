@@ -130,7 +130,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	// force-update shown batches when it's been too long
-	if(mode_ == UpdateMode::swapchain) {
+	if(mode_ == UpdateMode::swapchain && !freezeState_) {
 		auto lastPresent = dev.swapchain->frameSubmissions[0].presentID;
 		if(record_ && lastPresent > swapchainPresent_ + 3) {
 			auto diff = lastPresent - swapchainPresent_;
@@ -141,6 +141,8 @@ void CommandBufferGui::draw(Draw& draw) {
 			// force update
 			if(!freezeCommands_) {
 				records_ = dev.swapchain->frameSubmissions[0].batches;
+				// record_ = {};
+				// command_ = {};
 			}
 		}
 	}
@@ -159,6 +161,8 @@ void CommandBufferGui::draw(Draw& draw) {
 	} else if(mode_ == UpdateMode::swapchain) {
 		if(!gui_->dev().swapchain) {
 			record_ = {};
+			selectedRecord_ = {};
+			records_ = {};
 			selectedBatch_ = {};
 			dsState_ = {};
 			swapchainPresent_ = {};
@@ -261,8 +265,9 @@ void CommandBufferGui::draw(Draw& draw) {
 						if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
 							record_ = rec;
 							command_ = std::move(nsel);
-							dsState_ = record_->lastDescriptorState;
 							selectedBatch_ = records_;
+							selectedRecord_ = rec;
+							dsState_ = record_->lastDescriptorState;
 
 							commandViewer_.select(record_, *command_.back(), dsState_, true);
 
@@ -332,9 +337,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	// command info
 	ImGui::BeginChild("Command Info");
-	if(!command_.empty()) {
-		commandViewer_.draw(draw);
-	}
+	commandViewer_.draw(draw);
 
 	ImGui::EndChild();
 	ImGui::EndTable();
@@ -358,6 +361,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 
 	command_ = {};
 	record_ = std::move(record);
+	selectedRecord_ = {};
 	dsState_ = {};
 
 	updateHookTarget();
@@ -383,6 +387,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 
 	command_ = {};
 	record_ = std::move(record);
+	selectedRecord_ = {};
 	dsState_ = {};
 
 	updateHookTarget();
@@ -396,6 +401,7 @@ void CommandBufferGui::showSwapchainSubmissions() {
 
 	command_ = {};
 	record_ = {};
+	selectedRecord_ = {};
 	dsState_ = {};
 
 	// Unset hooks
@@ -487,7 +493,7 @@ void CommandBufferGui::updateState() {
 					if(batchMatch.a->submissionID == res.submissionID) {
 						for(auto& recMatch : batchMatch.matches) {
 							if(recMatch.a == res.record) {
-								 if(recMatch.b == record_) {
+								 if(recMatch.b == selectedRecord_.get()) {
 									recordMatched = true;
 									resMatch *= recMatch.match;
 								 }
@@ -526,21 +532,19 @@ void CommandBufferGui::updateState() {
 				best->descriptorSnapshot, false);
 
 			// update internal state state from hook match
-			if(!freezeCommands_) {
-				record_ = best->record;
-				command_ = best->command;
-				dsState_ = best->descriptorSnapshot;
-			}
-
-			selectedBatch_ = {bestBatches.begin(), bestBatches.end()};
+			record_ = best->record;
+			command_ = best->command;
+			dsState_ = best->descriptorSnapshot;
 
 			// In swapchain mode - and when not freezing commands - make
 			// sure to also display the new frame
 			if(mode_ == UpdateMode::swapchain) {
 				swapchainPresent_ = bestPresentID;
+				records_ = {bestBatches.begin(), bestBatches.end()};
 
 				if(!freezeCommands_) {
-					records_ = selectedBatch_;
+					selectedBatch_ = records_;
+					selectedRecord_ = record_;
 				}
 			}
 
@@ -568,6 +572,7 @@ void CommandBufferGui::updateState() {
 	if(!freezeCommands_ && command_.empty()) {
 		if(mode_ == UpdateMode::swapchain) {
 			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
+			swapchainPresent_ = gui_->dev().swapchain->frameSubmissions[0].presentID;
 		} else if(mode_ == UpdateMode::commandBuffer) {
 			dlg_assert(cb_);
 			record_ = cb_->lastRecordPtrLocked();

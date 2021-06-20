@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>
 #include <dlg/dlg.hpp>
 #include <ds.hpp>
 #include <buffer.hpp>
@@ -113,6 +114,20 @@ bool optSliderRange(const char* name, T& val, std::size_t count) {
 	val = T(v);
 
 	return ret;
+}
+
+inline void pushDisabled(bool disabled) {
+	if(disabled) {
+		ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+	}
+}
+
+inline void popDisabled(bool disabled) {
+	if(disabled) {
+		ImGui::PopStyleVar();
+		ImGui::PopItemFlag();
+	}
 }
 
 } // namesapce vil

@@ -62,6 +62,7 @@ public:
 	void state(IntrusivePtr<CommandHookState>);
 
 	CommandHookState* state() const { return state_.get(); }
+	CommandRecord* record() const { return record_.get(); }
 
 	auto& vertexViewer() { return vertexViewer_; }
 

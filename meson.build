@@ -47,6 +47,12 @@ args = cc.get_supported_arguments([
 	# '-Wno-float-conversion',
 ])
 
+# defines
+args += [
+	'-DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=1',
+	'-DSPIRV_CROSS_NAMESPACE_OVERRIDE=spc',
+]
+
 if get_option('buildtype') == 'debug'
 	# highly useful for debugging
 	args += '-D_GLIBCXX_DEBUG'
@@ -110,6 +116,7 @@ src = files(
 	'src/util/f16.cpp',
 	'src/util/ext.cpp',
 	'src/util/ownbuf.cpp',
+	'src/util/buffmt.cpp',
 	'src/command/alloc.cpp',
 	'src/command/desc.cpp',
 	'src/command/record.cpp',
@@ -216,6 +223,7 @@ src = files(
 	'src/util/camera.hpp',
 	'src/util/bytes.hpp',
 	'src/util/ownbuf.hpp',
+	'src/util/buffmt.hpp',
 
 	'include/vil_api.h',
 	'src/imgui/imgui.h',

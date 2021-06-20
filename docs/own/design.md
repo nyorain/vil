@@ -681,3 +681,36 @@ green, entries submitted during the last 20 frames yellow and everything red or
 something to make this easy to grasp.
 
 We can also use command groups to figure out whether to hook a command.
+
+---
+
+Next iteration on cbGUI:
+
+We need to completely separate the currently shown commands and the
+currently shown state:
+- we need to store the frame (recordBatch), record and command hierachy
+  of the selected command inside the currently shown commands
+- we need to store the same for the command associated with the currently shown
+  state
+
+They may differ and we need both:
+- when freezing commands but not state, the record of the state may be
+  up-to-date while the selected command/record/recordBatch is old.
+  To correctly show the commands (i.e. show the selected one as selected),
+  we need to remember everything of it.
+- when freezing state but not commands, the selected command inside the shown
+  record/batch may be new while the command associated with the shown state
+  might be old. We still need to store the old command from the state to...
+  hm, not sure, for what exactly? I guess we want to do matching with
+  this command/record combination instead of a newly selected one? But
+  it really should not matter. Nah, we should probably even prefer the new
+  one since it has less invalidated handles I guess. But might change
+  slightly over time, that's the downside.
+  
+Ok we need it in the following case:
+- a command was selected, state is shown, nothing frozen.
+  Suddenly the command can't be matched anymore. We still want to update
+  the shown commands (e.g. records_), no command is selected in that view.
+  Now suddenly, the command reappears, we get a completed hook.
+  We want to match its context with the selected batch. So we need that,
+  separately from the batch that is currently being shown.
