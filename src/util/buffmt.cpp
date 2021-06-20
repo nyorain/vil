@@ -1,5 +1,6 @@
 #include <util/buffmt.hpp>
 #include <util/f16.hpp>
+#include <util/bytes.hpp>
 #include <gui/util.hpp>
 
 namespace vil {

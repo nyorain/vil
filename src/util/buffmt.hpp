@@ -1,5 +1,8 @@
 #pragma once
 
+#include <fwd.hpp>
+#include <util/span.hpp>
+#include <util/bytes.hpp>
 #include <spirv-cross/spirv_cross.hpp>
 
 namespace vil {
