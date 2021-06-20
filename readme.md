@@ -141,9 +141,9 @@ make sure to report them here!
 There are multiple ways of using the introspection gui:
 
 - Make the layer create a new window containing the debug gui when the application starts.
-  This is the current default, you can control it via the environment variable
-  'VIL_CREATE_WINDOW={0, 1}'.
-- Make the layer draw an overlay over you application
+  This is the current default, you can enable it via the environment variable
+  `VIL_CREATE_WINDOW=1`.
+- Make the layer draw an overlay over your application
 	- Since the layer gui still needs input you have to supply it via
 	  a separate api. See [include/vil_api.h](include/vil_api.h).
 	  As soon as you call the API to create an overlay on a swapchain,
@@ -154,9 +154,9 @@ There are multiple ways of using the introspection gui:
 	  not work with certain platforms/applications.
 	  This is not enabled by default (and might be disabled from the default
 	  build config or even completely removed from the layer in future).
-	  You can force it via the environment variable 'VIL_HOOK_OVERLAY=1'.
+	  You can force it via the environment variable `VIL_HOOK_OVERLAY=1`.
 
-The layer running gui inside an extra window in doom eternal:
+<!--- The layer running gui inside an extra window in doom eternal: -->
 
 <!--- ![Extra window doom eternal example](docs/pics/doom-eternal-window.png) -->
 
