@@ -14,6 +14,8 @@ urgent, bugs:
       buffer_device_address, uncovered general potential race
 - [ ] windows: don't include windows.h in vil_api.h, instead just
       manually define LoadLibrary, GetProcAddress
+- [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
+      not the texture itself. Can be confusing otherwise
 
 descriptor indexing extension:
 - [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 

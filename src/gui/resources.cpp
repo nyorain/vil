@@ -40,7 +40,7 @@ std::string sepfmt(u64 size) {
 	auto poten = u64(1u);
 	auto counter = 0u;
 	while(size) {
-		if(++counter == 3u) {
+		if(counter == 3u) {
 			counter = 0u;
 			ret.insert(0, 1, '\'');
 		}
@@ -50,6 +50,7 @@ std::string sepfmt(u64 size) {
 		ret.insert(0, 1, nums[rest]);
 
 		poten *= 10;
+		++counter;
 	}
 
 	return ret;
@@ -1029,8 +1030,8 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 
 	ImU32 bgCol = IM_COL32(20, 20, 20, 180);
 	// ImU32 bgHoverCol = IM_COL32(35, 35, 35, 200);
-	ImU32 allocCol = IM_COL32(180, 250, 200, 255);
-	ImU32 allocHoverCol = IM_COL32(250, 180, 200, 255);
+	ImU32 allocCol = IM_COL32(130, 220, 150, 255);
+	ImU32 allocHoverCol = IM_COL32(250, 150, 180, 255);
 
 	drawList->AddRectFilled(start, end, bgCol);
 	for(auto& resource : mem.allocations) {
