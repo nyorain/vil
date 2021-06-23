@@ -653,7 +653,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.UpdateDescriptorSetWithTemplate,
 		&dev.dispatch.UpdateDescriptorSetWithTemplateKHR});
-	/// {KHR, EXT}_buffer_device_addres, Vulkan 1.2
+	// {KHR, EXT}_buffer_device_addres, Vulkan 1.2
 	aliasCmd(std::array{
 		&dev.dispatch.GetBufferDeviceAddress,
 		&dev.dispatch.GetBufferDeviceAddressKHR,
@@ -664,6 +664,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.GetDeviceMemoryOpaqueCaptureAddress,
 		&dev.dispatch.GetDeviceMemoryOpaqueCaptureAddressKHR});
+	// VK_KHR_get_memory_requirements2, Vulkan 1.1
+	aliasCmd(std::array{
+		&dev.dispatch.GetBufferMemoryRequirements2,
+		&dev.dispatch.GetBufferMemoryRequirements2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.GetImageMemoryRequirements2,
+		&dev.dispatch.GetImageMemoryRequirements2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.GetImageSparseMemoryRequirements2,
+		&dev.dispatch.GetImageSparseMemoryRequirements2KHR});
 
 	dev.swapchains.mutex = &dev.mutex;
 	dev.images.mutex = &dev.mutex;

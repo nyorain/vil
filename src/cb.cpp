@@ -719,8 +719,11 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 
 void cmdBeginRenderPass(CommandBuffer& cb,
 		VkRenderPassBeginInfo& rpBeginInfo,
-		const VkSubpassBeginInfo& subpassBeginInfo) {
+		const VkSubpassBeginInfo& subpassBeginInfo, ThreadMemScope& memScope) {
 	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
+
+	// copy the chain, we might have to modify it below
+	rpBeginInfo.pNext = copyChainLocal(memScope, rpBeginInfo.pNext);
 
 	cmd.clearValues = copySpan(cb, rpBeginInfo.pClearValues, rpBeginInfo.clearValueCount);
 	cmd.info = rpBeginInfo;
@@ -742,11 +745,15 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 	if(cmd.fb->imageless) {
 		constexpr auto sType = VK_STRUCTURE_TYPE_RENDER_PASS_ATTACHMENT_BEGIN_INFO;
-		auto* attInfo = findChainInfo<VkRenderPassAttachmentBeginInfo, sType>(rpBeginInfo);
+		auto* cAttInfo = findChainInfo<VkRenderPassAttachmentBeginInfo, sType>(rpBeginInfo);
+		// we can const_cast here since we copied the chain above
+		auto* attInfo = const_cast<VkRenderPassAttachmentBeginInfo*>(cAttInfo);
 		dlg_assert(attInfo);
 
 		dlg_assert(cmd.rp->desc.attachments.size() == attInfo->attachmentCount);
 		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, attInfo->attachmentCount);
+
+		auto fwdAttachments = memScope.alloc<VkImageView>(attInfo->attachmentCount);
 
 		for(auto i = 0u; i < attInfo->attachmentCount; ++i) {
 			auto& attachment = get(*cb.dev, attInfo->pAttachments[i]);
@@ -757,7 +764,10 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 				cmd.rp->desc.attachments[i].finalLayout);
 
 			cb.graphicsState().rpi.attachments[i] = &attachment;
+			fwdAttachments[i] = attachment.handle;
 		}
+
+		attInfo->pAttachments = fwdAttachments.data();
 	} else {
 		dlg_assert(cmd.rp->desc.attachments.size() == cmd.fb->attachments.size());
 		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, cmd.fb->attachments.size());
@@ -791,8 +801,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 	subpassBeginInfo.contents = contents;
 	subpassBeginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
 
+	ThreadMemScope memScope;
 	auto beginInfo = *pRenderPassBegin;
-	cmdBeginRenderPass(cb, beginInfo, subpassBeginInfo);
+	cmdBeginRenderPass(cb, beginInfo, subpassBeginInfo, memScope);
 
 	cb.dev->dispatch.CmdBeginRenderPass(cb.handle(), &beginInfo, contents);
 }
@@ -844,8 +855,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
 
+	ThreadMemScope memScope;
 	auto beginInfo = *pRenderPassBegin;
-	cmdBeginRenderPass(cb, beginInfo, *pSubpassBeginInfo);
+	cmdBeginRenderPass(cb, beginInfo, *pSubpassBeginInfo, memScope);
 
 	cb.dev->dispatch.CmdBeginRenderPass2(cb.handle(), &beginInfo, pSubpassBeginInfo);
 }
@@ -921,7 +933,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
-	auto setHandles = LocalVector<VkDescriptorSet>(descriptorSetCount);
+
+	ThreadMemScope memScope;
+	auto setHandles = memScope.alloc<VkDescriptorSet>(descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = get(*cb.dev, pDescriptorSets[i]);
 
@@ -1005,7 +1019,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 
 	ensureSize0(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
 	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
-	auto bufHandles = LocalVector<VkBuffer>(bindingCount);
+
+	ThreadMemScope memScope;
+	auto bufHandles = memScope.alloc<VkBuffer>(bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
 		auto& buf = get(*cb.dev, pBuffers[i]);
 		cmd.buffers[i].buffer = &buf;
@@ -1624,7 +1640,8 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
 	auto* last = cmd.children_; // nullptr
 
-	auto cbHandles = LocalVector<VkCommandBuffer>(commandBufferCount);
+	ThreadMemScope memScope;
+	auto cbHandles = memScope.alloc<VkCommandBuffer>(commandBufferCount);
 	for(auto i = 0u; i < commandBufferCount; ++i) {
 		auto& secondary = getCommandBuffer(pCommandBuffers[i]);
 		dlg_assert(secondary.state() == CommandBuffer::State::executable);
@@ -2449,7 +2466,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
 
 	ensureSize0(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
 	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
-	auto bufHandles = LocalVector<VkBuffer>(bindingCount);
+
+	ThreadMemScope memScope;
+	auto bufHandles = memScope.alloc<VkBuffer>(bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
 		auto& buf = get(*cb.dev, pBuffers[i]);
 		cmd.buffers[i].buffer = &buf;

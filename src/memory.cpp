@@ -33,21 +33,10 @@ DeviceMemory::~DeviceMemory() {
 
 	std::lock_guard lock(dev->mutex);
 
-	// dlg_info("Destroying DeviceMemory {} ({})", this, handle);
-
-	// Since we modify the elements inside the sets (with respect to
+	// Since we modify the elements inside allocations (with respect to
 	// our comparison iterator) we can't just iterate through them.
 	// Remove and reset one-by-one instead.
-	// TODO: nvm, fix for new vector-based allocations
-	while(!this->allocations.empty())
-	{
-		// auto* res = *this->allocations.begin();
-		// this->allocations.erase(this->allocations.begin());
-		auto* res = this->allocations.back();
-		this->allocations.pop_back();
-
-		// dlg_info("  Unregister handle {}", res);
-
+	for(auto* res : allocations) {
 		dlg_assert(!res->memoryDestroyed);
 		dlg_assert(res->memory == this);
 		res->memory = nullptr;
@@ -123,13 +112,14 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 		VkDeviceSize                                size,
 		VkMemoryMapFlags                            flags,
 		void**                                      ppData) {
-	auto& dev = getDevice(device);
-	auto res = dev.dispatch.MapMemory(device, memory, offset, size, flags, ppData);
+	auto& mem = get(device, memory);
+	auto res = mem.dev->dispatch.MapMemory(mem.dev->handle, mem.handle,
+		offset, size, flags, ppData);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& mem = dev.deviceMemories.get(memory);
+	dlg_assert(!mem.map);
 	mem.map = *ppData;
 	mem.mapOffset = offset;
 	mem.mapSize = size;
@@ -140,14 +130,53 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 VKAPI_ATTR void VKAPI_CALL UnmapMemory(
 		VkDevice                                    device,
 		VkDeviceMemory                              memory) {
-	auto& dev = getDevice(device);
-	auto& mem = dev.deviceMemories.get(memory);
+	auto& mem = get(device, memory);
 
+	dlg_assert(mem.map);
 	mem.map = nullptr;
 	mem.mapOffset = 0u;
 	mem.mapSize = 0u;
 
-	dev.dispatch.UnmapMemory(device, memory);
+	mem.dev->dispatch.UnmapMemory(mem.dev->handle, mem.handle);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL FlushMappedMemoryRanges(
+		VkDevice                                    device,
+		uint32_t                                    memoryRangeCount,
+		const VkMappedMemoryRange*                  pMemoryRanges) {
+	auto& dev = getDevice(device);
+	ThreadMemScope memScope;
+	auto fwd = memScope.alloc<VkMappedMemoryRange>(memoryRangeCount);
+	for(auto i = 0u; i < memoryRangeCount; ++i) {
+		fwd[i] = *pMemoryRanges;
+		fwd[i].memory = get(dev, fwd[i].memory).handle;
+	}
+
+	return dev.dispatch.FlushMappedMemoryRanges(dev.handle, u32(fwd.size()), fwd.data());
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL InvalidateMappedMemoryRanges(
+		VkDevice                                    device,
+		uint32_t                                    memoryRangeCount,
+		const VkMappedMemoryRange*                  pMemoryRanges) {
+	auto& dev = getDevice(device);
+	ThreadMemScope memScope;
+	auto fwd = memScope.alloc<VkMappedMemoryRange>(memoryRangeCount);
+	for(auto i = 0u; i < memoryRangeCount; ++i) {
+		fwd[i] = *pMemoryRanges;
+		fwd[i].memory = get(dev, fwd[i].memory).handle;
+	}
+
+	return dev.dispatch.InvalidateMappedMemoryRanges(dev.handle, u32(fwd.size()), fwd.data());
+}
+
+VKAPI_ATTR void VKAPI_CALL GetDeviceMemoryCommitment(
+		VkDevice                                    device,
+		VkDeviceMemory                              memory,
+		VkDeviceSize*                               pCommittedMemoryInBytes) {
+	auto& mem = get(device, memory);
+	mem.dev->dispatch.GetDeviceMemoryCommitment(mem.dev->handle, mem.handle,
+		pCommittedMemoryInBytes);
 }
 
 } // namespace vil

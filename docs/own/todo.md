@@ -152,6 +152,8 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] add submission log! possibility to track what submissions are done
+      during startup, another thing that's hard to track with capturing
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
 - [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
       we just create a second window by default?

@@ -54,7 +54,7 @@ args += [
 ]
 
 if get_option('buildtype') == 'debug'
-	# highly useful for debugging
+	# highly useful for debugging but has impact on performance
 	args += '-D_GLIBCXX_DEBUG'
 endif
 
@@ -85,10 +85,20 @@ layer_args = [
 ]
 
 # config options
-# layer_args += '-DVIL_EXTENSIVE_ZONES'
-# layer_args += '-DVIL_TRACY_MUTEX'
-layer_args += '-DVIL_DEBUG_MUTEX'
+with_debug_checks = get_option('buildtype') != 'release'
+if with_debug_checks
+	# layer_args += '-DVIL_EXTENSIVE_ZONES'
+	# layer_args += '-DVIL_TRACY_MUTEX'
+	layer_args += '-DVIL_DEBUG_MUTEX'
+	layer_args += '-DVIL_DEBUG'
+endif
 
+disable_dlg = false
+if disable_dlg
+	layer_args += '-DDLG_DISABLE'
+endif
+
+# deps
 dep_threads = dependency('threads', required: false)
 dep_dlg = dependency('dlg',
 	static: true,
@@ -287,7 +297,6 @@ endif
 if with_win32
 	src += files('src/win32.cpp')
 	args += ['-DVIL_WITH_WIN32']
-	layer_args += '-DUNICODE'
 endif
 
 # On win32, pch breaks with tracy due to some windows.h bs.

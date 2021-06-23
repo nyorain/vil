@@ -17,9 +17,21 @@ struct ThreadMemBlock {
 	ThreadMemBlock* prev {};
 	ThreadMemBlock* next {};
 	size_t size {};
+	size_t offset {};
+
+#ifdef VIL_DEBUG
+	// since we store the metadata right next to the raw byte array, we
+	// use a canary in debugging to warn about possibly corrupt metadat
+	// as early as possible.
+	static constexpr auto canaryValue = 0xCAFEC0DED00DDEAD;
+	u64 canary {canaryValue};
+#endif // VIL_DEBUG
+
 	// following: std::byte[size]
 };
 
+// All data we need per-thread. Currently only used for stack-like
+// dynamic memory allocation.
 struct ThreadContext {
 	static ThreadContext& get();
 
@@ -30,139 +42,55 @@ struct ThreadContext {
 
 	ThreadMemBlock* memRoot {};
 	ThreadMemBlock* memCurrent {};
-	size_t memOffset {};
 
 	ThreadContext();
 	~ThreadContext();
 };
 
-// Guaranteed to be aligned with __STDCPP_DEFAULT_NEW_ALIGNMENT__
-std::byte* allocate(ThreadContext& tc, size_t size);
-void free(ThreadContext& tc, const std::byte* ptr, size_t size);
-
-// NOTE: object of this allocator must never cross thread boundaries.
-// Must only be used for local stuff. Objects must also always be
-// destroyed in the order they were created, in a stack-like fashion.
-template<typename T>
-struct ThreadContextAllocator {
-	using is_always_equal = std::true_type;
-	using value_type = T;
-
-	T* allocate(size_t n) {
-		static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-		auto ptr = vil::allocate(ThreadContext::get(), sizeof(T) * n);
-		return reinterpret_cast<T*>(ptr);
-	}
-
-	void deallocate(const T* ptr, size_t n) const noexcept {
-		free(ThreadContext::get(), reinterpret_cast<const std::byte*>(ptr), n * sizeof(T));
-	}
-};
-
-template<typename T>
-bool operator==(const ThreadContextAllocator<T>&, const ThreadContextAllocator<T>&) noexcept {
-	return true;
-}
-
-template<typename T>
-bool operator!=(const ThreadContextAllocator<T>&, const ThreadContextAllocator<T>&) noexcept {
-	return false;
-}
-
-template<typename T>
-struct LocalVector {
-	using iterator = T*;
-	using const_iterator = const T*;
-
-	size_t size_;
-	T* data_ {};
-
-	LocalVector(const T* start, size_t size) : size_(size) {
-		if(size) {
-			data_ = ThreadContextAllocator<T>().allocate(size);
-			new(data_) T[size_];
-			std::copy(start, start + size, data_);
-		}
-	}
-
-	LocalVector(size_t size = 0u) : size_(size) {
-		if(size_) {
-			data_ = ThreadContextAllocator<T>().allocate(size);
-			new(data_) T[size_]();
-		}
-	}
-
-	~LocalVector() {
-		if(size_) {
-			std::destroy(begin(), end());
-			ThreadContextAllocator<T>().deallocate(data_, size_);
-		}
-	}
-
-	LocalVector(const LocalVector&) = delete;
-	LocalVector& operator=(const LocalVector&) = delete;
-
-	/*
-	LocalVector(LocalVector&& rhs) noexcept : size_(rhs.size_), data_(rhs.data_) {
-		rhs.data_ = {};
-		rhs.size_ = {};
-	}
-
-	LocalVector& operator=(LocalVector&& rhs) noexcept {
-		// this is usually a sign for an error, there are strict requirements
-		// for construction/destruction order of LocalVector, it should
-		// not happen here
-		dlg_assert(empty());
-		size_ = rhs.size_;
-		data_ = rhs.data_;
-		rhs.data_ = {};
-		rhs.size_ = {};
-		return *this;
-	}
-	*/
-
-	iterator begin() noexcept { return data_; }
-	iterator end() noexcept { return data_ + size_; }
-	const_iterator begin() const noexcept { return data_; }
-	const_iterator end() const noexcept { return data_ + size_; }
-
-	T* data() noexcept { return data_; }
-	const T* data() const noexcept { return data_; }
-
-	T& operator[](size_t i) { assert(i < size_); return data_[i]; }
-	const T& operator[](size_t i) const { assert(i < size_); return data_[i]; }
-
-	size_t size() const noexcept { return size_; }
-	bool empty() const noexcept { return size() == 0; }
-};
-
-// Offset more flexibility compared to LocalVector, e.g. for in-loop
-// allocation. All memory allocated by it from the ThreadContext will simply
-// be released when this object is destroyed.
+// Allocated memory from ThreadContext.
+// Will simply release all allocated memory by reset the allocation offset in the
+// current ThreadContext when this object is destroyed.
+// The object must therefore not be used/moved across thread boundaries or
+// alloc to different ThreadMemScope objects be incorrectly mixed (only allowed
+// in a stack-like manner).
 // When this is used, it must be the only mechanism by which memory
-// from the thread context is allocated, i.e. it must not be mixed
-// with manual allocation or LocalVector.
+// from the thread context is allocated.
 struct ThreadMemScope {
 	ThreadMemBlock* block {};
 	size_t offset {};
+
+	// only for debugging, making sure that we never use multiple
+	// ThreadMemScope objects at the same time in any way not resembling
+	// a stack.
+#ifdef VIL_DEBUG
 	size_t sizeAllocated {};
+	std::byte* current {};
+#endif // VIL_DEBUG
 
 	template<typename T>
 	span<T> alloc(size_t n) {
-		auto ptr = ThreadContextAllocator<T>().allocate(n);
-		new(ptr) T[n]();
-		sizeAllocated += align(sizeof(T) * n, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto ptr = allocRaw<T>(n);
 		return {ptr, n};
 	}
 
 	template<typename T>
 	span<std::remove_const_t<T>> copy(T* data, size_t n) {
-		auto ptr = ThreadContextAllocator<std::remove_const_t<T>>().allocate(n);
-		new(ptr) std::remove_const_t<T>[n]();
-		std::memcpy(ptr, data, n * sizeof(T));
-		sizeAllocated += align(sizeof(T) * n, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-		return {ptr, n};
+		auto ret = this->alloc<std::remove_const_t<T>>(n);
+		std::memcpy(ret.data(), data, n * sizeof(T));
+		return ret;
 	}
+
+	// NOTE: prefer alloc, returning a span.
+	// This function be useful for single allocations though.
+	template<typename T>
+	T* allocRaw(size_t n = 1) {
+		static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto ptr = reinterpret_cast<T*>(this->allocRaw(sizeof(T) * n));
+		new(ptr) T[n]();
+		return ptr;
+	}
+
+	std::byte* allocRaw(size_t size);
 
 	ThreadMemScope(); // stores current state
 	~ThreadMemScope(); // resets state

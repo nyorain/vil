@@ -311,6 +311,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 
 	VIL_DEV_HOOK(QueueSubmit),
 	VIL_DEV_HOOK(QueueWaitIdle),
+	VIL_DEV_HOOK(QueueBindSparse),
 
 	VIL_DEV_HOOK_EXT(CreateSwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(DestroySwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
@@ -351,10 +352,15 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	// image.hpp
 	VIL_DEV_HOOK(CreateImage),
 	VIL_DEV_HOOK(DestroyImage),
+	VIL_DEV_HOOK(GetImageMemoryRequirements),
+	VIL_DEV_HOOK(GetImageSparseMemoryRequirements),
+	VIL_DEV_HOOK(GetImageSubresourceLayout),
 	VIL_DEV_HOOK(BindImageMemory),
 	VIL_DEV_HOOK(BindImageMemory2),
 	VIL_DEV_HOOK_ALIAS(BindImageMemory2KHR, BindImageMemory2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetImageDrmFormatModifierPropertiesEXT,
+		VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CreateImageView),
 	VIL_DEV_HOOK(DestroyImageView),
@@ -394,6 +400,9 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(FreeMemory),
 	VIL_DEV_HOOK(MapMemory),
 	VIL_DEV_HOOK(UnmapMemory),
+	VIL_DEV_HOOK(FlushMappedMemoryRanges),
+	VIL_DEV_HOOK(InvalidateMappedMemoryRanges),
+	VIL_DEV_HOOK(GetDeviceMemoryCommitment),
 
 	// shader.hpp
 	VIL_DEV_HOOK(CreateShaderModule),

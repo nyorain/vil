@@ -2,6 +2,7 @@
 #include <data.hpp>
 #include <cb.hpp>
 #include <ds.hpp>
+#include <threadContext.hpp>
 #include <command/commands.hpp>
 #include <swapchain.hpp>
 #include <sync.hpp>
@@ -142,9 +143,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 	submitter.dstBatch = &batch;
 
-	for(auto i = 0u; i < submitCount; ++i) {
-		process(submitter, pSubmits[i]);
-	}
+	process(submitter, {pSubmits, submitCount});
 
 	// Make sure that every submission has a fence associated.
 	// If the application already set a fence we can simply check that
@@ -266,6 +265,138 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 		dlg_error("Expected submission to be completed after vkDeviceWaitIdle");
 		++it;
 	}
+
+	return res;
+}
+
+// TODO: process the bindings. Wait until we know that the submission finished?
+void process(Device& dev, ThreadMemScope& scope, VkSparseBufferMemoryBindInfo& bind) {
+	auto& buf = get(dev, bind.buffer);
+	bind.buffer = buf.handle;
+
+	auto mems = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
+	for(auto i = 0u; i < bind.bindCount; ++i) {
+		auto& b = mems[i];
+		b = bind.pBinds[i];
+
+		if(b.memory) {
+			auto& mem = get(dev, b.memory);
+			b.memory = mem.handle;
+		}
+	}
+
+	bind.pBinds = mems.data();
+}
+
+void process(Device& dev, ThreadMemScope& scope, VkSparseImageOpaqueMemoryBindInfo& bind) {
+	auto& img = get(dev, bind.image);
+	bind.image = img.handle;
+
+	auto mems = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
+	for(auto i = 0u; i < bind.bindCount; ++i) {
+		auto& b = mems[i];
+		b = bind.pBinds[i];
+
+		if(b.memory) {
+			auto& mem = get(dev, b.memory);
+			b.memory = mem.handle;
+		}
+	}
+
+	bind.pBinds = mems.data();
+}
+
+void process(Device& dev, ThreadMemScope& scope, VkSparseImageMemoryBindInfo& bind) {
+	auto& img = get(dev, bind.image);
+	bind.image = img.handle;
+
+	auto mems = scope.alloc<VkSparseImageMemoryBind>(bind.bindCount);
+	for(auto i = 0u; i < bind.bindCount; ++i) {
+		auto& b = mems[i];
+		b = bind.pBinds[i];
+
+		if(b.memory) {
+			auto& mem = get(dev, b.memory);
+			b.memory = mem.handle;
+		}
+	}
+
+	bind.pBinds = mems.data();
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
+		VkQueue                                     vkQueue,
+		uint32_t                                    bindInfoCount,
+		const VkBindSparseInfo*                     pBindInfo,
+		VkFence                                     vkFence) {
+	auto& queue = getData<Queue>(vkQueue);
+	auto& dev = *queue.dev;
+
+	Fence* fence {};
+	if(vkFence) {
+		fence = &get(dev, vkFence);
+	}
+
+	ThreadMemScope memScope;
+	auto fwd = memScope.alloc<VkBindSparseInfo>(bindInfoCount);
+	for(auto i = 0u; i < bindInfoCount; ++i) {
+		auto& bindInfo = fwd[i];
+		bindInfo = pBindInfo[i];
+
+		// process semaphores
+		auto waitSems = memScope.alloc<VkSemaphore>(bindInfo.waitSemaphoreCount);
+		for(auto j = 0u; j < bindInfo.waitSemaphoreCount; ++j) {
+			auto& sem = get(dev, bindInfo.pWaitSemaphores[j]);
+			waitSems[j] = sem.handle;
+		}
+
+		auto signalSems = memScope.alloc<VkSemaphore>(bindInfo.signalSemaphoreCount);
+		for(auto j = 0u; j < bindInfo.signalSemaphoreCount; ++j) {
+			auto& sem = get(dev, bindInfo.pSignalSemaphores[j]);
+			signalSems[j] = sem.handle;
+		}
+
+		// process bindings
+		auto bufBinds = memScope.alloc<VkSparseBufferMemoryBindInfo>(bindInfo.bufferBindCount);
+		for(auto j = 0u; j < bindInfo.bufferBindCount; ++j) {
+			bufBinds[j] = bindInfo.pBufferBinds[j];
+			process(dev, memScope, bufBinds[j]);
+		}
+
+		auto imgOpaqueBinds = memScope.alloc<VkSparseImageOpaqueMemoryBindInfo>(
+			bindInfo.imageOpaqueBindCount);
+		for(auto j = 0u; j < bindInfo.imageOpaqueBindCount; ++j) {
+			imgOpaqueBinds[j] = bindInfo.pImageOpaqueBinds[j];
+			process(dev, memScope, imgOpaqueBinds[j]);
+		}
+
+		auto imgBinds = memScope.alloc<VkSparseImageMemoryBindInfo>(bindInfo.imageBindCount);
+		for(auto j = 0u; j < bindInfo.imageBindCount; ++j) {
+			imgBinds[j] = bindInfo.pImageBinds[j];
+			process(dev, memScope, imgBinds[j]);
+		}
+
+		bindInfo.pBufferBinds = bufBinds.data();
+		bindInfo.pImageBinds = imgBinds.data();
+		bindInfo.pImageOpaqueBinds = imgOpaqueBinds.data();
+		bindInfo.pSignalSemaphores = signalSems.data();
+		bindInfo.pWaitSemaphores = waitSems.data();
+	}
+
+	VkResult res;
+
+	{
+		// QueueBindSparse is a queue operation, have to lock our mutex
+		std::lock_guard lock(queue.dev->queueMutex);
+		res = queue.dev->dispatch.QueueBindSparse(queue.handle,
+			u32(fwd.size()), fwd.data(), fence ? fence->handle : VK_NULL_HANDLE);
+		if(res != VK_SUCCESS) {
+			return res;
+		}
+	}
+
+	// TODO: insert into pending submissions, track completion.
+	// We might have to sync past and future hooks/gui submissions with this!
 
 	return res;
 }

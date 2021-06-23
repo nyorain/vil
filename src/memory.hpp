@@ -31,17 +31,8 @@ struct DeviceMemory : DeviceHandle {
 	VkDeviceSize mapSize {};
 
 	// NOTE: we can't use a set since resources may alias
-	// struct AllocationCmp {
-	// 	bool operator()(const MemoryResource* a, const MemoryResource* b) const noexcept {
-	// 		dlg_assertm(a == b ||
-	// 			a->allocationOffset + a->allocationSize <= b->allocationOffset ||
-	// 			b->allocationOffset + b->allocationSize <= a->allocationOffset,
-	// 			"{} {} vs {} {}", a->allocationOffset, a->allocationSize, b->allocationOffset, b->allocationSize);
-	// 		return a->allocationOffset < b->allocationOffset;
-	// 	}
-	// };
-	// std::set<MemoryResource*, AllocationCmp> allocations;
-	std::vector<MemoryResource*> allocations; // TODO: unsorted, should be sorted for viz
+	// TODO: currently unsorted, should probably sort it
+	std::vector<MemoryResource*> allocations;
 
 	~DeviceMemory();
 };
@@ -68,5 +59,20 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 VKAPI_ATTR void VKAPI_CALL UnmapMemory(
     VkDevice                                    device,
     VkDeviceMemory                              memory);
+
+VKAPI_ATTR VkResult VKAPI_CALL FlushMappedMemoryRanges(
+    VkDevice                                    device,
+    uint32_t                                    memoryRangeCount,
+    const VkMappedMemoryRange*                  pMemoryRanges);
+
+VKAPI_ATTR VkResult VKAPI_CALL InvalidateMappedMemoryRanges(
+    VkDevice                                    device,
+    uint32_t                                    memoryRangeCount,
+    const VkMappedMemoryRange*                  pMemoryRanges);
+
+VKAPI_ATTR void VKAPI_CALL GetDeviceMemoryCommitment(
+    VkDevice                                    device,
+    VkDeviceMemory                              memory,
+    VkDeviceSize*                               pCommittedMemoryInBytes);
 
 } // namespace vil

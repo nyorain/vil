@@ -32,7 +32,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	auto& dev = getDevice(device);
 	auto imageless = pCreateInfo->flags & VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT;
 
-	LocalVector<VkImageView> viewHandles(pCreateInfo->attachmentCount);
+	ThreadMemScope memScope;
+	auto viewHandles = memScope.alloc<VkImageView>(pCreateInfo->attachmentCount);
 	std::vector<ImageView*> views(pCreateInfo->attachmentCount);
 
 	if(!imageless) {

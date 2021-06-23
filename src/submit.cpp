@@ -16,7 +16,7 @@
 
 namespace vil {
 
-void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
+VkCommandBuffer processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 	ZoneScoped;
 
 	auto& dev = *subm.dev;
@@ -58,9 +58,9 @@ void processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer vkcb) {
 		if(dev.commandHook) {
 			auto hooked = dev.commandHook->hook(cb, dst, scb.hook);
 			dlg_assert(hooked);
-			subm.commandBuffers.back().push_back(hooked);
+			return hooked;
 		} else {
-			subm.commandBuffers.back().push_back(cb.handle());
+			return cb.handle();
 		}
 	}
 }
@@ -151,12 +151,11 @@ VkResult submitSemaphore(Queue& q, VkSemaphore sem, bool timeline) {
 	return q.dev->dispatch.QueueSubmit(q.handle, 1u, &si, VK_NULL_HANDLE);
 }
 
-void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
+void process(QueueSubmitter& subm, VkSubmitInfo& si) {
 	ZoneScoped;
 
 	auto& dev = *subm.dev;
 
-	auto si = info;
 	auto& dst = subm.dstBatch->submissions.emplace_back();
 	dst.parent = subm.dstBatch;
 
@@ -165,9 +164,9 @@ void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
 		dst.signalSemaphores.push_back(&sem);
 	}
 
-	auto& cbs = subm.commandBuffers.emplace_back();
+	auto cbs = subm.memScope.alloc<VkCommandBuffer>(si.commandBufferCount);
 	for(auto j = 0u; j < si.commandBufferCount; ++j) {
-		processCB(subm, dst, si.pCommandBuffers[j]);
+		cbs[j] = processCB(subm, dst, si.pCommandBuffers[j]);
 	}
 
 	// For wait & present semaphores: if we have timeline semaphores
@@ -176,13 +175,13 @@ void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
 	VkTimelineSemaphoreSubmitInfo* tsInfo = nullptr;
 	if(dev.timelineSemaphores) {
 		if(hasChain(si, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)) {
-			copyChain(si.pNext, subm.copiedChains.emplace_back());
+			si.pNext = copyChainLocal(subm.memScope, si.pNext);
 			tsInfo = const_cast<VkTimelineSemaphoreSubmitInfo*>(findChainInfo<
 				VkTimelineSemaphoreSubmitInfo,
 				VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO>(si));
 			dlg_assert(tsInfo);
 		} else {
-			tsInfo = &subm.tsSubmitInfos.emplace_back();
+			tsInfo = subm.memScope.allocRaw<VkTimelineSemaphoreSubmitInfo>();
 			*tsInfo = {};
 			tsInfo->sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
 			tsInfo->pNext = si.pNext;
@@ -202,10 +201,9 @@ void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
 	// by this submission in the future, we need to be able to gpu-sync them.
 	dst.ourSemaphore = getSemaphoreFromPool(dev);
 
-	auto& signalSems = subm.semaphores.emplace_back(
-		si.pSignalSemaphores,
-		si.pSignalSemaphores + si.signalSemaphoreCount);
-	signalSems.push_back(dst.ourSemaphore);
+	auto signalSems = subm.memScope.alloc<VkSemaphore>(si.signalSemaphoreCount + 1);
+	std::copy_n(si.pSignalSemaphores, si.signalSemaphoreCount, signalSems.begin());
+	signalSems.back() = dst.ourSemaphore;
 
 	dlg_assert(bool(tsInfo) == dev.timelineSemaphores);
 	if(tsInfo) {
@@ -215,11 +213,13 @@ void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
 
 		dst.ourSemaphoreValue = ourValue;
 
-		auto& signalVals = subm.tsValues.emplace_back(
-			tsInfo->pSignalSemaphoreValues,
-			tsInfo->pSignalSemaphoreValues + tsInfo->signalSemaphoreValueCount);
-		signalVals.resize(si.signalSemaphoreCount); // ignored
-		signalVals.push_back(ourValue);
+		// tsInfo->signalSemaphoreValueCount may be smaller than si.signalSemaphoreCount
+		// but then values in between are simply ignored.
+		dlg_assert(tsInfo->signalSemaphoreValueCount <= si.signalSemaphoreCount);
+		auto signalVals = subm.memScope.alloc<u64>(si.signalSemaphoreCount + 1);
+		std::copy_n(tsInfo->pSignalSemaphoreValues, tsInfo->signalSemaphoreValueCount,
+			signalVals.begin());
+		signalVals.back() = ourValue;
 
 		dlg_assert(signalVals.size() == signalSems.size());
 		tsInfo->signalSemaphoreValueCount = u32(signalVals.size());
@@ -231,8 +231,16 @@ void process(QueueSubmitter& subm, const VkSubmitInfo& info) {
 
 	si.commandBufferCount = u32(cbs.size());
 	si.pCommandBuffers = cbs.data();
+}
 
-	subm.submitInfos.push_back(si);
+void process(QueueSubmitter& subm, span<const VkSubmitInfo> infos) {
+	auto off = subm.submitInfos.size();
+	subm.submitInfos = subm.memScope.alloc<VkSubmitInfo>(off + infos.size());
+
+	for(auto i = 0u; i < infos.size(); ++i) {
+		subm.submitInfos[off + i] = infos[i];
+		process(subm, subm.submitInfos[off + i]);
+	}
 }
 
 void cleanupOnError(QueueSubmitter& subm) {
@@ -287,7 +295,8 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 
 	// When we don't use timeline semaphores, we need to reset our
 	// semaphore pool every now and then.
-	if(!dev.timelineSemaphores && dev.resetSemaphores.size() > 4) {
+	dlg_assert(!dev.timelineSemaphores || dev.resetSemaphores.empty());
+	if(dev.resetSemaphores.size() > 4) {
 		insertResetSemaphores = true;
 	}
 
@@ -295,21 +304,24 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 		return;
 	}
 
-	// at this point we know that an additional submission is needed.
-	// add it as *first* submission
-	auto& si = *subm.submitInfos.emplace(subm.submitInfos.begin());
+	// At this point we know that an additional submission is needed.
+	// add it as *first* submission. Need to completely reallocate
+	// span for that.
+	auto newInfos = subm.memScope.alloc<VkSubmitInfo>(subm.submitInfos.size() + 1);
+	std::copy(subm.submitInfos.begin(), subm.submitInfos.end(), newInfos.begin() + 1);
+	subm.submitInfos = newInfos;
+
+	auto& si = subm.submitInfos[0];
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	si.pNext = nullptr;
 
-	auto& waitSems = subm.semaphores.emplace_back();
-	auto& waitStages = subm.waitStages.emplace_back();
+	auto maxWaitSemCount = dev.resetSemaphores.size() + 1;
+	auto waitSems = subm.memScope.alloc<VkSemaphore>(maxWaitSemCount);
+	auto waitStages = subm.memScope.alloc<VkPipelineStageFlags>(maxWaitSemCount);
 
-	if(insertResetSemaphores) {
-		dlg_assert(!dev.timelineSemaphores);
-		waitSems = std::move(dev.resetSemaphores);
-		waitStages.resize(waitSems.size(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
-		batch.poolSemaphores = waitSems;
-	}
+	std::copy(dev.resetSemaphores.begin(), dev.resetSemaphores.end(), waitSems.begin());
+	std::fill_n(waitStages.begin(), dev.resetSemaphores.size(), VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+	auto waitSemCount = dev.resetSemaphores.size();
 
 	if(insertGuiSync) {
 		auto& waitDraw = *insertGuiSync;
@@ -320,15 +332,16 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 		// practical for timeline semaphores I guess since otherwise we can't
 		// use the src semaphore multiple times.
 		if(dev.timelineSemaphores) {
-			auto& tsInfo = subm.tsSubmitInfos.emplace_back();
+			auto& tsInfo = *subm.memScope.allocRaw<VkTimelineSemaphoreSubmitInfo>();
 			tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
 			tsInfo.pNext = NULL;
 
-			waitSems.push_back(waitDraw.futureSemaphore);
-			waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+			waitSems[waitSemCount] = waitDraw.futureSemaphore;
+			waitStages[waitSemCount] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+			++waitSemCount;
 
-			auto& waitVals = subm.tsValues.emplace_back();
-			waitVals.push_back(waitDraw.futureSemaphoreValue);
+			auto waitVals = subm.memScope.alloc<u64>(1);
+			waitVals[0] = waitDraw.futureSemaphoreValue;
 
 			tsInfo.waitSemaphoreValueCount = u32(waitVals.size());
 			tsInfo.pWaitSemaphoreValues = waitVals.data();
@@ -338,23 +351,27 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 			if(waitDraw.futureSemaphoreUsed) {
 				// we don't have timeline semaphores and have already
 				// chained the future semaphore of that draw somewhere, ugh.
-				// Add a new semaphore to the graphics queue.
+				// Add a new semaphore to the gui rendering queue.
 				auto guiSyncSemaphore = getSemaphoreFromPoolLocked(dev);
 				auto res = submitSemaphore(*subm.queue, guiSyncSemaphore);
 
 				if(res != VK_SUCCESS) {
-					dlg_trace("vkQueueSubmit error: {}", vk::name(res));
-					// cleanupOnError(subm);
-					return;
+					dlg_error("vkQueueSubmit error: {}", vk::name(res));
+
+					// we continue as usual, the submission will just
+					// not be chained correctly and might cause sync
+					// issues.
 				}
 
-				waitSems.push_back(guiSyncSemaphore);
-				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+				waitSems[waitSemCount] = guiSyncSemaphore;
+				waitStages[waitSemCount] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+				++waitSemCount;
+
 				batch.poolSemaphores.push_back(guiSyncSemaphore);
 			} else {
 				waitDraw.futureSemaphoreUsed = true;
-				waitSems.push_back(waitDraw.futureSemaphore);
-				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+				waitSems[waitSemCount] = waitDraw.futureSemaphore;
+				waitStages[waitSemCount] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 				// DON'T add waitDraw.futureSemaphore to batch.poolSemaphores
 				// here since it's owned by the gui.
 
@@ -363,7 +380,8 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 		}
 	}
 
-	si.waitSemaphoreCount = u32(waitSems.size());
+	batch.poolSemaphores = std::move(dev.resetSemaphores);
+	si.waitSemaphoreCount = waitSemCount;
 	si.pWaitSemaphores = waitSems.data();
 	si.pWaitDstStageMask = waitStages.data();
 }

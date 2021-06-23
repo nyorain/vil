@@ -554,10 +554,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 
 	// unwrap immutable sampler handles
 	auto nci = *pCreateInfo;
-	auto nbindings = LocalVector(nci.pBindings, nci.bindingCount);
-	nci.pBindings = nbindings.data();
 
 	ThreadMemScope memScope;
+	auto nbindings = memScope.copy(nci.pBindings, nci.bindingCount);
+	nci.pBindings = nbindings.data();
+
 	for(auto& bind : nbindings) {
 		if(!needsSampler(bind.descriptorType) || bind.descriptorCount == 0 ||
 				!bind.pImmutableSamplers) {
@@ -734,7 +735,8 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 	auto nci = *pAllocateInfo;
 	nci.descriptorPool = pool.handle;
 
-	auto dsLayouts = LocalVector<VkDescriptorSetLayout>(pAllocateInfo->descriptorSetCount);
+	ThreadMemScope memScope;
+	auto dsLayouts = memScope.alloc<VkDescriptorSetLayout>(pAllocateInfo->descriptorSetCount);
 	for(auto i = 0u; i < nci.descriptorSetCount; ++i) {
 		dsLayouts[i] = get(dev, pAllocateInfo->pSetLayouts[i]).handle;
 	}
@@ -814,7 +816,9 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 
 	auto& pool = get(device, descriptorPool);
 	auto& dev = *pool.dev;
-	auto handles = LocalVector<VkDescriptorSet>(descriptorSetCount);
+
+	ThreadMemScope memScope;
+	auto handles = memScope.alloc<VkDescriptorSet>(descriptorSetCount);
 
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		if(!HandleDesc<VkDescriptorSet>::wrap) {
@@ -1133,7 +1137,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 	}
 
 	// handle copies
-	auto copies = LocalVector<VkCopyDescriptorSet>(descriptorCopyCount);
+	auto copies = memScope.alloc<VkCopyDescriptorSet>(descriptorCopyCount);
 
 	for(auto i = 0u; i < descriptorCopyCount; ++i) {
 		auto& copyInfo = pDescriptorCopies[i];
@@ -1238,7 +1242,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	checkCopyState(ds);
 
 	auto totalSize = totalUpdateDataSize(dut);
-	auto fwdData = LocalVector<std::byte>(totalSize);
+
+	ThreadMemScope memScope;
+	auto fwdData = memScope.alloc<std::byte>(totalSize);
 	std::memcpy(fwdData.data(), pData, totalSize);
 	auto* ptr = fwdData.data();
 

@@ -258,6 +258,9 @@ DefHandleDesc(VkQueryPool, QueryPool, queryPools, false, false);
 DefHandleDesc(VkPipeline, Pipeline, pipes, false, false);
 DefHandleDesc(VkRenderPass, RenderPass, renderPasses, false, false);
 DefHandleDesc(VkFramebuffer, Framebuffer, framebuffers, false, false);
+DefHandleDesc(VkFence, Fence, fences, false, false);
+DefHandleDesc(VkSemaphore, Semaphore, semaphores, false, false);
+DefHandleDesc(VkEvent, Event, events, false, false);
 
 #undef DefHandleDesc
 

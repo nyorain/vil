@@ -133,6 +133,67 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 	dev.dispatch.DestroyImage(device, handle, pAllocator);
 }
 
+VKAPI_ATTR void VKAPI_CALL GetImageMemoryRequirements(
+		VkDevice                                    device,
+		VkImage                                     image,
+		VkMemoryRequirements*                       pMemoryRequirements) {
+	auto& img = get(device, image);
+	img.dev->dispatch.GetImageMemoryRequirements(img.dev->handle,
+		img.handle, pMemoryRequirements);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetImageSparseMemoryRequirements(
+		VkDevice                                    device,
+		VkImage                                     image,
+		uint32_t*                                   pSparseMemoryRequirementCount,
+		VkSparseImageMemoryRequirements*            pSparseMemoryRequirements) {
+	auto& img = get(device, image);
+	img.dev->dispatch.GetImageSparseMemoryRequirements(img.dev->handle,
+		img.handle, pSparseMemoryRequirementCount, pSparseMemoryRequirements);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetImageSubresourceLayout(
+		VkDevice                                    device,
+		VkImage                                     image,
+		const VkImageSubresource*                   pSubresource,
+		VkSubresourceLayout*                        pLayout) {
+	auto& img = get(device, image);
+	img.dev->dispatch.GetImageSubresourceLayout(img.dev->handle,
+		img.handle, pSubresource, pLayout);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetImageMemoryRequirements2(
+		VkDevice                                    device,
+		const VkImageMemoryRequirementsInfo2*       pInfo,
+		VkMemoryRequirements2*                      pMemoryRequirements) {
+	auto& img = get(device, pInfo->image);
+	auto fwd = *pInfo;
+	fwd.image = img.handle;
+	img.dev->dispatch.GetImageMemoryRequirements2(img.dev->handle,
+		&fwd, pMemoryRequirements);
+}
+
+VKAPI_ATTR void VKAPI_CALL GetImageSparseMemoryRequirements2(
+		VkDevice                                    device,
+		const VkImageSparseMemoryRequirementsInfo2* pInfo,
+		uint32_t*                                   pSparseMemoryRequirementCount,
+		VkSparseImageMemoryRequirements2*           pSparseMemoryRequirements) {
+	auto& img = get(device, pInfo->image);
+	auto fwd = *pInfo;
+	fwd.image = img.handle;
+	img.dev->dispatch.GetImageSparseMemoryRequirements2(img.dev->handle,
+		&fwd, pSparseMemoryRequirementCount, pSparseMemoryRequirements);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL GetImageDrmFormatModifierPropertiesEXT(
+		VkDevice                                    device,
+		VkImage                                     image,
+		VkImageDrmFormatModifierPropertiesEXT*      pProperties) {
+	auto& img = get(device, image);
+	return img.dev->dispatch.GetImageDrmFormatModifierPropertiesEXT(img.dev->handle,
+		img.handle, pProperties);
+}
+
 void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
 	auto& img = dev.images.get(bind.image);
 	auto& mem = dev.deviceMemories.get(bind.memory);
@@ -151,11 +212,8 @@ void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
 	{
 		// access to the given memory must be internally synced
 		std::lock_guard lock(dev.mutex);
-		// mem.allocations.insert(&img); // TODO: insert ordered
 		mem.allocations.push_back(&img);
 	}
-
-	// dlg_trace("Binding image {} ({}) to memory {} ({})", &img, img.handle, &mem, mem.handle);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
