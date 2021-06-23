@@ -252,7 +252,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 
 		if(swapchain.overlay && swapchain.overlay->platform) {
 			auto state = swapchain.overlay->platform->update(swapchain.overlay->gui);
-			swapchain.overlay->gui.visible = (state != Platform::Status::hidden);
+			swapchain.overlay->gui.visible = (state != Platform::State::hidden);
 			// swapchain.overlay->gui.focused = (state == Platform::Status::focused);
 		}
 

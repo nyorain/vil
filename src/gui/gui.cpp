@@ -387,7 +387,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	auto accentHue = 0.f; // red
 
-	auto setAccentColorHue = [&](ImGuiCol_ col, u8 h, u8 s, u8 v, u8 a) {
+	auto setColorHSV = [&](ImGuiCol_ col, u8 h, u8 s, u8 v, u8 a) {
 		float r, g, b;
 		ImGui::ColorConvertHSVtoRGB(h / 255.f, s / 255.f, v / 255.f, r, g, b);
 		style.Colors[col] = {r, g, b, a / 255.f};
@@ -395,7 +395,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	// hsv + alpha. H will always be accentHue
 	auto setAccentColor = [&](ImGuiCol_ col, u8 s, u8 v, u8 a) {
-		setAccentColorHue(col, accentHue, s, v, a);
+		setColorHSV(col, accentHue, s, v, a);
 	};
 
 	setAccentColor(ImGuiCol_CheckMark, 187, 250, 255);
@@ -428,12 +428,13 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	style.Colors[ImGuiCol_WindowBg] = {0.02, 0.02, 0.02, 0.6}; // dark
 
-	setAccentColorHue(ImGuiCol_PlotHistogram, 119, 187, 250, 240);
-	setAccentColorHue(ImGuiCol_PlotHistogramHovered, accentHue, 187, 250, 240);
+	setColorHSV(ImGuiCol_PlotHistogram, 119, 240, 180, 240);
+	setColorHSV(ImGuiCol_PlotHistogramHovered, accentHue, 187, 250, 240);
 
 	// style.Colors[ImGuiCol_TitleBgActive] = style.Colors[ImGuiCol_WindowBg];
-	setAccentColorHue(ImGuiCol_TitleBgActive, 119, 220, 102, 200);
-	style.Colors[ImGuiCol_TitleBg] = style.Colors[ImGuiCol_WindowBg];
+	// style.Colors[ImGuiCol_TitleBg] = style.Colors[ImGuiCol_WindowBg];
+	setColorHSV(ImGuiCol_TitleBgActive, 119, 240, 150, 200);
+	setColorHSV(ImGuiCol_TitleBg, 119, 100, 100, 50);
 	style.Colors[ImGuiCol_TitleBgCollapsed] = style.Colors[ImGuiCol_WindowBg];
 
 	// Disable all rounding

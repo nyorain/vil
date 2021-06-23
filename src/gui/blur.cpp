@@ -357,29 +357,10 @@ void blur(GuiBlur& blur, VkCommandBuffer cb, u32 imageIdx, VkOffset2D offset, Vk
 	};
 
 	// NOTE: strictly speaking none of the known kernels but good enough
-	dispatch(1.5f);
-	dispatch(2.5f);
-
-	dispatch(3.5f);
-	dispatch(4.5f);
-
-	dispatch(5.5f);
-	dispatch(6.5f);
-
-	dispatch(7.5f);
-	dispatch(8.5f);
-
-	dispatch(9.5f);
-	dispatch(10.5f);
-
-	dispatch(11.5f);
-	dispatch(12.5f);
-
-	dispatch(13.5f);
-	dispatch(14.5f);
-
-	dispatch(15.5f);
-	dispatch(16.5f);
+	constexpr auto blurSteps = 16u;
+	for(auto i = 0u; i < blurSteps; ++i) {
+		dispatch(float(i) + 0.5f);
+	}
 
 	// we swap an even number of times, meaning that the final result
 	// is in srcID = 0.

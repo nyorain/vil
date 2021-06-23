@@ -15,7 +15,7 @@ constexpr auto focusKey = swa_key_rightbrace;
 void cbMouseMove(swa_window* win, const swa_mouse_move_event* ev) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 
-	if(platform->status == SwaPlatform::Status::focused) {
+	if(platform->status == SwaPlatform::State::focused) {
 		// dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
 		ImGui::GetIO().MousePos.x = ev->x;
 		ImGui::GetIO().MousePos.y = ev->y;
@@ -27,65 +27,25 @@ void cbMouseMove(swa_window* win, const swa_mouse_move_event* ev) {
 void cbMouseButton(swa_window* win, const swa_mouse_button_event* ev) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 
-	bool forward = platform->status == SwaPlatform::Status::shown;
-	bool handle = platform->status == SwaPlatform::Status::focused;
+	bool forward = platform->status == SwaPlatform::State::shown;
+	bool handle = platform->status == SwaPlatform::State::focused;
 
-	if(/*ev->button == swa_mouse_button_left*/ true) {
-		// auto reset = true;
-		auto inside =
-			ev->x > platform->guiWinPos.x &&
-			ev->y > platform->guiWinPos.y &&
-			ev->x < platform->guiWinPos.x + platform->guiWinSize.x &&
-			ev->y < platform->guiWinPos.y + platform->guiWinSize.y;
-		if(platform->status == SwaPlatform::Status::focused && !inside) {
-			// platform->activateWindow(false);
-
-			/*
-			if(platform->unfocusPending && !ev->pressed) {
-				dlg_trace("state: shown (unfocsed)");
-				platform->status = SwaPlatform::Status::shown;
-				handle = true;
-				forward = false;
-			} else if(!platform->unfocusPending && ev->pressed) {
-				platform->unfocusPending = true;
-				handle = true;
-				forward = false;
-				reset = false;
-			}
-			*/
-
-			dlg_trace("state: shown (unfocsed)");
-			platform->status = SwaPlatform::Status::shown;
-			handle = false;
-			forward = true;
-			platform->doGuiUnfocus = true;
-		} else if(platform->status == SwaPlatform::Status::shown && inside) {
-			// platform->activateWindow(true);
-
-			/*
-			if(platform->focusPending && !ev->pressed) {
-				dlg_trace("state: focused");
-				platform->status = SwaPlatform::Status::focused;
-				handle = true;
-				forward = false;
-			} else if(!platform->focusPending && ev->pressed) {
-				platform->focusPending = true;
-				handle = true;
-				forward = false;
-				reset = false;
-			}
-			*/
-
-			dlg_trace("state: focused");
-			platform->status = SwaPlatform::Status::focused;
-			handle = true;
-			forward = false;
-		}
-
-		// if(reset) {
-		// 	platform->focusPending = false;
-		// 	platform->unfocusPending = false;
-		// }
+	auto inside =
+		ev->x > platform->guiWinPos.x &&
+		ev->y > platform->guiWinPos.y &&
+		ev->x < platform->guiWinPos.x + platform->guiWinSize.x &&
+		ev->y < platform->guiWinPos.y + platform->guiWinSize.y;
+	if(platform->status == SwaPlatform::State::focused && !inside) {
+		dlg_trace("state: shown (unfocsed)");
+		platform->status = SwaPlatform::State::shown;
+		handle = false;
+		forward = true;
+		platform->doGuiUnfocus = true;
+	} else if(platform->status == SwaPlatform::State::shown && inside) {
+		dlg_trace("state: focused");
+		platform->status = SwaPlatform::State::focused;
+		handle = true;
+		forward = false;
 	}
 
 	if(forward) {
@@ -105,7 +65,7 @@ void cbMouseButton(swa_window* win, const swa_mouse_button_event* ev) {
 
 void cbMouseCross(swa_window* win, const swa_mouse_cross_event* ev) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
-	if(platform->status == SwaPlatform::Status::focused) {
+	if(platform->status == SwaPlatform::State::focused) {
 		if(ev->entered) {
 			ImGui::GetIO().MousePos.x = ev->x;
 			ImGui::GetIO().MousePos.y = ev->y;
@@ -121,7 +81,7 @@ void cbMouseCross(swa_window* win, const swa_mouse_cross_event* ev) {
 void cbKey(swa_window* win, const swa_key_event* ev) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 
-	if(platform->status == SwaPlatform::Status::focused) {
+	if(platform->status == SwaPlatform::State::focused) {
 		// dlg_trace("overlay key: {} {}", ev->keycode, ev->pressed);
 		if(ev->keycode < 512) {
 			ImGui::GetIO().KeysDown[ev->keycode] = ev->pressed;
@@ -138,7 +98,7 @@ void cbKey(swa_window* win, const swa_key_event* ev) {
 void cbMouseWheel(swa_window* win, float x, float y) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 
-	if(platform->status == SwaPlatform::Status::focused) {
+	if(platform->status == SwaPlatform::State::focused) {
 		ImGui::GetIO().MouseWheel = y;
 		ImGui::GetIO().MouseWheelH = x;
 	}
@@ -195,29 +155,29 @@ bool updateEdge(bool& val, bool pressed) {
 	return false;
 }
 
-Platform::Status SwaPlatform::update(Gui& gui) {
+Platform::State SwaPlatform::update(Gui& gui) {
 	gui.makeImGuiCurrent();
 
 	guiWinPos = gui.windowPos();
 	guiWinSize = gui.windowSize();
 
-	if(status != Status::focused) {
+	if(status != State::focused) {
 		if(updateEdge(togglePressed, this->pressed(toggleKey))) {
 			activateWindow(true);
-			status = Status::focused;
+			status = State::focused;
 		}
 	}
 
 	swa_display_dispatch(this->dpy, false);
-	if(status == Status::focused) {
+	if(status == State::focused) {
 		bool toggle = swa_display_key_pressed(this->dpy, toggleKey);
 		bool focus = swa_display_key_pressed(this->dpy, focusKey);
 		if(updateEdge(togglePressed, toggle)) {
 			activateWindow(false);
-			status = Status::hidden;
+			status = State::hidden;
 		} else if(updateEdge(focusPressed, focus)) {
 			activateWindow(false);
-			status = Status::shown;
+			status = State::shown;
 		}
 	}
 

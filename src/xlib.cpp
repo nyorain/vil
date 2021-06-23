@@ -22,7 +22,7 @@ struct X11Platform : SwaPlatform {
 
 	void init(Device& dev, unsigned width, unsigned height) override;
 	bool pressed(u32 key) const override;
-	Status update(Gui& gui) override;
+	State update(Gui& gui) override;
 	void activateWindow(bool doActivate) override;
 	void onEvent() override;
 };
@@ -66,8 +66,8 @@ bool X11Platform::pressed(u32 key) const {
 	return pressed;
 }
 
-Platform::Status X11Platform::update(Gui& gui) {
-	if(status == Status::focused) {
+Platform::State X11Platform::update(Gui& gui) {
+	if(status == State::focused) {
 		// re-activate force grab
 		xcb_ungrab_pointer(this->origConnection, XCB_TIME_CURRENT_TIME);
 		xcb_ungrab_keyboard(this->origConnection, XCB_TIME_CURRENT_TIME);
@@ -107,7 +107,7 @@ void X11Platform::activateWindow(bool doActivate) {
 
 void X11Platform::onEvent() {
 	auto* ev = static_cast<const xcb_generic_event_t*>(swa_display_x11_current_event(this->dpy));
-	if(ev && status == Status::shown) {
+	if(ev && status == State::shown) {
 		unsigned type = ev->response_type & ~0x80;
 		switch(type) {
 			case XCB_BUTTON_PRESS: {

@@ -16,7 +16,7 @@ namespace vil {
 
 // Can be associated with a VkSurfaceKHR
 struct Platform {
-	enum class Status {
+	enum class State {
 		// overlay and input window are hidden
 		hidden,
 		// overlay is shown but input window is hidden, i.e. no input
@@ -31,7 +31,7 @@ struct Platform {
 
 	virtual void init(Device& dev, unsigned width, unsigned height) = 0;
 	virtual void resize(unsigned width, unsigned height) = 0;
-	virtual Status update(Gui& gui) = 0;
+	virtual State update(Gui& gui) = 0;
 	virtual void onEvent() {};
 };
 
@@ -45,18 +45,16 @@ struct SwaPlatform : Platform {
 	Vec2f guiWinPos {};
 	Vec2f guiWinSize {};
 
-	Status status {Status::hidden};
+	State status {State::hidden};
 	bool togglePressed {}; // for toggle key
 	bool focusPressed {}; // for focus key
 
 	// for automatic activation/deactivation
-	// bool focusPending {};
-	// bool unfocusPending {};
 	bool doGuiUnfocus {};
 
 	virtual void activateWindow(bool doActivate);
 	void resize(unsigned width, unsigned height) override;
-	Status update(Gui& gui) override;
+	State update(Gui& gui) override;
 
 	// Derived platforms must first initialize the display (using the
 	// specific, matching swa backend), then call this for window

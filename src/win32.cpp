@@ -30,17 +30,6 @@ static unsigned key_to_winapi(enum swa_key key);
 //  investigate!
 
 struct Win32Platform : Platform {
-	enum class State {
-		// overlay and input window are hidden
-		hidden,
-		// overlay is shown but input window is hidden, i.e. no input
-		// can be passed to window
-		shown,
-		// overlay is shown and input window is active, i.e. input
-		// is redirected
-		focused,
-	};
-
 	HWND surfaceWindow {};
 	HWND overlayWindow {};
 
@@ -59,7 +48,7 @@ struct Win32Platform : Platform {
 
 	int lastX {};
 	int lastY {};
-	
+
 	bool moveResizing {};
 	bool rawInput {};
 
@@ -67,7 +56,7 @@ struct Win32Platform : Platform {
 
 	void init(Device& dev, unsigned width, unsigned height) override;
 	void resize(unsigned, unsigned) override {}
-	bool update(Gui& gui) override;
+	State update(Gui& gui) override;
 
 	bool checkPressed(u32 key) const;
 	void uiThread(Device& dev, u32 width, u32 height);
@@ -833,7 +822,7 @@ void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
 	cv.wait(lock);
 }
 
-bool Win32Platform::update(Gui& gui) {
+Status Win32Platform::update(Gui& gui) {
 	// this->gui = &gui;
 	// return ret.load();
 
@@ -842,7 +831,8 @@ bool Win32Platform::update(Gui& gui) {
 	doStuff.store(2);
 	cv.notify_one();
 	cv.wait(lock);
-	return ret.load();
+	// TODO: not thread safe...
+	return state;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
