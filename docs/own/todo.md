@@ -152,6 +152,8 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] remove -DUNICODE from defines
+	- [ ] also check that vil_api works either way, can't depend on that
 - [ ] add submission log! possibility to track what submissions are done
       during startup, another thing that's hard to track with capturing
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well

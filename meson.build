@@ -261,7 +261,6 @@ if with_tests
 	src += files(
 		'src/test/bugged.cpp',
 		'src/test/rpsplit.cpp',
-		'src/test/localVector.cpp',
 		'src/test/xfb.cpp',
 		'src/test/bufferAddress.cpp',
 	)
@@ -297,6 +296,7 @@ endif
 if with_win32
 	src += files('src/win32.cpp')
 	args += ['-DVIL_WITH_WIN32']
+	layer_args += '-DUNICODE'
 endif
 
 # On win32, pch breaks with tracy due to some windows.h bs.
