@@ -136,7 +136,8 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	return (ownMatch + childMatchSum) / (1 + maxChildren);
 }
 
-float match(const DescriptorSetState& a, const DescriptorSetState& b) {
+// TODO: should return Matcher struct instead
+Matcher match(const DescriptorSetState& a, const DescriptorSetState& b) {
 	dlg_assert(a.layout);
 	dlg_assert(b.layout);
 
@@ -145,16 +146,16 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 
 	if(&a == &b) {
 		// fast path: full match since same descriptorSet
-		return 1.f;
+		auto count = float(totalDescriptorCount(a));
+		return Matcher{count, count};
 	}
 
 	// we expect them to have the same layout since they must
 	// be bound for commands with the same pipeline
-	dlg_assert_or(compatible(*a.layout, *b.layout), return 0.f);
+	dlg_assert_or(compatible(*a.layout, *b.layout), return Matcher::noMatch());
 
 	// iterate over bindings
-	unsigned count {};
-	unsigned match {};
+	Matcher m;
 	for(auto bindingID = 0u; bindingID < a.layout->bindings.size(); ++bindingID) {
 		// they can have different size, when variable descriptor count is used
 		auto sizeA = descriptorCount(a, bindingID);
@@ -171,9 +172,9 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 			// comparison isn't the best anyways. Counting the number
 			// of equal bytes or weighing this by the block size
 			// would be bad.
-			count += 1;
+			m.total += 1;
 		} else {
-			count += std::max(sizeA, sizeB);
+			m.total += std::max(sizeA, sizeB);
 		}
 
 		// TODO: if samplers or image/buffers views are different we could
@@ -197,7 +198,7 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 				}
 
 				// NOTE: consider image layout? not too relevant I guess
-				++match;
+				++m.match;
 			}
 		} else if(dsCat == DescriptorCategory::buffer) {
 			auto bindingsA = buffers(a, bindingID);
@@ -208,7 +209,7 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 				// NOTE: consider offset? not too relevant I guess
 				if(bindA.buffer == bindB.buffer &&
 						bindA.range == bindB.range) {
-					++match;
+					++m.match;
 				}
 			}
 		} else if(dsCat == DescriptorCategory::bufferView) {
@@ -216,7 +217,7 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 			auto bindingsB = bufferViews(b, bindingID);
 			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
 				if(bindingsA[e] == bindingsB[e]) {
-					++match;
+					++m.match;
 				}
 			}
 		} else if(dsCat == DescriptorCategory::accelStruct) {
@@ -224,7 +225,7 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 			auto bindingsB = accelStructs(b, bindingID);
 			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
 				if(bindingsA[e] == bindingsB[e]) {
-					++match;
+					++m.match;
 				}
 			}
 		} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
@@ -232,14 +233,14 @@ float match(const DescriptorSetState& a, const DescriptorSetState& b) {
 			auto bytesB = inlineUniformBlock(b, bindingID);
 			if(bytesA.size() == bytesB.size() &&
 					std::memcmp(bytesA.data(), bytesB.data(), bytesA.size()) == 0) {
-				++match;
+				++m.match;
 			}
 		} else {
 			dlg_error("Unsupported descriptor type: {}", u32(dsType));
 		}
 	}
 
-	return float(match) / count;
+	return m;
 }
 
 FindResult find(const Command* root, span<const Command*> dst,
@@ -254,7 +255,8 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 	for(auto it = root; it; it = it->next) {
 		auto m = it->match(*dst[0]);
-		if(m == 0.f || m < bestMatch) {
+		auto em = eval(m);
+		if(em == 0.f || em < bestMatch) {
 			continue;
 		}
 
@@ -262,7 +264,7 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 		if(dst.size() > 1) {
 			dlg_assert(it->children());
-			auto newThresh = bestMatch / m;
+			auto newThresh = bestMatch / em;
 			auto restResult = find(it->children(), dst.subspan(1), dstDsState, newThresh);
 			if(restResult.hierachy.empty()) {
 				continue;
@@ -270,7 +272,7 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 			auto& rest = restResult.hierachy;
 			currCmds.insert(currCmds.end(), rest.begin(), rest.end());
-			m *= restResult.match;
+			em *= restResult.match;
 		} else if(auto srcCmd = dynamic_cast<const StateCmdBase*>(it); srcCmd) {
 			// match descriptors, if any
 			// TODO: only consider descriptors statically used by pipeline
@@ -294,8 +296,6 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 			if(!dstBound.empty() || !srcBound.empty()) {
 				// TODO: consider dynamic offsets?
-
-				unsigned match {};
 				for(auto i = 0u; i < std::min(srcBound.size(), dstBound.size()); ++i) {
 					if(!srcBound[i].ds || !dstBound[i].ds) {
 						// TODO: not sure if this can happen. Do sets
@@ -308,18 +308,24 @@ FindResult find(const Command* root, span<const Command*> dst,
 					auto& srcDescriptors = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
 					auto dstDescriptors = dstDsState.states.find(dstBound[i].ds);
 					dlg_assert_or(dstDescriptors != dstDsState.states.end(), continue);
-					match += vil::match(nonNull(srcDescriptors), nonNull(dstDescriptors->second));
+
+					auto res = vil::match(nonNull(srcDescriptors), nonNull(dstDescriptors->second));
+					m.match += res.match;
+					m.total += res.total;
 				}
 
-				m *= float(match) / std::max(srcBound.size(), dstBound.size());
+				// auto dsMatch = float(match) / std::max(srcBound.size(), dstBound.size());
+				// dlg_trace("match: {}, dsMatch: {}", m, dsMatch);
 			}
 		}
 
-		if(m == 0.f || m < bestMatch) {
+		em = eval(m);
+		if(em == 0.f || em < bestMatch) {
 			continue;
-		} else if(m == bestMatch && !bestCmds.empty()) {
+		} else if(em == bestMatch && !bestCmds.empty()) {
 			// when the match values of two commands are equal, choose
 			// simply by order in current hierachy level.
+			// XXX: maybe it's worth it to always consider this?
 			if(std::abs(int(currCmds.front()->relID) - int(dst.front()->relID)) >=
 					std::abs(int(bestCmds.front()->relID) - int(dst.front()->relID))) {
 				continue;
@@ -328,7 +334,7 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 		bestCmds.clear();
 		bestCmds = std::move(currCmds);
-		bestMatch = m;
+		bestMatch = em;
 	}
 
 	return {bestCmds, bestMatch};

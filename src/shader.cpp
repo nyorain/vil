@@ -329,7 +329,7 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 	// It's important we set the specialization entries here since
 	// they might influence output sizes, e.g. for arrays.
 	for(auto& entry : spec.entries) {
-		auto id = u32(-1);
+		std::optional<u32> id;
 		for(auto& sc : compiler.get_specialization_constants()) {
 			if(sc.constant_id == entry.constantID) {
 				id = sc.id;
@@ -337,8 +337,13 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 			}
 		}
 
-		dlg_assert_or(id != u32(-1), return {});
-		auto& constant = compiler.get_constant(id);
+		// seems like having specialization ids that don't appear in
+		// the shader is allowed per vulkan spec
+		if(!id) {
+			continue;
+		}
+
+		auto& constant = compiler.get_constant(*id);
 
 		// spec constants can only be scalar: int, float or bool
 		dlg_assert(constant.m.columns == 1u);

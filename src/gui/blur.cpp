@@ -375,6 +375,12 @@ void blur(GuiBlur& blur, VkCommandBuffer cb, u32 imageIdx, VkOffset2D offset, Vk
 	dispatch(11.5f);
 	dispatch(12.5f);
 
+	dispatch(13.5f);
+	dispatch(14.5f);
+
+	dispatch(15.5f);
+	dispatch(16.5f);
+
 	// we swap an even number of times, meaning that the final result
 	// is in srcID = 0.
 	// Also return the swapchain image into presentSrc

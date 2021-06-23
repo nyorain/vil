@@ -58,6 +58,7 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	void* pmap;
 	VK_CHECK(dev.dispatch.MapMemory(dev.handle, mem, 0, VK_WHOLE_SIZE, 0, &pmap));
 	this->map = static_cast<std::byte*>(pmap);
+	dlg_assert(this->map);
 }
 
 OwnBuffer::~OwnBuffer() {
@@ -105,6 +106,7 @@ void swap(OwnBuffer& a, OwnBuffer& b) noexcept {
 	swap(a.buf, b.buf);
 	swap(a.mem, b.mem);
 	swap(a.size, b.size);
+	swap(a.map, b.map);
 }
 
 } // namespace vil

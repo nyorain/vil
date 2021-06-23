@@ -431,7 +431,8 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	setAccentColorHue(ImGuiCol_PlotHistogram, 119, 187, 250, 240);
 	setAccentColorHue(ImGuiCol_PlotHistogramHovered, accentHue, 187, 250, 240);
 
-	style.Colors[ImGuiCol_TitleBgActive] = style.Colors[ImGuiCol_WindowBg];
+	// style.Colors[ImGuiCol_TitleBgActive] = style.Colors[ImGuiCol_WindowBg];
+	setAccentColorHue(ImGuiCol_TitleBgActive, 119, 220, 102, 200);
 	style.Colors[ImGuiCol_TitleBg] = style.Colors[ImGuiCol_WindowBg];
 	style.Colors[ImGuiCol_TitleBgCollapsed] = style.Colors[ImGuiCol_WindowBg];
 
@@ -931,8 +932,12 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Separator();
 
 	// Enabled instance extensions
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.f, 3.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+
 	auto iniExtLbl = dlg::format("{} instance extensions enabled", dev.ini->extensions.size());
-	if(ImGui::TreeNode(iniExtLbl.c_str())) {
+	auto tnFlags = ImGuiTreeNodeFlags_FramePadding;
+	if(ImGui::TreeNodeEx(iniExtLbl.c_str(), tnFlags)) {
 		ImGui::Indent();
 		for(auto& ext : dev.ini->extensions) {
 			imGuiText("{}", ext);
@@ -942,7 +947,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 	}
 
 	auto devExtLbl = dlg::format("{} device extensions enabled", dev.appExts.size());
-	if(ImGui::TreeNode(devExtLbl.c_str())) {
+	if(ImGui::TreeNodeEx(devExtLbl.c_str(), tnFlags)) {
 		ImGui::Indent();
 		for(auto& ext : dev.appExts) {
 			imGuiText("{}", ext);
@@ -953,7 +958,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 	auto features = enabledFeatures(dev);
 	auto featuresLbl = dlg::format("{} device features enabled", features.size());
-	if(ImGui::TreeNode(featuresLbl.c_str())) {
+	if(ImGui::TreeNodeEx(featuresLbl.c_str(), tnFlags)) {
 		ImGui::Indent();
 		for(auto& f : features) {
 			imGuiText("{}", f);
@@ -962,6 +967,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::TreePop();
 	}
 
+	ImGui::PopStyleVar(2);
 	ImGui::Separator();
 
 	if(dev.swapchain) {
@@ -972,7 +978,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 			ImGui::SetTooltip(
 				"This will open the tab to view all submissions done between two\n"
 				"presents to the main swapchain. You can alternatively select\n"
-				"specific Command Buffers from the 'Resources' tab to view their content.");
+				"specific CommandBuffers from the 'Resources' tab to view their content.");
 		}
 
 		// show timings
@@ -1153,8 +1159,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		// ImGui::ShowMetricsWindow();
 		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
 		ImGui::SetNextWindowSize({900, 550}, ImGuiCond_Once);
-
-		// flags |= ImGuiWindowFlags_NoCollapse;
 	}
 
 	auto checkSelectTab = [&](Tab tab) {
@@ -1166,6 +1170,17 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 		return flags;
 	};
+
+	// TODO: needed?
+	// if(this->focused) {
+	// 	ImGui::SetNextWindowFocus();
+	// } else {
+	// 	ImGui::SetWindowFocus(nullptr);
+	// }
+	if(this->unfocus) {
+		ImGui::SetWindowFocus(nullptr);
+		this->unfocus = false;
+	}
 
 	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
 		windowPos_ = ImGui::GetWindowPos();

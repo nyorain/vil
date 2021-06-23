@@ -275,6 +275,15 @@ u32 descriptorCount(const DescriptorSetState& state, unsigned binding) {
 	return layout.descriptorCount;
 }
 
+u32 totalDescriptorCount(const DescriptorSetState& state) {
+	auto ret = 0u;
+	for(auto i = 0u; i < state.layout->bindings.size(); ++i) {
+		ret += descriptorCount(state, i);
+	}
+
+	return ret;
+}
+
 DescriptorSet::~DescriptorSet() {
 	if(!dev) {
 		return;

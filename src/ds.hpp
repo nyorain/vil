@@ -142,6 +142,7 @@ struct DescriptorSetState {
 using DescriptorSetStatePtr = HandledPtr<DescriptorSetState, DescriptorSetState::PtrHandler>;
 
 u32 descriptorCount(const DescriptorSetState&, unsigned binding);
+u32 totalDescriptorCount(const DescriptorSetState&);
 
 // NOTE: while retrieving the span itself does not need to lock the state's
 // mutex. The caller must manually synchronize access to the bindings by locking

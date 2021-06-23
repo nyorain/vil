@@ -1676,6 +1676,8 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		bufb.size = size;
 		bufb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 		bufb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		bufb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		bufb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 		dev.dispatch.CmdPipelineBarrier(draw.cb,
 			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,

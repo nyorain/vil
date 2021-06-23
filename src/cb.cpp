@@ -617,7 +617,7 @@ void cmdBarrier(
 		auto& imgb = cmd.imgBarriers[i];
 		copyChainInPlace(cb, imgb.pNext);
 
-		auto& img = cb.dev->images.get(imgb.image);
+		auto& img = get(*cb.dev, imgb.image);
 		cmd.images[i] = &img;
 		useHandle(cb, cmd, img, imgb.newLayout);
 
@@ -637,7 +637,7 @@ void cmdBarrier(
 		auto& bufb = cmd.bufBarriers[i];
 		copyChainInPlace(cb, bufb.pNext);
 
-		auto& buf = cb.dev->buffers.get(bufb.buffer);
+		auto& buf = get(*cb.dev, bufb.buffer);
 		cmd.buffers[i] = &buf;
 		useHandle(cb, cmd, buf);
 
@@ -1097,7 +1097,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
-	auto& buf = cb.dev->buffers.get(buffer);
+	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
@@ -1124,7 +1124,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
 
-	auto& buf = cb.dev->buffers.get(buffer);
+	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
@@ -1238,7 +1238,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb, cb.computeState());
 	cmd.offset = offset;
 
-	auto& buf = cb.dev->buffers.get(buffer);
+	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
 
@@ -1287,8 +1287,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageCmd>(cb);
 
-	auto& src = cb.dev->images.get(srcImage);
-	auto& dst = cb.dev->images.get(dstImage);
+	auto& src = get(*cb.dev, srcImage);
+	auto& dst = get(*cb.dev, dstImage);
 
 	cmd.src = &src;
 	cmd.srcLayout = srcImageLayout;
@@ -1311,8 +1311,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage2KHR(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageCmd>(cb);
 
-	auto& src = cb.dev->images.get(info->srcImage);
-	auto& dst = cb.dev->images.get(info->dstImage);
+	auto& src = get(*cb.dev, info->srcImage);
+	auto& dst = get(*cb.dev, info->dstImage);
 
 	cmd.pNext = copyChain(cb, info->pNext);
 	cmd.src = &src;
@@ -1342,8 +1342,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BlitImageCmd>(cb);
 
-	auto& src = cb.dev->images.get(srcImage);
-	auto& dst = cb.dev->images.get(dstImage);
+	auto& src = get(*cb.dev, srcImage);
+	auto& dst = get(*cb.dev, dstImage);
 
 	cmd.src = &src;
 	cmd.srcLayout = srcImageLayout;
@@ -1367,8 +1367,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage2KHR(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BlitImageCmd>(cb);
 
-	auto& src = cb.dev->images.get(info->srcImage);
-	auto& dst = cb.dev->images.get(info->dstImage);
+	auto& src = get(*cb.dev, info->srcImage);
+	auto& dst = get(*cb.dev, info->dstImage);
 
 	cmd.pNext = copyChain(cb, info->pNext);
 	cmd.src = &src;
@@ -1397,8 +1397,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyBufferToImageCmd>(cb);
 
-	auto& src = cb.dev->buffers.get(srcBuffer);
-	auto& dst = cb.dev->images.get(dstImage);
+	auto& src = get(*cb.dev, srcBuffer);
+	auto& dst = get(*cb.dev, dstImage);
 
 	cmd.src = &src;
 	cmd.dst = &dst;
@@ -1418,8 +1418,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2KHR(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyBufferToImageCmd>(cb);
 
-	auto& src = cb.dev->buffers.get(info->srcBuffer);
-	auto& dst = cb.dev->images.get(info->dstImage);
+	auto& src = get(*cb.dev, info->srcBuffer);
+	auto& dst = get(*cb.dev, info->dstImage);
 
 	cmd.pNext = copyChain(cb, info->pNext);
 	cmd.src = &src;
@@ -1446,8 +1446,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageToBufferCmd>(cb);
 
-	auto& src = cb.dev->images.get(srcImage);
-	auto& dst = cb.dev->buffers.get(dstBuffer);
+	auto& src = get(*cb.dev, srcImage);
+	auto& dst = get(*cb.dev, dstBuffer);
 
 	cmd.src = &src;
 	cmd.dst = &dst;
@@ -1467,8 +1467,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2KHR(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<CopyImageToBufferCmd>(cb);
 
-	auto& src = cb.dev->images.get(info->srcImage);
-	auto& dst = cb.dev->buffers.get(info->dstBuffer);
+	auto& src = get(*cb.dev, info->srcImage);
+	auto& dst = get(*cb.dev, info->dstBuffer);
 
 	cmd.pNext = copyChain(cb, info->pNext);
 	cmd.src = &src;
@@ -1495,7 +1495,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ClearColorImageCmd>(cb);
 
-	auto& dst = cb.dev->images.get(image);
+	auto& dst = get(*cb.dev, image);
 	cmd.dst = &dst;
 	cmd.color = *pColor;
 	cmd.dstLayout = imageLayout;
@@ -1517,7 +1517,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ClearDepthStencilImageCmd>(cb);
 
-	auto& dst = cb.dev->images.get(image);
+	auto& dst = get(*cb.dev, image);
 	cmd.dst = &dst;
 	cmd.dstLayout = imageLayout;
 	cmd.value = *pDepthStencil;
@@ -1562,8 +1562,8 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 		uint32_t                                    regionCount,
 		const VkImageResolve*                       pRegions) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& src = cb.dev->images.get(srcImage);
-	auto& dst = cb.dev->images.get(dstImage);
+	auto& src = get(*cb.dev, srcImage);
+	auto& dst = get(*cb.dev, dstImage);
 
 	auto& cmd = addCmd<ResolveImageCmd>(cb);
 	cmd.src = &src;
@@ -1583,8 +1583,8 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage2KHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkResolveImageInfo2KHR*               info) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& src = cb.dev->images.get(info->srcImage);
-	auto& dst = cb.dev->images.get(info->dstImage);
+	auto& src = get(*cb.dev, info->srcImage);
+	auto& dst = get(*cb.dev, info->dstImage);
 
 	auto& cmd = addCmd<ResolveImageCmd>(cb);
 

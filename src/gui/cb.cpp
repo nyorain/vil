@@ -253,15 +253,11 @@ void CommandBufferGui::draw(Draw& draw) {
 					auto flags = int(ImGuiTreeNodeFlags_FramePadding);
 					auto id = dlg::format("Commands:{}", r);
 					if(ImGui::TreeNodeEx(id.c_str(), flags, "Commands")) {
-						if(rec->commands) {
-							ImGui::Separator();
-						}
-
 						// we don't want as much space as tree nodes
 						auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
 						ImGui::Unindent(s);
 
-						auto nsel = displayCommands(rec->commands, selected, commandFlags_);
+						auto nsel = displayCommands(rec->commands, selected, commandFlags_, true);
 						if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
 							record_ = rec;
 							command_ = std::move(nsel);
@@ -306,7 +302,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		dlg_assert(record_->invalidated.empty());
 
 		auto* selected = command_.empty() ? nullptr : command_.back();
-		auto nsel = displayCommands(record_->commands, selected, commandFlags_);
+		auto nsel = displayCommands(record_->commands, selected, commandFlags_, false);
 		if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
 			if(mode_ == UpdateMode::none) {
 				dlg_assert(dev.commandHook->target.record == record_.get());

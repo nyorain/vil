@@ -151,18 +151,18 @@ std::string printBufferImageCopy(Image* image,
 
 // API
 std::vector<const Command*> displayCommands(const Command* cmd,
-		const Command* selected, Command::TypeFlags typeFlags) {
+		const Command* selected, Command::TypeFlags typeFlags, bool firstSep) {
 	// TODO: should use imgui list clipper, might have *a lot* of commands here.
 	// But first we have to restrict what cmd->display can actually do.
 	// Would also have to pre-filter commands for that. And stop at every
 	// (expanded) parent command (but it's hard to tell whether they are
 	// expanded).
 	std::vector<const Command*> ret;
-	auto first = true;
+	auto showSep = firstSep;
 	while(cmd) {
 		// No matter the flags, we never want to hide parent commands.
 		if((typeFlags & cmd->type()) || cmd->children()) {
-			if(!first) {
+			if(showSep) {
 				ImGui::Separator();
 			}
 
@@ -171,7 +171,7 @@ std::vector<const Command*> displayCommands(const Command* cmd,
 				ret = reti;
 			}
 
-			first = false;
+			showSep = true;
 		}
 
 		cmd = cmd->next;
@@ -229,8 +229,16 @@ bool Command::isDescendant(const Command& cmd) const {
 	return false;
 }
 
-float Command::match(const Command& cmd) const {
-	return typeid(cmd) == typeid(*this) ? 1.f : 0.f;
+Matcher Command::match(const Command& cmd) const {
+	if(typeid(cmd) != typeid(*this)) {
+		return Matcher::noMatch();
+	}
+
+	// match by order
+	Matcher m;
+	m.total = 1.f;
+	m.match = 1.f / (1.f + std::abs(int(cmd.relID) - int(this->relID)));
+	return m;
 }
 
 // Commands
@@ -257,8 +265,7 @@ std::vector<const Command*> ParentCommand::display(const Command* selected,
 			auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
 			ImGui::Unindent(s);
 
-			ImGui::Separator();
-			auto retc = displayCommands(cmd, selected, typeFlags);
+			auto retc = displayCommands(cmd, selected, typeFlags, true);
 			if(!retc.empty()) {
 				dlg_assert(ret.empty());
 				ret = std::move(retc);
@@ -356,13 +363,6 @@ void BarrierCmdBase::displayInspector(Gui& gui) const {
 	}
 }
 
-struct Matcher {
-	float match {};
-	float total {};
-
-	static Matcher noMatch() { return {0.f, -1.f}; }
-};
-
 bool operator==(const VkImageSubresourceLayers& a, const VkImageSubresourceLayers& b) {
 	return a.aspectMask == b.aspectMask &&
 		a.baseArrayLayer == b.baseArrayLayer &&
@@ -397,47 +397,44 @@ float eval(const Matcher& m) {
 	return m.total == 0.f ? 1.f : m.match / m.total;
 }
 
-float match(const VkBufferCopy2KHR& a, const VkBufferCopy2KHR& b) {
+Matcher match(const VkBufferCopy2KHR& a, const VkBufferCopy2KHR& b) {
 	Matcher m;
 	add(m, a.size, b.size);
 	add(m, a.srcOffset, b.srcOffset, 0.2);
 	add(m, a.dstOffset, b.dstOffset, 0.2);
-	return eval(m);
+	return m;
 }
 
-float match(const VkImageCopy2KHR& a, const VkImageCopy2KHR& b) {
+Matcher match(const VkImageCopy2KHR& a, const VkImageCopy2KHR& b) {
 	Matcher m;
 	addMemcmp(m, a.dstOffset, b.dstOffset);
 	addMemcmp(m, a.srcOffset, b.srcOffset);
 	addMemcmp(m, a.extent, b.extent);
 	add(m, a.dstSubresource, b.dstSubresource);
 	add(m, a.srcSubresource, b.srcSubresource);
-
-	return eval(m);
+	return m;
 }
 
-float match(const VkImageBlit2KHR& a, const VkImageBlit2KHR& b) {
+Matcher match(const VkImageBlit2KHR& a, const VkImageBlit2KHR& b) {
 	Matcher m;
 	add(m, a.srcSubresource, b.srcSubresource);
 	add(m, a.dstSubresource, b.dstSubresource);
 	addMemcmp(m, a.srcOffsets, b.srcOffsets);
 	addMemcmp(m, a.dstOffsets, b.dstOffsets);
-
-	return eval(m);
+	return m;
 }
 
-float match(const VkImageResolve2KHR& a, const VkImageResolve2KHR& b) {
+Matcher match(const VkImageResolve2KHR& a, const VkImageResolve2KHR& b) {
 	Matcher m;
 	add(m, a.srcSubresource, b.srcSubresource);
 	add(m, a.dstSubresource, b.dstSubresource);
 	addMemcmp(m, a.srcOffset, b.srcOffset);
 	addMemcmp(m, a.dstOffset, b.dstOffset);
 	addMemcmp(m, a.extent, b.extent);
-
-	return eval(m);
+	return m;
 }
 
-float match(const VkBufferImageCopy2KHR& a, const VkBufferImageCopy2KHR& b) {
+Matcher match(const VkBufferImageCopy2KHR& a, const VkBufferImageCopy2KHR& b) {
 	Matcher m;
 	add(m, a.bufferImageHeight, b.bufferImageHeight);
 	add(m, a.bufferOffset, b.bufferOffset);
@@ -445,27 +442,28 @@ float match(const VkBufferImageCopy2KHR& a, const VkBufferImageCopy2KHR& b) {
 	addMemcmp(m, a.imageOffset, b.imageOffset);
 	addMemcmp(m, a.imageExtent, b.imageExtent);
 	add(m, a.imageSubresource, b.imageSubresource);
-	return eval(m);
+	return m;
 }
 
-float match(const VkImageSubresourceRange& a, const VkImageSubresourceRange& b) {
+Matcher match(const VkImageSubresourceRange& a, const VkImageSubresourceRange& b) {
 	Matcher m;
 	add(m, a.aspectMask, b.aspectMask);
 	add(m, a.baseArrayLayer, b.baseArrayLayer);
 	add(m, a.baseMipLevel, b.baseMipLevel);
 	add(m, a.levelCount, b.levelCount);
-	return eval(m) > 0.99f ? 1.f : 0.f;
+	return m;
 }
 
-float match(const VkClearAttachment& a, const VkClearAttachment& b) {
+Matcher match(const VkClearAttachment& a, const VkClearAttachment& b) {
 	if(a.aspectMask != b.aspectMask || a.colorAttachment != b.colorAttachment) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	return std::memcmp(&a.clearValue, &b.clearValue, sizeof(a.clearValue)) == 0 ? 1.f : 0.5f;
+	auto sameCV = std::memcmp(&a.clearValue, &b.clearValue, sizeof(a.clearValue)) == 0;
+	return sameCV ? Matcher{3.f, 3.f} : Matcher::noMatch();
 }
 
-float match(const VkClearRect& a, const VkClearRect& b) {
+Matcher match(const VkClearRect& a, const VkClearRect& b) {
 	Matcher m;
 	add(m, a.rect.offset.x, b.rect.offset.x);
 	add(m, a.rect.offset.y, b.rect.offset.y);
@@ -473,14 +471,14 @@ float match(const VkClearRect& a, const VkClearRect& b) {
 	add(m, a.rect.extent.height, b.rect.extent.height);
 	add(m, a.baseArrayLayer, b.baseArrayLayer);
 	add(m, a.layerCount, b.layerCount);
-	return eval(m);
+	return m;
 }
 
-float match(const BoundVertexBuffer& a, const BoundVertexBuffer& b) {
+Matcher match(const BoundVertexBuffer& a, const BoundVertexBuffer& b) {
 	Matcher m;
 	addNonNull(m, a.buffer, b.buffer);
 	add(m, a.offset, b.offset, 0.1);
-	return eval(m);
+	return m;
 }
 
 bool operator==(const VkMemoryBarrier& a, const VkMemoryBarrier& b) {
@@ -586,12 +584,16 @@ void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) 
 		return;
 	}
 
-	float sum = 0.f;
+	Matcher accum {};
 	for(auto i = 0u; i < a.size(); ++i) {
-		sum += match(a[i], b[i]);
+		auto res = match(a[i], b[i]);
+		accum.match += res.match;
+		accum.total += res.total;
 	}
 
-	m.match += weight * sum / a.size();
+	// TODO: maybe better to make weight also dependent on size?
+	// could add flag/param for that behavior.
+	m.match += weight * eval(accum);
 }
 
 // match ideas:
@@ -641,16 +643,16 @@ void WaitEventsCmd::displayInspector(Gui& gui) const {
 	BarrierCmdBase::displayInspector(gui);
 }
 
-float WaitEventsCmd::match(const Command& base) const {
+Matcher WaitEventsCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const WaitEventsCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd);
 	addSpanUnordered(m, events, cmd->events);
 
-	return eval(m);
+	return m;
 }
 
 // BarrierCmd
@@ -668,16 +670,16 @@ void BarrierCmd::displayInspector(Gui& gui) const {
 	BarrierCmdBase::displayInspector(gui);
 }
 
-float BarrierCmd::match(const Command& base) const {
+Matcher BarrierCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const BarrierCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd);
 	add(m, dependencyFlags, cmd->dependencyFlags);
 
-	return eval(m);
+	return m;
 }
 
 // BeginRenderPassCmd
@@ -872,10 +874,10 @@ bool same(const RenderPassDesc& a, const RenderPassDesc& b) {
 	return true;
 }
 
-float BeginRenderPassCmd::match(const Command& base) const {
+Matcher BeginRenderPassCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const BeginRenderPassCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	// TODO
@@ -889,16 +891,20 @@ float BeginRenderPassCmd::match(const Command& base) const {
 
 	// match render pass description
 	if(!rp || !cmd->rp || !same(rp->desc, cmd->rp->desc)) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	if(!fb || !cmd->fb) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	dlg_assert_or(fb->attachments.size() == cmd->fb->attachments.size(), return 0.f);
+	dlg_assert_or(fb->attachments.size() == cmd->fb->attachments.size(),
+		return Matcher::noMatch());
 
 	Matcher m;
+	m.total += 5.f;
+	m.match += 5.f;
+
 	for(auto i = 0u; i < fb->attachments.size(); ++i) {
 		auto va = fb->attachments[i];
 		auto vb = cmd->fb->attachments[i];
@@ -916,7 +922,7 @@ float BeginRenderPassCmd::match(const Command& base) const {
 
 	// TODO: consider render area, clearValues?
 
-	return eval(m);
+	return m;
 }
 
 void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -933,13 +939,15 @@ void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	}
 }
 
-float NextSubpassCmd::match(const Command& base) const {
+Matcher NextSubpassCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const NextSubpassCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	return cmd->subpassID == subpassID ? 1.f : 0.f;
+	// we don't need to consider surrounding RenderPass, that is already
+	// considered when matching parent
+	return cmd->subpassID == subpassID ? Matcher{1.f, 1.f} : Matcher::noMatch();
 }
 
 void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -1100,6 +1108,9 @@ Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 	}
 
 	Matcher m;
+	m.total += 2.f;
+	m.match += 2.f;
+
 	for(auto i = 0u; i < state.pipe->vertexBindings.size(); ++i) {
 		dlg_assert(i < state.vertices.size());
 		dlg_assert(i < cmd.state.vertices.size());
@@ -1165,10 +1176,10 @@ void DrawCmd::displayInspector(Gui& gui) const {
 	DrawCmdBase::displayGrahpicsState(gui, false);
 }
 
-float DrawCmd::match(const Command& base) const {
+Matcher DrawCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DrawCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	// hard matching for now. Might need to relax this in the future.
@@ -1176,10 +1187,18 @@ float DrawCmd::match(const Command& base) const {
 			cmd->instanceCount != instanceCount ||
 			cmd->firstVertex != firstVertex ||
 			cmd->firstInstance != firstInstance) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	return eval(doMatch(*cmd, false));
+	auto m = doMatch(*cmd, false);
+	if(m.total == -1.f) {
+		return m;
+	}
+
+	m.total += 5.f;
+	m.match += 5.f;
+
+	return m;
 }
 
 // DrawIndirectCmd
@@ -1218,22 +1237,25 @@ std::string DrawIndirectCmd::toString() const {
 	}
 }
 
-float DrawIndirectCmd::match(const Command& base) const {
+Matcher DrawIndirectCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DrawIndirectCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	// hard matching on those; differences would indicate a totally
 	// different command structure.
 	if(cmd->indexed != this->indexed || cmd->stride != this->stride) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd, indexed);
 	if(m.total == -1.f) {
-		return 0.f;
+		return m;
 	}
+
+	m.total += 5.f;
+	m.match += 5.f;
 
 	addNonNull(m, buffer, cmd->buffer);
 
@@ -1242,7 +1264,7 @@ float DrawIndirectCmd::match(const Command& base) const {
 	add(m, drawCount, cmd->drawCount);
 	add(m, offset, cmd->offset, 0.2);
 
-	return eval(m);
+	return m;
 }
 
 // DrawIndexedCmd
@@ -1267,10 +1289,10 @@ void DrawIndexedCmd::displayInspector(Gui& gui) const {
 	DrawCmdBase::displayGrahpicsState(gui, true);
 }
 
-float DrawIndexedCmd::match(const Command& base) const {
+Matcher DrawIndexedCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DrawIndexedCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	// hard matching for now. Might need to relax this in the future.
@@ -1279,10 +1301,17 @@ float DrawIndexedCmd::match(const Command& base) const {
 			cmd->firstIndex != firstIndex ||
 			cmd->vertexOffset != vertexOffset ||
 			cmd->firstInstance != firstInstance) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	return eval(doMatch(*cmd, true));
+	auto m = doMatch(*cmd, true);
+	if(m.total == -1.f) {
+		return m;
+	}
+
+	m.total += 5.f;
+	m.match += 5.f;
+	return m;
 }
 
 // DrawIndirectCountCmd
@@ -1326,22 +1355,25 @@ void DrawIndirectCountCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	DrawCmdBase::replace(map);
 }
 
-float DrawIndirectCountCmd::match(const Command& base) const {
+Matcher DrawIndirectCountCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	// hard matching on those; differences would indicate a totally
 	// different command structure.
 	if(cmd->indexed != this->indexed || cmd->stride != this->stride) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd, indexed);
 	if(m.total == -1.f) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
+
+	m.match += 2.0;
+	m.total += 2.0;
 
 	addNonNull(m, buffer, cmd->buffer);
 	addNonNull(m, countBuffer, cmd->countBuffer);
@@ -1352,7 +1384,7 @@ float DrawIndirectCountCmd::match(const Command& base) const {
 	add(m, countBufferOffset, cmd->countBufferOffset, 0.2);
 	add(m, offset, cmd->offset, 0.2);
 
-	return eval(m);
+	return m;
 }
 
 // BindVertexBuffersCmd
@@ -1399,19 +1431,19 @@ void BindVertexBuffersCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	}
 }
 
-float BindVertexBuffersCmd::match(const Command& rhs) const {
+Matcher BindVertexBuffersCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BindVertexBuffersCmd*>(&rhs);
 	if(!cmd || firstBinding != cmd->firstBinding) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
-	m.match += 1.0;
-	m.total += 1.0;
+	m.match += 2.0;
+	m.total += 2.0;
 
 	addSpanOrderedStrict(m, buffers, cmd->buffers);
 
-	return eval(m);
+	return m;
 }
 
 // BindIndexBufferCmd
@@ -1423,10 +1455,10 @@ void BindIndexBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, Device
 	checkReplace(buffer, map);
 }
 
-float BindIndexBufferCmd::match(const Command& rhs) const {
+Matcher BindIndexBufferCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BindIndexBufferCmd*>(&rhs);
 	if(!cmd || indexType != cmd->indexType) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -1435,7 +1467,7 @@ float BindIndexBufferCmd::match(const Command& rhs) const {
 	addNonNull(m, buffer, cmd->buffer);
 	add(m, offset, cmd->offset, 0.2);
 
-	return eval(m);
+	return m;
 }
 
 // BindDescriptorSetCmd
@@ -1484,17 +1516,21 @@ void BindDescriptorSetCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	checkReplace(sets, map);
 }
 
-float BindDescriptorSetCmd::match(const Command& rhs) const {
+Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BindDescriptorSetCmd*>(&rhs);
 	if(!cmd || firstSet != cmd->firstSet ||
 			pipeBindPoint != cmd->pipeBindPoint || pipeLayout != cmd->pipeLayout) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	// NOTE: evaluating the used descriptor sets or dynamic offsets
 	// is likely of no use as they are too instable.
 
-	return 1.f;
+	Matcher m;
+	m.total += 3.f;
+	m.match += 3.f;
+
+	return m;
 }
 
 // DispatchCmdBase
@@ -1555,15 +1591,15 @@ void DispatchCmd::displayInspector(Gui& gui) const {
 	DispatchCmdBase::displayComputeState(gui);
 }
 
-float DispatchCmd::match(const Command& base) const {
+Matcher DispatchCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DispatchCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd);
 	if(m.total == -1.f) {
-		return 0.f;
+		return m;
 	}
 
 	// we don't hard-match on them since this may change for per-frame
@@ -1574,7 +1610,7 @@ float DispatchCmd::match(const Command& base) const {
 	add(m, groupsY, cmd->groupsY, 4.0);
 	add(m, groupsZ, cmd->groupsZ, 6.0);
 
-	return eval(m);
+	return m;
 }
 
 // DispatchIndirectCmd
@@ -1601,21 +1637,21 @@ void DispatchIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devic
 	DispatchCmdBase::replace(map);
 }
 
-float DispatchIndirectCmd::match(const Command& base) const {
+Matcher DispatchIndirectCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DispatchIndirectCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd);
 	if(m.total == -1.f) {
-		return 0.f;
+		return m;
 	}
 
 	addNonNull(m, buffer, cmd->buffer);
 	add(m, offset, cmd->offset, 0.1);
 
-	return eval(m);
+	return m;
 }
 
 // DispatchBaseCmd
@@ -1635,15 +1671,15 @@ void DispatchBaseCmd::displayInspector(Gui& gui) const {
 	DispatchCmdBase::displayComputeState(gui);
 }
 
-float DispatchBaseCmd::match(const Command& base) const {
+Matcher DispatchBaseCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DispatchBaseCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd);
 	if(m.total == -1.f) {
-		return 0.f;
+		return m;
 	}
 
 	// we don't hard-match on them since this may change for per-frame
@@ -1658,7 +1694,7 @@ float DispatchBaseCmd::match(const Command& base) const {
 	add(m, baseGroupY, cmd->baseGroupY, 4.0);
 	add(m, baseGroupZ, cmd->baseGroupZ, 8.0);
 
-	return eval(m);
+	return m;
 }
 
 // CopyImageCmd
@@ -1727,10 +1763,10 @@ void CopyImageCmd::displayInspector(Gui& gui) const {
 	}
 }
 
-float CopyImageCmd::match(const Command& rhs) const {
+Matcher CopyImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const CopyImageCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -1741,7 +1777,7 @@ float CopyImageCmd::match(const Command& rhs) const {
 
 	addSpanOrderedStrict(m, copies, cmd->copies);
 
-	return eval(m);
+	return m;
 }
 
 // CopyBufferToImageCmd
@@ -1797,10 +1833,10 @@ void CopyBufferToImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	checkReplace(dst, map);
 }
 
-float CopyBufferToImageCmd::match(const Command& rhs) const {
+Matcher CopyBufferToImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -1809,7 +1845,7 @@ float CopyBufferToImageCmd::match(const Command& rhs) const {
 	add(m, dstLayout, cmd->dstLayout);
 	addSpanOrderedStrict(m, copies, cmd->copies);
 
-	return eval(m);
+	return m;
 }
 
 // CopyImageToBufferCmd
@@ -1865,10 +1901,10 @@ void CopyImageToBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 	checkReplace(dst, map);
 }
 
-float CopyImageToBufferCmd::match(const Command& rhs) const {
+Matcher CopyImageToBufferCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -1877,7 +1913,7 @@ float CopyImageToBufferCmd::match(const Command& rhs) const {
 	add(m, srcLayout, cmd->srcLayout);
 	addSpanOrderedStrict(m, copies, cmd->copies);
 
-	return eval(m);
+	return m;
 }
 
 // BlitImageCmd
@@ -1950,10 +1986,10 @@ void BlitImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle
 	checkReplace(dst, map);
 }
 
-float BlitImageCmd::match(const Command& rhs) const {
+Matcher BlitImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BlitImageCmd*>(&rhs);
 	if(!cmd || filter != cmd->filter) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -1964,7 +2000,7 @@ float BlitImageCmd::match(const Command& rhs) const {
 	add(m, dstLayout, cmd->dstLayout);
 	addSpanOrderedStrict(m, blits, cmd->blits);
 
-	return eval(m);
+	return m;
 }
 
 // ResolveImageCmd
@@ -2034,10 +2070,10 @@ void ResolveImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHan
 	checkReplace(dst, map);
 }
 
-float ResolveImageCmd::match(const Command& rhs) const {
+Matcher ResolveImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const ResolveImageCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -2048,7 +2084,7 @@ float ResolveImageCmd::match(const Command& rhs) const {
 	add(m, dstLayout, cmd->dstLayout);
 	addSpanOrderedStrict(m, regions, cmd->regions);
 
-	return eval(m);
+	return m;
 }
 
 // CopyBufferCmd
@@ -2103,10 +2139,10 @@ void CopyBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandl
 	checkReplace(dst, map);
 }
 
-float CopyBufferCmd::match(const Command& rhs) const {
+Matcher CopyBufferCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const CopyBufferCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -2115,7 +2151,7 @@ float CopyBufferCmd::match(const Command& rhs) const {
 
 	addSpanOrderedStrict(m, regions, cmd->regions);
 
-	return eval(m);
+	return m;
 }
 
 // UpdateBufferCmd
@@ -2144,17 +2180,17 @@ void UpdateBufferCmd::displayInspector(Gui& gui) const {
 	// TODO: display data?
 }
 
-float UpdateBufferCmd::match(const Command& rhs) const {
+Matcher UpdateBufferCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const UpdateBufferCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
 	addNonNull(m, dst, cmd->dst, 5.0);
 	add(m, data.size(), cmd->data.size());
 	add(m, offset, cmd->offset, 0.2);
-	return eval(m);
+	return m;
 }
 
 // FillBufferCmd
@@ -2183,10 +2219,10 @@ void FillBufferCmd::displayInspector(Gui& gui) const {
 	imGuiText("Filled with {}{}", std::hex, data);
 }
 
-float FillBufferCmd::match(const Command& rhs) const {
+Matcher FillBufferCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const FillBufferCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -2194,7 +2230,7 @@ float FillBufferCmd::match(const Command& rhs) const {
 	add(m, data, cmd->data);
 	add(m, size, cmd->size);
 	add(m, offset, cmd->offset, 0.1);
-	return eval(m);
+	return m;
 }
 
 // ClearColorImageCmd
@@ -2221,10 +2257,10 @@ void ClearColorImageCmd::displayInspector(Gui& gui) const {
 	// TODO: color, layout, ranges
 }
 
-float ClearColorImageCmd::match(const Command& rhs) const {
+Matcher ClearColorImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const ClearColorImageCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -2237,7 +2273,7 @@ float ClearColorImageCmd::match(const Command& rhs) const {
 		m.match += 1;
 	}
 
-	return eval(m);
+	return m;
 }
 
 // ClearDepthStencilImageCmd
@@ -2264,10 +2300,10 @@ void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
 	// TODO: value, layout, ranges
 }
 
-float ClearDepthStencilImageCmd::match(const Command& rhs) const {
+Matcher ClearDepthStencilImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const ClearDepthStencilImageCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
@@ -2280,7 +2316,7 @@ float ClearDepthStencilImageCmd::match(const Command& rhs) const {
 		m.match += 1;
 	}
 
-	return eval(m);
+	return m;
 }
 
 // Clear AttachhmentCmd
@@ -2302,16 +2338,16 @@ void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, Device
 	}
 }
 
-float ClearAttachmentCmd::match(const Command& rhs) const {
+Matcher ClearAttachmentCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&rhs);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	Matcher m;
 	addSpanOrderedStrict(m, attachments, cmd->attachments, 5.0);
 	addSpanOrderedStrict(m, rects, cmd->rects);
-	return eval(m);
+	return m;
 }
 
 // SetEventCmd
@@ -2441,13 +2477,13 @@ void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb) cons
 	dev.dispatch.CmdBeginDebugUtilsLabelEXT(cb, &label);
 }
 
-float BeginDebugUtilsLabelCmd::match(const Command& rhs) const {
+Matcher BeginDebugUtilsLabelCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(&rhs);
 	if(!cmd || std::strcmp(cmd->name, this->name) != 0) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	return 1.f;
+	return Matcher{4.f, 4.f};
 }
 
 // EndDebugUtilsLabelCmd
@@ -2483,13 +2519,13 @@ void BindPipelineCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHan
 	checkReplace(pipe, map);
 }
 
-float BindPipelineCmd::match(const Command& rhs) const {
+Matcher BindPipelineCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BindPipelineCmd*>(&rhs);
 	if(!cmd || cmd->bindPoint != this->bindPoint || cmd->pipe != this->pipe) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	return 1.f;
+	return Matcher{4.f, 4.f};
 }
 
 // PushConstantsCmd
@@ -2498,15 +2534,26 @@ void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		u32(values.size()), values.data());
 }
 
-float PushConstantsCmd::match(const Command& rhs) const {
+Matcher PushConstantsCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const PushConstantsCmd*>(&rhs);
+
+	// hard matching on metadata here. The data is irrelevant when
+	// the push destination isn't the same.
 	if(!cmd || pipeLayout != cmd->pipeLayout || stages != cmd->stages ||
 			offset != cmd->offset || values.size() != cmd->values.size()) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
-	auto sameData = std::memcmp(values.data(), cmd->values.data(), values.size()) == 0u;
-	return 0.5f + (sameData ? 0.5f : 0.0f);
+	Matcher m;
+	m.total += 4.f;
+	m.match += 4.f;
+
+	if(std::memcmp(values.data(), cmd->values.data(), values.size()) == 0u) {
+		m.total += 1.f;
+		m.match += 1.f;
+	}
+
+	return m;
 }
 
 // SetViewportCmd
@@ -2852,15 +2899,15 @@ void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		width, height, depth);
 }
 
-float TraceRaysCmd::match(const Command& base) const {
+Matcher TraceRaysCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const TraceRaysCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd);
 	if(m.total == -1.f) {
-		return 0.f;
+		return m;
 	}
 
 	// we don't hard-match on them since this may change for per-frame
@@ -2873,7 +2920,7 @@ float TraceRaysCmd::match(const Command& base) const {
 
 	// TODO: consider bound tables? At least size and stride?
 
-	return eval(m);
+	return m;
 }
 
 void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -2882,20 +2929,20 @@ void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		indirectDeviceAddress);
 }
 
-float TraceRaysIndirectCmd::match(const Command& base) const {
+Matcher TraceRaysIndirectCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const TraceRaysCmd*>(&base);
 	if(!cmd) {
-		return 0.f;
+		return Matcher::noMatch();
 	}
 
 	auto m = doMatch(*cmd);
 	if(m.total == -1.f) {
-		return 0.f;
+		return m;
 	}
 
 	// TODO: consider bound tables? At least size and stride?
 
-	return eval(m);
+	return m;
 }
 
 void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffer cb) const {

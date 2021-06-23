@@ -853,6 +853,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 					auto& binding = pipe.vertexBindings[attrib.binding];
 					auto& buf = state.vertexBufCopies[attrib.binding];
+
 					// TODO: correctly implement multi-instance support
 					auto off = binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX ?
 						id * binding.stride : 0u;

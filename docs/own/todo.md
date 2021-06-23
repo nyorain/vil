@@ -9,6 +9,8 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 
 urgent, bugs:
 - [ ] correctly integrate spirv-cross everywhere, remove spirv_reflect
+	- [ ] correctly set specialization constants before using it for reflection
+	      reset previously set constants to default. Not sure how tho
 - [ ] image viewer validation bug when we don't hover the image
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
@@ -16,20 +18,6 @@ urgent, bugs:
       manually define LoadLibrary, GetProcAddress
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
-
-descriptor indexing extension:
-- [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 
-	  expect descriptors to be valid. Might also be a problem in CommandHook.
-- [ ] Make sure we have update_after_bind in
-      mind everywhere. We would at least have to lock the descriptorSetState mutex
-	  when reading it in Gui/match to support this, might get a race otherwise.
-	  Or, probably better: hold the per-ds mutex locked during the whole
-	  update process, sync refCount using it. For CopyDescriptorSet,
-	  we can use std::lock.
-- [ ] (low prio) See the TODO in CommandHookRecord::copyDs to fix
-      support for updateUnusedWhilePending.
-- [ ] (for later) investigate whether our current approach really
-      scales for descriptor sets with many thousand bindings
 
 docs
 - [ ] write small wiki documentation post on how to use API
@@ -152,8 +140,11 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] improve imgui event handles, make sure inputs aren't lost when fps are low.
+      see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
 - [ ] remove -DUNICODE from defines
 	- [ ] also check that vil_api works either way, can't depend on that
+- [ ] fix "command not found 4 frames" shortly appearing when selecting new command
 - [ ] add submission log! possibility to track what submissions are done
       during startup, another thing that's hard to track with capturing
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
@@ -229,6 +220,20 @@ matching:
 	- [ ] bind: match via next draw/dispatch that uses this bind
 	- [ ] sync: match previous and next draw/dispatch and try to find
 	      matching sync in between? or something like that
+
+descriptor indexing extension:
+- [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 
+	  expect descriptors to be valid. Might also be a problem in CommandHook.
+- [ ] Make sure we have update_after_bind in
+      mind everywhere. We would at least have to lock the descriptorSetState mutex
+	  when reading it in Gui/match to support this, might get a race otherwise.
+	  Or, probably better: hold the per-ds mutex locked during the whole
+	  update process, sync refCount using it. For CopyDescriptorSet,
+	  we can use std::lock.
+- [ ] (low prio) See the TODO in CommandHookRecord::copyDs to fix
+      support for updateUnusedWhilePending.
+- [ ] (for later) investigate whether our current approach really
+      scales for descriptor sets with many thousand bindings
 
 vertex viewer/xfb:
 - [ ] allow to select vertices, render them as points in the viewport

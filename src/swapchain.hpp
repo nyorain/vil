@@ -89,4 +89,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	VkQueue                                     queue,
 	const VkPresentInfoKHR*                     pPresentInfo);
 
+VKAPI_ATTR VkResult VKAPI_CALL GetSwapchainImagesKHR(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    uint32_t*                                   pSwapchainImageCount,
+    VkImage*                                    pSwapchainImages);
+
 } // namespace vil

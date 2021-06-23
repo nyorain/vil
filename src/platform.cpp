@@ -12,43 +12,138 @@ namespace {
 constexpr auto toggleKey = swa_key_backslash;
 constexpr auto focusKey = swa_key_rightbrace;
 
-void cbMouseMove(swa_window*, const swa_mouse_move_event* ev) {
-	// dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
-	ImGui::GetIO().MousePos.x = ev->x;
-	ImGui::GetIO().MousePos.y = ev->y;
-}
+void cbMouseMove(swa_window* win, const swa_mouse_move_event* ev) {
+	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 
-void cbMouseButton(swa_window*, const swa_mouse_button_event* ev) {
-	// dlg_trace("overlay mouse button");
-	if(ev->button > 0 && ev->button < 6) {
-		ImGui::GetIO().MouseDown[unsigned(ev->button) - 1] = ev->pressed;
-	}
-}
-
-void cbMouseCross(swa_window*, const swa_mouse_cross_event* ev) {
-	if(ev->entered) {
+	if(platform->status == SwaPlatform::Status::focused) {
+		// dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
 		ImGui::GetIO().MousePos.x = ev->x;
 		ImGui::GetIO().MousePos.y = ev->y;
-	} else {
-		ImGui::GetIO().MousePos.x = -FLT_MAX;
-		ImGui::GetIO().MousePos.y = -FLT_MAX;
 	}
+
+	platform->onEvent();
 }
 
-void cbKey(swa_window*, const swa_key_event* ev) {
-	// dlg_trace("overlay key: {} {}", ev->keycode, ev->pressed);
-	if(ev->keycode < 512) {
-		ImGui::GetIO().KeysDown[ev->keycode] = ev->pressed;
+void cbMouseButton(swa_window* win, const swa_mouse_button_event* ev) {
+	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
+
+	bool forward = platform->status == SwaPlatform::Status::shown;
+	bool handle = platform->status == SwaPlatform::Status::focused;
+
+	if(/*ev->button == swa_mouse_button_left*/ true) {
+		// auto reset = true;
+		auto inside =
+			ev->x > platform->guiWinPos.x &&
+			ev->y > platform->guiWinPos.y &&
+			ev->x < platform->guiWinPos.x + platform->guiWinSize.x &&
+			ev->y < platform->guiWinPos.y + platform->guiWinSize.y;
+		if(platform->status == SwaPlatform::Status::focused && !inside) {
+			// platform->activateWindow(false);
+
+			/*
+			if(platform->unfocusPending && !ev->pressed) {
+				dlg_trace("state: shown (unfocsed)");
+				platform->status = SwaPlatform::Status::shown;
+				handle = true;
+				forward = false;
+			} else if(!platform->unfocusPending && ev->pressed) {
+				platform->unfocusPending = true;
+				handle = true;
+				forward = false;
+				reset = false;
+			}
+			*/
+
+			dlg_trace("state: shown (unfocsed)");
+			platform->status = SwaPlatform::Status::shown;
+			handle = false;
+			forward = true;
+			platform->doGuiUnfocus = true;
+		} else if(platform->status == SwaPlatform::Status::shown && inside) {
+			// platform->activateWindow(true);
+
+			/*
+			if(platform->focusPending && !ev->pressed) {
+				dlg_trace("state: focused");
+				platform->status = SwaPlatform::Status::focused;
+				handle = true;
+				forward = false;
+			} else if(!platform->focusPending && ev->pressed) {
+				platform->focusPending = true;
+				handle = true;
+				forward = false;
+				reset = false;
+			}
+			*/
+
+			dlg_trace("state: focused");
+			platform->status = SwaPlatform::Status::focused;
+			handle = true;
+			forward = false;
+		}
+
+		// if(reset) {
+		// 	platform->focusPending = false;
+		// 	platform->unfocusPending = false;
+		// }
 	}
 
-	if(ev->utf8 && *ev->utf8) {
-		ImGui::GetIO().AddInputCharactersUTF8(ev->utf8);
+	if(forward) {
+		platform->onEvent();
 	}
+
+	if(handle) {
+		// dlg_trace("overlay mouse button");
+		if(ev->button > 0 && ev->button < 6) {
+			ImGui::GetIO().MouseDown[unsigned(ev->button) - 1] = ev->pressed;
+			ImGui::GetIO().MousePos.x = ev->x;
+			ImGui::GetIO().MousePos.y = ev->y;
+		}
+	}
+
 }
 
-void cbMouseWheel(swa_window*, float x, float y) {
-	ImGui::GetIO().MouseWheel = y;
-	ImGui::GetIO().MouseWheelH = x;
+void cbMouseCross(swa_window* win, const swa_mouse_cross_event* ev) {
+	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
+	if(platform->status == SwaPlatform::Status::focused) {
+		if(ev->entered) {
+			ImGui::GetIO().MousePos.x = ev->x;
+			ImGui::GetIO().MousePos.y = ev->y;
+		} else {
+			ImGui::GetIO().MousePos.x = -FLT_MAX;
+			ImGui::GetIO().MousePos.y = -FLT_MAX;
+		}
+	}
+
+	platform->onEvent();
+}
+
+void cbKey(swa_window* win, const swa_key_event* ev) {
+	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
+
+	if(platform->status == SwaPlatform::Status::focused) {
+		// dlg_trace("overlay key: {} {}", ev->keycode, ev->pressed);
+		if(ev->keycode < 512) {
+			ImGui::GetIO().KeysDown[ev->keycode] = ev->pressed;
+		}
+
+		if(ev->utf8 && *ev->utf8) {
+			ImGui::GetIO().AddInputCharactersUTF8(ev->utf8);
+		}
+	}
+
+	platform->onEvent();
+}
+
+void cbMouseWheel(swa_window* win, float x, float y) {
+	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
+
+	if(platform->status == SwaPlatform::Status::focused) {
+		ImGui::GetIO().MouseWheel = y;
+		ImGui::GetIO().MouseWheelH = x;
+	}
+
+	platform->onEvent();
 }
 
 } // anon namespace
@@ -80,6 +175,8 @@ void SwaPlatform::initWindow(Device& dev, void* nativeParent,
 	window = swa_display_create_window(dpy, &ws);
 	dlg_assert(window);
 
+	swa_window_set_userdata(window, this);
+
 	(void) dev;
 }
 
@@ -98,8 +195,11 @@ bool updateEdge(bool& val, bool pressed) {
 	return false;
 }
 
-bool SwaPlatform::update(Gui& gui) {
+Platform::Status SwaPlatform::update(Gui& gui) {
 	gui.makeImGuiCurrent();
+
+	guiWinPos = gui.windowPos();
+	guiWinSize = gui.windowSize();
 
 	if(status != Status::focused) {
 		if(updateEdge(togglePressed, this->pressed(toggleKey))) {
@@ -121,7 +221,12 @@ bool SwaPlatform::update(Gui& gui) {
 		}
 	}
 
-	return status != Status::hidden;
+	if(doGuiUnfocus) {
+		gui.unfocus = true;
+		doGuiUnfocus = false;
+	}
+
+	return status;
 }
 
 void SwaPlatform::activateWindow(bool doActivate) {

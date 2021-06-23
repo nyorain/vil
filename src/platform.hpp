@@ -16,17 +16,6 @@ namespace vil {
 
 // Can be associated with a VkSurfaceKHR
 struct Platform {
-	virtual ~Platform() = default;
-
-	virtual void init(Device& dev, unsigned width, unsigned height) = 0;
-	virtual void resize(unsigned width, unsigned height) = 0;
-	virtual bool update(Gui& gui) = 0;
-};
-
-// Uses swa to create an input-grabbing, invisible child window on the
-// given platform. Just needs platform-specific mechanisms for checking
-// on the original window.
-struct SwaPlatform : Platform {
 	enum class Status {
 		// overlay and input window are hidden
 		hidden,
@@ -38,16 +27,36 @@ struct SwaPlatform : Platform {
 		focused,
 	};
 
+	virtual ~Platform() = default;
+
+	virtual void init(Device& dev, unsigned width, unsigned height) = 0;
+	virtual void resize(unsigned width, unsigned height) = 0;
+	virtual Status update(Gui& gui) = 0;
+	virtual void onEvent() {};
+};
+
+// Uses swa to create an input-grabbing, invisible child window on the
+// given platform. Just needs platform-specific mechanisms for checking
+// on the original window.
+struct SwaPlatform : Platform {
 	swa_display* dpy {};
 	swa_window* window {};
+
+	Vec2f guiWinPos {};
+	Vec2f guiWinSize {};
 
 	Status status {Status::hidden};
 	bool togglePressed {}; // for toggle key
 	bool focusPressed {}; // for focus key
 
+	// for automatic activation/deactivation
+	// bool focusPending {};
+	// bool unfocusPending {};
+	bool doGuiUnfocus {};
+
 	virtual void activateWindow(bool doActivate);
 	void resize(unsigned width, unsigned height) override;
-	bool update(Gui& gui) override;
+	Status update(Gui& gui) override;
 
 	// Derived platforms must first initialize the display (using the
 	// specific, matching swa backend), then call this for window

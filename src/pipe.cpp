@@ -126,15 +126,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 					lock.unlock();
 					auto xfb = patchShaderXfb(dev, mod.spv, stage.pName,
 						std::move(spec), mod.name);
-					lock.lock();
 
-					// check again, it might have been constructed by another thread in the meantime
-					it = find_if(mod.xfb, finder);
 					if(xfb.mod) {
+						lock.lock();
+						// check again, it might have been constructed by another thread in the meantime
+						it = find_if(mod.xfb, finder);
+
 						if(it == mod.xfb.end()) {
 							stage.module = xfb.mod;
 							it = mod.xfb.emplace(it, std::move(xfb));
 						} else if(xfb.mod) {
+							dlg_trace("xfb patch race prevented");
 							dev.dispatch.DestroyShaderModule(dev.handle, xfb.mod, nullptr);
 						}
 					}
@@ -324,10 +326,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipeline(
 	}
 
 	auto& dev = getDevice(device);
-
 	auto pipe = dev.pipes.mustMove(pipeline);
 	pipeline = pipe->handle;
 
+	// Pipeline destructor isn't virtual
 	switch(pipe->type) {
 		case VK_PIPELINE_BIND_POINT_GRAPHICS:
 			delete static_cast<GraphicsPipeline*>(pipe.release());
@@ -584,9 +586,9 @@ VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingCaptureReplayShaderGroupHandlesKHR(
 		uint32_t                                    groupCount,
 		size_t                                      dataSize,
 		void*                                       pData) {
-	auto& dev = getDevice(device);
-	return dev.dispatch.GetRayTracingCaptureReplayShaderGroupHandlesKHR(dev.handle,
-		pipeline, firstGroup, groupCount, dataSize, pData);
+	auto& pipe = get(device, pipeline);
+	return pipe.dev->dispatch.GetRayTracingCaptureReplayShaderGroupHandlesKHR(
+		pipe.dev->handle, pipe.handle, firstGroup, groupCount, dataSize, pData);
 }
 
 VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(
@@ -594,9 +596,9 @@ VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(
 		VkPipeline                                  pipeline,
 		uint32_t                                    group,
 		VkShaderGroupShaderKHR                      groupShader) {
-	auto& dev = getDevice(device);
-	return dev.dispatch.GetRayTracingShaderGroupStackSizeKHR(
-		dev.handle, pipeline, group, groupShader);
+	auto& pipe = get(device, pipeline);
+	return pipe.dev->dispatch.GetRayTracingShaderGroupStackSizeKHR(
+		pipe.dev->handle, pipe.handle, group, groupShader);
 }
 
 } // namespace vil

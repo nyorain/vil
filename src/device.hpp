@@ -247,20 +247,23 @@ DefHandleDesc(VkDescriptorUpdateTemplate, DescriptorUpdateTemplate, dsuTemplates
 DefHandleDesc(VkCommandPool, CommandPool, commandPools, false, true);
 DefHandleDesc(VkPipelineLayout, PipelineLayout, pipeLayouts, false, true);
 DefHandleDesc(VkAccelerationStructureKHR, AccelStruct, accelStructs, false, true);
+DefHandleDesc(VkImage, Image, images, false, true);
+DefHandleDesc(VkPipeline, Pipeline, pipes, false, true);
 
 DefHandleDesc(VkCommandBuffer, CommandBuffer, commandBuffers, true, true);
 
-// TODO: enable wrapping for these as well. Might need to implement some
-// additional functions first, especially for image (e.g. GetSubresourceLayout)
-DefHandleDesc(VkImage, Image, images, false, false);
+// NOTE: to enable wrapping for those handles we might have to fix a couple
+// of places inside the layer where they aren't correctly forwarded yet.
+// But these handles aren't really used on performance-critical paths anyways
 DefHandleDesc(VkDeviceMemory, DeviceMemory, deviceMemories, false, false);
 DefHandleDesc(VkQueryPool, QueryPool, queryPools, false, false);
-DefHandleDesc(VkPipeline, Pipeline, pipes, false, false);
 DefHandleDesc(VkRenderPass, RenderPass, renderPasses, false, false);
 DefHandleDesc(VkFramebuffer, Framebuffer, framebuffers, false, false);
 DefHandleDesc(VkFence, Fence, fences, false, false);
 DefHandleDesc(VkSemaphore, Semaphore, semaphores, false, false);
 DefHandleDesc(VkEvent, Event, events, false, false);
+DefHandleDesc(VkShaderModule, ShaderModule, shaderModules, false, false);
+DefHandleDesc(VkSwapchainKHR, Swapchain, swapchains, false, false);
 
 #undef DefHandleDesc
 

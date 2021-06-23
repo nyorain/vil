@@ -2,6 +2,7 @@
 #include <layer.hpp>
 #include <device.hpp>
 #include <data.hpp>
+#include <threadContext.hpp>
 #include <ds.hpp>
 #include <rp.hpp>
 
@@ -106,7 +107,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		return res;
 	}
 
-	auto& img = dev.images.add(*pImage);
+	auto imgPtr = std::make_unique<Image>();
+	auto& img = *imgPtr;
 	img.objectType = VK_OBJECT_TYPE_IMAGE;
 	img.dev = &dev;
 	img.handle = *pImage;
@@ -116,6 +118,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.allowsLinearSampling = linearSampling;
 	img.concurrentHooked = concurrent;
 	img.hasTransferSrc = nci.usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
+	*pImage = castDispatch<VkImage>(img);
+	dev.images.mustEmplace(*pImage, std::move(imgPtr));
 
 	return res;
 }
@@ -130,7 +135,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 
 	auto& dev = getDevice(device);
 	auto handle = dev.images.mustMove(image)->handle;
-	dev.dispatch.DestroyImage(device, handle, pAllocator);
+	dev.dispatch.DestroyImage(dev.handle, handle, pAllocator);
 }
 
 VKAPI_ATTR void VKAPI_CALL GetImageMemoryRequirements(
@@ -194,26 +199,22 @@ VKAPI_ATTR VkResult VKAPI_CALL GetImageDrmFormatModifierPropertiesEXT(
 		img.handle, pProperties);
 }
 
-void bindImageMemory(Device& dev, const VkBindImageMemoryInfo& bind) {
-	auto& img = dev.images.get(bind.image);
-	auto& mem = dev.deviceMemories.get(bind.memory);
-
-	dlg_assert(!img.memory);
-	dlg_assert(!img.memoryDestroyed);
+void bindImageMemory(Image& img, DeviceMemory& mem, u64 offset) {
+	auto& dev = *img.dev;
 
 	// find required size
 	VkMemoryRequirements memReqs;
-	dev.dispatch.GetImageMemoryRequirements(dev.handle, bind.image, &memReqs);
+	dev.dispatch.GetImageMemoryRequirements(dev.handle, img.handle, &memReqs);
+
+	// access to the given memory and image must be internally synced
+	std::lock_guard lock(dev.mutex);
+	dlg_assert(!img.memory);
+	dlg_assert(!img.memoryDestroyed);
+	mem.allocations.push_back(&img);
 
 	img.memory = &mem;
-	img.allocationOffset = bind.memoryOffset;
+	img.allocationOffset = offset;
 	img.allocationSize = memReqs.size;
-
-	{
-		// access to the given memory must be internally synced
-		std::lock_guard lock(dev.mutex);
-		mem.allocations.push_back(&img);
-	}
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
@@ -221,12 +222,22 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
 		uint32_t                                    bindInfoCount,
 		const VkBindImageMemoryInfo*                pBindInfos) {
 	auto& dev = getDevice(device);
+
+	ThreadMemScope memScope;
+	auto fwd = memScope.alloc<VkBindImageMemoryInfo>(bindInfoCount);
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
-		bindImageMemory(dev, bind);
+		auto& img = get(dev, bind.image);
+		auto& mem = get(dev, bind.memory);
+
+		bindImageMemory(img, mem, bind.memoryOffset);
+
+		fwd[i] = bind;
+		fwd[i].image = img.handle;
+		fwd[i].memory = mem.handle;
 	}
 
-	return dev.dispatch.BindImageMemory2(dev.handle, bindInfoCount, pBindInfos);
+	return dev.dispatch.BindImageMemory2(dev.handle, u32(fwd.size()), fwd.data());
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
@@ -234,9 +245,11 @@ VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory(
 		VkImage                                     image,
 		VkDeviceMemory                              memory,
 		VkDeviceSize                                memoryOffset) {
-	auto& dev = getDevice(device);
-	bindImageMemory(dev, {{}, {}, image, memory, memoryOffset});
-	return dev.dispatch.BindImageMemory(dev.handle, image, memory, memoryOffset);
+	auto& img = get(device, image);
+	auto& mem = get(device, memory);
+	bindImageMemory(img, mem, memoryOffset);
+	return img.dev->dispatch.BindImageMemory(img.dev->handle, img.handle,
+		mem.handle, memoryOffset);
 }
 
 // ImageView
@@ -245,9 +258,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 		const VkImageViewCreateInfo*                pCreateInfo,
 		const VkAllocationCallbacks*                pAllocator,
 		VkImageView*                                pView) {
-	auto& dev = getDevice(device);
+	auto& img = get(device, pCreateInfo->image);
+	auto& dev = *img.dev;
 
-	auto res = dev.dispatch.CreateImageView(dev.handle, pCreateInfo, pAllocator, pView);
+	auto fwd = *pCreateInfo;
+	fwd.image = img.handle;
+
+	auto res = dev.dispatch.CreateImageView(dev.handle, &fwd, pAllocator, pView);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
@@ -256,7 +273,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	auto& view = *viewPtr;
 	view.objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
 	view.handle = *pView;
-	view.img = &dev.images.get(pCreateInfo->image);
+	view.img = &img;
 	view.dev = &dev;
 	view.ci = *pCreateInfo;
 

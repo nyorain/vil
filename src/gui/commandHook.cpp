@@ -3,7 +3,9 @@
 #include <ds.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
+#include <threadContext.hpp>
 #include <pipe.hpp>
+#include <swapchain.hpp>
 #include <rp.hpp>
 #include <accelStruct.hpp>
 #include <cb.hpp>
@@ -392,6 +394,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 		dlg_assert(findRes.hierachy.size() == hierachy_.size());
 	}
+
+	// dlg_trace("hooking command submission; frame {}", dev.swapchain->presentCounter);
 
 	dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
 		"Alarmingly high number of hooks for a single record");
@@ -882,15 +886,7 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		VkImageLayout srcLayout, const VkImageSubresourceRange& srcSubres,
 		std::string& errorMessage, u32 srcQueueFam) {
-	if(src.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
-		// TODO: support multisampling via vkCmdResolveImage
-		//   alternatively we could check if the image is
-		//   resolved at the end of the subpass and then simply
-		//   copy that.
-		errorMessage = "Can't copy/display multisampled attachment";
-		dlg_trace(errorMessage);
-		return;
-	} else if(!src.hasTransferSrc) {
+	if(!src.hasTransferSrc) {
 		// There are only very specific cases where this can happen,
 		// we could work around some of them (e.g. transient
 		// attachment images or swapchain images that don't
@@ -953,31 +949,61 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 
-	std::vector<VkImageCopy> copies;
-	for(auto m = 0u; m < srcSubres.levelCount; ++m) {
-		auto& copy = copies.emplace_back();
-		copy.dstOffset = {};
-		copy.srcOffset = {};
-		copy.extent = extent;
-		copy.srcSubresource.aspectMask = srcSubres.aspectMask;
-		copy.srcSubresource.baseArrayLayer = srcSubres.baseArrayLayer;
-		copy.srcSubresource.layerCount = srcSubres.layerCount;
-		copy.srcSubresource.mipLevel = srcSubres.baseMipLevel + m;
+	// for 1-sample images we can copy, otherwise we need resolve
+	ThreadMemScope memScope;
+	if(src.ci.samples == VK_SAMPLE_COUNT_1_BIT) {
+		auto copies = memScope.alloc<VkImageCopy>(srcSubres.levelCount);
+		for(auto m = 0u; m < srcSubres.levelCount; ++m) {
+			auto& copy = copies[m];
+			copy.dstOffset = {};
+			copy.srcOffset = {};
+			copy.extent = extent;
+			copy.srcSubresource.aspectMask = srcSubres.aspectMask;
+			copy.srcSubresource.baseArrayLayer = srcSubres.baseArrayLayer;
+			copy.srcSubresource.layerCount = srcSubres.layerCount;
+			copy.srcSubresource.mipLevel = srcSubres.baseMipLevel + m;
 
-		copy.dstSubresource.aspectMask = dst.aspectMask;
-		copy.dstSubresource.baseArrayLayer = 0u;
-		copy.dstSubresource.layerCount = srcSubres.layerCount;
-		copy.dstSubresource.mipLevel = m;
+			copy.dstSubresource.aspectMask = dst.aspectMask;
+			copy.dstSubresource.baseArrayLayer = 0u;
+			copy.dstSubresource.layerCount = srcSubres.layerCount;
+			copy.dstSubresource.mipLevel = m;
 
-		extent.width = std::max(extent.width >> 1u, 1u);
-		extent.height = std::max(extent.height >> 1u, 1u);
-		extent.depth = std::max(extent.depth >> 1u, 1u);
+			extent.width = std::max(extent.width >> 1u, 1u);
+			extent.height = std::max(extent.height >> 1u, 1u);
+			extent.depth = std::max(extent.depth >> 1u, 1u);
+		}
+
+		dev.dispatch.CmdCopyImage(cb,
+			src.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			u32(copies.size()), copies.data());
+	} else {
+		auto resolves = memScope.alloc<VkImageResolve>(srcSubres.levelCount);
+		for(auto m = 0u; m < srcSubres.levelCount; ++m) {
+			auto& resolve = resolves[m];
+			resolve.dstOffset = {};
+			resolve.srcOffset = {};
+			resolve.extent = extent;
+			resolve.srcSubresource.aspectMask = srcSubres.aspectMask;
+			resolve.srcSubresource.baseArrayLayer = srcSubres.baseArrayLayer;
+			resolve.srcSubresource.layerCount = srcSubres.layerCount;
+			resolve.srcSubresource.mipLevel = srcSubres.baseMipLevel + m;
+
+			resolve.dstSubresource.aspectMask = dst.aspectMask;
+			resolve.dstSubresource.baseArrayLayer = 0u;
+			resolve.dstSubresource.layerCount = srcSubres.layerCount;
+			resolve.dstSubresource.mipLevel = m;
+
+			extent.width = std::max(extent.width >> 1u, 1u);
+			extent.height = std::max(extent.height >> 1u, 1u);
+			extent.depth = std::max(extent.depth >> 1u, 1u);
+		}
+
+		dev.dispatch.CmdResolveImage(cb,
+			src.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			u32(resolves.size()), resolves.data());
 	}
-
-	dev.dispatch.CmdCopyImage(cb,
-		src.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		u32(copies.size()), copies.data());
 
 	srcBarrier.oldLayout = srcBarrier.newLayout;
 	srcBarrier.newLayout = srcLayout;

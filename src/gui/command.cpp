@@ -47,6 +47,7 @@ SpvReflectDescriptorBinding* getReflectBinding(const SpvReflectShaderModule& mod
 	return nullptr;
 }
 
+// TODO: remove, use buffmt instead, everywhere
 std::string formatScalar(SpvReflectTypeFlags type,
 		const SpvReflectNumericTraits& traits, span<const std::byte> data) {
 	if(type == SPV_REFLECT_TYPE_FLAG_INT) {

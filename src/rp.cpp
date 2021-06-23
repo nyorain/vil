@@ -742,10 +742,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	}
 
 	auto addAtts = [&](const VkAttachmentReference2* refs, std::size_t count) {
+		if(!count) {
+			return 0u;
+		}
+
 		auto& atts = rp.desc.attachmentRefs.back();
 		auto ret = atts.size();
 		atts.insert(atts.end(), refs, refs + count);
-		return ret;
+		return unsigned(ret);
 	};
 
 	for(auto& subp : rp.desc.subpasses) {

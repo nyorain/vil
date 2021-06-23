@@ -41,6 +41,21 @@ enum class CommandType : u32 {
 	buildAccelStruct = (1u << 9u),
 };
 
+// Represents the result of a matching operation.
+// The effective matching value is 'match/total' but having both values
+// gives additional information for further processing.
+// Invariant: For common objects, match <= total.
+struct Matcher {
+	float match {}; // sum of weights of comparisons that matched
+	float total {}; // sum of weights of all comparisons
+
+	// Special constant to signal that matching can't work and should
+	// be aborted.
+	static Matcher noMatch() { return {0.f, -1.f}; }
+};
+
+float eval(const Matcher& m);
+
 using CommandTypeFlags = nytl::Flags<CommandType>;
 
 // The list of commands in a CommandBuffer is organized as a tree.
@@ -109,7 +124,7 @@ struct Command {
 	// Returns how much this commands matches with the given one.
 	// Should always return 0.f for two commands that don't have the
 	// same type. Should not consider child commands, just itself.
-	virtual float match(const Command& cmd) const;
+	virtual Matcher match(const Command& cmd) const;
 
 	// Forms a forward linked list with siblings
 	Command* next {};
@@ -141,9 +156,7 @@ struct NameResult {
 
 NameResult name(DeviceHandle*, NullName = NullName::null);
 std::vector<const Command*> displayCommands(const Command* cmd,
-		const Command* selected, Command::TypeFlags typeFlags);
-
-struct Matcher;
+		const Command* selected, Command::TypeFlags typeFlags, bool firstSep);
 
 struct ParentCommand : Command {
 	std::vector<const Command*> display(const Command* selected,
@@ -189,7 +202,7 @@ struct WaitEventsCmd : BarrierCmdBase {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command& rhs) const override;
+	Matcher match(const Command& rhs) const override;
 };
 
 struct BarrierCmd : BarrierCmdBase {
@@ -199,7 +212,7 @@ struct BarrierCmd : BarrierCmdBase {
 	Type type() const override { return Type::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command& rhs) const override;
+	Matcher match(const Command& rhs) const override;
 };
 
 // All direct children must be of type 'NextSubpassCmd'
@@ -222,7 +235,7 @@ struct BeginRenderPassCmd : SectionCommand {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command& rhs) const override;
+	Matcher match(const Command& rhs) const override;
 };
 
 struct SubpassCmd : SectionCommand {};
@@ -238,7 +251,7 @@ struct NextSubpassCmd : SubpassCmd {
 	// Must be tracked while recording
 	std::string nameDesc() const override { return "NextSubpass"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command& rhs) const override;
+	Matcher match(const Command& rhs) const override;
 };
 
 // Meta command needed for correct hierachy. We want each subpass to
@@ -292,7 +305,7 @@ struct DrawCmd final : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "Draw"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct DrawIndirectCmd final : DrawCmdBase {
@@ -311,7 +324,7 @@ struct DrawIndirectCmd final : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct DrawIndexedCmd final : DrawCmdBase {
@@ -327,7 +340,7 @@ struct DrawIndexedCmd final : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "DrawIndexed"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct DrawIndirectCountCmd final : DrawCmdBase {
@@ -348,7 +361,7 @@ struct DrawIndirectCountCmd final : DrawCmdBase {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct BindVertexBuffersCmd final : Command {
@@ -362,7 +375,7 @@ struct BindVertexBuffersCmd final : Command {
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct BindIndexBufferCmd final : Command {
@@ -374,7 +387,7 @@ struct BindIndexBufferCmd final : Command {
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct BindDescriptorSetCmd final : Command {
@@ -390,7 +403,7 @@ struct BindDescriptorSetCmd final : Command {
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void displayInspector(Gui& gui) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct DispatchCmdBase : StateCmdBase {
@@ -420,7 +433,7 @@ struct DispatchCmd final : DispatchCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "Dispatch"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct DispatchIndirectCmd final : DispatchCmdBase {
@@ -434,7 +447,7 @@ struct DispatchIndirectCmd final : DispatchCmdBase {
 	std::string nameDesc() const override { return "DispatchIndirect"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct DispatchBaseCmd final : DispatchCmdBase {
@@ -451,7 +464,7 @@ struct DispatchBaseCmd final : DispatchCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string nameDesc() const override { return "DispatchBase"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 // transfer commands
@@ -469,7 +482,7 @@ struct CopyImageCmd final : Command {
 	std::string nameDesc() const override { return "CopyImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct CopyBufferToImageCmd final : Command {
@@ -485,7 +498,7 @@ struct CopyBufferToImageCmd final : Command {
 	std::string nameDesc() const override { return "CopyBufferToImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct CopyImageToBufferCmd final : Command {
@@ -501,7 +514,7 @@ struct CopyImageToBufferCmd final : Command {
 	std::string nameDesc() const override { return "CopyImageToBuffer"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct BlitImageCmd final : Command {
@@ -519,7 +532,7 @@ struct BlitImageCmd final : Command {
 	std::string nameDesc() const override { return "BlitImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct ResolveImageCmd final : Command {
@@ -536,7 +549,7 @@ struct ResolveImageCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct CopyBufferCmd final : Command {
@@ -551,7 +564,7 @@ struct CopyBufferCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct UpdateBufferCmd final : Command {
@@ -565,7 +578,7 @@ struct UpdateBufferCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct FillBufferCmd final : Command {
@@ -580,7 +593,7 @@ struct FillBufferCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct ClearColorImageCmd final : Command {
@@ -595,7 +608,7 @@ struct ClearColorImageCmd final : Command {
 	std::string nameDesc() const override { return "ClearColorImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct ClearDepthStencilImageCmd final : Command {
@@ -610,7 +623,7 @@ struct ClearDepthStencilImageCmd final : Command {
 	std::string nameDesc() const override { return "ClearDepthStencilImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct ClearAttachmentCmd final : Command {
@@ -623,7 +636,7 @@ struct ClearAttachmentCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct SetEventCmd final : Command {
@@ -677,7 +690,7 @@ struct BeginDebugUtilsLabelCmd final : SectionCommand {
 
 	std::string toString() const override { return dlg::format("Label: {}", name); }
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 
 	// NOTE: yes, we return more than just the command here.
 	// But that's because the command itself isn't of any use without the label.
@@ -700,7 +713,7 @@ struct BindPipelineCmd final : Command {
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct PushConstantsCmd final : Command {
@@ -712,7 +725,7 @@ struct PushConstantsCmd final : Command {
 	std::string nameDesc() const override { return "PushConstants"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 // dynamic state
@@ -1150,7 +1163,7 @@ struct TraceRaysCmd final : TraceRaysCmdBase {
 	using TraceRaysCmdBase::TraceRaysCmdBase;
 	std::string nameDesc() const override { return "TraceRays"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct TraceRaysIndirectCmd final : TraceRaysCmdBase {
@@ -1163,7 +1176,7 @@ struct TraceRaysIndirectCmd final : TraceRaysCmdBase {
 	using TraceRaysCmdBase::TraceRaysCmdBase;
 	std::string nameDesc() const override { return "TraceRaysIndirect"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	float match(const Command&) const override;
+	Matcher match(const Command&) const override;
 };
 
 struct SetRayTracingPipelineStackSizeCmd final : Command {

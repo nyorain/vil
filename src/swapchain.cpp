@@ -1,11 +1,12 @@
 #include <swapchain.hpp>
 #include <data.hpp>
-#include <command/record.hpp>
 #include <layer.hpp>
+#include <threadContext.hpp>
 #include <image.hpp>
 #include <queue.hpp>
 #include <platform.hpp>
 #include <overlay.hpp>
+#include <command/record.hpp>
 #include <util/profiling.hpp>
 #include <vk/enumString.hpp>
 
@@ -26,7 +27,8 @@ void Swapchain::destroy() {
 	}
 
 	for(auto* img : this->images) {
-		dev->images.mustErase(img->handle);
+		auto handle = castDispatch<VkImage>(*img);
+		dev->images.mustErase(handle);
 	}
 
 	images.clear();
@@ -121,15 +123,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		swapd.frameSubmissions = std::move(oldChain->frameSubmissions);
 	}
 
-	// add swapchain images to tracked images
+	// Add swapchain images to tracked images
 	u32 imgCount = 0u;
 	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapd.handle, &imgCount, nullptr));
-	auto imgs = std::make_unique<VkImage[]>(imgCount);
-	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapd.handle, &imgCount, imgs.get()));
+
+	ThreadMemScope memScope;
+	auto imgs = memScope.alloc<VkImage>(imgCount);
+	VK_CHECK(dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapd.handle, &imgCount, imgs.data()));
 
 	swapd.images.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
-		auto& img = dev.images.add(imgs[i]);
+		auto imgPtr = std::make_unique<Image>();
+		auto& img = *imgPtr;
 		img.swapchain = &swapd;
 		img.swapchainImageID = i;
 		img.dev = &dev;
@@ -152,6 +157,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		// img.ci.queueFamilyIndexCount = sci.queueFamilyIndexCount;
 
 		swapd.images[i] = &img;
+
+		auto handleDown = castDispatch<VkImage>(img);
+		dev.images.mustEmplace(handleDown, std::move(imgPtr));
 	}
 
 	dev.lastCreatedSwapchain = &swapd;
@@ -182,7 +190,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 
 	// TODO: hacky, see cb gui
 	dev.swapchain = &swapd;
-
 	return result;
 }
 
@@ -194,9 +201,9 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		return;
 	}
 
-	auto& devd = getDevice(device);
-	devd.swapchains.mustErase(swapchain);
-	devd.dispatch.DestroySwapchainKHR(device, swapchain, pAllocator);
+	auto& dev = getDevice(device);
+	swapchain = dev.swapchains.mustMove(swapchain)->handle;
+	dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, pAllocator);
 }
 
 void swapchainPresent(Swapchain& swapchain) {
@@ -244,7 +251,9 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		VkResult res;
 
 		if(swapchain.overlay && swapchain.overlay->platform) {
-			swapchain.overlay->gui.visible = swapchain.overlay->platform->update(swapchain.overlay->gui);
+			auto state = swapchain.overlay->platform->update(swapchain.overlay->gui);
+			swapchain.overlay->gui.visible = (state != Platform::Status::hidden);
+			// swapchain.overlay->gui.focused = (state == Platform::Status::focused);
 		}
 
 		// update tracked frameSubmissions and timings before drawing
@@ -281,6 +290,39 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	}
 
 	return combinedResult;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL GetSwapchainImagesKHR(
+		VkDevice                                    device,
+		VkSwapchainKHR                              vkSwapchain,
+		uint32_t*                                   pSwapchainImageCount,
+		VkImage*                                    pSwapchainImages) {
+	auto& swapchain = get(device, vkSwapchain);
+	auto& dev = *swapchain.dev;
+
+	// Doing this quick forward here is nice so that with VIL_WRAP_IMAGE=0,
+	// we will just forward instead of executing all the custom logic below (
+	// that might e.g. not handle all cases of future extensions)
+	if(!HandleDesc<VkImage>::wrap) {
+		return dev.dispatch.GetSwapchainImagesKHR(dev.handle, swapchain.handle,
+			pSwapchainImageCount, pSwapchainImages);
+	}
+
+	auto res = VK_SUCCESS;
+	if(pSwapchainImages) {
+		auto writeCount = std::min<u32>(*pSwapchainImageCount, swapchain.images.size());
+		for(auto i = 0u; i < writeCount; ++i) {
+			pSwapchainImages[i] = castDispatch<VkImage>(*swapchain.images[i]);
+		}
+		*pSwapchainImageCount = writeCount;
+		if(writeCount < swapchain.images.size()) {
+			res = VK_INCOMPLETE;
+		}
+	} else {
+		*pSwapchainImageCount = swapchain.images.size();
+	}
+
+	return res;
 }
 
 } // namespace vil

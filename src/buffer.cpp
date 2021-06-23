@@ -165,14 +165,14 @@ VKAPI_ATTR void VKAPI_CALL GetBufferMemoryRequirements2(
 
 void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
 	auto& dev = *buf.dev;
-	dlg_assert(!buf.memory);
 
 	// find required size
 	VkMemoryRequirements memReqs;
 	dev.dispatch.GetBufferMemoryRequirements(dev.handle, buf.handle, &memReqs);
 
-	// access to the given memory must be internally synced
+	// access to the given memory and buffer must be internally synced
 	std::lock_guard lock(dev.mutex);
+	dlg_assert(!buf.memory);
 	buf.memory = &mem;
 	buf.allocationOffset = offset;
 	buf.allocationSize = memReqs.size;

@@ -33,6 +33,7 @@ public:
 	};
 
 	bool visible {false};
+	bool unfocus {false};
 
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
@@ -72,6 +73,9 @@ public:
 	Device& dev() const { return *dev_; }
 	VkRenderPass rp() const { return rp_; }
 	float dt() const { return dt_; }
+
+	Vec2f windowSize() const { return {windowSize_.x, windowSize_.y}; }
+	Vec2f windowPos() const { return {windowPos_.x, windowPos_.y}; }
 
 private:
 	void draw(Draw&, bool fullscreen);

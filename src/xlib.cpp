@@ -22,8 +22,9 @@ struct X11Platform : SwaPlatform {
 
 	void init(Device& dev, unsigned width, unsigned height) override;
 	bool pressed(u32 key) const override;
-	bool update(Gui& gui) override;
+	Status update(Gui& gui) override;
 	void activateWindow(bool doActivate) override;
+	void onEvent() override;
 };
 
 void X11Platform::init(Device& dev, unsigned width, unsigned height) {
@@ -65,7 +66,7 @@ bool X11Platform::pressed(u32 key) const {
 	return pressed;
 }
 
-bool X11Platform::update(Gui& gui) {
+Platform::Status X11Platform::update(Gui& gui) {
 	if(status == Status::focused) {
 		// re-activate force grab
 		xcb_ungrab_pointer(this->origConnection, XCB_TIME_CURRENT_TIME);
@@ -102,6 +103,56 @@ void X11Platform::activateWindow(bool doActivate) {
 	}
 
 	SwaPlatform::activateWindow(doActivate);
+}
+
+void X11Platform::onEvent() {
+	auto* ev = static_cast<const xcb_generic_event_t*>(swa_display_x11_current_event(this->dpy));
+	if(ev && status == Status::shown) {
+		unsigned type = ev->response_type & ~0x80;
+		switch(type) {
+			case XCB_BUTTON_PRESS: {
+				xcb_button_press_event_t* bev = (xcb_button_press_event_t*) ev;
+				bev->event = xcb_window_t(surfaceWindow);
+				bev->child = bev->event;
+				break;
+			} case XCB_BUTTON_RELEASE: {
+				xcb_button_release_event_t* bev = (xcb_button_release_event_t*) ev;
+				bev->event = xcb_window_t(surfaceWindow);
+				bev->child = bev->event;
+				break;
+			} case XCB_MOTION_NOTIFY: {
+				xcb_motion_notify_event_t* motion = (xcb_motion_notify_event_t*) ev;
+				motion->event = xcb_window_t(surfaceWindow);
+				motion->child = motion->event;
+				break;
+			} case XCB_KEY_PRESS: {
+				xcb_key_press_event_t* kev = (xcb_key_press_event_t*) ev;
+				kev->event = xcb_window_t(surfaceWindow);
+				kev->child = kev->event;
+				break;
+			} case XCB_KEY_RELEASE: {
+				xcb_key_release_event_t* kev = (xcb_key_release_event_t*) ev;
+				kev->event = xcb_window_t(surfaceWindow);
+				kev->child = kev->event;
+				break;
+			} case XCB_ENTER_NOTIFY: {
+				xcb_enter_notify_event_t* eev = (xcb_enter_notify_event_t*) ev;
+				eev->event = xcb_window_t(surfaceWindow);
+				eev->child = eev->event;
+				break;
+			} case XCB_LEAVE_NOTIFY: {
+				xcb_leave_notify_event_t* eev = (xcb_enter_notify_event_t*) ev;
+				eev->event = xcb_window_t(surfaceWindow);
+				eev->child = eev->event;
+				break;
+			} default:
+				// nothing to forward
+				return;
+		}
+
+		xcb_send_event(connection, 1, surfaceWindow, 0, (const char*) ev);
+		xcb_flush(connection);
+	}
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateXlibSurfaceKHR(

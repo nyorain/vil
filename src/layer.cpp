@@ -90,6 +90,7 @@ void initSettings() {
 	checkSet(HandleDesc<VkCommandPool>::wrap, "VIL_WRAP_COMMAND_POOL");
 	checkSet(HandleDesc<VkBufferView>::wrap, "VIL_WRAP_BUFFER_VIEW");
 	checkSet(HandleDesc<VkDescriptorUpdateTemplate>::wrap, "VIL_WRAP_BUFFER_DESCRIPTOR_UPDATE_TEMPLATE");
+	checkSet(HandleDesc<VkImage>::wrap, "VIL_WRAP_IMAGE");
 }
 
 // Instance
@@ -299,6 +300,11 @@ struct HookedFunction {
 #define VIL_DEV_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), {}, ext}}
 #define VIL_DEV_HOOK_ALIAS(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), {}, ext}}
 
+// NOTE: not sure about these, it seems applications can use KHR functions without
+// enabling the extension when the function is in core? The vulkan samples do this
+// at least. So we return them as well.
+#define VIL_DEV_HOOK_ALIAS_CORE(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), {}, {}}}
+
 static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_INI_HOOK(GetInstanceProcAddr),
 	VIL_INI_HOOK(CreateInstance),
@@ -316,6 +322,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CreateSwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(DestroySwapchainKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(QueuePresentKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetSwapchainImagesKHR, VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 
 	VIL_DEV_HOOK_EXT(SetDebugUtilsObjectNameEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(SetDebugUtilsObjectTagEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
@@ -346,7 +353,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(CreateRenderPass),
 	VIL_DEV_HOOK(DestroyRenderPass),
 	VIL_DEV_HOOK(CreateRenderPass2),
-	VIL_DEV_HOOK_ALIAS(CreateRenderPass2KHR, CreateRenderPass2,
+	VIL_DEV_HOOK_ALIAS_CORE(CreateRenderPass2KHR, CreateRenderPass2,
 		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
 
 	// image.hpp
@@ -356,9 +363,15 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(GetImageSparseMemoryRequirements),
 	VIL_DEV_HOOK(GetImageSubresourceLayout),
 	VIL_DEV_HOOK(BindImageMemory),
+
 	VIL_DEV_HOOK(BindImageMemory2),
-	VIL_DEV_HOOK_ALIAS(BindImageMemory2KHR, BindImageMemory2,
+	VIL_DEV_HOOK_ALIAS_CORE(BindImageMemory2KHR, BindImageMemory2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
+
+	VIL_DEV_HOOK(GetImageMemoryRequirements2),
+	VIL_DEV_HOOK_ALIAS_CORE(GetImageMemoryRequirements2KHR, GetImageMemoryRequirements2,
+		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
+
 	VIL_DEV_HOOK_EXT(GetImageDrmFormatModifierPropertiesEXT,
 		VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME),
 
@@ -374,22 +387,22 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(BindBufferMemory),
 	VIL_DEV_HOOK(GetBufferMemoryRequirements),
 	VIL_DEV_HOOK(GetBufferMemoryRequirements2),
-	VIL_DEV_HOOK_ALIAS(GetBufferMemoryRequirements2KHR, GetBufferMemoryRequirements2,
+	VIL_DEV_HOOK_ALIAS_CORE(GetBufferMemoryRequirements2KHR, GetBufferMemoryRequirements2,
 		VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME),
 	VIL_DEV_HOOK(BindBufferMemory2),
-	VIL_DEV_HOOK_ALIAS(BindBufferMemory2KHR, BindBufferMemory2,
+	VIL_DEV_HOOK_ALIAS_CORE(BindBufferMemory2KHR, BindBufferMemory2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(GetBufferDeviceAddress),
 	VIL_DEV_HOOK(GetBufferOpaqueCaptureAddress),
 	VIL_DEV_HOOK(GetDeviceMemoryOpaqueCaptureAddress),
-	VIL_DEV_HOOK_ALIAS(GetBufferDeviceAddressKHR, GetBufferDeviceAddress,
+	VIL_DEV_HOOK_ALIAS_CORE(GetBufferDeviceAddressKHR, GetBufferDeviceAddress,
 		VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
-	VIL_DEV_HOOK_ALIAS(GetBufferOpaqueCaptureAddressKHR, GetBufferOpaqueCaptureAddress,
+	VIL_DEV_HOOK_ALIAS_CORE(GetBufferOpaqueCaptureAddressKHR, GetBufferOpaqueCaptureAddress,
 		VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
-	VIL_DEV_HOOK_ALIAS(GetDeviceMemoryOpaqueCaptureAddressKHR, GetDeviceMemoryOpaqueCaptureAddress,
+	VIL_DEV_HOOK_ALIAS_CORE(GetDeviceMemoryOpaqueCaptureAddressKHR, GetDeviceMemoryOpaqueCaptureAddress,
 		VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
-	VIL_DEV_HOOK_ALIAS(GetBufferDeviceAddressKHR, GetBufferDeviceAddress,
+	VIL_DEV_HOOK_ALIAS_CORE(GetBufferDeviceAddressEXT, GetBufferDeviceAddress,
 		VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CreateBufferView),
@@ -437,11 +450,11 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(CreateDescriptorUpdateTemplate),
 	VIL_DEV_HOOK(DestroyDescriptorUpdateTemplate),
 	VIL_DEV_HOOK(UpdateDescriptorSetWithTemplate),
-	VIL_DEV_HOOK_ALIAS(CreateDescriptorUpdateTemplateKHR,
+	VIL_DEV_HOOK_ALIAS_CORE(CreateDescriptorUpdateTemplateKHR,
 		CreateDescriptorUpdateTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
-	VIL_DEV_HOOK_ALIAS(DestroyDescriptorUpdateTemplateKHR,
+	VIL_DEV_HOOK_ALIAS_CORE(DestroyDescriptorUpdateTemplateKHR,
 		DestroyDescriptorUpdateTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
-	VIL_DEV_HOOK_ALIAS(UpdateDescriptorSetWithTemplateKHR,
+	VIL_DEV_HOOK_ALIAS_CORE(UpdateDescriptorSetWithTemplateKHR,
 		UpdateDescriptorSetWithTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
 
 	// pipe.hpp
@@ -536,27 +549,27 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 		VK_KHR_DEVICE_GROUP_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CmdDrawIndirectCount),
-	VIL_DEV_HOOK_ALIAS(CmdDrawIndirectCountKHR, CmdDrawIndirectCount,
+	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndirectCountKHR, CmdDrawIndirectCount,
 		VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
-	VIL_DEV_HOOK_ALIAS(CmdDrawIndirectCountAMD, CmdDrawIndirectCount,
+	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndirectCountAMD, CmdDrawIndirectCount,
 		VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CmdDrawIndexedIndirectCount),
-	VIL_DEV_HOOK_ALIAS(CmdDrawIndexedIndirectCountKHR, CmdDrawIndexedIndirectCount,
+	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndexedIndirectCountKHR, CmdDrawIndexedIndirectCount,
 		VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
-	VIL_DEV_HOOK_ALIAS(CmdDrawIndexedIndirectCountAMD, CmdDrawIndexedIndirectCount,
+	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndexedIndirectCountAMD, CmdDrawIndexedIndirectCount,
 		VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CmdBeginRenderPass2),
-	VIL_DEV_HOOK_ALIAS(CmdBeginRenderPass2KHR, CmdBeginRenderPass2,
+	VIL_DEV_HOOK_ALIAS_CORE(CmdBeginRenderPass2KHR, CmdBeginRenderPass2,
 		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CmdNextSubpass2),
-	VIL_DEV_HOOK_ALIAS(CmdNextSubpass2KHR, CmdNextSubpass2,
+	VIL_DEV_HOOK_ALIAS_CORE(CmdNextSubpass2KHR, CmdNextSubpass2,
 		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
 
 	VIL_DEV_HOOK(CmdEndRenderPass2),
-	VIL_DEV_HOOK_ALIAS(CmdEndRenderPass2KHR, CmdEndRenderPass2,
+	VIL_DEV_HOOK_ALIAS_CORE(CmdEndRenderPass2KHR, CmdEndRenderPass2,
 		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
 
 	VIL_DEV_HOOK_EXT(CmdCopyBuffer2KHR, VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
