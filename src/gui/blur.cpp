@@ -358,8 +358,9 @@ void blur(GuiBlur& blur, VkCommandBuffer cb, u32 imageIdx, VkOffset2D offset, Vk
 
 	// NOTE: strictly speaking none of the known kernels but good enough
 	constexpr auto blurSteps = 16u;
+	static_assert(blurSteps % 2 == 0u); // our ping-ponging relies on this
 	for(auto i = 0u; i < blurSteps; ++i) {
-		dispatch(float(i) + 0.5f);
+		dispatch(float(i) + 1.5f);
 	}
 
 	// we swap an even number of times, meaning that the final result

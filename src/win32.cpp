@@ -822,7 +822,7 @@ void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
 	cv.wait(lock);
 }
 
-Status Win32Platform::update(Gui& gui) {
+Platform::State Win32Platform::update(Gui& gui) {
 	// this->gui = &gui;
 	// return ret.load();
 
