@@ -11,13 +11,14 @@ urgent, bugs:
 - [ ] correctly integrate spirv-cross everywhere, remove spirv_reflect
 	- [ ] correctly set specialization constants before using it for reflection
 	      reset previously set constants to default. Not sure how tho
-- [ ] image viewer validation bug when we don't hover the image
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
 - [ ] windows: don't include windows.h in vil_api.h, instead just
       manually define LoadLibrary, GetProcAddress
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
+- [ ] image viewer validation bug when we don't hover the image
+      (happens when mip > 0 is selected)
 
 docs
 - [ ] write small wiki documentation post on how to use API
@@ -140,6 +141,10 @@ gui stuff
 	  Definitely useful for images, when exploring the resource space
 
 other
+- [ ] implement "jump to selected" in commandRecord viewer, immediately
+      opening all needed sections and centering the selected command.
+	  Maybe give some special visual feedback when selected command can't
+	  be found in current records?
 - [ ] improve imgui event handles, make sure inputs aren't lost when fps are low.
       see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
 - [ ] remove -DUNICODE from defines

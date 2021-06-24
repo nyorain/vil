@@ -164,7 +164,6 @@ void CommandBufferGui::draw(Draw& draw) {
 			selectedRecord_ = {};
 			records_ = {};
 			selectedBatch_ = {};
-			dsState_ = {};
 			swapchainPresent_ = {};
 			command_ = {};
 			hook.target = {};
@@ -263,13 +262,13 @@ void CommandBufferGui::draw(Draw& draw) {
 							command_ = std::move(nsel);
 							selectedBatch_ = records_;
 							selectedRecord_ = rec;
-							dsState_ = record_->lastDescriptorState;
 
-							commandViewer_.select(record_, *command_.back(), dsState_, true);
+							commandViewer_.select(record_, *command_.back(),
+								record_->lastDescriptorState, true);
 
 							dev.commandHook->target = {};
 							dev.commandHook->target.all = true;
-							dev.commandHook->desc(record_, command_, dsState_);
+							dev.commandHook->desc(record_, command_, record_->lastDescriptorState);
 							dev.commandHook->freeze = false;
 						}
 
@@ -314,11 +313,10 @@ void CommandBufferGui::draw(Draw& draw) {
 			}
 
 			command_ = std::move(nsel);
-			dsState_ = record_->lastDescriptorState;
-			commandViewer_.select(record_, *command_.back(), dsState_, true);
+			commandViewer_.select(record_, *command_.back(), record_->lastDescriptorState, true);
 
 			// in any case, update the hook
-			dev.commandHook->desc(record_, command_, dsState_);
+			dev.commandHook->desc(record_, command_, record_->lastDescriptorState);
 			dev.commandHook->freeze = false;
 		}
 	}
@@ -358,7 +356,6 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 	command_ = {};
 	record_ = std::move(record);
 	selectedRecord_ = {};
-	dsState_ = {};
 
 	updateHookTarget();
 
@@ -384,7 +381,6 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 	command_ = {};
 	record_ = std::move(record);
 	selectedRecord_ = {};
-	dsState_ = {};
 
 	updateHookTarget();
 
@@ -398,7 +394,6 @@ void CommandBufferGui::showSwapchainSubmissions() {
 	command_ = {};
 	record_ = {};
 	selectedRecord_ = {};
-	dsState_ = {};
 
 	// Unset hooks
 	auto& hook = *gui_->dev().commandHook;
@@ -528,19 +523,21 @@ void CommandBufferGui::updateState() {
 				best->descriptorSnapshot, false);
 
 			// update internal state state from hook match
-			record_ = best->record;
-			command_ = best->command;
-			dsState_ = best->descriptorSnapshot;
+			selectedRecord_ = best->record;
+
+			if(!freezeCommands_) {
+				record_ = best->record;
+				command_ = best->command;
+			}
 
 			// In swapchain mode - and when not freezing commands - make
 			// sure to also display the new frame
 			if(mode_ == UpdateMode::swapchain) {
 				swapchainPresent_ = bestPresentID;
-				records_ = {bestBatches.begin(), bestBatches.end()};
+				selectedBatch_ = {bestBatches.begin(), bestBatches.end()};
 
 				if(!freezeCommands_) {
-					selectedBatch_ = records_;
-					selectedRecord_ = record_;
+					records_ = {bestBatches.begin(), bestBatches.end()};
 				}
 			}
 

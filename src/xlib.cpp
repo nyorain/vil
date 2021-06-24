@@ -41,7 +41,7 @@ void X11Platform::init(Device& dev, unsigned width, unsigned height) {
 bool X11Platform::pressed(u32 key) const {
 	auto keycode = [&]{
 		switch(key) {
-			case swa_key_backslash:	return XK_backslash;
+			case swa_key_equals: return XK_equal;
 			case swa_key_f: return XK_F;
 			default: dlg_error("Unexpected key"); return 0;
 		}

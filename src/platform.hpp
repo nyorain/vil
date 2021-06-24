@@ -2,6 +2,7 @@
 
 #include <device.hpp>
 #include <vk/vulkan.h>
+#include <swa/key.h>
 
 // TODO: Xlib, trying to immitate the winapi terribleness.
 // Should be fixed more globally.
@@ -13,6 +14,9 @@ struct swa_display;
 struct swa_window;
 
 namespace vil {
+
+constexpr auto toggleKey = swa_key_equals;
+constexpr auto focusKey = swa_key_rightbrace;
 
 // Can be associated with a VkSurfaceKHR
 struct Platform {

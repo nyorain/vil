@@ -1366,7 +1366,6 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	auto keepAliveBatches0 = tabs_.cb.records_;
 	auto keepAliveBatches1 = tabs_.cb.selectedBatch_;
 	auto keepAliveDs0 = tabs_.cb.commandViewer_.dsState_;
-	auto keepAliveDs1 = tabs_.cb.dsState_;
 	std::vector<IntrusivePtr<CommandRecord>> keepAliveRecs {
 		tabs_.cb.record_,
 		tabs_.cb.selectedRecord_,

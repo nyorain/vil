@@ -16,9 +16,6 @@
 
 namespace vil {
 
-constexpr auto toggleKey = swa_key_equals;
-constexpr auto focusKey = swa_key_rightbrace;
-
 static enum swa_key winapi_to_key(unsigned vkcode);
 static unsigned key_to_winapi(enum swa_key key);
 

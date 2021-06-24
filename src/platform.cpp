@@ -9,9 +9,6 @@
 namespace vil {
 namespace {
 
-constexpr auto toggleKey = swa_key_backslash;
-constexpr auto focusKey = swa_key_rightbrace;
-
 void cbMouseMove(swa_window* win, const swa_mouse_move_event* ev) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 

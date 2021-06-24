@@ -69,7 +69,6 @@ private:
 	// The selected command (hierarchy) inside the cb.
 	// Might be empty, signalling that no command is secleted.
 	std::vector<const Command*> command_ {};
-	CommandDescriptorSnapshot dsState_ {};
 
 	CommandViewer commandViewer_ {};
 };
