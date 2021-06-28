@@ -360,6 +360,16 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 				{"ivec2", VK_FORMAT_R32G32_SINT},
 				{"ivec3", VK_FORMAT_R32G32B32_SINT},
 				{"ivec4", VK_FORMAT_R32G32B32A32_SINT},
+
+				{"u8", VK_FORMAT_R8_UINT},
+				{"u16", VK_FORMAT_R16_UINT},
+				{"u32", VK_FORMAT_R32_UINT},
+				{"u64", VK_FORMAT_R64_UINT},
+
+				{"i8", VK_FORMAT_R8_SINT},
+				{"i16", VK_FORMAT_R16_SINT},
+				{"i32", VK_FORMAT_R32_SINT},
+				{"i64", VK_FORMAT_R64_SINT},
 			};
 
 			auto lt = std::string_view(buffer_.layoutText);
