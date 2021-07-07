@@ -3,6 +3,7 @@
 #include <device.hpp>
 #include <vk/vulkan.h>
 #include <swa/key.h>
+#include <util/vec.hpp>
 
 // TODO: Xlib, trying to immitate the winapi terribleness.
 // Should be fixed more globally.
