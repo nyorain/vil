@@ -8,28 +8,12 @@
 #include <stdint.h>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
-  #ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN 1
-  #endif // WIN32_LEAN_AND_MEAN
-  #ifndef NOMINMAX
-    #define NOMINMAX 1
-  #endif // NOMINMAX
-
   // XXX NOTE ATTENTION: this header includes windows.h.
   // Just as a fair warning, this might break your application and will to live.
   // Nothing we can really do about it, we need the functions to load func pointers.
   // A possible workaround would be to move the vilLoadApi implementation
   // out of the header, into a separate file.
   #include <windows.h>
-
-  #undef near
-  #undef far
-  #undef ERROR
-  #undef MemoryBarrier
-  #undef WIN32_LEAN_AND_MEAN
-  #undef NOMINMAX
-  #undef CreateEvent
-  #undef CreateSemaphore
 
   // Needs to be defined when renamed the dll or compiled it e.g.
   // via MinGW. Must match the name of the lib that is loaded/registered as layer.

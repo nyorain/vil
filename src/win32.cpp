@@ -81,7 +81,7 @@ bool Win32Platform::checkPressed(u32 key) const {
 // from platform.cpp
 bool updateEdge(bool& val, bool pressed);
 
-constexpr auto windowClassName = L"VIL";
+constexpr auto windowClassName = "VIL";
 
 // from swa
 #define print_winapi_error(func) do { \
@@ -181,7 +181,7 @@ static LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 
 void Win32Platform::initWindow() {
 	// register window class
-	WNDCLASSEXW wcx = {0};
+	WNDCLASSEX wcx = {0};
 	wcx.cbSize = sizeof(wcx);
 	wcx.style = CS_VREDRAW | CS_HREDRAW;
 	wcx.lpfnWndProc = winProc;
@@ -195,7 +195,7 @@ void Win32Platform::initWindow() {
 	wcx.lpszMenuName = NULL;
 	wcx.lpszClassName = windowClassName;
 
-	if(!::RegisterClassExW(&wcx)) {
+	if(!::RegisterClassEx(&wcx)) {
 		print_winapi_error("RegisterClassEx");
 		// NOTE: we can probably just assume it was already registered by us
 	}
@@ -209,7 +209,7 @@ void Win32Platform::initWindow() {
 	auto height = 5;
 	auto hinstance = GetModuleHandle(NULL);
 
-	overlayWindow = CreateWindowEx(exstyle, windowClassName, L"VIL", style,
+	overlayWindow = CreateWindowExA(exstyle, windowClassName, "VIL", style,
 		x, y, width, height, NULL, NULL, hinstance, NULL);
 	if(!overlayWindow) {
 		print_winapi_error("CreateWindowEx");

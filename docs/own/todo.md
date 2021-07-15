@@ -13,8 +13,6 @@ urgent, bugs:
 	      reset previously set constants to default. Not sure how tho
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
-- [ ] windows: don't include windows.h in vil_api.h, instead just
-      manually define LoadLibrary, GetProcAddress
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 - [ ] image viewer validation bug when we don't hover the image
@@ -37,7 +35,7 @@ window/overlay
 - [ ] dota: figure out why hooked overlay does not work anymore when in game
       probably something to do with the way we grab input over x11
 - [ ] fix/implement input pass-through when the hooked overlay does not have
-      focus. Does not work atm.
+      focus for win32.
 - [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel

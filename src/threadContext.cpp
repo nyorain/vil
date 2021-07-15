@@ -128,9 +128,9 @@ ThreadContext::ThreadContext() {
 }
 
 ThreadContext::~ThreadContext() {
-	freeBlocks(memRoot);
 	dlg_assert(memCurrent == memRoot);
 	dlg_assertm(memCurrent->offset == 0u, "{}", memCurrent->offset);
+	freeBlocks(memRoot);
 }
 
 ThreadMemScope::ThreadMemScope() {
