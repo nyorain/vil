@@ -10,7 +10,6 @@
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
-#include <util/spirv_reflect.h>
 #include <map>
 
 namespace vil {
@@ -830,9 +829,11 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	for(auto& stage : pipe.stages) {
 		if(ImGui::TreeNode(&stage, "%s", vk::name(stage.stage))) {
 			ImGui::Text("Entry Point: %s", stage.entryPoint.c_str());
+			ImGui::Text("TODO");
 			// TODO: spec data
 
 
+			/*
 			auto& refl = nonNull(stage.spirv->reflection.get());
 			auto& entryPoint = nonNull(spvReflectGetEntryPoint(&refl, stage.entryPoint.c_str()));
 
@@ -903,6 +904,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 					entryPoint.local_size.y,
 					entryPoint.local_size.z);
 			}
+			*/
 
 			/*
 			if(ImGui::Button("Open in Vim")) {

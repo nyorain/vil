@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <handle.hpp>
+#include <shader.hpp>
 #include <util/intrusive.hpp>
 #include <vk/vulkan.h>
 
@@ -34,13 +35,14 @@ struct PipelineShaderStage {
 	VkShaderStageFlagBits stage;
 	IntrusivePtr<SpirvData> spirv;
 	std::string entryPoint;
-
-	std::vector<VkSpecializationMapEntry> specEntries;
-	std::vector<std::byte> specData;
+	ShaderSpecialization specialization;
 
 	PipelineShaderStage() = default;
 	explicit PipelineShaderStage(Device& dev, const VkPipelineShaderStageCreateInfo&);
 };
+
+// see shader.hpp
+ShaderReflectionAccess accessReflection(const PipelineShaderStage&);
 
 struct Pipeline : DeviceHandle {
 	VkPipeline handle {};

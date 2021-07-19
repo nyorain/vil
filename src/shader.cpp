@@ -4,8 +4,10 @@
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
-#include <util/spirv_reflect.h>
 #include <spirv-cross/spirv_cross.hpp>
+
+// NOTE: useful for debugging of patching issues, not enabled by default.
+// #ifdef VIL_OUTPUT_PATCHED_SPIRV
 
 namespace vil {
 
@@ -210,8 +212,8 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 	}
 }
 
-XfbPatchRes patchSpirvXfb(span<const u32> spirv,
-		const char* entryPoint, const ShaderSpecialization& spec) {
+XfbPatchRes patchSpirvXfb(span<const u32> spirv, const char* entryPoint,
+		spc::Compiler& compiled) {
 	// parse spirv
 	if(spirv.size() < 5) {
 		dlg_error("spirv to small");
@@ -321,68 +323,33 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 	}
 
 	// parse sizes, build the vector of captured output values.
-	// TODO: use spc::Compiler from SpirvData. Hard to synchronize though,
-	// we need to set entry point and spec constants :(
-	spc::Compiler compiler(std::vector<u32>(spirv.begin(), spirv.end()));
-	compiler.set_entry_point(entryPoint, spv::ExecutionModelVertex);
-
-	// It's important we set the specialization entries here since
-	// they might influence output sizes, e.g. for arrays.
-	for(auto& entry : spec.entries) {
-		std::optional<u32> id;
-		for(auto& sc : compiler.get_specialization_constants()) {
-			if(sc.constant_id == entry.constantID) {
-				id = sc.id;
-				break;
-			}
-		}
-
-		// seems like having specialization ids that don't appear in
-		// the shader is allowed per vulkan spec
-		if(!id) {
-			continue;
-		}
-
-		auto& constant = compiler.get_constant(*id);
-
-		// spec constants can only be scalar: int, float or bool
-		dlg_assert(constant.m.columns == 1u);
-		dlg_assert(constant.m.c[0].vecsize == 1u);
-		dlg_assert(entry.size <= 4);
-		dlg_assert(entry.offset + entry.size <= spec.data.size());
-
-		auto* src = spec.data.data() + entry.offset;
-		std::memcpy(constant.m.c[0].r, src, entry.size);
-	}
-
-	compiler.compile();
-	compiler.update_active_builtins();
+	compiled.update_active_builtins();
 
 	std::vector<XfbCapture> captures;
 	std::vector<u32> newDecos;
 
-	auto ivars = compiler.get_active_interface_variables();
+	auto ivars = compiled.get_active_interface_variables();
 
 	auto bufOffset = 0u;
 	for(auto& var : ivars) {
-		auto storage = compiler.get_storage_class(var);
+		auto storage = compiled.get_storage_class(var);
 		if(storage != spv::StorageClassOutput) {
 			continue;
 		}
 
-		auto& ptype = compiler.get_type_from_variable(var);
+		auto& ptype = compiled.get_type_from_variable(var);
 		dlg_assert(ptype.pointer);
 		dlg_assert(ptype.parent_type);
-		auto& type = compiler.get_type(ptype.parent_type);
+		auto& type = compiled.get_type(ptype.parent_type);
 
-		auto name = compiler.get_name(var);
+		auto name = compiled.get_name(var);
 		if(name.empty()) {
 			name = dlg::format("Output{}", var);
 		}
 
 		if(type.basetype == spc::SPIRType::Struct) {
 			name += ".";
-			annotateCapture(compiler, type, name, bufOffset, captures, newDecos);
+			annotateCapture(compiled, type, name, bufOffset, captures, newDecos);
 		} else {
 			XfbCapture cap {};
 			auto baseSize = baseTypeSize(type, cap);
@@ -390,10 +357,10 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 				continue;
 			}
 
-			if(compiler.has_decoration(var, spv::DecorationBuiltIn)) {
+			if(compiled.has_decoration(var, spv::DecorationBuiltIn)) {
 				// filter out unwritten builtins
-				auto builtin = compiler.get_decoration(var, spv::DecorationBuiltIn);
-				if(!compiler.has_active_builtin(spv::BuiltIn(builtin), spv::StorageClassOutput)) {
+				auto builtin = compiled.get_decoration(var, spv::DecorationBuiltIn);
+				if(!compiled.has_active_builtin(spv::BuiltIn(builtin), spv::StorageClassOutput)) {
 					continue;
 				}
 				cap.builtin = builtin;
@@ -403,19 +370,19 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 			for(auto j = 0u; j < type.array.size(); ++j) {
 				auto dim = type.array[j];
 				if(!type.array_size_literal[j]) {
-					dim = compiler.evaluate_constant_u32(dim);
+					dim = compiled.evaluate_constant_u32(dim);
 				}
 
 				cap.array.push_back(dim);
 				size *= dim;
 			}
 
-			if(!compiler.has_decoration(type.self, spv::DecorationArrayStride) &&
+			if(!compiled.has_decoration(type.self, spv::DecorationArrayStride) &&
 					!type.array.empty()) {
 				addDeco(newDecos, var, spv11::Decoration::ArrayStride, baseSize);
 			}
 
-			dlg_assert_or(!compiler.has_decoration(var, spv::DecorationOffset), continue);
+			dlg_assert_or(!compiled.has_decoration(var, spv::DecorationOffset), continue);
 			// TODO: have to align offset properly for 64-bit types
 			// compiler.set_decoration(var, spv::DecorationOffset, bufOffset);
 			addDeco(newDecos, var, spv11::Decoration::Offset, bufOffset);
@@ -440,7 +407,7 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 	auto stride = bufOffset;
 
 	for(auto& var : ivars) {
-		auto storage = compiler.get_storage_class(var);
+		auto storage = compiled.get_storage_class(var);
 		if(storage != spv::StorageClassOutput) {
 			continue;
 		}
@@ -459,18 +426,17 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv,
 }
 
 XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
-		const char* entryPoint, ShaderSpecialization spec,
+		const char* entryPoint, spc::Compiler& compiled,
 		std::string_view modName) {
 	ZoneScoped;
 
-	auto patched = patchSpirvXfb(spirv, entryPoint, spec);
+	auto patched = patchSpirvXfb(spirv, entryPoint, compiled);
 	if(!patched.desc) {
 		return {};
 	}
 
-	// NOTE: useful for debugging
 	(void) modName;
-	/*
+#ifdef VIL_OUTPUT_PATCHED_SPIRV
 	std::string output = "vil";
 	if(!modName.empty()) {
 		output += "_";
@@ -490,7 +456,7 @@ XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
 			dlg_info("  >> builtin {}", *cap.builtin);
 		}
 	}
-	*/
+#endif // VIL_OUTPUT_PATCHED_SPIRV
 
 	VkShaderModuleCreateInfo ci {};
 	ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -509,7 +475,6 @@ XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
 	nameHandle(dev, ret.mod, pname.c_str());
 
 	ret.entryPoint = entryPoint;
-	ret.spec = std::move(spec);
 	ret.desc = std::move(patched.desc);
 	return ret;
 }
@@ -517,9 +482,6 @@ XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
 
 // ShaderModule
 SpirvData::~SpirvData() {
-	if(reflection.get()) {
-		spvReflectDestroyShaderModule(reflection.get());
-	}
 }
 
 ShaderModule::~ShaderModule() {
@@ -553,14 +515,23 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	mod.spv = {pCreateInfo->pCode, pCreateInfo->pCode + pCreateInfo->codeSize / 4};
 
 	mod.code = IntrusivePtr<SpirvData>(new SpirvData());
-	mod.code->reflection = std::make_unique<SpvReflectShaderModule>();
-	auto reflRes = spvReflectCreateShaderModule(pCreateInfo->codeSize,
-		pCreateInfo->pCode, mod.code->reflection.get());
-	dlg_assertl(dlg_level_info, reflRes == SPV_REFLECT_RESULT_SUCCESS);
 
 	// TODO: catch errors here
 	mod.code->compiled = std::make_unique<spc::Compiler>(
 		pCreateInfo->pCode, pCreateInfo->codeSize / 4);
+
+	// copy default values of specialization constants
+	auto& compiled = *mod.code->compiled;
+	auto specConstants = compiled.get_specialization_constants();
+	for(auto& sc : specConstants) {
+		auto& entry = mod.code->constantDefaults.emplace_back();
+		entry.constantID = sc.constant_id;
+
+		auto& constant = compiled.get_constant(sc.id);
+		dlg_assert(constant.m.columns == 1u);
+		dlg_assert(constant.m.c[0].vecsize == 1u);
+		entry.constant = std::make_unique<spc::SPIRConstant>(constant);
+	}
 
 	return res;
 }
@@ -576,6 +547,126 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
 	auto& dev = getDevice(device);
 	dev.shaderModules.mustErase(shaderModule);
 	dev.dispatch.DestroyShaderModule(device, shaderModule, pAllocator);
+}
+
+std::optional<spc::Resource> resource(const spc::Compiler& compiler,
+		u32 setID, u32 bindingID, VkDescriptorType type) {
+	std::optional<spc::Resource> ret;
+
+	auto check = [&](auto& resources, span<const VkDescriptorType> trefs) {
+		if(type != VK_DESCRIPTOR_TYPE_MAX_ENUM && !contains(trefs, type)) {
+			return;
+		}
+
+		for(auto& res : resources) {
+			if(!compiler.has_decoration(res.id, spv::DecorationDescriptorSet) ||
+					!compiler.has_decoration(res.id, spv::DecorationBinding)) {
+				dlg_warn("resource {} doesn't have set/binding decorations", res.name);
+				continue;
+			}
+
+			auto sid = compiler.get_decoration(res.id, spv::DecorationDescriptorSet);
+			auto bid = compiler.get_decoration(res.id, spv::DecorationBinding);
+
+			if(sid == setID && bid == bindingID) {
+				dlg_assert(!ret);
+				ret = res;
+				break;
+			}
+		}
+	};
+
+	auto resources = compiler.get_shader_resources();
+	check(resources.acceleration_structures, {{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR}});
+	check(resources.sampled_images, {{
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+	}});
+	check(resources.separate_images, {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE}});
+	check(resources.separate_samplers, {{VK_DESCRIPTOR_TYPE_SAMPLER}});
+	check(resources.storage_images, {{
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+	}});
+	check(resources.storage_buffers, {{
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC,
+	}});
+	check(resources.uniform_buffers, {{
+		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+		VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT,
+	}});
+	check(resources.subpass_inputs, {{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT}});
+
+	return ret;
+}
+
+BindingNameRes bindingName(const spc::Compiler& compiler, u32 setID, u32 bindingID) {
+	auto ores = resource(compiler, setID, bindingID);
+	if(!ores) {
+		return {BindingNameRes::Type::notfound, {}};
+	}
+
+	auto& res = *ores;
+	if(res.name.empty()) {
+		return {BindingNameRes::Type::unnamed, {}};
+	}
+
+	return {BindingNameRes::Type::valid, std::move(res.name)};
+}
+
+ShaderReflectionAccess accessReflection(SpirvData& mod,
+		const ShaderSpecialization& specialization, const std::string& entryPoint,
+		u32 spvExecutionModel) {
+	dlg_assert(mod.compiled);
+
+	ShaderReflectionAccess access;
+	access.lock = std::unique_lock<DebugMutex>(mod.mutex);
+	access.data = &mod;
+
+	auto& compiled = *mod.compiled;
+	compiled.set_entry_point(entryPoint, spv::ExecutionModel(spvExecutionModel));
+
+	auto specConstants = compiled.get_specialization_constants();
+	for(auto& sc : specConstants) {
+		auto& dst = compiled.get_constant(sc.id);
+		dlg_assert(dst.m.columns == 1u);
+		dlg_assert(dst.m.c[0].vecsize == 1u);
+
+		auto found = false;
+		for(auto& specEntry : specialization.entries) {
+			if(specEntry.constantID != sc.constant_id) {
+				continue;
+			}
+
+			auto data = specialization.data.data() + specEntry.offset;
+			dlg_assert(specEntry.size == 4u);
+			dlg_assert(specEntry.offset + specEntry.size <= specialization.data.size());
+			std::memcpy(&dst.m.c[0].r[0], data, specEntry.size);
+
+			found = true;
+			break;
+		}
+
+		// if specialization wasn't found, reset it to the default value.
+		// needed in case a previous access specialized it.
+		if(!found) {
+			for(auto& constant : mod.constantDefaults) {
+				if(constant.constantID != sc.constant_id) {
+					continue;
+				}
+
+				dst.m.c[0].r[0] = constant.constant->m.c[0].r[0];
+				found = true;
+				break;
+			}
+
+			dlg_assert(found);
+		}
+	}
+
+	return access;
 }
 
 } // namespace vil

@@ -21,6 +21,7 @@ public:
 
 	IOView view_;
 	bool beforeCommand_ {}; // whether state is viewed before cmd
+	bool showUnusedBindings_ {};
 
 	union {
 		struct {
@@ -34,6 +35,7 @@ public:
 
 			// image view state
 			// buffer view state
+			VkShaderStageFlagBits stage;
 		} ds;
 
 		struct {
@@ -89,6 +91,9 @@ private:
 	void displayVertexInput(Draw& draw, const DrawCmdBase&);
 	void displayVertexOutput(Draw& draw, const DrawCmdBase&);
 	void displayVertexViewer(Draw& draw);
+
+	const PipelineShaderStage* displayDescriptorStageSelector(const Pipeline& pipe,
+		unsigned setID, unsigned bindingID, VkDescriptorType dsType);
 
 	// Can only be called once per frame
 	void displayImage(Draw& draw, const CopiedImage& img);

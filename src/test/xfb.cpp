@@ -3,6 +3,7 @@
 #include <util/span.hpp>
 #include <util/bytes.hpp>
 #include <dlg/dlg.hpp>
+#include <spirv-cross/spirv_cross.hpp>
 #include "bugged.hpp"
 #include "data/a.vert.spv.h" // see a.vert; compiled manually
 
@@ -31,7 +32,10 @@ const XfbCapture& getCapture(const XfbPatchDesc& desc, spv11::BuiltIn builtin) {
 }
 
 TEST(xfb_patch) {
-	auto patched = patchSpirvXfb(a_vert_spv_data, "main", {});
+	spc::Compiler compiled{{std::begin(a_vert_spv_data), std::end(a_vert_spv_data)}};
+	compiled.set_entry_point("main", spv::ExecutionModelVertex);
+
+	auto patched = patchSpirvXfb(a_vert_spv_data, "main", compiled);
 	EXPECT(patched.desc.get() != nullptr, true);
 	EXPECT(patched.desc->captures.size(), 5u);
 	EXPECT(patched.desc->stride, u32(16 + 4 + 16 + 1 * 16 + 16));
@@ -60,17 +64,17 @@ TEST(xfb_patch) {
 }
 
 TEST(xfb_patch_spec) {
-	u32 specVal = 8u;
-	ShaderSpecialization spec;
-	DynWriteBuf& wb = spec.data;
-	write(wb, specVal);
+	spc::Compiler compiled{{std::begin(a_vert_spv_data), std::end(a_vert_spv_data)}};
+	compiled.set_entry_point("main", spv::ExecutionModelVertex);
 
-	auto& entry = spec.entries.emplace_back();
-	entry.constantID = 0u;
-	entry.offset = 0u;
-	entry.size = 4u;
+	// set specialization constant to '8u'
+	auto specConstants = compiled.get_specialization_constants();
+	EXPECT(specConstants.size(), 1u);
+	EXPECT(specConstants[0].constant_id, 0u);
+	auto& constant = compiled.get_constant(specConstants[0].id);
+	constant.m.c[0].r[0].u32 = 8u;
 
-	auto patched = patchSpirvXfb(a_vert_spv_data, "main", spec);
+	auto patched = patchSpirvXfb(a_vert_spv_data, "main", compiled);
 	EXPECT(patched.desc.get() != nullptr, true);
 	EXPECT(patched.desc->captures.size(), 5u);
 	EXPECT(patched.desc->stride, u32(16 + 4 + 16 + 3 * 16 + 16));

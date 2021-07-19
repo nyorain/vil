@@ -1,5 +1,6 @@
 #include <gui/commandHook.hpp>
 #include <device.hpp>
+#include <layer.hpp>
 #include <ds.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
@@ -13,6 +14,7 @@
 #include <gui/gui.hpp>
 #include <command/desc.hpp>
 #include <command/commands.hpp>
+#include <vk/enumString.hpp>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
 #include <vk/format_utils.h>
@@ -71,7 +73,7 @@ bool copyableDescriptorSame(const DescriptorSetState& a, const DescriptorSetStat
 	return false;
 }
 
-void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
+bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam) {
 	ZoneScoped;
 
@@ -109,6 +111,47 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	ici.mipLevels = levelCount;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+
+	// Before creating image, check if device supports everything we need.
+	// We will not copy the image in that case but in almost all cases there
+	// are workarounds (e.g. copy to other format, split size or array layers
+	// or whatever) that we can implement when this really fails for someone
+	// and some usecase we want to support. So we make log every issue.
+	VkImageFormatProperties fmtProps;
+	auto res = dev.ini->dispatch.GetPhysicalDeviceImageFormatProperties(
+		dev.phdev, ici.format, ici.imageType, ici.tiling,
+		ici.usage, ici.flags, &fmtProps);
+	if(res == VK_ERROR_FORMAT_NOT_SUPPORTED) {
+		dlg_warn("CopiedImage: Unsupported format {} (imageType {}, "
+			"tiling {}, usage {}, flags {}",
+			vk::name(ici.format), vk::name(ici.imageType), vk::name(ici.tiling),
+			vk::flagNames(VkImageUsageFlagBits(ici.usage)),
+			vk::flagNames(VkImageCreateFlagBits(ici.flags)));
+		return false;
+	}
+
+	if(ici.arrayLayers > fmtProps.maxArrayLayers) {
+		dlg_warn("CopiedImage: only {} layers supported (needing {})",
+			fmtProps.maxArrayLayers, ici.arrayLayers);
+		return false;
+	}
+
+	if(ici.mipLevels > fmtProps.maxMipLevels) {
+		dlg_warn("CopiedImage: only {} levels supported (needing {})",
+			fmtProps.maxMipLevels, ici.mipLevels);
+		return false;
+	}
+
+	if(ici.extent.width > fmtProps.maxExtent.width ||
+			ici.extent.height > fmtProps.maxExtent.height ||
+			ici.extent.depth > fmtProps.maxExtent.depth) {
+		dlg_warn("CopiedImage: max supported size {}x{}x{} (needing {}x{}x{})",
+			fmtProps.maxExtent.width, fmtProps.maxExtent.height, fmtProps.maxExtent.depth,
+			ici.extent.width, ici.extent.height, ici.extent.depth);
+		return false;
+	}
+
+	// Create image
 	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &image));
 	nameHandle(dev, this->image, "CopiedImage:image");
 
@@ -144,7 +187,7 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 			break;
 		default:
 			dlg_error("unreachable");
-			break;
+			return false;
 	}
 	vci.format = format;
 	vci.subresourceRange.aspectMask = aspectMask & ~(VK_IMAGE_ASPECT_STENCIL_BIT);
@@ -158,6 +201,8 @@ void CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &stencilView));
 		nameHandle(dev, this->stencilView, "CopiedImage:stencilView");
 	}
+
+	return true;
 }
 
 CopiedImage::~CopiedImage() {
@@ -909,8 +954,13 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		}
 	}
 
-	dst.init(dev, src.ci.format, extent, srcSubres.layerCount,
+	auto success = dst.init(dev, src.ci.format, extent, srcSubres.layerCount,
 		srcSubres.levelCount, srcSubres.aspectMask, srcQueueFam);
+	if(!success) {
+		errorMessage = "Can't copy image, see log output";
+		return;
+	}
+
 	dst.srcSubresRange = srcSubres;
 
 	// perform copy

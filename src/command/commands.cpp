@@ -880,30 +880,51 @@ Matcher BeginRenderPassCmd::match(const Command& base) const {
 		return Matcher::noMatch();
 	}
 
+	// match render pass description
+	if(!rp || !cmd->rp) {
+		// Jumping out here is bad since we might miss the perfect candidate
+		// just because we don't have the render pass information anymore.
+		// We could fix this by keeping the renderpass alive by this command.
+		// Not sure if worth it though, don't know a valid use case of recreating
+		// a renderpass with same parameters.
+		dlg_trace("not matching BeginRenderPassCmd since a rp was destroyed");
+		return Matcher::noMatch();
+	}
+
+	if(!same(rp->desc, cmd->rp->desc)) {
+		return Matcher::noMatch();
+	}
+
+	// High base match probability since the RenderPasses matched.
+	Matcher m;
+	m.total += 4.f;
+	m.match += 4.f;
+
+	// The case where we try to match a command with destroyed framebuffer
+	// is ugly. Keeping references to the attachments does not help since
+	// they likely were destroyed as well, e.g. on application/renderTarget
+	// resize. We currently work around this by still returning a valid match
+	// here.
+	if(!fb || !cmd->fb) {
+		// Make sure the match isn't perfect at least.
+		if(fb) {
+			m.total += fb->attachments.size();
+		} else if(cmd->fb) {
+			m.total += cmd->fb->attachments.size();
+		} else {
+			m.total += 1;
+		}
+
+		dlg_trace("matching BeginRenderPassCmd with destroyed fb");
+		return m;
+	}
+
 	// TODO
-	// - this will currently return false negatives when render passes or framebuffers are used
-	//   as temporary handles, created as needed and destroyed when submission is
-	//   done. We would have to keep the renderPassDesc and framebuffer description
-	//   (mainly the referenced image views) alive.
 	// - will break for imageless framebuffers. Should probably store
 	//   the used attachments in BeginRenderPassCmd and compare them here
 	//   instead of relying on the attachments being stored in the fb.
-
-	// match render pass description
-	if(!rp || !cmd->rp || !same(rp->desc, cmd->rp->desc)) {
-		return Matcher::noMatch();
-	}
-
-	if(!fb || !cmd->fb) {
-		return Matcher::noMatch();
-	}
-
 	dlg_assert_or(fb->attachments.size() == cmd->fb->attachments.size(),
 		return Matcher::noMatch());
-
-	Matcher m;
-	m.total += 5.f;
-	m.match += 5.f;
 
 	for(auto i = 0u; i < fb->attachments.size(); ++i) {
 		auto va = fb->attachments[i];

@@ -1,3 +1,23 @@
+- [x] in CopiedImage::init: check for image usage support
+	- [x] generally: allow the image copy operation to fail.
+- [x] add support for timeline semaphores. Should just require some simple
+      changes to submission logic when we use them inside the layer.
+	  Test with official samples repo
+	  {couldn't find an issue with them anymore}
+- [x] remove -DUNICODE from defines
+	- [x] also check that vil_api works either way, can't depend on that
+- [x] fix "command not found 4 frames" shortly appearing when selecting new command
+      {fixed by simply increasing the threshold for showing the message,
+	   might come back to haunt us later on :)}
+- [x] correctly integrate spirv-cross everywhere, remove spirv_reflect
+	- [x] correctly set specialization constants before using it for reflection
+	      reset previously set constants to default. Not sure how tho.
+	- [x] figure our sync for spec constants. I guess we should have a mutex
+	- [x] remove util/spirv.h
+- [x] we should likely switch to spirv-cross instead of spirv-reflect
+	- we will probably need some its functionality later on anyways
+	- already hit some hard limitations of spirv-cross that would require
+	      a lot of changes
 - [x] Unselect a command when new frames don't contain it any more?
       We will still view the old state at the moment. Unselecting can
 	  be a problem since we might want to continue viewing the stale
@@ -59,6 +79,8 @@
 	  to hidden. But then we can't test vil. Maybe just export the stuff
 	  we test explicitly? Same for spirv_reflect basically.
 	  {can be removed in future, we don't export symbols anymore}
+- [x] ditch spirv_reflect for spirv_cross. Better maintained, support lots of features 
+      that we need that spirv_reflect does not
 - [x] commandHook: See the TODO on 'completed'. Might create problems atm.
 - [x] fix commandHook for updateAfterBind, updateUnusedWhilePending.
       We might need to invalidate the hooked records when a used descriptor

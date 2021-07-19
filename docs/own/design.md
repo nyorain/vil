@@ -714,3 +714,36 @@ Ok we need it in the following case:
   Now suddenly, the command reappears, we get a completed hook.
   We want to match its context with the selected batch. So we need that,
   separately from the batch that is currently being shown.
+
+## A full sync prototype
+
+So, as uncovered in the notes about supporting buffer_device_address, we need
+to more general synchronization. Long story short: We need to synchronize
+every access we do on application resources with *everything*. We can't
+rely on anything, even in CommandHook submission.
+
+Synchronization with stuff on the same queue is simple, just add a general
+barrier (we already do this in most places). Synchronization with
+other queues is harder.
+
+With timeline semaphores, we could simply have for each queue:
+- a timeline semaphore that was inserted *after* the last submission.
+  When hooking a command or submitting the gui cb with access to application
+  resources, we simply wait upon these most-recent semaphores
+  of all other queues (as long as they still have submissions pending).
+- If there is still a gui or hooked submission pending, a timeline semaphore
+  to that. We will wait for it in all future submissions the application makes.
+
+Without timeline semaphores, things look worse:
+- we potentially have to insert *a lot* of semaphores later on to other queues, 
+  on demand. That is really ugly, causing many vkQueueSubmit calls.
+
+Maybe just don't support full-sync when timeline semaphores aren't supported?
+Or at least don't support it for now. The biggest use for full-sync will
+be buffer_device_address (ok, granted: and weird applications binding the same
+resource from multiple queues at the same time. Sounds bad, but applications are
+probably doing it) anyways and drivers will more likely support
+timeline semaphores than buffer_device_address I guess. If someone
+pops up that really needs the feature (strictly speaking: fix, not feature) for 
+some ancient hardware, we can still see how to add it without making the
+code 10x more complicated.

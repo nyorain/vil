@@ -14,7 +14,7 @@
 #include <imgui/imgui.h>
 #include <vk/format_utils.h>
 #include <vk/enumString.hpp>
-#include <util/spirv_reflect.h>
+#include <spirv-cross/spirv_cross.hpp>
 
 #include <frustum.vert.spv.h>
 #include <vertices.vert.spv.h>
@@ -701,9 +701,6 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
 	ZoneScoped;
 
-	// TODO: display binding & attribs information
-	// TODO: only show vertex range used for draw call
-
 	dlg_assert_or(cmd.state.pipe, return);
 	if(state.vertexBufCopies.size() < cmd.state.pipe->vertexBindings.size()) {
 		if(!state.errorMessage.empty()) {
@@ -717,10 +714,10 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 	auto& pipe = *cmd.state.pipe;
 
-	SpvReflectShaderModule* vertStage = nullptr;
+	const PipelineShaderStage* vertStage = nullptr;
 	for(auto& stage : pipe.stages) {
 		if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
-			vertStage = &nonNull(nonNull(stage.spirv).reflection);
+			vertStage = &stage;
 			break;
 		}
 	}
@@ -734,11 +731,20 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	// match bindings to input variables into
 	// (pipe.vertexAttrib, vertStage->input_variables) id pairs
 	std::vector<std::pair<u32, u32>> attribs;
+	auto refl = accessReflection(*vertStage);
+	auto& compiled = refl.get();
+	auto resources = compiled.get_shader_resources();
+
 	for(auto a = 0u; a < pipe.vertexAttribs.size(); ++a) {
 		auto& attrib = pipe.vertexAttribs[a];
-		for(auto i = 0u; i < vertStage->input_variable_count; ++i) {
-			auto& iv = *vertStage->input_variables[i];
-			if(iv.location == attrib.location) {
+		for(auto i = 0u; i < resources.stage_inputs.size(); ++i) {
+			auto& iv = resources.stage_inputs[i];
+			if(!compiled.has_decoration(iv.id, spv::DecorationLocation)) {
+				dlg_warn("vertex shader input without decoration location?");
+				continue;
+			}
+			auto loc = compiled.get_decoration(iv.id, spv::DecorationLocation);
+			if(loc == attrib.location) {
 				attribs.push_back({a, i});
 			}
 		}
@@ -800,8 +806,6 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	}
 
 	// TODO sort attribs by input location?
-	// TODO when drawing indexed, we really need to consider and display
-	//   the used indices, otherwise this is utterly useless.
 
 	auto colCount = attribs.size();
 	if(params.indexType) {
@@ -819,8 +823,8 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			}
 
 			for(auto& attrib : attribs) {
-				auto& iv = *vertStage->input_variables[attrib.second];
-				ImGui::TableSetupColumn(iv.name);
+				auto& iv = resources.stage_inputs[attrib.second];
+				ImGui::TableSetupColumn(iv.name.empty() ? "?" : iv.name.c_str());
 			}
 
 			ImGui::TableHeadersRow();

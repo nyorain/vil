@@ -6,11 +6,11 @@
 #include <util/f16.hpp>
 #include <util/profiling.hpp>
 #include <util/buffmt.hpp>
-#include <util/spirv_reflect.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
 #include <command/commands.hpp>
 #include <command/record.hpp>
+#include <threadContext.hpp>
 #include <pipe.hpp>
 #include <accelStruct.hpp>
 #include <image.hpp>
@@ -26,210 +26,6 @@
 //   when the cooresponding handle is destroyed/invalidated).
 
 namespace vil {
-
-// util
-SpvReflectDescriptorBinding* getReflectBinding(const SpvReflectShaderModule& mod,
-		unsigned setID, unsigned bindingID) {
-	for(auto s = 0u; s < mod.descriptor_set_count; ++s) {
-		auto& set = mod.descriptor_sets[s];
-		if(set.set != setID) {
-			continue;
-		}
-
-		for(auto b = 0u; b < set.binding_count; ++b) {
-			auto* binding = set.bindings[b];
-			if(binding->binding == bindingID) {
-				return binding;
-			}
-		}
-	}
-
-	return nullptr;
-}
-
-// TODO: remove, use buffmt instead, everywhere
-std::string formatScalar(SpvReflectTypeFlags type,
-		const SpvReflectNumericTraits& traits, span<const std::byte> data) {
-	if(type == SPV_REFLECT_TYPE_FLAG_INT) {
-		dlg_assert(traits.scalar.width == 32);
-		auto sgn = traits.scalar.signedness;
-		switch(traits.scalar.width) {
-			case 8:  return dlg::format("{}", sgn ? copy<i8> (data) : copy<u8> (data));
-			case 16: return dlg::format("{}", sgn ? copy<i16>(data) : copy<u16>(data));
-			case 32: return dlg::format("{}", sgn ? copy<i32>(data) : copy<u32>(data));
-			case 64: return dlg::format("{}", sgn ? copy<i64>(data) : copy<u64>(data));
-			default: break;
-		}
-	} else if(type == SPV_REFLECT_TYPE_FLAG_FLOAT) {
-		switch(traits.scalar.width) {
-			case 16: return dlg::format("{}", copy<f16>(data));
-			case 32: return dlg::format("{}", copy<float>(data));
-			case 64: return dlg::format("{}", copy<double>(data));
-			default: break;
-		}
-	} else if(type == SPV_REFLECT_TYPE_FLAG_BOOL) {
-		switch(traits.scalar.width) {
-			case 8: return dlg::format("{}", bool(copy<u8>(data)));
-			case 16: return dlg::format("{}", bool(copy<u16>(data)));
-			case 32: return dlg::format("{}", bool(copy<u32>(data)));
-			case 64: return dlg::format("{}", bool(copy<u64>(data)));
-			default: break;
-		}
-	}
-
-	dlg_warn("Unsupported scalar type (flags {})", std::bitset<32>(u32(type)));
-	return "<Unsupported type>";
-}
-
-void display(SpvReflectBlockVariable& bvar, span<const std::byte> data);
-
-// TODO: probably cleaner to use a table for display here
-void displayNonArray(SpvReflectBlockVariable& bvar, span<const std::byte> data,
-		const char* varName) {
-	auto& type = nonNull(bvar.type_description);
-	varName = varName ? varName : (bvar.name ? bvar.name : "?");
-
-	auto typeFlags = type.type_flags & (~SPV_REFLECT_TYPE_FLAG_ARRAY);
-	auto scalarFlags =
-		SPV_REFLECT_TYPE_FLAG_BOOL |
-		SPV_REFLECT_TYPE_FLAG_FLOAT |
-		SPV_REFLECT_TYPE_FLAG_INT;
-	if((typeFlags & ~scalarFlags) == 0) { // must be scalar
-		auto nBytes = bvar.numeric.scalar.width / 8;
-		dlg_assert(data.size() >= nBytes);
-		auto val = formatScalar(typeFlags, type.traits.numeric, data.first(nBytes));
-
-		ImGui::Columns(2);
-		imGuiText("{}:", varName);
-
-		ImGui::NextColumn();
-		imGuiText("{}", val);
-		ImGui::Columns();
-	} else if((typeFlags & ~(scalarFlags | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
-		auto comps = type.traits.numeric.vector.component_count;
-		auto* sep = "";
-		auto compSize = type.traits.numeric.scalar.width / 8;
-		auto varStr = std::string("");
-		auto scalarType = typeFlags & scalarFlags;
-
-		for(auto i = 0u; i < comps; ++i) {
-			auto d = data.subspan(i * compSize, compSize);
-			auto var = formatScalar(scalarType, type.traits.numeric, d);
-			varStr += dlg::format("{}{}", sep, var);
-			sep = ", ";
-		}
-
-		ImGui::Columns(2);
-		imGuiText("{}:", varName);
-
-		ImGui::NextColumn();
-		imGuiText("{}", varStr);
-		ImGui::Columns();
-
-	} else if((typeFlags & ~(scalarFlags |
-			SPV_REFLECT_TYPE_FLAG_MATRIX | SPV_REFLECT_TYPE_FLAG_VECTOR)) == 0) {
-		auto& mt = type.traits.numeric.matrix;
-		auto compSize = type.traits.numeric.scalar.width / 8;
-		auto scalarType = typeFlags & scalarFlags;
-		auto rowMajor = bvar.decoration_flags & SPV_REFLECT_DECORATION_ROW_MAJOR;
-
-		auto deco = "";
-		if(rowMajor) {
-			deco = " [row major memory]";
-		} else {
-			deco = " [column major memory]";
-		}
-
-		ImGui::Columns(2);
-		imGuiText("{}{}:", varName, deco);
-
-		ImGui::NextColumn();
-
-		if(ImGui::BeginTable("Matrix", mt.column_count)) {
-			for(auto r = 0u; r < mt.row_count; ++r) {
-				ImGui::TableNextRow();
-
-				for(auto c = 0u; c < mt.column_count; ++c) {
-					auto offset = rowMajor ? r * mt.stride + c * compSize : c * mt.stride + r * compSize;
-					auto d = data.subspan(offset, compSize);
-					auto var = formatScalar(scalarType, type.traits.numeric, d);
-					ImGui::TableNextColumn();
-					imGuiText("{}", var);
-				}
-			}
-
-			ImGui::EndTable();
-		}
-
-		ImGui::Columns();
-	} else if(typeFlags & SPV_REFLECT_TYPE_FLAG_STRUCT) {
-		imGuiText("{}", varName);
-	} else {
-		imGuiText("{}: TODO not implemented", varName);
-	}
-
-	ImGui::Separator();
-
-	for(auto m = 0u; m < bvar.member_count; ++m) {
-		auto& member = bvar.members[m];
-		ImGui::Indent();
-		display(member, data);
-		ImGui::Unindent();
-	}
-}
-
-void display(SpvReflectBlockVariable& bvar, span<const std::byte> data) {
-	auto& type = nonNull(bvar.type_description);
-	auto varName = bvar.name ? bvar.name : "?";
-	data = data.subspan(bvar.offset);
-
-	// TODO: arrays (but pretty much the whole buffer display thing) could
-	// profit from good ImGui-based clipping. E.g. skip all formatting when
-	// not visible. And for arrays we can use ListClip i guess
-	if(type.type_flags & SPV_REFLECT_TYPE_FLAG_ARRAY) {
-		auto& at = type.traits.array;
-		if(at.dims_count != 1u) {
-			// TODO: fix this
-			imGuiText("{}: TODO: multiple array dimensions not supported", varName);
-		} else {
-			if(at.dims[0] == 0xFFFFFFFF) {
-				// TODO: needs spirv reflect support, see issue there
-				imGuiText("{}: TODO: specialization constant array size not supported", varName);
-			} else if(at.dims[0] == 0u) {
-				// runtime array
-				// TODO: implement paging
-				constexpr auto maxCount = 100;
-
-				auto varName = bvar.name ? bvar.name : "?";
-				auto i = 0u;
-				while(data.size() >= at.stride && i < maxCount) {
-					auto d = data.subspan(0, at.stride);
-					auto name = dlg::format("{}[{}]", varName, i++);
-
-					ImGui::Indent();
-					displayNonArray(bvar, d, name.c_str());
-					ImGui::Unindent();
-
-					data = data.subspan(at.stride);
-				}
-			} else {
-				// TODO: limit somehow, might be huge
-				auto varName = bvar.name ? bvar.name : "?";
-				for(auto i = 0u; i < at.dims[0]; ++i) {
-					auto d = data.subspan(i * at.stride);
-
-					auto name = dlg::format("{}[{}]", varName, i);
-
-					ImGui::Indent();
-					displayNonArray(bvar, d, name.c_str());
-					ImGui::Unindent();
-				}
-			}
-		}
-	} else {
-		displayNonArray(bvar, data, nullptr);
-	}
-}
 
 // CommandViewer
 CommandViewer::CommandViewer() = default;
@@ -358,12 +154,16 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			selectCommandView = true;
 
 			for(auto& stage : pipeStages) {
-				auto& refl = nonNull(stage.spirv->reflection);
-				if(refl.push_constant_block_count &&
-						viewData_.pushConstants.stage == stage.stage) {
-					selectCommandView = false;
-					break;
+				if(viewData_.pushConstants.stage != stage.stage) {
+					continue;
 				}
+
+				auto refl = accessReflection(stage);
+				if(!refl.get().get_shader_resources().push_constant_buffers.empty()) {
+					selectCommandView = false;
+				}
+
+				break;
 			}
 
 			break;
@@ -475,102 +275,67 @@ void CommandViewer::displayTransferIOList() {
 }
 
 void CommandViewer::displayDsList() {
-	auto& cmd = nonNull(command_);
+	auto& baseCmd = nonNull(command_);
 
+	const StateCmdBase* cmd {};
 	const DrawCmdBase* drawCmd {};
 	const DispatchCmdBase* dispatchCmd {};
 	const TraceRaysCmdBase* traceCmd {};
-	span<const BoundDescriptorSet> dss {};
 
-	switch(cmd.type()) {
+	switch(baseCmd.type()) {
 		case CommandType::draw:
-			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
-			dss = drawCmd->state.descriptorSets;
+			drawCmd = deriveCast<const DrawCmdBase*>(&baseCmd);
+			cmd = drawCmd;
 			break;
 		case CommandType::dispatch:
-			dispatchCmd = deriveCast<const DispatchCmdBase*>(&cmd);
-			dss = dispatchCmd->state.descriptorSets;
+			dispatchCmd = deriveCast<const DispatchCmdBase*>(&baseCmd);
+			cmd = dispatchCmd;
 			break;
 		case CommandType::traceRays:
-			traceCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
-			dss = traceCmd->state.descriptorSets;
+			traceCmd = deriveCast<const TraceRaysCmdBase*>(&baseCmd);
+			cmd = traceCmd;
 			break;
 		default:
 			return;
 	}
 
-	// TODO: make this a runtime setting
+	auto dss = cmd->boundDescriptors().descriptorSets;
+
+	if(!cmd->boundPipe()) {
+		ImGui::Text("Error: No pipeline");
+		return;
+	}
+
+	auto& pipe = *cmd->boundPipe();
+
+	// TODO: make runtime setting?
+	// whether to notify of unbound descriptor sets
 	static constexpr auto showUnboundSets = true;
-	static constexpr auto showUnusedBindings = false;
-	static constexpr auto unnamedName = "<unnamed>";
-
-	auto modBindingName = [&](const SpvReflectShaderModule& refl, u32 setID, u32 bindingID) -> const char* {
-		auto* binding = getReflectBinding(refl, setID, bindingID);
-		if(binding) {
-			if(binding->name && binding->name[0] != '\0') {
-				return binding->name;
-			} else if(binding->type_description &&
-					binding->type_description->type_name &&
-					binding->type_description->type_name[0] != '\0') {
-				return binding->type_description->type_name;
-			}
-
-			return unnamedName;
-		}
-
-		return nullptr;
-	};
-
-	// Returns nullopt if the binding isn't used.
-	auto bindingName = [&](u32 setID, u32 bindingID) -> std::optional<const char*> {
-		const char* best = nullptr;
-		if(dispatchCmd && dispatchCmd->state.pipe) {
-			auto& refl = nonNull(nonNull(dispatchCmd->state.pipe->stage.spirv).reflection);
-			best = modBindingName(refl, setID, bindingID);
-		} else if(drawCmd && drawCmd->state.pipe) {
-			for(auto& stage : drawCmd->state.pipe->stages) {
-				auto& refl = nonNull(nonNull(stage.spirv).reflection);
-				if(auto name = modBindingName(refl, setID, bindingID); name) {
-					best = name;
-					if(best != unnamedName) {
-						return best;
-					}
-				}
-			}
-		} else if(traceCmd && traceCmd->state.pipe) {
-			for(auto& stage : traceCmd->state.pipe->stages) {
-				auto& refl = nonNull(nonNull(stage.spirv).reflection);
-				if(auto name = modBindingName(refl, setID, bindingID); name) {
-					best = name;
-					if(best != unnamedName) {
-						return best;
-					}
-				}
-			}
-		}
-
-		if(best) {
-			return best;
-		}
-
-		// We come here if no shader has a valid name for the reosurce.
-		return showUnusedBindings ? std::optional("<unused>") : std::nullopt;
-	};
 
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	if(ImGui::TreeNodeEx("Descriptors", ImGuiTreeNodeFlags_FramePadding)) {
 		// NOTE: better to iterate over sets/bindings in shader stages?
-		for(auto i = 0u; i < dss.size(); ++i) {
-			auto& ds = dss[i];
+		for(auto setID = 0u; setID < dss.size(); ++setID) {
+			auto& ds = dss[setID];
 
+			// No descriptor set bound
 			if(!ds.ds) {
 				if(showUnboundSets) {
-					auto label = dlg::format("Descriptor Set {}: null", i);
+					auto label = dlg::format("Descriptor Set {}: unbound", setID);
 					auto flags = ImGuiTreeNodeFlags_Bullet |
 						ImGuiTreeNodeFlags_Leaf |
 						ImGuiTreeNodeFlags_NoTreePushOnOpen |
 						ImGuiTreeNodeFlags_FramePadding;
 					ImGui::TreeNodeEx(label.c_str(), flags);
+
+					if(ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+						imGuiText("No descriptor was bound for this slot");
+						// TODO: check whether the pipeline uses any bindings
+						// of this descriptor statically. Warn, if so.
+						// Are there any descriptor flags that would allow this?
+						ImGui::EndTooltip();
+					}
 				}
 
 				continue;
@@ -582,35 +347,84 @@ void CommandViewer::displayDsList() {
 			auto& state = *stateIt->second;
 			dlg_assert(state.layout);
 
-			auto label = dlg::format("Descriptor Set {}", i);
+			auto label = dlg::format("Descriptor Set {}", setID);
 			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 			if(ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_FramePadding)) {
-				for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
-					auto oLabel = bindingName(i, b);
-					if(!oLabel) {
+				for(auto bID = 0u; bID < state.layout->bindings.size(); ++bID) {
+					auto sstages = stages(pipe);
+					dlg_assert(!sstages.empty());
+
+					ThreadMemScope memScope;
+					auto stageNames = memScope.alloc<std::string>(sstages.size());
+
+					std::optional<u32> firstValid;
+					for(auto i = 0u; i < sstages.size(); ++i) {
+						auto& stage = sstages[i];
+						auto refl = accessReflection(stage);
+						auto name = bindingName(refl.get(), setID, bID);
+						if(name.type == BindingNameRes::Type::valid) {
+							stageNames[i] = std::move(name.name);
+							if(!firstValid) {
+								firstValid = i;
+							}
+						} else if(name.type == BindingNameRes::Type::unnamed) {
+							stageNames[i] = "<unnamed>";
+						} else if(name.type == BindingNameRes::Type::notfound) {
+							stageNames[i] = "<not used in this stage>";
+						}
+					}
+
+					if(!firstValid && !showUnusedBindings_) {
 						continue;
 					}
 
-					auto label = *oLabel;
 					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
 						ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
-					if(view_ == IOView::ds && viewData_.ds.set == i && viewData_.ds.binding == b) {
+					if(view_ == IOView::ds && viewData_.ds.set == setID && viewData_.ds.binding == bID) {
 						flags |= ImGuiTreeNodeFlags_Selected;
 					}
 
 					// NOTE
-					// - additionally indicate type? Just add a small UBO, SSBO, Image,
-					//   Sampler, StorageImage etc prefix? Also array bounds
 					// - Previews would be the best on the long run but hard to get
 					//   right I guess (also: preview of buffers?)
-					// - could show name of bound resource
-					auto msg = dlg::format("{}: {}", b, label);
+					// - could show name of bound resource(s)?
+					// - could show additional information, e.g. shader decorations
+					auto id = firstValid ? *firstValid : 0u;
+					auto* label = stageNames[id].c_str();
+					auto msg = dlg::format("{}: {}", bID, label);
+
 					ImGui::TreeNodeEx(msg.c_str(), flags);
 					if(ImGui::IsItemClicked()) {
 						view_ = IOView::ds;
-						viewData_.ds = {i, b, 0};
+						viewData_.ds = {setID, bID, 0, VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM};
 						ioImage_ = {};
 						updateHook();
+					}
+					if(ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+
+						auto& layout = state.layout->bindings[bID];
+						std::string type = vk::name(layout.descriptorType);
+						if(layout.descriptorCount > 1) {
+							auto count = descriptorCount(state, bID);
+							type += dlg::format("[{}]", count);
+							if(layout.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
+								type += " (variable count)";
+
+							}
+						}
+
+						imGuiText("Type: {}", type);
+
+						if(sstages.size() > 1u) {
+							ImGui::Separator();
+							for(auto i = 0u; i < sstages.size(); ++i) {
+								imGuiText("{}: {}", vk::name(sstages[i].stage),
+									stageNames[i]);
+							}
+						}
+
+						ImGui::EndTooltip();
 					}
 				}
 
@@ -625,6 +439,7 @@ void CommandViewer::displayDsList() {
 void CommandViewer::displayIOList() {
 	auto& cmd = nonNull(command_);
 
+	const StateCmdBase* stateCmd {};
 	const DrawCmdBase* drawCmd {};
 	const DispatchCmdBase* dispatchCmd {};
 	const TraceRaysCmdBase* traceCmd {};
@@ -632,12 +447,15 @@ void CommandViewer::displayIOList() {
 	switch(cmd.type()) {
 		case CommandType::draw:
 			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
+			stateCmd = drawCmd;
 			break;
 		case CommandType::dispatch:
 			dispatchCmd = deriveCast<const DispatchCmdBase*>(&cmd);
+			stateCmd = dispatchCmd;
 			break;
 		case CommandType::traceRays:
 			traceCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
+			stateCmd = traceCmd;
 			break;
 		default:
 			break;
@@ -660,6 +478,7 @@ void CommandViewer::displayIOList() {
 	// Transfer IO
 	if(cmd.type() == CommandType::transfer) {
 		displayTransferIOList();
+		return;
 	}
 
 	// Vertex IO
@@ -744,28 +563,15 @@ void CommandViewer::displayIOList() {
 		viewPCRStage = viewData_.pushConstants.stage;
 	}
 
-	if(dispatchCmd && dispatchCmd->state.pipe) {
-		auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
+	if(stateCmd && stateCmd->boundPipe()) {
+		// TODO: push constants for ray tracing can get messy due to
+		// high number of shaders, need new concept for visualizing them.
 
-		if(refl.push_constant_block_count) {
-			auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
-				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
-			if(viewPCRStage == VK_SHADER_STAGE_COMPUTE_BIT) {
-				flags |= ImGuiTreeNodeFlags_Selected;
-			}
-
-			ImGui::TreeNodeEx("Push Constants", flags);
-			if(ImGui::IsItemClicked()) {
-				view_ = IOView::pushConstants;
-				viewData_.pushConstants = {VK_SHADER_STAGE_COMPUTE_BIT};
-				updateHook();
-			}
-		}
-	} else if(drawCmd && drawCmd->state.pipe) {
-		auto& pipe = nonNull(drawCmd->state.pipe);
-		for(auto& stage : pipe.stages) {
-			auto& refl = nonNull(nonNull(stage.spirv).reflection);
-			if(!refl.push_constant_block_count) {
+		auto sstages = stages(*stateCmd->boundPipe());
+		for(auto& stage : sstages) {
+			auto refl = accessReflection(stage);
+			auto& compiled = refl.get();
+			if(compiled.get_shader_resources().push_constant_buffers.empty()) {
 				continue;
 			}
 
@@ -776,7 +582,8 @@ void CommandViewer::displayIOList() {
 			}
 
 			auto stageName = vk::name(stage.stage);
-			auto label = dlg::format("Push Constants {}", stageName);
+			auto label = sstages.size() == 1u ?
+				"Push Constants" : dlg::format("Push Constants {}", stageName);
 			ImGui::TreeNodeEx(label.c_str(), flags);
 			if(ImGui::IsItemClicked()) {
 				view_ = IOView::pushConstants;
@@ -785,8 +592,6 @@ void CommandViewer::displayIOList() {
 			}
 		}
 	}
-	// TODO: push constants for ray tracing. Can get complicated due to
-	// high number of shaders, need new concept for visualizing them.
 }
 
 bool CommandViewer::displayBeforeCheckbox() {
@@ -817,7 +622,7 @@ void CommandViewer::displayDs(Draw& draw) {
 	auto& pipe = *cmd->boundPipe();
 
 	dlg_assert(view_ == IOView::ds);
-	auto [setID, bindingID, _] = viewData_.ds;
+	auto [setID, bindingID, _1, _2] = viewData_.ds;
 
 	if(setID >= dss.size()) {
 		ImGui::Text("DescriptorSet not bound");
@@ -896,74 +701,28 @@ void CommandViewer::displayDs(Draw& draw) {
 			return;
 		}
 
-		/*
-		SpvReflectBlockVariable* bestVar = nullptr;
-
-		// In all graphics pipeline stages, find the block with
-		// that covers the most of the buffer
-		// TODO: add explicit dropdown, selecting the stage to view.
-		for(auto& stage : stages(pipe)) {
-			auto& refl = nonNull(nonNull(stage.spirv).reflection);
-			auto* binding = getReflectBinding(refl, setID, bindingID);
-
-			if(binding && binding->block.type_description && (
-					!bestVar || binding->block.size > bestVar->size)) {
-				bestVar = &binding->block;
-			}
-		}
-
-		if(bestVar) {
-			display(*bestVar, buf->data());
-		} else {
-			ImGui::Text("Binding not used in pipeline");
-		}
-		*/
-
-		u32 bestSize = 0u;
-		spc::Resource bestBuf {};
-		const PipelineShaderStage* bestStage = nullptr;
-
-		for(auto& stage : stages(pipe)) {
-			auto& compiled = nonNull(nonNull(stage.spirv).compiled);
-			// TODO: set spec constants
-			auto resources = compiled.get_shader_resources();
-			auto isUniform =
-				dsType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ||
-				dsType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-			auto& bufs = isUniform ? resources.uniform_buffers : resources.storage_buffers;
-			for(auto& buf : bufs) {
-				auto set = compiled.get_decoration(buf.id, spv::DecorationDescriptorSet);
-				auto binding = compiled.get_decoration(buf.id, spv::DecorationBinding);
-				if(set != setID || binding != bindingID) {
-					continue;
-				}
-
-				auto& type = compiled.get_type(buf.base_type_id);
-				auto typeSize = compiled.get_declared_struct_size(type);
-				if(typeSize >= bestSize) {
-					bestSize = typeSize;
-					bestBuf = buf;
-					bestStage = &stage;
-				}
-
-				break;
-			}
-		}
-
-		if(bestStage) {
-			auto& compiled = nonNull(nonNull(bestStage->spirv).compiled);
-			auto name = compiled.get_name(bestBuf.id);
+		auto* stage = displayDescriptorStageSelector(pipe, setID, bindingID, dsType);
+		if(stage) {
+			auto refl = accessReflection(*stage);
+			auto& compiled = refl.get();
+			// TODO: reuse found resource from displayDescriptorStageSelector
+			auto res = nonNull(resource(compiled, setID, bindingID, dsType));
+			auto name = compiled.get_name(res.id);
 			if(name.empty()) {
-				name = compiled.get_name(bestBuf.base_type_id);
+				name = compiled.get_name(res.base_type_id);
 				if(name.empty()) {
 					name = "?";
 				}
 			}
 
 			auto flags = ImGuiTableFlags_BordersInner |
-				ImGuiTableFlags_SizingStretchProp;
+				ImGuiTableFlags_Resizable |
+				ImGuiTableFlags_SizingStretchSame;
 			if(ImGui::BeginTable("Values", 2u, flags)) {
-				display(compiled, bestBuf.type_id, name.c_str(), buf->data());
+				ImGui::TableSetupColumn(nullptr, 0, 0.25f);
+				ImGui::TableSetupColumn(nullptr, 0, 0.75f);
+
+				display(compiled, res.type_id, name.c_str(), buf->data());
 				ImGui::EndTable();
 			}
 		} else {
@@ -1030,23 +789,30 @@ void CommandViewer::displayDs(Draw& draw) {
 		auto blockData = inlineUniformBlock(state, bindingID);
 		imGuiText("Inline Uniform Block, Size {}", blockData.size());
 
-		SpvReflectBlockVariable* bestVar = nullptr;
-
-		// In all graphics pipeline stages, find the block with
-		// that covers the most of the buffer
-		// TODO: add explicit dropdown, selecting the stage to view.
-		for(auto& stage : stages(pipe)) {
-			auto& refl = nonNull(nonNull(stage.spirv).reflection);
-			auto* binding = getReflectBinding(refl, setID, bindingID);
-
-			if(binding && binding->block.type_description && (
-					!bestVar || binding->block.size > bestVar->size)) {
-				bestVar = &binding->block;
+		auto* stage = displayDescriptorStageSelector(pipe, setID, bindingID, dsType);
+		if(stage) {
+			auto refl = accessReflection(*stage);
+			auto& compiled = refl.get();
+			// TODO: reuse found resource from displayDescriptorStageSelector
+			auto res = nonNull(resource(compiled, setID, bindingID, dsType));
+			auto name = compiled.get_name(res.id);
+			if(name.empty()) {
+				name = compiled.get_name(res.base_type_id);
+				if(name.empty()) {
+					name = "?";
+				}
 			}
-		}
 
-		if(bestVar) {
-			display(*bestVar, blockData);
+			auto flags = ImGuiTableFlags_BordersInner |
+				ImGuiTableFlags_Resizable |
+				ImGuiTableFlags_SizingStretchSame;
+			if(ImGui::BeginTable("Values", 2u, flags)) {
+				ImGui::TableSetupColumn(nullptr, 0, 0.25f);
+				ImGui::TableSetupColumn(nullptr, 0, 0.75f);
+
+				display(compiled, res.type_id, name.c_str(), blockData);
+				ImGui::EndTable();
+			}
 		} else {
 			ImGui::Text("Binding not used in pipeline");
 		}
@@ -1104,52 +870,59 @@ void CommandViewer::displayAttachment(Draw& draw) {
 }
 
 void CommandViewer::displayPushConstants() {
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(command_);
-	auto* dispatchCmd = dynamic_cast<const DispatchCmdBase*>(command_);
+	auto* cmd = deriveCast<const StateCmdBase*>(command_);
+	dlg_assert_or(cmd, return);
+
+	if(!cmd->boundPipe()) {
+		ImGui::Text("Pipeline was destroyed, can't interpret push constants");
+		return;
+	}
+
 	auto viewStage = viewData_.pushConstants.stage;
+	auto found = false;
 
-	if(dispatchCmd) {
-		if(!dispatchCmd->state.pipe) {
-			ImGui::Text("Pipeline was destroyed, can't interpret content");
-			return;
-		} else if(viewStage != dispatchCmd->state.pipe->stage.stage) {
-			dlg_warn("Invalid push constants stage? Should not happen! (compute)");
-			ImGui::Text("Error: Invalid push constants stage selected");
-			return;
+	for(auto& stage : stages(*cmd->boundPipe())) {
+		if(stage.stage != viewStage) {
+			continue;
 		}
 
-		auto& refl = nonNull(nonNull(nonNull(dispatchCmd->state.pipe).stage.spirv).reflection);
-		dlg_assert(refl.push_constant_block_count == 1);
-		if(refl.push_constant_block_count) {
-			display(nonNull(refl.push_constant_blocks), dispatchCmd->pushConstants.data);
-		}
-	} else if(drawCmd && drawCmd->state.pipe) {
-		if(!drawCmd->state.pipe) {
-			ImGui::Text("Pipeline was destroyed, can't interpret content");
+		found = true;
+		auto refl = accessReflection(stage);
+		auto& compiled = refl.get();
+		auto resources = compiled.get_shader_resources();
+		if(resources.push_constant_buffers.empty()) {
+			ImGui::Text("Error: No push constants in stage");
 			return;
 		}
 
-		auto found = false;
-		for(auto& stage : drawCmd->state.pipe->stages) {
-			if(stage.stage != viewStage) {
-				continue;
+		dlg_assert(resources.push_constant_buffers.size() == 1u);
+		auto& pcr = resources.push_constant_buffers[0];
+		auto name = compiled.get_name(pcr.id);
+		if(name.empty()) {
+			name = compiled.get_name(pcr.base_type_id);
+			if(name.empty()) {
+				name = "?";
 			}
-
-			found = true;
-			auto& refl = nonNull(nonNull(stage.spirv).reflection);
-			dlg_assert(refl.push_constant_block_count);
-			if(refl.push_constant_block_count) {
-				display(nonNull(refl.push_constant_blocks), drawCmd->pushConstants.data);
-			}
-
-			break;
 		}
 
-		if(!found) {
-			dlg_warn("Invalid push constants stage? Should not happen! (graphics)");
-			ImGui::Text("Error: Invalid push constants stage selected");
-			return;
+		auto flags = ImGuiTableFlags_BordersInner |
+			ImGuiTableFlags_Resizable |
+			ImGuiTableFlags_SizingStretchProp;
+		if(ImGui::BeginTable("Values", 2u, flags)) {
+			ImGui::TableSetupColumn(nullptr, 0, 0.25f);
+			ImGui::TableSetupColumn(nullptr, 0, 0.75f);
+
+			display(compiled, pcr.type_id, name.c_str(), cmd->boundPushConstants().data);
+			ImGui::EndTable();
 		}
+
+		break;
+	}
+
+	if(!found) {
+		dlg_warn("Invalid push constants stage? Should not happen! (graphics)");
+		ImGui::Text("Error: Invalid push constants stage selected");
+		return;
 	}
 }
 
@@ -1526,6 +1299,67 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 	write.pImageInfo = &dsii;
 
 	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
+}
+
+const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
+		const Pipeline& pipe, unsigned setID, unsigned bindingID,
+		VkDescriptorType dsType) {
+
+	auto sstages = stages(pipe);
+
+	// query the stages referencing this resource
+	ThreadMemScope memScope;
+	auto refStages = memScope.alloc<u32>(sstages.size());
+	auto stageCount = 0u;
+	bool selectedValid = false;
+
+	for(auto i = 0u; i < sstages.size(); ++i) {
+		auto& stage = sstages[i];
+		auto refl = accessReflection(stage);
+		auto res = resource(refl.get(), setID, bindingID, dsType);
+		if(res) {
+			refStages[stageCount] = i;
+			++stageCount;
+
+			if(viewData_.ds.stage == stage.stage) {
+				selectedValid = true;
+			}
+		}
+	}
+
+	refStages = refStages.subspan(0, stageCount);
+	if(stageCount == 0u) {
+		ImGui::Text("Binding not used in pipeline");
+		return nullptr;
+	}
+
+	if(!selectedValid) {
+		viewData_.ds.stage = sstages[refStages[0]].stage;
+	}
+
+	if(stageCount == 1u) {
+		return &sstages[refStages[0]];
+	}
+
+	if(ImGui::BeginCombo("Stage", vk::name(viewData_.ds.stage))) {
+		for(auto id : refStages) {
+			auto name = vk::name(sstages[id].stage);
+			if(ImGui::Selectable(name)) {
+				viewData_.ds.stage = sstages[id].stage;
+			}
+		}
+
+		ImGui::EndCombo();
+	}
+
+	for(auto& stage : sstages) {
+		if(stage.stage == viewData_.ds.stage) {
+			return &stage;
+		}
+	}
+
+	dlg_error("unreachable");
+	return nullptr;
 }
 
 } // namespace vil

@@ -43,9 +43,7 @@ Implemented:
 - VK_KHR_imageless_framebuffer
 - VK_EXT_descriptor_indexing
 	- known problem: some edge cases with update_unused_while_pending
-
-Missing/incomplete:
-- timeline semaphores (might crash at the moment)
+- VK_KHR_timeline_semaphore
 
 ## Non-core extensions
 
@@ -85,7 +83,7 @@ For instance:
 - VK_NV_cooperative_matrix
 
 Extensions that just add SPIR-V features shouldn't be a problem in general
-as long as SPIRV-Tools and spirv_reflect support it.
+as long as SPIRV-Tools supports it.
 For instance:
 - VK_KHR_ray_query
 - VK_KHR_workgroup_memory_explicit_layout

@@ -74,6 +74,7 @@ struct Sampler;
 struct MemoryResource;
 struct RenderPassDesc;
 struct AccelStruct;
+struct PipelineShaderStage;
 
 struct Queue;
 struct QueueFamily;

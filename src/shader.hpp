@@ -11,11 +11,15 @@
 #include <optional>
 
 // fwd
-namespace spc { class Compiler; }
+namespace spc {
+
+class Compiler;
+class Resource;
+class SPIRConstant;
+
+} // namespace spc
 
 namespace vil {
-
-typedef struct SpvReflectShaderModule SpvReflectShaderModule;
 
 struct ShaderSpecialization {
 	std::vector<VkSpecializationMapEntry> entries;
@@ -66,19 +70,62 @@ struct XfbPatchRes {
 	IntrusivePtr<XfbPatchDesc> desc {};
 };
 
-XfbPatchRes patchSpirvXfb(span<const u32> spirv,
-	const char* entryPoint, const ShaderSpecialization& spec);
-XfbPatchData patchShaderXfb(Device&, span<const u32> spirv,
-	const char* entryPoint, ShaderSpecialization sepc,
-	std::string_view modName);
-
 struct SpirvData {
-	std::unique_ptr<spc::Compiler> compiled;
-	std::unique_ptr<SpvReflectShaderModule> reflection; // TODO: use spc instead
 	std::atomic<u32> refCount {};
+
+	// for access to 'compiled'. Locking other mutexes while holding
+	// this one can lead to a deadlock.
+	mutable DebugMutex mutex;
+	// NOTE: don't access directly, see 'accessReflection' below.
+	// Need to use proper specialization constants and therefore
+	// make sure to lock access. We don't want to store the reflection
+	// per used pipeline but just once so we have to set the corresponding
+	// specialization constants every time we want to look something up.
+	std::unique_ptr<spc::Compiler> compiled;
+
+	struct SpecializationConstantDefault {
+		u32 constantID;
+		std::unique_ptr<spc::SPIRConstant> constant;
+	};
+
+	std::vector<SpecializationConstantDefault> constantDefaults;
 
 	~SpirvData();
 };
+
+XfbPatchRes patchSpirvXfb(span<const u32> spirv, const char* entryPoint,
+	spc::Compiler&);
+XfbPatchData patchShaderXfb(Device&, span<const u32> spirv,
+	const char* entryPoint, spc::Compiler& compiled,
+	std::string_view modName);
+
+// RAII wrapper around an access to a spc::Compiler object.
+// All accesses are exclusive since we always need to set specialization
+// constants before reading anything.
+struct ShaderReflectionAccess {
+	SpirvData* data;
+	std::unique_lock<DebugMutex> lock;
+
+	spc::Compiler& get() { return *data->compiled; }
+};
+
+// Returns a name for the given set, binding in the given module.
+struct BindingNameRes {
+	enum class Type {
+		valid,
+		notfound,
+		unnamed,
+	};
+
+	Type type;
+	std::string name;
+};
+
+BindingNameRes bindingName(const spc::Compiler&, u32 setID, u32 bindingID);
+
+// Returns the resource associated with the given set, binding, if present.
+std::optional<spc::Resource> resource(const spc::Compiler&,
+	u32 setID, u32 bindingID, VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM);
 
 struct ShaderModule : DeviceHandle {
 	VkShaderModule handle {};
@@ -89,6 +136,7 @@ struct ShaderModule : DeviceHandle {
 	// Maybe we could dump them to disk and read them when needed. Should also
 	// just generate the Reflection on-demand then since that eats up quite
 	// some data as well.
+	// TODO: we probably don't need this, just use code->compiler->get_ir().code
 	std::vector<u32> spv;
 
 	// Owend by us.
@@ -103,6 +151,12 @@ struct ShaderModule : DeviceHandle {
 
 	~ShaderModule();
 };
+
+// Might still need to call spc::Compiler::update_active_builtins() after this,
+// if builtins are accessed.
+ShaderReflectionAccess accessReflection(SpirvData& mod,
+		const ShaderSpecialization& specialization, const std::string& entryPoint,
+		u32 spvExecutionModel);
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
     VkDevice                                    device,

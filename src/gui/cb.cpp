@@ -20,7 +20,6 @@
 #include <vk/format_utils.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
-#include <util/spirv_reflect.h>
 #include <bitset>
 
 namespace vil {
@@ -109,7 +108,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	// Selector for visible commands
 	ImGui::SameLine();
-	if(ImGui::Button("Visible Commands")) {
+	if(ImGui::Button("Settings")) {
 		ImGui::OpenPopup("Command Selector");
 	}
 
@@ -126,13 +125,16 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
 		commandFlags_ = CommandType(val);
 
+		ImGui::Separator();
+		ImGui::Checkbox("Unused Descriptor Bindings", &commandViewer_.showUnusedBindings_);
+
 		ImGui::EndPopup();
 	}
 
 	// force-update shown batches when it's been too long
 	if(mode_ == UpdateMode::swapchain && !freezeState_) {
 		auto lastPresent = dev.swapchain->frameSubmissions[0].presentID;
-		if(record_ && lastPresent > swapchainPresent_ + 3) {
+		if(record_ && lastPresent > swapchainPresent_ + 4) {
 			auto diff = lastPresent - swapchainPresent_;
 
 			ImGui::SameLine();
@@ -477,27 +479,33 @@ void CommandBufferGui::updateState() {
 					continue;
 				}
 
+				// check if [selectedRecord_ in selectedBatch_] contextually
+				// matches  [res.record in foundBatches]
 				dlg_assert(!selectedBatch_.empty());
 				auto batchMatches = match(foundBatches, selectedBatch_);
 				bool recordMatched = false;
 				for(auto& batchMatch : batchMatches.matches) {
-					if(batchMatch.a->submissionID == res.submissionID) {
-						for(auto& recMatch : batchMatch.matches) {
-							if(recMatch.a == res.record) {
-								 if(recMatch.b == selectedRecord_.get()) {
-									recordMatched = true;
-									resMatch *= recMatch.match;
-								 }
+					if(batchMatch.a->submissionID != res.submissionID) {
+						continue;
+					}
 
-								 break;
-							}
+					for(auto& recMatch : batchMatch.matches) {
+						if(recMatch.a != res.record) {
+							continue;
+						}
+
+						if(recMatch.b == selectedRecord_.get()) {
+							recordMatched = true;
+							resMatch *= recMatch.match;
 						}
 
 						break;
 					}
+
+					break;
 				}
 
-				// In this case, the newly hooked potentialy candidate didn
+				// In this case, the newly hooked potentialy candidate didn't
 				// not match with our previous record in content; we won't use it.
 				if(!recordMatched) {
 					dlg_info("Hooked record did not match. Total match: {}, match count {}",

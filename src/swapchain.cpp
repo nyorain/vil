@@ -121,6 +121,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		swapd.lastPresent = std::move(oldChain->lastPresent);
 		swapd.frameTimings = std::move(oldChain->frameTimings);
 		swapd.frameSubmissions = std::move(oldChain->frameSubmissions);
+		swapd.nextFrameSubmissions = std::move(oldChain->nextFrameSubmissions);
 	}
 
 	// Add swapchain images to tracked images

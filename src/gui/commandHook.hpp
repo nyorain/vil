@@ -36,8 +36,8 @@ struct CopiedImage {
 	VkFormat format {};
 
 	CopiedImage() = default;
-	void init(Device& dev, VkFormat, const VkExtent3D&, u32 layers, u32 levels,
-		VkImageAspectFlags aspects, u32 srcQueueFam);
+	[[nodiscard]] bool init(Device& dev, VkFormat, const VkExtent3D&,
+		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam);
 	~CopiedImage();
 };
 

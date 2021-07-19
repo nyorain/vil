@@ -6,6 +6,7 @@
 #include <data.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
+#include <spirv-cross/spirv.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <dlg/dlg.hpp>
@@ -28,12 +29,7 @@ PipelineLayout::~PipelineLayout() {
 
 PipelineShaderStage::PipelineShaderStage(Device& dev, const VkPipelineShaderStageCreateInfo& sci) {
 	stage = sci.stage;
-
-	if(auto* spec = sci.pSpecializationInfo) {
-		auto data = static_cast<const std::byte*>(spec->pData);
-		specData = {data, data + spec->dataSize};
-		specEntries = {spec->pMapEntries, spec->pMapEntries + spec->mapEntryCount};
-	}
+	specialization = createShaderSpecialization(sci.pSpecializationInfo);
 
 	auto& mod = dev.shaderModules.get(sci.module);
 	spirv = mod.code;
@@ -124,8 +120,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				auto it = find_if(mod.xfb, finder);
 				if(it == mod.xfb.end()) {
 					lock.unlock();
-					auto xfb = patchShaderXfb(dev, mod.spv, stage.pName,
-						std::move(spec), mod.name);
+					XfbPatchData xfb;
+
+					{
+						auto refl = accessReflection(nonNull(mod.code), spec,
+							stage.pName, u32(spv::ExecutionModelVertex));
+						xfb = patchShaderXfb(dev, mod.spv, stage.pName,
+							refl.get(), mod.name);
+					}
 
 					if(xfb.mod) {
 						lock.lock();
@@ -133,6 +135,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 						it = find_if(mod.xfb, finder);
 
 						if(it == mod.xfb.end()) {
+							xfb.spec = std::move(spec);
 							stage.module = xfb.mod;
 							it = mod.xfb.emplace(it, std::move(xfb));
 						} else if(xfb.mod) {
@@ -489,6 +492,48 @@ span<const PipelineShaderStage> stages(const Pipeline& pipe) {
 			dlg_error("Invalid pipeline type: {}", pipe.type);
 			return {};
 	}
+}
+
+u32 getSpvExecutionModel(VkShaderStageFlagBits stage) {
+	switch(stage) {
+		case VK_SHADER_STAGE_VERTEX_BIT:
+			return spv::ExecutionModelVertex;
+		case VK_SHADER_STAGE_GEOMETRY_BIT:
+			return spv::ExecutionModelGeometry;
+		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+			return spv::ExecutionModelTessellationControl;
+		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+			return spv::ExecutionModelTessellationEvaluation;
+		case VK_SHADER_STAGE_FRAGMENT_BIT:
+			return spv::ExecutionModelFragment;
+		case VK_SHADER_STAGE_COMPUTE_BIT:
+			return spv::ExecutionModelGLCompute;
+		case VK_SHADER_STAGE_TASK_BIT_NV:
+			return spv::ExecutionModelTaskNV;
+		case VK_SHADER_STAGE_MESH_BIT_NV:
+			return spv::ExecutionModelMeshNV;
+		case VK_SHADER_STAGE_RAYGEN_BIT_KHR:
+			return spv::ExecutionModelRayGenerationKHR;
+		case VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:
+			return spv::ExecutionModelClosestHitKHR;
+		case VK_SHADER_STAGE_ANY_HIT_BIT_KHR:
+			return spv::ExecutionModelAnyHitKHR;
+		case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
+			return spv::ExecutionModelCallableKHR;
+		case VK_SHADER_STAGE_MISS_BIT_KHR:
+			return spv::ExecutionModelMissKHR;
+		case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
+			return spv::ExecutionModelIntersectionKHR;
+		default:
+			dlg_error("Unsupported stage");
+			return spv::ExecutionModelFragment;
+	}
+}
+
+ShaderReflectionAccess accessReflection(const PipelineShaderStage& stage) {
+	auto execModel = getSpvExecutionModel(stage.stage);
+	return accessReflection(nonNull(stage.spirv), stage.specialization,
+		stage.entryPoint, execModel);
 }
 
 GraphicsPipeline::~GraphicsPipeline() = default;

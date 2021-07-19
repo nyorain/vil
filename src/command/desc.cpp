@@ -391,6 +391,11 @@ BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
 	BatchMatch res;
 	res.a = &a;
 	res.b = &b;
+	if(entries.empty()) {
+		res.match = 0.f;
+		return res;
+	}
+
 	res.match = entries.back().match;
 	res.matches.reserve(std::min(a.submissions.size(), b.submissions.size()));
 

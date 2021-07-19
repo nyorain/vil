@@ -160,9 +160,6 @@ src = files(
 	'src/gui/vertexViewer.cpp',
 	'src/gui/blur.cpp',
 
-	# external util
-	'src/util/spirv_reflect.cpp',
-
 	# imgui
 	'src/imgui/imgui.cpp',
 	'src/imgui/imgui_draw.cpp',
@@ -237,7 +234,6 @@ src = files(
 
 	'include/vil_api.h',
 	'src/imgui/imgui.h',
-	'src/util/spirv_reflect.h',
 
 	# spirv-cross
 	'src/spirv-cross/spirv.h',

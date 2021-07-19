@@ -8,9 +8,7 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] correctly integrate spirv-cross everywhere, remove spirv_reflect
-	- [ ] correctly set specialization constants before using it for reflection
-	      reset previously set constants to default. Not sure how tho
+- [ ] figure out crashes in doom eternal
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
@@ -92,8 +90,6 @@ performance/profiling:
 	      cbGui, CommandViewer etc). We only need the state of the hooked command, 
 		  should be easy to determine.
 	- [ ] See the commented-out condition in submit.cpp
-- [ ] (low prio) add (extensive) time zone to basically every entry point so we
-	  can quickly figure out why an application is slow
 
 
 object wrapping:
@@ -116,8 +112,8 @@ gui stuff
 	  When selecting the vkQueueSubmit just show an overview.
 - [ ] (high prio) figure out general approach to fix flickering data, especially
       in command viewer (but also e.g. on image hover in resource viewer)
-- [ ] imgui styling. It's really not beautiful at the moment, compare with
-      other imgui applications. See imgui style examples in imgui releases
+- [ ] imgui styling. Compare with other imgui applications.
+      See imgui style examples in imgui releases
 	- [x] use custom font
 	- [ ] better markup in ui. E.g. color/somehow mark "Waiting for submission"
 	      or error messages in command viewer.
@@ -133,10 +129,6 @@ gui stuff
 	- [ ] lots of places where we should replace column usage with tables
 	- [x] fix stupid looking duplicate header-seperator for commands in 
 	      command viewer (command viewer header UI is a mess anyways)
-- [ ] (low prio, later?) resource viewer: basic filtering by properties, e.g. allow to just
-      show all images with 'width > 1920 && layers > 3' or something.
-	  Could start with images for now and add for other handles as needed.
-	  Definitely useful for images, when exploring the resource space
 
 other
 - [ ] implement "jump to selected" in commandRecord viewer, immediately
@@ -145,9 +137,6 @@ other
 	  be found in current records?
 - [ ] improve imgui event handles, make sure inputs aren't lost when fps are low.
       see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
-- [ ] remove -DUNICODE from defines
-	- [ ] also check that vil_api works either way, can't depend on that
-- [ ] fix "command not found 4 frames" shortly appearing when selecting new command
 - [ ] add submission log! possibility to track what submissions are done
       during startup, another thing that's hard to track with capturing
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
@@ -158,9 +147,6 @@ other
 	  creation (if swapchain ext is enabled) with creating/showing the window
 - [ ] rename VIL_HOOK_OVERLAY to just VIL_OVERLAY?
       and VIL_CREATE_WINDOW to VIL_WINDOW?
-- [ ] add support for timeline semaphores. Should just require some simple
-      changes to submission logic when we use them inside the layer.
-	  Test with official samples repo
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
 	- [ ] also: intercept debug callback? can currently cause problems
 	      e.g. when the application controlled debug callback is called
@@ -178,6 +164,14 @@ other
 	- [x] start using src/gui/command.hpp
 	- [x] fix descriptor arrays
 	- [ ] fix transfer buffer introspection
+	      to cleanly implement this: clean up and split out the buffer reader
+		  implementation from the resource gui. On the long run, it would
+		  be nice to reuse buffmt.hpp for this but I don't know how exactly.
+		  Maybe transform the spirv type representation in our own internal
+		  representation first and rewrite buffmt for that representation
+		  (into which we can also easily parse input from gui).
+		  The current problem is that we can't easily parse gui layout input
+		  into spirv_cross primitives
 	- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
 	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
 	- [x] when viewing transfer img, show image refButton
@@ -189,9 +183,8 @@ other
 		  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
 	- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
 	      i.e. support buffer IO viewing for transfer commands
-- [ ] in CopiedImage::init: check for image usage support
-	- [ ] generally: allow the image copy operation to fail.
-- [ ] better pipeline/shader module display in resource viewer
+- [ ] (high prio) better pipeline/shader module display in resource viewer
+      It's currently completely broken due to spirv-reflect removal
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 	- [ ] also make sure to handle in/out structs correctly. Follow SpvReflectInterfaceVariable::members
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
@@ -261,7 +254,29 @@ ext support:
 - [ ] VK_KHR_fragment_shading_rate: need to consider the additional attachment,
       would also be nice to show in gui
 
+gui:
+- [ ] (low prio, later?) resource viewer: basic filtering by properties, e.g. allow to just
+      show all images with 'width > 1920 && layers > 3' or something.
+	  Could start with images for now and add for other handles as needed.
+	  Definitely useful for images, when exploring the resource space
 
+optimization:
+- [ ] (low prio) add (extensive) time zone to basically every entry point so we
+	  can quickly figure out why an application is slow
+- [ ] (low prio) setting spec constants every time we access a spc::Compiler
+      object is inefficient since most applications don't reuse a shaderMod
+	  object in multiple pipelines and we mostly don't randomly access them.
+	  Maybe store last-used specialization constant object and compare
+	  whether they are the same?
+- [ ] (low prio) during reflection, we often call get_shader_resources()
+      which is expensive. Maybe cache result?
+
+---
+
+- [ ] we need to copy acceleration structures/accelStructs in commandHook/
+      on submission. But not really physically copy but track their state
+	  at that point when they are viewed. Hard to do in case the submission
+	  also writes into them.
 - [ ] figure out how to handle device address in UI.
 	  We probably want to link to the related resource. Just solve
 	  this via std::map in Device with custom comparison that
@@ -287,8 +302,6 @@ ext support:
 - [ ] SetHandleName should probably not always use the device hash map
       when the objects are wrapped. Currently causes issues since
 	  we don't insert descriptor sets when wrapping, we need the custom hack there
-- [ ] ditch spirv_reflect for spirv_cross. Better maintained, support lots of features 
-      that we need that spirv_reflect does not
 - [ ] track ext dynamic state in graphics state
 	- [ ] show extended dynamic state in gui
 - [ ] the current handling when someone attempts to construct multiple guis
@@ -457,10 +470,6 @@ ext support:
 	  struct for POD (with no public/private classifiers and member functions),
 	  class otherwise I guess
 - [ ] move external source into extra folder
-- [ ] we should likely switch to spirv-cross instead of spirv-reflect
-	- [ ] we will probably need some its functionality later on anyways
-	- [ ] already hit some hard limitations of spirv-cross that would require
-	      a lot of changes
 - [ ] support timeline semaphores (submission rework/display)
 - [ ] support for the spirv primites in block variables that are still missing
  	  See https://github.com/KhronosGroup/SPIRV-Reflect/issues/110
