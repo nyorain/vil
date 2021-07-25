@@ -8,7 +8,7 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] figure out crashes in doom eternal
+- [ ] figure out timline_semaphore crashes in doom eternal
 - [ ] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),

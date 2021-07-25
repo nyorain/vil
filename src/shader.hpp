@@ -14,8 +14,8 @@
 namespace spc {
 
 class Compiler;
-class Resource;
-class SPIRConstant;
+struct Resource;
+struct SPIRConstant;
 
 } // namespace spc
 

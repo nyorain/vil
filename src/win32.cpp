@@ -412,7 +412,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			return 0;
 		} case WM_INPUT: {
 			// Shouldn't happen
-			dlg_error("wm_input");
+			// dlg_error("unexpected wm_input");
 
 			UINT dwSize = sizeof(RAWINPUT);
 			static std::aligned_storage_t<sizeof(RAWINPUT), 8> lpb {};
