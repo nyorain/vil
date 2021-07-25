@@ -1576,6 +1576,8 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 		}
 
+		// TODO, PERF: we should only add the latest needed semaphore from every
+		// queue, the other ones are irrelevant
 		if(dev().timelineSemaphores) {
 			dlg_assert(dev().resetSemaphores.empty());
 

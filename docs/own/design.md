@@ -715,10 +715,10 @@ Ok we need it in the following case:
   We want to match its context with the selected batch. So we need that,
   separately from the batch that is currently being shown.
 
-## A full sync prototype
+# A full sync prototype
 
 So, as uncovered in the notes about supporting buffer_device_address, we need
-to more general synchronization. Long story short: We need to synchronize
+more general synchronization. Long story short: We need to synchronize
 every access we do on application resources with *everything*. We can't
 rely on anything, even in CommandHook submission.
 

@@ -27,6 +27,18 @@ struct Queue : Handle {
 	// Counted up each time this queue is submitted to.
 	// Might wrap around.
 	u64 submissionCounter {};
+
+	// Only valid when using timeline semaphores, used for full-sync.
+	// Semaphore that will get set by each submission to this queue to
+	// their corresponding submissionID.
+	// When its current value is same as submissionCounter,
+	// there are no pending submissions on this queue.
+	VkSemaphore submissionSemaphore {};
+
+	// Only valid when using timeline semaphores, used for full-sync.
+	// The submissionID of the last submission where the layer inserted
+	// commands, e.g. for gui rendering or via a CommandHook.
+	u64 lastLayerSubmission;
 };
 
 // All data we store for a queue family.
