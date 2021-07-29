@@ -731,7 +731,7 @@ With timeline semaphores, we could simply have for each queue:
   When hooking a command or submitting the gui cb with access to application
   resources, we simply wait upon these most-recent semaphores
   of all other queues (as long as they still have submissions pending).
-- If there is still a gui or hooked submission pending, a timeline semaphore
+- If there is still a gui or hooked submission pending, add a timeline semaphore
   to that. We will wait for it in all future submissions the application makes.
 
 Without timeline semaphores, things look worse:
@@ -747,3 +747,63 @@ timeline semaphores than buffer_device_address I guess. If someone
 pops up that really needs the feature (strictly speaking: fix, not feature) for 
 some ancient hardware, we can still see how to add it without making the
 code 10x more complicated.
+
+---
+
+For gui submission, the only relevant full-sync case is buffer_device_address,
+right? When we access an application image during gui rendering, it should
+be enough to sync with all submissions that also use that image.
+But when we copy application buffer contents, we just can't know which
+submissions might use it and must sync with everything.
+
+For commandHook submissions, we might always need full sync. E.g. when
+we copy an image, we can't know that another submission is using it at
+the same time (even if it was statically used by the shader, it might
+not have been dynamically used since the application knows it's not
+allowed to do that).
+
+---
+
+While implementing the full-sync concept I noticed several things:
+- It's just another code sync code path. We now have 3:
+	- binary semaphores
+	- timeline semaphores
+	- timeline semaphores + full sync
+  Where the first two paths should behave the same and the third path
+  be somewhat different. This is unfortunate, hard to test.
+- At the same time, we kinda want the full sync path for binary
+  semaphores as well since it's about correctness, not speed.
+- At the same time, I'm not sure we want to enable full sync by default.
+  And I'm convinced we want to always allow a non-full-sync path (so
+  we shouldn't just always use full sync when using timeline semaphores).
+  The reason for that is that we modify the application. And one of the
+  goals of the layer was to do that as little as possible. We might need
+  to do it in some cases though. But in other cases it might be nicer
+  if we didn't do it. Especially, it might be really useful for the user
+  to just toggle it at runtime so it might be worth maintaining all these
+  paths for now (and maybe even add a binary-semaphore+full-sync path later
+  on)
+
+# Relying on timeline semaphores
+
+Sooner or later, we'll likely just require timeline semaphores since that
+makes everything so much easier.
+
+- We can get rid of all binary semaphore code paths (that are already
+  very inefficient in some places or just don't support some features,
+  like full sync)
+- We can completely get rid of tracking application submissions via fences
+  (don't need a fence pool anymore) and just use the queue submission semaphore
+  for that as well.
+- Get rid of semaphore resetting concept. Actually, I think we can get
+  completely rid of the semaphore pool as well.
+
+The concept of a per-queue semaphore that simply tracks at which submission
+it is currently working is so clean and simple, it allows us to get rid
+of all the different synchronization mechanisms we needed when there
+aren't timeline semaphores.
+
+But to support that, we'd need
+- either the translation layer to work well, without large overhead.
+  should test that
+- or osx, android implementations to support it which might not happen soon :(

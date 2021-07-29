@@ -20,7 +20,9 @@ void swap(Draw& a, Draw& b) noexcept {
 	swap(a.readback.copy, b.readback.copy);
 	swap(a.presentSemaphore, b.presentSemaphore);
 	swap(a.futureSemaphore, b.futureSemaphore);
-	swap(a.futureSemaphoreValue, b.futureSemaphoreValue);
+	swap(a.futureSemaphoreSignaled, b.futureSemaphoreSignaled);
+	swap(a.futureSemaphoreUsed, b.futureSemaphoreUsed);
+	swap(a.lastSubmissionID, b.lastSubmissionID);
 	swap(a.usedHandles, b.usedHandles);
 	swap(a.usedHookState, b.usedHookState);
 	swap(a.waitedUpon, b.waitedUpon);
@@ -61,16 +63,10 @@ void Draw::init(Device& dev, VkCommandPool commandPool) {
 	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &presentSemaphore));
 	nameHandle(dev, this->presentSemaphore, "Draw:presentSemaphore");
 
-	VkSemaphoreTypeCreateInfo tsInfo {};
-	if(dev.timelineSemaphores) {
-		tsInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-		tsInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-		tsInfo.initialValue = 0u;
-		sci.pNext = &tsInfo;
+	if(!dev.timelineSemaphores) {
+		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &futureSemaphore));
+		nameHandle(dev, this->futureSemaphore, "Draw:futureSemaphore");
 	}
-
-	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &futureSemaphore));
-	nameHandle(dev, this->futureSemaphore, "Draw:futureSemaphore");
 
 	VkDescriptorSetAllocateInfo dsai {};
 	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;

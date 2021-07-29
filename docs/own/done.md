@@ -1,3 +1,5 @@
+- [x] fix general commandHook synchronization, see design.md on
+      buffer_device_address, uncovered general potential race
 - [x] in CopiedImage::init: check for image usage support
 	- [x] generally: allow the image copy operation to fail.
 - [x] add support for timeline semaphores. Should just require some simple

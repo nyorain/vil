@@ -60,6 +60,9 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 		} else if(sub.ourSemaphore && dev.timelineSemaphores) {
 			dev.semaphorePool.push_back(sub.ourSemaphore);
 		}
+
+		if(subm.queue->lastLayerSubmission == sub.queueSubmitID) {
+		}
 	}
 
 	if(subm.ourFence) {
@@ -125,7 +128,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	{
 		// Get a new submission ID for this queue
 		std::lock_guard lock(dev.mutex);
-		submitter.queueSubmitID = ++qd.submissionCounter;
 		submitter.globalSubmitID = ++dev.submissionCounter;
 
 		// Check all pending submissions for completion, to possibly return
@@ -138,7 +140,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	auto& batch = *batchPtr;
 	batch.submissions.reserve(submitCount); // make sure it's never re-allocated
 	batch.queue = &qd;
-	batch.queueSubmitID = submitter.queueSubmitID;
 	batch.globalSubmitID = submitter.globalSubmitID;
 
 	submitter.dstBatch = &batch;
@@ -175,10 +176,15 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	{
 		// TODO PERF: locking the dev mutex here is terrible for performance,
 		// queueSubmit can take a long time and applications might parallelize
-		// arond it.
+		// around it.
 		// Maybe we can handle this with a separate gui/submission sync mutex?
 		std::lock_guard devLock(dev.mutex);
-		addGuiSyncLocked(submitter);
+
+		if(dev.doFullSync) {
+			addFullSyncLocked(submitter);
+		} else {
+			addGuiSyncLocked(submitter);
+		}
 
 		{
 			ZoneScopedN("dispatch.QueueSubmit");

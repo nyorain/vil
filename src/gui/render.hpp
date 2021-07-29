@@ -32,14 +32,17 @@ struct Draw {
 	// Consumed by the present info.
 	VkSemaphore presentSemaphore {};
 
+	// Only when we are not using timeline semaphores:
 	// Semaphore associated with the gfx submission that can be used later
 	// on to make application submissions to a different queue that write
 	// to memory we read here wait. When supported by device, this is a timeline
 	// semaphore that will be set to the given value by this submission.
 	VkSemaphore futureSemaphore {};
-	u64 futureSemaphoreValue {}; // only for timeline semaphores
 	bool futureSemaphoreUsed {}; // only for binary semaphores
 	bool futureSemaphoreSignaled {}; // only false when draw is used first
+
+	// Synchronization for timeline semaphores: submissionID on gui gfxQueue
+	u64 lastSubmissionID {}; // only for timeline semaphores
 
 	// Fence associated with the gfx submission of this rendering.
 	// Used to check if frame has completed and Draw can be used again.

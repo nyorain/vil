@@ -1040,6 +1040,18 @@ void Gui::drawOverviewUI(Draw& draw) {
 		imGuiText("fence pool size: {}", dev.fencePool.size());
 		imGuiText("semaphore pool size: {}", dev.semaphorePool.size());
 		imGuiText("reset semaphores size: {}", dev.resetSemaphores.size());
+
+		ImGui::Separator();
+
+		if(dev.timelineSemaphores) {
+			ImGui::Checkbox("Full-Sync", &dev.doFullSync);
+			if(ImGui::IsItemHovered()) {
+				imGuiText("Ok ok hear me out: Life's just one weird rush and "
+					"barely anyone really knows what they are doing. So "
+					"every now and then, just go crazy, just go wild, just "
+					"try something new and see how things turn out");
+			}
+		}
 	}
 
 	// if(ImGui::TreeNode("Statistics")) {
@@ -1233,9 +1245,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 void Gui::destroyed(const Handle& handle) {
 	ExtZoneScoped;
 
-	tabs_.resources.destroyed(handle);
-	tabs_.cb.destroyed(handle);
-
 	// Make sure that all our submissions that use the given handle have
 	// finished.
 	std::vector<VkFence> fences;
@@ -1258,6 +1267,11 @@ void Gui::destroyed(const Handle& handle) {
 
 	VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
 		fences.data(), true, UINT64_MAX));
+
+	// important that we *first* wait for the submission, then forward
+	// this since e.g. the resources gui may destroy handles based on it
+	tabs_.resources.destroyed(handle);
+	tabs_.cb.destroyed(handle);
 
 	// TODO: call locks mutex, we can't do that here tho
 	// for(auto* draw : draws) {
@@ -1528,151 +1542,25 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		// number of pending submissions while there might be more recordings
 		// referencing a handle.
 
-		std::vector<Submission*> waitSubmissions;
-		for(auto& pending : reversed(dev().pending)) {
-			// When the pending submission was submitted to the gfxQueue
-			// (as the gui draw submissions are), we don't need to sync
-			// via semaphore, the pipeline barrier is enough
-			if(pending->queue == dev().gfxQueue && !forceGuiQueueSemaphores) {
-				continue;
-			}
+		waitSemaphores_.clear();
+		waitSemaphores_.insert(waitSemaphores_.end(),
+			info.waitSemaphores.begin(), info.waitSemaphores.end());
 
-			// We only need to chain the last submission on each
-			// queue as semaphores guarantee that everything before
-			// has finished. Since dev().pending is ordered (by submission
-			// order) we just take the first submission per queue
-			auto found = false;
-			for(auto& sub : waitSubmissions) {
-				if(sub->parent->queue == pending->queue) {
-					dlg_assert(sub->parent->queueSubmitID > pending->queueSubmitID);
-					found = true;
-					break;
-				}
-			}
+		waitStages_.resize(info.waitSemaphores.size());
+		std::fill_n(waitStages_.begin(), info.waitSemaphores.size(),
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 
-			if(found) {
-				continue;
-			}
+		signalSemaphores_.clear();
+		signalSemaphores_.emplace_back(draw.presentSemaphore);
 
-			auto subs = needsSyncLocked(*pending, draw);
-			if(!subs.empty()) {
-				// we only need the last submission from the batch
-				// as semaphores guarantee everything before in submission
-				// order has finished.
-				waitSubmissions.push_back(const_cast<Submission*>(subs.back()));
-			}
-		}
-
-		u64 signalValues[2];
-		std::vector<u64> waitValues;
-		VkTimelineSemaphoreSubmitInfo tsInfo {};
-
-		auto waitSems = std::vector(info.waitSemaphores.begin(), info.waitSemaphores.end());
-		auto signalSems = std::vector{draw.presentSemaphore};
-
-		std::vector<VkPipelineStageFlags> waitStages;
-		for(auto i = 0u; i < info.waitSemaphores.size(); ++i) {
-			// PERF: we might be able to do better
-			waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-		}
-
-		// TODO, PERF: we should only add the latest needed semaphore from every
-		// queue, the other ones are irrelevant
-		if(dev().timelineSemaphores) {
-			dlg_assert(dev().resetSemaphores.empty());
-
-			tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-			tsInfo.pNext = submitInfo.pNext;
-
-			// wait
-			waitValues.resize(waitSems.size()); // initial ones, ignored
-			for(auto* sub : waitSubmissions) {
-				// PERF: guess we could do better
-				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-				waitSems.push_back(sub->ourSemaphore);
-				waitValues.push_back(sub->ourSemaphoreValue);
-			}
-
-			dlg_assert(waitValues.size() == waitSems.size());
-			tsInfo.waitSemaphoreValueCount = u32(waitValues.size());
-			tsInfo.pWaitSemaphoreValues = waitValues.data();
-
-			// signal
-			// signalValues[0] is uninitialized by design, should be
-			// ignored by driver as signalSemaphores[0] is binary
-			signalSems.push_back(draw.futureSemaphore);
-			++draw.futureSemaphoreValue;
-			signalValues[1] = draw.futureSemaphoreValue;
-
-			tsInfo.signalSemaphoreValueCount = 2u;
-			tsInfo.pSignalSemaphoreValues = signalValues;
-
-			submitInfo.pNext = &tsInfo;
+		if(dev().doFullSync) {
+			addFullSync(draw, submitInfo);
 		} else {
-			// add dev.resetSemaphores while we are at it
-			for(auto sem : dev().resetSemaphores) {
-				waitSems.push_back(sem);
-				waitStages.push_back(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
-				draw.waitedUpon.push_back(sem);
-			}
-
-			dev().resetSemaphores.clear();
-
-			// When this draw's futureSemaphore wasn't used, make sure
-			// to reset it before we signal it again. This shouldn't acutally
-			// cause an additional wait, we already wait for the last draw.
-			if(!draw.futureSemaphoreUsed && draw.futureSemaphoreSignaled) {
-				// This is a bit messy.
-				// So, 'futureSemaphore' was signaled by us but never consumed
-				// (happens when we just didn't access the anything the
-				// applicaiton used since then). We have to reset the
-				// semaphore.
-				// Initially, we simply waited on it via
-				// submitInfo.pWaitSemaphores but no one knows if this
-				// is valid or not, the spec is too vague.
-				// Since this lead to a deadlock with anv, mesa 20.3, 21.1,
-				// we just swap it out with a pool semaphore now.
-				// We can't recreate it without waiting on draw.fence
-				// which we want to avoid.
-				dev().resetSemaphores.push_back(draw.futureSemaphore);
-				draw.futureSemaphore = getSemaphoreFromPoolLocked(dev());
-
-				draw.futureSemaphoreUsed = false;
-				draw.futureSemaphoreSignaled = false;
-			}
-
-			signalSems.push_back(draw.futureSemaphore);
-
-			for(auto* sub : waitSubmissions) {
-				// take ownership of sub->ourSemaphore if it's valid
-				VkSemaphore sem = sub->ourSemaphore;
-				sub->ourSemaphore = {};
-
-				// if sub->ourSemaphore has already been used before, we have
-				// to synchronize with the queue via a new semaphore.
-				if(!sem) {
-					sem = getSemaphoreFromPoolLocked(dev());
-					auto res = submitSemaphore(*sub->parent->queue, sem);
-					if(res != VK_SUCCESS) {
-						dlg_error("vkQueueSubmit error: {}", vk::name(res));
-						return res;
-					}
-				}
-
-				// PERF: guess we could do better
-				waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-				waitSems.push_back(sem);
-				draw.waitedUpon.push_back(sem);
+			auto res = addLegacySync(draw, submitInfo);
+			if(res != VK_SUCCESS) {
+				return res;
 			}
 		}
-
-		dlg_assert(waitStages.size() == waitSems.size());
-
-		submitInfo.signalSemaphoreCount = u32(signalSems.size());
-		submitInfo.pSignalSemaphores = signalSems.data();
-		submitInfo.pWaitDstStageMask = waitStages.data();
-		submitInfo.waitSemaphoreCount = u32(waitSems.size());
-		submitInfo.pWaitSemaphores = waitSems.data();
 
 		{
 			ZoneScopedN("dispatch.QueueSubmit");
@@ -1680,13 +1568,17 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			// PERF: when using timeline semaphores we don't need a
 			// fence and can just use the timeline semaphore
 			std::lock_guard queueLock(dev().queueMutex);
-			res = dev().dispatch.QueueSubmit(dev().gfxQueue->handle,
+			res = dev().dispatch.QueueSubmit(usedQueue().handle,
 				1u, &submitInfo, draw.fence);
 		}
 
 		if(res != VK_SUCCESS) {
 			dlg_error("vkQueueSubmit error: {}", vk::name(res));
 			return res;
+		}
+
+		if(dev().timelineSemaphores) {
+			usedQueue().lastLayerSubmission = draw.lastSubmissionID;
 		}
 
 		draw.inUse = true;
@@ -1728,6 +1620,207 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	}
 
 	return VK_SUCCESS;
+}
+
+VkResult Gui::addLegacySync(Draw& draw, VkSubmitInfo& submitInfo) {
+	std::vector<Submission*> waitSubmissions;
+	for(auto& pending : reversed(dev().pending)) {
+		// When the pending submission was submitted to the guiQueue
+		// we don't need to sync via semaphore, the pipeline barrier is enough
+		if(pending->queue == dev().gfxQueue) {
+			continue;
+		}
+
+		// We only need to chain the last submission on each
+		// queue as semaphores guarantee that everything before
+		// has finished. Since dev().pending is ordered (by submission
+		// order) we just take the first submission per queue
+		auto found = false;
+		for(auto& sub : waitSubmissions) {
+			if(sub->parent->queue == pending->queue) {
+				dlg_assert(sub->parent->globalSubmitID > pending->globalSubmitID);
+				found = true;
+				break;
+			}
+		}
+
+		if(found) {
+			continue;
+		}
+
+		auto subs = needsSyncLocked(*pending, draw);
+		if(!subs.empty()) {
+			// we only need the last submission from the batch
+			// as semaphores guarantee everything before in submission
+			// order has finished.
+			waitSubmissions.push_back(const_cast<Submission*>(subs.back()));
+		}
+	}
+
+	if(dev().timelineSemaphores) {
+		dlg_assert(dev().resetSemaphores.empty());
+
+		tsInfo_.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+		tsInfo_.pNext = submitInfo.pNext;
+
+		// wait
+		waitValues_.resize(waitSemaphores_.size()); // initial ones, ignored
+		for(auto* sub : waitSubmissions) {
+			// PERF: guess we could do better
+			waitStages_.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+			waitSemaphores_.push_back(sub->parent->queue->submissionSemaphore);
+			waitValues_.push_back(sub->queueSubmitID);
+		}
+
+		dlg_assert(waitValues_.size() == waitSemaphores_.size());
+		tsInfo_.waitSemaphoreValueCount = u32(waitValues_.size());
+		tsInfo_.pWaitSemaphoreValues = waitValues_.data();
+
+		// signal
+		signalSemaphores_.push_back(usedQueue().submissionSemaphore);
+		draw.lastSubmissionID = ++usedQueue().submissionCounter;
+
+		// signalValues[0] is uninitialized by design, should be
+		// ignored by driver as signalSemaphores[0] is binary, we need
+		// that since present semaphores cannot be timelined
+		signalValues_.resize(2);
+		signalValues_[1] = draw.lastSubmissionID;
+
+		tsInfo_.signalSemaphoreValueCount = signalValues_.size();
+		tsInfo_.pSignalSemaphoreValues = signalValues_.data();
+
+		submitInfo.pNext = &tsInfo_;
+	} else {
+		// add dev.resetSemaphores while we are at it
+		for(auto sem : dev().resetSemaphores) {
+			waitSemaphores_.push_back(sem);
+			waitStages_.push_back(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT);
+			draw.waitedUpon.push_back(sem);
+		}
+
+		dev().resetSemaphores.clear();
+
+		// When this draw's futureSemaphore wasn't used, make sure
+		// to reset it before we signal it again. This shouldn't acutally
+		// cause an additional wait, we already wait for the last draw.
+		if(!draw.futureSemaphoreUsed && draw.futureSemaphoreSignaled) {
+			// This is a bit messy.
+			// So, 'futureSemaphore' was signaled by us but never consumed
+			// (happens when we just didn't access the anything the
+			// applicaiton used since then). We have to reset the
+			// semaphore.
+			// Initially, we simply waited on it via
+			// submitInfo.pWaitSemaphores but no one knows if this
+			// is valid or not, the spec is too vague.
+			// Since this lead to a deadlock with anv, mesa 20.3, 21.1,
+			// we just swap it out with a pool semaphore now.
+			// We can't recreate it without waiting on draw.fence
+			// which we want to avoid.
+			dev().resetSemaphores.push_back(draw.futureSemaphore);
+			draw.futureSemaphore = getSemaphoreFromPoolLocked(dev());
+
+			draw.futureSemaphoreUsed = false;
+			draw.futureSemaphoreSignaled = false;
+		}
+
+		signalSemaphores_.push_back(draw.futureSemaphore);
+
+		for(auto* sub : waitSubmissions) {
+			// take ownership of sub->ourSemaphore if it's valid
+			VkSemaphore sem = sub->ourSemaphore;
+			sub->ourSemaphore = {};
+
+			// if sub->ourSemaphore has already been used before, we have
+			// to synchronize with the queue via a new semaphore.
+			if(!sem) {
+				sem = getSemaphoreFromPoolLocked(dev());
+				auto res = submitSemaphore(*sub->parent->queue, sem);
+				if(res != VK_SUCCESS) {
+					dlg_error("vkQueueSubmit error: {}", vk::name(res));
+					return res;
+				}
+			}
+
+			// PERF: guess we could do better
+			waitStages_.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+			waitSemaphores_.push_back(sem);
+			draw.waitedUpon.push_back(sem);
+		}
+	}
+
+	dlg_assert(waitStages_.size() == waitSemaphores_.size());
+
+	submitInfo.signalSemaphoreCount = u32(signalSemaphores_.size());
+	submitInfo.pSignalSemaphores = signalSemaphores_.data();
+	submitInfo.pWaitDstStageMask = waitStages_.data();
+	submitInfo.waitSemaphoreCount = u32(waitSemaphores_.size());
+	submitInfo.pWaitSemaphores = waitSemaphores_.data();
+
+	return VK_SUCCESS;
+}
+
+void Gui::addFullSync(Draw& draw, VkSubmitInfo& submitInfo) {
+	dlg_assert(dev().timelineSemaphores);
+
+	// tsInfo_
+	tsInfo_.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+	tsInfo_.pNext = submitInfo.pNext;
+
+	// wait
+	waitValues_.resize(waitSemaphores_.size()); // initial ones, ignored
+
+	// when we used any application resources we sync with *all*
+	// pending submissions.
+	if(!draw.usedHandles.empty()) {
+		for(auto& pqueue : dev().queues) {
+			auto& queue = *pqueue;
+			if(&queue == &usedQueue()) {
+				continue;
+			}
+
+			u64 finishedID;
+			dev().dispatch.GetSemaphoreCounterValue(dev().handle,
+				queue.submissionSemaphore, &finishedID);
+
+			// no pending submissions on this queue
+			if(finishedID == queue.submissionCounter) {
+				continue;
+			}
+
+			dlg_assert(finishedID < queue.submissionCounter);
+			waitValues_.push_back(queue.submissionCounter);
+			waitSemaphores_.push_back(queue.submissionSemaphore);
+			waitStages_.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+		}
+	}
+
+	dlg_assert(waitValues_.size() == waitSemaphores_.size());
+	tsInfo_.waitSemaphoreValueCount = u32(waitValues_.size());
+	tsInfo_.pWaitSemaphoreValues = waitValues_.data();
+
+	// signal
+	signalSemaphores_.push_back(usedQueue().submissionSemaphore);
+	draw.lastSubmissionID = ++usedQueue().submissionCounter;
+
+	// signalValues[0] is uninitialized by design, should be
+	// ignored by driver as signalSemaphores[0] is binary, we need
+	// that since present semaphores cannot be timelined
+	signalValues_.resize(2);
+	signalValues_[1] = draw.lastSubmissionID;
+
+	tsInfo_.signalSemaphoreValueCount = signalValues_.size();
+	tsInfo_.pSignalSemaphoreValues = signalValues_.data();
+
+	submitInfo.pNext = &tsInfo_;
+
+	// build submitInfo
+	dlg_assert(waitStages_.size() == waitSemaphores_.size());
+
+	submitInfo.signalSemaphoreCount = u32(signalSemaphores_.size());
+	submitInfo.pSignalSemaphores = signalSemaphores_.data();
+	submitInfo.pWaitDstStageMask = waitStages_.data();
+	submitInfo.waitSemaphoreCount = u32(waitSemaphores_.size());
+	submitInfo.pWaitSemaphores = waitSemaphores_.data();
 }
 
 void Gui::waitForDraws() {

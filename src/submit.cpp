@@ -58,6 +58,10 @@ VkCommandBuffer processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer
 		if(dev.commandHook) {
 			auto hooked = dev.commandHook->hook(cb, dst, scb.hook);
 			dlg_assert(hooked);
+			if(hooked != cb.handle()) {
+				subm.lastLayerSubmission = dst.queueSubmitID;
+			}
+
 			return hooked;
 		} else {
 			return cb.handle();
@@ -89,13 +93,14 @@ VkSemaphore createSemaphore(Device& dev) {
 	VkSemaphore semaphore;
 	VkSemaphoreCreateInfo sci {};
 
-	VkSemaphoreTypeCreateInfo tsci {}; // keep-alive
-	if(dev.timelineSemaphores) {
-		tsci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-		tsci.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-		tsci.initialValue = 0u;
-		sci.pNext = &tsci;
-	}
+	dlg_assert(!dev.timelineSemaphores);
+	// VkSemaphoreTypeCreateInfo tsci {}; // keep-alive
+	// if(dev.timelineSemaphores) {
+	// 	tsci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+	// 	tsci.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+	// 	tsci.initialValue = 0u;
+	// 	sci.pNext = &tsci;
+	// }
 
 	sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 	VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &semaphore));
@@ -159,6 +164,12 @@ void process(QueueSubmitter& subm, VkSubmitInfo& si) {
 	auto& dst = subm.dstBatch->submissions.emplace_back();
 	dst.parent = subm.dstBatch;
 
+	// id
+	{
+		auto lock = std::lock_guard(dev.mutex);
+		dst.queueSubmitID = ++subm.queue->submissionCounter;
+	}
+
 	for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
 		auto& sem = dev.semaphores.get(si.pSignalSemaphores[j]);
 		dst.signalSemaphores.push_back(&sem);
@@ -196,34 +207,30 @@ void process(QueueSubmitter& subm, VkSubmitInfo& si) {
 	}
 
 	// = signal semaphores =
-	// We need to add a semaphore for device synchronization.
-	// We might wanna read from resources that are potentially written
-	// by this submission in the future, we need to be able to gpu-sync them.
-	dst.ourSemaphore = getSemaphoreFromPool(dev);
-
 	auto signalSems = subm.memScope.alloc<VkSemaphore>(si.signalSemaphoreCount + 1);
 	std::copy_n(si.pSignalSemaphores, si.signalSemaphoreCount, signalSems.begin());
-	signalSems.back() = dst.ourSemaphore;
 
 	dlg_assert(bool(tsInfo) == dev.timelineSemaphores);
 	if(tsInfo) {
-		u64 ourValue;
-		VK_CHECK(dev.dispatch.GetSemaphoreCounterValue(dev.handle, dst.ourSemaphore, &ourValue));
-		++ourValue;
-
-		dst.ourSemaphoreValue = ourValue;
-
 		// tsInfo->signalSemaphoreValueCount may be smaller than si.signalSemaphoreCount
 		// but then values in between are simply ignored.
 		dlg_assert(tsInfo->signalSemaphoreValueCount <= si.signalSemaphoreCount);
 		auto signalVals = subm.memScope.alloc<u64>(si.signalSemaphoreCount + 1);
 		std::copy_n(tsInfo->pSignalSemaphoreValues, tsInfo->signalSemaphoreValueCount,
 			signalVals.begin());
-		signalVals.back() = ourValue;
+
+		signalSems.back() = subm.queue->submissionSemaphore;
+		signalVals.back() = dst.queueSubmitID;
 
 		dlg_assert(signalVals.size() == signalSems.size());
 		tsInfo->signalSemaphoreValueCount = u32(signalVals.size());
 		tsInfo->pSignalSemaphoreValues = signalVals.data();
+	} else {
+		// We need to add a semaphore for device synchronization.
+		// We might wanna read from resources that are potentially written
+		// by this submission in the future, we need to be able to gpu-sync them.
+		dst.ourSemaphore = getSemaphoreFromPool(dev);
+		signalSems.back() = dst.ourSemaphore;
 	}
 
 	si.signalSemaphoreCount = u32(signalSems.size());
@@ -273,6 +280,82 @@ void cleanupOnError(QueueSubmitter& subm) {
 	}
 }
 
+void addFullSyncLocked(QueueSubmitter& subm) {
+	ZoneScoped;
+
+	auto& dev = *subm.dev;
+	dlg_assert(dev.timelineSemaphores);
+
+	auto maxWaitSemCount = dev.queues.size();
+	auto waitSems = subm.memScope.alloc<VkSemaphore>(maxWaitSemCount);
+	auto waitStages = subm.memScope.alloc<VkPipelineStageFlags>(maxWaitSemCount);
+	auto waitVals = subm.memScope.alloc<u64>(maxWaitSemCount);
+	auto waitSemCount = 0u;
+
+	for(auto& pqueue : dev.queues) {
+		auto& queue = *pqueue;
+		if(&queue == subm.queue) {
+			continue;
+		}
+
+		// no pending submissions on this queue
+		u64 finishedID;
+		dev.dispatch.GetSemaphoreCounterValue(dev.handle,
+			queue.submissionSemaphore, &finishedID);
+		if(finishedID == queue.submissionCounter) {
+			continue;
+		}
+
+		dlg_assert(finishedID < queue.submissionCounter);
+		if(subm.lastLayerSubmission) {
+			// if subm.lastLayerSubmission was set, the submission we are currently
+			// processing was hooked and we therefore need to sync with all
+			// other queues.
+			waitVals[waitSemCount] = queue.submissionCounter;
+		} else {
+			// here we only need to sync with previous layer submissions
+			// since we didn't insert any commands ourselves
+			if(queue.lastLayerSubmission < finishedID) {
+				continue;
+			}
+
+			waitVals[waitSemCount] = queue.lastLayerSubmission;
+		}
+
+		waitSems[waitSemCount] = queue.submissionSemaphore;
+		waitStages[waitSemCount] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		++waitSemCount;
+	}
+
+	if(waitSemCount == 0u) {
+		return;
+	}
+
+	// At this point we know that an additional submission is needed.
+	// add it as *first* submission. Need to completely reallocate
+	// span for that.
+	auto newInfos = subm.memScope.alloc<VkSubmitInfo>(subm.submitInfos.size() + 1);
+	std::copy(subm.submitInfos.begin(), subm.submitInfos.end(), newInfos.begin() + 1);
+	subm.submitInfos = newInfos;
+
+	auto& si = subm.submitInfos[0];
+	si = {};
+	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	si.pNext = nullptr;
+	si.waitSemaphoreCount = waitSemCount;
+	si.pWaitSemaphores = waitSems.data();
+	si.pWaitDstStageMask = waitStages.data();
+
+	auto& tsInfo = *subm.memScope.allocRaw<VkTimelineSemaphoreSubmitInfo>();
+	tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+	tsInfo.pNext = NULL;
+
+	tsInfo.waitSemaphoreValueCount = u32(waitVals.size());
+	tsInfo.pWaitSemaphoreValues = waitVals.data();
+
+	si.pNext = &tsInfo;
+}
+
 void addGuiSyncLocked(QueueSubmitter& subm) {
 	ZoneScoped;
 
@@ -287,7 +370,7 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 	// When this submission uses the gfxQueue (which we also use for
 	// gui rendering) we don't have to synchronize with gui rendering
 	// via semaphores, the pipeline barrier is enough.
-	if(dev.gui && (dev.gfxQueue != subm.queue || forceGuiQueueSemaphores)) {
+	if(dev.gui && dev.gfxQueue != subm.queue) {
 		// since all draws are submitted to the same queue
 		// we only need to wait upon the last one pending.
 		insertGuiSync = dev.gui->latestPendingDrawSyncLocked(batch);
@@ -336,12 +419,11 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 			tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
 			tsInfo.pNext = NULL;
 
-			waitSems[waitSemCount] = waitDraw.futureSemaphore;
+			auto waitVals = subm.memScope.alloc<u64>(1);
+			waitSems[waitSemCount] = dev.gui->usedQueue().submissionSemaphore;
+			waitVals[waitSemCount] = waitDraw.lastSubmissionID;
 			waitStages[waitSemCount] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 			++waitSemCount;
-
-			auto waitVals = subm.memScope.alloc<u64>(1);
-			waitVals[0] = waitDraw.futureSemaphoreValue;
 
 			tsInfo.waitSemaphoreValueCount = u32(waitVals.size());
 			tsInfo.pWaitSemaphoreValues = waitVals.data();
@@ -419,6 +501,10 @@ void postProcessLocked(QueueSubmitter& subm) {
 			}
 		}
 	}
+
+	if(subm.lastLayerSubmission) {
+		subm.queue->lastLayerSubmission = *subm.lastLayerSubmission;
+	}
 }
 
 // Returns whether the given submission potentially writes the given
@@ -476,7 +562,7 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 	ZoneScoped;
 
 	auto& dev = *pending.queue->dev;
-	if(pending.queue == dev.gfxQueue && !forceGuiQueueSemaphores) {
+	if(pending.queue == dev.gfxQueue) {
 		return {};
 	}
 

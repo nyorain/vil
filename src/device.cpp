@@ -108,6 +108,8 @@ Device::~Device() {
 		if(!queue->createdByUs) {
 			eraseData(queue->handle);
 		}
+
+		dispatch.DestroySemaphore(handle, queue->submissionSemaphore, nullptr);
 	}
 
 	for(auto& qf : queueFamilies) {
@@ -401,9 +403,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	}
 
 	// useful to test fallback code paths
-	// TODO: when the validation layer version with the timeline semaphores validation crash (it's fixed
-	// in master already) is old enough, we should enable timeline semaphores by default.
-	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", false);
+	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", true);
 	auto enableTransformFeedback = checkEnvBinary("VIL_TRANSFORM_FEEDBACK", true);
 
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage && (
@@ -745,6 +745,19 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 				dlg_assert(window);
 				dlg_assert(!window->presentQueue);
 				window->presentQueue = &q;
+			}
+
+			if(dev.timelineSemaphores) {
+				VkSemaphoreCreateInfo sci {};
+				VkSemaphoreTypeCreateInfo tsci {};
+				tsci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+				tsci.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+				tsci.initialValue = 0u;
+				sci.pNext = &tsci;
+
+				sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+				VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr,
+					&q.submissionSemaphore));
 			}
 		}
 	}

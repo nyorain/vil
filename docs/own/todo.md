@@ -8,12 +8,11 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] figure out timline_semaphore crashes in doom eternal
-- [ ] fix general commandHook synchronization, see design.md on
-      buffer_device_address, uncovered general potential race
+- [ ] figure out transform_feedback crashes in doom eternal
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
-- [ ] image viewer validation bug when we don't hover the image
+	- [ ] maybe show full image size on hover?
+- [ ] image viewer validation error when we don't hover the image
       (happens when mip > 0 is selected)
 
 docs
@@ -131,6 +130,9 @@ gui stuff
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
+- [ ] decide whether to enable full-sync by default or not.
+      Explain somewhere (in gui?) why/when it's needed. Already described
+	  in design.md from my pov
 - [ ] implement "jump to selected" in commandRecord viewer, immediately
       opening all needed sections and centering the selected command.
 	  Maybe give some special visual feedback when selected command can't

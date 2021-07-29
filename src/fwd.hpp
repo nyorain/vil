@@ -34,10 +34,6 @@ using i64 = std::int64_t;
 
 using std::size_t;
 
-// Debug setting. When true, will use the cross-queue semaphore chaining
-// logic for submissions to the same queue as well. Useful for debugging.
-constexpr auto forceGuiQueueSemaphores = false;
-
 class Gui;
 struct RenderBuffer;
 

@@ -65,6 +65,8 @@ struct Device {
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
 
+	bool doFullSync {};
+
 	// Aside from properties, only the families used by device
 	// are initialized.
 	std::vector<QueueFamily> queueFamilies;

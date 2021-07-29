@@ -38,7 +38,7 @@ struct Queue : Handle {
 	// Only valid when using timeline semaphores, used for full-sync.
 	// The submissionID of the last submission where the layer inserted
 	// commands, e.g. for gui rendering or via a CommandHook.
-	u64 lastLayerSubmission;
+	u64 lastLayerSubmission {};
 };
 
 // All data we store for a queue family.
@@ -62,6 +62,7 @@ struct SubmittedCommandBuffer {
 // A single Submission done via one VkSubmitInfo in vkQueueSubmit.
 struct Submission {
 	SubmissionBatch* parent {};
+	u64 queueSubmitID {};
 
 	std::vector<std::pair<Semaphore*, VkPipelineStageFlags>> waitSemaphores;
 	std::vector<Semaphore*> signalSemaphores;
@@ -70,11 +71,11 @@ struct Submission {
 	// is still pending (anything else is an application error).
 	std::vector<SubmittedCommandBuffer> cbs;
 
-	// We always add a signal semaphore to a submission, from the
-	// devices semaphore pool. When we have timeline semaphores, we also
-	// store the associated value this semaphore is set to by this submission.
+	// When not having timeline semaphores, we always add a binary
+	// semaphore to the submission to allow chaining it with future
+	// submissions. Otherwise the per-queue timeline semaphore can
+	// simply be used (with queueSubmitID as value).
 	VkSemaphore ourSemaphore {};
-	u64 ourSemaphoreValue {};
 };
 
 // Checks all pending submissions of the given device, processing
@@ -93,7 +94,6 @@ VkFence getFenceFromPool(Device& dev);
 struct SubmissionBatch {
 	Queue* queue {};
 	std::vector<Submission> submissions; // immutable after creation
-	u64 queueSubmitID {};
 	u64 globalSubmitID {};
 
 	// The fence added by the caller.

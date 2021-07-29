@@ -77,6 +77,8 @@ public:
 	Vec2f windowSize() const { return {windowSize_.x, windowSize_.y}; }
 	Vec2f windowPos() const { return {windowPos_.x, windowPos_.y}; }
 
+	Queue& usedQueue() const { return *dev().gfxQueue; }
+
 private:
 	void draw(Draw&, bool fullscreen);
 	void drawOverviewUI(Draw&);
@@ -86,6 +88,9 @@ private:
 	void uploadDraw(Draw&, const ImDrawData&);
 	void recordDraw(Draw&, VkExtent2D extent, VkFramebuffer fb, const ImDrawData&);
 	void finishedLocked(Draw&);
+
+	[[nodiscard]] VkResult addLegacySync(Draw&, VkSubmitInfo&);
+	void addFullSync(Draw&, VkSubmitInfo&);
 
 private:
 	Device* dev_ {};
@@ -152,6 +157,15 @@ private:
 	ImVec2 windowPos_ {};
 	ImVec2 windowSize_ {};
 	VkDescriptorSet blurDs_;
+
+	// only using during submission might this allows us to split
+	// sync building into separate functions
+	std::vector<VkSemaphore> waitSemaphores_;
+	std::vector<VkPipelineStageFlags> waitStages_;
+	std::vector<VkSemaphore> signalSemaphores_;
+	std::vector<u64> waitValues_;
+	std::vector<u64> signalValues_;
+	VkTimelineSemaphoreSubmitInfo tsInfo_ {};
 };
 
 // Inserts an imgui button towards the given handle.

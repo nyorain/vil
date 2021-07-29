@@ -722,7 +722,12 @@ void CommandViewer::displayDs(Draw& draw) {
 				ImGui::TableSetupColumn(nullptr, 0, 0.25f);
 				ImGui::TableSetupColumn(nullptr, 0, 0.75f);
 
-				display(compiled, res.type_id, name.c_str(), buf->data());
+				ThreadMemScope memScope;
+				auto* type = buildTypes(compiled, res.type_id, memScope);
+				dlg_assert(type);
+				display(name.c_str(), *type, buf->data());
+
+				// display(compiled, res.type_id, name.c_str(), buf->data());
 				ImGui::EndTable();
 			}
 		} else {
