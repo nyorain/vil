@@ -1046,10 +1046,13 @@ void Gui::drawOverviewUI(Draw& draw) {
 		if(dev.timelineSemaphores) {
 			ImGui::Checkbox("Full-Sync", &dev.doFullSync);
 			if(ImGui::IsItemHovered()) {
-				imGuiText("Ok ok hear me out: Life's just one weird rush and "
-					"barely anyone really knows what they are doing. So "
-					"every now and then, just go crazy, just go wild, just "
-					"try something new and see how things turn out");
+				ImGui::BeginTooltip();
+				imGuiText("Causes over-conservative synchronization of\n"
+					"inserted layer commands.\n"
+					"Might fix synchronization in some corner cases\n"
+					"and is needed when your application accesses buffers\n"
+					"by just using device addresses");
+				ImGui::EndTooltip();
 			}
 		}
 	}
@@ -1875,27 +1878,19 @@ void Gui::finishedLocked(Draw& draw) {
 	}
 
 	auto& rb = tabs_.resources.buffer_;
-	// NOTE: handle case where offset isn't the same? could patch-in
-	// relevant data nonetheless
-	if(rb.handle &&
-			rb.handle->handle == draw.readback.src &&
-			rb.offset == draw.readback.offset) {
-		ensureSize(rb.lastRead, draw.readback.size);
-		draw.readback.copy.invalidateMap();
-
-		// PERF: with some clever syncing we could probably get around
-		// the copy here and instead read from the mapped memory directly.
-		auto src = static_cast<std::byte*>(draw.readback.copy.map);
-		std::copy(src, src + draw.readback.size, rb.lastRead.begin());
+	auto found = false;
+	for(auto [i, readback] : enumerate(rb.readbacks)) {
+		if(readback.pending == &draw) {
+			dlg_assert(!found);
+			found = true;
+			readback.pending = nullptr;
+			rb.lastReadback = i;
+		}
 	}
 
 	draw.waitedUpon.clear();
 	draw.usedHandles.clear();
 	draw.usedHookState.reset();
-
-	draw.readback.offset = 0u;
-	draw.readback.size = 0u;
-	draw.readback.src = {};
 
 	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
 

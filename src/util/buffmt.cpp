@@ -2,7 +2,9 @@
 #include <util/f16.hpp>
 #include <util/bytes.hpp>
 #include <gui/util.hpp>
+#include <util/profiling.hpp>
 #include <threadContext.hpp>
+#include <numeric>
 
 namespace vil {
 
@@ -777,6 +779,8 @@ void displayArrayDim(const char* baseName, const Type& type, span<const u32> rem
 }
 
 void display(const char* name, const Type& type, ReadBuf data, u32 offset) {
+	ZoneScoped;
+
 	if(type.array.empty()) {
 		displayNonArray(name, type, data, offset);
 		return;
@@ -784,6 +788,63 @@ void display(const char* name, const Type& type, ReadBuf data, u32 offset) {
 
 	// display array
 	displayArrayDim(name, type, type.array, data, offset);
+}
+
+
+unsigned size(const Type& t, BufferLayout bl) {
+	u32 arrayFac = std::accumulate(t.array.begin(), t.array.end(), 1u, std::multiplies{});
+	switch(t.type) {
+		case Type::typeBool:
+		case Type::typeFloat:
+		case Type::typeUint:
+		case Type::typeInt: {
+			auto vec = t.vecsize;
+			if(bl == BufferLayout::std140 && vec == 3u) {
+				vec = 4u;
+			}
+			return arrayFac * vec * t.columns * t.width / 8u;
+		} case Type::typeStruct: {
+			auto end = 0u;
+			for(auto& member : t.members) {
+				end = std::max(end, member.offset + size(*member.type, bl));
+			}
+			return arrayFac * end;
+		}
+	}
+
+	dlg_error("unreachable");
+	return 0u;
+}
+
+unsigned align(const Type& t, BufferLayout bl) {
+	switch(t.type) {
+		case Type::typeBool:
+		case Type::typeFloat:
+		case Type::typeUint:
+		case Type::typeInt: {
+			auto vec = t.vecsize;
+			if(bl == BufferLayout::std140 && vec == 3u) {
+				vec = 4u;
+			}
+			return vec * t.width / 8u;
+		} case Type::typeStruct: {
+			auto ret = 0u;
+			for(auto& member : t.members) {
+				ret = std::max(ret, align(*member.type, bl));
+			}
+			return ret;
+		}
+	}
+
+	dlg_error("unreachable");
+	return 0u;
+}
+
+unsigned endAlign(const Type& t, BufferLayout bl) {
+	// TODO
+	(void) bl;
+	(void) t;
+	return 1u;
 }
 
 } // namespace vil

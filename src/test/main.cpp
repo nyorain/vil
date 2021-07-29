@@ -6,8 +6,12 @@
 
 extern "C" VIL_IMPORT int vil_runUnitTests(const char* pattern);
 
-int main() {
-	// TODO: allow passing a valid pattern via command line args
-	return vil_runUnitTests(nullptr);
+int main(int argc, const char** argv) {
+	const char* pattern = nullptr;
+	if(argc > 1) {
+		pattern = argv[1];
+	}
+
+	return vil_runUnitTests(pattern);
 }
 

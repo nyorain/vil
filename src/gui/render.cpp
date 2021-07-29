@@ -17,12 +17,12 @@ void swap(Draw& a, Draw& b) noexcept {
 	swap(a.inUse, b.inUse);
 	swap(a.indexBuffer, b.indexBuffer);
 	swap(a.vertexBuffer, b.vertexBuffer);
-	swap(a.readback.copy, b.readback.copy);
 	swap(a.presentSemaphore, b.presentSemaphore);
 	swap(a.futureSemaphore, b.futureSemaphore);
 	swap(a.futureSemaphoreSignaled, b.futureSemaphoreSignaled);
 	swap(a.futureSemaphoreUsed, b.futureSemaphoreUsed);
 	swap(a.lastSubmissionID, b.lastSubmissionID);
+	swap(a.lastUsed, b.lastUsed);
 	swap(a.usedHandles, b.usedHandles);
 	swap(a.usedHookState, b.usedHookState);
 	swap(a.waitedUpon, b.waitedUpon);

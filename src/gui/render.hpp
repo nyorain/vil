@@ -21,13 +21,6 @@ struct Draw {
 	OwnBuffer indexBuffer {};
 	VkCommandBuffer cb {}; // not freed here, relies on command pool being freed
 
-	struct {
-		OwnBuffer copy;
-		VkBuffer src {};
-		VkDeviceSize offset {};
-		VkDeviceSize size {};
-	} readback;
-
 	// Semaphore associated with the gfx submission of this rendering.
 	// Consumed by the present info.
 	VkSemaphore presentSemaphore {};

@@ -38,6 +38,7 @@ struct Type {
 	BaseType type;
 	u32 columns {1};
 	u32 vecsize {1};
+	// Set to 0 for runtime array.
 	std::vector<u32> array {};
 	u32 width;
 
@@ -54,9 +55,38 @@ struct Type {
 
 void display(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
 
+enum class BufferLayout {
+	std140,
+	std430,
+};
+
+// TODO: returns 0u for runtime arrays atm
+unsigned size(const Type& t, BufferLayout bl);
+unsigned align(const Type& t, BufferLayout bl);
+unsigned endAlign(const Type& t, BufferLayout bl);
+
 // TODO: no correct pointer/self-reference support
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		ThreadMemScope& memScope);
+
+struct ParsedLocation {
+	unsigned line;
+	unsigned col;
+	unsigned tabCount; // in addition to column
+	std::string lineContent; // content of line
+};
+
+struct ParsedMessage {
+	ParsedLocation loc;
+	std::string message;
+};
+
+// either type or error is valid.
+struct ParseTypeResult {
+	const Type* type {};
+	std::optional<ParsedMessage> error {};
+	std::vector<ParsedMessage> warnings {};
+};
 
 const Type* parseType(std::string_view str, ThreadMemScope&);
 

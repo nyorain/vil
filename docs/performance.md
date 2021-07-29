@@ -63,3 +63,14 @@ Todo
 - allow to enable/disable it (as well as some more detailed options) via meson_options
 - better memory tracking, we just track a small number of places at the moment
   that were suspects for leaks or significant overhead in the past.
+
+Notes/observations:
+- Copying large amounts of data on the GPU is generally not a problem.
+  Even capturing many MBs of data (e.g. with transform feedback or buffer/image
+  inspection) usually runs smoothly. It breaks down only when capturing
+  like houndred MBs in every frame (could only achieve this with transform
+  feedback where a single draw command draws the whole scene so far).
+  On the CPU, we are much more limited and should *never* variable sized
+  application data when we can get around it. Copying even 4MB per
+  frame via memcpy can cause significant problems. Just use the mapped
+  GPU buffers directly.

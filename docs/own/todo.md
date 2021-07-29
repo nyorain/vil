@@ -14,6 +14,23 @@ urgent, bugs:
 	- [ ] maybe show full image size on hover?
 - [ ] image viewer validation error when we don't hover the image
       (happens when mip > 0 is selected)
+- [ ] improve buffer viewer UI.
+	- [ ] integrate https://github.com/BalazsJako/ImGuiColorTextEdit
+	- [ ] use monospace font
+	- [ ] refactor parsing code to correctly output errors and warnings.
+	      - Idea here was to use two types of exceptions: one for expected
+		    errors and one for failed asserts (that might happen often in the
+		    beginning or when adding new features to the lang; 
+		    we want to write-out a dot file in that case and don't 
+		    crash the application).
+		  - accumulate warnings inside Parser struct and just return them.
+		    For instance: badly aligned data, column-major matrices etc
+	- [ ] show errors and warnings
+	- [ ] use that UI for buffer transform commands
+		- [ ] for that: implement transfer command buffer copy in command hook
+	- [ ] allow to convert the spirv buffer representation into text form
+	      and edit it before viewing buffer data e.g. in command viewer?
+		  Could really be useful for packed data.
 
 docs
 - [ ] write small wiki documentation post on how to use API

@@ -723,7 +723,7 @@ void CommandViewer::displayDs(Draw& draw) {
 				ImGui::TableSetupColumn(nullptr, 0, 0.75f);
 
 				ThreadMemScope memScope;
-				auto* type = buildTypes(compiled, res.type_id, memScope);
+				auto* type = buildType(compiled, res.type_id, memScope);
 				dlg_assert(type);
 				display(name.c_str(), *type, buf->data());
 

@@ -49,14 +49,25 @@ private:
 		VkOffset3D readPixelOffset {};
 	} image_;
 
+	struct BufReadback {
+		OwnBuffer own;
+		VkBuffer src {};
+		VkDeviceSize offset {};
+		VkDeviceSize size {};
+		Draw* pending {};
+	};
+
 	struct {
 		Buffer* handle {};
 		VkDeviceSize offset {};
 		VkDeviceSize size {};
 
-		std::vector<std::byte> lastRead;
+		// std::vector<std::byte> lastRead;
+		// std::vector<std::pair<std::string, VkFormat>> layout;
 		std::string layoutText;
-		std::vector<std::pair<std::string, VkFormat>> layout;
+
+		std::vector<BufReadback> readbacks;
+		std::optional<unsigned> lastReadback {};
 	} buffer_;
 
 	// Draws an ImGui overview for a resource.

@@ -4,9 +4,11 @@
 #include <gui/command.hpp>
 #include <gui/vertexViewer.hpp>
 #include <device.hpp>
+#include <threadContext.hpp>
 #include <handles.hpp>
 #include <accelStruct.hpp>
 #include <util/util.hpp>
+#include <util/buffmt.hpp>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
@@ -241,6 +243,9 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		subres.aspectMask = image_.aspect;
 
 		ReadBuf texelData;
+
+		// TODO: we need mutliple buffers, readPixelBuffer might currently
+		// be written on gpu
 		if(image_.readPixelBuffer.size) {
 			image_.readPixelBuffer.invalidateMap();
 			texelData = {image_.readPixelBuffer.map, image_.readPixelBuffer.size};
@@ -308,7 +313,30 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 
 	// content
 	// we are using a child window to avoid column glitches
-	if(!buffer_.lastRead.empty() && ImGui::BeginChild("BufContent")) {
+	if(buffer_.lastReadback) {
+		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
+		dlg_assert(!readback.pending);
+		if(readback.src == buffer_.handle->handle) {
+			imGuiTextMultiline("Layout", buffer_.layoutText);
+
+			ThreadMemScope memScope;
+			auto type = parseType(buffer_.layoutText, memScope);
+			if(type) {
+				auto flags = ImGuiTableFlags_BordersInner |
+					ImGuiTableFlags_Resizable |
+					ImGuiTableFlags_SizingStretchSame;
+				if(ImGui::BeginTable("Values", 2u, flags)) {
+					ImGui::TableSetupColumn(nullptr, 0, 0.25f);
+					ImGui::TableSetupColumn(nullptr, 0, 0.75f);
+
+					auto data = readback.own.data();
+					display("Content", *type, data);
+					ImGui::EndTable();
+				}
+			}
+		}
+
+			/*
 		imGuiText("Content");
 		ImGui::Spacing();
 
@@ -451,6 +479,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 		}
 
 		ImGui::EndChild();
+		*/
 	}
 }
 
@@ -1675,11 +1704,23 @@ void ResourceGui::recordPreRender(Draw& draw) {
 	if(handle_ && handle_ == buffer_.handle) {
 		auto& buf = *buffer_.handle;
 		auto offset = 0u; // TODO: allow to set in gui
-		auto size = std::min(buf.ci.size - offset, VkDeviceSize(1024 * 16));
+		auto maxCopySize = VkDeviceSize(1 * 1024 * 1024);
+		auto size = std::min(buf.ci.size - offset, maxCopySize);
 
-		if(size > draw.readback.copy.size) {
-			draw.readback.copy.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+		// find free readback or create a new one
+		BufReadback* readback {};
+		for(auto [i, r] : enumerate(buffer_.readbacks)) {
+			if(!r.pending && (!buffer_.lastReadback || i != *buffer_.lastReadback)) {
+				readback = &r;
+				break;
+			}
 		}
+
+		if(!readback) {
+			readback = &buffer_.readbacks.emplace_back();
+		}
+
+		readback->own.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
 		VkBufferMemoryBarrier bufb {};
 		bufb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -1700,8 +1741,7 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		copy.srcOffset = offset;
 		copy.dstOffset = 0u;
 		copy.size = size;
-		dev.dispatch.CmdCopyBuffer(draw.cb, buf.handle, draw.readback.copy.buf,
-			1, &copy);
+		dev.dispatch.CmdCopyBuffer(draw.cb, buf.handle, readback->own.buf, 1, &copy);
 
 		bufb.srcAccessMask = bufb.dstAccessMask;
 		bufb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -1715,9 +1755,10 @@ void ResourceGui::recordPreRender(Draw& draw) {
 		// We have to set this data correctly to the currently selected buffer,
 		// it will be compared then so that we only retrieve data we are
 		// still interested in.
-		draw.readback.offset = offset;
-		draw.readback.size = size;
-		draw.readback.src = buf.handle;
+		readback->offset = offset;
+		readback->size = size;
+		readback->src = buf.handle;
+		readback->pending = &draw;
 
 		// make sure this submission properly synchronized with submissions
 		// that also use the buffer (especially on other queues).

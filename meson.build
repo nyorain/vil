@@ -127,6 +127,7 @@ src = files(
 	'src/util/ext.cpp',
 	'src/util/ownbuf.cpp',
 	'src/util/buffmt.cpp',
+	'src/util/bufparser.cpp',
 	'src/command/alloc.cpp',
 	'src/command/desc.cpp',
 	'src/command/record.cpp',
@@ -259,6 +260,7 @@ if with_tests
 		'src/test/rpsplit.cpp',
 		'src/test/xfb.cpp',
 		'src/test/bufferAddress.cpp',
+		'src/test/bufparse.cpp',
 	)
 endif
 

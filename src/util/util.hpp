@@ -223,6 +223,56 @@ Vec4d srgbToLinear(Vec4d);
 
 std::size_t structSize(VkStructureType type);
 
+// TODO: bad performance due to taking string parameter. Should
+// take string_view but then we need to use from_chars which has poor
+// support. Should be better in future.
+template<typename T>
+bool stoi(std::string string, T& val, unsigned base = 10) {
+	char* end {};
+	auto str = string.c_str();
+	auto v = std::strtoll(str, &end, base);
+	if(end == str) {
+		return false;
+	}
+
+	val = v;
+	return true;
+}
+
+template<typename T, typename It = decltype(std::declval<T>().begin())>
+struct EnumerateImpl {
+	using Ref = decltype((*std::declval<It>()));
+
+	struct Value {
+		std::size_t index;
+		Ref item;
+	};
+
+ 	// Custom iterator with minimal interface
+    struct Iterator {
+        Iterator(It it, size_t counter = 0) : it_(it), counter_(counter) {}
+
+        Iterator operator++() { return Iterator(++it_, ++counter_); }
+        bool operator!=(Iterator other) { return it_ != other.it_; }
+        Value operator*() { return Value{counter_, *it_}; }
+        Value operator->() { return Value{counter_, *it_}; }
+
+    private:
+        It it_;
+		std::size_t counter_;
+    };
+
+	Iterator begin() { return {value_.begin()}; }
+	Iterator end() { return {value_.end()}; }
+
+	T& value_;
+};
+
+template<typename T>
+EnumerateImpl<T> enumerate(T& t) {
+    return EnumerateImpl<T>{t};
+}
+
 template<typename V, typename T>
 decltype(auto) constexpr templatize(T&& value) {
 	return std::forward<T>(value);

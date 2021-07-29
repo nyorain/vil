@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <vector>
 #include <cassert>
+#include <memory_resource>
 #include <util/util.hpp>
 
 // per-thread allocator for temporary local memory, allocated in stack-like
@@ -23,7 +24,7 @@ struct ThreadMemBlock {
 	// since we store the metadata right next to the raw byte array, we
 	// use a canary in debugging to warn about possibly corrupt metadat
 	// as early as possible.
-	static constexpr auto canaryValue = 0xCAFEC0DED00DDEAD;
+	static constexpr auto canaryValue = u64(0xCAFEC0DED00DDEADULL);
 	u64 canary {canaryValue};
 #endif // VIL_DEBUG
 
@@ -94,6 +95,56 @@ struct ThreadMemScope {
 
 	ThreadMemScope(); // stores current state
 	~ThreadMemScope(); // resets state
+};
+
+template<typename T>
+class ThreadMemoryAllocator {
+	using is_always_equal = std::false_type;
+	using value_type = T;
+
+	ThreadMemScope* memScope_;
+
+	ThreadMemoryAllocator(ThreadMemScope& tms) noexcept : memScope_(&tms) {}
+
+	template<typename O>
+	ThreadMemoryAllocator(const ThreadMemoryAllocator<O>& rhs) noexcept :
+		memScope_(rhs.memScope_) {}
+
+	template<typename O>
+	ThreadMemoryAllocator& operator=(const ThreadMemoryAllocator<O>& rhs) noexcept {
+		this->rec = rhs.rec;
+		return *this;
+	}
+
+	T* allocate(size_t n) {
+		return memScope_->allocRaw<T>(n);
+	}
+
+	void deallocate(T*, size_t) const noexcept {
+		// no-op
+	}
+};
+
+class ThreadMemoryResource : public std::pmr::memory_resource {
+	ThreadMemScope* memScope_ {};
+
+	void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+		dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		return memScope_->allocRaw(bytes);
+	}
+
+	void do_deallocate(void*, std::size_t, std::size_t) override {
+		// no-op
+	}
+
+	bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+		auto* tmr = dynamic_cast<const ThreadMemoryResource*>(&other);
+		if(!tmr) {
+			return false;
+		}
+
+		return tmr->memScope_ == this->memScope_;
+	}
 };
 
 } // namespace vil
