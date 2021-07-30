@@ -165,10 +165,10 @@ other
 - [ ] IO viewer additions
 	- [x] start using src/gui/command.hpp
 	- [x] fix descriptor arrays
-	- [ ] use the new buffer viewer for transfer buffer commands
-	- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
-		- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
+	- [x] use the new buffer viewer for transfer buffer commands
+		- [x] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
 			  i.e. support buffer IO viewing for transfer commands
+	- [x] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
 	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
 	- [x] when viewing transfer img, show image refButton
 	- [x] adapt ioImage_ to selected image (e.g. channels)
@@ -195,6 +195,7 @@ other
 	- [x] when viewing image as grayscale they become transparent atm.
 	      no idea why
 	- [ ] also don't apply scale for alpha
+	- [ ] maybe add some "transparent" background (some known pattern)
 - [ ] when viewing live command submissions, clicking on resource buttons
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
@@ -267,9 +268,19 @@ optimization:
 
 ---
 
+- [ ] (low prio but highly interesting) optionally capture callstacks for each command
+      immediately jumping to the point the command was recorded sounds
+	  useful. Could build in support for vim and visual studio I guess.
+	  See https://github.com/bombela/backward-cpp/blob/master/backward.hpp
+	- [ ] or maybe just use tracy's backtrace facilities?
 - [ ] buffer viewer: allow to convert the spirv buffer representation into text form
 	  and edit it before viewing buffer data e.g. in command viewer?
 	  Could really be useful for packed data.
+	- [ ] related: just allow to reference known types anywhere?
+	      If any shader module contained a struct type named "GlobalUbo",
+		  allow to just use it in any context?
+		  Would be *really* useful for debugging but might require too much
+		  tracking. Also problematic with different std buffer layouts
 - [ ] we need to copy acceleration structures/accelStructs in commandHook/
       on submission. But not really physically copy but track their state
 	  at that point when they are viewed. Hard to do in case the submission
@@ -324,10 +335,6 @@ optimization:
 	  should fix their shit but in some cases this might not be too hard
 	  to support properly with some additional tracking and there might
 	  be valid usecases for using transient image views
-- [ ] (low prio but highly interesting) optionally capture callstacks for each command
-      immediately jumping to the point the command was recorded sounds
-	  useful. Could build in support for vim and visual studio I guess.
-	  See https://github.com/bombela/backward-cpp/blob/master/backward.hpp
 - [ ] get it to run without significant (slight (like couple of percent) increase 
 	  of frame timings even with layer in release mode is ok) overhead.
 	  Just tests with the usual suspects of games

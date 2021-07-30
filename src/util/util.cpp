@@ -1113,4 +1113,35 @@ u32 readIndex(VkIndexType type, ReadBuf& data) {
 	return 0;
 }
 
+
+BufferInterval minMaxInterval(span<const VkBufferImageCopy2KHR> copies, u32 texelSize) {
+	VkDeviceSize offset = VkDeviceSize(-1);
+	VkDeviceSize end = 0u;
+
+	for(auto& copy : copies) {
+		auto stride = copy.bufferRowLength ?
+			copy.bufferRowLength : copy.imageExtent.width * texelSize;
+		auto hstride = copy.bufferImageHeight ?
+			copy.bufferImageHeight : copy.imageExtent.height * stride;
+		auto size = VkDeviceSize(hstride * copy.imageExtent.depth);
+		offset = std::min(copy.bufferOffset, offset);
+		end = std::max(copy.bufferOffset + size, end);
+	}
+
+	return {offset, end - offset};
+}
+
+BufferInterval minMaxInterval(span<const VkBufferCopy2KHR> copies, bool src) {
+	VkDeviceSize offset = VkDeviceSize(-1);
+	VkDeviceSize end = 0u;
+
+	for(auto& copy : copies) {
+		auto off = src ? copy.srcOffset : copy.dstOffset;
+		offset = std::min(off, offset);
+		end = std::max(off + copy.size, end);
+	}
+
+	return {offset, end - offset};
+}
+
 } // namespace vil

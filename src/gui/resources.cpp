@@ -323,6 +323,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	// content
 	// we are using a child window to avoid column glitches
 	if(buffer_.lastReadback) {
+		// TODO: code duplication with command viewer (transfer buffer)
 		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
 		dlg_assert(!readback.pending);
 		if(readback.src == buffer_.handle->handle) {

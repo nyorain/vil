@@ -273,6 +273,14 @@ EnumerateImpl<T> enumerate(T& t) {
     return EnumerateImpl<T>{t};
 }
 
+struct BufferInterval {
+	VkDeviceSize offset;
+	VkDeviceSize size;
+};
+
+BufferInterval minMaxInterval(span<const VkBufferImageCopy2KHR> copies, u32 texelSize);
+BufferInterval minMaxInterval(span<const VkBufferCopy2KHR> copies, bool src);
+
 template<typename V, typename T>
 decltype(auto) constexpr templatize(T&& value) {
 	return std::forward<T>(value);

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
 #include <gui/vertexViewer.hpp>
+#include <imgui/textedit.h>
 #include <command/record.hpp>
 
 namespace vil {
@@ -37,6 +38,10 @@ public:
 			// buffer view state
 			VkShaderStageFlagBits stage;
 		} ds;
+
+		struct {
+			u32 index;
+		} transfer;
 
 		struct {
 			bool output; // vertex input or output
@@ -77,6 +82,7 @@ private:
 	// IO list display
 	void displayIOList();
 	void displayTransferIOList();
+	void displayBufferTextedit(ReadBuf data);
 	void displayDsList();
 
 	// selected IO display
@@ -111,6 +117,7 @@ private:
 	DrawGuiImage ioImage_ {};
 
 	VertexViewer vertexViewer_ {};
+	igt::TextEditor bufTextedit_ {};
 };
 
 } // namespace vil

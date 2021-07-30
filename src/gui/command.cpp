@@ -26,9 +26,59 @@
 //   when the cooresponding handle is destroyed/invalidated).
 
 namespace vil {
+namespace {
+
+u32 transferCount(const CopyBufferCmd& cmd) { return cmd.regions.size(); }
+u32 transferCount(const CopyImageCmd& cmd) { return cmd.copies.size(); }
+u32 transferCount(const CopyBufferToImageCmd& cmd) { return cmd.copies.size(); }
+u32 transferCount(const CopyImageToBufferCmd& cmd) { return cmd.copies.size(); }
+u32 transferCount(const BlitImageCmd& cmd) { return cmd.blits.size(); }
+u32 transferCount(const ClearColorImageCmd& cmd) { return cmd.ranges.size(); }
+u32 transferCount(const ClearDepthStencilImageCmd& cmd) { return cmd.ranges.size(); }
+u32 transferCount(const ResolveImageCmd& cmd) { return cmd.regions.size(); }
+u32 transferCount(const FillBufferCmd&) { return 1u; }
+u32 transferCount(const UpdateBufferCmd&) { return 1u; }
+
+BufferInterval srcBufInterval(const CopyBufferCmd& cmd, u32 idx) {
+	dlg_assert(idx < cmd.regions.size());
+	return {cmd.regions[idx].srcOffset, cmd.regions[idx].size};
+}
+
+BufferInterval dstBufInterval(const CopyBufferCmd& cmd, u32 idx) {
+	dlg_assert(idx < cmd.regions.size());
+	return {cmd.regions[idx].dstOffset, cmd.regions[idx].size};
+}
+
+BufferInterval dstBufInterval(const FillBufferCmd& cmd, u32 idx) {
+	dlg_assert(idx == 0u);
+	return {cmd.offset, cmd.size};
+}
+
+BufferInterval dstBufInterval(const UpdateBufferCmd& cmd, u32 idx) {
+	dlg_assert(idx == 0u);
+	return {cmd.offset, cmd.data.size()};
+}
+
+BufferInterval srcBufInterval(const CopyBufferToImageCmd& cmd, u32 idx) {
+	auto texelSize = FormatTexelSize(cmd.dst->ci.format);
+	return minMaxInterval({{cmd.copies[idx]}}, texelSize);
+}
+
+BufferInterval dstBufInterval(const CopyImageToBufferCmd& cmd, u32 idx) {
+	auto texelSize = FormatTexelSize(cmd.src->ci.format);
+	return minMaxInterval({{cmd.copies[idx]}}, texelSize);
+}
+
+} // anon namespace
 
 // CommandViewer
-CommandViewer::CommandViewer() = default;
+CommandViewer::CommandViewer() {
+	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	bufTextedit_.SetLanguageDefinition(lang);
+	bufTextedit_.SetShowWhitespaces(false);
+	bufTextedit_.SetTabSize(4);
+}
+
 CommandViewer::~CommandViewer() = default;
 
 Device& CommandViewer::dev() const {
@@ -141,6 +191,9 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			if(!command_ || typeid(*command_) != typeid(cmd)) {
 				selectCommandView = true;
 			}
+
+			// always reset this
+			viewData_.transfer.index = 0u;
 			break;
 		case IOView::pushConstants:
 			if(!stateCmd || !stateCmd->boundPipe()) {
@@ -221,6 +274,7 @@ void CommandViewer::displayTransferIOList() {
 		ImGui::TreeNodeEx("Source", lflags);
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferSrc;
+			viewData_.transfer.index = 0u; // always reset
 			ioImage_ = {};
 			updateHook();
 		}
@@ -242,6 +296,7 @@ void CommandViewer::displayTransferIOList() {
 		ImGui::TreeNodeEx("Destination", lflags);
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferDst;
+			viewData_.transfer.index = 0u; // always reset
 			ioImage_ = {};
 			updateHook();
 		}
@@ -256,20 +311,35 @@ void CommandViewer::displayTransferIOList() {
 	};
 
 	addSrcDst(dynamic_cast<const CopyImageCmd*>(&cmd));
-	addDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
-	addSrc(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
+	addSrcDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
+	addSrcDst(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
 	addSrcDst(dynamic_cast<const BlitImageCmd*>(&cmd));
 	addSrcDst(dynamic_cast<const ResolveImageCmd*>(&cmd));
-	// addSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
-	// addDst(dynamic_cast<const UpdateBufferCmd*>(&cmd));
-	// addDst(dynamic_cast<const FillBufferCmd*>(&cmd));
+	addSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
+	addSrcDst(dynamic_cast<const UpdateBufferCmd*>(&cmd));
 	addDst(dynamic_cast<const ClearColorImageCmd*>(&cmd));
 	addDst(dynamic_cast<const ClearDepthStencilImageCmd*>(&cmd));
+	addDst(dynamic_cast<const FillBufferCmd*>(&cmd));
 
-	// TODO: add support for selecting one of the multiple
-	//   cleared attachments. We need special treatment here anyways,
-	//   need to set copyAttachment in updateHook for this.
-	// addDst(dynamic_cast<const ClearAttachmentCmd*>(&cmd));
+	if(auto* ca = dynamic_cast<const ClearAttachmentCmd*>(&cmd)) {
+		found = true;
+
+		for(auto [i, att] : enumerate(ca->attachments)) {
+			auto lflags = flags;
+			if(view_ == IOView::transferDst && viewData_.transfer.index == i) {
+				lflags |= ImGuiTreeNodeFlags_Selected;
+			}
+
+			auto label = dlg::format("Attachment {}", att.colorAttachment);
+			ImGui::TreeNodeEx(label.c_str(), lflags);
+			if(ImGui::IsItemClicked()) {
+				view_ = IOView::transferDst;
+				viewData_.transfer.index = i;
+				ioImage_ = {};
+				updateHook();
+			}
+		}
+	}
 
 	dlg_assertlm(dlg_level_warn, found, "IO inspector unimplemented for command");
 }
@@ -605,10 +675,6 @@ bool CommandViewer::displayBeforeCheckbox() {
 
 void CommandViewer::displayDs(Draw& draw) {
 	auto& gui = *this->gui_;
-	if(displayBeforeCheckbox()) {
-		ImGui::Text("Updating...");
-		return;
-	}
 
 	auto* cmd = deriveCast<const StateCmdBase*>(command_);
 	dlg_assert_or(cmd, return);
@@ -651,6 +717,18 @@ void CommandViewer::displayDs(Draw& draw) {
 	auto& bindingLayout = state.layout->bindings[bindingID];
 	auto dsType = bindingLayout.descriptorType;
 	auto dsCat = category(dsType);
+
+	// NOTE: the "Before Command" checkbox might not make sense for other types.
+	// For uniform buffers etc. the contents *should* stay the same but it
+	// might still be nice to select when they are captured, for some
+	// debugging corner cases. For sampler, otoh, we just don't capture
+	// anything anyways.
+	if(dsType != VK_DESCRIPTOR_TYPE_SAMPLER) {
+		if(displayBeforeCheckbox()) {
+			ImGui::Text("Updating...");
+			return;
+		}
+	}
 
 	auto& elemID = viewData_.ds.elem;
 	if(dsCat != DescriptorCategory::inlineUniformBlock) {
@@ -948,26 +1026,29 @@ void CommandViewer::displayTransferData(Draw& draw) {
 	}
 
 	dlg_assert(view_ == IOView::transferSrc || view_ == IOView::transferDst);
-
-	auto refSrcDst = [&](auto* ccmd) {
-		if(!ccmd) {
-			return;
-		}
-
-		if(view_ == IOView::transferSrc) {
-			refButtonD(*gui_, ccmd->src);
-		} else  {
-			refButtonD(*gui_, ccmd->dst);
-		}
-	};
+	bool refBuffer = false;
+	bool refImage = false;
+	u32 tcount = 0u;
 
 	auto refDst = [&](auto* ccmd) {
 		if(!ccmd) {
 			return;
 		}
 
+		tcount = transferCount(*ccmd);
 		dlg_assert(view_ == IOView::transferDst);
 		refButtonD(*gui_, ccmd->dst);
+
+		if constexpr(std::is_convertible_v<decltype(ccmd->dst), const Buffer*>) {
+			auto [offset, size] = dstBufInterval(*ccmd, viewData_.transfer.index);
+			// PERF: IntrusivePtr here not needed at all
+			ImGui::SameLine();
+			drawOffsetSize({IntrusivePtr<Buffer>{ccmd->dst}, offset, size});
+			refBuffer = true;
+		} else {
+			static_assert(std::is_convertible_v<decltype(ccmd->dst), const Image*>);
+			refImage = true;
+		}
 	};
 
 	auto refSrc = [&](auto* ccmd) {
@@ -975,33 +1056,130 @@ void CommandViewer::displayTransferData(Draw& draw) {
 			return;
 		}
 
+		tcount = transferCount(*ccmd);
 		dlg_assert(view_ == IOView::transferSrc);
 		refButtonD(*gui_, ccmd->src);
+
+		if constexpr(std::is_convertible_v<decltype(ccmd->src), const Buffer*>) {
+			auto [offset, size] = srcBufInterval(*ccmd, viewData_.transfer.index);
+			// PERF: IntrusivePtr here not needed at all
+			ImGui::SameLine();
+			drawOffsetSize({IntrusivePtr<Buffer>{ccmd->src}, offset, size});
+			refBuffer = true;
+		} else {
+			static_assert(std::is_convertible_v<decltype(ccmd->src), const Image*>);
+			refImage = true;
+		}
 	};
 
+	auto refSrcDst = [&](auto* ccmd) {
+		if(!ccmd) {
+			return;
+		}
+
+		tcount = transferCount(*ccmd);
+		if(view_ == IOView::transferSrc) {
+			refSrc(ccmd);
+		} else  {
+			refDst(ccmd);
+		}
+	};
+
+	(void) refSrc;
+
 	refSrcDst(dynamic_cast<const CopyImageCmd*>(&cmd));
-	refDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
-	refSrc(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
+	refSrcDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
+	refSrcDst(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
 	refSrcDst(dynamic_cast<const BlitImageCmd*>(&cmd));
 	refSrcDst(dynamic_cast<const ResolveImageCmd*>(&cmd));
 
-	// addSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
-	// addDst(dynamic_cast<const UpdateBufferCmd*>(&cmd));
-	// addDst(dynamic_cast<const FillBufferCmd*>(&cmd));
+	refSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
+	refDst(dynamic_cast<const FillBufferCmd*>(&cmd));
 	refDst(dynamic_cast<const ClearColorImageCmd*>(&cmd));
 	refDst(dynamic_cast<const ClearDepthStencilImageCmd*>(&cmd));
 
-	// TODO: add support for selecting one of the multiple
-	//   cleared attachments
-	// if(auto* ccmd = dynamic_cast<const ClearAttachmentCmd*>(&cmd); ccmd) {
-	// 	// TODO
-	// 	(void) ccmd;
-	// }
+	if(auto* ccmd = dynamic_cast<const UpdateBufferCmd*>(&cmd); ccmd) {
+		if(view_ == IOView::transferSrc) {
+			imGuiText("Static data of size {}", ccmd->data.size());
+			displayBufferTextedit(ccmd->data);
+			return;
+		} else  {
+			refDst(ccmd);
+		}
+	}
 
-	if(state_->transferImgCopy.image) {
-		displayImage(draw, state_->transferImgCopy);
-	} else {
+	dlg_assert(refBuffer ^ refImage);
+	dlg_assert(tcount > 0u);
+	if(!state_->errorMessage.empty()) {
 		imGuiText("Error: {}", state_->errorMessage);
+		return;
+	}
+
+	if(optSliderRange("Transfer", viewData_.transfer.index, tcount)) {
+		updateHook();
+		state_ = {};
+		imGuiText("Updating...");
+		return;
+	}
+
+	dlg_assert(refBuffer == !!state_->transferBufCopy.buf);
+	dlg_assert(refImage == !!state_->transferImgCopy.image);
+
+	if(refBuffer && state_->transferBufCopy.buf) {
+		displayBufferTextedit(state_->transferBufCopy.data());
+	} else if(refImage && state_->transferImgCopy.image) {
+		displayImage(draw, state_->transferImgCopy);
+	}
+}
+
+void CommandViewer::displayBufferTextedit(ReadBuf data) {
+	// TODO: code duplication with resource viewer (buffer)
+	auto layoutText = bufTextedit_.GetText();
+	ThreadMemScope memScope;
+	auto parseRes = parseType(layoutText, memScope);
+
+	igt::TextEditor::ErrorMarkers markers;
+	if(parseRes.error) {
+		auto& err = *parseRes.error;
+
+		auto msg = err.message;
+		msg += "\n";
+
+		// TODO: make it work with tabs
+		auto& line = err.loc.lineContent;
+		auto tabCount = std::count(line.begin(), line.end(), '\t');
+		msg += line;
+		msg += "\n";
+
+		// hard to say what tab size is... eh. Maybe just replace it?
+		auto col = err.loc.col + tabCount * (4 - 1);
+		for(auto i = 1u; i < col; ++i) {
+			msg += " ";
+		}
+
+		msg += "^\n";
+
+		markers.insert({err.loc.line, msg});
+	}
+
+	bufTextedit_.SetErrorMarkers(markers);
+
+	ImGui::PushFont(gui_->monoFont);
+	bufTextedit_.Render("Layout", {0, 200});
+	ImGui::PopFont();
+
+	auto type = parseRes.type;
+	if(type && !type->members.empty()) {
+		auto flags = ImGuiTableFlags_BordersInner |
+			ImGuiTableFlags_Resizable |
+			ImGuiTableFlags_SizingStretchSame;
+		if(ImGui::BeginTable("Values", 2u, flags)) {
+			ImGui::TableSetupColumn(nullptr, 0, 0.25f);
+			ImGui::TableSetupColumn(nullptr, 0, 0.75f);
+
+			display("Content", *type, data);
+			ImGui::EndTable();
+		}
 	}
 }
 
@@ -1227,6 +1405,7 @@ void CommandViewer::updateHook() {
 	hook.unsetHookOps();
 	state_ = {};
 
+	auto stateCmd = dynamic_cast<const StateCmdBase*>(command_);
 	auto drawIndexedCmd = dynamic_cast<const DrawIndexedCmd*>(command_);
 	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(command_);
 	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(command_);
@@ -1248,17 +1427,37 @@ void CommandViewer::updateHook() {
 			hook.copyAttachment = {viewData_.attachment.id, beforeCommand_};
 			break;
 		case IOView::transferSrc:
+			if(dynamic_cast<const UpdateBufferCmd*>(command_)) {
+				// nothing to do in that case, we know the data statically
+				break;
+			}
+
+			hook.transferIdx = viewData_.transfer.index;
 			hook.copyTransferSrc = true;
 			hook.copyTransferBefore = beforeCommand_;
 			break;
 		case IOView::transferDst:
+			hook.transferIdx = viewData_.transfer.index;
 			hook.copyTransferDst = true;
 			hook.copyTransferBefore = beforeCommand_;
 			break;
-		case IOView::ds:
+		case IOView::ds: {
+			dlg_assert_or(stateCmd, break);
+			auto pl = stateCmd->boundPipe()->layout;
+			dlg_assert_or(pl, break);
+			dlg_assert_or(viewData_.ds.set < pl->descriptors.size(), break);
+			auto dsl = pl->descriptors[viewData_.ds.set];
+			dlg_assert_or(dsl, break);
+			dlg_assert_or(viewData_.ds.binding < dsl->bindings.size(), break);
+			auto& bindingLayout = dsl->bindings[viewData_.ds.binding];
+			if(bindingLayout.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) {
+				// just a sampler bound, command hook has nothing to do
+				break;
+			}
+
 			hook.copyDS = {viewData_.ds.set, viewData_.ds.binding, viewData_.ds.elem, beforeCommand_};
 			break;
-		case IOView::mesh:
+		} case IOView::mesh:
 			if(viewData_.mesh.output) {
 				hook.copyXfb = true;
 				hook.copyIndirectCmd = indirectCmd;

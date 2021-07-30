@@ -502,6 +502,7 @@ void CommandHook::unsetHookOps(bool doQueryTime) {
 	this->copyDS = {};
 	this->copyTransferSrc = false;
 	this->copyTransferDst = false;
+	this->transferIdx = 0u;
 	invalidateRecordings();
 	invalidateData();
 }
@@ -1222,9 +1223,8 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 					state->errorMessage, record->queueFamily);
 			}
 		} else {
-			// TODO we should not land here at all! Check state in
-			// cb gui before registring hook. Don't register a hook
-			// just to find out *here* that we don't need it
+			// We shouldn't land here at all, we catch that case when
+			// updting the hook in CommandViewer
 			state->errorMessage = "Just a sampler bound";
 			dlg_error(state->errorMessage);
 		}
@@ -1331,68 +1331,77 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 	dlg_assert(hook->copyTransferDst != hook->copyTransferSrc);
 	auto& dev = *record->dev;
 
-	if(hook->copyTransferSrc) {
-		VkImageSubresourceRange subres {};
-		VkImageLayout layout {};
+	struct CopyImage {
 		Image* src {};
+		VkImageLayout layout {};
+		VkImageSubresourceRange subres {};
+	};
+
+	struct CopyBuffer {
+		Buffer* buf {};
+		VkDeviceSize offset {};
+		VkDeviceSize size {};
+	};
+
+	auto idx = hook->transferIdx;
+	if(hook->copyTransferSrc) {
+		std::optional<CopyImage> img;
+		std::optional<CopyBuffer> buf;
 
 		if(auto* cmd = dynamic_cast<const CopyImageCmd*>(&bcmd); cmd) {
-			src = cmd->src;
-			layout = cmd->srcLayout;
-			subres = toRange(cmd->copies[0].srcSubresource);
+			img = {cmd->src, cmd->srcLayout, toRange(cmd->copies[idx].srcSubresource)};
 		} else if(auto* cmd = dynamic_cast<const BlitImageCmd*>(&bcmd); cmd) {
-			src = cmd->src;
-			layout = cmd->srcLayout;
-			subres = toRange(cmd->blits[0].srcSubresource);
+			img = {cmd->src, cmd->srcLayout, toRange(cmd->blits[idx].srcSubresource)};
 		} else if(auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&bcmd); cmd) {
-			src = cmd->src;
-			layout = cmd->srcLayout;
-			subres = toRange(cmd->copies[0].imageSubresource);
+			img = {cmd->src, cmd->srcLayout, toRange(cmd->copies[idx].imageSubresource)};
 		} else if(auto* cmd = dynamic_cast<const ResolveImageCmd*>(&bcmd); cmd) {
-			src = cmd->src;
-			layout = cmd->srcLayout;
-			subres = toRange(cmd->regions[0].srcSubresource);
+			img = {cmd->src, cmd->srcLayout, toRange(cmd->regions[idx].srcSubresource)};
+		} else if(auto* cmd = dynamic_cast<const CopyBufferCmd*>(&bcmd); cmd) {
+			auto [offset, size] = minMaxInterval({{cmd->regions[idx]}}, true);
+			buf = {cmd->src, offset, size};
+		} else if(auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&bcmd); cmd) {
+			auto texelSize = FormatTexelSize(cmd->dst->ci.format);
+			auto [offset, size] = minMaxInterval({{cmd->copies[idx]}}, texelSize);
+			buf = {cmd->src, offset, size};
 		}
 
-		dlg_assert(src);
-		initAndCopy(dev, cb, state->transferImgCopy, *src,
-			layout, subres, state->errorMessage, record->queueFamily);
+		dlg_assert(img || buf);
+		if(img) {
+			auto [src, layout, subres] = *img;
+			initAndCopy(dev, cb, state->transferImgCopy, *src,
+				layout, subres, state->errorMessage, record->queueFamily);
+		} else if(buf) {
+			auto [src, offset, size] = *buf;
+			if(copyFullTransferBuffer) {
+				offset = 0u;
+				size = src->ci.size;
+			}
+
+			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size);
+		}
 	} else if(hook->copyTransferDst) {
-		VkImageSubresourceRange subres {};
-		VkImageLayout layout {};
-		Image* src {};
+		std::optional<CopyImage> img;
+		std::optional<CopyBuffer> buf;
 
 		if(auto* cmd = dynamic_cast<const CopyImageCmd*>(&bcmd); cmd) {
-			src = cmd->dst;
-			layout = cmd->dstLayout;
-			subres = toRange(cmd->copies[0].dstSubresource);
+			img = {cmd->dst, cmd->dstLayout, toRange(cmd->copies[idx].dstSubresource)};
 		} else if(auto* cmd = dynamic_cast<const BlitImageCmd*>(&bcmd); cmd) {
-			src = cmd->dst;
-			layout = cmd->dstLayout;
-			subres = toRange(cmd->blits[0].dstSubresource);
+			img = {cmd->dst, cmd->dstLayout, toRange(cmd->blits[idx].dstSubresource)};
 		} else if(auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&bcmd); cmd) {
-			src = cmd->dst;
-			layout = cmd->dstLayout;
-			subres = toRange(cmd->copies[0].imageSubresource);
+			img = {cmd->dst, cmd->dstLayout, toRange(cmd->copies[idx].imageSubresource)};
 		} else if(auto* cmd = dynamic_cast<const ResolveImageCmd*>(&bcmd); cmd) {
-			src = cmd->dst;
-			layout = cmd->dstLayout;
-			subres = toRange(cmd->regions[0].dstSubresource);
+			img = {cmd->dst, cmd->dstLayout, toRange(cmd->regions[idx].dstSubresource)};
 		} else if(auto* cmd = dynamic_cast<const ClearColorImageCmd*>(&bcmd); cmd) {
-			src = cmd->dst;
-			layout = cmd->dstLayout;
-			subres = cmd->ranges[0];
+			img = {cmd->dst, cmd->dstLayout, cmd->ranges[idx]};
 		} else if(auto* cmd = dynamic_cast<const ClearDepthStencilImageCmd*>(&bcmd); cmd) {
-			src = cmd->dst;
-			layout = cmd->dstLayout;
-			subres = cmd->ranges[0];
+			img = {cmd->dst, cmd->dstLayout, cmd->ranges[idx]};
 		} else if(auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&bcmd)) {
 			auto& rp = nonNull(info.beginRenderPassCmd->rp);
 			auto& fb = nonNull(info.beginRenderPassCmd->fb);
 
 			// TODO: support showing multiple cleared attachments in gui,
 			//   allowing to select here which one is copied.
-			auto& clearAtt = cmd->attachments[0];
+			auto& clearAtt = cmd->attachments[idx];
 			u32 attID = clearAtt.colorAttachment;
 			if(clearAtt.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT) {
 				auto& subpass = rp.desc.subpasses[info.hookedSubpass];
@@ -1402,18 +1411,38 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 
 			dlg_assert(fb.attachments.size() > attID);
 			auto& imgView = nonNull(fb.attachments[attID]);
-			auto& img = nonNull(imgView.img);
+			auto& src = nonNull(imgView.img);
 
 			// image must be in general layout because we are just between
 			// the split render passes
-			src = &img;
-			layout = VK_IMAGE_LAYOUT_GENERAL;
-			subres = imgView.ci.subresourceRange;
+			img = {&src, VK_IMAGE_LAYOUT_GENERAL, imgView.ci.subresourceRange};
+		} else if(auto* cmd = dynamic_cast<const CopyBufferCmd*>(&bcmd); cmd) {
+			auto [offset, size] = minMaxInterval({{cmd->regions[idx]}}, false);
+			buf = {cmd->dst, offset, size};
+		} else if(auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&bcmd); cmd) {
+			auto texelSize = FormatTexelSize(cmd->src->ci.format);
+			auto [offset, size] = minMaxInterval({{cmd->copies[idx]}}, texelSize);
+			buf = {cmd->dst, offset, size};
+		} else if(auto* cmd = dynamic_cast<const FillBufferCmd*>(&bcmd); cmd) {
+			buf = {cmd->dst, cmd->offset, cmd->size};
+		} else if(auto* cmd = dynamic_cast<const UpdateBufferCmd*>(&bcmd); cmd) {
+			buf = {cmd->dst, cmd->offset, cmd->data.size()};
 		}
 
-		dlg_assert(src);
-		initAndCopy(dev, cb, state->transferImgCopy, *src,
-			layout, subres, state->errorMessage, record->queueFamily);
+		dlg_assert(img || buf);
+		if(img) {
+			auto [src, layout, subres] = *img;
+			initAndCopy(dev, cb, state->transferImgCopy, *src,
+				layout, subres, state->errorMessage, record->queueFamily);
+		} else if(buf) {
+			auto [src, offset, size] = *buf;
+			if(copyFullTransferBuffer) {
+				offset = 0u;
+				size = src->ci.size;
+			}
+
+			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size);
+		}
 	}
 }
 

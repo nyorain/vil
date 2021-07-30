@@ -67,7 +67,7 @@ struct CommandHookState {
 	CopiedImage attachmentCopy {}; // Copy of selected attachment
 
 	// Only for transfer commands
-	// OwnBuffer transferBufCopy {}; // TODO(io-rework): support transfer buffers in IO viewer
+	OwnBuffer transferBufCopy {};
 	CopiedImage transferImgCopy {};
 
 	// When a requested resource cannot be retrieved, this holds the reason.
@@ -120,6 +120,7 @@ public:
 	bool copyTransferSrc {};
 	bool copyTransferDst {};
 	bool copyTransferBefore {};
+	u32 transferIdx {}; // the relevant region/blit/attachment of the transfer command
 
 	// A vector of the last received states of finished submissions.
 	// Must be reset manually when retrieved.
@@ -295,6 +296,10 @@ private:
 	// size for sub-allocated buffers. Theoretically, we could analyze
 	// previous index/indirect data for this. Not sure if good idea.
 	static constexpr auto maxBufCopySize = VkDeviceSize(32 * 1024 * 1024);
+
+	// TODO: should the whole buffer be copied for transfer operations?
+	// bad idea in many cases, e.g. when huge upload heaps are used.
+	static constexpr auto copyFullTransferBuffer = false;
 };
 
 struct CommandHookSubmission {
