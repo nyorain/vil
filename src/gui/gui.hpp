@@ -35,6 +35,9 @@ public:
 	bool visible {false};
 	bool unfocus {false};
 
+	ImFont* defaultFont {};
+	ImFont* monoFont {};
+
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
 

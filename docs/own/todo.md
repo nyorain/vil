@@ -14,23 +14,6 @@ urgent, bugs:
 	- [ ] maybe show full image size on hover?
 - [ ] image viewer validation error when we don't hover the image
       (happens when mip > 0 is selected)
-- [ ] improve buffer viewer UI.
-	- [ ] integrate https://github.com/BalazsJako/ImGuiColorTextEdit
-	- [ ] use monospace font
-	- [ ] refactor parsing code to correctly output errors and warnings.
-	      - Idea here was to use two types of exceptions: one for expected
-		    errors and one for failed asserts (that might happen often in the
-		    beginning or when adding new features to the lang; 
-		    we want to write-out a dot file in that case and don't 
-		    crash the application).
-		  - accumulate warnings inside Parser struct and just return them.
-		    For instance: badly aligned data, column-major matrices etc
-	- [ ] show errors and warnings
-	- [ ] use that UI for buffer transform commands
-		- [ ] for that: implement transfer command buffer copy in command hook
-	- [ ] allow to convert the spirv buffer representation into text form
-	      and edit it before viewing buffer data e.g. in command viewer?
-		  Could really be useful for packed data.
 
 docs
 - [ ] write small wiki documentation post on how to use API
@@ -182,16 +165,10 @@ other
 - [ ] IO viewer additions
 	- [x] start using src/gui/command.hpp
 	- [x] fix descriptor arrays
-	- [ ] fix transfer buffer introspection
-	      to cleanly implement this: clean up and split out the buffer reader
-		  implementation from the resource gui. On the long run, it would
-		  be nice to reuse buffmt.hpp for this but I don't know how exactly.
-		  Maybe transform the spirv type representation in our own internal
-		  representation first and rewrite buffmt for that representation
-		  (into which we can also easily parse input from gui).
-		  The current problem is that we can't easily parse gui layout input
-		  into spirv_cross primitives
+	- [ ] use the new buffer viewer for transfer buffer commands
 	- [ ] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
+		- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
+			  i.e. support buffer IO viewing for transfer commands
 	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
 	- [x] when viewing transfer img, show image refButton
 	- [x] adapt ioImage_ to selected image (e.g. channels)
@@ -200,8 +177,6 @@ other
 	- [ ] support texel reading implementation for cb-viewed-images and clean
 		  up color format presentation, support depth and packed formats.
 		  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
-	- [ ] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
-	      i.e. support buffer IO viewing for transfer commands
 - [ ] (high prio) better pipeline/shader module display in resource viewer
       It's currently completely broken due to spirv-reflect removal
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
@@ -292,6 +267,9 @@ optimization:
 
 ---
 
+- [ ] buffer viewer: allow to convert the spirv buffer representation into text form
+	  and edit it before viewing buffer data e.g. in command viewer?
+	  Could really be useful for packed data.
 - [ ] we need to copy acceleration structures/accelStructs in commandHook/
       on submission. But not really physically copy but track their state
 	  at that point when they are viewed. Hard to do in case the submission
@@ -307,7 +285,7 @@ optimization:
 	  new mechanism to correctly match new records.
 	  Fix this when doing the next match/cbGui update iteration (related: next 
 	  command group impl iteration)
-- [ ] memory overhead from using spirv-cross may be too large.
+- [ ] (low prio, only when problem) memory overhead from using spirv-cross may be too large.
       Create the reflection modules only on-demand then, shouldn't be
 	  too expensive. And/or page them and/or the stored spirv data
 	  itself out to disk.
@@ -316,7 +294,7 @@ optimization:
 - [ ] (later?) correctly track stuff from push descriptors. Need to add handles and stuff,
       make sure destruction is tracked correctly. Also show in gui.
 	  See the commands in cb.cpp
-- [ ] vil_api.h: Allow destroyed created overlays
+- [ ] vil_api.h: Allow destroying created overlays
 - [ ] improve DeviceMemory visualization. Also improve Memory overview tab
 - [ ] SetHandleName should probably not always use the device hash map
       when the objects are wrapped. Currently causes issues since

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <gui/render.hpp>
 #include <vk/vulkan.h>
+#include <imgui/textedit.h>
 #include <variant>
 #include <vector>
 #include <unordered_set>
@@ -13,6 +14,8 @@ namespace vil {
 class ResourceGui {
 public:
 	~ResourceGui();
+
+	void init();
 
 	void select(Handle& handle);
 	void draw(Draw&);
@@ -64,10 +67,12 @@ private:
 
 		// std::vector<std::byte> lastRead;
 		// std::vector<std::pair<std::string, VkFormat>> layout;
-		std::string layoutText;
+		// std::string layoutText;
 
 		std::vector<BufReadback> readbacks;
 		std::optional<unsigned> lastReadback {};
+
+		igt::TextEditor textedit_ {};
 	} buffer_;
 
 	// Draws an ImGui overview for a resource.

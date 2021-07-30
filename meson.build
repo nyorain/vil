@@ -167,6 +167,7 @@ src = files(
 	'src/imgui/imgui_widgets.cpp',
 	'src/imgui/imgui_demo.cpp',
 	'src/imgui/imgui_tables.cpp',
+	'src/imgui/textedit.cpp',
 
 	# useful for visual studio build to include headers here
 	'src/fwd.hpp',
@@ -216,7 +217,7 @@ src = files(
 	'src/gui/blur.hpp',
 
 	# fonts
-	'src/gui/arimo.cpp',
+	'src/gui/fonts.cpp',
 
 	'src/util/util.hpp',
 	'src/util/span.hpp',

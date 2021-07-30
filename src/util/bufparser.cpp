@@ -446,6 +446,11 @@ struct TreeParser {
 		auto offset = 0u;
 		for(auto& member : decl.children[1]->children) {
 			appendValueDecl(*member, t, offset);
+
+			auto& type = *t.members.back().type;
+			if(!type.array.empty() && type.array.front() == 0u) {
+				throw SemanticError(decl, "Runtime array not allowed in struct");
+			}
 		}
 
 		structs_.emplace(std::string_view(t.deco.name), &t);
@@ -467,8 +472,17 @@ struct TreeParser {
 		sdst->deco.name = "main";
 
 		auto offset = 0u;
+		auto runtimeArray = false;
 		for(auto& member : decls.children) {
+			if(runtimeArray) {
+				throw SemanticError(*member, "No values allowed after runtime-array");
+			}
 			appendValueDecl(*member, *sdst, offset);
+
+			auto& type = *sdst->members.back().type;
+			if(!type.array.empty() && type.array.front() == 0u) {
+				runtimeArray = true;
+			}
 		}
 
 		main_ = sdst;
@@ -592,7 +606,6 @@ const Type* unwrap(const ParseTypeResult& res) {
 
 	dlg_assert(res.error);
 	auto& err = *res.error;
-
 
 	char buf[12];
 	dlg_escape_sequence(dlg_default_output_styles[dlg_level_error], buf);

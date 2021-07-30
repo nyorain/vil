@@ -57,6 +57,13 @@ std::string sepfmt(u64 size) {
 	return ret;
 }
 
+void ResourceGui::init() {
+	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	buffer_.textedit_.SetLanguageDefinition(lang);
+	buffer_.textedit_.SetShowWhitespaces(false);
+	buffer_.textedit_.SetTabSize(4);
+}
+
 ResourceGui::~ResourceGui() {
 	if(image_.view) {
 		gui_->dev().dispatch.DestroyImageView(gui_->dev().handle,
@@ -284,7 +291,9 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	if(buffer_.handle != &buffer) {
 		// TODO: remember used layouts per-buffer?
 		// But would be nice to have mechanism for that across multiple starts
-		buffer_ = {};
+		buffer_.lastReadback = {};
+		buffer_.offset = {};
+		buffer_.size = {};
 		buffer_.handle = &buffer;
 	}
 
@@ -317,11 +326,42 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
 		dlg_assert(!readback.pending);
 		if(readback.src == buffer_.handle->handle) {
-			imGuiTextMultiline("Layout", buffer_.layoutText);
-
+			auto layoutText = buffer_.textedit_.GetText();
 			ThreadMemScope memScope;
-			auto type = unwrap(parseType(buffer_.layoutText, memScope));
-			if(type) {
+			auto parseRes = parseType(layoutText, memScope);
+
+			igt::TextEditor::ErrorMarkers markers;
+			if(parseRes.error) {
+				auto& err = *parseRes.error;
+
+				auto msg = err.message;
+				msg += "\n";
+
+				// TODO: make it work with tabs
+				auto& line = err.loc.lineContent;
+				auto tabCount = std::count(line.begin(), line.end(), '\t');
+				msg += line;
+				msg += "\n";
+
+				// hard to say what tab size is... eh. Maybe just replace it?
+				auto col = err.loc.col + tabCount * (4 - 1);
+				for(auto i = 1u; i < col; ++i) {
+					msg += " ";
+				}
+
+				msg += "^\n";
+
+				markers.insert({err.loc.line, msg});
+			}
+
+			buffer_.textedit_.SetErrorMarkers(markers);
+
+			ImGui::PushFont(gui_->monoFont);
+			buffer_.textedit_.Render("Layout", {0, 200});
+			ImGui::PopFont();
+
+			auto type = parseRes.type;
+			if(type && !type->members.empty()) {
 				auto flags = ImGuiTableFlags_BordersInner |
 					ImGuiTableFlags_Resizable |
 					ImGuiTableFlags_SizingStretchSame;
@@ -335,151 +375,6 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 				}
 			}
 		}
-
-			/*
-		imGuiText("Content");
-		ImGui::Spacing();
-
-		if(imGuiTextMultiline("Layout", buffer_.layoutText)) {
-			buffer_.layout.clear();
-
-			constexpr auto whitespace = "\n\t\f\r\v "; // as by std::isspace
-			constexpr auto whitespaceSemic = "\n\t\f\r\v; ";
-
-			const std::unordered_map<std::string_view, VkFormat> layoutMap = {
-				{"float", VK_FORMAT_R32_SFLOAT},
-				{"f32", VK_FORMAT_R32_SFLOAT},
-				{"vec1", VK_FORMAT_R32_SFLOAT},
-				{"float1", VK_FORMAT_R32_SFLOAT},
-				{"vec2", VK_FORMAT_R32G32_SFLOAT},
-				{"float2", VK_FORMAT_R32G32_SFLOAT},
-				{"vec3", VK_FORMAT_R32G32B32_SFLOAT},
-				{"float3", VK_FORMAT_R32G32B32_SFLOAT},
-				{"vec4", VK_FORMAT_R32G32B32A32_SFLOAT},
-				{"float4", VK_FORMAT_R32G32B32A32_SFLOAT},
-
-				{"half", VK_FORMAT_R16_SFLOAT},
-				{"f16", VK_FORMAT_R16_SFLOAT},
-				{"float16_t", VK_FORMAT_R16_SFLOAT},
-				{"half1", VK_FORMAT_R16_SFLOAT},
-				{"f16vec1", VK_FORMAT_R16_SFLOAT},
-				{"f16vec2", VK_FORMAT_R16G16_SFLOAT},
-				{"half2", VK_FORMAT_R16G16_SFLOAT},
-				{"f16vec3", VK_FORMAT_R16G16B16_SFLOAT},
-				{"half3", VK_FORMAT_R16G16B16_SFLOAT},
-				{"f16vec4", VK_FORMAT_R16G16B16A16_SFLOAT},
-				{"half4", VK_FORMAT_R16G16B16A16_SFLOAT},
-
-				{"uint", VK_FORMAT_R32_UINT},
-				{"uint2", VK_FORMAT_R32G32_UINT},
-				{"uint3", VK_FORMAT_R32G32B32_UINT},
-				{"uint4", VK_FORMAT_R32G32B32A32_UINT},
-				{"uvec1", VK_FORMAT_R32_UINT},
-				{"uvec2", VK_FORMAT_R32G32_UINT},
-				{"uvec3", VK_FORMAT_R32G32B32_UINT},
-				{"uvec4", VK_FORMAT_R32G32B32A32_UINT},
-
-				{"int", VK_FORMAT_R32_SINT},
-				{"int2", VK_FORMAT_R32G32_SINT},
-				{"int3", VK_FORMAT_R32G32B32_SINT},
-				{"int4", VK_FORMAT_R32G32B32A32_SINT},
-				{"ivec1", VK_FORMAT_R32_SINT},
-				{"ivec2", VK_FORMAT_R32G32_SINT},
-				{"ivec3", VK_FORMAT_R32G32B32_SINT},
-				{"ivec4", VK_FORMAT_R32G32B32A32_SINT},
-
-				{"u8", VK_FORMAT_R8_UINT},
-				{"u16", VK_FORMAT_R16_UINT},
-				{"u32", VK_FORMAT_R32_UINT},
-				{"u64", VK_FORMAT_R64_UINT},
-
-				{"i8", VK_FORMAT_R8_SINT},
-				{"i16", VK_FORMAT_R16_SINT},
-				{"i32", VK_FORMAT_R32_SINT},
-				{"i64", VK_FORMAT_R64_SINT},
-			};
-
-			auto lt = std::string_view(buffer_.layoutText);
-			for(auto end = lt.find(';'); end != lt.npos; end = lt.find(';')) {
-				auto start = lt.find_first_not_of(whitespace);
-				auto elem = lt.substr(start);
-
-				auto sep = elem.find_first_of(whitespaceSemic);
-				auto type = elem.substr(0, sep);
-				auto it = layoutMap.find(type);
-				if(it == layoutMap.end()) {
-					dlg_error("Invalid buffer layout identifier {}", type);
-					break;
-				}
-
-				std::string_view ident = type;
-				if(sep != end) {
-					ident = elem.substr(sep + 1);
-					start = ident.find_first_not_of(whitespace);
-					ident = ident.substr(start);
-					sep = ident.find_first_of(whitespaceSemic);
-					ident = ident.substr(0, sep);
-				}
-
-				buffer_.layout.push_back({std::string(ident), it->second});
-				lt = lt.substr(end + 1);
-			}
-
-			if(!lt.empty()) {
-				auto start = lt.find_first_not_of(whitespace);
-				if (start != lt.npos) {
-					lt = lt.substr(start);
-				}
-			}
-
-			dlg_assertm(lt.empty(), "Invalid buffer layout ending: {}", lt);
-		}
-
-		if(!buffer_.layout.empty()) {
-			auto data = span<const std::byte>(buffer_.lastRead);
-
-			// TODO: offset & scrolling!
-			constexpr auto maxSize = 1024;
-			if(data.size() > maxSize) {
-				data = data.first(maxSize);
-			}
-
-			ImGui::Columns(u32(buffer_.layout.size()));
-			for(auto& [name, _] : buffer_.layout) {
-				imGuiText("{}", name);
-				ImGui::NextColumn();
-			}
-
-			ImGui::Separator();
-
-			auto done = false;
-			while(!done) {
-				for(auto& [name, format] : buffer_.layout) {
-					if(data.size() < FormatTexelSize(format)) {
-						done = true;
-						break;
-					}
-
-					auto val = read(format, data);
-					auto cc = FormatChannelCount(format);
-					dlg_assert(cc <= 4);
-
-					std::string text;
-					for(auto i = 0u; i < cc; ++i) {
-						text += dlg::format("{} ", val[i]);
-					}
-
-					imGuiText("{}", text);
-					ImGui::NextColumn();
-				}
-			}
-
-			dlg_assertm(data.empty(), "Leftover data in buffer");
-			ImGui::Columns();
-		}
-
-		ImGui::EndChild();
-		*/
 	}
 }
 

@@ -2,7 +2,7 @@
 #include <gui/util.hpp>
 #include <gui/render.hpp>
 #include <gui/commandHook.hpp>
-#include <gui/arimo.hpp>
+#include <gui/fonts.hpp>
 #include <layer.hpp>
 #include <queue.hpp>
 #include <handle.hpp>
@@ -377,8 +377,14 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 		0,
 	};
 
-	io.Fonts->AddFontFromMemoryCompressedTTF(Arimo_compressed_data,
-		Arimo_compressed_size, 15.f, nullptr, rangesBasic);
+	ImFontConfig configOwned;
+	configOwned.FontDataOwnedByAtlas = false;
+
+	defaultFont = io.Fonts->AddFontFromMemoryCompressedTTF(arimo_compressed_data,
+		arimo_compressed_size, 15.f, nullptr, rangesBasic);
+	// TODO: compress
+	monoFont = io.Fonts->AddFontFromMemoryTTF((void*) inconsolata_compressed_data,
+		inconsolata_compressed_size, 15.f, &configOwned, rangesBasic);
 
 	// Apply style
 	ImGui::StyleColorsDark();
@@ -457,6 +463,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	// init tabs
 	tabs_.resources.gui_ = this;
+	tabs_.resources.init();
 	tabs_.cb.init(*this);
 }
 
@@ -510,6 +517,7 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 	ImGuiIO& io = ImGui::GetIO();
 	unsigned char* pixels;
 	int width, height;
+	// TODO: use a8
 	io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 	size_t uploadSize = width * height * 4 * sizeof(char);
 

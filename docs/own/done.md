@@ -1,3 +1,15 @@
+- [x] improve buffer viewer UI.
+	- [x] integrate https://github.com/BalazsJako/ImGuiColorTextEdit
+	- [x] use monospace font
+	- [x] refactor parsing code to correctly output errors and warnings.
+	      - Idea here was to use two types of exceptions: one for expected
+		    errors and one for failed asserts (that might happen often in the
+		    beginning or when adding new features to the lang; 
+		    we want to write-out a dot file in that case and don't 
+		    crash the application).
+		  - accumulate warnings inside Parser struct and just return them.
+		    For instance: badly aligned data, column-major matrices etc
+	- [x] show errors and warnings {no warnings for now}
 - [x] fix general commandHook synchronization, see design.md on
       buffer_device_address, uncovered general potential race
 - [x] in CopiedImage::init: check for image usage support
