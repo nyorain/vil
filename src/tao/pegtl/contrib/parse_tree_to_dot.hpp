@@ -74,35 +74,43 @@ namespace TAO_PEGTL_NAMESPACE::parse_tree
          os.write( l, p - l );
       }
 
-      template< typename Node >
-      void print_dot_node( std::ostream& os, const Node& n, const std::string_view s )
-      {
+	  template< typename Node >
+	  void default_printer(std::ostream& os, const Node& n)
+	  {
+		 auto type = n.is_root() ? "ROOT" : n.type;
+
          os << "  x" << &n << " [ label=\"";
-         escape( os, s );
+         escape( os, type );
          if( n.has_content() ) {
             os << "\\n\\\"";
             escape( os, n.string_view() );
             os << "\\\"";
          }
          os << "\" ]\n";
+	  }
+
+      template< typename Node, typename F >
+      void print_dot_node( std::ostream& os, const Node& n, F&& f )
+      {
+		 f(os, n);
          if( !n.children.empty() ) {
             os << "  x" << &n << " -> { ";
             for( auto& up : n.children ) {
                os << "x" << up.get() << ( ( up == n.children.back() ) ? " }\n" : ", " );
             }
             for( auto& up : n.children ) {
-               print_dot_node( os, *up, up->type );
+               print_dot_node( os, *up, f);
             }
          }
       }
 
    }  // namespace internal
 
-   template< typename Node >
-   void print_dot( std::ostream& os, const Node& n )
+   template< typename Node, typename F >
+   void print_dot( std::ostream& os, const Node& n, F&& f = internal::default_printer<Node> )
    {
       os << "digraph parse_tree\n{\n";
-      internal::print_dot_node( os, n, n.is_root() ? "ROOT" : n.type );
+      internal::print_dot_node( os, n, f );
       os << "}\n";
    }
 

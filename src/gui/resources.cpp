@@ -320,7 +320,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 			imGuiTextMultiline("Layout", buffer_.layoutText);
 
 			ThreadMemScope memScope;
-			auto type = parseType(buffer_.layoutText, memScope);
+			auto type = unwrap(parseType(buffer_.layoutText, memScope));
 			if(type) {
 				auto flags = ImGuiTableFlags_BordersInner |
 					ImGuiTableFlags_Resizable |

@@ -8,7 +8,7 @@ TEST(test1) {
 	auto str = "struct Test { int a[8][4]; uint4 b; }; Test a;";
 
 	ThreadMemScope memScope;
-	auto ret = parseType(str, memScope);
+	auto ret = unwrap(parseType(str, memScope));
 
 	EXPECT(ret != nullptr, true);
 	EXPECT(ret->type, Type::typeStruct);
@@ -34,7 +34,7 @@ TEST(invalid1) {
 	auto str = "struct Material { vec4 albed };";
 
 	ThreadMemScope memScope;
-	auto ret = parseType(str, memScope);
+	auto ret = unwrap(parseType(str, memScope));
 
 	EXPECT(ret == nullptr, true);
 }

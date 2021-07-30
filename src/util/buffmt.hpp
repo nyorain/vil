@@ -72,7 +72,6 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 struct ParsedLocation {
 	unsigned line;
 	unsigned col;
-	unsigned tabCount; // in addition to column
 	std::string lineContent; // content of line
 };
 
@@ -85,9 +84,12 @@ struct ParsedMessage {
 struct ParseTypeResult {
 	const Type* type {};
 	std::optional<ParsedMessage> error {};
-	std::vector<ParsedMessage> warnings {};
+	// std::vector<ParsedMessage> warnings {};
 };
 
-const Type* parseType(std::string_view str, ThreadMemScope&);
+ParseTypeResult parseType(std::string_view str, ThreadMemScope&);
+
+// Will simply output any errors to console.
+const Type* unwrap(const ParseTypeResult& res);
 
 } // namespace vil
