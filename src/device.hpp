@@ -92,9 +92,7 @@ struct Device {
 
 	u32 hostVisibleMemTypeBits {};
 	u32 deviceLocalMemTypeBits {};
-
 	VkDescriptorPool dsPool {};
-	std::unique_ptr<RenderData> renderData;
 
 	std::unique_ptr<DisplayWindow> window;
 

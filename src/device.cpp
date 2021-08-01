@@ -94,11 +94,6 @@ Device::~Device() {
 		dispatch.DestroySemaphore(handle, semaphore, nullptr);
 	}
 
-	if(renderData) {
-		renderData->free(*this);
-		renderData.reset();
-	}
-
 	if(dsPool) {
 		dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
 	}
@@ -796,10 +791,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			dev.deviceLocalMemTypeBits |= (1 << i);
 		}
 	}
-
-	// == graphics-stuff ==
-	dev.renderData = std::make_unique<RenderData>();
-	dev.renderData->init(dev);
 
 	// descriptor pool
 	// TODO: proper resource management.

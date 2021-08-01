@@ -100,7 +100,6 @@ struct BuildAccelStructsIndirectCmd;
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;
 
-struct RenderData;
 struct DisplayWindow;
 struct Platform;
 struct Overlay;

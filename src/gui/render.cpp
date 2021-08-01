@@ -1,5 +1,6 @@
 #include <gui/render.hpp>
 #include <gui/commandHook.hpp>
+#include <gui/gui.hpp>
 #include <util/util.hpp>
 #include <device.hpp>
 #include <queue.hpp>
@@ -39,7 +40,8 @@ Draw& Draw::operator=(Draw rhs) noexcept {
 	return *this;
 }
 
-void Draw::init(Device& dev, VkCommandPool commandPool) {
+void Draw::init(Gui& gui, VkCommandPool commandPool) {
+	auto& dev = gui.dev();
 	this->dev = &dev;
 
 	// init data
@@ -72,7 +74,7 @@ void Draw::init(Device& dev, VkCommandPool commandPool) {
 	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	dsai.descriptorPool = dev.dsPool;
 	dsai.descriptorSetCount = 1u;
-	dsai.pSetLayouts = &dev.renderData->dsLayout;
+	dsai.pSetLayouts = &gui.dsLayout();
 	VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dsai, &dsSelected));
 	nameHandle(dev, this->dsSelected, "Draw:dsSelected");
 }
@@ -154,74 +156,6 @@ RenderBuffer::~RenderBuffer() {
 	if(view) {
 		dev->dispatch.DestroyImageView(dev->handle, view, nullptr);
 	}
-}
-
-// RenderData
-void RenderData::init(Device& dev) {
-	// samplers
-	VkSamplerCreateInfo sci {};
-	sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	sci.magFilter = VK_FILTER_NEAREST;
-	sci.minFilter = VK_FILTER_NEAREST;
-	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.minLod = -1000;
-	sci.maxLod = 1000;
-	sci.maxAnisotropy = 1.0f;
-	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &nearestSampler));
-	nameHandle(dev, this->nearestSampler, "RenderData:nearestSampler");
-
-	sci.magFilter = VK_FILTER_LINEAR;
-	sci.minFilter = VK_FILTER_LINEAR;
-	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &linearSampler));
-	nameHandle(dev, this->linearSampler, "RenderData:linearSampler");
-
-	// descriptor set layout
-	VkDescriptorSetLayoutBinding binding {};
-	binding.binding = 0u;
-	binding.descriptorCount = 1u;
-	binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-	VkDescriptorSetLayoutCreateInfo dslci {};
-	dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	dslci.bindingCount = 1u;
-	dslci.pBindings = &binding;
-	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &dsLayout));
-	nameHandle(dev, this->dsLayout, "RenderData:dsLayout");
-
-	// pipeline layout
-	// We just allocate the full push constant range that all implementations
-	// must support.
-	VkPushConstantRange pcrs[1] = {};
-	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-	pcrs[0].offset = 0;
-	// PERF: perf most pipelines don't need this much. Could create multiple
-	// pipe layouts.
-	pcrs[0].size = 128; // needed e.g. for vertex viewer pipeline
-
-	VkPipelineLayoutCreateInfo plci {};
-	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	plci.setLayoutCount = 1;
-	plci.pSetLayouts = &dsLayout;
-	plci.pushConstantRangeCount = 1;
-	plci.pPushConstantRanges = pcrs;
-	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &pipeLayout));
-	nameHandle(dev, this->pipeLayout, "RenderData:pipeLayout");
-}
-
-void RenderData::free(Device& dev) {
-	if(!nearestSampler) {
-		return;
-	}
-
-	dev.dispatch.DestroySampler(dev.handle, nearestSampler, nullptr);
-	dev.dispatch.DestroySampler(dev.handle, linearSampler, nullptr);
-	dev.dispatch.DestroyDescriptorSetLayout(dev.handle, dsLayout, nullptr);
-	dev.dispatch.DestroyPipelineLayout(dev.handle, pipeLayout, nullptr);
-	*this = {};
 }
 
 } // namespace vil

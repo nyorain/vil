@@ -24,6 +24,8 @@ if glslang.found()
 		'vertices.frag': {'': [] },
 		'blur.comp': {'': [] },
 		'accelStructVertices.comp': {'': [] },
+		'imagebg.vert': {'': [] },
+		'imagebg.frag': {'': [] },
 	}
 
 	foreach file, configs : overlay_shaders

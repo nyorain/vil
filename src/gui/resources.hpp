@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <gui/render.hpp>
+#include <gui/bufferViewer.hpp>
 #include <vk/vulkan.h>
 #include <imgui/textedit.h>
 #include <variant>
@@ -15,7 +16,7 @@ class ResourceGui {
 public:
 	~ResourceGui();
 
-	void init();
+	void init(Gui& gui);
 
 	void select(Handle& handle);
 	void draw(Draw&);
@@ -65,14 +66,9 @@ private:
 		VkDeviceSize offset {};
 		VkDeviceSize size {};
 
-		// std::vector<std::byte> lastRead;
-		// std::vector<std::pair<std::string, VkFormat>> layout;
-		// std::string layoutText;
-
 		std::vector<BufReadback> readbacks;
 		std::optional<unsigned> lastReadback {};
-
-		igt::TextEditor textedit_ {};
+		BufferViewer viewer;
 	} buffer_;
 
 	// Draws an ImGui overview for a resource.

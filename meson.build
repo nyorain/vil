@@ -159,6 +159,8 @@ src = files(
 	'src/gui/command.cpp',
 	'src/gui/commandHook.cpp',
 	'src/gui/vertexViewer.cpp',
+	'src/gui/bufferViewer.cpp',
+	'src/gui/imageViewer.cpp',
 	'src/gui/blur.cpp',
 
 	# imgui

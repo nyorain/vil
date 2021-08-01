@@ -57,11 +57,9 @@ std::string sepfmt(u64 size) {
 	return ret;
 }
 
-void ResourceGui::init() {
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	buffer_.textedit_.SetLanguageDefinition(lang);
-	buffer_.textedit_.SetShowWhitespaces(false);
-	buffer_.textedit_.SetTabSize(4);
+void ResourceGui::init(Gui& gui) {
+	gui_ = &gui;
+	buffer_.viewer.init(gui);
 }
 
 ResourceGui::~ResourceGui() {
@@ -269,7 +267,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		VkDescriptorImageInfo dsii {};
 		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		dsii.imageView = image_.view;
-		dsii.sampler = dev.renderData->nearestSampler;
+		dsii.sampler = gui_->nearestSampler();
 		// dsii.sampler = image.allowsLinearSampling ?
 		// 	dev.renderData->linearSampler :
 		// 	dev.renderData->nearestSampler;
@@ -323,58 +321,11 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	// content
 	// we are using a child window to avoid column glitches
 	if(buffer_.lastReadback) {
-		// TODO: code duplication with command viewer (transfer buffer)
 		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
 		dlg_assert(!readback.pending);
 		if(readback.src == buffer_.handle->handle) {
-			auto layoutText = buffer_.textedit_.GetText();
-			ThreadMemScope memScope;
-			auto parseRes = parseType(layoutText, memScope);
-
-			igt::TextEditor::ErrorMarkers markers;
-			if(parseRes.error) {
-				auto& err = *parseRes.error;
-
-				auto msg = err.message;
-				msg += "\n";
-
-				// TODO: make it work with tabs
-				auto& line = err.loc.lineContent;
-				auto tabCount = std::count(line.begin(), line.end(), '\t');
-				msg += line;
-				msg += "\n";
-
-				// hard to say what tab size is... eh. Maybe just replace it?
-				auto col = err.loc.col + tabCount * (4 - 1);
-				for(auto i = 1u; i < col; ++i) {
-					msg += " ";
-				}
-
-				msg += "^\n";
-
-				markers.insert({err.loc.line, msg});
-			}
-
-			buffer_.textedit_.SetErrorMarkers(markers);
-
-			ImGui::PushFont(gui_->monoFont);
-			buffer_.textedit_.Render("Layout", {0, 200});
-			ImGui::PopFont();
-
-			auto type = parseRes.type;
-			if(type && !type->members.empty()) {
-				auto flags = ImGuiTableFlags_BordersInner |
-					ImGuiTableFlags_Resizable |
-					ImGuiTableFlags_SizingStretchSame;
-				if(ImGui::BeginTable("Values", 2u, flags)) {
-					ImGui::TableSetupColumn(nullptr, 0, 0.25f);
-					ImGui::TableSetupColumn(nullptr, 0, 0.75f);
-
-					auto data = readback.own.data();
-					display("Content", *type, data);
-					ImGui::EndTable();
-				}
-			}
+			ImGui::Separator();
+			buffer_.viewer.display(readback.own.data());
 		}
 	}
 }

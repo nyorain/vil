@@ -62,7 +62,7 @@ struct Draw {
 	// frame number in which this draw was last used
 	u64 lastUsed {};
 
-	void init(Device& dev, VkCommandPool pool);
+	void init(Gui& gui, VkCommandPool pool);
 
 	Draw();
 	~Draw();
@@ -71,19 +71,6 @@ struct Draw {
 	Draw& operator=(Draw rhs) noexcept;
 
 	friend void swap(Draw& a, Draw& b) noexcept;
-};
-
-// Static, immutable rendering data shared by all renderers.
-// TODO: this should probably just be moved inside Gui, we don't
-// have multiple gui objects.
-struct RenderData {
-	VkDescriptorSetLayout dsLayout {};
-	VkPipelineLayout pipeLayout {};
-	VkSampler linearSampler {};
-	VkSampler nearestSampler {};
-
-	void init(Device& dev);
-	void free(Device& dev);
 };
 
 // For swapchain rendering

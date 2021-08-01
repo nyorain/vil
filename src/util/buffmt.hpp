@@ -7,10 +7,6 @@
 
 namespace vil {
 
-void display(const spc::Compiler& compiler, u32 typeID,
-		const char* name, ReadBuf data, u32 offset = 0u);
-
-// TODO: WIP
 struct Decoration {
 	enum class Bits {
 		rowMajor = 1 << 0u,
@@ -54,6 +50,7 @@ struct Type {
 };
 
 void display(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
+void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
 
 enum class BufferLayout {
 	std140,
@@ -84,7 +81,7 @@ struct ParsedMessage {
 struct ParseTypeResult {
 	const Type* type {};
 	std::optional<ParsedMessage> error {};
-	// std::vector<ParsedMessage> warnings {};
+	// warnings?
 };
 
 ParseTypeResult parseType(std::string_view str, ThreadMemScope&);

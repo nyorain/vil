@@ -1,5 +1,6 @@
 #include <gui/vertexViewer.hpp>
 #include <gui/commandHook.hpp>
+#include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <util/f16.hpp>
 #include <util/transform.hpp>
@@ -36,6 +37,123 @@ std::string printFormat(u32 count, const Vec4d& val) {
 	}
 
 	return ret;
+}
+
+// Need to convert the captures variable type info a vulkan format
+// so that we can read and display it.
+// TODO: should reuse buffmt for this.
+VkFormat formatForType(const XfbCapture& capture) {
+	auto compIDForWidth = [](u32 width) -> u32 {
+		switch(width) {
+			case 8: return 0u;
+			case 16: return 1u;
+			case 32: return 2u;
+			case 64: return 3u;
+			default: return u32(-1);
+		}
+	};
+
+	auto compID = compIDForWidth(capture.width);
+	if(compID == u32(-1)) {
+		dlg_error("Invalid width: {}", capture.width);
+		return VK_FORMAT_UNDEFINED;
+	}
+
+	if(capture.type == XfbCapture::typeFloat) {
+		VkFormat formats[4][4] = {
+			{
+				VK_FORMAT_UNDEFINED,
+				VK_FORMAT_UNDEFINED,
+				VK_FORMAT_UNDEFINED,
+				VK_FORMAT_UNDEFINED,
+			},
+			{
+				VK_FORMAT_R16_SFLOAT,
+				VK_FORMAT_R16G16_SFLOAT,
+				VK_FORMAT_R16G16B16_SFLOAT,
+				VK_FORMAT_R16G16B16A16_SFLOAT,
+			},
+			{
+				VK_FORMAT_R32_SFLOAT,
+				VK_FORMAT_R32G32_SFLOAT,
+				VK_FORMAT_R32G32B32_SFLOAT,
+				VK_FORMAT_R32G32B32A32_SFLOAT,
+			},
+			{
+				VK_FORMAT_R64_SFLOAT,
+				VK_FORMAT_R64G64_SFLOAT,
+				VK_FORMAT_R64G64B64_SFLOAT,
+				VK_FORMAT_R64G64B64A64_SFLOAT,
+			}
+		};
+
+		dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
+		dlg_assert_or(compID != 0u, return VK_FORMAT_UNDEFINED);
+		return formats[compID][capture.vecsize - 1];
+	} else if(capture.type == XfbCapture::typeUint) {
+		VkFormat formats[4][4] = {
+			{
+				VK_FORMAT_R8_UINT,
+				VK_FORMAT_R8G8_UINT,
+				VK_FORMAT_R8G8B8_UINT,
+				VK_FORMAT_R8G8B8A8_UINT,
+			},
+			{
+				VK_FORMAT_R16_UINT,
+				VK_FORMAT_R16G16_UINT,
+				VK_FORMAT_R16G16B16_UINT,
+				VK_FORMAT_R16G16B16A16_UINT,
+			},
+			{
+				VK_FORMAT_R32_UINT,
+				VK_FORMAT_R32G32_UINT,
+				VK_FORMAT_R32G32B32_UINT,
+				VK_FORMAT_R32G32B32A32_UINT,
+			},
+			{
+				VK_FORMAT_R64_UINT,
+				VK_FORMAT_R64G64_UINT,
+				VK_FORMAT_R64G64B64_UINT,
+				VK_FORMAT_R64G64B64A64_UINT,
+			}
+		};
+
+		dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
+		return formats[compID][capture.vecsize - 1];
+	} else if(capture.type == XfbCapture::typeInt) {
+		VkFormat formats[4][4] = {
+			{
+				VK_FORMAT_R8_SINT,
+				VK_FORMAT_R8G8_SINT,
+				VK_FORMAT_R8G8B8_SINT,
+				VK_FORMAT_R8G8B8A8_SINT,
+			},
+			{
+				VK_FORMAT_R16_SINT,
+				VK_FORMAT_R16G16_SINT,
+				VK_FORMAT_R16G16B16_SINT,
+				VK_FORMAT_R16G16B16A16_SINT,
+			},
+			{
+				VK_FORMAT_R32_SINT,
+				VK_FORMAT_R32G32_SINT,
+				VK_FORMAT_R32G32B32_SINT,
+				VK_FORMAT_R32G32B32A32_SINT,
+			},
+			{
+				VK_FORMAT_R64_SINT,
+				VK_FORMAT_R64G64_SINT,
+				VK_FORMAT_R64G64B64_SINT,
+				VK_FORMAT_R64G64B64A64_SINT,
+			}
+		};
+
+		dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
+		return formats[compID][capture.vecsize - 1];
+	}
+
+	dlg_error("Invalid capture type {}", unsigned(capture.type));
+	return VK_FORMAT_UNDEFINED;
 }
 
 std::string printFormat(VkFormat format, span<const std::byte> src) {
@@ -210,23 +328,25 @@ AABB3f bounds(span<const Vec4f> points, bool useW) {
 
 // VertexViewer
 VertexViewer::~VertexViewer() {
-	if(!dev_) {
+	if(!gui_) {
 		return;
 	}
 
+	auto& dev = gui_->dev();
 	for(auto& pipe : pipes_) {
-		dev_->dispatch.DestroyPipeline(dev_->handle, pipe.pipe, nullptr);
+		dev.dispatch.DestroyPipeline(dev.handle, pipe.pipe, nullptr);
 	}
 
-	dev_->dispatch.DestroyPipeline(dev_->handle, frustumPipe_, nullptr);
-	dev_->dispatch.DestroyPipelineLayout(dev_->handle, pipeLayout_, nullptr);
-	dev_->dispatch.DestroyShaderModule(dev_->handle, vertShader_, nullptr);
-	dev_->dispatch.DestroyShaderModule(dev_->handle, fragShader_, nullptr);
+	dev.dispatch.DestroyPipeline(dev.handle, frustumPipe_, nullptr);
+	dev.dispatch.DestroyPipelineLayout(dev.handle, pipeLayout_, nullptr);
+	dev.dispatch.DestroyShaderModule(dev.handle, vertShader_, nullptr);
+	dev.dispatch.DestroyShaderModule(dev.handle, fragShader_, nullptr);
 }
 
-void VertexViewer::init(Device& dev, VkRenderPass rp) {
-	dev_ = &dev;
-	rp_ = rp;
+void VertexViewer::init(Gui& gui) {
+	gui_ = &gui;
+
+	auto& dev = gui_->dev();
 
 	// pipeline layout
 	// We just allocate the full push constant range that all implementations
@@ -264,7 +384,7 @@ void VertexViewer::init(Device& dev, VkRenderPass rp) {
 }
 
 void VertexViewer::createFrustumPipe() {
-	auto& dev = *dev_;
+	auto& dev = gui_->dev();
 	dlg_assert(dev.nonSolidFill);
 
 	// load shaders
@@ -357,8 +477,8 @@ void VertexViewer::createFrustumPipe() {
 	gpi[0].pColorBlendState = &blendInfo;
 	gpi[0].pDepthStencilState = &depthStencil;
 	gpi[0].pDynamicState = &dynState;
-	gpi[0].layout = dev.renderData->pipeLayout;
-	gpi[0].renderPass = rp_;
+	gpi[0].layout = gui_->pipeLayout();
+	gpi[0].renderPass = gui_->rp();
 	gpi[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
 	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
@@ -369,7 +489,7 @@ void VertexViewer::createFrustumPipe() {
 
 VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 		VkPrimitiveTopology topology) {
-	auto& dev = *this->dev_;
+	auto& dev = gui_->dev();
 
 	// store them for destruction later on
 	std::array<VkPipelineShaderStageCreateInfo, 2> stages {};
@@ -468,8 +588,8 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	gpi[0].pColorBlendState = &blendInfo;
 	gpi[0].pDepthStencilState = &depthStencil;
 	gpi[0].pDynamicState = &dynState;
-	gpi[0].layout = dev.renderData->pipeLayout;
-	gpi[0].renderPass = rp_;
+	gpi[0].layout = gui_->pipeLayout();
+	gpi[0].renderPass = gui_->rp();
 	gpi[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
 	VkPipeline pipe;
@@ -486,7 +606,7 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 }
 
 void VertexViewer::imGuiDraw(const DrawData& data) {
-	auto& dev = *this->dev_;
+	auto& dev = gui_->dev();
 	auto cb = data.cb;
 
 	// try to find position by heuristics
@@ -754,7 +874,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	DrawParams params;
 
 	auto displayCmdSlider = [&](std::optional<VkIndexType> indices, u32 stride, u32 offset = 0u){
-		dlg_assert(dev_->commandHook->copyIndirectCmd);
+		dlg_assert(gui_->dev().commandHook->copyIndirectCmd);
 		dlg_assert(state.indirectCopy.size);
 
 		auto count = state.indirectCommandCount;
@@ -1042,7 +1162,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	u32 vertexOffset {};
 	u32 vertexCount {};
 	auto displayCmdSlider = [&](bool indexed, u32 stride, u32 offset = 0u){
-		dlg_assert(dev_->commandHook->copyIndirectCmd);
+		dlg_assert(gui_->dev().commandHook->copyIndirectCmd);
 		dlg_assert(state.indirectCopy.size);
 
 		auto count = state.indirectCommandCount;
@@ -1146,123 +1266,8 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 			auto xfbData = state.transformFeedback.data();
 			xfbData = xfbData.subspan(vertexOffset * xfbPatch.stride);
 
-			// Need to convert the captures variable type info a vulkan format
-			// so that we can read and display it.
-			// NOTE: should be a separate function.
-			auto formatForType = [](XfbCapture& capture) {
-				auto compIDForWidth = [](u32 width) -> u32 {
-					switch(width) {
-						case 8: return 0u;
-						case 16: return 1u;
-						case 32: return 2u;
-						case 64: return 3u;
-						default: return u32(-1);
-					}
-				};
-
-				auto compID = compIDForWidth(capture.width);
-				if(compID == u32(-1)) {
-					dlg_error("Invalid width: {}", capture.width);
-					return VK_FORMAT_UNDEFINED;
-				}
-
-				if(capture.type == XfbCapture::typeFloat) {
-					VkFormat formats[4][4] = {
-						{
-							VK_FORMAT_UNDEFINED,
-							VK_FORMAT_UNDEFINED,
-							VK_FORMAT_UNDEFINED,
-							VK_FORMAT_UNDEFINED,
-						},
-						{
-							VK_FORMAT_R16_SFLOAT,
-							VK_FORMAT_R16G16_SFLOAT,
-							VK_FORMAT_R16G16B16_SFLOAT,
-							VK_FORMAT_R16G16B16A16_SFLOAT,
-						},
-						{
-							VK_FORMAT_R32_SFLOAT,
-							VK_FORMAT_R32G32_SFLOAT,
-							VK_FORMAT_R32G32B32_SFLOAT,
-							VK_FORMAT_R32G32B32A32_SFLOAT,
-						},
-						{
-							VK_FORMAT_R64_SFLOAT,
-							VK_FORMAT_R64G64_SFLOAT,
-							VK_FORMAT_R64G64B64_SFLOAT,
-							VK_FORMAT_R64G64B64A64_SFLOAT,
-						}
-					};
-
-					dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
-					dlg_assert_or(compID != 0u, return VK_FORMAT_UNDEFINED);
-					return formats[compID][capture.vecsize - 1];
-				} else if(capture.type == XfbCapture::typeUint) {
-					VkFormat formats[4][4] = {
-						{
-							VK_FORMAT_R8_UINT,
-							VK_FORMAT_R8G8_UINT,
-							VK_FORMAT_R8G8B8_UINT,
-							VK_FORMAT_R8G8B8A8_UINT,
-						},
-						{
-							VK_FORMAT_R16_UINT,
-							VK_FORMAT_R16G16_UINT,
-							VK_FORMAT_R16G16B16_UINT,
-							VK_FORMAT_R16G16B16A16_UINT,
-						},
-						{
-							VK_FORMAT_R32_UINT,
-							VK_FORMAT_R32G32_UINT,
-							VK_FORMAT_R32G32B32_UINT,
-							VK_FORMAT_R32G32B32A32_UINT,
-						},
-						{
-							VK_FORMAT_R64_UINT,
-							VK_FORMAT_R64G64_UINT,
-							VK_FORMAT_R64G64B64_UINT,
-							VK_FORMAT_R64G64B64A64_UINT,
-						}
-					};
-
-					dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
-					return formats[compID][capture.vecsize - 1];
-				} else if(capture.type == XfbCapture::typeInt) {
-					VkFormat formats[4][4] = {
-						{
-							VK_FORMAT_R8_SINT,
-							VK_FORMAT_R8G8_SINT,
-							VK_FORMAT_R8G8B8_SINT,
-							VK_FORMAT_R8G8B8A8_SINT,
-						},
-						{
-							VK_FORMAT_R16_SINT,
-							VK_FORMAT_R16G16_SINT,
-							VK_FORMAT_R16G16B16_SINT,
-							VK_FORMAT_R16G16B16A16_SINT,
-						},
-						{
-							VK_FORMAT_R32_SINT,
-							VK_FORMAT_R32G32_SINT,
-							VK_FORMAT_R32G32B32_SINT,
-							VK_FORMAT_R32G32B32A32_SINT,
-						},
-						{
-							VK_FORMAT_R64_SINT,
-							VK_FORMAT_R64G64_SINT,
-							VK_FORMAT_R64G64B64_SINT,
-							VK_FORMAT_R64G64B64A64_SINT,
-						}
-					};
-
-					dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
-					return formats[compID][capture.vecsize - 1];
-				}
-
-				dlg_error("Invalid capture type {}", unsigned(capture.type));
-				return VK_FORMAT_UNDEFINED;
-			};
-
+			// TODO: show pages
+			// TODO: make rows selectable
 			for(auto i = 0u; i < std::min(u32(100u), vertexCount); ++i) {
 				auto buf = xfbData.subspan(i * xfbPatch.stride, xfbPatch.stride);
 
@@ -1353,7 +1358,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		drawData_.useW = useW;
 		drawData_.scale = 1.f;
-		drawData_.drawFrustum = dev_->nonSolidFill;
+		drawData_.drawFrustum = gui_->dev().nonSolidFill;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);

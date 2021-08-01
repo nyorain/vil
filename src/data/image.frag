@@ -68,7 +68,12 @@ void main() {
 	texCol.r *= float((pcr.flags & flagMaskR) != 0);
 	texCol.g *= float((pcr.flags & flagMaskG) != 0);
 	texCol.b *= float((pcr.flags & flagMaskB) != 0);
-	texCol.a = (pcr.flags & flagMaskA) != 0 ? texCol.a : 1.f;
+	texCol.a = ((pcr.flags & flagMaskA) != 0) ? texCol.a : 1.f;
+
+	// important for image viewer
+	if(In.uv != clamp(In.uv, 0, 1)) {
+		texCol.a = 0.f;
+	}
 
 	// TODO: add additional luminance mode? might be what some people
 	// expect from grayscale

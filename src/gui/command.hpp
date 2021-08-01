@@ -3,6 +3,8 @@
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
 #include <gui/vertexViewer.hpp>
+#include <gui/bufferViewer.hpp>
+#include <gui/imageViewer.hpp>
 #include <imgui/textedit.h>
 #include <command/record.hpp>
 
@@ -82,7 +84,6 @@ private:
 	// IO list display
 	void displayIOList();
 	void displayTransferIOList();
-	void displayBufferTextedit(ReadBuf data);
 	void displayDsList();
 
 	// selected IO display
@@ -114,10 +115,11 @@ private:
 	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
 
 	// For the one image we potentially display
-	DrawGuiImage ioImage_ {};
+	// DrawGuiImage ioImage_ {};
 
 	VertexViewer vertexViewer_ {};
-	igt::TextEditor bufTextedit_ {};
+	BufferViewer bufferViewer_ {};
+	ImageViewer imageViewer_ {};
 };
 
 } // namespace vil

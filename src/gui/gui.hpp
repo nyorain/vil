@@ -82,7 +82,16 @@ public:
 
 	Queue& usedQueue() const { return *dev().gfxQueue; }
 
+	const VkPipeline& imageBgPipe() const { return pipes_.imageBg; }
+	const VkSampler& linearSampler() const { return linearSampler_; }
+	const VkSampler& nearestSampler() const { return nearestSampler_; }
+	const VkPipelineLayout& pipeLayout() const { return pipeLayout_; }
+	const VkDescriptorSetLayout& dsLayout() const { return dsLayout_; }
+
 private:
+	void initPipes();
+	void initImGui();
+
 	void draw(Draw&, bool fullscreen);
 	void drawOverviewUI(Draw&);
 	void drawMemoryUI(Draw&);
@@ -112,6 +121,11 @@ private:
 	} tabs_;
 
 	// rendering stuff
+	VkDescriptorSetLayout dsLayout_ {};
+	VkPipelineLayout pipeLayout_ {};
+	VkSampler linearSampler_ {};
+	VkSampler nearestSampler_ {};
+
 	VkRenderPass rp_ {};
 	VkCommandPool commandPool_ {};
 
@@ -129,6 +143,8 @@ private:
 		VkPipeline image3D;
 		VkPipeline uimage3D;
 		VkPipeline iimage3D;
+
+		VkPipeline imageBg;
 	} pipes_;
 
 	bool clear_ {};

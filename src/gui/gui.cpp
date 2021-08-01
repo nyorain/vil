@@ -27,15 +27,15 @@
 
 #include <gui.frag.spv.h>
 #include <gui.vert.spv.h>
+#include <imagebg.vert.spv.h>
+#include <imagebg.frag.spv.h>
 
 #include <image.frag.1DArray.spv.h>
 #include <image.frag.u1DArray.spv.h>
 #include <image.frag.i1DArray.spv.h>
-
 #include <image.frag.2DArray.spv.h>
 #include <image.frag.u2DArray.spv.h>
 #include <image.frag.i2DArray.spv.h>
-
 #include <image.frag.3D.spv.h>
 #include <image.frag.u3D.spv.h>
 #include <image.frag.i3D.spv.h>
@@ -61,19 +61,6 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	lastFrame_ = Clock::now();
 
-	auto blurBackground = checkEnvBinary("VIL_BLUR", true);
-	if(!clear && blurBackground) {
-		vil::init(blur_, dev, dev.renderData->linearSampler);
-
-		VkDescriptorSetAllocateInfo dai {};
-		dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dai.descriptorSetCount = 1u;
-		dai.pSetLayouts = &dev.renderData->dsLayout;
-		dai.descriptorPool = dev.dsPool;
-		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &blurDs_));
-		nameHandle(dev, blurDs_, "Gui:blurDs");
-	}
-
 	// init command pool
 	VkCommandPoolCreateInfo cpci {};
 	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -83,6 +70,60 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	nameHandle(dev, commandPool_, "Gui:commandPool");
 
 	// init render stuff
+	// samplers
+	VkSamplerCreateInfo sci {};
+	sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	sci.magFilter = VK_FILTER_NEAREST;
+	sci.minFilter = VK_FILTER_NEAREST;
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.minLod = -1000;
+	sci.maxLod = 1000;
+	sci.maxAnisotropy = 1.0f;
+	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &nearestSampler_));
+	nameHandle(dev, nearestSampler_, "Gui:nearestSampler");
+
+	sci.magFilter = VK_FILTER_LINEAR;
+	sci.minFilter = VK_FILTER_LINEAR;
+	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &linearSampler_));
+	nameHandle(dev, linearSampler_, "Gui:linearSampler");
+
+	// descriptor set layout
+	VkDescriptorSetLayoutBinding binding {};
+	binding.binding = 0u;
+	binding.descriptorCount = 1u;
+	binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutCreateInfo dslci {};
+	dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	dslci.bindingCount = 1u;
+	dslci.pBindings = &binding;
+	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &dsLayout_));
+	nameHandle(dev, dsLayout_, "Gui:dsLayout");
+
+	// pipeline layout
+	// We just allocate the full push constant range that all implementations
+	// must support.
+	VkPushConstantRange pcrs[1] = {};
+	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pcrs[0].offset = 0;
+	// PERF: perf most pipelines don't need this much. Could create multiple
+	// pipe layouts.
+	pcrs[0].size = 128; // needed e.g. for vertex viewer pipeline
+
+	VkPipelineLayoutCreateInfo plci {};
+	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &dsLayout_;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = pcrs;
+	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &pipeLayout_));
+	nameHandle(dev, pipeLayout_, "Gui:pipeLayout");
+
+	// render pass
 	VkAttachmentDescription atts[2] {};
 
 	auto& colorAtt = atts[0];
@@ -133,6 +174,31 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp_));
 	nameHandle(dev, rp_, "Gui:rp");
 
+	initPipes();
+	initImGui();
+
+	// init blur
+	auto blurBackground = checkEnvBinary("VIL_BLUR", true);
+	if(!clear && blurBackground) {
+		vil::init(blur_, dev);
+
+		VkDescriptorSetAllocateInfo dai {};
+		dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dai.descriptorSetCount = 1u;
+		dai.pSetLayouts = &dsLayout_;
+		dai.descriptorPool = dev.dsPool;
+		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &blurDs_));
+		nameHandle(dev, blurDs_, "Gui:blurDs");
+	}
+
+	// init tabs
+	tabs_.resources.init(*this);
+	tabs_.cb.init(*this);
+}
+
+void Gui::initPipes() {
+	auto& dev = *dev_;
+
 	// pipeline
 	VkShaderModule vertModule;
 	VkShaderModuleCreateInfo vertShaderInfo {};
@@ -142,16 +208,21 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertModule));
 
 	std::vector<VkShaderModule> modules;
-	auto initStages = [&](span<const u32> fragSpv) {
-		VkShaderModule fragModule;
-		VkShaderModuleCreateInfo fragShaderInfo {};
-		fragShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		fragShaderInfo.codeSize = fragSpv.size() * 4;
-		fragShaderInfo.pCode = fragSpv.data();
-		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &fragShaderInfo, NULL, &fragModule));
+	auto createShaderMod = [&](span<const u32> spv) {
+		VkShaderModuleCreateInfo shaderInfo {};
+		shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		shaderInfo.codeSize = spv.size() * 4;
+		shaderInfo.pCode = spv.data();
 
+		VkShaderModule ret;
+		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &shaderInfo, NULL, &ret));
 		// store them for destruction later on
-		modules.push_back(fragModule);
+		modules.push_back(ret);
+		return ret;
+	};
+
+	auto initStages = [&](span<const u32> fragSpv) {
+		VkShaderModule fragModule = createShaderMod(fragSpv);
 
 		std::array<VkPipelineShaderStageCreateInfo, 2> ret {};
 		ret[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -271,7 +342,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	guiGpi.pDepthStencilState = &depthInfo;
 	guiGpi.pColorBlendState = &blendInfo;
 	guiGpi.pDynamicState = &dynState;
-	guiGpi.layout = dev.renderData->pipeLayout;
+	guiGpi.layout = pipeLayout_;
 	guiGpi.renderPass = rp_;
 	guiGpi.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
@@ -300,7 +371,34 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	addImGpi(uimage3DStages);
 	addImGpi(iimage3DStages);
 
-	VkPipeline pipes[10];
+	// imageBg pipe
+	auto imageBgVertModule = createShaderMod(imagebg_vert_spv_data);
+	auto imageBgFragModule = createShaderMod(imagebg_frag_spv_data);
+
+	std::array<VkPipelineShaderStageCreateInfo, 2> bgStages {};
+	bgStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	bgStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	bgStages[0].module = imageBgVertModule;
+	bgStages[0].pName = "main";
+
+	bgStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	bgStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	bgStages[1].module = imageBgFragModule;
+	bgStages[1].pName = "main";
+
+	auto imgBgGpi = imgGpi;
+	auto imgBgVertInfo = *imgBgGpi.pVertexInputState;
+	auto imgBgAssembly = *imgBgGpi.pInputAssemblyState;
+	imgBgVertInfo.vertexAttributeDescriptionCount = 0u;
+	imgBgVertInfo.vertexBindingDescriptionCount = 0u;
+	imgBgGpi.pVertexInputState = &imgBgVertInfo;
+	imgBgGpi.pStages = bgStages.data();
+	imgBgAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
+	imgBgGpi.pInputAssemblyState = &imgBgAssembly;
+	gpis.push_back(imgBgGpi);
+
+	// init pipes
+	VkPipeline pipes[11];
 	dlg_assert(gpis.size() == sizeof(pipes) / sizeof(pipes[0]));
 
 	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
@@ -320,6 +418,8 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	pipes_.uimage3D = pipes[8];
 	pipes_.iimage3D = pipes[9];
 
+	pipes_.imageBg = pipes[10];
+
 	nameHandle(dev, pipes_.gui, "Gui:pipeGui");
 
 	nameHandle(dev, pipes_.image1D, "Gui:pipeImage1D");
@@ -334,11 +434,15 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	nameHandle(dev, pipes_.uimage3D, "Gui:pipeUImage3D");
 	nameHandle(dev, pipes_.iimage3D, "Gui:pipeIImage3D");
 
+	nameHandle(dev, pipes_.imageBg, "Gui:pipeImageBg");
+
 	dev.dispatch.DestroyShaderModule(dev.handle, vertModule, nullptr);
 	for(auto& mod : modules) {
 		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 	}
+}
 
+void Gui::initImGui() {
 	// Init imgui
 	this->imgui_ = ImGui::CreateContext();
 	ImGui::SetCurrentContext(imgui_);
@@ -460,11 +564,6 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	// Center window title
 	style.WindowTitleAlign = {0.5f, 0.5f};
 	style.Alpha = 1.f;
-
-	// init tabs
-	tabs_.resources.gui_ = this;
-	tabs_.resources.init();
-	tabs_.cb.init(*this);
 }
 
 // ~Gui
@@ -485,6 +584,11 @@ Gui::~Gui() {
 	}
 
 	auto vkDev = dev_->handle;
+	dev_->dispatch.DestroySampler(vkDev, nearestSampler_, nullptr);
+	dev_->dispatch.DestroySampler(vkDev, linearSampler_, nullptr);
+	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, dsLayout_, nullptr);
+	dev_->dispatch.DestroyPipelineLayout(vkDev, pipeLayout_, nullptr);
+
 	dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
 	dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
 	dev_->dispatch.DestroyImageView(vkDev, font_.view, nullptr);
@@ -501,6 +605,7 @@ Gui::~Gui() {
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.image3D, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.uimage3D, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.iimage3D, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
 
 	dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
 	dev_->dispatch.DestroyCommandPool(vkDev, commandPool_, nullptr);
@@ -644,14 +749,14 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	dsai.descriptorPool = dev.dsPool;
 	dsai.descriptorSetCount = 1u;
-	dsai.pSetLayouts = &dev_->renderData->dsLayout;
+	dsai.pSetLayouts = &dsLayout_;
 	VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dsai, &dsFont_));
 
 	// ...and update it
 	VkDescriptorImageInfo dsii;
 	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	dsii.imageView = font_.view;
-	dsii.sampler = dev_->renderData->linearSampler;
+	dsii.sampler = linearSampler_;
 
 	VkWriteDescriptorSet write {};
 	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -727,8 +832,9 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 		// translate
 		pcr[2] = -1.0f - drawData.DisplayPos.x * pcr[0];
 		pcr[3] = -1.0f - drawData.DisplayPos.y * pcr[1];
-		dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
-			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
+		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
+			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+			0, sizeof(pcr), pcr);
 
 		auto idxOff = 0u;
 		auto vtxOff = 0u;
@@ -742,12 +848,12 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 					cmd.UserCallback(&cmds, &cmd);
 
 					// reset state we need
-					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
+					dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
 						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
 					dev.dispatch.CmdSetViewport(draw.cb, 0, 1, &viewport);
 					dev.dispatch.CmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
 					dev.dispatch.CmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
-					dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
+					dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
 						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
 				} else {
 					VkDescriptorSet ds = dsFont_;
@@ -790,14 +896,14 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 							img->level,
 						};
 
-						dev.dispatch.CmdPushConstants(draw.cb, dev.renderData->pipeLayout,
+						dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
 							VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
 							sizeof(pcr), &pcr);
 					}
 
 					dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
 					dev.dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-						dev.renderData->pipeLayout, 0, 1, &ds, 0, nullptr);
+						pipeLayout_, 0, 1, &ds, 0, nullptr);
 
 					VkRect2D scissor {};
 					scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
@@ -1324,7 +1430,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 
 	if(!foundDraw) {
 		foundDraw = &draws_.emplace_back();
-		foundDraw->init(dev(), commandPool_);
+		foundDraw->init(*this, commandPool_);
 	}
 
 	auto& draw = *foundDraw;
@@ -1351,7 +1457,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 				VkDescriptorImageInfo imgInfo {};
 				imgInfo.imageView = blur_.view0;
 				imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				imgInfo.sampler = dev().renderData->linearSampler;
+				imgInfo.sampler = linearSampler_;
 
 				VkWriteDescriptorSet write {};
 				write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1504,10 +1610,10 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			pcr[3] = 0.f;
 
 			dev().dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipes_.gui);
-			dev().dispatch.CmdPushConstants(draw.cb, dev().renderData->pipeLayout,
+			dev().dispatch.CmdPushConstants(draw.cb, pipeLayout_,
 				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
 			dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				dev().renderData->pipeLayout, 0u, 1u, &blurDs_, 0, nullptr);
+				pipeLayout_, 0u, 1u, &blurDs_, 0, nullptr);
 			VkDeviceSize off = 0u;
 			dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
 			dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
@@ -1885,6 +1991,8 @@ void Gui::finishedLocked(Draw& draw) {
 		dev().semaphorePool.push_back(semaphore);
 	}
 
+	// TODO: replace with general per-draw callback system (callbacks cleared
+	// after this) also used by ImageViewer
 	auto& rb = tabs_.resources.buffer_;
 	auto found = false;
 	for(auto [i, readback] : enumerate(rb.readbacks)) {

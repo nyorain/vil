@@ -9,8 +9,23 @@ GuiBlur::~GuiBlur() {
 	destroy(*this);
 }
 
-void init(GuiBlur& blur, Device& dev, VkSampler sampler) {
+void init(GuiBlur& blur, Device& dev) {
 	blur.dev = &dev;
+
+	// Create sampler
+	VkSamplerCreateInfo saci {};
+	saci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	saci.magFilter = VK_FILTER_LINEAR;
+	saci.minFilter = VK_FILTER_LINEAR;
+	saci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	saci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	saci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	saci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	saci.minLod = -1000;
+	saci.maxLod = 1000;
+	saci.maxAnisotropy = 1.0f;
+	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &saci, nullptr, &blur.sampler));
+	nameHandle(dev, blur.sampler, "BlurSampler");
 
 	// Create ds layout
 	VkDescriptorSetLayoutBinding bindings[2] {};
@@ -18,7 +33,7 @@ void init(GuiBlur& blur, Device& dev, VkSampler sampler) {
 	bindings[0].descriptorCount = 1u;
 	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	bindings[0].pImmutableSamplers = &sampler;
+	bindings[0].pImmutableSamplers = &blur.sampler;
 
 	bindings[1].binding = 1u;
 	bindings[1].descriptorCount = 1u;
@@ -390,6 +405,7 @@ void destroy(GuiBlur& blur) {
 	dev.dispatch.DestroyPipeline(dev.handle, blur.blurPipe, nullptr);
 	dev.dispatch.DestroyPipelineLayout(dev.handle, blur.pipeLayout, nullptr);
 	dev.dispatch.DestroyDescriptorSetLayout(dev.handle, blur.dsLayout, nullptr);
+	dev.dispatch.DestroySampler(dev.handle, blur.sampler, nullptr);
 
 	blur.blurPipe = {};
 	blur.pipeLayout = {};

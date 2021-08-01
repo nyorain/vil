@@ -30,7 +30,7 @@ struct DrawParams {
 struct VertexViewer {
 	~VertexViewer();
 
-	void init(Device& dev, VkRenderPass rp);
+	void init(Gui& gui);
 
 	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
@@ -73,8 +73,7 @@ private:
 	void imGuiDraw(const DrawData& data);
 
 private:
-	Device* dev_ {};
-	VkRenderPass rp_ {};
+	Gui* gui_ {};
 
 	VkShaderModule vertShader_ {};
 	VkShaderModule fragShader_ {};

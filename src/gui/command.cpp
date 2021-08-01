@@ -72,13 +72,7 @@ BufferInterval dstBufInterval(const CopyImageToBufferCmd& cmd, u32 idx) {
 } // anon namespace
 
 // CommandViewer
-CommandViewer::CommandViewer() {
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	bufTextedit_.SetLanguageDefinition(lang);
-	bufTextedit_.SetShowWhitespaces(false);
-	bufTextedit_.SetTabSize(4);
-}
-
+CommandViewer::CommandViewer() = default;
 CommandViewer::~CommandViewer() = default;
 
 Device& CommandViewer::dev() const {
@@ -87,7 +81,9 @@ Device& CommandViewer::dev() const {
 
 void CommandViewer::init(Gui& gui) {
 	gui_ = &gui;
-	vertexViewer_.init(gui.dev(), gui.rp());
+	vertexViewer_.init(gui);
+	bufferViewer_.init(gui);
+	imageViewer_.init(gui);
 }
 
 void CommandViewer::unselect() {
@@ -234,7 +230,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 
 	if(resetState) {
 		state_ = {};
-		ioImage_ = {};
+		imageViewer_.reset();
 
 		// Even when we could keep our selection, when resetState is true
 		// the command might have potentially changed (e.g. from a Draw
@@ -275,7 +271,7 @@ void CommandViewer::displayTransferIOList() {
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferSrc;
 			viewData_.transfer.index = 0u; // always reset
-			ioImage_ = {};
+			imageViewer_.reset();
 			updateHook();
 		}
 	};
@@ -297,7 +293,7 @@ void CommandViewer::displayTransferIOList() {
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferDst;
 			viewData_.transfer.index = 0u; // always reset
-			ioImage_ = {};
+			imageViewer_.reset();
 			updateHook();
 		}
 	};
@@ -335,7 +331,7 @@ void CommandViewer::displayTransferIOList() {
 			if(ImGui::IsItemClicked()) {
 				view_ = IOView::transferDst;
 				viewData_.transfer.index = i;
-				ioImage_ = {};
+				imageViewer_.reset();
 				updateHook();
 			}
 		}
@@ -467,7 +463,7 @@ void CommandViewer::displayDsList() {
 					if(ImGui::IsItemClicked()) {
 						view_ = IOView::ds;
 						viewData_.ds = {setID, bID, 0, VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM};
-						ioImage_ = {};
+						imageViewer_.reset();
 						updateHook();
 					}
 					if(ImGui::IsItemHovered()) {
@@ -596,7 +592,7 @@ void CommandViewer::displayIOList() {
 					if(ImGui::IsItemClicked()) {
 						view_ = IOView::attachment;
 						viewData_.attachment = {id};
-						ioImage_ = {};
+						imageViewer_.reset();
 						updateHook();
 					}
 				};
@@ -793,21 +789,9 @@ void CommandViewer::displayDs(Draw& draw) {
 				}
 			}
 
-			auto flags = ImGuiTableFlags_BordersInner |
-				ImGuiTableFlags_Resizable |
-				ImGuiTableFlags_SizingStretchSame;
-			if(ImGui::BeginTable("Values", 2u, flags)) {
-				ImGui::TableSetupColumn(nullptr, 0, 0.25f);
-				ImGui::TableSetupColumn(nullptr, 0, 0.75f);
-
-				ThreadMemScope memScope;
-				auto* type = buildType(compiled, res.type_id, memScope);
-				dlg_assert(type);
-				display(name.c_str(), *type, buf->data());
-
-				// display(compiled, res.type_id, name.c_str(), buf->data());
-				ImGui::EndTable();
-			}
+			ThreadMemScope memScope;
+			auto* type = buildType(compiled, res.type_id, memScope);
+			displayTable(name.c_str(), *type, buf->data());
 		} else {
 			ImGui::Text("Binding not used in pipeline");
 		}
@@ -886,16 +870,9 @@ void CommandViewer::displayDs(Draw& draw) {
 				}
 			}
 
-			auto flags = ImGuiTableFlags_BordersInner |
-				ImGuiTableFlags_Resizable |
-				ImGuiTableFlags_SizingStretchSame;
-			if(ImGui::BeginTable("Values", 2u, flags)) {
-				ImGui::TableSetupColumn(nullptr, 0, 0.25f);
-				ImGui::TableSetupColumn(nullptr, 0, 0.75f);
-
-				display(compiled, res.type_id, name.c_str(), blockData);
-				ImGui::EndTable();
-			}
+			ThreadMemScope memScope;
+			auto* type = buildType(compiled, res.type_id, memScope);
+			displayTable(name.c_str(), *type, blockData);
 		} else {
 			ImGui::Text("Binding not used in pipeline");
 		}
@@ -988,17 +965,9 @@ void CommandViewer::displayPushConstants() {
 			}
 		}
 
-		auto flags = ImGuiTableFlags_BordersInner |
-			ImGuiTableFlags_Resizable |
-			ImGuiTableFlags_SizingStretchProp;
-		if(ImGui::BeginTable("Values", 2u, flags)) {
-			ImGui::TableSetupColumn(nullptr, 0, 0.25f);
-			ImGui::TableSetupColumn(nullptr, 0, 0.75f);
-
-			display(compiled, pcr.type_id, name.c_str(), cmd->boundPushConstants().data);
-			ImGui::EndTable();
-		}
-
+		ThreadMemScope memScope;
+		auto* type = buildType(compiled, pcr.type_id, memScope);
+		displayTable(name.c_str(), *type, cmd->boundPushConstants().data);
 		break;
 	}
 
@@ -1100,8 +1069,9 @@ void CommandViewer::displayTransferData(Draw& draw) {
 
 	if(auto* ccmd = dynamic_cast<const UpdateBufferCmd*>(&cmd); ccmd) {
 		if(view_ == IOView::transferSrc) {
+			ImGui::Separator();
 			imGuiText("Static data of size {}", ccmd->data.size());
-			displayBufferTextedit(ccmd->data);
+			bufferViewer_.display(state_->transferBufCopy.data());
 			return;
 		} else  {
 			refDst(ccmd);
@@ -1126,60 +1096,9 @@ void CommandViewer::displayTransferData(Draw& draw) {
 	dlg_assert(refImage == !!state_->transferImgCopy.image);
 
 	if(refBuffer && state_->transferBufCopy.buf) {
-		displayBufferTextedit(state_->transferBufCopy.data());
+		bufferViewer_.display(state_->transferBufCopy.data());
 	} else if(refImage && state_->transferImgCopy.image) {
 		displayImage(draw, state_->transferImgCopy);
-	}
-}
-
-void CommandViewer::displayBufferTextedit(ReadBuf data) {
-	// TODO: code duplication with resource viewer (buffer)
-	auto layoutText = bufTextedit_.GetText();
-	ThreadMemScope memScope;
-	auto parseRes = parseType(layoutText, memScope);
-
-	igt::TextEditor::ErrorMarkers markers;
-	if(parseRes.error) {
-		auto& err = *parseRes.error;
-
-		auto msg = err.message;
-		msg += "\n";
-
-		// TODO: make it work with tabs
-		auto& line = err.loc.lineContent;
-		auto tabCount = std::count(line.begin(), line.end(), '\t');
-		msg += line;
-		msg += "\n";
-
-		// hard to say what tab size is... eh. Maybe just replace it?
-		auto col = err.loc.col + tabCount * (4 - 1);
-		for(auto i = 1u; i < col; ++i) {
-			msg += " ";
-		}
-
-		msg += "^\n";
-
-		markers.insert({err.loc.line, msg});
-	}
-
-	bufTextedit_.SetErrorMarkers(markers);
-
-	ImGui::PushFont(gui_->monoFont);
-	bufTextedit_.Render("Layout", {0, 200});
-	ImGui::PopFont();
-
-	auto type = parseRes.type;
-	if(type && !type->members.empty()) {
-		auto flags = ImGuiTableFlags_BordersInner |
-			ImGuiTableFlags_Resizable |
-			ImGuiTableFlags_SizingStretchSame;
-		if(ImGui::BeginTable("Values", 2u, flags)) {
-			ImGui::TableSetupColumn(nullptr, 0, 0.25f);
-			ImGui::TableSetupColumn(nullptr, 0, 0.75f);
-
-			display("Content", *type, data);
-			ImGui::EndTable();
-		}
 	}
 }
 
@@ -1483,17 +1402,30 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 	draw.usedHookState = state_;
 	dlg_assert(draw.usedHookState);
 
+	/*
 	// TODO: when a new CopiedImage is displayed we could reset the
 	//   color mask flags. In some cases this is desired but probably
 	//   not in all.
 
 	vil::displayImage(*gui_, ioImage_, img.extent, minImageType(img.extent),
 		img.format, img.srcSubresRange, nullptr, {});
+	*/
 
+	imageViewer_.extent = img.extent;
+	imageViewer_.imgType = minImageType(img.extent);
+	imageViewer_.format = img.format;
+	imageViewer_.subresRange = img.srcSubresRange;
+	imageViewer_.display(draw);
+
+	// TODO: move ds management into imageViewer as well.
+	// Store a list of descriptorSets in Draw.
+	// Use a sampler that uses linear for mag and nearest for min (or
+	// the other way around? look it up)
 	VkDescriptorImageInfo dsii {};
 	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	dsii.imageView = (ioImage_.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) ? img.stencilView : img.imageView;
-	dsii.sampler = dev.renderData->nearestSampler;
+	auto aspect = imageViewer_.imageDraw().aspect;
+	dsii.imageView = (aspect == VK_IMAGE_ASPECT_STENCIL_BIT) ? img.stencilView : img.imageView;
+	dsii.sampler = gui_->nearestSampler();
 
 	VkWriteDescriptorSet write {};
 	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

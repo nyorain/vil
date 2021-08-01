@@ -14,6 +14,10 @@ urgent, bugs:
 	- [ ] maybe show full image size on hover?
 - [ ] image viewer validation error when we don't hover the image
       (happens when mip > 0 is selected)
+- [ ] imgui input: figure out why del key does produce a '?'.
+      e.g. in buffer viewer
+- [ ] vertex viewer: show pages
+- [ ] vertex viewer: make rows selectable, show vertex in 3D view
 
 docs
 - [ ] write small wiki documentation post on how to use API

@@ -19,6 +19,7 @@ struct GuiBlur {
 	VkImage target {};
 	VkImageView view0 {};
 	VkImageView view1 {};
+	VkSampler sampler {};
 
 	struct RenderBuffer {
 		VkImage image {};
@@ -36,7 +37,7 @@ struct GuiBlur {
 	~GuiBlur();
 };
 
-void init(GuiBlur&, Device&, VkSampler);
+void init(GuiBlur&, Device&);
 void destroy(GuiBlur&);
 void resize(GuiBlur&, VkExtent2D, VkSwapchainKHR swapchain, VkFormat swapchainFormat);
 void blur(GuiBlur& blur, VkCommandBuffer, u32 imageIdx, VkOffset2D offset, VkExtent2D size);
