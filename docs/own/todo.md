@@ -56,6 +56,11 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
+- [ ] don't allocate memory per-resource. Especially for CommandHookState.
+	  Instead, allocate large blocks (we need hostVisible for buffers
+	  and deviceLocal for images) and then suballocate from that.
+	  Consider just using vk_alloc, not sure if good idea though as we might
+	  have some slight but very special requirements.
 - [ ] figure out a better way to retrieve xfb data (and data in general, same
       problem for huge structured buffers). For huge draw commands
       (especially multi-draw where the whole scene is rendered), we would
@@ -81,7 +86,7 @@ performance/profiling:
 - [ ] fix the optimization we have in ds.cpp where we don't store DescriptorSets into the
       hash maps when object wrapping is active (which currently causes the gui to not
 	  show any descriptorSets in the resource viewer)
-- [ ] also don't always copy DescriptorSetState on submission.
+- [ ] also don't always copy (ref) DescriptorSetState on submission.
       Leads to lot of DescriptorSetState copies, destructors.
 	  We only need to do it when currently in swapchain mode *and* inside
 	  the cb tab. (maybe we can even get around always doing it in that
@@ -134,6 +139,11 @@ gui stuff
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
+- [ ] (high prio) better pipeline/shader module display in resource viewer
+      It's currently completely broken due to spirv-reflect removal
+	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
+	- [ ] also make sure to handle in/out structs correctly. Follow SpvReflectInterfaceVariable::members
+	- [ ] maybe display each stage (the shader and associated information) as its own tab
 - [ ] decide whether to enable full-sync by default or not.
       Explain somewhere (in gui?) why/when it's needed. Already described
 	  in design.md from my pov
@@ -141,16 +151,6 @@ other
       opening all needed sections and centering the selected command.
 	  Maybe give some special visual feedback when selected command can't
 	  be found in current records?
-- [ ] improve imgui event handles, make sure inputs aren't lost when fps are low.
-      see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
-- [ ] add submission log! possibility to track what submissions are done
-      during startup, another thing that's hard to track with capturing
-- [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
-- [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
-      we just create a second window by default?
-	  If a manual overlay is created later on, we can still close the window
-	  and move the gui. Could also wait for first submission/swapchain
-	  creation (if swapchain ext is enabled) with creating/showing the window
 - [ ] rename VIL_HOOK_OVERLAY to just VIL_OVERLAY?
       and VIL_CREATE_WINDOW to VIL_WINDOW?
 - [ ] clean up logging system, all that ugly setup stuff in layer.cpp
@@ -166,26 +166,11 @@ other
 	      when we detect that there is an attached debugger.
 	      Somehow signal they are coming from us though, use a VIL prefix or smth.
 		  Stop allocating a console.
-- [ ] IO viewer additions
-	- [x] start using src/gui/command.hpp
-	- [x] fix descriptor arrays
-	- [x] use the new buffer viewer for transfer buffer commands
-		- [x] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
-			  i.e. support buffer IO viewing for transfer commands
-	- [x] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
-	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
-	- [x] when viewing transfer img, show image refButton
-	- [x] adapt ioImage_ to selected image (e.g. channels)
-		- [ ] also fix logic for depthStencil images. Select depth by default.
-			  (can be tested with doom)
-	- [ ] support texel reading implementation for cb-viewed-images and clean
-		  up color format presentation, support depth and packed formats.
-		  See TODOs in gui.cpp:displayImage and util.cpp:ioFormat
-- [ ] (high prio) better pipeline/shader module display in resource viewer
-      It's currently completely broken due to spirv-reflect removal
-	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
-	- [ ] also make sure to handle in/out structs correctly. Follow SpvReflectInterfaceVariable::members
-	- [ ] maybe display each stage (the shader and associated information) as its own tab
+- [ ] proper support for reading depth, packed and compressed formats.
+      See TODOs in ioFormat
+      ImageViewer does not handle depth/stencil aspects correctly when
+	  reading back texels
+	- [ ] write some tests
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
 - [ ] more useful names for handles (e.g. some basic information for images)
@@ -195,15 +180,14 @@ other
 		  resource viewer only viewing buffers) its very redundant.
 		  In most cases, it's redundant, only useful for some buttons (but
 		  even then we likely should rather have `Image: |terrainHeightmap|`.
-- [ ] improve handling of transparent images. Checkerboard background?
-	- [x] when viewing image as grayscale they become transparent atm.
-	      no idea why
-	- [ ] also don't apply scale for alpha
-	- [ ] maybe add some "transparent" background (some known pattern)
 - [ ] when viewing live command submissions, clicking on resource buttons
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
 	  we could fix it by not imgui-pushing the resource ID before showing the button.
+- [ ] (low prio) improve imgui event handles, make sure inputs aren't lost when fps are low.
+      see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
+- [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
+- [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
 
 ---
 

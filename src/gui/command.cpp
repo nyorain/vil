@@ -1395,6 +1395,8 @@ void CommandViewer::updateHook() {
 void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 	auto& dev = gui_->dev();
 
+	ImGui::Separator();
+
 	dlg_assert(img.aspectMask);
 	dlg_assert(img.image);
 	dlg_assert(img.imageView);
@@ -1411,6 +1413,10 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 		img.format, img.srcSubresRange, nullptr, {});
 	*/
 
+	imageViewer_.src = img.image;
+	imageViewer_.initialImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imageViewer_.finalImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imageViewer_.copyTexel = true;
 	imageViewer_.extent = img.extent;
 	imageViewer_.imgType = minImageType(img.extent);
 	imageViewer_.format = img.format;

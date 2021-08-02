@@ -10,6 +10,9 @@ be possible or useful in the end.
   hook all that) but it might be useful to inspect command buffers without
   handles being destroyed
 
+- add option to automatically write some specific pattern into images/buffers
+  on initialization, making it easier to detect uninitialized memory usage
+
 - explore what random stuff we are able to do
 	- Visualize models (drawcalls) on its own by inferring
 	  position (and possibly other attribs; hard to infer though, could use heuristics
@@ -36,6 +39,13 @@ be possible or useful in the end.
   copy-on-write. Only when this submission (or some other pending one)
   is potentially writing something, copy it. Otherwise, copy it before
   future submissions that might write it (if still needed)
+
+- add submission log! possibility to track what submissions are done
+  during startup, another thing that's hard to track with capturing
+  we just create a second window by default?
+  If a manual overlay is created later on, we can still close the window
+  and move the gui. Could also wait for first submission/swapchain
+  creation (if swapchain ext is enabled) with creating/showing the window
 
 - add anti-aliasing to vertex viewer. Should probably be beautifully
   be doable with TAA

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <gui/render.hpp>
 #include <gui/bufferViewer.hpp>
+#include <gui/imageViewer.hpp>
 #include <vk/vulkan.h>
 #include <imgui/textedit.h>
 #include <variant>
@@ -21,9 +22,6 @@ public:
 	void select(Handle& handle);
 	void draw(Draw&);
 	void destroyed(const Handle&);
-
-	void recordPreRender(Draw&);
-	void recoredPostRender(Draw&);
 
 private:
 	friend class Gui;
@@ -44,13 +42,10 @@ private:
 	struct {
 		Image* object {};
 		VkImageView view {};
-		DrawGuiImage draw {};
+		ImageViewer viewer {};
 
 		unsigned level {};
 		VkImageAspectFlagBits aspect {};
-
-		OwnBuffer readPixelBuffer {};
-		VkOffset3D readPixelOffset {};
 	} image_;
 
 	struct BufReadback {
@@ -101,6 +96,7 @@ private:
 	void drawDesc(Draw&, DescriptorUpdateTemplate&);
 
 	void drawHandleDesc(Draw&, Handle& handle);
+	void copyBuffer(Draw&);
 };
 
 } // namespace vil

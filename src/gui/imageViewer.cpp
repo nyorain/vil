@@ -1,5 +1,7 @@
 #include <gui/imageViewer.hpp>
 #include <gui/gui.hpp>
+#include <gui/util.hpp>
+#include <util/util.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/format_utils.h>
@@ -12,6 +14,9 @@ void ImageViewer::init(Gui& gui) {
 }
 
 void ImageViewer::display(Draw& draw) {
+	gui_->addPreRender([&](Draw& draw) { this->recordPreImage(draw.cb); });
+	gui_->addPostRender([&](Draw& draw) { this->recordPostImage(draw); });
+
 	ImVec2 pos = ImGui::GetCursorScreenPos();
 
 	auto level = u32(imageDraw_.level);
@@ -43,16 +48,15 @@ void ImageViewer::display(Draw& draw) {
 		regW = regH * aspect;
 	}
 
-	// draw image
+	// draw
 	// background
 	draw_ = &draw;
-	auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+	auto cbPost = [](const ImDrawList*, const ImDrawCmd* cmd) {
 		auto* self = static_cast<ImageViewer*>(cmd->UserCallbackData);
 		dlg_assert(self->draw_);
 		self->drawBackground(self->draw_->cb);
 	};
-
-	ImGui::GetWindowDrawList()->AddCallback(cb, this);
+	ImGui::GetWindowDrawList()->AddCallback(cbPost, this);
 
 	// image
 	ImGui::PushClipRect({pos.x, pos.y}, {pos.x + bgW, pos.y + bgH}, true);
@@ -63,9 +67,9 @@ void ImageViewer::display(Draw& draw) {
 	size_ = {clipMax.x - clipMin.x, clipMax.y - clipMin.y};
 
 	auto uv0 = ImVec2(-this->offset.x / scale, -this->offset.y / scale);
-	auto uv1 = ImVec2((1 - this->offset.x) / scale, (1 - this->offset.y) / scale);
-	uv1.x *= bgW / float(regW);
-	uv1.y *= bgH / float(regH);
+	auto endX = bgW / float(regW);
+	auto endY = bgH / float(regH);
+	auto uv1 = ImVec2((endX - this->offset.x) / scale, (endY - this->offset.y) / scale);
 	ImGui::Image((void*) &imageDraw_, {bgW, bgH}, uv0, uv1);
 
 	ImGui::PopClipRect();
@@ -89,6 +93,7 @@ void ImageViewer::display(Draw& draw) {
 	}
 
 	if(ImGui::IsItemHovered() && io.MouseWheel != 0.f) {
+		// zoom
 		auto moff = Vec2f{
 			(io.MousePos.x - pos.x) / regW,
 			(io.MousePos.y - pos.y) / regH,
@@ -104,6 +109,48 @@ void ImageViewer::display(Draw& draw) {
 		offset.y += moff.y;
 
 		scale *= sfac;
+	}
+
+	// process mouse position for texel reading
+	auto muv = Vec2f{
+		mix(uv0.x, uv1.x, (io.MousePos.x - pos.x) / bgW),
+		mix(uv0.y, uv1.y, (io.MousePos.y - pos.y) / bgH),
+	};
+
+	readTexelOffset_.x = std::clamp<int>(muv.x * width, 0, width - 1);
+	readTexelOffset_.y = std::clamp<int>(muv.y * height, 0, height - 1);
+	if(!copyTexel) {
+		lastReadback_ = {};
+	}
+
+	// Row 0: readback texel value
+	imGuiText("Position: {}, {} | Format {}",
+		readTexelOffset_.x, readTexelOffset_.y,
+		vk::name(format));
+	ImGui::SameLine();
+
+	bool texelValid = false;
+	if(lastReadback_) {
+		auto& rb = readbacks_[*lastReadback_];
+		dlg_assert(!rb.pending);
+		if(rb.valid &&
+				rb.texel.x == readTexelOffset_.x &&
+				rb.texel.y == readTexelOffset_.y &&
+				rb.layer == imageDraw_.layer &&
+				rb.level == imageDraw_.level) {
+			texelValid = true;
+			auto data = rb.own.data();
+			imGuiText("| Texel: {}", read(format, data));
+		}
+	}
+
+	if(!texelValid) {
+		lastReadback_ = {};
+		if(copyTexel) {
+			imGuiText("| Texel: Reading...");
+		} else {
+			imGuiText("| Texel: Can't read Image");
+		}
 	}
 
 	// Row 1: components
@@ -198,6 +245,68 @@ void ImageViewer::display(Draw& draw) {
 		"imgType {}, format {}", vk::name(imgType), vk::name(format));
 }
 
+void ImageViewer::recordPreImage(VkCommandBuffer cb) {
+	auto& dev = gui_->dev();
+
+	// prepare image for being drawn
+	if(initialImageLayout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+		VkImageMemoryBarrier imgb {};
+		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imgb.image = this->src;
+		imgb.subresourceRange.aspectMask = imageDraw_.aspect;
+		imgb.subresourceRange.baseMipLevel = imageDraw_.level;
+		imgb.subresourceRange.levelCount = 1u;
+		imgb.subresourceRange.layerCount = subresRange.layerCount;
+		imgb.oldLayout = initialImageLayout;
+		imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imgb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+		imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+			0, 0, nullptr, 0, nullptr, 1, &imgb);
+	}
+}
+
+void ImageViewer::recordPostImage(Draw& draw) {
+	auto cb = draw.cb;
+
+	auto srcLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	auto srcAccess = VK_ACCESS_SHADER_READ_BIT;
+	auto srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	auto needBarrier = finalImageLayout != srcLayout;
+	if(copyTexel) {
+		doCopy(cb, draw);
+		srcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		srcAccess = VK_ACCESS_TRANSFER_READ_BIT;
+		srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		needBarrier = true;
+	}
+
+	if(needBarrier) {
+		auto& dev = gui_->dev();
+
+		VkImageMemoryBarrier imgb {};
+		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		imgb.image = this->src;
+		imgb.subresourceRange.aspectMask = imageDraw_.aspect;
+		imgb.subresourceRange.baseMipLevel = imageDraw_.level;
+		imgb.subresourceRange.levelCount = 1u;
+		imgb.subresourceRange.layerCount = subresRange.layerCount;
+		imgb.oldLayout = srcLayout;
+		imgb.newLayout = finalImageLayout;
+		imgb.srcAccessMask = srcAccess;
+		imgb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		dev.dispatch.CmdPipelineBarrier(cb,
+			srcStage, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // defer
+			0, 0, nullptr, 0, nullptr, 1, &imgb);
+	}
+}
+
 void ImageViewer::drawBackground(VkCommandBuffer cb) {
 	auto& dev = gui_->dev();
 	auto displaySize = ImGui::GetIO().DisplaySize;
@@ -274,6 +383,104 @@ DrawGuiImage::Type ImageViewer::parseType(VkImageType imgType, VkFormat format,
 	}
 
 	return DrawGuiImage::Type(unsigned(baseType) + off);
+}
+
+void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw) {
+	auto& dev = gui_->dev();
+	dlg_assert(this->copyTexel);
+
+	// find free readback or create a new one
+	Readback* readback {};
+	for(auto [i, r] : enumerate(readbacks_)) {
+		if(!r.pending && (!lastReadback_ || i != *lastReadback_)) {
+			readback = &r;
+			break;
+		}
+	}
+
+	if(!readback) {
+		readback = &readbacks_.emplace_back();
+
+		// TODO: can we always be sure this is enough?
+		auto maxBufSize = 1024;
+		readback->own.ensure(dev, maxBufSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+	}
+
+	dlg_assert(readback->own.size >= FormatElementSize(format));
+
+	// TODO: fix handling of depth-stencil images. We probably have to pass
+	// multiple copy regions (one for each aspect, see the docs of
+	// VkBufferImageCopy). But then also fix the aspects in the barriers.
+
+	VkImageMemoryBarrier imgb {};
+	imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	imgb.image = this->src;
+	imgb.subresourceRange.aspectMask = imageDraw_.aspect;
+	imgb.subresourceRange.baseMipLevel = imageDraw_.level;
+	imgb.subresourceRange.levelCount = 1u;
+	imgb.subresourceRange.layerCount = subresRange.layerCount;
+	imgb.oldLayout = initialImageLayout;
+	imgb.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	imgb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	imgb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	// TODO: transfer queue ownership.
+	// We currently just force concurrent mode on image/buffer creation
+	// but that might have performance impact.
+	// Requires additional submissions to the other queues.
+	// We should first check whether the queue is different in first place.
+	// if(img.ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
+	// }
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		0, 0, nullptr, 0, nullptr, 1, &imgb);
+
+	// copy
+	VkBufferImageCopy copy {};
+	copy.imageExtent = {1, 1, 1};
+	copy.imageSubresource.aspectMask = imageDraw_.aspect;
+	copy.imageSubresource.mipLevel = imageDraw_.level;
+	copy.imageSubresource.layerCount = 1u;
+	dlg_assert(readTexelOffset_.x >= 0 && readTexelOffset_.y >= 0);
+	[[maybe_unused]] auto w = std::max(extent.width >> u32(imageDraw_.level), 1u);
+	[[maybe_unused]] auto h = std::max(extent.height >> u32(imageDraw_.level), 1u);
+	dlg_assert(u32(readTexelOffset_.x) < w && u32(readTexelOffset_.y) < h);
+
+	copy.imageOffset.x = readTexelOffset_.x;
+	copy.imageOffset.y = readTexelOffset_.y;
+	if(imgType == VK_IMAGE_TYPE_3D) {
+		copy.imageOffset.z = imageDraw_.layer;
+	} else {
+		copy.imageSubresource.baseArrayLayer = imageDraw_.layer;
+	}
+
+	dev.dispatch.CmdCopyImageToBuffer(cb, src,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback->own.buf, 1, &copy);
+
+	readback->valid = true; // TODO: reset on select
+	readback->level = imageDraw_.level;
+	readback->layer = imageDraw_.layer;
+	readback->texel = readTexelOffset_;
+	readback->pending = &draw;
+
+	// register callback to be called when gpu batch finishes execution
+	auto cbFinish = [this](Draw& draw) {
+		auto found = false;
+		for(auto [i, readback] : enumerate(readbacks_)) {
+			if(readback.pending == &draw) {
+				dlg_assert(!found);
+				found = true;
+				readback.pending = nullptr;
+				lastReadback_ = i;
+			}
+		}
+	};
+
+	draw.onFinish.push_back(cbFinish);
 }
 
 } // namespace vil

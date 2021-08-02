@@ -60,6 +60,7 @@ std::string sepfmt(u64 size) {
 void ResourceGui::init(Gui& gui) {
 	gui_ = &gui;
 	buffer_.viewer.init(gui);
+	image_.viewer.init(gui);
 }
 
 ResourceGui::~ResourceGui() {
@@ -97,16 +98,18 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	if(image_.object != &image) {
 		if(image_.view) {
 			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
+			image_.view = {};
 		}
 
-		image_ = {};
+		image_.level = 0u;
+		image_.aspect = {};
 		image_.object = &image;
 	}
 
 	recreateView |= (!image_.view && canHaveView);
 	recreateView |= image_.view && (
-		(image_.aspect != image_.draw.aspect) ||
-		(image_.level != image_.draw.level));
+		(image_.aspect != image_.viewer.aspect()) ||
+		(image_.level != image_.viewer.level()));
 
 	if(recreateView) {
 		if(!image_.view) {
@@ -119,20 +122,11 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 			}
 
 			image_.level = 0u;
-
-			auto numComponents = FormatChannelCount(image_.object->ci.format);
-			if(numComponents == 1) {
-				image_.draw.flags |= DrawGuiImage::flagMaskR | DrawGuiImage::flagGrayscale;
-			} else {
-				for(auto i = 0u; i < numComponents; ++i) {
-					image_.draw.flags |= (1u << i);
-				}
-			}
 		} else if(image_.view) {
 			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
 
-			image_.level = image_.draw.level;
-			image_.aspect = image_.draw.aspect;
+			image_.level = image_.viewer.level();
+			image_.aspect = image_.viewer.aspect();
 		}
 
 		auto getViewType = [&]{
@@ -247,19 +241,16 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		subres.levelCount = image_.object->ci.mipLevels;
 		subres.aspectMask = image_.aspect;
 
-		ReadBuf texelData;
+		image_.viewer.src = image_.object->handle;
+		image_.viewer.subresRange = subres;
+		image_.viewer.imgType = image_.object->ci.imageType;
+		image_.viewer.extent = image_.object->ci.extent;
+		image_.viewer.format = image_.object->ci.format;
 
-		// TODO: we need mutliple buffers, readPixelBuffer might currently
-		// be written on gpu
-		if(image_.readPixelBuffer.size) {
-			image_.readPixelBuffer.invalidateMap();
-			texelData = {image_.readPixelBuffer.map, image_.readPixelBuffer.size};
-		}
+		image_.viewer.initialImageLayout = image_.object->pendingLayout;
+		image_.viewer.finalImageLayout = image_.object->pendingLayout;
 
-		auto format = image_.object->ci.format;
-		displayImage(*gui_, image_.draw, image_.object->ci.extent,
-			image_.object->ci.imageType, format, subres,
-			&image_.readPixelOffset, texelData);
+		image_.viewer.display(draw);
 
 		// We always update the descriptor set, not only when we recreate
 		// a view, since we can never know about the used draw.
@@ -320,6 +311,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 
 	// content
 	// we are using a child window to avoid column glitches
+	gui_->addPostRender([&](Draw& draw) { this->copyBuffer(draw); });
 	if(buffer_.lastReadback) {
 		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
 		dlg_assert(!readback.pending);
@@ -1441,9 +1433,12 @@ void ResourceGui::destroyed(const Handle& handle) {
 		if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
 			if(image_.view) {
 				dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
+				image_.view = {};
 			}
 
-			image_ = {};
+			image_.object = {};
+			image_.aspect = {};
+			image_.level = {};
 		}
 
 		handle_ = nullptr;
@@ -1459,198 +1454,89 @@ void ResourceGui::select(Handle& handle) {
 	dlg_assert(handle.objectType != VK_OBJECT_TYPE_UNKNOWN);
 }
 
-void ResourceGui::recordPreRender(Draw& draw) {
+void ResourceGui::copyBuffer(Draw& draw) {
 	auto& dev = gui_->dev();
 
-	// image waiting logic
-	// if we are displaying an image we have to make sure it is not currently
-	// being written somewhere else.
-	if(handle_ && handle_ == image_.object && image_.view) {
-		auto& img = *image_.object;
+	// might happen if we switched from buffer view to something
+	// else in this frame I guess.
+	if(!handle_ || handle_ != buffer_.handle) {
+		return;
+	}
 
-		// Make sure the image is in the right layout.
-		// And we are allowed to read it
-		VkImageMemoryBarrier imgb {};
-		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		imgb.image = img.handle;
-		// TODO: don't just use imag_.aspect, for depthStencil images,
-		// we need to set depth & stencil
-		imgb.subresourceRange.aspectMask = image_.aspect;
-		imgb.subresourceRange.baseMipLevel = image_.level;
-		imgb.subresourceRange.levelCount = 1u;
-		imgb.subresourceRange.layerCount = image_.object->ci.arrayLayers;
-		imgb.oldLayout = img.pendingLayout;
-		imgb.newLayout = img.hasTransferSrc ?
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL :
-			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // our rendering
-		imgb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-		imgb.dstAccessMask = img.hasTransferSrc ?
-			VK_ACCESS_TRANSFER_READ_BIT :
-			VK_ACCESS_SHADER_READ_BIT;
-		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	auto& buf = *buffer_.handle;
+	auto offset = 0u; // TODO: allow to set in gui
+	auto maxCopySize = VkDeviceSize(1 * 1024 * 1024);
+	auto size = std::min(buf.ci.size - offset, maxCopySize);
 
-		// TODO: transfer queue ownership.
-		// We currently just force concurrent mode on image/buffer creation
-		// but that might have performance impact.
-		// Requires additional submissions to the other queues.
-		// We should first check whether the queue is different in first place.
-		// if(img.ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
-		// }
-
-		auto dstStage = img.hasTransferSrc ?
-			VK_PIPELINE_STAGE_TRANSFER_BIT :
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT; // our rendering
-		dev.dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
-			dstStage, 0, 0, nullptr, 0, nullptr, 1, &imgb);
-
-		// image texel copy
-		// TODO: should only copy this when the cursor is hovering the image
-		if(img.hasTransferSrc) {
-			VkBufferImageCopy copy {};
-			copy.imageExtent = {1, 1, 1};
-			copy.imageSubresource.aspectMask = image_.draw.aspect;
-			copy.imageSubresource.baseArrayLayer = image_.draw.layer;
-			copy.imageSubresource.mipLevel = image_.draw.level;
-			copy.imageSubresource.layerCount = 1u;
-			dlg_assert(
-				image_.readPixelOffset.x >= 0 &&
-				image_.readPixelOffset.y >= 0 &&
-				image_.readPixelOffset.z >= 0);
-			[[maybe_unused]] auto w = std::max(img.ci.extent.width >> u32(image_.draw.level), 1u);
-			[[maybe_unused]] auto h = std::max(img.ci.extent.height >> u32(image_.draw.level), 1u);
-			[[maybe_unused]] auto d = std::max(img.ci.extent.depth >> u32(image_.draw.level), 1u);
-			dlg_assert(
-				u32(image_.readPixelOffset.x) < w &&
-				u32(image_.readPixelOffset.y) < h &&
-				u32(image_.readPixelOffset.z) < d);
-
-			copy.imageOffset = image_.readPixelOffset;
-
-			auto dstBufUsage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-			image_.readPixelBuffer.ensure(dev, FormatElementSize(img.ci.format), dstBufUsage);
-
-			dev.dispatch.CmdCopyImageToBuffer(draw.cb, img.handle,
-				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image_.readPixelBuffer.buf, 1, &copy);
-
-			// Add barrier for our gui read from the image later on
-			imgb.oldLayout = imgb.newLayout;
-			imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			imgb.srcAccessMask = imgb.srcAccessMask;
-			imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-			dev.dispatch.CmdPipelineBarrier(draw.cb,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, // wait for everything
-				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				0, 0, nullptr, 0, nullptr, 1, &imgb);
+	// find free readback or create a new one
+	BufReadback* readback {};
+	for(auto [i, r] : enumerate(buffer_.readbacks)) {
+		if(!r.pending && (!buffer_.lastReadback || i != *buffer_.lastReadback)) {
+			readback = &r;
+			break;
 		}
 	}
 
-	// copy buffer if needed
-	if(handle_ && handle_ == buffer_.handle) {
-		auto& buf = *buffer_.handle;
-		auto offset = 0u; // TODO: allow to set in gui
-		auto maxCopySize = VkDeviceSize(1 * 1024 * 1024);
-		auto size = std::min(buf.ci.size - offset, maxCopySize);
+	if(!readback) {
+		readback = &buffer_.readbacks.emplace_back();
+	}
 
-		// find free readback or create a new one
-		BufReadback* readback {};
-		for(auto [i, r] : enumerate(buffer_.readbacks)) {
-			if(!r.pending && (!buffer_.lastReadback || i != *buffer_.lastReadback)) {
-				readback = &r;
-				break;
+	readback->own.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
+	VkBufferMemoryBarrier bufb {};
+	bufb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	bufb.buffer = buf.handle;
+	bufb.offset = offset;
+	bufb.size = size;
+	bufb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	bufb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	bufb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	bufb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	dev.dispatch.CmdPipelineBarrier(draw.cb,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+		VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+		0, nullptr, 1u, &bufb, 0, nullptr);
+
+	VkBufferCopy copy {};
+	copy.srcOffset = offset;
+	copy.dstOffset = 0u;
+	copy.size = size;
+	dev.dispatch.CmdCopyBuffer(draw.cb, buf.handle, readback->own.buf, 1, &copy);
+
+	bufb.srcAccessMask = bufb.dstAccessMask;
+	bufb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+
+	dev.dispatch.CmdPipelineBarrier(draw.cb,
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+		0, nullptr, 1u, &bufb, 0, nullptr);
+
+	// The copied data will be received when the draw finishes, Gui::finishedLocked(Draw&)
+	// We have to set this data correctly to the currently selected buffer,
+	// it will be compared then so that we only retrieve data we are
+	// still interested in.
+	readback->offset = offset;
+	readback->size = size;
+	readback->src = buf.handle;
+	readback->pending = &draw;
+
+	auto cb = [this](Draw& draw){
+		auto found = false;
+		for(auto [i, readback] : enumerate(buffer_.readbacks)) {
+			if(readback.pending == &draw) {
+				dlg_assert(!found);
+				found = true;
+				readback.pending = nullptr;
+				buffer_.lastReadback = i;
 			}
 		}
+	};
+	draw.onFinish.push_back(cb);
 
-		if(!readback) {
-			readback = &buffer_.readbacks.emplace_back();
-		}
-
-		readback->own.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-
-		VkBufferMemoryBarrier bufb {};
-		bufb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-		bufb.buffer = buf.handle;
-		bufb.offset = offset;
-		bufb.size = size;
-		bufb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-		bufb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		bufb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		bufb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		dev.dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-			0, nullptr, 1u, &bufb, 0, nullptr);
-
-		VkBufferCopy copy {};
-		copy.srcOffset = offset;
-		copy.dstOffset = 0u;
-		copy.size = size;
-		dev.dispatch.CmdCopyBuffer(draw.cb, buf.handle, readback->own.buf, 1, &copy);
-
-		bufb.srcAccessMask = bufb.dstAccessMask;
-		bufb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-
-		dev.dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_TRANSFER_BIT,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
-			0, nullptr, 1u, &bufb, 0, nullptr);
-
-		// The copied data will be received when the draw finishes, Gui::finishedLocked(Draw&)
-		// We have to set this data correctly to the currently selected buffer,
-		// it will be compared then so that we only retrieve data we are
-		// still interested in.
-		readback->offset = offset;
-		readback->size = size;
-		readback->src = buf.handle;
-		readback->pending = &draw;
-
-		// make sure this submission properly synchronized with submissions
-		// that also use the buffer (especially on other queues).
-		draw.usedHandles.push_back(&buf);
-	}
-}
-
-void ResourceGui::recoredPostRender(Draw& draw) {
-	auto& dev = gui_->dev();
-
-	if(handle_ && handle_ == image_.object && image_.view) {
-		auto& img = *image_.object;
-
-		// return it to original layout
-		VkImageMemoryBarrier imgb {};
-		imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		imgb.image = img.handle;
-		imgb.subresourceRange.aspectMask = image_.aspect;
-		imgb.subresourceRange.baseMipLevel = image_.level;
-		imgb.subresourceRange.levelCount = 1u;
-		imgb.subresourceRange.layerCount = image_.object->ci.arrayLayers;
-		imgb.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		imgb.newLayout = img.pendingLayout;
-		imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-
-		dlg_assert(
-			img.pendingLayout != VK_IMAGE_LAYOUT_PREINITIALIZED &&
-			img.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED);
-		imgb.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		imgb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
-
-		// TODO: transfer queue ownership.
-		// We currently just force concurrent mode on image/buffer creation
-		// but that might have performance (and correctness) impact.
-		// Requires additional submissions to the other queues.
-		// We should first check whether the queue is different in first place.
-		// if(selImg->ci.sharingMode == VK_SHARING_MODE_EXCLUSIVE) {
-		// }
-
-		dev.dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, // our rendering
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // wait in everything
-			0, 0, nullptr, 0, nullptr, 1, &imgb);
-	}
+	// make sure this submission properly synchronized with submissions
+	// that also use the buffer (especially on other queues).
+	draw.usedHandles.push_back(&buf);
 }
 
 } // namespace vil

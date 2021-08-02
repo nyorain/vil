@@ -84,8 +84,6 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	this->aspectMask = aspects;
 	this->format = format;
 
-	// TODO: evaluate if the image can be used for everything we want
-	//   to use it for. Could blit to related format if not.
 	// TODO: support multisampling?
 	VkImageCreateInfo ici {};
 	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -93,7 +91,9 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	ici.extent = extent;
 	ici.format = format;
 	ici.imageType = minImageType(this->extent);
-	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // needed for texel reading later on
 
 	std::array<u32, 2> qfams = {dev.gfxQueue->family, srcQueueFam};
 
@@ -116,7 +116,7 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	// We will not copy the image in that case but in almost all cases there
 	// are workarounds (e.g. copy to other format, split size or array layers
 	// or whatever) that we can implement when this really fails for someone
-	// and some usecase we want to support. So we make log every issue.
+	// and some usecase we want to support. So we make sure we log every issue.
 	VkImageFormatProperties fmtProps;
 	auto res = dev.ini->dispatch.GetPhysicalDeviceImageFormatProperties(
 		dev.phdev, ici.format, ici.imageType, ici.tiling,

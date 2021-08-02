@@ -88,6 +88,11 @@ public:
 	const VkPipelineLayout& pipeLayout() const { return pipeLayout_; }
 	const VkDescriptorSetLayout& dsLayout() const { return dsLayout_; }
 
+	// only for the current draw
+	using Recorder = std::function<void(Draw&)>;
+	void addPreRender(Recorder);
+	void addPostRender(Recorder);
+
 private:
 	void initPipes();
 	void initImGui();
@@ -168,9 +173,6 @@ private:
 	float dt_ {};
 	u64 drawCounter_ {};
 
-	// drawing/sync logic
-	bool resourcesTabDrawn_ {};
-
 	GuiBlur blur_ {};
 	VkSwapchainKHR blurSwapchain_ {};
 	ImVec2 windowPos_ {};
@@ -185,6 +187,9 @@ private:
 	std::vector<u64> waitValues_;
 	std::vector<u64> signalValues_;
 	VkTimelineSemaphoreSubmitInfo tsInfo_ {};
+
+	std::vector<Recorder> preRender_ {};
+	std::vector<Recorder> postRender_ {};
 };
 
 // Inserts an imgui button towards the given handle.
@@ -200,10 +205,5 @@ void refButtonExpect(Gui& gui, Handle* handle);
 // If the given handle is null, inserts a disabled "<Destroyed>" button.
 // Otherwise, normally inserts the button as with refButton.
 void refButtonD(Gui& gui, Handle* handle, const char* str = "<Destroyed>");
-
-void displayImage(Gui& gui, DrawGuiImage& imgDraw,
-	const VkExtent3D& extent, VkImageType imgType, VkFormat format,
-	const VkImageSubresourceRange& subresources,
-	VkOffset3D* viewedTexel, ReadBuf texelData);
 
 } // namespace vil

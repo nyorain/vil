@@ -1159,14 +1159,12 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 		if(dev.timelineSemaphores) {
 			ImGui::Checkbox("Full-Sync", &dev.doFullSync);
-			if(ImGui::IsItemHovered()) {
-				ImGui::BeginTooltip();
-				imGuiText("Causes over-conservative synchronization of\n"
+			if(ImGui::IsItemHovered() && showHelp) {
+				ImGui::SetTooltip("Causes over-conservative synchronization of\n"
 					"inserted layer commands.\n"
 					"Might fix synchronization in some corner cases\n"
 					"and is needed when your application accesses buffers\n"
 					"by just using device addresses");
-				ImGui::EndTooltip();
 			}
 		}
 	}
@@ -1273,7 +1271,6 @@ void Gui::drawMemoryUI(Draw&) {
 
 void Gui::draw(Draw& draw, bool fullscreen) {
 	ZoneScoped;
-	resourcesTabDrawn_ = false;
 
 	ImGui::NewFrame();
 
@@ -1332,7 +1329,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 				tabs_.resources.draw(draw);
 				ImGui::EndTabItem();
-				resourcesTabDrawn_ = true;
 			}
 
 			if(ImGui::BeginTabItem("Memory", nullptr, checkSelectTab(Tab::memory))) {
@@ -1361,6 +1357,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 void Gui::destroyed(const Handle& handle) {
 	ExtZoneScoped;
+	assertOwned(dev().mutex);
 
 	// Make sure that all our submissions that use the given handle have
 	// finished.
@@ -1390,10 +1387,8 @@ void Gui::destroyed(const Handle& handle) {
 	tabs_.resources.destroyed(handle);
 	tabs_.cb.destroyed(handle);
 
-	// TODO: call locks mutex, we can't do that here tho
-	// for(auto* draw : draws) {
-	// 	finished(*draw);
-	// }
+	// NOTE: I guess we could finish the draws here? But shouldn't be
+	// a problem to wait until the next frame.
 }
 
 void Gui::activateTab(Tab tab) {
@@ -1548,9 +1543,10 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 				0, 1, &memb, 0, nullptr, 0, nullptr);
 		}
 
-		if(resourcesTabDrawn_) {
-			tabs_.resources.recordPreRender(draw);
+		for(auto& cb : preRender_) {
+			cb(draw);
 		}
+		preRender_.clear();
 
 		// optionally blur
 		VkRenderPassBeginInfo rpBegin {};
@@ -1623,9 +1619,10 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 
 		dev().dispatch.CmdEndRenderPass(draw.cb);
 
-		if(resourcesTabDrawn_) {
-			tabs_.resources.recoredPostRender(draw);
+		for(auto& cb : postRender_) {
+			cb(draw);
 		}
+		postRender_.clear();
 
 		// General barrier to make sure all our reading is done before
 		// future application submissions to this queue.
@@ -1991,19 +1988,11 @@ void Gui::finishedLocked(Draw& draw) {
 		dev().semaphorePool.push_back(semaphore);
 	}
 
-	// TODO: replace with general per-draw callback system (callbacks cleared
-	// after this) also used by ImageViewer
-	auto& rb = tabs_.resources.buffer_;
-	auto found = false;
-	for(auto [i, readback] : enumerate(rb.readbacks)) {
-		if(readback.pending == &draw) {
-			dlg_assert(!found);
-			found = true;
-			readback.pending = nullptr;
-			rb.lastReadback = i;
-		}
+	for(auto& cb : draw.onFinish) {
+		cb(draw);
 	}
 
+	draw.onFinish.clear();
 	draw.waitedUpon.clear();
 	draw.usedHandles.clear();
 	draw.usedHookState.reset();
@@ -2050,232 +2039,12 @@ void refButtonD(Gui& gui, Handle* handle, const char* str) {
 	}
 }
 
-void displayImage(Gui& gui, DrawGuiImage& imgDraw,
-		const VkExtent3D& extent, VkImageType imgType, VkFormat format,
-		const VkImageSubresourceRange& subresources,
-		VkOffset3D* viewedTexel, ReadBuf texelData) {
-	ImVec2 pos = ImGui::GetCursorScreenPos();
+void Gui::addPreRender(Recorder rec) {
+	preRender_.emplace_back(std::move(rec));
+}
 
-	// respect current mip level?
-	float aspect = float(extent.width) / extent.height;
-
-	// TODO: this logic might lead to problems for 1xHUGE images
-	float regW = ImGui::GetContentRegionAvail().x - 20.f;
-
-	// TODO: also kinda messy. Need this to make avoid flickering for
-	// windows that barely need a scrollbar (adding a scrollbar makes
-	// the image smaller, causing the content to not need a scrollbar
-	// anymore; we will get flickering).
-	auto* win = ImGui::GetCurrentWindowRead();
-	if(win->ScrollbarY) {
-		regW += ImGui::GetStyle().ScrollbarSize;
-	}
-
-	float regH = regW / aspect;
-
-	ImGui::Image((void*) &imgDraw, {regW, regH});
-
-	// Taken pretty much just from the imgui demo
-	auto& io = gui.imguiIO();
-	if (ImGui::IsItemHovered()) {
-		ImGui::BeginTooltip();
-		float region_sz = 64.0f;
-		float center_x = io.MousePos.x - pos.x;
-		float center_y = io.MousePos.y - pos.y;
-		float region_x = center_x - region_sz * 0.5f;
-		float region_y = center_y - region_sz * 0.5f;
-		float zoom = 4.0f;
-		if (region_x < 0.0f) { region_x = 0.0f; }
-		else if (region_x > regW - region_sz) { region_x = regW - region_sz; }
-		if (region_y < 0.0f) { region_y = 0.0f; }
-		else if (region_y > regH - region_sz) { region_y = regH - region_sz; }
-
-		// ImGui::Text("Min: (%d, %d)",
-		// 	int(extent.width * region_x / regW),
-		// 	int(extent.height * region_y / regH)
-		// );
-		// ImGui::Text("Max: (%d, %d)",
-		// 	int(extent.width * (region_x + region_sz) / regW),
-		// 	int(extent.height * (region_y + region_sz) / regH)
-		// );
-
-		auto w = std::max(extent.width >> u32(imgDraw.level), 1u);
-		auto h = std::max(extent.height >> u32(imgDraw.level), 1u);
-
-		auto px = int(w * center_x / regW);
-		auto py = int(h * center_y / regH);
-		if(viewedTexel) {
-			viewedTexel->x = px;
-			viewedTexel->y = py;
-			viewedTexel->z = extent.depth > 1 ? imgDraw.layer : 0;
-		}
-		if(!texelData.empty()) {
-			// TODO: better formatting of color
-			// - based on image format, show int or float
-			// - when using float, always have fixed length, avoid flickering
-			imGuiText("({}, {}): {}", px, py, read(format, texelData));
-		}
-
-		ImVec2 uv0 = ImVec2((region_x) / regW, (region_y) / regH);
-		ImVec2 uv1 = ImVec2((region_x + region_sz) / regW, (region_y + region_sz) / regH);
-		ImGui::Image((void*) &imgDraw, ImVec2(region_sz * zoom, region_sz * zoom), uv0, uv1);
-		ImGui::EndTooltip();
-	}
-
-	// Row 1: components
-	if(subresources.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
-		auto numComponents = FormatChannelCount(format);
-		imgDraw.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-
-		ImGui::CheckboxFlags("R", &imgDraw.flags, DrawGuiImage::flagMaskR);
-		if(numComponents > 1) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("G", &imgDraw.flags, DrawGuiImage::flagMaskG);
-		} else {
-			imgDraw.flags &= ~(DrawGuiImage::flagMaskG);
-		}
-
-		if(numComponents > 2) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("B", &imgDraw.flags, DrawGuiImage::flagMaskB);
-		} else {
-			imgDraw.flags &= ~(DrawGuiImage::flagMaskB);
-		}
-
-		if(numComponents > 3) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("A", &imgDraw.flags, DrawGuiImage::flagMaskA);
-		} else {
-			imgDraw.flags &= ~(DrawGuiImage::flagMaskA);
-		}
-
-		ImGui::SameLine();
-		ImGui::CheckboxFlags("Gray", &imgDraw.flags, DrawGuiImage::flagGrayscale);
-	} else {
-		VkFlags depthStencil = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-		imgDraw.flags = DrawGuiImage::flagMaskR | DrawGuiImage::flagGrayscale;
-
-		// init
-		if(imgDraw.aspect != VK_IMAGE_ASPECT_DEPTH_BIT && imgDraw.aspect != VK_IMAGE_ASPECT_STENCIL_BIT) {
-			imgDraw.aspect = (subresources.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) ?
-				VK_IMAGE_ASPECT_DEPTH_BIT :
-				VK_IMAGE_ASPECT_STENCIL_BIT;
-		}
-
-		if((subresources.aspectMask & depthStencil) == depthStencil) {
-			if(ImGui::RadioButton("Depth", imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT)) {
-				imgDraw.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-			}
-
-			ImGui::SameLine();
-			if(ImGui::RadioButton("Stencil", imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT)) {
-				imgDraw.aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
-			}
-		} else if(subresources.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) {
-			imgDraw.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-		} else if(subresources.aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) {
-			imgDraw.aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
-		} else {
-			dlg_error("Unsupported image format, aspect mask: '{}'",
-				vk::flagNames(VkImageAspectFlagBits(subresources.aspectMask)));
-		}
-	}
-
-	// Row 2: layer and mip
-	if(extent.depth > 1) {
-		// TODO: not very convenient to use for a lot of slices.
-		//   make sensitivity absolute, i.e. not dependent on number of slices?
-		// TODO: this is weird when the image also has mip levels
-		auto maxDepth = std::max((extent.depth >> u32(imgDraw.level)), 1u) - 1u;
-		float layer = imgDraw.layer * maxDepth;
-		ImGui::SliderFloat("slice", &layer, 0, maxDepth);
-		imgDraw.layer /= maxDepth;
-	} else if(subresources.layerCount > 1) {
-		int layer = int(imgDraw.layer);
-		ImGui::SliderInt("Layer", &layer, subresources.baseArrayLayer,
-			subresources.baseArrayLayer + subresources.layerCount - 1);
-		imgDraw.layer = layer;
-	}
-
-	if(subresources.levelCount > 1) {
-		int mip = int(imgDraw.level);
-		ImGui::SliderInt("Mip", &mip, subresources.baseMipLevel,
-			subresources.baseMipLevel + subresources.levelCount - 1);
-		imgDraw.level = mip;
-	}
-
-	// Row 3: min/max values
-	ImGui::DragFloat("Min", &imgDraw.minValue, 0.01);
-	ImGui::DragFloat("Max", &imgDraw.maxValue, 0.01);
-	// NOTE: could add power/gamma slider here.
-
-	// TODO: ugh, this could be done a bit cleaner...
-	if(imgType == VK_IMAGE_TYPE_1D) {
-		if(imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
-			auto numt = FormatDepthNumericalType(format);
-			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
-
-			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i1d;
-			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u1d;
-			else imgDraw.type = DrawGuiImage::f1d;
-		} else if(imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
-			auto numt = FormatStencilNumericalType(format);
-			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
-
-			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i1d;
-			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u1d;
-			else imgDraw.type = DrawGuiImage::f1d;
-		} else {
-			if(FormatIsSampledFloat(format)) imgDraw.type = DrawGuiImage::f1d;
-			if(FormatIsInt(format)) imgDraw.type = DrawGuiImage::i1d;
-			if(FormatIsUInt(format)) imgDraw.type = DrawGuiImage::u1d;
-		}
-	} else if(imgType == VK_IMAGE_TYPE_2D) {
-		if(imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
-			auto numt = FormatDepthNumericalType(format);
-			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
-
-			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i2d;
-			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u2d;
-			else imgDraw.type = DrawGuiImage::f2d;
-		} else if(imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
-			auto numt = FormatStencilNumericalType(format);
-			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
-
-			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i2d;
-			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u2d;
-			else imgDraw.type = DrawGuiImage::f2d;
-		} else {
-			if(FormatIsSampledFloat(format)) imgDraw.type = DrawGuiImage::f2d;
-			if(FormatIsInt(format)) imgDraw.type = DrawGuiImage::i2d;
-			if(FormatIsUInt(format)) imgDraw.type = DrawGuiImage::u2d;
-		}
-	} else if(imgType == VK_IMAGE_TYPE_3D) {
-		if(imgDraw.aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
-			auto numt = FormatDepthNumericalType(format);
-			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
-
-			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i3d;
-			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u3d;
-			else imgDraw.type = DrawGuiImage::f3d;
-		} else if(imgDraw.aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
-			auto numt = FormatStencilNumericalType(format);
-			dlg_assert(numt != VK_FORMAT_NUMERICAL_TYPE_NONE);
-
-			if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) imgDraw.type = DrawGuiImage::i3d;
-			else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) imgDraw.type = DrawGuiImage::u3d;
-			else imgDraw.type = DrawGuiImage::f1d;
-		} else {
-			if(FormatIsSampledFloat(format)) imgDraw.type = DrawGuiImage::f3d;
-			if(FormatIsInt(format)) imgDraw.type = DrawGuiImage::i3d;
-			if(FormatIsUInt(format)) imgDraw.type = DrawGuiImage::u3d;
-		}
-	}
-
-	dlg_assertm(imgDraw.type != DrawGuiImage::font,
-		"imgType {}, format {}", vk::name(imgType), vk::name(format));
-
-	// TODO: display format and aspect?
+void Gui::addPostRender(Recorder rec) {
+	postRender_.emplace_back(std::move(rec));
 }
 
 } // namespace vil

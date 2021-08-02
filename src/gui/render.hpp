@@ -59,6 +59,11 @@ struct Draw {
 	// to the Devices semaphore pool (they are already reset).
 	std::vector<VkSemaphore> waitedUpon;
 
+	// Called from the gui thread with dev mutex locked when this draw finishes.
+	// One-shot, i.e. automatically cleared aftewards.
+	using FinishCallback = std::function<void(Draw&)>;
+	std::vector<FinishCallback> onFinish;
+
 	// frame number in which this draw was last used
 	u64 lastUsed {};
 

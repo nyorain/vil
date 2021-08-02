@@ -1,3 +1,22 @@
+- [x] improve handling of transparent images. Checkerboard background?
+	- [x] when viewing image as grayscale they become transparent atm.
+	      no idea why
+	- [x] also don't apply scale for alpha
+	- [x] maybe add some "transparent" background (some known pattern)
+- [x] IO viewer additions
+	- [x] start using src/gui/command.hpp
+	- [x] fix descriptor arrays
+	- [x] use the new buffer viewer for transfer buffer commands
+		- [x] fix `[cb.cpp:1056] assertion 'found' failed` for cmdUpdateBuffer,
+			  i.e. support buffer IO viewing for transfer commands
+	- [x] fix ClearAttachmentCmd handling, allow to copy/view any of the cleared attachments
+	- [x] when viewing attachments, show framebuffer and image/imageView (see TODO in code)
+	- [x] when viewing transfer img, show image refButton
+	- [x] adapt ioImage_ to selected image (e.g. channels)
+		- [x] also fix logic for depthStencil images. Select depth by default.
+			  (can be tested with doom)
+	- [x] support texel reading implementation for cb-viewed-images and clean
+		  up color format presentation
 - [x] improve buffer viewer UI.
 	- [x] integrate https://github.com/BalazsJako/ImGuiColorTextEdit
 	- [x] use monospace font

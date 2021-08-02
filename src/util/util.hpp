@@ -286,6 +286,13 @@ decltype(auto) constexpr templatize(T&& value) {
 	return std::forward<T>(value);
 }
 
+/// Returns the linear mix of x and y with factor a.
+/// P must represent a mathematical field.
+template<typename P, typename T>
+constexpr auto mix(P x, P y, T a) {
+	return (1 - a) * x + a * y;
+}
+
 // Like a mixture of static_cast and dynamic_cast.
 // Will assert (i.e. no-op in release mode) that the given pointer
 // can be casted to the requested type and then cast it.
