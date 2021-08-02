@@ -10,6 +10,7 @@
 #include <util/util.hpp>
 #include <util/ext.hpp>
 #include <util/profiling.hpp>
+#include <util/callstack.hpp>
 
 namespace vil {
 

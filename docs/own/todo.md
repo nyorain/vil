@@ -12,10 +12,6 @@ urgent, bugs:
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
-- [ ] image viewer validation error when we don't hover the image
-      (happens when mip > 0 is selected)
-- [ ] imgui input: figure out why del key does produce a '?'.
-      e.g. in buffer viewer
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
 
@@ -269,6 +265,8 @@ optimization:
 		  allow to just use it in any context?
 		  Would be *really* useful for debugging but might require too much
 		  tracking. Also problematic with different std buffer layouts
+- [ ] buffer viewer: allow to show data as hexadecimal
+- [ ] buffer viewer: allow to show data in a more compact manner, binary-viewer-like
 - [ ] we need to copy acceleration structures/accelStructs in commandHook/
       on submission. But not really physically copy but track their state
 	  at that point when they are viewed. Hard to do in case the submission

@@ -1,3 +1,8 @@
+- [x] image viewer validation error when we don't hover the image
+      (happens when mip > 0 is selected)
+	  {should be fixed with new image viewer}
+- [x] imgui input: figure out why del key does produce a '?'.
+	  e.g. in buffer viewer {nvm. issue in swa/iro}
 - [x] improve handling of transparent images. Checkerboard background?
 	- [x] when viewing image as grayscale they become transparent atm.
 	      no idea why

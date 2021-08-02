@@ -39,7 +39,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 	if(stype->pointer) {
 		dlg_assert(stype->parent_type);
 		typeID = stype->parent_type;
-		stype = &compiler.get_type(stype->parent_type);
+		stype = &compiler.get_type(typeID);
 	}
 
 	auto& dst = *memScope.allocRaw<Type>();
@@ -79,6 +79,12 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 				dst.array[d] = compiler.evaluate_constant_u32(stype->array[d]);
 			}
 		}
+
+		// apparently this is needed? not entirely sure why
+		dlg_assert(stype->parent_type);
+		typeID = stype->parent_type;
+		stype = &compiler.get_type(typeID);
+		meta = compiler.get_ir().find_meta(typeID);
 	}
 
 	if(stype->basetype == spc::SPIRType::Struct) {
@@ -86,13 +92,11 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		for(auto i = 0u; i < stype->member_types.size(); ++i) {
 			auto memTypeID = stype->member_types[i];
 
-			auto off = 0u;
-			const spc::Meta::Decoration* deco {};
-			auto name = dlg::format("?{}", i);
-
 			dlg_assert(meta && meta->members.size() > i);
-			deco = &meta->members[i];
-			off = deco->offset;
+			auto deco = &meta->members[i];
+			auto off = deco->offset;
+
+			auto name = dlg::format("?{}", i);
 			if(!deco->alias.empty()) {
 				name = deco->alias;
 			}

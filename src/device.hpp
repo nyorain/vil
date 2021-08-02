@@ -66,6 +66,7 @@ struct Device {
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
 
 	bool doFullSync {};
+	bool captureCmdStack {};
 
 	// Aside from properties, only the families used by device
 	// are initialized.

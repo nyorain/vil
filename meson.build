@@ -283,6 +283,11 @@ deps = [
 	tracy_deps,
 ]
 
+# TODO, wip, just for testing backtraces
+if not with_win32
+	deps += dependency('libdw', required: true)
+endif
+
 if with_x11_hook
 	src += files('src/xlib.cpp')
 

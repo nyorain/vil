@@ -7,6 +7,7 @@
 #include <util/span.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
+#include <util/callstack.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/commandHook.hpp>
@@ -15,6 +16,7 @@
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
 #include <iomanip>
+#include <filesystem>
 
 // TODO:
 // - a lot of commands are still missing valid match() implementations.
@@ -56,6 +58,33 @@ template<typename H>
 void checkReplace(span<H*> handlePtr, const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	for(auto& ptr : handlePtr) {
 		checkReplace(ptr, map);
+	}
+}
+
+void display(const backward::StackTrace& st, unsigned offset = 3u) {
+	// TODO terible
+	static backward::TraceResolver resolver;
+	static std::unordered_map<void*, backward::ResolvedTrace::SourceLoc> locs;
+
+	resolver.load_stacktrace(st);
+
+	for(auto i = offset; i < st.size(); ++i) {
+		auto it = locs.find(st[i - 1].addr);
+		if(it == locs.end()) {
+			auto res = resolver.resolve(st[i - 1]);
+			it = locs.emplace(st[i - 1].addr, res.source).first;
+		}
+
+		auto& loc = it->second;
+		imGuiText("#{}: {}:{}:{}: {} [{}]", i, loc.filename, loc.line,
+			loc.col, loc.function, st[i - 1].addr);
+		if(ImGui::IsItemClicked()) {
+			// TODO
+			auto base = std::filesystem::current_path();
+			auto cmd = dlg::format("nvr -c \"e +{} {}/{}\"", loc.line,
+				base.string(), loc.filename);
+			std::system(cmd.c_str());
+		}
 	}
 }
 
@@ -985,6 +1014,12 @@ DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
 	state = copy(cb, gfxState);
 	// TODO: only do this when pipe layout matches pcr layout
 	pushConstants.data = copySpan(cb, cb.pushConstants().data);
+
+	// TODO: does not really belong here. should be atomic then at least
+	if(cb.dev->captureCmdStack) {
+		this->stackTrace = &allocate<backward::StackTrace>(cb);
+		this->stackTrace->load_here(32u);
+	}
 }
 
 void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
@@ -1099,6 +1134,13 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		imGuiText("Can't display relevant dynamic state, pipeline was destroyed");
 	} else if(state.pipe->dynamicState.empty()) {
 		// imGuiText("No relevant dynamic state");
+	}
+
+	// TODO: does not really belong here
+	auto flags = imgui_vil::ImGuiTreeNodeFlags_FramePadding;
+	if(this->stackTrace && ImGui::TreeNodeEx("StackTrace", flags)) {
+		vil::display(*stackTrace);
+		ImGui::TreePop();
 	}
 }
 
