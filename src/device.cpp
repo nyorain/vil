@@ -469,7 +469,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			if(inVulkan12) {
 				addLink = false;
 				inVulkan12->timelineSemaphore = true;
-			} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
+			} else if(inTS) {
 				addLink = false;
 				inTS->timelineSemaphore = true;
 			}

@@ -285,7 +285,11 @@ deps = [
 
 # TODO, wip, just for testing backtraces
 if not with_win32
-	deps += dependency('libdw', required: true)
+	dep_dw = dependency('libdw', required: false)
+	if dep_dw.found()
+		deps += dep_dw
+		layer_args += '-DBACKWARD_HAS_DW'
+	endif
 endif
 
 if with_x11_hook

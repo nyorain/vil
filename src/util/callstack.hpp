@@ -133,9 +133,6 @@
 #define BACKWARD_HAS_BACKTRACE 0
 #endif
 
-// TODO, for testing
-#define BACKWARD_HAS_DW 1
-
 // On linux, backward can extract detailed information about a stack trace
 // using one of the following libraries:
 //

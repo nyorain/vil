@@ -1167,6 +1167,13 @@ void Gui::drawOverviewUI(Draw& draw) {
 					"by just using device addresses");
 			}
 		}
+
+		auto val = dev.captureCmdStack.load();
+		ImGui::Checkbox("Capture Command Callstacks", &val);
+		dev.captureCmdStack.store(val);
+		if(ImGui::IsItemHovered() && showHelp) {
+			ImGui::SetTooltip("Captures and shows callstacks of each command");
+		}
 	}
 
 	// if(ImGui::TreeNode("Statistics")) {
