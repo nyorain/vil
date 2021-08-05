@@ -41,7 +41,7 @@ private:
 	// Will perform transitions, if needed.
 	void recordPostImage(Draw& draw);
 
-	void doCopy(VkCommandBuffer cb, Draw& draw);
+	void doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
 	void copyComplete(Draw&);
 
 	static DrawGuiImage::Type parseType(VkImageType type, VkFormat format,

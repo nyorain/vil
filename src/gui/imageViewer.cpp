@@ -278,7 +278,7 @@ void ImageViewer::recordPostImage(Draw& draw) {
 	auto srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 	auto needBarrier = finalImageLayout != srcLayout;
 	if(copyTexel) {
-		doCopy(cb, draw);
+		doCopy(cb, draw, srcLayout);
 		srcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 		srcAccess = VK_ACCESS_TRANSFER_READ_BIT;
 		srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
@@ -385,7 +385,7 @@ DrawGuiImage::Type ImageViewer::parseType(VkImageType imgType, VkFormat format,
 	return DrawGuiImage::Type(unsigned(baseType) + off);
 }
 
-void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw) {
+void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout) {
 	auto& dev = gui_->dev();
 	dlg_assert(this->copyTexel);
 
@@ -419,7 +419,7 @@ void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw) {
 	imgb.subresourceRange.baseMipLevel = imageDraw_.level;
 	imgb.subresourceRange.levelCount = 1u;
 	imgb.subresourceRange.layerCount = subresRange.layerCount;
-	imgb.oldLayout = initialImageLayout;
+	imgb.oldLayout = srcLayout;
 	imgb.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	imgb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
 	imgb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
