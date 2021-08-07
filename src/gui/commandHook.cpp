@@ -689,6 +689,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 
 void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info) {
 	auto& dev = *record->dev;
+
 	dlg_assert(&dst == hcommand.back());
 
 	if(info.splitRenderPass) {
@@ -785,6 +786,7 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info)
 
 void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 	auto& dev = *record->dev;
+	DebugLabel cblbl(dev, cb, "vil:hookRecordDst");
 
 	hookRecordBeforeDst(cmd, info);
 
@@ -1130,6 +1132,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 
 void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	auto& dev = *record->dev;
+	DebugLabel lbl(dev, cb, "vil:copyDs");
 
 	const DescriptorState* dsState = getDsState(bcmd);
 	if(!dsState) {
@@ -1270,6 +1273,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 
 void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID) {
 	auto& dev = *record->dev;
+	DebugLabel lbl(dev, cb, "vil:copyAttachment");
 
 	dlg_assert(info.beginRenderPassCmd);
 	auto& fb = nonNull(info.beginRenderPassCmd->fb);
@@ -1330,6 +1334,7 @@ VkImageSubresourceRange toRange(const VkImageSubresourceLayers& subres) {
 void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 	dlg_assert(hook->copyTransferDst != hook->copyTransferSrc);
 	auto& dev = *record->dev;
+	DebugLabel lbl(dev, cb, "vil:copyTransfer");
 
 	struct CopyImage {
 		Image* src {};
@@ -1448,7 +1453,7 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 
 void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info) {
 	auto& dev = *record->dev;
-	DebugLabel lbl(dev, cb, "beforeDstOutsideRp");
+	DebugLabel lbl(dev, cb, "vil:beforeDstOutsideRp");
 
 	if(info.splitRenderPass) {
 		// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
@@ -1468,6 +1473,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 
 	// indirect copy
 	if(hook->copyIndirectCmd) {
+		DebugLabel lbl(dev, cb, "vil:copyInderectCmd");
+
 		if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(&bcmd)) {
 			VkDeviceSize stride = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
@@ -1524,6 +1531,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 	auto maxVertIndSize = maxBufCopySize;
 
 	if(hook->copyVertexBuffers) {
+		DebugLabel lbl(dev, cb, "vil:copyVertexBuffers");
+
 		dlg_assert(drawCmd);
 		for(auto& vertbuf : drawCmd->state.vertices) {
 			auto& dst = state->vertexBufCopies.emplace_back();
@@ -1538,6 +1547,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 	}
 
 	if(hook->copyIndexBuffers) {
+		DebugLabel lbl(dev, cb, "vil:copyIndexBuffers");
+
 		dlg_assert(drawCmd);
 		auto& inds = drawCmd->state.indices;
 		if(inds.buffer) {
@@ -1555,7 +1566,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 
 void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info) {
 	auto& dev = *record->dev;
-	DebugLabel lbl(dev, cb, "afterDsOutsideRp");
+	DebugLabel lbl(dev, cb, "vil:afterDsOutsideRp");
 
 	if(info.splitRenderPass) {
 		// TODO: kinda hacky, can be improved. But we definitely need a general barrier here,
@@ -1617,6 +1628,8 @@ u32 getVertType(VkFormat fmt) {
 
 void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 	auto& dev = *record->dev;
+	DebugLabel lbl(dev, cb, "vil:beforeBuildAccelStructs");
+
 	auto& cmdHook = *dev.commandHook;
 
 	auto& build = accelStructBuilds.emplace_back();

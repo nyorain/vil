@@ -1163,16 +1163,26 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 	// TODO: ext data
 }
 
-void ResourceGui::drawDesc(Draw&, Event&) {
-	// TODO: submission rework/display
+void ResourceGui::drawDesc(Draw&, Event& event) {
+	imGuiText("{}", name(event));
+	ImGui::Spacing();
 }
 
-void ResourceGui::drawDesc(Draw&, Semaphore&) {
-	// TODO: submission rework/display
+void ResourceGui::drawDesc(Draw&, Semaphore& semaphore) {
+	imGuiText("{}", name(semaphore));
+	ImGui::Spacing();
+
+	imGuiText("Type: {}", vk::name(semaphore.type));
+	if(semaphore.type == VK_SEMAPHORE_TYPE_TIMELINE) {
+		auto& dev = gui_->dev();
+		u64 val;
+		dev.dispatch.GetSemaphoreCounterValue(dev.handle, semaphore.handle, &val);
+		imGuiText("Value: {}", val);
+	}
 }
 
 void ResourceGui::drawDesc(Draw&, Fence& fence) {
-	ImGui::Text("%s", name(fence).c_str());
+	imGuiText("{}", name(fence));
 	ImGui::Spacing();
 
 	// TODO: display associated submission, if any

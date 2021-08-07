@@ -430,11 +430,10 @@ void CommandViewer::displayDsList() {
 						auto name = bindingName(refl.get(), setID, bID);
 						if(name.type == BindingNameRes::Type::valid) {
 							stageNames[i] = std::move(name.name);
-							if(!firstValid) {
-								firstValid = i;
-							}
+							firstValid = firstValid.value_or(i);
 						} else if(name.type == BindingNameRes::Type::unnamed) {
 							stageNames[i] = "<unnamed>";
+							firstValid = firstValid.value_or(i);
 						} else if(name.type == BindingNameRes::Type::notfound) {
 							stageNames[i] = "<not used in this stage>";
 						}

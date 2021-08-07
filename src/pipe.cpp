@@ -88,15 +88,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				xfbVertexStageID = u32(stages.size());
 			}
 
-			if(src.stage == VK_SHADER_STAGE_GEOMETRY_BIT ||
-					src.stage == VK_SHADER_STAGE_MESH_BIT_NV ||
-					src.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT ||
-					src.stage == VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) {
-				// Builtin Position might not be present
-				dlg_trace("xfb currently not supported for mesh/geometry/tessellation pipes");
-				useXfb = false;
-			}
-
 			stages.push_back(src);
 		}
 

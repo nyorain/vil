@@ -165,6 +165,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
 	semaphore.objectType = VK_OBJECT_TYPE_SEMAPHORE;
 	semaphore.dev = &dev;
 	semaphore.handle = *pSemaphore;
+	semaphore.type = VK_SEMAPHORE_TYPE_BINARY;
+
+	auto* typeCI = findChainInfo<VkSemaphoreTypeCreateInfo,
+		VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO>(*pCreateInfo);
+	if(typeCI) {
+		semaphore.value = typeCI->initialValue;
+		semaphore.type = typeCI->semaphoreType;
+	}
 
 	return res;
 }

@@ -323,4 +323,26 @@ struct ValidExpressionT<E, std::void_t<E<T...>>, T...> {
 template<template<typename...> typename E, typename... T>
 constexpr auto validExpression = detail::ValidExpressionT<E, void, T...>::value;
 
+// case-insensitive char traits
+// see https://stackoverflow.com/questions/11635
+struct CharTraitsCI : public std::char_traits<char> {
+    static bool eq(char c1, char c2) { return toupper(c1) == toupper(c2); }
+    static bool ne(char c1, char c2) { return toupper(c1) != toupper(c2); }
+    static bool lt(char c1, char c2) { return toupper(c1) <  toupper(c2); }
+    static int compare(const char* s1, const char* s2, size_t n) {
+        while(n-- != 0) {
+            if(toupper(*s1) < toupper(*s2)) return -1;
+            if(toupper(*s1) > toupper(*s2)) return 1;
+            ++s1; ++s2;
+        }
+        return 0;
+    }
+    static const char* find(const char* s, int n, char a) {
+        while(n-- > 0 && toupper(*s) != toupper(a)) {
+            ++s;
+        }
+        return s;
+    }
+};
+
 } // namespace vil

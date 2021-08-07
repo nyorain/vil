@@ -27,12 +27,6 @@
 
 namespace vil {
 
-struct CommandMemBlock {
-	CommandMemBlock* next {};
-	size_t size {};
-	// std::byte block[size]; // following 'this' in memory
-};
-
 [[nodiscard]] std::byte* allocate(CommandRecord&, size_t size, unsigned align);
 [[nodiscard]] std::byte* allocate(CommandBuffer&, size_t size, unsigned align);
 

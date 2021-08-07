@@ -14,6 +14,11 @@ urgent, bugs:
 	- [ ] maybe show full image size on hover?
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
+- [ ] image viewer: fix display of HUGEx1 images
+- [ ] image viewer: fix layer selection
+- [ ] figure out why copying attachments/descriptors shows weird/incorrect 
+      output in the dota intro screen sometimes. Sync problem? Matching problem?
+	  {might be fixed now, with proper splitrp deps}
 
 docs
 - [ ] write small wiki documentation post on how to use API
@@ -52,6 +57,10 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
+- [ ] don't hook every cb with matching command. At least do a rough check
+      on other commands/record structure. Otherwise (e.g. when just selecting
+	  a top-level barrier command) we very quickly might get >10 hooks per
+	  frame.
 - [ ] don't allocate memory per-resource. Especially for CommandHookState.
 	  Instead, allocate large blocks (we need hostVisible for buffers
 	  and deviceLocal for images) and then suballocate from that.

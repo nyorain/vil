@@ -90,7 +90,6 @@ struct CommandRecord;
 struct CommandBufferDesc;
 struct CommandMemBlock;
 struct CommandDescriptorSnapshot;
-struct MemBlockDeleter;
 struct DrawCmdBase;
 struct DispatchCommand;
 struct BeginRenderPassCmd;

@@ -1307,7 +1307,9 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	}
 
 	if(!posCapture) {
-		dlg_error("Not BuiltIn Position in xfb data?!");
+		// This might happen e.g. for geometry/tesselation pipes.
+		// TODO: just allow to select an attribute to be used as position in gui
+		imGuiText("No BuiltIn Position");
 		return;
 	}
 

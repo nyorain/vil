@@ -58,14 +58,18 @@ struct Framebuffer : DeviceHandle {
 // - the second and third renderpasses loads all attachments in the beginning
 // This way, one renderpass can be split into three, e.g. to insert
 // non-renderpass commands in between (at two points).
+// - addSync: whether to add external subpass dependencies making sure that
+//   the renderpasses are synchronized as one (i.e. strict ordering of
+//   drawing commands).
 // NOTE: the pNext chains are currently lost (needs fix for each extension we want to support)
 //   we could probably just forward pNext chains. Evaluate!
+//   We already warn about it though.
 struct RenderPassSplitDesc {
 	RenderPassDesc desc0;
 	RenderPassDesc desc1;
 	RenderPassDesc desc2;
 };
-RenderPassSplitDesc splitInterruptable(const RenderPassDesc&);
+RenderPassSplitDesc splitInterruptable(const RenderPassDesc&, bool addSync = true);
 
 // Returns whether the given renderpass can be split in the given subpass.
 // While this is usually possible, there are some combinations of resolve

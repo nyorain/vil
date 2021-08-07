@@ -108,9 +108,15 @@ bool matchesSearch(Handle& handle, std::string_view search) {
 		return true;
 	}
 
-	// TODO: better matching. At least ignore case.
+	// case-insensitive search
 	auto label = name(handle);
-	return (label.find(search) != label.npos);
+
+	using StringViewCI = std::basic_string_view<char, CharTraitsCI>;
+	auto nameCI = StringViewCI(label.data(), label.size());
+	auto searchCI = StringViewCI(search.data(), search.size());
+
+	// TODO: better matching. Support regex?
+	return (nameCI.find(searchCI) != nameCI.npos);
 }
 
 template<typename M>

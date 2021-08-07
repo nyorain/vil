@@ -53,7 +53,7 @@ TextEditor::TextEditor()
 	, mLastClick(-1.0f)
 {
 	SetPalette(GetDarkPalette());
-	SetLanguageDefinition(LanguageDefinition::HLSL());
+	// SetLanguageDefinition(LanguageDefinition::HLSL());
 	mLines.push_back(Line());
 }
 

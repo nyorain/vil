@@ -422,7 +422,7 @@ bool splittable(const RenderPassDesc& desc, unsigned split) {
 	return true;
 }
 
-RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
+RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc, bool addDeps) {
 	RenderPassDesc desc0 {};
 	RenderPassDesc desc1 {};
 	RenderPassDesc desc2 {};
@@ -432,23 +432,30 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 	desc2.flags = desc.flags;
 
 	// copy subpasses
-	auto copyRefs = [](auto* refs, std::size_t count, auto& attRefs) {
+	auto unsetExtWarn = [&](auto& base){
+		if(base.pNext) {
+			dlg_warn("render pass pNext lost on render pass splitting");
+		}
+		base.pNext = nullptr;
+	};
+
+	auto copyRefs = [&](auto* refs, std::size_t count, auto& attRefs) {
 		if(!count) {
 			return (VkAttachmentReference2*) nullptr;
 		}
 
 		auto& atts = attRefs.emplace_back(refs, refs + count);
 		for(auto& att : atts) {
-			att.pNext = nullptr;
+			unsetExtWarn(att);
 		}
 
 		return atts.data();
 	};
 
-	auto fixSubpasses = [&copyRefs](auto& desc) {
+	auto fixSubpasses = [&](auto& desc) {
 		auto& attRefs = desc.attachmentRefs;
 		for(auto& subp : desc.subpasses) {
-			subp.pNext = nullptr;
+			unsetExtWarn(subp);
 			subp.pColorAttachments = copyRefs(subp.pColorAttachments,
 				subp.colorAttachmentCount, attRefs);
 			subp.pInputAttachments = copyRefs(subp.pInputAttachments,
@@ -479,9 +486,9 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 	desc1.dependencies = desc.dependencies;
 	desc2.dependencies = desc.dependencies;
 
-	for(auto& dep : desc0.dependencies) dep.pNext = nullptr;
-	for(auto& dep : desc1.dependencies) dep.pNext = nullptr;
-	for(auto& dep : desc2.dependencies) dep.pNext = nullptr;
+	for(auto& dep : desc0.dependencies) unsetExtWarn(dep);
+	for(auto& dep : desc1.dependencies) unsetExtWarn(dep);
+	for(auto& dep : desc2.dependencies) unsetExtWarn(dep);
 
 	// Copy attachments.
 	// When an attachment is used in both splitted renderpasses, we transition
@@ -490,7 +497,7 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 	auto betweenLayout = VK_IMAGE_LAYOUT_GENERAL;
 	desc0.attachments = desc.attachments;
 	for(auto& att : desc0.attachments) {
-		att.pNext = nullptr;
+		unsetExtWarn(att);
 		att.finalLayout = betweenLayout;
 		att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -498,7 +505,7 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 
 	desc1.attachments = desc.attachments;
 	for(auto& att : desc1.attachments) {
-		att.pNext = nullptr;
+		unsetExtWarn(att);
 		att.initialLayout = betweenLayout;
 		att.finalLayout = betweenLayout;
 		att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -509,10 +516,69 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc) {
 
 	desc2.attachments = desc.attachments;
 	for(auto& att : desc2.attachments) {
-		att.pNext = nullptr;
+		unsetExtWarn(att);
 		att.initialLayout = betweenLayout;
 		att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	}
+
+	// add sync
+	if(addDeps) {
+		auto findOrAddDep = [&](auto& deps, auto src, auto dst) ->decltype(auto) {
+			for(auto& dep : deps) {
+				if(dep.srcSubpass == src && dep.dstSubpass == dst) {
+					return dep;
+				}
+			}
+
+			auto& ret = deps.emplace_back();
+			ret.sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
+			ret.srcSubpass = src;
+			ret.dstSubpass = dst;
+			return ret;
+		};
+
+		// TODO PERF oversyncing atm for all cases below
+		// TODO add geometry/tesselation stages if supported.
+		auto rpStages = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+		auto access =
+			VK_ACCESS_MEMORY_WRITE_BIT |
+			VK_ACCESS_MEMORY_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+
+		// rp0- > ext
+		auto& dep0 = findOrAddDep(desc0.dependencies,
+			desc0.subpasses.size() - 1, VK_SUBPASS_EXTERNAL);
+		dep0.srcStageMask = rpStages;
+		dep0.dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		dep0.srcAccessMask = access;
+		dep0.dstAccessMask = access;
+
+		// ext -> rp1
+		auto& dep1 = findOrAddDep(desc1.dependencies, VK_SUBPASS_EXTERNAL, 0u);
+		dep1.srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		dep1.dstStageMask = rpStages;
+		dep1.srcAccessMask = access;
+		dep1.dstAccessMask = access;
+
+		// rp1 -> ext
+		auto& dep2 = findOrAddDep(desc1.dependencies,
+			desc1.subpasses.size() - 1, VK_SUBPASS_EXTERNAL);
+		dep2.srcStageMask = rpStages;
+		dep2.dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		dep2.srcAccessMask = access;
+		dep2.dstAccessMask = access;
+
+		// ext -> rp2
+		auto& dep3 = findOrAddDep(desc2.dependencies, VK_SUBPASS_EXTERNAL, 0u);
+		dep3.srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		dep3.dstStageMask = rpStages;
+		dep3.srcAccessMask = access;
+		dep3.dstAccessMask = access;
 	}
 
 	return {std::move(desc0), std::move(desc1), std::move(desc2)};

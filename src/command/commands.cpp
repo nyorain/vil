@@ -181,7 +181,7 @@ std::string printBufferImageCopy(Image* image,
 // API
 std::vector<const Command*> displayCommands(const Command* cmd,
 		const Command* selected, Command::TypeFlags typeFlags, bool firstSep) {
-	// TODO: should use imgui list clipper, might have *a lot* of commands here.
+	// TODO PERF: should use imgui list clipper, might have *a lot* of commands here.
 	// But first we have to restrict what cmd->display can actually do.
 	// Would also have to pre-filter commands for that. And stop at every
 	// (expanded) parent command (but it's hard to tell whether they are

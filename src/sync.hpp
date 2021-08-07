@@ -38,6 +38,9 @@ struct Semaphore : DeviceHandle {
 	// SubmissionBatch* signalFrom {};
 	// SubmissionBatch* waitFrom {};
 
+	VkSemaphoreType type {};
+	u64 value {}; // only for timeline semaphores
+
 	~Semaphore();
 };
 

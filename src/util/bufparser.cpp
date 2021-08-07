@@ -67,10 +67,11 @@ struct ArrayQualifiers : pegtl::seq<
 	pegtl::star<pegtl::pad<ArrayQualifier, Separator>>
 > {};
 
-struct ValueDecl : Interleaved<Seps,
+struct ValueDecl : IfMustSep<
 	Type,
 	Identifier,
-	ArrayQualifiers
+	ArrayQualifiers,
+	Semicolon
 > {};
 
 struct StructMember : Interleaved<Seps, ValueDecl, Semicolon> {};
@@ -89,7 +90,7 @@ struct StructDecl : IfMustSep<
 > {};
 
 struct StructDecls : pegtl::star<pegtl::pad<StructDecl, Separator>> {};
-struct ValueDecls : pegtl::star<Interleaved<Seps, ValueDecl, Semicolon>> {};
+struct ValueDecls : pegtl::star<ValueDecl> {};
 
 struct Grammar : Interleaved<Seps, StructDecls, ValueDecls> {};
 struct Whole : pegtl::must<Grammar, Eof> {};
@@ -181,10 +182,14 @@ template<> inline constexpr const char* error_message<Identifier> = "Expected id
 
 template<> inline constexpr const char* error_message<ArrayQualifierClose> = "Expected a ']' to close the array qualifier";
 template<> inline constexpr const char* error_message<ArrayQualifierNumber> = "Expected a number literal as array size";
+template<> inline constexpr const char* error_message<Semicolon> = "Expected ';'";
 
 template<> inline constexpr const char* error_message<Eof> = "Expected end of file";
-template<> inline constexpr const char* error_message<Seps> = "??Seps"; // should never fail
-template<> inline constexpr const char* error_message<Grammar> = "??Grammar"; // should never fail
+
+// Those should never fail but we need them to avoid static asserts in pegtl
+template<> inline constexpr const char* error_message<Seps> = "??Seps";
+template<> inline constexpr const char* error_message<Grammar> = "??Grammar";
+template<> inline constexpr const char* error_message<ArrayQualifiers> = "??ArrayQualifiers";
 
 template<typename T> inline constexpr const char* error_message<pegtl::pad<T, Separator>> = error_message<T>;
 

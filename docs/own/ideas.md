@@ -50,3 +50,8 @@ be possible or useful in the end.
 - add anti-aliasing to vertex viewer. Should probably be beautifully
   be doable with TAA
   	- could also add AO to vertex viewer, when rendering faces
+
+- add a "force render-order" feature since it can be a pain in the ass
+  to continuously debug draw commands when their order randomly changes
+  (have seen it multiple times in games). Not sure if feasible though to
+  force/reorder on our side.

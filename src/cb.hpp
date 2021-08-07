@@ -9,12 +9,7 @@ namespace vil {
 struct CommandPool : DeviceHandle {
 	VkCommandPool handle {};
 	u32 queueFamily {};
-
 	std::vector<CommandBuffer*> cbs;
-	std::unordered_set<MemBlockDeleter*> records;
-
-	// TODO: make use of this again
-    // std::atomic<CommandMemBlock*> memBlocks {}; // forward linked list
 
 	~CommandPool();
 };

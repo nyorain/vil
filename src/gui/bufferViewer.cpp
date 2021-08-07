@@ -10,8 +10,10 @@ void BufferViewer::init(Gui& gui) {
 
 	// TODO: use own lang definition instead of just GLSL. We support
 	// hlsl keywords, for instance.
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	textedit.SetLanguageDefinition(lang);
+	// TODO: why does this break for games using tcmalloc? tested
+	// on linux with dota
+	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	// textedit.SetLanguageDefinition(lang);
 	textedit.SetShowWhitespaces(false);
 	textedit.SetTabSize(4);
 }

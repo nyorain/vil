@@ -1382,12 +1382,10 @@ void Gui::destroyed(const Handle& handle) {
 		}
 	}
 
-	if(fences.empty()) {
-		return;
+	if(!fences.empty()) {
+		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
+			fences.data(), true, UINT64_MAX));
 	}
-
-	VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
-		fences.data(), true, UINT64_MAX));
 
 	// important that we *first* wait for the submission, then forward
 	// this since e.g. the resources gui may destroy handles based on it
