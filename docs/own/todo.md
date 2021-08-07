@@ -19,6 +19,11 @@ urgent, bugs:
 - [ ] figure out why copying attachments/descriptors shows weird/incorrect 
       output in the dota intro screen sometimes. Sync problem? Matching problem?
 	  {might be fixed now, with proper splitrp deps}
+- [ ] figure out why spirv-cross is sometimes providing these weird names
+	  (e.g. for buffers; something like _170_2344) instead of simply having 
+	  an empty alias string
+- [ ] for debugging: track size of VkDeviceMemory objects created for
+      CommandHook objects
 
 docs
 - [ ] write small wiki documentation post on how to use API

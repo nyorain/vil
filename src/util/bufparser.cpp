@@ -74,8 +74,7 @@ struct ValueDecl : IfMustSep<
 	Semicolon
 > {};
 
-struct StructMember : Interleaved<Seps, ValueDecl, Semicolon> {};
-struct StructMemberList : pegtl::plus<StructMember> {};
+struct StructMemberList : pegtl::plus<ValueDecl> {};
 struct StructOpen : pegtl::one<'{'> {};
 struct StructClose : pegtl::one<'}'> {};
 struct StructSemicolon : Semicolon {};

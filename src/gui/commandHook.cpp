@@ -1855,8 +1855,12 @@ void CommandHookSubmission::finish(Submission& subm) {
 	state.descriptorSnapshot = std::move(this->descriptorSnapshot);
 	state.submissionID = subm.parent->globalSubmitID;
 
-	dlg_assertm(record->hook->completed.size() < 32,
-		"Hook state overflow detected");
+	// This usually is a sign of a problem somewhere inside the layer.
+	// Either we are not correctly clearing completed states from the gui
+	// but still producing new ones or we have just *waaay* to many
+	// candidates and should somehow improve matching for this case.
+	dlg_assertlm(dlg_level_warn, record->hook->completed.size() < 64,
+		"High number of hook states detected");
 
 	// indirect command readback
 	if(record->hook->copyIndirectCmd) {
