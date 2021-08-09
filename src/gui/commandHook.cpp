@@ -172,35 +172,8 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 
 	VK_CHECK(dev.dispatch.BindImageMemory(dev.handle, image, memory, 0));
 
-	VkImageViewCreateInfo vci {};
-	vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	vci.image = image;
-	switch(ici.imageType) {
-		case VK_IMAGE_TYPE_1D:
-			vci.viewType = VK_IMAGE_VIEW_TYPE_1D_ARRAY;
-			break;
-		case VK_IMAGE_TYPE_2D:
-			vci.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-			break;
-		case VK_IMAGE_TYPE_3D:
-			vci.viewType = VK_IMAGE_VIEW_TYPE_3D;
-			break;
-		default:
-			dlg_error("unreachable");
-			return false;
-	}
-	vci.format = format;
-	vci.subresourceRange.aspectMask = aspectMask & ~(VK_IMAGE_ASPECT_STENCIL_BIT);
-	vci.subresourceRange.layerCount = layerCount;
-	vci.subresourceRange.levelCount = levelCount;
-	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &imageView));
-	nameHandle(dev, this->imageView, "CopiedImage:imageView");
-
-	if(aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) {
-		vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
-		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &vci, nullptr, &stencilView));
-		nameHandle(dev, this->stencilView, "CopiedImage:stencilView");
-	}
+	neededMemory = memReqs.size;
+	DebugStats::get().copiedImageMem += memReqs.size;
 
 	return true;
 }
@@ -210,10 +183,12 @@ CopiedImage::~CopiedImage() {
 		return;
 	}
 
-	dev->dispatch.DestroyImageView(dev->handle, imageView, nullptr);
-	dev->dispatch.DestroyImageView(dev->handle, stencilView, nullptr);
+	// dev->dispatch.DestroyImageView(dev->handle, imageView, nullptr);
+	// dev->dispatch.DestroyImageView(dev->handle, stencilView, nullptr);
 	dev->dispatch.DestroyImage(dev->handle, image, nullptr);
 	dev->dispatch.FreeMemory(dev->handle, memory, nullptr);
+
+	DebugStats::get().copiedImageMem -= neededMemory;
 }
 
 void invalidate(CommandHookRecord& rec) {

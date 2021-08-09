@@ -22,13 +22,12 @@ struct CopiedImage {
 	Device* dev {};
 	u32 refCount {};
 	VkImage image {};
-	VkImageView imageView {}; // color/depth view
-	VkImageView stencilView {}; // Only valid if image has stencil aspect
 	VkDeviceMemory memory {};
 	VkExtent3D extent {}; // extent of the first level in this image
 	u32 layerCount {};
 	u32 levelCount {};
 	VkImageAspectFlags aspectMask {};
+	VkDeviceSize neededMemory {};
 
 	// TODO(io-rework): shouldn't be here. Subresource range of original src image,
 	// that this copy was created from.

@@ -45,12 +45,10 @@ struct Draw {
 	VkFence fence {};
 	bool inUse {};
 
-	// descriptor set for selected image view.
-	VkDescriptorSet dsSelected {};
-
 	// A list of handles that are referenced by this draw, i.e. are used in
 	// the submission. While the associated submission is pending, we must
-	// make sure that non of the handles are destroyed or written.
+	// make sure that none of the handles are destroyed and synchronize future
+	// applicaiton submissions that might write them.
 	std::vector<DeviceHandle*> usedHandles;
 	IntrusivePtr<CommandHookState> usedHookState;
 
@@ -91,15 +89,10 @@ struct RenderBuffer {
 };
 
 struct DrawGuiImage {
-	// TODO: maybe cleaner to just store
-	// - VkFormat
-	// - VkExtent
-	// - VkAspectFlags
-	// - ImageView (or directly the descriptor?)
 	enum Type {
 		font,
 
-		// custom, uses draw.dsSelected
+		// custom, uses the provided descriptor set
 		f1d,
 		u1d,
 		i1d,
@@ -122,17 +115,27 @@ struct DrawGuiImage {
 		flagGrayscale = (1u << 4u),
 	};
 
+	// The type of the image.
+	// When it's the font image (default), all other fields are irrelevant.
 	Type type;
-	// Only relevant when not font
-	float layer {};
-	float level {};
-	float minValue {0.f};
-	float maxValue {1.f};
+
+	// The descriptor to bind for drawing
+	VkDescriptorSet ds {};
+
+	// image.frag information:
+	// the channels to sample
 	u32 flags {
 		DrawGuiImage::flagMaskR |
 		DrawGuiImage::flagMaskG |
 		DrawGuiImage::flagMaskB};
-	VkImageAspectFlagBits aspect {};
+
+	// min/max values for scaling in shader
+	float minValue {0.f};
+	float maxValue {1.f};
+
+	// the layer/level to sample
+	float layer {};
+	float level {};
 };
 
 } // namespace vil

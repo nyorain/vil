@@ -1392,54 +1392,24 @@ void CommandViewer::updateHook() {
 }
 
 void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
-	auto& dev = gui_->dev();
-
 	ImGui::Separator();
 
 	dlg_assert(img.aspectMask);
 	dlg_assert(img.image);
-	dlg_assert(img.imageView);
+	dlg_assert(state_);
 
 	draw.usedHookState = state_;
-	dlg_assert(draw.usedHookState);
 
-	/*
 	// TODO: when a new CopiedImage is displayed we could reset the
 	//   color mask flags. In some cases this is desired but probably
 	//   not in all.
-
-	vil::displayImage(*gui_, ioImage_, img.extent, minImageType(img.extent),
-		img.format, img.srcSubresRange, nullptr, {});
-	*/
-
-	imageViewer_.src = img.image;
-	imageViewer_.initialImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	imageViewer_.finalImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	imageViewer_.copyTexel = true;
-	imageViewer_.extent = img.extent;
-	imageViewer_.imgType = minImageType(img.extent);
-	imageViewer_.format = img.format;
-	imageViewer_.subresRange = img.srcSubresRange;
+	auto flags = ImageViewer::preserveSelection |
+		ImageViewer::preserveZoomPan |
+		ImageViewer::preserveReadbacks;
+	auto imgLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imageViewer_.select(img.image, img.extent, minImageType(img.extent),
+		img.format, img.srcSubresRange, true, imgLayout, imgLayout, flags);
 	imageViewer_.display(draw);
-
-	// TODO: move ds management into imageViewer as well.
-	// Store a list of descriptorSets in Draw.
-	// Use a sampler that uses linear for mag and nearest for min (or
-	// the other way around? look it up)
-	VkDescriptorImageInfo dsii {};
-	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	auto aspect = imageViewer_.imageDraw().aspect;
-	dsii.imageView = (aspect == VK_IMAGE_ASPECT_STENCIL_BIT) ? img.stencilView : img.imageView;
-	dsii.sampler = gui_->nearestSampler();
-
-	VkWriteDescriptorSet write {};
-	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	write.descriptorCount = 1u;
-	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	write.dstSet = draw.dsSelected;
-	write.pImageInfo = &dsii;
-
-	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 }
 
 const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(

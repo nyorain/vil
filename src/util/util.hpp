@@ -345,4 +345,6 @@ struct CharTraitsCI : public std::char_traits<char> {
     }
 };
 
+VkImageAspectFlags aspects(VkFormat format);
+
 } // namespace vil

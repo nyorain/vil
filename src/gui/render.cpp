@@ -13,7 +13,6 @@ void swap(Draw& a, Draw& b) noexcept {
 	using std::swap;
 	swap(a.cb, b.cb);
 	swap(a.dev, b.dev);
-	swap(a.dsSelected, b.dsSelected);
 	swap(a.fence, b.fence);
 	swap(a.inUse, b.inUse);
 	swap(a.indexBuffer, b.indexBuffer);
@@ -69,14 +68,6 @@ void Draw::init(Gui& gui, VkCommandPool commandPool) {
 		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &futureSemaphore));
 		nameHandle(dev, this->futureSemaphore, "Draw:futureSemaphore");
 	}
-
-	VkDescriptorSetAllocateInfo dsai {};
-	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	dsai.descriptorPool = dev.dsPool;
-	dsai.descriptorSetCount = 1u;
-	dsai.pSetLayouts = &gui.dsLayout();
-	VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dsai, &dsSelected));
-	nameHandle(dev, this->dsSelected, "Draw:dsSelected");
 }
 
 Draw::~Draw() {
@@ -101,10 +92,6 @@ Draw::~Draw() {
 	// if(cb) {
 	// 	dev->dispatch.FreeCommandBuffers(dev->handle, commandPool, 1, &cb);
 	// }
-
-	if(dsSelected) {
-		dev->dispatch.FreeDescriptorSets(dev->handle, dev->dsPool, 1, &dsSelected);
-	}
 
 	// NOTE: could return them to the device pool alternatively
 	for(auto sem : waitedUpon) {

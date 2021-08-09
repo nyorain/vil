@@ -15,8 +15,6 @@ namespace vil {
 
 class ResourceGui {
 public:
-	~ResourceGui();
-
 	void init(Gui& gui);
 
 	void select(Handle& handle);
@@ -41,11 +39,7 @@ private:
 
 	struct {
 		Image* object {};
-		VkImageView view {};
 		ImageViewer viewer {};
-
-		unsigned level {};
-		VkImageAspectFlagBits aspect {};
 	} image_;
 
 	struct BufReadback {

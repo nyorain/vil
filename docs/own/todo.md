@@ -15,15 +15,13 @@ urgent, bugs:
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
 - [ ] image viewer: fix display of HUGEx1 images
-- [ ] image viewer: fix layer selection
 - [ ] figure out why copying attachments/descriptors shows weird/incorrect 
       output in the dota intro screen sometimes. Sync problem? Matching problem?
 	  {might be fixed now, with proper splitrp deps}
 - [ ] figure out why spirv-cross is sometimes providing these weird names
 	  (e.g. for buffers; something like _170_2344) instead of simply having 
 	  an empty alias string
-- [ ] for debugging: track size of VkDeviceMemory objects created for
-      CommandHook objects
+- [ ] toupper bug when searching for resource
 
 docs
 - [ ] write small wiki documentation post on how to use API
@@ -381,7 +379,7 @@ optimization:
 - [ ] reading 64-bit int formats might have precision problems, see the format
       io in util.cpp
 - [ ] Implement missing resource overview UIs
-	- [ ] sync primitives (-> submission rework & display, after v0.1)
+	- [ ] sync primitives (-> submission rework & display, after v1.1)
 - [ ] show histogram to image in ui. Generate histogram together with min/max
       values to allow auto-min-max as in renderdoc
 	- [ ] Using the histogram, we could add something even better, adjusting

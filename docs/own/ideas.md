@@ -55,3 +55,12 @@ be possible or useful in the end.
   to continuously debug draw commands when their order randomly changes
   (have seen it multiple times in games). Not sure if feasible though to
   force/reorder on our side.
+
+- allow to show contents of *any* resource before/after *any* command.
+  Useful debugging memory corruptions & aliasing.
+
+- allow to save image/buffer data to file
+
+- time critical functions: Gui::Draw, command hook recording, freeBlocks etc
+  and track them via DebugStats. When they get too large show something
+  via imgui in debug mode (e.g. the needed time in red).

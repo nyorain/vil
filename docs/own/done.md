@@ -1,3 +1,6 @@
+- [x] for debugging: track size of VkDeviceMemory objects created for
+      CommandHook objects
+- [x] image viewer: fix layer selection
 - [x] image viewer validation error when we don't hover the image
       (happens when mip > 0 is selected)
 	  {should be fixed with new image viewer}

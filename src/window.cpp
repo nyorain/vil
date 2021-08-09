@@ -554,7 +554,7 @@ void DisplayWindow::uiThread() {
 		timeIt(now, "frame");
 
 		// There is no advantage in having multiple draws pending at
-		// the same time, we don't need to squeeze ever last fps
+		// the same time, we don't need to squeeze every last fps
 		// out of the debug window. Waiting here is better than potentially
 		// somewhere in a critical section.
 		gui.waitForDraws();

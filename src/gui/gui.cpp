@@ -577,6 +577,12 @@ Gui::~Gui() {
 	dev_->gui = nullptr;
 
 	waitForDraws();
+	for(auto& draw : draws_) {
+		if(draw.inUse) {
+			finishedLocked(draw);
+		}
+	}
+
 	draws_.clear();
 
 	if(imgui_) {
@@ -808,6 +814,7 @@ void Gui::uploadDraw(Draw& draw, const ImDrawData& drawData) {
 void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 		const ImDrawData& drawData) {
 	ZoneScoped;
+	DebugLabel cblbl(dev(), draw.cb, "vil:Gui:recordDraw");
 
 	auto& dev = *dev_;
 	if(drawData.TotalIdxCount == 0 && !clear_) {
@@ -860,7 +867,7 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 					VkPipeline pipe = pipes_.gui;
 					auto img = (DrawGuiImage*) cmd.TextureId;
 					if(img && img->type != DrawGuiImage::font) {
-						ds = draw.dsSelected;
+						ds = img->ds;
 						pipe = [&]{
 							switch(img->type) {
 								case DrawGuiImage::f1d: return pipes_.image1D;
@@ -1139,6 +1146,8 @@ void Gui::drawOverviewUI(Draw& draw) {
 		imGuiText("dsState memory: {} KB", stats.descriptorStateMem / 1024.f);
 		imGuiText("alive hook records: {}", stats.aliveHookRecords);
 		imGuiText("alive hook states: {}", stats.aliveHookStates);
+		imGuiText("layer buffer memory: {} KB", stats.ownBufferMem / 1024.f);
+		imGuiText("layer image memory: {} KB", stats.copiedImageMem / 1024.f);
 		ImGui::Separator();
 		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
 		imGuiText("transform feedback: {}", dev.transformFeedback);
@@ -1440,6 +1449,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	VkCommandBufferBeginInfo cbBegin {};
 	cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
+	DebugLabel cblbl(dev(), draw.cb, "vil:Gui:draw");
 
 	ensureFontAtlas(draw.cb);
 

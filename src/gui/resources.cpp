@@ -63,13 +63,6 @@ void ResourceGui::init(Gui& gui) {
 	image_.viewer.init(gui);
 }
 
-ResourceGui::~ResourceGui() {
-	if(image_.view) {
-		gui_->dev().dispatch.DestroyImageView(gui_->dev().handle,
-			image_.view, nullptr);
-	}
-}
-
 void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 	if(res.memory) {
 		ImGui::Text("Bound to memory ");
@@ -88,74 +81,8 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	ImGui::Text("%s", name(image).c_str());
 	ImGui::Spacing();
 
-	auto& dev = gui_->dev();
-	bool recreateView = false;
-	bool canHaveView =
-		!image.swapchain &&
-		image.pendingLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
-		image.allowsNearestSampling &&
-		image.ci.samples == VK_SAMPLE_COUNT_1_BIT;
-	if(image_.object != &image) {
-		if(image_.view) {
-			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
-			image_.view = {};
-		}
-
-		image_.level = 0u;
-		image_.aspect = {};
-		image_.object = &image;
-	}
-
-	recreateView |= (!image_.view && canHaveView);
-	recreateView |= image_.view && (
-		(image_.aspect != image_.viewer.aspect()) ||
-		(image_.level != image_.viewer.level()));
-
-	if(recreateView) {
-		if(!image_.view) {
-			if(FormatHasDepth(image.ci.format)) {
-				image_.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-			} else if(FormatIsStencilOnly(image.ci.format)) {
-				image_.aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
-			} else {
-				image_.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
-			}
-
-			image_.level = 0u;
-		} else if(image_.view) {
-			dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
-
-			image_.level = image_.viewer.level();
-			image_.aspect = image_.viewer.aspect();
-		}
-
-		auto getViewType = [&]{
-			switch(image.ci.imageType) {
-				case VK_IMAGE_TYPE_1D:
-					return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
-				case VK_IMAGE_TYPE_2D:
-					return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-				case VK_IMAGE_TYPE_3D:
-					return VK_IMAGE_VIEW_TYPE_3D;
-				default:
-					dlg_error("Unsupported image type");
-					return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
-			}
-		};
-
-		VkImageViewCreateInfo ivi {};
-		ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		ivi.image = image.handle;
-		ivi.viewType = getViewType();
-		ivi.format = image.ci.format;
-		ivi.subresourceRange.aspectMask = image_.aspect;
-		ivi.subresourceRange.baseMipLevel = image_.level;
-		ivi.subresourceRange.layerCount = image_.object->ci.arrayLayers;
-		ivi.subresourceRange.levelCount = 1u;
-
-		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &image_.view));
-		nameHandle(dev, image_.view, "ResourceGui:image_.view");
-	}
+	auto doSelect = (image_.object != &image);
+	image_.object = &image;
 
 	// info
 	const auto& ci = image.ci;
@@ -230,47 +157,23 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		// writing this).
 		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
 	} else {
-		dlg_assert(image_.view);
+		if(doSelect) {
+			VkImageSubresourceRange subres {};
+			subres.layerCount = image.ci.arrayLayers;
+			subres.levelCount = image.ci.mipLevels;
+			subres.aspectMask = aspects(image.ci.format);
+			auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
+			image_.viewer.select(image.handle, image.ci.extent,
+				image.ci.imageType, image.ci.format, subres, image.hasTransferSrc,
+				image.pendingLayout, image.pendingLayout, flags);
+		}
+
 		draw.usedHandles.push_back(image_.object);
 
 		ImGui::Spacing();
 		ImGui::Spacing();
 
-		VkImageSubresourceRange subres {};
-		subres.layerCount = image_.object->ci.arrayLayers;
-		subres.levelCount = image_.object->ci.mipLevels;
-		subres.aspectMask = image_.aspect;
-
-		image_.viewer.src = image_.object->handle;
-		image_.viewer.subresRange = subres;
-		image_.viewer.imgType = image_.object->ci.imageType;
-		image_.viewer.extent = image_.object->ci.extent;
-		image_.viewer.format = image_.object->ci.format;
-
-		image_.viewer.initialImageLayout = image_.object->pendingLayout;
-		image_.viewer.finalImageLayout = image_.object->pendingLayout;
-
 		image_.viewer.display(draw);
-
-		// We always update the descriptor set, not only when we recreate
-		// a view, since we can never know about the used draw.
-		// Could store whether this is actually needed but not worth it.
-		VkDescriptorImageInfo dsii {};
-		dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		dsii.imageView = image_.view;
-		dsii.sampler = gui_->nearestSampler();
-		// dsii.sampler = image.allowsLinearSampling ?
-		// 	dev.renderData->linearSampler :
-		// 	dev.renderData->nearestSampler;
-
-		VkWriteDescriptorSet write {};
-		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		write.descriptorCount = 1u;
-		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		write.dstSet = draw.dsSelected;
-		write.pImageInfo = &dsii;
-
-		dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 	}
 
 	// TODO: display pending layout?
@@ -1438,17 +1341,10 @@ void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
 }
 
 void ResourceGui::destroyed(const Handle& handle) {
-	auto& dev = gui_->dev();
 	if(handle_ == &handle) {
 		if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
-			if(image_.view) {
-				dev.dispatch.DestroyImageView(dev.handle, image_.view, nullptr);
-				image_.view = {};
-			}
-
 			image_.object = {};
-			image_.aspect = {};
-			image_.level = {};
+			image_.viewer.unselect();
 		}
 
 		handle_ = nullptr;

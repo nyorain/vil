@@ -17,8 +17,11 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 		dev.dispatch.DestroyBuffer(dev.handle, buf, nullptr);
 		dev.dispatch.FreeMemory(dev.handle, mem, nullptr);
 
+		DebugStats::get().ownBufferMem -= size;
+
 		mem = {};
 		buf = {};
+		size = {};
 	}
 
 	// new buffer
@@ -54,6 +57,9 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	VK_CHECK(dev.dispatch.BindBufferMemory(dev.handle, buf, mem, 0));
 	this->size = reqSize;
 
+	// Might not be 100% accurate for used memory but good enough
+	DebugStats::get().ownBufferMem += size;
+
 	// map
 	void* pmap;
 	VK_CHECK(dev.dispatch.MapMemory(dev.handle, mem, 0, VK_WHOLE_SIZE, 0, &pmap));
@@ -70,6 +76,8 @@ OwnBuffer::~OwnBuffer() {
 
 	dev->dispatch.DestroyBuffer(dev->handle, buf, nullptr);
 	dev->dispatch.FreeMemory(dev->handle, mem, nullptr);
+
+	DebugStats::get().ownBufferMem -= size;
 }
 
 void OwnBuffer::invalidateMap() {

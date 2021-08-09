@@ -44,6 +44,9 @@ struct DebugStats {
 	std::atomic<u32> threadContextMem {};
 	std::atomic<u32> commandMem {};
 	std::atomic<u32> descriptorStateMem {};
+
+	std::atomic<u32> ownBufferMem {};
+	std::atomic<u32> copiedImageMem {};
 };
 
 struct Device {

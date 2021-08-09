@@ -1090,7 +1090,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		updateInput(dt);
 
 		dlg_assert(!draw.usedHookState);
-		draw.usedHookState = IntrusivePtr<CommandHookState>(const_cast<CommandHookState*>(&state));
+		draw.usedHookState.reset(const_cast<CommandHookState*>(&state));
 	}
 
 	ImGui::EndChild();
@@ -1374,7 +1374,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		// we read from the buffer that is potentially written again
 		// by the hook so we need barriers.
 		dlg_assert(!draw.usedHookState);
-		draw.usedHookState = IntrusivePtr<CommandHookState>(const_cast<CommandHookState*>(&state));
+		draw.usedHookState.reset(const_cast<CommandHookState*>(&state));
 	}
 
 	ImGui::EndChild();

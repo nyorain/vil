@@ -6,6 +6,7 @@
 #include <dlg/dlg.hpp>
 #include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>
+#include <vk/format_utils.h>
 #include <vk/enumString.hpp>
 #include <cmath>
 #include <cstdio>
@@ -1142,6 +1143,21 @@ BufferInterval minMaxInterval(span<const VkBufferCopy2KHR> copies, bool src) {
 	}
 
 	return {offset, end - offset};
+}
+
+VkImageAspectFlags aspects(VkFormat format) {
+	VkImageAspectFlags ret {};
+	if(FormatHasDepth(format)) {
+		ret |= VK_IMAGE_ASPECT_DEPTH_BIT;
+	}
+	if(FormatHasStencil(format)) {
+		ret |= VK_IMAGE_ASPECT_STENCIL_BIT;
+	}
+	if(FormatIsColor(format)) {
+		ret |= VK_IMAGE_ASPECT_COLOR_BIT;
+	}
+
+	return ret;
 }
 
 } // namespace vil
