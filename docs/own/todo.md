@@ -22,6 +22,7 @@ urgent, bugs:
 	  (e.g. for buffers; something like _170_2344) instead of simply having 
 	  an empty alias string
 - [ ] toupper bug when searching for resource
+- [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
 
 docs
 - [ ] write small wiki documentation post on how to use API
