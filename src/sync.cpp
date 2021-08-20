@@ -2,6 +2,7 @@
 #include <device.hpp>
 #include <data.hpp>
 #include <queue.hpp>
+#include <util/util.hpp>
 
 namespace vil {
 

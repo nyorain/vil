@@ -228,6 +228,7 @@ struct CommandHookRecord {
 	VkRenderPass rp2 {};
 
 	IntrusivePtr<CommandHookState> state {};
+	OwnBuffer dummyBuf {};
 
 	// accelStruct-related stuff
 	struct AccelStructBuild {
@@ -299,6 +300,10 @@ private:
 	// TODO: should the whole buffer be copied for transfer operations?
 	// bad idea in many cases, e.g. when huge upload heaps are used.
 	static constexpr auto copyFullTransferBuffer = false;
+
+	// See node 1963
+	static constexpr auto timingBarrierBefore = true;
+	static constexpr auto timingBarrierAfter = true;
 };
 
 struct CommandHookSubmission {

@@ -9,6 +9,7 @@
 #include <util/util.hpp>
 #include <threadContext.hpp>
 #include <dlg/output.h>
+#include <fstream>
 
 namespace pegtl = tao::pegtl;
 

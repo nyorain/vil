@@ -70,7 +70,22 @@ std::array<unsigned int, 3> apiVersion(uint32_t v) {
 	};
 }
 
+#ifdef TRACY_MANUAL_LIFETIME
+	// NOTE: strictly speaking, we'd need a mutex to do proper
+	//   initialization. But creating multiple Instances from multiple threads
+	//   at the same time is a weird and problematic corner case anyways
+	std::atomic<unsigned> tracyRefCount {};
+#endif // TRACY_MANUAL_LIFETIME
+
 Instance::~Instance() {
+#ifdef TRACY_MANUAL_LIFETIME
+	// TODO: need to fix some issues, e.g. ThreadContext memory first
+	/*
+	if(tracyRefCount.fetch_sub(1u) == 1u) {
+		tracy::ShutdownProfiler();
+	}
+	*/
+#endif // TRACY_MANUAL_LIFETIME
 }
 
 void initSettings() {
@@ -110,6 +125,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	AllocConsole();
 	dlg_trace("Allocated console. Creating vulkan instance");
 #endif // _WIN32
+
+#ifdef TRACY_MANUAL_LIFETIME
+	if (tracyRefCount.fetch_add(1u) == 0u) {
+		dlg_trace("Starting tracy...");
+		tracy::StartupProfiler();
+		dlg_trace(">> done");
+	}
+#endif // TRACY_MANUAL_LIFETIME
 
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
 	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {

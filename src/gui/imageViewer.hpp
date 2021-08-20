@@ -2,6 +2,7 @@
 
 #include <util/vec.hpp>
 #include <gui/render.hpp>
+#include <optional>
 
 namespace vil {
 

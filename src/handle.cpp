@@ -5,6 +5,8 @@
 #include <handles.hpp>
 #include <accelStruct.hpp>
 #include <vk/enumString.hpp>
+#include <util/util.hpp>
+#include <string_view>
 
 namespace vil {
 

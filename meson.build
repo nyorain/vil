@@ -71,6 +71,15 @@ if with_tracy
 	args += '-DTRACY_ENABLE'
 	# we always want on-demand profiling
 	args += '-DTRACY_ON_DEMAND'
+	# Without this we get problems in same applications.
+	# We manually init/shutdown on instance create/destroy
+	# NOTE: we need to fix some things to use this, e.g. cleanup
+	#  all ThreadContext memory (calling Tracy functions) when the last
+	#  instance is destroyed (and maybe some other shutdown corner cases)
+	#  to properly use ProfilerShutdown
+	# args += '-DTRACY_MANUAL_LIFETIME'
+	# args += '-DTRACY_DELAYED_INIT'
+
 	if build_machine.system() == 'windows'
 		tracy_deps += cc.find_library('Ws2_32')
 		tracy_deps += cc.find_library('Dbghelp')

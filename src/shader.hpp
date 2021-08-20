@@ -4,6 +4,7 @@
 #include <handle.hpp>
 #include <vk/vulkan.h>
 #include <util/intrusive.hpp>
+#include <util/debugMutex.hpp>
 
 #include <memory>
 #include <atomic>

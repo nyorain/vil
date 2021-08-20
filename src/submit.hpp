@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <deque>
+#include <optional>
 #include <threadContext.hpp>
 #include <vk/vulkan.h>
 #include <util/intrusive.hpp>

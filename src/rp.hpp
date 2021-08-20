@@ -69,7 +69,8 @@ struct RenderPassSplitDesc {
 	RenderPassDesc desc1;
 	RenderPassDesc desc2;
 };
-RenderPassSplitDesc splitInterruptable(const RenderPassDesc&, bool addSync = true);
+RenderPassSplitDesc splitInterruptable(const RenderPassDesc&,
+	bool addSync = true, bool addInternalDep = false);
 
 // Returns whether the given renderpass can be split in the given subpass.
 // While this is usually possible, there are some combinations of resolve

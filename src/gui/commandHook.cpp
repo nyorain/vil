@@ -603,7 +603,8 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	auto preEnd = hcommand.end() - 1;
 	for(auto it = hcommand.begin(); it != preEnd; ++it) {
 		auto* cmd = *it;
-		if(info.beginRenderPassCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd); info.beginRenderPassCmd) {
+		info.beginRenderPassCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd);
+		if(info.beginRenderPassCmd) {
 			break;
 		}
 	}
@@ -633,7 +634,6 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	if(info.splitRenderPass) {
 		auto& desc = info.beginRenderPassCmd->rp->desc;
 
-		info.beginRenderPassCmd = info.beginRenderPassCmd;
 		info.hookedSubpass = info.beginRenderPassCmd->subpassOfDescendant(*hcommand.back());
 		dlg_assert(info.hookedSubpass != u32(-1));
 		dlg_assert(info.hookedSubpass < desc.subpasses.size());
@@ -792,36 +792,68 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 		}
 	}
 
+	// TODO: Improve the timing queries for draw commands. With proper
+	// subpass dependencies and barrier stages we can probably isolate
+	// draw commands better (especially in the case where we don't
+	// split the render pass).
+	if(queryPool && timingBarrierBefore && !info.beginRenderPassCmd) {
+		// Make sure the timing query only captures the command itself,
+		// not stuff that comes before it
+		VkMemoryBarrier barrier {};
+		barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0u,
+			1u, &barrier, 0u, nullptr, 0u, nullptr);
+
+		// add a dummy command to make sure the pipeline barrier is effective
+		// TODO: ugly workaround needed in case cmd is something like
+		// a debug label command (at least in that case it was observed to
+		// be effective, radv mesa 21). Not sure atm how to properly fix this,
+		// maybe we only need this because of a driver bug?
+		if(!info.splitRenderPass) {
+			dummyBuf.ensure(dev, 4u, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+			dev.dispatch.CmdFillBuffer(cb, dummyBuf.buf, 0, 4, 42u);
+		}
+	}
+
 	cmd.record(dev, this->cb);
+
+	auto cmdAsParent = dynamic_cast<const ParentCommand*>(&cmd);
+	auto nextInfo = info;
+
+	if(queryPool) { // timing 0
+		auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
+	}
+
+	if(cmdAsParent) {
+		++nextInfo.nextHookLevel;
+		hookRecord(cmdAsParent->children(), nextInfo);
+	}
+
+	if(queryPool) { // timing 1
+		auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
+
+		if(timingBarrierAfter && !info.beginRenderPassCmd) {
+			// Make sure the timing query only captures the command itself,
+			// not stuff that comes after it
+			VkMemoryBarrier barrier {};
+			barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			dev.dispatch.CmdPipelineBarrier(cb,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0u,
+				1u, &barrier, 0u, nullptr, 0u, nullptr);
+		}
+	}
 
 	if(endXfb) {
 		dev.dispatch.CmdEndTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
-	}
-
-	auto parentCmd = dynamic_cast<const ParentCommand*>(&cmd);
-	auto nextInfo = info;
-	if(parentCmd) {
-		++nextInfo.nextHookLevel;
-
-		if(queryPool) {
-			// timing 0
-			auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-			dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
-		}
-
-		hookRecord(parentCmd->children(), nextInfo);
-	}
-
-	if(queryPool) {
-		if(!parentCmd) {
-			// timing 0
-			auto stage0 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-			dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, 0);
-		}
-
-		// timing 1
-		auto stage1 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-		dev.dispatch.CmdWriteTimestamp(this->cb, stage1, this->queryPool, 1);
 	}
 
 	// render pass split: rp2

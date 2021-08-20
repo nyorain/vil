@@ -112,7 +112,7 @@ void ImageViewer::display(Draw& draw) {
 			(io.MousePos.y - pos.y) / regH,
 		};
 
-		auto sfac = std::pow(1.05, io.MouseWheel);
+		auto sfac = std::pow(1.1, io.MouseWheel);
 
 		offset_.x -= moff.x;
 		offset_.y -= moff.y;

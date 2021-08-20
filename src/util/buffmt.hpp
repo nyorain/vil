@@ -3,7 +3,10 @@
 #include <fwd.hpp>
 #include <util/span.hpp>
 #include <util/bytes.hpp>
+#include <util/flags.hpp>
 #include <spirv-cross/spirv_cross.hpp>
+#include <optional>
+#include <string_view>
 
 namespace vil {
 

@@ -322,11 +322,15 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 
 	auto& cmd = vil::allocate<T>(cb, std::forward<Args>(args)...);
 
-	if constexpr(ST == SectionType::end || ST == SectionType::next) {
+	if constexpr(ST == SectionType::next) {
 		cb.endSection(&cmd);
 	}
 
 	cb.addCmd(cmd);
+
+	if constexpr(ST == SectionType::end) {
+		cb.endSection(&cmd);
+	}
 
 	if constexpr(ST == SectionType::begin || ST == SectionType::next) {
 		static_assert(std::is_convertible_v<T*, SectionCommand*>);
@@ -1798,6 +1802,10 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getCommandBuffer(commandBuffer);
 
+	// Create without SectionType::end, we end the section below
+	// manually if possible.
+	addCmd<EndDebugUtilsLabelCmd>(cb);
+
 	// See docs/debug-utils-label-nesting.md
 	// When the last section isn't a BeginDebugUtilsLabelCmd, we have to
 	// find the last one in the cb.section_ stack and mark it for pop.
@@ -1824,10 +1832,6 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 			++cb.record()->numPopLabels;
 		}
 	}
-
-	// Create without SectionType::end, we ended the section above
-	// manually if possible.
-	addCmd<EndDebugUtilsLabelCmd>(cb);
 
 	if(cb.dev->dispatch.CmdEndDebugUtilsLabelEXT) {
 		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(cb.handle());
