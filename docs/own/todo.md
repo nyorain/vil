@@ -12,6 +12,12 @@ urgent, bugs:
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
+- [ ] when the applications creates a resource with usage_exclusive
+	  and we overwrite it to concurrent, we modify the queue ownership
+	  transitions. But this breaks when queue ownership transition is combined
+	  with layout transition. The application will then do the same transition
+	  twice with our hooks. Not sure about proper solution yet, somehow
+	  filter out on of the transitions?
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
 - [ ] image viewer: fix display of HUGEx1 images
