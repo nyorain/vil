@@ -8,6 +8,15 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
+- [ ] instead of copy and cpu-formatting of texture values, we should
+      probably just dispatch a single compute shader invocation that samples
+	  the texture and writes the float4 output to a buffer.
+- [ ] We export dlg and swa symbols that we shouldn't export! See
+      nm -gDC --defined-only --numeric-sort libVkLayer_live_introspection.so | less
+	- [ ] similar reasoning: can we link C++ statically? Might fix the dota
+	      std::regex bug maybe it was something with the version of libstdc++?
+- [ ] higher-id descriptor sets sometimes incorrectly unbound, e.g. iro/atmosphere
+	- [ ] add unit test for this case.
 - [ ] figure out transform_feedback crashes in doom eternal
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise

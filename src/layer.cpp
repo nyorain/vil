@@ -106,6 +106,7 @@ void initSettings() {
 	checkSet(HandleDesc<VkBufferView>::wrap, "VIL_WRAP_BUFFER_VIEW");
 	checkSet(HandleDesc<VkDescriptorUpdateTemplate>::wrap, "VIL_WRAP_BUFFER_DESCRIPTOR_UPDATE_TEMPLATE");
 	checkSet(HandleDesc<VkImage>::wrap, "VIL_WRAP_IMAGE");
+	checkSet(HandleDesc<VkPipeline>::wrap, "VIL_WRAP_PIPELINE");
 }
 
 // Instance
@@ -164,7 +165,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// So we just trial-and-error to possibly bump up the version.
 	// When instance creation fails just turn it down to original again.
 	auto originalApiVersion = VK_API_VERSION_1_0;
-	auto ourApiVersion = VK_API_VERSION_1_2;
+	auto ourApiVersion = VK_API_VERSION_1_0;
 
 	VkApplicationInfo ourAppInfo {};
 	if(!nci.pApplicationInfo) {
@@ -506,6 +507,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CreateRayTracingPipelinesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetRayTracingCaptureReplayShaderGroupHandlesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetRayTracingShaderGroupStackSizeKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetRayTracingShaderGroupHandlesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 
 	// cb.hpp
 	VIL_DEV_HOOK(CreateCommandPool),

@@ -222,7 +222,7 @@ public:
 
 	const T& inner() const
 	{
-		return m_lockable;
+        return m_lockable;
 	}
 
 private:
@@ -544,13 +544,14 @@ public:
 
 	const T& inner() const
 	{
-		return m_lockable;
+        return m_lockable;
 	}
 
 private:
     T m_lockable;
     SharedLockableCtx m_ctx;
 };
+
 
 }
 

@@ -10,7 +10,7 @@
 #    define TRACY_API
 #  endif
 #else
-#  define TRACY_API __attribute__((visibility("default")))
+#  define TRACY_API /*__attribute__((visibility("default")))*/
 #endif
 
 #endif    // __TRACYAPI_H__

@@ -391,6 +391,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CopyAccelerationStructureKHR(
 	auto& dev = *src.dev;
 	auto& dst = get(dev, pInfo->src);
 
+	// TODO: actually copy data
+	dlg_error("TODO: implement host accelerationStructure copying");
+
 	auto fwd = *pInfo;
 	fwd.src = src.handle;
 	fwd.dst = dst.handle;

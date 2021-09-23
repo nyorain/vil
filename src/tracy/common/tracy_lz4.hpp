@@ -82,7 +82,7 @@
 */
 #ifndef LZ4LIB_VISIBILITY
 #  if defined(__GNUC__) && (__GNUC__ >= 4)
-#    define LZ4LIB_VISIBILITY __attribute__ ((visibility ("default")))
+#    define LZ4LIB_VISIBILITY /*__attribute__ ((visibility ("default")))*/
 #  else
 #    define LZ4LIB_VISIBILITY
 #  endif

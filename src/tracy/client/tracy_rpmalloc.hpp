@@ -18,8 +18,8 @@ namespace tracy
 {
 
 #if defined(__clang__) || defined(__GNUC__)
-# define RPMALLOC_EXPORT __attribute__((visibility("default")))
-# define RPMALLOC_ALLOCATOR 
+# define RPMALLOC_EXPORT /*__attribute__((visibility("default")))*/
+# define RPMALLOC_ALLOCATOR
 # define RPMALLOC_ATTRIB_MALLOC __attribute__((__malloc__))
 # if defined(__clang_major__) && (__clang_major__ < 4)
 # define RPMALLOC_ATTRIB_ALLOC_SIZE(size)

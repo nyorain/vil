@@ -551,7 +551,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		}
 
 		if(nci.pLibraryInfo) {
-			auto& copy = memScope.alloc<VkPipelineLibraryCreateInfoKHR>(1)[0];
+			auto& copy = *memScope.allocRaw<VkPipelineLibraryCreateInfoKHR>();
 			copy = *nci.pLibraryInfo;
 
 			auto libHandles = memScope.alloc<VkPipeline>(copy.libraryCount);
@@ -561,6 +561,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 			}
 
 			copy.pLibraries = libHandles.data();
+			nci.pLibraryInfo = &copy;
 		}
 	}
 
@@ -635,6 +636,18 @@ VKAPI_ATTR VkDeviceSize VKAPI_CALL GetRayTracingShaderGroupStackSizeKHR(
 	auto& pipe = get(device, pipeline);
 	return pipe.dev->dispatch.GetRayTracingShaderGroupStackSizeKHR(
 		pipe.dev->handle, pipe.handle, group, groupShader);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL GetRayTracingShaderGroupHandlesKHR(
+		VkDevice                                    device,
+		VkPipeline                                  pipeline,
+		uint32_t                                    firstGroup,
+		uint32_t                                    groupCount,
+		size_t                                      dataSize,
+		void*                                       pData) {
+	auto& pipe = get(device, pipeline);
+	return pipe.dev->dispatch.GetRayTracingShaderGroupHandlesKHR(
+		pipe.dev->handle, pipe.handle, firstGroup, groupCount, dataSize, pData);
 }
 
 } // namespace vil
