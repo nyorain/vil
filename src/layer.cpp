@@ -161,11 +161,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// See https://github.com/KhronosGroup/Vulkan-Loader/issues/51
 	auto nci = *ci;
 
-	// TODO: we can't call vkEnumerateInstanceVersion ourselves.
+	// NOTE: we can't call vkEnumerateInstanceVersion ourselves.
 	// So we just trial-and-error to possibly bump up the version.
 	// When instance creation fails just turn it down to original again.
 	auto originalApiVersion = VK_API_VERSION_1_0;
-	auto ourApiVersion = VK_API_VERSION_1_0;
+	auto ourApiVersion = VK_API_VERSION_1_2;
 
 	VkApplicationInfo ourAppInfo {};
 	if(!nci.pApplicationInfo) {

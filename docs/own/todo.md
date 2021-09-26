@@ -280,6 +280,8 @@ optimization:
 
 ---
 
+- [ ] implement "freeze on NaN/inf"
+- [ ] implement image histograms
 - [ ] (low prio but highly interesting) optionally capture callstacks for each command
       immediately jumping to the point the command was recorded sounds
 	  useful. Could build in support for vim and visual studio I guess.

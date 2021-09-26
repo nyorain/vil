@@ -401,10 +401,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", true);
 	auto enableTransformFeedback = checkEnvBinary("VIL_TRANSFORM_FEEDBACK", true);
 
-	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage && (
+	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage &&
+		fpPhdevFeatures2 && fpPhdevProps2 && (
 		(ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
 		hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));
 	auto hasTransformFeedbackApi = enableTransformFeedback &&
+		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
 
 	auto hasTimelineSemaphores = false;

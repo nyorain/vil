@@ -1,3 +1,5 @@
+- [x] device.cpp creation: handle case that vulkan12 is not available
+      and that VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2 was not enabled
 - [x] for debugging: track size of VkDeviceMemory objects created for
       CommandHook objects
 - [x] image viewer: fix layer selection
