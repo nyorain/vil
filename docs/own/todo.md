@@ -8,6 +8,8 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
+- [ ] Properly init/resize accel struct buffers on build.
+      See commandHook.cpp:1671
 - [ ] instead of copy and cpu-formatting of texture values, we should
       probably just dispatch a single compute shader invocation that samples
 	  the texture and writes the float4 output to a buffer.

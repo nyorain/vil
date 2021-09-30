@@ -1124,6 +1124,10 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 
 void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
 		OwnBuffer& dst, VkDeviceSize dstOffset, VkDeviceSize size) {
+	if(size == 0u) {
+		return;
+	}
+
 	auto& srcBuf = bufferAtLocked(dev, srcPtr);
 	auto srcOff = srcPtr - srcBuf.deviceAddress;
 	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
@@ -1664,6 +1668,8 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 			needsInit = !(std::get<AccelInstances>(dst.dst->data).buffer.buf);
 		}
 
+		// TODO: we don't always need this
+		needsInit = true;
 		if(needsInit) {
 			dlg_assert(cmd.buildRangeInfos[i].size() == srcBuildInfo.geometryCount);
 			initBufs(*dst.dst, srcBuildInfo, cmd.buildRangeInfos[i].data(), true);

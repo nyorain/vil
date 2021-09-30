@@ -16,7 +16,8 @@ namespace vil {
 AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address) {
 	assertOwnedOrShared(dev.mutex);
 	auto it = dev.accelStructAddresses.find(address);
-	dlg_assert(it != dev.accelStructAddresses.end());
+	dlg_assertm(it != dev.accelStructAddresses.end(),
+		"Couldn't find VkAccelerationStructure at address {}", address);
 	return nonNull(it->second);
 }
 
@@ -198,6 +199,9 @@ void initBufs(AccelStruct& accelStruct,
 			bufSize += rangeInfo.primitiveCount * sizeof(VkAccelerationStructureInstanceKHR);
 		}
 	}
+
+	// Make sure that we at least always create a dummy buffer
+	bufSize = std::max(bufSize, 4u);
 
 	std::byte* mapped {};
 	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
