@@ -1,3 +1,11 @@
+- [x] We export dlg and swa symbols that we shouldn't export! See
+      nm -gDC --defined-only --numeric-sort libVkLayer_live_introspection.so | less
+- [x] when the applications creates a resource with usage_exclusive
+	  and we overwrite it to concurrent, we modify the queue ownership
+	  transitions. But this breaks when queue ownership transition is combined
+	  with layout transition. The application will then do the same transition
+	  twice with our hooks. Not sure about proper solution yet, somehow
+	  filter out on of the transitions?
 - [x] device.cpp creation: handle case that vulkan12 is not available
       and that VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2 was not enabled
 - [x] for debugging: track size of VkDeviceMemory objects created for

@@ -44,7 +44,11 @@ struct AccelInstances {
 	};
 
 	std::vector<Instance> instances;
-	OwnBuffer buffer; // optional, only for readback when built on device
+	// optional, only for readback when built on device
+	// TODO: this leads to issues if AccelStruct is built multiple times
+	// in same submission (or otherwise in parallel). Fix that
+	// -> AccelStructState rework
+	OwnBuffer buffer;
 };
 
 // AccelerationStructure

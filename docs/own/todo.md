@@ -8,27 +8,15 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] Properly init/resize accel struct buffers on build.
-      See commandHook.cpp:1671
 - [ ] instead of copy and cpu-formatting of texture values, we should
       probably just dispatch a single compute shader invocation that samples
 	  the texture and writes the float4 output to a buffer.
-- [ ] We export dlg and swa symbols that we shouldn't export! See
-      nm -gDC --defined-only --numeric-sort libVkLayer_live_introspection.so | less
-	- [ ] similar reasoning: can we link C++ statically? Might fix the dota
-	      std::regex bug maybe it was something with the version of libstdc++?
 - [ ] higher-id descriptor sets sometimes incorrectly unbound, e.g. iro/atmosphere
 	- [ ] add unit test for this case.
 - [ ] figure out transform_feedback crashes in doom eternal
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
-- [ ] when the applications creates a resource with usage_exclusive
-	  and we overwrite it to concurrent, we modify the queue ownership
-	  transitions. But this breaks when queue ownership transition is combined
-	  with layout transition. The application will then do the same transition
-	  twice with our hooks. Not sure about proper solution yet, somehow
-	  filter out on of the transitions?
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
 - [ ] image viewer: fix display of HUGEx1 images
@@ -165,6 +153,8 @@ gui stuff
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
+- [ ] can we link C++ statically? Might fix the dota
+	  std::regex bug maybe it was something with the version of libstdc++?
 - [ ] (high prio) better pipeline/shader module display in resource viewer
       It's currently completely broken due to spirv-reflect removal
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
@@ -282,6 +272,8 @@ optimization:
 
 ---
 
+- [ ] Properly init/resize accel struct buffers on build.
+	  See ~commandHook.cpp:1671 (needsInit)
 - [ ] implement "freeze on NaN/inf"
 - [ ] implement image histograms
 - [ ] (low prio but highly interesting) optionally capture callstacks for each command

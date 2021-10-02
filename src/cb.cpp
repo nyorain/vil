@@ -616,6 +616,7 @@ void cmdBarrier(
 
 	cmd.srcStageMask = srcStageMask;
 	cmd.dstStageMask = dstStageMask;
+	cmd.recordQueueFamilyIndex = cb.pool().queueFamily;
 
 	cmd.images = allocSpan<Image*>(cb, cmd.imgBarriers.size());
 	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
@@ -625,14 +626,6 @@ void cmdBarrier(
 		auto& img = get(*cb.dev, imgb.image);
 		cmd.images[i] = &img;
 		useHandle(cb, cmd, img, imgb.newLayout);
-
-		// When the image was put into concurrent sharing mode by us,
-		// we have to make sure this does not actually define a queue
-		// family transition since those are not allowed for concurrent images
-		if(img.concurrentHooked) {
-			imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		}
 
 		imgb.image = img.handle;
 	}
@@ -645,11 +638,6 @@ void cmdBarrier(
 		auto& buf = get(*cb.dev, bufb.buffer);
 		cmd.buffers[i] = &buf;
 		useHandle(cb, cmd, buf);
-
-		if(buf.concurrentHooked) {
-			bufb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-			bufb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		}
 
 		bufb.buffer = buf.handle;
 	}
@@ -682,16 +670,12 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 
 	cmd.events = allocSpan<Event*>(cb, eventCount);
 	for(auto i = 0u; i < eventCount; ++i) {
-		auto& event = cb.dev->events.get(pEvents[i]);
+		auto& event = get(*cb.dev, pEvents[i]);
 		cmd.events[i] = &event;
 		useHandle(cb, cmd, event);
 	}
 
-	cb.dev->dispatch.CmdWaitEvents(cb.handle(), eventCount, pEvents,
-		srcStageMask, dstStageMask,
-		u32(cmd.memBarriers.size()), cmd.memBarriers.data(),
-		u32(cmd.bufBarriers.size()), cmd.bufBarriers.data(),
-		u32(cmd.imgBarriers.size()), cmd.imgBarriers.data());
+	cmd.record(*cb.dev, cb.handle());
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
@@ -715,11 +699,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 
 	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
 
-	cb.dev->dispatch.CmdPipelineBarrier(cb.handle(),
-		srcStageMask, dstStageMask, dependencyFlags,
-		u32(cmd.memBarriers.size()), cmd.memBarriers.data(),
-		u32(cmd.bufBarriers.size()), cmd.bufBarriers.data(),
-		u32(cmd.imgBarriers.size()), cmd.imgBarriers.data());
+	cmd.record(*cb.dev, cb.handle());
 }
 
 void cmdBeginRenderPass(CommandBuffer& cb,

@@ -1129,6 +1129,7 @@ void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
 	}
 
 	auto& srcBuf = bufferAtLocked(dev, srcPtr);
+	dlg_assert(srcBuf.deviceAddress);
 	auto srcOff = srcPtr - srcBuf.deviceAddress;
 	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
 }
@@ -1668,7 +1669,10 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 			needsInit = !(std::get<AccelInstances>(dst.dst->data).buffer.buf);
 		}
 
-		// TODO: we don't always need this
+		// TODO: we don't always need this. Not sure how to correctly handle it,
+		// we *sometimes* have to resize the buffer to make sure it can fit
+		// the new data. Maybe just always call initBufs and handle the logic
+		// in there? rename it to ensureBufSizes?
 		needsInit = true;
 		if(needsInit) {
 			dlg_assert(cmd.buildRangeInfos[i].size() == srcBuildInfo.geometryCount);
@@ -1714,6 +1718,39 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 
 				// copy vertices
 				dlg_assert(cmdHook.accelStructVertCopy_);
+
+				// make sure we can read it via copy
+				auto& vertBuf = bufferAtLocked(dev, srcTris.vertexData.deviceAddress);
+				dlg_assert(vertBuf.deviceAddress);
+
+				VkBufferMemoryBarrier barriers[2] = {};
+				barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+				barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barriers[0].buffer = vertBuf.handle;
+				barriers[0].srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+				barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+				barriers[0].size = srcTris.maxVertex * srcTris.vertexStride;
+				barriers[0].offset = srcTris.vertexData.deviceAddress - vertBuf.deviceAddress;
+
+				auto nbarriers = 1u;
+				if(srcTris.indexType != VK_INDEX_TYPE_NONE_KHR) {
+					dlg_assert(srcTris.indexData.deviceAddress);
+					auto& indBuf = bufferAtLocked(dev, srcTris.indexData.deviceAddress);
+					dlg_assert(indBuf.deviceAddress);
+
+					barriers[1] = barriers[0];
+					barriers[1].buffer = indBuf.handle;
+					barriers[1].size = indexSize(srcTris.indexType) * range.primitiveCount * 3;
+					barriers[1].offset = srcTris.indexData.deviceAddress - indBuf.deviceAddress;
+					++nbarriers;
+				}
+
+				dev.dispatch.CmdPipelineBarrier(cb,
+					VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0u,
+					0u, nullptr, nbarriers, barriers, 0u, nullptr);
+
 				// TODO: we can't assume this. But currently need it for
 				// the shader, would have to do work on raw bytes otherwise
 				// which is a pain.

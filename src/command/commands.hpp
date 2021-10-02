@@ -197,9 +197,22 @@ struct BarrierCmdBase : Command {
 	span<Image*> images;
 	span<Buffer*> buffers;
 
+	// NOTE: a bit hacky to store this information here but we need
+	// it to know whether family transitions are release or acquire.
+	// Should probably rather be passed to the record command
+	u32 recordQueueFamilyIndex {};
+
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void displayInspector(Gui& gui) const override;
 	Matcher doMatch(const BarrierCmdBase& rhs) const;
+
+	struct PatchedBarriers {
+		span<VkMemoryBarrier> memBarriers;
+		span<VkBufferMemoryBarrier> bufBarriers;
+		span<VkImageMemoryBarrier> imgBarriers;
+	};
+
+	PatchedBarriers patchedBarriers(ThreadMemScope& memScope) const;
 };
 
 struct WaitEventsCmd : BarrierCmdBase {

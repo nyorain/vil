@@ -1184,9 +1184,36 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 
 		imGuiText("{} geometries, {} total tris", tris.geometries.size(), triCount);
 
-		// TODO
+		// TODO: better display
 		auto& vv = gui_->cbGui().commandViewer().vertexViewer();
 		vv.displayTriangles(draw, tris, gui_->dt());
+
+		auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
+			ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
+		for(auto [i, geom] : enumerate(tris.geometries)) {
+			auto lbl = dlg::format("Geometry {}", i);
+			if(!ImGui::TreeNodeEx(lbl.c_str(), flags)) {
+				continue;
+			}
+
+			// TODO; store/show indices for better debugging?
+			auto nd = std::min<unsigned>(100u, geom.triangles.size());
+			for(auto tri : geom.triangles.subspan(0, nd)) {
+				ImGui::Bullet();
+				ImGui::SameLine();
+				imGuiText("{}", tri.a);
+
+				ImGui::Bullet();
+				ImGui::SameLine();
+				imGuiText("{}", tri.b);
+
+				ImGui::Bullet();
+				ImGui::SameLine();
+				imGuiText("{}", tri.c);
+
+				ImGui::Separator();
+			}
+		}
 	} else if(accelStruct.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
 		imGuiText("TODO: AABB info");
 	} else if(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {

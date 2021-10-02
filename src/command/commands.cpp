@@ -650,13 +650,14 @@ Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
 void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	ThreadMemScope memScope;
 	auto vkEvents = rawHandles(memScope, this->events);
+	auto [memb, bufb, imgb] = patchedBarriers(memScope);
+
 	dev.dispatch.CmdWaitEvents(cb,
 		u32(vkEvents.size()), vkEvents.data(),
 		this->srcStageMask, this->dstStageMask,
-		u32(this->memBarriers.size()), this->memBarriers.data(),
-		u32(this->bufBarriers.size()), this->bufBarriers.data(),
-		u32(this->imgBarriers.size()), this->imgBarriers.data());
-
+		u32(memb.size()), memb.data(),
+		u32(bufb.size()), bufb.data(),
+		u32(imgb.size()), imgb.data());
 }
 
 void WaitEventsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
@@ -685,13 +686,64 @@ Matcher WaitEventsCmd::match(const Command& base) const {
 }
 
 // BarrierCmd
+BarrierCmdBase::PatchedBarriers BarrierCmdBase::patchedBarriers(
+		ThreadMemScope& memScope) const {
+	PatchedBarriers ret;
+	ret.imgBarriers = memScope.copy(imgBarriers.data(), imgBarriers.size());
+	ret.bufBarriers = memScope.copy(bufBarriers.data(), bufBarriers.size());
+	ret.memBarriers = memScope.copy(memBarriers.data(), memBarriers.size());
+
+	for(auto i = 0u; i < ret.imgBarriers.size(); ++i) {
+		if(!images[i]->concurrentHooked) {
+			continue;
+		}
+
+		auto& ib = ret.imgBarriers[i];
+
+		// For queue family ownership transitions we need to ignore
+		// one of the layout transitions. We just choose to always ignore
+		// the acquire transition.
+		if(ib.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
+				ib.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
+				ib.srcQueueFamilyIndex != ib.dstQueueFamilyIndex) {
+			auto ignoreLayoutTransition =
+				ib.dstQueueFamilyIndex == this->recordQueueFamilyIndex;
+			if(ignoreLayoutTransition) {
+				// we know it's an acquire barrier and the layout
+				// transition was previously done
+				ib.oldLayout = ib.newLayout;
+			}
+		}
+
+		// ignore queue family ownership transition
+		ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	}
+
+	for(auto i = 0u; i < ret.bufBarriers.size(); ++i) {
+		if(!buffers[i]->concurrentHooked) {
+			continue;
+		}
+
+		auto& bb = ret.bufBarriers[i];
+
+		// ignore queue family ownership transition
+		bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	}
+
+	return ret;
+}
+
 void BarrierCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	ThreadMemScope ms;
+	auto [memb, bufb, imgb] = patchedBarriers(ms);
+
 	dev.dispatch.CmdPipelineBarrier(cb,
 		this->srcStageMask, this->dstStageMask, this->dependencyFlags,
-		u32(this->memBarriers.size()), this->memBarriers.data(),
-		u32(this->bufBarriers.size()), this->bufBarriers.data(),
-		u32(this->imgBarriers.size()), this->imgBarriers.data());
-
+		u32(memb.size()), memb.data(),
+		u32(bufb.size()), bufb.data(),
+		u32(imgb.size()), imgb.data());
 }
 
 void BarrierCmd::displayInspector(Gui& gui) const {

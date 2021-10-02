@@ -326,6 +326,47 @@ AABB3f bounds(span<const Vec4f> points, bool useW) {
 	return ret;
 }
 
+AABB3f bounds(const AccelTriangles::Geometry& tris) {
+	auto inf = std::numeric_limits<float>::infinity();
+	auto min = Vec3f{inf, inf, inf};
+	auto max = Vec3f{-inf, -inf, -inf};
+
+	for(auto& tri : tris.triangles) {
+		min = vec::cw::min(min, Vec3f(tri.a));
+		max = vec::cw::max(max, Vec3f(tri.a));
+
+		min = vec::cw::min(min, Vec3f(tri.b));
+		max = vec::cw::max(max, Vec3f(tri.b));
+
+		min = vec::cw::min(min, Vec3f(tri.c));
+		max = vec::cw::max(max, Vec3f(tri.c));
+	}
+
+	AABB3f ret;
+	ret.pos = 0.5f * (min + max);
+	ret.extent = 0.5f * (max - min);
+
+	return ret;
+}
+
+AABB3f bounds(const AccelTriangles& tris) {
+	auto inf = std::numeric_limits<float>::infinity();
+	auto min = Vec3f{inf, inf, inf};
+	auto max = Vec3f{-inf, -inf, -inf};
+
+	for(auto& geom : tris.geometries) {
+		auto b = bounds(geom);
+		min = vec::cw::min(min, b.pos - b.extent);
+		max = vec::cw::max(max, b.pos + b.extent);
+	}
+
+	AABB3f ret;
+	ret.pos = 0.5f * (min + max);
+	ret.extent = 0.5f * (max - min);
+
+	return ret;
+}
+
 // VertexViewer
 VertexViewer::~VertexViewer() {
 	if(!gui_) {
@@ -1400,6 +1441,11 @@ void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 }
 
 void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, float dt) {
+	if(ImGui::Button("Recenter")) {
+		AABB3f vertBounds = bounds(tris);
+		centerCamOnBounds(vertBounds);
+	}
+
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();

@@ -230,7 +230,9 @@ struct CommandHookRecord {
 	IntrusivePtr<CommandHookState> state {};
 	OwnBuffer dummyBuf {};
 
-	// accelStruct-related stuff
+	// AccelStruct-related stuff.
+	// We need to hook every CmdBuildAccelerationStructure, making sure
+	// we store the state the accelStruct is built with.
 	struct AccelStructBuild {
 		const Command* command {};
 
