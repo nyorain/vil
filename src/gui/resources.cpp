@@ -1225,10 +1225,17 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 
 			imGuiText("tableOffset: {}", ini.bindingTableOffset);
 			imGuiText("customIndex: {}", ini.customIndex);
-			imGuiText("mask: {}", ini.mask);
+			imGuiText("mask: {}{}", std::hex, u32(ini.mask));
 			imGuiText("flags: {}", vk::flagNames(VkGeometryInstanceFlagBitsKHR(ini.flags)));
 
-			// TODO: transform
+			imGuiText("transform:");
+			for(auto r = 0u; r < 3; ++r) {
+				imGuiText("{} {} {} {}",
+					ini.transform[r][0],
+					ini.transform[r][1],
+					ini.transform[r][2],
+					ini.transform[r][3]);
+			}
 		}
 
 		imGuiText("TODO: visualize instances");

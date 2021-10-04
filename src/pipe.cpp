@@ -516,7 +516,7 @@ u32 getSpvExecutionModel(VkShaderStageFlagBits stage) {
 		case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
 			return spv::ExecutionModelIntersectionKHR;
 		default:
-			dlg_error("Unsupported stage");
+			dlg_error("Unsupported stage {}", stage);
 			return spv::ExecutionModelFragment;
 	}
 }

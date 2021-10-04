@@ -1647,6 +1647,11 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 	auto& build = accelStructBuilds.emplace_back();
 	build.command = &cmd;
 
+	// TODO 1. Make sure all data has been written via memory barrier.
+	// The application might have set barriers that don't cover
+	// our case of reading data in compute shaders.
+	// Don't do the various small barriers below (and in performCopy)
+
 	// 2. initialize data
 	for(auto i = 0u; i < cmd.buildInfos.size(); ++i) {
 		auto& srcBuildInfo = cmd.buildInfos[i];

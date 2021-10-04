@@ -3008,6 +3008,10 @@ Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 	return m;
 }
 
+void TraceRaysCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	checkReplace(state.pipe, map);
+}
+
 void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdTraceRaysKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,

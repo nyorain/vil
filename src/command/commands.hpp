@@ -1169,6 +1169,7 @@ struct TraceRaysCmdBase : StateCmdBase {
 	const DescriptorState& boundDescriptors() const override { return state; }
 	const Pipeline* boundPipe() const override { return state.pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 struct TraceRaysCmd final : TraceRaysCmdBase {

@@ -482,10 +482,19 @@ VKAPI_ATTR void VKAPI_CALL GetAccelerationStructureBuildSizesKHR(
 		const uint32_t*                             pMaxPrimitiveCounts,
 		VkAccelerationStructureBuildSizesInfoKHR*   pSizeInfo) {
 	auto& dev = getDevice(device);
-	// we don't have to unwrap src/dst member of pBuildInfo since
-	// they are ignored (per spec)
+
+	// XXX: workaround for validation layer issue
+	// src/dst member of pBuildInfo are ignored (per spec) but the
+	// validation layer still complains if they are invalid so we simply
+	// always unset them. We don't unwrap them since they might contain
+	// garbage. This workaround should be removed eventually. We only
+	// have it since otherwise it looks like we forgot unwrapping somewhere.
+	auto cpy = *pBuildInfo;
+	cpy.srcAccelerationStructure = {};
+	cpy.dstAccelerationStructure = {};
+
 	return dev.dispatch.GetAccelerationStructureBuildSizesKHR(
-		dev.handle, buildType, pBuildInfo, pMaxPrimitiveCounts, pSizeInfo);
+		dev.handle, buildType, &cpy, pMaxPrimitiveCounts, pSizeInfo);
 }
 
 } // namespace vil

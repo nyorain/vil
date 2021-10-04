@@ -150,7 +150,7 @@ struct Device {
 	};
 
 	struct BufferAddressCmp {
-		using is_transparent = struct UghWtf {};
+		using is_transparent = struct UghWtf {}; // See cppreference is_transparent
 		bool operator()(const Buffer* a, const Buffer* b) const;
 		bool operator()(VkDeviceAddress a, const Buffer* b) const;
 		bool operator()(const Buffer* a, VkDeviceAddress b) const;
