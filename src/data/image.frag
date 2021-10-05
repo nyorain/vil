@@ -1,4 +1,6 @@
-#version 450 core
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
 
 layout(location = 0) in struct {
     vec4 color;
@@ -21,40 +23,8 @@ layout(push_constant) uniform PCR {
 	layout(offset = 32) float level;
 } pcr;
 
-#ifdef TEX_FORMAT_UINT
-	#define SamplerType(Dim) usampler##Dim
-#elif defined(TEX_FORMAT_INT)
-	#define SamplerType(Dim) isampler##Dim
-#elif defined(TEX_FORMAT_FLOAT)
-	#define SamplerType(Dim) sampler##Dim
-#else
-	#error No valid TEX_FORMAT definition
-#endif
-
-#ifdef TEX_TYPE_1D_ARRAY
-	layout(set = 0, binding = 0) uniform SamplerType(1DArray) sTexture;
-
-	vec4 sampleTex() {
-		return textureLod(sTexture, vec2(In.uv.x, pcr.layer), pcr.level);
-	}
-#elif defined(TEX_TYPE_2D_ARRAY)
-	layout(set = 0, binding = 0) uniform SamplerType(2DArray) sTexture;
-
-	vec4 sampleTex() {
-		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), pcr.level);
-	}
-// #elif TEX_TYPE_CUBE
-// TODO: cubearray?
-// layout(set = 0, binding = 0) uniform samplerCube sTexture;
-#elif defined(TEX_TYPE_3D)
-	layout(set = 0, binding = 0) uniform SamplerType(3D) sTexture;
-
-	vec4 sampleTex() {
-		return textureLod(sTexture, vec3(In.uv.xy, pcr.layer), pcr.level);
-	}
-#else
-	#error No valid TEX_TYPE definition
-#endif
+#define SAMPLE_TEX_BINDING 0
+#include "sample.glsl"
 
 vec3 remap(vec3 val, float oldLow, float oldHigh, float newLow, float newHigh) {
 	vec3 t = (val - oldLow) / (oldHigh - oldLow);
@@ -62,7 +32,7 @@ vec3 remap(vec3 val, float oldLow, float oldHigh, float newLow, float newHigh) {
 }
 
 void main() {
-	vec4 texCol = sampleTex();
+	vec4 texCol = sampleTex(vec3(In.uv, pcr.layer), pcr.level);
 	texCol.rgb = remap(texCol.rgb, pcr.valMin, pcr.valMax, 0, 1);
 
 	texCol.r *= float((pcr.flags & flagMaskR) != 0);

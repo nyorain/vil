@@ -7,10 +7,20 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 - gui improvement: remove flickering data and stuff, allow to get
   texel values in command viewer
 
-urgent, bugs:
+new:
+- [ ] for images captured in commandHook, we might be able to use
+      that image when drawing the gui even though the associated submission
+	  hasn't finished yet (chained via semaphore).
+	  Reducing latency, effectively having 0 frames
+	  latency between rendered frame and debug gui anymore. Investigate.
+	  (For buffers this isn't possible, we need the cpu processing for
+	  formatting & text rendering)
 - [ ] instead of copy and cpu-formatting of texture values, we should
       probably just dispatch a single compute shader invocation that samples
 	  the texture and writes the float4 output to a buffer.
+	  See readTex.comp
+
+urgent, bugs:
 - [ ] higher-id descriptor sets sometimes incorrectly unbound, e.g. iro/atmosphere
 	- [ ] add unit test for this case.
 - [ ] figure out transform_feedback crashes in doom eternal
@@ -272,10 +282,11 @@ optimization:
 
 ---
 
+- [ ] support multiple possible layouts (including scalar!) in bufparser
 - [ ] Properly init/resize accel struct buffers on build.
 	  See ~commandHook.cpp:1671 (needsInit)
 - [ ] implement "freeze on NaN/inf"
-- [ ] implement image histograms
+- [ ] implement image histograms (probably best like in PIX)
 - [ ] (low prio but highly interesting) optionally capture callstacks for each command
       immediately jumping to the point the command was recorded sounds
 	  useful. Could build in support for vim and visual studio I guess.

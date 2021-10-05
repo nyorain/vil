@@ -123,6 +123,20 @@ dep_swa = dependency('swa',
 		'with-kms=disabled'
 	])
 
+# spvm
+spvm_src = files(
+	'src/spvm/context.c',
+	'src/spvm/result.c',
+	'src/spvm/state.c',
+	'src/spvm/types.c',
+	'src/spvm/value.c',
+	'src/spvm/image.c',
+	'src/spvm/program.c',
+	'src/spvm/opcode_setup.c',
+	'src/spvm/opcode_execute.c',
+	'src/spvm/ext/GLSL450.c',
+)
+
 src = files(
 	# own meta sources & util
 	'src/layer.cpp',
@@ -326,12 +340,26 @@ if not with_win32 or not with_tracy
 	pch = 'src/pch.hpp'
 endif
 
+lib_spvm = []
+static_library(
+	'spvm',
+	spvm_src,
+	gnu_symbol_visibility: 'hidden',
+	include_directories: inc,
+	c_args: args + [
+		'-Wno-unused-parameter',
+		'-Wno-unused-variable',
+		'-Wno-sign-compare',
+	],
+)
+
 vil_layer = shared_library(
 	'VkLayer_live_introspection',
 	[src, spv],
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
+	link_with: lib_spvm,
 	cpp_args: args + layer_args,
 	install: true,
 	cpp_pch: pch,

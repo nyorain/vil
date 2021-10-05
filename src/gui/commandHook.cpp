@@ -260,6 +260,29 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 }
 
+bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
+	dlg_assert(descriptorCopies.empty() || record.dsState);
+	if(!descriptorCopies.empty() && record.dsState) {
+		dlg_assert(!record.hcommand.empty());
+		auto* cmd = record.hcommand.back();
+		const DescriptorState* dsState = getDsState(*cmd);
+		auto& dsSnapshot = record.record->lastDescriptorState;
+
+		for(auto [setID, bindingID, elemID, _] : descriptorCopies) {
+			dlg_assert(setID < dsState->descriptorSets.size());
+			auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
+			dlg_assert(it != dsSnapshot.states.end());
+			auto& currDS = nonNull(it->second);
+
+			if(!copyableDescriptorSame(currDS, *record.dsState, bindingID, elemID)) {
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data) {
 	dlg_assert(hooked.state() == CommandBuffer::State::executable);
@@ -339,8 +362,6 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	}
 
 	if(foundHookRecord) {
-		bool usable = true;
-
 		if(hookNeededForCmd) {
 			dlg_check({
 				// Before calling find, we need to unset the invalidated handles from the
@@ -372,29 +393,12 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		// Not possible to reuse the hook-recorded cb when the command
 		// buffer uses any update_after_bind descriptors that changed.
 		// We therefore compare them.
-		dlg_assert(!copyDS || foundHookRecord->dsState);
-		if(copyDS && foundHookRecord->dsState && hookNeededForCmd) {
-			auto [setID, bindingID, elemID, _] = *copyDS;
-
-			dlg_assert(!foundHookRecord->hcommand.empty());
-			auto* cmd = foundHookRecord->hcommand.back();
-			const DescriptorState* dsState = getDsState(*cmd);
-
-			auto& dsSnapshot = record.lastDescriptorState;
-			dlg_assert(setID < dsState->descriptorSets.size());
-			auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
-
-			dlg_assert(it != dsSnapshot.states.end());
-			auto& currDS = nonNull(it->second);
-
-			if(!copyableDescriptorSame(currDS, *foundHookRecord->dsState, bindingID, elemID)) {
-				usable = false;
-				invalidate(*foundHookRecord);
-				foundHookRecord = nullptr;
-			}
+		if(hookNeededForCmd && copiedDescriptorChanged(*foundHookRecord)) {
+			invalidate(*foundHookRecord);
+			foundHookRecord = nullptr;
 		}
 
-		if(usable) {
+		if(foundHookRecord) {
 			data.reset(new CommandHookSubmission(*foundHookRecord, subm));
 			return foundHookRecord->cb;
 		}
@@ -473,8 +477,8 @@ void CommandHook::unsetHookOps(bool doQueryTime) {
 	this->copyXfb = false;
 	this->queryTime = doQueryTime;
 	this->copyIndirectCmd = false;
-	this->copyAttachment = {};
-	this->copyDS = {};
+	this->attachmentCopies.clear();
+	this->descriptorCopies.clear();
 	this->copyTransferSrc = false;
 	this->copyTransferDst = false;
 	this->transferIdx = 0u;
@@ -597,7 +601,11 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	}
 
 	auto& dev = *record->dev;
+	auto& hook = *dev.commandHook;
+
 	state.reset(new CommandHookState());
+	state->copiedAttachments.resize(hook.attachmentCopies.size());
+	state->copiedDescriptors.resize(hook.descriptorCopies.size());
 
 	// Find out if final hooked command is inside render pass
 	auto preEnd = hcommand.end() - 1;
@@ -609,24 +617,31 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		}
 	}
 
+	// some operations (index/vertex/attachment) copies only make sense
+	// inside a render pass.
 	dlg_assert(info.beginRenderPassCmd ||
-		(!hook->copyVertexBuffers && !hook->copyIndexBuffers && !hook->copyAttachment));
+		(!hook.copyVertexBuffers &&
+		 !hook.copyIndexBuffers &&
+		 hook.attachmentCopies.empty()));
 
+	// when the hooked command is inside a render pass and we need to perform
+	// operations (e.g. copies) not possible while inside a render pass,
+	// we have to split the render pass around the selected command.
 	info.splitRenderPass = info.beginRenderPassCmd &&
-		(hook->copyVertexBuffers ||
-		 hook->copyIndexBuffers ||
-		 hook->copyAttachment ||
-		 hook->copyDS ||
-		 hook->copyIndirectCmd ||
-		 (hook->copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
+		(hook.copyVertexBuffers ||
+		 hook.copyIndexBuffers ||
+		 !hook.attachmentCopies.empty() ||
+		 !hook.descriptorCopies.empty() ||
+		 hook.copyIndirectCmd ||
+		 (hook.copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
 
 	if(info.splitRenderPass) {
 		auto& rp = *info.beginRenderPassCmd->rp;
 
-		// TODO: we could likely just directly support this
+		// TODO: we could likely just directly support this (with exception
+		// of transform feedback maybe)
 		if(hasChain(rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) {
-			state->errorMessage = "Splitting multiview renderpass not implemented";
-			dlg_trace(state->errorMessage);
+			dlg_warn("Splitting multiview renderpass not implemented");
 			info.splitRenderPass = false;
 		}
 	}
@@ -647,12 +662,11 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		// games. Would need extensive testing.
 		// This case should only happen anyways when a resolve attachments
 		// is used later on (in specific ways, i.e. written and then read
-		// or the resolve source written to). Niche feature, looking forward
-		// to the reported issue in 5 years.
+		// or the resolve source written to). Niche feature, am already
+		// looking forward to the reported issue in 5 years.
 		if(!splittable(desc, info.hookedSubpass)) {
 			info.splitRenderPass = false;
-			state->errorMessage = "Can't split render pass (due to resolve attachments)";
-			dlg_trace(state->errorMessage);
+			dlg_warn("Can't split render pass (due to resolve attachments)");
 		} else {
 			auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
 			rp0 = create(dev, rpi0);
@@ -940,14 +954,13 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		VkImageLayout srcLayout, const VkImageSubresourceRange& srcSubres,
-		std::string& errorMessage, u32 srcQueueFam) {
+		u32 srcQueueFam) {
 	if(!src.hasTransferSrc) {
 		// There are only very specific cases where this can happen,
 		// we could work around some of them (e.g. transient
 		// attachment images or swapchain images that don't
 		// support transferSrc).
-		errorMessage = "Can't display image copy; original can't be copied";
-		dlg_trace(errorMessage);
+		dlg_warn("Can't display image copy; original can't be copied");
 		return;
 	}
 
@@ -967,7 +980,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	auto success = dst.init(dev, src.ci.format, extent, srcSubres.layerCount,
 		srcSubres.levelCount, srcSubres.aspectMask, srcQueueFam);
 	if(!success) {
-		errorMessage = "Can't copy image, see log output";
+		dlg_warn("Initializing image copy failed");
 		return;
 	}
 
@@ -1142,26 +1155,25 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 	performCopy(dev, cb, src, offset, dst, 0, size);
 }
 
-void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
+void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info,
+		const CommandHook::DescriptorCopy& copyDesc,
+		CommandHookState::CopiedDescriptor& dst) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyDs");
 
 	const DescriptorState* dsState = getDsState(bcmd);
 	if(!dsState) {
-		state->errorMessage = "Unsupported descriptor command";
-		dlg_error("{}", state->errorMessage);
-		hook->copyDS = {};
+		dlg_error("Copying descriptor binding failed: Unsupported descriptor command");
 		return;
 	}
 
-	auto [setID, bindingID, elemID, _] = *hook->copyDS;
+	auto [setID, bindingID, elemID, _] = copyDesc;
 
 	// NOTE: we have to check for correct sizes here since the
 	// actual command might have changed (for an updated record)
 	// and the selected one not valid anymore.
 	if(setID >= dsState->descriptorSets.size()) {
-		dlg_trace("setID out of range");
-		hook->copyDS = {};
+		dlg_error("setID out of range");
 		return;
 	}
 
@@ -1170,14 +1182,12 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 	auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
 	if(it == dsSnapshot.states.end()) {
 		dlg_error("Could not find descriptor in snapshot??");
-		hook->copyDS = {};
 		return;
 	}
 
 	auto& ds = nonNull(it->second);
 	if(bindingID >= ds.layout->bindings.size()) {
 		dlg_trace("bindingID out of range");
-		hook->copyDS = {};
 		return;
 	}
 
@@ -1191,14 +1201,11 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		// somehow and when one of them is destroyed, wait for the associated
 		// hooked submission. No way around this I guess.
 		dlg_trace("Trying to read content of UPDATE_UNUSED_WHILE_PENDING descriptor");
-		state->errorMessage = "Can't read UPDATE_UNUSED_WHILE_PENDING descriptors at the moment";
-		hook->copyDS = {};
 		return;
 	}
 
 	if(elemID >= descriptorCount(*it->second, bindingID)) {
 		dlg_trace("elemID out of range");
-		hook->copyDS = {};
 		return;
 	}
 
@@ -1213,8 +1220,6 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 			dlg_assert(imgView);
 			dlg_assert(imgView->img);
 			if(imgView->img) {
-				auto& dst = state->dsCopy.emplace<CopiedImage>();
-
 				// We have to handle the special case where a renderpass
 				// attachment is bound in a descriptor set (e.g. as
 				// input attachment). In that case, it will be
@@ -1234,14 +1239,14 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 
 				// TODO: select exact layer/mip in view range via gui
 				auto subres = imgView->ci.subresourceRange;
-				initAndCopy(dev, cb, dst, *imgView->img, layout, subres,
-					state->errorMessage, record->queueFamily);
+				auto& dstImg = dst.data.emplace<CopiedImage>();
+				initAndCopy(dev, cb, dstImg, *imgView->img, layout, subres,
+					record->queueFamily);
 			}
 		} else {
 			// We shouldn't land here at all, we catch that case when
 			// updting the hook in CommandViewer
-			state->errorMessage = "Just a sampler bound";
-			dlg_error(state->errorMessage);
+			dlg_error("Requested descriptor binding copy for sampler");
 		}
 	} else if(cat == DescriptorCategory::buffer) {
 		auto& elem = buffers(*it->second, bindingID)[elemID];
@@ -1263,8 +1268,8 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		}
 		auto size = std::min(maxBufCopySize, range);
 
-		auto& dst = state->dsCopy.emplace<OwnBuffer>();
-		initAndCopy(dev, cb, dst, 0u, nonNull(elem.buffer),
+		auto& dstBuf = dst.data.emplace<OwnBuffer>();
+		initAndCopy(dev, cb, dstBuf, 0u, nonNull(elem.buffer),
 			elem.offset, size);
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
@@ -1273,17 +1278,33 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info) {
 		// dlg_assert(elem.bufferView->buffer);
 		// copyBuffer(dst, elem.bufferView->buffer->handle,
 		// 	elem.bufferView->ci.offset, elem.bufferView->ci.range);
-		state->errorMessage = "BufferView ds copy unimplemented";
-		dlg_error(state->errorMessage);
+		dlg_error("BufferView ds copy unimplemented");
 	} else if(cat == DescriptorCategory::inlineUniformBlock) {
 		// nothing to copy, data statically bound in state.
+		// We shouldn't land here at all, we catch that case when
+		// updting the hook in CommandViewer
+		dlg_error("Requested descriptor binding copy for inlineUniformBlock");
 	} else if(cat == DescriptorCategory::accelStruct) {
 		// TODO: do we need to copy acceleration structures?
 		// If we ever change this here, also change copyableDescriptorSame
+		//
+		// What we need to do here is this (-> AccelStructState rework):
+		// Copy a ref ptr to the current state of the used AccelStruct.
+		// That state should take into account all commands previously
+		// executed in this submission or from other submissions to the
+		// same queue. But it also needs to consider other queues:
+		// All submissions that have already finished on other queues
+		// or are chained to this submission. While already here we could
+		// make sure that there aren't any non-finished submissions to other
+		// queues that are building the accelStruct and are not chained
+		// to this submission. That would be a sync hazard and undefined anyways.
+	} else {
+		dlg_error("Unimplemented");
 	}
 }
 
-void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID) {
+void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID,
+		CommandHookState::CopiedAttachment& dst) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyAttachment");
 
@@ -1291,28 +1312,27 @@ void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID) {
 	auto& fb = nonNull(info.beginRenderPassCmd->fb);
 
 	if(attID >= fb.attachments.size()) {
-		state->errorMessage = "attachment out of range";
-		dlg_trace("copyAttachment {} out of range ({})", attID, fb.attachments.size());
-		hook->copyAttachment = {};
-	} else {
-		auto& imageView = fb.attachments[attID];
-		dlg_assert(imageView);
-		dlg_assert(imageView->img);
-		auto* image = imageView->img;
-
-		if(!image) {
-			// NOTE: this should not happen at all, not a regular error.
-			dlg_error("ImageView has no associated image");
-		} else {
-			auto& srcImg = *image;
-			auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
-
-			// TODO: select exact layer/mip in view range via gui
-			auto& subres = imageView->ci.subresourceRange;
-			initAndCopy(dev, cb, state->attachmentCopy, srcImg, layout, subres,
-				state->errorMessage, record->queueFamily);
-		}
+		dlg_error("copyAttachment {} out of range ({})", attID, fb.attachments.size());
+		return;
 	}
+
+	auto& imageView = fb.attachments[attID];
+	dlg_assert(imageView);
+	dlg_assert(imageView->img);
+	auto* image = imageView->img;
+
+	if(!image) {
+		dlg_error("ImageView has no associated image");
+		return;
+	}
+
+	auto& srcImg = *image;
+	auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
+
+	// TODO: select exact layer/mip in view range via gui
+	auto& subres = imageView->ci.subresourceRange;
+	initAndCopy(dev, cb, dst.data, srcImg, layout, subres,
+		record->queueFamily);
 }
 
 VkImageSubresourceRange fullSubresRange(const Image& img) {
@@ -1386,7 +1406,7 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 		if(img) {
 			auto [src, layout, subres] = *img;
 			initAndCopy(dev, cb, state->transferImgCopy, *src,
-				layout, subres, state->errorMessage, record->queueFamily);
+				layout, subres, record->queueFamily);
 		} else if(buf) {
 			auto [src, offset, size] = *buf;
 			if(copyFullTransferBuffer) {
@@ -1450,7 +1470,7 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 		if(img) {
 			auto [src, layout, subres] = *img;
 			initAndCopy(dev, cb, state->transferImgCopy, *src,
-				layout, subres, state->errorMessage, record->queueFamily);
+				layout, subres, record->queueFamily);
 		} else if(buf) {
 			auto [src, offset, size] = *buf;
 			if(copyFullTransferBuffer) {
@@ -1518,19 +1538,22 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 			performCopy(dev, cb, nonNull(cmd->buffer), cmd->offset,
 				state->indirectCopy, 4u, cmd->maxDrawCount * cmdSize);
 		} else {
-			state->errorMessage = "Unsupported indirect command";
-			dlg_warn(state->errorMessage);
+			dlg_error("Unsupported indirect command");
 		}
 	}
 
-	// attachment
-	if(hook->copyAttachment && hook->copyAttachment->before) {
-		copyAttachment(info, hook->copyAttachment->id);
+	// attachments
+	for(auto [i, ac] : enumerate(hook->attachmentCopies)) {
+		if(ac.before) {
+			copyAttachment(info, ac.id, state->copiedAttachments[i]);
+		}
 	}
 
 	// descriptor state
-	if(hook->copyDS && hook->copyDS->before) {
-		copyDs(bcmd, info);
+	for(auto [i, dc] : enumerate(hook->descriptorCopies)) {
+		if(dc.before) {
+			copyDs(bcmd, info, dc, state->copiedDescriptors[i]);
+		}
 	}
 
 	auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd);
@@ -1596,14 +1619,18 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info)
 			0, 1, &memBarrier, 0, nullptr, 0, nullptr);
 	}
 
-	// attachment
-	if(hook->copyAttachment && !hook->copyAttachment->before) {
-		copyAttachment(info, hook->copyAttachment->id);
+	// attachments
+	for(auto [i, ac] : enumerate(hook->attachmentCopies)) {
+		if(!ac.before) {
+			copyAttachment(info, ac.id, state->copiedAttachments[i]);
+		}
 	}
 
 	// descriptor state
-	if(hook->copyDS && !hook->copyDS->before) {
-		copyDs(bcmd, info);
+	for(auto [i, dc] : enumerate(hook->descriptorCopies)) {
+		if(!dc.before) {
+			copyDs(bcmd, info, dc, state->copiedDescriptors[i]);
+		}
 	}
 
 	// transfer

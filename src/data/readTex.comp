@@ -1,0 +1,21 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
+
+layout(set = 0, binding = 0) buffer Dst {
+	// TODO: this will truncate for 64-bit texture formats.
+	// We need 64-bit shader type support to correctly represent that.
+	vec4 outResult;
+};
+
+layout(push_constant) uniform PCR {
+	ivec3 coords;
+	int level;
+} pcr;
+
+#define SAMPLE_TEX_BINDING 1
+#include "sample.glsl"
+
+void main() {
+	outResult = fetchTex(pcr.coords, pcr.level);
+}

@@ -467,7 +467,8 @@ unsigned align(const Type& t, BufferLayout bl) {
 		case Type::typeUint:
 		case Type::typeInt: {
 			auto vec = t.vecsize;
-			if(bl == BufferLayout::std140 && vec == 3u) {
+			// For std140 *and* std430, vec3 has a 16-byte alignment
+			if((bl == BufferLayout::std140 || bl == BufferLayout::std430) && vec == 3u) {
 				vec = 4u;
 			}
 			return vec * t.width / 8u;

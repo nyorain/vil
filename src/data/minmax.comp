@@ -1,0 +1,51 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x_id = 0, local_size_y_id = 1) in;
+
+layout(push_constant) uniform PCR {
+	int level;
+} pcr;
+
+layout(set = 0, binding = 0) buffer Dst {
+	uvec3 outMin;
+	uvec3 outMax;
+};
+
+#define SAMPLE_TEX_BINDING 1
+#include "sample.glsl"
+
+// val >  0 => most significant bit of returned uint will be 1
+// val <= 0 => most significant bit of returned uint will be 0
+uint floatToUintOrdered(float val) {
+	uint r = floatBitsToUint(val);
+	if((r & (1u << 31)) == 0) {
+		// val is positive
+		return r ^ 0x80000000u;
+	} else {
+		// val is negative
+		return r ^ 0xFFFFFFFFu;
+	}
+}
+
+void main() {
+	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
+	if(!coordsInside(coords, pcr.level)) {
+		return;
+	}
+
+	vec4 col = fetchTex(coords, pcr.level);
+
+	// TODO: could speed this up with subgroup ballot
+	// so we only do atomic instructions once per subgroup
+
+	for(uint i = 0u; i < 3; ++i) {
+		// atomic instructions are only allowed on uints in core vulkan/glsl.
+		// it's possible to transform floats into a uints while keeping
+		// them ordered.
+		uint v = floatToUintOrdered(col[i]);
+		atomicMin(outMin[i], v);
+		atomicMax(outMax[i], v);
+	}
+}

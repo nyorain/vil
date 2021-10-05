@@ -40,42 +40,7 @@ struct CopiedImage {
 	~CopiedImage();
 };
 
-// NOTE: in most cases (except for xfb) we don't actually need OwnBuffer
-// itself and just the cpu data. The mapped data *must not* be used on cpu
-// since the state might have an active gpu-side writer submission.
-struct CommandHookState {
-	// We need a reference count here since this object is conceptually owned by
-	// CommandRecord but may be read by the gui even when the record
-	// was already destroyed (e.g. because it was replaced and all submissions
-	// have finished).
-	u32 refCount {};
-
-	// Copy of the selected viewed descriptor set
-	std::variant<std::monostate, CopiedImage, OwnBuffer> dsCopy;
-	u64 neededTime {u64(-1)}; // time needed for the given command
-
-	// For indirect commands: holds a copy of the indirect command(s)
-	u32 indirectCommandCount {};
-	OwnBuffer indirectCopy {};
-
-	// Only for draw commands
-	std::vector<OwnBuffer> vertexBufCopies {}; // draw cmd: Copy of all vertex buffers
-	OwnBuffer indexBufCopy {}; // draw cmd: Copy of index buffer
-	OwnBuffer transformFeedback {}; // draw cmd: position output of vertex stage
-
-	CopiedImage attachmentCopy {}; // Copy of selected attachment
-
-	// Only for transfer commands
-	OwnBuffer transferBufCopy {};
-	CopiedImage transferImgCopy {};
-
-	// When a requested resource cannot be retrieved, this holds the reason.
-	// TODO: kinda messy, should likely be provided per-resource
-	std::string errorMessage;
-
-	CommandHookState();
-	~CommandHookState();
-};
+struct CommandHookState;
 
 // Commandbuffer hook that allows us to forward a modified version
 // of this command buffer down the chain. Only called during submission,
@@ -110,8 +75,8 @@ public:
 	bool copyIndexBuffers {};
 	bool copyXfb {}; // transform feedback
 	bool copyIndirectCmd {};
-	std::optional<DescriptorCopy> copyDS;
-	std::optional<AttachmentCopy> copyAttachment; // only for cmd inside renderpass
+	std::vector<DescriptorCopy> descriptorCopies;
+	std::vector<AttachmentCopy> attachmentCopies; // only for cmd inside renderpass
 	bool queryTime {};
 
 	// transfer
@@ -166,7 +131,14 @@ public:
 	const auto& dsState() const { return dsState_; }
 
 private:
+	// Initializes the pipelines and data needed for acceleration
+	// structure copies
 	void initAccelStructCopy(Device& dev);
+
+	// Checks whether the copied descriptors in the associated
+	// record have changed (via update-after-bind) since the hooked
+	// record was created.
+	bool copiedDescriptorChanged(const CommandHookRecord&);
 
 private:
 	Device* dev_ {};
@@ -183,6 +155,43 @@ private:
 	// pipelines needed for the acceleration structure build copy
 	VkPipelineLayout accelStructPipeLayout_ {};
 	VkPipeline accelStructVertCopy_ {};
+};
+
+// Collection of data we got out of a submission/command.
+struct CommandHookState {
+	struct CopiedDescriptor {
+		std::variant<std::monostate, CopiedImage, OwnBuffer> data;
+	};
+
+	struct CopiedAttachment {
+		CopiedImage data;
+	};
+
+	// We need a reference count here since this object is conceptually owned by
+	// CommandRecord but may be read by the gui even when the record
+	// was already destroyed (e.g. because it was replaced and all submissions
+	// have finished).
+	u32 refCount {};
+	u64 neededTime {u64(-1)}; // time needed for the given command
+
+	std::vector<CopiedDescriptor> copiedDescriptors;
+	std::vector<CopiedAttachment> copiedAttachments;
+
+	// For indirect commands: holds a copy of the indirect command(s)
+	u32 indirectCommandCount {};
+	OwnBuffer indirectCopy {};
+
+	// Only for draw commands
+	std::vector<OwnBuffer> vertexBufCopies {}; // draw cmd: Copy of all vertex buffers
+	OwnBuffer indexBufCopy {}; // draw cmd: Copy of index buffer
+	OwnBuffer transformFeedback {}; // draw cmd: position output of vertex stage
+
+	// Only for transfer commands
+	OwnBuffer transferBufCopy {};
+	CopiedImage transferImgCopy {};
+
+	CommandHookState();
+	~CommandHookState();
 };
 
 // Is kept alive only as long as the associated Record is referencing this
@@ -285,8 +294,11 @@ private:
 	void hookRecord(Command* cmdChain, const RecordInfo&);
 
 	void copyTransfer(Command& bcmd, const RecordInfo&);
-	void copyDs(Command& bcmd, const RecordInfo&);
-	void copyAttachment(const RecordInfo&, unsigned id);
+	void copyDs(Command& bcmd, const RecordInfo&,
+		const CommandHook::DescriptorCopy&,
+		CommandHookState::CopiedDescriptor& dst);
+	void copyAttachment(const RecordInfo&, unsigned id,
+		CommandHookState::CopiedAttachment& dst);
 	void beforeDstOutsideRp(Command&, const RecordInfo&);
 	void afterDstOutsideRp(Command&, const RecordInfo&);
 

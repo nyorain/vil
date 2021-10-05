@@ -3,29 +3,42 @@ spv = []
 glslang = find_program('glslangValidator', required: false)
 
 if glslang.found()
+	imgtable = {
+		'1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_FLOAT'],
+		'u1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_UINT'],
+		'i1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_INT'],
+
+		'2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_FLOAT'],
+		'u2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_UINT'],
+		'i2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_INT'],
+
+		'3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_FLOAT'],
+		'u3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_UINT'],
+		'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
+	}
+
 	overlay_shaders = {
+		# the main imgui shaders used for text, shapes
 		'gui.frag': { '': [] },
 		'gui.vert': { '': [] },
-		'image.frag': {
-			'1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_FLOAT'],
-			'u1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_UINT'],
-			'i1DArray.': ['-DTEX_TYPE_1D_ARRAY', '-DTEX_FORMAT_INT'],
-
-			'2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_FLOAT'],
-			'u2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_UINT'],
-			'i2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_INT'],
-
-			'3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_FLOAT'],
-			'u3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_UINT'],
-			'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
-		},
+		# image.frag for rendering images
+		'image.frag': imgtable,
+		# rendering transparent image background
+		'imagebg.vert': {'': [] },
+		'imagebg.frag': {'': [] },
+		# readTex.comp for reading texture values
+		'readTex.comp': imgtable,
+		# vertex viewer
 		'frustum.vert': {'': [] },
 		'vertices.vert': {'': [] },
 		'vertices.frag': {'': [] },
+		# gui background blur
 		'blur.comp': {'': [] },
+		# accelStruct building
 		'accelStructVertices.comp': {'': [] },
-		'imagebg.vert': {'': [] },
-		'imagebg.frag': {'': [] },
+		# image analyze shaders
+		'histogram.comp': imgtable,
+		'minmax.comp': imgtable,
 	}
 
 	foreach file, configs : overlay_shaders

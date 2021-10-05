@@ -864,12 +864,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 	dlg_assert_or(cmd.state.pipe, return);
 	if(state.vertexBufCopies.size() < cmd.state.pipe->vertexBindings.size()) {
-		if(!state.errorMessage.empty()) {
-			imGuiText("Error: {}", state.errorMessage);
-		} else {
-			ImGui::Text("Error: not enough vertex buffers bound");
-		}
-
+		ImGui::Text("Error: not enough vertex buffers bound. See log output");
 		return;
 	}
 
@@ -885,7 +880,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 	if(!vertStage) {
 		// TODO: yeah this can happen with mesh shaders now
-		ImGui::Text("Grahpics Pipeline has no vertex stage :o");
+		ImGui::Text("Error: Grahpics Pipeline has no vertex stage :o");
 		return;
 	}
 
@@ -1189,12 +1184,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		imGuiText("Error: couldn't inject transform feedback code to shader");
 		return;
 	} else if(!state.transformFeedback.size) {
-		if(!state.errorMessage.empty()) {
-			imGuiText("Transform feedback error: {}", state.errorMessage);
-		} else {
-			ImGui::Text("Error: no transform feedback");
-		}
-
+		ImGui::Text("Error: no transform feedback. See log output");
 		return;
 	}
 

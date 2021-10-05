@@ -767,10 +767,17 @@ void CommandViewer::displayDs(Draw& draw) {
 			return;
 		}
 
-		auto* buf = std::get_if<OwnBuffer>(&state_->dsCopy);
+		if(state_->copiedDescriptors.empty()) {
+			dlg_error("copiedDescriptors shouldn't be empty");
+			ImGui::Text("Error copying descriptor. See log output");
+			return;
+		}
+
+		dlg_assert(state_->copiedDescriptors.size() == 1u);
+		auto* buf = std::get_if<OwnBuffer>(&state_->copiedDescriptors[0].data);
 		if(!buf) {
-			dlg_assert(state_->dsCopy.index() == 0);
-			imGuiText("Error: {}", state_->errorMessage);
+			dlg_assert(state_->copiedDescriptors[0].data.index() == 0);
+			imGuiText("Error copying descriptor buffer. See log output");
 			return;
 		}
 
@@ -835,10 +842,17 @@ void CommandViewer::displayDs(Draw& draw) {
 					return;
 				}
 
-				auto* img = std::get_if<CopiedImage>(&state_->dsCopy);
+				if(state_->copiedDescriptors.empty()) {
+					dlg_error("copiedDescriptors shouldn't be empty");
+					ImGui::Text("Error copying descriptor. See log output");
+					return;
+				}
+
+				dlg_assert(state_->copiedDescriptors.size() == 1u);
+				auto* img = std::get_if<CopiedImage>(&state_->copiedDescriptors[0].data);
 				if(!img) {
-					dlg_assert(state_->dsCopy.index() == 0);
-					imGuiText("Error: {}", state_->errorMessage);
+					dlg_assert(state_->copiedDescriptors[0].data.index() == 0);
+					imGuiText("Error copying descriptor image. See log output");
 					return;
 				}
 
@@ -918,10 +932,17 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	refButton(*gui_, img);
 
 	if(state_) {
-		if(state_->attachmentCopy.image) {
-			displayImage(draw, state_->attachmentCopy);
+		if(state_->copiedAttachments.empty()) {
+			dlg_error("copiedAttachments should not be empty");
+			ImGui::Text("No attachment copy found. See log output");
+			return;
+		}
+
+		dlg_assert(state_->copiedAttachments.size() == 1u);
+		if(state_->copiedAttachments[0].data.image) {
+			displayImage(draw, state_->copiedAttachments[0].data);
 		} else {
-			imGuiText("Error: {}", state_->errorMessage);
+			imGuiText("Error copying attachment. See log output");
 		}
 	} else {
 		ImGui::Text("Waiting for a submission...");
@@ -1079,10 +1100,6 @@ void CommandViewer::displayTransferData(Draw& draw) {
 
 	dlg_assert(refBuffer ^ refImage);
 	dlg_assert(tcount > 0u);
-	if(!state_->errorMessage.empty()) {
-		imGuiText("Error: {}", state_->errorMessage);
-		return;
-	}
 
 	if(optSliderRange("Transfer", viewData_.transfer.index, tcount)) {
 		updateHook();
@@ -1098,6 +1115,8 @@ void CommandViewer::displayTransferData(Draw& draw) {
 		bufferViewer_.display(state_->transferBufCopy.data());
 	} else if(refImage && state_->transferImgCopy.image) {
 		displayImage(draw, state_->transferImgCopy);
+	} else {
+		imGuiText("Error copying data. See log output");
 	}
 }
 
@@ -1342,7 +1361,7 @@ void CommandViewer::updateHook() {
 			hook.copyIndirectCmd = indirectCmd;
 			break;
 		case IOView::attachment:
-			hook.copyAttachment = {viewData_.attachment.id, beforeCommand_};
+			hook.attachmentCopies = {{viewData_.attachment.id, beforeCommand_}};
 			break;
 		case IOView::transferSrc:
 			if(dynamic_cast<const UpdateBufferCmd*>(command_)) {
@@ -1368,12 +1387,17 @@ void CommandViewer::updateHook() {
 			dlg_assert_or(dsl, break);
 			dlg_assert_or(viewData_.ds.binding < dsl->bindings.size(), break);
 			auto& bindingLayout = dsl->bindings[viewData_.ds.binding];
-			if(bindingLayout.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) {
-				// just a sampler bound, command hook has nothing to do
+
+			// For some descriptor types, we don't need a hook
+			if(bindingLayout.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+					bindingLayout.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT) {
 				break;
 			}
 
-			hook.copyDS = {viewData_.ds.set, viewData_.ds.binding, viewData_.ds.elem, beforeCommand_};
+			CommandHook::DescriptorCopy dsCopy = {
+				viewData_.ds.set, viewData_.ds.binding, viewData_.ds.elem, beforeCommand_
+			};
+			hook.descriptorCopies = {dsCopy};
 			break;
 		} case IOView::mesh:
 			if(viewData_.mesh.output) {

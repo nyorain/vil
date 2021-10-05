@@ -1,0 +1,42 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x_id = 0, local_size_y_id = 1) in;
+
+layout(push_constant) uniform PCR {
+	float begin;
+	float end;
+	int level;
+} pcr;
+
+layout(set = 0, binding = 0) buffer HistR {
+	uint hist[];
+} channels[3];
+
+#define SAMPLE_TEX_BINDING 1
+#include "sample.glsl"
+
+void main() {
+	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
+	if(!coordsInside(coords, pcr.level)) {
+		return;
+	}
+
+	vec4 col = fetchTex(coords, pcr.level);
+
+	// TODO: could speed this up with subgroup ballot
+	// so we only do three atomic instructions per subgroup
+
+	float range = pcr.end - pcr.begin;
+
+	for(uint i = 0u; i < 3; ++i) {
+		int len = channels[i].hist.length();
+		float pos = (col[i] - pcr.begin) / range;
+		// uint id = clamp(pos * len, 0, len - 1);
+		int id = int(pos * len);
+		if(id > 0 && id < len) {
+			atomicAdd(channels[i].hist[id], 1u);
+		}
+	}
+}

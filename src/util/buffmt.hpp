@@ -58,6 +58,7 @@ void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset =
 enum class BufferLayout {
 	std140,
 	std430,
+	scalar, // TODO WIP
 };
 
 // TODO: returns 0u for runtime arrays atm
