@@ -93,17 +93,17 @@ struct DrawGuiImage {
 		font,
 
 		// custom, uses the provided descriptor set
-		f1d,
 		u1d,
-		i1d,
-
-		f2d,
 		u2d,
-		i2d,
-
-		f3d,
 		u3d,
+
+		i1d,
+		i2d,
 		i3d,
+
+		f1d,
+		f2d,
+		f3d,
 	};
 
 	// Must match flags in image.frag

@@ -1,3 +1,7 @@
+- [x] instead of copy and cpu-formatting of texture values, we should
+      probably just dispatch a single compute shader invocation that samples
+	  the texture and writes the float4 output to a buffer.
+	  See readTex.comp
 - [x] We export dlg and swa symbols that we shouldn't export! See
       nm -gDC --defined-only --numeric-sort libVkLayer_live_introspection.so | less
 - [x] when the applications creates a resource with usage_exclusive

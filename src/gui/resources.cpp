@@ -163,8 +163,11 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 			subres.levelCount = image.ci.mipLevels;
 			subres.aspectMask = aspects(image.ci.format);
 			auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
+			if(image.hasTransferSrc) {
+				flags |= ImageViewer::supportsTransferSrc;
+			}
 			image_.viewer.select(image.handle, image.ci.extent,
-				image.ci.imageType, image.ci.format, subres, image.hasTransferSrc,
+				image.ci.imageType, image.ci.format, subres,
 				image.pendingLayout, image.pendingLayout, flags);
 		}
 

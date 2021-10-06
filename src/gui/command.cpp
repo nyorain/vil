@@ -1429,10 +1429,11 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 	//   not in all.
 	auto flags = ImageViewer::preserveSelection |
 		ImageViewer::preserveZoomPan |
-		ImageViewer::preserveReadbacks;
+		ImageViewer::preserveReadbacks |
+		ImageViewer::supportsTransferSrc;
 	auto imgLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	imageViewer_.select(img.image, img.extent, minImageType(img.extent),
-		img.format, img.srcSubresRange, true, imgLayout, imgLayout, flags);
+		img.format, img.srcSubresRange, imgLayout, imgLayout, flags);
 	imageViewer_.display(draw);
 }
 

@@ -219,7 +219,7 @@ void copy(DescriptorSetState& dst, unsigned dstBindID, unsigned dstElemID,
 	}
 }
 
-// TODO: not sure why this has to be in a locked section! it probably should
+// TODO PERF: not sure why this has to be in a locked section! it probably should
 // not be. We probably also shouldn't have to lock state.mutex
 void initImmutableSamplersLocked(DescriptorSetState& state) {
 	ZoneScoped;
@@ -1007,7 +1007,6 @@ void checkCopyState(DescriptorSet& ds) {
 	// If someone else holds a reference to to it, we need to allocate a new one.
 	// This basically implements copy-on-write.
 	// Edge case:
-	// since we release the lock right after checking the reference count,
 	// we won't correctly implement copy-on-write for copies that
 	// are made *during* the following update. Fixing this isn't easily possbile
 	// due to synchronization issues. But this isn't a real issue:

@@ -796,17 +796,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 
 	// descriptor pool
 	// TODO: proper resource management.
-	VkDescriptorPoolSize poolSizes[2];
+	std::array<VkDescriptorPoolSize, 3> poolSizes;
 	poolSizes[0].descriptorCount = 50u;
 	poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
-	poolSizes[1].descriptorCount = 10u;
+	poolSizes[1].descriptorCount = 50u;
 	poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+
+	poolSizes[2].descriptorCount = 50u;
+	poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 
 	VkDescriptorPoolCreateInfo dpci {};
 	dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	dpci.poolSizeCount = 2u;
-	dpci.pPoolSizes = poolSizes;
+	dpci.poolSizeCount = poolSizes.size();
+	dpci.pPoolSizes = poolSizes.data();
 	dpci.maxSets = 50u;
 	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 	VK_CHECK(dev.dispatch.CreateDescriptorPool(dev.handle, &dpci, nullptr, &dev.dsPool));

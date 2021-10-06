@@ -16,7 +16,13 @@ public:
 		preserveReadbacks = (1 << 0u), // still consider previous readbacks valid
 		preserveSelection = (1 << 1u), // preserve aspect/level/min/max values
 		preserveZoomPan = (1 << 2u), // preserve zoom/panning of the image
+
+		// whether the selected image supports transferSrc.
+		// (lowkey deprecated though)
+		supportsTransferSrc = (1 << 3u),
 	};
+
+	static constexpr auto useSamplingCopy = true;
 
 public:
 	void init(Gui& gui);
@@ -24,14 +30,11 @@ public:
 	// Selects the new image with the given properties to view.
 	// - initialLayout: the layout of the image before displaying it here
 	// - finalLayout: the layout the image should have afterwards
-	// - supportsTransferSrc: whether the given image supports
-	//   copying from. If this is false, no texel values can be shown in gui
 	// - tryPreserveSelected: Whether the old selection (zoom/pan, aspect,
 	//   min/max/layer) should be preserved, if possible.
 	void select(VkImage, VkExtent3D, VkImageType, VkFormat,
-		const VkImageSubresourceRange&, bool supportsTransferSrc,
-		VkImageLayout initialLayout, VkImageLayout finalLayout,
-		u32 /*Flags*/ flags);
+		const VkImageSubresourceRange&, VkImageLayout initialLayout,
+		VkImageLayout finalLayout, u32 /*Flags*/ flags);
 
 	void reset();
 	void unselect();
@@ -49,6 +52,7 @@ private:
 	void recordPostImage(Draw& draw);
 
 	void doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
+	void doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
 	void copyComplete(Draw&);
 
 	void createData();
@@ -70,6 +74,8 @@ private:
 		VkOffset2D texel {};
 		float layer {};
 		unsigned level {};
+
+		VkDescriptorSet opDS {};
 	};
 
 	std::vector<Readback> readbacks_;

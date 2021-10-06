@@ -40,6 +40,16 @@
 #include <image.frag.u3D.spv.h>
 #include <image.frag.i3D.spv.h>
 
+#include <readTex.comp.1DArray.spv.h>
+#include <readTex.comp.u1DArray.spv.h>
+#include <readTex.comp.i1DArray.spv.h>
+#include <readTex.comp.2DArray.spv.h>
+#include <readTex.comp.u2DArray.spv.h>
+#include <readTex.comp.i2DArray.spv.h>
+#include <readTex.comp.3D.spv.h>
+#include <readTex.comp.u3D.spv.h>
+#include <readTex.comp.i3D.spv.h>
+
 inline namespace imgui_vil {
 
 thread_local ImGuiContext* __LayerImGui;
@@ -104,6 +114,24 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &dsLayout_));
 	nameHandle(dev, dsLayout_, "Gui:dsLayout");
 
+	// img op compute ds layout
+	VkDescriptorSetLayoutBinding imgOpBindings[2] {};
+	imgOpBindings[0].binding = 0u;
+	imgOpBindings[0].descriptorCount = 1u;
+	imgOpBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	imgOpBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	imgOpBindings[1].binding = 1u;
+	imgOpBindings[1].descriptorCount = 1u;
+	imgOpBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	imgOpBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	imgOpBindings[1].pImmutableSamplers = &nearestSampler_;
+
+	dslci.bindingCount = 2u;
+	dslci.pBindings = imgOpBindings;
+	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &imgOpDsLayout_));
+	nameHandle(dev, dsLayout_, "Gui:imgOpDsLayout");
+
 	// pipeline layout
 	// We just allocate the full push constant range that all implementations
 	// must support.
@@ -122,6 +150,13 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	plci.pPushConstantRanges = pcrs;
 	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &pipeLayout_));
 	nameHandle(dev, pipeLayout_, "Gui:pipeLayout");
+
+	// Init image compute pipeline layout
+	pcrs[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	plci.pSetLayouts = &imgOpDsLayout_;
+	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &imgOpPipeLayout_));
+	nameHandle(dev, pipeLayout_, "Gui:imgOpPipeLayout");
 
 	// render pass
 	VkAttachmentDescription atts[2] {};
@@ -349,7 +384,7 @@ void Gui::initPipes() {
 	VkGraphicsPipelineCreateInfo imgGpi = guiGpi;
 	imgGpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 	imgGpi.basePipelineIndex = 0u;
-	imgGpi.pStages = image1DStages.data();
+	imgGpi.pStages = uimage1DStages.data();
 	gpis.push_back(imgGpi);
 
 	auto addImGpi = [&](auto& stages) {
@@ -360,16 +395,16 @@ void Gui::initPipes() {
 		gpis.push_back(gpi);
 	};
 
-	addImGpi(uimage1DStages);
-	addImGpi(iimage1DStages);
-
-	addImGpi(image2DStages);
 	addImGpi(uimage2DStages);
-	addImGpi(iimage2DStages);
-
-	addImGpi(image3DStages);
 	addImGpi(uimage3DStages);
+
+	addImGpi(iimage1DStages);
+	addImGpi(iimage2DStages);
 	addImGpi(iimage3DStages);
+
+	addImGpi(image1DStages);
+	addImGpi(image2DStages);
+	addImGpi(image3DStages);
 
 	// imageBg pipe
 	auto imageBgVertModule = createShaderMod(imagebg_vert_spv_data);
@@ -405,37 +440,60 @@ void Gui::initPipes() {
 		VK_NULL_HANDLE, u32(gpis.size()), gpis.data(), nullptr, pipes));
 
 	pipes_.gui = pipes[0];
-
-	pipes_.image1D = pipes[1];
-	pipes_.uimage1D = pipes[2];
-	pipes_.iimage1D = pipes[3];
-
-	pipes_.image2D = pipes[4];
-	pipes_.uimage2D = pipes[5];
-	pipes_.iimage2D = pipes[6];
-
-	pipes_.image3D = pipes[7];
-	pipes_.uimage3D = pipes[8];
-	pipes_.iimage3D = pipes[9];
-
-	pipes_.imageBg = pipes[10];
-
 	nameHandle(dev, pipes_.gui, "Gui:pipeGui");
 
-	nameHandle(dev, pipes_.image1D, "Gui:pipeImage1D");
-	nameHandle(dev, pipes_.uimage1D, "Gui:pipeUImage1D");
-	nameHandle(dev, pipes_.iimage1D, "Gui:pipeIImage1D");
+	for(auto i = 0u; i < ImageShader::count; ++i) {
+		pipes_.image[i] = pipes[1 + i];
+		auto name = dlg::format("Gui:pipeImage[{}]", i);
+		nameHandle(dev, pipes_.image[i], name.c_str());
+	}
 
-	nameHandle(dev, pipes_.image2D, "Gui:pipeImage2D");
-	nameHandle(dev, pipes_.uimage2D, "Gui:pipeUImage2D");
-	nameHandle(dev, pipes_.iimage2D, "Gui:pipeIImage2D");
-
-	nameHandle(dev, pipes_.image3D, "Gui:pipeImage3D");
-	nameHandle(dev, pipes_.uimage3D, "Gui:pipeUImage3D");
-	nameHandle(dev, pipes_.iimage3D, "Gui:pipeIImage3D");
-
+	pipes_.imageBg = pipes[10];
 	nameHandle(dev, pipes_.imageBg, "Gui:pipeImageBg");
 
+	// init compute pipelines
+	std::vector<VkComputePipelineCreateInfo> cpis {};
+
+	auto addCpi = [&](span<const u32> spv) {
+		VkShaderModuleCreateInfo shaderInfo {};
+		shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		shaderInfo.codeSize = spv.size() * 4;
+		shaderInfo.pCode = spv.data();
+
+		VkShaderModule mod;
+		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &shaderInfo, NULL, &mod));
+		// store module for destruction later on
+		modules.push_back(mod);
+
+		auto& cpi = cpis.emplace_back();
+		if(cpis.size() != 0u) {
+			cpi.basePipelineIndex = 0u;
+		}
+
+		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		cpi.layout = imgOpPipeLayout_;
+		cpi.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		cpi.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		cpi.stage.module = mod;
+		cpi.stage.pName = "main";
+	};
+
+	addCpi(readTex_comp_u1DArray_spv_data);
+	addCpi(readTex_comp_u2DArray_spv_data);
+	addCpi(readTex_comp_u3D_spv_data);
+
+	addCpi(readTex_comp_i1DArray_spv_data);
+	addCpi(readTex_comp_i2DArray_spv_data);
+	addCpi(readTex_comp_i3D_spv_data);
+
+	addCpi(readTex_comp_1DArray_spv_data);
+	addCpi(readTex_comp_2DArray_spv_data);
+	addCpi(readTex_comp_3D_spv_data);
+
+	VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
+		u32(cpis.size()), cpis.data(), nullptr, pipes_.readTex));
+
+	// destroy shader modules, not needed anymore after pipe creation
 	dev.dispatch.DestroyShaderModule(dev.handle, vertModule, nullptr);
 	for(auto& mod : modules) {
 		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
@@ -594,6 +652,8 @@ Gui::~Gui() {
 	dev_->dispatch.DestroySampler(vkDev, linearSampler_, nullptr);
 	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, dsLayout_, nullptr);
 	dev_->dispatch.DestroyPipelineLayout(vkDev, pipeLayout_, nullptr);
+	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, imgOpDsLayout_, nullptr);
+	dev_->dispatch.DestroyPipelineLayout(vkDev, imgOpPipeLayout_, nullptr);
 
 	dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
 	dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
@@ -602,16 +662,11 @@ Gui::~Gui() {
 	dev_->dispatch.FreeMemory(vkDev, font_.mem, nullptr);
 
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.image1D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.uimage1D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.iimage1D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.image2D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.uimage2D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.iimage2D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.image3D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.uimage3D, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.iimage3D, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
+	for(auto i = 0u; i < ImageShader::count; ++i) {
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.image[i], nullptr);
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.readTex[i], nullptr);
+	}
 
 	dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
 	dev_->dispatch.DestroyCommandPool(vkDev, commandPool_, nullptr);
@@ -868,25 +923,8 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 					auto img = (DrawGuiImage*) cmd.TextureId;
 					if(img && img->type != DrawGuiImage::font) {
 						ds = img->ds;
-						pipe = [&]{
-							switch(img->type) {
-								case DrawGuiImage::f1d: return pipes_.image1D;
-								case DrawGuiImage::u1d: return pipes_.uimage1D;
-								case DrawGuiImage::i1d: return pipes_.iimage1D;
-
-								case DrawGuiImage::f2d: return pipes_.image2D;
-								case DrawGuiImage::u2d: return pipes_.uimage2D;
-								case DrawGuiImage::i2d: return pipes_.iimage2D;
-
-								case DrawGuiImage::f3d: return pipes_.image3D;
-								case DrawGuiImage::u3d: return pipes_.uimage3D;
-								case DrawGuiImage::i3d: return pipes_.iimage3D;
-
-								default:
-									dlg_error("unreachable");
-									return VkPipeline {};
-							}
-						}();
+						dlg_assert(img->type - 1 < ImageShader::count);
+						pipe = pipes_.image[img->type - 1];
 
 						// bind push constant data
 						struct PcrImageData {

@@ -9,6 +9,53 @@
 
 namespace vil {
 
+void appendAsInt(std::string& str, double val) {
+	str += std::to_string(i64(val));
+}
+
+void appendAsDouble(std::string& str, double val) {
+	str += std::to_string(val);
+}
+
+std::string format(VkFormat format, VkImageAspectFlagBits aspect, Vec4d value) {
+	using FmtFunc = void(*)(std::string&, double);
+	FmtFunc fmt;
+	unsigned channels;
+
+	if(aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
+		channels = FormatChannelCount(format);
+		fmt = (FormatIsSampledFloat(format)) ? appendAsDouble : appendAsInt;
+	} else if(aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
+		channels = 1u;
+		auto numt = FormatDepthNumericalType(format);
+		fmt = (numt == VK_FORMAT_NUMERICAL_TYPE_UINT ||
+			   numt == VK_FORMAT_NUMERICAL_TYPE_SINT) ?
+			appendAsInt :
+			appendAsDouble;
+	} else if(aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
+		channels = 1u;
+		auto numt = FormatStencilNumericalType(format);
+		fmt = (numt == VK_FORMAT_NUMERICAL_TYPE_UINT ||
+			   numt == VK_FORMAT_NUMERICAL_TYPE_SINT) ?
+			appendAsInt :
+			appendAsDouble;
+	} else {
+		dlg_error("Unsupported aspect {}", aspect);
+		return "<ERROR>";
+	}
+
+	std::string ret;
+	for(auto i = 0u; i < channels; ++i) {
+		if(i != 0u) {
+			ret += ", ";
+		}
+
+		fmt(ret, value[i]);
+	}
+
+	return ret;
+}
+
 void ImageViewer::init(Gui& gui) {
 	gui_ = &gui;
 }
@@ -48,6 +95,10 @@ void ImageViewer::display(Draw& draw) {
 
 	auto bgW = regW;
 	auto bgH = regH;
+
+	// This is needed for HUGEx1 images (e.g. 1024x1) or 1 dimensional images.
+	// We make sure there is at least some area to zoom in.
+	bgH = std::max(bgH, 100.f);
 
 	// Cut the image off if too high
 	if(regH > regW) {
@@ -144,8 +195,18 @@ void ImageViewer::display(Draw& draw) {
 				rb.layer == imageDraw_.layer &&
 				rb.level == imageDraw_.level) {
 			texelValid = true;
-			auto data = rb.own.data();
-			imGuiText("| Texel: {}", read(format_, data));
+			Vec4d value;
+
+			if(useSamplingCopy) {
+				// TODO: precision issues for 32/64 int and doubles.
+				auto data = rb.own.data();
+				value = Vec4d(read<Vec4f>(data));
+			} else {
+				auto data = rb.own.data();
+				value = read(format_, data);
+			}
+
+			imGuiText("| Texel: {}", format(format_, aspect_, value));
 		} else {
 			// dlg_trace("Rejecting readback: valid: {}, texel: {} {} vs {} {}, "
 			// 	"layer {} vs {}, level {} vs {}",
@@ -287,11 +348,20 @@ void ImageViewer::recordPostImage(Draw& draw) {
 	auto srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 	auto needBarrier = finalImageLayout_ != srcLayout;
 	if(copyTexel_) {
-		doCopy(cb, draw, srcLayout);
-		srcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-		srcAccess = VK_ACCESS_TRANSFER_READ_BIT;
-		srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		needBarrier = true;
+		constexpr auto useSamplingCopy = true;
+		if(useSamplingCopy) {
+			doSample(cb, draw, srcLayout);
+			srcLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			srcAccess = VK_ACCESS_SHADER_READ_BIT;
+			srcStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+			needBarrier = true;
+		} else {
+			doCopy(cb, draw, srcLayout);
+			srcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			srcAccess = VK_ACCESS_TRANSFER_READ_BIT;
+			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			needBarrier = true;
+		}
 	}
 
 	if(needBarrier) {
@@ -389,6 +459,153 @@ DrawGuiImage::Type ImageViewer::parseType(VkImageType imgType, VkFormat format,
 	}
 
 	return DrawGuiImage::Type(unsigned(baseType) + off);
+}
+
+void ImageViewer::doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout) {
+	auto& dev = gui_->dev();
+	dlg_assert(this->copyTexel_);
+
+	// find free readback or create a new one
+	Readback* readback {};
+	for(auto [i, r] : enumerate(readbacks_)) {
+		if(!r.pending && (!lastReadback_ || i != *lastReadback_)) {
+			readback = &r;
+			break;
+		}
+	}
+
+	if(!readback) {
+		readback = &readbacks_.emplace_back();
+
+		// TODO: can we always be sure this is enough?
+		auto maxBufSize = 1024;
+		readback->own.ensure(dev, maxBufSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+		VkDescriptorSetAllocateInfo dsai {};
+		dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dsai.descriptorPool = dev.dsPool;
+		dsai.descriptorSetCount = 1u;
+		dsai.pSetLayouts = &gui_->imgOpDsLayout();
+
+		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dsai, &readback->opDS));
+		nameHandle(dev, readback->opDS, "ImageViewer:readbackOpDs");
+	}
+
+	dlg_assert(readback->own.size >= FormatElementSize(format_));
+
+	VkImageMemoryBarrier imgb {};
+	imgb.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	imgb.image = this->src_;
+	imgb.subresourceRange = subresRange_;
+	imgb.oldLayout = srcLayout;
+	imgb.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imgb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+	imgb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	imgb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imgb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // wait for everything
+		VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		0, 0, nullptr, 0, nullptr, 1, &imgb);
+
+	// update ds
+	VkDescriptorImageInfo imgInfo {};
+	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imgInfo.imageView = data_->view;
+
+	VkDescriptorBufferInfo bufInfo {};
+	bufInfo.buffer = readback->own.buf;
+	bufInfo.offset = 0u;
+	bufInfo.range = readback->own.size;
+
+	VkWriteDescriptorSet writes[2] {};
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[0].descriptorCount = 1u;
+	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	writes[0].pBufferInfo = &bufInfo;
+	writes[0].dstBinding = 0u;
+	writes[0].dstSet = readback->opDS;
+
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[1].descriptorCount = 1u;
+	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[1].pImageInfo = &imgInfo;
+	writes[1].dstBinding = 1u;
+	writes[1].dstSet = readback->opDS;
+
+	dev.dispatch.UpdateDescriptorSets(dev.handle, 2u, writes, 0u, nullptr);
+
+	// prepare sample copy operation
+	auto type = Gui::ImageShader(imageDraw_.type - 1);
+	auto& pipe = gui_->readTexPipe(type);
+	auto& pipeLayout = gui_->imgOpPipeLayout();
+
+	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+
+	struct {
+		Vec3i coords;
+		int level;
+	} pcr;
+
+	pcr.level = int(imageDraw_.level);
+	pcr.coords.x = readTexelOffset_.x;
+	if(imgType_ == VK_IMAGE_TYPE_1D) {
+		pcr.coords.y = imageDraw_.layer;
+		// z irrelevant
+	} else {
+		pcr.coords.y = readTexelOffset_.y;
+		pcr.coords.z = imageDraw_.layer;
+	}
+
+	// validate parameters
+	// things here shouldn't go wrong (but often did end up to somehow
+	// in the past) and assertions should be fixed.
+	[[maybe_unused]] auto layerBegin = subresRange_.baseArrayLayer;
+	[[maybe_unused]] auto layerEnd = layerBegin + subresRange_.layerCount;
+	[[maybe_unused]] auto levelBegin = subresRange_.baseMipLevel;
+	[[maybe_unused]] auto levelEnd = levelBegin + subresRange_.levelCount;
+	[[maybe_unused]] auto w = std::max(extent_.width >> u32(imageDraw_.level), 1u);
+	[[maybe_unused]] auto h = std::max(extent_.height >> u32(imageDraw_.level), 1u);
+	[[maybe_unused]] auto d = std::max(extent_.height >> u32(imageDraw_.level), 1u);
+
+	dlg_assert_or(pcr.coords.x >= 0, pcr.coords.x = 0);
+	dlg_assert_or(pcr.coords.y >= 0, pcr.coords.y = 0);
+	dlg_assert_or(u32(pcr.coords.x) < w, pcr.coords.x = w - 1);
+	dlg_assert_or(u32(pcr.coords.y) < h, pcr.coords.y = h - 1);
+	dlg_assert_or(u32(pcr.coords.z) < d, pcr.coords.z = d - 1);
+	dlg_assert(imageDraw_.layer >= layerBegin);
+	dlg_assert(imageDraw_.layer < layerEnd);
+	dlg_assert_or(pcr.level >= i32(levelBegin), pcr.level = levelBegin);
+	dlg_assert_or(pcr.level < i32(levelEnd), pcr.level = levelEnd - 1);
+
+	dev.dispatch.CmdPushConstants(cb, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+		0u, sizeof(pcr), &pcr);
+	dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+		pipeLayout, 0, 1, &readback->opDS, 0, nullptr);
+	dev.dispatch.CmdDispatch(cb, 1, 1, 1);
+
+	readback->valid = true;
+	readback->level = imageDraw_.level;
+	readback->layer = imageDraw_.layer;
+	readback->texel = readTexelOffset_;
+	readback->pending = &draw;
+
+	// register callback to be called when gpu batch finishes execution
+	auto cbFinish = [this](Draw& draw) {
+		auto found = false;
+		for(auto [i, readback] : enumerate(readbacks_)) {
+			if(readback.pending == &draw) {
+				dlg_assert(!found);
+				found = true;
+				readback.pending = nullptr;
+				lastReadback_ = i;
+				// break;
+			}
+		}
+	};
+
+	draw.onFinish.push_back(cbFinish);
 }
 
 void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout) {
@@ -523,16 +740,16 @@ VkImageAspectFlagBits defaultAspect(VkImageAspectFlags flags) {
 
 void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		VkFormat format, const VkImageSubresourceRange& subresRange,
-		bool supportsTransferSrc, VkImageLayout initialLayout,
-		VkImageLayout finalLayout, u32 /*Flags*/ flags) {
+		VkImageLayout initialLayout, VkImageLayout finalLayout,
+		u32 /*Flags*/ flags) {
 	src_ = src;
 	extent_ = extent;
 	imgType_ = imgType;
 	format_ = format;
-	copyTexel_ = supportsTransferSrc;
 	subresRange_ = subresRange;
 	initialImageLayout_ = initialLayout;
 	finalImageLayout_ = finalLayout;
+	copyTexel_ = useSamplingCopy || (flags & supportsTransferSrc);
 
 	draw_ = {};
 

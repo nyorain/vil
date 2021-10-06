@@ -41,6 +41,21 @@ public:
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
 
+	// For shaders/pipelines that access application images, we need
+	// permutations for the different images types.
+	enum ImageShader {
+		u1,
+		u2,
+		u3,
+		i1,
+		i2,
+		i3,
+		f1,
+		f2,
+		f3,
+		count
+	};
+
 public:
 	Gui() = default;
 	Gui(Gui&&) = delete;
@@ -88,6 +103,10 @@ public:
 	const VkPipelineLayout& pipeLayout() const { return pipeLayout_; }
 	const VkDescriptorSetLayout& dsLayout() const { return dsLayout_; }
 
+	const VkDescriptorSetLayout& imgOpDsLayout() const { return imgOpDsLayout_; }
+	const VkPipelineLayout& imgOpPipeLayout() const { return imgOpPipeLayout_; }
+	const VkPipeline& readTexPipe(ImageShader type) const { return pipes_.readTex[type]; }
+
 	// only for the current draw
 	using Recorder = std::function<void(Draw&)>;
 	void addPreRender(Recorder);
@@ -131,25 +150,17 @@ private:
 	VkSampler linearSampler_ {};
 	VkSampler nearestSampler_ {};
 
+	VkDescriptorSetLayout imgOpDsLayout_ {};
+	VkPipelineLayout imgOpPipeLayout_ {};
+
 	VkRenderPass rp_ {};
 	VkCommandPool commandPool_ {};
 
 	struct {
 		VkPipeline gui;
-
-		VkPipeline image1D;
-		VkPipeline uimage1D;
-		VkPipeline iimage1D;
-
-		VkPipeline image2D;
-		VkPipeline uimage2D;
-		VkPipeline iimage2D;
-
-		VkPipeline image3D;
-		VkPipeline uimage3D;
-		VkPipeline iimage3D;
-
 		VkPipeline imageBg;
+		VkPipeline image[ImageShader::count] {};
+		VkPipeline readTex[ImageShader::count] {};
 	} pipes_;
 
 	bool clear_ {};
