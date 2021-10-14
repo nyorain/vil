@@ -129,6 +129,15 @@ struct DrawGuiImage;
 
 } // namespace vil
 
+
+namespace spc {
+
+class Compiler;
+struct Resource;
+struct SPIRConstant;
+
+} // namespace spc
+
 #define VK_CHECK(x) do {\
 		auto result = (x);\
 		dlg_assertm(result == VK_SUCCESS, "result: {}", result); \

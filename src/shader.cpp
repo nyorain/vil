@@ -602,6 +602,31 @@ std::optional<spc::Resource> resource(const spc::Compiler& compiler,
 	return ret;
 }
 
+std::optional<spc::Resource> resource(const spc::Compiler& compiler, u32 varID) {
+	std::optional<spc::Resource> ret;
+
+	auto check = [&](auto& resources) {
+		for(auto& res : resources) {
+			if(res.id == varID) {
+				dlg_assert(!ret);
+				ret = res;
+				break;
+			}
+		}
+	};
+
+	auto resources = compiler.get_shader_resources();
+	check(resources.acceleration_structures);
+	check(resources.sampled_images);
+	check(resources.separate_images);
+	check(resources.separate_samplers);
+	check(resources.storage_buffers);
+	check(resources.uniform_buffers);
+	check(resources.subpass_inputs);
+
+	return ret;
+}
+
 BindingNameRes bindingName(const spc::Compiler& compiler, u32 setID, u32 bindingID) {
 	auto ores = resource(compiler, setID, bindingID);
 	if(!ores) {

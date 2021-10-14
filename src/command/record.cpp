@@ -15,9 +15,12 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 
 	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
 	// There may be errors here.
-	// TODO: do we even need to track it like this? only useful if we
+	// TODO PERF: do we even need to track it like this? only useful if we
 	// also show it in UI which sets were disturbed.
+	// Disabled for now
 
+// #define DS_DISTURB_CHECKS
+#ifdef DS_DISTURB_CHECKS
 	for(auto i = 0u; i < firstSet; ++i) {
 		if(!descriptorSets[i].ds) {
 			continue;
@@ -30,15 +33,19 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 			descriptorSets[i] = {};
 		}
 	}
+#endif // DS_DISTURB_CHECKS
 
 	// bind descriptors and check if future bindings are disturbed
 	auto followingDisturbed = false;
 	for(auto i = 0u; i < sets.size(); ++i) {
 		auto s = firstSet + i;
 		auto& dsLayout = *layout.descriptors[s];
-		if(!descriptorSets[s].ds || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
+
+#ifdef DS_DISTURB_CHECKS
+		if(!descriptorSets[s].layout || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
 			followingDisturbed = true;
 		}
+#endif // DS_DISTURB_CHECKS
 
 		descriptorSets[s].layout = &layout;
 		descriptorSets[s].ds = sets[i];

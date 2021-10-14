@@ -2,11 +2,7 @@
 #include <spvm/value.h>
 #include <string.h>
 
-spvm_state_t spvm_state_create(spvm_program_t prog)
-{
-	return _spvm_state_create_base(prog, 0, 0);
-}
-spvm_state_t _spvm_state_create_base(spvm_program_t prog, spvm_byte force_derv, spvm_byte is_derv_member)
+spvm_state_t spvm_state_create(spvm_program_t prog, spvm_state_settings settings)
 {
 	spvm_state_t state = (spvm_state_t)calloc(1, sizeof(spvm_state));
 
@@ -23,7 +19,13 @@ spvm_state_t _spvm_state_create_base(spvm_program_t prog, spvm_byte force_derv, 
 	state->function_stack = NULL;
 	state->context = prog->context;
 	state->analyzer = NULL;
-	state->_derivative_is_group_member = is_derv_member;
+	state->load_variable = settings.load_variable;
+	state->store_variable = settings.store_variable;
+	state->_derivative_is_group_member = settings.is_derv_member;
+
+	state->sample_texel = spvm_sampled_image_sample_impl;
+	state->read_image = spvm_image_read_impl;
+	state->write_image = spvm_image_write_impl;
 
 	for (size_t i = 0; i < prog->bound; i++)
 		state->results[i].storage_class = SpvStorageClassMax;
@@ -41,12 +43,15 @@ spvm_state_t _spvm_state_create_base(spvm_program_t prog, spvm_byte force_derv, 
 		i += word_count;
 	}
 
-	state->derivative_used = force_derv;
+	state->derivative_used = settings.force_derv;
 
-	if (!is_derv_member && state->derivative_used) {
-		state->derivative_group_x = _spvm_state_create_base(prog, force_derv, 1);
-		state->derivative_group_y = _spvm_state_create_base(prog, force_derv, 1);
-		state->derivative_group_d = _spvm_state_create_base(prog, force_derv, 1);
+	if (!settings.is_derv_member && state->derivative_used) {
+		spvm_state_settings derv_settings = settings;
+		derv_settings.is_derv_member = 1;
+
+		state->derivative_group_x = spvm_state_create(prog, derv_settings);
+		state->derivative_group_y = spvm_state_create(prog, derv_settings);
+		state->derivative_group_d = spvm_state_create(prog, derv_settings);
 
 		// setup pointers
 		// x

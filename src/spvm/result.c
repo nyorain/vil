@@ -1,6 +1,7 @@
 #include <spvm/result.h>
 #include <spvm/state.h>
 #include <spvm/spirv.h>
+#include <assert.h>
 
 void spvm_decoration_read(spvm_source src, SpvDecoration decor, spvm_word* literal1, spvm_word* literal2)
 {
@@ -85,6 +86,8 @@ void spvm_member_allocate_typed_value(spvm_member_t val, spvm_result* results, s
 		if (results[type_info->pointer].member_count > 0)
 			for (spvm_word i = 0; i < val->member_count; i++)
 				spvm_member_allocate_typed_value(&val->members[i], results, type_info->pointer);
+	} else {
+		assert(type_info->value_type != spvm_value_type_sampled_image);
 	}
 }
 void spvm_result_allocate_value(spvm_result_t val, spvm_word count)
@@ -95,7 +98,7 @@ void spvm_result_allocate_value(spvm_result_t val, spvm_word count)
 void spvm_result_allocate_typed_value(spvm_result_t val, spvm_result* results, spvm_word type)
 {
 	spvm_result_t type_info = spvm_state_get_type_info(results, &results[type]);
-	
+
 	spvm_result_allocate_value(val, type_info->member_count);
 	val->pointer = type;
 
@@ -111,6 +114,9 @@ void spvm_result_allocate_typed_value(spvm_result_t val, spvm_result* results, s
 		if (results[type_info->pointer].member_count > 0)
 			for (spvm_word i = 0; i < val->member_count; i++)
 				spvm_member_allocate_typed_value(&val->members[i], results, type_info->pointer);
+	} else if(type_info->value_type == spvm_value_type_sampled_image) {
+		val->members[0].type = type_info->pointer;
+		val->members[1].type = (spvm_word) -1; // we don't care about the OpTypeSampler used
 	}
 }
 void spvm_result_delete(spvm_result_t res)
@@ -136,6 +142,10 @@ void spvm_result_delete(spvm_result_t res)
 	// image info
 	if (res->image_info)
 		free(res->image_info);
+
+	// access chain indices
+	if (res->indices)
+		free(res->indices);
 
 	// constants
 	if (res->type == spvm_result_type_constant || res->type == spvm_result_type_variable)
@@ -171,3 +181,4 @@ void spvm_member_recursive_fill(spvm_result_t results, float* data, spvm_member_
 		}
 	}
 }
+

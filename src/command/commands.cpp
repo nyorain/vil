@@ -2940,7 +2940,7 @@ void WriteAccelStructsPropertiesCmd::replace(const CommandAllocHashMap<DeviceHan
 
 // BuildAccelStructs
 BuildAccelStructsCmd::BuildAccelStructsCmd(CommandBuffer& cb) {
-	savedComputeState = copy(cb, cb.computeState());
+	(void) cb;
 }
 
 void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -2962,7 +2962,7 @@ void BuildAccelStructsCmd::replace(const CommandAllocHashMap<DeviceHandle*, Devi
 }
 
 BuildAccelStructsIndirectCmd::BuildAccelStructsIndirectCmd(CommandBuffer& cb) {
-	savedComputeState = copy(cb, cb.computeState());
+	(void) cb;
 }
 
 void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {

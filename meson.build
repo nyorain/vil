@@ -186,6 +186,7 @@ src = files(
 	'src/gui/vertexViewer.cpp',
 	'src/gui/bufferViewer.cpp',
 	'src/gui/imageViewer.cpp',
+	'src/gui/shader.cpp',
 	'src/gui/blur.cpp',
 
 	# imgui
@@ -241,6 +242,8 @@ src = files(
 	'src/gui/util.hpp',
 	'src/gui/commandHook.hpp',
 	'src/gui/vertexViewer.hpp',
+	'src/gui/imageViewer.hpp',
+	'src/gui/shader.hpp',
 	'src/gui/blur.hpp',
 
 	# fonts
@@ -340,17 +343,16 @@ if not with_win32 or not with_tracy
 	pch = 'src/pch.hpp'
 endif
 
-lib_spvm = []
-static_library(
+lib_spvm = static_library(
 	'spvm',
 	spvm_src,
 	gnu_symbol_visibility: 'hidden',
 	include_directories: inc,
-	c_args: args + [
+	c_args: args + cc.get_supported_arguments([
 		'-Wno-unused-parameter',
 		'-Wno-unused-variable',
 		'-Wno-sign-compare',
-	],
+	]),
 )
 
 vil_layer = shared_library(
@@ -359,7 +361,7 @@ vil_layer = shared_library(
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
-	link_with: lib_spvm,
+	link_whole: lib_spvm,
 	cpp_args: args + layer_args,
 	install: true,
 	cpp_pch: pch,

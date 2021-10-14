@@ -1301,6 +1301,17 @@ void CommandViewer::displayCommand() {
 		}
 	}
 
+	// TODO: WIP
+	if(auto* dcmd = dynamic_cast<const DispatchCmdBase*>(command_); dcmd) {
+		if(ImGui::Button("Debug shader")) {
+			if(dcmd->state.pipe) {
+				// TODO: set specialization constants
+				auto& spirv = nonNull(dcmd->state.pipe->stage.spirv);
+				gui_->selectShader(nonNull(spirv.compiled));
+			}
+		}
+	}
+
 	command_->displayInspector(*gui_);
 }
 

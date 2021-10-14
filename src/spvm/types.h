@@ -5,7 +5,7 @@
 
 typedef unsigned char spvm_byte;
 typedef int spvm_word;
-typedef spvm_word* spvm_source;
+typedef const spvm_word* spvm_source;
 typedef char* spvm_string;
 struct spvm_state;
 

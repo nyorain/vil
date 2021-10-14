@@ -5,6 +5,35 @@
 #include <spvm/result.h>
 #include <spvm/analyzer.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+
+struct spvm_state;
+struct spvm_image;
+
+typedef struct spvm_member_list {
+	unsigned member_count;
+	spvm_member* members;
+} spvm_member_list;
+
+typedef spvm_member_list(*spvm_load_variable_fn)(struct spvm_state*, unsigned varID,
+	unsigned index_count, const spvm_word* indices);
+typedef void(*spvm_store_variable_fn)(struct spvm_state*, unsigned varID,
+	unsigned index_count, const spvm_word* indices,
+	spvm_member_list members);
+
+typedef spvm_vec4f (*spvm_image_read_fn)(struct spvm_state*, struct spvm_image*,
+	int x, int y, int z, int layer, int level);
+typedef void (*spvm_image_write_fn)(struct spvm_state*, struct spvm_image*,
+	int x, int y, int z, int layer, int level, const spvm_vec4f* data);
+
+typedef spvm_vec4f (*spvm_sampled_image_fetch_fn)(struct spvm_state*,
+	struct spvm_image*, struct spvm_sampler*, int x, int y, int z, int layer, int level);
+typedef spvm_vec4f (*spvm_sampled_image_sample_fn)(struct spvm_state*,
+	struct spvm_image*, struct spvm_sampler*, float x, float y, float z,
+	float layer, float level);
+
 typedef struct spvm_state {
 	spvm_context_t context;
 	spvm_program_t owner;
@@ -31,6 +60,25 @@ typedef struct spvm_state {
 
 	void(*control_barrier)(struct spvm_state*, spvm_word, spvm_word, spvm_word);
 
+	// Will be called every time the shader accesses a variable.
+	// Will only be called while executing code, not during setup.
+	// TODO The returned members will not be freed by spvm but must remain
+	// valid as long as the state is valid. Actually, they will only be
+	// used immediately afterwards for copying but are not needed after
+	// that. Suboptimal.
+	// TODO: maybe just pass id of AccessChain in case of access chain store/load?
+	// Would allow removing the indices from the call, letting the caller
+	// figure it out. And would probably allow the caller to use the
+	// members of the result as cache.
+	spvm_load_variable_fn load_variable;
+	spvm_store_variable_fn store_variable;
+
+	spvm_image_read_fn read_image;
+	spvm_image_write_fn write_image;
+
+	spvm_sampled_image_fetch_fn fetch_texel;
+	spvm_sampled_image_sample_fn sample_texel;
+
 	float frag_coord[4];
 
 	// derivative group
@@ -55,10 +103,16 @@ typedef struct spvm_state {
 } spvm_state;
 typedef spvm_state* spvm_state_t;
 
+typedef struct spvm_state_settings {
+	spvm_load_variable_fn load_variable;
+	spvm_store_variable_fn store_variable;
+	spvm_byte force_derv;
+	spvm_byte is_derv_member;
+} spvm_state_settings;
+
 spvm_result_t spvm_state_get_type_info(spvm_result_t res_list, spvm_result_t res);
 
-spvm_state_t spvm_state_create(spvm_program_t prog);
-spvm_state_t _spvm_state_create_base(spvm_program_t prog, spvm_byte force_derv, spvm_byte is_derv_member);
+spvm_state_t spvm_state_create(spvm_program_t prog, spvm_state_settings);
 void spvm_state_set_extension(spvm_state_t state, const spvm_string name, spvm_ext_opcode_func* ext);
 void spvm_state_call_function(spvm_state_t state);
 void spvm_state_prepare(spvm_state_t state, spvm_word fnLocation);
@@ -81,5 +135,9 @@ spvm_member_t spvm_state_get_object_member(spvm_state_t state, spvm_result_t var
 void spvm_state_push_function_stack(spvm_state_t state, spvm_result_t func, spvm_word func_res_id);
 void spvm_state_pop_function_stack(spvm_state_t state);
 void spvm_state_delete(spvm_state_t state);
+
+#ifdef __cplusplus
+}
+#endif // __cplusplus
 
 #endif // __SPIRV_VM_STATE_H__

@@ -5,6 +5,7 @@
 #include <spvm/image.h>
 #include <string.h>
 #include <math.h>
+#include <assert.h>
 
 /* opcodes */
 /* 3.32.2 Debug Instructions */
@@ -43,10 +44,27 @@ void spvm_execute_OpStore(spvm_word word_count, spvm_state_t state)
 	spvm_word ptr_id = SPVM_READ_WORD(state->code_current);
 	spvm_word val_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_member_memcpy(state->results[ptr_id].members, state->results[val_id].members, state->results[ptr_id].member_count);
+	spvm_result_t src = &state->results[val_id];
+	spvm_result_t dst = &state->results[ptr_id];
 
-	if (state->results[ptr_id].storage_class == SpvStorageClassWorkgroup && state->owner->write_workgroup_memory)
-		state->owner->write_workgroup_memory(state, ptr_id, val_id);
+	if(dst->type == spvm_result_type_variable && state->store_variable) {
+		spvm_member_list src_mems;
+		src_mems.members = src->members;
+		src_mems.member_count = src->member_count;
+
+		state->store_variable(state, ptr_id, 0, NULL, src_mems);
+	} else if(dst->type == spvm_result_type_access_chain && state->store_variable) {
+		spvm_member_list src_mems;
+		src_mems.members = src->members;
+		src_mems.member_count = src->member_count;
+
+		state->store_variable(state, ptr_id, dst->index_count, dst->indices, src_mems);
+	} else {
+		spvm_member_memcpy(dst->members, src->members, src->member_count);
+
+		if (state->results[ptr_id].storage_class == SpvStorageClassWorkgroup && state->owner->write_workgroup_memory)
+			state->owner->write_workgroup_memory(state, ptr_id, val_id);
+	}
 }
 void spvm_execute_OpLoad(spvm_word word_count, spvm_state_t state)
 {
@@ -54,10 +72,25 @@ void spvm_execute_OpLoad(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word ptr_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_member_memcpy(state->results[id].members, state->results[ptr_id].members, state->results[ptr_id].member_count);
+	spvm_result_t src = &state->results[ptr_id];
+	spvm_member_list src_mems;
+
+	if(src->type == spvm_result_type_variable && state->load_variable) {
+		src_mems = state->load_variable(state, ptr_id, 0u, NULL);
+	} else if(src->type == spvm_result_type_access_chain && state->load_variable) {
+		src_mems = state->load_variable(state, ptr_id, src->index_count, src->indices);
+	} else {
+		src_mems.members = src->members;
+		src_mems.member_count = src->member_count;
+	}
+
+	spvm_member_memcpy(state->results[id].members, src_mems.members, src_mems.member_count);
 }
 void spvm_execute_OpCopyMemory(spvm_word word_count, spvm_state_t state)
 {
+	// TODO: need to add support for new load/store variable api
+	assert(!"Not implemented");
+
 	spvm_word target = SPVM_READ_WORD(state->code_current);
 	spvm_word source = SPVM_READ_WORD(state->code_current);
 
@@ -65,6 +98,9 @@ void spvm_execute_OpCopyMemory(spvm_word word_count, spvm_state_t state)
 }
 void spvm_execute_OpCopyMemorySized(spvm_word word_count, spvm_state_t state)
 {
+	// TODO: need to add support for new load/store variable api
+	assert(!"Not implemented");
+
 	spvm_word target = SPVM_READ_WORD(state->code_current);
 	spvm_word source = SPVM_READ_WORD(state->code_current);
 	spvm_word size_id = SPVM_READ_WORD(state->code_current);
@@ -82,34 +118,50 @@ void spvm_execute_OpAccessChain(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word value_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_word index_count = word_count - 4;
-
 	state->results[id].type = spvm_result_type_access_chain;
 	state->results[id].pointer = var_type;
 	state->results[id].storage_class = state->results[value_id].storage_class;
 	state->results[id].source_location = source_pointer;
 	state->results[id].source_word_count = word_count;
 
-	spvm_word index_id = SPVM_READ_WORD(state->code_current);
-	spvm_word index = state->results[index_id].members[0].value.s;
+	// TODO: handle case where results[value_id] is another access chain.
+	// Just append the indices?
+	if(state->results[value_id].type == spvm_result_type_variable &&
+			state->load_variable && state->store_variable) {
+		spvm_word index_count = word_count - 3;
+		spvm_word* indices = calloc(sizeof(spvm_word), index_count);
 
-	spvm_member_t result = state->results[value_id].members + MIN(index, state->results[value_id].member_count - 1);
+		for(spvm_word i = 1; i < 1 + index_count; ++i) {
+			spvm_word index_id = SPVM_READ_WORD(state->code_current);
+			spvm_word index = state->results[index_id].members[0].value.s;
+			indices[i] = index;
+		}
 
-	while (index_count) {
-		index_id = SPVM_READ_WORD(state->code_current);
-		index = state->results[index_id].members[0].value.s;
-
-		result = result->members + MIN(index, result->member_count - 1);
-
-		index_count--;
-	}
-
-	if (result->member_count != 0) {
-		state->results[id].member_count = result->member_count;
-		state->results[id].members = result->members;
+		state->results[id].index_count = index_count;
+		state->results[id].indices = indices;
 	} else {
-		state->results[id].member_count = 1;
-		state->results[id].members = result;
+		spvm_word index_count = word_count - 4;
+		spvm_word index_id = SPVM_READ_WORD(state->code_current);
+		spvm_word index = state->results[index_id].members[0].value.s;
+
+		spvm_member_t result = state->results[value_id].members + MIN(index, state->results[value_id].member_count - 1);
+
+		while (index_count) {
+			index_id = SPVM_READ_WORD(state->code_current);
+			index = state->results[index_id].members[0].value.s;
+
+			result = result->members + MIN(index, result->member_count - 1);
+
+			index_count--;
+		}
+
+		if (result->member_count != 0) {
+			state->results[id].member_count = result->member_count;
+			state->results[id].members = result->members;
+		} else {
+			state->results[id].member_count = 1;
+			state->results[id].members = result;
+		}
 	}
 }
 void spvm_execute_OpPtrEqual(spvm_word word_count, spvm_state_t state)
@@ -265,55 +317,66 @@ void spvm_execute_OpImageSampleImplicitLod(spvm_word word_count, spvm_state_t st
 	spvm_word image_id = SPVM_READ_WORD(state->code_current);
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 
+	spvm_word operand_bits = 0;
 	spvm_image_operands operands;
 	memset(&operands, 0, sizeof(spvm_image_operands));
 
 	if (word_count > 4) {
-		spvm_word operand_bits = SPVM_READ_WORD(state->code_current);
+		operand_bits = SPVM_READ_WORD(state->code_current);
 		spvm_image_operands_parse(&operands, operand_bits, state);
 	}
 
 	spvm_result_t coord = &state->results[coord_id];
 
-	spvm_result_t image_container = &state->results[image_id];
-	spvm_image_t image = image_container->members[0].image_data;
+	spvm_result_t container = &state->results[image_id];
+	assert(container->member_count == 2u);
+	spvm_image* image = container->members[0].value.image;
+	spvm_sampler* sampler = container->members[1].value.sampler;
 
 	float stu[4] = { 0.0f };
 	for (spvm_word i = 0; i < coord->member_count; i++)
 		stu[i] = coord->members[i].value.f;
 
-	float* px = NULL;
+	spvm_vec4f res = {0};
 
 	if (image) {
 		stu[0] += operands.offsets[0][0] / (float)image->width;
 		stu[1] += operands.offsets[0][1] / (float)image->height;
 		stu[2] += operands.offsets[0][2] / (float)image->depth;
 
-		spvm_result_t image_type = spvm_state_get_type_info(state->results, &state->results[image_container->pointer]);
-		
+		spvm_result_t image_type = spvm_state_get_type_info(state->results, &state->results[container->pointer]);
+		assert(image_type->value_type == spvm_value_type_sampled_image);
+
 		if (image_type != NULL) {
 			if (image_type->image_info == NULL)
 				image_type = &state->results[image_type->pointer];
-			
+
 			if (image_type->image_info != NULL && image_type->image_info->dim == SpvDimCube)
 				process_cubemap_normal(&stu[0]);
 		}
-		px = spvm_image_sample(image, stu[0], stu[1], stu[2]);
+
+		// TODO: spvm_state_ddx/y(coord_id) ?
+		float level = 0u;
+		if (operand_bits & SpvImageOperandsLodMask)
+			level = operands.lod;
+
+		res = spvm_sampled_image_sample(state, image, sampler,
+			stu[0], stu[1], stu[2], stu[3], level);
 	}
 
-	// todo: spvm_state_ddx/y(coord_id) ?
-
-	for (spvm_word i = 0; i < state->results[id].member_count && px; i++)
-		state->results[id].members[i].value.f = *(px + i);
+	for (spvm_word i = 0; i < state->results[id].member_count; i++)
+		state->results[id].members[i].value.f = res.data[i];
 }
 void spvm_execute_OpSampledImage(spvm_word word_count, spvm_state_t state)
 {
 	SPVM_SKIP_WORD(state->code_current);
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word image_id = SPVM_READ_WORD(state->code_current);
+	spvm_word sampler_id = SPVM_READ_WORD(state->code_current);
 
-	// TODO: sampler
-	state->results[id].members[0].image_data = state->results[image_id].members[0].image_data;
+	assert(state->results[id].member_count == 2u);
+	state->results[id].members[0].value.image = state->results[image_id].members[0].value.image;
+	state->results[id].members[1].value.sampler = state->results[sampler_id].members[0].value.sampler;
 }
 void spvm_execute_OpImageFetch(spvm_word word_count, spvm_state_t state)
 {
@@ -322,33 +385,32 @@ void spvm_execute_OpImageFetch(spvm_word word_count, spvm_state_t state)
 	spvm_word image_id = SPVM_READ_WORD(state->code_current);
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 
+	spvm_word operand_bits = 0;
 	spvm_image_operands operands;
 	memset(&operands, 0, sizeof(spvm_image_operands));
 
 	if (word_count > 4) {
-		spvm_word operand_bits = SPVM_READ_WORD(state->code_current);
+		operand_bits = SPVM_READ_WORD(state->code_current);
 		spvm_image_operands_parse(&operands, operand_bits, state);
 	}
 
 	spvm_result_t coord = &state->results[coord_id];
 
 	spvm_result_t image_container = &state->results[image_id];
-	spvm_image_t image = image_container->members[0].image_data;
+	spvm_image* image = image_container->members[0].value.image;
 
-	float stu[4] = { 0.0f };
+	int stu[4] = { 0 };
 	for (spvm_word i = 0; i < coord->member_count; i++)
 		stu[i] = coord->members[i].value.s + operands.offsets[0][i];
 
-	stu[0] /= image->width;
-	stu[1] /= image->height;
-	stu[2] /= image->depth;
+	int level = 0u;
+	if (operand_bits & SpvImageOperandsLodMask)
+		level = operands.lod;
 
-	// todo: spvm_state_ddx/y(coord_id) ?
-
-	float* px = spvm_image_sample(image, stu[0], stu[1], stu[2]);
+	spvm_vec4f px = spvm_image_read(state, image, stu[0], stu[1], stu[2], stu[3], level);
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++)
-		state->results[id].members[i].value.f = *(px + i);
+		state->results[id].members[i].value.f = px.data[i];
 }
 void spvm_execute_OpImageGather(spvm_word word_count, spvm_state_t state)
 {
@@ -358,11 +420,12 @@ void spvm_execute_OpImageGather(spvm_word word_count, spvm_state_t state)
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 	spvm_word comp_id = SPVM_READ_WORD(state->code_current);
 
+	spvm_word operand_bits = 0;
 	spvm_image_operands operands;
 	memset(&operands, 0, sizeof(spvm_image_operands));
 
 	if (word_count > 4) {
-		spvm_word operand_bits = SPVM_READ_WORD(state->code_current);
+		operand_bits = SPVM_READ_WORD(state->code_current);
 		spvm_image_operands_parse(&operands, operand_bits, state);
 	}
 
@@ -370,8 +433,10 @@ void spvm_execute_OpImageGather(spvm_word word_count, spvm_state_t state)
 
 	spvm_word comp = state->results[coord_id].members[0].value.s;
 
-	spvm_result_t image_container = &state->results[image_id];
-	spvm_image_t image = image_container->members[0].image_data;
+	spvm_result_t container = &state->results[image_id];
+	assert(container->member_count == 2u);
+	spvm_image* image = container->members[0].value.image;
+	spvm_sampler* sampler = container->members[1].value.sampler;
 
 	float stu[4] = { 0.0f };
 	for (spvm_word i = 0; i < coord->member_count; i++)
@@ -396,11 +461,17 @@ void spvm_execute_OpImageGather(spvm_word word_count, spvm_state_t state)
 		}
 	}
 
-	// todo: spvm_state_ddx/y(coord_id) ?
+	// TODO: spvm_state_ddx/y(coord_id) ?
+	float level = 0;
+	if (operand_bits & SpvImageOperandsLodMask)
+		level = operands.lod;
 
 	for (int i = 0; i < 4; i++) {
-		float* sample = spvm_image_sample(image, stu[0] + (offs[i][0] / (float)image->width), stu[1] + (offs[i][1] / (float)image->height), stu[2]);
-		state->results[id].members[i].value.f = sample[comp];
+		spvm_vec4f sample = spvm_sampled_image_sample(state, image, sampler,
+			stu[0] + (offs[i][0] / (float)image->width),
+			stu[1] + (offs[i][1] / (float)image->height),
+			stu[2], stu[3], level);
+		state->results[id].members[i].value.f = sample.data[comp];
 	}
 }
 void spvm_execute_OpImageQuerySizeLod(spvm_word word_count, spvm_state_t state)
@@ -411,15 +482,18 @@ void spvm_execute_OpImageQuerySizeLod(spvm_word word_count, spvm_state_t state)
 	spvm_word lod_id = SPVM_READ_WORD(state->code_current);
 
 	int lod = state->results[lod_id].members[0].value.s;
-	spvm_image_t img = state->results[image_id].members[0].image_data;
+	spvm_image* img = state->results[image_id].members[0].value.image;
 
-	// TODO: lod
+	// TODO: we just assume the lod sizes here, might be slightly different
+	// (there are vulkan extensions allowing to round up lod sizes).
+	// Should probably just be exposed as callback via state as well.
+	// TODO: layer, check image type
 	if (state->results[id].member_count > 0)
-		state->results[id].members[0].value.s = img->width;
+		state->results[id].members[0].value.s = MAX(img->width >> lod, 1);
 	if (state->results[id].member_count > 1)
-		state->results[id].members[1].value.s = img->height;
+		state->results[id].members[1].value.s = MAX(img->height >> lod, 1);
 	if (state->results[id].member_count > 2)
-		state->results[id].members[2].value.s = img->depth;
+		state->results[id].members[2].value.s = MAX(img->depth >> lod, 1);
 }
 void spvm_execute_OpImageQuerySize(spvm_word word_count, spvm_state_t state)
 {
@@ -427,8 +501,9 @@ void spvm_execute_OpImageQuerySize(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word image_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_t img = state->results[image_id].members[0].image_data;
+	spvm_image* img = state->results[image_id].members[0].value.image;
 
+	// TODO: layer, check image type
 	if (state->results[id].member_count > 0)
 		state->results[id].members[0].value.s = img->width;
 	if (state->results[id].member_count > 1)
@@ -443,7 +518,7 @@ void spvm_execute_OpImageRead(spvm_word word_count, spvm_state_t state)
 	spvm_word image_id = SPVM_READ_WORD(state->code_current);
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_t img = state->results[image_id].members[0].image_data;
+	spvm_image* img = state->results[image_id].members[0].value.image;
 
 	if (img != NULL) {
 		spvm_result_t coord = &state->results[coord_id];
@@ -457,10 +532,13 @@ void spvm_execute_OpImageRead(spvm_word word_count, spvm_state_t state)
 		if (coord->member_count > 2)
 			z = coord->members[2].value.s;
 
-		float* data = spvm_image_read(img, x, y, z);
-		
+		int level = 0;
+		int layer = 0;
+
+		spvm_vec4f data = spvm_image_read(state, img, x, y, z, layer, level);
+
 		for (int i = 0; i < output->member_count; i++)
-			output->members[i].value.f = data[i];
+			output->members[i].value.f = data.data[i];
 
 		// report undefined behavior
 		if (state->analyzer) {
@@ -475,25 +553,28 @@ void spvm_execute_OpImageWrite(spvm_word word_count, spvm_state_t state)
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 	spvm_word texel_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_t img = state->results[image_id].members[0].image_data;
+	spvm_image* img = state->results[image_id].members[0].value.image;
 
 	if (img != NULL) {
 		spvm_result_t coord = &state->results[coord_id];
 		spvm_result_t texel = &state->results[texel_id];
 
 		int x = 0, y = 0, z = 0;
-		
+
 		x = coord->members[0].value.s;
 		if (coord->member_count > 1)
 			y = coord->members[1].value.s;
 		if (coord->member_count > 2)
 			z = coord->members[2].value.s;
 
-		float rgba[4];
+		spvm_vec4f rgba;
 		for (int i = 0; i < texel->member_count; i++)
-			rgba[i] = texel->members[i].value.f;
+			rgba.data[i] = texel->members[i].value.f;
 
-		spvm_image_write(img, x, y, z, rgba);
+		int level = 0;
+		int layer = 0;
+
+		spvm_image_write(state, img, x, y, z, level, layer, &rgba);
 
 		// report undefined behavior
 		if (state->analyzer) {
@@ -508,8 +589,8 @@ void spvm_execute_OpImage(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word image_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_t image = state->results[image_id].members[0].image_data;
-	state->results[id].members[0].image_data = image;
+	spvm_image* image = state->results[image_id].members[0].value.image;
+	state->results[id].members[0].value.image = image;
 }
 
 /* 3.32.11 Conversion Instructions */
@@ -580,7 +661,7 @@ void spvm_execute_OpUConvert(spvm_word word_count, spvm_state_t state)
 	spvm_word val = SPVM_READ_WORD(state->code_current);
 
 	spvm_result_t res_type_info = spvm_state_get_type_info(state->results, &state->results[res_type]);
-	
+
 	unsigned long long mask = 0xFF;
 	if (res_type_info->value_bitcount == 16)
 		mask = 0xFFFF;
@@ -860,7 +941,7 @@ void spvm_execute_OpUDiv(spvm_word word_count, spvm_state_t state)
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
 		state->results[id].members[i].value.u64 = state->results[op1].members[i].value.u64 / state->results[op2].members[i].value.u64;
-		
+
 		if (state->analyzer && state->results[op2].members[i].value.u64 == 0)
 			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
 	}
@@ -874,9 +955,9 @@ void spvm_execute_OpSDiv(spvm_word word_count, spvm_state_t state)
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
 		state->results[id].members[i].value.s = state->results[op1].members[i].value.s / state->results[op2].members[i].value.s;
-		
+
 		if (state->analyzer && state->results[op2].members[i].value.s == 0) // TODO: also op2 == -1, op1 == minimum representable value?
-			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);	
+			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
 	}
 }
 void spvm_execute_OpFDiv(spvm_word word_count, spvm_state_t state)
@@ -894,14 +975,14 @@ void spvm_execute_OpFDiv(spvm_word word_count, spvm_state_t state)
 			state->results[id].members[i].value.d = state->results[op1].members[i].value.d / state->results[op2].members[i].value.d;
 
 			if (state->analyzer && state->results[op2].members[i].value.d == 0.0)
-				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);	
+				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
 		}
 	else
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
 			state->results[id].members[i].value.f = state->results[op1].members[i].value.f / state->results[op2].members[i].value.f;
 
 			if (state->analyzer && state->results[op2].members[i].value.f == 0.0f)
-				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);	
+				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
 		}
 }
 void spvm_execute_OpUMod(spvm_word word_count, spvm_state_t state)
@@ -915,7 +996,7 @@ void spvm_execute_OpUMod(spvm_word word_count, spvm_state_t state)
 		state->results[id].members[i].value.u64 = state->results[op1].members[i].value.u64 % state->results[op2].members[i].value.u64;
 
 		if (state->analyzer && state->results[op2].members[i].value.u64 == 0)
-			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);	
+			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);
 	}
 }
 void spvm_execute_OpSMod(spvm_word word_count, spvm_state_t state)
@@ -927,9 +1008,9 @@ void spvm_execute_OpSMod(spvm_word word_count, spvm_state_t state)
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
 		state->results[id].members[i].value.s = state->results[op1].members[i].value.s % state->results[op2].members[i].value.s;
-		
+
 		if (state->analyzer && state->results[op2].members[i].value.s == 0) // TODO: mod by -1, while op1 is min representable value for operands type
-			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);	
+			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);
 	}
 }
 void spvm_execute_OpFMod(spvm_word word_count, spvm_state_t state)
@@ -951,9 +1032,9 @@ void spvm_execute_OpFMod(spvm_word word_count, spvm_state_t state)
 				sign = -1.0;
 
 			state->results[id].members[i].value.d = sign * fmod(state->results[op1].members[i].value.d, state->results[op2].members[i].value.d);
-		
+
 			if (state->analyzer && state->results[op2].members[i].value.d == 0.0)
-					state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);	
+					state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);
 		}
 	else
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
@@ -966,7 +1047,7 @@ void spvm_execute_OpFMod(spvm_word word_count, spvm_state_t state)
 			state->results[id].members[i].value.f = sign * fmodf(state->results[op1].members[i].value.f, state->results[op2].members[i].value.f);
 
 			if (state->analyzer && state->results[op2].members[i].value.f == 0.0f)
-				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);	
+				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_mod_by_zero);
 		}
 }
 void spvm_execute_OpVectorTimesScalar(spvm_word word_count, spvm_state_t state)
@@ -1816,7 +1897,7 @@ void _spvm_context_create_execute_table(spvm_context_t ctx)
 	ctx->opcode_execute[SpvOpReturnValue] = spvm_execute_OpReturnValue;
 
 	ctx->opcode_execute[SpvOpExtInst] = spvm_execute_OpExtInst;
-	
+
 	ctx->opcode_execute[SpvOpConvertFToU] = spvm_execute_OpConvertFToU;
 	ctx->opcode_execute[SpvOpConvertFToS] = spvm_execute_OpConvertFToS;
 	ctx->opcode_execute[SpvOpConvertUToF] = spvm_execute_OpConvertUToF;
@@ -1877,7 +1958,7 @@ void _spvm_context_create_execute_table(spvm_context_t ctx)
 	ctx->opcode_execute[SpvOpBitFieldUExtract] = NULL;
 	ctx->opcode_execute[SpvOpBitReverse] = NULL;
 	ctx->opcode_execute[SpvOpBitCount] = NULL;
-	
+
 	ctx->opcode_execute[SpvOpAny] = spvm_execute_OpAny;
 	ctx->opcode_execute[SpvOpAll] = spvm_execute_OpAll;
 	ctx->opcode_execute[SpvOpIsNan] = spvm_execute_OpIsNan;

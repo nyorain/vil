@@ -11,15 +11,6 @@
 #include <vector>
 #include <optional>
 
-// fwd
-namespace spc {
-
-class Compiler;
-struct Resource;
-struct SPIRConstant;
-
-} // namespace spc
-
 namespace vil {
 
 struct ShaderSpecialization {
@@ -127,6 +118,7 @@ BindingNameRes bindingName(const spc::Compiler&, u32 setID, u32 bindingID);
 // Returns the resource associated with the given set, binding, if present.
 std::optional<spc::Resource> resource(const spc::Compiler&,
 	u32 setID, u32 bindingID, VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM);
+std::optional<spc::Resource> resource(const spc::Compiler&, u32 varID);
 
 struct ShaderModule : DeviceHandle {
 	VkShaderModule handle {};

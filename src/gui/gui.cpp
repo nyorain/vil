@@ -229,6 +229,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	// init tabs
 	tabs_.resources.init(*this);
 	tabs_.cb.init(*this);
+	tabs_.shader.init(*this);
 }
 
 void Gui::initPipes() {
@@ -442,7 +443,7 @@ void Gui::initPipes() {
 	pipes_.gui = pipes[0];
 	nameHandle(dev, pipes_.gui, "Gui:pipeGui");
 
-	for(auto i = 0u; i < ImageShader::count; ++i) {
+	for(auto i = 0u; i < ShaderImageType::count; ++i) {
 		pipes_.image[i] = pipes[1 + i];
 		auto name = dlg::format("Gui:pipeImage[{}]", i);
 		nameHandle(dev, pipes_.image[i], name.c_str());
@@ -460,13 +461,11 @@ void Gui::initPipes() {
 		shaderInfo.codeSize = spv.size() * 4;
 		shaderInfo.pCode = spv.data();
 
-		VkShaderModule mod;
+		auto& mod = modules.emplace_back();
 		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &shaderInfo, NULL, &mod));
-		// store module for destruction later on
-		modules.push_back(mod);
 
 		auto& cpi = cpis.emplace_back();
-		if(cpis.size() != 0u) {
+		if(cpis.size() > 1u) {
 			cpi.basePipelineIndex = 0u;
 		}
 
@@ -663,7 +662,7 @@ Gui::~Gui() {
 
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
-	for(auto i = 0u; i < ImageShader::count; ++i) {
+	for(auto i = 0u; i < ShaderImageType::count; ++i) {
 		dev_->dispatch.DestroyPipeline(vkDev, pipes_.image[i], nullptr);
 		dev_->dispatch.DestroyPipeline(vkDev, pipes_.readTex[i], nullptr);
 	}
@@ -829,7 +828,7 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
 
 	// Store our identifier
-	font_.drawImage.type = DrawGuiImage::font;
+	font_.drawImage.type = ShaderImageType::count; // font
 	io.Fonts->TexID = (ImTextureID) &font_.drawImage;
 	font_.uploaded = true;
 }
@@ -921,10 +920,10 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 					VkDescriptorSet ds = dsFont_;
 					VkPipeline pipe = pipes_.gui;
 					auto img = (DrawGuiImage*) cmd.TextureId;
-					if(img && img->type != DrawGuiImage::font) {
+					if(img && img->type != ShaderImageType::count) {
 						ds = img->ds;
-						dlg_assert(img->type - 1 < ImageShader::count);
-						pipe = pipes_.image[img->type - 1];
+						dlg_assert(img->type < ShaderImageType::count);
+						pipe = pipes_.image[img->type];
 
 						// bind push constant data
 						struct PcrImageData {
@@ -1397,6 +1396,12 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 					tabs_.cb.draw(draw);
 					ImGui::EndTabItem();
 				}
+			}
+
+			if(ImGui::BeginTabItem("Shader", nullptr, checkSelectTab(Tab::shader))) {
+				activeTab_ = Tab::shader;
+				tabs_.shader.draw();
+				ImGui::EndTabItem();
 			}
 
 			ImGui::EndTabBar();
@@ -2016,6 +2021,11 @@ void Gui::selectResource(Handle& handle, bool activateTab) {
 	if(activateTab) {
 		this->activateTab(Tab::resources);
 	}
+}
+
+void Gui::selectShader(const spc::Compiler& compiled) {
+	tabs_.shader.select(compiled);
+	this->activateTab(Tab::shader);
 }
 
 Draw* Gui::latestPendingDrawSyncLocked(SubmissionBatch& batch) {

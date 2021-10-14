@@ -2,12 +2,28 @@
 #include <spvm/opcode.h>
 #include <spvm/state.h>
 #include <spvm/spirv.h>
+#include <string.h>
 
 /* 3.32.2 Debug Instructions */
 void spvm_setup_OpSource(spvm_word word_count, spvm_state_t state)
 {
-	state->owner->language = SPVM_READ_WORD(state->code_current);
-	state->owner->language_version = SPVM_READ_WORD(state->code_current);
+	size_t id = state->owner->file_count++;
+	state->owner->files = (spvm_file*) realloc(state->owner->files, sizeof(spvm_file) * state->owner->file_count);
+
+	spvm_file* file = &state->owner->files[id];
+	memset(file, 0x0, sizeof(spvm_file));
+	file->language = SPVM_READ_WORD(state->code_current);
+	file->language_version = SPVM_READ_WORD(state->code_current);
+
+	if (word_count > 2) {
+		spvm_word name = SPVM_READ_WORD(state->code_current);
+		file->name = state->results[name].name;
+	}
+
+	if (word_count > 3) {
+		file->source = (spvm_string)malloc((word_count - 2) * sizeof(spvm_word));
+		spvm_string_read(state->code_current, file->source, word_count - 3);
+	}
 }
 void spvm_setup_OpSourceExtension(spvm_word word_count, spvm_state_t state)
 {
@@ -94,7 +110,7 @@ void spvm_setup_OpEntryPoint(spvm_word word_count, spvm_state_t state)
 
 	spvm_word interface_count = word_count - name_length - 2;
 	entry->globals_count = interface_count;
-	
+
 	if (interface_count) {
 		entry->globals = (spvm_word*)calloc(interface_count, sizeof(spvm_word));
 		spvm_word interface_index = 0;
@@ -199,17 +215,26 @@ void spvm_setup_OpTypeImage(spvm_word word_count, spvm_state_t state)
 	info->ms = SPVM_READ_WORD(state->code_current);
 	info->sampled = SPVM_READ_WORD(state->code_current);
 	info->format = SPVM_READ_WORD(state->code_current);
-	
+
 	if (word_count > 8)
 		info->access = SPVM_READ_WORD(state->code_current);
+}
+void spvm_setup_OpTypeSampler(spvm_word word_count, spvm_state_t state)
+{
+	spvm_word id = SPVM_READ_WORD(state->code_current);
+	state->results[id].type = spvm_result_type_type;
+	state->results[id].value_type = spvm_value_type_sampler;
+	state->results[id].pointer = SPVM_READ_WORD(state->code_current);
+	state->results[id].member_count = 1;
 }
 void spvm_setup_OpTypeSampledImage(spvm_word word_count, spvm_state_t state)
 {
 	spvm_word id = SPVM_READ_WORD(state->code_current);
+
 	state->results[id].type = spvm_result_type_type;
 	state->results[id].value_type = spvm_value_type_sampled_image;
-	state->results[id].pointer = SPVM_READ_WORD(state->code_current);
-	state->results[id].member_count = 1;
+	state->results[id].pointer = SPVM_READ_WORD(state->code_current); // image type
+	state->results[id].member_count = 2;
 }
 void spvm_setup_OpTypeArray(spvm_word word_count, spvm_state_t state)
 {
@@ -336,7 +361,7 @@ void spvm_setup_OpVariable(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word storage_class = SPVM_READ_WORD(state->code_current);
 	spvm_word initializer = -1;
-	
+
 	if (word_count >= 4)
 		initializer = SPVM_READ_WORD(state->code_current);
 
@@ -344,13 +369,15 @@ void spvm_setup_OpVariable(spvm_word word_count, spvm_state_t state)
 	state->results[id].storage_class = storage_class;
 	state->results[id].owner = state->current_function;
 
-	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+	if(!state->load_variable || !state->store_variable) {
+		spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
 
-	if (initializer != -1)
-		spvm_member_memcpy(state->results[id].members, state->results[initializer].members, state->results[id].member_count);
+		if (initializer != -1)
+			spvm_member_memcpy(state->results[id].members, state->results[initializer].members, state->results[id].member_count);
 
-	if (state->owner->allocate_workgroup_memory && storage_class == SpvStorageClassWorkgroup)
-		state->owner->allocate_workgroup_memory(state, id, var_type);
+		if (state->owner->allocate_workgroup_memory && storage_class == SpvStorageClassWorkgroup)
+			state->owner->allocate_workgroup_memory(state, id, var_type);
+	}
 }
 void spvm_setup_OpLoad(spvm_word word_count, spvm_state_t state)
 {
@@ -472,6 +499,7 @@ void _spvm_context_create_setup_table(spvm_context_t ctx)
 	ctx->opcode_setup[SpvOpTypeVector] = spvm_setup_OpTypeVector;
 	ctx->opcode_setup[SpvOpTypeMatrix] = spvm_setup_OpTypeMatrix;
 	ctx->opcode_setup[SpvOpTypeImage] = spvm_setup_OpTypeImage;
+	ctx->opcode_setup[SpvOpTypeSampler] = spvm_setup_OpTypeSampler;
 	ctx->opcode_setup[SpvOpTypeSampledImage] = spvm_setup_OpTypeSampledImage;
 	ctx->opcode_setup[SpvOpTypeArray] = spvm_setup_OpTypeArray;
 	ctx->opcode_setup[SpvOpTypeRuntimeArray] = spvm_setup_OpTypeRuntimeArray;

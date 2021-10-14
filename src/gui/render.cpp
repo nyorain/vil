@@ -5,6 +5,7 @@
 #include <device.hpp>
 #include <queue.hpp>
 #include <imgui/imgui.h>
+#include <vk/format_utils.h>
 
 namespace vil {
 
@@ -142,6 +143,64 @@ RenderBuffer::~RenderBuffer() {
 	}
 	if(view) {
 		dev->dispatch.DestroyImageView(dev->handle, view, nullptr);
+	}
+}
+
+ShaderImageType::Value ShaderImageType::parseType(VkImageType imgType,
+		VkFormat format, VkImageAspectFlagBits aspect) {
+	// NOTE: relies on ordering of DrawGuiImage::Type enum
+	auto imageTypeFUI = [](auto numt) {
+		if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) return Value::i1;
+		else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) return Value::u1;
+		else return Value::f1;
+	};
+
+	Value baseType;
+
+	if(aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
+		if(FormatIsSampledFloat(format)) baseType = Value::f1;
+		else if(FormatIsUInt(format)) baseType = Value::u1;
+		else if(FormatIsInt(format)) baseType = Value::i1;
+		else {
+			dlg_error("unreachable");
+			return ShaderImageType::count;
+		}
+	} else {
+		auto numt = VK_FORMAT_NUMERICAL_TYPE_NONE;
+		if(aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
+			numt = FormatDepthNumericalType(format);
+		} else if(aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
+			numt = FormatStencilNumericalType(format);
+		} else {
+			dlg_error("unreachable");
+			return ShaderImageType::count;
+		}
+
+		baseType = imageTypeFUI(numt);
+	}
+
+	auto off = 0u;
+	switch(imgType) {
+		case VK_IMAGE_TYPE_1D: off = 0u; break;
+		case VK_IMAGE_TYPE_2D: off = 1u; break;
+		case VK_IMAGE_TYPE_3D: off = 2u; break;
+		default: dlg_error("unreachable"); return ShaderImageType::count;
+	}
+
+	return Value(unsigned(baseType) + off);
+}
+
+VkImageViewType ShaderImageType::imageViewForImageType(VkImageType type) {
+	switch(type) {
+		case VK_IMAGE_TYPE_1D:
+			return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
+		case VK_IMAGE_TYPE_2D:
+			return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+		case VK_IMAGE_TYPE_3D:
+			return VK_IMAGE_VIEW_TYPE_3D;
+		default:
+			dlg_error("Unsupported image type");
+			return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
 	}
 }
 

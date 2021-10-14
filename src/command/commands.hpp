@@ -1123,11 +1123,6 @@ struct BuildAccelStructsCmd final : Command {
 	span<AccelStruct*> srcs;
 	span<AccelStruct*> dsts;
 
-	// Special: we save the compute state at this command is executed since
-	// we need to restore it when hooking this command (to retrieve the
-	// source data) in CommandHookRecord.
-	ComputeState savedComputeState;
-
 	BuildAccelStructsCmd(CommandBuffer& cb);
 	Type type() const override { return Type::buildAccelStruct; }
 	std::string nameDesc() const override { return "BuildAccelerationStructures"; }
@@ -1144,11 +1139,6 @@ struct BuildAccelStructsIndirectCmd final : Command {
 	span<VkDeviceAddress> indirectAddresses;
 	span<u32> indirectStrides;
 	span<u32*> maxPrimitiveCounts;
-
-	// Special: we save the compute state at this command is executed since
-	// we need to restore it when hooking this command (to retrieve the
-	// source data) in CommandHookRecord.
-	ComputeState savedComputeState;
 
 	BuildAccelStructsIndirectCmd(CommandBuffer& cb);
 	Type type() const override { return Type::buildAccelStruct; }

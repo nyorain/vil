@@ -1,6 +1,10 @@
 #ifndef __SPIRV_VM_RESULT_H__
 #define __SPIRV_VM_RESULT_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+
 #include <spvm/types.h>
 #include <spvm/value.h>
 #include <spvm/spirv.h>
@@ -19,6 +23,7 @@ enum spvm_result_type {
 	spvm_result_type_function_parameter,
 	spvm_result_type_label
 };
+
 typedef struct {
 	SpvDim dim;
 	spvm_byte depth;
@@ -28,21 +33,20 @@ typedef struct {
 	SpvImageFormat format;
 	SpvAccessQualifier access;
 } spvm_image_info;
+
 typedef struct {
 	SpvDecoration type;
 	spvm_word literal1, literal2;
 	spvm_word index; // member
 } spvm_decoration;
+
 typedef struct spvm_result {
-	char type;
+	enum spvm_result_type type;
 
 	spvm_string name;
 	spvm_word pointer; // pointer to spvm_result
 	SpvStorageClass storage_class;
 	struct spvm_result* owner;
-
-	spvm_word member_name_count;
-	spvm_string* member_name;
 
 	spvm_word member_count;
 	spvm_member* members;
@@ -63,14 +67,20 @@ typedef struct spvm_result {
 	/* function, label & access chain */
 	spvm_source source_location;
 
+	/* spvm_result_type_access_chain*/
 	/* word count when a opcode uses source_location (OpAccessChain) */
 	spvm_word source_word_count;
+	spvm_word index_count;
+	spvm_word* indices;
 
 	/* op type */
-	char value_type;
+	enum spvm_value_type value_type;
 	spvm_word value_bitcount;
 	char value_sign;
 	spvm_image_info* image_info;
+
+	spvm_word member_name_count;
+	spvm_string* member_name;
 } spvm_result;
 typedef spvm_result* spvm_result_t;
 
@@ -86,5 +96,9 @@ void spvm_member_allocate_value(spvm_member_t val, spvm_word count);
 void spvm_member_allocate_typed_value(spvm_member_t val, spvm_result* results, spvm_word type);
 spvm_word spvm_result_calculate_size(spvm_result_t results, spvm_word type);
 void spvm_member_recursive_fill(spvm_result_t results, float* data, spvm_member_t values, spvm_word value_count, spvm_word element_type, spvm_word* offset); // offset is number of 4byte elements
+
+#ifdef __cplusplus
+}
+#endif // __cplusplus
 
 #endif // __SPIRV_VM_RESULT_H__

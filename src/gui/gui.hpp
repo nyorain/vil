@@ -5,6 +5,7 @@
 #include <gui/blur.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
+#include <gui/shader.hpp>
 #include <util/bytes.hpp>
 #include <imgui/imgui.h>
 #include <variant>
@@ -19,6 +20,7 @@ public:
 		resources,
 		commandBuffer,
 		memory,
+		shader,
 	};
 
 	struct FrameInfo {
@@ -40,21 +42,6 @@ public:
 
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
-
-	// For shaders/pipelines that access application images, we need
-	// permutations for the different images types.
-	enum ImageShader {
-		u1,
-		u2,
-		u3,
-		i1,
-		i2,
-		i3,
-		f1,
-		f2,
-		f3,
-		count
-	};
 
 public:
 	Gui() = default;
@@ -84,6 +71,7 @@ public:
 
 	void activateTab(Tab);
 	void selectResource(Handle& handle, bool activateTab = true);
+	void selectShader(const spc::Compiler& compiled);
 
 	auto& cbGui() { return tabs_.cb; }
 	ImGuiIO& imguiIO() const { return *io_; }
@@ -105,7 +93,7 @@ public:
 
 	const VkDescriptorSetLayout& imgOpDsLayout() const { return imgOpDsLayout_; }
 	const VkPipelineLayout& imgOpPipeLayout() const { return imgOpPipeLayout_; }
-	const VkPipeline& readTexPipe(ImageShader type) const { return pipes_.readTex[type]; }
+	const VkPipeline& readTexPipe(ShaderImageType::Value type) const { return pipes_.readTex[type]; }
 
 	// only for the current draw
 	using Recorder = std::function<void(Draw&)>;
@@ -142,6 +130,7 @@ private:
 	struct {
 		ResourceGui resources;
 		CommandBufferGui cb;
+		ShaderDebugger shader;
 	} tabs_;
 
 	// rendering stuff
@@ -159,8 +148,8 @@ private:
 	struct {
 		VkPipeline gui;
 		VkPipeline imageBg;
-		VkPipeline image[ImageShader::count] {};
-		VkPipeline readTex[ImageShader::count] {};
+		VkPipeline image[ShaderImageType::count] {};
+		VkPipeline readTex[ShaderImageType::count] {};
 	} pipes_;
 
 	bool clear_ {};

@@ -1,3 +1,15 @@
+- [x] higher-id descriptor sets sometimes incorrectly unbound, e.g. iro/atmosphere
+      {found the bug, binding a descriptor to a previously unbound slot would
+	   always disturb all following ones even though that's incorrect}
+	- [~] add unit test for this case.
+	      {we just disabled this whole disturb tracking for now at all}
+- [x] proper support for reading depth, packed and compressed formats.
+      See TODOs in ioFormat
+      ImageViewer does not handle depth/stencil aspects correctly when
+	  reading back texels
+	  {EDIT: don't need this anymore, we just use sampling to read images}
+	- [~] write some tests
+- [x] image viewer: fix display of HUGEx1 images
 - [x] instead of copy and cpu-formatting of texture values, we should
       probably just dispatch a single compute shader invocation that samples
 	  the texture and writes the float4 output to a buffer.

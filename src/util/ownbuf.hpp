@@ -16,7 +16,12 @@ struct OwnBuffer {
 	// Will ensure the buffer has at least the given size.
 	// If not, will recreate it with the given size and usage.
 	// Always uses host visible memory.
-	void ensure(Device&, VkDeviceSize, VkBufferUsageFlags);
+	// - queueFams: the queue families where the buffer will be used.
+	//   Passing in duplicates is okay, they will be eliminated.
+	//   If queueFams contains less than 2 unique families, exclusive
+	//   sharing mode will be used.
+	void ensure(Device&, VkDeviceSize, VkBufferUsageFlags,
+		span<const u32> queueFams = {});
 
 	void invalidateMap();
 	void flushMap();

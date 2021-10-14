@@ -1,0 +1,31 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x_id = 0, local_size_y_id = 1) in;
+
+layout(set = 0, binding = 0) buffer Dst {
+	// TODO: this will truncate for 64-bit texture formats.
+	// We need 64-bit shader type support to correctly represent that.
+	vec4 outResult[];
+};
+
+layout(push_constant) uniform PCR {
+	int level;
+	uint dstOffset;
+} pcr;
+
+#define SAMPLE_TEX_BINDING 1
+#include "sample.glsl"
+
+void main() {
+	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
+	ivec3 size = texSize(pcr.level);
+	if(coords.x >= size.x || coords.y >= size.y || coords.z >= size.z) {
+		return;
+	}
+
+	uint id = coords.z * (size.x * size.y) + coords.y * size.x + coords.x;
+	outResult[pcr.dstOffset + id] = fetchTex(coords, pcr.level);
+}
+

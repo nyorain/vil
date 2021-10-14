@@ -72,6 +72,8 @@ public:
 
 	CommandHookState* state() const { return state_.get(); }
 	CommandRecord* record() const { return record_.get(); }
+	const Command* command() const { return command_; }
+	const CommandDescriptorSnapshot& dsState() const { return dsState_; }
 
 	auto& vertexViewer() { return vertexViewer_; }
 

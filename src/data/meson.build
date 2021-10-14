@@ -39,6 +39,8 @@ if glslang.found()
 		# image analyze shaders
 		'histogram.comp': imgtable,
 		'minmax.comp': imgtable,
+		# copyTex to sample-copy an image to a vec4[] buffer
+		'copyTex.comp': imgtable,
 	}
 
 	foreach file, configs : overlay_shaders

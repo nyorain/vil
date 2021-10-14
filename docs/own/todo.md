@@ -20,15 +20,15 @@ new, workstack:
 	  formatting & text rendering)
 
 urgent, bugs:
-- [ ] higher-id descriptor sets sometimes incorrectly unbound, e.g. iro/atmosphere
-	- [ ] add unit test for this case.
+- [ ] figure out tracy issues. On windows, it causes problems with a lot
+      of applications that I can't explain :( Some of the problems
+	  have been caused by a tracy update, it used to work!
 - [ ] figure out transform_feedback crashes in doom eternal
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
-- [ ] image viewer: fix display of HUGEx1 images
 - [ ] figure out why copying attachments/descriptors shows weird/incorrect 
       output in the dota intro screen sometimes. Sync problem? Matching problem?
 	  {might be fixed now, with proper splitrp deps}
@@ -37,6 +37,19 @@ urgent, bugs:
 	  an empty alias string
 - [ ] toupper bug when searching for resource
 - [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
+
+spvm:
+- [ ] Add OpSpecConstant* support
+- [ ] Add OpArrayLength support
+- [ ] Avoid copies for setting buffer data.
+      Maybe just add callback when a buffer is accessed that can return the data?
+	  I guess the only ways for access is OpLoad, optionally via OpAccessChain.
+	  Something like `spvm_member_t get_data(spvm_result_t var, size_t index_count, unsigned* indices)`
+	  Alternative: a more specific interface only for the most important case, runtime arrays.
+	  (But honestly, shaders could also just declare huge static arrays so we probably
+	  want the general support).
+- [ ] add callback for getting image data instead of requiring the whole image
+      to be present
 
 docs
 - [ ] write small wiki documentation post on how to use API
@@ -90,6 +103,9 @@ performance/profiling:
 	  need giant buffers and the performance impact is huge
 	  	- [ ] also figure out better xfb buffer allocation strategy,
 		      just always allocating 32MB buffers is... not good.
+		- [ ] solution: implement draw call splitting as in docs/own/cow.md.
+		      We have to take care to always preserve all IDs passed to
+			  the shader (gl_DrawIndex, gl_VertexIndex etc)
 - [ ] profile our formatted data reading, might be a bottleneck worth
 	  optimizing. VertexViewer.Table zone had > 10ms (even with just 100
 	  vertices). Find the culprit!
@@ -191,11 +207,6 @@ other
 	      when we detect that there is an attached debugger.
 	      Somehow signal they are coming from us though, use a VIL prefix or smth.
 		  Stop allocating a console.
-- [ ] proper support for reading depth, packed and compressed formats.
-      See TODOs in ioFormat
-      ImageViewer does not handle depth/stencil aspects correctly when
-	  reading back texels
-	- [ ] write some tests
 - [ ] figure out "instance_extensions" in the layer json.
       Do we have to implement all functions? e.g. the CreateDebugUtilsMessengerEXT as well?
 - [ ] more useful names for handles (e.g. some basic information for images)
@@ -281,6 +292,10 @@ optimization:
 
 ---
 
+- [ ] proper descriptor resource management. We currently statically allocate
+	  a couple of descriptors (in Device) and pray it works
+	  	- [ ] when push descriptors are available we probably wanna use them.
+		      alternative code path should be straight forward
 - [ ] support multiple possible layouts (including scalar!) in bufparser
 - [ ] Properly init/resize accel struct buffers on build.
 	  See ~commandHook.cpp:1671 (needsInit)

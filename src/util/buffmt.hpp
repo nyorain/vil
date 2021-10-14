@@ -20,6 +20,11 @@ struct Decoration {
 
 	std::string name {};
 	u32 offset {}; // for members; offset in struct
+	// TODO: for multidim arrays, each dimension might have a non-tight
+	// arrayStride in spirv i guess? In Vulkan, the stride for the
+	// dimension >= 1 won't be non-tight but we might still want to
+	// handle this. This currently is the array stride of the last
+	// dimension (i.e. how large is one element in the array).
 	u32 arrayStride {};
 	u32 matrixStride {};
 	Flags flags {};

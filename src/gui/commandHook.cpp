@@ -20,6 +20,16 @@
 #include <vk/format_utils.h>
 #include <accelStructVertices.comp.spv.h>
 
+#include <copyTex.comp.1DArray.spv.h>
+#include <copyTex.comp.u1DArray.spv.h>
+#include <copyTex.comp.i1DArray.spv.h>
+#include <copyTex.comp.2DArray.spv.h>
+#include <copyTex.comp.u2DArray.spv.h>
+#include <copyTex.comp.i2DArray.spv.h>
+#include <copyTex.comp.3D.spv.h>
+#include <copyTex.comp.u3D.spv.h>
+#include <copyTex.comp.i3D.spv.h>
+
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
 //   barriers.
@@ -205,6 +215,7 @@ void invalidate(CommandHookRecord& rec) {
 // CommandHook
 CommandHook::CommandHook(Device& dev) {
 	dev_ = &dev;
+	initImageCopyPipes(dev);
 	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
 		initAccelStructCopy(dev);
 	}
@@ -214,17 +225,131 @@ CommandHook::~CommandHook() {
 	invalidateRecordings();
 
 	auto& dev = *dev_;
-	dev.dispatch.DestroyPipelineLayout(dev.handle, accelStructPipeLayout_, nullptr);
+
+	for(auto& pipe : copyImagePipes_) {
+		dev.dispatch.DestroyPipeline(dev.handle, pipe, nullptr);
+	}
+
+	dev.dispatch.DestroyPipelineLayout(dev.handle, copyImagePipeLayout_, nullptr);
+	dev.dispatch.DestroyDescriptorSetLayout(dev.handle, copyImageDsLayout_, nullptr);
+
 	dev.dispatch.DestroyPipeline(dev.handle, accelStructVertCopy_, nullptr);
+	dev.dispatch.DestroyPipelineLayout(dev.handle, accelStructPipeLayout_, nullptr);
 }
 
-void CommandHook::initAccelStructCopy(Device& dev) {
-	// We just allocate the full push constant range that all implementations
-	// must support.
+void CommandHook::initImageCopyPipes(Device& dev) {
+	// ds layout
+	VkDescriptorSetLayoutBinding bindings[2] {};
+	bindings[0].binding = 0u;
+	bindings[0].descriptorCount = 1u;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	bindings[1].binding = 1u;
+	bindings[1].descriptorCount = 1u;
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	bindings[1].pImmutableSamplers = &dev.gui->nearestSampler();
+
+	VkDescriptorSetLayoutCreateInfo dslci {};
+	dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	dslci.bindingCount = 2u;
+	dslci.pBindings = bindings;
+	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr,
+		&copyImageDsLayout_));
+	nameHandle(dev, copyImageDsLayout_, "CommandHook:copyImage");
+
+	// pipe layout
 	VkPushConstantRange pcrs[1] = {};
 	pcrs[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	pcrs[0].offset = 0;
-	pcrs[0].size = 128; // needed e.g. for vertex viewer pipeline
+	pcrs[0].size = 8;
+
+	VkPipelineLayoutCreateInfo plci {};
+	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = pcrs;
+	plci.setLayoutCount = 1u;
+	plci.pSetLayouts = &copyImageDsLayout_;
+	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
+		&copyImagePipeLayout_));
+	nameHandle(dev, copyImagePipeLayout_, "CommandHook:copyImage");
+
+	// pipes
+	std::vector<VkComputePipelineCreateInfo> cpis;
+
+	ThreadMemScope ms;
+	auto mods = ms.alloc<VkShaderModule>(ShaderImageType::count);
+	auto specs = ms.alloc<VkSpecializationInfo>(ShaderImageType::count);
+
+	VkSpecializationMapEntry specEntries[3];
+	for(auto i = 0u; i < 3; ++i) {
+		specEntries[i].constantID = i;
+		specEntries[i].offset = i * sizeof(u32);
+		specEntries[i].size = sizeof(u32);
+	}
+
+	auto addCpi = [&](span<const u32> spv, const std::array<u32, 3>& groupSizes) {
+		auto& spec = specs[cpis.size()];
+		spec.dataSize = groupSizes.size() * 4;
+		spec.pData = reinterpret_cast<const std::byte*>(groupSizes.data());
+		spec.mapEntryCount = groupSizes.size();
+		spec.pMapEntries = specEntries;
+
+		VkShaderModuleCreateInfo sci {};
+		sci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		sci.codeSize = spv.size() / 4;
+		sci.pCode = spv.data();
+
+		auto& mod = mods[cpis.size()];
+		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &sci, nullptr, &mod));
+
+		auto& cpi = cpis.emplace_back();
+		if(cpis.size() > 1u) {
+			cpi.basePipelineIndex = 0u;
+		}
+
+		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		cpi.layout = accelStructPipeLayout_;
+		cpi.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		cpi.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		cpi.stage.module = mod;
+		cpi.stage.pName = "main";
+		cpi.stage.pSpecializationInfo = &spec;
+	};
+
+	const std::array<u32, 3> spec1D {64, 1, 1};
+	const std::array<u32, 3> specOther {8, 8, 1};
+
+	addCpi(copyTex_comp_u1DArray_spv_data, spec1D);
+	addCpi(copyTex_comp_u2DArray_spv_data, specOther);
+	addCpi(copyTex_comp_u3D_spv_data, specOther);
+
+	addCpi(copyTex_comp_i1DArray_spv_data, spec1D);
+	addCpi(copyTex_comp_i2DArray_spv_data, specOther);
+	addCpi(copyTex_comp_i3D_spv_data, specOther);
+
+	addCpi(copyTex_comp_1DArray_spv_data, spec1D);
+	addCpi(copyTex_comp_2DArray_spv_data, specOther);
+	addCpi(copyTex_comp_3D_spv_data, specOther);
+
+	VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
+		cpis.size(), cpis.data(), nullptr, copyImagePipes_));
+
+	for(auto pipe : copyImagePipes_) {
+		nameHandle(dev, pipe, "CommandHook:copyImage");
+	}
+
+	for(auto mod : mods) {
+		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
+	}
+}
+
+void CommandHook::initAccelStructCopy(Device& dev) {
+	VkPushConstantRange pcrs[1] = {};
+	pcrs[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	pcrs[0].offset = 0;
+	pcrs[0].size = 48;
 
 	VkPipelineLayoutCreateInfo plci {};
 	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -232,7 +357,7 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	plci.pPushConstantRanges = pcrs;
 	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
 		&accelStructPipeLayout_));
-	nameHandle(dev, accelStructPipeLayout_, "CommandHook:accelStructPipeLayout");
+	nameHandle(dev, accelStructPipeLayout_, "CommandHook:accelStructVertCopy");
 
 	// init pipeline
 	VkShaderModule mod {};
@@ -268,7 +393,7 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 		const DescriptorState* dsState = getDsState(*cmd);
 		auto& dsSnapshot = record.record->lastDescriptorState;
 
-		for(auto [setID, bindingID, elemID, _] : descriptorCopies) {
+		for(auto [setID, bindingID, elemID, _1, _2] : descriptorCopies) {
 			dlg_assert(setID < dsState->descriptorSets.size());
 			auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
 			dlg_assert(it != dsSnapshot.states.end());
@@ -676,7 +801,38 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	}
 }
 
-void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info) {
+void CommandHookRecord::dispatchRecord(Command& cmd, RecordInfo& info) {
+	auto& dev = *record->dev;
+
+	if(info.rebindComputeState && cmd.type() == CommandType::dispatch) {
+		auto& dcmd = static_cast<const DispatchCmdBase&>(cmd);
+
+		// pipe, descriptors
+		bind(dev, this->cb, dcmd.state);
+
+		// push constants
+		if(!dcmd.pushConstants.data.empty()) {
+			auto data = dcmd.pushConstants.data;
+			auto& layout = dcmd.state.pipe->layout;
+			for(auto& pcr : layout->pushConstants) {
+				if(!(pcr.stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) ||
+						pcr.offset >= data.size()) {
+					continue;
+				}
+
+				auto size = std::min<u32>(pcr.size, data.size() - pcr.offset);
+				dev.dispatch.CmdPushConstants(cb, layout->handle,
+					pcr.stageFlags, pcr.offset, size, data.data() + pcr.offset);
+			}
+		}
+
+		info.rebindComputeState = false;
+	}
+
+	cmd.record(*record->dev, this->cb);
+}
+
+void CommandHookRecord::hookRecordBeforeDst(Command& dst, RecordInfo& info) {
 	auto& dev = *record->dev;
 
 	dlg_assert(&dst == hcommand.back());
@@ -686,8 +842,8 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 
 		auto numSubpasses = info.beginRenderPassCmd->rp->desc.subpasses.size();
 		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
-			// TODO: missing potential forward of pNext chain here
 			// Subpass contents irrelevant here.
+			// TODO: missing potential forward of pNext chain here
 			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 		}
 		dev.dispatch.CmdEndRenderPass(cb);
@@ -725,7 +881,7 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, const RecordInfo& info
 	}
 }
 
-void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info) {
+void CommandHookRecord::hookRecordAfterDst(Command& dst, RecordInfo& info) {
 	auto& dev = *record->dev;
 	dlg_assert(&dst == hcommand.back());
 
@@ -773,7 +929,7 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, const RecordInfo& info)
 	}
 }
 
-void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
+void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	DebugLabel cblbl(dev, cb, "vil:hookRecordDst");
 
@@ -833,7 +989,7 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 		}
 	}
 
-	cmd.record(dev, this->cb);
+	dispatchRecord(cmd, info);
 
 	auto cmdAsParent = dynamic_cast<const ParentCommand*>(&cmd);
 	auto nextInfo = info;
@@ -874,13 +1030,11 @@ void CommandHookRecord::hookRecordDst(Command& cmd, const RecordInfo& info) {
 	hookRecordAfterDst(cmd, info);
 }
 
-void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
+void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	*info.maxHookLevel = std::max(*info.maxHookLevel, info.nextHookLevel);
 
 	auto& dev = *record->dev;
 	while(cmd) {
-		auto nextInfo = info;
-
 		// check if command needs additional, manual hook
 		if(cmd->type() == CommandType::buildAccelStruct) {
 			auto* basCmd = dynamic_cast<BuildAccelStructsCmd*>(cmd);
@@ -892,6 +1046,10 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 			} else if(basCmdIndirect) {
 				hookBefore(*basCmdIndirect);
 			}
+
+			// We have to restore the original compute state here since the
+			// the acceleration structure copies change it.
+			info.rebindComputeState = true;
 		}
 
 		// check if command is on hooking chain
@@ -921,7 +1079,7 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 
 				// dlg_assert(!nextInfo.beginRenderPassCmd);
 				// nextInfo.beginRenderPassCmd = beginRpCmd;
-				dlg_assert(nextInfo.beginRenderPassCmd == beginRpCmd);
+				dlg_assert(info.beginRenderPassCmd == beginRpCmd);
 				skipRecord = true;
 			}
 
@@ -933,16 +1091,17 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 				dlg_assert(hookDst || (parentCmd && parentCmd->children()));
 
 				if(!skipRecord) {
-					cmd->record(dev, this->cb);
+					dispatchRecord(*cmd, info);
 				}
 
 				if(parentCmd) {
-					++nextInfo.nextHookLevel;
-					hookRecord(parentCmd->children(), nextInfo);
+					++info.nextHookLevel;
+					hookRecord(parentCmd->children(), info);
+					--info.nextHookLevel;
 				}
 			}
 		} else {
-			cmd->record(dev, this->cb);
+			dispatchRecord(*cmd, info);
 			if(auto parentCmd = dynamic_cast<const ParentCommand*>(cmd); parentCmd) {
 				hookRecord(parentCmd->children(), info);
 			}
@@ -952,6 +1111,10 @@ void CommandHookRecord::hookRecord(Command* cmd, const RecordInfo& info) {
 	}
 }
 
+// Initializes the given CopiedImage 'dst' and add commands to 'cb' (associated
+// with queue family 'srcQueueFam') to copy the given 'srcSubres' from
+// 'src' (which is in the given 'srcLayout') into 'dst'.
+// After executing the recorded commands, 'dst' will contain srcSubres from src.
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		VkImageLayout srcLayout, const VkImageSubresourceRange& srcSubres,
 		u32 srcQueueFam) {
@@ -1098,6 +1261,165 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 }
 
+// Initializes the given OwnBuffer 'dst' and add commands to 'cb' (associated
+// with queue family 'srcQueueFam') to copy the given 'srcSubres' from
+// 'src' (which is in the given 'srcLayout') into 'dst'.
+// After executing the recorded commands, 'dst' will contain srcSubres from src,
+// as if sampled and converted to vec4 (i.e. rgba32f). Requires that 'src'
+// supports nearest sampling. Will bind compute state to 'cb'.
+// Only a single aspect must be set int srcSubres.
+void CommandHookRecord::initAndSampleCopy(OwnBuffer& dst, Image& src, VkImageLayout srcLayout,
+		const VkImageSubresourceRange& srcSubres, span<const u32> queueFams) {
+	auto& dev = *record->dev;
+	auto& hook = *dev.commandHook;
+	dlg_assert(src.allowsNearestSampling);
+
+	// = init buffer =
+	// TODO PERF: only copy in the precision that we need. I.e. add
+	// shader permutations that pack the data into 8/16/32 bit
+	auto texelSize = sizeof(Vec4f);
+
+	auto neededSize = 0u;
+	for(auto l = 0u; l < srcSubres.levelCount; ++l) {
+		auto level = srcSubres.baseMipLevel + l;
+		auto width = std::max(1u, src.ci.extent.width >> level);
+		auto height = std::max(1u, src.ci.extent.height >> level);
+		auto depth = std::max(1u, src.ci.extent.depth >> level);
+		auto layerSize = texelSize * width * height * depth;
+		neededSize += layerSize * srcSubres.layerCount;
+	}
+
+	auto usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	dst.ensure(dev, neededSize, usage, queueFams);
+
+	// = record =
+	VkImageMemoryBarrier srcBarrier;
+	srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	srcBarrier.image = src.handle;
+	srcBarrier.oldLayout = srcLayout;
+	srcBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	srcBarrier.srcAccessMask =
+		VK_ACCESS_SHADER_READ_BIT |
+		VK_ACCESS_SHADER_WRITE_BIT |
+		VK_ACCESS_MEMORY_READ_BIT |
+		VK_ACCESS_MEMORY_WRITE_BIT; // dunno
+	srcBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	srcBarrier.subresourceRange = srcSubres;
+	srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		0, 0, nullptr, 0, nullptr, 1, &srcBarrier);
+
+	// create image view
+	VkImageViewCreateInfo ivi {};
+	ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	ivi.image = src.handle;
+	ivi.viewType = ShaderImageType::imageViewForImageType(src.ci.imageType);
+	ivi.format = src.ci.format;
+	ivi.subresourceRange = srcSubres;
+
+	auto& imgView = imageViews.emplace_back();
+	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &imgView));
+	nameHandle(dev, imgView, "CommandHook:copyImage");
+
+	// create/update descriptor bindings
+	auto& ds = descriptorSets.emplace_back();
+	VkDescriptorSetAllocateInfo dai {};
+	dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	dai.descriptorSetCount = 1u;
+	dai.pSetLayouts = &hook.copyImageDsLayout_;
+	dai.descriptorPool = dev.dsPool;
+	VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &ds));
+
+	VkDescriptorImageInfo imgInfo {};
+	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	imgInfo.imageView = imgView;
+
+	VkDescriptorBufferInfo bufInfo {};
+	bufInfo.buffer = dst.buf;
+	bufInfo.offset = 0u;
+	bufInfo.range = dst.size;
+
+	VkWriteDescriptorSet writes[2] {};
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[0].descriptorCount = 1u;
+	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	writes[0].pBufferInfo = &bufInfo;
+	writes[0].dstBinding = 0u;
+	writes[0].dstSet = ds;
+
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[1].descriptorCount = 1u;
+	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[1].pImageInfo = &imgInfo;
+	writes[1].dstBinding = 1u;
+	writes[1].dstSet = ds;
+
+	dev.dispatch.UpdateDescriptorSets(dev.handle, 2u, writes, 0u, nullptr);
+	dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+		hook.copyImagePipeLayout_, 0u, 1u, &ds, 0u, nullptr);
+
+	auto dstOffset = 0u;
+	for(auto l = 0u; l < srcSubres.levelCount; ++l) {
+		auto level = srcSubres.baseMipLevel + l;
+		auto width = std::max(1u, src.ci.extent.width >> level);
+		auto height = std::max(1u, src.ci.extent.height >> level);
+		auto depth = std::max(1u, src.ci.extent.depth >> level);
+		auto layerSize = texelSize * width * height * depth;
+
+		struct {
+			i32 level;
+			u32 dstOffset;
+		} pcr {
+			i32(level),
+			dstOffset,
+		};
+
+		dev.dispatch.CmdPushConstants(cb, hook.copyImagePipeLayout_,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), &pcr);
+
+		auto sit = ShaderImageType::parseType(src.ci.imageType,
+			src.ci.format, VkImageAspectFlagBits(srcSubres.aspectMask));
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			hook.copyImagePipes_[sit]);
+
+		auto groupSizeX = 8u;
+		auto groupSizeY = 8u;
+		auto groupSizeZ = 1u;
+		auto z = depth;
+
+		if(src.ci.imageType == VK_IMAGE_TYPE_1D) {
+			groupSizeX = 64u;
+			groupSizeY = 1u;
+		}
+
+		if(srcSubres.layerCount > 1u) {
+			// 3D images can't have multiple layers
+			z = srcSubres.layerCount;
+		}
+
+		auto gx = ceilDivide(width, groupSizeX);
+		auto gy = ceilDivide(height, groupSizeY);
+		auto gz = ceilDivide(z, groupSizeZ);
+
+		dev.dispatch.CmdDispatch(cb, gx, gy, gz);
+
+		dstOffset += layerSize * srcSubres.layerCount;
+	}
+
+	// restore image state
+	std::swap(srcBarrier.oldLayout, srcBarrier.newLayout);
+	std::swap(srcBarrier.srcAccessMask, srcBarrier.dstAccessMask);
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could
+		0, 0, nullptr, 0, nullptr, 1, &srcBarrier);
+}
+
 void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 		VkDeviceSize srcOffset, OwnBuffer& dst, VkDeviceSize dstOffset,
 		VkDeviceSize size) {
@@ -1149,13 +1471,13 @@ void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
 
 void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 		VkBufferUsageFlags addFlags, Buffer& src,
-		VkDeviceSize offset, VkDeviceSize size) {
+		VkDeviceSize offset, VkDeviceSize size, span<const u32> queueFams) {
 	addFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	dst.ensure(dev, size, addFlags);
+	dst.ensure(dev, size, addFlags, queueFams);
 	performCopy(dev, cb, src, offset, dst, 0, size);
 }
 
-void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info,
+void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		const CommandHook::DescriptorCopy& copyDesc,
 		CommandHookState::CopiedDescriptor& dst) {
 	auto& dev = *record->dev;
@@ -1167,7 +1489,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info,
 		return;
 	}
 
-	auto [setID, bindingID, elemID, _] = copyDesc;
+	auto [setID, bindingID, elemID, _1, imageAsBuffer] = copyDesc;
 
 	// NOTE: we have to check for correct sizes here since the
 	// actual command might have changed (for an updated record)
@@ -1213,6 +1535,11 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info,
 
 	auto& lbinding = ds.layout->bindings[bindingID];
 	auto cat = category(lbinding.descriptorType);
+
+	// Setting imageAsBuffer when the descriptor isn't of image type does
+	// not make sense
+	dlg_assertl(dlg_level_warn, cat == DescriptorCategory::image || !imageAsBuffer);
+
 	if(cat == DescriptorCategory::image) {
 		auto& elem = images(*it->second, bindingID)[elemID];
 		if(needsImageView(lbinding.descriptorType)) {
@@ -1239,9 +1566,17 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info,
 
 				// TODO: select exact layer/mip in view range via gui
 				auto subres = imgView->ci.subresourceRange;
-				auto& dstImg = dst.data.emplace<CopiedImage>();
-				initAndCopy(dev, cb, dstImg, *imgView->img, layout, subres,
-					record->queueFamily);
+
+				if(imageAsBuffer) {
+					// we don't ever use that buffer in a submission again
+					// so we an ignore queue families
+					auto& dstBuf = dst.data.emplace<OwnBuffer>();
+					initAndSampleCopy(dstBuf, *imgView->img, layout, subres, {});
+				} else {
+					auto& dstImg = dst.data.emplace<CopiedImage>();
+					initAndCopy(dev, cb, dstImg, *imgView->img, layout, subres,
+						record->queueFamily);
+				}
 			}
 		} else {
 			// We shouldn't land here at all, we catch that case when
@@ -1268,9 +1603,11 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info,
 		}
 		auto size = std::min(maxBufCopySize, range);
 
+		// we don't ever read the buffer from the gfxQueue so we can
+		// ignore queueFams here
 		auto& dstBuf = dst.data.emplace<OwnBuffer>();
 		initAndCopy(dev, cb, dstBuf, 0u, nonNull(elem.buffer),
-			elem.offset, size);
+			elem.offset, size, {});
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
 		//   as buffer but then create bufferView on our own?
@@ -1303,7 +1640,7 @@ void CommandHookRecord::copyDs(Command& bcmd, const RecordInfo& info,
 	}
 }
 
-void CommandHookRecord::copyAttachment(const RecordInfo& info, unsigned attID,
+void CommandHookRecord::copyAttachment(RecordInfo& info, unsigned attID,
 		CommandHookState::CopiedAttachment& dst) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyAttachment");
@@ -1363,7 +1700,7 @@ VkImageSubresourceRange toRange(const VkImageSubresourceLayers& subres) {
 	return ret;
 }
 
-void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
+void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 	dlg_assert(hook->copyTransferDst != hook->copyTransferSrc);
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyTransfer");
@@ -1414,7 +1751,9 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 				size = src->ci.size;
 			}
 
-			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size);
+			// we don't ever read the buffer from the gfxQueue so we can
+			// ignore queueFams here
+			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size, {});
 		}
 	} else if(hook->copyTransferDst) {
 		std::optional<CopyImage> img;
@@ -1478,12 +1817,14 @@ void CommandHookRecord::copyTransfer(Command& bcmd, const RecordInfo& info) {
 				size = src->ci.size;
 			}
 
-			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size);
+			// we don't ever read the buffer from the gfxQueue so we can
+			// ignore queueFams here
+			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size, {});
 		}
 	}
 }
 
-void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info) {
+void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:beforeDstOutsideRp");
 
@@ -1507,6 +1848,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 	if(hook->copyIndirectCmd) {
 		DebugLabel lbl(dev, cb, "vil:copyInderectCmd");
 
+		// we don't ever read the buffer from the gfxQueue so we can
+		// ignore queueFams here
 		if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(&bcmd)) {
 			VkDeviceSize stride = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
@@ -1514,11 +1857,11 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 			stride = cmd->stride ? cmd->stride : stride;
 			auto dstSize = cmd->drawCount * stride;
 			initAndCopy(dev, cb, state->indirectCopy,  0u,
-				nonNull(cmd->buffer), cmd->offset, dstSize);
+				nonNull(cmd->buffer), cmd->offset, dstSize, {});
 		} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
 			auto size = sizeof(VkDispatchIndirectCommand);
 			initAndCopy(dev, cb, state->indirectCopy, 0u,
-				nonNull(cmd->buffer), cmd->offset, size);
+				nonNull(cmd->buffer), cmd->offset, size, {});
 		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
 			auto cmdSize = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
@@ -1558,6 +1901,10 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 
 	auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd);
 
+	// We might use the vertex/index buffer copies when rendering the ui
+	// later on so we have to care about queue families
+	auto queueFams = {record->queueFamily, dev.gfxQueue->family};
+
 	// PERF: we could support tighter buffer bounds for indirect/indexed draw
 	// calls. See node 1749 for a sketch using a couple of compute shaders,
 	// basically emulating an indirect transfer.
@@ -1577,7 +1924,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 
 			auto size = std::min(maxVertIndSize, vertbuf.buffer->ci.size - vertbuf.offset);
 			initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-				nonNull(vertbuf.buffer), vertbuf.offset, size);
+				nonNull(vertbuf.buffer), vertbuf.offset, size, queueFams);
 		}
 	}
 
@@ -1589,7 +1936,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 		if(inds.buffer) {
 			auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
 			initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-				nonNull(inds.buffer), inds.offset, size);
+				nonNull(inds.buffer), inds.offset, size, queueFams);
 		}
 	}
 
@@ -1599,7 +1946,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, const RecordInfo& info
 	}
 }
 
-void CommandHookRecord::afterDstOutsideRp(Command& bcmd, const RecordInfo& info) {
+void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:afterDsOutsideRp");
 
@@ -1856,11 +2203,6 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 			}
 		}
 	}
-
-	// We have to restore the original compute state here since the application
-	// won't expect that we changed it for the following commands.
-	// TODO: also restore push constants
-	bind(dev, cb, cmd.savedComputeState);
 }
 
 void CommandHookRecord::hookBefore(const BuildAccelStructsIndirectCmd& cmd) {

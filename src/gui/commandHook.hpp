@@ -52,6 +52,11 @@ public:
 		unsigned binding {};
 		unsigned elem {};
 		bool before {}; // whether to copy before or after target command
+
+		// If this is set to true, image data will be copied into a host-mapped
+		// buffer as well. Useful to reading the data back on cpu instead
+		// of displaying it.
+		bool imageAsBuffer {};
 	};
 
 	struct AttachmentCopy {
@@ -134,6 +139,7 @@ private:
 	// Initializes the pipelines and data needed for acceleration
 	// structure copies
 	void initAccelStructCopy(Device& dev);
+	void initImageCopyPipes(Device& dev);
 
 	// Checks whether the copied descriptors in the associated
 	// record have changed (via update-after-bind) since the hooked
@@ -141,9 +147,10 @@ private:
 	bool copiedDescriptorChanged(const CommandHookRecord&);
 
 private:
+	friend struct CommandHookRecord;
+
 	Device* dev_ {};
 
-	friend struct CommandHookRecord;
 	u32 counter_ {0};
 	CommandHookRecord* records_ {}; // intrusive linked list
 
@@ -155,6 +162,11 @@ private:
 	// pipelines needed for the acceleration structure build copy
 	VkPipelineLayout accelStructPipeLayout_ {};
 	VkPipeline accelStructVertCopy_ {};
+
+	// pipeline for sample-copying image to buffer
+	VkDescriptorSetLayout copyImageDsLayout_ {};
+	VkPipelineLayout copyImagePipeLayout_ {};
+	VkPipeline copyImagePipes_[ShaderImageType::count] {};
 };
 
 // Collection of data we got out of a submission/command.
@@ -257,6 +269,10 @@ struct CommandHookRecord {
 
 	std::vector<AccelStructBuild> accelStructBuilds;
 
+	// Needed for image to buffer sample-copying
+	std::vector<VkDescriptorSet> descriptorSets;
+	std::vector<VkImageView> imageViews;
+
 	// Linked list of all records belonging to this->hook
 	CommandHookRecord* next {};
 	CommandHookRecord* prev {};
@@ -284,26 +300,48 @@ private:
 
 		unsigned nextHookLevel {}; // on hcommand, hook hierarchy
 		unsigned* maxHookLevel {};
+
+		bool rebindComputeState {};
 	};
 
 	void initState(RecordInfo&);
 
-	void hookRecordBeforeDst(Command& dst, const RecordInfo&);
-	void hookRecordAfterDst(Command& dst, const RecordInfo&);
-	void hookRecordDst(Command& dst, const RecordInfo&);
-	void hookRecord(Command* cmdChain, const RecordInfo&);
+	// = Recording =
+	// Will record the given command. Uses the given RecordInfo to do
+	// additional operations if needed (such as rebinding the compute state,
+	// if needed).
+	void dispatchRecord(Command& cmd, RecordInfo&);
 
-	void copyTransfer(Command& bcmd, const RecordInfo&);
-	void copyDs(Command& bcmd, const RecordInfo&,
+	// Called when we arrived ath the hooked command itself. Will make sure
+	// all barriers are set, render passes split correclty and copies are done.
+	void hookRecordDst(Command& dst, RecordInfo&);
+
+	// Called immediately before recording the hooked command itself.
+	// Will perform all needed operations.
+	void hookRecordBeforeDst(Command& dst, RecordInfo&);
+
+	// Called immediately after recording the hooked command itself.
+	// Will perform all needed operations.
+	void hookRecordAfterDst(Command& dst, RecordInfo&);
+
+	// Recursively records the given linked list of commands.
+	void hookRecord(Command* cmdChain, RecordInfo&);
+
+	// = Copying =
+	void copyTransfer(Command& bcmd, RecordInfo&);
+	void copyDs(Command& bcmd, RecordInfo&,
 		const CommandHook::DescriptorCopy&,
 		CommandHookState::CopiedDescriptor& dst);
-	void copyAttachment(const RecordInfo&, unsigned id,
+	void copyAttachment(RecordInfo&, unsigned id,
 		CommandHookState::CopiedAttachment& dst);
-	void beforeDstOutsideRp(Command&, const RecordInfo&);
-	void afterDstOutsideRp(Command&, const RecordInfo&);
+	void beforeDstOutsideRp(Command&, RecordInfo&);
+	void afterDstOutsideRp(Command&, RecordInfo&);
 
 	void hookBefore(const BuildAccelStructsCmd&);
 	void hookBefore(const BuildAccelStructsIndirectCmd&);
+
+	void initAndSampleCopy(OwnBuffer& dst, Image& src, VkImageLayout srcLayout,
+		const VkImageSubresourceRange& srcSubres, span<const u32> queueFams);
 
 	// TODO: kinda arbitrary, allow more. Configurable via settings?
 	// In general, the problem is that we can't know the relevant

@@ -57,9 +57,6 @@ private:
 
 	void createData();
 
-	static DrawGuiImage::Type parseType(VkImageType type, VkFormat format,
-		VkImageAspectFlagBits aspect);
-
 private:
 	// general, logical info
 	Draw* draw_ {}; // current draw

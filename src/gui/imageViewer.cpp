@@ -424,43 +424,6 @@ void ImageViewer::drawBackground(VkCommandBuffer cb) {
 	dev.dispatch.CmdDraw(cb, 4, 1, 0, 0);
 }
 
-DrawGuiImage::Type ImageViewer::parseType(VkImageType imgType, VkFormat format,
-		VkImageAspectFlagBits aspect) {
-
-	// NOTE: relies on ordering of DrawGuiImage::Type enum
-	auto imageTypeFUI = [](auto numt) {
-		if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) return 2u;
-		else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) return 1u;
-		else return 0u;
-	};
-
-	DrawGuiImage::Type baseType;
-	switch(imgType) {
-		case VK_IMAGE_TYPE_1D: baseType = DrawGuiImage::f1d; break;
-		case VK_IMAGE_TYPE_2D: baseType = DrawGuiImage::f2d; break;
-		case VK_IMAGE_TYPE_3D: baseType = DrawGuiImage::f3d; break;
-		default: dlg_error("unreachable"); baseType = {}; break;
-	}
-
-	auto off = 0u;
-	if(aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
-		if(FormatIsSampledFloat(format)) off = 0u;
-		if(FormatIsUInt(format)) off = 1u;
-		if(FormatIsInt(format)) off = 2u;
-	} else {
-		auto numt = VK_FORMAT_NUMERICAL_TYPE_NONE;
-		if(aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
-			numt = FormatDepthNumericalType(format);
-		} else if(aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
-			numt = FormatStencilNumericalType(format);
-		}
-
-		off = imageTypeFUI(numt);
-	}
-
-	return DrawGuiImage::Type(unsigned(baseType) + off);
-}
-
 void ImageViewer::doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout) {
 	auto& dev = gui_->dev();
 	dlg_assert(this->copyTexel_);
@@ -537,7 +500,7 @@ void ImageViewer::doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayo
 	dev.dispatch.UpdateDescriptorSets(dev.handle, 2u, writes, 0u, nullptr);
 
 	// prepare sample copy operation
-	auto type = Gui::ImageShader(imageDraw_.type - 1);
+	auto type = ShaderImageType::Value(imageDraw_.type - 1);
 	auto& pipe = gui_->readTexPipe(type);
 	auto& pipeLayout = gui_->imgOpPipeLayout();
 
@@ -611,6 +574,8 @@ void ImageViewer::doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayo
 void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout) {
 	auto& dev = gui_->dev();
 	dlg_assert(this->copyTexel_);
+	dlg_assertm(FormatTexelBlockExtent(format_).width == 1u,
+		"Block formats not supported for copying");
 
 	// find free readback or create a new one
 	Readback* readback {};
@@ -820,8 +785,8 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		}
 	}
 
-	imageDraw_.type = parseType(imgType, format, aspect_);
-	dlg_assertm(imageDraw_.type != DrawGuiImage::font,
+	imageDraw_.type = ShaderImageType::parseType(imgType, format, aspect_);
+	dlg_assertm(imageDraw_.type != ShaderImageType::count,
 		"imgType {}, format {}", vk::name(imgType_), vk::name(format_));
 
 	createData();
@@ -840,27 +805,13 @@ void ImageViewer::unselect() {
 }
 
 void ImageViewer::createData() {
-	auto getViewType = [&]{
-		switch(imgType_) {
-			case VK_IMAGE_TYPE_1D:
-				return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
-			case VK_IMAGE_TYPE_2D:
-				return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-			case VK_IMAGE_TYPE_3D:
-				return VK_IMAGE_VIEW_TYPE_3D;
-			default:
-				dlg_error("Unsupported image type");
-				return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
-		}
-	};
-
 	data_.reset(new DrawData());
 	data_->gui = gui_;
 
 	VkImageViewCreateInfo ivi {};
 	ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	ivi.image = src_;
-	ivi.viewType = getViewType();
+	ivi.viewType = ShaderImageType::imageViewForImageType(imgType_);
 	ivi.format = format_;
 	ivi.subresourceRange = subresRange_;
 	ivi.subresourceRange.aspectMask = aspect_;

@@ -1,11 +1,13 @@
 #include <util/ownbuf.hpp>
 #include <util/util.hpp>
 #include <device.hpp>
+#include <queue.hpp>
+#include <threadContext.hpp>
 
 namespace vil {
 
 void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
-		VkBufferUsageFlags usage) {
+		VkBufferUsageFlags usage, span<const u32> queueFams) {
 	dlg_assert(!this->dev || this->dev == &dev);
 	if(size >= reqSize) {
 		return;
@@ -29,6 +31,20 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	bufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	bufInfo.size = reqSize;
 	bufInfo.usage = usage;
+	bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	ThreadMemScope ms;
+	if(queueFams.size() >= 2) {
+		auto fams = ms.copy(queueFams.data(), queueFams.size());
+		auto famsCount = std::unique(fams.begin(), fams.end()) - fams.begin();
+
+		if(famsCount >= 2) {
+			bufInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+			bufInfo.pQueueFamilyIndices = fams.data();
+			bufInfo.queueFamilyIndexCount = famsCount;
+		}
+	}
+
 	VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf));
 	nameHandle(dev, this->buf, "OwnBuffer:buf");
 

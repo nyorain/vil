@@ -4,6 +4,11 @@
 #include <spvm/types.h>
 #include <spvm/image.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif // __cplusplus
+
+// TODO: should probably add a SPVM prefix to them to avoid name clashes
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define CLAMP(x, minVal, maxVal) MIN(MAX((x), (minVal)), (maxVal))
@@ -24,8 +29,9 @@ enum spvm_value_type
 	spvm_value_type_runtime_array,
 	spvm_value_type_struct,
 	spvm_value_type_image,
+	spvm_value_type_sampler,
 	spvm_value_type_sampled_image,
-	spvm_value_type_pointer
+	spvm_value_type_pointer,
 };
 
 typedef struct spvm_member {
@@ -39,10 +45,10 @@ typedef struct spvm_member {
 		unsigned int u;
 		unsigned long long u64;
 		char b;
+		spvm_image* image;
+		spvm_sampler* sampler;
 	} value;
 
-	spvm_image_t image_data;
-	
 	spvm_word member_count;
 	struct spvm_member* members;
 } spvm_member;
@@ -53,5 +59,9 @@ void spvm_member_memcpy(spvm_member_t target, spvm_member_t source, spvm_word va
 
 void spvm_member_set_value_f(spvm_member_t mems, size_t mem_count, float* f);
 void spvm_member_set_value_i(spvm_member_t mems, size_t mem_count,  int* d);
+
+#ifdef __cplusplus
+}
+#endif // __cplusplus
 
 #endif // __SPIRV_VM_VALUE_H__
