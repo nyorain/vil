@@ -2,6 +2,7 @@
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/commandHook.hpp>
+#include <gui/cb.hpp>
 #include <util/buffmt.hpp>
 #include <command/commands.hpp>
 #include <threadContext.hpp>
@@ -9,17 +10,17 @@
 #include <shader.hpp>
 #include <ds.hpp>
 #include <numeric>
+#include <spvm/types.h>
+#include <spvm/ext/GLSL450.h>
 
 namespace vil {
 
-ShaderDebugger::~ShaderDebugger() {
-	if(state) {
-		spvm_state_delete(state);
-	}
+span<spvm_member> children(spvm_member& member) {
+	return {member.members, std::size_t(member.member_count)};
+}
 
-	if(program) {
-		spvm_program_delete(program);
-	}
+ShaderDebugger::~ShaderDebugger() {
+	unselect();
 	if(context) {
 		spvm_context_deinitialize(context);
 	}
@@ -36,34 +37,62 @@ void ShaderDebugger::init(Gui& gui) {
 
 	textedit.SetShowWhitespaces(false);
 	textedit.SetTabSize(4);
+
+	// Shader can't be edited
+	// textedit.SetHandleKeyboardInputs(false);
+	// textedit.SetHandleMouseInputs(false);
 }
 
 void ShaderDebugger::select(const spc::Compiler& compiled) {
-	if(state) {
-		spvm_state_delete(state);
-		state = nullptr;
-	}
-
-	if(program) {
-		spvm_program_delete(program);
-		program = nullptr;
-	}
+	unselect();
 
 	this->compiled = &compiled;
 	static_assert(sizeof(spvm_word) == sizeof(u32));
 	auto ptr = reinterpret_cast<const spvm_word*>(compiled.get_ir().spirv.data());
 	program = spvm_program_create(context, ptr, compiled.get_ir().spirv.size());
 
+	initState();
+
+	const char* src {};
+	if(program->file_count) {
+		src = program->files[0].source;
+	}
+
+	if(src) {
+		textedit.SetText(src);
+	} else {
+		textedit.SetText("<No debug code embedded in spirv>");
+	}
+}
+
+void ShaderDebugger::initState() {
+	dlg_assert(program);
+	dlg_assert(compiled);
+
+	samplers_.clear();
+	images_.clear();
+
 	spvm_state_settings settings {};
 	settings.load_variable = [](struct spvm_state* state, unsigned varID,
-			unsigned index_count, const spvm_word* indices) {
+			unsigned index_count, const spvm_word* indices, spvm_member_list list,
+			spvm_word typeID) {
 		auto* self = static_cast<ShaderDebugger*>(state->user_data);
-		return self->loadVar(varID, {indices, index_count});
+		self->loadVar(varID,
+			{indices, std::size_t(index_count)},
+			{list.members, std::size_t(list.member_count)}, typeID);
 	};
 	settings.store_variable = [](struct spvm_state* state, unsigned varID,
-			unsigned index_count, const spvm_word* indices, spvm_member_list list) {
+			unsigned index_count, const spvm_word* indices, spvm_member_list list,
+			spvm_word typeID) {
 		auto* self = static_cast<ShaderDebugger*>(state->user_data);
-		self->storeVar(varID, {indices, index_count}, list);
+		self->storeVar(varID,
+			{indices, std::size_t(index_count)},
+			{list.members, std::size_t(list.member_count)}, typeID);
+	};
+	settings.log = [](struct spvm_state*, const char* fmt, va_list vargs) {
+		char buf[500];
+		std::vsnprintf(buf, sizeof(buf), fmt, vargs);
+		dlg_error("spvm: {}", buf);
 	};
 
 	state = spvm_state_create(program, settings);
@@ -79,16 +108,35 @@ void ShaderDebugger::select(const spc::Compiler& compiled) {
 		self->writeImage(*img, x, y, z, layer, level, *data);
 	};
 
-	const char* src {};
-	if(program->file_count) {
-		src = program->files[0].source;
+	spvm_word entryPoint = -1;
+	for(auto i = 0; i < program->entry_point_count; ++i) {
+		if(u32(program->entry_points[i].id) == compiled->get_ir().default_entry_point) {
+			entryPoint = program->entry_points[i].id;
+			break;
+		}
 	}
 
-	if(src) {
-		textedit.SetText(src);
-	} else {
-		textedit.SetText("<No debug code embedded in spirv>");
+	// TODO: don't static here
+	static spvm_ext_opcode_func* glslExt = spvm_build_glsl450_ext();
+	spvm_state_set_extension(state, "GLSL.std.450", glslExt);
+
+	dlg_assert(entryPoint != -1);
+	spvm_state_prepare(state, entryPoint);
+}
+
+void ShaderDebugger::unselect() {
+	if(state) {
+		spvm_state_delete(state);
+		state = nullptr;
 	}
+
+	if(program) {
+		spvm_program_delete(program);
+		program = nullptr;
+	}
+
+	compiled = nullptr;
+	vars_.clear();
 }
 
 void ShaderDebugger::draw() {
@@ -97,30 +145,223 @@ void ShaderDebugger::draw() {
 		return;
 	}
 
-	ImGui::PushFont(gui->monoFont);
-	textedit.Render("Shader");
-	ImGui::PopFont();
+	dlg_assert(state);
+
+	// shader view
+	if(ImGui::BeginChild("ShaderDebugger", ImVec2(0, -300))) {
+		ImGui::PushFont(gui->monoFont);
+		textedit.Render("Shader");
+		ImGui::PopFont();
+	}
+
+	ImGui::EndChild();
+
+	// variable view
+	if(ImGui::BeginChild("Vars")) {
+		if(state->code_current && ImGui::Button("Step Opcode")) {
+			do {
+				// auto prev = state->code_current;
+				spvm_state_step_opcode(state);
+
+				/*
+				for(auto i = 0u; i < program->bound; ++i) {
+					auto& res = state->results[i];
+					if(res.type != spvm_result_type_constant) {
+						continue;
+					}
+
+					if(!res.name) {
+						continue;
+					}
+
+					if(res.source_location >= prev && res.source_location <= state->code_current) {
+						vars_.insert_or_assign(res.name, &res);
+					}
+				}
+				*/
+			} while(state->current_line < 0);
+		}
+
+		if(state->code_current && ImGui::Button("Step Line")) {
+			auto line = state->current_line;
+			while(state->current_line == line) {
+				spvm_state_step_opcode(state);
+			}
+		}
+
+		if(state->code_current && ImGui::Button("Run")) {
+			while(state->code_current) {
+				spvm_state_step_opcode(state);
+			}
+		}
+
+		if(ImGui::Button("Reset")) {
+			spvm_state_delete(state);
+			initState();
+		}
+
+		imGuiText("Current line: {}", state->current_line);
+		imGuiText("Instruction count : {}", state->instruction_count);
+		imGuiText("Offset: {}", state->code_current - program->code);
+
+		auto printRes = [&](const auto& name, auto* res) {
+			imGuiText("{}: ", name);
+
+			ImGui::SameLine();
+
+			// TODO: proper spvm_result formatting
+			auto* resType = spvm_state_get_type_info(state->results,
+				&state->results[res->pointer]);
+			if(resType->value_type == spvm_value_type_vector) {
+				auto str = std::string{};
+
+				for(auto i = 0; i < res->member_count; ++i) {
+					// TODO:
+					auto vt = valueType(res->members[i]);
+					if(vt == spvm_value_type_int) {
+						str += dlg::format("{}, ", res->members[i].value.s);
+					} else if(vt == spvm_value_type_float) {
+						str += dlg::format("{}, ", res->members[i].value.f);
+					} else {
+						str += "??, ";
+					}
+				}
+
+				imGuiText("{}", str);
+			} else if(resType->value_type == spvm_value_type_int) {
+				// TODO: bitcount & signedness
+				imGuiText("{}", res->members[0].value.s);
+			} else if(resType->value_type == spvm_value_type_float) {
+				// TODO: bitcount
+				imGuiText("{}", res->members[0].value.f);
+			} else {
+				imGuiText("??");
+			}
+		};
+
+		// vars_
+		for(auto [name, res] : vars_) {
+			printRes(name, res);
+		}
+
+		// local vars
+		for(auto i = 0u; i < program->bound; ++i) {
+			auto& res = state->results[i];
+			if(res.type != spvm_result_type_variable ||
+					res.owner != state->current_function ||
+					!res.name) {
+				continue;
+			}
+
+			auto it = vars_.find(res.name);
+			if(it != vars_.end()) {
+				continue;
+			}
+
+			printRes(std::string_view(res.name), &res);
+		}
+	}
+
+	ImGui::EndChild();
 }
 
-spvm_member_list ShaderDebugger::loadVar(unsigned id, span<const spvm_word> indices) {
+void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
+		span<const spvm_word> indices, span<spvm_member> dst) {
+	dlg_trace("spirv OpLoad of builtin {}", builtin.builtin);
+
+	auto loadVecU = [&](auto& vec) {
+		if(indices.empty()) {
+			dlg_assert(dst.size() == vec.size());
+			for(auto i = 0u; i < vec.size(); ++i) {
+				dlg_assert(valueType(dst[i]) == spvm_value_type_int);
+				dst[i].value.u = vec[i];
+			}
+		} else {
+			dlg_assert(indices.size() == 1u);
+			dlg_assert(dst.size() == 1u);
+			dlg_assert(u32(indices[0]) < vec.size());
+			dlg_assert(valueType(dst[0]) == spvm_value_type_int);
+			dst[0].value.u = vec[indices[0]];
+		}
+	};
+
+	auto loadScalarU = [&](auto& val) {
+		dlg_assert(dst.size() == 1u);
+		dlg_assert(valueType(dst[0]) == spvm_value_type_int);
+		dst[0].value.u = val;
+	};
+
+	switch(builtin.builtin) {
+		case spv::BuiltInWorkgroupSize: {
+			Vec3ui size {8u, 8u, 1u}; // TODO
+			loadVecU(size);
+			break;
+		}
+		case spv::BuiltInWorkgroupId:
+		case spv::BuiltInInvocationId:
+		case spv::BuiltInGlobalInvocationId:
+		case spv::BuiltInLocalInvocationId: {
+			Vec3ui id {0u, 0u, 0u}; // TODO
+			loadVecU(id);
+			break;
+		}
+		case spv::BuiltInLocalInvocationIndex: {
+			auto id = 0u; // TODO
+			loadScalarU(id);
+			break;
+		} default:
+			dlg_error("Unhandled builtin: {}", builtin.builtin);
+			break;
+	}
+}
+
+void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
+		span<spvm_member> dst, u32 typeID) {
 	dlg_assert(compiled);
 
-	auto res = resource(*this->compiled, id);
-	dlg_assert(res);
+	auto res = resource(*this->compiled, srcID);
+	if(!res) {
+		auto builtin = builtinResource(*this->compiled, srcID);
+		if(!builtin) {
+			dlg_error("OpLoad of invalid/unknown var {}", srcID);
+			return;
+		}
 
-	auto it = varIDToDsCopyMap.find(id);
-	dlg_assert(it != varIDToDsCopyMap.end());
+		loadBuiltin(*builtin, indices, dst);
+		return;
+	}
 
-	auto hookState = gui->cbGui().commandViewer().state();
-	dlg_assert(hookState);
-	dlg_assert(hookState->copiedDescriptors.size() > it->second);
-	dlg_assert(gui->dev().commandHook->descriptorCopies.size() > it->second);
-	auto& copyRequest = gui->dev().commandHook->descriptorCopies[it->second];
-	auto& copyResult = hookState->copiedDescriptors[it->second];
+	dlg_trace("spirv OpLoad of var {}", srcID);
+	dlg_assert(compiled->has_decoration(res->id, spv::DecorationDescriptorSet) &&
+				compiled->has_decoration(res->id, spv::DecorationBinding));
+	auto& spcTypeMaybeArrayed = compiled->get_type(res->type_id);
 
-	auto setID = copyRequest.set;
-	auto bindingID = copyRequest.binding;
-	auto elemID = copyRequest.elem;
+	// Handle array bindings
+	auto arrayElemID = 0u;
+	auto spcType = spcTypeMaybeArrayed;
+	if(!spcTypeMaybeArrayed.array.empty()) {
+		// Multidimensional binding arrays not allowed I guess
+		dlg_assert(spcType.array.size() == 1u);
+
+		// Loading an entire binding array is not allowed I guess, we just
+		// require an element to be selected here
+		dlg_assert(!indices.empty());
+
+		auto bounds = spcType.array[0];
+		if(spcType.array_size_literal[0] == true) {
+			bounds = compiled->evaluate_constant_u32(bounds);
+		}
+
+		dlg_assert(u32(indices[0]) < bounds);
+
+		arrayElemID = indices[0];
+		indices = indices.subspan(1u);
+		spcType.array.clear();
+		spcType.array_size_literal.clear();
+	}
+
+	auto setID = compiled->get_decoration(res->id, spv::DecorationDescriptorSet);
+	auto bindingID = compiled->get_decoration(res->id, spv::DecorationBinding);
 
 	auto* baseCmd = gui->cbGui().commandViewer().command();
 	auto* cmd = static_cast<const StateCmdBase*>(baseCmd);
@@ -135,85 +376,116 @@ spvm_member_list ShaderDebugger::loadVar(unsigned id, span<const spvm_word> indi
 	dlg_assert(stateIt != dsState.states.end());
 	auto& ds = *stateIt->second;
 
-	auto& spcType = compiled->get_type(res->type_id);
+	// For samplers, we didn't do a copy and so have to early-out here
+	auto dsCopyIt = varIDToDsCopyMap.find(srcID);
+	if(dsCopyIt == varIDToDsCopyMap.end()) {
+		dlg_assert_or(spcType.basetype == spc::SPIRType::Sampler, return);
+		dlg_assert_or(spcType.storage == spv::StorageClassUniform, return);
+		dlg_assert(indices.empty());
+
+		dlg_trace(" >> found sampler");
+
+		auto image = vil::images(ds, bindingID)[arrayElemID];
+		dlg_assert(image.sampler);
+
+		auto& sampler = samplers_.emplace_back();
+		sampler.desc = setupSampler(*image.sampler);
+
+		dlg_assert(dst.size() == 1u);
+		dst[0].value.sampler = &sampler;
+
+		dlg_assert(dst[0].member_count == 0u);
+		return;
+	}
+
+	auto hookState = gui->cbGui().commandViewer().state();
+	dlg_assert(hookState);
+	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
+	dlg_assert(gui->dev().commandHook->descriptorCopies.size() > dsCopyIt->second);
+	auto& copyRequest = gui->dev().commandHook->descriptorCopies[dsCopyIt->second];
+	// dsCopyIt->second stores the beginning of the range we stored in the
+	// array elements in. So we have to offset it with the arrayElemID
+	auto& copyResult = hookState->copiedDescriptors[dsCopyIt->second + arrayElemID];
+
+	dlg_assert(copyRequest.set == setID);
+	dlg_assert(copyRequest.binding == bindingID);
+
 	if(spcType.storage == spv::StorageClassPushConstant) {
 		// TODO: get from command
-		return {};
-	} else if(spcType.storage == spv::StorageClassUniform ||
-			spcType.storage == spv::StorageClassStorageBuffer) {
-
-		if(spcType.basetype == spc::SPIRType::Sampler) {
-			auto image = vil::images(ds, bindingID)[elemID];
-			dlg_assert(image.sampler);
-
-			auto& sampler = samplers_.emplace_back();
-			sampler.desc = setupSampler(*image.sampler);
-			sampler.user_data = &sampler.desc;
-
-			auto& member = members_.emplace_back().emplace_back();
-			member.type = res->base_type_id;
-			member.member_count = 0u;
-			member.value.sampler = &sampler;
-
-			return {1u, &member};
-		} else if(spcType.basetype == spc::SPIRType::Image) {
-			auto image = vil::images(ds, bindingID)[elemID];
+		dlg_error("TODO: loadVar push constant");
+		return;
+	} else if(spcType.storage == spv::StorageClassUniformConstant) {
+		// we already handled samplers above
+		dlg_assert(spcType.basetype != spc::SPIRType::Sampler);
+		if(spcType.basetype == spc::SPIRType::Image) {
+			dlg_trace(" >> image");
+			auto image = vil::images(ds, bindingID)[arrayElemID];
 			auto& imgView = nonNull(image.imageView);
 			auto& img = nonNull(imgView.img);
 
 			auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
 			dlg_assert(buf);
 
-			auto& dst = images_.emplace_back();
-			dst.width = img.ci.extent.width;
-			dst.height = img.ci.extent.height;
-			dst.depth = img.ci.extent.depth;
-			dst.levels = imgView.ci.subresourceRange.levelCount;
-			dst.layers = imgView.ci.subresourceRange.layerCount;
-			dst.data = buf->data();
+			auto& dstImg = images_.emplace_back();
+			dstImg.width = img.ci.extent.width;
+			dstImg.height = img.ci.extent.height;
+			dstImg.depth = img.ci.extent.depth;
+			dstImg.levels = imgView.ci.subresourceRange.levelCount;
+			dstImg.layers = imgView.ci.subresourceRange.layerCount;
+			dstImg.data = buf->data();
 
-			auto& member = members_.emplace_back().emplace_back();
-			member.type = res->base_type_id;
-			member.member_count = 0u;
-			member.value.image = &dst;
+			dlg_assert(dst.size() == 1u);
 
-			return {1u, &member};
+			dst[0].value.image = &dstImg;
+			dlg_assert(u32(dst[0].type) == res->base_type_id);
+			dlg_assert(dst[0].member_count == 0u);
+
+			return;
 		} else if(spcType.basetype == spc::SPIRType::SampledImage) {
-			auto image = vil::images(ds, bindingID)[elemID];
+			dlg_trace(" >> sampled image");
+
+			auto image = vil::images(ds, bindingID)[arrayElemID];
 			auto& imgView = nonNull(image.imageView);
 			auto& img = nonNull(imgView.img);
 
 			auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
 			dlg_assert(buf);
 
-			auto& dst = images_.emplace_back();
-			dst.width = img.ci.extent.width;
-			dst.height = img.ci.extent.height;
-			dst.depth = img.ci.extent.depth;
-			dst.levels = imgView.ci.subresourceRange.levelCount;
-			dst.layers = imgView.ci.subresourceRange.layerCount;
-			dst.data = buf->data();
+			auto& dstImg = images_.emplace_back();
+			dstImg.width = img.ci.extent.width;
+			dstImg.height = img.ci.extent.height;
+			dstImg.depth = img.ci.extent.depth;
+			dstImg.levels = imgView.ci.subresourceRange.levelCount;
+			dstImg.layers = imgView.ci.subresourceRange.layerCount;
+			dstImg.data = buf->data();
 
 			auto& sampler = samplers_.emplace_back();
 			sampler.desc = setupSampler(*image.sampler);
-			sampler.user_data = &sampler.desc;
 
-			auto& members = members_.emplace_back();
-			members.resize(2);
-
-			auto& spvmRes = state->results[id];
+			auto& spvmRes = state->results[srcID];
 			auto* resType = spvm_state_get_type_info(state->results, &state->results[spvmRes.pointer]);
 
-			members[0].type = resType->pointer; // pointer to image type id
-			members[0].member_count = 0u;
-			members[0].value.image = &dst;
+			dlg_assert(dst.size() == 2u);
 
-			members[1].type = spvm_word(-1); // we don't care about OpTypeSampler
-			members[1].member_count = 0u;
-			members[1].value.sampler = &sampler;
+			// members[0]: image
+			dlg_assert(dst[0].member_count == 0u);
+			dlg_assert(dst[0].type == resType->pointer);
+			dst[0].value.image = &dstImg;
 
-			return {u32(members.size()), members.data()};
-		} else if(spcType.basetype == spc::SPIRType::Struct) {
+			// members[0]: sampler. We don't care about the OpTypeSampler used
+			dlg_assert(dst[1].member_count == 0u);
+			dst[1].value.sampler = &sampler;
+
+			return;
+		} else {
+			dlg_error("Invalid/unsupported UniformConstant");
+			return;
+		}
+	} else if(spcType.storage == spv::StorageClassUniform ||
+			spcType.storage == spv::StorageClassStorageBuffer) {
+		if(spcType.basetype == spc::SPIRType::Struct) {
+			dlg_trace(" >> struct");
+
 			ThreadMemScope tms;
 			const auto* type = buildType(*compiled, res->type_id, tms);
 			dlg_assert(type);
@@ -231,7 +503,7 @@ spvm_member_list ShaderDebugger::loadVar(unsigned id, span<const spvm_word> indi
 					auto subSize = type->deco.arrayStride;
 					dlg_assert(subSize);
 
-					for(auto size : type->array) {
+					for(auto size : remDims) {
 						dlg_assert(size != 0u); // only first dimension can be runtime size
 						subSize *= size;
 					}
@@ -291,41 +563,53 @@ spvm_member_list ShaderDebugger::loadVar(unsigned id, span<const spvm_word> indi
 					// buffer layout does not matter here since new type is scalar
 					off += id * size(*type, BufferLayout::std140);
 				} else {
-					dlg_assert("Invalida type for AccessChain");
+					dlg_error("Invalida type for AccessChain");
 					type = nullptr;
 					break;
 				}
 			}
 
 			dlg_assert(type);
-			auto res = setupMembers(*type, data.subspan(off));
 
-			if(res.member_count != 0) {
-				return {unsigned(res.member_count), res.members};
+			spvm_member* setupDst;
+			spvm_member wrapper;
+			if(type->type == Type::typeStruct ||
+					type->vecsize > 1 ||
+					type->columns > 1 ||
+					!type->array.empty()) {
+				setupDst = &wrapper;
+				wrapper.type = typeID;
+				wrapper.members = dst.data();
+				wrapper.member_count = dst.size();
 			} else {
-				auto& persistent = members_.emplace_back().emplace_back(res);
-				return {1u, &persistent};
+				dlg_assert(dst.size() == 1u);
+				setupDst = &dst[0];
 			}
+
+			setupMember(*type, data.subspan(off), *setupDst);
+			return;
 		} else {
-			dlg_assert("Unsupported spc type for uniform value");
-			return {};
+			dlg_error("Unsupported spc type for uniform value");
+			return;
 		}
 	}
 
 	// TODO:
 	// - graphic pipeline input/output vars
 	// - ray tracing stuff
-	dlg_assert("Unsupported variable storage class");
-	return {};
+	dlg_error("Unsupported variable storage class");
+	return;
 }
 
 void ShaderDebugger::storeVar(unsigned id, span<const spvm_word> indices,
-			spvm_member_list) {
+			span<spvm_member> src, u32 typeID) {
 	// TODO
 	// even if we are not interested in the results, we have to implement
 	// it to make sure reads of previous writes return the written values.
 	(void) id;
 	(void) indices;
+	(void) src;
+	(void) typeID;
 }
 
 void ShaderDebugger::updateHooks(CommandHook& hook) {
@@ -336,7 +620,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 
 	auto resources = compiled->get_shader_resources();
 
-	auto addCopies = [&](auto& resources) {
+	auto addCopies = [&](auto& resources, bool bufferAsImage) {
 		for(auto& res : resources) {
 			if(!compiled->has_decoration(res.id, spv::DecorationDescriptorSet) ||
 					!compiled->has_decoration(res.id, spv::DecorationBinding)) {
@@ -350,8 +634,8 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 			CommandHook::DescriptorCopy dsCopy;
 			dsCopy.set = compiled->get_decoration(res.id, spv::DecorationDescriptorSet);
 			dsCopy.binding = compiled->get_decoration(res.id, spv::DecorationBinding);
-			dsCopy.imageAsBuffer = true;
 			dsCopy.before = true;
+			dsCopy.imageAsBuffer = bufferAsImage;
 
 			auto arraySize = 1u;
 			if(type.array.size() > 1) {
@@ -366,19 +650,25 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 		}
 	};
 
-	addCopies(resources.sampled_images);
-	addCopies(resources.separate_images);
-	addCopies(resources.separate_samplers);
-	addCopies(resources.storage_buffers);
-	addCopies(resources.uniform_buffers);
-	addCopies(resources.subpass_inputs);
+	addCopies(resources.sampled_images, true);
+	addCopies(resources.separate_images, true);
+	addCopies(resources.storage_images, true);
+	// addCopies(resources.separate_samplers);
+	addCopies(resources.storage_buffers, false);
+	addCopies(resources.uniform_buffers, false);
+	addCopies(resources.subpass_inputs, true);
 }
 
-spvm_member ShaderDebugger::setupScalar(const Type& type, ReadBuf data) {
-	auto dst = spvm_member {};
+void ShaderDebugger::setupScalar(const Type& type, ReadBuf data, spvm_member& dst) {
+	[[maybe_unused]] auto vt = valueType(dst);
+	dlg_assert(dst.member_count == 0u);
+	dlg_assert(vt == spvm_value_type_bool ||
+		vt == spvm_value_type_float ||
+		vt == spvm_value_type_int);
 
 	if(type.type == Type::typeFloat) {
-		dst.type = spvm_value_type_float;
+		dlg_assert(vt == spvm_value_type_float);
+
 		if(type.width == 32) {
 			dst.value.f = read<float>(data);
 		} else if(type.width == 64) {
@@ -387,73 +677,67 @@ spvm_member ShaderDebugger::setupScalar(const Type& type, ReadBuf data) {
 			dlg_error("Invalid width");
 		}
 	} else if(type.type == Type::typeInt) {
-		dst.type = spvm_value_type_int;
+		dlg_assert(vt == spvm_value_type_int);
+
 		if(type.width == 32) {
 			dst.value.s = read<i32>(data);
 		} else {
 			dlg_error("Invalid width");
 		}
 	} else if(type.type == Type::typeUint) {
-		dst.type = spvm_value_type_int;
+		dlg_assert(vt == spvm_value_type_int);
+
 		if(type.width == 32) {
 			dst.value.s = read<u32>(data);
 		} else {
 			dlg_error("Invalid width");
 		}
 	} else if(type.type == Type::typeBool) {
-		dst.type = spvm_value_type_bool;
+		dlg_assert(vt == spvm_value_type_bool);
 		dlg_assert(type.width == 32);
 		dst.value.b = bool(read<u32>(data));
 	} else {
 		dlg_error("Invalid scalar");
 	}
-
-	return dst;
 }
 
-spvm_member ShaderDebugger::setupVector(const Type& type, u32 stride, ReadBuf data) {
-	auto dst = spvm_member {};
-	dst.type = spvm_value_type_vector;
+void ShaderDebugger::setupVector(const Type& type, u32 stride, ReadBuf data,
+		spvm_member& dst) {
+	dlg_assert(valueType(dst) == spvm_value_type_vector);
 
 	auto nextType = type;
 	nextType.vecsize = 1u;
 
-	auto& members = members_.emplace_back();
-	members.reserve(type.vecsize);
-	for(auto i = 0u; i < type.vecsize; ++i) {
-		setupScalar(type, data.subspan(i * stride));
-	}
+	auto elems = children(dst);
+	dlg_assert(elems.size() == type.vecsize);
 
-	dst.member_count = members.size();
-	dst.members = members.data();
-	return dst;
+	for(auto i = 0u; i < type.vecsize; ++i) {
+		setupScalar(type, data.subspan(i * stride), elems[i]);
+	}
 }
 
-spvm_member ShaderDebugger::setupMembers(const Type& type, ReadBuf data) {
+void ShaderDebugger::setupMember(const Type& type, ReadBuf data, spvm_member& dst) {
 	if(!type.array.empty()) {
-		return setupMembersArray(type.array, type, data);
+		setupMemberArray(type.array, type, data, dst);
+		return;
 	}
 
 	if(type.type == Type::typeStruct) {
-		auto dst = spvm_member {};
-		dst.type = spvm_value_type_struct;
+		dlg_assert(valueType(dst) == spvm_value_type_struct);
 
-		auto& members = members_.emplace_back();
-		members.reserve(type.members.size());
-		for(auto& member : type.members) {
-			auto mem = setupMembers(*member.type, data.subspan(member.offset));
-			members.push_back(mem);
+		auto members = children(dst);
+		dlg_assert(members.size() == type.members.size());
+
+		for(auto [i, member] : enumerate(type.members)) {
+			setupMember(*member.type, data.subspan(member.offset), members[i]);
 		}
 
-		dst.member_count = members.size();
-		dst.members = members.data();
-		return dst;
+		return;
 	}
 
-	if(type.columns) {
+	if(type.columns > 1) {
 		dlg_assert(type.deco.matrixStride);
-		auto dst = spvm_member {};
-		dst.type = spvm_value_type_matrix;
+		dlg_assert(valueType(dst) == spvm_value_type_matrix);
 
 		auto nextType = type;
 		nextType.columns = 1u;
@@ -465,28 +749,26 @@ spvm_member ShaderDebugger::setupMembers(const Type& type, ReadBuf data) {
 			std::swap(colStride, rowStride);
 		}
 
-		auto& members = members_.emplace_back();
-		members.reserve(type.columns);
+		auto cols = children(dst);
+		dlg_assert(cols.size() == type.columns);
+
 		for(auto i = 0u; i < type.columns; ++i) {
 			auto off = i * colStride;
-			auto mem = setupVector(nextType, rowStride, data.subspan(off));
-			members.push_back(mem);
+			setupVector(nextType, rowStride, data.subspan(off), cols[i]);
 		}
 
-		dst.member_count = members.size();
-		dst.members = members.data();
-		return dst;
-	} else if(type.vecsize) {
+		return;
+	} else if(type.vecsize > 1) {
 		auto stride = type.width / 8;
-		return setupVector(type, stride, data);
+		return setupVector(type, stride, data, dst);
 	}
 
-	return setupScalar(type, data);
+	setupScalar(type, data, dst);
 }
 
-spvm_member ShaderDebugger::setupMembersArray(span<const u32> arrayDims,
-		const Type& type, ReadBuf data) {
-	auto dst = spvm_member {};
+void ShaderDebugger::setupMemberArray(span<const u32> arrayDims,
+		const Type& type, ReadBuf data, spvm_member& dst) {
+	dlg_assert(!type.array.empty());
 
 	auto count = arrayDims[0];
 	arrayDims = arrayDims.subspan(1);
@@ -498,38 +780,38 @@ spvm_member ShaderDebugger::setupMembersArray(span<const u32> arrayDims,
 	}
 
 	if(count == 0u) {
-		dst.type = spvm_value_type_runtime_array;
+		// NOTE: this can't happen, loading a runtime_array is not allowed
+		// per spirv.
+		dlg_assert(valueType(dst) == spvm_value_type_runtime_array);
+		dlg_error("OpLoad on runtime array?! Not allowed!");
+		return;
 
+		/*
 		// runtime array, find out real size.
 		auto remSize = data.size();
 		// doesn't have to be like that even though it's sus if the buffer
 		// size isn't a multiple of the stride.
 		// dlg_assert(remSize % subSize == 0u);
 		count = remSize / subSize; // intentionally round down
-	} else {
-		dst.type = spvm_value_type_array;
+		*/
 	}
 
-	auto& members = members_.emplace_back();
-	members.reserve(count);
+	dlg_assert(valueType(dst) == spvm_value_type_array);
+
+	auto elems = children(dst);
+	dlg_assert(elems.size() == count);
+
 	for(auto i = 0u; i < count; ++i) {
 		auto nextData = data.subspan(i * subSize);
 
-		auto& mem = members.emplace_back();
 		if(!arrayDims.empty()) {
-			mem = setupMembersArray(arrayDims, type, nextData);
+			setupMemberArray(arrayDims, type, nextData, elems[i]);
 		} else {
 			auto nt = type;
 			nt.array.clear();
-			mem = setupMembers(nt, nextData);
+			setupMember(nt, nextData, elems[i]);
 		}
 	}
-
-	dst.member_count = members.size();
-	dst.members = members.data();
-
-	return dst;
-
 }
 
 spvm_sampler_desc ShaderDebugger::setupSampler(const Sampler& src) {
@@ -541,7 +823,6 @@ spvm_sampler_desc ShaderDebugger::setupSampler(const Sampler& src) {
 	ret.address_mode_v = spvm_sampler_address_mode(src.ci.addressModeV);
 	ret.address_mode_w = spvm_sampler_address_mode(src.ci.addressModeW);
 	ret.mip_bias = src.ci.mipLodBias;
-	ret.compare_enable = src.ci.compareEnable;
 	ret.compare_op = spvm_sampler_compare_op(src.ci.compareOp);
 	ret.min_lod = src.ci.minLod;
 	ret.max_lod = src.ci.maxLod;
@@ -582,6 +863,12 @@ void ShaderDebugger::writeImage(spvm_image&, int x, int y, int z, int layer, int
 	(void) layer;
 	(void) level;
 	(void) data;
+}
+
+spvm_value_type ShaderDebugger::valueType(spvm_member& member) {
+	auto* resType = spvm_state_get_type_info(state->results, &state->results[member.type]);
+	dlg_assert(resType);
+	return resType->value_type;
 }
 
 } // namespace vil

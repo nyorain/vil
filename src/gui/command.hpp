@@ -5,6 +5,7 @@
 #include <gui/vertexViewer.hpp>
 #include <gui/bufferViewer.hpp>
 #include <gui/imageViewer.hpp>
+#include <gui/shader.hpp>
 #include <imgui/textedit.h>
 #include <command/record.hpp>
 
@@ -20,6 +21,7 @@ public:
 		attachment,
 		transferSrc,
 		transferDst,
+		shader,
 	};
 
 	IOView view_;
@@ -66,9 +68,11 @@ public:
 	void draw(Draw& draw);
 
 	void unselect();
+
+	// When newState is nullptr, the old one should not be overwritten.
 	void select(IntrusivePtr<CommandRecord>, const Command&,
-		CommandDescriptorSnapshot, bool resetState);
-	void state(IntrusivePtr<CommandHookState>);
+		CommandDescriptorSnapshot, bool resetState,
+		IntrusivePtr<CommandHookState> newState);
 
 	CommandHookState* state() const { return state_.get(); }
 	CommandRecord* record() const { return record_.get(); }
@@ -122,6 +126,7 @@ private:
 	VertexViewer vertexViewer_ {};
 	BufferViewer bufferViewer_ {};
 	ImageViewer imageViewer_ {};
+	ShaderDebugger shaderDebugger_ {};
 };
 
 } // namespace vil

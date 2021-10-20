@@ -94,9 +94,9 @@ Device::~Device() {
 		dispatch.DestroySemaphore(handle, semaphore, nullptr);
 	}
 
-	if(dsPool) {
-		dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
-	}
+	dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
+	dispatch.DestroySampler(handle, nearestSampler, nullptr);
+	dispatch.DestroySampler(handle, linearSampler, nullptr);
 
 	// erase queue datas
 	for(auto& queue : this->queues) {
@@ -793,6 +793,26 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 			dev.deviceLocalMemTypeBits |= (1 << i);
 		}
 	}
+
+	// init static samplers
+	VkSamplerCreateInfo sci {};
+	sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	sci.magFilter = VK_FILTER_NEAREST;
+	sci.minFilter = VK_FILTER_NEAREST;
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.minLod = -1000;
+	sci.maxLod = 1000;
+	sci.maxAnisotropy = 1.0f;
+	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &dev.nearestSampler));
+	nameHandle(dev, dev.nearestSampler, "nearest");
+
+	sci.magFilter = VK_FILTER_LINEAR;
+	sci.minFilter = VK_FILTER_LINEAR;
+	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &dev.linearSampler));
+	nameHandle(dev, dev.linearSampler, "linear");
 
 	// descriptor pool
 	// TODO: proper resource management. We now have

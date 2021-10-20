@@ -11,6 +11,7 @@
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/commandHook.hpp>
+#include <gui/cb.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>

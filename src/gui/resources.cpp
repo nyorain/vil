@@ -2,6 +2,7 @@
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/command.hpp>
+#include <gui/cb.hpp>
 #include <gui/vertexViewer.hpp>
 #include <device.hpp>
 #include <threadContext.hpp>

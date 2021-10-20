@@ -29,37 +29,43 @@ struct ShaderDebugger {
 	// TODO: figure out ownership of spc::Compiler. Kinda difficult due
 	// to setting of spec constants
 	void select(const spc::Compiler& compiled);
+	void unselect();
 	void draw();
 
-	spvm_member_list loadVar(unsigned id, span<const spvm_word> indices);
-	void storeVar(unsigned id, span<const spvm_word> indices,
-		spvm_member_list);
+	void updateHooks(CommandHook&);
+
+private:
+	void loadBuiltin(const spc::BuiltInResource& builtin,
+		span<const spvm_word> indices, span<spvm_member> dst);
+	void loadVar(unsigned srcID, span<const spvm_word> indices,
+		span<spvm_member> dst, u32 typeID);
+	void storeVar(unsigned dstID, span<const spvm_word> indices,
+		span<spvm_member> src, u32 typeID);
 
 	spvm_vec4f readImage(spvm_image&, int x, int y, int z, int layer, int level);
 	void writeImage(spvm_image&, int x, int y, int z, int layer, int level,
 		const spvm_vec4f&);
 
-	void updateHooks(CommandHook&);
+	void setupMember(const Type& type, ReadBuf, spvm_member& dst);
+	void setupMemberArray(span<const u32> arrayDims, const Type& type, ReadBuf, spvm_member& dst);
+	void setupVector(const Type& type, u32 stride, ReadBuf, spvm_member& dst);
+	void setupScalar(const Type&, ReadBuf, spvm_member& dst);
 
-	spvm_member setupMembers(const Type& type, ReadBuf);
-	spvm_member setupMembersArray(span<const u32> arrayDims, const Type& type, ReadBuf);
-	spvm_member setupVector(const Type& type, u32 stride, ReadBuf);
-	spvm_member setupScalar(const Type&, ReadBuf);
+	void initState();
 
 	static spvm_sampler_desc setupSampler(const Sampler& src);
 
-	std::vector<std::vector<spvm_member>> members_;
+	spvm_value_type valueType(spvm_member& member);
 
-	struct OurSampler : spvm_sampler {
-		spvm_sampler_desc desc;
-	};
-
+private:
 	struct OurImage : spvm_image {
 		ReadBuf data;
 	};
 
-	std::deque<OurSampler> samplers_;
+	std::deque<spvm_sampler> samplers_;
 	std::deque<OurImage> images_;
+
+	std::unordered_map<std::string_view, spvm_result*> vars_;
 };
 
 } // namespace vil

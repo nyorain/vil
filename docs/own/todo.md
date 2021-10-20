@@ -18,6 +18,8 @@ new, workstack:
 	  latency between rendered frame and debug gui anymore. Investigate.
 	  (For buffers this isn't possible, we need the cpu processing for
 	  formatting & text rendering)
+- [ ] rework buffmt with proper array types (and multdim arrays)
+      allow to store spirv u32 id per Type.
 
 urgent, bugs:
 - [ ] figure out tracy issues. On windows, it causes problems with a lot
@@ -41,15 +43,6 @@ urgent, bugs:
 spvm:
 - [ ] Add OpSpecConstant* support
 - [ ] Add OpArrayLength support
-- [ ] Avoid copies for setting buffer data.
-      Maybe just add callback when a buffer is accessed that can return the data?
-	  I guess the only ways for access is OpLoad, optionally via OpAccessChain.
-	  Something like `spvm_member_t get_data(spvm_result_t var, size_t index_count, unsigned* indices)`
-	  Alternative: a more specific interface only for the most important case, runtime arrays.
-	  (But honestly, shaders could also just declare huge static arrays so we probably
-	  want the general support).
-- [ ] add callback for getting image data instead of requiring the whole image
-      to be present
 
 docs
 - [ ] write small wiki documentation post on how to use API

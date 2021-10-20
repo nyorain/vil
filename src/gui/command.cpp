@@ -84,6 +84,7 @@ void CommandViewer::init(Gui& gui) {
 	vertexViewer_.init(gui);
 	bufferViewer_.init(gui);
 	imageViewer_.init(gui);
+	shaderDebugger_.init(gui);
 }
 
 void CommandViewer::unselect() {
@@ -96,7 +97,8 @@ void CommandViewer::unselect() {
 }
 
 void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
-		CommandDescriptorSnapshot dsState, bool resetState) {
+		CommandDescriptorSnapshot dsState, bool resetState,
+		IntrusivePtr<CommandHookState> newState) {
 
 	const DrawCmdBase* drawCmd {};
 	const StateCmdBase* stateCmd {};
@@ -191,7 +193,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			// always reset this
 			viewData_.transfer.index = 0u;
 			break;
-		case IOView::pushConstants:
+		case IOView::pushConstants: {
 			if(!stateCmd || !stateCmd->boundPipe()) {
 				selectCommandView = true;
 				break;
@@ -216,6 +218,18 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			}
 
 			break;
+		} case IOView::shader: {
+			auto* lastStateCmd = dynamic_cast<const StateCmdBase*>(command_);
+			dlg_assert(lastStateCmd);
+
+			if(!stateCmd || !stateCmd->boundPipe()
+					|| stateCmd->boundPipe() != lastStateCmd->boundPipe()) {
+				selectCommandView = true;
+				shaderDebugger_.unselect();
+			}
+
+			break;
+		}
 	}
 
 	record_ = rec;
@@ -237,11 +251,9 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 		// command to a DrawIndirect command), requiring us to update
 		// the hook ops.
 		updateHook();
+	} else if(newState) {
+		state_ = newState;
 	}
-}
-
-void CommandViewer::state(IntrusivePtr<CommandHookState> state) {
-	state_ = state;
 }
 
 void CommandViewer::displayTransferIOList() {
@@ -1183,6 +1195,9 @@ void CommandViewer::displaySelectedIO(Draw& draw) {
 		case IOView::transferDst:
 			displayTransferData(draw);
 			break;
+		case IOView::shader:
+			shaderDebugger_.draw();
+			break;
 	}
 }
 
@@ -1307,7 +1322,10 @@ void CommandViewer::displayCommand() {
 			if(dcmd->state.pipe) {
 				// TODO: set specialization constants
 				auto& spirv = nonNull(dcmd->state.pipe->stage.spirv);
-				gui_->selectShader(nonNull(spirv.compiled));
+				shaderDebugger_.select(nonNull(spirv.compiled));
+				view_ = IOView::shader;
+				updateHook();
+				return;
 			}
 		}
 	}
@@ -1422,6 +1440,9 @@ void CommandViewer::updateHook() {
 			break;
 		case IOView::pushConstants:
 			// nothing to copy here, we know them staically
+			break;
+		case IOView::shader:
+			shaderDebugger_.updateHooks(hook);
 			break;
 	}
 }

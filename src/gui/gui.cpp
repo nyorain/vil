@@ -1,6 +1,8 @@
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/render.hpp>
+#include <gui/resources.hpp>
+#include <gui/cb.hpp>
 #include <gui/commandHook.hpp>
 #include <gui/fonts.hpp>
 #include <layer.hpp>
@@ -59,6 +61,8 @@ thread_local ImGuiContext* __LayerImGui;
 namespace vil {
 
 // Gui
+Gui::Gui() = default;
+
 void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear) {
 	dev_ = &dev;
 	clear_ = clear;
@@ -80,26 +84,6 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	nameHandle(dev, commandPool_, "Gui:commandPool");
 
 	// init render stuff
-	// samplers
-	VkSamplerCreateInfo sci {};
-	sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	sci.magFilter = VK_FILTER_NEAREST;
-	sci.minFilter = VK_FILTER_NEAREST;
-	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.minLod = -1000;
-	sci.maxLod = 1000;
-	sci.maxAnisotropy = 1.0f;
-	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &nearestSampler_));
-	nameHandle(dev, nearestSampler_, "Gui:nearestSampler");
-
-	sci.magFilter = VK_FILTER_LINEAR;
-	sci.minFilter = VK_FILTER_LINEAR;
-	VK_CHECK(dev.dispatch.CreateSampler(dev.handle, &sci, nullptr, &linearSampler_));
-	nameHandle(dev, linearSampler_, "Gui:linearSampler");
-
 	// descriptor set layout
 	VkDescriptorSetLayoutBinding binding {};
 	binding.binding = 0u;
@@ -125,7 +109,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	imgOpBindings[1].descriptorCount = 1u;
 	imgOpBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	imgOpBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	imgOpBindings[1].pImmutableSamplers = &nearestSampler_;
+	imgOpBindings[1].pImmutableSamplers = &dev.nearestSampler;
 
 	dslci.bindingCount = 2u;
 	dslci.pBindings = imgOpBindings;
@@ -227,9 +211,12 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	}
 
 	// init tabs
-	tabs_.resources.init(*this);
-	tabs_.cb.init(*this);
-	tabs_.shader.init(*this);
+	// TODO: use RAII for init
+	tabs_.resources = std::make_unique<ResourceGui>();
+	tabs_.cb = std::make_unique<CommandBufferGui>();
+
+	tabs_.resources->init(*this);
+	tabs_.cb->init(*this);
 }
 
 void Gui::initPipes() {
@@ -647,8 +634,6 @@ Gui::~Gui() {
 	}
 
 	auto vkDev = dev_->handle;
-	dev_->dispatch.DestroySampler(vkDev, nearestSampler_, nullptr);
-	dev_->dispatch.DestroySampler(vkDev, linearSampler_, nullptr);
 	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, dsLayout_, nullptr);
 	dev_->dispatch.DestroyPipelineLayout(vkDev, pipeLayout_, nullptr);
 	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, imgOpDsLayout_, nullptr);
@@ -816,7 +801,7 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 	VkDescriptorImageInfo dsii;
 	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	dsii.imageView = font_.view;
-	dsii.sampler = linearSampler_;
+	dsii.sampler = dev.linearSampler;
 
 	VkWriteDescriptorSet write {};
 	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1376,11 +1361,11 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				// When switching towards the resources tab, make sure to refresh
 				// the list of available resources, not showing "<Destroyed>"
 				if(activeTab_ != Tab::resources) {
-					tabs_.resources.firstUpdate_ = true;
+					tabs_.resources->firstUpdate_ = true;
 					activeTab_ = Tab::resources;
 				}
 
-				tabs_.resources.draw(draw);
+				tabs_.resources->draw(draw);
 				ImGui::EndTabItem();
 			}
 
@@ -1390,18 +1375,12 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				ImGui::EndTabItem();
 			}
 
-			if(tabs_.cb.record_ || tabs_.cb.mode_ == CommandBufferGui::UpdateMode::swapchain) {
+			if(tabs_.cb->record_ || tabs_.cb->mode_ == CommandBufferGui::UpdateMode::swapchain) {
 				if(ImGui::BeginTabItem("Commands", nullptr, checkSelectTab(Tab::commandBuffer))) {
 					activeTab_ = Tab::commandBuffer;
-					tabs_.cb.draw(draw);
+					tabs_.cb->draw(draw);
 					ImGui::EndTabItem();
 				}
-			}
-
-			if(ImGui::BeginTabItem("Shader", nullptr, checkSelectTab(Tab::shader))) {
-				activeTab_ = Tab::shader;
-				tabs_.shader.draw();
-				ImGui::EndTabItem();
 			}
 
 			ImGui::EndTabBar();
@@ -1441,8 +1420,8 @@ void Gui::destroyed(const Handle& handle) {
 
 	// important that we *first* wait for the submission, then forward
 	// this since e.g. the resources gui may destroy handles based on it
-	tabs_.resources.destroyed(handle);
-	tabs_.cb.destroyed(handle);
+	tabs_.resources->destroyed(handle);
+	tabs_.cb->destroyed(handle);
 
 	// NOTE: I guess we could finish the draws here? But shouldn't be
 	// a problem to wait until the next frame.
@@ -1455,7 +1434,7 @@ void Gui::activateTab(Tab tab) {
 	// When switching towards the resources tab, make sure to refresh
 	// the list of available resources, not showing "<Destroyed>"
 	if(tab == Tab::resources) {
-		tabs_.resources.firstUpdate_ = true;
+		tabs_.resources->firstUpdate_ = true;
 	}
 }
 
@@ -1510,7 +1489,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 				VkDescriptorImageInfo imgInfo {};
 				imgInfo.imageView = blur_.view0;
 				imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-				imgInfo.sampler = linearSampler_;
+				imgInfo.sampler = dev().linearSampler;
 
 				VkWriteDescriptorSet write {};
 				write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1546,13 +1525,13 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	// TODO: hacky but we have to keep the records alive, making sure
 	// it's not destroyed inside the lock. Might need more here for correctness.
 	// Should probably come up with better mechanism.
-	auto keepAliveBatches0 = tabs_.cb.records_;
-	auto keepAliveBatches1 = tabs_.cb.selectedBatch_;
-	auto keepAliveDs0 = tabs_.cb.commandViewer_.dsState_;
+	auto keepAliveBatches0 = tabs_.cb->records_;
+	auto keepAliveBatches1 = tabs_.cb->selectedBatch_;
+	auto keepAliveDs0 = tabs_.cb->commandViewer_.dsState_;
 	std::vector<IntrusivePtr<CommandRecord>> keepAliveRecs {
-		tabs_.cb.record_,
-		tabs_.cb.selectedRecord_,
-		tabs_.cb.commandViewer_.record_,
+		tabs_.cb->record_,
+		tabs_.cb->selectedRecord_,
+		tabs_.cb->commandViewer_.record_,
 	};
 
 	{
@@ -2015,17 +1994,12 @@ void Gui::makeImGuiCurrent() {
 }
 
 void Gui::selectResource(Handle& handle, bool activateTab) {
-	tabs_.resources.select(handle);
-	tabs_.resources.filter_ = handle.objectType;
+	tabs_.resources->select(handle);
+	tabs_.resources->filter_ = handle.objectType;
 
 	if(activateTab) {
 		this->activateTab(Tab::resources);
 	}
-}
-
-void Gui::selectShader(const spc::Compiler& compiled) {
-	tabs_.shader.select(compiled);
-	this->activateTab(Tab::shader);
 }
 
 Draw* Gui::latestPendingDrawSyncLocked(SubmissionBatch& batch) {

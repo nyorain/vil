@@ -249,7 +249,7 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	bindings[1].descriptorCount = 1u;
 	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	bindings[1].pImmutableSamplers = &dev.gui->nearestSampler();
+	bindings[1].pImmutableSamplers = &dev.nearestSampler;
 
 	VkDescriptorSetLayoutCreateInfo dslci {};
 	dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -298,7 +298,7 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 
 		VkShaderModuleCreateInfo sci {};
 		sci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		sci.codeSize = spv.size() / 4;
+		sci.codeSize = spv.size() * 4;
 		sci.pCode = spv.data();
 
 		auto& mod = mods[cpis.size()];
@@ -310,7 +310,7 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 		}
 
 		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		cpi.layout = accelStructPipeLayout_;
+		cpi.layout = copyImagePipeLayout_;
 		cpi.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		cpi.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		cpi.stage.module = mod;
@@ -386,26 +386,28 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 }
 
 bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
-	dlg_assert(descriptorCopies.empty() || record.dsState);
-	if(!descriptorCopies.empty() && record.dsState) {
-		dlg_assert(!record.hcommand.empty());
-		auto* cmd = record.hcommand.back();
-		const DescriptorState* dsState = getDsState(*cmd);
-		auto& dsSnapshot = record.record->lastDescriptorState;
+	dlg_assert_or(record.dsState.size() == descriptorCopies.size(), return true);
 
-		for(auto [setID, bindingID, elemID, _1, _2] : descriptorCopies) {
-			dlg_assert(setID < dsState->descriptorSets.size());
-			auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
-			dlg_assert(it != dsSnapshot.states.end());
-			auto& currDS = nonNull(it->second);
+	dlg_assert(!record.hcommand.empty());
+	auto* cmd = record.hcommand.back();
+	const DescriptorState* dsState = getDsState(*cmd);
+	auto& dsSnapshot = record.record->lastDescriptorState;
 
-			if(!copyableDescriptorSame(currDS, *record.dsState, bindingID, elemID)) {
-				return false;
-			}
+	for(auto i = 0u; i < descriptorCopies.size(); ++i) {
+		auto [setID, bindingID, elemID, _1, _2] = descriptorCopies[i];
+
+		dlg_assert(setID < dsState->descriptorSets.size());
+		auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
+		dlg_assert(it != dsSnapshot.states.end());
+		auto& currDS = nonNull(it->second);
+
+		dlg_assert_or(record.dsState[i], return true);
+		if(!copyableDescriptorSame(currDS, *record.dsState[i], bindingID, elemID)) {
+			return true;
 		}
 	}
 
-	return true;
+	return false;
 }
 
 VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
@@ -657,6 +659,8 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	RecordInfo info {};
 	initState(info);
 
+	this->dsState.resize(hook->descriptorCopies.size());
+
 	// record
 	// we can never submit the cb simulataneously anyways, see CommandHook
 	VkCommandBufferBeginInfo cbbi {};
@@ -699,6 +703,10 @@ CommandHookRecord::~CommandHookRecord() {
 
 	// destroy resources
 	auto commandPool = dev.queueFamilies[record->queueFamily].commandPool;
+
+	for(auto imgView : imageViews) {
+		dev.dispatch.DestroyImageView(dev.handle, imgView, nullptr);
+	}
 
 	dev.dispatch.FreeCommandBuffers(dev.handle, commandPool, 1, &cb);
 	dev.dispatch.DestroyQueryPool(dev.handle, queryPool, nullptr);
@@ -1289,11 +1297,11 @@ void CommandHookRecord::initAndSampleCopy(OwnBuffer& dst, Image& src, VkImageLay
 		neededSize += layerSize * srcSubres.layerCount;
 	}
 
-	auto usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	auto usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	dst.ensure(dev, neededSize, usage, queueFams);
 
 	// = record =
-	VkImageMemoryBarrier srcBarrier;
+	VkImageMemoryBarrier srcBarrier {};
 	srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	srcBarrier.image = src.handle;
 	srcBarrier.oldLayout = srcLayout;
@@ -1479,7 +1487,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 
 void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		const CommandHook::DescriptorCopy& copyDesc,
-		CommandHookState::CopiedDescriptor& dst) {
+		CommandHookState::CopiedDescriptor& dst, DescriptorSetStatePtr& dstStatePtr) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyDs");
 
@@ -1531,7 +1539,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		return;
 	}
 
-	this->dsState = it->second;
+	dstStatePtr = it->second;
 
 	auto& lbinding = ds.layout->bindings[bindingID];
 	auto cat = category(lbinding.descriptorType);
@@ -1569,9 +1577,10 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 
 				if(imageAsBuffer) {
 					// we don't ever use that buffer in a submission again
-					// so we an ignore queue families
+					// so we can ignore queue families
 					auto& dstBuf = dst.data.emplace<OwnBuffer>();
 					initAndSampleCopy(dstBuf, *imgView->img, layout, subres, {});
+					info.rebindComputeState = true;
 				} else {
 					auto& dstImg = dst.data.emplace<CopiedImage>();
 					initAndCopy(dev, cb, dstImg, *imgView->img, layout, subres,
@@ -1895,7 +1904,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// descriptor state
 	for(auto [i, dc] : enumerate(hook->descriptorCopies)) {
 		if(dc.before) {
-			copyDs(bcmd, info, dc, state->copiedDescriptors[i]);
+			copyDs(bcmd, info, dc, state->copiedDescriptors[i], dsState[i]);
 		}
 	}
 
@@ -1976,7 +1985,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// descriptor state
 	for(auto [i, dc] : enumerate(hook->descriptorCopies)) {
 		if(!dc.before) {
-			copyDs(bcmd, info, dc, state->copiedDescriptors[i]);
+			copyDs(bcmd, info, dc, state->copiedDescriptors[i], dsState[i]);
 		}
 	}
 

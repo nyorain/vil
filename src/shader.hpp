@@ -119,6 +119,7 @@ BindingNameRes bindingName(const spc::Compiler&, u32 setID, u32 bindingID);
 std::optional<spc::Resource> resource(const spc::Compiler&,
 	u32 setID, u32 bindingID, VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM);
 std::optional<spc::Resource> resource(const spc::Compiler&, u32 varID);
+std::optional<spc::BuiltInResource> builtinResource(const spc::Compiler&, u32 varID);
 
 struct ShaderModule : DeviceHandle {
 	VkShaderModule handle {};

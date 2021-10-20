@@ -8,24 +8,25 @@ extern "C" {
 struct spvm_state;
 struct spvm_image;
 struct spvm_result;
+struct spvm_image_info;
 
 typedef struct spvm_vec4f {
 	float data[4];
 } spvm_vec4f;
 
 typedef struct spvm_image {
+	// Size values of the first (base) mip level accessible to the shader.
+	// If the full image has size 1024x1024 but the imageView bound
+	// to the descriptor has firstLevel = 2, expects 256x256 here.
 	unsigned width;
 	unsigned height;
 	unsigned depth;
 	unsigned layers;
 	unsigned levels;
+	// TODO: support for multisampling
 
 	void* user_data;
 } spvm_image;
-
-typedef struct spvm_sampler {
-	void* user_data;
-} spvm_sampler;
 
 // Default implementation for image sampling
 // See VkSamplerCreateInfo
@@ -60,7 +61,6 @@ typedef struct spvm_sampler_desc {
 	spvm_sampler_address_mode address_mode_v;
 	spvm_sampler_address_mode address_mode_w;
 	float mip_bias;
-	char compare_enable;
 	spvm_sampler_compare_op compare_op;
 	float min_lod;
 	float max_lod;
@@ -69,12 +69,21 @@ typedef struct spvm_sampler_desc {
 	// TODO: no support for unnormalized coordinates yet
 } spvm_sampler_desc;
 
+typedef struct spvm_sampler {
+	spvm_sampler_desc desc;
+} spvm_sampler;
+
 spvm_vec4f spvm_image_read(struct spvm_state*, spvm_image*,
 	int x, int y, int z, int layer, int level);
 void spvm_image_write(struct spvm_state*, spvm_image*,
 	int x, int y, int z, int layer, int level, const spvm_vec4f* data);
 spvm_vec4f spvm_sampled_image_sample(struct spvm_state*, spvm_image*, spvm_sampler*,
 	float x, float y, float z, float layer, float level);
+
+// Applies the addressing mode from the sampler but always just
+// reads a single texel.
+spvm_vec4f spvm_fetch_texel(struct spvm_state* state,
+	spvm_image* img, const spvm_sampler_desc* desc, int x, int y, int z, int layer, int level);
 
 // spvm_image implementation
 // Functions will interpret user_data as float* with tight layout
@@ -84,11 +93,20 @@ spvm_vec4f spvm_image_read_impl(struct spvm_state*, struct spvm_image*,
 void spvm_image_write_impl(struct spvm_state*, struct spvm_image*,
 	int x, int y, int z, int layer, int level, const spvm_vec4f* data);
 
-// spvm_sampler_image implementation
-// Functions will interpret the user_data of the sampler associated
-// with the sampled image as spvm_sampler_desc* and sample according to it.
-spvm_vec4f spvm_sampled_image_sample_impl(struct spvm_state*, spvm_image*, spvm_sampler*,
-	float x, float y, float z, float layer, float level);
+struct spvm_sampled_image_lod_query {
+	float lambda_prime; // the level without any clamping/rounding
+	float dl; // the selected level
+};
+
+// Expects the coords to be loaded into the derivative buffers of the given state.
+struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod(
+	struct spvm_state*, spvm_image*, const struct spvm_image_info*, spvm_sampler*,
+	unsigned coord_id, float shader_lod_bias, float shader_lod_min);
+
+// For cubemaps, ddx and ddy must already correspond to the selected face.
+struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod_from_grad(
+	struct spvm_state*, spvm_image*, const struct spvm_image_info*, spvm_sampler*,
+	float* ddx/*[3]*/, float* ddy/*[3]*/, float shader_lod_bias, float shader_lod_min);
 
 #ifdef __cplusplus
 }

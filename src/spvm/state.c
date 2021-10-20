@@ -21,9 +21,9 @@ spvm_state_t spvm_state_create(spvm_program_t prog, spvm_state_settings settings
 	state->analyzer = NULL;
 	state->load_variable = settings.load_variable;
 	state->store_variable = settings.store_variable;
+	state->log = settings.log;
 	state->_derivative_is_group_member = settings.is_derv_member;
 
-	state->sample_texel = spvm_sampled_image_sample_impl;
 	state->read_image = spvm_image_read_impl;
 	state->write_image = spvm_image_write_impl;
 
@@ -36,8 +36,11 @@ spvm_state_t spvm_state_create(spvm_program_t prog, spvm_state_settings settings
 		spvm_word opcode = (opcode_data & SpvOpCodeMask);
 		spvm_source cur_code = state->code_current;
 
-		if (opcode <= SPVM_OPCODE_TABLE_LENGTH && state->context->opcode_setup[opcode] != 0)
+		if (opcode >= SPVM_OPCODE_TABLE_LENGTH) {
+			spvm_state_log(state, "opcode out of range: %d", (int) opcode);
+		} else if (state->context->opcode_setup[opcode]) {
 			state->context->opcode_setup[opcode](word_count, state);
+		}
 
 		state->code_current = (cur_code + word_count);
 		i += word_count;
@@ -78,7 +81,7 @@ spvm_result_t spvm_state_get_type_info(spvm_result_t res_list, spvm_result_t res
 		return spvm_state_get_type_info(res_list, &res_list[res->pointer]);
 	return res;
 }
-void spvm_state_set_extension(spvm_state_t state, const spvm_string name, spvm_ext_opcode_func* ext)
+void spvm_state_set_extension(spvm_state_t state, const char* name, spvm_ext_opcode_func* ext)
 {
 	spvm_result_t ptr = spvm_state_get_result(state, name);
 	if (ptr) ptr->extension = ext;
@@ -157,7 +160,7 @@ void spvm_state_set_frag_coord(spvm_state_t state, float x, float y, float z, fl
 void spvm_state_copy_uniforms(spvm_state_t dst, spvm_state_t src)
 {
 	for (unsigned i = 0; i < dst->owner->bound; i++) {
-		const spvm_string name1 = dst->results[i].name;
+		const char* name1 = dst->results[i].name;
 		if (name1 == NULL)
 			continue;
 
@@ -167,7 +170,7 @@ void spvm_state_copy_uniforms(spvm_state_t dst, spvm_state_t src)
 			continue;
 
 		for (unsigned j = 0; j < src->owner->bound; j++) {
-			const spvm_string name2 = src->results[j].name;
+			const char* name2 = src->results[j].name;
 			ptr = src->results[j].pointer;
 
 			if (name2 != NULL) {
@@ -203,7 +206,9 @@ void spvm_state_step_opcode(spvm_state_t state)
 	SpvOp opcode = (opcode_data & SpvOpCodeMask);
 	spvm_source cur_code = state->code_current;
 
-	if (opcode <= SPVM_OPCODE_TABLE_LENGTH && state->context->opcode_execute[opcode] != 0) {
+	if (opcode >= SPVM_OPCODE_TABLE_LENGTH) {
+		spvm_state_log(state, "opcode out of range: %d", (int) opcode);
+	} else if (state->context->opcode_execute[opcode]) {
 		state->context->opcode_execute[opcode](word_count, state);
 		if (opcode != SpvOpLine && opcode != SpvOpNoLine)
 			state->instruction_count++;
@@ -231,26 +236,8 @@ void spvm_state_jump_to_instruction(spvm_state_t state, spvm_word inst)
 }
 void spvm_state_call_function(spvm_state_t state)
 {
-	spvm_source cur_code = state->code_current;
-
 	while (state->code_current)
-	{
-		// read data
-		spvm_word opcode_data = SPVM_READ_WORD(state->code_current);
-		spvm_word word_count = ((opcode_data & (~SpvOpCodeMask)) >> SpvWordCountShift) - 1;
-		SpvOp opcode = (opcode_data & SpvOpCodeMask);
-		cur_code = state->code_current;
-
-		if (opcode <= SPVM_OPCODE_TABLE_LENGTH && state->context->opcode_execute[opcode] != 0) {
-			state->context->opcode_execute[opcode](word_count, state);
-			if (opcode != SpvOpLine && opcode != SpvOpNoLine)
-				state->instruction_count++;
-		}
-
-		if (!state->did_jump)
-			state->code_current = (cur_code + word_count);
-		else state->did_jump = 0;
-	}
+		spvm_state_step_opcode(state);
 }
 void spvm_state_ddx(spvm_state_t state, spvm_word id)
 {
@@ -358,7 +345,7 @@ spvm_member_t spvm_state_get_builtin(spvm_state_t state, SpvBuiltIn builtin, spv
 
 	return NULL;
 }
-spvm_result_t spvm_state_get_local_result(spvm_state_t state, spvm_result_t fn, const spvm_string str)
+spvm_result_t spvm_state_get_local_result(spvm_state_t state, spvm_result_t fn, const char* str)
 {
 	for (unsigned i = 0; i < state->owner->bound; i++)
 		if (state->results[i].name != NULL && strcmp(state->results[i].name, str) == 0 &&
@@ -367,7 +354,7 @@ spvm_result_t spvm_state_get_local_result(spvm_state_t state, spvm_result_t fn, 
 
 	return NULL;
 }
-spvm_word spvm_state_get_result_location(spvm_state_t state, const spvm_string str)
+spvm_word spvm_state_get_result_location(spvm_state_t state, const char* str)
 {
 	for (unsigned i = 0; i < state->owner->bound; i++)
 		if (state->results[i].name != NULL && strcmp(state->results[i].name, str) == 0 && state->results[i].owner == NULL)
@@ -375,7 +362,7 @@ spvm_word spvm_state_get_result_location(spvm_state_t state, const spvm_string s
 
 	return 0;
 }
-spvm_result_t spvm_state_get_result(spvm_state_t state, const spvm_string str)
+spvm_result_t spvm_state_get_result(spvm_state_t state, const char* str)
 {
 	for (unsigned i = 0; i < state->owner->bound; i++)
 		if (state->results[i].name != NULL && strcmp(state->results[i].name, str) == 0 && state->results[i].owner == NULL)
@@ -383,7 +370,7 @@ spvm_result_t spvm_state_get_result(spvm_state_t state, const spvm_string str)
 
 	return NULL;
 }
-spvm_result_t spvm_state_get_result_with_value(spvm_state_t state, const spvm_string str)
+spvm_result_t spvm_state_get_result_with_value(spvm_state_t state, const char* str)
 {
 	for (unsigned i = 0; i < state->owner->bound; i++)
 		if (state->results[i].name != NULL && strcmp(state->results[i].name, str) == 0 && state->results[i].owner == NULL && state->results[i].members != NULL)
@@ -391,7 +378,7 @@ spvm_result_t spvm_state_get_result_with_value(spvm_state_t state, const spvm_st
 
 	return NULL;
 }
-spvm_member_t spvm_state_get_object_member(spvm_state_t state, spvm_result_t var, const spvm_string member_name)
+spvm_member_t spvm_state_get_object_member(spvm_state_t state, spvm_result_t var, const char* member_name)
 {
 	spvm_result_t type_info = spvm_state_get_type_info(state->results, &state->results[var->pointer]);
 	spvm_word index = -1;
@@ -466,5 +453,16 @@ void spvm_state_delete(spvm_state_t state)
 
 	free(state->results);
 	free(state);
+}
+void spvm_state_log(struct spvm_state* state, const char* fmt, ...)
+{
+    va_list vargs;
+    va_start(vargs, fmt);
+
+	if (state->log) {
+		state->log(state, fmt, vargs);
+	}
+
+	va_end(vargs);
 }
 

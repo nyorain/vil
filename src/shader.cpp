@@ -621,8 +621,29 @@ std::optional<spc::Resource> resource(const spc::Compiler& compiler, u32 varID) 
 	check(resources.separate_images);
 	check(resources.separate_samplers);
 	check(resources.storage_buffers);
+	check(resources.storage_images);
 	check(resources.uniform_buffers);
 	check(resources.subpass_inputs);
+
+	return ret;
+}
+
+std::optional<spc::BuiltInResource> builtinResource(const spc::Compiler& compiler, u32 varID) {
+	std::optional<spc::BuiltInResource> ret;
+
+	auto checkBuiltin = [&](auto& resources) {
+		for(auto& res : resources) {
+			if(res.resource.id == varID) {
+				dlg_assert(!ret);
+				ret = res;
+				break;
+			}
+		}
+	};
+
+	auto resources = compiler.get_shader_resources();
+	checkBuiltin(resources.builtin_inputs);
+	checkBuiltin(resources.builtin_outputs);
 
 	return ret;
 }

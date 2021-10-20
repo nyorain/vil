@@ -835,7 +835,7 @@ void ImageViewer::createData() {
 	// TODO: use better sampler, with linear interpolation where possible.
 	// But only when image is too large for canvas, otherwise use nearest via
 	// min/magFilter
-	dsii.sampler = gui_->nearestSampler();
+	dsii.sampler = dev.nearestSampler;
 	// dsii.sampler = image.allowsLinearSampling ?
 	// 	dev.renderData->linearSampler :
 	// 	dev.renderData->nearestSampler;

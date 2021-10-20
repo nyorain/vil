@@ -3,15 +3,15 @@
 #include <device.hpp>
 #include <gui/render.hpp>
 #include <gui/blur.hpp>
-#include <gui/resources.hpp>
-#include <gui/cb.hpp>
-#include <gui/shader.hpp>
 #include <util/bytes.hpp>
 #include <imgui/imgui.h>
 #include <variant>
 #include <deque>
 
 namespace vil {
+
+class ResourceGui;
+class CommandBufferGui;
 
 class Gui {
 public:
@@ -20,7 +20,6 @@ public:
 		resources,
 		commandBuffer,
 		memory,
-		shader,
 	};
 
 	struct FrameInfo {
@@ -44,11 +43,12 @@ public:
 	static constexpr bool showHelp = true;
 
 public:
-	Gui() = default;
+	Gui();
 	Gui(Gui&&) = delete;
 	Gui& operator=(Gui&&) = delete;
 	~Gui();
 
+	// TODO: use constructor instead of init function
 	void init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear);
 	void makeImGuiCurrent();
 	VkResult renderFrame(FrameInfo& info);
@@ -71,9 +71,8 @@ public:
 
 	void activateTab(Tab);
 	void selectResource(Handle& handle, bool activateTab = true);
-	void selectShader(const spc::Compiler& compiled);
 
-	auto& cbGui() { return tabs_.cb; }
+	auto& cbGui() { return *tabs_.cb; }
 	ImGuiIO& imguiIO() const { return *io_; }
 
 	Device& dev() const { return *dev_; }
@@ -86,8 +85,6 @@ public:
 	Queue& usedQueue() const { return *dev().gfxQueue; }
 
 	const VkPipeline& imageBgPipe() const { return pipes_.imageBg; }
-	const VkSampler& linearSampler() const { return linearSampler_; }
-	const VkSampler& nearestSampler() const { return nearestSampler_; }
 	const VkPipelineLayout& pipeLayout() const { return pipeLayout_; }
 	const VkDescriptorSetLayout& dsLayout() const { return dsLayout_; }
 
@@ -128,16 +125,13 @@ private:
 	Draw* lastDraw_ {};
 
 	struct {
-		ResourceGui resources;
-		CommandBufferGui cb;
-		ShaderDebugger shader;
+		std::unique_ptr<ResourceGui> resources;
+		std::unique_ptr<CommandBufferGui> cb;
 	} tabs_;
 
 	// rendering stuff
 	VkDescriptorSetLayout dsLayout_ {};
 	VkPipelineLayout pipeLayout_ {};
-	VkSampler linearSampler_ {};
-	VkSampler nearestSampler_ {};
 
 	VkDescriptorSetLayout imgOpDsLayout_ {};
 	VkPipelineLayout imgOpPipeLayout_ {};

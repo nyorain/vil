@@ -96,7 +96,11 @@ struct Device {
 
 	u32 hostVisibleMemTypeBits {};
 	u32 deviceLocalMemTypeBits {};
+
+	// own static rendering stuff
 	VkDescriptorPool dsPool {};
+	VkSampler linearSampler {};
+	VkSampler nearestSampler {};
 
 	std::unique_ptr<DisplayWindow> window;
 

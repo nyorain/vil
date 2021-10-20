@@ -135,6 +135,7 @@ namespace spc {
 class Compiler;
 struct Resource;
 struct SPIRConstant;
+struct BuiltInResource;
 
 } // namespace spc
 

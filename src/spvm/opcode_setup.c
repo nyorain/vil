@@ -3,6 +3,11 @@
 #include <spvm/state.h>
 #include <spvm/spirv.h>
 #include <string.h>
+#include <assert.h>
+
+// defined in opcode_execute.c
+char spvm_use_access_callback(enum spvm_result_type result_type,
+		SpvStorageClass storage_class);
 
 /* 3.32.2 Debug Instructions */
 void spvm_setup_OpSource(spvm_word word_count, spvm_state_t state)
@@ -297,6 +302,7 @@ void spvm_setup_OpConstantTrue(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+	state->results[id].source_location = state->code_current;
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++)
 		state->results[id].members[i].value.b = 1;
@@ -308,6 +314,7 @@ void spvm_setup_OpConstantFalse(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+	state->results[id].source_location = state->code_current;
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++)
 		state->results[id].members[i].value.b = 0;
@@ -319,6 +326,7 @@ void spvm_setup_OpConstantNull(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+	state->results[id].source_location = state->code_current;
 }
 void spvm_setup_OpConstant(spvm_word word_count, spvm_state_t state)
 {
@@ -327,6 +335,7 @@ void spvm_setup_OpConstant(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+	state->results[id].source_location = state->code_current;
 
 	state->results[id].members[0].value.u64 = SPVM_READ_WORD(state->code_current);
 
@@ -343,6 +352,7 @@ void spvm_setup_OpConstantComposite(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+	state->results[id].source_location = state->code_current;
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
 		spvm_word index = SPVM_READ_WORD(state->code_current);
@@ -368,9 +378,12 @@ void spvm_setup_OpVariable(spvm_word word_count, spvm_state_t state)
 	state->results[id].type = spvm_result_type_variable;
 	state->results[id].storage_class = storage_class;
 	state->results[id].owner = state->current_function;
+	state->results[id].pointer = var_type;
 
-	if(!state->load_variable || !state->store_variable) {
+	if(!state->load_variable || !state->store_variable ||
+			storage_class == SpvStorageClassFunction) {
 		spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+		state->results[id].source_location = state->code_current;
 
 		if (initializer != -1)
 			spvm_member_memcpy(state->results[id].members, state->results[initializer].members, state->results[id].member_count);
@@ -387,6 +400,38 @@ void spvm_setup_OpLoad(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, res_type);
+	state->results[id].source_location = state->code_current;
+}
+void spvm_setup_OpAccessChain(spvm_word word_count, spvm_state_t state)
+{
+	spvm_source source_pointer = state->code_current;
+
+	spvm_word var_type = SPVM_READ_WORD(state->code_current);
+	spvm_word id = SPVM_READ_WORD(state->code_current);
+	spvm_word value_id = SPVM_READ_WORD(state->code_current);
+
+	state->results[id].type = spvm_result_type_access_chain;
+	state->results[id].pointer = var_type;
+	state->results[id].storage_class = state->results[value_id].storage_class;
+	state->results[id].source_location = source_pointer;
+	state->results[id].source_word_count = word_count;
+
+	spvm_result* src = &state->results[value_id];
+
+	if(state->load_variable && state->store_variable &&
+			spvm_use_access_callback(src->type, src->storage_class)) {
+		if(src->type == spvm_result_type_variable) {
+			spvm_word index_count = word_count - 3;
+
+			state->results[id].index_count = index_count;
+			state->results[id].indices = calloc(sizeof(spvm_word), index_count);;
+			state->results[id].access_chain_ref = value_id;
+		} else {
+			// TODO: handle case where results[value_id] is another access chain.
+			// Just append the indices?
+			assert(!"Unimplemented");
+		}
+	}
 }
 void spvm_setup_OpFunction(spvm_word word_count, spvm_state_t state)
 {
@@ -415,7 +460,6 @@ void spvm_setup_OpFunctionParameter(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 
 	state->results[id].type = spvm_result_type_function_parameter;
-	state->results[id].storage_class = SPVM_READ_WORD(state->code_current);
 	state->current_function->params[state->current_parameter] = id;
 	state->current_parameter++;
 
@@ -424,6 +468,7 @@ void spvm_setup_OpFunctionParameter(spvm_word word_count, spvm_state_t state)
 	state->results[id].pointer = var_type;
 	state->results[id].member_count = type_info->member_count;
 	state->results[id].owner = state->current_function;
+	state->results[id].storage_class = state->results[var_type].storage_class;
 }
 void spvm_setup_OpFunctionEnd(spvm_word word_count, spvm_state_t state)
 {
@@ -436,6 +481,7 @@ void spvm_setup_OpFunctionCall(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, ret_type);
+	state->results[id].source_location = state->code_current;
 }
 
 /* 3.32.11 Conversion Instructions */
@@ -448,6 +494,7 @@ void spvm_setup_constant(spvm_word word_count, spvm_state_t state)
 
 	state->results[id].type = spvm_result_type_constant;
 	spvm_result_allocate_typed_value(&state->results[id], state->results, res_type);
+	state->results[id].source_location = state->code_current;
 }
 
 /* 3.32.16 Derivative Instructions */
@@ -515,6 +562,7 @@ void _spvm_context_create_setup_table(spvm_context_t ctx)
 
 	ctx->opcode_setup[SpvOpVariable] = spvm_setup_OpVariable;
 	ctx->opcode_setup[SpvOpLoad] = spvm_setup_OpLoad;
+	ctx->opcode_setup[SpvOpAccessChain] = spvm_setup_OpAccessChain;
 	ctx->opcode_setup[SpvOpFunction] = spvm_setup_OpFunction;
 	ctx->opcode_setup[SpvOpFunctionParameter] = spvm_setup_OpFunctionParameter;
 	ctx->opcode_setup[SpvOpFunctionEnd] = spvm_setup_OpFunctionEnd;

@@ -69,12 +69,20 @@ void spvm_member_allocate_typed_value(spvm_member_t val, spvm_result* results, s
 {
 	spvm_result_t type_info = spvm_state_get_type_info(results, &results[type]);
 
-	spvm_member_allocate_value(val, type_info->member_count);
+	if (type_info->value_type == spvm_value_type_void ||
+			type_info->value_type == spvm_value_type_int ||
+			type_info->value_type == spvm_value_type_float ||
+			type_info->value_type == spvm_value_type_bool) {
+		assert(type_info->member_count == 1u); // should be 0 really
+	} else {
+		spvm_member_allocate_value(val, type_info->member_count);
+	}
+
 	val->type = type;
+	assert(type != 0);
 
 	if (type_info->value_type == spvm_value_type_struct) {
 		for (spvm_word i = 0; i < val->member_count; i++) {
-			val->members[i].type = type_info->params[i];
 			spvm_member_allocate_typed_value(&val->members[i], results, type_info->params[i]);
 		}
 	}
@@ -86,8 +94,13 @@ void spvm_member_allocate_typed_value(spvm_member_t val, spvm_result* results, s
 		if (results[type_info->pointer].member_count > 0)
 			for (spvm_word i = 0; i < val->member_count; i++)
 				spvm_member_allocate_typed_value(&val->members[i], results, type_info->pointer);
+	} else if (type_info->value_type == spvm_value_type_vector) {
+		for (spvm_word i = 0; i < val->member_count; ++i)
+			val->members[i].type = type_info->pointer;
 	} else {
 		assert(type_info->value_type != spvm_value_type_sampled_image);
+		assert(type_info->value_type != spvm_value_type_image);
+		assert(type_info->value_type != spvm_value_type_sampler);
 	}
 }
 void spvm_result_allocate_value(spvm_result_t val, spvm_word count)
@@ -101,22 +114,34 @@ void spvm_result_allocate_typed_value(spvm_result_t val, spvm_result* results, s
 
 	spvm_result_allocate_value(val, type_info->member_count);
 	val->pointer = type;
+	assert(type != 0);
 
 	if (type_info->value_type == spvm_value_type_struct) {
 		for (spvm_word i = 0; i < val->member_count; i++)
 			spvm_member_allocate_typed_value(&val->members[i], results, type_info->params[i]);
-	}
-	else if (type_info->value_type == spvm_value_type_matrix) {
+	} else if (type_info->value_type == spvm_value_type_matrix) {
 		for (spvm_word i = 0; i < val->member_count; i++)
 			spvm_member_allocate_typed_value(&val->members[i], results, type_info->pointer);
-	}
-	else if (type_info->value_type == spvm_value_type_array) {
+	} else if (type_info->value_type == spvm_value_type_array) {
 		if (results[type_info->pointer].member_count > 0)
 			for (spvm_word i = 0; i < val->member_count; i++)
 				spvm_member_allocate_typed_value(&val->members[i], results, type_info->pointer);
+	} else if (type_info->value_type == spvm_value_type_vector) {
+		for (spvm_word i = 0; i < val->member_count; ++i)
+			val->members[i].type = type_info->pointer;
 	} else if(type_info->value_type == spvm_value_type_sampled_image) {
 		val->members[0].type = type_info->pointer;
 		val->members[1].type = (spvm_word) -1; // we don't care about the OpTypeSampler used
+	} else if(type_info->value_type == spvm_value_type_image) {
+		val->members[0].type = type;
+	} else if(type_info->value_type == spvm_value_type_sampler) {
+		// no-op, we don't care about OpTypeSampler
+	} else if(type_info->value_type == spvm_value_type_float ||
+		type_info->value_type == spvm_value_type_int ||
+		type_info->value_type == spvm_value_type_bool) {
+
+		assert(val->member_count == 1u);
+		val->members[0].type = type;
 	}
 }
 void spvm_result_delete(spvm_result_t res)

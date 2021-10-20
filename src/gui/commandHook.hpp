@@ -231,7 +231,8 @@ struct CommandHookRecord {
 	// When copying state from a descriptor set, this will hold the pointer
 	// to the associated descriptor set state. Used for updateAfterBind
 	// descriptors: when they change we must recreate the CommandHookRecord.
-	DescriptorSetStatePtr dsState;
+	// One state pointer for each descriptorCopy stored here.
+	std::vector<DescriptorSetStatePtr> dsState;
 
 	// == Resources ==
 	VkCommandBuffer cb {};
@@ -331,7 +332,8 @@ private:
 	void copyTransfer(Command& bcmd, RecordInfo&);
 	void copyDs(Command& bcmd, RecordInfo&,
 		const CommandHook::DescriptorCopy&,
-		CommandHookState::CopiedDescriptor& dst);
+		CommandHookState::CopiedDescriptor& dst,
+		DescriptorSetStatePtr& dstStatePtr);
 	void copyAttachment(RecordInfo&, unsigned id,
 		CommandHookState::CopiedAttachment& dst);
 	void beforeDstOutsideRp(Command&, RecordInfo&);

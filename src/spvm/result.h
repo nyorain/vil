@@ -24,7 +24,7 @@ enum spvm_result_type {
 	spvm_result_type_label
 };
 
-typedef struct {
+typedef struct spvm_image_info {
 	SpvDim dim;
 	spvm_byte depth;
 	spvm_byte arrayed;
@@ -34,7 +34,7 @@ typedef struct {
 	SpvAccessQualifier access;
 } spvm_image_info;
 
-typedef struct {
+typedef struct spvm_decoration {
 	SpvDecoration type;
 	spvm_word literal1, literal2;
 	spvm_word index; // member
@@ -44,7 +44,7 @@ typedef struct spvm_result {
 	enum spvm_result_type type;
 
 	spvm_string name;
-	spvm_word pointer; // pointer to spvm_result
+	spvm_word pointer;
 	SpvStorageClass storage_class;
 	struct spvm_result* owner;
 
@@ -62,6 +62,7 @@ typedef struct spvm_result {
 	spvm_ext_opcode_func* extension;
 
 	/* spvm_result_type_function_type / spvm_result_type_type (structure) / spvm_result_type_function */
+	// TODO: just use 'members'?
 	spvm_word* params;
 
 	/* function, label & access chain */
@@ -70,6 +71,7 @@ typedef struct spvm_result {
 	/* spvm_result_type_access_chain*/
 	/* word count when a opcode uses source_location (OpAccessChain) */
 	spvm_word source_word_count;
+	spvm_word access_chain_ref;
 	spvm_word index_count;
 	spvm_word* indices;
 

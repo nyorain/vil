@@ -266,7 +266,7 @@ void CommandBufferGui::draw(Draw& draw) {
 							selectedRecord_ = rec;
 
 							commandViewer_.select(record_, *command_.back(),
-								record_->lastDescriptorState, true);
+								record_->lastDescriptorState, true, nullptr);
 
 							dev.commandHook->target = {};
 							dev.commandHook->target.all = true;
@@ -315,7 +315,8 @@ void CommandBufferGui::draw(Draw& draw) {
 			}
 
 			command_ = std::move(nsel);
-			commandViewer_.select(record_, *command_.back(), record_->lastDescriptorState, true);
+			commandViewer_.select(record_, *command_.back(),
+				record_->lastDescriptorState, true, nullptr);
 
 			// in any case, update the hook
 			dev.commandHook->desc(record_, command_, record_->lastDescriptorState);
@@ -556,8 +557,7 @@ void CommandBufferGui::updateState() {
 			// to call this here, we could also move from the vectors
 			// from *best above.
 			commandViewer_.select(best->record, *best->command.back(),
-				best->descriptorSnapshot, false);
-			commandViewer_.state(best->state);
+				best->descriptorSnapshot, false, best->state);
 
 			// in this case, we want to freeze state but temporarily
 			// unfroze it to get a new CommandHookState. This happens

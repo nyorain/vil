@@ -1,6 +1,7 @@
 #include <spvm/image.h>
 #include <spvm/value.h>
 #include <spvm/state.h>
+#include <spvm/result.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -9,28 +10,15 @@
 spvm_vec4f spvm_image_read(struct spvm_state* state, spvm_image* image,
 	int x, int y, int z, int layer, int level)
 {
-	if (state->read_image)
-		return state->read_image(state, image, x, y, z, layer, level);
-
-	spvm_vec4f res = {0};
-	return res;
+	assert(state->read_image);
+	return state->read_image(state, image, x, y, z, layer, level);
 }
 
 void spvm_image_write(struct spvm_state* state, spvm_image* image,
 	int x, int y, int z, int layer, int level, const spvm_vec4f* data)
 {
-	if (state->write_image)
-		state->write_image(state, image, x, y, z, layer, level, data);
-}
-
-spvm_vec4f spvm_sampled_image_sample(struct spvm_state* state, spvm_image* image,
-		spvm_sampler* sampler, float x, float y, float z, float layer, float level)
-{
-	if (state->sample_texel)
-		return state->sample_texel(state, image, sampler, x, y, z, layer, level);
-
-	spvm_vec4f res = {0};
-	return res;
+	assert(state->write_image);
+	state->write_image(state, image, x, y, z, layer, level, data);
 }
 
 unsigned spvm_image_texel_id(struct spvm_image* image,
@@ -118,7 +106,6 @@ int spvm_apply_address_mode(spvm_sampler_address_mode mode, int val, int size)
 	return -1;
 }
 
-
 float spvm_frac(float val)
 {
 	double iptr;
@@ -135,9 +122,9 @@ spvm_vec4f spvm_fetch_texel(struct spvm_state* state,
 	unsigned height = MAX(img->height >> level, 1u);
 	unsigned depth = MAX(img->depth >> level, 1u);
 
-	x = spvm_apply_address_mode(x, desc->address_mode_u, width - 1);
-	y = spvm_apply_address_mode(y, desc->address_mode_v, height - 1);
-	z = spvm_apply_address_mode(z, desc->address_mode_w, depth - 1);
+	x = spvm_apply_address_mode(desc->address_mode_u, x, width - 1);
+	y = spvm_apply_address_mode(desc->address_mode_v, y, height - 1);
+	z = spvm_apply_address_mode(desc->address_mode_w, z, depth - 1);
 
 	// check for border condition
 	if (x < 0 || y < 0 || z < 0)
@@ -150,12 +137,11 @@ spvm_vec4f spvm_fetch_texel(struct spvm_state* state,
 	return spvm_image_read_impl(state, img, x, y, z, layer, level);
 }
 
-spvm_vec4f spvm_sampled_image_sample_impl(struct spvm_state* state,
+spvm_vec4f spvm_sampled_image_sample(struct spvm_state* state,
 	spvm_image* img, spvm_sampler* sampler,
 	float s, float t, float r, float layer, float level)
 {
-	spvm_sampler_desc* desc = (spvm_sampler_desc*) sampler->user_data;
-	assert(desc);
+	spvm_sampler_desc* desc = &sampler->desc;
 
 	level = CLAMP(level + desc->mip_bias, desc->min_lod, desc->max_lod);
 	spvm_sampler_filter filter = (level <= 0.f) ? desc->filter_mag : desc->filter_min;
@@ -243,5 +229,74 @@ spvm_vec4f spvm_sampled_image_sample_impl(struct spvm_state* state,
 	}
 
 	return res;
+}
+
+struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod(
+		struct spvm_state* state, spvm_image* image, const struct spvm_image_info* imginfo,
+		spvm_sampler* sampler, unsigned coord_id, float shader_lod_bias, float shader_lod_min) {
+
+	// https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/chap16.html#textures-lod-and-scale-factor
+	// TODO: handle proj
+	// TODO: handle unnormalized sampling coords
+	// TODO: handle cubemaps
+
+	spvm_state_ddx(state, coord_id);
+	spvm_state_ddy(state, coord_id);
+
+	return spvm_sampled_image_query_lod_from_grad(state, image, imginfo,
+		sampler, state->derivative_buffer_x, state->derivative_buffer_y,
+		shader_lod_bias, shader_lod_min);
+}
+
+struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod_from_grad(
+	struct spvm_state* state, spvm_image* image, const struct spvm_image_info* imginfo,
+	spvm_sampler* sampler, float* ddx, float* ddy,
+	float shader_lod_bias, float shader_lod_min) {
+
+	float mx[3] = {0.f};
+	float my[3] = {0.f};
+
+	mx[0] = ddx[0] * image->width;
+	my[0] = ddy[0] * image->width;
+
+	if(imginfo->dim >= SpvDim2D) {
+		mx[1] = ddx[1] * image->height;
+		my[1] = ddy[1] * image->height;
+	}
+
+	if(imginfo->dim >= SpvDim3D) {
+		mx[2] = ddx[2] * image->depth;
+		my[2] = ddy[2] * image->depth;
+	}
+
+	float ro_x = sqrt(mx[0] * mx[0] + mx[1] * mx[1] + mx[2] * mx[2]);
+	float ro_y = sqrt(my[0] * my[0] + my[1] * my[1] + my[2] * my[2]);
+
+	float ro_max = MAX(ro_x, ro_y);
+	float ro_min = MIN(ro_x, ro_y);
+
+	// TODO: handle anisotropy
+	const float eta = 1.f;
+
+	float lambda_base = log2(ro_max / eta);
+
+	// NOTE: we don't clamp to any maxSamplerLodBias here
+	float lambda_prime = lambda_base + shader_lod_bias + sampler->desc.mip_bias;
+
+	float lod_min = MAX(shader_lod_min, sampler->desc.min_lod);
+	float lod_max = sampler->desc.max_lod;
+
+	float lambda = CLAMP(lambda_prime, lod_min, lod_max);
+	float dl = lambda;
+
+	if (sampler->desc.mipmap_mode == spvm_sampler_filter_nearest) {
+		dl = round(dl);
+	}
+
+	struct spvm_sampled_image_lod_query ret;
+	ret.dl = dl;
+	ret.lambda_prime = lambda_prime;
+
+	return ret;
 }
 
