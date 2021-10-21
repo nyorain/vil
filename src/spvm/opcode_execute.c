@@ -385,7 +385,7 @@ float spvm_execute_compare(float val, float ref, spvm_sampler_compare_op op) {
 			return (ref <= val) ? 1.f : 0.f;
 		default:
 			assert(!"Invalid sampler compare op");
-			break;
+			return 0.f;
 	}
 }
 
