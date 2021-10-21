@@ -325,8 +325,7 @@ float process_cubemap_normal(float* nrml)
 	float absX = (float)fabs(nrml[0]);
 	float absY = (float)fabs(nrml[1]);
 	float absZ = (float)fabs(nrml[2]);
-	float ma, u, v;
-	float layer;
+	float ma, layer;
 
 	if (absX > absY && absX > absZ) {
 		ma = absX;
