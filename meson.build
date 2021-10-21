@@ -11,7 +11,7 @@ project('VIL', ['c', 'cpp'],
 		'c_std=c11',
 		# We need this to build the subprojects as static libraries. No
 		# other way to do this apparently.
-		# And we force the layer to be shared library anyways.
+		# And we force the layer to be a shared library anyways.
 		'default_library=static',
 	]
 )

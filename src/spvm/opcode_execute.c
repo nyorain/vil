@@ -280,7 +280,6 @@ typedef struct {
 } spvm_image_operands;
 void spvm_image_operands_parse(spvm_image_operands* info, spvm_state_t state)
 {
-	memset(info, 0, sizeof(*info));
 	spvm_word bits = info->bits = SPVM_READ_WORD(state->code_current);
 	if (bits & SpvImageOperandsBiasMask)
 		info->bias = state->results[SPVM_READ_WORD(state->code_current)].members[0].value.f;
@@ -561,7 +560,7 @@ void spvm_execute_OpImageSample(spvm_word word_count, spvm_state_t state)
 	spvm_word sampled_image_id = SPVM_READ_WORD(state->code_current);
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_operands operands;
+	spvm_image_operands operands = {0};
 	if (word_count > 4) {
 		spvm_image_operands_parse(&operands, state);
 	}
@@ -581,7 +580,7 @@ void spvm_execute_OpImageSampleDref(spvm_word word_count, spvm_state_t state)
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 	spvm_word dref_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_operands operands;
+	spvm_image_operands operands = {0};
 	if (word_count > 4) {
 		spvm_image_operands_parse(&operands, state);
 	}
@@ -615,7 +614,7 @@ void spvm_execute_OpImageFetch(spvm_word word_count, spvm_state_t state)
 	spvm_word image_id = SPVM_READ_WORD(state->code_current);
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_operands operands;
+	spvm_image_operands operands = {0};
 	if (word_count > 4) {
 		spvm_image_operands_parse(&operands, state);
 	}
@@ -646,7 +645,7 @@ void spvm_execute_OpImageGather(spvm_word word_count, spvm_state_t state)
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 	spvm_word comp_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_operands operands;
+	spvm_image_operands operands = {0};
 	if (word_count > 4) {
 		spvm_image_operands_parse(&operands, state);
 	}
@@ -670,7 +669,7 @@ void spvm_execute_OpImageDrefGather(spvm_word word_count, spvm_state_t state)
 	spvm_word coord_id = SPVM_READ_WORD(state->code_current);
 	spvm_word dref_id = SPVM_READ_WORD(state->code_current);
 
-	spvm_image_operands operands;
+	spvm_image_operands operands = {0};
 	if (word_count > 4) {
 		spvm_image_operands_parse(&operands, state);
 	}
