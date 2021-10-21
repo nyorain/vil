@@ -351,9 +351,12 @@ lib_spvm = static_library(
 	c_args: args + cc.get_supported_arguments([
 		'-Wno-unused-parameter',
 		'-Wno-unused-variable',
-		'-Wno-sign-compare',
 		'/wd4100', # unreferenced formal parameter.
 		'/wd4189', # unused local variable
+		'/wd4457', # declaration hides function parameter
+		# TODO: fix the ones below?
+		'-Wno-sign-compare',
+		'/wd4018', # signed/unsigned mismatch
 		'/wd4090', # different 'const' qualifier on free/realloc calls
 	]),
 )
