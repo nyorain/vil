@@ -352,6 +352,8 @@ lib_spvm = static_library(
 		'-Wno-unused-parameter',
 		'-Wno-unused-variable',
 		'-Wno-sign-compare',
+		'/wd4100', # unreferenced formal parameter.
+		'/wd4189', # unused local variable
 		'/wd4090', # different 'const' qualifier on free/realloc calls
 	]),
 )
