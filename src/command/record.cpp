@@ -236,6 +236,13 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 			continue;
 		}
 
+		// NOTE: we only need this since we don't track this during recording
+		// anymore at the moment.
+		if(state.pipe && !compatibleForSetN(*state.pipe->layout,
+				*ds.layout, i)) {
+			break;
+		}
+
 		dlg_assert(ds.layout);
 		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 			ds.layout->handle, i, 1u, &static_cast<DescriptorSet*>(ds.ds)->handle,

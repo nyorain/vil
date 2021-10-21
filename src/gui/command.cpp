@@ -393,7 +393,8 @@ void CommandViewer::displayDsList() {
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 	if(ImGui::TreeNodeEx("Descriptors", ImGuiTreeNodeFlags_FramePadding)) {
 		// NOTE: better to iterate over sets/bindings in shader stages?
-		for(auto setID = 0u; setID < dss.size(); ++setID) {
+		auto size = std::min(dss.size(), cmd->boundPipe()->layout->descriptors.size());
+		for(auto setID = 0u; setID < size; ++setID) {
 			auto& ds = dss[setID];
 
 			// No descriptor set bound

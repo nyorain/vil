@@ -500,8 +500,7 @@ void ImageViewer::doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayo
 	dev.dispatch.UpdateDescriptorSets(dev.handle, 2u, writes, 0u, nullptr);
 
 	// prepare sample copy operation
-	auto type = ShaderImageType::Value(imageDraw_.type - 1);
-	auto& pipe = gui_->readTexPipe(type);
+	auto& pipe = gui_->readTexPipe(imageDraw_.type);
 	auto& pipeLayout = gui_->imgOpPipeLayout();
 
 	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);

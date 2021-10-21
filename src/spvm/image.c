@@ -127,11 +127,8 @@ spvm_vec4f spvm_fetch_texel(struct spvm_state* state,
 	z = spvm_apply_address_mode(desc->address_mode_w, z, depth - 1);
 
 	// check for border condition
-	if (x < 0 || y < 0 || z < 0)
-	{
-		// TODO: allow to customize border color
-		spvm_vec4f res = {0.f};
-		return res;
+	if (x < 0 || y < 0 || z < 0) {
+		return desc->border_color;
 	}
 
 	return spvm_image_read_impl(state, img, x, y, z, layer, level);
@@ -233,7 +230,8 @@ spvm_vec4f spvm_sampled_image_sample(struct spvm_state* state,
 
 struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod(
 		struct spvm_state* state, spvm_image* image, const struct spvm_image_info* imginfo,
-		spvm_sampler* sampler, unsigned coord_id, float shader_lod_bias, float shader_lod_min) {
+		spvm_sampler* sampler, unsigned coord_id, float shader_lod_bias, float shader_lod_min)
+{
 
 	// https://www.khronos.org/registry/vulkan/specs/1.2-extensions/html/chap16.html#textures-lod-and-scale-factor
 	// TODO: handle proj
@@ -251,7 +249,8 @@ struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod(
 struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod_from_grad(
 	struct spvm_state* state, spvm_image* image, const struct spvm_image_info* imginfo,
 	spvm_sampler* sampler, float* ddx, float* ddy,
-	float shader_lod_bias, float shader_lod_min) {
+	float shader_lod_bias, float shader_lod_min)
+{
 
 	float mx[3] = {0.f};
 	float my[3] = {0.f};

@@ -43,6 +43,11 @@ urgent, bugs:
 spvm:
 - [ ] Add OpSpecConstant* support
 - [ ] Add OpArrayLength support
+- [ ] merge back changes upstream
+	- [ ] asserts
+	- [ ] improved image sampling
+	- [ ] external variable load/store via callback
+	- [ ] other missing opcodes implemented now
 
 docs
 - [ ] write small wiki documentation post on how to use API

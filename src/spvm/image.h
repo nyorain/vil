@@ -60,11 +60,11 @@ typedef struct spvm_sampler_desc {
 	spvm_sampler_address_mode address_mode_u;
 	spvm_sampler_address_mode address_mode_v;
 	spvm_sampler_address_mode address_mode_w;
+	spvm_vec4f border_color;
 	float mip_bias;
 	spvm_sampler_compare_op compare_op;
 	float min_lod;
 	float max_lod;
-	// TODO: no support for border color
 	// TODO: no support for anisotropy yet
 	// TODO: no support for unnormalized coordinates yet
 } spvm_sampler_desc;

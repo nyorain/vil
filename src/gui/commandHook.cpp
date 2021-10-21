@@ -1370,6 +1370,11 @@ void CommandHookRecord::initAndSampleCopy(OwnBuffer& dst, Image& src, VkImageLay
 	dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 		hook.copyImagePipeLayout_, 0u, 1u, &ds, 0u, nullptr);
 
+	auto sit = ShaderImageType::parseType(src.ci.imageType,
+		src.ci.format, VkImageAspectFlagBits(srcSubres.aspectMask));
+	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+		hook.copyImagePipes_[sit]);
+
 	auto dstOffset = 0u;
 	for(auto l = 0u; l < srcSubres.levelCount; ++l) {
 		auto level = srcSubres.baseMipLevel + l;
@@ -1388,11 +1393,6 @@ void CommandHookRecord::initAndSampleCopy(OwnBuffer& dst, Image& src, VkImageLay
 
 		dev.dispatch.CmdPushConstants(cb, hook.copyImagePipeLayout_,
 			VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), &pcr);
-
-		auto sit = ShaderImageType::parseType(src.ci.imageType,
-			src.ci.format, VkImageAspectFlagBits(srcSubres.aspectMask));
-		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-			hook.copyImagePipes_[sit]);
 
 		auto groupSizeX = 8u;
 		auto groupSizeY = 8u;
