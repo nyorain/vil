@@ -352,6 +352,7 @@ lib_spvm = static_library(
 		'-Wno-unused-parameter',
 		'-Wno-unused-variable',
 		'-Wno-sign-compare',
+		'/wd4090', # different 'const' qualifier on free/realloc calls
 	]),
 )
 
