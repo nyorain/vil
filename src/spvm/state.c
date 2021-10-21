@@ -1,6 +1,7 @@
 #include <spvm/state.h>
 #include <spvm/value.h>
 #include <string.h>
+#include <stdlib.h>
 
 spvm_state_t spvm_state_create(spvm_program_t prog, spvm_state_settings settings)
 {
