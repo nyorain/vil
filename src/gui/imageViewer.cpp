@@ -514,7 +514,7 @@ void ImageViewer::doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayo
 	pcr.coords.x = readTexelOffset_.x;
 	if(imgType_ == VK_IMAGE_TYPE_1D) {
 		pcr.coords.y = imageDraw_.layer;
-		// z irrelevant
+		pcr.coords.z = 0; // z irrelevant
 	} else {
 		pcr.coords.y = readTexelOffset_.y;
 		pcr.coords.z = imageDraw_.layer;
