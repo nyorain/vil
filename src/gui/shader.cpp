@@ -977,17 +977,14 @@ void ShaderDebugger::display(const char* name, const spvm_member& member) {
 		if(ImGui::TreeNodeEx(id.c_str(), flags, "%s", name)) {
 			dlg_assert(type.member_count == member.member_count);
 			for(auto i = 0u; i < u32(member.member_count); ++i) {
-				// auto* memberType = spvm_state_get_type_info(state->results,
-				// 	&state->results[member.members[i].type]);
-
-				std::string name;
+				std::string mname;
 				if(type.member_name && i < u32(type.member_name_count)) {
-					name = type.member_name[i];
+					mname = type.member_name[i];
 				} else {
-					name = dlg::format("?{}", i);
+					mname = dlg::format("?{}", i);
 				}
 
-				display(name.c_str(), member.members[i]);
+				display(mname.c_str(), member.members[i]);
 			}
 
 			ImGui::TreePop();
@@ -997,7 +994,7 @@ void ShaderDebugger::display(const char* name, const spvm_member& member) {
 	} else if(type.value_type == spvm_value_type_array) {
 		if(ImGui::TreeNodeEx(id.c_str(), flags, "%s", name)) {
 			for(auto i = 0; i < member.member_count; ++i) {
-				auto aname = dlg::format("{}[{}]", name, i);
+				auto aname = dlg::format("[{}]", i);
 				display(aname.c_str(), member.members[i]);
 			}
 
@@ -1062,6 +1059,6 @@ std::string ShaderDebugger::formatScalar(const spvm_member& member) {
 	}
 
 	return str;
-};
+}
 
 } // namespace vil

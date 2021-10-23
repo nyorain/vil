@@ -19,9 +19,22 @@ MemoryResource::~MemoryResource() {
 	std::lock_guard lock(dev->mutex);
 	if(memory) {
 		dlg_assert(!memoryDestroyed);
-		auto it = find(memory->allocations, this);
-		dlg_assert(it != memory->allocations.end());
-		memory->allocations.erase(it);
+		auto it = std::lower_bound(memory->allocations.begin(), memory->allocations.end(),
+			*this, cmpMemRes);
+
+		// NOTE: we can't just iterate it but have to do a linear
+		// search until we find *this since memory->allocations can contain
+		// aliased memory resources
+		auto found = false;
+		while(it != memory->allocations.end()) {
+			if(*it == this) {
+				found = true;
+				memory->allocations.erase(it);
+				break;
+			}
+		}
+
+		dlg_assert(found);
 	}
 }
 

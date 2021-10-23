@@ -10,8 +10,8 @@ namespace vil {
 struct MemoryResource : DeviceHandle {
 	// !memoryDestroyed && !memory: no memory associated
 	// !memoryDestroyed && memory: memory associated
-	// memoryDestroyed && memory: invalid state, must not exist
 	// memoryDestroyed && !memory: had memory associated but memory object was destroyed
+	// memoryDestroyed && memory: invalid state, must not exist
 	bool memoryDestroyed {};
 	DeviceMemory* memory {};
 	VkDeviceSize allocationOffset {};
@@ -26,16 +26,25 @@ struct DeviceMemory : DeviceHandle {
 	u32 typeIndex {};
 	VkDeviceSize size {};
 
+	// Describes the current map state
 	void* map {}; // nullptr if not mapped
 	VkDeviceSize mapOffset {};
 	VkDeviceSize mapSize {};
 
-	// NOTE: we can't use a set since resources may alias
-	// TODO: currently unsorted, should probably sort it
+	// Sorted by offset. Keep in mind that allocations may alias. If
+	// multiple allocations have the same offset, the sorting between those
+	// is arbitrary.
 	std::vector<MemoryResource*> allocations;
 
 	~DeviceMemory();
 };
+
+// Used as comparator to std::lower_bound when searching for an allocation
+// in DeviceMemory::allocations.
+inline bool cmpMemRes(const MemoryResource* it, const MemoryResource& b) {
+	dlg_assert(it->memory == b.memory);
+	return it->allocationOffset < b.allocationOffset;
+}
 
 VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
     VkDevice                                    device,

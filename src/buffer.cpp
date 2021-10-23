@@ -177,7 +177,9 @@ void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
 	buf.allocationOffset = offset;
 	buf.allocationSize = memReqs.size;
 
-	mem.allocations.push_back(&buf);
+	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
+		buf, cmpMemRes);
+	mem.allocations.insert(it, &buf);
 }
 
 void checkDeviceAddress(Buffer& buf) {

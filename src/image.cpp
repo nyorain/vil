@@ -210,11 +210,14 @@ void bindImageMemory(Image& img, DeviceMemory& mem, u64 offset) {
 	std::lock_guard lock(dev.mutex);
 	dlg_assert(!img.memory);
 	dlg_assert(!img.memoryDestroyed);
-	mem.allocations.push_back(&img);
 
 	img.memory = &mem;
 	img.allocationOffset = offset;
 	img.allocationSize = memReqs.size;
+
+	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
+		img, cmpMemRes);
+	mem.allocations.insert(it, &img);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(
