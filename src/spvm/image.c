@@ -31,9 +31,9 @@ unsigned spvm_image_texel_id(struct spvm_image* image,
 
 	for(int l = 0; l < level; ++l)
 	{
-		width = MAX(width >> 1u, 1u);
-		height = MAX(height >> 1u, 1u);
-		depth = MAX(depth >> 1u, 1u);
+		width = SPVM_MAX(width >> 1u, 1u);
+		height = SPVM_MAX(height >> 1u, 1u);
+		depth = SPVM_MAX(depth >> 1u, 1u);
 		off += width * height * depth * image->layers;
 	}
 
@@ -93,7 +93,7 @@ int spvm_apply_address_mode(spvm_sampler_address_mode mode, int val, int size)
 		case spvm_sampler_address_mode_repeat:
 			return ((val % size) + size) % size;
 		case spvm_sampler_address_mode_clamp_to_edge:
-			return CLAMP(val, 0.f, size - 1);
+			return SPVM_CLAMP(val, 0.f, size - 1);
 		case spvm_sampler_address_mode_clamp_to_border:
 			return (val < 0 || val >= size) ? -1 : val;
 		case spvm_sampler_address_mode_mirrored_repeat: {
@@ -115,12 +115,12 @@ float spvm_frac(float val)
 spvm_vec4f spvm_fetch_texel(struct spvm_state* state,
 	spvm_image* img, const spvm_sampler_desc* desc, int x, int y, int z, int layer, int level)
 {
-	layer = CLAMP(layer, 0, img->layers - 1);
-	level = CLAMP(level, 0, img->levels - 1);
+	layer = SPVM_CLAMP(layer, 0, img->layers - 1);
+	level = SPVM_CLAMP(level, 0, img->levels - 1);
 
-	unsigned width = MAX(img->width >> level, 1u);
-	unsigned height = MAX(img->height >> level, 1u);
-	unsigned depth = MAX(img->depth >> level, 1u);
+	unsigned width = SPVM_MAX(img->width >> level, 1u);
+	unsigned height = SPVM_MAX(img->height >> level, 1u);
+	unsigned depth = SPVM_MAX(img->depth >> level, 1u);
 
 	x = spvm_apply_address_mode(desc->address_mode_u, x, width - 1);
 	y = spvm_apply_address_mode(desc->address_mode_v, y, height - 1);
@@ -140,7 +140,7 @@ spvm_vec4f spvm_sampled_image_sample(struct spvm_state* state,
 {
 	spvm_sampler_desc* desc = &sampler->desc;
 
-	level = CLAMP(level + desc->mip_bias, desc->min_lod, desc->max_lod);
+	level = SPVM_CLAMP(level + desc->mip_bias, desc->min_lod, desc->max_lod);
 	spvm_sampler_filter filter = (level <= 0.f) ? desc->filter_mag : desc->filter_min;
 
 	int levels[2];
@@ -168,10 +168,10 @@ spvm_vec4f spvm_sampled_image_sample(struct spvm_state* state,
 
 	for(unsigned l = 0u; l < num_level_samples; ++l)
 	{
-		unsigned level = CLAMP(levels[l], 0, img->levels - 1);
-		unsigned width = MAX(img->width >> level, 1u);
-		unsigned height = MAX(img->height >> level, 1u);
-		unsigned depth = MAX(img->depth >> level, 1u);
+		unsigned level = SPVM_CLAMP(levels[l], 0, img->levels - 1);
+		unsigned width = SPVM_MAX(img->width >> level, 1u);
+		unsigned height = SPVM_MAX(img->height >> level, 1u);
+		unsigned depth = SPVM_MAX(img->depth >> level, 1u);
 
 		float u = width * s;
 		float v = height * t;
@@ -271,8 +271,8 @@ struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod_from_grad(
 	float ro_x = sqrt(mx[0] * mx[0] + mx[1] * mx[1] + mx[2] * mx[2]);
 	float ro_y = sqrt(my[0] * my[0] + my[1] * my[1] + my[2] * my[2]);
 
-	float ro_max = MAX(ro_x, ro_y);
-	float ro_min = MIN(ro_x, ro_y);
+	float ro_max = SPVM_MAX(ro_x, ro_y);
+	float ro_min = SPVM_MIN(ro_x, ro_y);
 
 	// TODO: handle anisotropy
 	const float eta = 1.f;
@@ -282,10 +282,10 @@ struct spvm_sampled_image_lod_query spvm_sampled_image_query_lod_from_grad(
 	// NOTE: we don't clamp to any maxSamplerLodBias here
 	float lambda_prime = lambda_base + shader_lod_bias + sampler->desc.mip_bias;
 
-	float lod_min = MAX(shader_lod_min, sampler->desc.min_lod);
+	float lod_min = SPVM_MAX(shader_lod_min, sampler->desc.min_lod);
 	float lod_max = sampler->desc.max_lod;
 
-	float lambda = CLAMP(lambda_prime, lod_min, lod_max);
+	float lambda = SPVM_CLAMP(lambda_prime, lod_min, lod_max);
 	float dl = lambda;
 
 	if (sampler->desc.mipmap_mode == spvm_sampler_filter_nearest) {

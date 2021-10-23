@@ -4,6 +4,7 @@
 #include <gui/commandHook.hpp>
 #include <gui/cb.hpp>
 #include <util/buffmt.hpp>
+#include <util/profiling.hpp>
 #include <command/commands.hpp>
 #include <threadContext.hpp>
 #include <image.hpp>
@@ -156,55 +157,101 @@ void ShaderDebugger::draw() {
 
 	ImGui::EndChild();
 
+	auto jumpToState = [&]{
+		if(!state->current_file || state->current_line == -1) {
+			dlg_warn("Can't jump to debugging state");
+			return;
+		}
+
+		auto fileID = -1;
+		for(auto i = 0u; i < state->owner->file_count; ++i) {
+			if(std::strcmp(state->owner->files[i].name, state->current_file) == 0u) {
+				fileID = i;
+				break;
+			}
+		}
+
+		if(fileID == -1) {
+			dlg_warn("Can't jump to debugging state, invalid file '{}'", state->current_file);
+			return;
+		}
+
+		if(currFileName_ != state->owner->files[fileID].name) {
+			dlg_trace("now in file {}", state->owner->files[fileID].name);
+			textedit.SetText(state->owner->files[fileID].source);
+		}
+
+		// TODO: seems to be a textedit bug
+		auto line = state->current_line == 0 ? 0 : state->current_line - 1;
+		textedit.SetCursorPosition({line, state->current_column});
+	};
+
+	if(refresh_) {
+		spvm_state_delete(state);
+		initState();
+
+		// TODO: not sure how to handle divergence. Maybe just go to
+		// beginning again but don't overwrite currLine, currFileName?
+		while(u32(state->current_line) != currLine_ ||
+				state->current_file != currFileName_) {
+			spvm_state_step_opcode(state);
+		}
+
+		jumpToState();
+	}
+
 	// variable view
 	if(ImGui::BeginChild("Vars")) {
 		if(state->code_current && ImGui::Button("Step Opcode")) {
 			do {
-				// auto prev = state->code_current;
 				spvm_state_step_opcode(state);
-
-				/*
-				for(auto i = 0u; i < program->bound; ++i) {
-					auto& res = state->results[i];
-					if(res.type != spvm_result_type_constant) {
-						continue;
-					}
-
-					if(!res.name) {
-						continue;
-					}
-
-					if(res.source_location >= prev && res.source_location <= state->code_current) {
-						vars_.insert_or_assign(res.name, &res);
-					}
-				}
-				*/
 			} while(state->current_line < 0);
 		}
+
+		ImGui::SameLine();
 
 		if(state->code_current && ImGui::Button("Step Line")) {
 			auto line = state->current_line;
 			while(state->current_line == line) {
 				spvm_state_step_opcode(state);
 			}
+
+			jumpToState();
 		}
+
+		ImGui::SameLine();
 
 		if(state->code_current && ImGui::Button("Run")) {
 			while(state->code_current) {
 				spvm_state_step_opcode(state);
 			}
+
+			jumpToState();
 		}
+
+		ImGui::SameLine();
 
 		if(ImGui::Button("Reset")) {
 			spvm_state_delete(state);
 			initState();
+			jumpToState();
 		}
 
-		imGuiText("Current line: {}", state->current_line);
-		imGuiText("Instruction count : {}", state->instruction_count);
-		imGuiText("Offset: {}", state->code_current - program->code);
+		ImGui::SameLine();
 
+		ImGui::Checkbox("Refresh", &refresh_);
+
+
+		// imGuiText("Current line: {}", state->current_line);
+		// imGuiText("Instruction count : {}", state->instruction_count);
+		// imGuiText("Offset: {}", state->code_current - program->code);
+
+		/*
 		auto printRes = [&](const auto& name, auto* res) {
+			if (!res->stored_to) {
+				return;
+			}
+
 			imGuiText("{}: ", name);
 
 			ImGui::SameLine();
@@ -216,15 +263,7 @@ void ShaderDebugger::draw() {
 				auto str = std::string{};
 
 				for(auto i = 0; i < res->member_count; ++i) {
-					// TODO:
-					auto vt = valueType(res->members[i]);
-					if(vt == spvm_value_type_int) {
-						str += dlg::format("{}, ", res->members[i].value.s);
-					} else if(vt == spvm_value_type_float) {
-						str += dlg::format("{}, ", res->members[i].value.f);
-					} else {
-						str += "??, ";
-					}
+					str += formatScalar(res->members[i]);
 				}
 
 				imGuiText("{}", str);
@@ -238,28 +277,73 @@ void ShaderDebugger::draw() {
 				imGuiText("??");
 			}
 		};
+		*/
 
 		// vars_
-		for(auto [name, res] : vars_) {
-			printRes(name, res);
-		}
+		// for(auto [name, res] : vars_) {
+		// 	printRes(name, res);
+		// }
 
-		// local vars
-		for(auto i = 0u; i < program->bound; ++i) {
-			auto& res = state->results[i];
-			if(res.type != spvm_result_type_variable ||
-					res.owner != state->current_function ||
-					!res.name) {
-				continue;
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
+		auto flags = ImGuiTableFlags_BordersInner |
+			ImGuiTableFlags_Resizable |
+			ImGuiTableFlags_SizingStretchSame;
+		if(ImGui::BeginTable("Values", 2u, flags)) {
+			ImGui::TableSetupColumn(nullptr, 0, 0.25f);
+			ImGui::TableSetupColumn(nullptr, 0, 0.75f);
+
+			// local vars
+			for(auto i = 0u; i < program->bound; ++i) {
+				auto& res = state->results[i];
+				if((res.type != spvm_result_type_variable && res.type != spvm_result_type_function_parameter) ||
+						res.owner != state->current_function ||
+						!res.name ||
+						// TODO: make this filter optional, via gui.
+						// Useful in many cases but can be annoying/incorrect when
+						// a variable isn't written on all branches.
+						// To fix this (the filter setting/checkbox is probably
+						// still a good idea) we could store the first OpStore
+						// to this variable in opcode_setup of spvm. And then
+						// here compare whether the current position of state
+						// postdominates that instruction.
+						!res.stored_to) {
+					continue;
+				}
+
+				// auto it = vars_.find(res.name);
+				// if(it != vars_.end()) {
+				// 	continue;
+				// }
+
+				const spvm_member* setupDst;
+				spvm_member wrapper;
+				auto* resType = spvm_state_get_type_info(state->results,
+					&state->results[res.pointer]);
+				auto vt = resType->value_type;
+
+				if(vt == spvm_value_type_matrix || vt == spvm_value_type_vector ||
+						vt == spvm_value_type_struct) {
+					setupDst = &wrapper;
+					wrapper.type = u32(resType - state->results); // type id
+					wrapper.members = res.members;
+					wrapper.member_count = res.member_count;
+				} else {
+					dlg_assert(res.member_count == 1u);
+					setupDst = &res.members[0];
+				}
+
+				display(res.name, *setupDst);
 			}
 
-			auto it = vars_.find(res.name);
-			if(it != vars_.end()) {
-				continue;
-			}
-
-			printRes(std::string_view(res.name), &res);
+			ImGui::EndTable();
 		}
+	}
+
+	ImGui::PopStyleVar(1);
+
+	currLine_ = state->current_line;
+	if(state->current_file) {
+		currFileName_ = state->current_file;
 	}
 
 	ImGui::EndChild();
@@ -292,7 +376,13 @@ void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
 	};
 
 	switch(builtin.builtin) {
-		case spv::BuiltInWorkgroupSize: {
+		// TODO
+		case spv::BuiltInNumSubgroups:
+		case spv::BuiltInNumWorkgroups: {
+			Vec3ui size {1u, 1u, 1u};
+			loadVecU(size);
+			break;
+		} case spv::BuiltInWorkgroupSize: {
 			Vec3ui size {8u, 8u, 1u}; // TODO
 			loadVecU(size);
 			break;
@@ -317,6 +407,7 @@ void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
 
 void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		span<spvm_member> dst, u32 typeID) {
+	ZoneScoped;
 	dlg_assert(compiled);
 
 	auto res = resource(*this->compiled, srcID);
@@ -331,7 +422,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		return;
 	}
 
-	dlg_trace("spirv OpLoad of var {}", srcID);
+	// dlg_trace("spirv OpLoad of var {}", srcID);
 	dlg_assert(compiled->has_decoration(res->id, spv::DecorationDescriptorSet) &&
 				compiled->has_decoration(res->id, spv::DecorationBinding));
 	auto& spcTypeMaybeArrayed = compiled->get_type(res->type_id);
@@ -383,7 +474,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		dlg_assert_or(spcType.storage == spv::StorageClassUniform, return);
 		dlg_assert(indices.empty());
 
-		dlg_trace(" >> found sampler");
+		// dlg_trace(" >> found sampler");
 
 		auto image = vil::images(ds, bindingID)[arrayElemID];
 		dlg_assert(image.sampler);
@@ -418,7 +509,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		// we already handled samplers above
 		dlg_assert(spcType.basetype != spc::SPIRType::Sampler);
 		if(spcType.basetype == spc::SPIRType::Image) {
-			dlg_trace(" >> image");
+			// dlg_trace(" >> image");
 			auto image = vil::images(ds, bindingID)[arrayElemID];
 			auto& imgView = nonNull(image.imageView);
 			auto& img = nonNull(imgView.img);
@@ -442,7 +533,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 
 			return;
 		} else if(spcType.basetype == spc::SPIRType::SampledImage) {
-			dlg_trace(" >> sampled image");
+			// dlg_trace(" >> sampled image");
 
 			auto image = vil::images(ds, bindingID)[arrayElemID];
 			auto& imgView = nonNull(image.imageView);
@@ -484,7 +575,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	} else if(spcType.storage == spv::StorageClassUniform ||
 			spcType.storage == spv::StorageClassStorageBuffer) {
 		if(spcType.basetype == spc::SPIRType::Struct) {
-			dlg_trace(" >> struct");
+			// dlg_trace(" >> struct");
 
 			ThreadMemScope tms;
 			const auto* type = buildType(*compiled, res->type_id, tms);
@@ -865,10 +956,112 @@ void ShaderDebugger::writeImage(spvm_image&, int x, int y, int z, int layer, int
 	(void) data;
 }
 
-spvm_value_type ShaderDebugger::valueType(spvm_member& member) {
+spvm_value_type ShaderDebugger::valueType(const spvm_member& member) {
 	auto* resType = spvm_state_get_type_info(state->results, &state->results[member.type]);
 	dlg_assert(resType);
 	return resType->value_type;
 }
+
+void ShaderDebugger::display(const char* name, const spvm_member& member) {
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+
+	auto id = dlg::format("{}:{}", name, (void*) name);
+	auto flags = ImGuiTreeNodeFlags_FramePadding;
+
+	auto* ptype = spvm_state_get_type_info(state->results, &state->results[member.type]);
+	dlg_assert(ptype);
+	auto& type = *ptype;
+
+	if(type.value_type == spvm_value_type_struct) {
+		if(ImGui::TreeNodeEx(id.c_str(), flags, "%s", name)) {
+			dlg_assert(type.member_count == member.member_count);
+			for(auto i = 0u; i < u32(member.member_count); ++i) {
+				// auto* memberType = spvm_state_get_type_info(state->results,
+				// 	&state->results[member.members[i].type]);
+
+				std::string name;
+				if(type.member_name && i < u32(type.member_name_count)) {
+					name = type.member_name[i];
+				} else {
+					name = dlg::format("?{}", i);
+				}
+
+				display(name.c_str(), member.members[i]);
+			}
+
+			ImGui::TreePop();
+		}
+
+		return;
+	} else if(type.value_type == spvm_value_type_array) {
+		if(ImGui::TreeNodeEx(id.c_str(), flags, "%s", name)) {
+			for(auto i = 0; i < member.member_count; ++i) {
+				auto aname = dlg::format("{}[{}]", name, i);
+				display(aname.c_str(), member.members[i]);
+			}
+
+			ImGui::TreePop();
+		}
+
+		return;
+	} else if(type.value_type == spvm_value_type_matrix) {
+		// TODO: have to take care since they are col-major
+		imGuiText("TODO: matrix printing");
+		return;
+	}
+
+	ImGui::AlignTextToFramePadding();
+	ImGui::Bullet();
+	ImGui::SameLine();
+	imGuiText("{}", name);
+	ImGui::TableNextColumn();
+
+	if(type.value_type == spvm_value_type_vector) {
+		auto str = std::string{};
+
+		for(auto i = 0; i < member.member_count; ++i) {
+			if(i != 0) {
+				str += ", ";
+			}
+			str += formatScalar(member.members[i]);
+		}
+
+		ImGui::AlignTextToFramePadding();
+		imGuiText("{}", str);
+		return;
+	}
+
+	// Invalid types for values
+	dlg_assert_or(type.value_type != spvm_value_type_void, return);
+	dlg_assert_or(type.value_type != spvm_value_type_runtime_array, return);
+
+	// TODO: might happen I guess
+	dlg_assert_or(type.value_type != spvm_value_type_sampler, return);
+	dlg_assert_or(type.value_type != spvm_value_type_image, return);
+	dlg_assert_or(type.value_type != spvm_value_type_sampled_image, return);
+
+	// Must be scalar
+	auto fs = formatScalar(member);
+	imGuiText("{}", fs);
+
+	// TODO: tooltip
+}
+
+std::string ShaderDebugger::formatScalar(const spvm_member& member) {
+	std::string str;
+	auto vt = valueType(member);
+	if(vt == spvm_value_type_int) {
+		str += dlg::format("{}", member.value.s);
+	} else if(vt == spvm_value_type_float) {
+		str += dlg::format("{}", member.value.f);
+	} else if(vt == spvm_value_type_bool) {
+		str += dlg::format("{}", bool(member.value.b));
+	} else {
+		str += dlg::format("<Unable to format value type '{}'>", int(vt));
+	}
+
+	return str;
+};
 
 } // namespace vil

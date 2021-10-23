@@ -46,7 +46,7 @@ void spvm_setup_OpMemberName(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word memb = SPVM_READ_WORD(state->code_current);
 
-	state->results[id].member_name_count = MAX(memb + 1, state->results[id].member_name_count);
+	state->results[id].member_name_count = SPVM_MAX(memb + 1, state->results[id].member_name_count);
 	state->results[id].member_name = (spvm_string*)realloc(state->results[id].member_name, sizeof(spvm_string) * state->results[id].member_name_count);
 
 	spvm_word slen = word_count - 2;
@@ -415,6 +415,7 @@ void spvm_setup_OpAccessChain(spvm_word word_count, spvm_state_t state)
 	state->results[id].storage_class = state->results[value_id].storage_class;
 	state->results[id].source_location = source_pointer;
 	state->results[id].source_word_count = word_count;
+	state->results[id].access_chain_ref = value_id;
 
 	spvm_result* src = &state->results[value_id];
 
@@ -425,7 +426,6 @@ void spvm_setup_OpAccessChain(spvm_word word_count, spvm_state_t state)
 
 			state->results[id].index_count = index_count;
 			state->results[id].indices = calloc(sizeof(spvm_word), index_count);;
-			state->results[id].access_chain_ref = value_id;
 		} else {
 			// TODO: handle case where results[value_id] is another access chain.
 			// Just append the indices?

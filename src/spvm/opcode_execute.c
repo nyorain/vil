@@ -98,6 +98,12 @@ void spvm_execute_OpStore(spvm_word word_count, spvm_state_t state)
 		assert(dst->index_count == 0u);
 		spvm_member_memcpy(dst->members, src->members, src->member_count);
 
+		if (dst->type == spvm_result_type_variable) {
+			state->results[ptr_id].stored_to = 1;
+		} else if (dst->type == spvm_result_type_access_chain) {
+			state->results[dst->access_chain_ref].stored_to = 1;
+		}
+
 		if (state->results[ptr_id].storage_class == SpvStorageClassWorkgroup && state->owner->write_workgroup_memory)
 			state->owner->write_workgroup_memory(state, ptr_id, val_id);
 	}
@@ -194,13 +200,13 @@ void spvm_execute_OpAccessChain(spvm_word word_count, spvm_state_t state)
 		spvm_word index_id = SPVM_READ_WORD(state->code_current);
 		spvm_word index = state->results[index_id].members[0].value.s;
 
-		spvm_member_t result = src->members + MIN(index, src->member_count - 1);
+		spvm_member_t result = src->members + SPVM_MIN(index, src->member_count - 1);
 
 		while (index_count) {
 			index_id = SPVM_READ_WORD(state->code_current);
 			index = state->results[index_id].members[0].value.s;
 
-			result = result->members + MIN(index, result->member_count - 1);
+			result = result->members + SPVM_MIN(index, result->member_count - 1);
 
 			index_count--;
 		}
@@ -699,11 +705,11 @@ void spvm_execute_OpImageQuerySizeLod(spvm_word word_count, spvm_state_t state)
 	// Should probably just be exposed as callback via state as well.
 	// TODO: layer, check image type
 	if (state->results[id].member_count > 0)
-		state->results[id].members[0].value.s = MAX(img->width >> lod, 1);
+		state->results[id].members[0].value.s = SPVM_MAX(img->width >> lod, 1);
 	if (state->results[id].member_count > 1)
-		state->results[id].members[1].value.s = MAX(img->height >> lod, 1);
+		state->results[id].members[1].value.s = SPVM_MAX(img->height >> lod, 1);
 	if (state->results[id].member_count > 2)
-		state->results[id].members[2].value.s = MAX(img->depth >> lod, 1);
+		state->results[id].members[2].value.s = SPVM_MAX(img->depth >> lod, 1);
 }
 void spvm_execute_OpImageQuerySize(spvm_word word_count, spvm_state_t state)
 {
@@ -1275,8 +1281,8 @@ void spvm_execute_OpFMod(spvm_word word_count, spvm_state_t state)
 	// TODO: is there a better way to do this?
 	if (type_info->value_bitcount > 32)
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-			double op2_sign = SIGN(state->results[op2].members[i].value.d);
-			double op1_sign = SIGN(state->results[op1].members[i].value.d);
+			double op2_sign = SPVM_SIGN(state->results[op2].members[i].value.d);
+			double op1_sign = SPVM_SIGN(state->results[op1].members[i].value.d);
 			double sign = 1.0;
 			if (op2_sign != op1_sign)
 				sign = -1.0;
@@ -1288,8 +1294,8 @@ void spvm_execute_OpFMod(spvm_word word_count, spvm_state_t state)
 		}
 	else
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-			float op2_sign = SIGN(state->results[op2].members[i].value.f);
-			float op1_sign = SIGN(state->results[op1].members[i].value.f);
+			float op2_sign = SPVM_SIGN(state->results[op2].members[i].value.f);
+			float op1_sign = SPVM_SIGN(state->results[op1].members[i].value.f);
 			float sign = 1.0;
 			if (op2_sign != op1_sign)
 				sign = -1.0;

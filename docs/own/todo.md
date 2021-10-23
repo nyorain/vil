@@ -49,6 +49,10 @@ spvm:
 	- [ ] external variable load/store via callback
 	- [ ] other missing opcodes implemented now
 
+glslang:
+- [ ] add PR that disables naming of "param" OpVariables
+- [ ] add PR that adds flag to use OpLine with columns for expressions
+
 docs
 - [ ] write small wiki documentation post on how to use API
 	- [ ] could explain why it's needed in the first place. Maybe someone

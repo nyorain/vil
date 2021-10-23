@@ -8,14 +8,13 @@
 extern "C" {
 #endif // __cplusplus
 
-// TODO: should probably add a SPVM prefix to them to avoid name clashes
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define CLAMP(x, minVal, maxVal) MIN(MAX((x), (minVal)), (maxVal))
-#define NMAX(x, y) (isnan(x) ? (y) : (isnan(y) ? (x) : MAX(x,y)))
-#define NMIN(x, y) (isnan(x) ? (y) : (isnan(y) ? (x) : MIN(x,y)))
-#define NCLAMP(x, minVal, maxVal) NMIN(NMAX((x), (minVal)), (maxVal))
-#define SIGN(x) ((x) > 0) - ((x) < 0)
+#define SPVM_MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define SPVM_MIN(x, y) (((x) < (y)) ? (x) : (y))
+#define SPVM_CLAMP(x, minVal, maxVal) SPVM_MIN(SPVM_MAX((x), (minVal)), (maxVal))
+#define SPVM_NMAX(x, y) (isnan(x) ? (y) : (isnan(y) ? (x) : SPVM_MAX(x,y)))
+#define SPVM_NMIN(x, y) (isnan(x) ? (y) : (isnan(y) ? (x) : SPVM_MIN(x,y)))
+#define SPVM_NCLAMP(x, minVal, maxVal) SPVM_NMIN(SPVM_NMAX((x), (minVal)), (maxVal))
+#define SPVM_SIGN(x) ((x) > 0) - ((x) < 0)
 
 enum spvm_value_type
 {

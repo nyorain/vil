@@ -266,6 +266,7 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 				auto off = offset + r * rowStride + c * colStride;
 				auto fs = formatScalar(type, data, off);
 
+				ImGui::AlignTextToFramePadding();
 				imGuiText("{}", fs.scalar);
 				if(ImGui::IsItemHovered()) {
 					ImGui::BeginTooltip();

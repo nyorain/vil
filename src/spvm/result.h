@@ -47,6 +47,7 @@ typedef struct spvm_result {
 	spvm_word pointer;
 	SpvStorageClass storage_class;
 	struct spvm_result* owner;
+	char stored_to; // For OpVariable values
 
 	spvm_word member_count;
 	spvm_member* members;
@@ -62,7 +63,6 @@ typedef struct spvm_result {
 	spvm_ext_opcode_func* extension;
 
 	/* spvm_result_type_function_type / spvm_result_type_type (structure) / spvm_result_type_function */
-	// TODO: just use 'members'?
 	spvm_word* params;
 
 	/* function, label & access chain */

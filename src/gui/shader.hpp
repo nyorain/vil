@@ -55,7 +55,11 @@ private:
 
 	static spvm_sampler_desc setupSampler(const Sampler& src);
 
-	spvm_value_type valueType(spvm_member& member);
+	spvm_value_type valueType(const spvm_member& member);
+
+	// formatting spvm_result/spvm_member for debug table
+	void display(const char* name, const spvm_member& members);
+	std::string formatScalar(const spvm_member& member);
 
 private:
 	struct OurImage : spvm_image {
@@ -66,6 +70,10 @@ private:
 	std::deque<OurImage> images_;
 
 	std::unordered_map<std::string_view, spvm_result*> vars_;
+
+	bool refresh_ {};
+	u32 currLine_ {};
+	std::string currFileName_ {};
 };
 
 } // namespace vil
