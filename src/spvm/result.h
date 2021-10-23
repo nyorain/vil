@@ -48,6 +48,7 @@ typedef struct spvm_result {
 	SpvStorageClass storage_class;
 	struct spvm_result* owner;
 	char stored_to; // For OpVariable values
+	char was_loaded;
 
 	spvm_word member_count;
 	spvm_member* members;

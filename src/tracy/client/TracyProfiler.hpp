@@ -63,6 +63,7 @@ TRACY_API std::atomic<uint32_t>& GetLockCounter();
 TRACY_API std::atomic<uint8_t>& GetGpuCtxCounter();
 TRACY_API GpuCtxWrapper& GetGpuCtx();
 TRACY_API uint64_t GetThreadHandle();
+TRACY_API void InitRPMallocThread();
 TRACY_API bool ProfilerAvailable();
 TRACY_API int64_t GetFrequencyQpc();
 
@@ -230,8 +231,7 @@ public:
         fi->h = h;
         fi->flip = flip;
         profiler.m_fiQueue.commit_next();
-        profiler.m_fiLock.unlock();
-#else
+ #else
         (void) w;
         (void) h;
         (void) image;
@@ -300,6 +300,7 @@ public:
 #endif
         if( callstack != 0 )
         {
+            InitRPMallocThread();
             tracy::GetProfiler().SendCallstack( callstack );
         }
 
@@ -319,6 +320,7 @@ public:
 #endif
         if( callstack != 0 )
         {
+            InitRPMallocThread();
             tracy::GetProfiler().SendCallstack( callstack );
         }
 
@@ -336,6 +338,7 @@ public:
 #endif
         if( callstack != 0 )
         {
+            InitRPMallocThread();
             tracy::GetProfiler().SendCallstack( callstack );
         }
 
@@ -358,6 +361,7 @@ public:
 #endif
         if( callstack != 0 )
         {
+            InitRPMallocThread();
             tracy::GetProfiler().SendCallstack( callstack );
         }
 
@@ -373,6 +377,7 @@ public:
     static tracy_force_inline void MessageAppInfo( const char* txt, size_t size )
     {
         assert( size < std::numeric_limits<uint16_t>::max() );
+        InitRPMallocThread();
         auto ptr = (char*)tracy_malloc( size );
         memcpy( ptr, txt, size );
         TracyLfqPrepare( QueueType::MessageAppInfo );
@@ -423,6 +428,7 @@ public:
 #  endif
         const auto thread = GetThreadHandle();
 
+        InitRPMallocThread();
         auto callstack = Callstack( depth );
 
         profiler.m_serialLock.lock();
@@ -444,6 +450,7 @@ public:
 #  endif
         const auto thread = GetThreadHandle();
 
+        InitRPMallocThread();
         auto callstack = Callstack( depth );
 
         profiler.m_serialLock.lock();
@@ -493,6 +500,7 @@ public:
 #  endif
         const auto thread = GetThreadHandle();
 
+        InitRPMallocThread();
         auto callstack = Callstack( depth );
 
         profiler.m_serialLock.lock();
@@ -515,6 +523,7 @@ public:
 #  endif
         const auto thread = GetThreadHandle();
 
+        InitRPMallocThread();
         auto callstack = Callstack( depth );
 
         profiler.m_serialLock.lock();
@@ -817,16 +826,6 @@ private:
 
     char* m_queryData;
     char* m_queryDataPtr;
-
-#if defined _WIN32 || defined __CYGWIN__
-    void* m_exceptionHandler;
-#endif
-#ifdef __linux__
-    struct {
-        struct sigaction pwr, ill, fpe, segv, pipe, bus, abrt;
-    } m_prevSignal;
-#endif
-    bool m_crashHandlerInstalled;
 };
 
 }

@@ -118,10 +118,12 @@ void spvm_execute_OpLoad(spvm_word word_count, spvm_state_t state)
 
 	if(state->load_variable && spvm_use_access_callback(src->type, src->storage_class)) {
 		spvm_word src_id = ptr_id;
+		int allow_opt = 1;
 
 		while(src->type == spvm_result_type_function_parameter) {
 			src_id = src->access_chain_ref;
 			src = &state->results[src_id];
+			allow_opt = 0; // TODO: we can optimize here in most cases as well
 		}
 
 		// TODO: handle access chain on function parameter
@@ -129,11 +131,16 @@ void spvm_execute_OpLoad(spvm_word word_count, spvm_state_t state)
 			src_id = src->access_chain_ref;
 		}
 
+		if (allow_opt && state->results[id].was_loaded) {
+			return;
+		}
+
 		spvm_member_list dst_mems;
 		dst_mems.members = state->results[id].members;
 		dst_mems.member_count = state->results[id].member_count;
 
 		state->load_variable(state, src_id, src->index_count, src->indices, dst_mems, type_id);
+		state->results[id].was_loaded = 1;
 	} else {
 		assert(src->index_count == 0u);
 		spvm_member_memcpy(state->results[id].members, src->members, src->member_count);

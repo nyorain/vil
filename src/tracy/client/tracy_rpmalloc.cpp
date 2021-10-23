@@ -130,9 +130,7 @@
 #  include <stdio.h>
 #  include <stdlib.h>
 #  if defined(__APPLE__)
-#    if !TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
-#      include <mach/mach_vm.h>
-#    endif
+#    include <mach/mach_vm.h>
 #    include <mach/vm_statistics.h>
 #    include <pthread.h>
 #  endif
@@ -204,7 +202,7 @@ static FORCEINLINE int     atomic_cas_ptr(atomicptr_t* dst, void* val, void* ref
 //! Medium granularity shift count
 #define MEDIUM_GRANULARITY_SHIFT  9
 //! Number of medium block size classes
-#define MEDIUM_CLASS_COUNT        61
+#define MEDIUM_CLASS_COUNT        (50 * 61)
 //! Total number of small + medium size classes
 #define SIZE_CLASS_COUNT          (SMALL_CLASS_COUNT + MEDIUM_CLASS_COUNT)
 //! Number of large block size classes
@@ -638,7 +636,7 @@ static size_t
 _memory_map_align_span_count(size_t span_count) {
 	size_t request_count = (span_count > _memory_span_map_count) ? span_count : _memory_span_map_count;
 	if ((_memory_page_size > _memory_span_size) && ((request_count * _memory_span_size) % _memory_page_size))
-		request_count += _memory_span_map_count - (request_count % _memory_span_map_count);	
+		request_count += _memory_span_map_count - (request_count % _memory_span_map_count);
 	return request_count;
 }
 
@@ -657,7 +655,7 @@ _memory_span_initialize(span_t* span, size_t total_span_count, size_t span_count
 	span->span_count = (uint32_t)span_count;
 	span->align_offset = (uint32_t)align_offset;
 	span->flags = SPAN_FLAG_MASTER;
-	atomic_store32(&span->remaining_spans, (int32_t)total_span_count);	
+	atomic_store32(&span->remaining_spans, (int32_t)total_span_count);
 }
 
 //! Map a akigned set of spans, taking configured mapping granularity and the page size into account
@@ -1062,7 +1060,7 @@ _memory_heap_extract_new_span(heap_t* heap, size_t span_count, uint32_t class_id
 	if (spans_current > heap->size_class_use[class_idx].spans_peak)
 		heap->size_class_use[class_idx].spans_peak = spans_current;
 #endif
-#endif	
+#endif
 	span_t* span = _memory_heap_thread_cache_extract(heap, span_count);
 	if (EXPECTED(span != 0)) {
 		_memory_statistics_inc(heap->size_class_use[class_idx].spans_from_cache, 1);
@@ -1147,7 +1145,7 @@ _memory_span_set_new_active(heap_t* heap, heap_class_t* heap_class, span_t* span
 
 	//Setup free list. Only initialize one system page worth of free blocks in list
 	void* block;
-	span->free_list_limit = free_list_partial_init(&heap_class->free_list, &block, 
+	span->free_list_limit = free_list_partial_init(&heap_class->free_list, &block,
 		span, pointer_offset(span, SPAN_HEADER_SIZE), size_class->block_count, size_class->block_size);
 	atomic_store_ptr(&span->free_list_deferred, 0);
 	span->list_size = 0;

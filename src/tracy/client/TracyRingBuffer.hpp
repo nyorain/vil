@@ -5,9 +5,8 @@ template<size_t Size>
 class RingBuffer
 {
 public:
-    RingBuffer( int fd, int id )
-        : m_id( id )
-        , m_fd( fd )
+    RingBuffer( int fd )
+        : m_fd( fd )
     {
         const auto pageSize = uint32_t( getpagesize() );
         assert( Size >= pageSize );
@@ -17,14 +16,12 @@ public:
         if( !mapAddr )
         {
             m_fd = 0;
-            m_metadata = nullptr;
             close( fd );
             return;
         }
         m_metadata = (perf_event_mmap_page*)mapAddr;
         assert( m_metadata->data_offset == pageSize );
         m_buffer = ((char*)mapAddr) + pageSize;
-        m_tail = m_metadata->data_tail;
     }
 
     ~RingBuffer()
@@ -52,16 +49,21 @@ public:
     }
 
     bool IsValid() const { return m_metadata != nullptr; }
-    int GetId() const { return m_id; }
 
     void Enable()
     {
         ioctl( m_fd, PERF_EVENT_IOC_ENABLE, 0 );
     }
 
+    bool HasData() const
+    {
+        const auto head = LoadHead();
+        return head > m_metadata->data_tail;
+    }
+
     void Read( void* dst, uint64_t offset, uint64_t cnt )
     {
-        auto src = ( m_tail + offset ) % Size;
+        auto src = ( m_metadata->data_tail + offset ) % Size;
         if( src + cnt <= Size )
         {
             memcpy( dst, m_buffer + src, cnt );
@@ -76,8 +78,7 @@ public:
 
     void Advance( uint64_t cnt )
     {
-        m_tail += cnt;
-        StoreTail();
+        StoreTail( m_metadata->data_tail + cnt );
     }
 
     bool CheckTscCaps() const
@@ -87,33 +88,26 @@ public:
 
     int64_t ConvertTimeToTsc( int64_t timestamp ) const
     {
-        if( !m_metadata->cap_user_time_zero ) return 0;
+        assert( m_metadata->cap_user_time_zero );
         const auto time = timestamp - m_metadata->time_zero;
         const auto quot = time / m_metadata->time_mult;
         const auto rem = time % m_metadata->time_mult;
         return ( quot << m_metadata->time_shift ) + ( rem << m_metadata->time_shift ) / m_metadata->time_mult;
     }
 
+private:
     uint64_t LoadHead() const
     {
         return std::atomic_load_explicit( (const volatile std::atomic<uint64_t>*)&m_metadata->data_head, std::memory_order_acquire );
     }
 
-    uint64_t GetTail() const
+    void StoreTail( uint64_t tail )
     {
-        return m_tail;
+        std::atomic_store_explicit( (volatile std::atomic<uint64_t>*)&m_metadata->data_tail, tail, std::memory_order_release );
     }
 
-private:
-    void StoreTail()
-    {
-        std::atomic_store_explicit( (volatile std::atomic<uint64_t>*)&m_metadata->data_tail, m_tail, std::memory_order_release );
-    }
-
-    uint64_t m_tail;
-    char* m_buffer;
-    int m_id;
     perf_event_mmap_page* m_metadata;
+    char* m_buffer;
 
     size_t m_mapSize;
     int m_fd;

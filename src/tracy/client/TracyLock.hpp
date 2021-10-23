@@ -471,6 +471,7 @@ public:
         Profiler::QueueSerialFinish();
     }
 
+
 private:
     uint32_t m_id;
 
