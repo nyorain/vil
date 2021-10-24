@@ -372,17 +372,20 @@ void spvm_setup_OpVariable(spvm_word word_count, spvm_state_t state)
 	spvm_word storage_class = SPVM_READ_WORD(state->code_current);
 	spvm_word initializer = -1;
 
-	if (word_count >= 4)
+	if (word_count >= 4) {
 		initializer = SPVM_READ_WORD(state->code_current);
+	}
 
-	state->results[id].type = spvm_result_type_variable;
-	state->results[id].storage_class = storage_class;
-	state->results[id].owner = state->current_function;
-	state->results[id].pointer = var_type;
+	spvm_result* var = &state->results[id];
+
+	var->type = spvm_result_type_variable;
+	var->storage_class = storage_class;
+	var->owner = state->current_function;
+	var->pointer = var_type;
 
 	if(!state->load_variable || !state->store_variable ||
-			storage_class == SpvStorageClassFunction) {
-		spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+			!spvm_use_access_callback(var->type, var->storage_class)) {
+		spvm_result_allocate_typed_value(var, state->results, var_type);
 		state->results[id].source_location = state->code_current;
 
 		if (initializer != -1)

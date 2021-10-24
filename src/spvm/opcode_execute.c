@@ -4,6 +4,7 @@
 #include <spvm/spirv.h>
 #include <spvm/image.h>
 #include <string.h>
+#include <stdbool.h>
 #include <math.h>
 #include <assert.h>
 
@@ -403,7 +404,7 @@ float spvm_execute_compare(float val, float ref, spvm_sampler_compare_op op) {
 
 static spvm_vec4f spvm_op_image_sample(spvm_state_t state,
 		spvm_word sampled_image_id, spvm_word coord_id,
-		spvm_image_operands* operands, const float* dref)
+		spvm_image_operands* operands, const float* dref, bool proj)
 {
 	spvm_result_t coord = &state->results[coord_id];
 
@@ -424,23 +425,41 @@ static spvm_vec4f spvm_op_image_sample(spvm_state_t state,
 	assert(image_type->image_info);
 
 	float stu[4] = { 0.0f };
-	for (spvm_word i = 0; i < coord->member_count; i++)
+	for (spvm_word i = 0; i < coord->member_count; i++) {
 		stu[i] = coord->members[i].value.f;
+	}
 
 	spvm_vec4f res = {0};
 
+	unsigned dim;
+	if (image_type->image_info->dim == SpvDim1D) {
+		dim = 1u;
+	} else if (image_type->image_info->dim == SpvDim2D ||
+			image_type->image_info->dim == SpvDimSubpassData) {
+		dim = 2u;
+	} else if (image_type->image_info->dim == SpvDim3D) {
+		dim = 3u;
+	} else if (image_type->image_info->dim == SpvDimCube) {
+		dim = 3u;
+	} else {
+		assert(!"Unhandled SpvDim");
+		dim = 3u;
+	}
+
+	assert(!image_type->image_info->arrayed || !proj); // per spec
+
 	float layer = 0.f;
 	if (image_type->image_info->arrayed) {
-		if (image_type->image_info->dim == SpvDim1D) {
-			layer = stu[1];
-		} else if (image_type->image_info->dim == SpvDim2D) {
-			layer = stu[2];
-		} else if (image_type->image_info->dim == SpvDim3D) {
-			layer = stu[3];
-		} else if (image_type->image_info->dim == SpvDimCube) {
-			layer = 6 * stu[3];
-		} else {
-			assert(!"Unhandled SpvDim");
+		layer = stu[dim];
+
+		if (image_type->image_info->dim == SpvDimCube) {
+			layer *= 6;
+		}
+	}
+
+	if (proj) {
+		for (unsigned i = 0u; i < dim; ++i) {
+			stu[i] /= stu[dim];
 		}
 	}
 
@@ -499,23 +518,32 @@ static spvm_vec4f spvm_op_image_gather(spvm_state_t state,
 	assert(image_type->image_info);
 
 	float stu[4] = { 0.0f };
-	for (spvm_word i = 0; i < coord->member_count; i++)
+	for (spvm_word i = 0; i < coord->member_count; i++) {
 		stu[i] = coord->members[i].value.f;
+	}
 
 	spvm_vec4f res = {0};
 
+	unsigned dim;
+	if (image_type->image_info->dim == SpvDim1D) {
+		dim = 1u;
+	} else if (image_type->image_info->dim == SpvDim2D ||
+			image_type->image_info->dim == SpvDimSubpassData) {
+		dim = 2u;
+	} else if (image_type->image_info->dim == SpvDim3D) {
+		dim = 3u;
+	} else if (image_type->image_info->dim == SpvDimCube) {
+		dim = 3u;
+	} else {
+		assert(!"Unhandled SpvDim");
+	}
+
 	float layer = 0.f;
 	if (image_type->image_info->arrayed) {
-		if (image_type->image_info->dim == SpvDim1D) {
-			layer = stu[1];
-		} else if (image_type->image_info->dim == SpvDim2D) {
-			layer = stu[2];
-		} else if (image_type->image_info->dim == SpvDim3D) {
-			layer = stu[3];
-		} else if (image_type->image_info->dim == SpvDimCube) {
-			layer = 6 * stu[3];
-		} else {
-			assert(!"Unhandled SpvDim");
+		layer = stu[dim];
+
+		if (image_type->image_info->dim == SpvDimCube) {
+			layer *= 6;
 		}
 	}
 
@@ -566,7 +594,7 @@ static spvm_vec4f spvm_op_image_gather(spvm_state_t state,
 }
 
 // same implementation for ImplicitLod and ExplicitLod
-void spvm_execute_OpImageSample(spvm_word word_count, spvm_state_t state)
+void spvm_execute_OpImageSample_base(spvm_word word_count, spvm_state_t state, bool proj)
 {
 	spvm_word res_type = SPVM_READ_WORD(state->code_current);
 	spvm_word id = SPVM_READ_WORD(state->code_current);
@@ -579,13 +607,24 @@ void spvm_execute_OpImageSample(spvm_word word_count, spvm_state_t state)
 	}
 
 	spvm_vec4f res = spvm_op_image_sample(state, sampled_image_id,
-		coord_id, &operands, NULL);
+		coord_id, &operands, NULL, proj);
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++)
 		state->results[id].members[i].value.f = res.data[i];
 }
 
-void spvm_execute_OpImageSampleDref(spvm_word word_count, spvm_state_t state)
+void spvm_execute_OpImageSample(spvm_word word_count, spvm_state_t state)
+{
+	spvm_execute_OpImageSample_base(word_count, state, false);
+}
+
+void spvm_execute_OpImageSampleProj(spvm_word word_count, spvm_state_t state)
+{
+	spvm_execute_OpImageSample_base(word_count, state, true);
+}
+
+void spvm_execute_OpImageSampleDref_base(spvm_word word_count, spvm_state_t state,
+		bool proj)
 {
 	spvm_word res_type = SPVM_READ_WORD(state->code_current);
 	spvm_word id = SPVM_READ_WORD(state->code_current);
@@ -602,10 +641,21 @@ void spvm_execute_OpImageSampleDref(spvm_word word_count, spvm_state_t state)
 	float dref_val = dref->members[0].value.f;
 
 	spvm_vec4f res = spvm_op_image_sample(state, sampled_image_id,
-		coord_id, &operands, &dref_val);
+		coord_id, &operands, &dref_val, proj);
 
-	for (spvm_word i = 0; i < state->results[id].member_count; i++)
+	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
 		state->results[id].members[i].value.f = res.data[i];
+	}
+}
+
+void spvm_execute_OpImageSampleDref(spvm_word word_count, spvm_state_t state)
+{
+	spvm_execute_OpImageSampleDref_base(word_count, state, false);
+}
+
+void spvm_execute_OpImageSampleProjDref(spvm_word word_count, spvm_state_t state)
+{
+	spvm_execute_OpImageSampleDref_base(word_count, state, true);
 }
 
 void spvm_execute_OpSampledImage(spvm_word word_count, spvm_state_t state)
@@ -765,6 +815,27 @@ void spvm_execute_OpImageQueryLod(spvm_word word_count, spvm_state_t state)
 	// Per vulkan spec, those are the returned values
 	state->results[id].members[0].value.f = lodq.lambda_prime;
 	state->results[id].members[1].value.f = lodq.dl;
+}
+void spvm_execute_OpImageQueryLevels(spvm_word word_count, spvm_state_t state)
+{
+	SPVM_SKIP_WORD(state->code_current);
+	spvm_word id = SPVM_READ_WORD(state->code_current);
+	spvm_word image_id = SPVM_READ_WORD(state->code_current);
+
+	assert(state->results[image_id].members);
+	state->results[id].members[0].value.u = state->results[image_id].members[0].value.image->levels;
+}
+void spvm_execute_OpImageQuerySamples(spvm_word word_count, spvm_state_t state)
+{
+	SPVM_SKIP_WORD(state->code_current);
+	spvm_word id = SPVM_READ_WORD(state->code_current);
+	spvm_word image_id = SPVM_READ_WORD(state->code_current);
+
+	assert(state->results[image_id].members);
+	(void) image_id;
+
+	// TODO: spvm doesn't support multisampling atm
+	state->results[id].members[0].value.u = 1u;
 }
 void spvm_execute_OpImageRead(spvm_word word_count, spvm_state_t state)
 {
@@ -2275,10 +2346,10 @@ void _spvm_context_create_execute_table(spvm_context_t ctx)
 	ctx->opcode_execute[SpvOpImageQuerySize] = spvm_execute_OpImageQuerySize;
 	ctx->opcode_execute[SpvOpImageSampleDrefImplicitLod] = spvm_execute_OpImageSampleDref;
 	ctx->opcode_execute[SpvOpImageSampleDrefExplicitLod] = spvm_execute_OpImageSampleDref;
-	ctx->opcode_execute[SpvOpImageSampleProjImplicitLod] = spvm_execute_todo;
-	ctx->opcode_execute[SpvOpImageSampleProjExplicitLod] = spvm_execute_todo;
-	ctx->opcode_execute[SpvOpImageSampleProjDrefImplicitLod] = spvm_execute_todo;
-	ctx->opcode_execute[SpvOpImageSampleProjDrefExplicitLod] = spvm_execute_todo;
+	ctx->opcode_execute[SpvOpImageSampleProjImplicitLod] = spvm_execute_OpImageSampleProj;
+	ctx->opcode_execute[SpvOpImageSampleProjExplicitLod] = spvm_execute_OpImageSampleProj;
+	ctx->opcode_execute[SpvOpImageSampleProjDrefImplicitLod] = spvm_execute_OpImageSampleProjDref;
+	ctx->opcode_execute[SpvOpImageSampleProjDrefExplicitLod] = spvm_execute_OpImageSampleProjDref;
 	ctx->opcode_execute[SpvOpImageDrefGather] = spvm_execute_OpImageDrefGather;
 	ctx->opcode_execute[SpvOpImageRead] = spvm_execute_OpImageRead;
 	ctx->opcode_execute[SpvOpImageWrite] = spvm_execute_OpImageWrite;
@@ -2286,8 +2357,8 @@ void _spvm_context_create_execute_table(spvm_context_t ctx)
 	ctx->opcode_execute[SpvOpImageQueryFormat] = spvm_execute_todo;
 	ctx->opcode_execute[SpvOpImageQueryOrder] = spvm_execute_todo;
 	ctx->opcode_execute[SpvOpImageQueryLod] = spvm_execute_OpImageQueryLod;
-	ctx->opcode_execute[SpvOpImageQueryLevels] = spvm_execute_todo;
-	ctx->opcode_execute[SpvOpImageQuerySamples] = spvm_execute_todo;
+	ctx->opcode_execute[SpvOpImageQueryLevels] = spvm_execute_OpImageQueryLevels;
+	ctx->opcode_execute[SpvOpImageQuerySamples] = spvm_execute_OpImageQuerySamples;
 
 	// sparse image support
 	ctx->opcode_execute[SpvOpImageSparseSampleImplicitLod] = spvm_execute_todo;

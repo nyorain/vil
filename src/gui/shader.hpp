@@ -12,22 +12,13 @@ namespace vil {
 // from buffmt
 struct Type;
 
-struct ShaderDebugger {
-	Gui* gui {};
-	igt::TextEditor textedit;
-	const spc::Compiler* compiled;
-
-	spvm_context_t context {};
-	spvm_program_t program {};
-	spvm_state_t state {};
-
-	std::unordered_map<u32, u32> varIDToDsCopyMap;
-
+class ShaderDebugger {
+public:
 	~ShaderDebugger();
 	void init(Gui& gui);
 
 	// TODO: figure out ownership of spc::Compiler. Kinda difficult due
-	// to setting of spec constants
+	// to setting of spec constants. Just copy it?
 	void select(const spc::Compiler& compiled);
 	void unselect();
 	void draw();
@@ -66,6 +57,11 @@ private:
 		ReadBuf data;
 	};
 
+	struct Location {
+		u32 fileID;
+		u32 lineID;
+	};
+
 	std::deque<spvm_sampler> samplers_;
 	std::deque<OurImage> images_;
 
@@ -74,6 +70,17 @@ private:
 	bool refresh_ {};
 	u32 currLine_ {};
 	std::string currFileName_ {};
+
+	Gui* gui_ {};
+	igt::TextEditor textedit_;
+	const spc::Compiler* compiled_ {};
+
+	spvm_context_t context_ {};
+	spvm_program_t program_ {};
+	spvm_state_t state_ {};
+
+	std::unordered_map<u32, u32> varIDToDsCopyMap_;
+	std::vector<Location> breakpoints_;
 };
 
 } // namespace vil

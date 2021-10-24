@@ -7,20 +7,6 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 - gui improvement: remove flickering data and stuff, allow to get
   texel values in command viewer
 
-new, workstack:
-- [ ] implement image histograms (probably best like in PIX)
-      See minmax.comp and histogram.comp
-- [ ] implement basic filters in image viewer, like inf/nan overlay
-- [ ] optimization(important): for images captured in commandHook, we might be able to use
-      that image when drawing the gui even though the associated submission
-	  hasn't finished yet (chained via semaphore).
-	  Reducing latency, effectively having 0 frames
-	  latency between rendered frame and debug gui anymore. Investigate.
-	  (For buffers this isn't possible, we need the cpu processing for
-	  formatting & text rendering)
-- [ ] rework buffmt with proper array types (and multdim arrays)
-      allow to store spirv u32 id per Type.
-
 urgent, bugs:
 - [ ] figure out tracy issues. On windows, it causes problems with a lot
       of applications that I can't explain :( Some of the problems
@@ -39,6 +25,63 @@ urgent, bugs:
 	  an empty alias string
 - [ ] toupper bug when searching for resource
 - [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
+
+new, workstack:
+- [ ] implement image histograms (probably best like in PIX)
+      See minmax.comp and histogram.comp
+- [ ] implement basic filters in image viewer, like inf/nan overlay
+- [ ] optimization(important): for images captured in commandHook, we might be able to use
+      that image when drawing the gui even though the associated submission
+	  hasn't finished yet (chained via semaphore).
+	  Reducing latency, effectively having 0 frames
+	  latency between rendered frame and debug gui anymore. Investigate.
+	  (For buffers this isn't possible, we need the cpu processing for
+	  formatting & text rendering)
+- [ ] rework buffmt with proper array types (and multdim arrays)
+      allow to store spirv u32 id per Type.
+
+shader debugger:
+- [ ] implement breakpoints
+- [ ] add UI for selecting workgroup/invocation
+- [ ] return workgroup size from shader in loadBuiltin
+- [ ] add support for loading push constants
+- [ ] support vertex shaders
+	- [ ] correctly wire up the vertex input. And add ui for selecting
+	      instance/vertex id to debug.
+- [ ] support fragment shaders
+	- [ ] figure out how to wire up input. Sketch: allow to select the
+	      pixel, then select the primitive in the current draw call
+		  covering the pixel (if more than one; or always use the last
+		  one if it makes sense via vulkan drawing order guarantees?).
+		  We then interpolate the input we got from xfb and use that
+		  as input to the fragment shader.
+- geometry and tesselation shaders can remain unsupported for now.
+- [ ] support ray tracing pipelines
+	- [ ] as with compute shaders, we want to select the dispatch index
+	- [ ] add support in spvm. Not sure about callback interface, probably
+	      just pass the parameters from TraceRay to the application callback
+		  and then let the application return the hit?
+		  Hm, no, it's probably better to let the application then handle
+		  everything (i.e. invoking all the required intersection/hit/miss shaders)
+		  and just return/modify the ray payload, right?
+	- [ ] aside from debugging the shaders (and the acceleration structure
+		  hitting process), allow to visualize the rays (we can probably
+		  just do a very small number of rays) in the acceleration
+		  structure.
+	- [ ] if we are serious about it, we need to really build our own
+	      host-side acceleration structures
+- [ ] add proper stack trace (ui tab)
+- [ ] allow to view all sources in ui
+- [ ] figure out where to put the "Debug shader" buttons
+- [ ] add support for stores. And make sure reading variables later
+      on return the correct values. Might need changes in spvm, the
+	  was_loaded optimization is incorrect in that case.
+	  Maybe set was_loaded to false when the OpVariable was stored to?
+- [ ] clean up implementation. How we gather/display variables
+      Make sure the variable display tree nodes can opened while the
+	  state is being recreated (with "refresh" set. Should probably just
+	  use the name, not its pointer as well. Figure out why we did
+	  it for buffmt. arrays?)
 
 spvm:
 - [ ] Add OpSpecConstant* support
