@@ -286,7 +286,7 @@ void ShaderDebugger::draw() {
 		// 	printRes(name, res);
 		// }
 
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
 		auto flags = ImGuiTableFlags_BordersInner |
 			ImGuiTableFlags_Resizable |
 			ImGuiTableFlags_SizingStretchSame;
@@ -339,9 +339,9 @@ void ShaderDebugger::draw() {
 
 			ImGui::EndTable();
 		}
-	}
 
-	ImGui::PopStyleVar(1);
+		ImGui::PopStyleVar(1);
+	}
 
 	currLine_ = state_->current_line;
 	if(state_->current_file) {

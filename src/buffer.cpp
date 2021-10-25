@@ -22,6 +22,8 @@ Buffer& bufferAtLocked(Device& dev, VkDeviceAddress address) {
 
 	Buffer* best = nullptr;
 	while(begin != end) {
+		// select the buffer with the biggest range from the
+		// given address on
 		if(!best || (best->deviceAddress + best->ci.size - address) <
 				((*begin)->deviceAddress + (*begin)->ci.size - address)) {
 			best = *begin;
@@ -105,6 +107,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	buf.ci = *pCreateInfo;
 	buf.handle = *pBuffer;
 	buf.concurrentHooked = concurrent;
+
+	constexpr auto sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+	auto* externalMem = findChainInfo<VkExternalMemoryBufferCreateInfo, sType>(nci);
+	if(externalMem && externalMem->handleTypes) {
+		buf.externalMemory = true;
+	}
 
 	++DebugStats::get().aliveBuffers;
 

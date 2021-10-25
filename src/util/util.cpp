@@ -1160,4 +1160,28 @@ VkImageAspectFlags aspects(VkFormat format) {
 	return ret;
 }
 
+VkImageViewType imageViewForImageType(VkImageType type) {
+	switch(type) {
+		case VK_IMAGE_TYPE_1D:
+			return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
+		case VK_IMAGE_TYPE_2D:
+			return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+		case VK_IMAGE_TYPE_3D:
+			return VK_IMAGE_VIEW_TYPE_3D;
+		default:
+			dlg_error("Unsupported image type");
+			return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+	}
+}
+
+u32 combineQueueFamilies(span<const u32> queueFams) {
+	u32 ret = 0u;
+	for(auto qf : queueFams) {
+		dlg_assert(qf < 32);
+		ret |= (1u << qf);
+	}
+
+	return ret;
+}
+
 } // namespace vil

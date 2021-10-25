@@ -7,6 +7,7 @@
 #include <sync.hpp>
 #include <cb.hpp>
 #include <swapchain.hpp>
+#include <command/commands.hpp>
 #include <util/util.hpp>
 #include <util/intrusive.hpp>
 #include <gui/commandHook.hpp>
@@ -506,6 +507,25 @@ void postProcessLocked(QueueSubmitter& subm) {
 		subm.queue->lastLayerSubmission = *subm.lastLayerSubmission;
 	}
 }
+
+// TODO WIP
+// bool potentiallyWrites(const Command& bcmd, const Buffer& buf) {
+// 	if(typeid(bcmd) == typeid(CopyBufferCmd)) {
+// 		auto& cmd = static_cast<const CopyBufferCmd&>(bcmd);
+// 		dlg_assert(cmd.src == &buf || cmd.dst == &buf);
+// 		return cmd.dst == &buf;
+// 	} else if(typeid(bcmd) == typeid(CopyBufferToImageCmd)) {
+// 	}
+// }
+//
+// bool potentiallyWritesLocked(const CommandRecord& rec, const Buffer& buf) {
+// 	auto it = rec.handles.find(handleToU64(buf.handle));
+// 	if(it != rec.handles.end()) {
+// 		auto& uh = it->second;
+// 		for(auto* cmd : uh.commands) {
+// 		}
+// 	}
+// }
 
 // Returns whether the given submission potentially writes the given
 // DeviceHandle (only makes sense for Image and Buffer objects)

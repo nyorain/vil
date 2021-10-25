@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <cow.hpp>
 #include <command/desc.hpp>
 #include <command/record.hpp>
 #include <util/intrusive.hpp>
@@ -17,29 +18,6 @@
 namespace vil {
 
 struct BeginRenderPassCmd;
-
-struct CopiedImage {
-	Device* dev {};
-	u32 refCount {};
-	VkImage image {};
-	VkDeviceMemory memory {};
-	VkExtent3D extent {}; // extent of the first level in this image
-	u32 layerCount {};
-	u32 levelCount {};
-	VkImageAspectFlags aspectMask {};
-	VkDeviceSize neededMemory {};
-
-	// TODO(io-rework): shouldn't be here. Subresource range of original src image,
-	// that this copy was created from.
-	VkImageSubresourceRange srcSubresRange {};
-	VkFormat format {};
-
-	CopiedImage() = default;
-	[[nodiscard]] bool init(Device& dev, VkFormat, const VkExtent3D&,
-		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam);
-	~CopiedImage();
-};
-
 struct CommandHookState;
 
 // Commandbuffer hook that allows us to forward a modified version
@@ -160,6 +138,7 @@ private:
 	std::vector<const Command*> hierachy_;
 
 	// pipelines needed for the acceleration structure build copy
+public: // TODO, for cow. Maybe just move them to Device?
 	VkPipelineLayout accelStructPipeLayout_ {};
 	VkPipeline accelStructVertCopy_ {};
 
@@ -341,9 +320,6 @@ private:
 
 	void hookBefore(const BuildAccelStructsCmd&);
 	void hookBefore(const BuildAccelStructsIndirectCmd&);
-
-	void initAndSampleCopy(OwnBuffer& dst, Image& src, VkImageLayout srcLayout,
-		const VkImageSubresourceRange& srcSubres, span<const u32> queueFams);
 
 	// TODO: kinda arbitrary, allow more. Configurable via settings?
 	// In general, the problem is that we can't know the relevant

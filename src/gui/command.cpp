@@ -1465,8 +1465,13 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 		ImageViewer::preserveReadbacks |
 		ImageViewer::supportsTransferSrc;
 	auto imgLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	// TODO: we should probably use information about the original
+	//   range (e.g. from VkImageView if there is one; or from the
+	//   copy op). But not 100% what's better for gui, a level/layer
+	//   slider beginning at a number that isn't 0 might be confusing.
+	auto range = img.subresRange();
 	imageViewer_.select(img.image, img.extent, minImageType(img.extent),
-		img.format, img.srcSubresRange, imgLayout, imgLayout, flags);
+		img.format, range, imgLayout, imgLayout, flags);
 	imageViewer_.display(draw);
 }
 

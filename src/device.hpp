@@ -117,6 +117,7 @@ struct Device {
 	std::vector<VkSemaphore> semaphorePool; // currently used semaphores
 	std::vector<VkSemaphore> resetSemaphores; // list of semaphores that are waiting to be reset
 
+	// TODO: move to individual queues?
 	std::vector<std::unique_ptr<SubmissionBatch>> pending;
 
 	// Mutex for general shared access.

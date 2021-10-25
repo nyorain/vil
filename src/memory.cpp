@@ -19,6 +19,7 @@ MemoryResource::~MemoryResource() {
 	std::lock_guard lock(dev->mutex);
 	if(memory) {
 		dlg_assert(!memoryDestroyed);
+
 		auto it = std::lower_bound(memory->allocations.begin(), memory->allocations.end(),
 			*this, cmpMemRes);
 
@@ -32,6 +33,8 @@ MemoryResource::~MemoryResource() {
 				memory->allocations.erase(it);
 				break;
 			}
+
+			++it;
 		}
 
 		dlg_assert(found);
@@ -46,9 +49,10 @@ DeviceMemory::~DeviceMemory() {
 
 	std::lock_guard lock(dev->mutex);
 
-	// Since we modify the elements inside allocations (with respect to
-	// our comparison iterator) we can't just iterate through them.
-	// Remove and reset one-by-one instead.
+	// NOTE that we temporarily invalidate the ordering invariant of
+	// this->allocations. But since we own the mutex and this object
+	// is to be destroyed any moment anyways (and we are not calling
+	// any other functions in between) this isn't a problem.
 	for(auto* res : allocations) {
 		dlg_assert(!res->memoryDestroyed);
 		dlg_assert(res->memory == this);
@@ -132,6 +136,7 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 		return res;
 	}
 
+	std::lock_guard lock(mem.dev->mutex); // TODO PERF
 	dlg_assert(!mem.map);
 	mem.map = *ppData;
 	mem.mapOffset = offset;
@@ -145,10 +150,13 @@ VKAPI_ATTR void VKAPI_CALL UnmapMemory(
 		VkDeviceMemory                              memory) {
 	auto& mem = get(device, memory);
 
-	dlg_assert(mem.map);
-	mem.map = nullptr;
-	mem.mapOffset = 0u;
-	mem.mapSize = 0u;
+	{
+		std::lock_guard lock(mem.dev->mutex); // TODO PERF
+		dlg_assert(mem.map);
+		mem.map = nullptr;
+		mem.mapOffset = 0u;
+		mem.mapSize = 0u;
+	}
 
 	mem.dev->dispatch.UnmapMemory(mem.dev->handle, mem.handle);
 }
@@ -190,6 +198,37 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceMemoryCommitment(
 	auto& mem = get(device, memory);
 	mem.dev->dispatch.GetDeviceMemoryCommitment(mem.dev->handle, mem.handle,
 		pCommittedMemoryInBytes);
+}
+
+bool aliasesOtherResourceLocked(const MemoryResource& res) {
+	dlg_assert_or(res.memory, return false);
+	auto& mem = *res.memory;
+	assertOwned(res.dev->mutex);
+
+	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
+		res, cmpMemRes);
+	dlg_assert(it != mem.allocations.end());
+	if(*it != &res) {
+		dlg_assert((*it)->allocationOffset == res.allocationOffset);
+		return true;
+	}
+
+	++it;
+	auto imgEnd = res.allocationOffset + res.allocationSize;
+	if(it != mem.allocations.end() && (*it)->allocationOffset < imgEnd) {
+		return true;
+	}
+
+	return false;
+}
+
+bool currentlyMappedLocked(const MemoryResource& res) {
+	dlg_assert_or(res.memory, return false);
+	auto& mem = *res.memory;
+	assertOwned(res.dev->mutex);
+
+	return (mem.map && overlaps(res.allocationOffset, res.allocationSize,
+				mem.mapOffset, mem.mapSize));
 }
 
 } // namespace vil

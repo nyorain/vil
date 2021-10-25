@@ -40,6 +40,20 @@ new, workstack:
 - [ ] rework buffmt with proper array types (and multdim arrays)
       allow to store spirv u32 id per Type.
 
+cows:
+- [ ] resolve them in image/buffer destructor. Just wait for completion
+      at the moment. Can later on try to optimize it, keeping the
+	  handle (and possibly memory) alive until copy is finished.
+- [ ] rework CommandHookState to contain cows
+- [ ] rework CommandHookRecord to create cows
+- [ ] rework Gui to read cows
+- [ ] rework submission to resolve cows where needed.
+      We probably want a global list of cows. Hm or maybe a list of
+	  written handles in the CommandRecord?
+	- [ ] figure out good way/abstraction to actually (and efficiently) detect writing
+- [ ] rework vkMapMemory to resolve cow where needed.
+      Just iterate over MemoryResources in the given range.
+
 shader debugger:
 - [ ] implement breakpoints
 - [ ] add UI for selecting workgroup/invocation

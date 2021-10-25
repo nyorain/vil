@@ -190,18 +190,4 @@ ShaderImageType::Value ShaderImageType::parseType(VkImageType imgType,
 	return Value(unsigned(baseType) + off);
 }
 
-VkImageViewType ShaderImageType::imageViewForImageType(VkImageType type) {
-	switch(type) {
-		case VK_IMAGE_TYPE_1D:
-			return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
-		case VK_IMAGE_TYPE_2D:
-			return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-		case VK_IMAGE_TYPE_3D:
-			return VK_IMAGE_VIEW_TYPE_3D;
-		default:
-			dlg_error("Unsupported image type");
-			return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
-	}
-}
-
 } // namespace vil

@@ -21,7 +21,7 @@ struct OwnBuffer {
 	//   If queueFams contains less than 2 unique families, exclusive
 	//   sharing mode will be used.
 	void ensure(Device&, VkDeviceSize, VkBufferUsageFlags,
-		span<const u32> queueFams = {});
+		u32 queueFamsBitfield = {});
 
 	void invalidateMap();
 	void flushMap();

@@ -5,6 +5,7 @@
 #include <threadContext.hpp>
 #include <ds.hpp>
 #include <rp.hpp>
+#include <util/util.hpp>
 
 namespace vil {
 
@@ -118,6 +119,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.allowsLinearSampling = linearSampling;
 	img.concurrentHooked = concurrent;
 	img.hasTransferSrc = nci.usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
+	constexpr auto sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+	auto* externalMem = findChainInfo<VkExternalMemoryImageCreateInfo, sType>(nci);
+	if(externalMem && externalMem->handleTypes) {
+		img.externalMemory = true;
+	}
 
 	*pImage = castDispatch<VkImage>(img);
 	dev.images.mustEmplace(*pImage, std::move(imgPtr));

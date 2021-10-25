@@ -127,6 +127,9 @@ struct DescriptorStateRef {
 
 struct DrawGuiImage;
 
+struct CowImageRange;
+struct CowBufferRange;
+
 } // namespace vil
 
 

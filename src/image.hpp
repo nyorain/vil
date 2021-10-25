@@ -23,11 +23,15 @@ struct Image : MemoryResource {
 	Swapchain* swapchain {};
 	u32 swapchainImageID {};
 
+	bool externalMemory {}; // whether it supports importing/exporting
+
 	// Properties related to our changes
 	bool allowsNearestSampling {};
 	bool allowsLinearSampling {};
 	bool concurrentHooked {}; // whether we moved it into concurrent sharing mode
 	bool hasTransferSrc {}; // whether we were able to set transferSrc usage
+
+	std::vector<CowImageRange*> cows;
 
 	~Image();
 };

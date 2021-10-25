@@ -810,7 +810,7 @@ void ImageViewer::createData() {
 	VkImageViewCreateInfo ivi {};
 	ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	ivi.image = src_;
-	ivi.viewType = ShaderImageType::imageViewForImageType(imgType_);
+	ivi.viewType = imageViewForImageType(imgType_);
 	ivi.format = format_;
 	ivi.subresourceRange = subresRange_;
 	ivi.subresourceRange.aspectMask = aspect_;

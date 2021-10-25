@@ -4,9 +4,10 @@
 #include <handle.hpp>
 #include <set>
 
+// TODO: support sparse binding
+
 namespace vil {
 
-// TODO: support sparse binding
 struct MemoryResource : DeviceHandle {
 	// !memoryDestroyed && !memory: no memory associated
 	// !memoryDestroyed && memory: memory associated
@@ -38,6 +39,17 @@ struct DeviceMemory : DeviceHandle {
 
 	~DeviceMemory();
 };
+
+// Returns whether any parts of the given memory resource alias any
+// other resource.
+// Expects the given MemoryResource to be bound to memory.
+// Expects the device mutex to be locked.
+bool aliasesOtherResourceLocked(const MemoryResource& res);
+
+// Returns whether the given memory resources lies in currently mapped memory.
+// Expects the given MemoryResource to be bound to memory.
+// Expects the device mutex to be locked.
+bool currentlyMappedLocked(const MemoryResource& res);
 
 // Used as comparator to std::lower_bound when searching for an allocation
 // in DeviceMemory::allocations.

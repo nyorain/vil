@@ -146,6 +146,7 @@ src = files(
 	'src/overlay.cpp',
 	'src/platform.cpp',
 	'src/threadContext.cpp',
+	'src/cow.cpp',
 	'src/vk/format_utils.cpp',
 	'src/util/util.cpp',
 	'src/util/f16.cpp',

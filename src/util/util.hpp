@@ -144,6 +144,20 @@ const R* findChainInfo(const CI& ci) {
 }
 
 template<VkStructureType SType>
+const void* findChainInfo2(const void* pNext) {
+	auto* link = static_cast<const VkBaseInStructure*>(pNext);
+	while(link) {
+		if(link->sType == SType) {
+			return static_cast<const void*>(link);
+		}
+
+		link = static_cast<const VkBaseInStructure*>(link->pNext);
+	}
+
+	return nullptr;
+}
+
+template<VkStructureType SType>
 void* findChainInfo2(void* pNext) {
 	auto* link = static_cast<VkBaseOutStructure*>(pNext);
 	while(link) {
@@ -196,7 +210,17 @@ constexpr A align(A offset, B alignment) {
 	return rest ? A(offset + (alignment - rest)) : A(offset);
 }
 
+// Returns whether the range given by [offA, offA + sizeA) overlaps
+// the range given by [offB, offB + sizeB).
+constexpr bool overlaps(u32 offA, u32 sizeA, u32 offB, u32 sizeB) {
+	auto endA = offA + sizeA;
+	auto endB = offB + sizeB;
+	return (offA >= offB && offA < endB) ||
+		   (offB >= offA && offB < endA);
+}
+
 // Mainly taken from tkn/formats
+VkImageViewType imageViewForImageType(VkImageType);
 VkImageType minImageType(VkExtent3D, unsigned minDim = 1u);
 VkImageViewType minImageViewType(VkExtent3D, unsigned layers,
 	bool cubemap, unsigned minDim = 1u);
@@ -346,5 +370,6 @@ struct CharTraitsCI : public std::char_traits<char> {
 };
 
 VkImageAspectFlags aspects(VkFormat format);
+u32 combineQueueFamilies(span<const u32> queueFams);
 
 } // namespace vil

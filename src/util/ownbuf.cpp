@@ -7,7 +7,7 @@
 namespace vil {
 
 void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
-		VkBufferUsageFlags usage, span<const u32> queueFams) {
+		VkBufferUsageFlags usage, u32 queueFamsBitset) {
 	dlg_assert(!this->dev || this->dev == &dev);
 	if(size >= reqSize) {
 		return;
@@ -34,15 +34,19 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	bufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 	ThreadMemScope ms;
-	if(queueFams.size() >= 2) {
-		auto fams = ms.copy(queueFams.data(), queueFams.size());
-		auto famsCount = std::unique(fams.begin(), fams.end()) - fams.begin();
+	auto qfs = ms.allocRaw<u32>(32);
+	auto qfcount = 0u;
 
-		if(famsCount >= 2) {
-			bufInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
-			bufInfo.pQueueFamilyIndices = fams.data();
-			bufInfo.queueFamilyIndexCount = famsCount;
+	for(auto i = 0u; i < 32; ++i) {
+		if(queueFamsBitset & (1u << i)) {
+			qfs[qfcount++] = i;
 		}
+	}
+
+	if(qfcount >= 2) {
+		bufInfo.sharingMode = VK_SHARING_MODE_CONCURRENT;
+		bufInfo.pQueueFamilyIndices = qfs;
+		bufInfo.queueFamilyIndexCount = qfcount;
 	}
 
 	VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf));

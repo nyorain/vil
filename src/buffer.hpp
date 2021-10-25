@@ -11,11 +11,14 @@ struct Buffer : MemoryResource {
 	VkBuffer handle {};
 	VkBufferCreateInfo ci;
 	bool concurrentHooked {}; // whether we set it to concurrent mode
+	bool externalMemory {}; // whether it supports importing/exporting
 
 	std::vector<BufferView*> views;
 	VkDeviceAddress deviceAddress {}; // null if not available
 
 	std::atomic<u32> refCount {};
+
+	std::vector<CowBufferRange*> cows;
 
 	~Buffer();
 };

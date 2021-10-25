@@ -28,7 +28,6 @@ struct ShaderImageType {
 
 	static Value parseType(VkImageType type, VkFormat format,
 		VkImageAspectFlagBits aspect);
-	static VkImageViewType imageViewForImageType(VkImageType);
 };
 
 struct BufferSpan {
