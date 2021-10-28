@@ -33,8 +33,8 @@ void ShaderDebugger::init(Gui& gui) {
 
 	// TODO: why does this break for games using tcmalloc? tested
 	// on linux with dota
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	textedit_.SetLanguageDefinition(lang);
+	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	// textedit_.SetLanguageDefinition(lang);
 
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
@@ -467,7 +467,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 
 	auto stateIt = dsState.states.find(cmdDS.ds);
 	dlg_assert(stateIt != dsState.states.end());
-	auto& ds = *stateIt->second;
+	auto [ds, lock] = access(*stateIt->second);
 
 	// For samplers, we didn't do a copy and so have to early-out here
 	auto dsCopyIt = varIDToDsCopyMap_.find(srcID);

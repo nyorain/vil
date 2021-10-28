@@ -30,24 +30,22 @@ void DeviceHandle::invalidateCbsLocked() {
 	dlg_assert(dev);
 	assertOwned(dev->mutex);
 
-	// nothing can be added/removed while device mutex is locked
-	for(auto* ref : refRecords) {
-		// If the records still references it command buffer, the record
-		// is the current command buffer state. This handle being destroyed
-		// means the command buffer must be moved into invalid state.
-		if(ref->cb) {
-			dlg_assert(ref->cb->lastRecordLocked() == ref);
-			ref->cb->invalidateLocked();
+	auto it = refRecords;
+	while(it) {
+		dlg_assert(it->record);
+
+		if(it->record->cb) {
+			dlg_assert(it->record->cb->lastRecordLocked() == it->record);
+			it->record->cb->invalidateLocked();
 		}
 
-		dlg_assert(!ref->cb);
-
-		// we never insert descriptor sets into the list of destroyed objects
-		auto [_, success] = ref->invalidated.insert({this, nullptr});
+		auto [_, success] = it->record->invalidated.insert({this, nullptr});
 		dlg_assert(success);
+
+		it = it->next;
 	}
 
-	refRecords.clear();
+	refRecords = nullptr;
 }
 
 void DeviceHandle::invalidateCbs() {
@@ -295,9 +293,12 @@ VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectTagEXT(
 		auto* handle = findHandle(devd, pTagInfo->objectType,
 			pTagInfo->objectHandle, fwd.objectHandle);
 		if(handle) {
-			auto& data = handle->tags[pTagInfo->tagName];
-			auto ptr = reinterpret_cast<const std::byte*>(pTagInfo->pTag);
-			data = {ptr, ptr + pTagInfo->tagSize};
+			// TODO: reintroduce (and add UI support).
+			// But this time, add a hashMap to device and add it there
+			// instead of directly inside the handle for less overhead.
+			// auto& data = handle->tags[pTagInfo->tagName];
+			// auto ptr = reinterpret_cast<const std::byte*>(pTagInfo->pTag);
+			// data = {ptr, ptr + pTagInfo->tagSize};
 		}
 	}
 
@@ -305,7 +306,7 @@ VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectTagEXT(
 		return VK_SUCCESS;
 	}
 
-	return devd.dispatch.SetDebugUtilsObjectTagEXT(device, pTagInfo);
+	return devd.dispatch.SetDebugUtilsObjectTagEXT(device, &fwd);
 }
 
 } // namespace vil

@@ -103,7 +103,7 @@ public:
 	// Might delete itself (or decrement reference count or something).
 	void finish() noexcept { delete this; }
 
-	void invalidateRecordings();
+	void invalidateRecordings(bool forceAll = false);
 	void invalidateData() { completed.clear(); }
 
 	// invalidate: Automatically invalidates data and recordings?
@@ -112,6 +112,7 @@ public:
 	void unsetHookOps(bool doQueryTime = false);
 
 	const auto& dsState() const { return dsState_; }
+	auto recordPtr() const { return record_; }
 
 private:
 	// Initializes the pipelines and data needed for acceleration
@@ -121,7 +122,7 @@ private:
 
 	// Checks whether the copied descriptors in the associated
 	// record have changed (via update-after-bind) since the hooked
-	// record was created.
+	// record was created. Exepcts the given record to be valid.
 	bool copiedDescriptorChanged(const CommandHookRecord&);
 
 private:
@@ -162,7 +163,7 @@ struct CommandHookState {
 	// CommandRecord but may be read by the gui even when the record
 	// was already destroyed (e.g. because it was replaced and all submissions
 	// have finished).
-	u32 refCount {};
+	std::atomic<u32> refCount {};
 	u64 neededTime {u64(-1)}; // time needed for the given command
 
 	std::vector<CopiedDescriptor> copiedDescriptors;
@@ -211,7 +212,7 @@ struct CommandHookRecord {
 	// to the associated descriptor set state. Used for updateAfterBind
 	// descriptors: when they change we must recreate the CommandHookRecord.
 	// One state pointer for each descriptorCopy stored here.
-	std::vector<DescriptorSetStatePtr> dsState;
+	std::vector<IntrusivePtr<DescriptorSetCow>> dsState;
 
 	// == Resources ==
 	VkCommandBuffer cb {};
@@ -259,7 +260,8 @@ struct CommandHookRecord {
 
 public:
 	CommandHookRecord(CommandHook& hook, CommandRecord& record,
-		std::vector<const Command*> hooked);
+		std::vector<const Command*> hooked,
+		const CommandDescriptorSnapshot& descriptors);
 	~CommandHookRecord();
 
 	// Called when associated record is destroyed or hook replaced.
@@ -277,6 +279,7 @@ private:
 		bool splitRenderPass {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
 		const BeginRenderPassCmd* beginRenderPassCmd {};
+		const CommandDescriptorSnapshot* descriptors {};
 
 		unsigned nextHookLevel {}; // on hcommand, hook hierarchy
 		unsigned* maxHookLevel {};
@@ -312,7 +315,7 @@ private:
 	void copyDs(Command& bcmd, RecordInfo&,
 		const CommandHook::DescriptorCopy&,
 		CommandHookState::CopiedDescriptor& dst,
-		DescriptorSetStatePtr& dstStatePtr);
+		IntrusivePtr<DescriptorSetCow>& dstCow);
 	void copyAttachment(RecordInfo&, unsigned id,
 		CommandHookState::CopiedAttachment& dst);
 	void beforeDstOutsideRp(Command&, RecordInfo&);
@@ -340,7 +343,8 @@ struct CommandHookSubmission {
 	CommandHookRecord* record {};
 	CommandDescriptorSnapshot descriptorSnapshot {};
 
-	CommandHookSubmission(CommandHookRecord&, Submission&);
+	CommandHookSubmission(CommandHookRecord&, Submission&,
+		CommandDescriptorSnapshot descriptors);
 	~CommandHookSubmission();
 
 	// Called when the associated submission (passed again as parameter)

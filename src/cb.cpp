@@ -144,12 +144,12 @@ void CommandBuffer::doEnd() {
 
 		state_ = State::executable;
 
-		for(auto& image : record_->images) {
-			image.second.image->refRecords.insert(record_.get());
-		}
-
-		for(auto& handle : record_->handles) {
-			handle.second.handle->refRecords.insert(record_.get());
+		for(auto& [handle, uh] : record_->handles) {
+			if(handle->refRecords) {
+				handle->refRecords->prev = uh;
+			}
+			uh->next = handle->refRecords;
+			handle->refRecords = uh;
 		}
 
 		record_->finished = true;
@@ -533,39 +533,48 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-void useHandle(CommandRecord& rec, Command& cmd, u64 h64, DeviceHandle& handle) {
-	auto it = rec.handles.emplace(h64, UsedHandle{handle, rec}).first;
-	it->second.commands.push_back(&cmd);
+void useHandleImpl(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
+	auto it = rec.handles.find(&handle);
+	if(it == rec.handles.end()) {
+		auto& uh = allocate<UsedHandle>(rec, rec);
+		it = rec.handles.emplace(&handle, &uh).first;
+	}
+
+	it->second->commands.push_back(&cmd);
 }
 
-template<typename T>
-void useHandle(CommandRecord& rec, Command& cmd, T& handle) {
-	auto h64 = handleToU64(vil::handle(handle));
-	useHandle(rec, cmd, h64, handle);
+UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
+	auto it = rec.handles.find(&img);
+	if(it == rec.handles.end()) {
+		auto& uh = allocate<UsedImage>(rec, rec);
+		it = rec.handles.emplace(&img, &uh).first;
+	}
+
+	it->second->commands.push_back(&cmd);
+
+	return static_cast<UsedImage&>(*it->second);
 }
 
-UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& image) {
-	auto it = rec.images.emplace(image.handle, UsedImage{image, rec}).first;
-	it->second.commands.push_back(&cmd);
+void useHandle(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
+	useHandleImpl(rec, cmd, handle);
+}
 
-	dlg_assert(it->second.image);
-	it->second.commands.push_back(&cmd);
+UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& img) {
+	auto& ui = useHandleImpl(rec, cmd, img);
 
 	// NOTE: add swapchain in case it's a swapchain image?
 	// shouldn't be needed I guess.
 	// NOTE: can currently fail for sparse bindings i guess
-	dlg_assert(image.memory || image.swapchain);
-	if(image.memory) {
-		useHandle(rec, cmd, *image.memory);
+	dlg_assert(img.memory || img.swapchain);
+	if(img.memory) {
+		useHandle(rec, cmd, *img.memory);
 	}
 
-	return it->second;
+	return ui;
 }
 
 void useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = true) {
-	auto h64 = handleToU64(view.handle);
-	useHandle(rec, cmd, h64, view);
-
+	useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
 	dlg_assert(view.img);
 	if(useImg && view.img) {
 		useHandle(rec, cmd, *view.img);
@@ -573,8 +582,7 @@ void useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = 
 }
 
 void useHandle(CommandRecord& rec, Command& cmd, Buffer& buf) {
-	auto h64 = handleToU64(buf.handle);
-	useHandle(rec, cmd, h64, buf);
+	useHandle(rec, cmd, static_cast<DeviceHandle&>(buf));
 
 	// NOTE: can currently fail for sparse bindings i guess
 	dlg_assert(buf.memory);
@@ -584,8 +592,7 @@ void useHandle(CommandRecord& rec, Command& cmd, Buffer& buf) {
 }
 
 void useHandle(CommandRecord& rec, Command& cmd, BufferView& view) {
-	auto h64 = handleToU64(view.handle);
-	useHandle(rec, cmd, h64, view);
+	useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
 
 	dlg_assert(view.buffer);
 	if(view.buffer) {
@@ -1654,16 +1661,20 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		useHandle(cb, cmd, secondary);
 
 		auto& rec = *secondary.record();
-		for(auto& img : rec.images) {
-			if(img.second.layoutChanged) {
-				useHandle(cb, cmd, *img.second.image, img.second.finalLayout);
-			} else {
-				useHandle(cb, cmd, *img.second.image);
+		for(auto& [handle, uh] : rec.handles) {
+			// Make sure we carry along layout changes done in secondary
+			// command buffers.
+			if(handle->objectType == VK_OBJECT_TYPE_IMAGE) {
+				auto& ui = static_cast<UsedImage&>(*uh);
+				if(ui.layoutChanged) {
+					auto& dst = useHandleImpl(*cb.record(), cmd, static_cast<Image&>(*handle));
+					dst.layoutChanged = true;
+					dst.finalLayout = ui.finalLayout;
+					break;
+				}
 			}
-		}
 
-		for(auto& handle : rec.handles) {
-			useHandle(cb, cmd, handle.first, *handle.second.handle);
+			useHandleImpl(*cb.record(), cmd, *handle);
 		}
 
 		cbHandles[i] = secondary.handle();
@@ -1696,7 +1707,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 	cb.dev->dispatch.CmdCopyBuffer(cb.handle(),
 		srcBuf.handle, dstBuf.handle, regionCount, pRegions);
 }
-
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2KHR(
 		VkCommandBuffer                             commandBuffer,

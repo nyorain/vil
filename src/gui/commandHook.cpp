@@ -2,6 +2,7 @@
 #include <device.hpp>
 #include <layer.hpp>
 #include <cow.hpp>
+#include <queue.hpp>
 #include <ds.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
@@ -54,9 +55,9 @@ const DescriptorState* getDsState(const Command& cmd) {
 // Expects a and to have the same layout.
 // If the descriptor at (bindingID, elemID) needs to be copied by CommandHook,
 // returns whether its the same in a and b.
-bool copyableDescriptorSame(const DescriptorSetState& a, const DescriptorSetState& b,
+bool copyableDescriptorSame(DescriptorStateRef a, DescriptorStateRef b,
 		unsigned bindingID, unsigned elemID) {
-	if(&a == &b) {
+	if(a.data == b.data) {
 		return true;
 	}
 
@@ -105,9 +106,10 @@ CommandHook::CommandHook(Device& dev) {
 }
 
 CommandHook::~CommandHook() {
-	invalidateRecordings();
-
 	auto& dev = *dev_;
+	waitIdleImpl(dev);
+	dlg_assert(dev.pending.empty());
+	invalidateRecordings();
 
 	for(auto& pipe : copyImagePipes_) {
 		dev.dispatch.DestroyPipeline(dev.handle, pipe, nullptr);
@@ -274,18 +276,19 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 	dlg_assert(!record.hcommand.empty());
 	auto* cmd = record.hcommand.back();
 	const DescriptorState* dsState = getDsState(*cmd);
-	auto& dsSnapshot = record.record->lastDescriptorState;
 
 	for(auto i = 0u; i < descriptorCopies.size(); ++i) {
 		auto [setID, bindingID, elemID, _1, _2] = descriptorCopies[i];
 
-		dlg_assert(setID < dsState->descriptorSets.size());
-		auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
-		dlg_assert(it != dsSnapshot.states.end());
-		auto& currDS = nonNull(it->second);
+		// We can safely interpret the dsState of the record at that position
+		// since we know that the record is still valid
+		auto& currDs = *static_cast<const DescriptorSet*>(dsState->descriptorSets[setID].ds);
 
 		dlg_assert_or(record.dsState[i], return true);
-		if(!copyableDescriptorSame(currDS, *record.dsState[i], bindingID, elemID)) {
+		auto& oldCow = *record.dsState[i];
+		auto [oldDs, lock] = access(oldCow);
+
+		if(!copyableDescriptorSame(currDs, oldDs, bindingID, elemID)) {
 			return true;
 		}
 	}
@@ -371,6 +374,30 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		foundHookRecord = foundCompleted;
 	}
 
+	// We have to capture the currently bound descriptors when we really
+	// hook the submission.
+	// Needed in case the descriptorSet is changed/destroyd later on, also
+	// for updateAfterBind
+	auto captureDescriptors = [&]() -> CommandDescriptorSnapshot {
+		CommandDescriptorSnapshot descriptors;
+
+		// when we only hook for e.g. accel struct building there is no
+		// need to add cows to the descriptors.
+		if(!hookNeededForCmd) {
+			return descriptors;
+		}
+
+		for(auto& pair : record.handles) {
+			auto& handle = nonNull(pair.first);
+			if(handle.objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+				auto& ds = static_cast<DescriptorSet&>(handle);
+				descriptors.states[static_cast<void*>(&handle)] = addCow(ds);
+			}
+		}
+
+		return descriptors;
+	};
+
 	if(foundHookRecord) {
 		if(hookNeededForCmd) {
 			dlg_check({
@@ -409,7 +436,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		}
 
 		if(foundHookRecord) {
-			data.reset(new CommandHookSubmission(*foundHookRecord, subm));
+			data.reset(new CommandHookSubmission(*foundHookRecord, subm,
+				captureDescriptors()));
 			return foundHookRecord->cb;
 		}
 	}
@@ -430,15 +458,16 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	}
 
 	// dlg_trace("hooking command submission; frame {}", dev.swapchain->presentCounter);
-
 	dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
 		"Alarmingly high number of hooks for a single record");
 
-	auto hook = new CommandHookRecord(*this, record, std::move(findRes.hierachy));
+	auto descriptors = captureDescriptors();
+	auto hook = new CommandHookRecord(*this, record, std::move(findRes.hierachy),
+		descriptors);
 	hook->match = findRes.match;
 	record.hookRecords.emplace_back(hook);
 
-	data.reset(new CommandHookSubmission(*hook, subm));
+	data.reset(new CommandHookSubmission(*hook, subm, std::move(descriptors)));
 
 	return hook->cb;
 }
@@ -458,7 +487,7 @@ void CommandHook::desc(IntrusivePtr<CommandRecord> rec,
 	}
 }
 
-void CommandHook::invalidateRecordings() {
+void CommandHook::invalidateRecordings(bool forceAll) {
 	// We have to increase the counter to invalidate all past recordings
 	++counter_;
 
@@ -469,9 +498,9 @@ void CommandHook::invalidateRecordings() {
 		// important to store this before we potentially destroy rec.
 		auto* next = rec->next;
 
-		// we don't want to invalidate recordings that didn't hook a command
+		// we might not want to invalidate recordings that didn't hook a command
 		// and were only done for accelStruct builddata copying
-		if(!rec->hcommand.empty()) {
+		if(forceAll || !rec->hcommand.empty()) {
 			invalidate(*rec);
 		}
 
@@ -498,7 +527,8 @@ void CommandHook::unsetHookOps(bool doQueryTime) {
 
 // record
 CommandHookRecord::CommandHookRecord(CommandHook& xhook,
-	CommandRecord& xrecord, std::vector<const Command*> hooked) :
+	CommandRecord& xrecord, std::vector<const Command*> hooked,
+	const CommandDescriptorSnapshot& descriptors) :
 		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
 
 	++DebugStats::get().aliveHookRecords;
@@ -540,6 +570,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	}
 
 	RecordInfo info {};
+	info.descriptors = &descriptors;
 	initState(info);
 
 	this->dsState.resize(hook->descriptorCopies.size());
@@ -583,6 +614,11 @@ CommandHookRecord::~CommandHookRecord() {
 	dlg_assert(!writer);
 
 	auto& dev = *record->dev;
+
+	// TODO: don't require this here. Instead, require that it's not
+	// locked, enfore that everywhere and make sure to lock it here
+	// only where it's needed.
+	assertOwned(dev.mutex);
 
 	// destroy resources
 	auto commandPool = dev.queueFamilies[record->queueFamily].commandPool;
@@ -1009,7 +1045,8 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 
 void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		const CommandHook::DescriptorCopy& copyDesc,
-		CommandHookState::CopiedDescriptor& dst, DescriptorSetStatePtr& dstStatePtr) {
+		CommandHookState::CopiedDescriptor& dst,
+		IntrusivePtr<DescriptorSetCow>& dstCow) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyDs");
 
@@ -1029,15 +1066,15 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		return;
 	}
 
-	auto& dsSnapshot = record->lastDescriptorState;
-
-	auto it = dsSnapshot.states.find(dsState->descriptorSets[setID].ds);
-	if(it == dsSnapshot.states.end()) {
+	auto it = info.descriptors->states.find(dsState->descriptorSets[setID].ds);
+	if(it == info.descriptors->states.end()) {
 		dlg_error("Could not find descriptor in snapshot??");
 		return;
 	}
 
-	auto& ds = nonNull(it->second);
+	dstCow = it->second;
+	auto [ds, lock] = access(*it->second);
+
 	if(bindingID >= ds.layout->bindings.size()) {
 		dlg_trace("bindingID out of range");
 		return;
@@ -1056,12 +1093,10 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		return;
 	}
 
-	if(elemID >= descriptorCount(*it->second, bindingID)) {
+	if(elemID >= descriptorCount(ds, bindingID)) {
 		dlg_trace("elemID out of range");
 		return;
 	}
-
-	dstStatePtr = it->second;
 
 	auto& lbinding = ds.layout->bindings[bindingID];
 	auto cat = category(lbinding.descriptorType);
@@ -1071,7 +1106,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	dlg_assertl(dlg_level_warn, cat == DescriptorCategory::image || !imageAsBuffer);
 
 	if(cat == DescriptorCategory::image) {
-		auto& elem = images(*it->second, bindingID)[elemID];
+		auto& elem = images(ds, bindingID)[elemID];
 		if(needsImageView(lbinding.descriptorType)) {
 			auto& imgView = elem.imageView;
 			dlg_assert(imgView);
@@ -1116,7 +1151,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 			dlg_error("Requested descriptor binding copy for sampler");
 		}
 	} else if(cat == DescriptorCategory::buffer) {
-		auto& elem = buffers(*it->second, bindingID)[elemID];
+		auto& elem = buffers(ds, bindingID)[elemID];
 		dlg_assert(elem.buffer);
 
 		// calculate offset, taking dynamic offset into account
@@ -1774,11 +1809,11 @@ void CommandHookRecord::finish() noexcept {
 
 // submission
 CommandHookSubmission::CommandHookSubmission(CommandHookRecord& rec,
-		Submission& subm) : record(&rec) {
+	Submission& subm, CommandDescriptorSnapshot descriptors) :
+		record(&rec), descriptorSnapshot(std::move(descriptors)) {
 	dlg_assert(rec.state || !rec.accelStructBuilds.empty());
 	dlg_assert(!rec.writer);
 	rec.writer = &subm;
-	descriptorSnapshot = rec.record->lastDescriptorState;
 }
 
 CommandHookSubmission::~CommandHookSubmission() {

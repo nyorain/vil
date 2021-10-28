@@ -107,7 +107,7 @@ private:
 		Gui* gui {};
 		VkImageView view {};
 		VkDescriptorSet ds {};
-		u32 refCount {};
+		std::atomic<u32> refCount {};
 
 		~DrawData();
 	};

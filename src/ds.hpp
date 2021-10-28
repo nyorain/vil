@@ -15,6 +15,8 @@
 
 namespace vil {
 
+struct DescriptorStateCopy;
+
 // Describes the type of the descriptor data.
 enum class DescriptorCategory {
 	none,
@@ -36,12 +38,84 @@ bool needsImageView(VkDescriptorType);
 bool needsImageLayout(VkDescriptorType);
 bool needsDynamicOffset(VkDescriptorType);
 
+// struct NonDtorDeleter {
+// 	template<typename T>
+// 	void operator()(T* ptr) const {
+// 		operator delete(ptr);
+// 	}
+// };
+//
+// using DeadDescriptorSetPtr = std::unique_ptr<DescriptorSet, NonDtorDeleter>;
+
+
+struct DescriptorPoolSetEntry {
+	u32 offset;
+	u32 size;
+	DescriptorPoolSetEntry* next {};
+	DescriptorPoolSetEntry* prev {};
+	DescriptorSet* set;
+};
+
+// Vulkan descriptor set handle
+struct DescriptorSet : DeviceHandle {
+	DescriptorPool* pool {};
+	VkDescriptorSet handle {};
+
+	// Immutable after creation.
+	IntrusivePtr<DescriptorSetLayout> layout {};
+	u32 variableDescriptorCount {};
+	DescriptorPoolSetEntry* setEntry {};
+
+	// The internal state (in data) is protected by this mutex. This
+	// is needed since we might read the data anytime from the gui
+	// or when resolving the state.
+	DebugMutex mutex;
+	std::byte* data {};
+
+	// Protected by mutex.
+	DescriptorSetCow* cow {};
+
+	~DescriptorSet();
+};
+
 struct DescriptorPool : DeviceHandle {
 	VkDescriptorPool handle {};
-	std::vector<DescriptorSet*> descriptorSets;
+	VkDescriptorPoolCreateFlags flags {};
 
 	u32 maxSets {};
 	std::vector<VkDescriptorPoolSize> poolSizes {};
+
+	using SetEntry = DescriptorPoolSetEntry;
+	struct SetAlloc {
+		using Storage = std::aligned_storage_t<
+			sizeof(DescriptorSet), alignof(DescriptorSet)>;
+		Storage storage;
+		SetAlloc* next {};
+		SetAlloc* prev {};
+
+		DescriptorSet& ds() {
+			return *std::launder(reinterpret_cast<DescriptorSet*>(&storage));
+		}
+	};
+
+	std::unique_ptr<SetAlloc[]> sets;
+	SetAlloc* freeSets {};
+	SetAlloc* aliveSets {};
+
+	// Descriptor data: We just allocate one large buffer on
+	// DescriptorPool creation and then suballocate that to the individual
+	// descriptor sets. We want to guarantee fast allocation and
+	// freeing (even when using FreeDescriptorSets instead of
+	// ResetDescriptorPool) we use a linked list of entries.
+	u32 dataSize {};
+	std::unique_ptr<std::byte[]> data;
+	std::unique_ptr<SetEntry[]> entries;
+
+	u32 highestOffset {};
+	SetEntry* lastEntry {};
+	SetEntry* usedEntries {};
+	SetEntry* highestEntry {};
+	SetEntry* freeEntries {};
 
 	~DescriptorPool();
 };
@@ -74,6 +148,12 @@ struct DescriptorSetLayout : DeviceHandle {
 	// variable_descriptor_count flag
 	// (VUID-VkDescriptorSetLayoutBindingFlagsCreateInfo-pBindingFlags-03015)
 	u32 numDynamicBuffers {};
+
+	// Whether any bindings have immutableSamplers. We remember this
+	// as an optimization, so we don't iterate over bindings on
+	// AllocateDescriptorSets just to find there are not immutable samplers
+	// to initialize.
+	bool immutableSamplers {};
 
 	// handle will be kept alive until this object is actually destroyed.
 	~DescriptorSetLayout();
@@ -109,74 +189,55 @@ inline bool operator==(const BufferDescriptor& a, const BufferDescriptor& b) {
 using BufferViewDescriptor = IntrusivePtr<BufferView>;
 using AccelStructDescriptor = IntrusivePtr<AccelStruct>;
 
-// State of a descriptor set. Disconnected from the DescriptorSet itself
-// since for submission, we want to know the state of the descriptor at
-// submission time even if the descriptor set itself has been changed or
-// destroyed later on.
-// The memory for the DescriptorBindings will be allocated together with
-// the DescriptorSetState object, directly after it in memory.
-// See the 'binding' functions below to access it.
-struct DescriptorSetState {
-	struct PtrHandler {
-		void inc(DescriptorSetState&) const noexcept;
-		void dec(DescriptorSetState&) const noexcept;
-	};
-
-	// The ds with which this state is associated.
-	// If the ds the state originated from was changed or destroyed,
-	// this will be null.
-	DescriptorSet* ds {};
-
-	// The layout associated with this state. Always valid.
-	IntrusivePtr<DescriptorSetLayout> layout {};
-
-	// If the state has a variable_descriptor_count binding, this
-	// holds its count.
+// Temporary wrapper around descriptor state.
+struct DescriptorStateRef {
+	DescriptorSetLayout* layout {};
+	std::byte* data {};
 	u32 variableDescriptorCount {};
 
-	std::atomic<u32> refCount {}; // intrusive reference count
+	DescriptorStateRef() = default;
+	DescriptorStateRef(const DescriptorSet&);
 
-	vilDefMutex(mutex);
+	// explicit since usually accessed via 'access(DescriptorSetCow)'
+	explicit DescriptorStateRef(DescriptorStateCopy&);
 };
 
-using DescriptorSetStatePtr = HandledPtr<DescriptorSetState, DescriptorSetState::PtrHandler>;
+u32 descriptorCount(DescriptorStateRef, unsigned binding);
+u32 totalDescriptorCount(DescriptorStateRef);
 
-u32 descriptorCount(const DescriptorSetState&, unsigned binding);
-u32 totalDescriptorCount(const DescriptorSetState&);
-
-// NOTE: while retrieving the span itself does not need to lock the state's
+// NOTE: retrieving the span itself does not need to lock the state's
 // mutex. The caller must manually synchronize access to the bindings by locking
 // the state's mutex.
-span<BufferDescriptor> buffers(DescriptorSetState&, unsigned binding);
-span<const BufferDescriptor> buffers(const DescriptorSetState&, unsigned binding);
-span<ImageDescriptor> images(DescriptorSetState&, unsigned binding);
-span<const ImageDescriptor> images(const DescriptorSetState&, unsigned binding);
-span<BufferViewDescriptor> bufferViews(DescriptorSetState&, unsigned binding);
-span<const BufferViewDescriptor> bufferViews(const DescriptorSetState&, unsigned binding);
-span<AccelStructDescriptor> accelStructs(DescriptorSetState&, unsigned binding);
-span<const AccelStructDescriptor> accelStructs(const DescriptorSetState&, unsigned binding);
+span<BufferDescriptor> buffers(DescriptorStateRef, unsigned binding);
+span<ImageDescriptor> images(DescriptorStateRef, unsigned binding);
+span<BufferViewDescriptor> bufferViews(DescriptorStateRef, unsigned binding);
+span<AccelStructDescriptor> accelStructs(DescriptorStateRef, unsigned binding);
+span<std::byte> inlineUniformBlock(DescriptorStateRef, unsigned binding);
 
-span<std::byte> inlineUniformBlock(DescriptorSetState&, unsigned binding);
-span<const std::byte> inlineUniformBlock(const DescriptorSetState&, unsigned binding);
+struct DescriptorStateCopy {
+	struct Deleter {
+		void operator()(DescriptorStateCopy* ptr) const;
+	};
 
-// Vulkan descriptor set handle
-struct DescriptorSet : DeviceHandle {
-	DescriptorPool* pool {};
-	VkDescriptorSet handle {};
-
-	// synchronized via dev.mutex, i.e. pointer must only be changed/copied
-	// while dev.mutex is locked.
-	DescriptorSetStatePtr state;
-
-	~DescriptorSet();
+	IntrusivePtr<DescriptorSetLayout> layout {};
+	u32 variableDescriptorCount {};
+	u32 _pad {};
+	// std::byte data[];
 };
 
-// Notifies the given descriptor state that 'handle' - bound in the
-// descriptor at binding, elem - was destroyed.
-// Must only be called while device mutex is locked.
-// Will invalidate the command records connected to the ds.
-void notifyDestroyLocked(DescriptorSetState& ds, unsigned binding, unsigned elem,
-		const Handle& handle);
+using DescriptorStateCopyPtr = std::unique_ptr<DescriptorStateCopy, DescriptorStateCopy::Deleter>;
+
+struct DescriptorSetCow {
+	DebugMutex mutex;
+	DescriptorSet* ds {};
+	DescriptorStateCopyPtr copy {};
+	std::atomic<u32> refCount {};
+
+	~DescriptorSetCow();
+};
+
+IntrusivePtr<DescriptorSetCow> addCow(DescriptorSet& set);
+std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSetCow& cow);
 
 struct DescriptorUpdateTemplate : DeviceHandle {
 	VkDescriptorUpdateTemplate handle {};

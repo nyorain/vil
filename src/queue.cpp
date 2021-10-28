@@ -244,15 +244,14 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue vkQueue) {
 	return res;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
-	auto& dev = getDevice(device);
+VkResult waitIdleImpl(Device& dev) {
 	VkResult res;
 
 	{
 		// waiting on a device is considered a queue operation, needs
 		// queue synchronization.
 		std::lock_guard lock(dev.queueMutex);
-		res = dev.dispatch.DeviceWaitIdle(device);
+		res = dev.dispatch.DeviceWaitIdle(dev.handle);
 		if(res != VK_SUCCESS) {
 			return res;
 		}
@@ -273,6 +272,11 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 	}
 
 	return res;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
+	auto& dev = getDevice(device);
+	return waitIdleImpl(dev);
 }
 
 // TODO: process the bindings. Wait until we know that the submission finished?

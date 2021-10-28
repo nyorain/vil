@@ -33,30 +33,8 @@ VkCommandBuffer processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer
 		auto& rec = *cb.lastRecordLocked();
 		dlg_assert(subm.queue->family == rec.queueFamily);
 
-		// update the descriptor state of the record
-		// TODO, PERF: we only need to do this when update_after_bind
-		// descriptors in the record changed since the last submission.
-		// PERF: we don't need descriptor state copies in 99% of the cases (only
-		// when relevant for gui). The simple check below breaks in some cases
-		// though, e.g. when later on viewing the recording in the gui.
-		// if(dev.gui && dev.gui->visible)
-		{
-			ZoneScopedN("Copy Descriptor State");
-			rec.lastDescriptorState.states.clear();
-			for(auto& pair : rec.handles) {
-				auto& handle = nonNull(pair.second.handle);
-				if(handle.objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-
-					// important that dev.mutex is locked while we access (copy)
-					// ds.state
-					auto& ds = static_cast<const DescriptorSet&>(handle);
-					rec.lastDescriptorState.states[static_cast<void*>(&handle)] = ds.state;
-				}
-			}
-		}
-
 		// potentially hook command buffer
-		if(dev.commandHook) {
+		if(false && dev.commandHook) {
 			auto hooked = dev.commandHook->hook(cb, dst, scb.hook);
 			dlg_assert(hooked);
 			if(hooked != cb.handle()) {
@@ -492,12 +470,18 @@ void postProcessLocked(QueueSubmitter& subm) {
 			}
 
 			// store pending layouts
-			for(auto& used : recPtr->images) {
-				if(used.second.layoutChanged) {
+			for(auto& used : recPtr->handles) {
+				if(used.first->objectType != VK_OBJECT_TYPE_IMAGE) {
+					continue;
+				}
+
+				auto& img = static_cast<Image&>(*used.first);
+				auto& ui = static_cast<UsedImage&>(*used.second);
+				if(ui.layoutChanged) {
 					dlg_assert(
-						used.second.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
-						used.second.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
-					used.second.image->pendingLayout = used.second.finalLayout;
+						ui.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+						ui.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
+					img.pendingLayout = ui.finalLayout;
 				}
 			}
 		}
@@ -547,12 +531,28 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 
 	for(auto& [cb, _] : subm.cbs) {
 		auto& rec = *cb->lastRecordLocked();
-		if(handle.refRecords.find(&rec) != handle.refRecords.end()) {
+
+		// Need const_cast here since we store non-const pointers in rec.handles.
+		// The find function won't modify it, it's just an interface quirk.
+		auto* toFind = const_cast<DeviceHandle*>(&handle);
+		if(rec.handles.find(toFind) != rec.handles.end()) {
 			return true;
 		}
 
-		for(auto& pair : rec.lastDescriptorState.states) {
-			auto& state = *pair.second;
+
+		// for(auto& pair : rec.lastDescriptorState.states) {
+			// auto& state = *pair.second;
+		for(auto& pair : rec.handles) {
+			auto& handle = nonNull(pair.first);
+			if(handle.objectType != VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+				continue;
+			}
+
+			// important that the ds mutex is locked mainly for
+			// update_unused_while_pending.
+			auto& state = static_cast<DescriptorSet&>(handle);
+			std::lock_guard lock(state.mutex);
+
 			for(auto& binding : state.layout->bindings) {
 				auto dsCat = DescriptorCategory(binding.descriptorType);
 				if(img && dsCat == DescriptorCategory::image) {

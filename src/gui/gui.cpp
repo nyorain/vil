@@ -1160,12 +1160,13 @@ void Gui::drawOverviewUI(Draw& draw) {
 		auto& stats = DebugStats::get();
 		imGuiText("alive records: {}", stats.aliveRecords);
 		imGuiText("alive descriptor sets: {}", stats.aliveDescriptorSets);
-		imGuiText("alive descriptor states: {}", stats.aliveDescriptorStates);
+		imGuiText("alive descriptor copies: {}", stats.aliveDescriptorCopies);
 		imGuiText("alive buffers: {}", stats.aliveBuffers);
 		imGuiText("alive image views: {}", stats.aliveImagesViews);
 		imGuiText("threadContext memory: {} KB", stats.threadContextMem / 1024.f);
 		imGuiText("command memory: {} KB", stats.commandMem / 1024.f);
-		imGuiText("dsState memory: {} KB", stats.descriptorStateMem / 1024.f);
+		imGuiText("ds copy memory: {} KB", stats.descriptorCopyMem / 1024.f);
+		imGuiText("ds pool memory: {} KB", stats.descriptorPoolMem / 1024.f);
 		imGuiText("alive hook records: {}", stats.aliveHookRecords);
 		imGuiText("alive hook states: {}", stats.aliveHookStates);
 		imGuiText("layer buffer memory: {} KB", stats.ownBufferMem / 1024.f);
@@ -1532,6 +1533,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		tabs_.cb->record_,
 		tabs_.cb->selectedRecord_,
 		tabs_.cb->commandViewer_.record_,
+		dev().commandHook->recordPtr(),
 	};
 
 	{

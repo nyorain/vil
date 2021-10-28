@@ -136,8 +136,7 @@ float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
 	return (ownMatch + childMatchSum) / (1 + maxChildren);
 }
 
-// TODO: should return Matcher struct instead
-Matcher match(const DescriptorSetState& a, const DescriptorSetState& b) {
+Matcher match(DescriptorStateRef a, DescriptorStateRef b) {
 	dlg_assert(a.layout);
 	dlg_assert(b.layout);
 
@@ -305,11 +304,13 @@ FindResult find(const Command* root, span<const Command*> dst,
 						continue;
 					}
 
-					auto& srcDescriptors = static_cast<DescriptorSet*>(srcBound[i].ds)->state;
-					auto dstDescriptors = dstDsState.states.find(dstBound[i].ds);
-					dlg_assert_or(dstDescriptors != dstDsState.states.end(), continue);
+					auto* srcDs = static_cast<const DescriptorSet*>(srcBound[i].ds);
+					auto dstDsCow = dstDsState.states.find(dstBound[i].ds);
+					dlg_assert_or(dstDsCow != dstDsState.states.end(), continue);
 
-					auto res = vil::match(nonNull(srcDescriptors), nonNull(dstDescriptors->second));
+					auto [dstDs, lock] = access(*dstDsCow->second);
+
+					auto res = vil::match(nonNull(srcDs), dstDs);
 					m.match += res.match;
 					m.total += res.total;
 				}

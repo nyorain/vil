@@ -89,6 +89,8 @@ private:
 	void drawDesc(Draw&, AccelStruct&);
 	void drawDesc(Draw&, DescriptorUpdateTemplate&);
 
+	void drawShaderInfo(VkPipeline, VkShaderStageFlagBits stage);
+
 	void drawHandleDesc(Draw&, Handle& handle);
 	void copyBuffer(Draw&);
 };

@@ -12,8 +12,8 @@ void BufferViewer::init(Gui& gui) {
 	// hlsl keywords, for instance.
 	// TODO: why does this break for games using tcmalloc? tested
 	// on linux with dota
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	textedit.SetLanguageDefinition(lang);
+	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	// textedit.SetLanguageDefinition(lang);
 
 	textedit.SetShowWhitespaces(false);
 	textedit.SetTabSize(4);

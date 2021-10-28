@@ -285,19 +285,20 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 	imGuiText("{}", name(ds));
 	ImGui::Spacing();
 
-	dlg_assert(ds.state);
-	refButtonExpect(*gui_, ds.state->layout.get());
+	refButtonExpect(*gui_, ds.layout.get());
 	refButtonExpect(*gui_, ds.pool);
 
 	ImGui::Text("Bindings");
-	for(auto b = 0u; b < ds.state->layout->bindings.size(); ++b) {
-		auto& layout = ds.state->layout->bindings[b];
+	std::lock_guard lock(ds.mutex);
+
+	for(auto b = 0u; b < ds.layout->bindings.size(); ++b) {
+		auto& layout = ds.layout->bindings[b];
 		dlg_assert(layout.binding == b);
 
 		auto print = [&](VkDescriptorType type, unsigned b, unsigned e) {
 			switch(category(type)) {
 				case DescriptorCategory::image: {
-					auto& binding = images(*ds.state, b)[e];
+					auto& binding = images(ds, b)[e];
 					if(needsImageView(type)) {
 						refButtonExpect(*gui_, binding.imageView.get());
 					}
@@ -309,13 +310,13 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 					}
 					break;
 				} case DescriptorCategory::buffer: {
-					auto& binding = buffers(*ds.state, b)[e];
+					auto& binding = buffers(ds, b)[e];
 					refButtonExpect(*gui_, binding.buffer.get());
 					ImGui::SameLine();
 					drawOffsetSize(binding);
 					break;
 				} case DescriptorCategory::bufferView: {
-					auto& binding = bufferViews(*ds.state, b)[e];
+					auto& binding = bufferViews(ds, b)[e];
 					refButtonExpect(*gui_, binding.get());
 					break;
 				} default:
@@ -324,7 +325,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 			}
 		};
 
-		auto elemCount = descriptorCount(*ds.state, b);
+		auto elemCount = descriptorCount(ds, b);
 		if(elemCount > 1) {
 			auto label = dlg::format("{}: {}[{}]", b,
 				vk::name(layout.descriptorType), elemCount);
@@ -363,11 +364,14 @@ void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {
 		imGuiText("{}: {}", vk::name(size.type), size.descriptorCount);
 	}
 
-	ImGui::Text("Descriptors");
-	for(auto* ds : dsPool.descriptorSets) {
-		ImGui::Bullet();
-		refButtonExpect(*gui_, ds);
-	}
+	// NOTE: maintaining this was a huge pain in the ass.
+	// If somebody really needs it, we could implement it though.
+	// ImGui::Text("Descriptors");
+	// std::lock_guard lock(dsPool.mutex);
+	// for(auto* ds : dsPool.descriptorSets) {
+	// 	ImGui::Bullet();
+	// 	refButtonExpect(*gui_, ds);
+	// }
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
@@ -395,8 +399,6 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	imGuiText("{}", name(pipe));
 	ImGui::Spacing();
-
-	auto& dev = gui_->dev();
 
 	// references: layout & renderPass
 	refButtonExpect(*gui_, pipe.layout.get());
@@ -605,139 +607,8 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 		if(ImGui::TreeNode(&stage, "%s", vk::name(stage.stage))) {
 			ImGui::Text("Entry Point: %s", stage.entryPoint.c_str());
 			ImGui::Text("TODO");
-			// TODO: spec data
 
-
-			/*
-			auto& refl = nonNull(stage.spirv->reflection.get());
-			auto& entryPoint = nonNull(spvReflectGetEntryPoint(&refl, stage.entryPoint.c_str()));
-
-			// TODO: shader module info
-			// - source language
-			// - push constant blocks?
-			// - all entry points?
-			// - all descriptor sets?
-
-			ImGui::Text("Entry Point %s:", entryPoint.name);
-			ImGui::Text("Input variables");
-			for(auto i = 0u; i < entryPoint.input_variable_count; ++i) {
-				auto& iv = *entryPoint.input_variables[i];
-
-				if(ImGui::TreeNode(&iv, "%d: %s", iv.location, iv.name)) {
-					asColumns2({{
-						{"Format", "{}", vk::name(VkFormat(iv.format))},
-						{"Storage", "{}", iv.storage_class},
-					}});
-
-					ImGui::TreePop();
-				}
-			}
-
-			ImGui::Text("Output variables");
-			for(auto i = 0u; i < entryPoint.output_variable_count; ++i) {
-				auto& ov = *entryPoint.output_variables[i];
-
-				if(ImGui::TreeNode(&ov, "%d: %s", ov.location, ov.name)) {
-					asColumns2({{
-						{"Format", "{}", vk::name(VkFormat(ov.format))},
-						{"Storage", "{}", ov.storage_class},
-					}});
-
-					ImGui::TreePop();
-				}
-			}
-
-			if(entryPoint.descriptor_set_count) {
-				ImGui::Text("Descriptor Sets");
-				for(auto i = 0u; i < entryPoint.descriptor_set_count; ++i) {
-					auto& ds = entryPoint.descriptor_sets[i];
-
-					if(ImGui::TreeNode(&ds, "Set %d", ds.set)) {
-						for(auto b = 0u; b < ds.binding_count; ++b) {
-							auto& binding = *ds.bindings[b];
-
-							std::string name = dlg::format("{}: {}",
-								binding.binding,
-								vk::name(VkDescriptorType(binding.descriptor_type)));
-							if(binding.count > 1) {
-								name += dlg::format("[{}]", binding.count);
-							}
-							name += " ";
-							name += binding.name;
-
-							ImGui::BulletText("%s", name.c_str());
-						}
-
-						ImGui::TreePop();
-					}
-				}
-			}
-
-			if(stage.stage == VK_SHADER_STAGE_COMPUTE_BIT) {
-				ImGui::Text("Workgroup size: %d %d %d",
-					entryPoint.local_size.x,
-					entryPoint.local_size.y,
-					entryPoint.local_size.z);
-			}
-			*/
-
-			/*
-			if(ImGui::Button("Open in Vim")) {
-				namespace fs = std::filesystem;
-
-				auto fileName = dlg::format("vil.{}.spv", (std::uint64_t) stage.spirv.get());
-				auto tmpPath = fs::temp_directory_path() / fileName;
-
-				bool launch = false;
-
-				{
-					auto of = std::ofstream(tmpPath, std::ios::out | std::ios::binary);
-					if(of.is_open()) {
-						of.write((const char*) stage.spirv->spv.data(), stage.spirv->spv.size() * 4);
-						of.flush();
-						launch = true;
-					}
-				}
-
-				// ugh, not exactly beautiful, i know
-				if(launch) {
-					auto cmd = dlg::format("termite -e 'nvim {}' &", tmpPath);
-					dlg_info("cmd: {}", cmd);
-					std::system(cmd.c_str());
-				}
-
-				// TODO: we should probably delete the file somehow...
-			}
-			*/
-
-			// TODO: used push constants
-
-			if(contains(dev.allExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
-				if(ImGui::TreeNode("AMD shader info")) {
-					VkShaderStatisticsInfoAMD info {};
-					auto size = sizeof(info);
-
-					VK_CHECK(dev.dispatch.GetShaderInfoAMD(dev.handle, pipe.handle,
-						stage.stage, VK_SHADER_INFO_TYPE_STATISTICS_AMD,
-						&size, &info));
-
-					// TODO: info.computeWorkGroupSize?
-					asColumns2({{
-						{"Available SGPR", "{}", info.numAvailableSgprs},
-						{"Available VGPR", "{}", info.numAvailableVgprs},
-						{"Physical SGPR", "{}", info.numPhysicalSgprs},
-						{"Physical VGPR", "{}", info.numPhysicalVgprs},
-						{"Used SGPR", "{}", info.resourceUsage.numUsedSgprs},
-						{"Used VGPR", "{}", info.resourceUsage.numUsedVgprs},
-						{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
-						{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
-						{"lds Usage", "{}", info.resourceUsage.ldsUsageSizeInBytes},
-						{"lds Per Local Workgroup", "{}", info.resourceUsage.ldsSizePerLocalWorkGroup},
-					}});
-
-					ImGui::TreePop();
-				}
-			}
+			drawShaderInfo(pipe.handle, stage.stage);
 
 			ImGui::TreePop();
 		}
@@ -747,8 +618,41 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	// TODO: tesselation
 }
 
-void ResourceGui::drawDesc(Draw&, ComputePipeline&) {
+void ResourceGui::drawShaderInfo(VkPipeline pipe, VkShaderStageFlagBits stage) {
+	auto& dev = gui_->dev();
+	if(contains(dev.allExts, VK_AMD_SHADER_INFO_EXTENSION_NAME)) {
+		ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+		if(ImGui::TreeNode("AMD shader info")) {
+			VkShaderStatisticsInfoAMD info {};
+			auto size = sizeof(info);
+
+			VK_CHECK(dev.dispatch.GetShaderInfoAMD(dev.handle, pipe,
+				stage, VK_SHADER_INFO_TYPE_STATISTICS_AMD,
+				&size, &info));
+
+			// TODO: info.computeWorkGroupSize?
+			asColumns2({{
+				{"Available SGPR", "{}", info.numAvailableSgprs},
+				{"Available VGPR", "{}", info.numAvailableVgprs},
+				{"Physical SGPR", "{}", info.numPhysicalSgprs},
+				{"Physical VGPR", "{}", info.numPhysicalVgprs},
+				{"Used SGPR", "{}", info.resourceUsage.numUsedSgprs},
+				{"Used VGPR", "{}", info.resourceUsage.numUsedVgprs},
+				{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
+				{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
+				{"lds Usage", "{}", info.resourceUsage.ldsUsageSizeInBytes},
+				{"lds Per Local Workgroup", "{}", info.resourceUsage.ldsSizePerLocalWorkGroup},
+			}});
+
+			ImGui::TreePop();
+		}
+	}
+}
+
+void ResourceGui::drawDesc(Draw&, ComputePipeline& pipe) {
 	ImGui::Text("TODO");
+
+	drawShaderInfo(pipe.handle, VK_SHADER_STAGE_COMPUTE_BIT);
 }
 
 void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {

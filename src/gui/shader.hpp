@@ -6,6 +6,8 @@
 #include <spvm/state.h>
 #include <spvm/image.h>
 #include <spvm/result.h>
+#include <util/bytes.hpp>
+#include <deque>
 
 namespace vil {
 

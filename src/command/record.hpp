@@ -144,40 +144,32 @@ RayTracingState copy(CommandBuffer& cb, const RayTracingState& src);
 // might be dangling or null (if unset).
 void bind(Device&, VkCommandBuffer, const ComputeState&);
 
-// We don't use shared pointers here, they are used in the
-// commands referencing the handles.
-struct UsedImage {
-	UsedImage(Image& img, CommandRecord& rec) noexcept : image(&img), commands(rec) {}
+// Links a 'DeviceHandle' to a 'CommandRecord'.
+struct UsedHandle {
+	UsedHandle(CommandRecord& rec) noexcept : commands(rec), record(&rec) {}
 
-	// UsedImage(const UsedImage&) = default;
-	// UsedImage& operator=(const UsedImage&) = default;
-	UsedImage(UsedImage&&) noexcept;
-	UsedImage& operator=(UsedImage&&) noexcept;
+	// List of commands where the associated handle is used inside the
+	// associated record.
+	CommandAllocList<Command*> commands;
 
-	Image* image {};
+	// Links forming a linked list over all UsedHandle structs
+	// for the associated handle. That's why we store
+	// the associated record as well.
+	UsedHandle* next {};
+	UsedHandle* prev {};
+	CommandRecord* record {};
+};
+
+struct UsedImage : UsedHandle {
+	using UsedHandle::UsedHandle;
 	bool layoutChanged {};
 	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
-
-	// use custom (non-intrusive) linked-list instead. No need to run any destructor or free nodes.
-	CommandAllocList<Command*> commands;
 };
 
-// General definition covering all cases of handles not covered
-// above.
-struct UsedHandle {
-	UsedHandle(DeviceHandle& h, CommandRecord& rec) noexcept : handle(&h), commands(rec) {}
-
-	// UsedHandle(const UsedHandle&) = default;
-	// UsedHandle& operator=(const UsedHandle&) = default;
-	UsedHandle(UsedHandle&&) noexcept;
-	UsedHandle& operator=(UsedHandle&&) noexcept;
-
-	DeviceHandle* handle;
-	CommandAllocList<Command*> commands;
-};
-
+// Represents a mapping of descriptor set pointers, as present
+// in Command(Record), to their respective states at submission time.
 struct CommandDescriptorSnapshot {
-	std::unordered_map<void*, DescriptorSetStatePtr> states;
+	std::unordered_map<void*, IntrusivePtr<DescriptorSetCow>> states;
 };
 
 // Represents the recorded state of a command buffer.
@@ -224,11 +216,10 @@ struct CommandRecord {
 	u32 numPopLabels {};
 	CommandAllocList<const char*> pushLables;
 
-	// IDEA: Should the key rather be Handle*? Also, maybe we rather
-	// use a non-hash map here since rehashing might be a problem, especially
-	// considering the memory waste through our custom allocator
-	CommandAllocHashMap<VkImage, UsedImage> images;
-	CommandAllocHashMap<u64, UsedHandle> handles;
+	// TODO: maybe we rather use a non-hash map here since rehashing
+	// might be a problem, especially considering the memory waste through
+	// our custom allocator
+	CommandAllocHashMap<DeviceHandle*, UsedHandle*> handles;
 
 	// We store all device handles referenced by this command buffer that
 	// were destroyed since it was recorded so we can avoid deferencing
@@ -248,11 +239,6 @@ struct CommandRecord {
 	// we only reference the CommandRecord objects, don't copy them.
 	CommandAllocList<IntrusivePtr<CommandRecord>> secondaries;
 	CommandBufferDesc desc;
-
-	// descriptor state at the last submission of this command
-	// TODO: really always copy this? This is kinda costly, we will likely
-	// get away with only doing it in some cases
-	CommandDescriptorSnapshot lastDescriptorState;
 
 	// Ownership of this CommandRecord is shared: while generally it is
 	// not needed anymore as soon as the associated CommandBuffer is
@@ -274,11 +260,10 @@ struct CommandRecord {
 // one must iterate through all used descriptor sets to find them.
 template<typename H>
 bool uses(const CommandRecord& rec, const H& handle) {
-	if constexpr(std::is_same_v<H, Image>) {
-		return rec.images.find(handle.handle) != rec.images.end();
-	} else {
-		return rec.handles.find(handleToU64(vil::handle(handle))) != rec.handles.end();
+	if(rec.invalidated.find(&handle) != rec.invalidated.end()) {
+		return false;
 	}
+	return rec.handles.find(&handle) != rec.handles.end();
 }
 
 // Unsets all handles in record.destroyed in all of its commands and used

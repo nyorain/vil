@@ -76,11 +76,7 @@ if with_tracy
 
 	# Without this we get problems in same applications.
 	# We manually init/shutdown on instance create/destroy
-	# NOTE: we need to fix some things to use this, e.g. cleanup
-	#  all ThreadContext memory (calling Tracy functions) when the last
-	#  instance is destroyed (and maybe some other shutdown corner cases)
-	#  to properly use ProfilerShutdown
-	# args += '-DTRACY_MANUAL_LIFETIME'
+	args += '-DTRACY_MANUAL_LIFETIME'
 
 	if build_machine.system() == 'windows'
 		tracy_deps += cc.find_library('Ws2_32')
@@ -96,17 +92,34 @@ layer_args = [
 ]
 
 # config options
-with_debug_checks = get_option('buildtype') != 'release'
+debug_checks = get_option('buildtype') != 'release'
+extensive_zones = false
+debug_stats = false
+tracy_mutex = false
+disable_dlg = false
+
+if debug_stats
+	layer_args += '-DVIL_DEBUG_STATS'
+endif
+
+if extensive_zones
+	layer_args += '-DVIL_EXTENSIVE_ZONES'
+endif
+
+if tracy_mutex
+	layer_args += '-DVIL_TRACY_MUTEX'
+endif
+
 if with_debug_checks
-	# layer_args += '-DVIL_EXTENSIVE_ZONES'
-	# layer_args += '-DVIL_TRACY_MUTEX'
 	layer_args += '-DVIL_DEBUG_MUTEX'
 	layer_args += '-DVIL_DEBUG'
 endif
 
-disable_dlg = false
 if disable_dlg
 	layer_args += '-DDLG_DISABLE'
+	layer_args += cc.get_supported_arguments('-Wno-unused-variable')
+	layer_args += cc.get_supported_arguments('-Wno-unused-but-set-variable')
+	layer_args += cc.get_supported_arguments('-Wno-unused-parameter')
 endif
 
 # deps

@@ -147,6 +147,11 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
+- [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
+	  since we should be logically able to get around that
+	  case (with normal API use and no gui open)
+- [ ] make sure it's unlikely we have additional DescriptorSetState references
+	  on vkFreeDescriptorSets (with normal api use and no gui)
 - [ ] don't hook every cb with matching command. At least do a rough check
       on other commands/record structure. Otherwise (e.g. when just selecting
 	  a top-level barrier command) we very quickly might get >10 hooks per

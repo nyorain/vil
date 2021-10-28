@@ -63,37 +63,6 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 	}
 }
 
-// NOTE: We need them to be noexcept. We can't rely on the internal
-//   std::list to be noexcept movable though. So we implement it ourselves,
-//   effectively intentionally crashing the program (throwing from noexcept)
-//   when an stl throws from the move operation.
-//   Could be fixed later on with our own linked-list/grid.
-UsedImage::UsedImage(UsedImage&& rhs) noexcept :
-		image(rhs.image),
-		layoutChanged(rhs.layoutChanged),
-		finalLayout(rhs.finalLayout),
-		commands(std::move(rhs.commands)) {
-}
-
-UsedImage& UsedImage::operator=(UsedImage&& rhs) noexcept {
-	image = rhs.image;
-	layoutChanged = rhs.layoutChanged;
-	finalLayout = rhs.finalLayout;
-	commands = std::move(rhs.commands);
-	return *this;
-}
-
-UsedHandle::UsedHandle(UsedHandle&& rhs) noexcept :
-		handle(rhs.handle),
-		commands(std::move(rhs.commands)) {
-}
-
-UsedHandle& UsedHandle::operator=(UsedHandle&& rhs) noexcept {
-	handle = rhs.handle;
-	commands = std::move(rhs.commands);
-	return *this;
-}
-
 // Record
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		dev(xcb.dev),
@@ -102,7 +71,6 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		queueFamily(xcb.pool().queueFamily),
 		// initialize allocators
 		pushLables(*this),
-		images(*this),
 		handles(*this),
 		invalidated(*this),
 		pipeLayouts(*this),
@@ -125,24 +93,28 @@ CommandRecord::~CommandRecord() {
 	{
 		std::lock_guard lock(dev->mutex);
 
-		// remove cb from all referenced resources
-		auto removeFromResource = [&](auto& res) {
-			if(invalidated.count(&res) == 0) {
-				[[maybe_unused]] auto count = res.refRecords.erase(this);
-				dlg_assert(count > 0);
+		// remove record from all referenced resources
+		for(auto& [handle, uh] : handles) {
+			if(invalidated.count(handle)) {
+				continue;
 			}
-		};
 
-		for(auto& img : images) {
-			removeFromResource(*img.second.image);
-		}
+			dlg_assert(handle->refRecords);
+			if(uh->prev) {
+				uh->prev->next = uh->next;
+			} else {
+				dlg_assert(uh == handle->refRecords);
+				handle->refRecords = uh->next;
+			}
 
-		for(auto& handle : handles) {
-			removeFromResource(*handle.second.handle);
+			if(uh->next) {
+				uh->next->prev = uh->prev;
+			}
 		}
 
 		// Its destructor might reference this.
 		// And it must be called while mutex is locked.
+		// TODO: don't require that
 		hookRecords.clear();
 
 		dlg_assert(DebugStats::get().aliveRecords > 0);
@@ -173,20 +145,9 @@ void replaceInvalidatedLocked(CommandRecord& record) {
 	}
 
 	// remove from handles
-	// NOTE: there is no need to insert the new handles (the old ones
-	// are replaced to) since that mechanism is only used for dummy descriptor
-	// sets and we don't need to explicitly track them in usedHandles.
 	for(auto it = record.handles.begin(); it != record.handles.end(); ) {
-		if(record.invalidated.count(it->second.handle)) {
+		if(record.invalidated.find(it->first) != record.invalidated.end()) {
 			it = record.handles.erase(it);
-		} else {
-			++it;
-		}
-	}
-
-	for(auto it = record.images.begin(); it != record.images.end(); ) {
-		if(record.invalidated.count(it->second.image)) {
-			it = record.images.erase(it);
 		} else {
 			++it;
 		}

@@ -85,10 +85,11 @@ protected:
 template<typename T, typename Deleter = std::default_delete<T>>
 struct RefCountHandler {
 	// NOTE: we assume that increasing/decreasing ref count is noexcept
-	void inc(T& obj) const noexcept { ++obj.refCount; }
-	// void dec(T* ptr) const noexcept(std::is_nothrow_destructible_v<T>) {
+	// See https://stackoverflow.com/questions/41424539 for memory order rationle
+	void inc(T& obj) const noexcept { obj.refCount.fetch_add(1u, std::memory_order_relaxed); }
 	void dec(T& obj) const noexcept {
-		if(--obj.refCount == 0) {
+		dlg_assert(obj.refCount.load() > 0u);
+		if(obj.refCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u) {
 			Deleter()(&obj);
 		}
 	}

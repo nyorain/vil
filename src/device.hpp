@@ -34,7 +34,7 @@ struct DebugStats {
 	static DebugStats& get();
 
 	std::atomic<u32> aliveRecords {};
-	std::atomic<u32> aliveDescriptorStates {};
+	std::atomic<u32> aliveDescriptorCopies {};
 	std::atomic<u32> aliveDescriptorSets {};
 	std::atomic<u32> aliveBuffers {};
 	std::atomic<u32> aliveImagesViews {};
@@ -43,7 +43,8 @@ struct DebugStats {
 
 	std::atomic<u32> threadContextMem {};
 	std::atomic<u32> commandMem {};
-	std::atomic<u32> descriptorStateMem {};
+	std::atomic<u32> descriptorCopyMem {};
+	std::atomic<u32> descriptorPoolMem {};
 
 	std::atomic<u32> ownBufferMem {};
 	std::atomic<u32> copiedImageMem {};
@@ -180,12 +181,13 @@ struct Device {
 	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
 	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
 	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
-	SyncedUniqueUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
 	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
 	SyncedUniqueUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
 	SyncedUniqueUnorderedMap<VkEvent, Event> events;
 	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
 	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
+
+	SyncedRawUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
 
 	// NOTE: Even though we just store unique_ptr<Pipeline> here, the real
 	// type is GraphicsPipeline, ComputePipeline or RayTracingPipeline.

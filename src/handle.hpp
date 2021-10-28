@@ -11,10 +11,6 @@ namespace vil {
 
 struct Handle {
 	std::string name;
-	// NOTE: should this rather be an unordered multimap?
-	// not clear from spec whether setting a tag is intended
-	// to replace an old one.
-	std::unordered_map<u64, std::vector<std::byte>> tags;
 	VkObjectType objectType {};
 
 	Handle() = default;
@@ -29,10 +25,7 @@ struct DeviceHandle : Handle {
 	// current record state.
 	// On destruction, the handle will inform all of them that they
 	// are now in an invalid state.
-	// NOTE: the dynamic memory allocations we do here could become a
-	// performance problem. In that case replace it by per-cb
-	// 2D-linked-list (linked grid), see node 1648
-	std::unordered_set<CommandRecord*> refRecords;
+	UsedHandle* refRecords {};
 
 	// Expects that neither the device mutex nor its own mutex is locked.
 	~DeviceHandle();

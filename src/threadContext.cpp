@@ -75,8 +75,7 @@ std::byte* allocate(ThreadContext& tc, size_t size) {
 			return data(*tc.memCurrent, 0);
 		}
 
-		// NOTE: alternatively, could set 'offset' of all following block to 0
-		// and append the new giant block.
+		// TODO: Just insert it in between, no need to free blocks here I guess
 		dlg_warn("Giant local allocation (size {}); have to free previous blocks", size);
 		freeBlocks(tc.memCurrent->next);
 		tc.memCurrent->next = nullptr;

@@ -116,6 +116,8 @@ struct SubmissionBatch {
 using SubmIterator = std::vector<std::unique_ptr<SubmissionBatch>>::iterator;
 std::optional<SubmIterator> checkLocked(SubmissionBatch& subm);
 
+VkResult waitIdleImpl(Device& dev);
+
 // api
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	VkQueue                                     queue,

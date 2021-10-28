@@ -57,7 +57,6 @@ struct Semaphore;
 struct CommandPool;
 struct DescriptorPool;
 struct DescriptorSet;
-struct DescriptorSetState;
 struct DescriptorSetLayout;
 struct DescriptorUpdateTemplate;
 struct ShaderModule;
@@ -86,6 +85,7 @@ struct ViewableImageCopy;
 
 struct Command;
 struct SectionCommand;
+struct UsedHandle;
 struct CommandRecord;
 struct CommandBufferDesc;
 struct CommandMemBlock;
@@ -95,6 +95,7 @@ struct DispatchCommand;
 struct BeginRenderPassCmd;
 struct BuildAccelStructsCmd;
 struct BuildAccelStructsIndirectCmd;
+struct DescriptorSetCow;
 
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;
@@ -110,20 +111,6 @@ struct ThreadMemScope;
 struct AccelTriangles;
 struct AccelAABBs;
 struct AccelInstances;
-
-struct DescriptorStateRef {
-	DescriptorSetState* state {};
-	u32 binding {};
-	u32 elem {};
-
-	struct Hash {
-		std::size_t operator()(const DescriptorStateRef& dsr) const noexcept;
-	};
-
-	friend inline bool operator==(const DescriptorStateRef& a, const DescriptorStateRef& b) {
-		return a.state == b.state && a.binding == b.binding && a.elem == b.elem;
-	}
-};
 
 struct DrawGuiImage;
 

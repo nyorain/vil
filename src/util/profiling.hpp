@@ -9,4 +9,3 @@
 	#define ExtZoneScopedN(x)
 	#define ExtZoneScoped
 #endif // VIL_EXTENSIVE_ZONES
-

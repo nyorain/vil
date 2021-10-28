@@ -21,7 +21,7 @@ PipelineLayout::~PipelineLayout() {
 	}
 
 	// pipe layouts are never used directly by command buffers.
-	dlg_assert(refRecords.empty());
+	dlg_assert(!refRecords);
 	dlg_assert(handle);
 
 	dev->dispatch.DestroyPipelineLayout(dev->handle, handle, nullptr);

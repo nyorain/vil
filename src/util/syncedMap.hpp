@@ -156,7 +156,7 @@ public:
 	T* find(const K& key) {
 		std::shared_lock lock(*mutex);
 		auto it = map.find(key);
-		return it == map.end() ? nullptr : it->second.get();
+		return it == map.end() ? nullptr : &*it->second;
 	}
 
 	// Expects an element in the map, finds and returns it.
@@ -172,7 +172,7 @@ public:
 
 		auto it = map.find(key);
 		assert(it != map.end());
-		return *it->second.get();
+		return *it->second;
 	}
 
 	template<class O>
@@ -288,6 +288,12 @@ struct HandlePtrFactory<IntrusiveWrappedPtr<T>> {
 		return IntrusiveWrappedPtr<T>(new WrappedHandle<T>(std::forward<Args>(args)...));
 	}
 };
+
+template<typename T> using IdentityT = T;
+template<typename T> using PointerT = T*;
+
+template<typename K, typename T>
+using SyncedRawUnorderedMap = SyncedUnorderedMap<K, T, PointerT>;
 
 template<typename K, typename T>
 using SyncedUniqueUnorderedMap = SyncedUnorderedMap<K, T, std::unique_ptr>;

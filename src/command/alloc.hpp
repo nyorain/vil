@@ -27,6 +27,9 @@
 
 namespace vil {
 
+// TODO: remove the allocate functions that take a CommandBuffer as allocator.
+// They only forward to the CommandRecord internally anyways.
+
 [[nodiscard]] std::byte* allocate(CommandRecord&, size_t size, unsigned align);
 [[nodiscard]] std::byte* allocate(CommandBuffer&, size_t size, unsigned align);
 
@@ -41,6 +44,12 @@ struct MemBlocksListDeleter {
 template<typename T, typename... Args>
 [[nodiscard]] T& allocate(CommandBuffer& cb, Args&&... args) {
 	auto* raw = allocate(cb, sizeof(T), alignof(T));
+	return *(new(raw) T(std::forward<Args>(args)...));
+}
+
+template<typename T, typename... Args>
+[[nodiscard]] T& allocate(CommandRecord& rec, Args&&... args) {
+	auto* raw = allocate(rec, sizeof(T), alignof(T));
 	return *(new(raw) T(std::forward<Args>(args)...));
 }
 

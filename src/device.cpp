@@ -13,6 +13,13 @@
 #include <swa/swa.h>
 #include <vk/dispatch_table_helper.h>
 
+#ifdef TRACY_MANUAL_LIFETIME
+	// NOTE: strictly speaking, we'd need a mutex to do proper
+	//   initialization. But creating multiple Instances from multiple threads
+	//   at the same time is a weird and problematic corner case anyways
+	std::atomic<unsigned> tracyRefCount {};
+#endif // TRACY_MANUAL_LIFETIME
+
 namespace vil {
 
 DebugStats& DebugStats::get() {
@@ -116,6 +123,13 @@ Device::~Device() {
 
 	queueFamilies.clear();
 	queues.clear();
+
+#ifdef TRACY_MANUAL_LIFETIME
+ 	// TODO: need to fix some issues, e.g. ThreadContext memory first
+ 	// if(tracyRefCount.fetch_sub(1u) == 1u) {
+ 	// 	tracy::ShutdownProfiler();
+ 	// }
+#endif // TRACY_MANUAL_LIFETIME
 }
 
 bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
@@ -239,6 +253,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		const VkDeviceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
 		VkDevice* pDevice) {
+
+#ifdef TRACY_MANUAL_LIFETIME
+	if (tracyRefCount.fetch_add(1u) == 0u) {
+		dlg_trace("Starting tracy...");
+		tracy::StartupProfiler();
+		dlg_trace(">> done");
+	}
+#endif // TRACY_MANUAL_LIFETIME
+
 	auto* iniData = findData<Instance>(phdev);
 	dlg_assert(iniData);
 	auto& ini = *iniData;
@@ -860,27 +883,30 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 		return;
 	}
 
+	PFN_vkDestroyDevice pfnDestroyDev;
+	VkDevice handle;
+
 	if(HandleDesc<VkDevice>::wrap) {
 		auto& wrapped = unwrapWrapped(vkDevice);
 		auto& dev = wrapped.obj();
 
 		// destroy our logical device before we forward the call
-		auto handle = dev.handle;
-		auto* destroyDev = dev.dispatch.DestroyDevice;
+		handle = dev.handle;
+		pfnDestroyDev = dev.dispatch.DestroyDevice;
 		delete &wrapped;
-
-		destroyDev(handle, alloc);
 	} else {
 		auto devd = moveData<Device>(vkDevice);
 		dlg_assert(devd);
 
 		// destroy our logical device before we forward the call
-		auto handle = devd->handle;
-		auto* destroyDev = devd->dispatch.DestroyDevice;
+		handle = devd->handle;
+		pfnDestroyDev = devd->dispatch.DestroyDevice;
 		devd.reset();
-
-		destroyDev(handle, alloc);
 	}
+
+	dlg_assertm(DebugStats::get().aliveRecords == 0u,
+		"{}", DebugStats::get().aliveRecords);
+	pfnDestroyDev(handle, alloc);
 }
 
 // util

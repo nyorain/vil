@@ -423,12 +423,12 @@ void CommandViewer::displayDsList() {
 			auto stateIt = dsState_.states.find(ds.ds);
 			dlg_assert_or(stateIt != dsState_.states.end(), continue);
 
-			auto& state = *stateIt->second;
-			dlg_assert(state.layout);
+			auto& dsCow = *stateIt->second;
 
 			auto label = dlg::format("Descriptor Set {}", setID);
 			ImGui::SetNextItemOpen(true, ImGuiCond_Once);
 			if(ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_FramePadding)) {
+				auto [state, lock] = access(dsCow);
 				for(auto bID = 0u; bID < state.layout->bindings.size(); ++bID) {
 					auto sstages = stages(pipe);
 					dlg_assert(!sstages.empty());
@@ -713,8 +713,8 @@ void CommandViewer::displayDs(Draw& draw) {
 	auto stateIt = dsState_.states.find(set);
 	dlg_assert_or(stateIt != dsState_.states.end(), return);
 
-	auto& state = *stateIt->second;
-	dlg_assert(state.layout);
+	auto& dsCow = *stateIt->second;
+	auto [state, lock] = access(dsCow);
 
 	if(bindingID >= state.layout->bindings.size()) {
 		ImGui::Text("Binding not bound");
