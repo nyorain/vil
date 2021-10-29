@@ -324,7 +324,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 	// Even when we aren't interested in any command in the record, we have
 	// to hook it when it builds acceleration structures.
-	if(!hookNeededForCmd && !record.buildsAccelStructs) {
+	auto needBuildHook = record.buildsAccelStructs;
+	if(!hookNeededForCmd && !needBuildHook) {
 		return hooked.handle();
 	}
 

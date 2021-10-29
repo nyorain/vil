@@ -34,7 +34,7 @@ VkCommandBuffer processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer
 		dlg_assert(subm.queue->family == rec.queueFamily);
 
 		// potentially hook command buffer
-		if(false && dev.commandHook) {
+		if(dev.commandHook) {
 			auto hooked = dev.commandHook->hook(cb, dst, scb.hook);
 			dlg_assert(hooked);
 			if(hooked != cb.handle()) {

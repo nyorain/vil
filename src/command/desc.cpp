@@ -306,7 +306,11 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 					auto* srcDs = static_cast<const DescriptorSet*>(srcBound[i].ds);
 					auto dstDsCow = dstDsState.states.find(dstBound[i].ds);
-					dlg_assert_or(dstDsCow != dstDsState.states.end(), continue);
+					// TODO: we might not find it here due to the new
+					// descriptor set capturing rework.
+					if(dstDsCow == dstDsState.states.end()) {
+						continue;
+					}
 
 					auto [dstDs, lock] = access(*dstDsCow->second);
 
