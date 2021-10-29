@@ -153,8 +153,8 @@ inline bool ownedShared(const tracy::SharedLockable<DebugSharedMutex>& m) { retu
 #if defined(TRACY_ENABLE) && defined(VIL_TRACY_MUTEX)
 	#define vilDefSharedMutex(name) TracySharedLockable(DebugSharedMutex, name)
 	#define vilDefMutex(name) TracyLockable(DebugMutex, name)
-	using Mutex = LockableBase(DebugMutex)
-	using SharedMutex = SharedLockableBase(DebugSharedMutex)
+	using Mutex = LockableBase(DebugMutex);
+	using SharedMutex = SharedLockableBase(DebugSharedMutex);
 #else
 	#define vilDefSharedMutex(name) DebugSharedMutex name
 	#define vilDefMutex(name) DebugMutex name

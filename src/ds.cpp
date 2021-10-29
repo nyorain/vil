@@ -28,28 +28,20 @@ size_t descriptorSize(VkDescriptorType dsType) {
 	return 0u;
 }
 
+std::byte* bindingData(const DescriptorSet& ds) {
+	static_assert(sizeof(ds) % sizeof(void*) == 0u);
+	auto ptr = reinterpret_cast<const std::byte*>(&ds);
+	return const_cast<std::byte*>(ptr) + sizeof(ds);
+}
+
 DescriptorStateRef::DescriptorStateRef(const DescriptorSet& ds) :
-	layout(ds.layout.get()), data(ds.data), variableDescriptorCount(ds.variableDescriptorCount) {
+	layout(ds.layout.get()), data(bindingData(ds)), variableDescriptorCount(ds.variableDescriptorCount) {
 }
 
 DescriptorStateRef::DescriptorStateRef(DescriptorStateCopy& ds) :
 	layout(ds.layout.get()),
 	data(reinterpret_cast<std::byte*>(&ds) + sizeof(DescriptorStateCopy)),
 	variableDescriptorCount(ds.variableDescriptorCount) {
-}
-
-void returnToPool(DescriptorSet& ds) {
-	ds.~DescriptorSet();
-
-	static_assert(offsetof(DescriptorPool::SetAlloc, storage) == 0u);
-	auto& alloc = *std::launder(reinterpret_cast<DescriptorPool::SetAlloc*>(&ds));
-
-	// unlink from used list
-
-
-	// prev pointers don't matter for free list
-	alloc.next = ds.pool->freeSets;
-	ds.pool->freeSets = &alloc;
 }
 
 template<typename T>
@@ -158,12 +150,14 @@ void initImmutableSamplers(DescriptorStateRef state) {
 
 void initDescriptorState(std::byte* data,
 		const DescriptorSetLayout& layout, u32 variableDescriptorCount) {
+	// Possibly faster path but strictly speaking UB I guess?
+	// Compbilers should probably optimize it to this tho
 	auto bindingSize = totalDescriptorMemSize(layout, variableDescriptorCount);
 	std::memset(data, 0x0, bindingSize);
 
 	/*
 	auto it = data;
-	for(auto& binding : layout->bindings) {
+	for(auto& binding : layout.bindings) {
 		auto count = binding.descriptorCount;
 		if(binding.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
 			count = variableDescriptorCount;
@@ -372,86 +366,70 @@ std::unique_lock<DebugMutex> checkResolveCow(DescriptorSet& ds) {
 }
 
 void destroy(DescriptorSet& ds, bool unlink) {
+	ZoneScoped;
+
 	dlg_assert(ds.dev);
 
-	// NOTE: no need to remove from descriptor pool, that will
-	// be done externally
+	if(!HandleDesc<VkDescriptorSet>::wrap) {
+		ds.dev->descriptorSets.mustErase(ds.handle);
+	}
 
 	// no need to keep lock here, ds can't be accessed anymore
 	checkResolveCow(ds);
 	destroyDsState(ds);
 
+	debugStatSub(DebugStats::get().aliveDescriptorSets, 1u);
+
+	auto& pool = *ds.pool;
+	auto* setEntry = ds.setEntry;
+
+	auto* raw = reinterpret_cast<std::byte*>(&ds);
+	{
+		ExtZoneScopedN("dtor");
+		ds.~DescriptorSet();
+	}
+
 	// Return data to pool. We don't have to lock the pool mutex
 	// for this, external sync guaranteed by spec and it's not
 	// accessed by us.
-	if(ds.data < ds.pool->data.get() ||
-			ds.pool->data.get() + ds.pool->dataSize <= ds.data) {
+	if(raw < pool.data.get() || pool.data.get() + pool.dataSize <= raw) {
 		// See AllocateDescriptorSets. We had to choose a slow path due
 		// to fragmentation
 		dlg_trace("free independent DS data slot");
-		delete[] ds.data;
-		dlg_assert(!ds.setEntry);
-	} else if(unlink) {
-		dlg_assert(ds.pool->flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
+		dlg_assert(setEntry->offset == u32(-1));
+		delete[] raw;
+	}
+
+	if(unlink) {
+		dlg_assert(pool.flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
 		// PERF: could have a fast path not doing this when the whole
 		// pool is being reset.
 
 		// unlink setEntry
-		dlg_assert(!ds.setEntry->next == (ds.setEntry == ds.pool->highestEntry));
-		dlg_assert(!ds.setEntry->prev == (ds.setEntry == ds.pool->usedEntries));
+		dlg_assert(!setEntry->next == (setEntry == pool.highestEntry));
+		dlg_assert(!setEntry->prev == (setEntry == pool.usedEntries));
 
-		if(ds.setEntry->next) {
-			ds.setEntry->next->prev = ds.setEntry->prev;
+		if(setEntry->next) {
+			setEntry->next->prev = setEntry->prev;
 		} else {
-			ds.pool->highestEntry = ds.setEntry->prev;
-			ds.pool->highestOffset = 0u;
-			if(ds.setEntry->prev) {
-				ds.pool->highestOffset = ds.setEntry->prev->offset + ds.setEntry->prev->size;
-			}
+			pool.highestEntry = setEntry->prev;
 		}
 
-		if(ds.setEntry->prev) {
-			ds.setEntry->prev->next = ds.setEntry->next;
+		if(setEntry->prev) {
+			setEntry->prev->next = setEntry->next;
 		} else {
-			ds.pool->usedEntries = ds.setEntry->next;
+			pool.usedEntries = setEntry->next;
 		}
 
-		if(ds.setEntry == ds.pool->lastEntry) {
-			ds.pool->lastEntry = ds.setEntry->prev;
+		if(setEntry == pool.lastEntry) {
+			pool.lastEntry = setEntry->prev;
 		}
 
 		// return to free list
-		ds.setEntry->next = ds.pool->freeEntries;
-		ds.setEntry->prev = nullptr;
-		ds.pool->freeEntries = ds.setEntry;
-	} else {
-		dlg_assert(!ds.setEntry);
+		setEntry->next = pool.freeEntries;
+		setEntry->prev = nullptr;
+		pool.freeEntries = setEntry;
 	}
-
-	// return to pool
-	if(unlink) {
-		static_assert(offsetof(DescriptorPool::SetAlloc, storage) == 0u);
-		auto& alloc = *std::launder(reinterpret_cast<DescriptorPool::SetAlloc*>(&ds));
-
-		// unlink from used list
-		if(alloc.next) {
-			alloc.next->prev = alloc.prev;
-		}
-
-		dlg_assert(!alloc.prev == (&alloc == ds.pool->aliveSets));
-		if(alloc.prev) {
-			alloc.prev->next = alloc.next;
-		} else {
-			ds.pool->aliveSets = alloc.next;
-		}
-
-		// prev pointers don't matter for free list
-		alloc.next = ds.pool->freeSets;
-		ds.pool->freeSets = &alloc;
-	}
-
-	ds.~DescriptorSet();
-	debugStatSub(DebugStats::get().aliveDescriptorSets, 1u);
 }
 
 span<BufferDescriptor> buffers(DescriptorStateRef state, unsigned binding) {
@@ -535,36 +513,10 @@ DescriptorPool::~DescriptorPool() {
 		return;
 	}
 
-	// NOTE: we don't need a lock here:
-	// While the ds pool is being destroyed, no descriptor sets from it
-	// can be created or destroyed in another thread, that would always be a
-	// race. So accessing this vector is safe.
-	// (Just adding a lock here would furthermore result in deadlocks due
-	// to the mutexes locked inside the loop, don't do it!)
-	// We don't use a for loop since the descriptors remove themselves
-	// on destruction
-	// while(!descriptorSets.empty()) {
-	// 	if(HandleDesc<VkDescriptorSet>::wrap) {
-	// 		// TODO: ugh, this is terrible, should find a cleaner solution
-	// 		// auto h = u64ToHandle<VkDescriptorSet>(reinterpret_cast<std::uintptr_t>(descriptorSets[0]));
-	// 		// dev->descriptorSets.mustErase(h);
-	// 		delete descriptorSets[0];
-	// 	} else {
-	// 		auto* ds = descriptorSets[0];
-	// 		dev->descriptorSets.mustErase(ds->handle);
-	// 	}
-	// }
-
-	while(!descriptorSets.empty()) {
-		auto* ds = descriptorSets[0];
-		if(!HandleDesc<VkDescriptorSet>::wrap) {
-			dev->descriptorSets.mustErase(ds->handle);
-		}
-		ds->~DescriptorSet();
-		// no need to return to pool
+	for(auto it = usedEntries; it; it = it->next) {
+		destroy(nonNull(it->set), false);
 	}
 
-	dlg_assert(!usedEntries);
 	debugStatSub(DebugStats::get().descriptorPoolMem, dataSize);
 	TracyFree(data.get());
 }
@@ -793,7 +745,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorSetLayout(
 
 // dsPool
 void initResetPoolEntries(DescriptorPool& dsPool) {
+	dsPool.entries[0] = {};
+	dsPool.entries[dsPool.maxSets - 1] = {};
+
 	for(auto i = 1u; i + 1 < dsPool.maxSets; ++i) {
+		dsPool.entries[i] = {};
 		dsPool.entries[i].prev = &dsPool.entries[i - 1];
 		dsPool.entries[i].next = &dsPool.entries[i + 1];
 	}
@@ -808,21 +764,6 @@ void initResetPoolEntries(DescriptorPool& dsPool) {
 	dsPool.usedEntries = nullptr;
 	dsPool.lastEntry = nullptr;
 	dsPool.highestEntry = nullptr;
-}
-
-void initResetPoolSets(DescriptorPool& dsPool) {
-	for(auto i = 1u; i + 1 < dsPool.maxSets; ++i) {
-		dsPool.sets[i].prev = &dsPool.sets[i - 1];
-		dsPool.sets[i].next = &dsPool.sets[i + 1];
-	}
-
-	if(dsPool.maxSets > 1) {
-		dsPool.sets[0].next = &dsPool.sets[1];
-		dsPool.sets[dsPool.maxSets - 1].prev = &dsPool.sets[dsPool.maxSets - 2];
-	}
-
-	dsPool.freeSets = &dsPool.sets[0];
-	dsPool.aliveSets = nullptr;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
@@ -847,17 +788,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 	dsPool.flags = pCreateInfo->flags;
 
 	// init descriptor entries
-	if(dsPool.flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) {
-		dsPool.entries = std::make_unique<DescriptorPool::SetEntry[]>(dsPool.maxSets);
-		initResetPoolEntries(dsPool);
-	}
-
-	// init descriptor sets
-	dsPool.sets = std::make_unique<DescriptorPool::SetAlloc[]>(dsPool.maxSets);
-	initResetPoolSets(dsPool);
+	dsPool.entries = std::make_unique<DescriptorPool::SetEntry[]>(dsPool.maxSets);
+	initResetPoolEntries(dsPool);
 
 	// init descriptor data
-	dsPool.dataSize = 0u;
+	dsPool.dataSize = dsPool.maxSets * sizeof(DescriptorSet);
 	for(auto& pool : dsPool.poolSizes) {
 		dsPool.dataSize += descriptorSize(pool.type) * pool.descriptorCount;
 	}
@@ -894,22 +829,11 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 	auto& dsPool = get(device, descriptorPool);
 	auto& dev = *dsPool.dev;
 
-	// We know the linked list isn't modified in between
-	for(auto it = dsPool.aliveSets; it; it = it->next) {
-		auto& ds = it->ds();
-		if(!HandleDesc<VkDescriptorSet>::wrap) {
-			dev.descriptorSets.mustErase(ds.handle);
-		}
-
-		destroy(ds, false);
+	for(auto it = dsPool.usedEntries; it; it = it->next) {
+		destroy(nonNull(it->set), false);
 	}
 
-	initResetPoolSets(dsPool);
-	if(dsPool.flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) {
-		initResetPoolEntries(dsPool);
-	}
-
-	dsPool.highestOffset = 0u;
+	initResetPoolEntries(dsPool);
 
 	{
 		ZoneScopedN("dispatch");
@@ -917,70 +841,50 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 	}
 }
 
-// descriptor set
-// DeadDescriptorSetPtr kill(std::unique_ptr<DescriptorSet> dsPtr) {
-// 	dsPtr->~DescriptorSet();
-// 	return DeadDescriptorSetPtr(dsPtr.release());
-// }
-//
-// std::unique_ptr<DescriptorSet> revive(DeadDescriptorSetPtr deadDS) {
-// 	new (deadDS.get()) DescriptorSet();
-// 	return std::unique_ptr<DescriptorSet>(deadDS.release());
-// }
-
-void initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& handle,
-		IntrusivePtr<DescriptorSetLayout> layoutPtr, u32 varCount) {
+VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& handle,
+		IntrusivePtr<DescriptorSetLayout> layoutPtr, u32 varCount,
+		DescriptorSet*& out) {
 	ZoneScopedN("initDescriptorSet");
-	// std::unique_ptr<DescriptorSet> dsPtr;
-//
-	// if(pool.setPool.empty()) {
-	// 	ZoneScopedN("allocDescriptorSet");
-	// 	dsPtr = std::make_unique<DescriptorSet>();
-	// } else {
-	// 	ZoneScopedN("reviveDescriptorSet");
-	// 	dsPtr = revive(std::move(pool.setPool.back()));
-	// 	pool.setPool.pop_back();
-	// }
-//
-	// auto& ds = *dsPtr;
-
-	DescriptorSet& ds = *new(&pool.freeSets->ds) DescriptorSet();
-	pool.freeSets = pool.freeSets->nextFree;
-
-	ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
-	ds.dev = &dev;
-	ds.handle = handle;
-	ds.layout = std::move(layoutPtr);
-	ds.variableDescriptorCount = varCount;
-	ds.pool = &pool;
 
 	// find data
-	auto memSize = align(totalDescriptorMemSize(*ds.layout, varCount), sizeof(void*));
-	if(pool.highestOffset + memSize <= pool.dataSize) {
-		ds.data = &pool.data[pool.highestOffset];
-		if(pool.flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) {
-			dlg_assert(pool.freeEntries);
+	DescriptorPool::SetEntry* setEntry {};
+	std::byte* data {};
 
-			auto& entry = *pool.freeEntries;
-			pool.freeEntries = entry.next;
-			pool.freeEntries->prev = nullptr;
+	auto memSize = sizeof(DescriptorSet);
+	memSize += align(totalDescriptorMemSize(*layoutPtr, varCount), sizeof(void*));
 
-			if(pool.highestEntry) {
-				pool.highestEntry->next = &entry;
-			} else {
-				pool.usedEntries = &entry;
-			}
+	// TODO: Only return out_of_pool_memory when requested api
+	// is high enough?
 
-			entry.offset = pool.highestOffset;
-			entry.size = memSize;
-			entry.set = &ds;
-			entry.next = nullptr;
-			entry.prev = pool.highestEntry;
+	// apparently it's valid for applications to "just try"
+	// seems to be what dota does
+	if(!pool.freeEntries) {
+		return VK_ERROR_OUT_OF_POOL_MEMORY;
+	}
 
-			pool.highestEntry = &entry;
-			ds.setEntry = &entry;
+	auto highestOffset = 0u;
+	if(pool.highestEntry) {
+		highestOffset = pool.highestEntry->offset + pool.highestEntry->size;
+	}
+
+	if(highestOffset + memSize <= pool.dataSize) {
+		auto& entry = nonNull(pool.freeEntries);
+		pool.freeEntries = entry.next;
+
+		if(pool.highestEntry) {
+			pool.highestEntry->next = &entry;
+		} else {
+			pool.usedEntries = &entry;
 		}
-		pool.highestOffset += memSize;
+
+		entry.offset = highestOffset;
+		entry.size = memSize;
+		entry.next = nullptr;
+		entry.prev = pool.highestEntry;
+
+		pool.highestEntry = &entry;
+		setEntry = &entry;
+		data = &pool.data[entry.offset];
 	} else {
 		ZoneScopedN("findData - fragmented");
 
@@ -1007,6 +911,14 @@ void initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& handl
 			offset = 0u;
 			it = pool.usedEntries;
 
+			// skip special fragmented entries
+			// PERF: this makes fragmented entries extra hurtful.
+			// We could probably append them at the end instead with
+			// some additional trickery so we don't have to do this here.
+			while(it && it->offset == u32(-1)) {
+				it = it->next;
+			}
+
 			while(it) {
 				auto& entry = *it;
 				if(offset + memSize <= it->offset) {
@@ -1018,26 +930,43 @@ void initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& handl
 		}
 
 		if(offset + memSize > pool.dataSize) {
-			// NOTE: we could just return VK_ERROR_OUT_OF_POOL_MEMORY
+			// reserve entry
+			dlg_assert(pool.freeEntries);
+			auto& entry = *pool.freeEntries;
+			pool.freeEntries = entry.next;
+			setEntry = &entry;
+
+			// NOTE: we can just return VK_ERROR_OUT_OF_POOL_MEMORY
 			// here. Some drivers do it. But if we land here, the driver
 			// seems to not do it. So we just use a slow path.
+			/*
 			dlg_assert(!it);
 			dlg_warn("Fragmentation of descriptor pool detected. Slow path");
-			ds.data = new std::byte[memSize];
+			data = new std::byte[memSize];
+
+			// dummy setEntry so we can put it into our linked list
+			entry.offset = u32(-1);
+			entry.size = u32(-1);
+			entry.next = pool.usedEntries;
+			entry.prev = nullptr;
+			pool.usedEntries = &entry;
+			*/
+
+			return VK_ERROR_OUT_OF_POOL_MEMORY;
 		} else {
+			// reserve entry
+			dlg_assert(pool.freeEntries);
+			auto& entry = *pool.freeEntries;
+			pool.freeEntries = entry.next;
+			setEntry = &entry;
+
 			// it == null can't happen, we should have landed
 			// in some earlier branch.
 			dlg_assert(it);
 			dlg_assert(pool.usedEntries && pool.highestEntry);
-			dlg_assert(pool.freeEntries);
-
-			auto& entry = *pool.freeEntries;
-			pool.freeEntries = entry.next;
-			pool.freeEntries->prev = nullptr;
 
 			entry.offset = offset;
 			entry.size = memSize;
-			entry.set = &ds;
 
 			// insert entry before 'it'
 			entry.prev = it->prev;
@@ -1053,34 +982,38 @@ void initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& handl
 			it->prev = &entry;
 
 			pool.lastEntry = &entry;
-
-			ds.data = &pool.data[offset];
-			ds.setEntry = &entry;
+			data = &pool.data[offset];
 		}
 	}
 
-	dlg_assert(ds.data >= pool.data.get() &&
-		pool.data.get() + pool.dataSize >= ds.data);
-	initDescriptorState(ds.data, *ds.layout, ds.variableDescriptorCount);
+	dlg_assert(data);
+	dlg_assert(setEntry);
+	dlg_assert(std::uintptr_t(data) % sizeof(void*) == 0u);
 
-	dlg_assert(std::uintptr_t(ds.data) % sizeof(void*) == 0u);
+	auto& ds = *new(data) DescriptorSet();
+	ds.setEntry = setEntry;
+	ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
+	ds.dev = &dev;
+	ds.handle = handle;
+	ds.layout = std::move(layoutPtr);
+	ds.variableDescriptorCount = varCount;
+	ds.pool = &pool;
+	setEntry->set = &ds;
+
+	initDescriptorState(bindingData(ds), *ds.layout, ds.variableDescriptorCount);
 	handle = castDispatch<VkDescriptorSet>(ds);
 
-	// WIP(ds): temporary optimization to not insert into dev.descriptorSets
-	// when wrapping anyways. This means we lose the ability to enumerate
-	// descriptor sets in the gui though :(
-	// But this function can be on very hot paths.
 	if(!HandleDesc<VkDescriptorSet>::wrap) {
 		dev.descriptorSets.mustEmplace(handle, &ds);
-	} else {
-		// (void) dsPtr.release();
 	}
 
 	if(ds.layout->immutableSamplers) {
 		initImmutableSamplers(ds);
 	}
 
-	pool.descriptorSets.push_back(&ds);
+	out = &ds;
+
+	return VK_SUCCESS;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
@@ -1120,7 +1053,12 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 	dlg_assert(!variableCountInfo ||
 		variableCountInfo->descriptorSetCount == pAllocateInfo->descriptorSetCount);
 
-	for(auto i = 0u; i < count; ++i) {
+	auto dss = memScope.alloc<DescriptorSet*>(count);
+	std::memset(dss.data(), 0x0, dss.size() * sizeof(dss[0]));
+	VkResult res = VK_SUCCESS;
+
+	auto i = 0u;
+	for(i = 0u; i < count; ++i) {
 		auto layoutPtr = getPtr(dev, pAllocateInfo->pSetLayouts[i]);
 		auto& layout = *layoutPtr;
 
@@ -1131,11 +1069,23 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 			varCount = variableCountInfo->pDescriptorCounts[i];
 		}
 
-		initDescriptorSet(dev, pool, pDescriptorSets[i], std::move(layoutPtr), varCount);
+		res = initDescriptorSet(dev, pool, pDescriptorSets[i], std::move(layoutPtr), varCount, dss[i]);
+		if(res != VK_SUCCESS) {
+			break;
+		}
+	}
+
+	if(res != VK_SUCCESS) {
+		for(auto j = 0u; j < i; ++j) {
+			destroy(*dss[i], true);
+		}
+		dev.dispatch.FreeDescriptorSets(dev.handle, pool.handle,
+			count, pDescriptorSets);
+
+		return res;
 	}
 
 	debugStatAdd(DebugStats::get().aliveDescriptorSets, count);
-
 	return VK_SUCCESS;
 }
 
@@ -1156,13 +1106,11 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 		if(!HandleDesc<VkDescriptorSet>::wrap) {
 			auto ptr = dev.descriptorSets.mustMove(pDescriptorSets[i]);
 			handles[i] = ptr->handle;
-			// pool.setPool.push_back(kill(std::move(ptr)));
-			returnToPool(*ptr);
+			destroy(*ptr, true);
 		} else {
 			auto& ds = get(dev, pDescriptorSets[i]);
 			handles[i] = ds.handle;
-			// pool.setPool.push_back(kill(std::unique_ptr<DescriptorSet>(&ds)));
-			returnToPool(ds);
+			destroy(ds, true);
 		}
 	}
 
@@ -1507,6 +1455,12 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 
 	auto totalSize = totalUpdateDataSize(dut);
 
+	// PERF: our implementation has massive overhead compared to
+	// the driver on most platforms. One of the reasons is probably
+	// the copying here. We could (via env variable; off by default) just
+	// const_cast pData and then directly write into it. Should help
+	// a lot. Applications using this function likely have a whole lot of
+	// data to transmit.
 	ThreadMemScope memScope;
 	auto fwdData = memScope.alloc<std::byte>(totalSize);
 	std::memcpy(fwdData.data(), pData, totalSize);

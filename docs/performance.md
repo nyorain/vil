@@ -26,6 +26,15 @@ inside the layer mostly without requiring a mutex lock, most operations
 require a lock at some point. Programs that use vulkan heavily from multiple
 threads might be slowed down significantly.
 
+## General notes
+
+(We should probably migrate this to an extra page as it's advice for
+ the user while the other sections are dev-focused).
+
+- Enabled transform feedback (via VIL_TRANSFORM_FEEDBACK) can cause
+  pipeline cache misses causing a *massive* increase of pipeline
+  creation time that may cause slowdowns.
+
 ## Layer Profiling
 
 To profile critical performance and memory overhead, there are mechanisms 

@@ -95,7 +95,7 @@ CommandRecord::~CommandRecord() {
 
 		// remove record from all referenced resources
 		for(auto& [handle, uh] : handles) {
-			if(invalidated.count(handle)) {
+			if(invalidated.find(handle) != invalidated.end()) {
 				continue;
 			}
 

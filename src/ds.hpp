@@ -38,44 +38,14 @@ bool needsImageView(VkDescriptorType);
 bool needsImageLayout(VkDescriptorType);
 bool needsDynamicOffset(VkDescriptorType);
 
-// struct NonDtorDeleter {
-// 	template<typename T>
-// 	void operator()(T* ptr) const {
-// 		operator delete(ptr);
-// 	}
-// };
-//
-// using DeadDescriptorSetPtr = std::unique_ptr<DescriptorSet, NonDtorDeleter>;
-
-
 struct DescriptorPoolSetEntry {
-	u32 offset;
-	u32 size;
+	// NOTE: could compute offset, size from the referenced set.
+	// But it's not that expensive to store them here and might be faster.
+	u32 offset {};
+	u32 size {};
 	DescriptorPoolSetEntry* next {};
 	DescriptorPoolSetEntry* prev {};
-	DescriptorSet* set;
-};
-
-// Vulkan descriptor set handle
-struct DescriptorSet : DeviceHandle {
-	DescriptorPool* pool {};
-	VkDescriptorSet handle {};
-
-	// Immutable after creation.
-	IntrusivePtr<DescriptorSetLayout> layout {};
-	u32 variableDescriptorCount {};
-	DescriptorPoolSetEntry* setEntry {};
-
-	// The internal state (in data) is protected by this mutex. This
-	// is needed since we might read the data anytime from the gui
-	// or when resolving the state.
-	DebugMutex mutex;
-	std::byte* data {};
-
-	// Protected by mutex.
-	DescriptorSetCow* cow {};
-
-	~DescriptorSet();
+	DescriptorSet* set {};
 };
 
 struct DescriptorPool : DeviceHandle {
@@ -86,21 +56,6 @@ struct DescriptorPool : DeviceHandle {
 	std::vector<VkDescriptorPoolSize> poolSizes {};
 
 	using SetEntry = DescriptorPoolSetEntry;
-	struct SetAlloc {
-		using Storage = std::aligned_storage_t<
-			sizeof(DescriptorSet), alignof(DescriptorSet)>;
-		Storage storage;
-		SetAlloc* next {};
-		SetAlloc* prev {};
-
-		DescriptorSet& ds() {
-			return *std::launder(reinterpret_cast<DescriptorSet*>(&storage));
-		}
-	};
-
-	std::unique_ptr<SetAlloc[]> sets;
-	SetAlloc* freeSets {};
-	SetAlloc* aliveSets {};
 
 	// Descriptor data: We just allocate one large buffer on
 	// DescriptorPool creation and then suballocate that to the individual
@@ -111,10 +66,17 @@ struct DescriptorPool : DeviceHandle {
 	std::unique_ptr<std::byte[]> data;
 	std::unique_ptr<SetEntry[]> entries;
 
-	u32 highestOffset {};
-	SetEntry* lastEntry {};
+	// Linked list of the alive descriptor sets.
 	SetEntry* usedEntries {};
+
+	// The last link of the usedEntries list.
 	SetEntry* highestEntry {};
+
+	// The entry we last allocated that wasn't highestEntry.
+	// Only used for fragmentating pools.
+	SetEntry* lastEntry {};
+
+	// Linked list of unused SetEntry objects. NOT a list of free spaces.
 	SetEntry* freeEntries {};
 
 	~DescriptorPool();
@@ -213,6 +175,27 @@ span<ImageDescriptor> images(DescriptorStateRef, unsigned binding);
 span<BufferViewDescriptor> bufferViews(DescriptorStateRef, unsigned binding);
 span<AccelStructDescriptor> accelStructs(DescriptorStateRef, unsigned binding);
 span<std::byte> inlineUniformBlock(DescriptorStateRef, unsigned binding);
+
+// Vulkan descriptor set handle
+struct DescriptorSet : DeviceHandle {
+	DescriptorPool* pool {};
+	VkDescriptorSet handle {};
+
+	// Immutable after creation.
+	IntrusivePtr<DescriptorSetLayout> layout {};
+	u32 variableDescriptorCount {};
+	DescriptorPoolSetEntry* setEntry {};
+
+	// The internal state (in data) is protected by this mutex. This
+	// is needed since we might read the data anytime from the gui
+	// or when resolving the state.
+	DebugMutex mutex;
+
+	// Protected by mutex.
+	DescriptorSetCow* cow {};
+
+	// std::byte bindingData[]; // following this in memory
+};
 
 struct DescriptorStateCopy {
 	struct Deleter {

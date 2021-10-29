@@ -147,6 +147,14 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
+- [ ] make don't add to refRecords of used descriptorSets? We don't
+      reference them directly in a record anyways. We still want them
+	  in CommandRecord::handles though, not sure how this works. Maybe
+	  use some special sentinel values (next == prev == this) to signal
+	  this is not linked to the handle itself?
+	    Maybe we later on want to see all CommandRecords using a given
+		ds? But that's likely a gui operation where we could
+		use iterate over all known command records or something.
 - [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
 	  since we should be logically able to get around that
 	  case (with normal API use and no gui open)

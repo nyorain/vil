@@ -16,6 +16,20 @@ project('VIL', ['c', 'cpp'],
 	]
 )
 
+# Options
+
+with_tracy = get_option('tracy')
+is_release = get_option('buildtype') == 'release'
+
+profiling = with_tracy
+debug_checks = not is_release
+disable_dlg = is_release
+extensive_zones = profiling
+tracy_mutex = profiling
+debug_stats = true
+
+###############################################################
+
 shader_inc = []
 subdir('src/data') # compile shaders
 
@@ -65,8 +79,6 @@ with_x11_hook = not with_win32 and get_option('x11-hook')
 
 tracy_deps = []
 
-with_tracy = get_option('tracy')
-
 if with_tracy
 	args += '-DTRACY_ENABLE'
 	# we always want on-demand profiling
@@ -91,13 +103,6 @@ layer_args = [
 	'-DVK_NO_PROTOTYPES',
 ]
 
-# config options
-debug_checks = get_option('buildtype') != 'release'
-extensive_zones = false
-debug_stats = false
-tracy_mutex = false
-disable_dlg = false
-
 if debug_stats
 	layer_args += '-DVIL_DEBUG_STATS'
 endif
@@ -110,7 +115,7 @@ if tracy_mutex
 	layer_args += '-DVIL_TRACY_MUTEX'
 endif
 
-if with_debug_checks
+if debug_checks
 	layer_args += '-DVIL_DEBUG_MUTEX'
 	layer_args += '-DVIL_DEBUG'
 endif

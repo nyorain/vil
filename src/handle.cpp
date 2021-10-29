@@ -15,12 +15,18 @@ DeviceHandle::~DeviceHandle() {
 		return;
 	}
 
+	// TODO: yeah we want something like this. See ds3.hpp
+	// if(objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+	// 	return;
+	// }
+
 	// Inform command buffers that use this handle that it was
 	// destroyed.
 	invalidateCbs();
 
 	// Notify device that handle is destroyed. It will forward it
 	// to all instances that need to know (e.g. gui)
+	// TODO: hack
 	notifyDestruction(*dev, *this);
 }
 
@@ -39,6 +45,8 @@ void DeviceHandle::invalidateCbsLocked() {
 			it->record->cb->invalidateLocked();
 		}
 
+		// TODO: only do for handles that need it.
+		// We e.g. don't need it for descriptor sets
 		auto [_, success] = it->record->invalidated.insert({this, nullptr});
 		dlg_assert(success);
 
@@ -123,7 +131,7 @@ template<typename M>
 std::vector<Handle*> findHandles(const M& map, std::string_view search) {
 	std::vector<Handle*> ret;
 	for(auto& entry : map) {
-		auto& handle = *entry.second.get();
+		auto& handle = *entry.second;
 		if(!matchesSearch(handle, search)) {
 			continue;
 		}
@@ -169,6 +177,61 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 	}
 };
 
+struct DescriptorSetTypeImpl : ObjectTypeHandler {
+	static const DescriptorSetTypeImpl instance;
+
+	// when we wrap descriptor sets, we don't insert them into the
+	// device map
+
+	VkObjectType objectType() const override { return VK_OBJECT_TYPE_DESCRIPTOR_SET; }
+	Handle* find(Device& dev, u64 id, u64& fwdID) const override {
+		if(HandleDesc<VkDescriptorSet>::wrap) {
+			// TODO PERF: extremely slow, iterating over *all* descriptor sets
+			// via linked lists
+			auto vkh = u64ToHandle<VkDescriptorSet>(id);
+			for(auto& [h, pool] : dev.dsPools.map) {
+				for(auto it = pool->usedEntries; it; it = it->next) {
+					auto& set = *it->set;
+					if(castDispatch<VkDescriptorSet>(set) == vkh) {
+						fwdID = handleToU64(set.handle);
+						return &set;
+					}
+				}
+			}
+		} else {
+			auto& map = dev.descriptorSets.map;
+			auto it = map.find(u64ToHandle<VkDescriptorSet>(id));
+			if(it == map.end()) {
+				return nullptr;
+			}
+
+			fwdID = handleToU64(it->second->handle);
+			return it->second;
+		}
+
+		return nullptr;
+	}
+	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
+		if(!HandleDesc<VkDescriptorSet>::wrap) {
+			return findHandles(dev.descriptorSets.map, search);
+		}
+
+		std::vector<Handle*> ret;
+		for(auto& [h, pool] : dev.dsPools.map) {
+			for(auto it = pool->usedEntries; it; it = it->next) {
+				if(matchesSearch(*it->set, search)) {
+					ret.push_back(it->set);
+				}
+			}
+		}
+		return ret;
+	}
+	void visit(ResourceVisitor& visitor, Handle& handle) const override {
+		dlg_assert(handle.objectType == objectType());
+		return visitor.visit(static_cast<Queue&>(handle));
+	}
+};
+
 struct QueueTypeImpl : ObjectTypeHandler {
 	static const QueueTypeImpl instance;
 
@@ -207,7 +270,9 @@ struct QueueTypeImpl : ObjectTypeHandler {
 
 template<VkObjectType OT, typename HT, auto DevMapPtr>
 const ObjectTypeImpl<OT, HT, DevMapPtr> ObjectTypeImpl<OT, HT, DevMapPtr>::instance;
+
 const QueueTypeImpl QueueTypeImpl::instance;
+const DescriptorSetTypeImpl DescriptorSetTypeImpl::instance;
 
 static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
@@ -223,7 +288,6 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET, DescriptorSet, &Device::descriptorSets>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores>::instance,
@@ -233,6 +297,7 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
 	&ObjectTypeImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
+	&DescriptorSetTypeImpl::instance,
 	&QueueTypeImpl::instance,
 };
 
