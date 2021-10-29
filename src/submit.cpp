@@ -563,7 +563,7 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 					}
 				} else if(buf && dsCat == DescriptorCategory::buffer) {
 					for(auto& elem : buffers(state, binding.binding)) {
-						if(elem.buffer && elem.buffer.get() == buf) {
+						if(elem.buffer && &*elem.buffer == buf) {
 							return true;
 						}
 					}

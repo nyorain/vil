@@ -9,60 +9,6 @@
 
 namespace vil {
 
-void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
-		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
-	ensureSize0(cb, descriptorSets, firstSet + sets.size());
-
-	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
-	// There may be errors here.
-	// TODO PERF: do we even need to track it like this? only useful if we
-	// also show it in UI which sets were disturbed.
-	// Disabled for now
-
-// #define DS_DISTURB_CHECKS
-#ifdef DS_DISTURB_CHECKS
-	for(auto i = 0u; i < firstSet; ++i) {
-		if(!descriptorSets[i].ds) {
-			continue;
-		}
-
-		dlg_assert(descriptorSets[i].layout);
-		if(!compatibleForSetN(*descriptorSets[i].layout, layout, i)) {
-			// disturbed!
-			// dlg_debug("disturbed ds {}", i);
-			descriptorSets[i] = {};
-		}
-	}
-#endif // DS_DISTURB_CHECKS
-
-	// bind descriptors and check if future bindings are disturbed
-	auto followingDisturbed = false;
-	for(auto i = 0u; i < sets.size(); ++i) {
-		auto s = firstSet + i;
-		auto& dsLayout = *layout.descriptors[s];
-
-#ifdef DS_DISTURB_CHECKS
-		if(!descriptorSets[s].layout || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
-			followingDisturbed = true;
-		}
-#endif // DS_DISTURB_CHECKS
-
-		descriptorSets[s].layout = &layout;
-		descriptorSets[s].ds = sets[i];
-
-		dlg_assert(dsLayout.numDynamicBuffers <= dynOffsets.size());
-		descriptorSets[s].dynamicOffsets = copySpan(cb, dynOffsets.data(), dsLayout.numDynamicBuffers);
-		dynOffsets.subspan(dsLayout.numDynamicBuffers);
-	}
-
-	if(followingDisturbed) {
-		// dlg_debug("disturbed following descriptorSets, from {}", lastSet + 1);
-		for(auto i = firstSet + sets.size(); i < descriptorSets.size(); ++i) {
-			descriptorSets[i] = {};
-		}
-	}
-}
-
 // Record
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		dev(xcb.dev),
@@ -96,6 +42,11 @@ CommandRecord::~CommandRecord() {
 		// remove record from all referenced resources
 		for(auto& [handle, uh] : handles) {
 			if(invalidated.find(handle) != invalidated.end()) {
+				continue;
+			}
+
+			if(uh->next == uh && uh->prev == uh) {
+				// descriptor set, nothing to do
 				continue;
 			}
 
@@ -157,34 +108,6 @@ void replaceInvalidatedLocked(CommandRecord& record) {
 }
 
 // util
-void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
-	dst.descriptorSets = copySpan(cb, src.descriptorSets);
-	dst.pushDescriptors = copySpan(cb, src.pushDescriptors);
-}
-
-GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
-	GraphicsState dst = src;
-	copy(cb, src, dst); // descriptors
-
-	dst.vertices = copySpan(cb, src.vertices);
-	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
-	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
-
-	return dst;
-}
-
-ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
-	ComputeState dst = src;
-	copy(cb, src, dst); // descriptors
-	return dst;
-}
-
-RayTracingState copy(CommandBuffer& cb, const RayTracingState& src) {
-	RayTracingState dst = src;
-	copy(cb, src, dst); // descriptors
-	return dst;
-}
-
 void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 	if(state.pipe) {
 		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,

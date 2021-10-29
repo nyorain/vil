@@ -1066,11 +1066,11 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
 	state = copy(cb, gfxState);
 	// TODO: only do this when pipe layout matches pcr layout
-	pushConstants.data = copySpan(cb, cb.pushConstants().data);
+	pushConstants.data = copySpan(*cb.record(), cb.pushConstants().data);
 
 	// TODO: does not really belong here. should be atomic then at least
 	if(cb.dev->captureCmdStack) {
-		this->stackTrace = &allocate<backward::StackTrace>(cb);
+		this->stackTrace = &allocate<backward::StackTrace>(*cb.record());
 		this->stackTrace->load_here(32u);
 	}
 }
@@ -1597,12 +1597,15 @@ void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 std::string BindDescriptorSetCmd::toString() const {
 	if(sets.size() == 1) {
-		auto [ds0Res, ds0Name] = name(sets[0]);
-		if(ds0Res == NameType::named) {
-			return dlg::format("BindDescriptorSet({}: {})", firstSet, ds0Name);
-		} else {
-			return dlg::format("BindDescriptorSet({})", firstSet);
-		}
+		// NOTE: we can't rely on the set handles being valid anymore
+		// Could make it an env var option.
+		// auto [ds0Res, ds0Name] = name(sets[0]);
+		// if(ds0Res == NameType::named) {
+		// 	return dlg::format("BindDescriptorSet({}: {})", firstSet, ds0Name);
+		// } else {
+		// 	return dlg::format("BindDescriptorSet({})", firstSet);
+		// }
+		return dlg::format("BindDescriptorSet({})", firstSet);
 	} else {
 		return dlg::format("BindDescriptorSets({}..{})",
 			firstSet, firstSet + sets.size() - 1);
@@ -1615,17 +1618,21 @@ void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
 
 	refButtonD(gui, pipeLayout);
 
-	// TODO: dynamic offsets
+	// TODO: display dynamic offsets
 
+	// NOTE: we can't rely on the set handles being valid anymore.
+	// Could make it an env var option.
+	/*
 	for (auto* ds : sets) {
 		ImGui::Bullet();
 
 		if(!ds) {
-			imGuiText("null or map");
+			imGuiText("null or invalidated");
 		} else {
 			refButton(gui, *ds);
 		}
 	}
+	*/
 }
 
 void BindDescriptorSetCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
@@ -1653,7 +1660,7 @@ Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
 DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb, const ComputeState& compState) {
 	state = copy(cb, compState);
 	// TODO: only do this when pipe layout matches pcr layout
-	pushConstants.data = copySpan(cb, cb.pushConstants().data);
+	pushConstants.data = copySpan(*cb.record(), cb.pushConstants().data);
 }
 
 void DispatchCmdBase::displayComputeState(Gui& gui) const {
@@ -2981,7 +2988,7 @@ void BuildAccelStructsIndirectCmd::replace(const CommandAllocHashMap<DeviceHandl
 TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb, const RayTracingState& rtState) {
 	state = copy(cb, rtState);
 	// TODO: only do this when pipe layout matches pcr layout
-	pushConstants.data = copySpan(cb, cb.pushConstants().data);
+	pushConstants.data = copySpan(*cb.record(), cb.pushConstants().data);
 }
 
 Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {

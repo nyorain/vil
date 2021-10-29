@@ -15,19 +15,16 @@ DeviceHandle::~DeviceHandle() {
 		return;
 	}
 
-	// TODO: yeah we want something like this. See ds3.hpp
-	// if(objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-	// 	return;
-	// }
-
 	// Inform command buffers that use this handle that it was
 	// destroyed.
 	invalidateCbs();
 
 	// Notify device that handle is destroyed. It will forward it
-	// to all instances that need to know (e.g. gui)
-	// TODO: hack
-	notifyDestruction(*dev, *this);
+	// to all instances that need to know (e.g. gui).
+	// Not needed for all handle types
+	if(objectType != VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+		notifyDestruction(*dev, *this);
+	}
 }
 
 void DeviceHandle::invalidateCbsLocked() {
@@ -57,6 +54,12 @@ void DeviceHandle::invalidateCbsLocked() {
 }
 
 void DeviceHandle::invalidateCbs() {
+	// Not needed for some handle types
+	if(objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+		dlg_assert(!refRecords);
+		return;
+	}
+
 	// We have to lock the mutex here since other threads might access
 	// this->refCbs (e.g. other command buffers being destroyed and removing
 	// themselves).

@@ -8,13 +8,6 @@
 #endif // VIL_DEBUG
 
 namespace vil {
-namespace {
-
-std::byte* data(ThreadMemBlock& mem, size_t offset) {
-	dlg_assert(offset <= mem.size); // offset == mem.size as 'end' ptr is ok
-	auto objSize = align(sizeof(mem), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-	return reinterpret_cast<std::byte*>(&mem) + objSize + offset;
-}
 
 void freeBlocks(ThreadMemBlock* head) {
 	if(!head) {
@@ -50,6 +43,7 @@ ThreadMemBlock& createMemBlock(size_t memSize, ThreadMemBlock* prev) {
 }
 
 // Guaranteed to be aligned with __STDCPP_DEFAULT_NEW_ALIGNMENT__
+/*
 std::byte* allocate(ThreadContext& tc, size_t size) {
 	dlg_assert(tc.memCurrent); // there is always one
 	dlg_assert(tc.memCurrent->offset <= tc.memCurrent->size);
@@ -93,6 +87,7 @@ std::byte* allocate(ThreadContext& tc, size_t size) {
 	tc.memCurrent->offset = size;
 	return data(*tc.memCurrent, 0);
 }
+*/
 
 // NOTE: legacy interface, might be useful in future.
 /*
@@ -112,8 +107,6 @@ void free(ThreadContext& tc, const std::byte* ptr, size_t size) {
 	tc.memCurrent->offset -= size;
 }
 */
-
-} // anon namespace
 
 ThreadContext& ThreadContext::get() {
 	static thread_local ThreadContext tc;
@@ -174,6 +167,7 @@ ThreadMemScope::~ThreadMemScope() {
 	tc.memCurrent->offset = offset;
 }
 
+/*
 std::byte* ThreadMemScope::allocRaw(size_t size) {
 	auto& tc = ThreadContext::get();
 
@@ -191,5 +185,6 @@ std::byte* ThreadMemScope::allocRaw(size_t size) {
 
 	return ptr;
 }
+*/
 
 } // namespace vil

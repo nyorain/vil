@@ -19,7 +19,7 @@ project('VIL', ['c', 'cpp'],
 # Options
 
 with_tracy = get_option('tracy')
-is_release = get_option('buildtype') == 'release'
+is_release = (get_option('buildtype') == 'release')
 
 profiling = with_tracy
 debug_checks = not is_release
@@ -121,7 +121,9 @@ if debug_checks
 endif
 
 if disable_dlg
-	layer_args += '-DDLG_DISABLE'
+	warning('disabling dlg')
+
+	layer_args += '-DDLG_DISABLE=1'
 	layer_args += cc.get_supported_arguments('-Wno-unused-variable')
 	layer_args += cc.get_supported_arguments('-Wno-unused-but-set-variable')
 	layer_args += cc.get_supported_arguments('-Wno-unused-parameter')

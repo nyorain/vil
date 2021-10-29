@@ -348,6 +348,14 @@ template<typename H> MapHandle<H>& get(Device& dev, H handle) {
 	return HandleDesc<H>::map(dev).get(handle);
 }
 
+template<typename H> MapHandle<H>& getLocked(Device& dev, H handle) {
+	if(HandleDesc<H>::wrap) {
+		return unwrap(handle);
+	}
+
+	return HandleDesc<H>::map(dev).getLocked(handle);
+}
+
 template<typename H> MapHandle<H>& get(VkDevice vkDev, H handle) {
 	if(HandleDesc<H>::wrap) {
 		return unwrap(handle);

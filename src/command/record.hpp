@@ -144,27 +144,7 @@ RayTracingState copy(CommandBuffer& cb, const RayTracingState& src);
 // might be dangling or null (if unset).
 void bind(Device&, VkCommandBuffer, const ComputeState&);
 
-// Links a 'DeviceHandle' to a 'CommandRecord'.
-struct UsedHandle {
-	UsedHandle(CommandRecord& rec) noexcept : commands(rec), record(&rec) {}
-
-	// List of commands where the associated handle is used inside the
-	// associated record.
-	CommandAllocList<Command*> commands;
-
-	// Links forming a linked list over all UsedHandle structs
-	// for the associated handle. That's why we store
-	// the associated record as well.
-	UsedHandle* next {};
-	UsedHandle* prev {};
-	CommandRecord* record {};
-};
-
-struct UsedImage : UsedHandle {
-	using UsedHandle::UsedHandle;
-	bool layoutChanged {};
-	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
-};
+struct UsedHandle;
 
 // Represents a mapping of descriptor set pointers, as present
 // in Command(Record), to their respective states at submission time.
@@ -175,14 +155,8 @@ struct CommandDescriptorSnapshot {
 // Represents the recorded state of a command buffer.
 // We represent it as extra, reference-counted object so we can display
 // old records as well.
-struct CommandRecord {
+struct CommandRecord : CommandRecordMemory {
 	Device* dev {};
-
-	// We own those mem blocks, could even own them past command pool destruction.
-	// Important this is the last object to be destroyed as other destructors
-	// might still access that memory we free in this destructor.
-	std::unique_ptr<CommandMemBlock, MemBlocksListDeleter> memBlocks {};
-	std::size_t memBlockOffset {}; // offset in first (current) mem block
 
 	// Might be null when this isn't the current command buffer recording.
 	// Guaranteed to be valid during recording.
@@ -253,6 +227,28 @@ struct CommandRecord {
 
 	CommandRecord(CommandBuffer& cb);
 	~CommandRecord();
+};
+
+// Links a 'DeviceHandle' to a 'CommandRecord'.
+struct UsedHandle {
+	UsedHandle(CommandRecord& rec) noexcept : commands(rec), record(&rec) {}
+
+	// List of commands where the associated handle is used inside the
+	// associated record.
+	CommandAllocList<Command*> commands;
+
+	// Links forming a linked list over all UsedHandle structs
+	// for the associated handle. That's why we store
+	// the associated record as well.
+	UsedHandle* next {};
+	UsedHandle* prev {};
+	CommandRecord* record {};
+};
+
+struct UsedImage : UsedHandle {
+	using UsedHandle::UsedHandle;
+	bool layoutChanged {};
+	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
 };
 
 // Returns whether the given CommandRecord uses the given handle.

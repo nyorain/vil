@@ -823,7 +823,7 @@ void CommandViewer::displayDs(Draw& draw) {
 				refButtonExpect(gui, bindingLayout.immutableSamplers[elemID].get());
 			} else {
 				auto& elem = images(state, bindingID)[elemID];
-				refButtonExpect(gui, elem.sampler.get());
+				refButtonExpect(gui, elem.sampler);
 			}
 		}
 
@@ -876,7 +876,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		imGuiText("TODO: bufferView viewer not implemented yet");
 	} else if(dsCat == DescriptorCategory::accelStruct) {
 		auto& elem = accelStructs(state, bindingID)[elemID];
-		refButtonExpect(gui, elem.get());
+		refButtonExpect(gui, elem);
 		// TODO: show data of acceleration structure?
 	} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
 		auto blockData = inlineUniformBlock(state, bindingID);
@@ -1043,9 +1043,8 @@ void CommandViewer::displayTransferData(Draw& draw) {
 
 		if constexpr(std::is_convertible_v<decltype(ccmd->dst), const Buffer*>) {
 			auto [offset, size] = dstBufInterval(*ccmd, viewData_.transfer.index);
-			// PERF: IntrusivePtr here not needed at all
 			ImGui::SameLine();
-			drawOffsetSize({IntrusivePtr<Buffer>{ccmd->dst}, offset, size});
+			drawOffsetSize({ccmd->dst, offset, size});
 			refBuffer = true;
 		} else {
 			static_assert(std::is_convertible_v<decltype(ccmd->dst), const Image*>);
@@ -1064,9 +1063,8 @@ void CommandViewer::displayTransferData(Draw& draw) {
 
 		if constexpr(std::is_convertible_v<decltype(ccmd->src), const Buffer*>) {
 			auto [offset, size] = srcBufInterval(*ccmd, viewData_.transfer.index);
-			// PERF: IntrusivePtr here not needed at all
 			ImGui::SameLine();
-			drawOffsetSize({IntrusivePtr<Buffer>{ccmd->src}, offset, size});
+			drawOffsetSize({ccmd->src, offset, size});
 			refBuffer = true;
 		} else {
 			static_assert(std::is_convertible_v<decltype(ccmd->src), const Image*>);

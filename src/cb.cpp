@@ -14,6 +14,201 @@
 
 namespace vil {
 
+// TODO: remove
+[[nodiscard]] inline std::byte* allocate(CommandBuffer& cb, size_t size, unsigned alignment) {
+	dlg_assert(cb.state() == CommandBuffer::State::recording);
+	auto* rec = cb.record();
+	return allocate(rec->memBlocks, rec->memBlockOffset, size, alignment);
+}
+
+template<typename T, typename... Args>
+[[nodiscard]] T& allocate(CommandBuffer& cb, Args&&... args) {
+	auto* raw = allocate(cb, sizeof(T), alignof(T));
+	return *(new(raw) T(std::forward<Args>(args)...));
+}
+
+template<typename T>
+[[nodiscard]] span<T> allocSpan(CommandBuffer& cb, size_t count) {
+	if(count == 0) {
+		return {};
+	}
+
+	auto* raw = allocate(cb, sizeof(T) * count, alignof(T));
+	auto* arr = new(raw) T[count];
+	return span<T>(arr, count);
+}
+
+template<typename T>
+[[nodiscard]] span<T> allocSpan0(CommandBuffer& cb, size_t count) {
+	static_assert(std::is_trivially_copyable_v<T>);
+	auto ret = allocSpan<T>(cb, count);
+	std::memset((void*) ret.data(), 0x0, count * sizeof(ret[0]));
+	return ret;
+}
+
+template<typename T>
+[[nodiscard]] span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, span<T> data) {
+	return copySpan(cb, data.data(), data.size());
+}
+
+inline const char* copyString(CommandBuffer& cb, std::string_view src) {
+	auto dst = allocSpan<char>(cb, src.size() + 1);
+	std::copy(src.begin(), src.end(), dst.data());
+	dst[src.size()] = 0;
+	return dst.data();
+}
+
+template<typename T>
+void ensureSize(CommandBuffer& cb, span<T>& buf, size_t size) {
+	if(buf.size() >= size) {
+		return;
+	}
+
+	auto newBuf = allocSpan<T>(cb, size);
+	std::copy(buf.begin(), buf.end(), newBuf.begin());
+	buf = newBuf;
+}
+
+template<typename T>
+void ensureSize0(CommandBuffer& cb, span<T>& buf, size_t size) {
+	if(buf.size() >= size) {
+		return;
+	}
+
+	auto newBuf = allocSpan0<T>(cb, size);
+	std::copy(buf.begin(), buf.end(), newBuf.begin());
+	buf = newBuf;
+}
+
+template<typename D, typename T>
+void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
+	dst = allocSpan<D>(cb, count);
+	for(auto i = 0u; i < count; ++i) {
+		dst[i] = upgrade(data[i]);
+	}
+}
+
+template<typename T>
+[[nodiscard]] span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, T* data, size_t count) {
+	return copySpan(*cb.record(), data, count);
+}
+
+void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
+	VkBaseInStructure* last = nullptr;
+	auto it = pNext;
+	while(it) {
+		auto src = static_cast<const VkBaseInStructure*>(pNext);
+		auto size = structSize(src->sType);
+		dlg_assertm(size > 0, "Unknown structure type!");
+
+		auto buf = allocate(cb, size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
+		// TODO: technicallly UB to not construct object via placement new.
+		// In practice, this works everywhere since its only C PODs
+		std::memcpy(dst, src, size);
+
+		if(last) {
+			last->pNext = dst;
+		} else {
+			pNext = dst;
+		}
+
+		last = dst;
+		pNext = src->pNext;
+	}
+}
+
+const void* copyChain(CommandBuffer& cb, const void* pNext) {
+	auto ret = pNext;
+	copyChainInPlace(cb, ret);
+	return ret;
+}
+
+void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
+		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
+	ensureSize0(cb, descriptorSets, firstSet + sets.size());
+
+	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
+	// There may be errors here.
+	// TODO PERF: do we even need to track it like this? only useful if we
+	// also show it in UI which sets were disturbed.
+	// Disabled for now
+
+// #define DS_DISTURB_CHECKS
+#ifdef DS_DISTURB_CHECKS
+	for(auto i = 0u; i < firstSet; ++i) {
+		if(!descriptorSets[i].ds) {
+			continue;
+		}
+
+		dlg_assert(descriptorSets[i].layout);
+		if(!compatibleForSetN(*descriptorSets[i].layout, layout, i)) {
+			// disturbed!
+			// dlg_debug("disturbed ds {}", i);
+			descriptorSets[i] = {};
+		}
+	}
+
+	auto followingDisturbed = false;
+#endif // DS_DISTURB_CHECKS
+
+	for(auto i = 0u; i < sets.size(); ++i) {
+		auto s = firstSet + i;
+		auto& dsLayout = *layout.descriptors[s];
+
+#ifdef DS_DISTURB_CHECKS
+		if(!descriptorSets[s].layout || !compatibleForSetN(*descriptorSets[s].layout, layout, s)) {
+			followingDisturbed = true;
+		}
+#endif // DS_DISTURB_CHECKS
+
+		descriptorSets[s].layout = &layout;
+		descriptorSets[s].ds = sets[i];
+
+		dlg_assert(dsLayout.numDynamicBuffers <= dynOffsets.size());
+		descriptorSets[s].dynamicOffsets = copySpan(cb, dynOffsets.data(), dsLayout.numDynamicBuffers);
+		dynOffsets.subspan(dsLayout.numDynamicBuffers);
+	}
+
+#ifdef DS_DISTURB_CHECKS
+	if(followingDisturbed) {
+		// dlg_debug("disturbed following descriptorSets, from {}", lastSet + 1);
+		for(auto i = firstSet + sets.size(); i < descriptorSets.size(); ++i) {
+			descriptorSets[i] = {};
+		}
+	}
+#endif // DS_DISTURB_CHECKS
+}
+
+void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
+	dst.descriptorSets = copySpan(cb, src.descriptorSets);
+	dst.pushDescriptors = copySpan(cb, src.pushDescriptors);
+}
+
+GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
+	GraphicsState dst = src;
+	copy(cb, src, dst); // descriptors
+
+	dst.vertices = copySpan(cb, src.vertices);
+	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
+	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
+
+	return dst;
+}
+
+ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
+	ComputeState dst = src;
+	copy(cb, src, dst); // descriptors
+	return dst;
+}
+
+RayTracingState copy(CommandBuffer& cb, const RayTracingState& src) {
+	RayTracingState dst = src;
+	copy(cb, src, dst); // descriptors
+	return dst;
+}
+
+
 // CommandBuffer
 CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
 		pool_(&xpool), handle_(xhandle) {
@@ -145,6 +340,13 @@ void CommandBuffer::doEnd() {
 		state_ = State::executable;
 
 		for(auto& [handle, uh] : record_->handles) {
+			if(handle->objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+				// special sentinel
+				uh->next = uh;
+				uh->prev = uh;
+				continue;
+			}
+
 			if(handle->refRecords) {
 				handle->refRecords->prev = uh;
 			}
@@ -927,7 +1129,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
 
 	ThreadMemScope memScope;
-	auto setHandles = memScope.alloc<VkDescriptorSet>(descriptorSetCount);
+	auto setHandles = memScope.allocUndef<VkDescriptorSet>(descriptorSetCount);
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
 		auto& ds = get(*cb.dev, pDescriptorSets[i]);
 

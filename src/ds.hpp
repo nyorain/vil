@@ -125,8 +125,8 @@ bool compatible(const DescriptorSetLayout&, const DescriptorSetLayout& b);
 
 // Information about a single binding in a DescriptorSet.
 struct ImageDescriptor {
-	IntrusivePtr<ImageView> imageView;
-	IntrusivePtr<Sampler> sampler; // even stored here if immutable in layout
+	ImageView* imageView {};
+	Sampler* sampler {}; // even stored here if immutable in layout
 	VkImageLayout layout {};
 };
 
@@ -137,7 +137,7 @@ inline bool operator==(const ImageDescriptor& a, const ImageDescriptor& b) {
 }
 
 struct BufferDescriptor {
-	IntrusivePtr<Buffer> buffer;
+	Buffer* buffer {};
 	VkDeviceSize offset {};
 	VkDeviceSize range {};
 };
@@ -148,8 +148,8 @@ inline bool operator==(const BufferDescriptor& a, const BufferDescriptor& b) {
 		a.range == b.range;
 }
 
-using BufferViewDescriptor = IntrusivePtr<BufferView>;
-using AccelStructDescriptor = IntrusivePtr<AccelStruct>;
+using BufferViewDescriptor = BufferView*;
+using AccelStructDescriptor = AccelStruct*;
 
 // Temporary wrapper around descriptor state.
 struct DescriptorStateRef {

@@ -418,7 +418,7 @@ struct BindDescriptorSetCmd final : Command {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
 	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
-	span<DescriptorSet*> sets;
+	span<DescriptorSet*> sets; // NOTE: handles may be invalid
 	span<u32> dynamicOffsets;
 
 	std::string toString() const override;

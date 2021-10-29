@@ -289,8 +289,10 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 	refButtonExpect(*gui_, ds.pool);
 
 	ImGui::Text("Bindings");
-	std::lock_guard lock(ds.mutex);
 
+	// TODO: we can rely on the bindings being valid when we don't ref them
+	/*
+	std::lock_guard lock(ds.mutex);
 	for(auto b = 0u; b < ds.layout->bindings.size(); ++b) {
 		auto& layout = ds.layout->bindings[b];
 		dlg_assert(layout.binding == b);
@@ -300,7 +302,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 				case DescriptorCategory::image: {
 					auto& binding = images(ds, b)[e];
 					if(needsImageView(type)) {
-						refButtonExpect(*gui_, binding.imageView.get());
+						refButtonExpect(*gui_, *binding.imageView.get());
 					}
 					if(needsImageLayout(type)) {
 						imGuiText("{}", vk::name(binding.layout));
@@ -351,6 +353,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 			ImGui::Unindent();
 		}
 	}
+	*/
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {

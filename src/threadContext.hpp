@@ -48,6 +48,62 @@ struct ThreadContext {
 	~ThreadContext();
 };
 
+inline std::byte* data(ThreadMemBlock& mem, size_t offset) {
+	dlg_assert(offset <= mem.size); // offset == mem.size as 'end' ptr is ok
+	constexpr auto objSize = align(sizeof(mem), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+	return reinterpret_cast<std::byte*>(&mem) + objSize + offset;
+}
+
+void freeBlocks(ThreadMemBlock* head);
+ThreadMemBlock& createMemBlock(size_t memSize, ThreadMemBlock* prev);
+
+// We really want this function to be inlined
+inline std::byte* allocate(ThreadContext& tc, size_t size) {
+	ExtZoneScoped;
+
+	dlg_assert(tc.memCurrent); // there is always one
+	dlg_assert(tc.memCurrent->offset <= tc.memCurrent->size);
+	size = align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+
+	// assertCanary(*tc.memCurrent);
+
+	// fast path: enough memory available directly inside the command buffer,
+	// simply align and advance the offset
+	auto newBlockSize = size_t(tc.minBlockSize);
+	dlg_assert(tc.memCurrent && tc.memRoot);
+	dlg_assert(tc.memCurrent->offset % __STDCPP_DEFAULT_NEW_ALIGNMENT__ == 0u);
+	if(tc.memCurrent->offset + size <= tc.memCurrent->size) {
+		auto ret = data(*tc.memCurrent, tc.memCurrent->offset);
+		tc.memCurrent->offset += size;
+		return ret;
+	}
+
+	if(tc.memCurrent->next) {
+		if(tc.memCurrent->next->size >= size) {
+			tc.memCurrent = tc.memCurrent->next;
+			tc.memCurrent->offset = size;
+			return data(*tc.memCurrent, 0);
+		}
+
+		// TODO: Just insert it in between, no need to free blocks here I guess
+		dlg_warn("Giant local allocation (size {}); have to free previous blocks", size);
+		freeBlocks(tc.memCurrent->next);
+		tc.memCurrent->next = nullptr;
+	}
+
+	// not enough memory available in last block, allocate new one
+	newBlockSize = std::min<size_t>(tc.blockGrowFac * tc.memCurrent->size, tc.maxBlockSize);
+	newBlockSize = std::max<size_t>(newBlockSize, size);
+
+	dlg_assert(!tc.memCurrent->next);
+	auto& newBlock = createMemBlock(newBlockSize, tc.memCurrent);
+	tc.memCurrent->next = &newBlock;
+
+	tc.memCurrent = &newBlock;
+	tc.memCurrent->offset = size;
+	return data(*tc.memCurrent, 0);
+}
+
 // Allocated memory from ThreadContext.
 // Will simply release all allocated memory by reset the allocation offset in the
 // current ThreadContext when this object is destroyed.
@@ -68,9 +124,20 @@ struct ThreadMemScope {
 	std::byte* current {};
 #endif // VIL_DEBUG
 
+
+	// TODO: make naming here consistent with command allocator.
+	// alloc -> allocSpan0
+	// allocUndef -> allocSpan
+
 	template<typename T>
 	span<T> alloc(size_t n) {
 		auto ptr = allocRaw<T>(n);
+		return {ptr, n};
+	}
+
+	template<typename T>
+	span<T> allocUndef(size_t n) {
+		auto ptr = allocRawUndef<T>(n);
 		return {ptr, n};
 	}
 
@@ -91,7 +158,31 @@ struct ThreadMemScope {
 		return ptr;
 	}
 
-	std::byte* allocRaw(size_t size);
+	template<typename T>
+	T* allocRawUndef(size_t n = 1) {
+		static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto ptr = reinterpret_cast<T*>(this->allocRaw(sizeof(T) * n));
+		new(ptr) T[n];
+		return ptr;
+	}
+
+	inline std::byte* allocRaw(size_t size) {
+		auto& tc = ThreadContext::get();
+
+#ifdef VIL_DEBUG
+		dlg_assertm(data(*tc.memCurrent, tc.memCurrent->offset) == this->current,
+			"Invalid non-stacking interleaving of ThreadMemScope detected");
+#endif // VIL_DEBUG
+
+		auto* ptr = vil::allocate(tc, size);
+
+#ifdef VIL_DEBUG
+		current = ptr + align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		sizeAllocated += align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+#endif // VIL_DEBUG
+
+		return ptr;
+	}
 
 	ThreadMemScope(); // stores current state
 	~ThreadMemScope(); // resets state
