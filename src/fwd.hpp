@@ -129,7 +129,15 @@ struct BuiltInResource;
 
 } // namespace spc
 
+// TODO: rename to something like VIL_VK_CHECK
 #define VK_CHECK(x) do {\
 		auto result = (x);\
 		dlg_assertm(result == VK_SUCCESS, "result: {}", result); \
 	} while(0)
+
+
+#ifdef VIL_DEBUG
+	#define VIL_DEBUG_ONLY(x) x
+#else // VIL_DEBUG(x)
+	#define VIL_DEBUG_ONLY(x)
+#endif // VIL_DEBUG(x)

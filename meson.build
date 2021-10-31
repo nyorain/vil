@@ -124,9 +124,14 @@ if disable_dlg
 	warning('disabling dlg')
 
 	layer_args += '-DDLG_DISABLE=1'
-	layer_args += cc.get_supported_arguments('-Wno-unused-variable')
-	layer_args += cc.get_supported_arguments('-Wno-unused-but-set-variable')
-	layer_args += cc.get_supported_arguments('-Wno-unused-parameter')
+
+	layer_args += cc.get_supported_arguments([
+		'/wd4100', # unreferenced formal parameter.
+		'/wd4189', # unused local variable
+		'-Wno-unused-parameter',
+		'-Wno-unused-but-set-variable',
+		'-Wno-unused-variable',
+	])
 endif
 
 # deps

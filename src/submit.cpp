@@ -539,18 +539,17 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 			return true;
 		}
 
-
 		// for(auto& pair : rec.lastDescriptorState.states) {
 			// auto& state = *pair.second;
 		for(auto& pair : rec.handles) {
-			auto& handle = nonNull(pair.first);
-			if(handle.objectType != VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+			auto& rhandle = nonNull(pair.first);
+			if(rhandle.objectType != VK_OBJECT_TYPE_DESCRIPTOR_SET) {
 				continue;
 			}
 
 			// important that the ds mutex is locked mainly for
 			// update_unused_while_pending.
-			auto& state = static_cast<DescriptorSet&>(handle);
+			auto& state = static_cast<DescriptorSet&>(rhandle);
 			std::lock_guard lock(state.mutex);
 
 			for(auto& binding : state.layout->bindings) {

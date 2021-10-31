@@ -49,7 +49,6 @@ T u64ToHandle(u64 id) {
 #ifdef __GNUC__
 	return __builtin_bit_cast(T, id);
 #else
-	variant 1:
 	T ret {};
 	std::memcpy(&ret, &id, sizeof(T));
 	return ret;

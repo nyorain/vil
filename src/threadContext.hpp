@@ -6,6 +6,8 @@
 #include <cassert>
 #include <memory_resource>
 #include <util/util.hpp>
+#include <util/profiling.hpp>
+#include <dlg/dlg.hpp>
 
 // per-thread allocator for temporary local memory, allocated in stack-like
 // fashion. Due to its strict requirement, only useful to create one-shot
@@ -20,13 +22,13 @@ struct ThreadMemBlock {
 	size_t size {};
 	size_t offset {};
 
-#ifdef VIL_DEBUG
-	// since we store the metadata right next to the raw byte array, we
-	// use a canary in debugging to warn about possibly corrupt metadat
-	// as early as possible.
-	static constexpr auto canaryValue = u64(0xCAFEC0DED00DDEADULL);
-	u64 canary {canaryValue};
-#endif // VIL_DEBUG
+	VIL_DEBUG_ONLY(
+		// since we store the metadata right next to the raw byte array, we
+		// use a canary in debugging to warn about possibly corrupt metadat
+		// as early as possible.
+		static constexpr auto canaryValue = u64(0xCAFEC0DED00DDEADULL);
+		u64 canary {canaryValue};
+	)
 
 	// following: std::byte[size]
 };
@@ -65,7 +67,9 @@ inline std::byte* allocate(ThreadContext& tc, size_t size) {
 	dlg_assert(tc.memCurrent->offset <= tc.memCurrent->size);
 	size = align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
-	// assertCanary(*tc.memCurrent);
+	VIL_DEBUG_ONLY(
+		dlg_assert(tc.memCurrent->canary == ThreadMemBlock::canaryValue);
+	)
 
 	// fast path: enough memory available directly inside the command buffer,
 	// simply align and advance the offset
@@ -119,11 +123,10 @@ struct ThreadMemScope {
 	// only for debugging, making sure that we never use multiple
 	// ThreadMemScope objects at the same time in any way not resembling
 	// a stack.
-#ifdef VIL_DEBUG
-	size_t sizeAllocated {};
-	std::byte* current {};
-#endif // VIL_DEBUG
-
+	VIL_DEBUG_ONLY(
+		size_t sizeAllocated {};
+		std::byte* current {};
+	)
 
 	// TODO: make naming here consistent with command allocator.
 	// alloc -> allocSpan0
@@ -169,27 +172,66 @@ struct ThreadMemScope {
 	inline std::byte* allocRaw(size_t size) {
 		auto& tc = ThreadContext::get();
 
-#ifdef VIL_DEBUG
-		dlg_assertm(data(*tc.memCurrent, tc.memCurrent->offset) == this->current,
-			"Invalid non-stacking interleaving of ThreadMemScope detected");
-#endif // VIL_DEBUG
+		VIL_DEBUG_ONLY(
+			dlg_assertm(data(*tc.memCurrent, tc.memCurrent->offset) == this->current,
+				"Invalid non-stacking interleaving of ThreadMemScope detected");
+		)
 
 		auto* ptr = vil::allocate(tc, size);
 
-#ifdef VIL_DEBUG
-		current = ptr + align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-		sizeAllocated += align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-#endif // VIL_DEBUG
+		VIL_DEBUG_ONLY(
+			current = ptr + align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+			sizeAllocated += align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		)
 
 		return ptr;
 	}
 
-	ThreadMemScope(); // stores current state
-	~ThreadMemScope(); // resets state
+	inline ThreadMemScope() {
+		auto& tc = ThreadContext::get();
+		block = tc.memCurrent;
+		offset = block->offset;
+
+		VIL_DEBUG_ONLY(
+			current = data(*block, offset);
+		)
+	}
+
+	inline ~ThreadMemScope() {
+		auto& tc = ThreadContext::get();
+
+		VIL_DEBUG_ONLY(
+			// make sure that all memory in between did come from us
+			// starting at the allocation point we stored when 'this' was
+			// constructed...
+			auto off = this->offset;
+			auto size = this->sizeAllocated;
+			auto it = this->block;
+
+			// ...iterate through the blocks allocated since then...
+			while(off + size > it->offset) {
+				dlg_assert(it->canary == ThreadMemBlock::canaryValue);
+				dlg_assertm(it->next, "remaining: {}", size);
+				dlg_assertm(off <= it->offset, "{} vs {}", off, it->offset);
+				size -= it->offset - off;
+				off = 0u;
+				it = it->next;
+			}
+
+			// ...and assert that we would land at the current allocation point
+			dlg_assert(it->canary == ThreadMemBlock::canaryValue);
+			dlg_assert(it == tc.memCurrent);
+			dlg_assertm(it->offset == off + size,
+				"{} != {} (off {}, size {})", it->offset, off + size, off, size);
+		)
+
+		tc.memCurrent = block;
+		tc.memCurrent->offset = offset;
+	}
 };
 
 template<typename T>
-class ThreadMemoryAllocator {
+struct ThreadMemoryAllocator {
 	using is_always_equal = std::false_type;
 	using value_type = T;
 
@@ -237,5 +279,10 @@ class ThreadMemoryResource : public std::pmr::memory_resource {
 		return tmr->memScope_ == this->memScope_;
 	}
 };
+
+inline ThreadContext& ThreadContext::get() {
+	static thread_local ThreadContext tc;
+	return tc;
+}
 
 } // namespace vil

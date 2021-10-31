@@ -108,10 +108,10 @@ void free(ThreadContext& tc, const std::byte* ptr, size_t size) {
 }
 */
 
-ThreadContext& ThreadContext::get() {
-	static thread_local ThreadContext tc;
-	return tc;
-}
+// ThreadContext& ThreadContext::get() {
+// 	static thread_local ThreadContext tc;
+// 	return tc;
+// }
 
 ThreadContext::ThreadContext() {
 	// already allocate the first block, others may rely on it
@@ -125,6 +125,7 @@ ThreadContext::~ThreadContext() {
 	freeBlocks(memRoot);
 }
 
+/*
 ThreadMemScope::ThreadMemScope() {
 	auto& tc = ThreadContext::get();
 	block = tc.memCurrent;
@@ -134,7 +135,9 @@ ThreadMemScope::ThreadMemScope() {
 	current = data(*block, offset);
 #endif // VIL_DEBUG
 }
+*/
 
+/*
 ThreadMemScope::~ThreadMemScope() {
 	auto& tc = ThreadContext::get();
 
@@ -166,6 +169,7 @@ ThreadMemScope::~ThreadMemScope() {
 	tc.memCurrent = block;
 	tc.memCurrent->offset = offset;
 }
+*/
 
 /*
 std::byte* ThreadMemScope::allocRaw(size_t size) {

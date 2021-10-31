@@ -420,6 +420,7 @@ void CommandViewer::displayDsList() {
 				continue;
 			}
 
+			// TODO: this can happen now with descriptor cows
 			auto stateIt = dsState_.states.find(ds.ds);
 			dlg_assert_or(stateIt != dsState_.states.end(), continue);
 

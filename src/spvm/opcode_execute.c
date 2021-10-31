@@ -536,6 +536,7 @@ static spvm_vec4f spvm_op_image_gather(spvm_state_t state,
 		dim = 3u;
 	} else {
 		assert(!"Unhandled SpvDim");
+		dim = 3u;
 	}
 
 	float layer = 0.f;

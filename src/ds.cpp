@@ -91,7 +91,7 @@ size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDes
 	auto lastCount = last.descriptorCount;
 
 	if(last.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) {
-		ret += variableDescriptorCount;
+		lastCount = variableDescriptorCount;
 	}
 
 	ret += lastCount * descriptorSize(last.descriptorType);
@@ -154,7 +154,11 @@ void initImmutableSamplers(DescriptorStateRef state) {
 			for(auto e = 0u; e < binds.size(); ++e) {
 				auto* sampler = state.layout->bindings[b].immutableSamplers[e].get();
 				dlg_assert(sampler);
-				dlg_assert(sampler->handle);
+
+				// NOTE: this can happen e.g. when initializing the samplers
+				// of a ds cow. It means the sampler itself was already
+				// destroyed but we keep our object alive for the ui.
+				// dlg_assert(sampler->handle);
 
 				binds[e].sampler = sampler;
 				if(refBindings) {
@@ -171,42 +175,6 @@ void initDescriptorState(std::byte* data,
 	// Compbilers should probably optimize it to this tho
 	auto bindingSize = totalDescriptorMemSize(layout, variableDescriptorCount);
 	std::memset(data, 0x0, bindingSize);
-
-	/*
-	auto it = data;
-	for(auto& binding : layout.bindings) {
-		auto count = binding.descriptorCount;
-		if(binding.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT) {
-			count = variableDescriptorCount;
-		}
-
-		switch(category(binding.descriptorType)) {
-			case DescriptorCategory::buffer:
-				new(it) BufferDescriptor[count];
-				it += count * sizeof(BufferDescriptor);
-				break;
-			case DescriptorCategory::image:
-				new(it) ImageDescriptor[count];
-				it += count * sizeof(ImageDescriptor);
-				break;
-			case DescriptorCategory::bufferView:
-				new(it) BufferViewDescriptor[count];
-				it += count * sizeof(BufferViewDescriptor);
-				break;
-			case DescriptorCategory::accelStruct:
-				new(it) AccelStructDescriptor[count];
-				it += count * sizeof(AccelStructDescriptor);
-				break;
-			case DescriptorCategory::inlineUniformBlock:
-				// nothing to initialize, just raw data here
-				it += count;
-				break;
-			case DescriptorCategory::none:
-				dlg_error("unreachable: invalid descriptor type");
-				break;
-		}
-	}
-	*/
 }
 
 void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
@@ -366,41 +334,6 @@ void unrefBindings(DescriptorStateRef state) {
 				break;
 		}
 	}
-
-	// destroy bindings, mainly to release intrusive ptrs
-	/*
-	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
-		auto& binding = state.layout->bindings[b];
-		if(!descriptorCount(state, b)) {
-			continue;
-		}
-
-		switch(category(binding.descriptorType)) {
-			case DescriptorCategory::buffer: {
-				auto b = buffers(state, binding.binding);
-				std::destroy(b.begin(), b.end());
-				break;
-			} case DescriptorCategory::bufferView: {
-				auto b = bufferViews(state, binding.binding);
-				std::destroy(b.begin(), b.end());
-				break;
-			} case DescriptorCategory::image: {
-				auto b = images(state, binding.binding);
-				std::destroy(b.begin(), b.end());
-				break;
-			} case DescriptorCategory::accelStruct: {
-				auto b = accelStructs(state, binding.binding);
-				std::destroy(b.begin(), b.end());
-				break;
-			} case DescriptorCategory::inlineUniformBlock: {
-				// no-op, we just have raw bytes here
-				break;
-			} case DescriptorCategory::none:
-				dlg_error("unreachable: invalid descriptor type");
-				break;
-		}
-	}
-	*/
 }
 
 void DescriptorStateCopy::Deleter::operator()(DescriptorStateCopy* copy) const {
@@ -1165,7 +1098,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 	nci.descriptorPool = pool.handle;
 
 	ThreadMemScope memScope;
-	auto dsLayouts = memScope.alloc<VkDescriptorSetLayout>(count);
+	auto dsLayouts = memScope.allocUndef<VkDescriptorSetLayout>(count);
 	for(auto i = 0u; i < count; ++i) {
 		dsLayouts[i] = get(dev, pAllocateInfo->pSetLayouts[i]).handle;
 	}
@@ -1189,7 +1122,6 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateDescriptorSets(
 		variableCountInfo->descriptorSetCount == pAllocateInfo->descriptorSetCount);
 
 	auto dss = memScope.alloc<DescriptorSet*>(count);
-	std::memset(dss.data(), 0x0, dss.size() * sizeof(dss[0]));
 	VkResult res = VK_SUCCESS;
 
 	auto i = 0u;

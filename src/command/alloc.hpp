@@ -19,10 +19,12 @@
 #include <memory>
 #include <string_view>
 #include <list>
+#include <chrono>
 #include <unordered_map>
 #include <unordered_set>
 #include <util/span.hpp>
 #include <util/ext.hpp>
+#include <util/util.hpp>
 #include <dlg/dlg.hpp>
 
 namespace vil {
@@ -59,7 +61,7 @@ struct CommandRecordMemory {
 };
 
 inline std::byte* data(CommandMemBlock& mem, size_t offset) {
-	static constexpr auto alignedStructSize = align(sizeof(CommandMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+	constexpr auto alignedStructSize = align(sizeof(CommandMemBlock), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 	dlg_assert(offset < mem.size);
 	return reinterpret_cast<std::byte*>(&mem) + alignedStructSize + offset;
 }

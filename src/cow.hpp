@@ -1,6 +1,8 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <variant>
+#include <optional>
 #include <util/ownbuf.hpp>
 
 // We sometimes want to reference buffer or image data later on - e.g.
