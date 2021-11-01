@@ -60,9 +60,6 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 		} else if(sub.ourSemaphore && dev.timelineSemaphores) {
 			dev.semaphorePool.push_back(sub.ourSemaphore);
 		}
-
-		if(subm.queue->lastLayerSubmission == sub.queueSubmitID) {
-		}
 	}
 
 	if(subm.ourFence) {
@@ -204,6 +201,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		postProcessLocked(submitter);
 		dev.pending.push_back(std::move(batchPtr));
 	}
+
+	// XXX: plain forward for debugging
+	// auto res = dev.dispatch.QueueSubmit(qd.handle,
+	// 	submitCount, pSubmits, fence);
 
 	return res;
 }

@@ -1170,15 +1170,9 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 	auto handles = memScope.alloc<VkDescriptorSet>(descriptorSetCount);
 
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
-		if(!HandleDesc<VkDescriptorSet>::wrap) {
-			auto ptr = dev.descriptorSets.mustMove(pDescriptorSets[i]);
-			handles[i] = ptr->handle;
-			destroy(*ptr, true);
-		} else {
-			auto& ds = get(dev, pDescriptorSets[i]);
-			handles[i] = ds.handle;
-			destroy(ds, true);
-		}
+		auto& ds = get(dev, pDescriptorSets[i]);
+		handles[i] = ds.handle;
+		destroy(ds, true);
 	}
 
 	{
