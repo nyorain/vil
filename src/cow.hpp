@@ -110,7 +110,7 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 	VkDeviceSize srcOffset, OwnBuffer& dst, VkDeviceSize dstOffset,
 	VkDeviceSize size);
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
-	VkImageLayout srcLayout, const VkImageSubresourceRange& srcSubres,
+	VkImageLayout srcLayout, VkImageSubresourceRange srcSubres,
 	u32 srcQueueFam);
 void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 	OwnBuffer& dst, Image& src, VkImageLayout srcLayout,

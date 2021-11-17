@@ -1759,7 +1759,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		res = dev().dispatch.QueuePresentKHR(info.presentQueue, &presentInfo);
 	}
 
-	if(res != VK_SUCCESS) {
+	if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
 		dlg_error("vkQueuePresentKHR error: {}", vk::name(res));
 
 		// TODO: not sure how to handle this the best
@@ -1859,8 +1859,8 @@ VkResult Gui::addLegacySync(Draw& draw, VkSubmitInfo& submitInfo) {
 		if(!draw.futureSemaphoreUsed && draw.futureSemaphoreSignaled) {
 			// This is a bit messy.
 			// So, 'futureSemaphore' was signaled by us but never consumed
-			// (happens when we just didn't access the anything the
-			// applicaiton used since then). We have to reset the
+			// (happens when we just didn't access anything the
+			// application used since then). We have to reset the
 			// semaphore.
 			// Initially, we simply waited on it via
 			// submitInfo.pWaitSemaphores but no one knows if this

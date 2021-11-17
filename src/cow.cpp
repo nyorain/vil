@@ -131,8 +131,10 @@ CopiedImage::~CopiedImage() {
 // 'src' (which is in the given 'srcLayout') into 'dst'.
 // After executing the recorded commands, 'dst' will contain srcSubres from src.
 void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
-		VkImageLayout srcLayout, const VkImageSubresourceRange& srcSubres,
+		VkImageLayout srcLayout, VkImageSubresourceRange srcSubres,
 		u32 srcQueueFam) {
+	(void) srcLayout;
+
 	if(!src.hasTransferSrc) {
 		// There are only very specific cases where this can happen,
 		// we could work around some of them (e.g. transient
@@ -155,24 +157,21 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		}
 	}
 
-	auto layerCount = srcSubres.layerCount;
-	auto levelCount = srcSubres.levelCount;
-
-	if(layerCount == VK_REMAINING_ARRAY_LAYERS) {
-		layerCount = src.ci.arrayLayers - srcSubres.baseArrayLayer;
+	if(srcSubres.layerCount == VK_REMAINING_ARRAY_LAYERS) {
+		srcSubres.layerCount = src.ci.arrayLayers - srcSubres.baseArrayLayer;
 	}
-	if(levelCount == VK_REMAINING_MIP_LEVELS) {
-		levelCount = src.ci.mipLevels - srcSubres.levelCount;
+	if(srcSubres.levelCount == VK_REMAINING_MIP_LEVELS) {
+		srcSubres.levelCount = src.ci.mipLevels - srcSubres.levelCount;
 	}
 
-	if(layerCount == 0u || levelCount == 0u ||
+	if(srcSubres.layerCount == 0u || srcSubres.levelCount == 0u ||
 			extent.width == 0u || extent.height == 0u || extent.depth == 0u) {
 		dlg_warn("Image copy would be empty");
 		return;
 	}
 
-	auto success = dst.init(dev, src.ci.format, extent, layerCount,
-		levelCount, srcSubres.aspectMask, srcQueueFam);
+	auto success = dst.init(dev, src.ci.format, extent, srcSubres.layerCount,
+		srcSubres.levelCount, srcSubres.aspectMask, srcQueueFam);
 	if(!success) {
 		dlg_warn("Initializing image copy failed");
 		return;
