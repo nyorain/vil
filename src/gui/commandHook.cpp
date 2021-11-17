@@ -1214,14 +1214,13 @@ void CommandHookRecord::copyAttachment(RecordInfo& info, unsigned attID,
 	DebugLabel lbl(dev, cb, "vil:copyAttachment");
 
 	dlg_assert(info.beginRenderPassCmd);
-	auto& fb = nonNull(info.beginRenderPassCmd->fb);
-
-	if(attID >= fb.attachments.size()) {
-		dlg_error("copyAttachment {} out of range ({})", attID, fb.attachments.size());
+	if(attID >= info.beginRenderPassCmd->attachments.size()) {
+		dlg_error("copyAttachment {} out of range ({})", attID,
+			info.beginRenderPassCmd->attachments.size());
 		return;
 	}
 
-	auto& imageView = fb.attachments[attID];
+	auto& imageView = info.beginRenderPassCmd->attachments[attID];
 	dlg_assert(imageView);
 	dlg_assert(imageView->img);
 	auto* image = imageView->img;
@@ -1805,6 +1804,9 @@ void CommandHookRecord::finish() noexcept {
 		// no other reason for this record to be finished except
 		// invalidation
 		dlg_assert(!hook);
+
+		// WIP: I don't think we should ever land here.
+		dlg_error("should not happen");
 	}
 }
 
@@ -1837,13 +1839,15 @@ void CommandHookSubmission::finish(Submission& subm) {
 		record->writer = nullptr;
 		dlg_assert(!contains(record->record->hookRecords, record));
 		delete record;
+
+		// unset for our destructor
 		record = nullptr;
 		return;
 	}
 
 	finishAccelStructBuilds();
 
-	// when the record has not state, we don't have to transmit anything
+	// when the record has no state, we don't have to transmit anything
 	if(!record->state) {
 		dlg_assert(record->hcommand.empty());
 		return;

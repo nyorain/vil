@@ -95,17 +95,19 @@ template<typename T>
 
 void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 	VkBaseInStructure* last = nullptr;
-	auto it = pNext;
+	auto it = static_cast<const VkBaseInStructure*>(pNext);
+	pNext = nullptr;
+
 	while(it) {
-		auto src = static_cast<const VkBaseInStructure*>(pNext);
-		auto size = structSize(src->sType);
-		dlg_assertm(size > 0, "Unknown structure type!");
+		auto size = structSize(it->sType);
+		dlg_assertm_or(size > 0, it = it->pNext; continue,
+			"Unknown structure type: {}", it->sType);
 
 		auto buf = allocate(cb, size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs
-		std::memcpy(dst, src, size);
+		std::memcpy(dst, it, size);
 
 		if(last) {
 			last->pNext = dst;
@@ -114,7 +116,7 @@ void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 		}
 
 		last = dst;
-		pNext = src->pNext;
+		it = it->pNext;
 	}
 }
 
@@ -947,7 +949,9 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 		dlg_assert(cmd.rp->desc.attachments.size() == attInfo->attachmentCount);
 		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, attInfo->attachmentCount);
 
-		auto fwdAttachments = memScope.alloc<VkImageView>(attInfo->attachmentCount);
+		// NOTE: we allocate from cb here because of dstAttInfo below.
+		auto fwdAttachments = allocSpan<VkImageView>(cb, attInfo->attachmentCount);
+		cmd.attachments = allocSpan<ImageView*>(cb, attInfo->attachmentCount);
 
 		for(auto i = 0u; i < attInfo->attachmentCount; ++i) {
 			auto& attachment = get(*cb.dev, attInfo->pAttachments[i]);
@@ -957,19 +961,32 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 			useHandle(cb, cmd, nonNull(attachment.img),
 				cmd.rp->desc.attachments[i].finalLayout);
 
+			cmd.attachments[i] = &attachment;
 			cb.graphicsState().rpi.attachments[i] = &attachment;
 			fwdAttachments[i] = attachment.handle;
 		}
 
 		attInfo->pAttachments = fwdAttachments.data();
+
+		// TODO: kinda hacky, we need a better general solution to deep-copy
+		// and unwrap handles in extension chain structs
+		auto* cDstAttInfo = findChainInfo<VkRenderPassAttachmentBeginInfo, sType>(cmd.info);
+		// we can const_cast here since we copied the chain above
+		auto* dstAttInfo = const_cast<VkRenderPassAttachmentBeginInfo*>(cDstAttInfo);
+		dlg_assert(dstAttInfo);
+
+		dstAttInfo->pAttachments = fwdAttachments.data();
+		dlg_assert(dstAttInfo->attachmentCount == fwdAttachments.size());
 	} else {
 		dlg_assert(cmd.rp->desc.attachments.size() == cmd.fb->attachments.size());
 		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, cmd.fb->attachments.size());
+		cmd.attachments = allocSpan<ImageView*>(cb, cmd.fb->attachments.size());
 
 		for(auto i = 0u; i < cmd.fb->attachments.size(); ++i) {
 			auto& attachment = cmd.fb->attachments[i];
 			dlg_assert(attachment && attachment->img);
 
+			cmd.attachments[i] = attachment;
 			useHandle(cb, cmd, *attachment, false);
 			useHandle(cb, cmd, *attachment->img,
 				cmd.rp->desc.attachments[i].finalLayout);

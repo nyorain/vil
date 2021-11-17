@@ -155,8 +155,24 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		}
 	}
 
-	auto success = dst.init(dev, src.ci.format, extent, srcSubres.layerCount,
-		srcSubres.levelCount, srcSubres.aspectMask, srcQueueFam);
+	auto layerCount = srcSubres.layerCount;
+	auto levelCount = srcSubres.levelCount;
+
+	if(layerCount == VK_REMAINING_ARRAY_LAYERS) {
+		layerCount = src.ci.arrayLayers - srcSubres.baseArrayLayer;
+	}
+	if(levelCount == VK_REMAINING_MIP_LEVELS) {
+		levelCount = src.ci.mipLevels - srcSubres.levelCount;
+	}
+
+	if(layerCount == 0u || levelCount == 0u ||
+			extent.width == 0u || extent.height == 0u || extent.depth == 0u) {
+		dlg_warn("Image copy would be empty");
+		return;
+	}
+
+	auto success = dst.init(dev, src.ci.format, extent, layerCount,
+		levelCount, srcSubres.aspectMask, srcQueueFam);
 	if(!success) {
 		dlg_warn("Initializing image copy failed");
 		return;

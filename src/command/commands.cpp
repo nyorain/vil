@@ -828,6 +828,7 @@ std::vector<const Command*> BeginRenderPassCmd::display(const Command* selected,
 void BeginRenderPassCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(rp, map);
 	checkReplace(fb, map);
+	checkReplace(attachments, map);
 	ParentCommand::replace(map);
 }
 

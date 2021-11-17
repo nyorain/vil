@@ -40,6 +40,10 @@ struct RenderPass : DeviceHandle {
 struct Framebuffer : DeviceHandle {
 	VkFramebuffer handle {};
 
+	// NOTE: keep in mind that this might be empty for an imageless fb
+	// TODO: makes probably more sense to use IntrusivePtr here and
+	//   remove ImageView::fbs (since we don't need to unregister
+	//   on destruction anymore).
 	std::vector<ImageView*> attachments;
 	IntrusivePtr<RenderPass> rp {};
 

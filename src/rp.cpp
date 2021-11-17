@@ -34,9 +34,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 
 	ThreadMemScope memScope;
 	auto viewHandles = memScope.alloc<VkImageView>(pCreateInfo->attachmentCount);
-	std::vector<ImageView*> views(pCreateInfo->attachmentCount);
+	std::vector<ImageView*> views;
 
 	if(!imageless) {
+		views.resize(pCreateInfo->attachmentCount);
 		for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
 			views[i] = &get(dev, pCreateInfo->pAttachments[i]);
 			viewHandles[i] = views[i]->handle;

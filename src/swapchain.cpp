@@ -163,8 +163,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		dev.images.mustEmplace(handleDown, std::move(imgPtr));
 	}
 
-	dev.lastCreatedSwapchain = &swapd;
-
 	if(savedOverlay) {
 		swapd.overlay = std::move(savedOverlay);
 		swapd.overlay->swapchain = &swapd;
@@ -189,8 +187,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		platform->init(*swapd.dev, swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
 	}
 
-	// TODO: hacky, see cb gui
-	dev.swapchain = &swapd;
+	{
+		// TODO: hacky, see cb gui
+		std::lock_guard lock(dev.mutex);
+		dev.swapchain = &swapd;
+		dev.lastCreatedSwapchain = &swapd;
+	}
+
 	return result;
 }
 

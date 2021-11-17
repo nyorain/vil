@@ -25,6 +25,11 @@ urgent, bugs:
 	  an empty alias string
 - [ ] toupper bug when searching for resource
 - [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
+- [ ] figure out to handle copyChain in a general way. Sometimes we need
+      deep copies, sometimes we need to unwrap additional handles inside
+	  the copy. Both of it is currently not done.
+	  Or maybe remove the copyChain logic completely? Not sure if trying
+	  to support simple extensions out of the box even makes sense.
 
 new, workstack:
 - [ ] implement image histograms (probably best like in PIX)

@@ -90,6 +90,17 @@ void CommandBufferGui::draw(Draw& draw) {
 
 			ImGui::EndCombo();
 		}
+	} else if(!gui_->dev().swapchain) {
+		record_ = {};
+		selectedRecord_ = {};
+		records_ = {};
+		selectedBatch_ = {};
+		swapchainPresent_ = {};
+		command_ = {};
+		hook.target = {};
+		hook.desc({}, {}, {});
+		hook.unsetHookOps();
+		return;
 	}
 
 	// TODO: don't show this checkbox (or set it to true and disable?)
@@ -161,19 +172,6 @@ void CommandBufferGui::draw(Draw& draw) {
 	} else if(mode_ == UpdateMode::any) {
 		imGuiText("Updating from any records");
 	} else if(mode_ == UpdateMode::swapchain) {
-		if(!gui_->dev().swapchain) {
-			record_ = {};
-			selectedRecord_ = {};
-			records_ = {};
-			selectedBatch_ = {};
-			swapchainPresent_ = {};
-			command_ = {};
-			hook.target = {};
-			hook.desc({}, {}, {});
-			hook.unsetHookOps();
-			return;
-		}
-
 		auto& sc = *gui_->dev().swapchain;
 
 		imGuiText("Showing per-present commands from");

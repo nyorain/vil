@@ -241,11 +241,12 @@ struct BeginRenderPassCmd : SectionCommand {
 	VkRenderPassBeginInfo info {};
 	span<VkClearValue> clearValues;
 
-	// TODO: store attachment image views. Framebuffer might not
-	// contain them, e.g. when imageless
-
 	Framebuffer* fb {};
 	RenderPass* rp {};
+
+	// Used attachments, stored here separately from framebuffer since
+	// the framebuffer mgiht be imageless
+	span<ImageView*> attachments;
 
 	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
 

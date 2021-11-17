@@ -287,6 +287,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	view.dev = &dev;
 	view.ci = *pCreateInfo;
 
+	// TODO: resolve layerCount, levelCount of view.ci here already.
+	// handle REMAINING_* constants. Make sure to take special rules
+	// for 3D image as 2d array view and such into account, see docs
+	// on vkCreateImageView
+
 	{
 		std::lock_guard lock(dev.mutex);
 		view.img->views.push_back(&view);

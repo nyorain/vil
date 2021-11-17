@@ -85,9 +85,11 @@ Device::~Device() {
 	dlg_assert(this->dsuTemplates.empty());
 	dlg_assert(this->accelStructs.empty());
 
-	// their (transitive) destructors may use device resources
-	commandHook.reset();
+	// Their (transitive) destructors may use device resources.
+	// Important to first destroy the window, otherwise rendering may
+	// still be active and use e.g. commandHook resources.
 	window.reset();
+	commandHook.reset();
 
 	for(auto& fence : fencePool) {
 		dispatch.DestroyFence(handle, fence, nullptr);

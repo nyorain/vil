@@ -1037,20 +1037,19 @@ void* copyChain(const void*& pNext, std::unique_ptr<std::byte[]>& buf) {
 void* copyChainLocal(ThreadMemScope& memScope, const void* pNext) {
 	VkBaseInStructure* last = nullptr;
 	void* ret = nullptr;
-	auto it = pNext;
+	auto it = static_cast<const VkBaseInStructure*>(pNext);
 
 	while(it) {
-		auto src = static_cast<const VkBaseInStructure*>(it);
-		auto size = structSize(src->sType);
-		dlg_assertm_or(size > 0, it = src->pNext; continue,
-			"Unknown structure type: {}");
+		auto size = structSize(it->sType);
+		dlg_assertm_or(size > 0, it = it->pNext; continue,
+			"Unknown structure type: {}", it->sType);
 
 		auto dstBuf = memScope.alloc<std::byte>(size);
 		auto* dst = reinterpret_cast<VkBaseInStructure*>(dstBuf.data());
 
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs
-		std::memcpy(dst, src, size);
+		std::memcpy(dst, it, size);
 		dst->pNext = nullptr;
 
 		if(!last) {
@@ -1061,7 +1060,7 @@ void* copyChainLocal(ThreadMemScope& memScope, const void* pNext) {
 		}
 
 		last = dst;
-		it = src->pNext;
+		it = it->pNext;
 	}
 
 	return ret;
