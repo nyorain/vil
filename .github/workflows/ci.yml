@@ -3,8 +3,26 @@ name: C/C++ CI
 on:
   push:
     branches: [ master ]
+    paths:
+      - "**.c"
+      - "**.cpp"
+      - "**.h"
+      - "**.hpp"
+      - "**.inl"
+      - "**.comp"
+      - "**.vert"
+      - "**.frag"
   pull_request:
     branches: [ master ]
+    paths:
+      - "**.c"
+      - "**.cpp"
+      - "**.h"
+      - "**.hpp"
+      - "**.inl"
+      - "**.comp"
+      - "**.vert"
+      - "**.frag"
 
 jobs:
   linux-gcc:
@@ -45,6 +63,7 @@ jobs:
     - run: meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false
     - run: meson test -C build/ -v
 
+  # See https://dvdhrm.github.io/2021/04/21/meson-msvc-github-actions/
   windows-ninja:
     runs-on: windows-latest
     steps:

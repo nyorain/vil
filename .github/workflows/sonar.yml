@@ -3,8 +3,23 @@ name: C/C++ CI
 on:
   push:
     branches: [ master ]
+    paths:
+      - "**.c"
+      - "**.cpp"
+      - "**.h"
+      - "**.hpp"
+      - "**.inl"
   pull_request:
     branches: [ master ]
+    paths:
+      - "**.c"
+      - "**.cpp"
+      - "**.h"
+      - "**.hpp"
+      - "**.inl"
+
+# Original skeleton taken from 
+# https://github.com/sonarsource-cfamily-examples/linux-cmake-gh-actions-sc
 
 jobs:
   sonar:
@@ -21,6 +36,12 @@ jobs:
         with:
           python-version: '3.x'
       - run: pip install meson ninja
+      # Make sure the sonar cache is persistent
+      - name: Cache Sonar
+        uses: actions/cache@v2
+        with:
+          path: ~/cache/sonar
+          key: ${{ runner.os }}-cache-sonar
       - name: Install deps
         run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
           libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
