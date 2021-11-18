@@ -410,7 +410,7 @@ void spvm_execute_GLSL450_MatrixInverse(spvm_word type, spvm_word id, spvm_word 
 	matrix_to_array_d(&m[0][0], type_info->value_bitcount > 32, state->results[x].members, mtype);
 	double invdet = 1.0 / matrix_determinant(&m[0][0], mtype);
 
-	double res[4][4];
+	double res[4][4] = {0};
 
 	if (mtype == 2) {
 		res[0][0] = +m[1][1] * invdet;

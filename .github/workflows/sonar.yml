@@ -40,7 +40,7 @@ jobs:
       - name: Cache Sonar
         uses: actions/cache@v2
         with:
-          path: cache/sonar
+          path: /home/runner/cache-sonar
           key: ${{ runner.os }}-cache-sonar
       - name: Install deps
         run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
