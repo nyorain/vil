@@ -1,6 +1,5 @@
 #pragma once
 
-#include <device.hpp>
 #include <gui/render.hpp>
 #include <gui/blur.hpp>
 #include <util/bytes.hpp>
@@ -82,7 +81,7 @@ public:
 	Vec2f windowSize() const { return {windowSize_.x, windowSize_.y}; }
 	Vec2f windowPos() const { return {windowPos_.x, windowPos_.y}; }
 
-	Queue& usedQueue() const { return *dev().gfxQueue; }
+	Queue& usedQueue() const;
 
 	const VkPipeline& imageBgPipe() const { return pipes_.imageBg; }
 	const VkPipelineLayout& pipeLayout() const { return pipeLayout_; }

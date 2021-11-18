@@ -7,6 +7,7 @@
 #include <util/profiling.hpp>
 #include <command/commands.hpp>
 #include <threadContext.hpp>
+#include <device.hpp>
 #include <image.hpp>
 #include <shader.hpp>
 #include <ds.hpp>

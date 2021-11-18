@@ -31,6 +31,7 @@
 
 namespace vil {
 
+// TODO: move to own header, only include where needed
 struct DebugStats {
 	static DebugStats& get();
 

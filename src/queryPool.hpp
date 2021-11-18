@@ -1,6 +1,5 @@
 #pragma once
 
-#include <device.hpp>
 #include <handle.hpp>
 
 namespace vil {

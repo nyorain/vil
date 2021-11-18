@@ -10,6 +10,7 @@
 #include <vk/format_utils.h>
 #include <command/commands.hpp>
 #include <command/record.hpp>
+#include <device.hpp>
 #include <threadContext.hpp>
 #include <pipe.hpp>
 #include <accelStruct.hpp>

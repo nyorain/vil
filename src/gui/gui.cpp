@@ -2087,4 +2087,8 @@ void Gui::addPostRender(Recorder rec) {
 	postRender_.emplace_back(std::move(rec));
 }
 
+Queue& Gui::usedQueue() const {
+	return *dev().gfxQueue;
+}
+
 } // namespace vil
