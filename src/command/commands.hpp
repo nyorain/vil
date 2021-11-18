@@ -15,12 +15,6 @@
 	#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #endif // __GNUC__
 
-namespace backward {
-
-class StackTrace;
-
-} // namespace backward
-
 namespace vil {
 
 // The type of a command is used e.g. to hide them in the UI.
@@ -140,7 +134,9 @@ struct Command {
 	// It's needed by displayCommands to generate proper imgui ids
 	unsigned relID {};
 
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
 	backward::StackTrace* stackTrace {};
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 };
 
 NYTL_FLAG_OPS(Command::Type)

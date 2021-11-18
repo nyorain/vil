@@ -1,5 +1,4 @@
 - rename main branch to main
-- set up github/gitlab CI
 - hide shader debugger behind config feature?
 	- adds a whole new library and isn't ready yet at all.
 	  and might never really be ready, it's more of an experiment anyways
@@ -30,3 +29,6 @@
 		- make rows selectable
 		- render the select vertex in viewport, e.g. via point pipe
 			- later: render the selected triangle?
+- clean up sonar code issues
+	- somehow make sure failed asserts have a [[noreturn]] addition so
+	  we get less false positives for cases that we assert to be true

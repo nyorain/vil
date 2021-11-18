@@ -7,7 +7,6 @@
 #include <util/span.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
-#include <util/callstack.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/commandHook.hpp>
@@ -18,6 +17,10 @@
 #include <vk/format_utils.h>
 #include <iomanip>
 #include <filesystem>
+
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+	#include <util/callstack.hpp>
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 
 // TODO:
 // - a lot of commands are still missing valid match() implementations.
@@ -62,8 +65,9 @@ void checkReplace(span<H*> handlePtr, const CommandAllocHashMap<DeviceHandle*, D
 	}
 }
 
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
 void display(const backward::StackTrace& st, unsigned offset = 3u) {
-	// TODO terible
+	// TODO the static maps here are terrible
 	static backward::TraceResolver resolver;
 	static std::unordered_map<void*, backward::ResolvedTrace::SourceLoc> locs;
 
@@ -84,10 +88,11 @@ void display(const backward::StackTrace& st, unsigned offset = 3u) {
 			auto base = std::filesystem::current_path();
 			auto cmd = dlg::format("nvr -c \"e +{} {}/{}\"", loc.line,
 				base.string(), loc.filename);
-			std::system(cmd.c_str());
+			(void) std::system(cmd.c_str());
 		}
 	}
 }
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 
 // ArgumentsDesc
 NameResult name(DeviceHandle* handle, NullName nullName) {
@@ -1069,11 +1074,13 @@ DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
 	// TODO: only do this when pipe layout matches pcr layout
 	pushConstants.data = copySpan(*cb.record(), cb.pushConstants().data);
 
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
 	// TODO: does not really belong here. should be atomic then at least
 	if(cb.dev->captureCmdStack) {
 		this->stackTrace = &allocate<backward::StackTrace>(*cb.record());
 		this->stackTrace->load_here(32u);
 	}
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 }
 
 void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
@@ -1190,12 +1197,14 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		// imGuiText("No relevant dynamic state");
 	}
 
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
 	// TODO: does not really belong here
-	auto flags = imgui_vil::ImGuiTreeNodeFlags_FramePadding;
+	auto flags = ImGuiTreeNodeFlags_FramePadding;
 	if(this->stackTrace && ImGui::TreeNodeEx("StackTrace", flags)) {
 		vil::display(*stackTrace);
 		ImGui::TreePop();
 	}
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 }
 
 void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {

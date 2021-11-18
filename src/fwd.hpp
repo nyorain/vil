@@ -129,6 +129,13 @@ struct BuiltInResource;
 
 } // namespace spc
 
+
+namespace backward {
+
+class StackTrace;
+
+} // namespace backward
+
 // TODO: rename to something like VIL_VK_CHECK
 #define VK_CHECK(x) do {\
 		auto result = (x);\
