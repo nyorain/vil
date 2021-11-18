@@ -32,8 +32,18 @@ jobs:
     - uses: actions/setup-python@v1
       with:
         python-version: '3.x'
-    - uses: microsoft/setup-msbuild@v1.1
     - run: pip install meson ninja
-      # - run: call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+    - name: Prepare MSVC
+      uses: bus1/cabuild/action/msdevshell@v1
+      with:
+        architecture: x64
+    # - run: call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
     - run: meson setup build/ --backend=ninja -Dtests=true
     - run: meson test -C build/ -v
+
+# TODO:
+# - test debug and release builds
+# - test 32-bit build? Not sure if we even want to support it though.
+# - build mingw and visual studio, just use https://chocolatey.org/packages/mingw
+#   Just not calling vs vars script actually already calls mingw! fix that up.
+# - test meson visual studio backend, msbuild

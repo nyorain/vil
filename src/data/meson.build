@@ -43,15 +43,25 @@ if glslang.found()
 		'copyTex.comp': imgtable,
 	}
 
+	glslang_version_info = run_command(glslang, '--version', check: true).stdout()
+	glslang_version = glslang_version_info.split('\n')[0].split(':')[-1]
+
 	foreach file, configs : overlay_shaders
 		foreach name, config : configs
 			varname = file.underscorify() + '_' + name.underscorify() + 'spv_data'
 			outname = file + '.' + name + 'spv.h'
+
+			args = [glslang, '-V', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@']
+
+			if glslang_version.version_compare('>=11.0.0')
+				args += '--quiet'
+			endif
+
 			spv += custom_target(
 				outname,
 				input: files(file),
 				output: outname,
-				command : [glslang, '-V', '--quiet', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@'])
+				command: args)
 		endforeach
 	endforeach
 
