@@ -54,6 +54,7 @@ args = cc.get_supported_arguments([
 
 	# for clang
 	'-Wno-missing-braces',
+	'-Wno-newline-eof', # needed for spvm TODO re-enable and fix!
 
 	# to be compatible with msvc warning level on gcc/clang
 	# debatable whether the warnings are actually useful
