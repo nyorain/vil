@@ -122,9 +122,9 @@ spvm_vec4f spvm_fetch_texel(struct spvm_state* state,
 	unsigned height = SPVM_MAX(img->height >> level, 1u);
 	unsigned depth = SPVM_MAX(img->depth >> level, 1u);
 
-	x = spvm_apply_address_mode(desc->address_mode_u, x, width - 1);
-	y = spvm_apply_address_mode(desc->address_mode_v, y, height - 1);
-	z = spvm_apply_address_mode(desc->address_mode_w, z, depth - 1);
+	x = spvm_apply_address_mode(desc->address_mode_u, x, width);
+	y = spvm_apply_address_mode(desc->address_mode_v, y, height);
+	z = spvm_apply_address_mode(desc->address_mode_w, z, depth);
 
 	// check for border condition
 	if (x < 0 || y < 0 || z < 0) {

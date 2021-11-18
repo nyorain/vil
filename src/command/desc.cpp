@@ -143,7 +143,7 @@ Matcher match(DescriptorStateRef a, DescriptorStateRef b) {
 	// TODO: additional bonus matching points when the *same*
 	//   ds is used? Probably bad idea.
 
-	if(&a == &b) {
+	if(a.data == b.data) {
 		// fast path: full match since same descriptorSet
 		auto count = float(totalDescriptorCount(a));
 		return Matcher{count, count};

@@ -453,7 +453,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
 			inTS = reinterpret_cast<VkPhysicalDeviceTimelineSemaphoreFeatures*>(link);
 			break;
-		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES) {
 			inBufAddr = reinterpret_cast<VkPhysicalDeviceBufferDeviceAddressFeatures*>(link);
 			break;
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT) {
