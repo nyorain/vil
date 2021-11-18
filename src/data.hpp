@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <util/handleCast.hpp>
 #include <dlg/dlg.hpp>
 #include <vk/vulkan.h>
 #include <cstring>
@@ -25,38 +26,6 @@ extern std::unordered_map<std::uint64_t, void*> dispatchableTable;
 extern std::unordered_map<void*, Device*> devByLoaderTable;
 // Synchronizes access to those global tables
 extern std::shared_mutex dataMutex;
-
-template<typename T>
-std::uint64_t handleToU64(T handle) {
-	static_assert(sizeof(handle) <= sizeof(std::uint64_t));
-
-#ifdef __GNUC__
-	return __builtin_bit_cast(std::uint64_t, handle);
-#else // __GNUC__
-	std::uint64_t id {};
-	std::memcpy(&id, &handle, sizeof(handle));
-	return id;
-#endif // __GNUC__
-
-	// UB, actually gives compilation errors on GCC
-	// return *reinterpret_cast<std::uint64_t*>(&handle);
-}
-
-template<typename T>
-T u64ToHandle(u64 id) {
-	static_assert(sizeof(T) <= sizeof(id));
-
-#ifdef __GNUC__
-	return __builtin_bit_cast(T, id);
-#else
-	T ret {};
-	std::memcpy(&ret, &id, sizeof(T));
-	return ret;
-#endif // __GNUC__
-
-	// UB, actually gives compilation errors on GCC
-	// return *reinterpret_cast<T*>(&id);
-}
 
 template<typename T>
 void* findData(T handle) {

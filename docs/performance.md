@@ -69,7 +69,6 @@ vkCmdDraw, vkCmdDispatch, vkCmdBindDescriptorSet, vkCmdPushConstants) without
 locking a single mutex.
 
 Todo
-- allow to enable/disable it (as well as some more detailed options) via meson_options
 - better memory tracking, we just track a small number of places at the moment
   that were suspects for leaks or significant overhead in the past.
 
@@ -83,3 +82,46 @@ Notes/observations:
   application data when we can get around it. Copying even 4MB per
   frame via memcpy can cause significant problems. Just use the mapped
   GPU buffers directly.
+- Operations done in the gui/record hooking are less relevant.
+  Those functions being expensive is acceptable but we have to optimize
+  the hot paths of applications since applications might do a lot of
+  unoptimized stuff. Command recording and descriptor set management
+  should have as little overhead as possible, even if that means doing
+  more work later on when hooking a record or showing the data in the gui.
+  We want to runtime impact to be as close to zero as possible when the 
+  gui is not open, allowing developers to keep the layer always enabled.
+
+# Special cases
+
+## Descriptors
+
+Many applications are bottlenecked by descriptor set creation and updating.
+For DX11-style renderers we can clearly see the AllocateDescriptorSets -> 
+UpdateDescriptorSets(WithTemplate) -> CmdDraw chain executed many
+times during rendering. An example useful for profiling is Dota.
+These performance are therefore highly performance critical and we
+introduced some special handling of descriptor sets:
+
+- To completely avoid allocations in AllocateDescriptorSets we have a static
+  block of memory owned by a DescriptorPool in which all descriptor sets
+  are placed
+- We never insert records info `refRecords` of a DescriptorSet to make
+  destruction faster. Note that this means that we can't know whether
+  the descriptorSet handles used by a `CommandRecord` are still valid,
+  they may be dangling pointers. The only time we can safely dereference
+  them is while the record is being submitted or is still pending on the
+  device since the application cannot have destroyed the sets so far.
+	- Even when we don't have this guarantee we still have a way to
+	  know whether the pointer is dangling: we just need to store the
+	  DescriptorPool and the DescriptorSet::id together with the 
+	  descriptor set pointer. And then when accessing the descriptorSet pointer,
+	  we
+	  	- check whether the DescriptorPool is still alive (it notifies on
+		  destruction and would therefore have been unset)
+		- if so, check if the given descriptorSet is still alive in the
+		  given pool via the pool's entries
+		- if so, check that the id matches (otherwise a new descriptorSet
+		  has been created at the same address)
+	  Yes, this is a huge amount of work. BUT keep in mind that we very
+	  rarely need this (only when selecting a new record
+

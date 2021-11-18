@@ -134,14 +134,6 @@ public: // Only public for recording, should not be accessed outside api
 	CommandRecord* record() const { return record_.get(); }
 };
 
-inline CommandBuffer& getCommandBuffer(VkCommandBuffer handle) {
-	if(HandleDesc<VkCommandBuffer>::wrap) {
-		return unwrap(handle);
-	}
-
-	return getData<CommandBuffer>(handle);
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
     VkDevice                                    device,
     const VkCommandPoolCreateInfo*              pCreateInfo,

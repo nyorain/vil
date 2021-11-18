@@ -1,5 +1,7 @@
 #include <image.hpp>
+#include <wrap.hpp>
 #include <layer.hpp>
+#include <wrap.hpp>
 #include <device.hpp>
 #include <data.hpp>
 #include <threadContext.hpp>
@@ -313,7 +315,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		return;
 	}
 
-	auto& dev = getDevice(device);
+	auto& dev = *get(device, imageView).dev;
 	mustMoveUnset(dev, imageView);
 	dev.dispatch.DestroyImageView(dev.handle, imageView, pAllocator);
 }
@@ -351,7 +353,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 		return;
 	}
 
-	auto& dev = getDevice(device);
+	auto& dev = *get(device, sampler).dev;
 	mustMoveUnset(dev, sampler);
 	dev.dispatch.DestroySampler(dev.handle, sampler, pAllocator);
 }

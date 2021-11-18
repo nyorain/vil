@@ -51,7 +51,7 @@ if glslang.found()
 				outname,
 				input: files(file),
 				output: outname,
-				command : [glslang, '-V', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@'])
+				command : [glslang, '-V', '--quiet', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@'])
 		endforeach
 	endforeach
 

@@ -1,9 +1,8 @@
 #include <ds.hpp>
 #include <device.hpp>
-#include <data.hpp>
+#include <wrap.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
-#include <pipe.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <util/util.hpp>

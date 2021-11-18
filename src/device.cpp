@@ -1,4 +1,5 @@
 #include <device.hpp>
+#include <wrap.hpp>
 #include <queue.hpp>
 #include <layer.hpp>
 #include <data.hpp>

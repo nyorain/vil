@@ -114,11 +114,6 @@ struct ObjectTypeHandler {
 	virtual Handle* find(Device& dev, u64, u64& fwdID) const = 0;
 };
 
-// And so He spoke:
-//  "Letteth us go into the Holy Lands of SFINAE /
-//   Where Your Souls may findeth rest /
-//   Since'o He - and only Him - in all his Glory /
-//   Has forseen this as Our Home!"
 template<typename T>
 auto handle(const T& handle) -> decltype(handle.handle()) {
 	return handle.handle();

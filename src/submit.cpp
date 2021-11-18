@@ -1,4 +1,5 @@
 #include <submit.hpp>
+#include <wrap.hpp>
 #include <device.hpp>
 #include <queue.hpp>
 #include <image.hpp>

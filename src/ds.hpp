@@ -66,7 +66,7 @@ struct DescriptorPool : DeviceHandle {
 	std::unique_ptr<std::byte[]> data;
 	std::unique_ptr<SetEntry[]> entries;
 
-	// Linked list of the alive descriptor sets.
+	// Linked list of the alive descriptor sets, sorted by offset.
 	SetEntry* usedEntries {};
 
 	// The last link of the usedEntries list.

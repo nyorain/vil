@@ -1,4 +1,5 @@
 #include <queryPool.hpp>
+#include <wrap.hpp>
 
 namespace vil {
 

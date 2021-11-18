@@ -1,5 +1,6 @@
 #include <accelStruct.hpp>
 #include <buffer.hpp>
+#include <wrap.hpp>
 #include <device.hpp>
 #include <shader.hpp>
 #include <threadContext.hpp>
@@ -343,7 +344,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyAccelerationStructureKHR(
 		return;
 	}
 
-	auto& dev = getDevice(device);
+	auto& dev = *get(device, accelerationStructure).dev;
 	IntrusivePtr<AccelStruct> ptr;
 
 	{

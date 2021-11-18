@@ -379,6 +379,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// hook the submission.
 	// Needed in case the descriptorSet is changed/destroyd later on, also
 	// for updateAfterBind
+	// TODO PERF: do we really need *all* descriptors? We probably only need
+	// the descriptors relevant for the hooked command.
 	auto captureDescriptors = [&]() -> CommandDescriptorSnapshot {
 		CommandDescriptorSnapshot descriptors;
 

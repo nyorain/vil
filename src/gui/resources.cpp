@@ -1295,6 +1295,8 @@ void ResourceGui::destroyed(const Handle& handle) {
 		handle_ = nullptr;
 	}
 
+	// TODO: the DescriptorSet list is broken since we don't
+	// get notifications for them.
 	if(handle.objectType == filter_) {
 		destroyed_.insert(&handle);
 	}

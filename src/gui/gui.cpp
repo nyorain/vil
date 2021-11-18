@@ -9,6 +9,7 @@
 #include <queue.hpp>
 #include <handle.hpp>
 #include <data.hpp>
+#include <wrap.hpp>
 #include <handles.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>

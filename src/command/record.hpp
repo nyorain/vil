@@ -42,18 +42,6 @@ struct BoundDescriptorSet {
 	PipelineLayout* layout {};
 };
 
-struct ImageDescriptorRef {
-	ImageView* imageView;
-	Sampler* sampler; // even stored here if immutable in layout
-	VkImageLayout layout {};
-};
-
-struct BufferDescriptorRef {
-	Buffer* buffer;
-	VkDeviceSize offset {};
-	VkDeviceSize range {};
-};
-
 using BufferViewDescriptorRef = BufferView*;
 
 struct DescriptorState {

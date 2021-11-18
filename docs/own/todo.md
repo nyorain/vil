@@ -11,6 +11,7 @@ urgent, bugs:
 - [ ] figure out tracy issues. On windows, it causes problems with a lot
       of applications that I can't explain :( Some of the problems
 	  have been caused by a tracy update, it used to work!
+	- [ ] Might be fixed now, test with doom on windows
 - [ ] figure out transform_feedback crashes in doom eternal
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
@@ -152,6 +153,9 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
+- [ ] in CommandHook::hook only addCow for the descriptorSets that are really
+	  needed for the hooked command. We don't need the others (and it could
+	  be many)
 - [ ] make don't add to refRecords of used descriptorSets? We don't
       reference them directly in a record anyways. We still want them
 	  in CommandRecord::handles though, not sure how this works. Maybe
