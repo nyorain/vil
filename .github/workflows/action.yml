@@ -1,0 +1,40 @@
+name: C/C++ CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - run: pip install meson ninja
+    - name: Install deps
+      run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+        libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
+        libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
+        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
+    - run: meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false
+      env:
+        CC: gcc
+    - run: meson test -C build/ -v
+
+  windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - uses: microsoft/setup-msbuild@v1.1
+    - run: pip install meson ninja
+    - run: meson setup build/
+      # - run: call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+    - run: meson setup build/ --backend=ninja -Dtests=true
+    - run: meson test -C build/ -v
