@@ -7,7 +7,7 @@ on:
     branches: [ master ]
 
 jobs:
-  linux:
+  linux-gcc:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
@@ -25,6 +25,41 @@ jobs:
         CC: gcc
     - run: meson test -C build/ -v
 
+  linux-clang:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - name: Set up Clang
+      uses: egor-tensin/setup-clang@v1
+      with:
+        version: 12
+    - run: pip install meson ninja
+    - name: Install deps
+      run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+        libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
+        libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
+        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
+    - run: meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false
+    - run: meson test -C build/ -v
+
+  windows-ninja:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - run: pip install meson ninja
+    - name: Prepare MSVC
+      uses: bus1/cabuild/action/msdevshell@v1
+      with:
+        architecture: x64
+    - run: meson setup build/ --backend=ninja -Dtests=true
+    - run: meson test -C build/ -v
+
   windows:
     runs-on: windows-latest
     steps:
@@ -37,14 +72,12 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    # - run: call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
-    - run: meson setup build/ --backend=ninja -Dtests=true
+    - run: meson setup build/ -Dtests=true
     - run: meson test -C build/ -v
 
 # TODO:
-# - test clang
 # - test debug and release builds
 # - test 32-bit build? Not sure if we even want to support it though.
 # - build mingw and visual studio, just use https://chocolatey.org/packages/mingw
 #   Just not calling vs vars script actually already calls mingw! fix that up.
-# - test meson visual studio backend, msbuild
+# - test other gcc versions? Current ubuntu build only has v9
