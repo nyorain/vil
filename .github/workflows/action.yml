@@ -42,6 +42,7 @@ jobs:
     - run: meson test -C build/ -v
 
 # TODO:
+# - test clang
 # - test debug and release builds
 # - test 32-bit build? Not sure if we even want to support it though.
 # - build mingw and visual studio, just use https://chocolatey.org/packages/mingw
