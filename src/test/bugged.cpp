@@ -1,6 +1,7 @@
 #include "bugged.hpp"
 #include <util/export.hpp>
 #include <util/profiling.hpp>
+#include <dlg/dlg.hpp>
 
 // TODO: ugly, find proper solution. Init functions in profiling.hpp?
 #ifdef TRACY_MANUAL_LIFETIME
