@@ -490,11 +490,22 @@ Matcher match(const VkImageSubresourceRange& a, const VkImageSubresourceRange& b
 }
 
 Matcher match(const VkClearAttachment& a, const VkClearAttachment& b) {
-	if(a.aspectMask != b.aspectMask || a.colorAttachment != b.colorAttachment) {
+	if(a.aspectMask != b.aspectMask) {
 		return Matcher::noMatch();
 	}
 
-	auto sameCV = std::memcmp(&a.clearValue, &b.clearValue, sizeof(a.clearValue)) == 0;
+	auto sameCV = false;
+	if(a.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
+		if(a.colorAttachment != b.colorAttachment) {
+			return Matcher::noMatch();
+		}
+		sameCV = std::memcmp(&a.clearValue.color, &b.clearValue.color,
+			sizeof(a.clearValue.color)) == 0;
+	} else {
+		sameCV = std::memcmp(&a.clearValue.depthStencil, &b.clearValue.depthStencil,
+			sizeof(a.clearValue.depthStencil)) == 0;
+	}
+
 	return sameCV ? Matcher{3.f, 3.f} : Matcher::noMatch();
 }
 
@@ -596,7 +607,12 @@ void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 
 		// find it in b
 		for(auto j = 0u; j < b.size(); ++j) {
-			if(a[i] == b[j] && numSeen-- == 0u) {
+			auto found = a[i] == b[j];
+			if(!found) {
+				continue;
+			}
+
+			if(numSeen-- == 0u) {
 				++count;
 				break;
 			}

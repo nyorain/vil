@@ -493,10 +493,10 @@ struct TreeParser {
 		main_ = sdst;
 	}
 
-	void parseModule(const ParseTreeNode& module) {
-		checkType<syn::Grammar>(module);
-		parseStructDecls(*module.children[0]);
-		parseValueDecls(*module.children[1]);
+	void parseModule(const ParseTreeNode& mod) {
+		checkType<syn::Grammar>(mod);
+		parseStructDecls(*mod.children[0]);
+		parseValueDecls(*mod.children[1]);
 	}
 
 	ThreadMemScope& memScope_;

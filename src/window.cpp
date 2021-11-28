@@ -80,9 +80,7 @@ bool DisplayWindow::createDisplay() {
 	// wait until window was created
 	// It's important we create display & window in the ui thread (mainly windows bullshittery).
 	std::unique_lock lock(mutex_);
-	while(state_.load() == State::createDisplay) {
-		cv_.wait(lock);
-	}
+	cv_.wait(lock, [&]{ return state_.load() != State::createDisplay; });
 
 	return state_.load() == State::displayCreated && this->dpy;
 }
@@ -94,9 +92,7 @@ bool DisplayWindow::createWindow(Instance& ini) {
 	std::unique_lock lock(mutex_);
 	state_.store(State::createWindow);
 	cv_.notify_one();
-	while(state_.load() == State::createWindow) {
-		cv_.wait(lock);
-	}
+	cv_.wait(lock, [&]{ return state_.load() != State::createWindow; });
 
 	return state_.load() == State::windowCreated && this->surface;
 }
@@ -108,10 +104,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 	std::unique_lock lock(mutex_);
 	state_.store(State::initDevice);
 	cv_.notify_one();
-
-	while(state_.load() == State::initDevice) {
-		cv_.wait(lock);
-	}
+	cv_.wait(lock, [&]{ return state_.load() != State::initDevice; });
 
 	return state_.load() == State::mainLoop;
 }
@@ -392,9 +385,8 @@ void DisplayWindow::uiThread() {
 		cv_.notify_one();
 
 		// wait for step 1
-		while(run_.load() && state_.load() != State::createWindow) {
-			cv_.wait(lock);
-		}
+		auto pred1 = [&]{ return !run_.load() || state_.load() == State::createWindow; };
+		cv_.wait(lock, pred1);
 
 		if(!run_.load()) {
 			return;
@@ -433,9 +425,8 @@ void DisplayWindow::uiThread() {
 		cv_.notify_one();
 
 		// wait for step 2
-		while(run_.load() && state_.load() != State::initDevice) {
-			cv_.wait(lock);
-		}
+		auto pred2 = [&]{ return !run_.load() || state_.load() == State::initDevice; };
+		cv_.wait(lock, pred2);
 
 		if(!run_.load()) {
 			return;

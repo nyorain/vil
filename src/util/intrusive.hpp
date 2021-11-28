@@ -101,8 +101,8 @@ struct FinishHandler {
 	FinishHandler(const FinishHandler&) = delete;
 	FinishHandler& operator=(const FinishHandler&) = delete;
 
-	FinishHandler(FinishHandler&&) = default;
-	FinishHandler& operator=(FinishHandler&&) = default;
+	FinishHandler(FinishHandler&&) noexcept = default;
+	FinishHandler& operator=(FinishHandler&&) noexcept = default;
 
 	void inc(T&) const noexcept {}
 	void dec(T& obj) const noexcept {
