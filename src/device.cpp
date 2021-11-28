@@ -14,14 +14,14 @@
 #include <swa/swa.h>
 #include <vk/dispatch_table_helper.h>
 
+namespace vil {
+
 #ifdef TRACY_MANUAL_LIFETIME
 	// NOTE: strictly speaking, we'd need a mutex to do proper
 	//   initialization. But creating multiple Instances from multiple threads
 	//   at the same time is a weird and problematic corner case anyways
 	std::atomic<unsigned> tracyRefCount {};
 #endif // TRACY_MANUAL_LIFETIME
-
-namespace vil {
 
 DebugStats& DebugStats::get() {
 	static DebugStats ret;
@@ -258,7 +258,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		VkDevice* pDevice) {
 
 #ifdef TRACY_MANUAL_LIFETIME
-	if (tracyRefCount.fetch_add(1u) == 0u) {
+	if(tracyRefCount.fetch_add(1u) == 0u) {
 		dlg_trace("Starting tracy...");
 		tracy::StartupProfiler();
 		dlg_trace(">> done");
