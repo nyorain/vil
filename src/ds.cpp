@@ -10,7 +10,21 @@
 
 namespace vil {
 
+// Whether descriptor sets increase the refCount of the handles
+// written into the descriptors, effectively taking shared ownership of them.
+// Doing this has a huge performance impact (especially for applications
+// with many huge and dynamic descriptorSets). But not doing this means
+// that descriptor sets might contain invalid bindings. That is mainly
+// a problem for the resource viewer for descriptor sets at the moment.
+// TODO: better documentation, make it a meson_option
+// TODO: we could try to explicitly detect the invalid bindings, as we
+//   do with descriptor sets already. See notes in ds3.hpp for details.
 constexpr auto refBindings = false;
+
+// Whether we allow pool fragmentation. Setting this to false means we
+// might explicitly return an error from ds allocation (as valid per spec)
+// even though the driver could do it.
+constexpr auto enableDsFragmentationPath = false;
 
 template<typename T>
 void incRefCount(T& obj) {
@@ -462,16 +476,16 @@ void destroy(DescriptorSet& ds, bool unlink) {
 	// for this, external sync guaranteed by spec and it's not
 	// accessed by us.
 
-#ifdef VIL_DS_FRAGMENTATION_PATH
-	auto* raw = reinterpret_cast<std::byte*>(&ds);
-	if(raw < pool.data.get() || pool.data.get() + pool.dataSize <= raw) {
-		// See AllocateDescriptorSets. We had to choose a slow path due
-		// to fragmentation
-		dlg_trace("free independent DS data slot");
-		dlg_assert(setEntry->offset == u32(-1));
-		delete[] raw;
+	if constexpr(enableDsFragmentationPath) {
+		auto* raw = reinterpret_cast<std::byte*>(&ds);
+		if(raw < pool.data.get() || pool.data.get() + pool.dataSize <= raw) {
+			// See AllocateDescriptorSets. We had to choose a slow path due
+			// to fragmentation
+			dlg_trace("free independent DS data slot");
+			dlg_assert(setEntry->offset == u32(-1));
+			delete[] raw;
+		}
 	}
-#endif // VIL_DS_FRAGMENTATION_PATH
 
 	if(unlink) {
 		dlg_assert(pool.flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
@@ -926,7 +940,7 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 
 	// It's valid for applications to "just try" for newer api versions.
 	// Seems to be what dota does. When an application uses api 1.0 this
-	// is still valid behavior as behavior of overallocation was
+	// is still valid behavior for us to do as behavior of overallocation was
 	// undefined back then.
 	if(!pool.freeEntries) {
 		return VK_ERROR_OUT_OF_POOL_MEMORY;
@@ -1001,26 +1015,26 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 
 		if(offset + memSize > pool.dataSize) {
 			// NOTE: we can just return VK_ERROR_OUT_OF_POOL_MEMORY
-			// here. Some drivers do it.
-#ifdef VIL_DS_FRAGMENTATION_PATH
-			dlg_assert(pool.freeEntries);
-			auto& entry = *pool.freeEntries;
-			pool.freeEntries = entry.next;
-			setEntry = &entry;
+			// per spec here.
+			if constexpr(enableDsFragmentationPath) {
+				dlg_assert(pool.freeEntries);
+				auto& entry = *pool.freeEntries;
+				pool.freeEntries = entry.next;
+				setEntry = &entry;
 
-			dlg_assert(!it);
-			dlg_warn("Fragmentation of descriptor pool detected. Slow path");
-			data = new std::byte[memSize];
+				dlg_assert(!it);
+				dlg_warn("Fragmentation of descriptor pool detected. Slow path");
+				data = new std::byte[memSize];
 
-			// dummy setEntry so we can put it into our linked list
-			entry.offset = u32(-1);
-			entry.size = u32(-1);
-			entry.next = pool.usedEntries;
-			entry.prev = nullptr;
-			pool.usedEntries = &entry;
-#else
-			return VK_ERROR_OUT_OF_POOL_MEMORY;
-#endif // VIL_DS_FRAGMENTATION_PATH
+				// dummy setEntry so we can put it into our linked list
+				entry.offset = u32(-1);
+				entry.size = u32(-1);
+				entry.next = pool.usedEntries;
+				entry.prev = nullptr;
+				pool.usedEntries = &entry;
+			} else {
+				return VK_ERROR_OUT_OF_POOL_MEMORY;
+			}
 		} else {
 			// reserve entry
 			dlg_assert(pool.freeEntries);
@@ -1066,6 +1080,7 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 	ds.layout = std::move(layoutPtr);
 	ds.variableDescriptorCount = varCount;
 	ds.pool = &pool;
+	ds.id = ++pool.lastID;
 	setEntry->set = &ds;
 
 	initDescriptorState(bindingData(ds), *ds.layout, ds.variableDescriptorCount);

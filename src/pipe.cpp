@@ -59,6 +59,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 	ThreadMemScope memScope;
 	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
 	auto pres = memScope.alloc<PreData>(createInfoCount);
+	
+	// TODO: use memScope as well
 	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
 
 	for(auto i = 0u; i < createInfoCount; ++i) {

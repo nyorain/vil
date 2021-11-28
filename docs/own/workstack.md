@@ -1,15 +1,23 @@
+- [x] allow descriptor set dereference in commandRecord, see performance.md
+	- fix descriptorSet gui viewer via similar approach
+	- [x] only addCow the needed descriptorSets in commandHook
+	- [x] capture (via addCow) the descriptorSets when selecting a record
+  in the gui
 - rename main branch to main
 - hide shader debugger behind config feature?
 	- adds a whole new library and isn't ready yet at all.
 	  and might never really be ready, it's more of an experiment anyways
-- clean up ThreadContext (after inlining rework)
 - make ThreadContext alloc and CommandRecord alloc consistent
-- clean up includes to improve compile time
-- allow descriptor set dereference in commandRecord, see performance.md
-	- fix descriptorSet gui viewer
-- only addCow the needed descriptorSets in commandHook
-- capture (via addCow) the descriptorSets when selecting a record
-  in the gui
+	- we probably also don't want to really free the blocks. Just return them.
+	  Enable our global memory block cache thingy?
+	- Also clean up CommandRecord alloc in general. Messy with all those
+	  overloads for CommandBuffer
+	- Maybe we can reuse code? The allocators are fairly similar
+- look into found doom performance hotpaths
+	- Get rid of getAnnotate in command buffer end. Find clean solution for
+	  the problem/improve UI flickering for changing records
+	- Improve QueuePresent timing
+	- analyze other issues, tracy file on D:
 - Clean up Handle
 	- remove objectType from Handle
 	- could remove 'name' from Handle, instead use HashMap in device?
@@ -29,6 +37,13 @@
 		- make rows selectable
 		- render the select vertex in viewport, e.g. via point pipe
 			- later: render the selected triangle?
+- check if we can get the null vulkan driver running and execute tests
+	- just create images/buffers with various parameters and record submissions,
+	  recording every command at least once.
+	- manually test command hooking, without gui (or use gui without actually 
+	  rendering to a swapchain? would be nice to have that feature anyways
+	  but applications that don't use a swapchain e.g. wlroots)
 - clean up sonar code issues
 	- somehow make sure failed asserts have a [[noreturn]] addition so
 	  we get less false positives for cases that we assert to be true
+- clean up includes to improve compile time

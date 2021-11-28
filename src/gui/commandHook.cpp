@@ -379,26 +379,14 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// hook the submission.
 	// Needed in case the descriptorSet is changed/destroyd later on, also
 	// for updateAfterBind
-	// TODO PERF: do we really need *all* descriptors? We probably only need
-	// the descriptors relevant for the hooked command.
-	auto captureDescriptors = [&]() -> CommandDescriptorSnapshot {
-		CommandDescriptorSnapshot descriptors;
-
+	auto captureDescriptors = [&](const Command& cmd) -> CommandDescriptorSnapshot {
 		// when we only hook for e.g. accel struct building there is no
 		// need to add cows to the descriptors.
 		if(!hookNeededForCmd) {
-			return descriptors;
+			return {};
 		}
 
-		for(auto& pair : record.handles) {
-			auto& handle = nonNull(pair.first);
-			if(handle.objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-				auto& ds = static_cast<DescriptorSet&>(handle);
-				descriptors.states[static_cast<void*>(&handle)] = addCow(ds);
-			}
-		}
-
-		return descriptors;
+		return snapshotRelevantDescriptors(cmd);
 	};
 
 	if(foundHookRecord) {
@@ -440,7 +428,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 		if(foundHookRecord) {
 			data.reset(new CommandHookSubmission(*foundHookRecord, subm,
-				captureDescriptors()));
+				captureDescriptors(*foundHookRecord->hcommand.back())));
 			return foundHookRecord->cb;
 		}
 	}
@@ -464,7 +452,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
 		"Alarmingly high number of hooks for a single record");
 
-	auto descriptors = captureDescriptors();
+	auto descriptors = captureDescriptors(*findRes.hierachy.back());
 	auto hook = new CommandHookRecord(*this, record, std::move(findRes.hierachy),
 		descriptors);
 	hook->match = findRes.match;
@@ -1803,12 +1791,9 @@ void CommandHookRecord::finish() noexcept {
 	if(!writer) {
 		delete this;
 	} else {
-		// no other reason for this record to be finished except
-		// invalidation
+		// The only reason we might land here is when the record
+		// was invalidated.
 		dlg_assert(!hook);
-
-		// WIP: I don't think we should ever land here.
-		dlg_error("should not happen");
 	}
 }
 

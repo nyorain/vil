@@ -99,7 +99,7 @@ Many applications are bottlenecked by descriptor set creation and updating.
 For DX11-style renderers we can clearly see the AllocateDescriptorSets -> 
 UpdateDescriptorSets(WithTemplate) -> CmdDraw chain executed many
 times during rendering. An example useful for profiling is Dota.
-These performance are therefore highly performance critical and we
+These functions are therefore highly performance critical and we
 introduced some special handling of descriptor sets:
 
 - To completely avoid allocations in AllocateDescriptorSets we have a static
@@ -110,7 +110,7 @@ introduced some special handling of descriptor sets:
   the descriptorSet handles used by a `CommandRecord` are still valid,
   they may be dangling pointers. The only time we can safely dereference
   them is while the record is being submitted or is still pending on the
-  device since the application cannot have destroyed the sets so far.
+  device since the application cannot have destroyed the used sets so far.
 	- Even when we don't have this guarantee we still have a way to
 	  know whether the pointer is dangling: we just need to store the
 	  DescriptorPool and the DescriptorSet::id together with the 

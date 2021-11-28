@@ -148,3 +148,11 @@ class StackTrace;
 #else // VIL_DEBUG(x)
 	#define VIL_DEBUG_ONLY(x)
 #endif // VIL_DEBUG(x)
+
+#if __cplusplus >= 201902
+	#define VIL_LIKELY [[likely]]
+	#define VIL_UNLIKELY [[unlikely]]
+#else
+	#define VIL_LIKELY
+	#define VIL_UNLIKELY
+#endif

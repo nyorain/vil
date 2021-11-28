@@ -6,6 +6,7 @@
 #include <util/vec.hpp>
 #include <variant>
 #include <deque>
+#include <chrono>
 
 namespace vil {
 

@@ -131,7 +131,10 @@ struct Command {
 
 	// How many sibilings with same nameDesc() came before this in parent
 	// NOTE: i don't like this here. Not sure how to properly solve this.
-	// It's needed by displayCommands to generate proper imgui ids
+	// It's needed by displayCommands to generate proper imgui ids.
+	// We should probably rather do a full-tree-match between the old and
+	// the new record and assign ids via that. Note that this is not relevant
+	// for leaves so this shouldn't be a big performance issue.
 	unsigned relID {};
 
 #ifdef VIL_ENABLE_COMMAND_CALLSTACKS

@@ -134,4 +134,38 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 	}
 }
 
+CommandDescriptorSnapshot snapshotRelevantDescriptors(const Command& cmd) {
+	CommandDescriptorSnapshot ret;
+	auto* scmd = dynamic_cast<const StateCmdBase*>(&cmd);
+	if(!scmd) {
+		return ret;
+	}
+
+	// TODO: add this functionality to BoundDescriptorSet?
+	// Can be useful in a couple of other places.
+	// Also add it as a check version so we can use it via asserts
+	// where appropriate (e.g. bindState).
+
+	for(auto bds : scmd->boundDescriptors().descriptorSets) {
+		if(!bds.dsPool) {
+			dlg_warn("DescriptorSet inaccessible; DescriptorPool was destroyed");
+			continue;
+		}
+
+		// TODO: eh kinda sketchy. Maybe instead of ds rather reference
+		// the DescriptorPoolSetEntry? That is guaranteed to stay valid.
+		// We might access memory that is used for something else here.
+		auto& ds = *static_cast<DescriptorSet*>(bds.ds);
+		dlg_assert(reinterpret_cast<std::byte*>(bds.ds) - bds.dsPool->data.get() < bds.dsPool->dataSize);
+		if(ds.id != bds.dsID) {
+			dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed");
+			continue;
+		}
+
+		ret.states.emplace(bds.ds, addCow(ds));
+	}
+
+	return ret;
+}
+
 } // namespace vil

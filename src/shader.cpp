@@ -5,6 +5,7 @@
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
 #include <spirv-cross/spirv_cross.hpp>
+#include <filesystem>
 
 // NOTE: useful for debugging of patching issues, not enabled by default.
 // #ifdef VIL_OUTPUT_PATCHED_SPIRV
@@ -436,6 +437,7 @@ XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
 	}
 
 	(void) modName;
+// #define VIL_OUTPUT_PATCHED_SPIRV
 #ifdef VIL_OUTPUT_PATCHED_SPIRV
 	std::string output = "vil";
 	if(!modName.empty()) {
@@ -443,12 +445,17 @@ XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
 		output += modName;
 	}
 	output += ".";
+
+	auto badHash = u32(0u);
+	for(auto v : patched.spirv) badHash += v;
+
 	output += std::to_string(badHash);
 	output += ".spv";
-	writeFile(output.c_str(), bytes(patched), true);
+	writeFile(output.c_str(), bytes(patched.spirv), true);
 
-	dlg_info("xfb: {}, stride {}", output, ret.desc->stride);
-	for(auto& cap : ret.desc->captures) {
+	dlg_info("xfb: {}, stride {}", output, patched.desc->stride);
+	dlg_info("cwd: {}", std::filesystem::current_path());
+	for(auto& cap : patched.desc->captures) {
 		dlg_info("  {}", cap.name);
 		dlg_info("  >> offset {}", cap.offset);
 		dlg_info("  >> size {}", (cap.width * cap.columns * cap.vecsize) / 8);

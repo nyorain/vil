@@ -263,13 +263,13 @@ void CommandBufferGui::draw(Draw& draw) {
 							selectedBatch_ = records_;
 							selectedRecord_ = rec;
 
-							CommandDescriptorSnapshot descriptors; // TODO: make current snapshot?
+							auto dsSnapshot = snapshotRelevantDescriptors(*command_.back());
 							commandViewer_.select(record_, *command_.back(),
-								descriptors, true, nullptr);
+								dsSnapshot, true, nullptr);
 
 							dev.commandHook->target = {};
 							dev.commandHook->target.all = true;
-							dev.commandHook->desc(record_, command_, descriptors);
+							dev.commandHook->desc(record_, command_, dsSnapshot);
 							dev.commandHook->freeze = false;
 						}
 
@@ -315,12 +315,12 @@ void CommandBufferGui::draw(Draw& draw) {
 
 			command_ = std::move(nsel);
 
-			CommandDescriptorSnapshot descriptors; // TODO: make current snapshot?
+			auto dsSnapshot = snapshotRelevantDescriptors(*command_.back());
 			commandViewer_.select(record_, *command_.back(),
-				descriptors, true, nullptr);
+				dsSnapshot, true, nullptr);
 
 			// in any case, update the hook
-			dev.commandHook->desc(record_, command_, descriptors);
+			dev.commandHook->desc(record_, command_, dsSnapshot);
 			dev.commandHook->freeze = false;
 		}
 	}

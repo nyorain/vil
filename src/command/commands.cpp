@@ -1221,9 +1221,9 @@ void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*
 		checkReplace(verts.buffer, map);
 	}
 
-	// we don't ever unset descriptor sets, they are accessed via
-	// snapshots anyways and we need the original pointer as key into
-	// the snapshot map
+	for(auto& bds : state.descriptorSets) {
+		checkReplace(bds.dsPool, map);
+	}
 }
 
 Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
@@ -1680,9 +1680,9 @@ void DispatchCmdBase::displayComputeState(Gui& gui) const {
 void DispatchCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(state.pipe, map);
 
-	// we don't ever unset descriptor sets, they are accessed via
-	// snapshots anyways and we need the original pointer as key into
-	// the snapshot map
+	for(auto& bds : state.descriptorSets) {
+		checkReplace(bds.dsPool, map);
+	}
 }
 
 Matcher DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
@@ -3028,6 +3028,10 @@ Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 
 void TraceRaysCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
 	checkReplace(state.pipe, map);
+
+	for(auto& bds : state.descriptorSets) {
+		checkReplace(bds.dsPool, map);
+	}
 }
 
 void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {

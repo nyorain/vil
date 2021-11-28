@@ -1,3 +1,11 @@
+- [x] clean up ThreadContext (after inlining rework)
+	- [x] update to better ThreadContext version, where we don't use stdcpp alignment
+- [x] figure out tracy issues. On windows, it causes problems with a lot
+      of applications that I can't explain :( Some of the problems
+	  have been caused by a tracy update, it used to work!
+	- [x] Might be fixed now, test with doom on windows
+	      (on windows we currently init the ThreadContexts on thread creation, meaning
+	       we can't use tracy there. Otherwise it runs)
 - [x] spvm: add callback for getting image data instead of requiring the whole image
       to be present
 - [x] spvm: Avoid copies for setting buffer data.

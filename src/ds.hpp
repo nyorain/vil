@@ -53,6 +53,7 @@ struct DescriptorPool : DeviceHandle {
 	VkDescriptorPoolCreateFlags flags {};
 
 	u32 maxSets {};
+	u32 lastID {};
 	std::vector<VkDescriptorPoolSize> poolSizes {};
 
 	using SetEntry = DescriptorPoolSetEntry;
@@ -183,8 +184,9 @@ struct DescriptorSet : DeviceHandle {
 
 	// Immutable after creation.
 	IntrusivePtr<DescriptorSetLayout> layout {};
-	u32 variableDescriptorCount {};
 	DescriptorPoolSetEntry* setEntry {};
+	u32 id {};
+	u32 variableDescriptorCount {};
 
 	// The internal state (in data) is protected by this mutex. This
 	// is needed since we might read the data anytime from the gui

@@ -290,7 +290,11 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 
 	ImGui::Text("Bindings");
 
-	// TODO: we can rely on the bindings being valid when we don't ref them
+	// TODO: call addCow, then retrieve the bindings. This only
+	//   works if refBindings in ds.cpp is set though. Otherwise
+	//   the handles stored in the bindings might have been destroyed,
+	//   we don't track/notify that. Since activating refBindings
+	//   has a huge runtime impact, allow to enable it via meson option
 	/*
 	std::lock_guard lock(ds.mutex);
 	for(auto b = 0u; b < ds.layout->bindings.size(); ++b) {

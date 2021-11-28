@@ -14,15 +14,6 @@
 
 namespace vil {
 
-// IDEA: use something like this, track valid segments in push constant ranges
-// IDEA: we should care about pipeline layouts for push constants.
-// Not sure what the rules for disturbing them are though.
-// struct PushConstantSegment {
-// 	PushConstantSegment* next {};
-// 	std::size_t size {};
-// 	// std::byte data[size]; // following this
-// };
-
 struct PushConstantData {
 	span<std::byte> data; // full data
 };
@@ -37,7 +28,13 @@ struct BoundDescriptorSet {
 	// Unlike other handles, we don't unset these pointer even when the ds
 	// is invalidated or destroyed since we need descriptor information about
 	// potentially invalidated records for matching.
+	// To detect whether the pointer is still valid outside of submission
+	// time (e.g. when a new record is selected in the gui), we store
+	// the pool and the dsID here.
 	void* ds {};
+	DescriptorPool* dsPool {};
+	u32 dsID {};
+
 	span<u32> dynamicOffsets;
 	PipelineLayout* layout {};
 };
@@ -253,5 +250,12 @@ bool uses(const CommandRecord& rec, const H& handle) {
 // Unsets all handles in record.destroyed in all of its commands and used
 // handle entries. Must only be called while device mutex is locked
 void replaceInvalidatedLocked(CommandRecord& record);
+
+// Creates a snapshot of all descriptors relevant to the given command.
+// For commands that aren't of type StateCmdBase (i.e. aren't
+// draw/dispatch/traceRays) commands, returns an empty snapshot.
+// Otherwise returns the map of all bound descriptors to their
+// created/retrieved cows.
+CommandDescriptorSnapshot snapshotRelevantDescriptors(const Command&);
 
 } // namespace vil

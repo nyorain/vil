@@ -701,14 +701,15 @@ void CommandViewer::displayDs(Draw& draw) {
 	auto [setID, bindingID, _1, _2] = viewData_.ds;
 
 	if(setID >= dss.size()) {
-		ImGui::Text("DescriptorSet not bound");
-		dlg_warn("DescriptorSet not bound? Shouldn't happen");
+		ImGui::Text("DescriptorSet out of range");
+		dlg_warn("DescriptorSet out of range? Shouldn't happen");
 		return;
 	}
 
 	auto* set = dss[setID].ds;
 	if(!set) {
-		ImGui::Text("DescriptorSet was not bound or destroyed/invalidated");
+		ImGui::Text("DescriptorSet null");
+		dlg_warn("DescriptorSet null? Shouldn't happen");
 		return;
 	}
 
@@ -935,16 +936,11 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	auto aid = viewData_.attachment.id;
 	auto& attachments = drawCmd->state.rpi.attachments;
 	dlg_assert(aid < attachments.size());
-	if(!attachments[aid] || !attachments[aid]->img) {
-		imGuiText("Image or View were destroyed");
-		return;
+
+	refButtonD(*gui_, attachments[aid]);
+	if(attachments[aid]) {
+		refButtonD(*gui_, attachments[aid]->img);
 	}
-
-	auto& view = *attachments[aid];
-	auto& img = *view.img;
-
-	refButton(*gui_, view);
-	refButton(*gui_, img);
 
 	if(state_) {
 		if(state_->copiedAttachments.empty()) {

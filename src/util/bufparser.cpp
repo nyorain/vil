@@ -561,7 +561,7 @@ ParseTypeResult parseType(std::string_view str, ThreadMemScope& memScope) {
 		auto msg = dlg::format("Internal buftype compiler error. Assertion '{}' failed.",
 			err.assertion);
 
-		// Print dot file or error
+		// Print dot file for internal errors
 		// Make sure to never print the errror for the same input twice since
 		// that might be problematic with continuous editing.
 		static thread_local std::unordered_set<std::string> seen;

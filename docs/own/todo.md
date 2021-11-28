@@ -8,11 +8,12 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] figure out tracy issues. On windows, it causes problems with a lot
-      of applications that I can't explain :( Some of the problems
-	  have been caused by a tracy update, it used to work!
-	- [ ] Might be fixed now, test with doom on windows
+- [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
+      resource destruction, can happen in any thread. Caused a crash with doom.
 - [ ] figure out transform_feedback crashes in doom eternal
+      crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
+      check if it could be a error in patching logic; otherwise analyze our generated spirv,
+      see the dumped shaders that might have caused the crash (on D:)
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?

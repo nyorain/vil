@@ -68,12 +68,6 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	dev_ = &dev;
 	clear_ = clear;
 
-	// TODO: likely needs a lock. Shouldn't be done here in first place
-	// i guess but at Gui creation, where an existing gui object could
-	// be moved.
-	dlg_assert(dev.gui == nullptr);
-	dev.gui = this;
-
 	lastFrame_ = Clock::now();
 
 	// init command pool
@@ -218,6 +212,12 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 
 	tabs_.resources->init(*this);
 	tabs_.cb->init(*this);
+
+	// TODO: likely needs a lock. Shouldn't be done here in first place
+	// i guess but at Gui creation, where an existing gui object could
+	// be moved.
+	dlg_assert(dev.gui == nullptr);
+	dev.gui = this;
 }
 
 void Gui::initPipes() {

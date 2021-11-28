@@ -210,6 +210,13 @@ constexpr A align(A offset, B alignment) {
 	return rest ? A(offset + (alignment - rest)) : A(offset);
 }
 
+template<typename A, typename B>
+constexpr A alignPOT(A offset, B alignment) {
+	dlg_assert(alignment != 0);
+	dlg_assert((alignment & (alignment - 1)) == 0u); // POT
+	return (offset + alignment - 1) & ~(alignment - 1);
+}
+
 // Returns whether the range given by [offA, offA + sizeA) overlaps
 // the range given by [offB, offB + sizeB).
 constexpr bool overlaps(u32 offA, u32 sizeA, u32 offB, u32 sizeB) {

@@ -167,6 +167,8 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 
 		descriptorSets[s].layout = &layout;
 		descriptorSets[s].ds = sets[i];
+		descriptorSets[s].dsID = sets[i]->id;
+		descriptorSets[s].dsPool = sets[i]->pool;
 
 		dlg_assert(dsLayout.numDynamicBuffers <= dynOffsets.size());
 		descriptorSets[s].dynamicOffsets = copySpan(cb, dynOffsets.data(), dsLayout.numDynamicBuffers);

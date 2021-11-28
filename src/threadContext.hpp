@@ -19,8 +19,8 @@ namespace vil {
 struct ThreadMemBlock {
 	ThreadMemBlock* prev {};
 	ThreadMemBlock* next {};
-	size_t size {};
-	size_t offset {};
+	std::byte* data {};
+	std::byte* end {};
 
 	VIL_DEBUG_ONLY(
 		// since we store the metadata right next to the raw byte array, we
@@ -30,13 +30,26 @@ struct ThreadMemBlock {
 		u64 canary {canaryValue};
 	)
 
-	// following: std::byte[size]
+	// following: std::byte[]
 };
+
+inline std::size_t memSize(const ThreadMemBlock& block) {
+	return block.end - (reinterpret_cast<const std::byte*>(&block) + sizeof(ThreadMemBlock));
+}
+
+inline std::size_t memOffset(const ThreadMemBlock& block) {
+	return block.data - (reinterpret_cast<const std::byte*>(&block) + sizeof(ThreadMemBlock));
+}
 
 // All data we need per-thread. Currently only used for stack-like
 // dynamic memory allocation.
 struct ThreadContext {
-	static ThreadContext& get();
+	// NOTE: C++ does not clearly specify when its constructor will
+	// be called, just that it's before it's used the first time.
+	// This means we might be creating them for *every* thread even
+	// if its never used there. Keep this in mind when increasing the
+	// minBlockSize.
+	static thread_local ThreadContext instance;
 
 	// We grow block sizes exponentially, up to a maximum
 	static constexpr auto minBlockSize = 16 * 1024;
@@ -50,87 +63,78 @@ struct ThreadContext {
 	~ThreadContext();
 };
 
-inline std::byte* data(ThreadMemBlock& mem, size_t offset) {
-	dlg_assert(offset <= mem.size); // offset == mem.size as 'end' ptr is ok
-	constexpr auto objSize = align(sizeof(mem), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-	return reinterpret_cast<std::byte*>(&mem) + objSize + offset;
+void freeBlocks(ThreadMemBlock* head);
+std::byte* addBlock(ThreadContext& tc, std::size_t size, std::size_t alignment);
+
+// We really want this function to be inlined (in release mode at least)
+// so we keep it as small as possible.
+inline std::byte* attemptAlloc(ThreadMemBlock& block, std::size_t size,
+		std::size_t alignment) {
+	VIL_DEBUG_ONLY(dlg_assert(block.canary == ThreadMemBlock::canaryValue));
+	dlg_assert(block.data <= block.end);
+
+	auto dataUint = reinterpret_cast<std::uintptr_t>(block.data);
+	auto alignedData = alignPOT(dataUint, alignment);
+	auto allocBegin = reinterpret_cast<std::byte*>(alignedData);
+	auto allocEnd = allocBegin + size;
+
+	if(allocEnd > block.end) VIL_UNLIKELY {
+		return nullptr;
+	}
+
+	block.data = allocEnd;
+	return allocBegin;
 }
 
-void freeBlocks(ThreadMemBlock* head);
-ThreadMemBlock& createMemBlock(size_t memSize, ThreadMemBlock* prev);
-
-// We really want this function to be inlined
-inline std::byte* allocate(ThreadContext& tc, size_t size) {
+// We really want this function to be inlined (at least in release
+// with asserts and debug checks disabled).
+inline std::byte* allocate(ThreadContext& tc, std::size_t size,
+		std::size_t alignment) {
 	ExtZoneScoped;
+	dlg_assert(tc.memCurrent); // there is always a current block
 
-	dlg_assert(tc.memCurrent); // there is always one
-	dlg_assert(tc.memCurrent->offset <= tc.memCurrent->size);
-	size = align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-
-	VIL_DEBUG_ONLY(
-		dlg_assert(tc.memCurrent->canary == ThreadMemBlock::canaryValue);
-	)
-
-	// fast path: enough memory available directly inside the command buffer,
+	// fast path (1): enough memory available directly inside the block,
 	// simply align and advance the offset
-	auto newBlockSize = size_t(tc.minBlockSize);
-	dlg_assert(tc.memCurrent && tc.memRoot);
-	dlg_assert(tc.memCurrent->offset % __STDCPP_DEFAULT_NEW_ALIGNMENT__ == 0u);
-	if(tc.memCurrent->offset + size <= tc.memCurrent->size) {
-		auto ret = data(*tc.memCurrent, tc.memCurrent->offset);
-		tc.memCurrent->offset += size;
-		return ret;
+	if(auto* data = attemptAlloc(*tc.memCurrent, size, alignment); data) VIL_LIKELY {
+		return data;
 	}
 
-	if(tc.memCurrent->next) {
-		if(tc.memCurrent->next->size >= size) {
-			tc.memCurrent = tc.memCurrent->next;
-			tc.memCurrent->offset = size;
-			return data(*tc.memCurrent, 0);
+	// fast path (2): enough memory available in the next block, allocate
+	// from there and set it as new block.
+	if(tc.memCurrent->next) VIL_LIKELY {
+		auto& next = *tc.memCurrent->next;
+		dlg_assert(memOffset(next) == 0u);
+		if(auto* data = attemptAlloc(next, size, alignment); data) VIL_LIKELY {
+			tc.memCurrent = &next;
+			return data;
 		}
-
-		// TODO: Just insert it in between, no need to free blocks here I guess
-		dlg_warn("Giant local allocation (size {}); have to free previous blocks", size);
-		freeBlocks(tc.memCurrent->next);
-		tc.memCurrent->next = nullptr;
 	}
 
-	// not enough memory available in last block, allocate new one
-	newBlockSize = std::min<size_t>(tc.blockGrowFac * tc.memCurrent->size, tc.maxBlockSize);
-	newBlockSize = std::max<size_t>(newBlockSize, size);
-
-	dlg_assert(!tc.memCurrent->next);
-	auto& newBlock = createMemBlock(newBlockSize, tc.memCurrent);
-	tc.memCurrent->next = &newBlock;
-
-	tc.memCurrent = &newBlock;
-	tc.memCurrent->offset = size;
-	return data(*tc.memCurrent, 0);
+	// slow path: we need to allocate a new block
+	return addBlock(tc, size, alignment);
 }
 
 // Allocated memory from ThreadContext.
-// Will simply release all allocated memory by reset the allocation offset in the
-// current ThreadContext when this object is destroyed.
+// Will simply release all allocated memory by resetting the allocation offset
+// in the current ThreadContext when this object is destroyed.
 // The object must therefore not be used/moved across thread boundaries or
 // alloc to different ThreadMemScope objects be incorrectly mixed (only allowed
 // in a stack-like manner).
 // When this is used, it must be the only mechanism by which memory
 // from the thread context is allocated.
+// NOTE: for best performance, we try to allow the compiler to inline the
+// fast path for the alloc functions below, effectively reducing an alloc
+// call to just a couple of instructions.
 struct ThreadMemScope {
 	ThreadMemBlock* block {};
-	size_t offset {};
+	std::byte* savedPtr {}; // the saved offset
 
 	// only for debugging, making sure that we never use multiple
 	// ThreadMemScope objects at the same time in any way not resembling
 	// a stack.
 	VIL_DEBUG_ONLY(
-		size_t sizeAllocated {};
 		std::byte* current {};
 	)
-
-	// TODO: make naming here consistent with command allocator.
-	// alloc -> allocSpan0
-	// allocUndef -> allocSpan
 
 	template<typename T>
 	span<T> alloc(size_t n) {
@@ -138,6 +142,8 @@ struct ThreadMemScope {
 		return {ptr, n};
 	}
 
+	// Like alloc but does not value-initialize, so may be faster but
+	// leaves primitives with undefined values.
 	template<typename T>
 	span<T> allocUndef(size_t n) {
 		auto ptr = allocRawUndef<T>(n);
@@ -155,78 +161,51 @@ struct ThreadMemScope {
 	// This function be useful for single allocations though.
 	template<typename T>
 	T* allocRaw(size_t n = 1) {
-		static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-		auto ptr = reinterpret_cast<T*>(this->allocRaw(sizeof(T) * n));
+		auto ptr = reinterpret_cast<T*>(allocBytes(sizeof(T) * n, alignof(T)));
 		new(ptr) T[n]();
 		return ptr;
 	}
 
+	// Like allocRaw but does not value-initialize, so may be faster but
+	// leaves primitives with undefined values.
 	template<typename T>
 	T* allocRawUndef(size_t n = 1) {
-		static_assert(alignof(T) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-		auto ptr = reinterpret_cast<T*>(this->allocRaw(sizeof(T) * n));
+		auto ptr = reinterpret_cast<T*>(allocBytes(sizeof(T) * n, alignof(T)));
 		new(ptr) T[n];
 		return ptr;
 	}
 
-	inline std::byte* allocRaw(size_t size) {
-		auto& tc = ThreadContext::get();
+	inline std::byte* allocBytes(std::size_t size, std::size_t alignment) {
+		auto& tc = ThreadContext::instance;
 
 		VIL_DEBUG_ONLY(
-			dlg_assertm(data(*tc.memCurrent, tc.memCurrent->offset) == this->current,
+			dlg_assertm(tc.memCurrent->data == this->current,
 				"Invalid non-stacking interleaving of ThreadMemScope detected");
 		)
 
-		auto* ptr = vil::allocate(tc, size);
+		auto* ptr = vil::allocate(tc, size, alignment);
 
 		VIL_DEBUG_ONLY(
-			current = ptr + align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-			sizeAllocated += align(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+			current = tc.memCurrent->data;
 		)
 
 		return ptr;
 	}
 
 	inline ThreadMemScope() {
-		auto& tc = ThreadContext::get();
+		auto& tc = ThreadContext::instance;
 		block = tc.memCurrent;
-		offset = block->offset;
+		savedPtr = block->data;
 
 		VIL_DEBUG_ONLY(
-			current = data(*block, offset);
+			current = savedPtr;
 		)
 	}
 
 	inline ~ThreadMemScope() {
-		auto& tc = ThreadContext::get();
-
-		VIL_DEBUG_ONLY(
-			// make sure that all memory in between did come from us
-			// starting at the allocation point we stored when 'this' was
-			// constructed...
-			auto off = this->offset;
-			auto size = this->sizeAllocated;
-			auto it = this->block;
-
-			// ...iterate through the blocks allocated since then...
-			while(off + size > it->offset) {
-				dlg_assert(it->canary == ThreadMemBlock::canaryValue);
-				dlg_assertm(it->next, "remaining: {}", size);
-				dlg_assertm(off <= it->offset, "{} vs {}", off, it->offset);
-				size -= it->offset - off;
-				off = 0u;
-				it = it->next;
-			}
-
-			// ...and assert that we would land at the current allocation point
-			dlg_assert(it->canary == ThreadMemBlock::canaryValue);
-			dlg_assert(it == tc.memCurrent);
-			dlg_assertm(it->offset == off + size,
-				"{} != {} (off {}, size {})", it->offset, off + size, off, size);
-		)
-
+		auto& tc = ThreadContext::instance;
 		tc.memCurrent = block;
-		tc.memCurrent->offset = offset;
+		tc.memCurrent->data = savedPtr;
 	}
 };
 
@@ -262,8 +241,7 @@ class ThreadMemoryResource : public std::pmr::memory_resource {
 	ThreadMemScope* memScope_ {};
 
 	void* do_allocate(std::size_t bytes, std::size_t alignment) override {
-		dlg_assert(alignment <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
-		return memScope_->allocRaw(bytes);
+		return memScope_->allocBytes(bytes, alignment);
 	}
 
 	void do_deallocate(void*, std::size_t, std::size_t) override {
@@ -279,10 +257,5 @@ class ThreadMemoryResource : public std::pmr::memory_resource {
 		return tmr->memScope_ == this->memScope_;
 	}
 };
-
-inline ThreadContext& ThreadContext::get() {
-	static thread_local ThreadContext tc;
-	return tc;
-}
 
 } // namespace vil

@@ -24,6 +24,9 @@ on:
       - "**.vert"
       - "**.frag"
 
+# NOTE: we currently don't test all permutations of {release, debug, ...},
+# {tracy, !tracy}, {gcc, clang, msvc, msvc-ninja} since it would be many
+
 jobs:
   linux-gcc:
     runs-on: ubuntu-latest
@@ -38,7 +41,7 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false
+    - run: meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false -Dtracy=true
       env:
         CC: gcc
     - run: meson test -C build/ -v
@@ -79,6 +82,26 @@ jobs:
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
     - run: meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false
+    - run: meson test -C build/ -v
+
+  linux-clang-tracy-debugoptimized:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - name: Set up Clang
+      uses: egor-tensin/setup-clang@v1
+      with:
+        version: 12
+    - run: pip install meson ninja
+    - name: Install deps
+      run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+        libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
+        libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
+        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
+    - run: meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false -Dtracy=true -Dbuildtype=debugoptimized
     - run: meson test -C build/ -v
 
   # See https://dvdhrm.github.io/2021/04/21/meson-msvc-github-actions/
@@ -125,6 +148,21 @@ jobs:
       with:
         architecture: x64
     - run: meson setup build/ -Dtests=true -Dbuildtype=release
+    - run: meson test -C build/ -v
+
+  windows-release-tracy:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - run: pip install meson ninja
+    - name: Prepare MSVC
+      uses: bus1/cabuild/action/msdevshell@v1
+      with:
+        architecture: x64
+    - run: meson setup build/ -Dtests=true -Dbuildtype=release -Dtracy=true
     - run: meson test -C build/ -v
 
 # TODO:

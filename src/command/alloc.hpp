@@ -83,7 +83,7 @@ CommandMemBlock& getCommandMemBlock(std::size_t newBlockSize);
 	// simply align and advance the offset
 	auto newBlockSize = size_t(minBlockSize);
 	if(blocks) {
-		offset = align(offset, alignment);
+		offset = alignPOT(offset, alignment);
 		if(offset + size <= blocks->size) {
 			auto ret = data(*blocks, offset);
 			offset += size;

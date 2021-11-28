@@ -161,7 +161,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		srcSubres.layerCount = src.ci.arrayLayers - srcSubres.baseArrayLayer;
 	}
 	if(srcSubres.levelCount == VK_REMAINING_MIP_LEVELS) {
-		srcSubres.levelCount = src.ci.mipLevels - srcSubres.levelCount;
+		srcSubres.levelCount = src.ci.mipLevels - srcSubres.baseMipLevel;
 	}
 
 	if(srcSubres.layerCount == 0u || srcSubres.levelCount == 0u ||
