@@ -11,6 +11,9 @@ namespace vil {
 template<typename T, typename H>
 class HandledPtr {
 public:
+	using pointer = T*;
+
+public:
 	HandledPtr() noexcept(std::is_nothrow_constructible_v<H>) :
 			storage_{nullptr, H{}} {
 		static_assert(std::is_nothrow_invocable_v<decltype(&H::dec), H, T&>);
@@ -98,6 +101,9 @@ struct RefCountHandler {
 
 template<typename T>
 struct FinishHandler {
+	FinishHandler() = default;
+
+	// Can't be copied; inc not possible
 	FinishHandler(const FinishHandler&) = delete;
 	FinishHandler& operator=(const FinishHandler&) = delete;
 
@@ -147,3 +153,25 @@ bool operator!=(const T* b, const HandledPtr<T, H>& a) {
 }
 
 } // namspace vil
+
+namespace std {
+	template<typename T, typename H>
+	struct hash<vil::HandledPtr<T, H>> {
+		// See cppreference is_transparent
+		// We need C++20 for associative transparent lookup
+		using transparent_key_equal = std::equal_to<>;
+		using hash_type = std::hash<const T*>;
+
+		// TODO: remove this when all compilers implement P1690R3.
+		// GCC 11.1 does not have it
+		using is_transparent = struct UghWtf {};
+
+		size_t operator()(const vil::HandledPtr<T, H>& x) const {
+			return hash_type{}(x.get());
+		}
+
+		size_t operator()(const T* x) const {
+			return hash_type{}(x);
+		}
+	};
+}

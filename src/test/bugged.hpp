@@ -103,19 +103,21 @@ public:
 		unsigned int line;
 	};
 
+	static Testing& get();
+
 public:
 	// Config variables
 	// the ostream to output to. Must not be set to nullptr. Defaulted to std::cout
-	static std::ostream* output;
+	std::ostream* output {&std::cout};
 
 	// The width of the failure separator. Defaulted to 70.
-	static unsigned int separationWidth;
+	unsigned int separationWidth {55};
 
 	// The char to use in the failure separator line. Defaulted to '-'
-	static char failSeparator;
+	char failSeparator {'-'};
 
 	// The char to use in the bottom separator line. Defaulted to '='
-	static char bottomSeparator;
+	char bottomSeparator {'='};
 
 	// The escape sequences to use to style the output.
 	// Will all be empty if not on unix.
@@ -135,39 +137,40 @@ public:
 	/// the given information.
 	/// Should be only called inside of a testing unit.
 	template<typename V, typename E>
-	static void expectFailed(const FailInfo&, const V& value, const E& expected);
+	void expectFailed(const FailInfo&, const V& value, const E& expected);
 
 	/// Adds the given unit to the list of units to test.
 	/// Always returns 0, useful for static calling.
-	static int add(const Unit&);
+	int add(const Unit&);
 
 	/// Tests all registered units.
 	/// Returns the number of units failed.
-	static unsigned int run(const char* pattern);
+	unsigned int run(const char* pattern);
 
 	/// Outputs a separation line.
-	static void separationLine(bool beginning);
+	void separationLine(bool beginning);
 
 protected:
 	/// Returns a string for the given number of failed tests.
-	static std::string failString(unsigned int failCount, const char* type);
+	std::string failString(unsigned int failCount, const char* type);
 
 	/// Prints the error for an unexpected exception
-	static void unexpectedException(const std::string& errorString);
+	void unexpectedException(const std::string& errorString);
 
-	static std::vector<Unit> units;
-	static unsigned int currentFailed;
-	static unsigned int totalFailed;
-	static unsigned int unitsFailed;
-	static Unit* currentUnit;
+	std::vector<Unit> units;
+	unsigned int currentFailed;
+	unsigned int totalFailed;
+	unsigned int unitsFailed;
+	Unit* currentUnit;
 };
 
 // Utility method used by EXPECT to ensure the given expressions are evaluated
 // exactly once
 template<typename V, typename E>
 inline void checkExpect(const Testing::FailInfo& info, const V& value, const E& expected) {
-	if(value != expected)
-		Testing::expectFailed(info, value, expected);
+	if(value != expected) {
+		Testing::get().expectFailed(info, value, expected);
+	}
 }
 
 template<typename V, typename E>
@@ -190,8 +193,8 @@ inline void Testing::expectFailed(const FailInfo& info, const V& value, const E&
 /// ``` TEST(SampleTest) { EXPECT(1 + 1, 2); } ```
 #define TEST(name) \
 	static void BUGGED_##name##_U(); \
-	namespace { static const auto BUGGED_##name = ::vil::bugged::Testing::add({#name, \
-		BUGGED_##name##_U, ::vil::bugged::stripPath(__FILE__), __LINE__}); } \
+	namespace { static const auto BUGGED_##name = ::vil::bugged::Testing::get().add( \
+		{#name, BUGGED_##name##_U, ::vil::bugged::stripPath(__FILE__), __LINE__}); } \
 	static void BUGGED_##name##_U()
 
 /// Expects the two given values to be equal.

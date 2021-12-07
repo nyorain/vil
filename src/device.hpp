@@ -52,6 +52,22 @@ struct DebugStats {
 	std::atomic<u32> copiedImageMem {};
 };
 
+template<typename T, std::size_t maxSize>
+struct KeepAliveRingBuffer {
+	std::vector<T> data;
+	u64 insertOffset {};
+	SharedLockableBase(DebugSharedMutex)* mutex {};
+
+	VIL_DEBUG_ONLY(
+		using Clock = std::chrono::steady_clock;
+		Clock::time_point lastWrap {};
+	)
+
+	// defined in wrap.hpp
+	void push(T obj);
+	void clear();
+};
+
 struct Device {
 	Instance* ini {};
 	VkDevice handle {};
@@ -221,11 +237,21 @@ struct Device {
 	// Resources stored in descriptors need shared ownership since so that
 	// we don't have to track ds <-> resource links which would be a massive
 	// bottleneck.
-	SyncedIntrusiveUnorderedMap<VkImageView, ImageView> imageViews;
-	SyncedIntrusiveUnorderedMap<VkSampler, Sampler> samplers;
-	SyncedIntrusiveUnorderedMap<VkBuffer, Buffer> buffers;
-	SyncedIntrusiveUnorderedMap<VkBufferView, BufferView> bufferViews;
-	SyncedIntrusiveUnorderedMap<VkAccelerationStructureKHR, AccelStruct> accelStructs;
+	SyncedIntrusiveUnorderedSet<ImageView> imageViews;
+	SyncedIntrusiveUnorderedSet<Sampler> samplers;
+	SyncedIntrusiveUnorderedSet<Buffer> buffers;
+	SyncedIntrusiveUnorderedSet<BufferView> bufferViews;
+	SyncedIntrusiveUnorderedSet<AccelStruct> accelStructs;
+
+	// set to 0u to disable
+	// TODO: documentation on keep alive
+	static constexpr auto keepAliveCount = 0u;
+
+	KeepAliveRingBuffer<ImageView*, keepAliveCount> keepAliveImageViews;
+	KeepAliveRingBuffer<Sampler*, keepAliveCount> keepAliveSamplers;
+	KeepAliveRingBuffer<Buffer*, keepAliveCount> keepAliveBuffers;
+	KeepAliveRingBuffer<BufferView*, keepAliveCount> keepAliveBufferViews;
+	KeepAliveRingBuffer<AccelStruct*, keepAliveCount> keepAliveAccelStructs;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 

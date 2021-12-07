@@ -166,7 +166,7 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 #endif // DS_DISTURB_CHECKS
 
 		descriptorSets[s].layout = &layout;
-		descriptorSets[s].ds = sets[i];
+		descriptorSets[s].dsEntry = sets[i]->setEntry;
 		descriptorSets[s].dsID = sets[i]->id;
 		descriptorSets[s].dsPool = sets[i]->pool;
 

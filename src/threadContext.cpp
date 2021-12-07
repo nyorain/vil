@@ -52,18 +52,13 @@ std::byte* addBlock(ThreadContext& tc, std::size_t size, std::size_t alignment) 
 	newBlockSize = std::max<size_t>(newBlockSize, alignPOT(size, alignment));
 
 	auto& newBlock = createMemBlock(newBlockSize);
-	newBlock.prev = tc.memCurrent;
 	newBlock.next = tc.memCurrent->next;
-
-	if(tc.memCurrent->next) {
-		tc.memCurrent->next->prev = &newBlock;
-	}
-
 	tc.memCurrent->next = &newBlock;
 	tc.memCurrent = &newBlock;
 
-	auto ret = attemptAlloc(newBlock, size, alignment);
-	dlg_assert(ret);
+    std::byte* ret {};
+	auto success = attemptAlloc(newBlock, size, alignment, ret);
+	dlg_assert(success);
 	return ret;
 }
 

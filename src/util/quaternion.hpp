@@ -143,9 +143,6 @@ public:
 	}
 
 public:
-	// Default-constructs the Quaternion to a zero rotation.
-	Quaternion() noexcept = default;
-
 	// hamilton product of quaternions
 	Quaternion& operator*=(const Quaternion& rhs) {
 		auto nx = w * rhs.x + x * rhs.w + y * rhs.z - z * rhs.y;

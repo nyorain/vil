@@ -118,7 +118,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	++DebugStats::get().aliveBuffers;
 
 	*pBuffer = castDispatch<VkBuffer>(buf);
-	dev.buffers.mustEmplace(*pBuffer, std::move(bufPtr));
+	dev.buffers.mustEmplace(std::move(bufPtr));
 
 	return res;
 }
@@ -131,22 +131,19 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	IntrusivePtr<Buffer> ptr;
+	auto& buf = get(device, buffer);
+	auto& dev = *buf.dev;
+	buffer = buf.handle;
 
 	{
 		std::lock_guard lock(dev.mutex);
-		ptr = dev.buffers.mustMoveLocked(buffer);
-
-		if(ptr->ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-			auto num = dev.bufferAddresses.erase(ptr.get());
+		if(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+			auto num = dev.bufferAddresses.erase(&buf);
 			dlg_assert(num == 1u);
 		}
-
-		buffer = ptr->handle;
-		ptr->handle = {};
 	}
 
+	dev.keepAliveBuffers.push(&buf);
 	dev.dispatch.DestroyBuffer(dev.handle, buffer, pAllocator);
 }
 
@@ -290,7 +287,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
 	}
 
 	*pView = castDispatch<VkBufferView>(view);
-	dev.bufferViews.mustEmplace(*pView, std::move(viewPtr));
+	dev.bufferViews.mustEmplace(std::move(viewPtr));
 
 	return res;
 }
@@ -303,15 +300,10 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	IntrusivePtr<BufferView> ptr;
-
-	{
-		std::lock_guard lock(dev.mutex);
-		ptr = dev.bufferViews.mustMoveLocked(bufferView);
-		bufferView = ptr->handle;
-		ptr->handle = {}; // mark as destroyed
-	}
+	auto& bufView = get(device, bufferView);
+	auto& dev = *bufView.dev;
+	bufferView = bufView.handle;
+	dev.keepAliveBufferViews.push(&bufView);
 
 	dev.dispatch.DestroyBufferView(dev.handle, bufferView, pAllocator);
 }

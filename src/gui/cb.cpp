@@ -251,7 +251,12 @@ void CommandBufferGui::draw(Draw& draw) {
 					// extra tree node for every submission
 					auto flags = int(ImGuiTreeNodeFlags_FramePadding);
 					auto id = dlg::format("Commands:{}", r);
-					if(ImGui::TreeNodeEx(id.c_str(), flags, "Commands")) {
+					auto name = "<Unnamed>";
+					if(rec->cbName) {
+						name = rec->cbName;
+					}
+
+					if(ImGui::TreeNodeEx(id.c_str(), flags, name)) {
 						// we don't want as much space as tree nodes
 						auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
 						ImGui::Unindent(s);
@@ -263,7 +268,10 @@ void CommandBufferGui::draw(Draw& draw) {
 							selectedBatch_ = records_;
 							selectedRecord_ = rec;
 
-							auto dsSnapshot = snapshotRelevantDescriptors(*command_.back());
+							// TODO: fix snapshotRelevantDescriptors for destroyed bindings
+							// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
+							//  descriptors might already be destroyed, snapshotRelevantDescriptors won't help
+							auto dsSnapshot = CommandDescriptorSnapshot{}; // snapshotRelevantDescriptors(*command_.back());
 							commandViewer_.select(record_, *command_.back(),
 								dsSnapshot, true, nullptr);
 
@@ -315,7 +323,10 @@ void CommandBufferGui::draw(Draw& draw) {
 
 			command_ = std::move(nsel);
 
-			auto dsSnapshot = snapshotRelevantDescriptors(*command_.back());
+			// TODO: fix snapshotRelevantDescriptors for destroyed bindings
+			// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
+			//  descriptors might already be destroyed, snapshotRelevantDescriptors won't help
+			auto dsSnapshot = CommandDescriptorSnapshot{}; // snapshotRelevantDescriptors(*command_.back());
 			commandViewer_.select(record_, *command_.back(),
 				dsSnapshot, true, nullptr);
 

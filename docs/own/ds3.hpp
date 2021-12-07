@@ -97,3 +97,34 @@ struct Device {
 // And suddenly ResetDescriptorPool is nothing more than some
 // checkResolveCow calls pretty much (yeah, we still need to figure
 // out proper disconnection from CommandRecord).
+
+// ---
+
+// we can't just make a ds snapshot in gui/cb.cpp with refBindings false. Bindings
+// might be invalid, would crash when increasing ref count.
+//
+// Solution: check for each binding if it's known. To avoid false positives:
+// - either have a limited-size list of destroyed handles in the device. And then
+//   avoid recreating at same address or something. Ugh.
+//   - maybe we can come up with some clever allocation scheme for
+// 	descriptor-relevant handles that manages this automatically? Like, it
+// 	minimizes the chance that this happens by offsetting allocations or not
+// 	reusing them or something.
+// - Only in this case: Store the time when the selected record was submitted. And
+//   handle creation time. If handle creation time was later, reject it. Ugh. This
+//   wouldn't even catch all cases with update_unused_while_pending i guess. UGH
+// - Just don't give a fuck an show false positives? chance shouldn't be too high.
+//   And we could just show "Destroyed" otherwise. Which would at least be less
+//   confusion tho
+// - store ids in the bindings, allowing to reject later on as we do with
+//   descriptor sets. Massive increase of memory needed by descriptors, almost
+//   doubled. UGH
+//
+//
+// WAIT we can add a spin to the first approach, making it almost ok. Just keep
+// the handles itself, only marking them as destoyed. And then only clean if it
+// gets too large. Then we can even show correct information. And it's a nice
+// balance between memory overhead and time of keeping alive (could even be
+// runtime tuned via setting).
+//
+// To make 100% sure you never get false positives, just enable refBindings.

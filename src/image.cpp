@@ -300,7 +300,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	}
 
 	*pView = castDispatch<VkImageView>(view);
-	dev.imageViews.mustEmplace(*pView, std::move(viewPtr));
+	dev.imageViews.mustEmplace(std::move(viewPtr));
 
 	++DebugStats::get().aliveImagesViews;
 
@@ -315,8 +315,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		return;
 	}
 
-	auto& dev = *get(device, imageView).dev;
-	mustMoveUnset(dev, imageView);
+	auto& imgView = get(device, imageView);
+	auto& dev = *imgView.dev;
+	imageView = imgView.handle;
+	dev.keepAliveImageViews.push(&imgView);
+
 	dev.dispatch.DestroyImageView(dev.handle, imageView, pAllocator);
 }
 
@@ -340,22 +343,25 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
 	sampler.objectType = VK_OBJECT_TYPE_SAMPLER;
 
 	*pSampler = castDispatch<VkSampler>(sampler);
-	dev.samplers.mustEmplace(*pSampler, std::move(samplerPtr));
+	dev.samplers.mustEmplace(std::move(samplerPtr));
 
 	return res;
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroySampler(
 		VkDevice                                    device,
-		VkSampler                                   sampler,
+		VkSampler                                   handle,
 		const VkAllocationCallbacks*                pAllocator) {
-	if(!sampler) {
+	if(!handle) {
 		return;
 	}
 
-	auto& dev = *get(device, sampler).dev;
-	mustMoveUnset(dev, sampler);
-	dev.dispatch.DestroySampler(dev.handle, sampler, pAllocator);
+	auto& sampler = get(device, handle);
+	auto& dev = *sampler.dev;
+	handle = sampler.handle;
+	dev.keepAliveSamplers.push(&sampler);
+
+	dev.dispatch.DestroySampler(dev.handle, handle, pAllocator);
 }
 
 } // namespace vil

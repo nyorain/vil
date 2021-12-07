@@ -1230,7 +1230,7 @@ void Gui::drawMemoryUI(Draw&) {
 	auto& memProps = dev().memProps;
 	VkDeviceSize heapAlloc[VK_MAX_MEMORY_HEAPS] {};
 
-	for(auto& [_, mem] : dev().deviceMemories.map) {
+	for(auto& [_, mem] : dev().deviceMemories.inner) {
 		auto heap = memProps.memoryTypes[mem->typeIndex].heapIndex;
 		heapAlloc[heap] += mem->size;
 	}

@@ -64,16 +64,19 @@ the layer works internally. Useful mainly for development on it.
 	  to parse expressions. Used for instance by the buffer viewer to convert a 
 	  glsl-like type specification to an internal type representation used to 
 	  format buffer content, see [src/util/bufparser.cpp](src/util/bufparser.cpp).
-	- `test`: To test the functions and classes not exported from the layer,
+	- `test/unit`: To test the functions and classes not exported from the layer,
 	  we compile the tests directly into the shared library (when tests
 	  are enabled, they are off by default, but always run on the CI).
 	  The tests compiled into the shared library are defined in this folder.
 	  We compile them into the library itself so we can test functions that
 	  are not exported. 
 	  We also have a `main.cpp` here that is able to execute the tests.
-	  Unit tests are mainly for internal utility,
-	  end-to-end testing this way is hard to do in a useful way, should
-	  just be done manually by using the layer.
+	  Unit tests are mainly for internal utility.
+	- `test/integration`: We have some integration tests here.
+	  They just use Vulkan like any app would, with the vil layer loaded.
+	  Preferably, and to make this work easily in CI, we use the null Vulkan 
+	  mock_icd driver but load the validation layers *after* vil to make sure it
+	  catches our errors.
 - `include`: Only the public API header lives here. Future API or otherwise public
   headers should go here.
 - `docs`: Documentation, examples, pictures. The `own` subfolder contains

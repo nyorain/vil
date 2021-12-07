@@ -67,6 +67,9 @@ struct DescriptorPool : DeviceHandle {
 	std::unique_ptr<std::byte[]> data;
 	std::unique_ptr<SetEntry[]> entries;
 
+	// TODO: usedEntries is accessed from the outside.
+	// Need a mutex here.
+
 	// Linked list of the alive descriptor sets, sorted by offset.
 	SetEntry* usedEntries {};
 
@@ -131,17 +134,25 @@ struct ImageDescriptor {
 	VkImageLayout layout {};
 };
 
-inline bool operator==(const ImageDescriptor& a, const ImageDescriptor& b) {
-	return a.imageView == b.imageView &&
-		a.sampler == b.sampler &&
-		a.layout == b.layout;
-}
-
 struct BufferDescriptor {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	VkDeviceSize range {};
 };
+
+struct BufferViewDescriptor {
+	BufferView* bufferView {};
+};
+
+struct AccelStructDescriptor {
+	AccelStruct* accelStruct {};
+};
+
+inline bool operator==(const ImageDescriptor& a, const ImageDescriptor& b) {
+	return a.imageView == b.imageView &&
+		a.sampler == b.sampler &&
+		a.layout == b.layout;
+}
 
 inline bool operator==(const BufferDescriptor& a, const BufferDescriptor& b) {
 	return a.buffer == b.buffer &&
@@ -149,8 +160,13 @@ inline bool operator==(const BufferDescriptor& a, const BufferDescriptor& b) {
 		a.range == b.range;
 }
 
-using BufferViewDescriptor = BufferView*;
-using AccelStructDescriptor = AccelStruct*;
+inline bool operator==(const BufferViewDescriptor& a, const BufferViewDescriptor& b) {
+	return a.bufferView == b.bufferView;
+}
+
+inline bool operator==(const AccelStructDescriptor& a, const AccelStructDescriptor& b) {
+	return a.accelStruct == b.accelStruct;
+}
 
 // Temporary wrapper around descriptor state.
 struct DescriptorStateRef {

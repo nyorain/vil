@@ -324,7 +324,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 	dlg_assert(accelStruct.deviceAddress);
 
 	*pAccelerationStructure = castDispatch<VkAccelerationStructureKHR>(accelStruct);
-	dev.accelStructs.mustEmplace(*pAccelerationStructure, std::move(accelStructPtr));
+	dev.accelStructs.mustEmplace(std::move(accelStructPtr));
 
 	{
 		std::lock_guard lock(dev.mutex);
@@ -344,20 +344,19 @@ VKAPI_ATTR void VKAPI_CALL DestroyAccelerationStructureKHR(
 		return;
 	}
 
-	auto& dev = *get(device, accelerationStructure).dev;
-	IntrusivePtr<AccelStruct> ptr;
+	auto& accelStruct = get(device, accelerationStructure);
+	auto& dev = *accelStruct.dev;
+	accelerationStructure = accelStruct.handle;
 
 	{
 		auto lock = std::lock_guard(dev.mutex);
-		ptr = dev.accelStructs.mustMoveLocked(accelerationStructure);
 
-		dlg_assert(ptr->deviceAddress);
-		dev.accelStructAddresses.erase(ptr->deviceAddress);
+		dlg_assert(accelStruct.deviceAddress);
+		dev.accelStructAddresses.erase(accelStruct.deviceAddress);
 
-		accelerationStructure = ptr->handle;
-		ptr->handle = {};
 	}
 
+	dev.keepAliveAccelStructs.push(&accelStruct);
 	dev.dispatch.DestroyAccelerationStructureKHR(dev.handle, accelerationStructure, pAllocator);
 }
 

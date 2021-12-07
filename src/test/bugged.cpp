@@ -1,22 +1,11 @@
 #include "bugged.hpp"
-#include <util/export.hpp>
-#include <util/profiling.hpp>
 #include <dlg/dlg.hpp>
-
-// TODO: ugly, find proper solution. Init functions in profiling.hpp?
-#ifdef TRACY_MANUAL_LIFETIME
-namespace vil {
-
-extern std::atomic<unsigned> tracyRefCount;
-
-} // namespace vil
-#endif // TRACY_MANUAL_LIFETIME
 
 namespace vil::bugged {
 
-unsigned int Testing::separationWidth = 55;
-char Testing::failSeparator = '-';
-char Testing::bottomSeparator = '=';
+// unsigned int Testing::separationWidth = 55;
+// char Testing::failSeparator = '-';
+// char Testing::bottomSeparator = '=';
 
 #if defined(__unix__) || defined(__linux__) || defined(__APPLE__)
 	const char* Testing::Escape::testName = "\033[33m";
@@ -35,12 +24,17 @@ char Testing::bottomSeparator = '=';
 #endif
 
 
-std::vector<Testing::Unit> Testing::units {};
-unsigned int Testing::currentFailed {};
-unsigned int Testing::totalFailed {};
-unsigned int Testing::unitsFailed {};
-Testing::Unit* Testing::currentUnit {};
-std::ostream* Testing::output = &std::cout;
+// std::vector<Testing::Unit> Testing::units {};
+// unsigned int Testing::currentFailed {};
+// unsigned int Testing::totalFailed {};
+// unsigned int Testing::unitsFailed {};
+// Testing::Unit* Testing::currentUnit {};
+// std::ostream* Testing::output = &std::cout;
+
+Testing& Testing::get() {
+	static Testing ret;
+	return ret;
+}
 
 void Testing::separationLine(bool beginning) {
 	if(beginning && !totalFailed && !currentFailed && !unitsFailed)
@@ -115,16 +109,3 @@ std::string Testing::failString(unsigned int failCount, const char* type) {
 }
 
 } // namespace vil::bugged
-
-extern "C" VIL_EXPORT int vil_runUnitTests(const char* pattern) {
-#ifdef TRACY_MANUAL_LIFETIME
-	if(vil::tracyRefCount.fetch_add(1u) == 0u) {
-		dlg_trace("Starting tracy...");
-		tracy::StartupProfiler();
-		dlg_trace(">> done");
-	}
-#endif // TRACY_MANUAL_LIFETIME
-
-	return vil::bugged::Testing::run(pattern);
-}
-

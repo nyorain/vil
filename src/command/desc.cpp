@@ -296,7 +296,7 @@ FindResult find(const Command* root, span<const Command*> dst,
 			if(!dstBound.empty() || !srcBound.empty()) {
 				// TODO: consider dynamic offsets?
 				for(auto i = 0u; i < std::min(srcBound.size(), dstBound.size()); ++i) {
-					if(!srcBound[i].ds || !dstBound[i].ds) {
+					if(!srcBound[i].dsEntry || !dstBound[i].dsEntry) {
 						// TODO: not sure if this can happen. Do sets
 						// that are statically not used by pipeline
 						// have to be bound?
@@ -304,8 +304,9 @@ FindResult find(const Command* root, span<const Command*> dst,
 						continue;
 					}
 
-					auto* srcDs = static_cast<const DescriptorSet*>(srcBound[i].ds);
-					auto dstDsCow = dstDsState.states.find(dstBound[i].ds);
+					auto* srcDs = static_cast<const DescriptorPoolSetEntry*>(srcBound[i].dsEntry)->set;
+					dlg_assert(tryAccessLocked(srcBound[i]) == srcDs);
+					auto dstDsCow = dstDsState.states.find(dstBound[i].dsEntry);
 					// TODO: we might not find it here due to the new
 					// descriptor set capturing rework.
 					if(dstDsCow == dstDsState.states.end()) {
@@ -372,6 +373,8 @@ BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
 
 	for(auto ia = 0u; ia < a.submissions.size(); ++ia) {
 		for(auto ib = 0u; ib < b.submissions.size(); ++ib) {
+			// TODO: replace record.desc and the match here with
+			// proper matching. Remove getAnnotate
 			auto fac = match(a.submissions[ia]->desc, b.submissions[ib]->desc);
 			auto valDiag = ((ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match) + fac;
 			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
@@ -392,7 +395,7 @@ BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
 		}
 	}
 
-	// backtrac
+	// backtrack
 	BatchMatch res;
 	res.a = &a;
 	res.b = &b;

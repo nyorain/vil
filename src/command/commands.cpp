@@ -1324,21 +1324,25 @@ Matcher DrawCmd::match(const Command& base) const {
 		return Matcher::noMatch();
 	}
 
-	// hard matching for now. Might need to relax this in the future.
-	if(cmd->vertexCount != vertexCount ||
-			cmd->instanceCount != instanceCount ||
-			cmd->firstVertex != firstVertex ||
-			cmd->firstInstance != firstInstance) {
-		return Matcher::noMatch();
-	}
-
 	auto m = doMatch(*cmd, false);
 	if(m.total == -1.f) {
 		return m;
 	}
 
-	m.total += 5.f;
-	m.match += 5.f;
+	// hard matching? Disabled for now since one can easily think
+	// of cases where the "respective" command changes e.g. instanceCount
+	// over frames (depending on what is in view).
+	// if(cmd->vertexCount != vertexCount ||
+	// 		cmd->instanceCount != instanceCount ||
+	// 		cmd->firstVertex != firstVertex ||
+	// 		cmd->firstInstance != firstInstance) {
+	// 	return Matcher::noMatch();
+	// }
+
+	add(m, vertexCount, cmd->vertexCount, 10.f);
+	add(m, instanceCount, cmd->instanceCount, 10.f);
+	add(m, firstVertex, cmd->firstVertex, 10.f);
+	add(m, firstInstance, cmd->firstInstance, 10.f);
 
 	return m;
 }

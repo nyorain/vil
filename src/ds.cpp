@@ -233,8 +233,8 @@ void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
 			auto& dstBuf = bufferViews(dst, dstBindID)[dstElemID];
 
 			if(refBindings) {
-				if(dstBuf) decRefCount(*dstBuf);
-				if(srcBuf) incRefCount(*srcBuf);
+				if(dstBuf.bufferView) decRefCount(*dstBuf.bufferView);
+				if(srcBuf.bufferView) incRefCount(*srcBuf.bufferView);
 			}
 
 			dstBuf = srcBuf;
@@ -255,8 +255,8 @@ void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
 			auto& dstAS = accelStructs(dst, dstBindID)[dstElemID];
 
 			if(refBindings) {
-				if(dstAS) decRefCount(*dstAS);
-				if(srcAS) incRefCount(*srcAS);
+				if(dstAS.accelStruct) decRefCount(*dstAS.accelStruct);
+				if(srcAS.accelStruct) incRefCount(*srcAS.accelStruct);
 			}
 
 			dstAS = srcAS;
@@ -267,8 +267,46 @@ void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
 	}
 }
 
-void doRefBindings(DescriptorStateRef state) {
+template<typename Set, typename Handle>
+bool validate(Set& set, Handle*& handle, bool checkReplace) {
+	if(!handle) {
+		return false;
+	}
+
+	if(!checkReplace) {
+		return true;
+	}
+
+	auto it = set.inner.find(handle);
+	if(it == set.inner.end()) {
+		dlg_debug("Detected destroyed handle in descriptorSet");
+		handle = nullptr;
+		return false;
+	}
+
+	return true;
+}
+
+// NOTE: regarding checkIfValid
+// When we create a CoW in addCow and refBindings == false, the descriptorSet
+// might actually contain bindings that are invalid. With the descriptor_indexing
+// features, it's valid to submit records using descriptor sets without
+// destroyed bindings.
+// In that case, we need to check for each binding if it's still valid. We
+// can know whether the pointers are dangling by just looking them up in the
+// respective device data structures. Yep, this can go wrong if a handle
+// is destroyed and then another handle (of the same type) recreated at the
+// same address, giving us a false positive here. We won't crash in that case
+// but simply assume a wrong handle being written to the descriptor.
+// To minimize the chance for that case, we have the keepAliveXXX buffers
+// in Device, actually keeping handles alive for a time. But it might still
+// happen. Users that want to make absolutely sure false positives
+// can't happen should simply run with refBindings = true.
+// We *really* don't want refBindings = true since it's expensive, making
+// descriptor set updates and destruction a lot slower.
+static void doRefBindings(Device& dev, DescriptorStateRef state, bool checkIfValid) {
 	ZoneScopedN("refBindings");
+	assertOwned(dev.mutex);
 
 	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 		auto& binding = state.layout->bindings[b];
@@ -279,23 +317,34 @@ void doRefBindings(DescriptorStateRef state) {
 		switch(category(binding.descriptorType)) {
 			case DescriptorCategory::buffer: {
 				for(auto& b : buffers(state, binding.binding)) {
-					if(b.buffer) incRefCount(*b.buffer);
+					if(validate(dev.buffers, b.buffer, checkIfValid)) {
+						incRefCount(*b.buffer);
+					}
 				}
 				break;
 			} case DescriptorCategory::bufferView: {
 				for(auto& b : bufferViews(state, binding.binding)) {
-					if(b) incRefCount(*b);
+					if(validate(dev.bufferViews, b.bufferView, checkIfValid)) {
+						incRefCount(*b.bufferView);
+					}
 				}
 				break;
 			} case DescriptorCategory::image: {
 				for(auto& b : images(state, binding.binding)) {
-					if(b.imageView) incRefCount(*b.imageView);
-					if(b.sampler) incRefCount(*b.sampler);
+					if(validate(dev.imageViews, b.imageView, checkIfValid)) {
+						incRefCount(*b.imageView);
+					}
+
+					if(validate(dev.samplers, b.sampler, checkIfValid)) {
+						incRefCount(*b.sampler);
+					}
 				}
 				break;
 			} case DescriptorCategory::accelStruct: {
 				for(auto& b : accelStructs(state, binding.binding)) {
-					if(b) incRefCount(*b);
+					if(validate(dev.accelStructs, b.accelStruct, checkIfValid)) {
+						incRefCount(*b.accelStruct);
+					}
 				}
 				break;
 			} case DescriptorCategory::inlineUniformBlock: {
@@ -320,23 +369,33 @@ void unrefBindings(DescriptorStateRef state) {
 		switch(category(binding.descriptorType)) {
 			case DescriptorCategory::buffer: {
 				for(auto& b : buffers(state, binding.binding)) {
-					if(b.buffer) decRefCount(*b.buffer);
+					if(b.buffer) {
+						decRefCount(*b.buffer);
+					}
 				}
 				break;
 			} case DescriptorCategory::bufferView: {
 				for(auto& b : bufferViews(state, binding.binding)) {
-					if(b) decRefCount(*b);
+					if(b.bufferView) {
+						decRefCount(*b.bufferView);
+					}
 				}
 				break;
 			} case DescriptorCategory::image: {
 				for(auto& b : images(state, binding.binding)) {
-					if(b.imageView) decRefCount(*b.imageView);
-					if(b.sampler) decRefCount(*b.sampler);
+					if(b.imageView) {
+						decRefCount(*b.imageView);
+					}
+					if(b.sampler) {
+						decRefCount(*b.sampler);
+					}
 				}
 				break;
 			} case DescriptorCategory::accelStruct: {
 				for(auto& b : accelStructs(state, binding.binding)) {
-					if(b) decRefCount(*b);
+					if(b.accelStruct) {
+						decRefCount(*b.accelStruct);
+					}
 				}
 				break;
 			} case DescriptorCategory::inlineUniformBlock: {
@@ -513,6 +572,7 @@ void destroy(DescriptorSet& ds, bool unlink) {
 		// return to free list
 		setEntry->next = pool.freeEntries;
 		setEntry->prev = nullptr;
+		setEntry->set = nullptr;
 		pool.freeEntries = setEntry;
 	}
 }
@@ -1205,12 +1265,13 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 	handle = bufView.handle;
 
 	if(refBindings) {
-		if(binding) decRefCount(*binding);
+		if(binding.bufferView) {
+			decRefCount(*binding.bufferView);
+		}
 		incRefCount(bufView);
 	}
 
-	// std::lock_guard lock(state.mutex);
-	binding = &bufView;
+	binding.bufferView = &bufView;
 }
 
 void update(DescriptorSet& state, unsigned bind, unsigned elem,
@@ -1227,11 +1288,13 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 		img.imageView = imgView.handle;
 
 		if(refBindings) {
-			if(binding.imageView) decRefCount(*binding.imageView);
+			if(binding.imageView) {
+				decRefCount(*binding.imageView);
+			}
+
 			incRefCount(imgView);
 		}
 
-		// std::lock_guard lock(state.mutex);
 		binding.imageView = &imgView;
 	}
 
@@ -1251,7 +1314,6 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 				incRefCount(sampler);
 			}
 
-			// std::lock_guard lock(state.mutex);
 			binding.sampler = &sampler;
 		}
 	}
@@ -1264,11 +1326,12 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 	info.buffer = buf.handle;
 
 	if(refBindings) {
-		if(binding.buffer) decRefCount(*binding.buffer);
+		if(binding.buffer) {
+			decRefCount(*binding.buffer);
+		}
 		incRefCount(buf);
 	}
 
-	// std::lock_guard lock(state.mutex);
 	binding.buffer = &buf;
 	binding.offset = info.offset;
 	binding.range = evalRange(binding.buffer->ci.size, info.offset, info.range);
@@ -1283,12 +1346,14 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 	handle = as.handle;
 
 	if(refBindings) {
-		if(binding) decRefCount(*binding);
+		if(binding.accelStruct) {
+			decRefCount(*binding.accelStruct);
+		}
+
 		incRefCount(as);
 	}
 
-	// std::lock_guard lock(state.mutex);
-	binding = &as;
+	binding.accelStruct = &as;
 }
 
 void update(DescriptorSet& state, unsigned bind, unsigned offset,
@@ -1365,19 +1430,15 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		auto* inlineUniformWrite = (VkWriteDescriptorSetInlineUniformBlockEXT*) findChainInfo2<
 			VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_INLINE_UNIFORM_BLOCK_EXT>(chainCopy);
 
-		// NOTE: technically, a cow could be set immediately *after*
-		// we call this here, making us change the state even though there
-		// is an active cow. We only ever add cows during submission so
-		// that would mean that the application updates a descriptor set
-		// that is bound in a cb that is currently being submitted.
-		// That's only allowed with VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
-		// we don't support it.
-		//
-		// The proper fix for this: hard-require all handles used in
-		// descriptorSetUpdating to be wrapped (so we don't have to access
-		// the device mutex in between) and then just hold the lock returned
-		// by checkResolveCow while updating the ds
-		/*auto lock = */checkResolveCow(ds);
+		// NOTE: we need this lock here since, technically, the ds could
+		// be accessed by another thread during the update e.g. if the ds has
+		// UPDATE_UNUSED_WHILE_PENDING.
+		// Since we hold the lock here, we have to guarantee that we don't
+		// acquire another mutex higher in the locking hierachy.
+		// That's why we need all handles being written to descriptorSets
+		// to be wrapped, so we don't have to lock the device mutex to
+		// access the maps.
+		auto lock = checkResolveCow(ds);
 
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
 			advanceUntilValid(ds, dstBinding, dstElem);
@@ -1539,29 +1600,25 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	auto& dev = *ds.dev;
 	auto& dut = get(dev, descriptorUpdateTemplate);
 
-	// NOTE: technically, a cow could be set immediately *after*
-	// we call this here, making us change the state even though there
-	// is an active cow. We only ever add cows during submission so
-	// that would mean that the application updates a descriptor set
-	// that is bound in a cb that is currently being submitted.
-	// That's only allowed with VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT,
-	// we don't support it.
-	//
-	// The proper fix for this: hard-require all handles used in
-	// descriptorSetUpdating to be wrapped (so we don't have to access
-	// the device mutex in between) and then just hold the lock returned
-	// by checkResolveCow while updating the ds
+	// NOTE: we need this lock here since, technically, the ds could
+	// be accessed by another thread during the update e.g. if the ds has
+	// UPDATE_UNUSED_WHILE_PENDING.
+	// Since we hold the lock here, we have to guarantee that we don't
+	// acquire another mutex higher in the locking hierachy.
+	// That's why we need all handles being written to descriptorSets
+	// to be wrapped, so we don't have to lock the device mutex to
+	// access the maps.
 	auto lock = checkResolveCow(ds);
 
-	// PERF: our implementation has massive overhead compared to
+	ThreadMemScope memScope;
+	std::byte* ptr;
+
+	// Our implementation has massive overhead compared to
 	// the driver on most platforms. One of the reasons is probably
 	// the copying here. We could (via env variable; off by default) just
 	// const_cast pData and then directly write into it. Should help
 	// a lot. Applications using this function likely have a whole lot of
 	// data to transmit.
-	ThreadMemScope memScope;
-	std::byte* ptr;
-
 	// TODO: using the modify path is UB. But i'd expect it to work
 	// with most applications. It crashed with dota though. Are they
 	// *really* relying on pData content staying the same?
@@ -1583,7 +1640,8 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 		auto dsType = ds.layout->bindings[dstBinding].descriptorType;
 
 		for(auto j = 0u; j < entry.descriptorCount; ++j, ++dstElem) {
-			// TODO: is this needed?
+			// PERF Could we maybe determine this statically
+			// in CreateDescriptorUpdateTemplate?
 			advanceUntilValid(ds, dstBinding, dstElem);
 
 			// TODO: such an assertion here would be nice. Track used
@@ -1707,7 +1765,7 @@ IntrusivePtr<DescriptorSetCow> addCow(DescriptorSet& set) {
 		// we need to reference all bindings when they aren't referenced
 		// at the moment.
 		if(!refBindings) {
-			doRefBindings(set);
+			doRefBindings(*set.dev, set, true);
 		}
 	}
 

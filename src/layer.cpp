@@ -33,15 +33,19 @@ namespace vil {
 
 // Util
 // #define BREAK_ON_ERROR
-#ifdef BREAK_ON_ERROR
-volatile int a = 0u;
+static auto dlgWarnErrorCount = 0u;
 
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
 	dlg_default_output(origin, string, data);
 	// (void) string;
 	// (void) data;
 
-	if (origin->level >= dlg_level_error) {
+	if(origin->level >= dlg_level_warn) {
+		++dlgWarnErrorCount;
+	}
+
+#ifdef BREAK_ON_ERROR
+	if(origin->level >= dlg_level_error) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
 		#ifdef _MSC_VER
@@ -49,11 +53,9 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		#else
 			std::raise(SIGABRT);
 		#endif
-
-		a = 42;
 	}
-}
 #endif // BREAK_ON_ERROR
+}
 
 std::array<unsigned int, 3> apiVersion(uint32_t v) {
 	return {
@@ -74,17 +76,20 @@ void initSettings() {
 	};
 
 	checkSet(HandleDesc<VkCommandBuffer>::wrap, "VIL_WRAP_COMMAND_BUFFER");
-	checkSet(HandleDesc<VkImageView>::wrap, "VIL_WRAP_IMAGE_VIEW");
-	checkSet(HandleDesc<VkBuffer>::wrap, "VIL_WRAP_BUFFER");
 	checkSet(HandleDesc<VkDescriptorSet>::wrap, "VIL_WRAP_DESCRIPTOR_SET");
 	checkSet(HandleDesc<VkDescriptorSetLayout>::wrap, "VIL_WRAP_DESCRIPTOR_SET_LAYOUT");
-	checkSet(HandleDesc<VkSampler>::wrap, "VIL_WRAP_SAMPLER");
 	checkSet(HandleDesc<VkPipelineLayout>::wrap, "VIL_WRAP_PIPELINE_LAYOUT");
 	checkSet(HandleDesc<VkCommandPool>::wrap, "VIL_WRAP_COMMAND_POOL");
-	checkSet(HandleDesc<VkBufferView>::wrap, "VIL_WRAP_BUFFER_VIEW");
 	checkSet(HandleDesc<VkDescriptorUpdateTemplate>::wrap, "VIL_WRAP_BUFFER_DESCRIPTOR_UPDATE_TEMPLATE");
 	checkSet(HandleDesc<VkImage>::wrap, "VIL_WRAP_IMAGE");
 	checkSet(HandleDesc<VkPipeline>::wrap, "VIL_WRAP_PIPELINE");
+
+	// These are always wrapped now. Needed for atomic descriptor set updates.
+	// checkSet(HandleDesc<VkBufferView>::wrap, "VIL_WRAP_BUFFER_VIEW");
+	// checkSet(HandleDesc<VkImageView>::wrap, "VIL_WRAP_IMAGE_VIEW");
+	// checkSet(HandleDesc<VkBuffer>::wrap, "VIL_WRAP_BUFFER");
+	// checkSet(HandleDesc<VkSampler>::wrap, "VIL_WRAP_SAMPLER");
+	// checkSet(HandleDesc<VkSampler>::wrap, "VIL_WRAP_ACCELERATION_STRUCTURE");
 }
 
 // Instance
@@ -93,11 +98,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance) {
 
-#ifdef BREAK_ON_ERROR
-	// Even in debug kinda unacceptable.
-	// Maybe acceptable if we just reuse the old handler (and restore on DestroyInstance). Might still have problems
+	// We use a static version of dlg so this shouldn't be an issue.
+	// TODO: check if it's really ok on all platforms.
 	dlg_set_handler(dlgHandler, nullptr);
-#endif // BREAK_ON_ERROR
 
 	// TODO: remove/find real solution
 #ifdef _WIN32
@@ -739,3 +742,8 @@ vil_NegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVersionStru
 	return VK_SUCCESS;
 }
 */
+
+// Util for integration testing
+extern "C" VIL_EXPORT int vil_getErrorWarningCount() {
+	return vil::dlgWarnErrorCount;
+}

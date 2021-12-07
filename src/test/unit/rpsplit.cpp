@@ -1,4 +1,4 @@
-#include "bugged.hpp"
+#include "../bugged.hpp"
 #include <rp.hpp>
 #include <util/span.hpp>
 

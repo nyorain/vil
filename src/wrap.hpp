@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <device.hpp>
 #include <data.hpp>
+#include <dlg/dlg.hpp>
 
 namespace vil {
 
@@ -113,6 +114,27 @@ inline Device& getDevice(VkDevice handle) {
 
 template<typename H> using MapHandle = typename HandleDesc<H>::type;
 
+inline ImageView& get(Device&, VkImageView handle) { return unwrap(handle); }
+inline BufferView& get(Device&, VkBufferView handle) { return unwrap(handle); }
+inline AccelStruct& get(Device&, VkAccelerationStructureKHR handle) { return unwrap(handle); }
+inline Buffer& get(Device&, VkBuffer handle) { return unwrap(handle); }
+inline Sampler& get(Device&, VkSampler handle) { return unwrap(handle); }
+
+inline ImageView& getLocked(Device&, VkImageView handle) { return unwrap(handle); }
+inline BufferView& getLocked(Device&, VkBufferView handle) { return unwrap(handle); }
+inline AccelStruct& getLocked(Device&, VkAccelerationStructureKHR handle) { return unwrap(handle); }
+inline Buffer& getLocked(Device&, VkBuffer handle) { return unwrap(handle); }
+inline Sampler& getLocked(Device&, VkSampler handle) { return unwrap(handle); }
+
+inline ImageView& get(VkDevice, VkImageView handle) { return unwrap(handle); }
+inline BufferView& get(VkDevice, VkBufferView handle) { return unwrap(handle); }
+inline AccelStruct& get(VkDevice, VkAccelerationStructureKHR handle) { return unwrap(handle); }
+inline Buffer& get(VkDevice, VkBuffer handle) { return unwrap(handle); }
+inline Sampler& get(VkDevice, VkSampler handle) { return unwrap(handle); }
+
+template<typename = void>
+inline IntrusivePtr<Sampler> getPtr(Device&, VkSampler handle) { return IntrusivePtr<Sampler>(&unwrap(handle)); }
+
 template<typename H> MapHandle<H>& get(Device& dev, H handle) {
 	if(HandleDesc<H>::wrap) {
 		return unwrap(handle);
@@ -190,6 +212,58 @@ inline CommandBuffer& getCommandBuffer(VkCommandBuffer handle) {
 	}
 
 	return getData<CommandBuffer>(handle);
+}
+
+template<typename T, std::size_t maxSize>
+void KeepAliveRingBuffer<T, maxSize>::push(T obj) {
+	using H = decltype(obj->handle);
+
+	if constexpr(maxSize == 0u) {
+		HandleDesc<H>::map(*obj->dev).mustErase(*obj);
+		return;
+	}
+
+	// keep alive to make sure we destroy it ouside of the cirtical section
+	decltype(HandleDesc<H>::map(*obj->dev).mustMoveLocked(*obj)) ptr;
+	std::lock_guard lock(*this->mutex);
+
+	obj->handle = {};
+	if(data.size() == maxSize) {
+		auto& old = data[insertOffset];
+		ptr = HandleDesc<H>::map(*obj->dev).mustMoveLocked(*old);
+
+		VIL_DEBUG_ONLY(
+			if(insertOffset == 0u) {
+				auto now = Clock::now();
+				auto dur = std::chrono::duration_cast<std::chrono::seconds>(now - lastWrap);
+				// The shorter this is, the higher the chance for false
+				// positives (i.e. incorrect handles shown in gui) for
+				// descriptorSets when running with refBindings = false
+				dlg_warn("KeepAliveRingBuffer<{}> wrap took {}s",
+					typeid(*obj).name(), dur.count());
+				lastWrap = now;
+			}
+		)
+
+		data[insertOffset] = std::move(obj);
+		insertOffset = (insertOffset + 1) % maxSize;
+	} else {
+		if(data.size() == 0u) {
+			lastWrap = Clock::now();
+		}
+
+		data.push_back(std::move(obj));
+	}
+}
+
+template<typename T, std::size_t maxSize>
+void KeepAliveRingBuffer<T, maxSize>::clear() {
+	for(auto* obj : data) {
+		using H = decltype(obj->handle);
+		HandleDesc<H>::map(*obj->dev).mustMove(*obj);
+	}
+
+	data.clear();
 }
 
 } // namespace vil

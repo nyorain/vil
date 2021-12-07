@@ -1,5 +1,9 @@
 #pragma once
 
+// TODO: clean up. And rename to command/match.hpp?
+// It's not so much about descriptions, it's about matching commands/records.
+// And add more, proper documentation.
+
 #include <fwd.hpp>
 #include <ds.hpp>
 #include <vector>

@@ -1,8 +1,30 @@
+- [ ] integration test: depend on meson subproject for mock driver
+      And don't hardcode my own env path
+	- [ ] also make sure we don't need the layer to be installed
+	      but use the latest built version.
+		  pass build path in via meson config header file?
+	- [ ] add manual meson dependencies from integration test to used layer
+	      and mock driver
+- [ ] add mutex to descriptorPool, make sure it's correctly used everywhere
+- [ ] document what to do when descriptors are not available when
+      clicking new record in UI. Implement prototype for 
+	  always-cow-on-submission? Should probably be toggleable.
+- [ ] clean up special descriptorSet handling in handles.cpp
 - [x] allow descriptor set dereference in commandRecord, see performance.md
 	- fix descriptorSet gui viewer via similar approach
 	- [x] only addCow the needed descriptorSets in commandHook
 	- [x] capture (via addCow) the descriptorSets when selecting a record
   in the gui
+- rework gui device locking. We should be able to execute draw/uploadDraw
+  without holding a lock THE WHOLE TIME. Only lock it where it's really
+  needed
+- [x] got the null mock driver to work.
+  [x] Now write a simple test just creating an instance and device with
+  vil and the validation layer. And check that we can execute that on 
+  CI as well
+	- write test for creating ds, updating it with imageView, destroying
+	  imageView and then using ds in submission (might need partially_bound
+	  or something I guess)
 - rename main branch to main
 - hide shader debugger behind config feature?
 	- adds a whole new library and isn't ready yet at all.
@@ -47,3 +69,4 @@
 	- somehow make sure failed asserts have a [[noreturn]] addition so
 	  we get less false positives for cases that we assert to be true
 - clean up includes to improve compile time
+- [ ] (low prio) make keep-alive mechanism optional and implement descriptor ID housekeeping

@@ -282,7 +282,8 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 
 		// We can safely interpret the dsState of the record at that position
 		// since we know that the record is still valid
-		auto& currDs = *static_cast<const DescriptorSet*>(dsState->descriptorSets[setID].ds);
+		auto& currDs = *static_cast<const DescriptorPoolSetEntry*>(dsState->descriptorSets[setID].dsEntry)->set;
+		dlg_assert(tryAccessLocked(dsState->descriptorSets[setID]) == &currDs);
 
 		dlg_assert_or(record.dsState[i], return true);
 		auto& oldCow = *record.dsState[i];
@@ -386,7 +387,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			return {};
 		}
 
-		return snapshotRelevantDescriptors(cmd);
+		return snapshotRelevantDescriptorsLocked(cmd);
 	};
 
 	if(foundHookRecord) {
@@ -456,7 +457,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	auto hook = new CommandHookRecord(*this, record, std::move(findRes.hierachy),
 		descriptors);
 	hook->match = findRes.match;
-	record.hookRecords.emplace_back(hook);
+	record.hookRecords.push_back(FinishPtr<CommandHookRecord>(hook));
 
 	data.reset(new CommandHookSubmission(*hook, subm, std::move(descriptors)));
 
@@ -1057,7 +1058,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		return;
 	}
 
-	auto it = info.descriptors->states.find(dsState->descriptorSets[setID].ds);
+	auto it = info.descriptors->states.find(dsState->descriptorSets[setID].dsEntry);
 	if(it == info.descriptors->states.end()) {
 		dlg_error("Could not find descriptor in snapshot??");
 		return;

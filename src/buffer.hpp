@@ -17,7 +17,6 @@ struct Buffer : MemoryResource {
 	VkDeviceAddress deviceAddress {}; // null if not available
 
 	std::atomic<u32> refCount {};
-
 	std::vector<CowBufferRange*> cows;
 
 	~Buffer();

@@ -1,6 +1,6 @@
+#include "../bugged.hpp"
 #include <util/buffmt.hpp>
 #include <threadContext.hpp>
-#include "bugged.hpp"
 
 using namespace vil;
 
@@ -34,18 +34,18 @@ TEST(bufp_invalid1) {
 	auto str = "struct Material { vec4 albed };";
 
 	ThreadMemScope memScope;
-	auto ret = unwrap(parseType(str, memScope));
+	auto ret = parseType(str, memScope);
 
-	EXPECT(ret == nullptr, true);
-	// TODO: test error?
+	EXPECT(ret.error != std::nullopt, true);
+	// unwrap(ret); // TODO test error message?
 }
 
 TEST(bufp_invalid2) {
 	auto str = "uint d[";
 
 	ThreadMemScope memScope;
-	auto ret = unwrap(parseType(str, memScope));
+	auto ret = parseType(str, memScope);
 
-	EXPECT(ret == nullptr, true);
-	// TODO: test error?
+	EXPECT(ret.error != std::nullopt, true);
+	// unwrap(ret); // TODO test error message?
 }

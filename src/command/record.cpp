@@ -109,60 +109,69 @@ void replaceInvalidatedLocked(CommandRecord& record) {
 
 // util
 void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
+	assertOwned(dev.mutex);
+
 	if(state.pipe) {
 		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 			state.pipe->handle);
 	}
 
 	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
-		auto& ds = state.descriptorSets[i];
-		if(!ds.ds) {
-			continue;
-		}
+		auto& bds = state.descriptorSets[i];
+		auto& ds = nonNull(tryAccessLocked(bds));
 
 		// NOTE: we only need this since we don't track this during recording
 		// anymore at the moment.
 		if(state.pipe && !compatibleForSetN(*state.pipe->layout,
-				*ds.layout, i)) {
+				*bds.layout, i)) {
 			break;
 		}
 
 		dlg_assert(ds.layout);
 		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-			ds.layout->handle, i, 1u, &static_cast<DescriptorSet*>(ds.ds)->handle,
-			u32(ds.dynamicOffsets.size()), ds.dynamicOffsets.data());
+			bds.layout->handle, i, 1u, &ds.handle,
+			u32(bds.dynamicOffsets.size()), bds.dynamicOffsets.data());
 	}
 }
 
-CommandDescriptorSnapshot snapshotRelevantDescriptors(const Command& cmd) {
+DescriptorSet* tryAccessLocked(const BoundDescriptorSet& bds) {
+	// assertOwned(dev.mutex);
+
+	if(!bds.dsPool) {
+		dlg_debug("DescriptorSet inaccessible; DescriptorSet was destroyed");
+		return nullptr;
+	}
+
+	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.dsEntry);
+	if(!entry.set) {
+		dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed");
+		return nullptr;
+	}
+
+	auto& ds = *entry.set;
+	dlg_assert(reinterpret_cast<std::byte*>(&ds) - bds.dsPool->data.get() < bds.dsPool->dataSize);
+	if(ds.id != bds.dsID) {
+		dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed (overwritten)");
+		return nullptr;
+	}
+
+	return &ds;
+}
+
+CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) {
+	// assertOwned(dev.mutex);
+
 	CommandDescriptorSnapshot ret;
 	auto* scmd = dynamic_cast<const StateCmdBase*>(&cmd);
 	if(!scmd) {
 		return ret;
 	}
 
-	// TODO: add this functionality to BoundDescriptorSet?
-	// Can be useful in a couple of other places.
-	// Also add it as a check version so we can use it via asserts
-	// where appropriate (e.g. bindState).
-
 	for(auto bds : scmd->boundDescriptors().descriptorSets) {
-		if(!bds.dsPool) {
-			dlg_warn("DescriptorSet inaccessible; DescriptorPool was destroyed");
-			continue;
+		auto* ds = tryAccessLocked(bds);
+		if(ds) {
+			ret.states.emplace(bds.dsEntry, addCow(*ds));
 		}
-
-		// TODO: eh kinda sketchy. Maybe instead of ds rather reference
-		// the DescriptorPoolSetEntry? That is guaranteed to stay valid.
-		// We might access memory that is used for something else here.
-		auto& ds = *static_cast<DescriptorSet*>(bds.ds);
-		dlg_assert(reinterpret_cast<std::byte*>(bds.ds) - bds.dsPool->data.get() < bds.dsPool->dataSize);
-		if(ds.id != bds.dsID) {
-			dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed");
-			continue;
-		}
-
-		ret.states.emplace(bds.ds, addCow(ds));
 	}
 
 	return ret;

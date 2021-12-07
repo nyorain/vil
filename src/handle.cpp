@@ -123,16 +123,22 @@ bool matchesSearch(Handle& handle, std::string_view search) {
 	// case-insensitive search
 	auto label = name(handle);
 
+	// TODO: seems msvc can't handle our CI trait -.-
+	return (label.find(search) != label.npos);
+
+	/*
 	using StringViewCI = std::basic_string_view<char, CharTraitsCI>;
 	auto nameCI = StringViewCI(label.data(), label.size());
 	auto searchCI = StringViewCI(search.data(), search.size());
 
 	// TODO: better matching. Support regex?
 	return (nameCI.find(searchCI) != nameCI.npos);
+	*/
 }
 
-template<typename M>
-std::vector<Handle*> findHandles(const M& map, std::string_view search) {
+template<typename... Args>
+std::vector<Handle*> findHandles(const std::unordered_map<Args...>& map,
+		std::string_view search) {
 	std::vector<Handle*> ret;
 	for(auto& entry : map) {
 		auto& handle = *entry.second;
@@ -147,9 +153,26 @@ std::vector<Handle*> findHandles(const M& map, std::string_view search) {
 	return ret;
 }
 
+template<typename... Args>
+std::vector<Handle*> findHandles(const std::unordered_set<Args...>& set,
+		std::string_view search) {
+	std::vector<Handle*> ret;
+	for(auto& entry : set) {
+		auto& handle = *entry;
+		if(!matchesSearch(handle, search)) {
+			continue;
+		}
+
+		ret.push_back(&handle);
+	}
+
+	std::sort(ret.begin(), ret.end());
+	return ret;
+}
+
 template<VkObjectType OT, typename HT, auto DevMapPtr>
-struct ObjectTypeImpl : ObjectTypeHandler {
-	static const ObjectTypeImpl instance;
+struct ObjectTypeMapImpl : ObjectTypeHandler {
+	static const ObjectTypeMapImpl instance;
 
 	VkObjectType objectType() const override { return OT; }
 	Handle* find(Device& dev, u64 id, u64& fwdID) const override {
@@ -158,7 +181,8 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 		using VKHT = decltype(vil::handle(std::declval<HT>()));
 		auto vkht = u64ToHandle<VKHT>(id);
 
-		auto& map = (dev.*DevMapPtr).map;
+		/*
+		auto& map = (dev.*DevMapPtr).inner;
 		auto it = map.find(vkht);
 		if(it == map.end()) {
 			return nullptr;
@@ -171,9 +195,20 @@ struct ObjectTypeImpl : ObjectTypeHandler {
 		}
 
 		return &*it->second;
+		*/
+
+		auto& handle = getLocked(dev, vkht);
+
+		if constexpr(OT == VK_OBJECT_TYPE_COMMAND_BUFFER) {
+			fwdID = handleToU64(handle.handle());
+		} else {
+			fwdID = handleToU64(handle.handle);
+		}
+
+		return &handle;
 	}
 	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
-		return findHandles((dev.*DevMapPtr).map, search);
+		return findHandles((dev.*DevMapPtr).inner, search);
 	}
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
 		dlg_assert(handle.objectType == objectType());
@@ -193,7 +228,7 @@ struct DescriptorSetTypeImpl : ObjectTypeHandler {
 			// TODO PERF: extremely slow, iterating over *all* descriptor sets
 			// via linked lists
 			auto vkh = u64ToHandle<VkDescriptorSet>(id);
-			for(auto& [h, pool] : dev.dsPools.map) {
+			for(auto& [h, pool] : dev.dsPools.inner) {
 				for(auto it = pool->usedEntries; it; it = it->next) {
 					auto& set = *it->set;
 					if(castDispatch<VkDescriptorSet>(set) == vkh) {
@@ -203,7 +238,7 @@ struct DescriptorSetTypeImpl : ObjectTypeHandler {
 				}
 			}
 		} else {
-			auto& map = dev.descriptorSets.map;
+			auto& map = dev.descriptorSets.inner;
 			auto it = map.find(u64ToHandle<VkDescriptorSet>(id));
 			if(it == map.end()) {
 				return nullptr;
@@ -217,11 +252,11 @@ struct DescriptorSetTypeImpl : ObjectTypeHandler {
 	}
 	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
 		if(!HandleDesc<VkDescriptorSet>::wrap) {
-			return findHandles(dev.descriptorSets.map, search);
+			return findHandles(dev.descriptorSets.inner, search);
 		}
 
 		std::vector<Handle*> ret;
-		for(auto& [h, pool] : dev.dsPools.map) {
+		for(auto& [h, pool] : dev.dsPools.inner) {
 			for(auto it = pool->usedEntries; it; it = it->next) {
 				if(matchesSearch(*it->set, search)) {
 					ret.push_back(it->set);
@@ -273,34 +308,34 @@ struct QueueTypeImpl : ObjectTypeHandler {
 };
 
 template<VkObjectType OT, typename HT, auto DevMapPtr>
-const ObjectTypeImpl<OT, HT, DevMapPtr> ObjectTypeImpl<OT, HT, DevMapPtr>::instance;
+const ObjectTypeMapImpl<OT, HT, DevMapPtr> ObjectTypeMapImpl<OT, HT, DevMapPtr>::instance;
 
 const QueueTypeImpl QueueTypeImpl::instance;
 const DescriptorSetTypeImpl DescriptorSetTypeImpl::instance;
 
 static const ObjectTypeHandler* typeHandlers[] = {
-	&ObjectTypeImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &Device::pipes>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
-	&ObjectTypeImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE_VIEW, ImageView, &Device::imageViews>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SAMPLER, Sampler, &Device::samplers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER, Buffer, &Device::buffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &Device::pipes>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE_LAYOUT, PipelineLayout, &Device::pipeLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, DescriptorSetLayout, &Device::dsLayouts>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_POOL, DescriptorPool, &Device::dsPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FENCE, Fence, &Device::fences>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SEMAPHORE, Semaphore, &Device::semaphores>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_EVENT, Event, &Device::events>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_QUERY_POOL, QueryPool, &Device::queryPools>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SWAPCHAIN_KHR, Swapchain, &Device::swapchains>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
+	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
 	&DescriptorSetTypeImpl::instance,
 	&QueueTypeImpl::instance,
 };

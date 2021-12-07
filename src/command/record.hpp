@@ -19,8 +19,8 @@ struct PushConstantData {
 };
 
 struct BoundDescriptorSet {
-	// At record time, this points to the DescriptorSet object.
-	// But since the descriptor set might get invalid later on, this
+	// At record time, this points to the DescriptorPoolSetEntry object.
+	// Since the descriptor set might get invalid later on, this
 	// should not be accessed directly, unless we know for certain
 	// that the descriptorSet must be valid, e.g. at submission time.
 	// See CommandDescriptorSnapshot that maps these pointers
@@ -31,7 +31,7 @@ struct BoundDescriptorSet {
 	// To detect whether the pointer is still valid outside of submission
 	// time (e.g. when a new record is selected in the gui), we store
 	// the pool and the dsID here.
-	void* ds {};
+	void* dsEntry {};
 	DescriptorPool* dsPool {};
 	u32 dsID {};
 
@@ -154,6 +154,7 @@ struct CommandRecord : CommandRecordMemory {
 	u32 queueFamily {};
 	// Name of commmand buffer in which this record originated.
 	// Stored separately from cb so that information is retained when cb is unset.
+	// Allocated in memory of CommandRecord.
 	const char* cbName {};
 	// whether the recording is finished (i.e. EndCommandBuffer called)
 	bool finished {};
@@ -251,11 +252,20 @@ bool uses(const CommandRecord& rec, const H& handle) {
 // handle entries. Must only be called while device mutex is locked
 void replaceInvalidatedLocked(CommandRecord& record);
 
+// Checks if the given bound DescriptorSet is still valid. If so, returns it.
+// TODO: data race here with accessing it. We need to add a mutex to the pool used
+// for freeing sets (and unsetting setEntry->set). This will then returns the
+// DescriptorSet and the lock on the DescriptorPool (effectively preventing the ds
+// from being destroyed).
+DescriptorSet* tryAccessLocked(const BoundDescriptorSet&);
+
 // Creates a snapshot of all descriptors relevant to the given command.
 // For commands that aren't of type StateCmdBase (i.e. aren't
 // draw/dispatch/traceRays) commands, returns an empty snapshot.
 // Otherwise returns the map of all bound descriptors to their
 // created/retrieved cows.
-CommandDescriptorSnapshot snapshotRelevantDescriptors(const Command&);
+// TODO: Must currently not be called when bindings in the descriptor
+// might be invalid.
+CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command&);
 
 } // namespace vil

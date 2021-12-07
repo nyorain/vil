@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <vector>
 #include <cassert>
+#include <cstring>
 #include <memory_resource>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
@@ -14,11 +15,28 @@
 // continuous sequences. When used e.g. for vector, does not allow resizing.
 // because we don't know the size.
 
+// NOTE: Take care modifying this code in future, it was optimized so that
+// the allocation fast path only needs 6 instructions (1 load, 1 store).
+// Creating a ThreadMemScope has 7 instructions with 2 independent loads.
+// See node 2107.
+
+// TODO: factor optimized allocation code out into BlockAllocator and
+// replace the CommandAllocator with it.
+// TODO: add support for retrieving the memory blocks from a parent
+// allocator instead of calling new[], delete[] directly every time.
+
+// PERF: maybe don't support any alignment? Instead define a
+// maxAlignment and always align allocation size to multiple? We could
+// hope that constant folding will detect that object size is a multiple
+// in most cases (hm but this would only work for maxAlignment = sizeof(void*),
+// is that really enough for all cases?) and completely remove the align
+// computation
+
 namespace vil {
 
 struct ThreadMemBlock {
-	ThreadMemBlock* prev {};
 	ThreadMemBlock* next {};
+	// PERF: maybe move these two to ThreadContext, don't store it for every block
 	std::byte* data {};
 	std::byte* end {};
 
@@ -56,8 +74,8 @@ struct ThreadContext {
 	static constexpr auto maxBlockSize = 16 * 1024 * 1024;
 	static constexpr auto blockGrowFac = 2;
 
-	ThreadMemBlock* memRoot {};
-	ThreadMemBlock* memCurrent {};
+	ThreadMemBlock* memRoot;
+	ThreadMemBlock* memCurrent;
 
 	ThreadContext();
 	~ThreadContext();
@@ -68,8 +86,8 @@ std::byte* addBlock(ThreadContext& tc, std::size_t size, std::size_t alignment);
 
 // We really want this function to be inlined (in release mode at least)
 // so we keep it as small as possible.
-inline std::byte* attemptAlloc(ThreadMemBlock& block, std::size_t size,
-		std::size_t alignment) {
+inline bool attemptAlloc(ThreadMemBlock& block, std::size_t size,
+		std::size_t alignment, std::byte*& ret) {
 	VIL_DEBUG_ONLY(dlg_assert(block.canary == ThreadMemBlock::canaryValue));
 	dlg_assert(block.data <= block.end);
 
@@ -79,11 +97,12 @@ inline std::byte* attemptAlloc(ThreadMemBlock& block, std::size_t size,
 	auto allocEnd = allocBegin + size;
 
 	if(allocEnd > block.end) VIL_UNLIKELY {
-		return nullptr;
+		return false;
 	}
 
 	block.data = allocEnd;
-	return allocBegin;
+	ret = allocBegin;
+    return true;
 }
 
 // We really want this function to be inlined (at least in release
@@ -95,7 +114,8 @@ inline std::byte* allocate(ThreadContext& tc, std::size_t size,
 
 	// fast path (1): enough memory available directly inside the block,
 	// simply align and advance the offset
-	if(auto* data = attemptAlloc(*tc.memCurrent, size, alignment); data) VIL_LIKELY {
+    std::byte* data;
+	if(attemptAlloc(*tc.memCurrent, size, alignment, data)) VIL_LIKELY {
 		return data;
 	}
 
@@ -104,7 +124,7 @@ inline std::byte* allocate(ThreadContext& tc, std::size_t size,
 	if(tc.memCurrent->next) VIL_LIKELY {
 		auto& next = *tc.memCurrent->next;
 		dlg_assert(memOffset(next) == 0u);
-		if(auto* data = attemptAlloc(next, size, alignment); data) VIL_LIKELY {
+		if(attemptAlloc(next, size, alignment, data)) VIL_LIKELY {
 			tc.memCurrent = &next;
 			return data;
 		}
@@ -126,8 +146,12 @@ inline std::byte* allocate(ThreadContext& tc, std::size_t size,
 // fast path for the alloc functions below, effectively reducing an alloc
 // call to just a couple of instructions.
 struct ThreadMemScope {
-	ThreadMemBlock* block {};
-	std::byte* savedPtr {}; // the saved offset
+	ThreadMemBlock* block; // the block saved during construction
+	std::byte* savedPtr; // the offset saved during construction
+
+	// NOTE: storing this here is an optimization for compilers that
+	// lazy-initialize thread local storage.
+	ThreadContext& tc;
 
 	// only for debugging, making sure that we never use multiple
 	// ThreadMemScope objects at the same time in any way not resembling
@@ -152,7 +176,7 @@ struct ThreadMemScope {
 
 	template<typename T>
 	span<std::remove_const_t<T>> copy(T* data, size_t n) {
-		auto ret = this->alloc<std::remove_const_t<T>>(n);
+		auto ret = this->allocUndef<std::remove_const_t<T>>(n);
 		std::memcpy(ret.data(), data, n * sizeof(T));
 		return ret;
 	}
@@ -176,8 +200,6 @@ struct ThreadMemScope {
 	}
 
 	inline std::byte* allocBytes(std::size_t size, std::size_t alignment) {
-		auto& tc = ThreadContext::instance;
-
 		VIL_DEBUG_ONLY(
 			dlg_assertm(tc.memCurrent->data == this->current,
 				"Invalid non-stacking interleaving of ThreadMemScope detected");
@@ -192,8 +214,7 @@ struct ThreadMemScope {
 		return ptr;
 	}
 
-	inline ThreadMemScope() {
-		auto& tc = ThreadContext::instance;
+	inline ThreadMemScope() : tc(ThreadContext::instance) {
 		block = tc.memCurrent;
 		savedPtr = block->data;
 
@@ -203,7 +224,6 @@ struct ThreadMemScope {
 	}
 
 	inline ~ThreadMemScope() {
-		auto& tc = ThreadContext::instance;
 		tc.memCurrent = block;
 		tc.memCurrent->data = savedPtr;
 	}

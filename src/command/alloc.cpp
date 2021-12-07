@@ -23,8 +23,9 @@ CommandMemBlock::~CommandMemBlock() {
 
 CommandMemBlock& createMemBlock(size_t memSize, CommandMemBlock* next = nullptr) {
 	ZoneScoped;
-	auto buf = new std::byte[memSize];
-	auto* memBlock = new(buf) CommandMemBlock(memSize - alignedStructSize, next);
+
+	auto buf = new std::byte[alignedStructSize + memSize];
+	auto* memBlock = new(buf) CommandMemBlock(memSize, next);
 	return *memBlock;
 }
 

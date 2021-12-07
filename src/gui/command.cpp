@@ -399,7 +399,7 @@ void CommandViewer::displayDsList() {
 			auto& ds = dss[setID];
 
 			// No descriptor set bound
-			if(!ds.ds) {
+			if(!ds.dsEntry) {
 				if(showUnboundSets) {
 					auto label = dlg::format("Descriptor Set {}: unbound", setID);
 					auto flags = ImGuiTreeNodeFlags_Bullet |
@@ -422,7 +422,7 @@ void CommandViewer::displayDsList() {
 			}
 
 			// TODO: this can happen now with descriptor cows
-			auto stateIt = dsState_.states.find(ds.ds);
+			auto stateIt = dsState_.states.find(ds.dsEntry);
 			dlg_assert_or(stateIt != dsState_.states.end(), continue);
 
 			auto& dsCow = *stateIt->second;
@@ -706,14 +706,14 @@ void CommandViewer::displayDs(Draw& draw) {
 		return;
 	}
 
-	auto* set = dss[setID].ds;
-	if(!set) {
+	auto* setEntry = dss[setID].dsEntry;
+	if(!setEntry) {
 		ImGui::Text("DescriptorSet null");
 		dlg_warn("DescriptorSet null? Shouldn't happen");
 		return;
 	}
 
-	auto stateIt = dsState_.states.find(set);
+	auto stateIt = dsState_.states.find(setEntry);
 	dlg_assert_or(stateIt != dsState_.states.end(), return);
 
 	auto& dsCow = *stateIt->second;
@@ -879,7 +879,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		imGuiText("TODO: bufferView viewer not implemented yet");
 	} else if(dsCat == DescriptorCategory::accelStruct) {
 		auto& elem = accelStructs(state, bindingID)[elemID];
-		refButtonExpect(gui, elem);
+		refButtonExpect(gui, elem.accelStruct);
 		// TODO: show data of acceleration structure?
 	} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
 		auto blockData = inlineUniformBlock(state, bindingID);

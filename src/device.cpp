@@ -61,6 +61,13 @@ Device::~Device() {
 		dlg_assert(res.has_value());
 	}
 
+	// destroy all resources only kept alive by us
+	this->keepAliveBuffers.clear();
+	this->keepAliveImageViews.clear();
+	this->keepAliveBufferViews.clear();
+	this->keepAliveSamplers.clear();
+	this->keepAliveAccelStructs.clear();
+
 	// user must have erased all resources
 	dlg_assert(this->swapchains.empty());
 	dlg_assert(this->images.empty());
@@ -722,6 +729,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.bufferViews.mutex = &dev.mutex;
 	dev.dsuTemplates.mutex = &dev.mutex;
 	dev.accelStructs.mutex = &dev.mutex;
+
+	dev.keepAliveAccelStructs.mutex = &dev.mutex;
+	dev.keepAliveBufferViews.mutex = &dev.mutex;
+	dev.keepAliveBuffers.mutex = &dev.mutex;
+	dev.keepAliveSamplers.mutex = &dev.mutex;
+	dev.keepAliveAccelStructs.mutex = &dev.mutex;
+	dev.keepAliveImageViews.mutex = &dev.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);

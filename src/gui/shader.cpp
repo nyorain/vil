@@ -466,7 +466,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	dlg_assert(setID < dss.size());
 	auto& cmdDS = dss[setID];
 
-	auto stateIt = dsState.states.find(cmdDS.ds);
+	auto stateIt = dsState.states.find(cmdDS.dsEntry);
 	dlg_assert(stateIt != dsState.states.end());
 	auto [ds, lock] = access(*stateIt->second);
 

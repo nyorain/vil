@@ -3,7 +3,7 @@ project('VIL', ['c', 'cpp'],
 	default_options: [
 		'werror=true',
 		'warning_level=3',
-		'cpp_std=c++17',
+		'cpp_std=c++20',
 		# NOTE: this will cause issues on old msvc versions, with new
 		# meson versions. You need at least visual studio 19.28, see
 		# https://github.com/mesonbuild/meson/pull/7967 (already in the last
@@ -102,6 +102,10 @@ endif
 layer_args = [
 	# Make sure to *never* include them
 	'-DVK_NO_PROTOTYPES',
+
+	# for imgui, C++20
+	# TODO: only disable werror?
+	'-Wno-deprecated-enum-enum-conversion',
 ]
 
 if debug_stats
@@ -315,10 +319,11 @@ with_tests = get_option('tests')
 if with_tests
 	src += files(
 		'src/test/bugged.cpp',
-		'src/test/rpsplit.cpp',
-		'src/test/xfb.cpp',
-		'src/test/bufferAddress.cpp',
-		'src/test/bufparse.cpp',
+		'src/test/unit/entry.cpp',
+		'src/test/unit/rpsplit.cpp',
+		'src/test/unit/xfb.cpp',
+		'src/test/unit/bufferAddress.cpp',
+		'src/test/unit/bufparse.cpp',
 	)
 endif
 
@@ -434,10 +439,25 @@ if get_option('example')
 endif
 
 if with_tests
-	viltest = executable('viltest', files('src/test/main.cpp'),
+	# executor for embedded unit tests
+	viltest = executable('viltest', files('src/test/unit/main.cpp'),
 		include_directories: inc,
 		cpp_args: args,
 		dependencies: dep_dlg,
 		link_with: vil_layer)
 	test('viltest', viltest)
+
+	# integration tests
+	dep_vulkan = dependency('vulkan')
+	dep_dl = cc.find_library('dl', required: false)
+	int_src = files(
+		'src/test/bugged.cpp',
+		'src/test/integration/main.cpp',
+		'src/test/integration/raw.cpp',
+	)
+	intest = executable('intest', int_src,
+		include_directories: inc,
+		cpp_args: args,
+		dependencies: [dep_dlg, dep_vulkan, dep_dl])
+	test('intest', intest)
 endif
