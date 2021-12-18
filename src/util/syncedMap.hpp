@@ -260,9 +260,11 @@ public:
 template<typename T, template<typename...> typename P>
 class SyncedUnorderedSet {
 public:
-	// TODO: when P1690R3 is supported everywhere, we don't need
-	// the std::equal_to<> thingy here
-	using UnorderedSet = std::unordered_set<P<T>, std::hash<P<T>>, std::equal_to<>>;
+	// TODO: when switching to C++20 and when P1690R3 is supported everywhere,
+	// we don't need the std::equal_to<> thingy here
+	// using UnorderedSet = std::unordered_set<P<T>, std::hash<P<T>>, std::equal_to<>>;
+
+	using UnorderedSet = std::unordered_set<P<T>>;
 	using pointer = T*;
 	// using reference = T&;
 	using const_reference = const T&;
@@ -270,7 +272,12 @@ public:
 	P<T> moveLocked(const_reference key) {
 		assertOwned(*mutex);
 
-		auto it = inner.find(&key);
+		// TODO: not exception safe
+		// Remove with c++20s better container lookup
+		P<T> dummy(acquireOwnership, const_cast<pointer>(&key));
+		auto it = inner.find(dummy);
+		(void) dummy.release();
+
 		if(it == inner.end()) {
 			return nullptr;
 		}
@@ -313,7 +320,12 @@ public:
 	T& getLocked(const_reference key) {
 		assertOwnedOrShared(*mutex);
 
-		auto it = inner.find(key);
+		// TODO: not exception safe
+		// Remove with c++20s better container lookup
+		P<T> dummy(acquireOwnership, const_cast<pointer>(&key));
+		auto it = inner.find(dummy);
+		(void) dummy.release();
+
 		assert(it != inner.end());
 		return *it;
 	}

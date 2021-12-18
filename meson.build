@@ -3,7 +3,7 @@ project('VIL', ['c', 'cpp'],
 	default_options: [
 		'werror=true',
 		'warning_level=3',
-		'cpp_std=c++20',
+		'cpp_std=c++17',
 		# NOTE: this will cause issues on old msvc versions, with new
 		# meson versions. You need at least visual studio 19.28, see
 		# https://github.com/mesonbuild/meson/pull/7967 (already in the last

@@ -269,6 +269,7 @@ void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
 
 template<typename Set, typename Handle>
 bool validate(Set& set, Handle*& handle, bool checkReplace) {
+	assertOwned(handle->dev->mutex);
 	if(!handle) {
 		return false;
 	}
@@ -277,7 +278,12 @@ bool validate(Set& set, Handle*& handle, bool checkReplace) {
 		return true;
 	}
 
-	auto it = set.inner.find(handle);
+	// TODO: not fully exception safe
+	// Remove with c++20s better container lookup
+	IntrusivePtr<Handle> dummy(acquireOwnership, handle);
+	auto it = set.inner.find(dummy);
+	(void) dummy.release();
+
 	if(it == set.inner.end()) {
 		dlg_debug("Detected destroyed handle in descriptorSet");
 		handle = nullptr;

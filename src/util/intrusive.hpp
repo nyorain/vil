@@ -8,6 +8,8 @@
 
 namespace vil {
 
+constexpr struct AcquireOwnershipTag {} acquireOwnership;
+
 template<typename T, typename H>
 class HandledPtr {
 public:
@@ -44,6 +46,8 @@ public:
 			getHandler().inc(*getPointer());
 		}
 	}
+	explicit HandledPtr(AcquireOwnershipTag, T* ptr, H h = {}) noexcept : storage_{ptr, std::move(h)} {
+	}
 	HandledPtr(std::nullptr_t, H h = {}) noexcept : storage_{nullptr, std::move(h)} {}
 
 	HandledPtr(const HandledPtr& rhs) noexcept : storage_(rhs.storage_) {
@@ -74,6 +78,12 @@ public:
 
 	T* get() const noexcept { return std::get<0>(storage_); }
 	H& getHandler() const noexcept { return getHandler(); }
+
+	[[nodiscard]] T* release() noexcept {
+		auto ret = get();
+		getPointer() = nullptr;
+		return ret;
+	}
 
 	operator bool() const noexcept { return get(); }
 	T* operator->() const noexcept { return get(); }
