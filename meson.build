@@ -315,8 +315,8 @@ src = files(
 	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
 
-with_tests = get_option('tests')
-if with_tests
+with_unit_tests = get_option('unit-tests')
+if with_unit_tests
 	src += files(
 		'src/test/bugged.cpp',
 		'src/test/unit/entry.cpp',
@@ -438,7 +438,7 @@ if get_option('example')
 	subdir('docs/example')
 endif
 
-if with_tests
+if with_unit_tests
 	# executor for embedded unit tests
 	viltest = executable('viltest', files('src/test/unit/main.cpp'),
 		include_directories: inc,
@@ -446,7 +446,10 @@ if with_tests
 		dependencies: dep_dlg,
 		link_with: vil_layer)
 	test('viltest', viltest)
+endif
 
+with_integration_tests = get_option('integration-tests')
+if with_integration_tests
 	# integration tests
 	dep_vulkan = dependency('vulkan')
 	dep_dl = cc.find_library('dl', required: false)

@@ -10,7 +10,8 @@ option('example', type: 'boolean', value: false)
 # whether to build the tests
 # NOTE: due to technical reasons, the tests are compiled into the layer 
 # library itself. Disabling this should slightly decrease the size of the library
-option('tests', type: 'boolean', value: false)
+option('unit-tests', type: 'boolean', value: false)
+option('integration-tests', type: 'boolean', value: false)
 
 # whether to build with tracy for profiling
 option('tracy', type: 'boolean', value: false)

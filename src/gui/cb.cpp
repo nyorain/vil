@@ -256,7 +256,7 @@ void CommandBufferGui::draw(Draw& draw) {
 						name = rec->cbName;
 					}
 
-					if(ImGui::TreeNodeEx(id.c_str(), flags, name)) {
+					if(ImGui::TreeNodeEx(id.c_str(), flags, "%s", name)) {
 						// we don't want as much space as tree nodes
 						auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
 						ImGui::Unindent(s);

@@ -248,9 +248,11 @@ void KeepAliveRingBuffer<T, maxSize>::push(T obj) {
 		data[insertOffset] = std::move(obj);
 		insertOffset = (insertOffset + 1) % maxSize;
 	} else {
-		if(data.size() == 0u) {
-			lastWrap = Clock::now();
-		}
+		VIL_DEBUG_ONLY(
+			if(data.size() == 0u) {
+				lastWrap = Clock::now();
+			}
+		)
 
 		data.push_back(std::move(obj));
 	}
