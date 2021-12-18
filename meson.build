@@ -99,14 +99,14 @@ if with_tracy
 	endif
 endif
 
-layer_args = [
+layer_args = cc.get_supported_arguments([
 	# Make sure to *never* include them
 	'-DVK_NO_PROTOTYPES',
 
 	# for imgui, C++20
 	# TODO: only disable werror?
 	'-Wno-deprecated-enum-enum-conversion',
-]
+])
 
 if debug_stats
 	layer_args += '-DVIL_DEBUG_STATS'
