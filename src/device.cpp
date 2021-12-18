@@ -1095,5 +1095,4 @@ VkFormat findDepthFormat(const Device& dev) {
 	return findSupported(dev, fmts, img, features);
 }
 
-
 } // namespace vil
