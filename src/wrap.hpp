@@ -221,40 +221,40 @@ void KeepAliveRingBuffer<T, maxSize>::push(T obj) {
 	if constexpr(maxSize == 0u) {
 		HandleDesc<H>::map(*obj->dev).mustErase(*obj);
 		return;
-	}
-
-	// keep alive to make sure we destroy it ouside of the cirtical section
-	decltype(HandleDesc<H>::map(*obj->dev).mustMoveLocked(*obj)) ptr;
-	std::lock_guard lock(*this->mutex);
-
-	obj->handle = {};
-	if(data.size() == maxSize) {
-		auto& old = data[insertOffset];
-		ptr = HandleDesc<H>::map(*obj->dev).mustMoveLocked(*old);
-
-		VIL_DEBUG_ONLY(
-			if(insertOffset == 0u) {
-				auto now = Clock::now();
-				auto dur = std::chrono::duration_cast<std::chrono::seconds>(now - lastWrap);
-				// The shorter this is, the higher the chance for false
-				// positives (i.e. incorrect handles shown in gui) for
-				// descriptorSets when running with refBindings = false
-				dlg_warn("KeepAliveRingBuffer<{}> wrap took {}s",
-					typeid(*obj).name(), dur.count());
-				lastWrap = now;
-			}
-		)
-
-		data[insertOffset] = std::move(obj);
-		insertOffset = (insertOffset + 1) % maxSize;
 	} else {
-		VIL_DEBUG_ONLY(
-			if(data.size() == 0u) {
-				lastWrap = Clock::now();
-			}
-		)
+		// keep alive to make sure we destroy it ouside of the cirtical section
+		decltype(HandleDesc<H>::map(*obj->dev).mustMoveLocked(*obj)) ptr;
+		std::lock_guard lock(*this->mutex);
 
-		data.push_back(std::move(obj));
+		obj->handle = {};
+		if(data.size() == maxSize) {
+			auto& old = data[insertOffset];
+			ptr = HandleDesc<H>::map(*obj->dev).mustMoveLocked(*old);
+
+			VIL_DEBUG_ONLY(
+				if(insertOffset == 0u) {
+					auto now = Clock::now();
+					auto dur = std::chrono::duration_cast<std::chrono::seconds>(now - lastWrap);
+					// The shorter this is, the higher the chance for false
+					// positives (i.e. incorrect handles shown in gui) for
+					// descriptorSets when running with refBindings = false
+					dlg_warn("KeepAliveRingBuffer<{}> wrap took {}s",
+						typeid(*obj).name(), dur.count());
+					lastWrap = now;
+				}
+			)
+
+			data[insertOffset] = std::move(obj);
+			insertOffset = (insertOffset + 1) % maxSize;
+		} else {
+			VIL_DEBUG_ONLY(
+				if(data.size() == 0u) {
+					lastWrap = Clock::now();
+				}
+			)
+
+			data.push_back(std::move(obj));
+		}
 	}
 }
 
