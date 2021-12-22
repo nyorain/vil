@@ -125,6 +125,20 @@ if debug_checks
 	layer_args += '-DVIL_DEBUG'
 endif
 
+# deps
+dep_threads = dependency('threads', required: false)
+dep_swa = dependency('swa',
+	fallback: ['swa', 'swa_dep'],
+	static: true,
+	default_options: [
+		'with-gl=disabled',
+		'link-vulkan=false',
+		'with-kms=disabled'
+	])
+
+dep_dlg = dependency('dlg',
+	static: true,
+	fallback: ['dlg', 'dlg_dep'])
 if disable_dlg
 	warning('disabling dlg')
 
@@ -138,20 +152,6 @@ if disable_dlg
 		'-Wno-unused-variable',
 	])
 endif
-
-# deps
-dep_threads = dependency('threads', required: false)
-dep_dlg = dependency('dlg',
-	static: true,
-	fallback: ['dlg', 'dlg_dep'])
-dep_swa = dependency('swa',
-	fallback: ['swa', 'swa_dep'],
-	static: true,
-	default_options: [
-		'with-gl=disabled',
-		'link-vulkan=false',
-		'with-kms=disabled'
-	])
 
 # spvm
 spvm_src = files(
@@ -443,7 +443,7 @@ if with_unit_tests
 	viltest = executable('viltest', files('src/test/unit/main.cpp'),
 		include_directories: inc,
 		cpp_args: args,
-		dependencies: dep_dlg,
+		dependencies: [],
 		link_with: vil_layer)
 	test('viltest', viltest)
 endif

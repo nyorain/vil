@@ -68,7 +68,7 @@ jobs:
           echo "$HOME/.sonar/build-wrapper-linux-x86" >> $GITHUB_PATH
       - name: Run build-wrapper
         run: |
-          meson setup build/ --backend=ninja -Dtests=true -Dx11-hook=false
+          meson setup build/ --backend=ninja -Dunit-tests=true -Dx11-hook=false
           build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} meson compile -C build
       - name: Run sonar-scanner
         env:
