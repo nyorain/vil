@@ -533,6 +533,8 @@ void destroy(DescriptorSet& ds, bool unlink) {
 	auto* setEntry = ds.setEntry;
 
 	{
+		// The descriptor is placed in a raw memory block so we have to
+		// call the dtor manually here
 		ExtZoneScopedN("dtor");
 		ds.~DescriptorSet();
 	}
@@ -553,6 +555,7 @@ void destroy(DescriptorSet& ds, bool unlink) {
 	}
 
 	if(unlink) {
+		auto lock = std::scoped_lock(pool.mutex);
 		dlg_assert(pool.flags & VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
 
 		// unlink setEntry

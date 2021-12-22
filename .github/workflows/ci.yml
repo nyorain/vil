@@ -29,7 +29,9 @@ on:
 # NOTE: we currently don't test all permutations of {release, debug, ...},
 # {tracy, !tracy}, {gcc, clang, msvc, msvc-ninja} since it would be many
 
-# TODO: integration tests not enabled at the moment
+# TODO: integration tests not enabled everywhere at the moment, just testing
+# TODO: using old validation layers for integration tests. Build from source?
+#   could use build cache or something
 
 jobs:
   linux-gcc:
@@ -44,11 +46,21 @@ jobs:
       run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
-        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja -Dunit-tests=true -Dintegration-tests=false -Dx11-hook=false -Dtracy=true
+        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev vulkan-validationlayers
+    - run: meson setup build/ --backend=ninja 
+        -Dunit-tests=true 
+        -Dintegration-tests=true 
+        -Djson-config-absolute-path=true
+        -Dx11-hook=false 
+        -Dtracy=true
       env:
         CC: gcc
     - run: meson test -C build/ -v
+      # NOTE: the ci cpus seem to need this for tracy. Might result
+      # in issues (inconsistent timings between cpu cores or something), 
+      # we don't care about it here
+      env:
+        TRACY_NO_INVARIANT_CHECK: 1
 
   linux-gcc-release:
     runs-on: ubuntu-latest
@@ -63,7 +75,11 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja -Dunit-tests=true -Dintegration-tests=false -Dx11-hook=false -Dbuildtype=release
+    - run: meson setup build/ --backend=ninja 
+        -Dunit-tests=true 
+        -Dintegration-tests=false 
+        -Dx11-hook=false 
+        -Dbuildtype=release
       env:
         CC: gcc
     - run: meson test -C build/ -v
@@ -85,7 +101,10 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja -Dunit-tests=true -Dintegration-tests=false -Dx11-hook=false
+    - run: meson setup build/ --backend=ninja 
+        -Dunit-tests=true 
+        -Dintegration-tests=false 
+        -Dx11-hook=false
     - run: meson test -C build/ -v
 
   linux-clang-tracy-debugoptimized:
@@ -105,7 +124,12 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja -Dunit-tests=true -Dintegration-tests=false -Dx11-hook=false -Dtracy=true -Dbuildtype=debugoptimized
+    - run: meson setup build/ --backend=ninja 
+        -Dunit-tests=true 
+        -Dintegration-tests=false 
+        -Dx11-hook=false 
+        -Dtracy=true 
+        -Dbuildtype=debugoptimized
     - run: meson test -C build/ -v
 
   # See https://dvdhrm.github.io/2021/04/21/meson-msvc-github-actions/
@@ -121,7 +145,8 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    - run: meson setup build/ --backend=ninja -Dunit-tests=true
+    - run: meson setup build/ --backend=ninja 
+        -Dunit-tests=true
     - run: meson test -C build/ -v
 
   windows:
@@ -136,7 +161,8 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    - run: meson setup build/ -Dunit-tests=true
+    - run: meson setup build/
+        -Dunit-tests=true
     - run: meson test -C build/ -v
 
   windows-release:
@@ -151,7 +177,9 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    - run: meson setup build/ -Dunit-tests=true -Dbuildtype=release
+    - run: meson setup build/ 
+        -Dunit-tests=true 
+        -Dbuildtype=release
     - run: meson test -C build/ -v
 
   windows-release-tracy:
@@ -166,7 +194,10 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    - run: meson setup build/ -Dunit-tests=true -Dbuildtype=release -Dtracy=true
+    - run: meson setup build/ 
+        -Dunit-tests=true 
+        -Dbuildtype=release 
+        -Dtracy=true
     - run: meson test -C build/ -v
 
 # TODO:

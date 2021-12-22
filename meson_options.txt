@@ -15,3 +15,8 @@ option('integration-tests', type: 'boolean', value: false)
 
 # whether to build with tracy for profiling
 option('tracy', type: 'boolean', value: false)
+
+# whether to use the absolute build path in the layer json
+# useful e.g. to run the integration tests without installing, as we
+# do in ci
+option('json-config-absolute-path', type: 'boolean', value: false)

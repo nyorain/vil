@@ -56,6 +56,11 @@ struct DescriptorPool : DeviceHandle {
 	u32 lastID {};
 	std::vector<VkDescriptorPoolSize> poolSizes {};
 
+	// The mutex used to access the entries.
+	// While this mutex is locked, no sets from the pool will be
+	// created or destroyed.
+	TracySharedLockable(DebugMutex, mutex);
+
 	using SetEntry = DescriptorPoolSetEntry;
 
 	// Descriptor data: We just allocate one large buffer on

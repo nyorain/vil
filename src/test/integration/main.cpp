@@ -118,12 +118,21 @@ static VkBool32 VKAPI_PTR messengerCallback(
 int main() {
 	dlg_set_handler(dlgHandler, nullptr);
 
-	// TODO
 	// set null driver
-	setenv("VK_ICD_FILENAMES", "/home/jan/code/ext/Vulkan-Tools/icd/linux/VkICD_mock_icd.json", 1);
+	setenv("VK_ICD_FILENAMES", VIL_MOCK_ICD_FILE, 1);
+	setenv("VK_LAYER_PATH", VIL_LAYER_PATH "/:/usr/share/vulkan/explicit_layer.d/", 1);
+	// dlg_trace("layer path: {}", getenv("VK_LAYER_PATH"));
 
-	// TODO: don't require vil to be installed?
-	// use VK_LAYER_PATH instead?
+	{
+		u32 layerCount = 0u;
+		VK_CHECK(vkEnumerateInstanceLayerProperties(&layerCount, nullptr));
+		std::vector<VkLayerProperties> layerProps(layerCount);
+		VK_CHECK(vkEnumerateInstanceLayerProperties(&layerCount, layerProps.data()));
+
+		for(auto& layer : layerProps) {
+			dlg_info("Instance layer: {}", layer.layerName);
+		}
+	}
 
 	dlg_trace("Creating instance");
 

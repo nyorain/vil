@@ -1,9 +1,9 @@
-- [ ] integration test: depend on meson subproject for mock driver
+- [x] integration test: depend on meson subproject for mock driver
       And don't hardcode my own env path
-	- [ ] also make sure we don't need the layer to be installed
+	- [x] also make sure we don't need the layer to be installed
 	      but use the latest built version.
 		  pass build path in via meson config header file?
-	- [ ] add manual meson dependencies from integration test to used layer
+	- [x] add manual meson dependencies from integration test to used layer
 	      and mock driver
 - [ ] add mutex to descriptorPool, make sure it's correctly used everywhere
 - [ ] document what to do when descriptors are not available when

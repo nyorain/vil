@@ -408,12 +408,20 @@ vil_layer = shared_library(
 conf_data = configuration_data()
 conf_data.set('vil_version', meson.project_version())
 
-# TODO: this is terrible... needed for windows
 libpath = vil_layer.full_path()
+json_config_absolute_path = get_option('json-config-absolute-path')
+
+# TODO: this is terrible... needed for windows
 if libpath.contains('\\')
-	conf_data.set('lib_path', '.\\\\' + libpath.split('\\')[-1])
+	if not json_config_absolute_path
+		libpath = libpath.split('\\')[-1]
+	endif
+	conf_data.set('lib_path', '.\\\\' + libpath)
 else
-	conf_data.set('lib_path', libpath.split('/')[-1])
+	if not json_config_absolute_path
+		libpath = libpath.split('/')[-1]
+	endif
+	conf_data.set('lib_path', libpath)
 endif
 
 configure_file(
@@ -453,14 +461,24 @@ if with_integration_tests
 	# integration tests
 	dep_vulkan = dependency('vulkan')
 	dep_dl = cc.find_library('dl', required: false)
+
+	mock_icd_sub = subproject('vkmockicd')
+	mock_icd_file = mock_icd_sub.get_variable('icd_json_file')
+	mock_icd_lib = mock_icd_sub.get_variable('lib')
+
 	int_src = files(
 		'src/test/bugged.cpp',
 		'src/test/integration/main.cpp',
 		'src/test/integration/raw.cpp',
 	)
-	intest = executable('intest', int_src,
+
+	int_args = args
+	int_args += '-DVIL_MOCK_ICD_FILE="@0@"'.format(mock_icd_file)
+	int_args += '-DVIL_LAYER_PATH="@0@"'.format(meson.current_build_dir())
+
+	intest = executable('intest', [int_src, mock_icd_lib],
 		include_directories: inc,
-		cpp_args: args,
+		cpp_args: int_args,
 		dependencies: [dep_dlg, dep_vulkan, dep_dl])
 	test('intest', intest)
 endif

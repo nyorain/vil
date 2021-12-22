@@ -1,0 +1,6 @@
+[wrap-git]
+directory=vkmockicd
+url=https://github.com/nyorain/vkmockicd.git
+revision=main
+
+
