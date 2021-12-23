@@ -12,7 +12,8 @@ on:
       - "**.comp"
       - "**.vert"
       - "**.frag"
-      - "*meson.build"
+      - "**meson.build"
+      - "**ci.yml"
   pull_request:
     branches: [ master ]
     paths:
@@ -46,7 +47,7 @@ jobs:
       run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
-        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev vulkan-validationlayers
+        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev vulkan-validationlayers valgrind
     - run: meson setup build/ --backend=ninja 
         -Dunit-tests=true 
         -Dintegration-tests=true 
@@ -55,7 +56,11 @@ jobs:
         -Dtracy=true
       env:
         CC: gcc
-    - run: meson test -C build/ -v
+    # meson test -C build/ -v
+    # valgrind --leak-check=full?
+    - run: meson test -C build 
+        --wrapper 'valgrind --error-exitcode=1' 
+        --print-errorlogs
       # NOTE: the ci cpus seem to need this for tracy. Might result
       # in issues (inconsistent timings between cpu cores or something), 
       # we don't care about it here

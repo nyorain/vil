@@ -9,6 +9,8 @@ on:
       - "**.h"
       - "**.hpp"
       - "**.inl"
+      - "**meson.build"
+      - "**sonar.yml"
   pull_request:
     branches: [ master ]
     paths:
@@ -17,6 +19,8 @@ on:
       - "**.h"
       - "**.hpp"
       - "**.inl"
+      - "**meson.build"
+      - "**sonar.yml"
 
 # Original skeleton taken from 
 # https://github.com/sonarsource-cfamily-examples/linux-cmake-gh-actions-sc
