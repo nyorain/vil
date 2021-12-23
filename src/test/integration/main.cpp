@@ -123,6 +123,10 @@ int main() {
 	setenv("VK_LAYER_PATH", VIL_LAYER_PATH "/:/usr/share/vulkan/explicit_layer.d/", 1);
 	// dlg_trace("layer path: {}", getenv("VK_LAYER_PATH"));
 
+	// TODO: currently needed on CI to work around old validation layers
+	// timeline semaphore bug
+	setenv("VIL_TIMELINE_SEMAPHORES", "0", 1);
+
 	{
 		u32 layerCount = 0u;
 		VK_CHECK(vkEnumerateInstanceLayerProperties(&layerCount, nullptr));
@@ -130,7 +134,10 @@ int main() {
 		VK_CHECK(vkEnumerateInstanceLayerProperties(&layerCount, layerProps.data()));
 
 		for(auto& layer : layerProps) {
-			dlg_info("Instance layer: {}", layer.layerName);
+			dlg_info("Instance layer: {}, spec version {}.{}.{}", layer.layerName,
+				VK_VERSION_MAJOR(layer.specVersion),
+				VK_VERSION_MINOR(layer.specVersion),
+				VK_VERSION_PATCH(layer.specVersion));
 		}
 	}
 
