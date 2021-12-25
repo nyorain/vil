@@ -56,6 +56,9 @@ jobs:
         -Dtracy=true
       env:
         CC: gcc
+    # TODO: no idea why this is needed using 'meson test' but not 'ninja test'.
+    # sounds like a meson bug.
+    - run: ninja -C build subprojects/vkmockicd/libVkICD_mock_icd.so
     # meson test -C build/ -v
     # valgrind --leak-check=full?
     - run: meson test -C build 
