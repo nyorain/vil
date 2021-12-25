@@ -93,6 +93,10 @@ struct ParseTypeResult {
 	// warnings?
 };
 
+// TODO: the returned type pointer is allocated via the ThreadMemScope. But
+// the vectors inside the type tree (e.g. for array members) is not and
+// will leak. Fix that (just use a span instead inside type and allocate
+// that from the memscope as well?)
 ParseTypeResult parseType(std::string_view str, ThreadMemScope&);
 
 // Will simply output any errors to console.

@@ -121,7 +121,9 @@ int main() {
 	// set null driver
 	setenv("VK_ICD_FILENAMES", VIL_MOCK_ICD_FILE, 1);
 	setenv("VK_LAYER_PATH", VIL_LAYER_PATH "/:/usr/share/vulkan/explicit_layer.d/", 1);
-	// dlg_trace("layer path: {}", getenv("VK_LAYER_PATH"));
+
+	dlg_trace("vk_layer_path: {}", getenv("VK_LAYER_PATH"));
+	dlg_trace("vk_icd_filenames: {}", getenv("VK_ICD_FILENAMES"));
 
 	// TODO: currently needed on CI to work around old validation layers
 	// timeline semaphore bug

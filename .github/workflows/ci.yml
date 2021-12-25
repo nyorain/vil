@@ -48,17 +48,19 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev vulkan-validationlayers valgrind
+      # TODO: integration tests run in theory but crash inside vulkan
+      # loader on ci, can't reproduce locally :(
     - run: meson setup build/ --backend=ninja 
         -Dunit-tests=true 
-        -Dintegration-tests=true 
         -Djson-config-absolute-path=true
+        -Dintegration-tests=false
         -Dx11-hook=false 
         -Dtracy=true
       env:
         CC: gcc
     # TODO: no idea why this is needed using 'meson test' but not 'ninja test'.
     # sounds like a meson bug.
-    - run: ninja -C build subprojects/vkmockicd/libVkICD_mock_icd.so
+    # - run: ninja -C build subprojects/vkmockicd/libVkICD_mock_icd.so
     # meson test -C build/ -v
     # valgrind --leak-check=full?
     - run: meson test -C build 

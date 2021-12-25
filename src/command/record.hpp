@@ -253,19 +253,21 @@ bool uses(const CommandRecord& rec, const H& handle) {
 void replaceInvalidatedLocked(CommandRecord& record);
 
 // Checks if the given bound DescriptorSet is still valid. If so, returns it.
-// TODO: data race here with accessing it. We need to add a mutex to the pool used
-// for freeing sets (and unsetting setEntry->set). This will then returns the
-// DescriptorSet and the lock on the DescriptorPool (effectively preventing the ds
-// from being destroyed).
-DescriptorSet* tryAccessLocked(const BoundDescriptorSet&);
+[[nodiscard]]
+std::pair<DescriptorSet*, std::unique_lock<decltype(DescriptorPool::mutex)>>
+tryAccessLocked(const BoundDescriptorSet&);
+
+// Directly accesses the given descriptor set.
+// Asserts that it can be accessed. This method must only be used if
+// the validity of the BoundDescriptorSet is guaranteed, otherwise use
+// tryAccessLocked.
+DescriptorSet& access(const BoundDescriptorSet&);
 
 // Creates a snapshot of all descriptors relevant to the given command.
 // For commands that aren't of type StateCmdBase (i.e. aren't
 // draw/dispatch/traceRays) commands, returns an empty snapshot.
 // Otherwise returns the map of all bound descriptors to their
 // created/retrieved cows.
-// TODO: Must currently not be called when bindings in the descriptor
-// might be invalid.
 CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command&);
 
 } // namespace vil

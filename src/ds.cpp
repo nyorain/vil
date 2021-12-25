@@ -899,6 +899,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorSetLayout(
 
 // dsPool
 void initResetPoolEntries(DescriptorPool& dsPool) {
+	auto lock = std::scoped_lock(dsPool.mutex);
+
 	dsPool.entries[0] = {};
 	dsPool.entries[dsPool.maxSets - 1] = {};
 
@@ -995,23 +997,20 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 	}
 }
 
-VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& handle,
-		IntrusivePtr<DescriptorSetLayout> layoutPtr, u32 varCount,
-		DescriptorSet*& out) {
-	ZoneScopedN("initDescriptorSet");
+VkResult findEntry(DescriptorPool& pool, u32 memSize,
+		std::byte*& data, DescriptorPool::SetEntry*& setEntry) {
+	// note that this mutex is only important to sync with other threads
+	// that access entries, e.g. to check whether a descriptor set reference
+	// in a descriptor snapshot is still valid.
+	// Applications can't never actually allocate/free from multiple threads
+	// at the same time.
+	auto lock = std::scoped_lock(pool.mutex);
 
-	// find data
-	DescriptorPool::SetEntry* setEntry {};
-	std::byte* data {};
-
-	auto memSize = sizeof(DescriptorSet);
-	memSize += align(totalDescriptorMemSize(*layoutPtr, varCount), sizeof(void*));
-
-	// It's valid for applications to "just try" for newer api versions.
-	// Seems to be what dota does. When an application uses api 1.0 this
-	// is still valid behavior for us to do as behavior of overallocation was
-	// undefined back then.
 	if(!pool.freeEntries) {
+		// It's valid for applications to "just try" for newer api versions.
+		// Seems to be what dota does. When an application uses api 1.0 this
+		// is still valid behavior for us to do as behavior of overallocation was
+		// undefined back then.
 		return VK_ERROR_OUT_OF_POOL_MEMORY;
 	}
 
@@ -1083,8 +1082,6 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 		}
 
 		if(offset + memSize > pool.dataSize) {
-			// NOTE: we can just return VK_ERROR_OUT_OF_POOL_MEMORY
-			// per spec here.
 			if constexpr(enableDsFragmentationPath) {
 				dlg_assert(pool.freeEntries);
 				auto& entry = *pool.freeEntries;
@@ -1102,7 +1099,7 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 				entry.prev = nullptr;
 				pool.usedEntries = &entry;
 			} else {
-				return VK_ERROR_OUT_OF_POOL_MEMORY;
+				return VK_ERROR_FRAGMENTED_POOL;
 			}
 		} else {
 			// reserve entry
@@ -1135,6 +1132,26 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 			pool.lastEntry = &entry;
 			data = &pool.data[offset];
 		}
+	}
+
+	return VK_SUCCESS;
+}
+
+VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& handle,
+		IntrusivePtr<DescriptorSetLayout> layoutPtr, u32 varCount,
+		DescriptorSet*& out) {
+	ZoneScopedN("initDescriptorSet");
+
+	// find data
+	auto memSize = sizeof(DescriptorSet);
+	memSize += align(totalDescriptorMemSize(*layoutPtr, varCount), sizeof(void*));
+
+	// try to find a free setEntry object and space in the memory block
+	DescriptorPool::SetEntry* setEntry {};
+	std::byte* data {};
+	auto res = findEntry(pool, memSize, data, setEntry);
+	if(res != VK_SUCCESS) {
+		return res;
 	}
 
 	dlg_assert(data);

@@ -1,3 +1,4 @@
+- [ ] fix found bufparser leak
 - [x] integration test: depend on meson subproject for mock driver
       And don't hardcode my own env path
 	- [x] also make sure we don't need the layer to be installed
@@ -5,7 +6,11 @@
 		  pass build path in via meson config header file?
 	- [x] add manual meson dependencies from integration test to used layer
 	      and mock driver
-- [ ] add mutex to descriptorPool, make sure it's correctly used everywhere
+	- [ ] figure out why integration test crashes on CI.
+	      execute with valgrind?
+		  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
+- [x] add mutex to descriptorPool, make sure it's correctly used everywhere
+- [ ] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)
 - [ ] document what to do when descriptors are not available when
       clicking new record in UI. Implement prototype for 
 	  always-cow-on-submission? Should probably be toggleable.

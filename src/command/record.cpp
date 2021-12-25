@@ -118,7 +118,8 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 
 	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
 		auto& bds = state.descriptorSets[i];
-		auto& ds = nonNull(tryAccessLocked(bds));
+		auto [pds, lock] = tryAccessLocked(bds);
+		auto& ds = nonNull(pds);
 
 		// NOTE: we only need this since we don't track this during recording
 		// anymore at the moment.
@@ -134,28 +135,49 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 	}
 }
 
-DescriptorSet* tryAccessLocked(const BoundDescriptorSet& bds) {
-	// assertOwned(dev.mutex);
-
+std::pair<DescriptorSet*, std::unique_lock<decltype(DescriptorPool::mutex)>>
+tryAccessLocked(const BoundDescriptorSet& bds) {
 	if(!bds.dsPool) {
 		dlg_debug("DescriptorSet inaccessible; DescriptorSet was destroyed");
-		return nullptr;
+		return {};
 	}
+
+	// this functions requires the device mutex to be locked to make sure
+	// that the descriptor pool can't be destroyed.
+	// TODO: there is a race here ugh. When the ds destructor was
+	// already run but the DeviceHandle destructor not yet (unlocked
+	// mutx in between) we might be here. Accessing the dsPool object
+	// is UB.
+	assertOwned(bds.dsPool->dev->mutex);
+	auto lock = std::unique_lock(bds.dsPool->mutex);
 
 	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.dsEntry);
 	if(!entry.set) {
 		dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed");
-		return nullptr;
+		return {};
 	}
 
 	auto& ds = *entry.set;
 	dlg_assert(reinterpret_cast<std::byte*>(&ds) - bds.dsPool->data.get() < bds.dsPool->dataSize);
 	if(ds.id != bds.dsID) {
 		dlg_warn("DescriptorSet inaccessible; DescriptorSet was destroyed (overwritten)");
-		return nullptr;
+		return {};
 	}
 
-	return &ds;
+	return {&ds, std::move(lock)};
+}
+
+DescriptorSet& access(const BoundDescriptorSet& bds) {
+	dlg_assert(bds.dsPool);
+
+	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.dsEntry);
+	dlg_assert(entry.set);
+
+	auto& ds = *entry.set;
+	dlg_assert(reinterpret_cast<std::byte*>(&ds) - bds.dsPool->data.get() < bds.dsPool->dataSize);
+	dlg_assert(ds.id == bds.dsID);
+
+	return ds;
 }
 
 CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) {
@@ -168,7 +190,7 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) 
 	}
 
 	for(auto bds : scmd->boundDescriptors().descriptorSets) {
-		auto* ds = tryAccessLocked(bds);
+		auto [ds, lock] = tryAccessLocked(bds);
 		if(ds) {
 			ret.states.emplace(bds.dsEntry, addCow(*ds));
 		}

@@ -304,8 +304,9 @@ FindResult find(const Command* root, span<const Command*> dst,
 						continue;
 					}
 
-					auto* srcDs = static_cast<const DescriptorPoolSetEntry*>(srcBound[i].dsEntry)->set;
-					dlg_assert(tryAccessLocked(srcBound[i]) == srcDs);
+					// We can safely directly access the BoundDescriptorSet
+					// here since we can assume the given record to be valid.
+					auto& srcDs = access(srcBound[i]);
 					auto dstDsCow = dstDsState.states.find(dstBound[i].dsEntry);
 					// TODO: we might not find it here due to the new
 					// descriptor set capturing rework.
@@ -315,7 +316,7 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 					auto [dstDs, lock] = access(*dstDsCow->second);
 
-					auto res = vil::match(nonNull(srcDs), dstDs);
+					auto res = vil::match(srcDs, dstDs);
 					m.match += res.match;
 					m.total += res.total;
 				}

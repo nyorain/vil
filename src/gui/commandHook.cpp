@@ -280,10 +280,9 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 	for(auto i = 0u; i < descriptorCopies.size(); ++i) {
 		auto [setID, bindingID, elemID, _1, _2] = descriptorCopies[i];
 
-		// We can safely interpret the dsState of the record at that position
-		// since we know that the record is still valid
-		auto& currDs = *static_cast<const DescriptorPoolSetEntry*>(dsState->descriptorSets[setID].dsEntry)->set;
-		dlg_assert(tryAccessLocked(dsState->descriptorSets[setID]) == &currDs);
+		// We can safely access the ds here since we know that the record
+		// is still valid
+		auto& currDs = access(dsState->descriptorSets[setID]);
 
 		dlg_assert_or(record.dsState[i], return true);
 		auto& oldCow = *record.dsState[i];

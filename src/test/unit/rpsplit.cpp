@@ -22,7 +22,7 @@ auto& addAttachment(RenderPassDesc& desc, bool multisampled = false) {
 auto& addSubpass(RenderPassDesc& desc, span<const u32> colorAtts,
 		span<const u32> resolveAtts = {}) {
 	auto& subp = desc.subpasses.emplace_back();
-	subp.pNext = {};
+	subp = {};
 	subp.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
 
 	auto& colorRefs = desc.attachmentRefs.emplace_back();
@@ -40,6 +40,7 @@ auto& addSubpass(RenderPassDesc& desc, span<const u32> colorAtts,
 
 	if(!resolveAtts.empty()) {
 		auto& resRefs = desc.attachmentRefs.emplace_back();
+		dlg_assert(resolveAtts.size() == colorAtts.size());
 		for(auto c : resolveAtts) {
 			auto& resRef = resRefs.emplace_back();
 			resRef.sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
@@ -105,15 +106,16 @@ TEST(rpsplit_unused) {
 	// make that VK_ATTACHMENT_UNUSED does not cause an error, as
 	// it previously did
 	RenderPassDesc desc;
-	addAttachment(desc); // attachment 0
-	addAttachment(desc); // attachment 1
-	addAttachment(desc, true); // attachment 2
+	addAttachment(desc, true); // attachment 0
+	addAttachment(desc, true); // attachment 1
+	addAttachment(desc); // attachment 2
+	addAttachment(desc); // attachment 3
 	addSubpass(desc, {{0u, 1u}}); // subpass 0
 	EXPECT(splittable(desc, 0u), true);
 
 	addSubpass(desc, {{0u, 1u}}); // subpass 1
 	addSubpass(desc, {{1u, VK_ATTACHMENT_UNUSED}}); // subpass 2
-	addSubpass(desc, {{0u, VK_ATTACHMENT_UNUSED}}, {{2u}}); // subpass 3
+	addSubpass(desc, {{0u, VK_ATTACHMENT_UNUSED}}, {{2u, 3u}}); // subpass 3
 
 	EXPECT(splittable(desc, 0u), true);
 	EXPECT(splittable(desc, 1u), true);
