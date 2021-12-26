@@ -202,7 +202,7 @@ A downside that has to be kept in mind: even if we manage to maintain the
 layer that well, it might take a while before it arrives downstream. (But,
 usually, so do new vulkan versions & extensions. Hardcore users that
 quickly update for new extensions should be able to update the layer quickly
-as well/build it themselves from master).
+as well/build it themselves from main).
 
 # Window input hooking
 

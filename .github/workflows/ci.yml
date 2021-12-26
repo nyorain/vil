@@ -2,7 +2,7 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
     paths:
       - "**.c"
       - "**.cpp"
@@ -15,7 +15,7 @@ on:
       - "**meson.build"
       - "**ci.yml"
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
     paths:
       - "**.c"
       - "**.cpp"
