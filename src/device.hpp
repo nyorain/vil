@@ -68,6 +68,30 @@ struct KeepAliveRingBuffer {
 	void clear();
 };
 
+template<typename T>
+struct UnreachableDeleter {
+	void operator()(T* ptr) noexcept {
+		if(ptr) {
+			dlg_error("unreachable!");
+		}
+	}
+};
+
+using PipelineUniquePtr = std::unique_ptr<Pipeline, UnreachableDeleter<Pipeline>>;
+
+template<typename T>
+struct HandlePtrFactory<std::unique_ptr<T, UnreachableDeleter<T>>> {
+	template<typename... Args>
+	static std::unique_ptr<T, UnreachableDeleter<T>> create(Args&&...) {
+		dlg_error("unreachable");
+	}
+};
+
+template<typename T>
+using UnreachableDeleterUniquePtr = std::unique_ptr<T, UnreachableDeleter<T>>;
+using SyncedUnorderedPipeMap = SyncedUnorderedMap<VkPipeline,
+	  Pipeline, UnreachableDeleterUniquePtr>;
+
 struct Device {
 	Instance* ini {};
 	VkDevice handle {};
@@ -211,7 +235,7 @@ struct Device {
 	// type is GraphicsPipeline, ComputePipeline or RayTracingPipeline.
 	// When erasing from the map, mustMove should be used and the pipeline
 	// casted since the destructor is not virtual.
-	SyncedUniqueUnorderedMap<VkPipeline, Pipeline> pipes;
+	SyncedUnorderedPipeMap pipes;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still
@@ -262,7 +286,8 @@ Gui* getWindowGui(Device& dev);
 Gui* getOverlayGui(Swapchain& swapchain);
 
 // Does not expect mutex to be locked
-void notifyDestruction(Device& dev, Handle& handle);
+void notifyDestruction(Device& dev, Handle& handle, VkObjectType type);
+void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type);
 
 // Util for naming internal handles.
 // Mainly useful to get better validation layer output for stuff

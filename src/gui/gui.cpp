@@ -1395,7 +1395,9 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 	ImGui::Render();
 }
 
-void Gui::destroyed(const Handle& handle) {
+void Gui::destroyed(const Handle& handle, VkObjectType type) {
+	(void) type; // TODO
+
 	ExtZoneScoped;
 	assertOwned(dev().mutex);
 

@@ -58,6 +58,7 @@ protected:
 	// Make sure Pipeline objects are not created.
 	// Should always be GraphicsPipeline or ComputePipeline
 	Pipeline() = default;
+	~Pipeline();
 };
 
 // Returns all shader stages a pipeline has.

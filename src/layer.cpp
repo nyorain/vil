@@ -32,6 +32,8 @@
 namespace vil {
 
 // Util
+// TODO: break when debugger is attached?
+// make this a build or runtime config? VIL_BREAK_ON_ERROR env var?
 // #define BREAK_ON_ERROR
 static auto dlgWarnErrorCount = 0u;
 

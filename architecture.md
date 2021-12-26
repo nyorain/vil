@@ -86,6 +86,22 @@ the layer works internally. Useful mainly for development on it.
 
 ## Code organization
 
+`vil` is written in C++17. When all supported platforms support C++20,
+its features will be used as well.
+
+In most places, `vil` does not expect or handle or throw exceptions. We
+simply assume, for instance, that no vector re-allocation will throw
+since we couldn't properly handle it anyways. And throwing from inside the
+layer during an API call is undefined behavior (since it crosses a shared
+library C boundary). Therefore most code isn't written in an exception-safe
+manner. If an exception is thrown, something we can't fix anymore already
+went wrong.
+
+There are capsulated subsystems that may use exceptions (e.g. the buffer
+format parser).
+
+---
+
 Everything in the layer lives in the `vil` namespace.
 For almost every vulkan handle, there is a representation on our side.
 `VkInstance` is represented by `vil::Instance`, `VkDevice` by `vil::Device`,

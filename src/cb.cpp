@@ -231,6 +231,7 @@ CommandBuffer::~CommandBuffer() {
 	// unregister from everything
 	{
 		std::lock_guard lock(dev->mutex);
+
 		clearPendingLocked();
 
 		if(record_) {
@@ -238,6 +239,9 @@ CommandBuffer::~CommandBuffer() {
 			record_->cb = nullptr;
 			record_->hookRecords.clear();
 		}
+
+		invalidateCbsLocked();
+		notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_COMMAND_BUFFER);
 	}
 
 	// CommandBuffer is dispatchable handle, we need to remove this association
@@ -481,6 +485,9 @@ CommandPool::~CommandPool() {
 	if(!dev) {
 		return;
 	}
+
+	invalidateCbs();
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_COMMAND_POOL);
 
 	// When a CommandPool is destroyed, all command buffers created from
 	// it are automatically freed.

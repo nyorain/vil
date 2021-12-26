@@ -269,11 +269,11 @@ void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
 
 template<typename Set, typename Handle>
 bool validate(Set& set, Handle*& handle, bool checkReplace) {
-	assertOwned(handle->dev->mutex);
 	if(!handle) {
 		return false;
 	}
 
+	assertOwned(handle->dev->mutex);
 	if(!checkReplace) {
 		return true;
 	}
@@ -667,6 +667,9 @@ DescriptorPool::~DescriptorPool() {
 		return;
 	}
 
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_POOL);
+	invalidateCbs();
+
 	for(auto it = usedEntries; it; it = it->next) {
 		destroy(nonNull(it->set), false);
 	}
@@ -684,6 +687,8 @@ DescriptorSetLayout::~DescriptorSetLayout() {
 	dlg_assert(!refRecords);
 	dlg_assert(handle);
 
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
+
 	dev->dispatch.DestroyDescriptorSetLayout(dev->handle, handle, nullptr);
 }
 
@@ -695,6 +700,8 @@ DescriptorUpdateTemplate::~DescriptorUpdateTemplate() {
 	// never used directly by command buffers
 	dlg_assert(!refRecords);
 	dlg_assert(handle);
+
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE);
 
 	dev->dispatch.DestroyDescriptorUpdateTemplate(dev->handle, handle, nullptr);
 }

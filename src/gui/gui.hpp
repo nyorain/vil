@@ -54,7 +54,7 @@ public:
 	VkResult renderFrame(FrameInfo& info);
 
 	// Must only be called while device mutex is locked.
-	void destroyed(const Handle& handle);
+	void destroyed(const Handle& handle, VkObjectType type);
 
 	// Blocks until all pending draws have finished execution.
 	// Does not modify any internal state.

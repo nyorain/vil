@@ -14,6 +14,10 @@ Fence::~Fence() {
 
 	// per spec, we can assume all associated payload to be finished
 	std::lock_guard lock(dev->mutex);
+
+	invalidateCbsLocked();
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FENCE);
+
 	if(this->submission) {
 		auto finished = checkLocked(*this->submission);
 		dlg_assert(finished);
@@ -24,6 +28,10 @@ Semaphore::~Semaphore() {
 	if(!dev) {
 		return;
 	}
+
+	std::lock_guard lock(dev->mutex);
+	invalidateCbsLocked();
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FENCE);
 
 	// per spec, we can assume all associated payload to be finished
 	/*
@@ -38,6 +46,16 @@ Semaphore::~Semaphore() {
 		dlg_assert(finished);
 	}
 	*/
+}
+
+Event::~Event() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+	invalidateCbsLocked();
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_EVENT);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateFence(

@@ -27,6 +27,16 @@ AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
 	return accelStructAtLocked(dev, address);
 }
 
+AccelStruct::~AccelStruct() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR);
+	invalidateCbsLocked();
+}
+
 // building
 Mat4f toMat4f(const VkTransformMatrixKHR& src) {
 	Mat<3, 4, float> ret34;

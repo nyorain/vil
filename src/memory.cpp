@@ -49,6 +49,9 @@ DeviceMemory::~DeviceMemory() {
 
 	std::lock_guard lock(dev->mutex);
 
+	invalidateCbsLocked();
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_DEVICE_MEMORY);
+
 	// NOTE that we temporarily invalidate the ordering invariant of
 	// this->allocations. But since we own the mutex and this object
 	// is to be destroyed any moment anyways (and we are not calling

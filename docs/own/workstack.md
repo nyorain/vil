@@ -10,7 +10,7 @@
 	      execute with valgrind?
 		  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
 - [x] add mutex to descriptorPool, make sure it's correctly used everywhere
-- [ ] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)
+- [x] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)
 - [ ] document what to do when descriptors are not available when
       clicking new record in UI. Implement prototype for 
 	  always-cow-on-submission? Should probably be toggleable.

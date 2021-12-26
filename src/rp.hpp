@@ -35,6 +35,8 @@ struct RenderPass : DeviceHandle {
 	// compatible. To know this information, we keep the description
 	// of the render pass alive until all associated handles were destroyed.
 	std::atomic<u32> refCount {};
+
+	~RenderPass();
 };
 
 struct Framebuffer : DeviceHandle {

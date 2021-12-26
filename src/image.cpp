@@ -17,6 +17,9 @@ Image::~Image() {
 		return;
 	}
 
+	invalidateCbs();
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_IMAGE);
+
 	std::lock_guard lock(dev->mutex);
 	for(auto* view : this->views) {
 		view->img = nullptr;
@@ -27,6 +30,9 @@ ImageView::~ImageView() {
 	if(!dev) {
 		return;
 	}
+
+	invalidateCbs();
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_IMAGE_VIEW);
 
 	dlg_assert(DebugStats::get().aliveImagesViews > 0);
 	--DebugStats::get().aliveImagesViews;
@@ -49,6 +55,9 @@ Sampler::~Sampler() {
 	if(!dev) {
 		return;
 	}
+
+	invalidateCbs();
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SAMPLER);
 }
 
 // Image

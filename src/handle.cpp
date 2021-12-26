@@ -16,16 +16,9 @@ DeviceHandle::~DeviceHandle() {
 		return;
 	}
 
-	// Inform command buffers that use this handle that it was
-	// destroyed.
-	invalidateCbs();
-
-	// Notify device that handle is destroyed. It will forward it
-	// to all instances that need to know (e.g. gui).
-	// Not needed for all handle types
-	if(objectType != VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-		notifyDestruction(*dev, *this);
-	}
+	// All records should have been invalidated in the derived class
+	// already, if needed.
+	dlg_assert(!refRecords);
 }
 
 void DeviceHandle::invalidateCbsLocked() {

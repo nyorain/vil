@@ -15,6 +15,13 @@
   #include <windows.h>
   #define VIL_LIB_NAME "VkLayer_live_introspection.dll"
 #else
+  #include <sys/stat.h>
+  #include <string.h>
+  #include <fcntl.h>
+  #include <unistd.h>
+  #include <ctype.h>
+  #include <signal.h>
+
   #include <dlfcn.h>
   #define VIL_LIB_NAME "libVkLayer_live_introspection.so"
 #endif
@@ -45,6 +52,63 @@ VulkanSetup gSetup;
 
 unsigned dlgErrors = 0;
 unsigned dlgWarnings = 0;
+
+#ifdef WIN32
+
+bool debuggerAttached() {
+	return ::IsDebuggerPresent();
+}
+
+void debugBreak() {
+	::DebugBreak();
+}
+
+#else // WIN32
+
+bool debuggerAttached() {
+    char buf[4096];
+
+    const int statusFD = ::open("/proc/self/status", O_RDONLY);
+    if(statusFD == -1) {
+        return false;
+	}
+
+    const ssize_t nr = ::read(statusFD, buf, sizeof(buf) - 1);
+    if(nr <= 0) {
+		::close(statusFD);
+        return false;
+	}
+
+    buf[nr] = '\0';
+
+    constexpr char tracerPidString[] = "TracerPid:";
+    const auto tracerPidPtr = ::strstr(buf, tracerPidString);
+
+    if(!tracerPidPtr) {
+		::close(statusFD);
+        return false;
+	}
+
+	const char* it = tracerPidPtr + sizeof(tracerPidString) - 1;
+    while(it < buf + nr) {
+        if(!::isspace(*it)) {
+			::close(statusFD);
+            return ::isdigit(*it) != 0 && *it != '0';
+		}
+
+		++it;
+    }
+
+	::close(statusFD);
+    return false;
+}
+
+void debugBreak() {
+	::raise(SIGINT);
+}
+
+#endif
+
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
 	if(origin->level == dlg_level_error) {
 		++dlgErrors;
@@ -53,6 +117,10 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	}
 
 	dlg_default_output(origin, string, data);
+
+	if(origin->level >= dlg_level_warn && debuggerAttached()) {
+		debugBreak();
+	}
 }
 
 static VkBool32 VKAPI_PTR messengerCallback(

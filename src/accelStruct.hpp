@@ -69,6 +69,8 @@ struct AccelStruct : DeviceHandle {
 	// geometry info
 	VkGeometryTypeKHR geometryType {VK_GEOMETRY_TYPE_MAX_ENUM_KHR};
 	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
+
+	~AccelStruct();
 };
 
 void initBufs(AccelStruct&,

@@ -927,11 +927,16 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 }
 
 // util
-void notifyDestruction(Device& dev, Handle& handle) {
-	std::lock_guard lock(dev.mutex);
+void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type) {
+	assertOwned(dev.mutex);
 	if(dev.gui) {
-		dev.gui->destroyed(handle);
+		dev.gui->destroyed(handle, type);
 	}
+}
+
+void notifyDestruction(Device& dev, Handle& handle, VkObjectType type) {
+	std::lock_guard lock(dev.mutex);
+	notifyDestructionLocked(dev, handle, type);
 }
 
 void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name) {

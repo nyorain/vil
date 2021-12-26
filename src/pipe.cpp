@@ -24,6 +24,8 @@ PipelineLayout::~PipelineLayout() {
 	dlg_assert(!refRecords);
 	dlg_assert(handle);
 
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_PIPELINE);
+
 	dev->dispatch.DestroyPipelineLayout(dev->handle, handle, nullptr);
 }
 
@@ -59,7 +61,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 	ThreadMemScope memScope;
 	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
 	auto pres = memScope.alloc<PreData>(createInfoCount);
-	
+
 	// TODO: use memScope as well
 	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
 
@@ -161,7 +163,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		dlg_assert(pPipelines[i]);
 		auto& pci = ncis[i];
 
-		auto pipePtr = std::make_unique<GraphicsPipeline>();
+		auto pipePtr = new GraphicsPipeline();
 		auto& pipe = *pipePtr;
 		pipe.dev = &dev;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
@@ -296,7 +298,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 	for(auto i = 0u; i < createInfoCount; ++i) {
 		dlg_assert(pPipelines[i]);
 
-		auto pipePtr = std::make_unique<ComputePipeline>();
+		auto pipePtr = new ComputePipeline();
 		auto& pipe = *pipePtr;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -529,6 +531,16 @@ ShaderReflectionAccess accessReflection(const PipelineShaderStage& stage) {
 		stage.entryPoint, execModel);
 }
 
+Pipeline::~Pipeline() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+	invalidateCbsLocked();
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_PIPELINE);
+}
+
 GraphicsPipeline::~GraphicsPipeline() = default;
 
 // VK_KHR_ray_tracing_pipeline
@@ -581,7 +593,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		dlg_assert(pPipelines[i]);
 		auto& ci = pCreateInfos[i];
 
-		auto pipePtr = std::make_unique<RayTracingPipeline>();
+		auto pipePtr = new RayTracingPipeline();
 		auto& pipe = *pipePtr;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;

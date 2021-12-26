@@ -10,10 +10,26 @@
 namespace vil {
 
 // Classes
+RenderPass::~RenderPass() {
+	if(!dev) {
+		return;
+	}
+
+	std::lock_guard lock(dev->mutex);
+
+	invalidateCbsLocked();
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_RENDER_PASS);
+}
+
 Framebuffer::~Framebuffer() {
 	if(!dev) {
 		return;
 	}
+
+	std::lock_guard lock(dev->mutex);
+
+	invalidateCbsLocked();
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FRAMEBUFFER);
 
 	for(auto* attachment : attachments) {
 		auto it = find(attachment->fbs, this);

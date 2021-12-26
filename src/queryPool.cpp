@@ -3,6 +3,15 @@
 
 namespace vil {
 
+QueryPool::~QueryPool() {
+	if(!dev) {
+		return;
+	}
+
+	invalidateCbs();
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SAMPLER);
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(
 		VkDevice                                    device,
 		const VkQueryPoolCreateInfo*                pCreateInfo,

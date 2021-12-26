@@ -46,6 +46,7 @@ struct Semaphore : DeviceHandle {
 
 struct Event : DeviceHandle {
 	VkEvent handle {};
+	~Event();
 };
 
 // api

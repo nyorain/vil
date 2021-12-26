@@ -7,6 +7,8 @@ namespace vil {
 struct QueryPool : DeviceHandle {
 	VkQueryPool handle {};
 	VkQueryPoolCreateInfo ci {};
+
+	~QueryPool();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(

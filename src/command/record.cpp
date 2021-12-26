@@ -144,10 +144,6 @@ tryAccessLocked(const BoundDescriptorSet& bds) {
 
 	// this functions requires the device mutex to be locked to make sure
 	// that the descriptor pool can't be destroyed.
-	// TODO: there is a race here ugh. When the ds destructor was
-	// already run but the DeviceHandle destructor not yet (unlocked
-	// mutx in between) we might be here. Accessing the dsPool object
-	// is UB.
 	assertOwned(bds.dsPool->dev->mutex);
 	auto lock = std::unique_lock(bds.dsPool->mutex);
 
