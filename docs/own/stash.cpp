@@ -182,3 +182,27 @@ size_t totalNumBindings(const DescriptorSetLayout& layout, u32 variableDescripto
 	return ret;
 }
 
+---
+
+class ThreadMemoryResource : public std::pmr::memory_resource {
+	LinAllocScope* memScope_ {};
+
+	void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+		return memScope_->allocBytes(bytes, alignment);
+	}
+
+	void do_deallocate(void*, std::size_t, std::size_t) override {
+		// no-op
+	}
+
+	bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+		auto* tmr = dynamic_cast<const ThreadMemoryResource*>(&other);
+		if(!tmr) {
+			return false;
+		}
+
+		return tmr->memScope_ == this->memScope_;
+	}
+};
+
+

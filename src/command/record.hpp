@@ -2,8 +2,8 @@
 
 #include <fwd.hpp>
 #include <queue.hpp>
-#include <command/alloc.hpp>
 #include <util/span.hpp>
+#include <util/linalloc.hpp>
 #include <util/intrusive.hpp>
 
 #include <vector>
@@ -137,11 +137,29 @@ struct CommandDescriptorSnapshot {
 	std::unordered_map<void*, IntrusivePtr<DescriptorSetCow>> states;
 };
 
+// Since command buffer recording can be a bottleneck, we use our
+// linear allocator. We never use it in a scoped way but always just
+// allocate (during recording) and then reset everything when the
+// record is no longer needed.
+template<typename T> using CommandAllocList = std::list<T,
+	LinearUnscopedAllocator<T>>;
+template<typename K, typename V> using CommandAllocHashMap =
+	std::unordered_map<K, V,
+		std::hash<K>,
+		std::equal_to<K>,
+		LinearUnscopedAllocator<std::pair<const K, V>>>;
+template<typename K> using CommandAllocHashSet =
+	std::unordered_set<K,
+		std::hash<K>,
+		std::equal_to<K>,
+		LinearUnscopedAllocator<K>>;
+
 // Represents the recorded state of a command buffer.
 // We represent it as extra, reference-counted object so we can display
 // old records as well.
-struct CommandRecord : CommandRecordMemory {
+struct CommandRecord {
 	Device* dev {};
+	LinAllocator alloc;
 
 	// Might be null when this isn't the current command buffer recording.
 	// Guaranteed to be valid during recording.
@@ -217,7 +235,7 @@ struct CommandRecord : CommandRecordMemory {
 
 // Links a 'DeviceHandle' to a 'CommandRecord'.
 struct UsedHandle {
-	UsedHandle(CommandRecord& rec) noexcept : commands(rec), record(&rec) {}
+	UsedHandle(CommandRecord& rec) noexcept : commands(rec.alloc), record(&rec) {}
 
 	// List of commands where the associated handle is used inside the
 	// associated record.

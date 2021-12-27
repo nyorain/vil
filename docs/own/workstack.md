@@ -1,4 +1,5 @@
 - [ ] fix found bufparser leak
+	- [ ] afterwards: use valgrind for tests in ci to see new leaks/issues?
 - [x] integration test: depend on meson subproject for mock driver
       And don't hardcode my own env path
 	- [x] also make sure we don't need the layer to be installed
@@ -30,14 +31,15 @@
 	- write test for creating ds, updating it with imageView, destroying
 	  imageView and then using ds in submission (might need partially_bound
 	  or something I guess)
-- rename main branch to main
+- [x] rename main branch to main
 - hide shader debugger behind config feature?
 	- adds a whole new library and isn't ready yet at all.
 	  and might never really be ready, it's more of an experiment anyways
-- make ThreadContext alloc and CommandRecord alloc consistent
-	- we probably also don't want to really free the blocks. Just return them.
+- [x] make ThreadContext alloc and CommandRecord alloc consistent
+	- [ ] we probably also don't want to really free the blocks. Just return them.
 	  Enable our global memory block cache thingy?
-	- Also clean up CommandRecord alloc in general. Messy with all those
+	  Allow LinAllocator to take parent memory resource.
+	- [x] Also clean up CommandRecord alloc in general. Messy with all those
 	  overloads for CommandBuffer
 	- Maybe we can reuse code? The allocators are fairly similar
 - look into found doom performance hotpaths

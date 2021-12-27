@@ -134,6 +134,7 @@ public: // Only public for recording, should not be accessed outside api
 	CommandRecord* record() const { return record_.get(); }
 };
 
+// api
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
     VkDevice                                    device,
     const VkCommandPoolCreateInfo*              pCreateInfo,

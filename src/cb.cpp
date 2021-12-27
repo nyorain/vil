@@ -6,6 +6,7 @@
 #include <handles.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
+#include <command/alloc.hpp>
 #include <command/commands.hpp>
 #include <gui/commandHook.hpp>
 #include <util/util.hpp>
@@ -14,85 +15,6 @@
 #include <util/callstack.hpp>
 
 namespace vil {
-
-// TODO: remove
-[[nodiscard]] inline std::byte* allocate(CommandBuffer& cb, size_t size, unsigned alignment) {
-	dlg_assert(cb.state() == CommandBuffer::State::recording);
-	auto* rec = cb.record();
-	return allocate(rec->memBlocks, rec->memBlockOffset, size, alignment);
-}
-
-template<typename T, typename... Args>
-[[nodiscard]] T& allocate(CommandBuffer& cb, Args&&... args) {
-	auto* raw = allocate(cb, sizeof(T), alignof(T));
-	return *(new(raw) T(std::forward<Args>(args)...));
-}
-
-template<typename T>
-[[nodiscard]] span<T> allocSpan(CommandBuffer& cb, size_t count) {
-	if(count == 0) {
-		return {};
-	}
-
-	auto* raw = allocate(cb, sizeof(T) * count, alignof(T));
-	auto* arr = new(raw) T[count];
-	return span<T>(arr, count);
-}
-
-template<typename T>
-[[nodiscard]] span<T> allocSpan0(CommandBuffer& cb, size_t count) {
-	static_assert(std::is_trivially_copyable_v<T>);
-	auto ret = allocSpan<T>(cb, count);
-	std::memset((void*) ret.data(), 0x0, count * sizeof(ret[0]));
-	return ret;
-}
-
-template<typename T>
-[[nodiscard]] span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, span<T> data) {
-	return copySpan(cb, data.data(), data.size());
-}
-
-inline const char* copyString(CommandBuffer& cb, std::string_view src) {
-	auto dst = allocSpan<char>(cb, src.size() + 1);
-	std::copy(src.begin(), src.end(), dst.data());
-	dst[src.size()] = 0;
-	return dst.data();
-}
-
-template<typename T>
-void ensureSize(CommandBuffer& cb, span<T>& buf, size_t size) {
-	if(buf.size() >= size) {
-		return;
-	}
-
-	auto newBuf = allocSpan<T>(cb, size);
-	std::copy(buf.begin(), buf.end(), newBuf.begin());
-	buf = newBuf;
-}
-
-template<typename T>
-void ensureSize0(CommandBuffer& cb, span<T>& buf, size_t size) {
-	if(buf.size() >= size) {
-		return;
-	}
-
-	auto newBuf = allocSpan0<T>(cb, size);
-	std::copy(buf.begin(), buf.end(), newBuf.begin());
-	buf = newBuf;
-}
-
-template<typename D, typename T>
-void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
-	dst = allocSpan<D>(cb, count);
-	for(auto i = 0u; i < count; ++i) {
-		dst[i] = upgrade(data[i]);
-	}
-}
-
-template<typename T>
-[[nodiscard]] span<std::remove_const_t<T>> copySpan(CommandBuffer& cb, T* data, size_t count) {
-	return copySpan(*cb.record(), data, count);
-}
 
 void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 	VkBaseInStructure* last = nullptr;
@@ -104,7 +26,7 @@ void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 		dlg_assertm_or(size > 0, it = it->pNext; continue,
 			"Unknown structure type: {}", it->sType);
 
-		auto buf = allocate(cb, size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto buf = vil::allocate(cb.record()->alloc, size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs
@@ -127,9 +49,17 @@ const void* copyChain(CommandBuffer& cb, const void* pNext) {
 	return ret;
 }
 
+template<typename D, typename T>
+void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
+	dst = alloc<D>(cb, count);
+	for(auto i = 0u; i < count; ++i) {
+		dst[i] = upgrade(data[i]);
+	}
+}
+
 void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
-	ensureSize0(cb, descriptorSets, firstSet + sets.size());
+	ensureSize(cb, descriptorSets, firstSet + sets.size());
 
 	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
 	// There may be errors here.
@@ -422,13 +352,13 @@ void CommandBuffer::beginSection(SectionCommand& cmd) {
 			section_->cmd = nullptr;
 			section_->pop = false;
 		} else {
-			auto nextSection = &vil::allocate<Section>(*this);
+			auto nextSection = &construct<Section>(*this);
 			nextSection->parent = section_;
 			section_->next = nextSection;
 			section_ = nextSection;
 		}
 	} else {
-		section_ = &vil::allocate<Section>(*this);
+		section_ = &construct<Section>(*this);
 	}
 
 	section_->cmd = &cmd;
@@ -534,7 +464,7 @@ T& addCmd(CommandBuffer& cb, Args&&... args) {
 	dlg_assert(cb.state() == CommandBuffer::State::recording);
 	dlg_assert(cb.record());
 
-	auto& cmd = vil::allocate<T>(cb, std::forward<Args>(args)...);
+	auto& cmd = construct<T>(cb, std::forward<Args>(args)...);
 
 	if constexpr(ST == SectionType::next) {
 		cb.endSection(&cmd);
@@ -701,7 +631,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 			dlg_assert(!fb.imageless);
 			if(!fb.imageless) {
 				dlg_assert(rp.desc.attachments.size() == fb.attachments.size());
-				cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, fb.attachments.size());
+				cb.graphicsState().rpi.attachments = alloc<ImageView*>(cb, fb.attachments.size());
 
 				for(auto i = 0u; i < fb.attachments.size(); ++i) {
 					auto& attachment = fb.attachments[i];
@@ -750,7 +680,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 void useHandleImpl(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
 	auto it = rec.handles.find(&handle);
 	if(it == rec.handles.end()) {
-		auto& uh = allocate<UsedHandle>(rec, rec);
+		auto& uh = construct<UsedHandle>(rec, rec);
 		it = rec.handles.emplace(&handle, &uh).first;
 	}
 
@@ -760,7 +690,7 @@ void useHandleImpl(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
 UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 	auto it = rec.handles.find(&img);
 	if(it == rec.handles.end()) {
-		auto& uh = allocate<UsedImage>(rec, rec);
+		auto& uh = construct<UsedImage>(rec, rec);
 		it = rec.handles.emplace(&img, &uh).first;
 	}
 
@@ -839,7 +769,7 @@ void cmdBarrier(
 	cmd.dstStageMask = dstStageMask;
 	cmd.recordQueueFamilyIndex = cb.pool().queueFamily;
 
-	cmd.images = allocSpan<Image*>(cb, cmd.imgBarriers.size());
+	cmd.images = alloc<Image*>(cb, cmd.imgBarriers.size());
 	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
 		auto& imgb = cmd.imgBarriers[i];
 		copyChainInPlace(cb, imgb.pNext);
@@ -851,7 +781,7 @@ void cmdBarrier(
 		imgb.image = img.handle;
 	}
 
-	cmd.buffers = allocSpan<Buffer*>(cb, cmd.bufBarriers.size());
+	cmd.buffers = alloc<Buffer*>(cb, cmd.bufBarriers.size());
 	for(auto i = 0u; i < cmd.bufBarriers.size(); ++i) {
 		auto& bufb = cmd.bufBarriers[i];
 		copyChainInPlace(cb, bufb.pNext);
@@ -889,7 +819,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 
 	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
 
-	cmd.events = allocSpan<Event*>(cb, eventCount);
+	cmd.events = alloc<Event*>(cb, eventCount);
 	for(auto i = 0u; i < eventCount; ++i) {
 		auto& event = get(*cb.dev, pEvents[i]);
 		cmd.events[i] = &event;
@@ -957,11 +887,11 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 		dlg_assert(attInfo);
 
 		dlg_assert(cmd.rp->desc.attachments.size() == attInfo->attachmentCount);
-		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, attInfo->attachmentCount);
+		cb.graphicsState().rpi.attachments = alloc<ImageView*>(cb, attInfo->attachmentCount);
 
 		// NOTE: we allocate from cb here because of dstAttInfo below.
-		auto fwdAttachments = allocSpan<VkImageView>(cb, attInfo->attachmentCount);
-		cmd.attachments = allocSpan<ImageView*>(cb, attInfo->attachmentCount);
+		auto fwdAttachments = alloc<VkImageView>(cb, attInfo->attachmentCount);
+		cmd.attachments = alloc<ImageView*>(cb, attInfo->attachmentCount);
 
 		for(auto i = 0u; i < attInfo->attachmentCount; ++i) {
 			auto& attachment = get(*cb.dev, attInfo->pAttachments[i]);
@@ -989,8 +919,8 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 		dlg_assert(dstAttInfo->attachmentCount == fwdAttachments.size());
 	} else {
 		dlg_assert(cmd.rp->desc.attachments.size() == cmd.fb->attachments.size());
-		cb.graphicsState().rpi.attachments = allocSpan<ImageView*>(cb, cmd.fb->attachments.size());
-		cmd.attachments = allocSpan<ImageView*>(cb, cmd.fb->attachments.size());
+		cb.graphicsState().rpi.attachments = alloc<ImageView*>(cb, cmd.fb->attachments.size());
+		cmd.attachments = alloc<ImageView*>(cb, cmd.fb->attachments.size());
 
 		for(auto i = 0u; i < cmd.fb->attachments.size(); ++i) {
 			auto& attachment = cmd.fb->attachments[i];
@@ -1153,7 +1083,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
-	cmd.sets = allocSpan<DescriptorSet*>(cb, descriptorSetCount);
+	cmd.sets = alloc<DescriptorSet*>(cb, descriptorSetCount);
 
 	ThreadMemScope memScope;
 	auto setHandles = memScope.allocUndef<VkDescriptorSet>(descriptorSetCount);
@@ -1238,8 +1168,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
 
-	ensureSize0(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
-	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
+	ensureSize(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
+	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
 
 	ThreadMemScope memScope;
 	auto bufHandles = memScope.alloc<VkBuffer>(bindingCount);
@@ -1871,7 +1801,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		// state is not allowed to change while it is used here.
 		auto recordPtr = secondary.lastRecordPtrLocked();
 
-		auto& childCmd = vil::allocate<ExecuteCommandsChildCmd>(cb);
+		auto& childCmd = construct<ExecuteCommandsChildCmd>(cb);
 		childCmd.id_ = i;
 		childCmd.record_ = recordPtr.get();
 
@@ -2197,7 +2127,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	auto ptr = static_cast<const std::byte*>(pValues);
 	cmd.values = copySpan(cb, static_cast<const std::byte*>(ptr), size);
 
-	ensureSize0(cb, cb.pushConstants().data, std::max(offset + size, 128u));
+	ensureSize(cb, cb.pushConstants().data, std::max(offset + size, 128u));
 	std::memcpy(cb.pushConstants().data.data() + offset, pValues, size);
 
 	// TODO: improve pcr tracking
@@ -2270,7 +2200,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	cmd.first = firstViewport;
 	cmd.viewports = copySpan(cb, pViewports, viewportCount);
 
-	ensureSize0(cb, cb.graphicsState().dynamic.viewports, firstViewport + viewportCount);
+	ensureSize(cb, cb.graphicsState().dynamic.viewports, firstViewport + viewportCount);
 	std::copy(pViewports, pViewports + viewportCount,
 		cb.graphicsState().dynamic.viewports.begin() + firstViewport);
 
@@ -2287,7 +2217,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	cmd.first = firstScissor;
 	cmd.scissors = copySpan(cb, pScissors, scissorCount);
 
-	ensureSize0(cb, cb.graphicsState().dynamic.scissors, firstScissor + scissorCount);
+	ensureSize(cb, cb.graphicsState().dynamic.scissors, firstScissor + scissorCount);
 	std::copy(pScissors, pScissors + scissorCount,
 		cb.graphicsState().dynamic.scissors.begin() + firstScissor);
 
@@ -2427,7 +2357,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 		switch(category(write.descriptorType)) {
 			case DescriptorCategory::buffer: {
 				dlg_assert(write.pBufferInfo);
-				auto copies = allocSpan<VkDescriptorBufferInfo>(cb, write.descriptorCount);
+				auto copies = alloc<VkDescriptorBufferInfo>(cb, write.descriptorCount);
 				for(auto i = 0u; i < write.descriptorCount; ++i) {
 					auto& buf = get(*cb.dev, write.pBufferInfo[i].buffer);
 					copies[i] = write.pBufferInfo[i];
@@ -2438,7 +2368,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 				break;
 			} case DescriptorCategory::image: {
 				dlg_assert(write.pImageInfo);
-				auto copies = allocSpan<VkDescriptorImageInfo>(cb, write.descriptorCount);
+				auto copies = alloc<VkDescriptorImageInfo>(cb, write.descriptorCount);
 				for(auto i = 0u; i < write.descriptorCount; ++i) {
 					copies[i] = write.pImageInfo[i];
 					if(copies[i].imageView) {
@@ -2456,7 +2386,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 				break;
 			} case DescriptorCategory::bufferView: {
 				dlg_assert(write.pTexelBufferView);
-				auto copies = allocSpan<VkBufferView>(cb, write.descriptorCount);
+				auto copies = alloc<VkBufferView>(cb, write.descriptorCount);
 				for(auto i = 0u; i < write.descriptorCount; ++i) {
 					auto& bv = get(*cb.dev, write.pTexelBufferView[i]);
 					copies[i] = bv.handle;
@@ -2688,8 +2618,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
 
-	ensureSize0(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
-	cmd.buffers = allocSpan<BoundVertexBuffer>(cb, bindingCount);
+	ensureSize(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
+	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
 
 	ThreadMemScope memScope;
 	auto bufHandles = memScope.alloc<VkBuffer>(bindingCount);
@@ -2813,9 +2743,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BuildAccelStructsCmd>(cb, cb);
 
-	cmd.srcs = allocSpan0<AccelStruct*>(cb, infoCount);
-	cmd.dsts = allocSpan0<AccelStruct*>(cb, infoCount);
-	cmd.buildRangeInfos = allocSpan<span<VkAccelerationStructureBuildRangeInfoKHR>>(cb, infoCount);
+	cmd.srcs = alloc<AccelStruct*>(cb, infoCount);
+	cmd.dsts = alloc<AccelStruct*>(cb, infoCount);
+	cmd.buildRangeInfos = alloc<span<VkAccelerationStructureBuildRangeInfoKHR>>(cb, infoCount);
 
 	cmd.buildInfos = copySpan(cb, pInfos, infoCount);
 	for(auto i = 0u; i < infoCount; ++i) {
@@ -2827,7 +2757,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 			buildInfo.pGeometries = copySpan(cb, buildInfo.pGeometries, buildInfo.geometryCount).data();
 		} else if(buildInfo.geometryCount > 0) {
 			dlg_assert(buildInfo.ppGeometries);
-			auto dst = allocSpan<VkAccelerationStructureGeometryKHR>(cb, buildInfo.geometryCount);
+			auto dst = alloc<VkAccelerationStructureGeometryKHR>(cb, buildInfo.geometryCount);
 			for(auto g = 0u; g < buildInfo.geometryCount; ++g) {
 				dst[g] = *buildInfo.ppGeometries[g];
 			}
@@ -2868,11 +2798,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BuildAccelStructsIndirectCmd>(cb, cb);
 
-	cmd.srcs = allocSpan0<AccelStruct*>(cb, infoCount);
-	cmd.dsts = allocSpan0<AccelStruct*>(cb, infoCount);
-	cmd.indirectAddresses = allocSpan<VkDeviceAddress>(cb, infoCount);
-	cmd.indirectStrides = allocSpan<u32>(cb, infoCount);
-	cmd.maxPrimitiveCounts = allocSpan<u32*>(cb, infoCount);
+	cmd.srcs = alloc<AccelStruct*>(cb, infoCount);
+	cmd.dsts = alloc<AccelStruct*>(cb, infoCount);
+	cmd.indirectAddresses = alloc<VkDeviceAddress>(cb, infoCount);
+	cmd.indirectStrides = alloc<u32>(cb, infoCount);
+	cmd.maxPrimitiveCounts = alloc<u32*>(cb, infoCount);
 
 	cmd.buildInfos = copySpan(cb, pInfos, infoCount);
 	for(auto i = 0u; i < infoCount; ++i) {
@@ -2884,7 +2814,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 			buildInfo.pGeometries = copySpan(cb, buildInfo.pGeometries, buildInfo.geometryCount).data();
 		} else if(buildInfo.geometryCount > 0) {
 			dlg_assert(buildInfo.ppGeometries);
-			auto dst = allocSpan<VkAccelerationStructureGeometryKHR>(cb, buildInfo.geometryCount);
+			auto dst = alloc<VkAccelerationStructureGeometryKHR>(cb, buildInfo.geometryCount);
 			for(auto g = 0u; g < buildInfo.geometryCount; ++g) {
 				dst[g] = *buildInfo.ppGeometries[g];
 			}
@@ -2989,7 +2919,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteAccelerationStructuresPropertiesKHR(
 	cmd.queryPool = &get(*cb.dev, queryPool);
 	useHandle(cb, cmd, *cmd.queryPool);
 
-	cmd.accelStructs = allocSpan<AccelStruct*>(cb, accelerationStructureCount);
+	cmd.accelStructs = alloc<AccelStruct*>(cb, accelerationStructureCount);
 
 	ThreadMemScope memScope;
 	auto fwd = memScope.alloc<VkAccelerationStructureKHR>(accelerationStructureCount);

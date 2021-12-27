@@ -1,4 +1,5 @@
 #include <command/commands.hpp>
+#include <command/alloc.hpp>
 #include <handles.hpp>
 #include <shader.hpp>
 #include <cb.hpp>
@@ -1088,12 +1089,12 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
 	state = copy(cb, gfxState);
 	// TODO: only do this when pipe layout matches pcr layout
-	pushConstants.data = copySpan(*cb.record(), cb.pushConstants().data);
+	pushConstants.data = copySpan(cb, cb.pushConstants().data);
 
 #ifdef VIL_ENABLE_COMMAND_CALLSTACKS
 	// TODO: does not really belong here. should be atomic then at least
 	if(cb.dev->captureCmdStack) {
-		this->stackTrace = &allocate<backward::StackTrace>(*cb.record());
+		this->stackTrace = &construct<backward::StackTrace>(cb);
 		this->stackTrace->load_here(32u);
 	}
 #endif // VIL_ENABLE_COMMAND_CALLSTACKS

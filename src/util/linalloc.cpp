@@ -1,8 +1,8 @@
-#include <threadContext.hpp>
+#include <util/linalloc.hpp>
 #include <device.hpp>
 
 #ifdef VIL_DEBUG
-	#define assertCanary(block) dlg_assert((block).canary == ThreadMemBlock::canaryValue);
+	#define assertCanary(block) dlg_assert((block).canary == LinMemBlock::canaryValue);
 #else
 	#define assertCanary(block)
 #endif // VIL_DEBUG
@@ -12,9 +12,7 @@
 
 namespace vil {
 
-thread_local ThreadContext ThreadContext::instance;
-
-void freeBlocks(ThreadMemBlock* head) {
+void freeBlocks(LinMemBlock* head) {
 	if(!head) {
 		return;
 	}
@@ -33,11 +31,11 @@ void freeBlocks(ThreadMemBlock* head) {
 	}
 }
 
-ThreadMemBlock& createMemBlock(size_t memSize) {
-	auto totalSize = sizeof(ThreadMemBlock) + memSize;
+LinMemBlock& createMemBlock(size_t memSize) {
+	auto totalSize = sizeof(LinMemBlock) + memSize;
 	auto buf = new std::byte[totalSize]; // no need to value-initialize
-	auto* memBlock = new(buf) ThreadMemBlock;
-	memBlock->data = buf + sizeof(ThreadMemBlock);
+	auto* memBlock = new(buf) LinMemBlock;
+	memBlock->data = buf + sizeof(LinMemBlock);
 	memBlock->end = memBlock->data + memSize;
 
 	// TracyAllocS(buf, totalSize, 8);
@@ -46,7 +44,7 @@ ThreadMemBlock& createMemBlock(size_t memSize) {
 	return *memBlock;
 }
 
-std::byte* addBlock(ThreadContext& tc, std::size_t size, std::size_t alignment) {
+std::byte* addBlock(LinAllocator& tc, std::size_t size, std::size_t alignment) {
 	auto lastSize = memSize(*tc.memCurrent);
 	auto newBlockSize = std::min<size_t>(tc.blockGrowFac * lastSize, tc.maxBlockSize);
 	newBlockSize = std::max<size_t>(newBlockSize, alignPOT(size, alignment));
@@ -62,15 +60,20 @@ std::byte* addBlock(ThreadContext& tc, std::size_t size, std::size_t alignment) 
 	return ret;
 }
 
-ThreadContext::ThreadContext() {
-	// already allocate the first block, others may rely on it
-	// See e.g. ThreadMemScope.
+LinAllocator::LinAllocator() {
+	// Already allocate the first block, other functions rely on it
+	// TODO: depending on the usecase, this may be bad and very
+	// unexpected. The reason we are doing this here is to keep the
+	// allocation code as simple as possible, avoiding the check
+	// whether there already is a block or not.
 	memRoot = memCurrent = &createMemBlock(minBlockSize);
 }
 
-ThreadContext::~ThreadContext() {
-	dlg_assert(memCurrent == memRoot);
-	dlg_assertm(memOffset(*memCurrent) == 0u, "{}", memOffset(*memCurrent));
+LinAllocator::~LinAllocator() {
+	// NOTE: these must be true when the allocator was only used
+	// in a scoped manner.
+	// dlg_assert(memCurrent == memRoot);
+	// dlg_assertm(memOffset(*memCurrent) == 0u, "{}", memOffset(*memCurrent));
 	freeBlocks(memRoot);
 }
 

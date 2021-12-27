@@ -1,5 +1,6 @@
 #include <command/record.hpp>
 #include <command/commands.hpp>
+#include <command/alloc.hpp>
 #include <image.hpp>
 #include <pipe.hpp>
 #include <cb.hpp>
@@ -12,16 +13,17 @@ namespace vil {
 // Record
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		dev(xcb.dev),
+		alloc(),
 		cb(&xcb),
 		recordID(xcb.recordCount()),
 		queueFamily(xcb.pool().queueFamily),
 		// initialize allocators
-		pushLables(*this),
-		handles(*this),
-		invalidated(*this),
-		pipeLayouts(*this),
-		dsUpdateTemplates(*this),
-		secondaries(*this) {
+		pushLables(alloc),
+		handles(alloc),
+		invalidated(alloc),
+		pipeLayouts(alloc),
+		dsUpdateTemplates(alloc),
+		secondaries(alloc) {
 	if(!cb->name.empty()) {
 		cbName = copyString(*this, cb->name);
 	}

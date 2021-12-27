@@ -8,6 +8,7 @@
 #include <handles.hpp>
 #include <overlay.hpp>
 #include <accelStruct.hpp>
+#include <threadContext.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <gui/commandHook.hpp>
@@ -1099,5 +1100,8 @@ VkFormat findDepthFormat(const Device& dev) {
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 	return findSupported(dev, fmts, img, features);
 }
+
+// NOTE: doesn't really belong here
+thread_local ThreadContext ThreadContext::instance;
 
 } // namespace vil
