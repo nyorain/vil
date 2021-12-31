@@ -25,7 +25,9 @@ typedef struct spvm_member_list {
 //   memory pointed to by the given varID and access chain indices.
 typedef void(*spvm_access_variable_fn)(struct spvm_state*, unsigned varID,
 	unsigned index_count, const spvm_word* indices,
-	spvm_member_list members, spvm_word resTypeID);
+	spvm_member_list members, spvm_word res_type_id);
+typedef unsigned(*spvm_array_length_fn)(struct spvm_state*, unsigned varID,
+	unsigned index_count, const spvm_word* indices);
 
 typedef spvm_vec4f (*spvm_image_read_fn)(struct spvm_state*, struct spvm_image*,
 	int x, int y, int z, int layer, int level);
@@ -68,6 +70,7 @@ typedef struct spvm_state {
 	// members of the result as cache.
 	spvm_access_variable_fn load_variable;
 	spvm_access_variable_fn store_variable;
+	spvm_array_length_fn array_length;
 
 	spvm_image_read_fn read_image;
 	spvm_image_write_fn write_image;

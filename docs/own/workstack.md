@@ -10,6 +10,7 @@
 	- [ ] figure out why integration test crashes on CI.
 	      execute with valgrind?
 		  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
+		  -> no idea. Crash inside the vulkan loader that i can't reproduce locally
 - [x] add mutex to descriptorPool, make sure it's correctly used everywhere
 - [x] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)
 - [ ] document what to do when descriptors are not available when

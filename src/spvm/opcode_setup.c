@@ -572,6 +572,7 @@ void _spvm_context_create_setup_table(spvm_context_t ctx)
 	ctx->opcode_setup[SpvOpFunctionCall] = spvm_setup_OpFunctionCall;
 	ctx->opcode_setup[SpvOpPtrEqual] = spvm_setup_constant;
 	ctx->opcode_setup[SpvOpPtrNotEqual] = spvm_setup_constant;
+	ctx->opcode_setup[SpvOpArrayLength] = spvm_setup_constant;
 
 	ctx->opcode_setup[SpvOpConvertFToU] = spvm_setup_constant;
 	ctx->opcode_setup[SpvOpConvertFToS] = spvm_setup_constant;

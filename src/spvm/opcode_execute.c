@@ -147,6 +147,37 @@ void spvm_execute_OpLoad(spvm_word word_count, spvm_state_t state)
 		spvm_member_memcpy(state->results[id].members, src->members, src->member_count);
 	}
 }
+void spvm_execute_OpArrayLength(spvm_word word_count, spvm_state_t state)
+{
+	SPVM_SKIP_WORD(state->code_current); // result type
+
+	spvm_word id = SPVM_READ_WORD(state->code_current);
+	spvm_word var_id = SPVM_READ_WORD(state->code_current);
+	spvm_word member_id = SPVM_READ_WORD(state->code_current);
+
+	assert(state->array_length);
+
+	spvm_result_t var = &state->results[var_id];
+
+	if (var->type == spvm_result_type_access_chain) {
+		spvm_word indices[1 + var->index_count];
+		memcpy(indices, var->indices, sizeof(spvm_word) * var->index_count);
+		indices[var->index_count] = member_id;
+
+		spvm_result_t svar = &state->results[var->access_chain_ref];
+		assert(svar->type == spvm_result_type_variable);
+		assert(svar->storage_class == SpvStorageClassStorageBuffer);
+
+		state->results[id].members[0].value.u = state->array_length(state,
+			var->access_chain_ref, 1 + var->index_count, indices);
+	} else {
+		assert(var->type == spvm_result_type_variable);
+		assert(var->storage_class == SpvStorageClassStorageBuffer ||
+				var->storage_class == SpvStorageClassUniform);
+		state->results[id].members[0].value.u = state->array_length(state,
+			var_id, 1, &member_id);
+	}
+}
 void spvm_execute_OpCopyMemory(spvm_word word_count, spvm_state_t state)
 {
 	// TODO: need to add support for new load/store variable api
@@ -2231,6 +2262,7 @@ void _spvm_context_create_execute_table(spvm_context_t ctx)
 
 	ctx->opcode_execute[SpvOpStore] = spvm_execute_OpStore;
 	ctx->opcode_execute[SpvOpLoad] = spvm_execute_OpLoad;
+	ctx->opcode_execute[SpvOpArrayLength] = spvm_execute_OpArrayLength;
 	ctx->opcode_execute[SpvOpCopyMemory] = spvm_execute_OpCopyMemory;
 	ctx->opcode_execute[SpvOpCopyMemorySized] = spvm_execute_OpCopyMemorySized;
 	ctx->opcode_execute[SpvOpAccessChain] = spvm_execute_OpAccessChain;

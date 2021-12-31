@@ -34,8 +34,8 @@ void ShaderDebugger::init(Gui& gui) {
 
 	// TODO: why does this break for games using tcmalloc? tested
 	// on linux with dota
-	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	// textedit_.SetLanguageDefinition(lang);
+	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	textedit_.SetLanguageDefinition(lang);
 
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
@@ -108,6 +108,11 @@ void ShaderDebugger::initState() {
 			int x, int y, int z, int layer, int level, const spvm_vec4f* data) {
 		auto* self = static_cast<ShaderDebugger*>(state->user_data);
 		self->writeImage(*img, x, y, z, layer, level, *data);
+	};
+	state_->array_length = [](spvm_state* state, unsigned varID,
+			unsigned index_count, const spvm_word* indices) {
+		auto* self = static_cast<ShaderDebugger*>(state->user_data);
+		return self->arrayLength(varID, {indices, std::size_t(index_count)});
 	};
 
 	spvm_word entryPoint = -1;
@@ -208,14 +213,14 @@ void ShaderDebugger::draw() {
 		if(state_->code_current && ImGui::Button("Step Opcode")) {
 			do {
 				spvm_state_step_opcode(state_);
-			} while(state_->current_line < 0);
+			} while(state_->current_line < 0 && state_->code_current);
 		}
 
 		ImGui::SameLine();
 
 		if(state_->code_current && ImGui::Button("Step Line")) {
 			auto line = state_->current_line;
-			while(state_->current_line == line) {
+			while(state_->current_line == line && state_->code_current) {
 				spvm_state_step_opcode(state_);
 			}
 
@@ -408,6 +413,196 @@ void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
 	}
 }
 
+unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indices) {
+	ZoneScoped;
+	dlg_assert(compiled_);
+
+	auto res = resource(*this->compiled_, varID);
+	if(!res) {
+		dlg_error("OpArrayLength of invalid/unknown var {}", varID);
+		return 0;
+	}
+
+	dlg_assert(compiled_->has_decoration(res->id, spv::DecorationDescriptorSet) &&
+				compiled_->has_decoration(res->id, spv::DecorationBinding));
+	auto& spcTypeMaybeArrayed = compiled_->get_type(res->type_id);
+
+	// Handle array bindings
+	auto arrayElemID = 0u;
+	auto spcType = spcTypeMaybeArrayed;
+	if(!spcTypeMaybeArrayed.array.empty()) {
+		// Multidimensional binding arrays not allowed I guess
+		dlg_assert(spcType.array.size() == 1u);
+
+		// Loading an entire binding array is not allowed I guess, we just
+		// require an element to be selected here
+		dlg_assert(!indices.empty());
+
+		auto bounds = spcType.array[0];
+		if(spcType.array_size_literal[0] == true) {
+			bounds = compiled_->evaluate_constant_u32(bounds);
+		}
+
+		dlg_assert(u32(indices[0]) < bounds);
+
+		arrayElemID = indices[0];
+		indices = indices.subspan(1u);
+		spcType.array.clear();
+		spcType.array_size_literal.clear();
+	}
+
+	auto setID = compiled_->get_decoration(res->id, spv::DecorationDescriptorSet);
+	auto bindingID = compiled_->get_decoration(res->id, spv::DecorationBinding);
+
+	auto* baseCmd = gui_->cbGui().commandViewer().command();
+	auto* cmd = static_cast<const StateCmdBase*>(baseCmd);
+
+	auto& dsState = gui_->cbGui().commandViewer().dsState();
+	auto dss = cmd->boundDescriptors().descriptorSets;
+
+	dlg_assert(setID < dss.size());
+	auto& cmdDS = dss[setID];
+
+	auto stateIt = dsState.states.find(cmdDS.dsEntry);
+	dlg_assert(stateIt != dsState.states.end());
+	auto [ds, lock] = access(*stateIt->second);
+
+	// For samplers, we didn't do a copy and so have to early-out here
+	auto dsCopyIt = varIDToDsCopyMap_.find(varID);
+	if(dsCopyIt == varIDToDsCopyMap_.end()) {
+		dlg_error("OpArrayLength for var {} ERROR: not retrieved", varID);
+		return 0;
+	}
+
+	auto hookState = gui_->cbGui().commandViewer().state();
+	dlg_assert(hookState);
+	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
+	dlg_assert(gui_->dev().commandHook->descriptorCopies.size() > dsCopyIt->second);
+	auto& copyRequest = gui_->dev().commandHook->descriptorCopies[dsCopyIt->second];
+	// dsCopyIt->second stores the beginning of the range we stored in the
+	// array elements in. So we have to offset it with the arrayElemID
+	auto& copyResult = hookState->copiedDescriptors[dsCopyIt->second + arrayElemID];
+
+	dlg_assert(copyRequest.set == setID);
+	dlg_assert(copyRequest.binding == bindingID);
+
+	dlg_assert_or(spcType.storage == spv::StorageClassStorageBuffer ||
+		spcType.storage == spv::StorageClassUniform, return 0);
+
+	auto buf = buffers(ds, bindingID)[arrayElemID];
+	u32 size = 0u;
+	if(buf.buffer) {
+		size = evalRange(buf.buffer->ci.size, buf.offset, buf.range);
+	} else {
+		// NOTE: copied size will usually match the raw buffer size,
+		// except it was truncated for some reason (e.g. because it
+		// was too large).
+		dlg_warn("buffer was destroyed, using copied size instead");
+		auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
+		dlg_assert(buf);
+		size = buf->data().size();
+	}
+
+	ThreadMemScope tms;
+	auto [type, off] = accessBuffer(tms, res->type_id, indices, size);
+	dlg_assert_or(type, return 0);
+
+	dlg_assert(!type->array.empty());
+	dlg_assert(type->array[0] == 0u);
+	auto subSize = type->deco.arrayStride;
+	for(auto dim : span(type->array).subspan(1)) {
+		dlg_assert(dim != 0u); // only first dimension can be runtime size
+		subSize *= dim;
+	}
+
+	dlg_assert(size % subSize == 0u);
+	return size / subSize;
+}
+
+std::pair<const Type*, u32> ShaderDebugger::accessBuffer(ThreadMemScope& tms,
+		unsigned typeID, span<const spvm_word> indices, u32 dataSize) {
+	const auto* type = buildType(*compiled_, typeID, tms);
+	dlg_assert(type);
+
+	auto off = 0u;
+	while(!indices.empty()) {
+		if(!type->array.empty()) {
+			auto count = type->array[0];
+			auto remDims = span<const u32>(type->array).subspan(1);
+
+			auto subSize = type->deco.arrayStride;
+			dlg_assert(subSize);
+
+			for(auto size : remDims) {
+				dlg_assert(size != 0u); // only first dimension can be runtime size
+				subSize *= size;
+			}
+
+			if(count == 0u) { // runtime array, find out size
+				auto remSize = dataSize - off;
+				// doesn't have to be like that even though it's sus if the buffer
+				// size isn't a multiple of the stride.
+				// dlg_assert(remSize % subSize == 0u);
+				count = remSize / subSize; // intentionally round down
+			}
+
+			off += u32(indices[0]) * subSize;
+			indices = indices.subspan(1);
+
+			while(!indices.empty() && !remDims.empty()) {
+				count = remDims[0];
+				remDims = remDims.subspan(1);
+
+				subSize /= count;
+				off += u32(indices[0]) * subSize;
+				indices = indices.subspan(1);
+			}
+
+			auto& cpy = tms.construct<Type>();
+			cpy = *type;
+			cpy.array = {remDims.begin(), remDims.end()};
+			type = &cpy;
+		} else if(type->type == Type::typeStruct) {
+			auto id = u32(indices[0]);
+			indices = indices.subspan(1);
+			dlg_assert(id < type->members.size());
+
+			auto& member = type->members[id];
+			off += member.offset;
+			type = member.type;
+		} else if(type->columns > 1) {
+			auto id = u32(indices[0]);
+			indices = indices.subspan(1);
+			off += type->deco.matrixStride * id;
+			dlg_assert(id < type->columns);
+
+			auto& cpy = tms.construct<Type>();
+			cpy = *type;
+			cpy.columns = 1u;
+			type = &cpy;
+		} else if(type->vecsize > 1) {
+			auto id = u32(indices[0]);
+			indices = indices.subspan(1);
+			dlg_assert(id < type->vecsize);
+
+			auto& cpy = tms.construct<Type>();
+			cpy = *type;
+			cpy.vecsize = 1u;
+			type = &cpy;
+
+			// buffer layout does not matter here since new type is scalar
+			off += id * size(*type, BufferLayout::std140);
+		} else {
+			dlg_error("Invalida type for AccessChain");
+			type = nullptr;
+			break;
+		}
+	}
+
+	dlg_assert(type);
+	return {type, u32(off)};
+}
+
 void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		span<spvm_member> dst, u32 typeID) {
 	ZoneScoped;
@@ -588,89 +783,24 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		if(spcType.basetype == spc::SPIRType::Struct) {
 			// dlg_trace(" >> struct");
 
-			ThreadMemScope tms;
-			const auto* type = buildType(*compiled_, res->type_id, tms);
-			dlg_assert(type);
+			auto* copiedBuf = std::get_if<OwnBuffer>(&copyResult.data);
+			dlg_assert(copiedBuf);
+			auto data = copiedBuf->data();
 
-			auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
-			dlg_assert(buf);
-			auto data = buf->data();
-
-			auto off = 0u;
-			while(!indices.empty()) {
-				if(!type->array.empty()) {
-					auto count = type->array[0];
-					auto remDims = span<const u32>(type->array).subspan(1);
-
-					auto subSize = type->deco.arrayStride;
-					dlg_assert(subSize);
-
-					for(auto size : remDims) {
-						dlg_assert(size != 0u); // only first dimension can be runtime size
-						subSize *= size;
-					}
-
-					if(count == 0u) { // runtime array, find out size
-						auto remSize = data.size() - off;
-						// doesn't have to be like that even though it's sus if the buffer
-						// size isn't a multiple of the stride.
-						// dlg_assert(remSize % subSize == 0u);
-						count = remSize / subSize; // intentionally round down
-					}
-
-					off += u32(indices[0]) * subSize;
-					indices = indices.subspan(1);
-
-					while(!indices.empty() && !remDims.empty()) {
-						count = remDims[0];
-						remDims = remDims.subspan(1);
-
-						subSize /= count;
-						off += u32(indices[0]) * subSize;
-						indices = indices.subspan(1);
-					}
-
-					auto cpy = *tms.allocRaw<Type>();
-					cpy = *type;
-					cpy.array = {remDims.begin(), remDims.end()};
-					type = &cpy;
-				} else if(type->type == Type::typeStruct) {
-					auto id = u32(indices[0]);
-					indices = indices.subspan(1);
-					dlg_assert(id < type->members.size());
-
-					auto& member = type->members[id];
-					off += member.offset;
-					type = member.type;
-				} else if(type->columns > 1) {
-					auto id = u32(indices[0]);
-					indices = indices.subspan(1);
-					off += type->deco.matrixStride * id;
-					dlg_assert(id < type->columns);
-
-					auto cpy = *tms.allocRaw<Type>();
-					cpy = *type;
-					cpy.columns = 1u;
-					type = &cpy;
-				} else if(type->vecsize > 1) {
-					auto id = u32(indices[0]);
-					indices = indices.subspan(1);
-					dlg_assert(id < type->vecsize);
-
-					auto cpy = *tms.allocRaw<Type>();
-					cpy = *type;
-					cpy.vecsize = 1u;
-					type = &cpy;
-
-					// buffer layout does not matter here since new type is scalar
-					off += id * size(*type, BufferLayout::std140);
-				} else {
-					dlg_error("Invalida type for AccessChain");
-					type = nullptr;
-					break;
-				}
+			auto buf = buffers(ds, bindingID)[arrayElemID];
+			u32 size = 0u;
+			if(buf.buffer) {
+				size = evalRange(buf.buffer->ci.size, buf.offset, buf.range);
+			} else {
+				// NOTE: copied size will usually match the raw buffer size,
+				// except it was truncated for some reason (e.g. because it
+				// was too large).
+				dlg_warn("buffer was destroyed, using copied size instead");
+				size = data.size();
 			}
 
+			ThreadMemScope tms;
+			auto [type, off] = accessBuffer(tms, res->type_id, indices, size);
 			dlg_assert(type);
 
 			spvm_member* setupDst;

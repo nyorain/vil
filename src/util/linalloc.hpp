@@ -10,10 +10,9 @@
 #include <dlg/dlg.hpp>
 
 // Simple but optimized linear allocator implementation
-//
 // NOTE: Take care modifying this code in future, it was optimized so that
-// the allocation fast path only needs 6 instructions (1 load, 1 store).
-// Creating a ThreadMemScope has 7 instructions with 2 independent loads.
+// the allocation fast path only needs ~6 instructions (1 load, 1 store).
+// Creating a LinAllocScope has ~7 instructions with ~2 independent loads.
 // See node 2107.
 // TODO: add support for retrieving the memory blocks from a parent
 // allocator instead of calling new[], delete[] directly every time.
@@ -217,6 +216,10 @@ struct LinAllocScope {
 		tc.memCurrent = block;
 		tc.memCurrent->data = savedPtr;
 	}
+
+	// Doesn't make sense
+	LinAllocScope(LinAllocScope&&) noexcept = delete;
+	LinAllocScope& operator=(LinAllocScope&&) noexcept = delete;
 };
 
 template<typename T>

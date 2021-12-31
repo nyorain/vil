@@ -34,10 +34,13 @@ private:
 		span<spvm_member> dst, u32 typeID);
 	void storeVar(unsigned dstID, span<const spvm_word> indices,
 		span<spvm_member> src, u32 typeID);
+	std::pair<const Type*, u32> accessBuffer(ThreadMemScope& tms,
+		unsigned typeID, span<const spvm_word> indices, u32 dataSize);
 
 	spvm_vec4f readImage(spvm_image&, int x, int y, int z, int layer, int level);
 	void writeImage(spvm_image&, int x, int y, int z, int layer, int level,
 		const spvm_vec4f&);
+	unsigned arrayLength(unsigned varID, span<const spvm_word> indices);
 
 	void setupMember(const Type& type, ReadBuf, spvm_member& dst);
 	void setupMemberArray(span<const u32> arrayDims, const Type& type, ReadBuf, spvm_member& dst);
