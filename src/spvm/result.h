@@ -43,7 +43,7 @@ typedef struct spvm_decoration {
 typedef struct spvm_result {
 	enum spvm_result_type type;
 
-	spvm_string name;
+	const char* name;
 	spvm_word pointer;
 	SpvStorageClass storage_class;
 	struct spvm_result* owner;

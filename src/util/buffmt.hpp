@@ -30,6 +30,8 @@ struct Decoration {
 	Flags flags {};
 };
 
+// TODO: rename or move to namespace, kinda unfitting here.
+// vil::bufmt::Type or something makes more sense.
 struct Type {
 	enum BaseType {
 		typeStruct,

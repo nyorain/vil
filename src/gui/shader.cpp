@@ -143,7 +143,7 @@ void ShaderDebugger::unselect() {
 	}
 
 	compiled_ = nullptr;
-	vars_.clear();
+	breakpoints_.clear();
 }
 
 void ShaderDebugger::draw() {
@@ -154,43 +154,136 @@ void ShaderDebugger::draw() {
 
 	dlg_assert(state_);
 
+	auto isLastReturn = [this](){
+		// TODO: kinda hacky. I guess spvm should have a function
+		// like this? or we should always save the relevant information
+		// before stepping? not sure.
+		spvm_word opcode_data = *state_->code_current;
+		SpvOp opcode = SpvOp(opcode_data & SpvOpCodeMask);
+
+		if((opcode == SpvOpReturn || opcode == SpvOpReturnValue) &&
+				state_->function_stack_current == 0) {
+			return true;
+		}
+
+		return false;
+	};
+
+	// Controls
+	if(state_->code_current) {
+		if(ImGui::Button("Step Opcode")) {
+			auto doBreak = false;
+			// silently execute all init instructions here first
+			do {
+				doBreak = stepOpcode();
+			} while(state_->current_line < 0 && state_->code_current && !doBreak);
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Execute a single SPIR-V opcode");
+		}
+
+		ImGui::SameLine();
+
+		if(state_->code_current && ImGui::Button("Step Line")) {
+			auto doBreak = false;
+			auto line = state_->current_line;
+			// TODO: should probably also check for file change here, right?
+			// just in case we jump to a function in another file that
+			// happens to be at the same line
+			while(state_->current_line == line && state_->code_current && !doBreak) {
+				doBreak = stepOpcode();
+			}
+
+			jumpToState();
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Execute the program until the current line changes");
+		}
+
+		ImGui::SameLine();
+
+		if(ImGui::Button("Run")) {
+			auto doBreak = false;
+			while(state_->code_current && !doBreak) {
+				// TODO: really do this here? kinda hacky
+				if(isLastReturn()) {
+					break;
+				}
+
+				doBreak = stepOpcode();
+			}
+
+			jumpToState();
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Execute the program until it's finished "
+				"or a breakpoint triggered");
+		}
+
+
+		ImGui::SameLine();
+
+		// toggle breakpoint
+		if(ImGui::Button("Breakpoint")) {
+			// TODO: get current editor file
+			auto fileName = state_->current_file;
+			if(!fileName) {
+				dlg_assert(state_->owner->file_count > 0);
+				fileName = state_->owner->files[0].name;
+			}
+
+			auto line = 1 + textedit_.GetCursorPosition().mLine;
+
+			auto fid = fileID(fileName);
+			Location loc{fid, u32(line)};
+
+			auto it = find(breakpoints_, loc);
+			if(it != breakpoints_.end()) {
+				breakpoints_.erase(it);
+			} else {
+				breakpoints_.push_back(loc);
+			}
+		}
+
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Toggles the breakpoint at the current file/line "
+				"of the code editor");
+		}
+	} else {
+		ImGui::Text("Finished");
+
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Program execution has finished.");
+		}
+	}
+
+	ImGui::SameLine();
+
+	if(ImGui::Button("Reset")) {
+		spvm_state_delete(state_);
+		initState();
+		jumpToState();
+	}
+	if(gui_->showHelp && ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Reset execution to the beginning");
+	}
+
+	ImGui::SameLine();
+
+	ImGui::Checkbox("Refresh", &refresh_);
+	if(gui_->showHelp && ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Activating this means that the shader is re-run "
+			"every frame with the current input");
+	}
+
 	// shader view
-	if(ImGui::BeginChild("ShaderDebugger", ImVec2(0, -300))) {
+	if(ImGui::BeginChild("ShaderDebugger", ImVec2(0, -180))) {
 		ImGui::PushFont(gui_->monoFont);
 		textedit_.Render("Shader");
 		ImGui::PopFont();
 	}
 
 	ImGui::EndChild();
-
-	auto jumpToState = [&]{
-		if(!state_->current_file || state_->current_line == -1) {
-			dlg_warn("Can't jump to debugging state");
-			return;
-		}
-
-		auto fileID = -1;
-		for(auto i = 0u; i < state_->owner->file_count; ++i) {
-			if(std::strcmp(state_->owner->files[i].name, state_->current_file) == 0u) {
-				fileID = i;
-				break;
-			}
-		}
-
-		if(fileID == -1) {
-			dlg_warn("Can't jump to debugging state, invalid file '{}'", state_->current_file);
-			return;
-		}
-
-		if(currFileName_ != state_->owner->files[fileID].name) {
-			dlg_trace("now in file {}", state_->owner->files[fileID].name);
-			textedit_.SetText(state_->owner->files[fileID].source);
-		}
-
-		// TODO: seems to be a textedit bug
-		auto line = state_->current_line == 0 ? 0 : state_->current_line - 1;
-		textedit_.SetCursorPosition({line, state_->current_column});
-	};
 
 	if(refresh_) {
 		spvm_state_delete(state_);
@@ -202,159 +295,52 @@ void ShaderDebugger::draw() {
 		while(state_->code_current && (
 					u32(state_->current_line) != currLine_ ||
 					state_->current_file != currFileName_)) {
-			spvm_state_step_opcode(state_);
+			// TODO: trigger breakpoints here?
+			// probably not what we want. At least not always?
+			// spvm_state_step_opcode(state_);
+			auto doBreak = stepOpcode();
+			if(doBreak) {
+				refresh_ = false;
+				break;
+			}
 		}
 
 		jumpToState();
 	}
 
 	// variable view
-	if(ImGui::BeginChild("Vars")) {
-		if(state_->code_current && ImGui::Button("Step Opcode")) {
-			do {
-				spvm_state_step_opcode(state_);
-			} while(state_->current_line < 0 && state_->code_current);
-		}
-
-		ImGui::SameLine();
-
-		if(state_->code_current && ImGui::Button("Step Line")) {
-			auto line = state_->current_line;
-			while(state_->current_line == line && state_->code_current) {
-				spvm_state_step_opcode(state_);
+	if(ImGui::BeginChild("Views")) {
+		if(ImGui::BeginTabBar("Tabs")) {
+			if(ImGui::BeginTabItem("Inputs")) {
+				drawInputs();
+				ImGui::EndTabItem();
 			}
 
-			jumpToState();
-		}
-
-		ImGui::SameLine();
-
-		if(state_->code_current && ImGui::Button("Run")) {
-			while(state_->code_current) {
-				spvm_state_step_opcode(state_);
+			if(ImGui::BeginTabItem("Callstack")) {
+				drawCallstack();
+				ImGui::EndTabItem();
 			}
 
-			jumpToState();
-		}
-
-		ImGui::SameLine();
-
-		if(ImGui::Button("Reset")) {
-			spvm_state_delete(state_);
-			initState();
-			jumpToState();
-		}
-
-		ImGui::SameLine();
-
-		ImGui::Checkbox("Refresh", &refresh_);
-
-
-		// imGuiText("Current line: {}", state->current_line);
-		// imGuiText("Instruction count : {}", state->instruction_count);
-		// imGuiText("Offset: {}", state->code_current - program->code);
-
-		/*
-		auto printRes = [&](const auto& name, auto* res) {
-			if (!res->stored_to) {
-				return;
+			if(ImGui::BeginTabItem("Variables")) {
+				drawVariables();
+				ImGui::EndTabItem();
 			}
 
-			imGuiText("{}: ", name);
-
-			ImGui::SameLine();
-
-			// TODO: proper spvm_result formatting
-			auto* resType = spvm_state_get_type_info(state->results,
-				&state->results[res->pointer]);
-			if(resType->value_type == spvm_value_type_vector) {
-				auto str = std::string{};
-
-				for(auto i = 0; i < res->member_count; ++i) {
-					str += formatScalar(res->members[i]);
-				}
-
-				imGuiText("{}", str);
-			} else if(resType->value_type == spvm_value_type_int) {
-				// TODO: bitcount & signedness
-				imGuiText("{}", res->members[0].value.s);
-			} else if(resType->value_type == spvm_value_type_float) {
-				// TODO: bitcount
-				imGuiText("{}", res->members[0].value.f);
-			} else {
-				imGuiText("??");
-			}
-		};
-		*/
-
-		// vars_
-		// for(auto [name, res] : vars_) {
-		// 	printRes(name, res);
-		// }
-
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
-		auto flags = ImGuiTableFlags_BordersInner |
-			ImGuiTableFlags_Resizable |
-			ImGuiTableFlags_SizingStretchSame;
-		if(ImGui::BeginTable("Values", 2u, flags)) {
-			ImGui::TableSetupColumn(nullptr, 0, 0.25f);
-			ImGui::TableSetupColumn(nullptr, 0, 0.75f);
-
-			// local vars
-			for(auto i = 0u; i < program_->bound; ++i) {
-				auto& res = state_->results[i];
-				if((res.type != spvm_result_type_variable && res.type != spvm_result_type_function_parameter) ||
-						res.owner != state_->current_function ||
-						!res.name ||
-						// TODO: make this filter optional, via gui.
-						// Useful in many cases but can be annoying/incorrect when
-						// a variable isn't written on all branches.
-						// To fix this (the filter setting/checkbox is probably
-						// still a good idea) we could store the first OpStore
-						// to this variable in opcode_setup of spvm. And then
-						// here compare whether the current position of state
-						// postdominates that instruction.
-						!res.stored_to) {
-					continue;
-				}
-
-				// auto it = vars_.find(res.name);
-				// if(it != vars_.end()) {
-				// 	continue;
-				// }
-
-				const spvm_member* setupDst;
-				spvm_member wrapper;
-				auto* resType = spvm_state_get_type_info(state_->results,
-					&state_->results[res.pointer]);
-				auto vt = resType->value_type;
-
-				if(vt == spvm_value_type_matrix || vt == spvm_value_type_vector ||
-						vt == spvm_value_type_struct) {
-					setupDst = &wrapper;
-					wrapper.type = u32(resType - state_->results); // type id
-					wrapper.members = res.members;
-					wrapper.member_count = res.member_count;
-				} else {
-					dlg_assert(res.member_count == 1u);
-					setupDst = &res.members[0];
-				}
-
-				display(res.name, *setupDst);
+			if(ImGui::BeginTabItem("Breakpoints")) {
+				drawBreakpoints();
+				ImGui::EndTabItem();
 			}
 
-			ImGui::EndTable();
+			ImGui::EndTabBar();
 		}
-
-		ImGui::PopStyleVar(1);
 	}
+
+	ImGui::EndChild();
 
 	currLine_ = state_->current_line;
 	if(state_->current_file) {
 		currFileName_ = state_->current_file;
 	}
-
-	ImGui::EndChild();
 }
 
 void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
@@ -1200,6 +1186,225 @@ std::string ShaderDebugger::formatScalar(const spvm_member& member) {
 	}
 
 	return str;
+}
+
+void ShaderDebugger::drawVariables() {
+	// imGuiText("Current line: {}", state->current_line);
+	// imGuiText("Instruction count : {}", state->instruction_count);
+	// imGuiText("Offset: {}", state->code_current - program->code);
+
+	/*
+	auto printRes = [&](const auto& name, auto* res) {
+		if (!res->stored_to) {
+			return;
+		}
+
+		imGuiText("{}: ", name);
+
+		ImGui::SameLine();
+
+		// TODO: proper spvm_result formatting
+		auto* resType = spvm_state_get_type_info(state->results,
+			&state->results[res->pointer]);
+		if(resType->value_type == spvm_value_type_vector) {
+			auto str = std::string{};
+
+			for(auto i = 0; i < res->member_count; ++i) {
+				str += formatScalar(res->members[i]);
+			}
+
+			imGuiText("{}", str);
+		} else if(resType->value_type == spvm_value_type_int) {
+			// TODO: bitcount & signedness
+			imGuiText("{}", res->members[0].value.s);
+		} else if(resType->value_type == spvm_value_type_float) {
+			// TODO: bitcount
+			imGuiText("{}", res->members[0].value.f);
+		} else {
+			imGuiText("??");
+		}
+	};
+	*/
+
+	// vars_
+	// for(auto [name, res] : vars_) {
+	// 	printRes(name, res);
+	// }
+
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
+	auto flags = ImGuiTableFlags_BordersInner |
+		ImGuiTableFlags_Resizable |
+		ImGuiTableFlags_SizingStretchSame;
+	if(ImGui::BeginTable("Values", 2u, flags)) {
+		ImGui::TableSetupColumn(nullptr, 0, 0.25f);
+		ImGui::TableSetupColumn(nullptr, 0, 0.75f);
+
+		// local vars
+		for(auto i = 0u; i < program_->bound; ++i) {
+			auto& res = state_->results[i];
+			if((res.type != spvm_result_type_variable && res.type != spvm_result_type_function_parameter) ||
+					res.owner != state_->current_function ||
+					!res.name ||
+					// TODO: make this filter optional, via gui.
+					// Useful in many cases but can be annoying/incorrect when
+					// a variable isn't written on all branches.
+					// To fix this (the filter setting/checkbox is probably
+					// still a good idea) we could store the first OpStore
+					// to this variable in opcode_setup of spvm. And then
+					// here compare whether the current position of state
+					// postdominates that instruction.
+					!res.stored_to) {
+				continue;
+			}
+
+			// auto it = vars_.find(res.name);
+			// if(it != vars_.end()) {
+			// 	continue;
+			// }
+
+			const spvm_member* setupDst;
+			spvm_member wrapper;
+			auto* resType = spvm_state_get_type_info(state_->results,
+				&state_->results[res.pointer]);
+			auto vt = resType->value_type;
+
+			if(vt == spvm_value_type_matrix || vt == spvm_value_type_vector ||
+					vt == spvm_value_type_struct) {
+				setupDst = &wrapper;
+				wrapper.type = u32(resType - state_->results); // type id
+				wrapper.members = res.members;
+				wrapper.member_count = res.member_count;
+			} else {
+				dlg_assert(res.member_count == 1u);
+				setupDst = &res.members[0];
+			}
+
+			display(res.name, *setupDst);
+		}
+
+		ImGui::EndTable();
+	}
+
+	ImGui::PopStyleVar(1);
+}
+
+void ShaderDebugger::drawBreakpoints() {
+	for(auto& bp : breakpoints_) {
+		ImGui::Bullet();
+		ImGui::SameLine();
+		imGuiText("{}:{}", fileName(bp.fileID), bp.lineID);
+	}
+}
+
+void ShaderDebugger::drawCallstack() {
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
+	auto flags = ImGuiTableFlags_BordersInner |
+		ImGuiTableFlags_Resizable |
+		ImGuiTableFlags_SizingStretchSame;
+	if(ImGui::BeginTable("Values", 2u, flags)) {
+		ImGui::EndTable();
+
+		// TODO:
+		// - allow selecting entries and then showing the respective variables from threre
+		// - show file, line, function (and maybe hide address by default)
+		auto count = state_->function_stack_current + 1;
+		for(auto i = 0; i < count; ++i) {
+			ImGui::TableNextRow();
+
+			ImGui::NextColumn();
+			imGuiText("{}", static_cast<const void*>(state_->function_stack[i]));
+
+			ImGui::NextColumn();
+			auto name = state_->function_stack_info[i]->name;
+			imGuiText("{}", name ? name : "?");
+		}
+	}
+
+	ImGui::PopStyleVar(1);
+}
+
+void ShaderDebugger::drawInputs() {
+	// TODO: decide depending on shader type
+	// TODO: for compute shader, allow to select GlobalInvocationID
+	//   and automatically compute it here depending on workgroup size
+	imGuiText("todo");
+}
+
+void ShaderDebugger::jumpToState() {
+	if(!state_->current_file) {
+		dlg_warn("Can't jump to debugging state, current_file is null");
+		return;
+	}
+
+	if(state_->current_line < 0) {
+		dlg_warn("Can't jump to debugging state, current_line = {}",
+			state_->current_line);
+		return;
+	}
+
+	auto fileID = -1;
+	for(auto i = 0u; i < state_->owner->file_count; ++i) {
+		if(std::strcmp(state_->owner->files[i].name, state_->current_file) == 0u) {
+			fileID = i;
+			break;
+		}
+	}
+
+	if(fileID == -1) {
+		dlg_warn("Can't jump to debugging state, invalid file '{}'", state_->current_file);
+		return;
+	}
+
+	if(currFileName_ != state_->owner->files[fileID].name) {
+		dlg_trace("now in file {}", state_->owner->files[fileID].name);
+		textedit_.SetText(state_->owner->files[fileID].source);
+	}
+
+	// TODO: seems to be a textedit bug
+	auto line = state_->current_line == 0 ? 0 : state_->current_line - 1;
+	textedit_.SetCursorPosition({line, state_->current_column});
+}
+
+bool ShaderDebugger::stepOpcode() {
+	auto currLine = state_->current_line;
+	auto currFile = state_->current_file;
+
+	spvm_state_step_opcode(state_);
+
+	if(state_->current_line == currLine &&
+			state_->current_file == currFile) {
+		// position hasn't changed, can't be a breakpoint
+		return false;
+	}
+
+	for(auto& bp : breakpoints_) {
+		if(spvm_word(bp.lineID) == state_->current_line &&
+				fileName(bp.fileID) == state_->current_file) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+std::string_view ShaderDebugger::fileName(u32 fileID) const {
+	dlg_assert_or(fileID < state_->owner->file_count, return "");
+	return state_->owner->files[fileID].name;
+}
+
+u32 ShaderDebugger::fileID(std::string_view fileName) const {
+	auto fileID = u32(-1);
+	for(auto i = 0u; i < state_->owner->file_count; ++i) {
+		if(std::strncmp(state_->owner->files[i].name,
+				fileName.data(), fileName.size()) == 0u) {
+			fileID = i;
+			break;
+		}
+	}
+
+	dlg_assertm(fileID != u32(-1), "Can't find file {}", fileName);
+	return fileID;
+
 }
 
 } // namespace vil

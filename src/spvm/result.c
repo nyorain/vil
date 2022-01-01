@@ -146,10 +146,6 @@ void spvm_result_allocate_typed_value(spvm_result_t val, spvm_result* results, s
 }
 void spvm_result_delete(spvm_result_t res)
 {
-	// name
-	if (res->name != NULL)
-		free(res->name);
-
 	// member names
 	for (spvm_word j = 0; j < res->member_name_count; j++)
 		free(res->member_name[j]);

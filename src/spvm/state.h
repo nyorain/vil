@@ -13,6 +13,15 @@ extern "C" {
 struct spvm_state;
 struct spvm_image;
 
+typedef struct spvm_stack_entry {
+	spvm_source source;
+	spvm_result_t function;
+	spvm_word function_stack_returns;
+	spvm_word function_stack_cfg;
+	const char* file;
+	spvm_word line;
+} spvm_stack_entry;
+
 typedef struct spvm_member_list {
 	unsigned member_count;
 	spvm_member* members;
@@ -88,7 +97,7 @@ typedef struct spvm_state {
 	struct spvm_state* derivative_group_d; // bottom right / diagonal
 
 	// debug information
-	spvm_string current_file;
+	const char* current_file;
 	spvm_word current_line;
 	spvm_word current_column;
 	spvm_word instruction_count;

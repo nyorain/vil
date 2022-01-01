@@ -28,12 +28,18 @@ public:
 	void updateHooks(CommandHook&);
 
 private:
-	void loadBuiltin(const spc::BuiltInResource& builtin,
-		span<const spvm_word> indices, span<spvm_member> dst);
 	void loadVar(unsigned srcID, span<const spvm_word> indices,
 		span<spvm_member> dst, u32 typeID);
+	void loadBuiltin(const spc::BuiltInResource& builtin,
+		span<const spvm_word> indices, span<spvm_member> dst);
 	void storeVar(unsigned dstID, span<const spvm_word> indices,
 		span<spvm_member> src, u32 typeID);
+
+	// Returns (type, offset) tuple for accessing the sub-type
+	// given by the given indices (as usually defined by SPIR-V) in
+	// the given typeID.
+	// Requires the total dataSize of the original type/buffer to
+	// correctly handle runtime arrays.
 	std::pair<const Type*, u32> accessBuffer(ThreadMemScope& tms,
 		unsigned typeID, span<const spvm_word> indices, u32 dataSize);
 
@@ -47,8 +53,10 @@ private:
 	void setupVector(const Type& type, u32 stride, ReadBuf, spvm_member& dst);
 	void setupScalar(const Type&, ReadBuf, spvm_member& dst);
 
+	// (Re-)Initialized the spvm state.
 	void initState();
 
+	// Converts the information of the given sampler to a spvm_sampler_desc.
 	static spvm_sampler_desc setupSampler(const Sampler& src);
 
 	spvm_value_type valueType(const spvm_member& member);
@@ -56,6 +64,22 @@ private:
 	// formatting spvm_result/spvm_member for debug table
 	void display(const char* name, const spvm_member& members);
 	std::string formatScalar(const spvm_member& member);
+
+	// executes a single opcode. Returns true if a breakpoint was hit.
+	bool stepOpcode();
+
+	// Sets the text editor to the current line of the state.
+	void jumpToState();
+
+	void drawInputs();
+	void drawVariables();
+	void drawBreakpoints();
+	void drawCallstack();
+
+	// NOTE: the returned string view is only valid until the state
+	// gets recreated (which might happen every frame).
+	std::string_view fileName(u32 fileID) const;
+	u32 fileID(std::string_view fileName) const; // returns u32(-1) if not found
 
 private:
 	struct OurImage : spvm_image {
@@ -67,10 +91,12 @@ private:
 		u32 lineID;
 	};
 
+	friend inline bool operator==(const Location& a, const Location& b) {
+		return a.fileID == b.fileID && a.lineID == b.lineID;
+	}
+
 	std::deque<spvm_sampler> samplers_;
 	std::deque<OurImage> images_;
-
-	std::unordered_map<std::string_view, spvm_result*> vars_;
 
 	bool refresh_ {};
 	u32 currLine_ {};

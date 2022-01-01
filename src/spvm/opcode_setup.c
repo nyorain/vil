@@ -4,6 +4,7 @@
 #include <spvm/spirv.h>
 #include <string.h>
 #include <assert.h>
+#include <stdio.h>
 
 // defined in opcode_execute.c
 char spvm_use_access_callback(enum spvm_result_type result_type,
@@ -12,11 +13,20 @@ char spvm_use_access_callback(enum spvm_result_type result_type,
 /* 3.32.2 Debug Instructions */
 void spvm_setup_OpSource(spvm_word word_count, spvm_state_t state)
 {
+	// check if file was already added
+	for (unsigned i = 0u; i < state->owner->file_count; ++i) {
+		if (state->owner->files[i].origin == state->code_current) {
+			return;
+		}
+	}
+
 	size_t id = state->owner->file_count++;
-	state->owner->files = (spvm_file*) realloc(state->owner->files, sizeof(spvm_file) * state->owner->file_count);
+	state->owner->files = (spvm_file*) realloc(state->owner->files,
+		sizeof(spvm_file) * state->owner->file_count);
 
 	spvm_file* file = &state->owner->files[id];
 	memset(file, 0x0, sizeof(spvm_file));
+	file->origin = state->code_current;
 	file->language = SPVM_READ_WORD(state->code_current);
 	file->language_version = SPVM_READ_WORD(state->code_current);
 
@@ -26,8 +36,7 @@ void spvm_setup_OpSource(spvm_word word_count, spvm_state_t state)
 	}
 
 	if (word_count > 3) {
-		file->source = (spvm_string)malloc((word_count - 2) * sizeof(spvm_word));
-		spvm_string_read(state->code_current, file->source, word_count - 3);
+		file->source = (spvm_string) state->code_current;
 	}
 }
 void spvm_setup_OpSourceExtension(spvm_word word_count, spvm_state_t state)
@@ -38,8 +47,7 @@ void spvm_setup_OpSourceExtension(spvm_word word_count, spvm_state_t state)
 void spvm_setup_OpName(spvm_word word_count, spvm_state_t state)
 {
 	spvm_word id = SPVM_READ_WORD(state->code_current);
-	state->results[id].name = (spvm_string)malloc(word_count * sizeof(spvm_word) + 1);
-	spvm_string_read(state->code_current, state->results[id].name, word_count - 1);
+	state->results[id].name = (const char*) state->code_current;
 }
 void spvm_setup_OpMemberName(spvm_word word_count, spvm_state_t state)
 {
@@ -57,8 +65,7 @@ void spvm_setup_OpString(spvm_word word_count, spvm_state_t state)
 {
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	state->results[id].type = spvm_result_type_string;
-	state->results[id].name = (spvm_string)malloc((word_count - 1) * sizeof(spvm_word) + 1);
-	spvm_string_read(state->code_current, state->results[id].name, word_count - 1);
+	state->results[id].name = (const char*) state->code_current;
 }
 
 /* 3.32.3 Annotation Instructions */
@@ -90,11 +97,8 @@ void spvm_setup_OpExtInstImport(spvm_word word_count, spvm_state_t state)
 
 	word_count--;
 
-	spvm_string imp = (spvm_string)calloc(word_count, sizeof(spvm_word));
-	spvm_string_read(state->code_current, imp, word_count);
-
 	state->results[id].type = spvm_result_type_extension;
-	state->results[id].name = imp;
+	state->results[id].name = (const char*) state->code_current;
 }
 
 /* 3.32.5 Mode-Setting Instructions */

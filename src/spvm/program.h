@@ -20,7 +20,8 @@ typedef struct
 
 typedef struct
 {
-	spvm_string name; // points to OpString result
+	spvm_source origin; // OpSource instruction that created this spvm_file
+	const char* name; // points to OpString result
 	SpvSourceLanguage language;
 	spvm_word language_version;
 	spvm_string source;
