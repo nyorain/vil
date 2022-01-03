@@ -1768,6 +1768,7 @@ DescriptorSetCow::~DescriptorSetCow() {
 		std::lock_guard lock(ds->mutex);
 
 		// Unregister. We succesfully saved a copy *yeay*.
+		dlg_assert(ds->cow == this);
 		ds->cow = nullptr;
 	}
 }
@@ -1775,11 +1776,12 @@ DescriptorSetCow::~DescriptorSetCow() {
 std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSetCow& cow) {
 	std::unique_lock cowLock(cow.mutex);
 	if(cow.copy) {
+		cowLock.unlock();
 		return {DescriptorStateRef(*cow.copy), std::move(cowLock)};
 	}
 
-	assert(cow.ds);
-	assert(cow.ds->cow == &cow);
+	dlg_assert(cow.ds);
+	dlg_assert(cow.ds->cow == &cow);
 
 	// NOTE how we don't have to lock cow.obj->mutex to access the object
 	// state itself here. We know that while
@@ -1791,7 +1793,7 @@ std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSet
 IntrusivePtr<DescriptorSetCow> addCow(DescriptorSet& set) {
 	std::lock_guard lock(set.mutex);
 	if(!set.cow) {
-		// TODO: get from a pool or something
+		// TODO PERF: get from a pool or something
 		set.cow = new DescriptorSetCow();
 		set.cow->ds = &set;
 

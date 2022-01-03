@@ -72,9 +72,6 @@ struct DescriptorPool : DeviceHandle {
 	std::unique_ptr<std::byte[]> data;
 	std::unique_ptr<SetEntry[]> entries;
 
-	// TODO: usedEntries is accessed from the outside.
-	// Need a mutex here.
-
 	// Linked list of the alive descriptor sets, sorted by offset.
 	SetEntry* usedEntries {};
 
@@ -173,7 +170,7 @@ inline bool operator==(const AccelStructDescriptor& a, const AccelStructDescript
 	return a.accelStruct == b.accelStruct;
 }
 
-// Temporary wrapper around descriptor state.
+// Temporary reference to descriptor state.
 struct DescriptorStateRef {
 	DescriptorSetLayout* layout {};
 	std::byte* data {};
@@ -215,6 +212,8 @@ struct DescriptorSet : DeviceHandle {
 	DebugMutex mutex;
 
 	// Protected by mutex.
+	// Not owned here. The destructor of DescriptorSetCow automatically
+	// unsets this.
 	DescriptorSetCow* cow {};
 
 	// std::byte bindingData[]; // following this in memory
@@ -228,15 +227,29 @@ struct DescriptorStateCopy {
 	IntrusivePtr<DescriptorSetLayout> layout {};
 	u32 variableDescriptorCount {};
 	u32 _pad {};
-	// std::byte data[];
+
+	// std::byte data[]; // following this in memory
 };
 
 using DescriptorStateCopyPtr = std::unique_ptr<DescriptorStateCopy, DescriptorStateCopy::Deleter>;
 
+// Copy-on-write mechanism on a descriptor state.
+// See DescriptorSet::cow.
 struct DescriptorSetCow {
+	// Mutex protects ds and copy. Needed since accessing the cow
+	// and resolving it may happen in parallel from multiple threads.
 	DebugMutex mutex;
+
+	// Only set when the cow still references the descriptor sets original
+	// content. Otherwise null. Once unset, won't be set again.
 	DescriptorSet* ds {};
+
+	// Only set when the cow has made its own copy. Otherwise null.
+	// Once set, won't be unset again.
 	DescriptorStateCopyPtr copy {};
+
+	// DescriptorSetCow is intrusively reference counted since multiple
+	// consumers may want to reference the same descriptor state.
 	std::atomic<u32> refCount {};
 
 	~DescriptorSetCow();

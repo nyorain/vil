@@ -64,3 +64,7 @@ be possible or useful in the end.
 - time critical functions: Gui::Draw, command hook recording, freeBlocks etc
   and track them via DebugStats. When they get too large show something
   via imgui in debug mode (e.g. the needed time in red).
+
+- hide shader debugger behind config feature?
+	- adds a whole new library and isn't ready yet at all.
+	  and might never really be ready, it's more of an experiment anyways

@@ -33,9 +33,6 @@
 	  imageView and then using ds in submission (might need partially_bound
 	  or something I guess)
 - [x] rename main branch to main
-- hide shader debugger behind config feature?
-	- adds a whole new library and isn't ready yet at all.
-	  and might never really be ready, it's more of an experiment anyways
 - [x] make ThreadContext alloc and CommandRecord alloc consistent
 	- [ ] we probably also don't want to really free the blocks. Just return them.
 	  Enable our global memory block cache thingy?
