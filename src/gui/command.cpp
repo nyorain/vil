@@ -812,7 +812,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			}
 
 			ThreadMemScope memScope;
-			auto* type = buildType(compiled, res.type_id, memScope);
+			auto* type = buildType(compiled, res.type_id, memScope.customUse());
 			displayTable(name.c_str(), *type, buf->data());
 		} else {
 			ImGui::Text("Binding not used in pipeline");
@@ -900,7 +900,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			}
 
 			ThreadMemScope memScope;
-			auto* type = buildType(compiled, res.type_id, memScope);
+			auto* type = buildType(compiled, res.type_id, memScope.customUse());
 			displayTable(name.c_str(), *type, blockData);
 		} else {
 			ImGui::Text("Binding not used in pipeline");
@@ -997,7 +997,7 @@ void CommandViewer::displayPushConstants() {
 		}
 
 		ThreadMemScope memScope;
-		auto* type = buildType(compiled, pcr.type_id, memScope);
+		auto* type = buildType(compiled, pcr.type_id, memScope.customUse());
 		displayTable(name.c_str(), *type, cmd->boundPushConstants().data);
 		break;
 	}
@@ -1303,6 +1303,11 @@ void CommandViewer::displayCommand() {
 			imGuiText("groups X: {}", ecmd.x);
 			imGuiText("groups Y: {}", ecmd.y);
 			imGuiText("groups Z: {}", ecmd.z);
+		} else if(dynamic_cast<const TraceRaysIndirectCmd*>(command_)) {
+			auto ecmd = read<VkTraceRaysIndirectCommandKHR>(span);
+			imGuiText("width: {}", ecmd.width);
+			imGuiText("height: {}", ecmd.height);
+			imGuiText("depth: {}", ecmd.depth);
 		} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(command_); dcmd) {
 			auto cmdSize = dcmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
@@ -1373,8 +1378,12 @@ void CommandViewer::updateHook() {
 	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(command_);
 	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(command_);
 	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(command_);
+	auto traceRaysIndirectCmd = dynamic_cast<const TraceRaysIndirectCmd*>(command_);
 
-	auto indirectCmd = dispatchIndirectCmd || drawIndirectCmd || drawIndirectCountCmd;
+	auto indirectCmd = dispatchIndirectCmd ||
+		drawIndirectCmd ||
+		drawIndirectCountCmd ||
+		traceRaysIndirectCmd;
 	auto indexedCmd = drawIndexedCmd ||
 		(drawIndirectCmd && drawIndirectCmd->indexed) ||
 		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);

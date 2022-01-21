@@ -52,6 +52,26 @@ const DescriptorState* getDsState(const Command& cmd) {
 	}
 }
 
+// TODO: move to cow.hpp?
+void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
+		OwnBuffer& dst, VkDeviceSize dstOffset, VkDeviceSize size) {
+	if(size == 0u) {
+		return;
+	}
+
+	auto& srcBuf = bufferAtLocked(dev, srcPtr);
+	dlg_assert(srcBuf.deviceAddress);
+	auto srcOff = srcPtr - srcBuf.deviceAddress;
+	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
+}
+
+void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
+		VkDeviceAddress srcPtr, VkDeviceSize size, u32 queueFamsBitset) {
+	auto addFlags = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	dst.ensure(dev, size, addFlags, queueFamsBitset);
+	performCopy(dev, cb, srcPtr, dst, 0, size);
+}
+
 // Expects a and to have the same layout.
 // If the descriptor at (bindingID, elemID) needs to be copied by CommandHook,
 // returns whether its the same in a and b.
@@ -324,7 +344,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 	// Even when we aren't interested in any command in the record, we have
 	// to hook it when it builds acceleration structures.
-	auto needBuildHook = record.buildsAccelStructs;
+	auto needBuildHook = record.buildsAccelStructs && hookAccelStructBuilds;
 	if(!hookNeededForCmd && !needBuildHook) {
 		return hooked.handle();
 	}
@@ -452,9 +472,13 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
 		"Alarmingly high number of hooks for a single record");
 
-	auto descriptors = captureDescriptors(*findRes.hierachy.back());
-	auto hook = new CommandHookRecord(*this, record, std::move(findRes.hierachy),
-		descriptors);
+	auto descriptors = CommandDescriptorSnapshot {};
+	if(!findRes.hierachy.empty()) {
+		descriptors = captureDescriptors(*findRes.hierachy.back());
+	}
+
+	auto hook = new CommandHookRecord(*this, record,
+		std::move(findRes.hierachy), descriptors);
 	hook->match = findRes.match;
 	record.hookRecords.push_back(FinishPtr<CommandHookRecord>(hook));
 
@@ -959,7 +983,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	while(cmd) {
 		// check if command needs additional, manual hook
-		if(cmd->type() == CommandType::buildAccelStruct) {
+		if(cmd->type() == CommandType::buildAccelStruct && CommandHook::hookAccelStructBuilds) {
 			auto* basCmd = dynamic_cast<BuildAccelStructsCmd*>(cmd);
 			auto* basCmdIndirect = dynamic_cast<BuildAccelStructsCmd*>(cmd);
 			dlg_assert(basCmd || basCmdIndirect);
@@ -1157,7 +1181,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		// calculate size
 		auto range = elem.range;
 		if(range == VK_WHOLE_SIZE) {
-			range = elem.buffer->ci.size - elem.offset;
+			range = elem.buffer->ci.size - off;
 		}
 		auto size = std::min(maxBufCopySize, range);
 
@@ -1165,7 +1189,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		// ignore queueFams here
 		auto& dstBuf = dst.data.emplace<OwnBuffer>();
 		initAndCopy(dev, cb, dstBuf, 0u, nonNull(elem.buffer),
-			elem.offset, size, {});
+			off, size, {});
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
 		//   as buffer but then create bufferView on our own?
@@ -1437,6 +1461,10 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			// values (which they shouldn't).
 			performCopy(dev, cb, nonNull(cmd->buffer), cmd->offset,
 				state->indirectCopy, 4u, cmd->maxDrawCount * cmdSize);
+		} else if(auto* cmd = dynamic_cast<TraceRaysIndirectCmd*>(&bcmd)) {
+			auto size = sizeof(VkTraceRaysIndirectCommandKHR);
+			initAndCopy(dev, cb, state->indirectCopy, cmd->indirectDeviceAddress,
+				size, {});
 		} else {
 			dlg_error("Unsupported indirect command");
 		}
@@ -1567,18 +1595,6 @@ u32 getVertType(VkFormat fmt) {
 			dlg_error("Unsupported AccelerationStructure vertex format");
 			return 0u;
 	}
-}
-
-void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
-		OwnBuffer& dst, VkDeviceSize dstOffset, VkDeviceSize size) {
-	if(size == 0u) {
-		return;
-	}
-
-	auto& srcBuf = bufferAtLocked(dev, srcPtr);
-	dlg_assert(srcBuf.deviceAddress);
-	auto srcOff = srcPtr - srcBuf.deviceAddress;
-	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
 }
 
 void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
@@ -1888,6 +1904,11 @@ void CommandHookSubmission::finish(Submission& subm) {
 			record->state->indirectCopy.invalidateMap();
 		} else if(dynamic_cast<const DispatchIndirectCmd*>(&bcmd)) {
 			dlg_assert(record->state->indirectCopy.size == sizeof(VkDispatchIndirectCommand));
+
+			record->state->indirectCommandCount = 1u;
+			record->state->indirectCopy.invalidateMap();
+		} else if(dynamic_cast<const TraceRaysIndirectCmd*>(&bcmd)) {
+			dlg_assert(record->state->indirectCopy.size == sizeof(VkTraceRaysIndirectCommandKHR));
 
 			record->state->indirectCommandCount = 1u;
 			record->state->indirectCopy.invalidateMap();

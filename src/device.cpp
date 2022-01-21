@@ -17,13 +17,6 @@
 
 namespace vil {
 
-#ifdef TRACY_MANUAL_LIFETIME
-	// NOTE: strictly speaking, we'd need a mutex to do proper
-	//   initialization. But creating multiple Instances from multiple threads
-	//   at the same time is a weird and problematic corner case anyways
-	std::atomic<unsigned> tracyRefCount {};
-#endif // TRACY_MANUAL_LIFETIME
-
 DebugStats& DebugStats::get() {
 	static DebugStats ret;
 	return ret;
@@ -134,13 +127,6 @@ Device::~Device() {
 
 	queueFamilies.clear();
 	queues.clear();
-
-#ifdef TRACY_MANUAL_LIFETIME
- 	// TODO: need to fix some issues, e.g. ThreadContext memory first
- 	// if(tracyRefCount.fetch_sub(1u) == 1u) {
- 	// 	tracy::ShutdownProfiler();
- 	// }
-#endif // TRACY_MANUAL_LIFETIME
 }
 
 bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
@@ -264,14 +250,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		const VkDeviceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
 		VkDevice* pDevice) {
-
-#ifdef TRACY_MANUAL_LIFETIME
-	if(tracyRefCount.fetch_add(1u) == 0u) {
-		dlg_trace("Starting tracy...");
-		tracy::StartupProfiler();
-		dlg_trace(">> done");
-	}
-#endif // TRACY_MANUAL_LIFETIME
 
 	auto* iniData = findData<Instance>(phdev);
 	dlg_assert(iniData);

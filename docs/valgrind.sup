@@ -1,0 +1,17 @@
+{
+   Ignore dlopen bug.
+   Memcheck:Leak
+   ...
+   fun:_dl_open
+   ...
+}
+{
+   Ignore dlopen bug.
+   Memcheck:Leak
+   ...
+   fun:_dl_close_worker
+   fun:_dl_close
+   ...
+   fun:dlclose
+}
+

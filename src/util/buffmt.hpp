@@ -10,6 +10,11 @@
 
 namespace vil {
 
+// NOTE: important that destructors of Decoration and Type stay trivial as
+//   we use a custom allocator that does not call them in the functions
+//   below (for ease-of-use, allowing us to return just a single type allocated
+//   in user-specified memory).
+
 struct Decoration {
 	enum class Bits {
 		rowMajor = 1 << 0u,
@@ -18,7 +23,7 @@ struct Decoration {
 
 	using Flags = nytl::Flags<Bits>;
 
-	std::string name {};
+	std::string_view name {};
 	u32 offset {}; // for members; offset in struct
 	// TODO: for multidim arrays, each dimension might have a non-tight
 	// arrayStride in spirv i guess? In Vulkan, the stride for the
@@ -29,6 +34,8 @@ struct Decoration {
 	u32 matrixStride {};
 	Flags flags {};
 };
+
+static_assert(std::is_trivially_destructible_v<Decoration>);
 
 // TODO: rename or move to namespace, kinda unfitting here.
 // vil::bufmt::Type or something makes more sense.
@@ -45,19 +52,22 @@ struct Type {
 	u32 columns {1};
 	u32 vecsize {1};
 	// Set to 0 for runtime array.
-	std::vector<u32> array {};
+	span<u32> array {};
 	u32 width;
 
 	Decoration deco;
 
 	struct Member {
-		std::string name;
+		std::string_view name;
 		const Type* type;
 		u32 offset;
 	};
 
-	std::vector<Member> members;
+	span<Member> members;
 };
+
+static_assert(std::is_trivially_destructible_v<Type>);
+static_assert(std::is_trivially_destructible_v<Type::Member>);
 
 void display(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
 void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
@@ -75,12 +85,12 @@ unsigned endAlign(const Type& t, BufferLayout bl);
 
 // TODO: no correct pointer/self-reference support
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
-		ThreadMemScope& memScope);
+		LinAllocator& alloc);
 
 struct ParsedLocation {
 	unsigned line;
 	unsigned col;
-	std::string lineContent; // content of line
+	std::string_view lineContent; // content of line
 };
 
 struct ParsedMessage {
@@ -95,11 +105,7 @@ struct ParseTypeResult {
 	// warnings?
 };
 
-// TODO: the returned type pointer is allocated via the ThreadMemScope. But
-// the vectors inside the type tree (e.g. for array members) is not and
-// will leak. Fix that (just use a span instead inside type and allocate
-// that from the memscope as well?)
-ParseTypeResult parseType(std::string_view str, ThreadMemScope&);
+ParseTypeResult parseType(std::string_view str, LinAllocator&);
 
 // Will simply output any errors to console.
 const Type* unwrap(const ParseTypeResult& res);

@@ -25,6 +25,10 @@ struct CommandHookState;
 // when the given CommandBuffer has a valid recording.
 struct CommandHook {
 public:
+	// Mainly useful for debugging, should always be true otherwise
+	// as we need it to have accelStruct data.
+	static constexpr bool hookAccelStructBuilds = true;
+
 	struct DescriptorCopy {
 		unsigned set {};
 		unsigned binding {};

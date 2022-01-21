@@ -26,7 +26,7 @@ void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 		dlg_assertm_or(size > 0, it = it->pNext; continue,
 			"Unknown structure type: {}", it->sType);
 
-		auto buf = vil::allocate(cb.record()->alloc, size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto buf = cb.record()->alloc.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs

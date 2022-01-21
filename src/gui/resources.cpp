@@ -1153,6 +1153,10 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 			}
 		}
 
+		if(inis.instances.empty()) {
+			imGuiText("No instances.");
+		}
+
 		imGuiText("TODO: visualize instances");
 	}
 }

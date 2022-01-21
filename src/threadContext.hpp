@@ -26,11 +26,34 @@ struct ThreadContext {
 	// if its never used there. Keep this in mind when increasing the
 	// minBlockSize.
 	static thread_local ThreadContext instance;
-	LinAllocator linalloc;
+
+	static std::mutex mutex_;
+	static std::vector<ThreadContext*> contexts_;
+
+	// Only to be used in a scoped manner, via ThreadMemScope.
+	LinAllocator linalloc_;
+
+	ThreadContext() {
+		// TODO: hacky
+		std::lock_guard lock(mutex_);
+		contexts_.push_back(this);
+	}
+
+	~ThreadContext() {
+		// assert that all memory was freed
+		dlg_assert(linalloc_.memCurrent == linalloc_.memRoot);
+		dlg_assert(!linalloc_.memCurrent || memOffset(*linalloc_.memCurrent) == 0);
+
+		// TODO: hacky
+		std::lock_guard lock(mutex_);
+		auto it = find(contexts_, this);
+		dlg_assert(it != contexts_.end());
+		contexts_.erase(it);
+	}
 };
 
 struct ThreadMemScope : LinAllocScope {
-	inline ThreadMemScope() : LinAllocScope(ThreadContext::instance.linalloc) {}
+	inline ThreadMemScope() : LinAllocScope(ThreadContext::instance.linalloc_) {}
 };
 
 } // namespace vil

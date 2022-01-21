@@ -1,5 +1,5 @@
-- [ ] fix found bufparser leak
-	- [ ] afterwards: use valgrind for tests in ci to see new leaks/issues?
+- [x] fix found bufparser leak
+	- [x] afterwards: use valgrind for tests in ci to see new leaks/issues?
 - [x] integration test: depend on meson subproject for mock driver
       And don't hardcode my own env path
 	- [x] also make sure we don't need the layer to be installed

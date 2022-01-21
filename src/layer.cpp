@@ -7,6 +7,7 @@
 #include <queue.hpp>
 #include <overlay.hpp>
 #include <accelStruct.hpp>
+#include <threadContext.hpp>
 #include <util/util.hpp>
 #include <util/export.hpp>
 #include <util/profiling.hpp>
@@ -36,6 +37,10 @@ namespace vil {
 // make this a build or runtime config? VIL_BREAK_ON_ERROR env var?
 // #define BREAK_ON_ERROR
 static auto dlgWarnErrorCount = 0u;
+
+// TODO: doesn't belong here
+std::mutex ThreadContext::mutex_;
+std::vector<ThreadContext*> ThreadContext::contexts_;
 
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
 	dlg_default_output(origin, string, data);
@@ -94,15 +99,30 @@ void initSettings() {
 	// checkSet(HandleDesc<VkSampler>::wrap, "VIL_WRAP_ACCELERATION_STRUCTURE");
 }
 
+#ifdef TRACY_MANUAL_LIFETIME
+	// NOTE: strictly speaking, we'd need a mutex to do proper
+	//   initialization. But creating multiple Instances from multiple threads
+	//   at the same time is a weird and problematic corner case anyways
+	std::atomic<unsigned> tracyRefCount {};
+#endif // TRACY_MANUAL_LIFETIME
+
 // Instance
 VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkInstanceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance) {
 
+#ifdef TRACY_MANUAL_LIFETIME
+	if(tracyRefCount.fetch_add(1u) == 0u) {
+		dlg_trace("Starting tracy...");
+		tracy::StartupProfiler();
+		dlg_trace(">> done");
+	}
+#endif // TRACY_MANUAL_LIFETIME
+
 	// We use a static version of dlg so this shouldn't be an issue.
 	// TODO: check if it's really ok on all platforms.
-	dlg_set_handler(dlgHandler, nullptr);
+	// dlg_set_handler(dlgHandler, nullptr);
 
 	// TODO: remove/find real solution
 #ifdef _WIN32
@@ -259,6 +279,25 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 	auto inid = moveData<Instance>(ini);
 	dlg_assert(inid);
 	inid->dispatch.DestroyInstance(ini, alloc);
+
+#ifdef TRACY_MANUAL_LIFETIME
+	// TODO: hacky af
+	{
+		std::lock_guard lock(vil::ThreadContext::mutex_);
+		for(auto* tc : vil::ThreadContext::contexts_) {
+			dlg_assert(tc->linalloc_.memCurrent == tc->linalloc_.memRoot);
+			dlg_assert(memOffset(*tc->linalloc_.memCurrent) == 0);
+
+			tc->linalloc_.freeBlocks(tc->linalloc_.memRoot);
+			tc->linalloc_.memRoot = tc->linalloc_.memCurrent = nullptr;
+		}
+	}
+
+ 	// TODO: need to fix some issues, e.g. ThreadContext memory first
+ 	if(tracyRefCount.fetch_sub(1u) == 1u) {
+ 		tracy::ShutdownProfiler();
+ 	}
+#endif // TRACY_MANUAL_LIFETIME
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);

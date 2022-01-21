@@ -8,7 +8,7 @@ TEST(bufp_test1) {
 	auto str = "struct Test { int a[8][4]; uint4 b; }; Test a;";
 
 	ThreadMemScope memScope;
-	auto ret = unwrap(parseType(str, memScope));
+	auto ret = unwrap(parseType(str, memScope.customUse()));
 
 	EXPECT(ret != nullptr, true);
 	EXPECT(ret->type, Type::typeStruct);
@@ -34,7 +34,7 @@ TEST(bufp_invalid1) {
 	auto str = "struct Material { vec4 albed };";
 
 	ThreadMemScope memScope;
-	auto ret = parseType(str, memScope);
+	auto ret = parseType(str, memScope.customUse());
 
 	EXPECT(ret.error != std::nullopt, true);
 	// unwrap(ret); // TODO test error message?
@@ -44,7 +44,7 @@ TEST(bufp_invalid2) {
 	auto str = "uint d[";
 
 	ThreadMemScope memScope;
-	auto ret = parseType(str, memScope);
+	auto ret = parseType(str, memScope.customUse());
 
 	EXPECT(ret.error != std::nullopt, true);
 	// unwrap(ret); // TODO test error message?

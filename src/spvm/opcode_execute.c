@@ -160,7 +160,11 @@ void spvm_execute_OpArrayLength(spvm_word word_count, spvm_state_t state)
 	spvm_result_t var = &state->results[var_id];
 
 	if (var->type == spvm_result_type_access_chain) {
-		spvm_word indices[1 + var->index_count];
+		// TODO: msvc does not support vla
+		// spvm_word indices[1 + var->index_count];
+		assert(var->index_count < 512);
+		spvm_word indices[512];
+
 		memcpy(indices, var->indices, sizeof(spvm_word) * var->index_count);
 		indices[var->index_count] = member_id;
 

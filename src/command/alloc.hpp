@@ -18,7 +18,7 @@ struct CommandAlloc {
 
 template<typename T, typename... Args>
 [[nodiscard]] T& construct(CommandAlloc rec, Args&&... args) {
-	auto* raw = vil::allocate(rec.alloc, sizeof(T), alignof(T));
+	auto* raw = rec.alloc.allocate(sizeof(T), alignof(T));
 	return *new(raw) T(std::forward<Args>(args)...);
 }
 
@@ -28,7 +28,7 @@ template<typename T>
 		return {};
 	}
 
-	auto* raw = vil::allocate(rec.alloc, sizeof(T) * count, alignof(T));
+	auto* raw = rec.alloc.allocate(sizeof(T) * count, alignof(T));
 	auto* arr = new(raw) T[count]();
 	return span<T>(arr, count);
 }
@@ -39,7 +39,7 @@ template<typename T>
 		return {};
 	}
 
-	auto* raw = vil::allocate(rec.alloc, sizeof(T) * count, alignof(T));
+	auto* raw = rec.alloc.allocate(sizeof(T) * count, alignof(T));
 	return new(raw) T[count]();
 }
 
@@ -49,7 +49,7 @@ template<typename T>
 		return {};
 	}
 
-	auto* raw = vil::allocate(rec.alloc, sizeof(T) * count, alignof(T));
+	auto* raw = rec.alloc.allocate(sizeof(T) * count, alignof(T));
 	auto* arr = new(raw) T[count];
 	return span<T>(arr, count);
 }
@@ -60,7 +60,7 @@ template<typename T>
 		return {};
 	}
 
-	auto* raw = vil::allocate(rec.alloc, sizeof(T) * count, alignof(T));
+	auto* raw = rec.alloc.allocate(sizeof(T) * count, alignof(T));
 	return new(raw) T[count];
 }
 

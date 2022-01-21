@@ -105,7 +105,7 @@ bool allowCowLocked(const Buffer& buf);
 // Common utility
 void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 	VkBufferUsageFlags addFlags, Buffer& src,
-	VkDeviceSize offset, VkDeviceSize size, u32 queueFamsBitset);
+	VkDeviceSize srcOffset, VkDeviceSize size, u32 queueFamsBitset);
 void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 	VkDeviceSize srcOffset, OwnBuffer& dst, VkDeviceSize dstOffset,
 	VkDeviceSize size);

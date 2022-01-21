@@ -211,7 +211,7 @@ const Type* parseBuiltin(std::string_view str) {
 		ret.width = width;
 		ret.vecsize = vec;
 		ret.columns = col;
-		ret.deco.name = name;
+		ret.deco.name = name; // static string so it's ok to set it here
 		if(col > 1u) {
 			// TODO: would need to consider buffer layout
 			ret.deco.matrixStride = vec * width / 8;
@@ -401,34 +401,34 @@ struct TreeParser {
 		checkType<syn::ArrayQualifiers>(quals);
 		passert(!quals.children.empty(), quals);
 
-		auto& dst = *memScope_.allocRaw<Type>();
+		auto& dst = alloc_.construct<Type>();
 		dst = in;
 		dst.deco.arrayStride = size(in, bufferLayout_);
+		dst.array = alloc_.alloc<u32>(quals.children.size());
 
-		for(auto& qual : quals.children) {
+		for(auto [i, qual] : enumerate(quals.children)) {
 			if(qual->is_type<syn::ArrayRuntimeQualifier>()) {
-				passert(dst.array.empty(), *qual);
-				dst.array.push_back(0);
+				passert(i == 0u, *qual);
+				dst.array[i] = 0;
 			} else {
 				checkType<syn::Number>(*qual);
 				u32 dim;
 				auto success = stoi(qual->string(), dim);
 				passert(success, *qual);
-				dst.array.push_back(dim);
+				dst.array[i] = dim;
 			}
 		}
 
 		return &dst;
 	}
 
-	void appendValueDecl(const ParseTreeNode& decl, Type& dstStruct, unsigned& offset) {
+	void parseValueDecl(const ParseTreeNode& decl, Type::Member& dst, unsigned& offset) {
 		checkType<syn::ValueDecl>(decl);
 		passert(decl.children.size() >= 2u, decl);
 		passert(decl.children.size() <= 3u, decl);
 
-		auto& dst = dstStruct.members.emplace_back();
 		dst.type = parseType(*decl.children[0]);
-		dst.name = decl.children[1]->string_view();
+		dst.name = copy(alloc_, decl.children[1]->string_view());
 
 		offset = align(offset, align(*dst.type, bufferLayout_));
 		dst.offset = offset;
@@ -442,23 +442,26 @@ struct TreeParser {
 
 	void parseStruct(const ParseTreeNode& decl) {
 		checkType<syn::StructDecl>(decl);
-		auto& t = *memScope_.allocRaw<Type>();
+		auto& t = alloc_.construct<Type>();
 		t.type = Type::typeStruct;
 
 		passert(decl.children.size() == 2u, decl);
-		t.deco.name = decl.children[0]->string_view();
+		t.deco.name = copy(alloc_, decl.children[0]->string_view());
 
 		auto offset = 0u;
-		for(auto& member : decl.children[1]->children) {
-			appendValueDecl(*member, t, offset);
 
-			auto& type = *t.members.back().type;
+		auto& members = decl.children[1]->children;
+		t.members = alloc_.alloc<Type::Member>(members.size());
+		for(auto [i, member] : enumerate(members)) {
+			parseValueDecl(*member, t.members[i], offset);
+
+			auto& type = *t.members[i].type;
 			if(!type.array.empty() && type.array.front() == 0u) {
 				throw SemanticError(decl, "Runtime array not allowed in struct");
 			}
 		}
 
-		structs_.emplace(std::string_view(t.deco.name), &t);
+		structs_.emplace(t.deco.name, &t);
 	}
 
 	void parseStructDecls(const ParseTreeNode& decls) {
@@ -472,17 +475,20 @@ struct TreeParser {
 	void parseValueDecls(const ParseTreeNode& decls) {
 		checkType<syn::ValueDecls>(decls);
 
-		auto* sdst = memScope_.allocRaw<Type>();
+		auto* sdst = alloc_.allocRaw<Type>();
 		sdst->type = Type::typeStruct;
 		sdst->deco.name = "main";
 
 		auto offset = 0u;
 		auto runtimeArray = false;
-		for(auto& member : decls.children) {
+
+		auto& members = decls.children;
+		sdst->members = alloc_.alloc<Type::Member>(members.size());
+		for(auto [i, member] : enumerate(decls.children)) {
 			if(runtimeArray) {
 				throw SemanticError(*member, "No values allowed after runtime-array");
 			}
-			appendValueDecl(*member, *sdst, offset);
+			parseValueDecl(*member, sdst->members[i], offset);
 
 			auto& type = *sdst->members.back().type;
 			if(!type.array.empty() && type.array.front() == 0u) {
@@ -499,13 +505,17 @@ struct TreeParser {
 		parseValueDecls(*mod.children[1]);
 	}
 
-	ThreadMemScope& memScope_;
+	LinAllocator& alloc_;
+	// TODO: use linear allocator here as well?
+	// Should probably just use a vector (or map/linked list with
+	// LinearAllocator), we don't have so many types that we need an
+	// unordered map
 	std::unordered_map<std::string_view, const Type*> structs_ {};
 	const Type* main_ {};
 	BufferLayout bufferLayout_ {BufferLayout::std430}; // TODO
 };
 
-ParseTypeResult parseType(std::string_view str, ThreadMemScope& memScope) {
+ParseTypeResult parseType(std::string_view str, LinAllocator& alloc) {
 	ZoneScoped;
 
 	pegtl::string_input in {std::string(str), "input"};
@@ -527,7 +537,7 @@ ParseTypeResult parseType(std::string_view str, ThreadMemScope& memScope) {
 
 	dlg_assert(root);
 
-	TreeParser parser{memScope};
+	TreeParser parser{alloc};
 	try {
 		parser.parseModule(*root->children[0]);
 	} catch(const TreeParser::InternalError& err) {

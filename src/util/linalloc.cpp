@@ -12,7 +12,7 @@
 
 namespace vil {
 
-void freeBlocks(LinMemBlock* head) {
+void LinAllocator::freeBlocks(LinMemBlock* head) {
 	if(!head) {
 		return;
 	}
@@ -44,15 +44,15 @@ LinMemBlock& createMemBlock(size_t memSize) {
 	return *memBlock;
 }
 
-std::byte* addBlock(LinAllocator& tc, std::size_t size, std::size_t alignment) {
-	auto lastSize = memSize(*tc.memCurrent);
-	auto newBlockSize = std::min<size_t>(tc.blockGrowFac * lastSize, tc.maxBlockSize);
+std::byte* LinAllocator::addBlock(std::size_t size, std::size_t alignment) {
+	auto lastSize = memSize(*memCurrent);
+	auto newBlockSize = std::min<size_t>(blockGrowFac * lastSize, maxBlockSize);
 	newBlockSize = std::max<size_t>(newBlockSize, alignPOT(size, alignment));
 
 	auto& newBlock = createMemBlock(newBlockSize);
-	newBlock.next = tc.memCurrent->next;
-	tc.memCurrent->next = &newBlock;
-	tc.memCurrent = &newBlock;
+	newBlock.next = memCurrent->next;
+	memCurrent->next = &newBlock;
+	memCurrent = &newBlock;
 
     std::byte* ret {};
 	auto success = attemptAlloc(newBlock, size, alignment, ret);
@@ -75,6 +75,11 @@ LinAllocator::~LinAllocator() {
 	// dlg_assert(memCurrent == memRoot);
 	// dlg_assertm(memOffset(*memCurrent) == 0u, "{}", memOffset(*memCurrent));
 	freeBlocks(memRoot);
+}
+
+void LinAllocator::reset() {
+	memRoot = memCurrent;
+	memRoot->data = reinterpret_cast<std::byte*>(memRoot) + sizeof(LinMemBlock);
 }
 
 } // namespace vil

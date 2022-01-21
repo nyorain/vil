@@ -42,12 +42,16 @@ struct LinMemBlock {
 	// following: std::byte[]
 };
 
+inline const std::byte* dataBegin(const LinMemBlock& block) {
+	return reinterpret_cast<const std::byte*>(&block) + sizeof(LinMemBlock);
+}
+
 inline std::size_t memSize(const LinMemBlock& block) {
-	return block.end - (reinterpret_cast<const std::byte*>(&block) + sizeof(LinMemBlock));
+	return block.end - dataBegin(block);
 }
 
 inline std::size_t memOffset(const LinMemBlock& block) {
-	return block.data - (reinterpret_cast<const std::byte*>(&block) + sizeof(LinMemBlock));
+	return block.data - dataBegin(block);
 }
 
 struct LinAllocator {
@@ -61,60 +65,109 @@ struct LinAllocator {
 
 	LinAllocator();
 	~LinAllocator();
-};
 
-void freeBlocks(LinMemBlock* head);
-std::byte* addBlock(LinAllocator& tc, std::size_t size, std::size_t alignment);
+	// Resets the allocator to the beginning but does not free any
+	// associated memory.
+	void reset();
 
-// We really want this function to be inlined (in release mode at least)
-// so we keep it as small as possible.
-inline bool attemptAlloc(LinMemBlock& block, std::size_t size,
-		std::size_t alignment, std::byte*& ret) {
-	VIL_DEBUG_ONLY(dlg_assert(block.canary == LinMemBlock::canaryValue));
-	dlg_assert(block.data <= block.end);
+	void freeBlocks(LinMemBlock* head);
+	std::byte* addBlock(std::size_t size, std::size_t alignment);
 
-	auto dataUint = reinterpret_cast<std::uintptr_t>(block.data);
-	auto alignedData = alignPOT(dataUint, alignment);
-	auto allocBegin = reinterpret_cast<std::byte*>(alignedData);
-	auto allocEnd = allocBegin + size;
+	// We really want this function to be inlined (in release mode at least)
+	// so we keep it as small as possible.
+	inline bool attemptAlloc(LinMemBlock& block, std::size_t size,
+			std::size_t alignment, std::byte*& ret) {
+		VIL_DEBUG_ONLY(dlg_assert(block.canary == LinMemBlock::canaryValue));
+		dlg_assert(block.data <= block.end);
 
-	if(allocEnd > block.end) VIL_UNLIKELY {
-		return false;
+		auto dataUint = reinterpret_cast<std::uintptr_t>(block.data);
+		auto alignedData = alignPOT(dataUint, alignment);
+		auto allocBegin = reinterpret_cast<std::byte*>(alignedData);
+		auto allocEnd = allocBegin + size;
+
+		if(allocEnd > block.end) VIL_UNLIKELY {
+			return false;
+		}
+
+		block.data = allocEnd;
+		ret = allocBegin;
+		return true;
 	}
 
-	block.data = allocEnd;
-	ret = allocBegin;
-    return true;
-}
+	// We really want this function to be inlined (at least in release
+	// with asserts and debug checks disabled).
+	inline std::byte* allocate(std::size_t size,
+			std::size_t alignment) {
+		ExtZoneScoped;
+		dlg_assert(memCurrent); // there is always a current block
 
-// We really want this function to be inlined (at least in release
-// with asserts and debug checks disabled).
-inline std::byte* allocate(LinAllocator& tc, std::size_t size,
-		std::size_t alignment) {
-	ExtZoneScoped;
-	dlg_assert(tc.memCurrent); // there is always a current block
-
-	// fast path (1): enough memory available directly inside the block,
-	// simply align and advance the offset
-    std::byte* data;
-	if(attemptAlloc(*tc.memCurrent, size, alignment, data)) VIL_LIKELY {
-		return data;
-	}
-
-	// fast path (2): enough memory available in the next block, allocate
-	// from there and set it as new block.
-	if(tc.memCurrent->next) VIL_LIKELY {
-		auto& next = *tc.memCurrent->next;
-		dlg_assert(memOffset(next) == 0u);
-		if(attemptAlloc(next, size, alignment, data)) VIL_LIKELY {
-			tc.memCurrent = &next;
+		// fast path (1): enough memory available directly inside the block,
+		// simply align and advance the offset
+		std::byte* data;
+		if(attemptAlloc(*memCurrent, size, alignment, data)) VIL_LIKELY {
 			return data;
 		}
+
+		// fast path (2): enough memory available in the next block, allocate
+		// from there and set it as new block.
+		if(memCurrent->next) VIL_LIKELY {
+			auto& next = *memCurrent->next;
+			dlg_assert(memOffset(next) == 0u);
+			if(attemptAlloc(next, size, alignment, data)) VIL_LIKELY {
+				memCurrent = &next;
+				return data;
+			}
+		}
+
+		// slow path: we need to allocate a new block
+		return addBlock(size, alignment);
 	}
 
-	// slow path: we need to allocate a new block
-	return addBlock(tc, size, alignment);
-}
+	template<typename T, typename... Args>
+	[[nodiscard]] T& construct(Args&&... args) {
+		auto* raw = allocate(sizeof(T), alignof(T));
+		return *new(raw) T(std::forward<Args>(args)...);
+	}
+
+	template<typename T>
+	span<T> alloc(size_t n) {
+		auto ptr = allocRaw<T>(n);
+		return {ptr, n};
+	}
+
+	// Like alloc but does not value-initialize, so may be faster but
+	// leaves primitives with undefined values.
+	template<typename T>
+	span<T> allocUndef(size_t n) {
+		auto ptr = allocRawUndef<T>(n);
+		return {ptr, n};
+	}
+
+	template<typename T>
+	span<std::remove_const_t<T>> copy(T* data, size_t n) {
+		auto ret = this->allocUndef<std::remove_const_t<T>>(n);
+		std::memcpy(ret.data(), data, n * sizeof(T));
+		return ret;
+	}
+
+	// NOTE: prefer alloc, returning a span.
+	// This function be useful for single allocations though.
+	template<typename T>
+	T* allocRaw(size_t n = 1) {
+		auto ptr = reinterpret_cast<T*>(allocate(sizeof(T) * n, alignof(T)));
+		new(ptr) T[n]();
+		return ptr;
+	}
+
+	// Like allocRaw but does not value-initialize, so may be faster but
+	// leaves primitives with undefined values.
+	template<typename T>
+	T* allocRawUndef(size_t n = 1) {
+		auto ptr = reinterpret_cast<T*>(allocate(sizeof(T) * n, alignof(T)));
+		new(ptr) T[n];
+		return ptr;
+	}
+};
 
 // Allocates memory from LinearAllocator in a scoped manner.
 // Will simply release all allocated memory by resetting the allocation offset
@@ -145,7 +198,7 @@ struct LinAllocScope {
 
 	template<typename T, typename... Args>
 	[[nodiscard]] T& construct(Args&&... args) {
-		auto* raw = vil::allocate(tc, sizeof(T), alignof(T));
+		auto* raw = tc.allocate(sizeof(T), alignof(T));
 		return *new(raw) T(std::forward<Args>(args)...);
 	}
 
@@ -194,13 +247,37 @@ struct LinAllocScope {
 				"Invalid non-stacking interleaving of ThreadMemScope detected");
 		)
 
-		auto* ptr = vil::allocate(tc, size, alignment);
+		auto* ptr = tc.allocate(size, alignment);
 
 		VIL_DEBUG_ONLY(
 			current = tc.memCurrent->data;
 		)
 
 		return ptr;
+	}
+
+	// Only relevant for debugging asserts.
+	// When the caller mixes custom usage of the linear allocator
+	// with LinAllocScope (not recommended; keep in mind that all custom
+	// allocated must not be accessed anymore after the LinAllocScope was
+	// destroyed) they can call this function after custom usage
+	// to avoid debugging asserts.
+	// Perfer using the more confortable customUse() function below
+	inline void updateCustomUse() {
+		VIL_DEBUG_ONLY(
+			current = tc.memCurrent->data;
+		)
+	}
+
+	struct CustomUsageWrapper {
+		LinAllocScope& scope;
+
+		~CustomUsageWrapper() { scope.updateCustomUse(); }
+		operator LinAllocator&() const { return scope.tc; }
+	};
+
+	CustomUsageWrapper customUse() {
+		return {*this};
 	}
 
 	inline LinAllocScope(LinAllocator& xla) : tc(xla) {
@@ -213,6 +290,10 @@ struct LinAllocScope {
 	}
 
 	inline ~LinAllocScope() {
+		// TODO: check here for debug condition data == current?
+		// but that would prevent us from using LinAllocScope as dummy
+		// scope around manual allocations, as we do in some places.
+
 		tc.memCurrent = block;
 		tc.memCurrent->data = savedPtr;
 	}
@@ -242,7 +323,8 @@ struct LinearScopedAllocator {
 	}
 
 	T* allocate(size_t n) {
-		return memScope_->allocRaw<T>(n);
+		auto ptr = memScope_->allocBytes(sizeof(T) * n, alignof(T));
+		return reinterpret_cast<T*>(ptr);
 	}
 
 	void deallocate(T*, size_t) const noexcept {
@@ -271,16 +353,19 @@ struct LinearUnscopedAllocator {
 	}
 
 	T* allocate(size_t n) {
-		auto raw = vil::allocate(*linalloc_, sizeof(T) * n, alignof(T));
-		auto ptr = reinterpret_cast<T*>(raw);
-		new(ptr) T[n]();
-		return ptr;
+		auto ptr = linalloc_->allocate(sizeof(T) * n, alignof(T));
+		return reinterpret_cast<T*>(ptr);
 	}
 
 	void deallocate(T*, size_t) const noexcept {
 		// no-op
 	}
 };
+
+inline std::string_view copy(LinAllocator& alloc, std::string_view src) {
+	auto copy = alloc.copy(src.data(), src.size());
+	return {copy.data(), copy.size()};
+}
 
 } // namespace vil
 

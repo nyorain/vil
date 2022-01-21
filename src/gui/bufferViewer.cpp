@@ -29,8 +29,8 @@ void BufferViewer::display(ReadBuf data) {
 		layoutText.pop_back();
 	}
 
-	ThreadMemScope memScope;
-	auto parseRes = parseType(layoutText, memScope);
+	ThreadMemScope tms;
+	auto parseRes = parseType(layoutText, tms.customUse());
 
 	igt::TextEditor::ErrorMarkers markers;
 	if(parseRes.error) {

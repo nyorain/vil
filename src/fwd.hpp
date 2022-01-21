@@ -107,6 +107,8 @@ struct Draw;
 
 struct SpirvData;
 struct ThreadMemScope;
+struct LinAllocScope;
+struct LinAllocator;
 
 struct AccelTriangles;
 struct AccelAABBs;

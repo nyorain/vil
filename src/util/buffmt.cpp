@@ -33,7 +33,7 @@ FormattedScalar formatScalar(span<const std::byte> data, u32 offset, u32 width) 
 }
 
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
-		ThreadMemScope& memScope, const spc::Meta::Decoration* memberDeco) {
+		LinAllocator& alloc, const spc::Meta::Decoration* memberDeco) {
 
 	auto stype = &compiler.get_type(typeID);
 	if(stype->pointer) {
@@ -42,11 +42,11 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		stype = &compiler.get_type(typeID);
 	}
 
-	auto& dst = *memScope.allocRaw<Type>();
+	auto& dst = alloc.construct<Type>();
 
 	auto* meta = compiler.get_ir().find_meta(typeID);
 	if(meta) {
-		dst.deco.name = meta->decoration.alias;
+		dst.deco.name = copy(alloc, meta->decoration.alias);
 	}
 
 	if(memberDeco) {
@@ -70,7 +70,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		dst.deco.arrayStride = meta->decoration.array_stride;
 
 		dlg_assert(stype->array.size() == stype->array_size_literal.size());
-		dst.array.resize(stype->array.size());
+		dst.array = alloc.alloc<u32>(stype->array.size());
 
 		for(auto d = 0u; d < stype->array.size(); ++d) {
 			if(stype->array_size_literal[d] == true) {
@@ -89,6 +89,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 
 	if(stype->basetype == spc::SPIRType::Struct) {
 		// handle struct
+		dst.members = alloc.alloc<Type::Member>(stype->member_types.size());
 		for(auto i = 0u; i < stype->member_types.size(); ++i) {
 			auto memTypeID = stype->member_types[i];
 
@@ -96,14 +97,17 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 			auto deco = &meta->members[i];
 			auto off = deco->offset;
 
+			// TODO PERF: remove allocation via dlg format here,
+			// use linearAllocator instead if needed
 			auto name = dlg::format("?{}", i);
 			if(!deco->alias.empty()) {
+				// TODO PERF: we copy here with new, terrible
 				name = deco->alias;
 			}
 
-			auto& mdst = dst.members.emplace_back();
-			mdst.type = buildType(compiler, memTypeID, memScope, deco);
-			mdst.name = name;
+			auto& mdst = dst.members[i];
+			mdst.type = buildType(compiler, memTypeID, alloc, deco);
+			mdst.name = copy(alloc, name);
 			mdst.offset = off;
 
 			if(!mdst.type) {
@@ -158,8 +162,8 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 }
 
 Type* buildType(const spc::Compiler& compiler, u32 typeID,
-		ThreadMemScope& memScope) {
-	return buildType(compiler, typeID, memScope, nullptr);
+		LinAllocator& alloc) {
+	return buildType(compiler, typeID, alloc, nullptr);
 }
 
 FormattedScalar formatScalar(const Type& type, ReadBuf data, u32 offset) {
@@ -297,7 +301,7 @@ void displayStruct(const char* baseName, const Type& type, ReadBuf data, u32 off
 			auto& member = type.members[i];
 
 			auto off = member.offset;
-			auto name = member.name;
+			auto name = std::string(member.name); // ugh PERF
 			if(name.empty()) {
 				name = dlg::format("?{}", i);
 			}

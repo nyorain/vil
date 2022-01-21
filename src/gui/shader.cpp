@@ -507,14 +507,14 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 
 std::pair<const Type*, u32> ShaderDebugger::accessBuffer(ThreadMemScope& tms,
 		unsigned typeID, span<const spvm_word> indices, u32 dataSize) {
-	const auto* type = buildType(*compiled_, typeID, tms);
+	const auto* type = buildType(*compiled_, typeID, tms.customUse());
 	dlg_assert(type);
 
 	auto off = 0u;
 	while(!indices.empty()) {
 		if(!type->array.empty()) {
 			auto count = type->array[0];
-			auto remDims = span<const u32>(type->array).subspan(1);
+			auto remDims = span<u32>(type->array).subspan(1);
 
 			auto subSize = type->deco.arrayStride;
 			dlg_assert(subSize);
@@ -546,7 +546,7 @@ std::pair<const Type*, u32> ShaderDebugger::accessBuffer(ThreadMemScope& tms,
 
 			auto& cpy = tms.construct<Type>();
 			cpy = *type;
-			cpy.array = {remDims.begin(), remDims.end()};
+			cpy.array = remDims;
 			type = &cpy;
 		} else if(type->type == Type::typeStruct) {
 			auto id = u32(indices[0]);
@@ -930,7 +930,7 @@ void ShaderDebugger::setupVector(const Type& type, u32 stride, ReadBuf data,
 	dlg_assert(elems.size() == type.vecsize);
 
 	for(auto i = 0u; i < type.vecsize; ++i) {
-		setupScalar(type, data.subspan(i * stride), elems[i]);
+		setupScalar(nextType, data.subspan(i * stride), elems[i]);
 	}
 }
 
@@ -1026,7 +1026,7 @@ void ShaderDebugger::setupMemberArray(span<const u32> arrayDims,
 			setupMemberArray(arrayDims, type, nextData, elems[i]);
 		} else {
 			auto nt = type;
-			nt.array.clear();
+			nt.array = {};
 			setupMember(nt, nextData, elems[i]);
 		}
 	}

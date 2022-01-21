@@ -187,7 +187,11 @@ int main() {
 	dlg_set_handler(dlgHandler, nullptr);
 
 	// set null driver
+	// TODO: allow to configure this via options.
+	// Allowing to run this via normal driver might be interesting for development
 	setenv("VK_ICD_FILENAMES", VIL_MOCK_ICD_FILE, 1);
+	// TODO: don't hardcode the vulkan layer path here. Not sure how
+	// to properly retrieve it though, need to handle it per-platform.
 	setenv("VK_LAYER_PATH", VIL_LAYER_PATH "/:/usr/share/vulkan/explicit_layer.d/", 1);
 
 	dlg_trace("vk_layer_path: {}", getenv("VK_LAYER_PATH"));
