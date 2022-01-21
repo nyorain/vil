@@ -9,3 +9,10 @@
 	#define ExtZoneScopedN(x)
 	#define ExtZoneScoped
 #endif // VIL_EXTENSIVE_ZONES
+
+namespace vil {
+
+void initTracy();
+void shutdownTracy();
+
+} // namespace vil

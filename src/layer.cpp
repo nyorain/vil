@@ -106,12 +106,7 @@ void initSettings() {
 	std::atomic<unsigned> tracyRefCount {};
 #endif // TRACY_MANUAL_LIFETIME
 
-// Instance
-VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
-		const VkInstanceCreateInfo* ci,
-		const VkAllocationCallbacks* alloc,
-		VkInstance* pInstance) {
-
+void initTracy() {
 #ifdef TRACY_MANUAL_LIFETIME
 	if(tracyRefCount.fetch_add(1u) == 0u) {
 		dlg_trace("Starting tracy...");
@@ -119,6 +114,36 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		dlg_trace(">> done");
 	}
 #endif // TRACY_MANUAL_LIFETIME
+}
+
+void shutdownTracy() {
+#ifdef TRACY_MANUAL_LIFETIME
+ 	// TODO: need to fix some issues, e.g. ThreadContext memory first
+ 	if(tracyRefCount.fetch_sub(1u) == 1u) {
+		// TODO: hacky af
+		// make sure to cleaer threadcontext memory before tracy
+		// is shut down.
+		{
+			std::lock_guard lock(vil::ThreadContext::mutex_);
+			for(auto* tc : vil::ThreadContext::contexts_) {
+				dlg_assert(tc->linalloc_.memCurrent == tc->linalloc_.memRoot);
+				dlg_assert(memOffset(*tc->linalloc_.memCurrent) == 0);
+
+				tc->linalloc_.freeBlocks(tc->linalloc_.memRoot);
+				tc->linalloc_.memRoot = tc->linalloc_.memCurrent = nullptr;
+			}
+		}
+
+ 		tracy::ShutdownProfiler();
+ 	}
+#endif // TRACY_MANUAL_LIFETIME
+}
+
+// Instance
+VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
+		const VkInstanceCreateInfo* ci,
+		const VkAllocationCallbacks* alloc,
+		VkInstance* pInstance) {
 
 	// We use a static version of dlg so this shouldn't be an issue.
 	// TODO: check if it's really ok on all platforms.
@@ -276,28 +301,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 		return;
 	}
 
-	auto inid = moveData<Instance>(ini);
-	dlg_assert(inid);
-	inid->dispatch.DestroyInstance(ini, alloc);
-
-#ifdef TRACY_MANUAL_LIFETIME
-	// TODO: hacky af
+	// destroy the instance
 	{
-		std::lock_guard lock(vil::ThreadContext::mutex_);
-		for(auto* tc : vil::ThreadContext::contexts_) {
-			dlg_assert(tc->linalloc_.memCurrent == tc->linalloc_.memRoot);
-			dlg_assert(memOffset(*tc->linalloc_.memCurrent) == 0);
-
-			tc->linalloc_.freeBlocks(tc->linalloc_.memRoot);
-			tc->linalloc_.memRoot = tc->linalloc_.memCurrent = nullptr;
-		}
+		auto inid = moveData<Instance>(ini);
+		dlg_assert(inid);
+		inid->dispatch.DestroyInstance(ini, alloc);
 	}
-
- 	// TODO: need to fix some issues, e.g. ThreadContext memory first
- 	if(tracyRefCount.fetch_sub(1u) == 1u) {
- 		tracy::ShutdownProfiler();
- 	}
-#endif // TRACY_MANUAL_LIFETIME
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);
