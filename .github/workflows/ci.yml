@@ -64,7 +64,7 @@ jobs:
     # meson test -C build/ -v
     # valgrind --leak-check=full?
     - run: meson test -C build 
-        --wrapper 'valgrind --leak-check=full --error-exitcode=1 --suppressions=docs/valgrind.sup' 
+        --wrapper 'valgrind --leak-check=full --error-exitcode=1 --suppressions=../docs/valgrind.sup' 
         --print-errorlogs
       # NOTE: the ci cpus seem to need this for tracy. Might result
       # in issues (inconsistent timings between cpu cores or something), 

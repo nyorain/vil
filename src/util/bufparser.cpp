@@ -412,7 +412,9 @@ struct TreeParser {
 				dst.array[i] = 0;
 			} else {
 				checkType<syn::Number>(*qual);
-				u32 dim;
+				// initialization here only done because auf shitty msvc
+				// compiler warnings, breaks my heart :(
+				u32 dim {};
 				auto success = stoi(qual->string(), dim);
 				passert(success, *qual);
 				dst.array[i] = dim;

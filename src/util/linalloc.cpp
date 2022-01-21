@@ -7,9 +7,6 @@
 	#define assertCanary(block)
 #endif // VIL_DEBUG
 
-// TODO: We currently don't track this memory via TracyAlloc/TracyFree
-// since it might be called before we can initialize tracy
-
 namespace vil {
 
 void LinAllocator::freeBlocks(LinMemBlock* head) {
@@ -22,8 +19,8 @@ void LinAllocator::freeBlocks(LinMemBlock* head) {
 		assertCanary(*head);
 		auto next = head->next;
 		// no need to call MemBlocks destructor, it's trivial
-		// TracyFreeS(head, 8);
 
+		TracyFreeS(head, 8);
 		DebugStats::get().threadContextMem -= memSize(*head);
 
 		delete[] reinterpret_cast<std::byte*>(head);
@@ -38,7 +35,7 @@ LinMemBlock& createMemBlock(size_t memSize) {
 	memBlock->data = buf + sizeof(LinMemBlock);
 	memBlock->end = memBlock->data + memSize;
 
-	// TracyAllocS(buf, totalSize, 8);
+	TracyAllocS(buf, totalSize, 8);
 	DebugStats::get().threadContextMem += memSize;
 
 	return *memBlock;
