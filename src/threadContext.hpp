@@ -23,8 +23,7 @@ struct ThreadContext {
 	// NOTE: C++ does not clearly specify when its constructor will
 	// be called, just that it's before it's used the first time.
 	// This means we might be creating them for *every* thread even
-	// if its never used there. Keep this in mind when increasing the
-	// minBlockSize.
+	// if its never used there.
 	static thread_local ThreadContext instance;
 
 	static std::mutex mutex_;
@@ -41,8 +40,7 @@ struct ThreadContext {
 
 	~ThreadContext() {
 		// assert that all memory was freed
-		dlg_assert(linalloc_.memCurrent == linalloc_.memRoot);
-		dlg_assert(!linalloc_.memCurrent || memOffset(*linalloc_.memCurrent) == 0);
+		dlg_assert(linalloc_.empty());
 
 		// TODO: hacky
 		std::lock_guard lock(mutex_);

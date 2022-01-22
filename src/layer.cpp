@@ -118,7 +118,6 @@ void initTracy() {
 
 void shutdownTracy() {
 #ifdef TRACY_MANUAL_LIFETIME
- 	// TODO: need to fix some issues, e.g. ThreadContext memory first
  	if(tracyRefCount.fetch_sub(1u) == 1u) {
 		// TODO: hacky af
 		// make sure to cleaer threadcontext memory before tracy
@@ -126,11 +125,8 @@ void shutdownTracy() {
 		{
 			std::lock_guard lock(vil::ThreadContext::mutex_);
 			for(auto* tc : vil::ThreadContext::contexts_) {
-				dlg_assert(tc->linalloc_.memCurrent == tc->linalloc_.memRoot);
-				dlg_assert(memOffset(*tc->linalloc_.memCurrent) == 0);
-
-				tc->linalloc_.freeBlocks(tc->linalloc_.memRoot);
-				tc->linalloc_.memRoot = tc->linalloc_.memCurrent = nullptr;
+				dlg_assert(tc->linalloc_.empty());
+				tc->linalloc_.release();
 			}
 		}
 

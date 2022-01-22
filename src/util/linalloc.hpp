@@ -46,6 +46,10 @@ inline const std::byte* dataBegin(const LinMemBlock& block) {
 	return reinterpret_cast<const std::byte*>(&block) + sizeof(LinMemBlock);
 }
 
+inline std::byte* dataBegin(LinMemBlock& block) {
+	return reinterpret_cast<std::byte*>(&block) + sizeof(LinMemBlock);
+}
+
 inline std::size_t memSize(const LinMemBlock& block) {
 	return block.end - dataBegin(block);
 }
@@ -60,18 +64,25 @@ struct LinAllocator {
 	static constexpr auto maxBlockSize = 16 * 1024 * 1024;
 	static constexpr auto blockGrowFac = 2;
 
-	LinMemBlock* memRoot;
+	LinMemBlock memRoot {}; // empty block
 	LinMemBlock* memCurrent;
 
 	LinAllocator();
 	~LinAllocator();
 
+	// NOTE: could be implemented but need special handling of memRoot
+	LinAllocator(LinAllocator&& rhs) noexcept = delete;
+	LinAllocator& operator=(LinAllocator&& rhs) noexcept = delete;
+
 	// Resets the allocator to the beginning but does not free any
 	// associated memory.
 	void reset();
 
-	void freeBlocks(LinMemBlock* head);
-	std::byte* addBlock(std::size_t size, std::size_t alignment);
+	// Releases all allocated memory
+	void release();
+
+	// Returns whether there are no allocations in the allocator.
+	bool empty() const;
 
 	// We really want this function to be inlined (in release mode at least)
 	// so we keep it as small as possible.
@@ -167,6 +178,9 @@ struct LinAllocator {
 		new(ptr) T[n];
 		return ptr;
 	}
+
+	// own util
+	std::byte* addBlock(std::size_t size, std::size_t alignment);
 };
 
 // Allocates memory from LinearAllocator in a scoped manner.
