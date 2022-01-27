@@ -250,7 +250,7 @@ struct DisplayVisitor : CommandVisitor {
 	void visit(const FirstSubpassCmd& cmd) override {
 		if(labelOnlyIndent_) {
 			// skip display of this command itself.
-			displayChildren(cmd,);
+			displayChildren(cmd, false);
 		} else {
 			visit(static_cast<const SectionCommand&>(cmd));
 		}
