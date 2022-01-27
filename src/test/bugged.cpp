@@ -1,5 +1,5 @@
 #include "bugged.hpp"
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 namespace vil::bugged {
 

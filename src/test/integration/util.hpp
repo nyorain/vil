@@ -1,6 +1,6 @@
 #include <vk/vulkan.h>
 #include <vk/dispatch_table.h>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <util/span.hpp>
 
 using vil::span;

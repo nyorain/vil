@@ -1,5 +1,5 @@
 #include <util/ext.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 namespace vil {
 

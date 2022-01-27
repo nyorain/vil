@@ -9,7 +9,7 @@
 #include <spirv-cross/spirv.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <vk/enumString.hpp>
 
 namespace vil {

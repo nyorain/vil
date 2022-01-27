@@ -4,7 +4,7 @@
 #include <gui/gui.hpp>
 #include <util/util.hpp>
 #include <swa/swa.h>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 namespace vil {
 namespace {

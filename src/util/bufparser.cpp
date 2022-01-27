@@ -3,7 +3,7 @@
 #include <tao/pegtl/contrib/analyze.hpp>
 #include <tao/pegtl/contrib/parse_tree.hpp>
 #include <tao/pegtl/contrib/parse_tree_to_dot.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <util/buffmt.hpp>
 #include <util/profiling.hpp>
 #include <util/util.hpp>

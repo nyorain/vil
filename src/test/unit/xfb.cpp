@@ -2,7 +2,7 @@
 #include <util/spirv.hpp>
 #include <util/span.hpp>
 #include <util/bytes.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <spirv-cross/spirv_cross.hpp>
 #include "../bugged.hpp"
 #include "../data/a.vert.spv.h" // see a.vert; compiled manually

@@ -8,7 +8,7 @@
 #include <cassert>
 #include <cstring>
 #include <cstdlib>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 // taken from nytl/bytes.hpp
 

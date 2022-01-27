@@ -7,7 +7,7 @@
 #include <memory_resource>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 // Simple but optimized linear allocator implementation
 // NOTE: Take care modifying this code in future, it was optimized so that

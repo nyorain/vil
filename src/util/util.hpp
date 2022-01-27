@@ -2,7 +2,7 @@
 
 #include <fwd.hpp>
 #include <util/bytes.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <vk/vulkan.h>
 #include <util/vec.hpp>
 #include <cstring>

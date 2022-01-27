@@ -4,7 +4,7 @@
 #include <pipe.hpp>
 #include <util/flags.hpp>
 #include <util/span.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 // See ~Command. Keep in mind that we use a custom per-CommandRecord allocator
 // for all Commands, that's why we can use span<> here without the referenced

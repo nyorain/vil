@@ -9,7 +9,7 @@
 #include <util/util.hpp>
 #include <util/profiling.hpp>
 #include <util/linalloc.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 // per-thread allocator for temporary local memory, allocated in stack-like
 // fashion. Due to its strict requirement, only useful to create one-shot

@@ -4,7 +4,7 @@
 #include <utility>
 #include <tuple>
 #include <memory>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 namespace vil {
 

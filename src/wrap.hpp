@@ -3,7 +3,7 @@
 #include <fwd.hpp>
 #include <device.hpp>
 #include <data.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 
 namespace vil {
 

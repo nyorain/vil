@@ -3,7 +3,7 @@
 #include <util/bytes.hpp>
 #include <util/f16.hpp>
 #include <util/vecOps.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>
 #include <vk/format_utils.h>

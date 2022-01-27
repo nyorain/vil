@@ -4,7 +4,7 @@
 #include <shared_mutex>
 #include <thread>
 #include <atomic>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <util/profiling.hpp>
 
 namespace vil {

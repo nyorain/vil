@@ -52,4 +52,4 @@
 #include <util/flags.hpp>
 #include <util/profiling.hpp>
 
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>

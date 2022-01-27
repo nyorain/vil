@@ -11,6 +11,7 @@
 #include <util/util.hpp>
 #include <util/export.hpp>
 #include <util/profiling.hpp>
+#include <util/dlg.hpp>
 
 #ifdef VIL_WITH_WAYLAND
   #include <wayland.hpp>
@@ -25,7 +26,6 @@
 #endif // VIL_WITH_WIN32
 
 #include <vk/dispatch_table_helper.h>
-#include <dlg/dlg.hpp>
 #include <csignal>
 
 #include <vil_api.h>

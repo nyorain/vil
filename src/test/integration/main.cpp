@@ -5,7 +5,7 @@
 #include <vk/vulkan.h>
 #include <vk/dispatch_table_helper.h>
 #include <stdlib.h>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <array>
 
 #if defined(_WIN32) || defined(__CYGWIN__)

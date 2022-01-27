@@ -2,7 +2,7 @@
 
 #include <fwd.hpp>
 #include <handle.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <set>
 
 // TODO: support sparse binding

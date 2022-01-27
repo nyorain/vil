@@ -2,7 +2,7 @@
 
 #include <fwd.hpp>
 #include <util/handleCast.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <vk/vulkan.h>
 #include <cstring>
 #include <mutex>

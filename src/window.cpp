@@ -6,7 +6,7 @@
 #include <image.hpp>
 #include <util/util.hpp>
 #include <swa/swa.h>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <imgui/imgui.h>
 #include <vk/enumString.hpp>
 #include <chrono>
