@@ -29,7 +29,7 @@
 #include "vk/format_utils.h"
 #include <map>
 #include <vector>
-
+#include <unordered_map>
 
 enum class COMPONENT_TYPE {
     NONE,
