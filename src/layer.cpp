@@ -44,6 +44,7 @@ std::mutex ThreadContext::mutex_;
 std::vector<ThreadContext*> ThreadContext::contexts_;
 
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
+#ifndef DLG_DISABLE
 	dlg_default_output(origin, string, data);
 	// (void) string;
 	// (void) data;
@@ -63,6 +64,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		#endif
 	}
 #endif // BREAK_ON_ERROR
+#endif // DLG_DISABLE
 }
 
 std::array<unsigned int, 3> apiVersion(uint32_t v) {
@@ -151,11 +153,14 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// TODO: remove/find real solution for AllocConsole on windows
 	//  maybe control this via environment variable?
 	//  On windows (with msvc), we could use DebugOutput.
+#ifndef DLG_DISABLE
 	dlg_set_handler(dlgHandler, nullptr);
-#ifdef _WIN32
-	AllocConsole();
-	dlg_trace("Allocated console. Creating vulkan instance");
-#endif // _WIN32
+	#ifdef _WIN32
+		AllocConsole();
+		dlg_trace("Allocated console. Creating vulkan instance");
+	#endif // _WIN32
+#endif // DLG_DISABLE
+
 
 	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
 	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {

@@ -28,6 +28,10 @@
 
 #pragma once
 
+#include <cstdint>
+
+using std::uint32_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
