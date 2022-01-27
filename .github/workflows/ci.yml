@@ -30,7 +30,7 @@ on:
 # NOTE: we currently don't test all permutations of {release, debug, ...},
 # {tracy, !tracy}, {gcc, clang, msvc, msvc-ninja} since it would be many
 
-# TODO: integration tests not enabled everywhere at the moment, just testing
+# TODO: integration tests not enabled at the moment
 # TODO: using old validation layers for integration tests. Build from source?
 #   could use build cache or something
 

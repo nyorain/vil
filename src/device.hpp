@@ -267,8 +267,13 @@ struct Device {
 	SyncedIntrusiveUnorderedSet<BufferView> bufferViews;
 	SyncedIntrusiveUnorderedSet<AccelStruct> accelStructs;
 
-	// set to 0u to disable
-	// TODO: documentation on keep alive
+	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
+
+	// NOTE: keepAliveCount = 0 means it's disabled completely.
+	// TODO: documentation on keep alive.
+	// Note how we must only have the KeepAlive mechanism for handles
+	// we wrap and for which we have an unordered set instead of
+	// an unordered map.
 	static constexpr auto keepAliveCount = 0u;
 
 	KeepAliveRingBuffer<ImageView*, keepAliveCount> keepAliveImageViews;
@@ -276,8 +281,6 @@ struct Device {
 	KeepAliveRingBuffer<Buffer*, keepAliveCount> keepAliveBuffers;
 	KeepAliveRingBuffer<BufferView*, keepAliveCount> keepAliveBufferViews;
 	KeepAliveRingBuffer<AccelStruct*, keepAliveCount> keepAliveAccelStructs;
-
-	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 
 	~Device();
 };

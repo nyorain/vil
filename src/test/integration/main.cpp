@@ -3,8 +3,10 @@
 #include "../bugged.hpp"
 #include "common.hpp"
 #include <vk/vulkan.h>
+#include <vk/dispatch_table_helper.h>
 #include <stdlib.h>
 #include <dlg/dlg.hpp>
+#include <array>
 
 #if defined(_WIN32) || defined(__CYGWIN__)
   // XXX NOTE ATTENTION: this header includes windows.h.
@@ -33,6 +35,7 @@
 #endif
 
 using PFN_vil_getErrorWarningCount = int(*)();
+using PFN_vil_runInternalIntegrationTets = void(*)();
 
 #ifdef _WIN32
 
@@ -48,7 +51,7 @@ int setenv(const char *name, const char *value, int overwrite) {
 
 #endif // _WIN32
 
-VulkanSetup gSetup;
+Setup gSetup;
 
 unsigned dlgErrors = 0;
 unsigned dlgWarnings = 0;
@@ -123,7 +126,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	}
 }
 
-static VkBool32 VKAPI_PTR messengerCallback(
+VkBool32 VKAPI_PTR messengerCallback(
 		VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 		VkDebugUtilsMessageTypeFlagsEXT type,
 		const VkDebugUtilsMessengerCallbackDataEXT* pData,
@@ -192,7 +195,19 @@ int main() {
 	setenv("VK_ICD_FILENAMES", VIL_MOCK_ICD_FILE, 1);
 	// TODO: don't hardcode the vulkan layer path here. Not sure how
 	// to properly retrieve it though, need to handle it per-platform.
-	setenv("VK_LAYER_PATH", VIL_LAYER_PATH "/:/usr/share/vulkan/explicit_layer.d/", 1);
+	// setenv("VK_LAYER_PATH", VIL_LAYER_PATH "/:/usr/share/vulkan/explicit_layer.d/", 1);
+
+	std::string layerPath = VIL_LAYER_PATH;
+#ifdef _WIN32
+	layerPath += ";"; // seperator
+	auto vkSDKPath = getenv("VULKAN_SDK");
+	layerPath += vkSDKPath;
+	layerPath += "\\Bin";
+#else // _WIN32
+	layerPath += "/:/usr/share/vulkan/explicit_layer.d/";
+#endif // _WIN32
+
+	setenv("VK_LAYER_PATH", layerPath.c_str(), 1);
 
 	dlg_trace("vk_layer_path: {}", getenv("VK_LAYER_PATH"));
 	dlg_trace("vk_icd_filenames: {}", getenv("VK_ICD_FILENAMES"));
@@ -315,11 +330,12 @@ int main() {
 	vkGetDeviceQueue(dev, qfam, 0u, &queue);
 
 	// store in setup
-	gSetup.ini = ini;
+	// gSetup.ini = ini;
 	gSetup.dev = dev;
-	gSetup.phdev = phdev;
+	// gSetup.phdev = phdev;
 	gSetup.qfam = qfam;
 	gSetup.queue = queue;
+	layer_init_device_dispatch_table(gSetup.dev, &gSetup.dispatch, &vkGetDeviceProcAddr);
 
 	// run tests
 	auto pattern = nullptr;
@@ -341,13 +357,32 @@ int main() {
 #endif
 
 	PFN_vil_getErrorWarningCount getErrorWarningCount;
+	PFN_vil_runInternalIntegrationTets runInternalIntegrationTests;
+
 	vilLoadSym(getErrorWarningCount);
+	vilLoadSym(runInternalIntegrationTests);
+
 	dlg_assert_or(getErrorWarningCount, return -2);
+	dlg_assert_or(runInternalIntegrationTests, return -2);
+
+	dlg_trace("Running internal integration tests... ");
+	runInternalIntegrationTests();
+	dlg_trace(">> Done");
+
 	auto vilWarnErrorCount = getErrorWarningCount();
+
+	vilCloseLib();
 
 	// teardown
 	vkDestroyDevice(dev, nullptr);
+
+#ifndef _WIN32
+	// destroying the instance leads to a crash *after* main on windows (msvc).
+	// I have no idea why, seems terribly broken. This also happens without our
+	// custom icd and without vil so probably a loader error. Ugh.
+	// So we just leak this on windows, yay.
 	vkDestroyInstance(ini, nullptr);
+#endif // _WIN32
 
 	// Add error count
 	// This includes warnings/errors by the validation layer

@@ -646,9 +646,8 @@ void ResourceGui::drawShaderInfo(VkPipeline pipe, VkShaderStageFlagBits stage) {
 				{"Used SGPR", "{}", info.resourceUsage.numUsedSgprs},
 				{"Used VGPR", "{}", info.resourceUsage.numUsedVgprs},
 				{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
-				{"Scratch Mem Usage", "{}", info.resourceUsage.scratchMemUsageInBytes},
-				{"lds Usage", "{}", info.resourceUsage.ldsUsageSizeInBytes},
-				{"lds Per Local Workgroup", "{}", info.resourceUsage.ldsSizePerLocalWorkGroup},
+				{"LDS Usage", "{}", info.resourceUsage.ldsUsageSizeInBytes},
+				{"LDs Per Local Workgroup", "{}", info.resourceUsage.ldsSizePerLocalWorkGroup},
 			}});
 
 			ImGui::TreePop();

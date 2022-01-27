@@ -44,4 +44,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance);
 
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice, const char*);
+
+
 } // namespace vil

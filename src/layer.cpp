@@ -36,6 +36,7 @@ namespace vil {
 // TODO: break when debugger is attached?
 // make this a build or runtime config? VIL_BREAK_ON_ERROR env var?
 // #define BREAK_ON_ERROR
+
 static auto dlgWarnErrorCount = 0u;
 
 // TODO: doesn't belong here
@@ -141,11 +142,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance) {
 
+	initTracy();
+
 	// We use a static version of dlg so this shouldn't be an issue.
 	// TODO: check if it's really ok on all platforms.
-	// dlg_set_handler(dlgHandler, nullptr);
-
-	// TODO: remove/find real solution
+	// TODO: maybe control via environment variable whether we do this?
+	//   When a vil::Gui was created, we could show all output there
+	// TODO: remove/find real solution for AllocConsole on windows
+	//  maybe control this via environment variable?
+	//  On windows (with msvc), we could use DebugOutput.
+	dlg_set_handler(dlgHandler, nullptr);
 #ifdef _WIN32
 	AllocConsole();
 	dlg_trace("Allocated console. Creating vulkan instance");
@@ -303,10 +309,9 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 		dlg_assert(inid);
 		inid->dispatch.DestroyInstance(ini, alloc);
 	}
-}
 
-VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);
-VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice, const char*);
+	shutdownTracy();
+}
 
 struct HookedFunction {
 	PFN_vkVoidFunction func {};
@@ -790,6 +795,7 @@ vil_NegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVersionStru
 */
 
 // Util for integration testing
+// TODO: only enable if integration tests are enabled
 extern "C" VIL_EXPORT int vil_getErrorWarningCount() {
 	return vil::dlgWarnErrorCount;
 }

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <device.hpp>
 #include <command/record.hpp>
+#include <memory>
 
 namespace vil {
 

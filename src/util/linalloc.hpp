@@ -123,7 +123,10 @@ struct LinAllocator {
 		// from there and set it as new block.
 		if(memCurrent->next) VIL_LIKELY {
 			auto& next = *memCurrent->next;
-			dlg_assert(memOffset(next) == 0u);
+			// We have to reset it here in case it wasn't reset properly.
+			// NOTE: this seems a bit hackish, maybe we can change the design
+			// to avoid this here?
+			next.data = dataBegin(next);
 			if(attemptAlloc(next, size, alignment, data)) VIL_LIKELY {
 				memCurrent = &next;
 				return data;

@@ -18,7 +18,7 @@ namespace vil {
 
 // Table of all dispatchable handles (instance, device, phdev, queue, cb)
 extern std::unordered_map<std::uint64_t, void*> dispatchableTable;
-// Table of device loaders (the first word in any VkDevice handle, not matter
+// Table of device loaders (the first word in any VkDevice handle, no matter
 // where/how it is wrapped). This allows us in our public API implementation
 // to recognize VkDevice handles directly coming from the device (we can't
 // just use the dispatchableTable directly for that since it might

@@ -326,6 +326,13 @@ if with_unit_tests
 	)
 endif
 
+with_integration_tests = get_option('integration-tests')
+if with_integration_tests
+	src += files(
+		'src/test/integration/internal.cpp'
+	)
+endif
+
 public_inc = include_directories('include/')
 private_inc = include_directories('src/')
 
@@ -455,7 +462,6 @@ if with_unit_tests
 	test('viltest', viltest)
 endif
 
-with_integration_tests = get_option('integration-tests')
 if with_integration_tests
 	# integration tests
 	dep_vulkan = dependency('vulkan')

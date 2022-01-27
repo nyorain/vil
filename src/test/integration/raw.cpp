@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include <array>
 
 TEST(bufferCreation) {
 	auto& setup = getSetup();
