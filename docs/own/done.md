@@ -1,3 +1,10 @@
+- [x] make ThreadContext alloc and CommandRecord alloc consistent
+	  Allow LinAllocator to take parent memory resource.
+	- [x] Also clean up CommandRecord alloc in general. Messy with all those
+	  overloads for CommandBuffer
+	- [x] Maybe we can reuse code? The allocators are fairly similar
+- [x] fix found bufparser leak
+	- [x] afterwards: use valgrind for tests in ci to see new leaks/issues?
 - [x] clean up ThreadContext (after inlining rework)
 	- [x] update to better ThreadContext version, where we don't use stdcpp alignment
 - [x] figure out tracy issues. On windows, it causes problems with a lot

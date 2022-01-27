@@ -180,6 +180,10 @@ struct CommandRecord {
 	// for records containing CmdBuildAccelerationStructures(Indirect)
 	// since we need to copy the data using for the acceleration structure.
 	bool buildsAccelStructs {};
+	// Whether the record has a broken label hierarchy.
+	// Labels allow nesting in ways that mess with a strict hierarchy view.
+	// Will display such records differently by default.
+	bool brokenHierarchyLabels {};
 
 	VkCommandBufferUsageFlags usageFlags {};
 

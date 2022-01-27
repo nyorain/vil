@@ -13,6 +13,7 @@ the various extra tracking and workarounds in CommandBuffer, during recording.
 
 ---
 
+# Fixing approach
 Possible issues:
 
 ### 0
@@ -78,3 +79,23 @@ A non-debug-label section is ended even though the current section is a debug la
 We will then first end the debug label one(s), then the non-debug-label one but
 then create new dummy (outside) sections for the debug-label one (but only
 those that would be non-empty).
+
+NOTE: this approach was never implemented.
+
+# Alternative display approach
+
+This was implemented in January 2022.
+We simply detect the broken nesting cases and mark the record.
+When displaying it, we only nest by labels and nothing else.
+
+Ideas/improvements:
+- We could also decide on per-label/per-hierarchy basis on whether to
+  apply this or not.
+- We currently use this viewing mode from the moment when a broken record is 
+  first viewed (see vil::CommandBufferGui). We could let the user decide,
+  some may even prefer this mode even when they have non-broken records.
+  	- or decide on a per-record basis? This gets weird in swapchain mode
+	  when we show multiple records at once though.
+	- we show 'End' commands by default when this mode is selected first.
+	  Might also be unexpected (even though it makes sense, EndRenderPass
+	  wouldn't be shown otherwise).

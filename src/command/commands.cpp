@@ -185,60 +185,7 @@ std::string printBufferImageCopy(Image* image,
 	}
 }
 
-// API
-std::vector<const Command*> displayCommands(const Command* cmd,
-		const Command* selected, Command::TypeFlags typeFlags, bool firstSep) {
-	// TODO PERF: should use imgui list clipper, might have *a lot* of commands here.
-	// But first we have to restrict what cmd->display can actually do.
-	// Would also have to pre-filter commands for that. And stop at every
-	// (expanded) parent command (but it's hard to tell whether they are
-	// expanded).
-	std::vector<const Command*> ret;
-	auto showSep = firstSep;
-	while(cmd) {
-		// No matter the flags, we never want to hide parent commands.
-		if((typeFlags & cmd->type()) || cmd->children()) {
-			if(showSep) {
-				ImGui::Separator();
-			}
-
-			if(auto reti = cmd->display(selected, typeFlags); !reti.empty()) {
-				dlg_assert(ret.empty());
-				ret = reti;
-			}
-
-			showSep = true;
-		}
-
-		cmd = cmd->next;
-	}
-
-	return ret;
-}
-
 // Command
-std::vector<const Command*> Command::display(const Command* sel, TypeFlags typeFlags) const {
-	if(!(typeFlags & this->type())) {
-		return {};
-	}
-
-	int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
-		ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
-	if(sel == this) {
-		flags |= ImGuiTreeNodeFlags_Selected;
-	}
-
-	auto idStr = dlg::format("{}:{}", nameDesc(), relID);
-	ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", toString().c_str());
-
-	std::vector<const Command*> ret;
-	if(ImGui::IsItemClicked()) {
-		ret = {this};
-	}
-
-	return ret;
-}
-
 bool Command::isChild(const Command& cmd) const {
 	auto* it = children();
 	while(it) {
@@ -275,51 +222,6 @@ Matcher Command::match(const Command& cmd) const {
 	m.total = 1.f;
 	m.match = 1.f / (1.f + std::abs(int(cmd.relID) - int(this->relID)));
 	return m;
-}
-
-// Commands
-std::vector<const Command*> ParentCommand::display(const Command* selected,
-		TypeFlags typeFlags, const Command* cmd) const {
-	int flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding;
-	if(this == selected) {
-		flags |= ImGuiTreeNodeFlags_Selected;
-	}
-
-	std::vector<const Command*> ret {};
-	auto idStr = dlg::format("{}:{}", nameDesc(), relID);
-	auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", toString().c_str());
-	if(ImGui::IsItemClicked()) {
-		// don't select when only clicked on arrow
-		if(ImGui::GetMousePos().x > ImGui::GetItemRectMin().x + 30) {
-			ret = {this};
-		}
-	}
-
-	if(open) {
-		if(cmd) {
-			// we don't want as much space as tree nodes
-			auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
-			ImGui::Unindent(s);
-
-			auto retc = displayCommands(cmd, selected, typeFlags, true);
-			if(!retc.empty()) {
-				dlg_assert(ret.empty());
-				ret = std::move(retc);
-				ret.insert(ret.begin(), this);
-			}
-
-			ImGui::Indent(s);
-		}
-
-		ImGui::TreePop();
-	}
-
-	return ret;
-}
-
-std::vector<const Command*> ParentCommand::display(const Command* selected,
-		TypeFlags typeFlags) const {
-	return this->display(selected, typeFlags, children());
 }
 
 // BarrierCmdBase
@@ -823,28 +725,6 @@ void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	} else {
 		dev.dispatch.CmdBeginRenderPass(cb, &this->info, info.contents);
 	}
-}
-
-std::vector<const Command*> BeginRenderPassCmd::display(const Command* selected,
-		TypeFlags typeFlags) const {
-	auto cmd = this->children_;
-	auto first = static_cast<FirstSubpassCmd*>(nullptr);
-	if(cmd) {
-		// If we only have one subpass, don't give it an extra section
-		// to make everything more compact.
-		first = dynamic_cast<FirstSubpassCmd*>(cmd);
-		dlg_assert(first);
-		if(!first->next) {
-			cmd = first->children_;
-		}
-	}
-
-	auto ret = ParentCommand::display(selected, typeFlags, cmd);
-	if(ret.size() > 1 && cmd != children_) {
-		ret.insert(ret.begin() + 1, first);
-	}
-
-	return ret;
 }
 
 void BeginRenderPassCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
@@ -2572,28 +2452,6 @@ void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 	dev.dispatch.CmdExecuteCommands(cb, u32(vkcbs.size()), vkcbs.data());
 	*/
-}
-
-std::vector<const Command*> ExecuteCommandsCmd::display(const Command* selected,
-		TypeFlags typeFlags) const {
-	auto cmd = this->children_;
-	auto first = static_cast<ExecuteCommandsChildCmd*>(nullptr);
-	if(cmd) {
-		// If we only have one subpass, don't give it an extra section
-		// to make everything more compact.
-		first = dynamic_cast<ExecuteCommandsChildCmd*>(cmd);
-		dlg_assert(first);
-		if(!first->next) {
-			cmd = first->record_->commands;
-		}
-	}
-
-	auto ret = ParentCommand::display(selected, typeFlags, cmd);
-	if(ret.size() > 1 && cmd != this->children_) {
-		ret.insert(ret.begin() + 1, first);
-	}
-
-	return ret;
 }
 
 std::string ExecuteCommandsChildCmd::toString() const {

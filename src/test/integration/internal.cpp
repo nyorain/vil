@@ -43,6 +43,29 @@ void output(Command* it, unsigned indent) {
 	}
 }
 
+void output2(Command* it, unsigned& indent) {
+	std::string out;
+	while(it) {
+		out.clear();
+		for(auto i = 0u; i < indent; ++i) out += "  ";
+
+		if(typeid(*it) == typeid(BeginDebugUtilsLabelCmd)) {
+			++indent;
+		} else if(typeid(*it) == typeid(EndDebugUtilsLabelCmd) && indent > 0) {
+			--indent;
+		}
+
+		out += it->nameDesc();
+		dlg_trace("{}", out);
+
+		if(auto children = it->children(); children) {
+			output2(children, indent);
+		}
+
+		it = it->next;
+	}
+}
+
 void internalIntegrationTest(Device& dev) {
 	// find queue
 	auto& queue = *dev.queues.front();
@@ -115,10 +138,10 @@ void internalIntegrationTest(Device& dev) {
 	rbi.pClearValues = &clearValue;
 	rbi.framebuffer = fb;
 
-	CmdBeginRenderPass(cb, &rbi, VK_SUBPASS_CONTENTS_INLINE);
 	CmdBeginDebugUtilsLabelEXT(cb, &label);
-	CmdEndRenderPass(cb);
+	CmdBeginRenderPass(cb, &rbi, VK_SUBPASS_CONTENTS_INLINE);
 	CmdEndDebugUtilsLabelEXT(cb);
+	CmdEndRenderPass(cb);
 
 	EndCommandBuffer(cb);
 	dlg_assert(vilCB.state() == CommandBuffer::State::executable);
@@ -126,7 +149,9 @@ void internalIntegrationTest(Device& dev) {
 	{
 		auto& record = *vilCB.record();
 		dlg_info(">> Commands");
-		output(record.commands, 1);
+
+		auto indent = 1u;
+		output2(record.commands, indent);
 	}
 
 	// cleanup

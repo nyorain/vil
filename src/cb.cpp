@@ -338,6 +338,7 @@ void CommandBuffer::popLabelSections() {
 	while(auto* next = dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd)) {
 		dlg_trace("Problematic debug utils label nesting detected "
 			"(Begin without end in scope): {}", next->name);
+		record_->brokenHierarchyLabels = true;
 		section_ = section_->parent;
 		++ignoreEndDebugLabels_;
 	}
@@ -1969,6 +1970,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 			if(lcmd && !it->pop) {
 				dlg_trace("Problematic debug utils label nesting detected (End)");
 				it->pop = true;
+				cb.record()->brokenHierarchyLabels = true;
 				break;
 			}
 

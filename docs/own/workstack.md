@@ -1,5 +1,3 @@
-- [x] fix found bufparser leak
-	- [x] afterwards: use valgrind for tests in ci to see new leaks/issues?
 - [x] integration test: depend on meson subproject for mock driver
       And don't hardcode my own env path
 	- [x] also make sure we don't need the layer to be installed
@@ -11,6 +9,7 @@
 	      execute with valgrind?
 		  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
 		  -> no idea. Crash inside the vulkan loader that i can't reproduce locally
+		  Maybe just execute on windows? seems to work there.
 - [x] add mutex to descriptorPool, make sure it's correctly used everywhere
 - [x] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)
 - [ ] document what to do when descriptors are not available when
@@ -29,17 +28,13 @@
   [x] Now write a simple test just creating an instance and device with
   vil and the validation layer. And check that we can execute that on 
   CI as well
-	- write test for creating ds, updating it with imageView, destroying
+	- [ ] write test for creating ds, updating it with imageView, destroying
 	  imageView and then using ds in submission (might need partially_bound
 	  or something I guess)
 - [x] rename main branch to main
-- [x] make ThreadContext alloc and CommandRecord alloc consistent
-	- [ ] we probably also don't want to really free the blocks. Just return them.
-	  Enable our global memory block cache thingy?
-	  Allow LinAllocator to take parent memory resource.
-	- [x] Also clean up CommandRecord alloc in general. Messy with all those
-	  overloads for CommandBuffer
-	- Maybe we can reuse code? The allocators are fairly similar
+- [ ] Don't always alloc/free in LinAllocator.
+      Enable our global memory block cache thingy?
+
 - look into found doom performance hotpaths
 	- Get rid of getAnnotate in command buffer end. Find clean solution for
 	  the problem/improve UI flickering for changing records
