@@ -29,6 +29,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vk/vulkan.h>
 
 using std::uint32_t;
 

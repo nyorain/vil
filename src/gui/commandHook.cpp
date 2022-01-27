@@ -337,8 +337,9 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 	// When there is no gui viewing the submissions at the moment, we don't
 	// need/want to hook the submission.
-	if(!dev.gui || !dev.gui->visible || freeze ||
-			dev.gui->activeTab() != Gui::Tab::commandBuffer) {
+	if(!forceHook && (
+			!dev.gui || !dev.gui->visible || freeze ||
+			dev.gui->activeTab() != Gui::Tab::commandBuffer)) {
 		hookNeededForCmd = false;
 	}
 
@@ -573,7 +574,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	if(hook->queryTime) {
 		auto validBits = dev.queueFamilies[xrecord.queueFamily].props.timestampValidBits;
 		if(validBits == 0u) {
-			dlg_warn("Queue family {} does not support timing queries", xrecord.queueFamily);
+			dlg_info("Queue family {} does not support timing queries", xrecord.queueFamily);
 		} else {
 			VkQueryPoolCreateInfo qci {};
 			qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
@@ -597,7 +598,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	VK_CHECK(dev.dispatch.BeginCommandBuffer(this->cb, &cbbi));
 
 	// initial cmd stuff
-	if(hook->queryTime) {
+	if(this->queryPool) {
 		dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, 2);
 	}
 
@@ -1922,9 +1923,15 @@ void CommandHookSubmission::transmitTiming() {
 	ZoneScoped;
 
 	auto& dev = *record->record->dev;
+	if(!record->hook->queryTime) {
+		return;
+	}
 
-	dlg_assert(bool(record->queryPool) == record->hook->queryTime);
-	if(!record->queryPool || !record->hook->queryTime) {
+	if(!record->queryPool) {
+		// The query pool couldn't be created.
+		// This could be the case when the queue does not support
+		// timing queries. Signal it.
+		record->state->neededTime = u64(-1);
 		return;
 	}
 

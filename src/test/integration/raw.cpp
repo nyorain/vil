@@ -1,6 +1,33 @@
 #include "common.hpp"
 #include <array>
 
+TEST(names) {
+	auto& setup = getSetup();
+	setDebugName(setup, setup.dev, "testDevice");
+	setDebugName(setup, setup.queue, "testQueue");
+}
+
+TEST(destroy_null_handle) {
+	auto& stp = getSetup();
+	vkDestroyBuffer(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyImage(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyImageView(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyBufferView(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyPipeline(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyFramebuffer(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyPipelineCache(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyCommandPool(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyDescriptorPool(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyEvent(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyFence(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroySemaphore(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyQueryPool(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyRenderPass(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkFreeMemory(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroyShaderModule(stp.dev, VK_NULL_HANDLE, nullptr);
+	vkDestroySampler(stp.dev, VK_NULL_HANDLE, nullptr);
+}
+
 TEST(bufferCreation) {
 	auto& setup = getSetup();
 
@@ -14,6 +41,7 @@ TEST(bufferCreation) {
 	bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
 		VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	VK_CHECK(vkCreateBuffer(setup.dev, &bci, nullptr, &buf));
+	setDebugName(setup, buf, "testBuf");
 
 	VkMemoryRequirements memReqs;
 	vkGetBufferMemoryRequirements(setup.dev, buf, &memReqs);
@@ -89,6 +117,7 @@ TEST(rawCommands) {
 	// empty cb test
 	{
 		auto cb = cbs[0];
+		setDebugName(setup, cb, "testCb");
 
 		VkCommandBufferBeginInfo beginInfo {};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -154,6 +183,7 @@ TEST(rawCommands) {
 	fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	VkFence fence;
 	VK_CHECK(vkCreateFence(setup.dev, &fci, nullptr, &fence));
+	setDebugName(setup, fence, "testFence");
 
 	// submit
 	VkSubmitInfo si {};
@@ -213,6 +243,8 @@ TEST(descriptors) {
 	dsai.descriptorSetCount = layouts.size();
 	VK_CHECK(vkAllocateDescriptorSets(setup.dev, &dsai, sets));
 
+	setDebugName(setup, sets[0], "testDs");
+
 	// TODO: test out_of_pool_memory condition
 	// TODO: test FreeDescriptors
 	// TODO: test descriptor updates
@@ -221,4 +253,105 @@ TEST(descriptors) {
 	// teardown
 	vkDestroyDescriptorPool(setup.dev, dsPool, nullptr);
 	vkDestroyDescriptorSetLayout(setup.dev, dsLayout, nullptr);
+}
+
+TEST(sampler) {
+	auto& stp = getSetup();
+	auto sci = linearSamplerCI();
+	VkSampler sampler;
+	VK_CHECK(vkCreateSampler(stp.dev, &sci, nullptr, &sampler));
+	vkDestroySampler(stp.dev, sampler, nullptr);
+}
+
+TEST(immut_sampler) {
+	auto& stp = getSetup();
+	auto sci = linearSamplerCI();
+
+	// create sampler
+	VkSampler sampler;
+	VK_CHECK(vkCreateSampler(stp.dev, &sci, nullptr, &sampler));
+
+	// layout
+	auto bindings = std::array {
+		VkDescriptorSetLayoutBinding {0u, VK_DESCRIPTOR_TYPE_SAMPLER,
+			1u, VK_SHADER_STAGE_ALL, &sampler},
+	};
+
+	VkDescriptorSetLayoutCreateInfo lci {};
+	lci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	lci.bindingCount = 1u;
+	lci.pBindings = bindings.data();
+	lci.bindingCount = bindings.size();
+	VkDescriptorSetLayout dsLayout;
+	VK_CHECK(vkCreateDescriptorSetLayout(stp.dev, &lci,
+		nullptr, &dsLayout));
+
+	// ds pool
+	auto poolSizes = std::array {
+		VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_SAMPLER, 1},
+	};
+
+	VkDescriptorPoolCreateInfo dci {};
+	dci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	dci.pPoolSizes = poolSizes.data();
+	dci.poolSizeCount = poolSizes.size();
+	dci.maxSets = 1u;
+	VkDescriptorPool dsPool;
+	VK_CHECK(vkCreateDescriptorPool(stp.dev, &dci, nullptr, &dsPool));
+
+	// alloc dc
+	VkDescriptorSet ds;
+	VkDescriptorSetAllocateInfo dsai {};
+	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	dsai.descriptorPool = dsPool;
+	dsai.pSetLayouts = &dsLayout;
+	dsai.descriptorSetCount = 1u;
+	VK_CHECK(vkAllocateDescriptorSets(stp.dev, &dsai, &ds));
+
+	// destroy the sampler before we free the ds (implicitly via pool destruction)
+	vkDestroySampler(stp.dev, sampler, nullptr);
+	vkDestroyDescriptorPool(stp.dev, dsPool, nullptr);
+	vkDestroyDescriptorSetLayout(stp.dev, dsLayout, nullptr);
+}
+
+TEST(event) {
+	auto& stp = getSetup();
+
+	VkEvent event;
+	VkEventCreateInfo evi {};
+	evi.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+	VK_CHECK(vkCreateEvent(stp.dev, &evi, nullptr, &event));
+
+	// TODO: signal and stuff
+
+	vkDestroyEvent(stp.dev, event, nullptr);
+}
+
+TEST(semaphore) {
+	auto& stp = getSetup();
+
+	VkSemaphore semaphore;
+	VkSemaphoreCreateInfo evi {};
+	evi.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	VK_CHECK(vkCreateSemaphore(stp.dev, &evi, nullptr, &semaphore));
+
+	// TODO: signal and stuff
+
+	vkDestroySemaphore(stp.dev, semaphore, nullptr);
+}
+
+TEST(queryPool) {
+	auto& stp = getSetup();
+
+	VkQueryPool qp;
+	VkQueryPoolCreateInfo qci {};
+	qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+	qci.queryCount = 2u;
+	qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+	VK_CHECK(vkCreateQueryPool(stp.dev, &qci, nullptr, &qp));
+	setDebugName(stp, qp, "testQueryPool");
+
+	// TODO: use
+
+	vkDestroyQueryPool(stp.dev, qp, nullptr);
 }

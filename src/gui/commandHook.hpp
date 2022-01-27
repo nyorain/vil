@@ -55,6 +55,9 @@ public:
 
 	bool freeze {}; // temporarily don't resubmit states
 
+	// Always hooks, even with disabled gui. Mainly for testing.
+	bool forceHook {};
+
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
@@ -168,7 +171,10 @@ struct CommandHookState {
 	// was already destroyed (e.g. because it was replaced and all submissions
 	// have finished).
 	std::atomic<u32> refCount {};
-	u64 neededTime {u64(-1)}; // time needed for the given command
+
+	// Time needed for the given command.
+	// Set to u64(-1) on error.
+	u64 neededTime {u64(-1)};
 
 	std::vector<CopiedDescriptor> copiedDescriptors;
 	std::vector<CopiedAttachment> copiedAttachments;

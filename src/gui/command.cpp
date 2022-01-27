@@ -1250,6 +1250,9 @@ void CommandViewer::displayCommand() {
 		if(validBits == 0u) {
 			dlg_assert(lastTime == u64(-1));
 			imGuiText("Time: unavailable (Queue family does not support timing queries)");
+		} else if(lastTime == u64(-1)) {
+			dlg_error("lastTime is u64(-1), unexpectedly");
+			imGuiText("Time: Error");
 		} else {
 			auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
 			displayDiff /= 1000.f * 1000.f;

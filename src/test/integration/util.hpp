@@ -1,7 +1,9 @@
 #include <vk/vulkan.h>
 #include <vk/dispatch_table.h>
+#include <vk/object_types.h>
 #include <util/dlg.hpp>
 #include <util/span.hpp>
+#include <util/handleCast.hpp>
 
 using vil::span;
 
@@ -212,6 +214,32 @@ inline RenderPassInfo renderPassInfo(span<const VkFormat> formats,
 	}
 
 	return rpi;
+}
+
+inline VkSamplerCreateInfo linearSamplerCI() {
+	VkSamplerCreateInfo sci {};
+	sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	sci.magFilter = VK_FILTER_LINEAR;
+	sci.minFilter = VK_FILTER_LINEAR;
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.minLod = -1000;
+	sci.maxLod = 1000;
+	sci.maxAnisotropy = 1.0f;
+	return sci;
+}
+
+
+template<typename H>
+void setDebugName(const Setup& stp, H handle, const char* name) {
+	VkDebugUtilsObjectNameInfoEXT ni {};
+	ni.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+	ni.objectType = VkHandleInfo<H>::kVkObjectType;
+	ni.objectHandle = vil::handleToU64(handle);
+	ni.pObjectName = name;
+	VK_CHECK(stp.dispatch.SetDebugUtilsObjectNameEXT(stp.dev, &ni));
 }
 
 } // namespace tut
