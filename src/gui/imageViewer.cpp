@@ -20,24 +20,23 @@ void appendAsDouble(std::string& str, double val) {
 
 std::string format(VkFormat format, VkImageAspectFlagBits aspect, Vec4d value) {
 	using FmtFunc = void(*)(std::string&, double);
+	using NumType = FORMAT_NUMERICAL_TYPE;
 	FmtFunc fmt;
 	unsigned channels;
 
 	if(aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
-		channels = FormatChannelCount(format);
+		channels = FormatComponentCount(format);
 		fmt = (FormatIsSampledFloat(format)) ? appendAsDouble : appendAsInt;
 	} else if(aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
 		channels = 1u;
 		auto numt = FormatDepthNumericalType(format);
-		fmt = (numt == VK_FORMAT_NUMERICAL_TYPE_UINT ||
-			   numt == VK_FORMAT_NUMERICAL_TYPE_SINT) ?
+		fmt = (numt == NumType::UINT || numt == NumType::SINT) ?
 			appendAsInt :
 			appendAsDouble;
 	} else if(aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
 		channels = 1u;
 		auto numt = FormatStencilNumericalType(format);
-		fmt = (numt == VK_FORMAT_NUMERICAL_TYPE_UINT ||
-			   numt == VK_FORMAT_NUMERICAL_TYPE_SINT) ?
+		fmt = (numt == NumType::UINT || numt == NumType::SINT) ?
 			appendAsInt :
 			appendAsDouble;
 	} else {
@@ -232,7 +231,7 @@ void ImageViewer::display(Draw& draw) {
 	auto recreateView = false;
 	VkFlags depthStencil = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
 	if(subresRange_.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
-		auto numComponents = FormatChannelCount(format_);
+		auto numComponents = FormatComponentCount(format_);
 		dlg_assert(aspect_ == VK_IMAGE_ASPECT_COLOR_BIT);
 
 		ImGui::CheckboxFlags("R", &imageDraw_.flags, DrawGuiImage::flagMaskR);
@@ -724,7 +723,7 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		auto newAspect = defaultAspect(supportedAspects);
 		if(newAspect != aspect_ || !(flags & preserveSelection)) {
 			if(newAspect == VK_IMAGE_ASPECT_COLOR_BIT) {
-				auto numComponents = FormatChannelCount(format_);
+				auto numComponents = FormatComponentCount(format_);
 				imageDraw_.flags = DrawGuiImage::flagMaskR;
 				if(numComponents >= 2) {
 					imageDraw_.flags |= DrawGuiImage::flagMaskG;

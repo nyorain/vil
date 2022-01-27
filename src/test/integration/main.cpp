@@ -216,6 +216,7 @@ int main() {
 	// timeline semaphore bug
 	setenv("VIL_TIMELINE_SEMAPHORES", "0", 1);
 
+	/*
 	{
 		u32 layerCount = 0u;
 		VK_CHECK(vkEnumerateInstanceLayerProperties(&layerCount, nullptr));
@@ -229,6 +230,7 @@ int main() {
 				VK_VERSION_PATCH(layer.specVersion));
 		}
 	}
+	*/
 
 	dlg_trace("Creating instance");
 

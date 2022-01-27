@@ -149,9 +149,10 @@ RenderBuffer::~RenderBuffer() {
 ShaderImageType::Value ShaderImageType::parseType(VkImageType imgType,
 		VkFormat format, VkImageAspectFlagBits aspect) {
 	// NOTE: relies on ordering of DrawGuiImage::Type enum
+	using NumType = FORMAT_NUMERICAL_TYPE;
 	auto imageTypeFUI = [](auto numt) {
-		if(numt == VK_FORMAT_NUMERICAL_TYPE_SINT) return Value::i1;
-		else if(numt == VK_FORMAT_NUMERICAL_TYPE_UINT) return Value::u1;
+		if(numt == NumType::SINT) return Value::i1;
+		else if(numt == NumType::UINT) return Value::u1;
 		else return Value::f1;
 	};
 
@@ -159,14 +160,14 @@ ShaderImageType::Value ShaderImageType::parseType(VkImageType imgType,
 
 	if(aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
 		if(FormatIsSampledFloat(format)) baseType = Value::f1;
-		else if(FormatIsUInt(format)) baseType = Value::u1;
-		else if(FormatIsInt(format)) baseType = Value::i1;
+		else if(FormatIsUINT(format)) baseType = Value::u1;
+		else if(FormatIsSINT(format)) baseType = Value::i1;
 		else {
 			dlg_error("unreachable");
 			return ShaderImageType::count;
 		}
 	} else {
-		auto numt = VK_FORMAT_NUMERICAL_TYPE_NONE;
+		auto numt = NumType::NONE;
 		if(aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
 			numt = FormatDepthNumericalType(format);
 		} else if(aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {

@@ -157,7 +157,7 @@ VkFormat formatForType(const XfbCapture& capture) {
 }
 
 std::string printFormat(VkFormat format, span<const std::byte> src) {
-	u32 numChannels = FormatChannelCount(format);
+	u32 numChannels = FormatComponentCount(format);
 	u32 componentSize = FormatElementSize(format) / numChannels;
 
 	// TODO: not all formats covered
@@ -165,14 +165,14 @@ std::string printFormat(VkFormat format, span<const std::byte> src) {
 
 	Vec4d val = read(format, src);
 
-	if(FormatIsFloat(format)) {
+	if(FormatIsSFLOAT(format)) {
 		switch(componentSize) {
 			case 2: return printFormat<f16>(numChannels, val);
 			case 4: return printFormat<float>(numChannels, val);
 			case 8: return printFormat<double>(numChannels, val);
 			default: break;
 		}
-	} else if(FormatIsUInt(format) || FormatIsUScaled(format)) {
+	} else if(FormatIsUINT(format) || FormatIsUSCALED(format)) {
 		switch(componentSize) {
 			case 1: return printFormat<u8>(numChannels, val);
 			case 2: return printFormat<u16>(numChannels, val);
@@ -180,7 +180,7 @@ std::string printFormat(VkFormat format, span<const std::byte> src) {
 			case 8: return printFormat<u64>(numChannels, val);
 			default: break;
 		}
-	} else if(FormatIsInt(format) || FormatIsSScaled(format)) {
+	} else if(FormatIsSINT(format) || FormatIsSSCALED(format)) {
 		switch(componentSize) {
 			case 1: return printFormat<i8>(numChannels, val);
 			case 2: return printFormat<i16>(numChannels, val);
@@ -188,13 +188,13 @@ std::string printFormat(VkFormat format, span<const std::byte> src) {
 			case 8: return printFormat<i64>(numChannels, val);
 			default: break;
 		}
-	} else if(FormatIsUNorm(format)) {
+	} else if(FormatIsUNORM(format)) {
 		switch(componentSize) {
 			case 1: return printFormat<u8> (numChannels, val);
 			case 2: return printFormat<u16>(numChannels, val);
 			default: break;
 		}
-	} else if(FormatIsSNorm(format)) {
+	} else if(FormatIsSNORM(format)) {
 		switch(componentSize) {
 			case 1: return printFormat<i8> (numChannels, val);
 			case 2: return printFormat<i16>(numChannels, val);

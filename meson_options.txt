@@ -20,3 +20,8 @@ option('tracy', type: 'boolean', value: false)
 # useful e.g. to run the integration tests without installing, as we
 # do in ci
 option('json-config-absolute-path', type: 'boolean', value: false)
+
+# Whether to throw on failed assertion.
+# Mainly used for static analysis, to make it assume the conditions
+# we assert on.
+option('throw-on-assert', type: 'boolean', value: false)

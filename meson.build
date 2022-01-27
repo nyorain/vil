@@ -151,6 +151,8 @@ if disable_dlg
 		'-Wno-unused-but-set-variable',
 		'-Wno-unused-variable',
 	])
+elif get_option('throw-on-assert')
+	layer_args += '-DVIL_THROW_ON_ASSERT'
 endif
 
 # spvm
@@ -399,6 +401,11 @@ lib_spvm = static_library(
 	]),
 )
 
+link_args = []
+if get_option('b_coverage')
+	link_args += ['--coverage']
+endif
+
 vil_layer = shared_library(
 	'VkLayer_live_introspection',
 	[src, spv],
@@ -407,6 +414,7 @@ vil_layer = shared_library(
 	include_directories: inc,
 	link_whole: lib_spvm,
 	cpp_args: args + layer_args,
+	link_args: link_args,
 	install: true,
 	cpp_pch: pch,
 )

@@ -94,7 +94,7 @@ void writeTriangles(AccelStruct& accelStruct, unsigned id,
 		transform = toMat4f(*src);
 	}
 
-	auto vertsHaveW = (FormatChannelCount(src.vertexFormat) >= 4);
+	auto vertsHaveW = (FormatComponentCount(src.vertexFormat) >= 4);
 
 	auto readVertex = [&](u32 index) {
 		dlg_assert(index <= src.maxVertex);

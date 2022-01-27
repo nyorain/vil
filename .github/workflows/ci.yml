@@ -53,7 +53,7 @@ jobs:
     - run: meson setup build/ --backend=ninja 
         -Dunit-tests=true 
         -Djson-config-absolute-path=true
-        -Dintegration-tests=false
+        -Dintegration-tests=true
         -Dx11-hook=false 
         -Dtracy=true
       env:

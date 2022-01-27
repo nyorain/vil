@@ -768,9 +768,9 @@ void BeginRenderPassCmd::displayInspector(Gui& gui) const {
 
 				if(FormatIsSampledFloat(att.format)) {
 					print(clearValue.color.float32);
-				} else if(FormatIsInt(att.format)) {
+				} else if(FormatIsSINT(att.format)) {
 					print(clearValue.color.int32);
-				} else if(FormatIsUInt(att.format)) {
+				} else if(FormatIsUINT(att.format)) {
 					print(clearValue.color.uint32);
 				}
 			}
