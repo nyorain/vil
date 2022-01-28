@@ -1990,11 +1990,6 @@ inline const char* name(VkImageViewType val) {
 		default: return "";
 	}
 }
-inline const char* name(VkShaderModuleCreateFlagBits val) {
-	switch(val) {
-		default: return "";
-	}
-}
 inline const char* name(VkPipelineCacheCreateFlagBits val) {
 	switch(val) {
 		case VK_PIPELINE_CACHE_CREATE_EXTERNALLY_SYNCHRONIZED_BIT_EXT: return "ExternallySynchronizedEXT";
@@ -2404,12 +2399,6 @@ inline std::string flagNames(VkImageViewCreateFlagBits val) {
 	std::string ret;
 	if((val & VK_IMAGE_VIEW_CREATE_FRAGMENT_DENSITY_MAP_DYNAMIC_BIT_EXT) == VK_IMAGE_VIEW_CREATE_FRAGMENT_DENSITY_MAP_DYNAMIC_BIT_EXT) ret += "FragmentDensityMapDynamicEXT | ";
 	if((val & VK_IMAGE_VIEW_CREATE_FRAGMENT_DENSITY_MAP_DEFERRED_BIT_EXT) == VK_IMAGE_VIEW_CREATE_FRAGMENT_DENSITY_MAP_DEFERRED_BIT_EXT) ret += "FragmentDensityMapDeferredEXT | ";
-	if(!ret.empty()) ret.erase(ret.size() - 3, 3);
-	return ret;
-
-}
-inline std::string flagNames(VkShaderModuleCreateFlagBits) {
-	std::string ret;
 	if(!ret.empty()) ret.erase(ret.size() - 3, 3);
 	return ret;
 
