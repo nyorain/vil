@@ -215,6 +215,7 @@ int main() {
 	// TODO: currently needed on CI to work around old validation layers
 	// timeline semaphore bug
 	setenv("VIL_TIMELINE_SEMAPHORES", "0", 1);
+	setenv("VIL_DLG_HANDLER", "1", 1);
 
 	{
 		u32 layerCount = 0u;

@@ -148,17 +148,21 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 	// We use a static version of dlg so this shouldn't be an issue.
 	// TODO: check if it's really ok on all platforms.
+	//   NOPE, THIS SETS THE GLOBAL HANDLER ON LINUX UGH
+	//   We need this for tests tho
 	// TODO: maybe control via environment variable whether we do this?
-	//   When a vil::Gui was created, we could show all output there
+	//   When a vil::Gui was created, we could show all output there.
 	// TODO: remove/find real solution for AllocConsole on windows
 	//  maybe control this via environment variable?
 	//  On windows (with msvc), we could use DebugOutput.
 #ifndef DLG_DISABLE
-	dlg_set_handler(dlgHandler, nullptr);
-	#ifdef _WIN32
-		AllocConsole();
-		dlg_trace("Allocated console. Creating vulkan instance");
-	#endif // _WIN32
+	if(checkEnvBinary("VIL_DLG_HANDLER", false)) {
+		dlg_set_handler(dlgHandler, nullptr);
+		#ifdef _WIN32
+			AllocConsole();
+			dlg_trace("Allocated console. Creating vulkan instance");
+		#endif // _WIN32
+	}
 #endif // DLG_DISABLE
 
 

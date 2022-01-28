@@ -114,7 +114,6 @@ struct DisplayVisitor : CommandVisitor {
 		}
 
 		auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
-		dlg_info("tree push: {} ({})", cmd.toString(), indent_);
 		auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
 		if(ImGui::IsItemClicked()) {
 			// don't select when only clicked on arrow
@@ -211,7 +210,6 @@ struct DisplayVisitor : CommandVisitor {
 		display(cmd);
 
 		if(labelOnlyIndent_ && indent_ > 0 && open_) {
-			dlg_info("close indent");
 			--indent_;
 			ImGui::Indent(getUnindent());
 			ImGui::TreePop();
