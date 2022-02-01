@@ -1251,8 +1251,15 @@ void CommandHookRecord::copyAttachment(const Command& bcmd,
 	span<const ImageView* const> attachments;
 
 	switch(type) {
-		case AttachmentType::color: attachments = rpi->colorAttachments; break;
-		case AttachmentType::input: attachments = rpi->inputAttachments; break;
+		case AttachmentType::color: 
+			// written like this since old GCC versions seem to have problems with 
+			// our span conversion constructor.
+			// see https://github.com/nyorain/vil/runs/5014322209?check_suite_focus=true
+			attachments = {rpi->colorAttachments.data(), rpi->colorAttachments.size()};
+			break;
+		case AttachmentType::input:
+			attachments = {rpi->inputAttachments.data(), rpi->inputAttachments.size()};
+			break;
 		case AttachmentType::depthStencil:
 			attachments = {&rpi->depthStencilAttachment, 1u};
 			break;
