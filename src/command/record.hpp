@@ -14,6 +14,12 @@
 
 namespace vil {
 
+enum class AttachmentType {
+	color,
+	input,
+	depthStencil,
+};
+
 struct PushConstantData {
 	span<std::byte> data; // full data
 };
@@ -48,6 +54,7 @@ struct DescriptorState {
 	// important to do this, also fix in vil::bind(..., state) below then
 	span<std::byte> pushDescriptors;
 
+	// Will always re-allocate the descriptorSets span
 	void bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> offsets);
 };
@@ -71,26 +78,25 @@ struct DynamicStateDepthBias {
 	float slope {};
 };
 
+// All information about the rendering section we are currently in.
+// This can be a normal render pass, a render pass with a
+// vk_khr_image_less_framebuffer (core in Vulkan 1.2) or a
+// vk_khr_dynamic_rendering (core in Vulkan 1.3) section.
+// That's why we don't store references to render pass or framebuffer here
+// but have our own meta representation.
 struct RenderPassInstanceState {
-	RenderPass* rp {};
-	unsigned subpass {};
+	span<ImageView*> colorAttachments;
+	span<ImageView*> inputAttachments;
+	ImageView* depthStencilAttachment {};
 
-	// NOTE: we store the attachments here instead of the framebuffer
-	// to support VK_KHR_imageless_framebuffer (core in Vulkan 1.2).
-	// Keep in mind that this may be empty for secondary command buffers,
-	// even if they execute draw commands (the framebuffer parameter in the
-	// inherited info for secondary cbs is optional).
-	span<ImageView*> attachments;
+	// NOTE: add preserve attachments? resolve attachments?
 };
 
 struct GraphicsState : DescriptorState {
 	BoundIndexBuffer indices {};
 	span<BoundVertexBuffer> vertices;
 	GraphicsPipeline* pipe {};
-
-	// We can't store a BeginRenderPassCmd* here because that would not
-	// work with secondary command buffers inside a render pass
-	RenderPassInstanceState rpi {};
+	const RenderPassInstanceState* rpi {};
 
 	struct StencilState {
 		u32 writeMask {};
@@ -119,10 +125,6 @@ struct ComputeState : DescriptorState {
 struct RayTracingState : DescriptorState {
 	RayTracingPipeline* pipe;
 };
-
-GraphicsState copy(CommandBuffer& cb, const GraphicsState& src);
-ComputeState copy(CommandBuffer& cb, const ComputeState& src);
-RayTracingState copy(CommandBuffer& cb, const RayTracingState& src);
 
 // XXX: these must only be called while we can statically know that the record
 // associated with the given state is still valid. Otherwise its references

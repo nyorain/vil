@@ -44,6 +44,9 @@ new, workstack:
 	  latency between rendered frame and debug gui anymore. Investigate.
 	  (For buffers this isn't possible, we need the cpu processing for
 	  formatting & text rendering)
+	- [ ] maybe have a second vector<CommandHook> with pending submissions?
+	      and if the user of the submissions is ok with pending resources,
+		  use them?
 - [ ] rework buffmt with proper array types (and multdim arrays)
       allow to store spirv u32 id per Type.
 
@@ -154,17 +157,6 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
-- [ ] in CommandHook::hook only addCow for the descriptorSets that are really
-	  needed for the hooked command. We don't need the others (and it could
-	  be many)
-- [ ] make don't add to refRecords of used descriptorSets? We don't
-      reference them directly in a record anyways. We still want them
-	  in CommandRecord::handles though, not sure how this works. Maybe
-	  use some special sentinel values (next == prev == this) to signal
-	  this is not linked to the handle itself?
-	    Maybe we later on want to see all CommandRecords using a given
-		ds? But that's likely a gui operation where we could
-		use iterate over all known command records or something.
 - [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
 	  since we should be logically able to get around that
 	  case (with normal API use and no gui open)
@@ -222,11 +214,16 @@ performance/profiling:
 
 
 object wrapping:
-- [ ] only use the hash maps in Device when we are not using object 
+- [ ] (low prio, not sure yet)
+      only use the hash maps in Device when we are not using object 
       wrapping. Otherwise a linked list is enough/better.
 	  Could always use the linked list and the hash maps just optionally.
 	  Maybe we can even spin up some lockfree linked list for this? We'd only
 	  ever insert at one end, order is irrelevant.
+	  NOTE: linked list isn't always enough, for descriptor-bound handles
+	  (i.e. views) we sometimes need to check whether a given handle is
+	  still valid. But that is kinda error-prone anyways due to reallocation
+	  of the same address later on :/
 	- [ ] Figure out how to correctly handle the maps in Device when using 
 		  wrapping. Many ugly situations atm, see e.g. the
 		  hack in ~CommandPool and ~DescriptorPool.
@@ -260,13 +257,13 @@ gui stuff
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
-- [ ] can we link C++ statically? Might fix the dota
-	  std::regex bug maybe it was something with the version of libstdc++?
 - [ ] (high prio) better pipeline/shader module display in resource viewer
       It's currently completely broken due to spirv-reflect removal
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 	- [ ] also make sure to handle in/out structs correctly. Follow SpvReflectInterfaceVariable::members
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
+- [ ] can we link C++ statically? Might fix the dota
+	  std::regex bug maybe it was something with the version of libstdc++?
 - [ ] decide whether to enable full-sync by default or not.
       Explain somewhere (in gui?) why/when it's needed. Already described
 	  in design.md from my pov
@@ -302,6 +299,8 @@ other
 	  that change every frame/frequently (e.g. the backbuffer framebuffer)
 	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
 	  we could fix it by not imgui-pushing the resource ID before showing the button.
+	  	Instead just push the semantic that resource has in the given inspector
+		to make sure buttons are unique.
 - [ ] (low prio) improve imgui event handles, make sure inputs aren't lost when fps are low.
       see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well

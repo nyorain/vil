@@ -48,10 +48,11 @@ struct Pipeline : DeviceHandle {
 	VkPipeline handle {};
 	VkPipelineBindPoint type {};
 
-	// TODO: strictly speaking don't need shared ownership of the handle here, just
-	// of the data it holds. Separate handle and description into separate
-	// shared-owned objects? On the other hand, shouldn't hurt to keep it
-	// alive here either, should be cheap.
+	// NOTE: strictly speaking don't need shared ownership of the *handle* here,
+	// just of the creation description it holds.
+	// Could separate handle and description into separate
+	// shared-owned objects? On the other hand, shouldn't hurt to keep the
+	// handle alive here either, should be cheap.
 	IntrusivePtr<PipelineLayout> layout {};
 
 protected:

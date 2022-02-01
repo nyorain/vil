@@ -33,7 +33,10 @@ struct Image : MemoryResource {
 
 	std::vector<CowImageRange*> cows;
 
+	Image() = default;
 	~Image();
+	Image(Image&&) = delete;
+	Image& operator=(Image&&) = delete;
 };
 
 struct ImageView : DeviceHandle {
@@ -44,7 +47,10 @@ struct ImageView : DeviceHandle {
 	std::vector<Framebuffer*> fbs; // TODO: unordered set?
 	std::atomic<u32> refCount {};
 
+	ImageView() = default;
 	~ImageView();
+	ImageView(ImageView&&) = delete;
+	ImageView& operator=(ImageView&&) = delete;
 };
 
 struct Sampler : DeviceHandle {
@@ -52,7 +58,10 @@ struct Sampler : DeviceHandle {
 	VkSamplerCreateInfo ci;
 	std::atomic<u32> refCount {};
 
+	Sampler() = default;
 	~Sampler();
+	Sampler(Sampler&&) = delete;
+	Sampler& operator=(Sampler&&) = delete;
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateImage(

@@ -48,6 +48,38 @@ such a resource is destroyed), we simply
 We need special handling for resource destruction: We'd have to make sure to
 keep the resource alive until our copy submission finishes.
 
+### Timing & sync
+
+What if the gui has a pending submission using an application resource
+for drawing (cow saved us a copy) but then the application modifies
+it:
+
+- if it modifies it directly (e.g. MapMemory) we'd have to block in the
+  call until our submission returns which is problematic. Maybe don't
+  use the cow mechanism for mappable resources for now
+- if it modifies it via a submission, we can simply chain that submission
+  to our gui submission (via timeline semaphore).
+
+---
+
+What if the gui is *recording* it's submission while this happens?
+We might have a race here.
+
+Solution: We somehow have to signal *in the cow object* whether the
+original object is *scheduled for use*. Just a semaphore isn't enough
+tho since we might not have it/it might be signaled.
+A timeline semaphore would probably solve it but create an ugly
+dependency where we have to make an application submission wait
+on our *cpu-side* gui rendering to finish by waiting on a semaphore/timepoint
+with an associated submission that is still being built.
+
+---
+
+The operation resolving the cow needs to be synced with *all* operations
+the application does involving the resource.
+Actually, it's only that strict for images since we might have to
+transition them.
+
 The transform feedback problem
 ==============================
 

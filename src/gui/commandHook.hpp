@@ -42,6 +42,7 @@ public:
 	};
 
 	struct AttachmentCopy {
+		AttachmentType type;
 		unsigned id;
 		bool before {}; // whether to copy before or after target command
 	};
@@ -326,7 +327,8 @@ private:
 		const CommandHook::DescriptorCopy&,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow);
-	void copyAttachment(RecordInfo&, unsigned id,
+	void copyAttachment(const Command& bcmd,
+		AttachmentType type, unsigned id,
 		CommandHookState::CopiedAttachment& dst);
 	void beforeDstOutsideRp(Command&, RecordInfo&);
 	void afterDstOutsideRp(Command&, RecordInfo&);

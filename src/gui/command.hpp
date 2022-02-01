@@ -56,7 +56,8 @@ public:
 		} pushConstants;
 
 		struct {
-			unsigned id; // color attachment id
+			AttachmentType type;
+			unsigned id;
 		} attachment;
 	} viewData_;
 

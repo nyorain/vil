@@ -1,4 +1,21 @@
+- [ ] commandHook support for khr_dynamic_rendering.
+      find a sample to test it with.
+	  basically need some renderpass-splitting-light.
+	  Can't use suspend/resume
+- [ ] improve design for buffer viewer. Way too much space atm, make more compact
+- [ ] expose missing vulkan 1.3 core functions in layer.cpp
+	- [ ] update dispatch table header and source when they contain them.
+	      Don't forget to add the 'aliasCmd' entries in device.cpp.
+		  maybe move to extra file/inifunction since it's many by now.
 - [ ] update enumString.hpp for vulkan 1.3
+	- [ ] update the generator
+- [ ] Add "Jump to End/Begin" buttons in begin/end commands.
+      only show them in brokenLabel display mode?
+- [ ] don't give each DrawCmdBase/DispatchCmdBase/RTCmdBase their
+      own state copy. Instead just use a pointer and re-allocate
+	  on change (in the record memory). Should make records a lot smaller
+	  when there are many draw/dispatch calls. And draw/dispatch
+	  recording faster since we copy less data.
 - [x] integration test: depend on meson subproject for mock driver
       And don't hardcode my own env path
 	- [x] also make sure we don't need the layer to be installed
@@ -35,6 +52,7 @@
 - [x] rename main branch to main
 - [ ] Don't always alloc/free in LinAllocator.
       Enable our global memory block cache thingy?
+- [ ] test with rainbow six extraction
 
 - look into found doom performance hotpaths
 	- Get rid of getAnnotate in command buffer end. Find clean solution for

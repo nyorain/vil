@@ -19,7 +19,10 @@ struct Buffer : MemoryResource {
 	std::atomic<u32> refCount {};
 	std::vector<CowBufferRange*> cows;
 
+	Buffer() = default;
 	~Buffer();
+	Buffer(Buffer&&) = delete;
+	Buffer& operator=(Buffer&&) = delete;
 };
 
 struct BufferView : DeviceHandle {
@@ -29,7 +32,10 @@ struct BufferView : DeviceHandle {
 
 	std::atomic<u32> refCount {};
 
+	BufferView() = default;
 	~BufferView();
+	BufferView(BufferView&&) = delete;
+	BufferView& operator=(BufferView&&) = delete;
 };
 
 // util

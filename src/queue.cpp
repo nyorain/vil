@@ -412,4 +412,20 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
 	return res;
 }
 
+VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(
+		VkQueue                                     queue,
+		uint32_t                                    submitCount,
+		const VkSubmitInfo2*                        pSubmits,
+		VkFence                                     fence) {
+	(void) queue;
+	(void) submitCount;
+	(void) pSubmits;
+	(void) fence;
+
+	// Move the implentation of QueueSubmit here, adjust it for new infos.
+	// And then make QueueSubmit just call this function.
+	dlg_error("todo");
+	return VK_ERROR_INCOMPATIBLE_DRIVER;
+}
+
 } // namespace vil

@@ -88,9 +88,9 @@ private:
 	u32 recordCount_ {};
 
 	// Only needed while recording.
-	ComputeState computeState_ {};
-	GraphicsState graphicsState_ {};
-	RayTracingState rayTracingState_ {};
+	ComputeState* computeState_ {};
+	GraphicsState* graphicsState_ {};
+	RayTracingState* rayTracingState_ {};
 
     struct Section {
         SectionCommand* cmd;
@@ -102,10 +102,13 @@ private:
 	Section* section_ {}; // the last, lowest, deepest-down section
 	Command* lastCommand_ {}; // the last added command in current section (might be null)
 	u32 ignoreEndDebugLabels_ {}; // See docs/debug-utils-label-nesting.md
-
 	PushConstantData pushConstants_ {};
 
 public: // Only public for recording, should not be accessed outside api
+    u32 subpass_ {u32(-1)};
+    RenderPass* rp_ {};
+    span<ImageView*> rpAttachments_ {};
+
 	void beginSection(SectionCommand& cmd);
 	void addCmd(Command& cmd);
 	void endSection(Command*);
@@ -113,10 +116,15 @@ public: // Only public for recording, should not be accessed outside api
 	auto& section() { return section_; }
 	auto& ignoreEndDebugLabels() { return ignoreEndDebugLabels_; }
 
-	ComputeState& computeState() { return computeState_; }
-	GraphicsState& graphicsState() { return graphicsState_; }
-	RayTracingState& rayTracingState() { return rayTracingState_; }
+	const ComputeState& computeState() { return *computeState_; }
+	const GraphicsState& graphicsState() { return *graphicsState_; }
+	const RayTracingState& rayTracingState() { return *rayTracingState_; }
 	PushConstantData& pushConstants() { return pushConstants_; }
+
+	void initStates();
+	ComputeState& newComputeState();
+	GraphicsState& newGraphicsState();
+	RayTracingState& newRayTracingState();
 
 	// Expects device mutex to be locked
 	void clearPendingLocked();
@@ -538,27 +546,27 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
     const void*                                 pData);
 
 // VK_KHR_copy_commands_2
-VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2(
     VkCommandBuffer                             commandBuffer,
     const VkCopyBufferInfo2KHR*                 pCopyBufferInfo);
 
-VKAPI_ATTR void VKAPI_CALL CmdCopyImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImage2(
     VkCommandBuffer                             commandBuffer,
     const VkCopyImageInfo2KHR*                  pCopyImageInfo);
 
-VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2(
     VkCommandBuffer                             commandBuffer,
     const VkCopyBufferToImageInfo2KHR*          pCopyBufferToImageInfo);
 
-VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2(
     VkCommandBuffer                             commandBuffer,
     const VkCopyImageToBufferInfo2KHR*          pCopyImageToBufferInfo);
 
-VKAPI_ATTR void VKAPI_CALL CmdBlitImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdBlitImage2(
     VkCommandBuffer                             commandBuffer,
     const VkBlitImageInfo2KHR*                  pBlitImageInfo);
 
-VKAPI_ATTR void VKAPI_CALL CmdResolveImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdResolveImage2(
     VkCommandBuffer                             commandBuffer,
     const VkResolveImageInfo2KHR*               pResolveImageInfo);
 
@@ -642,6 +650,28 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
     VkStencilOp                                 depthFailOp,
     VkCompareOp                                 compareOp);
 
+// VK_EXT_extended_dynamic_state2
+// partially promoted to vulkan 1.3
+VKAPI_ATTR void VKAPI_CALL CmdSetPatchControlPointsEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    patchControlPoints);
+
+VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBool32                                    rasterizerDiscardEnable);
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthBiasEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBool32                                    depthBiasEnable);
+
+VKAPI_ATTR void VKAPI_CALL CmdSetLogicOpEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkLogicOp                                   logicOp);
+
+VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveRestartEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    VkBool32                                    primitiveRestartEnable);
+
 // VK_EXT_sample_locations
 VKAPI_ATTR void VKAPI_CALL CmdSetSampleLocationsEXT(
     VkCommandBuffer                             commandBuffer,
@@ -711,5 +741,13 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysIndirectKHR(
 VKAPI_ATTR void VKAPI_CALL CmdSetRayTracingPipelineStackSizeKHR(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    pipelineStackSize);
+
+// VK_KHR_dynamic_rendering
+VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
+    VkCommandBuffer                             commandBuffer,
+    const VkRenderingInfo*                      pRenderingInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
+    VkCommandBuffer                             commandBuffer);
 
 } // namespace vil

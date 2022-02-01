@@ -125,6 +125,12 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	const VkSubmitInfo*                         pSubmits,
 	VkFence                                     fence);
 
+VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(
+    VkQueue                                     queue,
+    uint32_t                                    submitCount,
+    const VkSubmitInfo2*                        pSubmits,
+    VkFence                                     fence);
+
 VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(
     VkQueue                                     queue);
 

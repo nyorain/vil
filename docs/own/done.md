@@ -1,3 +1,14 @@
+- [x] maybe don't add to refRecords of used descriptorSets? We don't
+      reference them directly in a record anyways. We still want them
+	  in CommandRecord::handles though, not sure how this works. Maybe
+	  use some special sentinel values (next == prev == this) to signal
+	  this is not linked to the handle itself?
+	    Maybe we later on want to see all CommandRecords using a given
+		ds? But that's likely a gui operation where we could
+		use iterate over all known command records or something.
+- [x] in CommandHook::hook only addCow for the descriptorSets that are really
+	  needed for the hooked command. We don't need the others (and it could
+	  be many)
 - [x] make ThreadContext alloc and CommandRecord alloc consistent
 	  Allow LinAllocator to take parent memory resource.
 	- [x] Also clean up CommandRecord alloc in general. Messy with all those

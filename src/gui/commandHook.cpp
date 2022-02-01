@@ -688,6 +688,8 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		if(info.beginRenderPassCmd) {
 			break;
 		}
+
+		// TODO: support for BeginRendering
 	}
 
 	// some operations (index/vertex/attachment) copies only make sense
@@ -722,11 +724,13 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	if(info.splitRenderPass) {
 		auto& desc = info.beginRenderPassCmd->rp->desc;
 
+		// TODO PERF: expensive. Iteratives over all commands.
 		info.hookedSubpass = info.beginRenderPassCmd->subpassOfDescendant(*hcommand.back());
 		dlg_assert(info.hookedSubpass != u32(-1));
 		dlg_assert(info.hookedSubpass < desc.subpasses.size());
 
-		// TODO: possible solution for allowing command viewing in this case:
+		// TODO: possible solution for allowing command viewing when
+		// rp is not spittable:
 		// - just split up the subpasses into individual renderpasses,
 		//   recreate affected pipelines inside the layer and use them
 		//   when hooking
@@ -1223,19 +1227,49 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	}
 }
 
-void CommandHookRecord::copyAttachment(RecordInfo& info, unsigned attID,
+void CommandHookRecord::copyAttachment(const Command& bcmd,
+		AttachmentType type, unsigned attID,
 		CommandHookState::CopiedAttachment& dst) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyAttachment");
 
-	dlg_assert(info.beginRenderPassCmd);
-	if(attID >= info.beginRenderPassCmd->attachments.size()) {
-		dlg_error("copyAttachment {} out of range ({})", attID,
-			info.beginRenderPassCmd->attachments.size());
+	// NOTE: written in a general way. We might be in a RenderPass
+	// or a {Begin, End}Rendering section (i.e. dynamicRendering).
+	const RenderPassInstanceState* rpi {};
+
+	if(auto* dcmd = dynamic_cast<const DrawCmdBase*>(&bcmd); dcmd) {
+		rpi = dcmd->state.rpi;
+	} else if(auto* ccmd = dynamic_cast<const ClearAttachmentCmd*>(&bcmd); ccmd) {
+		rpi = ccmd->rpi;
+	} else {
+		dlg_error("Invalid command fdor copy attachment");
 		return;
 	}
 
-	auto& imageView = info.beginRenderPassCmd->attachments[attID];
+	dlg_assert_or(rpi, return);
+
+	span<const ImageView* const> attachments;
+
+	switch(type) {
+		case AttachmentType::color: attachments = rpi->colorAttachments; break;
+		case AttachmentType::input: attachments = rpi->inputAttachments; break;
+		case AttachmentType::depthStencil:
+			attachments = {&rpi->depthStencilAttachment, 1u};
+			break;
+	}
+
+	if(attID >= attachments.size()) {
+		dlg_error("copyAttachment ({}, {}} out of range ({})",
+			(unsigned) type, attID, attachments.size());
+		return;
+	}
+
+	auto* imageView = attachments[attID];
+	if(!imageView) {
+		dlg_warn("copyAttachment on null attachment");
+		return;
+	}
+
 	dlg_assert(imageView);
 	dlg_assert(imageView->img);
 	auto* image = imageView->img;
@@ -1474,7 +1508,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// attachments
 	for(auto [i, ac] : enumerate(hook->attachmentCopies)) {
 		if(ac.before) {
-			copyAttachment(info, ac.id, state->copiedAttachments[i]);
+			copyAttachment(bcmd, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
 
@@ -1555,7 +1589,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// attachments
 	for(auto [i, ac] : enumerate(hook->attachmentCopies)) {
 		if(!ac.before) {
-			copyAttachment(info, ac.id, state->copiedAttachments[i]);
+			copyAttachment(bcmd, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
 

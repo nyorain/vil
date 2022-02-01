@@ -70,6 +70,8 @@ struct Command {
 	using Type = CommandType;
 	using TypeFlags = CommandTypeFlags;
 
+	Command();
+
 	// NOTE: Commands should never have a non-trivial destructor (that is
 	// static_assert'd in addCmd) since it won't be called. We do this
 	// so that resetting command buffers does not add significant overhead
@@ -240,14 +242,15 @@ struct BeginRenderPassCmd : SectionCommand {
 	VkRenderPassBeginInfo info {};
 	span<VkClearValue> clearValues;
 
-	Framebuffer* fb {};
 	RenderPass* rp {};
 
 	// Used attachments, stored here separately from framebuffer since
-	// the framebuffer mgiht be imageless
+	// the framebuffer might be imageless
 	span<ImageView*> attachments;
+	Framebuffer* fb {}; // NOTE: might be null for imageless framebuffer ext
 
 	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
+	RenderPassInstanceState rpi;
 
 	// Returns the subpass that contains the given command.
 	// Returns u32(-1) if no subpass is ancestor of the given command.
@@ -268,6 +271,7 @@ struct NextSubpassCmd : SubpassCmd {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 	VkSubpassBeginInfo beginInfo; // for the new subpass
 	u32 subpassID {};
+	RenderPassInstanceState rpi;
 
 	using SubpassCmd::SubpassCmd;
 
@@ -306,10 +310,10 @@ struct StateCmdBase : Command {
 };
 
 struct DrawCmdBase : StateCmdBase {
-	GraphicsState state;
+	const GraphicsState& state;
 	PushConstantData pushConstants;
 
-	DrawCmdBase(CommandBuffer& cb, const GraphicsState&);
+	DrawCmdBase(CommandBuffer& cb);
 
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
@@ -443,10 +447,10 @@ struct BindDescriptorSetCmd final : Command {
 };
 
 struct DispatchCmdBase : StateCmdBase {
-	ComputeState state;
+	const ComputeState& state;
 	PushConstantData pushConstants;
 
-	DispatchCmdBase(CommandBuffer&, const ComputeState&);
+	DispatchCmdBase(CommandBuffer&);
 
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;
@@ -679,7 +683,7 @@ struct ClearDepthStencilImageCmd final : Command {
 struct ClearAttachmentCmd final : Command {
 	span<VkClearAttachment> attachments;
 	span<VkClearRect> rects;
-	RenderPassInstanceState rpi;
+	const RenderPassInstanceState* rpi;
 
 	std::string nameDesc() const override { return "ClearAttachment"; }
 	void displayInspector(Gui& gui) const override;
@@ -1117,6 +1121,52 @@ struct SetStencilOpCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
+// VK_EXT_extended_dynamic_state2
+struct SetPatchControlPointsCmd final : Command {
+	u32 patchControlPoints;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetPatchControlPoints"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
+struct SetRasterizerDiscardEnableCmd final : Command {
+	bool enable;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetRasterizerDiscardEnable"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
+struct SetDepthBiasEnableCmd final : Command {
+	bool enable;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetDepthBiasEnable"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
+struct SetLogicOpCmd final : Command {
+	VkLogicOp logicOp;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetLogicOp"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
+struct SetPrimitiveRestartEnableCmd final : Command {
+	bool enable;
+
+	Type type() const override { return Type::bind; }
+	std::string nameDesc() const override { return "SetPrimitiveRestartEnable"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
 // VK_EXT_sample_locations
 struct SetSampleLocationsCmd final : Command {
 	VkSampleLocationsInfoEXT info;
@@ -1225,10 +1275,10 @@ struct BuildAccelStructsIndirectCmd final : Command {
 
 // VK_KHR_ray_tracing_pipeline
 struct TraceRaysCmdBase : StateCmdBase {
-	RayTracingState state;
+	const RayTracingState& state;
 	PushConstantData pushConstants;
 
-	TraceRaysCmdBase(CommandBuffer& cb, const RayTracingState&);
+	TraceRaysCmdBase(CommandBuffer& cb);
 	Type type() const override { return Type::traceRays; }
 	Matcher doMatch(const TraceRaysCmdBase& cmd) const;
 
@@ -1279,6 +1329,45 @@ struct SetRayTracingPipelineStackSizeCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
+// VK_KHR_dynamic_rendering
+struct BeginRenderingCmd final : SectionCommand {
+	struct Attachment {
+		ImageView* view {};
+		VkImageLayout imageLayout;
+		VkResolveModeFlagBits resolveMode;
+		ImageView* resolveView {};
+		VkImageLayout resolveImageLayout;
+		VkAttachmentLoadOp loadOp;
+		VkAttachmentStoreOp storeOp;
+		VkClearValue clearValue;
+	};
+
+	u32 layerCount {};
+	u32 viewMask {};
+	VkRenderingFlags flags {};
+	span<Attachment> colorAttachments;
+	Attachment depthAttachment; // only valid if view != null
+	Attachment stencilAttachment; // only valid if view != null
+	VkRect2D renderArea;
+
+	RenderPassInstanceState rpi;
+
+	std::string nameDesc() const override { return "BeginRendering"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
+	Matcher match(const Command& rhs) const override;
+
+	// TODO: inspector
+	// TODO: toString?
+};
+
+struct EndRenderingCmd final : SectionCommand {
+	std::string nameDesc() const override { return "EndRendering"; }
+	void record(const Device&, VkCommandBuffer cb) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
 // Visitor
 struct CommandVisitor {
 	virtual ~CommandVisitor() = default;
@@ -1299,6 +1388,8 @@ struct CommandVisitor {
 	virtual void visit(const EndConditionalRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const SubpassCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
 	virtual void visit(const FirstSubpassCmd& cmd) { visit(static_cast<const SubpassCmd&>(cmd)); }
+	virtual void visit(const BeginRenderingCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
+	virtual void visit(const EndRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 };
 
 template<typename C>

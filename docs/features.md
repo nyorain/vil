@@ -18,16 +18,16 @@ Missing:
 Implemented:
 - VK_KHR_descriptor_update_template
 - VK_KHR_bind_memory2
-- VK_KHR_bind_memory2
 - vkCmdDispatchBase
-- vkTrimCommandPool
+- VK_KHR_maintenance1 (e.g. vkTrimCommandPool)
 - VK_KHR_dedicated_allocation (not indicated in ui yet though)
+- VK_KHR_maintenance3 (nothing to do afaik)
 
 Missing:
 - Anything with device masks is missing; using it will very likely crash.
 - no support for render pass multiview, VK_KHR_multiview
 - external memory, fences, semaphores
-- KHR_maintenance2
+- VK_KHR_maintenance2
 	- using the renderpass/imageView extensions might crash
 - ui: for YCbCr conversion handles not tracked/shown
 - ui: no support for variable pointers buffer
@@ -35,25 +35,61 @@ Missing:
 ## Vulkan 1.2
 
 Implemented:
-- vkCmdDrawIndirectCount & vkCmdDrawIndexedIndirectCount
+- VK_KHR_draw_indirect_count
 - VK_KHR_create_renderpass2
 - VK_KHR_buffer_device_address (introspection support WIP)
 	- known problem: synchronization problems when using the gui on 
 	  commands/buffers using this feature. WIP
 - VK_KHR_imageless_framebuffer
 - VK_EXT_descriptor_indexing
-	- known problem: some edge cases with update_unused_while_pending
+	- some edge cases with update_unused_while_pending are not properly
+	  tested yet.
 - VK_KHR_timeline_semaphore
+
+missing:
+- extensions extending render passes (e.g. VK_KHR_depth_stencil_resolve)
+  using those might lead to crash.
+
+## Vulkan 1.3
+
+Implemented:
+- VK_KHR_copy_commands2
+- VK_EXT_extended_dynamic_state
+- VK_EXT_extended_dynamic_state2 (with extension-exclusive additions as well)
+- VK_KHR_dynamic_rendering (gui/hook support incomplete, WIP)
+
+Incomplete/missing:
+- VK_KHR_synchronization2
+- VK_KHR_format_feature_flags2 (enum names)
+- VK_EXT_private_data
+- VK_EXT_subgroup_size_control (NOTE: might need changes to the way we
+  patch shaders, need to correctly forward pNext).
+- VK_EXT_texture_compression_astc_hdr (only enum names)
+- VK_EXT_4444_formats (only enum names)
+- VK_EXT_tooling_info (not sure if we should interact with it)
+
+no-op/shader exts that should be supported out of the box (as long
+as spirv-tools supports them):
+- VK_KHR_maintenance4 (no changes needed afaik)
+- VK_KHR_shader_subgroup_extended_types 
+- VK_KHR_shader_non_semantic_info
+- VK_KHR_shader_terminate_invocation
+- VK_EXT_shader_demote_to_helper_invocation
+- VK_KHR_zero_initialize_workgroup_memory
+- VK_EXT_pipeline_creation_feedback
+- VK_EXT_image_robustness
+- VK_EXT_inline_uniform_block
+- VK_EXT_pipeline_creation_cache_control
+- VK_EXT_texel_buffer_alignment
 
 ## Non-core extensions
 
 Extensions promoted to core not explicitly mentioned here, see above.
 Supported extensions:
 
-- VK_KHR_copy_commands2
-- KHR_swapchain
+- VK_KHR_swapchain
 - VK_EXT_debug_utils
-- KHR_surface (tested overlay platforms: xlib, xcb, win32)
+- VK_KHR_surface (tested overlay platforms: xlib, xcb, win32)
 	- other platforms should work without crash at least
 
 supported but no/incomplete gui interaction/information:

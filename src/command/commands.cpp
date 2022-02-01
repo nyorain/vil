@@ -66,34 +66,17 @@ void checkReplace(span<H*> handlePtr, const CommandAllocHashMap<DeviceHandle*, D
 	}
 }
 
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
-void display(const backward::StackTrace& st, unsigned offset = 3u) {
-	// TODO the static maps here are terrible
-	static backward::TraceResolver resolver;
-	static std::unordered_map<void*, backward::ResolvedTrace::SourceLoc> locs;
-
-	resolver.load_stacktrace(st);
-
-	for(auto i = offset; i < st.size(); ++i) {
-		auto it = locs.find(st[i - 1].addr);
-		if(it == locs.end()) {
-			auto res = resolver.resolve(st[i - 1]);
-			it = locs.emplace(st[i - 1].addr, res.source).first;
-		}
-
-		auto& loc = it->second;
-		imGuiText("#{}: {}:{}:{}: {} [{}]", i, loc.filename, loc.line,
-			loc.col, loc.function, st[i - 1].addr);
-		if(ImGui::IsItemClicked()) {
-			// TODO
-			auto base = std::filesystem::current_path();
-			auto cmd = dlg::format("nvr -c \"e +{} {}/{}\"", loc.line,
-				base.string(), loc.filename);
-			(void) std::system(cmd.c_str());
-		}
+void checkReplace(RenderPassInstanceState& rpi, const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	for(auto& att : rpi.colorAttachments) {
+		checkReplace(att, map);
 	}
+
+	for(auto& att : rpi.inputAttachments) {
+		checkReplace(att, map);
+	}
+
+	checkReplace(rpi.depthStencilAttachment, map);
 }
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 
 // ArgumentsDesc
 NameResult name(DeviceHandle* handle, NullName nullName) {
@@ -218,6 +201,7 @@ Matcher Command::match(const Command& cmd) const {
 	}
 
 	// match by order
+	// TODO
 	Matcher m;
 	m.total = 1.f;
 	m.match = 1.f / (1.f + std::abs(int(cmd.relID) - int(this->relID)));
@@ -309,9 +293,11 @@ bool operator==(const VkImageSubresourceLayers& a, const VkImageSubresourceLayer
 }
 
 template<typename T>
-void add(Matcher& m, const T& a, const T& b, float weight = 1.0) {
+bool add(Matcher& m, const T& a, const T& b, float weight = 1.0) {
+	auto same = (a == b);
 	m.total += weight;
-	m.match += (a == b) ? weight : 0.f;
+	m.match += same ? weight : 0.f;
+	return same;
 }
 
 template<typename T>
@@ -558,6 +544,16 @@ void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) 
 //   even if everything else does"
 //   Different than just using a high weight in that a match doesn't automatically
 //   mean a match for the whole command.
+
+Command::Command() {
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+	// TODO: does not really belong here. should be atomic then at least
+	if(cb.dev->captureCmdStack) {
+		this->stackTrace = &construct<backward::StackTrace>(cb);
+		this->stackTrace->load_here(32u);
+	}
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+}
 
 Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
 	Matcher m;
@@ -859,74 +855,60 @@ bool same(const RenderPassDesc& a, const RenderPassDesc& b) {
 	return true;
 }
 
+bool addAllowSwapchainViews(Matcher& m, ImageView* va, ImageView* vb) {
+	if(va && vb && va != vb && va->img && vb->img && va->img->swapchain) {
+		return add(m, va->img->swapchain, vb->img->swapchain);
+	} else {
+		// the image views have to match, not the images to account
+		// for different mips or layers
+		// TODO: could consider the imageView description here instead?
+		// But creating similar image views for the same image is a weird corner case.
+		return add(m, va, vb);
+	}
+}
+
 Matcher BeginRenderPassCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const BeginRenderPassCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
 
-	// match render pass description
-	if(!rp || !cmd->rp) {
-		// Jumping out here is bad since we might miss the perfect candidate
-		// just because we don't have the render pass information anymore.
-		// We could fix this by keeping the renderpass alive by this command.
-		// Not sure if worth it though, don't know a valid use case of recreating
-		// a renderpass with same parameters.
-		dlg_trace("not matching BeginRenderPassCmd since a rp was destroyed");
-		return Matcher::noMatch();
-	}
-
-	if(!same(rp->desc, cmd->rp->desc)) {
-		return Matcher::noMatch();
-	}
-
-	// High base match probability since the RenderPasses matched.
 	Matcher m;
-	m.total += 4.f;
-	m.match += 4.f;
 
-	// The case where we try to match a command with destroyed framebuffer
-	// is ugly. Keeping references to the attachments does not help since
-	// they likely were destroyed as well, e.g. on application/renderTarget
-	// resize. We currently work around this by still returning a valid match
-	// here.
-	if(!fb || !cmd->fb) {
-		// Make sure the match isn't perfect at least.
-		if(fb) {
-			m.total += fb->attachments.size();
-		} else if(cmd->fb) {
-			m.total += cmd->fb->attachments.size();
-		} else {
-			m.total += 1;
+	// Match render pass description.
+	// When a render pass was destroyed, just ignore this check.
+	// That is unfortunate, but the attachment check below still
+	// provides significant information
+	auto rpmatch = false;
+	if(rp && cmd->rp) {
+		if(!same(rp->desc, cmd->rp->desc)) {
+			return Matcher::noMatch();
 		}
 
-		dlg_trace("matching BeginRenderPassCmd with destroyed fb");
-		return m;
+		// High base match probability since the RenderPasses matched.
+		m.total += 4.f;
+		m.match += 4.f;
+		rpmatch = true;
 	}
 
-	// TODO
-	// - will break for imageless framebuffers. Should probably store
-	//   the used attachments in BeginRenderPassCmd and compare them here
-	//   instead of relying on the attachments being stored in the fb.
-	dlg_assert_or(fb->attachments.size() == cmd->fb->attachments.size(),
-		return Matcher::noMatch());
+	// match attachments
+	if(attachments.size() != cmd->attachments.size()) {
+		return Matcher::noMatch();
+	}
 
-	for(auto i = 0u; i < fb->attachments.size(); ++i) {
-		auto va = fb->attachments[i];
-		auto vb = cmd->fb->attachments[i];
-
+	for(auto i = 0u; i < attachments.size(); ++i) {
 		// special case: different images but both are of the same
 		// swapchain, we treat them as being the same
-		if(va != vb && va->img && vb->img && va->img->swapchain) {
-			add(m, va->img->swapchain, vb->img->swapchain);
-		} else {
-			// the image views have to match, not the images to account
-			// for different mips or layers
-			add(m, va, vb);
+		auto same = addAllowSwapchainViews(m, attachments[i], cmd->attachments[i]);
+		if(!same && !rpmatch) {
+			// When we have no renderpass information, we require all attachments
+			// to be the same.
+			return Matcher::noMatch();
 		}
 	}
 
 	// TODO: consider render area, clearValues?
+	// both might be very dynamic (render area e.g. for dynamic resolution scaling)
 
 	return m;
 }
@@ -966,18 +948,8 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 }
 
 // DrawCmdBase
-DrawCmdBase::DrawCmdBase(CommandBuffer& cb, const GraphicsState& gfxState) {
-	state = copy(cb, gfxState);
-	// TODO: only do this when pipe layout matches pcr layout
-	pushConstants.data = copySpan(cb, cb.pushConstants().data);
-
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
-	// TODO: does not really belong here. should be atomic then at least
-	if(cb.dev->captureCmdStack) {
-		this->stackTrace = &construct<backward::StackTrace>(cb);
-		this->stackTrace->load_here(32u);
-	}
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+DrawCmdBase::DrawCmdBase(CommandBuffer& cb) :
+		state(cb.graphicsState()), pushConstants(cb.pushConstants()) {
 }
 
 void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
@@ -1093,26 +1065,17 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	} else if(state.pipe->dynamicState.empty()) {
 		// imGuiText("No relevant dynamic state");
 	}
-
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
-	// TODO: does not really belong here
-	auto flags = ImGuiTreeNodeFlags_FramePadding;
-	if(this->stackTrace && ImGui::TreeNodeEx("StackTrace", flags)) {
-		vil::display(*stackTrace);
-		ImGui::TreePop();
-	}
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 }
 
 void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(state.pipe, map);
-	checkReplace(state.indices.buffer, map);
+	// NOTE: we know that this isn't really const, it's just marked
+	// as const here because it's shared with other commands.
+	// And here we are allowed to modify it since this is always called
+	// for the whole record, not for individual commands.
+	auto& mstate = const_cast<GraphicsState&>(state);
 
-	checkReplace(state.rpi.rp, map);
-
-	for(auto& att : state.rpi.attachments) {
-		checkReplace(att, map);
-	}
+	checkReplace(mstate.pipe, map);
+	checkReplace(mstate.indices.buffer, map);
 
 	for(auto& verts : state.vertices) {
 		checkReplace(verts.buffer, map);
@@ -1568,10 +1531,8 @@ Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
 }
 
 // DispatchCmdBase
-DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb, const ComputeState& compState) {
-	state = copy(cb, compState);
-	// TODO: only do this when pipe layout matches pcr layout
-	pushConstants.data = copySpan(*cb.record(), cb.pushConstants().data);
+DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) :
+		state(cb.computeState()), pushConstants(cb.pushConstants()) {
 }
 
 void DispatchCmdBase::displayComputeState(Gui& gui) const {
@@ -1579,9 +1540,15 @@ void DispatchCmdBase::displayComputeState(Gui& gui) const {
 }
 
 void DispatchCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(state.pipe, map);
+	// NOTE: we know that this isn't really const, it's just marked
+	// as const here because it's shared with other commands.
+	// And here we are allowed to modify it since this is always called
+	// for the whole record, not for individual commands.
+	auto& mstate = const_cast<ComputeState&>(state);
 
-	for(auto& bds : state.descriptorSets) {
+	checkReplace(mstate.pipe, map);
+
+	for(auto& bds : mstate.descriptorSets) {
 		checkReplace(bds.dsPool, map);
 	}
 }
@@ -1621,7 +1588,9 @@ std::string DispatchCmd::toString() const {
 }
 
 void DispatchCmd::displayInspector(Gui& gui) const {
-	imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
+	imGuiText("groups X: {}", groupsX);
+	imGuiText("groups Y: {}", groupsY);
+	imGuiText("groups Z: {}", groupsZ);
 	DispatchCmdBase::displayComputeState(gui);
 }
 
@@ -2364,12 +2333,7 @@ void ClearAttachmentCmd::displayInspector(Gui& gui) const {
 	(void) gui;
 }
 
-void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(rpi.rp, map);
-
-	for(auto& att : rpi.attachments) {
-		checkReplace(att, map);
-	}
+void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>&) {
 }
 
 Matcher ClearAttachmentCmd::match(const Command& rhs) const {
@@ -2770,6 +2734,28 @@ void SetStencilOpCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		depthFailOp, compareOp);
 }
 
+// VK_EXT_extended_dynamic_state2
+void SetPatchControlPointsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetPatchControlPointsEXT(cb, this->patchControlPoints);
+}
+
+void SetRasterizerDiscardEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetRasterizerDiscardEnableEXT(cb, this->enable);
+}
+
+void SetDepthBiasEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetDepthBiasEnableEXT(cb, this->enable);
+}
+
+void SetLogicOpCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetLogicOpEXT(cb, this->logicOp);
+}
+
+void SetPrimitiveRestartEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dev.dispatch.CmdSetPrimitiveRestartEnableEXT(cb, this->enable);
+}
+
+// ---
 void SetSampleLocationsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetSampleLocationsEXT(cb, &this->info);
 }
@@ -2874,10 +2860,8 @@ void BuildAccelStructsIndirectCmd::replace(const CommandAllocHashMap<DeviceHandl
 }
 
 // VK_KHR_ray_tracing_pipeline
-TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb, const RayTracingState& rtState) {
-	state = copy(cb, rtState);
-	// TODO: only do this when pipe layout matches pcr layout
-	pushConstants.data = copySpan(*cb.record(), cb.pushConstants().data);
+TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb) :
+		state(cb.rayTracingState()), pushConstants(cb.pushConstants()) {
 }
 
 Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
@@ -2906,9 +2890,11 @@ Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 }
 
 void TraceRaysCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(state.pipe, map);
+	// See e.g. DrawCmdBase::replace for reasoning on const_cast here
+	auto& mstate = const_cast<RayTracingState&>(state);
+	checkReplace(mstate.pipe, map);
 
-	for(auto& bds : state.descriptorSets) {
+	for(auto& bds : mstate.descriptorSets) {
 		checkReplace(bds.dsPool, map);
 	}
 }
@@ -2967,6 +2953,123 @@ Matcher TraceRaysIndirectCmd::match(const Command& base) const {
 
 void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb, stackSize);
+}
+
+void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	ThreadMemScope ms;
+
+	auto convert = [&](const Attachment& src, VkRenderingAttachmentInfo& dst) {
+		if(!src.view) {
+			dst = {};
+			return;
+		}
+
+		dst.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+		dst.imageView = src.view->handle;
+		dst.imageLayout = src.imageLayout;
+		dst.resolveImageLayout = src.resolveImageLayout;
+		dst.resolveMode = src.resolveMode;
+		dst.clearValue = src.clearValue;
+		dst.loadOp = src.loadOp;
+		dst.storeOp = src.storeOp;
+
+		if(src.resolveView) {
+			dst.resolveImageView = src.resolveView->handle;
+		}
+	};
+
+	auto colorAtts = ms.alloc<VkRenderingAttachmentInfo>(colorAttachments.size());
+	for(auto [i, att] : enumerate(colorAttachments)) {
+		convert(att, colorAtts[i]);
+	}
+
+	VkRenderingAttachmentInfo dstDepth;
+	VkRenderingAttachmentInfo dstStencil;
+	convert(depthAttachment, dstDepth);
+	convert(stencilAttachment, dstStencil);
+
+	VkRenderingInfo info {};
+	info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+	info.colorAttachmentCount = u32(colorAtts.size());
+	info.pColorAttachments = colorAtts.data();
+	info.pDepthAttachment = &dstDepth;
+	info.pStencilAttachment = &dstStencil;
+	info.layerCount = this->layerCount;
+	info.renderArea = this->renderArea;
+	info.viewMask = this->viewMask;
+	info.flags = this->flags;
+
+	dlg_assert(dev.dispatch.CmdBeginRenderingKHR);
+	dev.dispatch.CmdBeginRenderingKHR(cb, &info);
+}
+
+void BeginRenderingCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	for(auto& ca : colorAttachments) {
+		checkReplace(ca.resolveView, map);
+		checkReplace(ca.view, map);
+	}
+
+	checkReplace(depthAttachment.view, map);
+	checkReplace(depthAttachment.resolveView, map);
+	checkReplace(stencilAttachment.view, map);
+	checkReplace(stencilAttachment.resolveView, map);
+	checkReplace(rpi, map);
+}
+
+Matcher BeginRenderingCmd::match(const Command& base) const {
+	auto* cmd = dynamic_cast<const BeginRenderingCmd*>(&base);
+	if(!cmd) {
+		return Matcher::noMatch();
+	}
+
+	Matcher m;
+
+	// Match attachments. We are strict here, we don't have any other information
+	if(colorAttachments.size() != cmd->colorAttachments.size()) {
+		return Matcher::noMatch();
+	}
+
+	auto addAttachment = [&](const Attachment& a, const Attachment& b) {
+		if(!a.view && !b.view) {
+			add(m, a.view, b.view);
+			return true;
+		}
+
+		// NOTE: clear value irrelevant, might change from frame to frame
+		return addAllowSwapchainViews(m, a.view, b.view) &&
+			!addAllowSwapchainViews(m, a.resolveView, b.resolveView) &&
+			a.loadOp == b.loadOp &&
+			a.storeOp == b.storeOp &&
+			a.resolveMode == b.resolveMode &&
+			a.imageLayout == b.imageLayout &&
+			a.resolveImageLayout == b.resolveImageLayout;
+	};
+
+	for(auto i = 0u; i < colorAttachments.size(); ++i) {
+		if(!addAttachment(colorAttachments[i], cmd->colorAttachments[i])) {
+			return Matcher::noMatch();
+		}
+	}
+
+	if(!addAttachment(depthAttachment, cmd->depthAttachment) ||
+			addAttachment(stencilAttachment, cmd->stencilAttachment)) {
+		return Matcher::noMatch();
+	}
+
+	if(flags != cmd->flags ||
+			viewMask != cmd->viewMask ||
+			layerCount != cmd->layerCount) {
+		return Matcher::noMatch();
+	}
+
+	m.match += 4.f;
+	m.total += 4.f;
+	return m;
+}
+
+void EndRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dlg_assert(dev.dispatch.CmdEndRenderingKHR);
+	dev.dispatch.CmdEndRenderingKHR(cb);
 }
 
 } // namespace vil

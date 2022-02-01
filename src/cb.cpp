@@ -59,7 +59,10 @@ void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
 
 void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
-	ensureSize(cb, descriptorSets, firstSet + sets.size());
+	auto allocSize = std::max<u32>(descriptorSets.size(), firstSet + sets.size());
+	auto newSpan = allocUndef<BoundDescriptorSet>(cb, allocSize);
+	std::copy(descriptorSets.begin(), descriptorSets.end(), newSpan.data());
+	this->descriptorSets = newSpan;
 
 	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
 	// There may be errors here.
@@ -114,35 +117,6 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 	}
 #endif // DS_DISTURB_CHECKS
 }
-
-void copy(CommandBuffer& cb, const DescriptorState& src, DescriptorState& dst) {
-	dst.descriptorSets = copySpan(cb, src.descriptorSets);
-	dst.pushDescriptors = copySpan(cb, src.pushDescriptors);
-}
-
-GraphicsState copy(CommandBuffer& cb, const GraphicsState& src) {
-	GraphicsState dst = src;
-	copy(cb, src, dst); // descriptors
-
-	dst.vertices = copySpan(cb, src.vertices);
-	dst.dynamic.viewports = copySpan(cb, src.dynamic.viewports);
-	dst.dynamic.scissors = copySpan(cb, src.dynamic.scissors);
-
-	return dst;
-}
-
-ComputeState copy(CommandBuffer& cb, const ComputeState& src) {
-	ComputeState dst = src;
-	copy(cb, src, dst); // descriptors
-	return dst;
-}
-
-RayTracingState copy(CommandBuffer& cb, const RayTracingState& src) {
-	RayTracingState dst = src;
-	copy(cb, src, dst); // descriptors
-	return dst;
-}
-
 
 // CommandBuffer
 CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
@@ -255,6 +229,13 @@ void CommandBuffer::doEnd() {
 	section_ = nullptr;
 	lastCommand_ = nullptr;
 	ignoreEndDebugLabels_ = 0u;
+
+	dlg_assert(subpass_ == u32(-1));
+	dlg_assert(!rp_);
+	dlg_assert(rpAttachments_.empty());
+	subpass_ = u32(-1);
+	rp_ = nullptr;
+	rpAttachments_ = {};
 
 	// parse commands into description
 	// record_->desc = CommandBufferDesc::get(record_->commands);
@@ -410,6 +391,31 @@ void CommandBuffer::invalidateLocked() {
 	record_ = nullptr;
 
 	this->state_ = State::invalid;
+}
+
+void CommandBuffer::initStates() {
+	dlg_assert(!computeState_);
+	dlg_assert(!graphicsState_);
+	dlg_assert(!rayTracingState_);
+
+	computeState_ = &construct<ComputeState>(*this);
+	graphicsState_ = &construct<GraphicsState>(*this);
+	rayTracingState_ = &construct<RayTracingState>(*this);
+}
+
+ComputeState& CommandBuffer::newComputeState() {
+	computeState_ = &construct<ComputeState>(*this, *computeState_);
+	return *computeState_;
+}
+
+GraphicsState& CommandBuffer::newGraphicsState() {
+	graphicsState_ = &construct<GraphicsState>(*this, *graphicsState_);
+	return *graphicsState_;
+}
+
+RayTracingState& CommandBuffer::newRayTracingState() {
+	rayTracingState_ = &construct<RayTracingState>(*this, *rayTracingState_);
+	return *rayTracingState_;
 }
 
 CommandPool::~CommandPool() {
@@ -604,6 +610,34 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 		commandBufferCount, handles.data());
 }
 
+void setup(CommandAlloc rec, RenderPassInstanceState& rpi, const RenderPassDesc& desc, unsigned subpass, span<ImageView*> attachments) {
+	dlg_assert(subpass < desc.subpasses.size());
+	auto& subpassDesc = desc.subpasses[subpass];
+
+	// color
+	rpi.colorAttachments = alloc<ImageView*>(rec, subpassDesc.colorAttachmentCount);
+	for(auto i = 0u; i < subpassDesc.colorAttachmentCount; ++i) {
+		auto& ref = subpassDesc.pColorAttachments[i];
+		dlg_assert(ref.attachment < attachments.size());
+		rpi.colorAttachments[i] = (attachments[ref.attachment]);
+	}
+
+	// input
+	rpi.inputAttachments = alloc<ImageView*>(rec, subpassDesc.inputAttachmentCount);
+	for(auto i = 0u; i < subpassDesc.inputAttachmentCount; ++i) {
+		auto& ref = subpassDesc.pInputAttachments[i];
+		dlg_assert(ref.attachment < attachments.size());
+		rpi.inputAttachments[i] = (attachments[ref.attachment]);
+	}
+
+	// depthstencil
+	if(subpassDesc.pDepthStencilAttachment) {
+		auto& ref = *subpassDesc.pDepthStencilAttachment;
+		dlg_assert(ref.attachment < attachments.size());
+		rpi.depthStencilAttachment = attachments[ref.attachment];
+	}
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		VkCommandBuffer                             commandBuffer,
 		const VkCommandBufferBeginInfo*             pBeginInfo) {
@@ -611,44 +645,38 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 	cb.doReset(true);
 	cb.record()->usageFlags = pBeginInfo->flags;
 
-	VkCommandBufferInheritanceInfo inherit;
+	VkCommandBufferInheritanceInfo inherit; // local copy, unwrapped
 	auto beginInfo = *pBeginInfo;
+
+	cb.initStates();
+	auto& gs = const_cast<GraphicsState&>(cb.graphicsState());
 
 	if(pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
 		dlg_assert(pBeginInfo->pInheritanceInfo);
 		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
-
-		auto& rp = get(*cb.dev, pBeginInfo->pInheritanceInfo->renderPass);
-		cb.graphicsState().rpi.rp = &rp;
-		cb.graphicsState().rpi.subpass = pBeginInfo->pInheritanceInfo->subpass;
-
 		inherit = *pBeginInfo->pInheritanceInfo;
+
+		// get render pass
+		auto& rp = get(*cb.dev, pBeginInfo->pInheritanceInfo->renderPass);
 		inherit.renderPass = rp.handle;
 
+		// get attachments
+		span<ImageView*> attachments;
 		if(pBeginInfo->pInheritanceInfo->framebuffer) {
 			auto& fb = get(*cb.dev, pBeginInfo->pInheritanceInfo->framebuffer);
 
 			// not sure if imageless framebuffers are allowed here.
 			dlg_assert(!fb.imageless);
-			if(!fb.imageless) {
-				dlg_assert(rp.desc.attachments.size() == fb.attachments.size());
-				cb.graphicsState().rpi.attachments = alloc<ImageView*>(cb, fb.attachments.size());
-
-				for(auto i = 0u; i < fb.attachments.size(); ++i) {
-					auto& attachment = fb.attachments[i];
-					dlg_assert(attachment && attachment->img);
-
-					// TODO: same issue as below, would need to allow usedHandles
-					// without commands.
-					// useHandle(cb, cmd, *attachment, false);
-
-					cb.graphicsState().rpi.attachments[i] = attachment;
-				}
-
-			}
+			attachments = fb.attachments;
+			dlg_assert(rp.desc.attachments.size() == fb.attachments.size());
 
 			inherit.framebuffer = fb.handle;
 		}
+
+		auto& rpi = construct<RenderPassInstanceState>(cb);
+		// TODO: we don't call useHandle on the attachments, should do that
+		setup(cb, rpi, rp.desc, inherit.subpass, attachments);
+		gs.rpi = &rpi;
 
 		beginInfo.pInheritanceInfo = &inherit;
 
@@ -870,10 +898,6 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cmd.fb = &get(*cb.dev, rpBeginInfo.framebuffer);
 	cmd.rp = &get(*cb.dev, rpBeginInfo.renderPass);
 
-	dlg_assert(!cb.graphicsState().rpi.rp);
-	cb.graphicsState().rpi.rp = cmd.rp;
-	cb.graphicsState().rpi.subpass = 0u;
-
 	cmd.subpassBeginInfo = subpassBeginInfo;
 	copyChainInPlace(cb, cmd.subpassBeginInfo.pNext);
 
@@ -888,7 +912,6 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 		dlg_assert(attInfo);
 
 		dlg_assert(cmd.rp->desc.attachments.size() == attInfo->attachmentCount);
-		cb.graphicsState().rpi.attachments = alloc<ImageView*>(cb, attInfo->attachmentCount);
 
 		// NOTE: we allocate from cb here because of dstAttInfo below.
 		auto fwdAttachments = alloc<VkImageView>(cb, attInfo->attachmentCount);
@@ -903,7 +926,6 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 				cmd.rp->desc.attachments[i].finalLayout);
 
 			cmd.attachments[i] = &attachment;
-			cb.graphicsState().rpi.attachments[i] = &attachment;
 			fwdAttachments[i] = attachment.handle;
 		}
 
@@ -920,7 +942,6 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 		dlg_assert(dstAttInfo->attachmentCount == fwdAttachments.size());
 	} else {
 		dlg_assert(cmd.rp->desc.attachments.size() == cmd.fb->attachments.size());
-		cb.graphicsState().rpi.attachments = alloc<ImageView*>(cb, cmd.fb->attachments.size());
 		cmd.attachments = alloc<ImageView*>(cb, cmd.fb->attachments.size());
 
 		for(auto i = 0u; i < cmd.fb->attachments.size(); ++i) {
@@ -931,16 +952,65 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 			useHandle(cb, cmd, *attachment, false);
 			useHandle(cb, cmd, *attachment->img,
 				cmd.rp->desc.attachments[i].finalLayout);
-
-			cb.graphicsState().rpi.attachments[i] = attachment;
 		}
 	}
+
+	dlg_assert(!cb.rp_);
+	cb.subpass_ = 0u;
+	cb.rp_ = cmd.rp;
+	cb.rpAttachments_ = cmd.attachments;
+
+	setup(cb, cmd.rpi, cmd.rp->desc, 0u, cmd.attachments);
+
+	auto& gs = cb.newGraphicsState();
+	dlg_assert(!gs.rpi);
+	gs.rpi = &cmd.rpi;
 
 	auto& subpassCmd = addCmd<FirstSubpassCmd, SectionType::begin>(cb);
 	(void) subpassCmd;
 
 	rpBeginInfo.framebuffer = cmd.fb->handle;
 	rpBeginInfo.renderPass = cmd.rp->handle;
+}
+
+void cmdEndRenderPass(CommandBuffer& cb, const VkSubpassEndInfo& endInfo) {
+	cb.popLabelSections();
+	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+
+	cb.endSection(nullptr); // pop subpass section
+	dlg_assert(cb.section() && dynamic_cast<BeginRenderPassCmd*>(cb.section()->cmd));
+
+	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
+	cmd.endInfo = endInfo;
+	copyChainInPlace(cb, cmd.endInfo.pNext);
+
+	auto& gs = cb.newGraphicsState();
+	dlg_assert(gs.rpi);
+	gs.rpi = {};
+
+	cb.subpass_ = u32(-1);
+	cb.rp_ = nullptr;
+	cb.rpAttachments_ = {};
+}
+
+void cmdNextSubpass(CommandBuffer& cb, const VkSubpassBeginInfo& beginInfo, const VkSubpassEndInfo& endInfo) {
+	cb.popLabelSections();
+	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+
+	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
+	cmd.beginInfo = beginInfo;
+	copyChainInPlace(cb, cmd.beginInfo.pNext);
+
+	cmd.endInfo = endInfo;
+	copyChainInPlace(cb, cmd.endInfo.pNext);
+
+	++cb.subpass_;
+	cmd.subpassID = cb.subpass_;
+	setup(cb, cmd.rpi, cb.rp_->desc, cb.subpass_, cb.rpAttachments_);
+
+	auto& gs = cb.newGraphicsState();
+	dlg_assert(gs.rpi);
+	gs.rpi = &cmd.rpi;
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
@@ -964,40 +1034,16 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 		VkCommandBuffer                             commandBuffer,
 		VkSubpassContents                           contents) {
 	auto& cb = getCommandBuffer(commandBuffer);
-
-	cb.popLabelSections();
-	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
-
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
-	cmd.beginInfo = {};
-	cmd.beginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
-	cmd.beginInfo.contents = contents;
-
-	dlg_assert(cb.graphicsState().rpi.rp);
-	++cb.graphicsState().rpi.subpass;
-
-	cmd.subpassID = cb.graphicsState().rpi.subpass;
-
+	cmdNextSubpass(cb,
+		{VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO, nullptr, contents},
+		{VK_STRUCTURE_TYPE_SUBPASS_END_INFO, nullptr});
 	cb.dev->dispatch.CmdNextSubpass(cb.handle(), contents);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getCommandBuffer(commandBuffer);
-
-	cb.popLabelSections();
-	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
-
-	cb.endSection(nullptr); // pop subpass section
-	dlg_assert(cb.section() && dynamic_cast<BeginRenderPassCmd*>(cb.section()->cmd));
-
-	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
-	cmd.endInfo = {};
-	cmd.endInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_END_INFO;
-
-	dlg_assert(cb.graphicsState().rpi.rp);
-	cb.graphicsState().rpi = {};
-
+	cmdEndRenderPass(cb, {VK_STRUCTURE_TYPE_SUBPASS_END_INFO, nullptr});
 	cb.dev->dispatch.CmdEndRenderPass(cb.handle());
 }
 
@@ -1019,19 +1065,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
-
-	cb.popLabelSections();
-	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
-
-	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
-	cmd.beginInfo = *pSubpassBeginInfo;
-	copyChainInPlace(cb, cmd.beginInfo.pNext);
-
-	dlg_assert(cb.graphicsState().rpi.rp);
-	++cb.graphicsState().rpi.subpass;
-
-	cmd.subpassID = cb.graphicsState().rpi.subpass;
-
+	cmdNextSubpass(cb, *pSubpassBeginInfo, *pSubpassEndInfo);
 	cb.dev->dispatch.CmdNextSubpass2(cb.handle(), pSubpassBeginInfo, pSubpassEndInfo);
 }
 
@@ -1039,20 +1073,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 		VkCommandBuffer                             commandBuffer,
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
-
-	cb.popLabelSections();
-	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
-
-	cb.endSection(nullptr); // pop subpass section
-	dlg_assert(cb.section() && dynamic_cast<BeginRenderPassCmd*>(cb.section()->cmd));
-
-	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
-	cmd.endInfo = *pSubpassEndInfo;
-	copyChainInPlace(cb, cmd.endInfo.pNext);
-
-	dlg_assert(cb.graphicsState().rpi.rp);
-	cb.graphicsState().rpi = {};
-
+	cmdEndRenderPass(cb, *pSubpassEndInfo);
 	cb.dev->dispatch.CmdEndRenderPass2(cb.handle(), pSubpassEndInfo);
 }
 
@@ -1112,13 +1133,13 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	// update bound state
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.newComputeState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.newGraphicsState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
-		cb.rayTracingState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
+		cb.newRayTracingState().bind(cb, *cmd.pipeLayout, firstSet, cmd.sets,
 			{pDynamicOffsets, pDynamicOffsets + dynamicOffsetCount});
 	} else {
 		dlg_error("Unknown pipeline bind point");
@@ -1152,11 +1173,43 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 	cmd.offset = offset;
 	cmd.indexType = indexType;
 
-	cb.graphicsState().indices.buffer = &buf;
-	cb.graphicsState().indices.offset = offset;
-	cb.graphicsState().indices.type = indexType;
+	auto& gs = cb.newGraphicsState();
+	gs.indices.buffer = &buf;
+	gs.indices.offset = offset;
+	gs.indices.type = indexType;
 
 	cb.dev->dispatch.CmdBindIndexBuffer(cb.handle(), buf.handle, offset, indexType);
+}
+
+span<VkBuffer> cmdBindVertexBuffers(CommandBuffer& cb, ThreadMemScope& tms,
+		uint32_t                                    firstBinding,
+		uint32_t                                    bindingCount,
+		const VkBuffer*                             pBuffers,
+		const VkDeviceSize*                         pOffsets,
+		const VkDeviceSize*                         pSizes,
+		const VkDeviceSize*                         pStrides) {
+
+	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
+	cmd.firstBinding = firstBinding;
+
+	auto& gs = cb.newGraphicsState();
+	ensureSize(cb, gs.vertices, firstBinding + bindingCount);
+	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
+
+	auto bufHandles = tms.alloc<VkBuffer>(bindingCount);
+	for(auto i = 0u; i < bindingCount; ++i) {
+		auto& buf = get(*cb.dev, pBuffers[i]);
+		cmd.buffers[i].buffer = &buf;
+		cmd.buffers[i].offset = pOffsets[i];
+		cmd.buffers[i].size = pSizes ? pSizes[i] : 0u;
+		cmd.buffers[i].stride = pStrides ? pStrides[i] : 0u;
+		useHandle(cb, cmd, buf);
+
+		gs.vertices[firstBinding + i] = cmd.buffers[i];
+		bufHandles[i] = buf.handle;
+	}
+
+	return bufHandles;
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
@@ -1166,26 +1219,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 		const VkBuffer*                             pBuffers,
 		const VkDeviceSize*                         pOffsets) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
-	cmd.firstBinding = firstBinding;
-
-	ensureSize(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
-	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
-
-	ThreadMemScope memScope;
-	auto bufHandles = memScope.alloc<VkBuffer>(bindingCount);
-	for(auto i = 0u; i < bindingCount; ++i) {
-		auto& buf = get(*cb.dev, pBuffers[i]);
-		cmd.buffers[i].buffer = &buf;
-		cmd.buffers[i].offset = pOffsets[i];
-		useHandle(cb, cmd, buf);
-
-		cb.graphicsState().vertices[firstBinding + i].buffer = &buf;
-		cb.graphicsState().vertices[firstBinding + i].offset = pOffsets[i];
-
-		bufHandles[i] = buf.handle;
-	}
-
+	ThreadMemScope tms;
+	auto bufHandles = cmdBindVertexBuffers(cb, tms, firstBinding, bindingCount,
+		pBuffers, pOffsets, nullptr, nullptr);
 	cb.dev->dispatch.CmdBindVertexBuffers(cb.handle(),
 		firstBinding, bindingCount, bufHandles.data(), pOffsets);
 }
@@ -1199,7 +1235,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DrawCmd>(cb, cb, cb.graphicsState());
+	auto& cmd = addCmd<DrawCmd>(cb, cb);
 
 	cmd.vertexCount = vertexCount;
 	cmd.instanceCount = instanceCount;
@@ -1223,7 +1259,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb, cb.graphicsState());
+	auto& cmd = addCmd<DrawIndexedCmd>(cb, cb);
 
 	cmd.firstInstance = firstInstance;
 	cmd.instanceCount = instanceCount;
@@ -1247,7 +1283,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb);
 
 	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
@@ -1274,7 +1310,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb, cb.graphicsState());
+	auto& cmd = addCmd<DrawIndirectCmd>(cb, cb);
 
 	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
@@ -1303,7 +1339,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb);
 
 	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
@@ -1337,7 +1373,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb, cb.graphicsState());
+	auto& cmd = addCmd<DrawIndirectCountCmd>(cb, cb);
 
 	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
@@ -1368,7 +1404,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DispatchCmd>(cb, cb, cb.computeState());
+	auto& cmd = addCmd<DispatchCmd>(cb, cb);
 
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
@@ -1387,7 +1423,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb, cb.computeState());
+	auto& cmd = addCmd<DispatchIndirectCmd>(cb, cb);
 	cmd.offset = offset;
 
 	auto& buf = get(*cb.dev, buffer);
@@ -1411,7 +1447,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	ExtZoneScoped;
 
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb, cb.computeState());
+	auto& cmd = addCmd<DispatchBaseCmd>(cb, cb);
 
 	cmd.baseGroupX = baseGroupX;
 	cmd.baseGroupY = baseGroupY;
@@ -1457,7 +1493,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 		regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdCopyImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImage2(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyImageInfo2KHR*                  info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1513,7 +1549,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 		regionCount, pRegions, filter);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdBlitImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdBlitImage2(
 		VkCommandBuffer                             commandBuffer,
 		const VkBlitImageInfo2KHR*                  info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1564,7 +1600,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 		src.handle, dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyBufferToImageInfo2KHR*          info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1613,7 +1649,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 		src.handle, srcImageLayout, dst.handle, regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyImageToBufferInfo2KHR*          info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1693,7 +1729,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	cmd.attachments = copySpan(cb, pAttachments, attachmentCount);
 	cmd.rects = copySpan(cb, pRects, rectCount);
 
-	dlg_assert(cb.graphicsState().rpi.rp);
+	dlg_assert(cb.graphicsState().rpi);
 	cmd.rpi = cb.graphicsState().rpi;
 
 	// NOTE: add clears attachments handles to used handles for this cmd?
@@ -1731,7 +1767,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 		dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdResolveImage2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdResolveImage2(
 		VkCommandBuffer                             commandBuffer,
 		const VkResolveImageInfo2KHR*               info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -1868,7 +1904,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 		srcBuf.handle, dstBuf.handle, regionCount, pRegions);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2KHR(
+VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyBufferInfo2KHR*                 info) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2001,15 +2037,15 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 	dlg_assert(pipe.type == pipelineBindPoint);
 
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.computeState().pipe = static_cast<ComputePipeline*>(&pipe);
+		cb.newComputeState().pipe = static_cast<ComputePipeline*>(&pipe);
 		cmd.pipe = cb.computeState().pipe;
 		useHandle(cb, cmd, *cmd.pipe);
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.graphicsState().pipe = static_cast<GraphicsPipeline*>(&pipe);
+		cb.newGraphicsState().pipe = static_cast<GraphicsPipeline*>(&pipe);
 		cmd.pipe = cb.graphicsState().pipe;
 		useHandle(cb, cmd, *cmd.pipe);
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
-		cb.rayTracingState().pipe = static_cast<RayTracingPipeline*>(&pipe);
+		cb.newRayTracingState().pipe = static_cast<RayTracingPipeline*>(&pipe);
 		cmd.pipe = cb.rayTracingState().pipe;
 		useHandle(cb, cmd, *cmd.pipe);
 	} else {
@@ -2129,8 +2165,11 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	auto ptr = static_cast<const std::byte*>(pValues);
 	cmd.values = copySpan(cb, static_cast<const std::byte*>(ptr), size);
 
-	ensureSize(cb, cb.pushConstants().data, std::max(offset + size, 128u));
-	std::memcpy(cb.pushConstants().data.data() + offset, pValues, size);
+	// reallocate push constants
+	auto& pc = cb.pushConstants().data;
+	auto allocSize = std::max<u32>(offset + size, pc.size());
+	pc = alloc<std::byte>(cb, allocSize);
+	std::memcpy(pc.data() + offset, pValues, size);
 
 	// TODO: improve pcr tracking
 	// not sure about this. The spec isn't clear about this.
@@ -2202,9 +2241,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	cmd.first = firstViewport;
 	cmd.viewports = copySpan(cb, pViewports, viewportCount);
 
-	ensureSize(cb, cb.graphicsState().dynamic.viewports, firstViewport + viewportCount);
+	auto& gs = cb.newGraphicsState();
+	ensureSize(cb, gs.dynamic.viewports, firstViewport + viewportCount);
 	std::copy(pViewports, pViewports + viewportCount,
-		cb.graphicsState().dynamic.viewports.begin() + firstViewport);
+		gs.dynamic.viewports.begin() + firstViewport);
 
 	cb.dev->dispatch.CmdSetViewport(cb.handle(), firstViewport, viewportCount, pViewports);
 }
@@ -2219,9 +2259,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	cmd.first = firstScissor;
 	cmd.scissors = copySpan(cb, pScissors, scissorCount);
 
-	ensureSize(cb, cb.graphicsState().dynamic.scissors, firstScissor + scissorCount);
+	auto& gs = cb.newGraphicsState();
+	ensureSize(cb, gs.dynamic.scissors, firstScissor + scissorCount);
 	std::copy(pScissors, pScissors + scissorCount,
-		cb.graphicsState().dynamic.scissors.begin() + firstScissor);
+		gs.dynamic.scissors.begin() + firstScissor);
 
 	cb.dev->dispatch.CmdSetScissor(cb.handle(), firstScissor, scissorCount, pScissors);
 }
@@ -2233,7 +2274,8 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineWidth(
 	auto& cmd = addCmd<SetLineWidthCmd>(cb);
 	cmd.width = lineWidth;
 
-	cb.graphicsState().dynamic.lineWidth = lineWidth;
+	auto& gs = cb.newGraphicsState();
+	gs.dynamic.lineWidth = lineWidth;
 	cb.dev->dispatch.CmdSetLineWidth(cb.handle(), lineWidth);
 }
 
@@ -2245,7 +2287,9 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetDepthBiasCmd>(cb);
 	cmd.state = {depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor};
-	cb.graphicsState().dynamic.depthBias = cmd.state;
+
+	auto& gs = cb.newGraphicsState();
+	gs.dynamic.depthBias = cmd.state;
 
 	cb.dev->dispatch.CmdSetDepthBias(cb.handle(),
 		depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor);
@@ -2257,8 +2301,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetBlendConstants(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<SetBlendConstantsCmd>(cb);
 	std::memcpy(cmd.values.data(), blendConstants, sizeof(cmd.values));
-	std::memcpy(cb.graphicsState().dynamic.blendConstants.data(), blendConstants,
-		sizeof(cb.graphicsState().dynamic.blendConstants));
+
+	auto& gs = cb.newGraphicsState();
+	std::memcpy(gs.dynamic.blendConstants.data(), blendConstants,
+		sizeof(gs.dynamic.blendConstants));
 
 	cb.dev->dispatch.CmdSetBlendConstants(cb.handle(), blendConstants);
 }
@@ -2271,8 +2317,10 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBounds(
 	auto& cmd = addCmd<SetDepthBoundsCmd>(cb);
 	cmd.min = minDepthBounds;
 	cmd.max = maxDepthBounds;
-	cb.graphicsState().dynamic.depthBoundsMin = minDepthBounds;
-	cb.graphicsState().dynamic.depthBoundsMax = maxDepthBounds;
+
+	auto& gs = cb.newGraphicsState();
+	gs.dynamic.depthBoundsMin = minDepthBounds;
+	gs.dynamic.depthBoundsMax = maxDepthBounds;
 
 	cb.dev->dispatch.CmdSetDepthBounds(cb.handle(), minDepthBounds, maxDepthBounds);
 }
@@ -2285,11 +2333,13 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilCompareMask(
 	auto& cmd = addCmd<SetStencilCompareMaskCmd>(cb);
 	cmd.faceMask = faceMask;
 	cmd.value = compareMask;
+
+	auto& gs = cb.newGraphicsState();
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
-		cb.graphicsState().dynamic.stencilFront.compareMask = compareMask;
+		gs.dynamic.stencilFront.compareMask = compareMask;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
-		cb.graphicsState().dynamic.stencilBack.compareMask = compareMask;
+		gs.dynamic.stencilBack.compareMask = compareMask;
 	}
 
 	cb.dev->dispatch.CmdSetStencilCompareMask(cb.handle(), faceMask, compareMask);
@@ -2303,11 +2353,13 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilWriteMask(
 	auto& cmd = addCmd<SetStencilWriteMaskCmd>(cb);
 	cmd.faceMask = faceMask;
 	cmd.value = writeMask;
+
+	auto& gs = cb.newGraphicsState();
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
-		cb.graphicsState().dynamic.stencilFront.compareMask = writeMask;
+		gs.dynamic.stencilFront.compareMask = writeMask;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
-		cb.graphicsState().dynamic.stencilBack.compareMask = writeMask;
+		gs.dynamic.stencilBack.compareMask = writeMask;
 	}
 
 	cb.dev->dispatch.CmdSetStencilWriteMask(cb.handle(), faceMask, writeMask);
@@ -2321,11 +2373,13 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 	auto& cmd = addCmd<SetStencilReferenceCmd>(cb);
 	cmd.faceMask = faceMask;
 	cmd.value = reference;
+
+	auto& gs = cb.newGraphicsState();
 	if(faceMask & VK_STENCIL_FACE_FRONT_BIT) {
-		cb.graphicsState().dynamic.stencilFront.reference = reference;
+		gs.dynamic.stencilFront.reference = reference;
 	}
 	if(faceMask & VK_STENCIL_FACE_BACK_BIT) {
-		cb.graphicsState().dynamic.stencilBack.reference = reference;
+		gs.dynamic.stencilBack.reference = reference;
 	}
 
 	cb.dev->dispatch.CmdSetStencilReference(cb.handle(), faceMask, reference);
@@ -2617,26 +2671,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
 		const VkDeviceSize*                         pSizes,
 		const VkDeviceSize*                         pStrides) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
-	cmd.firstBinding = firstBinding;
-
-	ensureSize(cb, cb.graphicsState().vertices, firstBinding + bindingCount);
-	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
-
-	ThreadMemScope memScope;
-	auto bufHandles = memScope.alloc<VkBuffer>(bindingCount);
-	for(auto i = 0u; i < bindingCount; ++i) {
-		auto& buf = get(*cb.dev, pBuffers[i]);
-		cmd.buffers[i].buffer = &buf;
-		cmd.buffers[i].offset = pOffsets[i];
-		cmd.buffers[i].size = pSizes ? pSizes[i] : 0u;
-		cmd.buffers[i].stride = pStrides ? pStrides[i] : 0u;
-		useHandle(cb, cmd, buf);
-
-		cb.graphicsState().vertices[firstBinding + i] = cmd.buffers[i];
-		bufHandles[i] = buf.handle;
-	}
-
+	ThreadMemScope tms;
+	auto bufHandles = cmdBindVertexBuffers(cb, tms, firstBinding, bindingCount,
+		pBuffers, pOffsets, pSizes, pStrides);
 	cb.dev->dispatch.CmdBindVertexBuffers2EXT(cb.handle(),
 		firstBinding, bindingCount, bufHandles.data(), pOffsets, pSizes,
 		pStrides);
@@ -2709,6 +2746,56 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
 
 	cb.dev->dispatch.CmdSetStencilOpEXT(cb.handle(), faceMask,
 		failOp, passOp, depthFailOp, compareOp);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetPatchControlPointsEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    patchControlPoints) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetPatchControlPointsCmd>(cb);
+	cmd.patchControlPoints = patchControlPoints;
+
+	cb.dev->dispatch.CmdSetPatchControlPointsEXT(cb.handle(), patchControlPoints);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    rasterizerDiscardEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetRasterizerDiscardEnableCmd>(cb);
+	cmd.enable = rasterizerDiscardEnable;
+
+	cb.dev->dispatch.CmdSetRasterizerDiscardEnableEXT(cb.handle(), rasterizerDiscardEnable);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthBiasEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    depthBiasEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetDepthBiasEnableCmd>(cb);
+	cmd.enable = depthBiasEnable;
+
+	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle(), depthBiasEnable);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetLogicOpEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkLogicOp                                   logicOp) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetLogicOpCmd>(cb);
+	cmd.logicOp = logicOp;
+
+	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle(), logicOp);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveRestartEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		VkBool32                                    primitiveRestartEnable) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetPrimitiveRestartEnableCmd>(cb);
+	cmd.enable = primitiveRestartEnable;
+
+	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle(), primitiveRestartEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetSampleLocationsEXT(
@@ -2948,7 +3035,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(
 		uint32_t                                    height,
 		uint32_t                                    depth) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<TraceRaysCmd>(cb, cb, cb.rayTracingState());
+	auto& cmd = addCmd<TraceRaysCmd>(cb, cb);
 	cmd.raygenBindingTable = *pRaygenShaderBindingTable;
 	cmd.missBindingTable = *pMissShaderBindingTable;
 	cmd.hitBindingTable = *pHitShaderBindingTable;
@@ -2975,7 +3062,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysIndirectKHR(
 		const VkStridedDeviceAddressRegionKHR*      pCallableShaderBindingTable,
 		VkDeviceAddress                             indirectDeviceAddress) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<TraceRaysIndirectCmd>(cb, cb, cb.rayTracingState());
+	auto& cmd = addCmd<TraceRaysIndirectCmd>(cb, cb);
 	cmd.raygenBindingTable = *pRaygenShaderBindingTable;
 	cmd.missBindingTable = *pMissShaderBindingTable;
 	cmd.hitBindingTable = *pHitShaderBindingTable;
@@ -3000,6 +3087,78 @@ VKAPI_ATTR void VKAPI_CALL CmdSetRayTracingPipelineStackSizeKHR(
 	cmd.stackSize = pipelineStackSize;
 
 	cb.dev->dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb.handle(), pipelineStackSize);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
+		VkCommandBuffer                             commandBuffer,
+		const VkRenderingInfo*                      pRenderingInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+
+	auto& info = *pRenderingInfo;
+	auto& cmd = addCmd<BeginRenderingCmd, SectionType::begin>(cb);
+	cmd.layerCount = info.layerCount;
+	cmd.viewMask = info.viewMask;
+	cmd.flags = info.flags;
+	cmd.renderArea = info.renderArea;
+
+	auto set = [&](const VkRenderingAttachmentInfo& src,
+			BeginRenderingCmd::Attachment& dst) {
+		if(!src.imageView) {
+			return static_cast<ImageView*>(nullptr);
+		}
+
+		dst.view = &unwrap(src.imageView);
+		useHandle(cb, cmd, *dst.view);
+
+		dst.imageLayout = src.imageLayout;
+		dst.resolveImageLayout = src.resolveImageLayout;
+		dst.resolveMode = src.resolveMode;
+		dst.clearValue = src.clearValue;
+		dst.loadOp = src.loadOp;
+		dst.storeOp = src.storeOp;
+
+		if(src.resolveImageView) {
+			dst.resolveView = &unwrap(src.resolveImageView);
+			useHandle(cb, cmd, *dst.resolveView);
+		}
+
+		return dst.view;
+	};
+
+	cmd.colorAttachments = alloc<BeginRenderingCmd::Attachment>(cb,
+		info.colorAttachmentCount);
+	cmd.rpi.colorAttachments = alloc<ImageView*>(cb, info.colorAttachmentCount);
+	for(auto i = 0u; i < cmd.colorAttachments.size(); ++i) {
+		auto* view = set(info.pColorAttachments[i], cmd.colorAttachments[i]);
+		cmd.rpi.colorAttachments[i] = view;
+	}
+
+	if(info.pDepthAttachment) {
+		auto* view = set(*info.pDepthAttachment, cmd.depthAttachment);
+		cmd.rpi.depthStencilAttachment = view;
+	}
+
+	if(info.pStencilAttachment) {
+		auto* view = set(*info.pStencilAttachment, cmd.stencilAttachment);
+		dlg_assert(!cmd.rpi.depthStencilAttachment ||
+			cmd.rpi.depthStencilAttachment == view);
+		cmd.rpi.depthStencilAttachment = view;
+	}
+
+	auto& gs = cb.newGraphicsState();
+	dlg_assert(!gs.rpi);
+	gs.rpi = &cmd.rpi;
+
+	cmd.record(*cb.dev, cb.handle());
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
+		VkCommandBuffer                             commandBuffer) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<EndRenderingCmd, SectionType::end>(cb);
+	(void) cmd;
+
+	cb.dev->dispatch.CmdEndRenderingKHR(cb.handle());
 }
 
 } // namespace vil

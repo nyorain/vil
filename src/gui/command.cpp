@@ -22,12 +22,45 @@
 #include <spirv-cross/spirv_cross.hpp>
 #include <bitset>
 
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+	#include <util/callstack.hpp>
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+
 // NOTE: since we might view invalidated command records, we can't assume
 //   any handles in Command objects to be not null (they are unset to null
 //   when the cooresponding handle is destroyed/invalidated).
 
 namespace vil {
 namespace {
+
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+void display(const backward::StackTrace& st, unsigned offset = 3u) {
+	// TODO the static maps here are terrible
+	static backward::TraceResolver resolver;
+	static std::unordered_map<void*, backward::ResolvedTrace::SourceLoc> locs;
+
+	resolver.load_stacktrace(st);
+
+	for(auto i = offset; i < st.size(); ++i) {
+		auto it = locs.find(st[i - 1].addr);
+		if(it == locs.end()) {
+			auto res = resolver.resolve(st[i - 1]);
+			it = locs.emplace(st[i - 1].addr, res.source).first;
+		}
+
+		auto& loc = it->second;
+		imGuiText("#{}: {}:{}:{}: {} [{}]", i, loc.filename, loc.line,
+			loc.col, loc.function, st[i - 1].addr);
+		if(ImGui::IsItemClicked()) {
+			// TODO
+			auto base = std::filesystem::current_path();
+			auto cmd = dlg::format("nvr -c \"e +{} {}/{}\"", loc.line,
+				base.string(), loc.filename);
+			(void) std::system(cmd.c_str());
+		}
+	}
+}
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 
 u32 transferCount(const CopyBufferCmd& cmd) { return cmd.regions.size(); }
 u32 transferCount(const CopyImageCmd& cmd) { return cmd.copies.size(); }
@@ -140,20 +173,44 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 				break;
 			}
 
-			auto id = viewData_.attachment.id;
-			auto* lastDrawCmd = dynamic_cast<const DrawCmdBase*>(command_);
-			dlg_assert(lastDrawCmd && lastDrawCmd->state.rpi.rp);
+			auto [type, id] = viewData_.attachment;
 
-			// when the newly select command uses a different renderpass,
-			// we reset the selection, otherwise we keep it.
-			// NOTE: would probably be better to compare for render pass
-			// compatibility instead of identity equality?
-			if(!lastDrawCmd->state.rpi.rp || !drawCmd->state.rpi.rp ||
-					lastDrawCmd->state.rpi.rp != drawCmd->state.rpi.rp) {
+			auto* lastDrawCmd = dynamic_cast<const DrawCmdBase*>(command_);
+			dlg_assert(lastDrawCmd && lastDrawCmd->state.rpi);
+			dlg_assert(drawCmd->state.rpi);
+			auto& rpiNew = *drawCmd->state.rpi;
+			auto& rpiOld = *lastDrawCmd->state.rpi;
+
+			// when the number of attachments match, we keep the selection.
+			// NOTE: not sure what makes sense here. Also check for unused
+			// attachments?
+			if(rpiNew.colorAttachments.size() != rpiOld.colorAttachments.size() ||
+					rpiNew.inputAttachments.size() != rpiOld.inputAttachments.size() ||
+					!!rpiNew.depthStencilAttachment != !!rpiOld.depthStencilAttachment) {
 				selectCommandView = true;
-			} else {
-				dlg_assert(id < drawCmd->state.rpi.rp->desc.attachments.size());
+				break;
 			}
+
+			if(type == AttachmentType::color) {
+				dlg_assert(id < rpiNew.colorAttachments.size());
+				if(!rpiNew.colorAttachments[id]) {
+					selectCommandView = true;
+					break;
+				}
+			} else if(type == AttachmentType::input) {
+				dlg_assert(id < rpiNew.inputAttachments.size());
+				if(!rpiNew.inputAttachments[id]) {
+					selectCommandView = true;
+					break;
+				}
+			} else if(type == AttachmentType::depthStencil) {
+				dlg_assert(id == 0u);
+				if(!rpiNew.depthStencilAttachment) {
+					selectCommandView = true;
+					break;
+				}
+			}
+
 			break;
 		} case IOView::ds: {
 			if(!stateCmd) {
@@ -584,53 +641,54 @@ void CommandViewer::displayIOList() {
 	if(drawCmd) {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
 		if(ImGui::TreeNodeEx("Attachments", ImGuiTreeNodeFlags_FramePadding)) {
-			if(drawCmd->state.rpi.rp) {
-				auto& desc = drawCmd->state.rpi.rp->desc;
-				auto subpassID = drawCmd->state.rpi.subpass;
-				dlg_assert(subpassID < desc.subpasses.size());
-
-				auto& subpass = desc.subpasses[subpassID];
-
-				auto addAttachment = [&](auto label, auto id) {
-					if(id == VK_ATTACHMENT_UNUSED) {
+			if(drawCmd->state.rpi) {
+				auto& rpi = *drawCmd->state.rpi;
+				auto addAttachment = [&](const std::string& label, AttachmentType type,
+						unsigned id, ImageView* view) {
+					if(!view) {
 						return;
 					}
 
 					auto flags = ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_Leaf |
 						ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
-					if(view_ == IOView::attachment && viewData_.attachment.id == id) {
+					if(view_ == IOView::attachment &&
+							viewData_.attachment.type == type &&
+							viewData_.attachment.id == id) {
 						flags |= ImGuiTreeNodeFlags_Selected;
 					}
 
 					ImGui::TreeNodeEx(label.c_str(), flags);
 					if(ImGui::IsItemClicked()) {
 						view_ = IOView::attachment;
-						viewData_.attachment = {id};
+						viewData_.attachment = {type, id};
 						imageViewer_.reset();
 						updateHook();
 					}
 				};
 
-				// TODO: name them if possible. Could use names from (fragment)
+				// IDEA: name them if possible? Could use names from (fragment)
 				// shader. Or names of image/imageView?
-				for(auto c = 0u; c < subpass.colorAttachmentCount; ++c) {
+				for(auto [c, att] : enumerate(rpi.colorAttachments)) {
 					auto label = dlg::format("Color Attachment {}", c);
-					addAttachment(label, subpass.pColorAttachments[c].attachment);
+					addAttachment(label, AttachmentType::color, c, att);
 				}
 
-				for(auto i = 0u; i < subpass.inputAttachmentCount; ++i) {
-					auto label = dlg::format("Input Attachment {}", i);
-					addAttachment(label, subpass.pInputAttachments[i].attachment);
+				for(auto [c, att] : enumerate(rpi.inputAttachments)) {
+					auto label = dlg::format("Input Attachment {}", c);
+					addAttachment(label, AttachmentType::input, c, att);
 				}
 
-				if(subpass.pDepthStencilAttachment) {
+				// depth-stencil
+				if(rpi.depthStencilAttachment) {
 					auto label = dlg::format("Depth Stencil");
-					addAttachment(label, subpass.pDepthStencilAttachment->attachment);
+					addAttachment(label, AttachmentType::depthStencil,
+						0u, rpi.depthStencilAttachment);
 				}
 
 				// NOTE: display preserve attachments? resolve attachments?
 			} else {
-				imGuiText("Could not get render pass. Was it destroyed?");
+				dlg_error("no render pass instance?!");
+				imGuiText("Unexpected error: No render pass instance?");
 			}
 
 			ImGui::TreePop();
@@ -922,19 +980,21 @@ void CommandViewer::displayAttachment(Draw& draw) {
 		return;
 	}
 
-	if(drawCmd->state.rpi.attachments.empty()) {
-		// attachments were destroyed, or we have a secondary cb that didn't
-		// se the framebuffer in inheritInfo
-		// NOTE: for secondary records (that are only nested to the main
-		// record we are viewing) we could figure it out. Not sure if worth
-		// it.
-		imGuiText("No attachment information");
-		return;
-	}
+	dlg_assert(drawCmd->state.rpi);
+	auto& rpi = *drawCmd->state.rpi;
 
 	// information
-	auto aid = viewData_.attachment.id;
-	auto& attachments = drawCmd->state.rpi.attachments;
+	auto [atype, aid] = viewData_.attachment;
+	span<ImageView* const> attachments;
+
+	switch(atype) {
+		case AttachmentType::color: attachments = rpi.colorAttachments; break;
+		case AttachmentType::input: attachments = rpi.inputAttachments; break;
+		case AttachmentType::depthStencil:
+			attachments = {&rpi.depthStencilAttachment, 1u};
+			break;
+	}
+
 	dlg_assert(aid < attachments.size());
 
 	refButtonD(*gui_, attachments[aid]);
@@ -1336,6 +1396,14 @@ void CommandViewer::displayCommand() {
 	}
 
 	command_->displayInspector(*gui_);
+
+#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+	auto flags = ImGuiTreeNodeFlags_FramePadding;
+	if(command_->stackTrace && ImGui::TreeNodeEx("StackTrace", flags)) {
+		vil::display(*command_->stackTrace);
+		ImGui::TreePop();
+	}
+#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 }
 
 void CommandViewer::draw(Draw& draw) {
@@ -1399,7 +1467,11 @@ void CommandViewer::updateHook() {
 			hook.copyIndirectCmd = indirectCmd;
 			break;
 		case IOView::attachment:
-			hook.attachmentCopies = {{viewData_.attachment.id, beforeCommand_}};
+			hook.attachmentCopies = {{
+				viewData_.attachment.type,
+				viewData_.attachment.id,
+				beforeCommand_
+			}};
 			break;
 		case IOView::transferSrc:
 			if(dynamic_cast<const UpdateBufferCmd*>(command_)) {

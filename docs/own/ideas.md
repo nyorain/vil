@@ -10,6 +10,15 @@ be possible or useful in the end.
   hook all that) but it might be useful to inspect command buffers without
   handles being destroyed
 
+- use dynamic rendering as renderpass splitting fallback?
+  we'd have to recreate the pipeline as well tho. And can't support
+  input attachments. Hm ok probably wont work
+  	- Could do it on pipeline creation time when no resolve/input
+	  attachments are used? But that might have performance impact
+	- The renderpass splitting approach is hacky, error-prone, hard
+	  to debug. So finding an alternative here (and dynamic rendering
+	  sounds promising) would make sense and be worth it.
+
 - add option to automatically write some specific pattern into images/buffers
   on initialization, making it easier to detect uninitialized memory usage
 
