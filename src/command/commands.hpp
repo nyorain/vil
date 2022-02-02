@@ -748,18 +748,18 @@ struct BeginDebugUtilsLabelCmd final : SectionCommand {
 	const char* name {};
 	std::array<float, 4> color; // NOTE: could use this in UI
 
-	std::string toString() const override { return dlg::format("Label: {}", name); }
+	std::string toString() const override { return name; }
 	void record(const Device&, VkCommandBuffer) const override;
 	Matcher match(const Command&) const override;
 
 	// NOTE: yes, we return more than just the command here.
 	// But that's because the command itself isn't of any use without the label.
-	std::string_view nameDesc() const override { return toString(); }
+	std::string_view nameDesc() const override { return name; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 struct EndDebugUtilsLabelCmd final : Command {
-	std::string_view nameDesc() const override { return dlg::format("EndLabel"); }
+	std::string_view nameDesc() const override { return "EndLabel"; }
 	Type type() const override { return Type::end; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
