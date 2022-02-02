@@ -45,8 +45,13 @@ CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
 	CommandBufferDesc ret;
 	ret.name = "root";
 
-	// TODO: should really use allocator
-	std::unordered_map<std::string, u32> ids;
+	ThreadMemScope tms;
+
+	using Pair = std::pair<const std::string_view, u32>;
+	std::unordered_map<std::string_view, u32, 
+		std::hash<std::string_view>, 
+		std::equal_to<std::string_view>, 
+		LinearScopedAllocator<Pair>> ids {tms};
 
 	while(cmd) {
 		if(auto children = cmd->children()) {

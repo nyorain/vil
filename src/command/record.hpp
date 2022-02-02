@@ -224,6 +224,9 @@ struct CommandRecord {
 	CommandAllocList<IntrusivePtr<CommandRecord>> secondaries;
 	CommandBufferDesc desc;
 
+	// TODO
+	// ParentCommand* firstParent_ {};
+
 	// Ownership of this CommandRecord is shared: while generally it is
 	// not needed anymore as soon as the associated CommandBuffer is
 	// destroyed or a new record completed in it, it may be kept alive
