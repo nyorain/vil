@@ -151,7 +151,9 @@ jobs:
     - uses: actions/setup-python@v1
       with:
         python-version: '3.x'
-    - run: pip install meson ninja
+    - run: pip install ninja
+    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
+    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:
@@ -167,29 +169,41 @@ jobs:
     - uses: actions/setup-python@v1
       with:
         python-version: '3.x'
-    - run: pip install meson ninja
+    - run: pip install ninja
+    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
+    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
     - run: meson setup build/
+        --backend=vs2019
         -Dunit-tests=true
-        -Dintegration-tests=true
+        -Dintegration-tests=false
     - run: meson test -C build/ -v
 
   windows-release:
     runs-on: windows-latest
+    env:
+      VULKAN_SDK: c:\VulkanSDK\1.2.198.1
     steps:
     - uses: actions/checkout@v1
     - uses: actions/setup-python@v1
       with:
         python-version: '3.x'
-    - run: pip install meson ninja
+    - name: Download Vulkan SDK
+      run: curl -L --silent --show-error --output VulkanSDK.exe https://sdk.lunarg.com/sdk/download/1.2.198.1/windows/VulkanSDK-1.2.198.1-Installer.exe
+    - name: Install Vulkan SDK
+      run: .\VulkanSDK.exe --accept-licenses --default-answer --confirm-command install
+    - run: pip install ninja
+    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
+    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
     - run: meson setup build/ 
+        --backend=vs2019
         -Dunit-tests=true 
         -Dintegration-tests=true
         -Dbuildtype=release
@@ -202,14 +216,16 @@ jobs:
     - uses: actions/setup-python@v1
       with:
         python-version: '3.x'
-    - run: pip install meson ninja
+    - run: pip install ninja
+    # TODO, tmp workaround: See https://github.com/mesonbuild/meson/pull/9918
+    - run: pip install git+https://github.com/frida/meson.git@f7f25b19a8d71cebf8e2934733eb041eb6862eee
     - name: Prepare MSVC
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
     - run: meson setup build/ 
+        --backend=vs2019
         -Dunit-tests=true 
-        -Dintegration-tests=true
         -Dbuildtype=release 
         -Dtracy=true
     - run: meson test -C build/ -v
