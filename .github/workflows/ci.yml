@@ -177,7 +177,6 @@ jobs:
       with:
         architecture: x64
     - run: meson setup build/
-        --backend=vs2019
         -Dunit-tests=true
         -Dintegration-tests=false
     - run: meson test -C build/ -v
@@ -203,7 +202,6 @@ jobs:
       with:
         architecture: x64
     - run: meson setup build/ 
-        --backend=vs2019
         -Dunit-tests=true 
         -Dintegration-tests=true
         -Dbuildtype=release
@@ -224,7 +222,6 @@ jobs:
       with:
         architecture: x64
     - run: meson setup build/ 
-        --backend=vs2019
         -Dunit-tests=true 
         -Dbuildtype=release 
         -Dtracy=true
