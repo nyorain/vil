@@ -240,7 +240,7 @@ struct BarrierCmd : BarrierCmdBase {
 };
 
 // All direct children must be of type 'NextSubpassCmd'
-struct BeginRenderPassCmd : SectionCommand {
+struct BeginRenderPassCmd final : SectionCommand {
 	VkRenderPassBeginInfo info {};
 	span<VkClearValue> clearValues;
 
@@ -269,7 +269,7 @@ struct BeginRenderPassCmd : SectionCommand {
 
 struct SubpassCmd : SectionCommand {};
 
-struct NextSubpassCmd : SubpassCmd {
+struct NextSubpassCmd final : SubpassCmd {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 	VkSubpassBeginInfo beginInfo; // for the new subpass
 	u32 subpassID {};
@@ -287,14 +287,14 @@ struct NextSubpassCmd : SubpassCmd {
 
 // Meta command needed for correct hierachy. We want each subpass to
 // have its own section.
-struct FirstSubpassCmd : SubpassCmd {
+struct FirstSubpassCmd final : SubpassCmd {
 	using SubpassCmd::SubpassCmd;
 	std::string_view nameDesc() const override { return "Subpass 0"; }
 	void record(const Device&, VkCommandBuffer) const override {}
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct EndRenderPassCmd : Command {
+struct EndRenderPassCmd final : Command {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 
 	std::string_view nameDesc() const override { return "EndRenderPass"; }
