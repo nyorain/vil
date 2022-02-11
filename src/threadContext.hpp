@@ -35,13 +35,13 @@ struct ThreadContext {
 	LinAllocator linalloc_;
 
 	ThreadContext() {
-		linalloc_.onAlloc = [&](auto* buf, auto size) {
+		linalloc_.onAlloc = [&]([[maybe_unused]] auto* buf, [[maybe_unused]] auto size) {
 			TracyAllocS(buf, size, 8);
 			DebugStats::get().threadContextMem += size;
 			// dlg_trace("thread context alloc {} (in {})", size, (void*) this);
 		};
 
-		linalloc_.onFree = [](auto* buf, auto size) {
+		linalloc_.onFree = []([[maybe_unused]] auto* buf, [[maybe_unused]] auto size) {
 			TracyFreeS(buf, 8);
 			DebugStats::get().threadContextMem -= size;
 		};

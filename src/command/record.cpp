@@ -26,13 +26,13 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		dsUpdateTemplates(alloc),
 		secondaries(alloc) {
 	// important to set this before we use it
-	alloc.onAlloc = [&](auto* buf, auto size) {
+	alloc.onAlloc = [&]([[maybe_unused]] auto* buf, [[maybe_unused]] auto size) {
 		TracyAllocS(buf, size, 8);
 		DebugStats::get().commandMem += size;
 		// dlg_trace("command alloc {} (in {}) -> {}", size, (void*) this, DebugStats::get().commandMem);
 	};
 
-	alloc.onFree = [&](auto* buf, auto size) {
+	alloc.onFree = [&]([[maybe_unused]] auto* buf, [[maybe_unused]] auto size) {
 		TracyFreeS(buf, 8);
 		DebugStats::get().commandMem -= size;
 		// dlg_trace("command free {} (in {}) -> {}", size, (void*) this, DebugStats::get().commandMem);
