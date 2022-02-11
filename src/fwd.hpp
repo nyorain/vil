@@ -84,7 +84,9 @@ struct CopiedImage;
 struct ViewableImageCopy;
 
 struct Command;
+struct ParentCommand;
 struct SectionCommand;
+struct RootCommand;
 struct UsedHandle;
 struct CommandRecord;
 struct CommandBufferDesc;

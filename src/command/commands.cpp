@@ -2418,15 +2418,6 @@ void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	*/
 }
 
-std::string ExecuteCommandsChildCmd::toString() const {
-	auto [cbRes, cbName] = name(record_->cb);
-	if(cbRes == NameType::named) {
-		return dlg::format("{}: {}", id_, cbName);
-	} else {
-		return dlg::format("{}", id_);
-	}
-}
-
 void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
 	auto echild = dynamic_cast<ExecuteCommandsChildCmd*>(children_);
 	while(echild) {
@@ -2442,6 +2433,33 @@ void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
 
 		echild = dynamic_cast<ExecuteCommandsChildCmd*>(echild->next);
 	}
+}
+
+const ParentCommand::SectionStats& ExecuteCommandsCmd::sectionStats() const {
+	// needed only for numChildSections, empty otherwise.
+	return stats_;
+}
+
+// ExecuteCommandsChildCmd
+std::string ExecuteCommandsChildCmd::toString() const {
+	auto [cbRes, cbName] = name(record_->cb);
+	if(cbRes == NameType::named) {
+		return dlg::format("{}: {}", id_, cbName);
+	} else {
+		return dlg::format("{}", id_);
+	}
+}
+
+const ParentCommand::SectionStats& ExecuteCommandsChildCmd::sectionStats() const {
+	return record_->commands->stats_;
+}
+
+Command* ExecuteCommandsChildCmd::children() const {
+	return record_->commands->children_;
+}
+
+ParentCommand* ExecuteCommandsChildCmd::firstChildParent() const {
+	return record_->commands->firstChildParent_;
 }
 
 // BeginDebugUtilsLabelCmd
@@ -3035,14 +3053,18 @@ Matcher BeginRenderingCmd::match(const Command& base) const {
 			return true;
 		}
 
+		if((a.resolveView || b.resolveView) && (
+				!addAllowSwapchainViews(m, a.resolveView, b.resolveView) ||
+				a.resolveMode != b.resolveMode ||
+				a.resolveImageLayout != b.resolveImageLayout)) {
+			return false;
+		}
+
 		// NOTE: clear value irrelevant, might change from frame to frame
 		return addAllowSwapchainViews(m, a.view, b.view) &&
-			!addAllowSwapchainViews(m, a.resolveView, b.resolveView) &&
 			a.loadOp == b.loadOp &&
 			a.storeOp == b.storeOp &&
-			a.resolveMode == b.resolveMode &&
-			a.imageLayout == b.imageLayout &&
-			a.resolveImageLayout == b.resolveImageLayout;
+			a.imageLayout == b.imageLayout;
 	};
 
 	for(auto i = 0u; i < colorAttachments.size(); ++i) {
@@ -3052,7 +3074,7 @@ Matcher BeginRenderingCmd::match(const Command& base) const {
 	}
 
 	if(!addAttachment(depthAttachment, cmd->depthAttachment) ||
-			addAttachment(stencilAttachment, cmd->stencilAttachment)) {
+			!addAttachment(stencilAttachment, cmd->stencilAttachment)) {
 		return Matcher::noMatch();
 	}
 

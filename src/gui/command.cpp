@@ -11,6 +11,7 @@
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <device.hpp>
+#include <queue.hpp>
 #include <threadContext.hpp>
 #include <pipe.hpp>
 #include <accelStruct.hpp>

@@ -3,6 +3,7 @@
 #include <image.hpp>
 #include <layer.hpp>
 #include <buffer.hpp>
+#include <queue.hpp>
 #include <threadContext.hpp>
 #include <util/debugMutex.hpp>
 #include <gui/commandHook.hpp> // TODO: only for pipes

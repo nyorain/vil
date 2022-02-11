@@ -6,6 +6,7 @@
 #include <gui/commandHook.hpp>
 #include <gui/fonts.hpp>
 #include <layer.hpp>
+#include <stats.hpp>
 #include <queue.hpp>
 #include <handle.hpp>
 #include <data.hpp>
@@ -1164,14 +1165,14 @@ void Gui::drawOverviewUI(Draw& draw) {
 		imGuiText("alive descriptor copies: {}", stats.aliveDescriptorCopies);
 		imGuiText("alive buffers: {}", stats.aliveBuffers);
 		imGuiText("alive image views: {}", stats.aliveImagesViews);
-		imGuiText("threadContext memory: {} KB", stats.threadContextMem / 1024.f);
-		imGuiText("command memory: {} KB", stats.commandMem / 1024.f);
-		imGuiText("ds copy memory: {} KB", stats.descriptorCopyMem / 1024.f);
-		imGuiText("ds pool memory: {} KB", stats.descriptorPoolMem / 1024.f);
+		imGuiText("threadContext memory: {} MB", stats.threadContextMem / (1024.f * 1024.f));
+		imGuiText("command memory: {} MB", stats.commandMem / (1024.f * 1024.f));
+		imGuiText("ds copy memory: {} MB", stats.descriptorCopyMem / (1024.f * 1024.f));
+		imGuiText("ds pool memory: {} MB", stats.descriptorPoolMem / (1024.f * 1024.f));
 		imGuiText("alive hook records: {}", stats.aliveHookRecords);
 		imGuiText("alive hook states: {}", stats.aliveHookStates);
-		imGuiText("layer buffer memory: {} KB", stats.ownBufferMem / 1024.f);
-		imGuiText("layer image memory: {} KB", stats.copiedImageMem / 1024.f);
+		imGuiText("layer buffer memory: {} MB", stats.ownBufferMem / (1024.f * 1024.f));
+		imGuiText("layer image memory: {} MB", stats.copiedImageMem / (1024.f * 1024.f));
 		ImGui::Separator();
 		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
 		imGuiText("transform feedback: {}", dev.transformFeedback);

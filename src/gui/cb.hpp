@@ -70,6 +70,8 @@ private:
 	// Might be empty, signalling that no command is secleted.
 	std::vector<const Command*> command_ {};
 
+	bool focusSelected_ {};
+
 	// Whether to only nest labels, supporting hierarchy-braking label nesting.
 	// We currently enable it the first time we encounter such a record.
 	bool brokenLabelNesting_ {};

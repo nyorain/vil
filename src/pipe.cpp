@@ -76,12 +76,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		auto& pre = pres[i];
 
-		pre.rp = getPtr(dev, nci.renderPass);
+		if(nci.renderPass) {
+			pre.rp = getPtr(dev, nci.renderPass);
+		}
+
 		pre.stages = {nci.pStages, nci.stageCount};
 		u32 xfbVertexStageID = u32(-1);
 
 		// transform feedback isn't supported for multiview graphics pipelines
+		// TODO: support it for non-multiview dynamic rendering
 		auto useXfb = dev.transformFeedback &&
+			pre.rp &&
 			!hasChain(pre.rp->desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO);
 
 		auto& stages = stagesVecs.emplace_back();
@@ -173,9 +178,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		pipe.renderPass = std::move(pres[i].rp);
 		pipe.subpass = pci.subpass;
 
+		// TODO: handle pNext infos.
+		// - dynamic rendering
+
 		pci.layout = pipe.layout->handle;
 
-		auto& subpassInfo = pipe.renderPass->desc.subpasses[pipe.subpass];
+		auto colorAttachmentCount = 0u;
+		auto hasDepthStencil = false;
+		if(pipe.renderPass) {
+			auto& subpassInfo = pipe.renderPass->desc.subpasses[pipe.subpass];
+			colorAttachmentCount = subpassInfo.colorAttachmentCount;
+			hasDepthStencil = !!subpassInfo.pDepthStencilAttachment;
+		}
 
 		pipe.hasTessellation = false;
 		pipe.hasMeshShader = false;
@@ -238,7 +252,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				pipe.viewportState.pViewports = pipe.viewports.data();
 			}
 
-			pipe.hasDepthStencil = subpassInfo.pDepthStencilAttachment;
+			pipe.hasDepthStencil = hasDepthStencil;
 			if(pipe.hasDepthStencil) {
 				pipe.depthStencilState = *pci.pDepthStencilState;
 			}
@@ -249,7 +263,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			pipe.tessellationState = *pci.pTessellationState;
 		}
 
-		if(subpassInfo.colorAttachmentCount) {
+		if(colorAttachmentCount) {
 			pipe.blendAttachments = {
 				pci.pColorBlendState->pAttachments,
 				pci.pColorBlendState->pAttachments + pci.pColorBlendState->attachmentCount

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <queue.hpp>
 #include <util/span.hpp>
 #include <util/linalloc.hpp>
 #include <util/intrusive.hpp>
@@ -186,11 +185,11 @@ struct CommandRecord {
 	// Labels allow nesting in ways that mess with a strict hierarchy view.
 	// Will display such records differently by default.
 	bool brokenHierarchyLabels {};
-
+	// The usageFlags passed to BeginCommandBuffer
 	VkCommandBufferUsageFlags usageFlags {};
 
 	// The hierachy of commands recording into this record.
-	Command* commands {};
+	RootCommand* commands {};
 
 	// DebugUtils labels can span across multiple records.
 	// - numPopLables: the number of labels popped from the queue stack
@@ -222,10 +221,6 @@ struct CommandRecord {
 	// since the command buffers can be reused by the application and
 	// we only reference the CommandRecord objects, don't copy them.
 	CommandAllocList<IntrusivePtr<CommandRecord>> secondaries;
-	CommandBufferDesc desc;
-
-	// TODO
-	// ParentCommand* firstParent_ {};
 
 	// Ownership of this CommandRecord is shared: while generally it is
 	// not needed anymore as soon as the associated CommandBuffer is
@@ -240,6 +235,9 @@ struct CommandRecord {
 
 	CommandRecord(CommandBuffer& cb);
 	~CommandRecord();
+
+	CommandRecord(CommandRecord&&) noexcept = delete;
+	CommandRecord& operator=(CommandRecord&&) noexcept = delete;
 };
 
 // Links a 'DeviceHandle' to a 'CommandRecord'.
@@ -281,7 +279,7 @@ void replaceInvalidatedLocked(CommandRecord& record);
 
 // Checks if the given bound DescriptorSet is still valid. If so, returns it.
 [[nodiscard]]
-std::pair<DescriptorSet*, std::unique_lock<decltype(DescriptorPool::mutex)>>
+std::pair<DescriptorSet*, std::unique_lock<SharedLockableBase(DebugMutex)>>
 tryAccessLocked(const BoundDescriptorSet&);
 
 // Directly accesses the given descriptor set.

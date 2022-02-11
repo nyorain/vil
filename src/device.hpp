@@ -31,27 +31,6 @@
 
 namespace vil {
 
-// TODO: move to own header, only include where needed
-struct DebugStats {
-	static DebugStats& get();
-
-	std::atomic<u32> aliveRecords {};
-	std::atomic<u32> aliveDescriptorCopies {};
-	std::atomic<u32> aliveDescriptorSets {};
-	std::atomic<u32> aliveBuffers {};
-	std::atomic<u32> aliveImagesViews {};
-	std::atomic<u32> aliveHookRecords {};
-	std::atomic<u32> aliveHookStates {};
-
-	std::atomic<u32> threadContextMem {};
-	std::atomic<u32> commandMem {};
-	std::atomic<u32> descriptorCopyMem {};
-	std::atomic<u32> descriptorPoolMem {};
-
-	std::atomic<u32> ownBufferMem {};
-	std::atomic<u32> copiedImageMem {};
-};
-
 template<typename T, std::size_t maxSize>
 struct KeepAliveRingBuffer {
 	std::vector<T> data;

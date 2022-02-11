@@ -5,6 +5,7 @@
 #include <gui/cb.hpp>
 #include <gui/vertexViewer.hpp>
 #include <device.hpp>
+#include <queue.hpp>
 #include <threadContext.hpp>
 #include <handles.hpp>
 #include <accelStruct.hpp>

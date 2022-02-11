@@ -4,3 +4,4 @@ subprojects/*/
 build/
 buildwin/
 .cache
+.vimspector.json

@@ -7,6 +7,7 @@
 #include <command/commands.hpp>
 #include <gui/commandHook.hpp>
 #include <layer.hpp>
+#include <queue.hpp>
 #include <cb.hpp>
 #include <rp.hpp>
 #include <util/export.hpp>
@@ -47,6 +48,13 @@ void internalIntegrationTest(Device& dev) {
 	auto passes = {0u};
 	auto format = tc.ici.format;
 	auto rpi = renderPassInfo({{format}}, {{passes}});
+
+	// add dummy VK_ATTACHMENT_UNUSED depth stencil attachment
+	VkAttachmentReference unusedRef;
+	unusedRef.attachment = VK_ATTACHMENT_UNUSED;
+	unusedRef.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+	rpi.subpasses[0].pDepthStencilAttachment = &unusedRef;
+
 	VkRenderPass rp;
 	VK_CHECK(CreateRenderPass(stp.dev, &rpi.info(), nullptr, &rp));
 
@@ -128,7 +136,8 @@ void internalIntegrationTest(Device& dev) {
 
 	// submit it, make sure it's hooked
 	auto& rec = *vilCB.record();
-	auto dst = rec.commands->next->next;
+	auto* cmd = rec.commands->children_;
+	auto dst = cmd->next->next;
 
 	dev.commandHook->queryTime = true;
 	dev.commandHook->forceHook = true;

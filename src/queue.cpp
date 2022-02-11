@@ -78,22 +78,6 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 SubmittedCommandBuffer::SubmittedCommandBuffer() = default;
 SubmittedCommandBuffer::~SubmittedCommandBuffer() = default;
 
-void print(const CommandBufferDesc& desc, unsigned indent = 0u) {
-	std::string is;
-	is.resize(indent, ' ');
-
-	dlg_trace("{}{} {}", is, desc.name, desc.totalCommands);
-	dlg_trace("{} dispatch: {}", is, desc.dispatchCommands);
-	dlg_trace("{} draw: {}", is, desc.drawCommands);
-	dlg_trace("{} transfer: {}", is, desc.transferCommands);
-	dlg_trace("{} sync: {}", is, desc.syncCommands);
-	dlg_trace("{} query: {}", is, desc.queryCommands);
-
-	for(auto& child : desc.children) {
-		print(child, indent + 1);
-	}
-}
-
 void checkPendingSubmissionsLocked(Device& dev) {
 	assertOwned(dev.mutex);
 

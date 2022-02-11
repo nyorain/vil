@@ -71,8 +71,8 @@ DescriptorStateRef::DescriptorStateRef(DescriptorStateCopy& ds) :
 	variableDescriptorCount(ds.variableDescriptorCount) {
 }
 
-template<typename T>
-void debugStatAdd(std::atomic<T>& dst, const T& val) {
+template<typename T, typename O>
+void debugStatAdd(std::atomic<T>& dst, const O& val) {
 #ifdef VIL_DEBUG_STATS
 	dst.fetch_add(val, std::memory_order_relaxed);
 #else // VIL_DEBUG_STATS
@@ -81,8 +81,8 @@ void debugStatAdd(std::atomic<T>& dst, const T& val) {
 #endif // VIL_DEBUG_STATS
 }
 
-template<typename T>
-void debugStatSub(std::atomic<T>& dst, const T& val) {
+template<typename T, typename O>
+void debugStatSub(std::atomic<T>& dst, const O& val) {
 #ifdef VIL_DEBUG_STATS
 	auto before = dst.fetch_sub(val, std::memory_order_relaxed);
 	dlg_assert(before >= val);

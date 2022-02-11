@@ -13,7 +13,10 @@ struct Fence : DeviceHandle {
 	// Synced via device mutex.
 	SubmissionBatch* submission {};
 
+	Fence() = default;
 	~Fence();
+	Fence(Fence&&) = delete;
+	Fence& operator=(Fence&&) = delete;
 };
 
 struct Semaphore : DeviceHandle {
@@ -41,6 +44,7 @@ struct Semaphore : DeviceHandle {
 	VkSemaphoreType type {};
 	u64 value {}; // only for timeline semaphores
 
+	Semaphore() = default;
 	~Semaphore();
 };
 

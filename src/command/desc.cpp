@@ -15,130 +15,26 @@
 
 namespace vil {
 
-void processType(CommandBufferDesc& desc, Command::Type type) {
-	switch(type) {
-		case Command::Type::draw:
-			++desc.drawCommands;
-			break;
-		case Command::Type::dispatch:
-			++desc.dispatchCommands;
-			break;
-		case Command::Type::sync:
-			++desc.syncCommands;
-			break;
-		case Command::Type::transfer:
-			++desc.transferCommands;
-			break;
-		case Command::Type::query:
-			++desc.queryCommands;
-			break;
-		case Command::Type::traceRays:
-			++desc.rayTraceCommands;
-			break;
-		default:
-			break;
-	}
-}
-
-// CommandBufferDesc CommandBufferDesc::get(const Command* cmd) {
-CommandBufferDesc CommandBufferDesc::getAnnotate(Command* cmd) {
-	CommandBufferDesc ret;
-	ret.name = "root";
-
+// TODO: to be removed, together with Command::relID in future.
+// This whole concept is hacky and only needed for gui.
+void annotateRelIDLegacy(Command* cmd) {
 	ThreadMemScope tms;
 
 	using Pair = std::pair<const std::string_view, u32>;
-	std::unordered_map<std::string_view, u32, 
-		std::hash<std::string_view>, 
-		std::equal_to<std::string_view>, 
+	std::unordered_map<std::string_view, u32,
+		std::hash<std::string_view>,
+		std::equal_to<std::string_view>,
 		LinearScopedAllocator<Pair>> ids {tms};
 
 	while(cmd) {
 		if(auto children = cmd->children()) {
-			auto child = CommandBufferDesc::getAnnotate(children);
-			child.name = cmd->nameDesc();
-			ret.children.push_back(std::move(child));
+			annotateRelIDLegacy(children);
 
-			// TODO: kinda hacky, should find general mechanism
-			if(auto rpc = dynamic_cast<BeginRenderPassCmd*>(cmd); rpc) {
-				dlg_assert(rpc->rp);
-
-				for(auto& attachment : rpc->rp->desc.attachments) {
-					child.params.push_back(vk::name(attachment.format));
-				}
-			}
 		}
 
-		processType(ret, cmd->type());
-
-		++ret.totalCommands;
 		cmd->relID = ids[cmd->nameDesc()]++;
 		cmd = cmd->next;
 	}
-
-	return ret;
-}
-
-float match(const CommandBufferDesc& a, const CommandBufferDesc& b) {
-	// compare children
-	auto bcit = b.children.begin();
-	float childMatchSum = 0u;
-
-	for(const auto& ac : a.children) {
-		// NOTE: when matching children we punish different orders
-		// *extremely* harshly, namely: (A, B) is considered 0% similar
-		// to (B, A). Intuitively, this seems ok for command buffer
-		// sections but it might be a problem in some cases; improve
-		// when need arises.
-		// NOTE: we only compare for exactly same sections here.
-		// We could also handle the case where labels e.g. include recording-
-		// specific information. Could filter out numbers or do a lexical
-		// distance check or something. Revisit if need ever arises.
-		for(auto it = bcit; it != b.children.end(); ++it) {
-			if(it->name == ac.name && std::equal(it->params.begin(), it->params.end(),
-					ac.params.begin(), ac.params.end())) {
-				// NOTE: we could weigh children with more total commands
-				// more, via it->totalCommands. Probably a good idea
-				// NOTE: when match is low, could look forward and choose
-				// child with almost full match, indicating a skip.
-				childMatchSum += match(*it, ac);
-				bcit = it + 1;
-				break;
-			}
-		}
-	}
-
-	auto maxChildren = std::max(a.children.size(), b.children.size());
-
-	// compare own commands
-	float weightSum = 0.f;
-	float diffSum = 0.f;
-
-	auto addMatch = [&](u32 dst, u32 src) {
-		diffSum += std::abs(float(dst) - float(src));
-		weightSum += std::max(dst, src);
-	};
-
-	addMatch(a.dispatchCommands, b.dispatchCommands);
-	addMatch(a.drawCommands, b.drawCommands);
-	addMatch(a.transferCommands, b.transferCommands);
-	addMatch(a.syncCommands, b.syncCommands);
-	addMatch(a.queryCommands, b.queryCommands);
-	addMatch(a.rayTraceCommands, b.rayTraceCommands);
-
-	// When there are no commands in either, we match 100%
-	float ownMatch = weightSum > 0.0 ? 1.f - diffSum / weightSum : 1.f;
-
-	// NOTE: kinda simplistic formula, can surely be improved.
-	// We might want to value large setions that are similar a lot
-	// more since that is a huge indicator that command buffers come from
-	// the same source, even if whole sections are missing in either of them.
-	// NOTE: we currently value child sections a lot since
-	// we are much more interested in the *structure* of a record than
-	// the actual commands (since we don't correctly match them anyways,
-	// only the numbers). Should be changed when doing better per-command
-	// matching
-	return (ownMatch + childMatchSum) / (1 + maxChildren);
 }
 
 Matcher match(DescriptorStateRef a, DescriptorStateRef b) {
@@ -352,10 +248,130 @@ FindResult find(const Command* root, span<const Command*> dst,
 	return {bestCmds, bestMatch};
 }
 
-
-// Basically just a LCS implementation, see
+// Basically just LCS implementations, see
 // https://en.wikipedia.org/wiki/Longest_common_subsequence_problem
-BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
+// TODO: can probably use a better algorithm but haven't found one
+//   yet. We are full O(n^2) here. For everything.
+// TODO: at least early-skip common begin/end. Which means this would
+//   be ~O(n) for very similar batches which would be okay again.
+// TODO: memory optimization: our current use of ThreadMemScope will
+//   keep all memory needed during matching alive. That's bad.
+//   Could recursively more local ThreadMemScopes. But then we'd have
+//   to copy the selected matches on return :(
+//   Maybe don't do it recursively but only once per match meta-level.
+//   Copy overhead should be acceptable and it's way less of a memory issue.
+
+// Outputs match in range [0, 1]
+std::pair<span<SectionMatch>, float> match(ThreadMemScope& tms,
+		const ParentCommand& rootA, const ParentCommand& rootB) {
+	// match commands themselves
+	const float rootMatch = eval(rootA.match(rootB));
+	if(rootMatch == 0.f) {
+		return {{}, 0.f};
+	}
+
+	// TODO: consider sectionStats for rootMatch.
+
+	// setup match matrix
+	struct Entry {
+		float match {};
+		unsigned dir {};
+		float matchHere {};
+		const ParentCommand* cA {};
+		const ParentCommand* cB {};
+		span<SectionMatch> children;
+	};
+
+	auto numSectionsA = rootA.sectionStats().numChildSections;
+	auto numSectionsB = rootB.sectionStats().numChildSections;
+
+	if(numSectionsA == 0u && numSectionsB == 0u) {
+		return {{}, rootMatch};
+	}
+
+	auto entries = tms.alloc<Entry>(numSectionsA * numSectionsB);
+	auto entry = [&](auto ia, auto ib) -> decltype(auto) {
+		dlg_assert(ia < numSectionsA);
+		dlg_assert(ib < numSectionsB);
+		return entries[ia * numSectionsB + ib];
+	};
+
+	// fill matrix
+	auto itA = rootA.firstChildParent();
+	auto ia = 0u;
+	while(itA) {
+		auto itB = rootB.firstChildParent();
+		auto ib = 0u;
+		while (itB) {
+			auto valDiag = -1.f;
+			auto [childMatches, matchVal] = match(tms, *itA, *itB);
+			if(matchVal > 0) {
+				valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match;
+				valDiag += matchVal;
+			}
+
+			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
+			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1).match;
+
+			auto& dst = entry(ia, ib);
+			dst.match = std::max(valDiag, std::max(valUp, valLeft));
+			dst.matchHere = matchVal;
+			dst.children = childMatches;
+			dst.cA = itA;
+			dst.cB = itB;
+			if(dst.match == valDiag) {
+				dst.dir = 1u;
+			} else if(dst.match == valUp) {
+				dst.dir = 2u;
+			} else if(dst.match == valLeft) {
+				dst.dir = 3u;
+			} else {
+				dlg_fatal("unreachable: {} = max({}, {}, {})",
+					dst.match, valDiag, valUp, valLeft);
+			}
+
+			itB = itB->nextParent_;
+			++ib;
+		}
+
+		itA = itA->nextParent_;
+		++ia;
+	}
+
+	// backtrack
+	auto maxNumMatches = std::min(numSectionsA, numSectionsB);
+	span<SectionMatch> resMatches = tms.alloc<SectionMatch>(maxNumMatches);
+
+	ia = numSectionsA;
+	auto ib = numSectionsB;
+	auto outID = 0u;
+	while(ia != 0u && ib != 0u) {
+		auto& src = entry(ia - 1, ib - 1);
+		if(src.dir == 1u) {
+			auto& sm = resMatches[outID++];
+			sm.a = src.cA;
+			sm.b = src.cB;
+			sm.match = src.matchHere;
+			sm.children = src.children;
+
+			--ia;
+			--ib;
+		} else if(src.dir == 2u) {
+			--ia;
+		} else if(src.dir == 3u) {
+			--ib;
+		} else {
+			dlg_fatal("unreachable: dir = {}", src.dir);
+		}
+	}
+
+	resMatches = resMatches.first(outID);
+
+	const float resMatch = (1 + entries.back().match) / (1 + std::max(numSectionsA, numSectionsB));
+	return {resMatches, rootMatch * resMatch};
+}
+
+BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b) {
 	ZoneScoped;
 
 	if(a.queue != b.queue) {
@@ -370,25 +386,32 @@ BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
 		float match {};
 		unsigned dir {};
 		float matchHere {};
+		span<SectionMatch> matches;
 	};
 
-	std::vector<Entry> entries(a.submissions.size() * b.submissions.size());
+	auto entries = tms.alloc<Entry>(a.submissions.size() * b.submissions.size());
 	auto entry = [&](auto ia, auto ib) -> decltype(auto) {
 		return entries[ia * b.submissions.size() + ib];
 	};
 
 	for(auto ia = 0u; ia < a.submissions.size(); ++ia) {
 		for(auto ib = 0u; ib < b.submissions.size(); ++ib) {
-			// TODO: replace record.desc and the match here with
-			// proper matching. Remove getAnnotate
-			auto fac = match(a.submissions[ia]->desc, b.submissions[ib]->desc);
-			auto valDiag = ((ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match) + fac;
+			auto [matches, fac] = match(tms,
+				*a.submissions[ia]->commands,
+				*b.submissions[ib]->commands);
+			auto valDiag = -1.f;
+			if(fac > 0.0) {
+				valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match;
+				valDiag += fac;
+			}
+
 			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
 			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1).match;
 
 			auto& dst = entry(ia, ib);
 			dst.match = std::max(valDiag, std::max(valUp, valLeft));
 			dst.matchHere = fac;
+			dst.matches = matches;
 			if(dst.match == valDiag) {
 				dst.dir = 1u;
 			} else if(dst.match == valUp) {
@@ -396,7 +419,8 @@ BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
 			} else if(dst.match == valLeft) {
 				dst.dir = 3u;
 			} else {
-				dlg_fatal("unreachable");
+				dlg_fatal("unreachable: {} = max({}, {}, {})",
+					dst.match, valDiag, valUp, valLeft);
 			}
 		}
 	}
@@ -411,37 +435,36 @@ BatchMatch match(const RecordBatch& a, const RecordBatch& b) {
 	}
 
 	res.match = entries.back().match;
-	res.matches.reserve(std::min(a.submissions.size(), b.submissions.size()));
+	res.matches = tms.alloc<RecordMatch>(std::min(a.submissions.size(), b.submissions.size()));
 
 	auto ia = a.submissions.size();
 	auto ib = b.submissions.size();
+	auto outID = 0u;
 	while(ia != 0u && ib != 0u) {
 		auto& src = entry(ia - 1, ib - 1);
 		if(src.dir == 1u) {
-			dlg_assert(ia > 0 && ib > 0);
-
-			auto& bm = res.matches.emplace_back();
+			auto& bm = res.matches[outID++];
 			bm.a = a.submissions[ia - 1].get();
 			bm.b = b.submissions[ib - 1].get();
 			bm.match = src.matchHere;
+			bm.matches = src.matches;
 
 			--ia;
 			--ib;
 		} else if(src.dir == 2u) {
-			dlg_assert(ia > 0);
 			--ia;
 		} else if(src.dir == 3u) {
-			dlg_assert(ib > 0);
 			--ib;
 		} else {
-			dlg_fatal("unreachable");
+			dlg_fatal("unreachable: src.dir = {}", src.dir);
 		}
 	}
 
+	res.matches = res.matches.first(outID);
 	return res;
 }
 
-MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b) {
+MatchResult match(ThreadMemScope& tms, span<const RecordBatch> a, span<const RecordBatch> b) {
 	ZoneScoped;
 
 	struct Entry {
@@ -450,7 +473,7 @@ MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b) {
 		BatchMatch matches;
 	};
 
-	std::vector<Entry> entries(a.size() * b.size());
+	auto entries = tms.alloc<Entry>(a.size() * b.size());
 	auto entry = [&](auto ia, auto ib) -> decltype(auto) {
 		return entries[ia * b.size() + ib];
 	};
@@ -458,9 +481,10 @@ MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b) {
 	for(auto ia = 0u; ia < a.size(); ++ia) {
 		for(auto ib = 0u; ib < b.size(); ++ib) {
 			auto valDiag = -1.f;
-			auto matchRes = match(a[ia], b[ib]);
+			auto matchRes = match(tms, a[ia], b[ib]);
 			if(matchRes.match > 0.f) {
-				valDiag = ((ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match) + matchRes.match;
+				valDiag = ((ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match);
+				valDiag += matchRes.match;
 			}
 
 			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
@@ -483,32 +507,30 @@ MatchResult match(span<const RecordBatch> a, span<const RecordBatch> b) {
 
 	// backtrack
 	MatchResult res;
-	res.matches.reserve(std::min(a.size(), b.size()));
+	res.matches = tms.alloc<BatchMatch>(std::min(a.size(), b.size()));
 	res.match = entries.back().match;
 
 	auto ia = a.size();
 	auto ib = b.size();
+	auto outID = 0u;
 	while(ia != 0u && ib != 0u) {
 		auto& src = entry(ia - 1, ib - 1);
 		if(src.dir == 1u) {
-			dlg_assert(ia > 0 && ib > 0);
-
-			auto& bm = *res.matches.emplace(res.matches.begin());
+			auto& bm = res.matches[outID++];
 			bm = std::move(src.matches);
 
 			--ia;
 			--ib;
 		} else if(src.dir == 2u) {
-			dlg_assert(ia > 0);
 			--ia;
 		} else if(src.dir == 3u) {
-			dlg_assert(ib > 0);
 			--ib;
 		} else {
-			dlg_fatal("unreachable");
+			dlg_fatal("unreachable: src.dir = {}", src.dir);
 		}
 	}
 
+	res.matches = res.matches.first(outID);
 	return res;
 }
 

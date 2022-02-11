@@ -331,7 +331,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		&hooked == target.cb ||
 		target.all;
 
-	if(!validTarget || !record_ || hierachy_.empty() || !record.commands) {
+	if(!validTarget || !record_ || hierachy_.empty() || !record.commands->children_) {
 		hookNeededForCmd = false;
 	}
 
@@ -417,7 +417,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 				// commands in hierachy_, find relies on all of them being valid.
 				replaceInvalidatedLocked(nonNull(record_));
 
-				auto findRes = find(record.commands, hierachy_, dsState_);
+				auto findRes = find(record.commands->children_, hierachy_, dsState_);
 				dlg_assert(std::equal(
 					foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
 					findRes.hierachy.begin(), findRes.hierachy.end()));
@@ -460,7 +460,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		// commands in hierachy_, find relies on all of them being valid.
 		replaceInvalidatedLocked(nonNull(record_));
 
-		findRes = find(record.commands, hierachy_, dsState_);
+		findRes = find(record.commands->children_, hierachy_, dsState_);
 		if(findRes.hierachy.empty()) {
 			// Can't find the command we are looking for in this record
 			return hooked.handle();
@@ -606,13 +606,14 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	info.maxHookLevel = &maxHookLevel;
 
 	ZoneScopedN("HookRecord");
-	this->hookRecord(record->commands, info);
+	this->hookRecord(record->commands->children_, info);
 
 	VK_CHECK(dev.dispatch.EndCommandBuffer(this->cb));
 
 	if(!hcommand.empty()) {
 		dlg_assert(maxHookLevel >= hcommand.size() - 1);
-		dlg_assert(hcommand.back()->children() || maxHookLevel == hcommand.size() - 1);
+		dlg_assert(dynamic_cast<const ParentCommand*>(hcommand.back()) ||
+			maxHookLevel == hcommand.size() - 1);
 	}
 }
 
@@ -1251,8 +1252,8 @@ void CommandHookRecord::copyAttachment(const Command& bcmd,
 	span<const ImageView* const> attachments;
 
 	switch(type) {
-		case AttachmentType::color: 
-			// written like this since old GCC versions seem to have problems with 
+		case AttachmentType::color:
+			// written like this since old GCC versions seem to have problems with
 			// our span conversion constructor.
 			// see https://github.com/nyorain/vil/runs/5014322209?check_suite_focus=true
 			attachments = {rpi->colorAttachments.data(), rpi->colorAttachments.size()};

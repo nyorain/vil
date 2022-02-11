@@ -1,15 +1,17 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <dlg/dlg.hpp>
+#include <stats.hpp>
+#include <util/util.hpp>
+#include <util/profiling.hpp>
+#include <util/linalloc.hpp>
+#include <util/dlg.hpp>
 #include <cstdlib>
 #include <vector>
 #include <cassert>
 #include <cstring>
 #include <memory_resource>
-#include <util/util.hpp>
-#include <util/profiling.hpp>
-#include <util/linalloc.hpp>
-#include <util/dlg.hpp>
 
 // per-thread allocator for temporary local memory, allocated in stack-like
 // fashion. Due to its strict requirement, only useful to create one-shot
@@ -33,6 +35,17 @@ struct ThreadContext {
 	LinAllocator linalloc_;
 
 	ThreadContext() {
+		linalloc_.onAlloc = [&](auto* buf, auto size) {
+			TracyAllocS(buf, size, 8);
+			DebugStats::get().threadContextMem += size;
+			// dlg_trace("thread context alloc {} (in {})", size, (void*) this);
+		};
+
+		linalloc_.onFree = [](auto* buf, auto size) {
+			TracyFreeS(buf, 8);
+			DebugStats::get().threadContextMem -= size;
+		};
+
 		// TODO: hacky
 		std::lock_guard lock(mutex_);
 		contexts_.push_back(this);

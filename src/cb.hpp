@@ -94,6 +94,7 @@ private:
 
     struct Section {
         SectionCommand* cmd;
+        ParentCommand* lastParentChild {}; // last child command of this section that is a parent to others
         Section* parent {}; // one level up. Null only for root node
         Section* next {}; // might be != null even when this is the last section. Re-using allocations
 		bool pop {}; // See docs/debug-utils-label-nesting.md
@@ -109,11 +110,12 @@ public: // Only public for recording, should not be accessed outside api
     RenderPass* rp_ {};
     span<ImageView*> rpAttachments_ {};
 
+	void appendParent(ParentCommand& cmd);
 	void beginSection(SectionCommand& cmd);
 	void addCmd(Command& cmd);
 	void endSection(Command*);
 	void popLabelSections();
-	auto& section() { return section_; }
+	auto* section() const { return section_; }
 	auto& ignoreEndDebugLabels() { return ignoreEndDebugLabels_; }
 
 	const ComputeState& computeState() { return *computeState_; }
@@ -121,7 +123,6 @@ public: // Only public for recording, should not be accessed outside api
 	const RayTracingState& rayTracingState() { return *rayTracingState_; }
 	PushConstantData& pushConstants() { return pushConstants_; }
 
-	void initStates();
 	ComputeState& newComputeState();
 	GraphicsState& newGraphicsState();
 	RayTracingState& newRayTracingState();

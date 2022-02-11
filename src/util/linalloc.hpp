@@ -67,6 +67,11 @@ struct LinAllocator {
 	LinMemBlock memRoot {}; // empty block
 	LinMemBlock* memCurrent;
 
+	// NOTE: should be removed later in final release mode.
+	// For keeping track of allocation size.
+	std::function<void(const std::byte*, u32)> onAlloc;
+	std::function<void(const std::byte*, u32)> onFree;
+
 	LinAllocator();
 	~LinAllocator();
 

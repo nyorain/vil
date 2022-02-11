@@ -5,6 +5,7 @@
 #include <queue.hpp>
 #include <ds.hpp>
 #include <swapchain.hpp>
+#include <threadContext.hpp>
 #include <image.hpp>
 #include <rp.hpp>
 #include <shader.hpp>
@@ -33,6 +34,8 @@ struct DisplayVisitor : CommandVisitor {
 	bool labelOnlyIndent_ {};
 	bool open_ {true};
 	u32 indent_ {};
+
+	bool jumpToSelection_ {};
 
 	DisplayVisitor(const Command* sel, Command::TypeFlags flags, bool labelOnlyIndent) :
 		sel_(sel), flags_(flags), labelOnlyIndent_(labelOnlyIndent) {
@@ -115,7 +118,8 @@ struct DisplayVisitor : CommandVisitor {
 
 		auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
 		auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
-		if(ImGui::IsItemClicked()) {
+		bool clicked = ImGui::IsItemClicked();
+		if(clicked) {
 			// don't select when only clicked on arrow
 			if(ImGui::GetMousePos().x > ImGui::GetItemRectMin().x + 30) {
 				dlg_assert(newSelection_.empty());
@@ -162,9 +166,14 @@ struct DisplayVisitor : CommandVisitor {
 		auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
 		ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
 
-		if(ImGui::IsItemClicked()) {
+		auto clicked = ImGui::IsItemClicked();
+		if(clicked) {
 			dlg_assert(newSelection_.empty());
 			newSelection_.push_back(&cmd);
+		}
+
+		if(jumpToSelection_ && (sel_ == &cmd || clicked)) {
+			ImGui::SetScrollHereY(0.5f);
 		}
 	}
 
@@ -407,6 +416,13 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::EndPopup();
 	}
 
+	ImGui::SameLine();
+
+	// TODO: this needs some love.
+	// - Disable in frames where the window was scrolled? and then
+	//   store the new scroll offset instead? This currently prevents scrolling
+	ImGui::Checkbox("Focus Selected", &focusSelected_);
+
 	// force-update shown batches when it's been too long
 	if(mode_ == UpdateMode::swapchain && !freezeState_) {
 		auto lastPresent = dev.swapchain->frameSubmissions[0].presentID;
@@ -536,7 +552,8 @@ void CommandBufferGui::draw(Draw& draw) {
 						}
 
 						DisplayVisitor visitor(selected, commandFlags_, brokenLabelNesting_);
-						visitor.displayCommands(rec->commands, true);
+						visitor.jumpToSelection_ = focusSelected_;
+						visitor.displayCommands(rec->commands->children_, true);
 						auto nsel = std::move(visitor.newSelection_);
 
 						if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
@@ -598,7 +615,8 @@ void CommandBufferGui::draw(Draw& draw) {
 		}
 
 		DisplayVisitor visitor(selected, commandFlags_, brokenLabelNesting_);
-		visitor.displayCommands(record_->commands, false);
+		visitor.jumpToSelection_ = focusSelected_;
+		visitor.displayCommands(record_->commands->children_, false);
 		auto nsel = std::move(visitor.newSelection_);
 
 		if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
@@ -782,10 +800,12 @@ void CommandBufferGui::updateState() {
 					continue;
 				}
 
+				dlg_assert(!selectedBatch_.empty());
+
 				// check if [selectedRecord_ in selectedBatch_] contextually
 				// matches  [res.record in foundBatches]
-				dlg_assert(!selectedBatch_.empty());
-				auto batchMatches = match(foundBatches, selectedBatch_);
+				ThreadMemScope tms;
+				auto batchMatches = match(tms, foundBatches, selectedBatch_);
 				bool recordMatched = false;
 				for(auto& batchMatch : batchMatches.matches) {
 					if(batchMatch.a->submissionID != res.submissionID) {
@@ -802,13 +822,18 @@ void CommandBufferGui::updateState() {
 							resMatch *= recMatch.match;
 						}
 
+						// TODO: For all parent commands, we could make
+						// sure that they match.
+						// I.e. (command_[i], res.command[i]) somewhere
+						// in the recMatch.matches[X]...matches hierarchy
+
 						break;
 					}
 
 					break;
 				}
 
-				// In this case, the newly hooked potentialy candidate didn't
+				// In this case, the newly hooked potentialy candidate did
 				// not match with our previous record in content; we won't use it.
 				if(!recordMatched) {
 					dlg_info("Hooked record did not match. Total match: {}, match count {}",

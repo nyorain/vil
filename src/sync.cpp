@@ -14,8 +14,7 @@ Fence::~Fence() {
 
 	// per spec, we can assume all associated payload to be finished
 	std::lock_guard lock(dev->mutex);
-
-	invalidateCbsLocked();
+	dlg_assert(!refRecords); // cant have associated records
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FENCE);
 
 	if(this->submission) {
@@ -30,8 +29,8 @@ Semaphore::~Semaphore() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-	invalidateCbsLocked();
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FENCE);
+	invalidateCbsLocked(); // timeline semaphores can have associated records
+	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_SEMAPHORE);
 
 	// per spec, we can assume all associated payload to be finished
 	/*
@@ -217,51 +216,56 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
 		const VkAllocationCallbacks*                pAllocator,
 		VkEvent*                                    pEvent) {
 	auto& dev = getDevice(device);
-	auto res = dev.dispatch.CreateEvent(device, pCreateInfo, pAllocator, pEvent);
+	auto res = dev.dispatch.CreateEvent(dev.handle, pCreateInfo, pAllocator, pEvent);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	auto& event = dev.events.add(*pEvent);
+	auto evPtr = std::make_unique<Event>();
+	auto& event = *evPtr;
 	event.objectType = VK_OBJECT_TYPE_EVENT;
 	event.dev = &dev;
 	event.handle = *pEvent;
+
+	*pEvent = castDispatch<VkEvent>(event);
+	dev.events.mustEmplace(*pEvent, std::move(evPtr));
 
 	return res;
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroyEvent(
 		VkDevice                                    device,
-		VkEvent                                     event,
+		VkEvent                                     vkEvent,
 		const VkAllocationCallbacks*                pAllocator) {
-	if(!event) {
+	if(!vkEvent) {
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	dev.events.mustErase(event);
-	dev.dispatch.DestroyEvent(device, event, pAllocator);
+	auto& ev = get(device, vkEvent);
+	auto handle = ev.handle;
+	ev.dev->events.mustErase(vkEvent);
+	ev.dev->dispatch.DestroyEvent(ev.dev->handle, handle, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetEventStatus(
 		VkDevice                                    device,
 		VkEvent                                     event) {
-	auto& dev = getDevice(device);
-	return dev.dispatch.GetEventStatus(device, event);
+	auto& ev = get(device, event);
+	return ev.dev->dispatch.GetEventStatus(ev.dev->handle, ev.handle);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL SetEvent(
 		VkDevice                                    device,
 		VkEvent                                     event) {
-	auto& dev = getDevice(device);
-	return dev.dispatch.SetEvent(device, event);
+	auto& ev = get(device, event);
+	return ev.dev->dispatch.SetEvent(ev.dev->handle, ev.handle);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetEvent(
 		VkDevice                                    device,
 		VkEvent                                     event) {
-	auto& dev = getDevice(device);
-	return dev.dispatch.ResetEvent(device, event);
+	auto& ev = get(device, event);
+	return ev.dev->dispatch.ResetEvent(device, ev.handle);
 }
 
 } // namespace vil

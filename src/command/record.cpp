@@ -1,6 +1,7 @@
 #include <command/record.hpp>
 #include <command/commands.hpp>
 #include <command/alloc.hpp>
+#include <stats.hpp>
 #include <image.hpp>
 #include <pipe.hpp>
 #include <cb.hpp>
@@ -24,6 +25,19 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		pipeLayouts(alloc),
 		dsUpdateTemplates(alloc),
 		secondaries(alloc) {
+	// important to set this before we use it
+	alloc.onAlloc = [&](auto* buf, auto size) {
+		TracyAllocS(buf, size, 8);
+		DebugStats::get().commandMem += size;
+		// dlg_trace("command alloc {} (in {}) -> {}", size, (void*) this, DebugStats::get().commandMem);
+	};
+
+	alloc.onFree = [&](auto* buf, auto size) {
+		TracyFreeS(buf, 8);
+		DebugStats::get().commandMem -= size;
+		// dlg_trace("command free {} (in {}) -> {}", size, (void*) this, DebugStats::get().commandMem);
+	};
+
 	if(!cb->name.empty()) {
 		cbName = copyString(*this, cb->name);
 	}
@@ -91,11 +105,7 @@ void replaceInvalidatedLocked(CommandRecord& record) {
 	// here anyways at the moment. But that should be doable if really
 	// needed, might be good idea to move the usedHandles maps to use
 	// our Handles (i.e. Image*) as key anyways.
-	auto* cmd = record.commands;
-	while(cmd) {
-		cmd->replace(record.invalidated);
-		cmd = cmd->next;
-	}
+	record.commands->replace(record.invalidated);
 
 	// remove from handles
 	for(auto it = record.handles.begin(); it != record.handles.end(); ) {

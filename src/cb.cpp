@@ -6,6 +6,7 @@
 #include <handles.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
+#include <vk/typemap_helper.h>
 #include <command/alloc.hpp>
 #include <command/commands.hpp>
 #include <gui/commandHook.hpp>
@@ -198,8 +199,21 @@ void CommandBuffer::doReset(bool startRecord) {
 		if(startRecord) {
 			++recordCount_;
 
+			dlg_assert(!computeState_);
+			dlg_assert(!graphicsState_);
+			dlg_assert(!rayTracingState_);
+			dlg_assert(!section_);
+
 			record_ = IntrusivePtr<CommandRecord>(new CommandRecord(*this));
 			state_ = CommandBuffer::State::recording;
+
+			computeState_ = &construct<ComputeState>(*this);
+			graphicsState_ = &construct<GraphicsState>(*this);
+			rayTracingState_ = &construct<RayTracingState>(*this);
+
+			record_->commands = &construct<RootCommand>(*this);
+			section_ = &construct<Section>(*this);
+			section_->cmd = record_->commands;
 		} else {
 			state_ = CommandBuffer::State::initial;
 		}
@@ -209,17 +223,16 @@ void CommandBuffer::doReset(bool startRecord) {
 void CommandBuffer::doEnd() {
 	ZoneScoped;
 	dlg_assert(record_);
+	dlg_assert(section_);
 
 	// debug utils labels can be unterminated, see docs/debug-utils-label-nesting.md
-	while(section_) {
+	while(section_->parent) {
 		auto lblCmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(section_->cmd);
 		dlg_assert(lblCmd);
 		dlg_assert(!section_->pop);
 		record_->pushLables.push_back(lblCmd->name);
 		section_ = section_->parent;
 	}
-
-	dlg_assert(!section_);
 
 	graphicsState_ = {};
 	computeState_ = {};
@@ -238,11 +251,8 @@ void CommandBuffer::doEnd() {
 	rpAttachments_ = {};
 
 	// parse commands into description
-	// record_->desc = CommandBufferDesc::get(record_->commands);
-	{
-		ZoneScopedN("getAnnotate");
-		record_->desc = CommandBufferDesc::getAnnotate(record_->commands);
-	}
+	// TODO: this should really be removed
+	annotateRelIDLegacy(record_->commands);
 
 	// Make sure to never call CommandBufferRecord destructor inside lock.
 	// Don't just call reset() here or move lastRecord_ so that always have a valid
@@ -280,7 +290,8 @@ void CommandBuffer::doEnd() {
 }
 
 void CommandBuffer::endSection(Command* cmd) {
-	if(!section_) {
+	if(!section_->parent) {
+		// We reached the root section.
 		// Debug utils commands can span multiple command buffers, they
 		// are only queue-local.
 		// See docs/debug-utils-label-nesting.md
@@ -302,7 +313,7 @@ void CommandBuffer::endSection(Command* cmd) {
 
 	// We pop the label sections here that were previously ended by
 	// the application but not in the same nesting level they were created.
-	while(section_ && section_->pop) {
+	while(section_->parent && section_->pop) {
 		dlg_assert(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd));
 		lastCommand_ = section_->cmd;
 
@@ -325,39 +336,54 @@ void CommandBuffer::popLabelSections() {
 	}
 }
 
-void CommandBuffer::beginSection(SectionCommand& cmd) {
-	if(section_) {
-		// re-use a previously allocated section that isn't in use anymore
-		if(section_->next) {
-			dlg_assert(!section_->next->cmd);
-			section_ = section_->next;
-			section_->cmd = nullptr;
-			section_->pop = false;
-		} else {
-			auto nextSection = &construct<Section>(*this);
-			nextSection->parent = section_;
-			section_->next = nextSection;
-			section_ = nextSection;
-		}
+void CommandBuffer::appendParent(ParentCommand& cmd) {
+	dlg_assert(section_);
+
+	dlg_assert(!!section_->lastParentChild == !!section_->cmd->firstChildParent_);
+	if(section_->lastParentChild) {
+		section_->lastParentChild->nextParent_ = &cmd;
 	} else {
-		section_ = &construct<Section>(*this);
+		section_->cmd->firstChildParent_ = &cmd;
+	}
+
+	section_->lastParentChild = &cmd;
+	++section_->cmd->stats_.numChildSections;
+}
+
+void CommandBuffer::beginSection(SectionCommand& cmd) {
+	appendParent(cmd);
+
+	if(section_->next) {
+		// re-use a previously allocated section that isn't in use anymore
+		dlg_assert(!section_->next->cmd);
+		dlg_assert(section_->next->parent == section_);
+		section_ = section_->next;
+		section_->cmd = nullptr;
+		section_->pop = false;
+		section_->lastParentChild = nullptr;
+	} else {
+		auto nextSection = &construct<Section>(*this);
+		nextSection->parent = section_;
+		section_->next = nextSection;
+		section_ = nextSection;
 	}
 
 	section_->cmd = &cmd;
-	lastCommand_ = nullptr;
+	lastCommand_ = nullptr; // will be set on first addCmd
 }
 
 void CommandBuffer::addCmd(Command& cmd) {
+	dlg_assert(record_);
+	dlg_assert(section_);
+
 	if(lastCommand_) {
 		dlg_assert(record_->commands);
 		lastCommand_->next = &cmd;
-	} else if(section_) {
+	} else {
 		dlg_assert(record_->commands);
 		dlg_assert(section_->cmd);
 		dlg_assert(!section_->cmd->children_);
 		section_->cmd->children_ = &cmd;
-	} else if(!record_->commands) {
-		record_->commands = &cmd;
 	}
 
 	lastCommand_ = &cmd;
@@ -391,16 +417,6 @@ void CommandBuffer::invalidateLocked() {
 	record_ = nullptr;
 
 	this->state_ = State::invalid;
-}
-
-void CommandBuffer::initStates() {
-	dlg_assert(!computeState_);
-	dlg_assert(!graphicsState_);
-	dlg_assert(!rayTracingState_);
-
-	computeState_ = &construct<ComputeState>(*this);
-	graphicsState_ = &construct<GraphicsState>(*this);
-	rayTracingState_ = &construct<RayTracingState>(*this);
 }
 
 ComputeState& CommandBuffer::newComputeState() {
@@ -618,23 +634,29 @@ void setup(CommandAlloc rec, RenderPassInstanceState& rpi, const RenderPassDesc&
 	rpi.colorAttachments = alloc<ImageView*>(rec, subpassDesc.colorAttachmentCount);
 	for(auto i = 0u; i < subpassDesc.colorAttachmentCount; ++i) {
 		auto& ref = subpassDesc.pColorAttachments[i];
-		dlg_assert(ref.attachment < attachments.size());
-		rpi.colorAttachments[i] = (attachments[ref.attachment]);
+		if(ref.attachment != VK_ATTACHMENT_UNUSED) {
+			dlg_assert(ref.attachment < attachments.size());
+			rpi.colorAttachments[i] = (attachments[ref.attachment]);
+		}
 	}
 
 	// input
 	rpi.inputAttachments = alloc<ImageView*>(rec, subpassDesc.inputAttachmentCount);
 	for(auto i = 0u; i < subpassDesc.inputAttachmentCount; ++i) {
 		auto& ref = subpassDesc.pInputAttachments[i];
-		dlg_assert(ref.attachment < attachments.size());
-		rpi.inputAttachments[i] = (attachments[ref.attachment]);
+		if(ref.attachment != VK_ATTACHMENT_UNUSED) {
+			dlg_assert(ref.attachment < attachments.size());
+			rpi.inputAttachments[i] = (attachments[ref.attachment]);
+		}
 	}
 
 	// depthstencil
 	if(subpassDesc.pDepthStencilAttachment) {
 		auto& ref = *subpassDesc.pDepthStencilAttachment;
-		dlg_assert(ref.attachment < attachments.size());
-		rpi.depthStencilAttachment = attachments[ref.attachment];
+		if(ref.attachment != VK_ATTACHMENT_UNUSED) {
+			dlg_assert(ref.attachment < attachments.size());
+			rpi.depthStencilAttachment = attachments[ref.attachment];
+		}
 	}
 }
 
@@ -645,10 +667,10 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 	cb.doReset(true);
 	cb.record()->usageFlags = pBeginInfo->flags;
 
+	ThreadMemScope tms;
 	VkCommandBufferInheritanceInfo inherit; // local copy, unwrapped
 	auto beginInfo = *pBeginInfo;
 
-	cb.initStates();
 	auto& gs = const_cast<GraphicsState&>(cb.graphicsState());
 
 	if(pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
@@ -656,34 +678,51 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
 		inherit = *pBeginInfo->pInheritanceInfo;
 
-		// get render pass
-		auto& rp = get(*cb.dev, pBeginInfo->pInheritanceInfo->renderPass);
-		inherit.renderPass = rp.handle;
+		auto* dynRender = LvlFindInChain<
+			VkCommandBufferInheritanceRenderingInfo>(inherit.pNext);
+		if(pBeginInfo->pInheritanceInfo->renderPass) {
+			// get render pass
+			auto& rp = get(*cb.dev, pBeginInfo->pInheritanceInfo->renderPass);
+			inherit.renderPass = rp.handle;
 
-		// get attachments
-		span<ImageView*> attachments;
-		if(pBeginInfo->pInheritanceInfo->framebuffer) {
-			auto& fb = get(*cb.dev, pBeginInfo->pInheritanceInfo->framebuffer);
+			// get attachments
+			span<ImageView*> attachments;
+			if(pBeginInfo->pInheritanceInfo->framebuffer) {
+				auto& fb = get(*cb.dev, pBeginInfo->pInheritanceInfo->framebuffer);
 
-			// not sure if imageless framebuffers are allowed here.
-			dlg_assert(!fb.imageless);
-			attachments = fb.attachments;
-			dlg_assert(rp.desc.attachments.size() == fb.attachments.size());
+				// not sure if imageless framebuffers are allowed here.
+				dlg_assert(!fb.imageless);
+				attachments = fb.attachments;
+				dlg_assert(rp.desc.attachments.size() == fb.attachments.size());
 
-			inherit.framebuffer = fb.handle;
+				inherit.framebuffer = fb.handle;
+			}
+
+			auto& rpi = construct<RenderPassInstanceState>(cb);
+			// TODO: we don't call useHandle on the attachments, should do that
+			setup(cb, rpi, rp.desc, inherit.subpass, attachments);
+			gs.rpi = &rpi;
+
+			// NOTE: no need to set cb.rp_, cb.subpass_, cb.rpAttachments_
+			// here, they are only relevant for NextSubpass logic
+
+			// TODO: use handles here? would have to allow using handles without command
+			// Pretty sure we'd have to do it for correctness.
+			// useHandle(cb, cmd, *cmd.fb);
+			// useHandle(cb, cmd, *cmd.rp);
+		} else if(dynRender) {
+			// TODO: setup rpi. We can't do this since we don't have
+			// view information here ugh. Should probably rework commands
+			// to not reference rpi at all to support this. And instead
+			// require knowing parent commands.
+			// auto& dynRender = *const_cast<VkCommandBufferInheritanceRenderingInfo*>(
+			// 	LvlFindInChain<VkCommandBufferInheritanceRenderingInfo>(inherit.pNext));
+			// auto& rpi = construct<RenderPassInstanceState>(cb);
+		} else {
+			dlg_error("Unsupported VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT usage");
 		}
 
-		auto& rpi = construct<RenderPassInstanceState>(cb);
-		// TODO: we don't call useHandle on the attachments, should do that
-		setup(cb, rpi, rp.desc, inherit.subpass, attachments);
-		gs.rpi = &rpi;
-
 		beginInfo.pInheritanceInfo = &inherit;
-
-		// TODO: use handles here? would have to allow using handles without command
-		// Pretty sure we'd have to do it for correctness.
-		// useHandle(cb, cmd, *cmd.fb);
-		// useHandle(cb, cmd, *cmd.rp);
 	}
 
 	return cb.dev->dispatch.BeginCommandBuffer(cb.handle(), &beginInfo);
@@ -855,6 +894,8 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		useHandle(cb, cmd, event);
 	}
 
+	++cb.section()->cmd->stats_.numSyncCommands;
+
 	cmd.record(*cb.dev, cb.handle());
 }
 
@@ -878,6 +919,8 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 	cmd.bufBarriers = copySpan(cb, pBufferMemoryBarriers, bufferMemoryBarrierCount);
 
 	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
+
+	++cb.section()->cmd->stats_.numSyncCommands;
 
 	cmd.record(*cb.dev, cb.handle());
 }
@@ -1242,6 +1285,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	cmd.firstVertex = firstVertex;
 	cmd.firstInstance = firstInstance;
 
+	++cb.section()->cmd->stats_.numDraws;
+
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDraw(cb.handle(),
@@ -1266,6 +1311,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	cmd.indexCount = indexCount;
 	cmd.vertexOffset = vertexOffset;
 	cmd.firstIndex = firstIndex;
+
+	++cb.section()->cmd->stats_.numDraws;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1294,6 +1341,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
 
+	++cb.section()->cmd->stats_.numDraws;
+
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDrawIndirect(cb.handle(),
@@ -1320,6 +1369,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	cmd.offset = offset;
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
+
+	++cb.section()->cmd->stats_.numDraws;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1355,6 +1406,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
+	++cb.section()->cmd->stats_.numDraws;
+
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDrawIndirectCount(cb.handle(), buf.handle, offset,
@@ -1389,6 +1442,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
+	++cb.section()->cmd->stats_.numDraws;
+
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDrawIndexedIndirectCount(cb.handle(), buf.handle,
@@ -1410,6 +1465,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
+	++cb.section()->cmd->stats_.numDispatches;
+
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDispatch(cb.handle(), groupCountX, groupCountY, groupCountZ);
@@ -1429,6 +1486,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
+
+	++cb.section()->cmd->stats_.numDispatches;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1455,6 +1514,8 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
+
+	++cb.section()->cmd->stats_.numDispatches;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1487,6 +1548,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdCopyImage(cb.handle(),
 		src.handle, srcImageLayout,
 		dst.handle, dstImageLayout,
@@ -1511,6 +1574,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.dstImage = dst.handle;
@@ -1543,6 +1608,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdBlitImage(cb.handle(),
 		src.handle, srcImageLayout,
 		dst.handle, dstImageLayout,
@@ -1568,6 +1635,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.srcImage = src.handle;
@@ -1596,6 +1665,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdCopyBufferToImage(cb.handle(),
 		src.handle, dst.handle, dstImageLayout, regionCount, pRegions);
 }
@@ -1617,6 +1688,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.srcBuffer = src.handle;
@@ -1645,6 +1718,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdCopyImageToBuffer(cb.handle(),
 		src.handle, srcImageLayout, dst.handle, regionCount, pRegions);
 }
@@ -1666,6 +1741,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.dstBuffer = dst.handle;
@@ -1691,6 +1768,8 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdClearColorImage(cb.handle(),
 		dst.handle, imageLayout, pColor, rangeCount, pRanges);
 }
@@ -1713,6 +1792,8 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdClearDepthStencilImage(cb.handle(), dst.handle,
 		imageLayout, pDepthStencil, rangeCount, pRanges);
 }
@@ -1732,10 +1813,11 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	dlg_assert(cb.graphicsState().rpi);
 	cmd.rpi = cb.graphicsState().rpi;
 
-	// NOTE: add clears attachments handles to used handles for this cmd?
-	// but they were already used in BeginRenderPass and are just implicitly
-	// used here (as in many other render pass cmds). So we probably should
-	// not do it.
+	// NOTE: We explicitly don't add the cleared attachments to used handles here.
+	// In case of a secondary command buffer with dynamic rendering, we might not even know them.
+
+	// NOTE: strictly speaking this isn't a transfer, we don't care.
+	++cb.section()->cmd->stats_.numTransfers;
 
 	cb.dev->dispatch.CmdClearAttachments(cb.handle(), attachmentCount,
 		pAttachments, rectCount, pRects);
@@ -1763,6 +1845,8 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdResolveImage(cb.handle(), src.handle, srcImageLayout,
 		dst.handle, dstImageLayout, regionCount, pRegions);
 }
@@ -1786,6 +1870,8 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage2(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	auto copy = *info;
 	copy.dstImage = dst.handle;
 	copy.srcImage = src.handle;
@@ -1803,6 +1889,8 @@ VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
 
 	useHandle(cb, cmd, *cmd.event);
 
+	++cb.section()->cmd->stats_.numSyncCommands;
+
 	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
 }
 
@@ -1817,6 +1905,8 @@ VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
 
 	useHandle(cb, cmd, *cmd.event);
 
+	++cb.section()->cmd->stats_.numSyncCommands;
+
 	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
 }
 
@@ -1826,7 +1916,10 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
-	auto* last = cmd.children_; // nullptr
+	cb.appendParent(cmd);
+
+	cmd.stats_.numChildSections = commandBufferCount;
+	auto* last = static_cast<ExecuteCommandsChildCmd*>(nullptr);
 
 	ThreadMemScope memScope;
 	auto cbHandles = memScope.alloc<VkCommandBuffer>(commandBufferCount);
@@ -1848,6 +1941,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		} else {
 			dlg_assert(cmd.children_);
 			last->next = &childCmd;
+			last->nextParent_ = &childCmd;
 		}
 
 		cb.record()->secondaries.push_back(std::move(recordPtr));
@@ -1900,6 +1994,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdCopyBuffer(cb.handle(),
 		srcBuf.handle, dstBuf.handle, regionCount, pRegions);
 }
@@ -1920,6 +2016,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2(
 
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.srcBuffer = srcBuf.handle;
@@ -1945,6 +2043,8 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 
 	useHandle(cb, cmd, buf);
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdUpdateBuffer(cb.handle(), buf.handle, dstOffset, dataSize, pData);
 }
 
@@ -1964,6 +2064,8 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 	cmd.data = data;
 
 	useHandle(cb, cmd, buf);
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	cb.dev->dispatch.CmdFillBuffer(cb.handle(), buf.handle, dstOffset, size, data);
 }
@@ -2955,6 +3057,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureKHR(
 	fwd.src = cmd.src->handle;
 	fwd.dst = cmd.dst->handle;
 
+	++cb.section()->cmd->stats_.numTransfers;
+
 	cb.dev->dispatch.CmdCopyAccelerationStructureKHR(cb.handle(), &fwd);
 }
 
@@ -2970,6 +3074,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureToMemoryKHR(
 
 	useHandle(cb, cmd, *cmd.src);
 	// TODO: useHandle for buffers of associated device addresses?
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	auto fwd = *pInfo;
 	fwd.src = cmd.src->handle;
@@ -2988,6 +3094,8 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyMemoryToAccelerationStructureKHR(
 
 	useHandle(cb, cmd, *cmd.dst);
 	// TODO: useHandle for buffers of associated device addresses?
+
+	++cb.section()->cmd->stats_.numTransfers;
 
 	auto fwd = *pInfo;
 	fwd.dst = cmd.dst->handle;
@@ -3046,6 +3154,8 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(
 
 	// TODO: useHandle for buffers of associated device addresses?
 
+	++cb.section()->cmd->stats_.numRayTraces;
+
 	cb.dev->dispatch.CmdTraceRaysKHR(cb.handle(),
 		pRaygenShaderBindingTable,
 		pMissShaderBindingTable,
@@ -3070,6 +3180,8 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysIndirectKHR(
 	cmd.indirectDeviceAddress = indirectDeviceAddress;
 
 	// TODO: useHandle for buffers of associated device addresses?
+
+	++cb.section()->cmd->stats_.numRayTraces;
 
 	cb.dev->dispatch.CmdTraceRaysIndirectKHR(cb.handle(),
 		pRaygenShaderBindingTable,

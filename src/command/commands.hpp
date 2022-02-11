@@ -165,7 +165,23 @@ struct NameResult {
 
 NameResult name(DeviceHandle*, NullName = NullName::null);
 
+// Base Command class for commands that have children.
+// These children might be directly part of the command record (see SectionCommand)
+// or external (e.g. ExecuteCommandBuffersCmd).
 struct ParentCommand : Command {
+	struct SectionStats {
+		u32 numDraws {};
+		u32 numDispatches {};
+		u32 numRayTraces {};
+		u32 numTransfers {};
+		u32 numSyncCommands {};
+		u32 numTotalCommands {};
+		u32 numChildSections {};
+
+		// TODO: add this information? Might be useful for matching
+		// span<Pipeline*> boundPipelines;
+	};
+
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override {
@@ -176,14 +192,37 @@ struct ParentCommand : Command {
 		}
 	}
 
-	// ParentCommand* nextParent_ {};
+	// Returns the stats over the section this ParentCommand represents.
+	// Note that the stats only contain information about the direct children.
+	virtual const SectionStats& sectionStats() const = 0;
+
+	// First command of the direct children that is also a ParentCommand.
+	// Might be null if all children are leaf commands.
+	virtual ParentCommand* firstChildParent() const = 0;
+
+	// Points to the next ParentCommand on the same level as this one.
+	ParentCommand* nextParent_ {};
 };
 
+// Base Command class for all commands containing their children, such
+// as BeginRenderPassCmd, BeginDebugUtilsLabelCmd or BeginConditionalRenderingCmd.
 struct SectionCommand : ParentCommand {
 	Command* children_ {};
+	SectionStats stats_ {};
+	ParentCommand* firstChildParent_ {};
 
 	Command* children() const override { return children_; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	const SectionStats& sectionStats() const override { return stats_; }
+	ParentCommand* firstChildParent() const override { return firstChildParent_; }
+};
+
+// Meta-command. Root node of the command hierarchy.
+// Empty SectionCommand.
+struct RootCommand final : SectionCommand {
+	void record(const Device&, VkCommandBuffer) const override {}
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	Type type() const override { return Type::other; }
 };
 
 struct BarrierCmdBase : Command {
@@ -689,6 +728,7 @@ struct ClearAttachmentCmd final : Command {
 
 	std::string_view nameDesc() const override { return "ClearAttachment"; }
 	void displayInspector(Gui& gui) const override;
+	// NOTE: strictly speaking this isn't a transfer, we don't care.
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
@@ -724,12 +764,17 @@ struct ResetEventCmd final : Command {
 
 struct ExecuteCommandsCmd final : ParentCommand {
 	Command* children_ {};
+	SectionStats stats_ {};
 
 	Command* children() const override { return children_; }
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "ExecuteCommands"; }
 	void record(const Device&, VkCommandBuffer) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	const SectionStats& sectionStats() const override;
+	ParentCommand* firstChildParent() const override {
+		return static_cast<ParentCommand*>(children_);
+	}
 };
 
 // Meta-command, inserted for each command buffer passed to CmdExecuteCommands
@@ -739,9 +784,12 @@ struct ExecuteCommandsChildCmd final : ParentCommand {
 
 	std::string_view nameDesc() const override { return "ExecuteCommandsChild"; }
 	std::string toString() const override;
-	Command* children() const override { return record_->commands; }
 	void record(const Device&, VkCommandBuffer) const override {}
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+
+	Command* children() const override;
+	const SectionStats& sectionStats() const override;
+	ParentCommand* firstChildParent() const override;
 };
 
 struct BeginDebugUtilsLabelCmd final : SectionCommand {

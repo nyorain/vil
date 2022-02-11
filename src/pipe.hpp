@@ -66,6 +66,7 @@ protected:
 span<const PipelineShaderStage> stages(const Pipeline& pipe);
 
 struct GraphicsPipeline : Pipeline {
+	// NOTE: might be null when using dynamic rendering.
 	IntrusivePtr<RenderPass> renderPass {};
 	u32 subpass {};
 

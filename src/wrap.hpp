@@ -33,6 +33,7 @@ DefHandleDesc(VkImage, Image, images, false, true);
 DefHandleDesc(VkPipeline, Pipeline, pipes, false, true);
 
 DefHandleDesc(VkCommandBuffer, CommandBuffer, commandBuffers, true, true);
+DefHandleDesc(VkEvent, Event, events, false, true);
 
 // NOTE: to enable wrapping for those handles we might have to fix a couple
 // of places inside the layer where they aren't correctly forwarded yet.
@@ -43,7 +44,6 @@ DefHandleDesc(VkRenderPass, RenderPass, renderPasses, false, false);
 DefHandleDesc(VkFramebuffer, Framebuffer, framebuffers, false, false);
 DefHandleDesc(VkFence, Fence, fences, false, false);
 DefHandleDesc(VkSemaphore, Semaphore, semaphores, false, false);
-DefHandleDesc(VkEvent, Event, events, false, false);
 DefHandleDesc(VkShaderModule, ShaderModule, shaderModules, false, false);
 DefHandleDesc(VkSwapchainKHR, Swapchain, swapchains, false, false);
 
