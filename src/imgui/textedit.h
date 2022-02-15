@@ -38,6 +38,8 @@ namespace igt {
 class TextEditor
 {
 public:
+	bool mFocused {};
+
 	enum class PaletteIndex
 	{
 		Default,
@@ -218,6 +220,7 @@ public:
 
 	void SetErrorMarkers(const ErrorMarkers& aMarkers) { mErrorMarkers = aMarkers; }
 	void SetBreakpoints(const Breakpoints& aMarkers) { mBreakpoints = aMarkers; }
+	auto& GetBreakpoints() { return mBreakpoints; }
 
 	void Render(const char* aTitle, const ImVec2& aSize = ImVec2(), bool aBorder = false);
 	void SetText(const std::string& aText);

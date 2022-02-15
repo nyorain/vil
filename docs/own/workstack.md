@@ -1,3 +1,5 @@
+- [ ] full commandbuffer/record timings.
+	- [ ] also full batch timings?
 - [ ] commandHook support for khr_dynamic_rendering.
       find a sample to test it with.
 	  basically need some renderpass-splitting-light.

@@ -1531,7 +1531,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	// it's not destroyed inside the lock. Might need more here for correctness.
 	// Should probably come up with better mechanism.
 	auto keepAliveBatches0 = tabs_.cb->records_;
-	auto keepAliveBatches1 = tabs_.cb->selectedBatch_;
+	auto keepAliveBatches1 = tabs_.cb->selectedFrame_;
 	auto keepAliveDs0 = tabs_.cb->commandViewer_.dsState_;
 	std::vector<IntrusivePtr<CommandRecord>> keepAliveRecs {
 		tabs_.cb->record_,

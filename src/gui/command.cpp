@@ -23,9 +23,9 @@
 #include <spirv-cross/spirv_cross.hpp>
 #include <bitset>
 
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+#ifdef VIL_COMMAND_CALLSTACKS
 	#include <util/callstack.hpp>
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+#endif // VIL_COMMAND_CALLSTACKS
 
 // NOTE: since we might view invalidated command records, we can't assume
 //   any handles in Command objects to be not null (they are unset to null
@@ -34,8 +34,8 @@
 namespace vil {
 namespace {
 
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
-void display(const backward::StackTrace& st, unsigned offset = 3u) {
+#ifdef VIL_COMMAND_CALLSTACKS
+void display(const backward::StackTrace& st, unsigned offset = 6u) {
 	// TODO the static maps here are terrible
 	static backward::TraceResolver resolver;
 	static std::unordered_map<void*, backward::ResolvedTrace::SourceLoc> locs;
@@ -52,16 +52,17 @@ void display(const backward::StackTrace& st, unsigned offset = 3u) {
 		auto& loc = it->second;
 		imGuiText("#{}: {}:{}:{}: {} [{}]", i, loc.filename, loc.line,
 			loc.col, loc.function, st[i - 1].addr);
-		if(ImGui::IsItemClicked()) {
-			// TODO
-			auto base = std::filesystem::current_path();
-			auto cmd = dlg::format("nvr -c \"e +{} {}/{}\"", loc.line,
-				base.string(), loc.filename);
-			(void) std::system(cmd.c_str());
-		}
+		// 	// TODO, something like this. But make it configurable.
+		// 	And ffs, don't use std::sytem.
+		// if(ImGui::IsItemClicked()) {
+		// 	auto base = std::filesystem::current_path();
+		// 	auto cmd = dlg::format("nvr -c \"e +{} {}/{}\"", loc.line,
+		// 		base.string(), loc.filename);
+		// 	(void) std::system(cmd.c_str());
+		// }
 	}
 }
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+#endif // VIL_COMMAND_CALLSTACKS
 
 u32 transferCount(const CopyBufferCmd& cmd) { return cmd.regions.size(); }
 u32 transferCount(const CopyImageCmd& cmd) { return cmd.copies.size(); }
@@ -1398,13 +1399,13 @@ void CommandViewer::displayCommand() {
 
 	command_->displayInspector(*gui_);
 
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+#ifdef VIL_COMMAND_CALLSTACKS
 	auto flags = ImGuiTreeNodeFlags_FramePadding;
 	if(command_->stackTrace && ImGui::TreeNodeEx("StackTrace", flags)) {
-		vil::display(*command_->stackTrace);
+		display(*command_->stackTrace);
 		ImGui::TreePop();
 	}
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+#endif // VIL_COMMAND_CALLSTACKS
 }
 
 void CommandViewer::draw(Draw& draw) {

@@ -21,20 +21,23 @@ struct FindResult {
 FindResult find(const Command* srcRoot, span<const Command*> dstHierachyToFind,
 	const CommandDescriptorSnapshot& dstDescriptors, float threshold = 0.0);
 
-// WIP
 struct RecordBatch;
-
-struct SectionMatch {
-	float match {}; // including children match
-	const ParentCommand* a {};
-	const ParentCommand* b {};
-	span<SectionMatch> children;
-};
 
 // TODO: to be removed when we have everything else in place.
 void annotateRelIDLegacy(Command*);
 
-// TODO: match values currently not normalized to [0, 1]
+// TODO: not all match values currently not normalized to [0, 1]
+//   or maybe rather always include a Matcher?
+// TODO: propagate Matcher objects instead of float for record and batch
+//   matching as well to make sure we put more weight on large
+//   records/submissions aligning.
+
+struct SectionMatch {
+	float match {}; // including children match; normalized
+	const ParentCommand* a {};
+	const ParentCommand* b {};
+	span<SectionMatch> children;
+};
 
 struct RecordMatch {
 	float match {};

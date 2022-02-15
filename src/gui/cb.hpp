@@ -9,6 +9,11 @@
 #include <util/flags.hpp>
 #include <command/desc.hpp>
 
+// TODO: maybe we should just get rid of the non-swapchain update modes.
+// They are unreliable and make this class a lot more complicated
+// than it should be. The main usecase is swapchain-mode anyways.
+// But not sure, maybe others find it useful.
+
 namespace vil {
 
 struct RecordBatch;
@@ -21,6 +26,13 @@ public:
 		commandBuffer, // always displays current record of commandBuffer
 		any, // always displays the last submission matching the selection
 		swapchain, // displays all commands between two swapchain presents
+	};
+
+	enum class SelectionType {
+		none,
+		submission,
+		record,
+		command,
 	};
 
 public:
@@ -42,6 +54,10 @@ private:
 	void updateState();
 	void updateHookTarget();
 
+	void displayFrameCommands();
+	void displayRecordCommands();
+	void clearSelection();
+
 private:
 	friend class Gui;
 	Gui* gui_ {};
@@ -60,23 +76,30 @@ private:
 	bool freezeCommands_ {};
 	bool freezeState_ {};
 
-	std::vector<RecordBatch> selectedBatch_; // batch of command viewer; for matching
-	IntrusivePtr<CommandRecord> selectedRecord_ {}; // part of selectedBatch_
+	SelectionType selectionType_ {};
+
+	// Potentially old, selected command, in its record and its batch.
+	// [Swapchain mode] Batch of command viewer; for matching
+	std::vector<RecordBatch> selectedFrame_;
+	// [Swapchain mode] part of selectedFrame_
+	RecordBatch* selectedBatch_ {};
+	// In swapchain mode: part of selectedBatch_
+	IntrusivePtr<CommandRecord> selectedRecord_ {};
+	// The selected command (hierarchy) inside selectedRecord_.
+	// Might be empty, signalling that no command is secleted.
+	// Only valid if selectionType_ == command.
+	std::vector<const Command*> selectedCommand_ {};
 
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};
-
-	// The selected command (hierarchy) inside the cb.
-	// Might be empty, signalling that no command is secleted.
-	std::vector<const Command*> command_ {};
-
-	bool focusSelected_ {};
 
 	// Whether to only nest labels, supporting hierarchy-braking label nesting.
 	// We currently enable it the first time we encounter such a record.
 	bool brokenLabelNesting_ {};
 
 	CommandViewer commandViewer_ {};
+
+	bool focusSelected_ {}; // TODO WIP experiment
 };
 
 } // namespace vil

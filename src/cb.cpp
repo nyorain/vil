@@ -376,6 +376,37 @@ void CommandBuffer::addCmd(Command& cmd) {
 	dlg_assert(record_);
 	dlg_assert(section_);
 
+#ifdef VIL_COMMAND_CALLSTACKS
+	// TODO: does not really belong here. should be atomic then at least
+	if(dev->captureCmdStack) {
+		cmd.stackTrace = &construct<backward::StackTrace>(*this);
+		cmd.stackTrace->load_here(32u);
+	}
+#endif // VIL_COMMAND_CALLSTACKS
+
+	// add to stats
+	++section_->cmd->stats_.numTotalCommands;
+	switch(cmd.type()) {
+		case CommandType::draw:
+			++section_->cmd->stats_.numDraws;
+			break;
+		case CommandType::dispatch:
+			++section_->cmd->stats_.numDispatches;
+			break;
+		case CommandType::traceRays:
+			++section_->cmd->stats_.numRayTraces;
+			break;
+		case CommandType::sync:
+			++section_->cmd->stats_.numSyncCommands;
+			break;
+		case CommandType::transfer:
+			++section_->cmd->stats_.numTransfers;
+			break;
+		default:
+			break;
+	}
+
+	// append
 	if(lastCommand_) {
 		dlg_assert(record_->commands);
 		lastCommand_->next = &cmd;
@@ -894,8 +925,6 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		useHandle(cb, cmd, event);
 	}
 
-	++cb.section()->cmd->stats_.numSyncCommands;
-
 	cmd.record(*cb.dev, cb.handle());
 }
 
@@ -919,8 +948,6 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 	cmd.bufBarriers = copySpan(cb, pBufferMemoryBarriers, bufferMemoryBarrierCount);
 
 	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
-
-	++cb.section()->cmd->stats_.numSyncCommands;
 
 	cmd.record(*cb.dev, cb.handle());
 }
@@ -1285,8 +1312,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 	cmd.firstVertex = firstVertex;
 	cmd.firstInstance = firstInstance;
 
-	++cb.section()->cmd->stats_.numDraws;
-
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDraw(cb.handle(),
@@ -1311,8 +1336,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 	cmd.indexCount = indexCount;
 	cmd.vertexOffset = vertexOffset;
 	cmd.firstIndex = firstIndex;
-
-	++cb.section()->cmd->stats_.numDraws;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1341,8 +1364,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
 
-	++cb.section()->cmd->stats_.numDraws;
-
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDrawIndirect(cb.handle(),
@@ -1369,8 +1390,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 	cmd.offset = offset;
 	cmd.drawCount = drawCount;
 	cmd.stride = stride;
-
-	++cb.section()->cmd->stats_.numDraws;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1406,8 +1425,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	++cb.section()->cmd->stats_.numDraws;
-
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDrawIndirectCount(cb.handle(), buf.handle, offset,
@@ -1442,8 +1459,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 	cmd.maxDrawCount = maxDrawCount;
 	cmd.stride = stride;
 
-	++cb.section()->cmd->stats_.numDraws;
-
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDrawIndexedIndirectCount(cb.handle(), buf.handle,
@@ -1465,8 +1480,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
 
-	++cb.section()->cmd->stats_.numDispatches;
-
 	{
 		ExtZoneScopedN("dispatch");
 		cb.dev->dispatch.CmdDispatch(cb.handle(), groupCountX, groupCountY, groupCountZ);
@@ -1486,8 +1499,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 	auto& buf = get(*cb.dev, buffer);
 	cmd.buffer = &buf;
 	useHandle(cb, cmd, buf);
-
-	++cb.section()->cmd->stats_.numDispatches;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1514,8 +1525,6 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 	cmd.groupsX = groupCountX;
 	cmd.groupsY = groupCountY;
 	cmd.groupsZ = groupCountZ;
-
-	++cb.section()->cmd->stats_.numDispatches;
 
 	{
 		ExtZoneScopedN("dispatch");
@@ -1548,8 +1557,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdCopyImage(cb.handle(),
 		src.handle, srcImageLayout,
 		dst.handle, dstImageLayout,
@@ -1574,8 +1581,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.dstImage = dst.handle;
@@ -1608,8 +1613,6 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdBlitImage(cb.handle(),
 		src.handle, srcImageLayout,
 		dst.handle, dstImageLayout,
@@ -1635,8 +1638,6 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.srcImage = src.handle;
@@ -1665,8 +1666,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdCopyBufferToImage(cb.handle(),
 		src.handle, dst.handle, dstImageLayout, regionCount, pRegions);
 }
@@ -1688,8 +1687,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.srcBuffer = src.handle;
@@ -1718,8 +1715,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdCopyImageToBuffer(cb.handle(),
 		src.handle, srcImageLayout, dst.handle, regionCount, pRegions);
 }
@@ -1741,8 +1736,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2(
 
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.dstBuffer = dst.handle;
@@ -1768,8 +1761,6 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdClearColorImage(cb.handle(),
 		dst.handle, imageLayout, pColor, rangeCount, pRanges);
 }
@@ -1792,8 +1783,6 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdClearDepthStencilImage(cb.handle(), dst.handle,
 		imageLayout, pDepthStencil, rangeCount, pRanges);
 }
@@ -1815,9 +1804,6 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 
 	// NOTE: We explicitly don't add the cleared attachments to used handles here.
 	// In case of a secondary command buffer with dynamic rendering, we might not even know them.
-
-	// NOTE: strictly speaking this isn't a transfer, we don't care.
-	++cb.section()->cmd->stats_.numTransfers;
 
 	cb.dev->dispatch.CmdClearAttachments(cb.handle(), attachmentCount,
 		pAttachments, rectCount, pRects);
@@ -1845,8 +1831,6 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdResolveImage(cb.handle(), src.handle, srcImageLayout,
 		dst.handle, dstImageLayout, regionCount, pRegions);
 }
@@ -1870,8 +1854,6 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage2(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	auto copy = *info;
 	copy.dstImage = dst.handle;
 	copy.srcImage = src.handle;
@@ -1889,8 +1871,6 @@ VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
 
 	useHandle(cb, cmd, *cmd.event);
 
-	++cb.section()->cmd->stats_.numSyncCommands;
-
 	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
 }
 
@@ -1904,8 +1884,6 @@ VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
 	cmd.stageMask = stageMask;
 
 	useHandle(cb, cmd, *cmd.event);
-
-	++cb.section()->cmd->stats_.numSyncCommands;
 
 	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
 }
@@ -1994,8 +1972,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdCopyBuffer(cb.handle(),
 		srcBuf.handle, dstBuf.handle, regionCount, pRegions);
 }
@@ -2016,8 +1992,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2(
 
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	auto copy = *info;
 	copy.srcBuffer = srcBuf.handle;
@@ -2043,8 +2017,6 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 
 	useHandle(cb, cmd, buf);
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdUpdateBuffer(cb.handle(), buf.handle, dstOffset, dataSize, pData);
 }
 
@@ -2064,8 +2036,6 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 	cmd.data = data;
 
 	useHandle(cb, cmd, buf);
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	cb.dev->dispatch.CmdFillBuffer(cb.handle(), buf.handle, dstOffset, size, data);
 }
@@ -2131,6 +2101,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 		VkCommandBuffer                             commandBuffer,
 		VkPipelineBindPoint                         pipelineBindPoint,
 		VkPipeline                                  pipeline) {
+	ExtZoneScoped;
+
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<BindPipelineCmd>(cb);
 	cmd.bindPoint = pipelineBindPoint;
@@ -2154,7 +2126,18 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 		dlg_error("unknown pipeline bind point");
 	}
 
-	cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, pipe.handle);
+	// add pipeline to stats
+	auto& stats = cb.section()->cmd->stats_;
+	auto& node = construct<ParentCommand::SectionStats::BoundPipeNode>(cb);
+	node.next = stats.boundPipelines;
+	node.pipe = &pipe;
+	stats.boundPipelines = &node;
+	++stats.numPipeBinds;
+
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, pipe.handle);
+	}
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
@@ -3057,8 +3040,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureKHR(
 	fwd.src = cmd.src->handle;
 	fwd.dst = cmd.dst->handle;
 
-	++cb.section()->cmd->stats_.numTransfers;
-
 	cb.dev->dispatch.CmdCopyAccelerationStructureKHR(cb.handle(), &fwd);
 }
 
@@ -3074,8 +3055,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureToMemoryKHR(
 
 	useHandle(cb, cmd, *cmd.src);
 	// TODO: useHandle for buffers of associated device addresses?
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	auto fwd = *pInfo;
 	fwd.src = cmd.src->handle;
@@ -3094,8 +3073,6 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyMemoryToAccelerationStructureKHR(
 
 	useHandle(cb, cmd, *cmd.dst);
 	// TODO: useHandle for buffers of associated device addresses?
-
-	++cb.section()->cmd->stats_.numTransfers;
 
 	auto fwd = *pInfo;
 	fwd.dst = cmd.dst->handle;
@@ -3154,8 +3131,6 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(
 
 	// TODO: useHandle for buffers of associated device addresses?
 
-	++cb.section()->cmd->stats_.numRayTraces;
-
 	cb.dev->dispatch.CmdTraceRaysKHR(cb.handle(),
 		pRaygenShaderBindingTable,
 		pMissShaderBindingTable,
@@ -3180,8 +3155,6 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysIndirectKHR(
 	cmd.indirectDeviceAddress = indirectDeviceAddress;
 
 	// TODO: useHandle for buffers of associated device addresses?
-
-	++cb.section()->cmd->stats_.numRayTraces;
 
 	cb.dev->dispatch.CmdTraceRaysIndirectKHR(cb.handle(),
 		pRaygenShaderBindingTable,

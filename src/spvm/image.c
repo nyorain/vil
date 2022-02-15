@@ -5,6 +5,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <math.h>
 
 spvm_vec4f spvm_image_read(struct spvm_state* state, spvm_image* image,
@@ -131,7 +132,7 @@ spvm_vec4f spvm_fetch_texel(struct spvm_state* state,
 		return desc->border_color;
 	}
 
-	return spvm_image_read_impl(state, img, x, y, z, layer, level);
+	return state->read_image(state, img, x, y, z, layer, level);
 }
 
 spvm_vec4f spvm_sampled_image_sample(struct spvm_state* state,

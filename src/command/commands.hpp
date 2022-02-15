@@ -41,19 +41,6 @@ enum class CommandType : u32 {
 	buildAccelStruct = (1u << 9u),
 };
 
-// Represents the result of a matching operation.
-// The effective matching value is 'match/total' but having both values
-// gives additional information for further processing.
-// Invariant: For common objects, match <= total.
-struct Matcher {
-	float match {}; // sum of weights of comparisons that matched
-	float total {}; // sum of weights of all comparisons
-
-	// Special constant to signal that matching can't work and should
-	// be aborted.
-	static Matcher noMatch() { return {0.f, -1.f}; }
-};
-
 float eval(const Matcher& m);
 
 using CommandTypeFlags = nytl::Flags<CommandType>;
@@ -139,9 +126,9 @@ struct Command {
 	// for leaves so this shouldn't be a big performance issue.
 	unsigned relID {};
 
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+#ifdef VIL_COMMAND_CALLSTACKS
 	backward::StackTrace* stackTrace {};
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+#endif // VIL_COMMAND_CALLSTACKS
 };
 
 NYTL_FLAG_OPS(Command::Type)
@@ -178,8 +165,17 @@ struct ParentCommand : Command {
 		u32 numTotalCommands {};
 		u32 numChildSections {};
 
-		// TODO: add this information? Might be useful for matching
-		// span<Pipeline*> boundPipelines;
+		u32 totalNumCommands {};
+
+		// Most significant used handles. Important to not include
+		// anything temporary here.
+		// TODO: add a BlockVector utility and use that here.
+		struct BoundPipeNode {
+			BoundPipeNode* next {};
+			Pipeline* pipe {};
+		};
+		BoundPipeNode* boundPipelines {};
+		u32 numPipeBinds {};
 	};
 
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
@@ -215,6 +211,7 @@ struct SectionCommand : ParentCommand {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	const SectionStats& sectionStats() const override { return stats_; }
 	ParentCommand* firstChildParent() const override { return firstChildParent_; }
+	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 // Meta-command. Root node of the command hierarchy.

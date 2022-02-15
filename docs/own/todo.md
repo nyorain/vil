@@ -157,6 +157,9 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. Use xdg popup
 
 performance/profiling:
+- [ ] can we make per-cb-mutexs a thing?
+      major bottleneck for applications that have hundreds of small command
+	  buffers.
 - [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
 	  since we should be logically able to get around that
 	  case (with normal API use and no gui open)

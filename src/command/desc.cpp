@@ -156,9 +156,19 @@ FindResult find(const Command* root, span<const Command*> dst,
 	for(auto it = root; it; it = it->next) {
 		auto m = it->match(*dst[0]);
 		auto em = eval(m);
-		if(em == 0.f || em < bestMatch) {
+
+		// NOTE: early-continue on less-than-best here incorrect,
+		// we might increase the matching value below.
+		if(em == 0.f /*|| em < bestMatch*/) {
 			continue;
 		}
+
+#ifdef VIL_COMMAND_CALLSTACKS
+		// TODO: use callstacks for matching.
+		// Fast reject if they aren't the same?
+		// Should probably make this an option, there might be
+		// special cases I'm not thinkin of rn.
+#endif // VIL_COMMAND_CALLSTACKS
 
 		std::vector<const Command*> currCmds {it};
 
@@ -261,20 +271,57 @@ FindResult find(const Command* root, span<const Command*> dst,
 //   Maybe don't do it recursively but only once per match meta-level.
 //   Copy overhead should be acceptable and it's way less of a memory issue.
 
+void add(Matcher& m, const ParentCommand::SectionStats& a, const ParentCommand::SectionStats& b) {
+	auto addMatch = [&](u32 dst, u32 src, float weight = 1.f) {
+		m.match += weight * std::min(dst, src); // in range [0, mx]
+		m.total += weight * std::max(dst, src);
+	};
+
+	addMatch(a.numDispatches, b.numDispatches);
+	addMatch(a.numDraws, b.numDraws);
+	addMatch(a.numRayTraces, b.numRayTraces);
+	addMatch(a.numTransfers, b.numTransfers);
+	addMatch(a.numSyncCommands, b.numSyncCommands);
+
+	// every pipeline match counts like N commands
+	const auto pipeWeight = 10.f;
+	m.total += pipeWeight * std::max(a.numPipeBinds, b.numPipeBinds);
+
+	// TODO: slightly asymmetrical in special cases. Problem?
+	for(auto pipeA = b.boundPipelines; pipeA; pipeA = pipeA->next) {
+		for(auto pipeB = b.boundPipelines; pipeB; pipeB = pipeB->next) {
+			if(pipeA == pipeB) {
+				m.match += pipeWeight;
+				break;
+			}
+		}
+	}
+}
+
 // Outputs match in range [0, 1]
-std::pair<span<SectionMatch>, float> match(ThreadMemScope& tms,
+std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 		const ParentCommand& rootA, const ParentCommand& rootB) {
 	// match commands themselves
-	const float rootMatch = eval(rootA.match(rootB));
-	if(rootMatch == 0.f) {
-		return {{}, 0.f};
+	auto rootMatch = rootA.match(rootB);
+	if(rootMatch.match <= 0.f) {
+		return {{}, rootMatch};
 	}
 
-	// TODO: consider sectionStats for rootMatch.
+#ifdef VIL_COMMAND_CALLSTACKS
+	// TODO: consider rootA.stackTrace, rootB.stackTrace.
+	// Fast reject if they aren't the same?
+	// Should probably make this an option, there might be
+	// special cases I'm not thinkin of rn.
+#endif // VIL_COMMAND_CALLSTACKS
+
+	// consider sectionStats for rootMatch.
+	auto statsA = rootA.sectionStats();
+	auto statsB = rootB.sectionStats();
+	add(rootMatch, statsA, statsB);
 
 	// setup match matrix
 	struct Entry {
-		float match {};
+		Matcher match {}; // accumulated
 		unsigned dir {};
 		float matchHere {};
 		const ParentCommand* cA {};
@@ -303,31 +350,39 @@ std::pair<span<SectionMatch>, float> match(ThreadMemScope& tms,
 		auto itB = rootB.firstChildParent();
 		auto ib = 0u;
 		while (itB) {
-			auto valDiag = -1.f;
+			Matcher valDiag = Matcher::noMatch();
 			auto [childMatches, matchVal] = match(tms, *itA, *itB);
-			if(matchVal > 0) {
-				valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match;
-				valDiag += matchVal;
+			if(matchVal.match > 0) {
+				valDiag = (ia == 0u || ib == 0u) ? Matcher {} : entry(ia - 1, ib - 1).match;
+				valDiag.match += matchVal.match;
+				valDiag.total += matchVal.total;
 			}
 
-			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
-			auto valLeft = (ib == 0u) ? 0.f : entry(ia, ib - 1).match;
+			const auto valUp = (ia == 0u) ? Matcher{} : entry(ia - 1, ib).match;
+			const auto valLeft = (ib == 0u) ? Matcher{} : entry(ia, ib - 1).match;
+
+			const auto evalUp = eval(valUp);
+			const auto evalLeft = eval(valUp);
+			const auto evalDiag = matchVal.match > 0 ? eval(valDiag) : -1.f;
+			const auto maxEval = std::max(evalDiag, std::max(evalUp, evalLeft));
 
 			auto& dst = entry(ia, ib);
-			dst.match = std::max(valDiag, std::max(valUp, valLeft));
-			dst.matchHere = matchVal;
+			dst.matchHere = eval(matchVal);
 			dst.children = childMatches;
 			dst.cA = itA;
 			dst.cB = itB;
-			if(dst.match == valDiag) {
+			if(maxEval == evalDiag) {
 				dst.dir = 1u;
-			} else if(dst.match == valUp) {
+				dst.match = valDiag;
+			} else if(maxEval == evalUp) {
 				dst.dir = 2u;
-			} else if(dst.match == valLeft) {
+				dst.match = valUp;
+			} else if(maxEval == evalLeft) {
 				dst.dir = 3u;
+				dst.match = valLeft;
 			} else {
 				dlg_fatal("unreachable: {} = max({}, {}, {})",
-					dst.match, valDiag, valUp, valLeft);
+					maxEval, evalDiag, evalUp, evalLeft);
 			}
 
 			itB = itB->nextParent_;
@@ -367,8 +422,10 @@ std::pair<span<SectionMatch>, float> match(ThreadMemScope& tms,
 
 	resMatches = resMatches.first(outID);
 
-	const float resMatch = (1 + entries.back().match) / (1 + std::max(numSectionsA, numSectionsB));
-	return {resMatches, rootMatch * resMatch};
+	auto& bestPath = entries.back().match;
+	rootMatch.total += bestPath.total;
+	rootMatch.match += bestPath.match;
+	return {resMatches, rootMatch};
 }
 
 BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b) {
@@ -396,13 +453,14 @@ BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b
 
 	for(auto ia = 0u; ia < a.submissions.size(); ++ia) {
 		for(auto ib = 0u; ib < b.submissions.size(); ++ib) {
-			auto [matches, fac] = match(tms,
+			auto [matches, matcher] = match(tms,
 				*a.submissions[ia]->commands,
 				*b.submissions[ib]->commands);
+			auto matchFac = eval(matcher);
 			auto valDiag = -1.f;
-			if(fac > 0.0) {
+			if(matchFac > 0.0) {
 				valDiag = (ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match;
-				valDiag += fac;
+				valDiag += matchFac;
 			}
 
 			auto valUp = (ia == 0u) ? 0.f : entry(ia - 1, ib).match;
@@ -410,7 +468,7 @@ BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b
 
 			auto& dst = entry(ia, ib);
 			dst.match = std::max(valDiag, std::max(valUp, valLeft));
-			dst.matchHere = fac;
+			dst.matchHere = matchFac;
 			dst.matches = matches;
 			if(dst.match == valDiag) {
 				dst.dir = 1u;

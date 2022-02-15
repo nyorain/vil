@@ -4,6 +4,7 @@
 #include <util/span.hpp>
 #include <util/linalloc.hpp>
 #include <util/intrusive.hpp>
+#include <util/debugMutex.hpp>
 
 #include <vector>
 #include <unordered_map>

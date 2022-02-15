@@ -1145,6 +1145,8 @@ void TextEditor::Render(const char* aTitle, const ImVec2& aSize, bool aBorder)
 	if (mHandleMouseInputs)
 		HandleMouseInputs();
 
+	mFocused = ImGui::IsWindowFocused();
+
 	ColorizeInternal();
 	Render();
 

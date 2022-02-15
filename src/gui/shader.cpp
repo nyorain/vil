@@ -34,8 +34,8 @@ void ShaderDebugger::init(Gui& gui) {
 
 	// TODO: why does this break for games using tcmalloc? tested
 	// on linux with dota
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	textedit_.SetLanguageDefinition(lang);
+	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	// textedit_.SetLanguageDefinition(lang);
 
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
@@ -277,10 +277,42 @@ void ShaderDebugger::draw() {
 	}
 
 	// shader view
-	if(ImGui::BeginChild("ShaderDebugger", ImVec2(0, -180))) {
+	if(ImGui::BeginChild("ShaderDebugger", ImVec2(0, -200))) {
 		ImGui::PushFont(gui_->monoFont);
 		textedit_.Render("Shader");
 		ImGui::PopFont();
+
+		ImGuiIO& io = ImGui::GetIO();
+		auto shift = io.KeyShift;
+		auto ctrl = io.ConfigMacOSXBehaviors ? io.KeySuper : io.KeyCtrl;
+		auto alt = io.ConfigMacOSXBehaviors ? io.KeyCtrl : io.KeyAlt;
+
+		if(textedit_.mFocused && (
+				(!shift && !ctrl && !alt && ImGui::IsKeyDown(swa_key_f9)) ||
+				(!shift && ctrl && !alt && ImGui::IsKeyDown(swa_key_b)))) {
+			bool doSet = true;
+			auto line = u32(textedit_.GetCursorPosition().mLine);
+
+			for(auto it = breakpoints_.begin(); it != breakpoints_.end(); ++it) {
+				auto& bp = *it;
+				// TODO: file
+				if(bp.lineID == line) {
+					dlg_trace(">> unset");
+					doSet = false;
+					breakpoints_.erase(it);
+					textedit_.GetBreakpoints().erase(line);
+					break;
+				}
+			}
+
+			if(doSet) {
+				dlg_trace(">> set");
+				auto& nbp = breakpoints_.emplace_back();
+				nbp.fileID = 0u; // TODO
+				nbp.lineID = line;
+				textedit_.GetBreakpoints().insert(line);
+			}
+		}
 	}
 
 	ImGui::EndChild();
@@ -312,22 +344,22 @@ void ShaderDebugger::draw() {
 	if(ImGui::BeginChild("Views")) {
 		if(ImGui::BeginTabBar("Tabs")) {
 			if(ImGui::BeginTabItem("Inputs")) {
-				drawInputs();
+				drawInputsTab();
 				ImGui::EndTabItem();
 			}
 
 			if(ImGui::BeginTabItem("Callstack")) {
-				drawCallstack();
+				drawCallstackTab();
 				ImGui::EndTabItem();
 			}
 
 			if(ImGui::BeginTabItem("Variables")) {
-				drawVariables();
+				drawVariablesTab();
 				ImGui::EndTabItem();
 			}
 
 			if(ImGui::BeginTabItem("Breakpoints")) {
-				drawBreakpoints();
+				drawBreakpointsTab();
 				ImGui::EndTabItem();
 			}
 
@@ -838,7 +870,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 
 	auto resources = compiled_->get_shader_resources();
 
-	auto addCopies = [&](auto& resources, bool bufferAsImage) {
+	auto addCopies = [&](auto& resources, bool imageAsBuffer) {
 		for(auto& res : resources) {
 			if(!compiled_->has_decoration(res.id, spv::DecorationDescriptorSet) ||
 					!compiled_->has_decoration(res.id, spv::DecorationBinding)) {
@@ -853,7 +885,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 			dsCopy.set = compiled_->get_decoration(res.id, spv::DecorationDescriptorSet);
 			dsCopy.binding = compiled_->get_decoration(res.id, spv::DecorationBinding);
 			dsCopy.before = true;
-			dsCopy.imageAsBuffer = bufferAsImage;
+			dsCopy.imageAsBuffer = imageAsBuffer;
 
 			auto arraySize = 1u;
 			if(type.array.size() > 1) {
@@ -1188,7 +1220,7 @@ std::string ShaderDebugger::formatScalar(const spvm_member& member) {
 	return str;
 }
 
-void ShaderDebugger::drawVariables() {
+void ShaderDebugger::drawVariablesTab() {
 	// imGuiText("Current line: {}", state->current_line);
 	// imGuiText("Instruction count : {}", state->instruction_count);
 	// imGuiText("Offset: {}", state->code_current - program->code);
@@ -1243,8 +1275,8 @@ void ShaderDebugger::drawVariables() {
 		for(auto i = 0u; i < program_->bound; ++i) {
 			auto& res = state_->results[i];
 			if((res.type != spvm_result_type_variable && res.type != spvm_result_type_function_parameter) ||
+					!res.name /* ||
 					res.owner != state_->current_function ||
-					!res.name ||
 					// TODO: make this filter optional, via gui.
 					// Useful in many cases but can be annoying/incorrect when
 					// a variable isn't written on all branches.
@@ -1254,6 +1286,11 @@ void ShaderDebugger::drawVariables() {
 					// here compare whether the current position of state
 					// postdominates that instruction.
 					!res.stored_to) {
+					*/) {
+				continue;
+			}
+
+			if(res.owner != state_->current_function) {
 				continue;
 			}
 
@@ -1288,7 +1325,7 @@ void ShaderDebugger::drawVariables() {
 	ImGui::PopStyleVar(1);
 }
 
-void ShaderDebugger::drawBreakpoints() {
+void ShaderDebugger::drawBreakpointsTab() {
 	for(auto& bp : breakpoints_) {
 		ImGui::Bullet();
 		ImGui::SameLine();
@@ -1296,14 +1333,12 @@ void ShaderDebugger::drawBreakpoints() {
 	}
 }
 
-void ShaderDebugger::drawCallstack() {
+void ShaderDebugger::drawCallstackTab() {
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
 	auto flags = ImGuiTableFlags_BordersInner |
 		ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_SizingStretchSame;
 	if(ImGui::BeginTable("Values", 2u, flags)) {
-		ImGui::EndTable();
-
 		// TODO:
 		// - allow selecting entries and then showing the respective variables from threre
 		// - show file, line, function (and maybe hide address by default)
@@ -1318,12 +1353,14 @@ void ShaderDebugger::drawCallstack() {
 			auto name = state_->function_stack_info[i]->name;
 			imGuiText("{}", name ? name : "?");
 		}
+
+		ImGui::EndTable();
 	}
 
 	ImGui::PopStyleVar(1);
 }
 
-void ShaderDebugger::drawInputs() {
+void ShaderDebugger::drawInputsTab() {
 	// TODO: decide depending on shader type
 	// TODO: for compute shader, allow to select GlobalInvocationID
 	//   and automatically compute it here depending on workgroup size

@@ -71,10 +71,10 @@ private:
 	// Sets the text editor to the current line of the state.
 	void jumpToState();
 
-	void drawInputs();
-	void drawVariables();
-	void drawBreakpoints();
-	void drawCallstack();
+	void drawInputsTab();
+	void drawVariablesTab();
+	void drawBreakpointsTab();
+	void drawCallstackTab();
 
 	// NOTE: the returned string view is only valid until the state
 	// gets recreated (which might happen every frame).

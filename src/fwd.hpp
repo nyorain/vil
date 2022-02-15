@@ -121,6 +121,21 @@ struct DrawGuiImage;
 struct CowImageRange;
 struct CowBufferRange;
 
+// TODO: find good place
+//
+// Represents the result of a matching operation.
+// The effective matching value is 'match/total' but having both values
+// gives additional information for further processing.
+// Invariant: For common objects, match <= total.
+struct Matcher {
+	float match {}; // sum of weights of comparisons that matched
+	float total {}; // sum of weights of all comparisons
+
+	// Special constant to signal that matching can't work and should
+	// be aborted.
+	static Matcher noMatch() { return {0.f, -1.f}; }
+};
+
 } // namespace vil
 
 

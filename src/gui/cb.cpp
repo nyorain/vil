@@ -111,20 +111,21 @@ struct DisplayVisitor : CommandVisitor {
 
 	// Returns whether the tree is open
 	bool openTree(const Command& cmd) {
-		int flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding;
+		int flags = ImGuiTreeNodeFlags_OpenOnArrow |
+			ImGuiTreeNodeFlags_FramePadding |
+			ImGuiTreeNodeFlags_OpenOnDoubleClick;
 		if(sel_ == &cmd) {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 
-		auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
-		auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
-		bool clicked = ImGui::IsItemClicked();
-		if(clicked) {
-			// don't select when only clicked on arrow
-			if(ImGui::GetMousePos().x > ImGui::GetItemRectMin().x + 30) {
-				dlg_assert(newSelection_.empty());
-				newSelection_.push_back(&cmd);
-			}
+		const auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
+		const auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
+
+		// don't select when only clicked on arrow
+		const auto labelStartX = ImGui::GetItemRectMin().x + 30;
+		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
+			dlg_assert(newSelection_.empty());
+			newSelection_.push_back(&cmd);
 		}
 
 		return open;
@@ -365,34 +366,20 @@ void CommandBufferGui::draw(Draw& draw) {
 			ImGui::EndCombo();
 		}
 	} else if(!gui_->dev().swapchain) {
+		clearSelection();
+
 		record_ = {};
 		selectedRecord_ = {};
 		records_ = {};
 		selectedBatch_ = {};
 		swapchainPresent_ = {};
-		command_ = {};
+		selectedCommand_ = {};
 		hook.target = {};
 		hook.desc({}, {}, {});
 		hook.unsetHookOps();
 		return;
 	}
 
-	// TODO: don't show this checkbox (or set it to true and disable?)
-	// when we are viewing an invalidated record without updating.
-	if(ImGui::Checkbox("Freeze State", &freezeState_)) {
-		hook.freeze = freezeState_;
-	}
-
-	if(gui_->showHelp && ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("This will freeze the state of the command you are viewing,\n"
-			"e.g. the image/buffer content and measured time.\n"
-			"This does not affect updating of the commands shown on the left.");
-	}
-
-	ImGui::SameLine();
-
-	// Selector for visible commands
-	ImGui::SameLine();
 	if(ImGui::Button("Settings")) {
 		ImGui::OpenPopup("Command Selector");
 	}
@@ -413,15 +400,42 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::Separator();
 		ImGui::Checkbox("Unused Descriptor Bindings", &commandViewer_.showUnusedBindings_);
 
+		// TODO: this needs some love.
+		// - Disable in frames where the window was scrolled? and then
+		//   store the new scroll offset instead? This currently prevents scrolling
+		ImGui::Separator();
+		ImGui::Checkbox("Focus Selected", &focusSelected_);
+
 		ImGui::EndPopup();
 	}
 
 	ImGui::SameLine();
 
-	// TODO: this needs some love.
-	// - Disable in frames where the window was scrolled? and then
-	//   store the new scroll offset instead? This currently prevents scrolling
-	ImGui::Checkbox("Focus Selected", &focusSelected_);
+	// TODO: don't show this checkbox (or set it to true and disable?)
+	// when we are viewing an invalidated record without updating.
+	if(ImGui::Checkbox("Freeze State", &freezeState_)) {
+		hook.freeze = freezeState_;
+	}
+
+	if(gui_->showHelp && ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("This will freeze the state of the command you are viewing,\n"
+			"e.g. the image/buffer content and measured time.\n"
+			"This does not affect updating of the commands shown on the left.");
+	}
+
+	ImGui::SameLine();
+
+	if(mode_ != UpdateMode::none) {
+		ImGui::SameLine();
+		ImGui::Checkbox("Freeze Commands", &freezeCommands_);
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"This will freeze the commands shown on the left.\n"
+				"Useful to avoid flickering or just to inspect the current state.\n"
+				"Note that the per-command state you are viewing (e.g. image/buffer\n"
+				"content or measured time) will still be updated, use the 'Freeze State' checkbox");
+		}
+	}
 
 	// force-update shown batches when it's been too long
 	if(mode_ == UpdateMode::swapchain && !freezeState_) {
@@ -441,37 +455,25 @@ void CommandBufferGui::draw(Draw& draw) {
 		}
 	}
 
-	if(mode_ == UpdateMode::none) {
-		imGuiText("Showing static record");
-	} else if(mode_ == UpdateMode::commandBuffer) {
-		dlg_assert(!record_->cb || record_->cb == cb_);
-		dlg_assert(cb_ && cb_->lastRecordPtrLocked());
-
-		imGuiText("Updating from Command Buffer");
-		ImGui::SameLine();
-		refButton(*gui_, *cb_);
-	} else if(mode_ == UpdateMode::any) {
-		imGuiText("Updating from any records");
-	} else if(mode_ == UpdateMode::swapchain) {
-		auto& sc = *gui_->dev().swapchain;
-
-		imGuiText("Showing per-present commands from");
-		ImGui::SameLine();
-		refButton(*gui_, sc);
-
-	}
-
-	if(mode_ != UpdateMode::none) {
-		ImGui::SameLine();
-		ImGui::Checkbox("Freeze Commands", &freezeCommands_);
-		if(gui_->showHelp && ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"This will freeze the commands shown on the left.\n"
-				"Useful to avoid flickering or just to inspect the current state.\n"
-				"Note that the per-command state you are viewing (e.g. image/buffer\n"
-				"content or measured time) will still be updated, use the 'Freeze State' checkbox");
-		}
-	}
+	// TODO: do we really want/need this?
+	// if(mode_ == UpdateMode::none) {
+	// 	imGuiText("Showing static record");
+	// } else if(mode_ == UpdateMode::commandBuffer) {
+	// 	dlg_assert(!record_->cb || record_->cb == cb_);
+	// 	dlg_assert(cb_ && cb_->lastRecordPtrLocked());
+//
+	// 	imGuiText("Updating from Command Buffer");
+	// 	ImGui::SameLine();
+	// 	refButton(*gui_, *cb_);
+	// } else if(mode_ == UpdateMode::any) {
+	// 	imGuiText("Updating from any records");
+	// } else if(mode_ == UpdateMode::swapchain) {
+	// 	auto& sc = *gui_->dev().swapchain;
+//
+	// 	imGuiText("Showing per-present commands from");
+	// 	ImGui::SameLine();
+	// 	refButton(*gui_, sc);
+	// }
 
 	ImGui::Separator();
 
@@ -494,154 +496,9 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
 
 	if(mode_ == UpdateMode::swapchain) {
-		if(records_.empty() && !gui_->dev().swapchain->frameSubmissions.empty()) {
-			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
-		}
-
-		auto* selected = record_ && !command_.empty() ? command_.back() : nullptr;
-
-		for(auto b = 0u; b < records_.size(); ++b) {
-			auto& batch = records_[b];
-			auto id = dlg::format("vkQueueSubmit:{}", b);
-
-			auto flags = int(ImGuiTreeNodeFlags_FramePadding);
-			if(batch.submissions.empty()) {
-				flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
-			}
-
-			if(ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit")) {
-				if(!batch.submissions.empty()) {
-					ImGui::Separator();
-				}
-
-				// we don't want as much space as tree nodes
-				auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
-				ImGui::Unindent(s);
-
-				for(auto r = 0u; r < batch.submissions.size(); ++r) {
-					auto& rec = batch.submissions[r];
-
-					// When the record isn't valid anymore (cb is unset), we have to
-					// be careful to not actually reference any destroyed resources.
-					if(!rec->cb) {
-						replaceInvalidatedLocked(*rec);
-					}
-
-					dlg_assert(rec->invalidated.empty());
-
-					// extra tree node for every submission
-					auto flags = int(ImGuiTreeNodeFlags_FramePadding);
-					auto id = dlg::format("Commands:{}", r);
-					auto name = "<Unnamed>";
-					if(rec->cbName) {
-						name = rec->cbName;
-					}
-
-					if(ImGui::TreeNodeEx(id.c_str(), flags, "%s", name)) {
-						// we don't want as much space as tree nodes
-						auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
-						ImGui::Unindent(s);
-
-						if(!brokenLabelNesting_ && rec->brokenHierarchyLabels) {
-							brokenLabelNesting_ = true;
-							// showing end commands in this viewing mode since
-							// they aren't implicitly shown via the nesting
-							// now anymore and stuff like EndRenderPass is
-							// kinda important.
-							commandFlags_ |= Command::Type::end;
-						}
-
-						DisplayVisitor visitor(selected, commandFlags_, brokenLabelNesting_);
-						visitor.jumpToSelection_ = focusSelected_;
-						visitor.displayCommands(rec->commands->children_, true);
-						auto nsel = std::move(visitor.newSelection_);
-
-						if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
-							record_ = rec;
-							command_ = std::move(nsel);
-							selectedBatch_ = records_;
-							selectedRecord_ = rec;
-
-							// TODO: fix snapshotRelevantDescriptors for destroyed bindings
-							// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
-							//  descriptors might already be destroyed, snapshotRelevantDescriptors won't help
-							auto dsSnapshot = CommandDescriptorSnapshot{}; // snapshotRelevantDescriptors(*command_.back());
-							commandViewer_.select(record_, *command_.back(),
-								dsSnapshot, true, nullptr);
-
-							dev.commandHook->target = {};
-							dev.commandHook->target.all = true;
-							dev.commandHook->desc(record_, command_, dsSnapshot);
-							dev.commandHook->freeze = false;
-						}
-
-						ImGui::Indent(s);
-						ImGui::TreePop();
-					}
-
-					if(r + 1 != batch.submissions.size()) {
-						ImGui::Separator();
-					}
-				}
-
-				ImGui::Indent(s);
-				ImGui::TreePop();
-
-				if(b + 1 != records_.size()) {
-					ImGui::Separator();
-				}
-			}
-		}
+		displayFrameCommands();
 	} else {
-		dlg_assert(record_);
-
-		// When the record isn't valid anymore (cb is unset), we have to
-		// be careful to not actually reference any destroyed resources.
-		if(record_ && !record_->cb) {
-			replaceInvalidatedLocked(*record_);
-		}
-
-		dlg_assert(record_->invalidated.empty());
-
-		auto* selected = command_.empty() ? nullptr : command_.back();
-
-		if(!brokenLabelNesting_ && record_->brokenHierarchyLabels) {
-			brokenLabelNesting_ = true;
-			// showing end commands in this viewing mode since
-			// they aren't implicitly shown via the nesting
-			// now anymore and stuff like EndRenderPass is
-			// kinda important.
-			commandFlags_ |= Command::Type::end;
-		}
-
-		DisplayVisitor visitor(selected, commandFlags_, brokenLabelNesting_);
-		visitor.jumpToSelection_ = focusSelected_;
-		visitor.displayCommands(record_->commands->children_, false);
-		auto nsel = std::move(visitor.newSelection_);
-
-		if(!nsel.empty() && (command_.empty() || nsel.back() != command_.back())) {
-			if(mode_ == UpdateMode::none) {
-				dlg_assert(dev.commandHook->target.record == record_.get());
-			} else if(mode_ == UpdateMode::commandBuffer) {
-				dlg_assert(cb_);
-				dlg_assert(dev.commandHook->target.cb == cb_);
-			} else if(mode_ == UpdateMode::any) {
-				dlg_assert(dev.commandHook->target.all);
-			}
-
-			command_ = std::move(nsel);
-
-			// TODO: fix snapshotRelevantDescriptors for destroyed bindings
-			// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
-			//  descriptors might already be destroyed, snapshotRelevantDescriptors won't help
-			auto dsSnapshot = CommandDescriptorSnapshot{}; // snapshotRelevantDescriptors(*command_.back());
-			commandViewer_.select(record_, *command_.back(),
-				dsSnapshot, true, nullptr);
-
-			// in any case, update the hook
-			dev.commandHook->desc(record_, command_, dsSnapshot);
-			dev.commandHook->freeze = false;
-		}
+		displayRecordCommands();
 	}
 
 	ImGui::PopStyleVar(2);
@@ -654,7 +511,32 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	// command info
 	ImGui::BeginChild("Command Info");
-	commandViewer_.draw(draw);
+
+	switch(selectionType_) {
+		case SelectionType::none:
+			imGuiText("Nothing selected yet");
+			break;
+		case SelectionType::submission:
+			dlg_assert(mode_ == UpdateMode::swapchain);
+			dlg_assert(selectedBatch_);
+			refButtonExpect(*gui_, selectedBatch_->queue);
+			imGuiText("{} records", selectedBatch_->submissions.size());
+			imGuiText("submissionID: {}", selectedBatch_->submissionID);
+			break;
+		case SelectionType::record:
+			dlg_assert(selectedRecord_);
+			refButtonD(*gui_, selectedRecord_->cb);
+			imGuiText("cb name: {}", selectedRecord_->cbName);
+			imGuiText("num handles: {}", selectedRecord_->handles.size());
+			imGuiText("broken labels: {}", selectedRecord_->brokenHierarchyLabels);
+			imGuiText("record id: {}", selectedRecord_->recordID);
+			imGuiText("refCount: {}", selectedRecord_->refCount);
+			imGuiText("num hook records: {}", selectedRecord_->hookRecords.size());
+			break;
+		case SelectionType::command:
+			commandViewer_.draw(draw);
+			break;
+	}
 
 	ImGui::EndChild();
 	ImGui::EndTable();
@@ -672,17 +554,9 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 	// }
 
 	// Unset hooks
-	auto& hook = *gui_->dev().commandHook;
-	hook.unsetHookOps();
-	hook.desc({}, {}, {});
-
-	command_ = {};
+	clearSelection();
 	record_ = std::move(record);
-	selectedRecord_ = {};
-
 	updateHookTarget();
-
-	commandViewer_.unselect();
 }
 
 void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
@@ -697,34 +571,15 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 	// }
 
 	// Unset hooks
-	auto& hook = *gui_->dev().commandHook;
-	hook.unsetHookOps();
-	hook.desc({}, {}, {});
-
-	command_ = {};
+	clearSelection();
 	record_ = std::move(record);
-	selectedRecord_ = {};
-
 	updateHookTarget();
-
-	commandViewer_.unselect();
 }
 
 void CommandBufferGui::showSwapchainSubmissions() {
 	mode_ = UpdateMode::swapchain;
 	cb_ = {};
-
-	command_ = {};
-	record_ = {};
-	selectedRecord_ = {};
-
-	// Unset hooks
-	auto& hook = *gui_->dev().commandHook;
-	hook.unsetHookOps();
-	hook.desc({}, {}, {});
-	hook.target = {};
-
-	commandViewer_.unselect();
+	clearSelection();
 }
 
 void CommandBufferGui::destroyed(const Handle& handle) {
@@ -769,6 +624,10 @@ void CommandBufferGui::updateState() {
 	auto& dev = gui_->dev();
 	auto& hook = *dev.commandHook;
 
+	// TODO: correctly implement for swapchain + batch/record selection.
+	// Just match with all (or just the latest?) finished frame and try
+	// to find equivalent there, updating record_.
+
 	// try to update the shown commands with the best new match
 	if(!hook.completed.empty() && (!freezeState_ || !commandViewer_.state())) {
 		// find the best match
@@ -800,12 +659,12 @@ void CommandBufferGui::updateState() {
 					continue;
 				}
 
-				dlg_assert(!selectedBatch_.empty());
+				dlg_assert(!selectedFrame_.empty());
 
 				// check if [selectedRecord_ in selectedBatch_] contextually
 				// matches  [res.record in foundBatches]
 				ThreadMemScope tms;
-				auto batchMatches = match(tms, foundBatches, selectedBatch_);
+				auto batchMatches = match(tms, foundBatches, selectedFrame_);
 				bool recordMatched = false;
 				for(auto& batchMatch : batchMatches.matches) {
 					if(batchMatch.a->submissionID != res.submissionID) {
@@ -863,14 +722,14 @@ void CommandBufferGui::updateState() {
 
 			if(!freezeCommands_) {
 				record_ = best->record;
-				command_ = best->command;
+				selectedCommand_ = best->command;
 			}
 
 			// In swapchain mode - and when not freezing commands - make
 			// sure to also display the new frame
 			if(mode_ == UpdateMode::swapchain) {
 				swapchainPresent_ = bestPresentID;
-				selectedBatch_ = {bestBatches.begin(), bestBatches.end()};
+				selectedFrame_ = {bestBatches.begin(), bestBatches.end()};
 
 				if(!freezeCommands_) {
 					records_ = {bestBatches.begin(), bestBatches.end()};
@@ -897,7 +756,7 @@ void CommandBufferGui::updateState() {
 
 	// When no command was selected yet, we won't get any new records
 	// from CommandHook. But still want to show the new commands.
-	if(!freezeCommands_ && command_.empty()) {
+	if(!freezeCommands_ && selectedCommand_.empty()) {
 		if(mode_ == UpdateMode::swapchain) {
 			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
 			swapchainPresent_ = gui_->dev().swapchain->frameSubmissions[0].presentID;
@@ -912,6 +771,235 @@ void CommandBufferGui::updateState() {
 	}
 
 	hook.completed.clear();
+}
+
+void CommandBufferGui::displayFrameCommands() {
+	auto& dev = gui_->dev();
+
+	if(records_.empty() && !gui_->dev().swapchain->frameSubmissions.empty()) {
+		records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
+	}
+
+	const Command* selectedCommand = nullptr;
+	if(selectionType_ == SelectionType::command) {
+		dlg_assert(record_);
+		dlg_assert(!selectedCommand_.empty());
+		selectedCommand = selectedCommand_.back();
+	}
+
+	for(auto b = 0u; b < records_.size(); ++b) {
+		auto& batch = records_[b];
+		if(b > 0) {
+			ImGui::Separator();
+		}
+
+		const auto id = dlg::format("vkQueueSubmit:{}", b);
+		auto flags = int(ImGuiTreeNodeFlags_FramePadding);
+		if(batch.submissions.empty()) {
+			// empty submissions are displayed differently.
+			// There is nothing more disappointing than expanding a
+			// tree node just to see that it's empty :(
+			flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
+		} else {
+			flags |= ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick;
+		}
+
+		// check if this vkQueueSubmit was selected
+		if(selectionType_ == SelectionType::submission && selectedBatch_ == &batch) {
+			flags |= ImGuiTreeNodeFlags_Selected;
+		}
+
+		const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit");
+		const auto labelStartX = ImGui::GetItemRectMin().x + 30;
+		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
+			clearSelection();
+			selectionType_ = SelectionType::submission;
+			selectedBatch_ = &batch;
+			selectedFrame_ = records_;
+		}
+
+		if(!open) {
+			continue;
+		}
+
+		if(!batch.submissions.empty()) {
+			ImGui::Separator();
+		}
+
+		// we don't want as much space as tree nodes
+		auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+		ImGui::Unindent(s);
+
+		for(auto r = 0u; r < batch.submissions.size(); ++r) {
+			auto& rec = batch.submissions[r];
+			if(r > 0) {
+				ImGui::Separator();
+			}
+
+			// When the record isn't valid anymore (cb is unset), we have to
+			// be careful to not actually reference any destroyed resources.
+			if(!rec->cb) {
+				replaceInvalidatedLocked(*rec);
+			}
+
+			dlg_assert(rec->invalidated.empty());
+
+			// extra tree node for every submission
+			const auto id = dlg::format("Commands:{}", r);
+			auto name = "<Unnamed>";
+			if(rec->cbName) {
+				name = rec->cbName;
+			}
+
+			auto flags = ImGuiTreeNodeFlags_FramePadding |
+				ImGuiTreeNodeFlags_OpenOnArrow |
+				ImGuiTreeNodeFlags_OpenOnDoubleClick;
+			if(selectionType_ == SelectionType::record && selectedRecord_ == rec) {
+				flags |= ImGuiTreeNodeFlags_Selected;
+			}
+
+			const auto open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name);
+			const auto labelStartX = ImGui::GetItemRectMin().x + 30;
+			if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
+				clearSelection();
+				selectionType_ = SelectionType::record;
+				selectedRecord_ = rec;
+				selectedBatch_ = &batch;
+				selectedFrame_ = records_;
+			}
+
+			if(!open) {
+				continue;
+			}
+
+			// we don't want as much space as tree nodes
+			auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+			ImGui::Unindent(s);
+
+			if(!brokenLabelNesting_ && rec->brokenHierarchyLabels) {
+				brokenLabelNesting_ = true;
+				// showing end commands in this viewing mode since
+				// they aren't implicitly shown via the nesting
+				// now anymore and stuff like EndRenderPass is
+				// kinda important.
+				commandFlags_ |= Command::Type::end;
+			}
+
+			DisplayVisitor visitor(selectedCommand, commandFlags_, brokenLabelNesting_);
+			visitor.jumpToSelection_ = focusSelected_;
+			visitor.displayCommands(rec->commands->children_, true);
+			auto nsel = std::move(visitor.newSelection_);
+
+			auto newSelection = !nsel.empty() && (
+				selectedCommand_.empty() ||
+				nsel.back() != selectedCommand_.back());
+			if(newSelection) {
+				clearSelection();
+
+				selectionType_ = SelectionType::command;
+				selectedCommand_ = std::move(nsel);
+				selectedRecord_ = rec;
+				selectedBatch_ = &batch;
+				selectedFrame_ = records_;
+				record_ = rec;
+
+				// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
+				//  descriptors might already be destroyed here, snapshotRelevantDescriptors won't help
+				//  maybe make that an option via gui or something
+				auto dsSnapshot = snapshotRelevantDescriptorsLocked(*selectedCommand_.back());
+				commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
+					dsSnapshot, true, nullptr);
+
+				dev.commandHook->target = {};
+				dev.commandHook->target.all = true;
+				dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
+				dev.commandHook->freeze = false;
+			}
+
+			ImGui::Indent(s);
+			ImGui::TreePop();
+		}
+
+		ImGui::Indent(s);
+		ImGui::TreePop();
+	}
+}
+
+void CommandBufferGui::displayRecordCommands() {
+	auto& dev = gui_->dev();
+	dlg_assert(record_);
+
+	// When the record isn't valid anymore (cb is unset), we have to
+	// be careful to not actually reference any destroyed resources.
+	if(record_ && !record_->cb) {
+		replaceInvalidatedLocked(*record_);
+	}
+
+	dlg_assert(record_->invalidated.empty());
+
+	auto* selected = selectedCommand_.empty() ? nullptr : selectedCommand_.back();
+
+	if(!brokenLabelNesting_ && record_->brokenHierarchyLabels) {
+		brokenLabelNesting_ = true;
+		// showing end commands in this viewing mode since
+		// they aren't implicitly shown via the nesting
+		// now anymore and stuff like EndRenderPass is
+		// kinda important.
+		commandFlags_ |= Command::Type::end;
+	}
+
+	DisplayVisitor visitor(selected, commandFlags_, brokenLabelNesting_);
+	visitor.jumpToSelection_ = focusSelected_;
+	visitor.displayCommands(record_->commands->children_, false);
+	auto nsel = std::move(visitor.newSelection_);
+
+	auto newSelection = !nsel.empty() && (
+		selectedCommand_.empty() ||
+		nsel.back() != selectedCommand_.back());
+	if(newSelection) {
+		if(mode_ == UpdateMode::none) {
+			dlg_assert(dev.commandHook->target.record == record_.get());
+		} else if(mode_ == UpdateMode::commandBuffer) {
+			dlg_assert(cb_);
+			dlg_assert(dev.commandHook->target.cb == cb_);
+		} else if(mode_ == UpdateMode::any) {
+			dlg_assert(dev.commandHook->target.all);
+		}
+
+		selectionType_ = SelectionType::command;
+		selectedCommand_ = std::move(nsel);
+		selectedRecord_ = record_;
+
+		// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
+		//  descriptors might already be destroyed, snapshotRelevantDescriptors won't help
+		//  maybe make that an option via gui or something
+		auto dsSnapshot = snapshotRelevantDescriptorsLocked(*selectedCommand_.back());
+		commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
+			dsSnapshot, true, nullptr);
+
+		// in any case, update the hook
+		dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
+		dev.commandHook->freeze = false;
+	}
+}
+
+void CommandBufferGui::clearSelection() {
+	auto& dev = gui_->dev();
+	commandViewer_.unselect();
+
+	selectionType_ = SelectionType::none;
+	selectedFrame_ = {};
+	selectedBatch_ = nullptr;
+	selectedRecord_ = {};
+	selectedCommand_ = {};
+
+	dev.commandHook->target = {};
+	dev.commandHook->unsetHookOps();
+	dev.commandHook->desc({}, {}, {});
+
+	if (mode_ == UpdateMode::swapchain) {
+		record_ = {};
+	}
 }
 
 } // namespace vil

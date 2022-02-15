@@ -19,9 +19,9 @@
 #include <iomanip>
 #include <filesystem>
 
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
+#ifdef VIL_COMMAND_CALLSTACKS
 	#include <util/callstack.hpp>
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
+#endif // VIL_COMMAND_CALLSTACKS
 
 // TODO:
 // - a lot of commands are still missing valid match() implementations.
@@ -206,6 +206,22 @@ Matcher Command::match(const Command& cmd) const {
 	m.total = 1.f;
 	m.match = 1.f / (1.f + std::abs(int(cmd.relID) - int(this->relID)));
 	return m;
+}
+
+// SectionCommand
+void SectionCommand::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
+	ParentCommand::replace(map);
+
+	auto it = stats_.boundPipelines;
+	auto prevPtr = &stats_.boundPipelines;
+	while(it) {
+		if(map.find(it->pipe) != map.end()) {
+			*prevPtr = it->next;
+		}
+
+		prevPtr = &it->next;
+		it = it->next;
+	}
 }
 
 // BarrierCmdBase
@@ -546,13 +562,6 @@ void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) 
 //   mean a match for the whole command.
 
 Command::Command() {
-#ifdef VIL_ENABLE_COMMAND_CALLSTACKS
-	// TODO: does not really belong here. should be atomic then at least
-	if(cb.dev->captureCmdStack) {
-		this->stackTrace = &construct<backward::StackTrace>(cb);
-		this->stackTrace->load_here(32u);
-	}
-#endif // VIL_ENABLE_COMMAND_CALLSTACKS
 }
 
 Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
@@ -1094,8 +1103,8 @@ Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 	}
 
 	Matcher m;
-	m.total += 2.f;
-	m.match += 2.f;
+	m.total += 5.f;
+	m.match += 5.f;
 
 	for(auto i = 0u; i < state.pipe->vertexBindings.size(); ++i) {
 		dlg_assert(i < state.vertices.size());

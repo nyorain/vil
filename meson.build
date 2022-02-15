@@ -125,6 +125,12 @@ if debug_checks
 	layer_args += '-DVIL_DEBUG'
 endif
 
+# TODO
+cmd_callstacks = true
+if cmd_callstacks
+	layer_args += '-DVIL_COMMAND_CALLSTACKS'
+endif
+
 # deps
 dep_threads = dependency('threads', required: false)
 dep_swa = dependency('swa',
