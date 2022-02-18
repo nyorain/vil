@@ -273,7 +273,7 @@ FindResult find(const Command* root, span<const Command*> dst,
 
 void add(Matcher& m, const ParentCommand::SectionStats& a, const ParentCommand::SectionStats& b) {
 	auto addMatch = [&](u32 dst, u32 src, float weight = 1.f) {
-		m.match += weight * std::min(dst, src); // in range [0, mx]
+		m.match += weight * std::min(dst, src); // in range [0, max]
 		m.total += weight * std::max(dst, src);
 	};
 
@@ -290,7 +290,7 @@ void add(Matcher& m, const ParentCommand::SectionStats& a, const ParentCommand::
 	// TODO: slightly asymmetrical in special cases. Problem?
 	for(auto pipeA = b.boundPipelines; pipeA; pipeA = pipeA->next) {
 		for(auto pipeB = b.boundPipelines; pipeB; pipeB = pipeB->next) {
-			if(pipeA == pipeB) {
+			if(pipeA->pipe == pipeB->pipe) {
 				m.match += pipeWeight;
 				break;
 			}
@@ -422,6 +422,9 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 
 	resMatches = resMatches.first(outID);
 
+	// TODO: for numSectionsA small and numSectionsB large we might
+	// get 100% match with this definition right?
+	// must be changed
 	auto& bestPath = entries.back().match;
 	rootMatch.total += bestPath.total;
 	rootMatch.match += bestPath.match;
