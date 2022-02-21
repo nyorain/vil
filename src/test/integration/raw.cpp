@@ -1,4 +1,4 @@
-#include "common.hpp"
+#include "external.hpp"
 #include <array>
 
 TEST(names) {

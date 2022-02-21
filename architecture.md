@@ -113,7 +113,7 @@ CommandBuffer, Queue; we also use it for VkSurfaceKHR), there is a global
 table in [src/data.hpp](src/data.hpp).
 
 The layer optionally wraps handles, see (env.md)[docs/env.md] for configuration, it's
-even possible to decide on a per-object-type basis whether warapping is done.
+even possible to decide on a per-object-type basis whether wrapping is done.
 See [this post](https://renderdoc.org/vulkan-layer-guide.html) for more details
 on handle wrapping.
 Wrapping handles allows us to bypass those (potentially large, synchronized) 
@@ -166,11 +166,15 @@ these objects for multiple purposes:
 
 ## CommandRecord
 
-`vil::CommandRecord` (see [record.hpp](src/command/record.hpp)) holds all state for a recorded command buffer, i.e.
+`vil::CommandRecord` (see [record.hpp](src/command/record.hpp)) holds all state for a 
+recorded command buffer, i.e.
 all commands, the usage flags with which the record was begun, which handles are used.
-It's disconnected from the command buffer itself and can outlive it.
-It's used in multiple places and ownership is shared via an intrusive reference count.
-One speciality is its custom memory allocation mechanism, see [alloc.hpp](src/command/alloc.hpp).
+It's disconnected from the command buffer itself and can outlive it. You can imagine
+the CommandBuffer as a builder for CommandRecord object.
+CommandRecords  are used in multiple places and ownership is shared via an 
+intrusive reference count.
+One speciality is its custom memory allocation mechanism, see 
+[linalloc.hpp](src/util/linalloc.hpp) and [command/alloc.hpp](src/command/alloc.hpp).
 Since CommandBuffer recording can be a bottleneck and might involve many thousands
 commands, we don't have any time to waste there. Therefore, we always allocate larger
 blocks of memory and place all commands and command-related data into them.

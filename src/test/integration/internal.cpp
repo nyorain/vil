@@ -10,35 +10,14 @@
 #include <queue.hpp>
 #include <cb.hpp>
 #include <rp.hpp>
-#include <util/export.hpp>
-#include <vk/dispatch_table_helper.h>
-#include "./util.hpp"
+#include "./internal.hpp"
 
 using namespace tut;
 
-namespace vil {
+namespace vil::test {
 
-template<typename T, typename O>
-T undispatch(O& dst) {
-	std::shared_lock lock(dataMutex);
-	for(auto& entry : dispatchableTable) {
-		if(entry.second == &dst) {
-			return u64ToHandle<T>(entry.first);
-		}
-	}
-
-	throw std::runtime_error("Invalid handle");
-}
-
-void internalIntegrationTest(Device& dev) {
-	// find queue
-	auto& queue = *dev.queues.front();
-
-	Setup stp;
-	stp.dev = undispatch<VkDevice>(dev);;
-	stp.queue = undispatch<VkQueue>(queue);
-	stp.qfam = queue.family;
-	layer_init_device_dispatch_table(stp.dev, &stp.dispatch, &vil::GetDeviceProcAddr);
+TEST(int_basic) {
+	auto& stp = gSetup;
 
 	// setup texture
 	auto tc = TextureCreation();
@@ -74,7 +53,7 @@ void internalIntegrationTest(Device& dev) {
 	VkCommandPoolCreateInfo cpi {};
 	cpi.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 	cpi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-	cpi.queueFamilyIndex = queue.family;
+	cpi.queueFamilyIndex = stp.qfam;
 	VkCommandPool cmdPool;
 	VK_CHECK(CreateCommandPool(stp.dev, &cpi, nullptr, &cmdPool));
 
@@ -139,10 +118,11 @@ void internalIntegrationTest(Device& dev) {
 	auto* cmd = rec.commands->children_;
 	auto dst = cmd->next->next;
 
-	dev.commandHook->queryTime = true;
-	dev.commandHook->forceHook = true;
-	dev.commandHook->target.all = true;
-	dev.commandHook->desc(vilCB.recordPtr(), {dst}, {});
+	auto& vilDev = *stp.vilDev;
+	vilDev.commandHook->queryTime = true;
+	vilDev.commandHook->forceHook = true;
+	vilDev.commandHook->target.all = true;
+	vilDev.commandHook->desc(vilCB.recordPtr(), {dst}, {});
 
 	VkSubmitInfo si {};
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -152,7 +132,7 @@ void internalIntegrationTest(Device& dev) {
 
 	DeviceWaitIdle(stp.dev);
 
-	dlg_assert(dev.commandHook->completed.size() == 1u);
+	dlg_assert(vilDev.commandHook->completed.size() == 1u);
 
 	// cleanup
 	DestroyFramebuffer(stp.dev, fb, nullptr);
@@ -161,7 +141,7 @@ void internalIntegrationTest(Device& dev) {
 
 	// init gui
 	auto gui = std::make_unique<vil::Gui>();
-	gui->init(dev, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
+	gui->init(vilDev, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
 	// TODO: actually render gui stuff. Create own swapchain?
 	//   or rather implement render-on-image for that?
 	//   We could create a headless surface tho.
@@ -170,17 +150,4 @@ void internalIntegrationTest(Device& dev) {
 // TODO: write test where we record a command buffer that executes
 // each command once. Then hook each of those commands, separately.
 
-} // namespace vil
-
-extern "C" VIL_EXPORT void vil_runInternalIntegrationTests() {
-	// at this point, there should be an instance and device
-	vil::Device* dev;
-
-	{
-		std::lock_guard lock(vil::dataMutex);
-		dlg_assert(!vil::devByLoaderTable.empty());
-		dev = vil::devByLoaderTable.begin()->second;
-	}
-
-	vil::internalIntegrationTest(*dev);
-}
+} // namespace vil::test

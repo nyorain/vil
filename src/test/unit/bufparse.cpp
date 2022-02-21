@@ -4,7 +4,7 @@
 
 using namespace vil;
 
-TEST(bufp_test1) {
+TEST(unit_bufp_test1) {
 	auto str = "struct Test { int a[8][4]; uint4 b; }; Test a;";
 
 	ThreadMemScope memScope;
@@ -30,7 +30,7 @@ TEST(bufp_test1) {
 	EXPECT(t00.width, 32u);
 }
 
-TEST(bufp_invalid1) {
+TEST(unit_bufp_invalid1) {
 	auto str = "struct Material { vec4 albed };";
 
 	ThreadMemScope memScope;
@@ -40,7 +40,7 @@ TEST(bufp_invalid1) {
 	// unwrap(ret); // TODO test error message?
 }
 
-TEST(bufp_invalid2) {
+TEST(unit_bufp_invalid2) {
 	auto str = "uint d[";
 
 	ThreadMemScope memScope;

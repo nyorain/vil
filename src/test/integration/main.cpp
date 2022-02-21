@@ -1,7 +1,5 @@
-#define BUGGED_NO_MAIN
-
 #include "../bugged.hpp"
-#include "common.hpp"
+#include "external.hpp"
 #include <vk/vulkan.h>
 #include <vk/dispatch_table_helper.h>
 #include <stdlib.h>
@@ -35,7 +33,8 @@
 #endif
 
 using PFN_vil_getErrorWarningCount = int(*)();
-using PFN_vil_runInternalIntegrationTets = void(*)();
+using PFN_vil_runInternalIntegrationTets = int(*)(
+		VkInstance ini, PFN_vkGetInstanceProcAddr);
 
 #ifdef _WIN32
 
@@ -217,6 +216,7 @@ int main() {
 	setenv("VIL_TIMELINE_SEMAPHORES", "0", 1);
 	setenv("VIL_DLG_HANDLER", "1", 1);
 
+	// enumerate layers
 	{
 		u32 layerCount = 0u;
 		VK_CHECK(vkEnumerateInstanceLayerProperties(&layerCount, nullptr));
@@ -231,6 +231,33 @@ int main() {
 		}
 	}
 
+	// enumerate instance extensions
+	auto foundDebugUtils = false;
+	auto foundHeadlessSurfaceExt = false;
+	{
+		auto foundSurfaceExt = false;
+
+		u32 extCount = 0u;
+		VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr));
+		std::vector<VkExtensionProperties> extProps(extCount);
+		VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, extProps.data()));
+
+		for(auto& ext : extProps) {
+			auto name = ext.extensionName;
+			dlg_info("Instance ext: {}, version {}", name, ext.specVersion);
+			if(std::strcmp(name, VK_KHR_SURFACE_EXTENSION_NAME) == 0) {
+				foundSurfaceExt = true;
+			} else if(std::strcmp(name, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) == 0) {
+				foundHeadlessSurfaceExt = true;
+			} else if(std::strcmp(name, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
+				foundDebugUtils = true;
+			}
+		}
+
+		foundHeadlessSurfaceExt = foundHeadlessSurfaceExt && foundSurfaceExt;
+	}
+
+	dlg_assert(foundDebugUtils);
 	dlg_trace("Creating instance");
 
 	auto layers = std::array {
@@ -238,9 +265,14 @@ int main() {
 		"VK_LAYER_KHRONOS_validation",
 	};
 
-	auto exts = std::array {
+	auto exts = std::vector {
 		VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 	};
+
+	if(foundHeadlessSurfaceExt) {
+		exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+		exts.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+	}
 
 	VkApplicationInfo appInfo {};
 	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -268,6 +300,10 @@ int main() {
 
 	VkInstance ini;
 	VK_CHECK(vkCreateInstance(&ici, nullptr, &ini));
+
+	gSetup.ini = ini;
+	layer_init_instance_dispatch_table(gSetup.ini, &gSetup.iniDispatch,
+		&vkGetInstanceProcAddr);
 
 	// init device
 	dlg_trace("Creating device");
@@ -315,11 +351,17 @@ int main() {
 	qci.queueFamilyIndex = qfam;
 	qci.pQueuePriorities = &prio1;
 
+	auto devExts = std::array {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+	};
+
 	VkDeviceCreateInfo dci {};
 	dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	dci.pQueueCreateInfos = &qci;
 	dci.queueCreateInfoCount = 1u;
 	dci.pEnabledFeatures = &features;
+	dci.enabledExtensionCount = devExts.size();
+	dci.ppEnabledExtensionNames = devExts.data();
 
 	dci.pNext = &features11;
 	// features11.pNext = &features12;
@@ -331,9 +373,8 @@ int main() {
 	vkGetDeviceQueue(dev, qfam, 0u, &queue);
 
 	// store in setup
-	// gSetup.ini = ini;
 	gSetup.dev = dev;
-	// gSetup.phdev = phdev;
+	gSetup.phdev = phdev;
 	gSetup.qfam = qfam;
 	gSetup.queue = queue;
 	layer_init_device_dispatch_table(gSetup.dev, &gSetup.dispatch, &vkGetDeviceProcAddr);
@@ -367,8 +408,10 @@ int main() {
 	dlg_assert_or(runInternalIntegrationTests, return -2);
 
 	dlg_trace("Running internal integration tests... ");
-	runInternalIntegrationTests();
-	dlg_trace(">> Done");
+
+	auto failCount = runInternalIntegrationTests(ini, &vkGetInstanceProcAddr);
+	ret += failCount;
+	dlg_trace(">> Done. Failures: {}", failCount);
 
 	auto vilWarnErrorCount = getErrorWarningCount();
 

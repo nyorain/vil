@@ -1,3 +1,5 @@
+// common header for external integration tests
+
 #pragma once
 
 #include "../bugged.hpp"

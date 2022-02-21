@@ -331,13 +331,16 @@ if with_unit_tests
 		'src/test/unit/xfb.cpp',
 		'src/test/unit/bufferAddress.cpp',
 		'src/test/unit/bufparse.cpp',
+		'src/test/unit/match.cpp',
 	)
 endif
 
 with_integration_tests = get_option('integration-tests')
 if with_integration_tests
 	src += files(
-		'src/test/integration/internal.cpp'
+		'src/test/integration/entry.cpp',
+		'src/test/integration/internal.cpp', # TODO: rename
+		'src/test/integration/gui.cpp',
 	)
 endif
 

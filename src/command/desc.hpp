@@ -60,4 +60,10 @@ struct MatchResult {
 
 MatchResult match(ThreadMemScope&, span<const RecordBatch> a, span<const RecordBatch> b);
 
+// util
+Matcher match(DescriptorStateRef a, DescriptorStateRef b);
+BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b);
+std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
+		const ParentCommand& rootA, const ParentCommand& rootB);
+
 } // namespace vil

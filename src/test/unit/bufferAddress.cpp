@@ -5,7 +5,7 @@
 
 using namespace vil;
 
-TEST(cmp) {
+TEST(unit_cmp) {
 	auto cmp = Device::BufferAddressCmp {};
 
 	Buffer a {};
@@ -25,7 +25,7 @@ TEST(cmp) {
 	EXPECT(cmp(t3, &a), false);
 }
 
-TEST(set) {
+TEST(unit_set) {
 	decltype(Device::bufferAddresses) set;
 
 	Buffer a {};
@@ -63,7 +63,7 @@ TEST(set) {
 	EXPECT(*it, &b);
 }
 
-TEST(alias) {
+TEST(unit_alias) {
 	decltype(Device::bufferAddresses) set;
 
 	Buffer a {};

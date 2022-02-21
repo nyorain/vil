@@ -1,3 +1,7 @@
+// header-only utility
+// used for external as well as internal integration tests
+// must not use symbols defined in vil
+
 #include <vk/vulkan.h>
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
@@ -30,9 +34,13 @@ inline u32 findLSB(u32 v) {
 }
 
 struct Setup {
+	VkInstance ini;
+	VkPhysicalDevice phdev;
 	VkDevice dev;
 	VkQueue queue;
 	u32 qfam;
+
+	VkLayerInstanceDispatchTable iniDispatch;
 	VkLayerDispatchTable dispatch;
 };
 

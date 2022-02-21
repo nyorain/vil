@@ -32,9 +32,10 @@
 //  - BUGGED_NO_MAIN: don't include the main function that just executes all tests.
 //  - BUGGED_NO_IMPL: don't include the implementation.
 
-// Modified for vil.
-
 #pragma once
+
+// Modified for vil.
+#define BUGGED_NO_MAIN
 
 #include <string> // std::string
 #include <cstring> // std::strrchr

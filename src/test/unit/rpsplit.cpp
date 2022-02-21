@@ -55,7 +55,7 @@ auto& addSubpass(RenderPassDesc& desc, span<const u32> colorAtts,
 	return subp;
 }
 
-TEST(rpsplit_basic) {
+TEST(unit_rpsplit_basic) {
 	RenderPassDesc desc;
 	addAttachment(desc); // attachment 0
 	addAttachment(desc, true); // attachment 1
@@ -75,7 +75,7 @@ TEST(rpsplit_basic) {
 	EXPECT(splittable(desc, 2u), true);
 }
 
-TEST(rpsplit_single_resolve) {
+TEST(unit_rpsplit_single_resolve) {
 	RenderPassDesc desc;
 	addAttachment(desc); // attachment 0
 	addAttachment(desc, true); // attachment 1
@@ -84,7 +84,7 @@ TEST(rpsplit_single_resolve) {
 	EXPECT(splittable(desc, 0u), true);
 }
 
-TEST(rpsplit_input_att) {
+TEST(unit_rpsplit_input_att) {
 	RenderPassDesc desc;
 	addAttachment(desc); // attachment 0
 	addAttachment(desc); // attachment 1
@@ -102,7 +102,7 @@ TEST(rpsplit_input_att) {
 	EXPECT(splittable(desc, 0u), false);
 }
 
-TEST(rpsplit_unused) {
+TEST(unit_rpsplit_unused) {
 	// make that VK_ATTACHMENT_UNUSED does not cause an error, as
 	// it previously did
 	RenderPassDesc desc;

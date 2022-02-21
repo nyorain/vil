@@ -31,7 +31,7 @@ const XfbCapture& getCapture(const XfbPatchDesc& desc, spv11::BuiltIn builtin) {
 	throw std::runtime_error("Could not find capture");
 }
 
-TEST(xfb_patch) {
+TEST(unit_xfb_patch) {
 	spc::Compiler compiled{{std::begin(a_vert_spv_data), std::end(a_vert_spv_data)}};
 	compiled.set_entry_point("main", spv::ExecutionModelVertex);
 
@@ -63,7 +63,7 @@ TEST(xfb_patch) {
 	EXPECT(out2.builtin, std::nullopt);
 }
 
-TEST(xfb_patch_spec) {
+TEST(unit_xfb_patch_spec) {
 	spc::Compiler compiled{{std::begin(a_vert_spv_data), std::end(a_vert_spv_data)}};
 	compiled.set_entry_point("main", spv::ExecutionModelVertex);
 
