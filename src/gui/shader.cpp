@@ -35,8 +35,8 @@ void ShaderDebugger::init(Gui& gui) {
 
 	// TODO: why does this break for games using tcmalloc? tested
 	// on linux with dota
-	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	// textedit_.SetLanguageDefinition(lang);
+	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	textedit_.SetLanguageDefinition(lang);
 
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
@@ -226,24 +226,7 @@ void ShaderDebugger::draw() {
 
 		// toggle breakpoint
 		if(ImGui::Button("Breakpoint")) {
-			// TODO: get current editor file
-			auto fileName = state_->current_file;
-			if(!fileName) {
-				dlg_assert(state_->owner->file_count > 0);
-				fileName = state_->owner->files[0].name;
-			}
-
-			auto line = 1 + textedit_.GetCursorPosition().mLine;
-
-			auto fid = fileID(fileName);
-			Location loc{fid, u32(line)};
-
-			auto it = find(breakpoints_, loc);
-			if(it != breakpoints_.end()) {
-				breakpoints_.erase(it);
-			} else {
-				breakpoints_.push_back(loc);
-			}
+			toggleBreakpoint();
 		}
 
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
@@ -288,31 +271,12 @@ void ShaderDebugger::draw() {
 		auto ctrl = io.ConfigMacOSXBehaviors ? io.KeySuper : io.KeyCtrl;
 		auto alt = io.ConfigMacOSXBehaviors ? io.KeyCtrl : io.KeyAlt;
 
-		if(textedit_.mFocused && (
-				(!shift && !ctrl && !alt && ImGui::IsKeyDown(swa_key_f9)) ||
-				(!shift && ctrl && !alt && ImGui::IsKeyDown(swa_key_b)))) {
-			bool doSet = true;
-			auto line = u32(textedit_.GetCursorPosition().mLine);
-
-			for(auto it = breakpoints_.begin(); it != breakpoints_.end(); ++it) {
-				auto& bp = *it;
-				// TODO: file
-				if(bp.lineID == line) {
-					dlg_trace(">> unset");
-					doSet = false;
-					breakpoints_.erase(it);
-					textedit_.GetBreakpoints().erase(line);
-					break;
-				}
-			}
-
-			if(doSet) {
-				dlg_trace(">> set");
-				auto& nbp = breakpoints_.emplace_back();
-				nbp.fileID = 0u; // TODO
-				nbp.lineID = line;
-				textedit_.GetBreakpoints().insert(line);
-			}
+		if(textedit_.mFocused && !f9Down_ && (
+				(!shift && !ctrl && !alt && ImGui::IsKeyDown(swa_key_f9)))) {
+			f9Down_ = true;
+			toggleBreakpoint();
+		} else if(!ImGui::IsKeyDown(swa_key_f9)) {
+			f9Down_ = false;
 		}
 	}
 
@@ -706,6 +670,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		return;
 	}
 
+	// TODO: hacky
 	auto hookState = gui_->cbGui().commandViewer().state();
 	dlg_assert(hookState);
 	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
@@ -719,15 +684,54 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	dlg_assert(copyRequest.binding == bindingID);
 
 	if(spcType.storage == spv::StorageClassPushConstant) {
-		// TODO: get from command
-		dlg_error("TODO: loadVar push constant");
+		// TODO: hacky
+		auto* cmd = gui_->cbGui().commandViewer().command();
+		auto* stateCmd = dynamic_cast<const StateCmdBase*>(cmd); // TODO PERF: static cast and assert
+		auto pcrData = stateCmd->boundPushConstants().data;
+
+		ThreadMemScope tms;
+		auto [type, off] = accessBuffer(tms, res->type_id, indices, pcrData.size());
+		dlg_assert(type);
+
+		spvm_member* setupDst;
+		spvm_member wrapper;
+		if(type->type == Type::typeStruct ||
+				type->vecsize > 1 ||
+				type->columns > 1 ||
+				!type->array.empty()) {
+			setupDst = &wrapper;
+			wrapper.type = typeID;
+			wrapper.members = dst.data();
+			wrapper.member_count = dst.size();
+		} else {
+			dlg_assert(dst.size() == 1u);
+			setupDst = &dst[0];
+		}
+
+		// NOTE: this can happen I guess, e.g. if not the whole range was
+		// bound and the shader is reading undefined data I guess?
+		auto typeSize = size(*type, BufferLayout::std140);
+		auto end = off + typeSize;
+		dlg_assert(end <= pcrData.size());
+		if(end > pcrData.size()) {
+			// read undefined data...
+			auto undefData = tms.allocUndef<std::byte>(typeSize);
+			if(off < pcrData.size()) {
+				std::copy(pcrData.begin() + off, pcrData.end(), undefData.begin());
+			}
+			pcrData = undefData;
+		} else {
+			pcrData = pcrData.subspan(off);
+		}
+
+		setupMember(*type, pcrData, *setupDst);
 		return;
 	} else if(spcType.storage == spv::StorageClassInput) {
 		// TODO: get from vertex input?
 		dlg_error("TODO: loadVar input");
 		return;
 	} else if(spcType.storage == spv::StorageClassOutput) {
-		// TODO: from own storage?
+		// TODO: from own storage? not sure what this actually means
 		dlg_error("TODO: loadVar output");
 		return;
 	} else if(spcType.storage == spv::StorageClassUniformConstant) {
@@ -1276,7 +1280,7 @@ void ShaderDebugger::drawVariablesTab() {
 		for(auto i = 0u; i < program_->bound; ++i) {
 			auto& res = state_->results[i];
 			if((res.type != spvm_result_type_variable && res.type != spvm_result_type_function_parameter) ||
-					!res.name /* ||
+					!res.name ||
 					res.owner != state_->current_function ||
 					// TODO: make this filter optional, via gui.
 					// Useful in many cases but can be annoying/incorrect when
@@ -1287,7 +1291,6 @@ void ShaderDebugger::drawVariablesTab() {
 					// here compare whether the current position of state
 					// postdominates that instruction.
 					!res.stored_to) {
-					*/) {
 				continue;
 			}
 
@@ -1335,11 +1338,14 @@ void ShaderDebugger::drawBreakpointsTab() {
 }
 
 void ShaderDebugger::drawCallstackTab() {
+	// TODO: does not belong here. Visual representation would be useful.
+	imGuiText("Current line: {}", state_->current_line);
+
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
 	auto flags = ImGuiTableFlags_BordersInner |
 		ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_SizingStretchSame;
-	if(ImGui::BeginTable("Values", 2u, flags)) {
+	if(ImGui::BeginTable("Callstack", 3u, flags)) {
 		// TODO:
 		// - allow selecting entries and then showing the respective variables from threre
 		// - show file, line, function (and maybe hide address by default)
@@ -1347,10 +1353,15 @@ void ShaderDebugger::drawCallstackTab() {
 		for(auto i = 0; i < count; ++i) {
 			ImGui::TableNextRow();
 
-			ImGui::NextColumn();
+			// TODO: show line!
+
+			ImGui::TableNextColumn();
+			imGuiText("{}", i);
+
+			ImGui::TableNextColumn();
 			imGuiText("{}", static_cast<const void*>(state_->function_stack[i]));
 
-			ImGui::NextColumn();
+			ImGui::TableNextColumn();
 			auto name = state_->function_stack_info[i]->name;
 			imGuiText("{}", name ? name : "?");
 		}
@@ -1400,13 +1411,16 @@ void ShaderDebugger::jumpToState() {
 
 	// TODO: seems to be a textedit bug
 	auto line = state_->current_line == 0 ? 0 : state_->current_line - 1;
-	textedit_.SetCursorPosition({line, state_->current_column});
+	dlg_trace("cursor pos: {} {}", line, state_->current_column);
+	textedit_.SetCursorPosition({line, 1});
+	textedit_.mCurrentLineNumber = {unsigned(line)};
 }
 
 bool ShaderDebugger::stepOpcode() {
 	auto currLine = state_->current_line;
 	auto currFile = state_->current_file;
 
+	auto posPrev = state_->code_current;
 	spvm_state_step_opcode(state_);
 
 	if(state_->current_line == currLine &&
@@ -1416,8 +1430,11 @@ bool ShaderDebugger::stepOpcode() {
 	}
 
 	for(auto& bp : breakpoints_) {
-		if(spvm_word(bp.lineID) == state_->current_line &&
-				fileName(bp.fileID) == state_->current_file) {
+		// if(spvm_word(bp.lineID) == state_->current_line &&
+		// 		fileName(bp.fileID) == state_->current_file) {
+		// 	return true;
+		// }
+		if(posPrev == bp.pos) {
 			return true;
 		}
 	}
@@ -1443,6 +1460,89 @@ u32 ShaderDebugger::fileID(std::string_view fileName) const {
 	dlg_assertm(fileID != u32(-1), "Can't find file {}", fileName);
 	return fileID;
 
+}
+
+void ShaderDebugger::toggleBreakpoint() {
+	// TODO: get current editor file
+	auto fileName = state_->current_file;
+	if(!fileName) {
+		dlg_assert(state_->owner->file_count > 0);
+		fileName = state_->owner->files[0].name;
+	}
+
+	const auto fid = fileID(fileName);
+	const auto line = 1 + u32(textedit_.GetCursorPosition().mLine);
+	bool doSet = true;
+
+	for(auto it = breakpoints_.begin(); it != breakpoints_.end(); ++it) {
+		auto& bp = *it;
+		if(bp.lineID == line && bp.fileID == fid) {
+			doSet = false;
+			breakpoints_.erase(it);
+			// TODO: file
+			textedit_.GetBreakpoints().erase(line);
+			break;
+		}
+	}
+
+	if(doSet) {
+		// find position
+		auto spv = program_->code;
+		auto spvEnd = program_->code + program_->code_length;
+
+		struct Find {
+			const spvm_source pos;
+			u32 line;
+		};
+
+		std::optional<Find> best;
+
+		while(spv < spvEnd) {
+			auto instrBegin = spv;
+			spvm_word opcode_data = SPVM_READ_WORD(spv);
+			spvm_word word_count = ((opcode_data & (~SpvOpCodeMask)) >> SpvWordCountShift);
+			SpvOp opcode = SpvOp(opcode_data & SpvOpCodeMask);
+
+			if(opcode == SpvOpLine) {
+				u32 opfile = SPVM_READ_WORD(spv);
+				u32 opline = SPVM_READ_WORD(spv);
+				u32 opclmn = SPVM_READ_WORD(spv);
+				(void) opclmn;
+
+				auto opfileID = fileID(state_->results[opfile].name);
+				if(opfileID == fid && opline >= line) {
+					if(!best || opline < best->line) {
+						best.emplace(Find{instrBegin, opline});
+
+						if(opline == line) {
+							// exact
+							break;
+						}
+					}
+				}
+			}
+
+			dlg_assert(word_count > 0);
+			spv = instrBegin + word_count;
+		}
+
+		// TODO: add threshold? we currently might add a breakpoint
+		// somewhere else, just because it's the closest.
+		// Should at least be in the same function, right?
+		if(!best) {
+			dlg_error("Coun't find location for breakpoint");
+			return;
+		}
+
+		// TODO: move visual presentation of breakpoint to the
+		// exact found position?
+
+		auto& nbp = breakpoints_.emplace_back();
+		nbp.fileID = fid;
+		nbp.lineID = line;
+		nbp.pos = best->pos;
+		textedit_.GetBreakpoints().insert(line);
+	}
 }
 
 } // namespace vil

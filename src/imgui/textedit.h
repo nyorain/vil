@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <map>
 #include <regex>
+#include <optional>
 #include "imgui.h"
 
 namespace igt {
@@ -39,6 +40,7 @@ class TextEditor
 {
 public:
 	bool mFocused {};
+	std::optional<unsigned> mCurrentLineNumber {};
 
 	enum class PaletteIndex
 	{
@@ -60,6 +62,7 @@ public:
 		ErrorMarker,
 		Breakpoint,
 		LineNumber,
+		CurrentLineNumber,
 		CurrentLineFill,
 		CurrentLineFillInactive,
 		CurrentLineEdge,
@@ -71,18 +74,6 @@ public:
 		Normal,
 		Word,
 		Line
-	};
-
-	struct Breakpoint
-	{
-		int mLine;
-		bool mEnabled;
-		std::string mCondition;
-
-		Breakpoint()
-			: mLine(-1)
-			, mEnabled(false)
-		{}
 	};
 
 	// Represents a character coordinate from the user's point of view,

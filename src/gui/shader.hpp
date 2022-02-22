@@ -81,6 +81,9 @@ private:
 	std::string_view fileName(u32 fileID) const;
 	u32 fileID(std::string_view fileName) const; // returns u32(-1) if not found
 
+	// toggles breakpoint on current line
+	void toggleBreakpoint();
+
 private:
 	struct OurImage : spvm_image {
 		ReadBuf data;
@@ -89,6 +92,7 @@ private:
 	struct Location {
 		u32 fileID;
 		u32 lineID;
+		const int* pos;
 	};
 
 	friend inline bool operator==(const Location& a, const Location& b) {
@@ -112,6 +116,9 @@ private:
 
 	std::unordered_map<u32, u32> varIDToDsCopyMap_;
 	std::vector<Location> breakpoints_;
+
+	// TODO
+	bool f9Down_ {};
 };
 
 } // namespace vil

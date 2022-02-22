@@ -8,6 +8,10 @@ be possible or useful in the end.
   	- beside visualization, this would make debugging easier, allowing
 	  to use specific (complex) records in the unit tests for reproduction
 	  and debugging
+	- would also allow to store a specific position inside a record/the frame
+	  to quickly navigate to it between multiple application starts.
+	  This one is even more tricky though, deciding which data to serialize.
+	  Probably wouldn't want to rely on stack traces here, right?
 
 - allow to visualize buffers as images where it makes sense 
   (using a bufferView or buffer-to-image copy)

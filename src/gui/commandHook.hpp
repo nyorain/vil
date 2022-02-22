@@ -54,7 +54,11 @@ public:
 		CommandRecord* record {};
 	} target;
 
-	bool freeze {}; // temporarily don't resubmit states
+	// Temporarily don't hook commands even if hook ops are set
+	// and a submission matches a target.
+	// Note that in comparison to just unsetting hook ops and target,
+	// this allows all already hooked records to stay valid.
+	bool freeze {};
 
 	// Always hooks, even with disabled gui. Mainly for testing.
 	bool forceHook {};

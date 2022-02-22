@@ -963,8 +963,13 @@ void TextEditor::Render()
 			// Draw line number (right aligned)
 			snprintf(buf, 16, "%d  ", lineNo + 1);
 
+			auto paletteIndex = PaletteIndex::LineNumber;
+			if(mCurrentLineNumber && unsigned(lineNo) == *mCurrentLineNumber) {
+				paletteIndex = PaletteIndex::CurrentLineNumber;
+			}
+
 			auto lineNoWidth = ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, -1.0f, buf, nullptr, nullptr).x;
-			drawList->AddText(ImVec2(lineStartScreenPos.x + mTextStart - lineNoWidth, lineStartScreenPos.y), mPalette[(int)PaletteIndex::LineNumber], buf);
+			drawList->AddText(ImVec2(lineStartScreenPos.x + mTextStart - lineNoWidth, lineStartScreenPos.y), mPalette[(int)paletteIndex], buf);
 
 			if (mState.mCursorPosition.mLine == lineNo)
 			{
@@ -2033,6 +2038,7 @@ const TextEditor::Palette & TextEditor::GetDarkPalette()
 			0x800020ff, // ErrorMarker
 			0x40f08000, // Breakpoint
 			0xff707000, // Line number
+			0xff77c7c7, // Current Line number
 			0x40000000, // Current line fill
 			0x40808080, // Current line fill (inactive)
 			0x40a0a0a0, // Current line edge
@@ -2061,6 +2067,7 @@ const TextEditor::Palette & TextEditor::GetLightPalette()
 			0xa00010ff, // ErrorMarker
 			0x80f08000, // Breakpoint
 			0xff505000, // Line number
+			0xff222222, // Current Line number
 			0x40000000, // Current line fill
 			0x40808080, // Current line fill (inactive)
 			0x40000000, // Current line edge
@@ -2089,6 +2096,7 @@ const TextEditor::Palette & TextEditor::GetRetroBluePalette()
 			0xa00000ff, // ErrorMarker
 			0x80ff8000, // Breakpoint
 			0xff808000, // Line number
+			0xff202000, // Current Line number
 			0x40000000, // Current line fill
 			0x40808080, // Current line fill (inactive)
 			0x40000000, // Current line edge

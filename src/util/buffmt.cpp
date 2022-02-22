@@ -6,6 +6,7 @@
 #include <threadContext.hpp>
 #include <spirv-cross/spirv_cross.hpp>
 #include <numeric>
+#include <iomanip>
 
 namespace vil {
 

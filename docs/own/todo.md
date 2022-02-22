@@ -79,10 +79,18 @@ add proper resource cow implementation:
       Just iterate over MemoryResources in the given range.
 
 shader debugger:
-- [ ] implement breakpoints
+- [ ] cleanup/fix freezing as described in node 2235
+- [x] implement breakpoints
+	- [x] issue: we currently check for equality for breakpoints.
+	      breakpoints for lines that don't have code associated with them
+		  in spirv won't trigger. Need to do a more proper check
+	- [ ] clean up breakpoint handling
+- [ ] test, fix, cleanup handling of multiple files. Broken
+      with breakpoints and their visualization.
 - [ ] add UI for selecting workgroup/invocation
 - [ ] return workgroup size from shader in loadBuiltin
-- [ ] add support for loading push constants
+- [x] add support for loading push constants
+	- [ ] TODO: test. Can we write unit tests for this? Should be possible
 - [ ] support vertex shaders
 	- [ ] correctly wire up the vertex input. And add ui for selecting
 	      instance/vertex id to debug.
