@@ -123,7 +123,6 @@ extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum vilKey ke
 
 	auto& io = ov.gui.imguiIO();
 
-	dlg_trace("key: {} {}", swa_key_to_name(swa_key(keycode)), pressed);
 	io.KeysDown[keycode] = pressed;
 	return io.WantCaptureKeyboard;
 }

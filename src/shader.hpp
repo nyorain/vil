@@ -21,6 +21,7 @@ struct ShaderSpecialization {
 ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo*);
 bool operator==(const ShaderSpecialization& a, const ShaderSpecialization& b);
 
+// TODO: should probably make this re-use buffmt
 struct XfbCapture {
 	enum Type {
 		typeFloat,

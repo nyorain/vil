@@ -111,6 +111,7 @@ struct Command {
 	// Returns how much this commands matches with the given one.
 	// Should always return 0.f for two commands that don't have the
 	// same type. Should not consider child commands, just itself.
+	// Will also never consider the stackTrace.
 	virtual Matcher match(const Command& cmd) const;
 
 	virtual void visit(CommandVisitor& v) const = 0;
@@ -119,11 +120,7 @@ struct Command {
 	Command* next {};
 
 	// How many sibilings with same nameDesc() came before this in parent
-	// NOTE: i don't like this here. Not sure how to properly solve this.
-	// It's needed by displayCommands to generate proper imgui ids.
-	// We should probably rather do a full-tree-match between the old and
-	// the new record and assign ids via that. Note that this is not relevant
-	// for leaves so this shouldn't be a big performance issue.
+	// TODO: to be removed, currently just used to improve matching.
 	unsigned relID {};
 
 #ifdef VIL_COMMAND_CALLSTACKS

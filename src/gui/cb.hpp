@@ -16,7 +16,7 @@
 
 namespace vil {
 
-struct RecordBatch;
+struct FrameSubmission;
 
 class CommandBufferGui {
 public:
@@ -59,8 +59,8 @@ private:
 	void clearSelection();
 
 	void updateRecord(IntrusivePtr<CommandRecord> record);
-	void updateRecords(std::vector<RecordBatch>, bool updateSelection);
-	void updateRecords(const MatchResult&, std::vector<RecordBatch>);
+	void updateRecords(std::vector<FrameSubmission>, bool updateSelection);
+	void updateRecords(const MatchResult&, std::vector<FrameSubmission>);
 
 private:
 	friend class Gui;
@@ -76,7 +76,7 @@ private:
 	IntrusivePtr<CommandRecord> record_ {};
 
 	// For swapchain
-	std::vector<RecordBatch> records_; // currently viewed frame; i.e. the displayed commands
+	std::vector<FrameSubmission> records_; // currently viewed frame; i.e. the displayed commands
 	u32 swapchainPresent_ {}; // present id of last time we got a completed hook
 	bool freezeCommands_ {};
 	bool freezeState_ {};
@@ -85,9 +85,9 @@ private:
 
 	// Potentially old, selected command, in its record and its batch.
 	// [Swapchain mode] Batch of command viewer; for matching
-	std::vector<RecordBatch> selectedFrame_;
+	std::vector<FrameSubmission> selectedFrame_;
 	// [Swapchain mode] part of selectedFrame_
-	RecordBatch* selectedBatch_ {};
+	FrameSubmission* selectedBatch_ {};
 	// In swapchain mode: part of selectedBatch_
 	IntrusivePtr<CommandRecord> selectedRecord_ {};
 	// The selected command (hierarchy) inside selectedRecord_.

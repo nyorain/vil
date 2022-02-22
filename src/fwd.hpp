@@ -141,6 +141,7 @@ struct Matcher {
 } // namespace vil
 
 
+// spirv-cross
 namespace spc {
 
 class Compiler;
@@ -150,7 +151,7 @@ struct BuiltInResource;
 
 } // namespace spc
 
-
+// backward
 namespace backward {
 
 class StackTrace;

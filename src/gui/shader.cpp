@@ -12,6 +12,7 @@
 #include <shader.hpp>
 #include <ds.hpp>
 #include <numeric>
+#include <spirv-cross/spirv_cross.hpp>
 #include <spvm/types.h>
 #include <spvm/ext/GLSL450.h>
 

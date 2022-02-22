@@ -2,6 +2,7 @@
 #include <gui/gui.hpp>
 #include <gui/commandHook.hpp>
 #include <gui/util.hpp>
+#include <gui/fontAwesome.hpp>
 #include <queue.hpp>
 #include <ds.hpp>
 #include <swapchain.hpp>
@@ -347,9 +348,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	if(mode_ != UpdateMode::swapchain) {
 		// only show combo if at least one update option is available
-		auto showCombo =
-			// (record_ && record_->group) ||
-			(cb_ || record_->cb);
+		auto showCombo = (cb_ || record_->cb);
 
 		if(showCombo && ImGui::BeginCombo("Update Source", modeName(mode_))) {
 			if(ImGui::Selectable("None")) {
@@ -387,7 +386,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		return;
 	}
 
-	if(ImGui::Button("Settings")) {
+	if(ImGui::Button(ICON_FA_WRENCH)) {
 		ImGui::OpenPopup("Command Selector");
 	}
 
@@ -467,7 +466,6 @@ void CommandBufferGui::draw(Draw& draw) {
 	// } else if(mode_ == UpdateMode::commandBuffer) {
 	// 	dlg_assert(!record_->cb || record_->cb == cb_);
 	// 	dlg_assert(cb_ && cb_->lastRecordPtrLocked());
-//
 	// 	imGuiText("Updating from Command Buffer");
 	// 	ImGui::SameLine();
 	// 	refButton(*gui_, *cb_);
@@ -475,7 +473,6 @@ void CommandBufferGui::draw(Draw& draw) {
 	// 	imGuiText("Updating from any records");
 	// } else if(mode_ == UpdateMode::swapchain) {
 	// 	auto& sc = *gui_->dev().swapchain;
-//
 	// 	imGuiText("Showing per-present commands from");
 	// 	ImGui::SameLine();
 	// 	refButton(*gui_, sc);
@@ -650,11 +647,11 @@ void CommandBufferGui::updateState() {
 		auto bestMatch = 0.f;
 		MatchResult bestMatchResult {};
 		u32 bestPresentID = {};
-		span<const RecordBatch> bestBatches; // only for swapchain mode
+		span<const FrameSubmission> bestBatches; // only for swapchain mode
 
 		for(auto& res : hook.completed) {
 			float resMatch = res.match;
-			span<const RecordBatch> foundBatches;
+			span<const FrameSubmission> foundBatches;
 			u32 presentID {};
 
 			// When we are in swapchain mode, we need the frame associated with
@@ -1029,7 +1026,7 @@ void CommandBufferGui::clearSelection() {
 	}
 }
 
-void CommandBufferGui::updateRecords(std::vector<RecordBatch> records,
+void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records,
 		bool updateSelection) {
 	// update records
 	{
@@ -1062,10 +1059,10 @@ void CommandBufferGui::updateRecords(std::vector<RecordBatch> records,
 		if(updateSelection && selectedBatch_ == batchMatch.a) {
 			dlg_assert(!newSelectedBatch);
 
-			// TODO: kinda hacky. But needed since the RecordBatch
+			// TODO: kinda hacky. But needed since the FrameSubmission
 			// references in frameMatch might not directly reference
 			// into records
-			auto cmp = [&](const RecordBatch& rec) {
+			auto cmp = [&](const FrameSubmission& rec) {
 				return rec.submissionID == batchMatch.b->submissionID;
 			};
 			auto it = find_if(records, cmp);
@@ -1114,7 +1111,7 @@ void addMatches(
 }
 
 void CommandBufferGui::updateRecords(const MatchResult& frameMatch,
-		std::vector<RecordBatch> records) {
+		std::vector<FrameSubmission> records) {
 	ThreadMemScope tms;
 
 	// find matching openedSections_

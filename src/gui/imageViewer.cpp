@@ -741,6 +741,9 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		aspect_ = newAspect;
 	}
 
+	dlg_assert(aspect_ == VK_IMAGE_ASPECT_COLOR_BIT ||
+		imageDraw_.flags == (DrawGuiImage::flagMaskR | DrawGuiImage::flagGrayscale));
+
 	if(!(flags & preserveZoomPan)) {
 		offset_ = {};
 		scale_ = {1.f};
@@ -794,6 +797,8 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 void ImageViewer::reset() {
 	unselect();
 	imageDraw_ = {};
+	aspect_ = {};
+	subresRange_ = {};
 	offset_ = {};
 	scale_ = 1.f;
 }

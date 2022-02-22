@@ -11,7 +11,7 @@
 
 namespace vil {
 
-struct RecordBatch {
+struct FrameSubmission {
 	Queue* queue;
 	std::vector<IntrusivePtr<CommandRecord>> submissions;
 	u64 submissionID; // global submission id
@@ -29,7 +29,7 @@ struct FrameSubmissions {
 	// submission associated with this frame.
 	u64 submissionEnd;
 
-	std::vector<RecordBatch> batches;
+	std::vector<FrameSubmission> batches;
 };
 
 struct Swapchain : DeviceHandle {

@@ -6,6 +6,7 @@
 #include <vk/enumString.hpp>
 #include <spirv-cross/spirv_cross.hpp>
 #include <filesystem>
+#include <optional>
 
 // NOTE: useful for debugging of patching issues, not enabled by default.
 // #ifdef VIL_OUTPUT_PATCHED_SPIRV

@@ -8,6 +8,7 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
+- [ ] fix msvc unit test issue (see CI, only in debug)
 - [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
       resource destruction, can happen in any thread. Caused a crash with doom.
 - [ ] figure out transform_feedback crashes in doom eternal
@@ -27,13 +28,25 @@ urgent, bugs:
 	  an empty alias string
 - [ ] toupper bug when searching for resource
 - [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
+- [ ] fix vertex viewer input issues (e.g. with a7c)
 - [ ] figure out to handle copyChain in a general way. Sometimes we need
       deep copies, sometimes we need to unwrap additional handles inside
 	  the copy. Both of it is currently not done.
 	  Or maybe remove the copyChain logic completely? Not sure if trying
 	  to support simple extensions out of the box even makes sense.
+- [ ] improve layout, too much wasted space in buffer viewer rn.
+- [ ] improve layout of image viewer (e.g. in command viewer).
+      really annoying rn to always scroll down. 
+	  Maybe use tabs? One for general information, one for the image viewer?
 
 new, workstack:
+- [ ] improve timing queries
+	- [ ] allow timing for whole command buffers (begin to end)
+	- [ ] allow timing for whole submissions (begin to end)
+	- [ ] allow (via button) to show a histogram for a specific timing query
+		- [ ] create a small TimingQuery widget
+	- [ ] stabilize it? (functionality for the TimingQuery widget).
+	      Like, only update a couple of times per second?
 - [ ] implement image histograms (probably best like in PIX)
       See minmax.comp and histogram.comp
 - [ ] implement basic filters in image viewer, like inf/nan overlay
@@ -46,11 +59,11 @@ new, workstack:
 	  formatting & text rendering)
 	- [ ] maybe have a second vector<CommandHook> with pending submissions?
 	      and if the user of the submissions is ok with pending resources,
-		  use them?
+		  it can use them?
 - [ ] rework buffmt with proper array types (and multdim arrays)
       allow to store spirv u32 id per Type.
 
-cows:
+add proper resource cow implementation:
 - [ ] resolve them in image/buffer destructor. Just wait for completion
       at the moment. Can later on try to optimize it, keeping the
 	  handle (and possibly memory) alive until copy is finished.
@@ -109,14 +122,14 @@ shader debugger:
 
 spvm:
 - [ ] Add OpSpecConstant* support
-- [ ] Add OpArrayLength support
+- [x] Add OpArrayLength support
 - [ ] merge back changes upstream
 	- [ ] asserts
 	- [ ] improved image sampling
 	- [ ] external variable load/store via callback
 	- [ ] other missing opcodes implemented now
 
-glslang:
+glslang (slightly unrelated):
 - [ ] add PR that disables naming of "param" OpVariables
 - [ ] add PR that adds flag to use OpLine with columns for expressions
 
@@ -159,10 +172,12 @@ window/overlay
 performance/profiling:
 - [ ] can we make per-cb-mutexs a thing?
       major bottleneck for applications that have hundreds of small command
-	  buffers.
+	  buffers. There are reasons it's not possible at the moment though,
+	  the cb-handle connections for instance.
 - [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
 	  since we should be logically able to get around that
-	  case (with normal API use and no gui open)
+	  case (with normal API use and no gui open; i.e. the Record should
+	  be destroyed before any resources it uses)
 - [ ] make sure it's unlikely we have additional DescriptorSetState references
 	  on vkFreeDescriptorSets (with normal api use and no gui)
 - [ ] don't hook every cb with matching command. At least do a rough check
@@ -186,6 +201,7 @@ performance/profiling:
 - [ ] profile our formatted data reading, might be a bottleneck worth
 	  optimizing. VertexViewer.Table zone had > 10ms (even with just 100
 	  vertices). Find the culprit!
+	- [ ] In VertexViewer: use imgui list clipping! perfect and easy to use here
 - [ ] (high prio) holding the device mutex while submitting is really bad, see queue.cpp.
       We only need it for gui sync I think, we might be able to use
 	  a separate gui/sync mutex for that. Basically a mutex that (when locked)
@@ -239,6 +255,8 @@ gui stuff
 - [ ] (high prio) cb/command viewer: when viewing a batch from a swapchain,
       show the semaphores/fences with from a vkQueueSubmit.
 	  When selecting the vkQueueSubmit just show an overview.
+	  	- Currently hard to do, the fences/semaphores might have been destroyed.
+		  Not sure how to easily track this.
 - [ ] (high prio) figure out general approach to fix flickering data, especially
       in command viewer (but also e.g. on image hover in resource viewer)
 - [ ] imgui styling. Compare with other imgui applications.

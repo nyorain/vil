@@ -48,6 +48,7 @@ TEST(unit_command_match_barrier) {
 
 TEST(unit_match_simple_record) {
 	Device dev;
+	dev.captureCmdStack.store(false);
 
 	RecordBuilder rb(dev);
 	rb.add<BarrierCmd>();
@@ -69,6 +70,7 @@ TEST(unit_match_simple_record) {
 
 TEST(unit_match_labels) {
 	Device dev;
+	dev.captureCmdStack.store(false);
 
 	RecordBuilder rb(dev);
 	auto& a1 = label(rb, "1").cmd;
@@ -86,7 +88,7 @@ TEST(unit_match_labels) {
 	ThreadMemScope tms;
 	auto [matches, matchRes] = match(tms, *recA->commands, *recB->commands);
 	auto matchVal = eval(matchRes);
-	// dlg_trace("match val: {}", matchVal);
+	dlg_trace("match val: {}", matchVal);
 
 	// don't care about specifics here. Might need to be changed in future
 	// but then investigate why, this range is fairly permissive as is.
@@ -104,4 +106,29 @@ TEST(unit_match_labels) {
 
 	dlg_assert(matches[0].a == &a4);
 	dlg_assert(matches[0].b == &b4);
+
+	// test symmetrical
+	{
+		auto [matches2, matchRes2] = match(tms, *recB->commands, *recA->commands);
+		auto matchVal2 = eval(matchRes2);
+		dlg_trace("match val 2: {}", matchVal2);
+
+		// don't care about specifics here. Might need to be changed in future
+		// but then investigate why, this range is fairly permissive as is.
+		dlg_assert(matchVal2 > 0.6f);
+		dlg_assert(matchVal2 < 0.9f);
+		dlg_assert(matchVal2 == approx(matchVal));
+
+		dlg_assert(matches2.size() == 3u);
+
+		// reverse order atm
+		dlg_assert(matches2[2].b == &a1);
+		dlg_assert(matches2[2].a == &b1);
+
+		dlg_assert(matches2[1].b == &a2);
+		dlg_assert(matches2[1].a == &b2);
+
+		dlg_assert(matches2[0].b == &a4);
+		dlg_assert(matches2[0].a == &b4);
+	}
 }

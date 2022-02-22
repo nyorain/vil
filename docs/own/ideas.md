@@ -1,6 +1,8 @@
 Moved from todo.md. Mostly ideas for experiments that might not even
 be possible or useful in the end.
 
+- When clicking on a flag, extension name or something, link to vulkan api spec
+  regarding that item? Not sure how easy to do.
 - serialize command records. At least roughly, without referenced handles
   and stuff
   	- beside visualization, this would make debugging easier, allowing

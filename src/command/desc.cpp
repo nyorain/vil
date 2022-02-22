@@ -17,7 +17,7 @@
 namespace vil {
 
 // TODO: to be removed, together with Command::relID in future.
-// This whole concept is hacky and only needed for gui.
+// This whole concept is hacky and we should not rely on it while matching.
 void annotateRelIDLegacy(Command* cmd) {
 	ThreadMemScope tms;
 
@@ -39,9 +39,9 @@ void annotateRelIDLegacy(Command* cmd) {
 }
 
 #ifdef VIL_COMMAND_CALLSTACKS
-// TODO: offset? depends on command type i guess...
+// TODO: consider offset? depends on command type i guess...
 bool same(const backward::StackTrace& a, const backward::StackTrace& b,
-		unsigned offset = 4u) {
+		unsigned offset = 1u) {
 	if(a.size() != b.size()) {
 		return false;
 	}
@@ -333,10 +333,14 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 	}
 
 #ifdef VIL_COMMAND_CALLSTACKS
-	// TODO: consider rootA.stackTrace, rootB.stackTrace.
+	// NOTE WIP: use callstacks for matching.
 	// Fast reject if they aren't the same?
 	// Should probably make this an option, there might be
 	// special cases I'm not thinkin of rn.
+	if(rootA.stackTrace && rootB.stackTrace &&
+			!same(*rootA.stackTrace, *rootB.stackTrace)) {
+		return {{}, Matcher::noMatch()};
+	}
 #endif // VIL_COMMAND_CALLSTACKS
 
 	// consider sectionStats for rootMatch.
@@ -472,7 +476,7 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 	return {resMatches, rootMatch};
 }
 
-BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b) {
+BatchMatch match(ThreadMemScope& tms, const FrameSubmission& a, const FrameSubmission& b) {
 	ZoneScoped;
 
 	if(a.queue != b.queue) {
@@ -567,7 +571,7 @@ BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b
 	return res;
 }
 
-MatchResult match(ThreadMemScope& tms, span<const RecordBatch> a, span<const RecordBatch> b) {
+MatchResult match(ThreadMemScope& tms, span<const FrameSubmission> a, span<const FrameSubmission> b) {
 	ZoneScoped;
 
 	if(a.empty() || b.empty()) {

@@ -21,7 +21,7 @@ struct FindResult {
 FindResult find(const Command* srcRoot, span<const Command*> dstHierachyToFind,
 	const CommandDescriptorSnapshot& dstDescriptors, float threshold = 0.0);
 
-struct RecordBatch;
+struct FrameSubmission;
 
 // TODO: to be removed when we have everything else in place.
 void annotateRelIDLegacy(Command*);
@@ -48,8 +48,8 @@ struct RecordMatch {
 
 struct BatchMatch {
 	float match {};
-	const RecordBatch* a {};
-	const RecordBatch* b {};
+	const FrameSubmission* a {};
+	const FrameSubmission* b {};
 	span<RecordMatch> matches; // TODO: currently reversed ordered
 };
 
@@ -58,11 +58,11 @@ struct MatchResult {
 	span<BatchMatch> matches; // TODO: currently reversed ordered
 };
 
-MatchResult match(ThreadMemScope&, span<const RecordBatch> a, span<const RecordBatch> b);
+MatchResult match(ThreadMemScope&, span<const FrameSubmission> a, span<const FrameSubmission> b);
 
 // util
 Matcher match(DescriptorStateRef a, DescriptorStateRef b);
-BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b);
+BatchMatch match(ThreadMemScope& tms, const FrameSubmission& a, const FrameSubmission& b);
 std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 		const ParentCommand& rootA, const ParentCommand& rootB);
 

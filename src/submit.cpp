@@ -451,7 +451,7 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 void postProcessLocked(QueueSubmitter& subm) {
 	ZoneScoped;
 
-	RecordBatch* recordBatch = nullptr;
+	FrameSubmission* recordBatch = nullptr;
 	if(subm.dev->swapchain) {
 		recordBatch = &subm.dev->swapchain->nextFrameSubmissions.batches.emplace_back();
 		recordBatch->queue = subm.queue;

@@ -187,7 +187,7 @@ void ioFormat(VkFormat format, Span& span, Vec& vec) {
 	// - packed formats (including < 8bit formats like 5-6-5,
 	//   also packed depth/stencil and ABGR)
 	// - 2-10-10-10 formats
-	// - compressed formats (can't be supported with this api anyways i guess)
+	// - (block-)compressed formats (can't be supported with this api anyways i guess)
 	// Also properly test this!
 
 	// We swizzle separately (in the calling function), so rgba here is the

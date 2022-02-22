@@ -5,6 +5,7 @@
 #include <gui/cb.hpp>
 #include <gui/commandHook.hpp>
 #include <gui/fonts.hpp>
+#include <gui/fontAwesome.hpp>
 #include <layer.hpp>
 #include <stats.hpp>
 #include <queue.hpp>
@@ -527,11 +528,24 @@ void Gui::initImGui() {
 		0,
 	};
 
+    static const ImWchar rangesIcons[] = {
+        ICON_MIN_FA, ICON_MAX_FA,
+        0
+    };
+
 	ImFontConfig configOwned;
 	configOwned.FontDataOwnedByAtlas = false;
+    // configOwned.FontBuilderFlags = ImGuiFreeTypeBuilderFlags_LightHinting;
+
+    ImFontConfig configMerge;
+    configMerge.MergeMode = true;
+    // configMerge.FontBuilderFlags = ImGuiFreeTypeBuilderFlags_LightHinting;
 
 	defaultFont = io.Fonts->AddFontFromMemoryCompressedTTF(arimo_compressed_data,
 		arimo_compressed_size, 15.f, nullptr, rangesBasic);
+	io.Fonts->AddFontFromMemoryCompressedTTF(fontAwesomeSolid_compressed_data,
+		fontAwesomeSolid_compressed_size, 14.f, &configMerge, rangesIcons);
+
 	// TODO: compress
 	monoFont = io.Fonts->AddFontFromMemoryTTF((void*) inconsolata_compressed_data,
 		inconsolata_compressed_size, 15.f, &configOwned, rangesBasic);
@@ -604,8 +618,9 @@ void Gui::initImGui() {
 	// Space a bit more vertically, makes information look less overwhelming.
 	// Don't overdo it though, we intentionally want it compact.
 	style.ItemSpacing = {8, 6};
-	style.FramePadding = {6, 6};
+	style.FramePadding = {4, 4};
 	style.ItemInnerSpacing = {4, 4};
+	style.CellPadding = {6, 1}; // we need this since we sometimes don't use lines
 
 	// Center window title
 	style.WindowTitleAlign = {0.5f, 0.5f};
@@ -1208,16 +1223,9 @@ void Gui::drawOverviewUI(Draw& draw) {
 		if(ImGui::IsItemHovered() && showHelp) {
 			ImGui::SetTooltip("Captures and shows callstacks of each command");
 		}
-	}
 
-	// if(ImGui::TreeNode("Statistics")) {
-	// 	auto numGroups = 0u;
-	// 	for(auto& qf : dev.queueFamilies) {
-	// 		numGroups += unsigned(qf.commandGroups.size());
-	// 	}
-	// 	imGuiText("Number of command groups: {}", numGroups);
-	// 	ImGui::TreePop();
-	// }
+		ImGui::Checkbox("Show ImGui Demo", &showImguiDemo_);
+	}
 }
 
 void Gui::drawMemoryUI(Draw&) {
@@ -1321,11 +1329,14 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 		flags = ImGuiWindowFlags_NoDecoration;
 	} else {
-		// ImGui::ShowDemoWindow();
-		// ImGui::ShowAboutWindow();
-		// ImGui::ShowMetricsWindow();
 		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
 		ImGui::SetNextWindowSize({900, 550}, ImGuiCond_Once);
+	}
+
+	if(showImguiDemo_) {
+		ImGui::ShowDemoWindow();
+		ImGui::ShowMetricsWindow();
+		// ImGui::ShowAboutWindow();
 	}
 
 	auto checkSelectTab = [&](Tab tab) {

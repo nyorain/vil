@@ -184,6 +184,8 @@ private:
 
 	std::vector<Recorder> preRender_ {};
 	std::vector<Recorder> postRender_ {};
+
+	bool showImguiDemo_ {false};
 };
 
 // Inserts an imgui button towards the given handle.

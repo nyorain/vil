@@ -4,6 +4,7 @@
 #include <gui/command.hpp>
 #include <gui/cb.hpp>
 #include <gui/vertexViewer.hpp>
+#include <gui/fontAwesome.hpp>
 #include <device.hpp>
 #include <queue.hpp>
 #include <threadContext.hpp>
@@ -1185,11 +1186,6 @@ void ResourceGui::draw(Draw& draw) {
 	auto update = firstUpdate_;
 	firstUpdate_ = false;
 
-	if(ImGui::Button("Update")) {
-		update = true;
-	}
-
-	ImGui::SameLine();
 	auto filterName = vil::name(filter_);
 	// ImGui::SetNextItemWidth(150.f);
 	if(ImGui::BeginCombo("", filterName)) {
@@ -1203,6 +1199,11 @@ void ResourceGui::draw(Draw& draw) {
 		}
 
 		ImGui::EndCombo();
+	}
+
+	ImGui::SameLine();
+	if(ImGui::Button(ICON_FA_REDO)) {
+		update = true;
 	}
 
 	// text search

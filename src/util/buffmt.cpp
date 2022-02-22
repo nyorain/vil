@@ -4,6 +4,7 @@
 #include <gui/util.hpp>
 #include <util/profiling.hpp>
 #include <threadContext.hpp>
+#include <spirv-cross/spirv_cross.hpp>
 #include <numeric>
 
 namespace vil {
@@ -14,7 +15,7 @@ struct FormattedScalar {
 };
 
 template<typename T8, typename T16, typename T32, typename T64, typename Cast = T64>
-FormattedScalar formatScalar(span<const std::byte> data, u32 offset, u32 width) {
+FormattedScalar formatScalar(span<const std::byte> data, u32 offset, u32 width, u32 precision) {
 	dlg_assert(width % 8 == 0u);
 	if(offset + width / 8 > data.size()) {
 		return {"N/A", dlg::format("Out of bounds")};
@@ -22,11 +23,12 @@ FormattedScalar formatScalar(span<const std::byte> data, u32 offset, u32 width) 
 
 	data = data.subspan(offset, width / 8);
 	std::string val;
+	auto prec = std::setprecision(precision);
 	switch(width) {
-		case 8:  return {dlg::format("{}", Cast(copy<T8> (data)))};
-		case 16: return {dlg::format("{}", Cast(copy<T16>(data)))};
-		case 32: return {dlg::format("{}", Cast(copy<T32>(data)))};
-		case 64: return {dlg::format("{}", Cast(copy<T64>(data)))};
+		case 8:  return {dlg::format("{}{}", prec, Cast(copy<T8> (data)))};
+		case 16: return {dlg::format("{}{}", prec, Cast(copy<T16>(data)))};
+		case 32: return {dlg::format("{}{}", prec, Cast(copy<T32>(data)))};
+		case 64: return {dlg::format("{}{}", prec, Cast(copy<T64>(data)))};
 		default:
 			return {"N/A", dlg::format("Unsupported type width {}", width)};
 	}
@@ -166,17 +168,17 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 	return buildType(compiler, typeID, alloc, nullptr);
 }
 
-FormattedScalar formatScalar(const Type& type, ReadBuf data, u32 offset) {
+FormattedScalar formatScalar(const Type& type, ReadBuf data, u32 offset, u32 precision) {
 	switch(type.type) {
 		case Type::typeInt:
-			return formatScalar<i8, i16, i32, i64>(data, offset, type.width);
+			return formatScalar<i8, i16, i32, i64>(data, offset, type.width, precision);
 		case Type::typeUint:
-			return formatScalar<u8, u16, u32, u64>(data, offset, type.width);
+			return formatScalar<u8, u16, u32, u64>(data, offset, type.width, precision);
 		case Type::typeFloat:
 			dlg_assertm(type.width != 8, "Invalid float bit width");
-			return formatScalar<u8, f16, float, double>(data, offset, type.width);
+			return formatScalar<u8, f16, float, double>(data, offset, type.width, precision);
 		case Type::typeBool:
-			return formatScalar<u8, u16, u32, u64, bool>(data, offset, type.width);
+			return formatScalar<u8, u16, u32, u64, bool>(data, offset, type.width, precision);
 		default:
 			return {"N/A", dlg::format("Unsupported type {}", unsigned(type.type))};
 	}
@@ -268,16 +270,29 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 			for(auto c = 0u; c < numColumns; ++c) {
 				ImGui::TableNextColumn();
 				auto off = offset + r * rowStride + c * colStride;
-				auto fs = formatScalar(type, data, off);
+				auto fs = formatScalar(type, data, off, 3);
 
 				ImGui::AlignTextToFramePadding();
 				imGuiText("{}", fs.scalar);
 				if(ImGui::IsItemHovered()) {
 					ImGui::BeginTooltip();
-					imGuiText("Offset: {}", off);
 					if(!fs.error.empty()) {
 						imGuiText("Error: {}", fs.error);
+					} else {
+						auto fs = formatScalar(type, data, off, 10);
+						imGuiText("Exact: {}", fs.scalar);
 					}
+
+					imGuiText("Memory offset: {}", off);
+
+					if(numRows > 1) {
+						imGuiText("Row: {}", r);
+					}
+
+					if(numColumns > 1) {
+						imGuiText("Column: {}", c);
+					}
+
 					ImGui::EndTooltip();
 				}
 			}

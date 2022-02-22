@@ -53,6 +53,9 @@ VkFormat formatForType(const XfbCapture& capture) {
 		}
 	};
 
+	// TODO
+	dlg_assertm(capture.columns == 1u, "Matrix captures currently not supported");
+
 	auto compID = compIDForWidth(capture.width);
 	if(compID == u32(-1)) {
 		dlg_error("Invalid width: {}", capture.width);
