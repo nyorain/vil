@@ -156,13 +156,14 @@ template<typename K> using CommandAllocHashSet =
 		std::hash<K>,
 		std::equal_to<K>,
 		LinearUnscopedAllocator<K>>;
+constexpr struct ManualTag {} manualTag;
 
 // Represents the recorded state of a command buffer.
 // We represent it as extra, reference-counted object so we can display
 // old records as well.
 struct CommandRecord {
-	Device* dev {};
 	LinAllocator alloc;
+	Device* dev {};
 
 	// Might be null when this isn't the current command buffer recording.
 	// Guaranteed to be valid during recording.
@@ -236,6 +237,7 @@ struct CommandRecord {
 	std::vector<FinishPtr<CommandHookRecord>> hookRecords;
 
 	CommandRecord(CommandBuffer& cb);
+	explicit CommandRecord(ManualTag, Device& dev); // mainly for testing
 	~CommandRecord();
 
 	CommandRecord(CommandRecord&&) noexcept = delete;

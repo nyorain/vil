@@ -27,7 +27,8 @@ void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 		dlg_assertm_or(size > 0, it = it->pNext; continue,
 			"Unknown structure type: {}", it->sType);
 
-		auto buf = cb.record()->alloc.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+		auto& rec = nonNull(cb.builder().record_);
+		auto buf = rec.alloc.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
 		// TODO: technicallly UB to not construct object via placement new.
 		// In practice, this works everywhere since its only C PODs
@@ -139,10 +140,11 @@ CommandBuffer::~CommandBuffer() {
 
 		clearPendingLocked();
 
-		if(record_) {
-			dlg_assert(record_->cb == this);
-			record_->cb = nullptr;
-			record_->hookRecords.clear();
+		if(builder_.record_) {
+			dlg_assert(state_ == State::recording);
+			dlg_assert(builder_.record_->cb == this);
+			builder_.record_->cb = nullptr;
+			builder_.record_->hookRecords.clear();
 		}
 
 		invalidateCbsLocked();
@@ -165,6 +167,8 @@ CommandBuffer::~CommandBuffer() {
 void CommandBuffer::clearPendingLocked() {
 	ZoneScoped;
 
+	dlg_assert(state_ == State::executable || pending.empty());
+
 	// checkLocked will automtically remove it from this cb
 	while(!this->pending.empty()) {
 		auto res = checkLocked(*this->pending.front()->parent);
@@ -186,12 +190,29 @@ void CommandBuffer::doReset(bool startRecord) {
 
 	{
 		std::lock_guard lock(dev->mutex);
+
+		// Make sure this command buffer isn't pending anymore
 		clearPendingLocked();
 
-		if(record_) {
-			record_->cb = nullptr;
-			record_->hookRecords.clear();
-			keepAliveRecord = std::move(record_);
+		// if this was called while we were still recording, make
+		// sure to properly terminate the pending record
+		if(builder_.record_) {
+			dlg_assert(state_ == State::recording);
+			builder_.record_->cb = nullptr;
+			builder_.record_->hookRecords.clear();
+			keepAliveRecord = std::move(builder_.record_);
+		}
+
+		// if this command buffer holds an executable record, disconnect
+		// it from this cb.
+		if(lastRecord_ && lastRecord_->cb) {
+			dlg_assert(lastRecord_->cb == this);
+			lastRecord_->cb = nullptr;
+			lastRecord_->hookRecords.clear();
+
+			// we can't have an executable record *and* a recording one
+			dlg_assert(!keepAliveRecord);
+			keepAliveRecord = std::move(lastRecord_);
 		}
 
 		// We have to lock our own mutex since other threads might read
@@ -202,18 +223,14 @@ void CommandBuffer::doReset(bool startRecord) {
 			dlg_assert(!computeState_);
 			dlg_assert(!graphicsState_);
 			dlg_assert(!rayTracingState_);
-			dlg_assert(!section_);
+			dlg_assert(!builder_.section_);
 
-			record_ = IntrusivePtr<CommandRecord>(new CommandRecord(*this));
+			builder_.reset(*this);
 			state_ = CommandBuffer::State::recording;
 
 			computeState_ = &construct<ComputeState>(*this);
 			graphicsState_ = &construct<GraphicsState>(*this);
 			rayTracingState_ = &construct<RayTracingState>(*this);
-
-			record_->commands = &construct<RootCommand>(*this);
-			section_ = &construct<Section>(*this);
-			section_->cmd = record_->commands;
 		} else {
 			state_ = CommandBuffer::State::initial;
 		}
@@ -222,16 +239,16 @@ void CommandBuffer::doReset(bool startRecord) {
 
 void CommandBuffer::doEnd() {
 	ZoneScoped;
-	dlg_assert(record_);
-	dlg_assert(section_);
+	dlg_assert(builder_.record_);
+	dlg_assert(builder_.section_);
 
 	// debug utils labels can be unterminated, see docs/debug-utils-label-nesting.md
-	while(section_->parent) {
-		auto lblCmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(section_->cmd);
+	while(builder_.section_->parent) {
+		auto lblCmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(builder_.section_->cmd);
 		dlg_assert(lblCmd);
-		dlg_assert(!section_->pop);
-		record_->pushLables.push_back(lblCmd->name);
-		section_ = section_->parent;
+		dlg_assert(!builder_.section_->pop);
+		builder_.record_->pushLables.push_back(lblCmd->name);
+		builder_.section_ = builder_.section_->parent;
 	}
 
 	graphicsState_ = {};
@@ -239,8 +256,8 @@ void CommandBuffer::doEnd() {
 	rayTracingState_ = {};
 	pushConstants_ = {};
 
-	section_ = nullptr;
-	lastCommand_ = nullptr;
+	builder_.section_ = nullptr;
+	builder_.lastCommand_ = nullptr;
 	ignoreEndDebugLabels_ = 0u;
 
 	dlg_assert(subpass_ == u32(-1));
@@ -252,7 +269,8 @@ void CommandBuffer::doEnd() {
 
 	// parse commands into description
 	// TODO: this should really be removed
-	annotateRelIDLegacy(record_->commands);
+	auto& rec = *builder_.record_;
+	annotateRelIDLegacy(rec.commands);
 
 	// Make sure to never call CommandBufferRecord destructor inside lock.
 	// Don't just call reset() here or move lastRecord_ so that always have a valid
@@ -265,11 +283,11 @@ void CommandBuffer::doEnd() {
 		ZoneScopedN("addToHandles");
 
 		dlg_assert(state_ == State::recording);
-		dlg_assert(!record_->finished);
+		dlg_assert(!rec.finished);
 
 		state_ = State::executable;
 
-		for(auto& [handle, uh] : record_->handles) {
+		for(auto& [handle, uh] : rec.handles) {
 			if(handle->objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
 				// special sentinel
 				uh->next = uh;
@@ -284,140 +302,20 @@ void CommandBuffer::doEnd() {
 			handle->refRecords = uh;
 		}
 
-		record_->finished = true;
-		lastRecord_ = record_; // could use std::move, record_ is only really used while recording
-	}
-}
-
-void CommandBuffer::endSection(Command* cmd) {
-	if(!section_->parent) {
-		// We reached the root section.
-		// Debug utils commands can span multiple command buffers, they
-		// are only queue-local.
-		// See docs/debug-utils-label-nesting.md
-		dlg_assert(dynamic_cast<EndDebugUtilsLabelCmd*>(cmd));
-		++record_->numPopLabels;
-		return;
-	}
-
-	lastCommand_ = section_->cmd;
-	dlg_assert(!section_->pop); // we shouldn't be able to land here
-
-	// reset it for future use
-	section_->cmd = nullptr;
-	section_->pop = false;
-
-	// Don't unset section_->next, we can re-use the allocation
-	// later on. We unset 'cmd' above to signal its unused (as debug check)
-	section_ = section_->parent;
-
-	// We pop the label sections here that were previously ended by
-	// the application but not in the same nesting level they were created.
-	while(section_->parent && section_->pop) {
-		dlg_assert(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd));
-		lastCommand_ = section_->cmd;
-
-		// reset it for future use
-		section_->cmd = nullptr;
-		section_->pop = false;
-
-		section_ = section_->parent;
+		rec.finished = true;
+		lastRecord_ = std::move(builder_.record_);
 	}
 }
 
 void CommandBuffer::popLabelSections() {
 	// See docs/debug-utils-label-nesting.md
-	while(auto* next = dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd)) {
+	while(auto* next = dynamic_cast<BeginDebugUtilsLabelCmd*>(builder_.section_->cmd)) {
 		dlg_trace("Problematic debug utils label nesting detected "
 			"(Begin without end in scope): {}", next->name);
-		record_->brokenHierarchyLabels = true;
-		section_ = section_->parent;
+		builder_.record_->brokenHierarchyLabels = true;
+		builder_.section_ = builder_.section_->parent;
 		++ignoreEndDebugLabels_;
 	}
-}
-
-void CommandBuffer::appendParent(ParentCommand& cmd) {
-	dlg_assert(section_);
-
-	dlg_assert(!!section_->lastParentChild == !!section_->cmd->firstChildParent_);
-	if(section_->lastParentChild) {
-		section_->lastParentChild->nextParent_ = &cmd;
-	} else {
-		section_->cmd->firstChildParent_ = &cmd;
-	}
-
-	section_->lastParentChild = &cmd;
-	++section_->cmd->stats_.numChildSections;
-}
-
-void CommandBuffer::beginSection(SectionCommand& cmd) {
-	appendParent(cmd);
-
-	if(section_->next) {
-		// re-use a previously allocated section that isn't in use anymore
-		dlg_assert(!section_->next->cmd);
-		dlg_assert(section_->next->parent == section_);
-		section_ = section_->next;
-		section_->cmd = nullptr;
-		section_->pop = false;
-		section_->lastParentChild = nullptr;
-	} else {
-		auto nextSection = &construct<Section>(*this);
-		nextSection->parent = section_;
-		section_->next = nextSection;
-		section_ = nextSection;
-	}
-
-	section_->cmd = &cmd;
-	lastCommand_ = nullptr; // will be set on first addCmd
-}
-
-void CommandBuffer::addCmd(Command& cmd) {
-	dlg_assert(record_);
-	dlg_assert(section_);
-
-#ifdef VIL_COMMAND_CALLSTACKS
-	// TODO: does not really belong here. should be atomic then at least
-	if(dev->captureCmdStack) {
-		cmd.stackTrace = &construct<backward::StackTrace>(*this);
-		cmd.stackTrace->load_here(32u);
-	}
-#endif // VIL_COMMAND_CALLSTACKS
-
-	// add to stats
-	++section_->cmd->stats_.numTotalCommands;
-	switch(cmd.type()) {
-		case CommandType::draw:
-			++section_->cmd->stats_.numDraws;
-			break;
-		case CommandType::dispatch:
-			++section_->cmd->stats_.numDispatches;
-			break;
-		case CommandType::traceRays:
-			++section_->cmd->stats_.numRayTraces;
-			break;
-		case CommandType::sync:
-			++section_->cmd->stats_.numSyncCommands;
-			break;
-		case CommandType::transfer:
-			++section_->cmd->stats_.numTransfers;
-			break;
-		default:
-			break;
-	}
-
-	// append
-	if(lastCommand_) {
-		dlg_assert(record_->commands);
-		lastCommand_->next = &cmd;
-	} else {
-		dlg_assert(record_->commands);
-		dlg_assert(section_->cmd);
-		dlg_assert(!section_->cmd->children_);
-		section_->cmd->children_ = &cmd;
-	}
-
-	lastCommand_ = &cmd;
 }
 
 void CommandBuffer::invalidateLocked() {
@@ -431,21 +329,14 @@ void CommandBuffer::invalidateLocked() {
 	// can never be called in recording state since we haven't added ourself
 	// to handles yet (this assumption is important below).
 	dlg_assert(state_ == State::executable);
-	dlg_assert(record_);
-	dlg_assert(record_.get() == lastRecord_.get());
+	dlg_assert(lastRecord_.get());
 
 	clearPendingLocked();
 
 	// Free the hook data (as soon as possible), it's no longer
 	// needed as this record will never be submitted again.
-	record_->hookRecords.clear();
-	record_->cb = nullptr;
-
-	// We can do this safely here, without ever causing the destructor
-	// to be called (which would be a problem since this function is
-	// called when device mutex is locked) since lastRecord_ must be
-	// the same as record_ (see assert above).
-	record_ = nullptr;
+	lastRecord_->hookRecords.clear();
+	lastRecord_->cb = nullptr;
 
 	this->state_ = State::invalid;
 }
@@ -499,43 +390,9 @@ CommandPool::~CommandPool() {
 }
 
 // recording
-enum class SectionType {
-	none,
-	begin,
-	next,
-	end,
-};
-
 template<typename T, SectionType ST = SectionType::none, typename... Args>
 T& addCmd(CommandBuffer& cb, Args&&... args) {
-	static_assert(std::is_base_of_v<Command, T>);
-
-	// We require all commands to be trivially destructible as we
-	// never destroy them. They are only meant to store data, not hold
-	// ownership of anything.
-	static_assert(std::is_trivially_destructible_v<T>);
-
-	dlg_assert(cb.state() == CommandBuffer::State::recording);
-	dlg_assert(cb.record());
-
-	auto& cmd = construct<T>(cb, std::forward<Args>(args)...);
-
-	if constexpr(ST == SectionType::next) {
-		cb.endSection(&cmd);
-	}
-
-	cb.addCmd(cmd);
-
-	if constexpr(ST == SectionType::end) {
-		cb.endSection(&cmd);
-	}
-
-	if constexpr(ST == SectionType::begin || ST == SectionType::next) {
-		static_assert(std::is_convertible_v<T*, SectionCommand*>);
-		cb.beginSection(cmd);
-	}
-
-	return cmd;
+	return cb.builder().add<T, ST>(std::forward<Args>(args)...);
 }
 
 // api
@@ -696,7 +553,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		const VkCommandBufferBeginInfo*             pBeginInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	cb.doReset(true);
-	cb.record()->usageFlags = pBeginInfo->flags;
+	cb.builder().record_->usageFlags = pBeginInfo->flags;
 
 	ThreadMemScope tms;
 	VkCommandBufferInheritanceInfo inherit; // local copy, unwrapped
@@ -852,8 +709,8 @@ void useHandle(CommandRecord& rec, Command& cmd, Image& image, VkImageLayout new
 template<typename... Args>
 void useHandle(CommandBuffer& cb, Args&&... args) {
 	dlg_assert(cb.state() == CommandBuffer::State::recording);
-	dlg_assert(cb.record());
-	useHandle(*cb.record(), std::forward<Args>(args)...);
+	dlg_assert(cb.builder().record_);
+	useHandle(*cb.builder().record_, std::forward<Args>(args)...);
 }
 
 // commands
@@ -1045,10 +902,12 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 void cmdEndRenderPass(CommandBuffer& cb, const VkSubpassEndInfo& endInfo) {
 	cb.popLabelSections();
-	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+	dlg_assert(cb.builder().section_ &&
+		dynamic_cast<SubpassCmd*>(cb.builder().section_->cmd));
 
-	cb.endSection(nullptr); // pop subpass section
-	dlg_assert(cb.section() && dynamic_cast<BeginRenderPassCmd*>(cb.section()->cmd));
+	cb.builder().endSection(nullptr); // pop subpass section
+	dlg_assert(cb.builder().section_ &&
+		dynamic_cast<BeginRenderPassCmd*>(cb.builder().section_->cmd));
 
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = endInfo;
@@ -1065,7 +924,8 @@ void cmdEndRenderPass(CommandBuffer& cb, const VkSubpassEndInfo& endInfo) {
 
 void cmdNextSubpass(CommandBuffer& cb, const VkSubpassBeginInfo& beginInfo, const VkSubpassEndInfo& endInfo) {
 	cb.popLabelSections();
-	dlg_assert(cb.section() && dynamic_cast<SubpassCmd*>(cb.section()->cmd));
+	dlg_assert(cb.builder().section_ &&
+		dynamic_cast<SubpassCmd*>(cb.builder().section_->cmd));
 
 	auto& cmd = addCmd<NextSubpassCmd, SectionType::next>(cb);
 	cmd.beginInfo = beginInfo;
@@ -1173,7 +1033,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// Also like this in CmdPushConstants
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.sets = alloc<DescriptorSet*>(cb, descriptorSetCount);
 
@@ -1894,7 +1754,8 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
-	cb.appendParent(cmd);
+	auto& parentRec = *cb.builder().record_;
+	cb.builder().appendParent(cmd);
 
 	cmd.stats_.numChildSections = commandBufferCount;
 	auto* last = static_cast<ExecuteCommandsChildCmd*>(nullptr);
@@ -1922,29 +1783,28 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 			last->nextParent_ = &childCmd;
 		}
 
-		cb.record()->secondaries.push_back(std::move(recordPtr));
-
 		// Needed to correctly invalidate cb when a secondary buffer is
 		// reset/destroyed.
 		useHandle(cb, cmd, secondary);
 
-		auto& rec = *secondary.record();
+		auto& rec = *recordPtr;
 		for(auto& [handle, uh] : rec.handles) {
 			// Make sure we carry along layout changes done in secondary
 			// command buffers.
 			if(handle->objectType == VK_OBJECT_TYPE_IMAGE) {
 				auto& ui = static_cast<UsedImage&>(*uh);
 				if(ui.layoutChanged) {
-					auto& dst = useHandleImpl(*cb.record(), cmd, static_cast<Image&>(*handle));
+					auto& dst = useHandleImpl(parentRec, cmd, static_cast<Image&>(*handle));
 					dst.layoutChanged = true;
 					dst.finalLayout = ui.finalLayout;
 					break;
 				}
 			}
 
-			useHandleImpl(*cb.record(), cmd, *handle);
+			useHandleImpl(parentRec, cmd, *handle);
 		}
 
+		cb.builder().record_->secondaries.push_back(std::move(recordPtr));
 		cbHandles[i] = secondary.handle();
 		last = &childCmd;
 	}
@@ -2067,18 +1927,19 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 	// See docs/debug-utils-label-nesting.md
 	// When the last section isn't a BeginDebugUtilsLabelCmd, we have to
 	// find the last one in the cb.section_ stack and mark it for pop.
+	auto* section = cb.builder().section_;
 	if(cb.ignoreEndDebugLabels() > 0) {
 		--cb.ignoreEndDebugLabels();
-	} else if(cb.section() && dynamic_cast<BeginDebugUtilsLabelCmd*>(cb.section()->cmd)) {
-		cb.endSection(nullptr);
+	} else if(section && dynamic_cast<const BeginDebugUtilsLabelCmd*>(section->cmd)) {
+		cb.builder().endSection(nullptr);
 	} else {
-		auto* it = cb.section();
+		auto* it = section;
 		while(it) {
 			auto lcmd = dynamic_cast<BeginDebugUtilsLabelCmd*>(it->cmd);
 			if(lcmd && !it->pop) {
 				dlg_trace("Problematic debug utils label nesting detected (End)");
 				it->pop = true;
-				cb.record()->brokenHierarchyLabels = true;
+				cb.builder().record_->brokenHierarchyLabels = true;
 				break;
 			}
 
@@ -2088,7 +1949,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 		// If there is no active label section at all, the command buffer
 		// effectively pops it from the queue.
 		if(!it) {
-			++cb.record()->numPopLabels;
+			++cb.builder().record_->numPopLabels;
 		}
 	}
 
@@ -2127,7 +1988,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 	}
 
 	// add pipeline to stats
-	auto& stats = cb.section()->cmd->stats_;
+	auto& stats = cb.builder().section_->cmd->stats_;
 	auto& node = construct<ParentCommand::SectionStats::BoundPipeNode>(cb);
 	node.next = stats.boundPipelines;
 	node.pipe = &pipe;
@@ -2243,7 +2104,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	// NOTE: See BindDescriptorSets for rationale on pipe layout handling here.
 	auto pipeLayoutPtr = getPtr(*cb.dev, pipeLayout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cmd.stages = stageFlags;
 	cmd.offset = offset;
@@ -2543,7 +2404,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	cb.dev->dispatch.CmdPushDescriptorSetKHR(cb.handle(),
 		pipelineBindPoint, cmd.pipeLayout->handle, set,
@@ -2564,14 +2425,14 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.record()->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
 
 	dlg_assert(set < cmd.pipeLayout->descriptors.size());
 	auto& dsLayout = *cmd.pipeLayout->descriptors[set];
 
 	auto dsUpdateTemplate = getPtr(*cb.dev, descriptorUpdateTemplate);
 	cmd.updateTemplate = dsUpdateTemplate.get();
-	cb.record()->dsUpdateTemplates.emplace_back(std::move(dsUpdateTemplate));
+	cb.builder().record_->dsUpdateTemplates.emplace_back(std::move(dsUpdateTemplate));
 
 	auto& dut = get(*cb.dev, descriptorUpdateTemplate);
 	auto dataSize = totalUpdateDataSize(*cmd.updateTemplate);
@@ -2956,7 +2817,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 
 	// we need to set this flag here so we can hook that record when it
 	// is submitted to the gpu to retrieve the actual data used for building.
-	cb.record()->buildsAccelStructs = true;
+	cb.builder().record_->buildsAccelStructs = true;
 
 	cb.dev->dispatch.CmdBuildAccelerationStructuresKHR(cb.handle(),
 		infoCount, cmd.buildInfos.data(), ppBuildRangeInfos);
@@ -3016,7 +2877,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 
 	// we need to set this flag here so we can hook that record when it
 	// is submitted to the gpu to retrieve the actual data used for building.
-	cb.record()->buildsAccelStructs = true;
+	cb.builder().record_->buildsAccelStructs = true;
 
 	cb.dev->dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb.handle(),
 		infoCount, cmd.buildInfos.data(), pIndirectDeviceAddresses,

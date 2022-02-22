@@ -1,6 +1,12 @@
 Moved from todo.md. Mostly ideas for experiments that might not even
 be possible or useful in the end.
 
+- serialize command records. At least roughly, without referenced handles
+  and stuff
+  	- beside visualization, this would make debugging easier, allowing
+	  to use specific (complex) records in the unit tests for reproduction
+	  and debugging
+
 - allow to visualize buffers as images where it makes sense 
   (using a bufferView or buffer-to-image copy)
 - allow to temporarily "freeze destruction", causing handles to be

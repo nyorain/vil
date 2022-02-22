@@ -44,7 +44,42 @@ bool hasAppExt(Device& dev, const char* extName) {
 	return (it != dev.appExts.end());
 }
 
-// deivce
+// device
+Device::Device() {
+	auto& dev = *this;
+	dev.swapchains.mutex = &dev.mutex;
+	dev.images.mutex = &dev.mutex;
+	dev.imageViews.mutex = &dev.mutex;
+	dev.buffers.mutex = &dev.mutex;
+	dev.framebuffers.mutex = &dev.mutex;
+	dev.renderPasses.mutex = &dev.mutex;
+	dev.commandBuffers.mutex = &dev.mutex;
+	dev.commandPools.mutex = &dev.mutex;
+	dev.fences.mutex = &dev.mutex;
+	dev.dsPools.mutex = &dev.mutex;
+	dev.dsLayouts.mutex = &dev.mutex;
+	dev.descriptorSets.mutex = &dev.mutex;
+	dev.buffers.mutex = &dev.mutex;
+	dev.deviceMemories.mutex = &dev.mutex;
+	dev.shaderModules.mutex = &dev.mutex;
+	dev.samplers.mutex = &dev.mutex;
+	dev.pipes.mutex = &dev.mutex;
+	dev.pipeLayouts.mutex = &dev.mutex;
+	dev.events.mutex = &dev.mutex;
+	dev.semaphores.mutex = &dev.mutex;
+	dev.queryPools.mutex = &dev.mutex;
+	dev.bufferViews.mutex = &dev.mutex;
+	dev.dsuTemplates.mutex = &dev.mutex;
+	dev.accelStructs.mutex = &dev.mutex;
+
+	dev.keepAliveAccelStructs.mutex = &dev.mutex;
+	dev.keepAliveBufferViews.mutex = &dev.mutex;
+	dev.keepAliveBuffers.mutex = &dev.mutex;
+	dev.keepAliveSamplers.mutex = &dev.mutex;
+	dev.keepAliveAccelStructs.mutex = &dev.mutex;
+	dev.keepAliveImageViews.mutex = &dev.mutex;
+}
+
 Device::~Device() {
 	// Vulkan spec requires that all pending submissions have finished.
 	while(!pending.empty()) {
@@ -105,9 +140,11 @@ Device::~Device() {
 		dispatch.DestroySemaphore(handle, semaphore, nullptr);
 	}
 
-	dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
-	dispatch.DestroySampler(handle, nearestSampler, nullptr);
-	dispatch.DestroySampler(handle, linearSampler, nullptr);
+	if(handle) {
+		dispatch.DestroyDescriptorPool(handle, dsPool, nullptr);
+		dispatch.DestroySampler(handle, nearestSampler, nullptr);
+		dispatch.DestroySampler(handle, linearSampler, nullptr);
+	}
 
 	// erase queue datas
 	for(auto& queue : this->queues) {
@@ -683,38 +720,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.GetImageSparseMemoryRequirements2,
 		&dev.dispatch.GetImageSparseMemoryRequirements2KHR});
-
-	dev.swapchains.mutex = &dev.mutex;
-	dev.images.mutex = &dev.mutex;
-	dev.imageViews.mutex = &dev.mutex;
-	dev.buffers.mutex = &dev.mutex;
-	dev.framebuffers.mutex = &dev.mutex;
-	dev.renderPasses.mutex = &dev.mutex;
-	dev.commandBuffers.mutex = &dev.mutex;
-	dev.commandPools.mutex = &dev.mutex;
-	dev.fences.mutex = &dev.mutex;
-	dev.dsPools.mutex = &dev.mutex;
-	dev.dsLayouts.mutex = &dev.mutex;
-	dev.descriptorSets.mutex = &dev.mutex;
-	dev.buffers.mutex = &dev.mutex;
-	dev.deviceMemories.mutex = &dev.mutex;
-	dev.shaderModules.mutex = &dev.mutex;
-	dev.samplers.mutex = &dev.mutex;
-	dev.pipes.mutex = &dev.mutex;
-	dev.pipeLayouts.mutex = &dev.mutex;
-	dev.events.mutex = &dev.mutex;
-	dev.semaphores.mutex = &dev.mutex;
-	dev.queryPools.mutex = &dev.mutex;
-	dev.bufferViews.mutex = &dev.mutex;
-	dev.dsuTemplates.mutex = &dev.mutex;
-	dev.accelStructs.mutex = &dev.mutex;
-
-	dev.keepAliveAccelStructs.mutex = &dev.mutex;
-	dev.keepAliveBufferViews.mutex = &dev.mutex;
-	dev.keepAliveBuffers.mutex = &dev.mutex;
-	dev.keepAliveSamplers.mutex = &dev.mutex;
-	dev.keepAliveAccelStructs.mutex = &dev.mutex;
-	dev.keepAliveImageViews.mutex = &dev.mutex;
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);

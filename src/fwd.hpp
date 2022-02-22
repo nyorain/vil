@@ -121,6 +121,8 @@ struct DrawGuiImage;
 struct CowImageRange;
 struct CowBufferRange;
 
+struct RecordBuilder;
+
 // TODO: find good place
 //
 // Represents the result of a matching operation.

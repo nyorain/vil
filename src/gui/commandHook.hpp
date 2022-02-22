@@ -106,11 +106,6 @@ public:
 	VkCommandBuffer hook(CommandBuffer& hooked,
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data);
 
-	// Called when hook is removed from command buffer or command group.
-	// Called while device mutex is locked.
-	// Might delete itself (or decrement reference count or something).
-	void finish() noexcept { delete this; }
-
 	void invalidateRecordings(bool forceAll = false);
 	void invalidateData() { completed.clear(); }
 

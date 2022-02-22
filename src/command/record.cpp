@@ -11,10 +11,24 @@
 
 namespace vil {
 
+void onRecordAlloc(const std::byte* buf, u32 size) {
+	(void) buf;
+	(void) size;
+	TracyAllocS(buf, size, 8);
+	DebugStats::get().commandMem += size;
+}
+
+void onRecordFree(const std::byte* buf, u32 size) {
+	(void) buf;
+	(void) size;
+	TracyFreeS(buf, 8);
+	DebugStats::get().commandMem -= size;
+}
+
 // Record
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
+		alloc(onRecordAlloc, onRecordFree),
 		dev(xcb.dev),
-		alloc(),
 		cb(&xcb),
 		recordID(xcb.recordCount()),
 		queueFamily(xcb.pool().queueFamily),
@@ -25,27 +39,26 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		pipeLayouts(alloc),
 		dsUpdateTemplates(alloc),
 		secondaries(alloc) {
-	// important to set this before we use it
-	alloc.onAlloc = [&](auto* buf, auto size) {
-		(void) buf;
-		(void) size;
-		TracyAllocS(buf, size, 8);
-		DebugStats::get().commandMem += size;
-		// dlg_trace("command alloc {} (in {}) -> {}", size, (void*) this, DebugStats::get().commandMem);
-	};
-
-	alloc.onFree = [&](auto* buf, auto size) {
-		(void) buf;
-		(void) size;
-		TracyFreeS(buf, 8);
-		DebugStats::get().commandMem -= size;
-		// dlg_trace("command free {} (in {}) -> {}", size, (void*) this, DebugStats::get().commandMem);
-	};
-
 	if(!cb->name.empty()) {
 		cbName = copyString(*this, cb->name);
 	}
 
+	++DebugStats::get().aliveRecords;
+}
+
+CommandRecord::CommandRecord(ManualTag, Device& dev) :
+		alloc(onRecordAlloc, onRecordFree),
+		dev(&dev),
+		cb(nullptr),
+		recordID(0u),
+		queueFamily(0u),
+		// initialize allocators
+		pushLables(alloc),
+		handles(alloc),
+		invalidated(alloc),
+		pipeLayouts(alloc),
+		dsUpdateTemplates(alloc),
+		secondaries(alloc) {
 	++DebugStats::get().aliveRecords;
 }
 

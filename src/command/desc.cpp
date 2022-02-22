@@ -10,8 +10,9 @@
 #include <vk/enumString.hpp>
 #include <util/profiling.hpp>
 
-// TODO: the whole CommandBufferDesc code is suboptimal, really.
-// See desc2.hpp and ideas in match.md and todo.md
+#ifdef VIL_COMMAND_CALLSTACKS
+	#include <util/callstack.hpp>
+#endif // VIL_COMMAND_CALLSTACKS
 
 namespace vil {
 
@@ -36,6 +37,24 @@ void annotateRelIDLegacy(Command* cmd) {
 		cmd = cmd->next;
 	}
 }
+
+#ifdef VIL_COMMAND_CALLSTACKS
+// TODO: offset? depends on command type i guess...
+bool same(const backward::StackTrace& a, const backward::StackTrace& b,
+		unsigned offset = 4u) {
+	if(a.size() != b.size()) {
+		return false;
+	}
+
+	for(auto i = offset; i < a.size(); ++i) {
+		if(a[i].addr != b[i].addr) {
+			return false;
+		}
+	}
+
+	return true;
+}
+#endif // VIL_COMMAND_CALLSTACKS
 
 Matcher match(DescriptorStateRef a, DescriptorStateRef b) {
 	dlg_assert(a.layout);
@@ -164,10 +183,14 @@ FindResult find(const Command* root, span<const Command*> dst,
 		}
 
 #ifdef VIL_COMMAND_CALLSTACKS
-		// TODO: use callstacks for matching.
+		// NOTE WIP: use callstacks for matching.
 		// Fast reject if they aren't the same?
 		// Should probably make this an option, there might be
 		// special cases I'm not thinkin of rn.
+		if(it->stackTrace && dst[0]->stackTrace &&
+				!same(*it->stackTrace, *dst[0]->stackTrace)) {
+			continue;
+		}
 #endif // VIL_COMMAND_CALLSTACKS
 
 		std::vector<const Command*> currCmds {it};
@@ -283,6 +306,8 @@ void add(Matcher& m, const ParentCommand::SectionStats& a, const ParentCommand::
 	addMatch(a.numTransfers, b.numTransfers);
 	addMatch(a.numSyncCommands, b.numSyncCommands);
 
+	addMatch(a.numTotalCommands, b.numTotalCommands);
+
 	// every pipeline match counts like N commands
 	const auto pipeWeight = 10.f;
 	m.total += pipeWeight * std::max(a.numPipeBinds, b.numPipeBinds);
@@ -332,7 +357,10 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 	auto numSectionsA = rootA.sectionStats().numChildSections;
 	auto numSectionsB = rootB.sectionStats().numChildSections;
 
-	if(numSectionsA == 0u && numSectionsB == 0u) {
+	auto maxSections = std::max(numSectionsA, numSectionsB);
+	auto minSections = std::min(numSectionsA, numSectionsB);
+
+	if(maxSections == 0u) {
 		return {{}, rootMatch};
 	}
 
@@ -350,20 +378,23 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 		auto itB = rootB.firstChildParent();
 		auto ib = 0u;
 		while (itB) {
-			Matcher valDiag = Matcher::noMatch();
+			Matcher valDiag = (ia == 0u || ib == 0u) ? Matcher {} : entry(ia - 1, ib - 1).match;
 			auto [childMatches, matchVal] = match(tms, *itA, *itB);
 			if(matchVal.match > 0) {
-				valDiag = (ia == 0u || ib == 0u) ? Matcher {} : entry(ia - 1, ib - 1).match;
 				valDiag.match += matchVal.match;
 				valDiag.total += matchVal.total;
 			}
 
-			const auto valUp = (ia == 0u) ? Matcher{} : entry(ia - 1, ib).match;
-			const auto valLeft = (ib == 0u) ? Matcher{} : entry(ia, ib - 1).match;
+			auto valUp = (ia == 0u) ? Matcher{} : entry(ia - 1, ib).match;
+			auto valLeft = (ib == 0u) ? Matcher{} : entry(ia, ib - 1).match;
 
-			const auto evalUp = eval(valUp);
-			const auto evalLeft = eval(valUp);
-			const auto evalDiag = matchVal.match > 0 ? eval(valDiag) : -1.f;
+			// NOTE: instead of eval() we only consider the match values
+			// here, not the total values. This means, we allow (even huge)
+			// mismatches to just straight up maximize the number of matches
+			// we have.
+			const auto evalUp = valUp.match;
+			const auto evalLeft = valLeft.match;
+			const auto evalDiag = matchVal.match > 0 ? valDiag.match : -1.f;
 			const auto maxEval = std::max(evalDiag, std::max(evalUp, evalLeft));
 
 			auto& dst = entry(ia, ib);
@@ -394,7 +425,7 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 	}
 
 	// backtrack
-	auto maxNumMatches = std::min(numSectionsA, numSectionsB);
+	auto maxNumMatches = minSections;
 	span<SectionMatch> resMatches = tms.alloc<SectionMatch>(maxNumMatches);
 
 	ia = numSectionsA;
@@ -421,13 +452,23 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 	}
 
 	resMatches = resMatches.first(outID);
+	auto numMatchedSections = outID;
+	dlg_assert(numMatchedSections <= minSections);
 
-	// TODO: for numSectionsA small and numSectionsB large we might
-	// get 100% match with this definition right?
-	// must be changed
 	auto& bestPath = entries.back().match;
 	rootMatch.total += bestPath.total;
 	rootMatch.match += bestPath.match;
+
+	// we assume that the total match lost by missing sections is the same
+	// as the match, but at least 1.
+	auto diff = (maxSections - numMatchedSections);
+	auto missedMin = 10;
+	if(numMatchedSections == 0u || bestPath.total < missedMin * diff) {
+		rootMatch.total += missedMin * diff;
+	} else {
+		rootMatch.total += diff * bestPath.total / numMatchedSections;
+	}
+
 	return {resMatches, rootMatch};
 }
 
@@ -459,6 +500,7 @@ BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b
 			auto [matches, matcher] = match(tms,
 				*a.submissions[ia]->commands,
 				*b.submissions[ib]->commands);
+			// TODO: take matcher.total into account
 			auto matchFac = eval(matcher);
 			auto valDiag = -1.f;
 			if(matchFac > 0.0) {
@@ -528,6 +570,11 @@ BatchMatch match(ThreadMemScope& tms, const RecordBatch& a, const RecordBatch& b
 MatchResult match(ThreadMemScope& tms, span<const RecordBatch> a, span<const RecordBatch> b) {
 	ZoneScoped;
 
+	if(a.empty() || b.empty()) {
+		// TODO: for a.empty && b.empty return match = 1.f? relevant anywhere?
+		return {};
+	}
+
 	struct Entry {
 		float match {};
 		unsigned dir {};
@@ -542,6 +589,7 @@ MatchResult match(ThreadMemScope& tms, span<const RecordBatch> a, span<const Rec
 	for(auto ia = 0u; ia < a.size(); ++ia) {
 		for(auto ib = 0u; ib < b.size(); ++ib) {
 			auto valDiag = -1.f;
+			// TODO: take matcher.total into account
 			auto matchRes = match(tms, a[ia], b[ib]);
 			if(matchRes.match > 0.f) {
 				valDiag = ((ia == 0u || ib == 0u) ? 0.f : entry(ia - 1, ib - 1).match);

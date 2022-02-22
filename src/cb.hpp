@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <device.hpp>
 #include <command/record.hpp>
+#include <command/builder.hpp>
 #include <memory>
 
 namespace vil {
@@ -73,13 +74,6 @@ private:
 	// The last recorded state.
 	State state_ {State::initial}; // synchronized via dev mutex
 
-	// The current state: only finished when in recording state, otherwise
-	// it may be null. This is reset every time the command buffer is
-	// reset (e.g. via the command pool or explicitly or implicitly via
-	// a new vkBeginCommandBuffer or when a reference resource is destroyed
-	// and the the command buffer moved to invalid state).
-	IntrusivePtr<CommandRecord> record_;
-
 	// The last valid state of this command buffer. We store this since
 	// it can be useful to know when inspecting a command buffer.
 	// This is only updated when a command buffer recording is finished,
@@ -92,30 +86,17 @@ private:
 	GraphicsState* graphicsState_ {};
 	RayTracingState* rayTracingState_ {};
 
-    struct Section {
-        SectionCommand* cmd;
-        ParentCommand* lastParentChild {}; // last child command of this section that is a parent to others
-        Section* parent {}; // one level up. Null only for root node
-        Section* next {}; // might be != null even when this is the last section. Re-using allocations
-		bool pop {}; // See docs/debug-utils-label-nesting.md
-    };
-
-	Section* section_ {}; // the last, lowest, deepest-down section
-	Command* lastCommand_ {}; // the last added command in current section (might be null)
 	u32 ignoreEndDebugLabels_ {}; // See docs/debug-utils-label-nesting.md
 	PushConstantData pushConstants_ {};
+
+	RecordBuilder builder_;
 
 public: // Only public for recording, should not be accessed outside api
     u32 subpass_ {u32(-1)};
     RenderPass* rp_ {};
     span<ImageView*> rpAttachments_ {};
 
-	void appendParent(ParentCommand& cmd);
-	void beginSection(SectionCommand& cmd);
-	void addCmd(Command& cmd);
-	void endSection(Command*);
 	void popLabelSections();
-	auto* section() const { return section_; }
 	auto& ignoreEndDebugLabels() { return ignoreEndDebugLabels_; }
 
 	const ComputeState& computeState() { return *computeState_; }
@@ -132,16 +113,10 @@ public: // Only public for recording, should not be accessed outside api
 	void doReset(bool record);
 	void doEnd();
 
-	// Can be nullptr when command buffer was never recorded.
-	// Otherwise returns the current or last recorded state.
-	// No synchronization needed to call this, the record is guaranteed
-	// to stay valid via the shared ownership acquired via the intrusive ptr.
-	IntrusivePtr<CommandRecord> recordPtr() const { return record_; }
-
-	// If non-null, only guaranteed to stay valid while device mutex is locked.
-	// This means calling this while device mutex isn't locked (for something
-	// other than a nullptr-comparison) is invalid.
-	CommandRecord* record() const { return record_.get(); }
+	RecordBuilder& builder() {
+		dlg_assert(state_ == State::recording);
+		return builder_;
+	}
 };
 
 // api

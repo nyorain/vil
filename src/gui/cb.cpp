@@ -26,6 +26,8 @@
 namespace vil {
 
 struct DisplayVisitor : CommandVisitor {
+	std::unordered_set<const ParentCommand*>& openedSections_;
+
 	const Command* sel_;
 	Command::TypeFlags flags_;
 	std::vector<const Command*> newSelection_;
@@ -37,8 +39,9 @@ struct DisplayVisitor : CommandVisitor {
 
 	bool jumpToSelection_ {};
 
-	DisplayVisitor(const Command* sel, Command::TypeFlags flags, bool labelOnlyIndent) :
-		sel_(sel), flags_(flags), labelOnlyIndent_(labelOnlyIndent) {
+	DisplayVisitor(std::unordered_set<const ParentCommand*>& opened,
+			const Command* sel, Command::TypeFlags flags, bool labelOnlyIndent) :
+		openedSections_(opened), sel_(sel), flags_(flags), labelOnlyIndent_(labelOnlyIndent) {
 	}
 
 	~DisplayVisitor() {
@@ -110,7 +113,7 @@ struct DisplayVisitor : CommandVisitor {
 	}
 
 	// Returns whether the tree is open
-	bool openTree(const Command& cmd) {
+	bool openTree(const ParentCommand& cmd) {
 		int flags = ImGuiTreeNodeFlags_OpenOnArrow |
 			ImGuiTreeNodeFlags_FramePadding |
 			ImGuiTreeNodeFlags_OpenOnDoubleClick;
@@ -118,14 +121,24 @@ struct DisplayVisitor : CommandVisitor {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 
-		const auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
-		const auto open = ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
+		const auto opened = openedSections_.count(&cmd);
+		ImGui::SetNextItemOpen(opened);
+
+		const auto open = ImGui::TreeNodeEx(static_cast<const void*>(&cmd),
+			flags, "%s", cmd.toString().c_str());
 
 		// don't select when only clicked on arrow
 		const auto labelStartX = ImGui::GetItemRectMin().x + 30;
 		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
 			dlg_assert(newSelection_.empty());
 			newSelection_.push_back(&cmd);
+		}
+
+		// check if open
+		if(open && !opened) {
+			openedSections_.insert(&cmd);
+		} else if(!open && opened) {
+			openedSections_.erase(&cmd);
 		}
 
 		return open;
@@ -164,8 +177,8 @@ struct DisplayVisitor : CommandVisitor {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 
-		auto idStr = dlg::format("{}:{}", cmd.nameDesc(), cmd.relID);
-		ImGui::TreeNodeEx(idStr.c_str(), flags, "%s", cmd.toString().c_str());
+		ImGui::TreeNodeEx(static_cast<const void*>(&cmd),
+			flags, "%s", cmd.toString().c_str());
 
 		auto clicked = ImGui::IsItemClicked();
 		if(clicked) {
@@ -368,15 +381,9 @@ void CommandBufferGui::draw(Draw& draw) {
 	} else if(!gui_->dev().swapchain) {
 		clearSelection();
 
-		record_ = {};
-		selectedRecord_ = {};
 		records_ = {};
-		selectedBatch_ = {};
+		openedSections_ = {};
 		swapchainPresent_ = {};
-		selectedCommand_ = {};
-		hook.target = {};
-		hook.desc({}, {}, {});
-		hook.unsetHookOps();
 		return;
 	}
 
@@ -448,9 +455,8 @@ void CommandBufferGui::draw(Draw& draw) {
 
 			// force update
 			if(!freezeCommands_) {
-				records_ = dev.swapchain->frameSubmissions[0].batches;
-				// record_ = {};
-				// command_ = {};
+				dlg_trace("force command update");
+				updateRecords(dev.swapchain->frameSubmissions[0].batches, false);
 			}
 		}
 	}
@@ -519,6 +525,11 @@ void CommandBufferGui::draw(Draw& draw) {
 		case SelectionType::submission:
 			dlg_assert(mode_ == UpdateMode::swapchain);
 			dlg_assert(selectedBatch_);
+			if(!selectedBatch_) {
+				imGuiText("Error!");
+				break;
+			}
+
 			refButtonExpect(*gui_, selectedBatch_->queue);
 			imGuiText("{} records", selectedBatch_->submissions.size());
 			imGuiText("submissionID: {}", selectedBatch_->submissionID);
@@ -556,6 +567,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 	// Unset hooks
 	clearSelection();
 	record_ = std::move(record);
+	openedSections_ = {};
 	updateHookTarget();
 }
 
@@ -573,6 +585,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 	// Unset hooks
 	clearSelection();
 	record_ = std::move(record);
+	openedSections_ = {};
 	updateHookTarget();
 }
 
@@ -580,6 +593,9 @@ void CommandBufferGui::showSwapchainSubmissions() {
 	mode_ = UpdateMode::swapchain;
 	cb_ = {};
 	clearSelection();
+
+	// NOTE: don't do that here, we explicitly preserve them.
+	// openedSections_ = {};
 }
 
 void CommandBufferGui::destroyed(const Handle& handle) {
@@ -611,7 +627,6 @@ void CommandBufferGui::updateHookTarget() {
 			break;
 		case UpdateMode::any:
 		case UpdateMode::swapchain:
-			// hook.target.group = nonNull(record_).group;
 			hook.target.all = true;
 			break;
 		case UpdateMode::commandBuffer:
@@ -633,6 +648,7 @@ void CommandBufferGui::updateState() {
 		// find the best match
 		CommandHook::CompletedHook* best = nullptr;
 		auto bestMatch = 0.f;
+		MatchResult bestMatchResult {};
 		u32 bestPresentID = {};
 		span<const RecordBatch> bestBatches; // only for swapchain mode
 
@@ -644,7 +660,10 @@ void CommandBufferGui::updateState() {
 			// When we are in swapchain mode, we need the frame associated with
 			// this submission. We will then also consider the submission in its
 			// context inside the frame.
+			MatchResult batchMatches;
 			if(mode_ == UpdateMode::swapchain) {
+				dlg_assert(selectionType_ == SelectionType::command);
+
 				for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
 					if(res.submissionID >= frame.submissionStart && res.submissionID <= frame.submissionEnd) {
 						foundBatches = frame.batches;
@@ -661,30 +680,30 @@ void CommandBufferGui::updateState() {
 
 				dlg_assert(!selectedFrame_.empty());
 
-				// check if [selectedRecord_ in selectedBatch_] contextually
+				// check if [selectedRecord_ in selectedFrame_] contextually
 				// matches  [res.record in foundBatches]
 				ThreadMemScope tms;
-				auto batchMatches = match(tms, foundBatches, selectedFrame_);
+				batchMatches = match(tms, selectedFrame_, foundBatches);
 				bool recordMatched = false;
 				for(auto& batchMatch : batchMatches.matches) {
-					if(batchMatch.a->submissionID != res.submissionID) {
+					if(batchMatch.b->submissionID != res.submissionID) {
 						continue;
 					}
 
 					for(auto& recMatch : batchMatch.matches) {
-						if(recMatch.a != res.record) {
+						if(recMatch.b != res.record) {
 							continue;
 						}
 
-						if(recMatch.b == selectedRecord_.get()) {
+						if(recMatch.a == selectedRecord_.get()) {
 							recordMatched = true;
 							resMatch *= recMatch.match;
-						}
 
-						// TODO: For all parent commands, we could make
-						// sure that they match.
-						// I.e. (command_[i], res.command[i]) somewhere
-						// in the recMatch.matches[X]...matches hierarchy
+							// TODO: For all parent commands, we could make
+							// sure that they match.
+							// I.e. (command_[i], res.command[i]) somewhere
+							// in the recMatch.matches[X]...matches hierarchy
+						}
 
 						break;
 					}
@@ -706,6 +725,7 @@ void CommandBufferGui::updateState() {
 				bestMatch = resMatch;
 				bestBatches = foundBatches;
 				bestPresentID = presentID;
+				bestMatchResult = batchMatches;
 			}
 		}
 
@@ -717,23 +737,23 @@ void CommandBufferGui::updateState() {
 			dev.commandHook->desc(best->record, best->command,
 				best->descriptorSnapshot, false);
 
-			// update internal state state from hook match
-			selectedRecord_ = best->record;
-
-			if(!freezeCommands_) {
-				record_ = best->record;
-				selectedCommand_ = best->command;
-			}
-
+			// Update internal state state from hook match
 			// In swapchain mode - and when not freezing commands - make
 			// sure to also display the new frame
 			if(mode_ == UpdateMode::swapchain) {
 				swapchainPresent_ = bestPresentID;
-				selectedFrame_ = {bestBatches.begin(), bestBatches.end()};
 
 				if(!freezeCommands_) {
-					records_ = {bestBatches.begin(), bestBatches.end()};
+					// TODO PERF: can re-use bestMatchResult in many cases,
+					updateRecords({bestBatches.begin(), bestBatches.end()}, false);
+					selectedFrame_ = {bestBatches.begin(), bestBatches.end()};
+					selectedCommand_ = best->command;
+					selectedRecord_ = best->record;
+					record_ = best->record;
 				}
+			} else if(!freezeCommands_) {
+				selectedCommand_ = best->command;
+				updateRecord(best->record);
 			}
 
 			// update command viewer state from hook match
@@ -758,11 +778,12 @@ void CommandBufferGui::updateState() {
 	// from CommandHook. But still want to show the new commands.
 	if(!freezeCommands_ && selectedCommand_.empty()) {
 		if(mode_ == UpdateMode::swapchain) {
-			records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
+			dlg_assert(selectionType_ != SelectionType::command);
+			updateRecords(gui_->dev().swapchain->frameSubmissions[0].batches, true);
 			swapchainPresent_ = gui_->dev().swapchain->frameSubmissions[0].presentID;
 		} else if(mode_ == UpdateMode::commandBuffer) {
 			dlg_assert(cb_);
-			record_ = cb_->lastRecordPtrLocked();
+			updateRecord(cb_->lastRecordPtrLocked());
 		} else if(mode_ == UpdateMode::any) {
 			// TODO: correct updating, iterate through all submissions
 			// in the last frames and find the best record match. ouch.
@@ -805,7 +826,11 @@ void CommandBufferGui::displayFrameCommands() {
 		}
 
 		// check if this vkQueueSubmit was selected
-		if(selectionType_ == SelectionType::submission && selectedBatch_ == &batch) {
+		if(selectionType_ == SelectionType::submission && selectedBatch_ &&
+				// TODO: this comparison is kinda hacky.
+				// batch comes from records_ while selectedBatch_ comes
+				// from selectedFrame_, that's why we can't compare pointers.
+				selectedBatch_->submissionID == batch.submissionID) {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 
@@ -814,8 +839,8 @@ void CommandBufferGui::displayFrameCommands() {
 		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
 			clearSelection();
 			selectionType_ = SelectionType::submission;
-			selectedBatch_ = &batch;
 			selectedFrame_ = records_;
+			selectedBatch_ = &selectedFrame_[b];
 		}
 
 		if(!open) {
@@ -864,8 +889,8 @@ void CommandBufferGui::displayFrameCommands() {
 				clearSelection();
 				selectionType_ = SelectionType::record;
 				selectedRecord_ = rec;
-				selectedBatch_ = &batch;
 				selectedFrame_ = records_;
+				selectedBatch_ = &selectedFrame_[b];
 			}
 
 			if(!open) {
@@ -885,7 +910,8 @@ void CommandBufferGui::displayFrameCommands() {
 				commandFlags_ |= Command::Type::end;
 			}
 
-			DisplayVisitor visitor(selectedCommand, commandFlags_, brokenLabelNesting_);
+			DisplayVisitor visitor(openedSections_, selectedCommand,
+				commandFlags_, brokenLabelNesting_);
 			visitor.jumpToSelection_ = focusSelected_;
 			visitor.displayCommands(rec->commands->children_, true);
 			auto nsel = std::move(visitor.newSelection_);
@@ -899,8 +925,8 @@ void CommandBufferGui::displayFrameCommands() {
 				selectionType_ = SelectionType::command;
 				selectedCommand_ = std::move(nsel);
 				selectedRecord_ = rec;
-				selectedBatch_ = &batch;
 				selectedFrame_ = records_;
+				selectedBatch_ = &selectedFrame_[b];
 				record_ = rec;
 
 				// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
@@ -948,7 +974,8 @@ void CommandBufferGui::displayRecordCommands() {
 		commandFlags_ |= Command::Type::end;
 	}
 
-	DisplayVisitor visitor(selected, commandFlags_, brokenLabelNesting_);
+	DisplayVisitor visitor(openedSections_,selected,
+		commandFlags_, brokenLabelNesting_);
 	visitor.jumpToSelection_ = focusSelected_;
 	visitor.displayCommands(record_->commands->children_, false);
 	auto nsel = std::move(visitor.newSelection_);
@@ -1000,6 +1027,130 @@ void CommandBufferGui::clearSelection() {
 	if (mode_ == UpdateMode::swapchain) {
 		record_ = {};
 	}
+}
+
+void CommandBufferGui::updateRecords(std::vector<RecordBatch> records,
+		bool updateSelection) {
+	// update records
+	{
+		ThreadMemScope tms;
+		auto frameMatch = match(tms, records_, records);
+		updateRecords(frameMatch, records);
+	}
+
+	// update selection
+	if(selectionType_ == SelectionType::none) {
+		dlg_assert(!selectedBatch_);
+		dlg_assert(!selectedRecord_);
+		updateSelection = false;
+	}
+
+	if(!updateSelection) {
+		return;
+	}
+
+	dlg_assert(selectionType_ != SelectionType::command);
+
+	// TODO PERF: can re-use frameMatch in many cases,
+	ThreadMemScope tms;
+	auto selMatch = match(tms, selectedFrame_, records);
+
+	std::optional<u32> newSelectedBatch = {};
+	IntrusivePtr<CommandRecord> newSelectedRecord = {};
+
+	for(auto batchMatch : selMatch.matches) {
+		if(updateSelection && selectedBatch_ == batchMatch.a) {
+			dlg_assert(!newSelectedBatch);
+
+			// TODO: kinda hacky. But needed since the RecordBatch
+			// references in frameMatch might not directly reference
+			// into records
+			auto cmp = [&](const RecordBatch& rec) {
+				return rec.submissionID == batchMatch.b->submissionID;
+			};
+			auto it = find_if(records, cmp);
+			dlg_assert(it != records.end());
+			newSelectedBatch = u32(it - records.begin());
+		}
+
+		for(auto& recordMatch : batchMatch.matches) {
+			if(updateSelection && selectedRecord_ == recordMatch.a) {
+				newSelectedRecord.reset(const_cast<CommandRecord*>(recordMatch.b));
+			}
+		}
+	}
+
+	if(selectionType_ == SelectionType::submission) {
+		updateSelection = updateSelection && !!newSelectedBatch;
+	} else if(selectionType_ == SelectionType::record) {
+		updateSelection = updateSelection && !!newSelectedBatch && !!newSelectedRecord;
+	}
+
+	if(updateSelection) {
+		selectedFrame_ = records;
+		selectedBatch_ = &selectedFrame_[*newSelectedBatch];
+		selectedRecord_ = std::move(newSelectedRecord);
+	}
+}
+
+// util
+// The recursion here can be assumed safe, applications nesting many thousand
+// levels of sections (only possible with debug labels i guess) are weird
+// and we don't need to support them at the moment.
+void addMatches(
+		const std::unordered_set<const ParentCommand*>& oldSet,
+		std::unordered_set<const ParentCommand*>& newSet,
+		std::unordered_set<const ParentCommand*>& transmitted,
+		const SectionMatch& sectionMatch) {
+
+	if(oldSet.count(sectionMatch.a)) {
+		newSet.insert(sectionMatch.b);
+		transmitted.insert(sectionMatch.a);
+	}
+
+	for(auto& child : sectionMatch.children) {
+		addMatches(oldSet, newSet, transmitted, child);
+	}
+}
+
+void CommandBufferGui::updateRecords(const MatchResult& frameMatch,
+		std::vector<RecordBatch> records) {
+	ThreadMemScope tms;
+
+	// find matching openedSections_
+	// NOTE: with this algorithm we will implicitly close sections
+	// that disappear and then re-appear.
+	// Not sure how we could keep that information though.
+	std::unordered_set<const ParentCommand*> newOpen;
+	std::unordered_set<const ParentCommand*> transmitted;
+
+	for(auto batchMatch : frameMatch.matches) {
+		for(auto& recordMatch : batchMatch.matches) {
+			for(auto& sectionMatch : recordMatch.matches) {
+				addMatches(openedSections_, newOpen, transmitted, sectionMatch);
+			}
+		}
+	}
+
+	// TODO PERF debugging, remove otherwise
+	for(auto& open : openedSections_) {
+		if(!transmitted.count(open)) {
+			if(auto* lbl = dynamic_cast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
+				dlg_trace("Losing open label {}", lbl->name);
+			} else {
+				dlg_trace("Losing open cmd {}", (const void*) open);
+			}
+		}
+	}
+
+	// apply
+	records_ = std::move(records);
+	openedSections_ = std::move(newOpen);
+}
+
+void CommandBufferGui::updateRecord(IntrusivePtr<CommandRecord> record) {
+	dlg_trace("TODO");
+	record_ = std::move(record);
 }
 
 } // namespace vil

@@ -58,6 +58,10 @@ private:
 	void displayRecordCommands();
 	void clearSelection();
 
+	void updateRecord(IntrusivePtr<CommandRecord> record);
+	void updateRecords(std::vector<RecordBatch>, bool updateSelection);
+	void updateRecords(const MatchResult&, std::vector<RecordBatch>);
+
 private:
 	friend class Gui;
 	Gui* gui_ {};
@@ -67,12 +71,13 @@ private:
 
 	// The command record we are currently viewing.
 	// We make sure it stays alive. In swapchain mode, this is nullptr
-	// unless we have a selected command.
+	// if we don't have a selected record, otherwise it's the same as
+	// selectedRecord_ (TODO: kinda redundant, merge with selectedRecord_).
 	IntrusivePtr<CommandRecord> record_ {};
 
 	// For swapchain
-	std::vector<RecordBatch> records_; // currently viewed frame
-	u32 swapchainPresent_ {}; // present id of viewed frame
+	std::vector<RecordBatch> records_; // currently viewed frame; i.e. the displayed commands
+	u32 swapchainPresent_ {}; // present id of last time we got a completed hook
 	bool freezeCommands_ {};
 	bool freezeState_ {};
 
@@ -89,6 +94,8 @@ private:
 	// Might be empty, signalling that no command is secleted.
 	// Only valid if selectionType_ == command.
 	std::vector<const Command*> selectedCommand_ {};
+
+	std::unordered_set<const ParentCommand*> openedSections_;
 
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};

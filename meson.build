@@ -195,6 +195,7 @@ src = files(
 	'src/command/desc.cpp',
 	'src/command/record.cpp',
 	'src/command/commands.cpp',
+	'src/command/builder.cpp',
 
 	# vulkan api entrypoints
 	'src/handle.cpp',

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <data.hpp>
+#include <queue.hpp>
 #include <util/handleCast.hpp>
 #include <util/syncedMap.hpp>
 #include <util/span.hpp>
@@ -261,6 +262,7 @@ struct Device {
 	KeepAliveRingBuffer<BufferView*, keepAliveCount> keepAliveBufferViews;
 	KeepAliveRingBuffer<AccelStruct*, keepAliveCount> keepAliveAccelStructs;
 
+	Device(); // = default in src
 	~Device();
 };
 

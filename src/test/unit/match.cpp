@@ -1,11 +1,33 @@
 #include <command/desc.hpp>
 #include <command/record.hpp>
 #include <command/commands.hpp>
+#include <command/alloc.hpp>
+#include <command/builder.hpp>
+#include <threadContext.hpp>
 #include <vk/vulkan.h>
 #include "../bugged.hpp"
 #include "../approx.hpp"
 
 using namespace vil;
+
+struct LabelEnder {
+	Command& cmd;
+	RecordBuilder& rb;
+
+	LabelEnder(LabelEnder&&) = delete;
+	LabelEnder& operator=(LabelEnder&&) = delete;
+
+	LabelEnder(Command& cmdx, RecordBuilder& rbx) : cmd(cmdx), rb(rbx) {}
+	~LabelEnder() {
+		rb.add<EndDebugUtilsLabelCmd, SectionType::end>();
+	}
+};
+
+LabelEnder label(RecordBuilder& rb, const char* name) {
+	auto& cmd = rb.add<BeginDebugUtilsLabelCmd, SectionType::begin>();
+	cmd.name = copyString(*rb.record_, name);
+	return {cmd, rb}; // move ellision
+}
 
 TEST(unit_command_match_barrier) {
 	BarrierCmd b1;
@@ -24,3 +46,62 @@ TEST(unit_command_match_barrier) {
 	EXPECT(eval(waitCmd.match(b2)), 0.f);
 }
 
+TEST(unit_match_simple_record) {
+	Device dev;
+
+	RecordBuilder rb(dev);
+	rb.add<BarrierCmd>();
+	rb.add<BarrierCmd>();
+	rb.add<BarrierCmd>();
+	auto rec3Barriers = rb.record_;
+
+	rb.reset(dev);
+	auto recEmpty = rb.record_;
+
+	ThreadMemScope tms;
+	auto [matches1, match1] = match(tms, *rec3Barriers->commands, *recEmpty->commands);
+	auto [matches2, match2] = match(tms, *rec3Barriers->commands, *rec3Barriers->commands);
+	dlg_trace("match1: {}/{}", match1.match, match1.total);
+	dlg_trace("match2: {}/{}", match2.match, match2.total);
+
+	dlg_assert(eval(match2) > eval(match1));
+}
+
+TEST(unit_match_labels) {
+	Device dev;
+
+	RecordBuilder rb(dev);
+	auto& a1 = label(rb, "1").cmd;
+	auto& a2 = label(rb, "2").cmd;
+	auto& a3 = label(rb, "3").cmd; (void) a3;
+	auto& a4 = label(rb, "4").cmd;
+	auto recA = rb.record_;
+
+	rb.reset(dev);
+	auto& b1 = label(rb, "1").cmd;
+	auto& b2 = label(rb, "2").cmd;
+	auto& b4 = label(rb, "4").cmd;
+	auto recB = rb.record_;
+
+	ThreadMemScope tms;
+	auto [matches, matchRes] = match(tms, *recA->commands, *recB->commands);
+	auto matchVal = eval(matchRes);
+	// dlg_trace("match val: {}", matchVal);
+
+	// don't care about specifics here. Might need to be changed in future
+	// but then investigate why, this range is fairly permissive as is.
+	dlg_assert(matchVal > 0.6f);
+	dlg_assert(matchVal < 0.9f);
+
+	dlg_assert(matches.size() == 3u);
+
+	// reverse order atm
+	dlg_assert(matches[2].a == &a1);
+	dlg_assert(matches[2].b == &b1);
+
+	dlg_assert(matches[1].a == &a2);
+	dlg_assert(matches[1].b == &b2);
+
+	dlg_assert(matches[0].a == &a4);
+	dlg_assert(matches[0].b == &b4);
+}

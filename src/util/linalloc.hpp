@@ -69,10 +69,12 @@ struct LinAllocator {
 
 	// NOTE: should be removed later in final release mode.
 	// For keeping track of allocation size.
-	std::function<void(const std::byte*, u32)> onAlloc;
-	std::function<void(const std::byte*, u32)> onFree;
+	using Callback = std::function<void(const std::byte*, u32)>;
+	Callback onAlloc;
+	Callback onFree;
 
 	LinAllocator();
+	LinAllocator(Callback alloc, Callback free);
 	~LinAllocator();
 
 	// NOTE: could be implemented but need special handling of memRoot

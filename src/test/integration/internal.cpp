@@ -114,7 +114,7 @@ TEST(int_basic) {
 	dlg_assert(vilCB.state() == CommandBuffer::State::executable);
 
 	// submit it, make sure it's hooked
-	auto& rec = *vilCB.record();
+	auto& rec = *vilCB.lastRecordPtr();
 	auto* cmd = rec.commands->children_;
 	auto dst = cmd->next->next;
 
@@ -122,7 +122,7 @@ TEST(int_basic) {
 	vilDev.commandHook->queryTime = true;
 	vilDev.commandHook->forceHook = true;
 	vilDev.commandHook->target.all = true;
-	vilDev.commandHook->desc(vilCB.recordPtr(), {dst}, {});
+	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {dst}, {});
 
 	VkSubmitInfo si {};
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

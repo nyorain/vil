@@ -1130,8 +1130,11 @@ Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 	}
 
 	for(auto& pcr : state.pipe->layout->pushConstants) {
-		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
-		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
+		// TODO: these asserts can trigger if parts of the push constant
+		// range was left undefined. It might not be used by the shader
+		// anyways. No idea how to fix.
+		dlg_assertl_or(dlg_level_warn, pcr.offset + pcr.size <= pushConstants.data.size(), continue);
+		dlg_assertl_or(dlg_level_warn, pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 
 		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
 		m.total += pcrWeight;

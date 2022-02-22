@@ -4,6 +4,11 @@
 #include <command/record.hpp>
 #include <cb.hpp>
 
+// TODO: this is terrible and only needed because we originally
+//   allocated memory from the command buffer and not from the
+//   CommandRecord. Need to rewrite all allocations in cb.cpp
+//   to directly happen from the record.
+
 namespace vil {
 
 // allocation util
@@ -13,7 +18,7 @@ struct CommandAlloc {
 	// implicit constructors
 	inline CommandAlloc(LinAllocator& xalloc) : alloc(xalloc) {}
 	inline CommandAlloc(CommandRecord& rec) : alloc(rec.alloc) {}
-	inline CommandAlloc(CommandBuffer& cb) : alloc(cb.record()->alloc) {}
+	inline CommandAlloc(CommandBuffer& cb) : alloc(cb.builder().record_->alloc) {}
 };
 
 template<typename T, typename... Args>
@@ -24,13 +29,7 @@ template<typename T, typename... Args>
 
 template<typename T>
 [[nodiscard]] span<T> alloc(CommandAlloc rec, size_t count) {
-	if(count == 0) {
-		return {};
-	}
-
-	auto* raw = rec.alloc.allocate(sizeof(T) * count, alignof(T));
-	auto* arr = new(raw) T[count]();
-	return span<T>(arr, count);
+	return rec.alloc.alloc<T>(count);
 }
 
 template<typename T>

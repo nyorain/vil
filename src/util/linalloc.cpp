@@ -38,6 +38,11 @@ LinAllocator::LinAllocator() {
 	memCurrent = &memRoot;
 }
 
+LinAllocator::LinAllocator(Callback alloc, Callback free) : LinAllocator() {
+	onAlloc = alloc;
+	onFree = free;
+}
+
 LinAllocator::~LinAllocator() {
 	release();
 }
