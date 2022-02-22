@@ -40,6 +40,7 @@ urgent, bugs:
 	  Maybe use tabs? One for general information, one for the image viewer?
 
 new, workstack:
+- [ ] update pegtl
 - [ ] improve timing queries
 	- [ ] allow timing for whole command buffers (begin to end)
 	- [ ] allow timing for whole submissions (begin to end)
