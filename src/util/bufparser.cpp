@@ -1,15 +1,20 @@
-#include <tao/pegtl.hpp>
-#include <tao/pegtl/contrib/trace.hpp>
-#include <tao/pegtl/contrib/analyze.hpp>
-#include <tao/pegtl/contrib/parse_tree.hpp>
-#include <tao/pegtl/contrib/parse_tree_to_dot.hpp>
-#include <util/dlg.hpp>
 #include <util/buffmt.hpp>
+#include <util/dlg.hpp>
 #include <util/profiling.hpp>
 #include <util/util.hpp>
 #include <threadContext.hpp>
 #include <dlg/output.h>
 #include <fstream>
+#include <unordered_set>
+#include <string>
+#include <string_view>
+#include <algorithm>
+
+#include <tao/pegtl.hpp>
+#include <tao/pegtl/contrib/trace.hpp>
+#include <tao/pegtl/contrib/analyze.hpp>
+#include <tao/pegtl/contrib/parse_tree.hpp>
+#include <tao/pegtl/contrib/parse_tree_to_dot.hpp>
 
 namespace pegtl = tao::pegtl;
 

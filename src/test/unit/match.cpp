@@ -10,23 +10,26 @@
 
 using namespace vil;
 
-struct LabelEnder {
-	Command& cmd;
+struct LabelSection {
+	BeginDebugUtilsLabelCmd* cmd;
 	RecordBuilder& rb;
 
-	LabelEnder(LabelEnder&&) = delete;
-	LabelEnder& operator=(LabelEnder&&) = delete;
+	LabelSection(LabelSection&&) = delete;
+	LabelSection& operator=(LabelSection&&) = delete;
 
-	LabelEnder(Command& cmdx, RecordBuilder& rbx) : cmd(cmdx), rb(rbx) {}
-	~LabelEnder() {
+	LabelSection(RecordBuilder& rbx, const char* name) : rb(rbx) {
+		cmd = &rb.add<BeginDebugUtilsLabelCmd, SectionType::begin>();
+		cmd->name = copyString(*rb.record_, name);
+	}
+
+	~LabelSection() {
 		rb.add<EndDebugUtilsLabelCmd, SectionType::end>();
 	}
 };
 
-LabelEnder label(RecordBuilder& rb, const char* name) {
-	auto& cmd = rb.add<BeginDebugUtilsLabelCmd, SectionType::begin>();
-	cmd.name = copyString(*rb.record_, name);
-	return {cmd, rb}; // move ellision
+BeginDebugUtilsLabelCmd& emptyLabelSection(RecordBuilder& rb, const char* name) {
+	LabelSection section(rb, name);
+	return *section.cmd;
 }
 
 TEST(unit_command_match_barrier) {
@@ -73,16 +76,16 @@ TEST(unit_match_labels) {
 	dev.captureCmdStack.store(false);
 
 	RecordBuilder rb(dev);
-	auto& a1 = label(rb, "1").cmd;
-	auto& a2 = label(rb, "2").cmd;
-	auto& a3 = label(rb, "3").cmd; (void) a3;
-	auto& a4 = label(rb, "4").cmd;
+	auto& a1 = emptyLabelSection(rb, "1");
+	auto& a2 = emptyLabelSection(rb, "2");
+	auto& a3 = emptyLabelSection(rb, "3"); (void) a3;
+	auto& a4 = emptyLabelSection(rb, "4");
 	auto recA = rb.record_;
 
 	rb.reset(dev);
-	auto& b1 = label(rb, "1").cmd;
-	auto& b2 = label(rb, "2").cmd;
-	auto& b4 = label(rb, "4").cmd;
+	auto& b1 = emptyLabelSection(rb, "1");
+	auto& b2 = emptyLabelSection(rb, "2");
+	auto& b4 = emptyLabelSection(rb, "4");
 	auto recB = rb.record_;
 
 	ThreadMemScope tms;

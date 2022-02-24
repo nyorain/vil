@@ -1,7 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <stats.hpp>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
