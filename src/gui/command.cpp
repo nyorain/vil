@@ -1302,6 +1302,7 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 }
 
 void CommandViewer::displayCommand() {
+	dlg_assert(command_);
 	dlg_assert(view_ == IOView::command);
 
 	if(state_) {
