@@ -9,8 +9,8 @@ layout(push_constant) uniform PCR {
 } pcr;
 
 layout(set = 0, binding = 0) buffer Dst {
-	uvec3 outMin;
-	uvec3 outMax;
+	uvec4 outMin;
+	uvec4 outMax;
 };
 
 #define SAMPLE_TEX_BINDING 1
@@ -40,7 +40,7 @@ void main() {
 	// TODO: could speed this up with subgroup ballot
 	// so we only do atomic instructions once per subgroup
 
-	for(uint i = 0u; i < 3; ++i) {
+	for(uint i = 0u; i < 4; ++i) {
 		// atomic instructions are only allowed on uints in core vulkan/glsl.
 		// it's possible to transform floats into a uints while keeping
 		// them ordered.

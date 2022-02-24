@@ -10,9 +10,9 @@ layout(push_constant) uniform PCR {
 	int level;
 } pcr;
 
-layout(set = 0, binding = 0) buffer HistR {
+layout(set = 0, binding = 0) buffer Hist {
 	uint hist[];
-} channels[3];
+} channels[4];
 
 #define SAMPLE_TEX_BINDING 1
 #include "sample.glsl"
@@ -30,7 +30,7 @@ void main() {
 
 	float range = pcr.end - pcr.begin;
 
-	for(uint i = 0u; i < 3; ++i) {
+	for(uint i = 0u; i < 4; ++i) {
 		int len = channels[i].hist.length();
 		float pos = (col[i] - pcr.begin) / range;
 		// uint id = clamp(pos * len, 0, len - 1);

@@ -23,6 +23,7 @@ public:
 	};
 
 	static constexpr auto useSamplingCopy = true;
+	static constexpr auto histogramSections = 64u;
 
 public:
 	void init(Gui& gui);
@@ -51,9 +52,12 @@ private:
 	// Will perform transitions, if needed.
 	void recordPostImage(Draw& draw);
 
+	// Reads the selected image at the cursor position via copy
 	void doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
+
+	// Reads the selected image at the cursor position via compute shader
+	// that samples it.
 	void doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
-	void copyComplete(Draw&);
 
 	void createData();
 
@@ -108,6 +112,7 @@ private:
 		VkImageView view {};
 		VkDescriptorSet ds {};
 		std::atomic<u32> refCount {};
+		OwnBuffer histogram;
 
 		~DrawData();
 	};

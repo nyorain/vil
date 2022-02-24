@@ -218,6 +218,7 @@ src = files(
 	# gui stuff
 	'src/gui/render.cpp',
 	'src/gui/gui.cpp',
+	'src/gui/pipes.cpp',
 	'src/gui/resources.cpp',
 	'src/gui/cb.cpp',
 	'src/gui/command.cpp',
