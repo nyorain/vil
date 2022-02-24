@@ -33,6 +33,16 @@ public:
 		span<const VkSemaphore> waitSemaphores;
 	};
 
+	struct Pipelines {
+		VkPipeline gui {};
+		VkPipeline imageBg {};
+		std::array<VkPipeline, ShaderImageType::count> image {};
+
+		std::array<VkPipeline, ShaderImageType::count> readTex {};
+		std::array<VkPipeline, ShaderImageType::count> histogramTex{};
+		std::array<VkPipeline, ShaderImageType::count> minMaxTex {};
+	};
+
 	bool visible {false};
 	bool unfocus {false};
 
@@ -98,7 +108,6 @@ public:
 	void addPostRender(Recorder);
 
 private:
-	void initPipes();
 	void initImGui();
 
 	void draw(Draw&, bool fullscreen);
@@ -139,12 +148,7 @@ private:
 	VkRenderPass rp_ {};
 	VkCommandPool commandPool_ {};
 
-	struct {
-		VkPipeline gui;
-		VkPipeline imageBg;
-		VkPipeline image[ShaderImageType::count] {};
-		VkPipeline readTex[ShaderImageType::count] {};
-	} pipes_;
+	Pipelines pipes_;
 
 	bool clear_ {};
 	VkDescriptorSet dsFont_ {};
@@ -171,10 +175,8 @@ private:
 	VkSwapchainKHR blurSwapchain_ {};
 	ImVec2 windowPos_ {};
 	ImVec2 windowSize_ {};
-	VkDescriptorSet blurDs_;
+	VkDescriptorSet blurDs_ {};
 
-	// only using during submission might this allows us to split
-	// sync building into separate functions
 	std::vector<VkSemaphore> waitSemaphores_;
 	std::vector<VkPipelineStageFlags> waitStages_;
 	std::vector<VkSemaphore> signalSemaphores_;
