@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <atomic>
 
 namespace vil {
 
