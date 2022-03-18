@@ -5,14 +5,15 @@
 layout(local_size_x_id = 0, local_size_y_id = 1) in;
 
 layout(push_constant) uniform PCR {
-	float begin;
-	float end;
 	int level;
 } pcr;
 
 layout(set = 0, binding = 0) buffer Hist {
-	uint hist[];
-} channels[4];
+	float begin;
+	float end;
+	uint _maxHist;
+	uvec4 data[];
+} hist;
 
 #define SAMPLE_TEX_BINDING 1
 #include "sample.glsl"
@@ -28,15 +29,15 @@ void main() {
 	// TODO: could speed this up with subgroup ballot
 	// so we only do three atomic instructions per subgroup
 
-	float range = pcr.end - pcr.begin;
+	float range = hist.end - hist.begin;
 
+	int len = hist.data.length();
 	for(uint i = 0u; i < 4; ++i) {
-		int len = channels[i].hist.length();
-		float pos = (col[i] - pcr.begin) / range;
+		float pos = (col[i] - hist.begin) / range;
 		// uint id = clamp(pos * len, 0, len - 1);
 		int id = int(pos * len);
 		if(id > 0 && id < len) {
-			atomicAdd(channels[i].hist[id], 1u);
+			atomicAdd(hist.data[id][i], 1u);
 		}
 	}
 }

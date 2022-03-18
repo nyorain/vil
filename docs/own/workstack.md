@@ -54,7 +54,8 @@
 - [x] rename main branch to main
 - [ ] Don't always alloc/free in LinAllocator.
       Enable our global memory block cache thingy?
-- [ ] test with rainbow six extraction
+- [~] test with rainbow six extraction
+	  {nvm, vulkan layers are blocked by anti-cheat}
 
 - look into found doom performance hotpaths
 	- Get rid of getAnnotate in command buffer end. Find clean solution for

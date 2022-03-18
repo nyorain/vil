@@ -7,6 +7,7 @@
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <spirv-cross/spirv.hpp>
+#include <spirv-cross/spirv_cross.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <util/dlg.hpp>
@@ -123,10 +124,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 					XfbPatchData xfb;
 
 					{
-						auto refl = accessReflection(nonNull(mod.code), spec,
+						dlg_assert(mod.code);
+						auto& refl = specializeSpirv(*mod.code, spec,
 							stage.pName, u32(spv::ExecutionModelVertex));
-						xfb = patchShaderXfb(dev, mod.spv, stage.pName,
-							refl.get(), mod.name);
+						xfb = patchShaderXfb(dev, refl, stage.pName, mod.name);
 					}
 
 					if(xfb.mod) {
@@ -539,9 +540,15 @@ u32 getSpvExecutionModel(VkShaderStageFlagBits stage) {
 	}
 }
 
-ShaderReflectionAccess accessReflection(const PipelineShaderStage& stage) {
+spc::Compiler& specializeSpirv(const PipelineShaderStage& stage) {
 	auto execModel = getSpvExecutionModel(stage.stage);
-	return accessReflection(nonNull(stage.spirv), stage.specialization,
+	return specializeSpirv(nonNull(stage.spirv), stage.specialization,
+		stage.entryPoint, execModel);
+}
+
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(const PipelineShaderStage& stage) {
+	auto execModel = getSpvExecutionModel(stage.stage);
+	return copySpecializeSpirv(nonNull(stage.spirv), stage.specialization,
 		stage.entryPoint, execModel);
 }
 

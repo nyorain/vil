@@ -22,6 +22,8 @@ span<spvm_member> children(spvm_member& member) {
 	return {member.members, std::size_t(member.member_count)};
 }
 
+ShaderDebugger::ShaderDebugger() = default;
+
 ShaderDebugger::~ShaderDebugger() {
 	unselect();
 	if(context_) {
@@ -46,13 +48,13 @@ void ShaderDebugger::init(Gui& gui) {
 	// textedit.SetHandleMouseInputs(false);
 }
 
-void ShaderDebugger::select(const spc::Compiler& compiled) {
+void ShaderDebugger::select(std::unique_ptr<spc::Compiler> compiled) {
 	unselect();
 
-	this->compiled_ = &compiled;
+	this->compiled_ = std::move(compiled);
 	static_assert(sizeof(spvm_word) == sizeof(u32));
-	auto ptr = reinterpret_cast<const spvm_word*>(compiled.get_ir().spirv.data());
-	program_ = spvm_program_create(context_, ptr, compiled.get_ir().spirv.size());
+	auto ptr = reinterpret_cast<const spvm_word*>(compiled_->get_ir().spirv.data());
+	program_ = spvm_program_create(context_, ptr, compiled_->get_ir().spirv.size());
 
 	initState();
 
@@ -133,6 +135,12 @@ void ShaderDebugger::initState() {
 }
 
 void ShaderDebugger::unselect() {
+	currLine_ = {};
+	currFileName_ = {};
+	varIDToDsCopyMap_.clear();
+	samplers_.clear();
+	images_.clear();
+
 	if(state_) {
 		spvm_state_delete(state_);
 		state_ = nullptr;
@@ -143,7 +151,7 @@ void ShaderDebugger::unselect() {
 		program_ = nullptr;
 	}
 
-	compiled_ = nullptr;
+	compiled_ = {};
 	breakpoints_.clear();
 }
 
@@ -169,6 +177,30 @@ void ShaderDebugger::draw() {
 
 		return false;
 	};
+
+	if(refresh_) {
+		spvm_state_delete(state_);
+		initState();
+
+		// TODO: not sure how to handle divergence. Maybe just go to
+		// beginning again but don't overwrite currLine, currFileName?
+		// notify about it in UI?
+		while(state_->code_current && (
+					u32(state_->current_line) != currLine_ ||
+					!state_->current_file ||
+					state_->current_file != currFileName_)) {
+			// TODO: trigger breakpoints here?
+			// probably not what we want. At least not always?
+			// spvm_state_step_opcode(state_);
+			auto doBreak = stepOpcode();
+			if(doBreak) {
+				refresh_ = false;
+				break;
+			}
+		}
+
+		jumpToState();
+	}
 
 	// Controls
 	if(state_->code_current) {
@@ -282,29 +314,6 @@ void ShaderDebugger::draw() {
 
 	ImGui::EndChild();
 
-	if(refresh_) {
-		spvm_state_delete(state_);
-		initState();
-
-		// TODO: not sure how to handle divergence. Maybe just go to
-		// beginning again but don't overwrite currLine, currFileName?
-		// notify about it in UI?
-		while(state_->code_current && (
-					u32(state_->current_line) != currLine_ ||
-					state_->current_file != currFileName_)) {
-			// TODO: trigger breakpoints here?
-			// probably not what we want. At least not always?
-			// spvm_state_step_opcode(state_);
-			auto doBreak = stepOpcode();
-			if(doBreak) {
-				refresh_ = false;
-				break;
-			}
-		}
-
-		jumpToState();
-	}
-
 	// variable view
 	if(ImGui::BeginChild("Views")) {
 		if(ImGui::BeginTabBar("Tabs")) {
@@ -340,11 +349,55 @@ void ShaderDebugger::draw() {
 	}
 }
 
+Vec3ui ShaderDebugger::workgroupSize() const {
+	// parse workgroup size
+	// TODO: cache on load for compute shaders
+	spc::SpecializationConstant wgsc[3];
+	Vec3ui wgs;
+	compiled_->get_work_group_size_specialization_constants(wgsc[0], wgsc[1], wgsc[2]);
+
+	for(auto i = 0u; i < 3u; ++i) {
+		if(wgsc[i].id) {
+			wgs[i] = compiled_->evaluate_constant_u32(wgsc[i].id);
+		} else {
+			wgs[i] = compiled_->get_execution_mode_argument(spv::ExecutionModeLocalSize, i);
+			dlg_assert(wgs[i] != 0);
+		}
+	}
+
+	return wgs;
+}
+
+Vec3ui ShaderDebugger::numWorkgroups() const {
+	// TODO: hacky
+	// TODO: cache/compute only if needed
+	auto* baseCmd = gui_->cbGui().commandViewer().command();
+	Vec3ui numWGs;
+	if(auto* idcmd = dynamic_cast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
+		// TODO: hacky
+		auto hookState = gui_->cbGui().commandViewer().state();
+		dlg_assert(hookState);
+
+		auto& ic = hookState->indirectCopy;
+		auto span = ic.data();
+		auto ecmd = read<VkDispatchIndirectCommand>(span);
+		numWGs = {ecmd.x, ecmd.y, ecmd.z};
+	} else if(auto* dcmd = dynamic_cast<const DispatchCmd*>(baseCmd); dcmd) {
+		numWGs = {dcmd->groupsX, dcmd->groupsY, dcmd->groupsZ};
+	} else if(auto* dcmd = dynamic_cast<const DispatchBaseCmd*>(baseCmd); dcmd) {
+		numWGs = {dcmd->groupsX, dcmd->groupsY, dcmd->groupsZ};
+	} else {
+		dlg_error("unreachable");
+	}
+
+	return numWGs;
+}
+
 void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
 		span<const spvm_word> indices, span<spvm_member> dst) {
 	dlg_trace("spirv OpLoad of builtin {}", builtin.builtin);
 
-	auto loadVecU = [&](auto& vec) {
+	auto loadVecU = [&](const auto& vec) {
 		if(indices.empty()) {
 			dlg_assert(dst.size() == vec.size());
 			for(auto i = 0u; i < vec.size(); ++i) {
@@ -360,34 +413,59 @@ void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
 		}
 	};
 
-	auto loadScalarU = [&](auto& val) {
+	auto loadScalarU = [&](const auto& val) {
 		dlg_assert(dst.size() == 1u);
 		dlg_assert(valueType(dst[0]) == spvm_value_type_int);
 		dst[0].value.u = val;
 	};
 
+	auto wgs = workgroupSize();
+	auto numWGs = numWorkgroups();
+
 	switch(builtin.builtin) {
-		// TODO
-		case spv::BuiltInNumSubgroups:
-		case spv::BuiltInNumWorkgroups: {
-			Vec3ui size {1u, 1u, 1u};
-			loadVecU(size);
-			break;
-		} case spv::BuiltInWorkgroupSize: {
-			Vec3ui size {8u, 8u, 1u}; // TODO
-			loadVecU(size);
+		case spv::BuiltInNumSubgroups: {
+			// TODO: proper subgroup support
+			loadScalarU(1u);
 			break;
 		}
-		case spv::BuiltInWorkgroupId:
-		case spv::BuiltInInvocationId:
-		case spv::BuiltInGlobalInvocationId:
+		case spv::BuiltInNumWorkgroups: {
+			loadVecU(numWGs);
+			break;
+		}
+		case spv::BuiltInWorkgroupSize: {
+			loadVecU(wgs);
+			break;
+		}
+		case spv::BuiltInWorkgroupId: {
+			Vec3ui id {0u, 0u, 0u};
+			// floor by design
+			id.x = globalInvocationID_.x / wgs.x;
+			id.y = globalInvocationID_.y / wgs.y;
+			id.z = globalInvocationID_.z / wgs.z;
+			loadVecU(id);
+			break;
+		}
+		case spv::BuiltInGlobalInvocationId: {
+			loadVecU(globalInvocationID_);
+			break;
+		}
 		case spv::BuiltInLocalInvocationId: {
-			Vec3ui id {0u, 0u, 0u}; // TODO
+			Vec3ui id {0u, 0u, 0u};
+			id.x = globalInvocationID_.x % wgs.x;
+			id.y = globalInvocationID_.y % wgs.y;
+			id.z = globalInvocationID_.z % wgs.z;
 			loadVecU(id);
 			break;
 		}
 		case spv::BuiltInLocalInvocationIndex: {
-			auto id = 0u; // TODO
+			Vec3ui lid {0u, 0u, 0u};
+			lid.x = globalInvocationID_.x % wgs.x;
+			lid.y = globalInvocationID_.y % wgs.y;
+			lid.z = globalInvocationID_.z % wgs.z;
+			auto id =
+				lid.z * wgs.y * wgs.x +
+				lid.y * wgs.x +
+				lid.x;
 			loadScalarU(id);
 			break;
 		} default:
@@ -437,6 +515,7 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 	auto setID = compiled_->get_decoration(res->id, spv::DecorationDescriptorSet);
 	auto bindingID = compiled_->get_decoration(res->id, spv::DecorationBinding);
 
+	// TODO: hacky
 	auto* baseCmd = gui_->cbGui().commandViewer().command();
 	auto* cmd = static_cast<const StateCmdBase*>(baseCmd);
 
@@ -457,6 +536,7 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 		return 0;
 	}
 
+	// TODO: hacky
 	auto hookState = gui_->cbGui().commandViewer().state();
 	dlg_assert(hookState);
 	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
@@ -912,6 +992,17 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	addCopies(resources.storage_buffers, false);
 	addCopies(resources.uniform_buffers, false);
 	addCopies(resources.subpass_inputs, true);
+
+	// for indirect dispatch, need to know the number of workgrups
+	// since the shader might read that var
+	// TODO: only do it if the shader accesses the variable?
+	auto* baseCmd = gui_->cbGui().commandViewer().command();
+	if(dynamic_cast<const DispatchIndirectCmd*>(baseCmd) ||
+			dynamic_cast<const DrawIndirectCmd*>(baseCmd) ||
+			dynamic_cast<const DrawIndirectCountCmd*>(baseCmd) ||
+			dynamic_cast<const TraceRaysIndirectCmd*>(baseCmd)) {
+		hook.copyIndirectCmd = true;
+	}
 }
 
 void ShaderDebugger::setupScalar(const Type& type, ReadBuf data, spvm_member& dst) {

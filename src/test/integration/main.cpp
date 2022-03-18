@@ -301,6 +301,16 @@ int main() {
 	VkInstance ini;
 	VK_CHECK(vkCreateInstance(&ici, nullptr, &ini));
 
+	// create debug messenger
+	auto fpCreateDebugUtilsMessengerEXT =
+		(PFN_vkCreateDebugUtilsMessengerEXT)
+		vkGetInstanceProcAddr(ini, "vkCreateDebugUtilsMessengerEXT");
+	auto fpDestroyDebugUtilsMessengerEXT =
+		(PFN_vkDestroyDebugUtilsMessengerEXT)
+		vkGetInstanceProcAddr(ini, "vkDestroyDebugUtilsMessengerEXT");
+	VkDebugUtilsMessengerEXT debugMessenger;
+	fpCreateDebugUtilsMessengerEXT(ini, &dumci, nullptr, &debugMessenger);
+
 	gSetup.ini = ini;
 	layer_init_instance_dispatch_table(gSetup.ini, &gSetup.iniDispatch,
 		&vkGetInstanceProcAddr);
@@ -419,6 +429,7 @@ int main() {
 
 	// teardown
 	vkDestroyDevice(dev, nullptr);
+	fpDestroyDebugUtilsMessengerEXT(ini, debugMessenger, nullptr);
 
 #ifndef _WIN32
 	// destroying the instance leads to a crash *after* main on windows (msvc).

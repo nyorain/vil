@@ -112,6 +112,15 @@ private:
 		VkImageView view {};
 		VkDescriptorSet ds {};
 		std::atomic<u32> refCount {};
+
+		// layout:
+		// - uvec4 texMin (written by minmax.comp)
+		// - uvec4 texMax
+		// - uint flags
+		// - float begin (writetn by histogramPrepare.comp)
+		// - float end
+		// - uint maxHist (written by histogramMax.comp)
+		// - uvec4 hist[numBins] (written by histogram.comp)
 		OwnBuffer histogram;
 
 		~DrawData();

@@ -49,11 +49,17 @@
 #include <histogram.comp.u3D.spv.h>
 #include <histogram.comp.i3D.spv.h>
 
+#include <histogramMax.comp.spv.h>
+#include <histogramPrepare.comp.spv.h>
+#include <histogram.vert.spv.h>
+#include <histogram.frag.spv.h>
+
 namespace vil {
 
 void initPipes(Device& dev,
 		VkRenderPass rp, VkPipelineLayout renderPipeLayout,
 		VkPipelineLayout compPipeLayout,
+		VkPipelineLayout histogramPipeLayout,
 		Gui::Pipelines& dstPipes) {
 	VkShaderModule vertModule;
 	VkShaderModuleCreateInfo vertShaderInfo {};
@@ -252,8 +258,36 @@ void initPipes(Device& dev,
 	imgBgGpi.pInputAssemblyState = &imgBgAssembly;
 	gpis.push_back(imgBgGpi);
 
+	// histogram pipe
+	auto histVertMod = createShaderMod(histogram_vert_spv_data);
+	auto histFragMod = createShaderMod(histogram_frag_spv_data);
+
+	std::array<VkPipelineShaderStageCreateInfo, 2> histStages {};
+	histStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	histStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	histStages[0].module = histVertMod;
+	histStages[0].pName = "main";
+
+	histStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	histStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	histStages[1].module = histFragMod;
+	histStages[1].pName = "main";
+
+	auto histGpi = imgBgGpi;
+	// already done for imgBgGpi
+	// auto histVertInfo = *histGpi.pVertexInputState;
+	// auto histAssembly = *histGpi.pInputAssemblyState;
+	// histVertInfo.vertexAttributeDescriptionCount = 0u;
+	// histVertInfo.vertexBindingDescriptionCount = 0u;
+	// histGpi.pVertexInputState = &histVertInfo;
+	// histAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
+	// histGpi.pInputAssemblyState = &histAssembly;
+	histGpi.pStages = histStages.data();
+	histGpi.layout = histogramPipeLayout;
+	gpis.push_back(histGpi);
+
 	// init pipes
-	VkPipeline pipes[11];
+	VkPipeline pipes[12];
 	dlg_assert(gpis.size() == sizeof(pipes) / sizeof(pipes[0]));
 
 	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
@@ -271,10 +305,13 @@ void initPipes(Device& dev,
 	dstPipes.imageBg = pipes[10];
 	nameHandle(dev, dstPipes.imageBg, "Gui:pipeImageBg");
 
+	dstPipes.histogramRender = pipes[11];
+	nameHandle(dev, dstPipes.histogramRender, "Gui:histogramRender");
+
 	// init compute pipelines
 	std::vector<VkComputePipelineCreateInfo> cpis {};
 
-	auto addCpi = [&](span<const u32> spv) {
+	auto addCpi = [&](VkPipelineLayout layout, span<const u32> spv) {
 		VkShaderModuleCreateInfo shaderInfo {};
 		shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		shaderInfo.codeSize = spv.size() * 4;
@@ -289,7 +326,7 @@ void initPipes(Device& dev,
 		}
 
 		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		cpi.layout = compPipeLayout;
+		cpi.layout = layout;
 		cpi.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		cpi.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		cpi.stage.module = mod;
@@ -299,12 +336,13 @@ void initPipes(Device& dev,
 	// readTex
 	struct PipeCreation {
 		std::array<VkPipeline, ShaderImageType::count>& dst;
+		VkPipelineLayout layout;
 		std::array<span<const u32>, ShaderImageType::count> spvs;
 	};
 
 	auto creations = std::array {
 		PipeCreation {
-			dstPipes.readTex, {
+			dstPipes.readTex, compPipeLayout, {
 				readTex_comp_u1DArray_spv_data,
 				readTex_comp_u2DArray_spv_data,
 				readTex_comp_u3D_spv_data,
@@ -317,7 +355,7 @@ void initPipes(Device& dev,
 			}
 		},
 		PipeCreation {
-			dstPipes.histogramTex, {
+			dstPipes.histogramTex, compPipeLayout, {
 				histogram_comp_u1DArray_spv_data,
 				histogram_comp_u2DArray_spv_data,
 				histogram_comp_u3D_spv_data,
@@ -330,7 +368,7 @@ void initPipes(Device& dev,
 			}
 		},
 		PipeCreation {
-			dstPipes.minMaxTex, {
+			dstPipes.minMaxTex, compPipeLayout, {
 				minmax_comp_u1DArray_spv_data,
 				minmax_comp_u2DArray_spv_data,
 				minmax_comp_u3D_spv_data,
@@ -346,11 +384,24 @@ void initPipes(Device& dev,
 
 	for(auto& creation : creations) {
 		for(auto& spv : creation.spvs) {
-			addCpi(spv);
+			addCpi(creation.layout, spv);
 		}
 
 		VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
 			u32(cpis.size()), cpis.data(), nullptr, creation.dst.data()));
+		cpis.clear();
+	}
+
+	// histogram pipes
+	{
+		addCpi(histogramPipeLayout, histogramPrepare_comp_spv_data);
+		addCpi(histogramPipeLayout, histogramMax_comp_spv_data);
+		VkPipeline pipes[2];
+
+		VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
+			u32(cpis.size()), cpis.data(), nullptr, pipes));
+		dstPipes.histogramPrepare = pipes[0];
+		dstPipes.histogramMax = pipes[1];
 		cpis.clear();
 	}
 

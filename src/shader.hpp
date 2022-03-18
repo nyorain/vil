@@ -66,14 +66,10 @@ struct XfbPatchRes {
 struct SpirvData {
 	std::atomic<u32> refCount {};
 
-	// for access to 'compiled'. Locking other mutexes while holding
-	// this one can lead to a deadlock.
-	mutable DebugMutex mutex;
-	// NOTE: don't access directly, see 'accessReflection' below.
-	// Need to use proper specialization constants and therefore
-	// make sure to lock access. We don't want to store the reflection
-	// per used pipeline but just once so we have to set the corresponding
-	// specialization constants every time we want to look something up.
+	// NOTE: in most cases, don't access directly, see 'accessReflection' below.
+	// Need to use proper specialization constants.
+	// Only to be used while the device mutex is locked, otherwise we can't
+	// sync access.
 	std::unique_ptr<spc::Compiler> compiled;
 
 	struct SpecializationConstantDefault {
@@ -86,21 +82,9 @@ struct SpirvData {
 	~SpirvData();
 };
 
-XfbPatchRes patchSpirvXfb(span<const u32> spirv, const char* entryPoint,
-	spc::Compiler&);
-XfbPatchData patchShaderXfb(Device&, span<const u32> spirv,
-	const char* entryPoint, spc::Compiler& compiled,
-	std::string_view modName);
-
-// RAII wrapper around an access to a spc::Compiler object.
-// All accesses are exclusive since we always need to set specialization
-// constants before reading anything.
-struct ShaderReflectionAccess {
-	SpirvData* data;
-	std::unique_lock<DebugMutex> lock;
-
-	spc::Compiler& get() { return *data->compiled; }
-};
+XfbPatchRes patchSpirvXfb(spc::Compiler&, const char* entryPoint);
+XfbPatchData patchShaderXfb(Device&, spc::Compiler& compiled,
+	const char* entryPoint, std::string_view modName);
 
 // Returns a name for the given set, binding in the given module.
 struct BindingNameRes {
@@ -125,31 +109,29 @@ std::optional<spc::BuiltInResource> builtinResource(const spc::Compiler&, u32 va
 struct ShaderModule : DeviceHandle {
 	VkShaderModule handle {};
 
-	// TODO: should keep this alive (longer than the ShaderModule lifetime)
-	// so it's inspectable in the gui later on. But this would eat up *a lot*
-	// of memory, games can have many thousand shader modules.
-	// Maybe we could dump them to disk and read them when needed. Should also
-	// just generate the Reflection on-demand then since that eats up quite
-	// some data as well.
-	// TODO: we probably don't need this, just use code->compiler->get_ir().code
-	std::vector<u32> spv;
-
 	// Owend by us.
 	// When the shader module is a vertex shader, we lazily create
 	// transform-feedback version(s) of it. We might need multiple
 	// versions in case the module has multiple entry points.
 	std::vector<XfbPatchData> xfb;
 
-	// Managed via shared ptr since it may outlive the shader module in
+	// Managed via intrusive ptr since it may outlive the shader module in
 	// (possibly multiple) pipeline objects.
 	IntrusivePtr<SpirvData> code;
 
 	~ShaderModule();
 };
 
+// Will set the given specialization, entryPoint and execution model into
+// '*mod.compiled'.
 // Might still need to call spc::Compiler::update_active_builtins() after this,
-// if builtins are accessed.
-ShaderReflectionAccess accessReflection(SpirvData& mod,
+// if active builtins are accessed.
+// Must only be called while the device mutex is locked for synchronization
+// of mod.compiled.
+spc::Compiler& specializeSpirv(SpirvData& mod,
+		const ShaderSpecialization& specialization, const std::string& entryPoint,
+		u32 spvExecutionModel);
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(SpirvData& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel);
 

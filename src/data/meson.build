@@ -41,6 +41,11 @@ if glslang.found()
 		'minmax.comp': imgtable,
 		# copyTex to sample-copy an image to a vec4[] buffer
 		'copyTex.comp': imgtable,
+		# histogram process/render
+		'histogramMax.comp': {'': [] },
+		'histogramPrepare.comp': {'': [] },
+		'histogram.vert': {'': [] },
+		'histogram.frag': {'': [] },
 	}
 
 	glslang_version_info = run_command(glslang, '--version', check: true).stdout()

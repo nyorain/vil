@@ -419,7 +419,7 @@ void ImageViewer::drawBackground(VkCommandBuffer cb) {
 	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		gui_->imageBgPipe());
 	dev.dispatch.CmdPushConstants(cb, gui_->pipeLayout(),
-		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
 		0, sizeof(pcData), &pcData);
 	dev.dispatch.CmdDraw(cb, 4, 1, 0, 0);
 }

@@ -1,0 +1,67 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
+
+layout(push_constant) uniform PCR {
+	bool useFixed;
+	float begin;
+	float end;
+	uint channelMask;
+} pcr;
+
+layout(set = 0, binding = 0) buffer Hist {
+	uvec4 texMin;
+	uvec4 texMax;
+	uint _flags;
+	float outBegin;
+	float outEnd;
+} histData;
+
+float uintOrderedToFloat(uint val) {
+	if((val & (1u << 31)) == 0) {
+		// original float must have been negative
+		return uintBitsToFloat(val ^ 0xFFFFFFFFu);
+	} else {
+		// original float must have been positive
+		return uintBitsToFloat(val ^ 0x80000000u);
+	}
+}
+
+void main() {
+	if(pcr.useFixed) {
+		histData.outBegin = pcr.begin;
+		histData.outEnd = pcr.end;
+	} else {
+		float begin = 0;
+		float end = 1;
+		uint beginCount = 0;
+		uint endCount = 0;
+
+		for(uint i = 0u; i < 4; ++i) {
+			if((pcr.channelMask & (1 << i)) == 0) {
+				continue;
+			}
+
+			// NOTE: we know that texMin/texMax does not contains nan or inf
+			float minval = uintOrderedToFloat(histData.texMin[i]);
+			if(beginCount == 0) {
+				begin = minval;
+			} else {
+				begin = min(begin, minval);
+			}
+			++beginCount;
+
+			float maxval = uintOrderedToFloat(histData.texMax[i]);
+			if(endCount == 0) {
+				end = maxval;
+			} else {
+				end = min(end, maxval);
+			}
+			++endCount;
+		}
+
+		histData.outBegin = begin;
+		histData.outEnd = end;
+	}
+}
+

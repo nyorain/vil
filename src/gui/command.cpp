@@ -269,8 +269,9 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 					continue;
 				}
 
-				auto refl = accessReflection(stage);
-				if(!refl.get().get_shader_resources().push_constant_buffers.empty()) {
+				// don't need to respect specialization constants.
+				auto& mod = *stage.spirv->compiled;
+				if(!mod.get_shader_resources().push_constant_buffers.empty()) {
 					selectCommandView = false;
 				}
 
@@ -500,8 +501,9 @@ void CommandViewer::displayDsList() {
 					std::optional<u32> firstValid;
 					for(auto i = 0u; i < sstages.size(); ++i) {
 						auto& stage = sstages[i];
-						auto refl = accessReflection(stage);
-						auto name = bindingName(refl.get(), setID, bID);
+						// don't need to respect specialization constants.
+						auto& mod = *stage.spirv->compiled;
+						auto name = bindingName(mod, setID, bID);
 						if(name.type == BindingNameRes::Type::valid) {
 							stageNames[i] = std::move(name.name);
 							firstValid = firstValid.value_or(i);
@@ -709,8 +711,8 @@ void CommandViewer::displayIOList() {
 
 		auto sstages = stages(*stateCmd->boundPipe());
 		for(auto& stage : sstages) {
-			auto refl = accessReflection(stage);
-			auto& compiled = refl.get();
+			// specialization constants not relevant here
+			auto& compiled = *stage.spirv->compiled;
 			if(compiled.get_shader_resources().push_constant_buffers.empty()) {
 				continue;
 			}
@@ -859,8 +861,7 @@ void CommandViewer::displayDs(Draw& draw) {
 
 		auto* stage = displayDescriptorStageSelector(pipe, setID, bindingID, dsType);
 		if(stage) {
-			auto refl = accessReflection(*stage);
-			auto& compiled = refl.get();
+			auto& compiled = specializeSpirv(*stage);
 			// TODO: reuse found resource from displayDescriptorStageSelector
 			auto res = nonNull(resource(compiled, setID, bindingID, dsType));
 			auto name = compiled.get_name(res.id);
@@ -947,8 +948,7 @@ void CommandViewer::displayDs(Draw& draw) {
 
 		auto* stage = displayDescriptorStageSelector(pipe, setID, bindingID, dsType);
 		if(stage) {
-			auto refl = accessReflection(*stage);
-			auto& compiled = refl.get();
+			auto& compiled = specializeSpirv(*stage);
 			// TODO: reuse found resource from displayDescriptorStageSelector
 			auto res = nonNull(resource(compiled, setID, bindingID, dsType));
 			auto name = compiled.get_name(res.id);
@@ -1040,8 +1040,7 @@ void CommandViewer::displayPushConstants() {
 		}
 
 		found = true;
-		auto refl = accessReflection(stage);
-		auto& compiled = refl.get();
+		auto& compiled = specializeSpirv(stage);
 		auto resources = compiled.get_shader_resources();
 		if(resources.push_constant_buffers.empty()) {
 			ImGui::Text("Error: No push constants in stage");
@@ -1388,9 +1387,8 @@ void CommandViewer::displayCommand() {
 	if(auto* dcmd = dynamic_cast<const DispatchCmdBase*>(command_); dcmd) {
 		if(ImGui::Button("Debug shader")) {
 			if(dcmd->state.pipe) {
-				// TODO: set specialization constants
-				auto& spirv = nonNull(dcmd->state.pipe->stage.spirv);
-				shaderDebugger_.select(nonNull(spirv.compiled));
+				auto mod = copySpecializeSpirv(dcmd->state.pipe->stage);
+				shaderDebugger_.select(std::move(mod));
 				view_ = IOView::shader;
 				updateHook();
 				return;
@@ -1572,8 +1570,8 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 
 	for(auto i = 0u; i < sstages.size(); ++i) {
 		auto& stage = sstages[i];
-		auto refl = accessReflection(stage);
-		auto res = resource(refl.get(), setID, bindingID, dsType);
+		// Don't need to respect specialization constants here
+		auto res = resource(*stage.spirv->compiled, setID, bindingID, dsType);
 		if(res) {
 			refStages[stageCount] = i;
 			++stageCount;

@@ -44,6 +44,7 @@ namespace vil {
 void initPipes(Device& dev,
 	VkRenderPass rp, VkPipelineLayout renderPipeLayout,
 	VkPipelineLayout compPipeLayout,
+	VkPipelineLayout histogramPipeLayout,
 	Gui::Pipelines& dstPipes);
 
 // Gui
@@ -94,13 +95,30 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	dslci.bindingCount = 2u;
 	dslci.pBindings = imgOpBindings;
 	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &imgOpDsLayout_));
-	nameHandle(dev, dsLayout_, "Gui:imgOpDsLayout");
+	nameHandle(dev, imgOpDsLayout_, "Gui:imgOpDsLayout");
+
+	// histogram ds layout
+	VkDescriptorSetLayoutBinding histBindings[2] {};
+	histBindings[0].binding = 0u;
+	histBindings[0].descriptorCount = 1u;
+	histBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	histBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+
+	histBindings[1].binding = 1u;
+	histBindings[1].descriptorCount = 1u;
+	histBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	histBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
+
+	dslci.bindingCount = 2u;
+	dslci.pBindings = histBindings;
+	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &histogramDsLayout_));
+	nameHandle(dev, histogramDsLayout_, "Gui:histogramDsLayout");
 
 	// pipeline layout
 	// We just allocate the full push constant range that all implementations
 	// must support.
 	VkPushConstantRange pcrs[1] = {};
-	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 	pcrs[0].offset = 0;
 	// PERF: perf most pipelines don't need this much. Could create multiple
 	// pipe layouts.
@@ -115,12 +133,16 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &pipeLayout_));
 	nameHandle(dev, pipeLayout_, "Gui:pipeLayout");
 
+	// histogram ops pipe layout
+	plci.pSetLayouts = &histogramDsLayout_;
+	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &histogramPipeLayout_));
+	nameHandle(dev, histogramPipeLayout_, "Gui:histogramPipeLayout");
+
 	// Init image compute pipeline layout
 	pcrs[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
 	plci.pSetLayouts = &imgOpDsLayout_;
 	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &imgOpPipeLayout_));
-	nameHandle(dev, pipeLayout_, "Gui:imgOpPipeLayout");
+	nameHandle(dev, imgOpPipeLayout_, "Gui:imgOpPipeLayout");
 
 	// render pass
 	VkAttachmentDescription atts[2] {};
@@ -173,7 +195,7 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp_));
 	nameHandle(dev, rp_, "Gui:rp");
 
-	initPipes(dev, rp_, pipeLayout_, imgOpPipeLayout_, pipes_);
+	initPipes(dev, rp_, pipeLayout_, imgOpPipeLayout_, histogramPipeLayout_, pipes_);
 	initImGui();
 
 	// init blur
@@ -371,6 +393,8 @@ Gui::~Gui() {
 	dev_->dispatch.DestroyPipelineLayout(vkDev, pipeLayout_, nullptr);
 	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, imgOpDsLayout_, nullptr);
 	dev_->dispatch.DestroyPipelineLayout(vkDev, imgOpPipeLayout_, nullptr);
+	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, histogramDsLayout_, nullptr);
+	dev_->dispatch.DestroyPipelineLayout(vkDev, histogramPipeLayout_, nullptr);
 
 	dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
 	dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
@@ -380,9 +404,14 @@ Gui::~Gui() {
 
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramPrepare, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramMax, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramRender, nullptr);
 	for(auto i = 0u; i < ShaderImageType::count; ++i) {
 		dev_->dispatch.DestroyPipeline(vkDev, pipes_.image[i], nullptr);
 		dev_->dispatch.DestroyPipeline(vkDev, pipes_.readTex[i], nullptr);
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.minMaxTex[i], nullptr);
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramTex[i], nullptr);
 	}
 
 	dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
@@ -611,8 +640,10 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 		// translate
 		pcr[2] = -1.0f - drawData.DisplayPos.x * pcr[0];
 		pcr[3] = -1.0f - drawData.DisplayPos.y * pcr[1];
-		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
-			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
+			VK_SHADER_STAGE_FRAGMENT_BIT |
+			VK_SHADER_STAGE_COMPUTE_BIT;
+		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_, pcrStages,
 			0, sizeof(pcr), pcr);
 
 		auto idxOff = 0u;
@@ -628,12 +659,12 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 
 					// reset state we need
 					dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
-						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
+						pcrStages, 0, sizeof(pcr), pcr);
 					dev.dispatch.CmdSetViewport(draw.cb, 0, 1, &viewport);
 					dev.dispatch.CmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
 					dev.dispatch.CmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
 					dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
-						VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
+						pcrStages, 0, sizeof(pcr), pcr);
 				} else {
 					VkDescriptorSet ds = dsFont_;
 					VkPipeline pipe = pipes_.gui;
@@ -659,7 +690,7 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 						};
 
 						dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
-							VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 16,
+							pcrStages, 16,
 							sizeof(pcr), &pcr);
 					}
 
@@ -1376,8 +1407,11 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			pcr[3] = 0.f;
 
 			dev().dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipes_.gui);
+			auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
+				VK_SHADER_STAGE_FRAGMENT_BIT |
+				VK_SHADER_STAGE_COMPUTE_BIT;
 			dev().dispatch.CmdPushConstants(draw.cb, pipeLayout_,
-				VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pcr), pcr);
+				pcrStages, 0, sizeof(pcr), pcr);
 			dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 				pipeLayout_, 0u, 1u, &blurDs_, 0, nullptr);
 			VkDeviceSize off = 0u;

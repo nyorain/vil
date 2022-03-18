@@ -39,8 +39,12 @@ public:
 		std::array<VkPipeline, ShaderImageType::count> image {};
 
 		std::array<VkPipeline, ShaderImageType::count> readTex {};
-		std::array<VkPipeline, ShaderImageType::count> histogramTex{};
 		std::array<VkPipeline, ShaderImageType::count> minMaxTex {};
+		std::array<VkPipeline, ShaderImageType::count> histogramTex {};
+
+		VkPipeline histogramPrepare {};
+		VkPipeline histogramMax {};
+		VkPipeline histogramRender {};
 	};
 
 	bool visible {false};
@@ -139,11 +143,21 @@ private:
 	} tabs_;
 
 	// rendering stuff
+	// TODO: some of this is very specific or not only gui-related (e.g.
+	//   used by CommandHook). Should find a better place for it.
+	//   Just putting it in Device seems bad as well, we don't want
+	//   to create all of these pipes if no gui is created.
+	//   And some stuff might have gui-specific details.
+	//   Maybe split it up, have some pipes here and some in Device?
+	//   But then factor out some utilities for easy pipeline creation.
 	VkDescriptorSetLayout dsLayout_ {};
 	VkPipelineLayout pipeLayout_ {};
 
 	VkDescriptorSetLayout imgOpDsLayout_ {};
 	VkPipelineLayout imgOpPipeLayout_ {};
+
+	VkDescriptorSetLayout histogramDsLayout_ {};
+	VkPipelineLayout histogramPipeLayout_ {};
 
 	VkRenderPass rp_ {};
 	VkCommandPool commandPool_ {};

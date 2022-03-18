@@ -1,0 +1,26 @@
+#version 460
+
+layout(set = 0, binding = 0) buffer HistData {
+	uint maxHist;
+} outHistData;
+
+layout(set = 0, binding = 1) readonly buffer Hist {
+	uvec4 data[];
+} hist;
+
+void main() {
+	// TODO: if we use a lot of bins, use some parallel scan instead.
+	//   We would need some local accumulation for this to make sense tho.
+	// uint id = gl_GlobalInvocationID.x;
+	// uint localMax = max(channels[0].hist[id], max(channels[1].hist[id], channels[2].hist[id]));
+	// atomicMax(outHistData.maxHist, localMax);
+
+	uint accum = 0u;
+	for(uint i = 0u; i < hist.data.length(); ++i) {
+		// TODO: alpha
+		uint maxi = max(hist.data[i][0], max(hist.data[i][1], hist.data[i][2]));
+		accum = max(accum, maxi);
+	}
+
+	outHistData.maxHist = accum;
+}

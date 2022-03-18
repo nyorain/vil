@@ -16,12 +16,13 @@ struct Type;
 
 class ShaderDebugger {
 public:
+	ShaderDebugger();
 	~ShaderDebugger();
 	void init(Gui& gui);
 
-	// TODO: figure out ownership of spc::Compiler. Kinda difficult due
-	// to setting of spec constants. Just copy it?
-	void select(const spc::Compiler& compiled);
+	// Select takes its own copy of a spc::Compiler mainly
+	// because of the specialization constant problematic
+	void select(std::unique_ptr<spc::Compiler> compiled);
 	void unselect();
 	void draw();
 
@@ -84,6 +85,10 @@ private:
 	// toggles breakpoint on current line
 	void toggleBreakpoint();
 
+	// compute stuff
+	Vec3ui workgroupSize() const;
+	Vec3ui numWorkgroups() const;
+
 private:
 	struct OurImage : spvm_image {
 		ReadBuf data;
@@ -108,7 +113,7 @@ private:
 
 	Gui* gui_ {};
 	igt::TextEditor textedit_;
-	const spc::Compiler* compiled_ {};
+	std::unique_ptr<spc::Compiler> compiled_ {};
 
 	spvm_context_t context_ {};
 	spvm_program_t program_ {};
@@ -119,6 +124,9 @@ private:
 
 	// TODO
 	bool f9Down_ {};
+
+	// TODO
+	Vec3ui globalInvocationID_ {0u, 0u, 0u};
 };
 
 } // namespace vil

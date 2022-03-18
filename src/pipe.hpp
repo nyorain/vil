@@ -41,8 +41,8 @@ struct PipelineShaderStage {
 	explicit PipelineShaderStage(Device& dev, const VkPipelineShaderStageCreateInfo&);
 };
 
-// see shader.hpp
-ShaderReflectionAccess accessReflection(const PipelineShaderStage&);
+spc::Compiler& specializeSpirv(const PipelineShaderStage&);
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(const PipelineShaderStage&);
 
 struct Pipeline : DeviceHandle {
 	VkPipeline handle {};

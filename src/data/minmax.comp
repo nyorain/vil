@@ -11,7 +11,11 @@ layout(push_constant) uniform PCR {
 layout(set = 0, binding = 0) buffer Dst {
 	uvec4 outMin;
 	uvec4 outMax;
+	uint outFlags;
 };
+
+const uint flagHasNan = 1u;
+const uint flagHasInf = 2u;
 
 #define SAMPLE_TEX_BINDING 1
 #include "sample.glsl"
@@ -41,6 +45,17 @@ void main() {
 	// so we only do atomic instructions once per subgroup
 
 	for(uint i = 0u; i < 4; ++i) {
+		// disregard inf and nan
+		if(isinf(col[i])) {
+			atomicOr(outFlags, flagHasInf);
+			continue;
+		}
+
+		if(isnan(col[i])) {
+			atomicOr(outFlags, flagHasNan);
+			continue;
+		}
+
 		// atomic instructions are only allowed on uints in core vulkan/glsl.
 		// it's possible to transform floats into a uints while keeping
 		// them ordered.

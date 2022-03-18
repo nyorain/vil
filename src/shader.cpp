@@ -9,7 +9,7 @@
 #include <optional>
 
 // NOTE: useful for debugging of patching issues, not enabled by default.
-// #ifdef VIL_OUTPUT_PATCHED_SPIRV
+// #define VIL_OUTPUT_PATCHED_SPIRV
 
 namespace vil {
 
@@ -214,8 +214,9 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 	}
 }
 
-XfbPatchRes patchSpirvXfb(span<const u32> spirv, const char* entryPoint,
-		spc::Compiler& compiled) {
+XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
+	auto spirv = span<const u32>(compiled.get_ir().spirv);
+
 	// parse spirv
 	if(spirv.size() < 5) {
 		dlg_error("spirv to small");
@@ -231,9 +232,6 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv, const char* entryPoint,
 	patched.reserve(spirv.size());
 	patched.resize(5);
 	std::copy(spirv.begin(), spirv.begin() + 5, patched.begin());
-
-	// yeah, our hashing is terrible. But we only use it for debug output
-	u32 hash = 0u;
 
 	auto addedCap = false;
 	auto addedExecutionMode = false;
@@ -269,7 +267,6 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv, const char* entryPoint,
 
 		for(auto i = 0u; i < wordCount; ++i) {
 			patched.push_back(spirv[offset + i]);
-			hash ^= spirv[offset + i];
 		}
 
 		// We need to add the TransformFeedback capability
@@ -427,12 +424,11 @@ XfbPatchRes patchSpirvXfb(span<const u32> spirv, const char* entryPoint,
 	return {patched, std::move(desc)};
 }
 
-XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
-		const char* entryPoint, spc::Compiler& compiled,
-		std::string_view modName) {
+XfbPatchData patchShaderXfb(Device& dev, spc::Compiler& compiled,
+		const char* entryPoint, std::string_view modName) {
 	ZoneScoped;
 
-	auto patched = patchSpirvXfb(spirv, entryPoint, compiled);
+	auto patched = patchSpirvXfb(compiled, entryPoint);
 	if(!patched.desc) {
 		return {};
 	}
@@ -448,7 +444,7 @@ XfbPatchData patchShaderXfb(Device& dev, span<const u32> spirv,
 	output += ".";
 
 	auto badHash = u32(0u);
-	for(auto v : patched.spirv) badHash += v;
+	for(auto v : patched.spirv) badHash ^= v;
 
 	output += std::to_string(badHash);
 	output += ".spv";
@@ -524,8 +520,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	mod.handle = *pShaderModule;
 
 	dlg_assert(pCreateInfo->codeSize % 4 == 0);
-	mod.spv = {pCreateInfo->pCode, pCreateInfo->pCode + pCreateInfo->codeSize / 4};
-
 	mod.code = IntrusivePtr<SpirvData>(new SpirvData());
 
 	// TODO: catch errors here
@@ -674,16 +668,9 @@ BindingNameRes bindingName(const spc::Compiler& compiler, u32 setID, u32 binding
 	return {BindingNameRes::Type::valid, std::move(res.name)};
 }
 
-ShaderReflectionAccess accessReflection(SpirvData& mod,
+void specializeSpirv(spc::Compiler& compiled,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
-		u32 spvExecutionModel) {
-	dlg_assert(mod.compiled);
-
-	ShaderReflectionAccess access;
-	access.lock = std::unique_lock<DebugMutex>(mod.mutex);
-	access.data = &mod;
-
-	auto& compiled = *mod.compiled;
+		u32 spvExecutionModel, span<const SpirvData::SpecializationConstantDefault> constantDefaults) {
 	compiled.set_entry_point(entryPoint, spv::ExecutionModel(spvExecutionModel));
 
 	auto specConstants = compiled.get_specialization_constants();
@@ -710,7 +697,7 @@ ShaderReflectionAccess accessReflection(SpirvData& mod,
 		// if specialization wasn't found, reset it to the default value.
 		// needed in case a previous access specialized it.
 		if(!found) {
-			for(auto& constant : mod.constantDefaults) {
+			for(auto& constant : constantDefaults) {
 				if(constant.constantID != sc.constant_id) {
 					continue;
 				}
@@ -723,8 +710,26 @@ ShaderReflectionAccess accessReflection(SpirvData& mod,
 			dlg_assert(found);
 		}
 	}
+}
 
-	return access;
+spc::Compiler& specializeSpirv(SpirvData& mod,
+		const ShaderSpecialization& specialization, const std::string& entryPoint,
+		u32 spvExecutionModel) {
+	dlg_assert(mod.compiled);
+	auto& compiled = *mod.compiled;
+	specializeSpirv(compiled, specialization, entryPoint, spvExecutionModel,
+		mod.constantDefaults);
+	return compiled;
+}
+
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(SpirvData& mod,
+		const ShaderSpecialization& specialization, const std::string& entryPoint,
+		u32 spvExecutionModel) {
+	dlg_assert(mod.compiled);
+	auto compiled = std::make_unique<spc::Compiler>(mod.compiled->get_ir());
+	specializeSpirv(*compiled, specialization, entryPoint, spvExecutionModel,
+		mod.constantDefaults);
+	return compiled;
 }
 
 } // namespace vil

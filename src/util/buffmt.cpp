@@ -279,7 +279,7 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 					ImGui::BeginTooltip();
 					if(!fs.error.empty()) {
 						imGuiText("Error: {}", fs.error);
-					} else {
+					} else if(type.type == Type::typeFloat) {
 						auto fs = formatScalar(type, data, off, 10);
 						imGuiText("Exact: {}", fs.scalar);
 					}

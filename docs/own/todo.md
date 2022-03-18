@@ -8,7 +8,6 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] fix msvc unit test issue (see CI, only in debug)
 - [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
       resource destruction, can happen in any thread. Caused a crash with doom.
 - [ ] figure out transform_feedback crashes in doom eternal
@@ -40,6 +39,11 @@ urgent, bugs:
 	  Maybe use tabs? One for general information, one for the image viewer?
 
 new, workstack:
+- [ ] should get rid of 'nonNull', it's poor design
+- [ ] there should probably just be one ImageViewer object; owned by Gui directly.
+      it's then used wherever an image is shown.
+	  Then, the ImageViewer could create and own its pipes, simplifying
+	  all that gui setup.
 - [ ] update pegtl
 - [ ] improve timing queries
 	- [ ] allow timing for whole command buffers (begin to end)
@@ -85,10 +89,13 @@ shader debugger:
 	      breakpoints for lines that don't have code associated with them
 		  in spirv won't trigger. Need to do a more proper check
 	- [ ] clean up breakpoint handling
+- [ ] detect unsupported features/capabilities (such as subgroup ops)
+      and display "unsupported feature: X" error message in gui
 - [ ] test, fix, cleanup handling of multiple files. Broken
       with breakpoints and their visualization.
 - [ ] add UI for selecting workgroup/invocation
-- [ ] return workgroup size from shader in loadBuiltin
+- [x] return workgroup size from shader in loadBuiltin
+	- [ ] TODO: test
 - [x] add support for loading push constants
 	- [ ] TODO: test. Can we write unit tests for this? Should be possible
 - [ ] support vertex shaders

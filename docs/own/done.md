@@ -1,3 +1,4 @@
+- [x] fix msvc unit test issue (see CI, only in debug)
 - [x] maybe don't add to refRecords of used descriptorSets? We don't
       reference them directly in a record anyways. We still want them
 	  in CommandRecord::handles though, not sure how this works. Maybe

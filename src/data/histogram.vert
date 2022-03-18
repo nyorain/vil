@@ -3,32 +3,28 @@
 layout(location = 0) out vec4 outChannels;
 layout(location = 1) out float outHeight;
 
-layout(push_constant) uniform PCR {
-	uvec2 
-} pcr;
-
 layout(set = 0, binding = 0) buffer HistData {
 	uint maxHist;
 } histData;
 
-layout(set = 0, binding = 1) buffer Hist {
-	uint hist[];
-} channels[4];
+layout(set = 0, binding = 1) readonly buffer Hist {
+	uvec4 data[];
+} hist;
 
 void main() {
-	uvec4 hist;	
+	vec4 lhist;	
 	for(uint i = 0u; i < 4; ++i) {
-		hist[i] = channels[i].hist[gl_InstanceIndex] / float(histData.maxHist);
+		lhist[i] = hist.data[gl_InstanceIndex][i] / float(histData.maxHist);
 	}
 
-	outChannels = hist;
+	outChannels = lhist;
 
-	float m = max(hist.x, max(hist.y, max(hist.z, hist.w)));
+	float m = max(lhist.x, max(lhist.y, max(lhist.z, lhist.w)));
 	vec2 start = vec2(
-		gl_InstanceIndex / float(channels[0].hist.length()),
+		gl_InstanceIndex / float(hist.data.length()),
 		1.f - m);
 	vec2 end = vec2(
-		(gl_InstanceIndex + 1) / float(channels[0].hist.length()),
+		(gl_InstanceIndex + 1) / float(hist.data.length()),
 		1.f);
 
 	vec2 pos = vec2(
@@ -37,5 +33,5 @@ void main() {
 	outHeight = (1 - pos.y) * m; // 0 or m
 	pos = start + pos * (start - end);
 
-	gl_Position = -1 + 2 * pos;
+	gl_Position = vec4(-1 + 2 * pos, 0.0, 1.0);
 }

@@ -890,8 +890,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	// match bindings to input variables into
 	// (pipe.vertexAttrib, vertStage->input_variables) id pairs
 	std::vector<std::pair<u32, u32>> attribs;
-	auto refl = accessReflection(*vertStage);
-	auto& compiled = refl.get();
+	auto& compiled = specializeSpirv(*vertStage);
 	auto resources = compiled.get_shader_resources();
 
 	for(auto a = 0u; a < pipe.vertexAttribs.size(); ++a) {

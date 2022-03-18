@@ -35,7 +35,7 @@ TEST(unit_xfb_patch) {
 	spc::Compiler compiled{{std::begin(a_vert_spv_data), std::end(a_vert_spv_data)}};
 	compiled.set_entry_point("main", spv::ExecutionModelVertex);
 
-	auto patched = patchSpirvXfb(a_vert_spv_data, "main", compiled);
+	auto patched = patchSpirvXfb(compiled, "main");
 	EXPECT(patched.desc.get() != nullptr, true);
 	EXPECT(patched.desc->captures.size(), 5u);
 	EXPECT(patched.desc->stride, u32(16 + 4 + 16 + 1 * 16 + 16));
@@ -74,7 +74,7 @@ TEST(unit_xfb_patch_spec) {
 	auto& constant = compiled.get_constant(specConstants[0].id);
 	constant.m.c[0].r[0].u32 = 8u;
 
-	auto patched = patchSpirvXfb(a_vert_spv_data, "main", compiled);
+	auto patched = patchSpirvXfb(compiled, "main");
 	EXPECT(patched.desc.get() != nullptr, true);
 	EXPECT(patched.desc->captures.size(), 5u);
 	EXPECT(patched.desc->stride, u32(16 + 4 + 16 + 3 * 16 + 16));
