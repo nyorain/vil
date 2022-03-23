@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
+#include <util/vec.hpp>
 #include <imgui/textedit.h>
 #include <spvm/program.h>
 #include <spvm/state.h>
@@ -8,6 +9,8 @@
 #include <spvm/result.h>
 #include <util/bytes.hpp>
 #include <deque>
+#include <unordered_map>
+#include <vector>
 
 namespace vil {
 
