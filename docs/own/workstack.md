@@ -4,7 +4,6 @@
       find a sample to test it with.
 	  basically need some renderpass-splitting-light.
 	  Can't use suspend/resume
-- [ ] improve design for buffer viewer. Way too much space atm, make more compact
 - [ ] expose missing vulkan 1.3 core functions in layer.cpp
 	- [ ] update dispatch table header and source when they contain them.
 	      Don't forget to add the 'aliasCmd' entries in device.cpp.
@@ -13,11 +12,6 @@
 	- [ ] update the generator
 - [ ] Add "Jump to End/Begin" buttons in begin/end commands.
       only show them in brokenLabel display mode?
-- [ ] don't give each DrawCmdBase/DispatchCmdBase/RTCmdBase their
-      own state copy. Instead just use a pointer and re-allocate
-	  on change (in the record memory). Should make records a lot smaller
-	  when there are many draw/dispatch calls. And draw/dispatch
-	  recording faster since we copy less data.
 - [x] integration test: depend on meson subproject for mock driver
       And don't hardcode my own env path
 	- [x] also make sure we don't need the layer to be installed
@@ -30,8 +24,6 @@
 		  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
 		  -> no idea. Crash inside the vulkan loader that i can't reproduce locally
 		  Maybe just execute on windows? seems to work there.
-- [x] add mutex to descriptorPool, make sure it's correctly used everywhere
-- [x] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)
 - [ ] document what to do when descriptors are not available when
       clicking new record in UI. Implement prototype for 
 	  always-cow-on-submission? Should probably be toggleable.

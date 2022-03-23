@@ -44,6 +44,7 @@ jobs:
       with:
         python-version: '3.x'
     - run: pip install meson ninja
+    - run: sudo apt-get -y update
     - name: Install deps
       run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
@@ -81,6 +82,7 @@ jobs:
       with:
         python-version: '3.x'
     - run: pip install meson ninja
+    - run: sudo apt-get -y update
     - name: Install deps
       run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
@@ -107,6 +109,7 @@ jobs:
       with:
         version: 12
     - run: pip install meson ninja
+    - run: sudo apt-get -y update
     - name: Install deps
       run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
@@ -130,6 +133,7 @@ jobs:
       with:
         version: 12
     - run: pip install meson ninja
+    - run: sudo apt-get -y update
     - name: Install deps
       run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev

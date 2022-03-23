@@ -1,5 +1,5 @@
 [wrap-git]
 directory=swa
 url=https://github.com/nyorain/swa.git
-revision=fuen_experiments
-
+# fuen_experiments branch
+revision=5004a6f9f7b1578806045da9776fa3f1f4d0acf8

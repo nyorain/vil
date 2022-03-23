@@ -372,7 +372,7 @@ Vec3ui ShaderDebugger::numWorkgroups() const {
 	// TODO: hacky
 	// TODO: cache/compute only if needed
 	auto* baseCmd = gui_->cbGui().commandViewer().command();
-	Vec3ui numWGs;
+	Vec3ui numWGs {};
 	if(auto* idcmd = dynamic_cast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
 		// TODO: hacky
 		auto hookState = gui_->cbGui().commandViewer().state();

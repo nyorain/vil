@@ -1,3 +1,11 @@
+- [x] improve design for buffer viewer. Way too much space atm, make more compact
+- [x] add mutex to descriptorPool, make sure it's correctly used everywhere
+- [x] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)
+- [x] don't give each DrawCmdBase/DispatchCmdBase/RTCmdBase their
+      own state copy. Instead just use a pointer and re-allocate
+	  on change (in the record memory). Should make records a lot smaller
+	  when there are many draw/dispatch calls. And draw/dispatch
+	  recording faster since we copy less data.
 - [x] fix msvc unit test issue (see CI, only in debug)
 - [x] maybe don't add to refRecords of used descriptorSets? We don't
       reference them directly in a record anyways. We still want them
