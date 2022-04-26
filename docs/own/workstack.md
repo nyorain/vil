@@ -1,5 +1,13 @@
+- [ ] investigate 255-overflow-like bug in shader debugger when
+      resizing
 - [ ] full commandbuffer/record timings.
 	- [ ] also full batch timings?
+- [] rework command hook to issue cow objects and resolve them
+     correctly when needed.
+	- [ ] in there: store the needed source information (size/level/layer etc)
+	      so we don't need to access the original resources when
+		  processing it, e.g. in the shader debugger.
+		  See the todo there
 - [ ] commandHook support for khr_dynamic_rendering.
       find a sample to test it with.
 	  basically need some renderpass-splitting-light.

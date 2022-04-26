@@ -50,6 +50,9 @@ public:
 
 	auto& commandViewer() { return commandViewer_; }
 
+	bool freezeState() const { return freezeState_; }
+	void freezeState(bool freeze) { freezeState_ = freeze; }
+
 private:
 	void updateState();
 	void updateHookTarget();

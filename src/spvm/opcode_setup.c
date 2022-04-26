@@ -214,7 +214,7 @@ void spvm_setup_OpTypeImage(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	state->results[id].type = spvm_result_type_type;
 	state->results[id].value_type = spvm_value_type_image;
-	state->results[id].pointer = SPVM_READ_WORD(state->code_current);
+	state->results[id].pointer = SPVM_READ_WORD(state->code_current); // sampled type
 	state->results[id].member_count = 1;
 
 	spvm_image_info* info = state->results[id].image_info = calloc(1, sizeof(spvm_image_info));

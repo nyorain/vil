@@ -193,12 +193,13 @@ struct LinAllocator {
 	std::byte* addBlock(std::size_t size, std::size_t alignment);
 };
 
-// Allocates memory from LinearAllocator in a scoped manner.
+// Allocates memory from LinAllocator in a scoped manner.
 // Will simply release all allocated memory by resetting the allocation offset
-// in the current ThreadContext when this object is destroyed.
-// Alloc calls to different ThreadMemScope objects must not be incorrectly
-// mixed (only allowed in a stack-like manner where memory is always only
-// allocated from the last-constructed LinAllocScope).
+// in the associated LinAllocator when this object is destroyed.
+// Alloc calls to different LinAllocScope objects of one LinAllocator must not
+// be incorrectly mixed (only allowed in a stack-like manner where memory is
+// always only allocated from the last-constructed LinAllocScope that
+// wasn't destroyed yet).
 // When this is used, it must be the only mechanism by which memory
 // from the linear allocator is allocated. There are debug checks in place
 // making sure this is done correctly.
@@ -214,8 +215,8 @@ struct LinAllocScope {
 	LinAllocator& tc;
 
 	// only for debugging, making sure that we never use multiple
-	// ThreadMemScope objects at the same time in any way not resembling
-	// a stack.
+	// LinAllocScope objects for one LinAllocator at the same time in any
+	// way not resembling a stack.
 	VIL_DEBUG_ONLY(
 		std::byte* current {};
 	)
@@ -268,7 +269,7 @@ struct LinAllocScope {
 	inline std::byte* allocBytes(std::size_t size, std::size_t alignment) {
 		VIL_DEBUG_ONLY(
 			dlg_assertm(tc.memCurrent->data == this->current,
-				"Invalid non-stacking interleaving of ThreadMemScope detected");
+				"Invalid non-stacking interleaving of LinAllocScope detected");
 		)
 
 		auto* ptr = tc.allocate(size, alignment);

@@ -18,6 +18,9 @@
 
 namespace vil {
 
+const ShaderDebugger::OurImage ShaderDebugger::emptyImage {};
+const spvm_sampler ShaderDebugger::defaultSampler {};
+
 span<spvm_member> children(spvm_member& member) {
 	return {member.members, std::size_t(member.member_count)};
 }
@@ -26,14 +29,14 @@ ShaderDebugger::ShaderDebugger() = default;
 
 ShaderDebugger::~ShaderDebugger() {
 	unselect();
-	if(context_) {
-		spvm_context_deinitialize(context_);
+	if(spvm_.context) {
+		spvm_context_deinitialize(spvm_.context);
 	}
 }
 
 void ShaderDebugger::init(Gui& gui) {
 	this->gui_ = &gui;
-	context_ = spvm_context_initialize();
+	spvm_.context = spvm_context_initialize();
 
 	// TODO: why does this break for games using tcmalloc? tested
 	// on linux with dota
@@ -42,25 +45,23 @@ void ShaderDebugger::init(Gui& gui) {
 
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
-
-	// Shader can't be edited
-	// textedit.SetHandleKeyboardInputs(false);
-	// textedit.SetHandleMouseInputs(false);
+	textedit_.SetReadOnly(true);
 }
 
 void ShaderDebugger::select(std::unique_ptr<spc::Compiler> compiled) {
 	unselect();
 
 	this->compiled_ = std::move(compiled);
+
 	static_assert(sizeof(spvm_word) == sizeof(u32));
 	auto ptr = reinterpret_cast<const spvm_word*>(compiled_->get_ir().spirv.data());
-	program_ = spvm_program_create(context_, ptr, compiled_->get_ir().spirv.size());
+	spvm_.program = spvm_program_create(spvm_.context, ptr, compiled_->get_ir().spirv.size());
 
 	initState();
 
 	const char* src {};
-	if(program_->file_count) {
-		src = program_->files[0].source;
+	if(spvm_.program->file_count) {
+		src = spvm_.program->files[0].source;
 	}
 
 	if(src) {
@@ -71,7 +72,7 @@ void ShaderDebugger::select(std::unique_ptr<spc::Compiler> compiled) {
 }
 
 void ShaderDebugger::initState() {
-	dlg_assert(program_);
+	dlg_assert(spvm_.program);
 	dlg_assert(compiled_);
 
 	samplers_.clear();
@@ -100,38 +101,38 @@ void ShaderDebugger::initState() {
 		dlg_error("spvm: {}", buf);
 	};
 
-	state_ = spvm_state_create(program_, settings);
-	state_->user_data = this;
-	state_->read_image = [](spvm_state* state, spvm_image* img,
+	spvm_.state = spvm_state_create(spvm_.program, settings);
+	spvm_.state->user_data = this;
+	spvm_.state->read_image = [](spvm_state* state, spvm_image* img,
 			int x, int y, int z, int layer, int level) {
 		auto* self = static_cast<ShaderDebugger*>(state->user_data);
 		return self->readImage(*img, x, y, z, layer, level);
 	};
-	state_->write_image = [](spvm_state* state, spvm_image* img,
+	spvm_.state->write_image = [](spvm_state* state, spvm_image* img,
 			int x, int y, int z, int layer, int level, const spvm_vec4f* data) {
 		auto* self = static_cast<ShaderDebugger*>(state->user_data);
 		self->writeImage(*img, x, y, z, layer, level, *data);
 	};
-	state_->array_length = [](spvm_state* state, unsigned varID,
+	spvm_.state->array_length = [](spvm_state* state, unsigned varID,
 			unsigned index_count, const spvm_word* indices) {
 		auto* self = static_cast<ShaderDebugger*>(state->user_data);
 		return self->arrayLength(varID, {indices, std::size_t(index_count)});
 	};
 
 	spvm_word entryPoint = -1;
-	for(auto i = 0; i < program_->entry_point_count; ++i) {
-		if(u32(program_->entry_points[i].id) == compiled_->get_ir().default_entry_point) {
-			entryPoint = program_->entry_points[i].id;
+	for(auto i = 0; i < spvm_.program->entry_point_count; ++i) {
+		if(u32(spvm_.program->entry_points[i].id) == compiled_->get_ir().default_entry_point) {
+			entryPoint = spvm_.program->entry_points[i].id;
 			break;
 		}
 	}
 
 	// TODO: don't static here
 	static spvm_ext_opcode_func* glslExt = spvm_build_glsl450_ext();
-	spvm_state_set_extension(state_, "GLSL.std.450", glslExt);
+	spvm_state_set_extension(spvm_.state, "GLSL.std.450", glslExt);
 
 	dlg_assert(entryPoint != -1);
-	spvm_state_prepare(state_, entryPoint);
+	spvm_state_prepare(spvm_.state, entryPoint);
 }
 
 void ShaderDebugger::unselect() {
@@ -141,75 +142,87 @@ void ShaderDebugger::unselect() {
 	samplers_.clear();
 	images_.clear();
 
-	if(state_) {
-		spvm_state_delete(state_);
-		state_ = nullptr;
+	if(spvm_.state) {
+		spvm_state_delete(spvm_.state);
+		spvm_.state = nullptr;
 	}
 
-	if(program_) {
-		spvm_program_delete(program_);
-		program_ = nullptr;
+	if(spvm_.program) {
+		spvm_program_delete(spvm_.program);
+		spvm_.program = nullptr;
 	}
 
 	compiled_ = {};
 	breakpoints_.clear();
+	state_ = {};
 }
 
 void ShaderDebugger::draw() {
-	if(!program_) {
+	if(!spvm_.program) {
 		imGuiText("No shader selected for debugging");
 		return;
 	}
 
-	dlg_assert(state_);
+	dlg_assert(spvm_.state);
+
+	if(!state_) {
+		imGuiText("Waiting for submission using the shader...");
+		return;
+	}
 
 	auto isLastReturn = [this](){
 		// TODO: kinda hacky. I guess spvm should have a function
 		// like this? or we should always save the relevant information
 		// before stepping? not sure.
-		spvm_word opcode_data = *state_->code_current;
+		spvm_word opcode_data = *spvm_.state->code_current;
 		SpvOp opcode = SpvOp(opcode_data & SpvOpCodeMask);
 
 		if((opcode == SpvOpReturn || opcode == SpvOpReturnValue) &&
-				state_->function_stack_current == 0) {
+				spvm_.state->function_stack_current == 0) {
 			return true;
 		}
 
 		return false;
 	};
 
-	if(refresh_) {
-		spvm_state_delete(state_);
+	if(rerun_) {
+		spvm_state_delete(spvm_.state);
 		initState();
 
-		// TODO: not sure how to handle divergence. Maybe just go to
-		// beginning again but don't overwrite currLine, currFileName?
+		// TODO: not sure how to handle divergence (i.e. when the current
+		// run doesn't hit the position we want to get to)
+		// Maybe just go to beginning again but don't overwrite currLine,
+		// currFileName?
 		// notify about it in UI?
-		while(state_->code_current && (
-					u32(state_->current_line) != currLine_ ||
-					!state_->current_file ||
-					state_->current_file != currFileName_)) {
-			// TODO: trigger breakpoints here?
-			// probably not what we want. At least not always?
-			// spvm_state_step_opcode(state_);
+		while(spvm_.state->code_current && (
+					u32(spvm_.state->current_line) != currLine_ ||
+					!spvm_.state->current_file ||
+					spvm_.state->current_file != currFileName_)) {
 			auto doBreak = stepOpcode();
 			if(doBreak) {
-				refresh_ = false;
+				if(freezeOnBreakPoint_) {
+					freezeOnBreakPoint_ = false;
+					gui_->cbGui().freezeState(true);
+				}
+
 				break;
 			}
 		}
 
-		jumpToState();
+		// We don't want to update the cursor position here since that would
+		// make navigation impossible when refreshing every frame.
+		updatePosition(false);
+		rerun_ = false;
 	}
 
 	// Controls
-	if(state_->code_current) {
+	if(spvm_.state->code_current) {
 		if(ImGui::Button("Step Opcode")) {
 			auto doBreak = false;
 			// silently execute all init instructions here first
 			do {
 				doBreak = stepOpcode();
-			} while(state_->current_line < 0 && state_->code_current && !doBreak);
+			} while(spvm_.state->current_line < 0 && spvm_.state->code_current && !doBreak);
 		}
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Execute a single SPIR-V opcode");
@@ -217,17 +230,17 @@ void ShaderDebugger::draw() {
 
 		ImGui::SameLine();
 
-		if(state_->code_current && ImGui::Button("Step Line")) {
+		if(spvm_.state->code_current && ImGui::Button("Step Line")) {
 			auto doBreak = false;
-			auto line = state_->current_line;
+			auto line = spvm_.state->current_line;
 			// TODO: should probably also check for file change here, right?
 			// just in case we jump to a function in another file that
 			// happens to be at the same line
-			while(state_->current_line == line && state_->code_current && !doBreak) {
+			while(spvm_.state->current_line == line && spvm_.state->code_current && !doBreak) {
 				doBreak = stepOpcode();
 			}
 
-			jumpToState();
+			updatePosition(true);
 		}
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Execute the program until the current line changes");
@@ -237,7 +250,7 @@ void ShaderDebugger::draw() {
 
 		if(ImGui::Button("Run")) {
 			auto doBreak = false;
-			while(state_->code_current && !doBreak) {
+			while(spvm_.state->code_current && !doBreak) {
 				// TODO: really do this here? kinda hacky
 				if(isLastReturn()) {
 					break;
@@ -246,7 +259,7 @@ void ShaderDebugger::draw() {
 				doBreak = stepOpcode();
 			}
 
-			jumpToState();
+			updatePosition(true);
 		}
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Execute the program until it's finished "
@@ -260,11 +273,22 @@ void ShaderDebugger::draw() {
 		if(ImGui::Button("Breakpoint")) {
 			toggleBreakpoint();
 		}
-
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Toggles the breakpoint at the current file/line "
 				"of the code editor");
 		}
+
+		ImGui::SameLine();
+
+		if(ImGui::Button("Move Cursor")) {
+			updatePosition(true);
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Move the cursor in the editor to the "
+				"current execution position");
+		}
+
+		// TODO: execute to cursor button/functionality
 	} else {
 		ImGui::Text("Finished");
 
@@ -276,9 +300,9 @@ void ShaderDebugger::draw() {
 	ImGui::SameLine();
 
 	if(ImGui::Button("Reset")) {
-		spvm_state_delete(state_);
+		spvm_state_delete(spvm_.state);
 		initState();
-		jumpToState();
+		updatePosition(true);
 	}
 	if(gui_->showHelp && ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("Reset execution to the beginning");
@@ -286,10 +310,23 @@ void ShaderDebugger::draw() {
 
 	ImGui::SameLine();
 
-	ImGui::Checkbox("Refresh", &refresh_);
-	if(gui_->showHelp && ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Activating this means that the shader is re-run "
-			"every frame with the current input");
+	{
+		auto disable = gui_->cbGui().freezeState();
+		if(disable) {
+			ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+		}
+
+		ImGui::Checkbox("Freeze on Breakpoint", &freezeOnBreakPoint_);
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Automatically freeze state when hitting "
+				"a breakpoint");
+		}
+
+		if(disable) {
+			ImGui::PopStyleVar();
+			ImGui::PopItemFlag();
+		}
 	}
 
 	// shader view
@@ -343,9 +380,9 @@ void ShaderDebugger::draw() {
 
 	ImGui::EndChild();
 
-	currLine_ = state_->current_line;
-	if(state_->current_file) {
-		currFileName_ = state_->current_file;
+	currLine_ = spvm_.state->current_line;
+	if(spvm_.state->current_file) {
+		currFileName_ = spvm_.state->current_file;
 	}
 }
 
@@ -369,16 +406,13 @@ Vec3ui ShaderDebugger::workgroupSize() const {
 }
 
 Vec3ui ShaderDebugger::numWorkgroups() const {
-	// TODO: hacky
 	// TODO: cache/compute only if needed
 	auto* baseCmd = gui_->cbGui().commandViewer().command();
 	Vec3ui numWGs {};
 	if(auto* idcmd = dynamic_cast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
-		// TODO: hacky
-		auto hookState = gui_->cbGui().commandViewer().state();
-		dlg_assert(hookState);
-
-		auto& ic = hookState->indirectCopy;
+		dlg_assert(state_);
+		auto& hookState = *state_;
+		auto& ic = hookState.indirectCopy;
 		auto span = ic.data();
 		auto ecmd = read<VkDispatchIndirectCommand>(span);
 		numWGs = {ecmd.x, ecmd.y, ecmd.z};
@@ -750,15 +784,14 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		return;
 	}
 
-	// TODO: hacky
-	auto hookState = gui_->cbGui().commandViewer().state();
-	dlg_assert(hookState);
-	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
+	dlg_assert(state_);
+	auto& hookState = *state_.get();
+	dlg_assert(hookState.copiedDescriptors.size() > dsCopyIt->second);
 	dlg_assert(gui_->dev().commandHook->descriptorCopies.size() > dsCopyIt->second);
 	auto& copyRequest = gui_->dev().commandHook->descriptorCopies[dsCopyIt->second];
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
-	auto& copyResult = hookState->copiedDescriptors[dsCopyIt->second + arrayElemID];
+	auto& copyResult = hookState.copiedDescriptors[dsCopyIt->second + arrayElemID];
 
 	dlg_assert(copyRequest.set == setID);
 	dlg_assert(copyRequest.binding == bindingID);
@@ -817,11 +850,23 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	} else if(spcType.storage == spv::StorageClassUniformConstant) {
 		// we already handled samplers above
 		dlg_assert(spcType.basetype != spc::SPIRType::Sampler);
+
+		// TODO: imageView, image from descriptor might be null here.
+		// We should probably just encode the needed information into
+		// the CommandHook so we can read the data even if original
+		// image/view were destroyed.
 		if(spcType.basetype == spc::SPIRType::Image) {
-			// dlg_trace(" >> image");
+			dlg_assert(dst.size() == 1u);
+
 			auto image = vil::images(ds, bindingID)[arrayElemID];
-			auto& imgView = nonNull(image.imageView);
-			auto& img = nonNull(imgView.img);
+			if(!image.imageView || !image.imageView->img) {
+				dlg_warn("source imageView/image were destroyed");
+				dst[0].value.image = const_cast<OurImage*>(&emptyImage);
+				return;
+			}
+
+			auto& imgView = *image.imageView;
+			auto& img = *imgView.img;
 
 			auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
 			dlg_assert(buf);
@@ -834,19 +879,24 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			dstImg.layers = imgView.ci.subresourceRange.layerCount;
 			dstImg.data = buf->data();
 
-			dlg_assert(dst.size() == 1u);
-
 			dst[0].value.image = &dstImg;
 			dlg_assert(u32(dst[0].type) == res->base_type_id);
 			dlg_assert(dst[0].member_count == 0u);
 
 			return;
 		} else if(spcType.basetype == spc::SPIRType::SampledImage) {
-			// dlg_trace(" >> sampled image");
+			dlg_assert(dst.size() == 2u);
 
 			auto image = vil::images(ds, bindingID)[arrayElemID];
-			auto& imgView = nonNull(image.imageView);
-			auto& img = nonNull(imgView.img);
+			if(!image.imageView || !image.imageView->img) {
+				dlg_warn("source imageView/image or sampler were destroyed");
+				dst[0].value.image = const_cast<OurImage*>(&emptyImage);
+				dst[1].value.sampler = const_cast<spvm_sampler*>(&defaultSampler);
+				return;
+			}
+
+			auto& imgView = *image.imageView;
+			auto& img = *imgView.img;
 
 			auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
 			dlg_assert(buf);
@@ -862,10 +912,8 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			auto& sampler = samplers_.emplace_back();
 			sampler.desc = setupSampler(*image.sampler);
 
-			auto& spvmRes = state_->results[srcID];
-			auto* resType = spvm_state_get_type_info(state_->results, &state_->results[spvmRes.pointer]);
-
-			dlg_assert(dst.size() == 2u);
+			auto& spvmRes = spvm_.state->results[srcID];
+			auto* resType = spvm_state_get_type_info(spvm_.state->results, &spvm_.state->results[spvmRes.pointer]);
 
 			// members[0]: image
 			dlg_assert(dst[0].member_count == 0u);
@@ -884,8 +932,6 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	} else if(spcType.storage == spv::StorageClassUniform ||
 			spcType.storage == spv::StorageClassStorageBuffer) {
 		if(spcType.basetype == spc::SPIRType::Struct) {
-			// dlg_trace(" >> struct");
-
 			auto* copiedBuf = std::get_if<OwnBuffer>(&copyResult.data);
 			dlg_assert(copiedBuf);
 			auto data = copiedBuf->data();
@@ -1195,7 +1241,16 @@ spvm_vec4f ShaderDebugger::readImage(spvm_image& srcImg, int x, int y, int z, in
 	off += y * extent[0];
 	off += x;
 
-	auto texel = img.data.subspan(off * sizeof(spvm_vec4f));
+	off *= sizeof(spvm_vec4f);
+	if(off + sizeof(spvm_vec4f) > img.data.size()) {
+		dlg_warn("Image read would be out of range: \n"
+			"\tpos ({}, {}, {}), layer {}, level {}\n"
+			"\timage data size in pixels: {}",
+			x, y, z, layer, level, img.data.size() / sizeof(spvm_vec4f));
+		return {};
+	}
+
+	auto texel = img.data.subspan(off);
 	return read<spvm_vec4f>(texel);
 }
 
@@ -1212,7 +1267,7 @@ void ShaderDebugger::writeImage(spvm_image&, int x, int y, int z, int layer, int
 }
 
 spvm_value_type ShaderDebugger::valueType(const spvm_member& member) {
-	auto* resType = spvm_state_get_type_info(state_->results, &state_->results[member.type]);
+	auto* resType = spvm_state_get_type_info(spvm_.state->results, &spvm_.state->results[member.type]);
 	dlg_assert(resType);
 	return resType->value_type;
 }
@@ -1224,7 +1279,7 @@ void ShaderDebugger::display(const char* name, const spvm_member& member) {
 	auto id = dlg::format("{}:{}", name, (void*) name);
 	auto flags = ImGuiTreeNodeFlags_FramePadding;
 
-	auto* ptype = spvm_state_get_type_info(state_->results, &state_->results[member.type]);
+	auto* ptype = spvm_state_get_type_info(spvm_.state->results, &spvm_.state->results[member.type]);
 	dlg_assert(ptype);
 	auto& type = *ptype;
 
@@ -1321,39 +1376,6 @@ void ShaderDebugger::drawVariablesTab() {
 	// imGuiText("Instruction count : {}", state->instruction_count);
 	// imGuiText("Offset: {}", state->code_current - program->code);
 
-	/*
-	auto printRes = [&](const auto& name, auto* res) {
-		if (!res->stored_to) {
-			return;
-		}
-
-		imGuiText("{}: ", name);
-
-		ImGui::SameLine();
-
-		// TODO: proper spvm_result formatting
-		auto* resType = spvm_state_get_type_info(state->results,
-			&state->results[res->pointer]);
-		if(resType->value_type == spvm_value_type_vector) {
-			auto str = std::string{};
-
-			for(auto i = 0; i < res->member_count; ++i) {
-				str += formatScalar(res->members[i]);
-			}
-
-			imGuiText("{}", str);
-		} else if(resType->value_type == spvm_value_type_int) {
-			// TODO: bitcount & signedness
-			imGuiText("{}", res->members[0].value.s);
-		} else if(resType->value_type == spvm_value_type_float) {
-			// TODO: bitcount
-			imGuiText("{}", res->members[0].value.f);
-		} else {
-			imGuiText("??");
-		}
-	};
-	*/
-
 	// vars_
 	// for(auto [name, res] : vars_) {
 	// 	printRes(name, res);
@@ -1368,11 +1390,11 @@ void ShaderDebugger::drawVariablesTab() {
 		ImGui::TableSetupColumn(nullptr, 0, 0.75f);
 
 		// local vars
-		for(auto i = 0u; i < program_->bound; ++i) {
-			auto& res = state_->results[i];
+		for(auto i = 0u; i < spvm_.program->bound; ++i) {
+			auto& res = spvm_.state->results[i];
 			if((res.type != spvm_result_type_variable && res.type != spvm_result_type_function_parameter) ||
 					!res.name ||
-					res.owner != state_->current_function ||
+					res.owner != spvm_.state->current_function ||
 					// TODO: make this filter optional, via gui.
 					// Useful in many cases but can be annoying/incorrect when
 					// a variable isn't written on all branches.
@@ -1385,7 +1407,7 @@ void ShaderDebugger::drawVariablesTab() {
 				continue;
 			}
 
-			if(res.owner != state_->current_function) {
+			if(res.owner != spvm_.state->current_function) {
 				continue;
 			}
 
@@ -1396,14 +1418,16 @@ void ShaderDebugger::drawVariablesTab() {
 
 			const spvm_member* setupDst;
 			spvm_member wrapper;
-			auto* resType = spvm_state_get_type_info(state_->results,
-				&state_->results[res.pointer]);
+			auto* resType = spvm_state_get_type_info(spvm_.state->results,
+				&spvm_.state->results[res.pointer]);
 			auto vt = resType->value_type;
 
-			if(vt == spvm_value_type_matrix || vt == spvm_value_type_vector ||
-					vt == spvm_value_type_struct) {
+			if(vt == spvm_value_type_matrix ||
+					vt == spvm_value_type_vector ||
+					vt == spvm_value_type_struct ||
+					vt == spvm_value_type_array) {
 				setupDst = &wrapper;
-				wrapper.type = u32(resType - state_->results); // type id
+				wrapper.type = u32(resType - spvm_.state->results); // type id
 				wrapper.members = res.members;
 				wrapper.member_count = res.member_count;
 			} else {
@@ -1430,7 +1454,7 @@ void ShaderDebugger::drawBreakpointsTab() {
 
 void ShaderDebugger::drawCallstackTab() {
 	// TODO: does not belong here. Visual representation would be useful.
-	imGuiText("Current line: {}", state_->current_line);
+	imGuiText("Current line: {}", spvm_.state->current_line);
 
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
 	auto flags = ImGuiTableFlags_BordersInner |
@@ -1440,7 +1464,7 @@ void ShaderDebugger::drawCallstackTab() {
 		// TODO:
 		// - allow selecting entries and then showing the respective variables from threre
 		// - show file, line, function (and maybe hide address by default)
-		auto count = state_->function_stack_current + 1;
+		auto count = spvm_.state->function_stack_current + 1;
 		for(auto i = 0; i < count; ++i) {
 			ImGui::TableNextRow();
 
@@ -1450,10 +1474,10 @@ void ShaderDebugger::drawCallstackTab() {
 			imGuiText("{}", i);
 
 			ImGui::TableNextColumn();
-			imGuiText("{}", static_cast<const void*>(state_->function_stack[i]));
+			imGuiText("{}", static_cast<const void*>(spvm_.state->function_stack[i]));
 
 			ImGui::TableNextColumn();
-			auto name = state_->function_stack_info[i]->name;
+			auto name = spvm_.state->function_stack_info[i]->name;
 			imGuiText("{}", name ? name : "?");
 		}
 
@@ -1467,62 +1491,65 @@ void ShaderDebugger::drawInputsTab() {
 	// TODO: decide depending on shader type
 	// TODO: for compute shader, allow to select GlobalInvocationID
 	//   and automatically compute it here depending on workgroup size
+
 	imGuiText("todo");
 }
 
-void ShaderDebugger::jumpToState() {
-	if(!state_->current_file) {
+void ShaderDebugger::updatePosition(bool moveCursor) {
+	if(!spvm_.state->current_file) {
 		dlg_warn("Can't jump to debugging state, current_file is null");
 		return;
 	}
 
-	if(state_->current_line < 0) {
+	if(spvm_.state->current_line < 0) {
 		dlg_warn("Can't jump to debugging state, current_line = {}",
-			state_->current_line);
+			spvm_.state->current_line);
 		return;
 	}
 
 	auto fileID = -1;
-	for(auto i = 0u; i < state_->owner->file_count; ++i) {
-		if(std::strcmp(state_->owner->files[i].name, state_->current_file) == 0u) {
+	for(auto i = 0u; i < spvm_.state->owner->file_count; ++i) {
+		if(std::strcmp(spvm_.state->owner->files[i].name, spvm_.state->current_file) == 0u) {
 			fileID = i;
 			break;
 		}
 	}
 
 	if(fileID == -1) {
-		dlg_warn("Can't jump to debugging state, invalid file '{}'", state_->current_file);
+		dlg_warn("Can't jump to debugging state, invalid file '{}'", spvm_.state->current_file);
 		return;
 	}
 
-	if(currFileName_ != state_->owner->files[fileID].name) {
-		dlg_trace("now in file {}", state_->owner->files[fileID].name);
-		textedit_.SetText(state_->owner->files[fileID].source);
+	if(currFileName_ != spvm_.state->owner->files[fileID].name) {
+		dlg_trace("now in file {}", spvm_.state->owner->files[fileID].name);
+		textedit_.SetText(spvm_.state->owner->files[fileID].source);
 	}
 
 	// TODO: seems to be a textedit bug
-	auto line = state_->current_line == 0 ? 0 : state_->current_line - 1;
-	dlg_trace("cursor pos: {} {}", line, state_->current_column);
-	textedit_.SetCursorPosition({line, 1});
+	auto line = spvm_.state->current_line == 0 ? 0 : spvm_.state->current_line - 1;
 	textedit_.mCurrentLineNumber = {unsigned(line)};
+
+	if(moveCursor) {
+		textedit_.SetCursorPosition({line, 1});
+	}
 }
 
 bool ShaderDebugger::stepOpcode() {
-	auto currLine = state_->current_line;
-	auto currFile = state_->current_file;
+	auto currLine = spvm_.state->current_line;
+	auto currFile = spvm_.state->current_file;
 
-	auto posPrev = state_->code_current;
-	spvm_state_step_opcode(state_);
+	auto posPrev = spvm_.state->code_current;
+	spvm_state_step_opcode(spvm_.state);
 
-	if(state_->current_line == currLine &&
-			state_->current_file == currFile) {
+	if(spvm_.state->current_line == currLine &&
+			spvm_.state->current_file == currFile) {
 		// position hasn't changed, can't be a breakpoint
 		return false;
 	}
 
 	for(auto& bp : breakpoints_) {
-		// if(spvm_word(bp.lineID) == state_->current_line &&
-		// 		fileName(bp.fileID) == state_->current_file) {
+		// if(spvm_word(bp.lineID) == spvm_.state->current_line &&
+		// 		fileName(bp.fileID) == spvm_.state->current_file) {
 		// 	return true;
 		// }
 		if(posPrev == bp.pos) {
@@ -1534,14 +1561,14 @@ bool ShaderDebugger::stepOpcode() {
 }
 
 std::string_view ShaderDebugger::fileName(u32 fileID) const {
-	dlg_assert_or(fileID < state_->owner->file_count, return "");
-	return state_->owner->files[fileID].name;
+	dlg_assert_or(fileID < spvm_.state->owner->file_count, return "");
+	return spvm_.state->owner->files[fileID].name;
 }
 
 u32 ShaderDebugger::fileID(std::string_view fileName) const {
 	auto fileID = u32(-1);
-	for(auto i = 0u; i < state_->owner->file_count; ++i) {
-		if(std::strncmp(state_->owner->files[i].name,
+	for(auto i = 0u; i < spvm_.state->owner->file_count; ++i) {
+		if(std::strncmp(spvm_.state->owner->files[i].name,
 				fileName.data(), fileName.size()) == 0u) {
 			fileID = i;
 			break;
@@ -1555,10 +1582,10 @@ u32 ShaderDebugger::fileID(std::string_view fileName) const {
 
 void ShaderDebugger::toggleBreakpoint() {
 	// TODO: get current editor file
-	auto fileName = state_->current_file;
+	auto fileName = spvm_.state->current_file;
 	if(!fileName) {
-		dlg_assert(state_->owner->file_count > 0);
-		fileName = state_->owner->files[0].name;
+		dlg_assert(spvm_.state->owner->file_count > 0);
+		fileName = spvm_.state->owner->files[0].name;
 	}
 
 	const auto fid = fileID(fileName);
@@ -1578,8 +1605,8 @@ void ShaderDebugger::toggleBreakpoint() {
 
 	if(doSet) {
 		// find position
-		auto spv = program_->code;
-		auto spvEnd = program_->code + program_->code_length;
+		auto spv = spvm_.program->code;
+		auto spvEnd = spvm_.program->code + spvm_.program->code_length;
 
 		struct Find {
 			const spvm_source pos;
@@ -1600,7 +1627,7 @@ void ShaderDebugger::toggleBreakpoint() {
 				u32 opclmn = SPVM_READ_WORD(spv);
 				(void) opclmn;
 
-				auto opfileID = fileID(state_->results[opfile].name);
+				auto opfileID = fileID(spvm_.state->results[opfile].name);
 				if(opfileID == fid && opline >= line) {
 					if(!best || opline < best->line) {
 						best.emplace(Find{instrBegin, opline});
@@ -1634,6 +1661,11 @@ void ShaderDebugger::toggleBreakpoint() {
 		nbp.pos = best->pos;
 		textedit_.GetBreakpoints().insert(line);
 	}
+}
+
+void ShaderDebugger::updateState(IntrusivePtr<CommandHookState> state) {
+	state_ = std::move(state);
+	rerun_ = true;
 }
 
 } // namespace vil

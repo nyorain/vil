@@ -26,6 +26,7 @@ public:
 	// Select takes its own copy of a spc::Compiler mainly
 	// because of the specialization constant problematic
 	void select(std::unique_ptr<spc::Compiler> compiled);
+	void updateState(IntrusivePtr<CommandHookState> state);
 	void unselect();
 	void draw();
 
@@ -73,7 +74,7 @@ private:
 	bool stepOpcode();
 
 	// Sets the text editor to the current line of the state.
-	void jumpToState();
+	void updatePosition(bool moveCursor = true);
 
 	void drawInputsTab();
 	void drawVariablesTab();
@@ -97,6 +98,9 @@ private:
 		ReadBuf data;
 	};
 
+	static const OurImage emptyImage;
+	static const spvm_sampler defaultSampler;
+
 	struct Location {
 		u32 fileID;
 		u32 lineID;
@@ -110,7 +114,8 @@ private:
 	std::deque<spvm_sampler> samplers_;
 	std::deque<OurImage> images_;
 
-	bool refresh_ {};
+	bool rerun_ {};
+	bool freezeOnBreakPoint_ {};
 	u32 currLine_ {};
 	std::string currFileName_ {};
 
@@ -118,10 +123,7 @@ private:
 	igt::TextEditor textedit_;
 	std::unique_ptr<spc::Compiler> compiled_ {};
 
-	spvm_context_t context_ {};
-	spvm_program_t program_ {};
-	spvm_state_t state_ {};
-
+	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
 	std::unordered_map<u32, u32> varIDToDsCopyMap_;
 	std::vector<Location> breakpoints_;
 
@@ -130,6 +132,12 @@ private:
 
 	// TODO
 	Vec3ui globalInvocationID_ {0u, 0u, 0u};
+
+	struct {
+		spvm_context_t context {};
+		spvm_program_t program {};
+		spvm_state_t state {};
+	} spvm_;
 };
 
 } // namespace vil

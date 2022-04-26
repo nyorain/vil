@@ -1296,6 +1296,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		tabs_.cb->selectedRecord_,
 		tabs_.cb->commandViewer_.record_,
 		dev().commandHook->recordPtr(),
+		// TODO: shader debugger state.
 	};
 
 	{

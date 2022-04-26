@@ -287,6 +287,10 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 					|| stateCmd->boundPipe() != lastStateCmd->boundPipe()) {
 				selectCommandView = true;
 				shaderDebugger_.unselect();
+			} else if(resetState) {
+				shaderDebugger_.updateState(nullptr);
+			} else {
+				shaderDebugger_.updateState(newState);
 			}
 
 			break;

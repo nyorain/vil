@@ -83,7 +83,7 @@ add proper resource cow implementation:
       Just iterate over MemoryResources in the given range.
 
 shader debugger:
-- [ ] cleanup/fix freezing as described in node 2235
+- [x] cleanup/fix freezing as described in node 2235
 - [x] implement breakpoints
 	- [x] issue: we currently check for equality for breakpoints.
 	      breakpoints for lines that don't have code associated with them
@@ -124,6 +124,7 @@ shader debugger:
 	- [ ] if we are serious about it, we need to really build our own
 	      host-side acceleration structures
 - [ ] add proper stack trace (ui tab)
+	- [ ] allow to jump to positions in stack trace
 - [ ] allow to view all sources in ui
 - [ ] figure out where to put the "Debug shader" buttons
 - [ ] add support for stores. And make sure reading variables later
