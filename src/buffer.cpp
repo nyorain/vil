@@ -88,7 +88,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 
 	auto nci = *pCreateInfo;
 
-	// Needed so we can copy from it for show its contents.
+	// Needed so we can copy from it to show its contents.
 	// AFAIK this should always be supported, for all buffers.
 	nci.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 

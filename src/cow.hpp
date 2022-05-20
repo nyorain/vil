@@ -37,16 +37,20 @@ struct CopiedImage {
 
 struct CowImageRange;
 struct CowBufferRange;
+struct ImageRangeCopy;
+struct BufferRangeCopy;
 
 struct CowResolveOp {
 	// To be signaled when operation is finished.
 	// Will be returned to the pool when completed.
 	VkFence fence;
-	VkSemaphore semaphore;
 	VkCommandBuffer cb;
+	Queue* queue;
 
-	std::vector<CowImageRange*> imgCows;
-	std::vector<CowBufferRange*> bufCows;
+	// They point directly into the respective ImageRangeCopy/BufferRangeCopy
+	// objects
+	std::vector<ImageRangeCopy*> imgCopies;
+	std::vector<BufferRangeCopy*> bufCopies;
 
 	// for imageToBuffer copies
 	std::vector<VkImageView> imageViews;
@@ -94,8 +98,10 @@ struct CowBufferRange {
 	~CowBufferRange();
 };
 
+void initLocked(Device&, CowResolveOp&);
 void recordResolve(Device&, CowResolveOp&, CowBufferRange&);
 void recordResolve(Device&, CowResolveOp&, CowImageRange&);
+void finishLocked(Device&, CowResolveOp&);
 
 // Returns whether the given handles support cows.
 // Certain resource properties makes it very hard to track writing.

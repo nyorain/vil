@@ -31,7 +31,7 @@ struct DeviceMemory : DeviceHandle {
 	// Describes the current map state
 	void* map {}; // nullptr if not mapped
 	VkDeviceSize mapOffset {};
-	VkDeviceSize mapSize {};
+	VkDeviceSize mapSize {}; // VK_WHOLE_SIZE already converted to real size
 
 	// Sorted by offset. Keep in mind that allocations may alias. If
 	// multiple allocations have the same offset, the sorting between those

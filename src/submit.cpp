@@ -68,6 +68,23 @@ VkFence getFenceFromPool(Device& dev) {
 	return fence;
 }
 
+VkFence getFenceFromPoolLocked(Device& dev) {
+	assertOwned(dev.mutex);
+	if(!dev.fencePool.empty()) {
+		auto ret = dev.fencePool.back();
+		dev.fencePool.pop_back();
+		return ret;
+	}
+
+	// create new fence
+	VkFence fence;
+	VkFenceCreateInfo fci {};
+	fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	VK_CHECK(dev.dispatch.CreateFence(dev.handle, &fci, nullptr, &fence));
+	nameHandle(dev, fence, "Device:[pool fence]");
+	return fence;
+}
+
 VkSemaphore createSemaphore(Device& dev) {
 	// create new semaphore
 	VkSemaphore semaphore;
@@ -278,7 +295,7 @@ void addFullSyncLocked(QueueSubmitter& subm) {
 			continue;
 		}
 
-		// no pending submissions on this queue
+		// check if pending submissions on this queue
 		u64 finishedID;
 		dev.dispatch.GetSemaphoreCounterValue(dev.handle,
 			queue.submissionSemaphore, &finishedID);

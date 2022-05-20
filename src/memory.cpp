@@ -4,6 +4,7 @@
 #include <image.hpp>
 #include <buffer.hpp>
 #include <threadContext.hpp>
+#include <cow.hpp>
 #include <util/util.hpp>
 
 namespace vil {
@@ -133,17 +134,125 @@ VKAPI_ATTR VkResult VKAPI_CALL MapMemory(
 		VkMemoryMapFlags                            flags,
 		void**                                      ppData) {
 	auto& mem = get(device, memory);
-	auto res = mem.dev->dispatch.MapMemory(mem.dev->handle, mem.handle,
+	const auto res = mem.dev->dispatch.MapMemory(mem.dev->handle, mem.handle,
 		offset, size, flags, ppData);
 	if(res != VK_SUCCESS) {
 		return res;
 	}
 
-	std::lock_guard lock(mem.dev->mutex); // TODO PERF
+	auto& dev = *mem.dev;
+	if(size == VK_WHOLE_SIZE) {
+		size = mem.size - offset;
+	}
+
+	std::unique_lock lock(dev.mutex); // TODO PERF
 	dlg_assert(!mem.map);
 	mem.map = *ppData;
 	mem.mapOffset = offset;
 	mem.mapSize = size;
+
+	// resolve cows of mapped resources
+	const auto mapEnd = mem.mapOffset + mem.mapSize;
+
+	std::optional<CowResolveOp> cowResolve;
+	auto getCowResolve = [&]() -> decltype(auto) {
+		if(cowResolve) {
+			return *cowResolve;
+		}
+
+		// create
+		auto& cr = cowResolve.emplace();
+		initLocked(dev, cr);
+		return cr;
+	};
+
+	for(auto* alloc : mem.allocations) {
+		if(alloc->allocationOffset + alloc->allocationSize <= offset) {
+			// no overlap
+			continue;
+		}
+
+		if(alloc->allocationOffset >= mapEnd) {
+			// break here, allocations are sorted by offset
+			break;
+		}
+
+		if(alloc->objectType == VK_OBJECT_TYPE_BUFFER) {
+			auto& img = static_cast<Image&>(*alloc);
+			for(auto& cow : img.cows) {
+				recordResolve(dev, getCowResolve(), *cow);
+			}
+			img.cows.clear();
+		} else if(alloc->objectType == VK_OBJECT_TYPE_IMAGE) {
+			auto& buf = static_cast<Buffer&>(*alloc);
+			for(auto& cow : buf.cows) {
+				recordResolve(dev, getCowResolve(), *cow);
+			}
+			buf.cows.clear();
+		} else {
+			dlg_error("unreachable");
+		}
+	}
+
+	if(cowResolve) {
+		auto& cr = *cowResolve;
+		++cr.queue->submissionCounter;
+
+		VkSubmitInfo si {};
+		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		si.commandBufferCount = 1u;
+		si.pCommandBuffers = &cr.cb;
+
+		// add full sync
+		dlg_assert(dev.doFullSync);
+
+		ThreadMemScope tms;
+		auto maxWaitSemCount = dev.queues.size();
+		auto waitSems = tms.alloc<VkSemaphore>(maxWaitSemCount);
+		auto waitStages = tms.alloc<VkPipelineStageFlags>(maxWaitSemCount);
+		auto waitVals = tms.alloc<u64>(maxWaitSemCount);
+		auto waitSemCount = 0u;
+
+		for(auto& pqueue : dev.queues) {
+			auto& queue = *pqueue;
+			if(&queue == cr.queue) {
+				continue;
+			}
+
+			// check if pending submissions on this queue
+			u64 finishedID;
+			dev.dispatch.GetSemaphoreCounterValue(dev.handle,
+				queue.submissionSemaphore, &finishedID);
+			if(finishedID == queue.submissionCounter) {
+				continue;
+			}
+
+			waitVals[waitSemCount] = queue.submissionCounter;
+			waitSems[waitSemCount] = queue.submissionSemaphore;
+			waitStages[waitSemCount] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+			++waitSemCount;
+		}
+
+		si.pWaitDstStageMask = waitStages.data();
+		si.pWaitSemaphores = waitSems.data();
+		si.waitSemaphoreCount = waitSemCount;
+		si.signalSemaphoreCount = 1u;
+		si.pSignalSemaphores = &cr.queue->submissionSemaphore;
+
+		VkTimelineSemaphoreSubmitInfo tsInfo {};
+		tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+		tsInfo.waitSemaphoreValueCount = waitSemCount;
+		tsInfo.pWaitSemaphoreValues = waitVals.data();
+		tsInfo.signalSemaphoreValueCount = 1u;
+		tsInfo.pSignalSemaphoreValues = &cr.queue->submissionCounter;
+
+		si.pNext = &tsInfo;
+
+		auto res = dev.dispatch.QueueSubmit(cr.queue->handle, 1u, &si, cr.fence);
+		dlg_assert(res == VK_SUCCESS);
+
+		finishLocked(dev, cr);
+	}
 
 	return res;
 }

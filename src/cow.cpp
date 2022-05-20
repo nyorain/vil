@@ -503,6 +503,7 @@ void recordResolve(Device& dev, CowResolveOp& op, CowBufferRange& cow) {
 
 	auto& dst = cow.copy.emplace();
 	dst.op = &op;
+	op.bufCopies.push_back(&dst);
 	initAndCopy(dev, op.cb, dst.buf, cow.addFlags, *cow.source,
 		cow.offset, cow.size, cow.queueFams);
 
@@ -531,11 +532,13 @@ void recordResolve(Device& dev, CowResolveOp& op, CowImageRange& cow) {
 	if(cow.imageAsBuffer) {
 		auto& dst = cow.copy.emplace<BufferRangeCopy>();
 		dst.op = &op;
+		op.bufCopies.push_back(&dst);
 		initAndSampleCopy(dev, op.cb, dst.buf, *cow.source,
 			layout, cow.range, cow.queueFams, op.imageViews, op.descriptorSets);
 	} else {
 		auto& dst = cow.copy.emplace<ImageRangeCopy>();
 		dst.op = &op;
+		op.imgCopies.push_back(&dst);
 		initAndCopy(dev, op.cb, dst.img, *cow.source,
 			layout, cow.range, cow.queueFams);
 	}
@@ -564,7 +567,7 @@ CowImageRange::~CowImageRange() {
 	}
 
 	// check if operation is pending
-	// we have to wait for it since our resource is being destroyed
+	// we have to wait for it since our destination resource is being destroyed
 	if(!source) {
 		CowResolveOp* op {};
 		Device* dev {};
@@ -578,8 +581,7 @@ CowImageRange::~CowImageRange() {
 		}
 
 		if(op) {
-			dlg_assert(op->fence);
-			dev->dispatch.WaitForFences(dev->handle, 1u, &op->fence, true, UINT64_MAX);
+			finishLocked(*dev, *op);
 		}
 	}
 }
@@ -598,14 +600,12 @@ CowBufferRange::~CowBufferRange() {
 
 	// check if operation is pending
 	// we have to wait for it since our resource is being destroyed
-	if(!source && copy) {
-		auto& dev = *copy->buf.dev;
-		dlg_assert(copy->op->fence);
-		dev.dispatch.WaitForFences(dev.handle, 1u, &copy->op->fence, true, UINT64_MAX);
+	if(!source && copy && copy->op) {
+		finishLocked(*copy->buf.dev, *copy->op);
 	}
 }
 
-bool allowCow(const Image& img) {
+bool allowCowLocked(const Image& img) {
 	// we don't have proper support for tracking the memory of
 	// sparse bindings yet
 	if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT) {
@@ -649,6 +649,39 @@ bool allowCowLocked(const Buffer& buf) {
 	}
 
 	return true;
+}
+
+void initLocked(Device& dev, CowResolveOp& op) {
+	op.queue = dev.gfxQueue;
+	op.fence = getFenceFromPoolLocked(dev);
+
+	VkCommandBufferAllocateInfo allocInfo {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandPool = dev.queueFamilies[op.queue->family].commandPool;
+	allocInfo.commandBufferCount = 1;
+
+	VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &allocInfo, &op.cb));
+}
+
+void finishLocked(Device& dev, CowResolveOp& cro) {
+	assertOwned(dev.mutex);
+	dlg_assert(cro.fence);
+	dev.dispatch.WaitForFences(dev.handle, 1u, &cro.fence, true, UINT64_MAX);
+
+	for(auto* img : cro.imgCopies) {
+		img->op = nullptr;
+	}
+
+	for(auto* buf : cro.bufCopies) {
+		buf->op = nullptr;
+	}
+
+	dev.fencePool.push_back(cro.fence);
+	cro.fence = {};
+
+	auto commandPool = dev.queueFamilies[cro.queue->family].commandPool;
+	dev.dispatch.FreeCommandBuffers(dev.handle, commandPool, 1, &cro.cb);
 }
 
 } // namespace vil

@@ -92,3 +92,47 @@ smaller ones with doesn't sound trivial. Especially for indirect multi draw.
 Maybe just make split up multi draw into the individual draw calls and
 implement paging on that base? We can then later on still investigate how to
 split up single draw calls, we then have to do both anyways.
+
+# Figuring out when a buffer/image is (potentially) written
+
+We only want to add Cows on large objects anyways (or maybe when there
+are many objects e.g. descriptorSet with >100 images). But for those
+we need to figure out when they are written to correctly resolve the cow.
+Multiple problems:
+
+- For image variables in shaders, we know whether they are readonly or not,
+  for buffers we don't. To make this work well with large storage buffers
+  (think e.g. vertex/index buffers for raytracing) we just need to do
+  our own shader analysis. Basically, just check each OpStore/OpImageStore
+  instruction or whatever else may write to image/buffer from shader.
+- When to check?
+  During recording, we know which bindings are potentially written to.
+  But that might bring quite some overhead for *all* records.
+  Alternatively, we could only check during hook/submission time, in most
+  cases there won't be any active cow and we can skip everything.
+  Probably better to not do it during recording already.
+- store a global list of all cow objects for this?
+
+pseudo code in submission logic:
+
+checkCow(submission)
+	if there are any cows
+		for usedHandle : submission.usedHandles
+			if usedHandle.handle is descriptorSet
+				for command : usedHandle.commands
+					store bindings potentially written by pipeline
+				for binding : bindings
+					if binding is potentially written by any pipeline
+						resolveCows(binding)
+			else if usedHandle.handle is image
+				if usedHandle.imageWritten
+					resolveCows(usedHandle)
+			else if usedHandle.handle is buffer
+				if usedHandle.bufferWritten
+					resolveCows(usedHandle)
+
+The most costly one will be the descriptorSets.
+But for most sets we can probably early-out, add fast path in
+layout for sets that don't have any writable bindings to begin with?
+					
+	

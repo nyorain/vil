@@ -89,6 +89,8 @@ VkResult submitSemaphore(Queue&, VkSemaphore, bool timeline = false);
 VkSemaphore getSemaphoreFromPool(Device& dev);
 VkSemaphore getSemaphoreFromPoolLocked(Device& dev);
 VkFence getFenceFromPool(Device& dev);
+// TODO: shouldn't exist, might create fence IN critical section :(
+VkFence getFenceFromPoolLocked(Device& dev);
 
 // Batch of Submissions, represents and tracks one vkQueueSubmit call.
 struct SubmissionBatch {
