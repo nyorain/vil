@@ -1161,9 +1161,31 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 						subres, {}, imageViews, descriptorSets);
 					info.rebindComputeState = true;
 				} else {
-					auto& dstImg = dst.data.emplace<CopiedImage>();
-					initAndCopy(dev, cb, dstImg, *imgView->img, layout, subres,
-						record->queueFamily);
+					auto& dstCow = dst.data.emplace<IntrusivePtr<CowImageRange>>();
+					// TODO: use memory/object pool
+					dstCow.reset(new CowImageRange());
+
+					// we only allow cows in certain cases
+					auto useCow = allowCowLocked(*imgView->img);
+					// NOTE: this is over-conservative.
+					// We really only want to disallow this if the record
+					// itself writes the image *after* the current command.
+					// But we can't check that efficiently right now.
+					// Anyways, the image being written in the same record
+					// at all could be a sign to not use a cow anyways.
+					useCow &= !potentiallyWrites(*record, *imgView->img);
+
+					if(useCow) {
+						dstCow->source = imgView->img;
+						dstCow->range = subres;
+						dstCow->queueFams = (1u << dev.gfxQueue->family);
+						dstCow->addImageFlags = VK_IMAGE_USAGE_SAMPLED_BIT;
+						imgView->img->cows.push_back(dstCow.get());
+					} else {
+						auto& dstCopy = dstCow->copy.emplace<ImageRangeCopy>();
+						initAndCopy(dev, cb, dstCopy.img, *imgView->img,
+							layout, subres, record->queueFamily);
+					}
 				}
 			}
 		} else {

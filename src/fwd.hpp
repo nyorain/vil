@@ -122,6 +122,7 @@ struct CowImageRange;
 struct CowBufferRange;
 
 struct RecordBuilder;
+struct CowResolveOp;
 
 // TODO: find good place
 //

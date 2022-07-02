@@ -554,7 +554,17 @@ void recordResolve(Device& dev, CowResolveOp& op, CowImageRange& cow) {
 	cow.range = {};
 }
 
+CowImageRange::CowImageRange() {
+	++DebugStats::get().aliveImageCows;
+}
+
 CowImageRange::~CowImageRange() {
+	--DebugStats::get().aliveImageCows;
+
+	TODO: source might be null. Moving it into source block might be
+		a data race when resolved at same from another thread.
+		solution is probably just to store a Device ref in each CowImageRange,
+		ugh that is terrible.
 	std::lock_guard lock(source->dev->mutex);
 
 	if(source) {
@@ -586,7 +596,13 @@ CowImageRange::~CowImageRange() {
 	}
 }
 
+CowBufferRange::CowBufferRange() {
+	++DebugStats::get().aliveBufferCows;
+}
+
 CowBufferRange::~CowBufferRange() {
+	--DebugStats::get().aliveBufferCows;
+
 	std::lock_guard lock(source->dev->mutex);
 
 	if(source) {
@@ -606,6 +622,23 @@ CowBufferRange::~CowBufferRange() {
 }
 
 bool allowCowLocked(const Image& img) {
+	// NOTE: we currently only allow images that are only ever written
+	// via transfer because we can track this efficiently. Determining
+	// when images are potentially written via other means (e.g. storage
+	// image/mapping etc) is harder and might result in performance problems.
+	// TODO: at least support color/depthStencil attachment? also easy to track
+	auto allowedUsageFlags =
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+		VK_IMAGE_USAGE_SAMPLED_BIT |
+		VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+		VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT |
+		VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+	if(img.ci.tiling != VK_IMAGE_TILING_OPTIMAL ||
+			(img.ci.usage & (~allowedUsageFlags)) != 0u) {
+		return false;
+	}
+
 	// we don't have proper support for tracking the memory of
 	// sparse bindings yet
 	if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT) {
@@ -626,6 +659,9 @@ bool allowCowLocked(const Image& img) {
 }
 
 bool allowCowLocked(const Buffer& buf) {
+	// TODO: buffers currently not supported at all
+	return false;
+
 	// we don't have proper support for tracking the memory of
 	// sparse bindings yet
 	if(buf.ci.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT) {

@@ -62,6 +62,8 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 		}
 	}
 
+	for(auto& cop : sub
+
 	if(subm.ourFence) {
 		dev.dispatch.ResetFences(dev.handle, 1, &subm.ourFence);
 		dev.fencePool.push_back(subm.ourFence);

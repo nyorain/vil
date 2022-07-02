@@ -111,6 +111,11 @@ private:
 
 	// Can only be called once per frame
 	void displayImage(Draw& draw, const CopiedImage& img);
+	void displayImage(Draw& draw, VkImage source,
+		const VkExtent3D& extent, VkFormat format,
+		VkImageSubresourceRange range,
+		VkImageLayout initialLayout,
+		VkImageLayout finalLayout);
 
 private:
 	friend class Gui;

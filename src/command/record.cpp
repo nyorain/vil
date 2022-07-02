@@ -224,4 +224,15 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) 
 	return ret;
 }
 
+bool potentiallyWrites(const CommandRecord& rec, const Image& img) {
+	auto mi = const_cast<DeviceHandle*>(static_cast<const DeviceHandle*>(&img));
+	auto it = rec.handles.find(mi);
+	if(it == rec.handles.end()) {
+		return false;
+	}
+
+	auto& usedImage = static_cast<UsedImage&>(*it->second);
+	return usedImage.potentiallyWrites;
+}
+
 } // namespace vil

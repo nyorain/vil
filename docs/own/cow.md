@@ -134,5 +134,164 @@ checkCow(submission)
 The most costly one will be the descriptorSets.
 But for most sets we can probably early-out, add fast path in
 layout for sets that don't have any writable bindings to begin with?
+
+__For now, let's just ignore storage image writes, it's too hard to track
+efficiently. We just focus on resources (for now: only images) written
+explicitly, i.e. via transfer. Add support for attachments later__
 					
-	
+# Support mappable resources
+
+in MapMemory:
+
+```
+
+	// resolve cows of mapped resources
+	const auto mapEnd = mem.mapOffset + mem.mapSize;
+
+	std::optional<CowResolveOp> cowResolve;
+	auto getCowResolve = [&]() -> decltype(auto) {
+		if(cowResolve) {
+			return *cowResolve;
+		}
+
+		// create
+		auto& cr = cowResolve.emplace();
+		initLocked(dev, cr);
+		return cr;
+	};
+
+	for(auto* alloc : mem.allocations) {
+		if(alloc->allocationOffset + alloc->allocationSize <= offset) {
+			// no overlap
+			continue;
+		}
+
+		if(alloc->allocationOffset >= mapEnd) {
+			// break here, allocations are sorted by offset
+			break;
+		}
+
+		if(alloc->objectType == VK_OBJECT_TYPE_BUFFER) {
+			auto& img = static_cast<Image&>(*alloc);
+			for(auto& cow : img.cows) {
+				recordResolve(dev, getCowResolve(), *cow);
+			}
+			img.cows.clear();
+		} else if(alloc->objectType == VK_OBJECT_TYPE_IMAGE) {
+			auto& buf = static_cast<Buffer&>(*alloc);
+			for(auto& cow : buf.cows) {
+				recordResolve(dev, getCowResolve(), *cow);
+			}
+			buf.cows.clear();
+		} else {
+			dlg_error("unreachable");
+		}
+	}
+
+	if(cowResolve) {
+		auto& cr = *cowResolve;
+		++cr.queue->submissionCounter;
+
+		VkSubmitInfo si {};
+		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		si.commandBufferCount = 1u;
+		si.pCommandBuffers = &cr.cb;
+
+		// add full sync
+		dlg_assert(dev.doFullSync);
+
+		ThreadMemScope tms;
+		auto maxWaitSemCount = dev.queues.size();
+		auto waitSems = tms.alloc<VkSemaphore>(maxWaitSemCount);
+		auto waitStages = tms.alloc<VkPipelineStageFlags>(maxWaitSemCount);
+		auto waitVals = tms.alloc<u64>(maxWaitSemCount);
+		auto waitSemCount = 0u;
+
+		for(auto& pqueue : dev.queues) {
+			auto& queue = *pqueue;
+			if(&queue == cr.queue) {
+				continue;
+			}
+
+			// check if pending submissions on this queue
+			u64 finishedID;
+			dev.dispatch.GetSemaphoreCounterValue(dev.handle,
+				queue.submissionSemaphore, &finishedID);
+			if(finishedID == queue.submissionCounter) {
+				continue;
+			}
+
+			waitVals[waitSemCount] = queue.submissionCounter;
+			waitSems[waitSemCount] = queue.submissionSemaphore;
+			waitStages[waitSemCount] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+			++waitSemCount;
+		}
+
+		si.pWaitDstStageMask = waitStages.data();
+		si.pWaitSemaphores = waitSems.data();
+		si.waitSemaphoreCount = waitSemCount;
+		si.signalSemaphoreCount = 1u;
+		si.pSignalSemaphores = &cr.queue->submissionSemaphore;
+
+		VkTimelineSemaphoreSubmitInfo tsInfo {};
+		tsInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+		tsInfo.waitSemaphoreValueCount = waitSemCount;
+		tsInfo.pWaitSemaphoreValues = waitVals.data();
+		tsInfo.signalSemaphoreValueCount = 1u;
+		tsInfo.pSignalSemaphoreValues = &cr.queue->submissionCounter;
+
+		si.pNext = &tsInfo;
+
+		auto res = dev.dispatch.QueueSubmit(cr.queue->handle, 1u, &si, cr.fence);
+		dlg_assert(res == VK_SUCCESS);
+
+		finishLocked(dev, cr);
+	}
+```
+
+## Ordering and timeline semaphores
+
+Timeline semaphores allow this:
+
+1. submit batch2, waiting for timelineSemaphore ts==1, reading image A. Hooked.
+2. submit batch1, writing image A, signaling ts=1
+
+In this case, a trivial detection algorithm would add a cow to batch1,
+just because it is submitted later than batch2. But batch1 is actually
+executed before batch2, therefore not needing the cow (and actually
+making the cow incorrect as it would be added before the changes made
+by batch1, which in turn would be visible by batch2 and the hooked
+command tho).
+How can our resolving algorithm detect this?
+It really seems like we have to inspect the whole submission graph and
+check if the batch is ready to execute? And only mark cows as 'active'
+as soon as we detect the batch to be logically ready for execution (i.e.
+we know all submissions happening before it). And not resolve cows
+before they are 'active'.
+But even then, we wouldn't catch all cases. We would incorrectly add
+the resolve to the first submitted-out-of-order write submission.
+So, in conclusion, we would have to postpone the cow adding (or activating) 
+and resolve op scheduling until we know a submission to be logically ready.
+
+Wow, that complicates things a lot!
+On the other hand, having such an application submission graph would be
+useful anyways.
+
+What about binary semaphores?
+We know that submissions can't be out-of-order and yet chained,
+that's not allowed. So we don't need that logic there. But maybe it's
+easier to implement it independently of semaphore type.
+
+----
+
+And what about events?
+In theory, an application could do the following
+
+- submit workload A (that waits on Event E in beginning) on queue Q1
+- submit workload B on queue Q2
+- wait on host until workload B is finished, only then signal E
+
+That creates an invisible dependency from B to A.
+No idea if this is valid per spec. No idea if we can support this at all.
+In the end we could still disable cows if events are used or something (or
+based on an environment variable).

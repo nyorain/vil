@@ -43,9 +43,9 @@ struct BufferRangeCopy;
 struct CowResolveOp {
 	// To be signaled when operation is finished.
 	// Will be returned to the pool when completed.
-	VkFence fence;
-	VkCommandBuffer cb;
-	Queue* queue;
+	VkFence fence {};
+	VkCommandBuffer cb {};
+	Queue* queue {};
 
 	// They point directly into the respective ImageRangeCopy/BufferRangeCopy
 	// objects
@@ -58,18 +58,18 @@ struct CowResolveOp {
 };
 
 struct ImageRangeCopy {
-	CowResolveOp* op;
+	CowResolveOp* op {};
 	CopiedImage img;
 };
 
 struct BufferRangeCopy {
-	CowResolveOp* op;
+	CowResolveOp* op {};
 	OwnBuffer buf;
 };
 
 struct CowImageRange {
 	std::variant<std::monostate, BufferRangeCopy, ImageRangeCopy> copy;
-	u32 refCount {};
+	std::atomic<u32> refCount {}; // TODO(PERF): do we need atomic here?
 	bool imageAsBuffer {};
 
 	Image* source {};
@@ -81,12 +81,13 @@ struct CowImageRange {
 		VkBufferUsageFlags addBufferFlags;
 	};
 
+	CowImageRange();
 	~CowImageRange();
 };
 
 struct CowBufferRange {
 	std::optional<BufferRangeCopy> copy;
-	u32 refCount {};
+	std::atomic<u32> refCount {}; // TODO(PERF): do we need atomic here?
 
 	Buffer* source {};
 	VkDeviceSize offset {};
@@ -95,6 +96,7 @@ struct CowBufferRange {
 	u32 queueFams {}; // bitset
 	VkBufferUsageFlags addFlags {};
 
+	CowBufferRange();
 	~CowBufferRange();
 };
 

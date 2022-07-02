@@ -7,6 +7,7 @@
 #include <threadContext.hpp>
 #include <ds.hpp>
 #include <rp.hpp>
+#include <cow.hpp>
 #include <util/util.hpp>
 
 namespace vil {
@@ -15,6 +16,28 @@ namespace vil {
 Image::~Image() {
 	if(!dev) {
 		return;
+	}
+
+	// resolve cows
+	// TODO: move this to a "finish" method called from vkDestroyImage?
+	// we really don't want to do this in a destructor.
+	{
+		std::lock_guard lock(dev->mutex);
+
+		if(!cows.empty()) {
+			CowResolveOp op;
+			initLocked(*dev, op);
+
+			[[maybe_unused]] auto numCows = cows.size();
+			for(auto* cow : cows) {
+				recordResolve(*dev, op, *cow);
+			}
+
+			dlg_trace("waiting on device to resolve {} cows inside image destructor", numCows);
+			finishLocked(*dev, op);
+
+			dlg_assert(cows.size() == 0u);
+		}
 	}
 
 	invalidateCbs();

@@ -633,7 +633,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-void useHandleImpl(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
+auto& useHandleImpl(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
 	auto it = rec.handles.find(&handle);
 	if(it == rec.handles.end()) {
 		auto& uh = construct<UsedHandle>(rec, rec);
@@ -641,6 +641,7 @@ void useHandleImpl(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
 	}
 
 	it->second->commands.push_back(&cmd);
+	return *it->second;
 }
 
 UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
@@ -655,8 +656,8 @@ UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 	return static_cast<UsedImage&>(*it->second);
 }
 
-void useHandle(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
-	useHandleImpl(rec, cmd, handle);
+auto& useHandle(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
+	return useHandleImpl(rec, cmd, handle);
 }
 
 UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& img) {
@@ -673,44 +674,50 @@ UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& img) {
 	return ui;
 }
 
-void useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = true) {
-	useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
+auto& useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = true) {
+	auto& ret = useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
 	dlg_assert(view.img);
 	if(useImg && view.img) {
 		useHandle(rec, cmd, *view.img);
 	}
+	return ret;
 }
 
-void useHandle(CommandRecord& rec, Command& cmd, Buffer& buf) {
-	useHandle(rec, cmd, static_cast<DeviceHandle&>(buf));
+auto& useHandle(CommandRecord& rec, Command& cmd, Buffer& buf) {
+	auto& ret = useHandle(rec, cmd, static_cast<DeviceHandle&>(buf));
 
 	// NOTE: can currently fail for sparse bindings i guess
 	dlg_assert(buf.memory);
 	if(buf.memory) {
 		useHandle(rec, cmd, *buf.memory);
 	}
+
+	return ret;
 }
 
-void useHandle(CommandRecord& rec, Command& cmd, BufferView& view) {
-	useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
+auto& useHandle(CommandRecord& rec, Command& cmd, BufferView& view) {
+	auto& ret = useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
 
 	dlg_assert(view.buffer);
 	if(view.buffer) {
 		useHandle(rec, cmd, *view.buffer);
 	}
+
+	return ret;
 }
 
-void useHandle(CommandRecord& rec, Command& cmd, Image& image, VkImageLayout newLayout) {
+auto& useHandle(CommandRecord& rec, Command& cmd, Image& image, VkImageLayout newLayout) {
 	auto& img = useHandle(rec, cmd, image);
 	img.layoutChanged = true;
 	img.finalLayout = newLayout;
+	return img;
 }
 
 template<typename... Args>
-void useHandle(CommandBuffer& cb, Args&&... args) {
+auto& useHandle(CommandBuffer& cb, Args&&... args) {
 	dlg_assert(cb.state() == CommandBuffer::State::recording);
 	dlg_assert(cb.builder().record_);
-	useHandle(*cb.builder().record_, std::forward<Args>(args)...);
+	return useHandle(*cb.builder().record_, std::forward<Args>(args)...);
 }
 
 // commands
@@ -732,7 +739,13 @@ void cmdBarrier(
 
 		auto& img = get(*cb.dev, imgb.image);
 		cmd.images[i] = &img;
-		useHandle(cb, cmd, img, imgb.newLayout);
+
+		auto& usedImage = useHandle(cb, cmd, img, imgb.newLayout);
+		if(imgb.oldLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+			// this is the only layout transition case that can irreversibly
+			// alter the images contents
+			usedImage.potentiallyWrites = true;
+		}
 
 		imgb.image = img.handle;
 	}
@@ -1471,7 +1484,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	cmd.filter = filter;
 
 	useHandle(cb, cmd, src);
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	cb.dev->dispatch.CmdBlitImage(cb.handle(),
 		src.handle, srcImageLayout,
@@ -1497,7 +1510,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage2(
 	cmd.filter = info->filter;
 
 	useHandle(cb, cmd, src);
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	auto copy = *info;
 	copy.srcImage = src.handle;
@@ -1524,7 +1537,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	upgradeSpan(cb, cmd.copies, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	cb.dev->dispatch.CmdCopyBufferToImage(cb.handle(),
 		src.handle, dst.handle, dstImageLayout, regionCount, pRegions);
@@ -1546,7 +1559,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2(
 	cmd.copies = copySpan(cb, info->pRegions, info->regionCount);
 
 	useHandle(cb, cmd, src);
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	auto copy = *info;
 	copy.srcBuffer = src.handle;
@@ -1619,7 +1632,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 	cmd.dstLayout = imageLayout;
 	cmd.ranges = copySpan(cb, pRanges, rangeCount);
 
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	cb.dev->dispatch.CmdClearColorImage(cb.handle(),
 		dst.handle, imageLayout, pColor, rangeCount, pRanges);
@@ -1641,7 +1654,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 	cmd.value = *pDepthStencil;
 	cmd.ranges = copySpan(cb, pRanges, rangeCount);
 
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	cb.dev->dispatch.CmdClearDepthStencilImage(cb.handle(), dst.handle,
 		imageLayout, pDepthStencil, rangeCount, pRanges);
@@ -1689,7 +1702,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	upgradeSpan(cb, cmd.regions, pRegions, regionCount);
 
 	useHandle(cb, cmd, src);
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	cb.dev->dispatch.CmdResolveImage(cb.handle(), src.handle, srcImageLayout,
 		dst.handle, dstImageLayout, regionCount, pRegions);
@@ -1712,7 +1725,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage2(
 	cmd.regions = copySpan(cb, info->pRegions, info->regionCount);
 
 	useHandle(cb, cmd, src);
-	useHandle(cb, cmd, dst);
+	useHandle(cb, cmd, dst).potentiallyWrites = true;
 
 	auto copy = *info;
 	copy.dstImage = dst.handle;
@@ -1793,12 +1806,15 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 			// command buffers.
 			if(handle->objectType == VK_OBJECT_TYPE_IMAGE) {
 				auto& ui = static_cast<UsedImage&>(*uh);
+				auto& dst = useHandleImpl(parentRec, cmd, static_cast<Image&>(*handle));
+				dst.potentiallyWrites |= ui.potentiallyWrites;
+
 				if(ui.layoutChanged) {
-					auto& dst = useHandleImpl(parentRec, cmd, static_cast<Image&>(*handle));
 					dst.layoutChanged = true;
 					dst.finalLayout = ui.finalLayout;
-					break;
 				}
+
+				continue;
 			}
 
 			useHandleImpl(parentRec, cmd, *handle);

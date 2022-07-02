@@ -159,7 +159,15 @@ public: // TODO, for cow. Maybe just move them to Device?
 // Collection of data we got out of a submission/command.
 struct CommandHookState {
 	struct CopiedDescriptor {
-		std::variant<std::monostate, CopiedImage, OwnBuffer> data;
+		std::variant<
+			// No descriptor copied.
+			std::monostate,
+			// The added cow or already resolved copy.
+			IntrusivePtr<CowImageRange>,
+			// The copied buffer.
+			// NOTE: will be made CowBufferRange ptr in future
+			OwnBuffer
+		> data;
 	};
 
 	struct CopiedAttachment {
@@ -239,6 +247,7 @@ struct CommandHookRecord {
 	VkRenderPass rp1 {};
 	VkRenderPass rp2 {};
 
+	// The CommandHookState owned by this
 	IntrusivePtr<CommandHookState> state {};
 	OwnBuffer dummyBuf {};
 

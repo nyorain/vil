@@ -263,6 +263,7 @@ struct UsedHandle {
 struct UsedImage : UsedHandle {
 	using UsedHandle::UsedHandle;
 	bool layoutChanged {};
+	bool potentiallyWrites {};
 	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
 };
 
@@ -298,5 +299,7 @@ DescriptorSet& access(const BoundDescriptorSet&);
 // Otherwise returns the map of all bound descriptors to their
 // created/retrieved cows.
 CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command&);
+
+[[nodiscard]] bool potentiallyWrites(const CommandRecord&, const Image& img);
 
 } // namespace vil

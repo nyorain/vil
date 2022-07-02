@@ -109,6 +109,13 @@ struct SubmissionBatch {
 	// Device pool semaphores that should be re-added to the pool after this.
 	// Only currently used when timeline semaphores aren't available.
 	std::vector<VkSemaphore> poolSemaphores {};
+
+	// Might have multiple CowResolveOps in the case where the submission
+	// first contained a cow resolve, then a hooked cb that added a cow and
+	// then another cb that potentially writes the cow'd handle.
+	// We can't combine those resolves into one op.
+	// TODO WIP
+	// std::vector<std::unique_ptr<CowResolveOp>> cowResolveOps {};
 };
 
 // Expects dev.mutex to be locked.

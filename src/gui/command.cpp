@@ -930,14 +930,35 @@ void CommandViewer::displayDs(Draw& draw) {
 				}
 
 				dlg_assert(state_->copiedDescriptors.size() == 1u);
-				auto* img = std::get_if<CopiedImage>(&state_->copiedDescriptors[0].data);
+				auto* img = std::get_if<IntrusivePtr<CowImageRange>>(&state_->copiedDescriptors[0].data);
 				if(!img) {
 					dlg_assert(state_->copiedDescriptors[0].data.index() == 0);
 					imGuiText("Error copying descriptor image. See log output");
 					return;
 				}
 
-				displayImage(draw, *img);
+				// TODO(important): slightly inconsitent depending on whether it
+				// was copied or not, see the displayImage overloads.
+				// In one, we will use the original image range to be copied,
+				// in the other we start counting at 0.
+				auto& cow = *img;
+				if(cow->source) { // not copied, use original image
+					auto& source = *cow->source;
+					displayImage(draw, source.handle, source.ci.extent,
+						source.ci.format, cow->range, source.pendingLayout,
+						source.pendingLayout);
+					draw.usedHandles.push_back(cow->source);
+				} else {
+					dlg_assert(!cow->imageAsBuffer);
+					dlg_assert(cow->copy.index() == 2u);
+					auto& imgCopy = std::get<2>(cow->copy);
+					if(imgCopy.op) {
+						finishLocked(dev(), *imgCopy.op);
+					}
+
+					dlg_assert(!imgCopy.op);
+					displayImage(draw, imgCopy.img);
+				}
 			}
 		}
 	} else if(dsCat == DescriptorCategory::bufferView) {
@@ -1534,29 +1555,39 @@ void CommandViewer::updateHook() {
 }
 
 void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
-	ImGui::Separator();
-
 	dlg_assert(img.aspectMask);
 	dlg_assert(img.image);
 	dlg_assert(state_);
 
 	draw.usedHookState = state_;
 
-	// TODO: when a new CopiedImage is displayed we could reset the
-	//   color mask flags. In some cases this is desired but probably
-	//   not in all.
-	auto flags = ImageViewer::preserveSelection |
-		ImageViewer::preserveZoomPan |
-		ImageViewer::preserveReadbacks |
-		ImageViewer::supportsTransferSrc;
 	auto imgLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	// TODO: we should probably use information about the original
 	//   range (e.g. from VkImageView if there is one; or from the
 	//   copy op). But not 100% what's better for gui, a level/layer
 	//   slider beginning at a number that isn't 0 might be confusing.
 	auto range = img.subresRange();
-	imageViewer_.select(img.image, img.extent, minImageType(img.extent),
-		img.format, range, imgLayout, imgLayout, flags);
+	this->displayImage(draw, img.image, img.extent,
+		img.format, range, imgLayout, imgLayout);
+}
+
+void CommandViewer::displayImage(Draw& draw, VkImage source,
+		const VkExtent3D& extent, VkFormat format,
+		VkImageSubresourceRange range,
+		VkImageLayout initialLayout,
+		VkImageLayout finalLayout) {
+	ImGui::Separator();
+
+	// TODO: when a new Image is displayed we could reset the
+	//   color mask flags. In some cases this is desired but probably
+	//   not in all.
+	auto flags = ImageViewer::preserveSelection |
+		ImageViewer::preserveZoomPan |
+		ImageViewer::preserveReadbacks |
+		ImageViewer::supportsTransferSrc;
+
+	imageViewer_.select(source, extent, minImageType(extent),
+		format, range, initialLayout, finalLayout, flags);
 	imageViewer_.display(draw);
 }
 
