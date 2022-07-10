@@ -196,6 +196,8 @@ span<AccelStructDescriptor> accelStructs(DescriptorStateRef, unsigned binding);
 span<std::byte> inlineUniformBlock(DescriptorStateRef, unsigned binding);
 
 // Vulkan descriptor set handle
+// PERF: would be nice to reduce its size. Statically allocated with maxSets
+// in descriptorPool.
 struct DescriptorSet : DeviceHandle {
 	DescriptorPool* pool {};
 	VkDescriptorSet handle {};

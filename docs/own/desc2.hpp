@@ -1,12 +1,17 @@
 #pragma once
 
 #include <rp.hpp>
+#include <command/desc.hpp>
+#include <command/commands.hpp>
 #include <util/span.hpp>
 
 #include <string>
 #include <variant>
 
 namespace vil::rd {
+
+// The idea behind these more abstract CommandRecord descriptions:
+// Mainly faster and better matching.
 
 struct Label;
 struct RenderPass;
@@ -31,6 +36,7 @@ struct CommandSpan {
 struct Block {
 	BlockType type;
 	CommandSpan span;
+	Block* next;
 };
 
 struct BasicBlock : Block {
@@ -44,7 +50,7 @@ struct BasicBlock : Block {
 };
 
 struct Level : Block {
-	std::vector<Block> blocks;
+	Block* blocks; // forward linked list
 };
 
 struct Label : Level {
@@ -89,5 +95,61 @@ struct CommandDesc {
 // command, block must be of CommandType::draw.
 Command* match(const Block& srcBlock, const Block& dstBlock,
 	Command& dstCmd, span<const Handle*> dstDescriptors = {});
+
+
+inline bool isActionCommand(Command& cmd) {
+	// special cases
+	if(dynamic_cast<const BeginDebugUtilsLabelCmd*>(&cmd)) {
+		return true;
+	}
+
+	return cmd.type() == CommandType::dispatch ||
+		cmd.type() == CommandType::buildAccelStruct ||
+		cmd.type() == CommandType::draw ||
+		// Not sure about this one. Could improve matching
+		// cmd.type() == CommandType::query ||
+		cmd.type() == CommandType::traceRays ||
+		cmd.type() == CommandType::transfer;
+}
+
+// let's assume we have this.
+Command* getPrev(Command& cmd);
+
+inline std::pair<Command*, Command*> findContext(Command& cmd) {
+	auto prev = getPrev(cmd);
+	while(prev && !isActionCommand(*prev)) {
+		prev = getPrev(*prev);
+	}
+
+	auto next = cmd.next;
+	while(next && !isActionCommand(*next)) {
+		next = next->next;
+	}
+
+	return {prev, next};
+}
+
+inline float matchContext(Command& a, Command& b) {
+	// TODO: consider context across submission boundaries
+	auto c1 = findContext(a);
+	auto c2 = findContext(b);
+
+	// TODO: consider additional data for matching below, e.g.
+	// descriptorSets
+	Matcher m;
+
+	if(c1.first && c2.first) {
+		m = c1.first->match(*c2.first);
+	}
+
+	if(c1.second && c2.second) {
+		auto m2 = c1.second->match(*c2.second);
+		// really add? or multiply match?
+		m.match += m2.match;
+		m.total += m2.total;
+	}
+
+	return eval(m);
+}
 
 } // namespac vil::rd

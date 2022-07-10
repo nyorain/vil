@@ -322,7 +322,9 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 }
 
 void CommandViewer::displayTransferIOList() {
-	auto& cmd = nonNull(command_);
+	dlg_assert(command_);
+
+	auto& cmd = *command_;
 	dlg_assert(cmd.type() == CommandType::transfer);
 
 	// TODO: add support for viewing buffers here.
@@ -418,7 +420,9 @@ void CommandViewer::displayTransferIOList() {
 }
 
 void CommandViewer::displayDsList() {
-	auto& baseCmd = nonNull(command_);
+	dlg_assert(command_);
+
+	auto& baseCmd = *command_;
 
 	const StateCmdBase* cmd {};
 	const DrawCmdBase* drawCmd {};
@@ -582,7 +586,8 @@ void CommandViewer::displayDsList() {
 }
 
 void CommandViewer::displayIOList() {
-	auto& cmd = nonNull(command_);
+	dlg_assert(command_);
+	auto& cmd = *command_;
 
 	const StateCmdBase* stateCmd {};
 	const DrawCmdBase* drawCmd {};
@@ -838,8 +843,9 @@ void CommandViewer::displayDs(Draw& draw) {
 
 		// general info
 		auto& elem = buffers(state, bindingID)[elemID];
-		auto& srcBuf = nonNull(elem.buffer);
-		refButton(gui, srcBuf);
+		dlg_assert(elem.buffer);
+
+		refButton(gui, *elem.buffer);
 		ImGui::SameLine();
 		drawOffsetSize(elem, dynOffset);
 
@@ -867,17 +873,19 @@ void CommandViewer::displayDs(Draw& draw) {
 		if(stage) {
 			auto& compiled = specializeSpirv(*stage);
 			// TODO: reuse found resource from displayDescriptorStageSelector
-			auto res = nonNull(resource(compiled, setID, bindingID, dsType));
-			auto name = compiled.get_name(res.id);
+			auto res = resource(compiled, setID, bindingID, dsType);
+			dlg_assert(res);
+
+			auto name = compiled.get_name(res->id);
 			if(name.empty()) {
-				name = compiled.get_name(res.base_type_id);
+				name = compiled.get_name(res->base_type_id);
 				if(name.empty()) {
 					name = "?";
 				}
 			}
 
 			ThreadMemScope memScope;
-			auto* type = buildType(compiled, res.type_id, memScope.customUse());
+			auto* type = buildType(compiled, res->type_id, memScope.customUse());
 			displayTable(name.c_str(), *type, buf->data());
 		} else {
 			ImGui::Text("Binding not used in pipeline");
@@ -899,7 +907,9 @@ void CommandViewer::displayDs(Draw& draw) {
 		if(needsImageView(dsType)) {
 			// general info
 			auto& elem = images(state, bindingID)[elemID];
-			auto& imgView = nonNull(elem.imageView);
+			dlg_assert(elem.imageView);
+
+			auto& imgView = *elem.imageView;
 			refButton(gui, imgView);
 
 			ImGui::SameLine();
@@ -954,17 +964,19 @@ void CommandViewer::displayDs(Draw& draw) {
 		if(stage) {
 			auto& compiled = specializeSpirv(*stage);
 			// TODO: reuse found resource from displayDescriptorStageSelector
-			auto res = nonNull(resource(compiled, setID, bindingID, dsType));
-			auto name = compiled.get_name(res.id);
+			auto res = resource(compiled, setID, bindingID, dsType);
+			dlg_assert(res);
+
+			auto name = compiled.get_name(res->id);
 			if(name.empty()) {
-				name = compiled.get_name(res.base_type_id);
+				name = compiled.get_name(res->base_type_id);
 				if(name.empty()) {
 					name = "?";
 				}
 			}
 
 			ThreadMemScope memScope;
-			auto* type = buildType(compiled, res.type_id, memScope.customUse());
+			auto* type = buildType(compiled, res->type_id, memScope.customUse());
 			displayTable(name.c_str(), *type, blockData);
 		} else {
 			ImGui::Text("Binding not used in pipeline");
@@ -1075,7 +1087,8 @@ void CommandViewer::displayPushConstants() {
 }
 
 void CommandViewer::displayTransferData(Draw& draw) {
-	auto& cmd = nonNull(command_);
+	dlg_assert(command_);
+	auto& cmd = *command_;
 
 	if(!state_) {
 		ImGui::Text("Waiting for a submission...");
@@ -1195,7 +1208,9 @@ void CommandViewer::displayTransferData(Draw& draw) {
 }
 
 void CommandViewer::displayVertexViewer(Draw& draw) {
-	auto& cmd = nonNull(command_);
+	dlg_assert(command_);
+
+	auto& cmd = *command_;
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
 	dlg_assert_or(drawCmd, return);
 
@@ -1429,7 +1444,7 @@ void CommandViewer::draw(Draw& draw) {
 
 	dlg_assert(record_->invalidated.empty());
 
-	auto& bcmd = nonNull(command_);
+	auto& bcmd = *command_;
 	auto actionCmd = bcmd.type() == CommandType::dispatch ||
 		bcmd.type() == CommandType::draw ||
 		bcmd.type() == CommandType::traceRays ||

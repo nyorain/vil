@@ -176,9 +176,9 @@ FindResult find(const Command* root, span<const Command*> dst,
 		auto m = it->match(*dst[0]);
 		auto em = eval(m);
 
-		// NOTE: early-continue on less-than-best here incorrect,
-		// we might increase the matching value below.
-		if(em == 0.f /*|| em < bestMatch*/) {
+		// NOTE: early-continue on less-than-best here incorrect for
+		// non-parent commands we might increase the matching value below.
+		if(em == 0.f || (em < bestMatch && dst.size() > 1)) {
 			continue;
 		}
 
@@ -285,8 +285,19 @@ FindResult find(const Command* root, span<const Command*> dst,
 // https://en.wikipedia.org/wiki/Longest_common_subsequence_problem
 // TODO: can probably use a better algorithm but haven't found one
 //   yet. We are full O(n^2) here. For everything.
+//   But since n is the number of total ParentCommands per frame
+//   (pretty much only labels or render passes) this should be fine.
+//   Note that the recursive nature of our matching DOES help, i.e.
+//   deep nests of ParentCommands (e.g. via lables) are easier to match
+//   due to early-outs when matching on high levels.
 // TODO: at least early-skip common begin/end. Which means this would
-//   be ~O(n) for very similar batches which would be okay again.
+//   be ~O(n) for very similar batches which would be significantly better.
+//   This would also make our recursive matching even more helpful for performance!
+// TODO: I really feel like we could come up with some lazy-matching algorithm
+//   that tries the diagonal first and then expands from there. Pretty sure
+//   that we can be SURE at some points that no way through the matrix
+//   further away from the diagonal will be faster. Effectively giving
+//   us something closer to O(n) again
 // TODO: memory optimization: our current use of ThreadMemScope will
 //   keep all memory needed during matching alive. That's bad.
 //   Could recursively more local ThreadMemScopes. But then we'd have

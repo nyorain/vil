@@ -26,8 +26,9 @@ void copyChainInPlace(CommandBuffer& cb, const void*& pNext) {
 		auto size = structSize(it->sType);
 		dlg_assertm_or(size > 0, it = it->pNext; continue,
 			"Unknown structure type: {}", it->sType);
+		dlg_assert(cb.builder().record_);
 
-		auto& rec = nonNull(cb.builder().record_);
+		auto& rec = *cb.builder().record_;
 		auto buf = rec.alloc.allocate(size, __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 		auto dst = reinterpret_cast<VkBaseInStructure*>(buf);
 		// TODO: technicallly UB to not construct object via placement new.
@@ -147,6 +148,12 @@ CommandBuffer::~CommandBuffer() {
 			builder_.record_->hookRecords.clear();
 		}
 
+		if(lastRecord_) {
+			dlg_assert(lastRecord_->cb == this || lastRecord_->cb == nullptr);
+			lastRecord_->cb = nullptr;
+			lastRecord_->hookRecords.clear();
+		}
+
 		invalidateCbsLocked();
 		notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_COMMAND_BUFFER);
 	}
@@ -219,21 +226,25 @@ void CommandBuffer::doReset(bool startRecord) {
 		// our data at the same time.
 		if(startRecord) {
 			++recordCount_;
-
-			dlg_assert(!computeState_);
-			dlg_assert(!graphicsState_);
-			dlg_assert(!rayTracingState_);
-			dlg_assert(!builder_.section_);
-
-			builder_.reset(*this);
+			// actually start the new record below, outside of the critical section
+			// since it will allocate memory and it's not publicly exposed.
 			state_ = CommandBuffer::State::recording;
-
-			computeState_ = &construct<ComputeState>(*this);
-			graphicsState_ = &construct<GraphicsState>(*this);
-			rayTracingState_ = &construct<RayTracingState>(*this);
 		} else {
 			state_ = CommandBuffer::State::initial;
 		}
+	}
+
+	if(startRecord) {
+		dlg_assert(!computeState_);
+		dlg_assert(!graphicsState_);
+		dlg_assert(!rayTracingState_);
+		dlg_assert(!builder_.section_);
+
+		builder_.reset(*this);
+
+		computeState_ = &construct<ComputeState>(*this);
+		graphicsState_ = &construct<GraphicsState>(*this);
+		rayTracingState_ = &construct<RayTracingState>(*this);
 	}
 }
 
@@ -849,7 +860,7 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 			dlg_assert(attachment.img);
 
 			useHandle(cb, cmd, attachment, false);
-			useHandle(cb, cmd, nonNull(attachment.img),
+			useHandle(cb, cmd, *attachment.img,
 				cmd.rp->desc.attachments[i].finalLayout);
 
 			cmd.attachments[i] = &attachment;

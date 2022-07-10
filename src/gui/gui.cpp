@@ -30,6 +30,15 @@
 #include <fstream>
 #include <filesystem>
 
+// TODO: tmp
+#ifdef VIL_DEBUG
+	#define VIL_VIZ_LCS
+#endif // DEBUG
+
+#ifdef VIL_VIZ_LCS
+	#include <gui/vizlcs.hpp>
+#endif // VIL_VIZ_LCS
+
 inline namespace imgui_vil {
 
 thread_local ImGuiContext* __LayerImGui;
@@ -995,7 +1004,7 @@ void Gui::drawMemoryUI(Draw&) {
 	auto hasMemBudget = contains(dev().allExts, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 	auto cols = 3u;
 	if(hasMemBudget) {
-		auto& ini = nonNull(dev().ini);
+		auto& ini = *dev().ini;
 		dlg_assert(ini.dispatch.GetPhysicalDeviceMemoryProperties2);
 
 		memBudget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
@@ -1143,6 +1152,15 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 					ImGui::EndTabItem();
 				}
 			}
+
+#ifdef VIL_VIZ_LCS
+			if(ImGui::BeginTabItem("VizLCS", nullptr)) {
+				activeTab_ = Tab::overview; // HACK
+				static VizLCS vizlcs;
+				vizlcs.draw();
+				ImGui::EndTabItem();
+			}
+#endif // VIL_VIZ_LCS
 
 			ImGui::EndTabBar();
 		}

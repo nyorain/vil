@@ -2696,9 +2696,11 @@ void SetFragmentShadingRateCmd::record(const Device& dev, VkCommandBuffer cb) co
 
 // Conditional rendering
 void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+	dlg_assert(buffer);
+
 	VkConditionalRenderingBeginInfoEXT info {};
 	info.sType = VK_STRUCTURE_TYPE_CONDITIONAL_RENDERING_BEGIN_INFO_EXT;
-	info.buffer = nonNull(buffer).handle;
+	info.buffer = buffer->handle;
 	info.offset = offset;
 	info.flags = flags;
 

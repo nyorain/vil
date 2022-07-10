@@ -14,25 +14,25 @@
 
 using namespace vil;
 
-static_assert(u32(vilKeyA) == u32(swa_key_a));
-static_assert(u32(vilKeyX) == u32(swa_key_x));
-static_assert(u32(vilKeyC) == u32(swa_key_c));
-static_assert(u32(vilKeyV) == u32(swa_key_v));
-static_assert(u32(vilKeyZ) == u32(swa_key_z));
-static_assert(u32(vilKeyY) == u32(swa_key_y));
-static_assert(u32(vilKeyEnter) == u32(swa_key_enter));
-static_assert(u32(vilKeyTab) == u32(swa_key_tab));
-static_assert(u32(vilKeyLeft) == u32(swa_key_left));
-static_assert(u32(vilKeyRight) == u32(swa_key_right));
-static_assert(u32(vilKeyDown) == u32(swa_key_down));
-static_assert(u32(vilKeyUp) == u32(swa_key_up));
-static_assert(u32(vilKeySpace) == u32(swa_key_space));
-static_assert(u32(vilKeyBackspace) == u32(swa_key_backspace));
-static_assert(u32(vilKeyPageUp) == u32(swa_key_pageup));
-static_assert(u32(vilKeyPageDown) == u32(swa_key_pagedown));
-static_assert(u32(vilKeyHome) == u32(swa_key_home));
-static_assert(u32(vilKeyEnd) == u32(swa_key_end));
-static_assert(u32(vilKeyInsert) == u32(swa_key_insert));
+static_assert(u32(VilKeyA) == u32(swa_key_a));
+static_assert(u32(VilKeyX) == u32(swa_key_x));
+static_assert(u32(VilKeyC) == u32(swa_key_c));
+static_assert(u32(VilKeyV) == u32(swa_key_v));
+static_assert(u32(VilKeyZ) == u32(swa_key_z));
+static_assert(u32(VilKeyY) == u32(swa_key_y));
+static_assert(u32(VilKeyEnter) == u32(swa_key_enter));
+static_assert(u32(VilKeyTab) == u32(swa_key_tab));
+static_assert(u32(VilKeyLeft) == u32(swa_key_left));
+static_assert(u32(VilKeyRight) == u32(swa_key_right));
+static_assert(u32(VilKeyDown) == u32(swa_key_down));
+static_assert(u32(VilKeyUp) == u32(swa_key_up));
+static_assert(u32(VilKeySpace) == u32(swa_key_space));
+static_assert(u32(VilKeyBackspace) == u32(swa_key_backspace));
+static_assert(u32(VilKeyPageUp) == u32(swa_key_pageup));
+static_assert(u32(VilKeyPageDown) == u32(swa_key_pagedown));
+static_assert(u32(VilKeyHome) == u32(swa_key_home));
+static_assert(u32(VilKeyEnd) == u32(swa_key_end));
+static_assert(u32(VilKeyInsert) == u32(swa_key_insert));
 
 extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
 	auto& dev = getDeviceByLoader(vkDevice);
@@ -107,7 +107,7 @@ extern "C" VIL_EXPORT bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x
 	return false;
 }
 
-extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum vilKey keycode, bool pressed) {
+extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum VilKey keycode, bool pressed) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 
@@ -140,7 +140,7 @@ extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* u
 	return io.WantCaptureKeyboard || io.WantTextInput;
 }
 
-extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum vilKeyMod mod, bool active) {
+extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum VilKeyMod mod, bool active) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 
@@ -150,16 +150,16 @@ extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum v
 
 	auto& io = ov.gui.imguiIO();
 	switch(mod) {
-		case vilKeyModAlt:
+		case VilKeyModAlt:
 			io.KeyAlt = active;
 			break;
-		case vilKeyModCtrl:
+		case VilKeyModCtrl:
 			io.KeyCtrl = active;
 			break;
-		case vilKeyModSuper:
+		case VilKeyModSuper:
 			io.KeySuper = active;
 			break;
-		case vilKeyModShift:
+		case VilKeyModShift:
 			io.KeyShift = active;
 			break;
 		default:

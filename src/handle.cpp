@@ -329,8 +329,11 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
-	&DescriptorSetTypeImpl::instance,
 	&QueueTypeImpl::instance,
+	// TODO: we currently don't support this, it causes too many problems.
+	// E.g. the returned handles might be destroyed async in another thread,
+	// we don't use the device mutex for it. Could likely be fixed
+	// &DescriptorSetTypeImpl::instance,
 };
 
 const span<const ObjectTypeHandler*> ObjectTypeHandler::handlers = typeHandlers;

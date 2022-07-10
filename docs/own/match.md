@@ -155,3 +155,35 @@ VkPipeline and (to a lesser degree) VkImage. Short-lived handles
 are VkDescriptorSet and maybe (to a lesser degree) VkBuffer. We mainly
 want to consider the persistent handles, or at least give them a waaay
 higher weight.
+
+## Case study; Global finding
+
+Inspired by RDR2. Consider this case:
+An application submits 100 cbs in the pattern (work, barrier, work, barrier, ...),
+where work are the real command buffers containing render passes and 
+dispatches while 'barrier' is a command buffer just contains a single pipeline
+barrier. (such a pattern isn't too unlikely with multi threaded rendering I guess)
+
+Selecting one of the CmdPpipelineBarrier commands will completely break our 
+hooking mechanism since we will likely hook *all* of the 'barrier' command buffers.
+Even if we then select the correct one in the end via LCS, this causes
+horrible performance.
+
+This can only be fixed by already considering the context (beyond command
+buffer boundaries) when deciding whether to match or not.
+In this case, we need some prefix matching.
+
+Previous frame submissions: A B C D E F
+Selected command: a CmdPipelineBarrier in C
+
+This frame, so far: A' B' C' D'
+
+Now we want to check if we should hook C' (let's say e.g. C' and D' came
+in a single submission, i.e. we already know D').
+We can now do a LCS between the previous frame and what we know so far.
+When C' and C are selected (and even have a significant match), we
+go for it. 
+If they are not selected as match (e.g. C' is matched to E or with nothing at all)
+then we don't hook.
+If C and C' are matched by have a very low match maybe also skip the hook? not sure.
+Maybe only if we already had a better candidate this frame?

@@ -542,13 +542,15 @@ u32 getSpvExecutionModel(VkShaderStageFlagBits stage) {
 
 spc::Compiler& specializeSpirv(const PipelineShaderStage& stage) {
 	auto execModel = getSpvExecutionModel(stage.stage);
-	return specializeSpirv(nonNull(stage.spirv), stage.specialization,
+	dlg_assert(stage.spirv);
+	return specializeSpirv(*stage.spirv, stage.specialization,
 		stage.entryPoint, execModel);
 }
 
 std::unique_ptr<spc::Compiler> copySpecializeSpirv(const PipelineShaderStage& stage) {
 	auto execModel = getSpvExecutionModel(stage.stage);
-	return copySpecializeSpirv(nonNull(stage.spirv), stage.specialization,
+	dlg_assert(stage.spirv);
+	return copySpecializeSpirv(*stage.spirv, stage.specialization,
 		stage.entryPoint, execModel);
 }
 

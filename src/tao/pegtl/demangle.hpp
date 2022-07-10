@@ -83,33 +83,41 @@ template< typename T >
 
 #else
 
+namespace tao::pegtl::special
+{
+   template< typename T >
+   [[nodiscard]] constexpr std::string_view demangle() noexcept
+   {
+      constexpr std::string_view sv = __PRETTY_FUNCTION__;
+      constexpr auto begin = sv.find( '=' );
+      static_assert( begin != std::string_view::npos );
+      constexpr auto tmp = sv.substr( begin + 2 );
+      constexpr auto end = tmp.rfind( ';' );
+      static_assert( end != std::string_view::npos );
+      return tmp.substr( 0, end );
+   }
+
+}  // namespace tao::pegtl::special
+
 template< typename T >
 [[nodiscard]] constexpr std::string_view tao::pegtl::demangle() noexcept
 {
-   constexpr std::string_view sv = __PRETTY_FUNCTION__;
-   constexpr auto begin = sv.find( '=' );
-   static_assert( begin != std::string_view::npos );
-   constexpr auto tmp = sv.substr( begin + 2 );
-   constexpr auto end = tmp.rfind( ';' );
-   static_assert( end != std::string_view::npos );
-   return tmp.substr( 0, end );
+   return tao::pegtl::special::demangle< T >();
 }
 
 #endif
 
 #elif defined( _MSC_VER )
 
-#include "internal/dependent_true.hpp"
-
 template< typename T >
 [[nodiscard]] constexpr std::string_view tao::pegtl::demangle() noexcept
 {
+   // we can not add static_assert for additional safety,
+   // see issues #296, #301 and #308
    constexpr std::string_view sv = __FUNCSIG__;
    constexpr auto begin = sv.find( "demangle<" );
-   static_assert( internal::dependent_true< T > && ( begin != std::string_view::npos ) );
    constexpr auto tmp = sv.substr( begin + 9 );
    constexpr auto end = tmp.rfind( '>' );
-   static_assert( internal::dependent_true< T > && ( end != std::string_view::npos ) );
    return tmp.substr( 0, end );
 }
 

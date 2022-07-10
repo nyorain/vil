@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <util/vec.hpp>
+#include <util/intrusive.hpp>
 #include <imgui/textedit.h>
 #include <spvm/program.h>
 #include <spvm/state.h>

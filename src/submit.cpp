@@ -540,10 +540,10 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 			return true;
 		}
 
-		// for(auto& pair : rec.lastDescriptorState.states) {
-			// auto& state = *pair.second;
 		for(auto& pair : rec.handles) {
-			auto& rhandle = nonNull(pair.first);
+			dlg_assert(pair.first);
+
+			auto& rhandle = *pair.first;
 			if(rhandle.objectType != VK_OBJECT_TYPE_DESCRIPTOR_SET) {
 				continue;
 			}

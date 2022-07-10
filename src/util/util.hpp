@@ -11,13 +11,6 @@
 
 namespace vil {
 
-// util
-template<typename T>
-auto& nonNull(T&& ptr) {
-	dlg_assert(ptr);
-	return *ptr;
-}
-
 template<typename ...Ts>
 struct Visitor : Ts...  {
     Visitor(const Ts&... args) : Ts(args)...  {}
@@ -270,8 +263,9 @@ bool stoi(std::string string, T& val, unsigned base = 10) {
 	return true;
 }
 
-template<typename T, typename It = decltype(std::declval<T>().begin())>
+template<typename T>
 struct EnumerateImpl {
+	using It = decltype(std::declval<T>().begin());
 	using Ref = decltype((*std::declval<It>()));
 
 	struct Value {
@@ -293,6 +287,7 @@ struct EnumerateImpl {
 		std::size_t counter_;
     };
 
+	EnumerateImpl(T& val) : value_(val) {}
 	Iterator begin() { return {value_.begin()}; }
 	Iterator end() { return {value_.end()}; }
 
@@ -301,7 +296,7 @@ struct EnumerateImpl {
 
 template<typename T>
 EnumerateImpl<T> enumerate(T& t) {
-    return EnumerateImpl<T>{t};
+    return EnumerateImpl<T>(t);
 }
 
 struct BufferInterval {

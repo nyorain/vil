@@ -60,8 +60,12 @@ inline std::size_t memOffset(const LinMemBlock& block) {
 
 struct LinAllocator {
 	// We grow block sizes exponentially, up to a maximum
-	static constexpr auto minBlockSize = 16 * 1024;
-	static constexpr auto maxBlockSize = 16 * 1024 * 1024;
+	// NOTE: temporarily increased minBlockSize as it has a huge performance
+	// impact on windows, with rdr2 new can take >10ms when we allocate often :(
+	// static constexpr auto minBlockSize = 16 * 1024;
+	// static constexpr auto maxBlockSize = 16 * 1024 * 1024;
+	static constexpr auto minBlockSize = 1024 * 1024;
+	static constexpr auto maxBlockSize = minBlockSize;
 	static constexpr auto blockGrowFac = 2;
 
 	LinMemBlock memRoot {}; // empty block

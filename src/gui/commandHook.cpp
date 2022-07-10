@@ -322,7 +322,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	ZoneScoped;
 
 	auto& dev = *hooked.dev;
-	auto& record = nonNull(hooked.lastRecordLocked());
+	dlg_assert(hooked.lastRecordLocked());
+	auto& record = *hooked.lastRecordLocked();
 
 	// Check whether we should attempt to hook this particular record
 	bool hookNeededForCmd = true;
@@ -415,7 +416,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			dlg_check({
 				// Before calling find, we need to unset the invalidated handles from the
 				// commands in hierachy_, find relies on all of them being valid.
-				replaceInvalidatedLocked(nonNull(record_));
+				dlg_assert(record_);
+				replaceInvalidatedLocked(*record_);
 
 				auto findRes = find(record.commands->children_, hierachy_, dsState_);
 				dlg_assert(std::equal(
@@ -458,7 +460,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	if(hookNeededForCmd) {
 		// Before calling find, we need to unset the invalidated handles from the
 		// commands in hierachy_, find relies on all of them being valid.
-		replaceInvalidatedLocked(nonNull(record_));
+		dlg_assert(record_);
+		replaceInvalidatedLocked(*record_);
 
 		findRes = find(record.commands->children_, hierachy_, dsState_);
 		if(findRes.hierachy.empty()) {
@@ -1140,7 +1143,8 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 				// not in the layout of the ds.
 				auto layout = elem.layout;
 				if(info.splitRenderPass) {
-					auto& fb = nonNull(nonNull(info.beginRenderPassCmd).fb);
+					dlg_assert(info.beginRenderPassCmd && info.beginRenderPassCmd->fb);
+					auto& fb = *info.beginRenderPassCmd->fb;
 					for(auto* att : fb.attachments) {
 						dlg_assert(att->img);
 						if(att->img == imgView->img) {
@@ -1194,8 +1198,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		// we don't ever read the buffer from the gfxQueue so we can
 		// ignore queueFams here
 		auto& dstBuf = dst.data.emplace<OwnBuffer>();
-		initAndCopy(dev, cb, dstBuf, 0u, nonNull(elem.buffer),
-			off, size, {});
+		initAndCopy(dev, cb, dstBuf, 0u, *elem.buffer, off, size, {});
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
 		//   as buffer but then create bufferView on our own?
@@ -1396,22 +1399,29 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 		} else if(auto* cmd = dynamic_cast<const ClearDepthStencilImageCmd*>(&bcmd); cmd) {
 			img = {cmd->dst, cmd->dstLayout, cmd->ranges[idx]};
 		} else if(auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&bcmd)) {
-			auto& rp = nonNull(info.beginRenderPassCmd->rp);
-			auto& fb = nonNull(info.beginRenderPassCmd->fb);
+			dlg_assert(info.beginRenderPassCmd->rp && info.beginRenderPassCmd->fb);
+			auto& rp = *info.beginRenderPassCmd->rp;
+			auto& fb = *info.beginRenderPassCmd->fb;
 
 			// TODO: support showing multiple cleared attachments in gui,
 			//   allowing to select here which one is copied.
 			auto& clearAtt = cmd->attachments[idx];
 			u32 attID = clearAtt.colorAttachment;
 			if(clearAtt.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT) {
+				// TODO: I guess other values are allowed here as well, fix it
+				dlg_assertm_or(clearAtt.aspectMask == VK_IMAGE_ASPECT_DEPTH_BIT,
+					return, "Only depth and color copies supported");
+
 				auto& subpass = rp.desc.subpasses[info.hookedSubpass];
-				auto& depthStencil = nonNull(subpass.pDepthStencilAttachment);
+				dlg_assert(subpass.pDepthStencilAttachment);
+				auto& depthStencil = *subpass.pDepthStencilAttachment;
 				attID = depthStencil.attachment;
 			}
 
 			dlg_assert(fb.attachments.size() > attID);
-			auto& imgView = nonNull(fb.attachments[attID]);
-			auto& src = nonNull(imgView.img);
+			dlg_assert(fb.attachments[attID] && fb.attachments[attID]->img);
+			auto& imgView = *fb.attachments[attID];
+			auto& src = *imgView.img;
 
 			// image must be in general layout because we are just between
 			// the split render passes
@@ -1480,13 +1490,17 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 				sizeof(VkDrawIndirectCommand);
 			stride = cmd->stride ? cmd->stride : stride;
 			auto dstSize = cmd->drawCount * stride;
+			dlg_assert(cmd->buffer);
 			initAndCopy(dev, cb, state->indirectCopy,  0u,
-				nonNull(cmd->buffer), cmd->offset, dstSize, {});
+				*cmd->buffer, cmd->offset, dstSize, {});
 		} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
+			dlg_assert(cmd->buffer);
 			auto size = sizeof(VkDispatchIndirectCommand);
 			initAndCopy(dev, cb, state->indirectCopy, 0u,
-				nonNull(cmd->buffer), cmd->offset, size, {});
+				*cmd->buffer, cmd->offset, size, {});
 		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
+			dlg_assert(cmd->buffer && cmd->countBuffer);
+
 			auto cmdSize = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
@@ -1494,7 +1508,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			state->indirectCopy.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
 			// copy count
-			performCopy(dev, cb, nonNull(cmd->countBuffer), cmd->countBufferOffset,
+			performCopy(dev, cb, *cmd->countBuffer, cmd->countBufferOffset,
 				state->indirectCopy, 0u, 4u);
 			// copy commands
 			// NOTE: using an indirect-transfer-emulation approach (see
@@ -1502,7 +1516,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			// we could avoid copying too much data here. Likely not worth
 			// it here though unless application pass *huge* maxDrawCount
 			// values (which they shouldn't).
-			performCopy(dev, cb, nonNull(cmd->buffer), cmd->offset,
+			performCopy(dev, cb, *cmd->buffer, cmd->offset,
 				state->indirectCopy, 4u, cmd->maxDrawCount * cmdSize);
 		} else if(auto* cmd = dynamic_cast<TraceRaysIndirectCmd*>(&bcmd)) {
 			auto size = sizeof(VkTraceRaysIndirectCommandKHR);
@@ -1552,7 +1566,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 
 			auto size = std::min(maxVertIndSize, vertbuf.buffer->ci.size - vertbuf.offset);
 			initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-				nonNull(vertbuf.buffer), vertbuf.offset, size, queueFams);
+				*vertbuf.buffer, vertbuf.offset, size, queueFams);
 		}
 	}
 
@@ -1564,7 +1578,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		if(inds.buffer) {
 			auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
 			initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-				nonNull(inds.buffer), inds.offset, size, queueFams);
+				*inds.buffer, inds.offset, size, queueFams);
 		}
 	}
 
@@ -2000,7 +2014,9 @@ void CommandHookSubmission::transmitTiming() {
 void CommandHookSubmission::finishAccelStructBuilds() {
 	for(auto& buildCmd : record->accelStructBuilds) {
 		for(auto& build : buildCmd.builds) {
-			auto& dst = nonNull(build.dst);
+			dlg_assert(build.dst);
+
+			auto& dst = *build.dst;
 			dlg_assert(build.rangeInfos.size() == build.info.geometryCount);
 			dlg_assert(build.dst->geometryType != VK_GEOMETRY_TYPE_MAX_ENUM_KHR);
 

@@ -12,16 +12,16 @@ namespace vil {
 std::byte* LinAllocator::addBlock(std::size_t size, std::size_t alignment) {
 	auto newBlockSize = (memCurrent == &memRoot) ? minBlockSize :
 		std::min<size_t>(blockGrowFac * memSize(*memCurrent), maxBlockSize);
-	newBlockSize = std::max<size_t>(newBlockSize, alignPOT(size, alignment));
+	auto neededSize = alignPOT(size, alignment) + sizeof(LinMemBlock);
+	newBlockSize = nextPOT(std::max<size_t>(newBlockSize, neededSize));
 
-	auto totalSize = sizeof(LinMemBlock) + newBlockSize;
-	auto buf = new std::byte[totalSize]; // no need to value-initialize
+	auto buf = new std::byte[newBlockSize]; // no need to value-initialize
 	auto* newBlock = new(buf) LinMemBlock;
 	newBlock->data = buf + sizeof(LinMemBlock);
-	newBlock->end = newBlock->data + newBlockSize;
+	newBlock->end = buf + newBlockSize;
 
 	if(onAlloc) {
-		onAlloc(buf, totalSize);
+		onAlloc(buf, newBlockSize);
 	}
 
 	newBlock->next = memCurrent->next;
@@ -35,6 +35,9 @@ std::byte* LinAllocator::addBlock(std::size_t size, std::size_t alignment) {
 }
 
 LinAllocator::LinAllocator() {
+	// We intentionally start with the empty block as current block.
+	// This way we don't have to allocate memory on construction (which is undesireable)
+	// and don't have to do a special null-block handling in allocate
 	memCurrent = &memRoot;
 }
 

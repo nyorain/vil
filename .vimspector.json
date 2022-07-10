@@ -1,0 +1,21 @@
+{
+  "configurations": {
+    "Launch": {
+      "adapter": "vscode-cpptools",
+      "configuration": {
+        "request": "launch",
+        "program": "${workspaceRoot}/build/intest",
+        "args": ["--vil"],
+        "cwd": "${workspaceRoot}/build",
+        "environment": [],
+        "externalConsole": false,
+        "MIMode": "gdb",
+		"setupCommands": [
+			{ "text": "-enable-pretty-printing", "description": "enable pretty printing", "ignoreFailures": true },
+			{ "text": "handle SIGPIPE nostop noprint pass", "description": "ignore SIGPIPE", "ignoreFailures": true }  
+		]
+      }
+    }
+  }
+}
+

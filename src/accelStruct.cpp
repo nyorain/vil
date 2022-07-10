@@ -19,7 +19,8 @@ AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address) {
 	auto it = dev.accelStructAddresses.find(address);
 	dlg_assertm(it != dev.accelStructAddresses.end(),
 		"Couldn't find VkAccelerationStructure at address {}", address);
-	return nonNull(it->second);
+	dlg_assert(it->second);
+	return *it->second;
 }
 
 AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {

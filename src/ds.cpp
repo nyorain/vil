@@ -671,7 +671,8 @@ DescriptorPool::~DescriptorPool() {
 	invalidateCbs();
 
 	for(auto it = usedEntries; it; it = it->next) {
-		destroy(nonNull(it->set), false);
+		dlg_assert(it->set);
+		destroy(*it->set, false);
 	}
 
 	debugStatSub(DebugStats::get().descriptorPoolMem, dataSize);
@@ -993,7 +994,8 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(
 	auto& dev = *dsPool.dev;
 
 	for(auto it = dsPool.usedEntries; it; it = it->next) {
-		destroy(nonNull(it->set), false);
+		dlg_assert(it->set);
+		destroy(*it->set, false);
 	}
 
 	initResetPoolEntries(dsPool);
@@ -1027,7 +1029,8 @@ VkResult findEntry(DescriptorPool& pool, u32 memSize,
 	}
 
 	if(highestOffset + memSize <= pool.dataSize) {
-		auto& entry = nonNull(pool.freeEntries);
+		dlg_assert(pool.freeEntries);
+		auto& entry = *pool.freeEntries;
 		pool.freeEntries = entry.next;
 
 		if(pool.highestEntry) {

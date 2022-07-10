@@ -118,7 +118,7 @@ void destroyBuffers(GuiBlur& blur, VkDescriptorPool dsPool) {
 		return;
 	}
 
-	auto& dev = nonNull(blur.dev);
+	auto& dev = *blur.dev;
 	dev.dispatch.FreeDescriptorSets(dev.handle, dsPool, 2u, blur.steps.data());
 	blur.steps = {};
 
@@ -148,7 +148,7 @@ void destroyBuffers(GuiBlur& blur, VkDescriptorPool dsPool) {
 
 void resize(GuiBlur& blur, VkExtent2D size, VkSwapchainKHR swapchain,
 		VkFormat swapchainFormat) {
-	auto& dev = nonNull(blur.dev);
+	auto& dev = *blur.dev;
 	auto dsPool = dev.dsPool;
 	destroyBuffers(blur, dsPool);
 
@@ -284,7 +284,7 @@ void resize(GuiBlur& blur, VkExtent2D size, VkSwapchainKHR swapchain,
 
 void blur(GuiBlur& blur, VkCommandBuffer cb, u32 imageIdx, VkOffset2D offset, VkExtent2D size) {
 	dlg_assert(imageIdx < blur.renderBuffers.size());
-	auto& dev = nonNull(blur.dev);
+	auto& dev = *blur.dev;
 
 	(void) offset;
 	(void) size;

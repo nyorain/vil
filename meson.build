@@ -228,6 +228,8 @@ src = files(
 	'src/gui/imageViewer.cpp',
 	'src/gui/shader.cpp',
 	'src/gui/blur.cpp',
+	# TODO, tmp
+	'src/gui/vizlcs.cpp',
 
 	# imgui
 	'src/imgui/imgui.cpp',
@@ -383,8 +385,21 @@ if with_x11_hook
 endif
 
 if with_win32
-	src += files('src/win32.cpp')
+	src += files(
+		'src/win32.cpp',
+
+		'src/minhook/buffer.c',
+		'src/minhook/hook.c',
+		'src/minhook/trampoline.c',
+		# We currently only support 64 bit
+		# 'src/minhook/hde/hde32.c',
+		'src/minhook/hde/hde64.c',
+		'src/minhook/MinHook.h',
+		'src/minhook/buffer.h',
+		'src/minhook/trampoline.h',
+	)
 	args += ['-DVIL_WITH_WIN32']
+	args += ['/wd4310'] # for minhook
 endif
 
 # On win32, pch breaks with tracy due to some windows.h bs.
@@ -425,6 +440,7 @@ vil_layer = shared_library(
 	include_directories: inc,
 	link_whole: lib_spvm,
 	cpp_args: args + layer_args,
+	c_args: args,
 	link_args: link_args,
 	install: true,
 	cpp_pch: pch,

@@ -3,5 +3,6 @@ compile_commands.json
 subprojects/*/
 build/
 buildwin/
+.vs/
 .cache
 .vimspector.json

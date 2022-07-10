@@ -147,8 +147,8 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 
 	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
 		auto& bds = state.descriptorSets[i];
-		auto [pds, lock] = tryAccessLocked(bds);
-		auto& ds = nonNull(pds);
+		auto [ds, lock] = tryAccessLocked(bds);
+		dlg_assert(ds);
 
 		// NOTE: we only need this since we don't track this during recording
 		// anymore at the moment.
@@ -157,9 +157,9 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 			break;
 		}
 
-		dlg_assert(ds.layout);
+		dlg_assert(ds->layout);
 		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-			bds.layout->handle, i, 1u, &ds.handle,
+			bds.layout->handle, i, 1u, &ds->handle,
 			u32(bds.dynamicOffsets.size()), bds.dynamicOffsets.data());
 	}
 }

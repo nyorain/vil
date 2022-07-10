@@ -10,6 +10,8 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
 urgent, bugs:
 - [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
       resource destruction, can happen in any thread. Caused a crash with doom.
+- [ ] selecting a whole CommandRecord in the command viewer crashed rdr2. Investigate
+- [ ] improve CmdBarrier matching, see node 2305
 - [ ] figure out transform_feedback crashes in doom eternal
       crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
       check if it could be a error in patching logic; otherwise analyze our generated spirv,
@@ -33,13 +35,19 @@ urgent, bugs:
 	  the copy. Both of it is currently not done.
 	  Or maybe remove the copyChain logic completely? Not sure if trying
 	  to support simple extensions out of the box even makes sense.
-- [ ] improve layout, too much wasted space in buffer viewer rn.
-- [ ] improve layout of image viewer (e.g. in command viewer).
+- [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
+      increasing the minBlockSize. Increased it temporarily but should probably just roll own block sub-allocator
+- [ ] improve gui layout, too much wasted space in buffer viewer rn.
+- [ ] improve gui layout of image viewer (e.g. in command viewer).
       really annoying rn to always scroll down. 
 	  Maybe use tabs? One for general information, one for the image viewer?
 
 new, workstack:
-- [ ] should get rid of 'nonNull', it's poor design
+- [ ] get rid of annotateRelIDLegacy, use proper context (across cb boundaries) 
+      when matching commands instead. Should fix CmdBarrier issues in RDR2
+	  See docs/own/desc2.hpp. But that isn't enough, we need more context.
+- [ ] improve matching (write tests first), propagate Matcher objects instead
+      of floats. See todo in desc.hpp
 - [ ] there should probably just be one ImageViewer object; owned by Gui directly.
       it's then used wherever an image is shown.
 	  Then, the ImageViewer could create and own its pipes, simplifying
@@ -52,8 +60,6 @@ new, workstack:
 		- [ ] create a small TimingQuery widget
 	- [ ] stabilize it? (functionality for the TimingQuery widget).
 	      Like, only update a couple of times per second?
-- [ ] implement image histograms (probably best like in PIX)
-      See minmax.comp and histogram.comp
 - [ ] implement basic filters in image viewer, like inf/nan overlay
 - [ ] optimization(important): for images captured in commandHook, we might be able to use
       that image when drawing the gui even though the associated submission
@@ -67,20 +73,11 @@ new, workstack:
 		  it can use them?
 - [ ] rework buffmt with proper array types (and multdim arrays)
       allow to store spirv u32 id per Type.
-
-add proper resource cow implementation:
-- [ ] resolve them in image/buffer destructor. Just wait for completion
-      at the moment. Can later on try to optimize it, keeping the
-	  handle (and possibly memory) alive until copy is finished.
-- [ ] rework CommandHookState to contain cows
-- [ ] rework CommandHookRecord to create cows
-- [ ] rework Gui to read cows
-- [ ] rework submission to resolve cows where needed.
-      We probably want a global list of cows. Hm or maybe a list of
-	  written handles in the CommandRecord?
-	- [ ] figure out good way/abstraction to actually (and efficiently) detect writing
-- [ ] rework vkMapMemory to resolve cow where needed.
-      Just iterate over MemoryResources in the given range.
+- [ ] investigate callstack performance for big applications.
+      Might be able to improve performance significantly, callstack.hpp
+	  always allocates a vector
+- [ ] {later} implement image histograms (probably best like in PIX)
+      See minmax.comp and histogram.comp
 
 shader debugger:
 - [x] cleanup/fix freezing as described in node 2235
@@ -168,7 +165,7 @@ window/overlay
       probably something to do with the way we grab input over x11
 - [ ] fix/implement input pass-through when the hooked overlay does not have
       focus for win32.
-- [ ] improve windows overlay hooking. Experiment with mouse hooks blocking
+- [x] improve windows overlay hooking. Experiment with mouse hooks blocking
       input.
 	- [ ] implement further messages, keyboard, mouse wheel
 	- [ ] clean the implementation up
@@ -184,13 +181,9 @@ window/overlay
 		   is not set).
 - [ ] add a window icon for the separate window
       guess we need to implement it in swa for win32 first
-- [ ] {low prio, later} fix overlay for wayland. Use xdg popup
+- [ ] {low prio, later} fix overlay for wayland. try xdg popup?
 
 performance/profiling:
-- [ ] can we make per-cb-mutexs a thing?
-      major bottleneck for applications that have hundreds of small command
-	  buffers. There are reasons it's not possible at the moment though,
-	  the cb-handle connections for instance.
 - [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
 	  since we should be logically able to get around that
 	  case (with normal API use and no gui open; i.e. the Record should
@@ -247,6 +240,13 @@ performance/profiling:
 	      cbGui, CommandViewer etc). We only need the state of the hooked command, 
 		  should be easy to determine.
 	- [ ] See the commented-out condition in submit.cpp
+- [ ] {low prio now} can we make per-cb-mutexs a thing?
+      major bottleneck for applications that have hundreds of small command
+	  buffers. There are reasons it's not possible at the moment though,
+	  the cb-handle connections for instance.
+	  	- The main issue was an allocation while locking. Fixed now.
+		  per-cb-mutex shouldn't be important as long as we keep the critical
+		  sections really small, without any blocking
 
 
 object wrapping:
@@ -343,6 +343,22 @@ other
       see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
 - [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
+
+PERF: add proper resource cow implementation 
+(see wip_cow branch, found that a major submission tracking rework would be needed):
+- [ ] resolve them in image/buffer destructor. Just wait for completion
+      at the moment. Can later on try to optimize it, keeping the
+	  handle (and possibly memory) alive until copy is finished.
+- [ ] rework CommandHookState to contain cows
+- [ ] rework CommandHookRecord to create cows
+- [ ] rework Gui to read cows
+- [ ] rework submission to resolve cows where needed.
+      We probably want a global list of cows. Hm or maybe a list of
+	  written handles in the CommandRecord?
+	- [ ] figure out good way/abstraction to actually (and efficiently) detect writing
+- [ ] rework vkMapMemory to resolve cow where needed.
+      Just iterate over MemoryResources in the given range.
+
 
 ---
 

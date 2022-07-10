@@ -6,6 +6,8 @@
 #include <platform.hpp>
 #include <util/util.hpp>
 #include <swa/key.h>
+#include <swa/winapi.h>
+#include <minhook/MinHook.h>
 
 #include <atomic>
 #include <thread>
@@ -16,9 +18,6 @@
 
 namespace vil {
 
-static enum swa_key winapi_to_key(unsigned vkcode);
-static unsigned key_to_winapi(enum swa_key key);
-
 // TODO: rather create one thread for all platform objects.
 // TODO: we probably just want to use WH_GETMESSAGE.
 //  Since that is the only real way to access WM_TEXT.
@@ -26,11 +25,109 @@ static unsigned key_to_winapi(enum swa_key key);
 // TODO: we might be able to block raw input using the low-level hooks.
 //  investigate!
 
+
+// NOTES:
+// - grabbing input for all applications without hooking winapi functions isn't possible:
+//   We can't intercept raw input or applications that use some GetCursorPos magic e.g. for
+//   movement (yes, it's terrible and yes, games do that, e.g. vkQuake).
+// - activating/deactivating hooks via minhook can be expensive, we therefore leave the hooks
+//   in place the whole time and just forward if the overlay is currently not visible.
+// - SetWindowsHookEx isn't expensive but calling it on every show (and UnhookWindowsHookEx on every hide)
+//   will eventually lead to an 'all windows api handles used' error (internal windows leak? idk).
+//   So we just ignore it and install the hook just once forever, just skipping it when not needed
+
+template<typename Fn>
+struct Hook;
+
+template<typename Ret, typename... Args>
+struct Hook<Ret(Args...)> {
+	using Fn = Ret(*)(Args...);
+
+	Fn original_ {};
+	void* target_ {};
+
+	Hook() = default;
+
+	void init(void* target, void* dst) {
+		dlg_assert(!target_);
+		dlg_assert(target);
+		dlg_assert(dst);
+
+		target_ = target;
+		auto res = MH_CreateHook(target_, dst, (void**) &original_);
+		dlg_assertm(res == MH_OK, "{}: {}", res, MH_StatusToString(res));
+	}
+
+	~Hook() {
+		MH_RemoveHook(target_);
+	}
+
+	void activate(bool active) {
+		dlg_assert_or(target_, return);
+
+		if(active) {
+			auto res = MH_EnableHook(target_);
+			dlg_assertm(res == MH_OK, "[{}] {}: {}", target_, res, MH_StatusToString(res));
+		} else {
+			auto res = MH_DisableHook(target_);
+			dlg_assertm(res == MH_OK, "[{}] {}: {}", target_, res, MH_StatusToString(res));
+		}
+	}
+
+	Ret forward(Args... args) const {
+		return original_(std::forward<Args>(args)...);
+	}
+};
+
+struct SavedState {
+	std::atomic<bool> inputStateSaved = false;
+    std::atomic<int> cursorCount = 0;
+    std::atomic<bool> cursorVisible = false;
+    std::atomic<POINT> cursorPos = POINT{ 0, 0 };
+    std::atomic<HCURSOR> cursor = nullptr;
+};
+
+struct InputHooks {
+	using PFN_GetAsyncKeyState = SHORT(WINAPI)(int vKey);
+	using PFN_GetKeyState = SHORT(WINAPI)(int vKey);
+	using PFN_GetKeyboardState = BOOL(WINAPI)(__out_ecount(256) PBYTE lpKeyState);
+	using PFN_GetRawInputData = UINT(WINAPI)(HRAWINPUT hRawInput, UINT uiCommand, LPVOID pData, PUINT pcbSize, UINT cbSizeHeader);
+	using PFN_GetRawInputBuffer = UINT(WINAPI)(PRAWINPUT pData, PUINT pcbSize, UINT cbSizeHeader);
+	using PFN_ShowCursor = int(WINAPI)(__in BOOL bShow);
+	using PFN_GetCursorPos = BOOL(WINAPI)(LPPOINT lpPoint);
+	using PFN_SetCursorPos = BOOL(WINAPI)(int X, int Y);
+	using PFN_SetCursor = HCURSOR(WINAPI)(HCURSOR hCursor);
+	using PFN_GetCursor = HCURSOR(WINAPI)();
+
+	Hook<PFN_GetAsyncKeyState> GetAsyncKeyState;
+	Hook<PFN_GetKeyState> GetKeyState;
+	Hook<PFN_GetKeyboardState> GetKeyboardState;
+	Hook<PFN_GetRawInputData> GetRawInputData;
+	Hook<PFN_GetRawInputBuffer> GetRawInputBuffer;
+	Hook<PFN_ShowCursor> ShowCursor;
+	Hook<PFN_GetCursorPos> GetCursorPos;
+	Hook<PFN_SetCursorPos> SetCursorPos;
+	Hook<PFN_SetCursor> SetCursor;
+	Hook<PFN_GetCursor> GetCursor;
+
+	void init();
+	void activate(bool);
+
+	void save();
+	void restore();
+
+public:
+	static std::weak_ptr<InputHooks> instance_;
+	SavedState saved;
+};
+
+std::weak_ptr<InputHooks> InputHooks::instance_;
+
 struct Win32Platform : Platform {
 	HWND surfaceWindow {};
-	HWND overlayWindow {};
 
-	HHOOK mouseHook {};
+	HHOOK msgHook {};
+	HHOOK wndProcHook {};
 
 	State state {State::hidden};
 	bool togglePressed {}; // for toggle key
@@ -47,7 +144,8 @@ struct Win32Platform : Platform {
 	int lastY {};
 
 	bool moveResizing {};
-	bool rawInput {};
+
+	std::shared_ptr<InputHooks> hooks;
 
 	~Win32Platform();
 
@@ -57,15 +155,29 @@ struct Win32Platform : Platform {
 
 	bool checkPressed(u32 key) const;
 	void uiThread(Device& dev, u32 width, u32 height);
-	void initWindow();
 	bool doUpdate();
-	bool doUpdate2();
-	void updateWindowRect();
+
+	bool hookInput() const { return state == State::focused; }
+
+public:
+	static Win32Platform* instance_;
+
+	static Win32Platform& get() {
+		dlg_assert(instance_);
+		return *instance_;
+	}
 };
 
-Win32Platform* globalPlatform = nullptr;
+Win32Platform* Win32Platform::instance_ = nullptr;
 
 Win32Platform::~Win32Platform() {
+	if(msgHook && wndProcHook) {
+		UnhookWindowsHookEx(msgHook);
+		UnhookWindowsHookEx(wndProcHook);
+		msgHook = nullptr;
+		wndProcHook = nullptr;
+	}
+
 	if(thread.joinable()) {
 		doStuff.store(1);
 		cv.notify_one();
@@ -74,8 +186,8 @@ Win32Platform::~Win32Platform() {
 }
 
 bool Win32Platform::checkPressed(u32 key) const {
-	auto keycode = key_to_winapi(swa_key(key));
-	return GetAsyncKeyState(keycode) < 0;
+	auto keycode = swa_key_to_winapi(swa_key(key));
+	return hooks->GetAsyncKeyState.forward(keycode) < 0;
 }
 
 // from platform.cpp
@@ -97,7 +209,7 @@ constexpr auto windowClassName = "VIL";
 void handleKey(Win32Platform* platform, bool pressed,
 		WPARAM wparam, LPARAM lparam) {
 	(void) lparam;
-	auto keycode = winapi_to_key((unsigned)(wparam));
+	auto keycode = swa_winapi_to_key((unsigned)(wparam));
 	if(keycode < 512) {
 		platform->gui->imguiIO().KeysDown[keycode] = pressed;
 	}
@@ -113,184 +225,50 @@ bool cursorShown() {
 	return true;
 }
 
-static LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
-	Win32Platform* platform = (Win32Platform*) GetWindowLongPtr(hwnd, GWLP_USERDATA);
-
-	switch(msg) {
-		case WM_CREATE: {
-			return 0;
-		} case WM_KEYDOWN: {
-			handleKey(platform, true, wparam, lparam);
-			break;
-		} case WM_KEYUP: {
-			handleKey(platform, false, wparam, lparam);
-			break;
-		} case WM_CHAR: {
-			if(wparam > 0 && wparam < 0x10000) {
-				platform->gui->imguiIO().AddInputCharacter(wparam);
-			}
-
-			break;
-		} case WM_INPUT: {
-			UINT dwSize = sizeof(RAWINPUT);
-			static std::aligned_storage_t<sizeof(RAWINPUT), 8> lpb {};
-			GetRawInputData((HRAWINPUT)lparam, RID_INPUT, &lpb, &dwSize, sizeof(RAWINPUTHEADER));
-			RAWINPUT* raw = (RAWINPUT*)&lpb;
-			if (raw->header.dwType == RIM_TYPEMOUSE) {
-				platform->gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
-				platform->gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
-				// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
-			}
-
-			break;
-		} case WM_ERASEBKGND:
-			// return 1; // prevent the background erase
-			break;
-		case WM_LBUTTONDOWN:
-			dlg_trace("button0 pressed");
-			platform->gui->imguiIO().MouseDown[0] = true;
-			break;
-		case WM_LBUTTONUP:
-			dlg_trace("button0 release");
-			platform->gui->imguiIO().MouseDown[0] = false;
-			break;
-		case WM_RBUTTONDOWN:
-			platform->gui->imguiIO().MouseDown[1] = true;
-			break;
-		case WM_RBUTTONUP:
-			platform->gui->imguiIO().MouseDown[1] = false;
-			break;
-		case WM_MBUTTONDOWN:
-			platform->gui->imguiIO().MouseDown[2] = true;
-			break;
-		case WM_MBUTTONUP:
-			platform->gui->imguiIO().MouseDown[2] = false;
-			break;
-		case WM_XBUTTONDOWN:
-			platform->gui->imguiIO().MouseDown[HIWORD(wparam) == 1 ? 3 : 4] = true;
-			break;
-		case WM_XBUTTONUP:
-			platform->gui->imguiIO().MouseDown[HIWORD(wparam) == 1 ? 3 : 4] = false;
-			break;
-		default:
-			break;
-	}
-
-	return DefWindowProc(hwnd, msg, wparam, lparam);
-}
-
-void Win32Platform::initWindow() {
-	// register window class
-	WNDCLASSEX wcx = {0};
-	wcx.cbSize = sizeof(wcx);
-	wcx.style = CS_VREDRAW | CS_HREDRAW;
-	wcx.lpfnWndProc = winProc;
-	wcx.cbClsExtra = 0;
-	wcx.cbWndExtra = 0;
-	wcx.hInstance = GetModuleHandle(NULL);
-	wcx.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-	wcx.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
-	wcx.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wcx.hbrBackground = (HBRUSH)CreateSolidBrush(RGB(30, 20, 30));
-	wcx.lpszMenuName = NULL;
-	wcx.lpszClassName = windowClassName;
-
-	if(!::RegisterClassEx(&wcx)) {
-		print_winapi_error("RegisterClassEx");
-		// NOTE: we can probably just assume it was already registered by us
-	}
-
-	// create window
-	auto style = WS_POPUP;
-	auto exstyle = WS_EX_TOOLWINDOW | WS_EX_TOPMOST; // | */WS_EX_LAYERED | WS_EX_TOOLWINDOW;
-	auto x = CW_USEDEFAULT;
-	auto y = CW_USEDEFAULT;
-	auto width = 5;
-	auto height = 5;
-	auto hinstance = GetModuleHandle(NULL);
-
-	overlayWindow = CreateWindowExA(exstyle, windowClassName, "VIL", style,
-		x, y, width, height, NULL, NULL, hinstance, NULL);
-	if(!overlayWindow) {
-		print_winapi_error("CreateWindowEx");
-		return;
-	}
-
-	ShowWindowAsync(overlayWindow, SW_HIDE);
-	SetWindowLongPtr(overlayWindow, GWLP_USERDATA, (uintptr_t) this);
-
-	// This will simply cause windows to respect the alpha bits in the content of the window
-	// and not actually blur anything.
-	// DWM_BLURBEHIND bb = {0};
-	// bb.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
-	// bb.hRgnBlur = CreateRectRgn(0, 0, -1, -1);  // makes the window transparent
-	// bb.fEnable = TRUE;
-	// DwmEnableBlurBehindWindow(overlayWindow, &bb);
-
-	// make transparent
-	// SetLayeredWindowAttributes(overlayWindow, 0, 0, LWA_ALPHA);
-}
-
-void Win32Platform::updateWindowRect() {
-	/*
-	RECT topWndRect;
-	GetWindowRect(surfaceWindow, &topWndRect);
-	auto w = topWndRect.right - topWndRect.left;
-	auto h = topWndRect.bottom - topWndRect.top;
-	// dlg_info("window rect, pos {} {}, size {} {}", topWndRect.left, topWndRect.top, w, h);
-	MoveWindow(overlayWindow, topWndRect.left, topWndRect.top, w, h, false);
-	*/
-}
-
 LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 	MSG* msg = (MSG*) lParam;
 
-	if (msg->message == WM_ENTERSIZEMOVE)
-	{
-		dlg_trace("enter size move {}", nCode);
-	}
+	dlg_assert_or(Win32Platform::instance_, return CallNextHookEx(nullptr, nCode, wParam, lParam));
+	auto& wp = Win32Platform::get();
 
-	if (globalPlatform->moveResizing || nCode < 0)
-	{
+	if (wp.state != Win32Platform::State::focused || wp.moveResizing || nCode < 0) {
 		return CallNextHookEx(nullptr, nCode, wParam, lParam);
 	}
 
-	auto doHitTest = [](u32 x, u32 y) {
-		u64 l = (u64(x) << 32) | u64(y);
-		auto res = SendMessage(globalPlatform->surfaceWindow, WM_NCHITTEST, 0, l);
+	auto doHitTest = [&](u32 x, u32 y) {
+		// (void) x;
+		// (void) y;
+		// return true;
+
+		POINT p {LONG(x), LONG(y)};
+		auto r = ClientToScreen(wp.surfaceWindow, &p);
+		dlg_assert(r);
+
+		i32 l = (u32(p.y) << 16) | (u32(p.x) & 0xFFFFu);
+		auto res = SendMessage(Win32Platform::get().surfaceWindow, WM_NCHITTEST, 0, l);
+		dlg_trace("doHitTest: {}", res == HTCLIENT);
 		return res == HTCLIENT;
 	};
 
 	switch(msg->message) {
-		case WM_ENTERSIZEMOVE: {
-			dlg_trace("enter move resize");
-			globalPlatform->moveResizing = true;
-			break;
-		} case WM_EXITSIZEMOVE: {
-			dlg_trace("exit move resize");
-			globalPlatform->moveResizing = false;
-			break;
-		} case WM_MOUSEMOVE: {
+		case WM_MOUSEMOVE: {
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
 
-			if (!globalPlatform->rawInput) {
-				globalPlatform->gui->imguiIO().MousePos.x = x;
-				globalPlatform->gui->imguiIO().MousePos.y = y;
-			}
+			dlg_trace("mouse move {} {}", x, y);
+			wp.gui->imguiIO().MousePos.x = x;
+			wp.gui->imguiIO().MousePos.y = y;
 
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_LBUTTONDOWN: {
 			// dlg_trace("lbuttondown {} {} {}", data->pt.x, data->pt.y, data->wHitTestCode);
-			globalPlatform->gui->imguiIO().MouseDown[0] = true;
+			wp.gui->imguiIO().MouseDown[0] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -299,10 +277,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			return 0;
 		} case WM_LBUTTONUP: {
 			// dlg_trace("lbuttonup {} {} {} | {} {}", data->pt.x, data->pt.y, data->wHitTestCode, winPos.x, winPos.y);
-			globalPlatform->gui->imguiIO().MouseDown[0] = false;
+			wp.gui->imguiIO().MouseDown[0] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -310,10 +287,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_RBUTTONDOWN: {
-			globalPlatform->gui->imguiIO().MouseDown[1] = true;
+			wp.gui->imguiIO().MouseDown[1] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -321,10 +297,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_RBUTTONUP: {
-			globalPlatform->gui->imguiIO().MouseDown[1] = false;
+			wp.gui->imguiIO().MouseDown[1] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -332,10 +307,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_MBUTTONDOWN: {
-			globalPlatform->gui->imguiIO().MouseDown[2] = true;
+			wp.gui->imguiIO().MouseDown[2] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -343,10 +317,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_MBUTTONUP: {
-			globalPlatform->gui->imguiIO().MouseDown[2] = false;
+			wp.gui->imguiIO().MouseDown[2] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -354,10 +327,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_XBUTTONDOWN: {
-			// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = true;
+			// wp.gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -365,10 +337,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_XBUTTONUP: {
-			// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = false;
+			// wp.gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
 			auto y = GET_Y_LPARAM(msg->lParam);
-			// if(x < 0 || y < 0) {
 			if(!doHitTest(x, y)) {
 				break;
 			}
@@ -378,9 +349,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		} case WM_KEYDOWN: {
 			dlg_trace("wm keydown");
 
-			auto key = winapi_to_key(unsigned(msg->wParam));
+			auto key = swa_winapi_to_key(unsigned(msg->wParam));
 			if (key < 512 && key != 0) {
-				globalPlatform->gui->imguiIO().KeysDown[unsigned(key)] = true;
+				wp.gui->imguiIO().KeysDown[unsigned(key)] = true;
 			}
 
 			// oh no, this is terrible
@@ -391,9 +362,9 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		} case WM_KEYUP: {
 			dlg_trace("wm keyup");
 
-			auto key = winapi_to_key(unsigned(msg->wParam));
+			auto key = swa_winapi_to_key(unsigned(msg->wParam));
 			if (key < 512 && key != 0) {
-				globalPlatform->gui->imguiIO().KeysDown[unsigned(key)] = false;
+				wp.gui->imguiIO().KeysDown[unsigned(key)] = false;
 			}
 
 			// oh no, this is terrible
@@ -405,7 +376,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			dlg_trace("wm char");
 
 			if (msg->wParam > 0 && msg->wParam < 0x10000) {
-				globalPlatform->gui->imguiIO().AddInputCharacterUTF16((unsigned short)msg->wParam);
+				wp.gui->imguiIO().AddInputCharacterUTF16((unsigned short)msg->wParam);
 			}
 
 			msg->message = WM_NULL;
@@ -416,7 +387,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 			UINT dwSize = sizeof(RAWINPUT);
 			static std::aligned_storage_t<sizeof(RAWINPUT), 8> lpb {};
-			auto ret = GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, &lpb, &dwSize, sizeof(RAWINPUTHEADER));
+			auto ret = wp.hooks->GetRawInputData.forward((HRAWINPUT)msg->lParam, RID_INPUT, &lpb, &dwSize, sizeof(RAWINPUTHEADER));
 			if (ret == UINT(-1)) {
 				print_winapi_error("GetRawInputData");
 				break;
@@ -424,22 +395,29 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 			RAWINPUT* raw = (RAWINPUT*) &lpb;
 			if (raw->header.dwType == RIM_TYPEMOUSE) {
-				globalPlatform->gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
-				globalPlatform->gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
+				wp.gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
+				wp.gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
+
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[0] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) wp.gui->imguiIO().MouseDown[0] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[1] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) wp.gui->imguiIO().MouseDown[1] = false;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[2] = true;
+				if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) wp.gui->imguiIO().MouseDown[2] = false;
 
 				// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
 			}
 
-			// msg->message = WM_NULL;
+			msg->message = WM_NULL;
 			return 0;
 		} case WM_MOUSEWHEEL: {
 			// TODO: accumulate?
-			globalPlatform->gui->imguiIO().MouseWheel = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
+			wp.gui->imguiIO().MouseWheel = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
 			msg->message = WM_NULL;
 			return 0;
 		} case WM_MOUSEHWHEEL: {
 			// TODO: accumulate?
-			globalPlatform->gui->imguiIO().MouseWheelH = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
+			wp.gui->imguiIO().MouseWheelH = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
 			msg->message = WM_NULL;
 			return 0;
 		} default:
@@ -449,100 +427,42 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 	return CallNextHookEx(nullptr, nCode, wParam, lParam);
 }
 
-LRESULT CALLBACK mouseHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
-	MOUSEHOOKSTRUCTEX* data = (MOUSEHOOKSTRUCTEX*) lParam;
+LRESULT wndProcHookFunc(_In_ int nCode, _In_ WPARAM wParam, _In_ LPARAM lParam)
+{
+	dlg_assert_or(Win32Platform::instance_, return CallNextHookEx(nullptr, nCode, wParam, lParam));
+	auto& wp = Win32Platform::get();
 
-	POINT winPos = data->pt;
-	ScreenToClient(globalPlatform->surfaceWindow, &winPos);
+	if (wp.state != Win32Platform::State::focused || nCode < 0) {
+		return CallNextHookEx(nullptr, nCode, wParam, lParam);
+	}
 
-	if (nCode >= 0 && wParam == WM_MOUSEMOVE) {
+	CWPSTRUCT* cwp = (CWPSTRUCT*)lParam;
+
+	switch (cwp->message) {
+		case WM_ENTERSIZEMOVE: {
+			dlg_trace("enter move resize");
+			wp.moveResizing = true;
+			break;
+		} case WM_EXITSIZEMOVE: {
+			dlg_trace("exit move resize");
+			wp.moveResizing = false;
+			break;
 		/*
-		dlg_assert(globalPlatform);
+		case WM_NCHITTEST: {
+			auto res = CallNextHookEx(nullptr, nCode, cwp->wParam, cwp->lParam);
 
-		auto* data = (MOUSEHOOKSTRUCT*)lParam;
-		// auto* data = (MSLLHOOKSTRUCT*)lParam;
-		auto xPos = data->pt.x;
-		auto yPos = data->pt.y;
-
-		if (abs(xPos - globalPlatform->lastX) < 10 && abs(yPos - globalPlatform->lastY) < 10) {
-			globalPlatform->gui->imguiIO().MousePos.x += xPos - globalPlatform->lastX;
-			globalPlatform->gui->imguiIO().MousePos.y += yPos - globalPlatform->lastY;
-		}
-
-		globalPlatform->lastX = xPos;
-		globalPlatform->lastY = yPos;
-
+			dlg_info("nchittest: {}", res);
+			if (res != HTCLIENT) {
+				dlg_info("move resizing true");
+				wp.moveResizing = true;
+			} else {
+				dlg_info("move resizing false");
+				wp.moveResizing = false;
+			}
+			return res;
 		*/
-
-		// dlg_trace("move {} {} {}", winPos.x, winPos.y, data->wHitTestCode);
-		// if(winPos.y < 0 || winPos.x < 0) {
-			return CallNextHookEx(nullptr, nCode, wParam, lParam);
-		// }
-
-		// return 1;
-	} else if(nCode >= 0) {
-		switch(wParam) {
-			case WM_LBUTTONDOWN:
-				// dlg_trace("lbuttondown {} {} {}", data->pt.x, data->pt.y, data->wHitTestCode);
-				globalPlatform->gui->imguiIO().MouseDown[0] = true;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_LBUTTONUP:
-				// dlg_trace("lbuttonup {} {} {} | {} {}", data->pt.x, data->pt.y, data->wHitTestCode, winPos.x, winPos.y);
-				globalPlatform->gui->imguiIO().MouseDown[0] = false;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_RBUTTONDOWN:
-				globalPlatform->gui->imguiIO().MouseDown[1] = true;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_RBUTTONUP:
-				globalPlatform->gui->imguiIO().MouseDown[1] = false;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_MBUTTONDOWN:
-				globalPlatform->gui->imguiIO().MouseDown[2] = true;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_MBUTTONUP:
-				globalPlatform->gui->imguiIO().MouseDown[2] = false;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_XBUTTONDOWN:
-				// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = true;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_XBUTTONUP:
-				// globalPlatform->gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = false;
-				if(winPos.y < 0 || winPos.x < 0) {
-					break;
-				}
-				return 1;
-			case WM_MOUSEWHEEL:
-				// TODO: accumulate?
-				globalPlatform->gui->imguiIO().MouseWheel = GET_WHEEL_DELTA_WPARAM(data->mouseData) / 120.f;
-				return 1;
-			case WM_MOUSEHWHEEL:
-				// TODO: accumulate?
-				globalPlatform->gui->imguiIO().MouseWheelH = GET_WHEEL_DELTA_WPARAM(data->mouseData) / 120.f;
-				return 1;
-			default:
-				break;
-		}
+		} default:
+			break;
 	}
 
 	return CallNextHookEx(nullptr, nCode, wParam, lParam);
@@ -553,67 +473,17 @@ bool Win32Platform::doUpdate() {
 	if(state != State::focused) {
 		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
 			dlg_trace("showing overlay; grabbing input");
-			dlg_assert(!mouseHook);
+
+			dlg_assert(!msgHook);
+			dlg_assert(!wndProcHook);
 
 			state = State::focused;
 
-			globalPlatform = this;
-			rawInput = false;
-
-			// register for raw input on mouse
-			if (!cursorShown()) {
-				RAWINPUTDEVICE Rid[1];
-
-				// unregister application
-				Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
-				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-				Rid[0].dwFlags = RIDEV_REMOVE;
-				Rid[0].hwndTarget = nullptr;
-				auto r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
-				if(!r) { print_winapi_error("RegisterRawInput"); }
-
-				Rid[0].usUsage = HID_USAGE_GENERIC_KEYBOARD;
-				r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
-				if(!r) { print_winapi_error("RegisterRawInput"); }
-
-				// register layer
-				Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
-				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-				Rid[0].dwFlags = 0u;
-				Rid[0].hwndTarget = overlayWindow;
-				RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
-				if(!r) { print_winapi_error("RegisterRawInput"); }
-
-				rawInput = true;
-			}
-
-			/*
-			auto threadID = GetWindowThreadProcessId(surfaceWindow, nullptr);
-			mouseHook = SetWindowsHookEx(WH_MOUSE, mouseHookFunc, nullptr, threadID);
-			// mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseHookFunc, nullptr, 0);
-			if (!mouseHook) {
-				print_winapi_error("SetWindowsHookEx");
-			}
-			*/
-
-			auto threadID = GetWindowThreadProcessId(surfaceWindow, nullptr);
-			mouseHook = SetWindowsHookEx(WH_GETMESSAGE, msgHookFunc, nullptr, threadID);
-			// mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseHookFunc, nullptr, 0);
-			if (!mouseHook) {
-				print_winapi_error("SetWindowsHookEx");
-			}
-
-
-			// updateWindowRect();
-			// ShowWindow(overlayWindow, SW_SHOW);
-
-			// TODO
-			// SetFocus(overlayWindow);
-			// SetActiveWindow(overlayWindow);
-			// SetWindowPos(surfaceWindow, overlayWindow, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_ASYNCWINDOWPOS);
+			Win32Platform::instance_ = this;
+			hooks->save();
 
 			POINT point;
-			GetCursorPos(&point);
+			hooks->GetCursorPos.forward(&point);
 			gui->imguiIO().MousePos.x = point.x;
 			gui->imguiIO().MousePos.y = point.y;
 		}
@@ -630,41 +500,15 @@ bool Win32Platform::doUpdate() {
 	if(state == State::focused) {
 		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
 			dlg_trace("hiding overlay window, ungrabbing input");
-			// ShowWindowAsync(overlayWindow, SW_HIDE);
-			UnhookWindowsHookEx(mouseHook);
 
-			// TODO: probably have to destroy window, this does no seem to work
-			if (rawInput)
-			{
-				RAWINPUTDEVICE Rid[1];
-				Rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;
-				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-				Rid[0].dwFlags = RIDEV_REMOVE;
-				Rid[0].hwndTarget = nullptr;
-				auto r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
-				if(!r) { print_winapi_error("RegisterRawInput"); }
+			hooks->restore();
 
-				// re-register for application
-				// shouldn't be a problem if not used
-				Rid[0].usUsage = HID_USAGE_GENERIC_MOUSE;
-				Rid[0].dwFlags = 0;
-				r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
-				if(!r) { print_winapi_error("RegisterRawInput"); }
-
-				Rid[0].usUsage = HID_USAGE_GENERIC_KEYBOARD;
-				Rid[0].dwFlags = 0;
-				r = RegisterRawInputDevices(Rid, 1, sizeof(Rid[0]));
-				if(!r) { print_winapi_error("RegisterRawInput"); }
-			}
-
-			mouseHook = nullptr;
 			state = State::hidden;
 		} else if(updateEdge(focusPressed, this->checkPressed(focusKey))) {
 			dlg_trace("ungrabbing input (overlay still shown)");
-			// ShowWindowAsync(overlayWindow, SW_HIDE);
-			// TODO: remove input device as well!
-			UnhookWindowsHookEx(mouseHook);
-			mouseHook = nullptr;
+
+			hooks->restore();
+
 			state = State::shown;
 		}
 
@@ -672,13 +516,14 @@ bool Win32Platform::doUpdate() {
 	}
 
 	if(state != State::hidden) {
-		auto drawCursor = false;
+		// TODO: don't ever do this, just make sure to show the hardware cursor instead
+		auto drawCursor = true;
 
 		// when the overlay is focused and the application does not show a
 		// cursor, we show our own software cursor.
 		// TODO: don't need raw input if application is showing cursor...
 		if(state == State::focused) {
-			drawCursor = !cursorShown();
+			// drawCursor = !cursorShown();
 		}
 
 		gui->imguiIO().MouseDrawCursor = drawCursor;
@@ -689,7 +534,7 @@ bool Win32Platform::doUpdate() {
 			//  only enable that when the cursor isn't shown as otherwise we must
 			//  rely on raw input and it will mess with that).
 			POINT pos;
-			GetCursorPos(&pos);
+			hooks->GetCursorPos.forward(&pos);
 			ScreenToClient(surfaceWindow, &pos);
 
 			gui->imguiIO().MousePos.x = pos.x;
@@ -697,68 +542,10 @@ bool Win32Platform::doUpdate() {
 		}
 
 		// Read keyboard modifiers inputs
-		gui->imguiIO().KeyCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
-		gui->imguiIO().KeyShift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
-		gui->imguiIO().KeyAlt = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+		gui->imguiIO().KeyCtrl = (hooks->GetKeyState.forward(VK_CONTROL) & 0x8000) != 0;
+		gui->imguiIO().KeyShift = (hooks->GetKeyState.forward(VK_SHIFT) & 0x8000) != 0;
+		gui->imguiIO().KeyAlt = (hooks->GetKeyState.forward(VK_MENU) & 0x8000) != 0;
 		gui->imguiIO().KeySuper = false;
-	}
-
-	return state != State::hidden;
-}
-
-LRESULT CALLBACK mouseLLHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
-	auto* data = (MSLLHOOKSTRUCT*) lParam;
-	(void) data;
-
-	if (nCode == 0 && globalPlatform->state == Win32Platform::State::focused) {
-		switch (wParam) {
-			case WM_LBUTTONDOWN:
-				dlg_trace("buttondown");
-				break;
-				// return 1;
-			case WM_MOUSEMOVE:
-				dlg_trace("mousemove");
-				break;
-				// return 1;
-			default:
-				break;
-		}
-	}
-
-	if (nCode == 0 && wParam == WM_LBUTTONDOWN)
-	{
-		PostThreadMessage(GetCurrentThreadId(), WM_USER, 0, 0);
-	}
-
-	return CallNextHookEx(NULL, nCode, wParam, lParam);
-}
-
-bool Win32Platform::doUpdate2() {
-	if(state != State::focused) {
-		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
-			dlg_trace("showing overlay; grabbing input");
-			dlg_assert(!mouseHook);
-
-			state = State::focused;
-
-			globalPlatform = this;
-
-		}
-	}
-
-	MSG msg;
-	if(GetMessage(&msg, 0, 0, 0)) {
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-	}
-
-	if(state == State::focused) {
-		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
-			dlg_trace("hiding overlay window, ungrabbing input");
-			// UnhookWindowsHookEx(mouseHook);
-			mouseHook = nullptr;
-			state = State::hidden;
-		}
 	}
 
 	return state != State::hidden;
@@ -767,15 +554,6 @@ bool Win32Platform::doUpdate2() {
 void Win32Platform::uiThread(Device& dev, u32, u32) {
 	std::unique_lock lock(mutex);
 	(void) dev;
-
-	// init hook
-	/*
-	globalPlatform = this;
-	mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseLLHookFunc, nullptr, 0);
-	if (!mouseHook) {
-		print_winapi_error("SetWindowsHookEx");
-	}
-	*/
 
 	// initWindow();
 	cv.notify_one();
@@ -817,6 +595,29 @@ void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
 	std::unique_lock lock(mutex);
 	thread = std::thread([&]{ uiThread(dev, width, height); });
 	cv.wait(lock);
+
+	Win32Platform::instance_ = this;
+	
+	if (auto ptr = InputHooks::instance_.lock()) {
+		this->hooks = std::move(ptr);
+	} else {
+		this->hooks = std::make_shared<InputHooks>();
+		InputHooks::instance_ = this->hooks;
+		hooks->init();
+		hooks->activate(true);
+	}
+
+	auto threadID = GetWindowThreadProcessId(surfaceWindow, nullptr);
+
+	msgHook = SetWindowsHookEx(WH_GETMESSAGE, msgHookFunc, nullptr, threadID);
+	if(!msgHook) {
+		print_winapi_error("SetWindowsHookEx");
+	}
+
+	wndProcHook = SetWindowsHookEx(WH_CALLWNDPROC, wndProcHookFunc, nullptr, threadID);
+	if(!wndProcHook) {
+		print_winapi_error("SetWindowsHookEx");
+	}
 }
 
 Platform::State Win32Platform::update(Gui& gui) {
@@ -830,6 +631,244 @@ Platform::State Win32Platform::update(Gui& gui) {
 	cv.wait(lock);
 	// TODO: not thread safe...
 	return state;
+}
+
+#pragma warning(disable : 4100)
+
+// hooked input functions
+SHORT WINAPI hookedGetAsyncKeyState(int vKey) {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		return 0u;
+	}
+
+	return wp.hooks->GetAsyncKeyState.forward(vKey);
+}
+
+SHORT WINAPI hookedGetKeyState(int vKey) {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		return 0u;
+	}
+
+	return wp.hooks->GetKeyState.forward(vKey);
+}
+
+BOOL WINAPI hookedGetKeyboardState(__out_ecount(256) PBYTE lpKeyState) {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		return false;
+	}
+
+	return wp.hooks->GetKeyboardState.forward(lpKeyState);
+}
+
+UINT WINAPI hookedGetRawInputData(HRAWINPUT hRawInput, UINT uiCommand, LPVOID pData, PUINT pcbSize, UINT cbSizeHeader) {
+	auto& wp = Win32Platform::get();
+	if (!wp.hookInput()) {
+		return wp.hooks->GetRawInputData.forward(hRawInput, uiCommand, pData, pcbSize, cbSizeHeader);
+	}
+
+	if (pcbSize) {
+		if(!pData) {
+			wp.hooks->GetRawInputData.forward(hRawInput, uiCommand, nullptr, pcbSize, cbSizeHeader);
+		}
+
+		if(*pcbSize > 0) {
+			LPBYTE lpb = new BYTE[*pcbSize];
+			wp.hooks->GetRawInputData.forward(hRawInput, uiCommand, lpb, pcbSize, cbSizeHeader);
+
+			delete[] lpb;
+			*pcbSize = 0;
+		}
+	}
+
+	return 0u;
+}
+
+UINT WINAPI hookedGetRawInputBuffer(PRAWINPUT pData, PUINT pcbSize, UINT cbSizeHeader) {
+	auto& wp = Win32Platform::get();
+	if (!wp.hookInput()) {
+		return wp.hooks->GetRawInputBuffer.forward(pData, pcbSize, cbSizeHeader);
+	}
+
+	if (pcbSize) {
+		if(!pData) {
+			wp.hooks->GetRawInputBuffer.forward(NULL, pcbSize, sizeof(RAWINPUTHEADER));
+		}
+
+		if (*pcbSize > 0) {
+			UINT AllocatedBufferByteCount = *pcbSize * 16;
+			RAWINPUT* RawInputBuffer = reinterpret_cast<RAWINPUT*>(malloc(AllocatedBufferByteCount));
+
+			UINT AllocatedBufferByteCountTwo = AllocatedBufferByteCount;
+			UINT Result = wp.hooks->GetRawInputBuffer.forward(RawInputBuffer, &(AllocatedBufferByteCountTwo), sizeof(RAWINPUTHEADER));
+			if (Result == -1) {
+				dlg_error(GetLastError());
+			} else if (Result != 0) {
+				UINT RawInputCount = Result;
+				DefRawInputProc(&(RawInputBuffer), RawInputCount, sizeof(RAWINPUTHEADER));
+			}
+
+			free(RawInputBuffer);
+		}
+		*pcbSize = 0;
+	}
+
+	return 0;
+}
+
+int WINAPI hookedShowCursor(__in BOOL bShow) {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		int saveCount = wp.hooks->saved.cursorCount;
+        wp.hooks->saved.cursorCount  += bShow ? 1 : -1;
+        wp.hooks->saved.cursorVisible = !!bShow;
+        return saveCount;
+	}
+
+	return wp.hooks->ShowCursor.forward(bShow);
+}
+
+BOOL WINAPI hookedGetCursorPos(LPPOINT lpPoint) {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		if (lpPoint) {
+            *lpPoint = wp.hooks->saved.cursorPos;
+        }
+
+		return true;
+	}
+
+	return wp.hooks->GetCursorPos.forward(lpPoint);
+}
+
+BOOL WINAPI hookedSetCursorPos(int X, int Y) {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		wp.hooks->saved.cursorPos = POINT{X, Y};
+		return true;
+	}
+
+	return wp.hooks->SetCursorPos.forward(X, Y);
+}
+
+HCURSOR WINAPI hookedSetCursor(HCURSOR hCursor) {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		wp.hooks->saved.cursor = hCursor;
+		return nullptr;
+	}
+
+	return wp.hooks->SetCursor.forward(hCursor);
+}
+
+HCURSOR	WINAPI hookedGetCursor() {
+	auto& wp = Win32Platform::get();
+	if (wp.hookInput()) {
+		return wp.hooks->saved.cursor;
+	}
+
+	return wp.hooks->GetCursor.forward();
+}
+
+/////
+void InputHooks::init() {
+	auto res = MH_Initialize();
+	dlg_assertm(res == MH_OK, "{}: {}", res, MH_StatusToString(res));
+
+	auto lib = LoadLibraryA("user32.dll");
+
+#define VIL_INIT_HOOK(x) { \
+		auto f##x = GetProcAddress(lib, #x); \
+		this->x.init(f##x, hooked##x); \
+		dlg_info("hook for {}: {}", #x, this->x.target_); \
+	}
+
+	VIL_INIT_HOOK(GetAsyncKeyState);
+	VIL_INIT_HOOK(GetKeyState);
+	VIL_INIT_HOOK(GetKeyboardState);
+	VIL_INIT_HOOK(GetRawInputData);
+	VIL_INIT_HOOK(GetRawInputBuffer);
+	VIL_INIT_HOOK(ShowCursor);
+	VIL_INIT_HOOK(GetCursorPos);
+	VIL_INIT_HOOK(SetCursorPos);
+	VIL_INIT_HOOK(SetCursor);
+	VIL_INIT_HOOK(GetCursor);
+
+#undef VIL_INIT_HOOK
+}
+
+void InputHooks::activate(bool a) {
+	GetAsyncKeyState.activate(a);
+	GetKeyState.activate(a);
+	GetKeyboardState.activate(a);
+	GetRawInputData.activate(a);
+	GetRawInputBuffer.activate(a);
+	ShowCursor.activate(a);
+	GetCursorPos.activate(a);
+	SetCursorPos.activate(a);
+	SetCursor.activate(a);
+	GetCursor.activate(a);
+}
+
+void InputHooks::save() {
+	auto& saved = this->saved;
+
+	if(!saved.inputStateSaved) {
+        saved.cursorCount = ShowCursor.forward(TRUE);
+        saved.cursorCount -= 1;
+
+        int showCursorCounter = ShowCursor.forward(TRUE);
+
+        while (showCursorCounter  < 0) {
+            auto nextCounter = ShowCursor.forward(TRUE);
+
+            if (nextCounter == showCursorCounter) {
+                dlg_trace("oops!");
+                break;
+            }
+
+            showCursorCounter = nextCounter;
+        }
+
+        POINT cursorPos = { 0 };
+        GetCursorPos.forward(&cursorPos);
+        saved.cursorPos.store(cursorPos);
+        saved.cursor = GetCursor.forward();
+        saved.inputStateSaved = true;
+    }
+}
+
+void InputHooks::restore() {
+	auto& saved = this->saved;
+
+    if (saved.inputStateSaved) {
+        int curCursorCount = ShowCursor.forward(FALSE);
+
+        if(saved.cursorCount != curCursorCount) {
+            BOOL showOrHide = saved.cursorCount > curCursorCount ? TRUE : FALSE;
+            int showCursorCounter = ShowCursor.forward(showOrHide);
+
+            while (showCursorCounter != saved.cursorCount) {
+                auto nextCounter = ShowCursor.forward(showOrHide);
+                if (nextCounter == showCursorCounter) {
+                    dlg_trace("oops!");
+                    break;
+                }
+
+                showCursorCounter = nextCounter;
+            }
+        }
+
+        SetCursor.forward(saved.cursor);
+
+        if (saved.cursorVisible) {
+            ShowCursor.forward(TRUE);
+        }
+
+        saved.inputStateSaved = false;
+    }
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
@@ -851,174 +890,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 	platform.surfaceWindow = pCreateInfo->hwnd;
 
 	return res;
-}
-
-// from swa
-static const struct {
-	enum swa_key key;
-	unsigned vkcode;
-} key_map [] = {
-	{swa_key_none, 0x0},
-	{swa_key_a, 'A'},
-	{swa_key_b, 'B'},
-	{swa_key_c, 'C'},
-	{swa_key_d, 'D'},
-	{swa_key_e, 'E'},
-	{swa_key_f, 'F'},
-	{swa_key_g, 'G'},
-	{swa_key_h, 'H'},
-	{swa_key_i, 'I'},
-	{swa_key_j, 'J'},
-	{swa_key_k, 'K'},
-	{swa_key_l, 'L'},
-	{swa_key_m, 'M'},
-	{swa_key_n, 'N'},
-	{swa_key_o, 'O'},
-	{swa_key_p, 'P'},
-	{swa_key_q, 'Q'},
-	{swa_key_r, 'R'},
-	{swa_key_s, 'S'},
-	{swa_key_t, 'T'},
-	{swa_key_u, 'U'},
-	{swa_key_v, 'V'},
-	{swa_key_w, 'W'},
-	{swa_key_x, 'X'},
-	{swa_key_y, 'Y'},
-	{swa_key_z, 'Z'},
-	{swa_key_k0, '0'},
-	{swa_key_k1, '1'},
-	{swa_key_k2, '2'},
-	{swa_key_k3, '3'},
-	{swa_key_k4, '4'},
-	{swa_key_k5, '5'},
-	{swa_key_k6, '6'},
-	{swa_key_k7, '7'},
-	{swa_key_k8, '8'},
-	{swa_key_k9, '9'},
-	{swa_key_backspace, VK_BACK},
-	{swa_key_tab, VK_TAB},
-	{swa_key_clear, VK_CLEAR},
-	{swa_key_enter, VK_RETURN},
-	{swa_key_leftshift, VK_SHIFT},
-	{swa_key_leftctrl, VK_CONTROL},
-	{swa_key_leftalt, VK_MENU},
-	{swa_key_capslock, VK_CAPITAL},
-	{swa_key_katakana, VK_KANA},
-	{swa_key_hanguel, VK_HANGUL},
-	{swa_key_hanja, VK_HANJA},
-	{swa_key_escape, VK_ESCAPE},
-	{swa_key_space, VK_SPACE},
-	{swa_key_pageup, VK_PRIOR},
-	{swa_key_pagedown, VK_NEXT},
-	{swa_key_end, VK_END},
-	{swa_key_home, VK_HOME},
-	{swa_key_left, VK_LEFT},
-	{swa_key_right, VK_RIGHT},
-	{swa_key_up, VK_UP},
-	{swa_key_down, VK_DOWN},
-	{swa_key_select, VK_SELECT},
-	{swa_key_print, VK_PRINT},
-	{swa_key_insert, VK_INSERT},
-	{swa_key_del, VK_DELETE},
-	{swa_key_help, VK_HELP},
-	{swa_key_leftmeta, VK_LWIN},
-	{swa_key_rightmeta, VK_RWIN},
-	{swa_key_sleep, VK_SLEEP},
-	{swa_key_kp0, VK_NUMPAD0},
-	{swa_key_kp1, VK_NUMPAD1},
-	{swa_key_kp2, VK_NUMPAD2},
-	{swa_key_kp3, VK_NUMPAD3},
-	{swa_key_kp4, VK_NUMPAD4},
-	{swa_key_kp5, VK_NUMPAD5},
-	{swa_key_kp6, VK_NUMPAD6},
-	{swa_key_kp7, VK_NUMPAD7},
-	{swa_key_kp8, VK_NUMPAD8},
-	{swa_key_kp9, VK_NUMPAD9},
-	{swa_key_kpmultiply, VK_MULTIPLY},
-	{swa_key_kpplus, VK_ADD},
-	{swa_key_kpminus, VK_SUBTRACT},
-	{swa_key_kpdivide, VK_DIVIDE},
-	{swa_key_kpperiod, VK_SEPARATOR}, //XXX not sure
-	{swa_key_f1, VK_F1},
-	{swa_key_f2, VK_F2},
-	{swa_key_f3, VK_F3},
-	{swa_key_f4, VK_F4},
-	{swa_key_f5, VK_F5},
-	{swa_key_f6, VK_F6},
-	{swa_key_f7, VK_F7},
-	{swa_key_f8, VK_F8},
-	{swa_key_f9, VK_F9},
-	{swa_key_f10, VK_F10},
-	{swa_key_f11, VK_F11},
-	{swa_key_f12, VK_F12},
-	{swa_key_f13, VK_F13},
-	{swa_key_f14, VK_F14},
-	{swa_key_f15, VK_F15},
-	{swa_key_f16, VK_F16},
-	{swa_key_f17, VK_F17},
-	{swa_key_f18, VK_F18},
-	{swa_key_f19, VK_F19},
-	{swa_key_f20, VK_F20},
-	{swa_key_f21, VK_F21},
-	{swa_key_f22, VK_F22},
-	{swa_key_f23, VK_F23},
-	{swa_key_f24, VK_F24},
-	{swa_key_numlock, VK_NUMLOCK},
-	{swa_key_scrollock, VK_SCROLL},
-	{swa_key_leftshift, VK_LSHIFT},
-	{swa_key_rightshift, VK_RSHIFT},
-	{swa_key_leftctrl, VK_LCONTROL},
-	{swa_key_rightctrl, VK_RCONTROL},
-	{swa_key_leftalt, VK_LMENU},
-	{swa_key_rightalt, VK_RMENU},
-	// XXX: some browser keys after this. not sure about it
-	{swa_key_mute, VK_VOLUME_MUTE},
-	{swa_key_volumedown, VK_VOLUME_DOWN},
-	{swa_key_volumeup, VK_VOLUME_UP},
-	{swa_key_nextsong, VK_MEDIA_NEXT_TRACK},
-	{swa_key_previoussong, VK_MEDIA_PREV_TRACK},
-	{swa_key_stopcd, VK_MEDIA_STOP}, // XXX: or keycode::stop?
-	{swa_key_playpause, VK_MEDIA_PLAY_PAUSE},
-	{swa_key_mail, VK_LAUNCH_MAIL},
-
-	{swa_key_period, VK_OEM_PERIOD},
-	{swa_key_comma, VK_OEM_COMMA},
-	{swa_key_equals, VK_OEM_PLUS},
-	{swa_key_minus, VK_OEM_MINUS},
-	{swa_key_102nd, VK_OEM_102},
-
-	{swa_key_semicolon, VK_OEM_1},
-	{swa_key_slash, VK_OEM_2},
-	{swa_key_grave, VK_OEM_3},
-	{swa_key_leftbrace, VK_OEM_4},
-	{swa_key_backslash, VK_OEM_5},
-	{swa_key_rightbrace, VK_OEM_6},
-	{swa_key_apostrophe, VK_OEM_7},
-
-	{swa_key_play, VK_PLAY},
-	{swa_key_zoom, VK_ZOOM},
-};
-
-static enum swa_key winapi_to_key(unsigned vkcode) {
-	unsigned len = sizeof(key_map) / sizeof(key_map[0]);
-	for(unsigned i = 0u; i < len; ++i) {
-		if(key_map[i].vkcode == vkcode) {
-			return key_map[i].key;
-		}
-	}
-
-	return swa_key_none;
-}
-
-static unsigned key_to_winapi(enum swa_key key) {
-	unsigned len = sizeof(key_map) / sizeof(key_map[0]);
-	for(unsigned i = 0u; i < len; ++i) {
-		if(key_map[i].key == key) {
-			return key_map[i].vkcode;
-		}
-	}
-
-	return 0x0;
 }
 
 } // namespace vil

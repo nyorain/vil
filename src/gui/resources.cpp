@@ -126,13 +126,13 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	} else if(image.views.size() == 1) {
 		ImGui::Text("Image View");
 		ImGui::SameLine();
-		refButton(*gui_, nonNull(image.views[0]));
+		refButtonExpect(*gui_, image.views[0]);
 	} else if(image.views.size() > 1) {
 		ImGui::Text("Image Views:");
 
 		for(auto* view : image.views) {
 			ImGui::Bullet();
-			refButton(*gui_, nonNull(view));
+			refButtonExpect(*gui_, view);
 		}
 	}
 

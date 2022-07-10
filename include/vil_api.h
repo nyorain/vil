@@ -47,35 +47,35 @@ typedef struct VilOverlayT* VilOverlay;
 
 // All keys that are handled by vil.
 // Derived from linux/input-event-codes.h
-enum vilKey {
-	vilKeyTab = 15,
-	vilKeyLeft = 105,
-	vilKeyRight = 106,
-	vilKeyUp = 103,
-	vilKeyDown = 108,
-	vilKeyPageUp = 104,
-	vilKeyPageDown = 109,
-	vilKeyHome = 102,
-	vilKeyEnd = 107,
-	vilKeyInsert = 110,
-	vilKeyDelete = 111,
-	vilKeyBackspace = 14,
-	vilKeySpace = 57,
-	vilKeyEnter = 28,
-	vilKeyPadEnter = 96,
-	vilKeyA = 30,
-	vilKeyC = 46,
-	vilKeyV = 47,
-	vilKeyX = 45,
-	vilKeyY = 21,
-	vilKeyZ = 44,
+enum VilKey {
+	VilKeyTab = 15,
+	VilKeyLeft = 105,
+	VilKeyRight = 106,
+	VilKeyUp = 103,
+	VilKeyDown = 108,
+	VilKeyPageUp = 104,
+	VilKeyPageDown = 109,
+	VilKeyHome = 102,
+	VilKeyEnd = 107,
+	VilKeyInsert = 110,
+	VilKeyDelete = 111,
+	VilKeyBackspace = 14,
+	VilKeySpace = 57,
+	VilKeyEnter = 28,
+	VilKeyPadEnter = 96,
+	VilKeyA = 30,
+	VilKeyC = 46,
+	VilKeyV = 47,
+	VilKeyX = 45,
+	VilKeyY = 21,
+	VilKeyZ = 44,
 };
 
-enum vilKeyMod {
-	vilKeyModShift = (1u << 0),
-	vilKeyModCtrl = (1u << 1),
-	vilKeyModAlt = (1u << 2),
-	vilKeyModSuper = (1u << 3),
+enum VilKeyMod {
+	VilKeyModShift = (1u << 0),
+	VilKeyModCtrl = (1u << 1),
+	VilKeyModAlt = (1u << 2),
+	VilKeyModSuper = (1u << 3),
 };
 
 // Creates an overlay for the swapchain last created for the given device.
@@ -103,11 +103,11 @@ typedef void (*PFN_vilOverlayShow)(VilOverlay, bool show);
 // return true, the event should not be handled by the application again.
 typedef bool (*PFN_vilOverlayMouseButtonEvent)(VilOverlay, unsigned button, bool press);
 typedef bool (*PFN_vilOverlayMouseWheelEvent)(VilOverlay, float x, float y);
-typedef bool (*PFN_vilOverlayKeyEvent)(VilOverlay, enum vilKey keycode, bool pressed);
+typedef bool (*PFN_vilOverlayKeyEvent)(VilOverlay, enum VilKey keycode, bool pressed);
 typedef bool (*PFN_vilOverlayTextEvent)(VilOverlay, const char* utf8);
 
 typedef void (*PFN_vilOverlayMouseMoveEvent)(VilOverlay, int x, int y);
-typedef void (*PFN_vilOverlayKeyboardModifier)(VilOverlay, enum vilKeyMod mod, bool active);
+typedef void (*PFN_vilOverlayKeyboardModifier)(VilOverlay, enum VilKeyMod mod, bool active);
 
 typedef struct VilApi {
 	PFN_vilCreateOverlayForLastCreatedSwapchain CreateOverlayForLastCreatedSwapchain;
