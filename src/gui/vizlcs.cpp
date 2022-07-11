@@ -1,6 +1,7 @@
 #include <gui/vizlcs.hpp>
 #include <util/list.hpp>
 #include <random>
+#include <iomanip>
 
 inline ImVec2 operator*(const ImVec2& lhs, const float rhs)              { return ImVec2(lhs.x * rhs, lhs.y * rhs); }
 inline ImVec2 operator/(const ImVec2& lhs, const float rhs)              { return ImVec2(lhs.x / rhs, lhs.y / rhs); }
