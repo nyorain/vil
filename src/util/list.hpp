@@ -3,7 +3,7 @@
 // Easy interface for building intrusive doubly linked list.
 // Inspired by the linux kernel implementation, but with added typesafety.
 
-#include <dlg/dlg.hpp>
+#include <util/dlg.hpp>
 #include <type_traits>
 
 namespace vil {
