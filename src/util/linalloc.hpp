@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstring>
 #include <memory_resource>
+#include <functional>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
 #include <util/dlg.hpp>

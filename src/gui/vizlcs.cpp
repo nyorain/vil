@@ -220,37 +220,34 @@ struct FLCS {
 		dlg_assert(maxPossibleScore(cand.score, cand.i, cand.j) >= bestMatch_);
 
 		auto& m = match(cand.i, cand.j);
-		if(m.best >= cand.score + 1) {
+		if(m.best >= cand.score) {
 			return;
 		}
 
+		m.best = cand.score;
 		if(m.eval == -1.f) {
 			m.eval = weight(cand.i, cand.j);
 		}
 
 		auto newScore = cand.score + m.eval;
-		if(newScore > m.best) {
-			m.best = newScore;
+		if(m.eval > 0.f) {
+			addCandidate(newScore, cand.i, cand.j, 1, 1);
 
-			if(m.eval > 0.f) {
-				addCandidate(newScore, cand.i, cand.j, 1, 1);
+			// throw out all candidates that can't even reach what we have
+			queue.prune(newScore);
+		}
 
-				// throw out all candidates that can't even reach what we have
-				queue.prune(newScore);
-			}
-
-			// TODO: yeah with fuzzy matching we should always branch
-			// out... This will generate so many candidates tho :(
-			// otoh they have a lower score so won't be considered.
-			// And for perfect matches we still only generate 3 * n
-			// candidates total.
-			// TODO: only threshold = 1.f is guaranteed to be 100% correct,
-			// otherwise it's a heuristic.
-			constexpr auto threshold = 0.9f;
-			if(m.eval < threshold) {
-				addCandidate(cand.score, cand.i, cand.j, 1, 0);
-				addCandidate(cand.score, cand.i, cand.j, 0, 1);
-			}
+		// TODO: yeah with fuzzy matching we should always branch
+		// out... This will generate so many candidates tho :(
+		// otoh they have a lower score so won't be considered.
+		// And for perfect matches we still only generate 3 * n
+		// candidates total.
+		// TODO: only threshold = 1.f is guaranteed to be 100% correct,
+		// otherwise it's a heuristic.
+		constexpr auto threshold = 1.f;
+		if(m.eval < threshold) {
+			addCandidate(cand.score, cand.i, cand.j, 1, 0);
+			addCandidate(cand.score, cand.i, cand.j, 0, 1);
 		}
 	}
 
@@ -308,9 +305,14 @@ void VizLCS::draw() {
 	while(it != &algo_->queue.queue) {
 		ImVec2 pos = spos + ImVec2(it->i, it->j) * (pad + size);
 		drawField(dl, pos, size, 0xFF6666FFu);
-		it = it->next;
 
-		drawWeight(dl, pos + ImVec2(0, 15), size, it->score);
+		auto score = it->score;
+		if(score < 0.0000001) {
+			score = 0.0;
+		}
+
+		drawWeight(dl, pos + ImVec2(0, 15), size, score);
+		it = it->next;
 	}
 
 	// now, draw best candidate

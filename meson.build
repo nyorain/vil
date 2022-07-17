@@ -184,6 +184,7 @@ src = files(
 	'src/overlay.cpp',
 	'src/platform.cpp',
 	'src/cow.cpp',
+	'src/lmm.cpp',
 	'src/vk/format_utils.cpp',
 	'src/util/util.cpp',
 	'src/util/f16.cpp',
@@ -336,6 +337,7 @@ if with_unit_tests
 		'src/test/unit/bufferAddress.cpp',
 		'src/test/unit/bufparse.cpp',
 		'src/test/unit/match.cpp',
+		'src/test/unit/lmm.cpp',
 	)
 endif
 
