@@ -22,8 +22,8 @@ inline ImVec4 operator*(const ImVec4& lhs, const ImVec4& rhs)            { retur
 namespace vil {
 
 // util
-static constexpr auto width = 15u;
-static constexpr auto height = 13u;
+static constexpr auto width = 20u;
+static constexpr auto height = 4u;
 
 struct Candidate {
 	Candidate* prev {};

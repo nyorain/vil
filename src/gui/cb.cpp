@@ -386,6 +386,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		return;
 	}
 
+	// Settings
 	if(ImGui::Button(ICON_FA_WRENCH)) {
 		ImGui::OpenPopup("Command Selector");
 	}
@@ -412,6 +413,12 @@ void CommandBufferGui::draw(Draw& draw) {
 		ImGui::Separator();
 		ImGui::Checkbox("Focus Selected", &focusSelected_);
 
+		ImGui::Separator();
+		int updateTime = std::chrono::duration_cast<std::chrono::milliseconds>(updateTick_.interval).count();
+		ImGui::SliderInt("Update time (ms)", &updateTime, 0, 1000);
+		updateTick_.interval = std::chrono::duration_cast<UpdateTicker::Clock::duration>(
+			std::chrono::milliseconds(updateTime));
+
 		ImGui::EndPopup();
 	}
 
@@ -430,6 +437,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	ImGui::SameLine();
+	auto doUpdate = updateTick_.tick();
 
 	if(mode_ != UpdateMode::none) {
 		ImGui::SameLine();
@@ -444,7 +452,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	// force-update shown batches when it's been too long
-	if(mode_ == UpdateMode::swapchain && !freezeState_) {
+	if(mode_ == UpdateMode::swapchain && !freezeState_ && doUpdate) {
 		auto lastPresent = dev.swapchain->frameSubmissions[0].presentID;
 		if(record_ && lastPresent > swapchainPresent_ + 4) {
 			auto diff = lastPresent - swapchainPresent_;
@@ -506,7 +514,14 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	ImGui::PopStyleVar(2);
 
-	updateState();
+	// logical state update
+	if(doUpdate) {
+		updateState();
+	}
+
+	// always clear the completed hooks, no matter if we update
+	// the state or not.
+	hook.completed.clear();
 
 	ImGui::EndChild();
 	// ImGui::PopStyleColor();
@@ -761,6 +776,7 @@ void CommandBufferGui::updateState() {
 			// from *best above.
 			commandViewer_.select(best->record, *best->command.back(),
 				best->descriptorSnapshot, false, best->state);
+			hook.stillNeeded = best->state.get();
 
 			// in this case, we want to freeze state but temporarily
 			// unfroze it to get a new CommandHookState. This happens
@@ -787,8 +803,6 @@ void CommandBufferGui::updateState() {
 			dlg_error("TODO: shown commands not correctly updated until selected");
 		}
 	}
-
-	hook.completed.clear();
 }
 
 void CommandBufferGui::displayFrameCommands() {
@@ -937,6 +951,7 @@ void CommandBufferGui::displayFrameCommands() {
 				dev.commandHook->target.all = true;
 				dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
 				dev.commandHook->freeze = false;
+				dev.commandHook->stillNeeded = nullptr;
 			}
 
 			ImGui::Indent(s);
@@ -1004,6 +1019,7 @@ void CommandBufferGui::displayRecordCommands() {
 		// in any case, update the hook
 		dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
 		dev.commandHook->freeze = false;
+		dev.commandHook->stillNeeded = nullptr;
 	}
 }
 
@@ -1020,6 +1036,7 @@ void CommandBufferGui::clearSelection() {
 	dev.commandHook->target = {};
 	dev.commandHook->unsetHookOps();
 	dev.commandHook->desc({}, {}, {});
+	dev.commandHook->stillNeeded = nullptr;
 
 	if (mode_ == UpdateMode::swapchain) {
 		record_ = {};

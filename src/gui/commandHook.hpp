@@ -93,6 +93,7 @@ public:
 	};
 
 	std::vector<CompletedHook> completed;
+	CommandHookState* stillNeeded {}; // hookState that can't be recycled
 
 public:
 	CommandHook(Device& dev);

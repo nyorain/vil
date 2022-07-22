@@ -369,6 +369,11 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			continue;
 		}
 
+		// we can't reuse this hook record, it's state is still needded
+		if(hookRecord->state.get() == stillNeeded) {
+			continue;
+		}
+
 		// the record has completed, its state in our completed list
 		auto completedIt = find_if(this->completed, [&](const CompletedHook& completed) {
 			return completed.state == hookRecord->state;

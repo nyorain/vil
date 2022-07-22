@@ -1,11 +1,17 @@
 #include <lmm.hpp>
 #include <util/list.hpp>
+#include <util/profiling.hpp>
 
 // PERF: figure out bottlenecks.
-// Probably inserting into the list. Replace the linked list
+// Maybe? inserting into the list. Replace the linked list
 // with a heap. Can't use linked list anymore then, re-allocate
 // span<Candidate> as needed?
 //
+// OTOH, we shouldn't really need a heap, inserting can't take that
+// long since new candidates will usually be near the top of the
+// queue (since they have a score >= the top one, metric can be
+// 1 less at max), so inserting should be O(n), but often more
+// close to O(1)?
 // Alternatively, could store a vector of the last couple of
 // insertions and start with the closest one
 
@@ -19,7 +25,8 @@ float maxPossibleScore(float score, u32 width, u32 height, u32 i, u32 j) {
 LazyMatrixMarch::LazyMatrixMarch(u32 width, u32 height, LinAllocator& alloc,
 	Matcher matcher, float branchThreshold) :
 		alloc_(alloc), width_(width), height_(height), matcher_(std::move(matcher)),
-		branchThreshold_(branchThreshold) {
+		branchThreshold_(branchThreshold), set_(HeapCandCompare{*this}, alloc) {
+
 	dlg_assert(width > 0);
 	dlg_assert(height > 0);
 	dlg_assert(matcher_);
@@ -33,10 +40,35 @@ LazyMatrixMarch::LazyMatrixMarch(u32 width, u32 height, LinAllocator& alloc,
 	freeList_.prev = &freeList_;
 
 	// add initial candidate
-	insertCandidate(0, 0, 0.f);
+	// 1
+	//  insertCandidate(0, 0, 0.f);
+	// /*
+	// if(height > width) {
+	// 	for(auto i = 1u; i < height - width; ++i) {
+	// 		insertCandidate(0, i, 0.f);
+	// 	}
+	// } else {
+	// 	for(auto i = 1u; i < width - height; ++i) {
+	// 		insertCandidate(i, 0, 0.f);
+	// 	}
+	// }
+	// */
+
+	// 2
+	// cands_ = alloc.alloc<HeapCand>(width * height);
+	// cands_[0] = {0, 0, 0.f};
+	// candCount_ = 1u;
+
+	// 3
+	auto it = set_.insert({0, 0, 0.f}).first;
+	match(0, 0).best = 0.f;
+	match(0, 0).hasCandidate = true;
+	match(0, 0).candidate = it;
 }
 
 void LazyMatrixMarch::addCandidate(float score, u32 i, u32 j, u32 addI, u32 addJ) {
+	ExtZoneScoped;
+
 	if(i + addI >= width() || j + addJ >= height()) {
 		// we have a finished run.
 		if(score > bestMatch_) {
@@ -58,43 +90,93 @@ void LazyMatrixMarch::addCandidate(float score, u32 i, u32 j, u32 addI, u32 addJ
 		auto& m = match(i + addI, j + addJ);
 		if(m.best < score) {
 			// TODO: can be made more efficient, don't insert from 0
-			if(m.candidate) {
-				if(m.candidate->score >= score) {
-					return;
-				}
+			// if(m.candidate) {
+			// 	if(m.candidate->score >= score) {
+			// 		return;
+			// 	}
+			// 	unlink(*m.candidate);
+			// 	insertBefore(freeList_, *m.candidate);
+			// }
 
-				unlink(*m.candidate);
-				insertBefore(freeList_, *m.candidate);
+			// m.candidate = &insertCandidate(i + addI, j + addJ, score);
+
+			// 2
+			// cands_[candCount_] = {u16(i + addI), u16(j + addJ), score};
+			// ++candCount_;
+			// std::push_heap(cands_.begin(), cands_.begin() + candCount_,
+			// 	[&](const auto& a, const auto& b) {
+			// 		return maxPossibleScore(a.score, a.i, a.j) + 0.000001 * a.score <
+			// 			maxPossibleScore(b.score, b.i, b.j) + 0.000001 * b.score;
+			// });
+
+			// 3
+			if(m.hasCandidate) {
+				// auto c = set_.erase({u16(i + addI), u16(j + addJ), m.best});
+				// dlg_assert(c == 1u);
+				set_.erase(m.candidate);
 			}
 
-			m.candidate = &insertCandidate(i + addI, j + addJ, score);
+			auto [it, succ] = set_.insert({u16(i + addI), u16(j + addJ), score});
+			dlg_assert(succ);
+			m.hasCandidate = true;
+			m.candidate = it;
+			m.best = score;
 		}
 	}
 }
 
 bool LazyMatrixMarch::step() {
+	ExtZoneScoped;
+
 	if(empty()) {
 		return false;
 	}
 
 	++numSteps_;
-	const auto cand = popCandidate();
+
+	// 1
+	// const auto cand = popCandidate();
+
+	// 2
+	// std::pop_heap(cands_.begin(), cands_.begin() + candCount_,
+	// 	[&](const auto& a, const auto& b) {
+	// 		return maxPossibleScore(a.score, a.i, a.j) + 0.000001 * a.score <
+	// 			maxPossibleScore(b.score, b.i, b.j) + 0.000001 * b.score;
+	// });
+	// --candCount_;
+	// const auto cand = cands_[candCount_];
+
+	// 3
+	auto it = set_.end();
+	--it;
+	auto cand = *it;
+	set_.erase(it); // pop_back, basically
 
 	// should be true due to pruning
 	// (i guess can be false when our metric does not fulfill the
 	// assumption used in prune(newScore) about the ordering)
 	// NOTE: we need the weird cand.score extra term due to the metric chosen,
 	// pruning might not always catch everything
-	dlg_assert(maxPossibleScore(cand.score, cand.i, cand.j) + 0.1 * cand.score >= bestMatch_);
+	// dlg_assert_or(maxPossibleScore(cand.score, cand.i, cand.j) + 0.00001 * cand.score >= bestMatch_,
+	// 	return true);
+	// NOTE can happen in heap, without pruning
+	// if(maxPossibleScore(cand.score, cand.i, cand.j) <= bestMatch_) {
+	// 	return true;
+	// }
+	dlg_assert(maxPossibleScore(cand.score, cand.i, cand.j) >= bestMatch_);
 
 	auto& m = this->match(cand.i, cand.j);
-	m.candidate = nullptr;
-	if(m.best >= cand.score) {
-		return true;
-	}
+	// m.candidate = nullptr;
+	m.hasCandidate = false;
+
+	dlg_assert(m.best == cand.score);
+	// if(m.best >= cand.score) {
+	// 	return true;
+	// }
 
 	m.best = cand.score;
 	if(m.eval == -1.f) {
+		ExtZoneScopedN("eval");
 		m.eval = matcher_(cand.i, cand.j);
 		++numEvals_;
 	}
@@ -123,6 +205,8 @@ bool LazyMatrixMarch::step() {
 }
 
 LazyMatrixMarch::Result LazyMatrixMarch::run() {
+	ExtZoneScoped;
+
 	// run algorithm
 	while(step()) /*noop*/;
 
@@ -182,6 +266,8 @@ float LazyMatrixMarch::maxPossibleScore(float score, u32 i, u32 j) const {
 }
 
 LazyMatrixMarch::Candidate& LazyMatrixMarch::insertCandidate(u32 i, u32 j, float score) {
+	ExtZoneScoped;
+
 	Candidate* cand;
 	if(freeList_.next != &freeList_) {
 		cand = freeList_.next;
@@ -220,6 +306,27 @@ LazyMatrixMarch::Candidate LazyMatrixMarch::peekCandidate() const {
 }
 
 void LazyMatrixMarch::prune(float minScore) {
+	ExtZoneScoped;
+
+	// 3
+	{
+		auto it = set_.begin();
+		for(; it != set_.end(); ++it) {
+			if(maxPossibleScore(it->score, it->i, it->j) >= minScore) {
+				break;
+			}
+
+			dlg_assert(match(it->i, it->j).hasCandidate);
+			match(it->i, it->j).hasCandidate = false;
+		}
+
+		if(it != set_.begin()) {
+			set_.erase(set_.begin(), it);
+		}
+
+		return;
+	}
+
 	// PERF: can be implement more efficiently, unlinking and
 	// inserting the whole sub-linked-list
 	// TODO: assumed we have maxPossibleScore as metric, not working
@@ -281,7 +388,7 @@ float LazyMatrixMarch::metric(const Candidate& c) const {
 	//   number of total iterations
 	// Contra: we might evaluate candidates we could have excluded
 	//   otherwise
-	return maxPossibleScore(c.score, c.i, c.j) + 0.01 * c.score;
+	return maxPossibleScore(c.score, c.i, c.j) + 0.000001 * c.score;
 
 	// Mixed metric. Still showed the problems of the score metric.
 	// return maxPossibleScore(c.score, c.i, c.j) + c.score;

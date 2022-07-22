@@ -6,6 +6,7 @@
 #include <gui/render.hpp>
 #include <gui/vertexViewer.hpp>
 #include <gui/command.hpp>
+#include <gui/update.hpp>
 #include <util/flags.hpp>
 #include <command/desc.hpp>
 
@@ -110,6 +111,7 @@ private:
 	CommandViewer commandViewer_ {};
 
 	bool focusSelected_ {}; // TODO WIP experiment
+	UpdateTicker updateTick_ {};
 };
 
 } // namespace vil

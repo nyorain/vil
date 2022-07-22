@@ -2,6 +2,7 @@
 #include "../approx.hpp"
 #include "lmm.hpp"
 #include <random>
+#include <util/profiling.hpp>
 
 using namespace vil;
 
@@ -36,6 +37,8 @@ struct SlowAlignAlgo {
 	};
 
 	static Result run(LinAllocator& alloc, u32 lenA, u32 lenB, Matcher matcher) {
+		ExtZoneScoped;
+
 		struct Entry {
 			float match {}; // accumulated
 			unsigned dir {};
@@ -52,7 +55,13 @@ struct SlowAlignAlgo {
 		// fill matrix
 		for(auto ia = 0u; ia < lenA; ++ia) {
 			for(auto ib = 0u; ib < lenB; ++ib) {
-				float matchVal = matcher(ia, ib);
+				ExtZoneScopedN("iteration");
+				float matchVal;
+
+				{
+					ExtZoneScopedN("eval");
+					matchVal = matcher(ia, ib);
+				}
 
 				auto valDiag = -1.f;
 				if(matchVal > 0.0) {
@@ -183,7 +192,7 @@ TEST(unit_validate_trivial) {
 
 TEST(unit_compare_trivial) {
 	auto lenA = 9 * 31u;
-	auto lenB = 1 * 44u;
+	auto lenB = 9 * 44u;
 	auto weights_ = std::make_unique<double[]>(lenA * lenB);
 
 	std::random_device rd;
@@ -212,9 +221,15 @@ TEST(unit_compare_trivial) {
 
 	auto matcher = [&](u32 i, u32 j) -> float {
 		// simulate some comparison operation
-		std::this_thread::sleep_for(std::chrono::microseconds(5));
+		// std::this_thread::sleep_for(std::chrono::microseconds(5));
 		// return i == j ? 1.f : 0.f;
-		return weights_[j * lenA + i];
+
+		float w = 1.f;
+		for(auto i = 1u; i < 256u; ++i) {
+			w += std::abs(0.01 * i - 5.0 / j);
+		}
+
+		return weights_[j * lenA + i] - 0.0000001 * w;
 	};
 
 	using Clock = std::chrono::high_resolution_clock;

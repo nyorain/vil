@@ -12,6 +12,7 @@ int main(int argc, const char** argv) {
 		pattern = argv[1];
 	}
 
-	return vil_runUnitTests(pattern);
+	auto ret = vil_runUnitTests(pattern);
+	return ret;
 }
 
