@@ -21,245 +21,6 @@ inline ImVec4 operator*(const ImVec4& lhs, const ImVec4& rhs)            { retur
 
 namespace vil {
 
-// util
-static constexpr auto width = 20u;
-static constexpr auto height = 4u;
-
-struct Candidate {
-	Candidate* prev {};
-	Candidate* next {};
-
-	u32 i;
-	u32 j;
-	float score;
-};
-
-float maxPossibleScore(float score, u32 i, u32 j) {
-	return score + std::min(width - i, height - j);
-}
-
-struct CandidateQueue {
-	CandidateQueue(LinAllocator& la) : tms(la) {
-		initListAnchor(queue);
-		initListAnchor(freeList);
-	}
-
-	LinAllocator& tms;
-
-	Candidate queue; // linked list, anchor
-	Candidate freeList; // linked list, anchor
-
-	void insert(u32 i, u32 j, float score);
-	Candidate pop();
-	Candidate peek();
-	void prune(float minScore);
-	bool empty() const { return queue.next == &queue; }
-
-	float metric(const Candidate& c) const;
-};
-
-void CandidateQueue::insert(u32 i, u32 j, float score) {
-	Candidate* cand;
-	if(freeList.next != &freeList) {
-		cand = freeList.next;
-		unlink(*cand);
-	} else {
-		cand = &tms.construct<Candidate>();
-	}
-
-	cand->i = i;
-	cand->j = j;
-	cand->score = score;
-
-	auto it = queue.next;
-	while(it != &queue && metric(*it) > metric(*cand)) {
-		it = it->next;
-	}
-
-	insertBefore(*it, *cand);
-}
-
-Candidate CandidateQueue::pop() {
-	dlg_assert(!empty());
-	auto ret = *queue.next;
-
-	auto& newFree = *queue.next;
-	unlink(newFree);
-	insertAfter(freeList, newFree);
-
-	return ret;
-}
-
-Candidate CandidateQueue::peek() {
-	dlg_assert(!empty());
-	return *queue.next;
-}
-
-void CandidateQueue::prune(float minScore) {
-	// PERF: can be implement more efficiently, unlinking and
-	// inserting the whole sub-linked-list
-	// TODO: assumed we have maxPossibleScore as metric, not working
-	// perfectly with other score
-
-	auto it = queue.prev;
-	while(it != &queue && maxPossibleScore(it->score, it->i, it->j) < minScore) {
-		auto prev = it->prev;
-
-		auto& newFree = *it;
-		unlink(newFree);
-		insertAfter(freeList, newFree);
-
-		it = prev;
-	}
-
-	// TODO, alternative (but SLOW) implementation without metric assumption
-#if 0
-	auto it = queue.prev;
-	while(it != &queue /*&& maxPossibleScore(it->score, it->i, it->j) < minScore*/) {
-		auto prev = it->prev;
-
-		if(maxPossibleScore(it->score, it->i, it->j) < minScore) {
-			auto& newFree = unlink(*it);
-			insertAfter(freeList, newFree);
-		}
-
-		// minimum ordering assumption
-		if(it->score >= minScore) {
-			break;
-		}
-
-		it = prev;
-	}
-#endif // 0
-}
-
-float CandidateQueue::metric(const Candidate& c) const {
-	// The '+ 0.01 * ' parts are basically tie-breakers.
-
-	// return c.score + 0.01 * maxPossibleScore(c.score, c.i, c.j);
-	return maxPossibleScore(c.score, c.i, c.j) + 0.01 * c.score;
-	// return maxPossibleScore(c.score, c.i, c.j) + c.score;
-	// return c.score;
-}
-
-// algo
-struct FLCS {
-	struct Match {
-		float eval {-1.f};
-		float best {-1.f};
-	};
-
-	std::unique_ptr<double[]> weights_;
-	std::unique_ptr<Match[]> matchMatrix_;
-	LinAllocator alloc;
-	CandidateQueue queue;
-
-	float bestMatch_ {};
-	std::pair<u32, u32> bestRes_ {};
-
-	FLCS() : queue(alloc) {
-		queue.insert(0u, 0u, 0u);
-
-		auto count = width * height;
-		matchMatrix_ = std::make_unique<Match[]>(count);
-
-		// init weights
-		// TODO: random
-		weights_ = std::make_unique<double[]>(count);
-
-		// all other weights are 0
-		// for(auto i = 0u; i < std::min(width, height); ++i) {
-		// 	weight(i, i) = 1.0;
-		// }
-
-		// all weights random
-		std::random_device rd;
-		std::mt19937 e2(rd());
-		std::uniform_real_distribution<> dist(0, 1);
-		for(auto y = 0u; y < height; ++y) {
-			for(auto x = 0u; x < width; ++x) {
-				weight(x, y) = 0;
-
-				auto w = std::max(dist(e2), 0.0);
-				w = 1 - w * w * w;
-				if(w > 0.8) {
-					weight(x, y) = w;
-				}
-				// if(x == y) {
-				// 	weight(x, y) = w;
-				// }
-			}
-		}
-	}
-
-	void addCandidate(float score, u32 i, u32 j, u32 addI, u32 addJ) {
-		if(i + addI >= width || j + addJ >= height) {
-			// we have a finished run.
-			if(score > bestMatch_) {
-				bestMatch_ = score;
-				bestRes_ = {i, j};
-			}
-		} else {
-			auto maxPossible = maxPossibleScore(score, i + addI, j + addJ);
-			if(maxPossible > bestMatch_) {
-				queue.insert(i + addI, j + addJ, score);
-			}
-		}
-	}
-
-	void step() {
-		if(queue.empty()) {
-			return;
-		}
-
-		auto cand = queue.pop();
-
-		// should be true due to pruning
-		// (i guess can be false when our metric does not fulfill the
-		// assumption used in prune(newScore) about the ordering)
-		dlg_assert(maxPossibleScore(cand.score, cand.i, cand.j) >= bestMatch_);
-
-		auto& m = match(cand.i, cand.j);
-		if(m.best >= cand.score) {
-			return;
-		}
-
-		m.best = cand.score;
-		if(m.eval == -1.f) {
-			m.eval = weight(cand.i, cand.j);
-		}
-
-		auto newScore = cand.score + m.eval;
-		if(m.eval > 0.f) {
-			addCandidate(newScore, cand.i, cand.j, 1, 1);
-
-			// throw out all candidates that can't even reach what we have
-			queue.prune(newScore);
-		}
-
-		// TODO: yeah with fuzzy matching we should always branch
-		// out... This will generate so many candidates tho :(
-		// otoh they have a lower score so won't be considered.
-		// And for perfect matches we still only generate 3 * n
-		// candidates total.
-		// TODO: only threshold = 1.f is guaranteed to be 100% correct,
-		// otherwise it's a heuristic.
-		constexpr auto threshold = 1.f;
-		if(m.eval < threshold) {
-			addCandidate(cand.score, cand.i, cand.j, 1, 0);
-			addCandidate(cand.score, cand.i, cand.j, 0, 1);
-		}
-	}
-
-	Match& match(u32 i, u32 j) {
-		return matchMatrix_[height * i + j];
-	}
-
-	double& weight(u32 i, u32 j) {
-		return weights_[height * i + j];
-	}
-};
-
 // viz
 void drawTexCentered(ImDrawList* dl, ImVec2 pos, u32 color, const char* text) {
 	auto textSize = ImGui::CalcTextSize(text);
@@ -277,12 +38,11 @@ void drawWeight(ImDrawList* dl, ImVec2 pos, ImVec2 size, double weight) {
 }
 
 void VizLCS::draw() {
-	if(!algo_) {
-		algo_ = std::make_unique<FLCS>();
-	}
+	auto width = algo_.width();
+	auto height = algo_.height();
 
 	if(ImGui::Button("Step")) {
-		algo_->step();
+		algo_.step();
 	}
 
 	auto* dl = ImGui::GetWindowDrawList();
@@ -301,43 +61,79 @@ void VizLCS::draw() {
 	}
 
 	// now, draw all candidates
-	auto it = algo_->queue.queue.next;
-	while(it != &algo_->queue.queue) {
-		ImVec2 pos = spos + ImVec2(it->i, it->j) * (pad + size);
+	for(auto& cand : algo_.candidates()) {
+		ImVec2 pos = spos + ImVec2(cand.i, cand.j) * (pad + size);
 		drawField(dl, pos, size, 0xFF6666FFu);
 
-		auto score = it->score;
-		if(score < 0.0000001) {
-			score = 0.0;
-		}
-
+		auto score = cand.score;
 		drawWeight(dl, pos + ImVec2(0, 15), size, score);
-		it = it->next;
 	}
 
 	// now, draw best candidate
-	{
-		auto it = algo_->queue.queue.next;
-		if(it != &algo_->queue.queue) {
-			ImVec2 pos = spos + ImVec2(it->i, it->j) * (pad + size);
-			drawField(dl, pos, size, 0xFFFF66FFu);
-		}
+	if(!algo_.empty()) {
+		auto cand = algo_.peekCandidate();
+		ImVec2 pos = spos + ImVec2(cand.i, cand.j) * (pad + size);
+		drawField(dl, pos, size, 0xFFFF66FFu);
 	}
+
 
 	// now, draw best paths on all discovered fields
 	for(auto y = 0u; y < height; ++y) {
 		for(auto x = 0u; x < width; ++x) {
-			if(algo_->match(x, y).eval == -1.f) {
+			if(algo_.matchData(x, y).eval == -1.f) {
 				continue;
 			}
 
 			ImVec2 pos = spos + ImVec2(x, y) * (pad + size);
-			drawWeight(dl, pos, size, algo_->match(x, y).best);
+			drawWeight(dl, pos, size, algo_.matchData(x, y).best);
+		}
+	}
+
+	// if done: viz results
+	if(algo_.empty()) {
+		auto res = algo_.run(); // collect
+
+		for(auto m : res.matches) {
+			ImVec2 pos = spos + ImVec2(m.i, m.j) * (pad + size);
+			drawField(dl, pos, size, 0xFF66FF66u);
+			drawWeight(dl, pos, size, m.matchVal);
 		}
 	}
 }
 
-VizLCS::VizLCS() = default;
-VizLCS::~VizLCS() = default;
+constexpr auto width = 12u;
+constexpr auto height = 7u;
+
+VizLCS::VizLCS() : algo_(width, height, alloc_,
+		[this](u32 x, u32 y){ return weights_[width * y + x]; }) {
+	weights_ = std::make_unique<float[]>(width * height);
+
+	// semi random weights
+	std::random_device rd;
+	std::mt19937 e2(rd());
+	std::uniform_real_distribution<> dist(0, 1);
+	for(auto y = 0u; y < height; ++y) {
+		for(auto x = 0u; x < width; ++x) {
+			auto weight = dist(e2);
+
+			/*
+			auto weight = 0.f;
+			float w = std::max(dist(e2), 0.0);
+			w = 1 - w * w * w;
+			if(w > 0.8) { //0.1 * std::abs(int(x) - int(y))) {
+				weight = std::max(std::min(w, 1.f), 0.f);
+			}
+			*/
+
+			// TODO: with this, an expected value on the boundary fails.
+			// figure out the correct solution
+			// if(x == y) {
+			// 	weight = 1.f;
+			// }
+
+			weights_[y * width + x] = weight;
+		}
+	}
+}
 
 } // namespace vil

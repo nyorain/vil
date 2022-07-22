@@ -191,8 +191,8 @@ TEST(unit_validate_trivial) {
 }
 
 TEST(unit_compare_trivial) {
-	auto lenA = 9 * 31u;
-	auto lenB = 9 * 44u;
+	auto lenA = 31u;
+	auto lenB = 44u;
 	auto weights_ = std::make_unique<double[]>(lenA * lenB);
 
 	std::random_device rd;
@@ -203,17 +203,17 @@ TEST(unit_compare_trivial) {
 			// auto weight = dist(e2);
 
 			auto weight = 0.f;
-			float w = std::max(dist(e2), 0.0);
-			w = 1 - w * w * w;
-			if(w > 0.8) { //0.1 * std::abs(int(x) - int(y))) {
-				weight = std::max(std::min(w, 1.f), 0.f);
-			}
+			// float w = std::max(dist(e2), 0.0);
+			// w = 1 - w * w * w;
+			// if(w > 0.8) { //0.1 * std::abs(int(x) - int(y))) {
+			// 	weight = std::max(std::min(w, 1.f), 0.f);
+			// }
 
 			// TODO: with this, an expected value on the boundary fails.
 			// figure out the correct solution
-			// if(x == y) {
-			// 	weight = 1.f;
-			// }
+			if(x == y) {
+				weight = 1.f;
+			}
 
 			weights_[y * lenA + x] = weight;
 		}
@@ -224,12 +224,12 @@ TEST(unit_compare_trivial) {
 		// std::this_thread::sleep_for(std::chrono::microseconds(5));
 		// return i == j ? 1.f : 0.f;
 
-		float w = 1.f;
-		for(auto i = 1u; i < 256u; ++i) {
-			w += std::abs(0.01 * i - 5.0 / j);
-		}
+		// float w = 1.f;
+		// for(auto i = 1u; i < 256u; ++i) {
+		// 	w += std::abs(0.01 * i - 5.0 / j);
+		// }
 
-		return weights_[j * lenA + i] - 0.0000001 * w;
+		return weights_[j * lenA + i]; // - 0.0000001 * w;
 	};
 
 	using Clock = std::chrono::high_resolution_clock;
@@ -258,6 +258,48 @@ TEST(unit_compare_trivial) {
 		auto& mllm = resLLM.matches[i];
 		EXPECT(mllm.i, mref.i);
 		EXPECT(mllm.j, mref.j);
-		EXPECT(approx(mllm.matchVal), mref.matchVal);
+		EXPECT(approx(mllm.matchVal, 0.001), mref.matchVal);
 	}
+}
+
+TEST(unit_lmm_strings) {
+	auto checkMatch = [](std::string_view strA, std::string_view strB, u32 count) {
+		auto matcher = [&](u32 i, u32 j) -> float {
+			return strA[i] == strB[j] ? 1.f : 0.f;
+		};
+
+		LinAllocator alloc;
+		LazyMatrixMarch llm(strA.size(), strB.size(), alloc, matcher, 1.f);
+		auto res = llm.run();
+
+		std::unordered_set<u32> seenA;
+		std::unordered_set<u32> seenB;
+
+		EXPECT(res.matches.size(), count);
+
+		for(auto& m : res.matches) {
+			EXPECT(seenA.count(m.i), 0u);
+			EXPECT(seenB.count(m.j), 0u);
+
+			EXPECT(strA[m.i], strB[m.j]);
+			EXPECT(m.matchVal, 1.f);
+
+			seenA.insert(m.i);
+			seenB.insert(m.j);
+		}
+	};
+
+	checkMatch("abcde", "0abceff", 4);
+	checkMatch("abcd", "abcd", 4);
+	checkMatch("abcdfff", "abcd", 4);
+	checkMatch("abcd", "abcdfff", 4);
+	checkMatch("fffabcd", "abcdfff", 4);
+	checkMatch("fffabcdxxx", "abcdfff", 4);
+	checkMatch("fffabcdxxx", "xxxxabcdfff", 4);
+	checkMatch("abcd", "aaaa", 1);
+	checkMatch("dddd", "aaaa", 0);
+	checkMatch("dddda", "aaaa", 1);
+	checkMatch("dddda", "da", 2);
+	checkMatch("dddda", "aaaad", 1);
+	checkMatch("a", "aaaadaaaa", 1);
 }

@@ -56,15 +56,6 @@ struct LazyMatrixMarch {
 		span<ResultMatch> matches;
 	};
 
-	struct Candidate {
-		u32 i;
-		u32 j;
-		float score;
-
-		Candidate* prev {};
-		Candidate* next {};
-	};
-
 	struct HeapCand {
 		u16 i;
 		u16 j;
@@ -108,7 +99,8 @@ struct LazyMatrixMarch {
 		using LinearUnscopedAllocator<T>::allocate;
 
 		void deallocate(T*, size_t) const noexcept {
-			dlg_error(":(");
+			// TODO: use free-list
+			// dlg_error(":(");
 		}
 	};
 
@@ -124,11 +116,7 @@ struct LazyMatrixMarch {
 		// current candidate, if any.
 		// with this we can make sure there is never more than one
 		// candidate per field
-		// Candidate* candidate {};
-
-		bool hasCandidate {}; // TODO: only for debugging?
-		// decltype(std::declval<QSet>().insert({0, 0, 0.f}).first) candidate;
-		QSet::const_iterator candidate;
+		QSet::const_iterator candidate; // candidates_.end() when there is none
 	};
 
 	// The function evaluating the match between the ith element in the
@@ -154,6 +142,14 @@ struct LazyMatrixMarch {
 	// Returns false if there's nothing to do anymore.
 	bool step();
 
+	// inspection
+	HeapCand peekCandidate() const;
+	const auto& candidates() const { return candidates_; }
+	bool empty() const { return candidates_.empty(); }
+	const EvalMatch& matchData(u32 i, u32 j) const {
+		return matchMatrix_[width() * j + i];
+	}
+
 	u32 width() const { return width_; }
 	u32 height() const { return height_; }
 
@@ -161,20 +157,20 @@ struct LazyMatrixMarch {
 	u32 numEvals() const { return numEvals_; }
 	u32 numSteps() const { return numSteps_; }
 
-	float maxPossibleScore(float score, u32 i, u32 j) const;
-
 private:
 	void addCandidate(float score, u32 i, u32 j, u32 addI, u32 addJ);
-	EvalMatch& match(u32 i, u32 j) { return matchMatrix_[width() * j + i]; }
 
-	Candidate& insertCandidate(u32 i, u32 j, float score);
-	Candidate popCandidate();
-	Candidate peekCandidate() const;
+	HeapCand popCandidate();
 	void prune(float minScore);
-	// bool empty() const { return queue_.next == &queue_; }
-	// bool empty() const { return candCount_ == 0u; }
-	bool empty() const { return set_.empty(); }
-	float metric(const Candidate& c) const;
+	EvalMatch& match(u32 i, u32 j) {
+		return matchMatrix_[width() * j + i];
+	}
+
+	// util
+	float maxPossibleScore(float score, u32 i, u32 j) const;
+	float maxPossibleScore(const HeapCand& c) {
+		return maxPossibleScore(c.score, c.i, c.j);
+	}
 
 private:
 	LinAllocator& alloc_;
@@ -186,19 +182,11 @@ private:
 	std::pair<u32, u32> bestRes_ {};
 	float branchThreshold_;
 
-	Candidate queue_; // linked list, anchor
-	Candidate freeList_; // linked list, anchor
-
 	// debug functionality
 	u32 numEvals_ {};
 	u32 numSteps_ {};
 
-	// WiP
-
-	span<HeapCand> cands_;
-	u32 candCount_;
-
-	QSet set_;
+	QSet candidates_;
 };
 
 float maxPossibleScore(float score, u32 width, u32 height, u32 i, u32 j);

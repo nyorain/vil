@@ -18,3 +18,10 @@ nonetheless? I'm not sure. For now, we should use our `selectCmd` stuff everywhe
 Adding a `Command* parent` to Command would make a lot of things easier
 in terms of hierarchy traversal. But we can't to that, mainly because
 of secondary command buffers, as they are effectively inlined.
+
+---
+
+last commit with alternative (linked-list, self-maintained heap) versions
+of candidate management in lmm:
+de8321e56ec94465f0bfa39d20da179a7ac84ac7
+

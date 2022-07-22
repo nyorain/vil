@@ -1,21 +1,20 @@
 #pragma once
 
 #include <memory>
+#include <lmm.hpp>
 #include <imgui/imgui.h>
 #include <util/linalloc.hpp>
 
 namespace vil {
 
-struct FLCS;
-
 // viz
 struct VizLCS {
 	VizLCS();
-	~VizLCS();
-
 	void draw();
 
-	std::unique_ptr<FLCS> algo_;
+	LinAllocator alloc_;
+	LazyMatrixMarch algo_;
+	std::unique_ptr<float[]> weights_;
 };
 
 } // namespace vil
