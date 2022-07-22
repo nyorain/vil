@@ -64,7 +64,7 @@ private:
 
 	void updateRecord(IntrusivePtr<CommandRecord> record);
 	void updateRecords(std::vector<FrameSubmission>, bool updateSelection);
-	void updateRecords(const MatchResult&, std::vector<FrameSubmission>);
+	void updateRecords(const MatchResult&, std::vector<FrameSubmission>&&);
 
 private:
 	friend class Gui;
@@ -100,6 +100,8 @@ private:
 	std::vector<const Command*> selectedCommand_ {};
 
 	std::unordered_set<const ParentCommand*> openedSections_;
+	std::unordered_set<const FrameSubmission*> openedSubmissions_; // points into records_
+	std::unordered_set<const CommandRecord*> openedRecords_; // points into records_[].submissions
 
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};

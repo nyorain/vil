@@ -3,6 +3,7 @@
 #include <util/linalloc.hpp>
 #include <functional>
 #include <utility>
+#include <set>
 
 namespace vil {
 
@@ -31,13 +32,10 @@ namespace vil {
 // in making the case of similar sequences fast.
 //
 // NOTE: for very quick comparisons (e.g. binary int/char comparison or simple
-// match retrieval), this will often still slower than the trivial algorithm.
+// match retrieval), this might still be slower than the trivial algorithm.
 // But if you have costly comparisons (e.g. for hierachical matching as we
 // do with command buffers), this implementation can be an order of
 // magnitude faster, especially when there's a strong correlation.
-// The number of needed comparisons gets high when the sequence lengths
-// vary significantly (i.e. order of magnitude). Try to prevent these
-// cases.
 struct LazyMatrixMarch {
 	// Describes a match between the ith sequence item in the first sequence
 	// with the jth sequence item in the second sequence, with a match
