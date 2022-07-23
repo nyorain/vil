@@ -314,10 +314,10 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) 
 			dsSnapshot, true, nullptr);
 
 		// we want to open all sections up to the selected command
-		for(auto* cmd : selectedCommand_) {
-			dlg_assert(!!cmd->children() == !!dynamic_cast<const ParentCommand*>(cmd));
-			if(cmd->children()) {
-				openedSections_.insert(static_cast<const ParentCommand*>(cmd));
+		for(auto* hcmd : selectedCommand_) {
+			dlg_assert(!!hcmd->children() == !!dynamic_cast<const ParentCommand*>(hcmd));
+			if(hcmd->children()) {
+				openedSections_.insert(static_cast<const ParentCommand*>(hcmd));
 			}
 		}
 

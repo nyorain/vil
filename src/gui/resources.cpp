@@ -1311,7 +1311,10 @@ void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
 				name = "unnamed";
 			}
 
+			ImGui::PushID(it->record);
 			showUsages(*it, name);
+			ImGui::PopID();
+
 			it = it->next;
 		}
 	};
@@ -1337,8 +1340,12 @@ void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
 					it->second->record->cbName ? it->second->record->cbName : "<unnamed record>",
 					vil::name(ds));
 
+				ImGui::PushID(rec.get());
 				ImGui::PushID(&ds);
+
 				showUsages(*it->second, name.c_str());
+
+				ImGui::PopID();
 				ImGui::PopID();
 			}
 		}

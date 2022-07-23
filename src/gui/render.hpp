@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
 #include <util/ownbuf.hpp>
+#include <util/util.hpp>
 #include <vk/vulkan.h>
 #include <imgui/imgui.h>
 #include <vector>
