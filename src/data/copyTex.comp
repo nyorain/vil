@@ -4,19 +4,26 @@
 
 layout(local_size_x_id = 0, local_size_y_id = 1) in;
 
-layout(set = 0, binding = 0) buffer Dst {
-	// TODO: this will truncate for 64-bit texture formats.
-	// We need 64-bit shader type support to correctly represent that.
-	vec4 outResult[];
-};
+#define SAMPLE_TEX_BINDING 1
+#include "sample.glsl"
+
+// TODO: WIP
+// only use this if device has the withoutFormat feature
+#define USE_TEXEL_STORAGE
+#ifdef USE_TEXEL_STORAGE
+	layout(set = 0, binding = 0) uniform writeonly StorageTexelBufferType outResult;
+#else
+	layout(set = 0, binding = 0) buffer Dst {
+		// TODO: this will truncate for 64-bit texture formats.
+		// We need 64-bit shader type support to correctly represent that.
+		vec4 outResult[];
+	};
+#endif
 
 layout(push_constant) uniform PCR {
 	int level;
 	uint dstOffset;
 } pcr;
-
-#define SAMPLE_TEX_BINDING 1
-#include "sample.glsl"
 
 void main() {
 	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
@@ -26,6 +33,8 @@ void main() {
 	}
 
 	uint id = coords.z * (size.x * size.y) + coords.y * size.x + coords.x;
-	outResult[pcr.dstOffset + id] = fetchTex(coords, pcr.level);
+
+	// outResult[pcr.dstOffset + id] = fetchTex(coords, pcr.level);
+	imageStore(outResult, int(pcr.dstOffset + id), fetchTexRaw(coords, pcr.level));
 }
 

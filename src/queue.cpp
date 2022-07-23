@@ -11,7 +11,7 @@
 #include <submit.hpp>
 #include <deque>
 #include <gui/gui.hpp>
-#include <gui/commandHook.hpp>
+#include <commandHook/submission.hpp>
 #include <util/util.hpp>
 #include <vk/enumString.hpp>
 #include <util/profiling.hpp>

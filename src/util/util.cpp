@@ -1252,4 +1252,49 @@ u32 combineQueueFamilies(span<const u32> queueFams) {
 	return ret;
 }
 
+ShaderImageType::Value ShaderImageType::parseType(VkImageType imgType,
+		VkFormat format, VkImageAspectFlagBits aspect) {
+	// NOTE: relies on ordering of DrawGuiImage::Type enum
+	using NumType = FORMAT_NUMERICAL_TYPE;
+	auto imageTypeFUI = [](auto numt) {
+		if(numt == NumType::SINT) return Value::i1;
+		else if(numt == NumType::UINT) return Value::u1;
+		else return Value::f1;
+	};
+
+	Value baseType;
+
+	if(aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
+		if(FormatIsSampledFloat(format)) baseType = Value::f1;
+		else if(FormatIsUINT(format)) baseType = Value::u1;
+		else if(FormatIsSINT(format)) baseType = Value::i1;
+		else {
+			dlg_error("unreachable");
+			return ShaderImageType::count;
+		}
+	} else {
+		auto numt = NumType::NONE;
+		if(aspect == VK_IMAGE_ASPECT_DEPTH_BIT) {
+			numt = FormatDepthNumericalType(format);
+		} else if(aspect == VK_IMAGE_ASPECT_STENCIL_BIT) {
+			numt = FormatStencilNumericalType(format);
+		} else {
+			dlg_error("unreachable");
+			return ShaderImageType::count;
+		}
+
+		baseType = imageTypeFUI(numt);
+	}
+
+	auto off = 0u;
+	switch(imgType) {
+		case VK_IMAGE_TYPE_1D: off = 0u; break;
+		case VK_IMAGE_TYPE_2D: off = 1u; break;
+		case VK_IMAGE_TYPE_3D: off = 2u; break;
+		default: dlg_error("unreachable"); return ShaderImageType::count;
+	}
+
+	return Value(unsigned(baseType) + off);
+}
+
 } // namespace vil

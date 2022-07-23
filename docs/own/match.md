@@ -187,3 +187,9 @@ If they are not selected as match (e.g. C' is matched to E or with nothing at al
 then we don't hook.
 If C and C' are matched by have a very low match maybe also skip the hook? not sure.
 Maybe only if we already had a better candidate this frame?
+
+---
+
+# The accumulated frame
+
+Accumulate via command groups: [...]

@@ -6,10 +6,52 @@
 #include <queue.hpp>
 #include <threadContext.hpp>
 #include <util/debugMutex.hpp>
-#include <gui/commandHook.hpp> // TODO: only for pipes
+#include <commandHook/hook.hpp> // TODO: only for pipes
 #include <vk/enumString.hpp>
+#include <vk/format_utils.h>
 
 namespace vil {
+
+VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect) {
+	// NOTE: see the vulkan table to formats that can be written
+	// with the shaderStorageImageWriteWithoutFormat feature
+	if(FormatIsCompressed(src)) {
+		dlg_assert(aspect == VK_IMAGE_ASPECT_COLOR_BIT);
+		// TODO: overkill in many cases, figure out minimum format able
+		// to hold the uncompressed data
+		return VK_FORMAT_R16G16B16A16_SFLOAT;
+	}
+
+	if(src == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) {
+		return VK_FORMAT_R16G16B16A16_SFLOAT;
+	}
+
+	switch(src) {
+		case VK_FORMAT_D16_UNORM:
+			return VK_FORMAT_R16_UNORM;
+		case VK_FORMAT_X8_D24_UNORM_PACK32:
+		case VK_FORMAT_D32_SFLOAT:
+			return VK_FORMAT_R32_SFLOAT;
+		case VK_FORMAT_D24_UNORM_S8_UINT:
+			dlg_assert(aspect == VK_IMAGE_ASPECT_DEPTH_BIT ||
+				aspect == VK_IMAGE_ASPECT_STENCIL_BIT);
+			return aspect == VK_IMAGE_ASPECT_DEPTH_BIT ?
+				VK_FORMAT_R32_SFLOAT : VK_FORMAT_R8_UINT;
+		case VK_FORMAT_D16_UNORM_S8_UINT:
+			dlg_assert(aspect == VK_IMAGE_ASPECT_DEPTH_BIT ||
+				aspect == VK_IMAGE_ASPECT_STENCIL_BIT);
+			return aspect == VK_IMAGE_ASPECT_DEPTH_BIT ?
+				VK_FORMAT_R16_UNORM : VK_FORMAT_R8_UINT;
+		case VK_FORMAT_S8_UINT:
+			return VK_FORMAT_R8_UINT;
+		default:
+			break;
+	}
+
+	// TODO: a lot more cases to handle
+
+	return src;
+}
 
 bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam) {
@@ -300,9 +342,13 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 		OwnBuffer& dst, Image& src, VkImageLayout srcLayout,
 		const VkImageSubresourceRange& srcSubres, u32 queueFamsBitset,
-		std::vector<VkImageView>& imgViews, std::vector<VkDescriptorSet>& dss) {
+		std::vector<VkImageView>& imgViews, std::vector<VkBufferView>& bufViews,
+		std::vector<VkDescriptorSet>& dss) {
 	auto& hook = *dev.commandHook;
 	dlg_assert(src.allowsNearestSampling);
+
+	// TODO
+	constexpr auto useTexelStorage = true;
 
 	// = init buffer =
 	// TODO PERF: only copy in the precision that we need. I.e. add
@@ -319,7 +365,13 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 		neededSize += layerSize * srcSubres.layerCount;
 	}
 
-	auto usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	auto usage = VkBufferUsageFlags(VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+	if(useTexelStorage) {
+		usage |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+	} else {
+		usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	}
 	dst.ensure(dev, neededSize, usage, queueFamsBitset);
 
 	// = record =
@@ -369,17 +421,40 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 	imgInfo.imageView = imgView;
 
 	VkDescriptorBufferInfo bufInfo {};
-	bufInfo.buffer = dst.buf;
-	bufInfo.offset = 0u;
-	bufInfo.range = dst.size;
 
 	VkWriteDescriptorSet writes[2] {};
-	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	writes[0].descriptorCount = 1u;
-	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	writes[0].pBufferInfo = &bufInfo;
-	writes[0].dstBinding = 0u;
-	writes[0].dstSet = ds;
+	if(useTexelStorage) {
+		VkBufferViewCreateInfo bvi {};
+		bvi.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+		bvi.buffer = dst.buf;
+		bvi.offset = 0u;
+		bvi.range = dst.size;
+		bvi.format = sampleFormat(src.ci.format,
+			VkImageAspectFlagBits(ivi.subresourceRange.aspectMask));
+
+		VkBufferView bufferView;
+		VK_CHECK(dev.dispatch.CreateBufferView(dev.handle,
+			&bvi, nullptr, &bufferView));
+		bufViews.push_back(bufferView);
+
+		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].descriptorCount = 1u;
+		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+		writes[0].pTexelBufferView = &bufViews.back();
+		writes[0].dstBinding = 0u;
+		writes[0].dstSet = ds;
+	} else {
+		bufInfo.buffer = dst.buf;
+		bufInfo.offset = 0u;
+		bufInfo.range = dst.size;
+
+		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[0].descriptorCount = 1u;
+		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[0].pBufferInfo = &bufInfo;
+		writes[0].dstBinding = 0u;
+		writes[0].dstSet = ds;
+	}
 
 	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	writes[1].descriptorCount = 1u;
@@ -403,7 +478,7 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 		auto width = std::max(1u, src.ci.extent.width >> level);
 		auto height = std::max(1u, src.ci.extent.height >> level);
 		auto depth = std::max(1u, src.ci.extent.depth >> level);
-		auto layerSize = texelSize * width * height * depth;
+		auto layerSize = width * height * depth;
 
 		struct {
 			i32 level;
@@ -532,7 +607,8 @@ void recordResolve(Device& dev, CowResolveOp& op, CowImageRange& cow) {
 		auto& dst = cow.copy.emplace<BufferRangeCopy>();
 		dst.op = &op;
 		initAndSampleCopy(dev, op.cb, dst.buf, *cow.source,
-			layout, cow.range, cow.queueFams, op.imageViews, op.descriptorSets);
+			layout, cow.range, cow.queueFams, op.imageViews, op.bufferViews,
+			op.descriptorSets);
 	} else {
 		auto& dst = cow.copy.emplace<ImageRangeCopy>();
 		dst.op = &op;

@@ -11,7 +11,7 @@
 #include <threadContext.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
-#include <gui/commandHook.hpp>
+#include <commandHook/hook.hpp>
 #include <swa/swa.h>
 #include <vk/dispatch_table_helper.h>
 
@@ -398,6 +398,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	// - timeline semaphores
 	// - transform feedback
 	// - nonSolidFill mode (for vertex viewer lines)
+	// - shaderStorageImageWriteWithoutFormat
 
 	// core 1.0 features
 	VkPhysicalDeviceFeatures supFeatures10 {};
@@ -411,7 +412,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	auto* features2 = findChainInfo<VkPhysicalDeviceFeatures2,
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2>(nci);
 	if(features2) {
-		// const_cast is allowed since we coied the pNext chain above
+		// const_cast is allowed since we copied the pNext chain above
 		pEnabledFeatures10 = const_cast<VkPhysicalDeviceFeatures*>(&features2->features);
 		dlg_assert(!ci->pEnabledFeatures);
 	} else {
@@ -426,6 +427,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		pEnabledFeatures10->fillModeNonSolid = true;
 	} else {
 		dlg_warn("fillModeNonSolid not supported, will get ugly vertex viewer");
+	}
+
+	if(supFeatures10.shaderStorageImageWriteWithoutFormat) {
+		pEnabledFeatures10->shaderStorageImageWriteWithoutFormat = true;
+	} else {
+		dlg_warn("shaderStorageImageWriteWithoutFormat not supported, image copying will be bad");
 	}
 
 	// ext features
@@ -620,6 +627,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.timelineSemaphores = hasTimelineSemaphores;
 	dev.transformFeedback = hasTransformFeedback;
 	dev.nonSolidFill = pEnabledFeatures10->fillModeNonSolid;
+	dev.shaderStorageImageWriteWithoutFormat = pEnabledFeatures10->shaderStorageImageWriteWithoutFormat;
 
 	// NOTE: we don't ever enable buffer device address and just
 	// want to track whether it's enabled.

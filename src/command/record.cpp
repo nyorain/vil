@@ -1,13 +1,13 @@
 #include <command/record.hpp>
 #include <command/commands.hpp>
 #include <command/alloc.hpp>
+#include <commandHook/record.hpp>
 #include <stats.hpp>
 #include <image.hpp>
 #include <pipe.hpp>
 #include <cb.hpp>
 #include <ds.hpp>
 #include <util/util.hpp>
-#include <gui/commandHook.hpp>
 
 namespace vil {
 

@@ -112,6 +112,10 @@ size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDes
 }
 
 bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
+	if(&da == &db) {
+		return true;
+	}
+
 	if(da.bindings.size() != db.bindings.size()) {
 		return false;
 	}

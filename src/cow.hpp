@@ -50,6 +50,7 @@ struct CowResolveOp {
 
 	// for imageToBuffer copies
 	std::vector<VkImageView> imageViews;
+	std::vector<VkBufferView> bufferViews;
 	std::vector<VkDescriptorSet> descriptorSets;
 };
 
@@ -115,6 +116,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 	OwnBuffer& dst, Image& src, VkImageLayout srcLayout,
 	const VkImageSubresourceRange& srcSubres, u32 queueFamsBitset,
-	std::vector<VkImageView>& imgViews, std::vector<VkDescriptorSet>& dss);
+	std::vector<VkImageView>& imgViews, std::vector<VkBufferView>& bufViews,
+	std::vector<VkDescriptorSet>& dss);
 
 } // namespace vil

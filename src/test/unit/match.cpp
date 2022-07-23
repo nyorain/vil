@@ -135,3 +135,13 @@ TEST(unit_match_labels) {
 		dlg_assert(matches2[0].a == &b4);
 	}
 }
+
+TEST(unit_match_tmp) {
+	ExecuteCommandsChildCmd cmd1;
+	ExecuteCommandsChildCmd cmd2;
+
+	cmd1.relID = 0u;
+	cmd2.relID = 0u;
+
+	EXPECT(eval(cmd1.match(cmd2)), approx(1.f));
+}

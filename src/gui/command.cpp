@@ -1,7 +1,8 @@
 #include <gui/command.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
-#include <gui/commandHook.hpp>
+#include <commandHook/hook.hpp>
+#include <commandHook/record.hpp>
 #include <util/util.hpp>
 #include <util/f16.hpp>
 #include <util/profiling.hpp>
@@ -1323,6 +1324,10 @@ void CommandViewer::displayCommand() {
 	dlg_assert(command_);
 	dlg_assert(view_ == IOView::command);
 
+#ifdef VIL_DEBUG
+	imGuiText("relID: {}", command_->relID);
+#endif // VIL_DEBUG
+
 	if(state_) {
 		dlg_assert(record_);
 
@@ -1417,6 +1422,12 @@ void CommandViewer::displayCommand() {
 
 	command_->displayInspector(*gui_);
 
+	// TODO: ugly here, might happen when displayInspector changes selction...
+	// not sure how to handle this better
+	if(!command_) {
+		return;
+	}
+
 #ifdef VIL_COMMAND_CALLSTACKS
 	auto flags = ImGuiTreeNodeFlags_FramePadding;
 	if(command_->stackTrace && ImGui::TreeNodeEx("StackTrace", flags)) {
@@ -1488,8 +1499,8 @@ void CommandViewer::updateHook() {
 			break;
 		case IOView::attachment:
 			hook.attachmentCopies = {{
-				viewData_.attachment.type,
 				viewData_.attachment.id,
+				viewData_.attachment.type,
 				beforeCommand_
 			}};
 			break;
@@ -1524,7 +1535,7 @@ void CommandViewer::updateHook() {
 				break;
 			}
 
-			CommandHook::DescriptorCopy dsCopy = {
+			DescriptorCopyOp dsCopy = {
 				viewData_.ds.set, viewData_.ds.binding, viewData_.ds.elem, beforeCommand_
 			};
 			hook.descriptorCopies = {dsCopy};

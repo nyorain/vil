@@ -1,7 +1,8 @@
 #include <gui/vertexViewer.hpp>
-#include <gui/commandHook.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
+#include <commandHook/hook.hpp>
+#include <commandHook/record.hpp>
 #include <util/f16.hpp>
 #include <util/transform.hpp>
 #include <util/util.hpp>

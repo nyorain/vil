@@ -8,8 +8,15 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
+- [ ] figure out if our linear allocator (the std::allocator) adapter
+      should value initialize on alloc
 - [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
       resource destruction, can happen in any thread. Caused a crash with doom.
+	- [ ] gui shouldn't be owned by overlay (and therefore swapchain),
+		  means we discard its state (e.g. selection) on every resize (when
+		  applications don't use the oldSwapchain feature).
+		  Should be a member of the device, we only display it once anyways.
+		  Create lazily as member there, WITH sync!
 - [ ] selecting a whole CommandRecord in the command viewer crashed rdr2. Investigate
 - [ ] improve CmdBarrier matching, see node 2305
 - [ ] figure out transform_feedback crashes in doom eternal
@@ -42,12 +49,41 @@ urgent, bugs:
       really annoying rn to always scroll down. 
 	  Maybe use tabs? One for general information, one for the image viewer?
 
-new, workstack:
+match rework 2, electric boogaloo
+- [ ] improve matching of common commands, e.g. BarrierCmd.
+      Returns 0 if they have nothing in command (except second-tier data
+	  like dependencyFlags or something). There should be at least
+	  one common handle and transition
 - [ ] get rid of annotateRelIDLegacy, use proper context (across cb boundaries) 
       when matching commands instead. Should fix CmdBarrier issues in RDR2
 	  See docs/own/desc2.hpp. But that isn't enough, we need more context.
+	- yeah desc2.hpp isn't too relevant here. In the two places where we
+	  still use relID, we instead want to do a local per-block LCS/LMM
+	  where we only consider the non-zero matches or something.
+	  Or only the two best matches, only do this if we have two candidates?
+	  And maybe only in the final hierarchy level?
+	- I guess the relID matching is only really relevant for 'find'.
+	  For command types without custom match implementation it's also used
+	  for 'match' but we don't really need it there, LCS already got us
+	  covered. 
+	  See node 2305 for details.
+	  The final find operation could then either be LCS (careful! might have
+	  a lot more commands here than sections for 'match') 
+	  Or - e.g. inside a render pass without blending - be independent 
+	  of the order of draw commands.
+	  	- for sync/bind commands: find surrounding actions commands - as
+		  outlined multiple times - and find them. Might cross block/record
+		  boundaries tho
+		- for action commands inside small (non-solid-renderpass) blocks: do LCS
+		- for big blocks: do best-match. In this case something like relID is
+		  useful. Maybe build it on-the-fly? should be a lot cheaper, only
+		  needed for very few blocks compared to *everything*
+		- for order-independent (e.g. no blend/additive) renderpasses we probably 
+		  want order-independency anyways, so just local-best-match
 - [ ] improve matching (write tests first), propagate Matcher objects instead
       of floats. See todo in desc.hpp
+
+new, workstack:
 - [ ] there should probably just be one ImageViewer object; owned by Gui directly.
       it's then used wherever an image is shown.
 	  Then, the ImageViewer could create and own its pipes, simplifying
@@ -60,6 +96,8 @@ new, workstack:
 		- [ ] create a small TimingQuery widget
 	- [ ] stabilize it? (functionality for the TimingQuery widget).
 	      Like, only update a couple of times per second?
+		  {NOTE, we have UpdateTick now, not sure if needing a separate
+		   mechanism just for timing queries}
 - [ ] implement basic filters in image viewer, like inf/nan overlay
 - [ ] optimization(important): for images captured in commandHook, we might be able to use
       that image when drawing the gui even though the associated submission

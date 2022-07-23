@@ -9,7 +9,7 @@
 #include <vk/typemap_helper.h>
 #include <command/alloc.hpp>
 #include <command/commands.hpp>
-#include <gui/commandHook.hpp>
+#include <commandHook/record.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
 #include <util/profiling.hpp>

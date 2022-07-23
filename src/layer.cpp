@@ -35,7 +35,7 @@ namespace vil {
 // Util
 // TODO: break when debugger is attached?
 // make this a build or runtime config? VIL_BREAK_ON_ERROR env var?
-// #define BREAK_ON_ERROR
+#define BREAK_ON_ERROR
 
 static auto dlgWarnErrorCount = 0u;
 
@@ -60,7 +60,8 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		#ifdef _MSC_VER
 			DebugBreak();
 		#else
-			std::raise(SIGABRT);
+			// std::raise(SIGABRT);
+			std::raise(SIGTRAP);
 		#endif
 	}
 #endif // BREAK_ON_ERROR
@@ -156,7 +157,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	//  maybe control this via environment variable?
 	//  On windows (with msvc), we could use DebugOutput.
 #ifndef DLG_DISABLE
-	if(checkEnvBinary("VIL_DLG_HANDLER", false)) {
+#ifndef BREAK_ON_ERROR
+	if(checkEnvBinary("VIL_DLG_HANDLER", false))
+#endif // BREAK_ON_ERROR
+	{
 		dlg_set_handler(dlgHandler, nullptr);
 		#ifdef _WIN32
 			AllocConsole();

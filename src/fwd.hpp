@@ -79,6 +79,8 @@ struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;
 struct CommandHookState;
+struct DescriptorCopyOp;
+struct DescriptorCopyOp;
 struct CopiedImage;
 
 struct ViewableImageCopy;
@@ -122,6 +124,8 @@ struct CowImageRange;
 struct CowBufferRange;
 
 struct RecordBuilder;
+
+enum class AttachmentType : u8;
 
 // TODO: find good place
 //

@@ -97,6 +97,7 @@ private:
 private:
 	struct OurImage : spvm_image {
 		ReadBuf data;
+		VkFormat format; // of data
 	};
 
 	static const OurImage emptyImage;

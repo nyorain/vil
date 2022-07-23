@@ -72,7 +72,7 @@ struct Command {
 	virtual std::string toString() const { return std::string(nameDesc()); }
 
 	// Returns the name of the command.
-	virtual std::string_view nameDesc() const { return "<unknown>"; }
+	virtual std::string_view nameDesc() const = 0;
 
 	// Whether this command is empty. Empty commands are usually hidden.
 	// Used for commands like CmdEndRenderPass.
@@ -217,6 +217,7 @@ struct RootCommand final : SectionCommand {
 	void record(const Device&, VkCommandBuffer) const override {}
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Type type() const override { return Type::other; }
+	std::string_view nameDesc() const override { return "<RootCommand>"; }
 };
 
 struct BarrierCmdBase : Command {
@@ -756,21 +757,6 @@ struct ResetEventCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct ExecuteCommandsCmd final : ParentCommand {
-	Command* children_ {};
-	SectionStats stats_ {};
-
-	Command* children() const override { return children_; }
-	void displayInspector(Gui& gui) const override;
-	std::string_view nameDesc() const override { return "ExecuteCommands"; }
-	void record(const Device&, VkCommandBuffer) const override;
-	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-	const SectionStats& sectionStats() const override;
-	ParentCommand* firstChildParent() const override {
-		return static_cast<ParentCommand*>(children_);
-	}
-};
-
 // Meta-command, inserted for each command buffer passed to CmdExecuteCommands
 struct ExecuteCommandsChildCmd final : ParentCommand {
 	CommandRecord* record_ {}; // kept alive in parent CommandRecord
@@ -784,6 +770,22 @@ struct ExecuteCommandsChildCmd final : ParentCommand {
 	Command* children() const override;
 	const SectionStats& sectionStats() const override;
 	ParentCommand* firstChildParent() const override;
+};
+
+struct ExecuteCommandsCmd final : ParentCommand {
+	ExecuteCommandsChildCmd* children_ {};
+	SectionStats stats_ {};
+
+	Command* children() const override { return children_; }
+	void displayInspector(Gui& gui) const override;
+	std::string_view nameDesc() const override { return "ExecuteCommands"; }
+	void record(const Device&, VkCommandBuffer) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	ParentCommand* firstChildParent() const override { return children_; }
+	const SectionStats& sectionStats() const override {
+		// needed only for numChildSections, empty otherwise.
+		return stats_;
+	}
 };
 
 struct BeginDebugUtilsLabelCmd final : SectionCommand {

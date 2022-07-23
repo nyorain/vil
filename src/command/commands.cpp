@@ -10,7 +10,6 @@
 #include <util/ext.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
-#include <gui/commandHook.hpp>
 #include <gui/cb.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
@@ -500,6 +499,8 @@ void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 		return;
 	}
 
+	// TODO: inefficient, find better way of doing this.
+
 	auto count = 0u;
 	for(auto i = 0u; i < a.size(); ++i) {
 		// check how many times we've seen it already
@@ -526,6 +527,8 @@ void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 
 	m.match += (weight * count) / std::max(a.size(), b.size());
 	m.total += weight;
+
+	dlg_assert(m.match <= m.total);
 }
 
 template<typename T>
@@ -573,6 +576,7 @@ Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
 	addSpanUnordered(m, this->bufBarriers, cmd.bufBarriers);
 	addSpanUnordered(m, this->imgBarriers, cmd.imgBarriers);
 
+	dlg_assert(m.match <= m.total);
 	return m;
 }
 
@@ -2445,11 +2449,6 @@ void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
 
 		echild = dynamic_cast<ExecuteCommandsChildCmd*>(echild->next);
 	}
-}
-
-const ParentCommand::SectionStats& ExecuteCommandsCmd::sectionStats() const {
-	// needed only for numChildSections, empty otherwise.
-	return stats_;
 }
 
 // ExecuteCommandsChildCmd

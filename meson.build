@@ -223,14 +223,16 @@ src = files(
 	'src/gui/resources.cpp',
 	'src/gui/cb.cpp',
 	'src/gui/command.cpp',
-	'src/gui/commandHook.cpp',
 	'src/gui/vertexViewer.cpp',
 	'src/gui/bufferViewer.cpp',
 	'src/gui/imageViewer.cpp',
 	'src/gui/shader.cpp',
 	'src/gui/blur.cpp',
-	# TODO, tmp
 	'src/gui/vizlcs.cpp',
+
+	'src/commandHook/hook.cpp',
+	'src/commandHook/record.cpp',
+	'src/commandHook/submission.cpp',
 
 	# imgui
 	'src/imgui/imgui.cpp',
@@ -283,11 +285,16 @@ src = files(
 	'src/gui/command.hpp',
 	'src/gui/render.hpp',
 	'src/gui/util.hpp',
-	'src/gui/commandHook.hpp',
 	'src/gui/vertexViewer.hpp',
 	'src/gui/imageViewer.hpp',
 	'src/gui/shader.hpp',
 	'src/gui/blur.hpp',
+	'src/gui/vizlcs.hpp',
+
+	'src/commandHook/hook.hpp',
+	'src/commandHook/record.hpp',
+	'src/commandHook/submission.hpp',
+	'src/commandHook/state.hpp',
 
 	# fonts
 	'src/gui/fonts.cpp',

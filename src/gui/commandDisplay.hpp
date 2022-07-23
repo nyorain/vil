@@ -260,8 +260,8 @@ struct DisplayVisitor : CommandVisitor {
 	}
 
 	void visit(const ExecuteCommandsCmd& cmd) override {
-		// TODO: can lables really pass CmdExecuteCommands boundaries?
-		// if not, we can always indent here as well.
+		// lables can pass CmdExecuteCommands boundaries, even if it's weird.
+		// otherwise we could always indent here as well.
 		if(labelOnlyIndent_) {
 			// TODO: this will result in CmdExecuteCommands being shown
 			// and then the commands, with same indentation level.
@@ -278,7 +278,7 @@ struct DisplayVisitor : CommandVisitor {
 				first = dynamic_cast<ExecuteCommandsChildCmd*>(children);
 				dlg_assert(first);
 				if(!first->next) {
-					children = first->record_->commands;
+					children = first->record_->commands->children_;
 				}
 			}
 

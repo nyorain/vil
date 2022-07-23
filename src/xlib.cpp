@@ -19,13 +19,21 @@ struct X11Platform : SwaPlatform {
 	xcb_connection_t* connection;
 	xcb_key_symbols_t* symbols;
 	xcb_connection_t* origConnection;
+	bool grabbingKeyboard {};
+	bool grabbingPointer {};
 
+	~X11Platform();
 	void init(Device& dev, unsigned width, unsigned height) override;
 	bool pressed(u32 key) const override;
 	State update(Gui& gui) override;
 	void activateWindow(bool doActivate) override;
 	void onEvent() override;
 };
+
+X11Platform::~X11Platform() {
+	dlg_trace("~X11Platform");
+	activateWindow(false);
+}
 
 void X11Platform::init(Device& dev, unsigned width, unsigned height) {
 	// init display
@@ -83,11 +91,17 @@ Platform::State X11Platform::update(Gui& gui) {
 		auto rp = xcb_grab_pointer_reply(connection, gpc, nullptr);
 		if(rp->status != XCB_GRAB_STATUS_SUCCESS) {
 			dlg_trace("pointer grab failed: {}", (u32) rp->status);
+			grabbingPointer = false;
+		} else {
+			grabbingPointer = true;
 		}
 
 		auto rk = xcb_grab_keyboard_reply(connection, gkc, nullptr);
 		if(rk->status != XCB_GRAB_STATUS_SUCCESS) {
-			dlg_trace("pointer grab failed: {}", (u32) rk->status);
+			dlg_trace("keyboard grab failed: {}", (u32) rk->status);
+			grabbingKeyboard = false;
+		} else {
+			grabbingKeyboard = true;
 		}
 	}
 
@@ -97,8 +111,16 @@ Platform::State X11Platform::update(Gui& gui) {
 void X11Platform::activateWindow(bool doActivate) {
 	if(!doActivate) {
 		// end our grab
-		xcb_ungrab_pointer(this->connection, XCB_TIME_CURRENT_TIME);
-		xcb_ungrab_keyboard(this->connection, XCB_TIME_CURRENT_TIME);
+		if(grabbingPointer) {
+			xcb_ungrab_pointer(this->connection, XCB_TIME_CURRENT_TIME);
+			grabbingPointer = false;
+		}
+
+		if(grabbingKeyboard) {
+			xcb_ungrab_keyboard(this->connection, XCB_TIME_CURRENT_TIME);
+			grabbingKeyboard = false;
+		}
+
 		xcb_flush(this->connection);
 	}
 

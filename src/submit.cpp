@@ -11,7 +11,9 @@
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <util/intrusive.hpp>
-#include <gui/commandHook.hpp>
+#include <commandHook/hook.hpp>
+#include <commandHook/record.hpp>
+#include <commandHook/submission.hpp>
 #include <gui/gui.hpp>
 #include <vk/enumString.hpp>
 #include <util/profiling.hpp>

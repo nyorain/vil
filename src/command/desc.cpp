@@ -33,7 +33,14 @@ void annotateRelIDLegacy(Command* cmd) {
 
 		}
 
-		cmd->relID = ids[cmd->nameDesc()]++;
+		auto it = ids.find(cmd->nameDesc());
+		if(it == ids.end()) {
+			ids.emplace(cmd->nameDesc(), 0u);
+			cmd->relID = 0u;
+		} else {
+			cmd->relID = ++it->second;
+		}
+
 		cmd = cmd->next;
 	}
 }
@@ -267,6 +274,8 @@ FindResult find(const Command* root, span<const Command*> dst,
 			// when the match values of two commands are equal, choose
 			// simply by order in current hierachy level.
 			// XXX: maybe it's worth it to always consider this?
+			//   We already consider this in Command::match but not the
+			//   custom implementations
 			if(std::abs(int(currCmds.front()->relID) - int(dst.front()->relID)) >=
 					std::abs(int(bestCmds.front()->relID) - int(dst.front()->relID))) {
 				continue;
@@ -334,11 +343,16 @@ void add(Matcher& m, const ParentCommand::SectionStats& a, const ParentCommand::
 	}
 }
 
-// Outputs match in range [0, 1]
 std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 		const ParentCommand& rootA, const ParentCommand& rootB) {
+	// TODO: fast patch for &rootA == &rootB
+	// take additional parameter on whether the matches are really needed?
+	// in many cases they are not, which would make this a lot cheaper.
+
 	// match commands themselves
 	auto rootMatch = rootA.match(rootB);
+	dlg_assert(rootMatch.total == -1.f || rootMatch.match <= rootMatch.total);
+
 	if(rootMatch.match <= 0.f) {
 		return {{}, rootMatch};
 	}
@@ -358,6 +372,7 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 	auto statsA = rootA.sectionStats();
 	auto statsB = rootB.sectionStats();
 	add(rootMatch, statsA, statsB);
+	dlg_assert(rootMatch.total == -1.f || rootMatch.match <= rootMatch.total);
 
 	// setup match matrix
 	struct Entry {
@@ -379,6 +394,13 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 		return {{}, rootMatch};
 	}
 
+	// one of them has no sections, the other one has.
+	if(minSections == 0u) {
+		auto missedMin = 10;
+		rootMatch.total += missedMin * maxSections;
+		return {{}, rootMatch};
+	}
+
 	auto entries = tms.alloc<Entry>(numSectionsA * numSectionsB);
 	auto entry = [&](auto ia, auto ib) -> decltype(auto) {
 		dlg_assert(ia < numSectionsA);
@@ -396,6 +418,7 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 			Matcher valDiag = (ia == 0u || ib == 0u) ? Matcher {} : entry(ia - 1, ib - 1).match;
 			auto [childMatches, matchVal] = match(tms, *itA, *itB);
 			if(matchVal.match > 0) {
+				dlg_assert(matchVal.match <= matchVal.total);
 				valDiag.match += matchVal.match;
 				valDiag.total += matchVal.total;
 			}
@@ -407,6 +430,7 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 			// here, not the total values. This means, we allow (even huge)
 			// mismatches to just straight up maximize the number of matches
 			// we have.
+			// TODO: might cause issues, might need finetuning. investigate
 			const auto evalUp = valUp.match;
 			const auto evalLeft = valLeft.match;
 			const auto evalDiag = matchVal.match > 0 ? valDiag.match : -1.f;
@@ -435,9 +459,13 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 			++ib;
 		}
 
+		dlg_assert(ib == numSectionsB);
+
 		itA = itA->nextParent_;
 		++ia;
 	}
+
+	dlg_assert(ia == numSectionsA);
 
 	// backtrack
 	auto maxNumMatches = minSections;
@@ -473,6 +501,7 @@ std::pair<span<SectionMatch>, Matcher> match(ThreadMemScope& tms,
 	auto& bestPath = entries.back().match;
 	rootMatch.total += bestPath.total;
 	rootMatch.match += bestPath.match;
+	dlg_assert(rootMatch.total == -1.f || rootMatch.match <= rootMatch.total);
 
 	// we assume that the total match lost by missing sections is the same
 	// as the match, but at least 1.
@@ -498,6 +527,9 @@ BatchMatch match(ThreadMemScope& tms, const FrameSubmission& a, const FrameSubmi
 		return {1.f, &a, &b, {}};
 	}
 
+	// TODO: handle this case, causes memory error atm.
+	dlg_assert(a.submissions.size() > 0 || b.submissions.size() > 0);
+
 	struct Entry {
 		float match {};
 		unsigned dir {};
@@ -512,6 +544,9 @@ BatchMatch match(ThreadMemScope& tms, const FrameSubmission& a, const FrameSubmi
 
 	for(auto ia = 0u; ia < a.submissions.size(); ++ia) {
 		for(auto ib = 0u; ib < b.submissions.size(); ++ib) {
+			// TODO: consider additional information about the record instead
+			// of just the commands? e.g. usage flags, callstacks of
+			// beginRecord/endRecord?
 			auto [matches, matcher] = match(tms,
 				*a.submissions[ia]->commands,
 				*b.submissions[ib]->commands);

@@ -1,9 +1,10 @@
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
-#include <gui/commandHook.hpp>
 #include <gui/util.hpp>
 #include <gui/fontAwesome.hpp>
 #include <gui/commandDisplay.hpp>
+#include <commandHook/hook.hpp>
+#include <commandHook/record.hpp>
 #include <queue.hpp>
 #include <ds.hpp>
 #include <swapchain.hpp>
@@ -165,6 +166,15 @@ void CommandBufferGui::draw(Draw& draw) {
 		}
 	}
 
+	// == logical state update ==
+	if(doUpdate) {
+		updateState();
+	}
+
+	// always clear the completed hooks, no matter if we update
+	// the state or not.
+	hook.completed.clear();
+
 	// force-update shown batches when it's been too long
 	// TODO: fix this for updateTick_
 	if(mode_ == UpdateMode::swapchain && !freezeState_ && doUpdate) {
@@ -229,15 +239,6 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	ImGui::PopStyleVar(2);
 
-	// logical state update
-	if(doUpdate) {
-		updateState();
-	}
-
-	// always clear the completed hooks, no matter if we update
-	// the state or not.
-	hook.completed.clear();
-
 	ImGui::EndChild();
 	// ImGui::PopStyleColor();
 	ImGui::TableNextColumn();
@@ -266,10 +267,13 @@ void CommandBufferGui::draw(Draw& draw) {
 			refButtonD(*gui_, selectedRecord_->cb);
 			imGuiText("cb name: {}", selectedRecord_->cbName);
 			imGuiText("num handles: {}", selectedRecord_->handles.size());
-			imGuiText("broken labels: {}", selectedRecord_->brokenHierarchyLabels);
+			imGuiText("broken labels: {}{}", std::boolalpha, selectedRecord_->brokenHierarchyLabels);
 			imGuiText("record id: {}", selectedRecord_->recordID);
 			imGuiText("refCount: {}", selectedRecord_->refCount);
 			imGuiText("num hook records: {}", selectedRecord_->hookRecords.size());
+			imGuiText("num secondaries: {}", selectedRecord_->secondaries.size());
+			imGuiText("num pipeLayouts: {}", selectedRecord_->pipeLayouts.size());
+			imGuiText("builds accel structs: {}", selectedRecord_->buildsAccelStructs);
 			break;
 		case SelectionType::command:
 			commandViewer_.draw(draw);
@@ -850,14 +854,16 @@ void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records,
 void addMatches(
 		const std::unordered_set<const ParentCommand*>& oldSet,
 		std::unordered_set<const ParentCommand*>& newSet,
+		std::unordered_set<const ParentCommand*>& transitioned,
 		const SectionMatch& sectionMatch) {
 
 	if(oldSet.count(sectionMatch.a)) {
 		newSet.insert(sectionMatch.b);
+		transitioned.insert(sectionMatch.a);
 	}
 
 	for(auto& child : sectionMatch.children) {
-		addMatches(oldSet, newSet, child);
+		addMatches(oldSet, newSet, transitioned, child);
 	}
 }
 
@@ -874,6 +880,8 @@ void CommandBufferGui::updateRecords(const MatchResult& frameMatch,
 	std::unordered_set<const FrameSubmission*> newOpenSubmissions;
 	std::unordered_set<const CommandRecord*> newOpenRecords;
 
+	std::unordered_set<const ParentCommand*> transitionedSections;
+
 	for(auto batchMatch : frameMatch.matches) {
 		if(openedSubmissions_.count(batchMatch.a)) {
 			newOpenSubmissions.insert(batchMatch.b);
@@ -886,14 +894,14 @@ void CommandBufferGui::updateRecords(const MatchResult& frameMatch,
 			}
 
 			for(auto& sectionMatch : recordMatch.matches) {
-				addMatches(openedSections_, newOpenSections, sectionMatch);
+				addMatches(openedSections_, newOpenSections, transitionedSections, sectionMatch);
 			}
 		}
 	}
 
 	// TODO PERF debugging, remove otherwise
 	for(auto& open : openedSections_) {
-		if(!newOpenSections.count(open)) {
+		if(!transitionedSections.count(open)) {
 			if(auto* lbl = dynamic_cast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
 				dlg_trace("Losing open label {}", lbl->name);
 			} else {

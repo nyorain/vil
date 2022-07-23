@@ -3,9 +3,10 @@
 #include <gui/render.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
-#include <gui/commandHook.hpp>
 #include <gui/fonts.hpp>
 #include <gui/fontAwesome.hpp>
+#include <commandHook/hook.hpp>
+#include <commandHook/record.hpp>
 #include <layer.hpp>
 #include <stats.hpp>
 #include <queue.hpp>
@@ -30,9 +31,9 @@
 #include <fstream>
 #include <filesystem>
 
-// TODO: tmp
 #ifdef VIL_DEBUG
-	#define VIL_VIZ_LCS
+	// NOTE: tmp deubgging tool for the LMM algorithm
+	// #define VIL_VIZ_LCS
 #endif // DEBUG
 
 #ifdef VIL_VIZ_LCS

@@ -2,6 +2,7 @@
 #include "../approx.hpp"
 #include "lmm.hpp"
 #include <random>
+#include <unordered_set>
 #include <util/profiling.hpp>
 
 using namespace vil;

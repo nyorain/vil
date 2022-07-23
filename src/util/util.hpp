@@ -247,6 +247,27 @@ Vec4d srgbToLinear(Vec4d);
 
 std::size_t structSize(VkStructureType type);
 
+// For shaders/pipelines that access application images, we need
+// permutations for the different images types.
+struct ShaderImageType {
+	// 1,2 dimensional images are usually treated as arrayed as a generalization.
+	enum Value {
+		u1,
+		u2,
+		u3,
+		i1,
+		i2,
+		i3,
+		f1,
+		f2,
+		f3,
+		count
+	};
+
+	static Value parseType(VkImageType type, VkFormat format,
+		VkImageAspectFlagBits aspect);
+};
+
 // TODO: bad performance due to taking string parameter. Should
 // take string_view but then we need to use from_chars which has poor
 // support. Should be better in future.

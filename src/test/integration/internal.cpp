@@ -5,7 +5,9 @@
 #include <wrap.hpp>
 #include <gui/gui.hpp>
 #include <command/commands.hpp>
-#include <gui/commandHook.hpp>
+#include <command/desc.hpp>
+#include <commandHook/hook.hpp>
+#include <threadContext.hpp>
 #include <layer.hpp>
 #include <queue.hpp>
 #include <cb.hpp>
@@ -145,6 +147,112 @@ TEST(int_basic) {
 	// TODO: actually render gui stuff. Create own swapchain?
 	//   or rather implement render-on-image for that?
 	//   We could create a headless surface tho.
+}
+
+
+TEST(int_secondary_cb) {
+	auto& setup = gSetup;
+
+	// matching of secondary command buffers
+	// setup pool
+	VkCommandPoolCreateInfo cpi {};
+	cpi.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	cpi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	cpi.queueFamilyIndex = setup.qfam;
+	VkCommandPool cmdPool;
+	VK_CHECK(CreateCommandPool(setup.dev, &cpi, nullptr, &cmdPool));
+
+	// setup secondary cb
+	VkCommandBufferAllocateInfo cbai {};
+	cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cbai.commandBufferCount = 1u;
+	cbai.commandPool = cmdPool;
+	cbai.level = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+	VkCommandBuffer scb;
+	VK_CHECK(AllocateCommandBuffers(setup.dev, &cbai, &scb));
+
+	{
+		VkCommandBufferInheritanceInfo ii {};
+		ii.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+
+		VkCommandBufferBeginInfo beginInfo {};
+		beginInfo.pInheritanceInfo = &ii;
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+		VK_CHECK(BeginCommandBuffer(scb, &beginInfo));
+
+		// some dummy label
+		VkDebugUtilsLabelEXT label {};
+		label.pLabelName = "TestLabel1";
+		label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+
+		CmdBeginDebugUtilsLabelEXT(scb, &label);
+		CmdEndDebugUtilsLabelEXT(scb);
+
+		EndCommandBuffer(scb);
+	}
+
+	// setup primary cbs
+	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cbai.commandBufferCount = 2u;
+	VkCommandBuffer pcbs[2];
+	VK_CHECK(AllocateCommandBuffers(setup.dev, &cbai, pcbs));
+
+	for(auto& cb : pcbs) {
+		VkCommandBufferBeginInfo beginInfo {};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		VK_CHECK(BeginCommandBuffer(cb, &beginInfo));
+
+		CmdExecuteCommands(cb, 1u, &scb);
+		CmdExecuteCommands(cb, 1u, &scb);
+
+		EndCommandBuffer(cb);
+	}
+
+	auto& cb0 = unwrap(pcbs[0]);
+	auto& cb1 = unwrap(pcbs[1]);
+
+	auto& rec0 = *cb0.lastRecordLocked();
+	auto& rec1 = *cb1.lastRecordLocked();
+
+	dlg_assert(rec0.commands->sectionStats().numChildSections == 2u);
+
+	auto& execCmd0 = dynamic_cast<ExecuteCommandsCmd&>(*rec0.commands->firstChildParent());
+	dlg_assert(execCmd0.sectionStats().numChildSections == 1u);
+	dlg_assert(execCmd0.nextParent_);
+
+	auto& childCmd0 = dynamic_cast<ExecuteCommandsChildCmd&>(*execCmd0.firstChildParent());
+	dlg_assert(childCmd0.sectionStats().numChildSections == 1u);
+	dlg_assert(childCmd0.firstChildParent());
+
+	auto& execCmd1 = dynamic_cast<ExecuteCommandsCmd&>(*rec1.commands->firstChildParent());
+	dlg_assert(execCmd1.sectionStats().numChildSections == 1u);
+	dlg_assert(execCmd1.nextParent_);
+
+	auto& childCmd1 = dynamic_cast<ExecuteCommandsChildCmd&>(*execCmd1.firstChildParent());
+	dlg_assert(childCmd1.sectionStats().numChildSections == 1u);
+	dlg_assert(childCmd1.firstChildParent());
+
+	ThreadMemScope tms;
+	auto res = match(tms, *rec0.commands, *rec1.commands);
+	auto matcher = res.second;
+	dlg_assert(matcher.match == matcher.total);
+	dlg_assert(matcher.match > 0.f);
+
+	auto secm = res.first;
+	dlg_assert(secm.size() == 2u);
+	dlg_assert(secm[1].a == &execCmd0 && secm[1].b == &execCmd1);
+	dlg_assert(secm[1].children.size() == 1u);
+	dlg_assert(secm[0].a == execCmd0.nextParent_ && secm[0].b == execCmd1.nextParent_);
+	dlg_assert(secm[0].children.size() == 1u);
+
+	{
+		auto secm = res.first[1].children;
+		dlg_assert(secm[0].a == &childCmd0 && secm[0].b == &childCmd1);
+		dlg_assert(secm[0].children.size() == 1u); // for the label section
+	}
+
+	DestroyCommandPool(setup.dev, cmdPool, nullptr);
 }
 
 // TODO: write test where we record a command buffer that executes

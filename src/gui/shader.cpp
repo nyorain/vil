@@ -1,8 +1,9 @@
 #include <gui/shader.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
-#include <gui/commandHook.hpp>
 #include <gui/cb.hpp>
+#include <commandHook/hook.hpp>
+#include <commandHook/record.hpp>
 #include <util/buffmt.hpp>
 #include <util/profiling.hpp>
 #include <command/commands.hpp>
@@ -15,6 +16,7 @@
 #include <spirv-cross/spirv_cross.hpp>
 #include <spvm/types.h>
 #include <spvm/ext/GLSL450.h>
+#include <vk/format_utils.h>
 
 namespace vil {
 
@@ -40,8 +42,8 @@ void ShaderDebugger::init(Gui& gui) {
 
 	// TODO: why does this break for games using tcmalloc? tested
 	// on linux with dota
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	textedit_.SetLanguageDefinition(lang);
+	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	// textedit_.SetLanguageDefinition(lang);
 
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
@@ -878,6 +880,8 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			dstImg.levels = imgView.ci.subresourceRange.levelCount;
 			dstImg.layers = imgView.ci.subresourceRange.layerCount;
 			dstImg.data = buf->data();
+			dstImg.format = sampleFormat(img.ci.format,
+				VkImageAspectFlagBits(imgView.ci.subresourceRange.aspectMask));
 
 			dst[0].value.image = &dstImg;
 			dlg_assert(u32(dst[0].type) == res->base_type_id);
@@ -908,6 +912,8 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			dstImg.levels = imgView.ci.subresourceRange.levelCount;
 			dstImg.layers = imgView.ci.subresourceRange.layerCount;
 			dstImg.data = buf->data();
+			dstImg.format = sampleFormat(img.ci.format,
+				VkImageAspectFlagBits(imgView.ci.subresourceRange.aspectMask));
 
 			auto& sampler = samplers_.emplace_back();
 			sampler.desc = setupSampler(*image.sampler);
@@ -1012,7 +1018,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 			auto& type = compiled_->get_type_from_variable(res.id);
 			varIDToDsCopyMap_.insert({u32(res.id), u32(hook.descriptorCopies.size())});
 
-			CommandHook::DescriptorCopy dsCopy;
+			DescriptorCopyOp dsCopy;
 			dsCopy.set = compiled_->get_decoration(res.id, spv::DecorationDescriptorSet);
 			dsCopy.binding = compiled_->get_decoration(res.id, spv::DecorationBinding);
 			dsCopy.before = true;
@@ -1241,17 +1247,20 @@ spvm_vec4f ShaderDebugger::readImage(spvm_image& srcImg, int x, int y, int z, in
 	off += y * extent[0];
 	off += x;
 
-	off *= sizeof(spvm_vec4f);
-	if(off + sizeof(spvm_vec4f) > img.data.size()) {
+	auto fmtSize = FormatElementSize(img.format);
+	off *= fmtSize;
+	if(off + fmtSize > img.data.size()) {
 		dlg_warn("Image read would be out of range: \n"
 			"\tpos ({}, {}, {}), layer {}, level {}\n"
 			"\timage data size in pixels: {}",
-			x, y, z, layer, level, img.data.size() / sizeof(spvm_vec4f));
+			x, y, z, layer, level, img.data.size() / fmtSize);
 		return {};
 	}
 
-	auto texel = img.data.subspan(off);
-	return read<spvm_vec4f>(texel);
+	auto texelBytes = img.data.subspan(off, fmtSize);
+	auto texel = read(img.format, texelBytes);
+
+	return {float(texel[0]), float(texel[1]), float(texel[2]), float(texel[3])};
 }
 
 void ShaderDebugger::writeImage(spvm_image&, int x, int y, int z, int layer, int level,

@@ -90,6 +90,7 @@ struct Device {
 	bool transformFeedback {}; // whether we have transformFeedback
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
+	bool shaderStorageImageWriteWithoutFormat {};
 
 	bool doFullSync {};
 	std::atomic<bool> captureCmdStack {};

@@ -1,15 +1,25 @@
 #ifdef TEX_FORMAT_UINT
 	#define SamplerType(Dim) usampler##Dim
+	#define StorageTexelBufferType uimageBuffer
+	#define RawVec4Type uvec4
 #elif defined(TEX_FORMAT_INT)
 	#define SamplerType(Dim) isampler##Dim
+	#define StorageTexelBufferType iimageBuffer
+	#define RawVec4Type ivec4
 #elif defined(TEX_FORMAT_FLOAT)
 	#define SamplerType(Dim) sampler##Dim
+	#define StorageTexelBufferType imageBuffer
+	#define RawVec4Type vec4
 #else
 	#error No valid TEX_FORMAT definition
 #endif
 
 #ifdef TEX_TYPE_1D_ARRAY
 	layout(set = 0, binding = SAMPLE_TEX_BINDING) uniform SamplerType(1DArray) sTexture;
+
+	RawVec4Type fetchTexRaw(ivec3 coords, int level) {
+		return texelFetch(sTexture, coords.xy, level);
+	}
 
 	vec4 fetchTex(ivec3 coords, int level) {
 		return texelFetch(sTexture, coords.xy, level);
@@ -27,6 +37,10 @@
 #elif defined(TEX_TYPE_2D_ARRAY)
 	layout(set = 0, binding = SAMPLE_TEX_BINDING) uniform SamplerType(2DArray) sTexture;
 
+	RawVec4Type fetchTexRaw(ivec3 coords, int level) {
+		return texelFetch(sTexture, coords, level);
+	}
+
 	vec4 fetchTex(ivec3 coords, int level) {
 		return texelFetch(sTexture, coords, level);
 	}
@@ -40,6 +54,10 @@
 	}
 #elif defined(TEX_TYPE_3D)
 	layout(set = 0, binding = SAMPLE_TEX_BINDING) uniform SamplerType(3D) sTexture;
+
+	RawVec4Type fetchTexRaw(ivec3 coords, int level) {
+		return texelFetch(sTexture, coords, level);
+	}
 
 	vec4 fetchTex(ivec3 coords, int level) {
 		return texelFetch(sTexture, coords, level);

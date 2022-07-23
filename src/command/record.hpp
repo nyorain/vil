@@ -15,7 +15,7 @@
 
 namespace vil {
 
-enum class AttachmentType {
+enum class AttachmentType : u8 {
 	color,
 	input,
 	depthStencil,
