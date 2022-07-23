@@ -224,4 +224,34 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) 
 	return ret;
 }
 
+bool findHierarchy(std::vector<const Command*>& hierarchy,
+		const Command& parent, const Command& dst) {
+	dlg_assert(hierarchy.empty());
+
+	auto it = parent.children();
+	while(it) {
+		if(it == &dst || findHierarchy(hierarchy, *it, dst)) {
+			hierarchy.push_back(it);
+			return true;
+		}
+
+		it = it->next;
+	}
+
+	return false;
+}
+
+std::vector<const Command*> findHierarchy(const CommandRecord& rec, const Command& dst) {
+	std::vector<const Command*> ret;
+	auto success = findHierarchy(ret, *rec.commands, dst);
+	dlg_assert(success != (ret.empty()));
+
+	// don't append root command
+	// need to reverse here, constructing in reverse order is more
+	// efficient during recursive traversal above
+	std::reverse(ret.begin(), ret.end());
+
+	return ret;
+}
+
 } // namespace vil

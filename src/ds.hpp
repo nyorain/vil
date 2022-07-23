@@ -195,6 +195,11 @@ span<BufferViewDescriptor> bufferViews(DescriptorStateRef, unsigned binding);
 span<AccelStructDescriptor> accelStructs(DescriptorStateRef, unsigned binding);
 span<std::byte> inlineUniformBlock(DescriptorStateRef, unsigned binding);
 
+// Returns whether the given descriptor state has the given handle bound.
+// For Buffers and Images, also returns true when one of their bufferViews/
+// imageViews is bound.
+bool hasBound(DescriptorStateRef, const DeviceHandle& handle);
+
 // Vulkan descriptor set handle
 // PERF: would be nice to reduce its size. Statically allocated with maxSets
 // in descriptorPool.

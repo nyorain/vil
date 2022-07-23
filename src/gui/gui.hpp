@@ -4,6 +4,7 @@
 #include <gui/blur.hpp>
 #include <util/bytes.hpp>
 #include <util/vec.hpp>
+#include <util/util.hpp>
 #include <variant>
 #include <deque>
 #include <chrono>

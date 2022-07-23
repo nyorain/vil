@@ -151,9 +151,6 @@ void CommandBufferGui::draw(Draw& draw) {
 			"This does not affect updating of the commands shown on the left.");
 	}
 
-	ImGui::SameLine();
-	auto doUpdate = updateTick_.tick();
-
 	if(mode_ != UpdateMode::none) {
 		ImGui::SameLine();
 		ImGui::Checkbox("Freeze Commands", &freezeCommands_);
@@ -167,6 +164,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	}
 
 	// == logical state update ==
+	auto doUpdate = updateTick_.tick();
 	if(doUpdate) {
 		updateState();
 	}
@@ -285,7 +283,7 @@ void CommandBufferGui::draw(Draw& draw) {
 }
 
 // TODO: some code duplication here...
-void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
+void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) {
 	mode_ = UpdateMode::none;
 	cb_ = {};
 
@@ -297,9 +295,36 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record) {
 
 	// Unset hooks
 	clearSelection();
-	record_ = std::move(record);
 	openedSections_ = {};
+
+	record_ = std::move(record);
 	updateHookTarget();
+
+	if(cmd) {
+		selectedCommand_ = findHierarchy(*record_, *cmd);
+		dlg_assert(!selectedCommand_.empty());
+
+		selectionType_ = SelectionType::command;
+		selectedRecord_ = record_;
+
+		// TODO:
+		// descriptors might already be destroyed, snapshotRelevantDescriptors won't help
+		auto dsSnapshot = snapshotRelevantDescriptorsLocked(*selectedCommand_.back());
+		commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
+			dsSnapshot, true, nullptr);
+
+		// we want to open all sections up to the selected command
+		for(auto* cmd : selectedCommand_) {
+			dlg_assert(!!cmd->children() == !!dynamic_cast<const ParentCommand*>(cmd));
+			if(cmd->children()) {
+				openedSections_.insert(static_cast<const ParentCommand*>(cmd));
+			}
+		}
+
+		auto& dev = gui_->dev();
+		dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
+		dev.commandHook->freeze = false;
+	}
 }
 
 void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,

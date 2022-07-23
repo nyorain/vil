@@ -59,7 +59,8 @@ struct DisplayVisitor : CommandVisitor {
 		while(cmd) {
 
 			// No matter the flags, we never want to hide parent commands.
-			if(open_ && ((flags_ & cmd->type()) || cmd->children())) {
+			auto visible = (flags_ & cmd->type()) || (cmd == sel_);
+			if(open_ && visible) {
 				if(showSep) {
 					ImGui::Separator();
 				}
@@ -149,7 +150,9 @@ struct DisplayVisitor : CommandVisitor {
 	}
 
 	void display(const Command& cmd) {
-		if(!(flags_ & cmd.type()) || !open_) {
+		// never skip the selected command
+		auto visible = (flags_ & cmd.type()) || (&cmd == sel_);
+		if(!visible || !open_) {
 			return;
 		}
 

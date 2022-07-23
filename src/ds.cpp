@@ -1815,4 +1815,47 @@ IntrusivePtr<DescriptorSetCow> addCow(DescriptorSet& set) {
 	return IntrusivePtr<DescriptorSetCow>(set.cow);
 }
 
+bool hasBound(DescriptorStateRef state, const DeviceHandle& handle) {
+	for(auto i = 0u; i < state.layout->bindings.size(); ++i) {
+		switch(category(state.layout->bindings[i].descriptorType)) {
+			case DescriptorCategory::accelStruct:
+				for(auto& accelStruct : accelStructs(state, i)) {
+					if(accelStruct.accelStruct == &handle) {
+						return true;
+					}
+				}
+				break;
+			case DescriptorCategory::buffer:
+				for(auto& buffer : buffers(state, i)) {
+					if(buffer.buffer == &handle) {
+						return true;
+					}
+				}
+				break;
+			case DescriptorCategory::image:
+				for(auto& img : images(state, i)) {
+					if(img.imageView == &handle || (img.imageView && img.imageView->img == &handle)) {
+						return true;
+					}
+				}
+				break;
+			case DescriptorCategory::bufferView:
+				for(auto& bv : bufferViews(state, i)) {
+					if(bv.bufferView == &handle || (bv.bufferView && bv.bufferView->buffer == &handle)) {
+						return true;
+					}
+				}
+				break;
+			case DescriptorCategory::inlineUniformBlock:
+				// nope
+				break;
+			case DescriptorCategory::none:
+				dlg_error("unreachable");
+				break;
+		}
+	}
+
+	return false;
+}
+
 } // namespace vil

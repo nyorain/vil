@@ -538,6 +538,13 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc,
 		att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 	}
 
+	// TODO: we are not allowed to add dependencies, it breaks
+	// rp compat. This could never have worked!
+	// Insert manual barriers between 1->2, 2->3 instead!
+	// I guess we don't really need the external dependencies right?
+	(void) addDeps;
+	(void) addInternalDep;
+	/*
 	// add additional sync
 	auto findOrAddDep = [&](auto& deps, auto src, auto dst) -> decltype(auto) {
 		// always add a dependency
@@ -604,6 +611,7 @@ RenderPassSplitDesc splitInterruptable(const RenderPassDesc& desc,
 		dep.srcAccessMask |= VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
 		dep.dstAccessMask |= VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
 	}
+	*/
 
 	return {std::move(desc0), std::move(desc1), std::move(desc2)};
 }

@@ -299,4 +299,8 @@ DescriptorSet& access(const BoundDescriptorSet&);
 // created/retrieved cows.
 CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command&);
 
+// Tries to find 'dst' in 'rec' and returns it full hierachy.
+// Returns empty vector if it can't be found.
+std::vector<const Command*> findHierarchy(const CommandRecord& rec, const Command& dst);
+
 } // namespace vil

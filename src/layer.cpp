@@ -33,11 +33,8 @@
 namespace vil {
 
 // Util
-// TODO: break when debugger is attached?
-// make this a build or runtime config? VIL_BREAK_ON_ERROR env var?
-#define BREAK_ON_ERROR
-
 static auto dlgWarnErrorCount = 0u;
+static auto breakOnError = false;
 
 // TODO: doesn't belong here
 std::mutex ThreadContext::mutex_;
@@ -53,8 +50,7 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		++dlgWarnErrorCount;
 	}
 
-#ifdef BREAK_ON_ERROR
-	if(origin->level >= dlg_level_error) {
+	if(origin->level >= dlg_level_error && breakOnError) {
 		// break
 		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
 		#ifdef _MSC_VER
@@ -64,7 +60,6 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 			std::raise(SIGTRAP);
 		#endif
 	}
-#endif // BREAK_ON_ERROR
 #endif // DLG_DISABLE
 }
 
@@ -156,10 +151,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// TODO: remove/find real solution for AllocConsole on windows
 	//  maybe control this via environment variable?
 	//  On windows (with msvc), we could use DebugOutput.
+	if(checkEnvBinary("VIL_BREAK_ON_ERROR", false)) {
+		breakOnError = true;
+	}
+
 #ifndef DLG_DISABLE
-#ifndef BREAK_ON_ERROR
-	if(checkEnvBinary("VIL_DLG_HANDLER", false))
-#endif // BREAK_ON_ERROR
+	if(checkEnvBinary("VIL_DLG_HANDLER", false) || breakOnError)
 	{
 		dlg_set_handler(dlgHandler, nullptr);
 		#ifdef _WIN32

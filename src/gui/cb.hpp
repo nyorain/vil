@@ -46,7 +46,7 @@ public:
 	void destroyed(const Handle& handle);
 
 	void showSwapchainSubmissions();
-	void select(IntrusivePtr<CommandRecord> record);
+	void select(IntrusivePtr<CommandRecord> record, Command* cmd = nullptr);
 	void select(IntrusivePtr<CommandRecord> record, CommandBuffer& cb);
 
 	auto& commandViewer() { return commandViewer_; }

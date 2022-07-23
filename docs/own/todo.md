@@ -8,6 +8,10 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
+- [ ] FIX RENDERPASS SPLIT SYNC. We know this was a problem before.
+      But the old solution breaks renderpass compat.
+	  Insert barriers as needed when recording instead.
+	  Remove the old code from splitInterruptable then.
 - [ ] figure out if our linear allocator (the std::allocator) adapter
       should value initialize on alloc
 - [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
