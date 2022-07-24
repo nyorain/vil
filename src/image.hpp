@@ -64,6 +64,9 @@ struct Sampler : DeviceHandle {
 	Sampler& operator=(Sampler&&) = delete;
 };
 
+std::string defaultName(const Image&);
+std::string defaultName(const ImageView&);
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	VkDevice                                   	device,
 	const VkImageCreateInfo*                    pCreateInfo,

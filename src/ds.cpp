@@ -15,7 +15,11 @@ namespace vil {
 // Doing this has a huge performance impact (especially for applications
 // with many huge and dynamic descriptorSets). But not doing this means
 // that descriptor sets might contain invalid bindings. That is mainly
-// a problem for the resource viewer for descriptor sets at the moment.
+// a problem for the resource viewer for descriptor sets at the moment
+// as we are able to filter them out like 99% of the times (the other times
+// we get valid new handles that were never bound but just happen
+// to be at the address now, also not UB at least), and we can increase
+// this via Device::keepAliveCount
 // TODO: better documentation, make it a meson_option
 // TODO: we could try to explicitly detect the invalid bindings, as we
 //   do with descriptor sets already. See notes in ds3.hpp for details.
@@ -437,16 +441,16 @@ void DescriptorStateCopy::Deleter::operator()(DescriptorStateCopy* copy) const {
 	delete[] ptr;
 }
 
-DescriptorStateCopyPtr copyLockedState(const DescriptorSet& set) {
+DescriptorStateCopyPtr DescriptorSet::copyLockedState() {
 	ZoneScoped;
 
 	// NOTE: when this assert fails somewhere, we have to adjust the code (storing stuff
 	// that is up-to-pointer-aligned directly behind the state object in memory).
 	static_assert(sizeof(DescriptorStateCopy) % alignof(void*) == 0u);
-	assertOwned(set.mutex);
-	dlg_assert(set.cow);
+	assertOwned(mutex_);
+	dlg_assert(cow_);
 
-	auto bindingSize = totalDescriptorMemSize(*set.layout, set.variableDescriptorCount);
+	auto bindingSize = totalDescriptorMemSize(*this->layout, this->variableDescriptorCount);
 	auto memSize = sizeof(DescriptorStateCopy) + bindingSize;
 
 	auto* mem = new std::byte[memSize]();
@@ -458,18 +462,18 @@ DescriptorStateCopyPtr copyLockedState(const DescriptorSet& set) {
 	auto* copy = new(mem) DescriptorStateCopy();
 	dlg_assert(reinterpret_cast<std::byte*>(copy) == mem);
 
-	copy->variableDescriptorCount = set.variableDescriptorCount;
-	copy->layout = set.layout;
+	copy->variableDescriptorCount = this->variableDescriptorCount;
+	copy->layout = this->layout;
 
-	DescriptorStateRef srcRef(set);
+	DescriptorStateRef srcRef(*this);
 	auto dstRef = srcRef;
 	dstRef.data = mem + sizeof(DescriptorStateCopy);
 
-	initDescriptorState(dstRef.data, *set.layout, set.variableDescriptorCount);
+	initDescriptorState(dstRef.data, *this->layout, this->variableDescriptorCount);
 	initImmutableSamplers(dstRef);
 
 	// copy descriptors
-	for(auto b = 0u; b < set.layout->bindings.size(); ++b) {
+	for(auto b = 0u; b < this->layout->bindings.size(); ++b) {
 		for(auto e = 0u; e < descriptorCount(srcRef, b); ++e) {
 			// with !refBindings, we "take ownership" of the increased
 			// reference count here
@@ -500,17 +504,51 @@ u32 totalDescriptorCount(DescriptorStateRef state) {
 	return ret;
 }
 
-std::unique_lock<DebugMutex> checkResolveCow(DescriptorSet& ds) {
-	std::unique_lock objLock(ds.mutex);
-	if(!ds.cow) {
+IntrusivePtr<DescriptorSetCow> DescriptorSet::addCow() {
+	std::lock_guard lock(mutex_);
+	if(!cow_) {
+		// TODO PERF: get from a pool or something
+		cow_.reset(new DescriptorSetCow());
+		cow_->ds = this;
+
+		// we need to reference all bindings when they aren't referenced
+		// at the moment.
+		if(!refBindings) {
+			doRefBindings(*dev, *this, true);
+		}
+	}
+
+	// increase reference count via new intrusive ptr
+	return IntrusivePtr<DescriptorSetCow>(cow_);
+}
+
+std::unique_lock<DebugMutex> DescriptorSet::checkResolveCow() {
+	std::unique_lock objLock(mutex_);
+	if(!cow_) {
 		return objLock;
 	}
 
-	std::unique_lock cowLock(ds.cow->mutex);
-	ds.cow->copy = copyLockedState(ds);
+	dlg_assert(cow_->ds == this);
+	dlg_assert(!cow_->copy);
+
+	// In this case nobody is interested in the cow anymore.
+	// This isn't a race, nobody is able to access it from the outside
+	// without holding mutex_.
+	// We just didn't destroy it before because that's not possible
+	// to do safely without deadlock. Destroy it here.
+	if(cow_->refCount.load() == 1u) {
+		cow_->ds = nullptr; // just as a debug marker, see ~DescriptorSetCow
+		cow_.reset();
+		return objLock;
+	}
+
+	// In this case we have to resolve the cow
+	std::unique_lock cowLock(cow_->mutex);
+	cow_->copy = this->copyLockedState();
+
 	// disconnect
-	ds.cow->ds = nullptr;
-	ds.cow = nullptr;
+	cow_->ds = nullptr;
+	cow_ = nullptr;
 
 	return objLock;
 }
@@ -525,7 +563,7 @@ void destroy(DescriptorSet& ds, bool unlink) {
 	}
 
 	// no need to keep lock here, ds can't be accessed anymore
-	checkResolveCow(ds);
+	ds.checkResolveCow();
 
 	if(refBindings) {
 		unrefBindings(ds);
@@ -1478,7 +1516,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		// That's why we need all handles being written to descriptorSets
 		// to be wrapped, so we don't have to lock the device mutex to
 		// access the maps.
-		auto lock = checkResolveCow(ds);
+		auto lock = ds.checkResolveCow();
 
 		for(auto j = 0u; j < write.descriptorCount; ++j, ++dstElem) {
 			advanceUntilValid(ds, dstBinding, dstElem);
@@ -1554,7 +1592,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSets(
 		auto srcBinding = copyInfo.srcBinding;
 		auto srcElem = copyInfo.srcArrayElement;
 
-		auto lock = checkResolveCow(dst);
+		auto lock = dst.checkResolveCow();
 
 		for(auto j = 0u; j < copyInfo.descriptorCount; ++j, ++srcElem, ++dstElem) {
 			advanceUntilValid(dst, dstBinding, dstElem);
@@ -1648,7 +1686,7 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 	// That's why we need all handles being written to descriptorSets
 	// to be wrapped, so we don't have to lock the device mutex to
 	// access the maps.
-	auto lock = checkResolveCow(ds);
+	auto lock = ds.checkResolveCow();
 
 	ThreadMemScope memScope;
 	std::byte* ptr;
@@ -1771,13 +1809,15 @@ u32 totalUpdateDataSize(const DescriptorUpdateTemplate& dut) {
 }
 
 DescriptorSetCow::~DescriptorSetCow() {
-	if(ds) {
-		std::lock_guard lock(ds->mutex);
+	dlg_assert(refCount.load() == 0u);
 
-		// Unregister. We succesfully saved a copy *yeay*.
-		dlg_assert(ds->cow == this);
-		ds->cow = nullptr;
-	}
+	// Must have been disconnected from the ds since we can't unregister
+	// ourselves here due to threading/deadlock issues.
+	// Either this happend by being resolved (i.e. this->copy holds
+	// a valid state) or by the DescriptorSet noticing in checkResolveCow
+	// that nobody is interested in the cow anymore and deleting it
+	// explicitly (in which case it also sets ds = nullptr)
+	dlg_assert(!ds);
 }
 
 std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSetCow& cow) {
@@ -1788,31 +1828,14 @@ std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSet
 	}
 
 	dlg_assert(cow.ds);
-	dlg_assert(cow.ds->cow == &cow);
+	// TODO: private now. Would be nice to have this assert tho
+	// dlg_assert(cow.ds->cow == &cow);
 
 	// NOTE how we don't have to lock cow.obj->mutex to access the object
 	// state itself here. We know that while
-	// cow.source, and therefore cow.source->cow, are set, cow.source->state
+	// cow.ds, and therefore cow.ds->cow, are set, cow.ds->state
 	// is immutable. All functions that change it must first call checkResolveCow.
 	return {DescriptorStateRef(*cow.ds), std::move(cowLock)};
-}
-
-IntrusivePtr<DescriptorSetCow> addCow(DescriptorSet& set) {
-	std::lock_guard lock(set.mutex);
-	if(!set.cow) {
-		// TODO PERF: get from a pool or something
-		set.cow = new DescriptorSetCow();
-		set.cow->ds = &set;
-
-		// we need to reference all bindings when they aren't referenced
-		// at the moment.
-		if(!refBindings) {
-			doRefBindings(*set.dev, set, true);
-		}
-	}
-
-	// increase reference count via new intrusive ptr
-	return IntrusivePtr<DescriptorSetCow>(set.cow);
 }
 
 bool hasBound(DescriptorStateRef state, const DeviceHandle& handle) {

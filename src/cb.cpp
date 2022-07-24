@@ -283,7 +283,7 @@ void CommandBuffer::doEnd() {
 	auto& rec = *builder_.record_;
 	annotateRelIDLegacy(rec.commands);
 
-	// Make sure to never call CommandBufferRecord destructor inside lock.
+	// Make sure to never call CommandRecord destructor inside lock.
 	// Don't just call reset() here or move lastRecord_ so that always have a valid
 	// lastRecord_ as state (some other thread could query it before we lock)
 	auto keepAliveRecord = lastRecord_;

@@ -553,7 +553,7 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 			// important that the ds mutex is locked mainly for
 			// update_unused_while_pending.
 			auto& state = static_cast<DescriptorSet&>(rhandle);
-			std::lock_guard lock(state.mutex);
+			auto lock = state.lock();
 
 			for(auto& binding : state.layout->bindings) {
 				auto dsCat = DescriptorCategory(binding.descriptorType);

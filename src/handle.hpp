@@ -37,7 +37,9 @@ struct DeviceHandle : Handle {
 };
 
 const char* name(VkObjectType objectType);
-std::string name(const Handle& handle);
+std::string name(const Handle& handle,
+		bool addType = true,
+		bool perTypeDefault = true);
 
 struct ResourceVisitor {
 	virtual ~ResourceVisitor() = default;

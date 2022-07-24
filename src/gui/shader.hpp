@@ -9,6 +9,7 @@
 #include <spvm/image.h>
 #include <spvm/result.h>
 #include <util/bytes.hpp>
+#include <vk/vulkan.h>
 #include <deque>
 #include <unordered_map>
 #include <vector>

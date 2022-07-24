@@ -78,9 +78,10 @@ void checkReplace(RenderPassInstanceState& rpi, const CommandAllocHashMap<Device
 }
 
 // ArgumentsDesc
-NameResult name(DeviceHandle* handle, NullName nullName) {
+NameResult name(DeviceHandle* handle, NullName nullName, bool displayType) {
 	if(!handle) {
 		switch(nullName) {
+			// TODO: also add type here when displayType is true?
 			case NullName::null: return {NameType::null, "<null>"};
 			case NullName::destroyed: return {NameType::null, "<destroyed>"};
 			case NullName::empty: return {NameType::null, ""};
@@ -88,7 +89,7 @@ NameResult name(DeviceHandle* handle, NullName nullName) {
 		}
 	}
 
-	auto name = vil::name(*handle);
+	auto name = vil::name(*handle, displayType);
 	if(handle->name.empty()) {
 		return {NameType::unnamed, name};
 	}

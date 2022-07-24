@@ -8,6 +8,7 @@
 #include <ds.hpp>
 #include <rp.hpp>
 #include <util/util.hpp>
+#include <vk/enumString.hpp>
 
 namespace vil {
 
@@ -58,6 +59,128 @@ Sampler::~Sampler() {
 
 	invalidateCbs();
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SAMPLER);
+}
+
+std::string defaultName(const Image& img) {
+	// format
+	auto formatStr = vk::name(img.ci.format);
+
+	// extent
+	std::string dimStr;
+	if(img.ci.imageType == VK_IMAGE_TYPE_1D) {
+		// We will print just a number e.g. 1024 in this case.
+		// Might be confusing but it's consistent with the rest,
+		// the user will figure it out.
+		dimStr = dlg::format("{}", img.ci.extent.width);
+	} else if(img.ci.imageType == VK_IMAGE_TYPE_2D) {
+		dimStr = dlg::format("{}x{}", img.ci.extent.width, img.ci.extent.height);
+	} else if(img.ci.imageType == VK_IMAGE_TYPE_3D) {
+		dimStr = dlg::format("{}x{}x{}", img.ci.extent.width,
+			img.ci.extent.height, img.ci.extent.depth);
+	} else {
+		dimStr = "<unsupported type>";
+	}
+
+	if(img.ci.arrayLayers > 1) {
+		dimStr += dlg::format("[{}]", img.ci.arrayLayers);
+	}
+
+	if(img.ci.samples > 1) {
+		dimStr += dlg::format("<{}>", img.ci.samples);
+	}
+
+	auto ret = dlg::format("{} {}", formatStr, dimStr);
+
+	// usage
+	auto attachmentUsage =
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+		VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	if(img.ci.usage & VK_IMAGE_USAGE_STORAGE_BIT) {
+		ret += " Storage";
+	} else if(img.ci.usage & attachmentUsage) {
+		ret += " Attachment";
+	} else if(img.ci.usage & VK_IMAGE_USAGE_SAMPLED_BIT) {
+		ret += " Sampled";
+	}
+
+	return ret;
+}
+
+std::string defaultName(const ImageView& iv) {
+	if(!iv.img) {
+		return "View to Destroy Image";
+	}
+
+	// format
+	auto formatStr = vk::name(iv.ci.format);
+
+	// extent
+	std::string dimStr;
+	if(iv.ci.viewType == VK_IMAGE_VIEW_TYPE_1D || iv.ci.viewType == VK_IMAGE_VIEW_TYPE_1D_ARRAY) {
+		// We will print just a number e.g. 1024 in this case.
+		// Might be confusing but it's consistent with the rest,
+		// the user will figure it out.
+		dimStr = dlg::format("{}", iv.img->ci.extent.width);
+	} else if(iv.ci.viewType == VK_IMAGE_VIEW_TYPE_2D || iv.ci.viewType == VK_IMAGE_VIEW_TYPE_2D_ARRAY) {
+		dimStr = dlg::format("{}x{}", iv.img->ci.extent.width,
+			iv.img->ci.extent.height);
+	} else if(iv.ci.viewType == VK_IMAGE_VIEW_TYPE_3D) {
+		dimStr = dlg::format("{}x{}x{}", iv.img->ci.extent.width,
+			iv.img->ci.extent.height, iv.img->ci.extent.depth);
+	} else if(iv.ci.viewType == VK_IMAGE_VIEW_TYPE_CUBE || iv.ci.viewType == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY) {
+		dimStr = dlg::format("Cube {}x{}", iv.img->ci.extent.width,
+			iv.img->ci.extent.height);
+	} else {
+		dimStr = "<unsupported type>";
+	}
+
+	// layers
+	const auto layered =
+		iv.ci.viewType == VK_IMAGE_VIEW_TYPE_1D_ARRAY ||
+		iv.ci.viewType == VK_IMAGE_VIEW_TYPE_2D_ARRAY ||
+		iv.ci.viewType == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+	if(layered) {
+		dimStr += dlg::format("[{}:{}]",
+			iv.ci.subresourceRange.baseArrayLayer,
+			iv.ci.subresourceRange.baseArrayLayer + iv.ci.subresourceRange.layerCount);
+	} else if(iv.ci.subresourceRange.baseArrayLayer != 0u) {
+		dlg_assert(iv.ci.subresourceRange.layerCount == 1u);
+		dimStr += dlg::format("[{}]", iv.ci.subresourceRange.baseArrayLayer);
+	}
+
+	// levels
+	// XXX: always show it? or just hide it when it's only the only base level?
+	if(iv.ci.subresourceRange.baseMipLevel != 0u ||
+			iv.ci.subresourceRange.levelCount != iv.img->ci.mipLevels) {
+		dimStr += dlg::format("[mip {}:{}]",
+			iv.ci.subresourceRange.baseMipLevel,
+			iv.ci.subresourceRange.baseMipLevel + iv.ci.subresourceRange.levelCount);
+	}
+
+	// TODO: show aspect?
+
+	// XXX: Really output samples here? already so much clutter
+	if(iv.img->ci.samples > 1) {
+		dimStr += dlg::format("<{}>", iv.img->ci.samples);
+	}
+
+	auto ret = dlg::format("{} {}", formatStr, dimStr);
+
+	// XXX: don't output usage here? already so much clutter.
+	// And might be confusing, storage image view might be used as sampled
+	// image.
+	// auto attachmentUsage =
+	// 	VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+	// 	VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	// if(img.ci.usage & VK_IMAGE_USAGE_STORAGE_BIT) {
+	// 	ret += " Storage";
+	// } else if(img.ci.usage & attachmentUsage) {
+	// 	ret += " Attachment";
+	// } else if(img.ci.usage & VK_IMAGE_USAGE_SAMPLED_BIT) {
+	// 	ret += " Sampled";
+	// }
+
+	return ret;
 }
 
 // Image
@@ -298,10 +421,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 	view.dev = &dev;
 	view.ci = *pCreateInfo;
 
-	// TODO: resolve layerCount, levelCount of view.ci here already.
-	// handle REMAINING_* constants. Make sure to take special rules
-	// for 3D image as 2d array view and such into account, see docs
-	// on vkCreateImageView
+	// TODO take special rules for 3D image as 2d array view and such
+	// into account, see docs on vkCreateImageView
+	if(view.ci.subresourceRange.layerCount == VK_REMAINING_ARRAY_LAYERS) {
+		view.ci.subresourceRange.layerCount =
+			img.ci.arrayLayers - view.ci.subresourceRange.baseArrayLayer;
+	}
+
+	if(view.ci.subresourceRange.levelCount == VK_REMAINING_MIP_LEVELS) {
+		view.ci.subresourceRange.levelCount =
+			img.ci.mipLevels - view.ci.subresourceRange.baseMipLevel;
+	}
 
 	{
 		std::lock_guard lock(dev.mutex);

@@ -82,9 +82,6 @@ void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 }
 
 void ResourceGui::drawDesc(Draw& draw, Image& image) {
-	ImGui::Text("%s", name(image).c_str());
-	ImGui::Spacing();
-
 	auto doSelect = (image_.object != &image);
 	image_.object = &image;
 
@@ -196,9 +193,6 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 		buffer_.handle = &buffer;
 	}
 
-	ImGui::Text("%s", name(buffer).c_str());
-	ImGui::Spacing();
-
 	// info
 	ImGui::Columns(2);
 
@@ -233,8 +227,6 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 }
 
 void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
-	ImGui::Text("%s", name(sampler).c_str());
-	ImGui::Spacing();
 	const auto& ci = sampler.ci;
 
 	// names
@@ -285,9 +277,6 @@ void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
-	imGuiText("{}", name(ds));
-	ImGui::Spacing();
-
 	refButtonExpect(*gui_, ds.layout.get());
 	refButtonExpect(*gui_, ds.pool);
 
@@ -364,9 +353,6 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {
-	imGuiText("{}", name(dsPool));
-	ImGui::Spacing();
-
 	imGuiText("maxSets: {}", dsPool.maxSets);
 
 	ImGui::Text("Sizes");
@@ -385,9 +371,6 @@ void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
-	imGuiText("{}", name(dsl));
-	ImGui::Spacing();
-
 	ImGui::Text("Bindings");
 
 	for(auto& binding : dsl.bindings) {
@@ -407,9 +390,6 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 }
 
 void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
-	imGuiText("{}", name(pipe));
-	ImGui::Spacing();
-
 	// references: layout & renderPass
 	refButtonExpect(*gui_, pipe.layout.get());
 
@@ -665,9 +645,6 @@ void ResourceGui::drawDesc(Draw&, ComputePipeline& pipe) {
 }
 
 void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
-	ImGui::Text("%s", name(pipeLayout).c_str());
-	ImGui::Spacing();
-
 	if(!pipeLayout.pushConstants.empty()) {
 		ImGui::Text("Push Constants");
 		for(auto& pcr : pipeLayout.pushConstants) {
@@ -684,9 +661,6 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 	}
 }
 void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
-	imGuiText("{}", name(cp));
-	ImGui::Spacing();
-
 	const auto& qprops = cp.dev->queueFamilies[cp.queueFamily].props;
 	imGuiText("Queue Family: {} ({})", cp.queueFamily,
 		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
@@ -697,9 +671,6 @@ void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
 }
 
 void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
-	imGuiText("{}", name(mem));
-	ImGui::Spacing();
-
 	// info
 	ImGui::Columns(2);
 
@@ -767,9 +738,6 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 }
 
 void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
-	ImGui::Text("%s", name(cb).c_str());
-	ImGui::Spacing();
-
 	// TODO: more info about cb
 
 	ImGui::Text("Pool: ");
@@ -812,9 +780,6 @@ void imguiPrintRange(u32 base, u32 count) {
 }
 
 void ResourceGui::drawDesc(Draw&, ImageView& view) {
-	ImGui::Text("%s", name(view).c_str());
-	ImGui::Spacing();
-
 	// info
 	ImGui::Columns(2);
 	auto& ci = view.ci;
@@ -858,9 +823,6 @@ void ResourceGui::drawDesc(Draw&, ShaderModule&) {
 }
 
 void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
-	ImGui::Text("%s", name(fb).c_str());
-	ImGui::Spacing();
-
 	asColumns2({{
 		{"Width", "{}", fb.width},
 		{"Height", "{}", fb.height},
@@ -884,9 +846,6 @@ void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
 }
 
 void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
-	ImGui::Text("%s", name(rp).c_str());
-	ImGui::Spacing();
-
 	// info
 	auto& desc = rp.desc;
 
@@ -984,14 +943,11 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 }
 
 void ResourceGui::drawDesc(Draw&, Event& event) {
-	imGuiText("{}", name(event));
-	ImGui::Spacing();
+	imGuiText("TODO");
+	(void) event;
 }
 
 void ResourceGui::drawDesc(Draw&, Semaphore& semaphore) {
-	imGuiText("{}", name(semaphore));
-	ImGui::Spacing();
-
 	imGuiText("Type: {}", vk::name(semaphore.type));
 	if(semaphore.type == VK_SEMAPHORE_TYPE_TIMELINE) {
 		auto& dev = gui_->dev();
@@ -1002,15 +958,12 @@ void ResourceGui::drawDesc(Draw&, Semaphore& semaphore) {
 }
 
 void ResourceGui::drawDesc(Draw&, Fence& fence) {
-	imGuiText("{}", name(fence));
-	ImGui::Spacing();
+	imGuiText("TODO");
+	(void) fence;
 
 	// TODO: display associated submission, if any
 }
 void ResourceGui::drawDesc(Draw&, BufferView& bufView) {
-	ImGui::Text("%s", name(bufView).c_str());
-	ImGui::Spacing();
-
 	refButtonD(*gui_, bufView.buffer);
 	ImGui::SameLine();
 	imGuiText("Offset {}, Size {}", bufView.ci.offset, bufView.ci.range);
@@ -1018,9 +971,6 @@ void ResourceGui::drawDesc(Draw&, BufferView& bufView) {
 	imGuiText("{}", vk::name(bufView.ci.format));
 }
 void ResourceGui::drawDesc(Draw&, QueryPool& pool) {
-	ImGui::Text("%s", name(pool).c_str());
-	ImGui::Spacing();
-
 	imGuiText("Query type: {}", vk::name(pool.ci.queryType));
 	imGuiText("Query count: {}", pool.ci.queryCount);
 	imGuiText("Pipeline statistics: {}",
@@ -1028,9 +978,6 @@ void ResourceGui::drawDesc(Draw&, QueryPool& pool) {
 }
 
 void ResourceGui::drawDesc(Draw&, Queue& queue) {
-	ImGui::Text("%s", name(queue).c_str());
-	ImGui::Spacing();
-
 	const auto& qprops = queue.dev->queueFamilies[queue.family].props;
 
 	imGuiText("Queue Family: {} ({})", queue.family,
@@ -1041,9 +988,6 @@ void ResourceGui::drawDesc(Draw&, Queue& queue) {
 }
 
 void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
-	ImGui::Text("%s", name(swapchain).c_str());
-	ImGui::Spacing();
-
 	auto& sci = swapchain.ci;
 	asColumns2({{
 		{"Format", vk::name(sci.imageFormat)},
@@ -1208,7 +1152,7 @@ void ResourceGui::draw(Draw& draw) {
 	}
 
 	// text search
-	if(imGuiTextInput("Search", search_)) {
+	if(imGuiTextInput(ICON_FA_SEARCH, search_)) {
 		update = true;
 	}
 
@@ -1246,7 +1190,7 @@ void ResourceGui::draw(Draw& draw) {
 			ImGui::PushID(&handle);
 
 			auto disabled = (destroyed_.count(&handle) > 0);
-			std::string label = disabled ? "<Destroyed>" : name(handle);
+			std::string label = disabled ? "<Destroyed>" : name(handle, false);
 			pushDisabled(disabled);
 
 			if(selected) {
@@ -1284,6 +1228,11 @@ void ResourceGui::draw(Draw& draw) {
 }
 
 void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
+	// too broken atm, was just a prototype.
+	// hard to implement for dynamic descriptor sets and records
+	constexpr auto enableUsages = false;
+
+	// too broken atm
 	auto showUsages = [&](const UsedHandle& uh, const char* name) {
 		if(ImGui::TreeNode(&handle, "%s", name)) {
 			for(auto& cmd : uh.commands) {
@@ -1352,7 +1301,28 @@ void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
 	};
 
 	auto visitor = TemplateResourceVisitor([&](auto& res) {
+		if(editName_) {
+			imGuiTextInput("", handle.name);
+			if(ImGui::IsItemDeactivated()) {
+				editName_ = false;
+			}
+
+			// TODO: forward new debug name to further layers?
+			// not sure if that's expected behavior
+		} else {
+			imGuiText("{}", name(res));
+			if(ImGui::IsItemClicked()) {
+				editName_ = true;
+			}
+		}
+
+		ImGui::Spacing();
+
 		this->drawDesc(draw, res);
+
+		if(!enableUsages) {
+			return;
+		}
 
 		using H = std::remove_reference_t<decltype(res)>;
 		if constexpr(std::is_base_of_v<DeviceHandle, H>) {
@@ -1369,7 +1339,7 @@ void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
 					auto lock = std::scoped_lock(pool->mutex);
 					for(auto it = pool->usedEntries; it; it = it->next) {
 						dlg_assert(it->set);
-						auto lock2 = std::scoped_lock(it->set->mutex);
+						auto lock2 = it->set->lock();
 
 						// TODO: instead of showing the commands
 						// where it's *bound*, show the commands
@@ -1422,6 +1392,7 @@ void ResourceGui::destroyed(const Handle& handle) {
 
 void ResourceGui::select(Handle& handle) {
 	handle_ = &handle;
+	editName_ = false;
 	dlg_assert(handle.objectType != VK_OBJECT_TYPE_UNKNOWN);
 }
 

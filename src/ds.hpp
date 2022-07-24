@@ -200,32 +200,6 @@ span<std::byte> inlineUniformBlock(DescriptorStateRef, unsigned binding);
 // imageViews is bound.
 bool hasBound(DescriptorStateRef, const DeviceHandle& handle);
 
-// Vulkan descriptor set handle
-// PERF: would be nice to reduce its size. Statically allocated with maxSets
-// in descriptorPool.
-struct DescriptorSet : DeviceHandle {
-	DescriptorPool* pool {};
-	VkDescriptorSet handle {};
-
-	// Immutable after creation.
-	IntrusivePtr<DescriptorSetLayout> layout {};
-	DescriptorPoolSetEntry* setEntry {};
-	u32 id {};
-	u32 variableDescriptorCount {};
-
-	// The internal state (in data) is protected by this mutex. This
-	// is needed since we might read the data anytime from the gui
-	// or when resolving the state.
-	DebugMutex mutex;
-
-	// Protected by mutex.
-	// Not owned here. The destructor of DescriptorSetCow automatically
-	// unsets this.
-	DescriptorSetCow* cow {};
-
-	// std::byte bindingData[]; // following this in memory
-};
-
 struct DescriptorStateCopy {
 	struct Deleter {
 		void operator()(DescriptorStateCopy* ptr) const;
@@ -239,6 +213,44 @@ struct DescriptorStateCopy {
 };
 
 using DescriptorStateCopyPtr = std::unique_ptr<DescriptorStateCopy, DescriptorStateCopy::Deleter>;
+
+// Vulkan descriptor set handle
+// PERF: would be nice to reduce its size. Statically allocated with maxSets
+// in descriptorPool.
+struct DescriptorSet : DeviceHandle {
+public:
+	// Immutable after creation.
+	DescriptorPool* pool {};
+	VkDescriptorSet handle {};
+
+	IntrusivePtr<DescriptorSetLayout> layout {};
+	DescriptorPoolSetEntry* setEntry {};
+	u32 id {};
+	u32 variableDescriptorCount {};
+
+public:
+	IntrusivePtr<DescriptorSetCow> addCow();
+	std::unique_lock<DebugMutex> checkResolveCow();
+	std::unique_lock<DebugMutex> lock() {
+		return std::unique_lock<DebugMutex>(mutex_);
+	}
+
+private:
+	DescriptorStateCopyPtr copyLockedState();
+
+private:
+	// Protected by mutex.
+	// Not owned here. The destructor of DescriptorSetCow automatically
+	// unsets this.
+	IntrusivePtr<DescriptorSetCow> cow_ {};
+
+	// The internal state (in data) is protected by this mutex. This
+	// is needed since we might read the data anytime from the gui
+	// or when resolving the state.
+	DebugMutex mutex_;
+
+	// std::byte bindingData[]; // following this in memory
+};
 
 // Copy-on-write mechanism on a descriptor state.
 // See DescriptorSet::cow.
@@ -259,10 +271,10 @@ struct DescriptorSetCow {
 	// consumers may want to reference the same descriptor state.
 	std::atomic<u32> refCount {};
 
+	DescriptorSetCow() = default;
 	~DescriptorSetCow();
 };
 
-IntrusivePtr<DescriptorSetCow> addCow(DescriptorSet& set);
 std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSetCow& cow);
 
 struct DescriptorUpdateTemplate : DeviceHandle {

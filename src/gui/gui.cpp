@@ -1830,8 +1830,9 @@ void Gui::finishedLocked(Draw& draw) {
 void refButton(Gui& gui, Handle& handle) {
 	// We need the PushID/PopID since there may be multiple
 	// ref buttons with the same label (e.g. for unnamed handles)
+	constexpr auto showType = true;
 	ImGui::PushID(&handle);
-	if(ImGui::Button(name(handle).c_str())) {
+	if(ImGui::Button(name(handle, showType).c_str())) {
 		gui.selectResource(handle);
 	}
 	ImGui::PopID();

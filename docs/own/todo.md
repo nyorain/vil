@@ -226,6 +226,23 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. try xdg popup?
 
 performance/profiling:
+- [ ] CommandRecord::doEnd is expensive (and has a way-too-long CS) improve that
+	- [ ] ~CommandRecord is expensive (and it's sometimes called multiple times
+	       from one doEnd/doReset?? figure out how)
+		   This is expensive due to (1) refRecords unregistering and
+		   (2, not sure, wild guess) due to HookRecord destruction?
+		   We should be able to move HookRecord destruction out of
+		   the critical section, if that really is an issue.
+	- [ ] I guess we could avoid a lot of this 'refRecords' stuff by
+	      simple making IntrusivePtr's out of all referenced handles.
+		  E.g. make sure Images, Buffers, QueryPools, etc are not destroyed
+		  while the CommandRecord is alive. And get completely rid of
+		  refRecords and this whole 'invalidated' stuff.
+		  OTOH this means it's even harder to find all command usages of
+		  a given handle. But we need a different approach for that anyways
+		  due to descriptor sets (something like one async search of all
+		  known records and then a notification callback for new records/ds 
+		  or something)
 - [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
 	  since we should be logically able to get around that
 	  case (with normal API use and no gui open; i.e. the Record should
@@ -342,6 +359,10 @@ other
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 	- [ ] also make sure to handle in/out structs correctly. Follow SpvReflectInterfaceVariable::members
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
+- [ ] improve resource viewer
+	- [ ] tables instead of columns (columns sometimes don't align)
+	- [ ] references to other handles are so ugly at the moment
+	- [ ] for many handles the page is not implemented yet or looks empty
 - [ ] can we link C++ statically? Might fix the dota
 	  std::regex bug maybe it was something with the version of libstdc++?
 - [ ] decide whether to enable full-sync by default or not.

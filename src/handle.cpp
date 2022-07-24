@@ -92,16 +92,34 @@ const char* name(VkObjectType objectType) {
 	}
 }
 
-std::string name(const Handle& handle) {
+std::string name(const Handle& handle, bool addType, bool perTypeDefault) {
 	const auto hn = name(handle.objectType);
 
 	std::string name;
-	if(handle.name.empty()) {
-		// auto id = handleToU64(vil::handle(handle));
-		// name = dlg::format("{} {}{}", hn, std::hex, id);
-		name = dlg::format("{}", hn);
-	} else {
-		name = dlg::format("{} {}", hn, handle.name);
+	if(addType) {
+		name += dlg::format("{}", hn);
+	}
+
+	if(!handle.name.empty()) {
+		if(!name.empty()) {
+			name += ' ';
+		}
+
+		name += handle.name;
+	} else if(perTypeDefault) {
+		if(!name.empty()) {
+			name += ' ';
+		}
+
+		if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
+			name += defaultName(static_cast<const Image&>(handle));
+		} else if(handle.objectType == VK_OBJECT_TYPE_IMAGE_VIEW) {
+			name += defaultName(static_cast<const ImageView&>(handle));
+		} else if(name.empty()) {
+			// TODO: not sure if good idea
+			name = hn;
+			// name = dlg::format("{}{}", std::hex, handleToU64(&handle));
+		}
 	}
 
 	return name;

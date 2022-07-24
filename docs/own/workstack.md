@@ -1,3 +1,5 @@
+- [ ] check if we can get rid of refRecords and CommandRecord::invalidated.
+      See the point in todo.md:performance about expensive doEnd
 - [ ] investigate 255-overflow-like bug in shader debugger when
       resizing
 - [ ] fix bad vk::name impls. E.g. for DescriptorSetLayout, the stages

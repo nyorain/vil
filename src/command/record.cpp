@@ -217,7 +217,7 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) 
 	for(auto bds : scmd->boundDescriptors().descriptorSets) {
 		auto [ds, lock] = tryAccessLocked(bds);
 		if(ds) {
-			ret.states.emplace(bds.dsEntry, addCow(*ds));
+			ret.states.emplace(bds.dsEntry, ds->addCow());
 		}
 	}
 
