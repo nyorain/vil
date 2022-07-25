@@ -5,34 +5,37 @@
 #include <device.hpp>
 #include <window.hpp>
 #include <gui/gui.hpp>
-#include <swa/swa.h>
 #include <util/export.hpp>
 #include <swapchain.hpp>
 #include <overlay.hpp>
 #include <imgui/imgui.h>
-#include <swa/swa.h>
 
 using namespace vil;
 
-static_assert(u32(VilKeyA) == u32(swa_key_a));
-static_assert(u32(VilKeyX) == u32(swa_key_x));
-static_assert(u32(VilKeyC) == u32(swa_key_c));
-static_assert(u32(VilKeyV) == u32(swa_key_v));
-static_assert(u32(VilKeyZ) == u32(swa_key_z));
-static_assert(u32(VilKeyY) == u32(swa_key_y));
-static_assert(u32(VilKeyEnter) == u32(swa_key_enter));
-static_assert(u32(VilKeyTab) == u32(swa_key_tab));
-static_assert(u32(VilKeyLeft) == u32(swa_key_left));
-static_assert(u32(VilKeyRight) == u32(swa_key_right));
-static_assert(u32(VilKeyDown) == u32(swa_key_down));
-static_assert(u32(VilKeyUp) == u32(swa_key_up));
-static_assert(u32(VilKeySpace) == u32(swa_key_space));
-static_assert(u32(VilKeyBackspace) == u32(swa_key_backspace));
-static_assert(u32(VilKeyPageUp) == u32(swa_key_pageup));
-static_assert(u32(VilKeyPageDown) == u32(swa_key_pagedown));
-static_assert(u32(VilKeyHome) == u32(swa_key_home));
-static_assert(u32(VilKeyEnd) == u32(swa_key_end));
-static_assert(u32(VilKeyInsert) == u32(swa_key_insert));
+#ifdef VIL_WITH_SWA
+	#include <swa/swa.h>
+
+	static_assert(u32(VilKeyA) == u32(swa_key_a));
+	static_assert(u32(VilKeyX) == u32(swa_key_x));
+	static_assert(u32(VilKeyC) == u32(swa_key_c));
+	static_assert(u32(VilKeyV) == u32(swa_key_v));
+	static_assert(u32(VilKeyZ) == u32(swa_key_z));
+	static_assert(u32(VilKeyY) == u32(swa_key_y));
+	static_assert(u32(VilKeyEnter) == u32(swa_key_enter));
+	static_assert(u32(VilKeyTab) == u32(swa_key_tab));
+	static_assert(u32(VilKeyLeft) == u32(swa_key_left));
+	static_assert(u32(VilKeyRight) == u32(swa_key_right));
+	static_assert(u32(VilKeyDown) == u32(swa_key_down));
+	static_assert(u32(VilKeyUp) == u32(swa_key_up));
+	static_assert(u32(VilKeySpace) == u32(swa_key_space));
+	static_assert(u32(VilKeyBackspace) == u32(swa_key_backspace));
+	static_assert(u32(VilKeyPageUp) == u32(swa_key_pageup));
+	static_assert(u32(VilKeyPageDown) == u32(swa_key_pagedown));
+	static_assert(u32(VilKeyHome) == u32(swa_key_home));
+	static_assert(u32(VilKeyEnd) == u32(swa_key_end));
+	static_assert(u32(VilKeyInsert) == u32(swa_key_insert));
+	static_assert(u32(VilKeyBackslash) == u32(swa_key_backslash));
+#endif // VIL_WITH_SWA
 
 extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevice vkDevice) {
 	auto& dev = getDeviceByLoader(vkDevice);
@@ -62,9 +65,11 @@ extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevic
 	}
 
 	// When the application creates an overlay, we can close the window
+#ifdef VIL_WITH_SWA
 	if(dev.window) {
 		dev.window.reset();
 	}
+#endif // VIL_WITH_SWA
 
 	return ret;
 }
@@ -112,7 +117,7 @@ extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum VilKey ke
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 
 	// TODO; remove hardcoded toggle.
-	if(swa_key(keycode) == swa_key_backslash && pressed) {
+	if(keycode == VilKeyBackslash && pressed) {
 		ov.gui.visible ^= true;
 		return true;
 	}

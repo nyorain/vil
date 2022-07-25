@@ -4,7 +4,6 @@
 #include <util/vec.hpp>
 #include <util/quaternion.hpp>
 #include <util/transform.hpp>
-#include <swa/swa.h> // only needed for key defs
 
 // Taken from tkn/camera
 

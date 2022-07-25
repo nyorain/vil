@@ -497,7 +497,7 @@ struct TreeParser {
 			}
 			parseValueDecl(*member, sdst->members[i], offset);
 
-			auto& type = *sdst->members.back().type;
+			auto& type = *sdst->members[i].type;
 			if(!type.array.empty() && type.array.front() == 0u) {
 				runtimeArray = true;
 			}

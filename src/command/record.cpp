@@ -72,34 +72,41 @@ CommandRecord::~CommandRecord() {
 	{
 		std::lock_guard lock(dev->mutex);
 
-		// remove record from all referenced resources
-		for(auto& [handle, uh] : handles) {
-			if(invalidated.find(handle) != invalidated.end()) {
-				continue;
-			}
+		{
+			ZoneScopedN("unregister");
 
-			if(uh->next == uh && uh->prev == uh) {
-				// descriptor set, nothing to do
-				continue;
-			}
+			// remove record from all referenced resources
+			for(auto& [handle, uh] : handles) {
+				if(invalidated.find(handle) != invalidated.end()) {
+					continue;
+				}
 
-			dlg_assert(handle->refRecords);
-			if(uh->prev) {
-				uh->prev->next = uh->next;
-			} else {
-				dlg_assert(uh == handle->refRecords);
-				handle->refRecords = uh->next;
-			}
+				if(uh->next == uh && uh->prev == uh) {
+					// descriptor set, nothing to do
+					continue;
+				}
 
-			if(uh->next) {
-				uh->next->prev = uh->prev;
+				dlg_assert(handle->refRecords);
+				if(uh->prev) {
+					uh->prev->next = uh->next;
+				} else {
+					dlg_assert(uh == handle->refRecords);
+					handle->refRecords = uh->next;
+				}
+
+				if(uh->next) {
+					uh->next->prev = uh->prev;
+				}
 			}
 		}
 
 		// Its destructor might reference this.
 		// And it must be called while mutex is locked.
 		// TODO: don't require that
-		hookRecords.clear();
+		{
+			ZoneScopedN("clear hookRecords");
+			hookRecords.clear();
+		}
 
 		dlg_assert(DebugStats::get().aliveRecords > 0);
 		--DebugStats::get().aliveRecords;

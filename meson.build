@@ -19,6 +19,8 @@ project('VIL', ['c', 'cpp'],
 # Options
 
 with_tracy = get_option('tracy')
+with_window = get_option('window')
+with_example = get_option('example')
 is_release = (get_option('buildtype') == 'release')
 
 profiling = with_tracy
@@ -133,14 +135,6 @@ endif
 
 # deps
 dep_threads = dependency('threads', required: false)
-dep_swa = dependency('swa',
-	fallback: ['swa', 'swa_dep'],
-	static: true,
-	default_options: [
-		'with-gl=disabled',
-		'link-vulkan=false',
-		'with-kms=disabled'
-	])
 
 dep_dlg = dependency('dlg',
 	static: true,
@@ -179,7 +173,6 @@ src = files(
 	# own meta sources & util
 	'src/layer.cpp',
 	'src/data.cpp',
-	'src/window.cpp',
 	'src/api.cpp',
 	'src/overlay.cpp',
 	'src/platform.cpp',
@@ -254,7 +247,6 @@ src = files(
 	'src/pipe.hpp',
 	'src/shader.hpp',
 	'src/ds.hpp',
-	'src/window.hpp',
 	'src/overlay.hpp',
 	'src/queue.hpp',
 	'src/platform.hpp',
@@ -334,6 +326,50 @@ src = files(
 	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
 
+public_inc = include_directories('include/')
+private_inc = include_directories('src/')
+
+inc = [
+	public_inc,
+	private_inc,
+	shader_inc,
+]
+
+deps = [
+	dep_threads,
+	dep_dlg,
+	tracy_deps,
+]
+
+
+dep_swa = []
+# TODO: add extra option whether to enable overlay on win32
+# also, even with overlay, we shouldn't pull swa as dependency.
+# shold probably just copy the key_to_winapi function
+if with_window or with_x11_hook or with_win32 or with_example
+	dep_swa = dependency('swa',
+		fallback: ['swa', 'swa_dep'],
+		static: true,
+		default_options: [
+			'with-gl=disabled',
+			'link-vulkan=false',
+			'with-kms=disabled'
+		])
+
+	if with_window or with_x11_hook or with_win32
+		deps += dep_swa
+		src += files(
+			'src/window.cpp',
+			'src/swaPlatform.cpp',
+
+			'src/window.hpp',
+			'src/swaPlatform.hpp',
+		)
+
+		layer_args += '-DVIL_WITH_SWA=1'
+	endif
+endif
+
 with_unit_tests = get_option('unit-tests')
 if with_unit_tests
 	src += files(
@@ -357,24 +393,8 @@ if with_integration_tests
 	)
 endif
 
-public_inc = include_directories('include/')
-private_inc = include_directories('src/')
-
-inc = [
-	public_inc,
-	private_inc,
-	shader_inc,
-]
-
-deps = [
-	dep_threads,
-	dep_dlg,
-	dep_swa,
-	tracy_deps,
-]
-
 # TODO, wip, just for testing backtraces
-if not with_win32
+if not with_win32 and get_option('libdw')
 	dep_dw = dependency('libdw', required: false)
 	if dep_dw.found()
 		deps += dep_dw
@@ -436,7 +456,12 @@ lib_spvm = static_library(
 	]),
 )
 
-link_args = []
+link_args = [
+	# statically link the standard library, where supported
+	# might get conflicts with the one loaded by the application otherwise
+	'-static-libstdc++',
+]
+
 if get_option('b_coverage')
 	link_args += ['--coverage']
 endif
@@ -450,7 +475,7 @@ vil_layer = shared_library(
 	link_whole: lib_spvm,
 	cpp_args: args + layer_args,
 	c_args: args,
-	link_args: link_args,
+	link_args: cc.get_supported_link_arguments(link_args),
 	install: true,
 	cpp_pch: pch,
 )
@@ -492,7 +517,7 @@ if build_machine.system() == 'windows'
 	)
 endif
 
-if get_option('example')
+if with_example
 	subdir('docs/example')
 endif
 

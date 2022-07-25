@@ -4,7 +4,6 @@
 #include <layer.hpp>
 #include <data.hpp>
 #include <swapchain.hpp>
-#include <window.hpp>
 #include <handles.hpp>
 #include <overlay.hpp>
 #include <accelStruct.hpp>
@@ -12,8 +11,14 @@
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/hook.hpp>
-#include <swa/swa.h>
 #include <vk/dispatch_table_helper.h>
+
+#ifdef VIL_WITH_SWA
+	#include <swa/swa.h>
+	#include <window.hpp>
+#else
+	namespace vil { struct DisplayWindow {}; }
+#endif // VIL_WITH_SWA
 
 namespace vil {
 
@@ -23,22 +28,6 @@ DebugStats& DebugStats::get() {
 }
 
 // util
-Gui* getWindowGui(Device& dev) {
-	if(dev.window) {
-		return &dev.window->gui;
-	}
-
-	return nullptr;
-}
-
-Gui* getOverlayGui(Swapchain& swapchain) {
-	if(swapchain.overlay) {
-		return &swapchain.overlay->gui;
-	}
-
-	return nullptr;
-}
-
 bool hasAppExt(Device& dev, const char* extName) {
 	auto it = find(dev.appExts, extName);
 	return (it != dev.appExts.end());
@@ -176,6 +165,7 @@ bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
 	return false;
 }
 
+#ifdef VIL_WITH_SWA
 std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		std::vector<const char*>& devExts,
 		std::vector<VkDeviceQueueCreateInfo>& queueCreateInfos,
@@ -280,6 +270,7 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 
 	return window;
 }
+#endif // VIL_WITH_SWA
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
@@ -386,12 +377,16 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
 	std::vector<const char*> newExts = {extsBegin, extsEnd};
 
+
+	std::unique_ptr<DisplayWindow> window;
+#ifdef VIL_WITH_SWA
 	// Make sure we get a queue that can potentially display to our
 	// window. To check that, we first have to create a window though.
 	u32 presentQueueInfoID = u32(-1);
-	auto window = tryCreateWindow(ini, newExts, queueCreateInfos,
+	window = tryCreateWindow(ini, newExts, queueCreateInfos,
 		fpGetInstanceProcAddr, phdev, nqf, presentQueueInfoID,
 		supportedExts);
+#endif // VIL_WITH_SWA
 
 	// = Enabled features =
 	// We try to additionally enable a couple of features/exts we need:
@@ -770,11 +765,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 				dev.gfxQueue = &q;
 			}
 
+#ifdef VIL_WITH_SWA
 			if(i == presentQueueInfoID && j == 0u) {
 				dlg_assert(window);
 				dlg_assert(!window->presentQueue);
 				window->presentQueue = &q;
 			}
+#endif // VIL_WITH_SWA
 
 			if(dev.timelineSemaphores) {
 				VkSemaphoreCreateInfo sci {};
@@ -871,11 +868,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	dev.commandHook = std::make_unique<CommandHook>(dev);
 
 	// == window stuff ==
+#ifdef VIL_WITH_SWA
 	if(window) {
 		dlg_assert(window->presentQueue); // should have been set in queue querying
 		dev.window = std::move(window);
 		dev.window->initDevice(dev);
 	}
+#endif // VIL_WITH_SWA
 
 	// Make sure we can recognize the VkDevice even when it comes from
 	// the application directly (and is potentially wrapped by other
@@ -927,6 +926,7 @@ void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type) {
 }
 
 void notifyDestruction(Device& dev, Handle& handle, VkObjectType type) {
+	ExtZoneScoped;
 	std::lock_guard lock(dev.mutex);
 	notifyDestructionLocked(dev, handle, type);
 }

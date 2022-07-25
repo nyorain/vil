@@ -25,7 +25,7 @@ PipelineLayout::~PipelineLayout() {
 	dlg_assert(!refRecords);
 	dlg_assert(handle);
 
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_PIPELINE);
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_PIPELINE_LAYOUT);
 
 	dev->dispatch.DestroyPipelineLayout(dev->handle, handle, nullptr);
 }

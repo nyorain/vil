@@ -35,9 +35,9 @@ struct QueueSubmitter {
 	SubmissionBatch* dstBatch;
 	u64 globalSubmitID; // dev.submissionCounter
 
-	// Will be set to the queueSubmitID of the last submission that
+	// Will be set to the local submission id of the last submission that
 	// contains a command buffer hooked by us.
-	std::optional<u64> lastLayerSubmission {};
+	std::optional<Submission*> lastLayerSubmission {};
 
 	// When we don't have timeline semaphores, we remember the gui draw we
 	// used for gui synchronization so we can reset futureSemaphoreUsed
@@ -47,6 +47,7 @@ struct QueueSubmitter {
 
 void process(QueueSubmitter&, span<const VkSubmitInfo>);
 void cleanupOnError(QueueSubmitter& subm);
+void addSubmissionSyncLocked(QueueSubmitter& subm);
 void addGuiSyncLocked(QueueSubmitter&);
 void addFullSyncLocked(QueueSubmitter&);
 void postProcessLocked(QueueSubmitter&);

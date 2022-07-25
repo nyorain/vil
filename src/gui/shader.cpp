@@ -17,6 +17,7 @@
 #include <spvm/types.h>
 #include <spvm/ext/GLSL450.h>
 #include <vk/format_utils.h>
+#include <vil_api.h>
 
 namespace vil {
 
@@ -40,10 +41,14 @@ void ShaderDebugger::init(Gui& gui) {
 	this->gui_ = &gui;
 	spvm_.context = spvm_context_initialize();
 
-	// TODO: why does this break for games using tcmalloc? tested
-	// on linux with dota
-	// const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
-	// textedit_.SetLanguageDefinition(lang);
+	// TODO: use own lang definition instead of just GLSL. We support
+	// hlsl keywords, for instance.
+	// Also make sure to use a more efficient lang def, e.g.
+	// the Lua/C/CPP defs don't use regex and are way better.
+	// Then we wouldn't have to trust that random regex library
+	// we are using in there...
+	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	textedit_.SetLanguageDefinition(lang);
 
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
@@ -342,11 +347,12 @@ void ShaderDebugger::draw() {
 		auto ctrl = io.ConfigMacOSXBehaviors ? io.KeySuper : io.KeyCtrl;
 		auto alt = io.ConfigMacOSXBehaviors ? io.KeyCtrl : io.KeyAlt;
 
+		auto breakKey = VilKeyD; // TODO
 		if(textedit_.mFocused && !f9Down_ && (
-				(!shift && !ctrl && !alt && ImGui::IsKeyDown(swa_key_f9)))) {
+				(!shift && !ctrl && !alt && ImGui::IsKeyDown(breakKey)))) {
 			f9Down_ = true;
 			toggleBreakpoint();
-		} else if(!ImGui::IsKeyDown(swa_key_f9)) {
+		} else if(!ImGui::IsKeyDown(breakKey)) {
 			f9Down_ = false;
 		}
 	}

@@ -267,9 +267,6 @@ struct Device {
 	~Device();
 };
 
-Gui* getWindowGui(Device& dev);
-Gui* getOverlayGui(Swapchain& swapchain);
-
 // Does not expect mutex to be locked
 void notifyDestruction(Device& dev, Handle& handle, VkObjectType type);
 void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type);

@@ -30,9 +30,16 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <map>
-#include <regex>
 #include <optional>
 #include "imgui.h"
+
+namespace srell {
+
+template <class charT> struct regex_traits;
+template <class charT, class traits> class basic_regex;
+typedef basic_regex<char, regex_traits<char>> regex;
+
+}
 
 namespace igt {
 
@@ -286,7 +293,7 @@ public:
 	static const Palette& GetRetroBluePalette();
 
 private:
-	typedef std::vector<std::pair<std::regex, PaletteIndex>> RegexList;
+	typedef std::vector<std::pair<srell::regex, PaletteIndex>> RegexList;
 
 	struct EditorState
 	{

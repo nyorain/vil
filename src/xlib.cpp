@@ -4,7 +4,7 @@
 #include <swa/swa.h>
 #include <gui/gui.hpp>
 #include <overlay.hpp>
-#include <platform.hpp>
+#include <swaPlatform.hpp>
 #include <swa/x11.h>
 
 #include <X11/keysym.h>

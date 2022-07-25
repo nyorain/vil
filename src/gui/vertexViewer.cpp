@@ -17,6 +17,7 @@
 #include <vk/format_utils.h>
 #include <vk/enumString.hpp>
 #include <spirv-cross/spirv_cross.hpp>
+#include <vil_api.h>
 
 #include <frustum.vert.spv.h>
 #include <vertices.vert.spv.h>
@@ -809,12 +810,12 @@ void VertexViewer::updateInput(float dt) {
 		auto fwd = apply(cam_.rot, Vec3f{0.f, 0.f, -1.f});
 		Vec3f accel {};
 
-		constexpr auto moveRight = swa_key_d;
-		constexpr auto moveLeft = swa_key_a;
-		constexpr auto moveFwd = swa_key_w;
-		constexpr auto moveBwd = swa_key_s;
-		constexpr auto moveUp = swa_key_q;
-		constexpr auto moveDown = swa_key_e;
+		constexpr auto moveRight = VilKeyD;
+		constexpr auto moveLeft = VilKeyA;
+		constexpr auto moveFwd = VilKeyW;
+		constexpr auto moveBwd = VilKeyS;
+		constexpr auto moveUp = VilKeyA;
+		constexpr auto moveDown = VilKeyE;
 
 		if(io.KeysDown[moveRight]) {
 			accel += right;

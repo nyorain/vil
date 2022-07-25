@@ -243,6 +243,15 @@ performance/profiling:
 		  due to descriptor sets (something like one async search of all
 		  known records and then a notification callback for new records/ds 
 		  or something)
+	- [ ] otoh it doesn't seem to be anything in particular, most CSs
+	      (except ~CommandRecord) are short. It's just that it's called
+		  at lot in different threads -> sync overhead.
+		  Can we maybe get it completely lockless (or only dependent
+		  on local per-cb lock?)
+		  Maybe it's a HUGE list of pipeline layouts being freed?
+		  Maybe try using a hashSet instead?
+		  maybe it's a lot of secret destructors being called?
+		  That in turn call notifyDestruction of the device?
 - [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
 	  since we should be logically able to get around that
 	  case (with normal API use and no gui open; i.e. the Record should

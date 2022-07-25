@@ -161,6 +161,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		// Maybe we can handle this with a separate gui/submission sync mutex?
 		std::lock_guard devLock(dev.mutex);
 
+		addSubmissionSyncLocked(submitter);
 		if(dev.doFullSync) {
 			addFullSyncLocked(submitter);
 		} else {

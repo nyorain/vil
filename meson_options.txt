@@ -14,7 +14,16 @@ option('unit-tests', type: 'boolean', value: false)
 option('integration-tests', type: 'boolean', value: false)
 
 # whether to build with tracy for profiling
+# will make the layer less lightweight and add potential error points
 option('tracy', type: 'boolean', value: false)
+
+# whether creating a window is supported
+# on linux, if this and x11-hook is false, a lot of dependencies
+# are removed from the layer
+option('window', type: 'boolean', value: true)
+
+# use libdw if possible (only on unix)
+option('libdw', type: 'boolean', value: true)
 
 # whether to use the absolute build path in the layer json
 # useful e.g. to run the integration tests without installing, as we

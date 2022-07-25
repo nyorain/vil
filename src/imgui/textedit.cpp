@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <chrono>
 #include <string>
-#include <regex>
 #include <cmath>
 #include <util/profiling.hpp>
 
@@ -10,10 +9,18 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h" // for imGui::GetCurrentWindow()
 
+// <regex> is broken on gcc.
+// Crashes e.g. with dota.
+// Using some random library found on the internet instead.
+// C++ standardization at it's best *party emoji*
+#include "srell.hpp"
+
 // TODO
 // - multiline comments vs single-line: latter is blocking start of a ML
 
 namespace igt {
+
+namespace rs = srell;
 
 template<class InputIt1, class InputIt2, class BinaryPredicate>
 bool equals(InputIt1 first1, InputIt1 last1,
@@ -67,7 +74,7 @@ void TextEditor::SetLanguageDefinition(const LanguageDefinition & aLanguageDef)
 	mRegexList.clear();
 
 	for (auto& r : mLanguageDefinition.mTokenRegexStrings)
-		mRegexList.push_back(std::make_pair(std::regex(r.first, std::regex_constants::optimize), r.second));
+		mRegexList.push_back(std::make_pair(rs::regex(r.first, rs::regex_constants::optimize), r.second));
 
 	Colorize();
 }
@@ -2164,7 +2171,7 @@ void TextEditor::ColorizeRange(int aFromLine, int aToLine)
 		return;
 
 	std::string buffer;
-	std::cmatch results;
+	rs::cmatch results;
 	std::string id;
 
 	int endLine = std::max(0, std::min((int)mLines.size(), aToLine));
@@ -2209,7 +2216,7 @@ void TextEditor::ColorizeRange(int aFromLine, int aToLine)
 
 				for (auto& p : mRegexList)
 				{
-					if (std::regex_search(first, last, results, p.first, std::regex_constants::match_continuous))
+					if (rs::regex_search(first, last, results, p.first, rs::regex_constants::match_continuous))
 					{
 						hasTokenizeResult = true;
 
@@ -2923,14 +2930,14 @@ const TextEditor::LanguageDefinition& TextEditor::LanguageDefinition::GLSL()
 		}
 
 		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("[ \\t]*#[ \\t]*[a-zA-Z_]+", PaletteIndex::Preprocessor));
-		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("L?\\\"(\\\\.|[^\\\"])*\\\"", PaletteIndex::String));
-		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("\\'\\\\?[^\\']\\'", PaletteIndex::CharLiteral));
+		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("L?\"(\\.|[^\"])*\"", PaletteIndex::String));
+		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("'\\?[^']'", PaletteIndex::CharLiteral));
 		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?[fF]?", PaletteIndex::Number));
 		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("[+-]?[0-9]+[Uu]?[lL]?[lL]?", PaletteIndex::Number));
 		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("0[0-7]+[Uu]?[lL]?[lL]?", PaletteIndex::Number));
 		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("0[xX][0-9a-fA-F]+[uU]?[lL]?[lL]?", PaletteIndex::Number));
 		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("[a-zA-Z_][a-zA-Z0-9_]*", PaletteIndex::Identifier));
-		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("[\\[\\]\\{\\}\\!\\%\\^\\&\\*\\(\\)\\-\\+\\=\\~\\|\\<\\>\\?\\/\\;\\,\\.]", PaletteIndex::Punctuation));
+		langDef.mTokenRegexStrings.push_back(std::make_pair<std::string, PaletteIndex>("[\\[\\]\\{\\}!%\\^&\\*\\(\\)\\-\\+=~\\|<>\\?\\/;,\\.]", PaletteIndex::Punctuation));
 
 		langDef.mCommentStart = "/*";
 		langDef.mCommentEnd = "*/";

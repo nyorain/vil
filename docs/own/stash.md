@@ -642,3 +642,12 @@ We could generate the spirv manually since we don't know a priori
 how many color attachments there are?
 > nah, overkill. We only ever visualize one attachment so only need
   to draw to one attachment!
+
+  ```
+// TODO: Xlib, trying to immitate the winapi terribleness.
+// Should be fixed more globally.
+#ifdef Status
+	#undef Status
+#endif
+
+  ```

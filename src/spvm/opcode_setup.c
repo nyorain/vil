@@ -417,25 +417,42 @@ void spvm_setup_OpAccessChain(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	spvm_word value_id = SPVM_READ_WORD(state->code_current);
 
-	state->results[id].type = spvm_result_type_access_chain;
-	state->results[id].pointer = var_type;
-	state->results[id].storage_class = state->results[value_id].storage_class;
-	state->results[id].source_location = source_pointer;
-	state->results[id].source_word_count = word_count;
-	state->results[id].access_chain_ref = value_id;
+	spvm_result* dst = &state->results[id];
+	dst->type = spvm_result_type_access_chain;
+	dst->pointer = var_type;
+	dst->storage_class = state->results[value_id].storage_class;
+	dst->source_location = source_pointer;
+	dst->source_word_count = word_count;
+	dst->access_chain_ref = value_id;
 
 	spvm_result* src = &state->results[value_id];
 
 	if(state->load_variable && state->store_variable &&
 			spvm_use_access_callback(src->type, src->storage_class)) {
-		if(src->type == spvm_result_type_variable) {
-			spvm_word index_count = word_count - 3;
 
-			state->results[id].index_count = index_count;
-			state->results[id].indices = calloc(sizeof(spvm_word), index_count);;
+		if(src->type == spvm_result_type_variable) {
+			dst->index_count = word_count - 3;;
+			dst->indices = calloc(sizeof(spvm_word), src->index_count);
+
+			for(spvm_word i = 0; i < dst->index_count; ++i) {
+				spvm_word index_id = SPVM_READ_WORD(state->code_current);
+				spvm_word index = state->results[index_id].members[0].value.s;
+				dst->indices[i] = index;
+			}
+		} else if(src->type == spvm_result_type_access_chain) {
+			dst->access_chain_ref = value_id;
+
+			spvm_word local_index_count = word_count - 3;
+			dst->index_count = local_index_count + state->results[id].index_count;
+			dst->indices = calloc(sizeof(spvm_word), dst->index_count);
+			memcpy(dst->indices, src->indices, src->index_count * sizeof(src->indices[0]));
+
+			for(spvm_word i = 0; i < local_index_count; ++i) {
+				spvm_word index_id = SPVM_READ_WORD(state->code_current);
+				spvm_word index = state->results[index_id].members[0].value.s;
+				dst->indices[src->index_count + i] = index;
+			}
 		} else {
-			// TODO: handle case where results[value_id] is another access chain.
-			// Just append the indices?
 			assert(!"Unimplemented");
 		}
 	}

@@ -48,6 +48,7 @@ typedef struct VilOverlayT* VilOverlay;
 // All keys that are handled by vil.
 // Derived from linux/input-event-codes.h
 enum VilKey {
+	VilKeyEscape = 1,
 	VilKeyTab = 15,
 	VilKeyLeft = 105,
 	VilKeyRight = 106,
@@ -65,10 +66,16 @@ enum VilKey {
 	VilKeyPadEnter = 96,
 	VilKeyA = 30,
 	VilKeyC = 46,
+	VilKeyD = 32,
+	VilKeyE = 18,
+	VilKeyQ = 16,
 	VilKeyV = 47,
+	VilKeyS = 31,
+	VilKeyW = 17,
 	VilKeyX = 45,
 	VilKeyY = 21,
 	VilKeyZ = 44,
+	VilKeyBackslash = 43,
 };
 
 enum VilKeyMod {

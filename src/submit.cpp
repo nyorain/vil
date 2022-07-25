@@ -41,7 +41,7 @@ VkCommandBuffer processCB(QueueSubmitter& subm, Submission& dst, VkCommandBuffer
 			auto hooked = dev.commandHook->hook(cb, dst, scb.hook);
 			dlg_assert(hooked);
 			if(hooked != cb.handle()) {
-				subm.lastLayerSubmission = dst.queueSubmitID;
+				subm.lastLayerSubmission = &dst;
 			}
 
 			return hooked;
@@ -147,11 +147,6 @@ void process(QueueSubmitter& subm, VkSubmitInfo& si) {
 	dst.parent = subm.dstBatch;
 
 	// id
-	{
-		auto lock = std::lock_guard(dev.mutex);
-		dst.queueSubmitID = ++subm.queue->submissionCounter;
-	}
-
 	for(auto j = 0u; j < si.signalSemaphoreCount; ++j) {
 		auto& sem = dev.semaphores.get(si.pSignalSemaphores[j]);
 		dst.signalSemaphores.push_back(&sem);
@@ -162,61 +157,11 @@ void process(QueueSubmitter& subm, VkSubmitInfo& si) {
 		cbs[j] = processCB(subm, dst, si.pCommandBuffers[j]);
 	}
 
-	// For wait & present semaphores: if we have timeline semaphores
-	// and application added a timeline semaphore submission info to
-	// pNext, we have to hook that instead of adding our own.
-	VkTimelineSemaphoreSubmitInfo* tsInfo = nullptr;
-	if(dev.timelineSemaphores) {
-		if(hasChain(si, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)) {
-			si.pNext = copyChainLocal(subm.memScope, si.pNext);
-			tsInfo = const_cast<VkTimelineSemaphoreSubmitInfo*>(findChainInfo<
-				VkTimelineSemaphoreSubmitInfo,
-				VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO>(si));
-			dlg_assert(tsInfo);
-		} else {
-			tsInfo = subm.memScope.allocRaw<VkTimelineSemaphoreSubmitInfo>();
-			*tsInfo = {};
-			tsInfo->sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-			tsInfo->pNext = si.pNext;
-			si.pNext = tsInfo;
-		}
-	}
-
 	// = wait semaphores =
 	for(auto j = 0u; j < si.waitSemaphoreCount; ++j) {
 		auto& semaphore = dev.semaphores.get(si.pWaitSemaphores[j]);
 		dst.waitSemaphores.emplace_back(&semaphore, si.pWaitDstStageMask[j]);
 	}
-
-	// = signal semaphores =
-	auto signalSems = subm.memScope.alloc<VkSemaphore>(si.signalSemaphoreCount + 1);
-	std::copy_n(si.pSignalSemaphores, si.signalSemaphoreCount, signalSems.begin());
-
-	dlg_assert(bool(tsInfo) == dev.timelineSemaphores);
-	if(tsInfo) {
-		// tsInfo->signalSemaphoreValueCount may be smaller than si.signalSemaphoreCount
-		// but then values in between are simply ignored.
-		dlg_assert(tsInfo->signalSemaphoreValueCount <= si.signalSemaphoreCount);
-		auto signalVals = subm.memScope.alloc<u64>(si.signalSemaphoreCount + 1);
-		std::copy_n(tsInfo->pSignalSemaphoreValues, tsInfo->signalSemaphoreValueCount,
-			signalVals.begin());
-
-		signalSems.back() = subm.queue->submissionSemaphore;
-		signalVals.back() = dst.queueSubmitID;
-
-		dlg_assert(signalVals.size() == signalSems.size());
-		tsInfo->signalSemaphoreValueCount = u32(signalVals.size());
-		tsInfo->pSignalSemaphoreValues = signalVals.data();
-	} else {
-		// We need to add a semaphore for device synchronization.
-		// We might wanna read from resources that are potentially written
-		// by this submission in the future, we need to be able to gpu-sync them.
-		dst.ourSemaphore = getSemaphoreFromPool(dev);
-		signalSems.back() = dst.ourSemaphore;
-	}
-
-	si.signalSemaphoreCount = u32(signalSems.size());
-	si.pSignalSemaphores = signalSems.data();
 
 	si.commandBufferCount = u32(cbs.size());
 	si.pCommandBuffers = cbs.data();
@@ -229,6 +174,65 @@ void process(QueueSubmitter& subm, span<const VkSubmitInfo> infos) {
 	for(auto i = 0u; i < infos.size(); ++i) {
 		subm.submitInfos[off + i] = infos[i];
 		process(subm, subm.submitInfos[off + i]);
+	}
+}
+
+void addSubmissionSyncLocked(QueueSubmitter& subm) {
+	assertOwned(subm.dev->mutex);
+
+	for(auto [i, si] : enumerate(subm.submitInfos)) {
+		auto& dst = subm.dstBatch->submissions[i];
+		dst.queueSubmitID = ++subm.queue->submissionCounter;
+
+		// For wait & present semaphores: if we have timeline semaphores
+		// and application added a timeline semaphore submission info to
+		// pNext, we have to hook that instead of adding our own.
+		VkTimelineSemaphoreSubmitInfo* tsInfo = nullptr;
+		if(subm.dev->timelineSemaphores) {
+			if(hasChain(si, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)) {
+				si.pNext = copyChainLocal(subm.memScope, si.pNext);
+				tsInfo = const_cast<VkTimelineSemaphoreSubmitInfo*>(findChainInfo<
+					VkTimelineSemaphoreSubmitInfo,
+					VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO>(si));
+				dlg_assert(tsInfo);
+			} else {
+				tsInfo = subm.memScope.allocRaw<VkTimelineSemaphoreSubmitInfo>();
+				*tsInfo = {};
+				tsInfo->sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+				tsInfo->pNext = si.pNext;
+				si.pNext = tsInfo;
+			}
+		}
+
+		// = signal semaphores =
+		auto signalSems = subm.memScope.alloc<VkSemaphore>(si.signalSemaphoreCount + 1);
+		std::copy_n(si.pSignalSemaphores, si.signalSemaphoreCount, signalSems.begin());
+
+		dlg_assert(bool(tsInfo) == subm.dev->timelineSemaphores);
+		if(tsInfo) {
+			// tsInfo->signalSemaphoreValueCount may be smaller than si.signalSemaphoreCount
+			// but then values in between are simply ignored.
+			dlg_assert(tsInfo->signalSemaphoreValueCount <= si.signalSemaphoreCount);
+			auto signalVals = subm.memScope.alloc<u64>(si.signalSemaphoreCount + 1);
+			std::copy_n(tsInfo->pSignalSemaphoreValues, tsInfo->signalSemaphoreValueCount,
+				signalVals.begin());
+
+			signalSems.back() = subm.queue->submissionSemaphore;
+			signalVals.back() = dst.queueSubmitID;
+
+			dlg_assert(signalVals.size() == signalSems.size());
+			tsInfo->signalSemaphoreValueCount = u32(signalVals.size());
+			tsInfo->pSignalSemaphoreValues = signalVals.data();
+		} else {
+			// We need to add a semaphore for device synchronization.
+			// We might wanna read from resources that are potentially written
+			// by this submission in the future, we need to be able to gpu-sync them.
+			dst.ourSemaphore = getSemaphoreFromPoolLocked(*subm.dev);
+			signalSems.back() = dst.ourSemaphore;
+		}
+
+		si.signalSemaphoreCount = u32(signalSems.size());
+		si.pSignalSemaphores = signalSems.data();
 	}
 }
 
@@ -491,7 +495,7 @@ void postProcessLocked(QueueSubmitter& subm) {
 	}
 
 	if(subm.lastLayerSubmission) {
-		subm.queue->lastLayerSubmission = *subm.lastLayerSubmission;
+		subm.queue->lastLayerSubmission = (*subm.lastLayerSubmission)->queueSubmitID;
 	}
 }
 

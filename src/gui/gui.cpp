@@ -20,7 +20,7 @@
 #include <util/vecOps.hpp>
 #include <util/profiling.hpp>
 
-#include <swa/key.h>
+#include <vil_api.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/enumString.hpp>
@@ -250,22 +250,22 @@ void Gui::initImGui() {
 	this->io_->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
 	auto& io = *this->io_;
-	io.KeyMap[ImGuiKey_A] = swa_key_a;
-	io.KeyMap[ImGuiKey_C] = swa_key_c;
-	io.KeyMap[ImGuiKey_V] = swa_key_v;
-	io.KeyMap[ImGuiKey_X] = swa_key_x;
-	io.KeyMap[ImGuiKey_Y] = swa_key_y;
-	io.KeyMap[ImGuiKey_Z] = swa_key_z;
-	io.KeyMap[ImGuiKey_Enter] = swa_key_enter;
-	io.KeyMap[ImGuiKey_Delete] = swa_key_del;
-	io.KeyMap[ImGuiKey_Space] = swa_key_space;
-	io.KeyMap[ImGuiKey_LeftArrow] = swa_key_left;
-	io.KeyMap[ImGuiKey_DownArrow] = swa_key_down;
-	io.KeyMap[ImGuiKey_RightArrow] = swa_key_right;
-	io.KeyMap[ImGuiKey_UpArrow] = swa_key_up;
-	io.KeyMap[ImGuiKey_Escape] = swa_key_escape;
-	io.KeyMap[ImGuiKey_Tab] = swa_key_tab;
-	io.KeyMap[ImGuiKey_Backspace] = swa_key_backspace;
+	io.KeyMap[ImGuiKey_A] = VilKeyA;
+	io.KeyMap[ImGuiKey_C] = VilKeyC;
+	io.KeyMap[ImGuiKey_V] = VilKeyV;
+	io.KeyMap[ImGuiKey_X] = VilKeyX;
+	io.KeyMap[ImGuiKey_Y] = VilKeyY;
+	io.KeyMap[ImGuiKey_Z] = VilKeyZ;
+	io.KeyMap[ImGuiKey_Enter] = VilKeyEnter;
+	io.KeyMap[ImGuiKey_Delete] = VilKeyDelete;
+	io.KeyMap[ImGuiKey_Space] = VilKeySpace;
+	io.KeyMap[ImGuiKey_LeftArrow] = VilKeyLeft;
+	io.KeyMap[ImGuiKey_DownArrow] = VilKeyDown;
+	io.KeyMap[ImGuiKey_RightArrow] = VilKeyRight;
+	io.KeyMap[ImGuiKey_UpArrow] = VilKeyUp;
+	io.KeyMap[ImGuiKey_Escape] = VilKeyEscape;
+	io.KeyMap[ImGuiKey_Tab] = VilKeyTab;
+	io.KeyMap[ImGuiKey_Backspace] = VilKeyBackspace;
 
 	static const ImWchar rangesBasic[] = {
 		0x0020, 0x00FF, // Basic Latin + Latin Supplement
