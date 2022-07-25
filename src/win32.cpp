@@ -1,4 +1,5 @@
 #include <win32.hpp>
+#include <swaPlatform.hpp>
 #include <gui/gui.hpp>
 #include <vk/vulkan.h>
 #include <device.hpp>
@@ -597,7 +598,7 @@ void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
 	cv.wait(lock);
 
 	Win32Platform::instance_ = this;
-	
+
 	if (auto ptr = InputHooks::instance_.lock()) {
 		this->hooks = std::move(ptr);
 	} else {
