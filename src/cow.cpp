@@ -33,6 +33,7 @@ VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect) {
 		case VK_FORMAT_D32_SFLOAT:
 			return VK_FORMAT_R32_SFLOAT;
 		case VK_FORMAT_D24_UNORM_S8_UINT:
+		case VK_FORMAT_D32_SFLOAT_S8_UINT:
 			dlg_assert(aspect == VK_IMAGE_ASPECT_DEPTH_BIT ||
 				aspect == VK_IMAGE_ASPECT_STENCIL_BIT);
 			return aspect == VK_IMAGE_ASPECT_DEPTH_BIT ?
@@ -44,6 +45,11 @@ VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect) {
 				VK_FORMAT_R16_UNORM : VK_FORMAT_R8_UINT;
 		case VK_FORMAT_S8_UINT:
 			return VK_FORMAT_R8_UINT;
+		// TODO: just implement in readFormat
+		case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+			return VK_FORMAT_R16G16B16A16_UNORM;
+		case VK_FORMAT_A2B10G10R10_SNORM_PACK32:
+			return VK_FORMAT_R16G16B16A16_SNORM;
 		default:
 			break;
 	}
@@ -145,6 +151,10 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	// NOTE: even though using host visible memory would make some operations
 	//   eaiser (such as showing a specific texel value in gui), the guarantees
 	//   vulkan gives for support of linear images are quite small.
+	//   And on device with dgpu (which are probably our main target,
+	//   at least what i'm interested in mainly), using host visible here
+	//   means transfering all the data from gpu to cpu which would
+	//   have a significant overhead.
 	auto memBits = memReqs.memoryTypeBits & dev.deviceLocalMemTypeBits;
 	allocInfo.memoryTypeIndex = findLSB(memBits);
 	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &memory));

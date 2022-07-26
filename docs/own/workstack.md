@@ -3,6 +3,22 @@
 - [ ] investigate 255-overflow-like bug in shader debugger when
       resizing
 - [ ] fix bad vk::name impls. E.g. for DescriptorSetLayout, the stages
+- [ ] cleanup imageToBuffer implementation
+	- [ ] for most formats (that we can read on cpu) we probably just 
+	      want CmdCopyImageToBuffer
+	- [ ] some formats can't be easily read on cpu. We want support on the
+	      long term but there are probably always commands that won't
+		  easily allow it, e.g. ASTC. For them, try 
+		  (1) blit to a format with at least that precision, if feature flags allow
+		  (2) write into a texel buffer with at least that precision
+		      need storageImageWithoutFormat device feature and the format
+			  feature flag
+			  In case storageImageWithoutFormat isn't supported, we
+			  could have a couple of default target formats that are
+			  guaranteed to be supported 
+			  (e.g. rgba8unorm, rgba16Sfloat, rgba32Sflot, r32Uint etc)
+		  (3) if nothing else works, fall back to our old terrible
+		       copy to vec4[]-storage buffer solution?
 - [ ] submission chaining rework, allowing cows
 - [ ] rework command hook to issue cow objects and resolve them
      correctly when needed.
@@ -10,6 +26,10 @@
 	      so we don't need to access the original resources when
 		  processing it, e.g. in the shader debugger.
 		  See the todo there
+- [ ] shader debugger: try out not downloading whole resources but
+      submit-copy-op-on-demand. Needed when we fully want to leverage
+	  cows there (important for shaders that bind a shitton of resources,
+	  e.g. bindless)
 - [ ] full commandbuffer/record timings.
 	- [ ] for this we need proper prefix-matching support in CommandHook. WIP
 	- [ ] also full batch timings?

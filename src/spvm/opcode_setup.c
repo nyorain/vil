@@ -431,27 +431,14 @@ void spvm_setup_OpAccessChain(spvm_word word_count, spvm_state_t state)
 			spvm_use_access_callback(src->type, src->storage_class)) {
 
 		if(src->type == spvm_result_type_variable) {
-			dst->index_count = word_count - 3;;
-			dst->indices = calloc(sizeof(spvm_word), src->index_count);
-
-			for(spvm_word i = 0; i < dst->index_count; ++i) {
-				spvm_word index_id = SPVM_READ_WORD(state->code_current);
-				spvm_word index = state->results[index_id].members[0].value.s;
-				dst->indices[i] = index;
-			}
+			dst->index_count = word_count - 3;
+			dst->indices = calloc(sizeof(spvm_word), dst->index_count);
 		} else if(src->type == spvm_result_type_access_chain) {
-			dst->access_chain_ref = value_id;
+			dst->access_chain_ref = src->access_chain_ref;
 
 			spvm_word local_index_count = word_count - 3;
-			dst->index_count = local_index_count + state->results[id].index_count;
+			dst->index_count = local_index_count + src->index_count;
 			dst->indices = calloc(sizeof(spvm_word), dst->index_count);
-			memcpy(dst->indices, src->indices, src->index_count * sizeof(src->indices[0]));
-
-			for(spvm_word i = 0; i < local_index_count; ++i) {
-				spvm_word index_id = SPVM_READ_WORD(state->code_current);
-				spvm_word index = state->results[index_id].members[0].value.s;
-				dst->indices[src->index_count + i] = index;
-			}
 		} else {
 			assert(!"Unimplemented");
 		}

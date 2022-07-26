@@ -517,30 +517,18 @@ bool Win32Platform::doUpdate() {
 	}
 
 	if(state != State::hidden) {
-		// TODO: don't ever do this, just make sure to show the hardware cursor instead
-		auto drawCursor = true;
+		gui->imguiIO().MouseDrawCursor = false;
 
-		// when the overlay is focused and the application does not show a
-		// cursor, we show our own software cursor.
-		// TODO: don't need raw input if application is showing cursor...
-		if(state == State::focused) {
-			// drawCursor = !cursorShown();
-		}
+		// TODO: error handling
+		// TODO: could use the mouse hook instead (but make sure to
+		//  only enable that when the cursor isn't shown as otherwise we must
+		//  rely on raw input and it will mess with that).
+		POINT pos;
+		hooks->GetCursorPos.forward(&pos);
+		ScreenToClient(surfaceWindow, &pos);
 
-		gui->imguiIO().MouseDrawCursor = drawCursor;
-
-		if(!drawCursor) {
-			// TODO: error handling
-			// TODO: could use the mouse hook instead (but make sure to
-			//  only enable that when the cursor isn't shown as otherwise we must
-			//  rely on raw input and it will mess with that).
-			POINT pos;
-			hooks->GetCursorPos.forward(&pos);
-			ScreenToClient(surfaceWindow, &pos);
-
-			gui->imguiIO().MousePos.x = pos.x;
-			gui->imguiIO().MousePos.y = pos.y;
-		}
+		gui->imguiIO().MousePos.x = pos.x;
+		gui->imguiIO().MousePos.y = pos.y;
 
 		// Read keyboard modifiers inputs
 		gui->imguiIO().KeyCtrl = (hooks->GetKeyState.forward(VK_CONTROL) & 0x8000) != 0;

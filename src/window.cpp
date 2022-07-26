@@ -493,7 +493,10 @@ void DisplayWindow::uiThread() {
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
 		if(res == VK_SUBOPTIMAL_KHR) {
 			dlg_info("Got suboptimal swapchain (acquire)");
-			continue;
+			// don't continue here, acquiring was still successful,
+			// this is only a warning. We must present and wait on
+			// the semaphore
+			// continue;
 		} else if(res == VK_ERROR_OUT_OF_DATE_KHR) {
 			dlg_warn("Got out of date swapchain (acquire)");
 			continue;

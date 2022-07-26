@@ -164,7 +164,6 @@ void spvm_result_delete(spvm_result_t res)
 	if (res->image_info)
 		free(res->image_info);
 
-	// access chain indices
 	if (res->indices)
 		free(res->indices);
 

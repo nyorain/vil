@@ -774,7 +774,8 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	auto dsCopyIt = varIDToDsCopyMap_.find(srcID);
 	if(dsCopyIt == varIDToDsCopyMap_.end()) {
 		dlg_assert_or(spcType.basetype == spc::SPIRType::Sampler, return);
-		dlg_assert_or(spcType.storage == spv::StorageClassUniform, return);
+		// ugh, not sure which one is right here
+		dlg_assert_or(spcType.storage == spv::StorageClassUniform || spcType.storage == spv::StorageClassUniformConstant, return);
 		dlg_assert(indices.empty());
 
 		// dlg_trace(" >> found sampler");

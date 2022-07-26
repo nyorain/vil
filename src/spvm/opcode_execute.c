@@ -218,7 +218,24 @@ void spvm_execute_OpAccessChain(spvm_word word_count, spvm_state_t state)
 
 	if(state->load_variable && state->store_variable &&
 			spvm_use_access_callback(src->type, src->storage_class)) {
-		/* no-op, indices read in setup */
+		spvm_result* dst = &state->results[id];
+
+		if(src->type == spvm_result_type_variable) {
+			for(spvm_word i = 0; i < dst->index_count; ++i) {
+				spvm_word index_id = SPVM_READ_WORD(state->code_current);
+				spvm_word index = state->results[index_id].members[0].value.s;
+				dst->indices[i] = index;
+			}
+		} else if(src->type == spvm_result_type_access_chain) {
+			spvm_word local_index_count = word_count - 3;
+			memcpy(dst->indices, src->indices, src->index_count * sizeof(src->indices[0]));
+
+			for(spvm_word i = 0; i < local_index_count; ++i) {
+				spvm_word index_id = SPVM_READ_WORD(state->code_current);
+				spvm_word index = state->results[index_id].members[0].value.s;
+				dst->indices[src->index_count + i] = index;
+			}
+		}
 	} else {
 		spvm_word index_count = word_count - 4;
 		spvm_word index_id = SPVM_READ_WORD(state->code_current);
