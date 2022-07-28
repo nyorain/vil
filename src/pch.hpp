@@ -45,7 +45,6 @@
 #include <vk/object_types.h>
 #include <vk/typemap_helper.h>
 
-#include <util/util.hpp>
 #include <util/span.hpp>
 #include <util/syncedMap.hpp>
 #include <util/intrusive.hpp>

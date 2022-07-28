@@ -1185,25 +1185,23 @@ Matcher DrawCmd::match(const Command& base) const {
 		return Matcher::noMatch();
 	}
 
+	// Hard matching on {indexCount, firstIndex, vertexOffset} since that's
+	// dependent on the rendered mesh.
+	// Soft matching on instancing parameters since renderers might batch dynamically,
+	// making this variable at runtime (but still obviously the same command).
+	if(vertexCount != cmd->vertexCount || firstVertex != cmd->firstVertex) {
+		return Matcher::noMatch();
+	}
+
 	auto m = doMatch(*cmd, false);
 	if(m.total == -1.f) {
 		return m;
 	}
 
-	// hard matching? Disabled for now since one can easily think
-	// of cases where the "respective" command changes e.g. instanceCount
-	// over frames (depending on what is in view).
-	// if(cmd->vertexCount != vertexCount ||
-	// 		cmd->instanceCount != instanceCount ||
-	// 		cmd->firstVertex != firstVertex ||
-	// 		cmd->firstInstance != firstInstance) {
-	// 	return Matcher::noMatch();
-	// }
-
-	add(m, vertexCount, cmd->vertexCount, 10.f);
-	add(m, instanceCount, cmd->instanceCount, 10.f);
-	add(m, firstVertex, cmd->firstVertex, 10.f);
-	add(m, firstInstance, cmd->firstInstance, 10.f);
+	m.total += 5.f;
+	m.match += 5.f;
+	add(m, instanceCount, cmd->instanceCount, 3.f);
+	add(m, firstInstance, cmd->firstInstance, 3.f);
 
 	return m;
 }
@@ -1302,12 +1300,13 @@ Matcher DrawIndexedCmd::match(const Command& base) const {
 		return Matcher::noMatch();
 	}
 
-	// hard matching for now. Might need to relax this in the future.
+	// Hard matching on {indexCount, firstIndex, vertexOffset} since that's
+	// dependent on the rendered mesh.
+	// Soft matching on instancing parameters since renderers might batch dynamically,
+	// making this variable at runtime (but still obviously the same command).
 	if(cmd->indexCount != indexCount ||
-			cmd->instanceCount != instanceCount ||
 			cmd->firstIndex != firstIndex ||
-			cmd->vertexOffset != vertexOffset ||
-			cmd->firstInstance != firstInstance) {
+			cmd->vertexOffset != vertexOffset) {
 		return Matcher::noMatch();
 	}
 
@@ -1318,6 +1317,10 @@ Matcher DrawIndexedCmd::match(const Command& base) const {
 
 	m.total += 5.f;
 	m.match += 5.f;
+
+	add(m, cmd->instanceCount, instanceCount, 3.f);
+	add(m, cmd->firstInstance, firstInstance, 3.f);
+
 	return m;
 }
 

@@ -4473,6 +4473,7 @@ std::string Compiler::get_remapped_declared_block_name(uint32_t id, bool fallbac
 	}
 	else
 	{
+		/*
 		auto &var = get<SPIRVariable>(id);
 
 		if (fallback_prefer_instance_name)
@@ -4486,6 +4487,10 @@ std::string Compiler::get_remapped_declared_block_name(uint32_t id, bool fallbac
 			auto *block_name = type_meta ? &type_meta->decoration.alias : nullptr;
 			return (!block_name || block_name->empty()) ? get_block_fallback_name(id) : *block_name;
 		}
+		*/
+
+		// NOTE: we don't want any fallback names in vil
+		return ir.get_empty_string();
 	}
 }
 

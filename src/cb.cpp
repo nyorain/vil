@@ -62,10 +62,8 @@ void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
 
 void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
-	auto allocSize = std::max<u32>(descriptorSets.size(), firstSet + sets.size());
-	auto newSpan = allocUndef<BoundDescriptorSet>(cb, allocSize);
-	std::copy(descriptorSets.begin(), descriptorSets.end(), newSpan.data());
-	this->descriptorSets = newSpan;
+	this->descriptorSets = copyEnsureSizeUndef(cb, descriptorSets,
+		firstSet + sets.size());
 
 	// NOTE: the "ds disturbing" part of vulkan is hard to grasp IMO.
 	// There may be errors here.
@@ -1132,10 +1130,10 @@ span<VkBuffer> cmdBindVertexBuffers(CommandBuffer& cb, ThreadMemScope& tms,
 
 	auto& cmd = addCmd<BindVertexBuffersCmd>(cb);
 	cmd.firstBinding = firstBinding;
+	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
 
 	auto& gs = cb.newGraphicsState();
-	ensureSize(cb, gs.vertices, firstBinding + bindingCount);
-	cmd.buffers = alloc<BoundVertexBuffer>(cb, bindingCount);
+	gs.vertices = copyEnsureSizeUndef(cb, gs.vertices, firstBinding + bindingCount);
 
 	auto bufHandles = tms.alloc<VkBuffer>(bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
@@ -2199,7 +2197,8 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	cmd.viewports = copySpan(cb, pViewports, viewportCount);
 
 	auto& gs = cb.newGraphicsState();
-	ensureSize(cb, gs.dynamic.viewports, firstViewport + viewportCount);
+	gs.dynamic.viewports = copyEnsureSizeUndef(cb, gs.dynamic.viewports,
+		firstViewport + viewportCount);
 	std::copy(pViewports, pViewports + viewportCount,
 		gs.dynamic.viewports.begin() + firstViewport);
 
@@ -2217,7 +2216,8 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	cmd.scissors = copySpan(cb, pScissors, scissorCount);
 
 	auto& gs = cb.newGraphicsState();
-	ensureSize(cb, gs.dynamic.scissors, firstScissor + scissorCount);
+	gs.dynamic.scissors = copyEnsureSizeUndef(cb, gs.dynamic.scissors,
+		firstScissor + scissorCount);
 	std::copy(pScissors, pScissors + scissorCount,
 		gs.dynamic.scissors.begin() + firstScissor);
 

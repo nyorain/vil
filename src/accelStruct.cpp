@@ -5,6 +5,7 @@
 #include <shader.hpp>
 #include <threadContext.hpp>
 #include <util/matOps.hpp>
+#include <util/fmt.hpp>
 #include <vk/format_utils.h>
 
 namespace vil {

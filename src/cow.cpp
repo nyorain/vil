@@ -45,11 +45,11 @@ VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect) {
 				VK_FORMAT_R16_UNORM : VK_FORMAT_R8_UINT;
 		case VK_FORMAT_S8_UINT:
 			return VK_FORMAT_R8_UINT;
-		// TODO: just implement in readFormat
-		case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
-			return VK_FORMAT_R16G16B16A16_UNORM;
-		case VK_FORMAT_A2B10G10R10_SNORM_PACK32:
-			return VK_FORMAT_R16G16B16A16_SNORM;
+		// NOTE: implemented now in readFormat
+		// case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+		// 	return VK_FORMAT_R16G16B16A16_UNORM;
+		// case VK_FORMAT_A2B10G10R10_SNORM_PACK32:
+		// 	return VK_FORMAT_R16G16B16A16_SNORM;
 		default:
 			break;
 	}
@@ -431,6 +431,13 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 	imgInfo.imageView = imgView;
 
 	VkDescriptorBufferInfo bufInfo {};
+
+	// TODO: if we don't have to do a format conversion here,
+	// just copy the data via CopyImageToBuffer!
+	// The other solutions should just be fallbacks.
+	// TODO: could add even another fallback for format conversion where
+	// we use blitting to a host image. No guarantees from vulkan for support
+	// but should often work in practice.
 
 	VkWriteDescriptorSet writes[2] {};
 	if(useTexelStorage) {

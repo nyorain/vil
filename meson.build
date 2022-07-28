@@ -180,6 +180,7 @@ src = files(
 	'src/lmm.cpp',
 	'src/vk/format_utils.cpp',
 	'src/util/util.cpp',
+	'src/util/fmt.cpp',
 	'src/util/f16.cpp',
 	'src/util/ext.cpp',
 	'src/util/ownbuf.cpp',
@@ -292,6 +293,7 @@ src = files(
 	'src/gui/fonts.cpp',
 
 	'src/util/util.hpp',
+	'src/util/fmt.hpp',
 	'src/util/span.hpp',
 	'src/util/flags.hpp',
 	'src/util/f16.hpp',
@@ -381,6 +383,7 @@ if with_unit_tests
 		'src/test/unit/bufparse.cpp',
 		'src/test/unit/match.cpp',
 		'src/test/unit/lmm.cpp',
+		'src/test/unit/fmt.cpp',
 	)
 endif
 

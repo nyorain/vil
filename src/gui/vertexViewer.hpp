@@ -25,6 +25,9 @@ struct DrawParams {
 	u32 offset {}; // firstVertex or firstIndex
 	u32 drawCount {}; // vertexCount or indexCount
 	u32 vertexOffset {}; // only for indexed drawing
+
+	// TODO: correctly implement multi-instance support
+	u32 instanceID {};
 };
 
 struct VertexViewer {

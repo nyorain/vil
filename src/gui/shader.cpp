@@ -6,6 +6,7 @@
 #include <commandHook/record.hpp>
 #include <util/buffmt.hpp>
 #include <util/profiling.hpp>
+#include <util/fmt.hpp>
 #include <command/commands.hpp>
 #include <threadContext.hpp>
 #include <device.hpp>

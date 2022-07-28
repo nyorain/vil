@@ -2,6 +2,7 @@
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <util/util.hpp>
+#include <util/fmt.hpp>
 #include <device.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>

@@ -3,6 +3,7 @@
 #include <command/record.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
+#include <util/fmt.hpp>
 #include <device.hpp>
 #include <stats.hpp>
 #include <buffer.hpp>

@@ -88,6 +88,18 @@ template<typename T>
 }
 
 template<typename T>
+[[nodiscard]] span<std::remove_const_t<T>> copyEnsureSizeUndef(CommandAlloc ca, span<T> data, size_t minSize) {
+	auto count = std::max(data.size(), minSize);
+	if(count == 0u) {
+		return {};
+	}
+
+	auto span = allocUndef<std::remove_const_t<T>>(ca, count);
+	std::copy(data.begin(), data.end(), span.data());
+	return span;
+}
+
+template<typename T>
 void ensureSizeUndef(CommandAlloc ca, span<T>& buf, size_t size) {
 	if(buf.size() >= size) {
 		return;

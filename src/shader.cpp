@@ -160,12 +160,16 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 		auto mname = compiler.get_member_name(structType.self, i);
 		if(!mname.empty()) {
 			memberName += mname;
-		} else {
+		} else if(!name.empty()) {
+			// only append if there is already something useful in the name
 			memberName += std::to_string(i);
 		}
 
 		if(mtype.basetype == spc::SPIRType::Struct) {
-			memberName += ".";
+			if(!memberName.empty()) {
+				memberName += ".";
+			}
+
 			annotateCapture(compiler, mtype, memberName, bufOffset, captures, newDecos);
 			continue;
 		}
@@ -175,7 +179,6 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 		if(baseSize == u32(-1)) {
 			continue;
 		}
-
 
 		if(compiler.has_member_decoration(structType.self, i, spv::DecorationBuiltIn)) {
 			// filter out unwritten builtins
@@ -197,17 +200,17 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 			size *= dim;
 		}
 
-		if(!compiler.has_member_decoration(structType.self, i, spv::DecorationArrayStride) &&
-				!mtype.array.empty()) {
-			addMemberDeco(newDecos, structType.self, i, spv11::Decoration::ArrayStride, baseSize);
-		}
+		// if(!compiler.has_decoration(mtype.self, spv::DecorationArrayStride) &&
+		// 		!mtype.array.empty()) {
+		// 	addDeco(newDecos, mtype.self, spv11::Decoration::ArrayStride, baseSize);
+		// }
 
 		dlg_assert_or(!compiler.has_member_decoration(structType.self, i, spv::DecorationOffset), continue);
 		// TODO: have to align offset properly for 64-bit types
 		addMemberDeco(newDecos, structType.self, i, spv11::Decoration::Offset, bufOffset);
 
-		cap.name = memberName;
 		cap.offset = bufOffset;
+		cap.name = memberName;
 
 		captures.push_back(std::move(cap));
 		bufOffset += size;
@@ -341,13 +344,12 @@ XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
 		dlg_assert(ptype.parent_type);
 		auto& type = compiled.get_type(ptype.parent_type);
 
-		auto name = compiled.get_name(var);
-		if(name.empty()) {
-			name = dlg::format("Output{}", var);
-		}
-
+		auto name = compiled.get_name(var); // might be empty
 		if(type.basetype == spc::SPIRType::Struct) {
-			name += ".";
+			if(!name.empty()) {
+				name += ".";
+			}
+
 			annotateCapture(compiled, type, name, bufOffset, captures, newDecos);
 		} else {
 			XfbCapture cap {};
@@ -376,18 +378,18 @@ XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
 				size *= dim;
 			}
 
-			if(!compiled.has_decoration(type.self, spv::DecorationArrayStride) &&
-					!type.array.empty()) {
-				addDeco(newDecos, var, spv11::Decoration::ArrayStride, baseSize);
-			}
+			// if(!compiled.has_decoration(type.self, spv::DecorationArrayStride) &&
+			// 		!type.array.empty()) {
+			// 	addDeco(newDecos, type.self, spv11::Decoration::ArrayStride, baseSize);
+			// }
 
 			dlg_assert_or(!compiled.has_decoration(var, spv::DecorationOffset), continue);
 			// TODO: have to align offset properly for 64-bit types
 			// compiler.set_decoration(var, spv::DecorationOffset, bufOffset);
 			addDeco(newDecos, var, spv11::Decoration::Offset, bufOffset);
 
-			cap.name = name;
 			cap.offset = bufOffset;
+			cap.name = name;
 
 			captures.push_back(std::move(cap));
 			bufOffset += size;

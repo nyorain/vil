@@ -1,6 +1,15 @@
 Moved from todo.md. Mostly ideas for experiments that might not even
 be possible or useful in the end.
 
+- matching on indirect commands can be hard since we don't know their
+  actual parameters. Could always retrieve their data (in many cases possible
+  without hooking; if the data segment isn't written/made undefined by that command buffer
+  itself before *and* after the draw command, we can simply insert our own
+  commandBuffer before/afterwards). And then match on that data.
+- to get command timings of whole commandbuffers (or whole submissions),
+  don't hook anything. Instead just insert our own command buffers
+  (before and after) into the submission stream where we write out timestamps
+
 - When clicking on a flag, extension name or something, link to vulkan api spec
   regarding that item? Not sure how easy to do.
 - serialize command records. At least roughly, without referenced handles

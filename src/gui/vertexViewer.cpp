@@ -7,6 +7,7 @@
 #include <util/transform.hpp>
 #include <util/util.hpp>
 #include <util/spirv.hpp>
+#include <util/fmt.hpp>
 #include <device.hpp>
 #include <shader.hpp>
 #include <accelStruct.hpp>
@@ -552,10 +553,11 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	VkVertexInputBindingDescription bindingDesc[1] = {};
 	bindingDesc[0].stride = stride;
 	bindingDesc[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	bindingDesc[0].binding = 0u;
 
 	VkVertexInputAttributeDescription attribDesc[1] = {};
 	attribDesc[0].location = 0;
-	attribDesc[0].binding = bindingDesc[0].binding;
+	attribDesc[0].binding = 0u;
 	attribDesc[0].format = format;
 	attribDesc[0].offset = 0;
 
@@ -746,9 +748,10 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 		dev.dispatch.CmdBindIndexBuffer(cb, data.indexBuffer.buffer,
 			0, *data.params.indexType);
 		dev.dispatch.CmdDrawIndexed(cb, data.params.drawCount, 1,
-			data.params.offset, data.params.vertexOffset, 0);
+			data.params.offset, data.params.vertexOffset, data.params.instanceID);
 	} else {
-		dev.dispatch.CmdDraw(cb, data.params.drawCount, 1, data.params.offset, 0);
+		dev.dispatch.CmdDraw(cb, data.params.drawCount, 1,
+			data.params.offset, data.params.instanceID);
 	}
 
 	if(data.drawFrustum) {
@@ -897,6 +900,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 	for(auto a = 0u; a < pipe.vertexAttribs.size(); ++a) {
 		auto& attrib = pipe.vertexAttribs[a];
+		auto found = false;
 		for(auto i = 0u; i < resources.stage_inputs.size(); ++i) {
 			auto& iv = resources.stage_inputs[i];
 			if(!compiled.has_decoration(iv.id, spv::DecorationLocation)) {
@@ -905,7 +909,15 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			}
 			auto loc = compiled.get_decoration(iv.id, spv::DecorationLocation);
 			if(loc == attrib.location) {
+				dlg_assertm(!found, "Multiple input vars for the same attrib?!");
 				attribs.push_back({a, i});
+				found = true;
+
+				// only in debug mode we want to make sure there aren't multiple
+				// input vars
+#ifndef VIL_DEBUG
+				break;
+#endif // VIL_DEBUG
 			}
 		}
 	}
@@ -938,22 +950,26 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			params.drawCount = ecmd.indexCount;
 			params.vertexOffset = ecmd.vertexOffset;
 			params.indexType = indices;
+			params.instanceID = ecmd.firstInstance;
 		} else {
 			auto sub = span.subspan(selectedID_ * stride);
 			auto ecmd = read<VkDrawIndirectCommand>(sub);
 			params.offset = ecmd.firstVertex;
 			params.drawCount = ecmd.vertexCount;
+			params.instanceID = ecmd.firstInstance;
 		}
 	};
 
 	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
 		params.offset = dcmd->firstVertex;
 		params.drawCount = dcmd->vertexCount;
+		params.instanceID = dcmd->firstInstance;
 	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
 		params.offset = dcmd->firstIndex;
 		params.vertexOffset = dcmd->vertexOffset;
 		params.drawCount = dcmd->indexCount;
 		params.indexType = dcmd->state.indices.type;
+		params.instanceID = dcmd->firstInstance;
 	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
 		auto i = dcmd->indexed ? std::optional(dcmd->state.indices.type) : std::nullopt;
 		displayCmdSlider(i, dcmd->stride);
@@ -978,21 +994,49 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		if(colCount == 0u) {
 			ImGui::Text("No Vertex input");
 		} else if(ImGui::BeginTable("Vertices", colCount, flags)) {
+			ImGui::TableNextRow();
+
 			if(params.indexType) {
-				ImGui::TableSetupColumn("IDX");
+				// ImGui::TableSetupColumn("IDX");
+				ImGui::TableNextColumn();
+				imGuiText("IDX");
 			}
 
-			for(auto& attrib : attribs) {
-				auto& iv = resources.stage_inputs[attrib.second];
-				ImGui::TableSetupColumn(iv.name.empty() ? "?" : iv.name.c_str());
+			for(auto& [pipeAttribID, shaderVarID] : attribs) {
+				auto& iv = resources.stage_inputs[shaderVarID];
+				auto name = iv.name.empty() ? "<unnamed>" : iv.name.c_str();
+				// ImGui::TableSetupColumn(name);
+
+				ImGui::TableNextColumn();
+				imGuiText(name);
+
+				if(ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+
+					auto& attrib = pipe.vertexAttribs[pipeAttribID];
+					auto& binding = pipe.vertexBindings[attrib.binding];
+					auto& buf = state.vertexBufCopies[binding.binding];
+
+					imGuiText("pipeline attribute ID: {}", pipeAttribID);
+					imGuiText("attrib format: {}", vk::name(attrib.format));
+					imGuiText("shader input location: {}", attrib.location);
+					imGuiText("attribute offset: {}", attrib.offset);
+					imGuiText("vertex buffer ID: {}", binding.binding);
+					imGuiText("captured buffer size: {}", buf.size);
+					imGuiText("buffer stride: {}", binding.stride);
+					imGuiText("buffer input rate: {}", vk::name(binding.inputRate));
+
+					ImGui::EndTooltip();
+				}
 			}
 
-			ImGui::TableHeadersRow();
+			// ImGui::TableHeadersRow();
 			ImGui::TableNextRow();
 
 			for(auto i = 0u; i < std::min(100u, params.drawCount); ++i) {
 				bool captured = true;
-				auto id = i;
+				auto vertexID = i;
+				auto iniID = params.instanceID;
 				if(params.indexType) {
 					ImGui::TableNextColumn();
 
@@ -1004,11 +1048,13 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 						imGuiText("N/A");
 					} else {
 						ib = ib.subspan(off, is);
-						id = readIndex(*params.indexType, ib) + params.vertexOffset;
-						imGuiText("{}", id);
+						vertexID = readIndex(*params.indexType, ib) + params.vertexOffset;
+						imGuiText("{}", vertexID);
 					}
 				} else {
-					id += params.offset;
+					vertexID += params.offset;
+					// XXX this isn't needed, right? not sure.
+					// iniID += params.offset;
 				}
 
 				for(auto& [aID, _] : attribs) {
@@ -1016,11 +1062,11 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 					ImGui::TableNextColumn();
 
 					auto& binding = pipe.vertexBindings[attrib.binding];
-					auto& buf = state.vertexBufCopies[attrib.binding];
+					auto& buf = state.vertexBufCopies[binding.binding];
 
-					// TODO: correctly implement multi-instance support
-					auto off = binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX ?
-						id * binding.stride : 0u;
+					auto off = (binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX) ?
+						vertexID * binding.stride :
+						iniID * binding.stride;
 					off += attrib.offset;
 
 					// TODO: compressed support?

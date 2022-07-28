@@ -52,6 +52,12 @@ urgent, bugs:
 - [ ] improve gui layout of image viewer (e.g. in command viewer).
       really annoying rn to always scroll down. 
 	  Maybe use tabs? One for general information, one for the image viewer?
+- [ ] when viewing resources aliasing others in memory in the resource viewer,
+      we have to make sure that their content wasn't made undefined.
+	  Vulkan says it's not allowed to use such resources.
+	  Note that they are usually NOT in the invalid image layout, just the last
+	  one they were used in.
+	  Hard to track though I guess?
 
 match rework 2, electric boogaloo
 - [ ] improve matching of common commands, e.g. BarrierCmd.

@@ -153,7 +153,10 @@ private:
 	// In general, the problem is that we can't know the relevant
 	// size for sub-allocated buffers. Theoretically, we could analyze
 	// previous index/indirect data for this. Not sure if good idea.
-	static constexpr auto maxBufCopySize = VkDeviceSize(32 * 1024 * 1024);
+	// NOTE: we should probably just set the required offset/size via
+	// gui, implement some paging mechanism for buffer and vertex
+	// viewer. Even if that means we have a frame delay
+	static constexpr auto maxBufCopySize = VkDeviceSize(2 * 1024 * 1024);
 
 	// TODO: should the whole buffer be copied for transfer operations?
 	// bad idea in many cases, e.g. when huge upload heaps are used.
