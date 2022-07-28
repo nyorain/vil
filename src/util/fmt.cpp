@@ -164,7 +164,7 @@ struct FormatWriter {
 			src = linearToSRGB(src);
 		}
 
-		u32 packed;
+		u32 packed {};
 		pack<Norm, Signed, Bits...>(packed, src, 0u);
 
 		constexpr u32 numBits = (0 + ... + Bits);
