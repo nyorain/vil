@@ -12,7 +12,7 @@ void spvm_member_free(spvm_member_t source, spvm_word value_count)
 void spvm_member_memcpy(spvm_member_t target, spvm_member_t source, spvm_word value_count)
 {
 	for (spvm_word i = 0; i < value_count; i++) {
-		target[i].value.u64 = source[i].value.u64;
+		target[i].value.u = source[i].value.u;
 
 		assert(target[i].member_count == source[i].member_count);
 		if (target[i].member_count != 0) {

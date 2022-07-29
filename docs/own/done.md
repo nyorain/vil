@@ -1,3 +1,10 @@
+- [x] improve matching of common commands, e.g. BarrierCmd.
+      Returns 0 if they have nothing in command (except second-tier data
+	  like dependencyFlags or something). There should be at least
+	  one common handle and transition
+- [x] figure out why spirv-cross is sometimes providing these weird names
+	  (e.g. for buffers; something like _170_2344) instead of simply having 
+	  an empty alias string
 - [x] improve design for buffer viewer. Way too much space atm, make more compact
 - [x] add mutex to descriptorPool, make sure it's correctly used everywhere
 - [x] fix invalidateCbs race (see command/record.cpp TODO in tryAccessLocked)

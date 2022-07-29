@@ -537,7 +537,7 @@ void spvm_execute_GLSL450_UMin(spvm_word type, spvm_word id, spvm_word word_coun
 	spvm_word y = SPVM_READ_WORD(state->code_current);
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++)
-		state->results[id].members[i].value.u64 = SPVM_MIN(state->results[x].members[i].value.u64, state->results[y].members[i].value.u64);
+		state->results[id].members[i].value.u = SPVM_MIN(state->results[x].members[i].value.u, state->results[y].members[i].value.u);
 }
 void spvm_execute_GLSL450_SMin(spvm_word type, spvm_word id, spvm_word word_count, spvm_state_t state)
 {
@@ -575,7 +575,7 @@ void spvm_execute_GLSL450_UMax(spvm_word type, spvm_word id, spvm_word word_coun
 	spvm_word y = SPVM_READ_WORD(state->code_current);
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++)
-		state->results[id].members[i].value.u64 = SPVM_MAX(state->results[x].members[i].value.u64, state->results[y].members[i].value.u64);
+		state->results[id].members[i].value.u = SPVM_MAX(state->results[x].members[i].value.u, state->results[y].members[i].value.u);
 }
 void spvm_execute_GLSL450_SMax(spvm_word type, spvm_word id, spvm_word word_count, spvm_state_t state)
 {
@@ -616,9 +616,9 @@ void spvm_execute_GLSL450_UClamp(spvm_word type, spvm_word id, spvm_word word_co
 	spvm_word maxVal = SPVM_READ_WORD(state->code_current);
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-		state->results[id].members[i].value.u64 = SPVM_CLAMP(state->results[x].members[i].value.u64, state->results[minVal].members[i].value.u64, state->results[maxVal].members[i].value.u64);
+		state->results[id].members[i].value.u = SPVM_CLAMP(state->results[x].members[i].value.u, state->results[minVal].members[i].value.u, state->results[maxVal].members[i].value.u);
 
-		if (state->analyzer && (state->results[minVal].members[i].value.u64 > state->results[maxVal].members[i].value.u64))
+		if (state->analyzer && (state->results[minVal].members[i].value.u > state->results[maxVal].members[i].value.u))
 			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_clamp);
 	}
 }

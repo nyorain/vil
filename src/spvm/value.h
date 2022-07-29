@@ -40,9 +40,8 @@ typedef struct spvm_member {
 	{
 		float f;
 		double d;
-		int s;
-		unsigned int u;
-		unsigned long long u64;
+		long long s;
+		unsigned long long u;
 		char b;
 		spvm_image* image;
 		spvm_sampler* sampler;

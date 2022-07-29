@@ -404,8 +404,10 @@ Matcher match(const VkClearAttachment& a, const VkClearAttachment& b) {
 		if(a.colorAttachment != b.colorAttachment) {
 			return Matcher::noMatch();
 		}
-		sameCV = std::memcmp(&a.clearValue.color, &b.clearValue.color,
-			sizeof(a.clearValue.color)) == 0;
+		// NOTE: stricly speaking we would have to check the format here
+		// and compare based on that
+		sameCV = std::memcmp(&a.clearValue.color.uint32, &b.clearValue.color.uint32,
+			sizeof(a.clearValue.color.uint32)) == 0;
 	} else {
 		sameCV = std::memcmp(&a.clearValue.depthStencil, &b.clearValue.depthStencil,
 			sizeof(a.clearValue.depthStencil)) == 0;
@@ -570,8 +572,16 @@ Command::Command() {
 
 Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
 	Matcher m;
-	add(m, this->srcStageMask, cmd.srcStageMask);
-	add(m, this->dstStageMask, cmd.dstStageMask);
+
+	// NOTE: we match hard on srcStageMask and dstStageMask now, otherwise
+	// we get way too many match candidates. With this formulation, we also
+	// need at least one common resource
+	// add(m, this->srcStageMask, cmd.srcStageMask);
+	// add(m, this->dstStageMask, cmd.dstStageMask);
+	if(this->srcStageMask != cmd.srcStageMask ||
+			this->dstStageMask != cmd.dstStageMask) {
+		return Matcher::noMatch();
+	}
 
 	addSpanUnordered(m, this->memBarriers, cmd.memBarriers);
 	addSpanUnordered(m, this->bufBarriers, cmd.bufBarriers);
@@ -693,8 +703,11 @@ Matcher BarrierCmd::match(const Command& base) const {
 	}
 
 	auto m = doMatch(*cmd);
-	add(m, dependencyFlags, cmd->dependencyFlags);
+	if(m.match == 0.f || m.total == -1.f) {
+		return m;
+	}
 
+	add(m, dependencyFlags, cmd->dependencyFlags);
 	return m;
 }
 

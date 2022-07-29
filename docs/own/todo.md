@@ -12,6 +12,8 @@ urgent, bugs:
       But the old solution breaks renderpass compat.
 	  Insert barriers as needed when recording instead.
 	  Remove the old code from splitInterruptable then.
+- [ ] set spec constants for shader module in gui shader debugger.
+      Test with shader from tkn/iro
 - [ ] figure out if our linear allocator (the std::allocator) adapter
       should value initialize on alloc
 - [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
@@ -35,9 +37,6 @@ urgent, bugs:
 - [ ] figure out why copying attachments/descriptors shows weird/incorrect 
       output in the dota intro screen sometimes. Sync problem? Matching problem?
 	  {might be fixed now, with proper splitrp deps}
-- [ ] figure out why spirv-cross is sometimes providing these weird names
-	  (e.g. for buffers; something like _170_2344) instead of simply having 
-	  an empty alias string
 - [ ] toupper bug when searching for resource
 - [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
 - [ ] fix vertex viewer input issues (e.g. with a7c)
@@ -60,10 +59,6 @@ urgent, bugs:
 	  Hard to track though I guess?
 
 match rework 2, electric boogaloo
-- [ ] improve matching of common commands, e.g. BarrierCmd.
-      Returns 0 if they have nothing in command (except second-tier data
-	  like dependencyFlags or something). There should be at least
-	  one common handle and transition
 - [ ] get rid of annotateRelIDLegacy, use proper context (across cb boundaries) 
       when matching commands instead. Should fix CmdBarrier issues in RDR2
 	  See docs/own/desc2.hpp. But that isn't enough, we need more context.
@@ -153,7 +148,7 @@ shader debugger:
 		  one if it makes sense via vulkan drawing order guarantees?).
 		  We then interpolate the input we got from xfb and use that
 		  as input to the fragment shader.
-- geometry and tesselation shaders can remain unsupported for now.
+	- geometry and tesselation shaders can remain unsupported for now.
 - [ ] support ray tracing pipelines
 	- [ ] as with compute shaders, we want to select the dispatch index
 	- [ ] add support in spvm. Not sure about callback interface, probably
@@ -183,11 +178,11 @@ shader debugger:
 	  it for buffmt. arrays?)
 
 spvm:
-- [ ] Add OpSpecConstant* support
+- [x] Add OpSpecConstant* support
 - [x] Add OpArrayLength support
 - [ ] merge back changes upstream
 	- [ ] asserts
-	- [ ] improved image sampling
+	- [x] improved image sampling
 	- [ ] external variable load/store via callback
 	- [ ] other missing opcodes implemented now
 

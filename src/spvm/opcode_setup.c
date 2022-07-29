@@ -253,6 +253,9 @@ void spvm_setup_OpTypeArray(spvm_word word_count, spvm_state_t state)
 
 	state->results[store_id].pointer = SPVM_READ_WORD(state->code_current);
 	state->results[store_id].member_count = state->results[SPVM_READ_WORD(state->code_current)].members[0].value.s;
+
+	// we can land here e.g. if somehow the value wasn't initialized correctly
+	assert(state->results[store_id].member_count > 0);
 }
 void spvm_setup_OpTypeRuntimeArray(spvm_word word_count, spvm_state_t state)
 {
@@ -341,12 +344,12 @@ void spvm_setup_OpConstant(spvm_word word_count, spvm_state_t state)
 	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
 	state->results[id].source_location = state->code_current;
 
-	state->results[id].members[0].value.u64 = SPVM_READ_WORD(state->code_current);
+	state->results[id].members[0].value.u = SPVM_READ_WORD(state->code_current);
 
 	spvm_result_t type_info = spvm_state_get_type_info(state->results, &state->results[var_type]);
 	if (type_info->value_bitcount > 32) {
 		unsigned long long highBits = SPVM_READ_WORD(state->code_current);
-		state->results[id].members[0].value.u64 |= highBits << 32ull;
+		state->results[id].members[0].value.u |= highBits << 32ull;
 	}
 }
 void spvm_setup_OpConstantComposite(spvm_word word_count, spvm_state_t state)
@@ -365,6 +368,37 @@ void spvm_setup_OpConstantComposite(spvm_word word_count, spvm_state_t state)
 			state->results[id].members[i].value.s = state->results[index].members[0].value.s;
 		else
 			spvm_member_memcpy(&state->results[id].members[i].members[0], &state->results[index].members[0], state->results[index].member_count);
+	}
+}
+void spvm_setup_OpSpecConstantOp(spvm_word word_count, spvm_state_t state) {
+	spvm_word var_type = SPVM_READ_WORD(state->code_current);
+	spvm_word id = SPVM_READ_WORD(state->code_current);
+	spvm_word opcode = SPVM_READ_WORD(state->code_current);
+
+	state->results[id].type = spvm_result_type_constant;
+	spvm_result_allocate_typed_value(&state->results[id], state->results, var_type);
+	state->results[id].source_location = state->code_current;
+
+	// we just call the function with the respective opcode directly
+	if(opcode >= SPVM_OPCODE_TABLE_LENGTH) {
+		spvm_state_log(state, "opcode for SpecConstantOp out of range: %d", (int) opcode);
+	} else if(!state->context->opcode_execute[opcode]) {
+		spvm_state_log(state, "null opcode for SpecConstantOp in : %d", (int) opcode);
+	} else {
+		// TODO: assert on opcode structure using SpvHasResultAndType
+
+		spvm_word buffer[word_count - 1];
+		buffer[0] = var_type;
+		buffer[1] = id;
+		// copy the operands
+		memcpy(buffer + 2, state->code_current, word_count - 3);
+
+		spvm_source saved = state->code_current;
+		state->code_current = buffer;
+
+		state->context->opcode_execute[opcode](word_count - 1, state);
+
+		state->code_current = saved;
 	}
 }
 
@@ -570,6 +604,13 @@ void _spvm_context_create_setup_table(spvm_context_t ctx)
 	ctx->opcode_setup[SpvOpConstantNull] = spvm_setup_OpConstantNull;
 	ctx->opcode_setup[SpvOpConstant] = spvm_setup_OpConstant;
 	ctx->opcode_setup[SpvOpConstantComposite] = spvm_setup_OpConstantComposite;
+
+	// spec constants instructions have the same anatomy as constant ones
+	ctx->opcode_setup[SpvOpSpecConstantTrue] = spvm_setup_OpConstantTrue;
+	ctx->opcode_setup[SpvOpSpecConstantFalse] = spvm_setup_OpConstantFalse;
+	ctx->opcode_setup[SpvOpSpecConstant] = spvm_setup_OpConstant;
+	ctx->opcode_setup[SpvOpSpecConstantComposite] = spvm_setup_OpConstantComposite;
+	ctx->opcode_setup[SpvOpSpecConstantOp] = spvm_setup_OpSpecConstantOp;
 
 	ctx->opcode_setup[SpvOpVariable] = spvm_setup_OpVariable;
 	ctx->opcode_setup[SpvOpLoad] = spvm_setup_OpLoad;
