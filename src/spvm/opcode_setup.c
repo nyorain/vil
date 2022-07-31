@@ -386,8 +386,11 @@ void spvm_setup_OpSpecConstantOp(spvm_word word_count, spvm_state_t state) {
 		spvm_state_log(state, "null opcode for SpecConstantOp in : %d", (int) opcode);
 	} else {
 		// TODO: assert on opcode structure using SpvHasResultAndType
+		// XXX: msvc doesn't support vla
+		// spvm_word buffer[word_count - 1];
+		assert(word_count < 100);
+		spvm_word buffer[100];
 
-		spvm_word buffer[word_count - 1];
 		buffer[0] = var_type;
 		buffer[1] = id;
 		// copy the operands
