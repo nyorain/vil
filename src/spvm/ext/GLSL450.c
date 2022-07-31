@@ -64,7 +64,7 @@ void spvm_execute_GLSL450_SAbs(spvm_word type, spvm_word id, spvm_word word_coun
 	spvm_word x = SPVM_READ_WORD(state->code_current);
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++)
-		state->results[id].members[i].value.s = abs(state->results[x].members[i].value.s);
+		state->results[id].members[i].value.s = labs(state->results[x].members[i].value.s);
 }
 void spvm_execute_GLSL450_FSign(spvm_word type, spvm_word id, spvm_word word_count, spvm_state_t state)
 {
@@ -734,14 +734,18 @@ void spvm_execute_GLSL450_Frexp(spvm_word type, spvm_word id, spvm_word word_cou
 
 	if (type_info->value_bitcount > 32)
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-			state->results[id].members[i].value.d = frexp(state->results[x].members[i].value.d, &state->results[out].members[i].value.s);
+			int s = state->results[out].members[i].value.s;
+			state->results[id].members[i].value.d = frexp(state->results[x].members[i].value.d, &s);
+			state->results[out].members[i].value.s = s;
 
 			if (state->analyzer && (isnan(state->results[x].members[i].value.d) || isinf(state->results[x].members[i].value.d)))
 				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_frexp);
 		}
 	else
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-			state->results[id].members[i].value.f = frexpf(state->results[x].members[i].value.f, &state->results[out].members[i].value.s);
+			int s = state->results[out].members[i].value.s;
+			state->results[id].members[i].value.f = frexpf(state->results[x].members[i].value.f, &s);
+			state->results[out].members[i].value.s = s;
 
 			if (state->analyzer && (isnan(state->results[x].members[i].value.f) || isinf(state->results[x].members[i].value.f)))
 				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_frexp);
@@ -754,11 +758,17 @@ void spvm_execute_GLSL450_FrexpStruct(spvm_word type, spvm_word id, spvm_word wo
 	spvm_result_t type_info = spvm_state_get_type_info(state->results, &state->results[type]);
 
 	if (type_info->value_bitcount > 32)
-		for (spvm_word i = 0; i < state->results[id].member_count; i++)
-			state->results[id].members[0].members[i].value.d = frexp(state->results[x].members[i].value.d, &state->results[id].members[1].members[i].value.s);
+		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
+			int s = state->results[id].members[1].members[i].value.s;
+			state->results[id].members[0].members[i].value.d = frexp(state->results[x].members[i].value.d, &s);
+			state->results[id].members[1].members[i].value.s = s;
+		}
 	else
-		for (spvm_word i = 0; i < state->results[id].member_count; i++)
-			state->results[id].members[0].members[i].value.f = frexpf(state->results[x].members[i].value.f, &state->results[id].members[1].members[i].value.s);
+		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
+			int s = state->results[id].members[1].members[i].value.s;
+			state->results[id].members[0].members[i].value.f = frexpf(state->results[x].members[i].value.f, &s);
+			state->results[id].members[1].members[i].value.s = s;
+		}
 }
 void spvm_execute_GLSL450_Ldexp(spvm_word type, spvm_word id, spvm_word word_count, spvm_state_t state)
 {

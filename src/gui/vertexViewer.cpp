@@ -168,6 +168,8 @@ std::string printFormat(VkFormat format, span<const std::byte> src) {
 
 	// TODO: not all formats covered
 	//   support compresssed formats! See ioFormat in util.cpp
+	// TODO: why do we care about componentSize??? shouldn't matter
+	//  probably legacy, should be removed
 
 	Vec4d val = read(format, src);
 
@@ -180,7 +182,7 @@ std::string printFormat(VkFormat format, span<const std::byte> src) {
 		}
 	} else if(FormatIsUINT(format) || FormatIsUSCALED(format)) {
 		switch(componentSize) {
-			case 1: return printFormat<u8>(numChannels, val);
+			case 1: return printFormat<u16>(numChannels, val);
 			case 2: return printFormat<u16>(numChannels, val);
 			case 4: return printFormat<u32>(numChannels, val);
 			case 8: return printFormat<u64>(numChannels, val);
@@ -188,7 +190,7 @@ std::string printFormat(VkFormat format, span<const std::byte> src) {
 		}
 	} else if(FormatIsSINT(format) || FormatIsSSCALED(format)) {
 		switch(componentSize) {
-			case 1: return printFormat<i8>(numChannels, val);
+			case 1: return printFormat<i16>(numChannels, val);
 			case 2: return printFormat<i16>(numChannels, val);
 			case 4: return printFormat<i32>(numChannels, val);
 			case 8: return printFormat<i64>(numChannels, val);
@@ -196,13 +198,13 @@ std::string printFormat(VkFormat format, span<const std::byte> src) {
 		}
 	} else if(FormatIsUNORM(format)) {
 		switch(componentSize) {
-			case 1: return printFormat<u8> (numChannels, val);
+			case 1: return printFormat<u16> (numChannels, val);
 			case 2: return printFormat<u16>(numChannels, val);
 			default: break;
 		}
 	} else if(FormatIsSNORM(format)) {
 		switch(componentSize) {
-			case 1: return printFormat<i8> (numChannels, val);
+			case 1: return printFormat<i16> (numChannels, val);
 			case 2: return printFormat<i16>(numChannels, val);
 			default: break;
 		}
@@ -817,7 +819,7 @@ void VertexViewer::updateInput(float dt) {
 		constexpr auto moveLeft = VilKeyA;
 		constexpr auto moveFwd = VilKeyW;
 		constexpr auto moveBwd = VilKeyS;
-		constexpr auto moveUp = VilKeyA;
+		constexpr auto moveUp = VilKeyQ;
 		constexpr auto moveDown = VilKeyE;
 
 		if(io.KeysDown[moveRight]) {
