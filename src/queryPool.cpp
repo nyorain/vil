@@ -8,7 +8,6 @@ QueryPool::~QueryPool() {
 		return;
 	}
 
-	invalidateCbs();
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SAMPLER);
 }
 
@@ -40,8 +39,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyQueryPool(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	dev.queryPools.mustErase(queryPool);
+	auto& dev = *mustMoveUnset(device, queryPool)->dev;
 	dev.dispatch.DestroyQueryPool(device, queryPool, pAllocator);
 }
 

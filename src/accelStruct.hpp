@@ -52,7 +52,7 @@ struct AccelInstances {
 };
 
 // AccelerationStructure
-struct AccelStruct : DeviceHandle {
+struct AccelStruct : SharedDeviceHandle {
 	VkAccelerationStructureKHR handle;
 	VkAccelerationStructureTypeKHR type; // can be generic
 	VkAccelerationStructureTypeKHR effectiveType; // only relevant when type == generic
@@ -63,8 +63,6 @@ struct AccelStruct : DeviceHandle {
 	VkDeviceSize size {};
 
 	VkDeviceAddress deviceAddress {};
-
-	std::atomic<u32> refCount {};
 
 	// geometry info
 	VkGeometryTypeKHR geometryType {VK_GEOMETRY_TYPE_MAX_ENUM_KHR};

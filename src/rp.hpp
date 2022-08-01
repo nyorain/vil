@@ -25,21 +25,14 @@ struct RenderPassDesc {
 	VkRenderPassCreateFlags flags {};
 };
 
-struct RenderPass : DeviceHandle {
+struct RenderPass : SharedDeviceHandle {
 	VkRenderPass handle {};
-
 	RenderPassDesc desc;
-
-	// Render passes can be destroyed after they were used to create
-	// framebuffers or pipelines, the created handles must just be
-	// compatible. To know this information, we keep the description
-	// of the render pass alive until all associated handles were destroyed.
-	std::atomic<u32> refCount {};
 
 	~RenderPass();
 };
 
-struct Framebuffer : DeviceHandle {
+struct Framebuffer : SharedDeviceHandle {
 	VkFramebuffer handle {};
 
 	// NOTE: keep in mind that this might be empty for an imageless fb

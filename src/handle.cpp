@@ -11,57 +11,6 @@
 
 namespace vil {
 
-DeviceHandle::~DeviceHandle() {
-	if(!dev) {
-		return;
-	}
-
-	// All records should have been invalidated in the derived class
-	// already, if needed.
-	dlg_assert(!refRecords);
-}
-
-void DeviceHandle::invalidateCbsLocked() {
-	ExtZoneScoped;
-
-	dlg_assert(dev);
-	assertOwned(dev->mutex);
-
-	auto it = refRecords;
-	while(it) {
-		dlg_assert(it->record);
-
-		if(it->record->cb) {
-			dlg_assert(it->record->cb->lastRecordLocked() == it->record);
-			it->record->cb->invalidateLocked();
-		}
-
-		// TODO: only do for handles that need it.
-		// We e.g. don't need it for descriptor sets
-		auto [_, success] = it->record->invalidated.insert({this, nullptr});
-		dlg_assert(success);
-
-		it = it->next;
-	}
-
-	refRecords = nullptr;
-}
-
-void DeviceHandle::invalidateCbs() {
-	// Not needed for some handle types
-	if(objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-		dlg_assert(!refRecords);
-		return;
-	}
-
-	// We have to lock the mutex here since other threads might access
-	// this->refCbs (e.g. other command buffers being destroyed and removing
-	// themselves).
-	dlg_assert(this->dev);
-	std::lock_guard lock(this->dev->mutex);
-	invalidateCbsLocked();
-}
-
 const char* name(VkObjectType objectType) {
 	switch(objectType) {
 		case VK_OBJECT_TYPE_IMAGE: return "Image";

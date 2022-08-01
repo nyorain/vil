@@ -18,7 +18,6 @@ Image::~Image() {
 		return;
 	}
 
-	invalidateCbs();
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_IMAGE);
 
 	std::lock_guard lock(dev->mutex);
@@ -32,7 +31,6 @@ ImageView::~ImageView() {
 		return;
 	}
 
-	invalidateCbs();
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_IMAGE_VIEW);
 
 	dlg_assert(DebugStats::get().aliveImagesViews > 0);
@@ -57,7 +55,6 @@ Sampler::~Sampler() {
 		return;
 	}
 
-	invalidateCbs();
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SAMPLER);
 }
 
@@ -242,7 +239,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		return res;
 	}
 
-	auto imgPtr = std::make_unique<Image>();
+	auto imgPtr = IntrusivePtr<Image>(new Image());
 	auto& img = *imgPtr;
 	img.objectType = VK_OBJECT_TYPE_IMAGE;
 	img.dev = &dev;
@@ -274,9 +271,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	auto handle = dev.images.mustMove(image)->handle;
-	dev.dispatch.DestroyImage(dev.handle, handle, pAllocator);
+	auto& dev = *mustMoveUnset(device, image)->dev;
+	dev.dispatch.DestroyImage(dev.handle, image, pAllocator);
 }
 
 VKAPI_ATTR void VKAPI_CALL GetImageMemoryRequirements(

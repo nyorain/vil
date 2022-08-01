@@ -9,6 +9,8 @@
 
 namespace vil {
 
+// In-layer representation of a vulkan API object created
+// by the application.
 struct Handle {
 	std::string name;
 	VkObjectType objectType {};
@@ -18,22 +20,13 @@ struct Handle {
 	Handle& operator=(Handle&&) = delete;
 };
 
+// Device-level vulkan API object.
 struct DeviceHandle : Handle {
 	Device* dev {};
+};
 
-	// A list of all command buffers recordings referencing this handle in their
-	// current record state.
-	// On destruction, the handle will inform all of them that they
-	// are now in an invalid state.
-	UsedHandle* refRecords {};
-
-	// Expects that neither the device mutex nor its own mutex is locked.
-	~DeviceHandle();
-
-	// Will inform all command buffers that use this handle that they
-	// have been invalidated.
-	void invalidateCbs();
-	void invalidateCbsLocked();
+struct SharedDeviceHandle : DeviceHandle {
+	std::atomic<u32> refCount {};
 };
 
 const char* name(VkObjectType objectType);

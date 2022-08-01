@@ -710,7 +710,6 @@ DescriptorPool::~DescriptorPool() {
 	}
 
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_POOL);
-	invalidateCbs();
 
 	for(auto it = usedEntries; it; it = it->next) {
 		dlg_assert(it->set);
@@ -727,11 +726,8 @@ DescriptorSetLayout::~DescriptorSetLayout() {
 	}
 
 	// ds layouts are never used directly by command buffers
-	dlg_assert(!refRecords);
 	dlg_assert(handle);
-
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
-
 	dev->dispatch.DestroyDescriptorSetLayout(dev->handle, handle, nullptr);
 }
 
@@ -741,11 +737,8 @@ DescriptorUpdateTemplate::~DescriptorUpdateTemplate() {
 	}
 
 	// never used directly by command buffers
-	dlg_assert(!refRecords);
 	dlg_assert(handle);
-
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE);
-
 	dev->dispatch.DestroyDescriptorUpdateTemplate(dev->handle, handle, nullptr);
 }
 
@@ -984,7 +977,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 		return res;
 	}
 
-	auto dsPoolPtr = std::make_unique<DescriptorPool>();
+	auto dsPoolPtr = IntrusivePtr<DescriptorPool>(new DescriptorPool());
 	auto& dsPool = *dsPoolPtr;
 	dsPool.objectType = VK_OBJECT_TYPE_DESCRIPTOR_POOL;
 	dsPool.dev = &dev;
@@ -1021,9 +1014,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyDescriptorPool(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	auto handle = dev.dsPools.mustMove(descriptorPool)->handle;
-	dev.dispatch.DestroyDescriptorPool(dev.handle, handle, pAllocator);
+	auto& dev = *mustMoveUnset(device, descriptorPool)->dev;
+	dev.dispatch.DestroyDescriptorPool(dev.handle, descriptorPool, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetDescriptorPool(

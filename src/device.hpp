@@ -57,20 +57,19 @@ struct UnreachableDeleter {
 	}
 };
 
-using PipelineUniquePtr = std::unique_ptr<Pipeline, UnreachableDeleter<Pipeline>>;
+template<typename T>
+using IntrusiveDerivedPtr = IntrusivePtr<T, UnreachableDeleter<T>>;
 
 template<typename T>
-struct HandlePtrFactory<std::unique_ptr<T, UnreachableDeleter<T>>> {
+struct HandlePtrFactory<IntrusiveDerivedPtr<T>> {
 	template<typename... Args>
-	static std::unique_ptr<T, UnreachableDeleter<T>> create(Args&&...) {
+	static IntrusiveDerivedPtr<T> create(Args&&...) {
 		dlg_error("unreachable");
 	}
 };
 
-template<typename T>
-using UnreachableDeleterUniquePtr = std::unique_ptr<T, UnreachableDeleter<T>>;
-using SyncedUnorderedPipeMap = SyncedUnorderedMap<VkPipeline,
-	  Pipeline, UnreachableDeleterUniquePtr>;
+template<typename K, typename T>
+using SyncedIntrusiveDerivedUnorderedMap = SyncedUnorderedMap<K, T, IntrusiveDerivedPtr>;
 
 struct Device {
 	Instance* ini {};
@@ -112,7 +111,7 @@ struct Device {
 	std::vector<u32> usedQueueFamilyIndices;
 	// Global submission counter - counts for all queues.
 	// Is increased for every VkQueueSubmit call.
-	std::atomic<u64> submissionCounter;
+	std::atomic<u64> submissionCounter {0u};
 
 	// The queue we use for graphics submissions. Can be assumed to
 	// be non-null.
@@ -196,27 +195,10 @@ struct Device {
 	std::unordered_map<VkDeviceAddress, AccelStruct*> accelStructAddresses;
 
 	// === Maps of all vulkan handles ===
-	SyncedUniqueWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
-
 	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
-	SyncedUniqueUnorderedMap<VkImage, Image> images;
-	SyncedUniqueUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
-	SyncedUniqueUnorderedMap<VkCommandPool, CommandPool> commandPools;
-	SyncedUniqueUnorderedMap<VkFence, Fence> fences;
-	SyncedUniqueUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
 	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
-	SyncedUniqueUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
-	SyncedUniqueUnorderedMap<VkEvent, Event> events;
-	SyncedUniqueUnorderedMap<VkSemaphore, Semaphore> semaphores;
-	SyncedUniqueUnorderedMap<VkQueryPool, QueryPool> queryPools;
-
 	SyncedRawUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
-
-	// NOTE: Even though we just store unique_ptr<Pipeline> here, the real
-	// type is GraphicsPipeline, ComputePipeline or RayTracingPipeline.
-	// When erasing from the map, mustMove should be used and the pipeline
-	// casted since the destructor is not virtual.
-	SyncedUnorderedPipeMap pipes;
+	SyncedUniqueWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still
@@ -225,28 +207,33 @@ struct Device {
 	// ownership, not the handle itself). Mostly done for layouts, we can
 	// expect the handles to be cheap to be kept alive anyways.
 
-	// Descriptors allocated from the layout expect it to remain
-	// valid. We might also (in future) create new descriptors from the
-	// layout ourselves (e.g. for submission modification).
+	// TODO: make them unordered set when we switch to c++20 and
+	// have transparent lookup
+	SyncedIntrusiveUnorderedMap<VkImage, Image> images;
+	SyncedIntrusiveUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
+	SyncedIntrusiveUnorderedMap<VkCommandPool, CommandPool> commandPools;
+	SyncedIntrusiveUnorderedMap<VkFence, Fence> fences;
+	SyncedIntrusiveUnorderedMap<VkDescriptorPool, DescriptorPool> dsPools;
+	SyncedIntrusiveUnorderedMap<VkDeviceMemory, DeviceMemory> deviceMemories;
+	SyncedIntrusiveUnorderedMap<VkEvent, Event> events;
+	SyncedIntrusiveUnorderedMap<VkSemaphore, Semaphore> semaphores;
+	SyncedIntrusiveUnorderedMap<VkQueryPool, QueryPool> queryPools;
 	SyncedIntrusiveUnorderedMap<VkDescriptorSetLayout, DescriptorSetLayout> dsLayouts;
-	// An application can destroy a pipeline layout after a command
-	// buffer is recorded without it becoming invalid. But we still need
-	// the handle for internal hooked-recording.
 	SyncedIntrusiveUnorderedMap<VkPipelineLayout, PipelineLayout> pipeLayouts;
-	// Needs to be ref-counted only for PushDescriptorSetWithTemplateCmd
 	SyncedIntrusiveUnorderedMap<VkDescriptorUpdateTemplate, DescriptorUpdateTemplate> dsuTemplates;
-	// Needs to be ref-counted so we can reference the render passes in
-	// Pipeline or Framebuffer
 	SyncedIntrusiveUnorderedMap<VkRenderPass, RenderPass> renderPasses;
 
-	// Resources stored in descriptors need shared ownership since so that
-	// we don't have to track ds <-> resource links which would be a massive
-	// bottleneck.
 	SyncedIntrusiveUnorderedSet<ImageView> imageViews;
 	SyncedIntrusiveUnorderedSet<Sampler> samplers;
 	SyncedIntrusiveUnorderedSet<Buffer> buffers;
 	SyncedIntrusiveUnorderedSet<BufferView> bufferViews;
 	SyncedIntrusiveUnorderedSet<AccelStruct> accelStructs;
+
+	// NOTE: Even though we just store IntrusivePtr<Pipeline> here, the real
+	// type is GraphicsPipeline, ComputePipeline or RayTracingPipeline.
+	// When erasing from the map, mustMove should be used and the pipeline
+	// casted since the destructor is not virtual.
+	SyncedIntrusiveDerivedUnorderedMap<VkPipeline, Pipeline> pipes;
 
 	// NOTE: when adding new maps: also add mutex initializer in CreateDevice
 
@@ -268,6 +255,7 @@ struct Device {
 };
 
 // Does not expect mutex to be locked
+// TODO: get rid of these
 void notifyDestruction(Device& dev, Handle& handle, VkObjectType type);
 void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type);
 

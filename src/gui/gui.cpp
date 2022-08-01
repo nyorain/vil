@@ -1307,6 +1307,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	// TODO: hacky but we have to keep the records alive, making sure
 	// it's not destroyed inside the lock. Might need more here for correctness.
 	// Should probably come up with better mechanism.
+	auto keepAliveDsCows = std::vector<CommandDescriptorSnapshot> {};
 	auto keepAliveBatches0 = tabs_.cb->records_;
 	auto keepAliveBatches1 = tabs_.cb->selectedFrame_;
 	auto keepAliveDs0 = tabs_.cb->commandViewer_.dsState_;
@@ -1343,6 +1344,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		// decrease) while we hold the lock.
 		for(auto& completed : dev().commandHook->completed) {
 			keepAliveRecs.push_back(completed.record);
+			keepAliveDsCows.push_back(completed.descriptorSnapshot);
 		}
 
 		this->draw(draw, info.fullscreen);

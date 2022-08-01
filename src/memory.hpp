@@ -9,7 +9,7 @@
 
 namespace vil {
 
-struct MemoryResource : DeviceHandle {
+struct MemoryResource : SharedDeviceHandle {
 	// !memoryDestroyed && !memory: no memory associated
 	// !memoryDestroyed && memory: memory associated
 	// memoryDestroyed && !memory: had memory associated but memory object was destroyed
@@ -22,7 +22,7 @@ struct MemoryResource : DeviceHandle {
 	~MemoryResource();
 };
 
-struct DeviceMemory : DeviceHandle {
+struct DeviceMemory : SharedDeviceHandle {
 	VkDeviceMemory handle {};
 
 	u32 typeIndex {};

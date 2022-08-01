@@ -21,12 +21,8 @@ PipelineLayout::~PipelineLayout() {
 		return;
 	}
 
-	// pipe layouts are never used directly by command buffers.
-	dlg_assert(!refRecords);
 	dlg_assert(handle);
-
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_PIPELINE_LAYOUT);
-
 	dev->dispatch.DestroyPipelineLayout(dev->handle, handle, nullptr);
 }
 
@@ -61,7 +57,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 	ThreadMemScope memScope;
 	auto ncis = memScope.copy(pCreateInfos, createInfoCount);
-	auto pres = memScope.alloc<PreData>(createInfoCount);
+
+	std::vector<PreData> pres;
+	pres.resize(createInfoCount);
 
 	// TODO: use memScope as well
 	std::vector<std::vector<VkPipelineShaderStageCreateInfo>> stagesVecs;
@@ -169,7 +167,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		dlg_assert(pPipelines[i]);
 		auto& pci = ncis[i];
 
-		auto pipePtr = new GraphicsPipeline();
+		auto pipePtr = IntrusivePtr<GraphicsPipeline>(new GraphicsPipeline());
 		auto& pipe = *pipePtr;
 		pipe.dev = &dev;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
@@ -275,7 +273,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		}
 
 		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
-		dev.pipes.mustEmplace(pPipelines[i], std::move(pipePtr));
+
+		auto newPipePtr = IntrusiveDerivedPtr<Pipeline>(pipePtr.get());
+		dev.pipes.mustEmplace(pPipelines[i], std::move(newPipePtr));
 	}
 
 	return VK_SUCCESS;
@@ -313,7 +313,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 	for(auto i = 0u; i < createInfoCount; ++i) {
 		dlg_assert(pPipelines[i]);
 
-		auto pipePtr = new ComputePipeline();
+		auto pipePtr = IntrusivePtr<ComputePipeline>(new ComputePipeline());
 		auto& pipe = *pipePtr;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -324,7 +324,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 		dlg_assert(pipe.stage.stage == VK_SHADER_STAGE_COMPUTE_BIT);
 
 		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
-		dev.pipes.mustEmplace(pPipelines[i], std::move(pipePtr));
+
+		auto newPipePtr = IntrusiveDerivedPtr<Pipeline>(pipePtr.get());
+		dev.pipes.mustEmplace(pPipelines[i], std::move(newPipePtr));
 	}
 
 	return VK_SUCCESS;
@@ -338,20 +340,25 @@ VKAPI_ATTR void VKAPI_CALL DestroyPipeline(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	auto pipe = dev.pipes.mustMove(pipeline);
-	pipeline = pipe->handle;
+	auto pipe = mustMoveUnset(device, pipeline);
+	auto& dev = *pipe->dev;
 
-	// Pipeline destructor isn't virtual
+	// Pipeline destructor isn't virtual so we release the IntrusivePtr<Pipeline>
+	// and construct an IntrusivePtr temporary with the correct type.
+	// That will decrease the refCount (and potentially delete the object)
+	// since its immediately destroyed again.
 	switch(pipe->type) {
 		case VK_PIPELINE_BIND_POINT_GRAPHICS:
-			delete static_cast<GraphicsPipeline*>(pipe.release());
+			IntrusivePtr<GraphicsPipeline>(acquireOwnership,
+				static_cast<GraphicsPipeline*>(pipe.release()));
 			break;
 		case VK_PIPELINE_BIND_POINT_COMPUTE:
-			delete static_cast<ComputePipeline*>(pipe.release());
+			IntrusivePtr<ComputePipeline>(acquireOwnership,
+				static_cast<ComputePipeline*>(pipe.release()));
 			break;
 		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
-			delete static_cast<RayTracingPipeline*>(pipe.release());
+			IntrusivePtr<RayTracingPipeline>(acquireOwnership,
+				static_cast<RayTracingPipeline*>(pipe.release()));
 			break;
 		default:
 			dlg_error("unreachable");
@@ -560,7 +567,6 @@ Pipeline::~Pipeline() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-	invalidateCbsLocked();
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_PIPELINE);
 }
 
@@ -616,7 +622,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		dlg_assert(pPipelines[i]);
 		auto& ci = pCreateInfos[i];
 
-		auto pipePtr = new RayTracingPipeline();
+		auto pipePtr = IntrusivePtr<RayTracingPipeline>(new RayTracingPipeline());
 		auto& pipe = *pipePtr;
 		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
@@ -647,7 +653,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		}
 
 		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
-		dev.pipes.mustEmplace(pPipelines[i], std::move(pipePtr));
+
+		auto newPipePtr = IntrusiveDerivedPtr<Pipeline>(pipePtr.get());
+		dev.pipes.mustEmplace(pPipelines[i], std::move(newPipePtr));
 	}
 
 	return VK_SUCCESS;

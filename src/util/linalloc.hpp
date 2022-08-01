@@ -234,6 +234,7 @@ struct LinAllocScope {
 
 	template<typename T>
 	span<T> alloc(size_t n) {
+		static_assert(std::is_trivially_destructible_v<T>);
 		auto ptr = allocRaw<T>(n);
 		return {ptr, n};
 	}

@@ -406,7 +406,6 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 				// Before calling find, we need to unset the invalidated handles from the
 				// commands in hierachy_, find relies on all of them being valid.
 				dlg_assert(record_);
-				replaceInvalidatedLocked(*record_);
 
 				auto findRes = find(record.commands->children_, hierachy_, dsState_);
 				dlg_assert(std::equal(
@@ -450,7 +449,6 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		// Before calling find, we need to unset the invalidated handles from the
 		// commands in hierachy_, find relies on all of them being valid.
 		dlg_assert(record_);
-		replaceInvalidatedLocked(*record_);
 
 		findRes = find(record.commands->children_, hierachy_, dsState_);
 		if(findRes.hierachy.empty()) {

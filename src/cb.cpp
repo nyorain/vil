@@ -152,7 +152,6 @@ CommandBuffer::~CommandBuffer() {
 			lastRecord_->hookRecords.clear();
 		}
 
-		invalidateCbsLocked();
 		notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_COMMAND_BUFFER);
 	}
 
@@ -179,11 +178,6 @@ void CommandBuffer::clearPendingLocked() {
 		auto res = checkLocked(*this->pending.front()->parent);
 		dlg_assert(res);
 	}
-
-	// NOTE: may be unexpected to do this here.
-	// But in all places where we can be sure all submissions were
-	// finished, we have to make sure to invalidate primary cbs.
-	this->invalidateCbsLocked();
 }
 
 void CommandBuffer::doReset(bool startRecord) {
@@ -286,32 +280,16 @@ void CommandBuffer::doEnd() {
 	// lastRecord_ as state (some other thread could query it before we lock)
 	auto keepAliveRecord = lastRecord_;
 
-	// Critical section
+	// Critical section, update our state
 	{
 		std::lock_guard lock(dev->mutex);
-		ZoneScopedN("addToHandles");
 
 		dlg_assert(state_ == State::recording);
 		dlg_assert(!rec.finished);
 
 		state_ = State::executable;
-
-		for(auto& [handle, uh] : rec.handles) {
-			if(handle->objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-				// special sentinel
-				uh->next = uh;
-				uh->prev = uh;
-				continue;
-			}
-
-			if(handle->refRecords) {
-				handle->refRecords->prev = uh;
-			}
-			uh->next = handle->refRecords;
-			handle->refRecords = uh;
-		}
-
 		rec.finished = true;
+
 		lastRecord_ = std::move(builder_.record_);
 	}
 }
@@ -370,7 +348,6 @@ CommandPool::~CommandPool() {
 		return;
 	}
 
-	invalidateCbs();
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_COMMAND_POOL);
 
 	// When a CommandPool is destroyed, all command buffers created from
@@ -418,7 +395,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
 		return res;
 	}
 
-	auto cpPtr = std::make_unique<CommandPool>();
+	auto cpPtr = IntrusivePtr<CommandPool>(new CommandPool());
 	auto& cp = *cpPtr;
 	cp.objectType = VK_OBJECT_TYPE_COMMAND_POOL;
 	cp.dev = &dev;
@@ -439,9 +416,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyCommandPool(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	auto handle = dev.commandPools.mustMove(commandPool)->handle;
-	dev.dispatch.DestroyCommandPool(dev.handle, handle, pAllocator);
+	auto& dev = *mustMoveUnset(device, commandPool)->dev;
+	dev.dispatch.DestroyCommandPool(dev.handle, commandPool, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandPool(
@@ -642,30 +618,83 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 
 // == command buffer recording ==
 // util
-void useHandleImpl(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
-	auto it = rec.handles.find(&handle);
-	if(it == rec.handles.end()) {
-		auto& uh = construct<UsedHandle>(rec, rec);
-		it = rec.handles.emplace(&handle, &uh).first;
+struct GetUsedSet {
+	static auto& get(CommandRecord& rec, const Image&) { return rec.used.images; }
+	static auto& get(CommandRecord& rec, const Buffer&) { return rec.used.buffers; }
+	static auto& get(CommandRecord& rec, const ImageView&) { return rec.used.imageViews; }
+	static auto& get(CommandRecord& rec, const BufferView&) { return rec.used.bufferViews; }
+	static auto& get(CommandRecord& rec, const Sampler&) { return rec.used.samplers; }
+	static auto& get(CommandRecord& rec, const Event&) { return rec.used.events; }
+	static auto& get(CommandRecord& rec, const PipelineLayout&) { return rec.used.pipeLayouts; }
+	static auto& get(CommandRecord& rec, const DescriptorUpdateTemplate&) { return rec.used.dsuTemplates; }
+	static auto& get(CommandRecord& rec, const RenderPass&) { return rec.used.renderPasses; }
+	static auto& get(CommandRecord& rec, const Framebuffer&) { return rec.used.framebuffers; }
+	static auto& get(CommandRecord& rec, const QueryPool&) { return rec.used.queryPools; }
+	static auto& get(CommandRecord& rec, const AccelStruct&) { return rec.used.accelStructs; }
+	static auto& get(CommandRecord& rec, const GraphicsPipeline&) { return rec.used.graphicsPipes; }
+	static auto& get(CommandRecord& rec, const ComputePipeline&) { return rec.used.computePipes; }
+	static auto& get(CommandRecord& rec, const RayTracingPipeline&) { return rec.used.rtPipes; }
+};
+
+template<typename T>
+auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
+	auto& set = GetUsedSet::get(rec, handle);
+
+	// TODO: more efficient find with C++20
+	RefHandle<T> rh(rec.alloc);
+	rh.handle.reset(&handle);
+	auto it = set.find(rh);
+
+	if(it == set.end()) {
+		it = set.insert(std::move(rh)).first;
+	} else {
+		dlg_assert(handle.refCount > 1u);
 	}
 
-	it->second->commands.push_back(&cmd);
+	auto& use = const_cast<RefHandle<T>&>(*it);
+	use.commands.push_back(&cmd);
+	return use;
 }
 
 UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
-	auto it = rec.handles.find(&img);
-	if(it == rec.handles.end()) {
-		auto& uh = construct<UsedImage>(rec, rec);
-		it = rec.handles.emplace(&img, &uh).first;
+	auto& set = rec.used.images;
+
+	// TODO: more efficient find with C++20
+	UsedImage rh(rec.alloc);
+	rh.handle.reset(&img);
+	auto it = set.find(rh);
+
+	if(it == set.end()) {
+		it = set.insert(std::move(rh)).first;
+	} else {
+		dlg_assert(img.refCount > 1u);
 	}
 
-	it->second->commands.push_back(&cmd);
-
-	return static_cast<UsedImage&>(*it->second);
+	auto& use = const_cast<UsedImage&>(*it);
+	use.commands.push_back(&cmd);
+	return use;
 }
 
-void useHandle(CommandRecord& rec, Command& cmd, DeviceHandle& handle) {
-	useHandleImpl(rec, cmd, handle);
+UsedDescriptorSet& useHandleImpl(CommandRecord& rec, Command& cmd, DescriptorSet& ds) {
+	auto& set = rec.used.descriptorSets;
+
+	// TODO: more efficient find with C++20
+	UsedDescriptorSet rh(rec.alloc);
+	rh.ds = static_cast<void*>(&ds);
+	auto it = set.find(rh);
+
+	if(it == set.end()) {
+		it = set.insert(std::move(rh)).first;
+	}
+
+	auto& use = const_cast<UsedDescriptorSet&>(*it);
+	use.commands.push_back(&cmd);
+	return use;
+}
+
+template<typename T>
+auto& useHandle(CommandRecord& rec, Command& cmd, T& handle) {
+	return useHandleImpl(rec, cmd, handle);
 }
 
 UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& img) {
@@ -676,14 +705,14 @@ UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& img) {
 	// NOTE: can currently fail for sparse bindings i guess
 	dlg_assert(img.memory || img.swapchain);
 	if(img.memory) {
-		useHandle(rec, cmd, *img.memory);
+		// useHandle(rec, cmd, *img.memory);
 	}
 
 	return ui;
 }
 
 void useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = true) {
-	useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
+	useHandleImpl(rec, cmd, view);
 	dlg_assert(view.img);
 	if(useImg && view.img) {
 		useHandle(rec, cmd, *view.img);
@@ -691,17 +720,17 @@ void useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = 
 }
 
 void useHandle(CommandRecord& rec, Command& cmd, Buffer& buf) {
-	useHandle(rec, cmd, static_cast<DeviceHandle&>(buf));
+	useHandleImpl(rec, cmd, buf);
 
 	// NOTE: can currently fail for sparse bindings i guess
 	dlg_assert(buf.memory);
 	if(buf.memory) {
-		useHandle(rec, cmd, *buf.memory);
+		// useHandle(rec, cmd, *buf.memory);
 	}
 }
 
 void useHandle(CommandRecord& rec, Command& cmd, BufferView& view) {
-	useHandle(rec, cmd, static_cast<DeviceHandle&>(view));
+	useHandleImpl(rec, cmd, view);
 
 	dlg_assert(view.buffer);
 	if(view.buffer) {
@@ -716,10 +745,10 @@ void useHandle(CommandRecord& rec, Command& cmd, Image& image, VkImageLayout new
 }
 
 template<typename... Args>
-void useHandle(CommandBuffer& cb, Args&&... args) {
+decltype(auto) useHandle(CommandBuffer& cb, Args&&... args) {
 	dlg_assert(cb.state() == CommandBuffer::State::recording);
 	dlg_assert(cb.builder().record_);
-	useHandle(*cb.builder().record_, std::forward<Args>(args)...);
+	return useHandle(*cb.builder().record_, std::forward<Args>(args)...);
 }
 
 // commands
@@ -1042,9 +1071,9 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 	// Also like this in CmdPushConstants
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
-
 	cmd.sets = alloc<DescriptorSet*>(cb, descriptorSetCount);
+
+	useHandle(cb, cmd, *pipeLayoutPtr);
 
 	ThreadMemScope memScope;
 	auto setHandles = memScope.allocUndef<VkDescriptorSet>(descriptorSetCount);
@@ -1763,7 +1792,6 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		const VkCommandBuffer*                      pCommandBuffers) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ExecuteCommandsCmd>(cb);
-	auto& parentRec = *cb.builder().record_;
 	cb.builder().appendParent(cmd);
 
 	cmd.stats_.numChildSections = commandBufferCount;
@@ -1792,25 +1820,38 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 			last->nextParent_ = &childCmd;
 		}
 
-		// Needed to correctly invalidate cb when a secondary buffer is
-		// reset/destroyed.
-		useHandle(cb, cmd, secondary);
+		auto useAllHandles = [&](auto& set) {
+			for(auto& entry : set) {
+				useHandle(cb, cmd, *entry.handle);
+			}
+		};
 
 		auto& rec = *recordPtr;
-		for(auto& [handle, uh] : rec.handles) {
-			// Make sure we carry along layout changes done in secondary
-			// command buffers.
-			if(handle->objectType == VK_OBJECT_TYPE_IMAGE) {
-				auto& ui = static_cast<UsedImage&>(*uh);
-				if(ui.layoutChanged) {
-					auto& dst = useHandleImpl(parentRec, cmd, static_cast<Image&>(*handle));
-					dst.layoutChanged = true;
-					dst.finalLayout = ui.finalLayout;
-					break;
-				}
-			}
+		useAllHandles(rec.used.buffers);
+		useAllHandles(rec.used.computePipes);
+		useAllHandles(rec.used.graphicsPipes);
+		useAllHandles(rec.used.rtPipes);
+		useAllHandles(rec.used.pipeLayouts);
+		useAllHandles(rec.used.dsuTemplates);
+		useAllHandles(rec.used.renderPasses);
+		useAllHandles(rec.used.framebuffers);
+		useAllHandles(rec.used.queryPools);
+		useAllHandles(rec.used.imageViews);
+		useAllHandles(rec.used.bufferViews);
+		useAllHandles(rec.used.samplers);
+		useAllHandles(rec.used.accelStructs);
+		useAllHandles(rec.used.events);
 
-			useHandleImpl(parentRec, cmd, *handle);
+		for(auto& uds : rec.used.descriptorSets) {
+			useHandle(cb, cmd, *static_cast<DescriptorSet*>(uds.ds));
+		}
+
+		for(auto& uimg : rec.used.images) {
+			auto& use = useHandle(cb, cmd, *uimg.handle);
+			if(uimg.layoutChanged) {
+				use.layoutChanged = true;
+				use.finalLayout = uimg.finalLayout;
+			}
 		}
 
 		cb.builder().record_->secondaries.push_back(std::move(recordPtr));
@@ -1981,17 +2022,20 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 	dlg_assert(pipe.type == pipelineBindPoint);
 
 	if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		cb.newComputeState().pipe = static_cast<ComputePipeline*>(&pipe);
-		cmd.pipe = cb.computeState().pipe;
-		useHandle(cb, cmd, *cmd.pipe);
+		auto computePipe = static_cast<ComputePipeline*>(&pipe);
+		cb.newComputeState().pipe = computePipe;
+		cmd.pipe = computePipe;
+		useHandle(cb, cmd, *computePipe);
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		cb.newGraphicsState().pipe = static_cast<GraphicsPipeline*>(&pipe);
-		cmd.pipe = cb.graphicsState().pipe;
-		useHandle(cb, cmd, *cmd.pipe);
+		auto gfxPipe = static_cast<GraphicsPipeline*>(&pipe);
+		cb.newGraphicsState().pipe = gfxPipe;
+		cmd.pipe = gfxPipe;
+		useHandle(cb, cmd, *gfxPipe);
 	} else if(pipelineBindPoint == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
-		cb.newRayTracingState().pipe = static_cast<RayTracingPipeline*>(&pipe);
-		cmd.pipe = cb.rayTracingState().pipe;
-		useHandle(cb, cmd, *cmd.pipe);
+		auto rtPipe = static_cast<RayTracingPipeline*>(&pipe);
+		cb.newRayTracingState().pipe = rtPipe;
+		cmd.pipe = rtPipe;
+		useHandle(cb, cmd, *rtPipe);
 	} else {
 		dlg_error("unknown pipeline bind point");
 	}
@@ -2113,7 +2157,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 	// NOTE: See BindDescriptorSets for rationale on pipe layout handling here.
 	auto pipeLayoutPtr = getPtr(*cb.dev, pipeLayout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	useHandle(cb, cmd, *cmd.pipeLayout);
 
 	cmd.stages = stageFlags;
 	cmd.offset = offset;
@@ -2415,7 +2459,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	useHandle(cb, cmd, *cmd.pipeLayout);
 
 	cb.dev->dispatch.CmdPushDescriptorSetKHR(cb.handle(),
 		pipelineBindPoint, cmd.pipeLayout->handle, set,
@@ -2436,14 +2480,14 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
 
 	auto pipeLayoutPtr = getPtr(*cb.dev, layout);
 	cmd.pipeLayout = pipeLayoutPtr.get();
-	cb.builder().record_->pipeLayouts.emplace_back(std::move(pipeLayoutPtr));
+	useHandle(cb, cmd, *cmd.pipeLayout);
 
 	dlg_assert(set < cmd.pipeLayout->descriptors.size());
 	auto& dsLayout = *cmd.pipeLayout->descriptors[set];
 
 	auto dsUpdateTemplate = getPtr(*cb.dev, descriptorUpdateTemplate);
 	cmd.updateTemplate = dsUpdateTemplate.get();
-	cb.builder().record_->dsUpdateTemplates.emplace_back(std::move(dsUpdateTemplate));
+	useHandle(cb, cmd, *cmd.updateTemplate);
 
 	auto& dut = get(*cb.dev, descriptorUpdateTemplate);
 	auto dataSize = totalUpdateDataSize(*cmd.updateTemplate);

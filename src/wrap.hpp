@@ -206,6 +206,17 @@ template<typename H> auto mustMoveUnset(Device& dev, H& handle) {
 	return ptr;
 }
 
+template<typename H> auto mustMoveUnset(VkDevice vkDev, H& handle) {
+	if(HandleDesc<H>::wrap) {
+		auto& h = unwrap(handle);
+		auto& dev = *h.dev;
+		return mustMoveUnset(dev, handle);
+	} else {
+		auto& dev = getDevice(vkDev);
+		return mustMoveUnset(dev, handle);
+	}
+}
+
 inline CommandBuffer& getCommandBuffer(VkCommandBuffer handle) {
 	if(HandleDesc<VkCommandBuffer>::wrap) {
 		return unwrap(handle);
@@ -219,7 +230,11 @@ void KeepAliveRingBuffer<T, maxSize>::push(T obj) {
 	using H = decltype(obj->handle);
 
 	if constexpr(maxSize == 0u) {
-		HandleDesc<H>::map(*obj->dev).mustErase(*obj);
+		std::unique_lock lock(obj->dev->mutex);
+		auto ptr = HandleDesc<H>::map(*obj->dev).mustMoveLocked(*obj);
+		ptr->handle = {}; // make sure to unset handle, marking it as destroyed
+		// unlock before ptr gets destroyed and potentially destroys the object
+		lock.unlock();
 		return;
 	} else {
 		// keep alive to make sure we destroy it ouside of the cirtical section

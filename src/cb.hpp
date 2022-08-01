@@ -8,7 +8,7 @@
 
 namespace vil {
 
-struct CommandPool : DeviceHandle {
+struct CommandPool : SharedDeviceHandle {
 	VkCommandPool handle {};
 	u32 queueFamily {};
 	std::vector<CommandBuffer*> cbs;
@@ -26,7 +26,7 @@ struct CommandPool : DeviceHandle {
 //   and the command buffer might be in invalid state before/during the
 //   record command, which is invalid.
 // - State changes are synchronized via the device mutex.
-struct CommandBuffer : DeviceHandle {
+struct CommandBuffer : SharedDeviceHandle {
 public:
 	enum class State {
 		initial,

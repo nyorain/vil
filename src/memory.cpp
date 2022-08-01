@@ -49,7 +49,6 @@ DeviceMemory::~DeviceMemory() {
 
 	std::lock_guard lock(dev->mutex);
 
-	invalidateCbsLocked();
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_DEVICE_MEMORY);
 
 	// NOTE that we temporarily invalidate the ordering invariant of
@@ -98,7 +97,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 		return res;
 	}
 
-	auto memPtr = std::make_unique<DeviceMemory>();
+	auto memPtr = IntrusivePtr<DeviceMemory>(new DeviceMemory());
 	auto& memory = *memPtr;
 	memory.objectType = VK_OBJECT_TYPE_DEVICE_MEMORY;
 	memory.dev = &dev;
@@ -120,9 +119,8 @@ VKAPI_ATTR void VKAPI_CALL FreeMemory(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	auto handle = dev.deviceMemories.mustMove(memory)->handle;
-	dev.dispatch.FreeMemory(dev.handle, handle, pAllocator);
+	auto& dev = *mustMoveUnset(device, memory)->dev;
+	dev.dispatch.FreeMemory(dev.handle, memory, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL MapMemory(

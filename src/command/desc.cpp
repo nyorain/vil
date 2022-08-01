@@ -542,15 +542,6 @@ BatchMatch match(ThreadMemScope& tms, const FrameSubmission& a, const FrameSubmi
 		return entries[ia * b.submissions.size() + ib];
 	};
 
-	// make sure no record has invalidated handles
-	for(auto& ra : a.submissions) {
-		replaceInvalidatedLocked(*ra);
-	}
-
-	for(auto& rb : b.submissions) {
-		replaceInvalidatedLocked(*rb);
-	}
-
 	for(auto ia = 0u; ia < a.submissions.size(); ++ia) {
 		for(auto ib = 0u; ib < b.submissions.size(); ++ib) {
 			// TODO: consider additional information about the record instead

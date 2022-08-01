@@ -264,13 +264,15 @@ void CommandBufferGui::draw(Draw& draw) {
 			dlg_assert(selectedRecord_);
 			refButtonD(*gui_, selectedRecord_->cb);
 			imGuiText("cb name: {}", selectedRecord_->cbName);
-			imGuiText("num handles: {}", selectedRecord_->handles.size());
 			imGuiText("broken labels: {}{}", std::boolalpha, selectedRecord_->brokenHierarchyLabels);
 			imGuiText("record id: {}", selectedRecord_->recordID);
 			imGuiText("refCount: {}", selectedRecord_->refCount);
 			imGuiText("num hook records: {}", selectedRecord_->hookRecords.size());
 			imGuiText("num secondaries: {}", selectedRecord_->secondaries.size());
-			imGuiText("num pipeLayouts: {}", selectedRecord_->pipeLayouts.size());
+			imGuiText("num pipeLayouts: {}", selectedRecord_->used.pipeLayouts.size());
+			imGuiText("num gfx pipes: {}", selectedRecord_->used.graphicsPipes.size());
+			imGuiText("num compute pipes: {}", selectedRecord_->used.computePipes.size());
+			imGuiText("num rt pipes: {}", selectedRecord_->used.rtPipes.size());
 			imGuiText("builds accel structs: {}", selectedRecord_->buildsAccelStructs);
 			break;
 		case SelectionType::command:
@@ -626,14 +628,6 @@ void CommandBufferGui::displayFrameCommands() {
 				ImGui::Separator();
 			}
 
-			// When the record isn't valid anymore (cb is unset), we have to
-			// be careful to not actually reference any destroyed resources.
-			if(!rec->cb) {
-				replaceInvalidatedLocked(*rec);
-			}
-
-			dlg_assert(rec->invalidated.empty());
-
 			// extra tree node for every submission
 			const auto id = dlg::format("Commands:{}", r);
 			auto name = "<Unnamed>";
@@ -730,14 +724,6 @@ void CommandBufferGui::displayFrameCommands() {
 void CommandBufferGui::displayRecordCommands() {
 	auto& dev = gui_->dev();
 	dlg_assert(record_);
-
-	// When the record isn't valid anymore (cb is unset), we have to
-	// be careful to not actually reference any destroyed resources.
-	if(record_ && !record_->cb) {
-		replaceInvalidatedLocked(*record_);
-	}
-
-	dlg_assert(record_->invalidated.empty());
 
 	auto* selected = selectedCommand_.empty() ? nullptr : selectedCommand_.back();
 
