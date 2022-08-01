@@ -239,8 +239,6 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	srcBarrier.oldLayout = srcLayout;
 	srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	srcBarrier.srcAccessMask =
-		VK_ACCESS_SHADER_READ_BIT |
-		VK_ACCESS_SHADER_WRITE_BIT |
 		VK_ACCESS_MEMORY_READ_BIT |
 		VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 	srcBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -326,8 +324,6 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	srcBarrier.newLayout = srcLayout;
 	srcBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	srcBarrier.dstAccessMask =
-		VK_ACCESS_SHADER_READ_BIT |
-		VK_ACCESS_SHADER_WRITE_BIT |
 		VK_ACCESS_MEMORY_READ_BIT |
 		VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 

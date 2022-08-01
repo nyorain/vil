@@ -93,7 +93,7 @@ void CommandBufferGui::draw(Draw& draw) {
 			ImGui::EndCombo();
 		}
 	} else if(!gui_->dev().swapchain) {
-		clearSelection();
+		clearSelection(true);
 
 		records_ = {};
 		openedSections_ = {};
@@ -294,7 +294,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) 
 	// }
 
 	// Unset hooks
-	clearSelection();
+	clearSelection(true);
 	openedSections_ = {};
 
 	record_ = std::move(record);
@@ -339,7 +339,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 	// }
 
 	// Unset hooks
-	clearSelection();
+	clearSelection(true);
 	record_ = std::move(record);
 	openedSections_ = {};
 	updateHookTarget();
@@ -348,7 +348,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
 void CommandBufferGui::showSwapchainSubmissions() {
 	mode_ = UpdateMode::swapchain;
 	cb_ = {};
-	clearSelection();
+	clearSelection(true);
 
 	// NOTE: don't do that here, we explicitly preserve them.
 	// openedSections_ = {};
@@ -595,7 +595,7 @@ void CommandBufferGui::displayFrameCommands() {
 		const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit");
 		const auto labelStartX = ImGui::GetItemRectMin().x + 30;
 		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
-			clearSelection();
+			clearSelection(true);
 			selectionType_ = SelectionType::submission;
 			selectedFrame_ = records_;
 			selectedBatch_ = &selectedFrame_[b];
@@ -654,7 +654,7 @@ void CommandBufferGui::displayFrameCommands() {
 			const auto open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name);
 			const auto labelStartX = ImGui::GetItemRectMin().x + 30;
 			if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
-				clearSelection();
+				clearSelection(true);
 				selectionType_ = SelectionType::record;
 				selectedRecord_ = rec;
 				selectedFrame_ = records_;
@@ -695,7 +695,7 @@ void CommandBufferGui::displayFrameCommands() {
 				selectedCommand_.empty() ||
 				nsel.back() != selectedCommand_.back());
 			if(newSelection) {
-				clearSelection();
+				clearSelection(false);
 
 				selectionType_ = SelectionType::command;
 				selectedCommand_ = std::move(nsel);
@@ -787,9 +787,12 @@ void CommandBufferGui::displayRecordCommands() {
 	}
 }
 
-void CommandBufferGui::clearSelection() {
+void CommandBufferGui::clearSelection(bool unselectCommandViewer) {
 	auto& dev = gui_->dev();
-	commandViewer_.unselect();
+
+	if(unselectCommandViewer) {
+		commandViewer_.unselect();
+	}
 
 	selectionType_ = SelectionType::none;
 	selectedFrame_ = {};

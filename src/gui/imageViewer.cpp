@@ -795,13 +795,17 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 	createData();
 }
 
-void ImageViewer::reset() {
+void ImageViewer::reset(bool resetZoomPanSelection) {
 	unselect();
-	imageDraw_ = {};
-	aspect_ = {};
-	subresRange_ = {};
-	offset_ = {};
-	scale_ = 1.f;
+	imageDraw_.ds = {};
+
+	if(resetZoomPanSelection) {
+		imageDraw_ = {};
+		offset_ = {};
+		scale_ = 1.f;
+		aspect_ = {};
+		subresRange_ = {};
+	}
 }
 
 void ImageViewer::unselect() {

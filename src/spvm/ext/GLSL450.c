@@ -2,6 +2,7 @@
 #include <spvm/state.h>
 #include "GLSL.std.450.h"
 #include <math.h>
+#include <assert.h>
 
 #ifndef M_PI
 #    define M_PI 3.14159265358979323846
@@ -351,14 +352,20 @@ void spvm_execute_GLSL450_InverseSqrt(spvm_word type, spvm_word id, spvm_word wo
 #define MATRIX_GET(m, c, r) *(m + c * 4 + r)
 void matrix_to_array_d(double* out, spvm_byte use_d, spvm_member_t mems, spvm_word mem_count) {
 	if (use_d) {
-		for (spvm_word i = 0; i < mem_count; i++)
-			for (spvm_word j = 0; j < mems[i].member_count; j++)
+		for (spvm_word i = 0; i < mem_count; i++) {
+			assert(mems[i].member_count == mem_count);
+			for (spvm_word j = 0; j < mems[i].member_count; j++) {
 				MATRIX_GET(out, i, j) = mems[i].members[j].value.d;
+			}
+		}
 	}
 	else {
-		for (spvm_word i = 0; i < mem_count; i++)
-			for (spvm_word j = 0; j < mems[i].member_count; j++)
+		for (spvm_word i = 0; i < mem_count; i++) {
+			assert(mems[i].member_count == mem_count);
+			for (spvm_word j = 0; j < mems[i].member_count; j++) {
 				MATRIX_GET(out, i, j) = (double)mems[i].members[j].value.f;
+			}
+		}
 	}
 }
 double matrix_determinant(double* m, spvm_word mtype)
@@ -408,7 +415,15 @@ void spvm_execute_GLSL450_MatrixInverse(spvm_word type, spvm_word id, spvm_word 
 	spvm_word mtype = state->results[x].member_count;
 
 	matrix_to_array_d(&m[0][0], type_info->value_bitcount > 32, state->results[x].members, mtype);
-	double invdet = 1.0 / matrix_determinant(&m[0][0], mtype);
+	// TODO: when the determinant here is zero, the resulting values
+	//   are undefined per glsl spec.
+	//   Add error code in undefined behavior analyzer
+	double det = matrix_determinant(&m[0][0], mtype);
+	if (state->analyzer && fabs(det) < 0.000001) {
+		state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_matrix_inverse);
+	}
+
+	double invdet = 1.0 / det;
 
 	double res[4][4] = {0};
 

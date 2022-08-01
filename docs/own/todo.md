@@ -12,6 +12,11 @@ urgent, bugs:
       But the old solution breaks renderpass compat.
 	  Insert barriers as needed when recording instead.
 	  Remove the old code from splitInterruptable then.
+	  	- wait no, this should work, we record memory barriers
+		  between the split passes. Just verify that it works
+		  (and figure our a7 bug)
+- [ ] add undefined behavior analyzer in shader debuggger.
+      just need to enable spvm feature
 - [ ] set spec constants for shader module in gui shader debugger.
       Test with shader from tkn/iro
 - [ ] figure out if our linear allocator (the std::allocator) adapter

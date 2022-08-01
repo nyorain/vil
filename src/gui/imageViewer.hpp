@@ -37,7 +37,7 @@ public:
 		const VkImageSubresourceRange&, VkImageLayout initialLayout,
 		VkImageLayout finalLayout, u32 /*Flags*/ flags);
 
-	void reset();
+	void reset(bool resetZoomPanSelection);
 	void unselect();
 	void display(Draw& draw);
 	const auto& imageDraw() const { return imageDraw_; }

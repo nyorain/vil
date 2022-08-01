@@ -60,7 +60,7 @@ private:
 
 	void displayFrameCommands();
 	void displayRecordCommands();
-	void clearSelection();
+	void clearSelection(bool unselectCommandViewer);
 
 	void updateRecord(IntrusivePtr<CommandRecord> record);
 	void updateRecords(std::vector<FrameSubmission>, bool updateSelection);

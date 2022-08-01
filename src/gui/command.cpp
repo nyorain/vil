@@ -302,15 +302,17 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 	command_ = &cmd;
 	dsState_ = std::move(dsState);
 
+	auto resetImgViewer = false;
 	if(selectCommandView) {
 		view_ = IOView::command;
 		viewData_.command = {};
 		resetState = true;
+		resetImgViewer = true;
 	}
 
 	if(resetState) {
 		state_ = {};
-		imageViewer_.reset();
+		imageViewer_.reset(resetImgViewer);
 
 		// Even when we could keep our selection, when resetState is true
 		// the command might have potentially changed (e.g. from a Draw
@@ -351,7 +353,7 @@ void CommandViewer::displayTransferIOList() {
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferSrc;
 			viewData_.transfer.index = 0u; // always reset
-			imageViewer_.reset();
+			imageViewer_.reset(true);
 			updateHook();
 		}
 	};
@@ -373,7 +375,7 @@ void CommandViewer::displayTransferIOList() {
 		if(ImGui::IsItemClicked()) {
 			view_ = IOView::transferDst;
 			viewData_.transfer.index = 0u; // always reset
-			imageViewer_.reset();
+			imageViewer_.reset(true);
 			updateHook();
 		}
 	};
@@ -411,7 +413,7 @@ void CommandViewer::displayTransferIOList() {
 			if(ImGui::IsItemClicked()) {
 				view_ = IOView::transferDst;
 				viewData_.transfer.index = i;
-				imageViewer_.reset();
+				imageViewer_.reset(true);
 				updateHook();
 			}
 		}
@@ -547,7 +549,7 @@ void CommandViewer::displayDsList() {
 					if(ImGui::IsItemClicked()) {
 						view_ = IOView::ds;
 						viewData_.ds = {setID, bID, 0, VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM};
-						imageViewer_.reset();
+						imageViewer_.reset(true);
 						updateHook();
 					}
 					if(ImGui::IsItemHovered()) {
@@ -675,7 +677,7 @@ void CommandViewer::displayIOList() {
 					if(ImGui::IsItemClicked()) {
 						view_ = IOView::attachment;
 						viewData_.attachment = {type, id};
-						imageViewer_.reset();
+						imageViewer_.reset(true);
 						updateHook();
 					}
 				};
@@ -1323,10 +1325,6 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 void CommandViewer::displayCommand() {
 	dlg_assert(command_);
 	dlg_assert(view_ == IOView::command);
-
-#ifdef VIL_DEBUG
-	imGuiText("relID: {}", command_->relID);
-#endif // VIL_DEBUG
 
 	if(state_) {
 		dlg_assert(record_);
