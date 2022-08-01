@@ -15,13 +15,10 @@ namespace vil {
 
 struct XfbPatchDesc;
 
-struct PipelineLayout : DeviceHandle {
+struct PipelineLayout : SharedDeviceHandle {
 	VkPipelineLayout handle;
 	std::vector<IntrusivePtr<DescriptorSetLayout>> descriptors;
 	std::vector<VkPushConstantRange> pushConstants;
-
-	// Intrusive ref count. Needed e.g. for command buffer recording
-	std::atomic<u32> refCount {0};
 
 	~PipelineLayout();
 };
@@ -44,7 +41,7 @@ struct PipelineShaderStage {
 spc::Compiler& specializeSpirv(const PipelineShaderStage&);
 std::unique_ptr<spc::Compiler> copySpecializeSpirv(const PipelineShaderStage&);
 
-struct Pipeline : DeviceHandle {
+struct Pipeline : SharedDeviceHandle {
 	VkPipeline handle {};
 	VkPipelineBindPoint type {};
 

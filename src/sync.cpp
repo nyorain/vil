@@ -3,6 +3,7 @@
 #include <device.hpp>
 #include <data.hpp>
 #include <queue.hpp>
+#include <wrap.hpp>
 #include <util/util.hpp>
 
 namespace vil {
@@ -14,7 +15,6 @@ Fence::~Fence() {
 
 	// per spec, we can assume all associated payload to be finished
 	std::lock_guard lock(dev->mutex);
-	dlg_assert(!refRecords); // cant have associated records
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FENCE);
 
 	if(this->submission) {
@@ -29,7 +29,6 @@ Semaphore::~Semaphore() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-	invalidateCbsLocked(); // timeline semaphores can have associated records
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_SEMAPHORE);
 
 	// per spec, we can assume all associated payload to be finished
@@ -53,7 +52,6 @@ Event::~Event() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-	invalidateCbsLocked();
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_EVENT);
 }
 
@@ -84,8 +82,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFence(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	dev.fences.mustErase(fence);
+	auto& dev = *mustMoveUnset(device, fence)->dev;
 	dev.dispatch.DestroyFence(device, fence, pAllocator);
 }
 
@@ -204,8 +201,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	dev.semaphores.mustErase(semaphore);
+	auto& dev = *mustMoveUnset(device, semaphore)->dev;
 	dev.dispatch.DestroySemaphore(device, semaphore, pAllocator);
 }
 
@@ -221,7 +217,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
 		return res;
 	}
 
-	auto evPtr = std::make_unique<Event>();
+	auto evPtr = IntrusivePtr<Event>(new Event());
 	auto& event = *evPtr;
 	event.objectType = VK_OBJECT_TYPE_EVENT;
 	event.dev = &dev;
@@ -241,10 +237,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyEvent(
 		return;
 	}
 
-	auto& ev = get(device, vkEvent);
-	auto handle = ev.handle;
-	ev.dev->events.mustErase(vkEvent);
-	ev.dev->dispatch.DestroyEvent(ev.dev->handle, handle, pAllocator);
+	auto& dev = *mustMoveUnset(device, vkEvent)->dev;
+	dev.dispatch.DestroyEvent(dev.handle, vkEvent, pAllocator);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetEventStatus(

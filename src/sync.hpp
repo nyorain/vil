@@ -6,7 +6,7 @@
 
 namespace vil {
 
-struct Fence : DeviceHandle {
+struct Fence : SharedDeviceHandle {
 	VkFence handle {};
 
 	// The pending submission this fence is currently associated to.
@@ -19,7 +19,7 @@ struct Fence : DeviceHandle {
 	Fence& operator=(Fence&&) = delete;
 };
 
-struct Semaphore : DeviceHandle {
+struct Semaphore : SharedDeviceHandle {
 	VkSemaphore handle {};
 
 	// NOTE: eventually, we'll want to support other kinds of payloads here.
@@ -48,7 +48,7 @@ struct Semaphore : DeviceHandle {
 	~Semaphore();
 };
 
-struct Event : DeviceHandle {
+struct Event : SharedDeviceHandle {
 	VkEvent handle {};
 	~Event();
 };

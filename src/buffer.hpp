@@ -16,7 +16,6 @@ struct Buffer : MemoryResource {
 	std::vector<BufferView*> views;
 	VkDeviceAddress deviceAddress {}; // null if not available
 
-	std::atomic<u32> refCount {};
 	std::vector<CowBufferRange*> cows;
 
 	Buffer() = default;
@@ -25,12 +24,10 @@ struct Buffer : MemoryResource {
 	Buffer& operator=(Buffer&&) = delete;
 };
 
-struct BufferView : DeviceHandle {
+struct BufferView : SharedDeviceHandle {
 	VkBufferView handle;
 	VkBufferViewCreateInfo ci;
 	Buffer* buffer {};
-
-	std::atomic<u32> refCount {};
 
 	BufferView() = default;
 	~BufferView();

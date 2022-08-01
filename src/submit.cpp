@@ -477,18 +477,12 @@ void postProcessLocked(QueueSubmitter& subm) {
 			}
 
 			// store pending layouts
-			for(auto& used : recPtr->handles) {
-				if(used.first->objectType != VK_OBJECT_TYPE_IMAGE) {
-					continue;
-				}
-
-				auto& img = static_cast<Image&>(*used.first);
-				auto& ui = static_cast<UsedImage&>(*used.second);
+			for(auto& ui : recPtr->used.images) {
 				if(ui.layoutChanged) {
 					dlg_assert(
 						ui.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
 						ui.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
-					img.pendingLayout = ui.finalLayout;
+					ui.handle->pendingLayout = ui.finalLayout;
 				}
 			}
 		}
@@ -542,21 +536,36 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 		// Need const_cast here since we store non-const pointers in rec.handles.
 		// The find function won't modify it, it's just an interface quirk.
 		auto* toFind = const_cast<DeviceHandle*>(&handle);
-		if(rec.handles.find(toFind) != rec.handles.end()) {
-			return true;
+
+		// TODO: implement more general mechanism
+		if(handle.objectType == VK_OBJECT_TYPE_BUFFER) {
+			auto& buf = static_cast<Buffer&>(*toFind);
+			RefHandle<Buffer> rh(ThreadContext::instance.linalloc_);
+			rh.handle = IntrusivePtr<Buffer>(acquireOwnership, &buf);
+			(void) rh.handle.release();
+			auto it = rec.used.buffers.find(rh);
+			if(it != rec.used.buffers.end()) {
+				return true;
+			}
+		} else if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
+			auto& img = static_cast<Image&>(*toFind);
+			UsedImage rh(ThreadContext::instance.linalloc_);
+			rh.handle = IntrusivePtr<Image>(acquireOwnership, &img);
+			auto it = rec.used.images.find(rh);
+			(void) rh.handle.release();
+			if(it != rec.used.images.end()) {
+				return true;
+			}
+		} else {
+			dlg_error("unreeachable");
 		}
 
-		for(auto& pair : rec.handles) {
-			dlg_assert(pair.first);
-
-			auto& rhandle = *pair.first;
-			if(rhandle.objectType != VK_OBJECT_TYPE_DESCRIPTOR_SET) {
-				continue;
-			}
-
+		for(auto& uds : rec.used.descriptorSets) {
+			// in this case we know that the bound descriptor set must
+			// still be valid
+			auto& state = *static_cast<DescriptorSet*>(uds.ds);
 			// important that the ds mutex is locked mainly for
 			// update_unused_while_pending.
-			auto& state = static_cast<DescriptorSet&>(rhandle);
 			auto lock = state.lock();
 
 			for(auto& binding : state.layout->bindings) {
@@ -577,6 +586,8 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 
 				// NOTE: we don't have to care for buffer views as they
 				// are always readonly.
+				// NOTE: not checking accelStructs here as we don't
+				// expect them to be checked here
 			}
 		}
 	}

@@ -1228,6 +1228,7 @@ void ResourceGui::draw(Draw& draw) {
 }
 
 void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
+	/*
 	// too broken atm, was just a prototype.
 	// hard to implement for dynamic descriptor sets and records
 	constexpr auto enableUsages = false;
@@ -1364,6 +1365,28 @@ void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
 				ImGui::TreePop();
 			}
 		}
+	});
+	*/
+
+	auto visitor = TemplateResourceVisitor([&](auto& res) {
+		if(editName_) {
+			imGuiTextInput("", handle.name);
+			if(ImGui::IsItemDeactivated()) {
+				editName_ = false;
+			}
+
+			// TODO: forward new debug name to further layers?
+			// not sure if that's expected behavior
+		} else {
+			imGuiText("{}", name(res));
+			if(ImGui::IsItemClicked()) {
+				editName_ = true;
+			}
+		}
+
+		ImGui::Spacing();
+
+		this->drawDesc(draw, res);
 	});
 
 	for(auto& handler : ObjectTypeHandler::handlers) {

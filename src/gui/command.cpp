@@ -506,8 +506,8 @@ void CommandViewer::displayDsList() {
 					auto sstages = stages(pipe);
 					dlg_assert(!sstages.empty());
 
-					ThreadMemScope memScope;
-					auto stageNames = memScope.alloc<std::string>(sstages.size());
+					std::vector<std::string> stageNames;
+					stageNames.resize(sstages.size());
 
 					std::optional<u32> firstValid;
 					for(auto i = 0u; i < sstages.size(); ++i) {
@@ -1444,14 +1444,6 @@ void CommandViewer::draw(Draw& draw) {
 	}
 
 	dlg_assert(record_);
-
-	// we read a lot of data from commands in the given record, so make
-	// sure there aren't any invalid handles in there.
-	if(!record_->cb) {
-		replaceInvalidatedLocked(*record_);
-	}
-
-	dlg_assert(record_->invalidated.empty());
 
 	auto& bcmd = *command_;
 	auto actionCmd = bcmd.type() == CommandType::dispatch ||

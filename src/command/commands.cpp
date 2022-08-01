@@ -45,38 +45,6 @@ auto rawHandles(ThreadMemScope& scope, const C& handles) {
 	return ret;
 }
 
-// checkUnset
-template<typename H>
-void checkReplace(H*& handlePtr, const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	if(!handlePtr) {
-		return;
-	}
-
-	auto it = map.find(handlePtr);
-	if(it != map.end()) {
-		handlePtr = static_cast<H*>(it->second);
-	}
-}
-
-template<typename H>
-void checkReplace(span<H*> handlePtr, const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	for(auto& ptr : handlePtr) {
-		checkReplace(ptr, map);
-	}
-}
-
-void checkReplace(RenderPassInstanceState& rpi, const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	for(auto& att : rpi.colorAttachments) {
-		checkReplace(att, map);
-	}
-
-	for(auto& att : rpi.inputAttachments) {
-		checkReplace(att, map);
-	}
-
-	checkReplace(rpi.depthStencilAttachment, map);
-}
-
 // ArgumentsDesc
 NameResult name(DeviceHandle* handle, NullName nullName, bool displayType) {
 	if(!handle) {
@@ -208,22 +176,6 @@ Matcher Command::match(const Command& cmd) const {
 	return m;
 }
 
-// SectionCommand
-void SectionCommand::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	ParentCommand::replace(map);
-
-	auto it = stats_.boundPipelines;
-	auto prevPtr = &stats_.boundPipelines;
-	while(it) {
-		if(map.find(it->pipe) != map.end()) {
-			*prevPtr = it->next;
-		}
-
-		prevPtr = &it->next;
-		it = it->next;
-	}
-}
-
 // BarrierCmdBase
 std::string formatQueueFam(u32 fam) {
 	if(fam == VK_QUEUE_FAMILY_IGNORED) {
@@ -235,11 +187,6 @@ std::string formatQueueFam(u32 fam) {
 	}
 
 	return std::to_string(fam);
-}
-
-void BarrierCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(buffers, map);
-	checkReplace(images, map);
 }
 
 void BarrierCmdBase::displayInspector(Gui& gui) const {
@@ -605,11 +552,6 @@ void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		u32(imgb.size()), imgb.data());
 }
 
-void WaitEventsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	BarrierCmdBase::replace(map);
-	checkReplace(events, map);
-}
-
 void WaitEventsCmd::displayInspector(Gui& gui) const {
 	for(auto& event : events) {
 		refButtonD(gui, event);
@@ -748,13 +690,6 @@ void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	} else {
 		dev.dispatch.CmdBeginRenderPass(cb, &this->info, info.contents);
 	}
-}
-
-void BeginRenderPassCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(rp, map);
-	checkReplace(fb, map);
-	checkReplace(attachments, map);
-	ParentCommand::replace(map);
 }
 
 void BeginRenderPassCmd::displayInspector(Gui& gui) const {
@@ -1094,25 +1029,6 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	}
 }
 
-void DrawCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	// NOTE: we know that this isn't really const, it's just marked
-	// as const here because it's shared with other commands.
-	// And here we are allowed to modify it since this is always called
-	// for the whole record, not for individual commands.
-	auto& mstate = const_cast<GraphicsState&>(state);
-
-	checkReplace(mstate.pipe, map);
-	checkReplace(mstate.indices.buffer, map);
-
-	for(auto& verts : state.vertices) {
-		checkReplace(verts.buffer, map);
-	}
-
-	for(auto& bds : state.descriptorSets) {
-		checkReplace(bds.dsPool, map);
-	}
-}
-
 Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
@@ -1236,11 +1152,6 @@ void DrawIndirectCmd::displayInspector(Gui& gui) const {
 	imGuiText("Offset {}", offset);
 
 	DrawCmdBase::displayGrahpicsState(gui, indexed);
-}
-
-void DrawIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(buffer, map);
-	DrawCmdBase::replace(map);
 }
 
 std::string DrawIndirectCmd::toString() const {
@@ -1372,12 +1283,6 @@ void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
 	DrawCmdBase::displayGrahpicsState(gui, indexed);
 }
 
-void DrawIndirectCountCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(buffer, map);
-	checkReplace(countBuffer, map);
-	DrawCmdBase::replace(map);
-}
-
 Matcher DrawIndirectCountCmd::match(const Command& base) const {
 	auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&base);
 	if(!cmd) {
@@ -1448,12 +1353,6 @@ void BindVertexBuffersCmd::displayInspector(Gui& gui) const {
 	}
 }
 
-void BindVertexBuffersCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	for(auto& buf : buffers) {
-		checkReplace(buf.buffer, map);
-	}
-}
-
 Matcher BindVertexBuffersCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BindVertexBuffersCmd*>(&rhs);
 	if(!cmd || firstBinding != cmd->firstBinding) {
@@ -1472,10 +1371,6 @@ Matcher BindVertexBuffersCmd::match(const Command& rhs) const {
 // BindIndexBufferCmd
 void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBindIndexBuffer(cb, buffer->handle, offset, indexType);
-}
-
-void BindIndexBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(buffer, map);
 }
 
 Matcher BindIndexBufferCmd::match(const Command& rhs) const {
@@ -1542,10 +1437,6 @@ void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
 	*/
 }
 
-void BindDescriptorSetCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(sets, map);
-}
-
 Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BindDescriptorSetCmd*>(&rhs);
 	if(!cmd || firstSet != cmd->firstSet ||
@@ -1570,20 +1461,6 @@ DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) :
 
 void DispatchCmdBase::displayComputeState(Gui& gui) const {
 	refButtonD(gui, state.pipe);
-}
-
-void DispatchCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	// NOTE: we know that this isn't really const, it's just marked
-	// as const here because it's shared with other commands.
-	// And here we are allowed to modify it since this is always called
-	// for the whole record, not for individual commands.
-	auto& mstate = const_cast<ComputeState&>(state);
-
-	checkReplace(mstate.pipe, map);
-
-	for(auto& bds : mstate.descriptorSets) {
-		checkReplace(bds.dsPool, map);
-	}
 }
 
 Matcher DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
@@ -1666,11 +1543,6 @@ std::string DispatchIndirectCmd::toString() const {
 	}
 
 	return "DispatchIndirect";
-}
-
-void DispatchIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(buffer, map);
-	DispatchCmdBase::replace(map);
 }
 
 Matcher DispatchIndirectCmd::match(const Command& base) const {
@@ -1766,11 +1638,6 @@ std::string CopyImageCmd::toString() const {
 	}
 }
 
-void CopyImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
-	checkReplace(dst, map);
-}
-
 void CopyImageCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, src);
 	ImGui::SameLine();
@@ -1864,11 +1731,6 @@ std::string CopyBufferToImageCmd::toString() const {
 	}
 }
 
-void CopyBufferToImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
-	checkReplace(dst, map);
-}
-
 Matcher CopyBufferToImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&rhs);
 	if(!cmd) {
@@ -1930,11 +1792,6 @@ std::string CopyImageToBufferCmd::toString() const {
 	} else {
 		return "CopyImageToBuffer";
 	}
-}
-
-void CopyImageToBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
-	checkReplace(dst, map);
 }
 
 Matcher CopyImageToBufferCmd::match(const Command& rhs) const {
@@ -2017,11 +1874,6 @@ std::string BlitImageCmd::toString() const {
 	}
 }
 
-void BlitImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
-	checkReplace(dst, map);
-}
-
 Matcher BlitImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BlitImageCmd*>(&rhs);
 	if(!cmd || filter != cmd->filter) {
@@ -2101,11 +1953,6 @@ std::string ResolveImageCmd::toString() const {
 	}
 }
 
-void ResolveImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
-	checkReplace(dst, map);
-}
-
 Matcher ResolveImageCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const ResolveImageCmd*>(&rhs);
 	if(!cmd) {
@@ -2170,11 +2017,6 @@ std::string CopyBufferCmd::toString() const {
 	}
 }
 
-void CopyBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
-	checkReplace(dst, map);
-}
-
 Matcher CopyBufferCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const CopyBufferCmd*>(&rhs);
 	if(!cmd) {
@@ -2193,10 +2035,6 @@ Matcher CopyBufferCmd::match(const Command& rhs) const {
 // UpdateBufferCmd
 void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdUpdateBuffer(cb, dst->handle, offset, data.size(), data.data());
-}
-
-void UpdateBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(dst, map);
 }
 
 std::string UpdateBufferCmd::toString() const {
@@ -2232,10 +2070,6 @@ Matcher UpdateBufferCmd::match(const Command& rhs) const {
 // FillBufferCmd
 void FillBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdFillBuffer(cb, dst->handle, offset, size, data);
-}
-
-void FillBufferCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(dst, map);
 }
 
 std::string FillBufferCmd::toString() const {
@@ -2284,10 +2118,6 @@ std::string ClearColorImageCmd::toString() const {
 	}
 }
 
-void ClearColorImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(dst, map);
-}
-
 void ClearColorImageCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, dst);
 	// TODO: color, layout, ranges
@@ -2327,10 +2157,6 @@ std::string ClearDepthStencilImageCmd::toString() const {
 	}
 }
 
-void ClearDepthStencilImageCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(dst, map);
-}
-
 void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, dst);
 	// TODO: value, layout, ranges
@@ -2366,9 +2192,6 @@ void ClearAttachmentCmd::displayInspector(Gui& gui) const {
 	(void) gui;
 }
 
-void ClearAttachmentCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>&) {
-}
-
 Matcher ClearAttachmentCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&rhs);
 	if(!cmd) {
@@ -2395,10 +2218,6 @@ std::string SetEventCmd::toString() const {
 	return "SetEvent";
 }
 
-void SetEventCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(event, map);
-}
-
 void SetEventCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, event);
 	imGuiText("Stages: {}", vk::flagNames(VkPipelineStageFlagBits(stageMask)));
@@ -2416,10 +2235,6 @@ std::string ResetEventCmd::toString() const {
 	}
 
 	return "ResetEvent";
-}
-
-void ResetEventCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(event, map);
 }
 
 void ResetEventCmd::displayInspector(Gui& gui) const {
@@ -2537,10 +2352,6 @@ std::string BindPipelineCmd::toString() const {
 	}
 }
 
-void BindPipelineCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(pipe, map);
-}
-
 Matcher BindPipelineCmd::match(const Command& rhs) const {
 	auto* cmd = dynamic_cast<const BindPipelineCmd*>(&rhs);
 	if(!cmd || cmd->bindPoint != this->bindPoint || cmd->pipe != this->pipe) {
@@ -2651,17 +2462,9 @@ void BeginQueryCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdBeginQuery(cb, pool->handle, query, flags);
 }
 
-void BeginQueryCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(pool, map);
-}
-
 // EndQuery
 void EndQueryCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdEndQuery(cb, pool->handle, query);
-}
-
-void EndQueryCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(pool, map);
 }
 
 // ResetQuery
@@ -2669,28 +2472,15 @@ void ResetQueryPoolCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdResetQueryPool(cb, pool->handle, first, count);
 }
 
-void ResetQueryPoolCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(pool, map);
-}
-
 // WriteTimestamp
 void WriteTimestampCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdWriteTimestamp(cb, stage, pool->handle, query);
-}
-
-void WriteTimestampCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(pool, map);
 }
 
 // CopyQueryPool
 void CopyQueryPoolResultsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	dev.dispatch.CmdCopyQueryPoolResults(cb, pool->handle, first, count,
 		dstBuffer->handle, dstOffset, stride, flags);
-}
-
-void CopyQueryPoolResultsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(pool, map);
-	checkReplace(dstBuffer, map);
 }
 
 // PushDescriptorSet
@@ -2721,10 +2511,6 @@ void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb)
 	info.flags = flags;
 
 	dev.dispatch.CmdBeginConditionalRenderingEXT(cb, &info);
-}
-
-void BeginConditionalRenderingCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(buffer, map);
 }
 
 void EndConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -2823,11 +2609,6 @@ void CopyAccelStructureCmd::record(const Device& dev, VkCommandBuffer cb) const 
 	dev.dispatch.CmdCopyAccelerationStructureKHR(cb, &info);
 }
 
-void CopyAccelStructureCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
-	checkReplace(dst, map);
-}
-
 void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	VkCopyAccelerationStructureToMemoryInfoKHR info {};
 	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_TO_MEMORY_INFO_KHR;
@@ -2836,10 +2617,6 @@ void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb) c
 	info.dst = dst;
 	info.mode = mode;
 	dev.dispatch.CmdCopyAccelerationStructureToMemoryKHR(cb, &info);
-}
-
-void CopyAccelStructToMemoryCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(src, map);
 }
 
 void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -2852,10 +2629,6 @@ void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb) c
 	dev.dispatch.CmdCopyMemoryToAccelerationStructureKHR(cb, &info);
 }
 
-void CopyMemoryToAccelStructCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(dst, map);
-}
-
 void WriteAccelStructsPropertiesCmd::record(const Device& dev, VkCommandBuffer cb) const {
 	ThreadMemScope memScope;
 	auto vkAccelStructs = rawHandles(memScope, accelStructs);
@@ -2863,10 +2636,6 @@ void WriteAccelStructsPropertiesCmd::record(const Device& dev, VkCommandBuffer c
 	dev.dispatch.CmdWriteAccelerationStructuresPropertiesKHR(cb,
 		u32(vkAccelStructs.size()), vkAccelStructs.data(), queryType,
 		queryPool->handle, firstQuery);
-}
-
-void WriteAccelStructsPropertiesCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(accelStructs, map);
 }
 
 // BuildAccelStructs
@@ -2887,11 +2656,6 @@ void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
 		buildInfos.data(), ppRangeInfos.data());
 }
 
-void BuildAccelStructsCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(srcs, map);
-	checkReplace(dsts, map);
-}
-
 BuildAccelStructsIndirectCmd::BuildAccelStructsIndirectCmd(CommandBuffer& cb) {
 	(void) cb;
 }
@@ -2900,11 +2664,6 @@ void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb)
 	dev.dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb, u32(buildInfos.size()),
 		buildInfos.data(), indirectAddresses.data(), indirectStrides.data(),
 		maxPrimitiveCounts.data());
-}
-
-void BuildAccelStructsIndirectCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	checkReplace(srcs, map);
-	checkReplace(dsts, map);
 }
 
 // VK_KHR_ray_tracing_pipeline
@@ -2935,16 +2694,6 @@ Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 	//   already have been unset from the command
 
 	return m;
-}
-
-void TraceRaysCmdBase::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	// See e.g. DrawCmdBase::replace for reasoning on const_cast here
-	auto& mstate = const_cast<RayTracingState&>(state);
-	checkReplace(mstate.pipe, map);
-
-	for(auto& bds : mstate.descriptorSets) {
-		checkReplace(bds.dsPool, map);
-	}
 }
 
 void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {
@@ -3049,19 +2798,6 @@ void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
 
 	dlg_assert(dev.dispatch.CmdBeginRenderingKHR);
 	dev.dispatch.CmdBeginRenderingKHR(cb, &info);
-}
-
-void BeginRenderingCmd::replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) {
-	for(auto& ca : colorAttachments) {
-		checkReplace(ca.resolveView, map);
-		checkReplace(ca.view, map);
-	}
-
-	checkReplace(depthAttachment.view, map);
-	checkReplace(depthAttachment.resolveView, map);
-	checkReplace(stencilAttachment.view, map);
-	checkReplace(stencilAttachment.resolveView, map);
-	checkReplace(rpi, map);
 }
 
 Matcher BeginRenderingCmd::match(const Command& base) const {

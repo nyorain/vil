@@ -1,3 +1,5 @@
+- [x] use mustMoveUnset everywhere a handle might outlive its
+      api side lifetime
 - [x] improve matching of common commands, e.g. BarrierCmd.
       Returns 0 if they have nothing in command (except second-tier data
 	  like dependencyFlags or something). There should be at least

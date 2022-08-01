@@ -53,7 +53,6 @@ Buffer::~Buffer() {
 
 	std::lock_guard lock(dev->mutex);
 
-	invalidateCbsLocked();
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_BUFFER);
 
 	for(auto* view : this->views) {
@@ -69,7 +68,6 @@ BufferView::~BufferView() {
 	std::lock_guard lock(dev->mutex);
 
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_BUFFER_VIEW);
-	invalidateCbsLocked();
 
 	if(this->buffer) {
 		auto it = std::find(this->buffer->views.begin(), this->buffer->views.end(), this);

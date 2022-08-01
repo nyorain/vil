@@ -462,7 +462,9 @@ lib_spvm = static_library(
 link_args = [
 	# statically link the standard library, where supported
 	# might get conflicts with the one loaded by the application otherwise
-	'-static-libstdc++',
+	# TODO: nope, using this causes weird runtime issues on linux (dlg::format
+	# not working as expected anymore?!)
+	# '-static-libstdc++',
 ]
 
 if get_option('b_coverage')

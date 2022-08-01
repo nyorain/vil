@@ -36,7 +36,6 @@ AccelStruct::~AccelStruct() {
 
 	std::lock_guard lock(dev->mutex);
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR);
-	invalidateCbsLocked();
 }
 
 // building

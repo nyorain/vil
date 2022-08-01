@@ -15,6 +15,7 @@ namespace vil {
 Swapchain::~Swapchain() {
 	overlay.reset();
 	destroy();
+	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SWAPCHAIN_KHR);
 }
 
 void Swapchain::destroy() {
@@ -22,21 +23,26 @@ void Swapchain::destroy() {
 		return;
 	}
 
-	if(dev->swapchain == this) {
-		dev->swapchain = nullptr;
-	}
-
 	for(auto* img : this->images) {
+		{
+			std::lock_guard lock(dev->mutex);
+			img->swapchain = nullptr;
+		}
+
 		auto handle = castDispatch<VkImage>(*img);
 		dev->images.mustErase(handle);
 	}
-
-	images.clear();
 
 	// TODO: not sure about this. We don't synchronize access to it
 	// in other places since the api for swapchain/overlay retrieval
 	// can't be threadsafe, by design.
 	std::lock_guard lock(dev->mutex);
+	images.clear();
+
+	if(dev->swapchain == this) {
+		dev->swapchain = nullptr;
+	}
+
 	if(dev->lastCreatedSwapchain == this) {
 		dev->lastCreatedSwapchain = nullptr;
 	}
@@ -134,7 +140,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 
 	swapd.images.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
-		auto imgPtr = std::make_unique<Image>();
+		auto imgPtr = IntrusivePtr<Image>(new Image());
 		auto& img = *imgPtr;
 		img.swapchain = &swapd;
 		img.swapchainImageID = i;

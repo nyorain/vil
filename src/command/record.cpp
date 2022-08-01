@@ -9,6 +9,14 @@
 #include <ds.hpp>
 #include <util/util.hpp>
 
+// for used handles
+#include <sync.hpp>
+#include <queryPool.hpp>
+#include <buffer.hpp>
+#include <image.hpp>
+#include <rp.hpp>
+#include <accelStruct.hpp>
+
 namespace vil {
 
 void onRecordAlloc(const std::byte* buf, u32 size) {
@@ -34,10 +42,7 @@ CommandRecord::CommandRecord(CommandBuffer& xcb) :
 		queueFamily(xcb.pool().queueFamily),
 		// initialize allocators
 		pushLables(alloc),
-		handles(alloc),
-		invalidated(alloc),
-		pipeLayouts(alloc),
-		dsUpdateTemplates(alloc),
+		used(alloc),
 		secondaries(alloc) {
 	if(!cb->name.empty()) {
 		cbName = copyString(*this, cb->name);
@@ -54,10 +59,7 @@ CommandRecord::CommandRecord(ManualTag, Device& dev) :
 		queueFamily(0u),
 		// initialize allocators
 		pushLables(alloc),
-		handles(alloc),
-		invalidated(alloc),
-		pipeLayouts(alloc),
-		dsUpdateTemplates(alloc),
+		used(alloc),
 		secondaries(alloc) {
 	++DebugStats::get().aliveRecords;
 }
@@ -70,77 +72,16 @@ CommandRecord::~CommandRecord() {
 	ZoneScoped;
 
 	{
-		std::lock_guard lock(dev->mutex);
-
-		{
-			ZoneScopedN("unregister");
-
-			// remove record from all referenced resources
-			for(auto& [handle, uh] : handles) {
-				if(invalidated.find(handle) != invalidated.end()) {
-					continue;
-				}
-
-				if(uh->next == uh && uh->prev == uh) {
-					// descriptor set, nothing to do
-					continue;
-				}
-
-				dlg_assert(handle->refRecords);
-				if(uh->prev) {
-					uh->prev->next = uh->next;
-				} else {
-					dlg_assert(uh == handle->refRecords);
-					handle->refRecords = uh->next;
-				}
-
-				if(uh->next) {
-					uh->next->prev = uh->prev;
-				}
-			}
-		}
-
-		// Its destructor might reference this.
+		// HookRecord destructor might reference this.
 		// And it must be called while mutex is locked.
 		// TODO: don't require that
-		{
-			ZoneScopedN("clear hookRecords");
-			hookRecords.clear();
-		}
-
-		dlg_assert(DebugStats::get().aliveRecords > 0);
-		--DebugStats::get().aliveRecords;
-	}
-}
-
-void replaceInvalidatedLocked(CommandRecord& record) {
-	ZoneScoped;
-
-	if(record.invalidated.empty()) {
-		return;
+		std::lock_guard lock(dev->mutex);
+		ZoneScopedN("clear hookRecords");
+		hookRecords.clear();
 	}
 
-	// unset in commands
-	// NOTE: we could query commands where handles are used via usedHandles
-	// maps. Might give speedup for large command buffers. But introduces
-	// new complexity and problems, maybe not worth it.
-	// Same optimization below when removing from usedHandles.
-	// Would need the raw vulkan handle though, we don't access to that
-	// here anyways at the moment. But that should be doable if really
-	// needed, might be good idea to move the usedHandles maps to use
-	// our Handles (i.e. Image*) as key anyways.
-	record.commands->replace(record.invalidated);
-
-	// remove from handles
-	for(auto it = record.handles.begin(); it != record.handles.end(); ) {
-		if(record.invalidated.find(it->first) != record.invalidated.end()) {
-			it = record.handles.erase(it);
-		} else {
-			++it;
-		}
-	}
-
-	record.invalidated.clear();
+	dlg_assert(DebugStats::get().aliveRecords > 0);
+	--DebugStats::get().aliveRecords;
 }
 
 // util
@@ -259,6 +200,25 @@ std::vector<const Command*> findHierarchy(const CommandRecord& rec, const Comman
 	std::reverse(ret.begin(), ret.end());
 
 	return ret;
+}
+
+CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
+		buffers(alloc),
+		graphicsPipes(alloc),
+		computePipes(alloc),
+		rtPipes(alloc),
+		pipeLayouts(alloc),
+		dsuTemplates(alloc),
+		renderPasses(alloc),
+		framebuffers(alloc),
+		queryPools(alloc),
+		imageViews(alloc),
+		bufferViews(alloc),
+		samplers(alloc),
+		accelStructs(alloc),
+		events(alloc),
+		descriptorSets(alloc),
+		images(alloc) {
 }
 
 } // namespace vil

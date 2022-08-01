@@ -132,8 +132,6 @@ struct RayTracingState : DescriptorState {
 // might be dangling or null (if unset).
 void bind(Device&, VkCommandBuffer, const ComputeState&);
 
-struct UsedHandle;
-
 // Represents a mapping of descriptor set pointers, as present
 // in Command(Record), to their respective states at submission time.
 struct CommandDescriptorSnapshot {
@@ -146,17 +144,77 @@ struct CommandDescriptorSnapshot {
 // record is no longer needed.
 template<typename T> using CommandAllocList = std::list<T,
 	LinearUnscopedAllocator<T>>;
-template<typename K, typename V> using CommandAllocHashMap =
-	std::unordered_map<K, V,
-		std::hash<K>,
-		std::equal_to<K>,
+template<typename K, typename V,
+		typename Hash = std::hash<K>,
+		typename Equal = std::equal_to<K>> using CommandAllocHashMap =
+	std::unordered_map<K, V, Hash, Equal,
 		LinearUnscopedAllocator<std::pair<const K, V>>>;
-template<typename K> using CommandAllocHashSet =
-	std::unordered_set<K,
-		std::hash<K>,
-		std::equal_to<K>,
+template<typename K,
+		typename Hash = std::hash<K>,
+		typename Equal = std::equal_to<K>> using CommandAllocHashSet =
+	std::unordered_set<K, Hash, Equal,
 		LinearUnscopedAllocator<K>>;
 constexpr struct ManualTag {} manualTag;
+
+// Links a 'DeviceHandle' to a 'CommandRecord'.
+template<typename T>
+struct RefHandle {
+	RefHandle(LinAllocator& alloc) noexcept : commands(alloc) {}
+
+	// List of commands where the associated handle is used inside the
+	// associated record.
+	CommandAllocList<Command*> commands;
+	IntrusivePtr<T> handle;
+};
+
+template<typename T>
+inline bool operator==(const RefHandle<T>& a, const RefHandle<T>& b) {
+	return a.handle == b.handle;
+}
+
+template<typename T>
+inline bool operator!=(const RefHandle<T>& a, const RefHandle<T>& b) {
+	return a.handle != b.handle;
+}
+
+struct UsedImage : RefHandle<Image> {
+	using RefHandle<Image>::RefHandle;
+	bool layoutChanged {};
+	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
+};
+
+struct UsedDescriptorSet {
+	UsedDescriptorSet(LinAllocator& alloc) noexcept : commands(alloc) {}
+
+	// Must not access directly, might have been destroyed.
+	void* ds {};
+	CommandAllocList<Command*> commands; // the BindDescriptorSets commands
+};
+
+inline bool operator==(const UsedDescriptorSet& a, const UsedDescriptorSet& b) {
+	return a.ds == b.ds;
+}
+
+inline bool operator!=(const UsedDescriptorSet& a, const UsedDescriptorSet& b) {
+	return a.ds != b.ds;
+}
+
+struct RefHandleHash {
+	template<typename T>
+	size_t operator()(const RefHandle<T>& x) const {
+		auto ptr = x.handle.get();
+		return std::hash<std::remove_reference_t<decltype(ptr)>>{}(ptr);
+	}
+};
+
+struct UsedDescriptorHash {
+	size_t operator()(const UsedDescriptorSet& x) const {
+		return std::hash<void*>{}(x.ds);
+	}
+};
+
+template<typename T>
+using UsedHandleSet = CommandAllocHashSet<RefHandle<T>, RefHandleHash>;
 
 // Represents the recorded state of a command buffer.
 // We represent it as extra, reference-counted object so we can display
@@ -202,23 +260,27 @@ struct CommandRecord {
 	u32 numPopLabels {};
 	CommandAllocList<const char*> pushLables;
 
-	// TODO: maybe we rather use a non-hash map here since rehashing
-	// might be a problem, especially considering the memory waste through
-	// our custom allocator
-	CommandAllocHashMap<DeviceHandle*, UsedHandle*> handles;
+	struct UsedHandles {
+		UsedHandleSet<Buffer> buffers;
+		UsedHandleSet<GraphicsPipeline> graphicsPipes;
+		UsedHandleSet<ComputePipeline> computePipes;
+		UsedHandleSet<RayTracingPipeline> rtPipes;
+		UsedHandleSet<PipelineLayout> pipeLayouts;
+		UsedHandleSet<DescriptorUpdateTemplate> dsuTemplates;
+		UsedHandleSet<RenderPass> renderPasses;
+		UsedHandleSet<Framebuffer> framebuffers;
+		UsedHandleSet<QueryPool> queryPools;
+		UsedHandleSet<ImageView> imageViews;
+		UsedHandleSet<BufferView> bufferViews;
+		UsedHandleSet<Sampler> samplers;
+		UsedHandleSet<AccelStruct> accelStructs;
+		UsedHandleSet<Event> events;
 
-	// We store all device handles referenced by this command buffer that
-	// were destroyed since it was recorded so we can avoid deferencing
-	// them in the command state.
-	// TODO: we can change this back to an unordered set, don't ever
-	// replace anymore.
-	CommandAllocHashMap<DeviceHandle*, DeviceHandle*> invalidated;
+		CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash> descriptorSets;
+		CommandAllocHashSet<UsedImage, RefHandleHash> images;
 
-	// We have to keep certain object alive that vulkan allows to be destroyed
-	// after recording even if the command buffer is used in the future.
-	CommandAllocList<IntrusivePtr<PipelineLayout>> pipeLayouts;
-	// only needed for PushDescriptorSetWithTemplate
-	CommandAllocList<IntrusivePtr<DescriptorUpdateTemplate>> dsUpdateTemplates;
+		UsedHandles(LinAllocator& alloc);
+	} used;
 
 	// We have to keep the secondary records (via cmdExecuteCommands) alive
 	// since the command buffers can be reused by the application and
@@ -244,42 +306,15 @@ struct CommandRecord {
 	CommandRecord& operator=(CommandRecord&&) noexcept = delete;
 };
 
-// Links a 'DeviceHandle' to a 'CommandRecord'.
-struct UsedHandle {
-	UsedHandle(CommandRecord& rec) noexcept : commands(rec.alloc), record(&rec) {}
-
-	// List of commands where the associated handle is used inside the
-	// associated record.
-	CommandAllocList<Command*> commands;
-
-	// Links forming a linked list over all UsedHandle structs
-	// for the associated handle. That's why we store
-	// the associated record as well.
-	UsedHandle* next {};
-	UsedHandle* prev {};
-	CommandRecord* record {};
-};
-
-struct UsedImage : UsedHandle {
-	using UsedHandle::UsedHandle;
-	bool layoutChanged {};
-	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
-};
-
 // Returns whether the given CommandRecord uses the given handle.
 // Keep in mind that handles only used via descriptor sets won't appear here,
 // one must iterate through all used descriptor sets to find them.
 template<typename H>
 bool uses(const CommandRecord& rec, const H& handle) {
-	if(rec.invalidated.find(&handle) != rec.invalidated.end()) {
-		return false;
-	}
-	return rec.handles.find(&handle) != rec.handles.end();
+	// TODO
+	dlg_error("unimplemented");
+	return {};
 }
-
-// Unsets all handles in record.destroyed in all of its commands and used
-// handle entries. Must only be called while device mutex is locked
-void replaceInvalidatedLocked(CommandRecord& record);
 
 // Checks if the given bound DescriptorSet is still valid. If so, returns it.
 [[nodiscard]]

@@ -87,13 +87,6 @@ struct Command {
 	// by this command. Must not dereference them.
 	virtual void displayInspector(Gui&) const {}
 
-	// Should replace all internal handles that are among the keys of
-	// the given map with the values they are mapped to.
-	// Should forward the call to all potential children.
-	// In practice, this is used mostly to inform Commands about destroyed
-	// handles.
-	virtual void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>&) {}
-
 	// Returns the children command list. For non-parent commands, this
 	// is simply null.
 	virtual Command* children() const { return nullptr; }
@@ -177,14 +170,6 @@ struct ParentCommand : Command {
 
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override {
-		auto* cmd = children();
-		while(cmd) {
-			cmd->replace(map);
-			cmd = cmd->next;
-		}
-	}
-
 	// Returns the stats over the section this ParentCommand represents.
 	// Note that the stats only contain information about the direct children.
 	virtual const SectionStats& sectionStats() const = 0;
@@ -208,7 +193,6 @@ struct SectionCommand : ParentCommand {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	const SectionStats& sectionStats() const override { return stats_; }
 	ParentCommand* firstChildParent() const override { return firstChildParent_; }
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 };
 
 // Meta-command. Root node of the command hierarchy.
@@ -236,7 +220,6 @@ struct BarrierCmdBase : Command {
 	// Should probably rather be passed to the record command
 	u32 recordQueueFamilyIndex {};
 
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void displayInspector(Gui& gui) const override;
 	Matcher doMatch(const BarrierCmdBase& rhs) const;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
@@ -257,7 +240,6 @@ struct WaitEventsCmd : BarrierCmdBase {
 	Type type() const override { return Type::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -296,7 +278,6 @@ struct BeginRenderPassCmd final : SectionCommand {
 	std::string_view nameDesc() const override { return "BeginRenderPass"; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -353,7 +334,6 @@ struct DrawCmdBase : StateCmdBase {
 
 	Type type() const override { return Type::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
 
 	const DescriptorState& boundDescriptors() const override { return state; }
@@ -393,7 +373,6 @@ struct DrawIndirectCmd final : DrawCmdBase {
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -432,7 +411,6 @@ struct DrawIndirectCountCmd final : DrawCmdBase {
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -447,7 +425,6 @@ struct BindVertexBuffersCmd final : Command {
 	std::string_view nameDesc() const override { return "BindVertexBuffers"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -460,7 +437,6 @@ struct BindIndexBufferCmd final : Command {
 	std::string_view nameDesc() const override { return "BindIndexBuffer"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -476,7 +452,6 @@ struct BindDescriptorSetCmd final : Command {
 	std::string_view nameDesc() const override { return "BindDescriptorSets"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void displayInspector(Gui& gui) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
@@ -490,7 +465,6 @@ struct DispatchCmdBase : StateCmdBase {
 
 	Type type() const override { return Type::dispatch; }
 	void displayComputeState(Gui& gui) const;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher doMatch(const DispatchCmdBase&) const;
 
 	const DescriptorState& boundDescriptors() const override { return state; }
@@ -524,7 +498,6 @@ struct DispatchIndirectCmd final : DispatchCmdBase {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "DispatchIndirect"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -561,7 +534,6 @@ struct CopyImageCmd final : Command {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -578,7 +550,6 @@ struct CopyBufferToImageCmd final : Command {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyBufferToImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -595,7 +566,6 @@ struct CopyImageToBufferCmd final : Command {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImageToBuffer"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -614,7 +584,6 @@ struct BlitImageCmd final : Command {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "BlitImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -632,7 +601,6 @@ struct ResolveImageCmd final : Command {
 	std::string_view nameDesc() const override { return "ResolveImage"; }
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -648,7 +616,6 @@ struct CopyBufferCmd final : Command {
 	std::string_view nameDesc() const override { return "CopyBuffer"; }
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -663,7 +630,6 @@ struct UpdateBufferCmd final : Command {
 	std::string_view nameDesc() const override { return "UpdateBuffer"; }
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -679,7 +645,6 @@ struct FillBufferCmd final : Command {
 	std::string_view nameDesc() const override { return "FillBuffer"; }
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -695,7 +660,6 @@ struct ClearColorImageCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	std::string_view nameDesc() const override { return "ClearColorImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -711,7 +675,6 @@ struct ClearDepthStencilImageCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	std::string_view nameDesc() const override { return "ClearDepthStencilImage"; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -726,7 +689,6 @@ struct ClearAttachmentCmd final : Command {
 	// NOTE: strictly speaking this isn't a transfer, we don't care.
 	Type type() const override { return Type::transfer; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -740,7 +702,6 @@ struct SetEventCmd final : Command {
 	std::string_view nameDesc() const override { return "SetEvent"; }
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -753,7 +714,6 @@ struct ResetEventCmd final : Command {
 	std::string_view nameDesc() const override { return "ResetEvent"; }
 	Type type() const override { return Type::sync; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -818,7 +778,6 @@ struct BindPipelineCmd final : Command {
 	std::string_view nameDesc() const override { return "BindPipeline"; }
 	Type type() const override { return Type::bind; }
 	void record(const Device&, VkCommandBuffer) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -936,7 +895,6 @@ struct BeginQueryCmd final : Command {
 	Type type() const override { return Type::query; }
 	std::string_view nameDesc() const override { return "BeginQuery"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -947,7 +905,6 @@ struct EndQueryCmd final : Command {
 	Type type() const override { return Type::query; }
 	std::string_view nameDesc() const override { return "EndQuery"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -959,7 +916,6 @@ struct ResetQueryPoolCmd final : Command {
 	Type type() const override { return Type::query; }
 	std::string_view nameDesc() const override { return "ResetQueryPool"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -971,7 +927,6 @@ struct WriteTimestampCmd final : Command {
 	Type type() const override { return Type::query; }
 	std::string_view nameDesc() const override { return "WriteTimestamp"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -987,7 +942,6 @@ struct CopyQueryPoolResultsCmd final : Command {
 	Type type() const override { return Type::query; }
 	std::string_view nameDesc() const override { return "CopyQueryPoolResults"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1039,7 +993,6 @@ struct BeginConditionalRenderingCmd final : SectionCommand {
 	Type type() const override { return Type::other; }
 	std::string_view nameDesc() const override { return "BeginConditionalRendering"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1244,7 +1197,6 @@ struct CopyAccelStructureCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	std::string_view nameDesc() const override { return "CopyAccelerationStructure"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1257,7 +1209,6 @@ struct CopyAccelStructToMemoryCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	std::string_view nameDesc() const override { return "CopyAccelerationStructureToMemory"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1270,7 +1221,6 @@ struct CopyMemoryToAccelStructCmd final : Command {
 	Type type() const override { return Type::transfer; }
 	std::string_view nameDesc() const override { return "CopyMemoryToAccelerationStructure"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1283,7 +1233,6 @@ struct WriteAccelStructsPropertiesCmd final : Command {
 	Type type() const override { return Type::query; }
 	std::string_view nameDesc() const override { return "WriteAccelerationStructuresProperties"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1297,7 +1246,6 @@ struct BuildAccelStructsCmd final : Command {
 	Type type() const override { return Type::buildAccelStruct; }
 	std::string_view nameDesc() const override { return "BuildAccelerationStructures"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1315,7 +1263,6 @@ struct BuildAccelStructsIndirectCmd final : Command {
 	Type type() const override { return Type::buildAccelStruct; }
 	std::string_view nameDesc() const override { return "BuildAccelerationStructuresIndirect"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1331,7 +1278,6 @@ struct TraceRaysCmdBase : StateCmdBase {
 	const DescriptorState& boundDescriptors() const override { return state; }
 	const Pipeline* boundPipe() const override { return state.pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1401,7 +1347,6 @@ struct BeginRenderingCmd final : SectionCommand {
 	std::string_view nameDesc() const override { return "BeginRendering"; }
 	void record(const Device&, VkCommandBuffer cb) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-	void replace(const CommandAllocHashMap<DeviceHandle*, DeviceHandle*>& map) override;
 	Matcher match(const Command& rhs) const override;
 
 	// TODO: inspector

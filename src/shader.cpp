@@ -496,9 +496,7 @@ ShaderModule::~ShaderModule() {
 	}
 
 	// shader modules are never used directly in a command buffer
-	dlg_assert(!refRecords);
 	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SHADER_MODULE);
-
 	for(auto& patched : this->xfb) {
 		dev->dispatch.DestroyShaderModule(dev->handle, patched.mod, nullptr);
 	}

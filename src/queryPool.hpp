@@ -4,7 +4,7 @@
 
 namespace vil {
 
-struct QueryPool : DeviceHandle {
+struct QueryPool : SharedDeviceHandle {
 	VkQueryPool handle {};
 	VkQueryPoolCreateInfo ci {};
 

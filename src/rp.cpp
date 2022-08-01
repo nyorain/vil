@@ -16,8 +16,6 @@ RenderPass::~RenderPass() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-
-	invalidateCbsLocked();
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_RENDER_PASS);
 }
 
@@ -27,8 +25,6 @@ Framebuffer::~Framebuffer() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-
-	invalidateCbsLocked();
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FRAMEBUFFER);
 
 	for(auto* attachment : attachments) {
@@ -68,7 +64,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 		return res;
 	}
 
-	auto fbPtr = std::make_unique<Framebuffer>();
+	auto fbPtr = IntrusivePtr<Framebuffer>(new Framebuffer());
 	auto& fb = *fbPtr;
 	fb.width = pCreateInfo->width;
 	fb.height = pCreateInfo->height;
@@ -99,8 +95,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyFramebuffer(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	mustMoveUnset(dev, framebuffer);
+	auto& dev = *mustMoveUnset(device, framebuffer)->dev;
 	dev.dispatch.DestroyFramebuffer(device, framebuffer, pAllocator);
 }
 
@@ -891,8 +886,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyRenderPass(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	mustMoveUnset(dev, renderPass);
+	auto& dev = *mustMoveUnset(device, renderPass)->dev;
 	dev.dispatch.DestroyRenderPass(device, renderPass, pAllocator);
 }
 

@@ -48,7 +48,7 @@ struct DescriptorPoolSetEntry {
 	DescriptorSet* set {};
 };
 
-struct DescriptorPool : DeviceHandle {
+struct DescriptorPool : SharedDeviceHandle {
 	VkDescriptorPool handle {};
 	VkDescriptorPoolCreateFlags flags {};
 
@@ -88,7 +88,7 @@ struct DescriptorPool : DeviceHandle {
 	~DescriptorPool();
 };
 
-struct DescriptorSetLayout : DeviceHandle {
+struct DescriptorSetLayout : SharedDeviceHandle {
 	VkDescriptorSetLayout handle {};
 	VkDescriptorSetLayoutCreateFlags flags {};
 
@@ -217,6 +217,10 @@ using DescriptorStateCopyPtr = std::unique_ptr<DescriptorStateCopy, DescriptorSt
 // Vulkan descriptor set handle
 // PERF: would be nice to reduce its size. Statically allocated with maxSets
 // in descriptorPool.
+// NOTE: other than most handles, DescriptorSet doesn't have shared
+// ownership. The reason for this is mainly that we can very efficiently
+// allocate them via the DescriptorPool (wouldn't be possible if all
+// of them could be kept alive).
 struct DescriptorSet : DeviceHandle {
 public:
 	// Immutable after creation.
@@ -277,12 +281,8 @@ struct DescriptorSetCow {
 
 std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSetCow& cow);
 
-struct DescriptorUpdateTemplate : DeviceHandle {
+struct DescriptorUpdateTemplate : SharedDeviceHandle {
 	VkDescriptorUpdateTemplate handle {};
-
-	// Intrusive ref count. Needed e.g. for command buffer recording
-	std::atomic<u32> refCount {0};
-
 	std::vector<VkDescriptorUpdateTemplateEntry> entries;
 
 	~DescriptorUpdateTemplate();

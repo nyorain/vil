@@ -39,13 +39,12 @@ struct Image : MemoryResource {
 	Image& operator=(Image&&) = delete;
 };
 
-struct ImageView : DeviceHandle {
+struct ImageView : SharedDeviceHandle {
 	Image* img {};
 	VkImageView handle {};
 	VkImageViewCreateInfo ci;
 
 	std::vector<Framebuffer*> fbs; // TODO: unordered set?
-	std::atomic<u32> refCount {};
 
 	ImageView() = default;
 	~ImageView();
@@ -53,7 +52,7 @@ struct ImageView : DeviceHandle {
 	ImageView& operator=(ImageView&&) = delete;
 };
 
-struct Sampler : DeviceHandle {
+struct Sampler : SharedDeviceHandle {
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
 	std::atomic<u32> refCount {};
