@@ -55,7 +55,6 @@ struct ImageView : SharedDeviceHandle {
 struct Sampler : SharedDeviceHandle {
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
-	std::atomic<u32> refCount {};
 
 	Sampler() = default;
 	~Sampler();
