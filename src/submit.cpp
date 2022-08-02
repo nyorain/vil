@@ -521,36 +521,37 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 
 	assertOwned(handle.dev->mutex);
 
-	const Image* img = nullptr;
-	const Buffer* buf = nullptr;
+	Image* img = nullptr;
+	Buffer* buf = nullptr;
 
+	// TODO: implement more general mechanism
+	// Need const_cast here since we store non-const pointers in rec.handles.
+	// The find function won't modify it, it's just an interface quirk.
+	auto* toFind = const_cast<DeviceHandle*>(&handle);
 	if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
-		img = static_cast<const Image*>(&handle);
+		img = static_cast<Image*>(toFind);
 	} else if(handle.objectType == VK_OBJECT_TYPE_BUFFER) {
-		buf = static_cast<const Buffer*>(&handle);
+		buf = static_cast<Buffer*>(toFind);
+	} else {
+		dlg_error("unreeachable");
 	}
 
 	for(auto& [cb, _] : subm.cbs) {
 		auto& rec = *cb->lastRecordLocked();
 
-		// Need const_cast here since we store non-const pointers in rec.handles.
-		// The find function won't modify it, it's just an interface quirk.
-		auto* toFind = const_cast<DeviceHandle*>(&handle);
-
-		// TODO: implement more general mechanism
-		if(handle.objectType == VK_OBJECT_TYPE_BUFFER) {
-			auto& buf = static_cast<Buffer&>(*toFind);
+		if(buf) {
+			// TODO: better, transparent find with c++20
 			RefHandle<Buffer> rh(ThreadContext::instance.linalloc_);
-			rh.handle = IntrusivePtr<Buffer>(acquireOwnership, &buf);
+			rh.handle = IntrusivePtr<Buffer>(acquireOwnership, buf);
 			(void) rh.handle.release();
 			auto it = rec.used.buffers.find(rh);
 			if(it != rec.used.buffers.end()) {
 				return true;
 			}
 		} else if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
-			auto& img = static_cast<Image&>(*toFind);
+			// TODO: better, transparent find with c++20
 			UsedImage rh(ThreadContext::instance.linalloc_);
-			rh.handle = IntrusivePtr<Image>(acquireOwnership, &img);
+			rh.handle = IntrusivePtr<Image>(acquireOwnership, img);
 			auto it = rec.used.images.find(rh);
 			(void) rh.handle.release();
 			if(it != rec.used.images.end()) {

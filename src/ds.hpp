@@ -108,7 +108,6 @@ struct DescriptorSetLayout : SharedDeviceHandle {
 
 	// Immutable after creation. Ordered by binding. Can be empty per vulkan spec.
 	std::vector<Binding> bindings;
-	std::atomic<u32> refCount {0}; // intrusive ref count
 
 	// The total number of dynamic buffer descriptors.
 	// Needed for quick binding in CmdBindDescriptorSets.

@@ -159,7 +159,7 @@ constexpr struct ManualTag {} manualTag;
 // Links a 'DeviceHandle' to a 'CommandRecord'.
 template<typename T>
 struct RefHandle {
-	RefHandle(LinAllocator& alloc) noexcept : commands(alloc) {}
+	explicit RefHandle(LinAllocator& alloc) noexcept : commands(alloc) {}
 
 	// List of commands where the associated handle is used inside the
 	// associated record.
@@ -184,7 +184,7 @@ struct UsedImage : RefHandle<Image> {
 };
 
 struct UsedDescriptorSet {
-	UsedDescriptorSet(LinAllocator& alloc) noexcept : commands(alloc) {}
+	explicit UsedDescriptorSet(LinAllocator& alloc) noexcept : commands(alloc) {}
 
 	// Must not access directly, might have been destroyed.
 	void* ds {};
@@ -305,16 +305,6 @@ struct CommandRecord {
 	CommandRecord(CommandRecord&&) noexcept = delete;
 	CommandRecord& operator=(CommandRecord&&) noexcept = delete;
 };
-
-// Returns whether the given CommandRecord uses the given handle.
-// Keep in mind that handles only used via descriptor sets won't appear here,
-// one must iterate through all used descriptor sets to find them.
-template<typename H>
-bool uses(const CommandRecord& rec, const H& handle) {
-	// TODO
-	dlg_error("unimplemented");
-	return {};
-}
 
 // Checks if the given bound DescriptorSet is still valid. If so, returns it.
 [[nodiscard]]
