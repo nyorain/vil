@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <unordered_set>
+#include <atomic>
 #include <vk/vulkan.h>
 
 namespace vil {
