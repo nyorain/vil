@@ -136,7 +136,7 @@ void ImageViewer::display(Draw& draw) {
 	// make sure the view & descriptor we used for drawing stay alive until the
 	// draw submission finishes. We do so by pushing an IntrusivePtr to the
 	// draw state into the draw, to be reset in onFinish
-	auto owner = [drawData = data_](Draw&) mutable { drawData.reset(); };
+	auto owner = [drawData = data_](Draw&, bool) mutable { drawData.reset(); };
 	draw.onFinish.emplace_back(std::move(owner));
 
 	// logic
@@ -555,17 +555,23 @@ void ImageViewer::doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayo
 	readback->pending = &draw;
 
 	// register callback to be called when gpu batch finishes execution
-	auto cbFinish = [this](Draw& draw) {
+	auto cbFinish = [this](Draw& draw, bool success) {
 		auto found = false;
 		for(auto [i, readback] : enumerate(readbacks_)) {
 			if(readback.pending == &draw) {
 				dlg_assert(!found);
 				found = true;
 				readback.pending = nullptr;
-				lastReadback_ = i;
+
+				if(success) {
+					lastReadback_ = i;
+				}
+
 				// break;
 			}
 		}
+
+		dlg_assert(found);
 	};
 
 	draw.onFinish.push_back(cbFinish);
@@ -674,17 +680,23 @@ void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout
 	readback->pending = &draw;
 
 	// register callback to be called when gpu batch finishes execution
-	auto cbFinish = [this](Draw& draw) {
+	auto cbFinish = [this](Draw& draw, bool success) {
 		auto found = false;
 		for(auto [i, readback] : enumerate(readbacks_)) {
 			if(readback.pending == &draw) {
 				dlg_assert(!found);
 				found = true;
 				readback.pending = nullptr;
-				lastReadback_ = i;
+
+				if(success) {
+					lastReadback_ = i;
+				}
+
 				// break;
 			}
 		}
+
+		dlg_assert(found);
 	};
 
 	draw.onFinish.push_back(cbFinish);

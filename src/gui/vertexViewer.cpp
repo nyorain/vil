@@ -928,7 +928,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	DrawParams params;
 
 	auto displayCmdSlider = [&](std::optional<VkIndexType> indices, u32 stride, u32 offset = 0u){
-		dlg_assert(gui_->dev().commandHook->copyIndirectCmd);
+		dlg_assert(gui_->dev().commandHook->ops().copyIndirectCmd);
 		dlg_assert(state.indirectCopy.size);
 
 		auto count = state.indirectCommandCount;
@@ -1245,7 +1245,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	u32 vertexOffset {};
 	u32 vertexCount {};
 	auto displayCmdSlider = [&](bool indexed, u32 stride, u32 offset = 0u){
-		dlg_assert(gui_->dev().commandHook->copyIndirectCmd);
+		dlg_assert(gui_->dev().commandHook->ops().copyIndirectCmd);
 		dlg_assert(state.indirectCopy.size);
 
 		auto count = state.indirectCommandCount;

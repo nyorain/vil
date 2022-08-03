@@ -45,6 +45,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 		hook(&xhook), record(&xrecord), hcommand(std::move(hooked)) {
 
 	++DebugStats::get().aliveHookRecords;
+	assertOwned(xhook.dev_->mutex);
 
 	this->next = hook->records_;
 	if(hook->records_) {
@@ -68,7 +69,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	nameHandle(dev, this->cb, "CommandHookRecord:cb");
 
 	// query pool
-	if(hook->queryTime) {
+	if(hook->ops_.queryTime) {
 		auto validBits = dev.queueFamilies[xrecord.queueFamily].props.timestampValidBits;
 		if(validBits == 0u) {
 			dlg_info("Queue family {} does not support timing queries", xrecord.queueFamily);
@@ -86,7 +87,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	info.descriptors = &descriptors;
 	initState(info);
 
-	this->dsState.resize(hook->descriptorCopies.size());
+	this->dsState.resize(hook->ops_.descriptorCopies.size());
 
 	// record
 	// we can never submit the cb simulataneously anyways, see CommandHook
@@ -179,8 +180,8 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	auto& hook = *dev.commandHook;
 
 	state.reset(new CommandHookState());
-	state->copiedAttachments.resize(hook.attachmentCopies.size());
-	state->copiedDescriptors.resize(hook.descriptorCopies.size());
+	state->copiedAttachments.resize(hook.ops_.attachmentCopies.size());
+	state->copiedDescriptors.resize(hook.ops_.descriptorCopies.size());
 
 	// Find out if final hooked command is inside render pass
 	auto preEnd = hcommand.end() - 1;
@@ -197,20 +198,20 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	// some operations (index/vertex/attachment) copies only make sense
 	// inside a render pass.
 	dlg_assert(info.beginRenderPassCmd ||
-		(!hook.copyVertexBuffers &&
-		 !hook.copyIndexBuffers &&
-		 hook.attachmentCopies.empty()));
+		(!hook.ops_.copyVertexBuffers &&
+		 !hook.ops_.copyIndexBuffers &&
+		 hook.ops_.attachmentCopies.empty()));
 
 	// when the hooked command is inside a render pass and we need to perform
 	// operations (e.g. copies) not possible while inside a render pass,
 	// we have to split the render pass around the selected command.
 	info.splitRenderPass = info.beginRenderPassCmd &&
-		(hook.copyVertexBuffers ||
-		 hook.copyIndexBuffers ||
-		 !hook.attachmentCopies.empty() ||
-		 !hook.descriptorCopies.empty() ||
-		 hook.copyIndirectCmd ||
-		 (hook.copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
+		(hook.ops_.copyVertexBuffers ||
+		 hook.ops_.copyIndexBuffers ||
+		 !hook.ops_.attachmentCopies.empty() ||
+		 !hook.ops_.descriptorCopies.empty() ||
+		 hook.ops_.copyIndirectCmd ||
+		 (hook.ops_.copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
 
 	if(info.splitRenderPass) {
 		auto& rp = *info.beginRenderPassCmd->rp;
@@ -392,7 +393,7 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 	// transform feedback
 	auto endXfb = false;
 	if(auto drawCmd = dynamic_cast<DrawCmdBase*>(&cmd); drawCmd) {
-		if(drawCmd->state.pipe->xfbPatch && hook->copyXfb) {
+		if(drawCmd->state.pipe->xfbPatch && hook->ops_.copyXfb) {
 			dlg_assert(dev.transformFeedback);
 			dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
 			dlg_assert(dev.dispatch.CmdBindTransformFeedbackBuffersEXT);
@@ -828,7 +829,7 @@ VkImageSubresourceRange toRange(const VkImageSubresourceLayers& subres) {
 }
 
 void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
-	dlg_assert(hook->copyTransferDst != hook->copyTransferSrc);
+	dlg_assert(hook->ops_.copyTransferDst != hook->ops_.copyTransferSrc);
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyTransfer");
 
@@ -844,8 +845,8 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 		VkDeviceSize size {};
 	};
 
-	auto idx = hook->transferIdx;
-	if(hook->copyTransferSrc) {
+	auto idx = hook->ops_.transferIdx;
+	if(hook->ops_.copyTransferSrc) {
 		std::optional<CopyImage> img;
 		std::optional<CopyBuffer> buf;
 
@@ -882,7 +883,7 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 			// ignore queueFams here
 			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size, {});
 		}
-	} else if(hook->copyTransferDst) {
+	} else if(hook->ops_.copyTransferDst) {
 		std::optional<CopyImage> img;
 		std::optional<CopyBuffer> buf;
 
@@ -979,7 +980,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	}
 
 	// indirect copy
-	if(hook->copyIndirectCmd) {
+	if(hook->ops_.copyIndirectCmd) {
 		DebugLabel lbl(dev, cb, "vil:copyInderectCmd");
 
 		// we don't ever read the buffer from the gfxQueue so we can
@@ -1028,14 +1029,14 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	}
 
 	// attachments
-	for(auto [i, ac] : enumerate(hook->attachmentCopies)) {
+	for(auto [i, ac] : enumerate(hook->ops_.attachmentCopies)) {
 		if(ac.before) {
 			copyAttachment(bcmd, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
 
 	// descriptor state
-	for(auto [i, dc] : enumerate(hook->descriptorCopies)) {
+	for(auto [i, dc] : enumerate(hook->ops_.descriptorCopies)) {
 		if(dc.before) {
 			copyDs(bcmd, info, dc, state->copiedDescriptors[i], dsState[i]);
 		}
@@ -1054,7 +1055,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// sizes of vertex/index buffers to copy, we could use that.
 	auto maxVertIndSize = maxBufCopySize;
 
-	if(hook->copyVertexBuffers) {
+	if(hook->ops_.copyVertexBuffers) {
 		DebugLabel lbl(dev, cb, "vil:copyVertexBuffers");
 
 		dlg_assert(drawCmd);
@@ -1070,7 +1071,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		}
 	}
 
-	if(hook->copyIndexBuffers) {
+	if(hook->ops_.copyIndexBuffers) {
 		DebugLabel lbl(dev, cb, "vil:copyIndexBuffers");
 
 		dlg_assert(drawCmd);
@@ -1083,7 +1084,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	}
 
 	// transfer
-	if(hook->copyTransferBefore && (hook->copyTransferDst || hook->copyTransferSrc)) {
+	if(hook->ops_.copyTransferBefore && (hook->ops_.copyTransferDst || hook->ops_.copyTransferSrc)) {
 		copyTransfer(bcmd, info);
 	}
 }
@@ -1109,21 +1110,21 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	}
 
 	// attachments
-	for(auto [i, ac] : enumerate(hook->attachmentCopies)) {
+	for(auto [i, ac] : enumerate(hook->ops_.attachmentCopies)) {
 		if(!ac.before) {
 			copyAttachment(bcmd, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
 
 	// descriptor state
-	for(auto [i, dc] : enumerate(hook->descriptorCopies)) {
+	for(auto [i, dc] : enumerate(hook->ops_.descriptorCopies)) {
 		if(!dc.before) {
 			copyDs(bcmd, info, dc, state->copiedDescriptors[i], dsState[i]);
 		}
 	}
 
 	// transfer
-	if(!hook->copyTransferBefore && (hook->copyTransferDst || hook->copyTransferSrc)) {
+	if(!hook->ops_.copyTransferBefore && (hook->ops_.copyTransferDst || hook->ops_.copyTransferSrc)) {
 		copyTransfer(bcmd, info);
 	}
 }

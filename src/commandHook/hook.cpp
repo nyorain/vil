@@ -10,7 +10,6 @@
 #include <queue.hpp>
 #include <threadContext.hpp>
 #include <swapchain.hpp>
-#include <gui/gui.hpp> // TODO: remove dep on this
 #include <command/desc.hpp>
 #include <command/commands.hpp>
 #include <vk/enumString.hpp>
@@ -265,10 +264,10 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 }
 
 bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
-	dlg_assert_or(record.dsState.size() == descriptorCopies.size(), return true);
+	dlg_assert_or(record.dsState.size() == ops_.descriptorCopies.size(), return true);
 
 	dlg_assert(!record.hcommand.empty());
-	if(descriptorCopies.empty()) {
+	if(ops_.descriptorCopies.empty()) {
 		return false;
 	}
 
@@ -281,8 +280,8 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 	const DescriptorState& dsState =
 		static_cast<const StateCmdBase*>(cmd)->boundDescriptors();
 
-	for(auto i = 0u; i < descriptorCopies.size(); ++i) {
-		auto [setID, bindingID, elemID, _1, _2] = descriptorCopies[i];
+	for(auto i = 0u; i < ops_.descriptorCopies.size(); ++i) {
+		auto [setID, bindingID, elemID, _1, _2] = ops_.descriptorCopies[i];
 
 		// We can safely access the ds here since we know that the record
 		// is still valid
@@ -308,13 +307,14 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	auto& dev = *hooked.dev;
 	dlg_assert(hooked.lastRecordLocked());
 	auto& record = *hooked.lastRecordLocked();
+	assertOwned(dev.mutex);
 
 	// Check whether we should attempt to hook this particular record
 	bool hookNeededForCmd = true;
 	const bool validTarget =
-		&record == target.record ||
-		&hooked == target.cb ||
-		target.all;
+		&record == target_.record ||
+		&hooked == target_.cb ||
+		target_.all;
 
 	if(!validTarget || !record_ || hierachy_.empty() || !record.commands->children_) {
 		hookNeededForCmd = false;
@@ -322,9 +322,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 	// When there is no gui viewing the submissions at the moment, we don't
 	// need/want to hook the submission.
-	if(!forceHook && (
-			!dev.gui || !dev.gui->visible || freeze ||
-			dev.gui->activeTab() != Gui::Tab::commandBuffer)) {
+	if(!forceHook && freeze) {
 		hookNeededForCmd = false;
 	}
 
@@ -338,7 +336,7 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// Check if there already is a valid CommandHookRecord we can use.
 	CommandHookRecord* foundHookRecord {};
 	CommandHookRecord* foundCompleted = nullptr;
-	auto foundCompletedIt = completed.end();
+	auto foundCompletedIt = completed_.end();
 	auto completedCount = 0u;
 
 	for(auto& hookRecord : record.hookRecords) {
@@ -354,15 +352,15 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		}
 
 		// we can't reuse this hook record, it's state is still needded
-		if(hookRecord->state.get() == stillNeeded) {
+		if(hookRecord->state.get() == stillNeeded_) {
 			continue;
 		}
 
 		// the record has completed, its state in our completed list
-		auto completedIt = find_if(this->completed, [&](const CompletedHook& completed) {
+		auto completedIt = find_if(this->completed_, [&](const CompletedHook& completed) {
 			return completed.state == hookRecord->state;
 		});
-		if(completedIt != completed.end()) {
+		if(completedIt != completed_.end()) {
 			++completedCount;
 			if(!foundCompleted) {
 				foundCompletedIt = completedIt;
@@ -380,9 +378,9 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 	// list, we can just take one of them (preferrably the older one)
 	// and reuse its state.
 	if(!foundHookRecord && completedCount > 2) {
-		dlg_assert(foundCompletedIt != completed.end());
+		dlg_assert(foundCompletedIt != completed_.end());
 		dlg_assert(foundCompleted);
-		this->completed.erase(foundCompletedIt);
+		this->completed_.erase(foundCompletedIt);
 		foundHookRecord = foundCompleted;
 	}
 
@@ -397,7 +395,9 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			return {};
 		}
 
-		return snapshotRelevantDescriptorsLocked(cmd);
+		// we know for sure that all descriptorSets of the to-be-hooked
+		// command must still be valid.
+		return snapshotRelevantDescriptorsValidLocked(cmd);
 	};
 
 	if(foundHookRecord) {
@@ -483,17 +483,35 @@ void CommandHook::desc(IntrusivePtr<CommandRecord> rec,
 		CommandDescriptorSnapshot dsState, bool invalidate) {
 	dlg_assert(bool(rec) == !hierachy.empty());
 
-	record_ = std::move(rec);
-	hierachy_ = std::move(hierachy);
-	dsState_ = std::move(dsState);
+	{
+		std::lock_guard lock(dev_->mutex);
+		record_ = std::move(rec);
+		hierachy_ = std::move(hierachy);
+		dsState_ = std::move(dsState);
+	}
 
 	if(invalidate) {
+		clearCompleted();
 		invalidateRecordings();
-		invalidateData();
 	}
 }
 
+std::vector<CommandHook::CompletedHook> CommandHook::moveCompleted() {
+	std::vector<CompletedHook> moved;
+	{
+		std::lock_guard lock(dev_->mutex);
+		moved = std::move(this->completed_);
+	}
+	return moved;
+}
+
+void CommandHook::clearCompleted() {
+	(void) moveCompleted();
+}
+
 void CommandHook::invalidateRecordings(bool forceAll) {
+	std::lock_guard lock(dev_->mutex);
+
 	// We have to increase the counter to invalidate all past recordings
 	++counter_;
 
@@ -516,21 +534,6 @@ void CommandHook::invalidateRecordings(bool forceAll) {
 	records_ = nullptr;
 }
 
-void CommandHook::unsetHookOps(bool doQueryTime) {
-	this->copyIndexBuffers = false;
-	this->copyVertexBuffers = false;
-	this->copyXfb = false;
-	this->queryTime = doQueryTime;
-	this->copyIndirectCmd = false;
-	this->attachmentCopies.clear();
-	this->descriptorCopies.clear();
-	this->copyTransferSrc = false;
-	this->copyTransferDst = false;
-	this->transferIdx = 0u;
-	invalidateRecordings();
-	invalidateData();
-}
-
 CommandHookState::CommandHookState() {
 	++DebugStats::get().aliveHookStates;
 }
@@ -538,6 +541,41 @@ CommandHookState::CommandHookState() {
 CommandHookState::~CommandHookState() {
 	dlg_assert(DebugStats::get().aliveHookStates > 0);
 	--DebugStats::get().aliveHookStates;
+}
+
+void CommandHook::ops(HookOps&& newOps) {
+	{
+		std::lock_guard lock(dev_->mutex);
+		ops_ = std::move(newOps);
+	}
+
+	clearCompleted();
+	invalidateRecordings();
+}
+
+void CommandHook::target(HookTarget&& newTarget) {
+	{
+		std::lock_guard lock(dev_->mutex);
+		target_ = std::move(newTarget);
+	}
+
+	clearCompleted();
+	invalidateRecordings();
+}
+
+void CommandHook::stillNeeded(CommandHookState* state) {
+	std::lock_guard lock(dev_->mutex);
+	stillNeeded_ = state;
+}
+
+CommandHook::HookOps CommandHook::ops() const {
+	std::lock_guard lock(dev_->mutex);
+	return ops_;
+}
+
+CommandHook::HookTarget CommandHook::target() const {
+	std::lock_guard lock(dev_->mutex);
+	return target_;
 }
 
 } // namespace vil

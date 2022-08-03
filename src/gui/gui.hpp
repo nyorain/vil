@@ -48,7 +48,6 @@ public:
 		VkPipeline histogramRender {};
 	};
 
-	bool visible {false};
 	bool unfocus {false};
 
 	ImFont* defaultFont {};
@@ -107,6 +106,9 @@ public:
 	const VkPipelineLayout& imgOpPipeLayout() const { return imgOpPipeLayout_; }
 	const VkPipeline& readTexPipe(ShaderImageType::Value type) const { return pipes_.readTex[type]; }
 
+	bool visible() const { return visible_; }
+	void visible(bool newVisible);
+
 	// only for the current draw
 	using Recorder = std::function<void(Draw&)>;
 	void addPreRender(Recorder);
@@ -115,6 +117,9 @@ public:
 private:
 	void initImGui();
 
+	// returns VK_INCOMPLETE when something was invalidated mid-draw
+	// and tryRender needs to be called again
+	VkResult tryRender(Draw&, FrameInfo& info);
 	void draw(Draw&, bool fullscreen);
 	void drawOverviewUI(Draw&);
 	void drawMemoryUI(Draw&);
@@ -202,6 +207,7 @@ private:
 	std::vector<Recorder> preRender_ {};
 	std::vector<Recorder> postRender_ {};
 
+	bool visible_ {false};
 	bool showImguiDemo_ {false};
 };
 

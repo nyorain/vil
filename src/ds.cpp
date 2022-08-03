@@ -276,15 +276,22 @@ void copy(DescriptorStateRef dst, unsigned dstBindID, unsigned dstElemID,
 }
 
 template<typename Set, typename Handle>
-bool validate(Set& set, Handle*& handle, bool checkReplace) {
+bool validateIncRef(Device& dev, Set& set, Handle*& handle, bool checkReplace) {
 	if(!handle) {
 		return false;
 	}
 
-	assertOwned(handle->dev->mutex);
 	if(!checkReplace) {
+		incRefCount(*handle);
 		return true;
 	}
+
+	// TODO: proper place to do this would be here.
+	// But due to the large critical section in CommandHook, we have to
+	// design the whole snapshot descriptors procedure as one giant
+	// critical section as well
+	// std::lock_guard lock(dev.mutex);
+	(void) dev;
 
 	// TODO: not fully exception safe
 	// Remove with c++20s better container lookup
@@ -298,13 +305,14 @@ bool validate(Set& set, Handle*& handle, bool checkReplace) {
 		return false;
 	}
 
+	incRefCount(*handle);
 	return true;
 }
 
 // NOTE: regarding checkIfValid
 // When we create a CoW in addCow and refBindings == false, the descriptorSet
 // might actually contain bindings that are invalid. With the descriptor_indexing
-// features, it's valid to submit records using descriptor sets without
+// features, it's valid to submit records using descriptor sets with
 // destroyed bindings.
 // In that case, we need to check for each binding if it's still valid. We
 // can know whether the pointers are dangling by just looking them up in the
@@ -320,7 +328,7 @@ bool validate(Set& set, Handle*& handle, bool checkReplace) {
 // descriptor set updates and destruction a lot slower.
 static void doRefBindings(Device& dev, DescriptorStateRef state, bool checkIfValid) {
 	ZoneScopedN("refBindings");
-	assertOwned(dev.mutex);
+	assertOwned(dev.mutex); // TODO: feels like bad design here
 
 	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 		auto& binding = state.layout->bindings[b];
@@ -331,34 +339,23 @@ static void doRefBindings(Device& dev, DescriptorStateRef state, bool checkIfVal
 		switch(category(binding.descriptorType)) {
 			case DescriptorCategory::buffer: {
 				for(auto& b : buffers(state, binding.binding)) {
-					if(validate(dev.buffers, b.buffer, checkIfValid)) {
-						incRefCount(*b.buffer);
-					}
+					validateIncRef(dev, dev.buffers, b.buffer, checkIfValid);
 				}
 				break;
 			} case DescriptorCategory::bufferView: {
 				for(auto& b : bufferViews(state, binding.binding)) {
-					if(validate(dev.bufferViews, b.bufferView, checkIfValid)) {
-						incRefCount(*b.bufferView);
-					}
+					validateIncRef(dev, dev.bufferViews, b.bufferView, checkIfValid);
 				}
 				break;
 			} case DescriptorCategory::image: {
 				for(auto& b : images(state, binding.binding)) {
-					if(validate(dev.imageViews, b.imageView, checkIfValid)) {
-						incRefCount(*b.imageView);
-					}
-
-					if(validate(dev.samplers, b.sampler, checkIfValid)) {
-						incRefCount(*b.sampler);
-					}
+					validateIncRef(dev, dev.imageViews, b.imageView, checkIfValid);
+					validateIncRef(dev, dev.samplers, b.sampler, checkIfValid);
 				}
 				break;
 			} case DescriptorCategory::accelStruct: {
 				for(auto& b : accelStructs(state, binding.binding)) {
-					if(validate(dev.accelStructs, b.accelStruct, checkIfValid)) {
-						incRefCount(*b.accelStruct);
-					}
+					validateIncRef(dev, dev.accelStructs, b.accelStruct, checkIfValid);
 				}
 				break;
 			} case DescriptorCategory::inlineUniformBlock: {
@@ -504,7 +501,8 @@ u32 totalDescriptorCount(DescriptorStateRef state) {
 	return ret;
 }
 
-IntrusivePtr<DescriptorSetCow> DescriptorSet::addCow() {
+IntrusivePtr<DescriptorSetCow> DescriptorSet::addCowLocked() {
+	assertOwned(dev->mutex); // TODO: feels like bad design here
 	std::lock_guard lock(mutex_);
 	if(!cow_) {
 		// TODO PERF: get from a pool or something

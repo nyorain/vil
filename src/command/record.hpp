@@ -275,6 +275,7 @@ struct CommandRecord {
 		UsedHandleSet<Sampler> samplers;
 		UsedHandleSet<AccelStruct> accelStructs;
 		UsedHandleSet<Event> events;
+		UsedHandleSet<DescriptorPool> dsPools;
 
 		CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash> descriptorSets;
 		CommandAllocHashSet<UsedImage, RefHandleHash> images;
@@ -306,10 +307,11 @@ struct CommandRecord {
 	CommandRecord& operator=(CommandRecord&&) noexcept = delete;
 };
 
-// Checks if the given bound DescriptorSet is still valid. If so, returns it.
+// Checks if the given bound DescriptorSet is still valid.
+// If so, returns it (and a lock making sure it's kept alive).
 [[nodiscard]]
 std::pair<DescriptorSet*, std::unique_lock<SharedLockableBase(DebugMutex)>>
-tryAccessLocked(const BoundDescriptorSet&);
+tryAccess(const BoundDescriptorSet&);
 
 // Directly accesses the given descriptor set.
 // Asserts that it can be accessed. This method must only be used if
@@ -322,7 +324,11 @@ DescriptorSet& access(const BoundDescriptorSet&);
 // draw/dispatch/traceRays) commands, returns an empty snapshot.
 // Otherwise returns the map of all bound descriptors to their
 // created/retrieved cows.
+CommandDescriptorSnapshot snapshotRelevantDescriptors(Device&, const Command&);
 CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command&);
+// Like snapshotRelevantDescriptors but for when the caller can guarantee
+// that the descriptor sets are still valid. Faster.
+CommandDescriptorSnapshot snapshotRelevantDescriptorsValidLocked(const Command&);
 
 // Tries to find 'dst' in 'rec' and returns it full hierachy.
 // Returns empty vector if it can't be found.

@@ -68,14 +68,18 @@ void CommandBufferGui::draw(Draw& draw) {
 		if(showCombo && ImGui::BeginCombo("Update Source", modeName(mode_))) {
 			if(ImGui::Selectable("None")) {
 				mode_ = UpdateMode::none;
-				hook.target = {};
-				hook.target.record = record_.get();
+
+				CommandHook::HookTarget target {};
+				target.record = record_.get();
+				hook.target(std::move(target));
 			}
 
 			if(record_ && ImGui::Selectable("Any")) {
 				mode_ = UpdateMode::any;
-				hook.target = {};
-				hook.target.all = true;
+
+				CommandHook::HookTarget target {};
+				target.all = true;
+				hook.target(std::move(target));
 			}
 
 			if((mode_ == UpdateMode::commandBuffer && cb_) || record_->cb) {
@@ -85,8 +89,10 @@ void CommandBufferGui::draw(Draw& draw) {
 					}
 
 					mode_ = UpdateMode::commandBuffer;
-					hook.target = {};
-					hook.target.cb = cb_;
+
+					CommandHook::HookTarget target {};
+					target.cb = cb_;
+					hook.target(std::move(target));
 				}
 			}
 
@@ -141,9 +147,10 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	// TODO: don't show this checkbox (or set it to true and disable?)
 	// when we are viewing an invalidated record without updating.
-	if(ImGui::Checkbox("Freeze State", &freezeState_)) {
-		hook.freeze = freezeState_;
-	}
+	ImGui::Checkbox("Freeze State", &freezeState_);
+	// NOTE: always update it, even if it wasn't changed since gui.cpp
+	// changes hook.freeze on window hide
+	hook.freeze.store(freezeState_);
 
 	if(gui_->showHelp && ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("This will freeze the state of the command you are viewing,\n"
@@ -171,7 +178,7 @@ void CommandBufferGui::draw(Draw& draw) {
 
 	// always clear the completed hooks, no matter if we update
 	// the state or not.
-	hook.completed.clear();
+	hook.clearCompleted();
 
 	// force-update shown batches when it's been too long
 	// TODO: fix this for updateTick_
@@ -303,6 +310,8 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) 
 	updateHookTarget();
 
 	if(cmd) {
+		auto& dev = gui_->dev();
+
 		selectedCommand_ = findHierarchy(*record_, *cmd);
 		dlg_assert(!selectedCommand_.empty());
 
@@ -311,7 +320,7 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) 
 
 		// TODO:
 		// descriptors might already be destroyed, snapshotRelevantDescriptors won't help
-		auto dsSnapshot = snapshotRelevantDescriptorsLocked(*selectedCommand_.back());
+		auto dsSnapshot = snapshotRelevantDescriptors(dev, *selectedCommand_.back());
 		commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
 			dsSnapshot, true, nullptr);
 
@@ -323,9 +332,8 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) 
 			}
 		}
 
-		auto& dev = gui_->dev();
 		dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
-		dev.commandHook->freeze = false;
+		dev.commandHook->freeze.store(false);
 	}
 }
 
@@ -366,8 +374,8 @@ void CommandBufferGui::destroyed(const Handle& handle) {
 			mode_ = UpdateMode::none;
 
 			auto& hook = *gui_->dev().commandHook;
-			dlg_assert(!hook.target.cb || hook.target.cb == &handle);
-			hook.target = {};
+			dlg_assert(!hook.target().cb || hook.target().cb == &handle);
+			hook.target({});
 		}
 	}
 
@@ -376,21 +384,23 @@ void CommandBufferGui::destroyed(const Handle& handle) {
 }
 
 void CommandBufferGui::updateHookTarget() {
-	auto& hook = *gui_->dev().commandHook;
-	hook.target = {};
+	CommandHook::HookTarget target {};
 
 	switch(mode_) {
 		case UpdateMode::none:
-			hook.target.record = record_.get();
+			target.record = record_.get();
 			break;
 		case UpdateMode::any:
 		case UpdateMode::swapchain:
-			hook.target.all = true;
+			target.all = true;
 			break;
 		case UpdateMode::commandBuffer:
-			hook.target.cb = cb_;
+			target.cb = cb_;
 			break;
 	}
+
+	auto& hook = *gui_->dev().commandHook;
+	hook.target(std::move(target));
 }
 
 void CommandBufferGui::updateState() {
@@ -402,17 +412,18 @@ void CommandBufferGui::updateState() {
 	// to find equivalent there, updating record_.
 
 	// try to update the shown commands with the best new match
-	if(!hook.completed.empty() && (!freezeState_ || !commandViewer_.state())) {
+	auto completed = hook.moveCompleted();
+	if(!completed.empty() && (!freezeState_ || !commandViewer_.state())) {
 		// find the best match
 		CommandHook::CompletedHook* best = nullptr;
 		auto bestMatch = 0.f;
 		MatchResult bestMatchResult {};
 		u32 bestPresentID = {};
-		span<const FrameSubmission> bestBatches; // only for swapchain mode
+		std::vector<FrameSubmission> bestBatches; // only for swapchain mode
 
-		for(auto& res : hook.completed) {
+		for(auto& res : completed) {
 			float resMatch = res.match;
-			span<const FrameSubmission> foundBatches;
+			std::vector<FrameSubmission> foundBatches;
 			u32 presentID {};
 
 			// When we are in swapchain mode, we need the frame associated with
@@ -422,11 +433,14 @@ void CommandBufferGui::updateState() {
 			if(mode_ == UpdateMode::swapchain) {
 				dlg_assert(selectionType_ == SelectionType::command);
 
-				for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
-					if(res.submissionID >= frame.submissionStart && res.submissionID <= frame.submissionEnd) {
-						foundBatches = frame.batches;
-						presentID = frame.presentID;
-						break;
+				{
+					std::lock_guard lock(dev.mutex);
+					for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
+						if(res.submissionID >= frame.submissionStart && res.submissionID <= frame.submissionEnd) {
+							foundBatches = frame.batches;
+							presentID = frame.presentID;
+							break;
+						}
 					}
 				}
 
@@ -522,7 +536,7 @@ void CommandBufferGui::updateState() {
 			// from *best above.
 			commandViewer_.select(best->record, *best->command.back(),
 				best->descriptorSnapshot, false, best->state);
-			hook.stillNeeded = best->state.get();
+			hook.stillNeeded(best->state.get());
 
 			// in this case, we want to freeze state but temporarily
 			// unfroze it to get a new CommandHookState. This happens
@@ -701,15 +715,16 @@ void CommandBufferGui::displayFrameCommands() {
 				// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
 				//  descriptors might already be destroyed here, snapshotRelevantDescriptors won't help
 				//  maybe make that an option via gui or something
-				auto dsSnapshot = snapshotRelevantDescriptorsLocked(*selectedCommand_.back());
+				auto dsSnapshot = snapshotRelevantDescriptors(dev, *selectedCommand_.back());
 				commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
 					dsSnapshot, true, nullptr);
 
-				dev.commandHook->target = {};
-				dev.commandHook->target.all = true;
+				CommandHook::HookTarget target {};
+				target.all = true;
+				dev.commandHook->target(std::move(target));
 				dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
-				dev.commandHook->freeze = false;
-				dev.commandHook->stillNeeded = nullptr;
+				dev.commandHook->freeze.store(false);
+				dev.commandHook->stillNeeded(nullptr);
 			}
 
 			ImGui::Indent(s);
@@ -747,12 +762,12 @@ void CommandBufferGui::displayRecordCommands() {
 		nsel.back() != selectedCommand_.back());
 	if(newSelection) {
 		if(mode_ == UpdateMode::none) {
-			dlg_assert(dev.commandHook->target.record == record_.get());
+			dlg_assert(dev.commandHook->target().record == record_.get());
 		} else if(mode_ == UpdateMode::commandBuffer) {
 			dlg_assert(cb_);
-			dlg_assert(dev.commandHook->target.cb == cb_);
+			dlg_assert(dev.commandHook->target().cb == cb_);
 		} else if(mode_ == UpdateMode::any) {
-			dlg_assert(dev.commandHook->target.all);
+			dlg_assert(dev.commandHook->target().all);
 		}
 
 		selectionType_ = SelectionType::command;
@@ -762,14 +777,14 @@ void CommandBufferGui::displayRecordCommands() {
 		// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
 		//  descriptors might already be destroyed, snapshotRelevantDescriptors won't help
 		//  maybe make that an option via gui or something
-		auto dsSnapshot = snapshotRelevantDescriptorsLocked(*selectedCommand_.back());
+		auto dsSnapshot = snapshotRelevantDescriptors(dev, *selectedCommand_.back());
 		commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
 			dsSnapshot, true, nullptr);
 
 		// in any case, update the hook
 		dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
-		dev.commandHook->freeze = false;
-		dev.commandHook->stillNeeded = nullptr;
+		dev.commandHook->freeze.store(false);
+		dev.commandHook->stillNeeded(nullptr);
 	}
 }
 
@@ -786,10 +801,10 @@ void CommandBufferGui::clearSelection(bool unselectCommandViewer) {
 	selectedRecord_ = {};
 	selectedCommand_ = {};
 
-	dev.commandHook->target = {};
-	dev.commandHook->unsetHookOps();
+	dev.commandHook->target({});
+	dev.commandHook->ops({});
 	dev.commandHook->desc({}, {}, {});
-	dev.commandHook->stillNeeded = nullptr;
+	dev.commandHook->stillNeeded(nullptr);
 
 	if (mode_ == UpdateMode::swapchain) {
 		record_ = {};

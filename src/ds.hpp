@@ -232,7 +232,8 @@ public:
 	u32 variableDescriptorCount {};
 
 public:
-	IntrusivePtr<DescriptorSetCow> addCow();
+	// requires the device mutex to be locked
+	IntrusivePtr<DescriptorSetCow> addCowLocked();
 	std::unique_lock<DebugMutex> checkResolveCow();
 	std::unique_lock<DebugMutex> lock() {
 		return std::unique_lock<DebugMutex>(mutex_);

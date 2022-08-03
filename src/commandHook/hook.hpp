@@ -31,38 +31,41 @@ public:
 	static constexpr bool hookAccelStructBuilds = true;
 
 	// Defines what to hook
-	struct {
+	struct HookTarget {
 		bool all {};
 		CommandBuffer* cb {};
 		CommandRecord* record {};
-	} target;
+	};
+
+	// Defines which data to retrieve
+	struct HookOps {
+		// Which operations/state copies to peform.
+		// When updating e.g. the id of the ds to be copied, all existing
+		// recordings have to be invalidated!
+		bool copyVertexBuffers {}; // could specify the needed subset in future
+		bool copyIndexBuffers {};
+		bool copyXfb {}; // transform feedback
+		bool copyIndirectCmd {};
+		std::vector<DescriptorCopyOp> descriptorCopies;
+		std::vector<AttachmentCopyOp> attachmentCopies; // only for cmd inside renderpass
+		bool queryTime {};
+
+		// transfer
+		// NOTE: copySrc and copyDst can't be true at same time, atm
+		bool copyTransferSrc {};
+		bool copyTransferDst {};
+		bool copyTransferBefore {};
+		u32 transferIdx {}; // the relevant region/blit/attachment of the transfer command
+	};
 
 	// Temporarily don't hook commands even if hook ops are set
 	// and a submission matches a target.
 	// Note that in comparison to just unsetting hook ops and target,
 	// this allows all already hooked records to stay valid.
-	bool freeze {};
+	std::atomic<bool> freeze {};
 
 	// Always hooks, even with disabled gui. Mainly for testing.
-	bool forceHook {};
-
-	// Which operations/state copies to peform.
-	// When updating e.g. the id of the ds to be copied, all existing
-	// recordings have to be invalidated!
-	bool copyVertexBuffers {}; // could specify the needed subset in future
-	bool copyIndexBuffers {};
-	bool copyXfb {}; // transform feedback
-	bool copyIndirectCmd {};
-	std::vector<DescriptorCopyOp> descriptorCopies;
-	std::vector<AttachmentCopyOp> attachmentCopies; // only for cmd inside renderpass
-	bool queryTime {};
-
-	// transfer
-	// NOTE: copySrc and copyDst can't be true at same time, atm
-	bool copyTransferSrc {};
-	bool copyTransferDst {};
-	bool copyTransferBefore {};
-	u32 transferIdx {}; // the relevant region/blit/attachment of the transfer command
+	std::atomic<bool> forceHook {};
 
 	// A vector of the last received states of finished submissions.
 	// Must be reset manually when retrieved.
@@ -74,9 +77,6 @@ public:
 		std::vector<const Command*> command;
 		float match; // how much the command matched
 	};
-
-	std::vector<CompletedHook> completed;
-	CommandHookState* stillNeeded {}; // hookState that can't be recycled
 
 public:
 	CommandHook(Device& dev);
@@ -95,12 +95,22 @@ public:
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data);
 
 	void invalidateRecordings(bool forceAll = false);
-	void invalidateData() { completed.clear(); }
+	void clearCompleted();
 
 	// invalidate: Automatically invalidates data and recordings?
 	void desc(IntrusivePtr<CommandRecord> rec, std::vector<const Command*> hierachy,
 		CommandDescriptorSnapshot, bool invalidate = true);
-	void unsetHookOps(bool doQueryTime = false);
+
+	void ops(HookOps&& newOps);
+	void target(HookTarget&& newTarget);
+	void stillNeeded(CommandHookState* state);
+
+	[[nodiscard]] std::vector<CompletedHook> moveCompleted();
+
+	// NOTE: copies are being made here (inside a critical section)
+	// so these functions are more expensive than simple getters.
+	HookOps ops() const;
+	HookTarget target() const;
 
 	const auto& dsState() const { return dsState_; }
 	auto recordPtr() const { return record_; }
@@ -118,6 +128,7 @@ private:
 
 private:
 	friend struct CommandHookRecord;
+	friend struct CommandHookSubmission;
 
 	Device* dev_ {};
 
@@ -138,6 +149,11 @@ public: // TODO, for cow. Maybe just move them to Device?
 	VkDescriptorSetLayout copyImageDsLayout_ {};
 	VkPipelineLayout copyImagePipeLayout_ {};
 	VkPipeline copyImagePipes_[ShaderImageType::count] {};
+
+	std::vector<CompletedHook> completed_;
+	HookOps ops_;
+	HookTarget target_;
+	CommandHookState* stillNeeded_ {}; // hookState that can't be recycled
 };
 
 } // namespace vil

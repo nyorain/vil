@@ -27,6 +27,7 @@ void Swapchain::destroy() {
 		{
 			std::lock_guard lock(dev->mutex);
 			img->swapchain = nullptr;
+			img->handle = {};
 		}
 
 		auto handle = castDispatch<VkImage>(*img);
@@ -38,14 +39,6 @@ void Swapchain::destroy() {
 	// can't be threadsafe, by design.
 	std::lock_guard lock(dev->mutex);
 	images.clear();
-
-	if(dev->swapchain == this) {
-		dev->swapchain = nullptr;
-	}
-
-	if(dev->lastCreatedSwapchain == this) {
-		dev->lastCreatedSwapchain = nullptr;
-	}
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
@@ -194,10 +187,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	}
 
 	{
-		// TODO: hacky, see cb gui
 		std::lock_guard lock(dev.mutex);
-		dev.swapchain = &swapd;
-		dev.lastCreatedSwapchain = &swapd;
+		dev.swapchain.reset(&swapd);
 	}
 
 	return result;
@@ -211,8 +202,17 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	swapchain = dev.swapchains.mustMove(swapchain)->handle;
+	auto ptr = mustMoveUnset(device, swapchain);
+	auto& dev = *ptr->dev;
+	ptr->destroy();
+
+	{
+		std::lock_guard lock(dev.mutex);
+		if(dev.swapchain == ptr.get()) {
+			dev.swapchain.reset();
+		}
+	}
+
 	dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, pAllocator);
 }
 
@@ -262,7 +262,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 
 		if(swapchain.overlay && swapchain.overlay->platform) {
 			auto state = swapchain.overlay->platform->update(swapchain.overlay->gui);
-			swapchain.overlay->gui.visible = (state != Platform::State::hidden);
+			swapchain.overlay->gui.visible(state != Platform::State::hidden);
 			// swapchain.overlay->gui.focused = (state == Platform::Status::focused);
 		}
 
@@ -271,7 +271,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		// can already be displayed.
 		swapchainPresent(swapchain);
 
-		if(swapchain.overlay && swapchain.overlay->gui.visible) {
+		if(swapchain.overlay && swapchain.overlay->gui.visible()) {
 			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
 			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
 		} else {

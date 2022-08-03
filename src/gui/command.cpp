@@ -1462,7 +1462,6 @@ void CommandViewer::draw(Draw& draw) {
 
 void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
-	hook.unsetHookOps();
 	state_ = {};
 
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(command_);
@@ -1480,15 +1479,15 @@ void CommandViewer::updateHook() {
 		(drawIndirectCmd && drawIndirectCmd->indexed) ||
 		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
-	hook.freeze = false;
+	CommandHook::HookOps ops {};
 
 	switch(view_) {
 		case IOView::command:
-			hook.queryTime = true;
-			hook.copyIndirectCmd = indirectCmd;
+			ops.queryTime = true;
+			ops.copyIndirectCmd = indirectCmd;
 			break;
 		case IOView::attachment:
-			hook.attachmentCopies = {{
+			ops.attachmentCopies = {{
 				viewData_.attachment.id,
 				viewData_.attachment.type,
 				beforeCommand_
@@ -1500,14 +1499,14 @@ void CommandViewer::updateHook() {
 				break;
 			}
 
-			hook.transferIdx = viewData_.transfer.index;
-			hook.copyTransferSrc = true;
-			hook.copyTransferBefore = beforeCommand_;
+			ops.transferIdx = viewData_.transfer.index;
+			ops.copyTransferSrc = true;
+			ops.copyTransferBefore = beforeCommand_;
 			break;
 		case IOView::transferDst:
-			hook.transferIdx = viewData_.transfer.index;
-			hook.copyTransferDst = true;
-			hook.copyTransferBefore = beforeCommand_;
+			ops.transferIdx = viewData_.transfer.index;
+			ops.copyTransferDst = true;
+			ops.copyTransferBefore = beforeCommand_;
 			break;
 		case IOView::ds: {
 			dlg_assert_or(stateCmd, break);
@@ -1528,16 +1527,16 @@ void CommandViewer::updateHook() {
 			DescriptorCopyOp dsCopy = {
 				viewData_.ds.set, viewData_.ds.binding, viewData_.ds.elem, beforeCommand_
 			};
-			hook.descriptorCopies = {dsCopy};
+			ops.descriptorCopies = {dsCopy};
 			break;
 		} case IOView::mesh:
 			if(viewData_.mesh.output) {
-				hook.copyXfb = true;
-				hook.copyIndirectCmd = indirectCmd;
+				ops.copyXfb = true;
+				ops.copyIndirectCmd = indirectCmd;
 			} else {
-				hook.copyVertexBuffers = true;
-				hook.copyIndexBuffers = indexedCmd;
-				hook.copyIndirectCmd = indirectCmd;
+				ops.copyVertexBuffers = true;
+				ops.copyIndexBuffers = indexedCmd;
+				ops.copyIndirectCmd = indirectCmd;
 			}
 			break;
 		case IOView::pushConstants:
@@ -1547,6 +1546,9 @@ void CommandViewer::updateHook() {
 			shaderDebugger_.updateHooks(hook);
 			break;
 	}
+
+	hook.freeze.store(false);
+	hook.ops(std::move(ops));
 }
 
 void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {

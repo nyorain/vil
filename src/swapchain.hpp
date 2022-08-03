@@ -32,7 +32,7 @@ struct FrameSubmissions {
 	std::vector<FrameSubmission> batches;
 };
 
-struct Swapchain : DeviceHandle {
+struct Swapchain : SharedDeviceHandle {
 	VkSwapchainKHR handle {};
 	VkSwapchainCreateInfoKHR ci;
 	std::unique_ptr<Overlay> overlay;
