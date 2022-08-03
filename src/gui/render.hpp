@@ -60,7 +60,9 @@ struct Draw {
 
 	// Called from the gui thread with dev mutex locked when this draw finishes.
 	// One-shot, i.e. automatically cleared aftewards.
-	using FinishCallback = std::function<void(Draw&)>;
+	// finished: in case the Draw is never submitted in the first place,
+	//   this will be set to false.
+	using FinishCallback = std::function<void(Draw&, bool finished)>;
 	std::vector<FinishCallback> onFinish;
 
 	// frame number in which this draw was last used

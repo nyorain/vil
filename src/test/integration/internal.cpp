@@ -121,9 +121,15 @@ TEST(int_basic) {
 	auto dst = cmd->next->next;
 
 	auto& vilDev = *stp.vilDev;
-	vilDev.commandHook->queryTime = true;
-	vilDev.commandHook->forceHook = true;
-	vilDev.commandHook->target.all = true;
+	CommandHook::HookOps ops {};
+	ops.queryTime = true;
+	vilDev.commandHook->ops(std::move(ops));
+
+	CommandHook::HookTarget target {};
+	target.all = true;
+	vilDev.commandHook->target(std::move(target));
+
+	vilDev.commandHook->forceHook.store(true);
 	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {dst}, {});
 
 	VkSubmitInfo si {};
@@ -134,7 +140,7 @@ TEST(int_basic) {
 
 	DeviceWaitIdle(stp.dev);
 
-	dlg_assert(vilDev.commandHook->completed.size() == 1u);
+	dlg_assert(vilDev.commandHook->moveCompleted().size() == 1u);
 
 	// cleanup
 	DestroyFramebuffer(stp.dev, fb, nullptr);

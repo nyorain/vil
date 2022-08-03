@@ -91,7 +91,7 @@ struct Device {
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
 	bool shaderStorageImageWriteWithoutFormat {};
 
-	bool doFullSync {};
+	std::atomic<bool> doFullSync {};
 	std::atomic<bool> captureCmdStack {};
 
 	// Aside from properties, only the families used by device
@@ -133,7 +133,14 @@ struct Device {
 	// The currently active gui. Might be null. There is never more than
 	// one gui associated with a device.
 	Gui* gui {};
-	Swapchain* swapchain {};
+
+	// synced via device mutex.
+	// NOTE: hacky as hell but can't work around it. Needed only by the
+	// public API to communicate with the application.
+	// Must only be accessed while the mutex is locked.
+	// TODO: could keep a stack of swapchains to support the case
+	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
+	IntrusivePtr<Swapchain> swapchain {};
 
 	std::vector<VkFence> fencePool; // currently unused fences
 
@@ -159,13 +166,6 @@ struct Device {
 	// Note that in vulkan submission synchronization happens on per-device,
 	// *not* on per-queue basis.
 	vilDefMutex(queueMutex);
-
-	// NOTE: hacky as hell but can't work around it. Needed only by the
-	// public API to communicate with the application.
-	// Must only be accessed while the mutex is locked.
-	// TODO: could keep a stack of swapchains to support the case
-	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
-	Swapchain* lastCreatedSwapchain {};
 
 	// === VkBufferAddress lookup ===
 	// In various places we need the buffer belonging to a given buffer address.
@@ -195,7 +195,6 @@ struct Device {
 	std::unordered_map<VkDeviceAddress, AccelStruct*> accelStructAddresses;
 
 	// === Maps of all vulkan handles ===
-	SyncedUniqueUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
 	SyncedRawUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
 	SyncedUniqueWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
@@ -209,6 +208,7 @@ struct Device {
 
 	// TODO: make them unordered set when we switch to c++20 and
 	// have transparent lookup
+	SyncedIntrusiveUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedIntrusiveUnorderedMap<VkImage, Image> images;
 	SyncedIntrusiveUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
 	SyncedIntrusiveUnorderedMap<VkCommandPool, CommandPool> commandPools;

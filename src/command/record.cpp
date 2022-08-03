@@ -95,7 +95,7 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 
 	for(auto i = 0u; i < state.descriptorSets.size(); ++i) {
 		auto& bds = state.descriptorSets[i];
-		auto [ds, lock] = tryAccessLocked(bds);
+		auto [ds, lock] = tryAccess(bds);
 		dlg_assert(ds);
 
 		// NOTE: we only need this since we don't track this during recording
@@ -113,15 +113,17 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 }
 
 std::pair<DescriptorSet*, std::unique_lock<decltype(DescriptorPool::mutex)>>
-tryAccessLocked(const BoundDescriptorSet& bds) {
+tryAccess(const BoundDescriptorSet& bds) {
 	if(!bds.dsPool) {
 		dlg_debug("DescriptorSet inaccessible; DescriptorSet was destroyed");
 		return {};
 	}
 
-	// this functions requires the device mutex to be locked to make sure
-	// that the descriptor pool can't be destroyed.
-	assertOwned(bds.dsPool->dev->mutex);
+	// NOTE: even if the device mutex isn't locked, we can be sure
+	// that the pool itself isn't destroyed since the associated record
+	// always adds it to its used handles and thus keeps it alive.
+	// assertOwned(bds.dsPool->dev->mutex);
+
 	auto lock = std::unique_lock(bds.dsPool->mutex);
 
 	auto& entry = *static_cast<DescriptorPoolSetEntry*>(bds.dsEntry);
@@ -153,9 +155,16 @@ DescriptorSet& access(const BoundDescriptorSet& bds) {
 	return ds;
 }
 
-CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) {
-	// assertOwned(dev.mutex);
+// TODO: we never REALLY need the mutex here.
+// But in hook.cpp we need to snapshot descriptors while having the mutex locked,
+// requiring us to never lock it in the procedure, so it's designed like this.
+// The proper fix would be reworking the giant commandHook critical section.
+CommandDescriptorSnapshot snapshotRelevantDescriptors(Device& dev, const Command& cmd) {
+	std::lock_guard lock(dev.mutex);
+	return snapshotRelevantDescriptorsLocked(cmd);
+}
 
+CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) {
 	CommandDescriptorSnapshot ret;
 	auto* scmd = dynamic_cast<const StateCmdBase*>(&cmd);
 	if(!scmd) {
@@ -163,10 +172,25 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) 
 	}
 
 	for(auto bds : scmd->boundDescriptors().descriptorSets) {
-		auto [ds, lock] = tryAccessLocked(bds);
+		auto [ds, lock] = tryAccess(bds);
 		if(ds) {
-			ret.states.emplace(bds.dsEntry, ds->addCow());
+			ret.states.emplace(bds.dsEntry, ds->addCowLocked());
 		}
+	}
+
+	return ret;
+}
+
+CommandDescriptorSnapshot snapshotRelevantDescriptorsValidLocked(const Command& cmd) {
+	CommandDescriptorSnapshot ret;
+	auto* scmd = dynamic_cast<const StateCmdBase*>(&cmd);
+	if(!scmd) {
+		return ret;
+	}
+
+	for(auto bds : scmd->boundDescriptors().descriptorSets) {
+		auto& ds = access(bds);
+		ret.states.emplace(bds.dsEntry, ds.addCowLocked());
 	}
 
 	return ret;
@@ -217,6 +241,7 @@ CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
 		samplers(alloc),
 		accelStructs(alloc),
 		events(alloc),
+		dsPools(alloc),
 		descriptorSets(alloc),
 		images(alloc) {
 }

@@ -162,32 +162,16 @@ inline bool ownedShared(const tracy::SharedLockable<DebugSharedMutex>& m) { retu
 	using SharedMutex = DebugSharedMutex;
 #endif
 
-template<typename M>
-void assertOwned([[maybe_unused]] M& mutex) {
 #ifdef VIL_DEBUG_MUTEX
-	dlg_assert(owned(mutex));
+	#define assertOwned(m) dlg_assert(owned(m))
+	#define assertOwnedOrShared(m) dlg_assert(owned(m) || ownedShared(m))
+	#define assertNotOwned(m) dlg_assert(!owned(m))
+	#define assertNotOwnedOrShared(m) dlg_assert(!owned(m) && !ownedShared(m))
+#else // VIL_DEBUG_MUTEX
+	#define assertOwned(m) (void)0
+	#define assertOwnedOrShared(m) (void)0
+	#define assertNotOwned(m) (void)0
+	#define assertNotOwnedOrShared(m) (void)0
 #endif // VIL_DEBUG_MUTEX
-}
-
-template<typename M>
-void assertOwnedOrShared([[maybe_unused]] M& mutex) {
-#ifdef VIL_DEBUG_MUTEX
-	dlg_assert(owned(mutex) || ownedShared(mutex));
-#endif // VIL_DEBUG_MUTEX
-}
-
-template<typename M>
-void assertNotOwned([[maybe_unused]] M& mutex) {
-#ifdef VIL_DEBUG_MUTEX
-	dlg_assert(!owned(mutex));
-#endif // VIL_DEBUG_MUTEX
-}
-
-template<typename M>
-void assertNotOwnedOrShared([[maybe_unused]] M& mutex) {
-#ifdef VIL_DEBUG_MUTEX
-	dlg_assert(!owned(mutex) && !ownedShared(mutex));
-#endif // VIL_DEBUG_MUTEX
-}
 
 } // namespace vil

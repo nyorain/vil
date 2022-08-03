@@ -887,7 +887,15 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::PopStyleVar(2);
 	ImGui::Separator();
 
-	if(dev.swapchain) {
+	// swapchain stuff
+	IntrusivePtr<Swapchain> swapchain;
+
+	{
+		std::lock_guard lock(dev.mutex);
+		swapchain = dev.swapchain;
+	}
+
+	if(swapchain) {
 		if(ImGui::Button("View per-frame submissions")) {
 			cbGui().showSwapchainSubmissions();
 			activateTab(Tab::commandBuffer);
@@ -900,9 +908,13 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 		// show timings
 		std::vector<float> hist;
-		for(auto& timing : dev.swapchain->frameTimings) {
-			using MS = std::chrono::duration<float, std::ratio<1, 1000>>;
-			hist.push_back(std::chrono::duration_cast<MS>(timing).count());
+
+		{
+			std::lock_guard lock(dev.mutex);
+			for(auto& timing : dev.swapchain->frameTimings) {
+				using MS = std::chrono::duration<float, std::ratio<1, 1000>>;
+				hist.push_back(std::chrono::duration_cast<MS>(timing).count());
+			}
 		}
 
 		// TODO: the histogram has several problems:
@@ -964,7 +976,9 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::Separator();
 
 		if(dev.timelineSemaphores) {
-			ImGui::Checkbox("Full-Sync", &dev.doFullSync);
+			auto val = dev.doFullSync.load();
+			ImGui::Checkbox("Full-Sync", &val);
+			dev.doFullSync.store(val);
 			if(ImGui::IsItemHovered() && showHelp) {
 				ImGui::SetTooltip("Causes over-conservative synchronization of\n"
 					"inserted layer commands.\n"
@@ -996,9 +1010,12 @@ void Gui::drawMemoryUI(Draw&) {
 	auto& memProps = dev().memProps;
 	VkDeviceSize heapAlloc[VK_MAX_MEMORY_HEAPS] {};
 
-	for(auto& [_, mem] : dev().deviceMemories.inner) {
-		auto heap = memProps.memoryTypes[mem->typeIndex].heapIndex;
-		heapAlloc[heap] += mem->size;
+	{
+		std::lock_guard lock(dev().mutex);
+		for(auto& [_, mem] : dev().deviceMemories.inner) {
+			auto heap = memProps.memoryTypes[mem->typeIndex].heapIndex;
+			heapAlloc[heap] += mem->size;
+		}
 	}
 
 	VkPhysicalDeviceMemoryBudgetPropertiesEXT memBudget {};
@@ -1117,6 +1134,11 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		this->unfocus = false;
 	}
 
+	if(activeTab_ != Tab::commandBuffer) {
+		// deactivate hook when we aren't in the commandbuffer tab
+		dev().commandHook->freeze.store(true);
+	}
+
 	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
 		windowPos_ = ImGui::GetWindowPos();
 		windowSize_ = ImGui::GetWindowSize();
@@ -1220,6 +1242,267 @@ void Gui::activateTab(Tab tab) {
 	}
 }
 
+VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
+	auto cleanupUnfished = [](Draw& draw) {
+		for(auto& fcb : draw.onFinish) {
+			fcb(draw, false);
+		}
+
+		draw.onFinish.clear();
+		draw.usedHandles.clear();
+		draw.usedHookState.reset();
+	};
+
+	// clean up finished application submissions
+	// not strictly needed here but might make additional information
+	// available to command viewer
+	{
+		std::lock_guard devMutex(dev().mutex);
+		for(auto it = dev().pending.begin(); it != dev().pending.end();) {
+			auto& subm = *it;
+			if(auto nit = checkLocked(*subm); nit) {
+				it = *nit;
+				continue;
+			}
+
+			++it; // already increment to next one so we can't miss it
+		}
+	}
+
+	// draw the ui
+	VkCommandBufferBeginInfo cbBegin {};
+	cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
+	DebugLabel cblbl(dev(), draw.cb, "vil:Gui:draw");
+
+	ensureFontAtlas(draw.cb);
+
+	this->draw(draw, info.fullscreen);
+	auto& drawData = *ImGui::GetDrawData();
+	this->uploadDraw(draw, drawData);
+
+	auto blurred = false;
+	if(blur_.dev) {
+		auto& sc = dev().swapchains.get(info.swapchain);
+		if(sc.supportsSampling) {
+			vil::blur(blur_, draw.cb, info.imageIdx, {}, {});
+			blurred = true;
+		}
+	}
+
+	// General barrier to make sure all past submissions writing resources
+	// we read are done. Not needed when we don't read a device resource.
+	// PERF: could likely at least give a better dstAccessMask
+	if(!draw.usedHandles.empty()) {
+		VkMemoryBarrier memb {};
+		memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+		memb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+
+		dev().dispatch.CmdPipelineBarrier(draw.cb,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			0, 1, &memb, 0, nullptr, 0, nullptr);
+	}
+
+	for(auto& cb : preRender_) {
+		cb(draw);
+	}
+	preRender_.clear();
+
+	// optionally blur
+	VkRenderPassBeginInfo rpBegin {};
+	rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	rpBegin.renderArea.extent = info.extent;
+	rpBegin.renderPass = rp_;
+	rpBegin.framebuffer = info.fb;
+
+	VkClearValue clearValues[2] {};
+
+	// color attachment (if we don't clear it, this value is ignored).
+	// see render pass creation
+	clearValues[0].color = {{0.f, 0.f, 0.f, 1.f}};
+
+	// our depth attachment, always clear that.
+	clearValues[1].depthStencil = {1.f, 0u};
+
+	rpBegin.pClearValues = clearValues;
+	rpBegin.clearValueCount = 2u;
+
+	dev().dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+	if(blurred) {
+		VkRect2D scissor;
+		// scissor.offset = {};
+		// scissor.extent = info.extent;
+		scissor.offset.x = std::max(windowPos_.x, 0.f);
+		scissor.offset.y = std::max(windowPos_.y, 0.f);
+		scissor.extent.width = std::min(
+			windowSize_.x + windowPos_.x - scissor.offset.x,
+			info.extent.width - windowPos_.x);
+		scissor.extent.height = std::min(
+			windowSize_.y + windowPos_.y - scissor.offset.y,
+			info.extent.height - windowPos_.y);
+
+		VkViewport viewport;
+		viewport.minDepth = 0.f;
+		viewport.maxDepth = 1.f;
+		viewport.x = 0u;
+		viewport.y = 0u;
+		viewport.width = info.extent.width;
+		viewport.height = info.extent.height;
+		// viewport.x = windowPos_.x;
+		// viewport.y = windowPos_.y;
+		// viewport.width = windowSize_.x;
+		// viewport.height = windowSize_.y;
+
+		dev().dispatch.CmdSetScissor(draw.cb, 0u, 1u, &scissor);
+		dev().dispatch.CmdSetViewport(draw.cb, 0u, 1u, &viewport);
+
+		float pcr[4];
+		// scale
+		pcr[0] = 1.f;
+		pcr[1] = 1.f;
+		// translate
+		pcr[2] = 0.f;
+		pcr[3] = 0.f;
+
+		dev().dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipes_.gui);
+		auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
+			VK_SHADER_STAGE_FRAGMENT_BIT |
+			VK_SHADER_STAGE_COMPUTE_BIT;
+		dev().dispatch.CmdPushConstants(draw.cb, pipeLayout_,
+			pcrStages, 0, sizeof(pcr), pcr);
+		dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+			pipeLayout_, 0u, 1u, &blurDs_, 0, nullptr);
+		VkDeviceSize off = 0u;
+		dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
+		dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
+	}
+
+	this->recordDraw(draw, info.extent, info.fb, drawData);
+
+	dev().dispatch.CmdEndRenderPass(draw.cb);
+
+	for(auto& cb : postRender_) {
+		cb(draw);
+	}
+	postRender_.clear();
+
+	// General barrier to make sure all our reading is done before
+	// future application submissions to this queue.
+	// Not needed when we don't read a device resource.
+	// PERF: could likely at least give a better srcAccessMask
+	if(!draw.usedHandles.empty()) {
+		VkMemoryBarrier memb {};
+		memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+		memb.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+		dev().dispatch.CmdPipelineBarrier(draw.cb,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			0, 1, &memb, 0, nullptr, 0, nullptr);
+	}
+
+	dev().dispatch.EndCommandBuffer(draw.cb);
+
+	// == Critical section ==
+	// Important we already lock this mutex here since we need to make
+	// sure no new submissions are done by application while we process
+	// and evaluate the pending submissions
+	// NOTE: lock order is important here! First lock device mutex,
+	// later on lock queue mutex, that's how we must always do it.
+	std::lock_guard devMutex(dev().mutex);
+
+	auto invalidated = false;
+	for(auto* handle : draw.usedHandles) {
+		if(handle->objectType == VK_OBJECT_TYPE_BUFFER) {
+			if(!static_cast<Buffer*>(handle)->handle) {
+				invalidated = true;
+				break;
+			}
+		} else if(handle->objectType == VK_OBJECT_TYPE_IMAGE) {
+			if(!static_cast<Image*>(handle)->handle) {
+				invalidated = true;
+				break;
+			}
+		} else {
+			dlg_error("unimplemented");
+		}
+	}
+
+	if(invalidated) {
+		cleanupUnfished(draw);
+		return VK_INCOMPLETE;
+	}
+
+	// == Submit batch ==
+	ZoneScopedN("BuildSubmission");
+
+	VkSubmitInfo submitInfo {};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1u;
+	submitInfo.pCommandBuffers = &draw.cb;
+
+	// NOTE: could alternatively retrieve all submissions via
+	// handle->refRecords->cb->pending (and handle->descriptos->...)
+	// but this should be faster, there are usually only a small
+	// number of pending submissions while there might be more recordings
+	// referencing a handle.
+
+	waitSemaphores_.clear();
+	waitSemaphores_.insert(waitSemaphores_.end(),
+		info.waitSemaphores.begin(), info.waitSemaphores.end());
+
+	waitStages_.resize(info.waitSemaphores.size());
+	std::fill_n(waitStages_.begin(), info.waitSemaphores.size(),
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+	signalSemaphores_.clear();
+	signalSemaphores_.emplace_back(draw.presentSemaphore);
+
+	if(dev().doFullSync) {
+		addFullSync(draw, submitInfo);
+	} else {
+		auto res = addLegacySync(draw, submitInfo);
+		if(res != VK_SUCCESS) {
+			dlg_assert(res != VK_INCOMPLETE);
+			return res;
+		}
+	}
+
+	VkResult res;
+
+	{
+		ZoneScopedN("dispatch.QueueSubmit");
+
+		// PERF: when using timeline semaphores we don't need a
+		// fence and can just use the timeline semaphore
+		std::lock_guard queueLock(dev().queueMutex);
+		res = dev().dispatch.QueueSubmit(usedQueue().handle,
+			1u, &submitInfo, draw.fence);
+	}
+
+	if(res != VK_SUCCESS) {
+		dlg_error("vkQueueSubmit error: {}", vk::name(res));
+		dlg_assert(res != VK_INCOMPLETE);
+		cleanupUnfished(draw);
+		return res;
+	}
+
+	if(dev().timelineSemaphores) {
+		usedQueue().lastLayerSubmission = draw.lastSubmissionID;
+	}
+
+	draw.inUse = true;
+	draw.futureSemaphoreSignaled = true;
+	draw.futureSemaphoreUsed = false;
+	lastDraw_ = &draw;
+
+	return VK_SUCCESS;
+}
+
 VkResult Gui::renderFrame(FrameInfo& info) {
 	ZoneScoped;
 	FrameMark;
@@ -1228,36 +1511,31 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	Draw* foundDraw {};
 
 	// find a free draw object
-	for(auto& draw : draws_) {
-		if(!draw.inUse) {
-			foundDraw = &draw;
-			continue;
+	{
+		std::lock_guard devMutex(dev().mutex);
+
+		for(auto& draw : draws_) {
+			if(!draw.inUse) {
+				foundDraw = &draw;
+				continue;
+			}
+
+			if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
+				finishedLocked(draw);
+				foundDraw = &draw;
+			}
 		}
 
-		if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
-			std::lock_guard devMutex(dev().mutex);
-			finishedLocked(draw);
-			foundDraw = &draw;
+		if(!foundDraw) {
+			foundDraw = &draws_.emplace_back();
+			foundDraw->init(*this, commandPool_);
 		}
-	}
-
-	if(!foundDraw) {
-		foundDraw = &draws_.emplace_back();
-		foundDraw->init(*this, commandPool_);
 	}
 
 	auto& draw = *foundDraw;
 	draw.usedHandles.clear();
 	foundDraw->lastUsed = ++drawCounter_;
 
-	VkCommandBufferBeginInfo cbBegin {};
-	cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
-	DebugLabel cblbl(dev(), draw.cb, "vil:Gui:draw");
-
-	ensureFontAtlas(draw.cb);
-
-	auto blurred = false;
 	if(blur_.dev) {
 		auto& sc = dev().swapchains.get(info.swapchain);
 		if(sc.supportsSampling) {
@@ -1284,9 +1562,6 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 
 				dev().dispatch.UpdateDescriptorSets(dev().handle, 1u, &write, 0u, nullptr);
 			}
-
-			vil::blur(blur_, draw.cb, info.imageIdx, {}, {});
-			blurred = true;
 		}
 	}
 
@@ -1302,229 +1577,19 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		ImGui::GetIO().DeltaTime = dt_;
 	}
 
-	VkResult res;
-
-	// TODO: hacky but we have to keep the records alive, making sure
-	// it's not destroyed inside the lock. Might need more here for correctness.
-	// Should probably come up with better mechanism.
-	auto keepAliveDsCows = std::vector<CommandDescriptorSnapshot> {};
-	auto keepAliveBatches0 = tabs_.cb->records_;
-	auto keepAliveBatches1 = tabs_.cb->selectedFrame_;
-	auto keepAliveDs0 = tabs_.cb->commandViewer_.dsState_;
-	std::vector<IntrusivePtr<CommandRecord>> keepAliveRecs {
-		tabs_.cb->record_,
-		tabs_.cb->selectedRecord_,
-		tabs_.cb->commandViewer_.record_,
-		dev().commandHook->recordPtr(),
-		// TODO: shader debugger state.
-	};
-
-	{
-		// Important we already lock this mutex here since we need to make
-		// sure no new submissions are done by application while we process
-		// and evaluate the pending submissions
-		// NOTE: lock order is important here! First lock device mutex,
-		// later on lock queue mutex, that's how we must always do it.
-		std::lock_guard devMutex(dev().mutex);
-
-		// Clear pending submissions
-		for(auto it = dev().pending.begin(); it != dev().pending.end();) {
-			auto& subm = *it;
-			if(auto nit = checkLocked(*subm); nit) {
-				it = *nit;
-				continue;
-			}
-
-			++it; // already increment to next one so we can't miss it
+	VkResult res = VK_INCOMPLETE;
+	while(true) {
+		res = tryRender(draw, info);
+		if(res == VK_SUCCESS) {
+			break;
 		}
 
-		// TODO UGH OUCHIE: related to the hack of keeping records alive
-		// mentioned above. Yes, this is also terrible, even more so.
-		// But we need to make sure they are not destructed (via shared refCount
-		// decrease) while we hold the lock.
-		for(auto& completed : dev().commandHook->completed) {
-			keepAliveRecs.push_back(completed.record);
-			keepAliveDsCows.push_back(completed.descriptorSnapshot);
-		}
-
-		this->draw(draw, info.fullscreen);
-		auto& drawData = *ImGui::GetDrawData();
-		this->uploadDraw(draw, drawData);
-
-		// General barrier to make sure all past submissions writing resources
-		// we read are done. Not needed when we don't read a device resource.
-		// PERF: could likely at least give a better dstAccessMask
-		if(!draw.usedHandles.empty()) {
-			VkMemoryBarrier memb {};
-			memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-			memb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-			memb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-
-			dev().dispatch.CmdPipelineBarrier(draw.cb,
-				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-				0, 1, &memb, 0, nullptr, 0, nullptr);
-		}
-
-		for(auto& cb : preRender_) {
-			cb(draw);
-		}
-		preRender_.clear();
-
-		// optionally blur
-		VkRenderPassBeginInfo rpBegin {};
-		rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		rpBegin.renderArea.extent = info.extent;
-		rpBegin.renderPass = rp_;
-		rpBegin.framebuffer = info.fb;
-
-		VkClearValue clearValues[2] {};
-
-		// color attachment (if we don't clear it, this value is ignored).
-		// see render pass creation
-		clearValues[0].color = {{0.f, 0.f, 0.f, 1.f}};
-
-		// our depth attachment, always clear that.
-		clearValues[1].depthStencil = {1.f, 0u};
-
-		rpBegin.pClearValues = clearValues;
-		rpBegin.clearValueCount = 2u;
-
-		dev().dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-		if(blurred) {
-			VkRect2D scissor;
-			// scissor.offset = {};
-			// scissor.extent = info.extent;
-			scissor.offset.x = std::max(windowPos_.x, 0.f);
-			scissor.offset.y = std::max(windowPos_.y, 0.f);
-			scissor.extent.width = std::min(
-				windowSize_.x + windowPos_.x - scissor.offset.x,
-				info.extent.width - windowPos_.x);
-			scissor.extent.height = std::min(
-				windowSize_.y + windowPos_.y - scissor.offset.y,
-				info.extent.height - windowPos_.y);
-
-			VkViewport viewport;
-			viewport.minDepth = 0.f;
-			viewport.maxDepth = 1.f;
-			viewport.x = 0u;
-			viewport.y = 0u;
-			viewport.width = info.extent.width;
-			viewport.height = info.extent.height;
-			// viewport.x = windowPos_.x;
-			// viewport.y = windowPos_.y;
-			// viewport.width = windowSize_.x;
-			// viewport.height = windowSize_.y;
-
-			dev().dispatch.CmdSetScissor(draw.cb, 0u, 1u, &scissor);
-			dev().dispatch.CmdSetViewport(draw.cb, 0u, 1u, &viewport);
-
-			float pcr[4];
-			// scale
-			pcr[0] = 1.f;
-			pcr[1] = 1.f;
-			// translate
-			pcr[2] = 0.f;
-			pcr[3] = 0.f;
-
-			dev().dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipes_.gui);
-			auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
-				VK_SHADER_STAGE_FRAGMENT_BIT |
-				VK_SHADER_STAGE_COMPUTE_BIT;
-			dev().dispatch.CmdPushConstants(draw.cb, pipeLayout_,
-				pcrStages, 0, sizeof(pcr), pcr);
-			dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				pipeLayout_, 0u, 1u, &blurDs_, 0, nullptr);
-			VkDeviceSize off = 0u;
-			dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
-			dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
-		}
-
-		this->recordDraw(draw, info.extent, info.fb, drawData);
-
-		dev().dispatch.CmdEndRenderPass(draw.cb);
-
-		for(auto& cb : postRender_) {
-			cb(draw);
-		}
-		postRender_.clear();
-
-		// General barrier to make sure all our reading is done before
-		// future application submissions to this queue.
-		// Not needed when we don't read a device resource.
-		// PERF: could likely at least give a better srcAccessMask
-		if(!draw.usedHandles.empty()) {
-			VkMemoryBarrier memb {};
-			memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-			memb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-			memb.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-
-			dev().dispatch.CmdPipelineBarrier(draw.cb,
-				VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-				VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-				0, 1, &memb, 0, nullptr, 0, nullptr);
-		}
-
-		dev().dispatch.EndCommandBuffer(draw.cb);
-
-		// == Submit batch ==
-		ZoneScopedN("BuildSubmission");
-
-		VkSubmitInfo submitInfo {};
-		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		submitInfo.commandBufferCount = 1u;
-		submitInfo.pCommandBuffers = &draw.cb;
-
-		// NOTE: could alternatively retrieve all submissions via
-		// handle->refRecords->cb->pending (and handle->descriptos->...)
-		// but this should be faster, there are usually only a small
-		// number of pending submissions while there might be more recordings
-		// referencing a handle.
-
-		waitSemaphores_.clear();
-		waitSemaphores_.insert(waitSemaphores_.end(),
-			info.waitSemaphores.begin(), info.waitSemaphores.end());
-
-		waitStages_.resize(info.waitSemaphores.size());
-		std::fill_n(waitStages_.begin(), info.waitSemaphores.size(),
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-
-		signalSemaphores_.clear();
-		signalSemaphores_.emplace_back(draw.presentSemaphore);
-
-		if(dev().doFullSync) {
-			addFullSync(draw, submitInfo);
-		} else {
-			auto res = addLegacySync(draw, submitInfo);
-			if(res != VK_SUCCESS) {
-				return res;
-			}
-		}
-
-		{
-			ZoneScopedN("dispatch.QueueSubmit");
-
-			// PERF: when using timeline semaphores we don't need a
-			// fence and can just use the timeline semaphore
-			std::lock_guard queueLock(dev().queueMutex);
-			res = dev().dispatch.QueueSubmit(usedQueue().handle,
-				1u, &submitInfo, draw.fence);
-		}
-
-		if(res != VK_SUCCESS) {
-			dlg_error("vkQueueSubmit error: {}", vk::name(res));
+		// error case
+		if(res != VK_INCOMPLETE) {
 			return res;
 		}
 
-		if(dev().timelineSemaphores) {
-			usedQueue().lastLayerSubmission = draw.lastSubmissionID;
-		}
-
-		draw.inUse = true;
-		draw.futureSemaphoreSignaled = true;
-		draw.futureSemaphoreUsed = false;
-		lastDraw_ = foundDraw;
+		dlg_info("re-trying rendering after mid-draw invalidation");
 	}
 
 	// call down
@@ -1794,7 +1859,7 @@ void Gui::selectResource(Handle& handle, bool activateTab) {
 Draw* Gui::latestPendingDrawSyncLocked(SubmissionBatch& batch) {
 	Draw* ret {};
 	for(auto& draw : draws_) {
-		if(!draw.inUse || dev().dispatch.GetFenceStatus(dev().handle, draw.fence) != VK_SUCCESS) {
+		if(!draw.inUse || dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
 			continue;
 		}
 
@@ -1815,7 +1880,7 @@ void Gui::finishedLocked(Draw& draw) {
 	}
 
 	for(auto& cb : draw.onFinish) {
-		cb(draw);
+		cb(draw, true);
 	}
 
 	draw.onFinish.clear();
@@ -1876,6 +1941,15 @@ void Gui::addPostRender(Recorder rec) {
 
 Queue& Gui::usedQueue() const {
 	return *dev().gfxQueue;
+}
+
+void Gui::visible(bool newVisible) {
+	visible_ = newVisible;
+
+	if(!newVisible) {
+		auto& hook = *dev().commandHook;
+		hook.freeze.store(true);
+	}
 }
 
 } // namespace vil

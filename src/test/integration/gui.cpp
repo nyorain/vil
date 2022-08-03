@@ -64,7 +64,7 @@ TEST(int_gui) {
 	vilOverlayShow(overlay, true);
 
 	dlg_assert(stp.vilDev->gui);
-	dlg_assert(stp.vilDev->gui->visible);
+	dlg_assert(stp.vilDev->gui->visible());
 
 	// TODO: render an (empty) frame just to cover basic rendering path
 	// of gui.

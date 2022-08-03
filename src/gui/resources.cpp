@@ -1131,6 +1131,11 @@ void ResourceGui::draw(Draw& draw) {
 	auto update = firstUpdate_;
 	firstUpdate_ = false;
 
+	// TODO: in most cases we don't need this huge critical section
+	// increase refCount for gathered handles, making sure they
+	// don't get destroyed
+	std::lock_guard lock(gui_->dev().mutex);
+
 	auto filterName = vil::name(filter_);
 	// ImGui::SetNextItemWidth(150.f);
 	if(ImGui::BeginCombo("", filterName)) {
@@ -1346,16 +1351,21 @@ void ResourceGui::copyBuffer(Draw& draw) {
 	readback->src = buf.handle;
 	readback->pending = &draw;
 
-	auto cb = [this](Draw& draw){
+	auto cb = [this](Draw& draw, bool success){
 		auto found = false;
 		for(auto [i, readback] : enumerate(buffer_.readbacks)) {
 			if(readback.pending == &draw) {
 				dlg_assert(!found);
 				found = true;
 				readback.pending = nullptr;
-				buffer_.lastReadback = i;
+
+				if(success) {
+					buffer_.lastReadback = i;
+				}
 			}
 		}
+
+		dlg_assert(found);
 	};
 	draw.onFinish.push_back(cb);
 

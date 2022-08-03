@@ -43,17 +43,20 @@ extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevic
 	VilOverlay ret {};
 	{
 		std::lock_guard lock(dev.mutex);
-		if(!dev.lastCreatedSwapchain) {
+		if(!dev.swapchain) {
 			dlg_warn("No last created swapchain (was the last created swapchain destroyed?)");
 			return {};
 		}
 
-		auto& sc = *dev.lastCreatedSwapchain;
+		auto& sc = *dev.swapchain;
 		if(sc.overlay) {
 			dlg_warn("Swapchain already had an overlay");
 			return {};
 		}
 
+		// TODO: if this gui object was created by implicitly created
+		// window/overlay, we want to keep the gui but create the new overlay
+		// after destroying the implicit window/overlay.
 		if(dev.gui) {
 			dlg_warn("There already is a vil gui; Can't have two of them");
 			return {};
@@ -76,13 +79,13 @@ extern "C" VIL_EXPORT VilOverlay vilCreateOverlayForLastCreatedSwapchain(VkDevic
 
 extern "C" VIL_EXPORT void vilOverlayShow(VilOverlay overlay, bool show) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
-	ov.gui.visible = show;
+	ov.gui.visible(show);
 }
 
 extern "C" VIL_EXPORT void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, int y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
-	if(ov.gui.visible) {
+	if(ov.gui.visible()) {
 		ov.gui.imguiIO().MousePos = {float(x), float(y)};
 	}
 }
@@ -91,7 +94,7 @@ extern "C" VIL_EXPORT void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, i
 extern "C" VIL_EXPORT bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsigned button, bool press) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
-	if(ov.gui.visible && button < 5) {
+	if(ov.gui.visible() && button < 5) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseDown[button] = press;
 		return io.WantCaptureMouse;
@@ -102,7 +105,7 @@ extern "C" VIL_EXPORT bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsign
 extern "C" VIL_EXPORT bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x, float y) {
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
-	if(ov.gui.visible) {
+	if(ov.gui.visible()) {
 		auto& io = ov.gui.imguiIO();
 		io.MouseWheel += y;
 		io.MouseWheelH += x;
@@ -118,11 +121,11 @@ extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum VilKey ke
 
 	// TODO; remove hardcoded toggle.
 	if(keycode == VilKeyBackslash && pressed) {
-		ov.gui.visible ^= true;
+		ov.gui.visible(ov.gui.visible() ^ true);
 		return true;
 	}
 
-	if(!ov.gui.visible) {
+	if(!ov.gui.visible()) {
 		return false;
 	}
 
@@ -136,7 +139,7 @@ extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* u
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 
-	if(!ov.gui.visible || !utf8) {
+	if(!ov.gui.visible() || !utf8) {
 		return false;
 	}
 
@@ -149,7 +152,7 @@ extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum V
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 
-	if(!ov.gui.visible) {
+	if(!ov.gui.visible()) {
 		return;
 	}
 

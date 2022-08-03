@@ -580,11 +580,12 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 	}
 
 	// TODO: hacky
+	// PERF: and expensive! espeically the hook.ops() call since it copies
 	auto hookState = gui_->cbGui().commandViewer().state();
 	dlg_assert(hookState);
 	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
-	dlg_assert(gui_->dev().commandHook->descriptorCopies.size() > dsCopyIt->second);
-	auto& copyRequest = gui_->dev().commandHook->descriptorCopies[dsCopyIt->second];
+	dlg_assert(gui_->dev().commandHook->ops().descriptorCopies.size() > dsCopyIt->second);
+	auto& copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
 	auto& copyResult = hookState->copiedDescriptors[dsCopyIt->second + arrayElemID];
@@ -794,11 +795,12 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		return;
 	}
 
+	// TODO: hacky and expensive
 	dlg_assert(state_);
 	auto& hookState = *state_.get();
 	dlg_assert(hookState.copiedDescriptors.size() > dsCopyIt->second);
-	dlg_assert(gui_->dev().commandHook->descriptorCopies.size() > dsCopyIt->second);
-	auto& copyRequest = gui_->dev().commandHook->descriptorCopies[dsCopyIt->second];
+	dlg_assert(gui_->dev().commandHook->ops().descriptorCopies.size() > dsCopyIt->second);
+	auto& copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
 	auto& copyResult = hookState.copiedDescriptors[dsCopyIt->second + arrayElemID];
@@ -1010,7 +1012,7 @@ void ShaderDebugger::storeVar(unsigned id, span<const spvm_word> indices,
 void ShaderDebugger::updateHooks(CommandHook& hook) {
 	dlg_assert(compiled_);
 
-	hook.unsetHookOps();
+	CommandHook::HookOps ops {};
 	varIDToDsCopyMap_.clear();
 
 	auto resources = compiled_->get_shader_resources();
@@ -1024,7 +1026,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 			}
 
 			auto& type = compiled_->get_type_from_variable(res.id);
-			varIDToDsCopyMap_.insert({u32(res.id), u32(hook.descriptorCopies.size())});
+			varIDToDsCopyMap_.insert({u32(res.id), u32(ops.descriptorCopies.size())});
 
 			DescriptorCopyOp dsCopy;
 			dsCopy.set = compiled_->get_decoration(res.id, spv::DecorationDescriptorSet);
@@ -1040,7 +1042,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 
 			for(auto i = 0u; i < arraySize; ++i) {
 				dsCopy.elem = i;
-				hook.descriptorCopies.push_back(dsCopy);
+				ops.descriptorCopies.push_back(dsCopy);
 			}
 		}
 	};
@@ -1061,8 +1063,10 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 			dynamic_cast<const DrawIndirectCmd*>(baseCmd) ||
 			dynamic_cast<const DrawIndirectCountCmd*>(baseCmd) ||
 			dynamic_cast<const TraceRaysIndirectCmd*>(baseCmd)) {
-		hook.copyIndirectCmd = true;
+		ops.copyIndirectCmd = true;
 	}
+
+	hook.ops(std::move(ops));
 }
 
 void ShaderDebugger::setupScalar(const Type& type, ReadBuf data, spvm_member& dst) {

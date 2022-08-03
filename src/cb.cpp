@@ -634,6 +634,7 @@ struct GetUsedSet {
 	static auto& get(CommandRecord& rec, const GraphicsPipeline&) { return rec.used.graphicsPipes; }
 	static auto& get(CommandRecord& rec, const ComputePipeline&) { return rec.used.computePipes; }
 	static auto& get(CommandRecord& rec, const RayTracingPipeline&) { return rec.used.rtPipes; }
+	static auto& get(CommandRecord& rec, const DescriptorPool&) { return rec.used.dsPools; }
 };
 
 template<typename T>
@@ -695,6 +696,13 @@ UsedDescriptorSet& useHandleImpl(CommandRecord& rec, Command& cmd, DescriptorSet
 template<typename T>
 auto& useHandle(CommandRecord& rec, Command& cmd, T& handle) {
 	return useHandleImpl(rec, cmd, handle);
+}
+
+void useHandle(CommandRecord& rec, Command& cmd, DescriptorSet& ds) {
+	useHandleImpl(rec, cmd, ds);
+	dlg_assert(ds.pool);
+	// also use the pool here, making sure it's kept alive
+	useHandleImpl(rec, cmd, *ds.pool);
 }
 
 UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& img) {

@@ -27,10 +27,11 @@ the layer works internally. Useful mainly for development on it.
 	- `util`: utility headers that are not directly involved with the vulkan API
 	  and or used in potentially multiple places throughout the layer.
 	  Most of these utilities were imported from previous projects.
-	- `gui`: all logic for the introspection gui go here. At the moment,
-	  the central `CommandHook` class and its utilities are also implemented
-	  here since they connect the gui to the command submissions done by
-	  the application.
+	- `gui`: all logic for the introspection gui go here. Resource viewer,
+	  command viewer, vertex viewer, image viewer, overview UI and so on.
+	- `commandHook`: the central `CommandHook` class and its utilities are implemented
+	  here. They are responsible for modifying the recorded command buffers
+	  submitted by applications
 	- `data`: shader sources. As we have a small number of rather static
 	  shared sources, there is a `prebuilt` subfolder that should contain
 	  compiled versions of the latest shader sources. When `glslang` is found,
@@ -60,6 +61,9 @@ the layer works internally. Useful mainly for development on it.
 	  library vil uses for shader debugging. We should probably move that
 	  to a git subproject sooner or later since we often need to change/extend/fix
 	  it during development.
+	- `minhook`: sources of the [minhook library](https://github.com/TsudaKageyu/minhook).
+	  Used only for the hooked win32 overlay, to grab/block input from
+	  the application.
 	- `tao/pegtl`: We use the [tao/pegtl](https://github.com/taocpp/PEGTL) library
 	  to parse expressions. Used for instance by the buffer viewer to convert a 
 	  glsl-like type specification to an internal type representation used to 
@@ -146,12 +150,43 @@ that implement copy-on-write when a state object has more than one reference
 Where needed, more fine-granular synchronization should be added as optimization
 in future.
 
-In general, we keep track of most connections between handles and allow
-to view them in the gui. While the gui is rendered, it locks the device mutex.
+In general, we keep track of some connections between handles and allow
+to view them in the gui. While the gui is rendered, it will lock the device
+mutex in many places.
 
 In addition to the standard device mutex, there is also the device queue mutex,
 used to synchronize submissions to queues (since vulkan does not allow
 to call queue operations from multiple threads at the same time).
+
+## Handles
+
+API objects created by the application generally have an object counterpart
+inside the layer, e.g. [vil::Image](src/image.hpp), [vil::DescriptorSet](src/ds.hpp),
+[vil::CommandBuffer](src/cb.hpp), or [vil::Device](src/device.hpp).
+They all derive from [vil::Handle](src/handle.hpp) which knows its own
+`objectType` and debug name.
+
+Many device-level handles have an embedded, intrusive, atomic reference
+count and have shared ownership. As long as their API counterpart is
+alive, the device has one owned reference to them and they are guaranteed
+to be kept alive. But most handles can stay alive beyond that (e.g. a
+`vil::ImageView` object existing even though the application has called
+`vkDestroyImageView`). There are multiple reasons for that:
+- For transient handles, it allows us to show some information (such as
+  create info or debug name) in the UI even if the handle was destroyed.
+  It's also useful for command matching, which is done to find a selected
+  command in future submissions as well.
+- Without shared ownership, we would have to track which `CommandRecord`
+  or `DescriptorSet` objects use which handles. That was done in the beginning
+  and had huge overhead (mainly because it's hard to do in parallel with
+  proper synchronization), shared ownership made this a lot easier and faster.
+- In some cases, the Vulkan spec allows to destroy handles very early
+  - e.g. destroying the PipelineLayout right after recording of a command buffer.
+  We might still need those API handles later on (e.g. for command hooking,
+  see below). Therefore will not just keep our object-representation of
+  the handle alive, but the handle (with further layers/the driver) itself
+  as well, so we can use it later on. But this only happens for some layout
+  handles.
 
 ## Command
 
@@ -182,7 +217,7 @@ The memory is freed simply when the CommandRecord is no longer needed.
 
 ## CommandHook
 
-`vil::CommandHook` (in [src/gui/commandHook.hpp](src/gui/commandHook.hpp)) and the associated
+`vil::CommandHook` (in [src/gui/commandHook.hpp](src/commandHook/hook.hpp)) and the associated
 classes `CommandHookRecord`, `CommandHookSubmission` allow us to insert
 commands into the submissions done by the application.
 A `CommandHook` can be installed in the `vil::Device` and will be considered

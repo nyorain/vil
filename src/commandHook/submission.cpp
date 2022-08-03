@@ -50,9 +50,10 @@ void CommandHookSubmission::finish(Submission& subm) {
 		return;
 	}
 
+	assertOwned(record->hook->dev_->mutex);
 	transmitTiming();
 
-	auto& state = record->hook->completed.emplace_back();
+	auto& state = record->hook->completed_.emplace_back();
 	state.record = IntrusivePtr<CommandRecord>(record->record);
 	state.match = record->match;
 	state.state = record->state;
@@ -64,11 +65,11 @@ void CommandHookSubmission::finish(Submission& subm) {
 	// Either we are not correctly clearing completed states from the gui
 	// but still producing new ones or we have just *waaay* to many
 	// candidates and should somehow improve matching for this case.
-	dlg_assertlm(dlg_level_warn, record->hook->completed.size() < 64,
+	dlg_assertlm(dlg_level_warn, record->hook->completed_.size() < 64,
 		"High number of hook states detected");
 
 	// indirect command readback
-	if(record->hook->copyIndirectCmd) {
+	if(record->hook->ops_.copyIndirectCmd) {
 		auto& bcmd = *record->hcommand.back();
 
 		if(auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&bcmd)) {
@@ -116,7 +117,7 @@ void CommandHookSubmission::transmitTiming() {
 	ZoneScoped;
 
 	auto& dev = *record->record->dev;
-	if(!record->hook->queryTime) {
+	if(!record->hook->ops_.queryTime) {
 		return;
 	}
 
