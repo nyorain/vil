@@ -12,17 +12,64 @@
 
 namespace vil {
 
+VkFormat upgradeToSafeStorageTexelWithoutFormat(VkFormat src) {
+	dlg_assert(!FormatIsCompressed(src));
+	dlg_assert(!FormatIsMultiplane(src));
+	dlg_assert(FormatIsColor(src));
+
+	// TODO PERF: implement proper map
+	// maybe just implement one central format map somewhere that
+	// has everything we need? then we can rid of format utils as well.
+	// Their map doesn't work for all our cases (e.g. format io) but
+	// it's a good starting point I guess
+	// auto numChannels = FormatComponentCount(src);
+	// auto texelSize = FormatTexelSize(src);
+	return VK_FORMAT_R32G32B32A32_SFLOAT;
+}
+
 VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect) {
 	// NOTE: see the vulkan table to formats that can be written
 	// with the shaderStorageImageWriteWithoutFormat feature
-	if(FormatIsCompressed(src)) {
+	if(FormatIsCompressed(src) || FormatIsMultiplane(src)) {
 		dlg_assert(aspect == VK_IMAGE_ASPECT_COLOR_BIT);
+
+		switch(src) {
+			case VK_FORMAT_BC1_RGBA_SRGB_BLOCK:
+			case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
+			case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
+			case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+			case VK_FORMAT_BC2_SRGB_BLOCK:
+			case VK_FORMAT_BC2_UNORM_BLOCK:
+			case VK_FORMAT_BC3_SRGB_BLOCK:
+			case VK_FORMAT_BC3_UNORM_BLOCK:
+			case VK_FORMAT_BC4_UNORM_BLOCK:
+			case VK_FORMAT_BC5_UNORM_BLOCK:
+			case VK_FORMAT_BC7_SRGB_BLOCK:
+			case VK_FORMAT_BC7_UNORM_BLOCK:
+				return VK_FORMAT_R8G8B8A8_UNORM;
+			case VK_FORMAT_BC4_SNORM_BLOCK:
+			case VK_FORMAT_BC5_SNORM_BLOCK:
+				return VK_FORMAT_R8G8B8A8_SNORM;
+			case VK_FORMAT_BC6H_SFLOAT_BLOCK:
+			case VK_FORMAT_BC6H_UFLOAT_BLOCK:
+				return VK_FORMAT_R16G16B16A16_SFLOAT;
+			default:
+				break;
+		}
+
 		// TODO: overkill in many cases, figure out minimum format able
 		// to hold the uncompressed data
-		return VK_FORMAT_R16G16B16A16_SFLOAT;
+		if(FormatIsSampledFloat(src)) {
+			return VK_FORMAT_R32G32B32A32_SFLOAT;
+		} else if(FormatIsSINT(src)) {
+			return VK_FORMAT_R32G32B32A32_SINT;
+		} else if(FormatIsUINT(src)) {
+			return VK_FORMAT_R32G32B32A32_UINT;
+		}
 	}
 
-	if(src == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) {
+	if(src == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 ||
+			src == VK_FORMAT_B10G11R11_UFLOAT_PACK32) {
 		return VK_FORMAT_R16G16B16A16_SFLOAT;
 	}
 
@@ -45,11 +92,6 @@ VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect) {
 				VK_FORMAT_R16_UNORM : VK_FORMAT_R8_UINT;
 		case VK_FORMAT_S8_UINT:
 			return VK_FORMAT_R8_UINT;
-		// NOTE: implemented now in readFormat
-		// case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
-		// 	return VK_FORMAT_R16G16B16A16_UNORM;
-		// case VK_FORMAT_A2B10G10R10_SNORM_PACK32:
-		// 	return VK_FORMAT_R16G16B16A16_SNORM;
 		default:
 			break;
 	}
@@ -346,104 +388,188 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 // supports nearest sampling. Will bind compute state to 'cb'.
 // Only a single aspect must be set int srcSubres.
 void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
-		OwnBuffer& dst, Image& src, VkImageLayout srcLayout,
+		CopiedImageToBuffer& dst, Image& src, VkImageLayout srcLayout,
 		const VkImageSubresourceRange& srcSubres, u32 queueFamsBitset,
 		std::vector<VkImageView>& imgViews, std::vector<VkBufferView>& bufViews,
 		std::vector<VkDescriptorSet>& dss) {
 	auto& hook = *dev.commandHook;
 	dlg_assert(src.allowsNearestSampling);
 
-	// TODO
-	constexpr auto useTexelStorage = true;
+	// determine the path we take here depending on the supported
+	// format features
+	enum class CopyMethod {
+		copy,
+		// TODO: implement! next best after copy
+		// blit,
+		texelStorage,
+	};
+
+	auto dstFormat = sampleFormat(src.ci.format,
+		VkImageAspectFlagBits(srcSubres.aspectMask));
+
+	CopyMethod method = CopyMethod::texelStorage;
+
+	if(dstFormat == src.ci.format) {
+		// TODO: cache somewhere, don't call this every time
+		VkFormatProperties formatProps {};
+		dev.ini->dispatch.GetPhysicalDeviceFormatProperties(dev.phdev,
+			src.ci.format, &formatProps);
+		auto checkTransfer = dev.props.apiVersion >= VK_API_VERSION_1_1;
+		auto srcFeatures = (src.ci.tiling == VK_IMAGE_TILING_LINEAR) ?
+			formatProps.linearTilingFeatures :
+			formatProps.optimalTilingFeatures;
+
+		if(!checkTransfer || (srcFeatures & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT)) {
+			method = CopyMethod::copy;
+		}
+	}
+
+	if(method != CopyMethod::copy) {
+		if(dev.shaderStorageImageWriteWithoutFormat) {
+			// make sure we can write dstFormat without format
+			// TODO: cache somewhere, don't call this every time
+			VkFormatProperties formatProps {};
+			dev.ini->dispatch.GetPhysicalDeviceFormatProperties(dev.phdev,
+				dstFormat, &formatProps);
+			auto dstFeatures = formatProps.bufferFeatures;
+			// TODO: is this enough? do we need VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT?
+			// the vulkan spec gives some guarantees but only for
+			// storage images, does it apply to storage texel buffers too?
+			if(!(dstFeatures & VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT)) {
+				dstFormat = upgradeToSafeStorageTexelWithoutFormat(dstFormat);
+			}
+		} else {
+			// our default format, see sample.glsl
+			if(FormatIsSampledFloat(src.ci.format)) {
+				dstFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
+			} else if(FormatIsSINT(src.ci.format)) {
+				dstFormat = VK_FORMAT_R32G32B32A32_SINT;
+			} else if(FormatIsUINT(src.ci.format)) {
+				dstFormat = VK_FORMAT_R32G32B32A32_UINT;
+			}
+		}
+	}
 
 	// = init buffer =
-	// TODO PERF: only copy in the precision that we need. I.e. add
-	// shader permutations that pack the data into 8/16/32 bit
-	auto texelSize = sizeof(Vec4f);
+	dlg_assert(!FormatIsCompressed(dstFormat));
+	dlg_assert(!FormatIsMultiplane(dstFormat));
+	dlg_assert(FormatIsColor(dstFormat));
+	dlg_assert(
+		FormatIsSampledFloat(dstFormat) == FormatIsSampledFloat(src.ci.format) &&
+		FormatIsSINT(dstFormat) == FormatIsSINT(src.ci.format) &&
+		FormatIsUINT(dstFormat) == FormatIsUINT(src.ci.format));
 
-	auto neededSize = 0u;
+	const auto texelSize = FormatTexelSize(dstFormat);
+
+	auto texelCount = 0u;
 	for(auto l = 0u; l < srcSubres.levelCount; ++l) {
 		auto level = srcSubres.baseMipLevel + l;
 		auto width = std::max(1u, src.ci.extent.width >> level);
 		auto height = std::max(1u, src.ci.extent.height >> level);
 		auto depth = std::max(1u, src.ci.extent.depth >> level);
-		auto layerSize = texelSize * width * height * depth;
-		neededSize += layerSize * srcSubres.layerCount;
+		auto numTexelsPerLayer = width * height * depth;
+		texelCount += numTexelsPerLayer * srcSubres.layerCount;
 	}
 
 	auto usage = VkBufferUsageFlags(VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-
-	if(useTexelStorage) {
+	auto opStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+	auto opSrcAccess = VK_ACCESS_TRANSFER_READ_BIT;
+	auto transitionTo = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	if(method == CopyMethod::texelStorage) {
 		usage |= VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+		opStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		opSrcAccess = VK_ACCESS_SHADER_READ_BIT;
+		transitionTo = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	} else {
-		usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	}
-	dst.ensure(dev, neededSize, usage, queueFamsBitset);
+
+	const auto neededSize = texelCount * texelSize;
+	dst.buffer.ensure(dev, neededSize, usage, queueFamsBitset);
+	dst.format = dstFormat;
 
 	// = record =
 	VkImageMemoryBarrier srcBarrier {};
 	srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	srcBarrier.image = src.handle;
 	srcBarrier.oldLayout = srcLayout;
-	srcBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	srcBarrier.newLayout = transitionTo;
 	srcBarrier.srcAccessMask =
 		VK_ACCESS_SHADER_READ_BIT |
 		VK_ACCESS_SHADER_WRITE_BIT |
 		VK_ACCESS_MEMORY_READ_BIT |
 		VK_ACCESS_MEMORY_WRITE_BIT; // dunno
-	srcBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	srcBarrier.dstAccessMask = opSrcAccess;
 	srcBarrier.subresourceRange = srcSubres;
 	srcBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	srcBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 	dev.dispatch.CmdPipelineBarrier(cb,
 		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could
-		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		opStage,
 		0, 0, nullptr, 0, nullptr, 1, &srcBarrier);
 
-	// create image view
-	VkImageViewCreateInfo ivi {};
-	ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	ivi.image = src.handle;
-	ivi.viewType = imageViewForImageType(src.ci.imageType);
-	ivi.format = src.ci.format;
-	ivi.subresourceRange = srcSubres;
+	if(method == CopyMethod::copy) {
+		dlg_assert(src.ci.format == dstFormat);
 
-	auto& imgView = imgViews.emplace_back();
-	VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &imgView));
-	nameHandle(dev, imgView, "CommandHook:copyImage");
+		ThreadMemScope tms;
+		auto copies = tms.alloc<VkBufferImageCopy>(srcSubres.levelCount);
 
-	// create/update descriptor bindings
-	auto& ds = dss.emplace_back();
-	VkDescriptorSetAllocateInfo dai {};
-	dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	dai.descriptorSetCount = 1u;
-	dai.pSetLayouts = &hook.copyImageDsLayout_;
-	dai.descriptorPool = dev.dsPool;
-	VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &ds));
+		auto dstOffset = 0u;
+		for(auto l = 0u; l < srcSubres.levelCount; ++l) {
+			auto level = srcSubres.baseMipLevel + l;
+			auto width = std::max(1u, src.ci.extent.width >> level);
+			auto height = std::max(1u, src.ci.extent.height >> level);
+			auto depth = std::max(1u, src.ci.extent.depth >> level);
+			auto layerSize = width * height * depth;
 
-	VkDescriptorImageInfo imgInfo {};
-	imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	imgInfo.imageView = imgView;
+			copies[l].imageExtent = {width, height, depth};
+			copies[l].imageOffset = {0, 0, 0};
+			copies[l].bufferOffset = dstOffset;
+			copies[l].imageSubresource.aspectMask = srcSubres.aspectMask;
+			copies[l].imageSubresource.baseArrayLayer = srcSubres.baseArrayLayer;
+			copies[l].imageSubresource.layerCount = srcSubres.layerCount;
+			copies[l].imageSubresource.mipLevel = level;
 
-	VkDescriptorBufferInfo bufInfo {};
+			dstOffset += texelSize * layerSize * srcSubres.layerCount;
+		}
 
-	// TODO: if we don't have to do a format conversion here,
-	// just copy the data via CopyImageToBuffer!
-	// The other solutions should just be fallbacks.
-	// TODO: could add even another fallback for format conversion where
-	// we use blitting to a host image. No guarantees from vulkan for support
-	// but should often work in practice.
+		dev.dispatch.CmdCopyImageToBuffer(cb, src.handle,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.buffer.buf,
+			u32(copies.size()), copies.data());
+	} else {
+		// create image view
+		VkImageViewCreateInfo ivi {};
+		ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		ivi.image = src.handle;
+		ivi.viewType = imageViewForImageType(src.ci.imageType);
+		ivi.format = src.ci.format;
+		ivi.subresourceRange = srcSubres;
 
-	VkWriteDescriptorSet writes[2] {};
-	if(useTexelStorage) {
+		auto& imgView = imgViews.emplace_back();
+		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &imgView));
+		nameHandle(dev, imgView, "CommandHook:copyImage");
+
+		// create/update descriptor bindings
+		auto& ds = dss.emplace_back();
+		VkDescriptorSetAllocateInfo dai {};
+		dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dai.descriptorSetCount = 1u;
+		dai.pSetLayouts = &hook.sampleImageDsLayout_;
+		dai.descriptorPool = dev.dsPool;
+		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &ds));
+
+		VkDescriptorImageInfo imgInfo {};
+		imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		imgInfo.imageView = imgView;
+
+		VkWriteDescriptorSet writes[2] {};
 		VkBufferViewCreateInfo bvi {};
 		bvi.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
-		bvi.buffer = dst.buf;
+		bvi.buffer = dst.buffer.buf;
 		bvi.offset = 0u;
-		bvi.range = dst.size;
-		bvi.format = sampleFormat(src.ci.format,
-			VkImageAspectFlagBits(ivi.subresourceRange.aspectMask));
+		bvi.range = dst.buffer.size;
+		bvi.format = dstFormat;
 
 		VkBufferView bufferView;
 		VK_CHECK(dev.dispatch.CreateBufferView(dev.handle,
@@ -456,76 +582,65 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 		writes[0].pTexelBufferView = &bufViews.back();
 		writes[0].dstBinding = 0u;
 		writes[0].dstSet = ds;
-	} else {
-		bufInfo.buffer = dst.buf;
-		bufInfo.offset = 0u;
-		bufInfo.range = dst.size;
 
-		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[0].descriptorCount = 1u;
-		writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		writes[0].pBufferInfo = &bufInfo;
-		writes[0].dstBinding = 0u;
-		writes[0].dstSet = ds;
-	}
+		writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[1].descriptorCount = 1u;
+		writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		writes[1].pImageInfo = &imgInfo;
+		writes[1].dstBinding = 1u;
+		writes[1].dstSet = ds;
 
-	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	writes[1].descriptorCount = 1u;
-	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	writes[1].pImageInfo = &imgInfo;
-	writes[1].dstBinding = 1u;
-	writes[1].dstSet = ds;
+		dev.dispatch.UpdateDescriptorSets(dev.handle, 2u, writes, 0u, nullptr);
+		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			hook.sampleImagePipeLayout_, 0u, 1u, &ds, 0u, nullptr);
 
-	dev.dispatch.UpdateDescriptorSets(dev.handle, 2u, writes, 0u, nullptr);
-	dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-		hook.copyImagePipeLayout_, 0u, 1u, &ds, 0u, nullptr);
+		auto sit = ShaderImageType::parseType(src.ci.imageType,
+			src.ci.format, VkImageAspectFlagBits(srcSubres.aspectMask));
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			hook.sampleImagePipes_[sit]);
 
-	auto sit = ShaderImageType::parseType(src.ci.imageType,
-		src.ci.format, VkImageAspectFlagBits(srcSubres.aspectMask));
-	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-		hook.copyImagePipes_[sit]);
+		auto dstOffset = 0u;
+		for(auto l = 0u; l < srcSubres.levelCount; ++l) {
+			auto level = srcSubres.baseMipLevel + l;
+			auto width = std::max(1u, src.ci.extent.width >> level);
+			auto height = std::max(1u, src.ci.extent.height >> level);
+			auto depth = std::max(1u, src.ci.extent.depth >> level);
+			auto layerSize = width * height * depth;
 
-	auto dstOffset = 0u;
-	for(auto l = 0u; l < srcSubres.levelCount; ++l) {
-		auto level = srcSubres.baseMipLevel + l;
-		auto width = std::max(1u, src.ci.extent.width >> level);
-		auto height = std::max(1u, src.ci.extent.height >> level);
-		auto depth = std::max(1u, src.ci.extent.depth >> level);
-		auto layerSize = width * height * depth;
+			struct {
+				i32 level;
+				u32 dstOffset;
+			} pcr {
+				i32(level),
+				dstOffset,
+			};
 
-		struct {
-			i32 level;
-			u32 dstOffset;
-		} pcr {
-			i32(level),
-			dstOffset,
-		};
+			dev.dispatch.CmdPushConstants(cb, hook.sampleImagePipeLayout_,
+				VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), &pcr);
 
-		dev.dispatch.CmdPushConstants(cb, hook.copyImagePipeLayout_,
-			VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), &pcr);
+			auto groupSizeX = 8u;
+			auto groupSizeY = 8u;
+			auto groupSizeZ = 1u;
+			auto z = depth;
 
-		auto groupSizeX = 8u;
-		auto groupSizeY = 8u;
-		auto groupSizeZ = 1u;
-		auto z = depth;
+			if(src.ci.imageType == VK_IMAGE_TYPE_1D) {
+				groupSizeX = 64u;
+				groupSizeY = 1u;
+			}
 
-		if(src.ci.imageType == VK_IMAGE_TYPE_1D) {
-			groupSizeX = 64u;
-			groupSizeY = 1u;
+			if(srcSubres.layerCount > 1u) {
+				// 3D images can't have multiple layers
+				z = srcSubres.layerCount;
+			}
+
+			auto gx = ceilDivide(width, groupSizeX);
+			auto gy = ceilDivide(height, groupSizeY);
+			auto gz = ceilDivide(z, groupSizeZ);
+
+			dev.dispatch.CmdDispatch(cb, gx, gy, gz);
+
+			dstOffset += layerSize * srcSubres.layerCount;
 		}
-
-		if(srcSubres.layerCount > 1u) {
-			// 3D images can't have multiple layers
-			z = srcSubres.layerCount;
-		}
-
-		auto gx = ceilDivide(width, groupSizeX);
-		auto gy = ceilDivide(height, groupSizeY);
-		auto gz = ceilDivide(z, groupSizeZ);
-
-		dev.dispatch.CmdDispatch(cb, gx, gy, gz);
-
-		dstOffset += layerSize * srcSubres.layerCount;
 	}
 
 	// restore image state
@@ -533,7 +648,7 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 	std::swap(srcBarrier.srcAccessMask, srcBarrier.dstAccessMask);
 
 	dev.dispatch.CmdPipelineBarrier(cb,
-		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		opStage,
 		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, // dunno, NOTE: probably could
 		0, 0, nullptr, 0, nullptr, 1, &srcBarrier);
 }
@@ -617,7 +732,7 @@ void recordResolve(Device& dev, CowResolveOp& op, CowImageRange& cow) {
 	auto layout = cow.source->pendingLayout;
 
 	if(cow.imageAsBuffer) {
-		auto& dst = cow.copy.emplace<BufferRangeCopy>();
+		auto& dst = cow.copy.emplace<ImageToBufferRangeCopy>();
 		dst.op = &op;
 		initAndSampleCopy(dev, op.cb, dst.buf, *cow.source,
 			layout, cow.range, cow.queueFams, op.imageViews, op.bufferViews,
@@ -658,12 +773,12 @@ CowImageRange::~CowImageRange() {
 		CowResolveOp* op {};
 		Device* dev {};
 
-		if(auto* buf = std::get_if<BufferRangeCopy>(&copy); buf) {
-			op = buf->op;
-			dev = buf->buf.dev;
-		} else if(auto* img = std::get_if<ImageRangeCopy>(&copy); img) {
-			op = img->op;
-			dev = img->img.dev;
+		if(auto* range = std::get_if<ImageToBufferRangeCopy>(&copy); range) {
+			op = range->op;
+			dev = range->buf.buffer.dev;
+		} else if(auto* range = std::get_if<ImageRangeCopy>(&copy); range) {
+			op = range->op;
+			dev = range->img.dev;
 		}
 
 		if(op) {

@@ -87,7 +87,8 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	info.descriptors = &descriptors;
 	initState(info);
 
-	this->dsState.resize(hook->ops_.descriptorCopies.size());
+	// TODO
+	// this->dsState.resize(hook->ops_.descriptorCopies.size());
 
 	// record
 	// we can never submit the cb simulataneously anyways, see CommandHook
@@ -661,7 +662,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 				if(imageAsBuffer) {
 					// we don't ever use that buffer in a submission again
 					// so we can ignore queue families
-					auto& dstBuf = dst.data.emplace<OwnBuffer>();
+					auto& dstBuf = dst.data.emplace<CopiedImageToBuffer>();
 					initAndSampleCopy(dev, cb, dstBuf, *imgView->img, layout,
 						subres, {}, imageViews, bufferViews, descriptorSets);
 					info.rebindComputeState = true;
@@ -1038,7 +1039,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// descriptor state
 	for(auto [i, dc] : enumerate(hook->ops_.descriptorCopies)) {
 		if(dc.before) {
-			copyDs(bcmd, info, dc, state->copiedDescriptors[i], dsState[i]);
+			IntrusivePtr<DescriptorSetCow> tmpCow; // TODO
+			copyDs(bcmd, info, dc, state->copiedDescriptors[i], tmpCow);
 		}
 	}
 
@@ -1119,7 +1121,8 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// descriptor state
 	for(auto [i, dc] : enumerate(hook->ops_.descriptorCopies)) {
 		if(!dc.before) {
-			copyDs(bcmd, info, dc, state->copiedDescriptors[i], dsState[i]);
+			IntrusivePtr<DescriptorSetCow> tmpCow; // TODO
+			copyDs(bcmd, info, dc, state->copiedDescriptors[i], tmpCow);
 		}
 	}
 

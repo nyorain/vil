@@ -17,6 +17,13 @@ if glslang.found()
 		'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
 	}
 
+	texelstore_table = imgtable
+	foreach name, config : imgtable
+		name = name + 'noformat.'
+		config += ['-DWITHOUT_FORMAT']
+		texelstore_table += {name: config}
+	endforeach
+
 	overlay_shaders = {
 		# the main imgui shaders used for text, shapes
 		'gui.frag': { '': [] },
@@ -39,8 +46,8 @@ if glslang.found()
 		# image analyze shaders
 		'histogram.comp': imgtable,
 		'minmax.comp': imgtable,
-		# copyTex to sample-copy an image to a vec4[] buffer
-		'copyTex.comp': imgtable,
+		# copyTex to sample-copy an image to a storage texel buffer
+		'copyTex.comp': texelstore_table,
 		# histogram process/render
 		'histogramMax.comp': {'': [] },
 		'histogramPrepare.comp': {'': [] },

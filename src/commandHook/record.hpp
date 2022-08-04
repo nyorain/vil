@@ -35,7 +35,9 @@ struct CommandHookRecord {
 	// to the associated descriptor set state. Used for updateAfterBind
 	// descriptors: when they change we must recreate the CommandHookRecord.
 	// One state pointer for each descriptorCopy stored here.
-	std::vector<IntrusivePtr<DescriptorSetCow>> dsState;
+	// TODO: temporary removal of record.dsState due to sync issues.
+	// Needs to be fixed!
+	// std::vector<IntrusivePtr<DescriptorSetCow>> dsState;
 
 	// == Resources ==
 	VkCommandBuffer cb {};

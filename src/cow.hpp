@@ -14,6 +14,11 @@
 
 namespace vil {
 
+struct CopiedImageToBuffer {
+	OwnBuffer buffer;
+	VkFormat format; // format of the data
+};
+
 struct CopiedImage {
 	Device* dev {};
 	VkImage image {};
@@ -64,8 +69,13 @@ struct BufferRangeCopy {
 	OwnBuffer buf;
 };
 
+struct ImageToBufferRangeCopy {
+	CowResolveOp* op;
+	CopiedImageToBuffer buf;
+};
+
 struct CowImageRange {
-	std::variant<std::monostate, BufferRangeCopy, ImageRangeCopy> copy;
+	std::variant<std::monostate, ImageToBufferRangeCopy, ImageRangeCopy> copy;
 	u32 refCount {};
 	bool imageAsBuffer {};
 
@@ -114,7 +124,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 	VkImageLayout srcLayout, VkImageSubresourceRange srcSubres,
 	u32 srcQueueFam);
 void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
-	OwnBuffer& dst, Image& src, VkImageLayout srcLayout,
+	CopiedImageToBuffer& dst, Image& src, VkImageLayout srcLayout,
 	const VkImageSubresourceRange& srcSubres, u32 queueFamsBitset,
 	std::vector<VkImageView>& imgViews, std::vector<VkBufferView>& bufViews,
 	std::vector<VkDescriptorSet>& dss);

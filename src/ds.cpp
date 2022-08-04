@@ -371,6 +371,9 @@ static void doRefBindings(Device& dev, DescriptorStateRef state, bool checkIfVal
 void unrefBindings(DescriptorStateRef state) {
 	ZoneScopedN("destroyDsState");
 
+	dlg_assert(state.layout);
+	assertNotOwned(state.layout->dev->mutex);
+
 	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 		auto& binding = state.layout->bindings[b];
 		if(!descriptorCount(state, b)) {

@@ -48,7 +48,7 @@ struct TextureCreation {
 	VkImageCreateInfo ici {};
 	VkImageViewCreateInfo ivi {};
 
-	inline TextureCreation();
+	inline TextureCreation(VkFormat format = VK_FORMAT_R8G8B8A8_UNORM);
 };
 
 struct Texture {
@@ -82,9 +82,7 @@ struct Texture {
 	}
 };
 
-inline TextureCreation::TextureCreation() {
-	auto format = VK_FORMAT_R8G8B8A8_UNORM;
-
+inline TextureCreation::TextureCreation(VkFormat format) {
 	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	ici.arrayLayers = 1u;
 	ici.imageType = VK_IMAGE_TYPE_2D;
@@ -133,6 +131,39 @@ inline Texture::Texture(Setup& stp, TextureCreation tc) {
 
 	tc.ivi.image = image;
 	VK_CHECK(stp.dispatch.CreateImageView(stp.dev, &tc.ivi, NULL, &imageView));
+}
+
+struct Buffer {
+	Setup* setup {};
+	VkBuffer buffer {};
+	VkDeviceMemory devMem {};
+
+	inline Buffer(Setup&, VkDeviceSize size, VkImageUsageFlags usage);
+	~Buffer() {
+		if(setup) {
+			setup->dispatch.DestroyBuffer(setup->dev, buffer, nullptr);
+			setup->dispatch.FreeMemory(setup->dev, devMem, nullptr);
+		}
+	}
+};
+
+inline Buffer::Buffer(Setup& stp, VkDeviceSize size, VkImageUsageFlags usage) : setup(&stp) {
+	VkBufferCreateInfo bci {};
+	bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	bci.size = size;
+	bci.usage = usage;
+	VK_CHECK(setup->dispatch.CreateBuffer(setup->dev, &bci, nullptr, &buffer));
+
+	VkMemoryRequirements memReqs;
+	setup->dispatch.GetBufferMemoryRequirements(setup->dev, buffer, &memReqs);
+
+	VkMemoryAllocateInfo mai {};
+	mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	mai.allocationSize = memReqs.size;
+	mai.memoryTypeIndex = findLSB(memReqs.memoryTypeBits);
+	VK_CHECK(setup->dispatch.AllocateMemory(setup->dev, &mai, nullptr, &devMem));
+	VK_CHECK(setup->dispatch.BindBufferMemory(setup->dev, buffer, devMem, 0u));
 }
 
 struct RenderPassInfo {
