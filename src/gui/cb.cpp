@@ -270,7 +270,7 @@ void CommandBufferGui::draw(Draw& draw) {
 		case SelectionType::record:
 			dlg_assert(selectedRecord_);
 			refButtonD(*gui_, selectedRecord_->cb);
-			imGuiText("cb name: {}", selectedRecord_->cbName);
+			imGuiText("cb name: {}", selectedRecord_->cbName ? selectedRecord_->cbName : "<unnamed>");
 			imGuiText("broken labels: {}{}", std::boolalpha, selectedRecord_->brokenHierarchyLabels);
 			imGuiText("record id: {}", selectedRecord_->recordID);
 			imGuiText("refCount: {}", selectedRecord_->refCount);
