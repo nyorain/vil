@@ -1131,7 +1131,7 @@ void spvm_execute_OpCompositeConstruct(spvm_word word_count, spvm_state_t state)
 	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
 		spvm_word index = SPVM_READ_WORD(state->code_current);
 		if (state->results[id].members[i].member_count == 0)
-			state->results[id].members[i].value.s = state->results[index].members[0].value.s;
+			state->results[id].members[i].value.u = state->results[index].members[0].value.u;
 		else
 			spvm_member_memcpy(&state->results[id].members[i].members[0], &state->results[index].members[0], state->results[index].member_count);
 	}
@@ -1163,6 +1163,32 @@ void spvm_execute_OpCompositeExtract(spvm_word word_count, spvm_state_t state)
 
 	spvm_member_memcpy(state->results[id].members, result, memcount);
 }
+
+void spvm_execute_OpCompositeInsert(spvm_word word_count, spvm_state_t state)
+{
+	SPVM_SKIP_WORD(state->code_current);
+	spvm_word id = SPVM_READ_WORD(state->code_current);
+	spvm_word object_id = SPVM_READ_WORD(state->code_current);
+	spvm_word value_id = SPVM_READ_WORD(state->code_current);
+
+	spvm_word index_count = word_count - 5;
+
+	spvm_member_memcpy(state->results[id].members, state->results[value_id].members, state->results[value_id].member_count);
+
+	spvm_word index = SPVM_READ_WORD(state->code_current);
+	spvm_member_t result = state->results[id].members + index;
+
+	while (index_count) {
+		index = SPVM_READ_WORD(state->code_current);
+
+		result = result->members + index;
+
+		index_count--;
+	}
+
+	spvm_member_memcpy(result, state->results[object_id].members, state->results[object_id].member_count);
+}
+
 void spvm_execute_OpCopyObject(spvm_word word_count, spvm_state_t state)
 {
 	SPVM_SKIP_WORD(state->code_current);
@@ -1674,7 +1700,7 @@ void spvm_execute_OpAny(spvm_word word_count, spvm_state_t state)
 	spvm_word vec = SPVM_READ_WORD(state->code_current);
 
 	spvm_byte result = 0;
-	for (spvm_word i = 0; i < state->results[id].member_count; i++)
+	for (spvm_word i = 0; i < state->results[vec].member_count; i++)
 		if (state->results[vec].members[i].value.b)
 			result = 1;
 	state->results[id].members[0].value.b = result;
@@ -1686,7 +1712,7 @@ void spvm_execute_OpAll(spvm_word word_count, spvm_state_t state)
 	spvm_word vec = SPVM_READ_WORD(state->code_current);
 
 	spvm_byte result = 1;
-	for (spvm_word i = 0; i < state->results[id].member_count; i++)
+	for (spvm_word i = 0; i < state->results[vec].member_count; i++)
 		if (!state->results[vec].members[i].value.b)
 			result = 0;
 	state->results[id].members[0].value.b = result;
@@ -2057,27 +2083,31 @@ void spvm_execute_OpPhi(spvm_word word_count, spvm_state_t state)
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 
 	word_count = (word_count - 2) / 2;
+	unsigned found = 0u;
 
 	for (spvm_word i = 0; i < word_count; i++) {
 		spvm_word variable = SPVM_READ_WORD(state->code_current);
 		spvm_word parent = SPVM_READ_WORD(state->code_current);
 
-		if (parent == state->function_stack_cfg[state->function_stack_current]) {
+		if (parent == state->function_stack_cfg_parent[state->function_stack_current]) {
 			spvm_member_memcpy(state->results[id].members, state->results[variable].members, state->results[id].member_count);
+			found = 1u;
 			break;
 		}
 	}
+
+	assert(found);
 }
 void spvm_execute_OpLabel(spvm_word word_count, spvm_state_t state)
 {
 	spvm_word id = SPVM_READ_WORD(state->code_current);
+	state->function_stack_cfg_parent[state->function_stack_current] = state->function_stack_cfg[state->function_stack_current];
 	state->function_stack_cfg[state->function_stack_current] = id;
 }
 void spvm_execute_OpBranch(spvm_word word_count, spvm_state_t state)
 {
 	spvm_word id = SPVM_READ_WORD(state->code_current);
 	state->code_current = state->results[id].source_location;
-	state->function_stack_cfg[state->function_stack_current] = id;
 
 	state->did_jump = 1;
 }
@@ -2292,7 +2322,7 @@ void _spvm_context_create_execute_table(spvm_context_t ctx)
 	ctx->opcode_execute[SpvOpVectorShuffle] = spvm_execute_OpVectorShuffle;
 	ctx->opcode_execute[SpvOpCompositeConstruct] = spvm_execute_OpCompositeConstruct;
 	ctx->opcode_execute[SpvOpCompositeExtract] = spvm_execute_OpCompositeExtract;
-	ctx->opcode_execute[SpvOpCompositeInsert] = spvm_execute_todo;
+	ctx->opcode_execute[SpvOpCompositeInsert] = spvm_execute_OpCompositeInsert;
 	ctx->opcode_execute[SpvOpCopyObject] = spvm_execute_OpCopyObject;
 	ctx->opcode_execute[SpvOpTranspose] = spvm_execute_OpTranspose;
 	ctx->opcode_execute[SpvOpCopyLogical] = spvm_execute_OpCopyLogical;

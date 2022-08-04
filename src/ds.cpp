@@ -544,13 +544,14 @@ std::unique_lock<DebugMutex> DescriptorSet::checkResolveCow() {
 	}
 
 	// In this case we have to resolve the cow
-	std::unique_lock cowLock(cow_->mutex);
-	cow_->copy = this->copyLockedState();
+	{
+		std::unique_lock cowLock(cow_->mutex);
+		cow_->copy = this->copyLockedState();
+		// disconnect
+		cow_->ds = nullptr;
+	}
 
-	// disconnect
-	cow_->ds = nullptr;
 	cow_ = nullptr;
-
 	return objLock;
 }
 
