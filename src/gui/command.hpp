@@ -85,6 +85,8 @@ public:
 private:
 	Device& dev() const;
 
+	// NOTE: updateHook will acquire the device mutex internally, don't
+	// call it when you have a mutex locked.
 	void updateHook();
 	void displayCommand();
 
@@ -128,6 +130,8 @@ private:
 	BufferViewer bufferViewer_ {};
 	ImageViewer imageViewer_ {};
 	ShaderDebugger shaderDebugger_ {};
+
+	bool doUpdateHook_ {};
 };
 
 } // namespace vil

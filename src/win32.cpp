@@ -144,6 +144,10 @@ struct Win32Platform : Platform {
 	int lastX {};
 	int lastY {};
 
+	Vec2f guiWinPos {};
+	Vec2f guiWinSize {};
+	bool doGuiUnfocus {};
+
 	bool moveResizing {};
 
 	std::shared_ptr<InputHooks> hooks;
@@ -232,15 +236,14 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 	dlg_assert_or(Win32Platform::instance_, return CallNextHookEx(nullptr, nCode, wParam, lParam));
 	auto& wp = Win32Platform::get();
 
-	if (wp.state != Win32Platform::State::focused || wp.moveResizing || nCode < 0) {
+	if (wp.state == Win32Platform::State::hidden || wp.moveResizing || nCode < 0) {
 		return CallNextHookEx(nullptr, nCode, wParam, lParam);
 	}
 
-	auto doHitTest = [&](u32 x, u32 y) {
-		// (void) x;
-		// (void) y;
-		// return true;
+	bool forward = wp.state == SwaPlatform::State::shown;
+	bool handle = wp.state == SwaPlatform::State::focused;
 
+	auto doHitTest = [&](u32 x, u32 y) {
 		POINT p {LONG(x), LONG(y)};
 		auto r = ClientToScreen(wp.surfaceWindow, &p);
 		dlg_assert(r);
@@ -249,6 +252,43 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		auto res = SendMessage(Win32Platform::get().surfaceWindow, WM_NCHITTEST, 0, l);
 		dlg_trace("doHitTest: {}", res == HTCLIENT);
 		return res == HTCLIENT;
+	};
+
+	auto handleMouseButton = [&](swa_mouse_button button, bool pressed) -> bool {
+		auto x = GET_X_LPARAM(msg->lParam);
+		auto y = GET_Y_LPARAM(msg->lParam);
+		if(!doHitTest(x, y)) {
+			return true;
+		}
+
+		auto inside =
+				x > wp.guiWinPos.x &&
+				y > wp.guiWinPos.y &&
+				x < wp.guiWinPos.x + wp.guiWinSize.x &&
+				y < wp.guiWinPos.y + wp.guiWinSize.y;
+		if(wp.state == SwaPlatform::State::focused && !inside) {
+			dlg_trace("state: shown (unfocsed)");
+			wp.state = SwaPlatform::State::shown;
+			handle = false;
+			forward = true;
+			wp.doGuiUnfocus = true;
+		} else if(wp.state == SwaPlatform::State::shown && inside) {
+			dlg_trace("state: focused");
+			wp.state = SwaPlatform::State::focused;
+			handle = true;
+			forward = false;
+		}
+
+		if(handle) {
+			wp.gui->imguiIO().MouseDown[unsigned(button) - 1] = pressed;
+		}
+
+		if(!forward) {
+			msg->message = WM_NULL;
+			return false;
+		}
+
+		return true;
 	};
 
 	switch(msg->message) {
@@ -263,70 +303,42 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			wp.gui->imguiIO().MousePos.x = x;
 			wp.gui->imguiIO().MousePos.y = y;
 
-			msg->message = WM_NULL;
-			return 0;
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_LBUTTONDOWN: {
-			// dlg_trace("lbuttondown {} {} {}", data->pt.x, data->pt.y, data->wHitTestCode);
-			wp.gui->imguiIO().MouseDown[0] = true;
-			auto x = GET_X_LPARAM(msg->lParam);
-			auto y = GET_Y_LPARAM(msg->lParam);
-			if(!doHitTest(x, y)) {
-				break;
+			if(!handleMouseButton(swa_mouse_button_left, true)) {
+				return 0;
 			}
-
-			msg->message = WM_NULL;
-			return 0;
+			break;
 		} case WM_LBUTTONUP: {
-			// dlg_trace("lbuttonup {} {} {} | {} {}", data->pt.x, data->pt.y, data->wHitTestCode, winPos.x, winPos.y);
-			wp.gui->imguiIO().MouseDown[0] = false;
-			auto x = GET_X_LPARAM(msg->lParam);
-			auto y = GET_Y_LPARAM(msg->lParam);
-			if(!doHitTest(x, y)) {
-				break;
+			if(!handleMouseButton(swa_mouse_button_left, false)) {
+				return 0;
 			}
-
-			msg->message = WM_NULL;
-			return 0;
+			break;
 		} case WM_RBUTTONDOWN: {
-			wp.gui->imguiIO().MouseDown[1] = true;
-			auto x = GET_X_LPARAM(msg->lParam);
-			auto y = GET_Y_LPARAM(msg->lParam);
-			if(!doHitTest(x, y)) {
-				break;
+			if(!handleMouseButton(swa_mouse_button_right, true)) {
+				return 0;
 			}
-
-			msg->message = WM_NULL;
-			return 0;
+			break;
 		} case WM_RBUTTONUP: {
-			wp.gui->imguiIO().MouseDown[1] = false;
-			auto x = GET_X_LPARAM(msg->lParam);
-			auto y = GET_Y_LPARAM(msg->lParam);
-			if(!doHitTest(x, y)) {
-				break;
+			if(!handleMouseButton(swa_mouse_button_right, false)) {
+				return 0;
 			}
-
-			msg->message = WM_NULL;
-			return 0;
+			break;
 		} case WM_MBUTTONDOWN: {
-			wp.gui->imguiIO().MouseDown[2] = true;
-			auto x = GET_X_LPARAM(msg->lParam);
-			auto y = GET_Y_LPARAM(msg->lParam);
-			if(!doHitTest(x, y)) {
-				break;
+			if(!handleMouseButton(swa_mouse_button_middle, true)) {
+				return 0;
 			}
-
-			msg->message = WM_NULL;
-			return 0;
+			break;
 		} case WM_MBUTTONUP: {
-			wp.gui->imguiIO().MouseDown[2] = false;
-			auto x = GET_X_LPARAM(msg->lParam);
-			auto y = GET_Y_LPARAM(msg->lParam);
-			if(!doHitTest(x, y)) {
-				break;
+			if(!handleMouseButton(swa_mouse_button_middle, false)) {
+				return 0;
 			}
-
-			msg->message = WM_NULL;
-			return 0;
+			break;
 		} case WM_XBUTTONDOWN: {
 			// wp.gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = true;
 			auto x = GET_X_LPARAM(msg->lParam);
@@ -335,8 +347,12 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 				break;
 			}
 
-			msg->message = WM_NULL;
-			return 0;
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_XBUTTONUP: {
 			// wp.gui->imguiIO().MouseClicked[HIWORD(wparam) == 1 ? 3 : 4] = false;
 			auto x = GET_X_LPARAM(msg->lParam);
@@ -345,8 +361,12 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 				break;
 			}
 
-			msg->message = WM_NULL;
-			return 0;
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_KEYDOWN: {
 			dlg_trace("wm keydown");
 
@@ -358,8 +378,12 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			// oh no, this is terrible
 			TranslateMessage(msg);
 
-			msg->message = WM_NULL;
-			return 0;
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_KEYUP: {
 			dlg_trace("wm keyup");
 
@@ -371,8 +395,12 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			// oh no, this is terrible
 			TranslateMessage(msg);
 
-			msg->message = WM_NULL;
-			return 0;
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_CHAR: {
 			dlg_trace("wm char");
 
@@ -380,8 +408,12 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 				wp.gui->imguiIO().AddInputCharacterUTF16((unsigned short)msg->wParam);
 			}
 
-			msg->message = WM_NULL;
-			return 0;
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_INPUT: {
 			// Shouldn't happen
 			// dlg_error("unexpected wm_input");
@@ -409,18 +441,36 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 				// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
 			}
 
-			msg->message = WM_NULL;
-			return 0;
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_MOUSEWHEEL: {
 			// TODO: accumulate?
-			wp.gui->imguiIO().MouseWheel = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
-			msg->message = WM_NULL;
-			return 0;
+			if(handle) {
+				wp.gui->imguiIO().MouseWheel = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
+			}
+
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} case WM_MOUSEHWHEEL: {
 			// TODO: accumulate?
-			wp.gui->imguiIO().MouseWheelH = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
-			msg->message = WM_NULL;
-			return 0;
+			if(handle) {
+				wp.gui->imguiIO().MouseWheelH = GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f;
+			}
+
+			if(!forward) {
+				msg->message = WM_NULL;
+				return 0;
+			}
+
+			break;
 		} default:
 			break;
 	}
@@ -474,9 +524,6 @@ bool Win32Platform::doUpdate() {
 	if(state != State::focused) {
 		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
 			dlg_trace("showing overlay; grabbing input");
-
-			dlg_assert(!msgHook);
-			dlg_assert(!wndProcHook);
 
 			state = State::focused;
 
@@ -615,6 +662,14 @@ Platform::State Win32Platform::update(Gui& gui) {
 
 	std::unique_lock lock(mutex);
 	this->gui = &gui;
+	this->guiWinPos = gui.windowPos();
+	this->guiWinSize = gui.windowSize();
+
+	if(doGuiUnfocus) {
+		gui.unfocus = true;
+		doGuiUnfocus = false;
+	}
+
 	doStuff.store(2);
 	cv.notify_one();
 	cv.wait(lock);

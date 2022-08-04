@@ -969,10 +969,21 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		// between the render passes to make sure the first render pass really
 		// has finished (with *everything*, not just the stuff we are interested
 		// in here) before we start the second one.
+		// NOTE: memory_write | memory_read *should* be enough here, they cover everything else.
+		// But we noticed this to make a difference on some drivers (e.g. AMD on windows)
+		auto access =
+			VK_ACCESS_MEMORY_WRITE_BIT |
+			VK_ACCESS_MEMORY_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+
 		VkMemoryBarrier memBarrier {};
 		memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
-		memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		memBarrier.srcAccessMask = access;
+		memBarrier.dstAccessMask = access;
 
 		dev.dispatch.CmdPipelineBarrier(cb,
 			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
@@ -1100,10 +1111,21 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		// between the render passes to make sure the second render pass really
 		// has finished (with *everything*, not just the stuff we are interested
 		// in here) before we start the third one.
+		// NOTE: memory_write | memory_read *should* be enough here, they cover everything else.
+		// But we noticed this to make a difference on some drivers (e.g. AMD on windows)
+		auto access =
+			VK_ACCESS_MEMORY_WRITE_BIT |
+			VK_ACCESS_MEMORY_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+
 		VkMemoryBarrier memBarrier {};
 		memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		memBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
-		memBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		memBarrier.srcAccessMask = access;
+		memBarrier.dstAccessMask = access;
 
 		dev.dispatch.CmdPipelineBarrier(cb,
 			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,

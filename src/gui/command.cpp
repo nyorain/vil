@@ -550,7 +550,7 @@ void CommandViewer::displayDsList() {
 						view_ = IOView::ds;
 						viewData_.ds = {setID, bID, 0, VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM};
 						imageViewer_.reset(true);
-						updateHook();
+						doUpdateHook_ = true;
 					}
 					if(ImGui::IsItemHovered()) {
 						ImGui::BeginTooltip();
@@ -750,7 +750,7 @@ void CommandViewer::displayIOList() {
 
 bool CommandViewer::displayBeforeCheckbox() {
 	if(ImGui::Checkbox("Before Command", &beforeCommand_)) {
-		updateHook();
+		doUpdateHook_ = true;
 		return true;
 	}
 
@@ -819,7 +819,7 @@ void CommandViewer::displayDs(Draw& draw) {
 	if(dsCat != DescriptorCategory::inlineUniformBlock) {
 		auto bindingCount = descriptorCount(state, bindingID);
 		if(optSliderRange("Element", elemID, bindingCount)) {
-			updateHook();
+			doUpdateHook_ = true;
 			state_ = {};
 		}
 
@@ -1310,6 +1310,12 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 
 	displayIOList();
 
+	if (doUpdateHook_)
+	{
+		updateHook();
+		doUpdateHook_ = false;
+	}
+
 	ImGui::PopStyleVar(2);
 
 	ImGui::EndChild();
@@ -1320,6 +1326,12 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 
 	ImGui::EndChild();
 	ImGui::EndTable();
+
+	if (doUpdateHook_)
+	{
+		updateHook();
+		doUpdateHook_ = false;
+	}
 }
 
 void CommandViewer::displayCommand() {
@@ -1480,6 +1492,7 @@ void CommandViewer::updateHook() {
 		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
 	CommandHook::HookOps ops {};
+	bool setOps = true;
 
 	switch(view_) {
 		case IOView::command:
@@ -1544,11 +1557,15 @@ void CommandViewer::updateHook() {
 			break;
 		case IOView::shader:
 			shaderDebugger_.updateHooks(hook);
+			setOps = false;
 			break;
 	}
 
 	hook.freeze.store(false);
-	hook.ops(std::move(ops));
+
+	if(setOps) {
+		hook.ops(std::move(ops));
+	}
 }
 
 void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {

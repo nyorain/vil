@@ -62,6 +62,8 @@ void upgradeSpan(CommandBuffer& cb, span<D>& dst, T* data, size_t count) {
 
 void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstSet,
 		span<DescriptorSet* const> sets, span<const u32> dynOffsets) {
+	ExtZoneScoped;
+
 	this->descriptorSets = copyEnsureSizeUndef(cb, descriptorSets,
 		firstSet + sets.size());
 
@@ -639,6 +641,7 @@ struct GetUsedSet {
 
 template<typename T>
 auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
+	ExtZoneScoped;
 	auto& set = GetUsedSet::get(rec, handle);
 
 	// TODO: more efficient find with C++20
@@ -653,11 +656,12 @@ auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
 	}
 
 	auto& use = const_cast<RefHandle<T>&>(*it);
-	use.commands.push_back(&cmd);
+	// use.commands.push_back(&cmd);
 	return use;
 }
 
 UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
+	ExtZoneScoped;
 	auto& set = rec.used.images;
 
 	// TODO: more efficient find with C++20
@@ -672,11 +676,12 @@ UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 	}
 
 	auto& use = const_cast<UsedImage&>(*it);
-	use.commands.push_back(&cmd);
+	// use.commands.push_back(&cmd);
 	return use;
 }
 
 UsedDescriptorSet& useHandleImpl(CommandRecord& rec, Command& cmd, DescriptorSet& ds) {
+	ExtZoneScoped;
 	auto& set = rec.used.descriptorSets;
 
 	// TODO: more efficient find with C++20
@@ -689,7 +694,7 @@ UsedDescriptorSet& useHandleImpl(CommandRecord& rec, Command& cmd, DescriptorSet
 	}
 
 	auto& use = const_cast<UsedDescriptorSet&>(*it);
-	use.commands.push_back(&cmd);
+	// use.commands.push_back(&cmd);
 	return use;
 }
 

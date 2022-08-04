@@ -156,14 +156,17 @@ template<typename K,
 		LinearUnscopedAllocator<K>>;
 constexpr struct ManualTag {} manualTag;
 
+// NOTE: we don't need RefHandle.commands atm, so we comment it out.
+// Until we use C++20 transparent lookup, it's a major performance impact (see useHandleImpl in cb.cpp)
+
 // Links a 'DeviceHandle' to a 'CommandRecord'.
 template<typename T>
 struct RefHandle {
-	explicit RefHandle(LinAllocator& alloc) noexcept : commands(alloc) {}
+	explicit RefHandle(LinAllocator& alloc) noexcept /*: commands(alloc)*/ { (void) alloc; }
 
 	// List of commands where the associated handle is used inside the
 	// associated record.
-	CommandAllocList<Command*> commands;
+	// CommandAllocList<Command*> commands;
 	IntrusivePtr<T> handle;
 };
 
@@ -184,11 +187,11 @@ struct UsedImage : RefHandle<Image> {
 };
 
 struct UsedDescriptorSet {
-	explicit UsedDescriptorSet(LinAllocator& alloc) noexcept : commands(alloc) {}
+	explicit UsedDescriptorSet(LinAllocator& alloc) noexcept /*: commands(alloc)*/ { (void) alloc; }
 
 	// Must not access directly, might have been destroyed.
 	void* ds {};
-	CommandAllocList<Command*> commands; // the BindDescriptorSets commands
+	// CommandAllocList<Command*> commands; // the BindDescriptorSets commands
 };
 
 inline bool operator==(const UsedDescriptorSet& a, const UsedDescriptorSet& b) {
