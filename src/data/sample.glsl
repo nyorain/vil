@@ -2,14 +2,17 @@
 	#define SamplerType(Dim) usampler##Dim
 	#define StorageTexelBufferType uimageBuffer
 	#define RawVec4Type uvec4
+	#define DefaultTexelFormat rgba32ui
 #elif defined(TEX_FORMAT_INT)
 	#define SamplerType(Dim) isampler##Dim
 	#define StorageTexelBufferType iimageBuffer
 	#define RawVec4Type ivec4
+	#define DefaultTexelFormat rgba32i
 #elif defined(TEX_FORMAT_FLOAT)
 	#define SamplerType(Dim) sampler##Dim
 	#define StorageTexelBufferType imageBuffer
 	#define RawVec4Type vec4
+	#define DefaultTexelFormat rgba32f
 #else
 	#error No valid TEX_FORMAT definition
 #endif

@@ -126,6 +126,9 @@ new, workstack:
 	  always allocates a vector
 - [ ] {later} implement image histograms (probably best like in PIX)
       See minmax.comp and histogram.comp
+- [ ] {later} honor maxTexelBufferElements. Fall back to raw vec4f copy
+	- most impls have valid limits though. Had to fix the mock icd tho :/
+- [ ] {later} implement blit imageToBuffer copy
 
 shader debugger:
 - [x] cleanup/fix freezing as described in node 2235

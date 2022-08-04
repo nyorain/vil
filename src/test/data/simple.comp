@@ -1,0 +1,13 @@
+// glslangValidator -V --vn simple_comp_spv_data simple.comp -o simple.comp.spv.h
+
+#version 450
+
+layout(set = 0, binding = 0) uniform sampler2D tex;
+layout(set = 0, binding = 1) buffer Buf {
+	vec4 val;
+};
+
+void main() {
+	val = texture(tex, vec2(0.5, 0.5));
+}
+

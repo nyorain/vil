@@ -880,7 +880,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			auto& imgView = *image.imageView;
 			auto& img = *imgView.img;
 
-			auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
+			auto* buf = std::get_if<CopiedImageToBuffer>(&copyResult.data);
 			dlg_assert(buf);
 
 			auto& dstImg = images_.emplace_back();
@@ -889,9 +889,8 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			dstImg.depth = img.ci.extent.depth;
 			dstImg.levels = imgView.ci.subresourceRange.levelCount;
 			dstImg.layers = imgView.ci.subresourceRange.layerCount;
-			dstImg.data = buf->data();
-			dstImg.format = sampleFormat(img.ci.format,
-				VkImageAspectFlagBits(imgView.ci.subresourceRange.aspectMask));
+			dstImg.data = buf->buffer.data();
+			dstImg.format = buf->format;
 
 			dst[0].value.image = &dstImg;
 			dlg_assert(u32(dst[0].type) == res->base_type_id);
@@ -912,7 +911,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			auto& imgView = *image.imageView;
 			auto& img = *imgView.img;
 
-			auto* buf = std::get_if<OwnBuffer>(&copyResult.data);
+			auto* buf = std::get_if<CopiedImageToBuffer>(&copyResult.data);
 			dlg_assert(buf);
 
 			auto& dstImg = images_.emplace_back();
@@ -921,9 +920,8 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 			dstImg.depth = img.ci.extent.depth;
 			dstImg.levels = imgView.ci.subresourceRange.levelCount;
 			dstImg.layers = imgView.ci.subresourceRange.layerCount;
-			dstImg.data = buf->data();
-			dstImg.format = sampleFormat(img.ci.format,
-				VkImageAspectFlagBits(imgView.ci.subresourceRange.aspectMask));
+			dstImg.data = buf->buffer.data();
+			dstImg.format = buf->format;
 
 			auto& sampler = samplers_.emplace_back();
 			sampler.desc = setupSampler(*image.sampler);

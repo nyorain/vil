@@ -27,6 +27,16 @@
 #include <copyTex.comp.u3D.spv.h>
 #include <copyTex.comp.i3D.spv.h>
 
+#include <copyTex.comp.1DArray.noformat.spv.h>
+#include <copyTex.comp.u1DArray.noformat.spv.h>
+#include <copyTex.comp.i1DArray.noformat.spv.h>
+#include <copyTex.comp.2DArray.noformat.spv.h>
+#include <copyTex.comp.u2DArray.noformat.spv.h>
+#include <copyTex.comp.i2DArray.noformat.spv.h>
+#include <copyTex.comp.3D.noformat.spv.h>
+#include <copyTex.comp.u3D.noformat.spv.h>
+#include <copyTex.comp.i3D.noformat.spv.h>
+
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
 //   barriers.
@@ -90,38 +100,28 @@ CommandHook::~CommandHook() {
 	auto& dev = *dev_;
 	waitIdleImpl(dev);
 	dlg_assert(dev.pending.empty());
-	invalidateRecordings();
 
-	for(auto& pipe : copyImagePipes_) {
+	// will invalidate everything, safely
+	this->desc({}, {}, {});
+
+	for(auto& pipe : sampleImagePipes_) {
 		dev.dispatch.DestroyPipeline(dev.handle, pipe, nullptr);
 	}
 
-	dev.dispatch.DestroyPipelineLayout(dev.handle, copyImagePipeLayout_, nullptr);
-	dev.dispatch.DestroyDescriptorSetLayout(dev.handle, copyImageDsLayout_, nullptr);
+	dev.dispatch.DestroyPipelineLayout(dev.handle, sampleImagePipeLayout_, nullptr);
+	dev.dispatch.DestroyDescriptorSetLayout(dev.handle, sampleImageDsLayout_, nullptr);
 
 	dev.dispatch.DestroyPipeline(dev.handle, accelStructVertCopy_, nullptr);
 	dev.dispatch.DestroyPipelineLayout(dev.handle, accelStructPipeLayout_, nullptr);
 }
 
 void CommandHook::initImageCopyPipes(Device& dev) {
-	// TODO! compile shader versions with raw storage buffers
-	auto useTexelStorage = dev.shaderStorageImageWriteWithoutFormat;
-	dlg_assert(useTexelStorage);
-	useTexelStorage = true;
-
 	// ds layout
 	VkDescriptorSetLayoutBinding bindings[2] {};
-	if(useTexelStorage) {
-		bindings[0].binding = 0u;
-		bindings[0].descriptorCount = 1u;
-		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
-		bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	} else {
-		bindings[0].binding = 0u;
-		bindings[0].descriptorCount = 1u;
-		bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	}
+	bindings[0].binding = 0u;
+	bindings[0].descriptorCount = 1u;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
 	bindings[1].binding = 1u;
 	bindings[1].descriptorCount = 1u;
@@ -134,8 +134,8 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	dslci.bindingCount = 2u;
 	dslci.pBindings = bindings;
 	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr,
-		&copyImageDsLayout_));
-	nameHandle(dev, copyImageDsLayout_, "CommandHook:copyImage");
+		&sampleImageDsLayout_));
+	nameHandle(dev, sampleImageDsLayout_, "CommandHook:copyImage");
 
 	// pipe layout
 	VkPushConstantRange pcrs[1] = {};
@@ -148,10 +148,10 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	plci.pushConstantRangeCount = 1;
 	plci.pPushConstantRanges = pcrs;
 	plci.setLayoutCount = 1u;
-	plci.pSetLayouts = &copyImageDsLayout_;
+	plci.pSetLayouts = &sampleImageDsLayout_;
 	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
-		&copyImagePipeLayout_));
-	nameHandle(dev, copyImagePipeLayout_, "CommandHook:copyImage");
+		&sampleImagePipeLayout_));
+	nameHandle(dev, sampleImagePipeLayout_, "CommandHook:sampleCopyImage");
 
 	// pipes
 	std::vector<VkComputePipelineCreateInfo> cpis;
@@ -188,7 +188,7 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 		}
 
 		cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		cpi.layout = copyImagePipeLayout_;
+		cpi.layout = sampleImagePipeLayout_;
 		cpi.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		cpi.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 		cpi.stage.module = mod;
@@ -199,22 +199,36 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	const std::array<u32, 3> spec1D {64, 1, 1};
 	const std::array<u32, 3> specOther {8, 8, 1};
 
-	addCpi(copyTex_comp_u1DArray_spv_data, spec1D);
-	addCpi(copyTex_comp_u2DArray_spv_data, specOther);
-	addCpi(copyTex_comp_u3D_spv_data, specOther);
+	if(dev.shaderStorageImageWriteWithoutFormat) {
+		addCpi(copyTex_comp_u1DArray_spv_data, spec1D);
+		addCpi(copyTex_comp_u2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_u3D_spv_data, specOther);
 
-	addCpi(copyTex_comp_i1DArray_spv_data, spec1D);
-	addCpi(copyTex_comp_i2DArray_spv_data, specOther);
-	addCpi(copyTex_comp_i3D_spv_data, specOther);
+		addCpi(copyTex_comp_i1DArray_spv_data, spec1D);
+		addCpi(copyTex_comp_i2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_i3D_spv_data, specOther);
 
-	addCpi(copyTex_comp_1DArray_spv_data, spec1D);
-	addCpi(copyTex_comp_2DArray_spv_data, specOther);
-	addCpi(copyTex_comp_3D_spv_data, specOther);
+		addCpi(copyTex_comp_1DArray_spv_data, spec1D);
+		addCpi(copyTex_comp_2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_3D_spv_data, specOther);
+	} else {
+		addCpi(copyTex_comp_u1DArray_noformat_spv_data, spec1D);
+		addCpi(copyTex_comp_u2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_u3D_noformat_spv_data, specOther);
+
+		addCpi(copyTex_comp_i1DArray_noformat_spv_data, spec1D);
+		addCpi(copyTex_comp_i2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_i3D_noformat_spv_data, specOther);
+
+		addCpi(copyTex_comp_1DArray_noformat_spv_data, spec1D);
+		addCpi(copyTex_comp_2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_3D_noformat_spv_data, specOther);
+	}
 
 	VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
-		cpis.size(), cpis.data(), nullptr, copyImagePipes_));
+		cpis.size(), cpis.data(), nullptr, sampleImagePipes_));
 
-	for(auto pipe : copyImagePipes_) {
+	for(auto pipe : sampleImagePipes_) {
 		nameHandle(dev, pipe, "CommandHook:copyImage");
 	}
 
@@ -263,8 +277,10 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 }
 
+// TODO: temporary removal of record.dsState due to sync issues.
+// Needs to be fixed!
 bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
-	dlg_assert_or(record.dsState.size() == ops_.descriptorCopies.size(), return true);
+	// dlg_assert_or(record.dsState.size() == ops_.descriptorCopies.size(), return true);
 
 	dlg_assert(!record.hcommand.empty());
 	if(ops_.descriptorCopies.empty()) {
@@ -287,6 +303,13 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 		// is still valid
 		auto& currDs = access(dsState.descriptorSets[setID]);
 
+		for(auto& binding : currDs.layout->bindings) {
+			if(binding.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) {
+				return true;
+			}
+		}
+
+	/*
 		dlg_assert_or(record.dsState[i], return true);
 		auto& oldCow = *record.dsState[i];
 		auto [oldDs, lock] = access(oldCow);
@@ -294,6 +317,7 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 		if(!copyableDescriptorSame(currDs, oldDs, bindingID, elemID)) {
 			return true;
 		}
+	*/
 	}
 
 	return false;
@@ -422,6 +446,8 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 				// 	"{} -> {}", foundHookRecord->match, findRes.match);
 			});
 
+			// TODO: this is the only place we use hookCounter, counter_
+			// We know this works. Maybe remove both?
 			dlg_assert(foundHookRecord->hookCounter == counter_);
 			dlg_assert(foundHookRecord->state);
 		}
@@ -484,10 +510,19 @@ void CommandHook::desc(IntrusivePtr<CommandRecord> rec,
 	dlg_assert(bool(rec) == !hierachy.empty());
 
 	{
-		std::lock_guard lock(dev_->mutex);
-		record_ = std::move(rec);
-		hierachy_ = std::move(hierachy);
-		dsState_ = std::move(dsState);
+		IntrusivePtr<CommandRecord> keepAliveRec;
+		CommandDescriptorSnapshot keepAliveDsSnapshot;
+
+		{
+			std::lock_guard lock(dev_->mutex);
+
+			keepAliveRec = std::move(record_);
+			keepAliveDsSnapshot = std::move(dsState_);
+
+			record_ = std::move(rec);
+			hierachy_ = std::move(hierachy);
+			dsState_ = std::move(dsState);
+		}
 	}
 
 	if(invalidate) {

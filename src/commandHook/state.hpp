@@ -28,7 +28,10 @@ struct AttachmentCopyOp {
 // Collection of data we got out of a submission/command.
 struct CommandHookState {
 	struct CopiedDescriptor {
-		std::variant<std::monostate, CopiedImage, OwnBuffer> data;
+		std::variant<std::monostate,
+			CopiedImage,
+			OwnBuffer,
+			CopiedImageToBuffer> data;
 	};
 
 	struct CopiedAttachment {

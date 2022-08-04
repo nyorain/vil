@@ -146,9 +146,9 @@ public: // TODO, for cow. Maybe just move them to Device?
 	VkPipeline accelStructVertCopy_ {};
 
 	// pipeline for sample-copying image to buffer
-	VkDescriptorSetLayout copyImageDsLayout_ {};
-	VkPipelineLayout copyImagePipeLayout_ {};
-	VkPipeline copyImagePipes_[ShaderImageType::count] {};
+	VkDescriptorSetLayout sampleImageDsLayout_ {};
+	VkPipelineLayout sampleImagePipeLayout_ {};
+	VkPipeline sampleImagePipes_[ShaderImageType::count] {};
 
 	std::vector<CompletedHook> completed_;
 	HookOps ops_;
