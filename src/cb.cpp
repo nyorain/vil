@@ -657,6 +657,7 @@ auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
 
 	auto& use = const_cast<RefHandle<T>&>(*it);
 	// use.commands.push_back(&cmd);
+	(void) cmd;
 	return use;
 }
 
@@ -677,6 +678,7 @@ UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 
 	auto& use = const_cast<UsedImage&>(*it);
 	// use.commands.push_back(&cmd);
+	(void) cmd;
 	return use;
 }
 
@@ -695,6 +697,7 @@ UsedDescriptorSet& useHandleImpl(CommandRecord& rec, Command& cmd, DescriptorSet
 
 	auto& use = const_cast<UsedDescriptorSet&>(*it);
 	// use.commands.push_back(&cmd);
+	(void) cmd;
 	return use;
 }
 

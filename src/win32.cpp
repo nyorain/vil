@@ -147,6 +147,7 @@ struct Win32Platform : Platform {
 	Vec2f guiWinPos {};
 	Vec2f guiWinSize {};
 	bool doGuiUnfocus {};
+	bool softwareCursor {};
 
 	bool moveResizing {};
 
@@ -404,8 +405,10 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		} case WM_CHAR: {
 			dlg_trace("wm char");
 
-			if (msg->wParam > 0 && msg->wParam < 0x10000) {
-				wp.gui->imguiIO().AddInputCharacterUTF16((unsigned short)msg->wParam);
+			if(handle) {
+				if(msg->wParam > 0 && msg->wParam < 0x10000) {
+					wp.gui->imguiIO().AddInputCharacterUTF16((unsigned short)msg->wParam);
+				}
 			}
 
 			if(!forward) {
@@ -415,36 +418,38 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 			break;
 		} case WM_INPUT: {
-			// Shouldn't happen
-			// dlg_error("unexpected wm_input");
+			if(handle) {
+				UINT dwSize = sizeof(RAWINPUT);
+				static std::aligned_storage_t<sizeof(RAWINPUT), 8> lpb {};
+				auto ret = wp.hooks->GetRawInputData.forward((HRAWINPUT)msg->lParam, RID_INPUT, &lpb, &dwSize, sizeof(RAWINPUTHEADER));
+				if (ret == UINT(-1)) {
+					print_winapi_error("GetRawInputData");
+					break;
+				}
 
-			UINT dwSize = sizeof(RAWINPUT);
-			static std::aligned_storage_t<sizeof(RAWINPUT), 8> lpb {};
-			auto ret = wp.hooks->GetRawInputData.forward((HRAWINPUT)msg->lParam, RID_INPUT, &lpb, &dwSize, sizeof(RAWINPUTHEADER));
-			if (ret == UINT(-1)) {
-				print_winapi_error("GetRawInputData");
-				break;
+				RAWINPUT* raw = (RAWINPUT*) &lpb;
+				if (raw->header.dwType == RIM_TYPEMOUSE) {
+					wp.gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
+					wp.gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
+
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[0] = true;
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) wp.gui->imguiIO().MouseDown[0] = false;
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[1] = true;
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) wp.gui->imguiIO().MouseDown[1] = false;
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[2] = true;
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) wp.gui->imguiIO().MouseDown[2] = false;
+
+					// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
+				}
 			}
 
-			RAWINPUT* raw = (RAWINPUT*) &lpb;
-			if (raw->header.dwType == RIM_TYPEMOUSE) {
-				wp.gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
-				wp.gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
-
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[0] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) wp.gui->imguiIO().MouseDown[0] = false;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[1] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) wp.gui->imguiIO().MouseDown[1] = false;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) wp.gui->imguiIO().MouseDown[2] = true;
-				if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) wp.gui->imguiIO().MouseDown[2] = false;
-
-				// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
-			}
-
-			if(!forward) {
-				msg->message = WM_NULL;
-				return 0;
-			}
+			// NOTE: we always forward this message
+			// important, WM_INPUT needs to be processed, otherwise the queue fills up or something.
+			// The application will call GetRawInputData on it, which is hooked by us anyways
+			// if(!forward) {
+				// msg->message = WM_NULL;
+				// return 0;
+			// }
 
 			break;
 		} case WM_MOUSEWHEEL: {
@@ -564,7 +569,7 @@ bool Win32Platform::doUpdate() {
 	}
 
 	if(state != State::hidden) {
-		gui->imguiIO().MouseDrawCursor = false;
+		gui->imguiIO().MouseDrawCursor = softwareCursor;
 
 		// TODO: error handling
 		// TODO: could use the mouse hook instead (but make sure to
@@ -643,6 +648,7 @@ void Win32Platform::init(Device& dev, unsigned width, unsigned height) {
 		hooks->activate(true);
 	}
 
+	softwareCursor = checkEnvBinary("VIL_WIN32_SOFTWARE_CURSOR", false);
 	auto threadID = GetWindowThreadProcessId(surfaceWindow, nullptr);
 
 	msgHook = SetWindowsHookEx(WH_GETMESSAGE, msgHookFunc, nullptr, threadID);
