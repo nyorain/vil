@@ -289,14 +289,25 @@ void Gui::initImGui() {
     configMerge.MergeMode = true;
     // configMerge.FontBuilderFlags = ImGuiFreeTypeBuilderFlags_LightHinting;
 
+	float scale = 1.0f;
+	auto e = std::getenv("VIL_UI_SCALE");
+	if(e) {
+		auto res = std::strtof(e, nullptr);
+		if(res != 0.f) {
+			scale = res;
+		} else {
+			dlg_warn("Environment variable 'VIL_UI_SCALE' set to invalid value '{}'.", e);
+		}
+	}
+
 	defaultFont = io.Fonts->AddFontFromMemoryCompressedTTF(arimo_compressed_data,
-		arimo_compressed_size, 15.f, nullptr, rangesBasic);
+		arimo_compressed_size, scale * 15.f, nullptr, rangesBasic);
 	io.Fonts->AddFontFromMemoryCompressedTTF(fontAwesomeSolid_compressed_data,
-		fontAwesomeSolid_compressed_size, 14.f, &configMerge, rangesIcons);
+		fontAwesomeSolid_compressed_size, scale * 14.f, &configMerge, rangesIcons);
 
 	// TODO: compress
 	monoFont = io.Fonts->AddFontFromMemoryTTF((void*) inconsolata_compressed_data,
-		inconsolata_compressed_size, 15.f, &configOwned, rangesBasic);
+		inconsolata_compressed_size, scale * 15.f, &configOwned, rangesBasic);
 
 	// Apply style
 	ImGui::StyleColorsDark();
@@ -373,6 +384,8 @@ void Gui::initImGui() {
 	// Center window title
 	style.WindowTitleAlign = {0.5f, 0.5f};
 	style.Alpha = 1.f;
+
+	style.ScaleAllSizes(scale);
 }
 
 // ~Gui
