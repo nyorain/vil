@@ -3,13 +3,13 @@
 Vulkan in-app debugging layer that is able to provide
 live introspection and debugging via an overlay or window GUI.
 
+![Example of command viewer 1](docs/pics/rtao-new.png)
+
 This is still in a very early stage of development. Bug reports are welcome.
 There are various known issues and some of the features below are work-in-progess.
 See the [rough overview](docs/features.md) over the currently implemented vulkan 
 commands/extensions. Keep in mind that using extensions/features not supported
 by the layer at the moment might cause crashes.
-
-![Example of command viewer 1](docs/pics/sponza-ssao-2.png)
 
 Features:
 
@@ -42,9 +42,6 @@ debugging approach to figure out roughly where a problem is, without
 having to wait for a capture to load. It also is useful as a general-purpose
 introspection tool, capture-based tools are usually optimized to only show
 resources important for their capture, leaving out the rest.
-It also allows to easily debug compute-only vulkan applications that
-don't have a swapchain (renderdoc can do that but requires the application
-to explicitly call renderdoc api).
 
 Downsides:
 
@@ -52,8 +49,7 @@ Downsides:
   and is likely just out of the scope of this project. There are great
   tools for that.
 - This isn't as stable/feature-complete as known tools
-- Currently, there is no shader debugging at all. Might be added in the
-  far away future.
+- Shader debugging is in a very experimental stage, more of a prototype
 - The live nature of the introspection brings various problems with it.
   While it is already possible to freeze some state and also view e.g.
   invalidated/destroyed command records, you might run into issues
@@ -198,9 +194,6 @@ specific game or fix a problem inside the layer to allow using it with
 a retail product, we definitely want to hear of it. But additional code paths
 inside the layer that work around specific *game issues* will not
 be accepted.
-
-Using the layer via an overlay inside the demo level of [vkQuake2](https://github.com/kondrak/vkQuake2):
-![Running inside vkQuake2](docs/pics/vkQuake2.png)
 
 # License
 
