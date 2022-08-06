@@ -11,6 +11,7 @@
 #include <vk/enumString.hpp>
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 
 namespace vil {
 

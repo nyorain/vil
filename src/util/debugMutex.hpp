@@ -7,6 +7,17 @@
 #include <util/dlg.hpp>
 #include <util/profiling.hpp>
 
+// TODO
+#define tsa_guarded_by(x) __attribute__((guarded_by(x)))
+#define tsa_pt_guarded_by(x) __attribute__((pt_guarded_by(x)))
+#define tsa_requires(x) __attribute__((requires_capability(x)))
+#define tsa_lock_returned(x) __attribute__((lock_returned(x)))
+#define tsa_acquire(x) __attribute__((acquire_capability(x)))
+#define tsa_release(x) __attribute__((release_capability(x)))
+#define tsa_acquire_shared(x) __attribute__((acquire_shared_capability(x)))
+#define tsa_release_shared(x) __attribute__((release_shared_capability(x)))
+#define tsa_capability(x) __attribute__((capability(x)))
+
 namespace vil {
 
 #ifndef VIL_DEBUG_MUTEX
@@ -21,13 +32,13 @@ using DebugMutex = std::mutex;
 // it's useful to find issues (e.g. a mutex isn't locked when we expected
 // it to be) with the unfortunately at times complicated threading
 // assumptions/guarantees for vil functions.
-struct DebugSharedMutex {
+struct tsa_capability("shared_mutex") DebugSharedMutex {
 	std::shared_mutex mtx_;
 	std::atomic<std::thread::id> owner_ {};
 	std::unordered_set<std::thread::id> shared_ {};
 	mutable std::mutex sharedMutex_ {};
 
-	void lock() {
+	void lock() tsa_acquire() {
 		dlg_assert(!owned());
 		dlg_assert(!ownedShared());
 		mtx_.lock();
@@ -35,7 +46,7 @@ struct DebugSharedMutex {
 		owner_.store(std::this_thread::get_id());
 	}
 
-	void unlock() {
+	void unlock() tsa_release() {
 		dlg_assert(owned());
 
 		{
@@ -47,19 +58,19 @@ struct DebugSharedMutex {
 		mtx_.unlock();
 	}
 
-	bool try_lock() {
-		dlg_assert(!owned());
-		dlg_assert(!ownedShared());
-		auto ret = mtx_.try_lock();
-		if(ret) {
-			dlg_assert(shared_.empty());
-			dlg_assert(owner_ == std::thread::id{});
-			owner_ = std::this_thread::get_id();
-		}
-		return ret;
-	}
+	// bool try_lock() {
+	// 	dlg_assert(!owned());
+	// 	dlg_assert(!ownedShared());
+	// 	auto ret = mtx_.try_lock();
+	// 	if(ret) {
+	// 		dlg_assert(shared_.empty());
+	// 		dlg_assert(owner_ == std::thread::id{});
+	// 		owner_ = std::this_thread::get_id();
+	// 	}
+	// 	return ret;
+	// }
 
-	void lock_shared() {
+	void lock_shared() tsa_acquire_shared() {
 		dlg_assert(!owned());
 		dlg_assert(!ownedShared());
 		mtx_.lock_shared();
@@ -69,7 +80,7 @@ struct DebugSharedMutex {
 		shared_.insert(std::this_thread::get_id());
 	}
 
-	void unlock_shared() {
+	void unlock_shared() tsa_release_shared() {
 		dlg_assert(ownedShared());
 		dlg_assert(owner_ == std::thread::id{});
 
@@ -81,17 +92,17 @@ struct DebugSharedMutex {
 		mtx_.unlock_shared();
 	}
 
-	bool try_lock_shared() {
-		dlg_assert(!owned());
-		dlg_assert(!ownedShared());
-		auto ret = mtx_.try_lock_shared();
-		if(ret) {
-			std::lock_guard lock(sharedMutex_);
-			dlg_assert(owner_.load() == std::thread::id{});
-			shared_.insert(std::this_thread::get_id());
-		}
-		return ret;
-	}
+	// bool try_lock_shared() {
+	// 	dlg_assert(!owned());
+	// 	dlg_assert(!ownedShared());
+	// 	auto ret = mtx_.try_lock_shared();
+	// 	if(ret) {
+	// 		std::lock_guard lock(sharedMutex_);
+	// 		dlg_assert(owner_.load() == std::thread::id{});
+	// 		shared_.insert(std::this_thread::get_id());
+	// 	}
+	// 	return ret;
+	// }
 
 	bool owned() const {
 		return owner_.load() == std::this_thread::get_id();
@@ -103,32 +114,32 @@ struct DebugSharedMutex {
 	}
 };
 
-struct DebugMutex {
+struct tsa_capability("mutex") DebugMutex {
 	std::mutex mtx_;
 	std::atomic<std::thread::id> owner_ {};
 
-	void lock() {
+	void lock() tsa_acquire() {
 		dlg_assert(!owned());
 		mtx_.lock();
 		dlg_assert(owner_ == std::thread::id{});
 		owner_.store(std::this_thread::get_id());
 	}
 
-	void unlock() {
+	void unlock() tsa_release() {
 		dlg_assert(owned());
 		owner_.store({});
 		mtx_.unlock();
 	}
 
-	bool try_lock() {
-		dlg_assert(!owned());
-		auto ret = mtx_.try_lock();
-		if(ret) {
-			dlg_assert(owner_ == std::thread::id{});
-			owner_ = std::this_thread::get_id();
-		}
-		return ret;
-	}
+	// bool try_lock() {
+	// 	dlg_assert(!owned());
+	// 	auto ret = mtx_.try_lock();
+	// 	if(ret) {
+	// 		dlg_assert(owner_ == std::thread::id{});
+	// 		owner_ = std::this_thread::get_id();
+	// 	}
+	// 	return ret;
+	// }
 
 	bool owned() const {
 		return owner_.load() == std::this_thread::get_id();

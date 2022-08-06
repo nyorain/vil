@@ -11,7 +11,6 @@
 #include <vector>
 #include <cassert>
 #include <cstring>
-#include <memory_resource>
 
 // per-thread allocator for temporary local memory, allocated in stack-like
 // fashion. Due to its strict requirement, only useful to create one-shot

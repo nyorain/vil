@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <algorithm>
+#include <unordered_map>
 
 #include <tao/pegtl.hpp>
 #include <tao/pegtl/contrib/trace.hpp>

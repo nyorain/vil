@@ -27,3 +27,4 @@ void _spvm_context_create_setup_table(spvm_context_t ctx);
 #endif // __cplusplus
 
 #endif // __SPIRV_VM_CONTEXT_H__
+

@@ -246,7 +246,7 @@ private:
 	// Protected by mutex.
 	// Not owned here. The destructor of DescriptorSetCow automatically
 	// unsets this.
-	IntrusivePtr<DescriptorSetCow> cow_ {};
+	IntrusivePtr<DescriptorSetCow> cow_ tsa_guarded_by(mutex_) {};
 
 	// The internal state (in data) is protected by this mutex. This
 	// is needed since we might read the data anytime from the gui

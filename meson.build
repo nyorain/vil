@@ -459,6 +459,14 @@ lib_spvm = static_library(
 	]),
 )
 
+# TODO WIP
+cpp_args = args + [
+	'-stdlib=libc++',
+	'-Wthread-safety',
+	'-D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS',
+]
+pch = []
+
 link_args = [
 	# statically link the standard library, where supported
 	# might get conflicts with the one loaded by the application otherwise
@@ -478,7 +486,7 @@ vil_layer = shared_library(
 	dependencies: deps,
 	include_directories: inc,
 	link_whole: lib_spvm,
-	cpp_args: args + layer_args,
+	cpp_args: cpp_args + layer_args,
 	c_args: args,
 	link_args: cc.get_supported_link_arguments(link_args),
 	install: true,

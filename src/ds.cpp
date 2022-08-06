@@ -448,7 +448,7 @@ DescriptorStateCopyPtr DescriptorSet::copyLockedState() {
 	// that is up-to-pointer-aligned directly behind the state object in memory).
 	static_assert(sizeof(DescriptorStateCopy) % alignof(void*) == 0u);
 	assertOwned(mutex_);
-	dlg_assert(cow_);
+	// dlg_assert(cow_);
 
 	auto bindingSize = totalDescriptorMemSize(*this->layout, this->variableDescriptorCount);
 	auto memSize = sizeof(DescriptorStateCopy) + bindingSize;

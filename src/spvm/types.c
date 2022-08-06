@@ -43,3 +43,4 @@ spvm_string spvm_string_read_all(spvm_source spv, spvm_word* length)
 
 	return start;
 }
+
