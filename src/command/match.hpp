@@ -3,6 +3,8 @@
 #include <fwd.hpp>
 #include <vector>
 #include <cstring>
+#include <util/span.hpp>
+#include <util/linalloc.hpp>
 
 namespace vil {
 
