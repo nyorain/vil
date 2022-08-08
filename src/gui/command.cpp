@@ -37,6 +37,11 @@ namespace {
 
 #ifdef VIL_COMMAND_CALLSTACKS
 void display(span<void*> st, unsigned offset = 6u) {
+	if (st.size() <= offset) {
+		imGuiText("No callstack");
+		return;
+	}
+
 	ThreadMemScope tms;
 	auto resolved = backward::resolve(tms, st.subspan(offset));
 

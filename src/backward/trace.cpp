@@ -166,10 +166,10 @@ void do_load(span<void*>& out) {
       if (s.AddrReturn.Offset == 0)
         break;
 
-	  out[id] = s.AddrPC.Offset;
+	  out[id] = reinterpret_cast<void*>(s.AddrPC.Offset);
 	  ++id;
 
-      if (id >= depth)
+      if (id >= out.size())
         break;
     }
 
