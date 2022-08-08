@@ -10,10 +10,6 @@
 #include <vk/enumString.hpp>
 #include <util/profiling.hpp>
 
-#ifdef VIL_COMMAND_CALLSTACKS
-	#include <util/callstack.hpp>
-#endif // VIL_COMMAND_CALLSTACKS
-
 namespace vil {
 
 // TODO: to be removed, together with Command::relID in future.
@@ -62,112 +58,6 @@ bool same(const backward::StackTrace& a, const backward::StackTrace& b,
 	return true;
 }
 #endif // VIL_COMMAND_CALLSTACKS
-
-Matcher match(DescriptorStateRef a, DescriptorStateRef b) {
-	dlg_assert(a.layout);
-	dlg_assert(b.layout);
-
-	// TODO: additional bonus matching points when the *same*
-	//   ds is used? Probably bad idea.
-
-	if(a.data == b.data) {
-		// fast path: full match since same descriptorSet
-		auto count = float(totalDescriptorCount(a));
-		return Matcher{count, count};
-	}
-
-	// we expect them to have the same layout since they must
-	// be bound for commands with the same pipeline
-	dlg_assert_or(compatible(*a.layout, *b.layout), return Matcher::noMatch());
-
-	// iterate over bindings
-	Matcher m;
-	for(auto bindingID = 0u; bindingID < a.layout->bindings.size(); ++bindingID) {
-		// they can have different size, when variable descriptor count is used
-		auto sizeA = descriptorCount(a, bindingID);
-		auto sizeB = descriptorCount(b, bindingID);
-
-		// must have the same type
-		auto dsType = a.layout->bindings[bindingID].descriptorType;
-		auto dsCat = vil::category(dsType);
-		dlg_assert_or(a.layout->bindings[bindingID].descriptorType ==
-			b.layout->bindings[bindingID].descriptorType, continue);
-
-		if(dsType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT) {
-			// This might seem like a low weight but the bytewise
-			// comparison isn't the best anyways. Counting the number
-			// of equal bytes or weighing this by the block size
-			// would be bad.
-			m.total += 1;
-		} else {
-			m.total += std::max(sizeA, sizeB);
-		}
-
-		// TODO: if samplers or image/buffers views are different we could
-		// check them for semantic equality as well. But who would ever do something
-		// as terrible as create multiple equal samplers/imageView? /s
-
-		if(dsCat == DescriptorCategory::image) {
-			auto bindingsA = images(a, bindingID);
-			auto bindingsB = images(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				auto& bindA = bindingsA[e];
-				auto& bindB = bindingsB[e];
-				if(needsSampler(dsType) &&
-						bindA.sampler != bindB.sampler) {
-					continue;
-				}
-
-				if(needsImageView(dsType) &&
-						bindA.imageView != bindB.imageView) {
-					continue;
-				}
-
-				// NOTE: consider image layout? not too relevant I guess
-				++m.match;
-			}
-		} else if(dsCat == DescriptorCategory::buffer) {
-			auto bindingsA = buffers(a, bindingID);
-			auto bindingsB = buffers(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				auto& bindA = bindingsA[e];
-				auto& bindB = bindingsB[e];
-				// NOTE: consider offset? not too relevant I guess
-				if(bindA.buffer == bindB.buffer &&
-						bindA.range == bindB.range) {
-					++m.match;
-				}
-			}
-		} else if(dsCat == DescriptorCategory::bufferView) {
-			auto bindingsA = bufferViews(a, bindingID);
-			auto bindingsB = bufferViews(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				if(bindingsA[e] == bindingsB[e]) {
-					++m.match;
-				}
-			}
-		} else if(dsCat == DescriptorCategory::accelStruct) {
-			auto bindingsA = accelStructs(a, bindingID);
-			auto bindingsB = accelStructs(b, bindingID);
-			for(auto e = 0u; e < std::min(sizeA, sizeB); ++e) {
-				if(bindingsA[e] == bindingsB[e]) {
-					++m.match;
-				}
-			}
-		} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
-			auto bytesA = inlineUniformBlock(a, bindingID);
-			auto bytesB = inlineUniformBlock(b, bindingID);
-			if(bytesA.size() == bytesB.size() &&
-					std::memcmp(bytesA.data(), bytesB.data(), bytesA.size()) == 0) {
-				++m.match;
-			}
-		} else {
-			dlg_error("Unsupported descriptor type: {}", u32(dsType));
-		}
-	}
-
-	return m;
-}
 
 FindResult find(const Command* root, span<const Command*> dst,
 		const CommandDescriptorSnapshot& dstDsState, float threshold) {

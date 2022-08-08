@@ -124,6 +124,8 @@ struct LazyMatrixMarch {
 	// Expected to return a matching value in range [0, 1] where 0
 	// means no match and a value >0 means there's a match, returning
 	// it's weight/value/importance/quality.
+	// Guaranteed to be called at most once per run for each (i, j)
+	// combinations so don't bother caching results.
 	using Matcher = std::function<float(u32 i, u32 j)>;
 
 	// width: length of the first sequence

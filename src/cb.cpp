@@ -13,7 +13,6 @@
 #include <util/util.hpp>
 #include <util/ext.hpp>
 #include <util/profiling.hpp>
-#include <util/callstack.hpp>
 
 namespace vil {
 
@@ -272,10 +271,7 @@ void CommandBuffer::doEnd() {
 	rp_ = nullptr;
 	rpAttachments_ = {};
 
-	// parse commands into description
-	// TODO: this should really be removed
 	auto& rec = *builder_.record_;
-	annotateRelIDLegacy(rec.commands);
 
 	// Make sure to never call CommandRecord destructor inside lock.
 	// Don't just call reset() here or move lastRecord_ so that always have a valid

@@ -1,4 +1,4 @@
-#include <command/desc.hpp>
+#include <command/match.hpp>
 #include <command/record.hpp>
 #include <command/commands.hpp>
 #include <command/alloc.hpp>
@@ -9,6 +9,8 @@
 #include "../approx.hpp"
 
 using namespace vil;
+
+thread_local LinAllocator localMem;
 
 struct LabelSection {
 	BeginDebugUtilsLabelCmd* cmd;
@@ -63,8 +65,9 @@ TEST(unit_match_simple_record) {
 	auto recEmpty = rb.record_;
 
 	ThreadMemScope tms;
-	auto [matches1, match1] = match(tms, *rec3Barriers->commands, *recEmpty->commands);
-	auto [matches2, match2] = match(tms, *rec3Barriers->commands, *rec3Barriers->commands);
+	LinAllocScope lms(localMem);
+	auto [match1, _1, _2, matches1] = match(tms, lms, *rec3Barriers->commands, *recEmpty->commands);
+	auto [match2, _3, _4, matches2] = match(tms, lms, *rec3Barriers->commands, *rec3Barriers->commands);
 	dlg_trace("match1: {}/{}", match1.match, match1.total);
 	dlg_trace("match2: {}/{}", match2.match, match2.total);
 
@@ -89,7 +92,8 @@ TEST(unit_match_labels) {
 	auto recB = rb.record_;
 
 	ThreadMemScope tms;
-	auto [matches, matchRes] = match(tms, *recA->commands, *recB->commands);
+	LinAllocScope lms(localMem);
+	auto [matchRes, _1, _2, matches] = match(tms, lms, *recA->commands, *recB->commands);
 	auto matchVal = eval(matchRes);
 	dlg_trace("match val: {}", matchVal);
 
@@ -101,18 +105,19 @@ TEST(unit_match_labels) {
 	dlg_assert(matches.size() == 3u);
 
 	// reverse order atm
-	dlg_assert(matches[2].a == &a1);
-	dlg_assert(matches[2].b == &b1);
+	dlg_assert(matches[0].a == &a1);
+	dlg_assert(matches[0].b == &b1);
 
 	dlg_assert(matches[1].a == &a2);
 	dlg_assert(matches[1].b == &b2);
 
-	dlg_assert(matches[0].a == &a4);
-	dlg_assert(matches[0].b == &b4);
+	dlg_assert(matches[2].a == &a4);
+	dlg_assert(matches[2].b == &b4);
 
 	// test symmetrical
 	{
-		auto [matches2, matchRes2] = match(tms, *recB->commands, *recA->commands);
+		LinAllocScope lms(localMem);
+		auto [matchRes2, _1, _2, matches2] = match(tms, lms, *recB->commands, *recA->commands);
 		auto matchVal2 = eval(matchRes2);
 		dlg_trace("match val 2: {}", matchVal2);
 
@@ -125,23 +130,13 @@ TEST(unit_match_labels) {
 		dlg_assert(matches2.size() == 3u);
 
 		// reverse order atm
-		dlg_assert(matches2[2].b == &a1);
-		dlg_assert(matches2[2].a == &b1);
+		dlg_assert(matches2[0].b == &a1);
+		dlg_assert(matches2[0].a == &b1);
 
 		dlg_assert(matches2[1].b == &a2);
 		dlg_assert(matches2[1].a == &b2);
 
-		dlg_assert(matches2[0].b == &a4);
-		dlg_assert(matches2[0].a == &b4);
+		dlg_assert(matches2[2].b == &a4);
+		dlg_assert(matches2[2].a == &b4);
 	}
-}
-
-TEST(unit_match_tmp) {
-	ExecuteCommandsChildCmd cmd1;
-	ExecuteCommandsChildCmd cmd2;
-
-	cmd1.relID = 0u;
-	cmd2.relID = 0u;
-
-	EXPECT(eval(cmd1.match(cmd2)), approx(1.f));
 }

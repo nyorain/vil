@@ -10,7 +10,7 @@
 #include <queue.hpp>
 #include <threadContext.hpp>
 #include <swapchain.hpp>
-#include <command/desc.hpp>
+#include <command/match.hpp>
 #include <command/commands.hpp>
 #include <vk/enumString.hpp>
 #include <util/util.hpp>
@@ -431,10 +431,10 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 				// commands in hierachy_, find relies on all of them being valid.
 				dlg_assert(record_);
 
-				auto findRes = find(record.commands->children_, hierachy_, dsState_);
+				auto findRes = find(*record.commands, hierachy_, dsState_);
 				dlg_assert(std::equal(
 					foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
-					findRes.hierachy.begin(), findRes.hierachy.end()));
+					findRes.hierarchy.begin(), findRes.hierarchy.end()));
 				// NOTE: I guess we can't really rely on this. Just always call
 				// findRes? But i'm not even sure this is important. Could we ever
 				// suddenly want to hook a different command in the same record
@@ -476,13 +476,13 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		// commands in hierachy_, find relies on all of them being valid.
 		dlg_assert(record_);
 
-		findRes = find(record.commands->children_, hierachy_, dsState_);
-		if(findRes.hierachy.empty()) {
+		findRes = find(*record.commands, hierachy_, dsState_);
+		if(findRes.hierarchy.empty()) {
 			// Can't find the command we are looking for in this record
 			return hooked.handle();
 		}
 
-		dlg_assert(findRes.hierachy.size() == hierachy_.size());
+		dlg_assert(findRes.hierarchy.size() == hierachy_.size());
 	}
 
 	// dlg_trace("hooking command submission; frame {}", dev.swapchain->presentCounter);
@@ -490,12 +490,12 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 		"Alarmingly high number of hooks for a single record");
 
 	auto descriptors = CommandDescriptorSnapshot {};
-	if(!findRes.hierachy.empty()) {
-		descriptors = captureDescriptors(*findRes.hierachy.back());
+	if(!findRes.hierarchy.empty()) {
+		descriptors = captureDescriptors(*findRes.hierarchy.back());
 	}
 
 	auto hook = new CommandHookRecord(*this, record,
-		std::move(findRes.hierachy), descriptors);
+		std::move(findRes.hierarchy), descriptors);
 	hook->match = findRes.match;
 	record.hookRecords.push_back(FinishPtr<CommandHookRecord>(hook));
 

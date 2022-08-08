@@ -30,6 +30,14 @@ struct DisplayVisitor : CommandVisitor {
 		finish();
 	}
 
+	bool display(const RootCommand& cmd, bool firstSep) {
+		auto selected = displayCommands(cmd.children_, firstSep);
+		if(selected) {
+			newSelection_.insert(newSelection_.begin(), &cmd);
+		}
+		return selected;
+	}
+
 	// Close any remaining trees in the end
 	void finish() {
 		if(!labelOnlyIndent_) {
@@ -53,7 +61,6 @@ struct DisplayVisitor : CommandVisitor {
 		// Would also have to pre-filter commands for that. And stop at every
 		// (expanded) parent command (but it's hard to tell whether they are
 		// expanded).
-		std::vector<const Command*> ret;
 		auto showSep = firstSep;
 		auto emptyBefore = newSelection_.empty();
 		while(cmd) {

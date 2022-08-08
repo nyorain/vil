@@ -5,7 +5,7 @@
 #include <wrap.hpp>
 #include <gui/gui.hpp>
 #include <command/commands.hpp>
-#include <command/desc.hpp>
+#include <command/match.hpp>
 #include <commandHook/hook.hpp>
 #include <commandHook/state.hpp>
 #include <threadContext.hpp>
@@ -13,7 +13,9 @@
 #include <image.hpp>
 #include <queue.hpp>
 #include <cb.hpp>
+#include <ds.hpp>
 #include <rp.hpp>
+#include <vk/enumString.hpp>
 #include "./internal.hpp"
 #include "../data/simple.comp.spv.h" // see simple.comp; compiled manually
 
@@ -145,7 +147,7 @@ TEST(int_basic) {
 	vilDev.commandHook->target(std::move(target));
 
 	vilDev.commandHook->forceHook.store(true);
-	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {dst}, {});
+	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {rec.commands, dst}, {});
 
 	VkSubmitInfo si {};
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -244,21 +246,24 @@ TEST(int_secondary_cb) {
 	dlg_assert(childCmd1.sectionStats().numChildSections == 1u);
 	dlg_assert(childCmd1.firstChildParent());
 
+	LinAllocator localMem;
+	LinAllocScope lms(localMem);
+
 	ThreadMemScope tms;
-	auto res = match(tms, *rec0.commands, *rec1.commands);
-	auto matcher = res.second;
+	auto res = match(tms, lms, *rec0.commands, *rec1.commands);
+	auto matcher = res.match;
 	dlg_assert(matcher.match == matcher.total);
 	dlg_assert(matcher.match > 0.f);
 
-	auto secm = res.first;
+	auto secm = res.children;
 	dlg_assert(secm.size() == 2u);
-	dlg_assert(secm[1].a == &execCmd0 && secm[1].b == &execCmd1);
-	dlg_assert(secm[1].children.size() == 1u);
-	dlg_assert(secm[0].a == execCmd0.nextParent_ && secm[0].b == execCmd1.nextParent_);
+	dlg_assert(secm[0].a == &execCmd0 && secm[0].b == &execCmd1);
 	dlg_assert(secm[0].children.size() == 1u);
+	dlg_assert(secm[1].a == execCmd0.nextParent_ && secm[1].b == execCmd1.nextParent_);
+	dlg_assert(secm[1].children.size() == 1u);
 
 	{
-		auto secm = res.first[1].children;
+		auto secm = res.children[0].children;
 		dlg_assert(secm[0].a == &childCmd0 && secm[0].b == &childCmd1);
 		dlg_assert(secm[0].children.size() == 1u); // for the label section
 	}
@@ -340,7 +345,7 @@ TEST(int_copy_transfer) {
 	vilDev.commandHook->target(std::move(target));
 
 	vilDev.commandHook->forceHook.store(true);
-	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {dst}, {});
+	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {rec.commands, dst}, {});
 
 	VkSubmitInfo si {};
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -352,7 +357,9 @@ TEST(int_copy_transfer) {
 
 	auto completed = vilDev.commandHook->moveCompleted();
 	dlg_assert(completed.size() == 1u);
-	dlg_assert(completed[0].command[0] == dst);
+	dlg_assert(completed[0].command.size() == 2u);
+	dlg_assert(completed[0].command[0] == rec.commands);
+	dlg_assert(completed[0].command[1] == dst);
 	dlg_assert(completed[0].state->transferImgCopy.image);
 
 	// cleanup
@@ -454,6 +461,9 @@ void sampleCopyTest(VkCommandBuffer cb, PipeSetup& ps, Texture& tex0) {
 	cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	VK_CHECK(BeginCommandBuffer(cb, &cbi));
 
+	auto& imgView = unwrap(tex0.imageView);
+	dlg_assert(imgView.refCount == 1u);
+
 	// barrier
 	VkImageMemoryBarrier imgBarriers[1] {};
 	imgBarriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -497,7 +507,9 @@ void sampleCopyTest(VkCommandBuffer cb, PipeSetup& ps, Texture& tex0) {
 	vilDev.commandHook->target(std::move(target));
 
 	vilDev.commandHook->forceHook.store(true);
-	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {dst}, {});
+	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {rec.commands, dst}, {});
+
+	dlg_assert(imgView.refCount == 1u);
 
 	VkSubmitInfo si {};
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -505,15 +517,29 @@ void sampleCopyTest(VkCommandBuffer cb, PipeSetup& ps, Texture& tex0) {
 	si.pCommandBuffers = &cb;
 	QueueSubmit(stp.queue, 1u, &si, VK_NULL_HANDLE);
 
+	// additional reference in the captured descriptor, hooked submission
+	dlg_assert(imgView.refCount == 2u);
+
 	DeviceWaitIdle(stp.dev);
+
+	// additional reference from the added ds cow
+	dlg_assert(imgView.refCount == 2u);
 
 	auto completed = vilDev.commandHook->moveCompleted();
 	dlg_assert(completed.size() == 1u);
-	dlg_assert(completed[0].command[0] == dst);
+	dlg_assert(completed[0].command.size() == 2u);
+	dlg_assert(completed[0].command[0] == rec.commands);
+	dlg_assert(completed[0].command[1] == dst);
 	auto& state = *completed[0].state;
 	dlg_assert(state.copiedDescriptors.size() == 1u);
 	auto& imgAsBuf = std::get<CopiedImageToBuffer>(state.copiedDescriptors[0].data);
 	dlg_assert(imgAsBuf.buffer.buf);
+
+	completed.clear();
+
+	// even though we clear completed, the cow is still active.
+	// Will only be destroyed on ds update/destroy
+	dlg_assert(imgView.refCount == 2u);
 }
 
 TEST(int_sample_copy_pipeline) {
@@ -531,6 +557,8 @@ TEST(int_sample_copy_pipeline) {
 	auto sci = linearSamplerCI();
 	VkSampler sampler;
 	VK_CHECK(CreateSampler(stp.dev, &sci, nullptr, &sampler));
+	auto& vilSampler = unwrap(sampler);
+	dlg_assert(vilSampler.refCount == 1u);
 
 	auto formats = {
 		VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -542,6 +570,8 @@ TEST(int_sample_copy_pipeline) {
 	for(auto format : formats) {
 		auto tc = TextureCreation(format);
 		auto tex0 = Texture(stp, tc);
+
+		dlg_trace("{}", vk::name(format));
 
 		VkDescriptorImageInfo imgInfo {};
 		imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -569,13 +599,20 @@ TEST(int_sample_copy_pipeline) {
 
 		UpdateDescriptorSets(stp.dev, 2u, dsw, 0u, nullptr);
 
+		dlg_assert(vilSampler.refCount == 1u);
+
 		sampleCopyTest(cb, ps, tex0);
+
+		dlg_assert(vilSampler.refCount == 2u);
 	}
 
 	// cleanup
 	destroy(ps);
 	DestroySampler(stp.dev, sampler, nullptr);
 	DestroyCommandPool(stp.dev, cmdPool, nullptr);
+
+	auto& vilDev = *stp.vilDev;
+	vilDev.commandHook->desc({}, {}, {});
 }
 
 // TODO: write test where we record a command buffer that executes

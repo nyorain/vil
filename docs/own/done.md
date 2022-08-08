@@ -1,3 +1,91 @@
+- [x] support for the spirv primites in block variables that are still missing
+ 	  See https://github.com/KhronosGroup/SPIRV-Reflect/issues/110
+	  {no longer using spirv-reflect}
+	- [x] runtime arrays (based on buffer range size)
+	- [x] spec constant arrays
+- [x] static buffer viewer currently broken, see resources.cpp recordPreRender
+	  for old code (that was terrible, we would have to rework it to
+	  chain readbacks to a future frame, when a previous draw is finished)
+- [x] full support CmdDrawIndirectCount in gui (most stuff not implemented atm in CommandHook)
+	  {probably not for v0.1} 
+- [x] limit device mutex lock by ui/overlay/window as much as possible.
+      {we don't have monolithic CS anymore now}
+    - [ ] We might have to manually throttle frame rate for window
+	      {meh}
+	- [x] add tracy (or something like it) to the layer (in debug mode or via 
+	      meson_options var) so we can properly profile the bottlenecks and
+		  problems
+- [x] (low prio) our descriptor matching fails in some cases when handles are abused
+	  as temporary, e.g. imageViews, samplers, bufferViews (ofc also for
+	  stuff like images and buffers).
+	  Probably a wontfix since applications
+	  should fix their shit but in some cases this might not be too hard
+	  to support properly with some additional tracking and there might
+	  be valid usecases for using transient image views
+	  {done via shared ownership now}
+- [x] The way we have to keep CommandRecord objects alive (keepAlive) in various places
+      (e.g. Gui::renderFrame, CommandBuffer::doReset, CommandBuffer::doEnd),
+      to make sure they are not destroyed while we hold the lock (and possibly
+	  reset an IntrusiverPtr) is a terrible hack. But no idea how to solve
+	  this properly. We can't require that the mutex is locked while ~CommandRecord
+	  is called, that leads to other problems (since it possibly destroys other
+	  objects)
+- [x] can we link C++ statically? Might fix the dota
+	  std::regex bug maybe it was something with the version of libstdc++?
+	  {tried, but caused more problems than it fixed. Dota bug not fixed,
+	   but we have an alternative regex lib now. And are completely
+	   avoiding regex in textedit}
+- [x] (high prio) figure out general approach to fix flickering data, especially
+      in command viewer (but also e.g. on image hover in resource viewer)
+	  {fixed pretty much by state freezing and update interval setting}
+- [x] also don't always copy (ref) DescriptorSetState on submission.
+      Leads to lot of DescriptorSetState copies, destructors.
+	  We only need to do it when currently in swapchain mode *and* inside
+	  the cb tab. (maybe we can even get around always doing it in that
+	  case but that's not too important).
+	  For non-update-after-bind (& update_unused_while_pending) descriptors,
+	  we could copy the state on BindDescriptorSet time? not sure that's
+	  better though.
+	- [x] also don't pass *all* the descriptorSet states around (hook submission,
+	      cbGui, CommandViewer etc). We only need the state of the hooked command, 
+		  should be easy to determine.
+	- [x] See the commented-out condition in submit.cpp
+- [x] {from expensive CommandBuffer::doEnd} 
+      I guess we could avoid a lot of this 'refRecords' stuff by
+	  simple making IntrusivePtr's out of all referenced handles.
+	  E.g. make sure Images, Buffers, QueryPools, etc are not destroyed
+	  while the CommandRecord is alive. And get completely rid of
+	  refRecords and this whole 'invalidated' stuff.
+	  OTOH this means it's even harder to find all command usages of
+	  a given handle. But we need a different approach for that anyways
+	  due to descriptor sets (something like one async search of all
+	  known records and then a notification callback for new records/ds 
+	  or something)
+- [x] get rid of annotateRelIDLegacy, use proper context (across cb boundaries) 
+      when matching commands instead. Should fix CmdBarrier issues in RDR2
+	  See docs/own/desc2.hpp. But that isn't enough, we need more context.
+	- yeah desc2.hpp isn't too relevant here. In the two places where we
+	  still use relID, we instead want to do a local per-block LCS/LMM
+	  where we only consider the non-zero matches or something.
+	  Or only the two best matches, only do this if we have two candidates?
+	  And maybe only in the final hierarchy level?
+- [x] improve matching (write tests first), propagate Matcher objects instead
+      of floats. See todo in desc.hpp
+- [x] improve CmdBarrier matching, see node 2305
+      {some improvements done, the general non-action matching rework is still WIP}
+- [x] selecting a whole CommandRecord in the command viewer crashed rdr2. Investigate
+	  {fixed, was caused by printing record names, might be null tho}
+- [x] FIX RENDERPASS SPLIT SYNC. We know this was a problem before.
+      But the old solution breaks renderpass compat.
+	  Insert barriers as needed when recording instead.
+	  Remove the old code from splitInterruptable then.
+	  	- wait no, this should work, we record memory barriers
+		  between the split passes. Just verify that it works
+		  (and figure our a7 bug)
+		  {seems like the amd windows driver don't handle
+		   memory_{read,write} access flags correctly, as adding
+		   color_attachment access helped. Makes no sense, likely
+		   just driver bug}
 - [x] use mustMoveUnset everywhere a handle might outlive its
       api side lifetime
 - [x] improve matching of common commands, e.g. BarrierCmd.

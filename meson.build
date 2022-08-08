@@ -127,12 +127,6 @@ if debug_checks
 	layer_args += '-DVIL_DEBUG'
 endif
 
-# TODO
-cmd_callstacks = true
-if cmd_callstacks
-	layer_args += '-DVIL_COMMAND_CALLSTACKS'
-endif
-
 # deps
 dep_threads = dependency('threads', required: false)
 
@@ -187,7 +181,7 @@ src = files(
 	'src/util/buffmt.cpp',
 	'src/util/bufparser.cpp',
 	'src/util/linalloc.cpp',
-	'src/command/desc.cpp',
+	'src/command/match.cpp',
 	'src/command/record.cpp',
 	'src/command/commands.cpp',
 	'src/command/builder.cpp',
@@ -259,7 +253,7 @@ src = files(
 	'src/command/commands.hpp',
 	'src/command/record.hpp',
 	'src/command/alloc.hpp',
-	'src/command/desc.hpp',
+	'src/command/match.hpp',
 
 	'src/tracy/TracyClient.cpp',
 
@@ -327,6 +321,20 @@ src = files(
 	'src/spirv-cross/spirv_parser.cpp',
 	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
+
+# TODO
+cmd_callstacks = true
+if cmd_callstacks
+	layer_args += '-DVIL_COMMAND_CALLSTACKS'
+	src += files(
+		'src/backward/trace.cpp',
+		'src/backward/resolve.cpp',
+
+		'src/backward/trace.hpp',
+		'src/backward/resolve.hpp',
+		'src/backward/common.hpp',
+	)
+endif
 
 public_inc = include_directories('include/')
 private_inc = include_directories('src/')

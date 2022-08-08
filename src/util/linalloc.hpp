@@ -249,6 +249,10 @@ struct LinAllocScope {
 
 	template<typename T>
 	span<std::remove_const_t<T>> copy(T* data, size_t n) {
+		if(n == 0u) {
+			return {};
+		}
+
 		auto ret = this->allocUndef<std::remove_const_t<T>>(n);
 		std::memcpy(ret.data(), data, n * sizeof(T));
 		return ret;

@@ -16,6 +16,7 @@
 #include <cb.hpp>
 #include <command/commands.hpp>
 #include <command/record.hpp>
+#include <command/match.hpp>
 #include <util/bytes.hpp>
 #include <util/util.hpp>
 #include <util/f16.hpp>
@@ -417,7 +418,8 @@ void CommandBufferGui::updateState() {
 		// find the best match
 		CommandHook::CompletedHook* best = nullptr;
 		auto bestMatch = 0.f;
-		MatchResult bestMatchResult {};
+		ThreadMemScope tms;
+		FrameMatch bestMatchResult {};
 		u32 bestPresentID = {};
 		std::vector<FrameSubmission> bestBatches; // only for swapchain mode
 
@@ -429,7 +431,7 @@ void CommandBufferGui::updateState() {
 			// When we are in swapchain mode, we need the frame associated with
 			// this submission. We will then also consider the submission in its
 			// context inside the frame.
-			MatchResult batchMatches;
+			FrameMatch batchMatches;
 			if(mode_ == UpdateMode::swapchain) {
 				dlg_assert(selectionType_ == SelectionType::command);
 
@@ -454,8 +456,8 @@ void CommandBufferGui::updateState() {
 
 				// check if [selectedRecord_ in selectedFrame_] contextually
 				// matches  [res.record in foundBatches]
-				ThreadMemScope tms;
-				batchMatches = match(tms, selectedFrame_, foundBatches);
+				LinAllocScope localMatchMem(matchAlloc_);
+				batchMatches = match(tms, localMatchMem, selectedFrame_, foundBatches);
 				bool recordMatched = false;
 				for(auto& batchMatch : batchMatches.matches) {
 					if(batchMatch.b->submissionID != res.submissionID) {
@@ -469,7 +471,7 @@ void CommandBufferGui::updateState() {
 
 						if(recMatch.a == selectedRecord_.get()) {
 							recordMatched = true;
-							resMatch *= recMatch.match;
+							resMatch *= eval(recMatch.match);
 
 							// TODO: For all parent commands, we could make
 							// sure that they match.
@@ -487,7 +489,7 @@ void CommandBufferGui::updateState() {
 				// not match with our previous record in content; we won't use it.
 				if(!recordMatched) {
 					dlg_info("Hooked record did not match. Total match: {}, match count {}",
-						batchMatches.match, batchMatches.matches.size());
+						eval(batchMatches.match), batchMatches.matches.size());
 					continue;
 				}
 			}
@@ -696,7 +698,7 @@ void CommandBufferGui::displayFrameCommands() {
 			DisplayVisitor visitor(openedSections_, selectedCommand,
 				commandFlags_, brokenLabelNesting_);
 			visitor.jumpToSelection_ = focusSelected_;
-			visitor.displayCommands(rec->commands->children_, true);
+			visitor.display(*rec->commands, true);
 			auto nsel = std::move(visitor.newSelection_);
 
 			auto newSelection = !nsel.empty() && (
@@ -754,7 +756,7 @@ void CommandBufferGui::displayRecordCommands() {
 	DisplayVisitor visitor(openedSections_,selected,
 		commandFlags_, brokenLabelNesting_);
 	visitor.jumpToSelection_ = focusSelected_;
-	visitor.displayCommands(record_->commands->children_, false);
+	visitor.display(*record_->commands, false);
 	auto nsel = std::move(visitor.newSelection_);
 
 	auto newSelection = !nsel.empty() && (
@@ -816,8 +818,9 @@ void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records,
 	// update records
 	{
 		ThreadMemScope tms;
+		LinAllocScope localMatchMem(matchAlloc_);
 		auto recCopy = records;
-		auto frameMatch = match(tms, records_, recCopy);
+		auto frameMatch = match(tms, localMatchMem, records_, recCopy);
 		updateRecords(frameMatch, std::move(recCopy));
 	}
 
@@ -836,7 +839,8 @@ void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records,
 
 	// TODO PERF: can re-use frameMatch in many cases,
 	ThreadMemScope tms;
-	auto selMatch = match(tms, selectedFrame_, records);
+	LinAllocScope localMatchMem(matchAlloc_);
+	auto selMatch = match(tms, localMatchMem, selectedFrame_, records);
 
 	std::optional<u32> newSelectedBatch = {};
 	IntrusivePtr<CommandRecord> newSelectedRecord = {};
@@ -884,7 +888,7 @@ void addMatches(
 		const std::unordered_set<const ParentCommand*>& oldSet,
 		std::unordered_set<const ParentCommand*>& newSet,
 		std::unordered_set<const ParentCommand*>& transitioned,
-		const SectionMatch& sectionMatch) {
+		const CommandSectionMatch& sectionMatch) {
 
 	if(oldSet.count(sectionMatch.a)) {
 		newSet.insert(sectionMatch.b);
@@ -896,7 +900,7 @@ void addMatches(
 	}
 }
 
-void CommandBufferGui::updateRecords(const MatchResult& frameMatch,
+void CommandBufferGui::updateRecords(const FrameMatch& frameMatch,
 		std::vector<FrameSubmission>&& records) {
 	ThreadMemScope tms;
 

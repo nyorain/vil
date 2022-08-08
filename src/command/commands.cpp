@@ -1,5 +1,6 @@
 #include <command/commands.hpp>
 #include <command/alloc.hpp>
+#include <command/match.hpp>
 #include <handles.hpp>
 #include <shader.hpp>
 #include <cb.hpp>
@@ -17,10 +18,6 @@
 #include <vk/format_utils.h>
 #include <iomanip>
 #include <filesystem>
-
-#ifdef VIL_COMMAND_CALLSTACKS
-	#include <util/callstack.hpp>
-#endif // VIL_COMMAND_CALLSTACKS
 
 // TODO:
 // - a lot of commands are still missing valid match() implementations.
@@ -164,16 +161,13 @@ bool Command::isDescendant(const Command& cmd) const {
 }
 
 Matcher Command::match(const Command& cmd) const {
+	// default implementation: when the types are the same, return 1,
+	// otherwise 0
 	if(typeid(cmd) != typeid(*this)) {
 		return Matcher::noMatch();
 	}
 
-	// match by order
-	// TODO
-	Matcher m;
-	m.total = 1.f;
-	m.match = 1.f / (1.f + std::abs(int(cmd.relID) - int(this->relID)));
-	return m;
+	return {1.f, 1.f};
 }
 
 // BarrierCmdBase
@@ -255,35 +249,6 @@ bool operator==(const VkImageSubresourceLayers& a, const VkImageSubresourceLayer
 		a.mipLevel == b.mipLevel;
 }
 
-template<typename T>
-bool add(Matcher& m, const T& a, const T& b, float weight = 1.0) {
-	auto same = (a == b);
-	m.total += weight;
-	m.match += same ? weight : 0.f;
-	return same;
-}
-
-template<typename T>
-void addMemcmp(Matcher& m, const T& a, const T& b, float weight = 1.0) {
-	m.total += weight;
-	m.match += std::memcmp(&a, &b, sizeof(T)) == 0 ? weight : 0.f;
-}
-
-template<typename T>
-void addNonNull(Matcher& m, T* a, T* b, float weight = 1.0) {
-	m.total += weight;
-	m.match += (a == b && a != nullptr) ? weight : 0.f;
-}
-
-float eval(const Matcher& m) {
-	if(m.total == -1.f) { // no match
-		return 0.f;
-	}
-
-	dlg_assertm(m.match <= m.total, "match {}, total {}", m.match, m.total);
-	return m.total == 0.f ? 1.f : m.match / m.total;
-}
-
 Matcher match(const VkBufferCopy2KHR& a, const VkBufferCopy2KHR& b) {
 	Matcher m;
 	add(m, a.size, b.size);
@@ -334,10 +299,7 @@ Matcher match(const VkBufferImageCopy2KHR& a, const VkBufferImageCopy2KHR& b) {
 
 Matcher match(const VkImageSubresourceRange& a, const VkImageSubresourceRange& b) {
 	Matcher m;
-	add(m, a.aspectMask, b.aspectMask);
-	add(m, a.baseArrayLayer, b.baseArrayLayer);
-	add(m, a.baseMipLevel, b.baseMipLevel);
-	add(m, a.levelCount, b.levelCount);
+	add(m, a, b);
 	return m;
 }
 

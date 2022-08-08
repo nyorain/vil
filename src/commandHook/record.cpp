@@ -105,7 +105,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	info.maxHookLevel = &maxHookLevel;
 
 	ZoneScopedN("HookRecord");
-	this->hookRecord(record->commands->children_, info);
+	this->hookRecord(record->commands, info);
 
 	VK_CHECK(dev.dispatch.EndCommandBuffer(this->cb));
 

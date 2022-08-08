@@ -3,7 +3,6 @@
 #include <fwd.hpp>
 #include <cow.hpp>
 #include <commandHook/state.hpp>
-#include <command/desc.hpp>
 #include <command/record.hpp>
 #include <util/intrusive.hpp>
 #include <util/bytes.hpp>

@@ -8,13 +8,6 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] FIX RENDERPASS SPLIT SYNC. We know this was a problem before.
-      But the old solution breaks renderpass compat.
-	  Insert barriers as needed when recording instead.
-	  Remove the old code from splitInterruptable then.
-	  	- wait no, this should work, we record memory barriers
-		  between the split passes. Just verify that it works
-		  (and figure our a7 bug)
 - [ ] add undefined behavior analyzer in shader debuggger.
       just need to enable spvm feature
 - [ ] set spec constants for shader module in gui shader debugger.
@@ -28,8 +21,6 @@ urgent, bugs:
 		  applications don't use the oldSwapchain feature).
 		  Should be a member of the device, we only display it once anyways.
 		  Create lazily as member there, WITH sync!
-- [ ] selecting a whole CommandRecord in the command viewer crashed rdr2. Investigate
-- [ ] improve CmdBarrier matching, see node 2305
 - [ ] figure out transform_feedback crashes in doom eternal
       crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
       check if it could be a error in patching logic; otherwise analyze our generated spirv,
@@ -64,34 +55,25 @@ urgent, bugs:
 	  Hard to track though I guess?
 
 match rework 2, electric boogaloo
-- [ ] get rid of annotateRelIDLegacy, use proper context (across cb boundaries) 
-      when matching commands instead. Should fix CmdBarrier issues in RDR2
-	  See docs/own/desc2.hpp. But that isn't enough, we need more context.
-	- yeah desc2.hpp isn't too relevant here. In the two places where we
-	  still use relID, we instead want to do a local per-block LCS/LMM
-	  where we only consider the non-zero matches or something.
-	  Or only the two best matches, only do this if we have two candidates?
-	  And maybe only in the final hierarchy level?
-	- I guess the relID matching is only really relevant for 'find'.
-	  For command types without custom match implementation it's also used
-	  for 'match' but we don't really need it there, LCS already got us
-	  covered. 
-	  See node 2305 for details.
-	  The final find operation could then either be LCS (careful! might have
-	  a lot more commands here than sections for 'match') 
-	  Or - e.g. inside a render pass without blending - be independent 
-	  of the order of draw commands.
-	  	- for sync/bind commands: find surrounding actions commands - as
-		  outlined multiple times - and find them. Might cross block/record
-		  boundaries tho
-		- for action commands inside small (non-solid-renderpass) blocks: do LCS
-		- for big blocks: do best-match. In this case something like relID is
-		  useful. Maybe build it on-the-fly? should be a lot cheaper, only
-		  needed for very few blocks compared to *everything*
-		- for order-independent (e.g. no blend/additive) renderpasses we probably 
-		  want order-independency anyways, so just local-best-match
-- [ ] improve matching (write tests first), propagate Matcher objects instead
-      of floats. See todo in desc.hpp
+- use LCS in hook already.
+  See node 2305 for details.
+  The final find operation could then either be LCS (careful! might have
+  a lot more commands here than sections for 'match') 
+  Or - e.g. inside a render pass without blending - be independent 
+  of the order of draw commands.
+	- for sync/bind commands: find surrounding actions commands - as
+	  outlined multiple times - and find them. Might cross block/record
+	  boundaries tho
+	- for action commands inside small (non-solid-renderpass) blocks: do LCS
+	- for big blocks: do best-match. In this case something like relID is
+	  useful. Maybe build it on-the-fly? should be a lot cheaper, only
+	  needed for very few blocks compared to *everything*
+	- for order-independent (e.g. no blend/additive) renderpasses we probably 
+	  want order-independency anyways, so just local-best-match
+-> don't hook every cb with matching command. At least do a rough check
+      on other commands/record structure. Otherwise (e.g. when just selecting
+	  a top-level barrier command) we very quickly might get >10 hooks per
+	  frame.
 
 new, workstack:
 - [ ] there should probably just be one ImageViewer object; owned by Gui directly.
@@ -242,17 +224,7 @@ performance/profiling:
 		   (2, not sure, wild guess) due to HookRecord destruction?
 		   We should be able to move HookRecord destruction out of
 		   the critical section, if that really is an issue.
-	- [ ] I guess we could avoid a lot of this 'refRecords' stuff by
-	      simple making IntrusivePtr's out of all referenced handles.
-		  E.g. make sure Images, Buffers, QueryPools, etc are not destroyed
-		  while the CommandRecord is alive. And get completely rid of
-		  refRecords and this whole 'invalidated' stuff.
-		  OTOH this means it's even harder to find all command usages of
-		  a given handle. But we need a different approach for that anyways
-		  due to descriptor sets (something like one async search of all
-		  known records and then a notification callback for new records/ds 
-		  or something)
-	- [ ] otoh it doesn't seem to be anything in particular, most CSs
+	- otoh it doesn't seem to be anything in particular, most CSs
 	      (except ~CommandRecord) are short. It's just that it's called
 		  at lot in different threads -> sync overhead.
 		  Can we maybe get it completely lockless (or only dependent
@@ -267,10 +239,6 @@ performance/profiling:
 	  be destroyed before any resources it uses)
 - [ ] make sure it's unlikely we have additional DescriptorSetState references
 	  on vkFreeDescriptorSets (with normal api use and no gui)
-- [ ] don't hook every cb with matching command. At least do a rough check
-      on other commands/record structure. Otherwise (e.g. when just selecting
-	  a top-level barrier command) we very quickly might get >10 hooks per
-	  frame.
 - [ ] don't allocate memory per-resource. Especially for CommandHookState.
 	  Instead, allocate large blocks (we need hostVisible for buffers
 	  and deviceLocal for images) and then suballocate from that.
@@ -305,18 +273,6 @@ performance/profiling:
 - [ ] fix the optimization we have in ds.cpp where we don't store DescriptorSets into the
       hash maps when object wrapping is active (which currently causes the gui to not
 	  show any descriptorSets in the resource viewer)
-- [ ] also don't always copy (ref) DescriptorSetState on submission.
-      Leads to lot of DescriptorSetState copies, destructors.
-	  We only need to do it when currently in swapchain mode *and* inside
-	  the cb tab. (maybe we can even get around always doing it in that
-	  case but that's not too important).
-	  For non-update-after-bind (& update_unused_while_pending) descriptors,
-	  we could copy the state on BindDescriptorSet time? not sure that's
-	  better though.
-	- [ ] also don't pass *all* the descriptorSet states around (hook submission,
-	      cbGui, CommandViewer etc). We only need the state of the hooked command, 
-		  should be easy to determine.
-	- [ ] See the commented-out condition in submit.cpp
 - [ ] {low prio now} can we make per-cb-mutexs a thing?
       major bottleneck for applications that have hundreds of small command
 	  buffers. There are reasons it's not possible at the moment though,
@@ -351,8 +307,7 @@ gui stuff
 	  When selecting the vkQueueSubmit just show an overview.
 	  	- Currently hard to do, the fences/semaphores might have been destroyed.
 		  Not sure how to easily track this.
-- [ ] (high prio) figure out general approach to fix flickering data, especially
-      in command viewer (but also e.g. on image hover in resource viewer)
+		-> submission tracking rework
 - [ ] imgui styling. Compare with other imgui applications.
       See imgui style examples in imgui releases
 	- [x] use custom font
@@ -381,8 +336,6 @@ other
 	- [ ] tables instead of columns (columns sometimes don't align)
 	- [ ] references to other handles are so ugly at the moment
 	- [ ] for many handles the page is not implemented yet or looks empty
-- [ ] can we link C++ statically? Might fix the dota
-	  std::regex bug maybe it was something with the version of libstdc++?
 - [ ] decide whether to enable full-sync by default or not.
       Explain somewhere (in gui?) why/when it's needed. Already described
 	  in design.md from my pov
@@ -508,7 +461,7 @@ optimization:
 
 ---
 
-- [ ] proper descriptor resource management. We currently statically allocate
+- [ ] proper descriptor resource management for gui. We currently statically allocate
 	  a couple of descriptors (in Device) and pray it works
 	  	- [ ] when push descriptors are available we probably wanna use them.
 		      alternative code path should be straight forward
@@ -566,25 +519,11 @@ optimization:
       is a bit messy. Move the old gui object? At least make sure we always
 	  synchronize dev.gui, might have races atm.
 	  See TODO in Gui::init
-- [ ] The way we have to keep CommandRecord objects alive (keepAlive) in various places
-      (e.g. Gui::renderFrame, CommandBuffer::doReset, CommandBuffer::doEnd),
-      to make sure they are not destroyed while we hold the lock (and possibly
-	  reset an IntrusiverPtr) is a terrible hack. But no idea how to solve
-	  this properly. We can't require that the mutex is locked while ~CommandRecord
-	  is called, that leads to other problems (since it possibly destroys other
-	  objects)
 - [ ] could write patched shader spirv data into a pipeline cache I guess
       or maintain own shader cache directory with patched spirv
 	  not sure if worth it at all though, the spirv patching is probably
 	  not that expensive (and could even be further optimized, skip
 	  the code sections).
-- [ ] (low prio) our descriptor matching fails in some cases when handles are abused
-	  as temporary, e.g. imageViews, samplers, bufferViews (ofc also for
-	  stuff like images and buffers).
-	  Probably a wontfix since applications
-	  should fix their shit but in some cases this might not be too hard
-	  to support properly with some additional tracking and there might
-	  be valid usecases for using transient image views
 - [ ] get it to run without significant (slight (like couple of percent) increase 
 	  of frame timings even with layer in release mode is ok) overhead.
 	  Just tests with the usual suspects of games
@@ -608,11 +547,6 @@ optimization:
 - [ ] functions that allocate CommandRecord-memory should not take
       a CommandBuffer& as first argument but rather something like
 	  CommandRecordAllocator (or just CommandRecord), for clarity.
-- [ ] limit device mutex lock by ui/overlay/window as much as possible.
-    - [ ] We might have to manually throttle frame rate for window
-	- [ ] add tracy (or something like it) to the layer (in debug mode or via 
-	      meson_options var) so we can properly profile the bottlenecks and
-		  problems
 - [ ] improve frame graph layout in overview. Looks not nice atm
 	- [ ] maybe try out implot lib
 	- [ ] instead of limiting by number of frames maybe limit by time?
@@ -625,7 +559,8 @@ optimization:
 	  maybe we can reuse existing normals in some cases but i doubt it,
 	  no idea for good heuristics
 - [ ] when selecting a draw call, allow to color it in final render
-	- [ ] would require us to modify shader/pipeline. lots of work
+	- would require us to modify shader/pipeline. lots of work.
+	  Alternatively, we could simply render over it with a custom pipeline
 - [ ] the gui code is currently rather messy. Think of a general concept
       on how to handle tabs, image draws and custom pipelines/draws inside imgui
 - [ ] reading 64-bit int formats might have precision problems, see the format
@@ -665,14 +600,9 @@ optimization:
       if we don't know them. E.g. QueuePresent, render pass splitting?
 	  Whatever gives the highest chance of success for unknown extensions.
 	  (Could even try to toggle it via runtime option)
-- [ ] full support CmdDrawIndirectCount in gui (most stuff not implemented atm in CommandHook)
-	  {probably not for v0.1} 
 - [ ] improve buffer viewer {postponed to after v0.1}
 	- [ ] NOTE: evaluate whether static buffer viewer makes much sense.
 	      Maybe it's not too useful at the moment.
-	- [x] static buffer viewer currently broken, see resources.cpp recordPreRender
-	      for old code (that was terrible, we would have to rework it to
-		  chain readbacks to a future frame, when a previous draw is finished)
 	- [ ] ability to infer layouts (simply use the last known one, link to last usage in cb) from
 		- [ ] uniform and storage buffers (using spirv_inspect)
 		- [ ] vertex buffer (using the pipeline layout)
@@ -725,10 +655,6 @@ optimization:
 	  class otherwise I guess
 - [ ] move external source into extra folder
 - [ ] support timeline semaphores (submission rework/display)
-- [ ] support for the spirv primites in block variables that are still missing
- 	  See https://github.com/KhronosGroup/SPIRV-Reflect/issues/110
-	- [ ] runtime arrays (based on buffer range size)
-	- [ ] spec constant arrays
 - [ ] performance: when a resource is only read by us we don't have to make future
 	  submissions that also only read it wait.
 	- [ ] requires us to track (in CommandRecord::usedX i guess) whether

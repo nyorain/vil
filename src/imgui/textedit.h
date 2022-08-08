@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <map>
 #include <optional>
+#include <regex>
 #include "imgui.h"
 
 namespace srell {
@@ -42,6 +43,9 @@ typedef basic_regex<char, regex_traits<char>> regex;
 }
 
 namespace igt {
+
+// namespace rs = srell;
+namespace rs = std;
 
 class TextEditor
 {
@@ -200,6 +204,7 @@ public:
 
 		static const LanguageDefinition& CPlusPlus();
 		static const LanguageDefinition& HLSL();
+		static const LanguageDefinition& GLSLFast();
 		static const LanguageDefinition& GLSL();
 		static const LanguageDefinition& C();
 		static const LanguageDefinition& SQL();
@@ -293,7 +298,7 @@ public:
 	static const Palette& GetRetroBluePalette();
 
 private:
-	typedef std::vector<std::pair<srell::regex, PaletteIndex>> RegexList;
+	typedef std::vector<std::pair<rs::regex, PaletteIndex>> RegexList;
 
 	struct EditorState
 	{

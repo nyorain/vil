@@ -12,7 +12,6 @@
 #include <shader.hpp>
 #include <accelStruct.hpp>
 #include <pipe.hpp>
-#include <command/desc.hpp>
 #include <command/commands.hpp>
 #include <imgui/imgui.h>
 #include <vk/format_utils.h>

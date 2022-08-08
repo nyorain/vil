@@ -11,23 +11,25 @@
 
 namespace vil {
 
+// Information about a single submission done during a swapchains frame duration.
 struct FrameSubmission {
-	Queue* queue;
+	Queue* queue {};
+	u64 submissionID {}; // global submission id
 	std::vector<IntrusivePtr<CommandRecord>> submissions;
-	u64 submissionID; // global submission id
 };
 
+// All submissions done during a swapchains frame duration.
 struct FrameSubmissions {
 	// presentID (swapchain.presentCounter) associated with this frame.
-	u64 presentID;
+	u64 presentID {};
 
 	// global submission id (dev.submissionCounter) of the first
 	// submission associated with this frame.
-	u64 submissionStart;
+	u64 submissionStart {};
 
 	// global submission id (dev.submissionCounter) of the last
 	// submission associated with this frame.
-	u64 submissionEnd;
+	u64 submissionEnd {};
 
 	std::vector<FrameSubmission> batches;
 };

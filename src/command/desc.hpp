@@ -13,11 +13,10 @@
 namespace vil {
 
 struct FindResult {
-	std::vector<const Command*> hierachy;
+	std::vector<const Command*> hierarchy;
 	float match;
 };
 
-// Assumes that 'root' is a command tree where all handles are still valid.
 FindResult find(const Command* srcRoot, span<const Command*> dstHierachyToFind,
 	const CommandDescriptorSnapshot& dstDescriptors, float threshold = 0.0);
 

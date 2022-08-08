@@ -1,10 +1,12 @@
 #pragma once
 
+#include <fwd.hpp>
 #include <command/record.hpp>
 #include <pipe.hpp>
 #include <util/flags.hpp>
 #include <util/span.hpp>
 #include <util/dlg.hpp>
+#include <util/linalloc.hpp>
 
 // See ~Command. Keep in mind that we use a custom per-CommandRecord allocator
 // for all Commands, that's why we can use span<> here without the referenced
@@ -40,8 +42,6 @@ enum class CommandType : u32 {
 	// BuildAccelerationStructures commands
 	buildAccelStruct = (1u << 9u),
 };
-
-float eval(const Matcher& m);
 
 using CommandTypeFlags = nytl::Flags<CommandType>;
 
@@ -112,12 +112,8 @@ struct Command {
 	// Forms a forward linked list with siblings
 	Command* next {};
 
-	// How many sibilings with same nameDesc() came before this in parent
-	// TODO: to be removed, currently just used to improve matching.
-	unsigned relID {};
-
 #ifdef VIL_COMMAND_CALLSTACKS
-	backward::StackTrace* stackTrace {};
+	span<void*> stacktrace {};
 #endif // VIL_COMMAND_CALLSTACKS
 };
 

@@ -64,6 +64,9 @@ the layer works internally. Useful mainly for development on it.
 	- `minhook`: sources of the [minhook library](https://github.com/TsudaKageyu/minhook).
 	  Used only for the hooked win32 overlay, to grab/block input from
 	  the application.
+	- `backward`: heavily modified/stripped sources of the
+	  [backward library](https://github.com/bombela/backward-cpp) used to
+	  capture stack traces
 	- `tao/pegtl`: We use the [tao/pegtl](https://github.com/taocpp/PEGTL) library
 	  to parse expressions. Used for instance by the buffer viewer to convert a 
 	  glsl-like type specification to an internal type representation used to 

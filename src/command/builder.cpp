@@ -3,7 +3,7 @@
 #include <command/alloc.hpp>
 
 #ifdef VIL_COMMAND_CALLSTACKS
-	#include <util/callstack.hpp>
+	#include <backward/trace.hpp>
 #endif // VIL_COMMAND_CALLSTACKS
 
 namespace vil {
@@ -112,10 +112,10 @@ void RecordBuilder::append(Command& cmd) {
 	dlg_assert(section_);
 
 #ifdef VIL_COMMAND_CALLSTACKS
-	// TODO: does not really belong here. should be atomic then at least
-	if(record_->dev->captureCmdStack) {
-		cmd.stackTrace = &construct<backward::StackTrace>(*record_);
-		cmd.stackTrace->load_here(32u);
+	// TODO: captureCmdStack does not really belong here,
+	// don't want to access device
+	if(record_->dev->captureCmdStack.load()) {
+		cmd.stacktrace = backward::load_here(record_->alloc, 16u);
 	}
 #endif // VIL_COMMAND_CALLSTACKS
 

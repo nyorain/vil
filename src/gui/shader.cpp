@@ -42,13 +42,9 @@ void ShaderDebugger::init(Gui& gui) {
 	this->gui_ = &gui;
 	spvm_.context = spvm_context_initialize();
 
-	// TODO: use own lang definition instead of just GLSL. We support
-	// hlsl keywords, for instance.
-	// Also make sure to use a more efficient lang def, e.g.
-	// the Lua/C/CPP defs don't use regex and are way better.
-	// Then we wouldn't have to trust that random regex library
-	// we are using in there...
-	const auto& lang = igt::TextEditor::LanguageDefinition::GLSL();
+	// TODO: decide dynamically whether to use GLSL or HLSL here.
+	// Can probalby parse it from the shader module
+	const auto& lang = igt::TextEditor::LanguageDefinition::GLSLFast();
 	textedit_.SetLanguageDefinition(lang);
 
 	textedit_.SetShowWhitespaces(false);

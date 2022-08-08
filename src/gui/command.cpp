@@ -25,7 +25,7 @@
 #include <bitset>
 
 #ifdef VIL_COMMAND_CALLSTACKS
-	#include <util/callstack.hpp>
+	#include <backward/resolve.hpp>
 #endif // VIL_COMMAND_CALLSTACKS
 
 // NOTE: since we might view invalidated command records, we can't assume
@@ -36,23 +36,15 @@ namespace vil {
 namespace {
 
 #ifdef VIL_COMMAND_CALLSTACKS
-void display(const backward::StackTrace& st, unsigned offset = 6u) {
-	// TODO the static maps here are terrible
-	static backward::TraceResolver resolver;
-	static std::unordered_map<void*, backward::ResolvedTrace::SourceLoc> locs;
+void display(span<void*> st, unsigned offset = 6u) {
+	ThreadMemScope tms;
+	auto resolved = backward::resolve(tms, st.subspan(offset));
 
-	resolver.load_stacktrace(st);
+	for(auto i = 0u; i < resolved.size(); ++i) {
+		auto& loc = resolved[i];
+		imGuiText("#{}: {}:{}:{}: {} [{}]", i + offset, loc.filename, loc.line,
+			loc.col, loc.function, st[i + offset]);
 
-	for(auto i = offset; i < st.size(); ++i) {
-		auto it = locs.find(st[i - 1].addr);
-		if(it == locs.end()) {
-			auto res = resolver.resolve(st[i - 1]);
-			it = locs.emplace(st[i - 1].addr, res.source).first;
-		}
-
-		auto& loc = it->second;
-		imGuiText("#{}: {}:{}:{}: {} [{}]", i, loc.filename, loc.line,
-			loc.col, loc.function, st[i - 1].addr);
 		// 	// TODO, something like this. But make it configurable.
 		// 	And ffs, don't use std::sytem.
 		// if(ImGui::IsItemClicked()) {
@@ -1440,8 +1432,8 @@ void CommandViewer::displayCommand() {
 
 #ifdef VIL_COMMAND_CALLSTACKS
 	auto flags = ImGuiTreeNodeFlags_FramePadding;
-	if(command_->stackTrace && ImGui::TreeNodeEx("StackTrace", flags)) {
-		display(*command_->stackTrace);
+	if(!command_->stacktrace.empty() && ImGui::TreeNodeEx("StackTrace", flags)) {
+		display(command_->stacktrace);
 		ImGui::TreePop();
 	}
 #endif // VIL_COMMAND_CALLSTACKS

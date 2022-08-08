@@ -58,6 +58,7 @@ struct CommandPool;
 struct DescriptorPool;
 struct DescriptorSet;
 struct DescriptorSetLayout;
+struct DescriptorStateRef;
 struct DescriptorUpdateTemplate;
 struct ShaderModule;
 struct Pipeline;
@@ -82,6 +83,7 @@ struct CommandHookState;
 struct DescriptorCopyOp;
 struct DescriptorCopyOp;
 struct CopiedImage;
+struct FrameSubmission;
 
 struct ViewableImageCopy;
 
@@ -100,6 +102,8 @@ struct BeginRenderPassCmd;
 struct BuildAccelStructsCmd;
 struct BuildAccelStructsIndirectCmd;
 struct DescriptorSetCow;
+
+struct Matcher;
 
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;
@@ -127,21 +131,6 @@ struct RecordBuilder;
 
 enum class AttachmentType : u8;
 
-// TODO: find good place
-//
-// Represents the result of a matching operation.
-// The effective matching value is 'match/total' but having both values
-// gives additional information for further processing.
-// Invariant: For common objects, match <= total.
-struct Matcher {
-	float match {}; // sum of weights of comparisons that matched
-	float total {}; // sum of weights of all comparisons
-
-	// Special constant to signal that matching can't work and should
-	// be aborted.
-	static Matcher noMatch() { return {0.f, -1.f}; }
-};
-
 } // namespace vil
 
 
@@ -154,13 +143,6 @@ struct SPIRConstant;
 struct BuiltInResource;
 
 } // namespace spc
-
-// backward
-namespace backward {
-
-class StackTrace;
-
-} // namespace backward
 
 // TODO: rename to something like VIL_VK_CHECK
 #define VK_CHECK(x) do {\

@@ -1,14 +1,12 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <command/desc.hpp>
 #include <command/record.hpp>
 #include <gui/render.hpp>
 #include <gui/vertexViewer.hpp>
 #include <gui/command.hpp>
 #include <gui/update.hpp>
 #include <util/flags.hpp>
-#include <command/desc.hpp>
 
 // TODO: maybe we should just get rid of the non-swapchain update modes.
 // They are unreliable and make this class a lot more complicated
@@ -18,6 +16,7 @@
 namespace vil {
 
 struct FrameSubmission;
+struct FrameMatch;
 
 class CommandBufferGui {
 public:
@@ -64,7 +63,7 @@ private:
 
 	void updateRecord(IntrusivePtr<CommandRecord> record);
 	void updateRecords(std::vector<FrameSubmission>, bool updateSelection);
-	void updateRecords(const MatchResult&, std::vector<FrameSubmission>&&);
+	void updateRecords(const FrameMatch&, std::vector<FrameSubmission>&&);
 
 private:
 	friend class Gui;
@@ -114,6 +113,8 @@ private:
 
 	bool focusSelected_ {}; // TODO WIP experiment
 	UpdateTicker updateTick_ {};
+
+	LinAllocator matchAlloc_;
 };
 
 } // namespace vil

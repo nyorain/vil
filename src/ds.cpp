@@ -532,26 +532,31 @@ std::unique_lock<DebugMutex> DescriptorSet::checkResolveCow() {
 	dlg_assert(cow_->ds == this);
 	dlg_assert(!cow_->copy);
 
-	// In this case nobody is interested in the cow anymore.
-	// This isn't a race, nobody is able to access it from the outside
-	// without holding mutex_.
+	// Check if there is anybody interested in the cow.
+	// This isn't a race, nobody is able to access cow_ from the outside
+	// without holding mutex_. So if the refCount is 1 we know that
+	// we keep the only reference.
 	// We just didn't destroy it before because that's not possible
-	// to do safely without deadlock. Destroy it here.
+	// to do safely without deadlock. Destroying it here now instead.
 	if(cow_->refCount.load() == 1u) {
+		// With !refBindings, we referenced all bindings when a cow was
+		// added so we have to unref them here since we will never
+		// create the cow-owned copy that takes ownership of the increased
+		// counts.
+		if(!refBindings) {
+			unrefBindings(*this);
+		}
+
 		cow_->ds = nullptr; // just as a debug marker, see ~DescriptorSetCow
 		cow_.reset();
-		return objLock;
-	}
-
-	// In this case we have to resolve the cow
-	{
+	} else {
+		// here we have to resolve the cow
 		std::unique_lock cowLock(cow_->mutex);
 		cow_->copy = this->copyLockedState();
-		// disconnect
-		cow_->ds = nullptr;
+		cow_->ds = nullptr; // just as a debug marker, see ~DescriptorSetCow
 	}
 
-	cow_ = nullptr;
+	cow_.reset();
 	return objLock;
 }
 
