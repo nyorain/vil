@@ -2,6 +2,9 @@
 
 #include <fwd.hpp>
 #include <util/ownbuf.hpp>
+#include <vk/vulkan_core.h>
+#include <variant>
+#include <vector>
 
 namespace vil {
 
