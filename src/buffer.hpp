@@ -16,8 +16,6 @@ struct Buffer : MemoryResource {
 	std::vector<BufferView*> views;
 	VkDeviceAddress deviceAddress {}; // null if not available
 
-	std::vector<CowBufferRange*> cows;
-
 	Buffer() = default;
 	~Buffer();
 	Buffer(Buffer&&) = delete;

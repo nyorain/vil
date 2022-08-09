@@ -1,7 +1,6 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <cow.hpp>
 #include <commandHook/state.hpp>
 #include <command/record.hpp>
 #include <util/intrusive.hpp>
@@ -140,7 +139,7 @@ private:
 	std::vector<const Command*> hierachy_;
 
 	// pipelines needed for the acceleration structure build copy
-public: // TODO, for cow. Maybe just move them to Device?
+public: // TODO, for copying. Maybe just move them to Device?
 	VkPipelineLayout accelStructPipeLayout_ {};
 	VkPipeline accelStructVertCopy_ {};
 

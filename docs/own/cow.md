@@ -463,3 +463,68 @@ struct SubmissionGraph {
 
 So we need to make `SubmissionBatch` and `Semaphore` shared and should
 be good? Pretty easy.
+
+# Reflections: are Cows really worth it?
+
+So, using cows will introduce additional complexity in vil.
+Maybe this isn't the right way. Let's see.
+
+Most images and buffers, we just *have* to copy, no way around it.
+E.g. storage image/buffer, color attachment etc. They are often directly
+modified again.
+
+Where would we save performance with cows?
+Static textures/buffers. E.g. material textures, vertex buffers.
+BUT, do we really need cows for them? When we don't expect resources
+to be modified, couldn't we simply just use them directly?
+What in the case they DO get modified after all (e.g. a material
+texture might be streamed out, a mesh swapped out for a higher LOD
+or something)? Well, maybe just don't handle that case? Just wait
+another frame? Or use the new content?
+Let's explore if such approaches are viable.
+__Detecting__ that a resource is potentially changed is easy, we don't
+need the whole complexity of the CoW mechanism fore that.
+
+Our main usecase for cows is the shader debugger. Secondary usecase:
+sometimes inputs to shaders are HUGE static resources (like >100MB textures, 
+think highly detailed cubemap or something). Having some CoW mechanism
+there would be nice as well.
+
+Shader debugger:
+- we run it for a retrieved HookState and let's say one of the input textures
+  wasn't copied because we don't expect it to change (could be based on
+  heuristics, e.g. if it wasn't changed the last 100 frames, it's likely
+  it doesn't get changed now). But now we detected that it is indeed
+  being modified. We could still "just use it" for debugging.
+  This means we might get weird results for one frame. So what, nobody
+  will notice :D
+  On a more serious note, performance in the shader debugger is mainly a 
+  concern when not having frozen state. We could always force copies when
+  our state is frozen so we guarantee coherent input state in that case.
+	- alternatively, if we detect the change, we could simply show some
+	  message in the UI. Or maybe both, "just use it" (TM) and show
+	  a little warning signaling that stuff was unexpectedly changed.
+	  Good thing: if the changed resource isn't even accessed from the
+	  shader, everything is alright (as will often be the case for
+	  the huge bindless table case that we need this for).
+- what in the case that it was destroyed? just sample it as 0 and show
+  the warning I guess.
+So, in summary, "just use it" sounds quite viable for the shader
+debugger.
+
+Resource viewer:
+- Similar to the shader debugger case. When state is frozen, we can afford
+  a copy (once). Otherwise, during continuous viewing, having a potentially
+  changed resource here shouldn't be a big deal.
+  Might be a good idea to allow forcing copies via a setting
+
+---
+
+Just noticed something: we can always "afford one copy", it's just this
+continuous copying that's an issue. But for resources that are rarely
+changed, one copy is enough most of the time. So instead of CoW, maybe
+we can just re-use copies? Should be a lot easier.
+
+Hm, this does NOT solve our problem with huge bindless tables (e.g. holding 16k
+material images), we can't afford a single copy on the whole table EVER.
+Maybe use the approach from above for them.

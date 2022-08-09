@@ -1,10 +1,35 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <cow.hpp>
 #include <util/ownbuf.hpp>
 
 namespace vil {
+
+struct CopiedImageToBuffer {
+	OwnBuffer buffer;
+	VkFormat format; // format of the data
+};
+
+struct CopiedImage {
+	Device* dev {};
+	VkImage image {};
+	VkDeviceMemory memory {};
+	VkExtent3D extent {};
+	u32 layerCount {};
+	u32 levelCount {};
+	VkImageAspectFlags aspectMask {};
+	VkDeviceSize neededMemory {};
+	VkFormat format {};
+
+	CopiedImage() = default;
+	[[nodiscard]] bool init(Device& dev, VkFormat, const VkExtent3D&,
+		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam);
+	~CopiedImage();
+
+	VkImageSubresourceRange subresRange() const {
+		return {aspectMask, 0, levelCount, 0, layerCount};
+	}
+};
 
 struct DescriptorCopyOp {
 	unsigned set {};
@@ -67,9 +92,5 @@ struct CommandHookState {
 	CommandHookState();
 	~CommandHookState();
 };
-
-// The format used for imageAsBuffer conversion.
-// Implemented in cow.cpp
-VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect);
 
 } // namespace vil

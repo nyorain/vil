@@ -124,9 +124,6 @@ struct AccelInstances;
 
 struct DrawGuiImage;
 
-struct CowImageRange;
-struct CowBufferRange;
-
 struct RecordBuilder;
 
 enum class AttachmentType : u8;

@@ -1,5 +1,6 @@
 #include <commandHook/record.hpp>
 #include <commandHook/hook.hpp>
+#include <commandHook/copy.hpp>
 #include <command/record.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
@@ -16,27 +17,6 @@
 #include <vk/format_utils.h>
 
 namespace vil {
-
-// TODO: move to cow.hpp?
-void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
-		OwnBuffer& dst, VkDeviceSize dstOffset, VkDeviceSize size) {
-	if(size == 0u) {
-		return;
-	}
-
-	auto& srcBuf = bufferAtLocked(dev, srcPtr);
-	dlg_assert(srcBuf.deviceAddress);
-	auto srcOff = srcPtr - srcBuf.deviceAddress;
-	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
-}
-
-void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
-		VkDeviceAddress srcPtr, VkDeviceSize size, u32 queueFamsBitset) {
-	auto addFlags = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	dst.ensure(dev, size, addFlags, queueFamsBitset);
-	performCopy(dev, cb, srcPtr, dst, 0, size);
-}
-
 
 // record
 CommandHookRecord::CommandHookRecord(CommandHook& xhook,
@@ -665,6 +645,9 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 					auto& dstBuf = dst.data.emplace<CopiedImageToBuffer>();
 					initAndSampleCopy(dev, cb, dstBuf, *imgView->img, layout,
 						subres, {}, imageViews, bufferViews, descriptorSets);
+
+					// TODO: not always needed, only when we copied via
+					// compute shader. Make that a return value of initAndSampleCopy?
 					info.rebindComputeState = true;
 				} else {
 					auto& dstImg = dst.data.emplace<CopiedImage>();

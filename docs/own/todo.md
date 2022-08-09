@@ -378,21 +378,8 @@ other
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
 - [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
 
-PERF: add proper resource cow implementation 
-(see wip_cow branch, found that a major submission tracking rework would be needed):
-- [ ] resolve them in image/buffer destructor. Just wait for completion
-      at the moment. Can later on try to optimize it, keeping the
-	  handle (and possibly memory) alive until copy is finished.
-- [ ] rework CommandHookState to contain cows
-- [ ] rework CommandHookRecord to create cows
-- [ ] rework Gui to read cows
-- [ ] rework submission to resolve cows where needed.
-      We probably want a global list of cows. Hm or maybe a list of
-	  written handles in the CommandRecord?
-	- [ ] figure out good way/abstraction to actually (and efficiently) detect writing
-- [ ] rework vkMapMemory to resolve cow where needed.
-      Just iterate over MemoryResources in the given range.
-
+PERF: lazy copying of resources, when resources don't change, we don't
+	have to make a copy every frame
 
 ---
 

@@ -7,6 +7,7 @@
 #include <util/buffmt.hpp>
 #include <util/profiling.hpp>
 #include <util/fmt.hpp>
+#include <util/f16.hpp>
 #include <command/commands.hpp>
 #include <threadContext.hpp>
 #include <device.hpp>
@@ -581,7 +582,7 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 	dlg_assert(hookState);
 	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
 	dlg_assert(gui_->dev().commandHook->ops().descriptorCopies.size() > dsCopyIt->second);
-	auto& copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
+	auto copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
 	auto& copyResult = hookState->copiedDescriptors[dsCopyIt->second + arrayElemID];
@@ -796,7 +797,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	auto& hookState = *state_.get();
 	dlg_assert(hookState.copiedDescriptors.size() > dsCopyIt->second);
 	dlg_assert(gui_->dev().commandHook->ops().descriptorCopies.size() > dsCopyIt->second);
-	auto& copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
+	auto copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
 	auto& copyResult = hookState.copiedDescriptors[dsCopyIt->second + arrayElemID];
@@ -1077,24 +1078,38 @@ void ShaderDebugger::setupScalar(const Type& type, ReadBuf data, spvm_member& ds
 			dst.value.f = read<float>(data);
 		} else if(type.width == 64) {
 			dst.value.d = read<double>(data);
+		} else if(type.width == 16) {
+			dst.value.f = read<f16>(data);
 		} else {
-			dlg_error("Invalid width");
+			dlg_error("Invalid width: float with {} bits", type.width);
 		}
 	} else if(type.type == Type::typeInt) {
 		dlg_assert(vt == spvm_value_type_int);
 
-		if(type.width == 32) {
+		if(type.width == 64) {
+			dst.value.s = read<i64>(data);
+		} else if(type.width == 32) {
 			dst.value.s = read<i32>(data);
+		} else if(type.width == 16) {
+			dst.value.s = read<i16>(data);
+		} else if(type.width == 8) {
+			dst.value.s = read<i8>(data);
 		} else {
-			dlg_error("Invalid width");
+			dlg_error("Invalid width: int with {} bits", type.width);
 		}
 	} else if(type.type == Type::typeUint) {
 		dlg_assert(vt == spvm_value_type_int);
 
-		if(type.width == 32) {
-			dst.value.s = read<u32>(data);
+		if(type.width == 64) {
+			dst.value.u = read<u64>(data);
+		} else if(type.width == 32) {
+			dst.value.u = read<u32>(data);
+		} else if(type.width == 16) {
+			dst.value.u = read<u16>(data);
+		} else if(type.width == 8) {
+			dst.value.u = read<u8>(data);
 		} else {
-			dlg_error("Invalid width");
+			dlg_error("Invalid width: uint with {} bits", type.width);
 		}
 	} else if(type.type == Type::typeBool) {
 		dlg_assert(vt == spvm_value_type_bool);

@@ -31,8 +31,6 @@ struct Image : MemoryResource {
 	bool concurrentHooked {}; // whether we moved it into concurrent sharing mode
 	bool hasTransferSrc {}; // whether we were able to set transferSrc usage
 
-	std::vector<CowImageRange*> cows;
-
 	Image() = default;
 	~Image();
 	Image(Image&&) = delete;

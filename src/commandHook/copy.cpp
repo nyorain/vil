@@ -1,4 +1,6 @@
-#include <cow.hpp>
+#include <commandHook/copy.hpp>
+#include <commandHook/hook.hpp> // TODO: only for pipes
+#include <commandHook/state.hpp>
 #include <device.hpp>
 #include <image.hpp>
 #include <layer.hpp>
@@ -6,7 +8,6 @@
 #include <queue.hpp>
 #include <threadContext.hpp>
 #include <util/debugMutex.hpp>
-#include <commandHook/hook.hpp> // TODO: only for pipes
 #include <vk/enumString.hpp>
 #include <vk/format_utils.h>
 
@@ -698,161 +699,23 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 	performCopy(dev, cb, src, offset, dst, 0, size);
 }
 
-void recordResolve(Device& dev, CowResolveOp& op, CowBufferRange& cow) {
-	dlg_assert(op.cb);
-	dlg_assert(!cow.copy);
-	dlg_assert(cow.source);
-	dlg_assert(cow.offset + cow.size <= cow.source->ci.size);
+void performCopy(Device& dev, VkCommandBuffer cb, VkDeviceAddress srcPtr,
+		OwnBuffer& dst, VkDeviceSize dstOffset, VkDeviceSize size) {
+	if(size == 0u) {
+		return;
+	}
 
-	auto& dst = cow.copy.emplace();
-	dst.op = &op;
-	initAndCopy(dev, op.cb, dst.buf, cow.addFlags, *cow.source,
-		cow.offset, cow.size, cow.queueFams);
-
-	// we can unregister the cow and remove the reference to the
-	// source now that it was resolved.
-	assertOwned(dev.mutex);
-	auto it = find(cow.source->cows, &cow);
-	dlg_assert(it != cow.source->cows.end());
-	cow.source->cows.erase(it);
-
-	cow.source = nullptr;
-	cow.offset = {};
-	cow.size = {};
+	auto& srcBuf = bufferAtLocked(dev, srcPtr);
+	dlg_assert(srcBuf.deviceAddress);
+	auto srcOff = srcPtr - srcBuf.deviceAddress;
+	performCopy(dev, cb, srcBuf, srcOff, dst, dstOffset, size);
 }
 
-void recordResolve(Device& dev, CowResolveOp& op, CowImageRange& cow) {
-	dlg_assert(op.cb);
-	dlg_assert(cow.copy.index() == 0u);
-	dlg_assert(cow.source);
-
-	// TODO: might be problematic. Not sure we can always rely on
-	// previous submissions (that actually realize this pending layout)
-	// having finishing.
-	auto layout = cow.source->pendingLayout;
-
-	if(cow.imageAsBuffer) {
-		auto& dst = cow.copy.emplace<ImageToBufferRangeCopy>();
-		dst.op = &op;
-		initAndSampleCopy(dev, op.cb, dst.buf, *cow.source,
-			layout, cow.range, cow.queueFams, op.imageViews, op.bufferViews,
-			op.descriptorSets);
-	} else {
-		auto& dst = cow.copy.emplace<ImageRangeCopy>();
-		dst.op = &op;
-		initAndCopy(dev, op.cb, dst.img, *cow.source,
-			layout, cow.range, cow.queueFams);
-	}
-
-	// we can unregister the cow and remove the reference to the
-	// source now that it was resolved.
-	assertOwned(dev.mutex);
-	auto it = find(cow.source->cows, &cow);
-	dlg_assert(it != cow.source->cows.end());
-	cow.source->cows.erase(it);
-
-	cow.source = nullptr;
-	cow.range = {};
-}
-
-CowImageRange::~CowImageRange() {
-	std::lock_guard lock(source->dev->mutex);
-
-	if(source) {
-		dlg_assert(copy.index() == 0u);
-
-		// unregister
-		auto it = find(source->cows, this);
-		dlg_assert(it != source->cows.end());
-		source->cows.erase(it);
-	}
-
-	// check if operation is pending
-	// we have to wait for it since our resource is being destroyed
-	if(!source) {
-		CowResolveOp* op {};
-		Device* dev {};
-
-		if(auto* range = std::get_if<ImageToBufferRangeCopy>(&copy); range) {
-			op = range->op;
-			dev = range->buf.buffer.dev;
-		} else if(auto* range = std::get_if<ImageRangeCopy>(&copy); range) {
-			op = range->op;
-			dev = range->img.dev;
-		}
-
-		if(op) {
-			dlg_assert(op->fence);
-			dev->dispatch.WaitForFences(dev->handle, 1u, &op->fence, true, UINT64_MAX);
-		}
-	}
-}
-
-CowBufferRange::~CowBufferRange() {
-	std::lock_guard lock(source->dev->mutex);
-
-	if(source) {
-		dlg_assert(!copy);
-
-		// unregister
-		auto it = find(source->cows, this);
-		dlg_assert(it != source->cows.end());
-		source->cows.erase(it);
-	}
-
-	// check if operation is pending
-	// we have to wait for it since our resource is being destroyed
-	if(!source && copy) {
-		auto& dev = *copy->buf.dev;
-		dlg_assert(copy->op->fence);
-		dev.dispatch.WaitForFences(dev.handle, 1u, &copy->op->fence, true, UINT64_MAX);
-	}
-}
-
-bool allowCow(const Image& img) {
-	// we don't have proper support for tracking the memory of
-	// sparse bindings yet
-	if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT) {
-		return false;
-	}
-
-	// we can't track access to external resources
-	if(img.externalMemory) {
-		return false;
-	}
-
-	dlg_assert(img.memory);
-	if(currentlyMappedLocked(img) || aliasesOtherResourceLocked(img)) {
-		return false;
-	}
-
-	return true;
-}
-
-bool allowCowLocked(const Buffer& buf) {
-	// we don't have proper support for tracking the memory of
-	// sparse bindings yet
-	if(buf.ci.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT) {
-		return false;
-	}
-
-	// we can't track access to external resources
-	if(buf.externalMemory) {
-		return false;
-	}
-
-	dlg_assert(buf.memory);
-	if(currentlyMappedLocked(buf) || aliasesOtherResourceLocked(buf)) {
-		return false;
-	}
-
-	// If the buffer has a device address we have no chance at all
-	// to track when it is being written
-	if(buf.deviceAddress) {
-		return false;
-	}
-
-	return true;
+void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
+		VkDeviceAddress srcPtr, VkDeviceSize size, u32 queueFamsBitset) {
+	auto addFlags = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	dst.ensure(dev, size, addFlags, queueFamsBitset);
+	performCopy(dev, cb, srcPtr, dst, 0, size);
 }
 
 } // namespace vil

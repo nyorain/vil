@@ -170,7 +170,6 @@ src = files(
 	'src/api.cpp',
 	'src/overlay.cpp',
 	'src/platform.cpp',
-	'src/cow.cpp',
 	'src/lmm.cpp',
 	'src/vk/format_utils.cpp',
 	'src/util/util.cpp',
@@ -221,6 +220,7 @@ src = files(
 	'src/commandHook/hook.cpp',
 	'src/commandHook/record.cpp',
 	'src/commandHook/submission.cpp',
+	'src/commandHook/copy.cpp',
 
 	# imgui
 	'src/imgui/imgui.cpp',
@@ -282,6 +282,7 @@ src = files(
 	'src/commandHook/record.hpp',
 	'src/commandHook/submission.hpp',
 	'src/commandHook/state.hpp',
+	'src/commandHook/copy.hpp',
 
 	# fonts
 	'src/gui/fonts.cpp',

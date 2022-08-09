@@ -1,7 +1,6 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <cow.hpp>
 #include <util/ownbuf.hpp>
 #include <command/record.hpp>
 #include <commandHook/state.hpp>
