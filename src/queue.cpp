@@ -36,7 +36,7 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	}
 	// apparently unique_ptr == ptr comparision not supported in stdlibc++ yet?
 	auto it = std::find_if(dev.pending.begin(), dev.pending.end(), [&](auto& ptr){
-			return ptr.get() == &subm;
+		return ptr.get() == &subm;
 	});
 	dlg_assert(it != dev.pending.end());
 
@@ -59,6 +59,43 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 			dev.resetSemaphores.push_back(sub.ourSemaphore);
 		} else if(sub.ourSemaphore && dev.timelineSemaphores) {
 			dev.semaphorePool.push_back(sub.ourSemaphore);
+		}
+
+		// process waits
+		for(auto& wait : sub.waits) {
+			auto& sem = *wait.semaphore;
+
+			auto finder = [&](auto& sync) { return sync.submission == &sub; };
+			auto it = std::find_if(sem.waits.begin(), sem.waits.end(), finder);
+			dlg_assert(it != sem.waits.end());
+			sem.waits.erase(it);
+
+			// for binary semaphores, we have to reset the value on wait
+			if(sem.type == VK_SEMAPHORE_TYPE_BINARY) {
+				auto hasActiveSignal = false;
+				for(auto& signal : sem.signals) {
+					if(signal.submission->active) {
+						hasActiveSignal = true;
+						break;
+					}
+				}
+
+				sem.lowerBound = 0u;
+				if(!hasActiveSignal) {
+					sem.upperBound = 0u;
+				}
+			}
+		}
+
+		// process signals
+		for(auto& signal : sub.signals) {
+			auto& sem = *signal.semaphore;
+			sem.lowerBound = std::max(sem.lowerBound, signal.value);
+
+			auto finder = [&](auto& sync) { return sync.submission == &sub; };
+			auto it = std::find_if(sem.signals.begin(), sem.signals.end(), finder);
+			dlg_assert(it != sem.signals.end());
+			sem.signals.erase(it);
 		}
 	}
 
@@ -93,13 +130,9 @@ void checkPendingSubmissionsLocked(Device& dev) {
 	}
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
-		VkQueue                                     queue,
-		uint32_t                                    submitCount,
-		const VkSubmitInfo*                         pSubmits,
-		VkFence                                     fence) {
+VkResult doSubmit(Queue& qd, span<const VkSubmitInfo2> submits,
+		VkFence fence, bool legacy) {
 	ZoneScoped;
-	auto& qd = getData<Queue>(queue);
 	auto& dev = *qd.dev;
 
 	QueueSubmitter submitter {};
@@ -119,13 +152,13 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 	auto batchPtr = std::make_unique<SubmissionBatch>();
 	auto& batch = *batchPtr;
-	batch.submissions.reserve(submitCount); // make sure it's never re-allocated
+	batch.submissions.reserve(submits.size()); // make sure it's never re-allocated
 	batch.queue = &qd;
 	batch.globalSubmitID = submitter.globalSubmitID;
 
 	submitter.dstBatch = &batch;
 
-	process(submitter, {pSubmits, submitCount});
+	process(submitter, submits);
 
 	// Make sure that every submission has a fence associated.
 	// If the application already set a fence we can simply check that
@@ -170,11 +203,25 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 
 		{
 			ZoneScopedN("dispatch.QueueSubmit");
-
 			std::lock_guard queueLock(dev.queueMutex);
-			res = dev.dispatch.QueueSubmit(qd.handle,
-				u32(submitter.submitInfos.size()), submitter.submitInfos.data(),
-				submFence);
+
+			if(legacy) {
+				auto downgraded = submitter.memScope.alloc<VkSubmitInfo>(submitter.submitInfos.size());
+				for(auto i = 0u; i < submitter.submitInfos.size(); ++i) {
+					downgraded[i] = downgrade(dev, submitter.memScope,
+						submitter.submitInfos[i]);
+				}
+
+				res = dev.dispatch.QueueSubmit(qd.handle,
+					u32(downgraded.size()),
+					downgraded.data(),
+					submFence);
+			} else {
+				res = dev.dispatch.QueueSubmit2(qd.handle,
+					u32(submitter.submitInfos.size()),
+					submitter.submitInfos.data(),
+					submFence);
+			}
 		}
 
 		if(res != VK_SUCCESS) {
@@ -192,6 +239,31 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 	// 	submitCount, pSubmits, fence);
 
 	return res;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
+		VkQueue                                     vkQueue,
+		uint32_t                                    submitCount,
+		const VkSubmitInfo*                         pSubmits,
+		VkFence                                     fence) {
+	auto& queue = getData<Queue>(vkQueue);
+
+	ThreadMemScope tms;
+	auto submits2 = tms.alloc<VkSubmitInfo2>(submitCount);
+	for(auto i = 0u; i < submitCount; ++i) {
+		submits2[i] = upgrade(*queue.dev, tms, pSubmits[i]);
+	}
+
+	return doSubmit(queue, submits2, fence, true);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(
+		VkQueue                                     vkQueue,
+		uint32_t                                    submitCount,
+		const VkSubmitInfo2*                        pSubmits,
+		VkFence                                     fence) {
+	auto& queue = getData<Queue>(vkQueue);
+	return doSubmit(queue, {pSubmits, submitCount}, fence, false);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue vkQueue) {
@@ -397,20 +469,36 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
 	return res;
 }
 
-VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(
-		VkQueue                                     queue,
-		uint32_t                                    submitCount,
-		const VkSubmitInfo2*                        pSubmits,
-		VkFence                                     fence) {
-	(void) queue;
-	(void) submitCount;
-	(void) pSubmits;
-	(void) fence;
+// Called when we know that the submission is ready for execution on the GPU.
+// Before this being called, no command can be executed.
+void activate(Submission& subm) {
+	dlg_assert(!subm.active);
+	assertOwned(subm.parent->queue->dev->mutex);
 
-	// Move the implentation of QueueSubmit here, adjust it for new infos.
-	// And then make QueueSubmit just call this function.
-	dlg_error("todo");
-	return VK_ERROR_INCOMPATIBLE_DRIVER;
+	subm.active = true;
+	for(auto& signal : subm.signals) {
+		updateUpperLocked(*signal.semaphore, signal.value);
+	}
+}
+
+bool checkActivateLocked(Submission& subm) {
+	dlg_assert(!subm.active);
+	assertOwned(subm.parent->queue->dev->mutex);
+
+	auto submActive = true;
+	for(auto& wait : subm.waits) {
+		if(wait.value > wait.semaphore->upperBound) {
+			submActive = false;
+			break;
+		}
+	}
+
+	if(!submActive) {
+		return false;
+	}
+
+	activate(subm);
+	return true;
 }
 
 } // namespace vil

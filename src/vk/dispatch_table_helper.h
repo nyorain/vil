@@ -191,6 +191,42 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     table->GetBufferDeviceAddress = (PFN_vkGetBufferDeviceAddress) gpa(device, "vkGetBufferDeviceAddress");
     table->GetBufferOpaqueCaptureAddress = (PFN_vkGetBufferOpaqueCaptureAddress) gpa(device, "vkGetBufferOpaqueCaptureAddress");
     table->GetDeviceMemoryOpaqueCaptureAddress = (PFN_vkGetDeviceMemoryOpaqueCaptureAddress) gpa(device, "vkGetDeviceMemoryOpaqueCaptureAddress");
+    table->CreatePrivateDataSlot = (PFN_vkCreatePrivateDataSlot) gpa(device, "vkCreatePrivateDataSlot");
+    table->DestroyPrivateDataSlot = (PFN_vkDestroyPrivateDataSlot) gpa(device, "vkDestroyPrivateDataSlot");
+    table->SetPrivateData = (PFN_vkSetPrivateData) gpa(device, "vkSetPrivateData");
+    table->GetPrivateData = (PFN_vkGetPrivateData) gpa(device, "vkGetPrivateData");
+    table->CmdSetEvent2 = (PFN_vkCmdSetEvent2) gpa(device, "vkCmdSetEvent2");
+    table->CmdResetEvent2 = (PFN_vkCmdResetEvent2) gpa(device, "vkCmdResetEvent2");
+    table->CmdWaitEvents2 = (PFN_vkCmdWaitEvents2) gpa(device, "vkCmdWaitEvents2");
+    table->CmdPipelineBarrier2 = (PFN_vkCmdPipelineBarrier2) gpa(device, "vkCmdPipelineBarrier2");
+    table->CmdWriteTimestamp2 = (PFN_vkCmdWriteTimestamp2) gpa(device, "vkCmdWriteTimestamp2");
+    table->QueueSubmit2 = (PFN_vkQueueSubmit2) gpa(device, "vkQueueSubmit2");
+    table->CmdCopyBuffer2 = (PFN_vkCmdCopyBuffer2) gpa(device, "vkCmdCopyBuffer2");
+    table->CmdCopyImage2 = (PFN_vkCmdCopyImage2) gpa(device, "vkCmdCopyImage2");
+    table->CmdCopyBufferToImage2 = (PFN_vkCmdCopyBufferToImage2) gpa(device, "vkCmdCopyBufferToImage2");
+    table->CmdCopyImageToBuffer2 = (PFN_vkCmdCopyImageToBuffer2) gpa(device, "vkCmdCopyImageToBuffer2");
+    table->CmdBlitImage2 = (PFN_vkCmdBlitImage2) gpa(device, "vkCmdBlitImage2");
+    table->CmdResolveImage2 = (PFN_vkCmdResolveImage2) gpa(device, "vkCmdResolveImage2");
+    table->CmdBeginRendering = (PFN_vkCmdBeginRendering) gpa(device, "vkCmdBeginRendering");
+    table->CmdEndRendering = (PFN_vkCmdEndRendering) gpa(device, "vkCmdEndRendering");
+    table->CmdSetCullMode = (PFN_vkCmdSetCullMode) gpa(device, "vkCmdSetCullMode");
+    table->CmdSetFrontFace = (PFN_vkCmdSetFrontFace) gpa(device, "vkCmdSetFrontFace");
+    table->CmdSetPrimitiveTopology = (PFN_vkCmdSetPrimitiveTopology) gpa(device, "vkCmdSetPrimitiveTopology");
+    table->CmdSetViewportWithCount = (PFN_vkCmdSetViewportWithCount) gpa(device, "vkCmdSetViewportWithCount");
+    table->CmdSetScissorWithCount = (PFN_vkCmdSetScissorWithCount) gpa(device, "vkCmdSetScissorWithCount");
+    table->CmdBindVertexBuffers2 = (PFN_vkCmdBindVertexBuffers2) gpa(device, "vkCmdBindVertexBuffers2");
+    table->CmdSetDepthTestEnable = (PFN_vkCmdSetDepthTestEnable) gpa(device, "vkCmdSetDepthTestEnable");
+    table->CmdSetDepthWriteEnable = (PFN_vkCmdSetDepthWriteEnable) gpa(device, "vkCmdSetDepthWriteEnable");
+    table->CmdSetDepthCompareOp = (PFN_vkCmdSetDepthCompareOp) gpa(device, "vkCmdSetDepthCompareOp");
+    table->CmdSetDepthBoundsTestEnable = (PFN_vkCmdSetDepthBoundsTestEnable) gpa(device, "vkCmdSetDepthBoundsTestEnable");
+    table->CmdSetStencilTestEnable = (PFN_vkCmdSetStencilTestEnable) gpa(device, "vkCmdSetStencilTestEnable");
+    table->CmdSetStencilOp = (PFN_vkCmdSetStencilOp) gpa(device, "vkCmdSetStencilOp");
+    table->CmdSetRasterizerDiscardEnable = (PFN_vkCmdSetRasterizerDiscardEnable) gpa(device, "vkCmdSetRasterizerDiscardEnable");
+    table->CmdSetDepthBiasEnable = (PFN_vkCmdSetDepthBiasEnable) gpa(device, "vkCmdSetDepthBiasEnable");
+    table->CmdSetPrimitiveRestartEnable = (PFN_vkCmdSetPrimitiveRestartEnable) gpa(device, "vkCmdSetPrimitiveRestartEnable");
+    table->GetDeviceBufferMemoryRequirements = (PFN_vkGetDeviceBufferMemoryRequirements) gpa(device, "vkGetDeviceBufferMemoryRequirements");
+    table->GetDeviceImageMemoryRequirements = (PFN_vkGetDeviceImageMemoryRequirements) gpa(device, "vkGetDeviceImageMemoryRequirements");
+    table->GetDeviceImageSparseMemoryRequirements = (PFN_vkGetDeviceImageSparseMemoryRequirements) gpa(device, "vkGetDeviceImageSparseMemoryRequirements");
     table->CreateSwapchainKHR = (PFN_vkCreateSwapchainKHR) gpa(device, "vkCreateSwapchainKHR");
     table->DestroySwapchainKHR = (PFN_vkDestroySwapchainKHR) gpa(device, "vkDestroySwapchainKHR");
     table->GetSwapchainImagesKHR = (PFN_vkGetSwapchainImagesKHR) gpa(device, "vkGetSwapchainImagesKHR");
@@ -318,6 +354,7 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     table->CmdCopyImageToBuffer2KHR = (PFN_vkCmdCopyImageToBuffer2KHR) gpa(device, "vkCmdCopyImageToBuffer2KHR");
     table->CmdBlitImage2KHR = (PFN_vkCmdBlitImage2KHR) gpa(device, "vkCmdBlitImage2KHR");
     table->CmdResolveImage2KHR = (PFN_vkCmdResolveImage2KHR) gpa(device, "vkCmdResolveImage2KHR");
+    table->CmdTraceRaysIndirect2KHR = (PFN_vkCmdTraceRaysIndirect2KHR) gpa(device, "vkCmdTraceRaysIndirect2KHR");
     table->GetDeviceBufferMemoryRequirementsKHR = (PFN_vkGetDeviceBufferMemoryRequirementsKHR) gpa(device, "vkGetDeviceBufferMemoryRequirementsKHR");
     table->GetDeviceImageMemoryRequirementsKHR = (PFN_vkGetDeviceImageMemoryRequirementsKHR) gpa(device, "vkGetDeviceImageMemoryRequirementsKHR");
     table->GetDeviceImageSparseMemoryRequirementsKHR = (PFN_vkGetDeviceImageSparseMemoryRequirementsKHR) gpa(device, "vkGetDeviceImageSparseMemoryRequirementsKHR");
@@ -446,6 +483,7 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     table->SetPrivateDataEXT = (PFN_vkSetPrivateDataEXT) gpa(device, "vkSetPrivateDataEXT");
     table->GetPrivateDataEXT = (PFN_vkGetPrivateDataEXT) gpa(device, "vkGetPrivateDataEXT");
     table->CmdSetFragmentShadingRateEnumNV = (PFN_vkCmdSetFragmentShadingRateEnumNV) gpa(device, "vkCmdSetFragmentShadingRateEnumNV");
+    // table->GetImageSubresourceLayout2EXT = (PFN_vkGetImageSubresourceLayout2EXT) gpa(device, "vkGetImageSubresourceLayout2EXT");
     table->CmdSetVertexInputEXT = (PFN_vkCmdSetVertexInputEXT) gpa(device, "vkCmdSetVertexInputEXT");
 #ifdef VK_USE_PLATFORM_FUCHSIA
     table->GetMemoryZirconHandleFUCHSIA = (PFN_vkGetMemoryZirconHandleFUCHSIA) gpa(device, "vkGetMemoryZirconHandleFUCHSIA");
@@ -478,6 +516,7 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     table->CmdSubpassShadingHUAWEI = (PFN_vkCmdSubpassShadingHUAWEI) gpa(device, "vkCmdSubpassShadingHUAWEI");
     table->CmdBindInvocationMaskHUAWEI = (PFN_vkCmdBindInvocationMaskHUAWEI) gpa(device, "vkCmdBindInvocationMaskHUAWEI");
     table->GetMemoryRemoteAddressNV = (PFN_vkGetMemoryRemoteAddressNV) gpa(device, "vkGetMemoryRemoteAddressNV");
+    // table->GetPipelinePropertiesEXT = (PFN_vkGetPipelinePropertiesEXT) gpa(device, "vkGetPipelinePropertiesEXT");
     table->CmdSetPatchControlPointsEXT = (PFN_vkCmdSetPatchControlPointsEXT) gpa(device, "vkCmdSetPatchControlPointsEXT");
     table->CmdSetRasterizerDiscardEnableEXT = (PFN_vkCmdSetRasterizerDiscardEnableEXT) gpa(device, "vkCmdSetRasterizerDiscardEnableEXT");
     table->CmdSetDepthBiasEnableEXT = (PFN_vkCmdSetDepthBiasEnableEXT) gpa(device, "vkCmdSetDepthBiasEnableEXT");
@@ -487,6 +526,8 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     table->CmdDrawMultiEXT = (PFN_vkCmdDrawMultiEXT) gpa(device, "vkCmdDrawMultiEXT");
     table->CmdDrawMultiIndexedEXT = (PFN_vkCmdDrawMultiIndexedEXT) gpa(device, "vkCmdDrawMultiIndexedEXT");
     table->SetDeviceMemoryPriorityEXT = (PFN_vkSetDeviceMemoryPriorityEXT) gpa(device, "vkSetDeviceMemoryPriorityEXT");
+    // table->GetDescriptorSetLayoutHostMappingInfoVALVE = (PFN_vkGetDescriptorSetLayoutHostMappingInfoVALVE) gpa(device, "vkGetDescriptorSetLayoutHostMappingInfoVALVE");
+    // table->GetDescriptorSetHostMappingVALVE = (PFN_vkGetDescriptorSetHostMappingVALVE) gpa(device, "vkGetDescriptorSetHostMappingVALVE");
     table->CreateAccelerationStructureKHR = (PFN_vkCreateAccelerationStructureKHR) gpa(device, "vkCreateAccelerationStructureKHR");
     table->DestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR) gpa(device, "vkDestroyAccelerationStructureKHR");
     table->CmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR) gpa(device, "vkCmdBuildAccelerationStructuresKHR");
@@ -511,9 +552,11 @@ static inline void layer_init_device_dispatch_table(VkDevice device, VkLayerDisp
     table->CmdSetRayTracingPipelineStackSizeKHR = (PFN_vkCmdSetRayTracingPipelineStackSizeKHR) gpa(device, "vkCmdSetRayTracingPipelineStackSizeKHR");
 }
 
+
 static inline void layer_init_instance_dispatch_table(VkInstance instance, VkLayerInstanceDispatchTable *table, PFN_vkGetInstanceProcAddr gpa) {
     memset(table, 0, sizeof(*table));
     // Instance function pointers
+    table->GetPhysicalDeviceProcAddr = (PFN_GetPhysicalDeviceProcAddr) gpa(instance, "vk_layerGetPhysicalDeviceProcAddr");
     table->DestroyInstance = (PFN_vkDestroyInstance) gpa(instance, "vkDestroyInstance");
     table->EnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices) gpa(instance, "vkEnumeratePhysicalDevices");
     table->GetPhysicalDeviceFeatures = (PFN_vkGetPhysicalDeviceFeatures) gpa(instance, "vkGetPhysicalDeviceFeatures");
@@ -527,205 +570,146 @@ static inline void layer_init_instance_dispatch_table(VkInstance instance, VkLay
     table->EnumerateDeviceLayerProperties = (PFN_vkEnumerateDeviceLayerProperties) gpa(instance, "vkEnumerateDeviceLayerProperties");
     table->GetPhysicalDeviceSparseImageFormatProperties = (PFN_vkGetPhysicalDeviceSparseImageFormatProperties) gpa(instance, "vkGetPhysicalDeviceSparseImageFormatProperties");
     table->EnumeratePhysicalDeviceGroups = (PFN_vkEnumeratePhysicalDeviceGroups) gpa(instance, "vkEnumeratePhysicalDeviceGroups");
-    // if (table->EnumeratePhysicalDeviceGroups == nullptr) { table->EnumeratePhysicalDeviceGroups = (PFN_vkEnumeratePhysicalDeviceGroups)StubEnumeratePhysicalDeviceGroups; }
     table->GetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2) gpa(instance, "vkGetPhysicalDeviceFeatures2");
-    // if (table->GetPhysicalDeviceFeatures2 == nullptr) { table->GetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)StubGetPhysicalDeviceFeatures2; }
     table->GetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2) gpa(instance, "vkGetPhysicalDeviceProperties2");
-    // if (table->GetPhysicalDeviceProperties2 == nullptr) { table->GetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)StubGetPhysicalDeviceProperties2; }
     table->GetPhysicalDeviceFormatProperties2 = (PFN_vkGetPhysicalDeviceFormatProperties2) gpa(instance, "vkGetPhysicalDeviceFormatProperties2");
-    // if (table->GetPhysicalDeviceFormatProperties2 == nullptr) { table->GetPhysicalDeviceFormatProperties2 = (PFN_vkGetPhysicalDeviceFormatProperties2)StubGetPhysicalDeviceFormatProperties2; }
     table->GetPhysicalDeviceImageFormatProperties2 = (PFN_vkGetPhysicalDeviceImageFormatProperties2) gpa(instance, "vkGetPhysicalDeviceImageFormatProperties2");
-    // if (table->GetPhysicalDeviceImageFormatProperties2 == nullptr) { table->GetPhysicalDeviceImageFormatProperties2 = (PFN_vkGetPhysicalDeviceImageFormatProperties2)StubGetPhysicalDeviceImageFormatProperties2; }
     table->GetPhysicalDeviceQueueFamilyProperties2 = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2) gpa(instance, "vkGetPhysicalDeviceQueueFamilyProperties2");
-    // if (table->GetPhysicalDeviceQueueFamilyProperties2 == nullptr) { table->GetPhysicalDeviceQueueFamilyProperties2 = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)StubGetPhysicalDeviceQueueFamilyProperties2; }
     table->GetPhysicalDeviceMemoryProperties2 = (PFN_vkGetPhysicalDeviceMemoryProperties2) gpa(instance, "vkGetPhysicalDeviceMemoryProperties2");
-    // if (table->GetPhysicalDeviceMemoryProperties2 == nullptr) { table->GetPhysicalDeviceMemoryProperties2 = (PFN_vkGetPhysicalDeviceMemoryProperties2)StubGetPhysicalDeviceMemoryProperties2; }
     table->GetPhysicalDeviceSparseImageFormatProperties2 = (PFN_vkGetPhysicalDeviceSparseImageFormatProperties2) gpa(instance, "vkGetPhysicalDeviceSparseImageFormatProperties2");
-    // if (table->GetPhysicalDeviceSparseImageFormatProperties2 == nullptr) { table->GetPhysicalDeviceSparseImageFormatProperties2 = (PFN_vkGetPhysicalDeviceSparseImageFormatProperties2)StubGetPhysicalDeviceSparseImageFormatProperties2; }
     table->GetPhysicalDeviceExternalBufferProperties = (PFN_vkGetPhysicalDeviceExternalBufferProperties) gpa(instance, "vkGetPhysicalDeviceExternalBufferProperties");
-    // if (table->GetPhysicalDeviceExternalBufferProperties == nullptr) { table->GetPhysicalDeviceExternalBufferProperties = (PFN_vkGetPhysicalDeviceExternalBufferProperties)StubGetPhysicalDeviceExternalBufferProperties; }
     table->GetPhysicalDeviceExternalFenceProperties = (PFN_vkGetPhysicalDeviceExternalFenceProperties) gpa(instance, "vkGetPhysicalDeviceExternalFenceProperties");
-    // if (table->GetPhysicalDeviceExternalFenceProperties == nullptr) { table->GetPhysicalDeviceExternalFenceProperties = (PFN_vkGetPhysicalDeviceExternalFenceProperties)StubGetPhysicalDeviceExternalFenceProperties; }
     table->GetPhysicalDeviceExternalSemaphoreProperties = (PFN_vkGetPhysicalDeviceExternalSemaphoreProperties) gpa(instance, "vkGetPhysicalDeviceExternalSemaphoreProperties");
-    // if (table->GetPhysicalDeviceExternalSemaphoreProperties == nullptr) { table->GetPhysicalDeviceExternalSemaphoreProperties = (PFN_vkGetPhysicalDeviceExternalSemaphoreProperties)StubGetPhysicalDeviceExternalSemaphoreProperties; }
+    table->GetPhysicalDeviceToolProperties = (PFN_vkGetPhysicalDeviceToolProperties) gpa(instance, "vkGetPhysicalDeviceToolProperties");
     table->DestroySurfaceKHR = (PFN_vkDestroySurfaceKHR) gpa(instance, "vkDestroySurfaceKHR");
-    // if (table->DestroySurfaceKHR == nullptr) { table->DestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)StubDestroySurfaceKHR; }
     table->GetPhysicalDeviceSurfaceSupportKHR = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR) gpa(instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
-    // if (table->GetPhysicalDeviceSurfaceSupportKHR == nullptr) { table->GetPhysicalDeviceSurfaceSupportKHR = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)StubGetPhysicalDeviceSurfaceSupportKHR; }
     table->GetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR) gpa(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
-    // if (table->GetPhysicalDeviceSurfaceCapabilitiesKHR == nullptr) { table->GetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)StubGetPhysicalDeviceSurfaceCapabilitiesKHR; }
     table->GetPhysicalDeviceSurfaceFormatsKHR = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR) gpa(instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
-    // if (table->GetPhysicalDeviceSurfaceFormatsKHR == nullptr) { table->GetPhysicalDeviceSurfaceFormatsKHR = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)StubGetPhysicalDeviceSurfaceFormatsKHR; }
     table->GetPhysicalDeviceSurfacePresentModesKHR = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR) gpa(instance, "vkGetPhysicalDeviceSurfacePresentModesKHR");
-    // if (table->GetPhysicalDeviceSurfacePresentModesKHR == nullptr) { table->GetPhysicalDeviceSurfacePresentModesKHR = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)StubGetPhysicalDeviceSurfacePresentModesKHR; }
     table->GetPhysicalDevicePresentRectanglesKHR = (PFN_vkGetPhysicalDevicePresentRectanglesKHR) gpa(instance, "vkGetPhysicalDevicePresentRectanglesKHR");
-    // if (table->GetPhysicalDevicePresentRectanglesKHR == nullptr) { table->GetPhysicalDevicePresentRectanglesKHR = (PFN_vkGetPhysicalDevicePresentRectanglesKHR)StubGetPhysicalDevicePresentRectanglesKHR; }
     table->GetPhysicalDeviceDisplayPropertiesKHR = (PFN_vkGetPhysicalDeviceDisplayPropertiesKHR) gpa(instance, "vkGetPhysicalDeviceDisplayPropertiesKHR");
-    // if (table->GetPhysicalDeviceDisplayPropertiesKHR == nullptr) { table->GetPhysicalDeviceDisplayPropertiesKHR = (PFN_vkGetPhysicalDeviceDisplayPropertiesKHR)StubGetPhysicalDeviceDisplayPropertiesKHR; }
     table->GetPhysicalDeviceDisplayPlanePropertiesKHR = (PFN_vkGetPhysicalDeviceDisplayPlanePropertiesKHR) gpa(instance, "vkGetPhysicalDeviceDisplayPlanePropertiesKHR");
-    // if (table->GetPhysicalDeviceDisplayPlanePropertiesKHR == nullptr) { table->GetPhysicalDeviceDisplayPlanePropertiesKHR = (PFN_vkGetPhysicalDeviceDisplayPlanePropertiesKHR)StubGetPhysicalDeviceDisplayPlanePropertiesKHR; }
     table->GetDisplayPlaneSupportedDisplaysKHR = (PFN_vkGetDisplayPlaneSupportedDisplaysKHR) gpa(instance, "vkGetDisplayPlaneSupportedDisplaysKHR");
-    // if (table->GetDisplayPlaneSupportedDisplaysKHR == nullptr) { table->GetDisplayPlaneSupportedDisplaysKHR = (PFN_vkGetDisplayPlaneSupportedDisplaysKHR)StubGetDisplayPlaneSupportedDisplaysKHR; }
     table->GetDisplayModePropertiesKHR = (PFN_vkGetDisplayModePropertiesKHR) gpa(instance, "vkGetDisplayModePropertiesKHR");
-    // if (table->GetDisplayModePropertiesKHR == nullptr) { table->GetDisplayModePropertiesKHR = (PFN_vkGetDisplayModePropertiesKHR)StubGetDisplayModePropertiesKHR; }
     table->CreateDisplayModeKHR = (PFN_vkCreateDisplayModeKHR) gpa(instance, "vkCreateDisplayModeKHR");
-    // if (table->CreateDisplayModeKHR == nullptr) { table->CreateDisplayModeKHR = (PFN_vkCreateDisplayModeKHR)StubCreateDisplayModeKHR; }
     table->GetDisplayPlaneCapabilitiesKHR = (PFN_vkGetDisplayPlaneCapabilitiesKHR) gpa(instance, "vkGetDisplayPlaneCapabilitiesKHR");
-    // if (table->GetDisplayPlaneCapabilitiesKHR == nullptr) { table->GetDisplayPlaneCapabilitiesKHR = (PFN_vkGetDisplayPlaneCapabilitiesKHR)StubGetDisplayPlaneCapabilitiesKHR; }
     table->CreateDisplayPlaneSurfaceKHR = (PFN_vkCreateDisplayPlaneSurfaceKHR) gpa(instance, "vkCreateDisplayPlaneSurfaceKHR");
-    // if (table->CreateDisplayPlaneSurfaceKHR == nullptr) { table->CreateDisplayPlaneSurfaceKHR = (PFN_vkCreateDisplayPlaneSurfaceKHR)StubCreateDisplayPlaneSurfaceKHR; }
 #ifdef VK_USE_PLATFORM_XLIB_KHR
     table->CreateXlibSurfaceKHR = (PFN_vkCreateXlibSurfaceKHR) gpa(instance, "vkCreateXlibSurfaceKHR");
-    // if (table->CreateXlibSurfaceKHR == nullptr) { table->CreateXlibSurfaceKHR = (PFN_vkCreateXlibSurfaceKHR)StubCreateXlibSurfaceKHR; }
 #endif // VK_USE_PLATFORM_XLIB_KHR
 #ifdef VK_USE_PLATFORM_XLIB_KHR
     table->GetPhysicalDeviceXlibPresentationSupportKHR = (PFN_vkGetPhysicalDeviceXlibPresentationSupportKHR) gpa(instance, "vkGetPhysicalDeviceXlibPresentationSupportKHR");
-    // if (table->GetPhysicalDeviceXlibPresentationSupportKHR == nullptr) { table->GetPhysicalDeviceXlibPresentationSupportKHR = (PFN_vkGetPhysicalDeviceXlibPresentationSupportKHR)StubGetPhysicalDeviceXlibPresentationSupportKHR; }
 #endif // VK_USE_PLATFORM_XLIB_KHR
 #ifdef VK_USE_PLATFORM_XCB_KHR
     table->CreateXcbSurfaceKHR = (PFN_vkCreateXcbSurfaceKHR) gpa(instance, "vkCreateXcbSurfaceKHR");
-    // if (table->CreateXcbSurfaceKHR == nullptr) { table->CreateXcbSurfaceKHR = (PFN_vkCreateXcbSurfaceKHR)StubCreateXcbSurfaceKHR; }
 #endif // VK_USE_PLATFORM_XCB_KHR
 #ifdef VK_USE_PLATFORM_XCB_KHR
     table->GetPhysicalDeviceXcbPresentationSupportKHR = (PFN_vkGetPhysicalDeviceXcbPresentationSupportKHR) gpa(instance, "vkGetPhysicalDeviceXcbPresentationSupportKHR");
-    // if (table->GetPhysicalDeviceXcbPresentationSupportKHR == nullptr) { table->GetPhysicalDeviceXcbPresentationSupportKHR = (PFN_vkGetPhysicalDeviceXcbPresentationSupportKHR)StubGetPhysicalDeviceXcbPresentationSupportKHR; }
 #endif // VK_USE_PLATFORM_XCB_KHR
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
     table->CreateWaylandSurfaceKHR = (PFN_vkCreateWaylandSurfaceKHR) gpa(instance, "vkCreateWaylandSurfaceKHR");
-    // if (table->CreateWaylandSurfaceKHR == nullptr) { table->CreateWaylandSurfaceKHR = (PFN_vkCreateWaylandSurfaceKHR)StubCreateWaylandSurfaceKHR; }
 #endif // VK_USE_PLATFORM_WAYLAND_KHR
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
     table->GetPhysicalDeviceWaylandPresentationSupportKHR = (PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR) gpa(instance, "vkGetPhysicalDeviceWaylandPresentationSupportKHR");
-    // if (table->GetPhysicalDeviceWaylandPresentationSupportKHR == nullptr) { table->GetPhysicalDeviceWaylandPresentationSupportKHR = (PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR)StubGetPhysicalDeviceWaylandPresentationSupportKHR; }
 #endif // VK_USE_PLATFORM_WAYLAND_KHR
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
     table->CreateAndroidSurfaceKHR = (PFN_vkCreateAndroidSurfaceKHR) gpa(instance, "vkCreateAndroidSurfaceKHR");
-    // if (table->CreateAndroidSurfaceKHR == nullptr) { table->CreateAndroidSurfaceKHR = (PFN_vkCreateAndroidSurfaceKHR)StubCreateAndroidSurfaceKHR; }
 #endif // VK_USE_PLATFORM_ANDROID_KHR
 #ifdef VK_USE_PLATFORM_WIN32_KHR
     table->CreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR) gpa(instance, "vkCreateWin32SurfaceKHR");
-    // if (table->CreateWin32SurfaceKHR == nullptr) { table->CreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)StubCreateWin32SurfaceKHR; }
 #endif // VK_USE_PLATFORM_WIN32_KHR
 #ifdef VK_USE_PLATFORM_WIN32_KHR
     table->GetPhysicalDeviceWin32PresentationSupportKHR = (PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR) gpa(instance, "vkGetPhysicalDeviceWin32PresentationSupportKHR");
-    // if (table->GetPhysicalDeviceWin32PresentationSupportKHR == nullptr) { table->GetPhysicalDeviceWin32PresentationSupportKHR = (PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR)StubGetPhysicalDeviceWin32PresentationSupportKHR; }
 #endif // VK_USE_PLATFORM_WIN32_KHR
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    table->GetPhysicalDeviceVideoCapabilitiesKHR = (PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR) gpa(instance, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    table->GetPhysicalDeviceVideoFormatPropertiesKHR = (PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR) gpa(instance, "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
+#endif // VK_ENABLE_BETA_EXTENSIONS
     table->GetPhysicalDeviceFeatures2KHR = (PFN_vkGetPhysicalDeviceFeatures2KHR) gpa(instance, "vkGetPhysicalDeviceFeatures2KHR");
-    // if (table->GetPhysicalDeviceFeatures2KHR == nullptr) { table->GetPhysicalDeviceFeatures2KHR = (PFN_vkGetPhysicalDeviceFeatures2KHR)StubGetPhysicalDeviceFeatures2KHR; }
     table->GetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR) gpa(instance, "vkGetPhysicalDeviceProperties2KHR");
-    // if (table->GetPhysicalDeviceProperties2KHR == nullptr) { table->GetPhysicalDeviceProperties2KHR = (PFN_vkGetPhysicalDeviceProperties2KHR)StubGetPhysicalDeviceProperties2KHR; }
     table->GetPhysicalDeviceFormatProperties2KHR = (PFN_vkGetPhysicalDeviceFormatProperties2KHR) gpa(instance, "vkGetPhysicalDeviceFormatProperties2KHR");
-    // if (table->GetPhysicalDeviceFormatProperties2KHR == nullptr) { table->GetPhysicalDeviceFormatProperties2KHR = (PFN_vkGetPhysicalDeviceFormatProperties2KHR)StubGetPhysicalDeviceFormatProperties2KHR; }
     table->GetPhysicalDeviceImageFormatProperties2KHR = (PFN_vkGetPhysicalDeviceImageFormatProperties2KHR) gpa(instance, "vkGetPhysicalDeviceImageFormatProperties2KHR");
-    // if (table->GetPhysicalDeviceImageFormatProperties2KHR == nullptr) { table->GetPhysicalDeviceImageFormatProperties2KHR = (PFN_vkGetPhysicalDeviceImageFormatProperties2KHR)StubGetPhysicalDeviceImageFormatProperties2KHR; }
     table->GetPhysicalDeviceQueueFamilyProperties2KHR = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR) gpa(instance, "vkGetPhysicalDeviceQueueFamilyProperties2KHR");
-    // if (table->GetPhysicalDeviceQueueFamilyProperties2KHR == nullptr) { table->GetPhysicalDeviceQueueFamilyProperties2KHR = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR)StubGetPhysicalDeviceQueueFamilyProperties2KHR; }
     table->GetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR) gpa(instance, "vkGetPhysicalDeviceMemoryProperties2KHR");
-    // if (table->GetPhysicalDeviceMemoryProperties2KHR == nullptr) { table->GetPhysicalDeviceMemoryProperties2KHR = (PFN_vkGetPhysicalDeviceMemoryProperties2KHR)StubGetPhysicalDeviceMemoryProperties2KHR; }
     table->GetPhysicalDeviceSparseImageFormatProperties2KHR = (PFN_vkGetPhysicalDeviceSparseImageFormatProperties2KHR) gpa(instance, "vkGetPhysicalDeviceSparseImageFormatProperties2KHR");
-    // if (table->GetPhysicalDeviceSparseImageFormatProperties2KHR == nullptr) { table->GetPhysicalDeviceSparseImageFormatProperties2KHR = (PFN_vkGetPhysicalDeviceSparseImageFormatProperties2KHR)StubGetPhysicalDeviceSparseImageFormatProperties2KHR; }
     table->EnumeratePhysicalDeviceGroupsKHR = (PFN_vkEnumeratePhysicalDeviceGroupsKHR) gpa(instance, "vkEnumeratePhysicalDeviceGroupsKHR");
-    // if (table->EnumeratePhysicalDeviceGroupsKHR == nullptr) { table->EnumeratePhysicalDeviceGroupsKHR = (PFN_vkEnumeratePhysicalDeviceGroupsKHR)StubEnumeratePhysicalDeviceGroupsKHR; }
     table->GetPhysicalDeviceExternalBufferPropertiesKHR = (PFN_vkGetPhysicalDeviceExternalBufferPropertiesKHR) gpa(instance, "vkGetPhysicalDeviceExternalBufferPropertiesKHR");
-    // if (table->GetPhysicalDeviceExternalBufferPropertiesKHR == nullptr) { table->GetPhysicalDeviceExternalBufferPropertiesKHR = (PFN_vkGetPhysicalDeviceExternalBufferPropertiesKHR)StubGetPhysicalDeviceExternalBufferPropertiesKHR; }
     table->GetPhysicalDeviceExternalSemaphorePropertiesKHR = (PFN_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR) gpa(instance, "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR");
-    // if (table->GetPhysicalDeviceExternalSemaphorePropertiesKHR == nullptr) { table->GetPhysicalDeviceExternalSemaphorePropertiesKHR = (PFN_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR)StubGetPhysicalDeviceExternalSemaphorePropertiesKHR; }
     table->GetPhysicalDeviceExternalFencePropertiesKHR = (PFN_vkGetPhysicalDeviceExternalFencePropertiesKHR) gpa(instance, "vkGetPhysicalDeviceExternalFencePropertiesKHR");
-    // if (table->GetPhysicalDeviceExternalFencePropertiesKHR == nullptr) { table->GetPhysicalDeviceExternalFencePropertiesKHR = (PFN_vkGetPhysicalDeviceExternalFencePropertiesKHR)StubGetPhysicalDeviceExternalFencePropertiesKHR; }
     table->EnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR = (PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR) gpa(instance, "vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR");
-    // if (table->EnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR == nullptr) { table->EnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR = (PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR)StubEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR; }
     table->GetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR = (PFN_vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR) gpa(instance, "vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR");
-    // if (table->GetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR == nullptr) { table->GetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR = (PFN_vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR)StubGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR; }
     table->GetPhysicalDeviceSurfaceCapabilities2KHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR) gpa(instance, "vkGetPhysicalDeviceSurfaceCapabilities2KHR");
-    // if (table->GetPhysicalDeviceSurfaceCapabilities2KHR == nullptr) { table->GetPhysicalDeviceSurfaceCapabilities2KHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR)StubGetPhysicalDeviceSurfaceCapabilities2KHR; }
     table->GetPhysicalDeviceSurfaceFormats2KHR = (PFN_vkGetPhysicalDeviceSurfaceFormats2KHR) gpa(instance, "vkGetPhysicalDeviceSurfaceFormats2KHR");
-    // if (table->GetPhysicalDeviceSurfaceFormats2KHR == nullptr) { table->GetPhysicalDeviceSurfaceFormats2KHR = (PFN_vkGetPhysicalDeviceSurfaceFormats2KHR)StubGetPhysicalDeviceSurfaceFormats2KHR; }
     table->GetPhysicalDeviceDisplayProperties2KHR = (PFN_vkGetPhysicalDeviceDisplayProperties2KHR) gpa(instance, "vkGetPhysicalDeviceDisplayProperties2KHR");
-    // if (table->GetPhysicalDeviceDisplayProperties2KHR == nullptr) { table->GetPhysicalDeviceDisplayProperties2KHR = (PFN_vkGetPhysicalDeviceDisplayProperties2KHR)StubGetPhysicalDeviceDisplayProperties2KHR; }
     table->GetPhysicalDeviceDisplayPlaneProperties2KHR = (PFN_vkGetPhysicalDeviceDisplayPlaneProperties2KHR) gpa(instance, "vkGetPhysicalDeviceDisplayPlaneProperties2KHR");
-    // if (table->GetPhysicalDeviceDisplayPlaneProperties2KHR == nullptr) { table->GetPhysicalDeviceDisplayPlaneProperties2KHR = (PFN_vkGetPhysicalDeviceDisplayPlaneProperties2KHR)StubGetPhysicalDeviceDisplayPlaneProperties2KHR; }
     table->GetDisplayModeProperties2KHR = (PFN_vkGetDisplayModeProperties2KHR) gpa(instance, "vkGetDisplayModeProperties2KHR");
-    // if (table->GetDisplayModeProperties2KHR == nullptr) { table->GetDisplayModeProperties2KHR = (PFN_vkGetDisplayModeProperties2KHR)StubGetDisplayModeProperties2KHR; }
     table->GetDisplayPlaneCapabilities2KHR = (PFN_vkGetDisplayPlaneCapabilities2KHR) gpa(instance, "vkGetDisplayPlaneCapabilities2KHR");
-    // if (table->GetDisplayPlaneCapabilities2KHR == nullptr) { table->GetDisplayPlaneCapabilities2KHR = (PFN_vkGetDisplayPlaneCapabilities2KHR)StubGetDisplayPlaneCapabilities2KHR; }
     table->GetPhysicalDeviceFragmentShadingRatesKHR = (PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR) gpa(instance, "vkGetPhysicalDeviceFragmentShadingRatesKHR");
-    // if (table->GetPhysicalDeviceFragmentShadingRatesKHR == nullptr) { table->GetPhysicalDeviceFragmentShadingRatesKHR = (PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR)StubGetPhysicalDeviceFragmentShadingRatesKHR; }
     table->CreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT) gpa(instance, "vkCreateDebugReportCallbackEXT");
-    // if (table->CreateDebugReportCallbackEXT == nullptr) { table->CreateDebugReportCallbackEXT = (PFN_vkCreateDebugReportCallbackEXT)StubCreateDebugReportCallbackEXT; }
     table->DestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT) gpa(instance, "vkDestroyDebugReportCallbackEXT");
-    // if (table->DestroyDebugReportCallbackEXT == nullptr) { table->DestroyDebugReportCallbackEXT = (PFN_vkDestroyDebugReportCallbackEXT)StubDestroyDebugReportCallbackEXT; }
     table->DebugReportMessageEXT = (PFN_vkDebugReportMessageEXT) gpa(instance, "vkDebugReportMessageEXT");
-    // if (table->DebugReportMessageEXT == nullptr) { table->DebugReportMessageEXT = (PFN_vkDebugReportMessageEXT)StubDebugReportMessageEXT; }
 #ifdef VK_USE_PLATFORM_GGP
     table->CreateStreamDescriptorSurfaceGGP = (PFN_vkCreateStreamDescriptorSurfaceGGP) gpa(instance, "vkCreateStreamDescriptorSurfaceGGP");
-    // if (table->CreateStreamDescriptorSurfaceGGP == nullptr) { table->CreateStreamDescriptorSurfaceGGP = (PFN_vkCreateStreamDescriptorSurfaceGGP)StubCreateStreamDescriptorSurfaceGGP; }
 #endif // VK_USE_PLATFORM_GGP
     table->GetPhysicalDeviceExternalImageFormatPropertiesNV = (PFN_vkGetPhysicalDeviceExternalImageFormatPropertiesNV) gpa(instance, "vkGetPhysicalDeviceExternalImageFormatPropertiesNV");
-    // if (table->GetPhysicalDeviceExternalImageFormatPropertiesNV == nullptr) { table->GetPhysicalDeviceExternalImageFormatPropertiesNV = (PFN_vkGetPhysicalDeviceExternalImageFormatPropertiesNV)StubGetPhysicalDeviceExternalImageFormatPropertiesNV; }
 #ifdef VK_USE_PLATFORM_VI_NN
     table->CreateViSurfaceNN = (PFN_vkCreateViSurfaceNN) gpa(instance, "vkCreateViSurfaceNN");
-    // if (table->CreateViSurfaceNN == nullptr) { table->CreateViSurfaceNN = (PFN_vkCreateViSurfaceNN)StubCreateViSurfaceNN; }
 #endif // VK_USE_PLATFORM_VI_NN
     table->ReleaseDisplayEXT = (PFN_vkReleaseDisplayEXT) gpa(instance, "vkReleaseDisplayEXT");
-    // if (table->ReleaseDisplayEXT == nullptr) { table->ReleaseDisplayEXT = (PFN_vkReleaseDisplayEXT)StubReleaseDisplayEXT; }
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
     table->AcquireXlibDisplayEXT = (PFN_vkAcquireXlibDisplayEXT) gpa(instance, "vkAcquireXlibDisplayEXT");
-    // if (table->AcquireXlibDisplayEXT == nullptr) { table->AcquireXlibDisplayEXT = (PFN_vkAcquireXlibDisplayEXT)StubAcquireXlibDisplayEXT; }
 #endif // VK_USE_PLATFORM_XLIB_XRANDR_EXT
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
     table->GetRandROutputDisplayEXT = (PFN_vkGetRandROutputDisplayEXT) gpa(instance, "vkGetRandROutputDisplayEXT");
-    // if (table->GetRandROutputDisplayEXT == nullptr) { table->GetRandROutputDisplayEXT = (PFN_vkGetRandROutputDisplayEXT)StubGetRandROutputDisplayEXT; }
 #endif // VK_USE_PLATFORM_XLIB_XRANDR_EXT
     table->GetPhysicalDeviceSurfaceCapabilities2EXT = (PFN_vkGetPhysicalDeviceSurfaceCapabilities2EXT) gpa(instance, "vkGetPhysicalDeviceSurfaceCapabilities2EXT");
-    // if (table->GetPhysicalDeviceSurfaceCapabilities2EXT == nullptr) { table->GetPhysicalDeviceSurfaceCapabilities2EXT = (PFN_vkGetPhysicalDeviceSurfaceCapabilities2EXT)StubGetPhysicalDeviceSurfaceCapabilities2EXT; }
 #ifdef VK_USE_PLATFORM_IOS_MVK
     table->CreateIOSSurfaceMVK = (PFN_vkCreateIOSSurfaceMVK) gpa(instance, "vkCreateIOSSurfaceMVK");
-    // if (table->CreateIOSSurfaceMVK == nullptr) { table->CreateIOSSurfaceMVK = (PFN_vkCreateIOSSurfaceMVK)StubCreateIOSSurfaceMVK; }
 #endif // VK_USE_PLATFORM_IOS_MVK
 #ifdef VK_USE_PLATFORM_MACOS_MVK
     table->CreateMacOSSurfaceMVK = (PFN_vkCreateMacOSSurfaceMVK) gpa(instance, "vkCreateMacOSSurfaceMVK");
-    // if (table->CreateMacOSSurfaceMVK == nullptr) { table->CreateMacOSSurfaceMVK = (PFN_vkCreateMacOSSurfaceMVK)StubCreateMacOSSurfaceMVK; }
 #endif // VK_USE_PLATFORM_MACOS_MVK
     table->CreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT) gpa(instance, "vkCreateDebugUtilsMessengerEXT");
-    // if (table->CreateDebugUtilsMessengerEXT == nullptr) { table->CreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)StubCreateDebugUtilsMessengerEXT; }
     table->DestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT) gpa(instance, "vkDestroyDebugUtilsMessengerEXT");
-    // if (table->DestroyDebugUtilsMessengerEXT == nullptr) { table->DestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)StubDestroyDebugUtilsMessengerEXT; }
     table->SubmitDebugUtilsMessageEXT = (PFN_vkSubmitDebugUtilsMessageEXT) gpa(instance, "vkSubmitDebugUtilsMessageEXT");
-    // if (table->SubmitDebugUtilsMessageEXT == nullptr) { table->SubmitDebugUtilsMessageEXT = (PFN_vkSubmitDebugUtilsMessageEXT)StubSubmitDebugUtilsMessageEXT; }
     table->GetPhysicalDeviceMultisamplePropertiesEXT = (PFN_vkGetPhysicalDeviceMultisamplePropertiesEXT) gpa(instance, "vkGetPhysicalDeviceMultisamplePropertiesEXT");
-    // if (table->GetPhysicalDeviceMultisamplePropertiesEXT == nullptr) { table->GetPhysicalDeviceMultisamplePropertiesEXT = (PFN_vkGetPhysicalDeviceMultisamplePropertiesEXT)StubGetPhysicalDeviceMultisamplePropertiesEXT; }
     table->GetPhysicalDeviceCalibrateableTimeDomainsEXT = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT) gpa(instance, "vkGetPhysicalDeviceCalibrateableTimeDomainsEXT");
-    // if (table->GetPhysicalDeviceCalibrateableTimeDomainsEXT == nullptr) { table->GetPhysicalDeviceCalibrateableTimeDomainsEXT = (PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT)StubGetPhysicalDeviceCalibrateableTimeDomainsEXT; }
 #ifdef VK_USE_PLATFORM_FUCHSIA
     table->CreateImagePipeSurfaceFUCHSIA = (PFN_vkCreateImagePipeSurfaceFUCHSIA) gpa(instance, "vkCreateImagePipeSurfaceFUCHSIA");
-    // if (table->CreateImagePipeSurfaceFUCHSIA == nullptr) { table->CreateImagePipeSurfaceFUCHSIA = (PFN_vkCreateImagePipeSurfaceFUCHSIA)StubCreateImagePipeSurfaceFUCHSIA; }
 #endif // VK_USE_PLATFORM_FUCHSIA
 #ifdef VK_USE_PLATFORM_METAL_EXT
     table->CreateMetalSurfaceEXT = (PFN_vkCreateMetalSurfaceEXT) gpa(instance, "vkCreateMetalSurfaceEXT");
-    // if (table->CreateMetalSurfaceEXT == nullptr) { table->CreateMetalSurfaceEXT = (PFN_vkCreateMetalSurfaceEXT)StubCreateMetalSurfaceEXT; }
 #endif // VK_USE_PLATFORM_METAL_EXT
     table->GetPhysicalDeviceToolPropertiesEXT = (PFN_vkGetPhysicalDeviceToolPropertiesEXT) gpa(instance, "vkGetPhysicalDeviceToolPropertiesEXT");
-    // if (table->GetPhysicalDeviceToolPropertiesEXT == nullptr) { table->GetPhysicalDeviceToolPropertiesEXT = (PFN_vkGetPhysicalDeviceToolPropertiesEXT)StubGetPhysicalDeviceToolPropertiesEXT; }
     table->GetPhysicalDeviceCooperativeMatrixPropertiesNV = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesNV) gpa(instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesNV");
-    // if (table->GetPhysicalDeviceCooperativeMatrixPropertiesNV == nullptr) { table->GetPhysicalDeviceCooperativeMatrixPropertiesNV = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesNV)StubGetPhysicalDeviceCooperativeMatrixPropertiesNV; }
     table->GetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV = (PFN_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV) gpa(instance, "vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV");
-    // if (table->GetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV == nullptr) { table->GetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV = (PFN_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV)StubGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV; }
 #ifdef VK_USE_PLATFORM_WIN32_KHR
     table->GetPhysicalDeviceSurfacePresentModes2EXT = (PFN_vkGetPhysicalDeviceSurfacePresentModes2EXT) gpa(instance, "vkGetPhysicalDeviceSurfacePresentModes2EXT");
-    // if (table->GetPhysicalDeviceSurfacePresentModes2EXT == nullptr) { table->GetPhysicalDeviceSurfacePresentModes2EXT = (PFN_vkGetPhysicalDeviceSurfacePresentModes2EXT)StubGetPhysicalDeviceSurfacePresentModes2EXT; }
 #endif // VK_USE_PLATFORM_WIN32_KHR
     table->CreateHeadlessSurfaceEXT = (PFN_vkCreateHeadlessSurfaceEXT) gpa(instance, "vkCreateHeadlessSurfaceEXT");
-    // if (table->CreateHeadlessSurfaceEXT == nullptr) { table->CreateHeadlessSurfaceEXT = (PFN_vkCreateHeadlessSurfaceEXT)StubCreateHeadlessSurfaceEXT; }
+    table->AcquireDrmDisplayEXT = (PFN_vkAcquireDrmDisplayEXT) gpa(instance, "vkAcquireDrmDisplayEXT");
+    table->GetDrmDisplayEXT = (PFN_vkGetDrmDisplayEXT) gpa(instance, "vkGetDrmDisplayEXT");
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    table->AcquireWinrtDisplayNV = (PFN_vkAcquireWinrtDisplayNV) gpa(instance, "vkAcquireWinrtDisplayNV");
+#endif // VK_USE_PLATFORM_WIN32_KHR
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    table->GetWinrtDisplayNV = (PFN_vkGetWinrtDisplayNV) gpa(instance, "vkGetWinrtDisplayNV");
+#endif // VK_USE_PLATFORM_WIN32_KHR
 #ifdef VK_USE_PLATFORM_DIRECTFB_EXT
     table->CreateDirectFBSurfaceEXT = (PFN_vkCreateDirectFBSurfaceEXT) gpa(instance, "vkCreateDirectFBSurfaceEXT");
-    // if (table->CreateDirectFBSurfaceEXT == nullptr) { table->CreateDirectFBSurfaceEXT = (PFN_vkCreateDirectFBSurfaceEXT)StubCreateDirectFBSurfaceEXT; }
 #endif // VK_USE_PLATFORM_DIRECTFB_EXT
 #ifdef VK_USE_PLATFORM_DIRECTFB_EXT
     table->GetPhysicalDeviceDirectFBPresentationSupportEXT = (PFN_vkGetPhysicalDeviceDirectFBPresentationSupportEXT) gpa(instance, "vkGetPhysicalDeviceDirectFBPresentationSupportEXT");
-    // if (table->GetPhysicalDeviceDirectFBPresentationSupportEXT == nullptr) { table->GetPhysicalDeviceDirectFBPresentationSupportEXT = (PFN_vkGetPhysicalDeviceDirectFBPresentationSupportEXT)StubGetPhysicalDeviceDirectFBPresentationSupportEXT; }
 #endif // VK_USE_PLATFORM_DIRECTFB_EXT
+#ifdef VK_USE_PLATFORM_SCREEN_QNX
+    table->CreateScreenSurfaceQNX = (PFN_vkCreateScreenSurfaceQNX) gpa(instance, "vkCreateScreenSurfaceQNX");
+#endif // VK_USE_PLATFORM_SCREEN_QNX
+#ifdef VK_USE_PLATFORM_SCREEN_QNX
+    table->GetPhysicalDeviceScreenPresentationSupportQNX = (PFN_vkGetPhysicalDeviceScreenPresentationSupportQNX) gpa(instance, "vkGetPhysicalDeviceScreenPresentationSupportQNX");
+#endif // VK_USE_PLATFORM_SCREEN_QNX
 }
-
 
 #ifdef __GNUC__
     #pragma GCC diagnostic pop

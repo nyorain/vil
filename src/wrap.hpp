@@ -10,6 +10,8 @@ namespace vil {
 static constexpr auto enableHandleWrapping = true;
 template<typename H> struct HandleDesc;
 
+using CommandBufferPtr = IntrusiveWrappedPtr<CommandBuffer>;
+
 #define DefHandleDesc(VkHandle, OurHandle, devMap, isDispatchable, wrapDefault) \
 	template<> struct HandleDesc<VkHandle> { \
 		using type = OurHandle; \
@@ -215,14 +217,6 @@ template<typename H> auto mustMoveUnset(VkDevice vkDev, H& handle) {
 		auto& dev = getDevice(vkDev);
 		return mustMoveUnset(dev, handle);
 	}
-}
-
-inline CommandBuffer& getCommandBuffer(VkCommandBuffer handle) {
-	if(HandleDesc<VkCommandBuffer>::wrap) {
-		return unwrap(handle);
-	}
-
-	return getData<CommandBuffer>(handle);
 }
 
 template<typename T, std::size_t maxSize>

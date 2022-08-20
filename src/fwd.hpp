@@ -84,6 +84,7 @@ struct DescriptorCopyOp;
 struct DescriptorCopyOp;
 struct CopiedImage;
 struct FrameSubmission;
+struct QueueSubmitter;
 
 struct ViewableImageCopy;
 
@@ -125,6 +126,12 @@ struct AccelInstances;
 struct DrawGuiImage;
 
 struct RecordBuilder;
+
+struct CommandRecordMatch;
+struct FrameSubmissionMatch;
+struct FrameMatch;
+struct FindResult;
+struct CommandSectionMatch;
 
 enum class AttachmentType : u8;
 

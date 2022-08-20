@@ -105,11 +105,11 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	ImGui::Text("%d", ci.arrayLayers);
 	ImGui::Text("%d", ci.mipLevels);
 	ImGui::Text("%s", vk::name(ci.format));
-	ImGui::Text("%s", vk::flagNames(VkImageUsageFlagBits(ci.usage)).c_str());
+	ImGui::Text("%s", vk::nameImageUsageFlags(ci.usage).c_str());
 	ImGui::Text("%s", vk::name(ci.tiling));
 	ImGui::Text("%s", vk::name(ci.samples));
 	ImGui::Text("%s", vk::name(ci.imageType));
-	ImGui::Text("%s", vk::flagNames(VkImageCreateFlagBits(ci.flags)).c_str());
+	ImGui::Text("%s", vk::nameImageCreateFlags(ci.flags).c_str());
 
 	ImGui::Columns();
 
@@ -205,7 +205,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 
 	auto& ci = buffer.ci;
 	imGuiText("{}", ci.size);
-	imGuiText("{}", vk::flagNames(VkBufferUsageFlagBits(ci.usage)).c_str());
+	imGuiText("{}", vk::nameBufferUsageFlags(ci.usage).c_str());
 
 	ImGui::Columns();
 
@@ -380,11 +380,11 @@ void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
 			ImGui::BulletText("%s[%d]: {%s}",
 				vk::name(binding.descriptorType),
 				binding.descriptorCount,
-				vk::flagNames(VkShaderStageFlagBits(binding.stageFlags)).c_str());
+				vk::nameShaderStageFlags(binding.stageFlags).c_str());
 		} else {
 			ImGui::BulletText("%s: {%s}",
 				vk::name(binding.descriptorType),
-				vk::flagNames(VkShaderStageFlagBits(binding.stageFlags)).c_str());
+				vk::nameShaderStageFlags(binding.stageFlags).c_str());
 		}
 	}
 }
@@ -422,7 +422,7 @@ void ResourceGui::drawDesc(Draw&, GraphicsPipeline& pipe) {
 	ImGui::Text("%d", rastInfo.rasterizerDiscardEnable);
 	ImGui::Text("%d", rastInfo.depthClampEnable);
 
-	ImGui::Text("%s", vk::flagNames(VkCullModeFlagBits(rastInfo.cullMode)).c_str());
+	ImGui::Text("%s", vk::nameCullModeFlags(rastInfo.cullMode).c_str());
 	ImGui::Text("%s", vk::name(rastInfo.polygonMode));
 	ImGui::Text("%s", vk::name(rastInfo.frontFace));
 
@@ -650,7 +650,7 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 		for(auto& pcr : pipeLayout.pushConstants) {
 			ImGui::Bullet();
 			ImGui::Text("Offset %d, Size %d, in %s", pcr.offset, pcr.size,
-				vk::flagNames(VkShaderStageFlagBits(pcr.stageFlags)).c_str());
+				vk::nameShaderStageFlags(pcr.stageFlags).c_str());
 		}
 	}
 
@@ -663,7 +663,7 @@ void ResourceGui::drawDesc(Draw&, PipelineLayout& pipeLayout) {
 void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
 	const auto& qprops = cp.dev->queueFamilies[cp.queueFamily].props;
 	imGuiText("Queue Family: {} ({})", cp.queueFamily,
-		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
+		vk::nameQueueFlags(qprops.queueFlags));
 
 	for(auto& cb : cp.cbs) {
 		refButtonExpect(*gui_, cb);
@@ -763,7 +763,7 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 	// and allow via button to switch to cb viewer?
 	if(cb.lastRecordLocked()) {
 		if(ImGui::Button("View Last Recording")) {
-			gui_->cbGui().select(cb.lastRecordPtrLocked(), cb);
+			gui_->cbGui().select(cb.lastRecordPtrLocked(), getCommandBufferPtr(cb));
 			gui_->activateTab(Gui::Tab::commandBuffer);
 		}
 	} else {
@@ -800,9 +800,9 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 	ImGui::Text("%s", vk::name(ci.viewType));
 	imguiPrintRange(ci.subresourceRange.baseArrayLayer, ci.subresourceRange.layerCount);
 	imguiPrintRange(ci.subresourceRange.baseMipLevel, ci.subresourceRange.levelCount);
-	ImGui::Text("%s", vk::flagNames(VkImageAspectFlagBits(ci.subresourceRange.aspectMask)).c_str());
+	ImGui::Text("%s", vk::nameImageAspectFlags(ci.subresourceRange.aspectMask).c_str());
 	ImGui::Text("%s", vk::name(ci.format));
-	ImGui::Text("%s", vk::flagNames(VkImageViewCreateFlagBits(ci.flags)).c_str());
+	ImGui::Text("%s", vk::nameImageViewCreateFlags(ci.flags).c_str());
 
 	ImGui::Columns();
 
@@ -857,7 +857,7 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 				{"Samples", "{}", vk::name(att.samples)},
 				{"Initial Layout", "{}", vk::name(att.initialLayout)},
 				{"Final Layout", "{}", vk::name(att.finalLayout)},
-				{"Flags", "{}", vk::flagNames(VkAttachmentDescriptionFlagBits(att.flags))},
+				{"Flags", "{}", vk::nameAttachmentDescriptionFlags(att.flags)},
 				{"Load Op", "{}", vk::name(att.loadOp)},
 				{"Store Op", "{}", vk::name(att.storeOp)},
 				{"Stencil Load Op", "{}", vk::name(att.stencilLoadOp)},
@@ -874,7 +874,7 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 		if(ImGui::TreeNode(&subp, "Subpass %d", i)) {
 			asColumns2({{
 				{"Pipeline Bind Point", "{}", vk::name(subp.pipelineBindPoint)},
-				{"Flags", "{}", vk::flagNames(VkSubpassDescriptionFlagBits(subp.flags)).c_str()},
+				{"Flags", "{}", vk::nameSubpassDescriptionFlags(subp.flags)},
 			}});
 
 			ImGui::Separator();
@@ -926,12 +926,12 @@ void ResourceGui::drawDesc(Draw&, RenderPass& rp) {
 		if(ImGui::TreeNode(&dep, "Dependency %d", i)) {
 			asColumns2({{
 				{"srcSubpass", formatSubpass(dep.srcSubpass)},
-				{"srcAccessMask", vk::flagNames(VkAccessFlagBits(dep.srcAccessMask))},
-				{"srcStageMask", vk::flagNames(VkPipelineStageFlagBits(dep.srcStageMask))},
+				{"srcAccessMask", vk::nameAccessFlags(dep.srcAccessMask)},
+				{"srcStageMask", vk::namePipelineStageFlags(dep.srcStageMask)},
 				{"dstSubpass", formatSubpass(dep.dstSubpass)},
-				{"dstAccessMask", vk::flagNames(VkAccessFlagBits(dep.dstAccessMask))},
-				{"dstStageMask", vk::flagNames(VkPipelineStageFlagBits(dep.dstStageMask))},
-				{"dependencyFlags", vk::flagNames(VkDependencyFlagBits(dep.dependencyFlags))},
+				{"dstAccessMask", vk::nameAccessFlags(dep.dstAccessMask)},
+				{"dstStageMask", vk::namePipelineStageFlags(dep.dstStageMask)},
+				{"dependencyFlags", vk::nameDependencyFlags(dep.dependencyFlags)},
 				{"viewOffset", dep.viewOffset},
 			}});
 
@@ -974,14 +974,14 @@ void ResourceGui::drawDesc(Draw&, QueryPool& pool) {
 	imGuiText("Query type: {}", vk::name(pool.ci.queryType));
 	imGuiText("Query count: {}", pool.ci.queryCount);
 	imGuiText("Pipeline statistics: {}",
-		vk::flagNames(VkQueryPipelineStatisticFlagBits(pool.ci.pipelineStatistics)));
+		vk::nameQueryPipelineStatisticFlags(pool.ci.pipelineStatistics));
 }
 
 void ResourceGui::drawDesc(Draw&, Queue& queue) {
 	const auto& qprops = queue.dev->queueFamilies[queue.family].props;
 
 	imGuiText("Queue Family: {} ({})", queue.family,
-		vk::flagNames(VkQueueFlagBits(qprops.queueFlags)));
+		vk::nameQueueFlags(qprops.queueFlags));
 	imGuiText("Priority: {}", queue.priority);
 
 	imGuiText("Submission Counter: {}", queue.submissionCounter);
@@ -997,7 +997,7 @@ void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
 		{"Present Mode", vk::name(sci.presentMode)},
 		{"Transform", vk::name(sci.preTransform)},
 		{"Alpha", vk::name(sci.compositeAlpha)},
-		{"Image Usage", vk::flagNames(VkImageUsageFlagBits(sci.imageUsage))},
+		{"Image Usage", vk::nameImageUsageFlags(sci.imageUsage)},
 		{"Array Layers", sci.imageArrayLayers},
 		{"Min Image Count", sci.minImageCount},
 		{"Clipped", sci.clipped},
@@ -1087,7 +1087,7 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 			imGuiText("tableOffset: {}", ini.bindingTableOffset);
 			imGuiText("customIndex: {}", ini.customIndex);
 			imGuiText("mask: {}{}", std::hex, u32(ini.mask));
-			imGuiText("flags: {}", vk::flagNames(VkGeometryInstanceFlagBitsKHR(ini.flags)));
+			imGuiText("flags: {}", vk::nameGeometryInstanceFlagsKHR(ini.flags));
 
 			imGuiText("transform:");
 			for(auto r = 0u; r < 3; ++r) {
@@ -1131,11 +1131,6 @@ void ResourceGui::draw(Draw& draw) {
 	auto update = firstUpdate_;
 	firstUpdate_ = false;
 
-	// TODO: in most cases we don't need this huge critical section
-	// increase refCount for gathered handles, making sure they
-	// don't get destroyed
-	std::lock_guard lock(gui_->dev().mutex);
-
 	auto filterName = vil::name(filter_);
 	// ImGui::SetNextItemWidth(150.f);
 	if(ImGui::BeginCombo("", filterName)) {
@@ -1163,6 +1158,8 @@ void ResourceGui::draw(Draw& draw) {
 
 	auto& dev = gui_->dev();
 	if(update) {
+		// lock access to destroyed_
+		std::lock_guard lock(gui_->dev().mutex);
 		handles_.clear();
 		destroyed_.clear();
 
@@ -1188,27 +1185,35 @@ void ResourceGui::draw(Draw& draw) {
 	while(clipper.Step()) {
 		for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			auto& handle = *handles_[i];
-			auto selected = (&handle == handle_);
 			auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
 				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
 
 			ImGui::PushID(&handle);
 
-			auto disabled = (destroyed_.count(&handle) > 0);
-			std::string label = disabled ? "<Destroyed>" : name(handle, false);
-			pushDisabled(disabled);
+			{
+				auto selected = (&handle == handle_);
 
-			if(selected) {
-				flags |= ImGuiTreeNodeFlags_Selected;
-			}
+				// lock access to destroyed_
+				std::lock_guard lock(gui_->dev().mutex);
+				auto disabled = (destroyed_.count(&handle) > 0);
+				std::string label = disabled ? "<Destroyed>" : name(handle, false);
 
-			if(ImGui::TreeNodeEx(label.c_str(), flags)) {
-				if(ImGui::IsItemClicked()) {
-					select(handle);
+				pushDisabled(disabled);
+
+				if(selected) {
+					flags |= ImGuiTreeNodeFlags_Selected;
 				}
+
+				if(ImGui::TreeNodeEx(label.c_str(), flags)) {
+					if(ImGui::IsItemClicked()) {
+						dlg_assert(!disabled);
+						select(handle);
+					}
+				}
+
+				popDisabled(disabled);
 			}
 
-			popDisabled(disabled);
 			ImGui::PopID();
 		}
 	}

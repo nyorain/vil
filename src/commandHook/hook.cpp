@@ -3,10 +3,13 @@
 #include <commandHook/submission.hpp>
 #include <commandHook/copy.hpp>
 #include <device.hpp>
+#include <submit.hpp>
+#include <wrap.hpp>
 #include <layer.hpp>
 #include <cb.hpp>
 #include <ds.hpp>
 #include <buffer.hpp>
+#include <image.hpp>
 #include <queue.hpp>
 #include <threadContext.hpp>
 #include <swapchain.hpp>
@@ -40,6 +43,13 @@
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
 //   barriers.
+// TODO: We don't really need hookCounter, counter_ anymore (except
+//   for asserts). Remove? might be useful in future for threading stuff tho.
+// TODO: move hooked command recording out of critical section, if possible.
+//   We have the guarantee that all handles in cb stay valid during submission
+//   and don't really access global state.
+//   Only difficulty: what if hook ops/target is changed in the meantime?
+//   Just discard the recording and abort hooking?
 
 namespace vil {
 
@@ -102,7 +112,12 @@ CommandHook::~CommandHook() {
 	dlg_assert(dev.pending.empty());
 
 	// will invalidate everything, safely
-	this->desc({}, {}, {});
+	HookUpdate update;
+	update.invalidate = true;
+	update.newOps = HookOps {};
+	update.newTarget = HookTarget {};
+	update.stillNeeded = nullptr;
+	this->updateHook(std::move(update));
 
 	for(auto& pipe : sampleImagePipes_) {
 		dev.dispatch.DestroyPipeline(dev.handle, pipe, nullptr);
@@ -304,7 +319,8 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 		auto& currDs = access(dsState.descriptorSets[setID]);
 
 		for(auto& binding : currDs.layout->bindings) {
-			if(binding.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) {
+			if(binding.flags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT ||
+					binding.flags & VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) {
 				return true;
 			}
 		}
@@ -323,45 +339,216 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 	return false;
 }
 
-VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
+void CommandHook::hook(QueueSubmitter& subm) {
+	auto& dev = *dev_;
+
+	// we put all of this in a critical section to protect against changes
+	// of target_ and ops_ and the list of hooked records.
+	// TODO: might be possible to just use internal mutex, try it.
+	// Would help performance, the hooked recording is in the critical
+	// section here as well and quite expensive.
+	std::lock_guard lock(dev.mutex);
+
+	if(target_.type == HookTargetType::none || freeze.load()) {
+		return;
+	}
+
+	// TODO: full-submission/record queries!
+	if(target_.command.empty()) {
+		return;
+	}
+
+	const CommandRecord* frameDstRecord {};
+	span<const CommandSectionMatch> frameRecMatchData {};
+	if(target_.type == HookTargetType::inFrame) {
+		if(!dev.swapchain) {
+			dlg_warn("no swapchain anymore?!");
+			return;
+		}
+
+		// get the current frame
+		std::vector<FrameSubmission> currFrame =
+			dev.swapchain->nextFrameSubmissions.batches;
+
+		// add the new submissions
+		auto& curr = currFrame.emplace_back();
+		curr.queue = subm.queue;
+		curr.submissionID = subm.globalSubmitID;
+		for(auto& sub : subm.dstBatch->submissions) {
+			for(auto& cb : sub.cbs) {
+				dlg_assertm(!cb.hook, "Hooking already hooked submission?!");
+				auto rec = cb.cb->lastRecordPtrLocked();
+				dlg_assert(rec);
+				curr.submissions.push_back(std::move(rec));
+			}
+		}
+
+		// Match current frame against hook target frame.
+		// Since we don't have the full current frame here yet and want
+		// to avoid false negatives, we trim the target frame up unto
+		// the target submission.
+		auto trimmedTargetFrame = span<FrameSubmission>(target_.frame);
+		auto off = target_.submissionID;
+		dlg_assert(off < target_.frame.size());
+		trimmedTargetFrame = trimmedTargetFrame.first(off + 1);
+
+		ThreadMemScope tms;
+		LinAllocScope localMatchMem(matchAlloc_);
+		auto frameMatch = match(tms, localMatchMem, target_.frame, currFrame);
+
+		for(auto& submMatch : frameMatch.matches) {
+			if(submMatch.a != &target_.frame[target_.submissionID]) {
+				continue;
+			}
+
+			for(auto& recMatch : submMatch.matches) {
+				if(recMatch.a == target_.record) {
+					frameDstRecord = recMatch.b;
+					frameRecMatchData = recMatch.matches;
+					break;
+				}
+
+			}
+
+			break;
+		}
+	}
+
+	// iterate through all submitted records and hook them if needed
+	for(auto [subID, sub] : enumerate(subm.dstBatch->submissions)) {
+		auto& srcSub = subm.submitInfos[subID];
+
+		span<VkCommandBufferSubmitInfo> patchedCbInfos {};
+
+		for(auto [cbID, cb] : enumerate(sub.cbs)) {
+			auto& rec = *cb.cb->lastRecordLocked();
+
+			VkCommandBuffer hooked = VK_NULL_HANDLE;
+			std::unique_ptr<CommandHookSubmission> hookData;
+
+			if(!freeze.load()) {
+				auto hookViaFind = false;
+				if(&rec == frameDstRecord) {
+					dlg_assert(target_.type == HookTargetType::inFrame);
+					hooked = hook(rec, frameRecMatchData, sub, hookData);
+				} else if(target_.type == HookTargetType::commandRecord) {
+					if(&rec == target_.record) {
+						hookViaFind = true;
+					}
+				} else if(target_.type == HookTargetType::commandBuffer) {
+					dlg_assert(rec.cb);
+					if(rec.cb == target_.cb.get()) {
+						hookViaFind = true;
+					}
+				} else if(target_.type == HookTargetType::all) {
+					hookViaFind = true;
+				}
+
+				if(hookViaFind) {
+					auto findRes = find(*rec.commands, target_.command,
+						target_.descriptors);
+					if(findRes.match > 0.f) {
+						hooked = doHook(rec, findRes.hierarchy,
+							findRes.match, sub, hookData);
+					}
+				}
+
+				if(!hookData && rec.buildsAccelStructs && hookAccelStructBuilds) {
+					dlg_assert(!hooked);
+					hooked = doHook(rec, {}, 0.f, sub, hookData);
+				}
+			}
+
+			dlg_assert(!!hooked == !!hookData);
+			if(hookData) {
+				if(patchedCbInfos.empty()) {
+					// NOTE: important to use subm.memScope instead of
+					// some local ThreadMemScope here!
+					patchedCbInfos = subm.memScope.copy(srcSub.pCommandBufferInfos,
+						srcSub.commandBufferInfoCount);
+				}
+
+				patchedCbInfos[cbID].commandBuffer = hooked;
+				cb.hook = std::move(hookData);
+
+				subm.lastLayerSubmission = &sub;
+			}
+		}
+
+		if(!patchedCbInfos.empty()) {
+			dlg_assert(patchedCbInfos.size() == srcSub.commandBufferInfoCount);
+			srcSub.pCommandBufferInfos = patchedCbInfos.data();
+		}
+	}
+}
+
+VkCommandBuffer CommandHook::hook(CommandRecord& record,
+		span<const CommandSectionMatch> matchData,
+		Submission& subm,
+		std::unique_ptr<CommandHookSubmission>& data) {
+
+	auto hierarchy = span<const Command*>(target_.command);
+	span<const CommandSectionMatch> sectionMatches = matchData;
+	std::vector<const ParentCommand*> dstHierarchy;
+
+	float dstMatch {1.f};
+	auto found = true;
+	while(hierarchy.size() > 1 && found) {
+		auto foundSection = false;
+		for(auto& cmdMatch : sectionMatches) {
+			if(cmdMatch.a != hierarchy[0]) {
+				continue;
+			}
+
+			dstMatch *= eval(cmdMatch.match);
+			foundSection = true;
+			hierarchy = hierarchy.subspan(1u);
+			sectionMatches = cmdMatch.children;
+			dstHierarchy.push_back(cmdMatch.b);
+			break;
+		}
+
+		if(!foundSection) {
+			found = false;
+		}
+	}
+
+	// no hook needed
+	if(!found) {
+		return VK_NULL_HANDLE;
+	}
+
+	auto findResult = find(*dstHierarchy.back(), span(target_.command).last(2),
+		target_.descriptors);
+
+	// no hook needed
+	if(findResult.hierarchy.empty()) {
+		return VK_NULL_HANDLE;
+	}
+
+	dstMatch *= findResult.match;
+
+	dlg_assert(findResult.hierarchy.size() == 2u);
+	dlg_assert(findResult.hierarchy[0] == dstHierarchy.back());
+
+	ThreadMemScope tms;
+	auto cmds = tms.alloc<const Command*>(dstHierarchy.size() + 1);
+	std::copy(dstHierarchy.begin(), dstHierarchy.end(), cmds.data());
+	cmds[dstHierarchy.size()] = findResult.hierarchy[1];
+
+	return doHook(record, cmds, dstMatch, subm, data);
+}
+
+VkCommandBuffer CommandHook::doHook(CommandRecord& record,
+		span<const Command*> dstCommand, float dstCommandMatch,
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data) {
-	dlg_assert(hooked.state() == CommandBuffer::State::executable);
-	ZoneScoped;
-
-	auto& dev = *hooked.dev;
-	dlg_assert(hooked.lastRecordLocked());
-	auto& record = *hooked.lastRecordLocked();
-	assertOwned(dev.mutex);
-
-	// Check whether we should attempt to hook this particular record
-	bool hookNeededForCmd = true;
-	const bool validTarget =
-		&record == target_.record ||
-		&hooked == target_.cb ||
-		target_.all;
-
-	if(!validTarget || !record_ || hierachy_.empty() || !record.commands->children_) {
-		hookNeededForCmd = false;
-	}
-
-	// When there is no gui viewing the submissions at the moment, we don't
-	// need/want to hook the submission.
-	if(!forceHook && freeze) {
-		hookNeededForCmd = false;
-	}
-
-	// Even when we aren't interested in any command in the record, we have
-	// to hook it when it builds acceleration structures.
-	auto needBuildHook = record.buildsAccelStructs && hookAccelStructBuilds;
-	if(!hookNeededForCmd && !needBuildHook) {
-		return hooked.handle();
-	}
 
 	// Check if there already is a valid CommandHookRecord we can use.
 	CommandHookRecord* foundHookRecord {};
 	CommandHookRecord* foundCompleted = nullptr;
 	auto foundCompletedIt = completed_.end();
 	auto completedCount = 0u;
+	auto hookNeededForCmd = bool(!dstCommand.empty());
 
 	for(auto& hookRecord : record.hookRecords) {
 		// we can't use this record since it didn't hook a command and
@@ -426,28 +613,6 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 
 	if(foundHookRecord) {
 		if(hookNeededForCmd) {
-			dlg_check({
-				// Before calling find, we need to unset the invalidated handles from the
-				// commands in hierachy_, find relies on all of them being valid.
-				dlg_assert(record_);
-
-				auto findRes = find(*record.commands, hierachy_, dsState_);
-				dlg_assert(std::equal(
-					foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
-					findRes.hierarchy.begin(), findRes.hierarchy.end()));
-				// NOTE: I guess we can't really rely on this. Just always call
-				// findRes? But i'm not even sure this is important. Could we ever
-				// suddenly want to hook a different command in the same record
-				// without the selection changing (in which case the hooked record
-				// would have been invalidated). In question, just remove this
-				// assert. It's useful for debugging though; was previously
-				// used to uncover new find/matching issues.
-				// dlg_assertm(std::abs(findRes.match - foundHookRecord->match) < 0.1,
-				// 	"{} -> {}", foundHookRecord->match, findRes.match);
-			});
-
-			// TODO: this is the only place we use hookCounter, counter_
-			// We know this works. Maybe remove both?
 			dlg_assert(foundHookRecord->hookCounter == counter_);
 			dlg_assert(foundHookRecord->state);
 		}
@@ -462,73 +627,38 @@ VkCommandBuffer CommandHook::hook(CommandBuffer& hooked,
 			invalidate(*foundHookRecord);
 			foundHookRecord = nullptr;
 		}
-
-		if(foundHookRecord) {
-			data.reset(new CommandHookSubmission(*foundHookRecord, subm,
-				captureDescriptors(*foundHookRecord->hcommand.back())));
-			return foundHookRecord->cb;
-		}
 	}
-
-	FindResult findRes {};
-	if(hookNeededForCmd) {
-		// Before calling find, we need to unset the invalidated handles from the
-		// commands in hierachy_, find relies on all of them being valid.
-		dlg_assert(record_);
-
-		findRes = find(*record.commands, hierachy_, dsState_);
-		if(findRes.hierarchy.empty()) {
-			// Can't find the command we are looking for in this record
-			return hooked.handle();
-		}
-
-		dlg_assert(findRes.hierarchy.size() == hierachy_.size());
-	}
-
-	// dlg_trace("hooking command submission; frame {}", dev.swapchain->presentCounter);
-	dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
-		"Alarmingly high number of hooks for a single record");
 
 	auto descriptors = CommandDescriptorSnapshot {};
-	if(!findRes.hierarchy.empty()) {
-		descriptors = captureDescriptors(*findRes.hierarchy.back());
+	if(!dstCommand.empty()) {
+		descriptors = captureDescriptors(*dstCommand.back());
 	}
 
-	auto hook = new CommandHookRecord(*this, record,
-		std::move(findRes.hierarchy), descriptors);
-	hook->match = findRes.match;
-	record.hookRecords.push_back(FinishPtr<CommandHookRecord>(hook));
+	if(!foundHookRecord) {
+		dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
+			"Alarmingly high number of hooks for a single record");
 
-	data.reset(new CommandHookSubmission(*hook, subm, std::move(descriptors)));
+		auto hook = new CommandHookRecord(*this, record,
+			{dstCommand.begin(), dstCommand.end()},
+			descriptors);
+		hook->match = dstCommandMatch;
+		record.hookRecords.push_back(FinishPtr<CommandHookRecord>(hook));
 
-	return hook->cb;
-}
-
-void CommandHook::desc(IntrusivePtr<CommandRecord> rec,
-		std::vector<const Command*> hierachy,
-		CommandDescriptorSnapshot dsState, bool invalidate) {
-	dlg_assert(bool(rec) == !hierachy.empty());
-
-	{
-		IntrusivePtr<CommandRecord> keepAliveRec;
-		CommandDescriptorSnapshot keepAliveDsSnapshot;
-
-		{
-			std::lock_guard lock(dev_->mutex);
-
-			keepAliveRec = std::move(record_);
-			keepAliveDsSnapshot = std::move(dsState_);
-
-			record_ = std::move(rec);
-			hierachy_ = std::move(hierachy);
-			dsState_ = std::move(dsState);
-		}
+		foundHookRecord = hook;
 	}
 
-	if(invalidate) {
-		clearCompleted();
-		invalidateRecordings();
-	}
+	dlg_check({
+		dlg_assert(target_.record);
+
+		auto findRes = find(*record.commands, target_.command, target_.descriptors);
+		dlg_assert(findRes.match > 0.f);
+		dlg_assert(std::equal(
+			foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
+			findRes.hierarchy.begin(), findRes.hierarchy.end()));
+	});
+
+	data.reset(new CommandHookSubmission(*foundHookRecord, subm, std::move(descriptors)));
+	return foundHookRecord->cb;
 }
 
 std::vector<CommandHook::CompletedHook> CommandHook::moveCompleted() {
@@ -578,29 +708,40 @@ CommandHookState::~CommandHookState() {
 	--DebugStats::get().aliveHookStates;
 }
 
-void CommandHook::ops(HookOps&& newOps) {
+void CommandHook::updateHook(HookUpdate&& update) {
 	{
-		std::lock_guard lock(dev_->mutex);
-		ops_ = std::move(newOps);
+		// make sure we don't destroy these while lock is held
+		HookTarget oldTarget;
+
+		{
+			std::lock_guard lock(dev_->mutex);
+
+			if(update.newTarget) {
+				oldTarget = std::move(target_);
+				target_ = std::move(*update.newTarget);
+
+				// validate
+				if(target_.type == HookTargetType::inFrame) {
+					dlg_assert(target_.submissionID != u32(-1));
+					dlg_assert(target_.submissionID < target_.frame.size());
+				}
+			}
+
+			if(update.newOps) {
+				dlg_assert(update.invalidate);
+				ops_ = std::move(*update.newOps);
+			}
+
+			if(update.stillNeeded) {
+				stillNeeded_ = *update.stillNeeded;
+			}
+		}
 	}
 
-	clearCompleted();
-	invalidateRecordings();
-}
-
-void CommandHook::target(HookTarget&& newTarget) {
-	{
-		std::lock_guard lock(dev_->mutex);
-		target_ = std::move(newTarget);
+	if(update.invalidate) {
+		clearCompleted();
+		invalidateRecordings();
 	}
-
-	clearCompleted();
-	invalidateRecordings();
-}
-
-void CommandHook::stillNeeded(CommandHookState* state) {
-	std::lock_guard lock(dev_->mutex);
-	stillNeeded_ = state;
 }
 
 CommandHook::HookOps CommandHook::ops() const {

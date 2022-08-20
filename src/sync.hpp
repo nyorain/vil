@@ -22,31 +22,31 @@ struct Fence : SharedDeviceHandle {
 struct Semaphore : SharedDeviceHandle {
 	VkSemaphore handle {};
 
-	// NOTE: eventually, we'll want to support other kinds of payloads here.
-	// Can be signaled/waited upon in QueuePresent, AcquireImage and more.
-	// struct PendingSignal {
-	// 	Submission* submission;
-	// 	u64 value;
-	// };
-	// struct PendingWait {
-	// 	Submission* submission;
-	// 	u64 value;
-	// };
-    // NOTE: it's not that easy to represent these chains. Semaphores can have
-    // multiple wait and signal operations pending as long as they are guaranteed
-    // to happen strictly in signal->wait, signal->wait, ... order.
-    // We can probably detect at submission time which signal belongs to which wait,
-    // represent it via new "SemaphoreLink" struct or something and allow to store
-    // multiple ocurrences of that hrere? -> submission rework/display (see above)
-	// SubmissionBatch* signalFrom {};
-	// SubmissionBatch* waitFrom {};
+	struct Sync {
+		Submission* submission {};
+		VkPipelineStageFlags stages {};
+		u64 value {1u}; // always 1 for binaries
+	};
+
+	std::vector<Sync> signals;
+	std::vector<Sync> waits;
 
 	VkSemaphoreType type {};
-	u64 value {}; // only for timeline semaphores
+
+	// Lower bound of the value. We know that the current value of
+	// the semaphore is at least this.
+	u64 lowerBound {};
+
+	// Upper bound of the value. We know that the current value of
+	// the semaphoer can't be greater.
+	u64 upperBound {};
 
 	Semaphore() = default;
 	~Semaphore();
 };
+
+// Updates upperBound
+void updateUpperLocked(Semaphore& sem, u64 value);
 
 struct Event : SharedDeviceHandle {
 	VkEvent handle {};
@@ -93,6 +93,15 @@ VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
     VkDevice                                    device,
     VkSemaphore                                 semaphore,
     const VkAllocationCallbacks*                pAllocator);
+
+VKAPI_ATTR VkResult VKAPI_CALL SignalSemaphore(
+    VkDevice                                    device,
+    const VkSemaphoreSignalInfo*                pSignalInfo);
+
+VKAPI_ATTR VkResult VKAPI_CALL WaitSemaphores(
+    VkDevice                                    device,
+    const VkSemaphoreWaitInfo*                  pWaitInfo,
+    uint64_t                                    timeout);
 
 // event
 VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(

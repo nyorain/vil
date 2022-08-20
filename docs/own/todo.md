@@ -8,8 +8,14 @@ v0.1, goal: end of january 2021 (edit may 2021: lmao)
   texel values in command viewer
 
 urgent, bugs:
-- [ ] add undefined behavior analyzer in shader debuggger.
-      just need to enable spvm feature
+- [ ] fix bug where resources are destroyed while being shown in
+      resource viewer in gui
+- [ ] fix CommandBuffer 'view commands' deadlock issue (by making resource
+      viewer non-locking)
+
+- [ ] require wrapping commandBuffers? does it even work otherwise?
+      maybe erase from global data when freed?
+
 - [ ] set spec constants for shader module in gui shader debugger.
       Test with shader from tkn/iro
 - [ ] figure out if our linear allocator (the std::allocator) adapter
@@ -76,6 +82,8 @@ match rework 2, electric boogaloo
 	  frame.
 
 new, workstack:
+- [ ] add undefined behavior analyzer in shader debuggger.
+      just need to enable spvm feature
 - [ ] there should probably just be one ImageViewer object; owned by Gui directly.
       it's then used wherever an image is shown.
 	  Then, the ImageViewer could create and own its pipes, simplifying

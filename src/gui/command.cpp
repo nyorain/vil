@@ -12,6 +12,8 @@
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <device.hpp>
+#include <swapchain.hpp>
+#include <cb.hpp>
 #include <queue.hpp>
 #include <threadContext.hpp>
 #include <pipe.hpp>
@@ -306,6 +308,11 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 		resetState = true;
 		resetImgViewer = true;
 	}
+
+	// TODO: do we really need the resetState parameter then?
+	// Just reset automatically when new state is null?
+	dlg_assertm(resetState ^ newState, "Either reset the state or "
+		"provide a new one");
 
 	if(resetState) {
 		state_ = {};
@@ -1561,7 +1568,11 @@ void CommandViewer::updateHook() {
 	hook.freeze.store(false);
 
 	if(setOps) {
-		hook.ops(std::move(ops));
+		CommandHook::HookUpdate update;
+		update.invalidate = true;
+		update.newOps = std::move(ops);
+
+		hook.updateHook(std::move(update));
 	}
 }
 

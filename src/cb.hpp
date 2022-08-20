@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <device.hpp>
+#include <wrap.hpp>
 #include <command/record.hpp>
 #include <command/builder.hpp>
 #include <memory>
@@ -68,6 +69,7 @@ public:
 	void invalidateLocked();
 
 private:
+	friend CommandPool;
 	CommandPool* pool_ {};
 	VkCommandBuffer handle_ {};
 
@@ -118,6 +120,32 @@ public: // Only public for recording, should not be accessed outside api
 		return builder_;
 	}
 };
+
+inline CommandBuffer& getCommandBuffer(VkCommandBuffer handle) {
+	if(HandleDesc<VkCommandBuffer>::wrap) {
+		return unwrap(handle);
+	}
+
+	return getData<WrappedHandle<CommandBuffer>>(handle).obj();
+}
+
+inline CommandBufferPtr getCommandBufferPtr(VkCommandBuffer handle) {
+	if(HandleDesc<VkCommandBuffer>::wrap) {
+		return CommandBufferPtr(&unwrapWrapped(handle));
+	}
+
+	return CommandBufferPtr(&getData<WrappedHandle<CommandBuffer>>(handle));
+}
+
+inline CommandBufferPtr getCommandBufferPtr(CommandBuffer& cb) {
+	constexpr auto off = sizeof(void*);
+	static_assert(std::is_standard_layout_v<WrappedHandle<CommandBuffer>>);
+	static_assert(offsetof(WrappedHandle<CommandBuffer>, obj_) == off);
+
+	auto ptr = reinterpret_cast<std::byte*>(&cb) - sizeof(void*);
+	auto wrapped = std::launder(reinterpret_cast<WrappedHandle<CommandBuffer>*>(ptr));
+	return CommandBufferPtr(wrapped);
+}
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
@@ -566,30 +594,30 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
     uint32_t                                    lineStippleFactor,
     uint16_t                                    lineStipplePattern);
 
-// VK_EXT_extended_dynamic_state
-VKAPI_ATTR void VKAPI_CALL CmdSetCullModeEXT(
+// VK_EXT_extended_dynamic_state, Vulkan 1.3
+VKAPI_ATTR void VKAPI_CALL CmdSetCullMode(
     VkCommandBuffer                             commandBuffer,
     VkCullModeFlags                             cullMode);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetFrontFaceEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetFrontFace(
     VkCommandBuffer                             commandBuffer,
     VkFrontFace                                 frontFace);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopologyEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopology(
     VkCommandBuffer                             commandBuffer,
     VkPrimitiveTopology                         primitiveTopology);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCountEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCount(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    viewportCount,
     const VkViewport*                           pViewports);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCountEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCount(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    scissorCount,
     const VkRect2D*                             pScissors);
 
-VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
+VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2(
     VkCommandBuffer                             commandBuffer,
     uint32_t                                    firstBinding,
     uint32_t                                    bindingCount,
@@ -598,27 +626,27 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
     const VkDeviceSize*                         pSizes,
     const VkDeviceSize*                         pStrides);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnable(
     VkCommandBuffer                             commandBuffer,
     VkBool32                                    depthTestEnable);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnable(
     VkCommandBuffer                             commandBuffer,
     VkBool32                                    depthWriteEnable);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOpEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOp(
     VkCommandBuffer                             commandBuffer,
     VkCompareOp                                 depthCompareOp);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnable(
     VkCommandBuffer                             commandBuffer,
     VkBool32                                    depthBoundsTestEnable);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnable(
     VkCommandBuffer                             commandBuffer,
     VkBool32                                    stencilTestEnable);
 
-VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetStencilOp(
     VkCommandBuffer                             commandBuffer,
     VkStencilFaceFlags                          faceMask,
     VkStencilOp                                 failOp,
@@ -719,11 +747,40 @@ VKAPI_ATTR void VKAPI_CALL CmdSetRayTracingPipelineStackSizeKHR(
     uint32_t                                    pipelineStackSize);
 
 // VK_KHR_dynamic_rendering
+// promoted to vulkan 1.3
 VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
     VkCommandBuffer                             commandBuffer,
     const VkRenderingInfo*                      pRenderingInfo);
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
     VkCommandBuffer                             commandBuffer);
+
+// VK_KHR_synchronization2
+// promoted to vulkan 1.3
+VKAPI_ATTR void VKAPI_CALL CmdSetEvent2(
+    VkCommandBuffer                             commandBuffer,
+    VkEvent                                     event,
+    const VkDependencyInfo*                     pDependencyInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdResetEvent2(
+    VkCommandBuffer                             commandBuffer,
+    VkEvent                                     event,
+    VkPipelineStageFlags2                       stageMask);
+
+VKAPI_ATTR void VKAPI_CALL CmdWaitEvents2(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    eventCount,
+    const VkEvent*                              pEvents,
+    const VkDependencyInfo*                     pDependencyInfos);
+
+VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier2(
+    VkCommandBuffer                             commandBuffer,
+    const VkDependencyInfo*                     pDependencyInfo);
+
+VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp2(
+    VkCommandBuffer                             commandBuffer,
+    VkPipelineStageFlags2                       stage,
+    VkQueryPool                                 queryPool,
+    uint32_t                                    query);
 
 } // namespace vil

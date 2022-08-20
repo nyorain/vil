@@ -23,7 +23,7 @@ LazyMatrixMarch::LazyMatrixMarch(u32 width, u32 height, LinAllocator& alloc,
 	dlg_assert(height < 1024 * 64);
 	dlg_assert(matcher_);
 
-	matchMatrix_ = alloc.alloc<EvalMatch>(width * height);
+	matchMatrix_ = alloc.allocNonTrivial<EvalMatch>(width * height);
 
 	for(auto& m : matchMatrix_) {
 		m.candidate = candidates_.end();

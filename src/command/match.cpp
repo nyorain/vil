@@ -483,7 +483,8 @@ FrameSubmissionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 
 		evalMatches[j * a.submissions.size() + i].a = &recA;
 		evalMatches[j * a.submissions.size() + i].b = &recB;
-		evalMatches[j * a.submissions.size() + i].matches = ret.children;
+		evalMatches[j * a.submissions.size() + i].matches = retMem.alloc<CommandSectionMatch>(1u);
+		evalMatches[j * a.submissions.size() + i].matches[0] = ret;
 		evalMatches[j * a.submissions.size() + i].match = ret.match;
 
 		return eval(ret.match);
@@ -767,15 +768,19 @@ FindResult find(const Command& srcParent, const Command& src,
 	return {bestCmds, bestMatch};
 }
 
-FindResult find(const RootCommand& srcRoot, span<const Command*> dstHierachyToFind,
+FindResult find(const ParentCommand& srcRoot, span<const Command*> dstHierarchyToFind,
 		const CommandDescriptorSnapshot& dstDescriptors, float threshold) {
-	// empty record
-	if(!srcRoot.children_) {
+	// empty hierarchy
+	if(!srcRoot.children()) {
 		return {};
 	}
 
-	auto ret = find(srcRoot, *srcRoot.children_,
-		*dstHierachyToFind[0], dstHierachyToFind.subspan(1),
+	// otherwise only the root command would be selected, makes no sense
+	dlg_assert(dstHierarchyToFind.size() >= 2);
+	dlg_assert(dynamic_cast<const ParentCommand*>(dstHierarchyToFind[0]));
+
+	auto ret = find(srcRoot, *srcRoot.children(),
+		*dstHierarchyToFind[0], dstHierarchyToFind.subspan(1),
 		dstDescriptors, threshold);
 	if(!ret.hierarchy.empty()) {
 		ret.hierarchy.insert(ret.hierarchy.begin(), &srcRoot);

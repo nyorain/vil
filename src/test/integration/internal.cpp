@@ -138,16 +138,19 @@ TEST(int_basic) {
 	auto dst = cmd->next->next;
 
 	auto& vilDev = *stp.vilDev;
-	CommandHook::HookOps ops {};
+
+	CommandHook::HookUpdate update {};
+	update.invalidate = true;
+	auto& ops = update.newOps.emplace();
 	ops.queryTime = true;
-	vilDev.commandHook->ops(std::move(ops));
 
-	CommandHook::HookTarget target {};
-	target.all = true;
-	vilDev.commandHook->target(std::move(target));
+	auto& target = update.newTarget.emplace();
+	target.type = CommandHook::HookTargetType::all;
+	target.record = vilCB.lastRecordPtr();
+	target.command = {rec.commands, dst};
 
+	vilDev.commandHook->updateHook(std::move(update));
 	vilDev.commandHook->forceHook.store(true);
-	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {rec.commands, dst}, {});
 
 	VkSubmitInfo si {};
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -336,16 +339,19 @@ TEST(int_copy_transfer) {
 	dlg_assert(dynamic_cast<CopyImageCmd*>(dst));
 
 	auto& vilDev = *stp.vilDev;
-	CommandHook::HookOps ops {};
+
+	CommandHook::HookUpdate update {};
+	update.invalidate = true;
+	auto& ops = update.newOps.emplace();
 	ops.copyTransferSrc = true;
-	vilDev.commandHook->ops(std::move(ops));
 
-	CommandHook::HookTarget target {};
-	target.all = true;
-	vilDev.commandHook->target(std::move(target));
+	auto& target = update.newTarget.emplace();
+	target.type = CommandHook::HookTargetType::all;
+	target.record = vilCB.lastRecordPtr();
+	target.command = {rec.commands, dst};
 
+	vilDev.commandHook->updateHook(std::move(update));
 	vilDev.commandHook->forceHook.store(true);
-	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {rec.commands, dst}, {});
 
 	VkSubmitInfo si {};
 	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -494,20 +500,24 @@ void sampleCopyTest(VkCommandBuffer cb, PipeSetup& ps, Texture& tex0) {
 	dlg_assert(dynamic_cast<DispatchCmd*>(dst));
 
 	auto& vilDev = *stp.vilDev;
-	CommandHook::HookOps ops {};
+
+	CommandHook::HookUpdate update {};
+	update.invalidate = true;
+
+	auto& ops = update.newOps.emplace();
 	auto& dsCopy = ops.descriptorCopies.emplace_back();
 	dsCopy.before = true;
 	dsCopy.binding = 0u;
 	dsCopy.set = 0u;
 	dsCopy.imageAsBuffer = true;
-	vilDev.commandHook->ops(std::move(ops));
 
-	CommandHook::HookTarget target {};
-	target.all = true;
-	vilDev.commandHook->target(std::move(target));
+	auto& target = update.newTarget.emplace();
+	target.type = CommandHook::HookTargetType::all;
+	target.record = vilCB.lastRecordPtr();
+	target.command = {rec.commands, dst};
 
+	vilDev.commandHook->updateHook(std::move(update));
 	vilDev.commandHook->forceHook.store(true);
-	vilDev.commandHook->desc(vilCB.lastRecordPtr(), {rec.commands, dst}, {});
 
 	dlg_assert(imgView.refCount == 1u);
 
@@ -610,9 +620,6 @@ TEST(int_sample_copy_pipeline) {
 	destroy(ps);
 	DestroySampler(stp.dev, sampler, nullptr);
 	DestroyCommandPool(stp.dev, cmdPool, nullptr);
-
-	auto& vilDev = *stp.vilDev;
-	vilDev.commandHook->desc({}, {}, {});
 }
 
 // TODO: write test where we record a command buffer that executes

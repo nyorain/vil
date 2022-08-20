@@ -5,6 +5,7 @@
 #include <util/linalloc.hpp>
 #include <util/intrusive.hpp>
 #include <util/debugMutex.hpp>
+#include <threadContext.hpp>
 
 #include <vector>
 #include <unordered_map>
@@ -218,6 +219,38 @@ struct UsedDescriptorHash {
 
 template<typename T>
 using UsedHandleSet = CommandAllocHashSet<RefHandle<T>, RefHandleHash>;
+
+template<typename K>
+auto find(UsedHandleSet<K>& used, K& elem) {
+	// TODO: better, transparent find with c++20
+	RefHandle<K> rh(ThreadContext::instance.linalloc_);
+	rh.handle = IntrusivePtr<K>(acquireOwnership, &elem);
+	auto it = used.find(rh);
+	(void) rh.handle.release();
+	return it;
+}
+
+// TODO: kinda hacky, only a template so we don't have to include stuff
+template<typename Image>
+auto find(CommandAllocHashSet<UsedImage, RefHandleHash>& used, Image& elem) {
+	// TODO: better, transparent find with c++20
+	UsedImage rh(ThreadContext::instance.linalloc_);
+	rh.handle = IntrusivePtr<Image>(acquireOwnership, &elem);
+	auto it = used.find(rh);
+	(void) rh.handle.release();
+	return it;
+}
+
+// TODO: kinda hacky, only a template so we don't have to include stuff
+template<typename DescriptorSet>
+inline auto find(CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash>& used,
+		DescriptorSet& ds) {
+	// TODO: better, transparent find with c++20
+	UsedDescriptorSet rh(ThreadContext::instance.linalloc_);
+	rh.ds = &ds;
+	auto it = used.find(rh);
+	return it;
+}
 
 // Represents the recorded state of a command buffer.
 // We represent it as extra, reference-counted object so we can display

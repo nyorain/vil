@@ -256,10 +256,10 @@ Timeline semaphores allow this:
 1. submit batch2, waiting for timelineSemaphore ts==1, reading image A. Hooked.
 2. submit batch1, writing image A, signaling ts=1
 
-In this case, a trivial detection algorithm would add a cow to batch1,
+In this case, a trivial detection algorithm would add a cow resolve to batch1,
 just because it is submitted later than batch2. But batch1 is actually
-executed before batch2, therefore not needing the cow (and actually
-making the cow incorrect as it would be added before the changes made
+executed before batch2, therefore not needing the copy (and actually
+making the copy incorrect as it would be added before the changes made
 by batch1, which in turn would be visible by batch2 and the hooked
 command tho).
 How can our resolving algorithm detect this?
@@ -296,8 +296,7 @@ No idea if this is valid per spec. No idea if we can support this at all.
 In the end we could still disable cows if events are used or something (or
 based on an environment variable).
 
-EDIT: nvm, this isn't valid. CmdWaitEvents can only wait on an event
-set by CmdSetEvent, on the same queue. Nice.
+EDIT: yeah, seems valid per spec. damn.
 
 ---
 
@@ -369,7 +368,7 @@ checkActivate(subm) {
 	auto submActive = true;
 	for(wait : subm.waits) {
 		if(wait.semaphore->isTimeline()) {
-			if(wait.value < wait.semaphore->upperBound) {
+			if(wait.value > wait.semaphore->upperBound) {
 				submActive = false;
 				break;
 			}
@@ -422,16 +421,23 @@ Semaphore::updateUpper(u64 value) {
 		}
 
 		// check if this activated the submission
-		if(!submission.active) {
+		if(!wait.submission.active) {
 			checkActivate(submission);
 		}
-		
-		// TODO: in real code, just use a second pass below to do this.
-		waits.erase(wait);
 	}
 
 	this->value = value;
 }
+
+// comment from later, during implementation:
+// TODO: need more complicated logic for something like cows or lazy
+// copying because of the stageMasks. In checkActivate, we must evaluate
+// the max stage that could be executed now and then check for all pending
+// ops whether something needs to be done.
+// NOT only in activate
+// ---
+// EDIT: nvm, we have to modify the wait stageMasks anyways when the submission
+// isn't activate on submission time.
 ```
 
 side note:
@@ -528,3 +534,16 @@ we can just re-use copies? Should be a lot easier.
 Hm, this does NOT solve our problem with huge bindless tables (e.g. holding 16k
 material images), we can't afford a single copy on the whole table EVER.
 Maybe use the approach from above for them.
+
+Also, all of this - even just detecting modification - has similar sync
+problems to the cow case. Out-of-order submissions using timeline semaphores
+makes this hard. So in either way, we need submission tracking.
+
+OTOH, when just using state "as is" we don't care about those details
+too much, could show the warning (or skip using it) in every frame
+where it was changed.
+
+So, should we implement sync tracking as outlined above?
+Just noticed: we need it anyways, full sync is (currently) broken without it.
+And since we want/need full sync anyways, let's implement sync tracking.
+Might also be useful in UI

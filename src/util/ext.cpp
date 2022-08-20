@@ -85,6 +85,56 @@ VkSubpassDependency downgrade(const VkSubpassDependency2& x) {
 	return ret;
 }
 
+VkImageMemoryBarrier downgrade(const VkImageMemoryBarrier2& x) {
+	VkImageMemoryBarrier ret {};
+
+	dlg_assertlm(dlg_level_warn, !x.pNext,
+		"unsupported extension used: pNext in ImageMemoryBarrier");
+
+	ret.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	ret.image = x.image;
+	ret.srcAccessMask = x.srcAccessMask;
+	ret.dstAccessMask = x.dstAccessMask;
+	ret.srcQueueFamilyIndex = x.srcQueueFamilyIndex;
+	ret.dstQueueFamilyIndex = x.dstQueueFamilyIndex;
+	ret.oldLayout = x.oldLayout;
+	ret.newLayout = x.newLayout;
+	ret.subresourceRange = x.subresourceRange;
+
+	return ret;
+}
+
+VkBufferMemoryBarrier downgrade(const VkBufferMemoryBarrier2& x) {
+	VkBufferMemoryBarrier ret {};
+
+	dlg_assertlm(dlg_level_warn, !x.pNext,
+		"unsupported extension used: pNext in BufferMemoryBarrier");
+
+	ret.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	ret.buffer = x.buffer;
+	ret.srcAccessMask = x.srcAccessMask;
+	ret.dstAccessMask = x.dstAccessMask;
+	ret.srcQueueFamilyIndex = x.srcQueueFamilyIndex;
+	ret.dstQueueFamilyIndex = x.dstQueueFamilyIndex;
+	ret.offset = x.offset;
+	ret.size = x.size;
+
+	return ret;
+}
+
+VkMemoryBarrier downgrade(const VkMemoryBarrier2& x) {
+	VkMemoryBarrier ret {};
+
+	dlg_assertlm(dlg_level_warn, !x.pNext,
+		"unsupported extension used: pNext in MemoryBarrier");
+
+	ret.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	ret.srcAccessMask = x.srcAccessMask;
+	ret.dstAccessMask = x.dstAccessMask;
+
+	return ret;
+}
+
 // upgrade
 VkImageCopy2KHR upgrade(const VkImageCopy& x) {
 	return {
@@ -170,6 +220,65 @@ VkSubpassDependency2 upgrade(const VkSubpassDependency& x) {
 	ret.dependencyFlags = x.dependencyFlags;
 	ret.srcStageMask = x.srcStageMask;
 	ret.dstStageMask = x.dstStageMask;
+	return ret;
+}
+
+VkImageMemoryBarrier2 upgrade(const VkImageMemoryBarrier& x,
+		VkPipelineStageFlags src, VkPipelineStageFlags dst) {
+	VkImageMemoryBarrier2 ret {};
+
+	dlg_assertlm(dlg_level_warn, !x.pNext,
+		"unsupported extension used: pNext in ImageMemoryBarrier");
+
+	ret.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+	ret.image = x.image;
+	ret.dstStageMask = upgradePipelineStageFlags(src);
+	ret.srcStageMask = upgradePipelineStageFlags(dst);
+	ret.srcAccessMask = x.srcAccessMask;
+	ret.dstAccessMask = x.dstAccessMask;
+	ret.srcQueueFamilyIndex = x.srcQueueFamilyIndex;
+	ret.dstQueueFamilyIndex = x.dstQueueFamilyIndex;
+	ret.oldLayout = x.oldLayout;
+	ret.newLayout = x.newLayout;
+	ret.subresourceRange = x.subresourceRange;
+
+	return ret;
+}
+
+VkBufferMemoryBarrier2 upgrade(const VkBufferMemoryBarrier& x,
+		VkPipelineStageFlags src, VkPipelineStageFlags dst) {
+	VkBufferMemoryBarrier2 ret {};
+
+	dlg_assertlm(dlg_level_warn, !x.pNext,
+		"unsupported extension used: pNext in BufferMemoryBarrier");
+
+	ret.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+	ret.buffer = x.buffer;
+	ret.dstStageMask = upgradePipelineStageFlags(src);
+	ret.srcStageMask = upgradePipelineStageFlags(dst);
+	ret.srcAccessMask = x.srcAccessMask;
+	ret.dstAccessMask = x.dstAccessMask;
+	ret.srcQueueFamilyIndex = x.srcQueueFamilyIndex;
+	ret.dstQueueFamilyIndex = x.dstQueueFamilyIndex;
+	ret.offset = x.offset;
+	ret.size = x.size;
+
+	return ret;
+}
+
+VkMemoryBarrier2 upgrade(const VkMemoryBarrier& x,
+		VkPipelineStageFlags src, VkPipelineStageFlags dst) {
+	VkMemoryBarrier2 ret {};
+
+	dlg_assertlm(dlg_level_warn, !x.pNext,
+		"unsupported extension used: pNext in MemoryBarrier");
+
+	ret.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+	ret.dstStageMask = upgradePipelineStageFlags(src);
+	ret.srcStageMask = upgradePipelineStageFlags(dst);
+	ret.srcAccessMask = x.srcAccessMask;
+	ret.dstAccessMask = x.dstAccessMask;
+
 	return ret;
 }
 

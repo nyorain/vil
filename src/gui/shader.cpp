@@ -207,7 +207,7 @@ void ShaderDebugger::draw() {
 			if(doBreak) {
 				if(freezeOnBreakPoint_) {
 					freezeOnBreakPoint_ = false;
-					gui_->cbGui().freezeState(true);
+					gui_->cbGui().selector().freezeState = true;
 				}
 
 				break;
@@ -316,7 +316,7 @@ void ShaderDebugger::draw() {
 	ImGui::SameLine();
 
 	{
-		auto disable = gui_->cbGui().freezeState();
+		auto disable = gui_->cbGui().selector().freezeState;
 		if(disable) {
 			ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
 			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
@@ -1061,7 +1061,10 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 		ops.copyIndirectCmd = true;
 	}
 
-	hook.ops(std::move(ops));
+	CommandHook::HookUpdate update;
+	update.invalidate = true;
+	update.newOps = std::move(ops);
+	hook.updateHook(std::move(update));
 }
 
 void ShaderDebugger::setupScalar(const Type& type, ReadBuf data, spvm_member& dst) {

@@ -643,11 +643,28 @@ how many color attachments there are?
 > nah, overkill. We only ever visualize one attachment so only need
   to draw to one attachment!
 
-  ```
+```
 // TODO: Xlib, trying to immitate the winapi terribleness.
 // Should be fixed more globally.
 #ifdef Status
 	#undef Status
 #endif
+```
 
-  ```
+----
+
+improved submission logic:
+
+in submit
+- don't call processCB, don't hook. But build up submission, gather records
+  in some list.
+- then call replaceHooked(subm), where we (in case of frame-base-selection)
+	- first run `match` on the selected
+	  frame (up to the selected command) with the submissions up to now in 
+	  this frame (including the current one).
+	- if the selected command can be found in one of the currently submitted
+	  records, hook it!
+	  Run find on the whole record again?
+	  Hm, maybe rather on the particular section (i.e. only last hierarchy part).
+	  would require reworking 'find' to not require RootCommand
+	- maybe replaceHooked should altogether be part of CommandHook?
