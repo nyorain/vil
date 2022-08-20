@@ -26,7 +26,7 @@ struct QueueSubmitter {
 	// - we add our own semaphore to every submission to allow tracking
 	//   when they are finished (we can use that in the gui to use the resources
 	//   ourselves without having to wait on cpu for the submissions to complete)
-	span<VkSubmitInfo> submitInfos;
+	span<VkSubmitInfo2> submitInfos;
 
 	ThreadMemScope memScope;
 
@@ -45,12 +45,26 @@ struct QueueSubmitter {
 	Draw* syncedGuiDraw {};
 };
 
-void process(QueueSubmitter&, span<const VkSubmitInfo>);
-void cleanupOnError(QueueSubmitter& subm);
+// Processes the given submit infos, adding them to the submitter.
+void process(QueueSubmitter&, span<const VkSubmitInfo2>);
+
+// Adds our own signal operation to each submission in the given QueueSubmitter,
+// so we have a semaphore knowing when it's ready.
 void addSubmissionSyncLocked(QueueSubmitter& subm);
+
+// Makes sure the submissions synchronize properly with the gui.
 void addGuiSyncLocked(QueueSubmitter&);
+
+// Makes sure the submissions synchronize properly with any other
+// layer submission (or hooked application submission).
 void addFullSyncLocked(QueueSubmitter&);
+
 void postProcessLocked(QueueSubmitter&);
+void cleanupOnError(QueueSubmitter& subm);
+
+// = ext conversion =
+VkSubmitInfo2 upgrade(Device&, ThreadMemScope& tms, const VkSubmitInfo&);
+VkSubmitInfo downgrade(Device&, ThreadMemScope& tms, const VkSubmitInfo2&);
 
 } // namespace vil
 

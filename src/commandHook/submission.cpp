@@ -23,6 +23,13 @@ CommandHookSubmission::~CommandHookSubmission() {
 	if(record) {
 		dlg_assert(record->record);
 		record->writer = nullptr;
+
+		// hook was invalidated, record should be deleted
+		if(!record->hook) {
+			record->writer = nullptr;
+			dlg_assert(!contains(record->record->hookRecords, record));
+			delete record;
+		}
 	}
 }
 
@@ -30,7 +37,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	ZoneScoped;
 	dlg_assert(record->writer == &subm);
 
-	// In this case the hook was removed, no longer interested in results.
+	// In this case the hook was invalidated, no longer interested in results.
 	// Since we are the only submission left to the record, it can be
 	// destroyed.
 	if(!record->hook) {

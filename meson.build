@@ -215,6 +215,8 @@ src = files(
 	'src/gui/imageViewer.cpp',
 	'src/gui/shader.cpp',
 	'src/gui/blur.cpp',
+	'src/gui/commandSelection.cpp',
+	# debug wip
 	'src/gui/vizlcs.cpp',
 
 	'src/commandHook/hook.cpp',
@@ -249,6 +251,7 @@ src = files(
 	'src/data.hpp',
 	'src/queryPool.hpp',
 	'src/submit.hpp',
+	'src/frame.hpp',
 	'src/threadContext.hpp',
 	'src/command/commands.hpp',
 	'src/command/record.hpp',
@@ -276,6 +279,7 @@ src = files(
 	'src/gui/imageViewer.hpp',
 	'src/gui/shader.hpp',
 	'src/gui/blur.hpp',
+	'src/gui/commandSelection.hpp',
 	'src/gui/vizlcs.hpp',
 
 	'src/commandHook/hook.hpp',

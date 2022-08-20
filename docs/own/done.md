@@ -1,3 +1,5 @@
+- [x] Get rid of getAnnotate in command buffer end. Find clean solution for
+      the problem/improve UI flickering for changing records
 - [x] check if we can get rid of refRecords and CommandRecord::invalidated.
       See the point in todo.md:performance about expensive doEnd
 	  	- [ ] renderpass

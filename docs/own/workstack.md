@@ -1,3 +1,16 @@
+- [ ] implement sync tracking
+	- [ ] and fix full sync
+	- [ ] add test for out-of-order submission
+- [ ] continue shader debugger
+	- [ ] using some lazy copy/cow mechanism.
+	      See cow.md, should probably re-introduce cows
+- improve vertex viewer
+	- allow to select vertices (/indices)
+		- in input and output viewer
+		- make rows selectable
+		- render the select vertex in viewport, e.g. via point pipe
+			- later: render the selected triangle?
+	- implement paging
 - [ ] investigate 255-overflow-like bug in shader debugger when
       resizing
 - [ ] fix bad vk::name impls. E.g. for DescriptorSetLayout, the stages
@@ -70,15 +83,15 @@
 	  {nvm, vulkan layers are blocked by anti-cheat}
 
 - look into found doom performance hotpaths
-	- Get rid of getAnnotate in command buffer end. Find clean solution for
-	  the problem/improve UI flickering for changing records
 	- Improve QueuePresent timing
 	- analyze other issues, tracy file on D:
-- Clean up Handle
+- Clean up Handle (?)
 	- remove objectType from Handle
 	- could remove 'name' from Handle, instead use HashMap in device?
 	  not sure if this is a good idea though. Probably not for now.
-- Clean up DeviceHandle
+	  our main usecase after all is application debugging where we
+	  expect most handles to have a name -> embedding in object makes sense.
+- Clean up DeviceHandle (?)
 	- In many handles we don't need the 'dev' pointer, e.g. descriptorSet,
 	  imageView etc. Remove it?
 	- Instead use DeviceHandle<ObjectType>, allowing to remove objectType from Handle
@@ -87,12 +100,6 @@
 	- Maybe rename DeviceHandle to RecordReferenced or something?
 		- split up notifyDestruction functionality in DeviceObserved or something,
 		  many classes (like Fence, CommandPool etc) don't need refRecords I guess
-- improve vertex viewer
-	- allow to select vertices (/indices)
-		- in input and output viewer
-		- make rows selectable
-		- render the select vertex in viewport, e.g. via point pipe
-			- later: render the selected triangle?
 - check if we can get the null vulkan driver running and execute tests
 	- just create images/buffers with various parameters and record submissions,
 	  recording every command at least once.

@@ -29,11 +29,17 @@
 
 namespace vil {
 
+using HookTarget = CommandHook::HookTarget;
+using HookTargetType = CommandHook::HookTargetType;
+using UpdateMode = CommandSelection::UpdateMode;
+using SelectionType = CommandSelection::SelectionType;
+
 // CommandBufferGui
 void CommandBufferGui::init(Gui& gui) {
 	gui_ = &gui;
 	commandFlags_ = CommandType(~(CommandType::end | CommandType::bind | CommandType::query));
 	commandViewer_.init(gui);
+	selector_.init(gui_->dev());
 }
 
 CommandBufferGui::~CommandBufferGui() = default;
@@ -41,8 +47,8 @@ CommandBufferGui::~CommandBufferGui() = default;
 void CommandBufferGui::draw(Draw& draw) {
 	ZoneScoped;
 
-	if(!record_ && mode_ != UpdateMode::swapchain) {
-		ImGui::Text("No record selected");
+	if(!record_ && selector_.updateMode() != UpdateMode::swapchain) {
+		imGuiText("No record selected");
 		return;
 	}
 
@@ -50,7 +56,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	auto& hook = *dev.commandHook;
 
 	// Possibly update mode
-	auto modeName = [](UpdateMode mode) {
+	auto modeName = [](CommandSelection::UpdateMode mode) {
 		switch(mode) {
 			case UpdateMode::none: return "Static";
 			case UpdateMode::commandBuffer: return "CommandBuffer";
@@ -62,49 +68,32 @@ void CommandBufferGui::draw(Draw& draw) {
 		}
 	};
 
-	if(mode_ != UpdateMode::swapchain) {
-		// only show combo if at least one update option is available
-		auto showCombo = (cb_ || record_->cb);
-
-		if(showCombo && ImGui::BeginCombo("Update Source", modeName(mode_))) {
+	auto updateMode = selector_.updateMode();
+	if(updateMode != UpdateMode::swapchain) {
+		if(ImGui::BeginCombo("Update Source", modeName(updateMode))) {
 			if(ImGui::Selectable("None")) {
-				mode_ = UpdateMode::none;
-
-				CommandHook::HookTarget target {};
-				target.record = record_.get();
-				hook.target(std::move(target));
+				selector_.updateMode(UpdateMode::none);
 			}
 
-			if(record_ && ImGui::Selectable("Any")) {
-				mode_ = UpdateMode::any;
-
-				CommandHook::HookTarget target {};
-				target.all = true;
-				hook.target(std::move(target));
+			if(!selector_.cb() && ImGui::Selectable("Any")) {
+				selector_.updateMode(UpdateMode::any);
 			}
 
-			if((mode_ == UpdateMode::commandBuffer && cb_) || record_->cb) {
-				if(ImGui::Selectable("CommandBuffer")) {
-					if(!cb_) {
-						cb_ = record_->cb;
-					}
-
-					mode_ = UpdateMode::commandBuffer;
-
-					CommandHook::HookTarget target {};
-					target.cb = cb_;
-					hook.target(std::move(target));
-				}
-			}
+			// TODO: broken I guess? Needs support for automatically
+			// selecting cb in Selector
+			// auto cb = IntrusiveWrappedPtr<CommandBuffer>(selector_.cb());
+			// if(!cb) {
+			// 	std::lock_guard lock(dev.mutex);
+			// 	cb = IntrusivePtr<CommandWrappedBuffer>(record_->cb);
+			// }
+			// if(cb && ImGui::Selectable("CommandBuffer")) {
+			// 	selector_.updateMode(UpdateMode::commandBuffer);
+			// }
 
 			ImGui::EndCombo();
 		}
 	} else if(!gui_->dev().swapchain) {
 		clearSelection(true);
-
-		records_ = {};
-		openedSections_ = {};
-		swapchainPresent_ = {};
 		return;
 	}
 
@@ -116,6 +105,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	if(ImGui::BeginPopup("Command Selector")) {
 		auto val = commandFlags_.value();
 
+		imGuiText("Visible commands");
 		ImGui::CheckboxFlags("Bind", &val, u32(CommandType::bind));
 		ImGui::CheckboxFlags("Draw", &val, u32(CommandType::draw));
 		ImGui::CheckboxFlags("Dispatch", &val, u32(CommandType::dispatch));
@@ -147,11 +137,17 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::SameLine();
 
 	// TODO: don't show this checkbox (or set it to true and disable?)
-	// when we are viewing an invalidated record without updating.
-	ImGui::Checkbox("Freeze State", &freezeState_);
-	// NOTE: always update it, even if it wasn't changed since gui.cpp
-	// changes hook.freeze on window hide
-	hook.freeze.store(freezeState_);
+	//   when we are viewing an invalidated record without updating.
+	auto updateInHook = ImGui::Checkbox("Freeze State", &selector_.freezeState);
+	// NOTE: gui.cpp changes hook.freeze on window hide. So we need to
+	//   set it to false again if needed.
+	//   But we don't always update it, in case of new-selection,
+	//   selector_.freezeState is true but hook.freeze is false.
+	//   All this update logic is somewhat messy, think of cleaner logic
+	updateInHook |= (hook.freeze.load() && !selector_.freezeState);
+	if(updateInHook) {
+		hook.freeze.store(selector_.freezeState);
+	}
 
 	if(gui_->showHelp && ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("This will freeze the state of the command you are viewing,\n"
@@ -159,7 +155,7 @@ void CommandBufferGui::draw(Draw& draw) {
 			"This does not affect updating of the commands shown on the left.");
 	}
 
-	if(mode_ != UpdateMode::none) {
+	if(selector_.updateMode() != UpdateMode::none) {
 		ImGui::SameLine();
 		ImGui::Checkbox("Freeze Commands", &freezeCommands_);
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
@@ -174,19 +170,40 @@ void CommandBufferGui::draw(Draw& draw) {
 	// == logical state update ==
 	auto doUpdate = updateTick_.tick();
 	if(doUpdate) {
-		updateState();
+		auto hookUpdated = selector_.update();
+		if(hookUpdated && !freezeCommands_) {
+			// TODO PERF: we could re-use the matching data from the selector
+			// here in many cases instead of running our own match
+			// in updateFromSelector.
+			updateFromSelector();
+		}
+
+		auto selType = selector_.selectionType();
+		if(hookUpdated && selType == CommandSelection::SelectionType::command) {
+			updateCommandViewer(false);
+		}
 	}
 
 	// always clear the completed hooks, no matter if we update
 	// the state or not.
+	// TODO XXX: don't do it like this. Imagine a case where the application
+	// has a low framerate and our window a way higher one.
+	// We clear this way too often and don't find anything completed
+	// during the update tick
+	// But we also don't want to keep like 100 completed states around, ugh.
+	// Maybe use something ring-buffer like instead? Directly inside CommandHook?
 	hook.clearCompleted();
 
 	// force-update shown batches when it's been too long
-	// TODO: fix this for updateTick_
-	if(mode_ == UpdateMode::swapchain && !freezeState_ && doUpdate) {
+	// TODO: do something like that also for non-swapchain mode?
+	//   when matching records are submitted but they don't contain the
+	//   selected command anymore.
+	updateMode = selector_.updateMode();
+	if(updateMode == UpdateMode::swapchain && !selector_.freezeState && doUpdate) {
 		auto lastPresent = dev.swapchain->frameSubmissions[0].presentID;
-		if(record_ && lastPresent > swapchainPresent_ + 4) {
-			auto diff = lastPresent - swapchainPresent_;
+		auto statePresent = selector_.hookStateSwapchainPresent();
+		if(selector_.submission() && lastPresent > statePresent + 4) {
+			auto diff = lastPresent - statePresent;
 
 			ImGui::SameLine();
 			imGuiText("Command not found in {} frames", diff);
@@ -194,12 +211,13 @@ void CommandBufferGui::draw(Draw& draw) {
 			// force update
 			if(!freezeCommands_) {
 				dlg_trace("force command update");
-				updateRecords(dev.swapchain->frameSubmissions[0].batches, false);
+				updateRecords(dev.swapchain->frameSubmissions[0].batches);
 			}
 		}
 	}
 
-	// TODO: do we really want/need this?
+	// TODO: re-add someting like this but in more beautiful
+	// Maybe to the settings popup?
 	// if(mode_ == UpdateMode::none) {
 	// 	imGuiText("Showing static record");
 	// } else if(mode_ == UpdateMode::commandBuffer) {
@@ -237,7 +255,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
 
-	if(mode_ == UpdateMode::swapchain) {
+	if(updateMode == UpdateMode::swapchain) {
 		displayFrameCommands();
 	} else {
 		displayRecordCommands();
@@ -252,38 +270,40 @@ void CommandBufferGui::draw(Draw& draw) {
 	// command info
 	ImGui::BeginChild("Command Info");
 
-	switch(selectionType_) {
+	switch(selector_.selectionType()) {
 		case SelectionType::none:
 			imGuiText("Nothing selected yet");
 			break;
-		case SelectionType::submission:
-			dlg_assert(mode_ == UpdateMode::swapchain);
-			dlg_assert(selectedBatch_);
-			if(!selectedBatch_) {
+		case SelectionType::submission: {
+			dlg_assert(updateMode == UpdateMode::swapchain);
+			auto* subm = selector_.submission();
+			dlg_assert(subm);
+			if(!subm) {
 				imGuiText("Error!");
 				break;
 			}
 
-			refButtonExpect(*gui_, selectedBatch_->queue);
-			imGuiText("{} records", selectedBatch_->submissions.size());
-			imGuiText("submissionID: {}", selectedBatch_->submissionID);
+			refButtonExpect(*gui_, subm->queue);
+			imGuiText("{} records", subm->submissions.size());
+			imGuiText("submissionID: {}", subm->submissionID);
 			break;
-		case SelectionType::record:
-			dlg_assert(selectedRecord_);
-			refButtonD(*gui_, selectedRecord_->cb);
-			imGuiText("cb name: {}", selectedRecord_->cbName ? selectedRecord_->cbName : "<unnamed>");
-			imGuiText("broken labels: {}{}", std::boolalpha, selectedRecord_->brokenHierarchyLabels);
-			imGuiText("record id: {}", selectedRecord_->recordID);
-			imGuiText("refCount: {}", selectedRecord_->refCount);
-			imGuiText("num hook records: {}", selectedRecord_->hookRecords.size());
-			imGuiText("num secondaries: {}", selectedRecord_->secondaries.size());
-			imGuiText("num pipeLayouts: {}", selectedRecord_->used.pipeLayouts.size());
-			imGuiText("num gfx pipes: {}", selectedRecord_->used.graphicsPipes.size());
-			imGuiText("num compute pipes: {}", selectedRecord_->used.computePipes.size());
-			imGuiText("num rt pipes: {}", selectedRecord_->used.rtPipes.size());
-			imGuiText("builds accel structs: {}", selectedRecord_->buildsAccelStructs);
+		} case SelectionType::record: {
+			auto* rec = selector_.record().get();
+			dlg_assert(rec);
+			refButtonD(*gui_, rec->cb);
+			imGuiText("cb name: {}", rec->cbName ? rec->cbName : "<unnamed>");
+			imGuiText("broken labels: {}{}", std::boolalpha, rec->brokenHierarchyLabels);
+			imGuiText("record id: {}", rec->recordID);
+			imGuiText("refCount: {}", rec->refCount);
+			imGuiText("num hook records: {}", rec->hookRecords.size());
+			imGuiText("num secondaries: {}", rec->secondaries.size());
+			imGuiText("num pipeLayouts: {}", rec->used.pipeLayouts.size());
+			imGuiText("num gfx pipes: {}", rec->used.graphicsPipes.size());
+			imGuiText("num compute pipes: {}", rec->used.computePipes.size());
+			imGuiText("num rt pipes: {}", rec->used.rtPipes.size());
+			imGuiText("builds accel structs: {}", rec->buildsAccelStructs);
 			break;
-		case SelectionType::command:
+		} case SelectionType::command:
 			commandViewer_.draw(draw);
 			break;
 	}
@@ -292,297 +312,73 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::EndTable();
 }
 
-// TODO: some code duplication here...
 void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) {
-	mode_ = UpdateMode::none;
-	cb_ = {};
-
-	// NOTE: we could try to find new command matching old description.
-	// if(record_ && !desc_.empty()) {
-	// 	command_ = CommandDesc::find(record_->commands, desc_);
-	// 	// update hooks here
-	// }
+	assertNotOwned(gui_->dev().mutex);
 
 	// Unset hooks
 	clearSelection(true);
-	openedSections_ = {};
 
-	record_ = std::move(record);
-	updateHookTarget();
-
+	record_ = record;
 	if(cmd) {
-		auto& dev = gui_->dev();
-
-		selectedCommand_ = findHierarchy(*record_, *cmd);
-		dlg_assert(!selectedCommand_.empty());
-
-		selectionType_ = SelectionType::command;
-		selectedRecord_ = record_;
-
-		// TODO:
-		// descriptors might already be destroyed, snapshotRelevantDescriptors won't help
-		auto dsSnapshot = snapshotRelevantDescriptors(dev, *selectedCommand_.back());
-		commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
-			dsSnapshot, true, nullptr);
+		command_ = findHierarchy(*record_, *cmd);
+		dlg_assert(!command_.empty());
 
 		// we want to open all sections up to the selected command
-		for(auto* hcmd : selectedCommand_) {
+		for(auto* hcmd : command_) {
 			dlg_assert(!!hcmd->children() == !!dynamic_cast<const ParentCommand*>(hcmd));
 			if(hcmd->children()) {
 				openedSections_.insert(static_cast<const ParentCommand*>(hcmd));
 			}
 		}
-
-		dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
-		dev.commandHook->freeze.store(false);
 	}
+
+	selector_.select(record, command_);
+	updateFromSelector();
 }
 
-void CommandBufferGui::select(IntrusivePtr<CommandRecord> record,
-		CommandBuffer& cb) {
-	mode_ = UpdateMode::commandBuffer;
-	cb_ = &cb;
+void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb) {
+	assertNotOwned(gui_->dev().mutex);
 
-	// NOTE: we could try to find new command matching old description.
-	// if(record_ && !desc_.empty()) {
-	// 	command_ = CommandDesc::find(record_->commands, desc_);
-	// 	// update hooks here
-	// }
-
-	// Unset hooks
 	clearSelection(true);
 	record_ = std::move(record);
-	openedSections_ = {};
-	updateHookTarget();
+	selector_.select(std::move(cb), record, {});
+	updateFromSelector();
 }
 
 void CommandBufferGui::showSwapchainSubmissions() {
-	mode_ = UpdateMode::swapchain;
-	cb_ = {};
-	clearSelection(true);
-
-	// NOTE: don't do that here, we explicitly preserve them.
-	// openedSections_ = {};
-}
-
-void CommandBufferGui::destroyed(const Handle& handle) {
-	(void) handle;
-
-	if(mode_ == UpdateMode::commandBuffer) {
-		dlg_assert(cb_ && record_);
-		if(cb_ == &handle) {
-			cb_ = nullptr;
-			mode_ = UpdateMode::none;
-
-			auto& hook = *gui_->dev().commandHook;
-			dlg_assert(!hook.target().cb || hook.target().cb == &handle);
-			hook.target({});
-		}
-	}
-
-	// otherwise we don't care as we only deal with recordings that have shared
-	// ownership, i.e. are kept alive by us.
-}
-
-void CommandBufferGui::updateHookTarget() {
-	CommandHook::HookTarget target {};
-
-	switch(mode_) {
-		case UpdateMode::none:
-			target.record = record_.get();
-			break;
-		case UpdateMode::any:
-		case UpdateMode::swapchain:
-			target.all = true;
-			break;
-		case UpdateMode::commandBuffer:
-			target.cb = cb_;
-			break;
-	}
-
-	auto& hook = *gui_->dev().commandHook;
-	hook.target(std::move(target));
-}
-
-void CommandBufferGui::updateState() {
 	auto& dev = gui_->dev();
-	auto& hook = *dev.commandHook;
+	assertNotOwned(dev.mutex);
+	dlg_assert(dev.swapchain);
 
-	// TODO: correctly implement for swapchain + batch/record selection.
-	// Just match with all (or just the latest?) finished frame and try
-	// to find equivalent there, updating record_.
-
-	// try to update the shown commands with the best new match
-	auto completed = hook.moveCompleted();
-	if(!completed.empty() && (!freezeState_ || !commandViewer_.state())) {
-		// find the best match
-		CommandHook::CompletedHook* best = nullptr;
-		auto bestMatch = 0.f;
-		ThreadMemScope tms;
-		FrameMatch bestMatchResult {};
-		u32 bestPresentID = {};
-		std::vector<FrameSubmission> bestBatches; // only for swapchain mode
-
-		for(auto& res : completed) {
-			float resMatch = res.match;
-			std::vector<FrameSubmission> foundBatches;
-			u32 presentID {};
-
-			// When we are in swapchain mode, we need the frame associated with
-			// this submission. We will then also consider the submission in its
-			// context inside the frame.
-			FrameMatch batchMatches;
-			if(mode_ == UpdateMode::swapchain) {
-				dlg_assert(selectionType_ == SelectionType::command);
-
-				{
-					std::lock_guard lock(dev.mutex);
-					for(auto& frame : gui_->dev().swapchain->frameSubmissions) {
-						if(res.submissionID >= frame.submissionStart && res.submissionID <= frame.submissionEnd) {
-							foundBatches = frame.batches;
-							presentID = frame.presentID;
-							break;
-						}
-					}
-				}
-
-				// when the hook is from too long ago, we won't
-				if(foundBatches.empty()) {
-					dlg_warn("Couldn't find frame associated to hooked submission");
-					continue;
-				}
-
-				dlg_assert(!selectedFrame_.empty());
-
-				// check if [selectedRecord_ in selectedFrame_] contextually
-				// matches  [res.record in foundBatches]
-				LinAllocScope localMatchMem(matchAlloc_);
-				batchMatches = match(tms, localMatchMem, selectedFrame_, foundBatches);
-				bool recordMatched = false;
-				for(auto& batchMatch : batchMatches.matches) {
-					if(batchMatch.b->submissionID != res.submissionID) {
-						continue;
-					}
-
-					for(auto& recMatch : batchMatch.matches) {
-						if(recMatch.b != res.record) {
-							continue;
-						}
-
-						if(recMatch.a == selectedRecord_.get()) {
-							recordMatched = true;
-							resMatch *= eval(recMatch.match);
-
-							// TODO: For all parent commands, we could make
-							// sure that they match.
-							// I.e. (command_[i], res.command[i]) somewhere
-							// in the recMatch.matches[X]...matches hierarchy
-						}
-
-						break;
-					}
-
-					break;
-				}
-
-				// In this case, the newly hooked potentialy candidate did
-				// not match with our previous record in content; we won't use it.
-				if(!recordMatched) {
-					dlg_info("Hooked record did not match. Total match: {}, match count {}",
-						eval(batchMatches.match), batchMatches.matches.size());
-					continue;
-				}
-			}
-
-			if(resMatch > bestMatch) {
-				best = &res;
-				bestMatch = resMatch;
-				bestBatches = foundBatches;
-				bestPresentID = presentID;
-				bestMatchResult = batchMatches;
-			}
-		}
-
-		if(best) {
-			// we alwyas update the commandHook desc (even if we don't
-			// update the internal state below) since this record is newer
-			// than the old one and might have valid handles/state that is
-			// already unset in the old one.
-			dev.commandHook->desc(best->record, best->command,
-				best->descriptorSnapshot, false);
-
-			// Update internal state state from hook match
-			// In swapchain mode - and when not freezing commands - make
-			// sure to also display the new frame
-			if(mode_ == UpdateMode::swapchain) {
-				swapchainPresent_ = bestPresentID;
-
-				if(!freezeCommands_) {
-					// TODO PERF: can re-use bestMatchResult in many cases,
-					updateRecords({bestBatches.begin(), bestBatches.end()}, false);
-					selectedFrame_ = {bestBatches.begin(), bestBatches.end()};
-					selectedCommand_ = best->command;
-					selectedRecord_ = best->record;
-					record_ = best->record;
-				}
-			} else if(!freezeCommands_) {
-				selectedCommand_ = best->command;
-				updateRecord(best->record);
-			}
-
-			// update command viewer state from hook match
-			// TODO: this call messes with the commandHook, potentially
-			// invalidated 'best'. And messing with freeze. Should
-			// clean up responsibilities here. If we don't have
-			// to call this here, we could also move from the vectors
-			// from *best above.
-			commandViewer_.select(best->record, *best->command.back(),
-				best->descriptorSnapshot, false, best->state);
-			hook.stillNeeded(best->state.get());
-
-			// in this case, we want to freeze state but temporarily
-			// unfroze it to get a new CommandHookState. This happens
-			// e.g. when selecting a new command or viewed resource
-			if(!hook.freeze && freezeState_) {
-				hook.freeze = true;
-			}
-		}
+	std::vector<FrameSubmission> lastFrame;
+	{
+		std::lock_guard lock(dev.mutex);
+		lastFrame = dev.swapchain->frameSubmissions[0].batches;
 	}
 
-	// When no command was selected yet, we won't get any new records
-	// from CommandHook. But still want to show the new commands.
-	if(!freezeCommands_ && selectedCommand_.empty()) {
-		if(mode_ == UpdateMode::swapchain) {
-			dlg_assert(selectionType_ != SelectionType::command);
-			updateRecords(gui_->dev().swapchain->frameSubmissions[0].batches, true);
-			swapchainPresent_ = gui_->dev().swapchain->frameSubmissions[0].presentID;
-		} else if(mode_ == UpdateMode::commandBuffer) {
-			dlg_assert(cb_);
-			updateRecord(cb_->lastRecordPtrLocked());
-		} else if(mode_ == UpdateMode::any) {
-			// TODO: correct updating, iterate through all submissions
-			// in the last frames and find the best record match. ouch.
-			dlg_error("TODO: shown commands not correctly updated until selected");
-		}
-	}
+	clearSelection(true);
+	selector_.select(std::move(lastFrame), u32(-1), nullptr, {});
+	updateFromSelector();
+}
+
+void CommandBufferGui::destroyed(const Handle&) {
+	// TODO: something to do here?
 }
 
 void CommandBufferGui::displayFrameCommands() {
-	auto& dev = gui_->dev();
-
-	if(records_.empty() && !gui_->dev().swapchain->frameSubmissions.empty()) {
-		records_ = gui_->dev().swapchain->frameSubmissions[0].batches;
+	if(frame_.empty() &&
+			!gui_->dev().swapchain->frameSubmissions[0].batches.empty()) {
+		dlg_warn("how did this happen?");
+		frame_ = gui_->dev().swapchain->frameSubmissions[0].batches;
 	}
 
 	const Command* selectedCommand = nullptr;
-	if(selectionType_ == SelectionType::command) {
-		dlg_assert(record_);
-		dlg_assert(!selectedCommand_.empty());
-		selectedCommand = selectedCommand_.back();
+	if(!command_.empty()) {
+		selectedCommand = command_.back();
 	}
 
-	for(auto b = 0u; b < records_.size(); ++b) {
-		auto& batch = records_[b];
+	for(auto b = 0u; b < frame_.size(); ++b) {
+		auto& batch = frame_[b];
 		if(b > 0) {
 			ImGui::Separator();
 		}
@@ -599,11 +395,8 @@ void CommandBufferGui::displayFrameCommands() {
 		}
 
 		// check if this vkQueueSubmit was selected
-		if(selectionType_ == SelectionType::submission && selectedBatch_ &&
-				// TODO: this comparison is kinda hacky.
-				// batch comes from records_ while selectedBatch_ comes
-				// from selectedFrame_, that's why we can't compare pointers.
-				selectedBatch_->submissionID == batch.submissionID) {
+		if(submission_ == &batch && !record_) {
+			dlg_assert(command_.empty());
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 
@@ -613,10 +406,13 @@ void CommandBufferGui::displayFrameCommands() {
 		const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit");
 		const auto labelStartX = ImGui::GetItemRectMin().x + 30;
 		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
-			clearSelection(true);
-			selectionType_ = SelectionType::submission;
-			selectedFrame_ = records_;
-			selectedBatch_ = &selectedFrame_[b];
+			submission_ = &batch;
+			record_ = nullptr;
+			command_ = {};
+
+			auto submID = u32(submission_ - frame_.data());
+			selector_.select(frame_, submID, record_, command_);
+			commandViewer_.unselect();
 		}
 
 		// check if open state changed
@@ -654,7 +450,9 @@ void CommandBufferGui::displayFrameCommands() {
 			auto flags = ImGuiTreeNodeFlags_FramePadding |
 				ImGuiTreeNodeFlags_OpenOnArrow |
 				ImGuiTreeNodeFlags_OpenOnDoubleClick;
-			if(selectionType_ == SelectionType::record && selectedRecord_ == rec) {
+
+			// check if record was selected
+			if(record_ == rec.get() && command_.empty()) {
 				flags |= ImGuiTreeNodeFlags_Selected;
 			}
 
@@ -664,11 +462,13 @@ void CommandBufferGui::displayFrameCommands() {
 			const auto open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name);
 			const auto labelStartX = ImGui::GetItemRectMin().x + 30;
 			if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
-				clearSelection(true);
-				selectionType_ = SelectionType::record;
-				selectedRecord_ = rec;
-				selectedFrame_ = records_;
-				selectedBatch_ = &selectedFrame_[b];
+				submission_ = &batch;
+				record_ = rec;
+				command_ = {};
+
+				auto submID = u32(submission_ - frame_.data());
+				selector_.select(frame_, submID, record_, command_);
+				commandViewer_.unselect();
 			}
 
 			// check if open state changed
@@ -702,31 +502,16 @@ void CommandBufferGui::displayFrameCommands() {
 			auto nsel = std::move(visitor.newSelection_);
 
 			auto newSelection = !nsel.empty() && (
-				selectedCommand_.empty() ||
-				nsel.back() != selectedCommand_.back());
+				command_.empty() ||
+				nsel.back() != command_.back());
 			if(newSelection) {
-				clearSelection(false);
-
-				selectionType_ = SelectionType::command;
-				selectedCommand_ = std::move(nsel);
-				selectedRecord_ = rec;
-				selectedFrame_ = records_;
-				selectedBatch_ = &selectedFrame_[b];
+				submission_ = &batch;
 				record_ = rec;
+				command_ = std::move(nsel);
 
-				// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
-				//  descriptors might already be destroyed here, snapshotRelevantDescriptors won't help
-				//  maybe make that an option via gui or something
-				auto dsSnapshot = snapshotRelevantDescriptors(dev, *selectedCommand_.back());
-				commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
-					dsSnapshot, true, nullptr);
-
-				CommandHook::HookTarget target {};
-				target.all = true;
-				dev.commandHook->target(std::move(target));
-				dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
-				dev.commandHook->freeze.store(false);
-				dev.commandHook->stillNeeded(nullptr);
+				auto submID = u32(submission_ - frame_.data());
+				selector_.select(frame_, submID, record_, command_);
+				updateCommandViewer(true);
 			}
 
 			ImGui::Indent(s);
@@ -739,10 +524,9 @@ void CommandBufferGui::displayFrameCommands() {
 }
 
 void CommandBufferGui::displayRecordCommands() {
-	auto& dev = gui_->dev();
 	dlg_assert(record_);
 
-	auto* selected = selectedCommand_.empty() ? nullptr : selectedCommand_.back();
+	auto* selected = command_.empty() ? nullptr : command_.back();
 
 	if(!brokenLabelNesting_ && record_->brokenHierarchyLabels) {
 		brokenLabelNesting_ = true;
@@ -760,124 +544,37 @@ void CommandBufferGui::displayRecordCommands() {
 	auto nsel = std::move(visitor.newSelection_);
 
 	auto newSelection = !nsel.empty() && (
-		selectedCommand_.empty() ||
-		nsel.back() != selectedCommand_.back());
+		command_.empty() ||
+		nsel.back() != command_.back());
 	if(newSelection) {
-		if(mode_ == UpdateMode::none) {
-			dlg_assert(dev.commandHook->target().record == record_.get());
-		} else if(mode_ == UpdateMode::commandBuffer) {
-			dlg_assert(cb_);
-			dlg_assert(dev.commandHook->target().cb == cb_);
-		} else if(mode_ == UpdateMode::any) {
-			dlg_assert(dev.commandHook->target().all);
+		command_ = std::move(nsel);
+
+		// TODO: add cleaner, automatic overload to Selector?
+		if(selector_.cb()) {
+			selector_.select(
+				selector_.cbPtr(),
+				record_, command_);
+		} else {
+			selector_.select(record_, command_);
 		}
-
-		selectionType_ = SelectionType::command;
-		selectedCommand_ = std::move(nsel);
-		selectedRecord_ = record_;
-
-		// TODO: do full snapshot in hook and use that here (if we already have a completed hook)?
-		//  descriptors might already be destroyed, snapshotRelevantDescriptors won't help
-		//  maybe make that an option via gui or something
-		auto dsSnapshot = snapshotRelevantDescriptors(dev, *selectedCommand_.back());
-		commandViewer_.select(selectedRecord_, *selectedCommand_.back(),
-			dsSnapshot, true, nullptr);
-
-		// in any case, update the hook
-		dev.commandHook->desc(selectedRecord_, selectedCommand_, dsSnapshot);
-		dev.commandHook->freeze.store(false);
-		dev.commandHook->stillNeeded(nullptr);
 	}
 }
 
 void CommandBufferGui::clearSelection(bool unselectCommandViewer) {
-	auto& dev = gui_->dev();
-
 	if(unselectCommandViewer) {
 		commandViewer_.unselect();
 	}
 
-	selectionType_ = SelectionType::none;
-	selectedFrame_ = {};
-	selectedBatch_ = nullptr;
-	selectedRecord_ = {};
-	selectedCommand_ = {};
+	selector_.unselect();
 
-	dev.commandHook->target({});
-	dev.commandHook->ops({});
-	dev.commandHook->desc({}, {}, {});
-	dev.commandHook->stillNeeded(nullptr);
+	frame_.clear();
+	submission_ = {};
+	record_.reset();
+	command_.clear();
 
-	if (mode_ == UpdateMode::swapchain) {
-		record_ = {};
-	}
-}
-
-void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records,
-		bool updateSelection) {
-	// update records
-	{
-		ThreadMemScope tms;
-		LinAllocScope localMatchMem(matchAlloc_);
-		auto recCopy = records;
-		auto frameMatch = match(tms, localMatchMem, records_, recCopy);
-		updateRecords(frameMatch, std::move(recCopy));
-	}
-
-	// update selection
-	if(selectionType_ == SelectionType::none) {
-		dlg_assert(!selectedBatch_);
-		dlg_assert(!selectedRecord_);
-		updateSelection = false;
-	}
-
-	if(!updateSelection) {
-		return;
-	}
-
-	dlg_assert(selectionType_ != SelectionType::command);
-
-	// TODO PERF: can re-use frameMatch in many cases,
-	ThreadMemScope tms;
-	LinAllocScope localMatchMem(matchAlloc_);
-	auto selMatch = match(tms, localMatchMem, selectedFrame_, records);
-
-	std::optional<u32> newSelectedBatch = {};
-	IntrusivePtr<CommandRecord> newSelectedRecord = {};
-
-	for(auto batchMatch : selMatch.matches) {
-		if(updateSelection && selectedBatch_ == batchMatch.a) {
-			dlg_assert(!newSelectedBatch);
-
-			// TODO: kinda hacky. But needed since the FrameSubmission
-			// references in frameMatch might not directly reference
-			// into records
-			auto cmp = [&](const FrameSubmission& rec) {
-				return rec.submissionID == batchMatch.b->submissionID;
-			};
-			auto it = find_if(records, cmp);
-			dlg_assert(it != records.end());
-			newSelectedBatch = u32(it - records.begin());
-		}
-
-		for(auto& recordMatch : batchMatch.matches) {
-			if(updateSelection && selectedRecord_ == recordMatch.a) {
-				newSelectedRecord.reset(const_cast<CommandRecord*>(recordMatch.b));
-			}
-		}
-	}
-
-	if(selectionType_ == SelectionType::submission) {
-		updateSelection = updateSelection && !!newSelectedBatch;
-	} else if(selectionType_ == SelectionType::record) {
-		updateSelection = updateSelection && !!newSelectedBatch && !!newSelectedRecord;
-	}
-
-	if(updateSelection) {
-		selectedFrame_ = records;
-		selectedBatch_ = &selectedFrame_[*newSelectedBatch];
-		selectedRecord_ = std::move(newSelectedRecord);
-	}
+	openedSections_.clear();
+	openedSubmissions_.clear();
+	openedRecords_.clear();
 }
 
 // util
@@ -944,15 +641,50 @@ void CommandBufferGui::updateRecords(const FrameMatch& frameMatch,
 	}
 
 	// apply
-	records_ = std::move(records);
+	frame_ = std::move(records);
 	openedSubmissions_ = std::move(newOpenSubmissions);
 	openedRecords_ = std::move(newOpenRecords);
 	openedSections_ = std::move(newOpenSections);
 }
 
+void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records) {
+	// update records
+	ThreadMemScope tms;
+	LinAllocScope localMatchMem(matchAlloc_);
+	auto frameMatch = match(tms, localMatchMem, frame_, records);
+	updateRecords(frameMatch, std::move(records));
+}
+
 void CommandBufferGui::updateRecord(IntrusivePtr<CommandRecord> record) {
-	dlg_trace("TODO");
+	dlg_trace("TODO: implement opened section matching for single record mode");
 	record_ = std::move(record);
+}
+
+void CommandBufferGui::updateFromSelector() {
+	if(selector_.updateMode() == UpdateMode::swapchain) {
+		auto frameSpan = selector_.frame();
+		updateRecords({frameSpan.begin(), frameSpan.end()});
+
+		if(selector_.submission()) {
+			auto submID = selector_.submission() - frameSpan.data();
+			submission_ = &frame_[submID];
+		} else {
+			submission_ = nullptr;
+		}
+
+		record_ = selector_.record();
+	} else {
+		updateRecord(selector_.record());
+	}
+
+	auto commandSpan = selector_.command();
+	command_ = {commandSpan.begin(), commandSpan.end()};
+}
+
+void CommandBufferGui::updateCommandViewer(bool resetState) {
+	commandViewer_.select(selector_.record(),
+		*selector_.command().back(), selector_.descriptorSnapshot(),
+		resetState, selector_.completedHookState());
 }
 
 } // namespace vil

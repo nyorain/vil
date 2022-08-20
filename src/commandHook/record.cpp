@@ -9,6 +9,7 @@
 #include <stats.hpp>
 #include <buffer.hpp>
 #include <image.hpp>
+#include <swapchain.hpp>
 #include <pipe.hpp>
 #include <accelStruct.hpp>
 #include <cb.hpp>
@@ -265,7 +266,7 @@ void CommandHookRecord::dispatchRecord(Command& cmd, RecordInfo& info) {
 		info.rebindComputeState = false;
 	}
 
-	cmd.record(*record->dev, this->cb);
+	cmd.record(*record->dev, this->cb, this->record->queueFamily);
 }
 
 void CommandHookRecord::hookRecordBeforeDst(Command& dst, RecordInfo& info) {

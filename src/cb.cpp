@@ -130,8 +130,9 @@ CommandBuffer::~CommandBuffer() {
 		return;
 	}
 
-	dlg_assert(pool_);
-	dlg_assert(handle_);
+	// NOTE: we can't assume this anymore.
+	// dlg_assert(pool_);
+	// dlg_assert(handle_);
 
 	// Wait for completion, free all data and allocated stuff,
 	// unregister from everything
@@ -160,13 +161,6 @@ CommandBuffer::~CommandBuffer() {
 	if(!HandleDesc<VkCommandBuffer>::wrap) {
 		eraseData(handle_);
 	}
-
-	// Remove ourselves from the pool we come from.
-	// A command pool can't be destroyed before its command buffers (it
-	// implicitly frees them).
-	auto it = find(pool_->cbs, this);
-	dlg_assert(it != pool_->cbs.end());
-	pool_->cbs.erase(it);
 }
 
 void CommandBuffer::clearPendingLocked() {
@@ -350,24 +344,28 @@ CommandPool::~CommandPool() {
 
 	// When a CommandPool is destroyed, all command buffers created from
 	// it are automatically freed.
-	// NOTE: we don't need a lock here:
-	// While the command pool is being destroyed, no command buffers from it
-	// can be created or destroyed in another thread, that would always be a
-	// race. So accessing this vector is safe.
-	// (Just adding a lock here would furthermore result in deadlocks due
-	// to the mutexes locked inside the loop, don't do it!)
-	// We don't use a for loop since the command buffers remove themselves
-	// on destruction
+	// But since CommandBuffer has shared ownership, we need special handling
+	// here.
 
-	while(!cbs.empty()) {
+	{
+		// unset ourselves in all
+		std::lock_guard lock(dev->mutex);
+		for(auto& cb : cbs) {
+			cb->pool_ = nullptr;
+			cb->handle_ = {}; // can't be used by application anymore
+		}
+	}
+
+	// now this->cbs can't be accessed from any thread since we unset
+	// ourselves with all CommandBuffers
+	for(auto& cb : cbs) {
 		if(HandleDesc<VkCommandBuffer>::wrap) {
 			// TODO: ugh, this is terrible, should find a cleaner solution
-			auto* cbp = reinterpret_cast<std::byte*>(cbs[0]);
+			auto* cbp = reinterpret_cast<std::byte*>(cb);
 			cbp -= offsetof(WrappedHandle<CommandBuffer>, obj_);
 			auto h = u64ToHandle<VkCommandBuffer>(reinterpret_cast<std::uintptr_t>(cbp));
 			dev->commandBuffers.mustErase(h);
 		} else {
-			auto* cb = cbs[0];
 			dev->commandBuffers.mustErase(cb->handle());
 		}
 	}
@@ -457,7 +455,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 	for(auto i = 0u; i < pAllocateInfo->commandBufferCount; ++i) {
 		auto handle = pCommandBuffers[i];
 
-		auto cbPtr = UniqueWrappedPtr<CommandBuffer>(new WrappedHandle<CommandBuffer>(pool, handle));
+		auto cbPtr = IntrusiveWrappedPtr<CommandBuffer>(new WrappedHandle<CommandBuffer>(pool, handle));
 		auto& cb = *cbPtr;
 
 		cb.dev = &dev;
@@ -466,7 +464,7 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 
 		// command buffers are dispatchable, add global data entry
 		if(!HandleDesc<VkCommandBuffer>::wrap) {
-			vil::insertData(cb.handle(), &cb);
+			vil::insertData(cb.handle(), cbPtr.wrapped());
 		} else {
 			dev.setDeviceLoaderData(dev.handle, pCommandBuffers[i]);
 			pCommandBuffers[i] = castDispatch<VkCommandBuffer>(dev, *cbPtr.wrapped());
@@ -490,7 +488,13 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 	auto handles = memScope.alloc<VkCommandBuffer>(commandBufferCount);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
-		handles[i] = dev.commandBuffers.mustMove(pCommandBuffers[i])->handle();
+		auto& cb = *dev.commandBuffers.mustMove(pCommandBuffers[i]);
+		handles[i] = cb.handle();
+		// TODO: unset handle
+
+		auto it = find(pool.cbs, &cb);
+		dlg_assert(it != pool.cbs.end());
+		pool.cbs.erase(it);
 	}
 
 	dev.dispatch.FreeCommandBuffers(dev.handle, pool.handle,
@@ -639,13 +643,11 @@ template<typename T>
 auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
 	ExtZoneScoped;
 	auto& set = GetUsedSet::get(rec, handle);
-
-	// TODO: more efficient find with C++20
-	RefHandle<T> rh(rec.alloc);
-	rh.handle.reset(&handle);
-	auto it = set.find(rh);
+	auto it = find(set, handle);
 
 	if(it == set.end()) {
+		RefHandle<T> rh(rec.alloc);
+		rh.handle.reset(&handle);
 		it = set.insert(std::move(rh)).first;
 	} else {
 		dlg_assert(handle.refCount > 1u);
@@ -660,13 +662,11 @@ auto& useHandleImpl(CommandRecord& rec, Command& cmd, T& handle) {
 UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 	ExtZoneScoped;
 	auto& set = rec.used.images;
-
-	// TODO: more efficient find with C++20
-	UsedImage rh(rec.alloc);
-	rh.handle.reset(&img);
-	auto it = set.find(rh);
+	auto it = find(set, img);
 
 	if(it == set.end()) {
+		UsedImage rh(rec.alloc);
+		rh.handle.reset(&img);
 		it = set.insert(std::move(rh)).first;
 	} else {
 		dlg_assert(img.refCount > 1u);
@@ -681,13 +681,11 @@ UsedImage& useHandleImpl(CommandRecord& rec, Command& cmd, Image& img) {
 UsedDescriptorSet& useHandleImpl(CommandRecord& rec, Command& cmd, DescriptorSet& ds) {
 	ExtZoneScoped;
 	auto& set = rec.used.descriptorSets;
-
-	// TODO: more efficient find with C++20
-	UsedDescriptorSet rh(rec.alloc);
-	rh.ds = static_cast<void*>(&ds);
-	auto it = set.find(rh);
+	auto it = find(set, ds);
 
 	if(it == set.end()) {
+		UsedDescriptorSet rh(rec.alloc);
+		rh.ds = static_cast<void*>(&ds);
 		it = set.insert(std::move(rh)).first;
 	}
 
@@ -765,15 +763,52 @@ decltype(auto) useHandle(CommandBuffer& cb, Args&&... args) {
 
 // commands
 void cmdBarrier(
-		CommandBuffer& 								cb,
-		BarrierCmdBase& 							cmd,
-		VkPipelineStageFlags                        srcStageMask,
-		VkPipelineStageFlags                        dstStageMask) {
+		CommandBuffer& cb,
+		BarrierCmdBase& cmd,
+		VkPipelineStageFlags srcStageMask,
+		VkPipelineStageFlags dstStageMask) {
 	ExtZoneScoped;
 
 	cmd.srcStageMask = srcStageMask;
 	cmd.dstStageMask = dstStageMask;
-	cmd.recordQueueFamilyIndex = cb.pool().queueFamily;
+
+	cmd.images = alloc<Image*>(cb, cmd.imgBarriers.size());
+	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
+		auto& imgb = cmd.imgBarriers[i];
+		copyChainInPlace(cb, imgb.pNext);
+
+		auto& img = get(*cb.dev, imgb.image);
+		cmd.images[i] = &img;
+		useHandle(cb, cmd, img, imgb.newLayout);
+
+		imgb.image = img.handle;
+	}
+
+	cmd.buffers = alloc<Buffer*>(cb, cmd.bufBarriers.size());
+	for(auto i = 0u; i < cmd.bufBarriers.size(); ++i) {
+		auto& bufb = cmd.bufBarriers[i];
+		copyChainInPlace(cb, bufb.pNext);
+
+		auto& buf = get(*cb.dev, bufb.buffer);
+		cmd.buffers[i] = &buf;
+		useHandle(cb, cmd, buf);
+
+		bufb.buffer = buf.handle;
+	}
+
+	for(auto& mem : cmd.memBarriers) {
+		copyChainInPlace(cb, mem.pNext);
+	}
+}
+
+void cmdBarrier(CommandBuffer& cb, Barrier2CmdBase& cmd,
+		const VkDependencyInfo& di) {
+	ExtZoneScoped;
+
+	cmd.imgBarriers = copySpan(cb, di.pImageMemoryBarriers, di.imageMemoryBarrierCount);
+	cmd.bufBarriers = copySpan(cb, di.pBufferMemoryBarriers, di.bufferMemoryBarrierCount);
+	cmd.memBarriers = copySpan(cb, di.pMemoryBarriers, di.memoryBarrierCount);
+	cmd.flags = di.dependencyFlags;
 
 	cmd.images = alloc<Image*>(cb, cmd.imgBarriers.size());
 	for(auto i = 0u; i < cmd.imgBarriers.size(); ++i) {
@@ -832,7 +867,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		useHandle(cb, cmd, event);
 	}
 
-	cmd.record(*cb.dev, cb.handle());
+	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
@@ -856,7 +891,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 
 	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
 
-	cmd.record(*cb.dev, cb.handle());
+	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
 }
 
 void cmdBeginRenderPass(CommandBuffer& cb,
@@ -1791,11 +1826,12 @@ VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
 	auto& cb = getCommandBuffer(commandBuffer);
 	auto& cmd = addCmd<ResetEventCmd>(cb);
 	cmd.event = &cb.dev->events.get(event);
-	cmd.stageMask = stageMask;
+	cmd.stageMask = VkPipelineStageFlags2(stageMask);
+	cmd.legacy = true;
 
 	useHandle(cb, cmd, *cmd.event);
 
-	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
+	cb.dev->dispatch.CmdResetEvent(cb.handle(), cmd.event->handle, stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
@@ -2122,6 +2158,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
 	cmd.pool = &cb.dev->queryPools.get(queryPool);
 	cmd.stage = pipelineStage;
 	cmd.query = query;
+	cmd.legacy = true;
 
 	useHandle(cb, cmd, *cmd.pool);
 
@@ -2621,7 +2658,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
 	cb.dev->dispatch.CmdSetLineStippleEXT(cb.handle(), lineStippleFactor, lineStipplePattern);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetCullModeEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetCullMode(
 		VkCommandBuffer                             commandBuffer,
 		VkCullModeFlags                             cullMode) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2631,7 +2668,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetCullModeEXT(
 	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle(), cullMode);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetFrontFaceEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetFrontFace(
 		VkCommandBuffer                             commandBuffer,
 		VkFrontFace                                 frontFace) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2641,7 +2678,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetFrontFaceEXT(
 	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle(), frontFace);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopologyEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopology(
 		VkCommandBuffer                             commandBuffer,
 		VkPrimitiveTopology                         primitiveTopology) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2651,7 +2688,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopologyEXT(
 	cb.dev->dispatch.CmdSetPrimitiveTopologyEXT(cb.handle(), primitiveTopology);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCountEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCount(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    viewportCount,
 		const VkViewport*                           pViewports) {
@@ -2663,7 +2700,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCountEXT(
 		pViewports);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCountEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCount(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    scissorCount,
 		const VkRect2D*                             pScissors) {
@@ -2675,7 +2712,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCountEXT(
 		pScissors);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
+VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2(
 		VkCommandBuffer                             commandBuffer,
 		uint32_t                                    firstBinding,
 		uint32_t                                    bindingCount,
@@ -2692,7 +2729,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2EXT(
 		pStrides);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnable(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    depthTestEnable) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2702,7 +2739,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnableEXT(
 	cb.dev->dispatch.CmdSetDepthTestEnableEXT(cb.handle(), depthTestEnable);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnable(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    depthWriteEnable) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2712,7 +2749,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnableEXT(
 	cb.dev->dispatch.CmdSetDepthWriteEnableEXT(cb.handle(), depthWriteEnable);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOpEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOp(
 		VkCommandBuffer                             commandBuffer,
 		VkCompareOp                                 depthCompareOp) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2722,7 +2759,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOpEXT(
 	cb.dev->dispatch.CmdSetDepthCompareOpEXT(cb.handle(), depthCompareOp);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnable(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    depthBoundsTestEnable) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2732,7 +2769,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnableEXT(
 	cb.dev->dispatch.CmdSetDepthBoundsTestEnableEXT(cb.handle(), depthBoundsTestEnable);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnableEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnable(
 		VkCommandBuffer                             commandBuffer,
 		VkBool32                                    stencilTestEnable) {
 	auto& cb = getCommandBuffer(commandBuffer);
@@ -2742,7 +2779,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnableEXT(
 	cb.dev->dispatch.CmdSetStencilTestEnableEXT(cb.handle(), stencilTestEnable);
 }
 
-VKAPI_ATTR void VKAPI_CALL CmdSetStencilOpEXT(
+VKAPI_ATTR void VKAPI_CALL CmdSetStencilOp(
 		VkCommandBuffer                             commandBuffer,
 		VkStencilFaceFlags                          faceMask,
 		VkStencilOp                                 failOp,
@@ -3162,7 +3199,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
 	dlg_assert(!gs.rpi);
 	gs.rpi = &cmd.rpi;
 
-	cmd.record(*cb.dev, cb.handle());
+	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
@@ -3172,6 +3209,81 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
 	(void) cmd;
 
 	cb.dev->dispatch.CmdEndRenderingKHR(cb.handle());
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdSetEvent2(
+		VkCommandBuffer                             commandBuffer,
+		VkEvent                                     event,
+		const VkDependencyInfo*                     pDependencyInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetEvent2Cmd>(cb);
+	cmd.event = &cb.dev->events.get(event);
+	cmdBarrier(cb, cmd, *pDependencyInfo);
+
+	useHandle(cb, cmd, *cmd.event);
+
+	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdResetEvent2(
+		VkCommandBuffer                             commandBuffer,
+		VkEvent                                     event,
+		VkPipelineStageFlags2                       stageMask) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<ResetEventCmd>(cb);
+	cmd.event = &cb.dev->events.get(event);
+	cmd.stageMask = stageMask;
+	cmd.legacy = false;
+
+	useHandle(cb, cmd, *cmd.event);
+
+	cb.dev->dispatch.CmdResetEvent2(cb.handle(), cmd.event->handle, stageMask);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdWaitEvents2(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    eventCount,
+		const VkEvent*                              pEvents,
+		const VkDependencyInfo*                     pDependencyInfos) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<WaitEvents2Cmd>(cb);
+	cmdBarrier(cb, cmd, *pDependencyInfos);
+
+	cmd.events = alloc<Event*>(cb, eventCount);
+	for(auto i = 0u; i < eventCount; ++i) {
+		auto& event = get(*cb.dev, pEvents[i]);
+		cmd.events[i] = &event;
+		useHandle(cb, cmd, event);
+	}
+
+	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier2(
+		VkCommandBuffer                             commandBuffer,
+		const VkDependencyInfo*                     pDependencyInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<Barrier2Cmd>(cb);
+	cmdBarrier(cb, cmd, *pDependencyInfo);
+
+	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp2(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineStageFlags2                       stage,
+		VkQueryPool                                 queryPool,
+		uint32_t                                    query) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<WriteTimestampCmd>(cb);
+	cmd.pool = &cb.dev->queryPools.get(queryPool);
+	cmd.stage = stage;
+	cmd.query = query;
+	cmd.legacy = false;
+
+	useHandle(cb, cmd, *cmd.pool);
+
+	cb.dev->dispatch.CmdWriteTimestamp2(cb.handle(), stage, cmd.pool->handle, query);
 }
 
 } // namespace vil

@@ -6,12 +6,8 @@
 #include <gui/vertexViewer.hpp>
 #include <gui/command.hpp>
 #include <gui/update.hpp>
+#include <gui/commandSelection.hpp>
 #include <util/flags.hpp>
-
-// TODO: maybe we should just get rid of the non-swapchain update modes.
-// They are unreliable and make this class a lot more complicated
-// than it should be. The main usecase is swapchain-mode anyways.
-// But not sure, maybe others find it useful.
 
 namespace vil {
 
@@ -19,22 +15,6 @@ struct FrameSubmission;
 struct FrameMatch;
 
 class CommandBufferGui {
-public:
-	// Defines from which source the displayed commands are updated.
-	enum class UpdateMode {
-		none, // does not update them at all. Displays static record
-		commandBuffer, // always displays current record of commandBuffer
-		any, // always displays the last submission matching the selection
-		swapchain, // displays all commands between two swapchain presents
-	};
-
-	enum class SelectionType {
-		none,
-		submission,
-		record,
-		command,
-	};
-
 public:
 	CommandBufferGui() = default;
 	~CommandBufferGui();
@@ -46,61 +26,48 @@ public:
 
 	void showSwapchainSubmissions();
 	void select(IntrusivePtr<CommandRecord> record, Command* cmd = nullptr);
-	void select(IntrusivePtr<CommandRecord> record, CommandBuffer& cb);
+	void select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb);
 
 	auto& commandViewer() { return commandViewer_; }
-
-	bool freezeState() const { return freezeState_; }
-	void freezeState(bool freeze) { freezeState_ = freeze; }
+	auto& selector() { return selector_; }
 
 private:
-	void updateState();
-	void updateHookTarget();
+	// void updateState();
+	// void updateHookTarget(
+	// 	std::optional<CommandDescriptorSnapshot> descriptors = {});
+	void updateFromSelector();
+	void updateCommandViewer(bool resetState);
 
 	void displayFrameCommands();
 	void displayRecordCommands();
 	void clearSelection(bool unselectCommandViewer);
 
 	void updateRecord(IntrusivePtr<CommandRecord> record);
-	void updateRecords(std::vector<FrameSubmission>, bool updateSelection);
+	void updateRecords(std::vector<FrameSubmission>);
 	void updateRecords(const FrameMatch&, std::vector<FrameSubmission>&&);
 
 private:
 	friend class Gui;
 	Gui* gui_ {};
-
-	UpdateMode mode_ {};
-	CommandBuffer* cb_ {}; // when updating from cb
-
-	// The command record we are currently viewing.
-	// We make sure it stays alive. In swapchain mode, this is nullptr
-	// if we don't have a selected record, otherwise it's the same as
-	// selectedRecord_ (TODO: kinda redundant, merge with selectedRecord_).
-	IntrusivePtr<CommandRecord> record_ {};
-
-	// For swapchain
-	std::vector<FrameSubmission> records_; // currently viewed frame; i.e. the displayed commands
-	u32 swapchainPresent_ {}; // present id of last time we got a completed hook
 	bool freezeCommands_ {};
-	bool freezeState_ {};
 
-	SelectionType selectionType_ {};
+	// = For selectionType_ swapchain =
+	// Currently viewed frame; i.e. the displayed commands in the command panel.
+	// Might be different (newer) from selectedFrame_ in case we force-updated
+	// the commands due to not finding the selected command anymore but
+	// wanting to show fresh commands.
+	std::vector<FrameSubmission> frame_;
+	// part of frame_
+	FrameSubmission* submission_ {};
 
-	// Potentially old, selected command, in its record and its batch.
-	// [Swapchain mode] Batch of command viewer; for matching
-	std::vector<FrameSubmission> selectedFrame_;
-	// [Swapchain mode] part of selectedFrame_
-	FrameSubmission* selectedBatch_ {};
-	// In swapchain mode: part of selectedBatch_
-	IntrusivePtr<CommandRecord> selectedRecord_ {};
-	// The selected command (hierarchy) inside selectedRecord_.
+	// The currently selected record.
+	IntrusivePtr<CommandRecord> record_ {};
 	// Might be empty, signalling that no command is secleted.
-	// Only valid if selectionType_ == command.
-	std::vector<const Command*> selectedCommand_ {};
+	std::vector<const Command*> command_ {};
 
 	std::unordered_set<const ParentCommand*> openedSections_;
-	std::unordered_set<const FrameSubmission*> openedSubmissions_; // points into records_
-	std::unordered_set<const CommandRecord*> openedRecords_; // points into records_[].submissions
+	std::unordered_set<const FrameSubmission*> openedSubmissions_; // [swapchain] points into frame_
+	std::unordered_set<const CommandRecord*> openedRecords_; // [swapchain] points into frame_[i].submissions
 
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};
@@ -115,6 +82,9 @@ private:
 	UpdateTicker updateTick_ {};
 
 	LinAllocator matchAlloc_;
+
+	// TODO: move to Gui class I guess
+	CommandSelection selector_;
 };
 
 } // namespace vil

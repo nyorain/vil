@@ -723,6 +723,88 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.GetImageSparseMemoryRequirements2,
 		&dev.dispatch.GetImageSparseMemoryRequirements2KHR});
+	// VK_KHR_synchronization2
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetEvent2,
+		&dev.dispatch.CmdSetEvent2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdResetEvent2,
+		&dev.dispatch.CmdResetEvent2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdWaitEvents2,
+		&dev.dispatch.CmdWaitEvents2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdPipelineBarrier2,
+		&dev.dispatch.CmdPipelineBarrier2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdWriteTimestamp2,
+		&dev.dispatch.CmdWriteTimestamp2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.QueueSubmit2,
+		&dev.dispatch.QueueSubmit2KHR});
+	// VK_EXT_extended_dynamic_state
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetCullMode,
+		&dev.dispatch.CmdSetCullModeEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetFrontFace,
+		&dev.dispatch.CmdSetFrontFaceEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetPrimitiveTopology,
+		&dev.dispatch.CmdSetPrimitiveTopologyEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetViewportWithCount,
+		&dev.dispatch.CmdSetViewportWithCountEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetScissorWithCount,
+		&dev.dispatch.CmdSetScissorWithCountEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdBindVertexBuffers2,
+		&dev.dispatch.CmdBindVertexBuffers2EXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetDepthTestEnable,
+		&dev.dispatch.CmdSetDepthTestEnableEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetDepthWriteEnable,
+		&dev.dispatch.CmdSetDepthWriteEnableEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetDepthCompareOp,
+		&dev.dispatch.CmdSetDepthCompareOpEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetDepthBoundsTestEnable,
+		&dev.dispatch.CmdSetDepthBoundsTestEnableEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetStencilTestEnable,
+		&dev.dispatch.CmdSetStencilTestEnableEXT});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdSetStencilOp,
+		&dev.dispatch.CmdSetStencilOpEXT});
+	// VK_KHR_copy_commands2
+	aliasCmd(std::array{
+		&dev.dispatch.CmdCopyBuffer2,
+		&dev.dispatch.CmdCopyBuffer2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdCopyImage2,
+		&dev.dispatch.CmdCopyImage2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdCopyBufferToImage2,
+		&dev.dispatch.CmdCopyBufferToImage2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdCopyImageToBuffer2,
+		&dev.dispatch.CmdCopyImageToBuffer2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdBlitImage2,
+		&dev.dispatch.CmdBlitImage2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdResolveImage2,
+		&dev.dispatch.CmdResolveImage2KHR});
+	// VK_KHR_dynamic_rendering
+	aliasCmd(std::array{
+		&dev.dispatch.CmdBeginRendering,
+		&dev.dispatch.CmdBeginRenderingKHR});
+	aliasCmd(std::array{
+		&dev.dispatch.CmdEndRendering,
+		&dev.dispatch.CmdEndRenderingKHR});
 
 	// find vkSetDeviceLoaderData callback
 	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);

@@ -4,6 +4,7 @@
 #include <data.hpp>
 #include <queue.hpp>
 #include <wrap.hpp>
+#include <threadContext.hpp>
 #include <util/util.hpp>
 
 namespace vil {
@@ -31,19 +32,35 @@ Semaphore::~Semaphore() {
 	std::lock_guard lock(dev->mutex);
 	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_SEMAPHORE);
 
-	// per spec, we can assume all associated payload to be finished
-	/*
-	std::lock_guard lock(dev->mutex);
-	if(this->signalFrom) {
-		auto finished = checkLocked(*this->signalFrom);
+	// Per spec, we can assume all associated payload to be finished
+	// Using while loop since checkLocked will erase from our list.
+	while(!signals.empty()) {
+		auto finished = checkLocked(*signals.back().submission->parent);
 		dlg_assert(finished);
 	}
 
-	if(this->waitFrom) {
-		auto finished = checkLocked(*this->waitFrom);
+	while(!waits.empty()) {
+		auto finished = checkLocked(*waits.back().submission->parent);
 		dlg_assert(finished);
 	}
-	*/
+}
+
+void updateUpperLocked(Semaphore& sem, u64 value) {
+	assertOwned(sem.dev->mutex);
+	if(sem.upperBound > value) {
+		return;
+	}
+
+	sem.upperBound = value;
+	for(auto& wait : sem.waits) {
+		if(wait.value > value) {
+			continue;
+		}
+
+		if(wait.submission->active) {
+			checkActivateLocked(*wait.submission);
+		}
+	}
 }
 
 Event::~Event() {
@@ -186,7 +203,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
 	auto* typeCI = findChainInfo<VkSemaphoreTypeCreateInfo,
 		VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO>(*pCreateInfo);
 	if(typeCI) {
-		semaphore.value = typeCI->initialValue;
+		semaphore.lowerBound = typeCI->initialValue;
+		semaphore.upperBound = semaphore.lowerBound;
 		semaphore.type = typeCI->semaphoreType;
 	}
 
@@ -203,6 +221,43 @@ VKAPI_ATTR void VKAPI_CALL DestroySemaphore(
 
 	auto& dev = *mustMoveUnset(device, semaphore)->dev;
 	dev.dispatch.DestroySemaphore(device, semaphore, pAllocator);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL SignalSemaphore(
+		VkDevice                                    device,
+		const VkSemaphoreSignalInfo*                pSignalInfo) {
+	auto& sem = get(device, pSignalInfo->semaphore);
+
+	{
+		std::lock_guard lock(sem.dev->mutex);
+		updateUpperLocked(sem, pSignalInfo->value);
+		dlg_assert(sem.lowerBound <= pSignalInfo->value);
+		sem.lowerBound = pSignalInfo->value;
+	}
+
+	auto copy = *pSignalInfo;
+	copy.semaphore = sem.handle;
+
+	return sem.dev->dispatch.SignalSemaphore(sem.dev->handle, &copy);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL WaitSemaphores(
+		VkDevice                                    device,
+		const VkSemaphoreWaitInfo*                  pWaitInfo,
+		uint64_t                                    timeout) {
+	ThreadMemScope tms;
+	auto copy = *pWaitInfo;
+	auto sems = tms.alloc<VkSemaphore>(pWaitInfo->semaphoreCount);
+
+	auto& dev = getDevice(device);
+	for(auto i = 0u; i < pWaitInfo->semaphoreCount; ++i) {
+		sems[i] = get(dev, pWaitInfo->pSemaphores[i]).handle;
+	}
+
+	copy.pSemaphores = sems.data();
+	return dev.dispatch.WaitSemaphores(dev.handle, &copy, timeout);
+
+	// TODO: check completed workloads?
 }
 
 // event

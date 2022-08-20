@@ -784,6 +784,28 @@ While implementing the full-sync concept I noticed several things:
   paths for now (and maybe even add a binary-semaphore+full-sync path later
   on)
 
+## Questioning full sync
+
+We have full-sync implementation now. During the currently happening
+sync/submission rework, I have some new ideas and thoughts.
+
+Do we really ever want full-sync?
+In hooked submission, we want to copy data *as the application sees it*.
+Adding full sync as soon as we hook a submission somewhat destroys that.
+And yes, it might be needed, in that case that the application writes
+the data we read from another queue. But then, the application is broken
+and we maybe explicitly *want* to show the broken/weird/racy data.
+(Only concern: might cause a crash in theory, would be bad).
+
+We only want it for gui submissions I guess.
+For images displayed in resource viewer, it doesn't really matter, 
+we just sync with the submissions that use it.
+For buffers, it harder. buffer_device_address is really a concern.
+So maybe only add full sync when reading a buffer with the flag set?
+
+Maybe just leave it up to the application? We kinda need both code paths
+anyways for now. And we need sync tracking in any case.
+
 # Relying on timeline semaphores
 
 Sooner or later, we'll likely just require timeline semaphores since that
@@ -807,3 +829,215 @@ But to support that, we'd need
 - either the translation layer to work well, without large overhead.
   should test that
 - or osx, android implementations to support it which might not happen soon :(
+
+
+# CommandSelection
+
+Idea: factor out matching logic from CommandBufferGui.
+We might want to use it outside of CommandBufferGui one day (e.g.
+image viewer/shader debugger outside of cb viewer tab) and it makes
+CbGui messy as hell atm.
+
+```
+struct CommandSelection {
+	// Defines from which source the selected state is updated.
+	enum class UpdateMode {
+		none, // does not update them at all, just select the static record
+		commandBuffer, // update them from the commands in the selected command buffer
+		any, // update them from any submitted matching record
+		swapchain, // update them from the active swapchain
+	};
+
+	enum class SelectionType {
+		none,
+		command,
+		submission, // only in swapchain mode
+		record, // only in swapchain mode
+	};
+
+	// Whether to freeze the selected state. 
+	// New completed hooks will still be fetched when something new is 
+	// selected but once we have a state we don't gather more and don't
+	// update the selection.
+	bool freezeState {};
+
+public:
+	// Tries to fetch a new completed hook, updating the selection.
+	void update();
+
+	// Sets updateMode to 'none'
+	// 'cmd' must be empty or a valid hierarchy inside 'record'
+	void select(IntrusivePtr<CommandRecord> record, 
+		std::vector<const Command*> cmd);
+
+	// Sets updateMode to swapchain
+	// 'submission' must be null or inside 'frame'.
+	// 'record' must be null or inside 'submission'
+	// 'cmd' must be empty or a valid hierarchy inside 'record'
+	void select(std::vector<FrameSubmission> frame,
+		FrameSubmission* submission,
+		IntrusivePtr<CommandRecord> record, 
+		std::vector<const Command*> cmd);
+
+	// Sets updateMode to 'commandBuffer'
+	// 'cmd' must be empty or a valid hierarchy inside record
+	void select(IntrusivePtr<CommandBuffer> cb,
+		IntrusivePtr<CommandRecord> record,
+		std::vector<const Command*> cmd);
+
+	UpdateMode updateMode() const { return mode_; }
+	SelectionType selectionType() const { return selectionType_; }
+	IntrusivePtr<CommandHookState> completedHookState() const { return state_; }
+
+	// Returns null when selectType is not 'command'
+	span<const Command* const> command() const { return command_; }
+	// Returns null when in 'swapchain' mode and selectionType
+	// is not 'record' or 'command'
+	IntrusivePtr<CommandRecord> record() const { return record_; }
+	// Returns null when not in 'swapchain' mode or when selectionType
+	// is 'none'
+	FrameSubmission* submission() const { return submission_; }
+	// Returns null when not in 'swapchain' mode
+	span<const FrameSubmission> frame() const { return frame_; }
+	// Only for swapchain mode.
+	// Returns the present id of the current completed hook state.
+	u32 hookStateSwapchainPresent() const { return swapchainPresent_; }
+
+private:
+	UpdateMode mode_ {};
+	SelectionType selectionType_ {};
+	IntrusivePtr<CommandHookState> state_; // the last received state
+	CommandDescriptorSnapshot descriptors_; // last snapshotted descriptors
+
+	// The currently selected record.
+	// In swapchain mode: part of selectedBatch_
+	IntrusivePtr<CommandRecord> record_ {};
+	// The selected command (hierarchy) inside selectedRecord_.
+	// Might be empty, signalling that no command is secleted.
+	// Only valid if selectionType_ == command.
+	std::vector<const Command*> command_ {};
+
+	// [swapchain mode] 
+	// Potentially old, selected command, in its record and its batch.
+	// Needed for matching potential candidates later.
+	std::vector<FrameSubmission> frame_;
+	// Part of selectedFrame_
+	FrameSubmission* submission_ {};
+	u32 swapchainPresent_ {}; // present id of last time we got a completed hook
+
+	// [commandBuffer mode]
+	IntrusivePtr<CommandBuffer> cb_ {};
+};
+```
+
+TODO:
+- need to give CommandBuffer shared ownership, updating from cb is
+  a mess otherwise
+  	- this means CommandBuffers can outlive their commandPool, make
+	  sure to unset the reference on destruction of the CommandPool
+
+# Next CommandGroup-like prototype
+
+ideally: be able to show *complete* frame, stable.
+Just color in the sections that aren't always submitted or something.
+
+```
+namespace summary { 
+
+struct FragmentSection {
+	u32 lastSeen {}; // frameID
+
+	IntrusivePtr<CommandRecord> lastRecord;
+	Command* first {};
+	Command* last {};
+
+	// in case of a parent command, first == last and this
+	// contains the child sections
+	std::vector<FragmentSection> children;
+
+	// TODO: some extra metadata
+	// e.g. for renderpasses, we could store the max number of 
+	// draw commands ever seen or something like that.
+	// Need some special handling for render passes anyways I guess?
+	// But same problematic applies to dispatches, could be highly
+	// dynamic as well. hmm.
+	// Really go all-in and treat sections of draw commands as fragments
+	// as well? But ordering shouldn't matter for them.
+	// OTOH for some highly dynamic compute system, order might not
+	// matter either. Hard to find good heuristic guessing that though
+	// I guess...
+	// Maybe store them as fragments but collapse in gui as
+	// <206 draw commands> or something?
+	// and when expanding them you can toggle whether they should be
+	// matched in order or not?
+};
+
+struct Record {
+	std::vector<FragmentSection> children;
+};
+
+struct Submission {
+	Queue* queue {};
+	std::vector<Record> records;
+	u32 lastSeen {}; // frameID
+};
+
+struct Frame {
+	std::vector<Submission> submissions;
+};
+
+} // namespace summary
+```
+
+Would be useful to capture commands/submissions that aren't submitted
+every frame. Think local shadow updates, transfer queue texture streams etc.
+Together with a "capture all" feature (that is similar to what we are already doing
+in the shader debugger; don't just capture one resource but all I/O
+of a given command) we could then even look into such commands (by
+selected them inside the ui even if they are stale and wait for a
+submission that gives us a hookState).
+
+With the current design sketch, this will fall apart quickly for
+something like draw commands though.
+
+Anyways, we'd have to do *full* record matches (i.e. not just the
+sections) at some points, which makes this whole concept probably impossible.
+
+# Should there be struct PipelineBarrier2Cmd?
+
+Or should it be merged with the original PipelineBarrierCmd
+pro for merging:
+- less code duplication, might be easier later on
+cons for merging:
+- introduces complexity
+- the data representation isn't what the user might expect
+  (or we'd need to write 2 handling methods in most case, e.g. gui, anyways)
+
+Yeah, let's not merge them.
+When commands are really different (e.g. different structs/values) and
+not just extending each other (e.g. CmdBindVertexBuffers2), use a different
+command struct.
+If that doesn't cause problems, maybe always do it?
+We currently show CmdBindVertexBuffers in the ui even if the 2 version was used.
+
+# Gui rendering without huge critical section
+
+Imagine this situation:
+- we are drawing the resource gui, <img> is selected
+- <img> gets destroyed in another thread
+
+How should this be handled?
+We can keep the vil::Image object alive via IntrusivePtr (e.g. in the 
+Gui Draw object) but in this case we also need the handle.
+Keeping all image handles alive until their vil representation is destroyed
+is problematic. The application might immediate re-use the memory,
+making the gui reading (and doing transitions on) the old image UB.
+
+What we could do:
+If the detect this case, wait in the destroying thread until gui
+rendering is done?
+	Done in the sense that we've gotten to the checkpoint where we see
+	that the image was destroyed and abort the rendering.
+
+The waiting itself (even if it might take >1ms) isn't a problem, this is 
+a very rare case.

@@ -50,6 +50,7 @@ struct Draw {
 	// the submission. While the associated submission is pending, we must
 	// make sure that none of the handles are destroyed and synchronize future
 	// applicaiton submissions that might write them.
+	// TODO: should probably be IntrusivePtrs right?
 	std::vector<DeviceHandle*> usedHandles;
 	IntrusivePtr<CommandHookState> usedHookState;
 

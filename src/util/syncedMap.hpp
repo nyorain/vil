@@ -37,9 +37,12 @@ struct WrappedHandle {
 
 template<typename T, typename Deleter = std::default_delete<WrappedHandle<T>>>
 struct WrappedRefCount {
-	void inc(WrappedHandle<T>& wrapped) const noexcept { ++wrapped.obj().refCount; }
+	void inc(WrappedHandle<T>& wrapped) const noexcept {
+		wrapped.obj().refCount.fetch_add(1u, std::memory_order_relaxed);
+	}
 	void dec(WrappedHandle<T>& wrapped) const noexcept {
-		if(--wrapped.obj().refCount == 0) {
+		dlg_assert(wrapped.obj().refCount.load() > 0u);
+		if(wrapped.obj().refCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u) {
 			Deleter()(&wrapped);
 		}
 	}

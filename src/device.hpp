@@ -197,7 +197,7 @@ struct Device {
 	// === Maps of all vulkan handles ===
 	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
 	SyncedRawUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
-	SyncedUniqueWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
+	SyncedIntrusiveWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 
 	// Some of our handles have shared ownership: this is only used when
 	// an application is allowed to destroy a handle that we might still

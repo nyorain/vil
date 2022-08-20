@@ -26,7 +26,6 @@
 //   links in addition to 'next' is already enough? probably not,
 //   the commands itself also should not do the iteration, should not
 //   know about other commands.
-// - when the new match implementation is working, remove nameDesc
 
 namespace vil {
 
@@ -170,7 +169,6 @@ Matcher Command::match(const Command& cmd) const {
 	return {1.f, 1.f};
 }
 
-// BarrierCmdBase
 std::string formatQueueFam(u32 fam) {
 	if(fam == VK_QUEUE_FAMILY_IGNORED) {
 		return "ignored";
@@ -183,17 +181,31 @@ std::string formatQueueFam(u32 fam) {
 	return std::to_string(fam);
 }
 
-void BarrierCmdBase::displayInspector(Gui& gui) const {
-	imGuiText("srcStage: {}", vk::flagNames(VkPipelineStageFlagBits(srcStageMask)));
-	imGuiText("dstStage: {}", vk::flagNames(VkPipelineStageFlagBits(dstStageMask)));
+// dummy for validExpression below
+template<typename B> using SrcStageMaskMember = decltype(B::srcStageMask);
+
+template<typename ImageBarrier, typename BufferBarrier, typename MemoryBarrier>
+void displayBarriers(
+		Gui& gui, span<Image*> images, span<Buffer*> buffers,
+		span<ImageBarrier> imgBarriers,
+		span<BufferBarrier> bufBarriers,
+		span<MemoryBarrier> memBarriers) {
+	constexpr auto v2 = validExpression<SrcStageMaskMember, MemoryBarrier>;
 
 	if(!memBarriers.empty()) {
 		imGuiText("Memory Barriers");
 		ImGui::Indent();
 		for(auto i = 0u; i < memBarriers.size(); ++i) {
 			auto& memb = memBarriers[i];
-			imGuiText("srcAccess: {}", vk::flagNames(VkAccessFlagBits(memb.srcAccessMask)));
-			imGuiText("dstAccess: {}", vk::flagNames(VkAccessFlagBits(memb.dstAccessMask)));
+
+			if constexpr(v2) {
+				imGuiText("srcStage: {}", vk::namePipelineStageFlags2(memb.srcStageMask));
+				imGuiText("dstStage: {}", vk::namePipelineStageFlags2(memb.dstStageMask));
+			}
+
+			imGuiText("srcAccess: {}", vk::nameAccessFlags2(memb.srcAccessMask));
+			imGuiText("dstAccess: {}", vk::nameAccessFlags2(memb.dstAccessMask));
+
 			ImGui::Separator();
 		}
 		ImGui::Unindent();
@@ -203,14 +215,21 @@ void BarrierCmdBase::displayInspector(Gui& gui) const {
 		imGuiText("Buffer Barriers");
 		ImGui::Indent();
 		for(auto i = 0u; i < bufBarriers.size(); ++i) {
-			auto& memb = bufBarriers[i];
+			auto& bufb = bufBarriers[i];
 			refButtonD(gui, buffers[i]);
-			imGuiText("offset: {}", memb.offset);
-			imGuiText("size: {}", memb.size);
-			imGuiText("srcAccess: {}", vk::flagNames(VkAccessFlagBits(memb.srcAccessMask)));
-			imGuiText("dstAccess: {}", vk::flagNames(VkAccessFlagBits(memb.dstAccessMask)));
-			imGuiText("srcQueueFamily: {}", formatQueueFam(memb.srcQueueFamilyIndex));
-			imGuiText("dstQueueFamily: {}", formatQueueFam(memb.dstQueueFamilyIndex));
+
+			imGuiText("offset: {}", bufb.offset);
+			imGuiText("size: {}", bufb.size);
+
+			if constexpr(v2) {
+				imGuiText("srcStage: {}", vk::namePipelineStageFlags2(bufb.srcStageMask));
+				imGuiText("dstStage: {}", vk::namePipelineStageFlags2(bufb.dstStageMask));
+			}
+
+			imGuiText("srcAccess: {}", vk::nameAccessFlagBits2(bufb.srcAccessMask));
+			imGuiText("dstAccess: {}", vk::nameAccessFlagBits2(bufb.dstAccessMask));
+			imGuiText("srcQueueFamily: {}", formatQueueFam(bufb.srcQueueFamilyIndex));
+			imGuiText("dstQueueFamily: {}", formatQueueFam(bufb.dstQueueFamilyIndex));
 			ImGui::Separator();
 		}
 		ImGui::Unindent();
@@ -224,14 +243,19 @@ void BarrierCmdBase::displayInspector(Gui& gui) const {
 			refButtonD(gui, images[i]);
 
 			auto& subres = imgb.subresourceRange;
-			imGuiText("aspectMask: {}", vk::flagNames(VkImageAspectFlagBits(subres.aspectMask)));
+			imGuiText("aspectMask: {}", vk::nameImageAspectFlags(subres.aspectMask));
 			imGuiText("baseArrayLayer: {}", subres.baseArrayLayer);
 			imGuiText("layerCount: {}", subres.layerCount);
 			imGuiText("baseMipLevel: {}", subres.baseMipLevel);
 			imGuiText("levelCount: {}", subres.levelCount);
 
-			imGuiText("srcAccess: {}", vk::flagNames(VkAccessFlagBits(imgb.srcAccessMask)));
-			imGuiText("dstAccess: {}", vk::flagNames(VkAccessFlagBits(imgb.dstAccessMask)));
+			if constexpr(v2) {
+				imGuiText("srcStage: {}", vk::namePipelineStageFlags2(imgb.srcStageMask));
+				imGuiText("dstStage: {}", vk::namePipelineStageFlags2(imgb.dstStageMask));
+			}
+
+			imGuiText("srcAccess: {}", vk::nameAccessFlags(imgb.srcAccessMask));
+			imGuiText("dstAccess: {}", vk::nameAccessFlags(imgb.dstAccessMask));
 			imGuiText("oldLayout: {}", vk::name(imgb.oldLayout));
 			imGuiText("newLayout: {}", vk::name(imgb.newLayout));
 			imGuiText("srcQueueFamily: {}", formatQueueFam(imgb.srcQueueFamilyIndex));
@@ -241,6 +265,7 @@ void BarrierCmdBase::displayInspector(Gui& gui) const {
 		ImGui::Unindent();
 	}
 }
+
 
 bool operator==(const VkImageSubresourceLayers& a, const VkImageSubresourceLayers& b) {
 	return a.aspectMask == b.aspectMask &&
@@ -343,12 +368,8 @@ Matcher match(const BoundVertexBuffer& a, const BoundVertexBuffer& b) {
 	return m;
 }
 
-bool operator==(const VkMemoryBarrier& a, const VkMemoryBarrier& b) {
-	return a.dstAccessMask == b.dstAccessMask &&
-		a.srcAccessMask == b.srcAccessMask;
-}
-
-bool operator==(const VkImageMemoryBarrier& a, const VkImageMemoryBarrier& b) {
+template<typename ResourceBarrier>
+bool equalOwnershipTransition(const ResourceBarrier& a, const ResourceBarrier& b) {
 	bool queueTransferA =
 		a.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
 		a.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
@@ -359,10 +380,26 @@ bool operator==(const VkImageMemoryBarrier& a, const VkImageMemoryBarrier& b) {
 		b.srcQueueFamilyIndex != b.dstQueueFamilyIndex;
 
 	if(queueTransferA || queueTransferB) {
-		// TODO: respect other relevant fields as well
 		return queueTransferA == queueTransferB &&
-			a.srcQueueFamilyIndex == b.srcQueueFamilyIndex &&
-			a.dstQueueFamilyIndex == b.dstQueueFamilyIndex;
+				a.srcQueueFamilyIndex == b.srcQueueFamilyIndex &&
+				a.dstQueueFamilyIndex == b.dstQueueFamilyIndex;
+	}
+
+	return true;
+}
+
+// TODO: use fuzzy matching for barriers? I.e. return matcher?
+template<typename ImgBarrier>
+bool equalImgBarrier(const ImgBarrier& a, const ImgBarrier& b) {
+	if(!equalOwnershipTransition(a, b)) {
+		return false;
+	}
+
+	if constexpr(validExpression<SrcStageMaskMember, ImgBarrier>) {
+		if(a.srcStageMask != b.srcStageMask ||
+				a.dstStageMask != b.dstStageMask) {
+			return false;
+		}
 	}
 
 	return a.dstAccessMask == b.dstAccessMask &&
@@ -377,23 +414,17 @@ bool operator==(const VkImageMemoryBarrier& a, const VkImageMemoryBarrier& b) {
 		a.subresourceRange.levelCount == b.subresourceRange.levelCount;
 }
 
-// TODO: should probably be match functions returning a float instead,
-// consider offsets. Same for image barrier above
-bool operator==(const VkBufferMemoryBarrier& a, const VkBufferMemoryBarrier& b) {
-	bool queueTransferA =
-		a.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		a.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		a.srcQueueFamilyIndex != a.dstQueueFamilyIndex;
-	bool queueTransferB =
-		b.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		b.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		b.srcQueueFamilyIndex != b.dstQueueFamilyIndex;
+template<typename BufferBarrier>
+bool equalBufBarrier(const BufferBarrier& a, const BufferBarrier& b) {
+	if(!equalOwnershipTransition(a, b)) {
+		return false;
+	}
 
-	if(queueTransferA || queueTransferB) {
-		// TODO: respect other relevant fields as well
-		return queueTransferA == queueTransferB &&
-			a.srcQueueFamilyIndex == b.srcQueueFamilyIndex &&
-			a.dstQueueFamilyIndex == b.dstQueueFamilyIndex;
+	if constexpr(validExpression<SrcStageMaskMember, BufferBarrier>) {
+		if(a.srcStageMask != b.srcStageMask ||
+				a.dstStageMask != b.dstStageMask) {
+			return false;
+		}
 	}
 
 	return a.dstAccessMask == b.dstAccessMask &&
@@ -402,6 +433,32 @@ bool operator==(const VkBufferMemoryBarrier& a, const VkBufferMemoryBarrier& b) 
 		a.size == b.size;
 }
 
+bool operator==(const VkMemoryBarrier& a, const VkMemoryBarrier& b) {
+	return a.dstAccessMask == b.dstAccessMask && a.srcAccessMask == b.srcAccessMask;
+}
+
+bool operator==(const VkMemoryBarrier2& a, const VkMemoryBarrier2& b) {
+	return a.dstAccessMask == b.dstAccessMask &&
+		a.srcAccessMask == b.srcAccessMask &&
+		a.srcStageMask == b.srcStageMask &&
+		a.dstStageMask == b.dstStageMask;
+}
+
+bool operator==(const VkImageMemoryBarrier& a, const VkImageMemoryBarrier& b) {
+	return equalImgBarrier(a, b);
+}
+
+bool operator==(const VkImageMemoryBarrier2& a, const VkImageMemoryBarrier2& b) {
+	return equalImgBarrier(a, b);
+}
+
+bool operator==(const VkBufferMemoryBarrier& a, const VkBufferMemoryBarrier& b) {
+	return equalBufBarrier(a, b);
+}
+
+bool operator==(const VkBufferMemoryBarrier2& a, const VkBufferMemoryBarrier2& b) {
+	return equalBufBarrier(a, b);
+}
 
 template<typename T>
 void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
@@ -479,6 +536,37 @@ void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) 
 Command::Command() {
 }
 
+// BarrierCmdBase
+template<typename ImageBarrier>
+void patch(ImageBarrier& ib, u32 recordQueueFamilyIndex) {
+	// For queue family ownership transitions we need to ignore
+	// one of the layout transitions. We just choose to always ignore
+	// the acquire transition.
+	if(ib.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
+			ib.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
+			ib.srcQueueFamilyIndex != ib.dstQueueFamilyIndex) {
+		auto ignoreLayoutTransition =
+			ib.dstQueueFamilyIndex == recordQueueFamilyIndex;
+		if(ignoreLayoutTransition) {
+			// we know it's an acquire barrier and the layout
+			// transition was previously done
+			ib.oldLayout = ib.newLayout;
+		}
+	}
+
+	// ignore queue family ownership transition
+	ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+}
+
+void BarrierCmdBase::displayInspector(Gui& gui) const {
+	imGuiText("srcStage: {}", vk::namePipelineStageFlags2(srcStageMask));
+	imGuiText("dstStage: {}", vk::namePipelineStageFlags2(dstStageMask));
+
+	displayBarriers(gui, images, buffers,
+		imgBarriers, bufBarriers, memBarriers);
+}
+
 Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
 	Matcher m;
 
@@ -500,11 +588,102 @@ Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
 	return m;
 }
 
+BarrierCmdBase::PatchedBarriers BarrierCmdBase::patchedBarriers(
+		ThreadMemScope& memScope, u32 qfam) const {
+	PatchedBarriers ret;
+	ret.imgBarriers = memScope.copy(imgBarriers);
+	ret.bufBarriers = memScope.copy(bufBarriers);
+
+	for(auto i = 0u; i < ret.imgBarriers.size(); ++i) {
+		if(!images[i]->concurrentHooked) {
+			continue;
+		}
+
+		patch(ret.imgBarriers[i], qfam);
+	}
+
+	for(auto i = 0u; i < ret.bufBarriers.size(); ++i) {
+		if(!buffers[i]->concurrentHooked) {
+			continue;
+		}
+
+		auto& bb = ret.bufBarriers[i];
+
+		// ignore queue family ownership transition
+		bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	}
+
+	return ret;
+}
+
+// BarrierCmdBase2
+void Barrier2CmdBase::displayInspector(Gui& gui) const {
+	displayBarriers(gui, images, buffers,
+		imgBarriers, bufBarriers, memBarriers);
+}
+
+Matcher Barrier2CmdBase::doMatch(const Barrier2CmdBase& cmd) const {
+	Matcher m;
+
+	addSpanUnordered(m, this->memBarriers, cmd.memBarriers);
+	addSpanUnordered(m, this->bufBarriers, cmd.bufBarriers);
+	addSpanUnordered(m, this->imgBarriers, cmd.imgBarriers);
+
+	if(m.match == 0.f) {
+		return Matcher::noMatch();
+	}
+
+	add(m, this->flags, cmd.flags);
+
+	dlg_assert(m.match <= m.total);
+	return m;
+}
+
+VkDependencyInfo Barrier2CmdBase::patchedBarriers(
+		ThreadMemScope& memScope, u32 qfam) const {
+	auto imgbPatched = memScope.copy(imgBarriers);
+	auto bufbPatched = memScope.copy(bufBarriers);
+
+	for(auto i = 0u; i < imgbPatched.size(); ++i) {
+		if(!images[i]->concurrentHooked) {
+			continue;
+		}
+
+		patch(imgbPatched[i], qfam);
+	}
+
+	for(auto i = 0u; i < bufbPatched.size(); ++i) {
+		if(!buffers[i]->concurrentHooked) {
+			continue;
+		}
+
+		auto& bb = bufbPatched[i];
+
+		// ignore queue family ownership transition
+		bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	}
+
+	VkDependencyInfo ret {};
+	ret.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+	ret.dependencyFlags = flags;
+	ret.bufferMemoryBarrierCount = bufbPatched.size();
+	ret.pBufferMemoryBarriers = bufbPatched.data();
+	ret.imageMemoryBarrierCount = imgbPatched.size();
+	ret.pImageMemoryBarriers = imgbPatched.data();
+	// no need to modify memory barriers
+	ret.memoryBarrierCount = memBarriers.size();
+	ret.pMemoryBarriers = memBarriers.data();
+
+	return ret;
+}
+
 // WaitEventsCmd
-void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void WaitEventsCmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const {
 	ThreadMemScope memScope;
 	auto vkEvents = rawHandles(memScope, this->events);
-	auto [memb, bufb, imgb] = patchedBarriers(memScope);
+	auto [memb, bufb, imgb] = patchedBarriers(memScope, qfam);
 
 	dev.dispatch.CmdWaitEvents(cb,
 		u32(vkEvents.size()), vkEvents.data(),
@@ -534,59 +713,38 @@ Matcher WaitEventsCmd::match(const Command& base) const {
 	return m;
 }
 
-// BarrierCmd
-BarrierCmdBase::PatchedBarriers BarrierCmdBase::patchedBarriers(
-		ThreadMemScope& memScope) const {
-	PatchedBarriers ret;
-	ret.imgBarriers = memScope.copy(imgBarriers.data(), imgBarriers.size());
-	ret.bufBarriers = memScope.copy(bufBarriers.data(), bufBarriers.size());
-	ret.memBarriers = memScope.copy(memBarriers.data(), memBarriers.size());
-
-	for(auto i = 0u; i < ret.imgBarriers.size(); ++i) {
-		if(!images[i]->concurrentHooked) {
-			continue;
-		}
-
-		auto& ib = ret.imgBarriers[i];
-
-		// For queue family ownership transitions we need to ignore
-		// one of the layout transitions. We just choose to always ignore
-		// the acquire transition.
-		if(ib.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-				ib.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-				ib.srcQueueFamilyIndex != ib.dstQueueFamilyIndex) {
-			auto ignoreLayoutTransition =
-				ib.dstQueueFamilyIndex == this->recordQueueFamilyIndex;
-			if(ignoreLayoutTransition) {
-				// we know it's an acquire barrier and the layout
-				// transition was previously done
-				ib.oldLayout = ib.newLayout;
-			}
-		}
-
-		// ignore queue family ownership transition
-		ib.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	}
-
-	for(auto i = 0u; i < ret.bufBarriers.size(); ++i) {
-		if(!buffers[i]->concurrentHooked) {
-			continue;
-		}
-
-		auto& bb = ret.bufBarriers[i];
-
-		// ignore queue family ownership transition
-		bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	}
-
-	return ret;
+// WaitEvents2Cmd
+void WaitEvents2Cmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const {
+	ThreadMemScope memScope;
+	auto vkEvents = rawHandles(memScope, this->events);
+	auto dep = patchedBarriers(memScope, qfam);
+	dev.dispatch.CmdWaitEvents2(cb, u32(vkEvents.size()), vkEvents.data(), &dep);
 }
 
-void BarrierCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void WaitEvents2Cmd::displayInspector(Gui& gui) const {
+	for(auto& event : events) {
+		refButtonD(gui, event);
+	}
+
+	Barrier2CmdBase::displayInspector(gui);
+}
+
+Matcher WaitEvents2Cmd::match(const Command& base) const {
+	auto* cmd = dynamic_cast<const WaitEvents2Cmd*>(&base);
+	if(!cmd) {
+		return Matcher::noMatch();
+	}
+
+	auto m = doMatch(*cmd);
+	addSpanUnordered(m, events, cmd->events);
+
+	return m;
+}
+
+// BarrierCmd
+void BarrierCmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const {
 	ThreadMemScope ms;
-	auto [memb, bufb, imgb] = patchedBarriers(ms);
+	auto [memb, bufb, imgb] = patchedBarriers(ms, qfam);
 
 	dev.dispatch.CmdPipelineBarrier(cb,
 		this->srcStageMask, this->dstStageMask, this->dependencyFlags,
@@ -596,7 +754,7 @@ void BarrierCmd::record(const Device& dev, VkCommandBuffer cb) const {
 }
 
 void BarrierCmd::displayInspector(Gui& gui) const {
-	imGuiText("dependencyFlags: {}", vk::flagNames(VkDependencyFlagBits(dependencyFlags)));
+	imGuiText("dependencyFlags: {}", vk::nameDependencyFlags(dependencyFlags));
 	BarrierCmdBase::displayInspector(gui);
 }
 
@@ -613,6 +771,26 @@ Matcher BarrierCmd::match(const Command& base) const {
 
 	add(m, dependencyFlags, cmd->dependencyFlags);
 	return m;
+}
+
+// BarrierCmd2
+void Barrier2Cmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const {
+	ThreadMemScope ms;
+	auto dep = patchedBarriers(ms, qfam);
+	dev.dispatch.CmdPipelineBarrier2(cb, &dep);
+}
+
+void Barrier2Cmd::displayInspector(Gui& gui) const {
+	Barrier2CmdBase::displayInspector(gui);
+}
+
+Matcher Barrier2Cmd::match(const Command& base) const {
+	auto* cmd = dynamic_cast<const Barrier2Cmd*>(&base);
+	if(!cmd) {
+		return Matcher::noMatch();
+	}
+
+	return doMatch(*cmd);
 }
 
 // BeginRenderPassCmd
@@ -639,7 +817,7 @@ std::string BeginRenderPassCmd::toString() const {
 	}
 }
 
-void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BeginRenderPassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	// NOTE: since we always manually re-record secondary command buffers,
 	// we must always pass VK_SUBPASS_CONTENTS_INLINE here.
 	auto info = this->subpassBeginInfo;
@@ -837,7 +1015,7 @@ Matcher BeginRenderPassCmd::match(const Command& base) const {
 	return m;
 }
 
-void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	// NOTE: since we always manually re-record secondary command buffers,
 	// we must always pass VK_SUBPASS_CONTENTS_INLINE here.
 	auto beginInfo = this->beginInfo;
@@ -862,7 +1040,7 @@ Matcher NextSubpassCmd::match(const Command& base) const {
 	return cmd->subpassID == subpassID ? Matcher{1.f, 1.f} : Matcher::noMatch();
 }
 
-void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(this->endInfo.pNext) {
 		auto f = dev.dispatch.CmdEndRenderPass2;
 		f(cb, &this->endInfo);
@@ -1050,7 +1228,7 @@ Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 }
 
 // DrawCmd
-void DrawCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void DrawCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdDraw(cb, vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
@@ -1098,7 +1276,7 @@ Matcher DrawCmd::match(const Command& base) const {
 }
 
 // DrawIndirectCmd
-void DrawIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void DrawIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(indexed) {
 		dev.dispatch.CmdDrawIndexedIndirect(cb, buffer->handle, offset, drawCount, stride);
 	} else {
@@ -1159,7 +1337,7 @@ Matcher DrawIndirectCmd::match(const Command& base) const {
 }
 
 // DrawIndexedCmd
-void DrawIndexedCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void DrawIndexedCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdDrawIndexed(cb, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 }
 
@@ -1211,7 +1389,7 @@ Matcher DrawIndexedCmd::match(const Command& base) const {
 }
 
 // DrawIndirectCountCmd
-void DrawIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void DrawIndirectCountCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(indexed) {
 		auto f = dev.dispatch.CmdDrawIndexedIndirectCount;
 		f(cb, buffer->handle, offset, countBuffer->handle, countBufferOffset,
@@ -1278,7 +1456,7 @@ Matcher DrawIndirectCountCmd::match(const Command& base) const {
 }
 
 // BindVertexBuffersCmd
-void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	std::vector<VkBuffer> vkbuffers;
 	std::vector<VkDeviceSize> vkoffsets;
 	vkbuffers.reserve(buffers.size());
@@ -1331,7 +1509,7 @@ Matcher BindVertexBuffersCmd::match(const Command& rhs) const {
 }
 
 // BindIndexBufferCmd
-void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdBindIndexBuffer(cb, buffer->handle, offset, indexType);
 }
 
@@ -1351,7 +1529,7 @@ Matcher BindIndexBufferCmd::match(const Command& rhs) const {
 }
 
 // BindDescriptorSetCmd
-void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BindDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	ThreadMemScope memScope;
 	auto vkds = rawHandles(memScope, sets);
 	dev.dispatch.CmdBindDescriptorSets(cb, pipeBindPoint, pipeLayout->handle,
@@ -1451,7 +1629,7 @@ Matcher DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
 }
 
 // DispatchCmd
-void DispatchCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void DispatchCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdDispatch(cb, groupsX, groupsY, groupsZ);
 }
 
@@ -1489,7 +1667,7 @@ Matcher DispatchCmd::match(const Command& base) const {
 }
 
 // DispatchIndirectCmd
-void DispatchIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void DispatchIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdDispatchIndirect(cb, buffer->handle, offset);
 }
 
@@ -1525,7 +1703,7 @@ Matcher DispatchIndirectCmd::match(const Command& base) const {
 }
 
 // DispatchBaseCmd
-void DispatchBaseCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void DispatchBaseCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto f = dev.dispatch.CmdDispatchBase;
 	f(cb, baseGroupX, baseGroupY, baseGroupZ, groupsX, groupsY, groupsZ);
 }
@@ -1568,7 +1746,7 @@ Matcher DispatchBaseCmd::match(const Command& base) const {
 }
 
 // CopyImageCmd
-void CopyImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdCopyImage2KHR) {
 		VkCopyImageInfo2KHR info = {
 			VK_STRUCTURE_TYPE_COPY_IMAGE_INFO_2_KHR,
@@ -1646,7 +1824,7 @@ Matcher CopyImageCmd::match(const Command& rhs) const {
 }
 
 // CopyBufferToImageCmd
-void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdCopyBufferToImage2KHR) {
 		VkCopyBufferToImageInfo2KHR info = {
 			VK_STRUCTURE_TYPE_COPY_BUFFER_TO_IMAGE_INFO_2_KHR,
@@ -1709,7 +1887,7 @@ Matcher CopyBufferToImageCmd::match(const Command& rhs) const {
 }
 
 // CopyImageToBufferCmd
-void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdCopyImageToBuffer2KHR) {
 		VkCopyImageToBufferInfo2KHR info = {
 			VK_STRUCTURE_TYPE_COPY_IMAGE_TO_BUFFER_INFO_2_KHR,
@@ -1772,7 +1950,7 @@ Matcher CopyImageToBufferCmd::match(const Command& rhs) const {
 }
 
 // BlitImageCmd
-void BlitImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BlitImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdBlitImage2KHR) {
 		VkBlitImageInfo2KHR info = {
 			VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2_KHR,
@@ -1854,7 +2032,7 @@ Matcher BlitImageCmd::match(const Command& rhs) const {
 }
 
 // ResolveImageCmd
-void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdResolveImage2KHR) {
 		VkResolveImageInfo2KHR info = {
 			VK_STRUCTURE_TYPE_RESOLVE_IMAGE_INFO_2_KHR,
@@ -1933,7 +2111,7 @@ Matcher ResolveImageCmd::match(const Command& rhs) const {
 }
 
 // CopyBufferCmd
-void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdCopyBuffer2KHR) {
 		VkCopyBufferInfo2KHR info = {
 			VK_STRUCTURE_TYPE_COPY_BUFFER_INFO_2_KHR,
@@ -1995,7 +2173,7 @@ Matcher CopyBufferCmd::match(const Command& rhs) const {
 }
 
 // UpdateBufferCmd
-void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdUpdateBuffer(cb, dst->handle, offset, data.size(), data.data());
 }
 
@@ -2030,7 +2208,7 @@ Matcher UpdateBufferCmd::match(const Command& rhs) const {
 }
 
 // FillBufferCmd
-void FillBufferCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void FillBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdFillBuffer(cb, dst->handle, offset, size, data);
 }
 
@@ -2066,7 +2244,7 @@ Matcher FillBufferCmd::match(const Command& rhs) const {
 }
 
 // ClearColorImageCmd
-void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdClearColorImage(cb, dst->handle, dstLayout, &color,
 		u32(ranges.size()), ranges.data());
 }
@@ -2105,7 +2283,7 @@ Matcher ClearColorImageCmd::match(const Command& rhs) const {
 }
 
 // ClearDepthStencilImageCmd
-void ClearDepthStencilImageCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void ClearDepthStencilImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdClearDepthStencilImage(cb, dst->handle, dstLayout, &value,
 		u32(ranges.size()), ranges.data());
 }
@@ -2144,7 +2322,7 @@ Matcher ClearDepthStencilImageCmd::match(const Command& rhs) const {
 }
 
 // Clear AttachhmentCmd
-void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdClearAttachments(cb, u32(attachments.size()),
 		attachments.data(), u32(rects.size()), rects.data());
 }
@@ -2167,7 +2345,7 @@ Matcher ClearAttachmentCmd::match(const Command& rhs) const {
 }
 
 // SetEventCmd
-void SetEventCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetEventCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetEvent(cb, event->handle, stageMask);
 }
 
@@ -2182,30 +2360,58 @@ std::string SetEventCmd::toString() const {
 
 void SetEventCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, event);
-	imGuiText("Stages: {}", vk::flagNames(VkPipelineStageFlagBits(stageMask)));
+	imGuiText("Stages: {}", vk::namePipelineStageFlags(stageMask));
+}
+
+// SetEvent2Cmd
+void SetEvent2Cmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const {
+	ThreadMemScope tms;
+	auto depInfo = patchedBarriers(tms, qfam);
+	dev.dispatch.CmdSetEvent2(cb, event->handle, &depInfo);
+}
+
+std::string SetEvent2Cmd::toString() const {
+	auto [nameRes, eventName] = name(event);
+	if(nameRes == NameType::named) {
+		return dlg::format("SetEvent2({})", eventName);
+	}
+
+	return "SetEvent2";
+}
+
+void SetEvent2Cmd::displayInspector(Gui& gui) const {
+	refButtonD(gui, event);
+	Barrier2CmdBase::displayInspector(gui);
 }
 
 // ResetEventCmd
-void ResetEventCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdResetEvent(cb, event->handle, stageMask);
+void ResetEventCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	if(legacy) {
+		dev.dispatch.CmdResetEvent(cb, event->handle,
+			downgradePipelineStageFlags(stageMask));
+	} else {
+		dlg_assert(dev.dispatch.CmdResetEvent2);
+		dev.dispatch.CmdResetEvent2(cb, event->handle, stageMask);
+	}
 }
 
 std::string ResetEventCmd::toString() const {
+	auto ownName = nameDesc();
 	auto [nameRes, eventName] = name(event);
 	if(nameRes == NameType::named) {
-		return dlg::format("ResetEvent({})", eventName);
+		return dlg::format("{}({})", ownName, eventName);
 	}
 
-	return "ResetEvent";
+	return std::string(ownName);
 }
 
 void ResetEventCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, event);
-	imGuiText("Stages: {}", vk::flagNames(VkPipelineStageFlagBits(stageMask)));
+	imGuiText("Stages: {}", vk::namePipelineStageFlags2(stageMask));
 }
 
 // ExecuteCommandsCmd
-void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	// NOTE: we don't do anything here. When re-recording we always want to
 	// see/potentially hook all commands and therefore will manually record
 	// the secondary command records (children of this command) as well.
@@ -2268,7 +2474,7 @@ ParentCommand* ExecuteCommandsChildCmd::firstChildParent() const {
 }
 
 // BeginDebugUtilsLabelCmd
-void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	VkDebugUtilsLabelEXT label {};
 	label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
 	label.pLabelName = this->name;
@@ -2286,12 +2492,12 @@ Matcher BeginDebugUtilsLabelCmd::match(const Command& rhs) const {
 }
 
 // EndDebugUtilsLabelCmd
-void EndDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void EndDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdEndDebugUtilsLabelEXT(cb);
 }
 
 // BindPipelineCmd
-void BindPipelineCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BindPipelineCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdBindPipeline(cb, bindPoint, pipe->handle);
 }
 
@@ -2324,7 +2530,7 @@ Matcher BindPipelineCmd::match(const Command& rhs) const {
 }
 
 // PushConstantsCmd
-void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdPushConstants(cb, pipeLayout->handle, stages, offset,
 		u32(values.size()), values.data());
 }
@@ -2352,7 +2558,7 @@ Matcher PushConstantsCmd::match(const Command& rhs) const {
 }
 
 // SetViewportCmd
-void SetViewportCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetViewportCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetViewport(cb, first, u32(viewports.size()), viewports.data());
 }
 
@@ -2369,7 +2575,7 @@ void SetViewportCmd::displayInspector(Gui&) const {
 }
 
 // SetScissorCmd
-void SetScissorCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetScissorCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetScissor(cb, first, u32(scissors.size()), scissors.data());
 }
 
@@ -2386,7 +2592,7 @@ void SetScissorCmd::displayInspector(Gui&) const {
 }
 
 // SetLineWidthCmd
-void SetLineWidthCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetLineWidthCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetLineWidth(cb, width);
 }
 
@@ -2395,75 +2601,81 @@ void SetLineWidthCmd::displayInspector(Gui&) const {
 }
 
 // other cmds
-void SetDepthBiasCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDepthBiasCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthBias(cb, state.constant, state.clamp, state.slope);
 }
 
-void SetBlendConstantsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetBlendConstantsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetBlendConstants(cb, values.data());
 }
 
-void SetStencilCompareMaskCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetStencilCompareMaskCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetStencilCompareMask(cb, faceMask, value);
 }
 
-void SetStencilWriteMaskCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetStencilWriteMaskCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetStencilWriteMask(cb, faceMask, value);
 }
 
-void SetStencilReferenceCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetStencilReferenceCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetStencilReference(cb, faceMask, value);
 }
 
-void SetDepthBoundsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDepthBoundsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthBounds(cb, min, max);
 }
 
 // BeginQuery
-void BeginQueryCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BeginQueryCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdBeginQuery(cb, pool->handle, query, flags);
 }
 
 // EndQuery
-void EndQueryCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void EndQueryCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdEndQuery(cb, pool->handle, query);
 }
 
 // ResetQuery
-void ResetQueryPoolCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void ResetQueryPoolCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdResetQueryPool(cb, pool->handle, first, count);
 }
 
 // WriteTimestamp
-void WriteTimestampCmd::record(const Device& dev, VkCommandBuffer cb) const {
-	dev.dispatch.CmdWriteTimestamp(cb, stage, pool->handle, query);
+void WriteTimestampCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	if(legacy) {
+		dev.dispatch.CmdWriteTimestamp(cb, downgradePipelineStageBits(stage),
+			pool->handle, query);
+	} else {
+		dlg_assert(dev.dispatch.CmdWriteTimestamp2);
+		dev.dispatch.CmdWriteTimestamp2(cb, stage, pool->handle, query);
+	}
 }
 
 // CopyQueryPool
-void CopyQueryPoolResultsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyQueryPoolResultsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdCopyQueryPoolResults(cb, pool->handle, first, count,
 		dstBuffer->handle, dstOffset, stride, flags);
 }
 
 // PushDescriptorSet
-void PushDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void PushDescriptorSetCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdPushDescriptorSetKHR(cb, bindPoint, pipeLayout->handle,
 		set, u32(descriptorWrites.size()), descriptorWrites.data());
 }
 
 // PushDescriptorSetWithTemplate
-void PushDescriptorSetWithTemplateCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void PushDescriptorSetWithTemplateCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdPushDescriptorSetWithTemplateKHR(cb, updateTemplate->handle,
 		pipeLayout->handle, set, static_cast<const void*>(data.data()));
 }
 
 // VK_KHR_fragment_shading_rate
-void SetFragmentShadingRateCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetFragmentShadingRateCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetFragmentShadingRateKHR(cb, &fragmentSize, combinerOps.data());
 }
 
 // Conditional rendering
-void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dlg_assert(buffer);
 
 	VkConditionalRenderingBeginInfoEXT info {};
@@ -2475,93 +2687,93 @@ void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb)
 	dev.dispatch.CmdBeginConditionalRenderingEXT(cb, &info);
 }
 
-void EndConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void EndConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdEndConditionalRenderingEXT(cb);
 }
 
 // VK_EXT_line_rasterization
-void SetLineStippleCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetLineStippleCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetLineStippleEXT(cb, stippleFactor, stipplePattern);
 }
 
 // VK_EXT_extended_dynamic_state
-void SetCullModeCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetCullModeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetCullModeEXT(cb, cullMode);
 }
 
-void SetFrontFaceCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetFrontFaceCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetFrontFaceEXT(cb, frontFace);
 }
 
-void SetPrimitiveTopologyCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetPrimitiveTopologyCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetPrimitiveTopologyEXT(cb, topology);
 }
 
-void SetViewportWithCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetViewportWithCountCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetViewportWithCountEXT(cb, viewports.size(), viewports.data());
 }
 
-void SetScissorWithCountCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetScissorWithCountCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetScissorWithCountEXT(cb, scissors.size(), scissors.data());
 }
 
-void SetDepthTestEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDepthTestEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthTestEnableEXT(cb, enable);
 }
 
-void SetDepthWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDepthWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthWriteEnableEXT(cb, enable);
 }
 
-void SetDepthCompareOpCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDepthCompareOpCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthBoundsTestEnableEXT(cb, op);
 }
 
-void SetDepthBoundsTestEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDepthBoundsTestEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthBoundsTestEnableEXT(cb, enable);
 }
 
-void SetStencilTestEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetStencilTestEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetStencilTestEnableEXT(cb, enable);
 }
 
-void SetStencilOpCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetStencilOpCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetStencilOpEXT(cb, faceMask, failOp, passOp,
 		depthFailOp, compareOp);
 }
 
 // VK_EXT_extended_dynamic_state2
-void SetPatchControlPointsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetPatchControlPointsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetPatchControlPointsEXT(cb, this->patchControlPoints);
 }
 
-void SetRasterizerDiscardEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetRasterizerDiscardEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetRasterizerDiscardEnableEXT(cb, this->enable);
 }
 
-void SetDepthBiasEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDepthBiasEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDepthBiasEnableEXT(cb, this->enable);
 }
 
-void SetLogicOpCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetLogicOpCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetLogicOpEXT(cb, this->logicOp);
 }
 
-void SetPrimitiveRestartEnableCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetPrimitiveRestartEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetPrimitiveRestartEnableEXT(cb, this->enable);
 }
 
 // ---
-void SetSampleLocationsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetSampleLocationsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetSampleLocationsEXT(cb, &this->info);
 }
 
-void SetDiscardRectangleCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetDiscardRectangleCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetDiscardRectangleEXT(cb, first, rects.size(), rects.data());
 }
 
 // VK_KHR_acceleration_structure
-void CopyAccelStructureCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyAccelStructureCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	VkCopyAccelerationStructureInfoKHR info {};
 	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
 	info.pNext = pNext;
@@ -2571,7 +2783,7 @@ void CopyAccelStructureCmd::record(const Device& dev, VkCommandBuffer cb) const 
 	dev.dispatch.CmdCopyAccelerationStructureKHR(cb, &info);
 }
 
-void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	VkCopyAccelerationStructureToMemoryInfoKHR info {};
 	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_TO_MEMORY_INFO_KHR;
 	info.pNext = pNext;
@@ -2581,7 +2793,7 @@ void CopyAccelStructToMemoryCmd::record(const Device& dev, VkCommandBuffer cb) c
 	dev.dispatch.CmdCopyAccelerationStructureToMemoryKHR(cb, &info);
 }
 
-void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	VkCopyMemoryToAccelerationStructureInfoKHR info {};
 	info.sType = VK_STRUCTURE_TYPE_COPY_MEMORY_TO_ACCELERATION_STRUCTURE_INFO_KHR;
 	info.pNext = pNext;
@@ -2591,7 +2803,7 @@ void CopyMemoryToAccelStructCmd::record(const Device& dev, VkCommandBuffer cb) c
 	dev.dispatch.CmdCopyMemoryToAccelerationStructureKHR(cb, &info);
 }
 
-void WriteAccelStructsPropertiesCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void WriteAccelStructsPropertiesCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	ThreadMemScope memScope;
 	auto vkAccelStructs = rawHandles(memScope, accelStructs);
 
@@ -2605,7 +2817,7 @@ BuildAccelStructsCmd::BuildAccelStructsCmd(CommandBuffer& cb) {
 	(void) cb;
 }
 
-void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dlg_assert(buildInfos.size() == buildRangeInfos.size());
 
 	ThreadMemScope memScope;
@@ -2622,7 +2834,7 @@ BuildAccelStructsIndirectCmd::BuildAccelStructsIndirectCmd(CommandBuffer& cb) {
 	(void) cb;
 }
 
-void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb, u32(buildInfos.size()),
 		buildInfos.data(), indirectAddresses.data(), indirectStrides.data(),
 		maxPrimitiveCounts.data());
@@ -2658,7 +2870,7 @@ Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 	return m;
 }
 
-void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdTraceRaysKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
 		width, height, depth);
@@ -2688,7 +2900,7 @@ Matcher TraceRaysCmd::match(const Command& base) const {
 	return m;
 }
 
-void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdTraceRaysIndirectKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
 		indirectDeviceAddress);
@@ -2710,11 +2922,11 @@ Matcher TraceRaysIndirectCmd::match(const Command& base) const {
 	return m;
 }
 
-void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb, stackSize);
 }
 
-void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	ThreadMemScope ms;
 
 	auto convert = [&](const Attachment& src, VkRenderingAttachmentInfo& dst) {
@@ -2817,7 +3029,7 @@ Matcher BeginRenderingCmd::match(const Command& base) const {
 	return m;
 }
 
-void EndRenderingCmd::record(const Device& dev, VkCommandBuffer cb) const {
+void EndRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dlg_assert(dev.dispatch.CmdEndRenderingKHR);
 	dev.dispatch.CmdEndRenderingKHR(cb);
 }

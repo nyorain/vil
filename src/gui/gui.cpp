@@ -1181,12 +1181,10 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				ImGui::EndTabItem();
 			}
 
-			if(tabs_.cb->record_ || tabs_.cb->mode_ == CommandBufferGui::UpdateMode::swapchain) {
-				if(ImGui::BeginTabItem("Commands", nullptr, checkSelectTab(Tab::commandBuffer))) {
-					activeTab_ = Tab::commandBuffer;
-					tabs_.cb->draw(draw);
-					ImGui::EndTabItem();
-				}
+			if(ImGui::BeginTabItem("Commands", nullptr, checkSelectTab(Tab::commandBuffer))) {
+				activeTab_ = Tab::commandBuffer;
+				tabs_.cb->draw(draw);
+				ImGui::EndTabItem();
 			}
 
 #ifdef VIL_VIZ_LCS

@@ -177,7 +177,10 @@ private:
 	u32 width_;
 	u32 height_;
 	Matcher matcher_;
-	span<EvalMatch> matchMatrix_; // lazily evaluated
+	// lazily evaluated matrix
+	// NOTE: need unique span since the iterator type might be
+	// non-trivially-destructible (e.g. the case for stdc++ debug mode)
+	UniqueSpan<EvalMatch> matchMatrix_;
 	float bestMatch_ {-1.f};
 	std::pair<u32, u32> bestRes_ {};
 	float branchThreshold_;

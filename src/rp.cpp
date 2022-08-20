@@ -631,10 +631,10 @@ VkRenderPass create(Device& dev, const RenderPassDesc& desc) {
 		VK_CHECK(create2(dev.handle, &rpi, nullptr, &rp));
 	} else {
 		std::vector<VkAttachmentDescription> attachments;
-		downgrade(attachments, span<const VkAttachmentDescription2>(desc.attachments));
+		downgradeInto(attachments, span<const VkAttachmentDescription2>(desc.attachments));
 
 		std::vector<VkSubpassDependency> dependencies;
-		downgrade(dependencies, span<const VkSubpassDependency2>(desc.dependencies));
+		downgradeInto(dependencies, span<const VkSubpassDependency2>(desc.dependencies));
 
 		std::vector<VkSubpassDescription> subpasses;
 		std::vector<std::vector<VkAttachmentReference>> references;

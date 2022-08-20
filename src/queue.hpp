@@ -60,11 +60,17 @@ struct SubmittedCommandBuffer {
 
 // A single Submission done via one VkSubmitInfo in vkQueueSubmit.
 struct Submission {
+	struct Sync {
+		Semaphore* semaphore {};
+		VkPipelineStageFlags stages {};
+		u64 value {1u}; // always 1 for binary sems
+	};
+
 	SubmissionBatch* parent {};
 	u64 queueSubmitID {};
 
-	std::vector<std::pair<Semaphore*, VkPipelineStageFlags>> waitSemaphores;
-	std::vector<Semaphore*> signalSemaphores;
+	std::vector<Sync> waits;
+	std::vector<Sync> signals;
 
 	// The CommandBuffer record must stay valid while the submission
 	// is still pending (anything else is an application error).
@@ -73,9 +79,18 @@ struct Submission {
 	// When not having timeline semaphores, we always add a binary
 	// semaphore to the submission to allow chaining it with future
 	// submissions. Otherwise the per-queue timeline semaphore can
-	// simply be used (with queueSubmitID as value).
+	// simply be used (with this->queueSubmitID as value).
 	VkSemaphore ourSemaphore {};
+
+	// Whether this submission might be executed on the device right now.
+	// Sometimes submissions are logically dependent on something not
+	// yet submitted yet, in which case active is false until all
+	// dependencies are submitted (i.e. 'waits' theoretically satisfied).
+	// Synced via device mutex
+	bool active {};
 };
+
+bool checkActivateLocked(Submission& subm);
 
 // Checks all pending submissions of the given device, processing
 // the finished ones. Must only be called while dev mutex is locked.

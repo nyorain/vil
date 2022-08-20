@@ -2,6 +2,7 @@
 #include <commandHook/hook.hpp> // TODO: only for pipes
 #include <commandHook/state.hpp>
 #include <device.hpp>
+#include <ds.hpp>
 #include <image.hpp>
 #include <layer.hpp>
 #include <buffer.hpp>
@@ -154,8 +155,8 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		dlg_warn("CopiedImage: Unsupported format {} (imageType {}, "
 			"tiling {}, usage {}, flags {}",
 			vk::name(ici.format), vk::name(ici.imageType), vk::name(ici.tiling),
-			vk::flagNames(VkImageUsageFlagBits(ici.usage)),
-			vk::flagNames(VkImageCreateFlagBits(ici.flags)));
+			vk::nameImageUsageFlags(ici.usage),
+			vk::nameImageCreateFlags(ici.flags));
 		return false;
 	}
 
