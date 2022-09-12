@@ -1495,7 +1495,7 @@ void CommandViewer::updateHook() {
 		(drawIndirectCmd && drawIndirectCmd->indexed) ||
 		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
-	CommandHook::HookOps ops {};
+	CommandHook::Ops ops {};
 	bool setOps = true;
 
 	switch(view_) {
@@ -1568,7 +1568,7 @@ void CommandViewer::updateHook() {
 	hook.freeze.store(false);
 
 	if(setOps) {
-		CommandHook::HookUpdate update;
+		CommandHook::Update update;
 		update.invalidate = true;
 		update.newOps = std::move(ops);
 

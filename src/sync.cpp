@@ -47,7 +47,7 @@ Semaphore::~Semaphore() {
 
 void updateUpperLocked(Semaphore& sem, u64 value) {
 	assertOwned(sem.dev->mutex);
-	if(sem.upperBound > value) {
+	if(sem.upperBound >= value) {
 		return;
 	}
 
@@ -57,7 +57,7 @@ void updateUpperLocked(Semaphore& sem, u64 value) {
 			continue;
 		}
 
-		if(wait.submission->active) {
+		if(!wait.submission->active) {
 			checkActivateLocked(*wait.submission);
 		}
 	}
@@ -202,7 +202,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
 
 	auto* typeCI = findChainInfo<VkSemaphoreTypeCreateInfo,
 		VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO>(*pCreateInfo);
-	if(typeCI) {
+	if(typeCI && typeCI->semaphoreType == VK_SEMAPHORE_TYPE_TIMELINE) {
 		semaphore.lowerBound = typeCI->initialValue;
 		semaphore.upperBound = semaphore.lowerBound;
 		semaphore.type = typeCI->semaphoreType;

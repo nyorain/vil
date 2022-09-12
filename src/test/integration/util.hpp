@@ -38,7 +38,9 @@ struct Setup {
 	VkPhysicalDevice phdev;
 	VkDevice dev;
 	VkQueue queue;
+	VkQueue queue2; // alternative, separate queue
 	u32 qfam;
+	u32 qfam2; // for queue2
 
 	VkLayerInstanceDispatchTable iniDispatch;
 	VkLayerDispatchTable dispatch;

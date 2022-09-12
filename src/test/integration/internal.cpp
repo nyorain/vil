@@ -10,6 +10,7 @@
 #include <commandHook/state.hpp>
 #include <threadContext.hpp>
 #include <layer.hpp>
+#include <sync.hpp>
 #include <image.hpp>
 #include <queue.hpp>
 #include <cb.hpp>
@@ -139,13 +140,13 @@ TEST(int_basic) {
 
 	auto& vilDev = *stp.vilDev;
 
-	CommandHook::HookUpdate update {};
+	CommandHookUpdate update {};
 	update.invalidate = true;
 	auto& ops = update.newOps.emplace();
 	ops.queryTime = true;
 
 	auto& target = update.newTarget.emplace();
-	target.type = CommandHook::HookTargetType::all;
+	target.type = CommandHookTargetType::all;
 	target.record = vilCB.lastRecordPtr();
 	target.command = {rec.commands, dst};
 
@@ -173,8 +174,7 @@ TEST(int_gui) {
 	auto& vilDev = *stp.vilDev;
 
 	// init gui
-	auto gui = std::make_unique<vil::Gui>();
-	gui->init(vilDev, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_D32_SFLOAT, true);
+	auto gui = std::make_unique<vil::Gui>(vilDev, VK_FORMAT_R8G8B8A8_UNORM);
 	// TODO: actually render gui stuff. Create own swapchain?
 	//   or rather implement render-on-image for that?
 	//   We could create a headless surface tho.
@@ -340,13 +340,13 @@ TEST(int_copy_transfer) {
 
 	auto& vilDev = *stp.vilDev;
 
-	CommandHook::HookUpdate update {};
+	CommandHookUpdate update {};
 	update.invalidate = true;
 	auto& ops = update.newOps.emplace();
 	ops.copyTransferSrc = true;
 
 	auto& target = update.newTarget.emplace();
-	target.type = CommandHook::HookTargetType::all;
+	target.type = CommandHookTargetType::all;
 	target.record = vilCB.lastRecordPtr();
 	target.command = {rec.commands, dst};
 
@@ -501,7 +501,7 @@ void sampleCopyTest(VkCommandBuffer cb, PipeSetup& ps, Texture& tex0) {
 
 	auto& vilDev = *stp.vilDev;
 
-	CommandHook::HookUpdate update {};
+	CommandHookUpdate update {};
 	update.invalidate = true;
 
 	auto& ops = update.newOps.emplace();
@@ -512,7 +512,7 @@ void sampleCopyTest(VkCommandBuffer cb, PipeSetup& ps, Texture& tex0) {
 	dsCopy.imageAsBuffer = true;
 
 	auto& target = update.newTarget.emplace();
-	target.type = CommandHook::HookTargetType::all;
+	target.type = CommandHookTargetType::all;
 	target.record = vilCB.lastRecordPtr();
 	target.command = {rec.commands, dst};
 
@@ -620,6 +620,151 @@ TEST(int_sample_copy_pipeline) {
 	destroy(ps);
 	DestroySampler(stp.dev, sampler, nullptr);
 	DestroyCommandPool(stp.dev, cmdPool, nullptr);
+}
+
+TEST(int_submission_activation_timeline_semaphore) {
+	auto& stp = gSetup;
+	if(!stp.vilDev->timelineSemaphores) {
+		dlg_info("Timeline semaphores not supported, skipping");
+		return;
+	}
+
+	// create timeline semaphores
+	VkSemaphoreCreateInfo sci {};
+	sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+	VkSemaphoreTypeCreateInfo stci {};
+	stci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+	stci.initialValue = 420;
+	stci.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+
+	sci.pNext = &stci;
+
+	VkSemaphore semaphores[2];
+	CreateSemaphore(stp.dev, &sci, nullptr, &semaphores[0]);
+
+	stci.initialValue = 0;
+	CreateSemaphore(stp.dev, &sci, nullptr, &semaphores[1]);
+
+	auto& sem0 = get(*stp.vilDev, semaphores[0]);
+	auto& sem1 = get(*stp.vilDev, semaphores[1]);
+
+	// submit
+	auto createSemaphoreSubmit = [](VkSemaphore sem, u64 val, bool wait) {
+		VkSemaphoreSubmitInfo semSubm {};
+		semSubm.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+		semSubm.semaphore = sem;
+		semSubm.value = val;
+		semSubm.stageMask = wait ?
+			VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT :
+			VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+		return semSubm;
+	};
+
+	auto createSubmission = [](
+			const VkSemaphoreSubmitInfo* wait,
+			const VkSemaphoreSubmitInfo* signal) {
+		VkSubmitInfo2 submitInfo {};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2_KHR;
+
+		if(wait) {
+			submitInfo.waitSemaphoreInfoCount = 1u;
+			submitInfo.pWaitSemaphoreInfos = wait;
+		}
+
+		if(signal) {
+			submitInfo.signalSemaphoreInfoCount = 1u;
+			submitInfo.pSignalSemaphoreInfos = signal;
+		}
+
+		return submitInfo;
+	};
+
+	// - first submission -
+	{
+		auto semWait0 = createSemaphoreSubmit(semaphores[0], 420, true);
+		auto semSignal0 = createSemaphoreSubmit(semaphores[0], 425, false);
+		auto semWait1 = createSemaphoreSubmit(semaphores[1], 1, true);
+
+		std::array subm = {
+			createSubmission(&semWait0, &semSignal0),
+			createSubmission(&semWait1, nullptr),
+		};
+
+		doSubmit(*stp.vilQueue, subm, VK_NULL_HANDLE, true);
+	}
+
+	dlg_assert(stp.vilDev->pending.size() == 1u);
+	auto& pending0 = *stp.vilDev->pending[0];
+	EXPECT(pending0.appFence, nullptr);
+	EXPECT(pending0.submissions.size(), 2u);
+	EXPECT(pending0.queue, stp.vilQueue);
+	EXPECT(pending0.submissions[0].active, true);
+	EXPECT(pending0.submissions[1].active, false);
+	EXPECT(pending0.queue->firstWaiting, &pending0.submissions[1]);
+	EXPECT(sem0.lowerBound, 420u);
+	EXPECT(sem0.upperBound, 425u);
+	EXPECT(sem1.lowerBound, 0u);
+	EXPECT(sem1.upperBound, 0u);
+
+	// - second submission -
+	{
+		auto semSignal0 = createSemaphoreSubmit(semaphores[1], 2u, false);
+		std::array subm = {
+			createSubmission(nullptr, &semSignal0),
+		};
+
+		doSubmit(*stp.vilQueue, subm, VK_NULL_HANDLE, true);
+	}
+
+	// even though this submission has no wait operation, it's blocked
+	// by submission order
+	dlg_assert(stp.vilDev->pending.size() == 2u);
+	auto& pending1 = *stp.vilDev->pending[1];
+	EXPECT(pending1.submissions.size(), 1u);
+	EXPECT(pending1.submissions[0].active, false);
+	EXPECT(sem1.lowerBound, 0u);
+	EXPECT(sem1.upperBound, 0u);
+	EXPECT(pending0.queue->firstWaiting, &pending0.submissions[1]);
+
+	// - third submission-
+	{
+		auto semWait0 = createSemaphoreSubmit(semaphores[0], 421u, true);
+		auto semSignal0 = createSemaphoreSubmit(semaphores[1], 1u, false);
+
+		std::array subm = {
+			createSubmission(&semWait0, &semSignal0),
+		};
+
+		doSubmit(*stp.vilQueue2, subm, VK_NULL_HANDLE, true);
+	}
+
+	dlg_assert(stp.vilDev->pending.size() == 3u);
+	auto& pending2 = *stp.vilDev->pending[2];
+	EXPECT(pending2.submissions.size(), 1u);
+
+	EXPECT(pending0.submissions[1].active, true);
+	EXPECT(pending1.submissions[0].active, true);
+	EXPECT(pending2.submissions[0].active, true);
+
+	EXPECT(sem0.lowerBound, 420u);
+	EXPECT(sem0.upperBound, 425u);
+	EXPECT(sem1.lowerBound, 0u);
+	EXPECT(sem1.upperBound, 2u);
+
+	// finalize
+	DeviceWaitIdle(stp.dev);
+
+	EXPECT(sem0.lowerBound, 425u);
+	EXPECT(sem0.upperBound, 425u);
+	EXPECT(sem1.lowerBound, 2u);
+	EXPECT(sem1.upperBound, 2u);
+	EXPECT(stp.vilDev->pending.size(), 0u);
+	EXPECT(stp.vilQueue->firstWaiting, nullptr);
+	EXPECT(stp.vilQueue2->firstWaiting, nullptr);
+
+	DestroySemaphore(stp.dev, semaphores[0], nullptr);
+	DestroySemaphore(stp.dev, semaphores[1], nullptr);
 }
 
 // TODO: write test where we record a command buffer that executes

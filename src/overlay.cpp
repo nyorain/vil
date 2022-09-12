@@ -21,11 +21,7 @@ Overlay::~Overlay() {
 
 void Overlay::init(Swapchain& swapchain) {
 	this->swapchain = &swapchain;
-
-	depthFormat_ = findDepthFormat(*swapchain.dev);
-	dlg_assert(depthFormat_ != VK_FORMAT_UNDEFINED);
-	this->gui.init(*swapchain.dev, swapchain.ci.imageFormat, depthFormat_, false);
-
+	this->gui = &swapchain.dev->getOrCreateGui(swapchain.ci.imageFormat);
 	initRenderBuffers();
 }
 
@@ -37,7 +33,7 @@ void Overlay::destroyDepth() {
 }
 
 void Overlay::initRenderBuffers() {
-	gui.waitForDraws();
+	gui->waitForDraws();
 
 	auto& swapchain = *this->swapchain;
 	auto& dev = *swapchain.dev;
@@ -59,7 +55,7 @@ void Overlay::initRenderBuffers() {
 	ici.samples = VK_SAMPLE_COUNT_1_BIT;
 	ici.usage = /*VK_IMAGE_USAGE_SAMPLED_BIT |*/ VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	ici.format = depthFormat_;
+	ici.format = gui->depthFormat();
 
 	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &depthImage_));
 	nameHandle(dev, depthImage_, "overlayDepth");
@@ -80,7 +76,7 @@ void Overlay::initRenderBuffers() {
 	ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	ivi.image = depthImage_;
 	ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-	ivi.format = depthFormat_;
+	ivi.format = gui->depthFormat();
 	ivi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 	ivi.subresourceRange.layerCount = 1u;
 	ivi.subresourceRange.levelCount = 1u;
@@ -92,7 +88,7 @@ void Overlay::initRenderBuffers() {
 	buffers.resize(swapchain.images.size());
 	for(auto i = 0u; i < swapchain.images.size(); ++i) {
 		buffers[i].init(dev, swapchain.images[i]->handle,
-			swapchain.ci.imageFormat, swapchain.ci.imageExtent, gui.rp(), depthView_);
+			swapchain.ci.imageFormat, swapchain.ci.imageExtent, gui->rp(), depthView_);
 	}
 }
 
@@ -106,10 +102,11 @@ VkResult Overlay::drawPresent(Queue& queue, span<const VkSemaphore> semaphores,
 	frameInfo.waitSemaphores = semaphores;
 	frameInfo.fb = buffers[imageIdx].fb;
 	frameInfo.fullscreen = false;
+	frameInfo.clear = false;
 	frameInfo.presentQueue = queue.handle;
 	frameInfo.swapchain = swapchain->handle;
 
-	return gui.renderFrame(frameInfo);
+	return gui->renderFrame(frameInfo);
 }
 
 bool Overlay::compatible(const VkSwapchainCreateInfoKHR& a,

@@ -22,28 +22,59 @@ bool CommandSelection::update() {
 
 	// find the best match
 	CommandHook::CompletedHook* best = nullptr;
-	auto bestMatch = 0.f;
-	ThreadMemScope tms;
-	FrameMatch bestMatchResult {};
-	u32 bestPresentID = {};
 	std::vector<FrameSubmission> bestBatches; // only for swapchain mode
+	ThreadMemScope tms;
+	u32 bestPresentID = {};
 
-	// TODO PERF we probably don't want/need all that matching logic
-	// here anymore, we match now already when hooking.
-	// Maybe just choose the last completed hook here?
-	// Or only match (and choose the best candidate) when there are multiple
-	// candidates in the last frame?
+	auto swapchain = dev.swapchain();
+
+	auto frameForSubmissionLocked = [&](u32 submissionID) -> const FrameSubmissions* {
+		assertOwned(dev.mutex);
+		if(!swapchain) {
+			dlg_warn("lost swapchain");
+			return nullptr;
+		}
+
+		for(auto& frame : swapchain->frameSubmissions) {
+			if(submissionID >= frame.submissionStart &&
+					submissionID <= frame.submissionEnd) {
+				return &frame;
+			}
+		}
+
+		dlg_warn("Couldn't find frame associated to hooked submission");
+		return nullptr;
+	};
+
+	// TODO: just set this to true for non-swapchain modes as well?
+	bool chooseLast = false;
+	if(mode_ == UpdateMode::swapchain) {
+		bool multipleMatchesInLastFrame = false;
+		if(completed.size() > 1u) {
+			auto id1 = completed[completed.size() - 1].submissionID;
+			auto id2 = completed[completed.size() - 2].submissionID;
+
+			std::lock_guard lock(dev.mutex);
+			auto* frame1 = frameForSubmissionLocked(id1);
+			auto* frame2 = frameForSubmissionLocked(id2);
+			multipleMatchesInLastFrame = frame1 && (frame1 == frame2);
+		}
+
+		chooseLast = !multipleMatchesInLastFrame;
+	}
+
+	auto bestMatch = 0.f;
 	for(auto& res : completed) {
-		float resMatch = res.match;
+		if(res.match <= bestMatch) {
+			continue;
+		}
 
-		// When we are in swapchain mode, we need the frame associated with
-		// this submission. We will then also consider the submission in its
-		// context inside the frame.
-		std::vector<FrameSubmission> frameSubmissions;
-		u32 presentID {};
-
-		FrameMatch batchMatches;
 		if(mode_ == UpdateMode::swapchain) {
+			// NOTE: before, we did a complete frame-matching here again,
+			// even though it's expensive. Might improve precision a bit
+			// compared to the prefix-only matching we do in CommandHook.
+			// Re-introduce this here again if ever needed, see design.md
+
 			[[maybe_unused]] auto selType = selectionType();
 			dlg_assert(selType == SelectionType::command ||
 				selType == SelectionType::record ||
@@ -51,73 +82,22 @@ bool CommandSelection::update() {
 
 			{
 				std::lock_guard lock(dev.mutex);
-				for(auto& frame : dev.swapchain->frameSubmissions) {
-					if(res.submissionID >= frame.submissionStart &&
-							res.submissionID <= frame.submissionEnd) {
-
-						frameSubmissions = frame.batches;
-						presentID = frame.presentID;
-						break;
-					}
-				}
-			}
-
-			// when the hook is from too long ago, we won't
-			if(frameSubmissions.empty()) {
-				dlg_warn("Couldn't find frame associated to hooked submission");
-				continue;
-			}
-
-			dlg_assert(!frame_.empty());
-
-			// check if [record_ in frame_] contextually
-			// matches  [res.record in foundBatches]
-			if(record_) {
-				LinAllocScope localMatchMem(matchAlloc_);
-				batchMatches = match(tms, localMatchMem, frame_, frameSubmissions);
-				bool recordMatched = false;
-				for(auto& batchMatch : batchMatches.matches) {
-					if(batchMatch.b->submissionID != res.submissionID) {
-						continue;
-					}
-
-					for(auto& recMatch : batchMatch.matches) {
-						if(recMatch.b != res.record) {
-							continue;
-						}
-
-						if(recMatch.a == record_.get()) {
-							recordMatched = true;
-							resMatch *= eval(recMatch.match);
-
-							// TODO: For all parent commands, we could make
-							// sure that they match.
-							// I.e. (command_[i], res.command[i]) somewhere
-							// in the recMatch.matches[X]...matches hierarchy
-						}
-
-						break;
-					}
-
-					break;
-				}
-
-				// In this case, the newly hooked potentialy candidate did
-				// not match with our previous record in content; we won't use it.
-				if(!recordMatched) {
-					dlg_info("Hooked record did not match. Total match: {}, match count {}",
-						eval(batchMatches.match), batchMatches.matches.size());
+				auto* frame = frameForSubmissionLocked(res.submissionID);
+				if(!frame) {
 					continue;
 				}
+
+				bestBatches = frame->batches;
+				bestPresentID = frame->presentID;
 			}
+
 		}
 
-		if(resMatch > bestMatch) {
-			best = &res;
-			bestMatch = resMatch;
-			bestBatches = frameSubmissions;
-			bestPresentID = presentID;
-			bestMatchResult = batchMatches;
+		best = &res;
+		bestMatch = res.match;
+
+		if(chooseLast) {
+			break;
 		}
 	}
 
@@ -184,6 +164,13 @@ void CommandSelection::select(std::vector<FrameSubmission> frame,
 	mode_ = UpdateMode::swapchain;
 	frame_ = std::move(frame);
 
+	// TODO: HACK, see todo on multi-swapchain support
+	auto swapchain = dev_->swapchain();
+	dlg_assertl(dlg_level_warn, swapchain); // only warning cause our logic is racy
+	if(swapchain) {
+		swapchainPresent_ = swapchain->presentCounter;
+	}
+
 	if(submissionID == u32(-1)) {
 		dlg_assert(cmd.empty());
 		dlg_assert(!record);
@@ -232,11 +219,10 @@ void CommandSelection::select(CommandBufferPtr cb,
 void CommandSelection::unselect() {
 	auto& hook = *dev_->commandHook;
 
-	CommandHook::HookUpdate update;
-	update.stillNeeded = nullptr;
+	CommandHook::Update update;
 	update.invalidate = true;
-	update.newTarget = CommandHook::HookTarget {};
-	update.newOps = CommandHook::HookOps {};
+	update.newTarget = CommandHook::Target {};
+	update.newOps = CommandHook::Ops {};
 
 	hook.updateHook(std::move(update));
 
@@ -253,8 +239,7 @@ void CommandSelection::unselect() {
 }
 
 void CommandSelection::updateHookTarget() {
-	CommandHook::HookUpdate update;
-	update.stillNeeded = state_.get();
+	CommandHook::Update update;
 
 	auto& target = update.newTarget.emplace();
 	target.cb = cb_;
@@ -264,25 +249,25 @@ void CommandSelection::updateHookTarget() {
 
 	switch(mode_) {
 		case UpdateMode::any:
-			target.type = CommandHook::HookTargetType::all;
+			target.type = CommandHook::TargetType::all;
 			break;
 		case UpdateMode::commandBuffer:
-			target.type = CommandHook::HookTargetType::commandBuffer;
+			target.type = CommandHook::TargetType::commandBuffer;
 			break;
 		case UpdateMode::swapchain:
 			if(!submission_) {
 				dlg_assert(!record_);
 				dlg_assert(command_.empty());
-				target.type = CommandHook::HookTargetType::none;
+				target.type = CommandHook::TargetType::none;
 				break;
 			}
 
 			target.submissionID = u32(submission_ - frame_.data());
 			target.frame = frame_;
-			target.type = CommandHook::HookTargetType::inFrame;
+			target.type = CommandHook::TargetType::inFrame;
 			break;
 		case UpdateMode::none:
-			target.type = CommandHook::HookTargetType::commandRecord;
+			target.type = CommandHook::TargetType::commandRecord;
 			break;
 	}
 

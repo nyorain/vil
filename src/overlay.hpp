@@ -9,9 +9,9 @@ namespace vil {
 // Displays the ImGui window directly in the application window, on
 // a given swapchain.
 struct Overlay {
-	Swapchain* swapchain;
-	Gui gui;
+	Swapchain* swapchain {};
 	std::vector<RenderBuffer> buffers;
+	Gui* gui {}; // not null after init
 
 	Platform* platform {};
 
@@ -33,7 +33,6 @@ struct Overlay {
 		const VkSwapchainCreateInfoKHR& b);
 
 private:
-	VkFormat depthFormat_ {};
 	VkImage depthImage_ {};
 	VkImageView depthView_ {};
 	VkDeviceMemory depthMemory_ {};

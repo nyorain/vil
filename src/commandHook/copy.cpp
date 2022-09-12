@@ -402,6 +402,10 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 	enum class CopyMethod {
 		copy,
 		// TODO: implement! next best after copy
+		//   but mainly relevant for cases where we don't have
+		//   shaderStorageImageWriteWithoutFormat.
+		//   And we want to support the texelStorage path in any case,
+		//   for formats that can be sampled but don't have blitSrc
 		// blit,
 		texelStorage,
 	};

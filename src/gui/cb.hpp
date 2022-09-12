@@ -24,7 +24,10 @@ public:
 	void draw(Draw& draw);
 	void destroyed(const Handle& handle);
 
-	void showSwapchainSubmissions();
+	// swapchain only guaranteed to stay valid during call
+	// TODO: somewhat misleading, will not consider the given swapchain but just
+	// use dev.swapchain for updates. See todo on multi-swapchain support
+	void showSwapchainSubmissions(Swapchain& swapchain);
 	void select(IntrusivePtr<CommandRecord> record, Command* cmd = nullptr);
 	void select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb);
 
@@ -32,13 +35,10 @@ public:
 	auto& selector() { return selector_; }
 
 private:
-	// void updateState();
-	// void updateHookTarget(
-	// 	std::optional<CommandDescriptorSnapshot> descriptors = {});
 	void updateFromSelector();
 	void updateCommandViewer(bool resetState);
 
-	void displayFrameCommands();
+	void displayFrameCommands(Swapchain&);
 	void displayRecordCommands();
 	void clearSelection(bool unselectCommandViewer);
 
@@ -57,6 +57,7 @@ private:
 	// the commands due to not finding the selected command anymore but
 	// wanting to show fresh commands.
 	std::vector<FrameSubmission> frame_;
+	u32 frameID_ {};
 	// part of frame_
 	FrameSubmission* submission_ {};
 

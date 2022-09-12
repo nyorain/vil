@@ -12,25 +12,31 @@ urgent, bugs:
       resource viewer in gui
 - [ ] fix CommandBuffer 'view commands' deadlock issue (by making resource
       viewer non-locking)
+- [ ] add 'hook' fastpaths that don't do this whole matching thing
+	  when we e.g. know it's a different queue (or when we already had
+	  a pretty perfect match?)
+
+- [ ] with lockfree gui rendering, the overlay input events in api.cpp
+      are racy when QueuePresent is called in another thread.
+	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
+	  Just insert events into queue that is processed at beginning of 
+	  rendering? probably best. Actually, most (all?) events don't need queue.
+	  Just update a copy of (mutex-synced) state that is applied at beginning
+	  of render.
 
 - [ ] require wrapping commandBuffers? does it even work otherwise?
-      maybe erase from global data when freed?
+      erase from global data when freed
+- [ ] correctly unset commandBuffer handle on api destruction
 
 - [ ] set spec constants for shader module in gui shader debugger.
       Test with shader from tkn/iro
 - [ ] figure out if our linear allocator (the std::allocator) adapter
       should value initialize on alloc
-- [ ] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
-      resource destruction, can happen in any thread. Caused a crash with doom.
-	- [ ] gui shouldn't be owned by overlay (and therefore swapchain),
-		  means we discard its state (e.g. selection) on every resize (when
-		  applications don't use the oldSwapchain feature).
-		  Should be a member of the device, we only display it once anyways.
-		  Create lazily as member there, WITH sync!
 - [ ] figure out transform_feedback crashes in doom eternal
       crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
       check if it could be a error in patching logic; otherwise analyze our generated spirv,
       see the dumped shaders that might have caused the crash (on D:)
+- [ ] figure out tracy crashs with doom eternal :(
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
@@ -58,30 +64,17 @@ urgent, bugs:
 	  Vulkan says it's not allowed to use such resources.
 	  Note that they are usually NOT in the invalid image layout, just the last
 	  one they were used in.
-	  Hard to track though I guess?
-
-match rework 2, electric boogaloo
-- use LCS in hook already.
-  See node 2305 for details.
-  The final find operation could then either be LCS (careful! might have
-  a lot more commands here than sections for 'match') 
-  Or - e.g. inside a render pass without blending - be independent 
-  of the order of draw commands.
-	- for sync/bind commands: find surrounding actions commands - as
-	  outlined multiple times - and find them. Might cross block/record
-	  boundaries tho
-	- for action commands inside small (non-solid-renderpass) blocks: do LCS
-	- for big blocks: do best-match. In this case something like relID is
-	  useful. Maybe build it on-the-fly? should be a lot cheaper, only
-	  needed for very few blocks compared to *everything*
-	- for order-independent (e.g. no blend/additive) renderpasses we probably 
-	  want order-independency anyways, so just local-best-match
--> don't hook every cb with matching command. At least do a rough check
-      on other commands/record structure. Otherwise (e.g. when just selecting
-	  a top-level barrier command) we very quickly might get >10 hooks per
-	  frame.
 
 new, workstack:
+- [ ] cleanup: move render buffer code from Window/Overlay to gui.
+      code duplication in Window/Overlay and it probably makes more sense
+	  in Gui anyways?!
+- [ ] support for multiple swapchains: store the selected swapchain
+      in CommandBufferGui/CommandSelection/CommandHook instead of using
+	  dev.swapchain. Rename dev.swapchain into dev.lastCreatedSwapchain and
+	  really only use it for the respective API call
+	- [ ] regarding overlays: lazily create the gui for the first swapchain/Platform
+	      that opens it? Allow switching later on though.
 - [ ] add undefined behavior analyzer in shader debuggger.
       just need to enable spvm feature
 - [ ] there should probably just be one ImageViewer object; owned by Gui directly.
@@ -119,6 +112,29 @@ new, workstack:
 - [ ] {later} honor maxTexelBufferElements. Fall back to raw vec4f copy
 	- most impls have valid limits though. Had to fix the mock icd tho :/
 - [ ] {later} implement blit imageToBuffer copy
+
+	  Hard to track though I guess?
+
+match rework 2, electric boogaloo
+- use LCS in hook already.
+  See node 2305 for details.
+  The final find operation could then either be LCS (careful! might have
+  a lot more commands here than sections for 'match') 
+  Or - e.g. inside a render pass without blending - be independent 
+  of the order of draw commands.
+	- for sync/bind commands: find surrounding actions commands - as
+	  outlined multiple times - and find them. Might cross block/record
+	  boundaries tho
+	- for action commands inside small (non-solid-renderpass) blocks: do LCS
+	- for big blocks: do best-match. In this case something like relID is
+	  useful. Maybe build it on-the-fly? should be a lot cheaper, only
+	  needed for very few blocks compared to *everything*
+	- for order-independent (e.g. no blend/additive) renderpasses we probably 
+	  want order-independency anyways, so just local-best-match
+-> don't hook every cb with matching command. At least do a rough check
+      on other commands/record structure. Otherwise (e.g. when just selecting
+	  a top-level barrier command) we very quickly might get >10 hooks per
+	  frame.
 
 shader debugger:
 - [x] cleanup/fix freezing as described in node 2235
@@ -241,10 +257,6 @@ performance/profiling:
 		  Maybe try using a hashSet instead?
 		  maybe it's a lot of secret destructors being called?
 		  That in turn call notifyDestruction of the device?
-- [ ] make sure it's unlikely we insert handles to CommandRecord::invalided
-	  since we should be logically able to get around that
-	  case (with normal API use and no gui open; i.e. the Record should
-	  be destroyed before any resources it uses)
 - [ ] make sure it's unlikely we have additional DescriptorSetState references
 	  on vkFreeDescriptorSets (with normal api use and no gui)
 - [ ] don't allocate memory per-resource. Especially for CommandHookState.

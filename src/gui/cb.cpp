@@ -29,8 +29,8 @@
 
 namespace vil {
 
-using HookTarget = CommandHook::HookTarget;
-using HookTargetType = CommandHook::HookTargetType;
+using HookTarget = CommandHook::Target;
+using HookTargetType = CommandHook::TargetType;
 using UpdateMode = CommandSelection::UpdateMode;
 using SelectionType = CommandSelection::SelectionType;
 
@@ -69,7 +69,14 @@ void CommandBufferGui::draw(Draw& draw) {
 	};
 
 	auto updateMode = selector_.updateMode();
-	if(updateMode != UpdateMode::swapchain) {
+	IntrusivePtr<Swapchain> swapchain;
+	if(updateMode == UpdateMode::swapchain) {
+		swapchain = gui_->dev().swapchain();
+		if(!swapchain) {
+			clearSelection(true);
+			return;
+		}
+	} else {
 		if(ImGui::BeginCombo("Update Source", modeName(updateMode))) {
 			if(ImGui::Selectable("None")) {
 				selector_.updateMode(UpdateMode::none);
@@ -92,9 +99,6 @@ void CommandBufferGui::draw(Draw& draw) {
 
 			ImGui::EndCombo();
 		}
-	} else if(!gui_->dev().swapchain) {
-		clearSelection(true);
-		return;
 	}
 
 	// Settings
@@ -171,28 +175,22 @@ void CommandBufferGui::draw(Draw& draw) {
 	auto doUpdate = updateTick_.tick();
 	if(doUpdate) {
 		auto hookUpdated = selector_.update();
-		if(hookUpdated && !freezeCommands_) {
-			// TODO PERF: we could re-use the matching data from the selector
-			// here in many cases instead of running our own match
-			// in updateFromSelector.
-			updateFromSelector();
-		}
+		if(!hookUpdated) {
+			// when we would like to have an update per update ticker
+			// but there wasn't one right now, try again in every tick
+			// until we find one.
+			updateTick_.activate();
+		} else {
+			if(!freezeCommands_) {
+				updateFromSelector();
+			}
 
-		auto selType = selector_.selectionType();
-		if(hookUpdated && selType == CommandSelection::SelectionType::command) {
-			updateCommandViewer(false);
+			auto selType = selector_.selectionType();
+			if(selType == CommandSelection::SelectionType::command) {
+				updateCommandViewer(false);
+			}
 		}
 	}
-
-	// always clear the completed hooks, no matter if we update
-	// the state or not.
-	// TODO XXX: don't do it like this. Imagine a case where the application
-	// has a low framerate and our window a way higher one.
-	// We clear this way too often and don't find anything completed
-	// during the update tick
-	// But we also don't want to keep like 100 completed states around, ugh.
-	// Maybe use something ring-buffer like instead? Directly inside CommandHook?
-	hook.clearCompleted();
 
 	// force-update shown batches when it's been too long
 	// TODO: do something like that also for non-swapchain mode?
@@ -200,18 +198,21 @@ void CommandBufferGui::draw(Draw& draw) {
 	//   selected command anymore.
 	updateMode = selector_.updateMode();
 	if(updateMode == UpdateMode::swapchain && !selector_.freezeState && doUpdate) {
-		auto lastPresent = dev.swapchain->frameSubmissions[0].presentID;
+		auto lastPresent = swapchain->frameSubmissions[0].presentID;
 		auto statePresent = selector_.hookStateSwapchainPresent();
 		if(selector_.submission() && lastPresent > statePresent + 4) {
 			auto diff = lastPresent - statePresent;
 
-			ImGui::SameLine();
-			imGuiText("Command not found in {} frames", diff);
+			auto selType = selector_.selectionType();
+			if(selType == CommandSelection::SelectionType::command) {
+				ImGui::SameLine();
+				imGuiText("Command not found in {} frames", diff);
+				// dlg_trace("force command update");
+			}
 
 			// force update
 			if(!freezeCommands_) {
-				dlg_trace("force command update");
-				updateRecords(dev.swapchain->frameSubmissions[0].batches);
+				updateRecords(swapchain->frameSubmissions[0].batches);
 			}
 		}
 	}
@@ -256,7 +257,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
 
 	if(updateMode == UpdateMode::swapchain) {
-		displayFrameCommands();
+		displayFrameCommands(*swapchain);
 	} else {
 		displayRecordCommands();
 	}
@@ -345,16 +346,11 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, CommandBufferP
 	updateFromSelector();
 }
 
-void CommandBufferGui::showSwapchainSubmissions() {
+void CommandBufferGui::showSwapchainSubmissions(Swapchain& swapchain) {
 	auto& dev = gui_->dev();
 	assertNotOwned(dev.mutex);
-	dlg_assert(dev.swapchain);
 
-	std::vector<FrameSubmission> lastFrame;
-	{
-		std::lock_guard lock(dev.mutex);
-		lastFrame = dev.swapchain->frameSubmissions[0].batches;
-	}
+	auto lastFrame = swapchain.frameSubmissions[0].batches;
 
 	clearSelection(true);
 	selector_.select(std::move(lastFrame), u32(-1), nullptr, {});
@@ -365,11 +361,10 @@ void CommandBufferGui::destroyed(const Handle&) {
 	// TODO: something to do here?
 }
 
-void CommandBufferGui::displayFrameCommands() {
-	if(frame_.empty() &&
-			!gui_->dev().swapchain->frameSubmissions[0].batches.empty()) {
+void CommandBufferGui::displayFrameCommands(Swapchain& swapchain) {
+	if(frame_.empty() && swapchain.frameSubmissions[0].batches.empty()) {
 		dlg_warn("how did this happen?");
-		frame_ = gui_->dev().swapchain->frameSubmissions[0].batches;
+		frame_ = swapchain.frameSubmissions[0].batches;
 	}
 
 	const Command* selectedCommand = nullptr;
@@ -585,15 +580,30 @@ void addMatches(
 		const std::unordered_set<const ParentCommand*>& oldSet,
 		std::unordered_set<const ParentCommand*>& newSet,
 		std::unordered_set<const ParentCommand*>& transitioned,
-		const CommandSectionMatch& sectionMatch) {
+		const CommandSectionMatch& sectionMatch,
+		span<const Command*> oldCommand,
+		std::vector<const Command*>& newCommand) {
 
 	if(oldSet.count(sectionMatch.a)) {
 		newSet.insert(sectionMatch.b);
 		transitioned.insert(sectionMatch.a);
 	}
 
+	auto found = false;
 	for(auto& child : sectionMatch.children) {
-		addMatches(oldSet, newSet, transitioned, child);
+		auto added = false;
+		if(!oldCommand.empty() && child.a == oldCommand[0]) {
+			dlg_assert(!found);
+			newCommand.push_back(child.b);
+			oldCommand = oldCommand.subspan(1u);
+			added = true;
+			found = true;
+		}
+
+		auto prevSize = newCommand.size();
+		addMatches(oldSet, newSet, transitioned, child, oldCommand, newCommand);
+
+		dlg_assert(!added || prevSize == newCommand.size());
 	}
 }
 
@@ -612,19 +622,39 @@ void CommandBufferGui::updateRecords(const FrameMatch& frameMatch,
 
 	std::unordered_set<const ParentCommand*> transitionedSections;
 
+	FrameSubmission* newSubmission = nullptr;
+	IntrusivePtr<CommandRecord> newRecord {};
+	std::vector<const Command*> newCommand {};
+
 	for(auto batchMatch : frameMatch.matches) {
+		if(submission_ == batchMatch.a) {
+			dlg_assert(!newSubmission);
+			newSubmission = const_cast<FrameSubmission*>(batchMatch.b);
+		}
+
 		if(openedSubmissions_.count(batchMatch.a)) {
 			newOpenSubmissions.insert(batchMatch.b);
 			dlg_assert(batchMatch.b - records.data() <= i64(records.size()));
 		}
 
 		for(auto& recordMatch : batchMatch.matches) {
+			if(record_ == recordMatch.a) {
+				dlg_assert(newSubmission);
+				dlg_assert(!newRecord);
+				newRecord.reset(const_cast<CommandRecord*>(recordMatch.b));
+			}
+
 			if(openedRecords_.count(recordMatch.a)) {
 				newOpenRecords.insert(recordMatch.b);
 			}
 
 			for(auto& sectionMatch : recordMatch.matches) {
-				addMatches(openedSections_, newOpenSections, transitionedSections, sectionMatch);
+				auto prevSize = newCommand.size();
+				addMatches(openedSections_, newOpenSections,
+					transitionedSections, sectionMatch,
+					command_, newCommand);
+				dlg_assert(record_ == recordMatch.a ||
+					prevSize == newCommand.size());
 			}
 		}
 	}
@@ -642,6 +672,11 @@ void CommandBufferGui::updateRecords(const FrameMatch& frameMatch,
 
 	// apply
 	frame_ = std::move(records);
+
+	submission_ = newSubmission;
+	record_ = std::move(newRecord);
+	command_ = std::move(newCommand);
+
 	openedSubmissions_ = std::move(newOpenSubmissions);
 	openedRecords_ = std::move(newOpenRecords);
 	openedSections_ = std::move(newOpenSections);

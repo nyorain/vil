@@ -1041,3 +1041,94 @@ rendering is done?
 
 The waiting itself (even if it might take >1ms) isn't a problem, this is 
 a very rare case.
+
+# Old commandSelection matching
+
+Me might need this again if prefix-matching (as we do in CommandHook
+to decide whether to hook or not) isn't enough in some case.
+
+```
+		// TODO PERF we probably don't want/need all that matching logic
+		// here anymore, we match now already when hooking.
+		// Maybe just choose the last completed hook here?
+		// Or only match (and choose the best candidate) when there are multiple
+		// candidates in the last frame?
+		for(auto& res : completed) {
+			float resMatch = res.match;
+
+			// When we are in swapchain mode, we need the frame associated with
+			// this submission. We will then also consider the submission in its
+			// context inside the frame.
+			std::vector<FrameSubmission> frameSubmissions;
+			u32 presentID {};
+
+			FrameMatch batchMatches;
+			if(mode_ == UpdateMode::swapchain) {
+				// we don't really want to end up here
+				dlg_trace("doing re-matching of hooked record");
+
+				[[maybe_unused]] auto selType = selectionType();
+				dlg_assert(selType == SelectionType::command ||
+					selType == SelectionType::record ||
+					selType == SelectionType::submission);
+
+				{
+					std::lock_guard lock(dev.mutex);
+					auto* frame = frameForSubmissionLocked(res.submissionID);
+					if(!frame) {
+						continue;
+					}
+
+					frameSubmissions = frame->batches;
+					presentID = frame->presentID;
+				}
+
+				dlg_assert(!frame_.empty());
+
+				// check if [record_ in frame_] contextually
+				// matches  [res.record in foundBatches]
+				constexpr auto rematch = false;
+				if(record_) {
+					LinAllocScope localMatchMem(matchAlloc_);
+					batchMatches = match(tms, localMatchMem, frame_, frameSubmissions);
+					bool recordMatched = false;
+					for(auto& batchMatch : batchMatches.matches) {
+						if(batchMatch.b->submissionID != res.submissionID) {
+							continue;
+						}
+
+						for(auto& recMatch : batchMatch.matches) {
+							if(recMatch.b != res.record) {
+								continue;
+							}
+
+							if(recMatch.a == record_.get()) {
+								recordMatched = true;
+								resMatch *= eval(recMatch.match);
+							}
+
+							break;
+						}
+
+						break;
+					}
+
+					// In this case, the newly hooked potentialy candidate did
+					// not match with our previous record in content; we won't use it.
+					if(!recordMatched) {
+						dlg_info("Hooked record did not match. Total match: {}, match count {}",
+							eval(batchMatches.match), batchMatches.matches.size());
+						continue;
+					}
+				}
+			}
+
+			if(resMatch > bestMatch) {
+				best = &res;
+				bestMatch = resMatch;
+				bestBatches = frameSubmissions;
+				bestPresentID = presentID;
+				bestMatchResult = batchMatches;
+			}
+		}
+```

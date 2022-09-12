@@ -110,10 +110,12 @@ Device::~Device() {
 	dlg_assert(this->bufferViews.empty());
 	dlg_assert(this->dsuTemplates.empty());
 	dlg_assert(this->accelStructs.empty());
+	dlg_assert(!swapchain_.get());
 
 	// Their (transitive) destructors may use device resources.
 	// Important to first destroy the window, otherwise rendering may
 	// still be active and use e.g. commandHook resources.
+	gui_.reset();
 	window.reset();
 	commandHook.reset();
 
@@ -155,6 +157,41 @@ Device::~Device() {
 	queues.clear();
 }
 
+Gui& Device::getOrCreateGui(VkFormat colorFormat) {
+	std::lock_guard lock(this->mutex);
+	if(!gui_) {
+		// TODO: don't create Gui object while holding lock?
+		gui_ = std::make_unique<Gui>(*this, colorFormat);
+	} else {
+		gui_->updateColorFormat(colorFormat);
+	}
+
+	return *gui_;
+}
+
+IntrusivePtr<Swapchain> Device::swapchain() {
+	std::lock_guard lock(this->mutex);
+	return swapchain_;
+}
+
+IntrusivePtr<Swapchain> Device::swapchainPtrLocked() {
+	assertOwned(this->mutex);
+	return swapchain_;
+}
+
+void Device::swapchain(IntrusivePtr<Swapchain> newSwapchain) {
+	std::lock_guard lock(this->mutex);
+	swapchain_ = std::move(newSwapchain);
+}
+
+void Device::swapchainDestroyed(const Swapchain& swapchain) {
+	std::lock_guard lock(this->mutex);
+	if(swapchain_ == &swapchain) {
+		swapchain_.reset();
+	}
+}
+
+// util
 bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
 	for(auto& prop : extProps) {
 		if(!std::strcmp(prop.extensionName, name)) {
@@ -1002,8 +1039,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 // util
 void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type) {
 	assertOwned(dev.mutex);
-	if(dev.gui) {
-		dev.gui->destroyed(handle, type);
+	if(dev.guiLocked()) {
+		dev.guiLocked()->destroyed(handle, type);
 	}
 }
 

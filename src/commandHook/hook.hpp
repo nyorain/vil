@@ -83,7 +83,6 @@ struct CommandHookOps {
 struct CommandHookUpdate {
 	std::optional<CommandHookTarget> newTarget;
 	std::optional<CommandHookOps> newOps;
-	std::optional<CommandHookState*> stillNeeded;
 	// Whether to automatically clear completed hooks and invalidate recordings.
 	// Must be true if ops are updated.
 	bool invalidate {};
@@ -98,10 +97,10 @@ public:
 	// as we need it to have accelStruct data.
 	static constexpr bool hookAccelStructBuilds = true;
 
-	using HookTargetType = CommandHookTargetType;
-	using HookTarget = CommandHookTarget;
-	using HookOps = CommandHookOps;
-	using HookUpdate = CommandHookUpdate;
+	using TargetType = CommandHookTargetType;
+	using Target = CommandHookTarget;
+	using Ops = CommandHookOps;
+	using Update = CommandHookUpdate;
 
 	// Temporarily don't hook commands even if hook ops are set
 	// and a submission matches a target.
@@ -136,7 +135,7 @@ public:
 	void hook(QueueSubmitter& subm);
 
 	// Updates the hook operations
-	void updateHook(HookUpdate&& update);
+	void updateHook(Update&& update);
 
 	// Moves all completed hooks to the caller, clearing them
 	// internally.
@@ -144,8 +143,8 @@ public:
 
 	// NOTE: copies are being made here (inside a critical section)
 	// so these functions are more expensive than simple getters.
-	HookOps ops() const;
-	HookTarget target() const;
+	Ops ops() const;
+	Target target() const;
 
 	void invalidateRecordings(bool forceAll = false);
 	void clearCompleted();
@@ -190,11 +189,12 @@ public: // TODO, for copying. Maybe just move them to Device?
 	VkPipeline sampleImagePipes_[ShaderImageType::count] {};
 
 	std::vector<CompletedHook> completed_;
-	HookOps ops_;
-	HookTarget target_;
-	CommandHookState* stillNeeded_ {}; // hookState that can't be recycled
-									   //
+	Ops ops_;
+	Target target_;
 	LinAllocator matchAlloc_;
+
+	// maximum number of completed hooks we store at a time.
+	static constexpr auto maxCompletedHooks = 8u;
 };
 
 } // namespace vil

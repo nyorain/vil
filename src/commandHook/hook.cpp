@@ -112,11 +112,10 @@ CommandHook::~CommandHook() {
 	dlg_assert(dev.pending.empty());
 
 	// will invalidate everything, safely
-	HookUpdate update;
+	Update update;
 	update.invalidate = true;
-	update.newOps = HookOps {};
-	update.newTarget = HookTarget {};
-	update.stillNeeded = nullptr;
+	update.newOps = Ops {};
+	update.newTarget = Target {};
 	this->updateHook(std::move(update));
 
 	for(auto& pipe : sampleImagePipes_) {
@@ -294,6 +293,10 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 
 // TODO: temporary removal of record.dsState due to sync issues.
 // Needs to be fixed!
+// Evaluate if it's worth it tho, maybe just returning the over-conservative true
+// for all update_after_bind descriptors isn't a huge problem?
+// meh ok it probably is, will cause us to never reuse a HookedRecord that
+// copies and update_after_bind descriptor
 bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 	// dlg_assert_or(record.dsState.size() == ops_.descriptorCopies.size(), return true);
 
@@ -349,7 +352,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	// section here as well and quite expensive.
 	std::lock_guard lock(dev.mutex);
 
-	if(target_.type == HookTargetType::none || freeze.load()) {
+	if(target_.type == TargetType::none || freeze.load()) {
 		return;
 	}
 
@@ -360,15 +363,22 @@ void CommandHook::hook(QueueSubmitter& subm) {
 
 	const CommandRecord* frameDstRecord {};
 	span<const CommandSectionMatch> frameRecMatchData {};
-	if(target_.type == HookTargetType::inFrame) {
-		if(!dev.swapchain) {
-			dlg_warn("no swapchain anymore?!");
+	auto swapchain = dev_->swapchainLocked();
+	if(target_.type == TargetType::inFrame) {
+		if(!swapchain) {
+			dlg_warn("no swapchain anymore");
+			return;
+		}
+
+		// different queue
+		dlg_assert(target_.submissionID < target_.frame.size());
+		if(subm.queue != target_.frame[target_.submissionID].queue) {
 			return;
 		}
 
 		// get the current frame
 		std::vector<FrameSubmission> currFrame =
-			dev.swapchain->nextFrameSubmissions.batches;
+			swapchain->nextFrameSubmissions.batches;
 
 		// add the new submissions
 		auto& curr = currFrame.emplace_back();
@@ -429,18 +439,18 @@ void CommandHook::hook(QueueSubmitter& subm) {
 			if(!freeze.load()) {
 				auto hookViaFind = false;
 				if(&rec == frameDstRecord) {
-					dlg_assert(target_.type == HookTargetType::inFrame);
+					dlg_assert(target_.type == TargetType::inFrame);
 					hooked = hook(rec, frameRecMatchData, sub, hookData);
-				} else if(target_.type == HookTargetType::commandRecord) {
+				} else if(target_.type == TargetType::commandRecord) {
 					if(&rec == target_.record) {
 						hookViaFind = true;
 					}
-				} else if(target_.type == HookTargetType::commandBuffer) {
+				} else if(target_.type == TargetType::commandBuffer) {
 					dlg_assert(rec.cb);
 					if(rec.cb == target_.cb.get()) {
 						hookViaFind = true;
 					}
-				} else if(target_.type == HookTargetType::all) {
+				} else if(target_.type == TargetType::all) {
 					hookViaFind = true;
 				}
 
@@ -562,20 +572,26 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 			continue;
 		}
 
-		// we can't reuse this hook record, it's state is still needded
-		if(hookRecord->state.get() == stillNeeded_) {
-			continue;
-		}
+		if(hookRecord->state->refCount > 1u) {
+			// We can't reuse this hook record, its state is still needded
+			// somewhere, e.g. referenced in gui or our completed list.
+			// The one ref count is always there and comes from the record.
+			// Note that this check isn't a race: when the refCount is
+			// 1 in this branch it can only be increased by CommandHook
+			// passing it out somewhere which only happens inside this
+			// critical section we are in.
 
-		// the record has completed, its state in our completed list
-		auto completedIt = find_if(this->completed_, [&](const CompletedHook& completed) {
-			return completed.state == hookRecord->state;
-		});
-		if(completedIt != completed_.end()) {
-			++completedCount;
-			if(!foundCompleted) {
-				foundCompletedIt = completedIt;
-				foundCompleted = hookRecord.get();
+			// check if it's because its completed for the state re-using
+			// logic below this loop
+			auto completedIt = find_if(this->completed_, [&](const CompletedHook& completed) {
+				return completed.state == hookRecord->state;
+			});
+			if(completedIt != completed_.end()) {
+				++completedCount;
+				if(!foundCompleted || foundCompletedIt > completedIt) {
+					foundCompletedIt = completedIt;
+					foundCompleted = hookRecord.get();
+				}
 			}
 
 			continue;
@@ -708,10 +724,10 @@ CommandHookState::~CommandHookState() {
 	--DebugStats::get().aliveHookStates;
 }
 
-void CommandHook::updateHook(HookUpdate&& update) {
+void CommandHook::updateHook(Update&& update) {
 	{
 		// make sure we don't destroy these while lock is held
-		HookTarget oldTarget;
+		Target oldTarget;
 
 		{
 			std::lock_guard lock(dev_->mutex);
@@ -721,7 +737,7 @@ void CommandHook::updateHook(HookUpdate&& update) {
 				target_ = std::move(*update.newTarget);
 
 				// validate
-				if(target_.type == HookTargetType::inFrame) {
+				if(target_.type == TargetType::inFrame) {
 					dlg_assert(target_.submissionID != u32(-1));
 					dlg_assert(target_.submissionID < target_.frame.size());
 				}
@@ -730,10 +746,6 @@ void CommandHook::updateHook(HookUpdate&& update) {
 			if(update.newOps) {
 				dlg_assert(update.invalidate);
 				ops_ = std::move(*update.newOps);
-			}
-
-			if(update.stillNeeded) {
-				stillNeeded_ = *update.stillNeeded;
 			}
 		}
 	}
@@ -744,12 +756,12 @@ void CommandHook::updateHook(HookUpdate&& update) {
 	}
 }
 
-CommandHook::HookOps CommandHook::ops() const {
+CommandHook::Ops CommandHook::ops() const {
 	std::lock_guard lock(dev_->mutex);
 	return ops_;
 }
 
-CommandHook::HookTarget CommandHook::target() const {
+CommandHook::Target CommandHook::target() const {
 	std::lock_guard lock(dev_->mutex);
 	return target_;
 }

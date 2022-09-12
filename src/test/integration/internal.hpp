@@ -12,6 +12,8 @@ namespace vil::test {
 
 struct InternalSetup : tut::Setup {
 	Device* vilDev;
+	Queue* vilQueue;
+	Queue* vilQueue2;
 
 	// We need the original instance (as it was created) to call
 	// instance functions here

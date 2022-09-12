@@ -58,13 +58,12 @@ void initPipes(Device& dev,
 	Gui::Pipelines& dstPipes);
 
 // Gui
-Gui::Gui() = default;
-
-void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear) {
+Gui::Gui(Device& dev, VkFormat colorFormat) {
 	dev_ = &dev;
-	clear_ = clear;
-
 	lastFrame_ = Clock::now();
+	colorFormat_ = colorFormat;
+	depthFormat_ = findDepthFormat(dev);
+	dlg_assert(depthFormat_ != VK_FORMAT_UNDEFINED);
 
 	// init command pool
 	VkCommandPoolCreateInfo cpci {};
@@ -154,25 +153,69 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &imgOpPipeLayout_));
 	nameHandle(dev, imgOpPipeLayout_, "Gui:imgOpPipeLayout");
 
+	initRenderStuff();
+	initImGui();
+
+	// init blur
+	auto blurBackground = checkEnvBinary("VIL_BLUR", true);
+	if(blurBackground) {
+		vil::init(blur_, dev);
+
+		VkDescriptorSetAllocateInfo dai {};
+		dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		dai.descriptorSetCount = 1u;
+		dai.pSetLayouts = &dsLayout_;
+		dai.descriptorPool = dev.dsPool;
+		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &blurDs_));
+		nameHandle(dev, blurDs_, "Gui:blurDs");
+	}
+
+	// init tabs
+	// TODO: use RAII for init
+	tabs_.resources = std::make_unique<ResourceGui>();
+	tabs_.cb = std::make_unique<CommandBufferGui>();
+
+	tabs_.resources->init(*this);
+	tabs_.cb->init(*this);
+}
+
+void Gui::destroyRenderStuff() {
+	auto vkDev = dev_->handle;
+
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramPrepare, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramMax, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramRender, nullptr);
+	for(auto i = 0u; i < ShaderImageType::count; ++i) {
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.image[i], nullptr);
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.readTex[i], nullptr);
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.minMaxTex[i], nullptr);
+		dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramTex[i], nullptr);
+	}
+
+	dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
+}
+
+void Gui::initRenderStuff() {
+	auto& dev = *dev_;
+	destroyRenderStuff();
+
 	// render pass
 	VkAttachmentDescription atts[2] {};
 
 	auto& colorAtt = atts[0];
-	colorAtt.format = colorFormat;
+	colorAtt.format = colorFormat_;
 	colorAtt.samples = VK_SAMPLE_COUNT_1_BIT;
-	colorAtt.loadOp = clear ?
-		VK_ATTACHMENT_LOAD_OP_CLEAR :
-		VK_ATTACHMENT_LOAD_OP_LOAD;
+	colorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 	colorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	colorAtt.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	colorAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	colorAtt.initialLayout = clear ?
-		VK_IMAGE_LAYOUT_UNDEFINED :
-		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	colorAtt.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	colorAtt.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
 	auto& depthAtt = atts[1];
-	depthAtt.format = depthFormat;
+	depthAtt.format = depthFormat_;
 	depthAtt.samples = VK_SAMPLE_COUNT_1_BIT;
 	depthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -206,35 +249,6 @@ void Gui::init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool cle
 	nameHandle(dev, rp_, "Gui:rp");
 
 	initPipes(dev, rp_, pipeLayout_, imgOpPipeLayout_, histogramPipeLayout_, pipes_);
-	initImGui();
-
-	// init blur
-	auto blurBackground = checkEnvBinary("VIL_BLUR", true);
-	if(!clear && blurBackground) {
-		vil::init(blur_, dev);
-
-		VkDescriptorSetAllocateInfo dai {};
-		dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dai.descriptorSetCount = 1u;
-		dai.pSetLayouts = &dsLayout_;
-		dai.descriptorPool = dev.dsPool;
-		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &blurDs_));
-		nameHandle(dev, blurDs_, "Gui:blurDs");
-	}
-
-	// init tabs
-	// TODO: use RAII for init
-	tabs_.resources = std::make_unique<ResourceGui>();
-	tabs_.cb = std::make_unique<CommandBufferGui>();
-
-	tabs_.resources->init(*this);
-	tabs_.cb->init(*this);
-
-	// TODO: likely needs a lock. Shouldn't be done here in first place
-	// i guess but at Gui creation, where an existing gui object could
-	// be moved.
-	dlg_assert(dev.gui == nullptr);
-	dev.gui = this;
 }
 
 void Gui::initImGui() {
@@ -394,10 +408,6 @@ Gui::~Gui() {
 		return;
 	}
 
-	// TODO: needs a lock. Likely also shouldn't be here.
-	dlg_assert(dev_->gui == this);
-	dev_->gui = nullptr;
-
 	waitForDraws();
 	for(auto& draw : draws_) {
 		if(draw.inUse) {
@@ -425,19 +435,7 @@ Gui::~Gui() {
 	dev_->dispatch.DestroyImage(vkDev, font_.image, nullptr);
 	dev_->dispatch.FreeMemory(vkDev, font_.mem, nullptr);
 
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.gui, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramPrepare, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramMax, nullptr);
-	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramRender, nullptr);
-	for(auto i = 0u; i < ShaderImageType::count; ++i) {
-		dev_->dispatch.DestroyPipeline(vkDev, pipes_.image[i], nullptr);
-		dev_->dispatch.DestroyPipeline(vkDev, pipes_.readTex[i], nullptr);
-		dev_->dispatch.DestroyPipeline(vkDev, pipes_.minMaxTex[i], nullptr);
-		dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramTex[i], nullptr);
-	}
-
-	dev_->dispatch.DestroyRenderPass(vkDev, rp_, nullptr);
+	destroyRenderStuff();
 	dev_->dispatch.DestroyCommandPool(vkDev, commandPool_, nullptr);
 }
 
@@ -641,7 +639,7 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 	DebugLabel cblbl(dev(), draw.cb, "vil:Gui:recordDraw");
 
 	auto& dev = *dev_;
-	if(drawData.TotalIdxCount == 0 && !clear_) {
+	if(drawData.TotalIdxCount == 0) {
 		return;
 	}
 
@@ -901,16 +899,11 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Separator();
 
 	// swapchain stuff
-	IntrusivePtr<Swapchain> swapchain;
-
-	{
-		std::lock_guard lock(dev.mutex);
-		swapchain = dev.swapchain;
-	}
+	auto swapchain = dev.swapchain();
 
 	if(swapchain) {
 		if(ImGui::Button("View per-frame submissions")) {
-			cbGui().showSwapchainSubmissions();
+			cbGui().showSwapchainSubmissions(*swapchain);
 			activateTab(Tab::commandBuffer);
 		} else if(showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
@@ -924,7 +917,7 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 		{
 			std::lock_guard lock(dev.mutex);
-			for(auto& timing : dev.swapchain->frameTimings) {
+			for(auto& timing : swapchain->frameTimings) {
 				using MS = std::chrono::duration<float, std::ratio<1, 1000>>;
 				hist.push_back(std::chrono::duration_cast<MS>(timing).count());
 			}
@@ -1293,7 +1286,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	this->uploadDraw(draw, drawData);
 
 	auto blurred = false;
-	if(blur_.dev) {
+	if(blur_.dev && !info.clear) {
 		auto& sc = dev().swapchains.get(info.swapchain);
 		if(sc.supportsSampling) {
 			vil::blur(blur_, draw.cb, info.imageIdx, {}, {});
@@ -1329,11 +1322,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	rpBegin.framebuffer = info.fb;
 
 	VkClearValue clearValues[2] {};
-
-	// color attachment (if we don't clear it, this value is ignored).
-	// see render pass creation
-	clearValues[0].color = {{0.f, 0.f, 0.f, 1.f}};
-
+	// clearValues[0] is ignored.
 	// our depth attachment, always clear that.
 	clearValues[1].depthStencil = {1.f, 0u};
 
@@ -1342,6 +1331,8 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 
 	dev().dispatch.CmdBeginRenderPass(draw.cb, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
 
+	// clearing and then blurring does not make sense
+	dlg_assert(!blurred || !info.clear);
 	if(blurred) {
 		VkRect2D scissor;
 		// scissor.offset = {};
@@ -1389,6 +1380,17 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		VkDeviceSize off = 0u;
 		dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
 		dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
+	} else if(info.clear) {
+		VkClearAttachment clearAtt {};
+		clearAtt.clearValue.color = {{0.f, 0.f, 0.f, 1.f}};
+		clearAtt.colorAttachment = 0u;
+		clearAtt.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+		VkClearRect clearRect {};
+		clearRect.rect = {{0u, 0u}, info.extent};
+		clearRect.layerCount = 1u;
+
+		dev().dispatch.CmdClearAttachments(draw.cb, 1u, &clearAtt, 1u, &clearRect);
 	}
 
 	this->recordDraw(draw, info.extent, info.fb, drawData);
@@ -1961,6 +1963,15 @@ void Gui::visible(bool newVisible) {
 		auto& hook = *dev().commandHook;
 		hook.freeze.store(true);
 	}
+}
+
+void Gui::updateColorFormat(VkFormat newColorFormat) {
+	if(colorFormat_ == newColorFormat) {
+		return;
+	}
+
+	colorFormat_ = newColorFormat;
+	initRenderStuff();
 }
 
 } // namespace vil
