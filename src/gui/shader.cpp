@@ -1007,7 +1007,7 @@ void ShaderDebugger::storeVar(unsigned id, span<const spvm_word> indices,
 void ShaderDebugger::updateHooks(CommandHook& hook) {
 	dlg_assert(compiled_);
 
-	CommandHook::HookOps ops {};
+	CommandHookOps ops {};
 	varIDToDsCopyMap_.clear();
 
 	auto resources = compiled_->get_shader_resources();
@@ -1061,7 +1061,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 		ops.copyIndirectCmd = true;
 	}
 
-	CommandHook::HookUpdate update;
+	CommandHookUpdate update;
 	update.invalidate = true;
 	update.newOps = std::move(ops);
 	hook.updateHook(std::move(update));

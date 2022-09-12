@@ -24,6 +24,16 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	auto& dev = *subm.queue->dev;
 	assertOwned(dev.mutex);
 
+	// If a submission in the batch isn't even active yet, it can't
+	// be finished. We don't have to check it, but it's an optimization.
+	// NOTE: this is important for integration testing though. The
+	//   mock icd always returns VK_SUCCESS for fences.
+	for(auto& sub : subm.submissions) {
+		if(!sub.active) {
+			return std::nullopt;
+		}
+	}
+
 	if(subm.appFence) {
 		if(dev.dispatch.GetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
 			return std::nullopt;
@@ -41,6 +51,8 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 	dlg_assert(it != dev.pending.end());
 
 	for(auto& sub : subm.submissions) {
+		dlg_assert(sub.active);
+
 		for(auto& [cb, hookData] : sub.cbs) {
 			if(hookData) {
 				hookData->finish(sub);
@@ -91,6 +103,14 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 		for(auto& signal : sub.signals) {
 			auto& sem = *signal.semaphore;
 			sem.lowerBound = std::max(sem.lowerBound, signal.value);
+
+			if(sem.type == VK_SEMAPHORE_TYPE_BINARY) {
+				// TODO: needed for weird QueuePresent sync case where
+				// we reset upperBound immediately.
+				sem.lowerBound = std::min(sem.lowerBound, sem.upperBound);
+			} else {
+				dlg_assert(sem.lowerBound <= sem.upperBound);
+			}
 
 			auto finder = [&](auto& sync) { return sync.submission == &sub; };
 			auto it = std::find_if(sem.signals.begin(), sem.signals.end(), finder);
@@ -469,21 +489,67 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
 	return res;
 }
 
+// ugh this is way too messy, maybe build next pointers into submissions
+// already at submission time?
+Submission* nextSubmissionOrder(Submission& subm) {
+	auto subID = &subm - subm.parent->submissions.data();
+	dlg_assert(subID >= 0 && subID < i64(subm.parent->submissions.size()));
+	if(subID + 1 < i64(subm.parent->submissions.size())) {
+		return &subm.parent->submissions[subID + 1];
+	}
+
+	auto& dev = *subm.parent->queue->dev;
+	for(auto& pending : dev.pending) {
+		if(pending->queue == subm.parent->queue &&
+				!pending->submissions.empty() &&
+				pending->submissions[0].queueSubmitID == subm.queueSubmitID + 1) {
+			return &pending->submissions[0];
+		}
+	}
+
+	return nullptr;
+}
+
 // Called when we know that the submission is ready for execution on the GPU.
 // Before this being called, no command can be executed.
-void activate(Submission& subm) {
+void activateLocked(Submission& subm) {
 	dlg_assert(!subm.active);
-	assertOwned(subm.parent->queue->dev->mutex);
+
+	[[maybe_unused]] auto& dev = *subm.parent->queue->dev;
+	assertOwned(dev.mutex);
 
 	subm.active = true;
 	for(auto& signal : subm.signals) {
 		updateUpperLocked(*signal.semaphore, signal.value);
 	}
+
+	if(subm.parent->queue->firstWaiting) {
+		dlg_assert(subm.parent->queue->firstWaiting == &subm);
+
+		auto* next = nextSubmissionOrder(subm);
+		if(next) {
+			dlg_assert(!next->active);
+
+			// TODO: bad recursion here.
+			// will explode when an applications has some thousand
+			// pending inactive submissions.
+			subm.parent->queue->firstWaiting = next;
+			checkActivateLocked(*next);
+		} else {
+			subm.parent->queue->firstWaiting = nullptr;
+		}
+	}
 }
 
 bool checkActivateLocked(Submission& subm) {
-	dlg_assert(!subm.active);
 	assertOwned(subm.parent->queue->dev->mutex);
+
+	dlg_assert(!subm.active);
+	dlg_assert(subm.parent->queue->firstWaiting);
+
+	if(subm.parent->queue->firstWaiting != &subm) {
+		return false;
+	}
 
 	auto submActive = true;
 	for(auto& wait : subm.waits) {
@@ -497,7 +563,7 @@ bool checkActivateLocked(Submission& subm) {
 		return false;
 	}
 
-	activate(subm);
+	activateLocked(subm);
 	return true;
 }
 

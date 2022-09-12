@@ -3,6 +3,7 @@
 #include <layer.hpp>
 #include <threadContext.hpp>
 #include <image.hpp>
+#include <sync.hpp>
 #include <queue.hpp>
 #include <platform.hpp>
 #include <overlay.hpp>
@@ -70,7 +71,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 				// Have to make sure previous rendering has finished.
 				// We can be sure gui isn't starting new draws in another
 				// thread.
-				oldChain->overlay->gui.waitForDraws();
+				oldChain->overlay->gui->waitForDraws();
 				savedOverlay = std::move(oldChain->overlay);
 			} else {
 				recreateOverlay = true;
@@ -178,7 +179,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		// Otherwise we have to create a new renderer from scratch.
 		// Carry over all gui logic. Just recreate rendering logic
 		dlg_error("TODO: not implemented");
-	} else if(platform && !dev.gui) {
+	} else if(platform && !dev.gui()) {
 		swapd.overlay = std::make_unique<Overlay>();
 		swapd.overlay->init(swapd);
 
@@ -186,11 +187,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		platform->init(*swapd.dev, swapd.ci.imageExtent.width, swapd.ci.imageExtent.height);
 	}
 
-	{
-		std::lock_guard lock(dev.mutex);
-		dev.swapchain.reset(&swapd);
-	}
-
+	dev.swapchain(IntrusivePtr<Swapchain>(&swapd));
 	return result;
 }
 
@@ -202,18 +199,64 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 		return;
 	}
 
-	auto ptr = mustMoveUnset(device, swapchain);
-	auto& dev = *ptr->dev;
-	ptr->destroy();
-
-	{
-		std::lock_guard lock(dev.mutex);
-		if(dev.swapchain == ptr.get()) {
-			dev.swapchain.reset();
-		}
-	}
+	auto swapchainPtr = mustMoveUnset(device, swapchain);
+	auto& dev = *swapchainPtr->dev;
+	dev.swapchainDestroyed(*swapchainPtr);
+	swapchainPtr->destroy();
 
 	dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, pAllocator);
+}
+
+void doAcquireImage(Swapchain& swapchain, VkSemaphore& vkSemaphore, VkFence& vkFence) {
+	auto& dev = *swapchain.dev;
+
+	if(vkSemaphore) {
+		auto& semaphore = get(dev, vkSemaphore);
+		dlg_assert(semaphore.type == VK_SEMAPHORE_TYPE_BINARY);
+		dlg_assert(semaphore.lowerBound == 0u);
+		dlg_assert(semaphore.upperBound == 0u);
+		semaphore.upperBound = 1u;
+		vkSemaphore = semaphore.handle;
+
+		// TODO: insert sync op to semaphore?
+		// can't really track when it's done tho
+	}
+
+	if(vkFence) {
+		auto& fence = get(dev, vkFence);
+		vkFence = fence.handle;
+	}
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage2KHR(
+		VkDevice                                    device,
+		const VkAcquireNextImageInfoKHR*            pAcquireInfo,
+		uint32_t*                                   pImageIndex) {
+	auto& swapchain = get(device, pAcquireInfo->swapchain);
+	auto& dev = *swapchain.dev;
+
+	auto cpy = *pAcquireInfo;
+	cpy.swapchain = swapchain.handle;
+
+	doAcquireImage(swapchain, cpy.semaphore, cpy.fence);
+
+	return dev.dispatch.AcquireNextImage2KHR(device, &cpy, pImageIndex);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImageKHR(
+		VkDevice                                    device,
+		VkSwapchainKHR                              vkSwapchain,
+		uint64_t                                    timeout,
+		VkSemaphore                                 vkSemaphore,
+		VkFence                                     vkFence,
+		uint32_t*                                   pImageIndex) {
+	auto& swapchain = get(device, vkSwapchain);
+	auto& dev = *swapchain.dev;
+
+	doAcquireImage(swapchain, vkSemaphore, vkFence);
+
+	return dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain.handle,
+		timeout, vkSemaphore, vkFence, pImageIndex);
 }
 
 void swapchainPresent(Swapchain& swapchain) {
@@ -254,15 +297,48 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	ZoneScoped;
 
 	auto& qd = getData<Queue>(queue);
+	auto& dev = *qd.dev;
 
+	// patch and submit semaphores
+	// TODO: not sure submitting these on the queue and then presenting
+	// is the same, probably not. Need to rework gui to not do present
+	// itself and do batch forward in the end instead.
+	ThreadMemScope tms;
+	auto sems = tms.alloc<VkSemaphore>(pPresentInfo->waitSemaphoreCount);
+	auto topOfPipes = tms.alloc<VkPipelineStageFlags>(pPresentInfo->waitSemaphoreCount);
+	for(auto i = 0u; i < pPresentInfo->waitSemaphoreCount; ++i) {
+		auto& semaphore = get(dev, pPresentInfo->pWaitSemaphores[i]);
+
+		// TODO: insert as sync op?
+		dlg_assert(semaphore.upperBound = 1u);
+		semaphore.lowerBound = 0u;
+		semaphore.upperBound = 0u;
+
+		sems[i] = semaphore.handle;
+		topOfPipes[i] = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	}
+
+	if(!sems.empty()) {
+		VkSubmitInfo si {};
+		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		si.pWaitSemaphores = sems.data();
+		si.waitSemaphoreCount = sems.size();
+		si.pWaitDstStageMask = topOfPipes.data();
+
+		std::lock_guard lock(dev.queueMutex);
+		ZoneScopedN("submit");
+		dev.dispatch.QueueSubmit(queue, 1u, &si, VK_NULL_HANDLE);
+	}
+
+	// dispatch presents, separately
 	auto combinedResult = VK_SUCCESS;
 	for(auto i = 0u; i < pPresentInfo->swapchainCount; ++i) {
-		auto& swapchain = qd.dev->swapchains.get(pPresentInfo->pSwapchains[i]);
+		auto& swapchain = dev.swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 
 		if(swapchain.overlay && swapchain.overlay->platform) {
-			auto state = swapchain.overlay->platform->update(swapchain.overlay->gui);
-			swapchain.overlay->gui.visible(state != Platform::State::hidden);
+			auto state = swapchain.overlay->platform->update(*swapchain.overlay->gui);
+			swapchain.overlay->gui->visible(state != Platform::State::hidden);
 			// swapchain.overlay->gui.focused = (state == Platform::Status::focused);
 		}
 
@@ -271,18 +347,17 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		// can already be displayed.
 		swapchainPresent(swapchain);
 
-		if(swapchain.overlay && swapchain.overlay->gui.visible()) {
-			auto waitsems = span{pPresentInfo->pWaitSemaphores, pPresentInfo->waitSemaphoreCount};
-			res = swapchain.overlay->drawPresent(qd, waitsems, pPresentInfo->pImageIndices[i]);
+		if(swapchain.overlay && swapchain.overlay->gui->visible()) {
+			res = swapchain.overlay->drawPresent(qd, {}, pPresentInfo->pImageIndices[i]);
 		} else {
 			VkPresentInfoKHR pi {};
 			pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 			pi.pImageIndices = &pPresentInfo->pImageIndices[i];
-			pi.pResults = pPresentInfo->pResults ? &pPresentInfo->pResults[i] : nullptr;
 			pi.pSwapchains = &pPresentInfo->pSwapchains[i];
-			pi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
-			pi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
 			pi.swapchainCount = 1u;
+			// wait semaphores already submitted
+			pi.pWaitSemaphores = nullptr;
+			pi.waitSemaphoreCount = 0u;
 			pi.pNext = pPresentInfo->pNext;
 
 			std::lock_guard queueLock(qd.dev->queueMutex);

@@ -350,8 +350,17 @@ CommandSectionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 	auto numSectionsA = rootA.sectionStats().numChildSections;
 	auto numSectionsB = rootB.sectionStats().numChildSections;
 
-	if(numSectionsA == 0u && numSectionsB == 0u) {
-		// no child matching to do
+	// no child matching to do
+	// but make sure to account for the "lost" match values here as well
+	if(numSectionsA == 0u || numSectionsB == 0u) {
+		for(auto it = rootA.firstChildParent(); it; it = it->nextParent_) {
+			ret.match.total += approxTotalWeight(*it);
+		}
+
+		for(auto it = rootB.firstChildParent(); it; it = it->nextParent_) {
+			ret.match.total += approxTotalWeight(*it);
+		}
+
 		return ret;
 	}
 

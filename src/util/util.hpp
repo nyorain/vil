@@ -300,6 +300,26 @@ EnumerateImpl<T> enumerate(T& t) {
     return EnumerateImpl<T>(t);
 }
 
+template<typename T>
+struct RevertedIteratable {
+	T& iterable;
+};
+
+template<typename T>
+auto begin(RevertedIteratable<T> w) {
+	return std::rbegin(w.iterable);
+}
+
+template<typename T>
+auto end(RevertedIteratable<T> w) {
+	return std::rend(w.iterable);
+}
+
+template<typename T>
+RevertedIteratable<T> reverse(T&& iterable) {
+	return {iterable};
+}
+
 struct BufferInterval {
 	VkDeviceSize offset;
 	VkDeviceSize size;

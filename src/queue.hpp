@@ -38,6 +38,11 @@ struct Queue : Handle {
 	// The submissionID of the last submission where the layer inserted
 	// commands, e.g. for gui rendering or via a CommandHook.
 	u64 lastLayerSubmission {};
+
+	// First inactive submission to this queue. Per submission order,
+	// all following submissions are inactive (waiting) as well.
+	// Null if there is no such submission.
+	Submission* firstWaiting {};
 };
 
 // All data we store for a queue family.
@@ -90,6 +95,7 @@ struct Submission {
 	bool active {};
 };
 
+void activateLocked(Submission& subm);
 bool checkActivateLocked(Submission& subm);
 
 // Checks all pending submissions of the given device, processing
@@ -131,6 +137,8 @@ using SubmIterator = std::vector<std::unique_ptr<SubmissionBatch>>::iterator;
 std::optional<SubmIterator> checkLocked(SubmissionBatch& subm);
 
 VkResult waitIdleImpl(Device& dev);
+VkResult doSubmit(Queue& qd, span<const VkSubmitInfo2> submits,
+	VkFence fence, bool legacy);
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(

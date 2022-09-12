@@ -91,6 +91,9 @@ struct Device {
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
 	bool shaderStorageImageWriteWithoutFormat {};
 
+	// Whether we are in integration testing mode
+	bool testing {};
+
 	std::atomic<bool> doFullSync {};
 	std::atomic<bool> captureCmdStack {};
 
@@ -129,18 +132,6 @@ struct Device {
 
 	// Always valid, initialized on device creation.
 	std::unique_ptr<CommandHook> commandHook {};
-
-	// The currently active gui. Might be null. There is never more than
-	// one gui associated with a device.
-	Gui* gui {};
-
-	// synced via device mutex.
-	// NOTE: hacky as hell but can't work around it. Needed only by the
-	// public API to communicate with the application.
-	// Must only be accessed while the mutex is locked.
-	// TODO: could keep a stack of swapchains to support the case
-	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
-	IntrusivePtr<Swapchain> swapchain {};
 
 	std::vector<VkFence> fencePool; // currently unused fences
 
@@ -250,8 +241,50 @@ struct Device {
 	KeepAliveRingBuffer<BufferView*, keepAliveCount> keepAliveBufferViews;
 	KeepAliveRingBuffer<AccelStruct*, keepAliveCount> keepAliveAccelStructs;
 
+public:
 	Device(); // = default in src
 	~Device();
+
+	IntrusivePtr<Swapchain> swapchain();
+	IntrusivePtr<Swapchain> swapchainPtrLocked();
+
+	Swapchain* swapchainLocked() {
+		assertOwned(this->mutex);
+		return swapchain_.get();
+	}
+
+	// NOTE: returning this outside the critical section isn't a race,
+	// we never destroy the Gui object while the device is alive.
+	Gui* gui() {
+		std::lock_guard lock(this->mutex);
+		return gui_.get();
+	}
+
+	Gui* guiLocked() {
+		assertOwned(this->mutex);
+		return gui_.get();
+	}
+
+	Gui& getOrCreateGui(VkFormat colorFormat);
+	void swapchain(IntrusivePtr<Swapchain>);
+	void swapchainDestroyed(const Swapchain& swapchain);
+
+private:
+	// The currently active gui. Might be null. There is never more than
+	// one gui associated with a device.
+	// Synced via device mutex.
+	std::unique_ptr<Gui> gui_ {};
+
+	// The last created swapchain.
+	// Synced via device mutex.
+	// NOTE: hacky as hell but can't work around it. Needed only by the
+	// public API to communicate with the application.
+	// Must only be accessed while the mutex is locked.
+	// NOTE: we don't really suport applications with multiple swapchains yet
+	// TODO: could keep a stack of swapchains to support the case
+	// "create1; create2; destroy2; getLastCreated" (correctly returning 1).
+	IntrusivePtr<Swapchain> swapchain_ {};
+
 };
 
 // Does not expect mutex to be locked

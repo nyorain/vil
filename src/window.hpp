@@ -21,7 +21,7 @@ struct DisplayWindow {
 	swa_window* window {};
 	Instance* ini {};
 	Device* dev {};
-	Gui gui;
+	Gui* gui {};
 
 	Queue* presentQueue {};
 
@@ -42,7 +42,6 @@ private:
 	std::thread thread_;
 	std::atomic<bool> run_ {true};
 
-	VkFormat depthFormat_ {};
 	VkImage depthImage_ {};
 	VkImageView depthView_ {};
 	VkDeviceMemory depthMemory_ {};

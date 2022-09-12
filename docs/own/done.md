@@ -1,3 +1,21 @@
+- [x] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
+      resource destruction, can happen in any thread. Caused a crash with doom.
+	- [x] gui shouldn't be owned by overlay (and therefore swapchain),
+		  means we discard its state (e.g. selection) on every resize (when
+		  applications don't use the oldSwapchain feature).
+		  Should be a member of the device, we only display it once anyways.
+		  Create lazily as member there, WITH sync!
+- [x] access to dev.swapchain without lock (e.g. cbGui, selector)
+      is a race every time. Should be fixed.
+- [x] fix hook completed clearing in cbgui, instead use something ringbuffer-like
+      in CommandHook
+- [x] checkActivate: need to take submission order into account.
+      Submission can only be active when all submissions before
+	  (on the same queue) are active.
+- [x] make sure it's unlikely we insert handles to CommandRecord::invalided
+	  since we should be logically able to get around that
+	  case (with normal API use and no gui open; i.e. the Record should
+	  be destroyed before any resources it uses)
 - [x] Get rid of getAnnotate in command buffer end. Find clean solution for
       the problem/improve UI flickering for changing records
 - [x] check if we can get rid of refRecords and CommandRecord::invalidated.

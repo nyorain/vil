@@ -252,10 +252,8 @@ bool DisplayWindow::initSwapchain() {
 		VK_CHECK(dev.dispatch.CreateSemaphore(dev.handle, &sci, nullptr, &acquireSem));
 	}
 
-	depthFormat_ = findDepthFormat(dev);
-	dlg_assert(depthFormat_ != VK_FORMAT_UNDEFINED);
-	this->gui.init(dev, sci.imageFormat, depthFormat_, true);
-	this->gui.visible(true);
+	this->gui = &dev.getOrCreateGui(sci.imageFormat);
+	this->gui->visible(true);
 	initBuffers();
 
 	return true;
@@ -316,7 +314,7 @@ void DisplayWindow::initBuffers() {
 	ici.samples = VK_SAMPLE_COUNT_1_BIT;
 	ici.usage = /*VK_IMAGE_USAGE_SAMPLED_BIT |*/ VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	ici.format = depthFormat_;
+	ici.format = gui->depthFormat();
 
 	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &depthImage_));
 	nameHandle(dev, depthImage_, "overlayDepth");
@@ -337,7 +335,7 @@ void DisplayWindow::initBuffers() {
 	ivi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	ivi.image = depthImage_;
 	ivi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-	ivi.format = depthFormat_;
+	ivi.format = gui->depthFormat();
 	ivi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 	ivi.subresourceRange.layerCount = 1u;
 	ivi.subresourceRange.levelCount = 1u;
@@ -353,12 +351,12 @@ void DisplayWindow::initBuffers() {
 	buffers_.resize(imgCount);
 	for(auto i = 0u; i < imgCount; ++i) {
 		buffers_[i].init(dev, imgs[i], swapchainCreateInfo.imageFormat,
-			swapchainCreateInfo.imageExtent, gui.rp(), depthView_);
+			swapchainCreateInfo.imageExtent, gui->rp(), depthView_);
 	}
 }
 
 void DisplayWindow::destroyBuffers() {
-	gui.waitForDraws();
+	gui->waitForDraws();
 
 	dev->dispatch.DestroyImageView(dev->handle, depthView_, nullptr);
 	dev->dispatch.DestroyImage(dev->handle, depthImage_, nullptr);
@@ -449,7 +447,7 @@ void DisplayWindow::uiThread() {
 	dlg_assert(this->presentQueue);
 	dlg_assert(this->swapchain);
 
-	gui.makeImGuiCurrent();
+	gui->makeImGuiCurrent();
 	auto& io = ImGui::GetIO();
 
 	using Clock = std::chrono::high_resolution_clock;
@@ -538,12 +536,13 @@ void DisplayWindow::uiThread() {
 		frameInfo.imageIdx = imageIdx;
 		frameInfo.fb = buffers_[imageIdx].fb;
 		frameInfo.fullscreen = true;
+		frameInfo.clear = true;
 		frameInfo.presentQueue = this->presentQueue->handle;
 		frameInfo.swapchain = swapchain;
 		auto sems = {acquireSem};
 		frameInfo.waitSemaphores = sems;
 
-		gui.renderFrame(frameInfo);
+		gui->renderFrame(frameInfo);
 
 		timeIt(now, "frame");
 
@@ -551,7 +550,7 @@ void DisplayWindow::uiThread() {
 		// the same time, we don't need to squeeze every last fps
 		// out of the debug window. Waiting here is better than potentially
 		// somewhere in a critical section.
-		gui.waitForDraws();
+		gui->waitForDraws();
 
 		// NOTE(experimental): we also might wanna limit refreshing of this window
 		// to a maximum frame rate. We don't really need those dank 144hz

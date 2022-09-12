@@ -29,6 +29,7 @@ public:
 		VkExtent2D extent {};
 		VkFramebuffer fb {};
 		bool fullscreen {};
+		bool clear {};
 		VkQueue presentQueue {};
 
 		span<const VkSemaphore> waitSemaphores;
@@ -57,13 +58,11 @@ public:
 	static constexpr bool showHelp = true;
 
 public:
-	Gui();
+	Gui(Device& dev, VkFormat colorFormat);
 	Gui(Gui&&) = delete;
 	Gui& operator=(Gui&&) = delete;
 	~Gui();
 
-	// TODO: use constructor instead of init function
-	void init(Device& dev, VkFormat colorFormat, VkFormat depthFormat, bool clear);
 	void makeImGuiCurrent();
 	VkResult renderFrame(FrameInfo& info);
 
@@ -80,6 +79,8 @@ public:
 	// with the given submission batch. In case there is no such Draw,
 	// returns nullptr.
 	Draw* latestPendingDrawSyncLocked(SubmissionBatch&);
+
+	void updateColorFormat(VkFormat newColorFormat);
 
 	Tab activeTab() const { return activeTab_; }
 
@@ -106,6 +107,9 @@ public:
 	const VkPipelineLayout& imgOpPipeLayout() const { return imgOpPipeLayout_; }
 	const VkPipeline& readTexPipe(ShaderImageType::Value type) const { return pipes_.readTex[type]; }
 
+	VkFormat colorFormat() const { return colorFormat_; }
+	VkFormat depthFormat() const { return depthFormat_; }
+
 	bool visible() const { return visible_; }
 	void visible(bool newVisible);
 
@@ -115,6 +119,8 @@ public:
 	void addPostRender(Recorder);
 
 private:
+	void destroyRenderStuff();
+	void initRenderStuff();
 	void initImGui();
 
 	// returns VK_INCOMPLETE when something was invalidated mid-draw
@@ -136,6 +142,9 @@ private:
 	Device* dev_ {};
 	ImGuiContext* imgui_ {};
 	ImGuiIO* io_ {};
+
+	VkFormat depthFormat_ {};
+	VkFormat colorFormat_ {};
 
 	Tab activeTab_ {};
 	u32 activateTabCounter_ {};
@@ -169,8 +178,6 @@ private:
 	VkCommandPool commandPool_ {};
 
 	Pipelines pipes_;
-
-	bool clear_ {};
 	VkDescriptorSet dsFont_ {};
 
 	struct {

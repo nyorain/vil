@@ -65,6 +65,19 @@ VKAPI_ATTR void VKAPI_CALL DestroySwapchainKHR(
 	VkSwapchainKHR                             	swapchain,
 	const VkAllocationCallbacks*                pAllocator);
 
+VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImageKHR(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    uint64_t                                    timeout,
+    VkSemaphore                                 semaphore,
+    VkFence                                     fence,
+    uint32_t*                                   pImageIndex);
+
+VKAPI_ATTR VkResult VKAPI_CALL AcquireNextImage2KHR(
+    VkDevice                                    device,
+    const VkAcquireNextImageInfoKHR*            pAcquireInfo,
+    uint32_t*                                   pImageIndex);
+
 VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	VkQueue                                     queue,
 	const VkPresentInfoKHR*                     pPresentInfo);

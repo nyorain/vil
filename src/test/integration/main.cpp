@@ -213,7 +213,7 @@ int main() {
 
 	// TODO: currently needed on CI to work around old validation layers
 	// timeline semaphore bug
-	setenv("VIL_TIMELINE_SEMAPHORES", "0", 1);
+	// setenv("VIL_TIMELINE_SEMAPHORES", "0", 1);
 	setenv("VIL_DLG_HANDLER", "1", 1);
 
 	// enumerate layers
@@ -333,60 +333,101 @@ int main() {
 	std::vector<VkQueueFamilyProperties> qprops(qpropsCount);
 	vkGetPhysicalDeviceQueueFamilyProperties(phdev, &qpropsCount, qprops.data());
 
-	u32 qfam {0xFFFFFFFFu};
+	u32 qfamGfx {0xFFFFFFFFu};
+	u32 qfamAsyncCompute {0xFFFFFFFFu};
 	for(auto i = 0u; i < qprops.size(); ++i) {
 		if(qprops[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) {
-			qfam = i;
-			break;
+			qfamGfx = i;
+		} else if(qprops[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+			qfamAsyncCompute = i;
 		}
 	}
 
-	dlg_assert(qfam != 0xFFFFFFFFu);
+	dlg_assert(qfamGfx != 0xFFFFFFFFu);
+	if(qfamAsyncCompute == 0xFFFFFFFFu) {
+		qfamAsyncCompute = qfamGfx;
+	}
 
+	// query supported features
+	VkPhysicalDeviceFeatures2 supFeatures {};
+	VkPhysicalDeviceVulkan11Features sup11 {};
+	VkPhysicalDeviceVulkan12Features sup12 {};
+
+	supFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	sup11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+	sup12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+	supFeatures.pNext = &sup11;
+	sup11.pNext = &sup12;
+
+	vkGetPhysicalDeviceFeatures2(phdev, &supFeatures);
+
+	// activate features we might need
 	VkPhysicalDeviceFeatures features {};
 
 	VkPhysicalDeviceVulkan11Features features11 {};
 	features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 
-	// NOTE: mock driver doesn't advertise support for 1.2
-	// maybe enable it in fork? would be really useful for testing
-	// VkPhysicalDeviceVulkan12Features features12 {};
-	// features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-	// features12.bufferDeviceAddress = true;
+	VkPhysicalDeviceVulkan12Features features12 {};
+	features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+	if(sup12.bufferDeviceAddress) {
+		features12.bufferDeviceAddress = true;
+	}
+	if(sup12.timelineSemaphore) {
+		features12.timelineSemaphore = true;
+	}
 
-	const float prio1 = 1.f;
-	VkDeviceQueueCreateInfo qci {};
-	qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	qci.queueCount = 1u;
-	qci.queueFamilyIndex = qfam;
-	qci.pQueuePriorities = &prio1;
+	const float prio1[] = {1.f, 1.f};
+	VkDeviceQueueCreateInfo qcis[2] {};
+	u32 qcCount = 1u;
+	qcis[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	qcis[0].queueCount = 1u;
+	qcis[0].queueFamilyIndex = qfamGfx;
+	qcis[0].pQueuePriorities = prio1;
 
-	auto devExts = std::array {
+	if(qfamAsyncCompute != qfamGfx) {
+		++qcCount;
+		qcis[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		qcis[1].queueCount = 1u;
+		qcis[1].queueFamilyIndex = qfamAsyncCompute;
+		qcis[1].pQueuePriorities = prio1;
+	} else {
+		++qcis[0].queueCount;
+	}
+
+	auto devExts = std::vector {
 		VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 	};
 
 	VkDeviceCreateInfo dci {};
 	dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	dci.pQueueCreateInfos = &qci;
-	dci.queueCreateInfoCount = 1u;
+	dci.pQueueCreateInfos = qcis;
+	dci.queueCreateInfoCount = qcCount;
 	dci.pEnabledFeatures = &features;
 	dci.enabledExtensionCount = devExts.size();
 	dci.ppEnabledExtensionNames = devExts.data();
 
 	dci.pNext = &features11;
-	// features11.pNext = &features12;
+	features11.pNext = &features12;
 
 	VkDevice dev;
 	VK_CHECK(vkCreateDevice(phdev, &dci, nullptr, &dev));
 
-	VkQueue queue;
-	vkGetDeviceQueue(dev, qfam, 0u, &queue);
+	VkQueue queueGfx, queueCompute;
+	vkGetDeviceQueue(dev, qfamGfx, 0u, &queueGfx);
+	if(qfamGfx == qfamAsyncCompute) {
+		vkGetDeviceQueue(dev, qfamGfx, 1u, &queueCompute);
+	} else {
+		vkGetDeviceQueue(dev, qfamAsyncCompute, 0u, &queueCompute);
+	}
 
 	// store in setup
 	gSetup.dev = dev;
 	gSetup.phdev = phdev;
-	gSetup.qfam = qfam;
-	gSetup.queue = queue;
+	gSetup.qfam = qfamGfx;
+	gSetup.qfam2 = qfamAsyncCompute;
+	gSetup.queue = queueGfx;
+	gSetup.queue2 = queueCompute;
 	layer_init_device_dispatch_table(gSetup.dev, &gSetup.dispatch, &vkGetDeviceProcAddr);
 
 	// run tests

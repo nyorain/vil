@@ -31,15 +31,15 @@ struct Semaphore : SharedDeviceHandle {
 	std::vector<Sync> signals;
 	std::vector<Sync> waits;
 
-	VkSemaphoreType type {};
+	VkSemaphoreType type {VK_SEMAPHORE_TYPE_BINARY};
 
 	// Lower bound of the value. We know that the current value of
 	// the semaphore is at least this.
-	u64 lowerBound {};
+	u64 lowerBound {0u};
 
 	// Upper bound of the value. We know that the current value of
 	// the semaphoer can't be greater.
-	u64 upperBound {};
+	u64 upperBound {0u};
 
 	Semaphore() = default;
 	~Semaphore();

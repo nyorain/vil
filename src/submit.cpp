@@ -331,10 +331,10 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 	// When this submission uses the gfxQueue (which we also use for
 	// gui rendering) we don't have to synchronize with gui rendering
 	// via semaphores, the pipeline barrier is enough.
-	if(dev.gui && dev.gfxQueue != subm.queue) {
+	if(dev.guiLocked() && dev.gfxQueue != subm.queue) {
 		// since all draws are submitted to the same queue
 		// we only need to wait upon the last one pending.
-		insertGuiSync = dev.gui->latestPendingDrawSyncLocked(batch);
+		insertGuiSync = dev.guiLocked()->latestPendingDrawSyncLocked(batch);
 	}
 
 	// When we don't use timeline semaphores, we need to reset our
@@ -385,7 +385,7 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 			tsInfo.pNext = NULL;
 
 			auto waitVals = subm.memScope.alloc<u64>(1);
-			waitSems[waitSemCount].semaphore = dev.gui->usedQueue().submissionSemaphore;
+			waitSems[waitSemCount].semaphore = dev.guiLocked()->usedQueue().submissionSemaphore;
 			waitSems[waitSemCount].value = waitDraw.lastSubmissionID;
 			waitSems[waitSemCount].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 			++waitSemCount;
@@ -437,8 +437,9 @@ void postProcessLocked(QueueSubmitter& subm) {
 
 	// add to swapchain
 	FrameSubmission* recordBatch = nullptr;
-	if(subm.dev->swapchain) {
-		recordBatch = &subm.dev->swapchain->nextFrameSubmissions.batches.emplace_back();
+	auto swapchain = subm.dev->swapchainLocked();
+	if(swapchain) {
+		recordBatch = &swapchain->nextFrameSubmissions.batches.emplace_back();
 		recordBatch->queue = subm.queue;
 		recordBatch->submissionID = subm.globalSubmitID;
 	}
@@ -446,6 +447,10 @@ void postProcessLocked(QueueSubmitter& subm) {
 	auto& batch = *subm.dstBatch;
 
 	for(auto& sub : batch.submissions) {
+		// don't activate when there already is an inactive submission
+		// on this queue.
+		bool doActivate = !subm.queue->firstWaiting;
+
 		// process cbs
 		for(auto& scb : sub.cbs) {
 			auto* cb = scb.cb;
@@ -457,6 +462,7 @@ void postProcessLocked(QueueSubmitter& subm) {
 			}
 
 			// store pending layouts
+			// TODO: postpone to submission activation!
 			for(auto& ui : recPtr->used.images) {
 				if(ui.layoutChanged) {
 					dlg_assert(
@@ -481,6 +487,17 @@ void postProcessLocked(QueueSubmitter& subm) {
 			semSync.stages = dstSync.stages;
 			semSync.value = dstSync.value;
 			semSync.submission = &sub;
+
+			if(semSync.value > dstSync.semaphore->upperBound) {
+				doActivate = false;
+				if(!subm.queue->firstWaiting) {
+					subm.queue->firstWaiting = &sub;
+				}
+			}
+		}
+
+		if(doActivate) {
+			activateLocked(sub);
 		}
 	}
 
@@ -535,7 +552,9 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 			// important that the ds mutex is locked mainly for
 			// update_unused_while_pending.
 			auto lock = state.lock();
-			return hasBound(state, handle);
+			if(hasBound(state, handle)) {
+				return true;
+			}
 		}
 	}
 
