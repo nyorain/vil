@@ -213,13 +213,14 @@ void doAcquireImage(Swapchain& swapchain, VkSemaphore& vkSemaphore, VkFence& vkF
 	if(vkSemaphore) {
 		auto& semaphore = get(dev, vkSemaphore);
 		dlg_assert(semaphore.type == VK_SEMAPHORE_TYPE_BINARY);
-		dlg_assert(semaphore.lowerBound == 0u);
-		dlg_assert(semaphore.upperBound == 0u);
-		semaphore.upperBound = 1u;
-		vkSemaphore = semaphore.handle;
+		dlg_assert(semaphore.signals.empty() ||
+			semaphore.signals.back()->counterpart ||
+			(semaphore.signals.back() == &SyncOp::swapchainAcquireDummy &&
+				!semaphore.waits.empty() &&
+				semaphore.waits.back()->counterpart == &SyncOp::swapchainAcquireDummy));
 
-		// TODO: insert sync op to semaphore?
-		// can't really track when it's done tho
+		semaphore.signals.push_back(&SyncOp::swapchainAcquireDummy);
+		vkSemaphore = semaphore.handle;
 	}
 
 	if(vkFence) {
@@ -309,10 +310,15 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	for(auto i = 0u; i < pPresentInfo->waitSemaphoreCount; ++i) {
 		auto& semaphore = get(dev, pPresentInfo->pWaitSemaphores[i]);
 
-		// TODO: insert as sync op?
-		dlg_assert(semaphore.upperBound = 1u);
-		semaphore.lowerBound = 0u;
-		semaphore.upperBound = 0u;
+		dlg_assert(!semaphore.signals.empty());
+		dlg_assert(!semaphore.signals.back()->counterpart);
+
+		if(semaphore.signals.back() == &SyncOp::swapchainAcquireDummy) {
+			// acquire operation, no need to store it further
+			semaphore.signals.pop_back();
+		} else {
+			semaphore.signals.back()->counterpart = &SyncOp::queuePresentDummy;
+		}
 
 		sems[i] = semaphore.handle;
 		topOfPipes[i] = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;

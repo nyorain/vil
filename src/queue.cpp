@@ -75,45 +75,47 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 
 		// process waits
 		for(auto& wait : sub.waits) {
-			auto& sem = *wait.semaphore;
+			auto& sem = *wait->semaphore;
 
-			auto finder = [&](auto& sync) { return sync.submission == &sub; };
-			auto it = std::find_if(sem.waits.begin(), sem.waits.end(), finder);
-			dlg_assert(it != sem.waits.end());
-			sem.waits.erase(it);
-
-			// for binary semaphores, we have to reset the value on wait
 			if(sem.type == VK_SEMAPHORE_TYPE_BINARY) {
-				auto hasActiveSignal = false;
-				for(auto& signal : sem.signals) {
-					if(signal.submission->active) {
-						hasActiveSignal = true;
-						break;
-					}
+				dlg_assert(wait->counterpart);
+				if(wait->counterpart &&
+						wait->counterpart != &SyncOp::doneDummy &&
+						wait->counterpart != &SyncOp::swapchainAcquireDummy) {
+					dlg_assert(wait->counterpart->submission);
+					wait->counterpart->counterpart = &SyncOp::doneDummy;
 				}
-
-				sem.lowerBound = 0u;
-				if(!hasActiveSignal) {
-					sem.upperBound = 0u;
+				if(wait->counterpart == &SyncOp::swapchainAcquireDummy) {
+					// in case there are multiple swapchain acquire signals, just
+					// erase the first one, does not matter
+					auto it = std::find(sem.signals.begin(), sem.signals.end(), &SyncOp::swapchainAcquireDummy);
+					dlg_assert(it != sem.signals.end());
+					sem.signals.erase(it);
 				}
 			}
+
+			auto it = std::find(sem.waits.begin(), sem.waits.end(), wait.get());
+			dlg_assert(it != sem.waits.end());
+			sem.waits.erase(it);
 		}
 
 		// process signals
 		for(auto& signal : sub.signals) {
-			auto& sem = *signal.semaphore;
-			sem.lowerBound = std::max(sem.lowerBound, signal.value);
+			auto& sem = *signal->semaphore;
 
 			if(sem.type == VK_SEMAPHORE_TYPE_BINARY) {
-				// TODO: needed for weird QueuePresent sync case where
-				// we reset upperBound immediately.
-				sem.lowerBound = std::min(sem.lowerBound, sem.upperBound);
+				if(signal->counterpart &&
+						signal->counterpart != &SyncOp::doneDummy &&
+						signal->counterpart != &SyncOp::queuePresentDummy) {
+					dlg_assert(signal->counterpart->submission);
+					signal->counterpart->counterpart = &SyncOp::doneDummy;
+				}
 			} else {
+				sem.lowerBound = std::max(sem.lowerBound, signal->value);
 				dlg_assert(sem.lowerBound <= sem.upperBound);
 			}
 
-			auto finder = [&](auto& sync) { return sync.submission == &sub; };
-			auto it = std::find_if(sem.signals.begin(), sem.signals.end(), finder);
+			auto it = std::find(sem.signals.begin(), sem.signals.end(), signal.get());
 			dlg_assert(it != sem.signals.end());
 			sem.signals.erase(it);
 		}
@@ -519,8 +521,18 @@ void activateLocked(Submission& subm) {
 	assertOwned(dev.mutex);
 
 	subm.active = true;
+
+	// for(auto& wait : subm.waits) {
+	// 	if(wait.semaphore->type == VK_SEMAPHORE_TYPE_BINARY) {
+	// 		// can be reset any time now
+	// 		wait.semaphore->lowerBound = 0u;
+	// 	}
+	// }
+
 	for(auto& signal : subm.signals) {
-		updateUpperLocked(*signal.semaphore, signal.value);
+		if(signal->semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE) {
+			updateUpperLocked(*signal->semaphore, signal->value);
+		}
 	}
 
 	if(subm.parent->queue->firstWaiting) {
@@ -553,7 +565,14 @@ bool checkActivateLocked(Submission& subm) {
 
 	auto submActive = true;
 	for(auto& wait : subm.waits) {
-		if(wait.value > wait.semaphore->upperBound) {
+		if(wait->semaphore->type == VK_SEMAPHORE_TYPE_BINARY) {
+			dlg_assert(wait->counterpart);
+			if(wait->counterpart->submission &&
+					!wait->counterpart->submission->active) {
+				submActive = false;
+				break;
+			}
+		} else if(wait->value > wait->semaphore->upperBound) {
 			submActive = false;
 			break;
 		}

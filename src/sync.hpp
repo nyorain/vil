@@ -19,17 +19,23 @@ struct Fence : SharedDeviceHandle {
 	Fence& operator=(Fence&&) = delete;
 };
 
+struct SyncOp {
+	Semaphore* semaphore {};
+	Submission* submission {}; // can be null in case of acquire/present
+	VkPipelineStageFlags stages {};
+	u64 value {1u}; // always 1 for binaries
+	SyncOp* counterpart {}; // only for binary sync ops
+
+	static SyncOp swapchainAcquireDummy;
+	static SyncOp queuePresentDummy;
+	static SyncOp doneDummy;
+};
+
 struct Semaphore : SharedDeviceHandle {
 	VkSemaphore handle {};
 
-	struct Sync {
-		Submission* submission {};
-		VkPipelineStageFlags stages {};
-		u64 value {1u}; // always 1 for binaries
-	};
-
-	std::vector<Sync> signals;
-	std::vector<Sync> waits;
+	std::vector<SyncOp*> signals;
+	std::vector<SyncOp*> waits;
 
 	VkSemaphoreType type {VK_SEMAPHORE_TYPE_BINARY};
 

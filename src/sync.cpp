@@ -9,6 +9,10 @@
 
 namespace vil {
 
+SyncOp SyncOp::queuePresentDummy {};
+SyncOp SyncOp::swapchainAcquireDummy {};
+SyncOp SyncOp::doneDummy {};
+
 Fence::~Fence() {
 	if(!dev) {
 		return;
@@ -35,17 +39,19 @@ Semaphore::~Semaphore() {
 	// Per spec, we can assume all associated payload to be finished
 	// Using while loop since checkLocked will erase from our list.
 	while(!signals.empty()) {
-		auto finished = checkLocked(*signals.back().submission->parent);
+		auto finished = checkLocked(*signals.back()->submission->parent);
 		dlg_assert(finished);
 	}
 
 	while(!waits.empty()) {
-		auto finished = checkLocked(*waits.back().submission->parent);
+		auto finished = checkLocked(*waits.back()->submission->parent);
 		dlg_assert(finished);
 	}
 }
 
 void updateUpperLocked(Semaphore& sem, u64 value) {
+	dlg_assert(sem.type == VK_SEMAPHORE_TYPE_TIMELINE);
+
 	assertOwned(sem.dev->mutex);
 	if(sem.upperBound >= value) {
 		return;
@@ -53,12 +59,12 @@ void updateUpperLocked(Semaphore& sem, u64 value) {
 
 	sem.upperBound = value;
 	for(auto& wait : sem.waits) {
-		if(wait.value > value) {
+		if(wait->value > value) {
 			continue;
 		}
 
-		if(!wait.submission->active) {
-			checkActivateLocked(*wait.submission);
+		if(!wait->submission->active) {
+			checkActivateLocked(*wait->submission);
 		}
 	}
 }
