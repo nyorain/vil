@@ -124,9 +124,10 @@ void process(QueueSubmitter& subm, VkSubmitInfo2& si) {
 	for(auto j = 0u; j < si.signalSemaphoreInfoCount; ++j) {
 		auto& signal = si.pSignalSemaphoreInfos[j];
 
-		auto& dstSync = dst.signals.emplace_back();
+		auto& dstSync = *dst.signals.emplace_back(std::make_unique<SyncOp>());
 		dstSync.semaphore = &get(dev, signal.semaphore);
 		dstSync.stages = signal.stageMask;
+		dstSync.submission = &dst;
 
 		fwdSignals[j] = signal;
 		fwdSignals[j].semaphore = dstSync.semaphore->handle;
@@ -147,9 +148,10 @@ void process(QueueSubmitter& subm, VkSubmitInfo2& si) {
 	for(auto j = 0u; j < si.waitSemaphoreInfoCount; ++j) {
 		auto& wait = si.pWaitSemaphoreInfos[j];
 
-		auto& dstSync = dst.waits.emplace_back();
+		auto& dstSync = *dst.waits.emplace_back(std::make_unique<SyncOp>());
 		dstSync.semaphore = &get(dev, wait.semaphore);
 		dstSync.stages = wait.stageMask;
+		dstSync.submission = &dst;
 
 		fwdWaits[j] = wait;
 		fwdWaits[j].semaphore = dstSync.semaphore->handle;
@@ -473,27 +475,46 @@ void postProcessLocked(QueueSubmitter& subm) {
 			}
 		}
 
-		// insert into signal semaphores
-		for(auto& dstSync : sub.signals) {
-			auto& semSync = dstSync.semaphore->signals.emplace_back();
-			semSync.stages = dstSync.stages;
-			semSync.value = dstSync.value;
-			semSync.submission = &sub;
-		}
-
 		// insert into wait semaphores
 		for(auto& dstSync : sub.waits) {
-			auto& semSync = dstSync.semaphore->waits.emplace_back();
-			semSync.stages = dstSync.stages;
-			semSync.value = dstSync.value;
-			semSync.submission = &sub;
+			dstSync->semaphore->waits.push_back(dstSync.get());
 
-			if(semSync.value > dstSync.semaphore->upperBound) {
+			if(dstSync->semaphore->type == VK_SEMAPHORE_TYPE_BINARY) {
+				if(dstSync->semaphore->signals.empty()) {
+					// TODO: validate that it's actually done
+					// maybe insert doneDummy into signalOps and erase it
+					// here?
+					dstSync->counterpart = &SyncOp::doneDummy;
+				} else {
+					if(dstSync->semaphore->signals.back() != &SyncOp::swapchainAcquireDummy) {
+						dstSync->semaphore->signals.back()->counterpart = dstSync.get();
+					}
+					dstSync->counterpart = dstSync->semaphore->signals.back();
+				}
+
+				// can't prevent activation via binary semaphores
+			} else if(dstSync->value > dstSync->semaphore->upperBound) {
 				doActivate = false;
 				if(!subm.queue->firstWaiting) {
 					subm.queue->firstWaiting = &sub;
 				}
 			}
+		}
+
+		// insert into signal semaphores
+		for(auto& dstSync : sub.signals) {
+			dlg_checkt("validation",
+				if(dstSync->semaphore->type == VK_SEMAPHORE_TYPE_BINARY) {
+					auto& semaphore = *dstSync->semaphore;
+					dlg_assert(semaphore.signals.empty() ||
+						semaphore.signals.back()->counterpart ||
+						(semaphore.signals.back() == &SyncOp::swapchainAcquireDummy &&
+							!semaphore.waits.empty() &&
+							semaphore.waits.back()->counterpart == &SyncOp::swapchainAcquireDummy));
+				}
+			);
+
+			dstSync->semaphore->signals.push_back(dstSync.get());
 		}
 
 		if(doActivate) {

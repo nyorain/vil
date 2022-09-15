@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <handle.hpp>
+#include <sync.hpp>
 #include <util/intrusive.hpp>
 #include <vk/vulkan.h>
 #include <vector>
@@ -65,17 +66,11 @@ struct SubmittedCommandBuffer {
 
 // A single Submission done via one VkSubmitInfo in vkQueueSubmit.
 struct Submission {
-	struct Sync {
-		Semaphore* semaphore {};
-		VkPipelineStageFlags stages {};
-		u64 value {1u}; // always 1 for binary sems
-	};
-
 	SubmissionBatch* parent {};
 	u64 queueSubmitID {};
 
-	std::vector<Sync> waits;
-	std::vector<Sync> signals;
+	std::vector<std::unique_ptr<SyncOp>> waits;
+	std::vector<std::unique_ptr<SyncOp>> signals;
 
 	// The CommandBuffer record must stay valid while the submission
 	// is still pending (anything else is an application error).
