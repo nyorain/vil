@@ -100,6 +100,7 @@ struct CommandDescriptorSnapshot;
 struct DrawCmdBase;
 struct DispatchCommand;
 struct BeginRenderPassCmd;
+struct BeginRenderingCmd;
 struct BuildAccelStructsCmd;
 struct BuildAccelStructsIndirectCmd;
 struct DescriptorSetCow;

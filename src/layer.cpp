@@ -210,6 +210,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	VkApplicationInfo ourAppInfo {};
 	if(nci.pApplicationInfo) {
 		originalApiVersion = nci.pApplicationInfo->apiVersion;
+		finalApiVersion = originalApiVersion;
 		if(nci.pApplicationInfo->apiVersion < ourApiVersion && tryBumpVersion) {
 			dlg_debug("Trying to manually bump instance apiVersion to 1.2 "
 				"instead of {} provided by application",

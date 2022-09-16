@@ -193,7 +193,6 @@ struct SectionCommand : ParentCommand {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	const SectionStats& sectionStats() const override { return stats_; }
 	ParentCommand* firstChildParent() const override { return firstChildParent_; }
-	Type type() const override { return Type::beginRenderPass; }
 };
 
 // Meta-command. Root node of the command hierarchy.
@@ -322,6 +321,7 @@ struct BeginRenderPassCmd final : SectionCommand {
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	Type type() const override { return Type::beginRenderPass; }
 };
 
 struct RenderSectionCommand : SectionCommand {
@@ -1403,6 +1403,12 @@ struct BeginRenderingCmd final : RenderSectionCommand {
 	Attachment depthAttachment; // only valid if view != null
 	Attachment stencilAttachment; // only valid if view != null
 	VkRect2D renderArea;
+
+	void record(const Device&, VkCommandBuffer cb,
+		std::optional<VkAttachmentLoadOp> overrideLoad,
+		std::optional<VkAttachmentStoreOp> overrideStore) const;
+
+	const Attachment* findAttachment(const Image& img) const;
 
 	std::string_view nameDesc() const override { return "BeginRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;

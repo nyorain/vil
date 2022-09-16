@@ -2926,7 +2926,9 @@ void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffe
 	dev.dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb, stackSize);
 }
 
-void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb,
+		std::optional<VkAttachmentLoadOp> overrideLoad,
+		std::optional<VkAttachmentStoreOp> overrideStore) const {
 	ThreadMemScope ms;
 
 	auto convert = [&](const Attachment& src, VkRenderingAttachmentInfo& dst) {
@@ -2937,8 +2939,8 @@ void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const
 		dst.resolveImageLayout = src.resolveImageLayout;
 		dst.resolveMode = src.resolveMode;
 		dst.clearValue = src.clearValue;
-		dst.loadOp = src.loadOp;
-		dst.storeOp = src.storeOp;
+		dst.loadOp = overrideLoad ? *overrideLoad : src.loadOp;
+		dst.storeOp = overrideStore ? *overrideStore : src.storeOp;
 
 		if(src.view) {
 			dst.imageView = src.view->handle;
@@ -2978,6 +2980,29 @@ void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const
 
 	dlg_assert(dev.dispatch.CmdBeginRendering);
 	dev.dispatch.CmdBeginRendering(cb, &info);
+}
+
+void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	this->record(dev, cb, std::nullopt, std::nullopt);
+}
+
+const BeginRenderingCmd::Attachment* BeginRenderingCmd::findAttachment(const Image& img) const {
+	// UGLY
+	assertOwned(img.dev->mutex);
+
+	if(depthAttachment.view && depthAttachment.view->img == &img) {
+		return &depthAttachment;
+	}
+	if(stencilAttachment.view && stencilAttachment.view->img == &img) {
+		return &stencilAttachment;
+	}
+	for(auto& colorAtt : colorAttachments) {
+		if(colorAtt.view->img == &img) {
+			return &colorAtt;
+		}
+	}
+
+	return nullptr;
 }
 
 Matcher BeginRenderingCmd::match(const Command& base) const {

@@ -104,6 +104,7 @@ private:
 		bool splitRenderPass {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
 		const BeginRenderPassCmd* beginRenderPassCmd {};
+		const BeginRenderingCmd* beginRenderingCmd {};
 		const RenderPassInstanceState* rpi {};
 		const CommandDescriptorSnapshot* descriptors {};
 

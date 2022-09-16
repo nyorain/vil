@@ -16,6 +16,25 @@ urgent, bugs:
 	  when we e.g. know it's a different queue (or when we already had
 	  a pretty perfect match?)
 
+- [ ] CommandViewer (and ShaderDebugger probs as well) don't get an initial
+      state when ops change and freezeState is active.
+	  Solution: instead of *each* component having its own state, they
+	  should all directly access the CommandSelection.
+	  And unset the state on hook ops change (or maybe even just change the ops
+	  *through* the selection? not sure what is better)
+	- [ ] maybe get rid of CommandViewer::select altogether?
+	      or at least only call it on real selection and not on every
+		  state update?
+
+- [ ] fix iro:water xfb output drawing issue.
+      somehow we draw too many vertices?
+
+- [ ] investigate why conditional rendering vulkan sample is so slow when hooked
+      guess: we have *a lot* of sections due to the BeginConditionalRendering
+	  calls (a lot of them). Investigate whether matching is working
+	  as well and fast as desired
+	- check if lower branchTreshold would help
+
 - [ ] with lockfree gui rendering, the overlay input events in api.cpp
       are racy when QueuePresent is called in another thread.
 	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.

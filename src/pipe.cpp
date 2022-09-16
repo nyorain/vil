@@ -96,6 +96,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				xfbVertexStageID = u32(stages.size());
 			}
 
+			if(src.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT ||
+					src.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT ||
+					src.stage == VK_SHADER_STAGE_MESH_BIT_NV) {
+				useXfb = false;
+				xfbVertexStageID = u32(-1);
+			}
+
 			stages.push_back(src);
 		}
 
