@@ -98,7 +98,11 @@ struct GraphicsState : DescriptorState {
 	BoundIndexBuffer indices {};
 	span<BoundVertexBuffer> vertices;
 	GraphicsPipeline* pipe {};
-	const RenderPassInstanceState* rpi {};
+
+	// NOTE: knowing this here would be convenient in a couple of places
+	// but we can't do to secondary commandbuffers not being required to
+	// specify the framaebuffer they are rendering into on recording time.
+	// const RenderPassInstanceState* rpi {};
 
 	struct StencilState {
 		u32 writeMask {};

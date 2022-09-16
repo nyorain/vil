@@ -126,19 +126,33 @@ void CommandViewer::init(Gui& gui) {
 void CommandViewer::unselect() {
 	record_ = {};
 	state_ = {};
-	command_ = nullptr;
+	command_ = {};
 
 	view_ = IOView::command;
 	viewData_.command.selected = 0;
 }
 
-void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
+const RenderPassInstanceState* findRPI(span<const Command*> cmdh) {
+	for(auto* cmd : cmdh) {
+		auto renderSection = dynamic_cast<const RenderSectionCommand*>(cmd);
+		if(renderSection) {
+			return &renderSection->rpi;
+		}
+	}
+
+	return nullptr;
+}
+
+void CommandViewer::select(IntrusivePtr<CommandRecord> rec, std::vector<const Command*> cmdh,
 		CommandDescriptorSnapshot dsState, bool resetState,
 		IntrusivePtr<CommandHookState> newState) {
 
 	const DrawCmdBase* drawCmd {};
 	const StateCmdBase* stateCmd {};
 
+	dlg_assert(!cmdh.empty());
+
+	auto& cmd = *cmdh.back();
 	switch(cmd.type()) {
 		case CommandType::draw:
 			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
@@ -160,7 +174,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 	switch(view_) {
 		case IOView::command:
 			// will always stay valid
-			if(!command_) {
+			if(command_.empty()) {
 				selectCommandView = true;
 			}
 			break;
@@ -177,11 +191,13 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 
 			auto [type, id] = viewData_.attachment;
 
-			auto* lastDrawCmd = dynamic_cast<const DrawCmdBase*>(command_);
-			dlg_assert(lastDrawCmd && lastDrawCmd->state.rpi);
-			dlg_assert(drawCmd->state.rpi);
-			auto& rpiNew = *drawCmd->state.rpi;
-			auto& rpiOld = *lastDrawCmd->state.rpi;
+			auto* lastRPI = findRPI(command_);
+			auto* newRPI = findRPI(cmdh);
+			dlg_assert(lastRPI);
+			dlg_assert(newRPI);
+
+			auto& rpiNew = *newRPI;
+			auto& rpiOld = *lastRPI;
 
 			// when the number of attachments match, we keep the selection.
 			// NOTE: not sure what makes sense here. Also check for unused
@@ -220,7 +236,8 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 				break;
 			}
 
-			auto* lastStateCmd = deriveCast<const StateCmdBase*>(command_);
+			dlg_assert(!command_.empty());
+			auto* lastStateCmd = deriveCast<const StateCmdBase*>(command_.back());
 			dlg_assert(lastStateCmd);
 
 			// when the newly select command uses a descriptor set with different
@@ -243,17 +260,24 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 			break;
 		}
 		case IOView::transferSrc:
-		case IOView::transferDst:
+		case IOView::transferDst: {
 			// Only keep transferSrc/Dst selection when the command type
 			// is exactly the same
-			if(!command_ || typeid(*command_) != typeid(cmd)) {
+			if(command_.empty()) {
 				selectCommandView = true;
+				break;
+			}
+
+			auto& lastCmd = *command_.back();
+			if(typeid(lastCmd) != typeid(cmd)) {
+				selectCommandView = true;
+				break;
 			}
 
 			// always reset this
 			viewData_.transfer.index = 0u;
 			break;
-		case IOView::pushConstants: {
+		} case IOView::pushConstants: {
 			if(!stateCmd || !stateCmd->boundPipe()) {
 				selectCommandView = true;
 				break;
@@ -280,7 +304,8 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 
 			break;
 		} case IOView::shader: {
-			auto* lastStateCmd = dynamic_cast<const StateCmdBase*>(command_);
+			dlg_assert(!command_.empty());
+			auto* lastStateCmd = dynamic_cast<const StateCmdBase*>(command_.back());
 			dlg_assert(lastStateCmd);
 
 			if(!stateCmd || !stateCmd->boundPipe()
@@ -298,7 +323,7 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 	}
 
 	record_ = rec;
-	command_ = &cmd;
+	command_ = std::move(cmdh);
 	dsState_ = std::move(dsState);
 
 	auto resetImgViewer = false;
@@ -329,9 +354,9 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, const Command& cmd,
 }
 
 void CommandViewer::displayTransferIOList() {
-	dlg_assert(command_);
+	dlg_assert(!command_.empty());
+	auto& cmd = *command_.back();
 
-	auto& cmd = *command_;
 	dlg_assert(cmd.type() == CommandType::transfer);
 
 	// TODO: add support for viewing buffers here.
@@ -427,9 +452,9 @@ void CommandViewer::displayTransferIOList() {
 }
 
 void CommandViewer::displayDsList() {
-	dlg_assert(command_);
+	dlg_assert(!command_.empty());
 
-	auto& baseCmd = *command_;
+	auto& baseCmd = *command_.back();
 
 	const StateCmdBase* cmd {};
 	const DrawCmdBase* drawCmd {};
@@ -593,8 +618,8 @@ void CommandViewer::displayDsList() {
 }
 
 void CommandViewer::displayIOList() {
-	dlg_assert(command_);
-	auto& cmd = *command_;
+	dlg_assert(!command_.empty());
+	auto& cmd = *command_.back();
 
 	const StateCmdBase* stateCmd {};
 	const DrawCmdBase* drawCmd {};
@@ -661,8 +686,10 @@ void CommandViewer::displayIOList() {
 	if(drawCmd) {
 		ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
 		if(ImGui::TreeNodeEx("Attachments", ImGuiTreeNodeFlags_FramePadding)) {
-			if(drawCmd->state.rpi) {
-				auto& rpi = *drawCmd->state.rpi;
+			auto* pRPI = findRPI(command_);
+
+			if(pRPI) {
+				auto& rpi = *pRPI;
 				auto addAttachment = [&](const std::string& label, AttachmentType type,
 						unsigned id, ImageView* view) {
 					if(!view) {
@@ -707,6 +734,10 @@ void CommandViewer::displayIOList() {
 
 				// NOTE: display preserve attachments? resolve attachments?
 			} else {
+				// TODO: I guess this can happen for secondary command buffers
+				// Should display more meaningful error message.
+				// And think about how to handle them, anyways...
+				// Do we allow selecting a secondary record on its own here?!
 				dlg_error("no render pass instance?!");
 				imGuiText("Unexpected error: No render pass instance?");
 			}
@@ -764,7 +795,8 @@ bool CommandViewer::displayBeforeCheckbox() {
 void CommandViewer::displayDs(Draw& draw) {
 	auto& gui = *this->gui_;
 
-	auto* cmd = deriveCast<const StateCmdBase*>(command_);
+	dlg_assert_or(!command_.empty(), return);
+	auto* cmd = deriveCast<const StateCmdBase*>(command_.back());
 	dlg_assert_or(cmd, return);
 
 	if(!cmd->boundPipe()) {
@@ -994,7 +1026,8 @@ void CommandViewer::displayDs(Draw& draw) {
 }
 
 void CommandViewer::displayAttachment(Draw& draw) {
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(command_);
+	dlg_assert_or(!command_.empty(), return);
+	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(command_.back());
 	dlg_assert_or(drawCmd, return);
 
 	// NOTE: maybe only show this button for output attachments (color, depthStencil)?
@@ -1005,8 +1038,9 @@ void CommandViewer::displayAttachment(Draw& draw) {
 		return;
 	}
 
-	dlg_assert(drawCmd->state.rpi);
-	auto& rpi = *drawCmd->state.rpi;
+	auto pRPI = findRPI(command_);
+	dlg_assert(pRPI);
+	auto& rpi = *pRPI;
 
 	// information
 	auto [atype, aid] = viewData_.attachment;
@@ -1046,7 +1080,8 @@ void CommandViewer::displayAttachment(Draw& draw) {
 }
 
 void CommandViewer::displayPushConstants() {
-	auto* cmd = deriveCast<const StateCmdBase*>(command_);
+	dlg_assert_or(!command_.empty(), return);
+	auto* cmd = deriveCast<const StateCmdBase*>(command_.back());
 	dlg_assert_or(cmd, return);
 
 	if(!cmd->boundPipe()) {
@@ -1094,8 +1129,8 @@ void CommandViewer::displayPushConstants() {
 }
 
 void CommandViewer::displayTransferData(Draw& draw) {
-	dlg_assert(command_);
-	auto& cmd = *command_;
+	dlg_assert(!command_.empty());
+	auto& cmd = *command_.back();
 
 	if(!state_) {
 		ImGui::Text("Waiting for a submission...");
@@ -1215,9 +1250,9 @@ void CommandViewer::displayTransferData(Draw& draw) {
 }
 
 void CommandViewer::displayVertexViewer(Draw& draw) {
-	dlg_assert(command_);
+	dlg_assert(!command_.empty());
 
-	auto& cmd = *command_;
+	auto& cmd = *command_.back();
 	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
 	dlg_assert_or(drawCmd, return);
 
@@ -1339,7 +1374,7 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 }
 
 void CommandViewer::displayCommand() {
-	dlg_assert(command_);
+	dlg_assert(!command_.empty());
 	dlg_assert(view_ == IOView::command);
 
 	if(state_) {
@@ -1399,19 +1434,19 @@ void CommandViewer::displayCommand() {
 	if(state_ && state_->indirectCopy.size) {
 		auto& ic = state_->indirectCopy;
 		auto span = ic.data();
-		if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_); dcmd) {
+		if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_.back()); dcmd) {
 			displayMultidraw(dcmd->drawCount, dcmd->indexed, span);
-		} else if(dynamic_cast<const DispatchIndirectCmd*>(command_)) {
+		} else if(dynamic_cast<const DispatchIndirectCmd*>(command_.back())) {
 			auto ecmd = read<VkDispatchIndirectCommand>(span);
 			imGuiText("groups X: {}", ecmd.x);
 			imGuiText("groups Y: {}", ecmd.y);
 			imGuiText("groups Z: {}", ecmd.z);
-		} else if(dynamic_cast<const TraceRaysIndirectCmd*>(command_)) {
+		} else if(dynamic_cast<const TraceRaysIndirectCmd*>(command_.back())) {
 			auto ecmd = read<VkTraceRaysIndirectCommandKHR>(span);
 			imGuiText("width: {}", ecmd.width);
 			imGuiText("height: {}", ecmd.height);
 			imGuiText("depth: {}", ecmd.depth);
-		} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(command_); dcmd) {
+		} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(command_.back()); dcmd) {
 			auto cmdSize = dcmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
@@ -1422,7 +1457,7 @@ void CommandViewer::displayCommand() {
 	}
 
 	// TODO: WIP
-	if(auto* dcmd = dynamic_cast<const DispatchCmdBase*>(command_); dcmd) {
+	if(auto* dcmd = dynamic_cast<const DispatchCmdBase*>(command_.back()); dcmd) {
 		if(ImGui::Button("Debug shader")) {
 			if(dcmd->state.pipe) {
 				auto mod = copySpecializeSpirv(dcmd->state.pipe->stage);
@@ -1434,18 +1469,18 @@ void CommandViewer::displayCommand() {
 		}
 	}
 
-	command_->displayInspector(*gui_);
+	command_.back()->displayInspector(*gui_);
 
 	// TODO: ugly here, might happen when displayInspector changes selction...
 	// not sure how to handle this better
-	if(!command_) {
+	if(command_.empty()) {
 		return;
 	}
 
 #ifdef VIL_COMMAND_CALLSTACKS
 	auto flags = ImGuiTreeNodeFlags_FramePadding;
-	if(!command_->stacktrace.empty() && ImGui::TreeNodeEx("StackTrace", flags)) {
-		display(command_->stacktrace);
+	if(!command_.back()->stacktrace.empty() && ImGui::TreeNodeEx("StackTrace", flags)) {
+		display(command_.back()->stacktrace);
 		ImGui::TreePop();
 	}
 #endif // VIL_COMMAND_CALLSTACKS
@@ -1454,14 +1489,14 @@ void CommandViewer::displayCommand() {
 void CommandViewer::draw(Draw& draw) {
 	ZoneScoped;
 
-	if(!command_) {
+	if(command_.empty()) {
 		imGuiText("No command selected");
 		return;
 	}
 
 	dlg_assert(record_);
 
-	auto& bcmd = *command_;
+	auto& bcmd = *command_.back();
 	auto actionCmd = bcmd.type() == CommandType::dispatch ||
 		bcmd.type() == CommandType::draw ||
 		bcmd.type() == CommandType::traceRays ||
@@ -1480,12 +1515,13 @@ void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
 	state_ = {};
 
-	auto stateCmd = dynamic_cast<const StateCmdBase*>(command_);
-	auto drawIndexedCmd = dynamic_cast<const DrawIndexedCmd*>(command_);
-	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(command_);
-	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(command_);
-	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(command_);
-	auto traceRaysIndirectCmd = dynamic_cast<const TraceRaysIndirectCmd*>(command_);
+	auto* cmd = command_.empty() ? nullptr : command_.back();
+	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
+	auto drawIndexedCmd = dynamic_cast<const DrawIndexedCmd*>(cmd);
+	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(cmd);
+	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(cmd);
+	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(cmd);
+	auto traceRaysIndirectCmd = dynamic_cast<const TraceRaysIndirectCmd*>(cmd);
 
 	auto indirectCmd = dispatchIndirectCmd ||
 		drawIndirectCmd ||
@@ -1511,7 +1547,7 @@ void CommandViewer::updateHook() {
 			}};
 			break;
 		case IOView::transferSrc:
-			if(dynamic_cast<const UpdateBufferCmd*>(command_)) {
+			if(dynamic_cast<const UpdateBufferCmd*>(cmd)) {
 				// nothing to do in that case, we know the data statically
 				break;
 			}

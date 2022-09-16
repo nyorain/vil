@@ -173,6 +173,7 @@ template<typename T>
 auto aliasCmd(T&& list) {
 	std::remove_reference_t<decltype(**list.begin())> found = nullptr;
 	for(auto& fn : list) {
+		dlg_assert(fn);
 		if(*fn) {
 			found = *fn;
 			break;
@@ -181,7 +182,9 @@ auto aliasCmd(T&& list) {
 
 	if(found) {
 		for(auto& fn : list) {
-			*fn = *found;
+			if(!*fn) {
+				*fn = *found;
+			}
 		}
 	}
 

@@ -30,6 +30,8 @@ struct Instance {
 	std::vector<std::string> extensions;
 	bool debugUtilsEnabled {};
 
+	std::vector<VkPhysicalDevice> phdevs;
+
 	// NOTE: this just means that the instance supports them.
 	// Usually need to check in device for features, might still not
 	// support them!

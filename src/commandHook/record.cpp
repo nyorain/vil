@@ -169,12 +169,18 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	auto preEnd = hcommand.end() - 1;
 	for(auto it = hcommand.begin(); it != preEnd; ++it) {
 		auto* cmd = *it;
-		info.beginRenderPassCmd = dynamic_cast<const BeginRenderPassCmd*>(cmd);
-		if(info.beginRenderPassCmd) {
+
+		auto type = cmd->type();
+		if(type == CommandType::beginRenderPass) {
+			dlg_assert(dynamic_cast<const BeginRenderPassCmd*>(cmd));
+			info.beginRenderPassCmd = static_cast<const BeginRenderPassCmd*>(cmd);
+		} else if(type == CommandType::renderSection) {
+			dlg_assert(dynamic_cast<const RenderSectionCommand*>(cmd));
+			info.rpi = &static_cast<const RenderSectionCommand*>(cmd)->rpi;
+			dlg_assertm(!dynamic_cast<const SubpassCmd*>(cmd) || info.beginRenderPassCmd,
+				"SubpassCmd without BeginRenderPassCmd?!");
 			break;
 		}
-
-		// TODO: support for BeginRendering
 	}
 
 	// some operations (index/vertex/attachment) copies only make sense
@@ -717,34 +723,26 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	}
 }
 
-void CommandHookRecord::copyAttachment(const Command& bcmd,
+void CommandHookRecord::copyAttachment(const Command&, const RecordInfo& info,
 		AttachmentType type, unsigned attID,
 		CommandHookState::CopiedAttachment& dst) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyAttachment");
 
-	// NOTE: written in a general way. We might be in a RenderPass
-	// or a {Begin, End}Rendering section (i.e. dynamicRendering).
-	const RenderPassInstanceState* rpi {};
-
-	if(auto* dcmd = dynamic_cast<const DrawCmdBase*>(&bcmd); dcmd) {
-		rpi = dcmd->state.rpi;
-	} else if(auto* ccmd = dynamic_cast<const ClearAttachmentCmd*>(&bcmd); ccmd) {
-		rpi = ccmd->rpi;
-	} else {
-		dlg_error("Invalid command fdor copy attachment");
+	if(!info.rpi) {
+		dlg_error("copyAttachment but no rpi?!");
 		return;
 	}
 
-	dlg_assert_or(rpi, return);
-
+	// NOTE: written in a general way. We might be in a RenderPass
+	// or a {Begin, End}Rendering section (i.e. dynamicRendering).
+	const RenderPassInstanceState* rpi = info.rpi;
 	span<const ImageView* const> attachments;
 
 	switch(type) {
 		case AttachmentType::color:
 			// written like this since old GCC versions seem to have problems with
 			// our span conversion constructor.
-			// see https://github.com/nyorain/vil/runs/5014322209?check_suite_focus=true
 			attachments = {rpi->colorAttachments.data(), rpi->colorAttachments.size()};
 			break;
 		case AttachmentType::input:
@@ -1027,7 +1025,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// attachments
 	for(auto [i, ac] : enumerate(hook->ops_.attachmentCopies)) {
 		if(ac.before) {
-			copyAttachment(bcmd, ac.type, ac.id, state->copiedAttachments[i]);
+			copyAttachment(bcmd, info, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
 
@@ -1120,7 +1118,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// attachments
 	for(auto [i, ac] : enumerate(hook->ops_.attachmentCopies)) {
 		if(!ac.before) {
-			copyAttachment(bcmd, ac.type, ac.id, state->copiedAttachments[i]);
+			copyAttachment(bcmd, info, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
 

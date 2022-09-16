@@ -26,7 +26,7 @@
 // the Binary Section of the SPIR-V specification.
 
 // Enumeration tokens for SPIR-V, in various styles:
-//   C, C++, C++11, JSON, Lua, Python, C#, D
+//   C, C++, C++11, JSON, Lua, Python, C#, D, Beef
 //
 // - C will have tokens with a "Spv" prefix, e.g.: SpvSourceLanguageGLSL
 // - C++ will have tokens in the "spv" name space, e.g.: spv::SourceLanguageGLSL
@@ -36,25 +36,27 @@
 // - C# will use enum classes in the Specification class located in the "Spv" namespace,
 //     e.g.: Spv.Specification.SourceLanguage.GLSL
 // - D will have tokens under the "spv" module, e.g: spv.SourceLanguage.GLSL
+// - Beef will use enum classes in the Specification class located in the "Spv" namespace,
+//     e.g.: Spv.Specification.SourceLanguage.GLSL
 //
 // Some tokens act like mask values, which can be OR'd together,
 // while others are mutually exclusive.  The mask-like ones have
 // "Mask" in their name, and a parallel enum that has the shift
 // amount (1 << x) for each corresponding enumerant.
 
-#ifndef spirv_11_HPP
-#define spirv_11_HPP
+#ifndef spirv_HPP11
+#define spirv_HPP11
 
 namespace spv11 {
 
 typedef unsigned int Id;
 
-// #define SPV_VERSION 0x10500
-// #define SPV_REVISION 4
+// #define SPV_VERSION 0x10600
+// #define SPV_REVISION 1
 
 static const unsigned int MagicNumber = 0x07230203;
-static const unsigned int Version = 0x00010500;
-static const unsigned int Revision = 4;
+static const unsigned int Version = 0x00010600;
+static const unsigned int Revision = 1;
 static const unsigned int OpCodeMask = 0xffff;
 static const unsigned int WordCountShift = 16;
 
@@ -65,6 +67,8 @@ enum class SourceLanguage : unsigned {
     OpenCL_C = 3,
     OpenCL_CPP = 4,
     HLSL = 5,
+    CPP_for_OpenCL = 6,
+    SYCL = 7,
     Max = 0x7fffffff,
 };
 
@@ -90,6 +94,8 @@ enum class ExecutionModel : unsigned {
     MissNV = 5317,
     CallableKHR = 5318,
     CallableNV = 5318,
+    TaskEXT = 5364,
+    MeshEXT = 5365,
     Max = 0x7fffffff,
 };
 
@@ -150,17 +156,28 @@ enum class ExecutionMode : unsigned {
     SubgroupsPerWorkgroupId = 37,
     LocalSizeId = 38,
     LocalSizeHintId = 39,
+    SubgroupUniformControlFlowKHR = 4421,
     PostDepthCoverage = 4446,
     DenormPreserve = 4459,
     DenormFlushToZero = 4460,
     SignedZeroInfNanPreserve = 4461,
     RoundingModeRTE = 4462,
     RoundingModeRTZ = 4463,
+    EarlyAndLateFragmentTestsAMD = 5017,
     StencilRefReplacingEXT = 5027,
+    StencilRefUnchangedFrontAMD = 5079,
+    StencilRefGreaterFrontAMD = 5080,
+    StencilRefLessFrontAMD = 5081,
+    StencilRefUnchangedBackAMD = 5082,
+    StencilRefGreaterBackAMD = 5083,
+    StencilRefLessBackAMD = 5084,
+    OutputLinesEXT = 5269,
     OutputLinesNV = 5269,
+    OutputPrimitivesEXT = 5270,
     OutputPrimitivesNV = 5270,
     DerivativeGroupQuadsNV = 5289,
     DerivativeGroupLinearNV = 5290,
+    OutputTrianglesEXT = 5298,
     OutputTrianglesNV = 5298,
     PixelInterlockOrderedEXT = 5366,
     PixelInterlockUnorderedEXT = 5367,
@@ -168,10 +185,17 @@ enum class ExecutionMode : unsigned {
     SampleInterlockUnorderedEXT = 5369,
     ShadingRateInterlockOrderedEXT = 5370,
     ShadingRateInterlockUnorderedEXT = 5371,
+    SharedLocalMemorySizeINTEL = 5618,
+    RoundingModeRTPINTEL = 5620,
+    RoundingModeRTNINTEL = 5621,
+    FloatingPointModeALTINTEL = 5622,
+    FloatingPointModeIEEEINTEL = 5623,
     MaxWorkgroupSizeINTEL = 5893,
     MaxWorkDimINTEL = 5894,
     NoGlobalOffsetINTEL = 5895,
     NumSIMDWorkitemsINTEL = 5896,
+    SchedulerTargetFmaxMhzINTEL = 5903,
+    NamedBarrierCountINTEL = 6417,
     Max = 0x7fffffff,
 };
 
@@ -203,7 +227,10 @@ enum class StorageClass : unsigned {
     ShaderRecordBufferNV = 5343,
     PhysicalStorageBuffer = 5349,
     PhysicalStorageBufferEXT = 5349,
+    TaskPayloadWorkgroupEXT = 5402,
     CodeSectionINTEL = 5605,
+    DeviceOnlyINTEL = 5936,
+    HostOnlyINTEL = 5937,
     Max = 0x7fffffff,
 };
 
@@ -343,6 +370,8 @@ enum class ImageOperandsShift : unsigned {
     VolatileTexelKHR = 11,
     SignExtend = 12,
     ZeroExtend = 13,
+    Nontemporal = 14,
+    Offsets = 16,
     Max = 0x7fffffff,
 };
 
@@ -366,6 +395,8 @@ enum class ImageOperandsMask : unsigned {
     VolatileTexelKHR = 0x00000800,
     SignExtend = 0x00001000,
     ZeroExtend = 0x00002000,
+    Nontemporal = 0x00004000,
+    Offsets = 0x00010000,
 };
 
 enum class FPFastMathModeShift : unsigned {
@@ -374,6 +405,8 @@ enum class FPFastMathModeShift : unsigned {
     NSZ = 2,
     AllowRecip = 3,
     Fast = 4,
+    AllowContractFastINTEL = 16,
+    AllowReassocINTEL = 17,
     Max = 0x7fffffff,
 };
 
@@ -384,6 +417,8 @@ enum class FPFastMathModeMask : unsigned {
     NSZ = 0x00000004,
     AllowRecip = 0x00000008,
     Fast = 0x00000010,
+    AllowContractFastINTEL = 0x00010000,
+    AllowReassocINTEL = 0x00020000,
 };
 
 enum class FPRoundingMode : unsigned {
@@ -397,6 +432,7 @@ enum class FPRoundingMode : unsigned {
 enum class LinkageType : unsigned {
     Export = 0,
     Import = 1,
+    LinkOnceODR = 2,
     Max = 0x7fffffff,
 };
 
@@ -474,9 +510,11 @@ enum class Decoration : unsigned {
     PassthroughNV = 5250,
     ViewportRelativeNV = 5252,
     SecondaryViewportRelativeNV = 5256,
+    PerPrimitiveEXT = 5271,
     PerPrimitiveNV = 5271,
     PerViewNV = 5272,
     PerTaskNV = 5273,
+    PerVertexKHR = 5285,
     PerVertexNV = 5285,
     NonUniform = 5300,
     NonUniformEXT = 5300,
@@ -484,12 +522,26 @@ enum class Decoration : unsigned {
     RestrictPointerEXT = 5355,
     AliasedPointer = 5356,
     AliasedPointerEXT = 5356,
+    BindlessSamplerNV = 5398,
+    BindlessImageNV = 5399,
+    BoundSamplerNV = 5400,
+    BoundImageNV = 5401,
+    SIMTCallINTEL = 5599,
     ReferencedIndirectlyINTEL = 5602,
+    ClobberINTEL = 5607,
+    SideEffectsINTEL = 5608,
+    VectorComputeVariableINTEL = 5624,
+    FuncParamIOKindINTEL = 5625,
+    VectorComputeFunctionINTEL = 5626,
+    StackCallINTEL = 5627,
+    GlobalVariableOffsetINTEL = 5628,
     CounterBuffer = 5634,
     HlslCounterBufferGOOGLE = 5634,
     HlslSemanticGOOGLE = 5635,
     UserSemantic = 5635,
     UserTypeGOOGLE = 5636,
+    FunctionRoundingModeINTEL = 5822,
+    FunctionDenormModeINTEL = 5823,
     RegisterINTEL = 5825,
     MemoryINTEL = 5826,
     NumbanksINTEL = 5827,
@@ -502,6 +554,20 @@ enum class Decoration : unsigned {
     MergeINTEL = 5834,
     BankBitsINTEL = 5835,
     ForcePow2DepthINTEL = 5836,
+    BurstCoalesceINTEL = 5899,
+    CacheSizeINTEL = 5900,
+    DontStaticallyCoalesceINTEL = 5901,
+    PrefetchINTEL = 5902,
+    StallEnableINTEL = 5905,
+    FuseLoopsInFunctionINTEL = 5907,
+    AliasScopeINTEL = 5914,
+    NoAliasINTEL = 5915,
+    BufferLocationINTEL = 5921,
+    IOPipeStorageINTEL = 5944,
+    FunctionFloatingPointModeINTEL = 6080,
+    SingleElementVectorINTEL = 6085,
+    VectorComputeCallableFunctionINTEL = 6087,
+    MediaBlockIOINTEL = 6140,
     Max = 0x7fffffff,
 };
 
@@ -586,12 +652,18 @@ enum class BuiltIn : unsigned {
     LayerPerViewNV = 5279,
     MeshViewCountNV = 5280,
     MeshViewIndicesNV = 5281,
+    BaryCoordKHR = 5286,
     BaryCoordNV = 5286,
+    BaryCoordNoPerspKHR = 5287,
     BaryCoordNoPerspNV = 5287,
     FragSizeEXT = 5292,
     FragmentSizeNV = 5292,
     FragInvocationCountEXT = 5293,
     InvocationsPerPixelNV = 5293,
+    PrimitivePointIndicesEXT = 5294,
+    PrimitiveLineIndicesEXT = 5295,
+    PrimitiveTriangleIndicesEXT = 5296,
+    CullPrimitiveEXT = 5299,
     LaunchIdKHR = 5319,
     LaunchIdNV = 5319,
     LaunchSizeKHR = 5320,
@@ -617,6 +689,7 @@ enum class BuiltIn : unsigned {
     HitTNV = 5332,
     HitKindKHR = 5333,
     HitKindNV = 5333,
+    CurrentRayTimeNV = 5334,
     IncomingRayFlagsKHR = 5351,
     IncomingRayFlagsNV = 5351,
     RayGeometryIndexKHR = 5352,
@@ -624,6 +697,7 @@ enum class BuiltIn : unsigned {
     SMCountNV = 5375,
     WarpIDNV = 5376,
     SMIDNV = 5377,
+    CullMaskKHR = 6021,
     Max = 0x7fffffff,
 };
 
@@ -656,6 +730,7 @@ enum class LoopControlShift : unsigned {
     LoopCoalesceINTEL = 20,
     MaxInterleavingINTEL = 21,
     SpeculatedIterationsINTEL = 22,
+    NoFusionINTEL = 23,
     Max = 0x7fffffff,
 };
 
@@ -677,6 +752,7 @@ enum class LoopControlMask : unsigned {
     LoopCoalesceINTEL = 0x00100000,
     MaxInterleavingINTEL = 0x00200000,
     SpeculatedIterationsINTEL = 0x00400000,
+    NoFusionINTEL = 0x00800000,
 };
 
 enum class FunctionControlShift : unsigned {
@@ -684,6 +760,7 @@ enum class FunctionControlShift : unsigned {
     DontInline = 1,
     Pure = 2,
     Const = 3,
+    OptNoneINTEL = 16,
     Max = 0x7fffffff,
 };
 
@@ -693,6 +770,7 @@ enum class FunctionControlMask : unsigned {
     DontInline = 0x00000002,
     Pure = 0x00000004,
     Const = 0x00000008,
+    OptNoneINTEL = 0x00010000,
 };
 
 enum class MemorySemanticsShift : unsigned {
@@ -747,6 +825,8 @@ enum class MemoryAccessShift : unsigned {
     MakePointerVisibleKHR = 4,
     NonPrivatePointer = 5,
     NonPrivatePointerKHR = 5,
+    AliasScopeINTELMask = 16,
+    NoAliasINTELMask = 17,
     Max = 0x7fffffff,
 };
 
@@ -761,6 +841,8 @@ enum class MemoryAccessMask : unsigned {
     MakePointerVisibleKHR = 0x00000010,
     NonPrivatePointer = 0x00000020,
     NonPrivatePointerKHR = 0x00000020,
+    AliasScopeINTELMask = 0x00010000,
+    NoAliasINTELMask = 0x00020000,
 };
 
 enum class Scope : unsigned {
@@ -873,9 +955,13 @@ enum class Capability : unsigned {
     GroupNonUniformQuad = 68,
     ShaderLayer = 69,
     ShaderViewportIndex = 70,
+    UniformDecoration = 71,
     FragmentShadingRateKHR = 4422,
     SubgroupBallotKHR = 4423,
     DrawParameters = 4427,
+    WorkgroupMemoryExplicitLayoutKHR = 4428,
+    WorkgroupMemoryExplicitLayout8BitAccessKHR = 4429,
+    WorkgroupMemoryExplicitLayout16BitAccessKHR = 4430,
     SubgroupVoteKHR = 4431,
     StorageBuffer16BitAccess = 4433,
     StorageUniformBufferBlock16 = 4433,
@@ -918,6 +1004,8 @@ enum class Capability : unsigned {
     FragmentFullyCoveredEXT = 5265,
     MeshShadingNV = 5266,
     ImageFootprintNV = 5282,
+    MeshShadingEXT = 5283,
+    FragmentBarycentricKHR = 5284,
     FragmentBarycentricNV = 5284,
     ComputeDerivativeGroupQuadsNV = 5288,
     FragmentDensityEXT = 5291,
@@ -948,6 +1036,7 @@ enum class Capability : unsigned {
     StorageTexelBufferArrayNonUniformIndexing = 5312,
     StorageTexelBufferArrayNonUniformIndexingEXT = 5312,
     RayTracingNV = 5340,
+    RayTracingMotionBlurNV = 5341,
     VulkanMemoryModel = 5345,
     VulkanMemoryModelKHR = 5345,
     VulkanMemoryModelDeviceScope = 5346,
@@ -961,26 +1050,67 @@ enum class Capability : unsigned {
     FragmentShaderShadingRateInterlockEXT = 5372,
     ShaderSMBuiltinsNV = 5373,
     FragmentShaderPixelInterlockEXT = 5378,
+    DemoteToHelperInvocation = 5379,
     DemoteToHelperInvocationEXT = 5379,
+    BindlessTextureNV = 5390,
     SubgroupShuffleINTEL = 5568,
     SubgroupBufferBlockIOINTEL = 5569,
     SubgroupImageBlockIOINTEL = 5570,
     SubgroupImageMediaBlockIOINTEL = 5579,
+    RoundToInfinityINTEL = 5582,
+    FloatingPointModeINTEL = 5583,
     IntegerFunctions2INTEL = 5584,
     FunctionPointersINTEL = 5603,
     IndirectReferencesINTEL = 5604,
+    AsmINTEL = 5606,
+    AtomicFloat32MinMaxEXT = 5612,
+    AtomicFloat64MinMaxEXT = 5613,
+    AtomicFloat16MinMaxEXT = 5616,
+    VectorComputeINTEL = 5617,
+    VectorAnyINTEL = 5619,
+    ExpectAssumeKHR = 5629,
     SubgroupAvcMotionEstimationINTEL = 5696,
     SubgroupAvcMotionEstimationIntraINTEL = 5697,
     SubgroupAvcMotionEstimationChromaINTEL = 5698,
+    VariableLengthArrayINTEL = 5817,
+    FunctionFloatControlINTEL = 5821,
     FPGAMemoryAttributesINTEL = 5824,
+    FPFastMathModeINTEL = 5837,
+    ArbitraryPrecisionIntegersINTEL = 5844,
+    ArbitraryPrecisionFloatingPointINTEL = 5845,
     UnstructuredLoopControlsINTEL = 5886,
     FPGALoopControlsINTEL = 5888,
     KernelAttributesINTEL = 5892,
     FPGAKernelAttributesINTEL = 5897,
+    FPGAMemoryAccessesINTEL = 5898,
+    FPGAClusterAttributesINTEL = 5904,
+    LoopFuseINTEL = 5906,
+    MemoryAccessAliasingINTEL = 5910,
+    FPGABufferLocationINTEL = 5920,
+    ArbitraryPrecisionFixedPointINTEL = 5922,
+    USMStorageClassesINTEL = 5935,
+    IOPipesINTEL = 5943,
     BlockingPipesINTEL = 5945,
     FPGARegINTEL = 5948,
+    DotProductInputAll = 6016,
+    DotProductInputAllKHR = 6016,
+    DotProductInput4x8Bit = 6017,
+    DotProductInput4x8BitKHR = 6017,
+    DotProductInput4x8BitPacked = 6018,
+    DotProductInput4x8BitPackedKHR = 6018,
+    DotProduct = 6019,
+    DotProductKHR = 6019,
+    RayCullMaskKHR = 6020,
+    BitInstructions = 6025,
+    GroupNonUniformRotateKHR = 6026,
     AtomicFloat32AddEXT = 6033,
     AtomicFloat64AddEXT = 6034,
+    LongConstantCompositeINTEL = 6089,
+    OptNoneINTEL = 6094,
+    AtomicFloat16AddEXT = 6095,
+    DebugInfoModuleINTEL = 6114,
+    SplitBarrierINTEL = 6141,
+    GroupUniformArithmeticKHR = 6400,
     Max = 0x7fffffff,
 };
 
@@ -1045,6 +1175,44 @@ enum class FragmentShadingRateMask : unsigned {
     Vertical4Pixels = 0x00000002,
     Horizontal2Pixels = 0x00000004,
     Horizontal4Pixels = 0x00000008,
+};
+
+enum class FPDenormMode : unsigned {
+    Preserve = 0,
+    FlushToZero = 1,
+    Max = 0x7fffffff,
+};
+
+enum class FPOperationMode : unsigned {
+    IEEE = 0,
+    ALT = 1,
+    Max = 0x7fffffff,
+};
+
+enum class QuantizationModes : unsigned {
+    TRN = 0,
+    TRN_ZERO = 1,
+    RND = 2,
+    RND_ZERO = 3,
+    RND_INF = 4,
+    RND_MIN_INF = 5,
+    RND_CONV = 6,
+    RND_CONV_ODD = 7,
+    Max = 0x7fffffff,
+};
+
+enum class OverflowModes : unsigned {
+    WRAP = 0,
+    SAT = 1,
+    SAT_ZERO = 2,
+    SAT_SYM = 3,
+    Max = 0x7fffffff,
+};
+
+enum class PackedVectorFormat : unsigned {
+    PackedVectorFormat4x8Bit = 0,
+    PackedVectorFormat4x8BitKHR = 0,
+    Max = 0x7fffffff,
 };
 
 enum class Op : unsigned {
@@ -1398,12 +1566,25 @@ enum class Op : unsigned {
     OpSubgroupAllKHR = 4428,
     OpSubgroupAnyKHR = 4429,
     OpSubgroupAllEqualKHR = 4430,
+    OpGroupNonUniformRotateKHR = 4431,
     OpSubgroupReadInvocationKHR = 4432,
     OpTraceRayKHR = 4445,
     OpExecuteCallableKHR = 4446,
     OpConvertUToAccelerationStructureKHR = 4447,
     OpIgnoreIntersectionKHR = 4448,
     OpTerminateRayKHR = 4449,
+    OpSDot = 4450,
+    OpSDotKHR = 4450,
+    OpUDot = 4451,
+    OpUDotKHR = 4451,
+    OpSUDot = 4452,
+    OpSUDotKHR = 4452,
+    OpSDotAccSat = 4453,
+    OpSDotAccSatKHR = 4453,
+    OpUDotAccSat = 4454,
+    OpUDotAccSatKHR = 4454,
+    OpSUDotAccSat = 4455,
+    OpSUDotAccSatKHR = 4455,
     OpTypeRayQueryKHR = 4472,
     OpRayQueryInitializeKHR = 4473,
     OpRayQueryTerminateKHR = 4474,
@@ -1423,6 +1604,8 @@ enum class Op : unsigned {
     OpFragmentFetchAMD = 5012,
     OpReadClockKHR = 5056,
     OpImageSampleFootprintNV = 5283,
+    OpEmitMeshTasksEXT = 5294,
+    OpSetMeshOutputsEXT = 5295,
     OpGroupNonUniformPartitionNV = 5296,
     OpWritePackedPrimitiveIndices4x8NV = 5299,
     OpReportIntersectionKHR = 5334,
@@ -1430,6 +1613,8 @@ enum class Op : unsigned {
     OpIgnoreIntersectionNV = 5335,
     OpTerminateRayNV = 5336,
     OpTraceNV = 5337,
+    OpTraceMotionNV = 5338,
+    OpTraceRayMotionNV = 5339,
     OpTypeAccelerationStructureKHR = 5341,
     OpTypeAccelerationStructureNV = 5341,
     OpExecuteCallableNV = 5344,
@@ -1440,8 +1625,16 @@ enum class Op : unsigned {
     OpCooperativeMatrixLengthNV = 5362,
     OpBeginInvocationInterlockEXT = 5364,
     OpEndInvocationInterlockEXT = 5365,
+    OpDemoteToHelperInvocation = 5380,
     OpDemoteToHelperInvocationEXT = 5380,
     OpIsHelperInvocationEXT = 5381,
+    OpConvertUToImageNV = 5391,
+    OpConvertUToSamplerNV = 5392,
+    OpConvertImageToUNV = 5393,
+    OpConvertSamplerToUNV = 5394,
+    OpConvertUToSampledImageNV = 5395,
+    OpConvertSampledImageToUNV = 5396,
+    OpSamplerImageAddressingModeNV = 5397,
     OpSubgroupShuffleINTEL = 5571,
     OpSubgroupShuffleDownINTEL = 5572,
     OpSubgroupShuffleUpINTEL = 5573,
@@ -1466,8 +1659,15 @@ enum class Op : unsigned {
     OpUSubSatINTEL = 5596,
     OpIMul32x16INTEL = 5597,
     OpUMul32x16INTEL = 5598,
-    OpFunctionPointerINTEL = 5600,
+    OpConstantFunctionPointerINTEL = 5600,
     OpFunctionPointerCallINTEL = 5601,
+    OpAsmTargetINTEL = 5609,
+    OpAsmINTEL = 5610,
+    OpAsmCallINTEL = 5611,
+    OpAtomicFMinEXT = 5614,
+    OpAtomicFMaxEXT = 5615,
+    OpAssumeTrueKHR = 5630,
+    OpExpectKHR = 5631,
     OpDecorateString = 5632,
     OpDecorateStringGOOGLE = 5632,
     OpMemberDecorateString = 5633,
@@ -1590,7 +1790,67 @@ enum class Op : unsigned {
     OpSubgroupAvcSicGetPackedSkcLumaCountThresholdINTEL = 5814,
     OpSubgroupAvcSicGetPackedSkcLumaSumThresholdINTEL = 5815,
     OpSubgroupAvcSicGetInterRawSadsINTEL = 5816,
+    OpVariableLengthArrayINTEL = 5818,
+    OpSaveMemoryINTEL = 5819,
+    OpRestoreMemoryINTEL = 5820,
+    OpArbitraryFloatSinCosPiINTEL = 5840,
+    OpArbitraryFloatCastINTEL = 5841,
+    OpArbitraryFloatCastFromIntINTEL = 5842,
+    OpArbitraryFloatCastToIntINTEL = 5843,
+    OpArbitraryFloatAddINTEL = 5846,
+    OpArbitraryFloatSubINTEL = 5847,
+    OpArbitraryFloatMulINTEL = 5848,
+    OpArbitraryFloatDivINTEL = 5849,
+    OpArbitraryFloatGTINTEL = 5850,
+    OpArbitraryFloatGEINTEL = 5851,
+    OpArbitraryFloatLTINTEL = 5852,
+    OpArbitraryFloatLEINTEL = 5853,
+    OpArbitraryFloatEQINTEL = 5854,
+    OpArbitraryFloatRecipINTEL = 5855,
+    OpArbitraryFloatRSqrtINTEL = 5856,
+    OpArbitraryFloatCbrtINTEL = 5857,
+    OpArbitraryFloatHypotINTEL = 5858,
+    OpArbitraryFloatSqrtINTEL = 5859,
+    OpArbitraryFloatLogINTEL = 5860,
+    OpArbitraryFloatLog2INTEL = 5861,
+    OpArbitraryFloatLog10INTEL = 5862,
+    OpArbitraryFloatLog1pINTEL = 5863,
+    OpArbitraryFloatExpINTEL = 5864,
+    OpArbitraryFloatExp2INTEL = 5865,
+    OpArbitraryFloatExp10INTEL = 5866,
+    OpArbitraryFloatExpm1INTEL = 5867,
+    OpArbitraryFloatSinINTEL = 5868,
+    OpArbitraryFloatCosINTEL = 5869,
+    OpArbitraryFloatSinCosINTEL = 5870,
+    OpArbitraryFloatSinPiINTEL = 5871,
+    OpArbitraryFloatCosPiINTEL = 5872,
+    OpArbitraryFloatASinINTEL = 5873,
+    OpArbitraryFloatASinPiINTEL = 5874,
+    OpArbitraryFloatACosINTEL = 5875,
+    OpArbitraryFloatACosPiINTEL = 5876,
+    OpArbitraryFloatATanINTEL = 5877,
+    OpArbitraryFloatATanPiINTEL = 5878,
+    OpArbitraryFloatATan2INTEL = 5879,
+    OpArbitraryFloatPowINTEL = 5880,
+    OpArbitraryFloatPowRINTEL = 5881,
+    OpArbitraryFloatPowNINTEL = 5882,
     OpLoopControlINTEL = 5887,
+    OpAliasDomainDeclINTEL = 5911,
+    OpAliasScopeDeclINTEL = 5912,
+    OpAliasScopeListDeclINTEL = 5913,
+    OpFixedSqrtINTEL = 5923,
+    OpFixedRecipINTEL = 5924,
+    OpFixedRsqrtINTEL = 5925,
+    OpFixedSinINTEL = 5926,
+    OpFixedCosINTEL = 5927,
+    OpFixedSinCosINTEL = 5928,
+    OpFixedSinPiINTEL = 5929,
+    OpFixedCosPiINTEL = 5930,
+    OpFixedSinCosPiINTEL = 5931,
+    OpFixedLogINTEL = 5932,
+    OpFixedExpINTEL = 5933,
+    OpPtrCastToCrossWorkgroupINTEL = 5934,
+    OpCrossWorkgroupCastToPtrINTEL = 5938,
     OpReadPipeBlockingINTEL = 5946,
     OpWritePipeBlockingINTEL = 5947,
     OpFPGARegINTEL = 5949,
@@ -1612,10 +1872,27 @@ enum class Op : unsigned {
     OpRayQueryGetIntersectionObjectToWorldKHR = 6031,
     OpRayQueryGetIntersectionWorldToObjectKHR = 6032,
     OpAtomicFAddEXT = 6035,
+    OpTypeBufferSurfaceINTEL = 6086,
+    OpTypeStructContinuedINTEL = 6090,
+    OpConstantCompositeContinuedINTEL = 6091,
+    OpSpecConstantCompositeContinuedINTEL = 6092,
+    OpControlBarrierArriveINTEL = 6142,
+    OpControlBarrierWaitINTEL = 6143,
+    OpGroupIMulKHR = 6401,
+    OpGroupFMulKHR = 6402,
+    OpGroupBitwiseAndKHR = 6403,
+    OpGroupBitwiseOrKHR = 6404,
+    OpGroupBitwiseXorKHR = 6405,
+    OpGroupLogicalAndKHR = 6406,
+    OpGroupLogicalOrKHR = 6407,
+    OpGroupLogicalXorKHR = 6408,
     Max = 0x7fffffff,
 };
 
 #ifdef SPV_ENABLE_UTILITY_CODE
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
 inline void HasResultAndType(Op opcode, bool *hasResult, bool *hasResultType) {
     *hasResult = *hasResultType = false;
     switch (opcode) {
@@ -1970,12 +2247,19 @@ inline void HasResultAndType(Op opcode, bool *hasResult, bool *hasResultType) {
     case Op::OpSubgroupAllKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpSubgroupAnyKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpSubgroupAllEqualKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupNonUniformRotateKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpSubgroupReadInvocationKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpTraceRayKHR: *hasResult = false; *hasResultType = false; break;
     case Op::OpExecuteCallableKHR: *hasResult = false; *hasResultType = false; break;
     case Op::OpConvertUToAccelerationStructureKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpIgnoreIntersectionKHR: *hasResult = false; *hasResultType = false; break;
     case Op::OpTerminateRayKHR: *hasResult = false; *hasResultType = false; break;
+    case Op::OpSDot: *hasResult = true; *hasResultType = true; break;
+    case Op::OpUDot: *hasResult = true; *hasResultType = true; break;
+    case Op::OpSUDot: *hasResult = true; *hasResultType = true; break;
+    case Op::OpSDotAccSat: *hasResult = true; *hasResultType = true; break;
+    case Op::OpUDotAccSat: *hasResult = true; *hasResultType = true; break;
+    case Op::OpSUDotAccSat: *hasResult = true; *hasResultType = true; break;
     case Op::OpTypeRayQueryKHR: *hasResult = true; *hasResultType = false; break;
     case Op::OpRayQueryInitializeKHR: *hasResult = false; *hasResultType = false; break;
     case Op::OpRayQueryTerminateKHR: *hasResult = false; *hasResultType = false; break;
@@ -1995,12 +2279,16 @@ inline void HasResultAndType(Op opcode, bool *hasResult, bool *hasResultType) {
     case Op::OpFragmentFetchAMD: *hasResult = true; *hasResultType = true; break;
     case Op::OpReadClockKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpImageSampleFootprintNV: *hasResult = true; *hasResultType = true; break;
+    case Op::OpEmitMeshTasksEXT: *hasResult = false; *hasResultType = false; break;
+    case Op::OpSetMeshOutputsEXT: *hasResult = false; *hasResultType = false; break;
     case Op::OpGroupNonUniformPartitionNV: *hasResult = true; *hasResultType = true; break;
     case Op::OpWritePackedPrimitiveIndices4x8NV: *hasResult = false; *hasResultType = false; break;
     case Op::OpReportIntersectionNV: *hasResult = true; *hasResultType = true; break;
     case Op::OpIgnoreIntersectionNV: *hasResult = false; *hasResultType = false; break;
     case Op::OpTerminateRayNV: *hasResult = false; *hasResultType = false; break;
     case Op::OpTraceNV: *hasResult = false; *hasResultType = false; break;
+    case Op::OpTraceMotionNV: *hasResult = false; *hasResultType = false; break;
+    case Op::OpTraceRayMotionNV: *hasResult = false; *hasResultType = false; break;
     case Op::OpTypeAccelerationStructureNV: *hasResult = true; *hasResultType = false; break;
     case Op::OpExecuteCallableNV: *hasResult = false; *hasResultType = false; break;
     case Op::OpTypeCooperativeMatrixNV: *hasResult = true; *hasResultType = false; break;
@@ -2010,8 +2298,15 @@ inline void HasResultAndType(Op opcode, bool *hasResult, bool *hasResultType) {
     case Op::OpCooperativeMatrixLengthNV: *hasResult = true; *hasResultType = true; break;
     case Op::OpBeginInvocationInterlockEXT: *hasResult = false; *hasResultType = false; break;
     case Op::OpEndInvocationInterlockEXT: *hasResult = false; *hasResultType = false; break;
-    case Op::OpDemoteToHelperInvocationEXT: *hasResult = false; *hasResultType = false; break;
+    case Op::OpDemoteToHelperInvocation: *hasResult = false; *hasResultType = false; break;
     case Op::OpIsHelperInvocationEXT: *hasResult = true; *hasResultType = true; break;
+    case Op::OpConvertUToImageNV: *hasResult = true; *hasResultType = true; break;
+    case Op::OpConvertUToSamplerNV: *hasResult = true; *hasResultType = true; break;
+    case Op::OpConvertImageToUNV: *hasResult = true; *hasResultType = true; break;
+    case Op::OpConvertSamplerToUNV: *hasResult = true; *hasResultType = true; break;
+    case Op::OpConvertUToSampledImageNV: *hasResult = true; *hasResultType = true; break;
+    case Op::OpConvertSampledImageToUNV: *hasResult = true; *hasResultType = true; break;
+    case Op::OpSamplerImageAddressingModeNV: *hasResult = false; *hasResultType = false; break;
     case Op::OpSubgroupShuffleINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpSubgroupShuffleDownINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpSubgroupShuffleUpINTEL: *hasResult = true; *hasResultType = true; break;
@@ -2036,8 +2331,15 @@ inline void HasResultAndType(Op opcode, bool *hasResult, bool *hasResultType) {
     case Op::OpUSubSatINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpIMul32x16INTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpUMul32x16INTEL: *hasResult = true; *hasResultType = true; break;
-    case Op::OpFunctionPointerINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpConstantFunctionPointerINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpFunctionPointerCallINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpAsmTargetINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpAsmINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpAsmCallINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpAtomicFMinEXT: *hasResult = true; *hasResultType = true; break;
+    case Op::OpAtomicFMaxEXT: *hasResult = true; *hasResultType = true; break;
+    case Op::OpAssumeTrueKHR: *hasResult = false; *hasResultType = false; break;
+    case Op::OpExpectKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpDecorateString: *hasResult = false; *hasResultType = false; break;
     case Op::OpMemberDecorateString: *hasResult = false; *hasResultType = false; break;
     case Op::OpVmeImageINTEL: *hasResult = true; *hasResultType = true; break;
@@ -2158,7 +2460,67 @@ inline void HasResultAndType(Op opcode, bool *hasResult, bool *hasResultType) {
     case Op::OpSubgroupAvcSicGetPackedSkcLumaCountThresholdINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpSubgroupAvcSicGetPackedSkcLumaSumThresholdINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpSubgroupAvcSicGetInterRawSadsINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpVariableLengthArrayINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpSaveMemoryINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpRestoreMemoryINTEL: *hasResult = false; *hasResultType = false; break;
+    case Op::OpArbitraryFloatSinCosPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatCastINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatCastFromIntINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatCastToIntINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatAddINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatSubINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatMulINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatDivINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatGTINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatGEINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatLTINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatLEINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatEQINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatRecipINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatRSqrtINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatCbrtINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatHypotINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatSqrtINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatLogINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatLog2INTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatLog10INTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatLog1pINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatExpINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatExp2INTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatExp10INTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatExpm1INTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatSinINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatCosINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatSinCosINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatSinPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatCosPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatASinINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatASinPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatACosINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatACosPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatATanINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatATanPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatATan2INTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatPowINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatPowRINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpArbitraryFloatPowNINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpLoopControlINTEL: *hasResult = false; *hasResultType = false; break;
+    case Op::OpAliasDomainDeclINTEL: *hasResult = true; *hasResultType = false; break;
+    case Op::OpAliasScopeDeclINTEL: *hasResult = true; *hasResultType = false; break;
+    case Op::OpAliasScopeListDeclINTEL: *hasResult = true; *hasResultType = false; break;
+    case Op::OpFixedSqrtINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedRecipINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedRsqrtINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedSinINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedCosINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedSinCosINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedSinPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedCosPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedSinCosPiINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedLogINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpFixedExpINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpPtrCastToCrossWorkgroupINTEL: *hasResult = true; *hasResultType = true; break;
+    case Op::OpCrossWorkgroupCastToPtrINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpReadPipeBlockingINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpWritePipeBlockingINTEL: *hasResult = true; *hasResultType = true; break;
     case Op::OpFPGARegINTEL: *hasResult = true; *hasResultType = true; break;
@@ -2180,6 +2542,20 @@ inline void HasResultAndType(Op opcode, bool *hasResult, bool *hasResultType) {
     case Op::OpRayQueryGetIntersectionObjectToWorldKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpRayQueryGetIntersectionWorldToObjectKHR: *hasResult = true; *hasResultType = true; break;
     case Op::OpAtomicFAddEXT: *hasResult = true; *hasResultType = true; break;
+    case Op::OpTypeBufferSurfaceINTEL: *hasResult = true; *hasResultType = false; break;
+    case Op::OpTypeStructContinuedINTEL: *hasResult = false; *hasResultType = false; break;
+    case Op::OpConstantCompositeContinuedINTEL: *hasResult = false; *hasResultType = false; break;
+    case Op::OpSpecConstantCompositeContinuedINTEL: *hasResult = false; *hasResultType = false; break;
+    case Op::OpControlBarrierArriveINTEL: *hasResult = false; *hasResultType = false; break;
+    case Op::OpControlBarrierWaitINTEL: *hasResult = false; *hasResultType = false; break;
+    case Op::OpGroupIMulKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupFMulKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupBitwiseAndKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupBitwiseOrKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupBitwiseXorKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupLogicalAndKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupLogicalOrKHR: *hasResult = true; *hasResultType = true; break;
+    case Op::OpGroupLogicalXorKHR: *hasResult = true; *hasResultType = true; break;
     }
 }
 #endif /* SPV_ENABLE_UTILITY_CODE */
@@ -2200,5 +2576,4 @@ inline FragmentShadingRateMask operator|(FragmentShadingRateMask a, FragmentShad
 }  // end namespace spv
 
 #endif  // #ifndef spirv_HPP
-
 

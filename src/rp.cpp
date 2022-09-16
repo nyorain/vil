@@ -45,19 +45,47 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	auto imageless = pCreateInfo->flags & VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT;
 
 	ThreadMemScope memScope;
-	auto viewHandles = memScope.alloc<VkImageView>(pCreateInfo->attachmentCount);
 	std::vector<ImageView*> views;
 
-	if(!imageless) {
+	auto nci = *pCreateInfo;
+
+	if(imageless) {
+		auto copy = copyChainLocal(memScope, nci.pNext);
+		auto* ptr = findChainInfo2<VK_STRUCTURE_TYPE_FRAMEBUFFER_ATTACHMENTS_CREATE_INFO>(copy);
+		dlg_assert(ptr);
+		if(ptr) {
+			// can cast it to non-const pointer since its type of our copied chain
+			auto* attInfo = static_cast<VkFramebufferAttachmentsCreateInfo*>(ptr);
+			auto atts = memScope.copy(attInfo->pAttachmentImageInfos,
+				attInfo->attachmentImageInfoCount);
+			for(auto& att : atts) {
+				// we have to add the usages that we add in CreateImage
+				// TODO: we have more checks in CreateImage on whether we add
+				// them but don't have all needed information here :(
+				// Maybe rewrite/simplify the logic in CreateImage to not need
+				// the image tiling information?
+				// Mismatches are likely caused by that atm.
+				att.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+				auto isTransient = !!(att.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
+				if(!isTransient) {
+					att.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+				}
+			}
+
+			attInfo->attachmentImageInfoCount = u32(atts.size());
+			attInfo->pAttachmentImageInfos = atts.data();
+			nci.pNext = copy;
+		}
+	} else {
 		views.resize(pCreateInfo->attachmentCount);
+		auto viewHandles = memScope.alloc<VkImageView>(pCreateInfo->attachmentCount);
 		for(auto i = 0u; i < pCreateInfo->attachmentCount; ++i) {
 			views[i] = &get(dev, pCreateInfo->pAttachments[i]);
 			viewHandles[i] = views[i]->handle;
 		}
-	}
 
-	auto nci = *pCreateInfo;
-	nci.pAttachments = viewHandles.data();
+		nci.pAttachments = viewHandles.data();
+	}
 
 	auto res = dev.dispatch.CreateFramebuffer(device, &nci, pAllocator, pFramebuffer);
 	if(res != VK_SUCCESS) {
@@ -858,8 +886,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 			subp.pResolveAttachments = &atts[resolveOff];
 		}
 
-		subp.pColorAttachments = &atts[colorOff];
-		subp.pInputAttachments = &atts[inputOff];
+		if(subp.colorAttachmentCount) {
+			subp.pColorAttachments = &atts[colorOff];
+		}
+
+		if(subp.inputAttachmentCount) {
+			subp.pInputAttachments = &atts[inputOff];
+		}
 
 		if(subp.pDepthStencilAttachment) {
 			subp.pDepthStencilAttachment = &atts[depthOff];

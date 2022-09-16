@@ -147,7 +147,6 @@ Device::~Device() {
 	}
 
 	for(auto& qf : queueFamilies) {
-		// qf.commandGroups.clear();
 		if(qf.commandPool) {
 			dispatch.DestroyCommandPool(handle, qf.commandPool, nullptr);
 		}
@@ -155,6 +154,8 @@ Device::~Device() {
 
 	queueFamilies.clear();
 	queues.clear();
+
+	eraseDeviceFromLoaderMap(this->handle);
 }
 
 Gui& Device::getOrCreateGui(VkFormat colorFormat) {
@@ -714,6 +715,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		&dev.dispatch.CmdDispatchBase,
 		&dev.dispatch.CmdDispatchBaseKHR});
 	aliasCmd(std::array{
+		&dev.dispatch.CmdDrawIndirectCount,
+		&dev.dispatch.CmdDrawIndirectCountAMD,
+		&dev.dispatch.CmdDrawIndirectCountKHR});
+	aliasCmd(std::array{
 		&dev.dispatch.CmdDrawIndexedIndirectCount,
 		&dev.dispatch.CmdDrawIndexedIndirectCountKHR,
 		&dev.dispatch.CmdDrawIndexedIndirectCountAMD});
@@ -729,6 +734,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.TrimCommandPool,
 		&dev.dispatch.TrimCommandPoolKHR});
+	// create_renderpass_2, vulkan 1.2
+	aliasCmd(std::array{
+		&dev.dispatch.CreateRenderPass2,
+		&dev.dispatch.CreateRenderPass2KHR});
+	// KHR_bind_memory_2, vulkan 1.1
+	aliasCmd(std::array{
+		&dev.dispatch.BindBufferMemory2,
+		&dev.dispatch.BindBufferMemory2KHR});
+	aliasCmd(std::array{
+		&dev.dispatch.BindImageMemory2,
+		&dev.dispatch.BindImageMemory2KHR});
 	// KHR_descriptor_update_template, vulkan 1.1
 	aliasCmd(std::array{
 		&dev.dispatch.CreateDescriptorUpdateTemplate,
@@ -760,7 +776,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.GetImageSparseMemoryRequirements2,
 		&dev.dispatch.GetImageSparseMemoryRequirements2KHR});
-	// VK_KHR_synchronization2
+	// VK_KHR_synchronization2, vulkan 1.3
 	aliasCmd(std::array{
 		&dev.dispatch.CmdSetEvent2,
 		&dev.dispatch.CmdSetEvent2KHR});

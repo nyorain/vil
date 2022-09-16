@@ -1321,6 +1321,10 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 	auto handles = memScope.alloc<VkDescriptorSet>(descriptorSetCount);
 
 	for(auto i = 0u; i < descriptorSetCount; ++i) {
+		if(!pDescriptorSets[i]) {
+			continue;
+		}
+
 		auto& ds = get(dev, pDescriptorSets[i]);
 		handles[i] = ds.handle;
 		destroy(ds, true);
@@ -1335,20 +1339,24 @@ VKAPI_ATTR VkResult VKAPI_CALL FreeDescriptorSets(
 
 void update(DescriptorSet& state, unsigned bind, unsigned elem,
 		VkBufferView& handle) {
-	dlg_assert(handle);
-
 	auto& binding = bufferViews(state, bind)[elem];
-	auto& bufView = get(*state.layout->dev, handle);
-	handle = bufView.handle;
+
+	BufferView* newView {};
+	if(handle) VIL_LIKELY {
+		newView = &get(*state.layout->dev, handle);
+		handle = newView->handle;
+	}
 
 	if(refBindings) {
 		if(binding.bufferView) {
 			decRefCount(*binding.bufferView);
 		}
-		incRefCount(bufView);
+		if(newView) {
+			incRefCount(*newView);
+		}
 	}
 
-	binding.bufferView = &bufView;
+	binding.bufferView = newView;
 }
 
 void update(DescriptorSet& state, unsigned bind, unsigned elem,
@@ -1359,22 +1367,28 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 	binding.layout = img.imageLayout;
 
 	auto& layout = state.layout->bindings[bind];
+
+	// update imageView, if needed
 	if(needsImageView(layout.descriptorType)) {
-		dlg_assert(img.imageView);
-		auto& imgView = get(dev, img.imageView);
-		img.imageView = imgView.handle;
+		ImageView* newView {};
+		if(img.imageView) VIL_LIKELY { // can be VK_NULL_HANDLE
+			newView = &get(dev, img.imageView);
+			img.imageView = newView->handle;
+		}
 
 		if(refBindings) {
 			if(binding.imageView) {
 				decRefCount(*binding.imageView);
 			}
-
-			incRefCount(imgView);
+			if(newView) {
+				incRefCount(*newView);
+			}
 		}
 
-		binding.imageView = &imgView;
+		binding.imageView = newView;
 	}
 
+	// update sampler, if needed
 	if(needsSampler(layout.descriptorType)) {
 		if(layout.immutableSamplers) {
 			// immutable samplers are initialized at the beginning and
@@ -1382,16 +1396,22 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 			dlg_assert(binding.sampler);
 			dlg_assert(binding.sampler == layout.immutableSamplers[elem].get());
 		} else {
-			dlg_assert(img.sampler);
-			auto& sampler = get(dev, img.sampler);
-			img.sampler = sampler.handle;
-
-			if(refBindings) {
-				if(binding.sampler) decRefCount(*binding.sampler);
-				incRefCount(sampler);
+			Sampler* newSampler {};
+			if(img.sampler) VIL_LIKELY { // can be VK_NULL_HANDLE
+				newSampler = &get(dev, img.sampler);
+				img.sampler = newSampler->handle;
 			}
 
-			binding.sampler = &sampler;
+			if(refBindings) {
+				if(binding.sampler) {
+					decRefCount(*binding.sampler);
+				}
+				if(newSampler) {
+					incRefCount(*newSampler);
+				}
+			}
+
+			binding.sampler = newSampler;
 		}
 	}
 }
@@ -1399,38 +1419,52 @@ void update(DescriptorSet& state, unsigned bind, unsigned elem,
 void update(DescriptorSet& state, unsigned bind, unsigned elem,
 		VkDescriptorBufferInfo& info) {
 	auto& binding = buffers(state, bind)[elem];
-	auto& buf = get(*state.layout->dev, info.buffer);
-	info.buffer = buf.handle;
+	Buffer* newBuffer {};
+
+	if(info.buffer) VIL_LIKELY { // can be VK_NULL_HANDLE
+		newBuffer = &get(*state.layout->dev, info.buffer);
+		info.buffer = newBuffer->handle;
+	}
 
 	if(refBindings) {
 		if(binding.buffer) {
 			decRefCount(*binding.buffer);
 		}
-		incRefCount(buf);
+		if(newBuffer) {
+			incRefCount(*newBuffer);
+		}
 	}
 
-	binding.buffer = &buf;
+	binding.buffer = newBuffer;
 	binding.offset = info.offset;
-	binding.range = evalRange(binding.buffer->ci.size, info.offset, info.range);
+
+	if(binding.buffer) {
+		binding.range = evalRange(binding.buffer->ci.size, info.offset, info.range);
+	} else {
+		binding.range = info.range;
+	}
 }
 
 void update(DescriptorSet& state, unsigned bind, unsigned elem,
 		VkAccelerationStructureKHR& handle) {
-	dlg_assert(handle);
-
 	auto& binding = accelStructs(state, bind)[elem];
-	auto& as = get(*state.layout->dev, handle);
-	handle = as.handle;
+	AccelStruct* newAS {};
+
+	if(handle) VIL_LIKELY { // can be VK_NULL_HANDLE
+		newAS = &get(*state.layout->dev, handle);
+		handle = newAS->handle;
+	}
 
 	if(refBindings) {
 		if(binding.accelStruct) {
 			decRefCount(*binding.accelStruct);
 		}
-
-		incRefCount(as);
+		if(newAS) {
+			incRefCount(*newAS);
+		}
 	}
 
-	binding.accelStruct = &as;
+	binding.accelStruct = newAS;
 }
 
 void update(DescriptorSet& state, unsigned bind, unsigned offset,
@@ -1439,7 +1473,7 @@ void update(DescriptorSet& state, unsigned bind, unsigned offset,
 	dlg_assert(offset < buf.size());
 
 	// std::lock_guard lock(state.mutex);
-	// NOTE: updating uniform inline blocks byte-by-byte is inefficient
+	// TODO: updating uniform inline blocks byte-by-byte is inefficient
 	// but reworking this to be more efficient would be complicated.
 	// Especially so since we still have to consider that additional bytes
 	// will update the next descriptor.

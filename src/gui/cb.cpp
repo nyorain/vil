@@ -717,8 +717,9 @@ void CommandBufferGui::updateFromSelector() {
 }
 
 void CommandBufferGui::updateCommandViewer(bool resetState) {
+	std::vector cmd(selector_.command().begin(), selector_.command().end());
 	commandViewer_.select(selector_.record(),
-		*selector_.command().back(), selector_.descriptorSnapshot(),
+		std::move(cmd), selector_.descriptorSnapshot(),
 		resetState, selector_.completedHookState());
 }
 

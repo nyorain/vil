@@ -210,6 +210,7 @@ void addSubmissionSyncLocked(QueueSubmitter& subm) {
 			signalOps.begin());
 
 		auto& ourSignal = signalOps.back();
+		ourSignal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
 		ourSignal.stageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT; // all finished
 		if(subm.dev->timelineSemaphores) {
 			ourSignal.semaphore = subm.queue->submissionSemaphore;

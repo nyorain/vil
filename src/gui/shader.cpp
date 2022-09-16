@@ -413,7 +413,7 @@ Vec3ui ShaderDebugger::workgroupSize() const {
 
 Vec3ui ShaderDebugger::numWorkgroups() const {
 	// TODO: cache/compute only if needed
-	auto* baseCmd = gui_->cbGui().commandViewer().command();
+	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
 	Vec3ui numWGs {};
 	if(auto* idcmd = dynamic_cast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
 		dlg_assert(state_);
@@ -556,7 +556,7 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 	auto bindingID = compiled_->get_decoration(res->id, spv::DecorationBinding);
 
 	// TODO: hacky
-	auto* baseCmd = gui_->cbGui().commandViewer().command();
+	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
 	auto* cmd = static_cast<const StateCmdBase*>(baseCmd);
 
 	auto& dsState = gui_->cbGui().commandViewer().dsState();
@@ -756,7 +756,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	auto setID = compiled_->get_decoration(res->id, spv::DecorationDescriptorSet);
 	auto bindingID = compiled_->get_decoration(res->id, spv::DecorationBinding);
 
-	auto* baseCmd = gui_->cbGui().commandViewer().command();
+	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
 	auto* cmd = static_cast<const StateCmdBase*>(baseCmd);
 
 	auto& dsState = gui_->cbGui().commandViewer().dsState();
@@ -807,7 +807,7 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 
 	if(spcType.storage == spv::StorageClassPushConstant) {
 		// TODO: hacky
-		auto* cmd = gui_->cbGui().commandViewer().command();
+		auto* cmd = gui_->cbGui().commandViewer().command().back();
 		auto* stateCmd = dynamic_cast<const StateCmdBase*>(cmd); // TODO PERF: static cast and assert
 		auto pcrData = stateCmd->boundPushConstants().data;
 
@@ -1053,7 +1053,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	// for indirect dispatch, need to know the number of workgrups
 	// since the shader might read that var
 	// TODO: only do it if the shader accesses the variable?
-	auto* baseCmd = gui_->cbGui().commandViewer().command();
+	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
 	if(dynamic_cast<const DispatchIndirectCmd*>(baseCmd) ||
 			dynamic_cast<const DrawIndirectCmd*>(baseCmd) ||
 			dynamic_cast<const DrawIndirectCountCmd*>(baseCmd) ||

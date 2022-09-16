@@ -182,7 +182,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		pci.layout = pipe.layout->handle;
 
-		auto colorAttachmentCount = 0u;
+		[[maybe_unused]] auto colorAttachmentCount = 0u;
 		auto hasDepthStencil = false;
 		if(pipe.renderPass) {
 			auto& subpassInfo = pipe.renderPass->desc.subpasses[pipe.subpass];
@@ -207,28 +207,32 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 		pipe.rasterizationState = *pci.pRasterizationState;
 
-		if(!pipe.hasMeshShader) {
-			pipe.vertexAttribs = {
-				pci.pVertexInputState->pVertexAttributeDescriptions,
-				pci.pVertexInputState->pVertexAttributeDescriptions + pci.pVertexInputState->vertexAttributeDescriptionCount
-			};
-			pipe.vertexBindings = {
-				pci.pVertexInputState->pVertexBindingDescriptions,
-				pci.pVertexInputState->pVertexBindingDescriptions + pci.pVertexInputState->vertexBindingDescriptionCount
-			};
-
-			pipe.vertexInputState = *pci.pVertexInputState;
-			pipe.vertexInputState.pVertexAttributeDescriptions = pipe.vertexAttribs.data();
-			pipe.vertexInputState.pVertexBindingDescriptions = pipe.vertexBindings.data();
-
-			pipe.inputAssemblyState = *pci.pInputAssemblyState;
-		}
-
 		if(pci.pDynamicState) {
 			pipe.dynamicState = {
 				pci.pDynamicState->pDynamicStates,
 				pci.pDynamicState->pDynamicStates + pci.pDynamicState->dynamicStateCount
 			};
+		}
+
+		if(!pipe.hasMeshShader) {
+			// vertex input state ignored if dynamic vertex input is set
+			if(!pipe.dynamicState.count(VK_DYNAMIC_STATE_VERTEX_INPUT_EXT)) {
+				dlg_assert(pci.pVertexInputState);
+				pipe.vertexAttribs = {
+					pci.pVertexInputState->pVertexAttributeDescriptions,
+					pci.pVertexInputState->pVertexAttributeDescriptions + pci.pVertexInputState->vertexAttributeDescriptionCount
+				};
+				pipe.vertexBindings = {
+					pci.pVertexInputState->pVertexBindingDescriptions,
+					pci.pVertexInputState->pVertexBindingDescriptions + pci.pVertexInputState->vertexBindingDescriptionCount
+				};
+
+				pipe.vertexInputState = *pci.pVertexInputState;
+				pipe.vertexInputState.pVertexAttributeDescriptions = pipe.vertexAttribs.data();
+				pipe.vertexInputState.pVertexBindingDescriptions = pipe.vertexBindings.data();
+			}
+
+			pipe.inputAssemblyState = *pci.pInputAssemblyState;
 		}
 
 		if(!pci.pRasterizationState->rasterizerDiscardEnable) {
@@ -262,7 +266,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			pipe.tessellationState = *pci.pTessellationState;
 		}
 
-		if(colorAttachmentCount) {
+		// NOTE: even if there are color attachments, pColorBlendState might
+		// be null e.g. if rasterizerDiscardEnable is true.
+		// We can't rely on comparison of pColorBlendState to null here,
+		// might be set to invalid pointer.
+		auto needsColorBlend =
+			colorAttachmentCount != 0u &&
+			!pci.pRasterizationState->rasterizerDiscardEnable;
+		if(needsColorBlend) {
+			dlg_assert(pci.pColorBlendState);
 			pipe.blendAttachments = {
 				pci.pColorBlendState->pAttachments,
 				pci.pColorBlendState->pAttachments + pci.pColorBlendState->attachmentCount

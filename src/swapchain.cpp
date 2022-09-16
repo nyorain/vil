@@ -60,21 +60,27 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	std::unique_ptr<Overlay> savedOverlay {};
 	bool recreateOverlay {false};
 	if(pCreateInfo->oldSwapchain) {
-		oldChain = &dev.swapchains.get(pCreateInfo->oldSwapchain);
+		// NOTE: valid per spec to pass in swapchains created by
+		// ANOTHER device. Don't handle this case rn but need to ignore
+		// the parameter in that case, we can't assume it's a known
+		// swapchain.
+		oldChain = dev.swapchains.find(pCreateInfo->oldSwapchain);
 
-		// This is important to destroy our handles of the swapchain
-		// images.
-		oldChain->destroy();
+		if(oldChain) {
+			// This is important to destroy our handles of the swapchain
+			// images.
+			oldChain->destroy();
 
-		if(oldChain->overlay) {
-			if(Overlay::compatible(oldChain->ci, *pCreateInfo)) {
-				// Have to make sure previous rendering has finished.
-				// We can be sure gui isn't starting new draws in another
-				// thread.
-				oldChain->overlay->gui->waitForDraws();
-				savedOverlay = std::move(oldChain->overlay);
-			} else {
-				recreateOverlay = true;
+			if(oldChain->overlay) {
+				if(Overlay::compatible(oldChain->ci, *pCreateInfo)) {
+					// Have to make sure previous rendering has finished.
+					// We can be sure gui isn't starting new draws in another
+					// thread.
+					oldChain->overlay->gui->waitForDraws();
+					savedOverlay = std::move(oldChain->overlay);
+				} else {
+					recreateOverlay = true;
+				}
 			}
 		}
 	}

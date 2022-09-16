@@ -157,11 +157,11 @@ public:
 		(void) ptr;
 	}
 
-	// T* find(const K& key) {
-	// 	std::shared_lock lock(*mutex);
-	// 	auto it = map.find(key);
-	// 	return it == map.end() ? nullptr : &*it->second;
-	// }
+	T* find(const K& key) {
+		std::shared_lock lock(*mutex);
+		auto it = inner.find(key);
+		return it == inner.end() ? nullptr : &*it->second;
+	}
 
 	// Expects an element in the map, finds and returns it.
 	// Unlike operator[], will never create the element.
