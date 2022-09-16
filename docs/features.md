@@ -10,7 +10,7 @@ See [env.md](env.md) for more details.
 ## Vulkan 1.0
 
 Missing:
-- Anything with sparse/aliasing memory: not implemented/tested at all, 
+- Anything with sparse memory: not implemented/tested at all, 
   will likely cause failed assert/crash in layer
 
 ## Vulkan 1.1
@@ -43,7 +43,7 @@ Implemented:
 - VK_KHR_imageless_framebuffer
 - VK_EXT_descriptor_indexing
 	- some edge cases with update_unused_while_pending are not properly
-	  tested yet.
+	  tested yet, might need some changes.
 - VK_KHR_timeline_semaphore
 
 missing:
@@ -56,10 +56,10 @@ Implemented:
 - VK_KHR_copy_commands2
 - VK_EXT_extended_dynamic_state
 - VK_EXT_extended_dynamic_state2 (with extension-exclusive additions as well)
-- VK_KHR_dynamic_rendering (gui/hook support incomplete, WIP)
+- VK_KHR_dynamic_rendering (including hook/ui support)
+- VK_KHR_synchronization2
 
 Incomplete/missing:
-- VK_KHR_synchronization2
 - VK_KHR_format_feature_flags2 (enum names)
 - VK_EXT_private_data
 - VK_EXT_subgroup_size_control (NOTE: might need changes to the way we
@@ -101,6 +101,8 @@ supported but no/incomplete gui interaction/information:
 - VK_KHR_draw_indirect_count
 - VK_EXT_sample_locations
 - VK_EXT_discard_rectangles
+- VK_EXT_vertex_input_dynamic_state
+- VK_EXT_color_write_enable
 
 There is basic support for ray tracing but no full UI support for TraceRays
 commands yet:

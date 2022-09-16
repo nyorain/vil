@@ -118,8 +118,21 @@ inline void storeDeviceByLoader(VkDevice vkDev, Device* dev) {
 inline void eraseDeviceFromLoaderMap(VkDevice vkDev) {
 	void* table;
 	std::memcpy(&table, reinterpret_cast<void*>(vkDev), sizeof(table));
+	std::lock_guard lock(dataMutex);
 	auto count = devByLoaderTable.erase(table);
 	dlg_assert(count == 1u);
+}
+
+inline void eraseDeviceFromLoaderMap(Device& dev) {
+	std::lock_guard lock(dataMutex);
+	for(auto it = devByLoaderTable.begin(); it != devByLoaderTable.end(); ++it) {
+		if(it->second == &dev) {
+			devByLoaderTable.erase(it);
+			return;
+		}
+	}
+
+	dlg_error("unreachable");
 }
 
 } // namespace vil

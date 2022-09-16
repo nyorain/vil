@@ -166,6 +166,14 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	state->copiedDescriptors.resize(hook.ops_.descriptorCopies.size());
 
 	// Find out if final hooked command is inside render pass
+	const auto careAboutRendering =
+		(hook.ops_.copyVertexBuffers ||
+		 hook.ops_.copyIndexBuffers ||
+		 !hook.ops_.attachmentCopies.empty() ||
+		 !hook.ops_.descriptorCopies.empty() ||
+		 hook.ops_.copyIndirectCmd ||
+		 (hook.ops_.copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
+
 	auto preEnd = hcommand.end() - 1;
 	for(auto it = hcommand.begin(); it != preEnd; ++it) {
 		auto* cmd = *it;
@@ -177,15 +185,21 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		} else if(type == CommandType::renderSection) {
 			dlg_assert(dynamic_cast<const RenderSectionCommand*>(cmd));
 			info.rpi = &static_cast<const RenderSectionCommand*>(cmd)->rpi;
-			dlg_assertm(!dynamic_cast<const SubpassCmd*>(cmd) || info.beginRenderPassCmd,
-				"SubpassCmd without BeginRenderPassCmd?!");
+
+			if(info.beginRenderPassCmd) {
+				dlg_assert(dynamic_cast<const SubpassCmd*>(cmd));
+			} else {
+				dlg_assert(dynamic_cast<const BeginRenderingCmd*>(cmd));
+				info.beginRenderingCmd = static_cast<const BeginRenderingCmd*>(cmd);
+			}
+
 			break;
 		}
 	}
 
 	// some operations (index/vertex/attachment) copies only make sense
 	// inside a render pass.
-	dlg_assert(info.beginRenderPassCmd ||
+	dlg_assert(info.rpi ||
 		(!hook.ops_.copyVertexBuffers &&
 		 !hook.ops_.copyIndexBuffers &&
 		 hook.ops_.attachmentCopies.empty()));
@@ -193,54 +207,45 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	// when the hooked command is inside a render pass and we need to perform
 	// operations (e.g. copies) not possible while inside a render pass,
 	// we have to split the render pass around the selected command.
-	info.splitRenderPass = info.beginRenderPassCmd &&
-		(hook.ops_.copyVertexBuffers ||
-		 hook.ops_.copyIndexBuffers ||
-		 !hook.ops_.attachmentCopies.empty() ||
-		 !hook.ops_.descriptorCopies.empty() ||
-		 hook.ops_.copyIndirectCmd ||
-		 (hook.ops_.copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
-
-	if(info.splitRenderPass) {
+	if(careAboutRendering && info.beginRenderPassCmd) {
 		auto& rp = *info.beginRenderPassCmd->rp;
 
 		// TODO: we could likely just directly support this (with exception
 		// of transform feedback maybe)
 		if(hasChain(rp.desc, VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO)) {
 			dlg_warn("Splitting multiview renderpass not implemented");
-			info.splitRenderPass = false;
-		}
-	}
-
-	if(info.splitRenderPass) {
-		auto& desc = info.beginRenderPassCmd->rp->desc;
-
-		// TODO PERF: expensive. Iteratives over all commands.
-		info.hookedSubpass = info.beginRenderPassCmd->subpassOfDescendant(*hcommand.back());
-		dlg_assert(info.hookedSubpass != u32(-1));
-		dlg_assert(info.hookedSubpass < desc.subpasses.size());
-
-		// TODO: possible solution for allowing command viewing when
-		// rp is not spittable:
-		// - just split up the subpasses into individual renderpasses,
-		//   recreate affected pipelines inside the layer and use them
-		//   when hooking
-		// super ugly and lots of work to implement, could be really
-		// expensive and just stall for multiple seconds at worst in large
-		// games. Would need extensive testing.
-		// This case should only happen anyways when a resolve attachments
-		// is used later on (in specific ways, i.e. written and then read
-		// or the resolve source written to). Niche feature, am already
-		// looking forward to the reported issue in 5 years.
-		if(!splittable(desc, info.hookedSubpass)) {
-			info.splitRenderPass = false;
-			dlg_warn("Can't split render pass (due to resolve attachments)");
 		} else {
-			auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
-			rp0 = create(dev, rpi0);
-			rp1 = create(dev, rpi1);
-			rp2 = create(dev, rpi2);
+			auto& desc = info.beginRenderPassCmd->rp->desc;
+
+			// TODO PERF: expensive. Iteratives over all commands.
+			info.hookedSubpass = info.beginRenderPassCmd->subpassOfDescendant(*hcommand.back());
+			dlg_assert(info.hookedSubpass != u32(-1));
+			dlg_assert(info.hookedSubpass < desc.subpasses.size());
+
+			// TODO: possible solution for allowing command viewing when
+			// rp is not spittable:
+			// - just split up the subpasses into individual renderpasses,
+			//   recreate affected pipelines inside the layer and use them
+			//   when hooking
+			// super ugly and lots of work to implement, could be really
+			// expensive and just stall for multiple seconds at worst in large
+			// games. Would need extensive testing.
+			// This case should only happen anyways when a resolve attachments
+			// is used later on (in specific ways, i.e. written and then read
+			// or the resolve source written to). Niche feature, am already
+			// looking forward to the reported issue in 5 years.
+			if(!splittable(desc, info.hookedSubpass)) {
+				dlg_warn("Can't split render pass (due to resolve attachments)");
+			} else {
+				info.splitRenderPass = true;
+				auto [rpi0, rpi1, rpi2] = splitInterruptable(desc);
+				rp0 = create(dev, rpi0);
+				rp1 = create(dev, rpi1);
+				rp2 = create(dev, rpi2);
+			}
 		}
+	} else if(careAboutRendering && info.beginRenderingCmd) {
+		info.splitRenderPass = true;
 	}
 }
 
@@ -280,8 +285,8 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, RecordInfo& info) {
 
 	dlg_assert(&dst == hcommand.back());
 
-	if(info.splitRenderPass) {
-		dlg_assert(info.beginRenderPassCmd);
+	if(info.splitRenderPass && info.beginRenderPassCmd) {
+		dlg_assert(info.rpi);
 
 		auto numSubpasses = info.beginRenderPassCmd->rp->desc.subpasses.size();
 		for(auto i = info.hookedSubpass; i + 1 < numSubpasses; ++i) {
@@ -319,8 +324,23 @@ void CommandHookRecord::hookRecordBeforeDst(Command& dst, RecordInfo& info) {
 			// Subpass contents irrelevant here.
 			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 		}
-	} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
+	} else if(info.splitRenderPass && info.beginRenderingCmd) {
+		dlg_assert(info.rpi);
+
+		dev.dispatch.CmdEndRendering(cb);
+
 		beforeDstOutsideRp(dst, info);
+
+		info.beginRenderingCmd->record(dev, cb,
+			VK_ATTACHMENT_LOAD_OP_LOAD,
+			VK_ATTACHMENT_STORE_OP_STORE);
+	} else if(!info.rpi) {
+		dlg_assert(!info.beginRenderPassCmd);
+		dlg_assert(!info.beginRenderingCmd);
+		beforeDstOutsideRp(dst, info);
+	} else {
+		// no-op, we land here when we couldn't split the renderpass :(
+		dlg_assert(!info.splitRenderPass && info.beginRenderPassCmd);
 	}
 }
 
@@ -328,8 +348,8 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, RecordInfo& info) {
 	auto& dev = *record->dev;
 	dlg_assert(&dst == hcommand.back());
 
-	if(info.splitRenderPass) {
-		dlg_assert(info.beginRenderPassCmd);
+	if(info.splitRenderPass && info.beginRenderPassCmd) {
+		dlg_assert(info.rpi);
 
 		// TODO: missing potential forward of pNext chain here
 		auto numSubpasses = info.beginRenderPassCmd->rp->desc.subpasses.size();
@@ -367,8 +387,24 @@ void CommandHookRecord::hookRecordAfterDst(Command& dst, RecordInfo& info) {
 			// TODO: subpass contents relevant?
 			dev.dispatch.CmdNextSubpass(cb, VK_SUBPASS_CONTENTS_INLINE);
 		}
-	} else if(!info.splitRenderPass && !info.beginRenderPassCmd) {
+	} else if(info.splitRenderPass && info.beginRenderingCmd) {
+		dlg_assert(info.rpi);
+
+		dev.dispatch.CmdEndRendering(cb);
+
 		afterDstOutsideRp(dst, info);
+
+		info.beginRenderingCmd->record(dev, cb,
+			VK_ATTACHMENT_LOAD_OP_LOAD,
+			std::nullopt);
+	} else if(!info.rpi) {
+		dlg_assert(!info.splitRenderPass);
+		dlg_assert(!info.beginRenderPassCmd);
+		dlg_assert(!info.beginRenderingCmd);
+		afterDstOutsideRp(dst, info);
+	} else {
+		// no-op, we land here when we couldn't split the renderpass :(
+		dlg_assert(!info.splitRenderPass && info.beginRenderPassCmd);
 	}
 }
 
@@ -500,11 +536,11 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 			auto hookDst = (info.nextHookLevel == hcommand.size() - 1);
 			auto skipRecord = false;
 
-			auto* beginRpCmd = dynamic_cast<BeginRenderPassCmd*>(cmd);
-			if(info.splitRenderPass && beginRpCmd) {
+			// hook BeginRenderPass
+			if(info.beginRenderPassCmd == cmd && info.splitRenderPass) {
 				dlg_assert(rp0);
 				dlg_assert(!hookDst);
-				auto rpBeginInfo = beginRpCmd->info;
+				auto rpBeginInfo = info.beginRenderPassCmd->info;
 				rpBeginInfo.renderPass = rp0;
 
 				// we never actually record CmdExecuteCommands when hook-recording,
@@ -512,7 +548,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 				auto subpassBeginInfo = info.beginRenderPassCmd->subpassBeginInfo;
 				subpassBeginInfo.contents = VK_SUBPASS_CONTENTS_INLINE;
 
-				if(beginRpCmd->subpassBeginInfo.pNext) {
+				if(info.beginRenderPassCmd->subpassBeginInfo.pNext) {
 					auto beginRp2 = dev.dispatch.CmdBeginRenderPass2;
 					dlg_assert(beginRp2);
 					beginRp2(cb, &rpBeginInfo, &subpassBeginInfo);
@@ -520,9 +556,16 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 					dev.dispatch.CmdBeginRenderPass(cb, &rpBeginInfo, subpassBeginInfo.contents);
 				}
 
-				// dlg_assert(!nextInfo.beginRenderPassCmd);
-				// nextInfo.beginRenderPassCmd = beginRpCmd;
-				dlg_assert(info.beginRenderPassCmd == beginRpCmd);
+				skipRecord = true;
+			}
+
+			// hook BeginRendering
+			if(info.beginRenderingCmd == cmd && info.splitRenderPass) {
+				dlg_assert(!hookDst);
+
+				info.beginRenderingCmd->record(dev, cb,
+					std::nullopt, VK_ATTACHMENT_STORE_OP_STORE);
+
 				skipRecord = true;
 			}
 
@@ -631,8 +674,8 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 				// in general layout (via our render pass splitting),
 				// not in the layout of the ds.
 				auto layout = elem.layout;
-				if(info.splitRenderPass) {
-					dlg_assert(info.beginRenderPassCmd && info.beginRenderPassCmd->fb);
+				if(info.splitRenderPass && info.beginRenderPassCmd) {
+					dlg_assert(info.beginRenderPassCmd->fb);
 					auto& fb = *info.beginRenderPassCmd->fb;
 					for(auto* att : fb.attachments) {
 						dlg_assert(att->img);
@@ -640,6 +683,12 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 							layout = VK_IMAGE_LAYOUT_GENERAL;
 							break;
 						}
+					}
+				} else if(info.splitRenderPass && info.beginRenderingCmd) {
+					// TODO: handle resolveImageLayout
+					auto* att = info.beginRenderingCmd->findAttachment(*imgView->img);
+					if(att) {
+						layout = att->imageLayout;
 					}
 				}
 
@@ -775,7 +824,25 @@ void CommandHookRecord::copyAttachment(const Command&, const RecordInfo& info,
 	}
 
 	auto& srcImg = *image;
-	auto layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
+	VkImageLayout layout {};
+
+	if(info.beginRenderPassCmd && info.splitRenderPass) {
+		layout = VK_IMAGE_LAYOUT_GENERAL; // layout between rp splits, see rp.cpp
+	} else if(info.beginRenderingCmd && info.splitRenderPass) {
+		switch(type) {
+			case AttachmentType::color:
+				dlg_assert(attID < info.beginRenderingCmd->colorAttachments.size());
+				layout = info.beginRenderingCmd->colorAttachments[attID].imageLayout;
+				break;
+			case AttachmentType::depthStencil:
+				dlg_assert(attID == 0u);
+				layout = info.beginRenderingCmd->depthAttachment.imageLayout;
+				break;
+			case AttachmentType::input:
+				dlg_error("unreachable");
+				return;
+		}
+	}
 
 	// TODO: select exact layer/mip in view range via gui
 	auto& subres = imageView->ci.subresourceRange;

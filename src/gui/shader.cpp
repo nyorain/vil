@@ -1064,6 +1064,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	CommandHookUpdate update;
 	update.invalidate = true;
 	update.newOps = std::move(ops);
+	hook.freeze.store(false);
 	hook.updateHook(std::move(update));
 }
 

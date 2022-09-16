@@ -1349,8 +1349,7 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 
 	displayIOList();
 
-	if (doUpdateHook_)
-	{
+	if(doUpdateHook_) {
 		updateHook();
 		doUpdateHook_ = false;
 	}
@@ -1366,8 +1365,7 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 	ImGui::EndChild();
 	ImGui::EndTable();
 
-	if (doUpdateHook_)
-	{
+	if(doUpdateHook_) {
 		updateHook();
 		doUpdateHook_ = false;
 	}
@@ -1601,9 +1599,9 @@ void CommandViewer::updateHook() {
 			break;
 	}
 
-	hook.freeze.store(false);
-
 	if(setOps) {
+		hook.freeze.store(false);
+
 		CommandHook::Update update;
 		update.invalidate = true;
 		update.newOps = std::move(ops);

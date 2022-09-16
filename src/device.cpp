@@ -154,8 +154,6 @@ Device::~Device() {
 
 	queueFamilies.clear();
 	queues.clear();
-
-	eraseDeviceFromLoaderMap(this->handle);
 }
 
 Gui& Device::getOrCreateGui(VkFormat colorFormat) {
@@ -1046,6 +1044,8 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 		pfnDestroyDev = devd->dispatch.DestroyDevice;
 		devd.reset();
 	}
+
+	eraseDeviceFromLoaderMap(handle);
 
 	dlg_assertm(DebugStats::get().aliveRecords == 0u,
 		"{}", DebugStats::get().aliveRecords);
