@@ -41,6 +41,10 @@ enum class CommandType : u32 {
 	traceRays = (1u << 8u),
 	// BuildAccelerationStructures commands
 	buildAccelStruct = (1u << 9u),
+	// BeginRenderPass
+	beginRenderPass = (1u << 10u),
+	// RenderSectionCommand
+	renderSection = (1u << 11u),
 };
 
 using CommandTypeFlags = nytl::Flags<CommandType>;
@@ -189,6 +193,7 @@ struct SectionCommand : ParentCommand {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	const SectionStats& sectionStats() const override { return stats_; }
 	ParentCommand* firstChildParent() const override { return firstChildParent_; }
+	Type type() const override { return Type::beginRenderPass; }
 };
 
 // Meta-command. Root node of the command hierarchy.
@@ -306,7 +311,6 @@ struct BeginRenderPassCmd final : SectionCommand {
 	Framebuffer* fb {}; // NOTE: might be null for imageless framebuffer ext
 
 	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
-	RenderPassInstanceState rpi;
 
 	// Returns the subpass that contains the given command.
 	// Returns u32(-1) if no subpass is ancestor of the given command.
@@ -320,13 +324,17 @@ struct BeginRenderPassCmd final : SectionCommand {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SubpassCmd : SectionCommand {};
+struct RenderSectionCommand : SectionCommand {
+	RenderPassInstanceState rpi;
+	Type type() const override { return Type::renderSection; }
+};
+
+struct SubpassCmd : RenderSectionCommand {};
 
 struct NextSubpassCmd final : SubpassCmd {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 	VkSubpassBeginInfo beginInfo; // for the new subpass
 	u32 subpassID {};
-	RenderPassInstanceState rpi;
 
 	using SubpassCmd::SubpassCmd;
 
@@ -720,7 +728,6 @@ struct ClearDepthStencilImageCmd final : Command {
 struct ClearAttachmentCmd final : Command {
 	span<VkClearAttachment> attachments;
 	span<VkClearRect> rects;
-	const RenderPassInstanceState* rpi;
 
 	std::string_view nameDesc() const override { return "ClearAttachment"; }
 	void displayInspector(Gui& gui) const override;
@@ -1377,7 +1384,7 @@ struct SetRayTracingPipelineStackSizeCmd final : Command {
 };
 
 // VK_KHR_dynamic_rendering
-struct BeginRenderingCmd final : SectionCommand {
+struct BeginRenderingCmd final : RenderSectionCommand {
 	struct Attachment {
 		ImageView* view {};
 		VkImageLayout imageLayout;
@@ -1397,8 +1404,6 @@ struct BeginRenderingCmd final : SectionCommand {
 	Attachment stencilAttachment; // only valid if view != null
 	VkRect2D renderArea;
 
-	RenderPassInstanceState rpi;
-
 	std::string_view nameDesc() const override { return "BeginRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
@@ -1412,6 +1417,27 @@ struct EndRenderingCmd final : SectionCommand {
 	std::string_view nameDesc() const override { return "EndRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
+// VK_EXT_vertex_input_dynamic_state
+struct SetVertexInputCmd final : Command {
+	span<VkVertexInputBindingDescription2EXT> bindings;
+	span<VkVertexInputAttributeDescription2EXT> attribs;
+
+	std::string_view nameDesc() const override { return "SetVertexInput"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	Type type() const override { return Type::bind; }
+};
+
+// VK_EXT_color_write_enable
+struct SetColorWriteEnableCmd final : Command {
+	span<VkBool32> writeEnables;
+
+	std::string_view nameDesc() const override { return "SetColorWriteEnable"; }
+	void record(const Device&, VkCommandBuffer cb, u32) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	Type type() const override { return Type::bind; }
 };
 
 // Visitor

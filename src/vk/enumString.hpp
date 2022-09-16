@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 #include <string>
 
 // Automatically generated header, don't edit.

@@ -12,6 +12,7 @@
 #include <util/export.hpp>
 #include <util/profiling.hpp>
 #include <util/dlg.hpp>
+#include <vk/enumString.hpp>
 
 #ifdef VIL_WITH_WAYLAND
   #include <wayland.hpp>
@@ -193,38 +194,63 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// See https://github.com/KhronosGroup/Vulkan-Loader/issues/51
 	auto nci = *ci;
 
+	const auto tryBumpVersion = checkEnvBinary("VIL_BUMP_API_VERSION", true);
+	constexpr auto ourApiVersion = VK_API_VERSION_1_2;
+
 	// NOTE: we can't call vkEnumerateInstanceVersion ourselves.
 	// So we just trial-and-error to possibly bump up the version.
 	// When instance creation fails just turn it down to original again.
 	auto originalApiVersion = VK_API_VERSION_1_0;
-	auto ourApiVersion = VK_API_VERSION_1_2;
+	auto finalApiVersion = originalApiVersion;
+
+	auto formatVersion = [](auto version) {
+		return dlg::format("{}.{}", VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version));
+	};
 
 	VkApplicationInfo ourAppInfo {};
-	if(!nci.pApplicationInfo) {
-		dlg_debug("Trying to manually increase instance apiVersion");
-		ourAppInfo.apiVersion = ourApiVersion;
-		nci.pApplicationInfo = &ourAppInfo;
-	} else {
+	if(nci.pApplicationInfo) {
 		originalApiVersion = nci.pApplicationInfo->apiVersion;
-		if(nci.pApplicationInfo->apiVersion < ourApiVersion) {
-			dlg_debug("Trying to manually increase instance apiVersion");
+		if(nci.pApplicationInfo->apiVersion < ourApiVersion && tryBumpVersion) {
+			dlg_debug("Trying to manually bump instance apiVersion to 1.2 "
+				"instead of {} provided by application",
+				formatVersion(nci.pApplicationInfo->apiVersion));
 			ourAppInfo = *nci.pApplicationInfo;
 			ourAppInfo.apiVersion = ourApiVersion;
 			nci.pApplicationInfo = &ourAppInfo;
+			finalApiVersion = ourApiVersion;
 		}
+	} else if(tryBumpVersion) {
+		dlg_debug("Trying to manually bump instance apiVersion to 1.2 (instead of default 1.0)");
+		ourAppInfo.apiVersion = ourApiVersion;
+		nci.pApplicationInfo = &ourAppInfo;
+		finalApiVersion = ourApiVersion;
 	}
 
 	// == Create instance ==
+	auto linkInfoCopy = *mutLinkInfo;
 	VkResult result = fpCreateInstance(&nci, alloc, pInstance);
 	if(result != VK_SUCCESS) {
+		dlg_debug("vkCreateInstance failed: {}", vk::name(result));
+
+		// in this case we didn't change it.
 		if(ourApiVersion <= originalApiVersion) {
 			return result;
 		}
 
-		dlg_debug("Bumping up instance API version failed, trying without");
+		// important mainly for vulkan validation layer tests
+		if(result == VK_ERROR_VALIDATION_FAILED_EXT) {
+			return result;
+		}
+
+		dlg_debug("Trying again with original api version");
 		dlg_assert(nci.pApplicationInfo == &ourAppInfo);
-		ourApiVersion = originalApiVersion;
+		finalApiVersion = originalApiVersion;
 		ourAppInfo.apiVersion = originalApiVersion;
+
+		// NOTE: make sure to restore link info, might have been modified
+		// on last tries
+		*mutLinkInfo = linkInfoCopy;
+
 		result = fpCreateInstance(&nci, alloc, pInstance);
 
 		if(result != VK_SUCCESS) {
@@ -261,8 +287,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		ini.app.engineVersion = ci->pApplicationInfo->engineVersion;
 	}
 
-	ini.vulkan11 = (ourApiVersion >= VK_API_VERSION_1_1);
-	ini.vulkan12 = (ourApiVersion >= VK_API_VERSION_1_2);
+	ini.vulkan11 = (finalApiVersion >= VK_API_VERSION_1_1);
+	ini.vulkan12 = (finalApiVersion >= VK_API_VERSION_1_2);
 
 	layer_init_instance_dispatch_table(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
 
@@ -298,11 +324,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	// it in CreateDevice
 	u32 phdevCount = 0;
 	ini.dispatch.EnumeratePhysicalDevices(*pInstance, &phdevCount, nullptr);
-	auto phdevs = std::make_unique<VkPhysicalDevice[]>(phdevCount);
-	ini.dispatch.EnumeratePhysicalDevices(*pInstance, &phdevCount, phdevs.get());
+	ini.phdevs.resize(phdevCount);
+	ini.dispatch.EnumeratePhysicalDevices(*pInstance, &phdevCount, ini.phdevs.data());
 
 	for(auto i = 0u; i < phdevCount; ++i) {
-		insertData(phdevs[i], &ini);
+		insertData(ini.phdevs[i], &ini);
 	}
 
 	return result;
@@ -317,6 +343,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 	{
 		auto inid = moveData<Instance>(ini);
 		dlg_assert(inid);
+
+		// remove physical devices we inserted
+		for(auto& phdev : inid->phdevs) {
+			eraseData(phdev);
+		}
+
 		inid->dispatch.DestroyInstance(ini, alloc);
 	}
 
@@ -326,6 +358,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 struct HookedFunction {
 	PFN_vkVoidFunction func {};
 	bool device {}; // device-level function
+	u32 version {}; // required vulkan version
 	// TODO: we never need both fields i guess, just merge them into 'ext'?
 	std::string_view iniExt {}; // name of extension that has to be enabled
 	std::string_view devExt {}; // name of extension that has to be enabled
@@ -351,33 +384,33 @@ struct HookedFunction {
 	return val; \
 }()
 
-#define VIL_INI_HOOK(fn) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), {}}}
-#define VIL_INI_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), ext}}
+#define VIL_INI_HOOK(fn, ver) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), ver, {}}}
+#define VIL_INI_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, false), VK_VERSION_1_0, ext}}
 
-#define VIL_DEV_HOOK(fn) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), {}, {}}}
-#define VIL_DEV_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), {}, ext}}
-#define VIL_DEV_HOOK_ALIAS(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), {}, ext}}
+#define VIL_DEV_HOOK(fn, ver) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), ver, {}, {}}}
+#define VIL_DEV_HOOK_EXT(fn, ext) {"vk" # fn, {(PFN_vkVoidFunction) fn, FN_TC(fn, true), VK_VERSION_1_0, {}, ext}}
+#define VIL_DEV_HOOK_ALIAS(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), VK_VERSION_1_0, {}, ext}}
 
 // NOTE: not sure about these, it seems applications can use KHR functions without
 // enabling the extension when the function is in core? The vulkan samples do this
 // at least. So we return them as well.
-#define VIL_DEV_HOOK_ALIAS_CORE(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), {}, {}}}
+#define VIL_DEV_HOOK_ALIAS_CORE(alias, fn, ext) {"vk" # alias, {(PFN_vkVoidFunction) fn, FN_TC_ALIAS(alias, fn, true), VK_VERSION_1_0, {}, {}}}
 
 static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
-	VIL_INI_HOOK(GetInstanceProcAddr),
-	VIL_INI_HOOK(CreateInstance),
-	VIL_INI_HOOK(DestroyInstance),
+	VIL_INI_HOOK(GetInstanceProcAddr, VK_API_VERSION_1_0),
+	VIL_INI_HOOK(CreateInstance, VK_API_VERSION_1_0),
+	VIL_INI_HOOK(DestroyInstance, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(GetDeviceProcAddr),
-	VIL_DEV_HOOK(CreateDevice),
-	VIL_DEV_HOOK(DestroyDevice),
-	VIL_DEV_HOOK(DeviceWaitIdle),
+	VIL_DEV_HOOK(GetDeviceProcAddr, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CreateDevice, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyDevice, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DeviceWaitIdle, VK_API_VERSION_1_0),
 
 	// queue.hpp
-	VIL_DEV_HOOK(QueueSubmit),
-	VIL_DEV_HOOK(QueueWaitIdle),
-	VIL_DEV_HOOK(QueueBindSparse),
-	VIL_DEV_HOOK(QueueSubmit2),
+	VIL_DEV_HOOK(QueueSubmit, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(QueueWaitIdle, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(QueueBindSparse, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(QueueSubmit2, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK_ALIAS_CORE(QueueSubmit2KHR, QueueSubmit2,
 		VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
 
@@ -394,7 +427,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(SetDebugUtilsObjectTagEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 
 #ifdef VIL_WITH_WAYLAND
-	VIL_HOOK(CreateWaylandSurfaceKHR),
+	VIL_HOOK_EXT(CreateWaylandSurfaceKHR, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME),
 #endif // VIL_WITH_WAYLAND
 
 #ifdef VIL_WITH_X11
@@ -411,55 +444,55 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_INI_HOOK_EXT(DestroySurfaceKHR, VK_KHR_SURFACE_EXTENSION_NAME),
 
 	// rp.hpp
-	VIL_DEV_HOOK(CreateFramebuffer),
-	VIL_DEV_HOOK(DestroyFramebuffer),
+	VIL_DEV_HOOK(CreateFramebuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyFramebuffer, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(CreateRenderPass),
-	VIL_DEV_HOOK(DestroyRenderPass),
-	VIL_DEV_HOOK(CreateRenderPass2),
+	VIL_DEV_HOOK(CreateRenderPass, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyRenderPass, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CreateRenderPass2, VK_API_VERSION_1_2),
 	VIL_DEV_HOOK_ALIAS_CORE(CreateRenderPass2KHR, CreateRenderPass2,
 		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
 
 	// image.hpp
-	VIL_DEV_HOOK(CreateImage),
-	VIL_DEV_HOOK(DestroyImage),
-	VIL_DEV_HOOK(GetImageMemoryRequirements),
-	VIL_DEV_HOOK(GetImageSparseMemoryRequirements),
-	VIL_DEV_HOOK(GetImageSubresourceLayout),
-	VIL_DEV_HOOK(BindImageMemory),
+	VIL_DEV_HOOK(CreateImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetImageMemoryRequirements, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetImageSparseMemoryRequirements, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetImageSubresourceLayout, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(BindImageMemory, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(BindImageMemory2),
+	VIL_DEV_HOOK(BindImageMemory2, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(BindImageMemory2KHR, BindImageMemory2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(GetImageMemoryRequirements2),
+	VIL_DEV_HOOK(GetImageMemoryRequirements2, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(GetImageMemoryRequirements2KHR, GetImageMemoryRequirements2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
 
 	VIL_DEV_HOOK_EXT(GetImageDrmFormatModifierPropertiesEXT,
 		VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(CreateImageView),
-	VIL_DEV_HOOK(DestroyImageView),
+	VIL_DEV_HOOK(CreateImageView, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyImageView, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(CreateSampler),
-	VIL_DEV_HOOK(DestroySampler),
+	VIL_DEV_HOOK(CreateSampler, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroySampler, VK_API_VERSION_1_0),
 
 	// buffer.hpp
-	VIL_DEV_HOOK(CreateBuffer),
-	VIL_DEV_HOOK(DestroyBuffer),
-	VIL_DEV_HOOK(BindBufferMemory),
-	VIL_DEV_HOOK(GetBufferMemoryRequirements),
-	VIL_DEV_HOOK(GetBufferMemoryRequirements2),
+	VIL_DEV_HOOK(CreateBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(BindBufferMemory, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetBufferMemoryRequirements, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetBufferMemoryRequirements2, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(GetBufferMemoryRequirements2KHR, GetBufferMemoryRequirements2,
 		VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME),
-	VIL_DEV_HOOK(BindBufferMemory2),
+	VIL_DEV_HOOK(BindBufferMemory2, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(BindBufferMemory2KHR, BindBufferMemory2,
 		VK_KHR_BIND_MEMORY_2_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(GetBufferDeviceAddress),
-	VIL_DEV_HOOK(GetBufferOpaqueCaptureAddress),
-	VIL_DEV_HOOK(GetDeviceMemoryOpaqueCaptureAddress),
+	VIL_DEV_HOOK(GetBufferDeviceAddress, VK_API_VERSION_1_2),
+	VIL_DEV_HOOK(GetBufferOpaqueCaptureAddress, VK_API_VERSION_1_2),
+	VIL_DEV_HOOK(GetDeviceMemoryOpaqueCaptureAddress, VK_API_VERSION_1_2),
 	VIL_DEV_HOOK_ALIAS_CORE(GetBufferDeviceAddressKHR, GetBufferDeviceAddress,
 		VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(GetBufferOpaqueCaptureAddressKHR, GetBufferOpaqueCaptureAddress,
@@ -469,57 +502,57 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_ALIAS_CORE(GetBufferDeviceAddressEXT, GetBufferDeviceAddress,
 		VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(CreateBufferView),
-	VIL_DEV_HOOK(DestroyBufferView),
+	VIL_DEV_HOOK(CreateBufferView, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyBufferView, VK_API_VERSION_1_0),
 
 	// memory.hpp
-	VIL_DEV_HOOK(AllocateMemory),
-	VIL_DEV_HOOK(FreeMemory),
-	VIL_DEV_HOOK(MapMemory),
-	VIL_DEV_HOOK(UnmapMemory),
-	VIL_DEV_HOOK(FlushMappedMemoryRanges),
-	VIL_DEV_HOOK(InvalidateMappedMemoryRanges),
-	VIL_DEV_HOOK(GetDeviceMemoryCommitment),
+	VIL_DEV_HOOK(AllocateMemory, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(FreeMemory, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(MapMemory, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(UnmapMemory, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(FlushMappedMemoryRanges, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(InvalidateMappedMemoryRanges, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetDeviceMemoryCommitment, VK_API_VERSION_1_0),
 
 	// shader.hpp
-	VIL_DEV_HOOK(CreateShaderModule),
-	VIL_DEV_HOOK(DestroyShaderModule),
+	VIL_DEV_HOOK(CreateShaderModule, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyShaderModule, VK_API_VERSION_1_0),
 
 	// sync.hpp
-	VIL_DEV_HOOK(CreateFence),
-	VIL_DEV_HOOK(DestroyFence),
-	VIL_DEV_HOOK(ResetFences),
-	VIL_DEV_HOOK(GetFenceStatus),
-	VIL_DEV_HOOK(WaitForFences),
+	VIL_DEV_HOOK(CreateFence, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyFence, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(ResetFences, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetFenceStatus, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(WaitForFences, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(CreateSemaphore),
-	VIL_DEV_HOOK(DestroySemaphore),
-	VIL_DEV_HOOK(SignalSemaphore),
-	VIL_DEV_HOOK(WaitSemaphores),
+	VIL_DEV_HOOK(CreateSemaphore, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroySemaphore, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(SignalSemaphore, VK_API_VERSION_1_2),
+	VIL_DEV_HOOK(WaitSemaphores, VK_API_VERSION_1_2),
 	VIL_DEV_HOOK_ALIAS_CORE(SignalSemaphoreKHR, SignalSemaphore,
 		VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(WaitSemaphoresKHR, WaitSemaphores,
 		VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(CreateEvent),
-	VIL_DEV_HOOK(DestroyEvent),
-	VIL_DEV_HOOK(SetEvent),
-	VIL_DEV_HOOK(ResetEvent),
-	VIL_DEV_HOOK(GetEventStatus),
+	VIL_DEV_HOOK(CreateEvent, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyEvent, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(SetEvent, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(ResetEvent, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(GetEventStatus, VK_API_VERSION_1_0),
 
 	// ds.hpp
-	VIL_DEV_HOOK(CreateDescriptorSetLayout),
-	VIL_DEV_HOOK(DestroyDescriptorSetLayout),
-	VIL_DEV_HOOK(CreateDescriptorPool),
-	VIL_DEV_HOOK(DestroyDescriptorPool),
-	VIL_DEV_HOOK(ResetDescriptorPool),
-	VIL_DEV_HOOK(AllocateDescriptorSets),
-	VIL_DEV_HOOK(FreeDescriptorSets),
-	VIL_DEV_HOOK(UpdateDescriptorSets),
+	VIL_DEV_HOOK(CreateDescriptorSetLayout, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyDescriptorSetLayout, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CreateDescriptorPool, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyDescriptorPool, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(ResetDescriptorPool, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(AllocateDescriptorSets, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(FreeDescriptorSets, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(UpdateDescriptorSets, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(CreateDescriptorUpdateTemplate),
-	VIL_DEV_HOOK(DestroyDescriptorUpdateTemplate),
-	VIL_DEV_HOOK(UpdateDescriptorSetWithTemplate),
+	VIL_DEV_HOOK(CreateDescriptorUpdateTemplate, VK_API_VERSION_1_1),
+	VIL_DEV_HOOK(DestroyDescriptorUpdateTemplate, VK_API_VERSION_1_1),
+	VIL_DEV_HOOK(UpdateDescriptorSetWithTemplate, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(CreateDescriptorUpdateTemplateKHR,
 		CreateDescriptorUpdateTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(DestroyDescriptorUpdateTemplateKHR,
@@ -528,15 +561,15 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 		UpdateDescriptorSetWithTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
 
 	// pipe.hpp
-	VIL_DEV_HOOK(CreateGraphicsPipelines),
-	VIL_DEV_HOOK(CreateComputePipelines),
-	VIL_DEV_HOOK(DestroyPipeline),
-	VIL_DEV_HOOK(CreatePipelineLayout),
-	VIL_DEV_HOOK(DestroyPipelineLayout),
+	VIL_DEV_HOOK(CreateGraphicsPipelines, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CreateComputePipelines, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyPipeline, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CreatePipelineLayout, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyPipelineLayout, VK_API_VERSION_1_0),
 
 	// queryPool.hpp
-	VIL_DEV_HOOK(CreateQueryPool),
-	VIL_DEV_HOOK(DestroyQueryPool),
+	VIL_DEV_HOOK(CreateQueryPool, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyQueryPool, VK_API_VERSION_1_0),
 
 	// accelStruct.hpp
 	VIL_DEV_HOOK_EXT(CreateAccelerationStructureKHR, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME),
@@ -556,84 +589,84 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(GetRayTracingShaderGroupHandlesKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 
 	// cb.hpp
-	VIL_DEV_HOOK(CreateCommandPool),
-	VIL_DEV_HOOK(DestroyCommandPool),
-	VIL_DEV_HOOK(ResetCommandPool),
+	VIL_DEV_HOOK(CreateCommandPool, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(DestroyCommandPool, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(ResetCommandPool, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(TrimCommandPool),
+	VIL_DEV_HOOK(TrimCommandPool, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS(TrimCommandPoolKHR, TrimCommandPool,
 		VK_KHR_MAINTENANCE1_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(AllocateCommandBuffers),
-	VIL_DEV_HOOK(FreeCommandBuffers),
-	VIL_DEV_HOOK(BeginCommandBuffer),
-	VIL_DEV_HOOK(EndCommandBuffer),
-	VIL_DEV_HOOK(ResetCommandBuffer),
+	VIL_DEV_HOOK(AllocateCommandBuffers, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(FreeCommandBuffers, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(BeginCommandBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(EndCommandBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(ResetCommandBuffer, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(CmdBeginRenderPass),
-	VIL_DEV_HOOK(CmdEndRenderPass),
-	VIL_DEV_HOOK(CmdNextSubpass),
-	VIL_DEV_HOOK(CmdWaitEvents),
-	VIL_DEV_HOOK(CmdPipelineBarrier),
-	VIL_DEV_HOOK(CmdBeginQuery),
-	VIL_DEV_HOOK(CmdEndQuery),
-	VIL_DEV_HOOK(CmdResetQueryPool),
-	VIL_DEV_HOOK(CmdWriteTimestamp),
-	VIL_DEV_HOOK(CmdCopyQueryPoolResults),
-	VIL_DEV_HOOK(CmdDraw),
-	VIL_DEV_HOOK(CmdDrawIndexed),
-	VIL_DEV_HOOK(CmdDrawIndirect),
-	VIL_DEV_HOOK(CmdDrawIndexedIndirect),
-	VIL_DEV_HOOK(CmdDispatch),
-	VIL_DEV_HOOK(CmdDispatchIndirect),
-	VIL_DEV_HOOK(CmdBindVertexBuffers),
-	VIL_DEV_HOOK(CmdBindIndexBuffer),
-	VIL_DEV_HOOK(CmdBindDescriptorSets),
-	VIL_DEV_HOOK(CmdClearColorImage),
-	VIL_DEV_HOOK(CmdClearDepthStencilImage),
-	VIL_DEV_HOOK(CmdClearAttachments),
-	VIL_DEV_HOOK(CmdResolveImage),
-	VIL_DEV_HOOK(CmdSetEvent),
-	VIL_DEV_HOOK(CmdResetEvent),
-	VIL_DEV_HOOK(CmdCopyBufferToImage),
-	VIL_DEV_HOOK(CmdCopyImageToBuffer),
-	VIL_DEV_HOOK(CmdBlitImage),
-	VIL_DEV_HOOK(CmdCopyImage),
-	VIL_DEV_HOOK(CmdExecuteCommands),
-	VIL_DEV_HOOK(CmdCopyBuffer),
-	VIL_DEV_HOOK(CmdFillBuffer),
-	VIL_DEV_HOOK(CmdUpdateBuffer),
-	VIL_DEV_HOOK(CmdBindPipeline),
-	VIL_DEV_HOOK(CmdPushConstants),
-	VIL_DEV_HOOK(CmdSetViewport),
-	VIL_DEV_HOOK(CmdSetScissor),
-	VIL_DEV_HOOK(CmdSetLineWidth),
-	VIL_DEV_HOOK(CmdSetDepthBias),
-	VIL_DEV_HOOK(CmdSetBlendConstants),
-	VIL_DEV_HOOK(CmdSetDepthBounds),
-	VIL_DEV_HOOK(CmdSetStencilCompareMask),
-	VIL_DEV_HOOK(CmdSetStencilWriteMask),
-	VIL_DEV_HOOK(CmdSetStencilReference),
+	VIL_DEV_HOOK(CmdBeginRenderPass, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdEndRenderPass, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdNextSubpass, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdWaitEvents, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdPipelineBarrier, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdBeginQuery, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdEndQuery, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdResetQueryPool, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdWriteTimestamp, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdCopyQueryPoolResults, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdDraw, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdDrawIndexed, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdDrawIndirect, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdDrawIndexedIndirect, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdDispatch, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdDispatchIndirect, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdBindVertexBuffers, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdBindIndexBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdBindDescriptorSets, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdClearColorImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdClearDepthStencilImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdClearAttachments, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdResolveImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetEvent, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdResetEvent, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdCopyBufferToImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdCopyImageToBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdBlitImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdCopyImage, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdExecuteCommands, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdCopyBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdFillBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdUpdateBuffer, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdBindPipeline, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdPushConstants, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetViewport, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetScissor, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetLineWidth, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetDepthBias, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetBlendConstants, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetDepthBounds, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetStencilCompareMask, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetStencilWriteMask, VK_API_VERSION_1_0),
+	VIL_DEV_HOOK(CmdSetStencilReference, VK_API_VERSION_1_0),
 
-	VIL_DEV_HOOK(CmdDispatchBase),
+	VIL_DEV_HOOK(CmdDispatchBase, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS(CmdDispatchBaseKHR, CmdDispatchBase,
 		VK_KHR_DEVICE_GROUP_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(CmdDrawIndirectCount),
+	VIL_DEV_HOOK(CmdDrawIndirectCount, VK_API_VERSION_1_2),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndirectCountKHR, CmdDrawIndirectCount,
 		VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndirectCountAMD, CmdDrawIndirectCount,
 		VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(CmdDrawIndexedIndirectCount),
+	VIL_DEV_HOOK(CmdDrawIndexedIndirectCount, VK_API_VERSION_1_2),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndexedIndirectCountKHR, CmdDrawIndexedIndirectCount,
 		VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdDrawIndexedIndirectCountAMD, CmdDrawIndexedIndirectCount,
 		VK_AMD_DRAW_INDIRECT_COUNT_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(CmdBeginRenderPass2),
-	VIL_DEV_HOOK(CmdNextSubpass2),
-	VIL_DEV_HOOK(CmdEndRenderPass2),
+	VIL_DEV_HOOK(CmdBeginRenderPass2, VK_API_VERSION_1_2),
+	VIL_DEV_HOOK(CmdNextSubpass2, VK_API_VERSION_1_2),
+	VIL_DEV_HOOK(CmdEndRenderPass2, VK_API_VERSION_1_2),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdBeginRenderPass2KHR, CmdBeginRenderPass2,
 		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdNextSubpass2KHR, CmdNextSubpass2,
@@ -645,12 +678,12 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdEndDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 
 	// copy_commands2
-	VIL_DEV_HOOK(CmdCopyBuffer2),
-	VIL_DEV_HOOK(CmdCopyImage2),
-	VIL_DEV_HOOK(CmdCopyBufferToImage2),
-	VIL_DEV_HOOK(CmdCopyImageToBuffer2),
-	VIL_DEV_HOOK(CmdBlitImage2),
-	VIL_DEV_HOOK(CmdResolveImage2),
+	VIL_DEV_HOOK(CmdCopyBuffer2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdCopyImage2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdCopyBufferToImage2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdCopyImageToBuffer2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdBlitImage2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdResolveImage2, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdCopyBuffer2KHR, CmdCopyBuffer2,
 		VK_KHR_COPY_COMMANDS_2_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdCopyImage2KHR, CmdCopyImage2,
@@ -675,18 +708,18 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdSetLineStippleEXT, VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME),
 
 	// extended dynamic state
-	VIL_DEV_HOOK(CmdSetCullMode),
-	VIL_DEV_HOOK(CmdSetFrontFace),
-	VIL_DEV_HOOK(CmdSetPrimitiveTopology),
-	VIL_DEV_HOOK(CmdSetViewportWithCount),
-	VIL_DEV_HOOK(CmdSetScissorWithCount),
-	VIL_DEV_HOOK(CmdBindVertexBuffers2),
-	VIL_DEV_HOOK(CmdSetDepthTestEnable),
-	VIL_DEV_HOOK(CmdSetDepthWriteEnable),
-	VIL_DEV_HOOK(CmdSetDepthCompareOp),
-	VIL_DEV_HOOK(CmdSetDepthBoundsTestEnable),
-	VIL_DEV_HOOK(CmdSetStencilTestEnable),
-	VIL_DEV_HOOK(CmdSetStencilOp),
+	VIL_DEV_HOOK(CmdSetCullMode, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetFrontFace, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetPrimitiveTopology, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetViewportWithCount, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetScissorWithCount, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdBindVertexBuffers2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetDepthTestEnable, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetDepthWriteEnable, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetDepthCompareOp, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetDepthBoundsTestEnable, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetStencilTestEnable, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdSetStencilOp, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdSetCullModeEXT, CmdSetCullMode,
 		VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdSetFrontFaceEXT, CmdSetFrontFace,
@@ -718,8 +751,8 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdSetLogicOpEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdSetPrimitiveRestartEnableEXT, VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME),
 
-	VIL_DEV_HOOK(CmdBeginRendering),
-	VIL_DEV_HOOK(CmdEndRendering),
+	VIL_DEV_HOOK(CmdBeginRendering, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdEndRendering, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdBeginRenderingKHR, CmdBeginRendering,
 		VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdEndRenderingKHR, CmdEndRendering,
@@ -741,11 +774,11 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdSetRayTracingPipelineStackSizeKHR, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME),
 
 	// sync2
-	VIL_DEV_HOOK(CmdSetEvent2),
-	VIL_DEV_HOOK(CmdResetEvent2),
-	VIL_DEV_HOOK(CmdWaitEvents2),
-	VIL_DEV_HOOK(CmdPipelineBarrier2),
-	VIL_DEV_HOOK(CmdWriteTimestamp2),
+	VIL_DEV_HOOK(CmdSetEvent2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdResetEvent2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdWaitEvents2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdPipelineBarrier2, VK_API_VERSION_1_3),
+	VIL_DEV_HOOK(CmdWriteTimestamp2, VK_API_VERSION_1_3),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdSetEvent2KHR, CmdSetEvent2,
 		VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdResetEvent2KHR, CmdResetEvent2,
@@ -756,6 +789,10 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 		VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(CmdWriteTimestamp2KHR, CmdWriteTimestamp2,
 		VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdSetVertexInputEXT, VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdSetColorWriteEnableEXT, VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME),
 };
 
 #undef VIL_INI_HOOK
@@ -784,13 +821,13 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	}
 
 	// special case: functions that don't need instance.
-	auto& hooked = it->second;
+	auto& hook = it->second;
 	if(std::strcmp(funcName, "vkGetInstanceProcAddr") == 0 ||
 			// NOTE: seems that some applications need this even though
 			// it shouldn't be valid use per spec
 			std::strcmp(funcName, "vkCreateDevice") == 0 ||
 			std::strcmp(funcName, "vkCreateInstance") == 0) {
-		return hooked.func;
+		return hook.func;
 	}
 
 	if(!ini) {
@@ -804,20 +841,22 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 		return nullptr;
 	}
 
-	if(!hooked.device && !hooked.iniExt.empty()) {
-		auto it = find(inid->extensions, hooked.iniExt);
+	if(!hook.device && !hook.iniExt.empty()) {
+		auto it = find(inid->extensions, hook.iniExt);
 		if(it == inid->extensions.end()) {
 			return inid->dispatch.GetInstanceProcAddr(ini, funcName);
 			// return nullptr;
 		}
 	}
 
+	// TODO: consider instance version
+
 	// TODO: when the queried function is a device function we technically
 	// should only return it when there is a physical device supporting
 	// the function (we could store a list of those in the instance data).
 	// See documentation for vkGetInstanceProcAddr.
 
-	return hooked.func;
+	return hook.func;
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const char* funcName) {
@@ -833,8 +872,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
   		return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
 	}
 
-	auto& hooked = it->second;
-	if(!vkDev || !hooked.device) {
+	auto& hook = it->second;
+	if(!vkDev || !hook.device) {
 		dlg_trace("GetDeviceProcAddr with no devcice/non-device function: {}", funcName);
 		return nullptr;
 	}
@@ -845,14 +884,20 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 		return nullptr;
 	}
 
-	if(!hooked.devExt.empty()) {
-		auto it = find(dev->appExts, hooked.devExt);
+	if(!hook.devExt.empty()) {
+		auto it = find(dev->appExts, hook.devExt);
 		if(it == dev->appExts.end()) {
-			return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
+			return nullptr;
+			// return dev->dispatch.GetDeviceProcAddr(vkDev, funcName);
 		}
 	}
 
-	return hooked.func;
+	// TODO: consider device version?
+	if(dev->ini->app.apiVersion < hook.version) {
+		return nullptr;
+	}
+
+	return hook.func;
 }
 
 } // namespace vil

@@ -239,13 +239,21 @@ VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory2(
 	auto fwd = memScope.alloc<VkBindBufferMemoryInfo>(bindInfoCount);
 	for(auto i = 0u; i < bindInfoCount; ++i) {
 		auto& bind = pBindInfos[i];
+		dlg_assert(bind.buffer);
+
 		auto& buf = get(dev, bind.buffer);
-		auto& mem = get(dev, bind.memory);
-		bindBufferMemory(buf, mem, bind.memoryOffset);
 
 		fwd[i] = bind;
 		fwd[i].buffer = buf.handle;
-		fwd[i].memory = mem.handle;
+
+		// could be VK_NULL_HANDLE for extensions
+		// e.g. the case for BindImageMemory2, we add this branch
+		// here defensively
+		if(bind.memory) {
+			auto& mem = get(dev, bind.memory);
+			bindBufferMemory(buf, mem, bind.memoryOffset);
+			fwd[i].memory = mem.handle;
+		}
 	}
 
 	auto res = dev.dispatch.BindBufferMemory2(dev.handle, u32(fwd.size()), fwd.data());

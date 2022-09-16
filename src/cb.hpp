@@ -783,4 +783,19 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp2(
     VkQueryPool                                 queryPool,
     uint32_t                                    query);
 
+// VK_EXT_vertex_input_dynamic_state
+VKAPI_ATTR void VKAPI_CALL CmdSetVertexInputEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    vertexBindingDescriptionCount,
+    const VkVertexInputBindingDescription2EXT*  pVertexBindingDescriptions,
+    uint32_t                                    vertexAttributeDescriptionCount,
+    const VkVertexInputAttributeDescription2EXT* pVertexAttributeDescriptions);
+
+// VK_EXT_color_write_enable
+VKAPI_ATTR void VKAPI_CALL CmdSetColorWriteEnableEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    attachmentCount,
+    const VkBool32*                             pColorWriteEnables);
+
+
 } // namespace vil

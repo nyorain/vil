@@ -115,4 +115,11 @@ inline void storeDeviceByLoader(VkDevice vkDev, Device* dev) {
 	dlg_assert(success);
 }
 
+inline void eraseDeviceFromLoaderMap(VkDevice vkDev) {
+	void* table;
+	std::memcpy(&table, reinterpret_cast<void*>(vkDev), sizeof(table));
+	auto count = devByLoaderTable.erase(table);
+	dlg_assert(count == 1u);
+}
+
 } // namespace vil

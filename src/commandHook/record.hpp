@@ -104,6 +104,7 @@ private:
 		bool splitRenderPass {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
 		const BeginRenderPassCmd* beginRenderPassCmd {};
+		const RenderPassInstanceState* rpi {};
 		const CommandDescriptorSnapshot* descriptors {};
 
 		unsigned nextHookLevel {}; // on hcommand, hook hierarchy
@@ -141,7 +142,7 @@ private:
 		const DescriptorCopyOp&,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow);
-	void copyAttachment(const Command& bcmd,
+	void copyAttachment(const Command& bcmd, const RecordInfo&,
 		AttachmentType type, unsigned id,
 		CommandHookState::CopiedAttachment& dst);
 	void beforeDstOutsideRp(Command&, RecordInfo&);

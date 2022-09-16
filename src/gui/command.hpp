@@ -71,13 +71,13 @@ public:
 	void unselect();
 
 	// When newState is nullptr, the old one should not be overwritten.
-	void select(IntrusivePtr<CommandRecord>, const Command&,
+	void select(IntrusivePtr<CommandRecord>, std::vector<const Command*>,
 		CommandDescriptorSnapshot, bool resetState,
 		IntrusivePtr<CommandHookState> newState);
 
 	CommandHookState* state() const { return state_.get(); }
 	CommandRecord* record() const { return record_.get(); }
-	const Command* command() const { return command_; }
+	const auto& command() const { return command_; }
 	const CommandDescriptorSnapshot& dsState() const { return dsState_; }
 
 	auto& vertexViewer() { return vertexViewer_; }
@@ -119,7 +119,7 @@ private:
 	Gui* gui_ {};
 
 	IntrusivePtr<CommandRecord> record_ {}; // the selected record
-	const Command* command_ {}; // the selected command
+	std::vector<const Command*> command_ {}; // the selected command
 	CommandDescriptorSnapshot dsState_ {};
 	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
 

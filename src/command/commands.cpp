@@ -2930,19 +2930,19 @@ void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const
 	ThreadMemScope ms;
 
 	auto convert = [&](const Attachment& src, VkRenderingAttachmentInfo& dst) {
-		if(!src.view) {
-			dst = {};
-			return;
-		}
+		dst = {};
 
 		dst.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-		dst.imageView = src.view->handle;
 		dst.imageLayout = src.imageLayout;
 		dst.resolveImageLayout = src.resolveImageLayout;
 		dst.resolveMode = src.resolveMode;
 		dst.clearValue = src.clearValue;
 		dst.loadOp = src.loadOp;
 		dst.storeOp = src.storeOp;
+
+		if(src.view) {
+			dst.imageView = src.view->handle;
+		}
 
 		if(src.resolveView) {
 			dst.resolveImageView = src.resolveView->handle;
@@ -2954,24 +2954,30 @@ void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const
 		convert(att, colorAtts[i]);
 	}
 
-	VkRenderingAttachmentInfo dstDepth;
-	VkRenderingAttachmentInfo dstStencil;
-	convert(depthAttachment, dstDepth);
-	convert(stencilAttachment, dstStencil);
-
 	VkRenderingInfo info {};
 	info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
 	info.colorAttachmentCount = u32(colorAtts.size());
 	info.pColorAttachments = colorAtts.data();
-	info.pDepthAttachment = &dstDepth;
-	info.pStencilAttachment = &dstStencil;
+
+	VkRenderingAttachmentInfo dstDepth;
+	if(depthAttachment.view) {
+		convert(depthAttachment, dstDepth);
+		info.pDepthAttachment = &dstDepth;
+	}
+
+	VkRenderingAttachmentInfo dstStencil;
+	if(stencilAttachment.view) {
+		convert(stencilAttachment, dstStencil);
+		info.pStencilAttachment = &dstStencil;
+	}
+
 	info.layerCount = this->layerCount;
 	info.renderArea = this->renderArea;
 	info.viewMask = this->viewMask;
 	info.flags = this->flags;
 
-	dlg_assert(dev.dispatch.CmdBeginRenderingKHR);
-	dev.dispatch.CmdBeginRenderingKHR(cb, &info);
+	dlg_assert(dev.dispatch.CmdBeginRendering);
+	dev.dispatch.CmdBeginRendering(cb, &info);
 }
 
 Matcher BeginRenderingCmd::match(const Command& base) const {
@@ -3030,8 +3036,21 @@ Matcher BeginRenderingCmd::match(const Command& base) const {
 }
 
 void EndRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dlg_assert(dev.dispatch.CmdEndRenderingKHR);
-	dev.dispatch.CmdEndRenderingKHR(cb);
+	dlg_assert(dev.dispatch.CmdEndRendering);
+	dev.dispatch.CmdEndRendering(cb);
+}
+
+void SetVertexInputCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dlg_assert(dev.dispatch.CmdSetVertexInputEXT);
+	dev.dispatch.CmdSetVertexInputEXT(cb,
+		u32(bindings.size()), bindings.data(),
+		u32(attribs.size()), attribs.data());
+}
+
+void SetColorWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	dlg_assert(dev.dispatch.CmdSetColorWriteEnableEXT);
+	dev.dispatch.CmdSetColorWriteEnableEXT(cb,
+		u32(writeEnables.size()), writeEnables.data());
 }
 
 } // namespace vil

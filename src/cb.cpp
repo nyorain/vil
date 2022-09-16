@@ -488,6 +488,10 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 	auto handles = memScope.alloc<VkCommandBuffer>(commandBufferCount);
 
 	for(auto i = 0u; i < commandBufferCount; ++i) {
+		if(!pCommandBuffers[i]) {
+			continue;
+		}
+
 		auto& cb = *dev.commandBuffers.mustMove(pCommandBuffers[i]);
 		handles[i] = cb.handle();
 		// TODO: unset handle
@@ -546,8 +550,6 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 	VkCommandBufferInheritanceInfo inherit; // local copy, unwrapped
 	auto beginInfo = *pBeginInfo;
 
-	auto& gs = const_cast<GraphicsState&>(cb.graphicsState());
-
 	if(pBeginInfo->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT) {
 		dlg_assert(pBeginInfo->pInheritanceInfo);
 		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
@@ -573,26 +575,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 				inherit.framebuffer = fb.handle;
 			}
 
-			auto& rpi = construct<RenderPassInstanceState>(cb);
-			// TODO: we don't call useHandle on the attachments, should do that
-			setup(cb, rpi, rp.desc, inherit.subpass, attachments);
-			gs.rpi = &rpi;
-
 			// NOTE: no need to set cb.rp_, cb.subpass_, cb.rpAttachments_
 			// here, they are only relevant for NextSubpass logic
-
-			// TODO: use handles here? would have to allow using handles without command
-			// Pretty sure we'd have to do it for correctness.
-			// useHandle(cb, cmd, *cmd.fb);
-			// useHandle(cb, cmd, *cmd.rp);
+			// NOTE: we don't use any attachments/fb/rp handles here as
+			// we don't even explicitly reference them.
 		} else if(dynRender) {
-			// TODO: setup rpi. We can't do this since we don't have
-			// view information here ugh. Should probably rework commands
-			// to not reference rpi at all to support this. And instead
-			// require knowing parent commands.
-			// auto& dynRender = *const_cast<VkCommandBufferInheritanceRenderingInfo*>(
-			// 	LvlFindInChain<VkCommandBufferInheritanceRenderingInfo>(inherit.pNext));
-			// auto& rpi = construct<RenderPassInstanceState>(cb);
+			// nothing really to do.
+			// We don't store the format/attachment count or something anywhere
 		} else {
 			dlg_error("Unsupported VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT usage");
 		}
@@ -972,14 +961,10 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cb.rp_ = cmd.rp;
 	cb.rpAttachments_ = cmd.attachments;
 
-	setup(cb, cmd.rpi, cmd.rp->desc, 0u, cmd.attachments);
-
-	auto& gs = cb.newGraphicsState();
-	dlg_assert(!gs.rpi);
-	gs.rpi = &cmd.rpi;
-
 	auto& subpassCmd = addCmd<FirstSubpassCmd, SectionType::begin>(cb);
 	(void) subpassCmd;
+
+	setup(cb, subpassCmd.rpi, cmd.rp->desc, 0u, cmd.attachments);
 
 	rpBeginInfo.framebuffer = cmd.fb->handle;
 	rpBeginInfo.renderPass = cmd.rp->handle;
@@ -997,10 +982,6 @@ void cmdEndRenderPass(CommandBuffer& cb, const VkSubpassEndInfo& endInfo) {
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = endInfo;
 	copyChainInPlace(cb, cmd.endInfo.pNext);
-
-	auto& gs = cb.newGraphicsState();
-	dlg_assert(gs.rpi);
-	gs.rpi = {};
 
 	cb.subpass_ = u32(-1);
 	cb.rp_ = nullptr;
@@ -1022,10 +1003,6 @@ void cmdNextSubpass(CommandBuffer& cb, const VkSubpassBeginInfo& beginInfo, cons
 	++cb.subpass_;
 	cmd.subpassID = cb.subpass_;
 	setup(cb, cmd.rpi, cb.rp_->desc, cb.subpass_, cb.rpAttachments_);
-
-	auto& gs = cb.newGraphicsState();
-	dlg_assert(gs.rpi);
-	gs.rpi = &cmd.rpi;
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
@@ -1213,15 +1190,21 @@ span<VkBuffer> cmdBindVertexBuffers(CommandBuffer& cb, ThreadMemScope& tms,
 
 	auto bufHandles = tms.alloc<VkBuffer>(bindingCount);
 	for(auto i = 0u; i < bindingCount; ++i) {
-		auto& buf = get(*cb.dev, pBuffers[i]);
-		cmd.buffers[i].buffer = &buf;
-		cmd.buffers[i].offset = pOffsets[i];
-		cmd.buffers[i].size = pSizes ? pSizes[i] : 0u;
-		cmd.buffers[i].stride = pStrides ? pStrides[i] : 0u;
-		useHandle(cb, cmd, buf);
+		if(pBuffers[i]) VIL_LIKELY { // can be null with nullDescriptor feature
+			auto& buf = get(*cb.dev, pBuffers[i]);
+			cmd.buffers[i].buffer = &buf;
+			cmd.buffers[i].offset = pOffsets[i];
+			cmd.buffers[i].size = pSizes ? pSizes[i] : 0u;
+			cmd.buffers[i].stride = pStrides ? pStrides[i] : 0u;
+
+			bufHandles[i] = buf.handle;
+			useHandle(cb, cmd, buf);
+		} else {
+			bufHandles[i] = VK_NULL_HANDLE;
+			cmd.buffers[i] = {};
+		}
 
 		gs.vertices[firstBinding + i] = cmd.buffers[i];
-		bufHandles[i] = buf.handle;
 	}
 
 	return bufHandles;
@@ -1744,11 +1727,8 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	cmd.attachments = copySpan(cb, pAttachments, attachmentCount);
 	cmd.rects = copySpan(cb, pRects, rectCount);
 
-	dlg_assert(cb.graphicsState().rpi);
-	cmd.rpi = cb.graphicsState().rpi;
-
 	// NOTE: We explicitly don't add the cleared attachments to used handles here.
-	// In case of a secondary command buffer with dynamic rendering, we might not even know them.
+	// In case of a secondary command buffer, we might not even know them.
 
 	cb.dev->dispatch.CmdClearAttachments(cb.handle(), attachmentCount,
 		pAttachments, rectCount, pRects);
@@ -3153,19 +3133,18 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
 
 	auto set = [&](const VkRenderingAttachmentInfo& src,
 			BeginRenderingCmd::Attachment& dst) {
-		if(!src.imageView) {
-			return static_cast<ImageView*>(nullptr);
-		}
-
-		dst.view = &unwrap(src.imageView);
-		useHandle(cb, cmd, *dst.view);
-
+		dst = {};
 		dst.imageLayout = src.imageLayout;
 		dst.resolveImageLayout = src.resolveImageLayout;
 		dst.resolveMode = src.resolveMode;
 		dst.clearValue = src.clearValue;
 		dst.loadOp = src.loadOp;
 		dst.storeOp = src.storeOp;
+
+		if(src.imageView) {
+			dst.view = &unwrap(src.imageView);
+			useHandle(cb, cmd, *dst.view);
+		}
 
 		if(src.resolveImageView) {
 			dst.resolveView = &unwrap(src.resolveImageView);
@@ -3190,14 +3169,11 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
 
 	if(info.pStencilAttachment) {
 		auto* view = set(*info.pStencilAttachment, cmd.stencilAttachment);
+		// guaranteed by vulkan spec
 		dlg_assert(!cmd.rpi.depthStencilAttachment ||
 			cmd.rpi.depthStencilAttachment == view);
 		cmd.rpi.depthStencilAttachment = view;
 	}
-
-	auto& gs = cb.newGraphicsState();
-	dlg_assert(!gs.rpi);
-	gs.rpi = &cmd.rpi;
 
 	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
 }
@@ -3208,7 +3184,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
 	auto& cmd = addCmd<EndRenderingCmd, SectionType::end>(cb);
 	(void) cmd;
 
-	cb.dev->dispatch.CmdEndRenderingKHR(cb.handle());
+	cb.dev->dispatch.CmdEndRendering(cb.handle());
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetEvent2(
@@ -3284,6 +3260,38 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp2(
 	useHandle(cb, cmd, *cmd.pool);
 
 	cb.dev->dispatch.CmdWriteTimestamp2(cb.handle(), stage, cmd.pool->handle, query);
+}
+
+// VK_EXT_vertex_input_dynamic_state
+VKAPI_ATTR void VKAPI_CALL CmdSetVertexInputEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    vertexBindingDescriptionCount,
+		const VkVertexInputBindingDescription2EXT*  pVertexBindingDescriptions,
+		uint32_t                                    vertexAttributeDescriptionCount,
+		const VkVertexInputAttributeDescription2EXT* pVertexAttributeDescriptions) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetVertexInputCmd>(cb);
+	cmd.bindings = copySpan(cb, pVertexBindingDescriptions, vertexBindingDescriptionCount);
+	cmd.attribs = copySpan(cb, pVertexAttributeDescriptions, vertexAttributeDescriptionCount);
+
+	// no need to patch
+	cb.dev->dispatch.CmdSetVertexInputEXT(cb.handle(),
+		vertexBindingDescriptionCount, pVertexBindingDescriptions,
+		vertexAttributeDescriptionCount, pVertexAttributeDescriptions);
+}
+
+// VK_EXT_color_write_enable
+VKAPI_ATTR void VKAPI_CALL CmdSetColorWriteEnableEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    attachmentCount,
+		const VkBool32*                             pColorWriteEnables) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<SetColorWriteEnableCmd>(cb);
+	cmd.writeEnables = copySpan(cb, pColorWriteEnables, attachmentCount);
+
+	// no need to patch
+	cb.dev->dispatch.CmdSetColorWriteEnableEXT(cb.handle(),
+		attachmentCount, pColorWriteEnables);
 }
 
 } // namespace vil
