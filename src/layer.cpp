@@ -439,7 +439,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 #ifdef VIL_WITH_WIN32
 	// We do everything to not include the platform-specific header
 	// VIL_INI_HOOK_EXT(CreateWin32SurfaceKHR, VK_KHR_WIN32_SURFACE_EXTENSION_NAME),
-	{"vkCreateWin32SurfaceKHR", HookedFunction{(PFN_vkVoidFunction) CreateWin32SurfaceKHR, false, "VK_KHR_win32_surface"}},
+	{"vkCreateWin32SurfaceKHR", HookedFunction{(PFN_vkVoidFunction) CreateWin32SurfaceKHR, false, VK_VERSION_1_0, "VK_KHR_win32_surface"}},
 #endif // VIL_WITH_WIN32
 
 	VIL_INI_HOOK_EXT(DestroySurfaceKHR, VK_KHR_SURFACE_EXTENSION_NAME),
