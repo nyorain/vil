@@ -1,6 +1,9 @@
 #version 460
 
 #extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+
+layout(constant_id = 0) const bool outputLinear = true;
 
 layout(location = 0) in struct {
     vec4 color;
@@ -51,6 +54,6 @@ void main() {
 		texCol.rgb = vec3(dot(texCol.rgb, 1.f.xxx));
 	}
 
-    fragColor = In.color * texCol;
+    fragColor = toLinearOpt(In.color * texCol, outputLinear);
 }
 

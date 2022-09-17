@@ -26,15 +26,6 @@ urgent, bugs:
 	      or at least only call it on real selection and not on every
 		  state update?
 
-- [ ] fix iro:water xfb output drawing issue.
-      somehow we draw too many vertices?
-
-- [ ] investigate why conditional rendering vulkan sample is so slow when hooked
-      guess: we have *a lot* of sections due to the BeginConditionalRendering
-	  calls (a lot of them). Investigate whether matching is working
-	  as well and fast as desired
-	- check if lower branchTreshold would help
-
 - [ ] with lockfree gui rendering, the overlay input events in api.cpp
       are racy when QueuePresent is called in another thread.
 	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
@@ -59,14 +50,7 @@ urgent, bugs:
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
-- [ ] vertex viewer: show pages
-- [ ] vertex viewer: make rows selectable, show vertex in 3D view
-- [ ] figure out why copying attachments/descriptors shows weird/incorrect 
-      output in the dota intro screen sometimes. Sync problem? Matching problem?
-	  {might be fixed now, with proper splitrp deps}
 - [ ] toupper bug when searching for resource
-- [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
-- [ ] fix vertex viewer input issues (e.g. with a7c)
 - [ ] figure out to handle copyChain in a general way. Sometimes we need
       deep copies, sometimes we need to unwrap additional handles inside
 	  the copy. Both of it is currently not done.
@@ -74,10 +58,6 @@ urgent, bugs:
 	  to support simple extensions out of the box even makes sense.
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
       increasing the minBlockSize. Increased it temporarily but should probably just roll own block sub-allocator
-- [ ] improve gui layout, too much wasted space in buffer viewer rn.
-- [ ] improve gui layout of image viewer (e.g. in command viewer).
-      really annoying rn to always scroll down. 
-	  Maybe use tabs? One for general information, one for the image viewer?
 - [ ] when viewing resources aliasing others in memory in the resource viewer,
       we have to make sure that their content wasn't made undefined.
 	  Vulkan says it's not allowed to use such resources.
@@ -85,6 +65,13 @@ urgent, bugs:
 	  one they were used in.
 
 new, workstack:
+- [ ] improve gui layout, too much wasted space in buffer viewer rn.
+- [ ] improve gui layout of image viewer (e.g. in command viewer).
+      really annoying rn to always scroll down. 
+	  Maybe use tabs? One for general information, one for the image viewer?
+- [ ] we often truncate buffers when copying them in record hook.
+      Should *always* show some note in the UI, might be extremely confusing
+	  otherwise
 - [ ] cleanup: move render buffer code from Window/Overlay to gui.
       code duplication in Window/Overlay and it probably makes more sense
 	  in Gui anyways?!
@@ -126,34 +113,43 @@ new, workstack:
 - [ ] investigate callstack performance for big applications.
       Might be able to improve performance significantly, callstack.hpp
 	  always allocates a vector
+- [ ] blur.comp: correctly blur in linear space, not srgb
+      looks different currently depending on whether swapchain is srgb or not
 - [ ] {later} implement image histograms (probably best like in PIX)
       See minmax.comp and histogram.comp
 - [ ] {later} honor maxTexelBufferElements. Fall back to raw vec4f copy
 	- most impls have valid limits though. Had to fix the mock icd tho :/
 - [ ] {later} implement blit imageToBuffer copy
 
-	  Hard to track though I guess?
+On vertices and where to find them:
+- [ ] fix capturing. Only capture the portions of the buffers that are used.
+	- [ ] fix vertexViewer bug for indexed drawing where we truncate the
+	      captured vertex buffers but can't really know/handle that
+		  while drawing the captured vertices
+	- [ ] show in UI if we truncate anything
+- [ ] vertex viewer: show pages
+- [ ] vertex viewer: make rows selectable, show vertex in 3D view
+- [ ] figure out why copying attachments/descriptors shows weird/incorrect 
+      output in the dota intro screen sometimes. Sync problem? Matching problem?
+	  {might be fixed now, with proper splitrp deps}
+- [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
+- [ ] allow to visualize primitives (connected to vertices)
+- [ ] allow to visualize non-builtin attributes somewhow
+	  maybe also allow to manually pick an attribute to use as position
+	  for the input?
+- [ ] (later) improve camera, probably better to not lock rotation or use arcball controls
+- [ ] (later) figure out when to flip y and when not.
+      {Not as relevant anymore now that we render the frustum. Could still
+	   be useful option. I guesse it's nothing we can just figure out}
+- [ ] (later) better perspective heurstic. Also detect near, far (and use for frustum
+      draw). Don't execute the heurstic every frame, only when something changes?
+	  (Technically, data potentially changes every frame but the assumption
+	  that drawn data doesn't suddenly change projection type seems safe).
+- [ ] (later) really attempt to display non-float formats in 3D vertex viewer?
+- [ ] (low prio) xfb: check whether a used output format is supported as input
+	- [ ] also handle matrices somehow
+- [ ] (later) support showing all draws from a render pass?
 
-match rework 2, electric boogaloo
-- use LCS in hook already.
-  See node 2305 for details.
-  The final find operation could then either be LCS (careful! might have
-  a lot more commands here than sections for 'match') 
-  Or - e.g. inside a render pass without blending - be independent 
-  of the order of draw commands.
-	- for sync/bind commands: find surrounding actions commands - as
-	  outlined multiple times - and find them. Might cross block/record
-	  boundaries tho
-	- for action commands inside small (non-solid-renderpass) blocks: do LCS
-	- for big blocks: do best-match. In this case something like relID is
-	  useful. Maybe build it on-the-fly? should be a lot cheaper, only
-	  needed for very few blocks compared to *everything*
-	- for order-independent (e.g. no blend/additive) renderpasses we probably 
-	  want order-independency anyways, so just local-best-match
--> don't hook every cb with matching command. At least do a rough check
-      on other commands/record structure. Otherwise (e.g. when just selecting
-	  a top-level barrier command) we very quickly might get >10 hooks per
-	  frame.
 
 shader debugger:
 - [x] cleanup/fix freezing as described in node 2235
@@ -431,6 +427,17 @@ matching:
 	- [ ] sync: match previous and next draw/dispatch and try to find
 	      matching sync in between? or something like that
 
+improved matching
+- [ ] (low prio) for sync/bind commands: find surrounding actions commands - as
+      outlined multiple times - and find them. Might cross block/record
+      boundaries tho
+	  {we have something almost as good now by first matching sections and
+	   then only 'find'-ing locally. This approach could still give
+	   some improvements tho}
+- [ ] (low prio) for order-dependent blocks, don't just use 'find' but use local
+      matching instead? could get too expensive tho
+	
+
 descriptor indexing extension:
 - [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 
 	  expect descriptors to be valid. Might also be a problem in CommandHook.
@@ -444,25 +451,6 @@ descriptor indexing extension:
       support for updateUnusedWhilePending.
 - [ ] (for later) investigate whether our current approach really
       scales for descriptor sets with many thousand bindings
-
-vertex viewer/xfb:
-- [ ] allow to select vertices, render them as points in the viewport
-- [ ] allow to visualize primitives (connected to vertices)
-- [ ] allow to visualize non-builtin attributes somewhow
-	  maybe also allow to manually pick an attribute to use as position
-	  for the input?
-- [ ] (later) improve camera, probably better to not lock rotation or use arcball controls
-- [ ] (later) figure out when to flip y and when not.
-      {Not as relevant anymore now that we render the frustum. Could still
-	   be useful option. I guesse it's nothing we can just figure out}
-- [ ] (later) better perspective heurstic. Also detect near, far (and use for frustum
-      draw). Don't execute the heurstic every frame, only when something changes?
-	  (Technically, data potentially changes every frame but the assumption
-	  that drawn data doesn't suddenly change projection type seems safe).
-- [ ] (later) really attempt to display non-float formats in 3D vertex viewer?
-- [ ] (low prio) xfb: check whether a used output format is supported as input
-	- [ ] also handle matrices somehow
-- [ ] (later) support showing all draws from a render pass?
 
 ext support:
 - [ ] VK_KHR_fragment_shading_rate: need to consider the additional attachment,

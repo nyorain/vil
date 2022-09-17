@@ -2675,6 +2675,8 @@ void SetFragmentShadingRateCmd::record(const Device& dev, VkCommandBuffer cb, u3
 }
 
 // Conditional rendering
+// TODO: match for BeginConditionalRenderingCmd!
+
 void BeginConditionalRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dlg_assert(buffer);
 

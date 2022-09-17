@@ -675,6 +675,7 @@ FindResult find(const Command& srcParent, const Command& src,
 #endif // VIL_COMMAND_CALLSTACKS
 
 		std::vector<const Command*> currCmds {it};
+		float childMatch = 1.f;
 
 		if(dst.size() > 1) {
 			dlg_assert(it->children());
@@ -688,7 +689,7 @@ FindResult find(const Command& srcParent, const Command& src,
 
 			auto& rest = restResult.hierarchy;
 			currCmds.insert(currCmds.end(), rest.begin(), rest.end());
-			em *= restResult.match;
+			childMatch = restResult.match;
 		} else if(auto srcCmd = dynamic_cast<const StateCmdBase*>(it); srcCmd) {
 			// match descriptors, if any
 			// TODO: only consider descriptors statically used by pipeline
@@ -743,7 +744,7 @@ FindResult find(const Command& srcParent, const Command& src,
 			}
 		}
 
-		em = eval(m);
+		em = eval(m) * childMatch;
 		if(em == 0.f || em < bestMatch) {
 			continue;
 		} else if(em == bestMatch && !bestCmds.empty()) {
@@ -761,12 +762,16 @@ FindResult find(const Command& srcParent, const Command& src,
 					*srcParent.children(), *bestCmds[0]);
 			}
 
+			// use bestCmds[0]->next instead of srcParent.children() and reuse relIDMap
+			// to not iterate over *all* commands again.
 			auto currRelID = evaluateRelID(relIDMap,
-				*bestCmds[0], *currCmds[0]);
+				*bestCmds[0]->next, *currCmds[0]);
 			if(std::abs(int(currRelID) - int(relIDs->dst)) >=
 					std::abs(int(relIDs->best) - int(relIDs->dst))) {
 				continue;
 			}
+
+			relIDs->best = currRelID;
 		}
 
 		bestCmds.clear();
