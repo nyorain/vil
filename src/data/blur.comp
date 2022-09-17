@@ -19,11 +19,19 @@ void main() {
 	const vec2 x = vec2(1, 0) / texSize;
 	const vec2 y = vec2(0, 1) / texSize;
 
-	vec4 accum = textureLod(inTex, uv, 0.0);
-	accum += textureLod(inTex, uv + scale * x + scale * y, 0);
-	accum += textureLod(inTex, uv - scale * x + scale * y, 0);
-	accum += textureLod(inTex, uv - scale * x - scale * y, 0);
-	accum += textureLod(inTex, uv + scale * x - scale * y, 0);
+	// TODO: manually convert to linear if its not a unorm image
+	// and then back to srgb after blurring.
 
-	imageStore(outTex, ivec2(id), accum / 5);
+	vec4 accum = textureLod(inTex, uv, 0.0);
+	accum.rgb += textureLod(inTex, uv + scale * x + scale * y, 0).rgb;
+	accum.rgb += textureLod(inTex, uv - scale * x + scale * y, 0).rgb;
+	accum.rgb += textureLod(inTex, uv - scale * x - scale * y, 0).rgb;
+	accum.rgb += textureLod(inTex, uv + scale * x - scale * y, 0).rgb;
+	accum.rgb /= 5;
+
+	// TODO: also blur alpha? looked weird for the vulkan samples tho,
+	// they seem to clear to 0 and have a weird swapchain mode or something?
+	accum.a = 1.f;
+
+	imageStore(outTex, ivec2(id), accum);
 }

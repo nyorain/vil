@@ -60,7 +60,7 @@ void initPipes(Device& dev,
 		VkRenderPass rp, VkPipelineLayout renderPipeLayout,
 		VkPipelineLayout compPipeLayout,
 		VkPipelineLayout histogramPipeLayout,
-		Gui::Pipelines& dstPipes) {
+		Gui::Pipelines& dstPipes, bool manualSRGB) {
 	VkShaderModule vertModule;
 	VkShaderModuleCreateInfo vertShaderInfo {};
 	vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -82,6 +82,18 @@ void initPipes(Device& dev,
 		return ret;
 	};
 
+	VkSpecializationMapEntry manualSRGBEntry {};
+	manualSRGBEntry.size = 4u;
+	manualSRGBEntry.offset = 0u;
+	manualSRGBEntry.constantID = 0u;
+
+	u32 uManualSRGB = manualSRGB ? 1u : 0u;
+	VkSpecializationInfo srgbSpec {};
+	srgbSpec.dataSize = 4u;
+	srgbSpec.pData = &uManualSRGB;
+	srgbSpec.mapEntryCount = 1u;
+	srgbSpec.pMapEntries = &manualSRGBEntry;
+
 	auto initStages = [&](span<const u32> fragSpv) {
 		VkShaderModule fragModule = createShaderMod(fragSpv);
 
@@ -95,6 +107,7 @@ void initPipes(Device& dev,
 		ret[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 		ret[1].module = fragModule;
 		ret[1].pName = "main";
+		ret[1].pSpecializationInfo = &srgbSpec;
 
 		return ret;
 	};
@@ -246,6 +259,7 @@ void initPipes(Device& dev,
 	bgStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 	bgStages[1].module = imageBgFragModule;
 	bgStages[1].pName = "main";
+	bgStages[1].pSpecializationInfo = &srgbSpec;
 
 	auto imgBgGpi = imgGpi;
 	auto imgBgVertInfo = *imgBgGpi.pVertexInputState;
@@ -272,6 +286,7 @@ void initPipes(Device& dev,
 	histStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 	histStages[1].module = histFragMod;
 	histStages[1].pName = "main";
+	histStages[1].pSpecializationInfo = &srgbSpec;
 
 	auto histGpi = imgBgGpi;
 	// already done for imgBgGpi

@@ -1,3 +1,38 @@
+- [x] overlay: looks very different depending on whether the application
+      uses srgb or not. Fix that!
+		- [x] imgui rendering: in fragment shader, convert to srgb manually
+		      when rendering on unorm image
+
+- [x] fix iro:water xfb output drawing issue.
+      somehow we draw too many vertices?
+	  EDIT: nope, not xfb but vertex input causes issues
+	  {fixed, but found the new, related indexed-drawing-truncated-vertex-buffers
+	   issue, see next-vertex-iteration section}
+- [x] fix vertex viewer input issues (e.g. with a7c)
+
+match rework 2, electric boogaloo
+- [x] use LCS in hook already.
+  See node 2305 for details.
+  The final find operation could then either be LCS (careful! might have
+  a lot more commands here than sections for 'match') 
+  Or - e.g. inside a render pass without blending - be independent 
+  of the order of draw commands.
+	- for action commands inside small (non-solid-renderpass) blocks: do LCS
+	- for big blocks: do best-match. In this case something like relID is
+	  useful. Maybe build it on-the-fly? should be a lot cheaper, only
+	  needed for very few blocks compared to *everything*
+	- for order-independent (e.g. no blend/additive) renderpasses we probably 
+	  want order-independency anyways, so just local-best-match
+-> don't hook every cb with matching command. At least do a rough check
+      on other commands/record structure. Otherwise (e.g. when just selecting
+	  a top-level barrier command) we very quickly might get >10 hooks per
+	  frame.
+- [x] investigate why conditional rendering vulkan sample is so slow when hooked
+      guess: we have *a lot* of sections due to the BeginConditionalRendering
+	  calls (a lot of them). Investigate whether matching is working
+	  as well and fast as desired
+	- check if lower branchTreshold would help
+	{gone in release mode but found a couple of bugs related to matching}
 - [x] Fix dev.gui modification. Make it threadsafe. E.g. accessed via all
       resource destruction, can happen in any thread. Caused a crash with doom.
 	- [x] gui shouldn't be owned by overlay (and therefore swapchain),

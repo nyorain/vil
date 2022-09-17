@@ -55,7 +55,7 @@ void initPipes(Device& dev,
 	VkRenderPass rp, VkPipelineLayout renderPipeLayout,
 	VkPipelineLayout compPipeLayout,
 	VkPipelineLayout histogramPipeLayout,
-	Gui::Pipelines& dstPipes);
+	Gui::Pipelines& dstPipes, bool manualSRGB);
 
 // Gui
 Gui::Gui(Device& dev, VkFormat colorFormat) {
@@ -248,7 +248,11 @@ void Gui::initRenderStuff() {
 	VK_CHECK(dev.dispatch.CreateRenderPass(dev.handle, &rpi, nullptr, &rp_));
 	nameHandle(dev, rp_, "Gui:rp");
 
-	initPipes(dev, rp_, pipeLayout_, imgOpPipeLayout_, histogramPipeLayout_, pipes_);
+	// imgui outputs srgb colors, need to convert to linear when rendering
+	// into srgb swapchain. This seems counterintuitive but is right.
+	auto manualSRGB = FormatIsSRGB(colorFormat_);
+	initPipes(dev, rp_, pipeLayout_, imgOpPipeLayout_, histogramPipeLayout_,
+		pipes_, manualSRGB);
 }
 
 void Gui::initImGui() {

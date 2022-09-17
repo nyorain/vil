@@ -989,6 +989,30 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		++colCount;
 	}
 
+	// clamp drawCount to captured size
+	if(params.indexType) {
+		auto maxCount = state.indexBufCopy.size / indexSize(*params.indexType);
+		params.drawCount = std::min<u32>(params.drawCount, maxCount);
+
+		// TODO: we also have to clamp to size of captured vertex buffers
+		// But for that we'd have to iterate over all the indices, too
+		// expensive here on cpu.
+		//   -> vertex buffer capture rework
+	} else {
+		for(auto& [pipeAttribID, shaderVarID] : attribs) {
+			auto& attrib = pipe.vertexAttribs[pipeAttribID];
+			auto& binding = pipe.vertexBindings[attrib.binding];
+			auto& buf = state.vertexBufCopies[binding.binding];
+
+			auto maxCount = buf.size / binding.stride; // floor
+			if(binding.inputRate == VK_VERTEX_INPUT_RATE_INSTANCE) {
+				// no-op atm, limit instances drawn
+			} else if(binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX) {
+				params.drawCount = std::min<u32>(params.drawCount, maxCount - params.vertexOffset);
+			}
+		}
+	}
+
 	auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
