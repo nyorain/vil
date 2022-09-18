@@ -61,7 +61,7 @@ struct DescriptorPool : SharedDeviceHandle {
 	// The mutex used to access the entries.
 	// While this mutex is locked, no sets from the pool will be
 	// created or destroyed.
-	TracySharedLockable(DebugMutex, mutex);
+	TracyLockable(DebugMutex, mutex);
 
 	using SetEntry = DescriptorPoolSetEntry;
 

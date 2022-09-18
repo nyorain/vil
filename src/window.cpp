@@ -539,6 +539,7 @@ void DisplayWindow::uiThread() {
 		frameInfo.clear = true;
 		frameInfo.presentQueue = this->presentQueue->handle;
 		frameInfo.swapchain = swapchain;
+		frameInfo.image = buffers_[imageIdx].image;
 		auto sems = {acquireSem};
 		frameInfo.waitSemaphores = sems;
 

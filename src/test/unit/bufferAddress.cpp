@@ -8,7 +8,7 @@ using namespace vil;
 TEST(unit_cmp) {
 	auto cmp = Device::BufferAddressCmp {};
 
-	Buffer a {};
+	Buffer a;
 	a.deviceAddress = VkDeviceAddress(100);
 	a.ci.size = 10;
 
@@ -28,12 +28,12 @@ TEST(unit_cmp) {
 TEST(unit_set) {
 	decltype(Device::bufferAddresses) set;
 
-	Buffer a {};
+	Buffer a;
 	a.deviceAddress = VkDeviceAddress(100);
 	a.ci.size = 10;
 	set.insert(&a);
 
-	Buffer b {};
+	Buffer b;
 	b.deviceAddress = VkDeviceAddress(200);
 	b.ci.size = 100;
 	set.insert(&b);
@@ -66,22 +66,22 @@ TEST(unit_set) {
 TEST(unit_alias) {
 	decltype(Device::bufferAddresses) set;
 
-	Buffer a {};
+	Buffer a;
 	a.deviceAddress = VkDeviceAddress(100);
 	a.ci.size = 10;
 	set.insert(&a);
 
-	Buffer b {};
+	Buffer b;
 	b.deviceAddress = VkDeviceAddress(200);
 	b.ci.size = 100;
 	set.insert(&b);
 
-	Buffer c {}; // aliases with a
+	Buffer c; // aliases with a
 	c.deviceAddress = VkDeviceAddress(50);
 	c.ci.size = 100;
 	set.insert(&c);
 
-	Buffer d {}; // aliases with all
+	Buffer d; // aliases with all
 	d.deviceAddress = VkDeviceAddress(64);
 	d.ci.size = 1024;
 	set.insert(&d);

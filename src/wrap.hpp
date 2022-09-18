@@ -283,6 +283,8 @@ IntrusivePtr<T> KeepAliveRingBuffer<T, maxSize>::pushLocked(IntrusivePtr<T> ptr)
 
 			data.push_back(std::move(ptr));
 		}
+	} else {
+		(void) ptr;
 	}
 
 	return oldPtr;

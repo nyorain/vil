@@ -75,8 +75,6 @@ private:
 	Handle* handle_ {};
 	bool editName_ {false};
 
-	float listWidth_ {200.f};
-
 	struct {
 		Image* object {};
 		ImageViewer viewer {};

@@ -184,6 +184,9 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 			ImGui::Text("Can't display image contents since the memory "
 				"it was bound to was destroyed");
 		} else {
+			// NOTE: useful for destruction race repro/debugging
+			// std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
 			if(doSelect) {
 				VkImageSubresourceRange subres {};
 				subres.layerCount = image.ci.arrayLayers;
@@ -1609,6 +1612,9 @@ void ResourceGui::copyBuffer(Draw& draw) {
 		draw.usedBuffers.push_back(buffer_.handle);
 		bufHandle = buffer_.handle->handle;
 	}
+
+	// NOTE: useful for destruction race repro/debugging
+	// std::this_thread::sleep_for(std::chrono::milliseconds(30));
 
 	auto& buf = *buffer_.handle;
 	auto offset = 0u; // TODO: allow to set in gui

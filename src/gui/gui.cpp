@@ -1225,14 +1225,20 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 	// Check if we are currently drawing (in another thread) and used
 	// one of the destroyed handles
 	if(currDraw_ && usesHandle(*currDraw_)) {
+		dlg_trace("waiting for draw completion (CPU)");
+
 		currDrawInvalidated_.fetch_add(1);
 		std::unique_lock lock(dev().mutex, std::adopt_lock);
-		currDrawWait_.wait(lock, [&]{ return currDraw_; });
+		currDrawWait_.wait(lock, [&]{ return currDraw_ == nullptr; });
+		dlg_trace(">> wait done");
 		auto waitingCount = currDrawInvalidated_.fetch_sub(1);
-		if(waitingCount == 0u) {
+		if(waitingCount == 1u) {
 			currDrawWait_.notify_one();
 		}
+
+		// mutex will stay locked
 		(void) lock.release();
+		dlg_trace(">> continuing");
 	}
 
 	// Make sure that all our submissions that use the given handle have
@@ -1247,6 +1253,8 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 	}
 
 	if(!fences.empty()) {
+		dlg_trace("waiting for draw completion (GPU)");
+
 		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
 			fences.data(), true, UINT64_MAX));
 
@@ -1341,7 +1349,28 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	}
 	preRender_.clear();
 
-	// optionally blur
+	if(info.clear) {
+		VkImageMemoryBarrier dstBarrier[1] = {};
+		dstBarrier[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		dstBarrier[0].dstAccessMask =
+			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		dstBarrier[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		dstBarrier[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		dstBarrier[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		dstBarrier[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		dstBarrier[0].image = info.image;
+		dstBarrier[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		dstBarrier[0].subresourceRange.levelCount = 1;
+		dstBarrier[0].subresourceRange.layerCount = 1;
+		dev().dispatch.CmdPipelineBarrier(draw.cb,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			0, 0, NULL, 0, NULL,
+			1, dstBarrier);
+	}
+
+	// optionally blur or clear
 	VkRenderPassBeginInfo rpBegin {};
 	rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	rpBegin.renderArea.extent = info.extent;
@@ -1458,7 +1487,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	dlg_assert(currDraw_ == &draw);
 	currDraw_ = nullptr;
 
-	if(currDrawInvalidated_.load()) {
+	if(currDrawInvalidated_.load() > 0u) {
 		dlg_check({
 			auto invalidated = false;
 			for(auto* usedBuf : draw.usedBuffers) {
@@ -1593,7 +1622,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	draw.usedBuffers.clear();
 	foundDraw->lastUsed = ++drawCounter_;
 
-	if(blur_.dev) {
+	if(blur_.dev && !info.clear) {
 		auto& sc = dev().swapchains.get(info.swapchain);
 		if(sc.supportsSampling) {
 			if(blurSwapchain_ != info.swapchain) {
