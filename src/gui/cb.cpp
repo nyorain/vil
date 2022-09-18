@@ -200,7 +200,7 @@ void CommandRecordGui::draw(Draw& draw) {
 	if(updateMode == UpdateMode::swapchain && !selector_.freezeState && doUpdate) {
 		auto lastPresent = swapchain->frameSubmissions[0].presentID;
 		auto statePresent = selector_.hookStateSwapchainPresent();
-		if(selector_.submission() && lastPresent > statePresent + 4) {
+		if(selector_.submission() && lastPresent > statePresent + 5) {
 			auto diff = lastPresent - statePresent;
 
 			auto selType = selector_.selectionType();

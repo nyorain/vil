@@ -13,7 +13,10 @@ bool CommandSelection::update() {
 	auto& hook = *dev.commandHook;
 	auto completed = hook.moveCompleted();
 
-	if(completed.empty() || (freezeState && state_)) {
+	// TODO: we want the second condition (maybe assert that completed is
+	//   empty when freezeState is true) but atm that means we would not
+	//   update state on hook ops change. See todo
+	if(completed.empty() /*|| (freezeState && hook.freeze.load() && state_)*/) {
 		// nothing to do
 		return false;
 	}

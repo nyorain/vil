@@ -1,16 +1,13 @@
 # Todo
 
-urgent, bugs:
-- [ ] CommandViewer (and ShaderDebugger probs as well) don't get an initial
-      state when ops change and freezeState is active.
-	  Solution: instead of *each* component having its own state, they
-	  should all directly access the CommandSelection.
-	  And unset the state on hook ops change (or maybe even just change the ops
-	  *through* the selection? not sure what is better)
-	- [ ] maybe get rid of CommandViewer::select altogether?
-	      or at least only call it on real selection and not on every
-		  state update?
+v0.2:
+- fix urgent bug list
+- image viewer improvements
+- vertex viewer improvements
+- fix README
 
+urgent, bugs:
+- [ ] unref handles in ResourceGui destructor
 - [ ] with lockfree gui rendering, the overlay input events in api.cpp
       are racy when QueuePresent is called in another thread.
 	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
@@ -45,12 +42,28 @@ urgent, bugs:
       test with iro, shadowCull
 
 new, workstack:
+Freeze/selection changes:
+- [ ] CommandViewer (and ShaderDebugger probs as well) don't get an initial
+      state when ops change and freezeState is active.
+	  Solution: instead of *each* component having its own state, they
+	  should all directly access the CommandSelection.
+	  And unset the state on hook ops change (or maybe even just change the ops
+	  *through* the selection? not sure what is better)
+	  {quick fix now in, still updating in commandselector when frozen.
+	   want a clean solution tho}
+	- [ ] maybe get rid of CommandViewer::select altogether?
+	      or at least only call it on real selection and not on every
+		  state update?
 - [ ] cbGui: freezing state will currently also freeze the shown commands,
       might not be expected/desired. Reworking this is hard:
 	  when freezing state we don't execute any hooks and therefore would need
 	  new mechanism to correctly match new records.
 	  Fix this when doing the next match/cbGui update iteration (related: next 
 	  command group impl iteration)
+	  	- I guess just kicking out the '!selector_.freezeState' condition
+		  from the force-update logic should be enough? Just make
+		  sure to not show the "not found in X frames" ImGuiText then
+
 - [ ] single-commandRecord viewing is buggy
 	- [ ] useful feature, we want to support it.
 - [ ] add global mutex priorities and add debug asserts
