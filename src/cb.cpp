@@ -122,7 +122,7 @@ void DescriptorState::bind(CommandBuffer& cb, PipelineLayout& layout, u32 firstS
 
 // CommandBuffer
 CommandBuffer::CommandBuffer(CommandPool& xpool, VkCommandBuffer xhandle) :
-		pool_(&xpool), handle_(xhandle) {
+		handle(xhandle), pool_(&xpool) {
 }
 
 CommandBuffer::~CommandBuffer() {
@@ -130,9 +130,8 @@ CommandBuffer::~CommandBuffer() {
 		return;
 	}
 
-	// NOTE: we can't assume this anymore.
-	// dlg_assert(pool_);
-	// dlg_assert(handle_);
+	dlg_assert(!pool_);
+	dlg_assert(!this->handle);
 
 	// Wait for completion, free all data and allocated stuff,
 	// unregister from everything
@@ -153,14 +152,21 @@ CommandBuffer::~CommandBuffer() {
 			lastRecord_->cb = nullptr;
 			lastRecord_->hookRecords.clear();
 		}
-
-		notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_COMMAND_BUFFER);
 	}
+}
+
+void CommandBuffer::onApiDestroy() {
+	dlg_assert(this->handle);
 
 	// CommandBuffer is dispatchable handle, we need to remove this association
 	if(!HandleDesc<VkCommandBuffer>::wrap) {
-		eraseData(handle_);
+		eraseData(handle);
 	}
+
+	std::lock_guard lock(dev->mutex);
+
+	pool_ = nullptr;
+	handle = {}; // can't be used by application anymore
 }
 
 void CommandBuffer::clearPendingLocked() {
@@ -335,39 +341,33 @@ RayTracingState& CommandBuffer::newRayTracingState() {
 	return *rayTracingState_;
 }
 
-CommandPool::~CommandPool() {
-	if(!dev) {
-		return;
-	}
-
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_COMMAND_POOL);
-
+void CommandPool::onApiDestroy() {
 	// When a CommandPool is destroyed, all command buffers created from
 	// it are automatically freed.
 	// But since CommandBuffer has shared ownership, we need special handling
 	// here.
 
+	std::vector<CommandBuffer*> moved;
+
 	{
-		// unset ourselves in all
 		std::lock_guard lock(dev->mutex);
-		for(auto& cb : cbs) {
-			cb->pool_ = nullptr;
-			cb->handle_ = {}; // can't be used by application anymore
-		}
+		moved = std::move(cbs);
 	}
 
-	// now this->cbs can't be accessed from any thread since we unset
-	// ourselves with all CommandBuffers
-	for(auto& cb : cbs) {
+	// unset ourselves in all
+	for(auto& cb : moved) {
+		CommandBufferPtr ptr;
 		if(HandleDesc<VkCommandBuffer>::wrap) {
 			// TODO: ugh, this is terrible, should find a cleaner solution
 			auto* cbp = reinterpret_cast<std::byte*>(cb);
 			cbp -= offsetof(WrappedHandle<CommandBuffer>, obj_);
 			auto h = u64ToHandle<VkCommandBuffer>(reinterpret_cast<std::uintptr_t>(cbp));
-			dev->commandBuffers.mustErase(h);
+			ptr = dev->commandBuffers.mustMove(h);
 		} else {
-			dev->commandBuffers.mustErase(cb->handle());
+			ptr = dev->commandBuffers.mustMove(cb->handle);
 		}
+
+		ptr->onApiDestroy();
 	}
 }
 
@@ -393,7 +393,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateCommandPool(
 
 	auto cpPtr = IntrusivePtr<CommandPool>(new CommandPool());
 	auto& cp = *cpPtr;
-	cp.objectType = VK_OBJECT_TYPE_COMMAND_POOL;
 	cp.dev = &dev;
 	cp.handle = *pCommandPool;
 	cp.queueFamily = pCreateInfo->queueFamilyIndex;
@@ -459,12 +458,15 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateCommandBuffers(
 		auto& cb = *cbPtr;
 
 		cb.dev = &dev;
-		cb.objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
-		cb.pool().cbs.push_back(&cb);
+
+		{
+			std::lock_guard lock(dev.mutex);
+			cb.pool().cbs.push_back(&cb);
+		}
 
 		// command buffers are dispatchable, add global data entry
 		if(!HandleDesc<VkCommandBuffer>::wrap) {
-			vil::insertData(cb.handle(), cbPtr.wrapped());
+			vil::insertData(cb.handle, cbPtr.wrapped());
 		} else {
 			dev.setDeviceLoaderData(dev.handle, pCommandBuffers[i]);
 			pCommandBuffers[i] = castDispatch<VkCommandBuffer>(dev, *cbPtr.wrapped());
@@ -492,13 +494,19 @@ VKAPI_ATTR void VKAPI_CALL FreeCommandBuffers(
 			continue;
 		}
 
-		auto& cb = *dev.commandBuffers.mustMove(pCommandBuffers[i]);
-		handles[i] = cb.handle();
-		// TODO: unset handle
+		auto cbPtr = dev.commandBuffers.mustMove(pCommandBuffers[i]);
+		handles[i] = cbPtr->handle;
+		cbPtr->onApiDestroy();
 
+		auto& cb = *cbPtr;
 		auto it = find(pool.cbs, &cb);
 		dlg_assert(it != pool.cbs.end());
-		pool.cbs.erase(it);
+
+		{
+			// critical section here mainly for gui
+			std::lock_guard lock(dev.mutex);
+			pool.cbs.erase(it);
+		}
 	}
 
 	dev.dispatch.FreeCommandBuffers(dev.handle, pool.handle,
@@ -589,14 +597,14 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		beginInfo.pInheritanceInfo = &inherit;
 	}
 
-	return cb.dev->dispatch.BeginCommandBuffer(cb.handle(), &beginInfo);
+	return cb.dev->dispatch.BeginCommandBuffer(cb.handle, &beginInfo);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL EndCommandBuffer(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	cb.doEnd();
-	return cb.dev->dispatch.EndCommandBuffer(cb.handle());
+	return cb.dev->dispatch.EndCommandBuffer(cb.handle);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
@@ -604,7 +612,7 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetCommandBuffer(
 		VkCommandBufferResetFlags                   flags) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	cb.doReset(false);
-	return cb.dev->dispatch.ResetCommandBuffer(cb.handle(), flags);
+	return cb.dev->dispatch.ResetCommandBuffer(cb.handle, flags);
 }
 
 // == command buffer recording ==
@@ -856,7 +864,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents(
 		useHandle(cb, cmd, event);
 	}
 
-	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
@@ -880,7 +888,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 
 	cmdBarrier(cb, cmd, srcStageMask, dstStageMask);
 
-	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 void cmdBeginRenderPass(CommandBuffer& cb,
@@ -1019,7 +1027,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 	auto beginInfo = *pRenderPassBegin;
 	cmdBeginRenderPass(cb, beginInfo, subpassBeginInfo, memScope);
 
-	cb.dev->dispatch.CmdBeginRenderPass(cb.handle(), &beginInfo, contents);
+	cb.dev->dispatch.CmdBeginRenderPass(cb.handle, &beginInfo, contents);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
@@ -1029,14 +1037,14 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass(
 	cmdNextSubpass(cb,
 		{VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO, nullptr, contents},
 		{VK_STRUCTURE_TYPE_SUBPASS_END_INFO, nullptr});
-	cb.dev->dispatch.CmdNextSubpass(cb.handle(), contents);
+	cb.dev->dispatch.CmdNextSubpass(cb.handle, contents);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass(
 		VkCommandBuffer                             commandBuffer) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	cmdEndRenderPass(cb, {VK_STRUCTURE_TYPE_SUBPASS_END_INFO, nullptr});
-	cb.dev->dispatch.CmdEndRenderPass(cb.handle());
+	cb.dev->dispatch.CmdEndRenderPass(cb.handle);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
@@ -1049,7 +1057,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
 	auto beginInfo = *pRenderPassBegin;
 	cmdBeginRenderPass(cb, beginInfo, *pSubpassBeginInfo, memScope);
 
-	cb.dev->dispatch.CmdBeginRenderPass2(cb.handle(), &beginInfo, pSubpassBeginInfo);
+	cb.dev->dispatch.CmdBeginRenderPass2(cb.handle, &beginInfo, pSubpassBeginInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
@@ -1058,7 +1066,7 @@ VKAPI_ATTR void VKAPI_CALL CmdNextSubpass2(
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	cmdNextSubpass(cb, *pSubpassBeginInfo, *pSubpassEndInfo);
-	cb.dev->dispatch.CmdNextSubpass2(cb.handle(), pSubpassBeginInfo, pSubpassEndInfo);
+	cb.dev->dispatch.CmdNextSubpass2(cb.handle, pSubpassBeginInfo, pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
@@ -1066,7 +1074,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRenderPass2(
 		const VkSubpassEndInfo*                     pSubpassEndInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
 	cmdEndRenderPass(cb, *pSubpassEndInfo);
-	cb.dev->dispatch.CmdEndRenderPass2(cb.handle(), pSubpassEndInfo);
+	cb.dev->dispatch.CmdEndRenderPass2(cb.handle, pSubpassEndInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
@@ -1139,7 +1147,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindDescriptorSets(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdBindDescriptorSets(cb.handle(),
+		cb.dev->dispatch.CmdBindDescriptorSets(cb.handle,
 			pipelineBindPoint,
 			cmd.pipeLayout->handle,
 			firstSet,
@@ -1170,7 +1178,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindIndexBuffer(
 	gs.indices.offset = offset;
 	gs.indices.type = indexType;
 
-	cb.dev->dispatch.CmdBindIndexBuffer(cb.handle(), buf.handle, offset, indexType);
+	cb.dev->dispatch.CmdBindIndexBuffer(cb.handle, buf.handle, offset, indexType);
 }
 
 span<VkBuffer> cmdBindVertexBuffers(CommandBuffer& cb, ThreadMemScope& tms,
@@ -1220,7 +1228,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers(
 	ThreadMemScope tms;
 	auto bufHandles = cmdBindVertexBuffers(cb, tms, firstBinding, bindingCount,
 		pBuffers, pOffsets, nullptr, nullptr);
-	cb.dev->dispatch.CmdBindVertexBuffers(cb.handle(),
+	cb.dev->dispatch.CmdBindVertexBuffers(cb.handle,
 		firstBinding, bindingCount, bufHandles.data(), pOffsets);
 }
 
@@ -1242,7 +1250,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDraw(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDraw(cb.handle(),
+		cb.dev->dispatch.CmdDraw(cb.handle,
 			vertexCount, instanceCount, firstVertex, firstInstance);
 	}
 }
@@ -1267,7 +1275,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexed(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDrawIndexed(cb.handle(),
+		cb.dev->dispatch.CmdDrawIndexed(cb.handle,
 			indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 	}
 }
@@ -1294,7 +1302,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirect(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDrawIndirect(cb.handle(),
+		cb.dev->dispatch.CmdDrawIndirect(cb.handle,
 			buf.handle, offset, drawCount, stride);
 	}
 }
@@ -1321,7 +1329,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirect(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDrawIndexedIndirect(cb.handle(),
+		cb.dev->dispatch.CmdDrawIndexedIndirect(cb.handle,
 			buf.handle, offset, drawCount, stride);
 	}
 }
@@ -1355,7 +1363,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndirectCount(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDrawIndirectCount(cb.handle(), buf.handle, offset,
+		cb.dev->dispatch.CmdDrawIndirectCount(cb.handle, buf.handle, offset,
 			countBuf.handle, countBufferOffset, maxDrawCount, stride);
 	}
 }
@@ -1389,7 +1397,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDrawIndexedIndirectCount(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDrawIndexedIndirectCount(cb.handle(), buf.handle,
+		cb.dev->dispatch.CmdDrawIndexedIndirectCount(cb.handle, buf.handle,
 			offset, countBuf.handle, countBufferOffset, maxDrawCount, stride);
 	}
 }
@@ -1410,7 +1418,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatch(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDispatch(cb.handle(), groupCountX, groupCountY, groupCountZ);
+		cb.dev->dispatch.CmdDispatch(cb.handle, groupCountX, groupCountY, groupCountZ);
 	}
 }
 
@@ -1430,7 +1438,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchIndirect(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDispatchIndirect(cb.handle(), buf.handle, offset);
+		cb.dev->dispatch.CmdDispatchIndirect(cb.handle, buf.handle, offset);
 	}
 }
 
@@ -1456,7 +1464,7 @@ VKAPI_ATTR void VKAPI_CALL CmdDispatchBase(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdDispatchBase(cb.handle(),
+		cb.dev->dispatch.CmdDispatchBase(cb.handle,
 			baseGroupX, baseGroupY, baseGroupZ,
 			groupCountX, groupCountY, groupCountZ);
 	}
@@ -1485,7 +1493,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyImage(cb.handle(),
+	cb.dev->dispatch.CmdCopyImage(cb.handle,
 		src.handle, srcImageLayout,
 		dst.handle, dstImageLayout,
 		regionCount, pRegions);
@@ -1513,7 +1521,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImage2(
 	auto copy = *info;
 	copy.dstImage = dst.handle;
 	copy.srcImage = src.handle;
-	cb.dev->dispatch.CmdCopyImage2KHR(cb.handle(), &copy);
+	cb.dev->dispatch.CmdCopyImage2KHR(cb.handle, &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
@@ -1541,7 +1549,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdBlitImage(cb.handle(),
+	cb.dev->dispatch.CmdBlitImage(cb.handle,
 		src.handle, srcImageLayout,
 		dst.handle, dstImageLayout,
 		regionCount, pRegions, filter);
@@ -1570,7 +1578,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBlitImage2(
 	auto copy = *info;
 	copy.srcImage = src.handle;
 	copy.dstImage = dst.handle;
-	cb.dev->dispatch.CmdBlitImage2KHR(cb.handle(), &copy);
+	cb.dev->dispatch.CmdBlitImage2KHR(cb.handle, &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
@@ -1594,7 +1602,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyBufferToImage(cb.handle(),
+	cb.dev->dispatch.CmdCopyBufferToImage(cb.handle,
 		src.handle, dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
@@ -1619,7 +1627,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBufferToImage2(
 	auto copy = *info;
 	copy.srcBuffer = src.handle;
 	copy.dstImage = dst.handle;
-	cb.dev->dispatch.CmdCopyBufferToImage2KHR(cb.handle(), &copy);
+	cb.dev->dispatch.CmdCopyBufferToImage2KHR(cb.handle, &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
@@ -1643,7 +1651,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdCopyImageToBuffer(cb.handle(),
+	cb.dev->dispatch.CmdCopyImageToBuffer(cb.handle,
 		src.handle, srcImageLayout, dst.handle, regionCount, pRegions);
 }
 
@@ -1668,7 +1676,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyImageToBuffer2(
 	auto copy = *info;
 	copy.dstBuffer = dst.handle;
 	copy.srcImage = src.handle;
-	cb.dev->dispatch.CmdCopyImageToBuffer2KHR(cb.handle(), &copy);
+	cb.dev->dispatch.CmdCopyImageToBuffer2KHR(cb.handle, &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
@@ -1689,7 +1697,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearColorImage(
 
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdClearColorImage(cb.handle(),
+	cb.dev->dispatch.CmdClearColorImage(cb.handle,
 		dst.handle, imageLayout, pColor, rangeCount, pRanges);
 }
 
@@ -1711,7 +1719,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearDepthStencilImage(
 
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdClearDepthStencilImage(cb.handle(), dst.handle,
+	cb.dev->dispatch.CmdClearDepthStencilImage(cb.handle, dst.handle,
 		imageLayout, pDepthStencil, rangeCount, pRanges);
 }
 
@@ -1730,7 +1738,7 @@ VKAPI_ATTR void VKAPI_CALL CmdClearAttachments(
 	// NOTE: We explicitly don't add the cleared attachments to used handles here.
 	// In case of a secondary command buffer, we might not even know them.
 
-	cb.dev->dispatch.CmdClearAttachments(cb.handle(), attachmentCount,
+	cb.dev->dispatch.CmdClearAttachments(cb.handle, attachmentCount,
 		pAttachments, rectCount, pRects);
 }
 
@@ -1756,7 +1764,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage(
 	useHandle(cb, cmd, src);
 	useHandle(cb, cmd, dst);
 
-	cb.dev->dispatch.CmdResolveImage(cb.handle(), src.handle, srcImageLayout,
+	cb.dev->dispatch.CmdResolveImage(cb.handle, src.handle, srcImageLayout,
 		dst.handle, dstImageLayout, regionCount, pRegions);
 }
 
@@ -1782,7 +1790,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResolveImage2(
 	auto copy = *info;
 	copy.dstImage = dst.handle;
 	copy.srcImage = src.handle;
-	cb.dev->dispatch.CmdResolveImage2KHR(cb.handle(), &copy);
+	cb.dev->dispatch.CmdResolveImage2KHR(cb.handle, &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
@@ -1796,7 +1804,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetEvent(
 
 	useHandle(cb, cmd, *cmd.event);
 
-	cb.dev->dispatch.CmdSetEvent(cb.handle(), cmd.event->handle, stageMask);
+	cb.dev->dispatch.CmdSetEvent(cb.handle, cmd.event->handle, stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
@@ -1811,7 +1819,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResetEvent(
 
 	useHandle(cb, cmd, *cmd.event);
 
-	cb.dev->dispatch.CmdResetEvent(cb.handle(), cmd.event->handle, stageMask);
+	cb.dev->dispatch.CmdResetEvent(cb.handle, cmd.event->handle, stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
@@ -1855,6 +1863,9 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		};
 
 		auto& rec = *recordPtr;
+
+		static_assert(CommandRecord::UsedHandles::handleTypeCount == 17u);
+
 		useAllHandles(rec.used.buffers);
 		useAllHandles(rec.used.computePipes);
 		useAllHandles(rec.used.graphicsPipes);
@@ -1869,6 +1880,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		useAllHandles(rec.used.samplers);
 		useAllHandles(rec.used.accelStructs);
 		useAllHandles(rec.used.events);
+		useAllHandles(rec.used.dsPools);
 
 		for(auto& uds : rec.used.descriptorSets) {
 			useHandle(cb, cmd, *static_cast<DescriptorSet*>(uds.ds));
@@ -1883,11 +1895,11 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 		}
 
 		cb.builder().record_->secondaries.push_back(std::move(recordPtr));
-		cbHandles[i] = secondary.handle();
+		cbHandles[i] = secondary.handle,
 		last = &childCmd;
 	}
 
-	cb.dev->dispatch.CmdExecuteCommands(cb.handle(),
+	cb.dev->dispatch.CmdExecuteCommands(cb.handle,
 		commandBufferCount, cbHandles.data());
 }
 
@@ -1910,7 +1922,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer(
 	useHandle(cb, cmd, srcBuf);
 	useHandle(cb, cmd, dstBuf);
 
-	cb.dev->dispatch.CmdCopyBuffer(cb.handle(),
+	cb.dev->dispatch.CmdCopyBuffer(cb.handle,
 		srcBuf.handle, dstBuf.handle, regionCount, pRegions);
 }
 
@@ -1935,7 +1947,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyBuffer2(
 	copy.srcBuffer = srcBuf.handle;
 	copy.dstBuffer = dstBuf.handle;
 
-	cb.dev->dispatch.CmdCopyBuffer2KHR(cb.handle(), &copy);
+	cb.dev->dispatch.CmdCopyBuffer2KHR(cb.handle, &copy);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
@@ -1955,7 +1967,7 @@ VKAPI_ATTR void VKAPI_CALL CmdUpdateBuffer(
 
 	useHandle(cb, cmd, buf);
 
-	cb.dev->dispatch.CmdUpdateBuffer(cb.handle(), buf.handle, dstOffset, dataSize, pData);
+	cb.dev->dispatch.CmdUpdateBuffer(cb.handle, buf.handle, dstOffset, dataSize, pData);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
@@ -1975,7 +1987,7 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 
 	useHandle(cb, cmd, buf);
 
-	cb.dev->dispatch.CmdFillBuffer(cb.handle(), buf.handle, dstOffset, size, data);
+	cb.dev->dispatch.CmdFillBuffer(cb.handle, buf.handle, dstOffset, size, data);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
@@ -1990,7 +2002,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 	// TODO: copy pNext?
 
 	if(cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT) {
-		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(cb.handle(), pLabelInfo);
+		cb.dev->dispatch.CmdBeginDebugUtilsLabelEXT(cb.handle, pLabelInfo);
 	}
 }
 
@@ -2032,7 +2044,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 	}
 
 	if(cb.dev->dispatch.CmdEndDebugUtilsLabelEXT) {
-		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(cb.handle());
+		cb.dev->dispatch.CmdEndDebugUtilsLabelEXT(cb.handle);
 	}
 }
 
@@ -2078,7 +2090,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdBindPipeline(cb.handle(), pipelineBindPoint, pipe.handle);
+		cb.dev->dispatch.CmdBindPipeline(cb.handle, pipelineBindPoint, pipe.handle);
 	}
 }
 
@@ -2095,7 +2107,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginQuery(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdBeginQuery(cb.handle(), cmd.pool->handle, query, flags);
+	cb.dev->dispatch.CmdBeginQuery(cb.handle, cmd.pool->handle, query, flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndQuery(
@@ -2109,7 +2121,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndQuery(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdEndQuery(cb.handle(), cmd.pool->handle, query);
+	cb.dev->dispatch.CmdEndQuery(cb.handle, cmd.pool->handle, query);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(
@@ -2125,7 +2137,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResetQueryPool(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdResetQueryPool(cb.handle(), cmd.pool->handle, firstQuery, queryCount);
+	cb.dev->dispatch.CmdResetQueryPool(cb.handle, cmd.pool->handle, firstQuery, queryCount);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
@@ -2142,7 +2154,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdWriteTimestamp(cb.handle(), pipelineStage, cmd.pool->handle, query);
+	cb.dev->dispatch.CmdWriteTimestamp(cb.handle, pipelineStage, cmd.pool->handle, query);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
@@ -2167,7 +2179,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyQueryPoolResults(
 	useHandle(cb, cmd, *cmd.pool);
 	useHandle(cb, cmd, *cmd.dstBuffer);
 
-	cb.dev->dispatch.CmdCopyQueryPoolResults(cb.handle(), cmd.pool->handle,
+	cb.dev->dispatch.CmdCopyQueryPoolResults(cb.handle, cmd.pool->handle,
 		firstQuery, queryCount, cmd.dstBuffer->handle, dstOffset, stride, flags);
 }
 
@@ -2254,7 +2266,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushConstants(
 
 	{
 		ExtZoneScopedN("dispatch");
-		cb.dev->dispatch.CmdPushConstants(cb.handle(), cmd.pipeLayout->handle,
+		cb.dev->dispatch.CmdPushConstants(cb.handle, cmd.pipeLayout->handle,
 			stageFlags, offset, size, pValues);
 	}
 }
@@ -2275,7 +2287,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewport(
 	std::copy(pViewports, pViewports + viewportCount,
 		gs.dynamic.viewports.begin() + firstViewport);
 
-	cb.dev->dispatch.CmdSetViewport(cb.handle(), firstViewport, viewportCount, pViewports);
+	cb.dev->dispatch.CmdSetViewport(cb.handle, firstViewport, viewportCount, pViewports);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
@@ -2294,7 +2306,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissor(
 	std::copy(pScissors, pScissors + scissorCount,
 		gs.dynamic.scissors.begin() + firstScissor);
 
-	cb.dev->dispatch.CmdSetScissor(cb.handle(), firstScissor, scissorCount, pScissors);
+	cb.dev->dispatch.CmdSetScissor(cb.handle, firstScissor, scissorCount, pScissors);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetLineWidth(
@@ -2306,7 +2318,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineWidth(
 
 	auto& gs = cb.newGraphicsState();
 	gs.dynamic.lineWidth = lineWidth;
-	cb.dev->dispatch.CmdSetLineWidth(cb.handle(), lineWidth);
+	cb.dev->dispatch.CmdSetLineWidth(cb.handle, lineWidth);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias(
@@ -2321,7 +2333,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBias(
 	auto& gs = cb.newGraphicsState();
 	gs.dynamic.depthBias = cmd.state;
 
-	cb.dev->dispatch.CmdSetDepthBias(cb.handle(),
+	cb.dev->dispatch.CmdSetDepthBias(cb.handle,
 		depthBiasConstantFactor, depthBiasClamp, depthBiasSlopeFactor);
 }
 
@@ -2336,7 +2348,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetBlendConstants(
 	std::memcpy(gs.dynamic.blendConstants.data(), blendConstants,
 		sizeof(gs.dynamic.blendConstants));
 
-	cb.dev->dispatch.CmdSetBlendConstants(cb.handle(), blendConstants);
+	cb.dev->dispatch.CmdSetBlendConstants(cb.handle, blendConstants);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthBounds(
@@ -2352,7 +2364,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBounds(
 	gs.dynamic.depthBoundsMin = minDepthBounds;
 	gs.dynamic.depthBoundsMax = maxDepthBounds;
 
-	cb.dev->dispatch.CmdSetDepthBounds(cb.handle(), minDepthBounds, maxDepthBounds);
+	cb.dev->dispatch.CmdSetDepthBounds(cb.handle, minDepthBounds, maxDepthBounds);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilCompareMask(
@@ -2372,7 +2384,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilCompareMask(
 		gs.dynamic.stencilBack.compareMask = compareMask;
 	}
 
-	cb.dev->dispatch.CmdSetStencilCompareMask(cb.handle(), faceMask, compareMask);
+	cb.dev->dispatch.CmdSetStencilCompareMask(cb.handle, faceMask, compareMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilWriteMask(
@@ -2392,7 +2404,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilWriteMask(
 		gs.dynamic.stencilBack.compareMask = writeMask;
 	}
 
-	cb.dev->dispatch.CmdSetStencilWriteMask(cb.handle(), faceMask, writeMask);
+	cb.dev->dispatch.CmdSetStencilWriteMask(cb.handle, faceMask, writeMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
@@ -2412,7 +2424,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilReference(
 		gs.dynamic.stencilBack.reference = reference;
 	}
 
-	cb.dev->dispatch.CmdSetStencilReference(cb.handle(), faceMask, reference);
+	cb.dev->dispatch.CmdSetStencilReference(cb.handle, faceMask, reference);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
@@ -2490,7 +2502,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetKHR(
 	cmd.pipeLayout = pipeLayoutPtr.get();
 	useHandle(cb, cmd, *cmd.pipeLayout);
 
-	cb.dev->dispatch.CmdPushDescriptorSetKHR(cb.handle(),
+	cb.dev->dispatch.CmdPushDescriptorSetKHR(cb.handle,
 		pipelineBindPoint, cmd.pipeLayout->handle, set,
 		descriptorWriteCount, cmd.descriptorWrites.data());
 }
@@ -2584,7 +2596,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPushDescriptorSetWithTemplateKHR(
 	}
 
 	cmd.data = copied;
-	cb.dev->dispatch.CmdPushDescriptorSetWithTemplateKHR(cb.handle(),
+	cb.dev->dispatch.CmdPushDescriptorSetWithTemplateKHR(cb.handle,
 		dut.handle, cmd.pipeLayout->handle, set, cmd.data.data());
 }
 
@@ -2597,7 +2609,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetFragmentShadingRateKHR(
 	cmd.fragmentSize = *pFragmentSize;
 	cmd.combinerOps = {combinerOps[0], combinerOps[1]};
 
-	cb.dev->dispatch.CmdSetFragmentShadingRateKHR(cb.handle(), pFragmentSize, combinerOps);
+	cb.dev->dispatch.CmdSetFragmentShadingRateKHR(cb.handle, pFragmentSize, combinerOps);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginConditionalRenderingEXT(
@@ -2614,7 +2626,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginConditionalRenderingEXT(
 	auto info = *pConditionalRenderingBegin;
 	info.buffer = cmd.buffer->handle;
 
-	cb.dev->dispatch.CmdBeginConditionalRenderingEXT(cb.handle(), &info);
+	cb.dev->dispatch.CmdBeginConditionalRenderingEXT(cb.handle, &info);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndConditionalRenderingEXT(
@@ -2623,7 +2635,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndConditionalRenderingEXT(
 	auto& cmd = addCmd<EndConditionalRenderingCmd, SectionType::end>(cb);
 	(void) cmd;
 
-	cb.dev->dispatch.CmdEndConditionalRenderingEXT(cb.handle());
+	cb.dev->dispatch.CmdEndConditionalRenderingEXT(cb.handle);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
@@ -2635,7 +2647,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLineStippleEXT(
 	cmd.stippleFactor = lineStippleFactor;
 	cmd.stipplePattern = lineStipplePattern;
 
-	cb.dev->dispatch.CmdSetLineStippleEXT(cb.handle(), lineStippleFactor, lineStipplePattern);
+	cb.dev->dispatch.CmdSetLineStippleEXT(cb.handle, lineStippleFactor, lineStipplePattern);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetCullMode(
@@ -2645,7 +2657,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetCullMode(
 	auto& cmd = addCmd<SetCullModeCmd>(cb);
 	cmd.cullMode = cullMode;
 
-	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle(), cullMode);
+	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle, cullMode);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetFrontFace(
@@ -2655,7 +2667,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetFrontFace(
 	auto& cmd = addCmd<SetFrontFaceCmd>(cb);
 	cmd.frontFace = frontFace;
 
-	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle(), frontFace);
+	cb.dev->dispatch.CmdSetCullModeEXT(cb.handle, frontFace);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopology(
@@ -2665,7 +2677,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveTopology(
 	auto& cmd = addCmd<SetPrimitiveTopologyCmd>(cb);
 	cmd.topology = primitiveTopology;
 
-	cb.dev->dispatch.CmdSetPrimitiveTopologyEXT(cb.handle(), primitiveTopology);
+	cb.dev->dispatch.CmdSetPrimitiveTopologyEXT(cb.handle, primitiveTopology);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCount(
@@ -2676,7 +2688,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetViewportWithCount(
 	auto& cmd = addCmd<SetViewportWithCountCmd>(cb);
 	cmd.viewports = copySpan(cb, pViewports, viewportCount);
 
-	cb.dev->dispatch.CmdSetViewportWithCountEXT(cb.handle(), viewportCount,
+	cb.dev->dispatch.CmdSetViewportWithCountEXT(cb.handle, viewportCount,
 		pViewports);
 }
 
@@ -2688,7 +2700,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetScissorWithCount(
 	auto& cmd = addCmd<SetScissorWithCountCmd>(cb);
 	cmd.scissors = copySpan(cb, pScissors, scissorCount);
 
-	cb.dev->dispatch.CmdSetScissorWithCountEXT(cb.handle(), scissorCount,
+	cb.dev->dispatch.CmdSetScissorWithCountEXT(cb.handle, scissorCount,
 		pScissors);
 }
 
@@ -2704,7 +2716,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBindVertexBuffers2(
 	ThreadMemScope tms;
 	auto bufHandles = cmdBindVertexBuffers(cb, tms, firstBinding, bindingCount,
 		pBuffers, pOffsets, pSizes, pStrides);
-	cb.dev->dispatch.CmdBindVertexBuffers2EXT(cb.handle(),
+	cb.dev->dispatch.CmdBindVertexBuffers2EXT(cb.handle,
 		firstBinding, bindingCount, bufHandles.data(), pOffsets, pSizes,
 		pStrides);
 }
@@ -2716,7 +2728,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthTestEnable(
 	auto& cmd = addCmd<SetDepthTestEnableCmd>(cb);
 	cmd.enable = depthTestEnable;
 
-	cb.dev->dispatch.CmdSetDepthTestEnableEXT(cb.handle(), depthTestEnable);
+	cb.dev->dispatch.CmdSetDepthTestEnableEXT(cb.handle, depthTestEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnable(
@@ -2726,7 +2738,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthWriteEnable(
 	auto& cmd = addCmd<SetDepthWriteEnableCmd>(cb);
 	cmd.enable = depthWriteEnable;
 
-	cb.dev->dispatch.CmdSetDepthWriteEnableEXT(cb.handle(), depthWriteEnable);
+	cb.dev->dispatch.CmdSetDepthWriteEnableEXT(cb.handle, depthWriteEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOp(
@@ -2736,7 +2748,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthCompareOp(
 	auto& cmd = addCmd<SetDepthCompareOpCmd>(cb);
 	cmd.op = depthCompareOp;
 
-	cb.dev->dispatch.CmdSetDepthCompareOpEXT(cb.handle(), depthCompareOp);
+	cb.dev->dispatch.CmdSetDepthCompareOpEXT(cb.handle, depthCompareOp);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnable(
@@ -2746,7 +2758,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBoundsTestEnable(
 	auto& cmd = addCmd<SetDepthBoundsTestEnableCmd>(cb);
 	cmd.enable = depthBoundsTestEnable;
 
-	cb.dev->dispatch.CmdSetDepthBoundsTestEnableEXT(cb.handle(), depthBoundsTestEnable);
+	cb.dev->dispatch.CmdSetDepthBoundsTestEnableEXT(cb.handle, depthBoundsTestEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnable(
@@ -2756,7 +2768,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilTestEnable(
 	auto& cmd = addCmd<SetStencilTestEnableCmd>(cb);
 	cmd.enable = stencilTestEnable;
 
-	cb.dev->dispatch.CmdSetStencilTestEnableEXT(cb.handle(), stencilTestEnable);
+	cb.dev->dispatch.CmdSetStencilTestEnableEXT(cb.handle, stencilTestEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetStencilOp(
@@ -2774,7 +2786,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetStencilOp(
 	cmd.depthFailOp = depthFailOp;
 	cmd.compareOp = compareOp;
 
-	cb.dev->dispatch.CmdSetStencilOpEXT(cb.handle(), faceMask,
+	cb.dev->dispatch.CmdSetStencilOpEXT(cb.handle, faceMask,
 		failOp, passOp, depthFailOp, compareOp);
 }
 
@@ -2785,7 +2797,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetPatchControlPointsEXT(
 	auto& cmd = addCmd<SetPatchControlPointsCmd>(cb);
 	cmd.patchControlPoints = patchControlPoints;
 
-	cb.dev->dispatch.CmdSetPatchControlPointsEXT(cb.handle(), patchControlPoints);
+	cb.dev->dispatch.CmdSetPatchControlPointsEXT(cb.handle, patchControlPoints);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnableEXT(
@@ -2795,7 +2807,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetRasterizerDiscardEnableEXT(
 	auto& cmd = addCmd<SetRasterizerDiscardEnableCmd>(cb);
 	cmd.enable = rasterizerDiscardEnable;
 
-	cb.dev->dispatch.CmdSetRasterizerDiscardEnableEXT(cb.handle(), rasterizerDiscardEnable);
+	cb.dev->dispatch.CmdSetRasterizerDiscardEnableEXT(cb.handle, rasterizerDiscardEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDepthBiasEnableEXT(
@@ -2805,7 +2817,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDepthBiasEnableEXT(
 	auto& cmd = addCmd<SetDepthBiasEnableCmd>(cb);
 	cmd.enable = depthBiasEnable;
 
-	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle(), depthBiasEnable);
+	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle, depthBiasEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetLogicOpEXT(
@@ -2815,7 +2827,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetLogicOpEXT(
 	auto& cmd = addCmd<SetLogicOpCmd>(cb);
 	cmd.logicOp = logicOp;
 
-	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle(), logicOp);
+	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle, logicOp);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveRestartEnableEXT(
@@ -2825,7 +2837,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetPrimitiveRestartEnableEXT(
 	auto& cmd = addCmd<SetPrimitiveRestartEnableCmd>(cb);
 	cmd.enable = primitiveRestartEnable;
 
-	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle(), primitiveRestartEnable);
+	cb.dev->dispatch.CmdSetDepthBiasEnableEXT(cb.handle, primitiveRestartEnable);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetSampleLocationsEXT(
@@ -2836,7 +2848,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetSampleLocationsEXT(
 	cmd.info = *pSampleLocationsInfo;
 	copyChainInPlace(cb, cmd.info.pNext);
 
-	cb.dev->dispatch.CmdSetSampleLocationsEXT(cb.handle(), pSampleLocationsInfo);
+	cb.dev->dispatch.CmdSetSampleLocationsEXT(cb.handle, pSampleLocationsInfo);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetDiscardRectangleEXT(
@@ -2849,7 +2861,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetDiscardRectangleEXT(
 	cmd.first = firstDiscardRectangle;
 	cmd.rects = copySpan(cb, pDiscardRectangles, discardRectangleCount);
 
-	cb.dev->dispatch.CmdSetDiscardRectangleEXT(cb.handle(),
+	cb.dev->dispatch.CmdSetDiscardRectangleEXT(cb.handle,
 		firstDiscardRectangle, discardRectangleCount, pDiscardRectangles);
 }
 
@@ -2903,7 +2915,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 	// is submitted to the gpu to retrieve the actual data used for building.
 	cb.builder().record_->buildsAccelStructs = true;
 
-	cb.dev->dispatch.CmdBuildAccelerationStructuresKHR(cb.handle(),
+	cb.dev->dispatch.CmdBuildAccelerationStructuresKHR(cb.handle,
 		infoCount, cmd.buildInfos.data(), ppBuildRangeInfos);
 }
 
@@ -2963,7 +2975,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 	// is submitted to the gpu to retrieve the actual data used for building.
 	cb.builder().record_->buildsAccelStructs = true;
 
-	cb.dev->dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb.handle(),
+	cb.dev->dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb.handle,
 		infoCount, cmd.buildInfos.data(), pIndirectDeviceAddresses,
 		pIndirectStrides, ppMaxPrimitiveCounts);
 }
@@ -2985,7 +2997,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureKHR(
 	fwd.src = cmd.src->handle;
 	fwd.dst = cmd.dst->handle;
 
-	cb.dev->dispatch.CmdCopyAccelerationStructureKHR(cb.handle(), &fwd);
+	cb.dev->dispatch.CmdCopyAccelerationStructureKHR(cb.handle, &fwd);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureToMemoryKHR(
@@ -3003,7 +3015,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureToMemoryKHR(
 
 	auto fwd = *pInfo;
 	fwd.src = cmd.src->handle;
-	cb.dev->dispatch.CmdCopyAccelerationStructureToMemoryKHR(cb.handle(), &fwd);
+	cb.dev->dispatch.CmdCopyAccelerationStructureToMemoryKHR(cb.handle, &fwd);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdCopyMemoryToAccelerationStructureKHR(
@@ -3021,7 +3033,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyMemoryToAccelerationStructureKHR(
 
 	auto fwd = *pInfo;
 	fwd.dst = cmd.dst->handle;
-	cb.dev->dispatch.CmdCopyMemoryToAccelerationStructureKHR(cb.handle(), &fwd);
+	cb.dev->dispatch.CmdCopyMemoryToAccelerationStructureKHR(cb.handle, &fwd);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdWriteAccelerationStructuresPropertiesKHR(
@@ -3049,7 +3061,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteAccelerationStructuresPropertiesKHR(
 		fwd[i] = cmd.accelStructs[i]->handle;
 	}
 
-	cb.dev->dispatch.CmdWriteAccelerationStructuresPropertiesKHR(cb.handle(),
+	cb.dev->dispatch.CmdWriteAccelerationStructuresPropertiesKHR(cb.handle,
 		fwd.size(), fwd.data(), queryType, cmd.queryPool->handle, firstQuery);
 }
 
@@ -3076,7 +3088,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysKHR(
 
 	// TODO: useHandle for buffers of associated device addresses?
 
-	cb.dev->dispatch.CmdTraceRaysKHR(cb.handle(),
+	cb.dev->dispatch.CmdTraceRaysKHR(cb.handle,
 		pRaygenShaderBindingTable,
 		pMissShaderBindingTable,
 		pHitShaderBindingTable,
@@ -3101,7 +3113,7 @@ VKAPI_ATTR void VKAPI_CALL CmdTraceRaysIndirectKHR(
 
 	// TODO: useHandle for buffers of associated device addresses?
 
-	cb.dev->dispatch.CmdTraceRaysIndirectKHR(cb.handle(),
+	cb.dev->dispatch.CmdTraceRaysIndirectKHR(cb.handle,
 		pRaygenShaderBindingTable,
 		pMissShaderBindingTable,
 		pHitShaderBindingTable,
@@ -3116,7 +3128,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetRayTracingPipelineStackSizeKHR(
 	auto& cmd = addCmd<SetRayTracingPipelineStackSizeCmd>(cb);
 	cmd.stackSize = pipelineStackSize;
 
-	cb.dev->dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb.handle(), pipelineStackSize);
+	cb.dev->dispatch.CmdSetRayTracingPipelineStackSizeKHR(cb.handle, pipelineStackSize);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
@@ -3175,7 +3187,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRendering(
 		cmd.rpi.depthStencilAttachment = view;
 	}
 
-	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
@@ -3184,7 +3196,7 @@ VKAPI_ATTR void VKAPI_CALL CmdEndRendering(
 	auto& cmd = addCmd<EndRenderingCmd, SectionType::end>(cb);
 	(void) cmd;
 
-	cb.dev->dispatch.CmdEndRendering(cb.handle());
+	cb.dev->dispatch.CmdEndRendering(cb.handle);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdSetEvent2(
@@ -3198,7 +3210,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetEvent2(
 
 	useHandle(cb, cmd, *cmd.event);
 
-	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdResetEvent2(
@@ -3213,7 +3225,7 @@ VKAPI_ATTR void VKAPI_CALL CmdResetEvent2(
 
 	useHandle(cb, cmd, *cmd.event);
 
-	cb.dev->dispatch.CmdResetEvent2(cb.handle(), cmd.event->handle, stageMask);
+	cb.dev->dispatch.CmdResetEvent2(cb.handle, cmd.event->handle, stageMask);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdWaitEvents2(
@@ -3232,7 +3244,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWaitEvents2(
 		useHandle(cb, cmd, event);
 	}
 
-	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier2(
@@ -3242,7 +3254,7 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier2(
 	auto& cmd = addCmd<Barrier2Cmd>(cb);
 	cmdBarrier(cb, cmd, *pDependencyInfo);
 
-	cmd.record(*cb.dev, cb.handle(), cb.pool().queueFamily);
+	cmd.record(*cb.dev, cb.handle, cb.pool().queueFamily);
 }
 
 VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp2(
@@ -3259,7 +3271,7 @@ VKAPI_ATTR void VKAPI_CALL CmdWriteTimestamp2(
 
 	useHandle(cb, cmd, *cmd.pool);
 
-	cb.dev->dispatch.CmdWriteTimestamp2(cb.handle(), stage, cmd.pool->handle, query);
+	cb.dev->dispatch.CmdWriteTimestamp2(cb.handle, stage, cmd.pool->handle, query);
 }
 
 // VK_EXT_vertex_input_dynamic_state
@@ -3275,7 +3287,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetVertexInputEXT(
 	cmd.attribs = copySpan(cb, pVertexAttributeDescriptions, vertexAttributeDescriptionCount);
 
 	// no need to patch
-	cb.dev->dispatch.CmdSetVertexInputEXT(cb.handle(),
+	cb.dev->dispatch.CmdSetVertexInputEXT(cb.handle,
 		vertexBindingDescriptionCount, pVertexBindingDescriptions,
 		vertexAttributeDescriptionCount, pVertexAttributeDescriptions);
 }
@@ -3290,7 +3302,7 @@ VKAPI_ATTR void VKAPI_CALL CmdSetColorWriteEnableEXT(
 	cmd.writeEnables = copySpan(cb, pColorWriteEnables, attachmentCount);
 
 	// no need to patch
-	cb.dev->dispatch.CmdSetColorWriteEnableEXT(cb.handle(),
+	cb.dev->dispatch.CmdSetColorWriteEnableEXT(cb.handle,
 		attachmentCount, pColorWriteEnables);
 }
 

@@ -116,18 +116,4 @@ bool optSliderRange(const char* name, T& val, std::size_t count) {
 	return ret;
 }
 
-inline void pushDisabled(bool disabled) {
-	if(disabled) {
-		ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
-	}
-}
-
-inline void popDisabled(bool disabled) {
-	if(disabled) {
-		ImGui::PopStyleVar();
-		ImGui::PopItemFlag();
-	}
-}
-
 } // namesapce vil

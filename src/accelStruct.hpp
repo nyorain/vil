@@ -53,6 +53,8 @@ struct AccelInstances {
 
 // AccelerationStructure
 struct AccelStruct : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR;
+
 	VkAccelerationStructureKHR handle;
 	VkAccelerationStructureTypeKHR type; // can be generic
 	VkAccelerationStructureTypeKHR effectiveType; // only relevant when type == generic
@@ -68,7 +70,7 @@ struct AccelStruct : SharedDeviceHandle {
 	VkGeometryTypeKHR geometryType {VK_GEOMETRY_TYPE_MAX_ENUM_KHR};
 	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
 
-	~AccelStruct();
+	void onApiDestroy();
 };
 
 void initBufs(AccelStruct&,

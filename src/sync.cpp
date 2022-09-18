@@ -20,8 +20,6 @@ Fence::~Fence() {
 
 	// per spec, we can assume all associated payload to be finished
 	std::lock_guard lock(dev->mutex);
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FENCE);
-
 	if(this->submission) {
 		auto finished = checkLocked(*this->submission);
 		dlg_assert(finished);
@@ -34,7 +32,6 @@ Semaphore::~Semaphore() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_SEMAPHORE);
 
 	// Per spec, we can assume all associated payload to be finished
 	// Using while loop since checkLocked will erase from our list.
@@ -69,15 +66,6 @@ void updateUpperLocked(Semaphore& sem, u64 value) {
 	}
 }
 
-Event::~Event() {
-	if(!dev) {
-		return;
-	}
-
-	std::lock_guard lock(dev->mutex);
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_EVENT);
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 		VkDevice                                    device,
 		const VkFenceCreateInfo*                    pCreateInfo,
@@ -90,7 +78,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFence(
 	}
 
 	auto& fence = dev.fences.add(*pFence);
-	fence.objectType = VK_OBJECT_TYPE_FENCE;
 	fence.dev = &dev;
 	fence.handle = *pFence;
 
@@ -201,7 +188,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSemaphore(
 	}
 
 	auto& semaphore = dev.semaphores.add(*pSemaphore);
-	semaphore.objectType = VK_OBJECT_TYPE_SEMAPHORE;
 	semaphore.dev = &dev;
 	semaphore.handle = *pSemaphore;
 	semaphore.type = VK_SEMAPHORE_TYPE_BINARY;
@@ -280,7 +266,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateEvent(
 
 	auto evPtr = IntrusivePtr<Event>(new Event());
 	auto& event = *evPtr;
-	event.objectType = VK_OBJECT_TYPE_EVENT;
 	event.dev = &dev;
 	event.handle = *pEvent;
 

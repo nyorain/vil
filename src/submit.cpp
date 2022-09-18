@@ -174,7 +174,7 @@ void process(QueueSubmitter& subm, VkSubmitInfo2& si) {
 		scb.cb = &getCommandBuffer(si.pCommandBufferInfos[j].commandBuffer);
 
 		fwdCbs[j] = si.pCommandBufferInfos[j];
-		fwdCbs[j].commandBuffer = scb.cb->handle();
+		fwdCbs[j].commandBuffer = scb.cb->handle;
 	}
 
 	si.commandBufferInfoCount = fwdCbs.size();
@@ -530,36 +530,22 @@ void postProcessLocked(QueueSubmitter& subm) {
 
 // Returns whether the given submission potentially writes the given
 // DeviceHandle (only makes sense for Image and Buffer objects)
-bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle) {
+bool potentiallyWritesLocked(const Submission& subm, const Image* img, const Buffer* buf) {
 	// TODO PERF: consider more information, not every use is potentially writing
 
-	assertOwned(handle.dev->mutex);
-
-	Image* img = nullptr;
-	Buffer* buf = nullptr;
-
-	// TODO: implement more general mechanism
-	// Need const_cast here since we store non-const pointers in rec.used.
-	// The find function won't modify it, it's just an interface quirk.
-	auto* toFind = const_cast<DeviceHandle*>(&handle);
-	if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
-		img = static_cast<Image*>(toFind);
-	} else if(handle.objectType == VK_OBJECT_TYPE_BUFFER) {
-		buf = static_cast<Buffer*>(toFind);
-	} else {
-		dlg_error("unreachable");
-	}
+	assertOwned(subm.parent->queue->dev->mutex);
+	dlg_assert(img || buf);
 
 	for(auto& [cb, _] : subm.cbs) {
 		auto& rec = *cb->lastRecordLocked();
 
 		if(buf) {
-			auto it = find(rec.used.buffers, *buf);
+			auto it = find(rec.used.buffers, const_cast<Buffer&>(*buf));
 			if(it != rec.used.buffers.end()) {
 				return true;
 			}
-		} else if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
-			auto it = find(rec.used.images, *img);
+		} else if(img) {
+			auto it = find(rec.used.images, const_cast<Image&>(*img));
 			if(it != rec.used.images.end()) {
 				return true;
 			}
@@ -574,7 +560,7 @@ bool potentiallyWritesLocked(const Submission& subm, const DeviceHandle& handle)
 			// important that the ds mutex is locked mainly for
 			// update_unused_while_pending.
 			auto lock = state.lock();
-			if(hasBound(state, handle)) {
+			if((img && hasBound(state, *img)) || (buf && hasBound(state, *buf))) {
 				return true;
 			}
 		}
@@ -594,8 +580,16 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 	std::vector<const Submission*> subs;
 	for(auto& subm : pending.submissions) {
 		auto added = false;
-		for(auto* handle : draw.usedHandles) {
-			if(potentiallyWritesLocked(subm, *handle)) {
+		for(auto* handle : draw.usedImages) {
+			if(potentiallyWritesLocked(subm, handle, nullptr)) {
+				subs.push_back(&subm);
+				added = true;
+				break;
+			}
+		}
+
+		for(auto* handle : draw.usedBuffers) {
+			if(potentiallyWritesLocked(subm, nullptr, handle)) {
 				subs.push_back(&subm);
 				added = true;
 				break;

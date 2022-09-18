@@ -140,7 +140,12 @@ struct NameResult {
 	std::string name;
 };
 
-NameResult name(DeviceHandle*, NullName = NullName::null, bool displayType = false);
+NameResult nameRes(Handle*, VkObjectType, NullName = NullName::null, bool displayType = false);
+
+template<typename H>
+NameResult nameRes(H* handle, NullName nn = NullName::null, bool displayType = false) {
+	return nameRes(handle, handle ? handle->objectType : VK_OBJECT_TYPE_MAX_ENUM, nn, displayType);
+}
 
 // Base Command class for commands that have children.
 // These children might be directly part of the command record (see SectionCommand)

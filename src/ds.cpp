@@ -30,18 +30,6 @@ constexpr auto refBindings = false;
 // even though the driver could do it.
 constexpr auto enableDsFragmentationPath = false;
 
-template<typename T>
-void incRefCount(T& obj) {
-	obj.refCount.fetch_add(1u, std::memory_order_relaxed);
-}
-
-template<typename T>
-void decRefCount(T& obj) {
-	if(obj.refCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u) {
-		delete &obj;
-	}
-}
-
 // util
 size_t descriptorSize(VkDescriptorType dsType) {
 	switch(category(dsType)) {
@@ -111,7 +99,10 @@ size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDes
 		lastCount = variableDescriptorCount;
 	}
 
-	ret += lastCount * descriptorSize(last.descriptorType);
+	if(lastCount) {
+		ret += lastCount * descriptorSize(last.descriptorType);
+	}
+
 	return ret;
 }
 
@@ -130,16 +121,15 @@ bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
 		auto& ba = da.bindings[b];
 		auto& bb = db.bindings[b];
 
-		if(ba.binding != bb.binding ||
-				ba.descriptorCount != bb.descriptorCount ||
+		if(ba.descriptorCount != bb.descriptorCount ||
 				ba.descriptorType != bb.descriptorType ||
 				ba.stageFlags != bb.stageFlags) {
 			return false;
 		}
 
 		// immutable samplers
-		if(ba.binding == VK_DESCRIPTOR_TYPE_SAMPLER ||
-				ba.binding == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+		if(ba.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+				ba.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
 			if(bool(ba.immutableSamplers) != bool(bb.immutableSamplers)) {
 				return false;
 			}
@@ -289,7 +279,10 @@ bool validateIncRef(Device& dev, Set& set, Handle*& handle, bool checkReplace) {
 	// TODO: proper place to do this would be here.
 	// But due to the large critical section in CommandHook, we have to
 	// design the whole snapshot descriptors procedure as one giant
-	// critical section as well
+	// critical section as welll.
+	// NOTE: otoh, we have to keep in mind that this function is called
+	// while a DescriptorSet mutex is locked (see addCowLocked path
+	// with !refBindings). Would this still be safe to do without deadlock?
 	// std::lock_guard lock(dev.mutex);
 	(void) dev;
 
@@ -338,23 +331,23 @@ static void doRefBindings(Device& dev, DescriptorStateRef state, bool checkIfVal
 
 		switch(category(binding.descriptorType)) {
 			case DescriptorCategory::buffer: {
-				for(auto& b : buffers(state, binding.binding)) {
+				for(auto& b : buffers(state, b)) {
 					validateIncRef(dev, dev.buffers, b.buffer, checkIfValid);
 				}
 				break;
 			} case DescriptorCategory::bufferView: {
-				for(auto& b : bufferViews(state, binding.binding)) {
+				for(auto& b : bufferViews(state, b)) {
 					validateIncRef(dev, dev.bufferViews, b.bufferView, checkIfValid);
 				}
 				break;
 			} case DescriptorCategory::image: {
-				for(auto& b : images(state, binding.binding)) {
+				for(auto& b : images(state, b)) {
 					validateIncRef(dev, dev.imageViews, b.imageView, checkIfValid);
 					validateIncRef(dev, dev.samplers, b.sampler, checkIfValid);
 				}
 				break;
 			} case DescriptorCategory::accelStruct: {
-				for(auto& b : accelStructs(state, binding.binding)) {
+				for(auto& b : accelStructs(state, b)) {
 					validateIncRef(dev, dev.accelStructs, b.accelStruct, checkIfValid);
 				}
 				break;
@@ -382,21 +375,21 @@ void unrefBindings(DescriptorStateRef state) {
 
 		switch(category(binding.descriptorType)) {
 			case DescriptorCategory::buffer: {
-				for(auto& b : buffers(state, binding.binding)) {
+				for(auto& b : buffers(state, b)) {
 					if(b.buffer) {
 						decRefCount(*b.buffer);
 					}
 				}
 				break;
 			} case DescriptorCategory::bufferView: {
-				for(auto& b : bufferViews(state, binding.binding)) {
+				for(auto& b : bufferViews(state, b)) {
 					if(b.bufferView) {
 						decRefCount(*b.bufferView);
 					}
 				}
 				break;
 			} case DescriptorCategory::image: {
-				for(auto& b : images(state, binding.binding)) {
+				for(auto& b : images(state, b)) {
 					if(b.imageView) {
 						decRefCount(*b.imageView);
 					}
@@ -406,7 +399,7 @@ void unrefBindings(DescriptorStateRef state) {
 				}
 				break;
 			} case DescriptorCategory::accelStruct: {
-				for(auto& b : accelStructs(state, binding.binding)) {
+				for(auto& b : accelStructs(state, b)) {
 					if(b.accelStruct) {
 						decRefCount(*b.accelStruct);
 					}
@@ -448,7 +441,6 @@ DescriptorStateCopyPtr DescriptorSet::copyLockedState() {
 	// that is up-to-pointer-aligned directly behind the state object in memory).
 	static_assert(sizeof(DescriptorStateCopy) % alignof(void*) == 0u);
 	assertOwned(mutex_);
-	dlg_assert(cow_);
 
 	auto bindingSize = totalDescriptorMemSize(*this->layout, this->variableDescriptorCount);
 	auto memSize = sizeof(DescriptorStateCopy) + bindingSize;
@@ -484,6 +476,20 @@ DescriptorStateCopyPtr DescriptorSet::copyLockedState() {
 	return DescriptorStateCopyPtr(copy);
 }
 
+DescriptorStateCopyPtr DescriptorSet::validateAndCopyLocked() {
+	assertOwned(dev().mutex);
+	std::lock_guard lock(mutex_);
+
+	// We need to reference all bindings when they aren't referenced
+	// at the moment. This will also validate them (i.e. set the ones
+	// we detect as destroyed to null)
+	if(!refBindings) {
+		doRefBindings(dev(), *this, true);
+	}
+
+	return copyLockedState();
+}
+
 u32 descriptorCount(DescriptorStateRef state, unsigned binding) {
 	dlg_assert(state.layout);
 	dlg_assert(binding < state.layout->bindings.size());
@@ -505,7 +511,7 @@ u32 totalDescriptorCount(DescriptorStateRef state) {
 }
 
 IntrusivePtr<DescriptorSetCow> DescriptorSet::addCowLocked() {
-	assertOwned(dev->mutex); // TODO: feels like bad design here
+	assertOwned(dev().mutex); // TODO: feels like bad design here
 	std::lock_guard lock(mutex_);
 	if(!cow_) {
 		// TODO PERF: get from a pool or something
@@ -515,7 +521,7 @@ IntrusivePtr<DescriptorSetCow> DescriptorSet::addCowLocked() {
 		// we need to reference all bindings when they aren't referenced
 		// at the moment.
 		if(!refBindings) {
-			doRefBindings(*dev, *this, true);
+			doRefBindings(dev(), *this, true);
 		}
 	}
 
@@ -563,10 +569,9 @@ std::unique_lock<DebugMutex> DescriptorSet::checkResolveCow() {
 void destroy(DescriptorSet& ds, bool unlink) {
 	ZoneScoped;
 
-	dlg_assert(ds.dev);
-
+	dlg_assert(ds.pool);
 	if(!HandleDesc<VkDescriptorSet>::wrap) {
-		ds.dev->descriptorSets.mustErase(ds.handle);
+		ds.dev().descriptorSets.mustErase(ds.handle);
 	}
 
 	// no need to keep lock here, ds can't be accessed anymore
@@ -716,8 +721,6 @@ DescriptorPool::~DescriptorPool() {
 		return;
 	}
 
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_POOL);
-
 	for(auto it = usedEntries; it; it = it->next) {
 		dlg_assert(it->set);
 		destroy(*it->set, false);
@@ -734,7 +737,6 @@ DescriptorSetLayout::~DescriptorSetLayout() {
 
 	// ds layouts are never used directly by command buffers
 	dlg_assert(handle);
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT);
 	dev->dispatch.DestroyDescriptorSetLayout(dev->handle, handle, nullptr);
 }
 
@@ -745,7 +747,6 @@ DescriptorUpdateTemplate::~DescriptorUpdateTemplate() {
 
 	// never used directly by command buffers
 	dlg_assert(handle);
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE);
 	dev->dispatch.DestroyDescriptorUpdateTemplate(dev->handle, handle, nullptr);
 }
 
@@ -846,7 +847,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	auto nbindings = memScope.copy(nci.pBindings, nci.bindingCount);
 	nci.pBindings = nbindings.data();
 
+	auto maxBindingID = 0u;
 	for(auto& bind : nbindings) {
+		maxBindingID = std::max(maxBindingID, bind.binding);
 		if(!needsSampler(bind.descriptorType) || bind.descriptorCount == 0 ||
 				!bind.pImmutableSamplers) {
 			continue;
@@ -861,6 +864,18 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 		bind.pImmutableSamplers = handles.data();
 	}
 
+	// PERF: our bindings vector is always the size of the largest bindingID + 1 to
+	//   allow fast direct access per bindingID.
+	//   Per spec, there is not limit on bindingIDs, so large IDs with
+	//   large holes in between are really inefficient.
+	//   Since accessing bindings is on a path that must be fast, just storing
+	//   the used slots or using a mapping by default here is not feasible.
+	//   Maybe use a fallback path when extremely large bindings are detected?
+	if(maxBindingID >= 10'000 && (maxBindingID / float(pCreateInfo->bindingCount)) < 0.1) {
+		dlg_warn("DesriptorSetLayout: Large bindingID and large holes detected, "
+			"vil will be inefficient");
+	}
+
 	auto res = dev.dispatch.CreateDescriptorSetLayout(dev.handle, &nci, nullptr, pSetLayout);
 	if(res != VK_SUCCESS) {
 		return res;
@@ -868,7 +883,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 
 	auto dsLayoutPtr = IntrusivePtr<DescriptorSetLayout>(new DescriptorSetLayout());
 	auto& dsLayout = *dsLayoutPtr;
-	dsLayout.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT;
 	dsLayout.dev = &dev;
 	dsLayout.handle = *pSetLayout;
 	dsLayout.flags = nci.flags;
@@ -878,12 +892,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	flagsInfo = (flagsInfo && flagsInfo->bindingCount == 0u) ? nullptr : flagsInfo;
 	dlg_assert(!flagsInfo || flagsInfo->bindingCount == pCreateInfo->bindingCount);
 
+
+	ensureSize(dsLayout.bindings, maxBindingID + 1);
 	for(auto i = 0u; i < pCreateInfo->bindingCount; ++i) {
 		const auto& bind = pCreateInfo->pBindings[i];
-		ensureSize(dsLayout.bindings, bind.binding + 1);
 
 		auto& dst = dsLayout.bindings[bind.binding];
-		dst.binding = bind.binding;
 		dst.descriptorCount = bind.descriptorCount;
 		dst.descriptorType = bind.descriptorType;
 		dst.stageFlags = bind.stageFlags;
@@ -909,6 +923,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(
 	for(auto b = 0u; b < dsLayout.bindings.size(); ++b) {
 		auto& bind = dsLayout.bindings[b];
 		bind.offset = off;
+
+		if(bind.descriptorCount == 0u) {
+			continue;
+		}
 
 		off += unsigned(bind.descriptorCount * descriptorSize(bind.descriptorType));
 
@@ -986,7 +1004,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 
 	auto dsPoolPtr = IntrusivePtr<DescriptorPool>(new DescriptorPool());
 	auto& dsPool = *dsPoolPtr;
-	dsPool.objectType = VK_OBJECT_TYPE_DESCRIPTOR_POOL;
 	dsPool.dev = &dev;
 	dsPool.handle = *pDescriptorPool;
 	dsPool.maxSets = pCreateInfo->maxSets;
@@ -1211,8 +1228,6 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 
 	auto& ds = *new(data) DescriptorSet();
 	ds.setEntry = setEntry;
-	ds.objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
-	ds.dev = &dev;
 	ds.handle = handle;
 	ds.layout = std::move(layoutPtr);
 	ds.variableDescriptorCount = varCount;
@@ -1669,7 +1684,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorUpdateTemplate(
 
 	auto dutPtr = IntrusivePtr<DescriptorUpdateTemplate>(new DescriptorUpdateTemplate());
 	auto& dut = *dutPtr;
-	dut.objectType = VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE;
 	dut.dev = &dev;
 	dut.handle = *pDescriptorUpdateTemplate;
 
@@ -1707,9 +1721,9 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
 		const void*                                 pData) {
 	ZoneScoped;
 
-	auto& ds  = get(device, descriptorSet);
-	auto& dev = *ds.dev;
-	auto& dut = get(dev, descriptorUpdateTemplate);
+	auto& dut = get(device, descriptorUpdateTemplate);
+	auto& dev = *dut.dev;
+	auto& ds  = get(dev, descriptorSet);
 
 	// NOTE: we need this lock here since, technically, the ds could
 	// be accessed by another thread during the update e.g. if the ds has
@@ -1871,7 +1885,7 @@ std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSet
 	return {DescriptorStateRef(*cow.ds), std::move(cowLock)};
 }
 
-bool hasBound(DescriptorStateRef state, const DeviceHandle& handle) {
+bool hasBound(DescriptorStateRef state, const Handle& handle) {
 	for(auto i = 0u; i < state.layout->bindings.size(); ++i) {
 		switch(category(state.layout->bindings[i].descriptorType)) {
 			case DescriptorCategory::accelStruct:

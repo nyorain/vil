@@ -8,6 +8,8 @@
 namespace vil {
 
 struct Buffer : MemoryResource {
+	static constexpr auto objectType = VK_OBJECT_TYPE_BUFFER;
+
 	VkBuffer handle {};
 	VkBufferCreateInfo ci;
 	bool concurrentHooked {}; // whether we set it to concurrent mode
@@ -16,21 +18,18 @@ struct Buffer : MemoryResource {
 	std::vector<BufferView*> views;
 	VkDeviceAddress deviceAddress {}; // null if not available
 
-	Buffer() = default;
 	~Buffer();
-	Buffer(Buffer&&) = delete;
-	Buffer& operator=(Buffer&&) = delete;
+	void onApiDestroy();
 };
 
 struct BufferView : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_BUFFER_VIEW;
+
 	VkBufferView handle;
 	VkBufferViewCreateInfo ci;
 	Buffer* buffer {};
 
-	BufferView() = default;
 	~BufferView();
-	BufferView(BufferView&&) = delete;
-	BufferView& operator=(BufferView&&) = delete;
 };
 
 // util

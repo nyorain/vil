@@ -10,23 +10,12 @@
 namespace vil {
 
 // Classes
-RenderPass::~RenderPass() {
-	if(!dev) {
-		return;
-	}
-
-	std::lock_guard lock(dev->mutex);
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_RENDER_PASS);
-}
-
 Framebuffer::~Framebuffer() {
 	if(!dev) {
 		return;
 	}
 
 	std::lock_guard lock(dev->mutex);
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_FRAMEBUFFER);
-
 	for(auto* attachment : attachments) {
 		auto it = find(attachment->fbs, this);
 		dlg_assert(it != attachment->fbs.end());
@@ -98,7 +87,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateFramebuffer(
 	fb.height = pCreateInfo->height;
 	fb.layers = pCreateInfo->layers;
 	fb.handle = *pFramebuffer;
-	fb.objectType = VK_OBJECT_TYPE_FRAMEBUFFER;
 	fb.rp = getPtr(dev, pCreateInfo->renderPass);
 	fb.dev = &dev;
 	fb.attachments = std::move(views);
@@ -743,7 +731,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(
 	auto& rp = *rpPtr;
 	rp.dev = &dev;
 	rp.handle = *pRenderPass;
-	rp.objectType = VK_OBJECT_TYPE_RENDER_PASS;
 
 	rp.desc.flags = pCreateInfo->flags;
 	rp.desc.pNext = pCreateInfo->pNext;
@@ -843,7 +830,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(
 	auto& rp = *rpPtr;
 	rp.dev = &dev;
 	rp.handle = *pRenderPass;
-	rp.objectType = VK_OBJECT_TYPE_RENDER_PASS;
 
 	auto& rpi = *pCreateInfo;
 	rp.desc.flags = rpi.flags;

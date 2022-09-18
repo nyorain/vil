@@ -10,11 +10,13 @@
 namespace vil {
 
 struct CommandPool : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_COMMAND_POOL;
+
 	VkCommandPool handle {};
 	u32 queueFamily {};
 	std::vector<CommandBuffer*> cbs;
 
-	~CommandPool();
+	void onApiDestroy();
 };
 
 // Synchronization:
@@ -36,16 +38,18 @@ public:
 		invalid,
 	};
 
+	static constexpr auto objectType = VK_OBJECT_TYPE_COMMAND_BUFFER;
+
 public:
 	// List of pending submissions including this cb.
 	// Access synchronized via device mutex.
 	std::vector<Submission*> pending;
+	VkCommandBuffer handle {}; // immutable
 
 public:
 	CommandBuffer(CommandPool& pool, VkCommandBuffer handle);
 	~CommandBuffer();
 
-	VkCommandBuffer handle() const { return handle_; }
 	CommandPool& pool() const { return *pool_; }
 
 	// Synchronized via dev.mutex (must only be called while mutex is locked)
@@ -67,11 +71,11 @@ public:
 	// Will disconnect this CommandBuffer from the CommandRecord.
 	// Expects device mutex to be locked
 	void invalidateLocked();
+	void onApiDestroy();
 
 private:
 	friend CommandPool;
 	CommandPool* pool_ {};
-	VkCommandBuffer handle_ {};
 
 	// The last recorded state.
 	State state_ {State::initial}; // synchronized via dev mutex

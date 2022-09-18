@@ -12,7 +12,7 @@
 namespace vil {
 
 class ResourceGui;
-class CommandBufferGui;
+class CommandRecordGui;
 
 class Gui {
 public:
@@ -66,8 +66,13 @@ public:
 	void makeImGuiCurrent();
 	VkResult renderFrame(FrameInfo& info);
 
+	// Informs the Gui that the api handle of the given object
+	// has is about to be destroyed (note that this has no implications
+	// for the lifetime of the object on our side due to the shared
+	// ownership of handle objects).
+	// The respective handle was already unset.
 	// Must only be called while device mutex is locked.
-	void destroyed(const Handle& handle, VkObjectType type);
+	void apiHandleDestroyed(const Handle& handle, VkObjectType type);
 
 	// Blocks until all pending draws have finished execution.
 	// Does not modify any internal state.
@@ -85,7 +90,8 @@ public:
 	Tab activeTab() const { return activeTab_; }
 
 	void activateTab(Tab);
-	void selectResource(Handle& handle, bool activateTab = true);
+	void selectResource(Handle& handle, VkObjectType objectType,
+		bool activateTab = true);
 
 	auto& cbGui() { return *tabs_.cb; }
 	ImGuiIO& imguiIO() const { return *io_; }
@@ -152,9 +158,14 @@ private:
 	std::deque<Draw> draws_;
 	Draw* lastDraw_ {};
 
+	// synced via device mutex
+	Draw* currDraw_ {};
+	std::atomic<u32> currDrawInvalidated_ {};
+	std::condition_variable_any currDrawWait_ {};
+
 	struct {
 		std::unique_ptr<ResourceGui> resources;
-		std::unique_ptr<CommandBufferGui> cb;
+		std::unique_ptr<CommandRecordGui> cb;
 	} tabs_;
 
 	// rendering stuff
@@ -218,18 +229,46 @@ private:
 	bool showImguiDemo_ {false};
 };
 
+void pushDisabled(bool disabled = true);
+void popDisabled(bool disabled = true);
+
 // Inserts an imgui button towards the given handle.
 // When clicked, selects the handle in the given gui.
-void refButton(Gui& gui, Handle& handle);
+void refButton(Gui& gui, Handle& handle, VkObjectType objectType);
+
+template<typename H>
+void refButton(Gui& gui, H& handle) {
+	refButton(gui, handle, handle.objectType);
+}
 
 // If handle isn't null, adds the button as with refButton.
-void refButtonOpt(Gui& gui, Handle* handle);
+template<typename H>
+void refButtonOpt(Gui& gui, H* handle) {
+	if(handle) {
+		refButton(gui, *handle);
+	}
+}
 
 // Asserts that image isn't null and if so, adds the button as with refButton.
-void refButtonExpect(Gui& gui, Handle* handle);
+template<typename H>
+void refButtonExpect(Gui& gui, H* handle) {
+	dlg_assert_or(handle, return);
+	refButton(gui, *handle);
+}
 
 // If the given handle is null, inserts a disabled "<Destroyed>" button.
 // Otherwise, normally inserts the button as with refButton.
-void refButtonD(Gui& gui, Handle* handle, const char* str = "<Destroyed>");
+template<typename H>
+void refButtonD(Gui& gui, H* handle, const char* str = "<Destroyed>") {
+	if(handle) {
+		refButton(gui, *handle);
+	} else {
+		pushDisabled();
+		// NOTE: could add popup to button further explaining what's going on
+		ImGui::Button(str);
+		popDisabled();
+	}
+}
+
 
 } // namespace vil

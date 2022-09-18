@@ -34,9 +34,8 @@ namespace vil {
 
 template<typename T, std::size_t maxSize>
 struct KeepAliveRingBuffer {
-	std::vector<T> data;
+	std::vector<IntrusivePtr<T>> data;
 	u64 insertOffset {};
-	SharedLockableBase(DebugSharedMutex)* mutex {};
 
 	VIL_DEBUG_ONLY(
 		using Clock = std::chrono::steady_clock;
@@ -44,7 +43,7 @@ struct KeepAliveRingBuffer {
 	)
 
 	// defined in wrap.hpp
-	void push(T obj);
+	IntrusivePtr<T> pushLocked(IntrusivePtr<T> obj);
 	void clear();
 };
 
@@ -186,7 +185,6 @@ struct Device {
 	std::unordered_map<VkDeviceAddress, AccelStruct*> accelStructAddresses;
 
 	// === Maps of all vulkan handles ===
-	SyncedUniqueUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
 	SyncedRawUnorderedMap<VkDescriptorSet, DescriptorSet> descriptorSets;
 	SyncedIntrusiveWrappedUnorderedMap<VkCommandBuffer, CommandBuffer> commandBuffers;
 
@@ -199,6 +197,7 @@ struct Device {
 
 	// TODO: make them unordered set when we switch to c++20 and
 	// have transparent lookup
+	SyncedIntrusiveUnorderedMap<VkShaderModule, ShaderModule> shaderModules;
 	SyncedIntrusiveUnorderedMap<VkSwapchainKHR, Swapchain> swapchains;
 	SyncedIntrusiveUnorderedMap<VkImage, Image> images;
 	SyncedIntrusiveUnorderedMap<VkFramebuffer, Framebuffer> framebuffers;
@@ -235,11 +234,11 @@ struct Device {
 	// an unordered map.
 	static constexpr auto keepAliveCount = 0u;
 
-	KeepAliveRingBuffer<ImageView*, keepAliveCount> keepAliveImageViews;
-	KeepAliveRingBuffer<Sampler*, keepAliveCount> keepAliveSamplers;
-	KeepAliveRingBuffer<Buffer*, keepAliveCount> keepAliveBuffers;
-	KeepAliveRingBuffer<BufferView*, keepAliveCount> keepAliveBufferViews;
-	KeepAliveRingBuffer<AccelStruct*, keepAliveCount> keepAliveAccelStructs;
+	KeepAliveRingBuffer<ImageView, keepAliveCount> keepAliveImageViews;
+	KeepAliveRingBuffer<Sampler, keepAliveCount> keepAliveSamplers;
+	KeepAliveRingBuffer<Buffer, keepAliveCount> keepAliveBuffers;
+	KeepAliveRingBuffer<BufferView, keepAliveCount> keepAliveBufferViews;
+	KeepAliveRingBuffer<AccelStruct, keepAliveCount> keepAliveAccelStructs;
 
 public:
 	Device(); // = default in src
@@ -287,10 +286,8 @@ private:
 
 };
 
-// Does not expect mutex to be locked
-// TODO: get rid of these
-void notifyDestruction(Device& dev, Handle& handle, VkObjectType type);
-void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type);
+// Expects device mutex to be locked.
+void notifyApiHandleDestroyedLocked(Device& dev, Handle& handle, VkObjectType type);
 
 // Util for naming internal handles.
 // Mainly useful to get better validation layer output for stuff

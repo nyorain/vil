@@ -29,15 +29,6 @@ AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
 	return accelStructAtLocked(dev, address);
 }
 
-AccelStruct::~AccelStruct() {
-	if(!dev) {
-		return;
-	}
-
-	std::lock_guard lock(dev->mutex);
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR);
-}
-
 // building
 Mat4f toMat4f(const VkTransformMatrixKHR& src) {
 	Mat<3, 4, float> ret34;
@@ -320,7 +311,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 	auto accelStructPtr = IntrusivePtr<AccelStruct>(new AccelStruct());
 	auto& accelStruct = *accelStructPtr;
 	accelStruct.dev = &dev;
-	accelStruct.objectType = VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR;
 	accelStruct.buf = &buf;
 	accelStruct.handle = *pAccelerationStructure;
 	accelStruct.type = pCreateInfo->type;
@@ -347,6 +337,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 	return res;
 }
 
+void AccelStruct::onApiDestroy() {
+	std::lock_guard lock(dev->mutex);
+	dlg_assert(deviceAddress);
+	dev->accelStructAddresses.erase(deviceAddress);
+}
+
 VKAPI_ATTR void VKAPI_CALL DestroyAccelerationStructureKHR(
 		VkDevice                                    device,
 		VkAccelerationStructureKHR                  accelerationStructure,
@@ -355,19 +351,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyAccelerationStructureKHR(
 		return;
 	}
 
-	auto& accelStruct = get(device, accelerationStructure);
-	auto& dev = *accelStruct.dev;
-	accelerationStructure = accelStruct.handle;
-
-	{
-		auto lock = std::lock_guard(dev.mutex);
-
-		dlg_assert(accelStruct.deviceAddress);
-		dev.accelStructAddresses.erase(accelStruct.deviceAddress);
-
-	}
-
-	dev.keepAliveAccelStructs.push(&accelStruct);
+	auto& dev = mustMoveUnsetKeepAlive<&Device::keepAliveAccelStructs>(device, accelerationStructure);
 	dev.dispatch.DestroyAccelerationStructureKHR(dev.handle, accelerationStructure, pAllocator);
 }
 

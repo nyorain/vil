@@ -5,10 +5,10 @@
 namespace vil {
 
 struct QueryPool : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_SHADER_MODULE;
+
 	VkQueryPool handle {};
 	VkQueryPoolCreateInfo ci {};
-
-	~QueryPool();
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(

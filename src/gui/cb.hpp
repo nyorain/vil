@@ -14,15 +14,13 @@ namespace vil {
 struct FrameSubmission;
 struct FrameMatch;
 
-class CommandBufferGui {
+class CommandRecordGui {
 public:
-	CommandBufferGui() = default;
-	~CommandBufferGui();
+	CommandRecordGui() = default;
+	~CommandRecordGui();
 
 	void init(Gui& gui);
-
 	void draw(Draw& draw);
-	void destroyed(const Handle& handle);
 
 	// swapchain only guaranteed to stay valid during call
 	// TODO: somewhat misleading, will not consider the given swapchain but just
@@ -51,7 +49,7 @@ private:
 	Gui* gui_ {};
 	bool freezeCommands_ {};
 
-	// = For selectionType_ swapchain =
+	// = When in swapchain mode =
 	// Currently viewed frame; i.e. the displayed commands in the command panel.
 	// Might be different (newer) from selectedFrame_ in case we force-updated
 	// the commands due to not finding the selected command anymore but

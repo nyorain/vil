@@ -350,6 +350,8 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	// TODO: might be possible to just use internal mutex, try it.
 	// Would help performance, the hooked recording is in the critical
 	// section here as well and quite expensive.
+	// NOTE: when using local mutex instead, rework ds.cpp mutex locking,
+	// see TODOs there on device mutex locked assumptions
 	std::lock_guard lock(dev.mutex);
 
 	if(target_.type == TargetType::none || freeze.load()) {

@@ -41,8 +41,8 @@ const char* name(VkObjectType objectType) {
 	}
 }
 
-std::string name(const Handle& handle, bool addType, bool perTypeDefault) {
-	const auto hn = name(handle.objectType);
+std::string name(const Handle& handle, VkObjectType objectType, bool addType, bool perTypeDefault) {
+	const auto hn = name(objectType);
 
 	std::string name;
 	if(addType) {
@@ -60,9 +60,9 @@ std::string name(const Handle& handle, bool addType, bool perTypeDefault) {
 			name += ' ';
 		}
 
-		if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
+		if(objectType == VK_OBJECT_TYPE_IMAGE) {
 			name += defaultName(static_cast<const Image&>(handle));
-		} else if(handle.objectType == VK_OBJECT_TYPE_IMAGE_VIEW) {
+		} else if(objectType == VK_OBJECT_TYPE_IMAGE_VIEW) {
 			name += defaultName(static_cast<const ImageView&>(handle));
 		} else if(name.empty()) {
 			// TODO: not sure if good idea
@@ -75,13 +75,13 @@ std::string name(const Handle& handle, bool addType, bool perTypeDefault) {
 }
 
 // type handlers
-bool matchesSearch(Handle& handle, std::string_view search) {
+bool matchesSearch(Handle& handle, VkObjectType objectType, std::string_view search) {
 	if(search.empty()) {
 		return true;
 	}
 
 	// case-insensitive search
-	auto label = name(handle);
+	auto label = name(handle, objectType);
 
 	// TODO: seems msvc can't handle our CI trait -.-
 	return (label.find(search) != label.npos);
@@ -102,7 +102,7 @@ std::vector<Handle*> findHandles(const std::unordered_map<Args...>& map,
 	std::vector<Handle*> ret;
 	for(auto& entry : map) {
 		auto& handle = *entry.second;
-		if(!matchesSearch(handle, search)) {
+		if(!matchesSearch(handle, handle.objectType, search)) {
 			continue;
 		}
 
@@ -119,7 +119,7 @@ std::vector<Handle*> findHandles(const std::unordered_set<Args...>& set,
 	std::vector<Handle*> ret;
 	for(auto& entry : set) {
 		auto& handle = *entry;
-		if(!matchesSearch(handle, search)) {
+		if(!matchesSearch(handle, handle.objectType, search)) {
 			continue;
 		}
 
@@ -136,34 +136,13 @@ struct ObjectTypeMapImpl : ObjectTypeHandler {
 
 	VkObjectType objectType() const override { return OT; }
 	Handle* find(Device& dev, u64 id, u64& fwdID) const override {
-		// TODO: should probably implement this using vil::get so we
-		// automatically just unwrap instead of using the map where possible.
-		using VKHT = decltype(vil::handle(std::declval<HT>()));
+		assertOwned(dev.mutex);
+
+		using VKHT = decltype(std::declval<HT>().handle);
 		auto vkht = u64ToHandle<VKHT>(id);
 
-		/*
-		auto& map = (dev.*DevMapPtr).inner;
-		auto it = map.find(vkht);
-		if(it == map.end()) {
-			return nullptr;
-		}
-
-		if constexpr(OT == VK_OBJECT_TYPE_COMMAND_BUFFER) {
-			fwdID = handleToU64(it->second->handle());
-		} else {
-			fwdID = handleToU64(it->second->handle);
-		}
-
-		return &*it->second;
-		*/
-
 		auto& handle = getLocked(dev, vkht);
-
-		if constexpr(OT == VK_OBJECT_TYPE_COMMAND_BUFFER) {
-			fwdID = handleToU64(handle.handle());
-		} else {
-			fwdID = handleToU64(handle.handle);
-		}
+		fwdID = handleToU64(handle.handle);
 
 		return &handle;
 	}
@@ -171,7 +150,6 @@ struct ObjectTypeMapImpl : ObjectTypeHandler {
 		return findHandles((dev.*DevMapPtr).inner, search);
 	}
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
-		dlg_assert(handle.objectType == objectType());
 		return visitor.visit(static_cast<HT&>(handle));
 	}
 };
@@ -183,50 +161,26 @@ struct DescriptorSetTypeImpl : ObjectTypeHandler {
 	// device map
 
 	VkObjectType objectType() const override { return VK_OBJECT_TYPE_DESCRIPTOR_SET; }
+
+	// NOTE: must only be called while api guarantees that the handle
+	// stays valid, ds could be destroyed in another thread otherwise (lifetime
+	// not bound to device mutex as an optimization)
 	Handle* find(Device& dev, u64 id, u64& fwdID) const override {
-		if(HandleDesc<VkDescriptorSet>::wrap) {
-			// TODO PERF: extremely slow, iterating over *all* descriptor sets
-			// via linked lists
-			auto vkh = u64ToHandle<VkDescriptorSet>(id);
-			for(auto& [h, pool] : dev.dsPools.inner) {
-				for(auto it = pool->usedEntries; it; it = it->next) {
-					auto& set = *it->set;
-					if(castDispatch<VkDescriptorSet>(set) == vkh) {
-						fwdID = handleToU64(set.handle);
-						return &set;
-					}
-				}
-			}
-		} else {
-			auto& map = dev.descriptorSets.inner;
-			auto it = map.find(u64ToHandle<VkDescriptorSet>(id));
-			if(it == map.end()) {
-				return nullptr;
-			}
+		assertOwned(dev.mutex);
 
-			fwdID = handleToU64(it->second->handle);
-			return it->second;
-		}
+		auto vkds = u64ToHandle<VkDescriptorSet>(id);
+		auto& handle = getLocked(dev, vkds);
+		fwdID = handleToU64(handle.handle);
 
-		return nullptr;
+		return &handle;
 	}
 	std::vector<Handle*> resources(Device& dev, std::string_view search) const override {
-		if(!HandleDesc<VkDescriptorSet>::wrap) {
-			return findHandles(dev.descriptorSets.inner, search);
-		}
-
-		std::vector<Handle*> ret;
-		for(auto& [h, pool] : dev.dsPools.inner) {
-			for(auto it = pool->usedEntries; it; it = it->next) {
-				if(matchesSearch(*it->set, search)) {
-					ret.push_back(it->set);
-				}
-			}
-		}
-		return ret;
+		(void) dev;
+		(void) search;
+		dlg_error("Enumerating DescriptorSets not supported, should not be called");
+		return {};
 	}
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
-		dlg_assert(handle.objectType == objectType());
 		return visitor.visit(static_cast<Queue&>(handle));
 	}
 };
@@ -252,7 +206,7 @@ struct QueueTypeImpl : ObjectTypeHandler {
 		for(auto& queue : dev.queues) {
 			// We never return queues created by us, they don't count as
 			// resources.
-			if(queue->createdByUs || !matchesSearch(*queue, search)) {
+			if(queue->createdByUs || !matchesSearch(*queue, objectType(), search)) {
 				continue;
 			}
 
@@ -262,7 +216,6 @@ struct QueueTypeImpl : ObjectTypeHandler {
 		return ret;
 	}
 	void visit(ResourceVisitor& visitor, Handle& handle) const override {
-		dlg_assert(handle.objectType == objectType());
 		return visitor.visit(static_cast<Queue&>(handle));
 	}
 };
@@ -297,23 +250,14 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
 	&QueueTypeImpl::instance,
-	// TODO: we currently don't support this, it causes too many problems.
-	// E.g. the returned handles might be destroyed async in another thread,
-	// we don't use the device mutex for it. Could likely be fixed
-	// &DescriptorSetTypeImpl::instance,
+	// NOTE: this one is special, it does not support all operations.
+	// Caller must handle this on their side.
+	&DescriptorSetTypeImpl::instance,
 };
 
 const span<const ObjectTypeHandler*> ObjectTypeHandler::handlers = typeHandlers;
 
 Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle, u64& fwdID) {
-	// TODO: temporary workaround for descriptor sets, see our wrap optimization
-	// is ds.cpp where we don't insert them into maps anymore.
-	if(objectType == VK_OBJECT_TYPE_DESCRIPTOR_SET && HandleDesc<VkDescriptorSet>::wrap) {
-		auto& ds = get(dev, u64ToHandle<VkDescriptorSet>(handle));
-		fwdID = handleToU64(ds.handle);
-		return &ds;
-	}
-
 	for(auto& handler : ObjectTypeHandler::handlers) {
 		if(handler->objectType() == objectType) {
 			auto* ptr = handler->find(dev, handle, fwdID);

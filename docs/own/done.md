@@ -1,3 +1,105 @@
+- [x] we might be able to improve the accuracy of the queried timings (in hooked cbs)
+      with inserted pipeline barriers. That will cause certain stages/commands
+	  to stall so we can measure the per-stage time in a more isolated environment
+- [x] transfer command IO inspector for buffers
+- [x] transfer commands IO insepctor for ClearAttachmentCmd: allow to select
+      the attachment to be shown in IO list and then copy that in commandHook
+- [x] remove PageVector when not used anymore. Maybe move to docs or nodes
+- [x] optimization: use custom memory management in QueueSubmit impl
+	- [x] investigate other potential bottleneck places where we
+	      allocate a lot
+- [~] command groups: come up with a concept to avoid glitchy updates
+	  in viewer. Either just update every couple of seconds (lame!) or
+	  display something special there.
+- [~] opt: even for command buffer recording we still allocate memory in a lot
+	  of places (e.g. CommandBufferDesc::getAnnotate but also in Record/Desc itself).
+	  Fix what is possible
+- [~] command groups: should probably also check commonly used handles to match them.
+	  at least some handles (at least root resources like memory, samplers etc)
+	  will always be in common. Command buffers that use almost entirely the
+	  same buffers and images can be considered related
+- [~] not sure if current cmdExecuteCommands implementation is the best.
+      see comment there.
+- [x] support khr ray tracing extension
+- [x] figure out if our linear allocator (the std::allocator) adapter
+      should value initialize on alloc
+	  {no, clearly not, per spec! See https://en.cppreference.com/w/cpp/named_req/Allocator}
+- [x] v0.1, goal: end of january 2021 (edit may 2021: lmao) 
+	- overlay improvements (especially win32 but also x11; leave wl out)
+	- testing & stability improvements
+	- docs improvements (mainly: add introduction post explaining stuff)
+	- gui improvement: remove flickering data and stuff, allow to get
+	  texel values in command viewer
+- [x] require wrapping commandBuffers? does it even work otherwise?
+      erase from global data when freed
+	  {yep, works. We want to keep supporting it for now}
+- [x] correctly unset commandBuffer handle on api destruction
+- [x] implement additional command buffer viewer mode: per-frame-commands
+      basically shows all commands submitted to queue between two present calls.
+	  similar to renderdoc
+	  {lol, yes, somewhat done by now}
+	- [~] or just show the most important submission for now? (based on "main
+	      submission" heuristics)
+- [x] support compressed/block formats
+- [x] implement buffer device address
+- [~] optimization: we don't really need to always track refCbs and store
+      the destroyed handles. Only do it for submissions viewed in gui?
+	  Could just require commandRecords to be valid while selected and
+	  then just handle the unsetting logic in CommandBufferGui::destroyed
+	    Hm, on a second thought, this won't work so easily since we might
+		select a new record that is already invalidated (useful in some
+		cases I guess). Also, we want to support showing every command
+		for a given handle at some point, where we need this tracking as well.
+	  {completely kicked out refCbs by now}
+- [x] add optional to just show timing per command (correctly show it per section)
+      in command buffer command list.
+	  Wouldn't even need to use the (error-prone) command buffer hooking
+	  mechanism, could just insert it directly into the forwarded recording
+	  commands. {nope, won't do that, hooking isn't that error-prone.}
+- [x] improve the case where multiple command buffers are pretty much the
+      same and just vary for swapchain image id or something.
+- [x] handle command-buffer re-recording as graceful as possible.
+      	- [x] Try to match selected command in new state
+- [x] general buffer reading mechanism for UI. Implement e.g. to read
+      indirect command from buffer and display in command UI
+- [x] we might be able to not lock the device mutex for all the time we lock
+      the ui (which can be a serious problem) by relying on weak/shared pointers
+	  eveywhere (making concurrently happening resource destruction no problem) 
+	  	- [x] probably requires a lot of other reworks as well, e.g. for buffer readback
+- implement at least extensions that record to command buffer to allow hooking when they are used
+	- [x] push descriptors
+	- [x] implement khr_copy_commands2 extension
+	- [x] khr fragment shading rate
+	- [x] ext conditional rendering
+	- [x] ext sample locations
+	- [x] ext discard rectangles
+	- [x] extended dynamic state
+	- [x] ext line rasterization
+	- [x] khr sync commands 2
+	- [x] ext vertex_input_dynamic_state
+	- [x] ext extended_dynamic_state2
+	- [x] ext color_write_enable
+	- [x] khr ray tracing
+- [~] with the ds changes, we don't correctly track commandRecord invalidation
+      by destroyed handles anymore. But with e.g. update_unused_while_pending +
+	  partially_bound, we can't track that anyways and must just assume
+	  the records stays valid. 
+	  We should just not expose any information about that in the gui or
+	  state it's limitation (e.g. on hover).
+	- [~] if we absolutely need this information (e.g. if it's really useful
+	      for some usecase) we could manually track it. Either by iterating
+		  over all alive records on view/sampler/buffer destruction or
+		  (e.g. triggered by explicit "query" button) by just checking
+		  for all descriptors in a record whether it has views/sampler
+		  with NULL handles (in not partially_bound descriptors I guess)
+	  {yeah, we just don't display that in the UI}
+- [x] fix CommandBuffer 'view commands' deadlock issue (by making resource
+      viewer non-locking)
+- [x] fix bug where resources are destroyed while being shown in
+      resource viewer in gui
+- [x] fix the optimization we have in ds.cpp where we don't store DescriptorSets into the
+      hash maps when object wrapping is active (which currently causes the gui to not
+	  show any descriptorSets in the resource viewer)
 - [x] overlay: looks very different depending on whether the application
       uses srgb or not. Fix that!
 		- [x] imgui rendering: in fragment shader, convert to srgb manually

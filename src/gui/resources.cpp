@@ -8,6 +8,7 @@
 #include <command/commands.hpp>
 #include <device.hpp>
 #include <queue.hpp>
+#include <pipe.hpp>
 #include <threadContext.hpp>
 #include <handles.hpp>
 #include <accelStruct.hpp>
@@ -135,6 +136,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	}
 
 	// content
+
 	if(image.swapchain) {
 		ImGui::Text("Image can't be displayed since it's a swapchain image of");
 		ImGui::SameLine();
@@ -158,26 +160,51 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		// writing this).
 		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
 	} else {
-		if(doSelect) {
-			VkImageSubresourceRange subres {};
-			subres.layerCount = image.ci.arrayLayers;
-			subres.levelCount = image.ci.mipLevels;
-			subres.aspectMask = aspects(image.ci.format);
-			auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
-			if(image.hasTransferSrc) {
-				flags |= ImageViewer::supportsTransferSrc;
+		MemoryResource::State memState {};
+		VkImage imageHandle {};
+		{
+			std::lock_guard lock(image.dev->mutex);
+			memState = image.memState;
+			if(memState == MemoryResource::State::bound) {
+				dlg_assert(image.handle);
+				dlg_assert(image.memory);
+				draw.usedImages.push_back(image_.object);
+				imageHandle = image.handle;
 			}
-			image_.viewer.select(image.handle, image.ci.extent,
-				image.ci.imageType, image.ci.format, subres,
-				image.pendingLayout, image.pendingLayout, flags);
 		}
 
-		draw.usedHandles.push_back(image_.object);
+		if(memState == MemoryResource::State::resourceDestroyed) {
+			dlg_assert(!image.handle);
+			ImGui::Text("Can't display contents since image was destroyed");
+		} else if(memState == MemoryResource::State::unbound) {
+			dlg_assert(!image.memory);
+			ImGui::Text("Can't display contents since image was never bound to memory");
+		} else if(memState == MemoryResource::State::memoryDestroyed) {
+			dlg_assert(!image.memory);
+			ImGui::Text("Can't display image contents since the memory "
+				"it was bound to was destroyed");
+		} else {
+			if(doSelect) {
+				VkImageSubresourceRange subres {};
+				subres.layerCount = image.ci.arrayLayers;
+				subres.levelCount = image.ci.mipLevels;
+				subres.aspectMask = aspects(image.ci.format);
+				auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
+				if(image.hasTransferSrc) {
+					flags |= ImageViewer::supportsTransferSrc;
+				}
 
-		ImGui::Spacing();
-		ImGui::Spacing();
+				image_.viewer.reset(true);
+				image_.viewer.select(imageHandle, image.ci.extent,
+					image.ci.imageType, image.ci.format, subres,
+					image.pendingLayout, image.pendingLayout, flags);
+			}
 
-		image_.viewer.display(draw);
+			ImGui::Spacing();
+			ImGui::Spacing();
+
+			image_.viewer.display(draw);
+		}
 	}
 
 	// TODO: display pending layout?
@@ -213,13 +240,31 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	ImGui::Spacing();
 	drawMemoryResDesc(draw, buffer);
 
-	// content
-	// we are using a child window to avoid column glitches
-	gui_->addPostRender([&](Draw& draw) { this->copyBuffer(draw); });
-	if(buffer_.lastReadback) {
-		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
-		dlg_assert(!readback.pending);
-		if(readback.src == buffer_.handle->handle) {
+	// NOTE: this check is racy and we don't insert into usedBuffers yet
+	//   since it's only relevant to insert the relevant gui message.
+	//   We do the real check (and insert) in the copyBuffer callback.
+	MemoryResource::State state;
+	{
+		std::lock_guard lock(buffer.dev->mutex);
+		state = buffer.memState;
+	}
+
+	if(state == MemoryResource::State::unbound) {
+		dlg_assert(!buffer.memory);
+		imGuiText("Can't display buffer content since it isn't bound to memory");
+	} else if(state == MemoryResource::State::resourceDestroyed) {
+		dlg_assert(!buffer.handle);
+		imGuiText("Can't display buffer content since it was destroyed");
+	} else if(state == MemoryResource::State::memoryDestroyed) {
+		dlg_assert(!buffer.memory);
+		imGuiText("Can't display buffer content since its memory was destroyed");
+	} else {
+		gui_->addPostRender([&](Draw& draw) { this->copyBuffer(draw); });
+		if(buffer_.lastReadback) {
+			auto& readback = buffer_.readbacks[*buffer_.lastReadback];
+			dlg_assert(!readback.pending);
+			dlg_assert(readback.src == buffer_.handle->handle);
+
 			ImGui::Separator();
 			buffer_.viewer.display(readback.own.data());
 		}
@@ -277,45 +322,70 @@ void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
+	// NOTE: while drawing this, we have the respective pool mutex
+	// locked. So it's important we don't lock anything in here, otherwise
+	// we might run into a deadlock
+	assertOwned(ds.pool->mutex);
+
 	refButtonExpect(*gui_, ds.layout.get());
 	refButtonExpect(*gui_, ds.pool);
 
 	ImGui::Text("Bindings");
 
-	// TODO: call addCow, then retrieve the bindings. This only
-	//   works if refBindings in ds.cpp is set though. Otherwise
-	//   the handles stored in the bindings might have been destroyed,
-	//   we don't track/notify that. Since activating refBindings
-	//   has a huge runtime impact, allow to enable it via meson option
-	/*
-	std::lock_guard lock(ds.mutex);
+	// NOTE: with refBindings == false in ds.cpp, we MIGHT get incorrect handles
+	//   here. But the chance is small when device has keepAlive maps.
+	//   Even when the handles are incorrect, that's only because a view
+	//   was destroyed and then a view of the same type constructed
+	//   at the same memory address, we validate them inside addCowLocked.
+	// TODO: also re-evaluate whether the performance impact of refBindings
+	//   is really that large. It really shouldn't be.
+
+	dlg_assert(ds_.state);
+	auto state = DescriptorStateRef(*ds_.state);
+
 	for(auto b = 0u; b < ds.layout->bindings.size(); ++b) {
 		auto& layout = ds.layout->bindings[b];
-		dlg_assert(layout.binding == b);
 
 		auto print = [&](VkDescriptorType type, unsigned b, unsigned e) {
 			switch(category(type)) {
 				case DescriptorCategory::image: {
-					auto& binding = images(ds, b)[e];
+					auto& binding = images(state, b)[e];
+					bool append = false;
 					if(needsImageView(type)) {
-						refButtonExpect(*gui_, *binding.imageView.get());
+						if(append) {
+							ImGui::SameLine();
+						}
+						refButtonD(*gui_, binding.imageView);
+						append = true;
 					}
 					if(needsImageLayout(type)) {
+						if(append) {
+							ImGui::SameLine();
+						}
 						imGuiText("{}", vk::name(binding.layout));
+						append = true;
 					}
 					if(needsSampler(type)) {
-						refButtonExpect(*gui_, binding.sampler.get());
+						if(append) {
+							ImGui::SameLine();
+						}
+						refButtonD(*gui_, binding.sampler);
+						append = true;
 					}
 					break;
 				} case DescriptorCategory::buffer: {
-					auto& binding = buffers(ds, b)[e];
-					refButtonExpect(*gui_, binding.buffer.get());
+					auto& binding = buffers(state, b)[e];
+					refButtonD(*gui_, binding.buffer);
 					ImGui::SameLine();
 					drawOffsetSize(binding);
 					break;
 				} case DescriptorCategory::bufferView: {
-					auto& binding = bufferViews(ds, b)[e];
-					refButtonExpect(*gui_, binding.get());
+					auto& binding = bufferViews(state, b)[e];
+					refButtonD(*gui_, binding.bufferView);
+					break;
+				} case DescriptorCategory::accelStruct: {
+					auto& binding = accelStructs(state, b)[e];
+					refButtonD(*gui_, binding.accelStruct);
 					break;
 				} default:
 					dlg_warn("Unimplemented descriptor category");
@@ -335,8 +405,10 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 
 					print(layout.descriptorType, b, e);
 				}
+
+				ImGui::TreePop();
 			}
-		} else {
+		} else if(elemCount == 1u) {
 			ImGui::Bullet();
 			imGuiText("{}, {}: ", b, vk::name(layout.descriptorType));
 
@@ -347,9 +419,11 @@ void ResourceGui::drawDesc(Draw&, DescriptorSet& ds) {
 
 			ImGui::Unindent();
 			ImGui::Unindent();
+		} else if(elemCount == 0u) {
+			ImGui::Bullet();
+			imGuiText("{}: empty (0 elements)", b);
 		}
 	}
-	*/
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {
@@ -665,7 +739,14 @@ void ResourceGui::drawDesc(Draw&, CommandPool& cp) {
 	imGuiText("Queue Family: {} ({})", cp.queueFamily,
 		vk::nameQueueFlags(qprops.queueFlags));
 
-	for(auto& cb : cp.cbs) {
+	std::vector<CommandBuffer*> cbsCopy;
+
+	{
+		std::lock_guard lock(cp.dev->mutex);
+		cbsCopy = cp.cbs;
+	}
+
+	for(auto& cb : cbsCopy) {
 		refButtonExpect(*gui_, cb);
 	}
 }
@@ -723,13 +804,13 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 			col = allocHoverCol;
 
 			ImGui::BeginTooltip();
-			imGuiText("{}", vil::name(*resource));
+			imGuiText("{}", vil::name(*resource, resource->memObjectType, true, true));
 			imGuiText("Offset: {}", sepfmt(resource->allocationOffset));
 			imGuiText("Size: {}", sepfmt(resource->allocationSize));
 			ImGui::EndTooltip();
 		}
 		if(ImGui::IsItemClicked()) {
-			select(*resource);
+			select(*resource, resource->memObjectType);
 		}
 
 		auto resEnd = ImVec2(resPos.x + rectSize.x, resPos.y + rectSize.y);
@@ -1113,6 +1194,121 @@ void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {
 	imGuiText("TODO");
 }
 
+void ResourceGui::updateResourceList() {
+	dlg_trace("updateResourceList");
+	auto& dev = gui_->dev();
+
+	auto incRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
+		using HT = std::remove_reference_t<decltype(res)>;
+		constexpr auto noop =
+			std::is_same_v<HT, DescriptorSet> ||
+			std::is_same_v<HT, Queue>;
+		if constexpr(!noop) {
+			incRefCount(res);
+		}
+	});
+	auto decRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
+		using HT = std::remove_reference_t<decltype(res)>;
+		constexpr auto noop =
+			std::is_same_v<HT, DescriptorSet> ||
+			std::is_same_v<HT, Queue>;
+		if constexpr(std::is_same_v<HT, Pipeline>) {
+			if(res.type == VK_PIPELINE_BIND_POINT_COMPUTE) {
+				decRefCount(static_cast<ComputePipeline&>(res));
+			} else if(res.type == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+				decRefCount(static_cast<GraphicsPipeline&>(res));
+			} else if(res.type == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
+				decRefCount(static_cast<RayTracingPipeline&>(res));
+			} else {
+				dlg_error("unreachable");
+			}
+		} else if constexpr(!noop) {
+			decRefCount(res);
+		}
+	});
+
+	// clear selection
+	const ObjectTypeHandler* typeHandler {};
+	for(auto& handler : ObjectTypeHandler::handlers) {
+		if(handler->objectType() == filter_) {
+			typeHandler = handler;
+			break;
+		}
+	}
+
+	for(auto& handle : handles_) {
+		typeHandler->visit(decRefCountVisitor, *handle);
+	}
+
+	handles_.clear();
+	ds_.pools.clear();
+	ds_.entries.clear();
+
+	// find new handler
+	if(filter_ != newFilter_) {
+		clearSelection();
+	}
+	filter_ = newFilter_;
+
+	for(auto& handler : ObjectTypeHandler::handlers) {
+		if(handler->objectType() == filter_) {
+			typeHandler = handler;
+			break;
+		}
+	}
+
+	std::lock_guard lock(gui_->dev().mutex);
+
+	// find new handles
+	auto foundSelected = false;
+	if(filter_ == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+		for(auto& dsPool : dev.dsPools.inner) {
+			ds_.pools.push_back(dsPool.second);
+
+			auto it = dsPool.second->usedEntries;
+			while(it) {
+				dlg_assert(it->set);
+
+				auto& entry = ds_.entries.emplace_back();
+				entry.pool = dsPool.second.get();
+				entry.entry = it;
+				entry.id = it->set->id;
+				it = it->next;
+
+				if(entry.entry == ds_.selected.entry) {
+					foundSelected = true;
+				}
+			}
+		}
+	} else {
+		for(auto& typeHandler : ObjectTypeHandler::handlers) {
+			if(typeHandler->objectType() == filter_) {
+				handles_ = typeHandler->resources(dev, search_);
+				break;
+			}
+		}
+
+		for(auto& handle : handles_) {
+			typeHandler->visit(incRefCountVisitor, *handle);
+			if(handle == handle_) {
+				foundSelected = true;
+			}
+		}
+	}
+
+	// we updated the list and our selection wasn't in there anymore
+	if(!foundSelected) {
+		clearSelection();
+	}
+}
+
+void ResourceGui::clearSelection() {
+	handle_ = nullptr;
+	ds_.selected = {};
+	image_.object = {};
+	buffer_.handle = {};
+}
+
 void ResourceGui::draw(Draw& draw) {
 	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
 	if(!ImGui::BeginTable("Resource viewer", 2, flags, ImGui::GetContentRegionAvail())) {
@@ -1129,6 +1325,7 @@ void ResourceGui::draw(Draw& draw) {
 
 	// filter by object type
 	auto update = firstUpdate_;
+	update |= (filter_ != newFilter_);
 	firstUpdate_ = false;
 
 	auto filterName = vil::name(filter_);
@@ -1138,7 +1335,7 @@ void ResourceGui::draw(Draw& draw) {
 			auto filter = typeHandler->objectType();
 			auto name = vil::name(filter);
 			if(ImGui::Selectable(name)) {
-				filter_ = filter;
+				newFilter_ = filter;
 				update = true;
 			}
 		}
@@ -1156,64 +1353,124 @@ void ResourceGui::draw(Draw& draw) {
 		update = true;
 	}
 
-	auto& dev = gui_->dev();
 	if(update) {
-		// lock access to destroyed_
-		std::lock_guard lock(gui_->dev().mutex);
-		handles_.clear();
-		destroyed_.clear();
-
-		for(auto& typeHandler : ObjectTypeHandler::handlers) {
-			if(typeHandler->objectType() == filter_) {
-				handles_ = typeHandler->resources(dev, search_);
-				break;
-			}
-		}
+		updateResourceList();
 	}
 
 	ImGui::Separator();
 
 	// resource list
+	const ObjectTypeHandler* typeHandler {};
+	for(auto& handler : ObjectTypeHandler::handlers) {
+		if(handler->objectType() == filter_) {
+			typeHandler = handler;
+			break;
+		}
+	}
+
+	bool isDestroyed {};
+	auto isDestroyedVisitor = TemplateResourceVisitor([&](auto& res) {
+		using HT = std::remove_reference_t<decltype(res)>;
+		if constexpr(std::is_same_v<HT, Queue>) {
+			return;
+		} else if constexpr(std::is_same_v<HT, DescriptorSet>) {
+			dlg_error("unreachable");
+			return;
+		} else {
+			// lock mutex due to access to res.handle
+			std::lock_guard lock(gui_->dev().mutex);
+			isDestroyed = (res.handle == VK_NULL_HANDLE);
+		}
+	});
+
 	ImGui::BeginChild("Resource List", {0.f, 0.f}, false);
 
 	ImGuiListClipper clipper;
-	clipper.Begin(int(handles_.size()));
+	if(filter_ == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+		// we can't guarantee the handle stays valid so we
+		// never store it, even on selection.
+		dlg_assert(handle_ == nullptr);
+		clipper.Begin(int(ds_.entries.size()));
+	} else {
+		clipper.Begin(int(handles_.size()));
+	}
 
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.f, 3.f));
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
 
 	while(clipper.Step()) {
 		for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-			auto& handle = *handles_[i];
-			auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
-				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
+			std::string label;
+			bool isSelected;
+			bool disable;
 
-			ImGui::PushID(&handle);
+			Handle* handle {};
+			if(filter_ == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+				auto& entry = ds_.entries[i];
+				ImGui::PushID(&entry);
 
-			{
-				auto selected = (&handle == handle_);
+				isSelected = (entry.entry == ds_.selected.entry);
 
-				// lock access to destroyed_
-				std::lock_guard lock(gui_->dev().mutex);
-				auto disabled = (destroyed_.count(&handle) > 0);
-				std::string label = disabled ? "<Destroyed>" : name(handle, false);
+				{
+					std::lock_guard lock(entry.pool->mutex);
+					isDestroyed = !entry.entry->set ||
+						// in this case the dsPool-entry-slot was reused
+						(entry.entry->set->id != entry.id);
 
-				pushDisabled(disabled);
-
-				if(selected) {
-					flags |= ImGuiTreeNodeFlags_Selected;
-				}
-
-				if(ImGui::TreeNodeEx(label.c_str(), flags)) {
-					if(ImGui::IsItemClicked()) {
-						dlg_assert(!disabled);
-						select(handle);
+					if(!isDestroyed) {
+						label = name(*entry.entry->set, false);
 					}
 				}
 
-				popDisabled(disabled);
+				disable = isDestroyed;
+				if(isDestroyed) {
+					label = "<Destroyed>";
+					if(isSelected) {
+						ds_.selected = {};
+						isSelected = false;
+					}
+				}
+			} else {
+				handle = handles_[i];
+				ImGui::PushID(&handle);
+
+				isSelected = (handle == handle_);
+				typeHandler->visit(isDestroyedVisitor, *handle);
+
+				if(isDestroyed) {
+					label += "[Destroyed] ";
+				}
+
+				// we explicitly allow selecting destroyed handles
+				disable = false;
+				label += name(*handle, filter_, false, true);
 			}
 
+			auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
+				ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
+
+			// TODO: for non-ds handles, we could still allow selecting them
+			pushDisabled(disable);
+
+			if(isSelected) {
+				flags |= ImGuiTreeNodeFlags_Selected;
+			}
+
+			if(ImGui::TreeNodeEx(label.c_str(), flags)) {
+				if(ImGui::IsItemClicked()) {
+					dlg_assert(!disable);
+					clearSelection();
+
+					if(filter_ == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+						ds_.selected = ds_.entries[i];
+					} else {
+						dlg_assert(handle);
+						select(*handle, filter_);
+					}
+				}
+			}
+
+			popDisabled(disable);
 			ImGui::PopID();
 		}
 	}
@@ -1227,20 +1484,32 @@ void ResourceGui::draw(Draw& draw) {
 	// resource view
 	ImGui::BeginChild("Resource View", {0.f, 0.f}, false);
 
-	if(handle_) {
-		ImGui::PushID(handle_);
-		drawHandleDesc(draw, *handle_);
+	if(filter_ == VK_OBJECT_TYPE_DESCRIPTOR_SET && ds_.selected.entry) {
+		ImGui::PushID(ds_.selected.entry);
+		drawHandleDesc(draw);
 		ImGui::PopID();
+	} else if(handle_) {
+		// NOTE: automatically unselect on destruction?
+		// typeHandler->visit(isDestroyedVisitor, *handle_);
+		// if(isDestroyed) {
+		// 	handle_ = {};
+		// }
+
+		if(handle_) {
+			ImGui::PushID(handle_);
+			drawHandleDesc(draw);
+			ImGui::PopID();
+		}
 	}
 
 	ImGui::EndChild();
 	ImGui::EndTable();
 }
 
-void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
+void ResourceGui::drawHandleDesc(Draw& draw) {
 	auto visitor = TemplateResourceVisitor([&](auto& res) {
 		if(editName_) {
-			imGuiTextInput("", handle.name);
+			imGuiTextInput("", res.name);
 			if(ImGui::IsItemDeactivated()) {
 				editName_ = false;
 			}
@@ -1259,34 +1528,63 @@ void ResourceGui::drawHandleDesc(Draw& draw, Handle& handle) {
 		this->drawDesc(draw, res);
 	});
 
-	for(auto& handler : ObjectTypeHandler::handlers) {
-		if(handler->objectType() == handle.objectType) {
-			handler->visit(visitor, handle);
+	if(filter_ == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+		dlg_assert(ds_.selected.entry);
+		dlg_assert(!handle_);
+
+		// update dsState
+		// important to reset outside CS
+		ds_.state.reset();
+
+		// this separate critical section means that the state can be
+		// outdated when we draw it below but that's not a problem
+		{
+			std::lock_guard devLock(gui_->dev().mutex);
+			std::lock_guard poolLock(ds_.selected.pool->mutex);
+			auto valid = ds_.selected.entry->set &&
+				ds_.selected.entry->set->id == ds_.selected.id;
+			if(valid) {
+				ds_.state = ds_.selected.entry->set->validateAndCopyLocked();
+			}
+		}
+
+		// draw
+		std::lock_guard lock(ds_.selected.pool->mutex);
+		auto valid = ds_.selected.entry->set &&
+			ds_.selected.entry->set->id == ds_.selected.id;
+		if(valid) {
+			drawDesc(draw, *ds_.selected.entry->set);
+		} else {
+			imGuiText("Was destroyed");
+			ds_.selected = {};
+		}
+	} else {
+		for(auto& handler : ObjectTypeHandler::handlers) {
+			if(handler->objectType() == filter_) {
+				handler->visit(visitor, *handle_);
+			}
 		}
 	}
 }
 
-void ResourceGui::destroyed(const Handle& handle) {
-	if(handle_ == &handle) {
-		if(handle.objectType == VK_OBJECT_TYPE_IMAGE) {
-			image_.object = {};
-			image_.viewer.unselect();
-		}
-
-		handle_ = nullptr;
-	}
-
-	// TODO: the DescriptorSet list is broken since we don't
-	// get notifications for them.
-	if(handle.objectType == filter_) {
-		destroyed_.insert(&handle);
-	}
-}
-
-void ResourceGui::select(Handle& handle) {
-	handle_ = &handle;
+void ResourceGui::select(Handle& handle, VkObjectType type) {
+	clearSelection();
+	newFilter_ = type;
 	editName_ = false;
-	dlg_assert(handle.objectType != VK_OBJECT_TYPE_UNKNOWN);
+
+	dlg_assert(type != VK_OBJECT_TYPE_UNKNOWN);
+
+	if(type == VK_OBJECT_TYPE_DESCRIPTOR_SET) {
+		auto& ds = static_cast<DescriptorSet&>(handle);
+		// anything else is a race since the DescriptorSet itself could be
+		// destroyed any moment
+		assertOwned(ds.pool->mutex);
+		ds_.selected.entry = ds.setEntry;
+		ds_.selected.pool = ds.pool;
+		ds_.selected.id = ds.id;
+	} else {
+		handle_ = &handle;
+	}
 }
 
 void ResourceGui::copyBuffer(Draw& draw) {
@@ -1296,6 +1594,20 @@ void ResourceGui::copyBuffer(Draw& draw) {
 	// else in this frame I guess.
 	if(!handle_ || handle_ != buffer_.handle) {
 		return;
+	}
+
+	VkBuffer bufHandle {};
+	{
+		std::lock_guard lock(dev.mutex);
+		bool valid = (buffer_.handle->memState == MemoryResource::State::bound);
+		if(!valid) {
+			return;
+		}
+
+		dlg_assert(buffer_.handle->handle);
+		dlg_assert(buffer_.handle->memory);
+		draw.usedBuffers.push_back(buffer_.handle);
+		bufHandle = buffer_.handle->handle;
 	}
 
 	auto& buf = *buffer_.handle;
@@ -1320,7 +1632,7 @@ void ResourceGui::copyBuffer(Draw& draw) {
 
 	VkBufferMemoryBarrier bufb {};
 	bufb.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	bufb.buffer = buf.handle;
+	bufb.buffer = bufHandle;
 	bufb.offset = offset;
 	bufb.size = size;
 	bufb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -1337,7 +1649,7 @@ void ResourceGui::copyBuffer(Draw& draw) {
 	copy.srcOffset = offset;
 	copy.dstOffset = 0u;
 	copy.size = size;
-	dev.dispatch.CmdCopyBuffer(draw.cb, buf.handle, readback->own.buf, 1, &copy);
+	dev.dispatch.CmdCopyBuffer(draw.cb, bufHandle, readback->own.buf, 1, &copy);
 
 	bufb.srcAccessMask = bufb.dstAccessMask;
 	bufb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -1353,7 +1665,7 @@ void ResourceGui::copyBuffer(Draw& draw) {
 	// still interested in.
 	readback->offset = offset;
 	readback->size = size;
-	readback->src = buf.handle;
+	readback->src = bufHandle;
 	readback->pending = &draw;
 
 	auto cb = [this](Draw& draw, bool success){
@@ -1373,10 +1685,6 @@ void ResourceGui::copyBuffer(Draw& draw) {
 		dlg_assert(found);
 	};
 	draw.onFinish.push_back(cb);
-
-	// make sure this submission properly synchronized with submissions
-	// that also use the buffer (especially on other queues).
-	draw.usedHandles.push_back(&buf);
 }
 
 } // namespace vil

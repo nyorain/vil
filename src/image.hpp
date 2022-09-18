@@ -8,6 +8,8 @@
 namespace vil {
 
 struct Image : MemoryResource {
+	static constexpr auto objectType = VK_OBJECT_TYPE_IMAGE;
+
 	VkImage handle {};
 	VkImageCreateInfo ci;
 
@@ -31,33 +33,26 @@ struct Image : MemoryResource {
 	bool concurrentHooked {}; // whether we moved it into concurrent sharing mode
 	bool hasTransferSrc {}; // whether we were able to set transferSrc usage
 
-	Image() = default;
 	~Image();
-	Image(Image&&) = delete;
-	Image& operator=(Image&&) = delete;
 };
 
 struct ImageView : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
+
 	Image* img {};
 	VkImageView handle {};
 	VkImageViewCreateInfo ci;
 
 	std::vector<Framebuffer*> fbs; // TODO: unordered set?
 
-	ImageView() = default;
 	~ImageView();
-	ImageView(ImageView&&) = delete;
-	ImageView& operator=(ImageView&&) = delete;
 };
 
 struct Sampler : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_SAMPLER;
+
 	VkSampler handle {};
 	VkSamplerCreateInfo ci;
-
-	Sampler() = default;
-	~Sampler();
-	Sampler(Sampler&&) = delete;
-	Sampler& operator=(Sampler&&) = delete;
 };
 
 std::string defaultName(const Image&);

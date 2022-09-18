@@ -10,6 +10,19 @@ namespace vil {
 
 constexpr struct AcquireOwnershipTag {} acquireOwnership;
 
+template<typename T>
+void incRefCount(T& obj) {
+	obj.refCount.fetch_add(1u, std::memory_order_relaxed);
+}
+
+template<typename T, typename Deleter = std::default_delete<T>>
+void decRefCount(T& obj) {
+	dlg_assert(obj.refCount.load() > 0u);
+	if(obj.refCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u) {
+		Deleter()(&obj);
+	}
+}
+
 template<typename T, typename H>
 class HandledPtr {
 public:
@@ -100,13 +113,8 @@ template<typename T, typename Deleter = std::default_delete<T>>
 struct RefCountHandler {
 	// NOTE: we assume that increasing/decreasing ref count is noexcept
 	// See https://stackoverflow.com/questions/41424539 for memory order rationle
-	void inc(T& obj) const noexcept { obj.refCount.fetch_add(1u, std::memory_order_relaxed); }
-	void dec(T& obj) const noexcept {
-		dlg_assert(obj.refCount.load() > 0u);
-		if(obj.refCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u) {
-			Deleter()(&obj);
-		}
-	}
+	void inc(T& obj) const noexcept { incRefCount(obj); }
+	void dec(T& obj) const noexcept { decRefCount<T, Deleter>(obj); }
 };
 
 template<typename T>

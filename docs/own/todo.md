@@ -1,21 +1,6 @@
 # Todo
 
-v0.1, goal: end of january 2021 (edit may 2021: lmao) 
-- overlay improvements (especially win32 but also x11; leave wl out)
-- testing & stability improvements
-- docs improvements (mainly: add introduction post explaining stuff)
-- gui improvement: remove flickering data and stuff, allow to get
-  texel values in command viewer
-
 urgent, bugs:
-- [ ] fix bug where resources are destroyed while being shown in
-      resource viewer in gui
-- [ ] fix CommandBuffer 'view commands' deadlock issue (by making resource
-      viewer non-locking)
-- [ ] add 'hook' fastpaths that don't do this whole matching thing
-	  when we e.g. know it's a different queue (or when we already had
-	  a pretty perfect match?)
-
 - [ ] CommandViewer (and ShaderDebugger probs as well) don't get an initial
       state when ops change and freezeState is active.
 	  Solution: instead of *each* component having its own state, they
@@ -34,28 +19,19 @@ urgent, bugs:
 	  Just update a copy of (mutex-synced) state that is applied at beginning
 	  of render.
 
-- [ ] require wrapping commandBuffers? does it even work otherwise?
-      erase from global data when freed
-- [ ] correctly unset commandBuffer handle on api destruction
-
 - [ ] set spec constants for shader module in gui shader debugger.
       Test with shader from tkn/iro
-- [ ] figure out if our linear allocator (the std::allocator) adapter
-      should value initialize on alloc
+
 - [ ] figure out transform_feedback crashes in doom eternal
       crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
       check if it could be a error in patching logic; otherwise analyze our generated spirv,
       see the dumped shaders that might have caused the crash (on D:)
+	  {NOTE: check if that was fixed by the xfb changes we did}
 - [ ] figure out tracy crashs with doom eternal :(
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
 - [ ] toupper bug when searching for resource
-- [ ] figure out to handle copyChain in a general way. Sometimes we need
-      deep copies, sometimes we need to unwrap additional handles inside
-	  the copy. Both of it is currently not done.
-	  Or maybe remove the copyChain logic completely? Not sure if trying
-	  to support simple extensions out of the box even makes sense.
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
       increasing the minBlockSize. Increased it temporarily but should probably just roll own block sub-allocator
 - [ ] when viewing resources aliasing others in memory in the resource viewer,
@@ -63,8 +39,19 @@ urgent, bugs:
 	  Vulkan says it's not allowed to use such resources.
 	  Note that they are usually NOT in the invalid image layout, just the last
 	  one they were used in.
+- [ ] fix buffmt for storageBuffer array
+      test with iro, shadowCull
 
 new, workstack:
+- [ ] cbGui: freezing state will currently also freeze the shown commands,
+      might not be expected/desired. Reworking this is hard:
+	  when freezing state we don't execute any hooks and therefore would need
+	  new mechanism to correctly match new records.
+	  Fix this when doing the next match/cbGui update iteration (related: next 
+	  command group impl iteration)
+- [ ] single-commandRecord viewing is buggy
+	- [ ] useful feature, we want to support it.
+- [ ] add global mutex priorities and add debug asserts
 - [ ] improve gui layout, too much wasted space in buffer viewer rn.
 - [ ] improve gui layout of image viewer (e.g. in command viewer).
       really annoying rn to always scroll down. 
@@ -115,6 +102,11 @@ new, workstack:
 	  always allocates a vector
 - [ ] blur.comp: correctly blur in linear space, not srgb
       looks different currently depending on whether swapchain is srgb or not
+- [ ] figure out to handle copyChain in a general way. Sometimes we need
+      deep copies, sometimes we need to unwrap additional handles inside
+	  the copy. Both of it is currently not done.
+	  Or maybe remove the copyChain logic completely? Not sure if trying
+	  to support simple extensions out of the box even makes sense.
 - [ ] {later} implement image histograms (probably best like in PIX)
       See minmax.comp and histogram.comp
 - [ ] {later} honor maxTexelBufferElements. Fall back to raw vec4f copy
@@ -256,6 +248,10 @@ window/overlay
 - [ ] {low prio, later} fix overlay for wayland. try xdg popup?
 
 performance/profiling:
+- [ ] add 'hook' fastpaths that don't do this whole matching thing
+	  when we e.g. know it's a different queue (or when we already had
+	  a pretty perfect match?)
+
 - [ ] CommandRecord::doEnd is expensive (and has a way-too-long CS) improve that
 	- [ ] ~CommandRecord is expensive (and it's sometimes called multiple times
 	       from one doEnd/doReset?? figure out how)
@@ -305,9 +301,6 @@ performance/profiling:
 	  Just re-add what we previously had. But this will need changes to CommandRecord::invalidated
 	  and some re-thinking in general on how to allocate *after* recording is finished.
 	  Might have to merge this with the refRecords/invalidated rework.
-- [ ] fix the optimization we have in ds.cpp where we don't store DescriptorSets into the
-      hash maps when object wrapping is active (which currently causes the gui to not
-	  show any descriptorSets in the resource viewer)
 - [ ] {low prio now} can we make per-cb-mutexs a thing?
       major bottleneck for applications that have hundreds of small command
 	  buffers. There are reasons it's not possible at the moment though,
@@ -316,25 +309,6 @@ performance/profiling:
 		  per-cb-mutex shouldn't be important as long as we keep the critical
 		  sections really small, without any blocking
 
-
-object wrapping:
-- [ ] (low prio, not sure yet)
-      only use the hash maps in Device when we are not using object 
-      wrapping. Otherwise a linked list is enough/better.
-	  Could always use the linked list and the hash maps just optionally.
-	  Maybe we can even spin up some lockfree linked list for this? We'd only
-	  ever insert at one end, order is irrelevant.
-	  NOTE: linked list isn't always enough, for descriptor-bound handles
-	  (i.e. views) we sometimes need to check whether a given handle is
-	  still valid. But that is kinda error-prone anyways due to reallocation
-	  of the same address later on :/
-	- [ ] Figure out how to correctly handle the maps in Device when using 
-		  wrapping. Many ugly situations atm, see e.g. the
-		  hack in ~CommandPool and ~DescriptorPool.
-		  And we don't really need maps in the first place, see below.
-- [ ] (later, low prio) support wrapping for remaining handle types.
-      we can wait with this until it proves to be a bottleneck somewhere
-- [ ] (later, low prio) support wrapping for VkDevice, fix it everywhere
 
 gui stuff
 - [ ] (high prio) cb/command viewer: when viewing a batch from a swapchain,
@@ -415,6 +389,26 @@ other
 
 PERF: lazy copying of resources, when resources don't change, we don't
 	have to make a copy every frame
+
+object wrapping:
+- [ ] (low prio, not sure yet)
+      only use the hash maps in Device when we are not using object 
+      wrapping. Otherwise a linked list is enough/better.
+	  Could always use the linked list and the hash maps just optionally.
+	  Maybe we can even spin up some lockfree linked list for this? We'd only
+	  ever insert at one end, order is irrelevant.
+	  NOTE: linked list isn't always enough, for descriptor-bound handles
+	  (i.e. views) we sometimes need to check whether a given handle is
+	  still valid. But that is kinda error-prone anyways due to reallocation
+	  of the same address later on :/
+	- [ ] Figure out how to correctly handle the maps in Device when using 
+		  wrapping. Many ugly situations atm, see e.g. the
+		  hack in ~CommandPool and ~DescriptorPool.
+		  And we don't really need maps in the first place, see below.
+- [ ] (later, low prio) support wrapping for remaining handle types.
+      we can wait with this until it proves to be a bottleneck somewhere
+- [ ] (later, low prio) support wrapping for VkDevice, fix it everywhere
+
 
 ---
 
@@ -507,12 +501,6 @@ optimization:
 	  this via std::map in Device with custom comparison that
 	  checks whether an address is in-range? Think about whether
 	  this works for memory aliasing.
-- [ ] cbGui: freezing state will currently also freeze the shown commands,
-      might not be expected/desired. Reworking this is hard:
-	  when freezing state we don't execute any hooks and therefore would need
-	  new mechanism to correctly match new records.
-	  Fix this when doing the next match/cbGui update iteration (related: next 
-	  command group impl iteration)
 - [ ] (low prio, only when problem) memory overhead from using spirv-cross may be too large.
       Create the reflection modules only on-demand then, shouldn't be
 	  too expensive. And/or page them and/or the stored spirv data
@@ -588,8 +576,6 @@ optimization:
 - [ ] displaying high-res images in small viewer gives bad artefacts
       since we don't use mips. Could generate mips on our own (this requires
 	  just copying the currently vieweed mip and then generating our own mips)
-- [ ] attempt to retain previous selection in io viewer when selecting
-	  new command
 - [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support
       is being enabled. I remember renderdoc doing this, sounds like a good idea.
 	- [ ] or an unexpectly high api version
@@ -635,12 +621,6 @@ optimization:
 	- [ ] allow per-app shortcuts to specific commands?
 - [ ] look into imgui shortcuts to allow quick interaction.
       vim-like!
-- [ ] we might be able to improve the accuracy of the queried timings (in hooked cbs)
-      with inserted pipeline barriers. That will cause certain stages/commands
-	  to stall so we can measure the per-stage time in a more isolated environment
-- [ ] transfer command IO inspector for buffers
-- [ ] transfer commands IO insepctor for ClearAttachmentCmd: allow to select
-      the attachment to be shown in IO list and then copy that in commandHook
 - [ ] support multiple subresources for transfer commands, images
 	- [ ] pain in the ass regarding layout transitions as the range of
 	      subresources does not have to be continuous (and we can't assume
@@ -648,18 +628,6 @@ optimization:
 - [ ] important optimization, low hanging fruit:
       CopiedImage: don't ever use concurrent sharing mode.
 	  We can explicitly transition the image when first copying it.
-- [ ] with the ds changes, we don't correctly track commandRecord invalidation
-      by destroyed handles anymore. But with e.g. update_unused_while_pending +
-	  partially_bound, we can't track that anyways and must just assume
-	  the records stays valid. 
-	  We should just not expose any information about that in the gui or
-	  state it's limitation (e.g. on hover).
-	- [ ] if we absolutely need this information (e.g. if it's really useful
-	      for some usecase) we could manually track it. Either by iterating
-		  over all alive records on view/sampler/buffer destruction or
-		  (e.g. triggered by explicit "query" button) by just checking
-		  for all descriptors in a record whether it has views/sampler
-		  with NULL handles (in not partially_bound descriptors I guess)
 - [ ] we currently copy more levels/layers in commandHook than are shown
       in i/o inspector. Could just copy the currently shown subresource.
 - [ ] write tests for some common functionality
@@ -684,28 +652,14 @@ optimization:
 	- [ ] support buffer views in our texture viewer (i.e. show their content)
 - [ ] experiment with transparent overlay windows in which we render the
       overlay, to not be dependent on application refresh rate.
-- [ ] support compressed/block formats
 - [ ] allow to view submissions to a queue
-- [ ] implement buffer devicve address
-- [ ] implement at least extensions that record to command buffer to allow hooking when they are used
-	- [x] push descriptors
-	- [x] implement khr_copy_commands2 extension
-	- [x] khr fragment shading rate
-	- [x] ext conditional rendering
-	- [x] ext sample locations
-	- [x] ext discard rectangles
-	- [x] extended dynamic state
-	- [x] ext line rasterization
-	- [ ] khr sync commands 2
-	- [ ] ext vertex_input_dynamic_state
-	- [ ] ext extended_dynamic_state2
-	- [ ] ext color_write_enable
-	- [x] khr ray tracing
+- [ ] add support for ext mesh shaders
+- {low prio} implement at least extensions that record to command buffer 
+  to allow hooking when they are used
 	- [ ] device masks (core vulkan by now)
 	      ugh, supporting this will be a MAJOR pain, especially gui rendering.
 	- [ ] nv device diagnostic checkpoint
 	- [ ] nv exclusive scissor
-	- [ ] nv mesh shaders
 	- [ ] amd buffer marker
 	- [ ] intel performance metrics
 	- [ ] nv shading rate image
@@ -715,11 +669,6 @@ optimization:
 		  for pipes/shaders that use it themselves. Vertex shader won't be available
 		  in that case.
 	- [ ] nv shading rate enums
-- [ ] implement additional command buffer viewer mode: per-frame-commands
-      basically shows all commands submitted to queue between two present calls.
-	  similar to renderdoc
-	- [ ] or just show the most important submission for now? (based on "main
-	      submission" heuristics)
 - [ ] use new imgui tables api where useful
 - [ ] add "save to ktx" feature on images? Personally, I'd consider this
       useful but this will likely scream LETS ABUSE PROPRIETARY IMAGES to some
@@ -730,10 +679,9 @@ optimization:
 		  (without textures or at unassigned textures or maybe even
 		   try to connect them to gltf properties via heuristics)
 - [ ] support for compressed image formats
-- [ ] optimize: suballocate and CopiedBuffer
+- [ ] optimize: suballocate CopiedBuffer
 - [ ] optimize: reuse CopiedImage and CopiedBuffer
 - [ ] support multiple imgui themes via settings
-- [ ] remove PageVector when not used anymore. Maybe move to docs or nodes
 - [ ] in cb viewer: allow to set collapse mode, e.g. allow more linear layout?
       and other settings
 - [ ] make gui more comfortable to use
@@ -746,9 +694,6 @@ optimization:
 	  implemented by driver or by implementing it inside our layer) expect
 	  timeline semaphores to be available, removing the legacy code path.
 - [ ] fix warning 4458, see meson.build, we currently disable it.
-- [ ] optimization: use custom memory management in QueueSubmit impl
-	- [ ] investigate other potential bottleneck places where we
-	      allocate a lot
 - [ ] internal statistics tab
 	- [ ] number of hooked command buffer records (alive records)
 	- [ ] time spent in certain critical sections?
@@ -765,39 +710,21 @@ optimization:
 	  provide a full frame graph).
 	- [ ] Maybe start with something that simply writes a dot file for a frame or two?
 	      Getting this right interactively with imgui will be... hard
-- [ ] command groups: come up with a concept to avoid glitchy updates
-	  in viewer. Either just update every couple of seconds (lame!) or
-	  display something special there.
-- [ ] opt: even for command buffer recording we still allocate memory in a lot
-	  of places (e.g. CommandBufferDesc::getAnnotate but also in Record/Desc itself).
-	  Fix what is possible
-- [ ] command groups: should probably also check commonly used handles to match them.
-	  at least some handles (at least root resources like memory, samplers etc)
-	  will always be in common. Command buffers that use almost entirely the
-	  same buffers and images can be considered related
 - [ ] register own debug messenger if possible?
-- [ ] not sure if current cmdExecuteCommands implementation is the best.
-      see comment there.
 - [ ] for command descriptions, take pNext chains into account.
 	  they are rarely changed just like that (neither is their order I guess)
-- [ ] track push constant range pipe layouts; correctly invalidate & disturb
+- [ ] track push constant range pipe layouts? correctly invalidate & disturb
       also track which range is bound for which stage.
 - [ ] can we support viewing multisample images?
       either sample them directly in shader (requires a whole lotta new 
 	  shader permuatations, not sure if supported everywhere) or resolve
 	  into temporary image first (lot of work as well)
-- [ ] we might be able to not lock the device mutex for all the time we lock
-      the ui (which can be a serious problem) by relying on weak/shared pointers
-	  eveywhere (making concurrently happening resource destruction no problem) 
-	  	- [ ] probably requires a lot of other reworks as well, e.g. for buffer readback
 - [ ] better installing
 	- [ ] simple wix windows installer, just needs to install prebuilt layer,
 	  	   json file and add the registry file. Should probably also install
 	       api header tho
 		   (maybe for later, >0.1.0?)
 	- [ ] write AUR package (maybe for later, >0.1.0?)
-- [ ] general buffer reading mechanism for UI. Implement e.g. to read
-      indirect command from buffer and display in command UI
 - [ ] allow to display stuff (e.g. images) over swapchain, fullscreen, not just in overlay
 - [x] memory budget overview {present but ugly as-is}
 	- [ ] show how much memory was allocated overall, per-heap
@@ -823,13 +750,6 @@ optimization:
 - [ ] show histogram for query pool timings (for inserted ones, but could
       also do it for application query pool timings).
 - [ ] add per-section and per-commandbuffer query pool timings
-- [ ] add optional to just show timing per command (correctly show it per section)
-      in command buffer command list.
-	  Wouldn't even need to use the (error-prone) command buffer hooking
-	  mechanism, could just insert it directly into the forwarded recording
-	  commands.
-- [ ] improve the case where multiple command buffers are pretty much the
-      same and just vary for swapchain image id or something.
 - [ ] directly show content for imageview? with correct format/mip/layer etc?
 - [ ] (somewhat high prio tho) add support for waiting for command buffer
       recording to finish (with a timeout tho, in which case we simply display
@@ -838,11 +758,9 @@ optimization:
 	  when an application re-records in every frame.
 	  	- [ ] could be done via conditional variable in command buffer
 		      that is signaled on endCommandBuffer
-- [ ] handle command-buffer re-recording as graceful as possible.
-      	- [x] Try to match selected command in new state
-		- [ ] give visual/explicit feedback about re-recording though.
-		      maybe show time/frames since last re-record?
-			  Show statistics, how often the cb is re-recorded?
+- [ ] give visual/explicit feedback about commandBuffer change in UI?
+	  maybe show time/frames since last re-record?
+	  Show statistics, how often the cb is re-recorded?
 - [ ] mode that allows to simply view all commands pushed to a queue?
 - [ ] way later: support for sparse binding
 - [ ] we might be able (with checks everywhere and no assumptions at all, basically)
@@ -867,10 +785,6 @@ optimization:
 	- [x] CmdDrawIndirectCount
 	- [x] CmdDrawIndexedIndirectCount
 	- [x] other new creation and commands
-- [ ] support as many KHR extensions as possible (non-crash)
-	- [ ] support UI for them where not too much work
-- [ ] support khr ray tracing extension
-- [ ] support all other extensions (non-crash)
 - [ ] interactive 3D cubemap viewer
 - [ ] interactive 3D model viewer with as many information as possible
 - [ ] event log showing all queue submits
@@ -901,11 +815,3 @@ optimization:
 - [ ] (low prio), optimization: in `Draw`, we don't need presentSemaphore when
 	  we have timeline semaphores, can simply use futureSemaphore for
 	  present as well
-- [ ] optimization: we don't really need to always track refCbs and store
-      the destroyed handles. Only do it for submissions viewed in gui?
-	  Could just require commandRecords to be valid while selected and
-	  then just handle the unsetting logic in CommandBufferGui::destroyed
-	    Hm, on a second thought, this won't work so easily since we might
-		select a new record that is already invalidated (useful in some
-		cases I guess). Also, we want to support showing every command
-		for a given handle at some point, where we need this tracking as well.

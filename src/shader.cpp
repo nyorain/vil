@@ -487,19 +487,20 @@ XfbPatchData patchShaderXfb(Device& dev, spc::Compiler& compiled,
 
 
 // ShaderModule
-SpirvData::~SpirvData() {
-}
-
 ShaderModule::~ShaderModule() {
 	if(!dev) {
 		return;
 	}
 
-	// shader modules are never used directly in a command buffer
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SHADER_MODULE);
+	// clearXfb should have been called on API object destruction
+	dlg_assert(xfb.empty());
+}
+
+void ShaderModule::clearXfb() {
 	for(auto& patched : this->xfb) {
 		dev->dispatch.DestroyShaderModule(dev->handle, patched.mod, nullptr);
 	}
+	xfb.clear();
 }
 
 // api
@@ -515,22 +516,20 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	}
 
 	auto& mod = dev.shaderModules.add(*pShaderModule);
-	mod.objectType = VK_OBJECT_TYPE_SHADER_MODULE;
 	mod.dev = &dev;
 	mod.handle = *pShaderModule;
 
 	dlg_assert(pCreateInfo->codeSize % 4 == 0);
-	mod.code = IntrusivePtr<SpirvData>(new SpirvData());
 
 	// TODO: catch errors here
-	mod.code->compiled = std::make_unique<spc::Compiler>(
+	mod.compiled = std::make_unique<spc::Compiler>(
 		pCreateInfo->pCode, pCreateInfo->codeSize / 4);
 
 	// copy default values of specialization constants
-	auto& compiled = *mod.code->compiled;
+	auto& compiled = *mod.compiled;
 	auto specConstants = compiled.get_specialization_constants();
 	for(auto& sc : specConstants) {
-		auto& entry = mod.code->constantDefaults.emplace_back();
+		auto& entry = mod.constantDefaults.emplace_back();
 		entry.constantID = sc.constant_id;
 
 		auto& constant = compiled.get_constant(sc.id);
@@ -550,9 +549,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyShaderModule(
 		return;
 	}
 
-	auto& dev = getDevice(device);
-	dev.shaderModules.mustErase(shaderModule);
-	dev.dispatch.DestroyShaderModule(device, shaderModule, pAllocator);
+	auto mod = mustMoveUnset(device, shaderModule);
+	// memory optimization:
+	// we don't need any xfb-patched data anymore
+	mod->clearXfb();
+	mod->dev->dispatch.DestroyShaderModule(device, shaderModule, pAllocator);
 }
 
 std::optional<spc::Resource> resource(const spc::Compiler& compiler,
@@ -670,7 +671,7 @@ BindingNameRes bindingName(const spc::Compiler& compiler, u32 setID, u32 binding
 
 void specializeSpirv(spc::Compiler& compiled,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
-		u32 spvExecutionModel, span<const SpirvData::SpecializationConstantDefault> constantDefaults) {
+		u32 spvExecutionModel, span<const SpecializationConstantDefault> constantDefaults) {
 	compiled.set_entry_point(entryPoint, spv::ExecutionModel(spvExecutionModel));
 
 	auto specConstants = compiled.get_specialization_constants();
@@ -712,7 +713,7 @@ void specializeSpirv(spc::Compiler& compiled,
 	}
 }
 
-spc::Compiler& specializeSpirv(SpirvData& mod,
+spc::Compiler& specializeSpirv(ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel) {
 	dlg_assert(mod.compiled);
@@ -722,7 +723,7 @@ spc::Compiler& specializeSpirv(SpirvData& mod,
 	return compiled;
 }
 
-std::unique_ptr<spc::Compiler> copySpecializeSpirv(SpirvData& mod,
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel) {
 	dlg_assert(mod.compiled);

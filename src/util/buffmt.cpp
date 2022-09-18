@@ -2,6 +2,7 @@
 #include <util/f16.hpp>
 #include <util/bytes.hpp>
 #include <gui/util.hpp>
+#include <gui/gui.hpp>
 #include <util/profiling.hpp>
 #include <threadContext.hpp>
 #include <spirv-cross/spirv_cross.hpp>
@@ -68,6 +69,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 	}
 
 	// handle array
+	// TODO: need special handling for top-level array e.g. storageBuffer[4]
 	if(!stype->array.empty()) {
 		dlg_assert(meta && meta->decoration.decoration_flags.get(spv::DecorationArrayStride));
 		dst.deco.arrayStride = meta->decoration.array_stride;

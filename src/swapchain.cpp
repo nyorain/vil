@@ -16,7 +16,6 @@ namespace vil {
 Swapchain::~Swapchain() {
 	overlay.reset();
 	destroy();
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SWAPCHAIN_KHR);
 }
 
 void Swapchain::destroy() {
@@ -25,14 +24,14 @@ void Swapchain::destroy() {
 	}
 
 	for(auto* img : this->images) {
+		auto handle = castDispatch<VkImage>(*img);
+		dev->images.mustErase(handle);
+
 		{
 			std::lock_guard lock(dev->mutex);
 			img->swapchain = nullptr;
 			img->handle = {};
 		}
-
-		auto handle = castDispatch<VkImage>(*img);
-		dev->images.mustErase(handle);
 	}
 
 	// TODO: not sure about this. We don't synchronize access to it
@@ -115,7 +114,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	}
 
 	auto& swapd = dev.swapchains.add(*pSwapchain);
-	swapd.objectType = VK_OBJECT_TYPE_SWAPCHAIN_KHR;
 	swapd.dev = &dev;
 	swapd.ci = *pCreateInfo;
 	swapd.handle = *pSwapchain;
@@ -145,7 +143,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		img.swapchain = &swapd;
 		img.swapchainImageID = i;
 		img.dev = &dev;
-		img.objectType = VK_OBJECT_TYPE_IMAGE;
+		img.memObjectType = VK_OBJECT_TYPE_IMAGE;
 		img.handle = imgs[i];
 		img.hasTransferSrc = (sci.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 

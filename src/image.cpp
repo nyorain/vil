@@ -12,13 +12,14 @@
 
 namespace vil {
 
+static_assert(validExpression<HasOnApiDestroy, Image>);
+static_assert(validExpression<HasOnApiDestroy, DeviceMemory>);
+
 // Classes
 Image::~Image() {
 	if(!dev) {
 		return;
 	}
-
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_IMAGE);
 
 	std::lock_guard lock(dev->mutex);
 	for(auto* view : this->views) {
@@ -30,8 +31,6 @@ ImageView::~ImageView() {
 	if(!dev) {
 		return;
 	}
-
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_IMAGE_VIEW);
 
 	dlg_assert(DebugStats::get().aliveImagesViews > 0);
 	--DebugStats::get().aliveImagesViews;
@@ -48,14 +47,6 @@ ImageView::~ImageView() {
 		dlg_assert(it != fb->attachments.end());
 		fb->attachments.erase(it);
 	}
-}
-
-Sampler::~Sampler() {
-	if(!dev) {
-		return;
-	}
-
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SAMPLER);
 }
 
 std::string defaultName(const Image& img) {
@@ -241,7 +232,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 
 	auto imgPtr = IntrusivePtr<Image>(new Image());
 	auto& img = *imgPtr;
-	img.objectType = VK_OBJECT_TYPE_IMAGE;
+	img.memObjectType = VK_OBJECT_TYPE_IMAGE;
 	img.dev = &dev;
 	img.handle = *pImage;
 	img.ci = *pCreateInfo;
@@ -346,11 +337,12 @@ void bindImageMemory(Image& img, DeviceMemory& mem, u64 offset) {
 	// access to the given memory and image must be internally synced
 	std::lock_guard lock(dev.mutex);
 	dlg_assert(!img.memory);
-	dlg_assert(!img.memoryDestroyed);
+	dlg_assert(img.memState == MemoryResource::State::unbound);
 
 	img.memory = &mem;
 	img.allocationOffset = offset;
 	img.allocationSize = memReqs.size;
+	img.memState = MemoryResource::State::bound;
 
 	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
 		img, cmpMemRes);
@@ -415,7 +407,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImageView(
 
 	auto viewPtr = IntrusivePtr<ImageView>(new ImageView());
 	auto& view = *viewPtr;
-	view.objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
 	view.handle = *pView;
 	view.img = &img;
 	view.dev = &dev;
@@ -454,11 +445,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyImageView(
 		return;
 	}
 
-	auto& imgView = get(device, imageView);
-	auto& dev = *imgView.dev;
-	imageView = imgView.handle;
-	dev.keepAliveImageViews.push(&imgView);
-
+	auto& dev = mustMoveUnsetKeepAlive<&Device::keepAliveImageViews>(device, imageView);
 	dev.dispatch.DestroyImageView(dev.handle, imageView, pAllocator);
 }
 
@@ -479,7 +466,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(
 	sampler.dev = &dev;
 	sampler.handle = *pSampler;
 	sampler.ci = *pCreateInfo;
-	sampler.objectType = VK_OBJECT_TYPE_SAMPLER;
 
 	*pSampler = castDispatch<VkSampler>(sampler);
 	dev.samplers.mustEmplace(std::move(samplerPtr));
@@ -495,11 +481,7 @@ VKAPI_ATTR void VKAPI_CALL DestroySampler(
 		return;
 	}
 
-	auto& sampler = get(device, handle);
-	auto& dev = *sampler.dev;
-	handle = sampler.handle;
-	dev.keepAliveSamplers.push(&sampler);
-
+	auto& dev = mustMoveUnsetKeepAlive<&Device::keepAliveSamplers>(device, handle);
 	dev.dispatch.DestroySampler(dev.handle, handle, pAllocator);
 }
 

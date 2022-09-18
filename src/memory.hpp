@@ -10,19 +10,25 @@
 namespace vil {
 
 struct MemoryResource : SharedDeviceHandle {
-	// !memoryDestroyed && !memory: no memory associated
-	// !memoryDestroyed && memory: memory associated
-	// memoryDestroyed && !memory: had memory associated but memory object was destroyed
-	// memoryDestroyed && memory: invalid state, must not exist
-	bool memoryDestroyed {};
+	enum class State {
+		unbound,
+		bound,
+		memoryDestroyed,
+		resourceDestroyed,
+	};
+
+	State memState {State::unbound};
 	DeviceMemory* memory {};
 	VkDeviceSize allocationOffset {};
 	VkDeviceSize allocationSize {};
+	VkObjectType memObjectType {};
 
-	~MemoryResource();
+	void onApiDestroy();
 };
 
 struct DeviceMemory : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_DEVICE_MEMORY;
+
 	VkDeviceMemory handle {};
 
 	u32 typeIndex {};
@@ -38,7 +44,7 @@ struct DeviceMemory : SharedDeviceHandle {
 	// is arbitrary.
 	std::vector<MemoryResource*> allocations;
 
-	~DeviceMemory();
+	void onApiDestroy();
 };
 
 // Returns whether any parts of the given memory resource alias any

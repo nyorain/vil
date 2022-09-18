@@ -49,6 +49,8 @@ struct DescriptorPoolSetEntry {
 };
 
 struct DescriptorPool : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_DESCRIPTOR_POOL;
+
 	VkDescriptorPool handle {};
 	VkDescriptorPoolCreateFlags flags {};
 
@@ -89,24 +91,26 @@ struct DescriptorPool : SharedDeviceHandle {
 };
 
 struct DescriptorSetLayout : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT;
+
 	VkDescriptorSetLayout handle {};
 	VkDescriptorSetLayoutCreateFlags flags {};
 
 	// VkDescriptorSetLayoutBinding, with extra data
 	struct Binding {
-		u32 binding; // binding id
-		u32 offset; // total offset in bytes into binding data of DescriptorSetState
-		VkDescriptorType descriptorType;
+		u32 offset {}; // total offset in bytes into binding data of DescriptorSetState
 		// You almost never want to use descriptorCount when dealing with a
 		// descriptorSet, just use binding.size() to account for variable count bindings.
-		u32 descriptorCount;
-		VkShaderStageFlags stageFlags;
+		u32 descriptorCount {};
+		VkDescriptorType descriptorType {VK_DESCRIPTOR_TYPE_MAX_ENUM};
+		VkShaderStageFlags stageFlags {};
 		std::unique_ptr<IntrusivePtr<Sampler>[]> immutableSamplers;
-		VkDescriptorBindingFlags flags; // for descriptor indexing
+		VkDescriptorBindingFlags flags {}; // for descriptor indexing
 		u32 dynOffset {u32(-1)}; // offset into dynamic offset array
 	};
 
-	// Immutable after creation. Ordered by binding. Can be empty per vulkan spec.
+	// Immutable after creation. Can be empty per vulkan spec.
+	// Allows fast random access via bindingID.
 	std::vector<Binding> bindings;
 
 	// The total number of dynamic buffer descriptors.
@@ -182,6 +186,7 @@ struct DescriptorStateRef {
 	explicit DescriptorStateRef(DescriptorStateCopy&);
 };
 
+// NOTE: keep in mind that descriptorCount is allowed to be 0
 u32 descriptorCount(DescriptorStateRef, unsigned binding);
 u32 totalDescriptorCount(DescriptorStateRef);
 
@@ -197,7 +202,7 @@ span<std::byte> inlineUniformBlock(DescriptorStateRef, unsigned binding);
 // Returns whether the given descriptor state has the given handle bound.
 // For Buffers and Images, also returns true when one of their bufferViews/
 // imageViews is bound.
-bool hasBound(DescriptorStateRef, const DeviceHandle& handle);
+bool hasBound(DescriptorStateRef, const Handle& handle);
 
 struct DescriptorStateCopy {
 	struct Deleter {
@@ -220,8 +225,10 @@ using DescriptorStateCopyPtr = std::unique_ptr<DescriptorStateCopy, DescriptorSt
 // ownership. The reason for this is mainly that we can very efficiently
 // allocate them via the DescriptorPool (wouldn't be possible if all
 // of them could be kept alive).
-struct DescriptorSet : DeviceHandle {
+struct DescriptorSet : Handle {
 public:
+	static constexpr auto objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
+
 	// Immutable after creation.
 	DescriptorPool* pool {};
 	VkDescriptorSet handle {};
@@ -232,12 +239,17 @@ public:
 	u32 variableDescriptorCount {};
 
 public:
+	Device& dev() const { return *pool->dev; }
+
 	// requires the device mutex to be locked
 	IntrusivePtr<DescriptorSetCow> addCowLocked();
 	std::unique_lock<DebugMutex> checkResolveCow();
 	std::unique_lock<DebugMutex> lock() {
 		return std::unique_lock<DebugMutex>(mutex_);
 	}
+
+	// requires device mutex to be locked
+	DescriptorStateCopyPtr validateAndCopyLocked();
 
 private:
 	DescriptorStateCopyPtr copyLockedState();
@@ -282,6 +294,8 @@ struct DescriptorSetCow {
 std::pair<DescriptorStateRef, std::unique_lock<DebugMutex>> access(DescriptorSetCow& cow);
 
 struct DescriptorUpdateTemplate : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE;
+
 	VkDescriptorUpdateTemplate handle {};
 	std::vector<VkDescriptorUpdateTemplateEntry> entries;
 

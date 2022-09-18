@@ -35,16 +35,16 @@ using UpdateMode = CommandSelection::UpdateMode;
 using SelectionType = CommandSelection::SelectionType;
 
 // CommandBufferGui
-void CommandBufferGui::init(Gui& gui) {
+void CommandRecordGui::init(Gui& gui) {
 	gui_ = &gui;
 	commandFlags_ = CommandType(~(CommandType::end | CommandType::bind | CommandType::query));
 	commandViewer_.init(gui);
 	selector_.init(gui_->dev());
 }
 
-CommandBufferGui::~CommandBufferGui() = default;
+CommandRecordGui::~CommandRecordGui() = default;
 
-void CommandBufferGui::draw(Draw& draw) {
+void CommandRecordGui::draw(Draw& draw) {
 	ZoneScoped;
 
 	if(!record_ && selector_.updateMode() != UpdateMode::swapchain) {
@@ -313,7 +313,7 @@ void CommandBufferGui::draw(Draw& draw) {
 	ImGui::EndTable();
 }
 
-void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) {
+void CommandRecordGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) {
 	assertNotOwned(gui_->dev().mutex);
 
 	// Unset hooks
@@ -337,16 +337,16 @@ void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) 
 	updateFromSelector();
 }
 
-void CommandBufferGui::select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb) {
+void CommandRecordGui::select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb) {
 	assertNotOwned(gui_->dev().mutex);
 
 	clearSelection(true);
 	record_ = std::move(record);
-	selector_.select(std::move(cb), record, {});
+	selector_.select(std::move(cb), record_, {});
 	updateFromSelector();
 }
 
-void CommandBufferGui::showSwapchainSubmissions(Swapchain& swapchain) {
+void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain) {
 	auto& dev = gui_->dev();
 	assertNotOwned(dev.mutex);
 
@@ -357,11 +357,7 @@ void CommandBufferGui::showSwapchainSubmissions(Swapchain& swapchain) {
 	updateFromSelector();
 }
 
-void CommandBufferGui::destroyed(const Handle&) {
-	// TODO: something to do here?
-}
-
-void CommandBufferGui::displayFrameCommands(Swapchain& swapchain) {
+void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 	if(frame_.empty() && swapchain.frameSubmissions[0].batches.empty()) {
 		dlg_warn("how did this happen?");
 		frame_ = swapchain.frameSubmissions[0].batches;
@@ -518,7 +514,7 @@ void CommandBufferGui::displayFrameCommands(Swapchain& swapchain) {
 	}
 }
 
-void CommandBufferGui::displayRecordCommands() {
+void CommandRecordGui::displayRecordCommands() {
 	dlg_assert(record_);
 
 	auto* selected = command_.empty() ? nullptr : command_.back();
@@ -555,7 +551,7 @@ void CommandBufferGui::displayRecordCommands() {
 	}
 }
 
-void CommandBufferGui::clearSelection(bool unselectCommandViewer) {
+void CommandRecordGui::clearSelection(bool unselectCommandViewer) {
 	if(unselectCommandViewer) {
 		commandViewer_.unselect();
 	}
@@ -607,7 +603,7 @@ void addMatches(
 	}
 }
 
-void CommandBufferGui::updateRecords(const FrameMatch& frameMatch,
+void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 		std::vector<FrameSubmission>&& records) {
 	ThreadMemScope tms;
 
@@ -682,7 +678,7 @@ void CommandBufferGui::updateRecords(const FrameMatch& frameMatch,
 	openedSections_ = std::move(newOpenSections);
 }
 
-void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records) {
+void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records) {
 	// update records
 	ThreadMemScope tms;
 	LinAllocScope localMatchMem(matchAlloc_);
@@ -690,12 +686,12 @@ void CommandBufferGui::updateRecords(std::vector<FrameSubmission> records) {
 	updateRecords(frameMatch, std::move(records));
 }
 
-void CommandBufferGui::updateRecord(IntrusivePtr<CommandRecord> record) {
+void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record) {
 	dlg_trace("TODO: implement opened section matching for single record mode");
 	record_ = std::move(record);
 }
 
-void CommandBufferGui::updateFromSelector() {
+void CommandRecordGui::updateFromSelector() {
 	if(selector_.updateMode() == UpdateMode::swapchain) {
 		auto frameSpan = selector_.frame();
 		updateRecords({frameSpan.begin(), frameSpan.end()});
@@ -716,7 +712,7 @@ void CommandBufferGui::updateFromSelector() {
 	command_ = {commandSpan.begin(), commandSpan.end()};
 }
 
-void CommandBufferGui::updateCommandViewer(bool resetState) {
+void CommandRecordGui::updateCommandViewer(bool resetState) {
 	std::vector cmd(selector_.command().begin(), selector_.command().end());
 	commandViewer_.select(selector_.record(),
 		std::move(cmd), selector_.descriptorSnapshot(),
