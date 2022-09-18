@@ -7,6 +7,8 @@
 namespace vil {
 
 struct Fence : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_FENCE;
+
 	VkFence handle {};
 
 	// The pending submission this fence is currently associated to.
@@ -32,6 +34,8 @@ struct SyncOp {
 };
 
 struct Semaphore : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_SEMAPHORE;
+
 	VkSemaphore handle {};
 
 	std::vector<SyncOp*> signals;
@@ -55,8 +59,9 @@ struct Semaphore : SharedDeviceHandle {
 void updateUpperLocked(Semaphore& sem, u64 value);
 
 struct Event : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_EVENT;
+
 	VkEvent handle {};
-	~Event();
 };
 
 // api

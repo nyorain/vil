@@ -10,30 +10,36 @@
 
 namespace vil {
 
-// In-layer representation of a vulkan API object created
-// by the application.
+// In-layer representation of a vulkan API object created by the application.
 struct Handle {
 	std::string name;
-	VkObjectType objectType {};
 
 	Handle() = default;
 	Handle(Handle&&) = delete;
 	Handle& operator=(Handle&&) = delete;
 };
 
-// Device-level vulkan API object.
-struct DeviceHandle : Handle {
+struct SharedDeviceHandle : Handle {
 	Device* dev {};
-};
-
-struct SharedDeviceHandle : DeviceHandle {
 	std::atomic<u32> refCount {};
+
+protected:
+	// to prevent anyone from doing IntrusivePtr<SharedDeviceHandle>
+	~SharedDeviceHandle() = default;
 };
 
 const char* name(VkObjectType objectType);
 std::string name(const Handle& handle,
+		VkObjectType objectType,
 		bool addType = true,
 		bool perTypeDefault = true);
+
+template<typename T>
+std::string name(const T& handle,
+		bool addType = true,
+		bool perTypeDefault = true) {
+	return name(handle, handle.objectType, addType, perTypeDefault);
+}
 
 struct ResourceVisitor {
 	virtual ~ResourceVisitor() = default;
@@ -106,19 +112,18 @@ struct ObjectTypeHandler {
 
 	// The following functions may use the device maps directly and
 	// can expect the device mutex to be locked.
+	// NOTE: not implemented for the DescriptorSet ObjectTypeHandler
 	virtual std::vector<Handle*> resources(Device& dev, std::string_view search) const = 0;
-	virtual Handle* find(Device& dev, u64, u64& fwdID) const = 0;
+
+	// Expects device mutex to be locked.
+	// NOTE: even though this is called 'find' expects 'handleToFind' to
+	// be valid, i.e. can't detect bogus ids.
+	// TODO: rename to 'get' or something and return a reference.
+	// NOTE: for DescriptorSet handles, must only be called while
+	// API guarantees that the handle stays valid since its lifetime is not bound
+	// to the device mutex.
+	virtual Handle* find(Device& dev, u64 handleToFind, u64& fwdID) const = 0;
 };
-
-template<typename T>
-auto handle(const T& handle) -> decltype(handle.handle()) {
-	return handle.handle();
-}
-
-template<typename T>
-auto handle(const T& handle) -> decltype(handle.handle) {
-	return handle.handle;
-}
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL SetDebugUtilsObjectNameEXT(

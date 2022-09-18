@@ -16,6 +16,8 @@ namespace vil {
 struct XfbPatchDesc;
 
 struct PipelineLayout : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_PIPELINE_LAYOUT;
+
 	VkPipelineLayout handle;
 	std::vector<IntrusivePtr<DescriptorSetLayout>> descriptors;
 	std::vector<VkPushConstantRange> pushConstants;
@@ -30,7 +32,7 @@ bool compatibleForSetN(const PipelineLayout& a, const PipelineLayout& b,
 
 struct PipelineShaderStage {
 	VkShaderStageFlagBits stage;
-	IntrusivePtr<SpirvData> spirv;
+	IntrusivePtr<ShaderModule> spirv;
 	std::string entryPoint;
 	ShaderSpecialization specialization;
 
@@ -42,6 +44,8 @@ spc::Compiler& specializeSpirv(const PipelineShaderStage&);
 std::unique_ptr<spc::Compiler> copySpecializeSpirv(const PipelineShaderStage&);
 
 struct Pipeline : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_PIPELINE;
+
 	VkPipeline handle {};
 	VkPipelineBindPoint type {};
 
@@ -56,7 +60,7 @@ protected:
 	// Make sure Pipeline objects are not created.
 	// Should always be GraphicsPipeline or ComputePipeline
 	Pipeline() = default;
-	~Pipeline();
+	~Pipeline() = default;
 };
 
 // Returns all shader stages a pipeline has.

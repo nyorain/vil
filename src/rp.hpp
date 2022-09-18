@@ -26,13 +26,15 @@ struct RenderPassDesc {
 };
 
 struct RenderPass : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_RENDER_PASS;
+
 	VkRenderPass handle {};
 	RenderPassDesc desc;
-
-	~RenderPass();
 };
 
 struct Framebuffer : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_FRAMEBUFFER;
+
 	VkFramebuffer handle {};
 
 	// NOTE: keep in mind that this might be empty for an imageless fb

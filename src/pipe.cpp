@@ -22,7 +22,6 @@ PipelineLayout::~PipelineLayout() {
 	}
 
 	dlg_assert(handle);
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_PIPELINE_LAYOUT);
 	dev->dispatch.DestroyPipelineLayout(dev->handle, handle, nullptr);
 }
 
@@ -30,8 +29,7 @@ PipelineShaderStage::PipelineShaderStage(Device& dev, const VkPipelineShaderStag
 	stage = sci.stage;
 	specialization = createShaderSpecialization(sci.pSpecializationInfo);
 
-	auto& mod = dev.shaderModules.get(sci.module);
-	spirv = mod.code;
+	spirv = getPtr(dev, sci.module);
 	entryPoint = sci.pName;
 }
 
@@ -129,8 +127,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 					XfbPatchData xfb;
 
 					{
-						dlg_assert(mod.code);
-						auto& refl = specializeSpirv(*mod.code, spec,
+						auto& refl = specializeSpirv(mod, spec,
 							stage.pName, u32(spv::ExecutionModelVertex));
 						xfb = patchShaderXfb(dev, refl, stage.pName, mod.name);
 					}
@@ -177,7 +174,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		auto pipePtr = IntrusivePtr<GraphicsPipeline>(new GraphicsPipeline());
 		auto& pipe = *pipePtr;
 		pipe.dev = &dev;
-		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		pipe.handle = pPipelines[i];
 		pipe.layout = getPtr(dev, pCreateInfos[i].layout);
@@ -334,7 +330,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(
 
 		auto pipePtr = IntrusivePtr<ComputePipeline>(new ComputePipeline());
 		auto& pipe = *pipePtr;
-		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_COMPUTE;
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
@@ -418,7 +413,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(
 
 	auto plPtr = IntrusivePtr<PipelineLayout>(new PipelineLayout());
 	auto& pl = *plPtr;
-	pl.objectType = VK_OBJECT_TYPE_PIPELINE_LAYOUT;
 	pl.dev = &dev;
 	pl.handle = *pPipelineLayout;
 	pl.descriptors = std::move(dsls);
@@ -580,15 +574,6 @@ std::unique_ptr<spc::Compiler> copySpecializeSpirv(const PipelineShaderStage& st
 		stage.entryPoint, execModel);
 }
 
-Pipeline::~Pipeline() {
-	if(!dev) {
-		return;
-	}
-
-	std::lock_guard lock(dev->mutex);
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_PIPELINE);
-}
-
 GraphicsPipeline::~GraphicsPipeline() = default;
 
 // VK_KHR_ray_tracing_pipeline
@@ -643,7 +628,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 
 		auto pipePtr = IntrusivePtr<RayTracingPipeline>(new RayTracingPipeline());
 		auto& pipe = *pipePtr;
-		pipe.objectType = VK_OBJECT_TYPE_PIPELINE;
 		pipe.type = VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR;
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];

@@ -4,6 +4,7 @@
 #include <device.hpp>
 #include <data.hpp>
 #include <util/dlg.hpp>
+#include <util/tmpUtil.hpp>
 
 namespace vil {
 
@@ -83,11 +84,7 @@ H castDispatch(Device& dev, WrappedHandle<T>& wrapped) {
 	static_assert(std::is_same_v<typename HandleDesc<H>::type, T>);
 
 	if(!HandleDesc<H>::wrap) {
-		if constexpr(std::is_same_v<T, CommandBuffer>) {
-			return wrapped.obj().handle();
-		} else {
-			return wrapped.obj().handle;
-		}
+		return wrapped.obj().handle;
 	}
 
 	std::memcpy(&wrapped.dispatch, reinterpret_cast<void*>(dev.handle), sizeof(wrapped.dispatch));
@@ -198,13 +195,27 @@ template<typename H> auto getPtr(VkDevice vkDev, H handle) {
 	return HandleDesc<H>::map(dev).getPtr(handle);
 }
 
+template<typename H> using HasOnApiDestroy = decltype(std::declval<H>().onApiDestroy());
+
+template<typename T> void apiHandleDestroyed(T& ourHandle) {
+	if constexpr(validExpression<HasOnApiDestroy, T>) {
+		ourHandle.onApiDestroy();
+	}
+}
+
 // Removes the given handle from the associated map in the given device.
 // Will additionally unset the internal forward handle in the given object.
 template<typename H> auto mustMoveUnset(Device& dev, H& handle) {
-	auto lock = std::lock_guard(dev.mutex);
-	auto ptr = HandleDesc<H>::map(dev).mustMoveLocked(handle);
-	handle = ptr->handle;
-	ptr->handle = {};
+	decltype(HandleDesc<H>::map(dev).mustMoveLocked(handle)) ptr {};
+
+	{
+		auto lock = std::lock_guard(dev.mutex);
+		ptr = HandleDesc<H>::map(dev).mustMoveLocked(handle);
+		handle = ptr->handle;
+		ptr->handle = {};
+	}
+
+	apiHandleDestroyed(*ptr);
 	return ptr;
 }
 
@@ -219,27 +230,33 @@ template<typename H> auto mustMoveUnset(VkDevice vkDev, H& handle) {
 	}
 }
 
+template<auto KeepAlive, typename H>
+Device& mustMoveUnsetKeepAlive(VkDevice vkDev, H& vkHandle) {
+	auto& handle = get(vkDev, vkHandle);
+	auto& dev = *handle.dev;
+
+	IntrusivePtr<typename HandleDesc<H>::type> oldPtr;
+	IntrusivePtr<typename HandleDesc<H>::type> ptr;
+
+	{
+		auto lock = std::lock_guard(dev.mutex);
+		ptr = HandleDesc<H>::map(dev).mustMoveLocked(handle);
+		oldPtr = (dev.*KeepAlive).pushLocked(ptr);
+		vkHandle = ptr->handle;
+		ptr->handle = {};
+	}
+
+	apiHandleDestroyed(handle);
+	return dev;
+}
+
 template<typename T, std::size_t maxSize>
-void KeepAliveRingBuffer<T, maxSize>::push(T obj) {
-	using H = decltype(obj->handle);
+IntrusivePtr<T> KeepAliveRingBuffer<T, maxSize>::pushLocked(IntrusivePtr<T> ptr) {
+	// keep alive to make sure we destroy it ouside of the cirtical section
+	IntrusivePtr<T> oldPtr;
 
-	if constexpr(maxSize == 0u) {
-		std::unique_lock lock(obj->dev->mutex);
-		auto ptr = HandleDesc<H>::map(*obj->dev).mustMoveLocked(*obj);
-		ptr->handle = {}; // make sure to unset handle, marking it as destroyed
-		// unlock before ptr gets destroyed and potentially destroys the object
-		lock.unlock();
-		return;
-	} else {
-		// keep alive to make sure we destroy it ouside of the cirtical section
-		decltype(HandleDesc<H>::map(*obj->dev).mustMoveLocked(*obj)) ptr;
-		std::lock_guard lock(*this->mutex);
-
-		obj->handle = {};
+	if constexpr(maxSize > 0u) {
 		if(data.size() == maxSize) {
-			auto& old = data[insertOffset];
-			ptr = HandleDesc<H>::map(*obj->dev).mustMoveLocked(*old);
-
 			VIL_DEBUG_ONLY(
 				if(insertOffset == 0u) {
 					auto now = Clock::now();
@@ -248,32 +265,31 @@ void KeepAliveRingBuffer<T, maxSize>::push(T obj) {
 					// positives (i.e. incorrect handles shown in gui) for
 					// descriptorSets when running with refBindings = false
 					dlg_warn("KeepAliveRingBuffer<{}> wrap took {}s",
-						typeid(*obj).name(), dur.count());
+						typeid(*ptr).name(), dur.count());
 					lastWrap = now;
 				}
 			)
 
-			data[insertOffset] = std::move(obj);
+			oldPtr = std::move(data[insertOffset]);
+			data[insertOffset] = std::move(ptr);
 			insertOffset = (insertOffset + 1) % maxSize;
 		} else {
 			VIL_DEBUG_ONLY(
 				if(data.size() == 0u) {
+					// init lastWrap on first insert
 					lastWrap = Clock::now();
 				}
 			)
 
-			data.push_back(std::move(obj));
+			data.push_back(std::move(ptr));
 		}
 	}
+
+	return oldPtr;
 }
 
 template<typename T, std::size_t maxSize>
 void KeepAliveRingBuffer<T, maxSize>::clear() {
-	for(auto* obj : data) {
-		using H = decltype(obj->handle);
-		HandleDesc<H>::map(*obj->dev).mustMove(*obj);
-	}
-
 	data.clear();
 }
 

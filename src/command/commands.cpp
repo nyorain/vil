@@ -32,17 +32,18 @@ namespace vil {
 // Command utility
 template<typename C>
 auto rawHandles(ThreadMemScope& scope, const C& handles) {
-	using VkH = decltype(handle(*handles[0]));
+	using VkH = decltype(handles[0]->handle);
 	auto ret = scope.alloc<VkH>(handles.size());
 	for(auto i = 0u; i < handles.size(); ++i) {
-		ret[i] = handle(*handles[i]);
+		ret[i] = handles[i]->handle;
 	}
 
 	return ret;
 }
 
 // ArgumentsDesc
-NameResult name(DeviceHandle* handle, NullName nullName, bool displayType) {
+NameResult nameRes(Handle* handle, VkObjectType objectType,
+		NullName nullName, bool displayType) {
 	if(!handle) {
 		switch(nullName) {
 			// TODO: also add type here when displayType is true?
@@ -53,7 +54,7 @@ NameResult name(DeviceHandle* handle, NullName nullName, bool displayType) {
 		}
 	}
 
-	auto name = vil::name(*handle, displayType);
+	auto name = vil::name(*handle, objectType, displayType);
 	if(handle->name.empty()) {
 		return {NameType::unnamed, name};
 	}
@@ -806,8 +807,8 @@ unsigned BeginRenderPassCmd::subpassOfDescendant(const Command& cmd) const {
 }
 
 std::string BeginRenderPassCmd::toString() const {
-	auto [fbRes, fbName] = name(fb);
-	auto [rpRes, rpName] = name(rp);
+	auto [fbRes, fbName] = nameRes(fb);
+	auto [rpRes, rpName] = nameRes(rp);
 	if(fbRes == NameType::named && rpRes == NameType::named) {
 		return dlg::format("BeginRenderPass({}, {})", rpName, fbName);
 	} else if(rpRes == NameType::named) {
@@ -1295,7 +1296,7 @@ void DrawIndirectCmd::displayInspector(Gui& gui) const {
 }
 
 std::string DrawIndirectCmd::toString() const {
-	auto [bufNameRes, bufName] = name(buffer);
+	auto [bufNameRes, bufName] = nameRes(buffer);
 	auto cmdName = indexed ? "DrawIndexedIndirect" : "DrawIndirect";
 	if(bufNameRes == NameType::named) {
 		return dlg::format("{}({}, {})", cmdName, bufName, drawCount);
@@ -1472,7 +1473,7 @@ void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb, u32) co
 
 std::string BindVertexBuffersCmd::toString() const {
 	if(buffers.size() == 1) {
-		auto [buf0NameRes, buf0Name] = name(buffers[0].buffer);
+		auto [buf0NameRes, buf0Name] = nameRes(buffers[0].buffer);
 		if(buf0NameRes == NameType::named) {
 			return dlg::format("BindVertexBuffer({}: {})", firstBinding, buf0Name);
 		} else {
@@ -1677,7 +1678,7 @@ void DispatchIndirectCmd::displayInspector(Gui& gui) const {
 }
 
 std::string DispatchIndirectCmd::toString() const {
-	auto [bufNameRes, bufName] = name(buffer);
+	auto [bufNameRes, bufName] = nameRes(buffer);
 	if(bufNameRes == NameType::named) {
 		return dlg::format("DispatchIndirect({})", bufName);
 	}
@@ -1769,8 +1770,8 @@ void CopyImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 }
 
 std::string CopyImageCmd::toString() const {
-	auto [srcRes, srcName] = name(src);
-	auto [dstRes, dstName] = name(dst);
+	auto [srcRes, srcName] = nameRes(src);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named || srcRes == NameType::named) {
 		return dlg::format("CopyImage({} -> {})", srcName, dstName);
 	} else {
@@ -1862,8 +1863,8 @@ void CopyBufferToImageCmd::displayInspector(Gui& gui) const {
 }
 
 std::string CopyBufferToImageCmd::toString() const {
-	auto [srcRes, srcName] = name(src);
-	auto [dstRes, dstName] = name(dst);
+	auto [srcRes, srcName] = nameRes(src);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named || srcRes == NameType::named) {
 		return dlg::format("CopyBufferToImage({} -> {})", srcName, dstName);
 	} else {
@@ -1925,8 +1926,8 @@ void CopyImageToBufferCmd::displayInspector(Gui& gui) const {
 }
 
 std::string CopyImageToBufferCmd::toString() const {
-	auto [srcRes, srcName] = name(src);
-	auto [dstRes, dstName] = name(dst);
+	auto [srcRes, srcName] = nameRes(src);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named || srcRes == NameType::named) {
 		return dlg::format("CopyImageToBuffer({} -> {})", srcName, dstName);
 	} else {
@@ -2005,8 +2006,8 @@ void BlitImageCmd::displayInspector(Gui& gui) const {
 }
 
 std::string BlitImageCmd::toString() const {
-	auto [srcRes, srcName] = name(src);
-	auto [dstRes, dstName] = name(dst);
+	auto [srcRes, srcName] = nameRes(src);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named || srcRes == NameType::named) {
 		return dlg::format("BlitImage({} -> {})", srcName, dstName);
 	} else {
@@ -2084,8 +2085,8 @@ void ResolveImageCmd::displayInspector(Gui& gui) const {
 }
 
 std::string ResolveImageCmd::toString() const {
-	auto [srcRes, srcName] = name(src);
-	auto [dstRes, dstName] = name(dst);
+	auto [srcRes, srcName] = nameRes(src);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named || srcRes == NameType::named) {
 		return dlg::format("ResolveImage({} -> {})", srcName, dstName);
 	} else {
@@ -2148,8 +2149,8 @@ void CopyBufferCmd::displayInspector(Gui& gui) const {
 }
 
 std::string CopyBufferCmd::toString() const {
-	auto [srcRes, srcName] = name(src);
-	auto [dstRes, dstName] = name(dst);
+	auto [srcRes, srcName] = nameRes(src);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named || srcRes == NameType::named) {
 		return dlg::format("CopyBuffer({} -> {})", srcName, dstName);
 	} else {
@@ -2178,7 +2179,7 @@ void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 }
 
 std::string UpdateBufferCmd::toString() const {
-	auto [dstRes, dstName] = name(dst);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named) {
 		return dlg::format("UpdateBuffer({})", dstName);
 	} else {
@@ -2213,7 +2214,7 @@ void FillBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 }
 
 std::string FillBufferCmd::toString() const {
-	auto [dstRes, dstName] = name(dst);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named) {
 		return dlg::format("FillBuffer({})", dstName);
 	} else {
@@ -2250,7 +2251,7 @@ void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 }
 
 std::string ClearColorImageCmd::toString() const {
-	auto [dstRes, dstName] = name(dst);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named) {
 		return dlg::format("ClearColorImage({})", dstName);
 	} else {
@@ -2289,7 +2290,7 @@ void ClearDepthStencilImageCmd::record(const Device& dev, VkCommandBuffer cb, u3
 }
 
 std::string ClearDepthStencilImageCmd::toString() const {
-	auto [dstRes, dstName] = name(dst);
+	auto [dstRes, dstName] = nameRes(dst);
 	if(dstRes == NameType::named) {
 		return dlg::format("ClearDepthStencilImage({})", dstName);
 	} else {
@@ -2350,7 +2351,7 @@ void SetEventCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 }
 
 std::string SetEventCmd::toString() const {
-	auto [nameRes, eventName] = name(event);
+	auto [nameRes, eventName] = vil::nameRes(event);
 	if(nameRes == NameType::named) {
 		return dlg::format("SetEvent({})", eventName);
 	}
@@ -2371,7 +2372,7 @@ void SetEvent2Cmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const
 }
 
 std::string SetEvent2Cmd::toString() const {
-	auto [nameRes, eventName] = name(event);
+	auto [nameRes, eventName] = vil::nameRes(event);
 	if(nameRes == NameType::named) {
 		return dlg::format("SetEvent2({})", eventName);
 	}
@@ -2397,7 +2398,7 @@ void ResetEventCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 
 std::string ResetEventCmd::toString() const {
 	auto ownName = nameDesc();
-	auto [nameRes, eventName] = name(event);
+	auto [nameRes, eventName] = vil::nameRes(event);
 	if(nameRes == NameType::named) {
 		return dlg::format("{}({})", ownName, eventName);
 	}
@@ -2453,7 +2454,7 @@ void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
 
 // ExecuteCommandsChildCmd
 std::string ExecuteCommandsChildCmd::toString() const {
-	auto [cbRes, cbName] = name(record_->cb);
+	auto [cbRes, cbName] = nameRes(record_->cb);
 	if(cbRes == NameType::named) {
 		return dlg::format("{}: {}", id_, cbName);
 	} else {
@@ -2512,7 +2513,7 @@ void BindPipelineCmd::displayInspector(Gui& gui) const {
 
 std::string BindPipelineCmd::toString() const {
 	auto bp = (bindPoint == VK_PIPELINE_BIND_POINT_COMPUTE) ? "compute" : "graphics";
-	auto [nameRes, pipeName] = name(pipe);
+	auto [nameRes, pipeName] = vil::nameRes(pipe);
 	if(nameRes == NameType::named) {
 		return dlg::format("BindPipeline({}: {})", bp, pipeName);
 	} else {

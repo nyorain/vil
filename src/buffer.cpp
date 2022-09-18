@@ -43,6 +43,16 @@ Buffer& bufferAt(Device& dev, VkDeviceAddress address) {
 }
 
 // Classes
+void Buffer::onApiDestroy() {
+	MemoryResource::onApiDestroy();
+
+	std::lock_guard lock(dev->mutex);
+	if(ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+		auto num = dev->bufferAddresses.erase(this);
+		dlg_assert(num == 1u);
+	}
+}
+
 Buffer::~Buffer() {
 	if(!dev) {
 		return;
@@ -52,9 +62,6 @@ Buffer::~Buffer() {
 	--DebugStats::get().aliveBuffers;
 
 	std::lock_guard lock(dev->mutex);
-
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_BUFFER);
-
 	for(auto* view : this->views) {
 		view->buffer = nullptr;
 	}
@@ -66,9 +73,6 @@ BufferView::~BufferView() {
 	}
 
 	std::lock_guard lock(dev->mutex);
-
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_BUFFER_VIEW);
-
 	if(this->buffer) {
 		auto it = std::find(this->buffer->views.begin(), this->buffer->views.end(), this);
 		dlg_assert(it != this->buffer->views.end());
@@ -108,7 +112,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 
 	auto bufPtr = IntrusivePtr<Buffer>(new Buffer);
 	auto& buf = *bufPtr;
-	buf.objectType = VK_OBJECT_TYPE_BUFFER;
+	buf.memObjectType = VK_OBJECT_TYPE_BUFFER;
 	buf.dev = &dev;
 	buf.ci = *pCreateInfo;
 	buf.handle = *pBuffer;
@@ -136,19 +140,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyBuffer(
 		return;
 	}
 
-	auto& buf = get(device, buffer);
-	auto& dev = *buf.dev;
-	buffer = buf.handle;
-
-	{
-		std::lock_guard lock(dev.mutex);
-		if(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-			auto num = dev.bufferAddresses.erase(&buf);
-			dlg_assert(num == 1u);
-		}
-	}
-
-	dev.keepAliveBuffers.push(&buf);
+	auto& dev = mustMoveUnsetKeepAlive<&Device::keepAliveBuffers>(device, buffer);
 	dev.dispatch.DestroyBuffer(dev.handle, buffer, pAllocator);
 }
 
@@ -184,9 +176,12 @@ void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
 	// access to the given memory and buffer must be internally synced
 	std::lock_guard lock(dev.mutex);
 	dlg_assert(!buf.memory);
+	dlg_assert(buf.memState == MemoryResource::State::unbound);
+
 	buf.memory = &mem;
 	buf.allocationOffset = offset;
 	buf.allocationSize = memReqs.size;
+	buf.memState = MemoryResource::State::bound;
 
 	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
 		buf, cmpMemRes);
@@ -289,7 +284,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBufferView(
 	auto viewPtr = IntrusivePtr<BufferView>(new BufferView());
 	auto& view = *viewPtr;
 	view.dev = &dev;
-	view.objectType = VK_OBJECT_TYPE_BUFFER_VIEW;
 	view.handle = *pView;
 	view.buffer = &buf;
 	view.ci = *pCreateInfo;
@@ -313,11 +307,7 @@ VKAPI_ATTR void VKAPI_CALL DestroyBufferView(
 		return;
 	}
 
-	auto& bufView = get(device, bufferView);
-	auto& dev = *bufView.dev;
-	bufferView = bufView.handle;
-	dev.keepAliveBufferViews.push(&bufView);
-
+	auto& dev = mustMoveUnsetKeepAlive<&Device::keepAliveBufferViews>(device, bufferView);
 	dev.dispatch.DestroyBufferView(dev.handle, bufferView, pAllocator);
 }
 

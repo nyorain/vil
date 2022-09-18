@@ -50,8 +50,14 @@ struct Draw {
 	// the submission. While the associated submission is pending, we must
 	// make sure that none of the handles are destroyed and synchronize future
 	// applicaiton submissions that might write them.
-	// TODO: should probably be IntrusivePtrs right?
-	std::vector<DeviceHandle*> usedHandles;
+	// Not IntrusivePtr by design, while they are referenced here we have to
+	// make sure their API handle is not destroyed, which is an even stronger
+	// guarantee than just lifetime. See Gui::destroyed.
+	// NOTE: synced by device mutex, might be accessed by different
+	// thread *while* drawing is active.
+	std::vector<Image*> usedImages;
+	std::vector<Buffer*> usedBuffers;
+
 	IntrusivePtr<CommandHookState> usedHookState;
 
 	// All the semaphores of submissions (Submission::ourSemaphore) we

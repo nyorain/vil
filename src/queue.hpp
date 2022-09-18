@@ -15,6 +15,8 @@ namespace vil {
 // Queue handles can't be created or destroyed. They are existent
 // for the entire time the Device exists.
 struct Queue : Handle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_QUEUE;
+
 	Device* dev {};
 
 	VkQueue handle {};
@@ -98,7 +100,7 @@ bool checkActivateLocked(Submission& subm);
 void checkPendingSubmissionsLocked(Device&);
 
 // Implemented in submit.cpp
-bool potentiallyWritesLocked(const Submission&, const DeviceHandle&);
+bool potentiallyWritesLocked(const Submission&, const Image*, const Buffer*);
 std::vector<const Submission*> needsSyncLocked(const SubmissionBatch&, const Draw&);
 VkResult submitSemaphore(Queue&, VkSemaphore, bool timeline = false);
 VkSemaphore getSemaphoreFromPool(Device& dev);

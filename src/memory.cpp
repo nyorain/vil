@@ -8,17 +8,13 @@
 
 namespace vil {
 
-// MemoryResource
-MemoryResource::~MemoryResource() {
-	if(!dev) {
-		return;
-	}
+void MemoryResource::onApiDestroy() {
+	std::lock_guard lock(dev->mutex);
 
 	// If this resource had memory assigned, remove it from the memories
 	// list of resources.
-	std::lock_guard lock(dev->mutex);
 	if(memory) {
-		dlg_assert(!memoryDestroyed);
+		dlg_assert(memState == State::bound);
 
 		auto it = std::lower_bound(memory->allocations.begin(), memory->allocations.end(),
 			*this, cmpMemRes);
@@ -38,31 +34,34 @@ MemoryResource::~MemoryResource() {
 		}
 
 		dlg_assert(found);
+
+		memory = nullptr;
+		allocationOffset = {};
+		allocationSize = {};
+		memState = State::resourceDestroyed;
 	}
+
+	notifyApiHandleDestroyedLocked(*dev, *this, memObjectType);
 }
 
-// DeviceMemory
-DeviceMemory::~DeviceMemory() {
-	if(!dev) {
-		return;
-	}
-
+void DeviceMemory::onApiDestroy() {
 	std::lock_guard lock(dev->mutex);
-
-	notifyDestructionLocked(*dev, *this, VK_OBJECT_TYPE_DEVICE_MEMORY);
 
 	// NOTE that we temporarily invalidate the ordering invariant of
 	// this->allocations. But since we own the mutex and this object
 	// is to be destroyed any moment anyways (and we are not calling
 	// any other functions in between) this isn't a problem.
 	for(auto* res : allocations) {
-		dlg_assert(!res->memoryDestroyed);
+		dlg_assert(res->memState == MemoryResource::State::bound);
 		dlg_assert(res->memory == this);
 		res->memory = nullptr;
-		res->memoryDestroyed = true;
+		res->memState = MemoryResource::State::memoryDestroyed;
 		res->allocationOffset = 0u;
 		res->allocationSize = 0u;
 	}
+
+	allocations.clear();
+	notifyApiHandleDestroyedLocked(*dev, *this, VK_OBJECT_TYPE_DEVICE_MEMORY);
 }
 
 // Memory
@@ -99,7 +98,6 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 
 	auto memPtr = IntrusivePtr<DeviceMemory>(new DeviceMemory());
 	auto& memory = *memPtr;
-	memory.objectType = VK_OBJECT_TYPE_DEVICE_MEMORY;
 	memory.dev = &dev;
 	memory.handle = *pMemory;
 	memory.typeIndex = pAllocateInfo->memoryTypeIndex;

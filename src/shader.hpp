@@ -63,25 +63,6 @@ struct XfbPatchRes {
 	IntrusivePtr<XfbPatchDesc> desc {};
 };
 
-struct SpirvData {
-	std::atomic<u32> refCount {};
-
-	// NOTE: in most cases, don't access directly, see 'accessReflection' below.
-	// Need to use proper specialization constants.
-	// Only to be used while the device mutex is locked, otherwise we can't
-	// sync access.
-	std::unique_ptr<spc::Compiler> compiled;
-
-	struct SpecializationConstantDefault {
-		u32 constantID;
-		std::unique_ptr<spc::SPIRConstant> constant;
-	};
-
-	std::vector<SpecializationConstantDefault> constantDefaults;
-
-	~SpirvData();
-};
-
 XfbPatchRes patchSpirvXfb(spc::Compiler&, const char* entryPoint);
 XfbPatchData patchShaderXfb(Device&, spc::Compiler& compiled,
 	const char* entryPoint, std::string_view modName);
@@ -106,8 +87,22 @@ std::optional<spc::Resource> resource(const spc::Compiler&,
 std::optional<spc::Resource> resource(const spc::Compiler&, u32 varID);
 std::optional<spc::BuiltInResource> builtinResource(const spc::Compiler&, u32 varID);
 
-struct ShaderModule : DeviceHandle {
+struct SpecializationConstantDefault {
+	u32 constantID;
+	std::unique_ptr<spc::SPIRConstant> constant;
+};
+
+struct ShaderModule : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_SHADER_MODULE;
+
 	VkShaderModule handle {};
+
+	// NOTE: in most cases, don't access directly, see 'accessReflection' below.
+	// Need to use proper specialization constants.
+	// Only to be used while the device mutex is locked, otherwise we can't
+	// sync access.
+	std::unique_ptr<spc::Compiler> compiled;
+	std::vector<SpecializationConstantDefault> constantDefaults;
 
 	// Owend by us.
 	// When the shader module is a vertex shader, we lazily create
@@ -115,11 +110,8 @@ struct ShaderModule : DeviceHandle {
 	// versions in case the module has multiple entry points.
 	std::vector<XfbPatchData> xfb;
 
-	// Managed via intrusive ptr since it may outlive the shader module in
-	// (possibly multiple) pipeline objects.
-	IntrusivePtr<SpirvData> code;
-
 	~ShaderModule();
+	void clearXfb();
 };
 
 // Will set the given specialization, entryPoint and execution model into
@@ -128,10 +120,10 @@ struct ShaderModule : DeviceHandle {
 // if active builtins are accessed.
 // Must only be called while the device mutex is locked for synchronization
 // of mod.compiled.
-spc::Compiler& specializeSpirv(SpirvData& mod,
+spc::Compiler& specializeSpirv(ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel);
-std::unique_ptr<spc::Compiler> copySpecializeSpirv(SpirvData& mod,
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel);
 

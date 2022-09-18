@@ -71,6 +71,7 @@ struct MemoryResource;
 struct RenderPassDesc;
 struct AccelStruct;
 struct PipelineShaderStage;
+struct DescriptorPoolSetEntry;
 
 struct Queue;
 struct QueueFamily;
@@ -107,6 +108,8 @@ struct DescriptorSetCow;
 
 struct Matcher;
 
+struct ObjectTypeHandler;
+
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;
 
@@ -115,7 +118,6 @@ struct Platform;
 struct Overlay;
 struct Draw;
 
-struct SpirvData;
 struct ThreadMemScope;
 struct LinAllocScope;
 struct LinAllocator;

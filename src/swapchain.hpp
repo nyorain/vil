@@ -13,6 +13,8 @@
 namespace vil {
 
 struct Swapchain : SharedDeviceHandle {
+	static constexpr auto objectType = VK_OBJECT_TYPE_SWAPCHAIN_KHR;
+
 	VkSwapchainKHR handle {};
 	VkSwapchainCreateInfoKHR ci;
 	std::unique_ptr<Overlay> overlay;

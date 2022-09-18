@@ -60,13 +60,6 @@ Device::Device() {
 	dev.bufferViews.mutex = &dev.mutex;
 	dev.dsuTemplates.mutex = &dev.mutex;
 	dev.accelStructs.mutex = &dev.mutex;
-
-	dev.keepAliveAccelStructs.mutex = &dev.mutex;
-	dev.keepAliveBufferViews.mutex = &dev.mutex;
-	dev.keepAliveBuffers.mutex = &dev.mutex;
-	dev.keepAliveSamplers.mutex = &dev.mutex;
-	dev.keepAliveAccelStructs.mutex = &dev.mutex;
-	dev.keepAliveImageViews.mutex = &dev.mutex;
 }
 
 Device::~Device() {
@@ -874,7 +867,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		for(auto j = 0u; j < qi.queueCount; ++j) {
 			auto& q = *dev.queues.emplace_back(std::make_unique<Queue>());
 			q.dev = &dev;
-			q.objectType = VK_OBJECT_TYPE_QUEUE;
 			q.priority = qi.pQueuePriorities[j];
 			q.family = qi.queueFamilyIndex;
 			q.createdByUs = (i >= ci->queueCreateInfoCount);
@@ -1053,17 +1045,11 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 }
 
 // util
-void notifyDestructionLocked(Device& dev, Handle& handle, VkObjectType type) {
+void notifyApiHandleDestroyedLocked(Device& dev, Handle& handle, VkObjectType type) {
 	assertOwned(dev.mutex);
 	if(dev.guiLocked()) {
-		dev.guiLocked()->destroyed(handle, type);
+		dev.guiLocked()->apiHandleDestroyed(handle, type);
 	}
-}
-
-void notifyDestruction(Device& dev, Handle& handle, VkObjectType type) {
-	ExtZoneScoped;
-	std::lock_guard lock(dev.mutex);
-	notifyDestructionLocked(dev, handle, type);
 }
 
 void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name) {

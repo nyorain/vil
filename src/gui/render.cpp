@@ -24,7 +24,8 @@ void swap(Draw& a, Draw& b) noexcept {
 	swap(a.futureSemaphoreUsed, b.futureSemaphoreUsed);
 	swap(a.lastSubmissionID, b.lastSubmissionID);
 	swap(a.lastUsed, b.lastUsed);
-	swap(a.usedHandles, b.usedHandles);
+	swap(a.usedImages, b.usedImages);
+	swap(a.usedBuffers, b.usedBuffers);
 	swap(a.usedHookState, b.usedHookState);
 	swap(a.waitedUpon, b.waitedUpon);
 }

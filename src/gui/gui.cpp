@@ -173,7 +173,7 @@ Gui::Gui(Device& dev, VkFormat colorFormat) {
 	// init tabs
 	// TODO: use RAII for init
 	tabs_.resources = std::make_unique<ResourceGui>();
-	tabs_.cb = std::make_unique<CommandBufferGui>();
+	tabs_.cb = std::make_unique<CommandRecordGui>();
 
 	tabs_.resources->init(*this);
 	tabs_.cb->init(*this);
@@ -1203,23 +1203,44 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 	ImGui::Render();
 }
 
-void Gui::destroyed(const Handle& handle, VkObjectType type) {
-	(void) type; // TODO
-
-	ExtZoneScoped;
+void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
+	(void) type;
 	assertOwned(dev().mutex);
+
+	auto usesHandle = [&](const Draw& draw) {
+		for(auto* usedBuf : draw.usedBuffers) {
+			if(usedBuf == &handle || usedBuf->memory == &handle) {
+				return true;
+			}
+		}
+		for(auto* usedImg : draw.usedImages) {
+			if(usedImg == &handle || usedImg->memory == &handle) {
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	// Check if we are currently drawing (in another thread) and used
+	// one of the destroyed handles
+	if(currDraw_ && usesHandle(*currDraw_)) {
+		currDrawInvalidated_.fetch_add(1);
+		std::unique_lock lock(dev().mutex, std::adopt_lock);
+		currDrawWait_.wait(lock, [&]{ return currDraw_; });
+		auto waitingCount = currDrawInvalidated_.fetch_sub(1);
+		if(waitingCount == 0u) {
+			currDrawWait_.notify_one();
+		}
+		(void) lock.release();
+	}
 
 	// Make sure that all our submissions that use the given handle have
 	// finished.
 	std::vector<VkFence> fences;
 	std::vector<Draw*> draws;
 	for(auto& draw : draws_) {
-		if(!draw.inUse) {
-			continue;
-		}
-
-		auto it = find(draw.usedHandles, &handle);
-		if(it != draw.usedHandles.end()) {
+		if(draw.inUse && usesHandle(draw)) {
 			fences.push_back(draw.fence);
 			draws.push_back(&draw);
 		}
@@ -1228,15 +1249,11 @@ void Gui::destroyed(const Handle& handle, VkObjectType type) {
 	if(!fences.empty()) {
 		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
 			fences.data(), true, UINT64_MAX));
+
+		for(auto* draw : draws) {
+			finishedLocked(*draw);
+		}
 	}
-
-	// important that we *first* wait for the submission, then forward
-	// this since e.g. the resources gui may destroy handles based on it
-	tabs_.resources->destroyed(handle);
-	tabs_.cb->destroyed(handle);
-
-	// NOTE: I guess we could finish the draws here? But shouldn't be
-	// a problem to wait until the next frame.
 }
 
 void Gui::activateTab(Tab tab) {
@@ -1257,7 +1274,8 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		}
 
 		draw.onFinish.clear();
-		draw.usedHandles.clear();
+		draw.usedImages.clear();
+		draw.usedBuffers.clear();
 		draw.usedHookState.reset();
 	};
 
@@ -1266,6 +1284,11 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	// available to command viewer
 	{
 		std::lock_guard devMutex(dev().mutex);
+
+		dlg_assert(currDrawInvalidated_.load() == 0u);
+		dlg_assert(!currDraw_);
+		currDraw_ = &draw;
+
 		for(auto it = dev().pending.begin(); it != dev().pending.end();) {
 			auto& subm = *it;
 			if(auto nit = checkLocked(*subm); nit) {
@@ -1301,7 +1324,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	// General barrier to make sure all past submissions writing resources
 	// we read are done. Not needed when we don't read a device resource.
 	// PERF: could likely at least give a better dstAccessMask
-	if(!draw.usedHandles.empty()) {
+	if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
 		VkMemoryBarrier memb {};
 		memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 		memb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
@@ -1410,7 +1433,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	// future application submissions to this queue.
 	// Not needed when we don't read a device resource.
 	// PERF: could likely at least give a better srcAccessMask
-	if(!draw.usedHandles.empty()) {
+	if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
 		VkMemoryBarrier memb {};
 		memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 		memb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
@@ -1430,27 +1453,43 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	// and evaluate the pending submissions
 	// NOTE: lock order is important here! First lock device mutex,
 	// later on lock queue mutex, that's how we must always do it.
-	std::lock_guard devMutex(dev().mutex);
+	std::unique_lock devLock(dev().mutex);
 
-	auto invalidated = false;
-	for(auto* handle : draw.usedHandles) {
-		if(handle->objectType == VK_OBJECT_TYPE_BUFFER) {
-			if(!static_cast<Buffer*>(handle)->handle) {
-				invalidated = true;
-				break;
-			}
-		} else if(handle->objectType == VK_OBJECT_TYPE_IMAGE) {
-			if(!static_cast<Image*>(handle)->handle) {
-				invalidated = true;
-				break;
-			}
-		} else {
-			dlg_error("unimplemented");
-		}
-	}
+	dlg_assert(currDraw_ == &draw);
+	currDraw_ = nullptr;
 
-	if(invalidated) {
+	if(currDrawInvalidated_.load()) {
+		dlg_check({
+			auto invalidated = false;
+			for(auto* usedBuf : draw.usedBuffers) {
+				if(!usedBuf->handle || !usedBuf->memory) {
+					invalidated = true;
+					break;
+				}
+			}
+			for(auto* usedImg : draw.usedImages) {
+				if(!usedImg->handle || !usedImg->memory) {
+					invalidated = true;
+					break;
+				}
+			}
+
+			dlg_assert(invalidated);
+		});
+
 		cleanupUnfished(draw);
+
+		// notify all destruction threads that they can carry on
+		currDrawWait_.notify_all();
+
+		// now wait for all destruction threads to acknowledge
+		// NOTE: might seem useless but this step is important for the
+		//   destruction thread waiting predicate, currDraw_ might
+		//   not be null anymore until they wake up if we just carry on.
+		currDrawWait_.wait(devLock, [&]{
+			return currDrawInvalidated_.load() == 0u;
+		});
+
 		return VK_INCOMPLETE;
 	}
 
@@ -1550,7 +1589,8 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	}
 
 	auto& draw = *foundDraw;
-	draw.usedHandles.clear();
+	draw.usedImages.clear();
+	draw.usedBuffers.clear();
 	foundDraw->lastUsed = ++drawCounter_;
 
 	if(blur_.dev) {
@@ -1793,7 +1833,7 @@ void Gui::addFullSync(Draw& draw, VkSubmitInfo& submitInfo) {
 
 	// when we used any application resources we sync with *all*
 	// pending submissions.
-	if(!draw.usedHandles.empty()) {
+	if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
 		for(auto& pqueue : dev().queues) {
 			auto& queue = *pqueue;
 			if(&queue == &usedQueue()) {
@@ -1864,9 +1904,8 @@ void Gui::makeImGuiCurrent() {
 	ImGui::SetCurrentContext(imgui_);
 }
 
-void Gui::selectResource(Handle& handle, bool activateTab) {
-	tabs_.resources->select(handle);
-	tabs_.resources->filter_ = handle.objectType;
+void Gui::selectResource(Handle& handle, VkObjectType objectType, bool activateTab) {
+	tabs_.resources->select(handle, objectType);
 
 	if(activateTab) {
 		this->activateTab(Tab::resources);
@@ -1902,50 +1941,13 @@ void Gui::finishedLocked(Draw& draw) {
 
 	draw.onFinish.clear();
 	draw.waitedUpon.clear();
-	draw.usedHandles.clear();
+	draw.usedImages.clear();
+	draw.usedBuffers.clear();
 	draw.usedHookState.reset();
 
 	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
 
 	draw.inUse = false;
-}
-
-// util
-void refButton(Gui& gui, Handle& handle) {
-	// We need the PushID/PopID since there may be multiple
-	// ref buttons with the same label (e.g. for unnamed handles)
-	constexpr auto showType = true;
-	ImGui::PushID(&handle);
-	if(ImGui::Button(name(handle, showType).c_str())) {
-		gui.selectResource(handle);
-	}
-	ImGui::PopID();
-}
-
-void refButtonOpt(Gui& gui, Handle* handle) {
-	if(handle) {
-		refButton(gui, *handle);
-	}
-}
-
-void refButtonExpect(Gui& gui, Handle* handle) {
-	dlg_assert_or(handle, return);
-	refButton(gui, *handle);
-}
-
-void refButtonD(Gui& gui, Handle* handle, const char* str) {
-	if(handle) {
-		refButton(gui, *handle);
-	} else {
-		ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
-
-		// NOTE: could add popup to button further explaining what's going on
-		ImGui::Button(str);
-
-		ImGui::PopStyleVar();
-		ImGui::PopItemFlag();
-	}
 }
 
 void Gui::addPreRender(Recorder rec) {
@@ -1976,6 +1978,32 @@ void Gui::updateColorFormat(VkFormat newColorFormat) {
 
 	colorFormat_ = newColorFormat;
 	initRenderStuff();
+}
+
+// util
+void refButton(Gui& gui, Handle& handle, VkObjectType objectType) {
+	// We need the PushID/PopID since there may be multiple
+	// ref buttons with the same label (e.g. for unnamed handles)
+	constexpr auto showType = true;
+	ImGui::PushID(&handle);
+	if(ImGui::Button(name(handle, objectType, showType).c_str())) {
+		gui.selectResource(handle, objectType);
+	}
+	ImGui::PopID();
+}
+
+void pushDisabled(bool disabled) {
+	if(disabled) {
+		ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.6f);
+	}
+}
+
+void popDisabled(bool disabled) {
+	if(disabled) {
+		ImGui::PopStyleVar();
+		ImGui::PopItemFlag();
+	}
 }
 
 } // namespace vil

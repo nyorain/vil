@@ -3,14 +3,6 @@
 
 namespace vil {
 
-QueryPool::~QueryPool() {
-	if(!dev) {
-		return;
-	}
-
-	notifyDestruction(*dev, *this, VK_OBJECT_TYPE_SAMPLER);
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(
 		VkDevice                                    device,
 		const VkQueryPoolCreateInfo*                pCreateInfo,
@@ -24,7 +16,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateQueryPool(
 
 	auto& queryPool = dev.queryPools.add(*pQueryPool);
 	queryPool.dev = &dev;
-	queryPool.objectType = VK_OBJECT_TYPE_QUERY_POOL;
 	queryPool.handle = *pQueryPool;
 	queryPool.ci = *pCreateInfo;
 

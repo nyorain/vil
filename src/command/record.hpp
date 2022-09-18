@@ -301,6 +301,10 @@ struct CommandRecord {
 	CommandAllocList<const char*> pushLables;
 
 	struct UsedHandles {
+		// NOTE: change this when adding maps here!
+		// Important for CmdExecuteCommands impl assert
+		static constexpr auto handleTypeCount = 17u;
+
 		UsedHandleSet<Buffer> buffers;
 		UsedHandleSet<GraphicsPipeline> graphicsPipes;
 		UsedHandleSet<ComputePipeline> computePipes;
