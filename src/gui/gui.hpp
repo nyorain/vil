@@ -6,6 +6,8 @@
 #include <util/vec.hpp>
 #include <util/util.hpp>
 #include <variant>
+#include <condition_variable>
+#include <atomic>
 #include <deque>
 #include <chrono>
 
@@ -28,6 +30,7 @@ public:
 		u32 imageIdx {};
 		VkExtent2D extent {};
 		VkFramebuffer fb {};
+		VkImage image {};
 		bool fullscreen {};
 		bool clear {};
 		VkQueue presentQueue {};

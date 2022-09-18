@@ -19,6 +19,8 @@ urgent, bugs:
 	  Just update a copy of (mutex-synced) state that is applied at beginning
 	  of render.
 
+- [ ] UpdateBuffer source not correctly viewable in command viewer
+      Debug e.g. with iro preFrame cb
 - [ ] set spec constants for shader module in gui shader debugger.
       Test with shader from tkn/iro
 

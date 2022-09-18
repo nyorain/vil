@@ -354,7 +354,7 @@ struct CommandRecord {
 // Checks if the given bound DescriptorSet is still valid.
 // If so, returns it (and a lock making sure it's kept alive).
 [[nodiscard]]
-std::pair<DescriptorSet*, std::unique_lock<SharedLockableBase(DebugMutex)>>
+std::pair<DescriptorSet*, std::unique_lock<LockableBase(DebugMutex)>>
 tryAccess(const BoundDescriptorSet&);
 
 // Directly accesses the given descriptor set.
