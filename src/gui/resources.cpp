@@ -1203,7 +1203,7 @@ void ResourceGui::updateResourceList() {
 
 	auto incRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
 		using HT = std::remove_reference_t<decltype(res)>;
-		constexpr auto noop =
+		[[maybe_unused]] constexpr auto noop =
 			std::is_same_v<HT, DescriptorSet> ||
 			std::is_same_v<HT, Queue>;
 		if constexpr(!noop) {
@@ -1212,7 +1212,7 @@ void ResourceGui::updateResourceList() {
 	});
 	auto decRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
 		using HT = std::remove_reference_t<decltype(res)>;
-		constexpr auto noop =
+		[[maybe_unused]] constexpr auto noop =
 			std::is_same_v<HT, DescriptorSet> ||
 			std::is_same_v<HT, Queue>;
 		if constexpr(std::is_same_v<HT, Pipeline>) {
