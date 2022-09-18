@@ -19,6 +19,7 @@ public:
 	bool firstUpdate_ {true};
 
 public:
+	~ResourceGui();
 	void init(Gui& gui);
 
 	void select(Handle& handle, VkObjectType type);

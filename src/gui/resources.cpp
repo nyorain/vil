@@ -62,6 +62,10 @@ std::string sepfmt(u64 size) {
 	return ret;
 }
 
+ResourceGui::~ResourceGui() {
+	// TODO: unref handles!
+}
+
 void ResourceGui::init(Gui& gui) {
 	gui_ = &gui;
 	buffer_.viewer.init(gui);

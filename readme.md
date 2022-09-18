@@ -67,8 +67,8 @@ Supported/Tested platforms:
 - Unix, gcc & clang (with solid C++17 support)
 	- xcb, xlib and wayland platforms
   - hooked overlay not supported on wayland, it is too well designed to allow hacks like that.
-    Just integrate vil with your application using the API or use `VIL_CREATE_WINDOW` for a separate
-    window (that works on native wayland). Or make your application use xcb/xlib.
+    Just integrate vil with your application using the API or set the `VIL_CREATE_WINDOW=1` environment var
+	for a separate window (that works on native wayland). Or make your application use xcb/xlib.
 	- only actively tested on linux, bug reports and improvements for
 	  other platforms appreciated
 - MSVC 2019 (x64)
@@ -137,8 +137,7 @@ make sure to report them here!
 There are multiple ways of using the introspection gui:
 
 - Make the layer create a new window containing the debug gui when the application starts.
-  This is the current default, you can enable it via the environment variable
-  `VIL_CREATE_WINDOW=1`.
+  You can enable it via the environment variable `VIL_CREATE_WINDOW=1`.
 - Make the layer draw an overlay over your application
 	- Since the layer gui still needs input you have to supply it via
 	  a separate api. See [include/vil_api.h](include/vil_api.h).
