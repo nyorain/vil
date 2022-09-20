@@ -345,13 +345,30 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 void CommandHook::hook(QueueSubmitter& subm) {
 	auto& dev = *dev_;
 
+	// make sure we never have too many submissions
+	// can become a memory problem at some point (e.g. when never
+	// retrieved & cleared by gui for whatever reason).
+	{
+		// We can't delete CompletedHook objects while holding
+		// device mutex since their destruction might trigger
+		// a CommandRecord destruction
+		std::vector<CompletedHook> keepAlive;
+		std::lock_guard lock(dev.mutex);
+		if(completed_.size() > maxCompletedHooks) {
+			auto upTo = completed_.size() - maxCompletedHooks;
+			for(auto i = 0u; i < upTo; ++i) {
+				keepAlive.push_back(std::move(completed_[i]));
+			}
+
+			completed_.erase(completed_.begin(), completed_.begin() + upTo);
+		}
+	}
+
 	// we put all of this in a critical section to protect against changes
 	// of target_ and ops_ and the list of hooked records.
 	// TODO: might be possible to just use internal mutex, try it.
 	// Would help performance, the hooked recording is in the critical
 	// section here as well and quite expensive.
-	// NOTE: when using local mutex instead, rework ds.cpp mutex locking,
-	// see TODOs there on device mutex locked assumptions
 	std::lock_guard lock(dev.mutex);
 
 	if(target_.type == TargetType::none || freeze.load()) {

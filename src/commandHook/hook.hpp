@@ -97,6 +97,9 @@ public:
 	// as we need it to have accelStruct data.
 	static constexpr bool hookAccelStructBuilds = true;
 
+	// maximum number of completed hooks we store at a time.
+	static constexpr auto maxCompletedHooks = 8u;
+
 	using TargetType = CommandHookTargetType;
 	using Target = CommandHookTarget;
 	using Ops = CommandHookOps;
@@ -192,9 +195,6 @@ public: // TODO, for copying. Maybe just move them to Device?
 	Ops ops_;
 	Target target_;
 	LinAllocator matchAlloc_;
-
-	// maximum number of completed hooks we store at a time.
-	static constexpr auto maxCompletedHooks = 8u;
 };
 
 } // namespace vil

@@ -61,11 +61,6 @@ void CommandHookSubmission::finish(Submission& subm) {
 	assertOwned(record->hook->dev_->mutex);
 	transmitTiming();
 
-	// make sure we never exceed the maximum number of completed states.
-	if(record->hook->completed_.size() > CommandHook::maxCompletedHooks) {
-		record->hook->completed_.erase(record->hook->completed_.begin());
-	}
-
 	auto& state = record->hook->completed_.emplace_back();
 	state.record = IntrusivePtr<CommandRecord>(record->record);
 	state.match = record->match;

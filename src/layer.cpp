@@ -677,6 +677,7 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 
 	VIL_DEV_HOOK_EXT(CmdBeginDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdEndDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdInsertDebugUtilsLabelEXT, VK_EXT_DEBUG_UTILS_EXTENSION_NAME),
 
 	// copy_commands2
 	VIL_DEV_HOOK(CmdCopyBuffer2, VK_API_VERSION_1_3),

@@ -7,7 +7,6 @@ v0.2:
 - fix README
 
 urgent, bugs:
-- [ ] unref handles in ResourceGui destructor
 - [ ] with lockfree gui rendering, the overlay input events in api.cpp
       are racy when QueuePresent is called in another thread.
 	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
@@ -16,10 +15,10 @@ urgent, bugs:
 	  Just update a copy of (mutex-synced) state that is applied at beginning
 	  of render.
 
-- [ ] UpdateBuffer source not correctly viewable in command viewer
-      Debug e.g. with iro preFrame cb
-- [ ] set spec constants for shader module in gui shader debugger.
-      Test with shader from tkn/iro
+- [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
+      test with iro, shadowCull
+
+- [ ] fix sync hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 
 - [ ] figure out transform_feedback crashes in doom eternal
       crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
@@ -31,15 +30,14 @@ urgent, bugs:
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
 - [ ] toupper bug when searching for resource
+	- [ ] Better resource search (simple fuzzy search)
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
-      increasing the minBlockSize. Increased it temporarily but should probably just roll own block sub-allocator
+      Increased it temporarily but should probably just roll own block sub-allocator
 - [ ] when viewing resources aliasing others in memory in the resource viewer,
       we have to make sure that their content wasn't made undefined.
 	  Vulkan says it's not allowed to use such resources.
 	  Note that they are usually NOT in the invalid image layout, just the last
 	  one they were used in.
-- [ ] fix buffmt for storageBuffer array
-      test with iro, shadowCull
 
 new, workstack:
 Freeze/selection changes:
@@ -165,6 +163,8 @@ shader debugger:
 	      breakpoints for lines that don't have code associated with them
 		  in spirv won't trigger. Need to do a more proper check
 	- [ ] clean up breakpoint handling
+- [ ] set spec constants for shader module in gui shader debugger.
+      Test with shader from tkn/iro
 - [ ] detect unsupported features/capabilities (such as subgroup ops)
       and display "unsupported feature: X" error message in gui
 - [ ] test, fix, cleanup handling of multiple files. Broken

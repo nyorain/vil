@@ -98,3 +98,31 @@ be possible or useful in the end.
 - hide shader debugger behind config feature?
 	- adds a whole new library and isn't ready yet at all.
 	  and might never really be ready, it's more of an experiment anyways
+
+---
+
+quick local-command capture
+
+During recording already, we can tell vil *somehow* that we are
+interested in *this* command (maybe pass flags, e.g. say that we are 
+interested in shader debugging).
+
+When opening the UI (even if that's way later), we can then select
+the last capture of this particular command (e.g. associated with
+name via API).
+Shouldn't be too hard via current api.
+
+The hardest part is the notification via api I guess.
+We can't just pass a VkCommandBuffer into vil api.
+Could store per-thread last recorded CommandBuffer but that introduces 
+some overhead while recording; would like to avoid.
+
+Hm, maybe we can use some specific debug label names?
+E.g. if you begin insert a debug utils label called "VilCaptureNext"
+	(and then possibly some more arguments into the string)
+we store inside the commandbuffer that the next command should be marked.
+
+Wait, we don't even support InsertDebugUtilsLabel rn. brb.
+	btw, we would want this for BeginDebugUtilsLabel as well, often
+	the main thing used, might be the only thing supported/easily accessible
+	in engine

@@ -59,6 +59,7 @@ private:
 
 	void drawHandleDesc(Draw&);
 	void copyBuffer(Draw&);
+	void clearHandles();
 	// Will also apply newFilter
 	void updateResourceList();
 	void clearSelection();

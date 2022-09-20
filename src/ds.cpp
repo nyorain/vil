@@ -276,14 +276,6 @@ bool validateIncRef(Device& dev, Set& set, Handle*& handle, bool checkReplace) {
 		return true;
 	}
 
-	// TODO: proper place to do this would be here.
-	// But due to the large critical section in CommandHook, we have to
-	// design the whole snapshot descriptors procedure as one giant
-	// critical section as welll.
-	// NOTE: otoh, we have to keep in mind that this function is called
-	// while a DescriptorSet mutex is locked (see addCowLocked path
-	// with !refBindings). Would this still be safe to do without deadlock?
-	// std::lock_guard lock(dev.mutex);
 	(void) dev;
 
 	// TODO: not fully exception safe
@@ -321,7 +313,12 @@ bool validateIncRef(Device& dev, Set& set, Handle*& handle, bool checkReplace) {
 // descriptor set updates and destruction a lot slower.
 static void doRefBindings(Device& dev, DescriptorStateRef state, bool checkIfValid) {
 	ZoneScopedN("refBindings");
-	assertOwned(dev.mutex); // TODO: feels like bad design here
+
+	// NOTE: might seem like bad design but we need the device mutex locked
+	// to validate handles when checkIfValid = true.
+	// We can't lock it locally since it must be locked *before* the
+	// ds/pool mutex is locked.
+	assertOwned(dev.mutex);
 
 	for(auto b = 0u; b < state.layout->bindings.size(); ++b) {
 		auto& binding = state.layout->bindings[b];
@@ -440,7 +437,7 @@ DescriptorStateCopyPtr DescriptorSet::copyLockedState() {
 	// NOTE: when this assert fails somewhere, we have to adjust the code (storing stuff
 	// that is up-to-pointer-aligned directly behind the state object in memory).
 	static_assert(sizeof(DescriptorStateCopy) % alignof(void*) == 0u);
-	assertOwned(mutex_);
+	assertOwned(pool->mutex);
 
 	auto bindingSize = totalDescriptorMemSize(*this->layout, this->variableDescriptorCount);
 	auto memSize = sizeof(DescriptorStateCopy) + bindingSize;
@@ -478,7 +475,7 @@ DescriptorStateCopyPtr DescriptorSet::copyLockedState() {
 
 DescriptorStateCopyPtr DescriptorSet::validateAndCopyLocked() {
 	assertOwned(dev().mutex);
-	std::lock_guard lock(mutex_);
+	std::lock_guard lock(pool->mutex);
 
 	// We need to reference all bindings when they aren't referenced
 	// at the moment. This will also validate them (i.e. set the ones
@@ -511,10 +508,16 @@ u32 totalDescriptorCount(DescriptorStateRef state) {
 }
 
 IntrusivePtr<DescriptorSetCow> DescriptorSet::addCowLocked() {
-	assertOwned(dev().mutex); // TODO: feels like bad design here
-	std::lock_guard lock(mutex_);
+	// NOTE: might seem like bad design but on the doRefBindings codepath,
+	// we need the device mutex locked to validate handles.
+	// We can't lock it locally since it must be locked *before* the
+	// ds/pool mutex is locked.
+	assertOwned(dev().mutex);
+
+	std::lock_guard lock(pool->mutex);
 	if(!cow_) {
 		// TODO PERF: get from a pool or something
+		// (low prio since only relevant for gui stuff)
 		cow_.reset(new DescriptorSetCow());
 		cow_->ds = this;
 
@@ -529,8 +532,8 @@ IntrusivePtr<DescriptorSetCow> DescriptorSet::addCowLocked() {
 	return IntrusivePtr<DescriptorSetCow>(cow_);
 }
 
-std::unique_lock<DebugMutex> DescriptorSet::checkResolveCow() {
-	std::unique_lock objLock(mutex_);
+std::unique_lock<LockableBase(DebugMutex)> DescriptorSet::checkResolveCow() {
+	std::unique_lock objLock(pool->mutex);
 	if(!cow_) {
 		return objLock;
 	}
