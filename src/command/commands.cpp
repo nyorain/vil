@@ -2497,6 +2497,15 @@ void EndDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb, u32) c
 	dev.dispatch.CmdEndDebugUtilsLabelEXT(cb);
 }
 
+// InsertDebugUtilsLabelCmd
+void InsertDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	VkDebugUtilsLabelEXT label {};
+	label.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+	label.pLabelName = this->name;
+	std::memcpy(&label.color, this->color.data(), sizeof(label.color));
+	dev.dispatch.CmdInsertDebugUtilsLabelEXT(cb, &label);
+}
+
 // BindPipelineCmd
 void BindPipelineCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdBindPipeline(cb, bindPoint, pipe->handle);

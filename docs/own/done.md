@@ -1,3 +1,9 @@
+- [x] unref handles in ResourceGui destructor
+- [x] UpdateBuffer source not correctly viewable in command viewer
+      Debug e.g. with iro preFrame cb
+- [x] fix deadlock in HookedSubmission::finish when clearing completed
+      hooks while holding mutex
+- [x] replace ds::mutex with its pools mutex
 - [x] we might be able to improve the accuracy of the queried timings (in hooked cbs)
       with inserted pipeline barriers. That will cause certain stages/commands
 	  to stall so we can measure the per-stage time in a more isolated environment

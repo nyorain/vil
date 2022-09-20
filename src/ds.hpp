@@ -218,13 +218,13 @@ struct DescriptorStateCopy {
 
 using DescriptorStateCopyPtr = std::unique_ptr<DescriptorStateCopy, DescriptorStateCopy::Deleter>;
 
-// Vulkan descriptor set handle
-// PERF: would be nice to reduce its size. Statically allocated with maxSets
-// in descriptorPool.
+// Vulkan descriptor set handle.
+// PERF: make sure to keep this as small as possible. Space for it is
+//   statically allocated on descriptorPool creation.
 // NOTE: other than most handles, DescriptorSet doesn't have shared
-// ownership. The reason for this is mainly that we can very efficiently
-// allocate them via the DescriptorPool (wouldn't be possible if all
-// of them could be kept alive).
+//   ownership. The reason for this is mainly that we can very efficiently
+//   allocate them via the DescriptorPool (wouldn't be possible if all
+//   of them could be kept alive).
 struct DescriptorSet : Handle {
 public:
 	static constexpr auto objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET;
@@ -243,9 +243,10 @@ public:
 
 	// requires the device mutex to be locked
 	IntrusivePtr<DescriptorSetCow> addCowLocked();
-	std::unique_lock<DebugMutex> checkResolveCow();
-	std::unique_lock<DebugMutex> lock() {
-		return std::unique_lock<DebugMutex>(mutex_);
+	std::unique_lock<LockableBase(DebugMutex)> checkResolveCow();
+	std::unique_lock<LockableBase(DebugMutex)> lock() {
+		dlg_assert(pool);
+		return std::unique_lock<LockableBase(DebugMutex)>(pool->mutex);
 	}
 
 	// requires device mutex to be locked
@@ -255,17 +256,14 @@ private:
 	DescriptorStateCopyPtr copyLockedState();
 
 private:
-	// Protected by mutex.
+	// Protected by pool->mutex
 	// Not owned here. The destructor of DescriptorSetCow automatically
 	// unsets this.
 	IntrusivePtr<DescriptorSetCow> cow_ {};
 
-	// The internal state (in data) is protected by this mutex. This
-	// is needed since we might read the data anytime from the gui
-	// or when resolving the state.
-	DebugMutex mutex_;
-
-	// std::byte bindingData[]; // following this in memory
+	// Following this in memory
+	// Protected by pool->mutex
+	// std::byte bindingData[];
 };
 
 // Copy-on-write mechanism on a descriptor state.

@@ -451,19 +451,23 @@ void DisplayWindow::uiThread() {
 	auto& io = ImGui::GetIO();
 
 	using Clock = std::chrono::high_resolution_clock;
-	auto timeIt = [](auto& now, auto name) {
-		(void) now;
-		(void) name;
-		// auto newNow = Clock::now();
-		// auto dist = newNow - now;
-		// dlg_trace("time {}: {}", name,
-		// 	std::chrono::duration_cast<std::chrono::milliseconds>(dist).count());
-		// now = newNow;
-	};
 
-	const auto maxFramerate = 30.f;
-	const auto minIterationTime = std::chrono::milliseconds(u32(1000.f / maxFramerate));
-	const auto limitRefreshRate = true;
+	// NOTE: limiting the framerate may be desirable to not make vil
+	// block a core and lock the device mutex too often.
+	auto minIterationTime = std::chrono::milliseconds(0u);
+	auto limitRefreshRate = false;
+	// environment variable is the minimum frame we spend in one window
+	// iteration in milliseconds.
+	auto envFrameTime = std::getenv("VIL_WINDOW_MIN_FRAME_TIME");
+	if(envFrameTime) {
+		int minTime;
+		if(stoi(envFrameTime, minTime) && minTime > 0 && minTime < 1000) {
+			minIterationTime = std::chrono::milliseconds(minTime);
+			limitRefreshRate = true;
+		} else {
+			dlg_warn("Bad parameter for VIL_WINDOW_MIN_FRAME_TIME");
+		}
+	}
 
 	while(run_.load()) {
 		auto now = Clock::now();
@@ -544,8 +548,6 @@ void DisplayWindow::uiThread() {
 		frameInfo.waitSemaphores = sems;
 
 		gui->renderFrame(frameInfo);
-
-		timeIt(now, "frame");
 
 		// There is no advantage in having multiple draws pending at
 		// the same time, we don't need to squeeze every last fps

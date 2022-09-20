@@ -2048,6 +2048,22 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 	}
 }
 
+VKAPI_ATTR void VKAPI_CALL CmdInsertDebugUtilsLabelEXT(
+		VkCommandBuffer                             commandBuffer,
+		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<InsertDebugUtilsLabelCmd>(cb);
+
+	auto* c = pLabelInfo->color;
+	cmd.color = {c[0], c[1], c[2], c[3]};
+	cmd.name = copyString(cb, pLabelInfo->pLabelName);
+	// TODO: copy pNext?
+
+	if(cb.dev->dispatch.CmdInsertDebugUtilsLabelEXT) {
+		cb.dev->dispatch.CmdInsertDebugUtilsLabelEXT(cb.handle, pLabelInfo);
+	}
+}
+
 VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 		VkCommandBuffer                             commandBuffer,
 		VkPipelineBindPoint                         pipelineBindPoint,

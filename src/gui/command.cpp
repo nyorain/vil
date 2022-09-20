@@ -1220,7 +1220,7 @@ void CommandViewer::displayTransferData(Draw& draw) {
 		if(view_ == IOView::transferSrc) {
 			ImGui::Separator();
 			imGuiText("Static data of size {}", ccmd->data.size());
-			bufferViewer_.display(state_->transferBufCopy.data());
+			bufferViewer_.display(ccmd->data);
 			return;
 		} else  {
 			refDst(ccmd);

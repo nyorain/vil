@@ -833,6 +833,15 @@ struct EndDebugUtilsLabelCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
+struct InsertDebugUtilsLabelCmd final : Command {
+	const char* name {};
+	std::array<float, 4> color; // NOTE: could use this in UI
+
+	std::string_view nameDesc() const override { return name; }
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	void record(const Device&, VkCommandBuffer, u32) const override;
+};
+
 struct BindPipelineCmd final : Command {
 	VkPipelineBindPoint bindPoint {};
 	Pipeline* pipe {};

@@ -63,7 +63,8 @@ std::string sepfmt(u64 size) {
 }
 
 ResourceGui::~ResourceGui() {
-	// TODO: unref handles!
+	// unref handles
+	clearHandles();
 }
 
 void ResourceGui::init(Gui& gui) {
@@ -1201,19 +1202,7 @@ void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {
 	imGuiText("TODO");
 }
 
-void ResourceGui::updateResourceList() {
-	dlg_trace("updateResourceList");
-	auto& dev = gui_->dev();
-
-	auto incRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
-		using HT = std::remove_reference_t<decltype(res)>;
-		[[maybe_unused]] constexpr auto noop =
-			std::is_same_v<HT, DescriptorSet> ||
-			std::is_same_v<HT, Queue>;
-		if constexpr(!noop) {
-			incRefCount(res);
-		}
-	});
+void ResourceGui::clearHandles() {
 	auto decRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
 		using HT = std::remove_reference_t<decltype(res)>;
 		[[maybe_unused]] constexpr auto noop =
@@ -1250,6 +1239,23 @@ void ResourceGui::updateResourceList() {
 	handles_.clear();
 	ds_.pools.clear();
 	ds_.entries.clear();
+}
+
+void ResourceGui::updateResourceList() {
+	dlg_trace("updateResourceList");
+	auto& dev = gui_->dev();
+
+	auto incRefCountVisitor = TemplateResourceVisitor([&](auto& res) {
+		using HT = std::remove_reference_t<decltype(res)>;
+		[[maybe_unused]] constexpr auto noop =
+			std::is_same_v<HT, DescriptorSet> ||
+			std::is_same_v<HT, Queue>;
+		if constexpr(!noop) {
+			incRefCount(res);
+		}
+	});
+
+	clearHandles();
 
 	// find new handler
 	if(filter_ != newFilter_) {
@@ -1257,6 +1263,7 @@ void ResourceGui::updateResourceList() {
 	}
 	filter_ = newFilter_;
 
+	const ObjectTypeHandler* typeHandler {};
 	for(auto& handler : ObjectTypeHandler::handlers) {
 		if(handler->objectType() == filter_) {
 			typeHandler = handler;
