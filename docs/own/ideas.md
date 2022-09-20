@@ -126,3 +126,13 @@ Wait, we don't even support InsertDebugUtilsLabel rn. brb.
 	btw, we would want this for BeginDebugUtilsLabel as well, often
 	the main thing used, might be the only thing supported/easily accessible
 	in engine
+
+```cpp
+struct LocalCapture {
+	std::string name;
+	IntrusivePtr<CommandRecord> record;
+	std::vector<const Command*> commands;
+	bool once {};
+};
+
+```

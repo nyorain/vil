@@ -1232,6 +1232,8 @@ void ResourceGui::clearHandles() {
 		}
 	}
 
+	dlg_assert(typeHandler);
+
 	for(auto& handle : handles_) {
 		typeHandler->visit(decRefCountVisitor, *handle);
 	}
@@ -1270,6 +1272,8 @@ void ResourceGui::updateResourceList() {
 			break;
 		}
 	}
+
+	dlg_assert(typeHandler);
 
 	std::lock_guard lock(gui_->dev().mutex);
 

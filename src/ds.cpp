@@ -475,7 +475,7 @@ DescriptorStateCopyPtr DescriptorSet::copyLockedState() {
 
 DescriptorStateCopyPtr DescriptorSet::validateAndCopyLocked() {
 	assertOwned(dev().mutex);
-	std::lock_guard lock(pool->mutex);
+	assertOwned(pool->mutex);
 
 	// We need to reference all bindings when they aren't referenced
 	// at the moment. This will also validate them (i.e. set the ones
