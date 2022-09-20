@@ -20,6 +20,7 @@ struct CommandHookRecord {
 	// TODO: we don't really need this, can just use dev->commandHook.
 	CommandHook* hook {};
 	CommandRecord* record {}; // the record we hook. Always valid.
+	LocalCapture* localCapture {}; // when this was hooked for a local capture
 	u32 hookCounter {}; // hook->counter_ at creation time; for invalidation
 	// Hierachy of the hooked command. May be empty when there was no
 	// selected command and this HookRecord just exists for accelStructs
@@ -86,7 +87,8 @@ struct CommandHookRecord {
 public:
 	CommandHookRecord(CommandHook& hook, CommandRecord& record,
 		std::vector<const Command*> hooked,
-		const CommandDescriptorSnapshot& descriptors);
+		const CommandDescriptorSnapshot& descriptors,
+		const CommandHookOps& ops, LocalCapture* localCapture = nullptr);
 	~CommandHookRecord();
 
 	// Called when associated record is destroyed or hook replaced.
@@ -101,6 +103,8 @@ public:
 
 private:
 	struct RecordInfo {
+		const CommandHookOps& ops;
+
 		bool splitRenderPass {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
 		const BeginRenderPassCmd* beginRenderPassCmd {};

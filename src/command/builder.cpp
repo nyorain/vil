@@ -155,4 +155,22 @@ void RecordBuilder::append(Command& cmd) {
 	lastCommand_ = &cmd;
 }
 
+std::vector<const Command*> RecordBuilder::lastCommand() const {
+	std::vector<const Command*> ret;
+	ret.push_back(lastCommand_);
+
+	auto section = section_;
+	if(section->cmd == lastCommand_) {
+		section = section->parent;
+	}
+
+	while(section) {
+		ret.push_back(section->cmd);
+		section = section->parent;
+	}
+
+	std::reverse(ret.begin(), ret.end());
+	return ret;
+}
+
 } // namespace vil

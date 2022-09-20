@@ -61,14 +61,6 @@ void CommandHookSubmission::finish(Submission& subm) {
 	assertOwned(record->hook->dev_->mutex);
 	transmitTiming();
 
-	auto& state = record->hook->completed_.emplace_back();
-	state.record = IntrusivePtr<CommandRecord>(record->record);
-	state.match = record->match;
-	state.state = record->state;
-	state.command = record->hcommand;
-	state.descriptorSnapshot = std::move(this->descriptorSnapshot);
-	state.submissionID = subm.parent->globalSubmitID;
-
 	// This usually is a sign of a problem somewhere inside the layer.
 	// Either we are not correctly clearing completed states from the gui
 	// but still producing new ones or we have just *waaay* to many
@@ -77,7 +69,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 		"High number of hook states detected");
 
 	// indirect command readback
-	if(record->hook->ops_.copyIndirectCmd) {
+	if(record->state->indirectCopy.buf) {
 		auto& bcmd = *record->hcommand.back();
 
 		if(auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&bcmd)) {
@@ -119,19 +111,38 @@ void CommandHookSubmission::finish(Submission& subm) {
 			dlg_warn("Unsupported indirect command (readback)");
 		}
 	}
+
+	CompletedHook* dstCompleted {};
+	if(record->localCapture) {
+		dstCompleted = &record->localCapture->completed;
+
+		// TODO: really just overwrite previous result here?
+		// TODO: shouldn't do in critical section, might deadlock :(
+		//   quickfix to just abort in that case
+		if(dstCompleted->state) {
+			dlg_assert(dstCompleted->state);
+			dlg_trace("localCapture already has state");
+			return;
+		}
+	} else {
+		dstCompleted = &record->hook->completed_.emplace_back();
+	}
+
+	dstCompleted->record = IntrusivePtr<CommandRecord>(record->record);
+	dstCompleted->match = record->match;
+	dstCompleted->state = record->state;
+	dstCompleted->command = record->hcommand;
+	dstCompleted->descriptorSnapshot = std::move(this->descriptorSnapshot);
+	dstCompleted->submissionID = subm.parent->globalSubmitID;
 }
 
 void CommandHookSubmission::transmitTiming() {
 	ZoneScoped;
 
 	auto& dev = *record->record->dev;
-	if(!record->hook->ops_.queryTime) {
-		return;
-	}
-
 	if(!record->queryPool) {
-		// The query pool couldn't be created.
-		// This could be the case when the queue does not support
+		// We didn't query the time or the query pool couldn't be created.
+		// Latter could be the case when the queue does not support
 		// timing queries. Signal it.
 		record->state->neededTime = u64(-1);
 		return;

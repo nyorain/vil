@@ -88,6 +88,24 @@ struct CommandHookUpdate {
 	bool invalidate {};
 };
 
+// A vector of the last received states of finished submissions.
+struct CompletedHook {
+	u64 submissionID; // global submission id (dev.submissionCounter)
+	IntrusivePtr<CommandRecord> record;
+	IntrusivePtr<CommandHookState> state;
+	CommandDescriptorSnapshot descriptorSnapshot;
+	std::vector<const Command*> command;
+	float match; // how much the command matched
+};
+
+struct LocalCapture {
+	std::string name;
+	IntrusivePtr<CommandRecord> record;
+	std::vector<const Command*> command;
+	bool once {};
+	CompletedHook completed; // may be empty
+};
+
 // Commandbuffer hook that allows us to forward a modified version
 // of this command buffer down the chain. Only called during submission,
 // when the given CommandBuffer has a valid recording.
@@ -113,17 +131,6 @@ public:
 
 	// Always hooks, even with disabled gui. Mainly for testing.
 	std::atomic<bool> forceHook {};
-
-	// A vector of the last received states of finished submissions.
-	// Must be reset manually when retrieved.
-	struct CompletedHook {
-		u64 submissionID; // global submission id (dev.submissionCounter)
-		IntrusivePtr<CommandRecord> record;
-		IntrusivePtr<CommandHookState> state;
-		CommandDescriptorSnapshot descriptorSnapshot;
-		std::vector<const Command*> command;
-		float match; // how much the command matched
-	};
 
 public:
 	CommandHook(Device& dev);
@@ -152,6 +159,9 @@ public:
 	void invalidateRecordings(bool forceAll = false);
 	void clearCompleted();
 
+	void addLocalCapture(std::unique_ptr<LocalCapture>&&);
+	std::vector<LocalCapture*> localCaptures() const;
+
 private:
 	// Initializes the pipelines and data needed for acceleration
 	// structure copies
@@ -166,7 +176,8 @@ private:
 	VkCommandBuffer doHook(CommandRecord& record,
 		span<const Command*> dstCommand, // might be empty
 		float dstCommandMatch,
-		Submission& subm, std::unique_ptr<CommandHookSubmission>& data);
+		Submission& subm, std::unique_ptr<CommandHookSubmission>& data,
+		LocalCapture* localCapture = nullptr);
 
 	VkCommandBuffer hook(CommandRecord& record,
 		span<const CommandSectionMatch> matchData,
@@ -180,6 +191,13 @@ private:
 
 	u32 counter_ {0};
 	CommandHookRecord* records_ {}; // intrusive linked list
+									//
+	std::vector<CompletedHook> completed_;
+	Ops ops_;
+	Target target_;
+	LinAllocator matchAlloc_;
+
+	std::vector<std::unique_ptr<LocalCapture>> localCaptures_;
 
 	// pipelines needed for the acceleration structure build copy
 public: // TODO, for copying. Maybe just move them to Device?
@@ -190,11 +208,6 @@ public: // TODO, for copying. Maybe just move them to Device?
 	VkDescriptorSetLayout sampleImageDsLayout_ {};
 	VkPipelineLayout sampleImagePipeLayout_ {};
 	VkPipeline sampleImagePipes_[ShaderImageType::count] {};
-
-	std::vector<CompletedHook> completed_;
-	Ops ops_;
-	Target target_;
-	LinAllocator matchAlloc_;
 };
 
 } // namespace vil

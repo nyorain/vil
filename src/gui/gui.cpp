@@ -900,6 +900,16 @@ void Gui::drawOverviewUI(Draw& draw) {
 				"specific CommandBuffers from the 'Resources' tab to view their content.");
 		}
 
+		auto localCaptures = dev.commandHook->localCaptures();
+		for(auto& lc : localCaptures) {
+			std::string lbl = dlg::format("Local Captures {}{}: {}", std::hex, (void*) lc,
+				lc->completed.state ? "found" : "not found");
+			if(ImGui::Button(lbl.c_str())) {
+				cbGui().showLocalCaptures(*lc);
+				activateTab(Tab::commandBuffer);
+			}
+		}
+
 		// show timings
 		std::vector<float> hist;
 

@@ -15,6 +15,7 @@ public:
 	// Defines from which source the selected state is updated.
 	enum class UpdateMode {
 		none, // does not update them at all, just select the static record
+		localCapture, // same as none but uses a fixed state
 		commandBuffer, // update them from the commands in the selected command buffer
 		any, // update them from any submitted matching record
 		swapchain, // update them from the active swapchain
@@ -59,6 +60,9 @@ public:
 	void select(CommandBufferPtr cb,
 		IntrusivePtr<CommandRecord> record,
 		std::vector<const Command*> cmd);
+
+	// LocalCapture mode
+	void select(const LocalCapture& lc);
 
 	// Only some update modes are valid:
 	// - when a whole frame is set, only UpdateMode::swapchain is valid

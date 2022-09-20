@@ -6,6 +6,25 @@ v0.2:
 - vertex viewer improvements
 - fix README
 
+local captures:
+- [ ] fix/implement updating of local captures
+- [ ] add names
+- [ ] allow application to specify whether one capture is enough or
+      if it should be updated
+	- [ ] for onetime local captures, use a separate list in CommandHook
+	      for done ones? to speed up hooking on submission
+- [ ] Fix gui/command.cpp assumption on hooks. They assume only one
+      descriptor/attachment whatever is created. Should work with any
+	  state that contains the relevant information.
+	- [ ] first: need to include (set, binding, elem, before) tuple in
+	      CopiedDescriptor in CompletedHook state
+- [ ] capture attachments and other stuff in local captures
+- [ ] make sure local captures work in render passes
+- [ ] Fix shader debugger to be able to work with LocalCapture
+	- [ ] also some hook assumptions, somehow setup varIDToCopyMap_
+- [ ] clean up somewhat hacky CommandViewer and CommandSelector code
+- [ ] move "ALL THE HOOKS" code out of CommandHook into separate function
+
 urgent, bugs:
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?

@@ -371,13 +371,16 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	// section here as well and quite expensive.
 	std::lock_guard lock(dev.mutex);
 
-	if(target_.type == TargetType::none || freeze.load()) {
-		return;
-	}
+	// fast early-outs
+	if(localCaptures_.empty()) {
+		if(target_.type == TargetType::none || freeze.load()) {
+			return;
+		}
 
-	// TODO: full-submission/record queries!
-	if(target_.command.empty()) {
-		return;
+		// TODO: full-submission/record queries!
+		if(target_.command.empty()) {
+			return;
+		}
 	}
 
 	const CommandRecord* frameDstRecord {};
@@ -455,7 +458,25 @@ void CommandHook::hook(QueueSubmitter& subm) {
 			VkCommandBuffer hooked = VK_NULL_HANDLE;
 			std::unique_ptr<CommandHookSubmission> hookData;
 
-			if(!freeze.load()) {
+			// first check for local captures
+			// NOTE: only doing exact matches for now
+			// TODO: records captures by local capture can't be captured otherwise rn.
+			for(auto& lc : localCaptures_) {
+				auto* rec = cb.cb->lastRecordLocked();
+				if(rec != lc->record.get()) {
+					continue;
+				}
+
+				// shouldn't need descriptors to find *identicial* command
+				auto findRes = find(*rec->commands, lc->command, {});
+				dlg_assert(!findRes.hierarchy.empty());
+				hooked = doHook(*rec, findRes.hierarchy,
+					findRes.match, sub, hookData, lc.get());
+
+				break;
+			}
+
+			if(!freeze.load() && !hookData) {
 				auto hookViaFind = false;
 				if(&rec == frameDstRecord) {
 					dlg_assert(target_.type == TargetType::inFrame);
@@ -601,7 +622,8 @@ VkCommandBuffer CommandHook::hook(CommandRecord& record,
 
 VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 		span<const Command*> dstCommand, float dstCommandMatch,
-		Submission& subm, std::unique_ptr<CommandHookSubmission>& data) {
+		Submission& subm, std::unique_ptr<CommandHookSubmission>& data,
+		LocalCapture* localCapture) {
 
 	// Check if there already is a valid CommandHookRecord we can use.
 	CommandHookRecord* foundHookRecord {};
@@ -619,6 +641,11 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 
 		// the record is currently pending on the device
 		if(hookRecord->writer) {
+			continue;
+		}
+
+		// local capture mismath
+		if(hookRecord->localCapture != localCapture) {
 			continue;
 		}
 
@@ -704,9 +731,85 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 		dlg_assertlm(dlg_level_warn, record.hookRecords.size() < 8,
 			"Alarmingly high number of hooks for a single record");
 
+		const CommandHookOps* ops = &ops_;
+		CommandHookOps opsTmp {};
+
+		if(localCapture) {
+			dlg_trace("Creating hook record for local capture");
+
+			// "we want all the ops"
+			// "ehm... what do you mean with 'all the ops'"?
+			// "AAAALLLL THE OPS!"
+			ops = &opsTmp;
+			opsTmp.queryTime = true;
+
+			dlg_assert(!dstCommand.empty());
+			auto& dstCmd = *dstCommand.back();
+
+			// TODO: need to be able to specify to copy transfer stuff
+			// before *and* after
+			if(dstCmd.type() == CommandType::transfer) {
+				opsTmp.copyTransferDst = true;
+				opsTmp.copyTransferSrc = true;
+			}
+
+			opsTmp.copyIndirectCmd = true;
+
+			if(dstCmd.type() == CommandType::draw) {
+				opsTmp.copyIndexBuffers = true;
+				opsTmp.copyVertexBuffers = true;
+				// TODO: attachment copies
+			}
+
+			auto* stateCmd = dynamic_cast<const StateCmdBase*>(dstCommand.back());
+			auto* pipe = stateCmd->boundPipe();
+			dlg_assert(pipe);
+			if(pipe) {
+				auto& layout = *pipe->layout;
+				for(auto [setID, dsLayout] : enumerate(layout.descriptors)) {
+					for(auto [bindingID, binding] : enumerate(dsLayout->bindings)) {
+						// TODO: also skip sampler-only bindings
+						if(binding.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK) {
+							continue;
+						}
+
+						// bindless stuff.
+						// just skip for now.
+						if(binding.descriptorCount > 32) {
+							dlg_warn("aaah, way too many bindings: {}", binding.descriptorCount);
+							continue;
+						}
+
+						for(auto e = 0u; e < binding.descriptorCount; ++e) {
+							auto& copyBefore = opsTmp.descriptorCopies.emplace_back();
+							copyBefore.set = setID;
+							copyBefore.binding = bindingID;
+							copyBefore.elem = e;
+							copyBefore.before = true;
+
+							auto& copyAfter = opsTmp.descriptorCopies.emplace_back();
+							copyAfter = copyBefore;
+							copyAfter.before = false;
+
+							// TODO: imageAsBuffer?
+							// would be needed for shader debugger
+							// but shader debugger needs some changes to work
+							// with this anyways (see varIDToCopyMap_).
+							// Need code in shader debugger that sets up this
+							// map from an existing LocalCapture (including ops tho).
+							// Maybe just add an extra imageAsBuffer before+after
+							// copy here? gets really expensive tho, 4 copies...
+						}
+					}
+				}
+			}
+
+			// TODO: capture other stuff
+		}
+
 		auto hook = new CommandHookRecord(*this, record,
 			{dstCommand.begin(), dstCommand.end()},
-			descriptors);
+			descriptors, *ops, localCapture);
 		hook->match = dstCommandMatch;
 		record.hookRecords.push_back(FinishPtr<CommandHookRecord>(hook));
 
@@ -714,20 +817,22 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 	}
 
 	dlg_check({
-		dlg_assert(target_.record);
+		if(!localCapture) {
+			dlg_assert(target_.record);
 
-		auto findRes = find(*record.commands, target_.command, target_.descriptors);
-		dlg_assert(findRes.match > 0.f);
-		dlg_assert(std::equal(
-			foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
-			findRes.hierarchy.begin(), findRes.hierarchy.end()));
+			auto findRes = find(*record.commands, target_.command, target_.descriptors);
+			dlg_assert(findRes.match > 0.f);
+			dlg_assert(std::equal(
+				foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
+				findRes.hierarchy.begin(), findRes.hierarchy.end()));
+		}
 	});
 
 	data.reset(new CommandHookSubmission(*foundHookRecord, subm, std::move(descriptors)));
 	return foundHookRecord->cb;
 }
 
-std::vector<CommandHook::CompletedHook> CommandHook::moveCompleted() {
+std::vector<CompletedHook> CommandHook::moveCompleted() {
 	std::vector<CompletedHook> moved;
 	{
 		std::lock_guard lock(dev_->mutex);
@@ -814,6 +919,20 @@ CommandHook::Ops CommandHook::ops() const {
 CommandHook::Target CommandHook::target() const {
 	std::lock_guard lock(dev_->mutex);
 	return target_;
+}
+
+void CommandHook::addLocalCapture(std::unique_ptr<LocalCapture>&& lc) {
+	localCaptures_.push_back(std::move(lc));
+}
+
+std::vector<LocalCapture*> CommandHook::localCaptures() const {
+	std::lock_guard lock(dev_->mutex);
+	std::vector<LocalCapture*> ret;
+	ret.reserve(localCaptures_.size());
+	for(auto& lc : localCaptures_) {
+		ret.push_back(lc.get());
+	}
+	return ret;
 }
 
 } // namespace vil

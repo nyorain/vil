@@ -145,7 +145,9 @@ const RenderPassInstanceState* findRPI(span<const Command*> cmdh) {
 
 void CommandViewer::select(IntrusivePtr<CommandRecord> rec, std::vector<const Command*> cmdh,
 		CommandDescriptorSnapshot dsState, bool resetState,
-		IntrusivePtr<CommandHookState> newState) {
+		IntrusivePtr<CommandHookState> newState, bool localCapture) {
+
+	localCaptureMode_ = localCapture;
 
 	const DrawCmdBase* drawCmd {};
 	const StateCmdBase* stateCmd {};
@@ -336,10 +338,10 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, std::vector<const Co
 
 	// TODO: do we really need the resetState parameter then?
 	// Just reset automatically when new state is null?
-	dlg_assertm(resetState ^ newState, "Either reset the state or "
+	dlg_assertm(localCapture || (resetState ^ newState), "Either reset the state or "
 		"provide a new one");
 
-	if(resetState) {
+	if(resetState && !localCapture) {
 		state_ = {};
 		imageViewer_.reset(resetImgViewer);
 
@@ -1510,6 +1512,10 @@ void CommandViewer::draw(Draw& draw) {
 }
 
 void CommandViewer::updateHook() {
+	if(localCaptureMode_) {
+		return;
+	}
+
 	auto& hook = *gui_->dev().commandHook;
 	state_ = {};
 

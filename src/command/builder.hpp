@@ -40,6 +40,7 @@ struct RecordBuilder {
 	void beginSection(SectionCommand& cmd);
 	void endSection(Command* cmd);
 	void append(Command& cmd);
+	std::vector<const Command*> lastCommand() const;
 
 	template<typename T, SectionType ST = SectionType::none, typename... Args>
 	T& add(Args&&... args) {
