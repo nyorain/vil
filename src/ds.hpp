@@ -249,7 +249,7 @@ public:
 		return std::unique_lock<LockableBase(DebugMutex)>(pool->mutex);
 	}
 
-	// requires device mutex to be locked
+	// requires device *and* pool mutex to be locked
 	DescriptorStateCopyPtr validateAndCopyLocked();
 
 private:
