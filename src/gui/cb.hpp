@@ -28,6 +28,7 @@ public:
 	void showSwapchainSubmissions(Swapchain& swapchain);
 	void select(IntrusivePtr<CommandRecord> record, Command* cmd = nullptr);
 	void select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb);
+	void showLocalCaptures(LocalCapture& lc);
 
 	auto& commandViewer() { return commandViewer_; }
 	auto& selector() { return selector_; }

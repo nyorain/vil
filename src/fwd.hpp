@@ -81,6 +81,8 @@ struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;
 struct CommandHookState;
+struct LocalCapture;
+struct CommandHookOps;
 struct DescriptorCopyOp;
 struct DescriptorCopyOp;
 struct CopiedImage;

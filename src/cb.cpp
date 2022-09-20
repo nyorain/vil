@@ -7,6 +7,7 @@
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <vk/typemap_helper.h>
+#include <commandHook/hook.hpp>
 #include <command/alloc.hpp>
 #include <command/commands.hpp>
 #include <commandHook/record.hpp>
@@ -378,7 +379,23 @@ void CommandPool::onApiDestroy() {
 // recording
 template<typename T, SectionType ST = SectionType::none, typename... Args>
 T& addCmd(CommandBuffer& cb, Args&&... args) {
-	return cb.builder().add<T, ST>(std::forward<Args>(args)...);
+	auto& cmd = cb.builder().add<T, ST>(std::forward<Args>(args)...);
+	if(cb.localCapture_) {
+		auto& hook = *cb.dev->commandHook;
+		auto capture = std::make_unique<LocalCapture>();
+		capture->once = cb.localCaptureOnce_;
+		capture->record = cb.builder().record_;
+		capture->command = cb.builder().lastCommand();
+		// TODO capture.name
+		hook.addLocalCapture(std::move(capture));
+
+		dlg_trace("Added local capture");
+
+		cb.localCapture_ = false;
+		cb.localCaptureOnce_ = false;
+	}
+
+	return cmd;
 }
 
 // api
@@ -1994,10 +2011,28 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 	cb.dev->dispatch.CmdFillBuffer(cb.handle, buf.handle, dstOffset, size, data);
 }
 
+bool checkDebugLabelForLocalCapture(CommandBuffer& cb, std::string_view name) {
+	if(name == "vil.localCapture") {
+		cb.localCapture_ = true;
+		cb.localCaptureOnce_ = false;
+		return true;
+	} else if(name == "vil.localCapture.once") {
+		cb.localCapture_ = true;
+		cb.localCaptureOnce_ = true;
+		return true;
+	}
+
+	return false;
+}
+
 VKAPI_ATTR void VKAPI_CALL CmdBeginDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
+	if(checkDebugLabelForLocalCapture(cb, pLabelInfo->pLabelName)) {
+			return;
+	}
+
 	auto& cmd = addCmd<BeginDebugUtilsLabelCmd, SectionType::begin>(cb);
 
 	auto* c = pLabelInfo->color;
@@ -2056,6 +2091,10 @@ VKAPI_ATTR void VKAPI_CALL CmdInsertDebugUtilsLabelEXT(
 		VkCommandBuffer                             commandBuffer,
 		const VkDebugUtilsLabelEXT*                 pLabelInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
+	if(checkDebugLabelForLocalCapture(cb, pLabelInfo->pLabelName)) {
+			return;
+	}
+
 	auto& cmd = addCmd<InsertDebugUtilsLabelCmd>(cb);
 
 	auto* c = pLabelInfo->color;

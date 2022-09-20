@@ -62,6 +62,7 @@ void CommandRecordGui::draw(Draw& draw) {
 			case UpdateMode::commandBuffer: return "CommandBuffer";
 			case UpdateMode::any: return "Any";
 			case UpdateMode::swapchain: return "Swapchain";
+			case UpdateMode::localCapture: return "LocalCapture";
 			default:
 				dlg_error("unreachable");
 				return "";
@@ -76,7 +77,7 @@ void CommandRecordGui::draw(Draw& draw) {
 			clearSelection(true);
 			return;
 		}
-	} else {
+	} else if(updateMode != UpdateMode::localCapture) {
 		if(ImGui::BeginCombo("Update Source", modeName(updateMode))) {
 			if(ImGui::Selectable("None")) {
 				selector_.updateMode(UpdateMode::none);
@@ -357,6 +358,14 @@ void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain) {
 	updateFromSelector();
 }
 
+void CommandRecordGui::showLocalCaptures(LocalCapture& lc) {
+	clearSelection(true);
+	selector_.select(lc);
+	updateFromSelector();
+	commandViewer_.select(record_, command_, lc.completed.descriptorSnapshot,
+		false, lc.completed.state, true);
+}
+
 void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 	if(frame_.empty() && swapchain.frameSubmissions[0].batches.empty()) {
 		dlg_warn("how did this happen?");
@@ -537,7 +546,7 @@ void CommandRecordGui::displayRecordCommands() {
 	auto newSelection = !nsel.empty() && (
 		command_.empty() ||
 		nsel.back() != command_.back());
-	if(newSelection) {
+	if(newSelection && selector_.updateMode() != UpdateMode::localCapture) {
 		command_ = std::move(nsel);
 
 		// TODO: add cleaner, automatic overload to Selector?

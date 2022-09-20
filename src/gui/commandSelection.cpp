@@ -21,10 +21,14 @@ bool CommandSelection::update() {
 		return false;
 	}
 
+	if(mode_ == UpdateMode::localCapture) {
+		return false;
+	}
+
 	dlg_assert(selectionType() != SelectionType::none);
 
 	// find the best match
-	CommandHook::CompletedHook* best = nullptr;
+	CompletedHook* best = nullptr;
 	std::vector<FrameSubmission> bestBatches; // only for swapchain mode
 	ThreadMemScope tms;
 	u32 bestPresentID = {};
@@ -219,6 +223,19 @@ void CommandSelection::select(CommandBufferPtr cb,
 	updateHookTarget();
 }
 
+void CommandSelection::select(const LocalCapture& lc) {
+	unselect();
+
+	mode_ = UpdateMode::localCapture;
+	record_ = lc.record;
+	command_ = lc.command;
+	// TODO: update for new LocalCaptures?
+	// might change over time
+	state_ = lc.completed.state;
+
+	updateHookTarget();
+}
+
 void CommandSelection::unselect() {
 	auto& hook = *dev_->commandHook;
 
@@ -271,6 +288,9 @@ void CommandSelection::updateHookTarget() {
 			break;
 		case UpdateMode::none:
 			target.type = CommandHook::TargetType::commandRecord;
+			break;
+		case UpdateMode::localCapture:
+			target.type = CommandHook::TargetType::none;
 			break;
 	}
 

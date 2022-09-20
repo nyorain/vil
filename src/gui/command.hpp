@@ -73,7 +73,7 @@ public:
 	// When newState is nullptr, the old one should not be overwritten.
 	void select(IntrusivePtr<CommandRecord>, std::vector<const Command*>,
 		CommandDescriptorSnapshot, bool resetState,
-		IntrusivePtr<CommandHookState> newState);
+		IntrusivePtr<CommandHookState> newState, bool localCapture = false);
 
 	CommandHookState* state() const { return state_.get(); }
 	CommandRecord* record() const { return record_.get(); }
@@ -132,6 +132,7 @@ private:
 	ShaderDebugger shaderDebugger_ {};
 
 	bool doUpdateHook_ {};
+	bool localCaptureMode_ {};
 };
 
 } // namespace vil
