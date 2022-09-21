@@ -15,7 +15,7 @@ enum class SectionType {
 // Utility around building CommandRecords
 struct RecordBuilder {
     struct Section {
-        SectionCommand* cmd;
+        SectionCommand* cmd {};
         ParentCommand* lastParentChild {}; // last child command of this section that is a parent to others
         Section* parent {}; // one level up. Null only for root node
         Section* next {}; // might be != null even when this is the last section. Re-using allocations

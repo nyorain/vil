@@ -298,7 +298,11 @@ void CommandBuffer::popLabelSections() {
 		dlg_trace("Problematic debug utils label nesting detected "
 			"(Begin without end in scope): {}", next->name);
 		builder_.record_->brokenHierarchyLabels = true;
+
+		builder_.section_->cmd = nullptr;
+		builder_.section_->pop = false;
 		builder_.section_ = builder_.section_->parent;
+
 		++ignoreEndDebugLabels_;
 	}
 }
