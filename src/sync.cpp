@@ -36,11 +36,23 @@ Semaphore::~Semaphore() {
 	// Per spec, we can assume all associated payload to be finished
 	// Using while loop since checkLocked will erase from our list.
 	while(!signals.empty()) {
+		if(!signals.back()->submission) {
+			// special signal
+			signals.pop_back();
+			continue;
+		}
+
 		auto finished = checkLocked(*signals.back()->submission->parent);
 		dlg_assert(finished);
 	}
 
 	while(!waits.empty()) {
+		if(!waits.back()->submission) {
+			// special signal
+			waits.pop_back();
+			continue;
+		}
+
 		auto finished = checkLocked(*waits.back()->submission->parent);
 		dlg_assert(finished);
 	}
