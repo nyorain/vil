@@ -460,7 +460,7 @@ void DisplayWindow::uiThread() {
 	// iteration in milliseconds.
 	auto envFrameTime = std::getenv("VIL_WINDOW_MIN_FRAME_TIME");
 	if(envFrameTime) {
-		int minTime;
+		int minTime {};
 		if(stoi(envFrameTime, minTime) && minTime > 0 && minTime < 1000) {
 			minIterationTime = std::chrono::milliseconds(minTime);
 			limitRefreshRate = true;
