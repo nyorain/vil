@@ -41,6 +41,12 @@ urgent, bugs:
 
 new, workstack:
 Freeze/selection changes:
+- [ ] make use of proper sync tracking
+	- [ ] fix added sync: only sync with active pending submission?
+	      not sure how to properly do this
+	- [ ] proper setting of image's pending layout
+	- [ ] introduce first cow-like concept, just tracking when resources get
+	      modified
 - [ ] CommandViewer (and ShaderDebugger probs as well) don't get an initial
       state when ops change and freezeState is active.
 	  Solution: instead of *each* component having its own state, they

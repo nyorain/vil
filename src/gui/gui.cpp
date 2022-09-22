@@ -40,7 +40,7 @@
 	#include <gui/vizlcs.hpp>
 #endif // VIL_VIZ_LCS
 
-inline namespace imgui_vil {
+inline namespace imgui {
 
 thread_local ImGuiContext* __LayerImGui;
 

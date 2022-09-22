@@ -15,10 +15,12 @@
 
 #include <cstdint>
 
-// Have each embedded of ImGui define this symbol :
-inline namespace imgui_vil {
-
 struct ImGuiContext;
+
+// Have each embedded of ImGui define this symbol :
+inline namespace imgui {
+
+// struct ImGuiContext;
 extern thread_local ImGuiContext* __LayerImGui;
 #define GImGui __LayerImGui
 
