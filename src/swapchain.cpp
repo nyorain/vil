@@ -346,10 +346,16 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		auto& swapchain = dev.swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 
+		bool visible;
 		if(swapchain.overlay && swapchain.overlay->platform) {
 			auto state = swapchain.overlay->platform->update(*swapchain.overlay->gui);
-			swapchain.overlay->gui->visible(state != Platform::State::hidden);
-			// swapchain.overlay->gui.focused = (state == Platform::Status::focused);
+			visible = (state != Platform::State::hidden);
+
+			std::lock_guard lock(dev.mutex);
+			swapchain.overlay->gui->visible(visible);
+		} else {
+			std::lock_guard lock(dev.mutex);
+			visible = swapchain.overlay->gui->visible();
 		}
 
 		// update tracked frameSubmissions and timings before drawing
@@ -357,7 +363,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		// can already be displayed.
 		swapchainPresent(swapchain);
 
-		if(swapchain.overlay && swapchain.overlay->gui->visible()) {
+		if(swapchain.overlay && visible) {
 			res = swapchain.overlay->drawPresent(qd, {}, pPresentInfo->pImageIndices[i]);
 		} else {
 			VkPresentInfoKHR pi {};

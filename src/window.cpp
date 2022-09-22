@@ -11,6 +11,10 @@
 #include <vk/enumString.hpp>
 #include <chrono>
 
+// NOTE: we know event calls always happen in the same thread as rendering
+// so we don't need to use gui-internal even queue and can access imguiIO
+// directly
+
 namespace vil {
 namespace {
 
@@ -27,29 +31,27 @@ void cbResize(swa_window* win, unsigned width, unsigned height) {
 }
 
 void cbMouseMove(swa_window*, const swa_mouse_move_event* ev) {
-	ImGui::GetIO().MousePos.x = ev->x;
-	ImGui::GetIO().MousePos.y = ev->y;
+	ImGui::GetIO().AddMousePosEvent(ev->x, ev->y);
 }
 
 void cbMouseButton(swa_window*, const swa_mouse_button_event* ev) {
 	if(ev->button > 0 && ev->button < 6) {
-		ImGui::GetIO().MouseDown[unsigned(ev->button) - 1] = ev->pressed;
+		ImGui::GetIO().AddMousePosEvent(ev->x, ev->y);
+		ImGui::GetIO().AddMouseButtonEvent(unsigned(ev->button) - 1, ev->pressed);
 	}
 }
 
 void cbMouseCross(swa_window*, const swa_mouse_cross_event* ev) {
 	if(ev->entered) {
-		ImGui::GetIO().MousePos.x = ev->x;
-		ImGui::GetIO().MousePos.y = ev->y;
+		ImGui::GetIO().AddMousePosEvent(ev->x, ev->y);
 	} else {
-		ImGui::GetIO().MousePos.x = -FLT_MAX;
-		ImGui::GetIO().MousePos.y = -FLT_MAX;
+		ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
 	}
 }
 
 void cbKey(swa_window*, const swa_key_event* ev) {
 	if(ev->keycode < 512) {
-		ImGui::GetIO().KeysDown[ev->keycode] = ev->pressed;
+		ImGui::GetIO().AddKeyEvent(keyToImGui(ev->keycode), ev->pressed);
 	}
 
 	if(ev->utf8 && *ev->utf8) {
@@ -58,8 +60,7 @@ void cbKey(swa_window*, const swa_key_event* ev) {
 }
 
 void cbMouseWheel(swa_window*, float x, float y) {
-	ImGui::GetIO().MouseWheel = y;
-	ImGui::GetIO().MouseWheelH = x;
+	ImGui::GetIO().AddMouseWheelEvent(x, y);
 }
 
 } // anon namespace

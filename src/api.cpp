@@ -29,8 +29,8 @@ using namespace vil;
 	static_assert(u32(VilKeyUp) == u32(swa_key_up));
 	static_assert(u32(VilKeySpace) == u32(swa_key_space));
 	static_assert(u32(VilKeyBackspace) == u32(swa_key_backspace));
-	static_assert(u32(VilKeyPageUp) == u32(swa_key_pageup));
-	static_assert(u32(VilKeyPageDown) == u32(swa_key_pagedown));
+	static_assert(u32(VilKeyPageup) == u32(swa_key_pageup));
+	static_assert(u32(VilKeyPagedown) == u32(swa_key_pagedown));
 	static_assert(u32(VilKeyHome) == u32(swa_key_home));
 	static_assert(u32(VilKeyEnd) == u32(swa_key_end));
 	static_assert(u32(VilKeyInsert) == u32(swa_key_insert));
@@ -84,7 +84,7 @@ extern "C" VIL_EXPORT void vilOverlayMouseMoveEvent(VilOverlay overlay, int x, i
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 	if(ov.gui->visible()) {
-		ov.gui->imguiIO().MousePos = {float(x), float(y)};
+		ov.gui->addMousePosEvent({float(x), float(y)});
 	}
 }
 
@@ -93,9 +93,7 @@ extern "C" VIL_EXPORT bool vilOverlayMouseButtonEvent(VilOverlay overlay, unsign
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 	if(ov.gui->visible() && button < 5) {
-		auto& io = ov.gui->imguiIO();
-		io.MouseDown[button] = press;
-		return io.WantCaptureMouse;
+		return ov.gui->addMouseButtonEvent(button, press);
 	}
 
 	return false;
@@ -104,10 +102,7 @@ extern "C" VIL_EXPORT bool vilOverlayMouseWheelEvent(VilOverlay overlay, float x
 	auto& ov = *reinterpret_cast<vil::Overlay*>(overlay);
 	std::lock_guard lock(ov.swapchain->dev->mutex);
 	if(ov.gui->visible()) {
-		auto& io = ov.gui->imguiIO();
-		io.MouseWheel += y;
-		io.MouseWheelH += x;
-		return io.WantCaptureMouse;
+		return ov.gui->addMouseWheelEvent({x, y});
 	}
 
 	return false;
@@ -127,10 +122,7 @@ extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum VilKey ke
 		return false;
 	}
 
-	auto& io = ov.gui->imguiIO();
-
-	io.KeysDown[keycode] = pressed;
-	return io.WantCaptureKeyboard;
+	return ov.gui->addKeyEvent(keycode, pressed);
 }
 
 extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8) {
@@ -141,9 +133,7 @@ extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* u
 		return false;
 	}
 
-	auto& io = ov.gui->imguiIO();
-	io.AddInputCharactersUTF8(utf8);
-	return io.WantCaptureKeyboard || io.WantTextInput;
+	return ov.gui->addInputEvent(std::string(utf8));
 }
 
 extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum VilKeyMod mod, bool active) {
@@ -154,21 +144,23 @@ extern "C" VIL_EXPORT void vilOverlayKeyboardModifier(VilOverlay overlay, enum V
 		return;
 	}
 
-	auto& io = ov.gui->imguiIO();
+	ImGuiKey key {};
 	switch(mod) {
 		case VilKeyModAlt:
-			io.KeyAlt = active;
+			key = ImGuiKey_ModAlt;
 			break;
 		case VilKeyModCtrl:
-			io.KeyCtrl = active;
+			key = ImGuiKey_ModCtrl;
 			break;
 		case VilKeyModSuper:
-			io.KeySuper = active;
+			key = ImGuiKey_ModSuper;
 			break;
 		case VilKeyModShift:
-			io.KeyShift = active;
+			key = ImGuiKey_ModShift;
 			break;
 		default:
 			break;
 	}
+
+	ov.gui->addKeyEvent(key, active);
 }

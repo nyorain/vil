@@ -7,18 +7,12 @@ v0.2:
 - fix README
 
 urgent, bugs:
-- [ ] with lockfree gui rendering, the overlay input events in api.cpp
-      are racy when QueuePresent is called in another thread.
-	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
-	  Just insert events into queue that is processed at beginning of 
-	  rendering? probably best. Actually, most (all?) events don't need queue.
-	  Just update a copy of (mutex-synced) state that is applied at beginning
-	  of render.
-
+- [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
+      just track internally?
 - [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull
 
-- [ ] fix sync hazards in gui (try out commands, e.g. transfer UpdateBuffer)
+- [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 
 - [ ] figure out transform_feedback crashes in doom eternal
       crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
@@ -41,6 +35,8 @@ urgent, bugs:
 
 new, workstack:
 Freeze/selection changes:
+- [ ] remove hardcoded vil api and vil platform toggles
+	- [ ] env variables instead?
 - [ ] make use of proper sync tracking
 	- [ ] fix added sync: only sync with active pending submission?
 	      not sure how to properly do this

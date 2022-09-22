@@ -25,6 +25,23 @@ public:
 		memory,
 	};
 
+	struct Event {
+		enum class Type {
+			key,
+			mouseButton,
+			mousePos,
+			mouseWheel,
+			input,
+		};
+
+		Type type;
+		ImGuiKey key;
+		int button;
+		bool b; // focused/down
+		Vec2f vec2f; // wheel or position
+		std::string input;
+	};
+
 	struct FrameInfo {
 		VkSwapchainKHR swapchain {};
 		u32 imageIdx {};
@@ -126,6 +143,15 @@ public:
 	using Recorder = std::function<void(Draw&)>;
 	void addPreRender(Recorder);
 	void addPostRender(Recorder);
+
+	// internally synced event queue
+	// can be called from any thread at any time
+	// will be forwarded to imgui before rendering
+	bool addKeyEvent(ImGuiKey key, bool down);
+	void addMousePosEvent(Vec2f pos);
+	bool addMouseButtonEvent(int button, bool down);
+	bool addMouseWheelEvent(Vec2f dir);
+	bool addInputEvent(std::string input);
 
 private:
 	void destroyRenderStuff();
@@ -230,7 +256,15 @@ private:
 
 	bool visible_ {false};
 	bool showImguiDemo_ {false};
+
+	std::mutex eventMutex_;
+	std::vector<Event> events_;
+	bool eventCaptureMouse_ {};
+	bool eventCaptureKeyboard_ {};
+	bool eventWantTextInput_ {};
 };
+
+ImGuiKey keyToImGui(unsigned key);
 
 void pushDisabled(bool disabled = true);
 void popDisabled(bool disabled = true);

@@ -4,6 +4,10 @@
 #include <util/dlg.hpp>
 #include <gui/gui.hpp>
 
+// NOTE: we know event calls always happen in the same thread as rendering
+// so we don't need to use gui-internal even queue and can access imguiIO
+// directly
+
 namespace vil {
 namespace {
 
@@ -12,8 +16,7 @@ void cbMouseMove(swa_window* win, const swa_mouse_move_event* ev) {
 
 	if(platform->status == SwaPlatform::State::focused) {
 		// dlg_trace("overlay mouse move: {} {}", ev->x, ev->y);
-		ImGui::GetIO().MousePos.x = ev->x;
-		ImGui::GetIO().MousePos.y = ev->y;
+		ImGui::GetIO().AddMousePosEvent(ev->x, ev->y);
 	}
 
 	platform->onEvent();
@@ -50,9 +53,8 @@ void cbMouseButton(swa_window* win, const swa_mouse_button_event* ev) {
 	if(handle) {
 		// dlg_trace("overlay mouse button");
 		if(ev->button > 0 && ev->button < 6) {
-			ImGui::GetIO().MouseDown[unsigned(ev->button) - 1] = ev->pressed;
-			ImGui::GetIO().MousePos.x = ev->x;
-			ImGui::GetIO().MousePos.y = ev->y;
+			ImGui::GetIO().AddMousePosEvent(ev->x, ev->y);
+			ImGui::GetIO().AddMouseButtonEvent(unsigned(ev->button) - 1, ev->pressed);
 		}
 	}
 
@@ -62,11 +64,9 @@ void cbMouseCross(swa_window* win, const swa_mouse_cross_event* ev) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 	if(platform->status == SwaPlatform::State::focused) {
 		if(ev->entered) {
-			ImGui::GetIO().MousePos.x = ev->x;
-			ImGui::GetIO().MousePos.y = ev->y;
+			ImGui::GetIO().AddMousePosEvent(ev->x, ev->y);
 		} else {
-			ImGui::GetIO().MousePos.x = -FLT_MAX;
-			ImGui::GetIO().MousePos.y = -FLT_MAX;
+			ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
 		}
 	}
 
@@ -79,7 +79,7 @@ void cbKey(swa_window* win, const swa_key_event* ev) {
 	if(platform->status == SwaPlatform::State::focused) {
 		// dlg_trace("overlay key: {} {}", ev->keycode, ev->pressed);
 		if(ev->keycode < 512) {
-			ImGui::GetIO().KeysDown[ev->keycode] = ev->pressed;
+			ImGui::GetIO().AddKeyEvent(keyToImGui(ev->keycode), ev->pressed);
 		}
 
 		if(ev->utf8 && *ev->utf8) {
@@ -94,8 +94,7 @@ void cbMouseWheel(swa_window* win, float x, float y) {
 	auto* platform = static_cast<SwaPlatform*>(swa_window_get_userdata(win));
 
 	if(platform->status == SwaPlatform::State::focused) {
-		ImGui::GetIO().MouseWheel = y;
-		ImGui::GetIO().MouseWheelH = x;
+		ImGui::GetIO().AddMouseWheelEvent(x, y);
 	}
 
 	platform->onEvent();

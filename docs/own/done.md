@@ -1,3 +1,11 @@
+- [x] with lockfree gui rendering, the overlay input events in api.cpp
+      are racy when QueuePresent is called in another thread.
+	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
+	  Just insert events into queue that is processed at beginning of 
+	  rendering? probably best. Actually, most (all?) events don't need queue.
+	  Just update a copy of (mutex-synced) state that is applied at beginning
+	  of render.
+	  {nope, just used a full-blown queue to match imgui's new queue}
 - [x] unref handles in ResourceGui destructor
 - [x] UpdateBuffer source not correctly viewable in command viewer
       Debug e.g. with iro preFrame cb
