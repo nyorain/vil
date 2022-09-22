@@ -241,7 +241,7 @@ public:
 public:
 	Device& dev() const { return *pool->dev; }
 
-	// requires the device mutex to be locked
+	// requires device *and* pool mutex to be locked
 	IntrusivePtr<DescriptorSetCow> addCowLocked();
 	std::unique_lock<LockableBase(DebugMutex)> checkResolveCow();
 	std::unique_lock<LockableBase(DebugMutex)> lock() {

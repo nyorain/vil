@@ -1348,7 +1348,7 @@ void ResourceGui::draw(Draw& draw) {
 
 	auto filterName = vil::name(filter_);
 	// ImGui::SetNextItemWidth(150.f);
-	if(ImGui::BeginCombo("", filterName)) {
+	if(ImGui::BeginCombo(ICON_FA_FILTER, filterName)) {
 		for(auto& typeHandler : ObjectTypeHandler::handlers) {
 			auto filter = typeHandler->objectType();
 			auto name = vil::name(filter);

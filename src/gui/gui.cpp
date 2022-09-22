@@ -268,22 +268,6 @@ void Gui::initImGui() {
 	this->io_->ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
 	auto& io = *this->io_;
-	io.KeyMap[ImGuiKey_A] = VilKeyA;
-	io.KeyMap[ImGuiKey_C] = VilKeyC;
-	io.KeyMap[ImGuiKey_V] = VilKeyV;
-	io.KeyMap[ImGuiKey_X] = VilKeyX;
-	io.KeyMap[ImGuiKey_Y] = VilKeyY;
-	io.KeyMap[ImGuiKey_Z] = VilKeyZ;
-	io.KeyMap[ImGuiKey_Enter] = VilKeyEnter;
-	io.KeyMap[ImGuiKey_Delete] = VilKeyDelete;
-	io.KeyMap[ImGuiKey_Space] = VilKeySpace;
-	io.KeyMap[ImGuiKey_LeftArrow] = VilKeyLeft;
-	io.KeyMap[ImGuiKey_DownArrow] = VilKeyDown;
-	io.KeyMap[ImGuiKey_RightArrow] = VilKeyRight;
-	io.KeyMap[ImGuiKey_UpArrow] = VilKeyUp;
-	io.KeyMap[ImGuiKey_Escape] = VilKeyEscape;
-	io.KeyMap[ImGuiKey_Tab] = VilKeyTab;
-	io.KeyMap[ImGuiKey_Backspace] = VilKeyBackspace;
 
 	static const ImWchar rangesBasic[] = {
 		0x0020, 0x00FF, // Basic Latin + Latin Supplement
@@ -1651,8 +1635,9 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		}
 	}
 
-	ImGui::GetIO().DisplaySize.x = info.extent.width;
-	ImGui::GetIO().DisplaySize.y = info.extent.height;
+	auto& io = ImGui::GetIO();
+	io.DisplaySize.x = info.extent.width;
+	io.DisplaySize.y = info.extent.height;
 
 	using Secf = std::chrono::duration<float, std::ratio<1, 1>>;
 	auto now = Clock::now();
@@ -1661,6 +1646,33 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	dt_ = std::chrono::duration_cast<Secf>(diff).count();
 	if(dt_ > 0.f) {
 		ImGui::GetIO().DeltaTime = dt_;
+	}
+
+	// process events
+	std::vector<Event> movedEvents;
+	{
+		std::lock_guard lock(eventMutex_);
+		movedEvents = std::move(events_);
+	}
+
+	for(auto& event : movedEvents) {
+		switch(event.type) {
+			case Event::Type::input:
+				io.AddInputCharactersUTF8(event.input.data());
+				break;
+			case Event::Type::key:
+				io.AddKeyEvent(keyToImGui(event.key), event.b);
+				break;
+			case Event::Type::mousePos:
+				io.AddMousePosEvent(event.vec2f.x, event.vec2f.y);
+				break;
+			case Event::Type::mouseButton:
+				io.AddMouseButtonEvent(event.button, event.b);
+				break;
+			case Event::Type::mouseWheel:
+				io.AddMouseWheelEvent(event.vec2f.x, event.vec2f.y);
+				break;
+		}
 	}
 
 	VkResult res = VK_INCOMPLETE;
@@ -1676,6 +1688,14 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		}
 
 		dlg_info("re-trying rendering after mid-draw invalidation");
+	}
+
+	// upadte event info
+	{
+		std::lock_guard lock(eventMutex_);
+		eventCaptureKeyboard_ = io.WantCaptureKeyboard;
+		eventCaptureMouse_ = io.WantCaptureMouse;
+		eventWantTextInput_ = io.WantTextInput;
 	}
 
 	// call down
@@ -2009,6 +2029,57 @@ void Gui::updateColorFormat(VkFormat newColorFormat) {
 	initRenderStuff();
 }
 
+bool Gui::addKeyEvent(ImGuiKey key, bool down) {
+	Event ev {};
+	ev.type = Event::Type::key;
+	ev.key = key;
+	ev.b = down;
+
+	std::lock_guard lock(eventMutex_);
+	events_.push_back(ev);
+
+	return eventCaptureKeyboard_;
+}
+void Gui::addMousePosEvent(Vec2f pos) {
+	Event ev {};
+	ev.type = Event::Type::mousePos;
+	ev.vec2f = pos;
+
+	std::lock_guard lock(eventMutex_);
+	events_.push_back(ev);
+}
+bool Gui::addMouseButtonEvent(int button, bool down) {
+	Event ev {};
+	ev.type = Event::Type::mouseButton;
+	ev.button = button;
+	ev.b = down;
+
+	std::lock_guard lock(eventMutex_);
+	events_.push_back(ev);
+
+	return eventCaptureMouse_;
+}
+bool Gui::addMouseWheelEvent(Vec2f dir) {
+	Event ev {};
+	ev.type = Event::Type::mouseWheel;
+	ev.vec2f = dir;
+
+	std::lock_guard lock(eventMutex_);
+	events_.push_back(ev);
+
+	return eventCaptureMouse_;
+}
+bool Gui::addInputEvent(std::string input) {
+	Event ev {};
+	ev.type = Event::Type::input;
+	ev.input = std::move(input);
+
+	std::lock_guard lock(eventMutex_);
+	events_.push_back(ev);
+
+	return eventCaptureKeyboard_ || eventWantTextInput_;
+}
+
 // util
 void refButton(Gui& gui, Handle& handle, VkObjectType objectType) {
 	// We need the PushID/PopID since there may be multiple
@@ -2033,6 +2104,123 @@ void popDisabled(bool disabled) {
 		ImGui::PopStyleVar();
 		ImGui::PopItemFlag();
 	}
+}
+
+// TODO: kinda ugly, cleanup
+std::vector<unsigned> initImguiKeymap() {
+	std::vector<unsigned> ret;
+	ret.resize(1024);
+
+	// TODO: add other keys
+	ret[ImGuiKey_A] = VilKeyA;
+	ret[ImGuiKey_B] = VilKeyB;
+	ret[ImGuiKey_C] = VilKeyC;
+	ret[ImGuiKey_D] = VilKeyC;
+	ret[ImGuiKey_E] = VilKeyC;
+	ret[ImGuiKey_F] = VilKeyC;
+	ret[ImGuiKey_G] = VilKeyC;
+	ret[ImGuiKey_H] = VilKeyC;
+	ret[ImGuiKey_I] = VilKeyC;
+	ret[ImGuiKey_J] = VilKeyC;
+	ret[ImGuiKey_K] = VilKeyC;
+	ret[ImGuiKey_L] = VilKeyC;
+	ret[ImGuiKey_M] = VilKeyC;
+	ret[ImGuiKey_N] = VilKeyC;
+	ret[ImGuiKey_O] = VilKeyC;
+	ret[ImGuiKey_P] = VilKeyC;
+	ret[ImGuiKey_Q] = VilKeyC;
+	ret[ImGuiKey_R] = VilKeyC;
+	ret[ImGuiKey_S] = VilKeyC;
+	ret[ImGuiKey_T] = VilKeyC;
+	ret[ImGuiKey_U] = VilKeyC;
+	ret[ImGuiKey_V] = VilKeyC;
+	ret[ImGuiKey_W] = VilKeyC;
+	ret[ImGuiKey_X] = VilKeyC;
+	ret[ImGuiKey_Y] = VilKeyC;
+	ret[ImGuiKey_Z] = VilKeyC;
+
+	ret[ImGuiKey_0] = VilKey0;
+	ret[ImGuiKey_1] = VilKey1;
+	ret[ImGuiKey_2] = VilKey2;
+	ret[ImGuiKey_3] = VilKey3;
+	ret[ImGuiKey_4] = VilKey4;
+	ret[ImGuiKey_5] = VilKey5;
+	ret[ImGuiKey_6] = VilKey6;
+	ret[ImGuiKey_7] = VilKey7;
+	ret[ImGuiKey_8] = VilKey8;
+	ret[ImGuiKey_9] = VilKey9;
+
+	ret[ImGuiKey_Minus] = VilKeyMinus;
+	ret[ImGuiKey_Equal] = VilKeyEquals;
+	ret[ImGuiKey_Tab] = VilKeyTab;
+	ret[ImGuiKey_Backspace] = VilKeyBackspace;
+
+	ret[ImGuiKey_LeftBracket] = VilKeyLeftbrace;
+	ret[ImGuiKey_RightBracket] = VilKeyRightbrace;
+	ret[ImGuiKey_Enter] = VilKeyEnter;
+	ret[ImGuiKey_LeftCtrl] = VilKeyLeftctrl;
+
+	ret[ImGuiKey_Semicolon] = VilKeySemicolon;
+	ret[ImGuiKey_Apostrophe] = VilKeyApostrophe;
+	ret[ImGuiKey_GraveAccent] = VilKeyGrave;
+	ret[ImGuiKey_LeftShift] = VilKeyLeftshift;
+	ret[ImGuiKey_Backslash] = VilKeyBackslash;
+
+	ret[ImGuiKey_Comma] = VilKeyComma;
+	ret[ImGuiKey_Period] = VilKeyPeriod;
+	ret[ImGuiKey_Slash] = VilKeySlash;
+	ret[ImGuiKey_RightShift] = VilKeyRightshift;
+	ret[ImGuiKey_KeypadMultiply] = VilKeyKpmultiply;
+	ret[ImGuiKey_LeftAlt] = VilKeyLeftalt;
+	ret[ImGuiKey_Space] = VilKeySpace;
+	ret[ImGuiKey_CapsLock] = VilKeyCapslock;
+
+	ret[ImGuiKey_F1] = VilKeyF1;
+	ret[ImGuiKey_F2] = VilKeyF2;
+	ret[ImGuiKey_F3] = VilKeyF3;
+	ret[ImGuiKey_F4] = VilKeyF4;
+	ret[ImGuiKey_F5] = VilKeyF5;
+	ret[ImGuiKey_F6] = VilKeyF6;
+	ret[ImGuiKey_F7] = VilKeyF7;
+	ret[ImGuiKey_F8] = VilKeyF8;
+	ret[ImGuiKey_F9] = VilKeyF9;
+	ret[ImGuiKey_F10] = VilKeyF10;
+	ret[ImGuiKey_F11] = VilKeyF11;
+	ret[ImGuiKey_F12] = VilKeyF12;
+
+	ret[ImGuiKey_NumLock] = VilKeyNumlock;
+	ret[ImGuiKey_ScrollLock] = VilKeyScrollock;
+	ret[ImGuiKey_KeypadSubtract] = VilKeyKpminus;
+	ret[ImGuiKey_KeypadAdd] = VilKeyKpplus;
+	// kpmult
+
+	ret[ImGuiKey_Keypad0] = VilKeyKp0;
+	ret[ImGuiKey_Keypad1] = VilKeyKp1;
+	ret[ImGuiKey_Keypad2] = VilKeyKp2;
+	ret[ImGuiKey_Keypad3] = VilKeyKp3;
+	ret[ImGuiKey_Keypad4] = VilKeyKp4;
+	ret[ImGuiKey_Keypad5] = VilKeyKp5;
+	ret[ImGuiKey_Keypad6] = VilKeyKp6;
+	ret[ImGuiKey_Keypad7] = VilKeyKp7;
+	ret[ImGuiKey_Keypad8] = VilKeyKp8;
+	ret[ImGuiKey_Keypad9] = VilKeyKp9;
+
+	ret[ImGuiKey_LeftArrow] = VilKeyLeft;
+	ret[ImGuiKey_DownArrow] = VilKeyDown;
+	ret[ImGuiKey_RightArrow] = VilKeyRight;
+	ret[ImGuiKey_UpArrow] = VilKeyUp;
+	ret[ImGuiKey_PageDown] = VilKeyPagedown;
+	ret[ImGuiKey_PageUp] = VilKeyPageup;
+	ret[ImGuiKey_Insert] = VilKeyInsert;
+	ret[ImGuiKey_Delete] = VilKeyDel;
+
+	return ret;
+}
+
+ImGuiKey keyToImGui(unsigned key) {
+	static auto map = initImguiKeymap();
+	dlg_assert_or(key < map.size(), return ImGuiKey_None);
+	return map[key];
 }
 
 } // namespace vil

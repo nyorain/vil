@@ -513,8 +513,8 @@ IntrusivePtr<DescriptorSetCow> DescriptorSet::addCowLocked() {
 	// We can't lock it locally since it must be locked *before* the
 	// ds/pool mutex is locked.
 	assertOwned(dev().mutex);
+	assertOwned(pool->mutex);
 
-	std::lock_guard lock(pool->mutex);
 	if(!cow_) {
 		// TODO PERF: get from a pool or something
 		// (low prio since only relevant for gui stuff)

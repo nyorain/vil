@@ -190,6 +190,7 @@ CommandDescriptorSnapshot snapshotRelevantDescriptorsValidLocked(const Command& 
 
 	for(auto bds : scmd->boundDescriptors().descriptorSets) {
 		auto& ds = access(bds);
+		std::lock_guard lock(ds.pool->mutex);
 		ret.states.emplace(bds.dsEntry, ds.addCowLocked());
 	}
 
