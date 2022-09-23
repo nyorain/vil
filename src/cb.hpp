@@ -101,8 +101,12 @@ public: // Only public for recording, should not be accessed outside api
     u32 subpass_ {u32(-1)};
     RenderPass* rp_ {};
     span<ImageView*> rpAttachments_ {};
-	bool localCapture_ {};
-	bool localCaptureOnce_ {};
+
+	struct LocalCaptureInfo {
+		bool activeNext {};
+		std::string name {};
+		LocalCaptureFlags flags {};
+	} localCapture_;
 
 	void popLabelSections();
 	auto& ignoreEndDebugLabels() { return ignoreEndDebugLabels_; }

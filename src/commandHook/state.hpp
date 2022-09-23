@@ -56,6 +56,7 @@ struct AttachmentCopyOp {
 // Collection of data we got out of a submission/command.
 struct CommandHookState {
 	struct CopiedDescriptor {
+		DescriptorCopyOp op;
 		std::variant<std::monostate,
 			CopiedImage,
 			OwnBuffer,
@@ -63,7 +64,13 @@ struct CommandHookState {
 	};
 
 	struct CopiedAttachment {
+		AttachmentCopyOp op;
 		CopiedImage data;
+	};
+
+	struct CopiedTransferIO {
+		OwnBuffer buf {};
+		CopiedImage img {};
 	};
 
 	// We need a reference count here since this object is conceptually owned by
@@ -89,11 +96,21 @@ struct CommandHookState {
 	OwnBuffer transformFeedback {}; // draw cmd: position output of vertex stage
 
 	// Only for transfer commands
-	OwnBuffer transferBufCopy {};
-	CopiedImage transferImgCopy {};
+	CopiedTransferIO transferSrcBefore {};
+	CopiedTransferIO transferSrcAfter {};
+	CopiedTransferIO transferDstBefore {};
+	CopiedTransferIO transferDstAfter {};
 
 	CommandHookState();
 	~CommandHookState();
 };
+
+const CommandHookState::CopiedDescriptor* findDsCopy(const CommandHookState&,
+	unsigned setID, unsigned bindingID, unsigned elemID,
+	std::optional<bool> before = std::nullopt,
+	std::optional<bool> imageAsBuffer = std::nullopt);
+const CommandHookState::CopiedAttachment* findAttachmentCopy(const CommandHookState&,
+	AttachmentType type, unsigned id,
+	std::optional<bool> before = std::nullopt);
 
 } // namespace vil

@@ -359,11 +359,17 @@ void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain) {
 }
 
 void CommandRecordGui::showLocalCaptures(LocalCapture& lc) {
+	CompletedHook completed;
+	{
+		std::lock_guard lock(gui_->dev().mutex);
+		completed = lc.completed;
+	}
+
 	clearSelection(true);
 	selector_.select(lc);
 	updateFromSelector();
-	commandViewer_.select(record_, command_, lc.completed.descriptorSnapshot,
-		false, lc.completed.state, true);
+	commandViewer_.select(record_, command_, completed.descriptorSnapshot,
+		false, completed.state, true);
 }
 
 void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
@@ -723,9 +729,11 @@ void CommandRecordGui::updateFromSelector() {
 
 void CommandRecordGui::updateCommandViewer(bool resetState) {
 	std::vector cmd(selector_.command().begin(), selector_.command().end());
+	auto localCapture = (selector_.updateMode() == UpdateMode::localCapture);
 	commandViewer_.select(selector_.record(),
 		std::move(cmd), selector_.descriptorSnapshot(),
-		resetState, selector_.completedHookState());
+		resetState, selector_.completedHookState(),
+		localCapture);
 }
 
 } // namespace vil

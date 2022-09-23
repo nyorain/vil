@@ -140,6 +140,9 @@ struct CommandSectionMatch;
 
 enum class AttachmentType : u8;
 
+enum class LocalCaptureBits : u32;
+using LocalCaptureFlags = Flags<LocalCaptureBits>;
+
 } // namespace vil
 
 

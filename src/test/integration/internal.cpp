@@ -343,7 +343,7 @@ TEST(int_copy_transfer) {
 	CommandHookUpdate update {};
 	update.invalidate = true;
 	auto& ops = update.newOps.emplace();
-	ops.copyTransferSrc = true;
+	ops.copyTransferSrcBefore = true;
 
 	auto& target = update.newTarget.emplace();
 	target.type = CommandHookTargetType::all;
@@ -366,7 +366,7 @@ TEST(int_copy_transfer) {
 	dlg_assert(completed[0].command.size() == 2u);
 	dlg_assert(completed[0].command[0] == rec.commands);
 	dlg_assert(completed[0].command[1] == dst);
-	dlg_assert(completed[0].state->transferImgCopy.image);
+	dlg_assert(completed[0].state->transferSrcBefore.img.image);
 
 	// cleanup
 	DestroyCommandPool(stp.dev, cmdPool, nullptr);

@@ -7,35 +7,46 @@ v0.2:
 - fix README
 
 local captures:
-- [ ] fix/implement updating of local captures
-- [ ] add names
-- [ ] allow application to specify whether one capture is enough or
-      if it should be updated
-	- [ ] for onetime local captures, use a separate list in CommandHook
+- [x] fix varIDToDsCopyMap_ setup, elemID for arrays
+- [x] add names
+- [x] fix/implement updating of local captures
+	- [x] allow application to specify whether one capture is enough or
+		  if it should be updated
+	- [x] for onetime local captures, use a separate list in CommandHook
 	      for done ones? to speed up hooking on submission
-- [ ] Fix gui/command.cpp assumption on hooks. They assume only one
+- [x] fix hacky UI code, make sure there are no races
+	- [ ] lots of local locks rn, error-prone
+	      introduce cleaner interface, maybe functions on LocalCapture that do it
+- [ ] clean up somewhat hacky CommandViewer and CommandSelector code
+	  might need CommandSelector rework to do this properly
+- [x] Fix gui/command.cpp assumption on hooks. They assume only one
       descriptor/attachment whatever is created. Should work with any
 	  state that contains the relevant information.
-	- [ ] first: need to include (set, binding, elem, before) tuple in
+	- [x] first: need to include (set, binding, elem, before) tuple in
 	      CopiedDescriptor in CompletedHook state
-- [ ] capture attachments and other stuff in local captures
-- [ ] make sure local captures work in render passes
-- [ ] Fix shader debugger to be able to work with LocalCapture
-	- [ ] also some hook assumptions, somehow setup varIDToCopyMap_
-- [ ] clean up somewhat hacky CommandViewer and CommandSelector code
-- [ ] move "ALL THE HOOKS" code out of CommandHook into separate function
+- [x] capture attachments and other stuff in local captures
+- [x] make sure local captures work in render passes
+- [x] Fix shader debugger to be able to work with LocalCapture
+	- [x] also some hook assumptions, somehow setup varIDToCopyMap_
+- [x] move "ALL THE HOOKS" code out of CommandHook into separate function
+- [ ] {feature, later} add flag specifying to capture the frame context
+      i.e. when showing it, show the whole frame.
+	  Just store the submissions in the LocalCapture completed hook.
 
 urgent, bugs:
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
+
 - [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull
+	- [ ] a lot of descriptor code was probably never really tested for array bindings.
+	      Make sure everything works.
 
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 
 - [ ] figure our why overlay on doom is broken
 	- [ ] also fix the semaphore crash. Run with debug output enabled.
-- [ ] figure out tracy crashs with doom eternal :(
+- [ ] figure out tracy crashes with doom eternal :(
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
@@ -181,6 +192,8 @@ shader debugger:
 	      breakpoints for lines that don't have code associated with them
 		  in spirv won't trigger. Need to do a more proper check
 	- [ ] clean up breakpoint handling
+- [ ] factor out retrieving descriptor from varID+indicies as used
+      in load/store/arrayLength callbacks. Code duplication atm.
 - [ ] set spec constants for shader module in gui shader debugger.
       Test with shader from tkn/iro
 - [ ] detect unsupported features/capabilities (such as subgroup ops)

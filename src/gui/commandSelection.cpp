@@ -13,15 +13,38 @@ bool CommandSelection::update() {
 	auto& hook = *dev.commandHook;
 	auto completed = hook.moveCompleted();
 
+	if(mode_ == UpdateMode::localCapture) {
+		dlg_assert(localCapture_);
+
+		IntrusivePtr<CommandRecord> record;
+		IntrusivePtr<CommandHookState> state;
+		CommandDescriptorSnapshot descriptors;
+
+		{
+			std::lock_guard lock(dev_->mutex);
+
+			// check if the LocalCapture has found something new.
+			if(localCapture_->completed.state == state_) {
+				return false;
+			}
+
+			record = localCapture_->completed.record;
+			command_ = localCapture_->completed.command;
+			state = localCapture_->completed.state;
+			descriptors = localCapture_->completed.descriptorSnapshot;
+		}
+
+		state_ = std::move(state);
+		record_ = std::move(record);
+		descriptors_ = std::move(descriptors);
+		return true;
+	}
+
 	// TODO: we want the second condition (maybe assert that completed is
 	//   empty when freezeState is true) but atm that means we would not
 	//   update state on hook ops change. See todo
 	if(completed.empty() /*|| (freezeState && hook.freeze.load() && state_)*/) {
 		// nothing to do
-		return false;
-	}
-
-	if(mode_ == UpdateMode::localCapture) {
 		return false;
 	}
 
@@ -227,11 +250,20 @@ void CommandSelection::select(const LocalCapture& lc) {
 	unselect();
 
 	mode_ = UpdateMode::localCapture;
-	record_ = lc.record;
-	command_ = lc.command;
-	// TODO: update for new LocalCaptures?
-	// might change over time
-	state_ = lc.completed.state;
+
+	IntrusivePtr<CommandRecord> record;
+	IntrusivePtr<CommandHookState> state;
+
+	{
+		std::lock_guard lock(dev_->mutex);
+		record = lc.record;
+		state = lc.completed.state;
+		command_ = lc.command;
+	}
+
+	state_ = std::move(state);
+	record_ = std::move(record);
+	localCapture_ = &lc;
 
 	updateHookTarget();
 }

@@ -114,16 +114,31 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 	CompletedHook* dstCompleted {};
 	if(record->localCapture) {
-		dstCompleted = &record->localCapture->completed;
+		if(record->localCapture->flags & LocalCaptureBits::once) {
+			dlg_assert(!record->localCapture->completed.state);
 
-		// TODO: really just overwrite previous result here?
-		// TODO: shouldn't do in critical section, might deadlock :(
-		//   quickfix to just abort in that case
-		if(dstCompleted->state) {
-			dlg_assert(dstCompleted->state);
-			dlg_trace("localCapture already has state");
-			return;
+			auto& lcs = record->hook->localCaptures_;
+			auto finder = [&](auto& ptr){ return ptr.get() == record->localCapture; };
+			auto it = find_if(lcs, finder);
+			dlg_assert(it != lcs.end());
+			auto ptr = std::move(*it);
+			lcs.erase(it);
+			record->hook->localCapturesCompleted_.push_back(std::move(ptr));
+
+			dlg_trace("completed local capture (first) '{}'", record->localCapture->name);
 		}
+
+		if(record->localCapture->completed.state) {
+			// TODO: hacky af. Needed because we can't destroy the record
+			// here (intrusivePtr) since the device mutex is locked.
+			// Maybe just change that?
+			dlg_assert(record->localCapture->completed.record);
+			record->hook->keepAliveLC_.push_back(std::move(record->localCapture->completed));
+
+			dlg_trace("updating local capture state '{}'", record->localCapture->name);
+		}
+
+		dstCompleted = &record->localCapture->completed;
 	} else {
 		dstCompleted = &record->hook->completed_.emplace_back();
 	}

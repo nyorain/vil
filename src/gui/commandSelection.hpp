@@ -123,6 +123,8 @@ private:
 	// [commandBuffer mode]
 	CommandBufferPtr cb_ {};
 
+	const LocalCapture* localCapture_ {};
+
 	LinAllocator matchAlloc_;
 };
 
