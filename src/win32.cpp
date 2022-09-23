@@ -37,9 +37,8 @@ namespace vil {
 //   will eventually lead to an 'all windows api handles used' error (internal windows leak? idk).
 //   So we just ignore it and install the hook just once forever, just skipping it when not needed
 
-// NOTE: we know event calls always happen in the same thread as rendering
-// so we don't need to use gui-internal even queue and can access imguiIO
-// directly
+// NOTE: we can't know event calls always happen in the same thread as rendering
+// so we need to use gui-internal even queue
 
 template<typename Fn>
 struct Hook;
@@ -221,7 +220,7 @@ void handleKey(Win32Platform* platform, bool pressed,
 	(void) lparam;
 	auto keycode = swa_winapi_to_key((unsigned)(wparam));
 	if(keycode < 512) {
-		platform->gui->imguiIO().AddKeyEvent(keyToImGui(keycode), pressed);
+		platform->gui->addKeyEvent(keyToImGui(keycode), pressed);
 	}
 }
 
@@ -285,7 +284,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 		}
 
 		if(handle) {
-			wp.gui->imguiIO().AddMouseButtonEvent(unsigned(button) - 1, pressed);
+			wp.gui->addMouseButtonEvent(unsigned(button) - 1, pressed);
 		}
 
 		if(!forward) {
@@ -305,7 +304,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			}
 
 			dlg_trace("mouse move {} {}", x, y);
-			wp.gui->imguiIO().AddMousePosEvent(x, y);
+			wp.gui->addMousePosEvent({float(x), float(y)});
 
 			if(!forward) {
 				msg->message = WM_NULL;
@@ -376,7 +375,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 			auto key = swa_winapi_to_key(unsigned(msg->wParam));
 			if (key < 512 && key != 0) {
-				wp.gui->imguiIO().AddKeyEvent(keyToImGui(unsigned(key)), true);
+				wp.gui->addKeyEvent(keyToImGui(unsigned(key)), true);
 			}
 
 			// oh no, this is terrible
@@ -393,7 +392,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 			auto key = swa_winapi_to_key(unsigned(msg->wParam));
 			if (key < 512 && key != 0) {
-				wp.gui->imguiIO().AddKeyEvent(keyToImGui(unsigned(key)), false);
+				wp.gui->addKeyEvent(keyToImGui(unsigned(key)), false);
 			}
 
 			// oh no, this is terrible
@@ -410,7 +409,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 			if(handle) {
 				if(msg->wParam > 0 && msg->wParam < 0x10000) {
-					wp.gui->imguiIO().AddInputCharacterUTF16((unsigned short)msg->wParam);
+					wp.gui->addInputEvent((unsigned short) msg->wParam);
 				}
 			}
 
@@ -436,12 +435,12 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 					wp.gui->imguiIO().MousePos.x += raw->data.mouse.lLastX;
 					wp.gui->imguiIO().MousePos.y += raw->data.mouse.lLastY;
 
-					if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) wp.gui->imguiIO().AddMouseButtonEvent(0, true);
-					if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) wp.gui->imguiIO().AddMouseButtonEvent(0, false);
-					if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) wp.gui->imguiIO().AddMouseButtonEvent(1, true);
-					if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) wp.gui->imguiIO().AddMouseButtonEvent(1, false);
-					if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) wp.gui->imguiIO().AddMouseButtonEvent(2, true);
-					if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) wp.gui->imguiIO().AddMouseButtonEvent(2, false);
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_DOWN) wp.gui->addMouseButtonEvent(0, true);
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_LEFT_BUTTON_UP) wp.gui->addMouseButtonEvent(0, false);
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN) wp.gui->addMouseButtonEvent(1, true);
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_RIGHT_BUTTON_UP) wp.gui->addMouseButtonEvent(1, false);
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN) wp.gui->addMouseButtonEvent(2, true);
+					if (raw->data.mouse.usButtonFlags & RI_MOUSE_MIDDLE_BUTTON_UP) wp.gui->addMouseButtonEvent(2, false);
 
 					// dlg_trace("mouse pos: {} {}", platform->gui->imguiIO().MousePos.x, platform->gui->imguiIO().MousePos.y);
 				}
@@ -458,7 +457,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			break;
 		} case WM_MOUSEWHEEL: {
 			if(handle) {
-				wp.gui->imguiIO().AddMouseWheelEvent(0, GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f);
+				wp.gui->addMouseWheelEvent({0, GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f});
 			}
 
 			if(!forward) {
@@ -469,7 +468,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 			break;
 		} case WM_MOUSEHWHEEL: {
 			if(handle) {
-				wp.gui->imguiIO().AddMouseWheelEvent(GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f, 0);
+				wp.gui->addMouseWheelEvent({GET_WHEEL_DELTA_WPARAM(msg->wParam) / 120.f, 0});
 			}
 
 			if(!forward) {
@@ -539,7 +538,7 @@ bool Win32Platform::doUpdate() {
 
 			POINT point;
 			hooks->GetCursorPos.forward(&point);
-			gui->imguiIO().AddMousePosEvent(point.x, point.y);
+			gui->addMousePosEvent({float(point.x), float(point.y)});
 		}
 	}
 
@@ -580,12 +579,12 @@ bool Win32Platform::doUpdate() {
 		hooks->GetCursorPos.forward(&pos);
 		ScreenToClient(surfaceWindow, &pos);
 
-		gui->imguiIO().AddMousePosEvent(point.x, point.y);
+		gui->addMousePosEvent({float(pos.x), float(pos.y)});
 
 		// Read keyboard modifiers inputs
-		gui->imguiIO().AddKeyEvent(ImGuiKey_ModCtrl, (hooks->GetKeyState.forward(VK_CONTROL) & 0x8000) != 0);
-		gui->imguiIO().AddKeyEvent(ImGuiKey_ModAlt, (hooks->GetKeyState.forward(VK_MENU) & 0x8000) != 0);
-		gui->imguiIO().AddKeyEvent(ImGuiKey_ModShift, (hooks->GetKeyState.forward(VK_SHIFT) & 0x8000) != 0);
+		gui->addKeyEvent(ImGuiKey_ModCtrl, (hooks->GetKeyState.forward(VK_CONTROL) & 0x8000) != 0);
+		gui->addKeyEvent(ImGuiKey_ModAlt, (hooks->GetKeyState.forward(VK_MENU) & 0x8000) != 0);
+		gui->addKeyEvent(ImGuiKey_ModShift, (hooks->GetKeyState.forward(VK_SHIFT) & 0x8000) != 0);
 	}
 
 	return state != State::hidden;

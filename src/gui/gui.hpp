@@ -32,6 +32,7 @@ public:
 			mousePos,
 			mouseWheel,
 			input,
+			input16, // using wstring
 		};
 
 		Type type;
@@ -40,6 +41,7 @@ public:
 		bool b; // focused/down
 		Vec2f vec2f; // wheel or position
 		std::string input;
+		unsigned short input16;
 	};
 
 	struct FrameInfo {
@@ -152,6 +154,7 @@ public:
 	bool addMouseButtonEvent(int button, bool down);
 	bool addMouseWheelEvent(Vec2f dir);
 	bool addInputEvent(std::string input);
+	bool addInputEvent(unsigned short input16);
 
 private:
 	void destroyRenderStuff();
