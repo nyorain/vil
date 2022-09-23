@@ -28,7 +28,7 @@ public:
 	// Select takes its own copy of a spc::Compiler mainly
 	// because of the specialization constant problematic
 	void select(std::unique_ptr<spc::Compiler> compiled);
-	void updateState(IntrusivePtr<CommandHookState> state);
+	void updateState(IntrusivePtr<CommandHookState> state, bool localCapture);
 	void unselect();
 	void draw();
 
@@ -94,6 +94,8 @@ private:
 	// compute stuff
 	Vec3ui workgroupSize() const;
 	Vec3ui numWorkgroups() const;
+
+	void initVarMapFromState(const CommandHookState& state);
 
 private:
 	struct OurImage : spvm_image {

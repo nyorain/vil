@@ -315,9 +315,9 @@ void CommandViewer::select(IntrusivePtr<CommandRecord> rec, std::vector<const Co
 				selectCommandView = true;
 				shaderDebugger_.unselect();
 			} else if(resetState) {
-				shaderDebugger_.updateState(nullptr);
+				shaderDebugger_.updateState(nullptr, false);
 			} else {
-				shaderDebugger_.updateState(newState);
+				shaderDebugger_.updateState(newState, localCapture);
 			}
 
 			break;
@@ -871,6 +871,16 @@ void CommandViewer::displayDs(Draw& draw) {
 	// TODO: we expect descriptors to be valid here. Needs rework
 	// for descriptor indexing
 
+	// Find the descriptor in question
+	// NOTE: we can't rely on 'state_->copiedDescriptors.size() == 1u' anymore
+	//   for the descriptor types that need copies since we want to support
+	//   local captures (that might have more data)
+	const CommandHookState::CopiedDescriptor* copiedData {};
+	if(state_) {
+		copiedData = findDsCopy(*state_, setID, bindingID, elemID,
+			beforeCommand_, false);
+	}
+
 	// == Buffer ==
 	if(dsCat == DescriptorCategory::buffer) {
 		imGuiText("{}", vk::name(dsType));
@@ -896,16 +906,15 @@ void CommandViewer::displayDs(Draw& draw) {
 			return;
 		}
 
-		if(state_->copiedDescriptors.empty()) {
-			dlg_error("copiedDescriptors shouldn't be empty");
+		if(!copiedData) {
+			dlg_error("couldn't find copied descriptor data");
 			ImGui::Text("Error copying descriptor. See log output");
 			return;
 		}
 
-		dlg_assert(state_->copiedDescriptors.size() == 1u);
-		auto* buf = std::get_if<OwnBuffer>(&state_->copiedDescriptors[0].data);
+		auto* buf = std::get_if<OwnBuffer>(&copiedData->data);
 		if(!buf) {
-			dlg_assert(state_->copiedDescriptors[0].data.index() == 0);
+			dlg_assert(copiedData->data.index() == 0);
 			imGuiText("Error copying descriptor buffer. See log output");
 			return;
 		}
@@ -974,16 +983,15 @@ void CommandViewer::displayDs(Draw& draw) {
 					return;
 				}
 
-				if(state_->copiedDescriptors.empty()) {
-					dlg_error("copiedDescriptors shouldn't be empty");
+				if(!copiedData) {
+					dlg_error("couldn't find copied descriptor data");
 					ImGui::Text("Error copying descriptor. See log output");
 					return;
 				}
 
-				dlg_assert(state_->copiedDescriptors.size() == 1u);
-				auto* img = std::get_if<CopiedImage>(&state_->copiedDescriptors[0].data);
+				auto* img = std::get_if<CopiedImage>(&copiedData->data);
 				if(!img) {
-					dlg_assert(state_->copiedDescriptors[0].data.index() == 0);
+					dlg_assert(copiedData->data.index() == 0);
 					imGuiText("Error copying descriptor image. See log output");
 					return;
 				}
@@ -1070,12 +1078,14 @@ void CommandViewer::displayAttachment(Draw& draw) {
 			return;
 		}
 
-		dlg_assert(state_->copiedAttachments.size() == 1u);
-		if(state_->copiedAttachments[0].data.image) {
-			displayImage(draw, state_->copiedAttachments[0].data);
-		} else {
+		auto* attCopy = findAttachmentCopy(*state_,
+			viewData_.attachment.type, viewData_.attachment.id, beforeCommand_);
+		if(!attCopy) {
 			imGuiText("Error copying attachment. See log output");
+			return;
 		}
+
+		displayImage(draw, attCopy->data);
 	} else {
 		ImGui::Text("Waiting for a submission...");
 	}
@@ -1148,8 +1158,8 @@ void CommandViewer::displayTransferData(Draw& draw) {
 	}
 
 	dlg_assert(view_ == IOView::transferSrc || view_ == IOView::transferDst);
-	bool refBuffer = false;
-	bool refImage = false;
+	OwnBuffer* refBuffer = nullptr;
+	CopiedImage* refImage = nullptr;
 	u32 tcount = 0u;
 
 	auto refDst = [&](auto* ccmd) {
@@ -1165,10 +1175,14 @@ void CommandViewer::displayTransferData(Draw& draw) {
 			auto [offset, size] = dstBufInterval(*ccmd, viewData_.transfer.index);
 			ImGui::SameLine();
 			drawOffsetSize({ccmd->dst, offset, size});
-			refBuffer = true;
+			refBuffer = beforeCommand_ ?
+				&state_->transferDstBefore.buf :
+				&state_->transferDstAfter.buf;
 		} else {
 			static_assert(std::is_convertible_v<decltype(ccmd->dst), const Image*>);
-			refImage = true;
+			refImage = beforeCommand_ ?
+				&state_->transferDstBefore.img :
+				&state_->transferDstAfter.img;
 		}
 	};
 
@@ -1185,10 +1199,14 @@ void CommandViewer::displayTransferData(Draw& draw) {
 			auto [offset, size] = srcBufInterval(*ccmd, viewData_.transfer.index);
 			ImGui::SameLine();
 			drawOffsetSize({ccmd->src, offset, size});
-			refBuffer = true;
+			refBuffer = beforeCommand_ ?
+				&state_->transferSrcBefore.buf :
+				&state_->transferSrcAfter.buf;
 		} else {
 			static_assert(std::is_convertible_v<decltype(ccmd->src), const Image*>);
-			refImage = true;
+			refImage = beforeCommand_ ?
+				&state_->transferSrcBefore.img :
+				&state_->transferSrcAfter.img;
 		}
 	};
 
@@ -1229,7 +1247,7 @@ void CommandViewer::displayTransferData(Draw& draw) {
 		}
 	}
 
-	dlg_assert(refBuffer ^ refImage);
+	dlg_assert(bool(refBuffer) ^ bool(refImage));
 	dlg_assert(tcount > 0u);
 
 	if(optSliderRange("Transfer", viewData_.transfer.index, tcount)) {
@@ -1239,13 +1257,10 @@ void CommandViewer::displayTransferData(Draw& draw) {
 		return;
 	}
 
-	dlg_assert(refBuffer == !!state_->transferBufCopy.buf);
-	dlg_assert(refImage == !!state_->transferImgCopy.image);
-
-	if(refBuffer && state_->transferBufCopy.buf) {
-		bufferViewer_.display(state_->transferBufCopy.data());
-	} else if(refImage && state_->transferImgCopy.image) {
-		displayImage(draw, state_->transferImgCopy);
+	if(refBuffer && refBuffer->buf) {
+		bufferViewer_.display(refBuffer->data());
+	} else if(refImage && refImage->image) {
+		displayImage(draw, *refImage);
 	} else {
 		imGuiText("Error copying data. See log output");
 	}
@@ -1464,6 +1479,11 @@ void CommandViewer::displayCommand() {
 				shaderDebugger_.select(std::move(mod));
 				view_ = IOView::shader;
 				updateHook();
+
+				if(localCaptureMode_) {
+					shaderDebugger_.updateState(state_, true);
+				}
+
 				return;
 			}
 		}
@@ -1557,13 +1577,19 @@ void CommandViewer::updateHook() {
 			}
 
 			ops.transferIdx = viewData_.transfer.index;
-			ops.copyTransferSrc = true;
-			ops.copyTransferBefore = beforeCommand_;
+			if(beforeCommand_) {
+				ops.copyTransferSrcBefore = true;
+			} else {
+				ops.copyTransferSrcAfter = true;
+			}
 			break;
 		case IOView::transferDst:
 			ops.transferIdx = viewData_.transfer.index;
-			ops.copyTransferDst = true;
-			ops.copyTransferBefore = beforeCommand_;
+			if(beforeCommand_) {
+				ops.copyTransferDstBefore = true;
+			} else {
+				ops.copyTransferDstAfter = true;
+			}
 			break;
 		case IOView::ds: {
 			dlg_assert_or(stateCmd, break);

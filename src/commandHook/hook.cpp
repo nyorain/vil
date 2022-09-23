@@ -344,6 +344,7 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 
 void CommandHook::hook(QueueSubmitter& subm) {
 	auto& dev = *dev_;
+	keepAliveLC_.clear();
 
 	// make sure we never have too many submissions
 	// can become a memory problem at some point (e.g. when never
@@ -620,6 +621,125 @@ VkCommandBuffer CommandHook::hook(CommandRecord& record,
 	return doHook(record, dstHierarchy, dstMatch, subm, data);
 }
 
+void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsTmp,
+		span<const Command*> dstCommand) {
+	// "we want all the ops"
+	// "ehm... what do you mean with 'all the ops'"?
+	// "AAAALLLL THE OPS!"
+	opsTmp.queryTime = true;
+
+	dlg_assert(!dstCommand.empty());
+	auto& dstCmd = *dstCommand.back();
+
+	if(dstCmd.type() == CommandType::transfer) {
+		if(flags & LocalCaptureBits::transferBefore) {
+			opsTmp.copyTransferDstBefore = true;
+			opsTmp.copyTransferSrcBefore = true;
+		} else {
+			opsTmp.copyTransferDstAfter = true;
+			opsTmp.copyTransferSrcAfter = true;
+		}
+	}
+
+	// just always do that, low cost
+	opsTmp.copyIndirectCmd = true;
+
+	if(dstCmd.type() == CommandType::draw) {
+		if(flags & LocalCaptureBits::vertexInput) {
+			opsTmp.copyIndexBuffers = true;
+			opsTmp.copyVertexBuffers = true;
+		}
+
+		if(flags & LocalCaptureBits::vertexOutput) {
+			opsTmp.copyXfb = true;
+		}
+
+		if(flags & LocalCaptureBits::attachments) {
+			auto preEnd = dstCommand.end() - 1;
+			for(auto it = dstCommand.begin(); it != preEnd; ++it) {
+				auto* cmd = *it;
+
+				auto type = cmd->type();
+				if(type == CommandType::renderSection) {
+					dlg_assert(dynamic_cast<const RenderSectionCommand*>(cmd));
+					auto& rpi = static_cast<const RenderSectionCommand*>(cmd)->rpi;
+
+					auto addCopy = [&](AttachmentType type, u32 id) {
+						AttachmentCopyOp op {};
+						op.type = type;
+						op.id = id;
+						op.before = true;
+						opsTmp.attachmentCopies.push_back(op);
+
+						op.before = false;
+						opsTmp.attachmentCopies.push_back(op);
+					};
+
+					for(auto i = 0u; i < rpi.colorAttachments.size(); ++i) {
+						addCopy(AttachmentType::color, i);
+					}
+
+					if(rpi.depthStencilAttachment) {
+						addCopy(AttachmentType::depthStencil, 0u);
+					}
+
+					for(auto i = 0u; i < rpi.inputAttachments.size(); ++i) {
+						addCopy(AttachmentType::color, i);
+					}
+				}
+			}
+		}
+	}
+
+	auto* stateCmd = dynamic_cast<const StateCmdBase*>(dstCommand.back());
+	auto* pipe = stateCmd->boundPipe();
+	dlg_assert(pipe);
+	auto copyDescriptors =
+		(flags & LocalCaptureBits::descriptors) ||
+		(flags & LocalCaptureBits::shaderDebugger);
+	if(pipe && copyDescriptors) {
+		auto& layout = *pipe->layout;
+		for(auto [setID, dsLayout] : enumerate(layout.descriptors)) {
+			for(auto [bindingID, binding] : enumerate(dsLayout->bindings)) {
+				if(binding.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK ||
+						binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) {
+					// Nothing to copy here. Avoid triggering asserts
+					continue;
+				}
+
+				// bindless stuff.
+				// just skip for now.
+				if(binding.descriptorCount > 32) {
+					dlg_warn("aaah, way too many bindings: {}", binding.descriptorCount);
+					continue;
+				}
+
+				for(auto e = 0u; e < binding.descriptorCount; ++e) {
+					DescriptorCopyOp op {};
+					op.set = setID;
+					op.binding = bindingID;
+					op.elem = e;
+					op.before = true;
+					opsTmp.descriptorCopies.emplace_back(op);
+
+					// TODO: only do 'after' copy for mutable descriptors data
+					op.before = false;
+					opsTmp.descriptorCopies.emplace_back(op);
+
+					// extra imageAsBuffer copy for shader debugger
+					// TODO: might be able to get rid of this
+					if(category(binding.descriptorType) == DescriptorCategory::image &&
+							(flags & LocalCaptureBits::shaderDebugger)) {
+						op.before = true;
+						op.imageAsBuffer = true;
+						opsTmp.descriptorCopies.emplace_back(op);
+					}
+				}
+			}
+		}
+	}
+}
+
 VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 		span<const Command*> dstCommand, float dstCommandMatch,
 		Submission& subm, std::unique_ptr<CommandHookSubmission>& data,
@@ -736,75 +856,8 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 
 		if(localCapture) {
 			dlg_trace("Creating hook record for local capture");
-
-			// "we want all the ops"
-			// "ehm... what do you mean with 'all the ops'"?
-			// "AAAALLLL THE OPS!"
+			fillLocalCaptureHookOps(localCapture->flags, opsTmp, dstCommand);
 			ops = &opsTmp;
-			opsTmp.queryTime = true;
-
-			dlg_assert(!dstCommand.empty());
-			auto& dstCmd = *dstCommand.back();
-
-			// TODO: need to be able to specify to copy transfer stuff
-			// before *and* after
-			if(dstCmd.type() == CommandType::transfer) {
-				opsTmp.copyTransferDst = true;
-				opsTmp.copyTransferSrc = true;
-			}
-
-			opsTmp.copyIndirectCmd = true;
-
-			if(dstCmd.type() == CommandType::draw) {
-				opsTmp.copyIndexBuffers = true;
-				opsTmp.copyVertexBuffers = true;
-				// TODO: attachment copies
-			}
-
-			auto* stateCmd = dynamic_cast<const StateCmdBase*>(dstCommand.back());
-			auto* pipe = stateCmd->boundPipe();
-			dlg_assert(pipe);
-			if(pipe) {
-				auto& layout = *pipe->layout;
-				for(auto [setID, dsLayout] : enumerate(layout.descriptors)) {
-					for(auto [bindingID, binding] : enumerate(dsLayout->bindings)) {
-						// TODO: also skip sampler-only bindings
-						if(binding.descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK) {
-							continue;
-						}
-
-						// bindless stuff.
-						// just skip for now.
-						if(binding.descriptorCount > 32) {
-							dlg_warn("aaah, way too many bindings: {}", binding.descriptorCount);
-							continue;
-						}
-
-						for(auto e = 0u; e < binding.descriptorCount; ++e) {
-							auto& copyBefore = opsTmp.descriptorCopies.emplace_back();
-							copyBefore.set = setID;
-							copyBefore.binding = bindingID;
-							copyBefore.elem = e;
-							copyBefore.before = true;
-
-							auto& copyAfter = opsTmp.descriptorCopies.emplace_back();
-							copyAfter = copyBefore;
-							copyAfter.before = false;
-
-							// TODO: imageAsBuffer?
-							// would be needed for shader debugger
-							// but shader debugger needs some changes to work
-							// with this anyways (see varIDToCopyMap_).
-							// Need code in shader debugger that sets up this
-							// map from an existing LocalCapture (including ops tho).
-							// Maybe just add an extra imageAsBuffer before+after
-							// copy here? gets really expensive tho, 4 copies...
-						}
-					}
-				}
-			}
-
-			// TODO: capture other stuff
 		}
 
 		auto hook = new CommandHookRecord(*this, record,
@@ -922,6 +975,32 @@ CommandHook::Target CommandHook::target() const {
 }
 
 void CommandHook::addLocalCapture(std::unique_ptr<LocalCapture>&& lc) {
+	IntrusivePtr<CommandRecord> keepAliveRecord;
+
+	std::lock_guard lock(dev_->mutex);
+	for(auto& completed : localCapturesCompleted_) {
+		if(completed->name == lc->name) {
+			return;
+		}
+	}
+
+	for(auto& known : localCaptures_) {
+		if(known->name == lc->name) {
+			dlg_trace("updating local capture cmd '{}'", lc->name);
+
+			// update its info
+			keepAliveRecord = std::move(known->record);
+
+			known->command = std::move(lc->command);
+			known->record = std::move(lc->record);
+
+			dlg_assertm(known->flags == lc->flags,
+				"Can't change flags of known local capture");
+
+			return;
+		}
+	}
+
 	localCaptures_.push_back(std::move(lc));
 }
 
@@ -933,6 +1012,84 @@ std::vector<LocalCapture*> CommandHook::localCaptures() const {
 		ret.push_back(lc.get());
 	}
 	return ret;
+}
+
+std::vector<LocalCapture*> CommandHook::localCapturesOnceCompleted() const {
+	std::lock_guard lock(dev_->mutex);
+	std::vector<LocalCapture*> ret;
+	ret.reserve(localCapturesCompleted_.size());
+	for(auto& lc : localCapturesCompleted_) {
+		ret.push_back(lc.get());
+	}
+	return ret;
+}
+
+// util
+static struct {
+	std::string_view name;
+	LocalCaptureBits bit;
+} localCaptureBitsTable[] = {
+	{"shaderDebugger", LocalCaptureBits::shaderDebugger},
+	{"descriptors", LocalCaptureBits::descriptors},
+	{"attachments", LocalCaptureBits::attachments},
+	{"transferBefore", LocalCaptureBits::transferBefore},
+	{"transferAfter", LocalCaptureBits::transferAfter},
+	{"vertexInput", LocalCaptureBits::vertexInput},
+	{"vertexOutput", LocalCaptureBits::vertexOutput},
+	{"once", LocalCaptureBits::once},
+	{"all", LocalCaptureBits::all},
+};
+
+std::string_view name(LocalCaptureBits localCaptureBit) {
+	for(auto& entry : localCaptureBitsTable) {
+		if(entry.bit == localCaptureBit) {
+			return entry.name;
+		}
+	}
+
+	return {};
+}
+
+std::optional<LocalCaptureBits> localCaptureBit(std::string_view name) {
+	for(auto& entry : localCaptureBitsTable) {
+		if(entry.name == name) {
+			return entry.bit;
+		}
+	}
+
+	return std::nullopt;
+}
+
+// From state.hpp
+const CommandHookState::CopiedDescriptor* findDsCopy(const CommandHookState& state,
+		unsigned setID, unsigned bindingID, unsigned elemID,
+		std::optional<bool> before,
+		std::optional<bool> imageAsBuffer) {
+	for(auto& copy : state.copiedDescriptors) {
+		if(copy.op.set == setID &&
+				copy.op.binding == bindingID &&
+				copy.op.elem == elemID &&
+				(!before || copy.op.before == *before) &&
+				(!imageAsBuffer || copy.op.imageAsBuffer == *imageAsBuffer)) {
+			return &copy;
+		}
+	}
+
+	return nullptr;
+}
+
+const CommandHookState::CopiedAttachment* findAttachmentCopy(const CommandHookState& state,
+		AttachmentType type, unsigned id,
+		std::optional<bool> before) {
+	for(auto& copy : state.copiedAttachments) {
+		if(copy.op.type == type &&
+				copy.op.id == id &&
+				(!before || copy.op.before == *before)) {
+			return &copy;
+		}
+	}
+
+	return nullptr;
 }
 
 } // namespace vil

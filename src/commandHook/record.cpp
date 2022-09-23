@@ -173,7 +173,8 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		 !info.ops.attachmentCopies.empty() ||
 		 !info.ops.descriptorCopies.empty() ||
 		 info.ops.copyIndirectCmd ||
-		 (info.ops.copyTransferDst && dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
+		 ((info.ops.copyTransferDstBefore || info.ops.copyTransferDstAfter)
+		  	&& dynamic_cast<const ClearAttachmentCmd*>(hcommand.back())));
 
 	auto preEnd = hcommand.end() - 1;
 	for(auto it = hcommand.begin(); it != preEnd; ++it) {
@@ -605,6 +606,8 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyDs");
 
+	dst.op = copyDesc;
+
 	dlg_assert_or(bcmd.type() == CommandType::draw ||
 		bcmd.type() == CommandType::dispatch ||
 		bcmd.type() == CommandType::traceRays,
@@ -619,7 +622,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	// actual command might have changed (for an updated record)
 	// and the selected one not valid anymore.
 	if(setID >= dsState.descriptorSets.size()) {
-		dlg_error("setID out of range");
+		dlg_error("setID out of range: {}/{}", setID, dsState.descriptorSets.size());
 		return;
 	}
 
@@ -879,8 +882,7 @@ VkImageSubresourceRange toRange(const VkImageSubresourceLayers& subres) {
 	return ret;
 }
 
-void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
-	dlg_assert(info.ops.copyTransferDst != info.ops.copyTransferSrc);
+void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info, bool isBefore) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyTransfer");
 
@@ -897,7 +899,7 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 	};
 
 	auto idx = info.ops.transferIdx;
-	if(info.ops.copyTransferSrc) {
+	if(isBefore ? info.ops.copyTransferSrcBefore : info.ops.copyTransferSrcAfter) {
 		std::optional<CopyImage> img;
 		std::optional<CopyBuffer> buf;
 
@@ -918,10 +920,12 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 			buf = {cmd->src, offset, size};
 		}
 
+		auto& toWrite = isBefore ? state->transferSrcBefore : state->transferSrcAfter;
+
 		dlg_assert(img || buf);
 		if(img) {
 			auto [src, layout, subres] = *img;
-			initAndCopy(dev, cb, state->transferImgCopy, *src,
+			initAndCopy(dev, cb, toWrite.img, *src,
 				layout, subres, record->queueFamily);
 		} else if(buf) {
 			auto [src, offset, size] = *buf;
@@ -932,9 +936,11 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 
 			// we don't ever read the buffer from the gfxQueue so we can
 			// ignore queueFams here
-			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size, {});
+			initAndCopy(dev, cb, toWrite.buf, 0u, *src, offset, size, {});
 		}
-	} else if(info.ops.copyTransferDst) {
+	}
+
+	if(isBefore ? info.ops.copyTransferDstBefore : info.ops.copyTransferDstAfter) {
 		std::optional<CopyImage> img;
 		std::optional<CopyBuffer> buf;
 
@@ -991,10 +997,11 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 			buf = {cmd->dst, cmd->offset, cmd->data.size()};
 		}
 
+		auto& toWrite = isBefore ? state->transferDstBefore : state->transferDstAfter;
 		dlg_assert(img || buf);
 		if(img) {
 			auto [src, layout, subres] = *img;
-			initAndCopy(dev, cb, state->transferImgCopy, *src,
+			initAndCopy(dev, cb, toWrite.img, *src,
 				layout, subres, record->queueFamily);
 		} else if(buf) {
 			auto [src, offset, size] = *buf;
@@ -1005,7 +1012,7 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info) {
 
 			// we don't ever read the buffer from the gfxQueue so we can
 			// ignore queueFams here
-			initAndCopy(dev, cb, state->transferBufCopy, 0u, *src, offset, size, {});
+			initAndCopy(dev, cb, toWrite.buf, 0u, *src, offset, size, {});
 		}
 	}
 }
@@ -1093,6 +1100,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// attachments
 	for(auto [i, ac] : enumerate(info.ops.attachmentCopies)) {
 		if(ac.before) {
+			state->copiedAttachments[i].op = ac;
 			copyAttachment(bcmd, info, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
@@ -1147,8 +1155,8 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	}
 
 	// transfer
-	if(info.ops.copyTransferBefore && (info.ops.copyTransferDst || info.ops.copyTransferSrc)) {
-		copyTransfer(bcmd, info);
+	if(info.ops.copyTransferSrcBefore || info.ops.copyTransferDstBefore) {
+		copyTransfer(bcmd, info, true);
 	}
 }
 
@@ -1186,6 +1194,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// attachments
 	for(auto [i, ac] : enumerate(info.ops.attachmentCopies)) {
 		if(!ac.before) {
+			state->copiedAttachments[i].op = ac;
 			copyAttachment(bcmd, info, ac.type, ac.id, state->copiedAttachments[i]);
 		}
 	}
@@ -1199,8 +1208,8 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	}
 
 	// transfer
-	if(!info.ops.copyTransferBefore && (info.ops.copyTransferDst || info.ops.copyTransferSrc)) {
-		copyTransfer(bcmd, info);
+	if(info.ops.copyTransferSrcAfter || info.ops.copyTransferDstAfter) {
+		copyTransfer(bcmd, info, false);
 	}
 }
 

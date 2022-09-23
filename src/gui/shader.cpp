@@ -577,18 +577,15 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 	}
 
 	// TODO: hacky
-	// PERF: and expensive! espeically the hook.ops() call since it copies
 	auto hookState = gui_->cbGui().commandViewer().state();
 	dlg_assert(hookState);
-	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second);
-	dlg_assert(gui_->dev().commandHook->ops().descriptorCopies.size() > dsCopyIt->second);
-	auto copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
+	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second + arrayElemID);
 	auto& copyResult = hookState->copiedDescriptors[dsCopyIt->second + arrayElemID];
 
-	dlg_assert(copyRequest.set == setID);
-	dlg_assert(copyRequest.binding == bindingID);
+	dlg_assert(copyResult.op.set == setID);
+	dlg_assert(copyResult.op.binding == bindingID);
 
 	dlg_assert_or(spcType.storage == spv::StorageClassStorageBuffer ||
 		spcType.storage == spv::StorageClassUniform, return 0);
@@ -795,15 +792,14 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	// TODO: hacky and expensive
 	dlg_assert(state_);
 	auto& hookState = *state_.get();
-	dlg_assert(hookState.copiedDescriptors.size() > dsCopyIt->second);
-	dlg_assert(gui_->dev().commandHook->ops().descriptorCopies.size() > dsCopyIt->second);
-	auto copyRequest = gui_->dev().commandHook->ops().descriptorCopies[dsCopyIt->second];
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
+	dlg_assert(hookState.copiedDescriptors.size() > dsCopyIt->second + arrayElemID);
 	auto& copyResult = hookState.copiedDescriptors[dsCopyIt->second + arrayElemID];
 
-	dlg_assert(copyRequest.set == setID);
-	dlg_assert(copyRequest.binding == bindingID);
+	dlg_assert(copyResult.op.set == setID);
+	dlg_assert(copyResult.op.binding == bindingID);
+	dlg_assert(copyResult.op.elem == 0u);
 
 	if(spcType.storage == spv::StorageClassPushConstant) {
 		// TODO: hacky
@@ -1031,8 +1027,8 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 
 			auto arraySize = 1u;
 			if(type.array.size() > 1) {
-				// TODO: support all array dimensions
-				dlg_assert(type.array.size() == 1u);
+				// TODO: support all array dimensions?
+				dlg_error("multi-dim arrays not supported");
 			}
 
 			for(auto i = 0u; i < arraySize; ++i) {
@@ -1045,7 +1041,6 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	addCopies(resources.sampled_images, true);
 	addCopies(resources.separate_images, true);
 	addCopies(resources.storage_images, true);
-	// addCopies(resources.separate_samplers);
 	addCopies(resources.storage_buffers, false);
 	addCopies(resources.uniform_buffers, false);
 	addCopies(resources.subpass_inputs, true);
@@ -1066,6 +1061,63 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	update.newOps = std::move(ops);
 	hook.freeze.store(false);
 	hook.updateHook(std::move(update));
+}
+
+void ShaderDebugger::initVarMapFromState(const CommandHookState& state) {
+	// TODO: support copied descriptor set without imageAsBuffer.
+	// We can still manually download the data somehow
+
+	varIDToDsCopyMap_.clear();
+	auto resources = compiled_->get_shader_resources();
+
+	auto initVars = [&](auto& resources, bool imageAsBuffer) {
+		for(auto& res : resources) {
+			if(!compiled_->has_decoration(res.id, spv::DecorationDescriptorSet) ||
+					!compiled_->has_decoration(res.id, spv::DecorationBinding)) {
+				dlg_warn("resource {} doesn't have set/binding decorations", res.name);
+				continue;
+			}
+
+			auto& type = compiled_->get_type_from_variable(res.id);
+			auto setID = compiled_->get_decoration(res.id, spv::DecorationDescriptorSet);
+			auto bindingID = compiled_->get_decoration(res.id, spv::DecorationBinding);
+
+			// don't have to insert for *each* elemID, they are sequential
+			auto* copy = findDsCopy(state, setID, bindingID, 0u,
+				true, imageAsBuffer);
+			if(!copy) {
+				dlg_warn("shader debugger: missing var");
+				continue;
+			}
+
+			dlg_assert(copy >= state.copiedDescriptors.data());
+			auto off = u32(copy - state.copiedDescriptors.data());
+			dlg_assert(off < state.copiedDescriptors.size());
+			varIDToDsCopyMap_.insert({u32(res.id), off});
+
+			// assert that copies are indeed sequential
+			dlg_check({
+				auto arraySize = 1u;
+				if(type.array.size() > 1) {
+					// TODO: support all array dimensions?
+					dlg_error("multi-dim arrays not supported");
+				}
+
+				for(auto elemID = 0u; elemID < arraySize; ++elemID) {
+					auto* ecopy = findDsCopy(state, setID, bindingID, elemID,
+						true, imageAsBuffer);
+					dlg_assert(ecopy && (ecopy - copy) == i64(elemID));
+				}
+			});
+		}
+	};
+
+	initVars(resources.sampled_images, true);
+	initVars(resources.separate_images, true);
+	initVars(resources.storage_images, true);
+	initVars(resources.storage_buffers, false);
+	initVars(resources.uniform_buffers, false);
+	initVars(resources.subpass_inputs, true);
 }
 
 void ShaderDebugger::setupScalar(const Type& type, ReadBuf data, spvm_member& dst) {
@@ -1697,9 +1749,16 @@ void ShaderDebugger::toggleBreakpoint() {
 	}
 }
 
-void ShaderDebugger::updateState(IntrusivePtr<CommandHookState> state) {
+void ShaderDebugger::updateState(IntrusivePtr<CommandHookState> state,
+		bool localCapture) {
 	state_ = std::move(state);
 	rerun_ = true;
+
+	// For localCapture == true, updateHooks will never be called.
+	// Init the map now
+	if(localCapture && state_) {
+		initVarMapFromState(*state_);
+	}
 }
 
 } // namespace vil

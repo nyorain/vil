@@ -70,11 +70,16 @@ struct CommandHookOps {
 	bool queryTime {};
 
 	// transfer
-	// NOTE: copySrc and copyDst can't be true at same time, atm
-	bool copyTransferSrc {};
-	bool copyTransferDst {};
-	bool copyTransferBefore {};
-	u32 transferIdx {}; // the relevant region/blit/attachment of the transfer command
+	bool copyTransferSrcBefore {};
+	bool copyTransferSrcAfter {};
+	bool copyTransferDstBefore {};
+	bool copyTransferDstAfter {};
+
+	// TODO: allow setting this to u32(-1), not supported atm
+	// The relevant region/blit/attachment of the transfer command
+	// Pass u32(-1) to just copy everything, independent of transfers
+
+	u32 transferIdx {0u};
 };
 
 // Only set the members that should be updated.
@@ -98,11 +103,43 @@ struct CompletedHook {
 	float match; // how much the command matched
 };
 
+enum class LocalCaptureBits : u32 {
+	// Capture all data needed for shader debugging
+	shaderDebugger = (1u << 0u),
+	// Capture all (before and after) descriptor data
+	descriptors = (1u << 1u),
+	// captures attachments (only relevant for draw cmds)
+	attachments = (1u << 2u),
+	// capture transfer I/O before command (only relevant for transfer cmds)
+	transferBefore = (1u << 3u),
+	// capture transfer I/O before command (only relevant for transfer cmds)
+	transferAfter = (1u << 4u),
+	// capture vertex/index buffer data
+	vertexInput = (1u << 5u),
+	// capture vertex shader output data (via xfb)
+	vertexOutput = (1u << 6u),
+	// Only do a single capture, unregister the hook afterwards.
+	once = (1u << 7u),
+
+	// Keep the history of all done hooks.
+	// Extremely expensive (keeps a lot of memory around) if the command
+	// is submitted often.
+	// Does only make sense when 'once' is not set.
+	// keepAll = (1u << 8u),
+
+	all = (1u << 16u) - 1u,
+};
+
+NYTL_FLAG_OPS(LocalCaptureBits);
+
+std::string_view name(LocalCaptureBits localCaptureBit);
+std::optional<LocalCaptureBits> localCaptureBit(std::string_view name);
+
 struct LocalCapture {
+	LocalCaptureFlags flags;
 	std::string name;
 	IntrusivePtr<CommandRecord> record;
 	std::vector<const Command*> command;
-	bool once {};
 	CompletedHook completed; // may be empty
 };
 
@@ -161,6 +198,7 @@ public:
 
 	void addLocalCapture(std::unique_ptr<LocalCapture>&&);
 	std::vector<LocalCapture*> localCaptures() const;
+	std::vector<LocalCapture*> localCapturesOnceCompleted() const;
 
 private:
 	// Initializes the pipelines and data needed for acceleration
@@ -198,6 +236,12 @@ private:
 	LinAllocator matchAlloc_;
 
 	std::vector<std::unique_ptr<LocalCapture>> localCaptures_;
+	// LocalCaptures with 'once' flag set that were completed.
+	// Stored as extra list so we don't have to check them every time.
+	std::vector<std::unique_ptr<LocalCapture>> localCapturesCompleted_;
+
+	// TODO: wip hack
+	std::vector<CompletedHook> keepAliveLC_;
 
 	// pipelines needed for the acceleration structure build copy
 public: // TODO, for copying. Maybe just move them to Device?

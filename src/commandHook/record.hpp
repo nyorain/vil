@@ -142,7 +142,7 @@ private:
 	void hookRecord(Command* cmdChain, RecordInfo&);
 
 	// = Copying =
-	void copyTransfer(Command& bcmd, RecordInfo&);
+	void copyTransfer(Command& bcmd, RecordInfo&, bool isBefore);
 	void copyDs(Command& bcmd, RecordInfo&,
 		const DescriptorCopyOp&,
 		CommandHookState::CopiedDescriptor& dst,

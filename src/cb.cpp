@@ -380,19 +380,16 @@ void CommandPool::onApiDestroy() {
 template<typename T, SectionType ST = SectionType::none, typename... Args>
 T& addCmd(CommandBuffer& cb, Args&&... args) {
 	auto& cmd = cb.builder().add<T, ST>(std::forward<Args>(args)...);
-	if(cb.localCapture_) {
+	if(cb.localCapture_.activeNext) {
 		auto& hook = *cb.dev->commandHook;
 		auto capture = std::make_unique<LocalCapture>();
-		capture->once = cb.localCaptureOnce_;
+		capture->flags = cb.localCapture_.flags;
+		capture->name = std::move(cb.localCapture_.name);
 		capture->record = cb.builder().record_;
 		capture->command = cb.builder().lastCommand();
-		// TODO capture.name
 		hook.addLocalCapture(std::move(capture));
 
-		dlg_trace("Added local capture");
-
-		cb.localCapture_ = false;
-		cb.localCaptureOnce_ = false;
+		cb.localCapture_ = {};
 	}
 
 	return cmd;
@@ -2012,13 +2009,44 @@ VKAPI_ATTR void VKAPI_CALL CmdFillBuffer(
 }
 
 bool checkDebugLabelForLocalCapture(CommandBuffer& cb, std::string_view name) {
-	if(name == "vil.localCapture") {
-		cb.localCapture_ = true;
-		cb.localCaptureOnce_ = false;
-		return true;
-	} else if(name == "vil.localCapture.once") {
-		cb.localCapture_ = true;
-		cb.localCaptureOnce_ = true;
+	// syntax: 'vil.localCapture:<name>:<flag1>|<flag2>'
+
+	auto start = std::string_view("vil.localCapture");
+	if(name.find(start) == 0u) {
+		CommandBuffer::LocalCaptureInfo lci {};
+		lci.activeNext = true;
+
+		auto pos = start.size();
+		dlg_assertm_or(name.size() > pos && name[pos] == ':', return false,
+			"Invalid localCapture string. Expected ':' after 'vil.localCapture'");
+
+		auto nextSep = name.find(':', pos + 1);
+		dlg_assertm_or(nextSep != name.npos, return false,
+			"Invalid localCapture string. Expected ':' after 'vil.localCapture:<name>'");
+		dlg_assertm_or(nextSep != pos + 1, return false,
+			"Invalid localCapture string. Expected non-empty name");
+
+		lci.name = name.substr(pos + 1, nextSep - pos - 1);
+
+		auto flagsString = name.substr(nextSep + 1);
+		auto nextBar = flagsString.find('|'); // npos is ok
+		while(!flagsString.empty()) {
+			auto flagStr = flagsString.substr(0, nextBar);
+			auto bit = localCaptureBit(flagStr);
+			dlg_assertm_or(bit, return false,
+				"Invalid localCapture flag '{}'", flagStr);
+
+			lci.flags |= *bit;
+
+			if(nextBar == flagStr.npos) {
+				flagsString = {};
+			} else {
+				flagsString = flagsString.substr(nextBar + 1);
+				nextBar = flagsString.find('|');
+			}
+		}
+
+		cb.localCapture_ = std::move(lci);
 		return true;
 	}
 
