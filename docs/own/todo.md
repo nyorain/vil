@@ -14,11 +14,8 @@ urgent, bugs:
 
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 
-- [ ] figure out transform_feedback crashes in doom eternal
-      crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
-      check if it could be a error in patching logic; otherwise analyze our generated spirv,
-      see the dumped shaders that might have caused the crash (on D:)
-	  {NOTE: check if that was fixed by the xfb changes we did}
+- [ ] figure our why overlay on doom is broken
+	- [ ] also fix the semaphore crash. Run with debug output enabled.
 - [ ] figure out tracy crashs with doom eternal :(
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise

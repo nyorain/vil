@@ -1,3 +1,9 @@
+- [x] figure out transform_feedback crashes in doom eternal
+      crashed deep inside driver in CreateGraphicsPipeline when we patch xfb in :(
+      check if it could be a error in patching logic; otherwise analyze our generated spirv,
+      see the dumped shaders that might have caused the crash (on D:)
+	  {NOTE: check if that was fixed by the xfb changes we did}
+	  {yes, does not occur anymore, it seems. Got other crashes now}
 - [x] with lockfree gui rendering, the overlay input events in api.cpp
       are racy when QueuePresent is called in another thread.
 	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
