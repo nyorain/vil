@@ -25,13 +25,15 @@ void Swapchain::destroy() {
 
 	for(auto* img : this->images) {
 		auto handle = castDispatch<VkImage>(*img);
-		dev->images.mustErase(handle);
 
 		{
 			std::lock_guard lock(dev->mutex);
 			img->swapchain = nullptr;
 			img->handle = {};
+			img->memState = MemoryResource::State::resourceDestroyed;
 		}
+
+		dev->images.mustErase(handle);
 	}
 
 	// TODO: not sure about this. We don't synchronize access to it
@@ -146,6 +148,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		img.memObjectType = VK_OBJECT_TYPE_IMAGE;
 		img.handle = imgs[i];
 		img.hasTransferSrc = (sci.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+		img.allowsNearestSampling = (sci.imageUsage & VK_IMAGE_USAGE_SAMPLED_BIT);
+		// TODO: special case, not sure how to represent it.
+		// It's bound but implicitly, so we can't set img.memory
+		// Might trigger asserts somewhere (that expect 'state == bound' -> 'memory != null')
+		img.memState = MemoryResource::State::bound;
 
 		img.ci.arrayLayers = sci.imageArrayLayers;
 		img.ci.imageType = VK_IMAGE_TYPE_2D;
@@ -346,14 +353,14 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		auto& swapchain = dev.swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
 
-		bool visible;
+		bool visible {};
 		if(swapchain.overlay && swapchain.overlay->platform) {
 			auto state = swapchain.overlay->platform->update(*swapchain.overlay->gui);
 			visible = (state != Platform::State::hidden);
 
 			std::lock_guard lock(dev.mutex);
 			swapchain.overlay->gui->visible(visible);
-		} else {
+		} else if(swapchain.overlay) {
 			std::lock_guard lock(dev.mutex);
 			visible = swapchain.overlay->gui->visible();
 		}

@@ -1660,6 +1660,9 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			case Event::Type::input:
 				io.AddInputCharactersUTF8(event.input.data());
 				break;
+			case Event::Type::input16:
+				io.AddInputCharacterUTF16(event.input16);
+				break;
 			case Event::Type::key:
 				io.AddKeyEvent(keyToImGui(event.key), event.b);
 				break;
@@ -2073,6 +2076,17 @@ bool Gui::addInputEvent(std::string input) {
 	Event ev {};
 	ev.type = Event::Type::input;
 	ev.input = std::move(input);
+
+	std::lock_guard lock(eventMutex_);
+	events_.push_back(ev);
+
+	return eventCaptureKeyboard_ || eventWantTextInput_;
+}
+
+bool Gui::addInputEvent(unsigned short input16) {
+	Event ev {};
+	ev.type = Event::Type::input16;
+	ev.input16 = input16;
 
 	std::lock_guard lock(eventMutex_);
 	events_.push_back(ev);

@@ -141,7 +141,6 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	}
 
 	// content
-
 	if(image.swapchain) {
 		ImGui::Text("Image can't be displayed since it's a swapchain image of");
 		ImGui::SameLine();
