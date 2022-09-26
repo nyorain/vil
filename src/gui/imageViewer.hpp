@@ -59,7 +59,12 @@ private:
 	// that samples it.
 	void doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
 
+	void computeMinMax(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
+
 	void createData();
+
+	void drawImageArea(Draw& draw);
+	void drawMetaInfo(Draw& draw);
 
 private:
 	// general, logical info

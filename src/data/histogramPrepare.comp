@@ -2,6 +2,8 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+#include "histogram.glsl"
+
 layout(push_constant) uniform PCR {
 	bool useFixed;
 	float begin;
@@ -10,12 +12,8 @@ layout(push_constant) uniform PCR {
 } pcr;
 
 layout(set = 0, binding = 0) buffer Hist {
-	uvec4 texMin;
-	uvec4 texMax;
-	uint _flags;
-	float outBegin;
-	float outEnd;
-} histData;
+	HistMetadata meta;
+} hist;
 
 float uintOrderedToFloat(uint val) {
 	if((val & (1u << 31)) == 0) {
@@ -29,8 +27,8 @@ float uintOrderedToFloat(uint val) {
 
 void main() {
 	if(pcr.useFixed) {
-		histData.outBegin = pcr.begin;
-		histData.outEnd = pcr.end;
+		hist.meta.begin = pcr.begin;
+		hist.meta.end = pcr.end;
 	} else {
 		float begin = 0;
 		float end = 1;
@@ -43,7 +41,7 @@ void main() {
 			}
 
 			// NOTE: we know that texMin/texMax does not contains nan or inf
-			float minval = uintOrderedToFloat(histData.texMin[i]);
+			float minval = uintOrderedToFloat(hist.meta.texMin[i]);
 			if(beginCount == 0) {
 				begin = minval;
 			} else {
@@ -51,7 +49,7 @@ void main() {
 			}
 			++beginCount;
 
-			float maxval = uintOrderedToFloat(histData.texMax[i]);
+			float maxval = uintOrderedToFloat(hist.meta.texMax[i]);
 			if(endCount == 0) {
 				end = maxval;
 			} else {
@@ -60,8 +58,8 @@ void main() {
 			++endCount;
 		}
 
-		histData.outBegin = begin;
-		histData.outEnd = end;
+		hist.meta.begin = begin;
+		hist.meta.end = end;
 	}
 }
 

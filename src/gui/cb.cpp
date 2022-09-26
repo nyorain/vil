@@ -152,8 +152,9 @@ void CommandRecordGui::draw(Draw& draw) {
 
 	ImGui::SameLine();
 
-	// TODO: don't show this checkbox (or set it to true and disable?)
+	// TODO: don't show this (or set it to true and disable?)
 	//   when we are viewing an invalidated record without updating.
+	// auto updateInHook = toggleButton(ICON_FA_PAUSE, selector_.freezeState);
 	auto updateInHook = ImGui::Checkbox("Freeze State", &selector_.freezeState);
 	// NOTE: gui.cpp changes hook.freeze on window hide. So we need to
 	//   set it to false again if needed.
@@ -173,6 +174,7 @@ void CommandRecordGui::draw(Draw& draw) {
 
 	if(selector_.updateMode() != UpdateMode::none) {
 		ImGui::SameLine();
+		// toggleButton(ICON_FA_LIST, freezeCommands_);
 		ImGui::Checkbox("Freeze Commands", &freezeCommands_);
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip(
@@ -180,6 +182,36 @@ void CommandRecordGui::draw(Draw& draw) {
 				"Useful to avoid flickering or just to inspect the current state.\n"
 				"Note that the per-command state you are viewing (e.g. image/buffer\n"
 				"content or measured time) will still be updated, use the 'Freeze State' checkbox");
+		}
+	}
+
+	// toggle button
+	if(selector_.selectionType() == SelectionType::none) {
+		actionFullscreen_ = false;
+	} else {
+		// TODO: maybe align this to the right? might be more intuitive
+		ImGui::SameLine();
+
+		// ImGui::SeparatorEx(ImGuiSeparatorFlags_Horizontal);
+		// ImGui::SameLine();
+
+		toggleButton(ICON_FA_ARROWS_ALT, actionFullscreen_);
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Maximize the selected command viewer.\n"
+				"This will hide the command and I/O view");
+		}
+
+		if(selector_.selectionType() == SelectionType::command) {
+			if(commandViewer_.showBeforeCheckbox_) {
+				ImGui::SameLine();
+				if(toggleButton(ICON_FA_UNDO, commandViewer_.beforeCommand_)) {
+					commandViewer_.doUpdateHook_ = true;
+				}
+
+				if(gui_->showHelp && ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Show state as it was before the command");
+				}
+			}
 		}
 	}
 
@@ -250,100 +282,108 @@ void CommandRecordGui::draw(Draw& draw) {
 
 	ImGui::Separator();
 
-	// Command list
-	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
-	if(!ImGui::BeginTable("RecordViewer", 2, flags, ImGui::GetContentRegionAvail())) {
-		return;
-	}
+	auto drawSelected = [&]{
+		ImGui::BeginChild("Command Info");
 
-	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
-	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
-
-	ImGui::TableNextRow();
-	ImGui::TableNextColumn();
-
-	// ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 20, 20, 255));
-	ImGui::BeginChild("Command list", {0, 0});
-
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
-
-	if(updateMode == UpdateMode::swapchain) {
-		displayFrameCommands(*swapchain);
-	} else {
-		displayRecordCommands();
-	}
-
-	ImGui::PopStyleVar(2);
-
-	ImGui::EndChild();
-	// ImGui::PopStyleColor();
-	ImGui::TableNextColumn();
-
-	// command info
-	ImGui::BeginChild("Command Info");
-
-	switch(selector_.selectionType()) {
-		case SelectionType::none:
-			imGuiText("Nothing selected yet");
-			break;
-		case SelectionType::submission: {
-			dlg_assert(updateMode == UpdateMode::swapchain);
-			auto* subm = selector_.submission();
-			dlg_assert(subm);
-			if(!subm) {
-				imGuiText("Error!");
+		switch(selector_.selectionType()) {
+			case SelectionType::none:
+				imGuiText("Nothing selected yet");
 				break;
-			}
-
-			refButtonExpect(*gui_, subm->queue);
-			imGuiText("{} records", subm->submissions.size());
-			imGuiText("submissionID: {}", subm->submissionID);
-			break;
-		} case SelectionType::record: {
-			auto* rec = selector_.record().get();
-			dlg_assert(rec);
-
-			auto hookState = selector_.completedHookState();
-			if(hookState) {
-				auto lastTime = hookState->neededTime;
-				auto validBits = gui_->dev().queueFamilies[rec->queueFamily].props.timestampValidBits;
-				if(validBits == 0u) {
-					dlg_assert(lastTime == u64(-1));
-					imGuiText("Time: unavailable (Queue family does not support timing queries)");
-				} else if(lastTime == u64(-1)) {
-					dlg_error("lastTime is u64(-1), unexpectedly");
-					imGuiText("Time: Error");
-				} else {
-					auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
-					displayDiff /= 1000.f * 1000.f;
-					imGuiText("Time: {} ms", displayDiff);
+			case SelectionType::submission: {
+				dlg_assert(updateMode == UpdateMode::swapchain);
+				auto* subm = selector_.submission();
+				dlg_assert(subm);
+				if(!subm) {
+					imGuiText("Error!");
+					break;
 				}
-			} else {
-				imGuiText("Time: Waiting for submission...");
-			}
 
-			refButtonD(*gui_, rec->cb);
-			imGuiText("cb name: {}", rec->cbName ? rec->cbName : "<unnamed>");
-			imGuiText("broken labels: {}{}", std::boolalpha, rec->brokenHierarchyLabels);
-			imGuiText("record id: {}", rec->recordID);
-			imGuiText("refCount: {}", rec->refCount);
-			imGuiText("num hook records: {}", rec->hookRecords.size());
-			imGuiText("num secondaries: {}", rec->secondaries.size());
-			imGuiText("num pipeLayouts: {}", rec->used.pipeLayouts.size());
-			imGuiText("num gfx pipes: {}", rec->used.graphicsPipes.size());
-			imGuiText("num compute pipes: {}", rec->used.computePipes.size());
-			imGuiText("num rt pipes: {}", rec->used.rtPipes.size());
-			imGuiText("builds accel structs: {}", rec->buildsAccelStructs);
+				refButtonExpect(*gui_, subm->queue);
+				imGuiText("{} records", subm->submissions.size());
+				imGuiText("submissionID: {}", subm->submissionID);
+				break;
+			} case SelectionType::record: {
+				auto* rec = selector_.record().get();
+				dlg_assert(rec);
 
-			break;
-		} case SelectionType::command:
-			commandViewer_.draw(draw);
-			break;
+				auto hookState = selector_.completedHookState();
+				if(hookState) {
+					auto lastTime = hookState->neededTime;
+					auto validBits = gui_->dev().queueFamilies[rec->queueFamily].props.timestampValidBits;
+					if(validBits == 0u) {
+						dlg_assert(lastTime == u64(-1));
+						imGuiText("Time: unavailable (Queue family does not support timing queries)");
+					} else if(lastTime == u64(-1)) {
+						dlg_error("lastTime is u64(-1), unexpectedly");
+						imGuiText("Time: Error");
+					} else {
+						auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
+						displayDiff /= 1000.f * 1000.f;
+						imGuiText("Time: {} ms", displayDiff);
+					}
+				} else {
+					imGuiText("Time: Waiting for submission...");
+				}
+
+				refButtonD(*gui_, rec->cb);
+				imGuiText("cb name: {}", rec->cbName ? rec->cbName : "<unnamed>");
+				imGuiText("broken labels: {}{}", std::boolalpha, rec->brokenHierarchyLabels);
+				imGuiText("record id: {}", rec->recordID);
+				imGuiText("refCount: {}", rec->refCount);
+				imGuiText("num hook records: {}", rec->hookRecords.size());
+				imGuiText("num secondaries: {}", rec->secondaries.size());
+				imGuiText("num pipeLayouts: {}", rec->used.pipeLayouts.size());
+				imGuiText("num gfx pipes: {}", rec->used.graphicsPipes.size());
+				imGuiText("num compute pipes: {}", rec->used.computePipes.size());
+				imGuiText("num rt pipes: {}", rec->used.rtPipes.size());
+				imGuiText("builds accel structs: {}", rec->buildsAccelStructs);
+				break;
+			} case SelectionType::command:
+				commandViewer_.draw(draw, actionFullscreen_);
+				break;
+		}
+
+		ImGui::EndChild();
+	};
+
+	if(actionFullscreen_) {
+		drawSelected();
+	} else {
+		// Command list
+		auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+		if(!ImGui::BeginTable("RecordViewer", 2, flags, ImGui::GetContentRegionAvail())) {
+			return;
+		}
+
+		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+		ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+
+		// ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 20, 20, 255));
+		ImGui::BeginChild("Command list", {0, 0});
+
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+
+		if(updateMode == UpdateMode::swapchain) {
+			displayFrameCommands(*swapchain);
+		} else {
+			displayRecordCommands();
+		}
+
+		ImGui::PopStyleVar(2);
+
+		ImGui::EndChild();
+		// ImGui::PopStyleColor();
+		ImGui::TableNextColumn();
+
+		drawSelected();
+
+		// command info
+		ImGui::EndTable();
 	}
-
-	ImGui::EndChild();
-	ImGui::EndTable();
 }
 
 void CommandRecordGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) {

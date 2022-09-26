@@ -15,6 +15,17 @@
 	#define DefaultTexelFormat rgba32f
 #else
 	#error No valid TEX_FORMAT definition
+
+	// for linting in editor
+	#define SamplerType(Dim) sampler##Dim
+	#define StorageTexelBufferType imageBuffer
+	#define RawVec4Type vec4
+	#define DefaultTexelFormat rgba32f
+#endif
+
+// for linting in editor
+#if !defined(TEX_TYPE_1D_ARRAY) && !defined(TEX_TYPE_2D_ARRAY) && !defined(TEX_TYPE_3D)
+	#define TEX_TYPE_2D_ARRAY
 #endif
 
 #ifdef TEX_TYPE_1D_ARRAY

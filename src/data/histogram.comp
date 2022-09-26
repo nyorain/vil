@@ -4,19 +4,18 @@
 
 layout(local_size_x_id = 0, local_size_y_id = 1) in;
 
+#define SAMPLE_TEX_BINDING 1
+#include "sample.glsl"
+#include "histogram.glsl"
+
 layout(push_constant) uniform PCR {
 	int level;
 } pcr;
 
 layout(set = 0, binding = 0) buffer Hist {
-	float begin;
-	float end;
-	uint _maxHist;
+	HistMetadata meta;
 	uvec4 data[];
 } hist;
-
-#define SAMPLE_TEX_BINDING 1
-#include "sample.glsl"
 
 void main() {
 	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
@@ -29,11 +28,11 @@ void main() {
 	// TODO: could speed this up with subgroup ballot
 	// so we only do three atomic instructions per subgroup
 
-	float range = hist.end - hist.begin;
+	float range = hist.meta.end - hist.meta.begin;
 
 	int len = hist.data.length();
 	for(uint i = 0u; i < 4; ++i) {
-		float pos = (col[i] - hist.begin) / range;
+		float pos = (col[i] - hist.meta.begin) / range;
 		// uint id = clamp(pos * len, 0, len - 1);
 		int id = int(pos * len);
 		if(id > 0 && id < len) {
