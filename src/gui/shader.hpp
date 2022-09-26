@@ -91,6 +91,8 @@ private:
 	// toggles breakpoint on current line
 	void toggleBreakpoint();
 
+	void stepLine();
+
 	// compute stuff
 	Vec3ui workgroupSize() const;
 	Vec3ui numWorkgroups() const;
@@ -131,9 +133,6 @@ private:
 	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
 	std::unordered_map<u32, u32> varIDToDsCopyMap_;
 	std::vector<Location> breakpoints_;
-
-	// TODO
-	bool f9Down_ {};
 
 	// TODO
 	Vec3ui globalInvocationID_ {0u, 0u, 0u};
