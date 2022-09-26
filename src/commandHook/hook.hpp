@@ -118,16 +118,17 @@ enum class LocalCaptureBits : u32 {
 	vertexInput = (1u << 5u),
 	// capture vertex shader output data (via xfb)
 	vertexOutput = (1u << 6u),
+
+	allCapture = (1u << 10u) - 1u,
+
 	// Only do a single capture, unregister the hook afterwards.
-	once = (1u << 7u),
+	once = (1u << 10u),
 
 	// Keep the history of all done hooks.
 	// Extremely expensive (keeps a lot of memory around) if the command
 	// is submitted often.
 	// Does only make sense when 'once' is not set.
 	// keepAll = (1u << 8u),
-
-	all = (1u << 16u) - 1u,
 };
 
 NYTL_FLAG_OPS(LocalCaptureBits);
@@ -135,9 +136,17 @@ NYTL_FLAG_OPS(LocalCaptureBits);
 std::string_view name(LocalCaptureBits localCaptureBit);
 std::optional<LocalCaptureBits> localCaptureBit(std::string_view name);
 
+// Lifetime of LocalCapture objects: once created they live forever.
 struct LocalCapture {
+	// immutable
 	LocalCaptureFlags flags;
 	std::string name;
+
+	// Protected by device mutex.
+	// NOTE: record, command might not always mirror completex.{record, command}.
+	//   LocalCaptures without once flags can be updated with more
+	//   recent recordings while we don't have a completed hook state
+	//   of them yet.
 	IntrusivePtr<CommandRecord> record;
 	std::vector<const Command*> command;
 	CompletedHook completed; // may be empty

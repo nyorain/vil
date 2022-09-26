@@ -60,6 +60,9 @@ struct AccelStruct : SharedDeviceHandle {
 	VkAccelerationStructureTypeKHR effectiveType; // only relevant when type == generic
 
 	// creation info
+	// TODO: can buffer get destroyed before AccelStruct?
+	//   should unset itself here then.
+	//   Or make it an IntrusivePtr
 	Buffer* buf {};
 	VkDeviceSize offset {};
 	VkDeviceSize size {};

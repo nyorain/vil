@@ -105,23 +105,19 @@ introduced some special handling of descriptor sets:
 - To completely avoid allocations in AllocateDescriptorSets we have a static
   block of memory owned by a DescriptorPool in which all descriptor sets
   are placed
-- We never insert records info `refRecords` of a DescriptorSet to make
-  destruction faster. Note that this means that we can't know whether
-  the descriptorSet handles used by a `CommandRecord` are still valid,
-  they may be dangling pointers. The only time we can safely dereference
-  them is while the record is being submitted or is still pending on the
-  device since the application cannot have destroyed the used sets so far.
-	- Even when we don't have this guarantee we still have a way to
-	  know whether the pointer is dangling: we just need to store the
-	  DescriptorPool and the DescriptorSet::id together with the 
-	  descriptor set pointer. And then when accessing the descriptorSet pointer,
-	  we
-	  	- check whether the DescriptorPool is still alive (it notifies on
-		  destruction and would therefore have been unset)
-		- if so, check if the given descriptorSet is still alive in the
-		  given pool via the pool's entries
-		- if so, check that the id matches (otherwise a new descriptorSet
-		  has been created at the same address)
-	  Yes, this is a huge amount of work. BUT keep in mind that we very
-	  rarely need this (only when selecting a new record
-
+	- This means DescriptorSets do not have shared ownership/lifetime,
+	  like most other handles do. The way we deal with this:
+	  You can acquire a shared (intrusive) pointer to its pool and then
+	  remember the DescriptorSet's DescriptorPoolSetEntry and its ID.
+	  When you want to access the DescriptorSet you can check whether
+	  the entry still points to the same DescriptorSet (AND you have to check
+	  that the DescriptorSet object still has the same id, there might
+	  have been created just a new DescriptorSet object at the memory
+	  address of the old one).
+	  There is utility for exactly this `command/record.hpp`,
+	  see the `tryAccess`/`access` functions on a `BoundDescriptorSet`.
+	- For this reason, we can view destroyed handles in the resource
+	  viewer UI but *can't* view destroyed descriptor sets. The information
+	  is just lost. I think this trade-off is fair, the performance
+	  optimizations for descriptorSets were really needed to make the
+	  layer usable to shipped AAA titles.

@@ -15,10 +15,13 @@ local captures:
 	- [x] for onetime local captures, use a separate list in CommandHook
 	      for done ones? to speed up hooking on submission
 - [x] fix hacky UI code, make sure there are no races
-	- [ ] lots of local locks rn, error-prone
+	- [x] lots of local locks rn, error-prone
 	      introduce cleaner interface, maybe functions on LocalCapture that do it
+		  {meh, don't feel like that's a good idea atm. Manual locking
+		   when accessing isn't that bad}
 - [ ] clean up somewhat hacky CommandViewer and CommandSelector code
 	  might need CommandSelector rework to do this properly
+	  {yes, please do that}
 - [x] Fix gui/command.cpp assumption on hooks. They assume only one
       descriptor/attachment whatever is created. Should work with any
 	  state that contains the relevant information.
@@ -40,6 +43,7 @@ local captures:
 urgent, bugs:
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
+- [ ] fix updateRecord in CbGui
 
 - [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull

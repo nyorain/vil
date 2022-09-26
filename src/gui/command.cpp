@@ -1543,14 +1543,9 @@ void CommandViewer::updateHook() {
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
 	auto drawIndexedCmd = dynamic_cast<const DrawIndexedCmd*>(cmd);
 	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(cmd);
-	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(cmd);
 	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(cmd);
-	auto traceRaysIndirectCmd = dynamic_cast<const TraceRaysIndirectCmd*>(cmd);
 
-	auto indirectCmd = dispatchIndirectCmd ||
-		drawIndirectCmd ||
-		drawIndirectCountCmd ||
-		traceRaysIndirectCmd;
+	auto indirectCmd = cmd && isIndirect(*cmd);
 	auto indexedCmd = drawIndexedCmd ||
 		(drawIndirectCmd && drawIndirectCmd->indexed) ||
 		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);

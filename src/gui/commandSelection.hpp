@@ -2,8 +2,8 @@
 
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
+#include <commandHook/state.hpp>
 #include <command/record.hpp> // TODO: get rid of include, only for CommandDescriptorSnapshot
-#include <commandHook/hook.hpp> // TODO: get rid of include, only for CompletedHook
 #include <vector>
 
 namespace vil {

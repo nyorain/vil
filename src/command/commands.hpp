@@ -1489,6 +1489,10 @@ void doVisit(CommandVisitor& v, C& cmd) {
 	templatize<C>(v).visit(cmd);
 }
 
+// Return true for indirect commands (i.e. state or transfer commands that
+// contain command information in a passed address/buffer)
+bool isIndirect(const Command&);
+
 } // namespace vil
 
 #ifdef __GNUC__

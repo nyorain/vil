@@ -25,7 +25,7 @@ AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address) {
 }
 
 AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
-	auto lock = std::shared_lock(dev.mutex);
+	std::shared_lock lock(dev.mutex);
 	return accelStructAtLocked(dev, address);
 }
 

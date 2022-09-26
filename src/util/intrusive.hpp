@@ -109,7 +109,7 @@ protected:
 	std::tuple<T*, H> storage_; // empty-object-optimization for H
 };
 
-template<typename T, typename Deleter = std::default_delete<T>>
+template<typename T, typename Deleter>
 struct RefCountHandler {
 	// NOTE: we assume that increasing/decreasing ref count is noexcept
 	// See https://stackoverflow.com/questions/41424539 for memory order rationle
@@ -134,11 +134,6 @@ struct FinishHandler {
 		obj.finish();
 	}
 };
-
-template<typename T, typename D = std::default_delete<T>>
-	using IntrusivePtr = HandledPtr<T, RefCountHandler<T, D>>;
-
-template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
 template<typename T, typename H>
 bool operator==(const HandledPtr<T, H>& a, const HandledPtr<T, H>& b) {

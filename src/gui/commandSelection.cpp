@@ -354,7 +354,6 @@ CommandSelection::SelectionType CommandSelection::selectionType() const {
 	}
 
 	return SelectionType::none;
-
 }
 
 } // namespace vil

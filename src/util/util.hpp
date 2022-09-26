@@ -398,4 +398,10 @@ struct CharTraitsCI : public std::char_traits<char> {
 VkImageAspectFlags aspects(VkFormat format);
 u32 combineQueueFamilies(span<const u32> queueFams);
 
+template<typename Mutex, typename T>
+auto lockCopy(Mutex& mutex, T& obj) {
+	std::lock_guard lock(mutex);
+	return obj;
+}
+
 } // namespace vil

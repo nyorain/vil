@@ -74,6 +74,7 @@ void ResourceGui::init(Gui& gui) {
 }
 
 void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
+	std::lock_guard lock(gui_->dev().mutex);
 	if(res.memory) {
 		ImGui::Text("Bound to memory ");
 		ImGui::SameLine();
@@ -125,26 +126,37 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 
 	ImGui::Spacing();
 
-	if(image.views.empty()) {
+	// make sure the views stay alive while we render this
+	std::vector<IntrusivePtr<ImageView>> views;
+	IntrusivePtr<Swapchain> swapchain;
+	{
+		std::lock_guard lock(gui_->dev().mutex);
+		swapchain.reset(image.swapchain);
+		for(auto* view : image.views) {
+			views.emplace_back(view);
+		}
+	}
+
+	if(views.empty()) {
 		ImGui::Text("No image views");
-	} else if(image.views.size() == 1) {
+	} else if(views.size() == 1) {
 		ImGui::Text("Image View");
 		ImGui::SameLine();
-		refButtonExpect(*gui_, image.views[0]);
-	} else if(image.views.size() > 1) {
+		refButtonExpect(*gui_, views[0].get());
+	} else if(views.size() > 1) {
 		ImGui::Text("Image Views:");
 
-		for(auto* view : image.views) {
+		for(auto& view : views) {
 			ImGui::Bullet();
-			refButtonExpect(*gui_, view);
+			refButtonExpect(*gui_, view.get());
 		}
 	}
 
 	// content
-	if(image.swapchain) {
+	if(swapchain) {
 		ImGui::Text("Image can't be displayed since it's a swapchain image of");
 		ImGui::SameLine();
-		refButton(*gui_, *image.swapchain);
+		refButtonExpect(*gui_, swapchain.get());
 	} else if(!image.allowsNearestSampling) {
 		ImGui::Text("Image can't be displayed since its format does not support sampling");
 	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
@@ -441,14 +453,7 @@ void ResourceGui::drawDesc(Draw&, DescriptorPool& dsPool) {
 		imGuiText("{}: {}", vk::name(size.type), size.descriptorCount);
 	}
 
-	// NOTE: maintaining this was a huge pain in the ass.
-	// If somebody really needs it, we could implement it though.
-	// ImGui::Text("Descriptors");
-	// std::lock_guard lock(dsPool.mutex);
-	// for(auto* ds : dsPool.descriptorSets) {
-	// 	ImGui::Bullet();
-	// 	refButtonExpect(*gui_, ds);
-	// }
+	// TODO: show a list of alive descriptorSets
 }
 
 void ResourceGui::drawDesc(Draw&, DescriptorSetLayout& dsl) {
@@ -793,35 +798,39 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 	ImU32 allocHoverCol = IM_COL32(250, 150, 180, 255);
 
 	drawList->AddRectFilled(start, end, bgCol);
-	for(auto& resource : mem.allocations) {
-		auto resOff = width * float(resource->allocationOffset) / mem.size;
-		auto resSize = width * float(resource->allocationSize) / mem.size;
 
-		auto resPos = start;
-		resPos.x += resOff;
+	{
+		std::lock_guard lock(gui_->dev().mutex);
+		for(auto& resource : mem.allocations) {
+			auto resOff = width * float(resource->allocationOffset) / mem.size;
+			auto resSize = width * float(resource->allocationSize) / mem.size;
 
-		auto rectSize = ImVec2(resSize, height);
+			auto resPos = start;
+			resPos.x += resOff;
 
-		auto col = allocCol;
-		auto name = dlg::format("{}", (void*) &resource);
+			auto rectSize = ImVec2(resSize, height);
 
-		ImGui::SetCursorScreenPos(resPos);
-		ImGui::InvisibleButton(name.c_str(), rectSize);
-		if(ImGui::IsItemHovered()) {
-			col = allocHoverCol;
+			auto col = allocCol;
+			auto name = dlg::format("{}", (void*) &resource);
 
-			ImGui::BeginTooltip();
-			imGuiText("{}", vil::name(*resource, resource->memObjectType, true, true));
-			imGuiText("Offset: {}", sepfmt(resource->allocationOffset));
-			imGuiText("Size: {}", sepfmt(resource->allocationSize));
-			ImGui::EndTooltip();
+			ImGui::SetCursorScreenPos(resPos);
+			ImGui::InvisibleButton(name.c_str(), rectSize);
+			if(ImGui::IsItemHovered()) {
+				col = allocHoverCol;
+
+				ImGui::BeginTooltip();
+				imGuiText("{}", vil::name(*resource, resource->memObjectType, true, true));
+				imGuiText("Offset: {}", sepfmt(resource->allocationOffset));
+				imGuiText("Size: {}", sepfmt(resource->allocationSize));
+				ImGui::EndTooltip();
+			}
+			if(ImGui::IsItemClicked()) {
+				select(*resource, resource->memObjectType);
+			}
+
+			auto resEnd = ImVec2(resPos.x + rectSize.x, resPos.y + rectSize.y);
+			drawList->AddRectFilled(resPos, resEnd, col);
 		}
-		if(ImGui::IsItemClicked()) {
-			select(*resource, resource->memObjectType);
-		}
-
-		auto resEnd = ImVec2(resPos.x + rectSize.x, resPos.y + rectSize.y);
-		drawList->AddRectFilled(resPos, resEnd, col);
 	}
 }
 
@@ -849,9 +858,10 @@ void ResourceGui::drawDesc(Draw&, CommandBuffer& cb) {
 
 	// maybe show commands inline (in tree node)
 	// and allow via button to switch to cb viewer?
-	if(cb.lastRecordLocked()) {
+	auto lastRecord = cb.lastRecordPtr();
+	if(lastRecord) {
 		if(ImGui::Button("View Last Recording")) {
-			gui_->cbGui().select(cb.lastRecordPtrLocked(), getCommandBufferPtr(cb));
+			gui_->cbGui().select(lastRecord, getCommandBufferPtr(cb));
 			gui_->activateTab(Gui::Tab::commandBuffer);
 		}
 	} else {
@@ -883,7 +893,10 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 	// data
 	ImGui::NextColumn();
 
-	refButtonD(*gui_, view.img);
+	{
+		std::lock_guard lock(gui_->dev().mutex);
+		refButtonD(*gui_, view.img);
+	}
 
 	ImGui::Text("%s", vk::name(ci.viewType));
 	imguiPrintRange(ci.subresourceRange.baseArrayLayer, ci.subresourceRange.layerCount);
@@ -896,12 +909,22 @@ void ResourceGui::drawDesc(Draw&, ImageView& view) {
 
 	// resource references
 	ImGui::Spacing();
-	if(!view.fbs.empty()) {
+
+	// make sure fbs stay alive while we show them
+	std::vector<IntrusivePtr<Framebuffer>> fbs;
+	{
+		std::lock_guard lock(gui_->dev().mutex);
+		for(auto* fb : view.fbs) {
+			fbs.emplace_back(fb);
+		}
+	}
+
+	if(!fbs.empty()) {
 		ImGui::Text("Framebuffers:");
 
-		for(auto* fb : view.fbs) {
+		for(auto& fb : fbs) {
 			ImGui::Bullet();
-			refButtonExpect(*gui_, fb);
+			refButtonExpect(*gui_, fb.get());
 		}
 	}
 }
@@ -926,9 +949,18 @@ void ResourceGui::drawDesc(Draw&, Framebuffer& fb) {
 		ImGui::Spacing();
 		ImGui::Text("Attachments:");
 
-		for(auto* view : fb.attachments) {
+		// make sure the views stay alive while we render this
+		std::vector<IntrusivePtr<ImageView>> views;
+		{
+			std::lock_guard lock(gui_->dev().mutex);
+			for(auto* view : fb.attachments) {
+				views.emplace_back(view);
+			}
+		}
+
+		for(auto& view : views) {
 			ImGui::Bullet();
-			refButtonExpect(*gui_, view);
+			refButtonExpect(*gui_, view.get());
 		}
 	}
 }
@@ -1094,9 +1126,18 @@ void ResourceGui::drawDesc(Draw&, Swapchain& swapchain) {
 	ImGui::Spacing();
 	ImGui::Text("Images");
 
-	for(auto& image : swapchain.images) {
+	// make sure the views stay alive while we render this
+	std::vector<IntrusivePtr<Image>> images;
+	{
+		std::lock_guard lock(gui_->dev().mutex);
+		for(auto* img : swapchain.images) {
+			images.emplace_back(img);
+		}
+	}
+
+	for(auto& image : images) {
 		ImGui::Bullet();
-		refButtonExpect(*gui_, image);
+		refButtonExpect(*gui_, image.get());
 	}
 }
 

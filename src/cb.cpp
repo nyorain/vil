@@ -1859,7 +1859,7 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 
 		// We don't have to lock the mutex here because the command buffer
 		// state is not allowed to change while it is used here.
-		auto recordPtr = secondary.lastRecordPtrLocked();
+		auto recordPtr = secondary.lastRecordPtr();
 
 		auto& childCmd = construct<ExecuteCommandsChildCmd>(cb);
 		childCmd.id_ = i;

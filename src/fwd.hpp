@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include <memory>
 
 namespace nytl {
 
@@ -142,6 +143,20 @@ enum class AttachmentType : u8;
 
 enum class LocalCaptureBits : u32;
 using LocalCaptureFlags = Flags<LocalCaptureBits>;
+
+template<typename T> struct IntrusiveWrappedPtr;
+template<typename T> struct WrappedHandle;
+
+template<typename T, typename H> class HandledPtr;
+template<typename T, typename Deleter = std::default_delete<T>> struct RefCountHandler;
+template<typename T> struct FinishHandler;
+
+template<typename T, typename D = std::default_delete<T>>
+using IntrusivePtr = HandledPtr<T, RefCountHandler<T, D>>;
+
+template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
+
+using CommandBufferPtr = IntrusiveWrappedPtr<CommandBuffer>;
 
 } // namespace vil
 
