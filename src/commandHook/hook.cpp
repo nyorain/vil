@@ -641,8 +641,8 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 		}
 	}
 
-	// just always do that, low cost
-	opsTmp.copyIndirectCmd = true;
+	// we do this by default, independent of any capture flags
+	opsTmp.copyIndirectCmd = isIndirect(dstCmd);
 
 	if(dstCmd.type() == CommandType::draw) {
 		if(flags & LocalCaptureBits::vertexInput) {
@@ -722,12 +722,14 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 					op.before = true;
 					opsTmp.descriptorCopies.emplace_back(op);
 
-					// TODO: only do 'after' copy for mutable descriptors data
+					// NOTE: only do 'after' copy for mutable descriptors data?
+					//   OTOH could be useful to find memory corruptions
 					op.before = false;
 					opsTmp.descriptorCopies.emplace_back(op);
 
 					// extra imageAsBuffer copy for shader debugger
-					// TODO: might be able to get rid of this
+					// TODO: might be able to get rid of this with better
+					//   shader debugger data retrieval (from on-device images)
 					if(category(binding.descriptorType) == DescriptorCategory::image &&
 							(flags & LocalCaptureBits::shaderDebugger)) {
 						op.before = true;
@@ -1036,8 +1038,8 @@ static struct {
 	{"transferAfter", LocalCaptureBits::transferAfter},
 	{"vertexInput", LocalCaptureBits::vertexInput},
 	{"vertexOutput", LocalCaptureBits::vertexOutput},
+	{"allCapture", LocalCaptureBits::allCapture},
 	{"once", LocalCaptureBits::once},
-	{"all", LocalCaptureBits::all},
 };
 
 std::string_view name(LocalCaptureBits localCaptureBit) {

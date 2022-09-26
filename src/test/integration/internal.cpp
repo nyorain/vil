@@ -228,8 +228,8 @@ TEST(int_secondary_cb) {
 	auto& cb0 = unwrap(pcbs[0]);
 	auto& cb1 = unwrap(pcbs[1]);
 
-	auto& rec0 = *cb0.lastRecordLocked();
-	auto& rec1 = *cb1.lastRecordLocked();
+	auto& rec0 = *cb0.lastRecordPtr();
+	auto& rec1 = *cb1.lastRecordPtr();
 
 	dlg_assert(rec0.commands->sectionStats().numChildSections == 2u);
 

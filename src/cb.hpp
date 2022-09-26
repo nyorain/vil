@@ -59,13 +59,18 @@ public:
 	// Returns the last complete recorded state.
 	// When command buffer is executable/pending, this is the current state.
 	// Otherwise it's the previous state.
-	IntrusivePtr<CommandRecord> lastRecordPtrLocked() const { return lastRecord_; }
+	IntrusivePtr<CommandRecord> lastRecordPtrLocked() const {
+		assertOwned(dev->mutex);
+		return lastRecord_;
+	}
 	IntrusivePtr<CommandRecord> lastRecordPtr() const {
 		std::lock_guard lock(dev->mutex);
 		return lastRecordPtrLocked();
 	}
-
-	CommandRecord* lastRecordLocked() const { return lastRecord_.get(); }
+	CommandRecord* lastRecordLocked() const {
+		assertOwned(dev->mutex);
+		return lastRecord_.get();
+	}
 
 	// Moves the command buffer to invalid state.
 	// Will disconnect this CommandBuffer from the CommandRecord.

@@ -28,3 +28,27 @@ Environment variables
 - `VIL_TRANSFORM_FEEDBACK={0, 1}` whether vil should use transform feedback,
   if available. Could cause problems in some cases but without this, viewing
   the data coming out of vertex shaders won't be available.
+
+- `VIL_BLUR={0, 1}` whether to enable the blur for the overlay
+- `VIL_UI_SCALE={0, 1}` global scale for the UI, e.g. for high-dpi displays
+  or screen sharing
+- `VIL_DEBUG={0, 1}` will show additional
+  information in the UI. Currently enabled by default.
+- `VIL_BUMP_API_VERSION={0, 1}` whether we try inside the layer to bump up
+  the instance version on creation (to enable features the layer can
+  make use of). Enabled by default.
+
+- `VIL_BREAK_ON_ERROR={0, 1}` if set to true, will DebugBreak() on windows
+  and raise(SIGTRAP) otherwise when an internal error is encountered.
+  Note that internal logs/asserts are disabled in release builds.
+- `VIL_DLG_HANDLER={0, 1}` if set to true, will install a dlg handler
+  (for logs and debug asserts), outputting all internal log/asserts
+  and counting the number of warnings errors. On windows, will allocate
+  a console window to output to.
+  Note that internal logs/asserts are disabled in release builds.
+
+- `VIL_WINDOW_MIN_FRAME_TIME=<time in ms>` when a window was created
+  via `VIL_CREATE_WINDOW`, will throttle its framerate (if needed) to make
+  sure the framerate isn't too high. Rendering the vil UI locks mutexes
+  and a high debug UI framerate might slow down your application.
+  (Less important now that most critical sections in UI rendering are short)

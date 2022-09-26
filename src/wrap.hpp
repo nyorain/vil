@@ -11,8 +11,6 @@ namespace vil {
 static constexpr auto enableHandleWrapping = true;
 template<typename H> struct HandleDesc;
 
-using CommandBufferPtr = IntrusiveWrappedPtr<CommandBuffer>;
-
 #define DefHandleDesc(VkHandle, OurHandle, devMap, isDispatchable, wrapDefault) \
 	template<> struct HandleDesc<VkHandle> { \
 		using type = OurHandle; \

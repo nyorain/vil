@@ -3090,4 +3090,16 @@ void SetColorWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) 
 		u32(writeEnables.size()), writeEnables.data());
 }
 
+bool isIndirect(const Command& cmd) {
+	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(&cmd);
+	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(&cmd);
+	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(&cmd);
+	auto traceRaysIndirectCmd = dynamic_cast<const TraceRaysIndirectCmd*>(&cmd);
+
+	return dispatchIndirectCmd ||
+		drawIndirectCmd ||
+		drawIndirectCountCmd ||
+		traceRaysIndirectCmd;
+}
+
 } // namespace vil

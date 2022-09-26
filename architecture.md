@@ -147,15 +147,15 @@ Example cases where the mutex is needed:
 
 Since DescriptorSet updates can be a bottleneck and are often done from
 multiple threads, we have a separate synchronization mechanism for that.
-Basically, all DescriptorSet state is moved into DescriptorSetState objects
-that implement copy-on-write when a state object has more than one reference
-(i.e. someone else is interested in the descriptor state at a specific time).
-Where needed, more fine-granular synchronization should be added as optimization
-in future.
+Basically, we somewhat separate DescriptorSet handles and their state
+at a point of time. We can attach a DescriptorSetCow (copy-on-write) object
+to a DescriptorSet to make sure we can view its state at a current point
+in time later on, even if the DescriptorSet was destroyed or updated.
 
-In general, we keep track of some connections between handles and allow
-to view them in the gui. While the gui is rendered, it will lock the device
-mutex in many places.
+In general, we keep track of some connections between handles where
+performance allows it to make it possible to view them in the gui. 
+While the gui is rendered, it will lock the device mutex in many places
+when accessing these connections.
 
 In addition to the standard device mutex, there is also the device queue mutex,
 used to synchronize submissions to queues (since vulkan does not allow
@@ -166,8 +166,8 @@ to call queue operations from multiple threads at the same time).
 API objects created by the application generally have an object counterpart
 inside the layer, e.g. [vil::Image](src/image.hpp), [vil::DescriptorSet](src/ds.hpp),
 [vil::CommandBuffer](src/cb.hpp), or [vil::Device](src/device.hpp).
-They all derive from [vil::Handle](src/handle.hpp) which knows its own
-`objectType` and debug name.
+They all derive from [vil::Handle](src/handle.hpp) which just knows its 
+own debug name.
 
 Many device-level handles have an embedded, intrusive, atomic reference
 count and have shared ownership. As long as their API counterpart is
@@ -195,7 +195,7 @@ to be kept alive. But most handles can stay alive beyond that (e.g. a
 
 `vil::Command` (see [commands.hpp](src/command/commands.hpp)) is our internal representation
 of a single command added to a command buffer. When the application
-records a command buffer, we build a list (in truth: rather a hierachy) of
+records a command buffer, we build a list (in truth: rather a hierarchy) of
 these objects for multiple purposes:
 - Viewing the recorded command buffer and its state in gui
 - Knowing what the command buffer does, e.g. the image layout transitions
