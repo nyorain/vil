@@ -310,5 +310,4 @@ void refButtonD(Gui& gui, H* handle, const char* str = "<Destroyed>") {
 	}
 }
 
-
 } // namespace vil

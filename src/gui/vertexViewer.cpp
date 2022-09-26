@@ -814,29 +814,29 @@ void VertexViewer::updateInput(float dt) {
 		auto fwd = apply(cam_.rot, Vec3f{0.f, 0.f, -1.f});
 		Vec3f accel {};
 
-		constexpr auto moveRight = VilKeyD;
-		constexpr auto moveLeft = VilKeyA;
-		constexpr auto moveFwd = VilKeyW;
-		constexpr auto moveBwd = VilKeyS;
-		constexpr auto moveUp = VilKeyQ;
-		constexpr auto moveDown = VilKeyE;
+		constexpr auto moveRight = ImGuiKey_D;
+		constexpr auto moveLeft = ImGuiKey_A;
+		constexpr auto moveFwd = ImGuiKey_W;
+		constexpr auto moveBwd = ImGuiKey_S;
+		constexpr auto moveUp = ImGuiKey_Q;
+		constexpr auto moveDown = ImGuiKey_E;
 
-		if(io.KeysDown[moveRight]) {
+		if(ImGui::IsKeyDown(moveRight)) {
 			accel += right;
 		}
-		if(io.KeysDown[moveLeft]) {
+		if(ImGui::IsKeyDown(moveLeft)) {
 			accel += -right;
 		}
-		if(io.KeysDown[moveFwd]) {
+		if(ImGui::IsKeyDown(moveFwd)) {
 			accel += fwd;
 		}
-		if(io.KeysDown[moveBwd]) {
+		if(ImGui::IsKeyDown(moveBwd)) {
 			accel += -fwd;
 		}
-		if(io.KeysDown[moveUp]) {
+		if(ImGui::IsKeyDown(moveUp)) {
 			accel += up;
 		}
-		if(io.KeysDown[moveDown]) {
+		if(ImGui::IsKeyDown(moveDown)) {
 			accel += -up;
 		}
 

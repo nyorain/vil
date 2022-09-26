@@ -220,6 +220,25 @@ void ShaderDebugger::draw() {
 		rerun_ = false;
 	}
 
+	// Handle input
+	if(spvm_.state->code_current && textedit_.mFocused) {
+		ImGuiIO& io = ImGui::GetIO();
+		auto shift = io.KeyShift;
+		auto ctrl = io.KeyCtrl;
+		auto alt = io.KeyAlt;
+
+		auto breakKey = ImGuiKey_F9;
+		auto stepKey = ImGuiKey_F10;
+
+		if(!shift && !ctrl && !alt && ImGui::IsKeyPressed(breakKey, false)) {
+			toggleBreakpoint();
+		} else if(!shift && !ctrl && !alt && ImGui::IsKeyPressed(stepKey, false)) {
+			stepLine();
+		}
+
+		io.WantCaptureKeyboard = true;
+	}
+
 	// Controls
 	if(spvm_.state->code_current) {
 		if(ImGui::Button("Step Opcode")) {
@@ -236,16 +255,7 @@ void ShaderDebugger::draw() {
 		ImGui::SameLine();
 
 		if(spvm_.state->code_current && ImGui::Button("Step Line")) {
-			auto doBreak = false;
-			auto line = spvm_.state->current_line;
-			// TODO: should probably also check for file change here, right?
-			// just in case we jump to a function in another file that
-			// happens to be at the same line
-			while(spvm_.state->current_line == line && spvm_.state->code_current && !doBreak) {
-				doBreak = stepOpcode();
-			}
-
-			updatePosition(true);
+			stepLine();
 		}
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Execute the program until the current line changes");
@@ -339,20 +349,6 @@ void ShaderDebugger::draw() {
 		ImGui::PushFont(gui_->monoFont);
 		textedit_.Render("Shader");
 		ImGui::PopFont();
-
-		ImGuiIO& io = ImGui::GetIO();
-		auto shift = io.KeyShift;
-		auto ctrl = io.ConfigMacOSXBehaviors ? io.KeySuper : io.KeyCtrl;
-		auto alt = io.ConfigMacOSXBehaviors ? io.KeyCtrl : io.KeyAlt;
-
-		auto breakKey = VilKeyD; // TODO
-		if(textedit_.mFocused && !f9Down_ && (
-				(!shift && !ctrl && !alt && ImGui::IsKeyDown(breakKey)))) {
-			f9Down_ = true;
-			toggleBreakpoint();
-		} else if(!ImGui::IsKeyDown(breakKey)) {
-			f9Down_ = false;
-		}
 	}
 
 	ImGui::EndChild();
@@ -1749,10 +1745,26 @@ void ShaderDebugger::toggleBreakpoint() {
 	}
 }
 
+void ShaderDebugger::stepLine() {
+	auto doBreak = false;
+	auto line = spvm_.state->current_line;
+	// TODO: should probably also check for file change here, right?
+	// just in case we jump to a function in another file that
+	// happens to be at the same line
+	while(spvm_.state->current_line == line && spvm_.state->code_current && !doBreak) {
+		doBreak = stepOpcode();
+	}
+
+	updatePosition(true);
+}
+
 void ShaderDebugger::updateState(IntrusivePtr<CommandHookState> state,
 		bool localCapture) {
+	if(state_) {
+		rerun_ = true;
+	}
+
 	state_ = std::move(state);
-	rerun_ = true;
 
 	// For localCapture == true, updateHooks will never be called.
 	// Init the map now

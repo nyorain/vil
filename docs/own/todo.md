@@ -29,6 +29,10 @@ local captures:
 - [x] Fix shader debugger to be able to work with LocalCapture
 	- [x] also some hook assumptions, somehow setup varIDToCopyMap_
 - [x] move "ALL THE HOOKS" code out of CommandHook into separate function
+- [ ] {feature, later, useful tho} support regular hooks on 
+      local-capture-hooked records. Not exactly sure how this would work.
+	  On a similar note, support hooking multiple commands in a single record
+	  (most general case: multiple local hooks, multiple regular captures)
 - [ ] {feature, later} add flag specifying to capture the frame context
       i.e. when showing it, show the whole frame.
 	  Just store the submissions in the LocalCapture completed hook.
