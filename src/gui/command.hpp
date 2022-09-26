@@ -25,14 +25,21 @@ public:
 	};
 
 	bool beforeCommand_ {}; // whether state is viewed before cmd
+	bool showBeforeCheckbox_ {};
 	bool showUnusedBindings_ {};
+
+	// We don't really want to update hook options immediately while drawing
+	// the gui when something is pressed since that might mess with
+	// local assumptions of the function we are in.
+	// We therefore wait until we are finished with drawing the ui.
+	bool doUpdateHook_ {};
 
 public:
 	CommandViewer();
 	~CommandViewer();
 
 	void init(Gui& gui);
-	void draw(Draw& draw);
+	void draw(Draw& draw, bool skipList);
 
 	void unselect();
 	void updateFromSelector(bool forceUpdateHook);
@@ -56,7 +63,7 @@ private:
 	void displaySelectedIO(Draw&);
 	bool displayBeforeCheckbox();
 	void displayDs(Draw&);
-	void displayActionInspector(Draw&);
+	void displayActionInspector(Draw&, bool skipList);
 	void displayAttachment(Draw&);
 	void displayPushConstants();
 	void displayTransferData(Draw&);
@@ -83,12 +90,6 @@ private:
 
 	// the currently viewed command hierarchy
 	std::vector<const Command*> command_ {};
-
-	// We don't really want to update hook options immediately while drawing
-	// the gui when something is pressed since that might mess with
-	// local assumptions of the function we are in.
-	// We therefore wait until we are finished with drawing the ui.
-	bool doUpdateHook_ {};
 
 	IOView view_ {};
 	union {

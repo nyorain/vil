@@ -61,18 +61,87 @@ void ImageViewer::init(Gui& gui) {
 	gui_ = &gui;
 }
 
-void ImageViewer::display(Draw& draw) {
-	if(!data_) {
-		dlg_error("ImageViewer::display without selected image");
-		imGuiText("Error: no select image");
-		return;
+void ImageViewer::drawMetaInfo(Draw& draw) {
+	// Row 1: components
+	auto recreateView = false;
+	VkFlags depthStencil = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	if(subresRange_.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
+		auto numComponents = FormatComponentCount(format_);
+		dlg_assert(aspect_ == VK_IMAGE_ASPECT_COLOR_BIT);
+
+		ImGui::CheckboxFlags("R", &imageDraw_.flags, DrawGuiImage::flagMaskR);
+		if(numComponents > 1) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("G", &imageDraw_.flags, DrawGuiImage::flagMaskG);
+		}
+
+		if(numComponents > 2) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("B", &imageDraw_.flags, DrawGuiImage::flagMaskB);
+		}
+
+		if(numComponents > 3) {
+			ImGui::SameLine();
+			ImGui::CheckboxFlags("A", &imageDraw_.flags, DrawGuiImage::flagMaskA);
+		}
+
+		ImGui::SameLine();
+		ImGui::CheckboxFlags("Gray", &imageDraw_.flags, DrawGuiImage::flagGrayscale);
+	} else if((subresRange_.aspectMask & depthStencil) == depthStencil) {
+		dlg_assert(aspect_ == VK_IMAGE_ASPECT_DEPTH_BIT || aspect_ == VK_IMAGE_ASPECT_STENCIL_BIT);
+
+		if(ImGui::RadioButton("Depth", aspect_ == VK_IMAGE_ASPECT_DEPTH_BIT)) {
+			aspect_ = VK_IMAGE_ASPECT_DEPTH_BIT;
+			recreateView = true;
+		}
+
+		ImGui::SameLine();
+		if(ImGui::RadioButton("Stencil", aspect_ == VK_IMAGE_ASPECT_STENCIL_BIT)) {
+			aspect_ = VK_IMAGE_ASPECT_STENCIL_BIT;
+			recreateView = true;
+		}
 	}
 
-	dlg_assert(src_);
+	const auto level = u32(imageDraw_.level);
+	// const auto width = std::max(extent_.width >> level, 1u);
+	// const auto height = std::max(extent_.height >> level, 1u);
+	const auto depth = std::max(extent_.depth >> level, 1u);
 
-	gui_->addPreRender([&](Draw& draw) { this->recordPreImage(draw.cb); });
-	gui_->addPostRender([&](Draw& draw) { this->recordPostImage(draw); });
+	// Row 2: layer and mip
+	if(extent_.depth > 1) {
+		// TODO: not very convenient to use for a lot of slices.
+		//   make sensitivity absolute, i.e. not dependent on number of slices?
+		// TODO: this is weird when the image also has mip levels
+		auto maxDepth = depth - 1;
+		float layer = imageDraw_.layer * maxDepth;
+		ImGui::SliderFloat("slice", &layer, 0, maxDepth);
+		imageDraw_.layer = layer / maxDepth;
+	} else if(subresRange_.layerCount > 1) {
+		int layer = int(imageDraw_.layer);
+		ImGui::SliderInt("Layer", &layer, subresRange_.baseArrayLayer,
+			subresRange_.baseArrayLayer + subresRange_.layerCount - 1);
+		imageDraw_.layer = layer;
+	}
 
+	if(subresRange_.levelCount > 1) {
+		int mip = int(imageDraw_.level);
+		ImGui::SliderInt("Mip", &mip, subresRange_.baseMipLevel,
+			subresRange_.baseMipLevel + subresRange_.levelCount - 1);
+		imageDraw_.level = mip;
+	}
+
+	// Row 3: min/max values
+	ImGui::DragFloat("Min", &imageDraw_.minValue, 0.01);
+	ImGui::DragFloat("Max", &imageDraw_.maxValue, 0.01);
+
+	// NOTE: could add power/gamma slider here.
+
+	if(recreateView) {
+		createData();
+	}
+}
+
+void ImageViewer::drawImageArea(Draw& draw) {
 	ImVec2 pos = ImGui::GetCursorScreenPos();
 
 	auto level = u32(imageDraw_.level);
@@ -80,7 +149,8 @@ void ImageViewer::display(Draw& draw) {
 	auto height = std::max(extent_.height >> level, 1u);
 	auto depth = std::max(extent_.depth >> level, 1u);
 
-	float regW = ImGui::GetContentRegionAvail().x - 20.f;
+	const float aspectImage = float(width) / height;
+	float regW = ImGui::GetContentRegionAvail().x;
 
 	// kinda messy but need this to make avoid flickering for
 	// windows that barely need a scrollbar (adding a scrollbar makes
@@ -91,8 +161,11 @@ void ImageViewer::display(Draw& draw) {
 		regW += ImGui::GetStyle().ScrollbarSize;
 	}
 
-	float aspect = float(width) / height;
-	float regH = regW / aspect;
+	float regH = regW / aspectImage;
+
+	// TODO: proper computation using imgui margin/padding values
+	auto bottomLineHeight = 10.f + ImGui::GetFontSize();
+	regH = ImGui::GetContentRegionAvail().y - bottomLineHeight;
 
 	auto bgW = regW;
 	auto bgH = regH;
@@ -101,11 +174,17 @@ void ImageViewer::display(Draw& draw) {
 	// We make sure there is at least some area to zoom in.
 	bgH = std::max(bgH, 100.f);
 
+	// TODO: don't cut off
+
 	// Cut the image off if too high
-	if(regH > regW) {
-		bgH = bgW;
+	if(regW > regH) {
+		// bgW = bgH;
+		regW = bgW;
+		regW = regH * aspectImage;
+	} else if(regH > regW) {
+		// bgH = bgW;
 		regH = bgH;
-		regW = regH * aspect;
+		regH = regW / aspectImage;
 	}
 
 	// draw
@@ -181,18 +260,19 @@ void ImageViewer::display(Draw& draw) {
 		lastReadback_ = {};
 	}
 
-	imGuiText("Position: {}, {} | Format {}",
-		readTexelOffset_.x, readTexelOffset_.y,
-		vk::name(format_));
-	ImGui::SameLine();
+	// If this is false we show "Reading..." and the current mouse position
+	// instead of the position and texel value of the last read texel.
+	// I'd argue showing slightly outdated (position-wise) data has more
+	// value than just showing "Reading..." on cursor movement.
+	constexpr auto showOutdatedPos = true;
 
 	bool texelValid = false;
 	if(lastReadback_) {
 		auto& rb = readbacks_[*lastReadback_];
 		dlg_assert(!rb.pending);
-		if(rb.valid &&
+		if(rb.valid && (showOutdatedPos || (
 				rb.texel.x == readTexelOffset_.x &&
-				rb.texel.y == readTexelOffset_.y &&
+				rb.texel.y == readTexelOffset_.y)) &&
 				rb.layer == imageDraw_.layer &&
 				rb.level == imageDraw_.level) {
 			texelValid = true;
@@ -207,6 +287,10 @@ void ImageViewer::display(Draw& draw) {
 				value = read(format_, data);
 			}
 
+			imGuiText("Position: {}, {} | Format {}",
+				rb.texel.x, rb.texel.y,
+				vk::name(format_));
+			ImGui::SameLine();
 			imGuiText("| Texel: {}", format(format_, aspect_, value));
 		} else {
 			// dlg_trace("Rejecting readback: valid: {}, texel: {} {} vs {} {}, "
@@ -221,84 +305,17 @@ void ImageViewer::display(Draw& draw) {
 
 	if(!texelValid) {
 		lastReadback_ = {};
+
+		imGuiText("Position: {}, {} | Format {}",
+			readTexelOffset_.x, readTexelOffset_.y,
+			vk::name(format_));
+		ImGui::SameLine();
+
 		if(copyTexel_) {
 			imGuiText("| Texel: Reading...");
 		} else {
 			imGuiText("| Texel: Can't read Image");
 		}
-	}
-
-	// Row 1: components
-	auto recreateView = false;
-	VkFlags depthStencil = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-	if(subresRange_.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
-		auto numComponents = FormatComponentCount(format_);
-		dlg_assert(aspect_ == VK_IMAGE_ASPECT_COLOR_BIT);
-
-		ImGui::CheckboxFlags("R", &imageDraw_.flags, DrawGuiImage::flagMaskR);
-		if(numComponents > 1) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("G", &imageDraw_.flags, DrawGuiImage::flagMaskG);
-		}
-
-		if(numComponents > 2) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("B", &imageDraw_.flags, DrawGuiImage::flagMaskB);
-		}
-
-		if(numComponents > 3) {
-			ImGui::SameLine();
-			ImGui::CheckboxFlags("A", &imageDraw_.flags, DrawGuiImage::flagMaskA);
-		}
-
-		ImGui::SameLine();
-		ImGui::CheckboxFlags("Gray", &imageDraw_.flags, DrawGuiImage::flagGrayscale);
-	} else if((subresRange_.aspectMask & depthStencil) == depthStencil) {
-		dlg_assert(aspect_ == VK_IMAGE_ASPECT_DEPTH_BIT || aspect_ == VK_IMAGE_ASPECT_STENCIL_BIT);
-
-		if(ImGui::RadioButton("Depth", aspect_ == VK_IMAGE_ASPECT_DEPTH_BIT)) {
-			aspect_ = VK_IMAGE_ASPECT_DEPTH_BIT;
-			recreateView = true;
-		}
-
-		ImGui::SameLine();
-		if(ImGui::RadioButton("Stencil", aspect_ == VK_IMAGE_ASPECT_STENCIL_BIT)) {
-			aspect_ = VK_IMAGE_ASPECT_STENCIL_BIT;
-			recreateView = true;
-		}
-	}
-
-	// Row 2: layer and mip
-	if(extent_.depth > 1) {
-		// TODO: not very convenient to use for a lot of slices.
-		//   make sensitivity absolute, i.e. not dependent on number of slices?
-		// TODO: this is weird when the image also has mip levels
-		auto maxDepth = depth - 1;
-		float layer = imageDraw_.layer * maxDepth;
-		ImGui::SliderFloat("slice", &layer, 0, maxDepth);
-		imageDraw_.layer = layer / maxDepth;
-	} else if(subresRange_.layerCount > 1) {
-		int layer = int(imageDraw_.layer);
-		ImGui::SliderInt("Layer", &layer, subresRange_.baseArrayLayer,
-			subresRange_.baseArrayLayer + subresRange_.layerCount - 1);
-		imageDraw_.layer = layer;
-	}
-
-	if(subresRange_.levelCount > 1) {
-		int mip = int(imageDraw_.level);
-		ImGui::SliderInt("Mip", &mip, subresRange_.baseMipLevel,
-			subresRange_.baseMipLevel + subresRange_.levelCount - 1);
-		imageDraw_.level = mip;
-	}
-
-	// Row 3: min/max values
-	ImGui::DragFloat("Min", &imageDraw_.minValue, 0.01);
-	ImGui::DragFloat("Max", &imageDraw_.maxValue, 0.01);
-
-	// NOTE: could add power/gamma slider here.
-
-	if(recreateView) {
-		createData();
 	}
 
 	// Process mouse position for texel reading.
@@ -315,6 +332,59 @@ void ImageViewer::display(Draw& draw) {
 
 	readTexelOffset_.x = std::clamp<int>(muv.x * width, 0, width - 1);
 	readTexelOffset_.y = std::clamp<int>(muv.y * height, 0, height - 1);
+}
+
+void ImageViewer::display(Draw& draw) {
+	if(!data_) {
+		dlg_error("ImageViewer::display without selected image");
+		imGuiText("Error: no select image");
+		return;
+	}
+
+	dlg_assert(src_);
+
+	gui_->addPreRender([&](Draw& draw) { this->recordPreImage(draw.cb); });
+	gui_->addPostRender([&](Draw& draw) { this->recordPostImage(draw); });
+
+	auto level = u32(imageDraw_.level);
+	auto width = std::max(extent_.width >> level, 1u);
+	auto height = std::max(extent_.height >> level, 1u);
+
+	const float availX = ImGui::GetContentRegionAvail().x;
+	const float availY = ImGui::GetContentRegionAvail().y;
+
+	const float aspectImage = float(width) / height;
+	const float aspectAvail = availX / availY;
+
+	if(aspectImage > aspectAvail) {
+		auto availY = (availX - 30) / aspectImage;
+		if(ImGui::BeginChild("ImageArea", ImVec2(availX - 30, availY))) {
+			drawImageArea(draw);
+			ImGui::EndChild();
+		}
+
+		drawMetaInfo(draw);
+	} else {
+		auto flags = ImGuiTableFlags_NoBordersInBodyUntilResize | ImGuiTableFlags_Resizable;
+		if(ImGui::BeginTable("Img", 2u, flags)) {
+			ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthStretch, 1.f);
+			ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			if(ImGui::BeginChild("ImageArea", ImVec2(0.f, availY))) {
+				drawImageArea(draw);
+				ImGui::EndChild();
+			}
+
+			ImGui::TableNextColumn();
+
+			drawMetaInfo(draw);
+
+			ImGui::EndTable();
+		}
+	}
 }
 
 void ImageViewer::recordPreImage(VkCommandBuffer cb) {
@@ -349,6 +419,14 @@ void ImageViewer::recordPostImage(Draw& draw) {
 	auto srcStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 	auto needBarrier = finalImageLayout_ != srcLayout;
 	if(copyTexel_) {
+		// We want to get a single texel from the texture on the cpu.
+		// For many formats this can be done by simple copying it to our
+		// hostVisible buffer. But for compressed formats this is more
+		// complicated, we therefore use sampling by default.
+		// Don't delete the doCopy codepath, there might be cases in
+		// which we need it (some hardware not supporting sampling
+		// certain formats? maybe copying is a lot faster sometimes, making
+		// a dynamic branch here worth it?)
 		constexpr auto useSamplingCopy = true;
 		if(useSamplingCopy) {
 			doSample(cb, draw, srcLayout);
@@ -363,6 +441,14 @@ void ImageViewer::recordPostImage(Draw& draw) {
 			srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 			needBarrier = true;
 		}
+	}
+
+	{
+		computeMinMax(cb, draw, srcLayout);
+		srcLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		srcAccess = VK_ACCESS_SHADER_READ_BIT;
+		srcStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+		needBarrier = true;
 	}
 
 	if(needBarrier) {
@@ -702,6 +788,9 @@ void ImageViewer::doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout
 	draw.onFinish.push_back(cbFinish);
 }
 
+void ImageViewer::computeMinMax(VkCommandBuffer cb, Draw& draw, VkImageLayout srcLayout) {
+}
+
 VkImageAspectFlagBits defaultAspect(VkImageAspectFlags flags) {
 	if(flags & VK_IMAGE_ASPECT_DEPTH_BIT) {
 		return VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -823,6 +912,7 @@ void ImageViewer::reset(bool resetZoomPanSelection) {
 void ImageViewer::unselect() {
 	src_ = {};
 	draw_ = {};
+	lastReadback_ = {};
 }
 
 void ImageViewer::createData() {

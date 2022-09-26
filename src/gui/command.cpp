@@ -145,6 +145,7 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 	auto& sel = selection();
 	bool isLocalCapture = sel.updateMode() == CommandSelection::UpdateMode::localCapture;
 	auto cmdh = sel.command();
+	showBeforeCheckbox_ = false;
 
 	const DrawCmdBase* drawCmd {};
 	const StateCmdBase* stateCmd {};
@@ -847,10 +848,11 @@ void CommandViewer::displayDs(Draw& draw) {
 	// debugging corner cases. For sampler, otoh, we just don't capture
 	// anything anyways.
 	if(dsType != VK_DESCRIPTOR_TYPE_SAMPLER) {
-		if(displayBeforeCheckbox()) {
-			ImGui::Text("Updating...");
-			return;
-		}
+		// if(displayBeforeCheckbox()) {
+		// 	ImGui::Text("Updating...");
+		// 	return;
+		// }
+		showBeforeCheckbox_ = true;
 	}
 
 	auto& elemID = viewData_.ds.elem;
@@ -941,7 +943,7 @@ void CommandViewer::displayDs(Draw& draw) {
 			ImGui::Text("Binding not used in pipeline");
 		}
 	} else if(dsCat == DescriptorCategory::image) {
-		imGuiText("{}", vk::name(dsType));
+		// imGuiText("{}", vk::name(dsType));
 
 		// == Sampler ==
 		if(needsSampler(dsType)) {
@@ -960,21 +962,21 @@ void CommandViewer::displayDs(Draw& draw) {
 			dlg_assert(elem.imageView);
 
 			auto& imgView = *elem.imageView;
-			refButton(gui, imgView);
+			// refButton(gui, imgView);
 
-			ImGui::SameLine();
-			refButtonD(gui, imgView.img);
+			// ImGui::SameLine();
+			// refButtonD(gui, imgView.img);
 
 			// imgView.img can be null if the image was destroyed. This isn't
 			// too unlikely since we might have kept the imgView alive since it's
 			// still referenced in our DescriptorState
 			if(imgView.img) {
-				imGuiText("Format: {}", vk::name(imgView.ci.format));
-				auto& extent = imgView.img->ci.extent;
-				imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
+				// imGuiText("Format: {}", vk::name(imgView.ci.format));
+				// auto& extent = imgView.img->ci.extent;
+				// imGuiText("Extent: {}x{}x{}", extent.width, extent.height, extent.depth);
 
 				if(needsImageLayout(dsType)) {
-					imGuiText("Layout: {}", vk::name(elem.layout));
+					// imGuiText("Layout: {}", vk::name(elem.layout));
 				}
 
 				// content
@@ -1043,10 +1045,11 @@ void CommandViewer::displayAttachment(Draw& draw) {
 	// NOTE: maybe only show this button for output attachments (color, depthStencil)?
 	// Does not make sense otherwise as it stays the same i guess.
 	// But could be useful for debugging nonetheless
-	if(displayBeforeCheckbox()) {
-		ImGui::Text("Updating...");
-		return;
-	}
+	// if(displayBeforeCheckbox()) {
+	// 	ImGui::Text("Updating...");
+	// 	return;
+	// }
+	showBeforeCheckbox_ = true;
 
 	auto pRPI = findRPI(command_);
 	dlg_assert(pRPI);
@@ -1066,9 +1069,9 @@ void CommandViewer::displayAttachment(Draw& draw) {
 
 	dlg_assert(aid < attachments.size());
 
-	refButtonD(*gui_, attachments[aid]);
+	// refButtonD(*gui_, attachments[aid]);
 	if(attachments[aid]) {
-		refButtonD(*gui_, attachments[aid]->img);
+		// refButtonD(*gui_, attachments[aid]->img);
 	}
 
 	auto hookState = selection().completedHookState();
@@ -1150,10 +1153,11 @@ void CommandViewer::displayTransferData(Draw& draw) {
 	// NOTE: only show where it makes sense?
 	// shouldn't be here for src resources i guess.
 	// But could be useful for debugging anyways
-	if(displayBeforeCheckbox()) {
-		ImGui::Text("Updating...");
-		return;
-	}
+	// if(displayBeforeCheckbox()) {
+	// 	ImGui::Text("Updating...");
+	// 	return;
+	// }
+	showBeforeCheckbox_ = true;
 
 	dlg_assert(view_ == IOView::transferSrc || view_ == IOView::transferDst);
 	OwnBuffer* refBuffer = nullptr;
@@ -1334,7 +1338,7 @@ void CommandViewer::displaySelectedIO(Draw& draw) {
 	}
 }
 
-void CommandViewer::displayActionInspector(Draw& draw) {
+void CommandViewer::displayActionInspector(Draw& draw, bool skipList) {
 	// TODO: don't even display the inspector when we are viewing a static
 	// record and that record is invalidated.
 	// (or other cases where we know it will never be submitted again)
@@ -1345,39 +1349,45 @@ void CommandViewer::displayActionInspector(Draw& draw) {
 
 	ZoneScoped;
 
-	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
-	if(!ImGui::BeginTable("IO inspector", 2, flags, ImGui::GetContentRegionAvail())) {
-		return;
+	if(skipList) {
+		ImGui::BeginChild("Command IO Inspector");
+		displaySelectedIO(draw);
+		ImGui::EndChild();
+	} else {
+		auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+		if(!ImGui::BeginTable("IO inspector", 2, flags, ImGui::GetContentRegionAvail())) {
+			return;
+		}
+
+		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 200.f);
+		ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn();
+
+		ImGui::BeginChild("Command IO list");
+
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+
+		displayIOList();
+
+		if(doUpdateHook_) {
+			updateHook();
+			doUpdateHook_ = false;
+		}
+
+		ImGui::PopStyleVar(2);
+
+		ImGui::EndChild();
+		ImGui::TableNextColumn();
+		ImGui::BeginChild("Command IO Inspector");
+
+		displaySelectedIO(draw);
+
+		ImGui::EndChild();
+		ImGui::EndTable();
 	}
-
-	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 200.f);
-	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
-
-	ImGui::TableNextRow();
-	ImGui::TableNextColumn();
-
-	ImGui::BeginChild("Command IO list");
-
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
-
-	displayIOList();
-
-	if(doUpdateHook_) {
-		updateHook();
-		doUpdateHook_ = false;
-	}
-
-	ImGui::PopStyleVar(2);
-
-	ImGui::EndChild();
-	ImGui::TableNextColumn();
-	ImGui::BeginChild("Command IO Inspector");
-
-	displaySelectedIO(draw);
-
-	ImGui::EndChild();
-	ImGui::EndTable();
 
 	if(doUpdateHook_) {
 		updateHook();
@@ -1500,8 +1510,10 @@ void CommandViewer::displayCommand() {
 #endif // VIL_COMMAND_CALLSTACKS
 }
 
-void CommandViewer::draw(Draw& draw) {
+void CommandViewer::draw(Draw& draw, bool skipList) {
 	ZoneScoped;
+
+	showBeforeCheckbox_ = false;
 
 	if(command_.empty()) {
 		imGuiText("No command selected");
@@ -1520,7 +1532,7 @@ void CommandViewer::draw(Draw& draw) {
 		return;
 	}
 
-	displayActionInspector(draw);
+	displayActionInspector(draw, skipList);
 }
 
 void CommandViewer::updateHook() {

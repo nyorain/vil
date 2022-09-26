@@ -16,6 +16,13 @@ bool CommandSelection::update() {
 	if(mode_ == UpdateMode::localCapture) {
 		dlg_assert(localCapture_);
 
+		if(hook.freeze.load()) {
+			// NOTE: even if there is a new state, don't update.
+			//   LocalCaptures are updated independently from the freeze
+			//   flag since we never want to miss them.
+			return false;
+		}
+
 		IntrusivePtr<CommandRecord> record;
 		IntrusivePtr<CommandHookState> state;
 		CommandDescriptorSnapshot descriptors;

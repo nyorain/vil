@@ -48,6 +48,7 @@ private:
 	friend class Gui;
 	Gui* gui_ {};
 	bool freezeCommands_ {};
+	bool actionFullscreen_ {};
 
 	// = When in swapchain mode =
 	// Currently viewed frame; i.e. the displayed commands in the command panel.

@@ -157,4 +157,23 @@ void refButtonD(Gui& gui, H* handle, const char* str = "<Destroyed>") {
 	}
 }
 
+inline bool toggleButton(const char* label, bool& active) {
+	auto prev = active;
+	if(prev) {
+		ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+	}
+
+	auto ret = ImGui::Button(label);
+	if(ImGui::IsItemClicked()) {
+		active = !active;
+	}
+
+	if(prev) {
+		ImGui::PopStyleColor(2);
+	}
+
+	return ret;
+}
+
 } // namesapce vil

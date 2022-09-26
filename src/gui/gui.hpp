@@ -127,6 +127,7 @@ public:
 
 	Queue& usedQueue() const;
 
+	const auto& pipes() const { return pipes_; }
 	const VkPipeline& imageBgPipe() const { return pipes_.imageBg; }
 	const VkPipelineLayout& pipeLayout() const { return pipeLayout_; }
 	const VkDescriptorSetLayout& dsLayout() const { return dsLayout_; }

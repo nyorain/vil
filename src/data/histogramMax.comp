@@ -1,5 +1,11 @@
 #version 460
 
+#extension GL_GOOGLE_include_directive : require
+
+#include "histogram.glsl"
+
+layout(local_size_x = 1, local_size_y = 1) in;
+
 layout(set = 0, binding = 0) buffer HistData {
 	uint maxHist;
 } outHistData;
@@ -11,6 +17,7 @@ layout(set = 0, binding = 1) readonly buffer Hist {
 void main() {
 	// TODO: if we use a lot of bins, use some parallel scan instead.
 	//   We would need some local accumulation for this to make sense tho.
+	//   Could be sped up easily by using subgroup ballot
 	// uint id = gl_GlobalInvocationID.x;
 	// uint localMax = max(channels[0].hist[id], max(channels[1].hist[id], channels[2].hist[id]));
 	// atomicMax(outHistData.maxHist, localMax);
