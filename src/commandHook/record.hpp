@@ -105,7 +105,7 @@ private:
 	struct RecordInfo {
 		const CommandHookOps& ops;
 
-		bool splitRenderPass {}; // whether we have to hook the renderpass
+		bool splitRendering {}; // whether we have to hook the renderpass
 		u32 hookedSubpass {};
 		const BeginRenderPassCmd* beginRenderPassCmd {};
 		const BeginRenderingCmd* beginRenderingCmd {};

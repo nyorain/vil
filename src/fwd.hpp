@@ -139,6 +139,8 @@ struct FrameMatch;
 struct FindResult;
 struct CommandSectionMatch;
 
+class CommandSelection;
+
 enum class AttachmentType : u8;
 
 enum class LocalCaptureBits : u32;

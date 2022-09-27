@@ -377,11 +377,6 @@ void CommandHook::hook(QueueSubmitter& subm) {
 		if(target_.type == TargetType::none || freeze.load()) {
 			return;
 		}
-
-		// TODO: full-submission/record queries!
-		if(target_.command.empty()) {
-			return;
-		}
 	}
 
 	const CommandRecord* frameDstRecord {};
@@ -479,6 +474,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 
 			if(!freeze.load() && !hookData) {
 				auto hookViaFind = false;
+
 				if(&rec == frameDstRecord) {
 					dlg_assert(target_.type == TargetType::inFrame);
 					hooked = hook(rec, frameRecMatchData, sub, hookData);
@@ -538,84 +534,90 @@ VkCommandBuffer CommandHook::hook(CommandRecord& record,
 		Submission& subm,
 		std::unique_ptr<CommandHookSubmission>& data) {
 
-	auto hierarchy = span<const Command*>(target_.command);
-	span<const CommandSectionMatch> sectionMatches = matchData;
+	float dstMatch {1.f};
 	std::vector<const Command*> dstHierarchy;
 
-	// our matching algorithm (the data in matchData) only matches sections,
-	// trying to match *all* compute and draw commands would be too expensive.
-	// When the command in the hierarchy is a parent command, we can find
-	// it via the matching result, otherwise we have to run an additional
-	// local 'find' on it.
-	auto finalCmdIsParent = !!target_.command.back()->children();
-	if(!finalCmdIsParent) {
-		hierarchy = hierarchy.first(hierarchy.size() - 1);
-	}
+	if(target_.command.empty()) {
+		// hook on the whole recording, mainly for time queries or testing
+		dstHierarchy.push_back(record.commands);
+	} else {
+		auto hierarchy = span<const Command*>(target_.command);
+		span<const CommandSectionMatch> sectionMatches = matchData;
 
-	float dstMatch {1.f};
-	auto found = true;
-	while(!hierarchy.empty() && found) {
-		auto foundSection = false;
-		for(auto& cmdMatch : sectionMatches) {
-			if(cmdMatch.a != hierarchy[0]) {
-				continue;
+		// our matching algorithm (the data in matchData) only matches sections,
+		// trying to match *all* compute and draw commands would be too expensive.
+		// When the command in the hierarchy is a parent command, we can find
+		// it via the matching result, otherwise we have to run an additional
+		// local 'find' on it.
+		auto finalCmdIsParent = !!target_.command.back()->children();
+		if(!finalCmdIsParent) {
+			hierarchy = hierarchy.first(hierarchy.size() - 1);
+		}
+
+		auto found = true;
+		while(!hierarchy.empty() && found) {
+			auto foundSection = false;
+			for(auto& cmdMatch : sectionMatches) {
+				if(cmdMatch.a != hierarchy[0]) {
+					continue;
+				}
+
+				dstMatch *= eval(cmdMatch.match);
+				foundSection = true;
+				hierarchy = hierarchy.subspan(1u);
+				sectionMatches = cmdMatch.children;
+				dstHierarchy.push_back(cmdMatch.b);
+				break;
 			}
 
-			dstMatch *= eval(cmdMatch.match);
-			foundSection = true;
-			hierarchy = hierarchy.subspan(1u);
-			sectionMatches = cmdMatch.children;
-			dstHierarchy.push_back(cmdMatch.b);
-			break;
+			if(!foundSection) {
+				found = false;
+			}
 		}
-
-		if(!foundSection) {
-			found = false;
-		}
-	}
-
-	// no hook needed
-	if(!found) {
-		return VK_NULL_HANDLE;
-	}
-
-	if(!finalCmdIsParent) {
-		dlg_assert(dstHierarchy.size() == target_.command.size() - 1);
-		auto* parent = static_cast<const ParentCommand*>(dstHierarchy.back());
-		auto findResult = find(*parent, span(target_.command).last(2),
-			target_.descriptors);
 
 		// no hook needed
-		if(findResult.hierarchy.empty()) {
+		if(!found) {
 			return VK_NULL_HANDLE;
 		}
 
-		dstMatch *= findResult.match;
+		if(!finalCmdIsParent) {
+			dlg_assert(dstHierarchy.size() == target_.command.size() - 1);
+			auto* parent = static_cast<const ParentCommand*>(dstHierarchy.back());
+			auto findResult = find(*parent, span(target_.command).last(2),
+				target_.descriptors);
 
-		dlg_assert(findResult.hierarchy.size() == 2u);
-		dlg_assert(findResult.hierarchy[0] == parent);
+			// no hook needed
+			if(findResult.hierarchy.empty()) {
+				return VK_NULL_HANDLE;
+			}
 
-		dstHierarchy.push_back(findResult.hierarchy[1]);
-	} else {
-		dlg_assert(dstHierarchy.size() == target_.command.size());
+			dstMatch *= findResult.match;
 
-		// Run 'find' as debug check
-		// There may be cases where 'find' and 'match' result in differences
-		// but we should debug each of them carefully, both functions should
-		// be correct
-		dlg_check({
-			dlg_assert(dstHierarchy.size() >= 2);
-			auto* parent = static_cast<const ParentCommand*>(
-				dstHierarchy[dstHierarchy.size() - 2]);
-			auto findResult = find(*parent,
-				span(target_.command).last(2), target_.descriptors);
-			dlg_assert(!findResult.hierarchy.empty());
 			dlg_assert(findResult.hierarchy.size() == 2u);
 			dlg_assert(findResult.hierarchy[0] == parent);
-			dlg_assertlm(dlg_level_warn,
-				findResult.hierarchy[1] == dstHierarchy.back(),
-				"Mismatch between 'find' and 'match' result");
-		});
+
+			dstHierarchy.push_back(findResult.hierarchy[1]);
+		} else {
+			dlg_assert(dstHierarchy.size() == target_.command.size());
+
+			// Run 'find' as debug check
+			// There may be cases where 'find' and 'match' result in differences
+			// but we should debug each of them carefully, both functions should
+			// be correct
+			dlg_check({
+				dlg_assert(dstHierarchy.size() >= 2);
+				auto* parent = static_cast<const ParentCommand*>(
+					dstHierarchy[dstHierarchy.size() - 2]);
+				auto findResult = find(*parent,
+					span(target_.command).last(2), target_.descriptors);
+				dlg_assert(!findResult.hierarchy.empty());
+				dlg_assert(findResult.hierarchy.size() == 2u);
+				dlg_assert(findResult.hierarchy[0] == parent);
+				dlg_assertlm(dlg_level_warn,
+					findResult.hierarchy[1] == dstHierarchy.back(),
+					"Mismatch between 'find' and 'match' result");
+			});
+		}
 	}
 
 	return doHook(record, dstHierarchy, dstMatch, subm, data);
@@ -872,7 +874,7 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 	}
 
 	dlg_check({
-		if(!localCapture) {
+		if(!localCapture && !target_.command.empty()) {
 			dlg_assert(target_.record);
 
 			auto findRes = find(*record.commands, target_.command, target_.descriptors);

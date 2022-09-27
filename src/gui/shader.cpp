@@ -159,7 +159,6 @@ void ShaderDebugger::unselect() {
 
 	compiled_ = {};
 	breakpoints_.clear();
-	state_ = {};
 }
 
 void ShaderDebugger::draw() {
@@ -169,8 +168,9 @@ void ShaderDebugger::draw() {
 	}
 
 	dlg_assert(spvm_.state);
+	auto hookState = selection().completedHookState();
 
-	if(!state_) {
+	if(!hookState) {
 		imGuiText("Waiting for submission using the shader...");
 		return;
 	}
@@ -409,12 +409,12 @@ Vec3ui ShaderDebugger::workgroupSize() const {
 
 Vec3ui ShaderDebugger::numWorkgroups() const {
 	// TODO: cache/compute only if needed
-	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
+	auto* baseCmd = selection().command().back();
 	Vec3ui numWGs {};
 	if(auto* idcmd = dynamic_cast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
-		dlg_assert(state_);
-		auto& hookState = *state_;
-		auto& ic = hookState.indirectCopy;
+		auto hookState = selection().completedHookState();
+		dlg_assert(hookState);
+		auto& ic = hookState->indirectCopy;
 		auto span = ic.data();
 		auto ecmd = read<VkDispatchIndirectCommand>(span);
 		numWGs = {ecmd.x, ecmd.y, ecmd.z};
@@ -551,11 +551,9 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 	auto setID = compiled_->get_decoration(res->id, spv::DecorationDescriptorSet);
 	auto bindingID = compiled_->get_decoration(res->id, spv::DecorationBinding);
 
-	// TODO: hacky
-	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
-	auto* cmd = static_cast<const StateCmdBase*>(baseCmd);
-
-	auto& dsState = gui_->cbGui().commandViewer().dsState();
+	auto* baseCmd = selection().command().back();
+	auto* cmd = deriveCast<const StateCmdBase*>(baseCmd);
+	auto& dsState = selection().descriptorSnapshot();
 	auto dss = cmd->boundDescriptors().descriptorSets;
 
 	dlg_assert(setID < dss.size());
@@ -572,8 +570,7 @@ unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indic
 		return 0;
 	}
 
-	// TODO: hacky
-	auto hookState = gui_->cbGui().commandViewer().state();
+	auto hookState = selection().completedHookState();
 	dlg_assert(hookState);
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
@@ -749,10 +746,9 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 	auto setID = compiled_->get_decoration(res->id, spv::DecorationDescriptorSet);
 	auto bindingID = compiled_->get_decoration(res->id, spv::DecorationBinding);
 
-	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
-	auto* cmd = static_cast<const StateCmdBase*>(baseCmd);
-
-	auto& dsState = gui_->cbGui().commandViewer().dsState();
+	auto* baseCmd = selection().command().back();
+	auto* cmd = deriveCast<const StateCmdBase*>(baseCmd);
+	auto& dsState = selection().descriptorSnapshot();
 	auto dss = cmd->boundDescriptors().descriptorSets;
 
 	dlg_assert(setID < dss.size());
@@ -785,23 +781,19 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		return;
 	}
 
-	// TODO: hacky and expensive
-	dlg_assert(state_);
-	auto& hookState = *state_.get();
+	auto hookState = selection().completedHookState();
+	dlg_assert(hookState);
 	// dsCopyIt->second stores the beginning of the range we stored in the
 	// array elements in. So we have to offset it with the arrayElemID
-	dlg_assert(hookState.copiedDescriptors.size() > dsCopyIt->second + arrayElemID);
-	auto& copyResult = hookState.copiedDescriptors[dsCopyIt->second + arrayElemID];
+	dlg_assert(hookState->copiedDescriptors.size() > dsCopyIt->second + arrayElemID);
+	auto& copyResult = hookState->copiedDescriptors[dsCopyIt->second + arrayElemID];
 
 	dlg_assert(copyResult.op.set == setID);
 	dlg_assert(copyResult.op.binding == bindingID);
 	dlg_assert(copyResult.op.elem == 0u);
 
 	if(spcType.storage == spv::StorageClassPushConstant) {
-		// TODO: hacky
-		auto* cmd = gui_->cbGui().commandViewer().command().back();
-		auto* stateCmd = dynamic_cast<const StateCmdBase*>(cmd); // TODO PERF: static cast and assert
-		auto pcrData = stateCmd->boundPushConstants().data;
+		auto pcrData = cmd->boundPushConstants().data;
 
 		ThreadMemScope tms;
 		auto [type, off] = accessBuffer(tms, res->type_id, indices, pcrData.size());
@@ -1044,7 +1036,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	// for indirect dispatch, need to know the number of workgrups
 	// since the shader might read that var
 	// TODO: only do it if the shader accesses the variable?
-	auto* baseCmd = gui_->cbGui().commandViewer().command().back();
+	auto* baseCmd = selection().command().back();
 	if(dynamic_cast<const DispatchIndirectCmd*>(baseCmd) ||
 			dynamic_cast<const DrawIndirectCmd*>(baseCmd) ||
 			dynamic_cast<const DrawIndirectCountCmd*>(baseCmd) ||
@@ -1057,9 +1049,14 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	update.newOps = std::move(ops);
 	hook.freeze.store(false);
 	hook.updateHook(std::move(update));
+
+	selection().clearState();
 }
 
-void ShaderDebugger::initVarMapFromState(const CommandHookState& state) {
+void ShaderDebugger::initVarMap() {
+	dlg_assert(selection().completedHookState());
+	auto& state = *selection().completedHookState();
+
 	// TODO: support copied descriptor set without imageAsBuffer.
 	// We can still manually download the data somehow
 
@@ -1758,19 +1755,8 @@ void ShaderDebugger::stepLine() {
 	updatePosition(true);
 }
 
-void ShaderDebugger::updateState(IntrusivePtr<CommandHookState> state,
-		bool localCapture) {
-	if(state_) {
-		rerun_ = true;
-	}
-
-	state_ = std::move(state);
-
-	// For localCapture == true, updateHooks will never be called.
-	// Init the map now
-	if(localCapture && state_) {
-		initVarMapFromState(*state_);
-	}
+CommandSelection& ShaderDebugger::selection() const {
+	return gui_->cbGui().selector();
 }
 
 } // namespace vil

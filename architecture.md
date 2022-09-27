@@ -209,14 +209,16 @@ recorded command buffer, i.e.
 all commands, the usage flags with which the record was begun, which handles are used.
 It's disconnected from the command buffer itself and can outlive it. You can imagine
 the CommandBuffer as a builder for CommandRecord object.
-CommandRecords  are used in multiple places and ownership is shared via an 
+CommandRecords are used in multiple places and ownership is shared via an 
 intrusive reference count.
 One speciality is its custom memory allocation mechanism, see 
 [linalloc.hpp](src/util/linalloc.hpp) and [command/alloc.hpp](src/command/alloc.hpp).
 Since CommandBuffer recording can be a bottleneck and might involve many thousands
 commands, we don't have any time to waste there. Therefore, we always allocate larger
 blocks of memory and place all commands and command-related data into them.
-The memory is freed simply when the CommandRecord is no longer needed.
+We then link them together, making them formed a hierarchy of linked lists.
+The memory is freed simply when the CommandRecord is no longer needed (we
+explicitly skip all destructor calls of `vil::Command` and its derivates)
 
 ## CommandHook
 
@@ -225,9 +227,10 @@ classes `CommandHookRecord`, `CommandHookSubmission` allow us to insert
 commands into the submissions done by the application.
 A `CommandHook` can be installed in the `vil::Device` and will be considered
 every time commands are submitted to a queue of that device via
-`CommandHook::hook`. That function gets the command buffer that is submitted
-and can return an internal replacement command buffer. To "insert" commands,
-it simply reads from the recorded command buffer, recording the commands
+`CommandHook::hook`. That function gets a submission to a queue
+and can replace command buffers with internal, patched replacements. 
+To "insert" commands, it simply reads from the recorded command buffer 
+(using our `vil::Command` objects created at recording time), records the commands
 into an internally created command, adding or altering commands as needed.
 The reason we don't already do this directly into the application's command
 buffers as it records them is that we might not know at that point of time
@@ -289,3 +292,5 @@ that can be used to create the new render passes.
 
 - write about shader debugging
 - write about getting vertex data and transform feedback via spirv injection
+- write about local hooks
+- write some notes about threading

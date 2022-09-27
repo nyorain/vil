@@ -2939,6 +2939,7 @@ void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffe
 }
 
 void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb,
+		bool skipResolves,
 		std::optional<VkAttachmentLoadOp> overrideLoad,
 		std::optional<VkAttachmentStoreOp> overrideStore) const {
 	ThreadMemScope ms;
@@ -2958,7 +2959,7 @@ void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb,
 			dst.imageView = src.view->handle;
 		}
 
-		if(src.resolveView) {
+		if(src.resolveView && !skipResolves) {
 			dst.resolveImageView = src.resolveView->handle;
 		}
 	};
@@ -2995,7 +2996,7 @@ void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb,
 }
 
 void BeginRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	this->record(dev, cb, std::nullopt, std::nullopt);
+	this->record(dev, cb, false, std::nullopt, std::nullopt);
 }
 
 const BeginRenderingCmd::Attachment* BeginRenderingCmd::findAttachment(const Image& img) const {
