@@ -72,6 +72,10 @@ public:
 	//   will automatically reference it.
 	void updateMode(UpdateMode newUpdateMode);
 
+	// Resets the selected CommandHookState.
+	// Useful e.g. when hookOps have changed.
+	void clearState();
+
 	UpdateMode updateMode() const { return mode_; }
 	SelectionType selectionType() const;
 	IntrusivePtr<CommandHookState> completedHookState() const { return state_; }

@@ -4,6 +4,7 @@
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <imgui/imgui.h>
+#include <gui/util.hpp>
 
 namespace vil {
 
@@ -20,6 +21,8 @@ struct DisplayVisitor : CommandVisitor {
 	u32 indent_ {};
 
 	bool jumpToSelection_ {};
+	bool forbidNewSelection_ {};
+	bool showSingleSections_ {};
 
 	DisplayVisitor(std::unordered_set<const ParentCommand*>& opened,
 			const Command* sel, Command::TypeFlags flags, bool labelOnlyIndent) :
@@ -52,6 +55,24 @@ struct DisplayVisitor : CommandVisitor {
 
 	auto getUnindent() {
 		return 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+	}
+
+	// returns
+	bool drawNode(const Command& cmd, ImGuiTreeNodeFlags flags) {
+		auto disable = forbidNewSelection_ && sel_ != &cmd;
+		if(disable) {
+			ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+			ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+		}
+
+		const auto open = ImGui::TreeNodeEx(static_cast<const void*>(&cmd),
+			flags, "%s", cmd.toString().c_str());
+
+		if(disable) {
+			ImGui::PopStyleColor(2u);
+		}
+
+		return open;
 	}
 
 	// Returns whether one of the children was selected
@@ -106,6 +127,7 @@ struct DisplayVisitor : CommandVisitor {
 	bool openTree(const ParentCommand& cmd) {
 		int flags = ImGuiTreeNodeFlags_OpenOnArrow |
 			ImGuiTreeNodeFlags_FramePadding |
+			ImGuiTreeNodeFlags_SpanFullWidth |
 			ImGuiTreeNodeFlags_OpenOnDoubleClick;
 		if(sel_ == &cmd) {
 			flags |= ImGuiTreeNodeFlags_Selected;
@@ -114,12 +136,12 @@ struct DisplayVisitor : CommandVisitor {
 		const auto opened = openedSections_.count(&cmd);
 		ImGui::SetNextItemOpen(opened);
 
-		const auto open = ImGui::TreeNodeEx(static_cast<const void*>(&cmd),
-			flags, "%s", cmd.toString().c_str());
+		const auto open = drawNode(cmd, flags);
 
 		// don't select when only clicked on arrow
-		const auto labelStartX = ImGui::GetItemRectMin().x + 30;
-		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
+		if(ImGui::IsItemActivated() &&
+				!forbidNewSelection_ &&
+				!ImGui::IsItemToggledOpen()) {
 			dlg_assert(newSelection_.empty());
 			newSelection_.push_back(&cmd);
 		}
@@ -163,22 +185,24 @@ struct DisplayVisitor : CommandVisitor {
 			return;
 		}
 
-		int flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
-			ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
+		int flags = ImGuiTreeNodeFlags_Leaf |
+			ImGuiTreeNodeFlags_Bullet |
+			ImGuiTreeNodeFlags_NoTreePushOnOpen |
+			ImGuiTreeNodeFlags_SpanFullWidth |
+			ImGuiTreeNodeFlags_FramePadding;
 		if(sel_ == &cmd) {
 			flags |= ImGuiTreeNodeFlags_Selected;
 		}
 
-		ImGui::TreeNodeEx(static_cast<const void*>(&cmd),
-			flags, "%s", cmd.toString().c_str());
+		drawNode(cmd, flags);
 
-		auto clicked = ImGui::IsItemClicked();
-		if(clicked) {
+		auto activated = ImGui::IsItemActivated() && !forbidNewSelection_;
+		if(activated) {
 			dlg_assert(newSelection_.empty());
 			newSelection_.push_back(&cmd);
 		}
 
-		if(jumpToSelection_ && (sel_ == &cmd || clicked)) {
+		if(jumpToSelection_ && (sel_ == &cmd || activated)) {
 			ImGui::SetScrollHereY(0.5f);
 		}
 	}
@@ -239,12 +263,15 @@ struct DisplayVisitor : CommandVisitor {
 		} else {
 			auto children = cmd.children();
 			auto first = static_cast<FirstSubpassCmd*>(nullptr);
-			if(children) {
+			if(children && !showSingleSections_) {
 				// If we only have one subpass, don't give it an extra section
 				// to make everything more compact.
-				first = dynamic_cast<FirstSubpassCmd*>(children);
+				first = deriveCast<FirstSubpassCmd*>(children);
 				dlg_assert(first);
-				if(!first->next) {
+				// for single-subpass renderpasses, this should
+				// be the EndRenderPassCmd
+				dlg_assert(first->next);
+				if(dynamic_cast<EndRenderPassCmd*>(first->next)) {
 					children = first->children_;
 				}
 			}
@@ -282,10 +309,10 @@ struct DisplayVisitor : CommandVisitor {
 		} else {
 			auto children = cmd.children();
 			auto first = static_cast<ExecuteCommandsChildCmd*>(nullptr);
-			if(children) {
+			if(children && !showSingleSections_) {
 				// If we only have one command buffer, don't give it an extra section
 				// to make everything more compact.
-				first = dynamic_cast<ExecuteCommandsChildCmd*>(children);
+				first = deriveCast<ExecuteCommandsChildCmd*>(children);
 				dlg_assert(first);
 				if(!first->next) {
 					children = first->record_->commands->children_;

@@ -28,11 +28,11 @@ public:
 	// Select takes its own copy of a spc::Compiler mainly
 	// because of the specialization constant problematic
 	void select(std::unique_ptr<spc::Compiler> compiled);
-	void updateState(IntrusivePtr<CommandHookState> state, bool localCapture);
 	void unselect();
 	void draw();
 
 	void updateHooks(CommandHook&);
+	void initVarMap();
 
 private:
 	void loadVar(unsigned srcID, span<const spvm_word> indices,
@@ -97,7 +97,7 @@ private:
 	Vec3ui workgroupSize() const;
 	Vec3ui numWorkgroups() const;
 
-	void initVarMapFromState(const CommandHookState& state);
+	CommandSelection& selection() const;
 
 private:
 	struct OurImage : spvm_image {
@@ -130,7 +130,6 @@ private:
 	igt::TextEditor textedit_;
 	std::unique_ptr<spc::Compiler> compiled_ {};
 
-	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
 	std::unordered_map<u32, u32> varIDToDsCopyMap_;
 	std::vector<Location> breakpoints_;
 

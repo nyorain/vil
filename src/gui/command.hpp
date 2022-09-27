@@ -24,42 +24,8 @@ public:
 		shader,
 	};
 
-	IOView view_;
 	bool beforeCommand_ {}; // whether state is viewed before cmd
 	bool showUnusedBindings_ {};
-
-	union {
-		struct {
-			int selected; // for multidraw
-		} command;
-
-		struct {
-			unsigned set;
-			unsigned binding;
-			unsigned elem;
-
-			// image view state
-			// buffer view state
-			VkShaderStageFlagBits stage;
-		} ds;
-
-		struct {
-			u32 index;
-		} transfer;
-
-		struct {
-			bool output; // vertex input or output
-		} mesh;
-
-		struct {
-			VkShaderStageFlagBits stage;
-		} pushConstants;
-
-		struct {
-			AttachmentType type;
-			unsigned id;
-		} attachment;
-	} viewData_;
 
 public:
 	CommandViewer();
@@ -69,16 +35,7 @@ public:
 	void draw(Draw& draw);
 
 	void unselect();
-
-	// When newState is nullptr, the old one should not be overwritten.
-	void select(IntrusivePtr<CommandRecord>, std::vector<const Command*>,
-		CommandDescriptorSnapshot, bool resetState,
-		IntrusivePtr<CommandHookState> newState, bool localCapture = false);
-
-	CommandHookState* state() const { return state_.get(); }
-	CommandRecord* record() const { return record_.get(); }
-	const auto& command() const { return command_; }
-	const CommandDescriptorSnapshot& dsState() const { return dsState_; }
+	void updateFromSelector(bool forceUpdateHook);
 
 	auto& vertexViewer() { return vertexViewer_; }
 
@@ -114,25 +71,58 @@ private:
 	// Can only be called once per frame
 	void displayImage(Draw& draw, const CopiedImage& img);
 
+	CommandSelection& selection() const;
+
 private:
-	friend class Gui;
 	Gui* gui_ {};
-
-	IntrusivePtr<CommandRecord> record_ {}; // the selected record
-	std::vector<const Command*> command_ {}; // the selected command
-	CommandDescriptorSnapshot dsState_ {};
-	IntrusivePtr<CommandHookState> state_ {}; // the currently viewed state
-
-	// For the one image we potentially display
-	// DrawGuiImage ioImage_ {};
 
 	VertexViewer vertexViewer_ {};
 	BufferViewer bufferViewer_ {};
 	ImageViewer imageViewer_ {};
 	ShaderDebugger shaderDebugger_ {};
 
+	// the currently viewed command hierarchy
+	std::vector<const Command*> command_ {};
+
+	// We don't really want to update hook options immediately while drawing
+	// the gui when something is pressed since that might mess with
+	// local assumptions of the function we are in.
+	// We therefore wait until we are finished with drawing the ui.
 	bool doUpdateHook_ {};
-	bool localCaptureMode_ {};
+
+	IOView view_ {};
+	union {
+		struct {
+			int selected; // for multidraw
+		} command;
+
+		struct {
+			unsigned set;
+			unsigned binding;
+			unsigned elem;
+
+			// image view state
+			// buffer view state
+			VkShaderStageFlagBits stage;
+		} ds;
+
+		struct {
+			u32 index;
+		} transfer;
+
+		struct {
+			bool output; // vertex input or output
+		} mesh;
+
+		struct {
+			VkShaderStageFlagBits stage;
+		} pushConstants;
+
+		struct {
+			AttachmentType type;
+			unsigned id;
+		} attachment;
+	} viewData_;
 };
 
 } // namespace vil

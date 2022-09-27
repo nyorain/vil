@@ -1284,7 +1284,6 @@ void ResourceGui::clearHandles() {
 }
 
 void ResourceGui::updateResourceList() {
-	dlg_trace("updateResourceList");
 	auto& dev = gui_->dev();
 
 	auto incRefCountVisitor = TemplateResourceVisitor([&](auto& res) {

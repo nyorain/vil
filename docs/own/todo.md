@@ -6,44 +6,11 @@ v0.2:
 - vertex viewer improvements
 - fix README
 
-local captures:
-- [x] fix varIDToDsCopyMap_ setup, elemID for arrays
-- [x] add names
-- [x] fix/implement updating of local captures
-	- [x] allow application to specify whether one capture is enough or
-		  if it should be updated
-	- [x] for onetime local captures, use a separate list in CommandHook
-	      for done ones? to speed up hooking on submission
-- [x] fix hacky UI code, make sure there are no races
-	- [x] lots of local locks rn, error-prone
-	      introduce cleaner interface, maybe functions on LocalCapture that do it
-		  {meh, don't feel like that's a good idea atm. Manual locking
-		   when accessing isn't that bad}
-- [ ] clean up somewhat hacky CommandViewer and CommandSelector code
-	  might need CommandSelector rework to do this properly
-	  {yes, please do that}
-- [x] Fix gui/command.cpp assumption on hooks. They assume only one
-      descriptor/attachment whatever is created. Should work with any
-	  state that contains the relevant information.
-	- [x] first: need to include (set, binding, elem, before) tuple in
-	      CopiedDescriptor in CompletedHook state
-- [x] capture attachments and other stuff in local captures
-- [x] make sure local captures work in render passes
-- [x] Fix shader debugger to be able to work with LocalCapture
-	- [x] also some hook assumptions, somehow setup varIDToCopyMap_
-- [x] move "ALL THE HOOKS" code out of CommandHook into separate function
-- [ ] {feature, later, useful tho} support regular hooks on 
-      local-capture-hooked records. Not exactly sure how this would work.
-	  On a similar note, support hooking multiple commands in a single record
-	  (most general case: multiple local hooks, multiple regular captures)
-- [ ] {feature, later} add flag specifying to capture the frame context
-      i.e. when showing it, show the whole frame.
-	  Just store the submissions in the LocalCapture completed hook.
-
 urgent, bugs:
+- [ ] look into a lot of descriptor names not being visible anymore
+      likely related to spirv-cross update
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
-- [ ] fix updateRecord in CbGui
 
 - [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull
@@ -272,6 +239,15 @@ docs
 	- [x] write something on instance extensions for compute-only applications
 	      see: https://github.com/KhronosGroup/Vulkan-Loader/issues/51
 		  {see docs/compute-only.md}
+
+local captures:
+- [ ] {feature, later, useful tho} support regular hooks on 
+      local-capture-hooked records. Not exactly sure how this would work.
+	  On a similar note, support hooking multiple commands in a single record
+	  (most general case: multiple local hooks, multiple regular captures)
+- [ ] {feature, later} add flag specifying to capture the frame context
+      i.e. when showing it, show the whole frame.
+	  Just store the submissions in the LocalCapture completed hook.
 
 window/overlay
 - [ ] make the key to toggle/focus overlay configurable

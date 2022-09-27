@@ -123,12 +123,23 @@ void CommandRecordGui::draw(Draw& draw) {
 
 		ImGui::Separator();
 		ImGui::Checkbox("Unused Descriptor Bindings", &commandViewer_.showUnusedBindings_);
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Show descriptor bindings that are not used "
+				"by a command. Their contents and resources can still be shown");
+		}
+
+		ImGui::Checkbox("Show single-sections", &showSingleSections_);
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Show implicit sections, e.g. the single subpass "
+				"of a 1-subpass renderpass or the single execute of a CmdExecuteCommands");
+		}
 
 		// TODO: this needs some love.
 		// - Disable in frames where the window was scrolled? and then
 		//   store the new scroll offset instead? This currently prevents scrolling
-		ImGui::Separator();
-		ImGui::Checkbox("Focus Selected", &focusSelected_);
+		//  - make this work for parent commands (needs changes in DisplayVisitor I guess)
+		// ImGui::Separator();
+		// ImGui::Checkbox("Focus Selected", &focusSelected_);
 
 		ImGui::Separator();
 		int updateTime = std::chrono::duration_cast<std::chrono::milliseconds>(updateTick_.interval).count();
@@ -188,7 +199,7 @@ void CommandRecordGui::draw(Draw& draw) {
 
 			auto selType = selector_.selectionType();
 			if(selType == CommandSelection::SelectionType::command) {
-				updateCommandViewer(false);
+				commandViewer_.updateFromSelector(false);
 			}
 		}
 	}
@@ -292,6 +303,26 @@ void CommandRecordGui::draw(Draw& draw) {
 		} case SelectionType::record: {
 			auto* rec = selector_.record().get();
 			dlg_assert(rec);
+
+			auto hookState = selector_.completedHookState();
+			if(hookState) {
+				auto lastTime = hookState->neededTime;
+				auto validBits = gui_->dev().queueFamilies[rec->queueFamily].props.timestampValidBits;
+				if(validBits == 0u) {
+					dlg_assert(lastTime == u64(-1));
+					imGuiText("Time: unavailable (Queue family does not support timing queries)");
+				} else if(lastTime == u64(-1)) {
+					dlg_error("lastTime is u64(-1), unexpectedly");
+					imGuiText("Time: Error");
+				} else {
+					auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
+					displayDiff /= 1000.f * 1000.f;
+					imGuiText("Time: {} ms", displayDiff);
+				}
+			} else {
+				imGuiText("Time: Waiting for submission...");
+			}
+
 			refButtonD(*gui_, rec->cb);
 			imGuiText("cb name: {}", rec->cbName ? rec->cbName : "<unnamed>");
 			imGuiText("broken labels: {}{}", std::boolalpha, rec->brokenHierarchyLabels);
@@ -304,6 +335,7 @@ void CommandRecordGui::draw(Draw& draw) {
 			imGuiText("num compute pipes: {}", rec->used.computePipes.size());
 			imGuiText("num rt pipes: {}", rec->used.rtPipes.size());
 			imGuiText("builds accel structs: {}", rec->buildsAccelStructs);
+
 			break;
 		} case SelectionType::command:
 			commandViewer_.draw(draw);
@@ -336,6 +368,7 @@ void CommandRecordGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) 
 
 	selector_.select(record, command_);
 	updateFromSelector();
+	commandViewer_.updateFromSelector(true);
 }
 
 void CommandRecordGui::select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb) {
@@ -359,17 +392,21 @@ void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain) {
 }
 
 void CommandRecordGui::showLocalCaptures(LocalCapture& lc) {
-	CompletedHook completed;
-	{
-		std::lock_guard lock(gui_->dev().mutex);
-		completed = lc.completed;
-	}
+	assertNotOwned(gui_->dev().mutex);
 
 	clearSelection(true);
 	selector_.select(lc);
 	updateFromSelector();
-	commandViewer_.select(record_, command_, completed.descriptorSnapshot,
-		false, completed.state, true);
+
+	// we want to open all sections up to the selected command
+	for(auto* hcmd : command_) {
+		dlg_assert(!!hcmd->children() == !!dynamic_cast<const ParentCommand*>(hcmd));
+		if(hcmd->children()) {
+			openedSections_.insert(static_cast<const ParentCommand*>(hcmd));
+		}
+	}
+
+	commandViewer_.updateFromSelector(true);
 }
 
 void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
@@ -390,7 +427,7 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 		}
 
 		const auto id = dlg::format("vkQueueSubmit:{}", b);
-		auto flags = int(ImGuiTreeNodeFlags_FramePadding);
+		auto flags = int(ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth);
 		if(batch.submissions.empty()) {
 			// empty submissions are displayed differently.
 			// There is nothing more disappointing than expanding a
@@ -410,8 +447,7 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 		ImGui::SetNextItemOpen(opened);
 
 		const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit");
-		const auto labelStartX = ImGui::GetItemRectMin().x + 30;
-		if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
+		if(ImGui::IsItemActivated() && !ImGui::IsItemToggledOpen()) {
 			submission_ = &batch;
 			record_ = nullptr;
 			command_ = {};
@@ -455,7 +491,8 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 
 			auto flags = ImGuiTreeNodeFlags_FramePadding |
 				ImGuiTreeNodeFlags_OpenOnArrow |
-				ImGuiTreeNodeFlags_OpenOnDoubleClick;
+				ImGuiTreeNodeFlags_OpenOnDoubleClick |
+				ImGuiTreeNodeFlags_SpanFullWidth;
 
 			// check if record was selected
 			if(record_ == rec.get() && command_.empty()) {
@@ -466,8 +503,7 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 			ImGui::SetNextItemOpen(opened);
 
 			const auto open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name);
-			const auto labelStartX = ImGui::GetItemRectMin().x + 30;
-			if(ImGui::IsItemClicked() && ImGui::GetMousePos().x > labelStartX) {
+			if(ImGui::IsItemActivated() && !ImGui::IsItemToggledOpen()) {
 				submission_ = &batch;
 				record_ = rec;
 				command_ = {};
@@ -475,6 +511,13 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 				auto submID = u32(submission_ - frame_.data());
 				selector_.select(frame_, submID, record_, command_);
 				commandViewer_.unselect();
+
+				// update ops to query time
+				CommandHook::Update update;
+				update.invalidate = true;
+				auto& ops = update.newOps.emplace();
+				ops.queryTime = true;
+				gui_->dev().commandHook->updateHook(std::move(update));
 			}
 
 			// check if open state changed
@@ -504,6 +547,7 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 			DisplayVisitor visitor(openedSections_, selectedCommand,
 				commandFlags_, brokenLabelNesting_);
 			visitor.jumpToSelection_ = focusSelected_;
+			visitor.showSingleSections_ = showSingleSections_;
 			visitor.display(*rec->commands, true);
 			auto nsel = std::move(visitor.newSelection_);
 
@@ -517,7 +561,7 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 
 				auto submID = u32(submission_ - frame_.data());
 				selector_.select(frame_, submID, record_, command_);
-				updateCommandViewer(true);
+				commandViewer_.updateFromSelector(true);
 			}
 
 			ImGui::Indent(s);
@@ -546,13 +590,17 @@ void CommandRecordGui::displayRecordCommands() {
 	DisplayVisitor visitor(openedSections_,selected,
 		commandFlags_, brokenLabelNesting_);
 	visitor.jumpToSelection_ = focusSelected_;
+	visitor.forbidNewSelection_ = (selector_.updateMode() == UpdateMode::localCapture);
+	visitor.showSingleSections_ = showSingleSections_;
 	visitor.display(*record_->commands, false);
+
 	auto nsel = std::move(visitor.newSelection_);
 
 	auto newSelection = !nsel.empty() && (
 		command_.empty() ||
 		nsel.back() != command_.back());
-	if(newSelection && selector_.updateMode() != UpdateMode::localCapture) {
+	if(newSelection) {
+		dlg_assert(selector_.updateMode() != UpdateMode::localCapture);
 		command_ = std::move(nsel);
 
 		// TODO: add cleaner, automatic overload to Selector?
@@ -563,6 +611,8 @@ void CommandRecordGui::displayRecordCommands() {
 		} else {
 			selector_.select(record_, command_);
 		}
+
+		commandViewer_.updateFromSelector(true);
 	}
 }
 
@@ -626,12 +676,10 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	// NOTE: with this algorithm we will implicitly close sections
 	// that disappear and then re-appear.
 	// Not sure how we could keep that information though.
-	// TODO PERF: memory allocations, use allocator? or swap, keep memory over frames
-	std::unordered_set<const ParentCommand*> newOpenSections;
-	std::unordered_set<const FrameSubmission*> newOpenSubmissions;
-	std::unordered_set<const CommandRecord*> newOpenRecords;
-
-	std::unordered_set<const ParentCommand*> transitionedSections;
+	auto& newOpenSections = tmp_.openedSections;
+	auto& newOpenSubmissions = tmp_.openedSubmissions;
+	auto& newOpenRecords = tmp_.openedRecords;
+	auto& transitionedSections = tmp_.transitionedSections;
 
 	FrameSubmission* newSubmission = nullptr;
 	IntrusivePtr<CommandRecord> newRecord {};
@@ -670,16 +718,17 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 		}
 	}
 
-	// TODO PERF debugging, remove otherwise
-	for(auto& open : openedSections_) {
-		if(!transitionedSections.count(open)) {
-			if(auto* lbl = dynamic_cast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
-				dlg_trace("Losing open label {}", lbl->name);
-			} else {
-				dlg_trace("Losing open cmd {}", (const void*) open);
+	VIL_DEBUG_ONLY(
+		for(auto& open : openedSections_) {
+			if(!transitionedSections.count(open)) {
+				if(auto* lbl = dynamic_cast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
+					dlg_trace("Losing open label {}", lbl->name);
+				} else {
+					dlg_trace("Losing open cmd {}", (const void*) open);
+				}
 			}
 		}
-	}
+	);
 
 	// apply
 	frame_ = std::move(records);
@@ -688,9 +737,15 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	record_ = std::move(newRecord);
 	command_ = std::move(newCommand);
 
-	openedSubmissions_ = std::move(newOpenSubmissions);
-	openedRecords_ = std::move(newOpenRecords);
-	openedSections_ = std::move(newOpenSections);
+	std::swap(openedSubmissions_, newOpenSubmissions);
+	std::swap(openedRecords_, newOpenRecords);
+	std::swap(openedSections_, newOpenSections);
+
+	// clear shouldn't free the memory or shrink the containers
+	newOpenSubmissions.clear();
+	newOpenRecords.clear();
+	newOpenSections.clear();
+	transitionedSections.clear();
 }
 
 void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records) {
@@ -702,8 +757,45 @@ void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records) {
 }
 
 void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record) {
-	dlg_trace("TODO: implement opened section matching for single record mode");
+	dlg_assert(record);
+	if(!record_) {
+		record_ = std::move(record);
+		return;
+	}
+
+	ThreadMemScope tms;
+	LinAllocScope localMatchMem(matchAlloc_);
+	auto recMatch = match(tms, localMatchMem,
+		*record_->commands, *record->commands);
+	std::vector<const Command*> newCommand {};
+
+	auto& newOpenSections = tmp_.openedSections;
+	auto& transitionedSections = tmp_.transitionedSections;
+
+	for(auto& sectionMatch : recMatch.children) {
+		addMatches(openedSections_, newOpenSections,
+			transitionedSections, sectionMatch,
+			command_, newCommand);
+	}
+
+	VIL_DEBUG_ONLY(
+		for(auto& open : openedSections_) {
+			if(!transitionedSections.count(open)) {
+				if(auto* lbl = dynamic_cast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
+					dlg_trace("Losing open label {}", lbl->name);
+				} else {
+					dlg_trace("Losing open cmd {}", (const void*) open);
+				}
+			}
+		}
+	);
+
 	record_ = std::move(record);
+	command_ = std::move(newCommand);
+
+	std::swap(openedSections_, newOpenSections);
+	newOpenSections.clear();
+	transitionedSections.clear();
 }
 
 void CommandRecordGui::updateFromSelector() {
@@ -725,15 +817,6 @@ void CommandRecordGui::updateFromSelector() {
 
 	auto commandSpan = selector_.command();
 	command_ = {commandSpan.begin(), commandSpan.end()};
-}
-
-void CommandRecordGui::updateCommandViewer(bool resetState) {
-	std::vector cmd(selector_.command().begin(), selector_.command().end());
-	auto localCapture = (selector_.updateMode() == UpdateMode::localCapture);
-	commandViewer_.select(selector_.record(),
-		std::move(cmd), selector_.descriptorSnapshot(),
-		resetState, selector_.completedHookState(),
-		localCapture);
 }
 
 } // namespace vil

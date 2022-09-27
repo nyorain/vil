@@ -136,3 +136,8 @@ struct LocalCapture {
 };
 
 ```
+
+---
+
+- reintroduce the "Focus Selected" checkbox (and feature) in CommandBufferGui
+  it just needs some love

@@ -988,7 +988,7 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 	cb.rpAttachments_ = cmd.attachments;
 
 	auto& subpassCmd = addCmd<FirstSubpassCmd, SectionType::begin>(cb);
-	(void) subpassCmd;
+	subpassCmd.subpassID = 0u;
 
 	setup(cb, subpassCmd.rpi, cmd.rp->desc, 0u, cmd.attachments);
 

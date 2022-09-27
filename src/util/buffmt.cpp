@@ -310,7 +310,8 @@ void displayStruct(const char* baseName, const Type& type, ReadBuf data, u32 off
 	ImGui::TableNextColumn();
 
 	auto id = dlg::format("{}:{}", baseName, offset);
-	auto flags = ImGuiTreeNodeFlags_FramePadding;
+	auto flags = ImGuiTreeNodeFlags_FramePadding |
+		ImGuiTreeNodeFlags_SpanFullWidth;
 
 	// all structs are initially open
 	ImGui::SetNextItemOpen(true, ImGuiCond_Once);
@@ -371,7 +372,8 @@ void displayArrayDim(const char* baseName, const Type& type, span<const u32> rem
 
 	// all arrays are initially closed
 	auto id = dlg::format("{}:{}", type.deco.name, offset);
-	auto flags = ImGuiTreeNodeFlags_FramePadding;
+	auto flags = ImGuiTreeNodeFlags_FramePadding |
+		ImGuiTreeNodeFlags_SpanFullWidth;
 
 	ImGui::SetNextItemOpen(false, ImGuiCond_Once);
 	if(ImGui::TreeNodeEx(id.c_str(), flags, "%s", name.c_str())) {

@@ -269,45 +269,4 @@ private:
 
 ImGuiKey keyToImGui(unsigned key);
 
-void pushDisabled(bool disabled = true);
-void popDisabled(bool disabled = true);
-
-// Inserts an imgui button towards the given handle.
-// When clicked, selects the handle in the given gui.
-void refButton(Gui& gui, Handle& handle, VkObjectType objectType);
-
-template<typename H>
-void refButton(Gui& gui, H& handle) {
-	refButton(gui, handle, handle.objectType);
-}
-
-// If handle isn't null, adds the button as with refButton.
-template<typename H>
-void refButtonOpt(Gui& gui, H* handle) {
-	if(handle) {
-		refButton(gui, *handle);
-	}
-}
-
-// Asserts that image isn't null and if so, adds the button as with refButton.
-template<typename H>
-void refButtonExpect(Gui& gui, H* handle) {
-	dlg_assert_or(handle, return);
-	refButton(gui, *handle);
-}
-
-// If the given handle is null, inserts a disabled "<Destroyed>" button.
-// Otherwise, normally inserts the button as with refButton.
-template<typename H>
-void refButtonD(Gui& gui, H* handle, const char* str = "<Destroyed>") {
-	if(handle) {
-		refButton(gui, *handle);
-	} else {
-		pushDisabled();
-		// NOTE: could add popup to button further explaining what's going on
-		ImGui::Button(str);
-		popDisabled();
-	}
-}
-
 } // namespace vil

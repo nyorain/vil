@@ -668,3 +668,10 @@ in submit
 	  Hm, maybe rather on the particular section (i.e. only last hierarchy part).
 	  would require reworking 'find' to not require RootCommand
 	- maybe replaceHooked should altogether be part of CommandHook?
+
+```
+template<typename K,
+		typename Hash = std::hash<K>,
+		typename Equal = std::equal_to<K>> using LinAllocScopeHashSet =
+	std::unordered_set<K, Hash, Equal, LinearScopedAllocator<K>>;
+```

@@ -334,12 +334,13 @@ struct RenderSectionCommand : SectionCommand {
 	Type type() const override { return Type::renderSection; }
 };
 
-struct SubpassCmd : RenderSectionCommand {};
+struct SubpassCmd : RenderSectionCommand {
+	u32 subpassID {};
+};
 
 struct NextSubpassCmd final : SubpassCmd {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 	VkSubpassBeginInfo beginInfo; // for the new subpass
-	u32 subpassID {};
 
 	using SubpassCmd::SubpassCmd;
 
@@ -1419,6 +1420,7 @@ struct BeginRenderingCmd final : RenderSectionCommand {
 	VkRect2D renderArea;
 
 	void record(const Device&, VkCommandBuffer cb,
+		bool skipResolves,
 		std::optional<VkAttachmentLoadOp> overrideLoad,
 		std::optional<VkAttachmentStoreOp> overrideStore) const;
 

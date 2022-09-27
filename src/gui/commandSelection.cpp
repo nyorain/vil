@@ -153,7 +153,14 @@ bool CommandSelection::update() {
 	}
 
 	record_ = best->record;
-	command_ = best->command;
+
+	// NOTE: somewhat hacky, the way we handle whole-record selections.
+	if(best->command.size() == 1u) {
+		dlg_assert(command_.empty());
+	} else {
+		command_ = best->command;
+	}
+
 	state_ = best->state;
 	descriptors_ = best->descriptorSnapshot;
 
@@ -265,6 +272,10 @@ void CommandSelection::select(const LocalCapture& lc) {
 	record_ = std::move(record);
 	localCapture_ = &lc;
 
+	if(!command_.empty()) {
+		descriptors_ = snapshotRelevantDescriptors(*dev_, *command_.back());
+	}
+
 	updateHookTarget();
 }
 
@@ -354,6 +365,10 @@ CommandSelection::SelectionType CommandSelection::selectionType() const {
 	}
 
 	return SelectionType::none;
+}
+
+void CommandSelection::clearState() {
+	state_.reset();
 }
 
 } // namespace vil

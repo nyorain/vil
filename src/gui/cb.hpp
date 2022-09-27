@@ -35,7 +35,6 @@ public:
 
 private:
 	void updateFromSelector();
-	void updateCommandViewer(bool resetState);
 
 	void displayFrameCommands(Swapchain&);
 	void displayRecordCommands();
@@ -69,6 +68,14 @@ private:
 	std::unordered_set<const FrameSubmission*> openedSubmissions_; // [swapchain] points into frame_
 	std::unordered_set<const CommandRecord*> openedRecords_; // [swapchain] points into frame_[i].submissions
 
+	// kept to avoid frequent allocations while matching/updating openedX_ sets
+	struct {
+		std::unordered_set<const ParentCommand*> openedSections;
+		std::unordered_set<const FrameSubmission*> openedSubmissions;
+		std::unordered_set<const CommandRecord*> openedRecords;
+		std::unordered_set<const ParentCommand*> transitionedSections;
+	} tmp_;
+
 	// The commands to display
 	CommandTypeFlags commandFlags_ {};
 
@@ -79,11 +86,10 @@ private:
 	CommandViewer commandViewer_ {};
 
 	bool focusSelected_ {}; // TODO WIP experiment
+	bool showSingleSections_ {};
 	UpdateTicker updateTick_ {};
 
 	LinAllocator matchAlloc_;
-
-	// TODO: move to Gui class I guess
 	CommandSelection selector_;
 };
 
