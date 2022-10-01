@@ -7,10 +7,7 @@
 layout(local_size_x = 1, local_size_y = 1) in;
 
 layout(set = 0, binding = 0) buffer HistData {
-	uint maxHist;
-} outHistData;
-
-layout(set = 0, binding = 1) readonly buffer Hist {
+	HistMetadata meta;
 	uvec4 data[];
 } hist;
 
@@ -29,5 +26,5 @@ void main() {
 		accum = max(accum, maxi);
 	}
 
-	outHistData.maxHist = accum;
+	hist.meta.maxHist = accum;
 }

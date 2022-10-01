@@ -8,7 +8,7 @@
 #include <ds.hpp>
 #include <rp.hpp>
 #include <util/util.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 
 namespace vil {
 

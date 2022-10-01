@@ -171,7 +171,6 @@ src = files(
 	'src/overlay.cpp',
 	'src/platform.cpp',
 	'src/lmm.cpp',
-	'src/vk/format_utils.cpp',
 	'src/util/util.cpp',
 	'src/util/fmt.cpp',
 	'src/util/f16.cpp',
@@ -224,6 +223,13 @@ src = files(
 	'src/commandHook/submission.cpp',
 	'src/commandHook/copy.cpp',
 
+	# vulkan and util
+	'src/vk/format_utils.cpp',
+	'src/vkutil/sync.cpp',
+	'src/vkutil/cmd.cpp',
+	'src/vkutil/handles.cpp',
+	'src/vkutil/dynds.cpp',
+
 	# imgui
 	'src/imgui/imgui.cpp',
 	'src/imgui/imgui_draw.cpp',
@@ -237,7 +243,6 @@ src = files(
 	'src/device.hpp',
 	'src/layer.hpp',
 	'src/cb.hpp',
-	'src/handles.hpp',
 	'src/rp.hpp',
 	'src/accelStruct.hpp',
 	'src/sync.hpp',

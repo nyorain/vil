@@ -13,7 +13,7 @@
 #include <gui/gui.hpp>
 #include <commandHook/submission.hpp>
 #include <util/util.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <util/profiling.hpp>
 
 namespace vil {

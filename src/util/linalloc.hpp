@@ -6,7 +6,7 @@
 #include <cstring>
 #include <memory_resource>
 #include <functional>
-#include <util/util.hpp>
+#include <util/allocation.hpp>
 #include <util/profiling.hpp>
 #include <util/dlg.hpp>
 
@@ -358,9 +358,10 @@ struct LinAllocScope {
 	}
 
 	inline ~LinAllocScope() {
-		// TODO: check here for debug condition data == current?
-		// but that would prevent us from using LinAllocScope as dummy
-		// scope around manual allocations, as we do in some places.
+		VIL_DEBUG_ONLY(
+			dlg_assertm(tc.memCurrent->data == this->current,
+				"Invalid non-stacking interleaving of LinAllocScope detected");
+		)
 
 		tc.memCurrent = block;
 		tc.memCurrent->data = savedPtr;
@@ -434,6 +435,9 @@ inline std::string_view copy(LinAllocator& alloc, std::string_view src) {
 	auto copy = alloc.copy(src.data(), src.size());
 	return {copy.data(), copy.size()};
 }
+
+template<typename T>
+using ScopedVector = std::vector<T, LinearScopedAllocator<T>>;
 
 } // namespace vil
 

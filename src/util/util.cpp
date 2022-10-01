@@ -8,7 +8,7 @@
 #include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>
 #include <vk/format_utils.h>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <cmath>
 #include <cstdio>
 

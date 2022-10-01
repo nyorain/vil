@@ -1,9 +1,16 @@
 #include <command/commands.hpp>
 #include <command/alloc.hpp>
 #include <command/match.hpp>
-#include <handles.hpp>
 #include <shader.hpp>
 #include <cb.hpp>
+#include <buffer.hpp>
+#include <image.hpp>
+#include <sync.hpp>
+#include <cb.hpp>
+#include <pipe.hpp>
+#include <ds.hpp>
+#include <queryPool.hpp>
+#include <rp.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <util/span.hpp>
@@ -14,8 +21,8 @@
 #include <gui/cb.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
-#include <vk/enumString.hpp>
 #include <vk/format_utils.h>
+#include <vkutil/enumString.hpp>
 #include <iomanip>
 #include <filesystem>
 

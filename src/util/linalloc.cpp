@@ -1,4 +1,5 @@
 #include <util/linalloc.hpp>
+#include <util/util.hpp> // nextPOT
 #include <device.hpp>
 
 #ifdef VIL_DEBUG

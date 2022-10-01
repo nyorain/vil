@@ -3,7 +3,7 @@
 #include <util/f16.hpp>
 #include <util/vecOps.hpp>
 #include <vk/format_utils.h>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <cmath>
 
 namespace vil {

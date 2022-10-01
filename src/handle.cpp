@@ -3,9 +3,20 @@
 #include <data.hpp>
 #include <queue.hpp>
 #include <device.hpp>
-#include <handles.hpp>
+#include <shader.hpp>
+#include <swapchain.hpp>
+#include <cb.hpp>
+#include <buffer.hpp>
+#include <image.hpp>
+#include <sync.hpp>
+#include <cb.hpp>
+#include <pipe.hpp>
+#include <ds.hpp>
+#include <queryPool.hpp>
+#include <rp.hpp>
 #include <accelStruct.hpp>
-#include <vk/enumString.hpp>
+#include <accelStruct.hpp>
+#include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <string_view>
 

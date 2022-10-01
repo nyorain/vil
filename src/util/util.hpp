@@ -192,37 +192,6 @@ auto aliasCmd(T&& list) {
 	return found;
 }
 
-// Taken from vpp/util
-/// Aligns an offset to the given alignment.
-/// An alignment of 0 zero will not change the offset.
-/// An offset of 0 is treated as aligned with every possible alignment.
-/// Undefined if either value is negative.
-template<typename A, typename B>
-constexpr A align(A offset, B alignment) {
-	if(offset == 0 || alignment == 0) {
-		return offset;
-	}
-
-	auto rest = offset % alignment;
-	return rest ? A(offset + (alignment - rest)) : A(offset);
-}
-
-template<typename A, typename B>
-constexpr A alignPOT(A offset, B alignment) {
-	dlg_assert(alignment != 0);
-	dlg_assert((alignment & (alignment - 1)) == 0u); // POT
-	return (offset + alignment - 1) & ~(alignment - 1);
-}
-
-// Returns whether the range given by [offA, offA + sizeA) overlaps
-// the range given by [offB, offB + sizeB).
-constexpr bool overlaps(u32 offA, u32 sizeA, u32 offB, u32 sizeB) {
-	auto endA = offA + sizeA;
-	auto endB = offB + sizeB;
-	return (offA >= offB && offA < endB) ||
-		   (offB >= offA && offB < endA);
-}
-
 // Mainly taken from tkn/formats
 VkImageViewType imageViewForImageType(VkImageType);
 VkImageType minImageType(VkExtent3D, unsigned minDim = 1u);

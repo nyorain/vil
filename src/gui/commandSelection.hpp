@@ -5,6 +5,7 @@
 #include <commandHook/state.hpp>
 #include <util/syncedMap.hpp> // TODO: get rid of include, only for CommandBufferPtr
 #include <command/record.hpp> // TODO: get rid of include, only for CommandDescriptorSnapshot
+#include <frame.hpp>
 #include <vector>
 
 namespace vil {

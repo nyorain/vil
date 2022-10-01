@@ -7,7 +7,7 @@
 namespace vil {
 
 void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
-		VkBufferUsageFlags usage, u32 queueFamsBitset) {
+		VkBufferUsageFlags usage, u32 queueFamsBitset, Type type) {
 	dlg_assert(!this->dev || this->dev == &dev);
 	if(size >= reqSize) {
 		return;
@@ -61,7 +61,12 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	VkMemoryAllocateInfo allocInfo {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	allocInfo.allocationSize = align(memReqs.size, dev.props.limits.nonCoherentAtomSize);
-	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & dev.hostVisibleMemTypeBits);
+
+	auto memBits = (type == Type::hostVisible) ?
+		dev.hostVisibleMemTypeBits :
+		dev.deviceLocalMemTypeBits;
+	dlg_assert(memBits != 0u);
+	allocInfo.memoryTypeIndex = findLSB(memReqs.memoryTypeBits & memBits);
 
 	VkMemoryAllocateFlagsInfo flagsInfo {};
 	if(usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
@@ -81,10 +86,12 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	DebugStats::get().ownBufferMem += size;
 
 	// map
-	void* pmap;
-	VK_CHECK(dev.dispatch.MapMemory(dev.handle, mem, 0, VK_WHOLE_SIZE, 0, &pmap));
-	this->map = static_cast<std::byte*>(pmap);
-	dlg_assert(this->map);
+	if(type == Type::hostVisible) {
+		void* pmap;
+		VK_CHECK(dev.dispatch.MapMemory(dev.handle, mem, 0, VK_WHOLE_SIZE, 0, &pmap));
+		this->map = static_cast<std::byte*>(pmap);
+		dlg_assert(this->map);
+	}
 }
 
 OwnBuffer::~OwnBuffer() {
@@ -126,6 +133,15 @@ void OwnBuffer::flushMap() {
 	range[0].memory = mem;
 	range[0].size = VK_WHOLE_SIZE;
 	VK_CHECK(dev->dispatch.FlushMappedMemoryRanges(dev->handle, 1, range));
+}
+
+vku::BufferSpan OwnBuffer::asSpan(VkDeviceSize offset, VkDeviceSize size) const {
+	vku::BufferSpan ret;
+	ret.buffer = buf;
+	ret.allocation.offset = offset;
+	ret.allocation.size = size == VK_WHOLE_SIZE ? this->size - offset : size;
+	dlg_assert(ret.allocation.offset + ret.allocation.size <= this->size);
+	return ret;
 }
 
 void swap(OwnBuffer& a, OwnBuffer& b) noexcept {

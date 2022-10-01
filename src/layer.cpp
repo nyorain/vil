@@ -2,7 +2,16 @@
 #include <wrap.hpp>
 #include <data.hpp>
 #include <swapchain.hpp>
-#include <handles.hpp>
+#include <image.hpp>
+#include <buffer.hpp>
+#include <queryPool.hpp>
+#include <sync.hpp>
+#include <rp.hpp>
+#include <cb.hpp>
+#include <memory.hpp>
+#include <pipe.hpp>
+#include <shader.hpp>
+#include <ds.hpp>
 #include <platform.hpp>
 #include <queue.hpp>
 #include <overlay.hpp>
@@ -12,7 +21,7 @@
 #include <util/export.hpp>
 #include <util/profiling.hpp>
 #include <util/dlg.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 
 #ifdef VIL_WITH_WAYLAND
   #include <wayland.hpp>

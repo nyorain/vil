@@ -8,12 +8,14 @@
 #include <commandHook/hook.hpp>
 #include <commandHook/record.hpp>
 #include <layer.hpp>
+#include <swapchain.hpp>
+#include <image.hpp>
+#include <buffer.hpp>
 #include <stats.hpp>
 #include <queue.hpp>
 #include <handle.hpp>
 #include <data.hpp>
 #include <wrap.hpp>
-#include <handles.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <util/bytes.hpp>
@@ -23,7 +25,7 @@
 #include <vil_api.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
 
 #include <set>
@@ -71,87 +73,48 @@ Gui::Gui(Device& dev, VkFormat colorFormat) {
 	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 	cpci.queueFamilyIndex = dev.gfxQueue->family;
 	VK_CHECK(dev.dispatch.CreateCommandPool(dev.handle, &cpci, nullptr, &commandPool_));
-	nameHandle(dev, commandPool_, "Gui:commandPool");
+	nameHandle(dev, commandPool_, "Gui");
 
 	// init render stuff
 	// descriptor set layout
-	VkDescriptorSetLayoutBinding binding {};
-	binding.binding = 0u;
-	binding.descriptorCount = 1u;
-	binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	auto imguiBindings = std::array {
+		vku::descriptorBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_FRAGMENT_BIT),
+	};
+	imguiDsLayout_.init(dev, imguiBindings, "imgui");
 
-	VkDescriptorSetLayoutCreateInfo dslci {};
-	dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	dslci.bindingCount = 1u;
-	dslci.pBindings = &binding;
-	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &dsLayout_));
-	nameHandle(dev, dsLayout_, "Gui:dsLayout");
+	auto imgOpBindings = std::array {
+		vku::descriptorBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_SHADER_STAGE_COMPUTE_BIT),
+		vku::descriptorBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			VK_SHADER_STAGE_COMPUTE_BIT, &dev.nearestSampler),
+	};
+	imgOpDsLayout_.init(dev, imgOpBindings, "imgOp");
 
-	// img op compute ds layout
-	VkDescriptorSetLayoutBinding imgOpBindings[2] {};
-	imgOpBindings[0].binding = 0u;
-	imgOpBindings[0].descriptorCount = 1u;
-	imgOpBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	imgOpBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	imgOpBindings[1].binding = 1u;
-	imgOpBindings[1].descriptorCount = 1u;
-	imgOpBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	imgOpBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	imgOpBindings[1].pImmutableSamplers = &dev.nearestSampler;
-
-	dslci.bindingCount = 2u;
-	dslci.pBindings = imgOpBindings;
-	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &imgOpDsLayout_));
-	nameHandle(dev, imgOpDsLayout_, "Gui:imgOpDsLayout");
-
-	// histogram ds layout
-	VkDescriptorSetLayoutBinding histBindings[2] {};
-	histBindings[0].binding = 0u;
-	histBindings[0].descriptorCount = 1u;
-	histBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	histBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-
-	histBindings[1].binding = 1u;
-	histBindings[1].descriptorCount = 1u;
-	histBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	histBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-
-	dslci.bindingCount = 2u;
-	dslci.pBindings = histBindings;
-	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr, &histogramDsLayout_));
-	nameHandle(dev, histogramDsLayout_, "Gui:histogramDsLayout");
+	auto histogramBindings = std::array {
+		vku::descriptorBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT),
+	};
+	histogramDsLayout_.init(dev, histogramBindings, "histogram");
 
 	// pipeline layout
 	// We just allocate the full push constant range that all implementations
 	// must support.
-	VkPushConstantRange pcrs[1] = {};
-	pcrs[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-	pcrs[0].offset = 0;
+	VkPushConstantRange pcr = {};
+	pcr.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+	pcr.offset = 0;
 	// PERF: perf most pipelines don't need this much. Could create multiple
 	// pipe layouts.
-	pcrs[0].size = 128; // needed e.g. for vertex viewer pipeline
+	pcr.size = 128; // needed e.g. for vertex viewer pipeline
 
-	VkPipelineLayoutCreateInfo plci {};
-	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	plci.setLayoutCount = 1;
-	plci.pSetLayouts = &dsLayout_;
-	plci.pushConstantRangeCount = 1;
-	plci.pPushConstantRanges = pcrs;
-	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &pipeLayout_));
-	nameHandle(dev, pipeLayout_, "Gui:pipeLayout");
+	imguiPipeLayout_ = vku::PipelineLayout(dev,
+		{{imguiDsLayout_.vkHandle()}}, {{pcr}}, "imgui");
+	histogramPipeLayout_ = vku::PipelineLayout(dev,
+		{{histogramDsLayout_.vkHandle()}}, {{pcr}}, "histogram");
 
-	// histogram ops pipe layout
-	plci.pSetLayouts = &histogramDsLayout_;
-	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &histogramPipeLayout_));
-	nameHandle(dev, histogramPipeLayout_, "Gui:histogramPipeLayout");
-
-	// Init image compute pipeline layout
-	pcrs[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-	plci.pSetLayouts = &imgOpDsLayout_;
-	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr, &imgOpPipeLayout_));
-	nameHandle(dev, imgOpPipeLayout_, "Gui:imgOpPipeLayout");
+	pcr.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	imgOpPipeLayout_ = vku::PipelineLayout(dev,
+		{{imgOpDsLayout_.vkHandle()}}, {{pcr}}, "histogram");
 
 	initRenderStuff();
 	initImGui();
@@ -160,14 +123,7 @@ Gui::Gui(Device& dev, VkFormat colorFormat) {
 	auto blurBackground = checkEnvBinary("VIL_BLUR", true);
 	if(blurBackground) {
 		vil::init(blur_, dev);
-
-		VkDescriptorSetAllocateInfo dai {};
-		dai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		dai.descriptorSetCount = 1u;
-		dai.pSetLayouts = &dsLayout_;
-		dai.descriptorPool = dev.dsPool;
-		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &blurDs_));
-		nameHandle(dev, blurDs_, "Gui:blurDs");
+		blurDs_ = allocDs(imguiDsLayout_, "Gui:blur");
 	}
 
 	// init tabs
@@ -251,7 +207,10 @@ void Gui::initRenderStuff() {
 	// imgui outputs srgb colors, need to convert to linear when rendering
 	// into srgb swapchain. This seems counterintuitive but is right.
 	auto manualSRGB = FormatIsSRGB(colorFormat_);
-	initPipes(dev, rp_, pipeLayout_, imgOpPipeLayout_, histogramPipeLayout_,
+	initPipes(dev, rp_,
+		imguiPipeLayout_.vkHandle(),
+		imgOpPipeLayout_.vkHandle(),
+		histogramPipeLayout_.vkHandle(),
 		pipes_, manualSRGB);
 }
 
@@ -410,13 +369,6 @@ Gui::~Gui() {
 	}
 
 	auto vkDev = dev_->handle;
-	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, dsLayout_, nullptr);
-	dev_->dispatch.DestroyPipelineLayout(vkDev, pipeLayout_, nullptr);
-	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, imgOpDsLayout_, nullptr);
-	dev_->dispatch.DestroyPipelineLayout(vkDev, imgOpPipeLayout_, nullptr);
-	dev_->dispatch.DestroyDescriptorSetLayout(vkDev, histogramDsLayout_, nullptr);
-	dev_->dispatch.DestroyPipelineLayout(vkDev, histogramPipeLayout_, nullptr);
-
 	dev_->dispatch.DestroyBuffer(vkDev, font_.uploadBuf, nullptr);
 	dev_->dispatch.FreeMemory(vkDev, font_.uploadMem, nullptr);
 	dev_->dispatch.DestroyImageView(vkDev, font_.view, nullptr);
@@ -560,28 +512,9 @@ void Gui::ensureFontAtlas(VkCommandBuffer cb) {
 		0, NULL,
 		1, useBarrier);
 
-	// create descriptor
-	VkDescriptorSetAllocateInfo dsai {};
-	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	dsai.descriptorPool = dev.dsPool;
-	dsai.descriptorSetCount = 1u;
-	dsai.pSetLayouts = &dsLayout_;
-	VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dsai, &dsFont_));
-
-	// ...and update it
-	VkDescriptorImageInfo dsii;
-	dsii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	dsii.imageView = font_.view;
-	dsii.sampler = dev.linearSampler;
-
-	VkWriteDescriptorSet write {};
-	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	write.descriptorCount = 1u;
-	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	write.dstSet = dsFont_;
-	write.pImageInfo = &dsii;
-
-	dev.dispatch.UpdateDescriptorSets(dev.handle, 1, &write, 0, nullptr);
+	// create and update font descriptor
+	dsFont_ = allocDs(imguiDsLayout_, "imguiFont");
+	vku::DescriptorUpdate(dsFont_).set(font_.view, dev.linearSampler);
 
 	// Store our identifier
 	font_.drawImage.type = ShaderImageType::count; // font
@@ -652,8 +585,8 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 		auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
 			VK_SHADER_STAGE_FRAGMENT_BIT |
 			VK_SHADER_STAGE_COMPUTE_BIT;
-		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_, pcrStages,
-			0, sizeof(pcr), pcr);
+		dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
+			pcrStages, 0, sizeof(pcr), pcr);
 
 		auto idxOff = 0u;
 		auto vtxOff = 0u;
@@ -667,15 +600,15 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 					cmd.UserCallback(&cmds, &cmd);
 
 					// reset state we need
-					dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
+					dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
 						pcrStages, 0, sizeof(pcr), pcr);
 					dev.dispatch.CmdSetViewport(draw.cb, 0, 1, &viewport);
 					dev.dispatch.CmdBindVertexBuffers(draw.cb, 0, 1, &draw.vertexBuffer.buf, &off0);
 					dev.dispatch.CmdBindIndexBuffer(draw.cb, draw.indexBuffer.buf, 0, VK_INDEX_TYPE_UINT16);
-					dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
+					dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
 						pcrStages, 0, sizeof(pcr), pcr);
 				} else {
-					VkDescriptorSet ds = dsFont_;
+					VkDescriptorSet ds = dsFont_.vkHandle();
 					VkPipeline pipe = pipes_.gui;
 					auto img = (DrawGuiImage*) cmd.TextureId;
 					if(img && img->type != ShaderImageType::count) {
@@ -698,14 +631,14 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 							img->level,
 						};
 
-						dev.dispatch.CmdPushConstants(draw.cb, pipeLayout_,
+						dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
 							pcrStages, 16,
 							sizeof(pcr), &pcr);
 					}
 
 					dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
 					dev.dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-						pipeLayout_, 0, 1, &ds, 0, nullptr);
+						imguiPipeLayout_.vkHandle(), 0, 1, &ds, 0, nullptr);
 
 					VkRect2D scissor {};
 					scissor.offset.x = std::max<int>(cmd.ClipRect.x - drawData.DisplayPos.x, 0);
@@ -1437,10 +1370,10 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		auto pcrStages = VK_SHADER_STAGE_VERTEX_BIT |
 			VK_SHADER_STAGE_FRAGMENT_BIT |
 			VK_SHADER_STAGE_COMPUTE_BIT;
-		dev().dispatch.CmdPushConstants(draw.cb, pipeLayout_,
+		dev().dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
 			pcrStages, 0, sizeof(pcr), pcr);
 		dev().dispatch.CmdBindDescriptorSets(draw.cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			pipeLayout_, 0u, 1u, &blurDs_, 0, nullptr);
+			imguiPipeLayout_.vkHandle(), 0u, 1u, &blurDs_.vkHandle(), 0, nullptr);
 		VkDeviceSize off = 0u;
 		dev().dispatch.CmdBindVertexBuffers(draw.cb, 0u, 1u, &blur_.vertices.buf, &off);
 		dev().dispatch.CmdDraw(draw.cb, 6, 1, 0, 0);
@@ -1650,7 +1583,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 				write.pImageInfo = &imgInfo;
 				write.descriptorCount = 1u;
 				write.dstArrayElement = 0u;
-				write.dstSet = blurDs_;
+				write.dstSet = blurDs_.vkHandle();
 				write.dstBinding = 0u;
 				write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
@@ -2116,6 +2049,25 @@ bool Gui::addInputEvent(unsigned short input16) {
 	events_.push_back(ev);
 
 	return eventCaptureKeyboard_ || eventWantTextInput_;
+}
+
+vku::DynDs Gui::allocDs(const vku::DynDsLayout& layout, StringParam name) {
+	VkDescriptorSetAllocateInfo dsai {};
+	dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	dsai.descriptorPool = dev_->dsPool;
+	dsai.descriptorSetCount = 1u;
+	dsai.pSetLayouts = &layout.vkHandle();
+
+	VkDescriptorSet ds;
+	VK_CHECK(dev_->dispatch.AllocateDescriptorSets(dev_->handle, &dsai, &ds));
+
+	auto ret = vku::DynDs(dev_->dsPool, layout, ds);
+
+	if(!name.empty()) {
+		nameHandle(ret, name);
+	}
+
+	return ret;
 }
 
 // util

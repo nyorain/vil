@@ -3,10 +3,16 @@
 #include <fwd.hpp>
 #include <util/bytes.hpp>
 #include <vk/vulkan_core.h>
+#include <vkutil/bufferSpan.hpp>
 
 namespace vil {
 
 struct OwnBuffer {
+	enum class Type {
+		hostVisible,
+		deviceLocal,
+	};
+
 	Device* dev {};
 	VkBuffer buf {};
 	VkDeviceMemory mem {};
@@ -15,13 +21,12 @@ struct OwnBuffer {
 
 	// Will ensure the buffer has at least the given size.
 	// If not, will recreate it with the given size and usage.
-	// Always uses host visible memory.
 	// - queueFams: the queue families where the buffer will be used.
 	//   Passing in duplicates is okay, they will be eliminated.
 	//   If queueFams contains less than 2 unique families, exclusive
 	//   sharing mode will be used.
 	void ensure(Device&, VkDeviceSize, VkBufferUsageFlags,
-		u32 queueFamsBitfield = {});
+		u32 queueFamsBitfield = {}, Type type = Type::hostVisible);
 
 	void invalidateMap();
 	void flushMap();
@@ -35,6 +40,9 @@ struct OwnBuffer {
 		swap(*this, rhs);
 		return *this;
 	}
+
+	vku::BufferSpan asSpan(VkDeviceSize offset = 0u, VkDeviceSize size = VK_WHOLE_SIZE) const;
+	explicit operator vku::BufferSpan() const { return asSpan(); }
 
 	friend void swap(OwnBuffer& a, OwnBuffer& b) noexcept;
 };

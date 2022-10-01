@@ -8,7 +8,7 @@
 #include <swa/swa.h>
 #include <util/dlg.hpp>
 #include <imgui/imgui.h>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <chrono>
 
 // NOTE: we know event calls always happen in the same thread as rendering

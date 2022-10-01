@@ -2,7 +2,8 @@
 
 #extension GL_GOOGLE_include_directive : require
 
-layout(local_size_x_id = 0, local_size_y_id = 1) in;
+// layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
+layout(local_size_x = 8, local_size_y = 8) in;
 
 layout(push_constant) uniform PCR {
 	int level;
@@ -19,19 +20,7 @@ const uint flagHasInf = 2u;
 
 #define SAMPLE_TEX_BINDING 1
 #include "sample.glsl"
-
-// val >  0 => most significant bit of returned uint will be 1
-// val <= 0 => most significant bit of returned uint will be 0
-uint floatToUintOrdered(float val) {
-	uint r = floatBitsToUint(val);
-	if((r & (1u << 31)) == 0) {
-		// val is positive
-		return r ^ 0x80000000u;
-	} else {
-		// val is negative
-		return r ^ 0xFFFFFFFFu;
-	}
-}
+#include "histogram.glsl"
 
 void main() {
 	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);

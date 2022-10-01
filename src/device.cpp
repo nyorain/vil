@@ -4,7 +4,14 @@
 #include <layer.hpp>
 #include <data.hpp>
 #include <swapchain.hpp>
-#include <handles.hpp>
+#include <image.hpp>
+#include <buffer.hpp>
+#include <queryPool.hpp>
+#include <cb.hpp>
+#include <rp.hpp>
+#include <ds.hpp>
+#include <sync.hpp>
+#include <swapchain.hpp>
 #include <overlay.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
