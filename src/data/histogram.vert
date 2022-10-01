@@ -1,20 +1,22 @@
 #version 460
 
+#extension GL_GOOGLE_include_directive : require
+
 layout(location = 0) out vec4 outChannels;
 layout(location = 1) out float outHeight;
 
-layout(set = 0, binding = 0) buffer HistData {
-	uint maxHist;
-} histData;
+#include "histogram.glsl"
 
-layout(set = 0, binding = 1) readonly buffer Hist {
+layout(set = 0, binding = 0) buffer HistData {
+	HistMetadata meta;
 	uvec4 data[];
 } hist;
 
 void main() {
 	vec4 lhist;	
+	float maxHist = uintOrderedToFloat(hist.meta.maxHist);
 	for(uint i = 0u; i < 4; ++i) {
-		lhist[i] = hist.data[gl_InstanceIndex][i] / float(histData.maxHist);
+		lhist[i] = hist.data[gl_InstanceIndex][i] / maxHist;
 	}
 
 	outChannels = lhist;

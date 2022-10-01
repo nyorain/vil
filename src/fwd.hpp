@@ -173,6 +173,15 @@ struct BuiltInResource;
 
 } // namespace spc
 
+namespace vil::vku {
+
+struct LocalImageState;
+struct LocalBufferState;
+struct SyncScope;
+struct BufferSpan;
+
+} // namespace vil::vku
+
 // TODO: rename to something like VIL_VK_CHECK
 #define VK_CHECK(x) do {\
 		auto result = (x);\

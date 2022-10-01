@@ -16,7 +16,7 @@
 #include <cb.hpp>
 #include <ds.hpp>
 #include <rp.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include "./internal.hpp"
 #include "../data/simple.comp.spv.h" // see simple.comp; compiled manually
 

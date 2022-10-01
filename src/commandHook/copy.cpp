@@ -9,7 +9,7 @@
 #include <queue.hpp>
 #include <threadContext.hpp>
 #include <util/debugMutex.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
 
 namespace vil {

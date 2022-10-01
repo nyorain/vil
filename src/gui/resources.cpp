@@ -10,12 +10,19 @@
 #include <queue.hpp>
 #include <pipe.hpp>
 #include <threadContext.hpp>
-#include <handles.hpp>
+#include <image.hpp>
+#include <buffer.hpp>
+#include <ds.hpp>
+#include <cb.hpp>
+#include <rp.hpp>
+#include <swapchain.hpp>
+#include <sync.hpp>
+#include <queryPool.hpp>
 #include <accelStruct.hpp>
 #include <util/util.hpp>
 #include <util/buffmt.hpp>
 #include <imgui/imgui_internal.h>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
 #include <map>
 

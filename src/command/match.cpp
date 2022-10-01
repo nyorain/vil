@@ -310,6 +310,14 @@ float approxTotalWeight(const FrameSubmission& subm) {
 	return ret;
 }
 
+LazyMatrixMarch::Result runLMM(u32 width, u32 height,
+		LinAllocScope& localMem, LazyMatrixMarch::Matcher matcher) {
+	constexpr auto branchThreshold = 0.9f;
+	auto customUse = localMem.customUse();
+	LazyMatrixMarch lmm(width, height, localMem.tc, matcher, branchThreshold);
+	return lmm.run();
+}
+
 // command hierarchy matching
 CommandSectionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 		const ParentCommand& rootA, const ParentCommand& rootB) {
@@ -409,10 +417,7 @@ CommandSectionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 		// return dst.match.match;
 	};
 
-	constexpr auto branchThreshold = 0.9f;
-	LazyMatrixMarch lmm(numSectionsA, numSectionsB, localMem.tc, matchingFunc,
-		branchThreshold);
-	auto lmmRes = lmm.run();
+	auto lmmRes = runLMM(numSectionsA, numSectionsB, localMem, matchingFunc);
 
 	ret.children = retMem.alloc<CommandSectionMatch>(lmmRes.matches.size());
 	id = 0u;
@@ -499,10 +504,8 @@ FrameSubmissionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 		return eval(ret.match);
 	};
 
-	constexpr auto branchThreshold = 0.9f;
-	LazyMatrixMarch lmm(a.submissions.size(), b.submissions.size(),
-		localMem.tc, matchingFunc, branchThreshold);
-	auto lmmRes = lmm.run();
+	auto lmmRes = runLMM(a.submissions.size(), b.submissions.size(),
+		localMem, matchingFunc);
 
 	// fill ret
 	ret.matches = retMem.alloc<CommandRecordMatch>(lmmRes.matches.size());
@@ -563,10 +566,7 @@ FrameMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 		return eval(ret.match);
 	};
 
-	constexpr auto branchThreshold = 0.9f;
-	LazyMatrixMarch lmm(a.size(), b.size(), localMem.tc, matchingFunc,
-		branchThreshold);
-	auto lmmRes = lmm.run();
+	auto lmmRes = runLMM(a.size(), b.size(), localMem, matchingFunc);
 
 	// fill return info
 	FrameMatch ret;

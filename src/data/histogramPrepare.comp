@@ -15,16 +15,6 @@ layout(set = 0, binding = 0) buffer Hist {
 	HistMetadata meta;
 } hist;
 
-float uintOrderedToFloat(uint val) {
-	if((val & (1u << 31)) == 0) {
-		// original float must have been negative
-		return uintBitsToFloat(val ^ 0xFFFFFFFFu);
-	} else {
-		// original float must have been positive
-		return uintBitsToFloat(val ^ 0x80000000u);
-	}
-}
-
 void main() {
 	if(pcr.useFixed) {
 		hist.meta.begin = pcr.begin;

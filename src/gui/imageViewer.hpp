@@ -2,6 +2,7 @@
 
 #include <util/vec.hpp>
 #include <gui/render.hpp>
+#include <vkutil/dynds.hpp>
 #include <optional>
 
 namespace vil {
@@ -43,34 +44,6 @@ public:
 	const auto& imageDraw() const { return imageDraw_; }
 
 private:
-	// Called during recording before the image is rendered via imgui.
-	// Will perform transitions, if needed, and draw the display area background.
-	void recordPreImage(VkCommandBuffer cb);
-	void drawBackground(VkCommandBuffer cb);
-
-	// Called during recording after the image was rendered via imgui.
-	// Will perform transitions, if needed.
-	void recordPostImage(Draw& draw);
-
-	// Reads the selected image at the cursor position via copy
-	void doCopy(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
-
-	// Reads the selected image at the cursor position via compute shader
-	// that samples it.
-	void doSample(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
-
-	void computeMinMax(VkCommandBuffer cb, Draw& draw, VkImageLayout oldLayout);
-
-	void createData();
-
-	void drawImageArea(Draw& draw);
-	void drawMetaInfo(Draw& draw);
-
-private:
-	// general, logical info
-	Draw* draw_ {}; // current draw
-	Gui* gui_ {};
-
 	// readback data
 	struct Readback {
 		OwnBuffer own;
@@ -81,8 +54,38 @@ private:
 		float layer {};
 		unsigned level {};
 
-		VkDescriptorSet opDS {};
+		vku::DynDs opDS {};
 	};
+
+	// Called during recording before the image is rendered via imgui.
+	// Will perform transitions, if needed, and draw the display area background.
+	void recordPreImage(Draw& draw, Readback& rb);
+
+	// Called during recording after the image was rendered via imgui.
+	// Will perform transitions, if needed.
+	void recordPostImage(Draw& draw, Readback& rb);
+
+	void drawBackground(VkCommandBuffer cb);
+
+	// Reads the selected image at the cursor position via copy
+	void doCopy(Draw& draw, vku::LocalImageState&, Readback& rb);
+
+	// Reads the selected image at the cursor position via compute shader
+	// that samples it.
+	void doSample(Draw& draw, vku::LocalImageState&, Readback& rb);
+	void computeMinMax(Draw& draw, vku::LocalImageState&, Readback& rb);
+
+	void createData();
+
+	void drawImageArea(Draw& draw);
+	void drawMetaInfo(Draw& draw);
+
+	void validateClampCoords(Vec3i& coords, u32& layer, u32& level);
+
+private:
+	// general, logical info
+	Draw* draw_ {}; // current draw
+	Gui* gui_ {};
 
 	std::vector<Readback> readbacks_;
 	std::optional<unsigned> lastReadback_ {};
@@ -114,8 +117,9 @@ private:
 	// finished.
 	struct DrawData {
 		Gui* gui {};
-		VkImageView view {};
-		VkDescriptorSet ds {};
+		vku::ImageView view {};
+		vku::DynDs ds {}; // for drawing the image
+		vku::DynDs histDs {}; // for histogram stuff
 		std::atomic<u32> refCount {};
 
 		// layout:
@@ -127,8 +131,6 @@ private:
 		// - uint maxHist (written by histogramMax.comp)
 		// - uvec4 hist[numBins] (written by histogram.comp)
 		OwnBuffer histogram;
-
-		~DrawData();
 	};
 
 	IntrusivePtr<DrawData> data_;

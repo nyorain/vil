@@ -3,7 +3,11 @@
 #include <data.hpp>
 #include <ds.hpp>
 #include <queue.hpp>
-#include <handles.hpp>
+#include <image.hpp>
+#include <buffer.hpp>
+#include <rp.hpp>
+#include <queryPool.hpp>
+#include <sync.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
 #include <vk/typemap_helper.h>

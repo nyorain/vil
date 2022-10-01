@@ -3,7 +3,7 @@
 #include <wrap.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <spirv-cross/spirv_cross.hpp>
 #include <filesystem>
 #include <optional>

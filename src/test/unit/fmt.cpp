@@ -1,6 +1,6 @@
 #include <util/util.hpp>
 #include <util/fmt.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
 #include "../bugged.hpp"
 #include "../approx.hpp"

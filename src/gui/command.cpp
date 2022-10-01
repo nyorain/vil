@@ -8,7 +8,7 @@
 #include <util/f16.hpp>
 #include <util/profiling.hpp>
 #include <util/buffmt.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
 #include <command/commands.hpp>
 #include <command/record.hpp>

@@ -5,6 +5,8 @@
 #include <util/bytes.hpp>
 #include <util/vec.hpp>
 #include <util/util.hpp>
+#include <vkutil/handles.hpp>
+#include <vkutil/dynds.hpp>
 #include <variant>
 #include <condition_variable>
 #include <atomic>
@@ -128,12 +130,12 @@ public:
 	Queue& usedQueue() const;
 
 	const auto& pipes() const { return pipes_; }
+	const auto& pipeLayout() const { return imguiPipeLayout_; }
+	const auto& imguiDsLayout() const { return imguiDsLayout_; }
 	const VkPipeline& imageBgPipe() const { return pipes_.imageBg; }
-	const VkPipelineLayout& pipeLayout() const { return pipeLayout_; }
-	const VkDescriptorSetLayout& dsLayout() const { return dsLayout_; }
 
-	const VkDescriptorSetLayout& imgOpDsLayout() const { return imgOpDsLayout_; }
-	const VkPipelineLayout& imgOpPipeLayout() const { return imgOpPipeLayout_; }
+	const auto& imgOpDsLayout() const { return imgOpDsLayout_; }
+	const auto& imgOpPipeLayout() const { return imgOpPipeLayout_; }
 	const VkPipeline& readTexPipe(ShaderImageType::Value type) const { return pipes_.readTex[type]; }
 
 	VkFormat colorFormat() const { return colorFormat_; }
@@ -141,6 +143,8 @@ public:
 
 	bool visible() const { return visible_; }
 	void visible(bool newVisible);
+
+	vku::DynDs allocDs(const vku::DynDsLayout& layout, StringParam name);
 
 	// only for the current draw
 	using Recorder = std::function<void(Draw&)>;
@@ -209,20 +213,20 @@ private:
 	//   And some stuff might have gui-specific details.
 	//   Maybe split it up, have some pipes here and some in Device?
 	//   But then factor out some utilities for easy pipeline creation.
-	VkDescriptorSetLayout dsLayout_ {};
-	VkPipelineLayout pipeLayout_ {};
+	vku::DynDsLayout imguiDsLayout_ {};
+	vku::PipelineLayout imguiPipeLayout_ {};
 
-	VkDescriptorSetLayout imgOpDsLayout_ {};
-	VkPipelineLayout imgOpPipeLayout_ {};
+	vku::DynDsLayout imgOpDsLayout_ {};
+	vku::PipelineLayout imgOpPipeLayout_ {};
 
-	VkDescriptorSetLayout histogramDsLayout_ {};
-	VkPipelineLayout histogramPipeLayout_ {};
+	vku::DynDsLayout histogramDsLayout_ {};
+	vku::PipelineLayout histogramPipeLayout_ {};
 
 	VkRenderPass rp_ {};
 	VkCommandPool commandPool_ {};
 
 	Pipelines pipes_;
-	VkDescriptorSet dsFont_ {};
+	vku::DynDs dsFont_ {};
 
 	struct {
 		bool uploaded {};
@@ -246,7 +250,7 @@ private:
 	VkSwapchainKHR blurSwapchain_ {};
 	ImVec2 windowPos_ {};
 	ImVec2 windowSize_ {};
-	VkDescriptorSet blurDs_ {};
+	vku::DynDs blurDs_ {};
 
 	std::vector<VkSemaphore> waitSemaphores_;
 	std::vector<VkPipelineStageFlags> waitStages_;

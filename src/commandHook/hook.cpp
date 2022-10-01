@@ -15,7 +15,7 @@
 #include <swapchain.hpp>
 #include <command/match.hpp>
 #include <command/commands.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
 #include <accelStructVertices.comp.spv.h>

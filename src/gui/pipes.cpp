@@ -1,6 +1,7 @@
 #include <device.hpp>
 #include <gui/gui.hpp>
 #include <util/span.hpp>
+#include <vkutil/handles.hpp>
 #include <array>
 
 // shaders
@@ -61,26 +62,12 @@ void initPipes(Device& dev,
 		VkPipelineLayout compPipeLayout,
 		VkPipelineLayout histogramPipeLayout,
 		Gui::Pipelines& dstPipes, bool manualSRGB) {
-	VkShaderModule vertModule;
-	VkShaderModuleCreateInfo vertShaderInfo {};
-	vertShaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	vertShaderInfo.codeSize = sizeof(gui_vert_spv_data);
-	vertShaderInfo.pCode = gui_vert_spv_data;
-	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &vertShaderInfo, NULL, &vertModule));
-
-	std::vector<VkShaderModule> modules;
+	std::vector<vku::ShaderModule> modules;
 	auto createShaderMod = [&](span<const u32> spv) {
-		VkShaderModuleCreateInfo shaderInfo {};
-		shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		shaderInfo.codeSize = spv.size() * 4;
-		shaderInfo.pCode = spv.data();
-
-		VkShaderModule ret;
-		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &shaderInfo, NULL, &ret));
-		// store them for destruction later on
-		modules.push_back(ret);
-		return ret;
+		return modules.emplace_back(dev, spv).vkHandle();
 	};
+
+	auto vertModule = createShaderMod(gui_vert_spv_data);
 
 	VkSpecializationMapEntry manualSRGBEntry {};
 	manualSRGBEntry.size = 4u;
@@ -327,14 +314,7 @@ void initPipes(Device& dev,
 	std::vector<VkComputePipelineCreateInfo> cpis {};
 
 	auto addCpi = [&](VkPipelineLayout layout, span<const u32> spv) {
-		VkShaderModuleCreateInfo shaderInfo {};
-		shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		shaderInfo.codeSize = spv.size() * 4;
-		shaderInfo.pCode = spv.data();
-
-		auto& mod = modules.emplace_back();
-		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &shaderInfo, NULL, &mod));
-
+		auto mod = createShaderMod(spv);
 		auto& cpi = cpis.emplace_back();
 		if(cpis.size() > 1u) {
 			cpi.basePipelineIndex = 0u;
@@ -418,12 +398,6 @@ void initPipes(Device& dev,
 		dstPipes.histogramPrepare = pipes[0];
 		dstPipes.histogramMax = pipes[1];
 		cpis.clear();
-	}
-
-	// destroy shader modules, not needed anymore after pipe creation
-	dev.dispatch.DestroyShaderModule(dev.handle, vertModule, nullptr);
-	for(auto& mod : modules) {
-		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 	}
 }
 

@@ -9,7 +9,7 @@
 #include <overlay.hpp>
 #include <command/record.hpp>
 #include <util/profiling.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 
 namespace vil {
 

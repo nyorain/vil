@@ -16,7 +16,7 @@
 #include <commandHook/record.hpp>
 #include <commandHook/submission.hpp>
 #include <gui/gui.hpp>
-#include <vk/enumString.hpp>
+#include <vkutil/enumString.hpp>
 #include <util/profiling.hpp>
 
 namespace vil {
