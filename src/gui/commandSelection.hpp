@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <util/intrusive.hpp>
 #include <commandHook/state.hpp>
+#include <util/syncedMap.hpp> // TODO: get rid of include, only for CommandBufferPtr
 #include <command/record.hpp> // TODO: get rid of include, only for CommandDescriptorSnapshot
 #include <vector>
 
