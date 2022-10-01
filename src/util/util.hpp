@@ -8,6 +8,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include <mutex>
 
 namespace vil {
 
@@ -401,7 +402,8 @@ u32 combineQueueFamilies(span<const u32> queueFams);
 template<typename Mutex, typename T>
 auto lockCopy(Mutex& mutex, T& obj) {
 	std::lock_guard lock(mutex);
-	return obj;
+	auto cpy = obj;
+	return cpy;
 }
 
 } // namespace vil
