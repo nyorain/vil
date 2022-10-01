@@ -131,7 +131,7 @@ enum class LocalCaptureBits : u32 {
 	// keepAll = (1u << 8u),
 };
 
-NYTL_FLAG_OPS(LocalCaptureBits);
+NYTL_FLAG_OPS(LocalCaptureBits)
 
 std::string_view name(LocalCaptureBits localCaptureBit);
 std::optional<LocalCaptureBits> localCaptureBit(std::string_view name);
