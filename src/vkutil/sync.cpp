@@ -53,6 +53,8 @@ void cmdBarrier(Device& dev, VkCommandBuffer cb, VkImage image, SyncScope src,
 	barrier.dstAccessMask = dst.access;
 	barrier.newLayout = dst.layout;
 	barrier.subresourceRange = subres;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 	dlg_assertm(barrier.oldLayout != invalidImageLayout,
 		"Invalid oldLayout: image layout of sync scopes did not match");
@@ -71,6 +73,8 @@ void cmdBarrier(Device& dev, VkCommandBuffer cb, BufferSpan buf, SyncScope src, 
 	barrier.size = buf.size();
 	barrier.srcAccessMask = src.access;
 	barrier.dstAccessMask = dst.access;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 	dev.dispatch.CmdPipelineBarrier(cb, src.stages, dst.stages,
 		0u, 0u, nullptr, 1u, &barrier, 0u, nullptr);
@@ -104,6 +108,8 @@ void cmdBarrier(Device& dev, VkCommandBuffer cb,
 		barrier.dstAccessMask = b.dst.access;
 		barrier.newLayout = b.dst.layout;
 		barrier.subresourceRange = b.subres;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 		dlg_assertm(barrier.oldLayout != invalidImageLayout,
 			"Invalid oldLayout: image layout of sync scopes did not match");
@@ -129,6 +135,8 @@ void cmdBarrier(Device& dev, VkCommandBuffer cb,
 		barrier.size = b.buffer.size();
 		barrier.srcAccessMask = b.src.access;
 		barrier.dstAccessMask = b.dst.access;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	}
 
 	dev.dispatch.CmdPipelineBarrier(cb, srcStages, dstStages, 0u, 0u, nullptr,

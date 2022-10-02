@@ -6,6 +6,7 @@
 #include <variant>
 #include <vector>
 #include <optional>
+#include <atomic>
 
 namespace vil {
 

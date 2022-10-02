@@ -682,7 +682,7 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 
 	dev.dispatch.CmdPipelineBarrier(cb,
-		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, // dunno
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 1, &barrier, 0, nullptr);
 
@@ -692,7 +692,7 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 	barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT; // dunno
 	dev.dispatch.CmdPipelineBarrier(cb,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
-		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, // dunno
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 		0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 

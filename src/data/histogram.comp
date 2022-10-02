@@ -2,7 +2,8 @@
 
 #extension GL_GOOGLE_include_directive : require
 
-layout(local_size_x_id = 0, local_size_y_id = 1) in;
+// layout(local_size_x_id = 0, local_size_y_id = 1) in;
+layout(local_size_x = 8u, local_size_y = 8u) in;
 
 #define SAMPLE_TEX_BINDING 1
 #include "sample.glsl"
@@ -30,12 +31,20 @@ void main() {
 
 	float range = hist.meta.end - hist.meta.begin;
 
+	const bool ignoreBounds = false;
+
 	int len = hist.data.length();
 	for(uint i = 0u; i < 4; ++i) {
+		if(ignoreBounds && (
+				col[i] == hist.meta.begin ||
+				col[i] == hist.meta.end)) {
+			continue;
+		}
+
 		float pos = (col[i] - hist.meta.begin) / range;
 		// uint id = clamp(pos * len, 0, len - 1);
 		int id = int(pos * len);
-		if(id > 0 && id < len) {
+		if(id >= 0 && id < len) {
 			atomicAdd(hist.data[id][i], 1u);
 		}
 	}

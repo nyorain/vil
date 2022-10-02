@@ -4,7 +4,7 @@ v0.2:
 - fix urgent bug list
 - image viewer improvements
 - vertex viewer improvements
-- fix README
+- improve README
 
 urgent, bugs:
 - [ ] look into a lot of descriptor names not being visible anymore
@@ -45,17 +45,9 @@ Freeze/selection changes:
 	- [ ] proper setting of image's pending layout
 	- [ ] introduce first cow-like concept, just tracking when resources get
 	      modified
-- [ ] CommandViewer (and ShaderDebugger probs as well) don't get an initial
-      state when ops change and freezeState is active.
-	  Solution: instead of *each* component having its own state, they
-	  should all directly access the CommandSelection.
-	  And unset the state on hook ops change (or maybe even just change the ops
-	  *through* the selection? not sure what is better)
-	  {quick fix now in, still updating in commandselector when frozen.
-	   want a clean solution tho}
-	- [ ] maybe get rid of CommandViewer::select altogether?
-	      or at least only call it on real selection and not on every
-		  state update?
+- [ ] rework buffmt with proper array types (and multdim arrays)
+      allow to store spirv u32 id per Type.
+	  	- [ ] related to storageBuffer bug?
 - [ ] cbGui: freezing state will currently also freeze the shown commands,
       might not be expected/desired. Reworking this is hard:
 	  when freezing state we don't execute any hooks and therefore would need
@@ -70,16 +62,13 @@ Freeze/selection changes:
 	- [ ] useful feature, we want to support it.
 - [ ] add global mutex priorities and add debug asserts
 - [ ] improve gui layout, too much wasted space in buffer viewer rn.
-- [ ] improve gui layout of image viewer (e.g. in command viewer).
-      really annoying rn to always scroll down. 
-	  Maybe use tabs? One for general information, one for the image viewer?
 - [ ] we often truncate buffers when copying them in record hook.
       Should *always* show some note in the UI, might be extremely confusing
 	  otherwise
 - [ ] cleanup: move render buffer code from Window/Overlay to gui.
       code duplication in Window/Overlay and it probably makes more sense
 	  in Gui anyways?!
-- [ ] support for multiple swapchains: store the selected swapchain
+- [ ] {later} support for multiple swapchains: store the selected swapchain
       in CommandBufferGui/CommandSelection/CommandHook instead of using
 	  dev.swapchain. Rename dev.swapchain into dev.lastCreatedSwapchain and
 	  really only use it for the respective API call
@@ -87,13 +76,9 @@ Freeze/selection changes:
 	      that opens it? Allow switching later on though.
 - [ ] add undefined behavior analyzer in shader debuggger.
       just need to enable spvm feature
-- [ ] there should probably just be one ImageViewer object; owned by Gui directly.
-      it's then used wherever an image is shown.
-	  Then, the ImageViewer could create and own its pipes, simplifying
-	  all that gui setup.
-- [ ] update pegtl
+- [ ] {low prio} update pegtl
 - [ ] improve timing queries
-	- [ ] allow timing for whole command buffers (begin to end)
+	- [x] allow timing for whole command buffers (begin to end)
 	- [ ] allow timing for whole submissions (begin to end)
 	- [ ] allow (via button) to show a histogram for a specific timing query
 		- [ ] create a small TimingQuery widget
@@ -101,7 +86,6 @@ Freeze/selection changes:
 	      Like, only update a couple of times per second?
 		  {NOTE, we have UpdateTick now, not sure if needing a separate
 		   mechanism just for timing queries}
-- [ ] implement basic filters in image viewer, like inf/nan overlay
 - [ ] optimization(important): for images captured in commandHook, we might be able to use
       that image when drawing the gui even though the associated submission
 	  hasn't finished yet (chained via semaphore).
@@ -112,8 +96,6 @@ Freeze/selection changes:
 	- [ ] maybe have a second vector<CommandHook> with pending submissions?
 	      and if the user of the submissions is ok with pending resources,
 		  it can use them?
-- [ ] rework buffmt with proper array types (and multdim arrays)
-      allow to store spirv u32 id per Type.
 - [ ] investigate callstack performance for big applications.
       Might be able to improve performance significantly, callstack.hpp
 	  always allocates a vector
@@ -124,13 +106,34 @@ Freeze/selection changes:
 	  the copy. Both of it is currently not done.
 	  Or maybe remove the copyChain logic completely? Not sure if trying
 	  to support simple extensions out of the box even makes sense.
-- [ ] {later} implement image histograms (probably best like in PIX)
-      See minmax.comp and histogram.comp
 - [ ] {later} honor maxTexelBufferElements. Fall back to raw vec4f copy
 	- most impls have valid limits though. Had to fix the mock icd tho :/
 - [ ] {later} implement blit imageToBuffer copy
 
-On vertices and where to find them:
+ImageViewer-next:
+- [ ] implement basic filters in image viewer, like inf/nan overlay
+- [ ] {high prio} Find a way to handle viewport/scissor more elegantly,
+      making sure they don't pop out of the window, EVER.
+	  Probably need to store different values for viewport and scissor size.
+	  Viewport depending on desired size, scissor depending on available
+	  size (e.g. needed when hidden via scrolling)
+- [ ] displaying high-res images in small viewer gives bad artefacts
+      since we don't use mips. Could generate mips on our own (this requires
+	  just copying the currently vieweed mip and then generating our own mips)
+- [ ] there should probably just be one ImageViewer object; owned by Gui directly.
+      it's then used wherever an image is shown.
+	  Then, the ImageViewer could create and own its pipes, simplifying
+	  all that gui setup.
+- [ ] Improve/fix layout of image viewer
+	- [ ] Keep the different split types tho
+	- [ ] allow histogram to have more height?
+- [ ] Put image information in metaInfo tab or add popup over image area
+- [ ] allow viewing an image fullscreen instead of the overlay
+      possibly still forwarding input to the application
+	  (useful for debug-visualizing render targets, most engines have this)
+- [ ] See todos in ImageViewer::drawMetaInfo
+
+On vertices and where to capture them:
 - [ ] fix capturing. Only capture the portions of the buffers that are used.
 	- [ ] fix vertexViewer bug for indexed drawing where we truncate the
 	      captured vertex buffers but can't really know/handle that
@@ -240,15 +243,6 @@ docs
 	      see: https://github.com/KhronosGroup/Vulkan-Loader/issues/51
 		  {see docs/compute-only.md}
 
-local captures:
-- [ ] {feature, later, useful tho} support regular hooks on 
-      local-capture-hooked records. Not exactly sure how this would work.
-	  On a similar note, support hooking multiple commands in a single record
-	  (most general case: multiple local hooks, multiple regular captures)
-- [ ] {feature, later} add flag specifying to capture the frame context
-      i.e. when showing it, show the whole frame.
-	  Just store the submissions in the LocalCapture completed hook.
-
 window/overlay
 - [ ] make the key to toggle/focus overlay configurable
 	- [ ] we should probably think of a general configuration mechanism by now
@@ -339,7 +333,6 @@ performance/profiling:
 		  per-cb-mutex shouldn't be important as long as we keep the critical
 		  sections really small, without any blocking
 
-
 gui stuff
 - [ ] (high prio) cb/command viewer: when viewing a batch from a swapchain,
       show the semaphores/fences with from a vkQueueSubmit.
@@ -371,6 +364,12 @@ other
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
 	- [ ] also make sure to handle in/out structs correctly. Follow SpvReflectInterfaceVariable::members
 	- [ ] maybe display each stage (the shader and associated information) as its own tab
+- [ ] when viewing live command submissions, clicking on resource buttons
+	  that change every frame/frequently (e.g. the backbuffer framebuffer)
+	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
+	  we could fix it by not imgui-pushing the resource ID before showing the button.
+	  	Instead just push the semantic that resource has in the given inspector
+		to make sure buttons are unique.
 - [ ] improve resource viewer
 	- [ ] tables instead of columns (columns sometimes don't align)
 	- [ ] references to other handles are so ugly at the moment
@@ -406,19 +405,30 @@ other
 		  resource viewer only viewing buffers) its very redundant.
 		  In most cases, it's redundant, only useful for some buttons (but
 		  even then we likely should rather have `Image: |terrainHeightmap|`.
-- [ ] when viewing live command submissions, clicking on resource buttons
-	  that change every frame/frequently (e.g. the backbuffer framebuffer)
-	  does not work. Wanting to goto "just any of those" is a valid usecase IMO,
-	  we could fix it by not imgui-pushing the resource ID before showing the button.
-	  	Instead just push the semantic that resource has in the given inspector
-		to make sure buttons are unique.
 - [ ] (low prio) improve imgui event handles, make sure inputs aren't lost when fps are low.
       see e.g. https://gist.github.com/ocornut/8417344f3506790304742b07887adf9f
 - [ ] (low prio) show enabled vulkan11, vulkan12 features in gui as well
 - [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
 
-PERF: lazy copying of resources, when resources don't change, we don't
-	have to make a copy every frame
+local captures:
+- [ ] {feature, useful} support regular hooks on 
+      local-capture-hooked records. Not exactly sure how this would work.
+	  On a similar note, support hooking multiple commands in a single record
+	  (most general case: multiple local hooks, multiple regular captures)
+- [ ] {feature, later} add flag specifying to capture the frame context
+      i.e. when showing it, show the whole frame.
+	  Just store the submissions in the LocalCapture completed hook.
+
+---
+
+Possibly for later, new features/ideas:
+matching:
+- [ ] (low prio, later) implement 'match' for missing commands, e.g.
+      for queryPool/event/dynamic state commands
+- [ ] (for later) fix/improve command matching for sync/bind commands
+	- [ ] bind: match via next draw/dispatch that uses this bind
+	- [ ] sync: match previous and next draw/dispatch and try to find
+	      matching sync in between? or something like that
 
 object wrapping:
 - [ ] (low prio, not sure yet)
@@ -438,18 +448,6 @@ object wrapping:
 - [ ] (later, low prio) support wrapping for remaining handle types.
       we can wait with this until it proves to be a bottleneck somewhere
 - [ ] (later, low prio) support wrapping for VkDevice, fix it everywhere
-
-
----
-
-Possibly for later, new features/ideas:
-matching:
-- [ ] (low prio, later) implement 'match' for missing commands, e.g.
-      for queryPool/event/dynamic state commands
-- [ ] (for later) fix/improve command matching for sync/bind commands
-	- [ ] bind: match via next draw/dispatch that uses this bind
-	- [ ] sync: match previous and next draw/dispatch and try to find
-	      matching sync in between? or something like that
 
 improved matching
 - [ ] (low prio) for sync/bind commands: find surrounding actions commands - as
@@ -599,13 +597,6 @@ optimization:
       io in util.cpp
 - [ ] Implement missing resource overview UIs
 	- [ ] sync primitives (-> submission rework & display, after v1.1)
-- [ ] show histogram to image in ui. Generate histogram together with min/max
-      values to allow auto-min-max as in renderdoc
-	- [ ] Using the histogram, we could add something even better, adjusting
-	      tonemapping/gamma/min-max to histogram instead just min-max
-- [ ] displaying high-res images in small viewer gives bad artefacts
-      since we don't use mips. Could generate mips on our own (this requires
-	  just copying the currently vieweed mip and then generating our own mips)
 - [ ] in vkCreateInstance/vkCreateDevice, we could fail if an extension we don't support
       is being enabled. I remember renderdoc doing this, sounds like a good idea.
 	- [ ] or an unexpectly high api version
@@ -641,9 +632,6 @@ optimization:
 	- [ ] ability to directly jump to it - in the contextually inferred layout - from a command?
 	      (might be confusing, content might have changed since then)
 	- [ ] move to own tab/panel? needed in multiple cases
-- [ ] improve image viewer
-	- [ ] move to own tab/panel? needed in multiple cases
-	      {nah, viewing it inline is better for now}
 - [ ] attempt to minimize level depth in cb viewer
 	- [ ] when a parent has only one child, combine them in some cases?
 	      mainly for Labels, they are currently not too helpful as they

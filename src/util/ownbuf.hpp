@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <util/bytes.hpp>
+#include <util/stringParam.hpp>
 #include <vk/vulkan_core.h>
 #include <vkutil/bufferSpan.hpp>
 
@@ -26,7 +27,8 @@ struct OwnBuffer {
 	//   If queueFams contains less than 2 unique families, exclusive
 	//   sharing mode will be used.
 	void ensure(Device&, VkDeviceSize, VkBufferUsageFlags,
-		u32 queueFamsBitfield = {}, Type type = Type::hostVisible);
+		u32 queueFamsBitfield = {}, StringParam name = {},
+		Type type = Type::hostVisible);
 
 	void invalidateMap();
 	void flushMap();

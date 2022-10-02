@@ -24,6 +24,7 @@
 #include <backward/common.hpp>
 #include <backward/resolve.hpp>
 #include <mutex>
+#include <fstream>
 
 namespace backward {
 namespace details {

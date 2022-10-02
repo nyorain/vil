@@ -38,7 +38,7 @@ struct SyncScope {
 		return {
 			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 			VK_ACCESS_SHADER_READ_BIT,
-			VK_IMAGE_LAYOUT_GENERAL,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		};
 	}
 	static inline SyncScope computeRead() {
@@ -139,9 +139,9 @@ struct SyncScope {
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, {}, layout,
 		};
 	}
-	static inline SyncScope allAccess(VkImageLayout layout) {
+	static inline SyncScope allAccess(VkPipelineStageFlags stage, VkImageLayout layout) {
 		return {
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			stage,
 			VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
 			layout,
 		};

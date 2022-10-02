@@ -2,12 +2,11 @@
 
 #extension GL_GOOGLE_include_directive : require
 
+layout(local_size_x = 1u, local_size_y = 1u) in;
+
 #include "histogram.glsl"
 
 layout(push_constant) uniform PCR {
-	bool useFixed;
-	float begin;
-	float end;
 	uint channelMask;
 } pcr;
 
@@ -16,40 +15,35 @@ layout(set = 0, binding = 0) buffer Hist {
 } hist;
 
 void main() {
-	if(pcr.useFixed) {
-		hist.meta.begin = pcr.begin;
-		hist.meta.end = pcr.end;
-	} else {
-		float begin = 0;
-		float end = 1;
-		uint beginCount = 0;
-		uint endCount = 0;
+	float begin = 0;
+	float end = 0;
+	uint beginCount = 0;
+	uint endCount = 0;
 
-		for(uint i = 0u; i < 4; ++i) {
-			if((pcr.channelMask & (1 << i)) == 0) {
-				continue;
-			}
-
-			// NOTE: we know that texMin/texMax does not contains nan or inf
-			float minval = uintOrderedToFloat(hist.meta.texMin[i]);
-			if(beginCount == 0) {
-				begin = minval;
-			} else {
-				begin = min(begin, minval);
-			}
-			++beginCount;
-
-			float maxval = uintOrderedToFloat(hist.meta.texMax[i]);
-			if(endCount == 0) {
-				end = maxval;
-			} else {
-				end = min(end, maxval);
-			}
-			++endCount;
+	for(uint i = 0u; i < 4; ++i) {
+		if((pcr.channelMask & (1u << i)) == 0) {
+			continue;
 		}
 
-		hist.meta.begin = begin;
-		hist.meta.end = end;
+		// NOTE: we know that texMin/texMax does not contains nan or inf
+		float minval = uintOrderedToFloat(hist.meta.texMin[i]);
+		if(beginCount == 0) {
+			begin = minval;
+		} else {
+			begin = min(begin, minval);
+		}
+		++beginCount;
+
+		float maxval = uintOrderedToFloat(hist.meta.texMax[i]);
+		if(endCount == 0) {
+			end = maxval;
+		} else {
+			end = max(end, maxval);
+		}
+		++endCount;
 	}
+
+	hist.meta.begin = begin;
+	hist.meta.end = end;
 }
 

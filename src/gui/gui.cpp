@@ -109,12 +109,12 @@ Gui::Gui(Device& dev, VkFormat colorFormat) {
 
 	imguiPipeLayout_ = vku::PipelineLayout(dev,
 		{{imguiDsLayout_.vkHandle()}}, {{pcr}}, "imgui");
-	histogramPipeLayout_ = vku::PipelineLayout(dev,
-		{{histogramDsLayout_.vkHandle()}}, {{pcr}}, "histogram");
 
 	pcr.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	histogramPipeLayout_ = vku::PipelineLayout(dev,
+		{{histogramDsLayout_.vkHandle()}}, {{pcr}}, "histogram");
 	imgOpPipeLayout_ = vku::PipelineLayout(dev,
-		{{imgOpDsLayout_.vkHandle()}}, {{pcr}}, "histogram");
+		{{imgOpDsLayout_.vkHandle()}}, {{pcr}}, "imgOp");
 
 	initRenderStuff();
 	initImGui();
@@ -1280,8 +1280,8 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		memb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
 		dev().dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 			0, 1, &memb, 0, nullptr, 0, nullptr);
 	}
 
@@ -1410,8 +1410,8 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		memb.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
 
 		dev().dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 			0, 1, &memb, 0, nullptr, 0, nullptr);
 	}
 

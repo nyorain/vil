@@ -10,6 +10,22 @@ layout(location = 1) in float inHeight;
 layout(location = 0) out vec4 outColor;
 
 void main() {
+	// additive blending
+	outColor = vec4(0, 0, 0, 1.0);
+	float sum = 0.0;
+	for(uint i = 0u; i < 3; ++i) {
+		if(inChannels[i] > inHeight) {
+			outColor[i] = 1.0;
+			sum += 1.0;
+		}
+	}
+
+	for(uint i = 0u; i < 3; ++i) {
+		outColor[i] /= (1 + 0.1 * sum);
+	}
+
+	// overlapping, not-additive
+#if 0
 	uint best = 10;
 
 	// TODO: handle alpha
@@ -28,4 +44,7 @@ void main() {
 
 	outColor = vec4(0, 0, 0, 1.0);
 	outColor[best] = 1.0;
+#endif
+
+	outColor.rgb = toLinearOpt(outColor.rgb, outputLinear);
 }
