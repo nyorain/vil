@@ -5,7 +5,7 @@
 #include <cmath> // std::ceil
 #include <algorithm> // std::clamp
 #include <type_traits> // std::is_unsigned
-#include <vector>
+#include <util/dlg.hpp>
 
 namespace vil {
 

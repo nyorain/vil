@@ -14,8 +14,8 @@ layout(set = 0, binding = 0) buffer HistData {
 
 void main() {
 	vec4 lhist;	
-	float maxHist = uintOrderedToFloat(hist.meta.maxHist);
-	for(uint i = 0u; i < 4; ++i) {
+	float maxHist = hist.meta.maxHist;
+	for(uint i = 0u; i < 3; ++i) {
 		lhist[i] = hist.data[gl_InstanceIndex][i] / maxHist;
 	}
 
@@ -33,7 +33,7 @@ void main() {
 		float((gl_VertexIndex + 1) & 2) * 0.5f,
 		float(gl_VertexIndex & 2) * 0.5f);
 	outHeight = (1 - pos.y) * m; // 0 or m
-	pos = start + pos * (start - end);
+	pos = start + pos * (end - start);
 
 	gl_Position = vec4(-1 + 2 * pos, 0.0, 1.0);
 }

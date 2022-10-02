@@ -24,12 +24,6 @@ be possible or useful in the end.
 
 - allow to visualize buffers as images where it makes sense 
   (using a bufferView or buffer-to-image copy)
-- allow to temporarily "freeze destruction", causing handles to be
-  moved to per-handle, per-device "destroyedX" maps/vectors.
-  The vulkan handles probably need to be destroyed (keeping them alive
-  has other problems, e.g. giving memory back to pools, don't wanna
-  hook all that) but it might be useful to inspect command buffers without
-  handles being destroyed
 
 - use dynamic rendering as renderpass splitting fallback?
   we'd have to recreate the pipeline as well tho. And can't support

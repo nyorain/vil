@@ -1,3 +1,28 @@
+- [x] CommandViewer (and ShaderDebugger probs as well) don't get an initial
+      state when ops change and freezeState is active.
+	  Solution: instead of *each* component having its own state, they
+	  should all directly access the CommandSelection.
+	  And unset the state on hook ops change (or maybe even just change the ops
+	  *through* the selection? not sure what is better)
+	  {quick fix now in, still updating in commandselector when frozen.
+	   want a clean solution tho}
+	- [x] maybe get rid of CommandViewer::select altogether?
+	      or at least only call it on real selection and not on every
+		  state update?
+- [~] improve gui layout of image viewer (e.g. in command viewer).
+      really annoying rn to always scroll down. 
+	  Maybe use tabs? One for general information, one for the image viewer?
+	  {nope, inline is better. Found a better way but just allowing to hide
+	   everything else}
+- [~] improve image viewer
+	- [~] move to own tab/panel? needed in multiple cases
+	      {nah, viewing it inline is better for now}
+- [x] show histogram to image in ui. Generate histogram together with min/max
+      values to allow auto-min-max as in renderdoc
+	- [x] Using the image histogram, we could add something even better, adjusting
+		  tonemapping/gamma/min-max to histogram instead just min-max
+- [x] {later} implement image histograms (probably best like in PIX)
+      See minmax.comp and histogram.comp
 - [x] fix updateRecord in CbGui
 - [x] first viable prototype of local captures:
 	- [x] fix varIDToDsCopyMap_ setup, elemID for arrays

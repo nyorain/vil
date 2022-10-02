@@ -7,7 +7,8 @@
 namespace vil {
 
 void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
-		VkBufferUsageFlags usage, u32 queueFamsBitset, Type type) {
+		VkBufferUsageFlags usage, u32 queueFamsBitset, StringParam name,
+		Type type) {
 	dlg_assert(!this->dev || this->dev == &dev);
 	if(size >= reqSize) {
 		return;
@@ -50,7 +51,7 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	}
 
 	VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf));
-	nameHandle(dev, this->buf, "OwnBuffer:buf");
+	nameHandle(dev, this->buf, name.empty() ? "OwnBuffer:buf" : name.c_str());
 
 	// get memory props
 	VkMemoryRequirements memReqs;

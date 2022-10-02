@@ -59,7 +59,7 @@ namespace vil {
 
 void initPipes(Device& dev,
 		VkRenderPass rp, VkPipelineLayout renderPipeLayout,
-		VkPipelineLayout compPipeLayout,
+		VkPipelineLayout imgOpPipeLayout,
 		VkPipelineLayout histogramPipeLayout,
 		Gui::Pipelines& dstPipes, bool manualSRGB) {
 	std::vector<vku::ShaderModule> modules;
@@ -337,7 +337,7 @@ void initPipes(Device& dev,
 
 	auto creations = std::array {
 		PipeCreation {
-			dstPipes.readTex, compPipeLayout, {
+			dstPipes.readTex, imgOpPipeLayout, {
 				readTex_comp_u1DArray_spv_data,
 				readTex_comp_u2DArray_spv_data,
 				readTex_comp_u3D_spv_data,
@@ -350,7 +350,7 @@ void initPipes(Device& dev,
 			}
 		},
 		PipeCreation {
-			dstPipes.histogramTex, compPipeLayout, {
+			dstPipes.histogramTex, imgOpPipeLayout, {
 				histogram_comp_u1DArray_spv_data,
 				histogram_comp_u2DArray_spv_data,
 				histogram_comp_u3D_spv_data,
@@ -363,7 +363,7 @@ void initPipes(Device& dev,
 			}
 		},
 		PipeCreation {
-			dstPipes.minMaxTex, compPipeLayout, {
+			dstPipes.minMaxTex, imgOpPipeLayout, {
 				minmax_comp_u1DArray_spv_data,
 				minmax_comp_u2DArray_spv_data,
 				minmax_comp_u3D_spv_data,

@@ -53,8 +53,8 @@ public:
 	DynDs(VkDescriptorPool, const DynDsLayout&, VkDescriptorSet);
 	~DynDs() { destroy(); }
 
-	DynDs(DynDs&& rhs) = default;
-	DynDs& operator=(DynDs&& rhs) = default;
+	DynDs(DynDs&& rhs) noexcept = default;
+	DynDs& operator=(DynDs&& rhs) noexcept = default;
 
 	void destroy();
 

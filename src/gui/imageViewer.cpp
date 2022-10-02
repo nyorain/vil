@@ -15,10 +15,13 @@
 namespace vil {
 
 // see histogram.glsl
-struct MinMaxData {
+struct HistMetadata {
 	Vec4u32 texMin;
 	Vec4u32 texMax;
 	u32 flags;
+	float begin;
+	float end;
+	u32 maxHist;
 };
 
 // See minmax.comp
@@ -88,6 +91,9 @@ void ImageViewer::init(Gui& gui) {
 void ImageViewer::drawMetaInfo(Draw& draw) {
 	(void) draw;
 
+	// TODO:
+	// rework all of this just into the histogram.
+
 	// Row 1: components
 	auto recreateView = false;
 	VkFlags depthStencil = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
@@ -156,12 +162,136 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		imageDraw_.level = mip;
 	}
 
-	// Row 3: min/max values
-	ImGui::DragFloat("Min", &imageDraw_.minValue, 0.01);
-	ImGui::DragFloat("Max", &imageDraw_.maxValue, 0.01);
+	// == Histogram ==
+	// TODO:
+	// - add power/gamma button-slider (add such a widget in gui/util)
+	// - add reset button after fixedRange was activated
+	// - proper resetting on a newly selected image
+	// - use color channel mask in histogram. Only show certain channels.
+	//   Add support for luma conversion.
+	//   Also, apply coloring rules for images.
+	//   On single-channel images, don't show red histogram etc
+	//   Also, don't show the bucket count for the deactived channels
+	//   in the tooltip
+	// - The tooltip could use some love in general.
+	//   Less digits in the float range
+	// - Add stabilizing option? E.g. make bucket counts float and
+	//   use moving average or something?
+	// - Add option to not automatically rescale (height-wise)
+	//   buckets to current maximum? i.e. optionally skip histogramMax
+	//   as well when fixedRange is active, fixing meta.maxHist to
+	//   the value it had when frozen?
+	//   This might not make sense tho, evaluate.
+	// - Add support for skipping outliers. E.g. in an image with black
+	//   background, make it possible to ignore that bar in the histogram
+	//   (we have ignoreBounds in histogram.comp but that is way too
+	//   limited. Doesn't work with manual bounds and doesn't work
+	//   with outliers that aren't on bounds, think of 0.0 background
+	//   of (signed) normal-gbuffer)
 
-	// NOTE: could add power/gamma slider here.
+	Readback* rb = nullptr;
+	if(lastReadback_) {
+		auto& readback = readbacks_[*lastReadback_];
+		dlg_assert(!readback.pending);
+		if(readback.valid) {
+			rb = &readback;
+		}
+	}
 
+	if(rb && !histogram_.fixedRange) {
+		auto data = rb->own.data();
+		skip(data, 100u);
+		auto meta = read<HistMetadata>(data);
+		histogram_.begin = meta.begin;
+		histogram_.end = meta.end;
+	}
+
+	auto pos = ImGui::GetCursorScreenPos();
+	auto avail = ImGui::GetContentRegionAvail();
+	histogram_.offset.x = pos.x;
+	histogram_.offset.y = pos.y;
+	histogram_.size.x = avail.x;
+	histogram_.size.y = 200u;
+
+	auto& io = ImGui::GetIO();
+	ImGui::InvisibleButton("HistCanvas", {histogram_.size.x, histogram_.size.y});
+	ImGui::SetItemUsingMouseWheel();
+	if(ImGui::IsItemFocused()) {
+		if(histogram_.panning) {
+			histogram_.fixedRange = true;
+
+			auto range = histogram_.end - histogram_.begin;
+			auto delta = range * io.MouseDelta.x / histogram_.size.x;
+			histogram_.end -= delta;
+			histogram_.begin -= delta;
+		}
+
+		if(ImGui::IsItemHovered() || histogram_.panning) {
+			histogram_.panning = io.MouseDown[0];
+		}
+	}
+
+	if(ImGui::IsItemHovered()) {
+		// hover msg
+		auto mpos = ImGui::GetMousePos();
+		float rx = (mpos.x - histogram_.offset.x) / histogram_.size.x;
+		dlg_assert(rx >= 0.f && rx <= 1.f);
+		i32 bucketID = std::clamp(histogramSections * rx, 0.f, histogramSections - 1.f); // floor
+
+		if(rb) {
+			auto data = rb->own.data();
+			skip(data, 100 + sizeof(HistMetadata) + bucketID * sizeof(Vec4u32));
+			auto bucket = read<Vec4u32>(data);
+
+			auto begin = histogram_.begin;
+			auto end = histogram_.end;
+			auto bucketStart = mix(begin, end, float(bucketID) / histogramSections);
+			auto bucketEnd = mix(begin, end, float(bucketID + 1) / histogramSections);
+
+			auto str = dlg::format("{} [{} - {}]: {}", bucketID,
+				bucketStart, bucketEnd, bucket);
+			ImGui::SetTooltip("%s", str.c_str());
+		} else {
+			auto str = dlg::format("Reading... Bucket {}", bucketID);
+			ImGui::SetTooltip("%s", str.c_str());
+		}
+
+		// process mouse wheel
+		if(io.MouseWheel != 0.f) {
+			histogram_.fixedRange = true;
+
+			auto range = histogram_.end - histogram_.begin;
+			auto rcenter = (io.MousePos.x - histogram_.offset.x) / histogram_.size.x;
+			auto center = histogram_.begin + std::clamp(rcenter, 0.f, 1.f) * range;
+
+			auto sfac = std::pow(0.9, io.MouseWheel);
+
+			histogram_.begin -= center;
+			histogram_.end   -= center;
+			histogram_.begin *= sfac;
+			histogram_.end   *= sfac;
+			histogram_.begin += center;
+			histogram_.end   += center;
+		}
+	}
+
+	if(histogram_.fixedRange) {
+		imageDraw_.minValue = histogram_.begin;
+		imageDraw_.maxValue = histogram_.end;
+	}
+
+	// histogram
+	draw_ = &draw;
+	auto cbHistogram = [](const ImDrawList*, const ImDrawCmd* cmd) {
+		auto* self = static_cast<ImageViewer*>(cmd->UserCallbackData);
+		dlg_assert(self->draw_);
+		self->drawHistogram(self->draw_->cb);
+	};
+	ImGui::GetWindowDrawList()->AddCallback(cbHistogram, this);
+
+	// TODO: likely not the right position to call this.
+	// We'd have to keep the old *and* new one alive in that case...
+	// Probably not what we want!
 	if(recreateView) {
 		createData();
 	}
@@ -216,12 +346,12 @@ void ImageViewer::drawImageArea(Draw& draw) {
 	// draw
 	// background
 	draw_ = &draw;
-	auto cbPost = [](const ImDrawList*, const ImDrawCmd* cmd) {
+	auto cbBackground = [](const ImDrawList*, const ImDrawCmd* cmd) {
 		auto* self = static_cast<ImageViewer*>(cmd->UserCallbackData);
 		dlg_assert(self->draw_);
 		self->drawBackground(self->draw_->cb);
 	};
-	ImGui::GetWindowDrawList()->AddCallback(cbPost, this);
+	ImGui::GetWindowDrawList()->AddCallback(cbBackground, this);
 
 	// image
 	ImGui::PushClipRect({pos.x, pos.y}, {pos.x + bgW, pos.y + bgH}, true);
@@ -257,7 +387,7 @@ void ImageViewer::drawImageArea(Draw& draw) {
 			offset_.y += delta.y / regH;
 		}
 
-		if(ImGui::IsItemHovered()) {
+		if(ImGui::IsItemHovered() || panning_) {
 			panning_ = io.MouseDown[0];
 		}
 	}
@@ -321,8 +451,9 @@ void ImageViewer::drawImageArea(Draw& draw) {
 
 			auto data = rb.own.data();
 			skip(data, 100u);
-			auto minMax = read<MinMaxData>(data);
-			ImGui::SameLine();
+			auto minMax = read<HistMetadata>(data);
+
+			/*
 			Vec4f min;
 			Vec4f max;
 			for(auto i = 0u; i < 4; ++i) {
@@ -330,7 +461,9 @@ void ImageViewer::drawImageArea(Draw& draw) {
 				max[i] = uintOrderedToFloat(minMax.texMax[i]);
 			}
 
+			ImGui::SameLine();
 			imGuiText("| Min: {}, Max: {}", min, max);
+			*/
 
 			if(minMax.flags != 0u) {
 				if(minMax.flags & flagHasInf) {
@@ -412,10 +545,10 @@ void ImageViewer::display(Draw& draw) {
 	if(!readback) {
 		readback = &readbacks_.emplace_back();
 
-		auto maxBufSize = 1024;
+		auto maxBufSize = 100 + histogramBufSize();
 		readback->own.ensure(dev, maxBufSize,
 			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-			VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+			VK_BUFFER_USAGE_TRANSFER_DST_BIT, {}, "ImageViewer:readback");
 		readback->opDS = gui_->allocDs(gui_->imgOpDsLayout(), "ImageViewer:readbackOpDs");
 	}
 
@@ -463,8 +596,8 @@ void ImageViewer::display(Draw& draw) {
 		auto availY = (availX - 30) / aspectImage;
 		if(ImGui::BeginChild("ImageArea", ImVec2(availX - 30, availY))) {
 			drawImageArea(draw);
-			ImGui::EndChild();
 		}
+		ImGui::EndChild();
 
 		drawMetaInfo(draw);
 	} else {
@@ -478,8 +611,8 @@ void ImageViewer::display(Draw& draw) {
 
 			if(ImGui::BeginChild("ImageArea", ImVec2(0.f, availY))) {
 				drawImageArea(draw);
-				ImGui::EndChild();
 			}
+			ImGui::EndChild();
 
 			ImGui::TableNextColumn();
 
@@ -496,15 +629,15 @@ void ImageViewer::recordPreImage(Draw& draw, Readback& rb) {
 
 	vku::LocalImageState srcState;
 	srcState.image = src_;
-	srcState.lastAccess = vku::SyncScope::allAccess(initialImageLayout_);
+	srcState.lastAccess = vku::SyncScope::allAccess(
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, initialImageLayout_);
 	srcState.range = subresRange_;
 
-	computeMinMax(draw, srcState, rb);
+	vku::LocalBufferState histBufState{data_->histogram.asSpan()};
+	computeHistogram(draw, srcState, histBufState, rb);
 
 	// prepare image for being drawn
-	if(initialImageLayout_ != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-		srcState.transition(dev, draw.cb, vku::SyncScope::fragmentRead());
-	}
+	srcState.transition(dev, draw.cb, vku::SyncScope::fragmentRead());
 }
 
 void ImageViewer::recordPostImage(Draw& draw, Readback& rb) {
@@ -525,7 +658,6 @@ void ImageViewer::recordPostImage(Draw& draw, Readback& rb) {
 		// which we need it (some hardware not supporting sampling
 		// certain formats? maybe copying is a lot faster sometimes, making
 		// a dynamic branch here worth it?)
-		constexpr auto useSamplingCopy = true;
 		if(useSamplingCopy) {
 			doSample(draw, srcState, rb);
 		} else {
@@ -533,12 +665,15 @@ void ImageViewer::recordPostImage(Draw& draw, Readback& rb) {
 		}
 	}
 
-	srcState.transition(gui_->dev(), cb, vku::SyncScope::allAccess(finalImageLayout_));
+	srcState.transition(gui_->dev(), cb, vku::SyncScope::allAccess(
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, finalImageLayout_));
 }
 
 void ImageViewer::drawBackground(VkCommandBuffer cb) {
 	auto& dev = gui_->dev();
 	auto displaySize = ImGui::GetIO().DisplaySize;
+
+	DebugLabel cblbl(dev, cb, "vil:ImageViewer:drawBackground");
 
 	if(canvasSize_.x == 0u || canvasSize_.y == 0u) {
 		return; // nothing to do
@@ -571,10 +706,52 @@ void ImageViewer::drawBackground(VkCommandBuffer cb) {
 
 	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		gui_->imageBgPipe());
-	dev.dispatch.CmdPushConstants(cb, gui_->pipeLayout().vkHandle(),
+	dev.dispatch.CmdPushConstants(cb, gui_->imguiPipeLayout().vkHandle(),
 		VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
 		0, sizeof(pcData), &pcData);
 	dev.dispatch.CmdDraw(cb, 4, 1, 0, 0);
+}
+
+void ImageViewer::drawHistogram(VkCommandBuffer cb) {
+	auto& dev = gui_->dev();
+	auto displaySize = ImGui::GetIO().DisplaySize;
+
+	DebugLabel cblbl(dev, cb, "vil:ImageViewer:drawHistogram");
+
+	if(histogram_.size.x == 0u || histogram_.size.y == 0u) {
+		return; // nothing to do
+	}
+
+	VkRect2D scissor {};
+	scissor.offset.x = std::max<int>(histogram_.offset.x, 0);
+	scissor.offset.y = std::max<int>(histogram_.offset.y, 0);
+	scissor.extent.width = std::min<int>(
+		histogram_.size.x + histogram_.offset.x - scissor.offset.x,
+		displaySize.x - histogram_.offset.x);
+	scissor.extent.height = std::min<int>(
+		histogram_.size.y + histogram_.offset.y - scissor.offset.y,
+		displaySize.y - histogram_.offset.y);
+	dev.dispatch.CmdSetScissor(cb, 0, 1, &scissor);
+
+	VkViewport viewport {};
+	viewport.width = histogram_.size.x;
+	viewport.height = histogram_.size.y;
+	viewport.x = histogram_.offset.x;
+	viewport.y = histogram_.offset.y;
+	viewport.maxDepth = 1.f;
+	dev.dispatch.CmdSetViewport(cb, 0, 1, &viewport);
+
+	auto pipeLayout = gui_->histogramPipeLayout().vkHandle();
+	auto pipe = gui_->pipes().histogramRender;
+
+	dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		pipeLayout, 0u, 1u, &data_->histDs.vkHandle(), 0u, nullptr);
+	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+
+	// See histogram.vert
+	const auto numVerts = 4u; // quads using triangle fan
+	const auto numInstances = histogramSections;
+	dev.dispatch.CmdDraw(cb, numVerts, numInstances, 0, 0);
 }
 
 void ImageViewer::doSample(Draw& draw, vku::LocalImageState& srcState, Readback& rb) {
@@ -583,11 +760,11 @@ void ImageViewer::doSample(Draw& draw, vku::LocalImageState& srcState, Readback&
 	dlg_assert(this->copyTexel_);
 
 	dlg_assert(FormatElementSize(format_) <= 100);
-	srcState.transition(dev, cb, vku::SyncScope::fragmentRead());
+	srcState.transition(dev, cb, vku::SyncScope::computeRead());
 
 	// update ds
 	vku::DescriptorUpdate(rb.opDS)
-		(rb.own.asSpan())
+		(rb.own.asSpan(0, 100u))
 		(data_->view.vkHandle(), dev.nearestSampler);
 
 	// prepare sample copy operation
@@ -685,47 +862,127 @@ void ImageViewer::doCopy(Draw& draw, vku::LocalImageState& srcState, Readback& r
 	rb.texel = readTexelOffset_;
 }
 
-void ImageViewer::computeMinMax(Draw& draw, vku::LocalImageState& srcState,
-		Readback& rb) {
+void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
+		vku::LocalBufferState& histBufState, Readback& rb) {
 	auto& dev = gui_->dev();
+	DebugLabel cblbl(dev, draw.cb, "vil:ImageViewer:computeHistogram");
+
 	srcState.transition(dev, draw.cb, vku::SyncScope::computeRead());
 
-	vku::LocalBufferState histBufState{data_->histogram.asSpan()};
+	// clear hist buffer
 	histBufState.discard(dev, draw.cb, vku::SyncScope::transferWrite());
-
 	const u32 minVal = 0xFFFFFFFFu;
 	const u32 maxVal = 0x00000000u;
 
-	MinMaxData data {};
+	HistMetadata data {};
 	data.texMin = {minVal, minVal, minVal, minVal};
 	data.texMax = {maxVal, maxVal, maxVal, maxVal};
+
+	if(histogram_.fixedRange) {
+		data.begin = histogram_.begin;
+		data.end = histogram_.end;
+	}
+
 	dev.dispatch.CmdUpdateBuffer(draw.cb, data_->histogram.buf,
 		0u, sizeof(data), &data);
+	// make sure to clear the histogram buckets to 0
+	dev.dispatch.CmdFillBuffer(draw.cb, data_->histogram.buf,
+		sizeof(data), VK_WHOLE_SIZE, 0u);
 
 	histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());
 
-	auto pipeLayout = gui_->imgOpPipeLayout().vkHandle();
-	auto pipe = gui_->pipes().minMaxTex[imageDraw_.type];
+	// skip computeMinMax and Prepare pass and simple CmdUpdateBuffer
+	//   in fixed case. Makes histogramPrepare shader and pcr simpler
 
-	dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
-	dev.dispatch.CmdBindDescriptorSets(draw.cb,
-		VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
-		0u, 1u, &data_->histDs.vkHandle(), 0u, nullptr);
+	if(!histogram_.fixedRange) {
+		// compute minMax
+		DebugLabel cblbl(dev, draw.cb, "vil:ImageViewer:computeMinMax");
 
-	int level = int(imageDraw_.level);
-	dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
-		VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(level), &level);
+		auto pipeLayout = gui_->imgOpPipeLayout().vkHandle();
+		auto pipe = gui_->pipes().minMaxTex[imageDraw_.type];
 
-	auto w = std::max(extent_.width >> u32(level), 1u);
-	auto h = std::max(extent_.height >> u32(level), 1u);
-	auto d = std::max(extent_.depth >> u32(level), 1u);
+		dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+		dev.dispatch.CmdBindDescriptorSets(draw.cb,
+			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
+			0u, 1u, &data_->imgOpDs.vkHandle(), 0u, nullptr);
 
-	dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 8u), ceilDivide(h, 8u), d);
+		int level = int(imageDraw_.level);
+		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(level), &level);
 
-	// we want min/max and flags on cpu as well
+		auto w = std::max(extent_.width >> u32(level), 1u);
+		auto h = std::max(extent_.height >> u32(level), 1u);
+		auto d = std::max(extent_.depth >> u32(level), 1u);
+
+		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 8u), ceilDivide(h, 8u), d);
+
+		histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());
+
+		// prepare histogram
+		pipeLayout = gui_->histogramPipeLayout().vkHandle();
+		pipe = gui_->pipes().histogramPrepare;
+
+		struct {
+			u32 channelMask;
+		} pcr {
+			0xb0111, // don't include alpha here
+		};
+
+		dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+		dev.dispatch.CmdBindDescriptorSets(draw.cb,
+			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
+			0u, 1u, &data_->histDs.vkHandle(), 0u, nullptr);
+		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), &pcr);
+		dev.dispatch.CmdDispatch(draw.cb, 1u, 1u, 1u);
+	}
+
+	histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());
+
+	// compute histogram
+	{
+		auto pipeLayout = gui_->imgOpPipeLayout().vkHandle();
+		auto pipe = gui_->pipes().histogramTex[imageDraw_.type];
+
+		dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+		dev.dispatch.CmdBindDescriptorSets(draw.cb,
+			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
+			0u, 1u, &data_->imgOpDs.vkHandle(), 0u, nullptr);
+
+		int level = int(imageDraw_.level);
+		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(level), &level);
+
+		auto w = std::max(extent_.width >> u32(level), 1u);
+		auto h = std::max(extent_.height >> u32(level), 1u);
+		auto d = std::max(extent_.depth >> u32(level), 1u);
+
+		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 8u), ceilDivide(h, 8u), d);
+	}
+
+	histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());
+
+	// prepare histogram for rendering, compute the bucket with the highest count
+	{
+		auto pipeLayout = gui_->histogramPipeLayout().vkHandle();
+		auto pipe = gui_->pipes().histogramMax;
+
+		dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+		dev.dispatch.CmdBindDescriptorSets(draw.cb,
+			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
+			0u, 1u, &data_->histDs.vkHandle(), 0u, nullptr);
+
+		dev.dispatch.CmdDispatch(draw.cb, 1u, 1u, 1u);
+	}
+
+	histBufState.transition(dev, draw.cb, vku::SyncScope::vertexRead());
+
+	// We want histogram on cpu as well
+	// We don't use the readback buffer as storage buffer directly
+	// for performance reasons.
 	histBufState.transition(dev, draw.cb, vku::SyncScope::transferRead());
 	vku::cmdCopyBuffer(dev, draw.cb,
-		data_->histogram.asSpan(0u, sizeof(MinMaxData)),
+		data_->histogram.asSpan(),
 		rb.own.asSpan(100u));
 }
 
@@ -868,24 +1125,28 @@ void ImageViewer::createData() {
 	ivi.subresourceRange.aspectMask = aspect_;
 	data_->view = {dev, ivi, "ImageViewer:imageView"};
 
-	data_->ds = gui_->allocDs(gui_->imguiDsLayout(), "ImageViewer:display");
+	data_->drawDs = gui_->allocDs(gui_->imguiDsLayout(), "ImageViewer:display");
 	// TODO: use better sampler, with linear interpolation where possible.
 	// But only when image is too large for canvas, otherwise use nearest via
 	// min/magFilter
-	vku::DescriptorUpdate(data_->ds)
+	vku::DescriptorUpdate(data_->drawDs)
 		(data_->view.vkHandle(), dev.nearestSampler);
 
-	// TODO: don't just hardcode size here
-	data_->histogram.ensure(dev, 8192,
+	data_->histogram.ensure(dev, histogramBufSize(),
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 		VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT, {}, OwnBuffer::Type::deviceLocal);
-	data_->histDs = gui_->allocDs(gui_->imgOpDsLayout(), "ImageViewer:histDs");
-	vku::DescriptorUpdate(data_->histDs)
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT, {}, "ImageViewer:hist",
+		OwnBuffer::Type::deviceLocal);
+	data_->imgOpDs = gui_->allocDs(gui_->imgOpDsLayout(), "ImageViewer:histImgOp");
+	vku::DescriptorUpdate(data_->imgOpDs)
 		(data_->histogram.asSpan())
 		(data_->view.vkHandle(), dev.nearestSampler);
 
-	imageDraw_.ds = data_->ds.vkHandle();
+	data_->histDs = gui_->allocDs(gui_->histogramDsLayout(), "ImageViewer:hist");
+	vku::DescriptorUpdate(data_->histDs)
+		(data_->histogram.asSpan());
+
+	imageDraw_.ds = data_->drawDs.vkHandle();
 }
 
 void ImageViewer::validateClampCoords(Vec3i& coords, u32& layer, u32& level) {
@@ -908,6 +1169,10 @@ void ImageViewer::validateClampCoords(Vec3i& coords, u32& layer, u32& level) {
 	dlg_assert_or(layer < layerEnd, layer = layerEnd - 1);
 	dlg_assert_or(level >= levelBegin, level = levelBegin);
 	dlg_assert_or(level < levelEnd, level = levelEnd - 1);
+}
+
+u32 ImageViewer::histogramBufSize() {
+	return sizeof(HistMetadata) + sizeof(Vec4u32) * histogramSections;
 }
 
 } // namespace vil

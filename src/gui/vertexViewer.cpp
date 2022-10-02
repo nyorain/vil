@@ -525,7 +525,7 @@ void VertexViewer::createFrustumPipe() {
 	gpi[0].pColorBlendState = &blendInfo;
 	gpi[0].pDepthStencilState = &depthStencil;
 	gpi[0].pDynamicState = &dynState;
-	gpi[0].layout = gui_->pipeLayout().vkHandle();
+	gpi[0].layout = gui_->imguiPipeLayout().vkHandle();
 	gpi[0].renderPass = gui_->rp();
 	gpi[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
@@ -637,7 +637,7 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	gpi[0].pColorBlendState = &blendInfo;
 	gpi[0].pDepthStencilState = &depthStencil;
 	gpi[0].pDynamicState = &dynState;
-	gpi[0].layout = gui_->pipeLayout().vkHandle();
+	gpi[0].layout = gui_->imguiPipeLayout().vkHandle();
 	gpi[0].renderPass = gui_->rp();
 	gpi[0].flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 

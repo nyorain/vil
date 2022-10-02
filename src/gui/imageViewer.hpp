@@ -24,7 +24,7 @@ public:
 	};
 
 	static constexpr auto useSamplingCopy = true;
-	static constexpr auto histogramSections = 64u;
+	static constexpr auto histogramSections = 128u;
 
 public:
 	void init(Gui& gui);
@@ -66,6 +66,7 @@ private:
 	void recordPostImage(Draw& draw, Readback& rb);
 
 	void drawBackground(VkCommandBuffer cb);
+	void drawHistogram(VkCommandBuffer cb);
 
 	// Reads the selected image at the cursor position via copy
 	void doCopy(Draw& draw, vku::LocalImageState&, Readback& rb);
@@ -73,7 +74,8 @@ private:
 	// Reads the selected image at the cursor position via compute shader
 	// that samples it.
 	void doSample(Draw& draw, vku::LocalImageState&, Readback& rb);
-	void computeMinMax(Draw& draw, vku::LocalImageState&, Readback& rb);
+	void computeHistogram(Draw& draw, vku::LocalImageState&,
+		vku::LocalBufferState& histogramState, Readback& rb);
 
 	void createData();
 
@@ -81,6 +83,7 @@ private:
 	void drawMetaInfo(Draw& draw);
 
 	void validateClampCoords(Vec3i& coords, u32& layer, u32& level);
+	static u32 histogramBufSize();
 
 private:
 	// general, logical info
@@ -118,8 +121,9 @@ private:
 	struct DrawData {
 		Gui* gui {};
 		vku::ImageView view {};
-		vku::DynDs ds {}; // for drawing the image
-		vku::DynDs histDs {}; // for histogram stuff
+		vku::DynDs drawDs {}; // for drawing the image
+		vku::DynDs imgOpDs {}; // for computing histogram
+		vku::DynDs histDs {}; // operations on the histogram
 		std::atomic<u32> refCount {};
 
 		// layout:
@@ -134,6 +138,16 @@ private:
 	};
 
 	IntrusivePtr<DrawData> data_;
+
+	struct {
+		Vec2f offset {};
+		Vec2f size {};
+
+		bool panning {};
+		bool fixedRange {};
+		float begin {};
+		float end {};
+	} histogram_;
 };
 
 } // namespace vil

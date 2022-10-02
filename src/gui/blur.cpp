@@ -318,7 +318,7 @@ void blur(GuiBlur& blur, VkCommandBuffer cb, u32 imageIdx, VkOffset2D offset, Vk
 	imgb[1].subresourceRange.layerCount = 1;
 
 	dev.dispatch.CmdPipelineBarrier(cb,
-		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		0, 0, NULL, 0, NULL, 2, imgb);
 
@@ -390,7 +390,7 @@ void blur(GuiBlur& blur, VkCommandBuffer cb, u32 imageIdx, VkOffset2D offset, Vk
 	imgb[1].subresourceRange.baseArrayLayer = srcID;
 	dev.dispatch.CmdPipelineBarrier(cb,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+		VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 		0, 0, NULL, 0, NULL, 2, imgb);
 }
 

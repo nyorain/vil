@@ -130,9 +130,12 @@ public:
 	Queue& usedQueue() const;
 
 	const auto& pipes() const { return pipes_; }
-	const auto& pipeLayout() const { return imguiPipeLayout_; }
+	const auto& imguiPipeLayout() const { return imguiPipeLayout_; }
 	const auto& imguiDsLayout() const { return imguiDsLayout_; }
 	const VkPipeline& imageBgPipe() const { return pipes_.imageBg; }
+
+	const auto& histogramPipeLayout() const { return histogramPipeLayout_; }
+	const auto& histogramDsLayout() const { return histogramDsLayout_; }
 
 	const auto& imgOpDsLayout() const { return imgOpDsLayout_; }
 	const auto& imgOpPipeLayout() const { return imgOpPipeLayout_; }

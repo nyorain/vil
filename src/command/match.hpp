@@ -5,6 +5,7 @@
 #include <cstring>
 #include <util/span.hpp>
 #include <util/linalloc.hpp>
+#include <vk/vulkan.h>
 
 namespace vil {
 

@@ -456,7 +456,7 @@ endif
 # windows.h keeps breaking my applications and will to live
 pch = []
 if not with_win32 or not with_tracy
-	pch = 'src/pch.hpp'
+	# pch = 'src/pch.hpp'
 endif
 
 lib_spvm = static_library(
@@ -491,7 +491,7 @@ endif
 
 vil_layer = shared_library(
 	'VkLayer_live_introspection',
-	[src, spv],
+	sources: [src + spv],
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
