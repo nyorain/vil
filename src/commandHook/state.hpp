@@ -5,6 +5,7 @@
 #include <vk/vulkan_core.h>
 #include <variant>
 #include <vector>
+#include <optional>
 
 namespace vil {
 
