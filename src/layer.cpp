@@ -144,12 +144,17 @@ void shutdownTracy() {
 #endif // TRACY_MANUAL_LIFETIME
 }
 
+VkResult VKAPI_PTR SetInstanceLoaderDataNOOP(VkInstance, void*) {
+	// noop
+	return VK_SUCCESS;
+}
+
 // Instance
-VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
+VkResult doCreateInstance(
 		const VkInstanceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
-		VkInstance* pInstance) {
-
+		VkInstance* pInstance,
+		StandaloneInstanceInfo* standalone) {
 	initTracy();
 
 	// We use a static version of dlg so this shouldn't be an issue.
@@ -176,27 +181,35 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	}
 #endif // DLG_DISABLE
 
+	PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr {};
+	VkLayerInstanceCreateInfo* mutLinkInfo {};
+	if(standalone) {
+		fpGetInstanceProcAddr = standalone->getProcAddr;
+	} else {
+		auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
+		while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
+			linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*linkInfo);
+		}
 
-	auto* linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
-	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
-		linkInfo = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*linkInfo);
+		if(!linkInfo) {
+			dlg_error("No linkInfo");
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		fpGetInstanceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
+
+		// Advance the link info for the next element on the chain
+		mutLinkInfo = const_cast<VkLayerInstanceCreateInfo*>(linkInfo);
+		mutLinkInfo->u.pLayerInfo = linkInfo->u.pLayerInfo->pNext;
 	}
 
-	if(!linkInfo) {
-		dlg_error("No linkInfo");
-		return VK_ERROR_INITIALIZATION_FAILED;
-	}
+	dlg_assert(fpGetInstanceProcAddr);
 
-	auto fpGetInstanceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
 	auto fpCreateInstance = (PFN_vkCreateInstance)fpGetInstanceProcAddr(nullptr, "vkCreateInstance");
 	if(!fpCreateInstance) {
 		dlg_error("could not load vkCreateInstance");
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
-
-	// Advance the link info for the next element on the chain
-	auto mutLinkInfo = const_cast<VkLayerInstanceCreateInfo*>(linkInfo);
-	mutLinkInfo->u.pLayerInfo = linkInfo->u.pLayerInfo->pNext;
 
 	// Init instance data
 	// NOTE: we cannot add extensions here, sadly.
@@ -237,7 +250,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	}
 
 	// == Create instance ==
-	auto linkInfoCopy = *mutLinkInfo;
+	VkLayerInstanceCreateInfo linkInfoCopy;
+	if(mutLinkInfo) {
+		linkInfoCopy = *mutLinkInfo;
+	}
+
 	VkResult result = fpCreateInstance(&nci, alloc, pInstance);
 	if(result != VK_SUCCESS) {
 		dlg_debug("vkCreateInstance failed: {}", vk::name(result));
@@ -259,7 +276,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 
 		// NOTE: make sure to restore link info, might have been modified
 		// on last tries
-		*mutLinkInfo = linkInfoCopy;
+		if(mutLinkInfo) {
+			*mutLinkInfo = linkInfoCopy;
+		}
 
 		result = fpCreateInstance(&nci, alloc, pInstance);
 
@@ -303,13 +322,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	layer_init_instance_dispatch_table(*pInstance, &ini.dispatch, fpGetInstanceProcAddr);
 
 	// find vkSetInstanceLoaderData callback
-	auto* loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
-	while(loaderData && loaderData->function != VK_LOADER_DATA_CALLBACK) {
-		loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*loaderData);
-	}
+	if(!standalone) {
+		auto* loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*ci);
+		while(loaderData && loaderData->function != VK_LOADER_DATA_CALLBACK) {
+			loaderData = findChainInfo<VkLayerInstanceCreateInfo, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO>(*loaderData);
+		}
 
-	dlg_assert(loaderData);
-	ini.setInstanceLoaderData = loaderData->u.pfnSetInstanceLoaderData;
+		dlg_assert(loaderData);
+		ini.setInstanceLoaderData = loaderData->u.pfnSetInstanceLoaderData;
+	} else {
+		ini.setInstanceLoaderData = SetInstanceLoaderDataNOOP;
+	}
 
 	// NOTE: not sure if this is needed actually.
 	// Should do it for all commands that need it for now.
@@ -342,6 +365,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 	}
 
 	return result;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
+		const VkInstanceCreateInfo* ci,
+		const VkAllocationCallbacks* alloc,
+		VkInstance* pInstance) {
+	return doCreateInstance(ci, alloc, pInstance);
 }
 
 VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCallbacks* alloc) {

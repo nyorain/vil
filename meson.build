@@ -22,6 +22,7 @@ with_tracy = get_option('tracy')
 with_window = get_option('window')
 with_example = get_option('example')
 is_release = (get_option('buildtype') == 'release')
+with_standalone = true # TODO: make option
 
 profiling = with_tracy
 debug_checks = not is_release
@@ -179,6 +180,7 @@ src = files(
 	'src/util/buffmt.cpp',
 	'src/util/bufparser.cpp',
 	'src/util/linalloc.cpp',
+	'src/util/dl.cpp',
 	'src/command/match.cpp',
 	'src/command/record.cpp',
 	'src/command/commands.cpp',
@@ -414,6 +416,12 @@ if with_integration_tests
 	)
 endif
 
+if with_standalone
+	src += files(
+		'src/standalone/entry.cpp'
+	)
+endif
+
 # TODO, wip, just for testing backtraces
 if not with_win32 and get_option('libdw')
 	dep_dw = dependency('libdw', required: false)
@@ -578,4 +586,13 @@ if with_integration_tests
 		cpp_args: int_args,
 		dependencies: [dep_dlg, dep_vulkan, dep_dl])
 	test('intest', intest)
+endif
+
+# standalone
+if with_standalone
+	iv = executable('iv', files('src/standalone/main.cpp'),
+		include_directories: inc,
+		cpp_args: args,
+		dependencies: [],
+		link_with: vil_layer)
 endif

@@ -17,9 +17,15 @@ namespace vil {
 
 class ResourceGui;
 class CommandRecordGui;
+class ImageViewer;
 
 class Gui {
 public:
+	enum class Mode {
+		normal,
+		image, // standalone image viewer
+	};
+
 	enum class Tab {
 		overview,
 		resources,
@@ -74,6 +80,7 @@ public:
 	};
 
 	bool unfocus {false};
+	Mode mode_ {Mode::normal};
 
 	ImFont* defaultFont {};
 	ImFont* monoFont {};
@@ -206,6 +213,9 @@ private:
 	struct {
 		std::unique_ptr<ResourceGui> resources;
 		std::unique_ptr<CommandRecordGui> cb;
+
+		// For image-only mode
+		std::unique_ptr<ImageViewer> imageViewer;
 	} tabs_;
 
 	// rendering stuff

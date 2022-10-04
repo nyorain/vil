@@ -11,6 +11,7 @@
 #include <vkutil/enumString.hpp>
 #include <vkutil/sync.hpp>
 #include <vkutil/cmd.hpp>
+#include <iomanip>
 
 namespace vil {
 
@@ -134,6 +135,39 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		}
 	}
 
+	// TODO: probably best to just use a small imgui slider
+	// - logarithmic
+	// - range (0, inf)
+	/*
+	ImGui::SameLine();
+
+	if(gammaSliding_) {
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+		ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+	}
+	ImGui::Button("Gamma");
+	if(gammaSliding_) {
+		ImGui::PopStyleColor(2);
+	}
+
+	auto hovered = ImGui::IsItemHovered();
+	if(gammaSliding_) {
+		float middle = (ImGui::GetItemRectMin().x + ImGui::GetItemRectMax().x) / 2.f;
+		float delta = ImGui::GetMousePos().x - middle;
+		constexpr float thresh = 30;
+		if(std::abs(delta) > thresh) {
+			// TODO: use frame time dt as multiplier
+			imageDraw_.power += 0.0001 * delta;
+		}
+	}
+	if(hovered || gammaSliding_) {
+		gammaSliding_ = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+
+		auto text = dlg::format("{}{}", std::setprecision(4), imageDraw_.power);
+		ImGui::SetTooltip("%s", text.c_str());
+	}
+	*/
+
 	const auto level = u32(imageDraw_.level);
 	// const auto width = std::max(extent_.width >> level, 1u);
 	// const auto height = std::max(extent_.height >> level, 1u);
@@ -206,12 +240,23 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		histogram_.end = meta.end;
 	}
 
+
 	auto pos = ImGui::GetCursorScreenPos();
 	auto avail = ImGui::GetContentRegionAvail();
 	histogram_.offset.x = pos.x;
 	histogram_.offset.y = pos.y;
 	histogram_.size.x = avail.x;
 	histogram_.size.y = 200u;
+
+	ImGui::PushClipRect({pos.x, pos.y},
+		{pos.x + histogram_.size.x, pos.y + histogram_.size.y}, true);
+
+	auto clipMin = ImGui::GetWindowDrawList()->GetClipRectMin();
+	auto clipMax = ImGui::GetWindowDrawList()->GetClipRectMax();
+	histogram_.scissorPos = {clipMin.x, clipMin.y};
+	histogram_.scissorSize = {clipMax.x - clipMin.x, clipMax.y - clipMin.y};
+
+	ImGui::PopClipRect();
 
 	auto& io = ImGui::GetIO();
 	ImGui::InvisibleButton("HistCanvas", {histogram_.size.x, histogram_.size.y});
@@ -592,7 +637,8 @@ void ImageViewer::display(Draw& draw) {
 	const float aspectImage = float(width) / height;
 	const float aspectAvail = availX / availY;
 
-	if(aspectImage > aspectAvail) {
+	// if(aspectImage > aspectAvail) {
+	if(aspectAvail < 1) {
 		auto availY = (availX - 30) / aspectImage;
 		if(ImGui::BeginChild("ImageArea", ImVec2(availX - 30, availY))) {
 			drawImageArea(draw);
@@ -723,14 +769,10 @@ void ImageViewer::drawHistogram(VkCommandBuffer cb) {
 	}
 
 	VkRect2D scissor {};
-	scissor.offset.x = std::max<int>(histogram_.offset.x, 0);
-	scissor.offset.y = std::max<int>(histogram_.offset.y, 0);
-	scissor.extent.width = std::min<int>(
-		histogram_.size.x + histogram_.offset.x - scissor.offset.x,
-		displaySize.x - histogram_.offset.x);
-	scissor.extent.height = std::min<int>(
-		histogram_.size.y + histogram_.offset.y - scissor.offset.y,
-		displaySize.y - histogram_.offset.y);
+	scissor.offset.x = histogram_.scissorPos.x;
+	scissor.offset.y = histogram_.scissorPos.y;
+	scissor.extent.width = histogram_.scissorSize.x;
+	scissor.extent.height = histogram_.scissorSize.y;
 	dev.dispatch.CmdSetScissor(cb, 0, 1, &scissor);
 
 	VkViewport viewport {};

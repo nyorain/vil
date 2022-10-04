@@ -40,6 +40,11 @@ bool hasAppExt(Device& dev, const char* extName) {
 	return (it != dev.appExts.end());
 }
 
+VkResult VKAPI_PTR SetDeviceLoaderDataNOOP(VkDevice, void*) {
+	// noop
+	return VK_SUCCESS;
+}
+
 // device
 Device::Device() {
 	auto& dev = *this;
@@ -314,33 +319,50 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		const VkDeviceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
 		VkDevice* pDevice) {
+	return doCreateDevice(phdev, ci, alloc, pDevice);
+}
 
+VkResult doCreateDevice(
+		VkPhysicalDevice phdev,
+		const VkDeviceCreateInfo* ci,
+		const VkAllocationCallbacks* alloc,
+		VkDevice* pDevice, StandaloneDeviceInfo* standalone) {
 	auto* iniData = findData<Instance>(phdev);
 	dlg_assert(iniData);
 	auto& ini = *iniData;
 
-	auto* linkInfo = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
-	while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
-		linkInfo = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*linkInfo);
+	PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr;
+	PFN_vkGetDeviceProcAddr fpGetDeviceProcAddr;
+	if(standalone) {
+		fpGetInstanceProcAddr = standalone->getInstanceProcAddr;
+		fpGetDeviceProcAddr = standalone->getDeviceProcAddr;
+	} else {
+		auto* linkInfo = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
+		while(linkInfo && linkInfo->function != VK_LAYER_LINK_INFO) {
+			linkInfo = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*linkInfo);
+		}
+
+		if(!linkInfo) {
+			dlg_error("No linkInfo");
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		auto mutLinkInfo = const_cast<VkLayerDeviceCreateInfo*>(linkInfo);
+		fpGetInstanceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
+		fpGetDeviceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetDeviceProcAddr;
+
+		// Advance the link info for the next element on the chain
+		mutLinkInfo->u.pLayerInfo = linkInfo->u.pLayerInfo->pNext;
 	}
 
-	if(!linkInfo) {
-		dlg_error("No linkInfo");
-		return VK_ERROR_INITIALIZATION_FAILED;
-	}
-
-	auto fpGetInstanceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
-	auto fpGetDeviceProcAddr = linkInfo->u.pLayerInfo->pfnNextGetDeviceProcAddr;
+	dlg_assert(fpGetInstanceProcAddr);
+	dlg_assert(fpGetDeviceProcAddr);
 	auto fpCreateDevice = (PFN_vkCreateDevice) fpGetInstanceProcAddr(ini.handle, "vkCreateDevice");
 
 	if(!fpCreateDevice) {
 		dlg_error("could not load vkCreateDevice");
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
-
-  	// Advance the link info for the next element on the chain
-	auto mutLinkInfo = const_cast<VkLayerDeviceCreateInfo*>(linkInfo);
-   	mutLinkInfo->u.pLayerInfo = linkInfo->u.pLayerInfo->pNext;
 
    	// query queues
 	u32 nqf;
@@ -858,13 +880,17 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 		&dev.dispatch.CmdEndRenderingKHR});
 
 	// find vkSetDeviceLoaderData callback
-	auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
-	while(loaderData && loaderData->function != VK_LOADER_DATA_CALLBACK) {
-		loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*loaderData);
-	}
+	if(standalone) {
+		dev.setDeviceLoaderData = SetDeviceLoaderDataNOOP;
+	} else {
+		auto* loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*ci);
+		while(loaderData && loaderData->function != VK_LOADER_DATA_CALLBACK) {
+			loaderData = findChainInfo<VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO>(*loaderData);
+		}
 
-	dlg_assert(loaderData);
-	dev.setDeviceLoaderData = loaderData->u.pfnSetDeviceLoaderData;
+		dlg_assert(loaderData);
+		dev.setDeviceLoaderData = loaderData->u.pfnSetDeviceLoaderData;
+	}
 
 	// Get device queues
 	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
