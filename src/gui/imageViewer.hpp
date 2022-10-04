@@ -142,12 +142,16 @@ private:
 	struct {
 		Vec2f offset {};
 		Vec2f size {};
+		Vec2f scissorPos {};
+		Vec2f scissorSize {};
 
 		bool panning {};
 		bool fixedRange {};
 		float begin {};
 		float end {};
 	} histogram_;
+
+	bool gammaSliding_ {};
 };
 
 } // namespace vil

@@ -608,6 +608,9 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 					dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
 						pcrStages, 0, sizeof(pcr), pcr);
 				} else {
+					// TODO: we only ever really need in this im ImageViewer.
+					//   Maybe just use it there explicitly instead
+					//   of handling it here?
 					VkDescriptorSet ds = dsFont_.vkHandle();
 					VkPipeline pipe = pipes_.gui;
 					auto img = (DrawGuiImage*) cmd.TextureId;
@@ -623,12 +626,14 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 							float valMax;
 							u32 flags;
 							float level;
+							float power;
 						} pcr = {
 							img->layer,
 							img->minValue,
 							img->maxValue,
 							img->flags,
 							img->level,
+							img->power
 						};
 
 						dev.dispatch.CmdPushConstants(draw.cb, imguiPipeLayout_.vkHandle(),
@@ -1094,47 +1099,53 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		windowPos_ = ImGui::GetWindowPos();
 		windowSize_ = ImGui::GetWindowSize();
 
-		if(ImGui::BeginTabBar("MainTabBar")) {
-			if(ImGui::BeginTabItem("Overview")) {
-				activeTab_ = Tab::overview;
-				drawOverviewUI(draw);
-				ImGui::EndTabItem();
-			}
-
-			if(ImGui::BeginTabItem("Resources", nullptr, checkSelectTab(Tab::resources))) {
-				// When switching towards the resources tab, make sure to refresh
-				// the list of available resources, not showing "<Destroyed>"
-				if(activeTab_ != Tab::resources) {
-					tabs_.resources->firstUpdate_ = true;
-					activeTab_ = Tab::resources;
+		if(mode_ == Mode::normal) {
+			if(ImGui::BeginTabBar("MainTabBar")) {
+				if(ImGui::BeginTabItem("Overview")) {
+					activeTab_ = Tab::overview;
+					drawOverviewUI(draw);
+					ImGui::EndTabItem();
 				}
 
-				tabs_.resources->draw(draw);
-				ImGui::EndTabItem();
-			}
+				if(ImGui::BeginTabItem("Resources", nullptr, checkSelectTab(Tab::resources))) {
+					// When switching towards the resources tab, make sure to refresh
+					// the list of available resources, not showing "<Destroyed>"
+					if(activeTab_ != Tab::resources) {
+						tabs_.resources->firstUpdate_ = true;
+						activeTab_ = Tab::resources;
+					}
 
-			if(ImGui::BeginTabItem("Memory", nullptr, checkSelectTab(Tab::memory))) {
-				activeTab_ = Tab::memory;
-				drawMemoryUI(draw);
-				ImGui::EndTabItem();
-			}
+					tabs_.resources->draw(draw);
+					ImGui::EndTabItem();
+				}
 
-			if(ImGui::BeginTabItem("Commands", nullptr, checkSelectTab(Tab::commandBuffer))) {
-				activeTab_ = Tab::commandBuffer;
-				tabs_.cb->draw(draw);
-				ImGui::EndTabItem();
-			}
+				if(ImGui::BeginTabItem("Memory", nullptr, checkSelectTab(Tab::memory))) {
+					activeTab_ = Tab::memory;
+					drawMemoryUI(draw);
+					ImGui::EndTabItem();
+				}
+
+				if(ImGui::BeginTabItem("Commands", nullptr, checkSelectTab(Tab::commandBuffer))) {
+					activeTab_ = Tab::commandBuffer;
+					tabs_.cb->draw(draw);
+					ImGui::EndTabItem();
+				}
 
 #ifdef VIL_VIZ_LCS
-			if(ImGui::BeginTabItem("VizLCS", nullptr)) {
-				activeTab_ = Tab::overview; // HACK
-				static VizLCS vizlcs;
-				vizlcs.draw();
-				ImGui::EndTabItem();
-			}
+				if(ImGui::BeginTabItem("VizLCS", nullptr)) {
+					activeTab_ = Tab::overview; // HACK
+					static VizLCS vizlcs;
+					vizlcs.draw();
+					ImGui::EndTabItem();
+				}
 #endif // VIL_VIZ_LCS
 
-			ImGui::EndTabBar();
+				ImGui::EndTabBar();
+			}
+		} else if(mode_ == Mode::image) {
+			imGuiText("Here will soon be an image viewer...");
+		} else {
+			dlg_error("invalid mode");
 		}
 	}
 

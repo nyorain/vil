@@ -24,6 +24,7 @@ layout(push_constant) uniform PCR {
 	layout(offset = 24) float valMax;
 	layout(offset = 28) uint flags;
 	layout(offset = 32) float level;
+	layout(offset = 36) float power;
 } pcr;
 
 #define SAMPLE_TEX_BINDING 0
@@ -53,6 +54,8 @@ void main() {
 	if((pcr.flags & flagGrayscale) != 0) {
 		texCol.rgb = vec3(dot(texCol.rgb, 1.f.xxx));
 	}
+
+	texCol = pow(texCol, vec4(pcr.power));
 
     fragColor = toLinearOpt(In.color * texCol, outputLinear);
 }

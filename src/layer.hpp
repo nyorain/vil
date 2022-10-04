@@ -41,10 +41,22 @@ struct Instance {
 	~Instance();
 };
 
+struct StandaloneInstanceInfo {
+	PFN_vkGetInstanceProcAddr getProcAddr;
+};
+
+VkResult doCreateInstance(
+		const VkInstanceCreateInfo* ci,
+		const VkAllocationCallbacks* alloc,
+		VkInstance* pInstance,
+		StandaloneInstanceInfo* standalone = nullptr);
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(
 		const VkInstanceCreateInfo* ci,
 		const VkAllocationCallbacks* alloc,
 		VkInstance* pInstance);
+VKAPI_ATTR void VKAPI_CALL DestroyInstance(
+		VkInstance ini, const VkAllocationCallbacks* alloc);
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance, const char*);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice, const char*);

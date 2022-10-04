@@ -322,7 +322,19 @@ VkFormat findDepthFormat(const Device& dev);
 
 bool hasAppExt(Device& dev, const char* extName);
 
+struct StandaloneDeviceInfo {
+	PFN_vkGetInstanceProcAddr getInstanceProcAddr;
+	PFN_vkGetDeviceProcAddr getDeviceProcAddr;
+};
+
 // api
+VkResult doCreateDevice(
+	VkPhysicalDevice phdev,
+	const VkDeviceCreateInfo* ci,
+	const VkAllocationCallbacks* alloc,
+	VkDevice* dev,
+	StandaloneDeviceInfo* standalone = nullptr);
+
 VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(
 	VkPhysicalDevice phdev,
 	const VkDeviceCreateInfo* ci,

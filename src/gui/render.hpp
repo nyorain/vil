@@ -126,6 +126,7 @@ struct DrawGuiImage {
 	// min/max values for scaling in shader
 	float minValue {0.f};
 	float maxValue {1.f};
+	float power {1.f}; // gamma
 
 	// the layer/level to sample
 	float layer {};
