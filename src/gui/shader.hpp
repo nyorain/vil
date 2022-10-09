@@ -1,14 +1,14 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <util/vec.hpp>
+#include <nytl/vec.hpp>
 #include <util/intrusive.hpp>
 #include <imgui/textedit.h>
 #include <spvm/program.h>
 #include <spvm/state.h>
 #include <spvm/image.h>
 #include <spvm/result.h>
-#include <util/bytes.hpp>
+#include <nytl/bytes.hpp>
 #include <vk/vulkan.h>
 #include <deque>
 #include <unordered_map>

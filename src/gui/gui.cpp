@@ -18,8 +18,8 @@
 #include <wrap.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
-#include <util/bytes.hpp>
-#include <util/vecOps.hpp>
+#include <nytl/bytes.hpp>
+#include <nytl/vecOps.hpp>
 #include <util/profiling.hpp>
 
 #include <vil_api.h>

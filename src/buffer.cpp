@@ -4,6 +4,7 @@
 #include <data.hpp>
 #include <ds.hpp>
 #include <threadContext.hpp>
+#include <util/util.hpp>
 
 namespace vil {
 

@@ -6,10 +6,10 @@
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
 #include <util/dlg.hpp>
-#include <util/span.hpp>
 #include <util/handleCast.hpp>
+#include <nytl/span.hpp>
 
-using vil::span;
+using nytl::span;
 
 #define VK_CHECK(x) do {\
 		auto result = (x);\

@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <cstdint>
+#include <fwd.hpp>
 
 namespace vil {
 

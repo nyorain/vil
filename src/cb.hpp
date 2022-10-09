@@ -5,7 +5,7 @@
 #include <wrap.hpp>
 #include <command/record.hpp>
 #include <command/builder.hpp>
-#include <util/flags.hpp>
+#include <nytl/flags.hpp>
 #include <memory>
 
 namespace vil {

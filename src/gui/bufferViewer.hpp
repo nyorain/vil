@@ -1,7 +1,8 @@
 #pragma once
 
+#include <fwd.hpp>
 #include <imgui/textedit.h>
-#include <util/bytes.hpp>
+#include <nytl/bytes.hpp>
 
 namespace vil {
 

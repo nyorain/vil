@@ -3,8 +3,9 @@
 #include <gui/util.hpp>
 #include <util/util.hpp>
 #include <util/fmt.hpp>
-#include <util/vecOps.hpp>
+#include <nytl/vecOps.hpp>
 #include <device.hpp>
+#include <nytl/bytes.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <vk/format_utils.h>
@@ -14,6 +15,8 @@
 #include <iomanip>
 
 namespace vil {
+
+using nytl::read;
 
 // see histogram.glsl
 struct HistMetadata {

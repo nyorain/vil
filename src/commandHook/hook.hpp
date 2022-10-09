@@ -4,7 +4,7 @@
 #include <commandHook/state.hpp>
 #include <command/record.hpp>
 #include <util/intrusive.hpp>
-#include <util/bytes.hpp>
+#include <nytl/bytes.hpp>
 #include <util/ownbuf.hpp>
 #include <util/util.hpp>
 #include <frame.hpp>

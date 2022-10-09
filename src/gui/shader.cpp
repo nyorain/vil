@@ -23,6 +23,8 @@
 
 namespace vil {
 
+using nytl::read;
+
 const ShaderDebugger::OurImage ShaderDebugger::emptyImage {};
 const spvm_sampler ShaderDebugger::defaultSampler {};
 

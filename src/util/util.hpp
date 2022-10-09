@@ -1,10 +1,10 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <util/bytes.hpp>
 #include <util/dlg.hpp>
 #include <vk/vulkan.h>
-#include <util/vec.hpp>
+#include <nytl/vec.hpp>
+#include <nytl/bytes.hpp>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -300,11 +300,6 @@ struct BufferInterval {
 
 BufferInterval minMaxInterval(span<const VkBufferImageCopy2KHR> copies, u32 texelSize);
 BufferInterval minMaxInterval(span<const VkBufferCopy2KHR> copies, bool src);
-
-template<typename V, typename T>
-decltype(auto) constexpr templatize(T&& value) {
-	return std::forward<T>(value);
-}
 
 /// Returns the linear mix of x and y with factor a.
 /// P must represent a mathematical field.

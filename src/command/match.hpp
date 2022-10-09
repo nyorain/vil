@@ -3,7 +3,7 @@
 #include <fwd.hpp>
 #include <vector>
 #include <cstring>
-#include <util/span.hpp>
+#include <nytl/span.hpp>
 #include <util/linalloc.hpp>
 #include <vk/vulkan.h>
 

@@ -3,10 +3,10 @@
 #include <fwd.hpp>
 #include <command/record.hpp>
 #include <pipe.hpp>
-#include <util/flags.hpp>
-#include <util/span.hpp>
 #include <util/dlg.hpp>
 #include <util/linalloc.hpp>
+#include <nytl/flags.hpp>
+#include <nytl/span.hpp>
 
 // See ~Command. Keep in mind that we use a custom per-CommandRecord allocator
 // for all Commands, that's why we can use span<> here without the referenced

@@ -1,7 +1,7 @@
 #include "../bugged.hpp"
 #include <device.hpp>
 #include <buffer.hpp>
-#include <util/span.hpp>
+#include <nytl/span.hpp>
 
 using namespace vil;
 

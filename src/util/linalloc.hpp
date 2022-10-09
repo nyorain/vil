@@ -9,7 +9,7 @@
 #include <util/allocation.hpp>
 #include <util/profiling.hpp>
 #include <util/dlg.hpp>
-#include <util/span.hpp>
+#include <nytl/span.hpp>
 
 // Simple but optimized linear allocator implementation
 // NOTE: Take care modifying this code in future, it was optimized so that

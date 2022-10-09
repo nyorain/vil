@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fwd.hpp>
 #include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>

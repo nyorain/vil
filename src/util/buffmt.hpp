@@ -1,9 +1,9 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <util/span.hpp>
-#include <util/bytes.hpp>
-#include <util/flags.hpp>
+#include <nytl/span.hpp>
+#include <nytl/bytes.hpp>
+#include <nytl/flags.hpp>
 #include <optional>
 #include <string_view>
 

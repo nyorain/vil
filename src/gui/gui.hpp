@@ -2,9 +2,9 @@
 
 #include <gui/render.hpp>
 #include <gui/blur.hpp>
-#include <util/bytes.hpp>
-#include <util/vec.hpp>
 #include <util/util.hpp>
+#include <nytl/bytes.hpp>
+#include <nytl/vec.hpp>
 #include <vkutil/handles.hpp>
 #include <vkutil/dynds.hpp>
 #include <variant>
