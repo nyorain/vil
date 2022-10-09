@@ -6,9 +6,9 @@
 #include <queue.hpp>
 #include <util/handleCast.hpp>
 #include <util/syncedMap.hpp>
-#include <util/span.hpp>
 #include <util/debugMutex.hpp>
 #include <util/profiling.hpp>
+#include <nytl/span.hpp>
 
 #include <vk/vulkan.h>
 #include <vk/vk_layer.h>

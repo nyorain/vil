@@ -1,9 +1,9 @@
 #include "vk/vulkan_core.h"
 #include <threadContext.hpp>
 #include <util/util.hpp>
-#include <util/bytes.hpp>
 #include <util/f16.hpp>
-#include <util/vecOps.hpp>
+#include <nytl/bytes.hpp>
+#include <nytl/vecOps.hpp>
 #include <util/dlg.hpp>
 #include <vk/typemap_helper.h>
 #include <vk/vk_layer.h>

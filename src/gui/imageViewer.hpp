@@ -1,6 +1,7 @@
 #pragma once
 
-#include <util/vec.hpp>
+#include <fwd.hpp>
+#include <nytl/vec.hpp>
 #include <gui/render.hpp>
 #include <vkutil/dynds.hpp>
 #include <optional>

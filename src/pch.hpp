@@ -45,11 +45,14 @@
 #include <vk/object_types.h>
 #include <vk/typemap_helper.h>
 
-#include <util/span.hpp>
+#include <nytl/span.hpp>
+#include <nytl/vec.hpp>
+#include <nytl/vecOps.hpp>
+#include <nytl/flags.hpp>
+
 #include <util/syncedMap.hpp>
 #include <util/intrusive.hpp>
 #include <util/debugMutex.hpp>
-#include <util/flags.hpp>
 #include <util/profiling.hpp>
 
 #include <util/dlg.hpp>

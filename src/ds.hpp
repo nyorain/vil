@@ -3,9 +3,9 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <util/intrusive.hpp>
-#include <util/span.hpp>
 #include <util/debugMutex.hpp>
 #include <util/profiling.hpp>
+#include <nytl/span.hpp>
 #include <vk/vulkan.h>
 
 #include <optional>

@@ -2,7 +2,7 @@
 
 #include <device.hpp>
 #include <vk/vulkan.h>
-#include <util/vec.hpp>
+#include <nytl/vec.hpp>
 
 namespace vil {
 

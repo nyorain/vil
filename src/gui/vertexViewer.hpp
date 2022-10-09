@@ -3,9 +3,9 @@
 #include <fwd.hpp>
 #include <gui/render.hpp>
 #include <vk/vulkan.h>
-#include <util/vec.hpp>
 #include <util/camera.hpp>
-#include <util/span.hpp>
+#include <nytl/vec.hpp>
+#include <nytl/span.hpp>
 #include <vector>
 #include <optional>
 

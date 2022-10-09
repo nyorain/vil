@@ -6,9 +6,9 @@
 
 #include <fwd.hpp>
 #include <vk/vulkan.h>
-#include <util/span.hpp>
-#include <util/stringParam.hpp>
 #include <util/handleCast.hpp>
+#include <nytl/span.hpp>
+#include <nytl/stringParam.hpp>
 
 namespace vil {
 

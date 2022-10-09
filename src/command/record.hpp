@@ -1,11 +1,12 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <util/span.hpp>
+#include <nytl/span.hpp>
 #include <util/linalloc.hpp>
 #include <util/intrusive.hpp>
 #include <util/debugMutex.hpp>
 #include <threadContext.hpp>
+#include <vk/vulkan.h>
 
 #include <vector>
 #include <unordered_map>

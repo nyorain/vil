@@ -1,8 +1,8 @@
 #include <shader.hpp>
 #include <util/spirv.hpp>
-#include <util/span.hpp>
-#include <util/bytes.hpp>
 #include <util/dlg.hpp>
+#include <nytl/span.hpp>
+#include <nytl/bytes.hpp>
 #include <spirv-cross/spirv_cross.hpp>
 #include "../bugged.hpp"
 #include "../data/a.vert.spv.h" // see a.vert; compiled manually

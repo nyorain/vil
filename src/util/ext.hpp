@@ -1,9 +1,9 @@
 #pragma once
 
 #include <vk/vulkan.h>
-#include <util/span.hpp>
 #include <util/dlg.hpp>
 #include <util/linalloc.hpp>
+#include <nytl/span.hpp>
 #include <vector>
 
 namespace vil {

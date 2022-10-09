@@ -1,6 +1,6 @@
 #pragma once
 
-#include <util/span.hpp>
+#include <nytl/span.hpp>
 #include <util/linalloc.hpp>
 #include <string>
 #include <vector>

@@ -3,7 +3,7 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <pipe.hpp>
-#include <util/mat.hpp>
+#include <nytl/mat.hpp>
 #include <util/ownbuf.hpp>
 #include <variant>
 

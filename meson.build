@@ -134,6 +134,9 @@ dep_threads = dependency('threads', required: false)
 dep_dlg = dependency('dlg',
 	static: true,
 	fallback: ['dlg', 'dlg_dep'])
+dep_nytl = dependency('nytl',
+	fallback: ['nytl', 'nytl_dep'])
+
 if disable_dlg
 	warning('disabling dlg')
 
@@ -300,8 +303,6 @@ src = files(
 
 	'src/util/util.hpp',
 	'src/util/fmt.hpp',
-	'src/util/span.hpp',
-	'src/util/flags.hpp',
 	'src/util/f16.hpp',
 	'src/util/intrusive.hpp',
 	'src/util/syncedMap.hpp',
@@ -310,7 +311,6 @@ src = files(
 	'src/util/profiling.hpp',
 	'src/util/spirv.hpp',
 	'src/util/camera.hpp',
-	'src/util/bytes.hpp',
 	'src/util/ownbuf.hpp',
 	'src/util/buffmt.hpp',
 
@@ -360,9 +360,9 @@ inc = [
 deps = [
 	dep_threads,
 	dep_dlg,
+	dep_nytl,
 	tracy_deps,
 ]
-
 
 dep_swa = []
 # TODO: add extra option whether to enable overlay on win32
@@ -584,7 +584,7 @@ if with_integration_tests
 	intest = executable('intest', [int_src, mock_icd_lib],
 		include_directories: inc,
 		cpp_args: int_args,
-		dependencies: [dep_dlg, dep_vulkan, dep_dl])
+		dependencies: [dep_dlg, dep_vulkan, dep_dl, dep_nytl])
 	test('intest', intest)
 endif
 

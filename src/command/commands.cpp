@@ -13,7 +13,7 @@
 #include <rp.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
-#include <util/span.hpp>
+#include <nytl/span.hpp>
 #include <util/util.hpp>
 #include <util/ext.hpp>
 #include <gui/gui.hpp>

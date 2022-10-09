@@ -1,8 +1,8 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <util/bytes.hpp>
-#include <util/stringParam.hpp>
+#include <nytl/bytes.hpp>
+#include <nytl/stringParam.hpp>
 #include <vk/vulkan_core.h>
 #include <vkutil/bufferSpan.hpp>
 

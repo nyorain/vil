@@ -2,8 +2,8 @@
 
 #include <fwd.hpp>
 #include <vk/vulkan.h>
-#include <util/vec.hpp>
-#include <util/bytes.hpp>
+#include <nytl/vec.hpp>
+#include <nytl/bytes.hpp>
 
 namespace vil {
 

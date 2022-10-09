@@ -7,7 +7,7 @@
 #include <gui/command.hpp>
 #include <gui/update.hpp>
 #include <gui/commandSelection.hpp>
-#include <util/flags.hpp>
+#include <nytl/flags.hpp>
 
 namespace vil {
 

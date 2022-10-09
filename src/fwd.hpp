@@ -4,20 +4,8 @@
 #include <cstdint>
 #include <type_traits>
 #include <memory>
-
-namespace nytl {
-
-// span
-// C++20: replace with std::span
-constexpr const std::size_t dynamic_extent = std::size_t(-1);
-template<typename T, std::size_t N = dynamic_extent> class span;
-template<typename T, std::size_t N = dynamic_extent>
-using Span = span<T, N>;
-
-// flags
-template<typename T, typename U = std::underlying_type_t<T>> class Flags;
-
-} // namespace nytl
+#include <nytl/fwd/span.hpp>
+#include <nytl/fwd/flags.hpp>
 
 namespace vil {
 
@@ -159,6 +147,11 @@ using IntrusivePtr = HandledPtr<T, RefCountHandler<T, D>>;
 template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
 using CommandBufferPtr = IntrusiveWrappedPtr<CommandBuffer>;
+
+template<typename V, typename T>
+decltype(auto) constexpr templatize(T&& value) {
+	return std::forward<T>(value);
+}
 
 } // namespace vil
 

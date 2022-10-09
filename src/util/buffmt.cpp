@@ -1,6 +1,6 @@
 #include <util/buffmt.hpp>
 #include <util/f16.hpp>
-#include <util/bytes.hpp>
+#include <nytl/bytes.hpp>
 #include <gui/util.hpp>
 #include <gui/gui.hpp>
 #include <util/profiling.hpp>
@@ -10,6 +10,8 @@
 #include <iomanip>
 
 namespace vil {
+
+using nytl::copy;
 
 struct FormattedScalar {
 	std::string scalar;

@@ -1,5 +1,4 @@
 #include <gui/vizlcs.hpp>
-#include <util/list.hpp>
 #include <random>
 #include <iomanip>
 

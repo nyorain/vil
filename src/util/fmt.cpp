@@ -1,12 +1,16 @@
 #include <util/fmt.hpp>
 #include <util/util.hpp>
 #include <util/f16.hpp>
-#include <util/vecOps.hpp>
+#include <nytl/vecOps.hpp>
+#include <nytl/vecOps.hpp>
 #include <vk/format_utils.h>
 #include <vkutil/enumString.hpp>
 #include <cmath>
 
 namespace vil {
+
+using nytl::read;
+using nytl::write;
 
 // - https://en.wikipedia.org/wiki/SRGB (conversion matrices from here)
 // - https://www.w3.org/Graphics/Color/srgb

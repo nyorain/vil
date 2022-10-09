@@ -1,9 +1,9 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <util/vec.hpp>
-#include <util/quaternion.hpp>
-#include <util/transform.hpp>
+#include <nytl/vec.hpp>
+#include <nytl/quaternion.hpp>
+#include <nytl/transform.hpp>
 
 // Taken from tkn/camera
 

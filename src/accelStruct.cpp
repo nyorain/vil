@@ -4,7 +4,7 @@
 #include <device.hpp>
 #include <shader.hpp>
 #include <threadContext.hpp>
-#include <util/matOps.hpp>
+#include <nytl/matOps.hpp>
 #include <util/fmt.hpp>
 #include <vk/format_utils.h>
 

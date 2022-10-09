@@ -3,11 +3,11 @@
 #include <fwd.hpp>
 #include <stats.hpp>
 #include <util/dlg.hpp>
-#include <util/util.hpp>
 #include <util/profiling.hpp>
 #include <util/linalloc.hpp>
 #include <util/dlg.hpp>
 #include <cstdlib>
+#include <algorithm>
 #include <vector>
 #include <cassert>
 #include <cstring>
@@ -61,7 +61,7 @@ struct ThreadContext {
 
 		// TODO: hacky
 		std::lock_guard lock(mutex_);
-		auto it = find(contexts_, this);
+		auto it = std::find(contexts_.begin(), contexts_.end(), this);
 		dlg_assert(it != contexts_.end());
 		contexts_.erase(it);
 	}
