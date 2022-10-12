@@ -1,107 +1,128 @@
 #pragma once
 
-// Easy interface for building intrusive doubly linked list.
-// Inspired by the linux kernel implementation, but with added typesafety.
-
 #include <util/dlg.hpp>
-#include <type_traits>
+#include <memory>
+#include <cstdlib>
+#include <new>
 
 namespace vil {
 
-// Returns the ListLink
-struct ListMemberLink { // embedding ListLink as specific member
-	template<typename T>
-	auto& operator()(T& obj) const {
-		return obj.link;
+template<typename T, typename Accessor> struct ListLink;
+
+template<typename T, unsigned offset>
+struct OffsetAccessor {
+	T& operator()(ListLink<T, OffsetAccessor<T, offset>>& link) {
+		return *std::launder<T*>(
+			reinterpret_cast<std::byte*>(&link) - offset);
+	}
+
+	const T& operator()(const ListLink<T, OffsetAccessor<T, offset>>& link) {
+		return *std::launder<const T*>(
+			reinterpret_cast<const std::byte*>(&link) - offset);
 	}
 };
 
-struct ListSelfLink { // e.g. via deriving from ListLink
-	template<typename T>
-	auto& operator()(T& obj) const {
-		return obj;
-	}
-};
-
-template<typename T, typename Link = ListSelfLink>
-struct ListLink {
-	T* next {};
-	T* prev {};
-};
-
-// unlink
-template<typename L, typename Link>
-void unlinkLink(L& link) {
-	dlg_assertm(link.next && link.prev,
-		"Unlinking list node that wasn't properly linked");
-	dlg_assertm(link.next != &link,
-		"Unlinking list anchor");
-
-	Link{}(*link.next).prev = link.prev;
-	Link{}(*link.prev).next = link.next;
-	link.next = nullptr;
-	link.prev = nullptr;
-}
-
-template<typename T, typename Link = ListSelfLink>
-void unlink(T& bLink) {
-	unlinkLink<T, Link>(Link{}(bLink));
-}
-
-template<typename T, typename Link>
-void unlink(ListLink<T, Link>& link) {
-	unlinkLink<T, Link>(link);
-}
-
-// insertAfter
-template<typename L, typename Link>
-void insertAfterLink(L& anchor, L& toInsert) {
-	dlg_assertm(anchor.next && anchor.prev, "Invalid anchor");
-	dlg_assertm(!toInsert.next && !toInsert.prev, "Already linked");
-
-	toInsert.next = anchor.next;
-	toInsert.prev = &anchor;
-	Link{}(*anchor.next).prev = &toInsert;
-	anchor.next = &toInsert;
-}
-
-template<typename T, typename Link = ListSelfLink>
-void insertAfter(T& bAnchor, T& bToInsert) {
-	insertAfterLink<T, Link>(Link{}(bAnchor), Link{}(bToInsert));
-}
-
-template<typename T, typename Link>
-void insertAfter(ListLink<T, Link>& bAnchor, ListLink<T, Link>& bToInsert) {
-	insertAfterLink<T, Link>(bAnchor, bToInsert);
-}
-
-// insertBefore
-template<typename L, typename Link>
-void insertBeforeLink(L& anchor, L& toInsert) {
-	dlg_assertm(anchor.next && anchor.prev, "Invalid anchor");
-	dlg_assertm(!toInsert.next && !toInsert.prev, "Already linked");
-
-	toInsert.next = &anchor;
-	toInsert.prev = anchor.prev;
-	Link{}(*anchor.prev).next = &toInsert;
-	anchor.prev = &toInsert;
-}
-
-template<typename T, typename Link = ListSelfLink>
-void insertBefore(T& bAnchor, T& bToInsert) {
-	insertBeforeLink<T, Link>(Link{}(bAnchor), Link{}(bToInsert));
-}
-
-template<typename T, typename Link>
-void insertBefore(ListLink<T, Link>& bAnchor, ListLink<T, Link>& bToInsert) {
-	insertBeforeLink<T, Link>(bAnchor, bToInsert);
-}
-
-// initAnchor
 template<typename T>
-void initListAnchor(T& anchor) {
-	anchor.next = &anchor;
-	anchor.prev = &anchor;
-}
+struct DerivedAccessor {
+	T& operator()(ListLink<T, DerivedAccessor>& link) {
+		return static_cast<T&>(link);
+	}
 
+	const T& operator()(const ListLink<T, DerivedAccessor>& link) {
+		return static_cast<const T&>(link);
+	}
+};
+
+constexpr struct AnchorTag {} anchor;
+
+// T: type of elements in the linked list
+// Accessor: given a link, returns the associated element
+template<typename T, typename Accessor>
+struct ListLink {
+	ListLink* next_ {};
+	ListLink* prev_ {};
+
+	ListLink() = default;
+	ListLink(AnchorTag) : next_(this), prev_(this) {}
+
+	T& get() { return Accessor{}(*this); }
+	const T& get() const { return Accessor{}(*this); }
+
+	void unlink() {
+		dlg_assertm(next_ && prev_,
+			"Unlinking list node that wasn't properly linked");
+		dlg_assertm(next_ != this,
+			"Unlinking last list element (anchor)");
+
+		next_->prev_ = prev_;
+		prev_->next_ = next_;
+		next_ = nullptr;
+		prev_ = nullptr;
+	}
+
+	void insertAfter(ListLink& prev) {
+		dlg_assertm(prev.next_ && prev.prev_, "Invalid anchor");
+		dlg_assertm(!next_ && !prev_, "Already linked");
+
+		next_ = prev.next_;
+		prev_ = &prev;
+		next_->prev_ = this;
+		prev_->next_ = this;
+	}
+
+	void insertBefore(ListLink& next) {
+		dlg_assertm(next.next_ && next.prev_, "Invalid anchor");
+		dlg_assertm(!next_ && !prev_, "Already linked");
+
+		next_ = &next;
+		prev_ = next.prev_;
+		next_->prev_ = this;
+		prev_->next_ = this;
+	}
+
+	// util
+	// TODO: only works for anchors, they should be separate type
+	template<bool IsConst>
+	struct Iterator {
+		std::conditional_t<IsConst, const ListLink*, ListLink*> link;
+
+		auto operator*() const { return link->get(); }
+		auto operator->() const { return &link->get(); }
+		Iterator& operator++() { link = link->next_; return *this; }
+		Iterator operator++(int) { return {link->next_}; }
+		Iterator& operator--() { link = link->prev_; return *this; }
+		Iterator operator--(int) { return {link->prev_}; }
+		bool operator==(Iterator rhs) { return rhs.link == link; }
+		bool operator!=(Iterator rhs) { return rhs.link != link; }
+	};
+
+	template<bool IsConst>
+	struct Range {
+		std::conditional_t<IsConst, const ListLink*, ListLink*> anchor;
+		Iterator<IsConst> begin() const { return Iterator{anchor->next}; }
+		Iterator<IsConst> end() const { return Iterator{anchor}; }
+	};
+
+	Range<false> range() { return Range<false>{this}; }
+	Range<true> range() const { return Range<true>{this}; }
+};
+
+template<typename T>
+using IntrusiveListNode = ListLink<T, DerivedAccessor<T>>;
+
+#define INTRUSIVE_LIST_LINK(Container, name) \
+	struct Accessor##name { \
+		Container& operator()(ListLink<Container, Accessor##name>& link) { \
+			constexpr auto offset = offsetof(Container, name); \
+			auto ptr = reinterpret_cast<std::byte*>(&link) - offset; \
+			return *std::launder(reinterpret_cast<Container*>(ptr)); \
+		} \
+		const Container& operator()(const ListLink<Container, Accessor##name>& link) { \
+			constexpr auto offset = offsetof(Container, name); \
+			auto ptr = reinterpret_cast<const std::byte*>(&link) - offset; \
+			return *std::launder(reinterpret_cast<const Container*>(ptr)); \
+		} \
+	}; \
+	ListLink<Container, Accessor##name> name
 } // namespace vil
+

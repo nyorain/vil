@@ -397,6 +397,7 @@ if with_unit_tests
 		'src/test/unit/match.cpp',
 		'src/test/unit/lmm.cpp',
 		'src/test/unit/fmt.cpp',
+		'src/test/unit/list.cpp',
 	)
 endif
 
