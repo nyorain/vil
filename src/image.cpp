@@ -49,6 +49,41 @@ ImageView::~ImageView() {
 	}
 }
 
+bool memoryUsableLocked(const Image& img) {
+	if(!img.handle) {
+		return false;
+	}
+
+	if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT) {
+		if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT) {
+			return true;
+		}
+
+		// sparse but not sparse residency
+		auto& state = std::get<1>(img.memory);
+		dlg_assert(state.imageBinds.empty());
+
+		auto last = 0u;
+		for(auto& bind : state.opaqueBinds) {
+			if(bind.resourceOffset != last) {
+				// detected hole
+				return false;
+			}
+		}
+
+		// TODO: cache reqs somewhere?
+		VkMemoryRequirements memReqs {};
+		img.dev->dispatch.GetImageMemoryRequirements(
+			img.dev->handle, img.handle, &memReqs);
+
+		// hole in the end
+		return last == memReqs.size;
+	}
+
+	// non-sparse
+	return std::get<0>(img.memory).memState == FullMemoryBind::State::bound;
+}
+
 std::string defaultName(const Image& img) {
 	// format
 	auto formatStr = vk::name(img.ci.format);
@@ -245,6 +280,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.concurrentHooked = concurrent;
 	img.hasTransferSrc = nci.usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
+	if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT) {
+		img.memory = SparseMemoryState{};
+	}
+
 	constexpr auto sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
 	auto* externalMem = findChainInfo<VkExternalMemoryImageCreateInfo, sType>(nci);
 	if(externalMem && externalMem->handleTypes) {
@@ -339,17 +378,18 @@ void bindImageMemory(Image& img, DeviceMemory& mem, u64 offset) {
 
 	// access to the given memory and image must be internally synced
 	std::lock_guard lock(dev.mutex);
-	dlg_assert(!img.memory);
-	dlg_assert(img.memState == MemoryResource::State::unbound);
+	dlg_assert(img.memory.index() == 0u);
+	auto& memBind = std::get<0>(img.memory);
 
-	img.memory = &mem;
-	img.allocationOffset = offset;
-	img.allocationSize = memReqs.size;
-	img.memState = MemoryResource::State::bound;
+	dlg_assert(!memBind.memory);
+	dlg_assert(memBind.memState == FullMemoryBind::State::unbound);
 
-	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
-		img, cmpMemRes);
-	mem.allocations.insert(it, &img);
+	memBind.memory = &mem;
+	memBind.memOffset = offset;
+	memBind.memSize = memReqs.size;
+	memBind.memState = FullMemoryBind::State::bound;
+
+	mem.allocations.insert(&memBind);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindImageMemory2(

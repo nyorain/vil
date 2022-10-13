@@ -30,9 +30,15 @@ void Swapchain::destroy() {
 			std::lock_guard lock(dev->mutex);
 			img->swapchain = nullptr;
 			img->handle = {};
-			img->memState = MemoryResource::State::resourceDestroyed;
+
+			dlg_assert(img->memory.index() == 0u);
+			auto& memBind = std::get<0>(img->memory);
+			memBind.memState = FullMemoryBind::State::resourceDestroyed;
 		}
 
+		// TODO: call onApiDestroy? shouldn't be needed atm but might
+		// be in future. Not sure if expected, the api object
+		// was always of implicit nature.
 		dev->images.mustErase(handle);
 	}
 
@@ -154,7 +160,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		// TODO: special case, not sure how to represent it.
 		// It's bound but implicitly, so we can't set img.memory
 		// Might trigger asserts somewhere (that expect 'state == bound' -> 'memory != null')
-		img.memState = MemoryResource::State::bound;
+		// std::get<0>(img.memory).memState = FullMemoryBind::State::bound;
 
 		img.ci.arrayLayers = sci.imageArrayLayers;
 		img.ci.imageType = VK_IMAGE_TYPE_2D;

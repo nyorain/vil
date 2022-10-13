@@ -728,15 +728,6 @@ void useHandle(CommandRecord& rec, Command& cmd, DescriptorSet& ds) {
 
 UsedImage& useHandle(CommandRecord& rec, Command& cmd, Image& img) {
 	auto& ui = useHandleImpl(rec, cmd, img);
-
-	// NOTE: add swapchain in case it's a swapchain image?
-	// shouldn't be needed I guess.
-	// NOTE: can currently fail for sparse bindings i guess
-	dlg_assert(img.memory || img.swapchain);
-	if(img.memory) {
-		// useHandle(rec, cmd, *img.memory);
-	}
-
 	return ui;
 }
 
@@ -750,12 +741,6 @@ void useHandle(CommandRecord& rec, Command& cmd, ImageView& view, bool useImg = 
 
 void useHandle(CommandRecord& rec, Command& cmd, Buffer& buf) {
 	useHandleImpl(rec, cmd, buf);
-
-	// NOTE: can currently fail for sparse bindings i guess
-	dlg_assert(buf.memory);
-	if(buf.memory) {
-		// useHandle(rec, cmd, *buf.memory);
-	}
 }
 
 void useHandle(CommandRecord& rec, Command& cmd, BufferView& view) {

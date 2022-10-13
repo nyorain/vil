@@ -74,6 +74,7 @@ struct Draw {
 	};
 	std::vector<UsedImage> usedImages;
 	std::vector<Buffer*> usedBuffers;
+	std::vector<DeviceMemory*> usedMemory;
 
 	IntrusivePtr<CommandHookState> usedHookState;
 

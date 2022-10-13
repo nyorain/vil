@@ -119,6 +119,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	buf.handle = *pBuffer;
 	buf.concurrentHooked = concurrent;
 
+	if(buf.ci.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT) {
+		buf.memory = SparseMemoryState{};
+	}
+
 	constexpr auto sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
 	auto* externalMem = findChainInfo<VkExternalMemoryBufferCreateInfo, sType>(nci);
 	if(externalMem && externalMem->handleTypes) {
@@ -176,17 +180,18 @@ void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
 
 	// access to the given memory and buffer must be internally synced
 	std::lock_guard lock(dev.mutex);
-	dlg_assert(!buf.memory);
-	dlg_assert(buf.memState == MemoryResource::State::unbound);
+	dlg_assert(buf.memory.index() == 0u);
+	auto& memBind = std::get<0>(buf.memory);
 
-	buf.memory = &mem;
-	buf.allocationOffset = offset;
-	buf.allocationSize = memReqs.size;
-	buf.memState = MemoryResource::State::bound;
+	dlg_assert(!memBind.memory);
+	dlg_assert(memBind.memState == FullMemoryBind::State::unbound);
 
-	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
-		buf, cmpMemRes);
-	mem.allocations.insert(it, &buf);
+	memBind.memory = &mem;
+	memBind.memOffset = offset;
+	memBind.memSize = memReqs.size;
+	memBind.memState = FullMemoryBind::State::bound;
+
+	mem.allocations.insert(&memBind);
 }
 
 void checkDeviceAddress(Buffer& buf) {

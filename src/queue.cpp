@@ -2,6 +2,7 @@
 #include <wrap.hpp>
 #include <cb.hpp>
 #include <ds.hpp>
+#include <layer.hpp>
 #include <threadContext.hpp>
 #include <command/commands.hpp>
 #include <swapchain.hpp>
@@ -14,6 +15,7 @@
 #include <commandHook/submission.hpp>
 #include <util/util.hpp>
 #include <vkutil/enumString.hpp>
+#include <vkutil/format_utils.h>
 #include <util/profiling.hpp>
 
 namespace vil {
@@ -359,23 +361,121 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 	return waitIdleImpl(dev);
 }
 
-// TODO: process the bindings. Wait until we know that the submission finished?
+void process(MemoryResource& res, VkSparseMemoryBind& vkBind) {
+	auto& dev = *res.dev;
+
+	dlg_assert(res.memory.index() == 1u);
+	auto& bindState = std::get<1>(res.memory);
+
+	if(vkBind.memory) {
+		auto& mem = get(dev, vkBind.memory);
+		vkBind.memory = mem.handle;
+
+		OpaqueSparseMemoryBind bind {};
+		bind.memory = &mem;
+		bind.resource = &res;
+		bind.flags = vkBind.flags;
+		bind.memOffset = vkBind.memoryOffset;
+		bind.memSize = vkBind.size;
+		bind.resourceOffset = vkBind.resourceOffset;
+		bindState.opaqueBinds.insert(bind);
+	} else {
+		// unbinding the range
+		OpaqueSparseMemoryBind testBind {};
+		testBind.resourceOffset = vkBind.resourceOffset;
+		testBind.memSize = vkBind.size;
+		auto resEnd = vkBind.resourceOffset + vkBind.size;
+
+		auto it = bindState.opaqueBinds.lower_bound(testBind);
+		while(it != bindState.opaqueBinds.end() &&
+				it->resourceOffset < resEnd) {
+			dlg_assert(it->resourceOffset + it->memSize < resEnd);
+			it = bindState.opaqueBinds.erase(it);
+		}
+	}
+}
+
+VkDeviceSize memorySize(const Image& img, const VkSparseImageMemoryBind& bind) {
+	auto& dev = *img.dev;
+
+	// TODO: cache properties somewhere?
+	u32 numFmtProps {};
+	dev.ini->dispatch.GetPhysicalDeviceSparseImageFormatProperties(
+		dev.phdev, img.ci.format, img.ci.imageType, img.ci.samples,
+		img.ci.usage, img.ci.tiling, &numFmtProps, nullptr);
+
+	ThreadMemScope tms;
+	auto props = tms.alloc<VkSparseImageFormatProperties>(numFmtProps);
+	dev.ini->dispatch.GetPhysicalDeviceSparseImageFormatProperties(
+		dev.phdev, img.ci.format, img.ci.imageType, img.ci.samples,
+		img.ci.usage, img.ci.tiling, &numFmtProps, props.data());
+
+	VkExtent3D granularity {};
+	for(auto& p : props) {
+		if(p.aspectMask == bind.subresource.aspectMask) {
+			granularity = p.imageGranularity;
+			break;
+		}
+	}
+
+	dlg_assert(granularity.width != 0);
+
+	// compare vulkan pec: "Any bound partially-used-sparse-blocks must still
+	// have their full sparse block size in bytes allocated in memory"
+	// Granularity is the number of blocks for BC formats so this should be fine.
+	auto numTexels = granularity.depth * granularity.height * granularity.width;
+	// auto numTexels = bind.extent.depth * bind.extent.height * bind.extent.width;
+	return numTexels * FormatElementSize(img.ci.format, bind.subresource.aspectMask);
+}
+
+void process(Image& img, VkSparseImageMemoryBind& vkBind) {
+	auto& dev = *img.dev;
+
+	dlg_assert(img.memory.index() == 1u);
+	auto& bindState = std::get<1>(img.memory);
+
+	if(vkBind.memory) {
+		auto& mem = get(dev, vkBind.memory);
+		vkBind.memory = mem.handle;
+
+		ImageSparseMemoryBind bind {};
+		bind.memory = &mem;
+		bind.resource = &img;
+		bind.flags = vkBind.flags;
+		bind.memOffset = vkBind.memoryOffset;
+		bind.offset = vkBind.offset;
+		bind.size = vkBind.extent;
+		bind.subres = vkBind.subresource;
+		bind.memSize = memorySize(img, vkBind);
+		bindState.imageBinds.insert(bind);
+	} else {
+		// unbinding the range
+		ImageSparseMemoryBind testBind {};
+		testBind.offset = vkBind.offset;
+		testBind.subres = vkBind.subresource;
+
+		// TODO: lower bound and iterate? not sure how
+		auto it = bindState.imageBinds.find(testBind);
+		while(it != bindState.imageBinds.end()) {
+			it = bindState.imageBinds.erase(it);
+		}
+	}
+}
+
+// TODO: Wait until we know that the submission finished with inserting
+// the new binds?
 void process(Device& dev, ThreadMemScope& scope, VkSparseBufferMemoryBindInfo& bind) {
 	auto& buf = get(dev, bind.buffer);
 	bind.buffer = buf.handle;
 
-	auto mems = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
+	auto fwdBinds = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
 	for(auto i = 0u; i < bind.bindCount; ++i) {
-		auto& b = mems[i];
+		auto& b = fwdBinds[i];
 		b = bind.pBinds[i];
-
-		if(b.memory) {
-			auto& mem = get(dev, b.memory);
-			b.memory = mem.handle;
-		}
+		process(buf, b);
 	}
 
-	bind.pBinds = mems.data();
+	bind.pBinds = fwdBinds.data();
 }
 
 void process(Device& dev, ThreadMemScope& scope, VkSparseImageOpaqueMemoryBindInfo& bind) {
@@ -386,11 +486,7 @@ void process(Device& dev, ThreadMemScope& scope, VkSparseImageOpaqueMemoryBindIn
 	for(auto i = 0u; i < bind.bindCount; ++i) {
 		auto& b = mems[i];
 		b = bind.pBinds[i];
-
-		if(b.memory) {
-			auto& mem = get(dev, b.memory);
-			b.memory = mem.handle;
-		}
+		process(img, b);
 	}
 
 	bind.pBinds = mems.data();
