@@ -13,6 +13,7 @@
 #include <device.hpp>
 #include <queue.hpp>
 #include <pipe.hpp>
+#include <memory.hpp>
 #include <threadContext.hpp>
 #include <image.hpp>
 #include <buffer.hpp>
@@ -86,16 +87,110 @@ void ResourceGui::init(Gui& gui) {
 
 void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 	std::lock_guard lock(gui_->dev().mutex);
-	if(res.memory) {
+	if(res.memory.index() == 1) {
+		imGuiText("TODO: show sparse bindings");
+		return;
+	}
+
+	auto& memBind = std::get<0>(res.memory);
+	if(memBind.memory) {
 		ImGui::Text("Bound to memory ");
 		ImGui::SameLine();
 
-		refButtonExpect(*gui_, res.memory);
+		refButtonExpect(*gui_, memBind.memory);
 
 		ImGui::SameLine();
 		imGuiText(" (offset {}, size {})",
-			sepfmt(res.allocationOffset),
-			sepfmt(res.allocationSize));
+			sepfmt(memBind.memOffset),
+			sepfmt(memBind.memSize));
+	}
+}
+
+void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
+	IntrusivePtr<Swapchain> swapchain;
+
+	{
+		std::lock_guard lock(gui_->dev().mutex);
+		swapchain.reset(image.swapchain);
+	}
+
+	if(swapchain) {
+		ImGui::Text("Image can't be displayed since it's a swapchain image of");
+		ImGui::SameLine();
+		refButtonExpect(*gui_, swapchain.get());
+	} else if(!image.allowsNearestSampling) {
+		ImGui::Text("Image can't be displayed since its format does not support sampling");
+	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
+		ImGui::Text("Image can't be displayed since it has multiple samples");
+	} else if(image.ci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT) {
+		ImGui::Text("Transient Image can't be displayed");
+	} else if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+		// TODO: well, we could still try to display it.
+		// But we have to modify our barrier logic a bit.
+		// And should probably at least output a warning here that it's in
+		// undefined layout and therefore may contain garbage, nothing
+		// we can do about that (well, once again not entirely true, we could
+		// prevent this invalidation by hooking into state transitions
+		// and prevent images from being put into undefined layout; always
+		// storing in renderpass and so on. But that's really something
+		// for waaaay later, i'm already wondering wth i'm doing with my life
+		// writing this).
+		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
+	} else if(image.memory.index() == 1) {
+		// see docs/own/sparse.md for an outline on how to handle it
+		// requires additional sync and tracking work
+		imGuiText("TODO: can't display sparse image contents yet");
+	} else {
+		FullMemoryBind::State memState {};
+		VkImage imageHandle {};
+		constexpr auto layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		{
+			std::lock_guard lock(image.dev->mutex);
+			auto& memBind = std::get<0>(image.memory);
+			memState = memBind.memState;
+			if(memState == FullMemoryBind::State::bound) {
+				dlg_assert(image.handle);
+				dlg_assert(memBind.memory);
+				draw.usedImages.push_back({image_.object, layout});
+				draw.usedMemory.push_back(memBind.memory);
+				imageHandle = image.handle;
+			}
+		}
+
+
+		if(memState == FullMemoryBind::State::resourceDestroyed) {
+			ImGui::Text("Can't display contents since image was destroyed");
+		} else if(memState == FullMemoryBind::State::unbound) {
+			ImGui::Text("Can't display contents since image was never bound to memory");
+		} else if(memState == FullMemoryBind::State::memoryDestroyed) {
+			ImGui::Text("Can't display image contents since the memory "
+				"it was bound to was destroyed");
+		} else {
+			// NOTE: useful for destruction race repro/debugging
+			// std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+			if(doSelect) {
+				VkImageSubresourceRange subres {};
+				subres.layerCount = image.ci.arrayLayers;
+				subres.levelCount = image.ci.mipLevels;
+				subres.aspectMask = aspects(image.ci.format);
+				auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
+				if(image.hasTransferSrc) {
+					flags |= ImageViewer::supportsTransferSrc;
+				}
+
+				image_.viewer.reset(true);
+				image_.viewer.select(imageHandle, image.ci.extent,
+					image.ci.imageType, image.ci.format, subres,
+					layout, layout, flags);
+			}
+
+			ImGui::Spacing();
+			ImGui::Spacing();
+
+			image_.viewer.display(draw);
+		}
 	}
 }
 
@@ -141,10 +236,8 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 
 	// make sure the views stay alive while we render this
 	std::vector<IntrusivePtr<ImageView>> views;
-	IntrusivePtr<Swapchain> swapchain;
 	{
 		std::lock_guard lock(gui_->dev().mutex);
-		swapchain.reset(image.swapchain);
 		for(auto* view : image.views) {
 			views.emplace_back(view);
 		}
@@ -167,81 +260,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		}
 	}
 
-	// content
-	if(swapchain) {
-		ImGui::Text("Image can't be displayed since it's a swapchain image of");
-		ImGui::SameLine();
-		refButtonExpect(*gui_, swapchain.get());
-	} else if(!image.allowsNearestSampling) {
-		ImGui::Text("Image can't be displayed since its format does not support sampling");
-	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
-		ImGui::Text("Image can't be displayed since it has multiple samples");
-	} else if(image.ci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT) {
-		ImGui::Text("Transient Image can't be displayed");
-	} else if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
-		// TODO: well, we could still try to display it.
-		// But we have to modify our barrier logic a bit.
-		// And should probably at least output a warning here that it's in
-		// undefined layout and therefore may contain garbage, nothing
-		// we can do about that (well, once again not entirely true, we could
-		// prevent this invalidation by hooking into state transitions
-		// and prevent images from being put into undefined layout; always
-		// storing in renderpass and so on. But that's really something
-		// for waaaay later, i'm already wondering wth i'm doing with my life
-		// writing this).
-		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
-	} else {
-		MemoryResource::State memState {};
-		VkImage imageHandle {};
-		constexpr auto layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-		{
-			std::lock_guard lock(image.dev->mutex);
-			memState = image.memState;
-			if(memState == MemoryResource::State::bound) {
-				dlg_assert(image.handle);
-				dlg_assert(image.memory);
-				draw.usedImages.push_back({image_.object, layout});
-				imageHandle = image.handle;
-			}
-		}
-
-		if(memState == MemoryResource::State::resourceDestroyed) {
-			dlg_assert(!image.handle);
-			ImGui::Text("Can't display contents since image was destroyed");
-		} else if(memState == MemoryResource::State::unbound) {
-			dlg_assert(!image.memory);
-			ImGui::Text("Can't display contents since image was never bound to memory");
-		} else if(memState == MemoryResource::State::memoryDestroyed) {
-			dlg_assert(!image.memory);
-			ImGui::Text("Can't display image contents since the memory "
-				"it was bound to was destroyed");
-		} else {
-			// NOTE: useful for destruction race repro/debugging
-			// std::this_thread::sleep_for(std::chrono::milliseconds(30));
-
-			if(doSelect) {
-				VkImageSubresourceRange subres {};
-				subres.layerCount = image.ci.arrayLayers;
-				subres.levelCount = image.ci.mipLevels;
-				subres.aspectMask = aspects(image.ci.format);
-				auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
-				if(image.hasTransferSrc) {
-					flags |= ImageViewer::supportsTransferSrc;
-				}
-
-				image_.viewer.reset(true);
-				image_.viewer.select(imageHandle, image.ci.extent,
-					image.ci.imageType, image.ci.format, subres,
-					layout, layout, flags);
-			}
-
-			ImGui::Spacing();
-			ImGui::Spacing();
-
-			image_.viewer.display(draw);
-		}
-	}
+	drawImageContents(draw, image, doSelect);
 
 	// TODO: display pending layout?
 }
@@ -276,33 +295,34 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	ImGui::Spacing();
 	drawMemoryResDesc(draw, buffer);
 
-	// NOTE: this check is racy and we don't insert into usedBuffers yet
-	//   since it's only relevant to insert the relevant gui message.
-	//   We do the real check (and insert) in the copyBuffer callback.
-	MemoryResource::State state;
-	{
-		std::lock_guard lock(buffer.dev->mutex);
-		state = buffer.memState;
-	}
-
-	if(state == MemoryResource::State::unbound) {
-		dlg_assert(!buffer.memory);
-		imGuiText("Can't display buffer content since it isn't bound to memory");
-	} else if(state == MemoryResource::State::resourceDestroyed) {
-		dlg_assert(!buffer.handle);
-		imGuiText("Can't display buffer content since it was destroyed");
-	} else if(state == MemoryResource::State::memoryDestroyed) {
-		dlg_assert(!buffer.memory);
-		imGuiText("Can't display buffer content since its memory was destroyed");
+	if(buffer.memory.index() == 1u) {
+		imGuiText("TODO: add support for showing sparse buffer content");
 	} else {
-		gui_->addPostRender([&](Draw& draw) { this->copyBuffer(draw); });
-		if(buffer_.lastReadback) {
-			auto& readback = buffer_.readbacks[*buffer_.lastReadback];
-			dlg_assert(!readback.pending);
-			dlg_assert(readback.src == buffer_.handle->handle);
+		// NOTE: this check is racy and we don't insert into usedBuffers yet
+		//   since it's only relevant to insert the relevant gui message.
+		//   We do the real check (and insert) in the copyBuffer callback.
+		FullMemoryBind::State state;
+		{
+			std::lock_guard lock(buffer.dev->mutex);
+			state = std::get<0>(buffer.memory).memState;
+		}
 
-			ImGui::Separator();
-			buffer_.viewer.display(readback.own.data());
+		if(state == FullMemoryBind::State::unbound) {
+			imGuiText("Can't display buffer content since it isn't bound to memory");
+		} else if(state == FullMemoryBind::State::resourceDestroyed) {
+			imGuiText("Can't display buffer content since it was destroyed");
+		} else if(state == FullMemoryBind::State::memoryDestroyed) {
+			imGuiText("Can't display buffer content since its memory was destroyed");
+		} else {
+			gui_->addPostRender([&](Draw& draw) { this->copyBuffer(draw); });
+			if(buffer_.lastReadback) {
+				auto& readback = buffer_.readbacks[*buffer_.lastReadback];
+				dlg_assert(!readback.pending);
+				dlg_assert(readback.src == buffer_.handle->handle);
+
+				ImGui::Separator();
+				buffer_.viewer.display(readback.own.data());
+			}
 		}
 	}
 }
@@ -818,9 +838,9 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 
 	{
 		std::lock_guard lock(gui_->dev().mutex);
-		for(auto& resource : mem.allocations) {
-			auto resOff = width * float(resource->allocationOffset) / mem.size;
-			auto resSize = width * float(resource->allocationSize) / mem.size;
+		for(auto* bind : mem.allocations) {
+			auto resOff = width * float(bind->memOffset) / mem.size;
+			auto resSize = width * float(bind->memSize) / mem.size;
 
 			auto resPos = start;
 			resPos.x += resOff;
@@ -828,17 +848,19 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 			auto rectSize = ImVec2(resSize, height);
 
 			auto col = allocCol;
-			auto name = dlg::format("{}", (void*) &resource);
+			auto name = dlg::format("{}", (void*) bind);
 
 			ImGui::SetCursorScreenPos(resPos);
 			ImGui::InvisibleButton(name.c_str(), rectSize);
+
+			auto* resource = bind->resource;
 			if(ImGui::IsItemHovered()) {
 				col = allocHoverCol;
 
 				ImGui::BeginTooltip();
 				imGuiText("{}", vil::name(*resource, resource->memObjectType, true, true));
-				imGuiText("Offset: {}", sepfmt(resource->allocationOffset));
-				imGuiText("Size: {}", sepfmt(resource->allocationSize));
+				imGuiText("Offset: {}", sepfmt(bind->memOffset));
+				imGuiText("Size: {}", sepfmt(bind->memSize));
 				ImGui::EndTooltip();
 			}
 			if(ImGui::IsItemClicked()) {
@@ -1675,16 +1697,19 @@ void ResourceGui::copyBuffer(Draw& draw) {
 	}
 
 	VkBuffer bufHandle {};
+	auto& memBind = std::get<0>(buffer_.handle->memory);
+
 	{
 		std::lock_guard lock(dev.mutex);
-		bool valid = (buffer_.handle->memState == MemoryResource::State::bound);
+		bool valid = (memBind.memState == FullMemoryBind::State::bound);
 		if(!valid) {
 			return;
 		}
 
 		dlg_assert(buffer_.handle->handle);
-		dlg_assert(buffer_.handle->memory);
+		dlg_assert(memBind.memory);
 		draw.usedBuffers.push_back(buffer_.handle);
+		draw.usedMemory.push_back(memBind.memory);
 		bufHandle = buffer_.handle->handle;
 	}
 

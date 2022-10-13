@@ -5,11 +5,24 @@
 #include <util/dlg.hpp>
 #include <set>
 
-// TODO: support sparse binding
-
 namespace vil {
 
-struct MemoryResource : SharedDeviceHandle {
+struct MemoryBind {
+	DeviceMemory* memory {};
+	MemoryResource* resource {};
+	VkDeviceSize memOffset {};
+	VkDeviceSize memSize {};
+
+	struct CmpByMemOffset {
+		bool operator()(const MemoryBind& a, const MemoryBind& b) const;
+		bool operator()(const MemoryBind* a, const MemoryBind* b) const {
+			return this->operator()(*a, *b);
+		}
+	};
+};
+
+// Describes the memory binding state of a non-sparse resource.
+struct FullMemoryBind : MemoryBind {
 	enum class State {
 		unbound,
 		bound,
@@ -18,10 +31,55 @@ struct MemoryResource : SharedDeviceHandle {
 	};
 
 	State memState {State::unbound};
-	DeviceMemory* memory {};
-	VkDeviceSize allocationOffset {};
-	VkDeviceSize allocationSize {};
+};
+
+struct SparseMemoryBind : MemoryBind {
+	VkSparseMemoryBindFlags flags {};
+	bool opaque {};
+};
+
+struct OpaqueSparseMemoryBind : SparseMemoryBind {
+	VkDeviceSize resourceOffset {};
+
+	OpaqueSparseMemoryBind() {
+		opaque = true;
+	}
+
+	struct Cmp {
+		bool operator()(const OpaqueSparseMemoryBind& a,
+			const OpaqueSparseMemoryBind& b) const;
+	};
+};
+
+struct ImageSparseMemoryBind : SparseMemoryBind {
+	VkImageSubresource subres {};
+	VkOffset3D offset {};
+	VkExtent3D size {};
+	VkSparseMemoryBindFlags flags {};
+
+	ImageSparseMemoryBind() {
+		opaque = true;
+	}
+
+	struct Cmp {
+		bool operator()(const ImageSparseMemoryBind& a,
+			const ImageSparseMemoryBind& b) const;
+	};
+};
+
+struct SparseMemoryState {
+	std::set<OpaqueSparseMemoryBind,
+		OpaqueSparseMemoryBind::Cmp> opaqueBinds;
+	std::set<ImageSparseMemoryBind,
+		ImageSparseMemoryBind::Cmp> imageBinds;
+};
+
+struct MemoryResource : SharedDeviceHandle {
 	VkObjectType memObjectType {};
+
+	// Which member is active is only determined by creation flags
+	// and immutable over the resources lifetime.
+	std::variant<FullMemoryBind, SparseMemoryState> memory {};
 
 	void onApiDestroy();
 };
@@ -39,31 +97,13 @@ struct DeviceMemory : SharedDeviceHandle {
 	VkDeviceSize mapOffset {};
 	VkDeviceSize mapSize {};
 
-	// Sorted by offset. Keep in mind that allocations may alias. If
+	// Sorted by memory offset. Keep in mind that allocations may alias. If
 	// multiple allocations have the same offset, the sorting between those
 	// is arbitrary.
-	std::vector<MemoryResource*> allocations;
+	std::set<const MemoryBind*, MemoryBind::CmpByMemOffset> allocations;
 
 	void onApiDestroy();
 };
-
-// Returns whether any parts of the given memory resource alias any
-// other resource.
-// Expects the given MemoryResource to be bound to memory.
-// Expects the device mutex to be locked.
-bool aliasesOtherResourceLocked(const MemoryResource& res);
-
-// Returns whether the given memory resources lies in currently mapped memory.
-// Expects the given MemoryResource to be bound to memory.
-// Expects the device mutex to be locked.
-bool currentlyMappedLocked(const MemoryResource& res);
-
-// Used as comparator to std::lower_bound when searching for an allocation
-// in DeviceMemory::allocations.
-inline bool cmpMemRes(const MemoryResource* it, const MemoryResource& b) {
-	dlg_assert(it->memory == b.memory);
-	return it->allocationOffset < b.allocationOffset;
-}
 
 VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
     VkDevice                                    device,

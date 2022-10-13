@@ -1289,12 +1289,17 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 
 	auto usesHandle = [&](const Draw& draw) {
 		for(auto* usedBuf : draw.usedBuffers) {
-			if(usedBuf == &handle || usedBuf->memory == &handle) {
+			if(usedBuf == &handle) {
 				return true;
 			}
 		}
 		for(auto [usedImg, _targetLayout] : draw.usedImages) {
-			if(usedImg == &handle || usedImg->memory == &handle) {
+			if(usedImg == &handle) {
+				return true;
+			}
+		}
+		for(auto& usedMem : draw.usedMemory) {
+			if(usedMem == &handle) {
 				return true;
 			}
 		}
@@ -1364,6 +1369,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		draw.onFinish.clear();
 		draw.usedImages.clear();
 		draw.usedBuffers.clear();
+		draw.usedMemory.clear();
 		draw.usedHookState.reset();
 	};
 
@@ -1541,13 +1547,19 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		dlg_check({
 			auto invalidated = false;
 			for(auto* usedBuf : draw.usedBuffers) {
-				if(!usedBuf->handle || !usedBuf->memory) {
+				if(!usedBuf->handle) {
 					invalidated = true;
 					break;
 				}
 			}
 			for(auto [usedImg, _targetLayout] : draw.usedImages) {
-				if(!usedImg->handle || !usedImg->memory) {
+				if(!usedImg->handle) {
+					invalidated = true;
+					break;
+				}
+			}
+			for(auto* usedMem : draw.usedMemory) {
+				if(!usedMem->handle) {
 					invalidated = true;
 					break;
 				}
@@ -1761,6 +1773,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	auto& draw = *foundDraw;
 	draw.usedImages.clear();
 	draw.usedBuffers.clear();
+	draw.usedMemory.clear();
 	foundDraw->lastUsed = ++drawCounter_;
 
 	if(blur_.dev && !info.clear) {
@@ -2042,7 +2055,9 @@ void Gui::addFullSync(Draw& draw, VkSubmitInfo& submitInfo) {
 
 	// when we used any application resources we sync with *all*
 	// pending submissions.
-	if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
+	if(!draw.usedImages.empty() ||
+			!draw.usedBuffers.empty() ||
+			!draw.usedMemory.empty()) {
 		for(auto& pqueue : dev().queues) {
 			auto& queue = *pqueue;
 			if(&queue == &usedQueue()) {
@@ -2152,6 +2167,7 @@ void Gui::finishedLocked(Draw& draw) {
 	draw.waitedUpon.clear();
 	draw.usedImages.clear();
 	draw.usedBuffers.clear();
+	draw.usedMemory.clear();
 	draw.usedHookState.reset();
 
 	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));

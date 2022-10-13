@@ -8,38 +8,99 @@
 
 namespace vil {
 
+bool MemoryBind::CmpByMemOffset::operator()(const MemoryBind& a, const MemoryBind& b) const {
+	dlg_assert(a.memory == b.memory);
+
+	if(a.memOffset != b.memOffset) {
+		return a.memOffset < b.memOffset;
+	}
+
+	if(a.memSize != b.memSize) {
+		return a.memSize < b.memSize;
+	}
+
+	// arbitrary ordering just for uniqueness
+	// NOTE: sorting by resource alone is not enough due to
+	//   inner-resource aliasing for sparse resources
+	return &a < &b;
+}
+
+bool OpaqueSparseMemoryBind::Cmp::operator()(const OpaqueSparseMemoryBind& a,
+		const OpaqueSparseMemoryBind& b) const {
+	dlg_assert(a.resource == b.resource);
+
+	if(a.resourceOffset != b.resourceOffset) {
+		return a.resourceOffset < b.resourceOffset;
+	}
+
+	return false;
+
+	// if(a.memSize != b.memSize) {
+	// 	return a.memSize < b.memSize;
+	// }
+
+	// arbitrary ordering just for uniqueness
+	// return &a < &b;
+}
+
+bool ImageSparseMemoryBind::Cmp::operator()(const ImageSparseMemoryBind& a,
+		const ImageSparseMemoryBind& b) const {
+	dlg_assert(a.resource == b.resource);
+
+	if(a.subres.aspectMask != b.subres.aspectMask) {
+		return a.subres.aspectMask < b.subres.aspectMask;
+	}
+	if(a.subres.mipLevel != b.subres.mipLevel) {
+		return a.subres.mipLevel < b.subres.mipLevel;
+	}
+	if(a.subres.arrayLayer != b.subres.arrayLayer) {
+		return a.subres.arrayLayer < b.subres.arrayLayer;
+	}
+
+	if(a.offset.z != b.offset.z) return a.offset.z < b.offset.z;
+	if(a.offset.y != b.offset.y) return a.offset.y < b.offset.y;
+	if(a.offset.x != b.offset.x) return a.offset.x < b.offset.x;
+
+	// Don't compare on size by design here
+	// If we land here, all the offsets/subres is the same.
+	// There can't multiple bindings (with different size) for the
+	// same address.
+
+	// arbitrary ordering just for uniqueness
+	// return &a < &b;
+	return false;
+}
+
 void MemoryResource::onApiDestroy() {
 	std::lock_guard lock(dev->mutex);
 
-	// If this resource had memory assigned, remove it from the memories
-	// list of resources.
-	if(memory) {
-		dlg_assert(memState == State::bound);
-
-		auto it = std::lower_bound(memory->allocations.begin(), memory->allocations.end(),
-			*this, cmpMemRes);
-
-		// NOTE: we can't just iterate it but have to do a linear
-		// search until we find *this since memory->allocations can contain
-		// aliased memory resources
-		auto found = false;
-		while(it != memory->allocations.end()) {
-			if(*it == this) {
-				found = true;
-				memory->allocations.erase(it);
-				break;
+	// unregister at memory
+	std::visit(Visitor{
+		[](FullMemoryBind& bind) {
+			dlg_assertm(!!bind.memory ==
+				(bind.memState == FullMemoryBind::State::bound),
+				"Inconsistent FullMemoryBind state");
+			if(bind.memory) {
+				dlg_assert(bind.memState == FullMemoryBind::State::bound);
+				bind.memory->allocations.erase(&bind);
+				bind.memory = {};
+				bind.memOffset = {};
+				bind.memSize = {};
+				bind.memState = FullMemoryBind::State::resourceDestroyed;
+			}
+		},
+		[](SparseMemoryState& mem) {
+			for(auto& bind : mem.opaqueBinds) {
+				bind.memory->allocations.erase(&bind);
+			}
+			for(auto& bind : mem.imageBinds) {
+				bind.memory->allocations.erase(&bind);
 			}
 
-			++it;
+			mem.opaqueBinds.clear();
+			mem.imageBinds.clear();
 		}
-
-		dlg_assert(found);
-
-		memory = nullptr;
-		allocationOffset = {};
-		allocationSize = {};
-		memState = State::resourceDestroyed;
-	}
+	}, memory);
 
 	notifyApiHandleDestroyedLocked(*dev, *this, memObjectType);
 }
@@ -47,17 +108,27 @@ void MemoryResource::onApiDestroy() {
 void DeviceMemory::onApiDestroy() {
 	std::lock_guard lock(dev->mutex);
 
-	// NOTE that we temporarily invalidate the ordering invariant of
-	// this->allocations. But since we own the mutex and this object
-	// is to be destroyed any moment anyways (and we are not calling
-	// any other functions in between) this isn't a problem.
-	for(auto* res : allocations) {
-		dlg_assert(res->memState == MemoryResource::State::bound);
-		dlg_assert(res->memory == this);
-		res->memory = nullptr;
-		res->memState = MemoryResource::State::memoryDestroyed;
-		res->allocationOffset = 0u;
-		res->allocationSize = 0u;
+	for(auto* bind : allocations) {
+		auto& res = *bind->resource;
+
+		std::visit(Visitor{
+			[&](FullMemoryBind& bind) {
+				dlg_assert(bind.memState == FullMemoryBind::State::bound);
+				dlg_assert(bind.memory == this);
+				bind.memory = nullptr;
+				bind.memState = FullMemoryBind::State::memoryDestroyed;
+				bind.memOffset = 0u;
+				bind.memSize = 0u;
+			},
+			[&](SparseMemoryState& mem) {
+				auto& sparseBind = static_cast<const SparseMemoryBind&>(*bind);
+				if(sparseBind.opaque) {
+					mem.opaqueBinds.erase(static_cast<const OpaqueSparseMemoryBind&>(*bind));
+				} else {
+					mem.imageBinds.erase(static_cast<const ImageSparseMemoryBind&>(*bind));
+				}
+			}
+		}, res.memory);
 	}
 
 	allocations.clear();
@@ -199,35 +270,18 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceMemoryCommitment(
 		pCommittedMemoryInBytes);
 }
 
-bool aliasesOtherResourceLocked(const MemoryResource& res) {
-	dlg_assert_or(res.memory, return false);
-	auto& mem = *res.memory;
-	assertOwned(res.dev->mutex);
+// Calls F for every resource overlapping the given range of [off, off + size)
+template<typename F>
+void forEachOverlappingResource(const DeviceMemory& mem,
+		VkDeviceSize off, VkDeviceSize size, F&& callback) {
+	MemoryBind tester {};
+	tester.memOffset = off;
 
-	auto it = std::lower_bound(mem.allocations.begin(), mem.allocations.end(),
-		res, cmpMemRes);
-	dlg_assert(it != mem.allocations.end());
-	if(*it != &res) {
-		dlg_assert((*it)->allocationOffset == res.allocationOffset);
-		return true;
+	auto end = off + size;
+	auto it = mem.allocations.lower_bound(&tester);
+	while(it != mem.allocations.end() && (*it)->memOffset < end) {
+		callback(**it);
 	}
-
-	++it;
-	auto imgEnd = res.allocationOffset + res.allocationSize;
-	if(it != mem.allocations.end() && (*it)->allocationOffset < imgEnd) {
-		return true;
-	}
-
-	return false;
-}
-
-bool currentlyMappedLocked(const MemoryResource& res) {
-	dlg_assert_or(res.memory, return false);
-	auto& mem = *res.memory;
-	assertOwned(res.dev->mutex);
-
-	return (mem.map && overlaps(res.allocationOffset, res.allocationSize,
-				mem.mapOffset, mem.mapSize));
 }
 
 } // namespace vil
