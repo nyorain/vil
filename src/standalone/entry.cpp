@@ -1,10 +1,22 @@
 #include <layer.hpp>
 #include <device.hpp>
+#include <image.hpp>
+#include <cb.hpp>
+#include <queue.hpp>
+#include <sync.hpp>
+#include <buffer.hpp>
+#include <window.hpp>
+#include <gui/gui.hpp>
+#include <gui/imageViewer.hpp>
 #include <util/export.hpp>
 #include <util/dl.hpp>
+#include <nytl/bytes.hpp>
+#include <vkutil/sync.hpp>
 #include <gui/gui.hpp>
 #include <swa/swa.h>
+#include <imgio/image.hpp>
 #include <cstdlib>
+#include <csignal>
 
 using namespace vil;
 
@@ -65,7 +77,168 @@ VkBool32 VKAPI_PTR messengerCallback(
 		dlg_log(level, "    cmd label '{}'", name);
 	}
 
+	// debug break
+	// std::raise(SIGTRAP);
+
 	return false;
+}
+
+struct ViewedImage {
+	VkImage img;
+	VkDeviceMemory mem;
+	vil::Image* vilImg;
+};
+
+struct SizeAlign {
+	VkDeviceSize size;
+	VkDeviceSize align;
+};
+
+SizeAlign neededUploadSizeAlign(const vil::Device& dev,
+		const imgio::ImageProvider& source) {
+	auto fmt = source.format();
+	auto [bx, by, bz] = imgio::blockSize(fmt);
+	auto fmtSize = imgio::formatElementSize(fmt);
+	auto size = source.size();
+	auto numElements = ceilDivide(size.x, bx) * ceilDivide(size.y, by) * ceilDivide(size.z, bz);
+	auto layerCount = source.layers();
+	auto dataSize = layerCount * fmtSize * numElements;
+	auto fillLevelCount = source.mipLevels();
+
+	for(auto i = 1u; i < fillLevelCount; ++i) {
+		auto isize = size;
+		isize.x = std::max(size.x >> i, 1u);
+		isize.y = std::max(size.y >> i, 1u);
+		isize.z = std::max(size.z >> i, 1u);
+		auto numElements = ceilDivide(isize.x, bx) * ceilDivide(isize.y, by) * ceilDivide(isize.z, bz);
+		dataSize += layerCount * fmtSize * numElements;
+	}
+
+	auto align = std::max<VkDeviceSize>(fmtSize,
+		dev.props.limits.optimalBufferCopyOffsetAlignment);
+	return {dataSize, align};
+}
+
+ViewedImage loadImage(VkDevice dev, vil::Device& vilDev, Gui& gui) {
+	// create image
+	auto provider = imgio::loadImage("test.ktx");
+	if(!provider) {
+		dlg_trace("error loading image");
+		return {};
+	}
+
+	VkImageCreateInfo ici {};
+	ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	ici.format = static_cast<VkFormat>(provider->format());
+	ici.arrayLayers = provider->layers();
+	ici.mipLevels = provider->mipLevels();
+	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	ici.extent = {provider->size().x, provider->size().y, provider->size().z};
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	if(provider->size().z > 1) {
+		ici.imageType = VK_IMAGE_TYPE_3D;
+	} else if(provider->size().y > 1) {
+		ici.imageType = VK_IMAGE_TYPE_2D;
+	} else {
+		ici.imageType = VK_IMAGE_TYPE_1D;
+	}
+
+	VkImage img;
+	VK_CHECK(vil::CreateImage(dev, &ici, nullptr, &img));
+
+	VkMemoryRequirements memReqs;
+	vil::GetImageMemoryRequirements(dev, img, &memReqs);
+
+	VkMemoryAllocateInfo mai {};
+	mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	mai.memoryTypeIndex = findLSB(memReqs.memoryTypeBits);
+	mai.allocationSize = memReqs.size;
+	VkDeviceMemory mem;
+	VK_CHECK(vil::AllocateMemory(dev, &mai, nullptr, &mem));
+	VK_CHECK(vil::BindImageMemory(dev, img, mem, 0u));
+	auto& vilImg = unwrap(img);
+
+	// = upload =
+	// alloc cb
+	// create staging buffer
+	// record cb while reading data into staging buffer
+	// submit & wait for cb
+
+	VkCommandPool cmdPool;
+	VkCommandPoolCreateInfo cpci {};
+	cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	cpci.queueFamilyIndex = gui.usedQueue().family;
+	VK_CHECK(vilDev.dispatch.CreateCommandPool(vilDev.handle, &cpci, nullptr, &cmdPool));
+	nameHandle(vilDev, cmdPool, "imgUpload");
+
+	VkCommandBufferAllocateInfo cbai {};
+	cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cbai.commandBufferCount = 1u;
+	cbai.commandPool = cmdPool;
+	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	VkCommandBuffer cb;
+	VK_CHECK(vilDev.dispatch.AllocateCommandBuffers(dev, &cbai, &cb));
+	nameHandle(vilDev, cb, "imgUpload");
+
+	auto needed = neededUploadSizeAlign(vilDev, *provider);
+	vil::OwnBuffer buf;
+	buf.ensure(vilDev, needed.size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, {}, "imgUpload");
+
+	WriteBuf bufData{buf.map, buf.size};
+	VkCommandBufferBeginInfo cbi {};
+	cbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	vilDev.dispatch.BeginCommandBuffer(cb, &cbi);
+
+	vku::cmdBarrier(vilDev, cb, vilImg.handle, vku::SyncScope::discard(),
+		vku::SyncScope::transferWrite());
+
+	auto [bx, by, bz] = imgio::blockSize(provider->format());
+	auto fmtSize = imgio::formatElementSize(provider->format());
+	for(auto m = 0u; m < provider->mipLevels(); ++m) {
+		VkExtent3D ext = ici.extent;
+		ext.width = std::max(ext.width >> m, 1u);
+		ext.height = std::max(ext.height >> m, 1u);
+		ext.depth = std::max(ext.depth >> m, 1u);
+
+		auto numElements = ceilDivide(ext.width, bx) * ceilDivide(ext.height, by) * ceilDivide(ext.depth, bz);
+		auto layerSize = fmtSize * numElements;
+		auto off = bufData.data() - buf.map;
+		for(auto i = 0u; i < provider->layers(); ++i) {
+			provider->read(bufData.first(layerSize), m, i);
+			skip(bufData, layerSize);
+		}
+
+		VkBufferImageCopy copy {};
+		copy.imageExtent = ext;
+		copy.bufferOffset = off;
+		copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copy.imageSubresource.baseArrayLayer = 0u;
+		copy.imageSubresource.layerCount = provider->layers();
+		copy.imageSubresource.mipLevel = m;
+		vilDev.dispatch.CmdCopyBufferToImage(cb, buf.buf, vilImg.handle,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copy);
+	}
+
+	vku::cmdBarrier(vilDev, cb, vilImg.handle, vku::SyncScope::transferWrite(),
+		vku::SyncScope::fragmentRead());
+
+	vilDev.dispatch.EndCommandBuffer(cb);
+
+	// submit & wait for cb
+	VkSubmitInfo si {};
+	si.commandBufferCount = 1u;
+	si.pCommandBuffers = &cb;
+	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	vilDev.dispatch.QueueSubmit(gui.usedQueue().handle, 1u, &si, VK_NULL_HANDLE);
+	vilDev.dispatch.QueueWaitIdle(gui.usedQueue().handle);
+
+	return {img, mem, &vilImg};
 }
 
 extern "C" VIL_EXPORT int vil_showImageViewer(int argc, const char** argv) {
@@ -288,13 +461,27 @@ extern "C" VIL_EXPORT int vil_showImageViewer(int argc, const char** argv) {
 	}
 
 	auto* gui = vilDev->gui();
-	if(gui) {
-		gui->mode_ = Gui::Mode::image;
-	}
+	auto [img, mem, vilImg] = loadImage(dev, *vilDev, *gui);
+	if(img) {
+		if(gui) {
+			gui->mode_ = Gui::Mode::image;
+		}
 
-	// TODO: mainloop
-	while(true) {
-		std::this_thread::sleep_for(std::chrono::seconds(1));
+		auto& iv = gui->standaloneImageViewer();
+		VkImageSubresourceRange subres {};
+		subres.layerCount = vilImg->ci.arrayLayers;
+		subres.levelCount = vilImg->ci.mipLevels;
+		subres.aspectMask = aspects(vilImg->ci.format);
+		auto flags = ImageViewer::supportsTransferSrc;
+
+		iv.select(vilImg->handle, vilImg->ci.extent, vilImg->ci.imageType,
+			vilImg->ci.format, subres, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, flags);
+
+		vilDev->window->doMainLoop();
+
+		// TODO: cleanup window. Currently not done correclty
+		//   in destructor
 	}
 
 	// shutdown

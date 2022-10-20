@@ -136,6 +136,9 @@ dep_dlg = dependency('dlg',
 	fallback: ['dlg', 'dlg_dep'])
 dep_nytl = dependency('nytl',
 	fallback: ['nytl', 'nytl_dep'])
+dep_imgio = dependency('imgio',
+	static: true,
+	fallback: ['imgio', 'imgio_dep'])
 
 if disable_dlg
 	warning('disabling dlg')
@@ -361,6 +364,7 @@ deps = [
 	dep_threads,
 	dep_dlg,
 	dep_nytl,
+	dep_imgio,
 	tracy_deps,
 ]
 

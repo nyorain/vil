@@ -212,8 +212,9 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		std::vector<VkDeviceQueueCreateInfo>& queueCreateInfos,
 		PFN_vkGetInstanceProcAddr fpGetInstanceProcAddr, VkPhysicalDevice phdev,
 		u32 numQueueFams, u32& presentQueueInfoID,
-		span<const VkExtensionProperties> extProps) {
-	if(!checkEnvBinary("VIL_CREATE_WINDOW", false)) {
+		span<const VkExtensionProperties> extProps,
+		bool standaloneMode) {
+	if(!checkEnvBinary("VIL_CREATE_WINDOW", false) && !standaloneMode) {
 		return nullptr;
 	}
 
@@ -224,8 +225,14 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 	// instance extensions (this matters on linux where we could hint
 	// swa whether it should use x11 or wayland; but also have to tell
 	// it whether to use xcb or xlib for window creation).
-	if(!window->createDisplay()) {
-		return nullptr;
+	if(standaloneMode) {
+		if(!window->doCreateDisplay()) {
+			return nullptr;
+		}
+	} else {
+		if(!window->createDisplay()) {
+			return nullptr;
+		}
 	}
 
 	// check if required extensions happen to be supported
@@ -241,8 +248,15 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		}
 	}
 
-	if(!window->createWindow(ini)) {
-		return nullptr;
+	if(standaloneMode) {
+		window->ini = &ini;
+		if(!window->doCreateWindow()) {
+			return nullptr;
+		}
+	} else {
+		if(!window->createWindow(ini)) {
+			return nullptr;
+		}
 	}
 
 	// Find present queue
@@ -438,12 +452,15 @@ VkResult doCreateDevice(
 
 	std::unique_ptr<DisplayWindow> window;
 #ifdef VIL_WITH_SWA
+	// When running in standalone mode we want the mainthread to
+	// handle the window main loop, externally.
+	auto standaloneMode = (standalone != nullptr);
 	// Make sure we get a queue that can potentially display to our
 	// window. To check that, we first have to create a window though.
-	u32 presentQueueInfoID = u32(-1);
+	auto presentQueueInfoID = u32(-1);
 	window = tryCreateWindow(ini, newExts, queueCreateInfos,
 		fpGetInstanceProcAddr, phdev, nqf, presentQueueInfoID,
-		supportedExts);
+		supportedExts, standaloneMode);
 #endif // VIL_WITH_SWA
 
 	// = Enabled features =
@@ -1030,7 +1047,13 @@ VkResult doCreateDevice(
 	if(window) {
 		dlg_assert(window->presentQueue); // should have been set in queue querying
 		dev.window = std::move(window);
-		dev.window->initDevice(dev);
+
+		if(standaloneMode) {
+			dev.window->dev = &dev;
+			dev.window->doInitSwapchain();
+		} else {
+			dev.window->initDevice(dev);
+		}
 	}
 #endif // VIL_WITH_SWA
 
