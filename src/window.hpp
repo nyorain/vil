@@ -38,6 +38,11 @@ struct DisplayWindow {
 
 	~DisplayWindow();
 
+	bool doCreateDisplay();
+	bool doCreateWindow();
+	bool doInitSwapchain();
+	void doMainLoop();
+
 private:
 	std::thread thread_;
 	std::atomic<bool> run_ {true};
@@ -65,7 +70,6 @@ private:
 
 	void initBuffers();
 	void destroyBuffers();
-	bool initSwapchain();
 	void uiThread();
 };
 

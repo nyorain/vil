@@ -1143,7 +1143,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				ImGui::EndTabBar();
 			}
 		} else if(mode_ == Mode::image) {
-			imGuiText("Here will soon be an image viewer...");
+			auto& iv = standaloneImageViewer();
+			iv.display(draw);
 		} else {
 			dlg_error("invalid mode");
 		}
@@ -2222,6 +2223,14 @@ ImGuiKey keyToImGui(unsigned key) {
 	static auto map = initImguiKeymap();
 	dlg_assert_or(key < map.size(), return ImGuiKey_None);
 	return map[key];
+}
+
+ImageViewer& Gui::standaloneImageViewer() {
+	if(!tabs_.imageViewer) {
+		tabs_.imageViewer = std::make_unique<ImageViewer>();
+		tabs_.imageViewer->init(*this);
+	}
+	return *tabs_.imageViewer;
 }
 
 } // namespace vil

@@ -126,6 +126,7 @@ public:
 
 	auto& cbGui() { return *tabs_.cb; }
 	ImGuiIO& imguiIO() const { return *io_; }
+	ImageViewer& standaloneImageViewer();
 
 	Device& dev() const { return *dev_; }
 	VkRenderPass rp() const { return rp_; }
@@ -135,6 +136,7 @@ public:
 	Vec2f windowPos() const { return {windowPos_.x, windowPos_.y}; }
 
 	Queue& usedQueue() const;
+	VkCommandPool commandPool() const { return commandPool_; }
 
 	const auto& pipes() const { return pipes_; }
 	const auto& imguiPipeLayout() const { return imguiPipeLayout_; }

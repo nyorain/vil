@@ -110,7 +110,7 @@ bool DisplayWindow::initDevice(Device& dev) {
 	return state_.load() == State::mainLoop;
 }
 
-bool DisplayWindow::initSwapchain() {
+bool DisplayWindow::doInitSwapchain() {
 	dlg_assert(this->dev);
 	auto& dev = *this->dev;
 
@@ -366,84 +366,41 @@ void DisplayWindow::destroyBuffers() {
 	buffers_.clear();
 }
 
-void DisplayWindow::uiThread() {
-	// initialization
-	{
-		std::unique_lock lock(mutex_);
+bool DisplayWindow::doCreateDisplay() {
+	dpy = swa_display_autocreate("VIL");
+	return dpy != nullptr;
+}
 
-		// step 0: display creation
-		dlg_assert(state_.load() == State::createDisplay);
-		dpy = swa_display_autocreate("VIL");
-		if (!dpy) {
-			state_.store(State::shutdown);
-			cv_.notify_one();
-			return;
-		}
+bool DisplayWindow::doCreateWindow() {
+	dlg_assert(this->ini);
 
-		state_.store(State::displayCreated);
-		cv_.notify_one();
+	static swa_window_listener listener;
+	listener.close = cbClose;
+	listener.resize = cbResize;
+	listener.mouse_move = cbMouseMove;
+	listener.mouse_cross = cbMouseCross;
+	listener.mouse_button = cbMouseButton;
+	listener.mouse_wheel = cbMouseWheel;
+	listener.key = cbKey;
 
-		// wait for step 1
-		auto pred1 = [&]{ return !run_.load() || state_.load() == State::createWindow; };
-		cv_.wait(lock, pred1);
-
-		if(!run_.load()) {
-			return;
-		}
-
-		// step 1: window creation
-		dlg_assert(this->ini);
-
-		static swa_window_listener listener;
-		listener.close = cbClose;
-		listener.resize = cbResize;
-		listener.mouse_move = cbMouseMove;
-		listener.mouse_cross = cbMouseCross;
-		listener.mouse_button = cbMouseButton;
-		listener.mouse_wheel = cbMouseWheel;
-		listener.key = cbKey;
-
-		swa_window_settings ws;
-		swa_window_settings_default(&ws);
-		ws.title = "VIL: Vulkan Introspection";
-		ws.listener = &listener;
-		ws.surface = swa_surface_vk;
-		ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(this->ini->handle);
-		ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(this->ini->dispatch.GetInstanceProcAddr);
-		window = swa_display_create_window(dpy, &ws);
-		if(!window) {
-			state_.store(State::shutdown);
-			cv_.notify_one();
-			return;
-		}
-
-		swa_window_set_userdata(window, this);
-		this->surface = bit_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
-
-		state_.store(State::windowCreated);
-		cv_.notify_one();
-
-		// wait for step 2
-		auto pred2 = [&]{ return !run_.load() || state_.load() == State::initDevice; };
-		cv_.wait(lock, pred2);
-
-		if(!run_.load()) {
-			return;
-		}
-
-		// step 2: swapchain creation
-		if(!initSwapchain()) {
-			state_.store(State::shutdown);
-			cv_.notify_one();
-			return;
-		}
-
-		state_.store(State::mainLoop);
-		cv_.notify_one();
+	swa_window_settings ws;
+	swa_window_settings_default(&ws);
+	ws.title = "VIL: Vulkan Introspection";
+	ws.listener = &listener;
+	ws.surface = swa_surface_vk;
+	ws.surface_settings.vk.instance = bit_cast<std::uintptr_t>(this->ini->handle);
+	ws.surface_settings.vk.get_instance_proc_addr = bit_cast<swa_proc>(this->ini->dispatch.GetInstanceProcAddr);
+	window = swa_display_create_window(dpy, &ws);
+	if(!window) {
+		return false;
 	}
 
-	auto& dev = *this->dev;
+	swa_window_set_userdata(window, this);
+	this->surface = bit_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
+	return true;
+}
 
+void DisplayWindow::doMainLoop() {
 	// run main loop!
 	dlg_assert(this->presentQueue);
 	dlg_assert(this->swapchain);
@@ -492,7 +449,7 @@ void DisplayWindow::uiThread() {
 		// would potentially mean less latency since that waiting for
 		// vsync currently effectively happens at the end of Gui::draw
 		// (where we wait for the submission).
-		VkResult res = dev.dispatch.AcquireNextImageKHR(dev.handle, swapchain,
+		VkResult res = dev->dispatch.AcquireNextImageKHR(dev->handle, swapchain,
 			UINT64_MAX, acquireSem, VK_NULL_HANDLE, &imageIdx);
 		if(res == VK_SUBOPTIMAL_KHR) {
 			dlg_info("Got suboptimal swapchain (acquire)");
@@ -568,6 +525,65 @@ void DisplayWindow::uiThread() {
 	state_.store(State::shutdown);
 	cv_.notify_one();
 	dlg_trace("Exiting window thread");
+}
+
+void DisplayWindow::uiThread() {
+	// initialization
+	{
+		std::unique_lock lock(mutex_);
+
+		// step 0: display creation
+		dlg_assert(state_.load() == State::createDisplay);
+		doCreateDisplay();
+		if (!dpy) {
+			state_.store(State::shutdown);
+			cv_.notify_one();
+			return;
+		}
+
+		state_.store(State::displayCreated);
+		cv_.notify_one();
+
+		// wait for step 1
+		auto pred1 = [&]{ return !run_.load() || state_.load() == State::createWindow; };
+		cv_.wait(lock, pred1);
+
+		if(!run_.load()) {
+			return;
+		}
+
+		// step 1: window creation
+		if(!doCreateWindow()) {
+			state_.store(State::shutdown);
+			cv_.notify_one();
+			return;
+		}
+
+		state_.store(State::windowCreated);
+		cv_.notify_one();
+
+		// wait for step 2
+		auto pred2 = [&]{ return !run_.load() || state_.load() == State::initDevice; };
+		cv_.wait(lock, pred2);
+
+		if(!run_.load()) {
+			return;
+		}
+
+		// step 2: swapchain creation
+		if(!doInitSwapchain()) {
+			state_.store(State::shutdown);
+			cv_.notify_one();
+			return;
+		}
+
+		state_.store(State::mainLoop);
+		cv_.notify_one();
+	}
+
+	auto& dev = *this->dev;
+
+	doMainLoop();
 
 	// cleanup
 	destroyBuffers();
