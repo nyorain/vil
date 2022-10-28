@@ -374,7 +374,17 @@ void CommandHook::hook(QueueSubmitter& subm) {
 
 	// fast early-outs
 	if(localCaptures_.empty()) {
-		if(target_.type == TargetType::none || freeze.load()) {
+		auto hasBuildCmd = false;
+		for(auto [subID, sub] : enumerate(subm.dstBatch->submissions)) {
+			for(auto [cbID, cb] : enumerate(sub.cbs)) {
+				auto& rec = *cb.cb->lastRecordLocked();
+				if(rec.buildsAccelStructs) {
+					hasBuildCmd = true;
+				}
+			}
+		}
+
+		if(!hasBuildCmd && (target_.type == TargetType::none || freeze.load())) {
 			return;
 		}
 	}
