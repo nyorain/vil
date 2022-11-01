@@ -1,3 +1,5 @@
+#define IMGUI_DEFINE_MATH_OPERATORS
+
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/render.hpp>
@@ -315,7 +317,9 @@ void Gui::initImGui() {
 	setAccentColor(ImGuiCol_FrameBgHovered, 187, 170, 150);
 	setAccentColor(ImGuiCol_FrameBgActive, 187, 190, 240);
 
-	style.Colors[ImGuiCol_WindowBg] = {0.02, 0.02, 0.02, 0.6}; // dark
+	// style.Colors[ImGuiCol_WindowBg] = {0.02, 0.02, 0.02, 0.6}; // dark
+	// style.Colors[ImGuiCol_WindowBg] = {0.1, 0.1, 0.1, 0.2};
+	style.Colors[ImGuiCol_WindowBg] = {0.0, 0.0, 0.0, 0.0};
 
 	setColorHSV(ImGuiCol_PlotHistogram, 119, 240, 180, 240);
 	setColorHSV(ImGuiCol_PlotHistogramHovered, accentHue, 187, 250, 240);
@@ -1069,16 +1073,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		// ImGui::ShowAboutWindow();
 	}
 
-	auto checkSelectTab = [&](Tab tab) {
-		auto flags = 0;
-		if(activeTab_ == tab && activateTabCounter_ < 2) {
-			flags = ImGuiTabItemFlags_SetSelected;
-			++activateTabCounter_;
-		}
-
-		return flags;
-	};
-
 	// TODO: needed?
 	// if(this->focused) {
 	// 	ImGui::SetNextWindowFocus();
@@ -1095,11 +1089,159 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		dev().commandHook->freeze.store(true);
 	}
 
+	flags |= ImGuiWindowFlags_NoTitleBar;
+
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.f, 0.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0.f, 0.f));
 	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
 		windowPos_ = ImGui::GetWindowPos();
 		windowSize_ = ImGui::GetWindowSize();
 
 		if(mode_ == Mode::normal) {
+			auto checkSelectTab = [&](Tab tab) {
+				auto flags = 0;
+				if(activeTab_ == tab && activateTabCounter_ < 2) {
+					flags = ImGuiTabItemFlags_SetSelected;
+					++activateTabCounter_;
+				}
+
+				return flags;
+			};
+
+			// tab bar
+			auto& dl = *ImGui::GetWindowDrawList();
+			auto pos = ImGui::GetCursorScreenPos();
+			auto pad = ImVec2(0, 0); // ImGui::GetStyle().WindowPadding;
+
+			// pos.x = ImGui::GetWindowPos().x;
+			// pos.y = ImGui::GetCursorScreenPos().y - pad.y;
+			// pos.y = ImGui::GetWindowPos().y;
+			// pos.x -= pad.x;
+			// pos.y -= pad.y;
+
+			auto barHeight = 32.f;
+			auto barEnd = ImVec2(
+				pos.x + ImGui::GetContentRegionAvail().x + 2 * pad.x,
+				pos.y + barHeight);
+
+			dl.PushClipRect(pos, barEnd);
+			// dl.AddRectFilled(pos, barEnd,
+			// 	ImGui::ColorConvertFloat4ToU32(ImVec4(0.1, 0.1, 0.1, 0.1)));
+
+			auto selColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.1, 0.1, 0.1, 0.5));
+			auto inactiveColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.3, 0.3, 0.3, 0.4));
+			auto hoverColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.4, 0.4, 0.4, 0.7));
+			auto pressColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.5, 0.5, 0.5, 0.7));
+			auto lineColor = ImGui::ColorConvertFloat4ToU32(ImVec4(0.8, 0.8, 0.8, 0.5));
+
+			ImGui::SetCursorScreenPos(pos);
+
+			auto first = true;
+
+			auto tabItem = [&](const char* label, Tab type) {
+				if(checkSelectTab(type)) {
+					activeTab_ = type;
+				}
+
+				auto selected = (activeTab_ == type);
+				auto line = false;
+				if(first) {
+					first = false;
+				} else {
+					ImGui::SameLine();
+					line = true;
+				}
+
+				const auto& style = ImGui::GetStyle();
+				auto id = ImGui::GetID(label);
+
+    			const auto labelSize = ImGui::CalcTextSize(label, NULL, true);
+				const auto start = ImGui::GetCursorScreenPos();
+
+				const auto baseSize = ImVec2(100.f, barHeight);
+				const auto size = ImVec2(baseSize.x, baseSize.y);
+
+				if(line) {
+					dl.AddLine(start + ImVec2(0.0, 5),
+						start + ImVec2(0.0, size.y - 5), lineColor,
+						1.f);
+				}
+
+    			const ImRect bb(start, start + size);
+				ImGui::ItemSize(size, style.FramePadding.y);
+				if(!ImGui::ItemAdd(bb, id))
+					return;
+
+				bool hovered, held;
+				auto pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, 0u);
+
+				ImGui::RenderNavHighlight(bb, id);
+
+				auto rounding = 0.f;
+				if(selected) {
+    				const ImU32 col = selColor;
+					ImGui::RenderFrame(bb.Min, bb.Max, col, true, rounding);
+				} else {
+    				const ImU32 col =
+						held ? pressColor :
+						hovered ? hoverColor :
+						inactiveColor;
+					ImGui::RenderFrame(bb.Min, bb.Max, col, true, rounding);
+				}
+
+				ImGui::RenderTextClipped(bb.Min + style.FramePadding,
+					bb.Max - style.FramePadding, label,
+					NULL, &labelSize, ImVec2(0.5f, 0.5f), &bb);
+
+				// auto pressed = ImGui::Button(label);
+
+				if(pressed && activeTab_ != type) {
+					if(type == Tab::resources) {
+						tabs_.resources->firstUpdate_ = true;
+					}
+					activeTab_ = type;
+				}
+			};
+
+			tabItem(ICON_FA_HOME " Overview", Tab::overview);
+			tabItem(ICON_FA_IMAGES " Resources", Tab::resources);
+			tabItem(ICON_FA_MEMORY " Memory", Tab::memory);
+			tabItem(ICON_FA_LIST " Commands", Tab::commandBuffer);
+
+			ImGui::SameLine();
+			const auto start = ImGui::GetCursorScreenPos();
+			dl.AddRectFilled(start, barEnd, inactiveColor);
+			ImGui::NewLine();
+
+			// end
+			ImGui::PopStyleVar(3);
+			dl.PopClipRect();
+
+			{
+				auto pos = ImGui::GetCursorScreenPos() - pad;
+				auto size = ImGui::GetContentRegionAvail() + pad;
+				auto end = pos + size;
+
+				dl.PushClipRect(pos, end);
+				dl.AddRectFilled(pos, end, selColor);
+				dl.PopClipRect();
+			}
+
+			// ImGui::SetCursorScreenPos(ImVec2(pos.x + pad.x, barEnd.y + pad.y));
+
+			ImGui::BeginChild("selected tab", ImVec2(0, 0), false,
+				ImGuiWindowFlags_AlwaysUseWindowPadding);
+			switch(activeTab_) {
+				case Tab::overview: drawOverviewUI(draw); break;
+				case Tab::memory: drawMemoryUI(draw); break;
+				case Tab::commandBuffer: tabs_.cb->draw(draw); break;
+				case Tab::resources: tabs_.resources->draw(draw); break;
+				default: break;
+			}
+			ImGui::EndChild();
+
+			/*
 			if(ImGui::BeginTabBar("MainTabBar")) {
 				if(ImGui::BeginTabItem("Overview")) {
 					activeTab_ = Tab::overview;
@@ -1142,6 +1284,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 				ImGui::EndTabBar();
 			}
+			*/
+
 		} else if(mode_ == Mode::image) {
 			auto& iv = standaloneImageViewer();
 			iv.display(draw);

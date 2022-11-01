@@ -12,6 +12,12 @@ urgent, bugs:
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
 
+- [ ] when viewing an image live in the resource viewer, we just use
+      pendingLayout as layout. But we don't lock anymore, maybe there's another
+	  submission before gui rendering is done that changes pendingLayout.
+	  Instead, assume a fixed layout there and then do a manual transition
+	  before/after while the lock is held
+	  	- Accessing pendingLayout outside a lock is a race in general.
 - [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull
 	- [ ] a lot of descriptor code was probably never really tested for array bindings.
