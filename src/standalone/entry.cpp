@@ -119,11 +119,11 @@ SizeAlign neededUploadSizeAlign(const vil::Device& dev,
 	return {dataSize, align};
 }
 
-ViewedImage loadImage(VkDevice dev, vil::Device& vilDev, Gui& gui) {
+ViewedImage loadImage(const char* path, VkDevice dev, vil::Device& vilDev, Gui& gui) {
 	// create image
-	auto provider = imgio::loadImage("test.ktx");
+	auto provider = imgio::loadImage(path);
 	if(!provider) {
-		dlg_trace("error loading image");
+		dlg_trace("error loading image '{}'", path);
 		return {};
 	}
 
@@ -460,8 +460,13 @@ extern "C" VIL_EXPORT int vil_showImageViewer(int argc, const char** argv) {
 		vilDev = vil::devByLoaderTable.begin()->second;
 	}
 
+	const char* name = "test.ktx";
+	if(argc > 1) {
+		name = argv[1];
+	}
+
 	auto* gui = vilDev->gui();
-	auto [img, mem, vilImg] = loadImage(dev, *vilDev, *gui);
+	auto [img, mem, vilImg] = loadImage(name, dev, *vilDev, *gui);
 	if(img) {
 		if(gui) {
 			gui->mode_ = Gui::Mode::image;

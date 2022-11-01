@@ -120,8 +120,8 @@ Device::~Device() {
 	// Their (transitive) destructors may use device resources.
 	// Important to first destroy the window, otherwise rendering may
 	// still be active and use e.g. commandHook resources.
-	gui_.reset();
 	window.reset();
+	gui_.reset();
 	commandHook.reset();
 
 	for(auto& fence : fencePool) {
@@ -214,7 +214,8 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		u32 numQueueFams, u32& presentQueueInfoID,
 		span<const VkExtensionProperties> extProps,
 		bool standaloneMode) {
-	if(!checkEnvBinary("VIL_CREATE_WINDOW", false) && !standaloneMode) {
+	auto hookOverlay = checkEnvBinary("VIL_HOOK_OVERLAY", false);
+	if(!checkEnvBinary("VIL_CREATE_WINDOW", !hookOverlay) && !standaloneMode) {
 		return nullptr;
 	}
 
