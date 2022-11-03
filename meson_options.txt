@@ -17,12 +17,21 @@ option('integration-tests', type: 'boolean', value: false)
 # will make the layer less lightweight and add potential error points
 option('tracy', type: 'boolean', value: false)
 
+# Whether to build the standlone application (just an image viewer atm).
+# Setting this to false makes the layer a bit more lightweight.
+option('with-standalone', type: 'boolean', value: true)
+
+# Enable support for callstack capturing (still WIP)
+# Disabling this makes the layer a bit more lightweight.
+option('with-callstacks', type: 'boolean', value: true)
+
 # whether creating a window is supported
 # on linux, if this and x11-hook is false, a lot of dependencies
 # are removed from the layer
 option('window', type: 'boolean', value: true)
 
-# use libdw if possible (only on unix)
+# use libdw if possible for callstacks (only on unix)
+# irrelevant if callstacks are disabled
 option('libdw', type: 'boolean', value: true)
 
 # whether to use the absolute build path in the layer json

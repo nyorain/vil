@@ -13,6 +13,7 @@
 #include <vkutil/sync.hpp>
 #include <vkutil/cmd.hpp>
 #include <iomanip>
+#include <imgio/image.hpp>
 
 namespace vil {
 
@@ -342,6 +343,109 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 	// Probably not what we want!
 	if(recreateView) {
 		createData();
+	}
+
+	if(ImGui::Button("Save as test.ktx2")) {
+		// TODO:
+		// - make async? just integrate into frame submission?
+		//   and then start async job that does the saving?
+		// - using initialLayout currently racy when coming
+		//   from image.pendingLayout
+		// - support file name dialog
+		// - support other formats (e.g. ktx/dds/png/jpeg/webp)
+
+		ThreadMemScope tms;
+
+		auto neededSize = 0u;
+		auto mipOffs = tms.alloc<u32>(subresRange_.levelCount);
+		for(auto m = 0u; m < subresRange_.levelCount; ++m) {
+			auto level = subresRange_.baseMipLevel + m;
+
+			mipOffs[m] = neededSize;
+			Vec3ui size{extent_.width, extent_.height, extent_.depth};
+			auto faceSize = imgio::sizeBytes(size, level, imgio::Format(format_));
+			neededSize += faceSize * subresRange_.layerCount;
+		}
+
+		auto& dev = gui_->dev();
+		OwnBuffer buf;
+		buf.ensure(dev, neededSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
+		VkCommandBuffer cb;
+		VkCommandBufferAllocateInfo cbai {};
+		cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		cbai.commandBufferCount = 1u;
+		cbai.commandPool = gui_->commandPool();
+		cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &cbai, &cb));
+		// command buffer is a dispatchable object
+		dev.setDeviceLoaderData(dev.handle, cb);
+		nameHandle(dev, cb, "ImageSave");
+
+		auto copies = tms.alloc<VkBufferImageCopy>(subresRange_.levelCount);
+		for(auto m = 0u; m < subresRange_.levelCount; ++m) {
+			auto level = subresRange_.baseMipLevel + m;
+
+			auto width = std::max(extent_.width >> level, 1u);
+			auto height = std::max(extent_.height >> level, 1u);
+			auto depth = std::max(extent_.depth >> level, 1u);
+
+			copies[m].imageOffset = {0, 0, 0};
+			copies[m].imageExtent = {width, height, depth};
+			copies[m].imageSubresource.aspectMask = subresRange_.aspectMask;
+			copies[m].imageSubresource.baseArrayLayer = subresRange_.baseArrayLayer;
+			copies[m].imageSubresource.layerCount = subresRange_.layerCount;
+			copies[m].imageSubresource.mipLevel = level;
+			copies[m].bufferOffset = mipOffs[m];
+		}
+
+		VkCommandBufferBeginInfo bi {};
+		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+		dev.dispatch.BeginCommandBuffer(cb, &bi);
+		auto srcScope = vku::SyncScope::allAccess(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				initialImageLayout_);
+		vku::cmdBarrier(dev, cb, src_, srcScope, vku::SyncScope::transferRead());
+		dev.dispatch.CmdCopyImageToBuffer(cb, src_,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf.buf,
+			copies.size(), copies.data());
+		vku::cmdBarrier(dev, cb, src_, vku::SyncScope::transferRead(), srcScope);
+		dev.dispatch.EndCommandBuffer(cb);
+
+		auto fence = getFenceFromPool(dev);
+
+		VkSubmitInfo si {};
+		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		si.pCommandBuffers = &cb;
+		si.commandBufferCount = 1u;
+
+		dlg_trace("submitting...");
+		{
+			std::lock_guard queueLock(dev.queueMutex);
+			dev.dispatch.QueueSubmit(dev.gfxQueue->handle, 1u, &si, fence);
+		}
+
+		dlg_trace("waiting...");
+		dev.dispatch.WaitForFences(dev.handle, 1u, &fence, true, UINT64_MAX);
+		dlg_trace(">> gpu work done!");
+
+		auto l0 = subresRange_.baseMipLevel;
+		auto size = Vec3ui{
+			std::max(extent_.width >> l0, 1u),
+			std::max(extent_.height >> l0, 1u),
+			std::max(extent_.depth >> l0, 1u),
+		};
+		auto provider = imgio::wrapImage(size, imgio::Format(format_),
+			subresRange_.levelCount, subresRange_.layerCount, buf.data());
+
+		dlg_trace("writing ktx2...");
+		imgio::writeKtx2("test.ktx2", *provider, true);
+		dlg_trace(">> done!");
+
+		dev.dispatch.ResetFences(dev.handle, 1u, &fence);
+
+		std::lock_guard lock(dev.mutex);
+		dev.fencePool.push_back(fence);
 	}
 }
 

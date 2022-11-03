@@ -1091,9 +1091,12 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 	flags |= ImGuiWindowFlags_NoTitleBar;
 
-	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.f, 0.f));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0.f, 0.f));
+	if(mode_ == Mode::normal) {
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.f, 0.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0.f, 0.f));
+	}
+
 	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
 		windowPos_ = ImGui::GetWindowPos();
 		windowSize_ = ImGui::GetWindowSize();
@@ -1240,51 +1243,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				default: break;
 			}
 			ImGui::EndChild();
-
-			/*
-			if(ImGui::BeginTabBar("MainTabBar")) {
-				if(ImGui::BeginTabItem("Overview")) {
-					activeTab_ = Tab::overview;
-					drawOverviewUI(draw);
-					ImGui::EndTabItem();
-				}
-
-				if(ImGui::BeginTabItem("Resources", nullptr, checkSelectTab(Tab::resources))) {
-					// When switching towards the resources tab, make sure to refresh
-					// the list of available resources, not showing "<Destroyed>"
-					if(activeTab_ != Tab::resources) {
-						tabs_.resources->firstUpdate_ = true;
-						activeTab_ = Tab::resources;
-					}
-
-					tabs_.resources->draw(draw);
-					ImGui::EndTabItem();
-				}
-
-				if(ImGui::BeginTabItem("Memory", nullptr, checkSelectTab(Tab::memory))) {
-					activeTab_ = Tab::memory;
-					drawMemoryUI(draw);
-					ImGui::EndTabItem();
-				}
-
-				if(ImGui::BeginTabItem("Commands", nullptr, checkSelectTab(Tab::commandBuffer))) {
-					activeTab_ = Tab::commandBuffer;
-					tabs_.cb->draw(draw);
-					ImGui::EndTabItem();
-				}
-
-#ifdef VIL_VIZ_LCS
-				if(ImGui::BeginTabItem("VizLCS", nullptr)) {
-					activeTab_ = Tab::overview; // HACK
-					static VizLCS vizlcs;
-					vizlcs.draw();
-					ImGui::EndTabItem();
-				}
-#endif // VIL_VIZ_LCS
-
-				ImGui::EndTabBar();
-			}
-			*/
 
 		} else if(mode_ == Mode::image) {
 			auto& iv = standaloneImageViewer();

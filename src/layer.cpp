@@ -250,7 +250,7 @@ VkResult doCreateInstance(
 	}
 
 	// == Create instance ==
-	VkLayerInstanceCreateInfo linkInfoCopy;
+	VkLayerInstanceCreateInfo linkInfoCopy {};
 	if(mutLinkInfo) {
 		linkInfoCopy = *mutLinkInfo;
 	}

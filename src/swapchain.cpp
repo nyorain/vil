@@ -321,7 +321,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	for(auto i = 0u; i < pPresentInfo->waitSemaphoreCount; ++i) {
 		auto& semaphore = get(dev, pPresentInfo->pWaitSemaphores[i]);
 
-		dlg_assert(!semaphore.signals.empty());
+		dlg_assert_or(!semaphore.signals.empty(), continue);
 		dlg_assert(!semaphore.signals.back()->counterpart);
 
 		if(semaphore.signals.back() == &SyncOp::swapchainAcquireDummy) {

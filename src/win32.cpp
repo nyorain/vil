@@ -254,7 +254,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 		i32 l = (u32(p.y) << 16) | (u32(p.x) & 0xFFFFu);
 		auto res = SendMessage(Win32Platform::get().surfaceWindow, WM_NCHITTEST, 0, l);
-		dlg_trace("doHitTest: {}", res == HTCLIENT);
+		// dlg_trace("doHitTest: {}", res == HTCLIENT);
 		return res == HTCLIENT;
 	};
 
@@ -303,7 +303,7 @@ LRESULT CALLBACK msgHookFunc(int nCode, WPARAM wParam, LPARAM lParam) {
 				break;
 			}
 
-			dlg_trace("mouse move {} {}", x, y);
+			// dlg_trace("mouse move {} {}", x, y);
 			wp.gui->addMousePosEvent({float(x), float(y)});
 
 			if(!forward) {

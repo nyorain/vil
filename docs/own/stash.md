@@ -675,3 +675,21 @@ template<typename K,
 		typename Equal = std::equal_to<K>> using LinAllocScopeHashSet =
 	std::unordered_set<K, Hash, Equal, LinearScopedAllocator<K>>;
 ```
+
+---
+
+			/*
+			auto typeID = res->type_id;
+			auto stype = &compiled.get_type(typeID);
+			if(stype->pointer) {
+				dlg_assert(stype->parent_type);
+				typeID = stype->parent_type;
+				stype = &compiled.get_type(typeID);
+			}
+
+			auto bindingCount = descriptorCount(dsState, bindingID);
+			if(bindingCount > 1) {
+				dlg_assert(stype->parent_type);
+				typeID = stype->parent_type;
+			}
+			*/

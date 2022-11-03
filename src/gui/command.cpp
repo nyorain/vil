@@ -829,6 +829,8 @@ void CommandViewer::displayDs(Draw& draw) {
 	auto stateIt = descriptors.states.find(setEntry);
 	dlg_assert_or(stateIt != descriptors.states.end(), return);
 
+	// NOTE: while holding this lock we MUST not lock the device or
+	// queue mutex.
 	auto& dsCow = *stateIt->second;
 	auto [dsState, lock] = access(dsCow);
 
@@ -936,8 +938,10 @@ void CommandViewer::displayDs(Draw& draw) {
 				}
 			}
 
+			auto typeID = res->base_type_id;
+
 			ThreadMemScope memScope;
-			auto* type = buildType(compiled, res->type_id, memScope.customUse());
+			auto* type = buildType(compiled, typeID, memScope.customUse());
 			displayTable(name.c_str(), *type, buf->data());
 		} else {
 			ImGui::Text("Binding not used in pipeline");
@@ -997,6 +1001,11 @@ void CommandViewer::displayDs(Draw& draw) {
 					imGuiText("Error copying descriptor image. See log output");
 					return;
 				}
+
+				// TODO: hacky, done because displayImage used to
+				// acquire the device mutex in some cases
+				lock = {};
+				dsState = {};
 
 				displayImage(draw, *img);
 			}
