@@ -22,7 +22,8 @@ with_tracy = get_option('tracy')
 with_window = get_option('window')
 with_example = get_option('example')
 is_release = (get_option('buildtype') == 'release')
-with_standalone = true # TODO: make option
+with_standalone = get_option('with-standalone')
+with_callstacks = get_option('with-callstacks')
 
 profiling = with_tracy
 debug_checks = not is_release
@@ -186,7 +187,6 @@ src = files(
 	'src/util/buffmt.cpp',
 	'src/util/bufparser.cpp',
 	'src/util/linalloc.cpp',
-	'src/util/dl.cpp',
 	'src/command/match.cpp',
 	'src/command/record.cpp',
 	'src/command/commands.cpp',
@@ -337,20 +337,6 @@ src = files(
 	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
 
-# TODO
-cmd_callstacks = true
-if cmd_callstacks
-	layer_args += '-DVIL_COMMAND_CALLSTACKS'
-	src += files(
-		'src/backward/trace.cpp',
-		'src/backward/resolve.cpp',
-
-		'src/backward/trace.hpp',
-		'src/backward/resolve.hpp',
-		'src/backward/common.hpp',
-	)
-endif
-
 public_inc = include_directories('include/')
 private_inc = include_directories('src/')
 
@@ -422,7 +408,20 @@ endif
 
 if with_standalone
 	src += files(
-		'src/standalone/entry.cpp'
+		'src/standalone/entry.cpp',
+		'src/util/dl.cpp',
+	)
+endif
+
+if with_callstacks
+	layer_args += '-DVIL_COMMAND_CALLSTACKS'
+	src += files(
+		'src/backward/trace.cpp',
+		'src/backward/resolve.cpp',
+
+		'src/backward/trace.hpp',
+		'src/backward/resolve.hpp',
+		'src/backward/common.hpp',
 	)
 endif
 

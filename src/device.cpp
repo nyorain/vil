@@ -216,7 +216,7 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		bool standaloneMode) {
 	auto hookOverlay = checkEnvBinary("VIL_HOOK_OVERLAY", false);
 	if(!checkEnvBinary("VIL_CREATE_WINDOW", !hookOverlay) && !standaloneMode) {
-		return nullptr;
+		// return nullptr;
 	}
 
 	std::unique_ptr<DisplayWindow> window;

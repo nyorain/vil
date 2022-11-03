@@ -1,3 +1,7 @@
+- [x] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
+      test with iro, shadowCull
+	- [x] a lot of descriptor code was probably never really tested for array bindings.
+	      Make sure everything works.
 - [x] CommandViewer (and ShaderDebugger probs as well) don't get an initial
       state when ops change and freezeState is active.
 	  Solution: instead of *each* component having its own state, they

@@ -2,7 +2,7 @@
 #include <util/dlg.hpp>
 
 #ifdef _WIN32 // Windows
-	#include <windowsx.h>
+	#include <windows.h>
 #else // Unix
 	#include <dlfcn.h>
 #endif
@@ -12,7 +12,7 @@ namespace vil {
 #ifdef _WIN32 // Windows
 
 void* dlopen(const char* name) {
-	auto ret = ::LoadLibrary(name);
+	auto ret = ::LoadLibraryA(name);
 
 	if(!ret) {
 		char buffer[512] = {};
@@ -20,7 +20,7 @@ void* dlopen(const char* name) {
 		::FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, nullptr, code,
 			0, buffer, sizeof(buffer), nullptr);
 
-		dlg_error("Library: failed to open {}: {}" name, buffer);
+		dlg_error("Library: failed to open {}: {}", name, buffer);
 	}
 
 	return ret;
