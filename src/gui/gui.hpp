@@ -212,14 +212,6 @@ private:
 	std::atomic<u32> currDrawInvalidated_ {};
 	std::condition_variable_any currDrawWait_ {};
 
-	struct {
-		std::unique_ptr<ResourceGui> resources;
-		std::unique_ptr<CommandRecordGui> cb;
-
-		// For image-only mode
-		std::unique_ptr<ImageViewer> imageViewer;
-	} tabs_;
-
 	// rendering stuff
 	// TODO: some of this is very specific or not only gui-related (e.g.
 	//   used by CommandHook). Should find a better place for it.
@@ -242,6 +234,14 @@ private:
 
 	Pipelines pipes_;
 	vku::DynDs dsFont_ {};
+
+	struct {
+		std::unique_ptr<ResourceGui> resources;
+		std::unique_ptr<CommandRecordGui> cb;
+
+		// For image-only mode
+		std::unique_ptr<ImageViewer> imageViewer;
+	} tabs_;
 
 	struct {
 		bool uploaded {};

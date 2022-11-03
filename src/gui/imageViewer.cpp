@@ -195,9 +195,22 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 
 	if(subresRange_.levelCount > 1) {
 		int mip = int(imageDraw_.level);
-		ImGui::SliderInt("Mip", &mip, subresRange_.baseMipLevel,
+		auto mipChanged = ImGui::SliderInt("Mip", &mip, subresRange_.baseMipLevel,
 			subresRange_.baseMipLevel + subresRange_.levelCount - 1);
-		imageDraw_.level = mip;
+		if(mipChanged) {
+			imageDraw_.level = mip;
+
+			[[maybe_unused]] auto w = std::max(extent_.width >> u32(mip), 1u);
+			[[maybe_unused]] auto h = std::max(extent_.height >> u32(mip), 1u);
+			[[maybe_unused]] auto d = std::max(extent_.depth >> u32(mip), 1u);
+
+			readTexelOffset_.x = std::min<u32>(readTexelOffset_.x, w - 1);
+			readTexelOffset_.y = std::min<u32>(readTexelOffset_.y, h - 1);
+
+			if(imgType_ == VK_IMAGE_TYPE_3D) {
+				imageDraw_.layer = std::min<float>(imageDraw_.layer, d - 1);
+			}
+		}
 	}
 
 	// == Histogram ==
@@ -236,14 +249,16 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		}
 	}
 
-	if(rb && !histogram_.fixedRange) {
+	if(!histogram_.fixedRange && rb && rb->hasMinMax) {
 		auto data = rb->own.data();
 		skip(data, 100u);
 		auto meta = read<HistMetadata>(data);
 		histogram_.begin = meta.begin;
 		histogram_.end = meta.end;
-	}
 
+		// fix it again
+		histogram_.fixedRange = true;
+	}
 
 	auto pos = ImGui::GetCursorScreenPos();
 	auto avail = ImGui::GetContentRegionAvail();
@@ -345,108 +360,44 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		createData();
 	}
 
-	if(ImGui::Button("Save as test.ktx2")) {
-		// TODO:
-		// - make async? just integrate into frame submission?
-		//   and then start async job that does the saving?
-		// - using initialLayout currently racy when coming
-		//   from image.pendingLayout
-		// - support file name dialog
-		// - support other formats (e.g. ktx/dds/png/jpeg/webp)
+	if(ImGui::Button("Fit Histogram")) {
+		histogram_.fixedRange = false;
 
-		ThreadMemScope tms;
-
-		auto neededSize = 0u;
-		auto mipOffs = tms.alloc<u32>(subresRange_.levelCount);
-		for(auto m = 0u; m < subresRange_.levelCount; ++m) {
-			auto level = subresRange_.baseMipLevel + m;
-
-			mipOffs[m] = neededSize;
-			Vec3ui size{extent_.width, extent_.height, extent_.depth};
-			auto faceSize = imgio::sizeBytes(size, level, imgio::Format(format_));
-			neededSize += faceSize * subresRange_.layerCount;
-		}
-
-		auto& dev = gui_->dev();
-		OwnBuffer buf;
-		buf.ensure(dev, neededSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-
-		VkCommandBuffer cb;
-		VkCommandBufferAllocateInfo cbai {};
-		cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		cbai.commandBufferCount = 1u;
-		cbai.commandPool = gui_->commandPool();
-		cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &cbai, &cb));
-		// command buffer is a dispatchable object
-		dev.setDeviceLoaderData(dev.handle, cb);
-		nameHandle(dev, cb, "ImageSave");
-
-		auto copies = tms.alloc<VkBufferImageCopy>(subresRange_.levelCount);
-		for(auto m = 0u; m < subresRange_.levelCount; ++m) {
-			auto level = subresRange_.baseMipLevel + m;
-
-			auto width = std::max(extent_.width >> level, 1u);
-			auto height = std::max(extent_.height >> level, 1u);
-			auto depth = std::max(extent_.depth >> level, 1u);
-
-			copies[m].imageOffset = {0, 0, 0};
-			copies[m].imageExtent = {width, height, depth};
-			copies[m].imageSubresource.aspectMask = subresRange_.aspectMask;
-			copies[m].imageSubresource.baseArrayLayer = subresRange_.baseArrayLayer;
-			copies[m].imageSubresource.layerCount = subresRange_.layerCount;
-			copies[m].imageSubresource.mipLevel = level;
-			copies[m].bufferOffset = mipOffs[m];
-		}
-
-		VkCommandBufferBeginInfo bi {};
-		bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-		dev.dispatch.BeginCommandBuffer(cb, &bi);
-		auto srcScope = vku::SyncScope::allAccess(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-				initialImageLayout_);
-		vku::cmdBarrier(dev, cb, src_, srcScope, vku::SyncScope::transferRead());
-		dev.dispatch.CmdCopyImageToBuffer(cb, src_,
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf.buf,
-			copies.size(), copies.data());
-		vku::cmdBarrier(dev, cb, src_, vku::SyncScope::transferRead(), srcScope);
-		dev.dispatch.EndCommandBuffer(cb);
-
-		auto fence = getFenceFromPool(dev);
-
-		VkSubmitInfo si {};
-		si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-		si.pCommandBuffers = &cb;
-		si.commandBufferCount = 1u;
-
-		dlg_trace("submitting...");
-		{
-			std::lock_guard queueLock(dev.queueMutex);
-			dev.dispatch.QueueSubmit(dev.gfxQueue->handle, 1u, &si, fence);
-		}
-
-		dlg_trace("waiting...");
-		dev.dispatch.WaitForFences(dev.handle, 1u, &fence, true, UINT64_MAX);
-		dlg_trace(">> gpu work done!");
-
-		auto l0 = subresRange_.baseMipLevel;
-		auto size = Vec3ui{
-			std::max(extent_.width >> l0, 1u),
-			std::max(extent_.height >> l0, 1u),
-			std::max(extent_.depth >> l0, 1u),
-		};
-		auto provider = imgio::wrapImage(size, imgio::Format(format_),
-			subresRange_.levelCount, subresRange_.layerCount, buf.data());
-
-		dlg_trace("writing ktx2...");
-		imgio::writeKtx2("test.ktx2", *provider, true);
-		dlg_trace(">> done!");
-
-		dev.dispatch.ResetFences(dev.handle, 1u, &fence);
-
-		std::lock_guard lock(dev.mutex);
-		dev.fencePool.push_back(fence);
+		imageDraw_.minValue = 0.f;
+		imageDraw_.maxValue = 1.f;
 	}
+
+	if(ImGui::Button("Save as test.ktx2")) {
+		saveToFile();
+	}
+
+	// info
+	/*
+	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+	if(ImGui::BeginTable("Info", 2, flags, ImGui::GetContentRegionAvail())) {
+		// ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthStretch, 1.f);
+		// ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+
+		auto addRow = [](const char* name, auto val) {
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			imGuiText(name);
+
+			ImGui::TableNextColumn();
+
+			imGuiText("{}", val);
+		};
+
+		addRow("Width", extent_.width);
+		addRow("Height", extent_.height);
+		addRow("Depth", extent_.depth);
+		addRow("ImageType", vk::name(imgType_));
+		addRow("Format", vk::name(format_));
+
+		ImGui::EndTable();
+	}
+	*/
 }
 
 void ImageViewer::drawImageArea(Draw& draw) {
@@ -1043,6 +994,7 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 	// skip computeMinMax and Prepare pass and simple CmdUpdateBuffer
 	//   in fixed case. Makes histogramPrepare shader and pcr simpler
 
+	rb.hasMinMax = !histogram_.fixedRange;
 	if(!histogram_.fixedRange) {
 		// compute minMax
 		DebugLabel cblbl(dev, draw.cb, "vil:ImageViewer:computeMinMax");
@@ -1322,6 +1274,109 @@ void ImageViewer::validateClampCoords(Vec3i& coords, u32& layer, u32& level) {
 
 u32 ImageViewer::histogramBufSize() {
 	return sizeof(HistMetadata) + sizeof(Vec4u32) * histogramSections;
+}
+
+void ImageViewer::saveToFile() {
+	// TODO:
+	// - make async? just integrate into frame submission?
+	//   and then start async job that does the saving?
+	// - using initialLayout currently racy when coming
+	//   from image.pendingLayout
+	// - support file name dialog
+	// - support other formats (e.g. ktx/dds/png/jpeg/webp)
+
+	ThreadMemScope tms;
+
+	auto neededSize = 0u;
+	auto mipOffs = tms.alloc<u32>(subresRange_.levelCount);
+	for(auto m = 0u; m < subresRange_.levelCount; ++m) {
+		auto level = subresRange_.baseMipLevel + m;
+
+		mipOffs[m] = neededSize;
+		Vec3ui size{extent_.width, extent_.height, extent_.depth};
+		auto faceSize = imgio::sizeBytes(size, level, imgio::Format(format_));
+		neededSize += faceSize * subresRange_.layerCount;
+	}
+
+	auto& dev = gui_->dev();
+	OwnBuffer buf;
+	buf.ensure(dev, neededSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+
+	VkCommandBuffer cb;
+	VkCommandBufferAllocateInfo cbai {};
+	cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cbai.commandBufferCount = 1u;
+	cbai.commandPool = gui_->commandPool();
+	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &cbai, &cb));
+	// command buffer is a dispatchable object
+	dev.setDeviceLoaderData(dev.handle, cb);
+	nameHandle(dev, cb, "ImageSave");
+
+	auto copies = tms.alloc<VkBufferImageCopy>(subresRange_.levelCount);
+	for(auto m = 0u; m < subresRange_.levelCount; ++m) {
+		auto level = subresRange_.baseMipLevel + m;
+
+		auto width = std::max(extent_.width >> level, 1u);
+		auto height = std::max(extent_.height >> level, 1u);
+		auto depth = std::max(extent_.depth >> level, 1u);
+
+		copies[m].imageOffset = {0, 0, 0};
+		copies[m].imageExtent = {width, height, depth};
+		copies[m].imageSubresource.aspectMask = subresRange_.aspectMask;
+		copies[m].imageSubresource.baseArrayLayer = subresRange_.baseArrayLayer;
+		copies[m].imageSubresource.layerCount = subresRange_.layerCount;
+		copies[m].imageSubresource.mipLevel = level;
+		copies[m].bufferOffset = mipOffs[m];
+	}
+
+	VkCommandBufferBeginInfo bi {};
+	bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	dev.dispatch.BeginCommandBuffer(cb, &bi);
+	auto srcScope = vku::SyncScope::allAccess(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			initialImageLayout_);
+	vku::cmdBarrier(dev, cb, src_, srcScope, vku::SyncScope::transferRead());
+	dev.dispatch.CmdCopyImageToBuffer(cb, src_,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buf.buf,
+		copies.size(), copies.data());
+	vku::cmdBarrier(dev, cb, src_, vku::SyncScope::transferRead(), srcScope);
+	dev.dispatch.EndCommandBuffer(cb);
+
+	auto fence = getFenceFromPool(dev);
+
+	VkSubmitInfo si {};
+	si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	si.pCommandBuffers = &cb;
+	si.commandBufferCount = 1u;
+
+	dlg_trace("submitting...");
+	{
+		std::lock_guard queueLock(dev.queueMutex);
+		dev.dispatch.QueueSubmit(dev.gfxQueue->handle, 1u, &si, fence);
+	}
+
+	dlg_trace("waiting...");
+	dev.dispatch.WaitForFences(dev.handle, 1u, &fence, true, UINT64_MAX);
+	dlg_trace(">> gpu work done!");
+
+	auto l0 = subresRange_.baseMipLevel;
+	auto size = Vec3ui{
+		std::max(extent_.width >> l0, 1u),
+		std::max(extent_.height >> l0, 1u),
+		std::max(extent_.depth >> l0, 1u),
+	};
+	auto provider = imgio::wrapImage(size, imgio::Format(format_),
+		subresRange_.levelCount, subresRange_.layerCount, buf.data());
+
+	dlg_trace("writing ktx2...");
+	imgio::writeKtx2("test.ktx2", *provider, true);
+	dlg_trace(">> done!");
+
+	dev.dispatch.ResetFences(dev.handle, 1u, &fence);
+
+	std::lock_guard lock(dev.mutex);
+	dev.fencePool.push_back(fence);
 }
 
 } // namespace vil

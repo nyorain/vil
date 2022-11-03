@@ -50,6 +50,7 @@ private:
 		OwnBuffer own;
 		Draw* pending {};
 
+		bool hasMinMax {};
 		bool valid {};
 		VkOffset2D texel {};
 		float layer {};
@@ -85,6 +86,8 @@ private:
 
 	void validateClampCoords(Vec3i& coords, u32& layer, u32& level);
 	static u32 histogramBufSize();
+
+	void saveToFile();
 
 private:
 	// general, logical info
@@ -147,9 +150,9 @@ private:
 		Vec2f scissorSize {};
 
 		bool panning {};
-		bool fixedRange {};
-		float begin {};
-		float end {};
+		bool fixedRange {true};
+		float begin {0.f};
+		float end {1.f};
 	} histogram_;
 
 	bool gammaSliding_ {};

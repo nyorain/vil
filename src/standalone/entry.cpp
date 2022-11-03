@@ -238,6 +238,8 @@ ViewedImage loadImage(const char* path, VkDevice dev, vil::Device& vilDev, Gui& 
 	vilDev.dispatch.QueueSubmit(gui.usedQueue().handle, 1u, &si, VK_NULL_HANDLE);
 	vilDev.dispatch.QueueWaitIdle(gui.usedQueue().handle);
 
+	vilDev.dispatch.DestroyCommandPool(dev, cmdPool, nullptr);
+
 	return {img, mem, &vilImg};
 }
 
@@ -483,11 +485,14 @@ extern "C" VIL_EXPORT int vil_showImageViewer(int argc, const char** argv) {
 			vilImg->ci.format, subres, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, flags);
 
+		vilDev->window->allowClose = true;
 		vilDev->window->doMainLoop();
-
-		// TODO: cleanup window. Currently not done correclty
-		//   in destructor
+		vilDev->window->doCleanup();
 	}
+
+	// destroy image
+	vil::DestroyImage(dev, img, nullptr);
+	vil::FreeMemory(dev, mem, nullptr);
 
 	// shutdown
 	vil::DestroyDevice(dev, nullptr);

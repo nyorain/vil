@@ -22,6 +22,7 @@ struct DisplayWindow {
 	Instance* ini {};
 	Device* dev {};
 	Gui* gui {};
+	bool allowClose {};
 
 	Queue* presentQueue {};
 
@@ -42,6 +43,8 @@ struct DisplayWindow {
 	bool doCreateWindow();
 	bool doInitSwapchain();
 	void doMainLoop();
+	void doCleanup();
+	void close();
 
 private:
 	std::thread thread_;
