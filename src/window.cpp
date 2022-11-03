@@ -19,10 +19,12 @@ namespace vil {
 namespace {
 
 void cbClose(swa_window* win) {
-	(void) win;
-	// TODO: make window closable? not sure if good idea
-	// DisplayWindow* dw = static_cast<DisplayWindow*>(swa_window_get_userdata(win));
-	// dw->close();
+	DisplayWindow* dw = static_cast<DisplayWindow*>(swa_window_get_userdata(win));
+	if(dw->allowClose) {
+		dw->close();
+	} else {
+		dlg_trace("ignoring window close");
+	}
 }
 
 void cbResize(swa_window* win, unsigned width, unsigned height) {
@@ -581,11 +583,17 @@ void DisplayWindow::uiThread() {
 		cv_.notify_one();
 	}
 
+	doMainLoop();
+	doCleanup();
+}
+
+void DisplayWindow::close() {
+	run_.store(false);
+}
+
+void DisplayWindow::doCleanup() {
 	auto& dev = *this->dev;
 
-	doMainLoop();
-
-	// cleanup
 	destroyBuffers();
 	if(swapchain) {
 		dev.dispatch.DestroySwapchainKHR(dev.handle, swapchain, nullptr);

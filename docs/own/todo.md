@@ -12,6 +12,21 @@ urgent, bugs:
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
 
+- [ ] wayland VIL_CREATE_WINDOW freezes of window:
+      when moving the application window to another workspace, the
+	  driver just indefinitely blocks in QueuePresent. The problem is,
+	  we have the queue mutex locked while that happens.
+	  And so our window thread just starves at some point, trying
+	  to acquire that mutex :/
+	  I have no idea how to solve that at the moment.
+	  We just can't submit while that is happening.
+	  Also see https://github.com/KhronosGroup/Vulkan-Docs/issues/1158
+	  QueuePresent also has no timeout parameter we could pass
+	  when forwarding it :(
+	  	- will probably not happen when applications use mailbox mode
+		  Should at least document it somewhere.
+		  Might also happen when the window is minimized on some platforms?
+
 - [ ] when viewing an image live in the resource viewer, we just use
       pendingLayout as layout. But we don't lock anymore, maybe there's another
 	  submission before gui rendering is done that changes pendingLayout.
