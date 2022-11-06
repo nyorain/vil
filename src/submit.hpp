@@ -1,9 +1,7 @@
 #pragma once
 
 #include <fwd.hpp>
-#include <vector>
 #include <memory>
-#include <deque>
 #include <optional>
 #include <threadContext.hpp>
 #include <vk/vulkan.h>
@@ -64,7 +62,7 @@ void addGuiSyncLocked(QueueSubmitter&);
 // layer submission (or hooked application submission).
 void addFullSyncLocked(QueueSubmitter&);
 
-void postProcessLocked(QueueSubmitter&);
+FrameSubmission postProcessLocked(QueueSubmitter&);
 void cleanupOnErrorLocked(QueueSubmitter& subm);
 
 // = ext conversion =

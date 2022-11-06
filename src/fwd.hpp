@@ -27,6 +27,7 @@ class Gui;
 class CommandViewer;
 struct RenderBuffer;
 
+struct EventLog;
 struct Device;
 struct Instance;
 struct Handle;

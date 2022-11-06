@@ -7,6 +7,7 @@
 #include <gui/render.hpp>
 #include <gui/resources.hpp>
 #include <gui/cb.hpp>
+#include <gui/events.hpp>
 #include <gui/fonts.hpp>
 #include <gui/fontAwesome.hpp>
 #include <commandHook/hook.hpp>
@@ -22,6 +23,7 @@
 #include <wrap.hpp>
 #include <serialize/serialize.hpp>
 #include <serialize/bufs.hpp>
+#include <eventLog.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <nytl/bytes.hpp>
@@ -35,13 +37,8 @@
 #include <vkutil/enumString.hpp>
 #include <vk/format_utils.h>
 
-#include <set>
-#include <map>
-#include <fstream>
-#include <filesystem>
 #include <cstdio>
 #include <cstring>
-#include <cerrno>
 
 #ifdef VIL_DEBUG
 	// NOTE: tmp deubgging tool for the LMM algorithm
@@ -140,6 +137,7 @@ Gui::Gui(Device& dev, VkFormat colorFormat) {
 	// TODO: use RAII for init
 	tabs_.resources = std::make_unique<ResourceGui>();
 	tabs_.cb = std::make_unique<CommandRecordGui>();
+	tabs_.events = std::make_unique<EventViewer>();
 
 	tabs_.resources->init(*this);
 	tabs_.cb->init(*this);
@@ -1075,76 +1073,6 @@ void Gui::drawOverviewUI(Draw& draw) {
 
 	// pretty much just own debug stuff
 	ImGui::Separator();
-
-	if(checkEnvBinary("VIL_DEBUG", true)) {
-		auto& stats = DebugStats::get();
-		imGuiText("alive records: {}", stats.aliveRecords);
-		imGuiText("alive descriptor sets: {}", stats.aliveDescriptorSets);
-		imGuiText("alive descriptor copies: {}", stats.aliveDescriptorCopies);
-		imGuiText("alive buffers: {}", stats.aliveBuffers);
-		imGuiText("alive image views: {}", stats.aliveImagesViews);
-		imGuiText("threadContext memory: {} MB", stats.threadContextMem / (1024.f * 1024.f));
-		imGuiText("command memory: {} MB", stats.commandMem / (1024.f * 1024.f));
-		imGuiText("ds copy memory: {} MB", stats.descriptorCopyMem / (1024.f * 1024.f));
-		imGuiText("ds pool memory: {} MB", stats.descriptorPoolMem / (1024.f * 1024.f));
-		imGuiText("alive hook records: {}", stats.aliveHookRecords);
-		imGuiText("alive hook states: {}", stats.aliveHookStates);
-		imGuiText("layer buffer memory: {} MB", stats.ownBufferMem / (1024.f * 1024.f));
-		imGuiText("layer image memory: {} MB", stats.copiedImageMem / (1024.f * 1024.f));
-		ImGui::Separator();
-		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
-		imGuiText("transform feedback: {}", dev.transformFeedback);
-		imGuiText("wrap command buffers: {}", HandleDesc<VkCommandBuffer>::wrap);
-		imGuiText("wrap image view: {}", HandleDesc<VkImageView>::wrap);
-		imGuiText("wrap buffers: {}", HandleDesc<VkBuffer>::wrap);
-		imGuiText("wrap descriptor set: {}", HandleDesc<VkDescriptorSet>::wrap);
-		imGuiText("wrap samplers: {}", HandleDesc<VkSampler>::wrap);
-		imGuiText("wrap device: {}", HandleDesc<VkDevice>::wrap);
-		ImGui::Separator();
-		imGuiText("submission counter: {}", dev.submissionCounter);
-		imGuiText("pending submissions: {}", dev.pending.size());
-		imGuiText("fence pool size: {}", dev.fencePool.size());
-		imGuiText("semaphore pool size: {}", dev.semaphorePool.size());
-		imGuiText("reset semaphores size: {}", dev.resetSemaphores.size());
-
-		ImGui::Separator();
-
-		if(dev.timelineSemaphores) {
-			auto val = dev.doFullSync.load();
-			ImGui::Checkbox("Full-Sync", &val);
-			dev.doFullSync.store(val);
-			if(ImGui::IsItemHovered() && showHelp) {
-				ImGui::SetTooltip("Causes over-conservative synchronization of\n"
-					"inserted layer commands.\n"
-					"Might fix synchronization in some corner cases\n"
-					"and is needed when your application accesses buffers\n"
-					"by just using device addresses");
-			}
-		}
-
-		auto val = dev.captureCmdStack.load();
-		ImGui::Checkbox("Capture Command Callstacks", &val);
-		dev.captureCmdStack.store(val);
-		if(ImGui::IsItemHovered() && showHelp) {
-			ImGui::SetTooltip("Captures and shows callstacks of each command");
-		}
-
-		ImGui::Checkbox("Show ImGui Demo", &showImguiDemo_);
-		imGuiCheckbox("Force hooking", dev.commandHook->forceHook);
-		imGuiCheckbox("Allow hook record reuse", dev.commandHook->allowReuse);
-		imGuiCheckbox("Hook AccelerationStructures", dev.commandHook->hookAccelStructBuilds);
-		imGuiCheckbox("Print VertexCapture Timings", dev.printVertexCaptureTimings);
-		imGuiCheckbox("Print VertexCapture Metadata", dev.printVertexCaptureMetadata);
-		ImGui::Checkbox("Show cursor", &io_->MouseDrawCursor);
-
-		ImGui::Checkbox("Show debug window", &showDebug);
-
-		ImGui::Separator();
-	}
-
-	if (platformUI) {
-		platformUI();
-	}
 }
 
 void Gui::drawMemoryUI(Draw&) {
@@ -1240,6 +1168,128 @@ void Gui::drawMemoryUI(Draw&) {
 	}
 }
 
+auto name(EventType type) {
+	switch(type) {
+		case EventType::resourceCreated: return "Resource Created";
+		case EventType::resourceDestroyed: return "Resource Destroyed";
+		case EventType::queueSubmit: return "QueueSubmit";
+		default: return "TODO";
+	}
+}
+
+void Gui::drawEventUI(Draw&) {
+	tabs_.events->draw(*this);
+	/*
+	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_Borders;
+	auto cols = 1u;
+	if(ImGui::BeginTable("Events", cols, flags)) {
+		std::lock_guard lock(dev_->eventLog->mutex);
+		for(auto& event : dev_->eventLog->events) {
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			// imGuiText("{}", name(event->type));
+			if(ImGui::TreeNode(event.get(), "%s", name(event->type))) {
+				if(event->type == EventType::resourceCreated) {
+					auto ot = static_cast<CreationEventBase&>(*event).objectType;
+
+					// TODO: find way to use ObjectTypeHandler here
+
+					if(ot == VK_OBJECT_TYPE_IMAGE) {
+						auto& ice = static_cast<CreationEvent<Image>&>(*event);
+						refButtonExpect(*this, ice.handle.get());
+					}
+				}
+
+				if(event->type == EventType::queueSubmit) {
+					auto& qse = static_cast<QueueSubmitEvent&>(*event);
+					refButtonExpect(*this, qse.submission.queue);
+					// TODO: allow to select submission
+				}
+
+				ImGui::TreePop();
+			}
+		}
+
+		ImGui::EndTable();
+	}
+	*/
+}
+
+void Gui::drawSettingsUI(Draw&) {
+	auto& dev = *dev_;
+
+	if(checkEnvBinary("VIL_DEBUG", true)) {
+		auto& stats = DebugStats::get();
+		imGuiText("alive records: {}", stats.aliveRecords);
+		imGuiText("alive descriptor sets: {}", stats.aliveDescriptorSets);
+		imGuiText("alive descriptor copies: {}", stats.aliveDescriptorCopies);
+		imGuiText("alive buffers: {}", stats.aliveBuffers);
+		imGuiText("alive image views: {}", stats.aliveImagesViews);
+		imGuiText("threadContext memory: {} MB", stats.threadContextMem / (1024.f * 1024.f));
+		imGuiText("command memory: {} MB", stats.commandMem / (1024.f * 1024.f));
+		imGuiText("ds copy memory: {} MB", stats.descriptorCopyMem / (1024.f * 1024.f));
+		imGuiText("ds pool memory: {} MB", stats.descriptorPoolMem / (1024.f * 1024.f));
+		imGuiText("alive hook records: {}", stats.aliveHookRecords);
+		imGuiText("alive hook states: {}", stats.aliveHookStates);
+		imGuiText("layer buffer memory: {} MB", stats.ownBufferMem / (1024.f * 1024.f));
+		imGuiText("layer image memory: {} MB", stats.copiedImageMem / (1024.f * 1024.f));
+		ImGui::Separator();
+		imGuiText("timeline semaphores: {}", dev.timelineSemaphores);
+		imGuiText("transform feedback: {}", dev.transformFeedback);
+		imGuiText("wrap command buffers: {}", HandleDesc<VkCommandBuffer>::wrap);
+		imGuiText("wrap image view: {}", HandleDesc<VkImageView>::wrap);
+		imGuiText("wrap buffers: {}", HandleDesc<VkBuffer>::wrap);
+		imGuiText("wrap descriptor set: {}", HandleDesc<VkDescriptorSet>::wrap);
+		imGuiText("wrap samplers: {}", HandleDesc<VkSampler>::wrap);
+		imGuiText("wrap device: {}", HandleDesc<VkDevice>::wrap);
+		ImGui::Separator();
+		imGuiText("submission counter: {}", dev.submissionCounter);
+		imGuiText("pending submissions: {}", dev.pending.size());
+		imGuiText("fence pool size: {}", dev.fencePool.size());
+		imGuiText("semaphore pool size: {}", dev.semaphorePool.size());
+		imGuiText("reset semaphores size: {}", dev.resetSemaphores.size());
+
+		ImGui::Separator();
+
+		if(dev.timelineSemaphores) {
+			auto val = dev.doFullSync.load();
+			ImGui::Checkbox("Full-Sync", &val);
+			dev.doFullSync.store(val);
+			if(ImGui::IsItemHovered() && showHelp) {
+				ImGui::SetTooltip("Causes over-conservative synchronization of\n"
+					"inserted layer commands.\n"
+					"Might fix synchronization in some corner cases\n"
+					"and is needed when your application accesses buffers\n"
+					"by just using device addresses");
+			}
+		}
+
+		auto val = dev.captureCmdStack.load();
+		ImGui::Checkbox("Capture Command Callstacks", &val);
+		dev.captureCmdStack.store(val);
+		if(ImGui::IsItemHovered() && showHelp) {
+			ImGui::SetTooltip("Captures and shows callstacks of each command");
+		}
+
+		ImGui::Checkbox("Show ImGui Demo", &showImguiDemo_);
+		imGuiCheckbox("Force hooking", dev.commandHook->forceHook);
+		imGuiCheckbox("Allow hook record reuse", dev.commandHook->allowReuse);
+		imGuiCheckbox("Hook AccelerationStructures", dev.commandHook->hookAccelStructBuilds);
+		imGuiCheckbox("Print VertexCapture Timings", dev.printVertexCaptureTimings);
+		imGuiCheckbox("Print VertexCapture Metadata", dev.printVertexCaptureMetadata);
+		ImGui::Checkbox("Show cursor", &io_->MouseDrawCursor);
+
+		ImGui::Checkbox("Show debug window", &showDebug);
+
+		ImGui::Separator();
+	}
+
+	if (platformUI) {
+		platformUI();
+	}
+}
+
 void Gui::draw(Draw& draw, bool fullscreen) {
 	ZoneScoped;
 
@@ -1298,6 +1348,11 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		focused_ = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 		windowPos_ = ImGui::GetWindowPos();
 		windowSize_ = ImGui::GetWindowSize();
+
+		if(!fullscreen) {
+			ImGui::PopStyleVar(1);
+			ImGui::PopStyleColor(1);
+		}
 
 		if(mode_ == Mode::normal) {
 			auto checkSelectTab = [&](Tab tab) {
@@ -1414,6 +1469,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			tabItem(ICON_FA_IMAGES " Resources", Tab::resources);
 			tabItem(ICON_FA_MEMORY " Memory", Tab::memory);
 			tabItem(ICON_FA_LIST " Commands", Tab::commandBuffer);
+			tabItem(ICON_FA_HISTORY " Events", Tab::event);
+			tabItem(ICON_FA_COG " Settings", Tab::settings);
 
 			ImGui::SameLine();
 			const auto start = ImGui::GetCursorScreenPos();
@@ -1441,6 +1498,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			switch(activeTab_) {
 				case Tab::overview: drawOverviewUI(draw); break;
 				case Tab::memory: drawMemoryUI(draw); break;
+				case Tab::event: drawEventUI(draw); break;
+				case Tab::settings: drawSettingsUI(draw); break;
 				case Tab::commandBuffer: tabs_.cb->draw(draw); break;
 				case Tab::resources: tabs_.resources->draw(draw); break;
 				default: break;
@@ -1453,11 +1512,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		} else {
 			dlg_error("invalid mode");
 		}
-	}
-
-	if(!fullscreen) {
-		ImGui::PopStyleVar(1);
-		ImGui::PopStyleColor(1);
 	}
 
 	ImGui::End();

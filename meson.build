@@ -246,6 +246,7 @@ src = files(
 	'src/gui/shader.cpp',
 	'src/gui/blur.cpp',
 	'src/gui/commandSelection.cpp',
+	'src/gui/events.cpp',
 	# debug wip
 	'src/gui/vizlcs.cpp',
 
@@ -458,7 +459,7 @@ if with_standalone
 endif
 
 if with_callstacks
-	layer_args += '-DVIL_COMMAND_CALLSTACKS'
+	layer_args += '-DVIL_WITH_CALLSTACKS'
 	src += files(
 		'src/backward/trace.cpp',
 		'src/backward/resolve.cpp',

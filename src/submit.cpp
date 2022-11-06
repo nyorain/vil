@@ -735,20 +735,16 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 	si.pWaitSemaphoreInfos = waitSems.data();
 }
 
-void postProcessLocked(QueueSubmitter& subm) {
+FrameSubmission postProcessLocked(QueueSubmitter& subm) {
 	ZoneScoped;
 
 	auto& batch = *subm.dstBatch;
 
 	// add to swapchain
-	FrameSubmission* recordBatch = nullptr;
-	auto swapchain = subm.dev->swapchainLocked();
-	if(swapchain) {
-		recordBatch = &swapchain->nextFrameSubmissions.batches.emplace_back();
-		recordBatch->queue = subm.queue;
-		recordBatch->submissionID = subm.globalSubmitID;
-		recordBatch->type = batch.type;
-	}
+	FrameSubmission recordBatch;
+	recordBatch.queue = subm.queue;
+	recordBatch.submissionID = subm.globalSubmitID;
+	recordBatch.type = batch.type;
 
 	for(auto& sub : batch.submissions) {
 		// For command submissions, don't activate when there already is an
@@ -778,15 +774,11 @@ void postProcessLocked(QueueSubmitter& subm) {
 				cb->pending.push_back(&sub);
 				auto recPtr = cb->lastRecordPtrLocked();
 
-				if(recordBatch) {
-					recordBatch->submissions.push_back(recPtr);
-				}
+				recordBatch.submissions.push_back(recPtr);
 			}
 		} else if(batch.type == SubmissionType::bindSparse) {
-			if(recordBatch) {
-				recordBatch->sparseBinds.push_back(
-					std::get<BindSparseSubmission>(sub.data));
-			}
+			recordBatch.sparseBinds.push_back(
+				std::get<BindSparseSubmission>(sub.data));
 		} else {
 			dlg_error("unreachable");
 		}
@@ -840,6 +832,13 @@ void postProcessLocked(QueueSubmitter& subm) {
 	if(subm.lastLayerSubmission) {
 		subm.queue->lastLayerSubmission = (*subm.lastLayerSubmission)->queueSubmitID;
 	}
+
+	auto swapchain = subm.dev->swapchainLocked();
+	if(swapchain) {
+		swapchain->nextFrameSubmissions.batches.emplace_back(recordBatch);
+	}
+
+	return recordBatch;
 }
 
 // Returns whether the given submission potentially writes the given

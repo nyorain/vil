@@ -18,6 +18,7 @@
 #include <threadContext.hpp>
 #include <fault.hpp>
 #include <exts.hpp>
+#include <eventLog.hpp>
 #include <util/util.hpp>
 #include <util/chain.hpp>
 #include <gui/gui.hpp>
@@ -137,6 +138,7 @@ Device::~Device() {
 	window.reset();
 	gui_.reset();
 	commandHook.reset();
+	eventLog.reset();
 
 	for(auto& fence : fencePool) {
 		dispatch.DestroyFence(handle, fence, nullptr);
@@ -1244,6 +1246,7 @@ VkResult doCreateDevice(
 
 	// init command hook
 	dev.commandHook = std::make_unique<CommandHook>(dev);
+	dev.eventLog = std::make_unique<EventLog>();
 
 #ifdef VIL_WITH_SWA
 	if(window) {

@@ -11,6 +11,7 @@
 #include <buffer.hpp>
 #include <image.hpp>
 #include <submit.hpp>
+#include <eventLog.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/submission.hpp>
 #include <util/util.hpp>
@@ -195,10 +196,12 @@ VkResult doSubmit(Queue& queue, span<const VkSubmitInfo2> submits,
 
 	QueueSubmitter submitter {};
 	init(submitter, queue, SubmissionType::command, fence);
-
 	process(submitter, submits);
 
 	VkResult res;
+	FrameSubmission submission;
+
+	auto& ev = dev.eventLog->construct<QueueSubmitEvent>();
 
 	// Lock order is important here, lock dev mutex before queue mutex.
 	// We lock the dev mutex to sync with gui.
@@ -249,9 +252,13 @@ VkResult doSubmit(Queue& queue, span<const VkSubmitInfo2> submits,
 			return res;
 		}
 
-		postProcessLocked(submitter);
+		ev.submission = postProcessLocked(submitter);
 		dev.pending.push_back(std::move(submitter.dstBatch));
 	}
+
+	// XXX: plain forward for debugging
+	// auto res = dev.dispatch.QueueSubmit(qd.handle,
+	// 	submitCount, pSubmits, fence);
 
 	return res;
 }

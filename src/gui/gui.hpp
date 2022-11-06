@@ -7,10 +7,8 @@
 #include <nytl/vec.hpp>
 #include <vkutil/handles.hpp>
 #include <vkutil/dynds.hpp>
-#include <variant>
 #include <condition_variable>
 #include <atomic>
-#include <deque>
 #include <chrono>
 
 namespace vil {
@@ -18,6 +16,7 @@ namespace vil {
 class ResourceGui;
 class CommandRecordGui;
 class ImageViewer;
+class EventViewer;
 struct Serializer;
 
 class Gui {
@@ -32,6 +31,8 @@ public:
 		resources,
 		commandBuffer,
 		memory,
+		event,
+		settings,
 	};
 
 	struct Event {
@@ -195,6 +196,8 @@ private:
 	void draw(Draw&, bool fullscreen);
 	void drawOverviewUI(Draw&);
 	void drawMemoryUI(Draw&);
+	void drawEventUI(Draw&);
+	void drawSettingsUI(Draw&);
 	void ensureFontAtlas(VkCommandBuffer cb);
 
 	void uploadDraw(Draw&, const ImDrawData&);
@@ -251,6 +254,7 @@ private:
 	struct {
 		std::unique_ptr<ResourceGui> resources;
 		std::unique_ptr<CommandRecordGui> cb;
+		std::unique_ptr<EventViewer> events;
 
 		// For image-only mode
 		std::unique_ptr<ImageViewer> imageViewer;
