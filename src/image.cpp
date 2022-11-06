@@ -7,6 +7,7 @@
 #include <threadContext.hpp>
 #include <ds.hpp>
 #include <rp.hpp>
+#include <eventLog.hpp>
 #include <util/util.hpp>
 #include <vkutil/enumString.hpp>
 
@@ -248,6 +249,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 		img.externalMemory = true;
 	}
 
+	auto& ev = dev.eventLog->construct<CreationEvent<Image>>();
+	ev.handle = imgPtr;
+
 	*pImage = castDispatch<VkImage>(img);
 	dev.images.mustEmplace(*pImage, std::move(imgPtr));
 
@@ -262,7 +266,12 @@ VKAPI_ATTR void VKAPI_CALL DestroyImage(
 		return;
 	}
 
-	auto& dev = *mustMoveUnset(device, image)->dev;
+	auto imgPtr = mustMoveUnset(device, image);
+	auto& dev = *imgPtr->dev;
+
+	auto& ev = dev.eventLog->construct<DestructionEvent<Image>>();
+	ev.handle = imgPtr;
+
 	dev.dispatch.DestroyImage(dev.handle, image, pAllocator);
 }
 

@@ -31,6 +31,8 @@ public:
 		resources,
 		commandBuffer,
 		memory,
+		event,
+		settings,
 	};
 
 	struct Event {
@@ -185,6 +187,8 @@ private:
 	void draw(Draw&, bool fullscreen);
 	void drawOverviewUI(Draw&);
 	void drawMemoryUI(Draw&);
+	void drawEventUI(Draw&);
+	void drawSettingsUI(Draw&);
 	void ensureFontAtlas(VkCommandBuffer cb);
 
 	void uploadDraw(Draw&, const ImDrawData&);

@@ -9,6 +9,7 @@
 #include <buffer.hpp>
 #include <image.hpp>
 #include <submit.hpp>
+#include <eventLog.hpp>
 #include <deque>
 #include <gui/gui.hpp>
 #include <commandHook/submission.hpp>
@@ -255,6 +256,8 @@ VkResult doSubmit(Queue& qd, span<const VkSubmitInfo2> submits,
 		postProcessLocked(submitter);
 		dev.pending.push_back(std::move(batchPtr));
 	}
+
+	dev.eventLog->construct<QueueSubmitEvent>();
 
 	// XXX: plain forward for debugging
 	// auto res = dev.dispatch.QueueSubmit(qd.handle,

@@ -15,6 +15,7 @@
 #include <overlay.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
+#include <eventLog.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/hook.hpp>
@@ -123,6 +124,7 @@ Device::~Device() {
 	window.reset();
 	gui_.reset();
 	commandHook.reset();
+	eventLog.reset();
 
 	for(auto& fence : fencePool) {
 		dispatch.DestroyFence(handle, fence, nullptr);
@@ -1042,6 +1044,7 @@ VkResult doCreateDevice(
 
 	// init command hook
 	dev.commandHook = std::make_unique<CommandHook>(dev);
+	dev.eventLog = std::make_unique<EventLog>();
 
 	// == window stuff ==
 #ifdef VIL_WITH_SWA

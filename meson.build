@@ -414,7 +414,7 @@ if with_standalone
 endif
 
 if with_callstacks
-	layer_args += '-DVIL_COMMAND_CALLSTACKS'
+	layer_args += '-DVIL_WITH_CALLSTACKS'
 	src += files(
 		'src/backward/trace.cpp',
 		'src/backward/resolve.cpp',

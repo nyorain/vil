@@ -26,6 +26,7 @@ using std::size_t;
 class Gui;
 struct RenderBuffer;
 
+struct EventLog;
 struct Device;
 struct Instance;
 struct Handle;

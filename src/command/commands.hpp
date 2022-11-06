@@ -17,6 +17,10 @@
 	#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #endif // __GNUC__
 
+#ifdef VIL_WITH_CALLSTACKS
+	#define VIL_COMMAND_CALLSTACKS
+#endif // VIL_WITH_CALLSTACKS
+
 namespace vil {
 
 // The type of a command is used e.g. to hide them in the UI.

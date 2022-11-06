@@ -131,6 +131,7 @@ struct Device {
 
 	// Always valid, initialized on device creation.
 	std::unique_ptr<CommandHook> commandHook {};
+	std::unique_ptr<EventLog> eventLog {};
 
 	std::vector<VkFence> fencePool; // currently unused fences
 
