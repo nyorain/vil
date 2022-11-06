@@ -14,6 +14,7 @@
 #include <vkutil/cmd.hpp>
 #include <iomanip>
 #include <imgio/image.hpp>
+#include <gui/fontAwesome.hpp>
 
 namespace vil {
 
@@ -93,7 +94,7 @@ void ImageViewer::init(Gui& gui) {
 	gui_ = &gui;
 }
 
-void ImageViewer::drawMetaInfo(Draw& draw) {
+void ImageViewer::drawMetaInfo(Draw& draw, bool noExtendFlag) {
 	(void) draw;
 
 	// TODO:
@@ -106,24 +107,32 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		auto numComponents = FormatComponentCount(format_);
 		dlg_assert(aspect_ == VK_IMAGE_ASPECT_COLOR_BIT);
 
-		ImGui::CheckboxFlags("R", &imageDraw_.flags, DrawGuiImage::flagMaskR);
+		ImVec2 size(30, 30);
+
+		// ImGui::CheckboxFlags("R", &imageDraw_.flags, DrawGuiImage::flagMaskR);
+		toggleButtonFlags("R", imageDraw_.flags, DrawGuiImage::flagMaskR, size);
 		if(numComponents > 1) {
 			ImGui::SameLine();
-			ImGui::CheckboxFlags("G", &imageDraw_.flags, DrawGuiImage::flagMaskG);
+			// ImGui::CheckboxFlags("G", &imageDraw_.flags, DrawGuiImage::flagMaskG);
+			toggleButtonFlags("G", imageDraw_.flags, DrawGuiImage::flagMaskG, size);
 		}
 
 		if(numComponents > 2) {
 			ImGui::SameLine();
-			ImGui::CheckboxFlags("B", &imageDraw_.flags, DrawGuiImage::flagMaskB);
+			// ImGui::CheckboxFlags("B", &imageDraw_.flags, DrawGuiImage::flagMaskB);
+			toggleButtonFlags("B", imageDraw_.flags, DrawGuiImage::flagMaskB, size);
 		}
 
 		if(numComponents > 3) {
 			ImGui::SameLine();
-			ImGui::CheckboxFlags("A", &imageDraw_.flags, DrawGuiImage::flagMaskA);
+			// ImGui::CheckboxFlags("A", &imageDraw_.flags, DrawGuiImage::flagMaskA);
+			toggleButtonFlags("A", imageDraw_.flags, DrawGuiImage::flagMaskA, size);
 		}
 
 		ImGui::SameLine();
-		ImGui::CheckboxFlags("Gray", &imageDraw_.flags, DrawGuiImage::flagGrayscale);
+		// ImGui::CheckboxFlags("Gray", &imageDraw_.flags, DrawGuiImage::flagGrayscale);
+		toggleButtonFlags("Gray", imageDraw_.flags, DrawGuiImage::flagGrayscale,
+			ImVec2(0, size.y));
 	} else if((subresRange_.aspectMask & depthStencil) == depthStencil) {
 		dlg_assert(aspect_ == VK_IMAGE_ASPECT_DEPTH_BIT || aspect_ == VK_IMAGE_ASPECT_STENCIL_BIT);
 
@@ -345,6 +354,31 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 	}
 
 	// histogram
+	auto filterName = "None";
+	if(ImGui::BeginCombo("Overlay", filterName)) {
+
+		// TODO
+		if(ImGui::Selectable("None")) {
+		}
+
+		ImGui::EndCombo();
+	}
+
+	toggleButton("MinMax", computeMinMax_);
+	ImGui::SameLine();
+
+	if(ImGui::Button(ICON_FA_MAGIC)) {
+		histogram_.fixedRange = false;
+
+		imageDraw_.minValue = 0.f;
+		imageDraw_.maxValue = 1.f;
+	}
+
+	ImGui::SameLine();
+	if(ImGui::Button(ICON_FA_SAVE)) {
+		saveToFile();
+	}
+
 	draw_ = &draw;
 	auto cbHistogram = [](const ImDrawList*, const ImDrawCmd* cmd) {
 		auto* self = static_cast<ImageViewer*>(cmd->UserCallbackData);
@@ -352,7 +386,6 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		self->drawHistogram(self->draw_->cb);
 	};
 	ImGui::GetWindowDrawList()->AddCallback(cbHistogram, this);
-
 	// TODO: likely not the right position to call this.
 	// We'd have to keep the old *and* new one alive in that case...
 	// Probably not what we want!
@@ -360,23 +393,15 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 		createData();
 	}
 
-	if(ImGui::Button("Fit Histogram")) {
-		histogram_.fixedRange = false;
-
-		imageDraw_.minValue = 0.f;
-		imageDraw_.maxValue = 1.f;
-	}
-
-	if(ImGui::Button("Save as test.ktx2")) {
-		saveToFile();
-	}
 
 	// info
-	/*
-	auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
-	if(ImGui::BeginTable("Info", 2, flags, ImGui::GetContentRegionAvail())) {
-		// ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthStretch, 1.f);
-		// ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
+	auto flags = u32(ImGuiTableFlags_Resizable);
+	if(noExtendFlag) {
+		// flags = flags | u32(ImGuiTableFlags_NoHostExtendY);
+	}
+	if(ImGui::BeginTable("Info", 2, flags /*, ImGui::GetContentRegionAvail()*/)) {
+		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 200);
+		ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
 
 		auto addRow = [](const char* name, auto val) {
 			ImGui::TableNextRow();
@@ -397,7 +422,6 @@ void ImageViewer::drawMetaInfo(Draw& draw) {
 
 		ImGui::EndTable();
 	}
-	*/
 }
 
 void ImageViewer::drawImageArea(Draw& draw) {
@@ -703,7 +727,7 @@ void ImageViewer::display(Draw& draw) {
 		}
 		ImGui::EndChild();
 
-		drawMetaInfo(draw);
+		drawMetaInfo(draw, false);
 	} else {
 		auto flags = ImGuiTableFlags_NoBordersInBodyUntilResize | ImGuiTableFlags_Resizable;
 		if(ImGui::BeginTable("Img", 2u, flags)) {
@@ -720,7 +744,9 @@ void ImageViewer::display(Draw& draw) {
 
 			ImGui::TableNextColumn();
 
-			drawMetaInfo(draw);
+			ImGui::BeginChild("meta");
+			drawMetaInfo(draw, true);
+			ImGui::EndChild();
 
 			ImGui::EndTable();
 		}
@@ -978,7 +1004,7 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 	data.texMin = {minVal, minVal, minVal, minVal};
 	data.texMax = {maxVal, maxVal, maxVal, maxVal};
 
-	if(histogram_.fixedRange) {
+	if(histogram_.fixedRange || !computeMinMax_) {
 		data.begin = histogram_.begin;
 		data.end = histogram_.end;
 	}
@@ -994,8 +1020,13 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 	// skip computeMinMax and Prepare pass and simple CmdUpdateBuffer
 	//   in fixed case. Makes histogramPrepare shader and pcr simpler
 
-	rb.hasMinMax = !histogram_.fixedRange;
-	if(!histogram_.fixedRange) {
+	auto w = std::max(extent_.width >> u32(imageDraw_.level), 1u);
+	auto h = std::max(extent_.height >> u32(imageDraw_.level), 1u);
+	auto d = std::max(extent_.depth >> u32(imageDraw_.level), 1u);
+
+	auto computeMinMax = !histogram_.fixedRange;
+	rb.hasMinMax = computeMinMax;
+	if(computeMinMax && computeMinMax_) {
 		// compute minMax
 		DebugLabel cblbl(dev, draw.cb, "vil:ImageViewer:computeMinMax");
 
@@ -1007,13 +1038,9 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
 			0u, 1u, &data_->imgOpDs.vkHandle(), 0u, nullptr);
 
-		int level = int(imageDraw_.level);
+		int pcr[] = {int(imageDraw_.level), int(imageDraw_.layer)};
 		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
-			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(level), &level);
-
-		auto w = std::max(extent_.width >> u32(level), 1u);
-		auto h = std::max(extent_.height >> u32(level), 1u);
-		auto d = std::max(extent_.depth >> u32(level), 1u);
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), pcr);
 
 		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 8u), ceilDivide(h, 8u), d);
 
@@ -1025,7 +1052,7 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 
 		struct {
 			u32 channelMask;
-		} pcr {
+		} pcr2 {
 			0xb0111, // don't include alpha here
 		};
 
@@ -1034,7 +1061,7 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
 			0u, 1u, &data_->histDs.vkHandle(), 0u, nullptr);
 		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
-			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), &pcr);
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr2), &pcr2);
 		dev.dispatch.CmdDispatch(draw.cb, 1u, 1u, 1u);
 	}
 
@@ -1050,20 +1077,39 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
 			0u, 1u, &data_->imgOpDs.vkHandle(), 0u, nullptr);
 
-		int level = int(imageDraw_.level);
+		int pcr[] = {int(imageDraw_.level), int(imageDraw_.layer)};
 		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
-			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(level), &level);
-
-		auto w = std::max(extent_.width >> u32(level), 1u);
-		auto h = std::max(extent_.height >> u32(level), 1u);
-		auto d = std::max(extent_.depth >> u32(level), 1u);
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), pcr);
 
 		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 8u), ceilDivide(h, 8u), d);
 	}
 
 	histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());
 
+	// do post processing for better range estimate, in case we need it
+	// We do this so we can ignore a percentage of outliers on both sides
+	constexpr auto doMinMaxPost = true;
+	if(computeMinMax && doMinMaxPost) {
+		auto pipeLayout = gui_->histogramPipeLayout().vkHandle();
+		auto pipe = gui_->pipes().histogramPost;
+
+		// numTexels
+		u32 pcr = w * h * d;
+		dlg_trace("numTexels: {}", pcr);
+
+		dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+		dev.dispatch.CmdBindDescriptorSets(draw.cb,
+			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
+			0u, 1u, &data_->histDs.vkHandle(), 0u, nullptr);
+		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
+			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), &pcr);
+
+
+		dev.dispatch.CmdDispatch(draw.cb, 1u, 1u, 1u);
+	}
+
 	// prepare histogram for rendering, compute the bucket with the highest count
+	// No barrier needed here as we read/write different values.
 	{
 		auto pipeLayout = gui_->histogramPipeLayout().vkHandle();
 		auto pipe = gui_->pipes().histogramMax;

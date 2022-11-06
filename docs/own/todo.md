@@ -12,6 +12,9 @@ urgent, bugs:
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
 
+- [ ] histogram minMax auto-range not correctly working on all channels?
+      just ignored the highs of the green-channel in a metallic/rough texture
+
 - [ ] wayland VIL_CREATE_WINDOW freezes of window:
       when moving the application window to another workspace, the
 	  driver just indefinitely blocks in QueuePresent. The problem is,
@@ -26,6 +29,14 @@ urgent, bugs:
 	  	- will probably not happen when applications use mailbox mode
 		  Should at least document it somewhere.
 		  Might also happen when the window is minimized on some platforms?
+
+- [ ] improve tabs ui: 
+	- [x] try out top-rounded corners {looks whack}, 
+	- [ ] play around further with alpha, 
+	- [x] signal somehow if window is focused or not
+		  Either make tab-background change color on being focused,
+		  make it more transparent or something or maybe use a thin window border?
+		  {think window border looks good imo}
 
 - [ ] when viewing an image live in the resource viewer, we just use
       pendingLayout as layout. But we don't lock anymore, maybe there's another

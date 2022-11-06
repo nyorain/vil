@@ -11,6 +11,7 @@ layout(local_size_x = 8u, local_size_y = 8u) in;
 
 layout(push_constant) uniform PCR {
 	int level;
+	int layer;
 } pcr;
 
 layout(set = 0, binding = 0) buffer Hist {
@@ -20,6 +21,7 @@ layout(set = 0, binding = 0) buffer Hist {
 
 void main() {
 	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
+	coords.z += pcr.layer;
 	if(!coordsInside(coords, pcr.level)) {
 		return;
 	}
@@ -43,7 +45,8 @@ void main() {
 
 		float pos = (col[i] - hist.meta.begin) / range;
 		// uint id = clamp(pos * len, 0, len - 1);
-		int id = int(pos * len);
+		// NOTE: we need the floor here, don't want trunc
+		int id = int(floor(pos * len));
 		if(id >= 0 && id < len) {
 			atomicAdd(hist.data[id][i], 1u);
 		}

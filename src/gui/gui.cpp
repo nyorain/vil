@@ -144,6 +144,7 @@ void Gui::destroyRenderStuff() {
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.imageBg, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramPrepare, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramMax, nullptr);
+	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramPost, nullptr);
 	dev_->dispatch.DestroyPipeline(vkDev, pipes_.histogramRender, nullptr);
 	for(auto i = 0u; i < ShaderImageType::count; ++i) {
 		dev_->dispatch.DestroyPipeline(vkDev, pipes_.image[i], nullptr);
@@ -1057,6 +1058,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 	ImGui::NewFrame();
 
+	auto windowRounding = 0.f;
+
 	unsigned flags = ImGuiWindowFlags_NoCollapse;
 	if(fullscreen) {
 		ImGui::SetNextWindowPos({0, 0});
@@ -1065,6 +1068,13 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 	} else {
 		ImGui::SetNextWindowPos({80, 80}, ImGuiCond_Once);
 		ImGui::SetNextWindowSize({900, 550}, ImGuiCond_Once);
+
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.f);
+
+		auto col = focused_ ?
+			ImVec4(1.f, 0.5f, 0.5f, 0.8f) :
+			ImVec4(0.2f, 0.2f, 0.2f, 0.1f);
+		ImGui::PushStyleColor(ImGuiCol_Border, col);
 	}
 
 	if(showImguiDemo_) {
@@ -1098,6 +1108,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 	}
 
 	if(ImGui::Begin("Vulkan Introspection", nullptr, flags)) {
+		focused_ = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 		windowPos_ = ImGui::GetWindowPos();
 		windowSize_ = ImGui::GetWindowSize();
 
@@ -1141,6 +1152,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			ImGui::SetCursorScreenPos(pos);
 
 			auto first = true;
+			auto prevSelected = false;
 
 			auto tabItem = [&](const char* label, Tab type) {
 				if(checkSelectTab(type)) {
@@ -1153,7 +1165,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 					first = false;
 				} else {
 					ImGui::SameLine();
-					line = true;
+					line = !prevSelected && !selected;
 				}
 
 				const auto& style = ImGui::GetStyle();
@@ -1185,12 +1197,16 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				if(selected) {
     				const ImU32 col = selColor;
 					ImGui::RenderFrame(bb.Min, bb.Max, col, true, rounding);
+					// dl.AddRectFilled(bb.Min, bb.Max, col, rounding,
+					// 	roundingFlags);
 				} else {
     				const ImU32 col =
 						held ? pressColor :
 						hovered ? hoverColor :
 						inactiveColor;
 					ImGui::RenderFrame(bb.Min, bb.Max, col, true, rounding);
+					// dl.AddRectFilled(bb.Min, bb.Max, col, rounding,
+					// 	roundingFlags);
 				}
 
 				ImGui::RenderTextClipped(bb.Min + style.FramePadding,
@@ -1205,6 +1221,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 					}
 					activeTab_ = type;
 				}
+
+				prevSelected = selected;
 			};
 
 			tabItem(ICON_FA_HOME " Overview", Tab::overview);
@@ -1250,6 +1268,11 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 		} else {
 			dlg_error("invalid mode");
 		}
+	}
+
+	if(!fullscreen) {
+		ImGui::PopStyleVar(1);
+		ImGui::PopStyleColor(1);
 	}
 
 	ImGui::End();

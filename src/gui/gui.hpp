@@ -76,6 +76,7 @@ public:
 
 		VkPipeline histogramPrepare {};
 		VkPipeline histogramMax {};
+		VkPipeline histogramPost {};
 		VkPipeline histogramRender {};
 	};
 
@@ -278,6 +279,7 @@ private:
 	std::vector<Recorder> postRender_ {};
 
 	bool visible_ {false};
+	bool focused_ {};
 	bool showImguiDemo_ {false};
 
 	std::mutex eventMutex_;

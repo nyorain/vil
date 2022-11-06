@@ -1,0 +1,58 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "histogram.glsl"
+
+layout(local_size_x = 1u, local_size_y = 1u) in;
+
+layout(push_constant) uniform PCR {
+	uint numTexels;
+} pcr;
+
+layout(set = 0, binding = 0) buffer HistData {
+	HistMetadata meta;
+	uvec4 data[];
+} hist;
+
+// TODO: handle channels properly.
+// alpha. don't assume rgb are present.
+
+void main() {
+	const float ignore = 0.1;
+	const uint startCount = uint(ignore * 3 * pcr.numTexels);
+	const uint endCount   = uint((1 - ignore) * 3 * pcr.numTexels);
+
+	const float range = hist.meta.end - hist.meta.begin;
+	const uint len = hist.data.length();
+	
+	float begin = 0.f;
+	float end = 0.f;
+	uint accum = 0u;
+
+	for(uint i = 0u; i < hist.data.length(); ++i) {
+		uint count = hist.data[i][0] + hist.data[i][1] + hist.data[i][2];
+
+		if(accum < startCount && accum + count >= startCount) {
+			begin = hist.meta.begin + (i * range) / len;
+		}
+
+		accum += count;
+		if(accum >= endCount) {
+			end = hist.meta.begin + ((i + 1) * range) / len;
+			break;
+		}
+	}
+
+	if(accum < endCount) {
+		end = hist.meta.end;
+	}
+
+	// assert(begin >= hist.meta.begin)
+	// assert(end <= hist.meta.end)
+
+	float nr = end - begin;
+	hist.meta.begin = max(hist.meta.begin, begin - 0.5 * nr);
+	hist.meta.end = min(hist.meta.end, end + 0.5 * nr);
+}
+

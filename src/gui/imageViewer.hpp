@@ -82,7 +82,7 @@ private:
 	void createData();
 
 	void drawImageArea(Draw& draw);
-	void drawMetaInfo(Draw& draw);
+	void drawMetaInfo(Draw& draw, bool noExtendFlag);
 
 	void validateClampCoords(Vec3i& coords, u32& layer, u32& level);
 	static u32 histogramBufSize();
@@ -156,6 +156,7 @@ private:
 	} histogram_;
 
 	bool gammaSliding_ {};
+	bool computeMinMax_ {true};
 };
 
 } // namespace vil

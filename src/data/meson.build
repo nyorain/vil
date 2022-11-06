@@ -50,6 +50,7 @@ if glslang.found()
 		'copyTex.comp': texelstore_table,
 		# histogram process/render
 		'histogramMax.comp': {'': [] },
+		'histogramPost.comp': {'': [] },
 		'histogramPrepare.comp': {'': [] },
 		'histogram.vert': {'': [] },
 		'histogram.frag': {'': [] },
