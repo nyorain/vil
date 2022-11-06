@@ -50,8 +50,11 @@ void display(span<void*> st, unsigned offset = 6u) {
 
 	for(auto i = 0u; i < resolved.size(); ++i) {
 		auto& loc = resolved[i];
-		imGuiText("#{}: {}:{}:{}: {} [{}]", i + offset, loc.filename, loc.line,
-			loc.col, loc.function, st[i + offset]);
+		if(loc.function.empty()) {
+			loc.function = dlg::format("[{}]", st[i + offset]);
+		}
+		imGuiText("#{}: {}:{}:{}: {}", i + offset, loc.filename, loc.line,
+			loc.col, loc.function);
 
 		// 	// TODO, something like this. But make it configurable.
 		// 	And ffs, don't use std::sytem.
@@ -1513,7 +1516,9 @@ void CommandViewer::displayCommand() {
 #ifdef VIL_COMMAND_CALLSTACKS
 	auto flags = ImGuiTreeNodeFlags_FramePadding;
 	if(!command_.back()->stacktrace.empty() && ImGui::TreeNodeEx("StackTrace", flags)) {
+		ImGui::PushFont(gui_->monoFont);
 		display(command_.back()->stacktrace);
+		ImGui::PopFont();
 		ImGui::TreePop();
 	}
 #endif // VIL_COMMAND_CALLSTACKS

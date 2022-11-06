@@ -176,4 +176,25 @@ inline bool toggleButton(const char* label, bool& active) {
 	return ret;
 }
 
+template<typename T, typename E>
+inline bool toggleButtonFlags(const char* label, T& flags, E val,
+		const ImVec2& sizeArg = ImVec2(0, 0)) {
+	auto prev = (flags & val);
+	if(prev) {
+		ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+	}
+
+	auto ret = ImGui::Button(label, sizeArg);
+	if(ImGui::IsItemClicked()) {
+		flags ^= val;
+	}
+
+	if(prev) {
+		ImGui::PopStyleColor(2);
+	}
+
+	return ret;
+}
+
 } // namesapce vil

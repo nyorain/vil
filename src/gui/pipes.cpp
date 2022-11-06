@@ -51,6 +51,7 @@
 #include <histogram.comp.i3D.spv.h>
 
 #include <histogramMax.comp.spv.h>
+#include <histogramPost.comp.spv.h>
 #include <histogramPrepare.comp.spv.h>
 #include <histogram.vert.spv.h>
 #include <histogram.frag.spv.h>
@@ -391,12 +392,14 @@ void initPipes(Device& dev,
 	{
 		addCpi(histogramPipeLayout, histogramPrepare_comp_spv_data);
 		addCpi(histogramPipeLayout, histogramMax_comp_spv_data);
-		VkPipeline pipes[2];
+		addCpi(histogramPipeLayout, histogramPost_comp_spv_data);
+		VkPipeline pipes[3];
 
 		VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
 			u32(cpis.size()), cpis.data(), nullptr, pipes));
 		dstPipes.histogramPrepare = pipes[0];
 		dstPipes.histogramMax = pipes[1];
+		dstPipes.histogramPost = pipes[2];
 		cpis.clear();
 	}
 }
