@@ -239,7 +239,8 @@ string Compiler::to_name(uint32_t id, bool allow_alias) const
 
 	auto &alias = ir.get_name(id);
 	if (alias.empty())
-		return join("_", id);
+		// return join("_", id);
+		return ir.get_empty_string();
 	else
 		return alias;
 }
@@ -1407,14 +1408,16 @@ const std::string &Compiler::get_name(ID id) const
 
 const std::string Compiler::get_fallback_name(ID id) const
 {
-	return join("_", id);
+	// return join("_", id);
+	return ir.get_empty_string();
 }
 
 const std::string Compiler::get_block_fallback_name(VariableID id) const
 {
 	auto &var = get<SPIRVariable>(id);
 	if (get_name(id).empty())
-		return join("_", get<SPIRType>(var.basetype).self, "_", id);
+		return ir.get_empty_string();
+		// return join("_", get<SPIRType>(var.basetype).self, "_", id);
 	else
 		return get_name(id);
 }
@@ -4735,8 +4738,7 @@ std::string Compiler::get_remapped_declared_block_name(uint32_t id, bool fallbac
 	else
 	{
 		// NOTE: we don't want any fallback names in vil
-		(void) fallback_prefer_instance_name;
-		/*
+		// (void) fallback_prefer_instance_name;
 		auto &var = get<SPIRVariable>(id);
 
 		if (fallback_prefer_instance_name)
@@ -4750,7 +4752,6 @@ std::string Compiler::get_remapped_declared_block_name(uint32_t id, bool fallbac
 			auto *block_name = type_meta ? &type_meta->decoration.alias : nullptr;
 			return (!block_name || block_name->empty()) ? get_block_fallback_name(id) : *block_name;
 		}
-		*/
 
 		return ir.get_empty_string();
 	}
