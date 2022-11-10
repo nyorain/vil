@@ -4,6 +4,7 @@
 #include <handle.hpp>
 #include <util/dlg.hpp>
 #include <set>
+#include <variant>
 
 namespace vil {
 
