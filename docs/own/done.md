@@ -1,3 +1,5 @@
+- [x] look into a lot of descriptor names not being visible anymore
+      likely related to spirv-cross update
 - [x] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull
 	- [x] a lot of descriptor code was probably never really tested for array bindings.

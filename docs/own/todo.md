@@ -7,28 +7,11 @@ v0.2:
 - improve README
 
 urgent, bugs:
-- [ ] look into a lot of descriptor names not being visible anymore
-      likely related to spirv-cross update
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
 
 - [ ] histogram minMax auto-range not correctly working on all channels?
       just ignored the highs of the green-channel in a metallic/rough texture
-
-- [ ] wayland VIL_CREATE_WINDOW freezes of window:
-      when moving the application window to another workspace, the
-	  driver just indefinitely blocks in QueuePresent. The problem is,
-	  we have the queue mutex locked while that happens.
-	  And so our window thread just starves at some point, trying
-	  to acquire that mutex :/
-	  I have no idea how to solve that at the moment.
-	  We just can't submit while that is happening.
-	  Also see https://github.com/KhronosGroup/Vulkan-Docs/issues/1158
-	  QueuePresent also has no timeout parameter we could pass
-	  when forwarding it :(
-	  	- will probably not happen when applications use mailbox mode
-		  Should at least document it somewhere.
-		  Might also happen when the window is minimized on some platforms?
 
 - [ ] improve tabs ui: 
 	- [x] try out top-rounded corners {looks whack}, 
@@ -65,6 +48,20 @@ urgent, bugs:
 
 new, workstack:
 Freeze/selection changes:
+- [ ] wayland VIL_CREATE_WINDOW freezes of window:
+      when moving the application window to another workspace, the
+	  driver just indefinitely blocks in QueuePresent. The problem is,
+	  we have the queue mutex locked while that happens.
+	  And so our window thread just starves at some point, trying
+	  to acquire that mutex :/
+	  I have no idea how to solve that at the moment.
+	  We just can't submit while that is happening.
+	  Also see https://github.com/KhronosGroup/Vulkan-Docs/issues/1158
+	  QueuePresent also has no timeout parameter we could pass
+	  when forwarding it :(
+	  	- will probably not happen when applications use mailbox mode
+		  Should at least document it somewhere.
+		  Might also happen when the window is minimized on some platforms?
 - [ ] remove hardcoded vil api and vil platform toggles
 	- [ ] env variables instead?
 - [ ] make use of proper sync tracking
