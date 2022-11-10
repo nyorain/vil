@@ -388,6 +388,7 @@ void bindImageMemory(Image& img, DeviceMemory& mem, u64 offset) {
 	memBind.memOffset = offset;
 	memBind.memSize = memReqs.size;
 	memBind.memState = FullMemoryBind::State::bound;
+	memBind.resource = &img;
 
 	mem.allocations.insert(&memBind);
 }

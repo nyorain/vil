@@ -4,6 +4,8 @@
 - [ ] continue shader debugger
 	- [ ] using some lazy copy/cow mechanism.
 	      See cow.md, should probably re-introduce cows
+- [ ] imageViewer: add overlay showing which regions are mapped
+      to which memory for sparse images
 - improve vertex viewer
 	- allow to select vertices (/indices)
 		- in input and output viewer

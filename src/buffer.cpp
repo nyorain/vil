@@ -190,6 +190,7 @@ void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
 	memBind.memOffset = offset;
 	memBind.memSize = memReqs.size;
 	memBind.memState = FullMemoryBind::State::bound;
+	memBind.resource = &buf;
 
 	mem.allocations.insert(&memBind);
 }

@@ -38,6 +38,18 @@ urgent, bugs:
 		  make it more transparent or something or maybe use a thin window border?
 		  {think window border looks good imo}
 
+- [ ] sparse binding: fix 'success' assert in insert
+      e.g. try bind/flush with texturesparseresidency sample
+
+- [ ] fix resource viewer when switching handle types
+      currently does not select the right handle then (e.g.
+	  going from Image -> DeviceMemory via refButton)
+
+- [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
+      test with iro, shadowCull
+	- [ ] a lot of descriptor code was probably never really tested for array bindings.
+	      Make sure everything works.
+
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 
 - [ ] figure our why overlay on doom is broken

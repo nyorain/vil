@@ -76,6 +76,7 @@ struct SparseMemoryState {
 };
 
 struct MemoryResource : SharedDeviceHandle {
+	// TODO: can probably get rid of this
 	VkObjectType memObjectType {};
 
 	// Which member is active is only determined by creation flags

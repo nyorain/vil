@@ -87,22 +87,116 @@ void ResourceGui::init(Gui& gui) {
 
 void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 	std::lock_guard lock(gui_->dev().mutex);
+
 	if(res.memory.index() == 1) {
-		imGuiText("TODO: show sparse bindings");
-		return;
-	}
+		if(ImGui::TreeNode("Sparse memory bindings")) {
+			auto& memState = std::get<1>(res.memory);
 
-	auto& memBind = std::get<0>(res.memory);
-	if(memBind.memory) {
-		ImGui::Text("Bound to memory ");
-		ImGui::SameLine();
+			auto printOpaqueLabel = false;
+			if(!memState.imageBinds.empty()) {
+				imGuiText("Image Binds");
+				printOpaqueLabel = true;
 
-		refButtonExpect(*gui_, memBind.memory);
+				dlg_assert(res.memObjectType == VK_OBJECT_TYPE_IMAGE);
+				auto& img = static_cast<const Image&>(res);
+				auto layered = img.ci.arrayLayers > 1;
+				auto hasMips = img.ci.mipLevels > 1;
+				auto printAspect = !FormatIsColor(img.ci.format);
 
-		ImGui::SameLine();
-		imGuiText(" (offset {}, size {})",
-			sepfmt(memBind.memOffset),
-			sepfmt(memBind.memSize));
+				for(auto& imgBind : memState.imageBinds) {
+					ImGui::Separator();
+
+#if 0
+					// having to hover here is somewhat annoying.
+					imGuiText(ICON_FA_INFO " ");
+					if(ImGui::IsItemHovered()) {
+						ImGui::BeginTooltip();
+
+						if(layered) {
+							imGuiText("Layer: {}", imgBind.subres.arrayLayer);
+						}
+
+						if(hasMips) {
+							imGuiText("Level: {}", imgBind.subres.mipLevel);
+						}
+
+						if(printAspect) {
+							imGuiText("Aspect: {}",
+								vk::nameImageAspectFlags(imgBind.subres.aspectMask));
+						}
+
+						imGuiText("offset {} {} {}",
+							imgBind.offset.x,
+							imgBind.offset.y,
+							imgBind.offset.z);
+						imGuiText("extent {} {} {}",
+							imgBind.size.width,
+							imgBind.size.height,
+							imgBind.size.depth);
+
+						ImGui::EndTooltip();
+					}
+#else
+					// TODO: also ugly, maybe make this a table?
+
+					if(layered) {
+						imGuiText("Layer: {} ", imgBind.subres.arrayLayer);
+						ImGui::SameLine();
+					}
+
+					if(hasMips) {
+						imGuiText("Level: {} ", imgBind.subres.mipLevel);
+						ImGui::SameLine();
+					}
+
+					if(printAspect) {
+						imGuiText("Aspect: {} ",
+							vk::nameImageAspectFlags(imgBind.subres.aspectMask));
+						ImGui::SameLine();
+					}
+
+					imGuiText("Offset [{}, {}, {}] Size [{}, {}, {}] ",
+						imgBind.offset.x, imgBind.offset.y, imgBind.offset.z,
+						imgBind.size.width, imgBind.size.height, imgBind.size.depth);
+#endif
+
+					ImGui::SameLine();
+					refButtonExpect(*gui_, imgBind.memory);
+					ImGui::SameLine();
+					imGuiText(" (offset {}, size {})",
+						sepfmt(imgBind.memOffset),
+						sepfmt(imgBind.memSize));
+				}
+			}
+
+			if(printOpaqueLabel && !memState.opaqueBinds.empty()) {
+				imGuiText("Opaque Binds");
+			}
+			for(auto& opaqueBind : memState.opaqueBinds) {
+				imGuiText("Offset {} ", opaqueBind.resourceOffset);
+				ImGui::SameLine();
+				refButtonExpect(*gui_, opaqueBind.memory);
+				ImGui::SameLine();
+				imGuiText(" (offset {}, size {})",
+					sepfmt(opaqueBind.memOffset),
+					sepfmt(opaqueBind.memSize));
+			}
+
+			ImGui::TreePop();
+		}
+	} else {
+		auto& memBind = std::get<0>(res.memory);
+		if(memBind.memory) {
+			ImGui::Text("Bound to memory ");
+			ImGui::SameLine();
+
+			refButtonExpect(*gui_, memBind.memory);
+
+			ImGui::SameLine();
+			imGuiText(" (offset {}, size {})",
+				sepfmt(memBind.memOffset),
+				sepfmt(memBind.memSize));
+		}
 	}
 }
 
@@ -852,6 +946,8 @@ void ResourceGui::drawDesc(Draw&, DeviceMemory& mem) {
 
 			ImGui::SetCursorScreenPos(resPos);
 			ImGui::InvisibleButton(name.c_str(), rectSize);
+
+			// TODO: add more details, e.g. for sparse bindings
 
 			auto* resource = bind->resource;
 			if(ImGui::IsItemHovered()) {
