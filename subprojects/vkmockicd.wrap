@@ -2,6 +2,5 @@
 directory=vkmockicd
 url=https://github.com/nyorain/vkmockicd.git
 # main branch
-revision=08a31a1fcd6239bc7f7a81233a9c2827b09e2d5c
-
+revision=44e947b
 
