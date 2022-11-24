@@ -844,7 +844,7 @@ void ImageViewer::drawBackground(VkCommandBuffer cb) {
 
 void ImageViewer::drawHistogram(VkCommandBuffer cb) {
 	auto& dev = gui_->dev();
-	auto displaySize = ImGui::GetIO().DisplaySize;
+	// auto displaySize = ImGui::GetIO().DisplaySize;
 
 	DebugLabel cblbl(dev, cb, "vil:ImageViewer:drawHistogram");
 

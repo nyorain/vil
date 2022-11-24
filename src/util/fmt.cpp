@@ -143,7 +143,7 @@ struct FormatWriter {
 
 		auto limit = 1u << FirstBits;
 		auto mask = limit - 1; // first (FirstBits-1) bits set to 1
-		float signFac = 1.0;
+		[[maybe_unused]] float signFac = 1.0;
 
 		if constexpr(Norm) {
 			converted *= double(mask);

@@ -4,6 +4,7 @@
 #include <shared_mutex>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include <util/dlg.hpp>
 #include <util/profiling.hpp>
 

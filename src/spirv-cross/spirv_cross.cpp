@@ -1408,6 +1408,7 @@ const std::string &Compiler::get_name(ID id) const
 
 const std::string Compiler::get_fallback_name(ID id) const
 {
+	(void) id;
 	// return join("_", id);
 	return ir.get_empty_string();
 }
@@ -1415,6 +1416,8 @@ const std::string Compiler::get_fallback_name(ID id) const
 const std::string Compiler::get_block_fallback_name(VariableID id) const
 {
 	auto &var = get<SPIRVariable>(id);
+	(void) var;
+
 	if (get_name(id).empty())
 		return ir.get_empty_string();
 		// return join("_", get<SPIRType>(var.basetype).self, "_", id);

@@ -2,6 +2,8 @@
 #include <util/export.hpp>
 #include <util/profiling.hpp>
 #include <util/dlg.hpp>
+#include <chrono>
+#include <thread>
 
 // Exported entry point for executing the tests.
 // See unit/main.cpp for the executor
