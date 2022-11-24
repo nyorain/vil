@@ -1327,7 +1327,9 @@ void ImageViewer::saveToFile() {
 	// - make async? just integrate into frame submission?
 	//   and then start async job that does the saving?
 	// - using initialLayout currently racy when coming
-	//   from image.pendingLayout
+	//   from image.pendingLayout.
+	//   Also need to sync with other submissions!
+	//   This is BROKEN AS HELL ATM
 	// - support file name dialog
 	// - support other formats (e.g. ktx/dds/png/jpeg/webp)
 
@@ -1420,6 +1422,7 @@ void ImageViewer::saveToFile() {
 	dlg_trace(">> done!");
 
 	dev.dispatch.ResetFences(dev.handle, 1u, &fence);
+	dev.dispatch.FreeCommandBuffers(dev.handle, gui_->commandPool(), 1u, &cb);
 
 	std::lock_guard lock(dev.mutex);
 	dev.fencePool.push_back(fence);
