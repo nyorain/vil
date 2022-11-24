@@ -1058,8 +1058,6 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 
 	ImGui::NewFrame();
 
-	auto windowRounding = 0.f;
-
 	unsigned flags = ImGuiWindowFlags_NoCollapse;
 	if(fullscreen) {
 		ImGui::SetNextWindowPos({0, 0});
