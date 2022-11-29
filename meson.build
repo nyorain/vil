@@ -412,6 +412,8 @@ if with_standalone
 		'src/standalone/entry.cpp',
 		'src/util/dl.cpp',
 	)
+	# needed for dl.cpp dlopen
+	deps += dependency('dl', required: false)
 endif
 
 if with_callstacks
