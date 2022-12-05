@@ -47,7 +47,7 @@ jobs:
           path: /home/runner/cache-sonar
           key: ${{ runner.os }}-cache-sonar
       - name: Install deps
-        run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-utils glslang-tools
+        run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-tools glslang-tools
           libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
           libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
           libxkbcommon-x11-dev libx11-dev libx11-xcb-dev

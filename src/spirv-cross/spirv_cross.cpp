@@ -4756,7 +4756,8 @@ std::string Compiler::get_remapped_declared_block_name(uint32_t id, bool fallbac
 			return (!block_name || block_name->empty()) ? get_block_fallback_name(id) : *block_name;
 		}
 
-		return ir.get_empty_string();
+		// unreachable
+		// return ir.get_empty_string();
 	}
 }
 
