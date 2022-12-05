@@ -140,6 +140,7 @@ dep_nytl = dependency('nytl',
 	fallback: ['nytl', 'nytl_dep'])
 dep_imgio = dependency('imgio',
 	static: true,
+	default_options: ['png=false'],
 	fallback: ['imgio', 'imgio_dep'])
 
 if disable_dlg
