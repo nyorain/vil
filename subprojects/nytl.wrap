@@ -1,4 +1,5 @@
 [wrap-git]
 directory=nytl
 url=https://github.com/nyorain/nytl.git
-revision=vil
+# branch: vil
+revision=cd4074a2bc9fe8508d2967fffb62cd6654ca6361
