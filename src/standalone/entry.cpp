@@ -245,7 +245,7 @@ ViewedImage loadImage(const char* path, VkDevice dev, vil::Device& vilDev, Gui& 
 
 extern "C" VIL_EXPORT int vil_showImageViewer(int argc, const char** argv) {
 #if defined(_WIN32) || defined(__CYGWIN__)
-	auto libvulkan = vil::dlopen("vulkan.dll");
+	auto libvulkan = vil::dlopen("vulkan-1.dll");
 #else // Unix
 	auto libvulkan = vil::dlopen("libvulkan.so");
 #endif
