@@ -1,4 +1,5 @@
 [wrap-git]
 directory=imgio
 url=https://github.com/nyorain/imgio.git
-revision=vil
+# branch vil
+revision=e1843dd6b458b5f0debc814f7a76ca2b9242455b
