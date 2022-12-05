@@ -1,4 +1,4 @@
-	// 1011.0.0
+	// 1011.8.0
 	 #pragma once
 const uint32_t copyTex_comp_1DArray_noformat_spv_data[] = {
 	0x07230203,0x00010000,0x0008000a,0x00000082,0x00000000,0x00020011,0x00000001,0x00020011,
