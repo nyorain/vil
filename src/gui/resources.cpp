@@ -185,13 +185,15 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	} else {
 		MemoryResource::State memState {};
 		VkImage imageHandle {};
+		constexpr auto layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
 		{
 			std::lock_guard lock(image.dev->mutex);
 			memState = image.memState;
 			if(memState == MemoryResource::State::bound) {
 				dlg_assert(image.handle);
 				dlg_assert(image.memory);
-				draw.usedImages.push_back(image_.object);
+				draw.usedImages.push_back({image_.object, layout});
 				imageHandle = image.handle;
 			}
 		}
@@ -223,7 +225,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 				image_.viewer.reset(true);
 				image_.viewer.select(imageHandle, image.ci.extent,
 					image.ci.imageType, image.ci.format, subres,
-					image.pendingLayout, image.pendingLayout, flags);
+					layout, layout, flags);
 			}
 
 			ImGui::Spacing();

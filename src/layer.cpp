@@ -60,9 +60,8 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 		++dlgWarnErrorCount;
 	}
 
+	// break
 	if(origin->level >= dlg_level_error && breakOnError) {
-		// break
-		// TODO: should be disabled in non-debug modes (but all of dlg probably should be?)
 		#ifdef _MSC_VER
 			DebugBreak();
 		#else

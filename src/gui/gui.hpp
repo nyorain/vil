@@ -205,7 +205,7 @@ private:
 	Tab activeTab_ {};
 	u32 activateTabCounter_ {};
 
-	std::deque<Draw> draws_;
+	std::vector<std::unique_ptr<Draw>> draws_;
 	Draw* lastDraw_ {};
 
 	// synced via device mutex

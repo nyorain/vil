@@ -121,6 +121,8 @@ Freeze/selection changes:
 	- [ ] maybe have a second vector<CommandHook> with pending submissions?
 	      and if the user of the submissions is ok with pending resources,
 		  it can use them?
+- [ ] optimization: when hooked submission of a record with one_time_submit
+      flag has finished, destroy the HookRecord
 - [ ] investigate callstack performance for big applications.
       Might be able to improve performance significantly, callstack.hpp
 	  always allocates a vector

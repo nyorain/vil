@@ -362,8 +362,8 @@ Gui::~Gui() {
 
 	waitForDraws();
 	for(auto& draw : draws_) {
-		if(draw.inUse) {
-			finishedLocked(draw);
+		if(draw->inUse) {
+			finishedLocked(*draw);
 		}
 	}
 
@@ -1289,7 +1289,7 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 				return true;
 			}
 		}
-		for(auto* usedImg : draw.usedImages) {
+		for(auto [usedImg, _targetLayout] : draw.usedImages) {
 			if(usedImg == &handle || usedImg->memory == &handle) {
 				return true;
 			}
@@ -1322,9 +1322,9 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 	std::vector<VkFence> fences;
 	std::vector<Draw*> draws;
 	for(auto& draw : draws_) {
-		if(draw.inUse && usesHandle(draw)) {
-			fences.push_back(draw.fence);
-			draws.push_back(&draw);
+		if(draw->inUse && usesHandle(*draw)) {
+			fences.push_back(draw->fence);
+			draws.push_back(draw.get());
 		}
 	}
 
@@ -1387,6 +1387,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	// draw the ui
 	VkCommandBufferBeginInfo cbBegin {};
 	cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cb, &cbBegin));
 	DebugLabel cblbl(dev(), draw.cb, "vil:Gui:draw");
 
@@ -1403,21 +1404,6 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 			vil::blur(blur_, draw.cb, info.imageIdx, {}, {});
 			blurred = true;
 		}
-	}
-
-	// General barrier to make sure all past submissions writing resources
-	// we read are done. Not needed when we don't read a device resource.
-	// PERF: could likely at least give a better dstAccessMask
-	if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
-		VkMemoryBarrier memb {};
-		memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		memb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-		memb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-
-		dev().dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			0, 1, &memb, 0, nullptr, 0, nullptr);
 	}
 
 	for(auto& cb : preRender_) {
@@ -1534,22 +1520,6 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	}
 	postRender_.clear();
 
-	// General barrier to make sure all our reading is done before
-	// future application submissions to this queue.
-	// Not needed when we don't read a device resource.
-	// PERF: could likely at least give a better srcAccessMask
-	if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
-		VkMemoryBarrier memb {};
-		memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-		memb.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-		memb.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-
-		dev().dispatch.CmdPipelineBarrier(draw.cb,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-			0, 1, &memb, 0, nullptr, 0, nullptr);
-	}
-
 	dev().dispatch.EndCommandBuffer(draw.cb);
 
 	// == Critical section ==
@@ -1572,7 +1542,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 					break;
 				}
 			}
-			for(auto* usedImg : draw.usedImages) {
+			for(auto [usedImg, _targetLayout] : draw.usedImages) {
 				if(!usedImg->handle || !usedImg->memory) {
 					invalidated = true;
 					break;
@@ -1601,10 +1571,102 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	// == Submit batch ==
 	ZoneScopedN("BuildSubmission");
 
+	{
+		ZoneScopedN("RecordLocked");
+
+		// cbPre, cbPost
+		VkCommandBufferBeginInfo cbBegin {};
+		cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cbLockedPre, &cbBegin));
+		VK_CHECK(dev().dispatch.BeginCommandBuffer(draw.cbLockedPost, &cbBegin));
+
+		if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
+			ThreadMemScope tms;
+			auto imgBarriersPre = tms.alloc<VkImageMemoryBarrier>(1 + draw.usedImages.size());
+			auto imgBarriersPost = tms.alloc<VkImageMemoryBarrier>(1 + draw.usedImages.size());
+			auto numImgBarriers = 0u;
+			for(auto& [img, targetLayout] : draw.usedImages) {
+				// undefined doesn't make sense, whoever added it to usedImages
+				// can't know which layout the image is in and can't use it
+				// without knowing that.
+				dlg_assert_or(targetLayout != VK_IMAGE_LAYOUT_UNDEFINED, continue);
+
+				// we don't need a barrier in that case, access is already
+				// covered by the general memory barriers
+				// NOTE: just do it anyways atm, found memory barriers
+				// to be insufficient on some platforms
+				// if(targetLayout == img->pendingLayout) {
+				// 	continue;
+				// }
+
+				VkImageSubresourceRange subres {};
+				subres.layerCount = img->ci.arrayLayers;
+				subres.levelCount = img->ci.mipLevels;
+				subres.aspectMask = aspects(img->ci.format);
+
+				auto& barrierPre = imgBarriersPre[numImgBarriers];
+				barrierPre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+				barrierPre.image = img->handle;
+				barrierPre.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+				barrierPre.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+				barrierPre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barrierPre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barrierPre.oldLayout = img->pendingLayout;
+				barrierPre.newLayout = targetLayout;
+				barrierPre.subresourceRange = subres;
+
+				auto& barrierPost = imgBarriersPost[numImgBarriers];
+				barrierPost.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+				barrierPost.image = img->handle;
+				barrierPost.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+				barrierPost.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+				barrierPost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barrierPost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+				barrierPost.oldLayout = img->pendingLayout;
+				barrierPost.newLayout = targetLayout;
+				barrierPost.subresourceRange = subres;
+
+				++numImgBarriers;
+			}
+
+			// cbPre: General barrier to make sure all past submissions writing resources
+			// we read are done. Not needed when we don't read a device resource.
+			// PERF: could likely at least give a better dstAccessMask
+			VkMemoryBarrier membPre {};
+			membPre.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			membPre.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+			membPre.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			dev().dispatch.CmdPipelineBarrier(draw.cbLockedPre,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				0, 1, &membPre, 0, nullptr, numImgBarriers, imgBarriersPre.data());
+
+			// cbPost: General barrier to make sure all our reading is done before
+			// future application submissions to this queue.
+			// Not needed when we don't read a device resource.
+			// PERF: could likely at least give a better srcAccessMask
+			VkMemoryBarrier membPost {};
+			membPost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			membPost.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			membPost.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+
+			dev().dispatch.CmdPipelineBarrier(draw.cbLockedPost,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+				0, 1, &membPre, 0, nullptr, numImgBarriers, imgBarriersPost.data());
+		}
+
+		dev().dispatch.EndCommandBuffer(draw.cbLockedPre);
+		dev().dispatch.EndCommandBuffer(draw.cbLockedPost);
+	}
+
 	VkSubmitInfo submitInfo {};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submitInfo.commandBufferCount = 1u;
-	submitInfo.pCommandBuffers = &draw.cb;
+
+	const auto cbs = std::array{draw.cbLockedPre, draw.cb, draw.cbLockedPost};
+	submitInfo.commandBufferCount = cbs.size();
+	submitInfo.pCommandBuffers = cbs.data();
 
 	// NOTE: could alternatively retrieve all submissions via
 	// handle->refRecords->cb->pending (and handle->descriptos->...)
@@ -1676,20 +1738,20 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		std::lock_guard devMutex(dev().mutex);
 
 		for(auto& draw : draws_) {
-			if(!draw.inUse) {
-				foundDraw = &draw;
+			if(!draw->inUse) {
+				foundDraw = draw.get();
 				continue;
 			}
 
-			if(dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
-				finishedLocked(draw);
-				foundDraw = &draw;
+			if(dev().dispatch.GetFenceStatus(dev().handle, draw->fence) == VK_SUCCESS) {
+				finishedLocked(*draw);
+				foundDraw = draw.get();
 			}
 		}
 
 		if(!foundDraw) {
-			foundDraw = &draws_.emplace_back();
-			foundDraw->init(*this, commandPool_);
+			auto draw = std::make_unique<Draw>(*this, commandPool_);
+			foundDraw = draws_.emplace_back(std::move(draw)).get();
 		}
 	}
 
@@ -2032,8 +2094,8 @@ void Gui::addFullSync(Draw& draw, VkSubmitInfo& submitInfo) {
 void Gui::waitForDraws() {
 	std::vector<VkFence> fences;
 	for(auto& draw : draws_) {
-		if(draw.inUse) {
-			fences.push_back(draw.fence);
+		if(draw->inUse) {
+			fences.push_back(draw->fence);
 		}
 	}
 
@@ -2059,12 +2121,12 @@ void Gui::selectResource(Handle& handle, VkObjectType objectType, bool activateT
 Draw* Gui::latestPendingDrawSyncLocked(SubmissionBatch& batch) {
 	Draw* ret {};
 	for(auto& draw : draws_) {
-		if(!draw.inUse || dev().dispatch.GetFenceStatus(dev().handle, draw.fence) == VK_SUCCESS) {
+		if(!draw->inUse || dev().dispatch.GetFenceStatus(dev().handle, draw->fence) == VK_SUCCESS) {
 			continue;
 		}
 
-		if((!ret || draw.lastUsed > ret->lastUsed) && !needsSyncLocked(batch, draw).empty()) {
-			ret = &draw;
+		if((!ret || draw->lastUsed > ret->lastUsed) && !needsSyncLocked(batch, *draw).empty()) {
+			ret = draw.get();
 		}
 	}
 
