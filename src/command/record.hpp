@@ -150,6 +150,11 @@ struct CommandDescriptorSnapshot {
 // record is no longer needed.
 template<typename T> using CommandAllocList = std::list<T,
 	LinearUnscopedAllocator<T>>;
+// NOTE: keep in mind that the vector data structure is problematic
+//   with LinearAllocator when it has to reallocate often (since the
+//   previous allocations are not freed for the lifetime of the CommandRecord).
+template<typename T> using CommandAllocVector = std::vector<T,
+	LinearUnscopedAllocator<T>>;
 template<typename K, typename V,
 		typename Hash = std::hash<K>,
 		typename Equal = std::equal_to<K>> using CommandAllocHashMap =
@@ -190,6 +195,9 @@ struct UsedImage : RefHandle<Image> {
 	using RefHandle<Image>::RefHandle;
 	bool layoutChanged {};
 	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
+
+	// WIP
+	// CommandAllocVector<ImageSubresourceLayout> layoutChanges;
 };
 
 struct UsedDescriptorSet {

@@ -122,7 +122,7 @@ TEST(unit_fmt_read_write) {
 			continue;
 		}
 
-		dlg_trace("fmt_read_write: {}", vk::name(fmt));
+		// dlg_trace("fmt_read_write: {}", vk::name(fmt));
 
 		Vec4d vals = {0.2, 0.8, 0.1, 1.0};
 

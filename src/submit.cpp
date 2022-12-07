@@ -580,7 +580,7 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 	std::vector<const Submission*> subs;
 	for(auto& subm : pending.submissions) {
 		auto added = false;
-		for(auto* handle : draw.usedImages) {
+		for(auto [handle, _layout] : draw.usedImages) {
 			if(potentiallyWritesLocked(subm, handle, nullptr)) {
 				subs.push_back(&subm);
 				added = true;

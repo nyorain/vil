@@ -2,6 +2,7 @@
 
 #include <fwd.hpp>
 #include <memory.hpp>
+#include <imageLayout.hpp>
 #include <unordered_set>
 #include <atomic>
 
@@ -13,9 +14,7 @@ struct Image : MemoryResource {
 	VkImage handle {};
 	VkImageCreateInfo ci;
 
-	// The image layout this image will have when *all* pending submissions
-	// are completed. When there are no pending submissions using this
-	// image, it's the current layout.
+	// TODO: remove
 	VkImageLayout pendingLayout {VK_IMAGE_LAYOUT_UNDEFINED};
 
 	// resource references
@@ -33,7 +32,17 @@ struct Image : MemoryResource {
 	bool concurrentHooked {}; // whether we moved it into concurrent sharing mode
 	bool hasTransferSrc {}; // whether we were able to set transferSrc usage
 
+	// Device mutex must be locked and returned span only accessed
+	// while it's locked.
+	span<const ImageSubresourceLayout> pendingLayoutLocked() const;
 	~Image();
+
+private:
+	// The image layout this image will have when *all* pending submissions
+	// are completed. When there are no pending submissions using this
+	// image, it's the current layout.
+	// Synced using device mutex.
+	std::vector<ImageSubresourceLayout> pendingLayout_;
 };
 
 struct ImageView : SharedDeviceHandle {

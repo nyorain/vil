@@ -199,6 +199,7 @@ src = files(
 	'src/device.cpp',
 	'src/swapchain.cpp',
 	'src/image.cpp',
+	'src/imageLayout.cpp',
 	'src/sync.cpp',
 	'src/rp.cpp',
 	'src/cb.cpp',
@@ -255,6 +256,8 @@ src = files(
 	'src/cb.hpp',
 	'src/rp.hpp',
 	'src/accelStruct.hpp',
+	'src/image.hpp',
+	'src/imageLayout.hpp',
 	'src/sync.hpp',
 	'src/pipe.hpp',
 	'src/shader.hpp',
@@ -396,6 +399,7 @@ if with_unit_tests
 		'src/test/unit/match.cpp',
 		'src/test/unit/lmm.cpp',
 		'src/test/unit/fmt.cpp',
+		'src/test/unit/imageLayout.cpp',
 	)
 endif
 

@@ -360,6 +360,7 @@ struct CharTraitsCI : public std::char_traits<char> {
     }
 };
 
+// NOTE: this ignores multi-plane aspects, will never return them.
 VkImageAspectFlags aspects(VkFormat format);
 u32 combineQueueFamilies(span<const u32> queueFams);
 

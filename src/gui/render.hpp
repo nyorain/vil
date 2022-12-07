@@ -16,11 +16,22 @@ struct BufferSpan {
 	VkDeviceSize size {};
 };
 
+// Represents all information associated with the rendering of a single
+// gui frame.
 struct Draw {
 	Device* dev {};
 	OwnBuffer vertexBuffer {};
 	OwnBuffer indexBuffer {};
-	VkCommandBuffer cb {}; // not freed here, relies on command pool being freed
+
+	// Main command buffer in which all the gui rendering commands are recorded.
+	// Recording of this cb will happen outside of a critical section.
+	VkCommandBuffer cb {};
+	// Command buffers submitted immediately before/after cb but recorded
+	// inside the critical section of the submission.
+	// Used for synchronization purposes such as layout transitions (that
+	// only make sense to do inside the critical section of the submission).
+	VkCommandBuffer cbLockedPre {};
+	VkCommandBuffer cbLockedPost {};
 
 	// Semaphore associated with the gfx submission of this rendering.
 	// Consumed by the present info.
@@ -54,8 +65,14 @@ struct Draw {
 	// make sure their API handle is not destroyed, which is an even stronger
 	// guarantee than just lifetime. See Gui::destroyed.
 	// NOTE: synced by device mutex, might be accessed by different
-	// thread *while* drawing is active.
-	std::vector<Image*> usedImages;
+	// thread *while* drawing is active, see Gui::apiHandleDestroyed.
+	struct UsedImage {
+		Image* image {};
+		// if not undefined, gui will perform transition from the pendingLayout
+		// to this layout in critical section of submission
+		VkImageLayout targetLayout {VK_IMAGE_LAYOUT_UNDEFINED};
+	};
+	std::vector<UsedImage> usedImages;
 	std::vector<Buffer*> usedBuffers;
 
 	IntrusivePtr<CommandHookState> usedHookState;
@@ -75,15 +92,11 @@ struct Draw {
 	// frame number in which this draw was last used
 	u64 lastUsed {};
 
-	void init(Gui& gui, VkCommandPool pool);
-
-	Draw();
+	Draw(Gui& gui, VkCommandPool);
 	~Draw();
 
-	Draw(Draw&& rhs) noexcept;
-	Draw& operator=(Draw rhs) noexcept;
-
-	friend void swap(Draw& a, Draw& b) noexcept;
+	Draw(Draw&& rhs) noexcept = delete;
+	Draw& operator=(Draw rhs) noexcept = delete;
 };
 
 // For swapchain rendering
