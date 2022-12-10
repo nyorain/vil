@@ -6,8 +6,12 @@
 #include <thread>
 #include <csignal>
 
+#ifdef VIL_WITH_WIN32
+  #include <win32.hpp>
+#endif // VIL_WITH_WIN32
+
 static auto dlgWarnErrorCount = 0u;
-static auto breakOnError = true;
+static auto breakOnError = false;
 
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
 #ifndef DLG_DISABLE
