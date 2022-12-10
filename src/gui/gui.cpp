@@ -1623,8 +1623,8 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 				barrierPost.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
 				barrierPost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 				barrierPost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				barrierPost.oldLayout = img->pendingLayout;
-				barrierPost.newLayout = targetLayout;
+				barrierPost.oldLayout = targetLayout;
+				barrierPost.newLayout = img->pendingLayout;
 				barrierPost.subresourceRange = subres;
 
 				++numImgBarriers;
@@ -1650,11 +1650,10 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 			membPost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
 			membPost.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 			membPost.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-
 			dev().dispatch.CmdPipelineBarrier(draw.cbLockedPost,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-				0, 1, &membPre, 0, nullptr, numImgBarriers, imgBarriersPost.data());
+				0, 1, &membPost, 0, nullptr, numImgBarriers, imgBarriersPost.data());
 		}
 
 		dev().dispatch.EndCommandBuffer(draw.cbLockedPre);
