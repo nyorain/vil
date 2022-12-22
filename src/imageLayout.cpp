@@ -13,141 +13,13 @@ ImageSubresourceLayout initialLayout(const VkImageCreateInfo& ci) {
 	return ret;
 }
 
-bool simplify0(std::vector<ImageSubresourceLayout>& state) {
-	auto changed = false;
-	for(auto it = state.begin(); it != state.end();) {
-		auto& sub = *it;
-		if(sub.range.baseArrayLayer == 0 && sub.range.baseMipLevel == 0) {
-			++it;
-			continue;
-		}
-
-		auto erase = false;
-		auto subLevelEnd = sub.range.baseMipLevel + sub.range.levelCount;
-		auto subLayerEnd = sub.range.baseArrayLayer + sub.range.layerCount;
-		for(auto& other : state) {
-			if(other.range.aspectMask != sub.range.aspectMask ||
-					other.layout != sub.layout) {
-				continue;
-			}
-
-			auto otherLayerEnd = other.range.baseArrayLayer + other.range.layerCount;
-			auto otherLevelEnd = other.range.baseMipLevel + other.range.levelCount;
-
-			// greedy
-			// lower layers
-			if(sub.range.baseArrayLayer > 0 &&
-					otherLayerEnd == sub.range.baseArrayLayer &&
-					// 'sub' covers at least the mip range of 'other'
-					other.range.baseMipLevel >= sub.range.baseMipLevel &&
-					otherLevelEnd <= subLevelEnd &&
-					// make sure that 'sub' is at one end of the mip range
-					// of 'other' to avoid inserting additional states
-					(other.range.baseMipLevel == sub.range.baseMipLevel ||
-					otherLevelEnd == subLevelEnd)) {
-
-				// can merge!
-				other.range.layerCount += sub.range.layerCount;
-				changed = true;
-
-				if(other.range.baseMipLevel == sub.range.baseMipLevel &&
-						other.range.levelCount == sub.range.levelCount) {
-					erase = true;
-				} else if(other.range.baseMipLevel != sub.range.baseMipLevel) {
-					// shrink to just beginning
-					sub.range.levelCount = other.range.baseMipLevel - sub.range.baseMipLevel;
-				} else {
-					// shrink to just end
-					sub.range.levelCount = subLevelEnd - otherLevelEnd;
-					sub.range.baseMipLevel = otherLevelEnd;
-				}
-			}
-
-			// higher layers
-			if(subLayerEnd == other.range.baseArrayLayer &&
-					// 'sub' covers at least the mip range of 'other'
-					other.range.baseMipLevel >= sub.range.baseMipLevel &&
-					otherLevelEnd <= subLevelEnd &&
-					// make sure that 'sub' is at one end of the mip range
-					// of 'other' to avoid inserting additional states
-					(other.range.baseMipLevel == sub.range.baseMipLevel ||
-					otherLevelEnd == subLevelEnd)) {
-
-				// can merge!
-				other.range.layerCount += sub.range.layerCount;
-				other.range.baseArrayLayer = sub.range.baseArrayLayer;
-				changed = true;
-
-				if(other.range.baseMipLevel == sub.range.baseMipLevel &&
-						other.range.levelCount == sub.range.levelCount) {
-					erase = true;
-				} else if(other.range.baseMipLevel != sub.range.baseMipLevel) {
-					// shrink to just beginning
-					sub.range.levelCount = other.range.baseMipLevel - sub.range.baseMipLevel;
-				} else {
-					// shrink to just end
-					sub.range.levelCount = subLevelEnd - otherLevelEnd;
-					sub.range.baseMipLevel = otherLevelEnd;
-				}
-			}
-		}
-
-		if(erase) {
-			it = state.erase(it);
-		} else {
-			++it;
-		}
-	}
-
-	return changed;
-}
-
-bool simplify1(std::vector<ImageSubresourceLayout>& state) {
-	auto changed = false;
-	for(auto it = state.begin(); it != state.end();) {
-		auto& sub = *it;
-		if(sub.range.baseArrayLayer == 0 && sub.range.baseMipLevel == 0) {
-			++it;
-			continue;
-		}
-
-		auto erase = false;
-		for(auto& other : state) {
-			if(other.range.aspectMask != sub.range.aspectMask ||
-					other.layout != sub.layout) {
-				continue;
-			}
-
-			auto otherLevelEnd = other.range.baseMipLevel + other.range.levelCount;
-
-			if(sub.range.baseMipLevel > 0 &&
-					otherLevelEnd == sub.range.baseMipLevel &&
-					other.range.baseArrayLayer == sub.range.baseArrayLayer &&
-					other.range.layerCount == sub.range.layerCount) {
-				// can merge!
-				other.range.levelCount += sub.range.levelCount;
-				changed = true;
-				erase = true;
-				break;
-			}
-
-		}
-
-		if(erase) {
-			it = state.erase(it);
-		} else {
-			++it;
-		}
-	}
-
-	return changed;
-}
-
+// NOTE: one call to simplify may not transform it into the most simple
+// representation possible. It should converge after multiple repeated calls
+// but this is usually not needed.
+// That's the reason we do greedy (but never worsening) merging in the
+// layer dimension.
+// TODO: also simplify for aspect masks
 void simplify(std::vector<ImageSubresourceLayout>& state) {
-	// while(simplify0(state));
-	// while(simplify1(state));
-	// return;
-
 	for(auto it = state.begin(); it != state.end();) {
 		auto& sub = *it;
 		if(sub.range.baseArrayLayer == 0 && sub.range.baseMipLevel == 0) {
@@ -166,7 +38,7 @@ void simplify(std::vector<ImageSubresourceLayout>& state) {
 			auto otherLayerEnd = other.range.baseArrayLayer + other.range.layerCount;
 			auto otherLevelEnd = other.range.baseMipLevel + other.range.levelCount;
 
-			// greedy
+			// greedy in this dimension
 			if(sub.range.baseArrayLayer > 0 &&
 					otherLayerEnd == sub.range.baseArrayLayer &&
 					// 'sub' covers at least the mip range of 'other'
@@ -214,12 +86,6 @@ void simplify(std::vector<ImageSubresourceLayout>& state) {
 			++it;
 		}
 	}
-
-	// TODO: also simplify for aspect masks
-	// TODO: in certain situations we won't simplify even though
-	//   it's possible (when levelCount/layerCount is never equal).
-	//   Might be able to fix it by greedily merging in one
-	//   dimension first (e.g. mips)
 }
 
 void apply(std::vector<ImageSubresourceLayout>& state,
@@ -342,7 +208,7 @@ void apply(std::vector<ImageSubresourceLayout>& state,
 		apply(state, change);
 	}
 
-	// TODO: simplify here?
+	// We don't simplify here to leave it up to the caller
 }
 
 void checkForErrors(span<const ImageSubresourceLayout> state,

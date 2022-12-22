@@ -13,6 +13,8 @@ urgent, bugs:
 - [ ] histogram minMax auto-range not correctly working on all channels?
       just ignored the highs of the green-channel in a metallic/rough texture
 
+- [ ] integrate per-subresource image layout tracking
+
 - [ ] improve tabs ui: 
 	- [x] try out top-rounded corners {looks whack}, 
 	- [ ] play around further with alpha, 
@@ -21,18 +23,12 @@ urgent, bugs:
 		  make it more transparent or something or maybe use a thin window border?
 		  {think window border looks good imo}
 
-- [ ] when viewing an image live in the resource viewer, we just use
-      pendingLayout as layout. But we don't lock anymore, maybe there's another
-	  submission before gui rendering is done that changes pendingLayout.
-	  Instead, assume a fixed layout there and then do a manual transition
-	  before/after while the lock is held
-	  	- Accessing pendingLayout outside a lock is a race in general.
-
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 
 - [ ] figure our why overlay on doom is broken
 	- [ ] also fix the semaphore crash. Run with debug output enabled.
 - [ ] figure out tracy crashes with doom eternal :(
+
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
@@ -46,7 +42,6 @@ urgent, bugs:
 	  Note that they are usually NOT in the invalid image layout, just the last
 	  one they were used in.
 
-new, workstack:
 Freeze/selection changes:
 - [ ] wayland VIL_CREATE_WINDOW freezes of window:
       when moving the application window to another workspace, the
@@ -62,6 +57,8 @@ Freeze/selection changes:
 	  	- will probably not happen when applications use mailbox mode
 		  Should at least document it somewhere.
 		  Might also happen when the window is minimized on some platforms?
+
+new, workstack:
 - [ ] remove hardcoded vil api and vil platform toggles
 	- [ ] env variables instead?
 - [ ] make use of proper sync tracking

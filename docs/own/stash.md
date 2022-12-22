@@ -693,3 +693,144 @@ template<typename K,
 				typeID = stype->parent_type;
 			}
 			*/
+
+---
+
+```
+
+bool simplify0(std::vector<ImageSubresourceLayout>& state) {
+	auto changed = false;
+	for(auto it = state.begin(); it != state.end();) {
+		auto& sub = *it;
+		if(sub.range.baseArrayLayer == 0 && sub.range.baseMipLevel == 0) {
+			++it;
+			continue;
+		}
+
+		auto erase = false;
+		auto subLevelEnd = sub.range.baseMipLevel + sub.range.levelCount;
+		auto subLayerEnd = sub.range.baseArrayLayer + sub.range.layerCount;
+		for(auto& other : state) {
+			if(other.range.aspectMask != sub.range.aspectMask ||
+					other.layout != sub.layout) {
+				continue;
+			}
+
+			auto otherLayerEnd = other.range.baseArrayLayer + other.range.layerCount;
+			auto otherLevelEnd = other.range.baseMipLevel + other.range.levelCount;
+
+			// greedy
+			// lower layers
+			if(sub.range.baseArrayLayer > 0 &&
+					otherLayerEnd == sub.range.baseArrayLayer &&
+					// 'sub' covers at least the mip range of 'other'
+					other.range.baseMipLevel >= sub.range.baseMipLevel &&
+					otherLevelEnd <= subLevelEnd &&
+					// make sure that 'sub' is at one end of the mip range
+					// of 'other' to avoid inserting additional states
+					(other.range.baseMipLevel == sub.range.baseMipLevel ||
+					otherLevelEnd == subLevelEnd)) {
+
+				// can merge!
+				other.range.layerCount += sub.range.layerCount;
+				changed = true;
+
+				if(other.range.baseMipLevel == sub.range.baseMipLevel &&
+						other.range.levelCount == sub.range.levelCount) {
+					erase = true;
+				} else if(other.range.baseMipLevel != sub.range.baseMipLevel) {
+					// shrink to just beginning
+					sub.range.levelCount = other.range.baseMipLevel - sub.range.baseMipLevel;
+				} else {
+					// shrink to just end
+					sub.range.levelCount = subLevelEnd - otherLevelEnd;
+					sub.range.baseMipLevel = otherLevelEnd;
+				}
+			}
+
+			// higher layers
+			if(subLayerEnd == other.range.baseArrayLayer &&
+					// 'sub' covers at least the mip range of 'other'
+					other.range.baseMipLevel >= sub.range.baseMipLevel &&
+					otherLevelEnd <= subLevelEnd &&
+					// make sure that 'sub' is at one end of the mip range
+					// of 'other' to avoid inserting additional states
+					(other.range.baseMipLevel == sub.range.baseMipLevel ||
+					otherLevelEnd == subLevelEnd)) {
+
+				// can merge!
+				other.range.layerCount += sub.range.layerCount;
+				other.range.baseArrayLayer = sub.range.baseArrayLayer;
+				changed = true;
+
+				if(other.range.baseMipLevel == sub.range.baseMipLevel &&
+						other.range.levelCount == sub.range.levelCount) {
+					erase = true;
+				} else if(other.range.baseMipLevel != sub.range.baseMipLevel) {
+					// shrink to just beginning
+					sub.range.levelCount = other.range.baseMipLevel - sub.range.baseMipLevel;
+				} else {
+					// shrink to just end
+					sub.range.levelCount = subLevelEnd - otherLevelEnd;
+					sub.range.baseMipLevel = otherLevelEnd;
+				}
+			}
+		}
+
+		if(erase) {
+			it = state.erase(it);
+		} else {
+			++it;
+		}
+	}
+
+	return changed;
+}
+
+bool simplify1(std::vector<ImageSubresourceLayout>& state) {
+	auto changed = false;
+	for(auto it = state.begin(); it != state.end();) {
+		auto& sub = *it;
+		if(sub.range.baseArrayLayer == 0 && sub.range.baseMipLevel == 0) {
+			++it;
+			continue;
+		}
+
+		auto erase = false;
+		for(auto& other : state) {
+			if(other.range.aspectMask != sub.range.aspectMask ||
+					other.layout != sub.layout) {
+				continue;
+			}
+
+			auto otherLevelEnd = other.range.baseMipLevel + other.range.levelCount;
+
+			if(sub.range.baseMipLevel > 0 &&
+					otherLevelEnd == sub.range.baseMipLevel &&
+					other.range.baseArrayLayer == sub.range.baseArrayLayer &&
+					other.range.layerCount == sub.range.layerCount) {
+				// can merge!
+				other.range.levelCount += sub.range.levelCount;
+				changed = true;
+				erase = true;
+				break;
+			}
+
+		}
+
+		if(erase) {
+			it = state.erase(it);
+		} else {
+			++it;
+		}
+	}
+
+	return changed;
+}
+
+
+void simplify(std::vector<ImageSubresourceLayout>& state) {
+	// while(simplify0(state));
+	// while(simplify1(state));
+	// return;
+```

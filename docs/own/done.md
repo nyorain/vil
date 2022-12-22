@@ -1,3 +1,9 @@
+- [x] when viewing an image live in the resource viewer, we just use
+      pendingLayout as layout. But we don't lock anymore, maybe there's another
+	  submission before gui rendering is done that changes pendingLayout.
+	  Instead, assume a fixed layout there and then do a manual transition
+	  before/after while the lock is held
+	  	- Accessing pendingLayout outside a lock is a race in general.
 - [x] look into a lot of descriptor names not being visible anymore
       likely related to spirv-cross update
 - [x] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
