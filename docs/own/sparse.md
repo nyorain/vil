@@ -59,3 +59,12 @@ on the submission inside the layer first.
 And obviously we then have to sync our hooked submission with all sparse
 binding operations affecting the resource (past and future).
 
+----
+
+The spec seems to read like this: copying sparse resources is always ok,
+even if only sparsely bound. *might* return undefined values, depending
+on a sparse format property.
+And the "handle/device memory is destroyed before our copying in hooked
+submission finishes" thing is a general problem. Should be fixed in the 
+next round of copy-cow-sync fixes/improvements. Hard to do again for
+sparse stuff tho...
