@@ -155,7 +155,6 @@ private:
 		float end {1.f};
 	} histogram_;
 
-	bool gammaSliding_ {};
 	bool computeMinMax_ {true};
 };
 

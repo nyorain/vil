@@ -44,6 +44,9 @@
 #include <vk/dispatch_table.h>
 #include <vk/object_types.h>
 #include <vk/typemap_helper.h>
+#include <vkutil/enumString.hpp>
+
+#include <spirv-cross/spirv_cross.hpp>
 
 #include <nytl/span.hpp>
 #include <nytl/vec.hpp>
@@ -56,3 +59,8 @@
 #include <util/profiling.hpp>
 
 #include <util/dlg.hpp>
+
+#define IMGUI_DEFINE_MATH_OPERATORS
+#include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>
+#include <imgui/textedit.h>
