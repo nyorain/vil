@@ -57,6 +57,12 @@ args = cc.get_supported_arguments([
 	# msvc really slow in debug build without this
 	#'-D_ITERATOR_DEBUG_LEVEL=0',
 
+	# NOTE: this is super useful to optimize compile times, with clang
+	# See https://www.phoronix.com/news/LLVM-Clang-9.0-Time-Trace
+	# View e.g. via ui.perfetto.dev. The trace files will be in the build dir,
+	# right next to the object files
+	# '-ftime-trace',
+
 	# for clang
 	'-Wno-missing-braces',
 	'-Wno-newline-eof', # needed for spvm TODO re-enable and fix!
@@ -475,7 +481,7 @@ endif
 # windows.h keeps breaking my applications and will to live
 pch = []
 if not with_win32 or not with_tracy
-	# pch = 'src/pch.hpp'
+	pch = 'src/pch.hpp'
 endif
 
 lib_spvm = static_library(

@@ -426,7 +426,8 @@ extern "C" VIL_EXPORT int vil_showImageViewer(int argc, const char** argv) {
 		qcis[1].queueFamilyIndex = qfamAsyncCompute;
 		qcis[1].pQueuePriorities = prio1;
 	} else {
-		++qcis[0].queueCount;
+		// NOTE: can't always do this
+		// ++qcis[0].queueCount;
 	}
 
 	auto devExts = std::vector {

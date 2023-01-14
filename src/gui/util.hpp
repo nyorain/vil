@@ -2,7 +2,6 @@
 
 #include <fwd.hpp>
 #include <imgui/imgui.h>
-#include <imgui/imgui_internal.h>
 #include <util/dlg.hpp>
 #include <ds.hpp>
 #include <buffer.hpp>
