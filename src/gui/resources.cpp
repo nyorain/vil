@@ -1,3 +1,7 @@
+#ifndef IMGUI_DEFINE_MATH_OPERATORS
+	#define IMGUI_DEFINE_MATH_OPERATORS
+#endif
+
 #include <gui/resources.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
@@ -100,6 +104,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	image_.object = &image;
 
 	// info
+	/*
 	const auto& ci = image.ci;
 	ImGui::Columns(2);
 
@@ -126,6 +131,7 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	ImGui::Text("%s", vk::nameImageCreateFlags(ci.flags).c_str());
 
 	ImGui::Columns();
+	*/
 
 	// resource references
 	ImGui::Spacing();
@@ -151,11 +157,13 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 		ImGui::SameLine();
 		refButtonExpect(*gui_, views[0].get());
 	} else if(views.size() > 1) {
-		ImGui::Text("Image Views:");
+		if(ImGui::TreeNode("Image Views")) {
+			for(auto& view : views) {
+				ImGui::Bullet();
+				refButtonExpect(*gui_, view.get());
+			}
 
-		for(auto& view : views) {
-			ImGui::Bullet();
-			refButtonExpect(*gui_, view.get());
+			ImGui::TreePop();
 		}
 	}
 
@@ -1381,7 +1389,7 @@ void ResourceGui::draw(Draw& draw) {
 		return;
 	}
 
-	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+	ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, gui_->uiScale() * 250.f);
 	ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
 
 	ImGui::TableNextRow();
@@ -1461,8 +1469,8 @@ void ResourceGui::draw(Draw& draw) {
 		clipper.Begin(int(handles_.size()));
 	}
 
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.f, 3.f));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, gui_->uiScale() * ImVec2(2.f, 3.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, gui_->uiScale() * ImVec2(4.f, 4.f));
 
 	while(clipper.Step()) {
 		for(auto i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {

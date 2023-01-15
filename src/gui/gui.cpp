@@ -261,6 +261,7 @@ void Gui::initImGui() {
 		auto res = std::strtof(e, nullptr);
 		if(res != 0.f) {
 			scale = res;
+			uiScale_ = scale;
 		} else {
 			dlg_warn("Environment variable 'VIL_UI_SCALE' set to invalid value '{}'.", e);
 		}
@@ -793,8 +794,8 @@ void Gui::drawOverviewUI(Draw& draw) {
 	ImGui::Separator();
 
 	// Enabled instance extensions
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.f, 3.f));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, uiScale_ * ImVec2(2.f, 3.f));
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, uiScale_ * ImVec2(4.f, 4.f));
 
 	auto iniExtLbl = dlg::format("{} instance extensions enabled", dev.ini->extensions.size());
 	auto tnFlags = ImGuiTreeNodeFlags_FramePadding;
@@ -1134,7 +1135,8 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 			// pos.x -= pad.x;
 			// pos.y -= pad.y;
 
-			auto barHeight = 32.f;
+			auto tabWidth = 100 * uiScale_;
+			auto barHeight = 32.f * uiScale_;
 			auto barEnd = ImVec2(
 				pos.x + ImGui::GetContentRegionAvail().x + 2 * pad.x,
 				pos.y + barHeight);
@@ -1174,7 +1176,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
     			const auto labelSize = ImGui::CalcTextSize(label, NULL, true);
 				const auto start = ImGui::GetCursorScreenPos();
 
-				const auto baseSize = ImVec2(100.f, barHeight);
+				const auto baseSize = ImVec2(tabWidth, barHeight);
 				const auto size = ImVec2(baseSize.x, baseSize.y);
 
 				if(line) {
@@ -1819,7 +1821,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 				io.AddInputCharacterUTF16(event.input16);
 				break;
 			case Event::Type::key:
-				io.AddKeyEvent(keyToImGui(event.key), event.b);
+				io.AddKeyEvent(event.key, event.b);
 				break;
 			case Event::Type::mousePos:
 				io.AddMousePosEvent(event.vec2f.x, event.vec2f.y);

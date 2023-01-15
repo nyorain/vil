@@ -1,3 +1,7 @@
+#ifndef IMGUI_DEFINE_MATH_OPERATORS
+	#define IMGUI_DEFINE_MATH_OPERATORS
+#endif
+
 #include <gui/shader.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
@@ -19,6 +23,7 @@
 #include <spvm/types.h>
 #include <spvm/ext/GLSL450.h>
 #include <vk/format_utils.h>
+#include <imgui/imgui_internal.h>
 #include <vil_api.h>
 
 namespace vil {
@@ -191,6 +196,11 @@ void ShaderDebugger::draw() {
 
 		return false;
 	};
+
+	if(lastHookState_ != hookState.get()) {
+		rerun_ = true;
+		lastHookState_ = hookState.get();
+	}
 
 	if(rerun_) {
 		spvm_state_delete(spvm_.state);
@@ -1462,7 +1472,7 @@ void ShaderDebugger::drawVariablesTab() {
 	// 	printRes(name, res);
 	// }
 
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, gui_->uiScale() * ImVec2(4.f, 2.5f));
 	auto flags = ImGuiTableFlags_BordersInner |
 		ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_SizingStretchSame;
@@ -1537,7 +1547,7 @@ void ShaderDebugger::drawCallstackTab() {
 	// TODO: does not belong here. Visual representation would be useful.
 	imGuiText("Current line: {}", spvm_.state->current_line);
 
-	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.5f));
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, gui_->uiScale() * ImVec2(4.f, 2.5f));
 	auto flags = ImGuiTableFlags_BordersInner |
 		ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_SizingStretchSame;

@@ -400,7 +400,7 @@ void ImageViewer::drawMetaInfo(Draw& draw, bool noExtendFlag) {
 		// flags = flags | u32(ImGuiTableFlags_NoHostExtendY);
 	}
 	if(ImGui::BeginTable("Info", 2, flags /*, ImGui::GetContentRegionAvail()*/)) {
-		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 200);
+		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, gui_->uiScale() * 90);
 		ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
 
 		auto addRow = [](const char* name, auto val) {
@@ -447,7 +447,7 @@ void ImageViewer::drawImageArea(Draw& draw) {
 	float regH = regW / aspectImage;
 
 	// TODO: proper computation using imgui margin/padding values
-	auto bottomLineHeight = 10.f + ImGui::GetFontSize();
+	auto bottomLineHeight = 10.f * gui_->uiScale() + ImGui::GetFontSize();
 	regH = ImGui::GetContentRegionAvail().y - bottomLineHeight;
 
 	auto bgW = regW;
@@ -729,15 +729,15 @@ void ImageViewer::display(Draw& draw) {
 
 		drawMetaInfo(draw, false);
 	} else {
-		auto flags = ImGuiTableFlags_NoBordersInBodyUntilResize | ImGuiTableFlags_Resizable;
-		if(ImGui::BeginTable("Img", 2u, flags)) {
+		auto flags = ImGuiTableFlags_NoBordersInBodyUntilResize | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
+		if(ImGui::BeginTable("Img", 2u, flags, ImVec2(0, availY - 5))) {
 			ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthStretch, 1.f);
-			ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+			ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 0.4f);
 
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 
-			if(ImGui::BeginChild("ImageArea", ImVec2(0.f, availY))) {
+			if(ImGui::BeginChild("ImageArea", ImVec2(0.f, 0.f))) {
 				drawImageArea(draw);
 			}
 			ImGui::EndChild();
@@ -1122,12 +1122,13 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 		dev.dispatch.CmdDispatch(draw.cb, 1u, 1u, 1u);
 	}
 
-	histBufState.transition(dev, draw.cb, vku::SyncScope::vertexRead());
+	auto dstState = vku::SyncScope::allShaderRead() |
+		vku::SyncScope::transferRead();
 
 	// We want histogram on cpu as well
 	// We don't use the readback buffer as storage buffer directly
 	// for performance reasons.
-	histBufState.transition(dev, draw.cb, vku::SyncScope::transferRead());
+	histBufState.transition(dev, draw.cb, dstState);
 	vku::cmdCopyBuffer(dev, draw.cb,
 		data_->histogram.asSpan(),
 		rb.own.asSpan(100u));

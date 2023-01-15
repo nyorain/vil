@@ -19,12 +19,18 @@ struct Platform {
 		focused,
 	};
 
+	Platform();
 	virtual ~Platform() = default;
 
 	virtual void init(Device& dev, unsigned width, unsigned height) = 0;
 	virtual void resize(unsigned width, unsigned height) = 0;
 	virtual State update(Gui& gui) = 0;
 	virtual void onEvent() {};
+
+	// VilKey
+	// They are read via environment variables
+	int toggleKey_ {0};
+	int focusKey_ {0};
 };
 
 VKAPI_ATTR void VKAPI_CALL DestroySurfaceKHR(

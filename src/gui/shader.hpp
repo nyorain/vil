@@ -126,6 +126,9 @@ private:
 	u32 currLine_ {};
 	std::string currFileName_ {};
 
+	// Only for comparison
+	CommandHookState* lastHookState_ {};
+
 	Gui* gui_ {};
 	igt::TextEditor textedit_;
 	std::unique_ptr<spc::Compiler> compiled_ {};

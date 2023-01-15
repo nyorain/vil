@@ -89,6 +89,7 @@ private:
 	ShaderDebugger shaderDebugger_ {};
 
 	// the currently viewed command hierarchy
+	IntrusivePtr<CommandRecord> record_ {};
 	std::vector<const Command*> command_ {};
 
 	IOView view_ {};

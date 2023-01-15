@@ -8,9 +8,6 @@ struct swa_window;
 
 namespace vil {
 
-constexpr auto toggleKey = swa_key_equals;
-constexpr auto focusKey = swa_key_rightbrace;
-
 // Uses swa to create an input-grabbing, invisible child window on the
 // given platform. Just needs platform-specific mechanisms for checking
 // on the original window.

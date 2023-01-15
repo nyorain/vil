@@ -1,3 +1,7 @@
+#ifndef IMGUI_DEFINE_MATH_OPERATORS
+	#define IMGUI_DEFINE_MATH_OPERATORS
+#endif
+
 #include <gui/command.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
@@ -25,6 +29,7 @@
 #include <shader.hpp>
 #include <rp.hpp>
 #include <spirv-cross/spirv_cross.hpp>
+#include <imgui/imgui_internal.h>
 #include <bitset>
 
 #ifdef VIL_COMMAND_CALLSTACKS
@@ -131,6 +136,7 @@ void CommandViewer::unselect() {
 	view_ = IOView::command;
 	viewData_.command.selected = 0;
 	command_.clear();
+	record_.reset();
 }
 
 const RenderPassInstanceState* findRPI(span<const Command* const> cmdh) {
@@ -145,6 +151,8 @@ const RenderPassInstanceState* findRPI(span<const Command* const> cmdh) {
 }
 
 void CommandViewer::updateFromSelector(bool forceUpdateHook) {
+	dlg_assert(command_.empty() == !record_);
+
 	auto& sel = selection();
 	bool isLocalCapture = sel.updateMode() == CommandSelection::UpdateMode::localCapture;
 	auto cmdh = sel.command();
@@ -324,6 +332,7 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 	}
 
 	command_ = {cmdh.begin(), cmdh.end()};
+	record_ = sel.record(); // make sure it stays alive
 
 	if(selectCommandView) {
 		view_ = IOView::command;
@@ -1371,7 +1380,7 @@ void CommandViewer::displayActionInspector(Draw& draw, bool skipList) {
 			return;
 		}
 
-		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 200.f);
+		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, gui_->uiScale() * 200.f);
 		ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
 
 		ImGui::TableNextRow();
@@ -1379,8 +1388,8 @@ void CommandViewer::displayActionInspector(Draw& draw, bool skipList) {
 
 		ImGui::BeginChild("Command IO list");
 
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, gui_->uiScale() * ImVec2(4.f, 2.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, gui_->uiScale() * ImVec2(4.f, 4.f));
 
 		displayIOList();
 
