@@ -6,6 +6,7 @@
 #include <layer.hpp>
 #include <platform.hpp>
 #include <util/util.hpp>
+#include <vil_api.h>
 #include <swa/key.h>
 #include <swa/winapi.h>
 #include <minhook/MinHook.h>
@@ -528,7 +529,7 @@ LRESULT wndProcHookFunc(_In_ int nCode, _In_ WPARAM wParam, _In_ LPARAM lParam)
 bool Win32Platform::doUpdate() {
 	// update overlay window position
 	if(state != State::focused) {
-		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
+		if(updateEdge(togglePressed, this->checkPressed(toggleKey_))) {
 			dlg_trace("showing overlay; grabbing input");
 
 			state = State::focused;
@@ -551,13 +552,13 @@ bool Win32Platform::doUpdate() {
 
 	// update status
 	if(state == State::focused) {
-		if(updateEdge(togglePressed, this->checkPressed(toggleKey))) {
+		if(updateEdge(togglePressed, this->checkPressed(toggleKey_))) {
 			dlg_trace("hiding overlay window, ungrabbing input");
 
 			hooks->restore();
 
 			state = State::hidden;
-		} else if(updateEdge(focusPressed, this->checkPressed(focusKey))) {
+		} else if(focusKey_ != VilKeyNone && updateEdge(focusPressed, this->checkPressed(focusKey_))) {
 			dlg_trace("ungrabbing input (overlay still shown)");
 
 			hooks->restore();

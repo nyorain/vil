@@ -156,7 +156,7 @@ Platform::State SwaPlatform::update(Gui& gui) {
 	guiWinSize = gui.windowSize();
 
 	if(status != State::focused) {
-		if(updateEdge(togglePressed, this->pressed(toggleKey))) {
+		if(updateEdge(togglePressed, this->pressed(toggleKey_))) {
 			activateWindow(true);
 			status = State::focused;
 		}
@@ -164,8 +164,8 @@ Platform::State SwaPlatform::update(Gui& gui) {
 
 	swa_display_dispatch(this->dpy, false);
 	if(status == State::focused) {
-		bool toggle = swa_display_key_pressed(this->dpy, toggleKey);
-		bool focus = swa_display_key_pressed(this->dpy, focusKey);
+		bool toggle = swa_display_key_pressed(this->dpy, (swa_key) toggleKey_);
+		bool focus = focusKey_ != swa_key_none && swa_display_key_pressed(this->dpy, (swa_key) focusKey_);
 		if(updateEdge(togglePressed, toggle)) {
 			activateWindow(false);
 			status = State::hidden;

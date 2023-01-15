@@ -132,6 +132,7 @@ public:
 	Device& dev() const { return *dev_; }
 	VkRenderPass rp() const { return rp_; }
 	float dt() const { return dt_; }
+	float uiScale() const { return uiScale_; }
 
 	Vec2f windowSize() const { return {windowSize_.x, windowSize_.y}; }
 	Vec2f windowPos() const { return {windowPos_.x, windowPos_.y}; }
@@ -287,6 +288,8 @@ private:
 	bool eventCaptureMouse_ {};
 	bool eventCaptureKeyboard_ {};
 	bool eventWantTextInput_ {};
+
+	float uiScale_ {1.f};
 };
 
 ImGuiKey keyToImGui(unsigned key);

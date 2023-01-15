@@ -1,3 +1,7 @@
+#ifndef IMGUI_DEFINE_MATH_OPERATORS
+	#define IMGUI_DEFINE_MATH_OPERATORS
+#endif
+
 #include <gui/cb.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
@@ -355,7 +359,7 @@ void CommandRecordGui::draw(Draw& draw) {
 			return;
 		}
 
-		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, 250.f);
+		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, gui_->uiScale() * 250.f);
 		ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
 
 		ImGui::TableNextRow();
@@ -364,8 +368,8 @@ void CommandRecordGui::draw(Draw& draw) {
 		// ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 20, 20, 255));
 		ImGui::BeginChild("Command list", {0, 0});
 
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.f, 2.f));
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.f, 4.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, gui_->uiScale() * ImVec2(4.f, 2.f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, gui_->uiScale() * ImVec2(4.f, 4.f));
 
 		if(updateMode == UpdateMode::swapchain) {
 			displayFrameCommands(*swapchain);

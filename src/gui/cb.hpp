@@ -52,7 +52,7 @@ private:
 
 	// = When in swapchain mode =
 	// Currently viewed frame; i.e. the displayed commands in the command panel.
-	// Might be different (newer) from selectedFrame_ in case we force-updated
+	// Might be different (newer) from the selected frame (CommandSelection) in case we force-updated
 	// the commands due to not finding the selected command anymore but
 	// wanting to show fresh commands.
 	std::vector<FrameSubmission> frame_;

@@ -340,6 +340,7 @@ constexpr auto validExpression = detail::ValidExpressionT<E, void, T...>::value;
 
 // case-insensitive char traits
 // see https://stackoverflow.com/questions/11635
+// NOTE: somehow causes crashes on MSVC
 struct CharTraitsCI : public std::char_traits<char> {
     static bool eq(char c1, char c2) { return toupper(c1) == toupper(c2); }
     static bool ne(char c1, char c2) { return toupper(c1) != toupper(c2); }

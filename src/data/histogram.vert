@@ -13,7 +13,7 @@ layout(set = 0, binding = 0) buffer HistData {
 } hist;
 
 void main() {
-	vec4 lhist;	
+	vec4 lhist = vec4(0.0);	
 	float maxHist = hist.meta.maxHist;
 	for(uint i = 0u; i < 3; ++i) {
 		lhist[i] = hist.data[gl_InstanceIndex][i] / maxHist;

@@ -19,6 +19,7 @@
 #include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <string_view>
+#include <locale>
 
 namespace vil {
 
@@ -85,6 +86,14 @@ std::string name(const Handle& handle, VkObjectType objectType, bool addType, bo
 	return name;
 }
 
+// case insensitive substring find
+template<typename T, typename O>
+int findSubstrCI(const T& haystack, const O& needle, const std::locale& loc = std::locale()) {
+	auto cmp = [&](int c1, int c2) { return std::tolower(c1, loc) == std::tolower(c2, loc); };
+    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), cmp);
+	return it == haystack.end() ? -1 : it - haystack.begin();
+}
+
 // type handlers
 bool matchesSearch(Handle& handle, VkObjectType objectType, std::string_view search) {
 	if(search.empty()) {
@@ -92,10 +101,11 @@ bool matchesSearch(Handle& handle, VkObjectType objectType, std::string_view sea
 	}
 
 	// case-insensitive search
+	// TODO: only works on ascii atm, convert to utf32 first?
+	// or write method that works on utf8
 	auto label = name(handle, objectType);
 
-	// TODO: seems msvc can't handle our CI trait -.-
-	return (label.find(search) != label.npos);
+	return findSubstrCI(label, search) != -1;
 
 	/*
 	using StringViewCI = std::basic_string_view<char, CharTraitsCI>;
