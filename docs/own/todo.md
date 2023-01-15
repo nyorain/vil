@@ -7,6 +7,10 @@ v0.2:
 - improve README
 
 urgent, bugs:
+- [ ] test more on laptop, intel gpu
+	- [ ] seems like we do some nasty stuff in the histogram shaders,
+		  get gpu timeouts (try e.g. with curlnoise.ktx, zoom out on histogram)
+
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
 
