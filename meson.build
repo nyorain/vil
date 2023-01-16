@@ -247,14 +247,6 @@ src = files(
 	'src/vkutil/handles.cpp',
 	'src/vkutil/dynds.cpp',
 
-	# imgui
-	'src/imgui/imgui.cpp',
-	'src/imgui/imgui_draw.cpp',
-	'src/imgui/imgui_widgets.cpp',
-	'src/imgui/imgui_demo.cpp',
-	'src/imgui/imgui_tables.cpp',
-	'src/imgui/textedit.cpp',
-
 	# useful for visual studio build to include headers here
 	'src/fwd.hpp',
 	'src/device.hpp',
@@ -346,6 +338,16 @@ src = files(
 	'src/spirv-cross/spirv_cross.cpp',
 	'src/spirv-cross/spirv_parser.cpp',
 	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
+)
+
+imgui_src = files(
+	# imgui
+	'src/imgui/imgui.cpp',
+	'src/imgui/imgui_draw.cpp',
+	'src/imgui/imgui_widgets.cpp',
+	'src/imgui/imgui_demo.cpp',
+	'src/imgui/imgui_tables.cpp',
+	'src/imgui/textedit.cpp',
 )
 
 public_inc = include_directories('include/')
@@ -502,6 +504,18 @@ lib_spvm = static_library(
 	]),
 )
 
+# building as separate lib as ugly workaround for gcc pch warning issue
+# See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=64117
+lib_imgui = static_library(
+	'imgui',
+	imgui_src,
+	gnu_symbol_visibility: 'hidden',
+	include_directories: inc,
+	c_args: args + cc.get_supported_arguments([
+		'-Wno-class-memaccess'
+	]),
+)
+
 link_args = [
 	# statically link the standard library, where supported
 	# might get conflicts with the one loaded by the application otherwise
@@ -520,7 +534,7 @@ vil_layer = shared_library(
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
-	link_whole: lib_spvm,
+	link_whole: [lib_spvm, lib_imgui],
 	cpp_args: args + layer_args,
 	c_args: args,
 	link_args: cc.get_supported_link_arguments(link_args),

@@ -3,6 +3,7 @@
 #endif // IMGUI_DEFINE_MATH_OPERATORS
 
 #include <gui/vizlcs.hpp>
+#include <imgui/imgui_internal.h>
 #include <random>
 #include <iomanip>
 
