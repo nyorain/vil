@@ -51,6 +51,18 @@ struct AccelInstances {
 	OwnBuffer buffer;
 };
 
+struct AccelStructState;
+
+struct AccelStructBuildOp {
+	CommandRecord* record {};
+	AccelStructState* state {};
+};
+
+struct AccelStructState {
+	AccelStruct* accelStruct {};
+	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
+};
+
 // AccelerationStructure
 struct AccelStruct : SharedDeviceHandle {
 	static constexpr auto objectType = VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR;

@@ -1283,6 +1283,14 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 		needsInit = true;
 		if(needsInit) {
 			dlg_assert(cmd.buildRangeInfos[i].size() == srcBuildInfo.geometryCount);
+
+			// TODO: calling this here is problematic. Another (running) submission
+			// might be writing to these buffers at the time (or a gui draw
+			// might read from them, right?!) but 'initBufs' might recreate the
+			// buffers (to make sure they are large enough).
+			// Either wait for all submissions using the buffers when we really
+			// have to resize or make sure they stay alive long enough somehow.
+			// -> AccelStructState rework
 			initBufs(*dst.dst, srcBuildInfo, cmd.buildRangeInfos[i].data(), true);
 		}
 

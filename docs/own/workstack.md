@@ -30,19 +30,9 @@
 			  (e.g. rgba8unorm, rgba16Sfloat, rgba32Sflot, r32Uint etc)
 		  (3) if nothing else works, fall back to our old terrible
 		       copy to vec4[]-storage buffer solution?
-- [ ] full commandbuffer/record timings.
-	- [ ] for this we need proper prefix-matching support in CommandHook. WIP
+- [x] full commandbuffer/record timings.
+	- [x] for this we need proper prefix-matching support in CommandHook. WIP
 	- [ ] also full batch timings?
-- [ ] commandHook support for khr_dynamic_rendering.
-      find a sample to test it with.
-	  basically need some renderpass-splitting-light.
-	  Can't use suspend/resume
-- [ ] expose missing vulkan 1.3 core functions in layer.cpp
-	- [ ] update dispatch table header and source when they contain them.
-	      Don't forget to add the 'aliasCmd' entries in device.cpp.
-		  maybe move to extra file/inifunction since it's many by now.
-- [ ] update enumString.hpp for vulkan 1.3
-	- [ ] update the generator
 - [ ] Add "Jump to End/Begin" buttons in begin/end commands.
       only show them in brokenLabel display mode?
 - [x] integration test: depend on meson subproject for mock driver
@@ -61,11 +51,6 @@
       clicking new record in UI. Implement prototype for 
 	  always-ds-cow-on-submission? Should probably be toggleable.
 - [ ] clean up special descriptorSet handling in handles.cpp
-- [x] allow descriptor set dereference in commandRecord, see performance.md
-	- fix descriptorSet gui viewer via similar approach
-	- [x] only addCow the needed descriptorSets in commandHook
-	- [x] capture (via addCow) the descriptorSets when selecting a record
-  in the gui
 - rework gui device locking. We should be able to execute draw/uploadDraw
   without holding a lock THE WHOLE TIME. Only lock it where it's really
   needed
@@ -79,8 +64,6 @@
 - [x] rename main branch to main
 - [ ] Don't always alloc/free in LinAllocator.
       Enable our global memory block cache thingy?
-- [~] test with rainbow six extraction
-	  {nvm, vulkan layers are blocked by anti-cheat}
 
 - look into found doom performance hotpaths
 	- Improve QueuePresent timing
