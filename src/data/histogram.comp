@@ -3,7 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 // layout(local_size_x_id = 0, local_size_y_id = 1) in;
-layout(local_size_x = 8u, local_size_y = 8u) in;
+layout(local_size_x = 16u, local_size_y = 16u) in;
 
 #define SAMPLE_TEX_BINDING 1
 #include "sample.glsl"
@@ -19,17 +19,20 @@ layout(set = 0, binding = 0) buffer Hist {
 	uvec4 data[];
 } hist;
 
-void main() {
-	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
-	coords.z += pcr.layer;
+// TODO: could speed this up with subgroup ballot or groupshared mem
+//   are atomics faster on groupshared? probably
+//   subgroup ballot only works for few samples, we don't want a *whole*
+//   histogram per thread (would crush VGPR pressure).
+// shared uvec4 data[256]; // max histogram size
+
+const uint sampleSize = 2u;
+
+void process(ivec3 coords) {
 	if(!coordsInside(coords, pcr.level)) {
 		return;
 	}
 
 	vec4 col = fetchTex(coords, pcr.level);
-
-	// TODO: could speed this up with subgroup ballot
-	// so we only do three atomic instructions per subgroup
 
 	float range = hist.meta.end - hist.meta.begin;
 
@@ -49,6 +52,19 @@ void main() {
 		int id = int(floor(pos * len));
 		if(id >= 0 && id < len) {
 			atomicAdd(hist.data[id][i], 1u);
+		}
+	}
+}
+
+void main() {
+	ivec3 coords = ivec3(sampleSize * gl_GlobalInvocationID.xyz);
+	coords.z += pcr.layer;
+
+	for(uint y = 0u; y < sampleSize; ++y) {
+		for(uint x = 0u; x < sampleSize; ++x) {
+			ivec3 lcoords = coords;
+			lcoords.xy += ivec2(x, y);
+			process(coords);
 		}
 	}
 }

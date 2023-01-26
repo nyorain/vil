@@ -1,3 +1,24 @@
+- [x] remove hardcoded vil api and vil platform toggles
+	- [x] env variables instead?
+- [x] toupper bug when searching for resource
+	- [x] Better resource search (simple fuzzy search)
+- [~] test with rainbow six extraction
+	  {nvm, vulkan layers are blocked by anti-cheat}
+- [x] allow descriptor set dereference in commandRecord, see performance.md
+	- fix descriptorSet gui viewer via similar approach
+	- [x] only addCow the needed descriptorSets in commandHook
+	- [x] capture (via addCow) the descriptorSets when selecting a record
+  in the gui
+- [x] update enumString.hpp for vulkan 1.3
+	- [x] update the generator
+- [x] commandHook support for khr_dynamic_rendering.
+      find a sample to test it with.
+	  basically need some renderpass-splitting-light.
+	  Can't use suspend/resume
+- [x] expose missing vulkan 1.3 core functions in layer.cpp
+	- [x] update dispatch table header and source when they contain them.
+	      Don't forget to add the 'aliasCmd' entries in device.cpp.
+		  maybe move to extra file/inifunction since it's many by now.
 - [x] when viewing an image live in the resource viewer, we just use
       pendingLayout as layout. But we don't lock anymore, maybe there's another
 	  submission before gui rendering is done that changes pendingLayout.

@@ -94,11 +94,8 @@ void ImageViewer::init(Gui& gui) {
 	gui_ = &gui;
 }
 
-void ImageViewer::drawMetaInfo(Draw& draw, bool noExtendFlag) {
+void ImageViewer::drawHistogram(Draw& draw) {
 	(void) draw;
-
-	// TODO:
-	// rework all of this just into the histogram.
 
 	// Row 1: components
 	auto recreateView = false;
@@ -392,13 +389,13 @@ void ImageViewer::drawMetaInfo(Draw& draw, bool noExtendFlag) {
 	if(recreateView) {
 		createData();
 	}
+}
 
+void ImageViewer::drawImageInfoTable(Draw& draw) {
+	(void) draw;
 
 	// info
 	auto flags = u32(ImGuiTableFlags_Resizable);
-	if(noExtendFlag) {
-		// flags = flags | u32(ImGuiTableFlags_NoHostExtendY);
-	}
 	if(ImGui::BeginTable("Info", 2, flags /*, ImGui::GetContentRegionAvail()*/)) {
 		ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthFixed, gui_->uiScale() * 90);
 		ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 1.f);
@@ -421,6 +418,32 @@ void ImageViewer::drawMetaInfo(Draw& draw, bool noExtendFlag) {
 		addRow("Format", vk::name(format_));
 
 		ImGui::EndTable();
+	}
+}
+
+void ImageViewer::drawMetaInfo(Draw& draw, bool useTable) {
+	if(useTable) {
+		// const float availX = ImGui::GetContentRegionAvail().x;
+		const float availY = ImGui::GetContentRegionAvail().y;
+		auto flags = ImGuiTableFlags_Resizable;
+		if(ImGui::BeginTable("Img", 2u, flags, ImVec2(0, availY - 5))) {
+			ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthStretch, 1.f);
+			ImGui::TableSetupColumn("col1", ImGuiTableColumnFlags_WidthStretch, 0.4f);
+
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			drawHistogram(draw);
+
+			ImGui::TableNextColumn();
+
+			drawImageInfoTable(draw);
+
+			ImGui::EndTable();
+		}
+	} else {
+		drawHistogram(draw);
+		drawImageInfoTable(draw);
 	}
 }
 
@@ -720,14 +743,15 @@ void ImageViewer::display(Draw& draw) {
 	const float aspectAvail = availX / availY;
 
 	// if(aspectImage > aspectAvail) {
-	if(aspectAvail < 1) {
+	auto useVertLayout = false;
+	if(useVertLayout && aspectAvail < 1) {
 		auto availY = (availX - 30) / aspectImage;
 		if(ImGui::BeginChild("ImageArea", ImVec2(availX - 30, availY))) {
 			drawImageArea(draw);
 		}
 		ImGui::EndChild();
 
-		drawMetaInfo(draw, false);
+		drawMetaInfo(draw, true);
 	} else {
 		auto flags = ImGuiTableFlags_NoBordersInBodyUntilResize | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
 		if(ImGui::BeginTable("Img", 2u, flags, ImVec2(0, availY - 5))) {
@@ -745,7 +769,7 @@ void ImageViewer::display(Draw& draw) {
 			ImGui::TableNextColumn();
 
 			ImGui::BeginChild("meta");
-			drawMetaInfo(draw, true);
+			drawMetaInfo(draw, false);
 			ImGui::EndChild();
 
 			ImGui::EndTable();
@@ -1081,7 +1105,7 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
 			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), pcr);
 
-		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 8u), ceilDivide(h, 8u), d);
+		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 32u), ceilDivide(h, 32u), d);
 	}
 
 	histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());

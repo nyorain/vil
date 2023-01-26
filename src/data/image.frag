@@ -44,6 +44,12 @@ void main() {
 	texCol.b *= float((pcr.flags & flagMaskB) != 0);
 	texCol.a = ((pcr.flags & flagMaskA) != 0) ? texCol.a : 1.f;
 
+	// when only alpha is selected, show it as grayscale
+	if(pcr.flags == flagMaskA) {
+		texCol.rgb = vec3(texCol.a);
+		texCol.a = 1.f;
+	}
+
 	// important for image viewer
 	if(In.uv != clamp(In.uv, 0, 1)) {
 		texCol.a = 0.f;
@@ -52,7 +58,7 @@ void main() {
 	// TODO: add additional luminance mode? might be what some people
 	// expect from grayscale
 	if((pcr.flags & flagGrayscale) != 0) {
-		texCol.rgb = vec3(dot(texCol.rgb, 1.f.xxx));
+		texCol.rgb = vec3(dot(texCol.rgb, 0.33f.xxx));
 	}
 
 	texCol = pow(texCol, vec4(pcr.power));

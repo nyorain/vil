@@ -122,7 +122,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 					return patched.entryPoint == stage.pName && patched.spec == spec;
 				};
 				auto it = find_if(mod.xfb, finder);
+				auto itValid = true;
 				if(it == mod.xfb.end()) {
+					itValid = false;
 					lock.unlock();
 					XfbPatchData xfb;
 
@@ -145,10 +147,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 							dlg_trace("xfb patch race prevented");
 							dev.dispatch.DestroyShaderModule(dev.handle, xfb.mod, nullptr);
 						}
+
+						itValid = true;
 					}
 				}
 
-				if(it != mod.xfb.end()) {
+				if(itValid) {
 					stage.module = it->mod;
 					pre.xfb = it->desc;
 				}
@@ -617,7 +621,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		auto res = dev.dispatch.CreateRayTracingPipelinesKHR(dev.handle,
 			deferredOperation, pipelineCache, createInfoCount, ncis.data(),
 			pAllocator, pPipelines);
-		if(res != VK_SUCCESS) {
+		if(res != VK_SUCCESS &&
+				res != VK_OPERATION_NOT_DEFERRED_KHR &&
+				res != VK_OPERATION_DEFERRED_KHR &&
+				res != VK_PIPELINE_COMPILE_REQUIRED_EXT) {
+			dlg_trace("CreateRayTracingPipelinesKHR returned {} ({})", vk::name(res), res);
 			return res;
 		}
 	}

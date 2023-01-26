@@ -153,7 +153,7 @@ TEST(unit_identity_square) {
 
 TEST(unit_identity_imperfect_rect) {
 	constexpr auto matchVal = 0.4f;
-	auto matcher = [](u32 i, u32 j) -> float {
+	auto matcher = [=](u32 i, u32 j) -> float {
 		return i == j ? matchVal : 0.f;
 	};
 
@@ -174,7 +174,7 @@ TEST(unit_identity_imperfect_rect) {
 // just for safety, unit test testing our trivial implementation
 TEST(unit_validate_trivial) {
 	constexpr auto matchVal = 0.4f;
-	auto matcher = [](u32 i, u32 j) -> float {
+	auto matcher = [=](u32 i, u32 j) -> float {
 		return i == j ? matchVal : 0.f;
 	};
 

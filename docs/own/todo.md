@@ -36,8 +36,6 @@ urgent, bugs:
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
-- [ ] toupper bug when searching for resource
-	- [ ] Better resource search (simple fuzzy search)
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
       Increased it temporarily but should probably just roll own block sub-allocator
 - [ ] when viewing resources aliasing others in memory in the resource viewer,
@@ -63,8 +61,6 @@ Freeze/selection changes:
 		  Might also happen when the window is minimized on some platforms?
 
 new, workstack:
-- [ ] remove hardcoded vil api and vil platform toggles
-	- [ ] env variables instead?
 - [ ] make use of proper sync tracking
 	- [ ] fix added sync: only sync with active pending submission?
 	      not sure how to properly do this
@@ -125,8 +121,8 @@ new, workstack:
 - [ ] optimization: when hooked submission of a record with one_time_submit
       flag has finished, destroy the HookRecord
 - [ ] investigate callstack performance for big applications.
-      Might be able to improve performance significantly, callstack.hpp
-	  always allocates a vector
+      For windows, the current backward implementation uses StackWalk64, which
+	  is super slow. Try CaptureStackBackTrace instead
 - [ ] blur.comp: correctly blur in linear space, not srgb
       looks different currently depending on whether swapchain is srgb or not
 - [ ] figure out to handle copyChain in a general way. Sometimes we need

@@ -122,7 +122,7 @@ extern "C" VIL_EXPORT bool vilOverlayKeyEvent(VilOverlay overlay, enum VilKey ke
 		return false;
 	}
 
-	return ov.gui->addKeyEvent(keycode, pressed);
+	return ov.gui->addKeyEvent(keyToImGui(keycode), pressed);
 }
 
 extern "C" VIL_EXPORT bool vilOverlayTextEvent(VilOverlay overlay, const char* utf8) {

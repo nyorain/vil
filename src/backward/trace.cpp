@@ -124,6 +124,9 @@ void do_load(span<void*>& out) {
 
 #elif defined(BACKWARD_SYSTEM_WINDOWS)
 
+// TODO PERF: use CaptureStackBackTrace instead
+// https://gist.github.com/Melonpi/1197e7d999c1d1192f42e62cdb65a224
+// https://blog.aaronballman.com/2011/04/generating-a-stack-crawl/
 void do_load(span<void*>& out) {
     CONTEXT localCtx; // used when no context is provided
 	CONTEXT* ctx_ = &localCtx;

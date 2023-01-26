@@ -82,7 +82,10 @@ private:
 	void createData();
 
 	void drawImageArea(Draw& draw);
-	void drawMetaInfo(Draw& draw, bool noExtendFlag);
+
+	void drawImageInfoTable(Draw& draw);
+	void drawHistogram(Draw& draw);
+	void drawMetaInfo(Draw& draw, bool useColumns);
 
 	void validateClampCoords(Vec3i& coords, u32& layer, u32& level);
 	static u32 histogramBufSize();
