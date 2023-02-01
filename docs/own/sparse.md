@@ -51,7 +51,7 @@ Just because an image is used *statically* by a pipeline we can't
 assume we can copy it (I think? spec not 100% clear on this but
 reads like this).
 Ok so currently we hold the lock during recording anyways.
-That is terrible what whatyagonnado.
+That is terrible but whatyagonnado.
 Using that, we can simply check during recording and then associate
 the (hooked) submission with the device memory objects it depends upon
 that *may* be destroyed by the applicaiton. We then just wait
@@ -68,3 +68,16 @@ And the "handle/device memory is destroyed before our copying in hooked
 submission finishes" thing is a general problem. Should be fixed in the 
 next round of copy-cow-sync fixes/improvements. Hard to do again for
 sparse stuff tho...
+
+Wait, no, the spec states "It is important to note that freeing
+a VkDeviceMemory object with vkFreeMemory will not cause resources (or resource
+regions) bound to the memory object to become unbound. Applications must not
+access resources bound to memory that has been freed".
+That is super important. It means that we don't have to care that much about
+destruction, we only have to make sure we probably sync with all binds.
+Oh no it does not, nevermind. An application might have an image bound
+but not *access* it, in which case this would be valid. Dammit.
+
+So (in addition to proper gpu-level sync for binds/submissions), when a memory 
+object is freed, we have to make sure all hooked submissions that use 
+resources bound to it, have completed.
