@@ -97,56 +97,55 @@ jobs:
         CC: gcc
     - run: meson test -C build/ -v
 
-  # clang builds disabled until https://github.com/egor-tensin/setup-clang/pull/9 is merged
-  # linux-clang:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - uses: actions/checkout@v1
-  #   - uses: actions/setup-python@v1
-  #     with:
-  #       python-version: '3.x'
-  #   - name: Set up Clang
-  #     uses: egor-tensin/setup-clang@v1
-  #     with:
-  #       version: 12
-  #   - run: pip install meson ninja
-  #   - run: sudo apt-get -y update
-  #   - name: Install deps
-  #     run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-tools glslang-tools
-  #       libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
-  #       libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
-  #       libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-  #   - run: meson setup build/ --backend=ninja 
-  #       -Dunit-tests=true 
-  #       -Dintegration-tests=false 
-  #       -Dx11-hook=false
-  #   - run: meson test -C build/ -v
+  linux-clang:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - name: Set up Clang
+      uses: egor-tensin/setup-clang@v1
+      with:
+        version: latest
+    - run: pip install meson ninja
+    - run: sudo apt-get -y update
+    - name: Install deps
+      run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-tools glslang-tools
+        libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
+        libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
+        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
+    - run: meson setup build/ --backend=ninja 
+        -Dunit-tests=true 
+        -Dintegration-tests=false 
+        -Dx11-hook=false
+    - run: meson test -C build/ -v
 
-  # linux-clang-tracy-debugoptimized:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - uses: actions/checkout@v1
-  #   - uses: actions/setup-python@v1
-  #     with:
-  #       python-version: '3.x'
-  #   - name: Set up Clang
-  #     uses: egor-tensin/setup-clang@v1
-  #     with:
-  #       version: 12
-  #   - run: pip install meson ninja
-  #   - run: sudo apt-get -y update
-  #   - name: Install deps
-  #     run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-tools glslang-tools
-  #       libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
-  #       libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
-  #       libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-  #   - run: meson setup build/ --backend=ninja 
-  #       -Dunit-tests=true 
-  #       -Dintegration-tests=false 
-  #       -Dx11-hook=false 
-  #       -Dtracy=true 
-  #       -Dbuildtype=debugoptimized
-  #   - run: meson test -C build/ -v
+  linux-clang-tracy-debugoptimized:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - uses: actions/setup-python@v1
+      with:
+        python-version: '3.x'
+    - name: Set up Clang
+      uses: egor-tensin/setup-clang@v1
+      with:
+        version: latest
+    - run: pip install meson ninja
+    - run: sudo apt-get -y update
+    - name: Install deps
+      run: sudo apt-get -y -f install libvulkan-dev libvulkan1 vulkan-tools glslang-tools
+        libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
+        libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
+        libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
+    - run: meson setup build/ --backend=ninja 
+        -Dunit-tests=true 
+        -Dintegration-tests=false 
+        -Dx11-hook=false 
+        -Dtracy=true 
+        -Dbuildtype=debugoptimized
+    - run: meson test -C build/ -v
 
   # See https://dvdhrm.github.io/2021/04/21/meson-msvc-github-actions/
   windows-ninja:
