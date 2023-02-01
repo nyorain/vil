@@ -6,6 +6,11 @@ v0.2:
 - vertex viewer improvements
 - improve README
 
+blocking sparse merge:
+- [ ] sparse binding: fix 'success' assert in insert
+      e.g. try bind/flush with texturesparseresidency sample
+- [ ] fix semaphore sync tracking stuff
+
 urgent, bugs:
 - [ ] test more on laptop, intel gpu
 	- [ ] seems like we do some nasty stuff in the histogram shaders,

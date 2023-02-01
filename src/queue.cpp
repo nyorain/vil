@@ -393,7 +393,8 @@ void process(MemoryResource& res, VkSparseMemoryBind& vkBind) {
 		auto it = bindState.opaqueBinds.lower_bound(testBind);
 		while(it != bindState.opaqueBinds.end() &&
 				it->resourceOffset < resEnd) {
-			dlg_assert(it->resourceOffset + it->memSize < resEnd);
+			// we currently don't support partial unbinds
+			dlg_assert(it->resourceOffset + it->memSize <= resEnd);
 			it->memory->allocations.erase(&*it);
 			it = bindState.opaqueBinds.erase(it);
 		}
@@ -425,11 +426,16 @@ VkDeviceSize memorySize(const Image& img, const VkSparseImageMemoryBind& bind) {
 
 	dlg_assert(granularity.width != 0);
 
+	dlg_assert(bind.offset.x % granularity.width == 0);
+	dlg_assert(bind.offset.y % granularity.height == 0);
+	dlg_assert(bind.offset.z % granularity.depth == 0);
+
 	// compare vulkan pec: "Any bound partially-used-sparse-blocks must still
 	// have their full sparse block size in bytes allocated in memory"
 	// Granularity is the number of blocks for BC formats so this should be fine.
-	auto numTexels = granularity.depth * granularity.height * granularity.width;
-	// auto numTexels = bind.extent.depth * bind.extent.height * bind.extent.width;
+	auto numTexels = alignPOT(bind.extent.depth, granularity.depth) *
+		alignPOT(bind.extent.height, granularity.height) *
+		alignPOT(bind.extent.width, granularity.width);
 	return numTexels * FormatElementSize(img.ci.format, bind.subresource.aspectMask);
 }
 
@@ -465,7 +471,15 @@ void process(Image& img, VkSparseImageMemoryBind& vkBind) {
 
 		// TODO: lower bound and iterate? not sure how
 		auto it = bindState.imageBinds.find(testBind);
-		while(it != bindState.imageBinds.end()) {
+		if(it != bindState.imageBinds.end()) {
+			// we currently don't support partial or multi- unbinding
+			dlg_assert(it->offset.x == vkBind.offset.x &&
+				it->offset.y == vkBind.offset.y &&
+				it->offset.z == vkBind.offset.z);
+			dlg_assert(it->size.width == vkBind.extent.width &&
+				it->size.height == vkBind.extent.height &&
+				it->size.depth == vkBind.extent.depth);
+
 			it->memory->allocations.erase(&*it);
 			it = bindState.imageBinds.erase(it);
 		}
