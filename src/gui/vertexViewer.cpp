@@ -721,7 +721,7 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 		u32 useW;
 		float scale;
 	} pcData = {
-		viewProjMtx_,
+		viewProjMtx_ * data.mat,
 		data.useW,
 		data.scale,
 	};
@@ -742,7 +742,9 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	clearRect.rect = scissor;
 	clearRect.layerCount = 1u;
 
-	dev.dispatch.CmdClearAttachments(cb, 1u, &clearAtt, 1u, &clearRect);
+	if(data.clear) {
+		dev.dispatch.CmdClearAttachments(cb, 1u, &clearAtt, 1u, &clearRect);
+	}
 
 	if(data.params.indexType) {
 		dlg_assert_or(data.indexBuffer.buffer, return);
@@ -1469,6 +1471,8 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.useW = useW;
 		drawData_.scale = 1.f;
 		drawData_.drawFrustum = gui_->dev().nonSolidFill;
+		drawData_.clear = true;
+		drawData_.mat = nytl::identity<4, float>();
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1487,8 +1491,6 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 
 	ImGui::EndChild();
 }
-
-void displayTriangles(Draw&, const AccelTriangles&, float dt);
 
 void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 	auto mxy = std::max(bounds.extent.y, bounds.extent.x);
@@ -1549,6 +1551,8 @@ void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, floa
 		drawData_.useW = false;
 		drawData_.scale = 1.f;
 		drawData_.drawFrustum = false;
+		drawData_.clear = true;
+		drawData_.mat = nytl::identity<4, float>();
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1556,6 +1560,131 @@ void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, floa
 		};
 
 		ImGui::GetWindowDrawList()->AddCallback(cb, this);
+		ImGui::InvisibleButton("Canvas", avail);
+		updateInput(dt);
+	}
+
+	ImGui::EndChild();
+}
+
+AABB3f bounds(const AABB3f& a, const AABB3f& b) {
+	auto endA = a.pos + 2.f * a.extent;
+	auto endB = b.pos + 2.f * b.extent;
+
+	auto start = nytl::vec::cw::min(a.pos, b.pos);
+	auto end = nytl::vec::cw::max(endA, endB);
+
+	return {start, 0.5f * (end - start)};
+}
+
+AABB3f transform(const AABB3f& a, const Mat4f& transform) {
+	using nytl::vec::cw::operators::operator*;
+	using nytl::vec::cw::min;
+	using nytl::vec::cw::max;
+
+	auto p0 = multPos(transform, a.pos + Vec3f{1.f, 0.f, 0.f} * a.extent);
+	auto p1 = multPos(transform, a.pos + Vec3f{0.f, 1.f, 0.f} * a.extent);
+	auto p2 = multPos(transform, a.pos + Vec3f{0.f, 0.f, 1.f} * a.extent);
+	auto p3 = multPos(transform, a.pos + Vec3f{1.f, 1.f, 0.f} * a.extent);
+	auto p4 = multPos(transform, a.pos + Vec3f{1.f, 0.f, 1.f} * a.extent);
+	auto p5 = multPos(transform, a.pos + Vec3f{0.f, 1.f, 1.f} * a.extent);
+	auto p6 = multPos(transform, a.pos + Vec3f{1.f, 1.f, 1.f} * a.extent);
+	auto p7 = multPos(transform, a.pos + Vec3f{0.f, 0.f, 0.f} * a.extent);
+
+	auto start = p0;
+	auto end = p0;
+
+	start = min(start, p1); end = max(end, p1);
+	start = min(start, p2); end = max(end, p2);
+	start = min(start, p3); end = max(end, p3);
+	start = min(start, p4); end = max(end, p4);
+	start = min(start, p5); end = max(end, p5);
+	start = min(start, p6); end = max(end, p6);
+	start = min(start, p7); end = max(end, p7);
+
+	return {start, 0.5f * (end - start)};
+}
+
+void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances, float dt) {
+	if(ImGui::Button("Recenter")) {
+		auto inf = 999999999.f; // std::numeric_limits<float>::infinity();
+		AABB3f vertBounds {inf, inf, inf, 0.f, 0.f, 0.f};
+
+		for(auto& ini : instances.instances) {
+			if(ini.accelStruct->data.index() != 0) {
+				continue;
+			}
+			auto& tris = std::get<0>(ini.accelStruct->data);
+			vertBounds = bounds(vertBounds, transform(bounds(tris), ini.transform));
+		}
+
+		centerCamOnBounds(vertBounds);
+	}
+
+	if(ImGui::BeginChild("vertexViewer")) {
+		auto avail = ImGui::GetContentRegionAvail();
+		auto pos = ImGui::GetCursorScreenPos();
+
+		// we statically know the single binding and attribute
+		drawData_.clear = true;
+		auto& vinput = drawData_.vertexInput;
+		vinput.bindings.resize(1);
+		vinput.attribs.resize(1);
+
+		vinput.bindings[0] = {
+			0u, sizeof(Vec4f), VK_VERTEX_INPUT_RATE_VERTEX,
+		};
+
+		vinput.attribs[0] = {
+			0u, 0u, VK_FORMAT_R32G32B32A32_SFLOAT, 0u,
+		};
+
+		drawDatas_.clear();
+		drawDatas_.reserve(instances.instances.size());
+
+		dlg_trace("drawing {} inis", instances.instances.size());
+
+		for(auto& ini : instances.instances) {
+			if(ini.accelStruct->data.index() != 0) {
+				continue;
+			}
+			auto& tris = std::get<0>(ini.accelStruct->data);
+
+			// TODO: we should multiple draw calls instead of just batching
+			// everything together. E.g. to visualize different geometry flags
+			// or to color them differently.
+			auto drawCount = 0u;
+			for(auto& geom : tris.geometries) {
+				drawCount += geom.triangles.size() * 3;
+			}
+
+			// TODO: inefficient, should batch it via drawData_ somehow into
+			// one call
+			auto& data = drawDatas_.emplace_back();
+			data = drawData_;
+			data.cb = draw.cb;
+			data.params = {};
+			data.indexBuffer = {};
+			data.canvasOffset = {pos.x, pos.y};
+			data.canvasSize = {avail.x, avail.y};
+			data.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+			data.useW = false;
+			data.scale = 1.f;
+			data.drawFrustum = false;
+			data.params.drawCount = drawCount;
+			data.vertexBuffers = {{{tris.buffer.buf, 0u, tris.buffer.size}}};
+			data.self = this;
+			data.mat = ini.transform;
+
+			auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
+				auto* data = static_cast<DrawData*>(cmd->UserCallbackData);
+				data->self->imGuiDraw(*data);
+			};
+
+			ImGui::GetWindowDrawList()->AddCallback(cb, &data);
+			drawData_.clear = false;
+		}
+
 		ImGui::InvisibleButton("Canvas", avail);
 		updateInput(dt);
 	}

@@ -509,11 +509,11 @@ void CommandHook::hook(QueueSubmitter& subm) {
 							findRes.match, sub, hookData);
 					}
 				}
+			}
 
-				if(!hookData && rec.buildsAccelStructs && hookAccelStructBuilds) {
-					dlg_assert(!hooked);
-					hooked = doHook(rec, {}, 0.f, sub, hookData);
-				}
+			if(!hookData && rec.buildsAccelStructs && hookAccelStructBuilds) {
+				dlg_assert(!hooked);
+				hooked = doHook(rec, {}, 0.f, sub, hookData);
 			}
 
 			dlg_assert(!!hooked == !!hookData);

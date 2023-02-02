@@ -394,6 +394,43 @@ VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance ini, const VkAllocationCal
 	shutdownTracy();
 }
 
+// tmp test
+void CmdCuLaunchKernelNVX(
+		VkCommandBuffer                             commandBuffer,
+		const VkCuLaunchInfoNVX* pLaunchInfo) {
+
+	(void) commandBuffer;
+	(void) pLaunchInfo;
+
+	dlg_error("uffff wtf");
+	// DebugBreak();
+}
+
+VkResult GetImageViewAddressNVX(
+		VkDevice                                    device,
+		VkImageView                                 imageView,
+		VkImageViewAddressPropertiesNVX* pProperties) {
+	(void) device;
+	(void) imageView;
+	(void) pProperties;
+
+	dlg_error("uffff wtf");
+	// DebugBreak();
+
+	return VK_SUCCESS;
+}
+
+uint32_t GetImageViewHandleNVX(
+		VkDevice                                    device,
+		const VkImageViewHandleInfoNVX* pInfo) {
+	(void) device;
+	(void) pInfo;
+	dlg_error("uffff wtf");
+	// DebugBreak();
+
+	return 0u;
+}
+
 struct HookedFunction {
 	PFN_vkVoidFunction func {};
 	bool device {}; // device-level function
@@ -833,6 +870,12 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdSetVertexInputEXT, VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME),
 
 	VIL_DEV_HOOK_EXT(CmdSetColorWriteEnableEXT, VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME),
+
+	// tmp test
+	VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
+
+	VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
 };
 
 #undef VIL_INI_HOOK
@@ -903,6 +946,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const
 	auto it = funcPtrTable.find(std::string_view(funcName));
 	if(it == funcPtrTable.end()) {
 		// If it's not hooked, just forward it to the next chain link
+		dlg_trace("unhooked device function: {}", funcName);
+
 		auto* dev = vil::findData<vil::Device>(vkDev);
 		if(!dev || !dev->dispatch.GetDeviceProcAddr) {
 			dlg_error("invalid device data: {}", vkDev);
