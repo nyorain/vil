@@ -233,6 +233,7 @@ void initBufs(AccelStruct& accelStruct,
 		auto& instances = accelStruct.data.emplace<AccelInstances>();
 		dlg_assert(info.geometryCount == 1u);
 		instances.instances.resize(buildRangeInfos[0].primitiveCount);
+
 		if(initInstanceBuffer) {
 			instances.buffer.ensure(dev, bufSize, usage);
 		}

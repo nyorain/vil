@@ -1226,30 +1226,34 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 	} else if(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
 		auto& inis = std::get<AccelInstances>(accelStruct.data);
 
-		for(auto& ini : inis.instances) {
-			ImGui::Separator();
-			refButtonExpect(*gui_, ini.accelStruct);
-
-			imGuiText("tableOffset: {}", ini.bindingTableOffset);
-			imGuiText("customIndex: {}", ini.customIndex);
-			imGuiText("mask: {}{}", std::hex, u32(ini.mask));
-			imGuiText("flags: {}", vk::nameGeometryInstanceFlagsKHR(ini.flags));
-
-			imGuiText("transform:");
-			for(auto r = 0u; r < 3; ++r) {
-				imGuiText("{} {} {} {}",
-					ini.transform[r][0],
-					ini.transform[r][1],
-					ini.transform[r][2],
-					ini.transform[r][3]);
-			}
-		}
-
 		if(inis.instances.empty()) {
 			imGuiText("No instances.");
+		} else if(ImGui::TreeNode("Instances")) {
+			for(auto& ini : inis.instances) {
+				ImGui::Separator();
+				refButtonExpect(*gui_, ini.accelStruct);
+
+				imGuiText("tableOffset: {}", ini.bindingTableOffset);
+				imGuiText("customIndex: {}", ini.customIndex);
+				imGuiText("mask: {}{}", std::hex, u32(ini.mask));
+				imGuiText("flags: {}", vk::nameGeometryInstanceFlagsKHR(ini.flags));
+
+				imGuiText("transform:");
+				for(auto r = 0u; r < 3; ++r) {
+					imGuiText("{} {} {} {}",
+						ini.transform[r][0],
+						ini.transform[r][1],
+						ini.transform[r][2],
+						ini.transform[r][3]);
+				}
+			}
+
+			ImGui::TreePop();
 		}
 
-		imGuiText("TODO: visualize instances");
+		// TODO: better display
+		auto& vv = gui_->cbGui().commandViewer().vertexViewer();
+		vv.displayInstances(draw, inis, gui_->dt());
 	}
 }
 

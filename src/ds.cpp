@@ -1023,6 +1023,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorPool(
 		dsPool.dataSize += descriptorSize(pool.type) * pool.descriptorCount;
 	}
 
+	// NOTE: no idea why this was needed for the nvidia rtxgi samples.
+	// Maybe we don't calculate the size correctly in some edge cases?
+	// constexpr auto overAllocFac = 4u;
+	// dsPool.dataSize *= overAllocFac;
+	// dsPool.dataSize = std::max<u32>(dsPool.dataSize, 1024 * 1024 * 64);
+
 	dsPool.data = std::make_unique<std::byte[]>(dsPool.dataSize);
 	debugStatAdd(DebugStats::get().descriptorPoolMem, dsPool.dataSize);
 	TracyAlloc(dsPool.data.get(), dsPool.dataSize);
@@ -1170,6 +1176,7 @@ VkResult findEntry(DescriptorPool& pool, u32 memSize,
 				entry.prev = nullptr;
 				pool.usedEntries = &entry;
 			} else {
+				dlg_trace("returning fragmented pool");
 				return VK_ERROR_FRAGMENTED_POOL;
 			}
 		} else {
@@ -1222,6 +1229,7 @@ VkResult initDescriptorSet(Device& dev, DescriptorPool& pool, VkDescriptorSet& h
 	std::byte* data {};
 	auto res = findEntry(pool, memSize, data, setEntry);
 	if(res != VK_SUCCESS) {
+		dlg_trace("could not find free entry");
 		return res;
 	}
 

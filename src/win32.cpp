@@ -932,8 +932,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateWin32SurfaceKHR(
 	}
 
 	if(!checkEnvBinary("VIL_HOOK_OVERLAY", false)) {
+		dlg_trace(">> no hook overlay env set");
 		return res;
 	}
+
+	dlg_trace(">> CreateWin32Surface");
 
 	auto& platform = createData<Win32Platform>(*pSurface);
 	platform.surfaceWindow = pCreateInfo->hwnd;

@@ -174,7 +174,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		dev.images.mustEmplace(handleDown, std::move(imgPtr));
 	}
 
+	dlg_trace(">> Createswapchain. platform: {}, dev.gui {}", platform, dev.gui());
+
 	if(savedOverlay) {
+		dlg_trace(">>savedOverlay");
+
 		swapd.overlay = std::move(savedOverlay);
 		swapd.overlay->swapchain = &swapd;
 
@@ -190,7 +194,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		// Otherwise we have to create a new renderer from scratch.
 		// Carry over all gui logic. Just recreate rendering logic
 		dlg_error("TODO: not implemented");
-	} else if(platform && !dev.gui()) {
+	} else if(platform) {
+		dlg_trace(">> creating overlay");
+
 		swapd.overlay = std::make_unique<Overlay>();
 		swapd.overlay->init(swapd);
 
@@ -321,6 +327,9 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	for(auto i = 0u; i < pPresentInfo->waitSemaphoreCount; ++i) {
 		auto& semaphore = get(dev, pPresentInfo->pWaitSemaphores[i]);
 
+		sems[i] = semaphore.handle;
+		topOfPipes[i] = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
 		dlg_assert_or(!semaphore.signals.empty(), continue);
 		dlg_assert(!semaphore.signals.back()->counterpart);
 
@@ -330,9 +339,6 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		} else {
 			semaphore.signals.back()->counterpart = &SyncOp::queuePresentDummy;
 		}
-
-		sems[i] = semaphore.handle;
-		topOfPipes[i] = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 	}
 
 	if(!sems.empty()) {
@@ -382,6 +388,14 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 			pi.pWaitSemaphores = nullptr;
 			pi.waitSemaphoreCount = 0u;
 			pi.pNext = pPresentInfo->pNext;
+
+			dlg_check({
+				auto it = static_cast<const VkBaseInStructure*>(pPresentInfo->pNext);
+				while (it) {
+					dlg_warn("unhandled queue present pNext {}", it->sType);
+					it = it->pNext;
+				}
+			});
 
 			std::lock_guard queueLock(qd.dev->queueMutex);
 			ZoneScopedN("dispatch");

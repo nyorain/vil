@@ -6,6 +6,7 @@
 #include <util/camera.hpp>
 #include <nytl/vec.hpp>
 #include <nytl/span.hpp>
+#include <nytl/matOps.hpp>
 #include <vector>
 #include <optional>
 
@@ -38,6 +39,7 @@ struct VertexViewer {
 	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayTriangles(Draw&, const AccelTriangles&, float dt);
+	void displayInstances(Draw&, const AccelInstances&, float dt);
 
 	void updateInput(float dt);
 
@@ -47,6 +49,8 @@ private:
 	void createFrustumPipe();
 
 	struct DrawData {
+		VertexViewer* self {};
+
 		VkPrimitiveTopology topology;
 		std::vector<BufferSpan> vertexBuffers;
 
@@ -59,6 +63,9 @@ private:
 		float scale {1.f};
 		bool useW {false};
 		bool drawFrustum {false};
+		bool clear {true};
+
+		Mat4f mat = nytl::identity<4, float>();
 
 		struct {
 			std::vector<VkVertexInputBindingDescription> bindings;
@@ -110,6 +117,7 @@ private:
 	DrawData drawData_;
 
 	u32 selectedID_ {};
+	std::vector<DrawData> drawDatas_;
 };
 
 } // namespace vil
