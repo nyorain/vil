@@ -12,6 +12,10 @@ layout(local_size_x = 16u, local_size_y = 16u) in;
 layout(push_constant) uniform PCR {
 	int level;
 	int layer;
+	// NOTE: for a full histogram this would be 1.
+	// For larger values, we effectively only sample every nth texe. 
+	// Useful as optimization on larger images.
+	int texelSkip;
 } pcr;
 
 layout(set = 0, binding = 0) buffer Hist {
@@ -58,12 +62,13 @@ void process(ivec3 coords) {
 
 void main() {
 	ivec3 coords = ivec3(sampleSize * gl_GlobalInvocationID.xyz);
+	coords *= pcr.texelSkip;
 	coords.z += pcr.layer;
 
 	for(uint y = 0u; y < sampleSize; ++y) {
 		for(uint x = 0u; x < sampleSize; ++x) {
 			ivec3 lcoords = coords;
-			lcoords.xy += ivec2(x, y);
+			lcoords.xy += pcr.texelSkip * ivec2(x, y);
 			process(coords);
 		}
 	}

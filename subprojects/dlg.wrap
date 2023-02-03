@@ -1,5 +1,6 @@
 [wrap-git]
 directory=dlg
 url=https://github.com/nyorain/dlg.git
-# assert_text branch
-revision=e81e7c3ab8b44945c482f23096cb34b3ee1c2b9c
+# assert_text branch (rebased on assert_or)
+revision=c2f32c1919470d71df224bbd60d063711aa9b52b
+
