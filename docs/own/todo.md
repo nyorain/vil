@@ -11,6 +11,14 @@ urgent, bugs:
 	- [ ] seems like we do some nasty stuff in the histogram shaders,
 		  get gpu timeouts (try e.g. with curlnoise.ktx, zoom out on histogram)
 
+- [ ] fix swapchain present for async present
+      when present happens on different queue than our gui drawing, we currently
+	  don't properly sync
+	- real problem in doom eternal with 'present from async compute'
+	- also investigate if the current approach even works with same-queue:
+	  we submit the wait semaphores to the queue just-like-that. Does
+	  QueuePresent respect submission order though?
+
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
 
