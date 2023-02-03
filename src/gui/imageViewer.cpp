@@ -92,6 +92,16 @@ std::string format(VkFormat format, VkImageAspectFlagBits aspect, Vec4d value) {
 
 void ImageViewer::init(Gui& gui) {
 	gui_ = &gui;
+
+	auto e = std::getenv("VIL_HISTOGRAM_SKIP");
+	if(e) {
+		auto res = std::strtol(e, nullptr, 10);
+		if(res > 0) {
+			histogram_.texelSkip = res;
+		} else {
+			dlg_warn("Environment variable 'VIL_HISTOGRAM_SKIP' set to invalid value '{}'.", e);
+		}
+	}
 }
 
 void ImageViewer::drawHistogram(Draw& draw) {
@@ -1048,6 +1058,17 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 	auto h = std::max(extent_.height >> u32(imageDraw_.level), 1u);
 	auto d = std::max(extent_.depth >> u32(imageDraw_.level), 1u);
 
+	auto layer = imageDraw_.layer;
+	if(imgType_ == VK_IMAGE_TYPE_3D) {
+		if(histogram3DCurrentSlice) {
+			// use current slice, just that
+			d = 1u;
+		} else {
+			// ignore selected slice
+			layer = 0u;
+		}
+	}
+
 	auto computeMinMax = !histogram_.fixedRange;
 	rb.hasMinMax = computeMinMax;
 	if(computeMinMax && computeMinMax_) {
@@ -1062,11 +1083,18 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
 			0u, 1u, &data_->imgOpDs.vkHandle(), 0u, nullptr);
 
-		int pcr[] = {int(imageDraw_.level), int(imageDraw_.layer)};
+		int pcr[] = {
+			int(imageDraw_.level),
+			int(layer),
+			int(histogram_.texelSkip),
+		};
 		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
 			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), pcr);
 
-		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 8u), ceilDivide(h, 8u), d);
+		dev.dispatch.CmdDispatch(draw.cb,
+			ceilDivide(w, 8u * histogram_.texelSkip),
+			ceilDivide(h, 8u * histogram_.texelSkip),
+			ceilDivide(d, 1u * histogram_.texelSkip));
 
 		histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());
 
@@ -1101,11 +1129,17 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 			VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout,
 			0u, 1u, &data_->imgOpDs.vkHandle(), 0u, nullptr);
 
-		int pcr[] = {int(imageDraw_.level), int(imageDraw_.layer)};
+		int pcr[] = {
+			int(imageDraw_.level),
+			int(layer),
+			int(histogram_.texelSkip)};
 		dev.dispatch.CmdPushConstants(draw.cb, pipeLayout,
 			VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pcr), pcr);
 
-		dev.dispatch.CmdDispatch(draw.cb, ceilDivide(w, 32u), ceilDivide(h, 32u), d);
+		dev.dispatch.CmdDispatch(draw.cb,
+			ceilDivide(w, 32u * histogram_.texelSkip),
+			ceilDivide(h, 32u * histogram_.texelSkip),
+			ceilDivide(d, 8u  * histogram_.texelSkip));
 	}
 
 	histBufState.transition(dev, draw.cb, vku::SyncScope::computeReadWrite());
@@ -1119,7 +1153,6 @@ void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
 
 		// numTexels
 		u32 pcr = w * h * d;
-		dlg_trace("numTexels: {}", pcr);
 
 		dev.dispatch.CmdBindPipeline(draw.cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
 		dev.dispatch.CmdBindDescriptorSets(draw.cb,

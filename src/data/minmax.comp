@@ -8,6 +8,10 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(push_constant) uniform PCR {
 	int level;
 	int layer;
+	// NOTE: for a full histogram this would be 1.
+	// For larger values, we effectively only sample every nth texe. 
+	// Useful as optimization on larger images.
+	int texelSkip;
 } pcr;
 
 layout(set = 0, binding = 0) buffer Dst {
@@ -23,8 +27,13 @@ const uint flagHasInf = 2u;
 #include "sample.glsl"
 #include "histogram.glsl"
 
+// TODO PERF: sample multiple texels per invocation and do local accumulation
+//   first to avoid aotmic ops
+// TODO PERF: use subgroup stuff if available for faster reduction, less aotmics
+
 void main() {
 	ivec3 coords = ivec3(gl_GlobalInvocationID.xyz);
+	coords *= pcr.texelSkip;
 	coords.z += pcr.layer;
 	if(!coordsInside(coords, pcr.level)) {
 		return;

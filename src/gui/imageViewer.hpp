@@ -26,6 +26,7 @@ public:
 
 	static constexpr auto useSamplingCopy = true;
 	static constexpr auto histogramSections = 128u;
+	static constexpr auto histogram3DCurrentSlice = true;
 
 public:
 	void init(Gui& gui);
@@ -156,6 +157,8 @@ private:
 		bool fixedRange {true};
 		float begin {0.f};
 		float end {1.f};
+
+		u32 texelSkip {1u};
 	} histogram_;
 
 	bool computeMinMax_ {true};

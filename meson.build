@@ -484,7 +484,9 @@ endif
 # windows.h keeps breaking my applications and will to live
 pch = []
 if not with_win32 or not with_tracy
-	pch = 'src/pch.hpp'
+	# TODO: fix. We want to use pch unless we are frequently editing shaders
+	# See https://github.com/mesonbuild/meson/issues/10882
+	# pch = 'src/pch.hpp'
 endif
 
 lib_spvm = static_library(
