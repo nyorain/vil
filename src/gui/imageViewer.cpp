@@ -5,6 +5,7 @@
 #include <util/fmt.hpp>
 #include <nytl/vecOps.hpp>
 #include <device.hpp>
+#include <queue.hpp>
 #include <nytl/bytes.hpp>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>

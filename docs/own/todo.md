@@ -9,7 +9,8 @@ v0.2:
 blocking sparse merge:
 - [ ] sparse binding: fix 'success' assert in insert
       e.g. try bind/flush with texturesparseresidency sample
-- [ ] fix semaphore sync tracking stuff
+	  (might be fixed, found issues)
+- [x] fix semaphore sync tracking stuff
 
 urgent, bugs:
 - [ ] test more on laptop, intel gpu
@@ -96,9 +97,13 @@ new, workstack:
 - [ ] make use of proper sync tracking
 	- [ ] fix added sync: only sync with active pending submission?
 	      not sure how to properly do this
-	- [ ] proper setting of image's pending layout
+	- [x] proper setting of image's pending layout
 	- [ ] introduce first cow-like concept, just tracking when resources get
 	      modified
+- [ ] add sparse bind matching
+- [ ] properly show sparse bindings in frame UI
+	- [ ] allow to inspect each bind/unbind
+	      should be possible to share code with resource mem state viz
 - [ ] rework buffmt with proper array types (and multdim arrays)
       allow to store spirv u32 id per Type.
 	  	- [ ] related to storageBuffer bug?

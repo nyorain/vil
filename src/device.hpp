@@ -3,7 +3,7 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <data.hpp>
-#include <queue.hpp>
+#include <queue.hpp> // TODO: get rid of this include
 #include <util/handleCast.hpp>
 #include <util/syncedMap.hpp>
 #include <util/debugMutex.hpp>

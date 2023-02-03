@@ -806,6 +806,31 @@ So maybe only add full sync when reading a buffer with the flag set?
 Maybe just leave it up to the application? We kinda need both code paths
 anyways for now. And we need sync tracking in any case.
 
+## Memory aliasing
+
+Another concern I just stumbled upon: memory aliasing.
+When we sync on a per-resource basis (e.g. we want to show image X in ui
+live and therefore just sync with submissions using it somehow), handling
+resource aliasing is a pain.
+We can track which submissions activate which regions but comparing that
+every time just for sync is kinda meh.
+
+How do we handle aliasing in general?
+We can't even legally access resources that were activate (implicitly!)
+due to another resource in the same memory becoming active.
+Maybe handle that via a mechanism similar to 'pendingLayout'?
+When an submission makes a resource active (transitions from undefined
+layout?) we mark all resources aliasing it as inactive when the
+submission is activated?
+Complicated, high overhead though.
+
+Maybe just completely ignore aliasing for now?
+We might read undefined memory but on desktop it's usually not a big issue.
+Have to rethink this when starting to use cows, then it becomes a
+bigger issue we have to tackle anyways.
+(something along the lines of tracking it as outlined above and resolving
+pending cows in 'activateSubmission' in that case)
+
 # Relying on timeline semaphores
 
 Sooner or later, we'll likely just require timeline semaphores since that

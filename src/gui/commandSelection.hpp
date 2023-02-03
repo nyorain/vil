@@ -37,6 +37,9 @@ public:
 	bool freezeState {};
 
 public:
+	CommandSelection();
+	~CommandSelection();
+
 	void init(Device& dev) { dev_ = &dev; }
 
 	// Tries to fetch a new completed hook, updating the selection.

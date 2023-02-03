@@ -3,6 +3,7 @@
 #include <commandHook/hook.hpp>
 #include <command/commands.hpp>
 #include <queue.hpp>
+#include <memory.hpp>
 #include <device.hpp>
 #include <ds.hpp>
 #include <accelStruct.hpp>

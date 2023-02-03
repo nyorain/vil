@@ -9,6 +9,7 @@
 #include <optional>
 #include <memory>
 #include <atomic>
+#include <variant>
 
 namespace vil {
 
@@ -35,6 +36,10 @@ struct Queue : Handle {
 	// their corresponding submissionID.
 	// When its current value is same as submissionCounter,
 	// there are no pending submissions on this queue.
+	// Also used for sparse binding submissions (even though sparse binds
+	// aren't implicitly ordered with other submissions, the semaphore
+	// signal operations are. Therefore we can guarantee that the value
+	// never decreases even for out-of-order overlapping of bind/submit).
 	VkSemaphore submissionSemaphore {};
 
 	// Only valid when using timeline semaphores, used for full-sync.
@@ -46,6 +51,9 @@ struct Queue : Handle {
 	// all following submissions are inactive (waiting) as well.
 	// Null if there is no such submission.
 	Submission* firstWaiting {};
+	// TODO(correctness): add a separate list of waiting bindSparse submissions
+	// since they don't follow submission order. We might currently treat
+	// BindSparse submissions as inactive even though they are not.
 };
 
 // All data we store for a queue family.
@@ -66,6 +74,57 @@ struct SubmittedCommandBuffer {
 	~SubmittedCommandBuffer();
 };
 
+// The naming here in the vulkan spec is a bit weird:
+// pending vkQueueBindSparse operations are also called "submissions" and
+// there is no special name for vkQueueSubmit ops.
+enum class SubmissionType : u8 {
+	command, // vkQueueSubmit(2)
+	bindSparse, // vkQueueBindSparse
+};
+
+// We want to keep the reference DeviceMemory objects here alive so we
+// can display the submissions later in the gui.
+template<typename MemBind>
+struct IntrusiveMemPtrBind {
+	MemBind bind;
+	IntrusivePtr<DeviceMemory> mem;
+};
+
+struct SparseBufferBind {
+	IntrusivePtr<Buffer> dst {};
+	std::vector<IntrusiveMemPtrBind<OpaqueSparseMemoryBind>> binds;
+};
+
+struct SparseOpaqueImageBind {
+	IntrusivePtr<Image> dst {};
+	std::vector<IntrusiveMemPtrBind<OpaqueSparseMemoryBind>> binds;
+};
+
+struct SparseImageBind {
+	IntrusivePtr<Image> dst {};
+	std::vector<IntrusiveMemPtrBind<ImageSparseMemoryBind>> binds;
+};
+
+struct BindSparseSubmission {
+	std::vector<SparseBufferBind> buffer;
+	std::vector<SparseOpaqueImageBind> opaqueImage;
+	std::vector<SparseImageBind> image;
+
+	BindSparseSubmission();
+	~BindSparseSubmission();
+
+	BindSparseSubmission(const BindSparseSubmission&) = default;
+	BindSparseSubmission& operator=(const BindSparseSubmission&) = default;
+	BindSparseSubmission(BindSparseSubmission&&) noexcept = default;
+	BindSparseSubmission& operator=(BindSparseSubmission&&) noexcept = default;
+};
+
+struct CommandSubmission {
+	// The CommandBuffer record must stay valid while the submission
+	// is still pending (anything else is an application error).
+	std::vector<SubmittedCommandBuffer> cbs;
+};
+
 // A single Submission done via one VkSubmitInfo in vkQueueSubmit.
 struct Submission {
 	SubmissionBatch* parent {};
@@ -73,10 +132,6 @@ struct Submission {
 
 	std::vector<std::unique_ptr<SyncOp>> waits;
 	std::vector<std::unique_ptr<SyncOp>> signals;
-
-	// The CommandBuffer record must stay valid while the submission
-	// is still pending (anything else is an application error).
-	std::vector<SubmittedCommandBuffer> cbs;
 
 	// When not having timeline semaphores, we always add a binary
 	// semaphore to the submission to allow chaining it with future
@@ -90,6 +145,9 @@ struct Submission {
 	// dependencies are submitted (i.e. 'waits' theoretically satisfied).
 	// Synced via device mutex
 	bool active {};
+
+	// parent->type determines which one is active.
+	std::variant<CommandSubmission, BindSparseSubmission> data;
 };
 
 void activateLocked(Submission& subm);
@@ -108,9 +166,11 @@ VkSemaphore getSemaphoreFromPoolLocked(Device& dev);
 VkFence getFenceFromPool(Device& dev);
 
 // Batch of Submissions, represents and tracks one vkQueueSubmit call.
+// Immutable after creation.
 struct SubmissionBatch {
 	Queue* queue {};
-	std::vector<Submission> submissions; // immutable after creation
+	SubmissionType type; // determines the type of objects in 'submissions'
+	std::vector<Submission> submissions;
 	u64 globalSubmitID {};
 
 	// The fence added by the caller.

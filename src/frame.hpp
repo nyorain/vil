@@ -9,8 +9,13 @@ namespace vil {
 // Information about a single submission done during a swapchains frame duration.
 struct FrameSubmission {
 	Queue* queue {};
+	SubmissionType type {};
 	u64 submissionID {}; // global submission id
-	std::vector<IntrusivePtr<CommandRecord>> submissions;
+	std::vector<BindSparseSubmission> sparseBinds;
+	std::vector<IntrusivePtr<CommandRecord>> submissions; // for command submission
+
+	FrameSubmission();
+	~FrameSubmission();
 };
 
 // All submissions done during a swapchains frame duration.

@@ -3,6 +3,7 @@
 #include <cb.hpp>
 #include <ds.hpp>
 #include <layer.hpp>
+#include <memory.hpp>
 #include <threadContext.hpp>
 #include <command/commands.hpp>
 #include <swapchain.hpp>
@@ -15,54 +16,56 @@
 #include <commandHook/submission.hpp>
 #include <util/util.hpp>
 #include <vkutil/enumString.hpp>
-#include <vkutil/format_utils.h>
 #include <util/profiling.hpp>
 
 namespace vil {
 
-std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
+std::optional<SubmIterator> checkLocked(SubmissionBatch& batch) {
 	ZoneScoped;
 
-	auto& dev = *subm.queue->dev;
+	auto& dev = *batch.queue->dev;
 	assertOwned(dev.mutex);
 
 	// If a submission in the batch isn't even active yet, it can't
 	// be finished. We don't have to check it, but it's an optimization.
 	// NOTE: this is important for integration testing though. The
 	//   mock icd always returns VK_SUCCESS for fences.
-	for(auto& sub : subm.submissions) {
+	for(auto& sub : batch.submissions) {
 		if(!sub.active) {
 			return std::nullopt;
 		}
 	}
 
-	if(subm.appFence) {
-		if(dev.dispatch.GetFenceStatus(dev.handle, subm.appFence->handle) != VK_SUCCESS) {
+	if(batch.appFence) {
+		if(dev.dispatch.GetFenceStatus(dev.handle, batch.appFence->handle) != VK_SUCCESS) {
 			return std::nullopt;
 		}
 	} else {
-		dlg_assert(subm.ourFence);
-		if(dev.dispatch.GetFenceStatus(dev.handle, subm.ourFence) != VK_SUCCESS) {
+		dlg_assert(batch.ourFence);
+		if(dev.dispatch.GetFenceStatus(dev.handle, batch.ourFence) != VK_SUCCESS) {
 			return std::nullopt;
 		}
 	}
 	// apparently unique_ptr == ptr comparision not supported in stdlibc++ yet?
-	auto it = std::find_if(dev.pending.begin(), dev.pending.end(), [&](auto& ptr){
-		return ptr.get() == &subm;
-	});
+	auto finder = [&](auto& ptr){ return ptr.get() == &batch; };
+	auto it = std::find_if(dev.pending.begin(), dev.pending.end(), finder);
 	dlg_assert(it != dev.pending.end());
 
-	for(auto& sub : subm.submissions) {
+	for(auto& sub : batch.submissions) {
 		dlg_assert(sub.active);
 
-		for(auto& [cb, hookData] : sub.cbs) {
-			if(hookData) {
-				hookData->finish(sub);
-			}
+		// process finished records
+		if(batch.type == SubmissionType::command) {
+			auto& cmdSub = std::get<CommandSubmission>(sub.data);
+			for(auto& [cb, hookData] : cmdSub.cbs) {
+				if(hookData) {
+					hookData->finish(sub);
+				}
 
-			auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &sub);
-			dlg_assert(it2 != cb->pending.end());
-			cb->pending.erase(it2);
+				auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &sub);
+				dlg_assert(it2 != cb->pending.end());
+				cb->pending.erase(it2);
+			}
 		}
 
 		// For a non-timeline semaphore (that was not waited upon), we
@@ -90,7 +93,8 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 				if(wait->counterpart == &SyncOp::swapchainAcquireDummy) {
 					// in case there are multiple swapchain acquire signals, just
 					// erase the first one, does not matter
-					auto it = std::find(sem.signals.begin(), sem.signals.end(), &SyncOp::swapchainAcquireDummy);
+					auto it = std::find(sem.signals.begin(), sem.signals.end(),
+						&SyncOp::swapchainAcquireDummy);
 					dlg_assert(it != sem.signals.end());
 					sem.signals.erase(it);
 				}
@@ -123,15 +127,15 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& subm) {
 		}
 	}
 
-	if(subm.ourFence) {
-		dev.dispatch.ResetFences(dev.handle, 1, &subm.ourFence);
-		dev.fencePool.push_back(subm.ourFence);
-	} else if(subm.appFence) {
-		subm.appFence->submission = nullptr;
+	if(batch.ourFence) {
+		dev.dispatch.ResetFences(dev.handle, 1, &batch.ourFence);
+		dev.fencePool.push_back(batch.ourFence);
+	} else if(batch.appFence) {
+		batch.appFence->submission = nullptr;
 	}
 
 	dev.semaphorePool.insert(dev.semaphorePool.end(),
-		subm.poolSemaphores.begin(), subm.poolSemaphores.end());
+		batch.poolSemaphores.begin(), batch.poolSemaphores.end());
 
 	return dev.pending.erase(it);
 }
@@ -154,58 +158,15 @@ void checkPendingSubmissionsLocked(Device& dev) {
 	}
 }
 
-VkResult doSubmit(Queue& qd, span<const VkSubmitInfo2> submits,
+VkResult doSubmit(Queue& queue, span<const VkSubmitInfo2> submits,
 		VkFence fence, bool legacy) {
 	ZoneScoped;
-	auto& dev = *qd.dev;
+	auto& dev = *queue.dev;
 
 	QueueSubmitter submitter {};
-	submitter.dev = &dev;
-	submitter.queue = &qd;
-
-	{
-		// Get a new submission ID for this queue
-		std::lock_guard lock(dev.mutex);
-		submitter.globalSubmitID = ++dev.submissionCounter;
-
-		// Check all pending submissions for completion, to possibly return
-		// resources to fence/semaphore pools
-		// check all submissions for completion
-		checkPendingSubmissionsLocked(dev);
-	}
-
-	auto batchPtr = std::make_unique<SubmissionBatch>();
-	auto& batch = *batchPtr;
-	batch.submissions.reserve(submits.size()); // make sure it's never re-allocated
-	batch.queue = &qd;
-	batch.globalSubmitID = submitter.globalSubmitID;
-
-	submitter.dstBatch = &batch;
+	init(submitter, queue, SubmissionType::command, fence);
 
 	process(submitter, submits);
-
-	// Make sure that every submission has a fence associated.
-	// If the application already set a fence we can simply check that
-	// to see if the submission completed (the vulkan spec gives us enough
-	// guarantees to allow it). Otherwise we have to use a fence from the pool.
-	VkFence submFence;
-	if(fence) {
-		batch.appFence = &dev.fences.get(fence);
-
-		std::lock_guard lock(dev.mutex);
-
-		// per vulkan spec, using a fence in QueueSubmit that is signaled
-		// is not allowed. And if it was reset we also remove its associated
-		// submission.
-		dlg_assert(!batch.appFence->submission);
-		submFence = fence;
-		batch.appFence->submission = &batch;
-	} else {
-		// PERF: when we have timeline semaphores we can simply use our
-		// added timeline semaphore to track this batch and don't need a fence at all.
-		batch.ourFence = getFenceFromPool(dev);
-		submFence = batch.ourFence;
-	}
 
 	VkResult res;
 
@@ -236,26 +197,26 @@ VkResult doSubmit(Queue& qd, span<const VkSubmitInfo2> submits,
 						submitter.submitInfos[i]);
 				}
 
-				res = dev.dispatch.QueueSubmit(qd.handle,
+				res = dev.dispatch.QueueSubmit(queue.handle,
 					u32(downgraded.size()),
 					downgraded.data(),
-					submFence);
+					submitter.submFence);
 			} else {
-				res = dev.dispatch.QueueSubmit2(qd.handle,
+				res = dev.dispatch.QueueSubmit2(queue.handle,
 					u32(submitter.submitInfos.size()),
 					submitter.submitInfos.data(),
-					submFence);
+					submitter.submFence);
 			}
 		}
 
 		if(res != VK_SUCCESS) {
-			dlg_trace("vkQueueSubmit error: {}", vk::name(res));
-			cleanupOnError(submitter);
+			dlg_trace("vkQueueSubmit error: {} ({})", vk::name(res), res);
+			cleanupOnErrorLocked(submitter);
 			return res;
 		}
 
 		postProcessLocked(submitter);
-		dev.pending.push_back(std::move(batchPtr));
+		dev.pending.push_back(std::move(submitter.dstBatch));
 	}
 
 	return res;
@@ -361,248 +322,55 @@ VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
 	return waitIdleImpl(dev);
 }
 
-void process(MemoryResource& res, VkSparseMemoryBind& vkBind) {
-	auto& dev = *res.dev;
-
-	dlg_assert(res.memory.index() == 1u);
-	auto& bindState = std::get<1>(res.memory);
-
-	if(vkBind.memory) {
-		auto& mem = get(dev, vkBind.memory);
-		vkBind.memory = mem.handle;
-
-		OpaqueSparseMemoryBind bind {};
-		bind.memory = &mem;
-		bind.resource = &res;
-		bind.flags = vkBind.flags;
-		bind.memOffset = vkBind.memoryOffset;
-		bind.memSize = vkBind.size;
-		bind.resourceOffset = vkBind.resourceOffset;
-
-		auto [it, success] = bindState.opaqueBinds.insert(bind);
-		dlg_assert(success);
-		mem.allocations.insert(&*it);
-	} else {
-		// unbinding the range
-		OpaqueSparseMemoryBind testBind {};
-		testBind.resourceOffset = vkBind.resourceOffset;
-		testBind.memSize = vkBind.size;
-		testBind.resource = &res;
-		auto resEnd = vkBind.resourceOffset + vkBind.size;
-
-		auto it = bindState.opaqueBinds.lower_bound(testBind);
-		while(it != bindState.opaqueBinds.end() &&
-				it->resourceOffset < resEnd) {
-			// we currently don't support partial unbinds
-			dlg_assert(it->resourceOffset + it->memSize <= resEnd);
-			it->memory->allocations.erase(&*it);
-			it = bindState.opaqueBinds.erase(it);
-		}
-	}
-}
-
-VkDeviceSize memorySize(const Image& img, const VkSparseImageMemoryBind& bind) {
-	auto& dev = *img.dev;
-
-	// TODO: cache properties somewhere?
-	u32 numFmtProps {};
-	dev.ini->dispatch.GetPhysicalDeviceSparseImageFormatProperties(
-		dev.phdev, img.ci.format, img.ci.imageType, img.ci.samples,
-		img.ci.usage, img.ci.tiling, &numFmtProps, nullptr);
-
-	ThreadMemScope tms;
-	auto props = tms.alloc<VkSparseImageFormatProperties>(numFmtProps);
-	dev.ini->dispatch.GetPhysicalDeviceSparseImageFormatProperties(
-		dev.phdev, img.ci.format, img.ci.imageType, img.ci.samples,
-		img.ci.usage, img.ci.tiling, &numFmtProps, props.data());
-
-	VkExtent3D granularity {};
-	for(auto& p : props) {
-		if(p.aspectMask == bind.subresource.aspectMask) {
-			granularity = p.imageGranularity;
-			break;
-		}
-	}
-
-	dlg_assert(granularity.width != 0);
-
-	dlg_assert(bind.offset.x % granularity.width == 0);
-	dlg_assert(bind.offset.y % granularity.height == 0);
-	dlg_assert(bind.offset.z % granularity.depth == 0);
-
-	// compare vulkan pec: "Any bound partially-used-sparse-blocks must still
-	// have their full sparse block size in bytes allocated in memory"
-	// Granularity is the number of blocks for BC formats so this should be fine.
-	auto numTexels = alignPOT(bind.extent.depth, granularity.depth) *
-		alignPOT(bind.extent.height, granularity.height) *
-		alignPOT(bind.extent.width, granularity.width);
-	return numTexels * FormatElementSize(img.ci.format, bind.subresource.aspectMask);
-}
-
-void process(Image& img, VkSparseImageMemoryBind& vkBind) {
-	auto& dev = *img.dev;
-
-	dlg_assert(img.memory.index() == 1u);
-	auto& bindState = std::get<1>(img.memory);
-
-	if(vkBind.memory) {
-		auto& mem = get(dev, vkBind.memory);
-		vkBind.memory = mem.handle;
-
-		ImageSparseMemoryBind bind {};
-		bind.memory = &mem;
-		bind.resource = &img;
-		bind.flags = vkBind.flags;
-		bind.memOffset = vkBind.memoryOffset;
-		bind.offset = vkBind.offset;
-		bind.size = vkBind.extent;
-		bind.subres = vkBind.subresource;
-		bind.memSize = memorySize(img, vkBind);
-
-		auto [it, success] = bindState.imageBinds.insert(bind);
-		dlg_assert(success);
-		mem.allocations.insert(&*it);
-	} else {
-		// unbinding the range
-		ImageSparseMemoryBind testBind {};
-		testBind.offset = vkBind.offset;
-		testBind.subres = vkBind.subresource;
-		testBind.resource = &img;
-
-		// TODO: lower bound and iterate? not sure how
-		auto it = bindState.imageBinds.find(testBind);
-		if(it != bindState.imageBinds.end()) {
-			// we currently don't support partial or multi- unbinding
-			dlg_assert(it->offset.x == vkBind.offset.x &&
-				it->offset.y == vkBind.offset.y &&
-				it->offset.z == vkBind.offset.z);
-			dlg_assert(it->size.width == vkBind.extent.width &&
-				it->size.height == vkBind.extent.height &&
-				it->size.depth == vkBind.extent.depth);
-
-			it->memory->allocations.erase(&*it);
-			it = bindState.imageBinds.erase(it);
-		}
-	}
-}
-
-// TODO: Wait until we know that the submission finished with inserting
-// the new binds?
-void process(Device& dev, ThreadMemScope& scope, VkSparseBufferMemoryBindInfo& bind) {
-	auto& buf = get(dev, bind.buffer);
-	bind.buffer = buf.handle;
-
-	auto fwdBinds = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
-	for(auto i = 0u; i < bind.bindCount; ++i) {
-		auto& b = fwdBinds[i];
-		b = bind.pBinds[i];
-		process(buf, b);
-	}
-
-	bind.pBinds = fwdBinds.data();
-}
-
-void process(Device& dev, ThreadMemScope& scope, VkSparseImageOpaqueMemoryBindInfo& bind) {
-	auto& img = get(dev, bind.image);
-	bind.image = img.handle;
-
-	auto mems = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
-	for(auto i = 0u; i < bind.bindCount; ++i) {
-		auto& b = mems[i];
-		b = bind.pBinds[i];
-		process(img, b);
-	}
-
-	bind.pBinds = mems.data();
-}
-
-void process(Device& dev, ThreadMemScope& scope, VkSparseImageMemoryBindInfo& bind) {
-	auto& img = get(dev, bind.image);
-	bind.image = img.handle;
-
-	auto mems = scope.alloc<VkSparseImageMemoryBind>(bind.bindCount);
-	for(auto i = 0u; i < bind.bindCount; ++i) {
-		auto& b = mems[i];
-		b = bind.pBinds[i];
-		process(img, b);
-	}
-
-	bind.pBinds = mems.data();
-}
-
 VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
 		VkQueue                                     vkQueue,
 		uint32_t                                    bindInfoCount,
 		const VkBindSparseInfo*                     pBindInfo,
-		VkFence                                     vkFence) {
+		VkFence                                     fence) {
 	auto& queue = getData<Queue>(vkQueue);
 	auto& dev = *queue.dev;
 
-	Fence* fence {};
-	if(vkFence) {
-		fence = &get(dev, vkFence);
-	}
+	QueueSubmitter submitter {};
+	init(submitter, queue, SubmissionType::bindSparse, fence);
 
-	ThreadMemScope memScope;
-	auto fwd = memScope.alloc<VkBindSparseInfo>(bindInfoCount);
-	for(auto i = 0u; i < bindInfoCount; ++i) {
-		auto& bindInfo = fwd[i];
-		bindInfo = pBindInfo[i];
-
-		// process semaphores
-		auto waitSems = memScope.alloc<VkSemaphore>(bindInfo.waitSemaphoreCount);
-		for(auto j = 0u; j < bindInfo.waitSemaphoreCount; ++j) {
-			auto& sem = get(dev, bindInfo.pWaitSemaphores[j]);
-			waitSems[j] = sem.handle;
-		}
-
-		auto signalSems = memScope.alloc<VkSemaphore>(bindInfo.signalSemaphoreCount);
-		for(auto j = 0u; j < bindInfo.signalSemaphoreCount; ++j) {
-			auto& sem = get(dev, bindInfo.pSignalSemaphores[j]);
-			signalSems[j] = sem.handle;
-		}
-
-		// process bindings
-		auto bufBinds = memScope.alloc<VkSparseBufferMemoryBindInfo>(bindInfo.bufferBindCount);
-		for(auto j = 0u; j < bindInfo.bufferBindCount; ++j) {
-			bufBinds[j] = bindInfo.pBufferBinds[j];
-			process(dev, memScope, bufBinds[j]);
-		}
-
-		auto imgOpaqueBinds = memScope.alloc<VkSparseImageOpaqueMemoryBindInfo>(
-			bindInfo.imageOpaqueBindCount);
-		for(auto j = 0u; j < bindInfo.imageOpaqueBindCount; ++j) {
-			imgOpaqueBinds[j] = bindInfo.pImageOpaqueBinds[j];
-			process(dev, memScope, imgOpaqueBinds[j]);
-		}
-
-		auto imgBinds = memScope.alloc<VkSparseImageMemoryBindInfo>(bindInfo.imageBindCount);
-		for(auto j = 0u; j < bindInfo.imageBindCount; ++j) {
-			imgBinds[j] = bindInfo.pImageBinds[j];
-			process(dev, memScope, imgBinds[j]);
-		}
-
-		bindInfo.pBufferBinds = bufBinds.data();
-		bindInfo.pImageBinds = imgBinds.data();
-		bindInfo.pImageOpaqueBinds = imgOpaqueBinds.data();
-		bindInfo.pSignalSemaphores = signalSems.data();
-		bindInfo.pWaitSemaphores = waitSems.data();
-	}
+	process(submitter, {pBindInfo, bindInfoCount});
 
 	VkResult res;
 
+	// Lock order is important here, lock dev mutex before queue mutex.
+	// We lock the dev mutex to sync with gui.
 	{
-		// QueueBindSparse is a queue operation, have to lock our mutex
-		std::lock_guard lock(queue.dev->queueMutex);
-		res = queue.dev->dispatch.QueueBindSparse(queue.handle,
-			u32(fwd.size()), fwd.data(), fence ? fence->handle : VK_NULL_HANDLE);
+		// TODO PERF: locking the dev mutex here is terrible for performance,
+		// queueSubmit can take a long time and applications might parallelize
+		// around it.
+		// Maybe we can handle this with a separate gui/submission sync mutex?
+		std::lock_guard devLock(dev.mutex);
+
+		addSubmissionSyncLocked(submitter);
+		if(dev.doFullSync) {
+			addFullSyncLocked(submitter);
+		} else {
+			addGuiSyncLocked(submitter);
+		}
+
+		{
+			ZoneScopedN("dispatch.QueueSubmit");
+			std::lock_guard queueLock(dev.queueMutex);
+			res = queue.dev->dispatch.QueueBindSparse(queue.handle,
+				u32(submitter.bindSparseInfos.size()),
+				submitter.bindSparseInfos.data(),
+				submitter.submFence);
+		}
+
 		if(res != VK_SUCCESS) {
+			dlg_trace("vkQueueBindSparse error: {} (res)", vk::name(res), res);
+			cleanupOnErrorLocked(submitter);
 			return res;
 		}
-	}
 
-	// TODO: insert into pending submissions, track completion.
-	// We might have to sync past and future hooks/gui submissions with this!
+		postProcessLocked(submitter);
+		dev.pending.push_back(std::move(submitter.dstBatch));
+	}
 
 	return res;
 }
@@ -628,6 +396,93 @@ Submission* nextSubmissionOrder(Submission& subm) {
 	return nullptr;
 }
 
+void activateLocked(MemoryResource& res, const OpaqueSparseMemoryBind& bind) {
+	dlg_assert(res.memory.index() == 1u);
+	auto& bindState = std::get<1>(res.memory);
+
+	if(bind.memory) {
+		auto [it, success] = bindState.opaqueBinds.insert(bind);
+		dlg_assert(success);
+		bind.memory->allocations.insert(&*it);
+	} else {
+		// unbind
+		auto resEnd = bind.resourceOffset + bind.memSize;
+		auto it = bindState.opaqueBinds.lower_bound(bind);
+		while(it != bindState.opaqueBinds.end() &&
+				it->resourceOffset < resEnd) {
+			dlg_assertm(it->resourceOffset + it->memSize <= resEnd,
+				"TODO: partial unbinds not support");
+			it->memory->allocations.erase(&*it);
+			it = bindState.opaqueBinds.erase(it);
+		}
+	}
+}
+
+void activateLocked(BindSparseSubmission& bindSparse) {
+	for(auto& bufBind : bindSparse.buffer) {
+		dlg_assert(bufBind.dst);
+		auto& res = *bufBind.dst;
+		for(auto& [bind, _] : bufBind.binds) {
+			activateLocked(res, bind);
+		}
+	}
+
+	for(auto& imgBind : bindSparse.opaqueImage) {
+		dlg_assert(imgBind.dst);
+		auto& res = *imgBind.dst;
+		for(auto& [bind, _] : imgBind.binds) {
+			activateLocked(res, bind);
+		}
+	}
+
+	for(auto& imgBind : bindSparse.image) {
+		dlg_assert(imgBind.dst);
+		auto& res = *imgBind.dst;
+		dlg_assert(res.memory.index() == 1u);
+		auto& bindState = std::get<1>(res.memory);
+
+		for(auto& [bind, _] : imgBind.binds) {
+			if(bind.memory) {
+				auto [it, success] = bindState.imageBinds.insert(bind);
+				dlg_assert(success);
+				bind.memory->allocations.insert(&*it);
+			} else {
+				// TODO: lower bound and iterate? not sure how
+				auto it = bindState.imageBinds.find(bind);
+				if(it != bindState.imageBinds.end()) {
+					// we currently don't support partial or multi- unbinding
+					dlg_assertm(it->offset.x == bind.offset.x &&
+						it->offset.y == bind.offset.y &&
+						it->offset.z == bind.offset.z,
+						"TODO: partial unbind not supported");
+					dlg_assertm(it->size.width == bind.size.width &&
+						it->size.height == bind.size.height &&
+						it->size.depth == bind.size.depth,
+						"TODO: partial unbind not supported");
+
+					it->memory->allocations.erase(&*it);
+					it = bindState.imageBinds.erase(it);
+				}
+			}
+		}
+	}
+}
+
+void activateLocked(CommandSubmission& cmdSub) {
+	// store pending layouts
+	for(auto& scb : cmdSub.cbs) {
+		auto recPtr = scb.cb->lastRecordPtrLocked();
+		for(auto& ui : recPtr->used.images) {
+			if(ui.layoutChanged) {
+				dlg_assert(
+					ui.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+					ui.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
+				ui.handle->pendingLayout = ui.finalLayout;
+			}
+		}
+	}
+}
+
 // Called when we know that the submission is ready for execution on the GPU.
 // Before this being called, no command can be executed.
 void activateLocked(Submission& subm) {
@@ -644,6 +499,16 @@ void activateLocked(Submission& subm) {
 	// 		wait.semaphore->lowerBound = 0u;
 	// 	}
 	// }
+
+	if(subm.parent->type == SubmissionType::command) {
+		auto& cmdSub = std::get<CommandSubmission>(subm.data);
+		activateLocked(cmdSub);
+	} else if(subm.parent->type == SubmissionType::bindSparse) {
+		auto& bindSub = std::get<BindSparseSubmission>(subm.data);
+		activateLocked(bindSub);
+	} else {
+		dlg_error("unreachable");
+	}
 
 	for(auto& signal : subm.signals) {
 		if(signal->semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE) {
@@ -701,5 +566,8 @@ bool checkActivateLocked(Submission& subm) {
 	activateLocked(subm);
 	return true;
 }
+
+BindSparseSubmission::BindSparseSubmission() = default;
+BindSparseSubmission::~BindSparseSubmission() = default;
 
 } // namespace vil
