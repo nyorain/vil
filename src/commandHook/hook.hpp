@@ -188,6 +188,8 @@ public:
 	// The hook can replace commandBuffers and add attach CommandHookSubmission
 	// objects to the associated cb submissions.
 	// Called with the device mutex unlocked.
+	// Assumes that the QueueSubmitter is a QueueSubmit command (i.e.
+	// not QueueBindSparse).
 	void hook(QueueSubmitter& subm);
 
 	// Updates the hook operations

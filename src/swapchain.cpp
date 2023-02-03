@@ -473,4 +473,7 @@ VKAPI_ATTR VkResult VKAPI_CALL GetSwapchainImagesKHR(
 	return res;
 }
 
+FrameSubmission::FrameSubmission() = default;
+FrameSubmission::~FrameSubmission() = default;
+
 } // namespace vil

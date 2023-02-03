@@ -3,10 +3,17 @@
 #include <commandHook/state.hpp>
 #include <command/match.hpp>
 #include <ds.hpp>
+#include <memory.hpp>
+#include <image.hpp>
+#include <buffer.hpp>
+#include <queue.hpp>
 #include <device.hpp>
 #include <swapchain.hpp>
 
 namespace vil {
+
+CommandSelection::CommandSelection() = default;
+CommandSelection::~CommandSelection() = default;
 
 bool CommandSelection::update() {
 	auto& dev = *dev_;

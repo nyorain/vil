@@ -346,6 +346,9 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	auto& dev = *dev_;
 	keepAliveLC_.clear();
 
+	// sparse bindings can't be hooked
+	dlg_assert(subm.dstBatch->type == SubmissionType::command);
+
 	// make sure we never have too many submissions
 	// can become a memory problem at some point (e.g. when never
 	// retrieved & cleared by gui for whatever reason).
@@ -376,7 +379,8 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	if(localCaptures_.empty()) {
 		auto hasBuildCmd = false;
 		for(auto [subID, sub] : enumerate(subm.dstBatch->submissions)) {
-			for(auto [cbID, cb] : enumerate(sub.cbs)) {
+			auto& cmdSub = std::get<CommandSubmission>(sub.data);
+			for(auto [cbID, cb] : enumerate(cmdSub.cbs)) {
 				auto& rec = *cb.cb->lastRecordLocked();
 				if(rec.buildsAccelStructs) {
 					hasBuildCmd = true;
@@ -413,7 +417,8 @@ void CommandHook::hook(QueueSubmitter& subm) {
 		curr.queue = subm.queue;
 		curr.submissionID = subm.globalSubmitID;
 		for(auto& sub : subm.dstBatch->submissions) {
-			for(auto& cb : sub.cbs) {
+			auto& cmdSub = std::get<CommandSubmission>(sub.data);
+			for(auto& cb : cmdSub.cbs) {
 				dlg_assertm(!cb.hook, "Hooking already hooked submission?!");
 				auto rec = cb.cb->lastRecordPtrLocked();
 				dlg_assert(rec);
@@ -458,7 +463,8 @@ void CommandHook::hook(QueueSubmitter& subm) {
 
 		span<VkCommandBufferSubmitInfo> patchedCbInfos {};
 
-		for(auto [cbID, cb] : enumerate(sub.cbs)) {
+		auto& cmdSub = std::get<CommandSubmission>(sub.data);
+		for(auto [cbID, cb] : enumerate(cmdSub.cbs)) {
 			auto& rec = *cb.cb->lastRecordLocked();
 
 			VkCommandBuffer hooked = VK_NULL_HANDLE;

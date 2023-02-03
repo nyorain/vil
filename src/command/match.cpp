@@ -469,6 +469,8 @@ FrameSubmissionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 	ret.match.match += 1.f;
 	ret.match.total += 1.f;
 
+	// TODO: add matching for sparse bindings
+
 	if(a.submissions.size() == 0u && b.submissions.size() == 0u) {
 		return ret;
 	} else if(a.submissions.size() == 0u || b.submissions.size() == 0u) {

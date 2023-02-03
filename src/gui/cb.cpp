@@ -470,7 +470,7 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 			ImGui::Separator();
 		}
 
-		const auto id = dlg::format("vkQueueSubmit:{}", b);
+		const auto id = dlg::format("submission:{}", b);
 		auto flags = int(ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth);
 		if(batch.submissions.empty()) {
 			// empty submissions are displayed differently.
@@ -490,7 +490,21 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 		const auto opened = openedSubmissions_.count(&batch);
 		ImGui::SetNextItemOpen(opened);
 
-		const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "vkQueueSubmit");
+		std::string name;
+		if(batch.type == SubmissionType::command) {
+			name = "vkQueueSubmit";
+		} else if(batch.type == SubmissionType::bindSparse) {
+			name = "vkQueueBindSparse";
+		} else {
+			dlg_error("unreachable");
+			name = "???";
+		}
+
+		if(!batch.queue->name.empty()) {
+			name = dlg::format("{}({})", name, batch.queue->name);
+		}
+
+		const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name.c_str());
 		if(ImGui::IsItemActivated() && !ImGui::IsItemToggledOpen()) {
 			submission_ = &batch;
 			record_ = nullptr;

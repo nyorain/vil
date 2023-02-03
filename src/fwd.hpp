@@ -78,6 +78,7 @@ struct DescriptorCopyOp;
 struct CopiedImage;
 struct FrameSubmission;
 struct QueueSubmitter;
+struct BindSparseSubmission;
 
 struct ViewableImageCopy;
 
@@ -98,12 +99,20 @@ struct BuildAccelStructsCmd;
 struct BuildAccelStructsIndirectCmd;
 struct DescriptorSetCow;
 
+struct MemoryBind;
+struct FullMemoryBind;
+struct SparseMemoryBind;
+struct OpaqueSparseMemoryBind;
+struct ImageSparseMemoryBind;
+
 struct Matcher;
 
 struct ObjectTypeHandler;
 
 enum class CommandType : u32;
 using CommandTypeFlags = nytl::Flags<CommandType>;
+
+enum class SubmissionType : u8;
 
 struct DisplayWindow;
 struct Platform;

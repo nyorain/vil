@@ -1,4 +1,5 @@
 #include <submit.hpp>
+#include <layer.hpp>
 #include <wrap.hpp>
 #include <device.hpp>
 #include <queue.hpp>
@@ -17,6 +18,7 @@
 #include <commandHook/submission.hpp>
 #include <gui/gui.hpp>
 #include <vkutil/enumString.hpp>
+#include <vk/format_utils.h>
 #include <util/profiling.hpp>
 
 namespace vil {
@@ -108,13 +110,61 @@ VkResult submitSemaphore(Queue& q, VkSemaphore sem, bool timeline) {
 	return q.dev->dispatch.QueueSubmit(q.handle, 1u, &si, VK_NULL_HANDLE);
 }
 
+void init(QueueSubmitter& subm, Queue& queue, SubmissionType type,
+		VkFence fence) {
+	auto& dev = *queue.dev;
+	dlg_assert(!queue.createdByUs);
+
+	subm.dev = &dev;
+	subm.queue = &queue;
+
+	{
+		// Get a new submission ID for this queue
+		std::lock_guard lock(dev.mutex);
+		subm.globalSubmitID = ++dev.submissionCounter;
+
+		// Check all pending submissions for completion, to possibly return
+		// resources to fence/semaphore pools
+		// check all submissions for completion
+		checkPendingSubmissionsLocked(dev);
+	}
+
+	subm.dstBatch = std::make_unique<SubmissionBatch>();
+	auto& batch = *subm.dstBatch;
+	batch.type = type;
+	batch.queue = &queue;
+	batch.globalSubmitID = subm.globalSubmitID;
+
+	// Make sure that every submission has a fence associated.
+	// If the application already set a fence we can simply check that
+	// to see if the submission completed (the vulkan spec gives us enough
+	// guarantees to allow it). Otherwise we have to use a fence from the pool.
+	if(fence) {
+		batch.appFence = &dev.fences.get(fence);
+
+		std::lock_guard lock(dev.mutex);
+
+		// per vulkan spec, using a fence in QueueSubmit that is signaled
+		// is not allowed. And if it was reset we also remove its associated
+		// submission.
+		dlg_assert(!batch.appFence->submission);
+		subm.submFence = fence;
+		batch.appFence->submission = &batch;
+	} else {
+		// PERF: when we have timeline semaphores we can simply use our
+		// added timeline semaphore to track this batch and don't need a fence at all.
+		batch.ourFence = getFenceFromPool(dev);
+		subm.submFence = batch.ourFence;
+	}
+}
+
 void process(QueueSubmitter& subm, VkSubmitInfo2& si) {
 	ZoneScoped;
 
 	auto& dev = *subm.dev;
 
 	auto& dst = subm.dstBatch->submissions.emplace_back();
-	dst.parent = subm.dstBatch;
+	dst.parent = subm.dstBatch.get();
 
 	dlg_assert(!hasChain(si, VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO));
 
@@ -166,11 +216,12 @@ void process(QueueSubmitter& subm, VkSubmitInfo2& si) {
 	si.waitSemaphoreInfoCount = fwdWaits.size();
 	si.pWaitSemaphoreInfos = fwdWaits.data();
 
-	// = commandbuffers =
+	// = commandBuffers =
 	auto fwdCbs = subm.memScope.alloc<VkCommandBufferSubmitInfo>(si.commandBufferInfoCount);
-	dst.cbs.reserve(si.commandBufferInfoCount);
+	auto& cmdSub = dst.data.emplace<CommandSubmission>();
+	cmdSub.cbs.reserve(si.commandBufferInfoCount);
 	for(auto j = 0u; j < si.commandBufferInfoCount; ++j) {
-		auto& scb = dst.cbs.emplace_back();
+		auto& scb = cmdSub.cbs.emplace_back();
 		scb.cb = &getCommandBuffer(si.pCommandBufferInfos[j].commandBuffer);
 
 		fwdCbs[j] = si.pCommandBufferInfos[j];
@@ -182,19 +233,262 @@ void process(QueueSubmitter& subm, VkSubmitInfo2& si) {
 }
 
 void process(QueueSubmitter& subm, span<const VkSubmitInfo2> infos) {
-	auto off = subm.submitInfos.size();
-	subm.submitInfos = subm.memScope.alloc<VkSubmitInfo2>(off + infos.size());
+	dlg_assert(subm.submitInfos.empty());
+	dlg_assert(subm.dstBatch->submissions.empty());
 
+	subm.submitInfos = subm.memScope.alloc<VkSubmitInfo2>(infos.size());
 	subm.dstBatch->submissions.reserve(infos.size());
+
 	for(auto i = 0u; i < infos.size(); ++i) {
-		subm.submitInfos[off + i] = infos[i];
-		process(subm, subm.submitInfos[off + i]);
+		subm.submitInfos[i] = infos[i];
+		process(subm, subm.submitInfos[i]);
 	}
 
 	if(subm.dev->commandHook) {
 		// after this, the SubmitInfos might contain our hooked command
 		// buffers, we must not use getCommandBuffer anymore!
 		subm.dev->commandHook->hook(subm);
+	}
+}
+
+// sparse
+IntrusiveMemPtrBind<OpaqueSparseMemoryBind> process(MemoryResource& res,
+		VkSparseMemoryBind& vkBind) {
+	auto& dev = *res.dev;
+	dlg_assert(res.memory.index() == 1u);
+
+	OpaqueSparseMemoryBind bind {};
+	bind.resource = &res;
+	bind.flags = vkBind.flags;
+	bind.memOffset = vkBind.memoryOffset;
+	bind.memSize = vkBind.size;
+	bind.resourceOffset = vkBind.resourceOffset;
+
+	IntrusivePtr<DeviceMemory> memPtr;
+	if(vkBind.memory) {
+		memPtr = getPtr(dev, vkBind.memory);
+		vkBind.memory = memPtr->handle;
+		bind.memory = memPtr.get();
+	}
+
+	return {bind, memPtr};
+}
+
+VkDeviceSize memorySize(const Image& img, const VkSparseImageMemoryBind& bind) {
+	auto& dev = *img.dev;
+
+	// TODO: cache properties somewhere?
+	u32 numFmtProps {};
+	dev.ini->dispatch.GetPhysicalDeviceSparseImageFormatProperties(
+		dev.phdev, img.ci.format, img.ci.imageType, img.ci.samples,
+		img.ci.usage, img.ci.tiling, &numFmtProps, nullptr);
+
+	ThreadMemScope tms;
+	auto props = tms.alloc<VkSparseImageFormatProperties>(numFmtProps);
+	dev.ini->dispatch.GetPhysicalDeviceSparseImageFormatProperties(
+		dev.phdev, img.ci.format, img.ci.imageType, img.ci.samples,
+		img.ci.usage, img.ci.tiling, &numFmtProps, props.data());
+
+	VkExtent3D granularity {};
+	for(auto& p : props) {
+		if(p.aspectMask == bind.subresource.aspectMask) {
+			granularity = p.imageGranularity;
+			break;
+		}
+	}
+
+	dlg_assert(granularity.width != 0);
+
+	dlg_assert(bind.offset.x % granularity.width == 0);
+	dlg_assert(bind.offset.y % granularity.height == 0);
+	dlg_assert(bind.offset.z % granularity.depth == 0);
+
+	// compare vulkan pec: "Any bound partially-used-sparse-blocks must still
+	// have their full sparse block size in bytes allocated in memory"
+	// Granularity is the number of blocks for BC formats so this should be fine.
+	auto numTexels = alignPOT(bind.extent.depth, granularity.depth) *
+		alignPOT(bind.extent.height, granularity.height) *
+		alignPOT(bind.extent.width, granularity.width);
+	return numTexels * FormatElementSize(img.ci.format, bind.subresource.aspectMask);
+}
+
+IntrusiveMemPtrBind<ImageSparseMemoryBind> process(Image& img, VkSparseImageMemoryBind& vkBind) {
+	auto& dev = *img.dev;
+
+	dlg_assert(img.memory.index() == 1u);
+
+	ImageSparseMemoryBind bind {};
+	bind.resource = &img;
+	bind.flags = vkBind.flags;
+	bind.memOffset = vkBind.memoryOffset;
+	bind.offset = vkBind.offset;
+	bind.size = vkBind.extent;
+	bind.subres = vkBind.subresource;
+	bind.memSize = memorySize(img, vkBind);
+
+	IntrusivePtr<DeviceMemory> memPtr;
+	if(vkBind.memory) {
+		memPtr = getPtr(dev, vkBind.memory);
+		vkBind.memory = memPtr->handle;
+		bind.memory = memPtr.get();
+	}
+
+	return {bind, memPtr};
+}
+
+void process(Device& dev, SparseBufferBind& dst, ThreadMemScope& scope,
+		VkSparseBufferMemoryBindInfo& bind) {
+	dst.dst.reset(&get(dev, bind.buffer));
+	auto& buf = *dst.dst;
+	bind.buffer = buf.handle;
+
+	auto fwdBinds = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
+	dst.binds.reserve(bind.bindCount);
+	for(auto i = 0u; i < bind.bindCount; ++i) {
+		auto& b = fwdBinds[i];
+		b = bind.pBinds[i];
+		dst.binds.push_back(process(buf, b));
+	}
+
+	bind.pBinds = fwdBinds.data();
+}
+
+void process(Device& dev, SparseOpaqueImageBind& dst, ThreadMemScope& scope,
+		VkSparseImageOpaqueMemoryBindInfo& bind) {
+	dst.dst = getPtr(dev, bind.image);
+	auto& img = *dst.dst;
+	bind.image = img.handle;
+
+	auto mems = scope.alloc<VkSparseMemoryBind>(bind.bindCount);
+	dst.binds.reserve(bind.bindCount);
+	for(auto i = 0u; i < bind.bindCount; ++i) {
+		auto& b = mems[i];
+		b = bind.pBinds[i];
+		dst.binds.push_back(process(img, b));
+	}
+
+	bind.pBinds = mems.data();
+}
+
+void process(Device& dev, SparseImageBind& dst, ThreadMemScope& scope,
+		VkSparseImageMemoryBindInfo& bind) {
+	dst.dst = getPtr(dev, bind.image);
+	auto& img = *dst.dst;
+	bind.image = img.handle;
+
+	auto mems = scope.alloc<VkSparseImageMemoryBind>(bind.bindCount);
+	dst.binds.reserve(bind.bindCount);
+	for(auto i = 0u; i < bind.bindCount; ++i) {
+		auto& b = mems[i];
+		b = bind.pBinds[i];
+		dst.binds.push_back(process(img, b));
+	}
+
+	bind.pBinds = mems.data();
+}
+
+
+void process(QueueSubmitter& subm, VkBindSparseInfo& bi) {
+	ZoneScoped;
+
+	auto& memScope = subm.memScope;
+	auto& dev = *subm.dev;
+
+	auto& dst = subm.dstBatch->submissions.emplace_back();
+	dst.parent = subm.dstBatch.get();
+
+	auto tsInfo = findChainInfo<
+		VkTimelineSemaphoreSubmitInfo,
+		VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO>(bi);
+
+	// = signal semaphores =
+	auto fwdSignals = subm.memScope.alloc<VkSemaphore>(bi.signalSemaphoreCount);
+	dst.signals.reserve(bi.signalSemaphoreCount);
+	for(auto j = 0u; j < bi.signalSemaphoreCount; ++j) {
+		auto& signal = bi.pSignalSemaphores[j];
+
+		auto& dstSync = *dst.signals.emplace_back(std::make_unique<SyncOp>());
+		dstSync.semaphore = &get(dev, signal);
+		dstSync.stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		dstSync.submission = &dst;
+
+		fwdSignals[j] = dstSync.semaphore->handle;
+
+		if(dstSync.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE) {
+			dlg_assert_or(tsInfo && j < tsInfo->signalSemaphoreValueCount, continue);
+			dstSync.value = tsInfo->pSignalSemaphoreValues[j];
+		}
+
+		// we insert the submission into semaphore.signals in postProcess
+	}
+
+	bi.signalSemaphoreCount = fwdSignals.size();
+	bi.pSignalSemaphores = fwdSignals.data();
+
+	// = wait semaphores =
+	auto fwdWaits = subm.memScope.alloc<VkSemaphore>(bi.waitSemaphoreCount);
+	dst.waits.reserve(bi.waitSemaphoreCount);
+	for(auto j = 0u; j < bi.waitSemaphoreCount; ++j) {
+		auto& wait = bi.pWaitSemaphores[j];
+
+		auto& dstSync = *dst.waits.emplace_back(std::make_unique<SyncOp>());
+		dstSync.semaphore = &get(dev, wait);
+		dstSync.stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		dstSync.submission = &dst;
+
+		fwdWaits[j] = dstSync.semaphore->handle;
+
+		if(dstSync.semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE) {
+			dlg_assert_or(tsInfo && j < tsInfo->waitSemaphoreValueCount, continue);
+			dstSync.value = tsInfo->pWaitSemaphoreValues[j];
+		}
+
+		// we insert the submission into semaphore.waits in postProcess
+	}
+
+	bi.waitSemaphoreCount = fwdWaits.size();
+	bi.pWaitSemaphores = fwdWaits.data();
+
+	// process bindings
+	auto& dstBinds = dst.data.emplace<BindSparseSubmission>();
+
+	auto bufBinds = memScope.alloc<VkSparseBufferMemoryBindInfo>(bi.bufferBindCount);
+	dstBinds.buffer.reserve(bi.bufferBindCount);
+	for(auto j = 0u; j < bi.bufferBindCount; ++j) {
+		bufBinds[j] = bi.pBufferBinds[j];
+		process(dev, dstBinds.buffer.emplace_back(), memScope, bufBinds[j]);
+	}
+
+	auto imgOpaqueBinds = memScope.alloc<VkSparseImageOpaqueMemoryBindInfo>(
+		bi.imageOpaqueBindCount);
+	dstBinds.opaqueImage.reserve(bi.imageOpaqueBindCount);
+	for(auto j = 0u; j < bi.imageOpaqueBindCount; ++j) {
+		imgOpaqueBinds[j] = bi.pImageOpaqueBinds[j];
+		process(dev, dstBinds.opaqueImage.emplace_back(), memScope, imgOpaqueBinds[j]);
+	}
+
+	auto imgBinds = memScope.alloc<VkSparseImageMemoryBindInfo>(bi.imageBindCount);
+	dstBinds.image.reserve(bi.imageBindCount);
+	for(auto j = 0u; j < bi.imageBindCount; ++j) {
+		imgBinds[j] = bi.pImageBinds[j];
+		process(dev, dstBinds.image.emplace_back(), memScope, imgBinds[j]);
+	}
+
+	bi.pBufferBinds = bufBinds.data();
+	bi.pImageBinds = imgBinds.data();
+	bi.pImageOpaqueBinds = imgOpaqueBinds.data();
+}
+
+void process(QueueSubmitter& subm, span<const VkBindSparseInfo> infos) {
+	dlg_assert(subm.bindSparseInfos.empty());
+	dlg_assert(subm.dstBatch->submissions.empty());
+
+	subm.bindSparseInfos = subm.memScope.alloc<VkBindSparseInfo>(infos.size());
+	subm.dstBatch->submissions.reserve(infos.size());
+
+	for(auto i = 0u; i < infos.size(); ++i) {
+		subm.bindSparseInfos[i] = infos[i];
+		process(subm, subm.bindSparseInfos[i]);
 	}
 }
 
@@ -225,9 +519,10 @@ void addSubmissionSyncLocked(QueueSubmitter& subm) {
 	}
 }
 
-void cleanupOnError(QueueSubmitter& subm) {
+void cleanupOnErrorLocked(QueueSubmitter& subm) {
 	auto& dev = *subm.dev;
 	auto& batch = *subm.dstBatch;
+	assertOwned(dev.mutex);
 
 	if(batch.ourFence) {
 		dev.fencePool.push_back(batch.ourFence);
@@ -406,7 +701,8 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 				auto res = submitSemaphore(*subm.queue, guiSyncSemaphore);
 
 				if(res != VK_SUCCESS) {
-					dlg_error("vkQueueSubmit error: {}", vk::name(res));
+					dlg_error("internal vkQueueSubmit error: {} ({})",
+						vk::name(res), res);
 
 					// we continue as usual, the submission will just
 					// not be chained correctly and might cause sync
@@ -455,25 +751,28 @@ void postProcessLocked(QueueSubmitter& subm) {
 		bool doActivate = !subm.queue->firstWaiting;
 
 		// process cbs
-		for(auto& scb : sub.cbs) {
-			auto* cb = scb.cb;
-			cb->pending.push_back(&sub);
-			auto recPtr = cb->lastRecordPtrLocked();
+		if(batch.type == SubmissionType::command) {
+			auto& cmdSub = std::get<CommandSubmission>(sub.data);
+			for(auto& scb : cmdSub.cbs) {
+				auto* cb = scb.cb;
+				// NOTE: could defer that to activate as well, not
+				//   sure about it. Doing it here means we can never rely
+				//   on cb->pending to be activated, i.e. must never wait
+				//   on them in any way.
+				cb->pending.push_back(&sub);
+				auto recPtr = cb->lastRecordPtrLocked();
 
-			if(recordBatch) {
-				recordBatch->submissions.push_back(recPtr);
-			}
-
-			// store pending layouts
-			// TODO: postpone to submission activation!
-			for(auto& ui : recPtr->used.images) {
-				if(ui.layoutChanged) {
-					dlg_assert(
-						ui.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
-						ui.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
-					ui.handle->pendingLayout = ui.finalLayout;
+				if(recordBatch) {
+					recordBatch->submissions.push_back(recPtr);
 				}
 			}
+		} else if(batch.type == SubmissionType::bindSparse) {
+			if(recordBatch) {
+				recordBatch->sparseBinds.push_back(
+					std::get<BindSparseSubmission>(sub.data));
+			}
+		} else {
+			dlg_error("unreachable");
 		}
 
 		// insert into wait semaphores
@@ -536,31 +835,58 @@ bool potentiallyWritesLocked(const Submission& subm, const Image* img, const Buf
 	assertOwned(subm.parent->queue->dev->mutex);
 	dlg_assert(img || buf);
 
-	for(auto& [cb, _] : subm.cbs) {
-		auto& rec = *cb->lastRecordLocked();
+	if(subm.parent->type == SubmissionType::command) {
+		auto& cmdSub = std::get<CommandSubmission>(subm.data);
+		for(auto& [cb, _] : cmdSub.cbs) {
+			auto& rec = *cb->lastRecordLocked();
 
-		if(buf) {
-			auto it = find(rec.used.buffers, const_cast<Buffer&>(*buf));
-			if(it != rec.used.buffers.end()) {
+			if(buf) {
+				auto it = find(rec.used.buffers, const_cast<Buffer&>(*buf));
+				if(it != rec.used.buffers.end()) {
+					return true;
+				}
+			} else if(img) {
+				auto it = find(rec.used.images, const_cast<Image&>(*img));
+				if(it != rec.used.images.end()) {
+					return true;
+				}
+			} else {
+				dlg_error("unreachable");
+			}
+
+			for(auto& uds : rec.used.descriptorSets) {
+				// in this case we know that the bound descriptor set must
+				// still be valid
+				auto& state = *static_cast<DescriptorSet*>(uds.ds);
+				// important that the ds mutex is locked mainly for
+				// update_unused_while_pending.
+				auto lock = state.lock();
+				if((img && hasBound(state, *img)) || (buf && hasBound(state, *buf))) {
+					return true;
+				}
+			}
+		}
+	} else {
+		dlg_assert(subm.parent->type == SubmissionType::bindSparse);
+		auto& bindSub = std::get<BindSparseSubmission>(subm.data);
+
+		// TODO(correctness): also consider memory aliasing somehow?
+		//   -> See aliasing in design.md
+
+		for(auto& bufBind : bindSub.buffer) {
+			if(buf && bufBind.dst == buf) {
 				return true;
 			}
-		} else if(img) {
-			auto it = find(rec.used.images, const_cast<Image&>(*img));
-			if(it != rec.used.images.end()) {
-				return true;
-			}
-		} else {
-			dlg_error("unreachable");
 		}
 
-		for(auto& uds : rec.used.descriptorSets) {
-			// in this case we know that the bound descriptor set must
-			// still be valid
-			auto& state = *static_cast<DescriptorSet*>(uds.ds);
-			// important that the ds mutex is locked mainly for
-			// update_unused_while_pending.
-			auto lock = state.lock();
-			if((img && hasBound(state, *img)) || (buf && hasBound(state, *buf))) {
+		for(auto& imgBind : bindSub.image) {
+			if(img && imgBind.dst == img) {
+				return true;
+			}
+		}
+
+		for(auto& imgBind : bindSub.opaqueImage) {
+			if(img && imgBind.dst == img) {
 				return true;
 			}
 		}
@@ -588,6 +914,10 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 			}
 		}
 
+		if(added) {
+			continue;
+		}
+
 		for(auto* handle : draw.usedBuffers) {
 			if(potentiallyWritesLocked(subm, nullptr, handle)) {
 				subs.push_back(&subm);
@@ -596,16 +926,26 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 			}
 		}
 
+		// TODO(correctness): also sync with memory objects.
+		//   e.g. for aliasing. But we are only interested in specific ranges
+		//   meh this will get complicated.
+		//   -> See aliasing in design.md
+
 		if(added) {
 			continue;
 		}
 
-		for(auto& [_, hookPtr] : subm.cbs) {
-			// TODO(perf): we might not need sync in all cases. Pretty much only
-			// for images and xfb buffers I guess.
-			if(hookPtr && hookPtr->record->state.get() == draw.usedHookState.get()) {
-				dlg_assert(hookPtr->record->writer == &subm);
-				subs.push_back(&subm);
+		// make sure that the draw has finished using the HookState if its
+		// writen by the submission
+		if(subm.parent->type == SubmissionType::command) {
+			auto& cmdSub = std::get<CommandSubmission>(subm.data);
+			for(auto& [_, hookPtr] : cmdSub.cbs) {
+				// TODO(perf): we might not need sync in all cases. Pretty much only
+				// for images and xfb buffers I guess.
+				if(hookPtr && hookPtr->record->state.get() == draw.usedHookState.get()) {
+					dlg_assert(hookPtr->record->writer == &subm);
+					subs.push_back(&subm);
+				}
 			}
 		}
 	}

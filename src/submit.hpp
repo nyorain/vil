@@ -26,14 +26,16 @@ struct QueueSubmitter {
 	// - we add our own semaphore to every submission to allow tracking
 	//   when they are finished (we can use that in the gui to use the resources
 	//   ourselves without having to wait on cpu for the submissions to complete)
-	span<VkSubmitInfo2> submitInfos;
+	span<VkSubmitInfo2> submitInfos; // for command submit
+	span<VkBindSparseInfo> bindSparseInfos; // for sparse bind
 
 	ThreadMemScope memScope;
 
 	Device* dev;
 	Queue* queue;
-	SubmissionBatch* dstBatch;
+	std::unique_ptr<SubmissionBatch> dstBatch;
 	u64 globalSubmitID; // dev.submissionCounter
+	VkFence submFence {}; // forward handle to be used on submission
 
 	// Will be set to the local submission id of the last submission that
 	// contains a command buffer hooked by us.
@@ -45,8 +47,11 @@ struct QueueSubmitter {
 	Draw* syncedGuiDraw {};
 };
 
+void init(QueueSubmitter&, Queue&, SubmissionType, VkFence);
+
 // Processes the given submit infos, adding them to the submitter.
 void process(QueueSubmitter&, span<const VkSubmitInfo2>);
+void process(QueueSubmitter&, span<const VkBindSparseInfo>);
 
 // Adds our own signal operation to each submission in the given QueueSubmitter,
 // so we have a semaphore knowing when it's ready.
@@ -60,7 +65,7 @@ void addGuiSyncLocked(QueueSubmitter&);
 void addFullSyncLocked(QueueSubmitter&);
 
 void postProcessLocked(QueueSubmitter&);
-void cleanupOnError(QueueSubmitter& subm);
+void cleanupOnErrorLocked(QueueSubmitter& subm);
 
 // = ext conversion =
 VkSubmitInfo2 upgrade(Device&, ThreadMemScope& tms, const VkSubmitInfo&);
