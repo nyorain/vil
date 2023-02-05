@@ -180,10 +180,13 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	auto& dev = getDevice(device);
 
 	auto nci = *pCreateInfo;
-	auto isTransient = !!(nci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
 
 	bool linearSampling {};
 	bool nearestSampling {};
+	bool concurrent {};
+
+#ifndef VIL_NO_IMAGE_MOD
+	const auto isTransient = !!(nci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT);
 
 	// If supported, we add the sampled flags to usage so we can
 	// display it directly in our gui.
@@ -204,7 +207,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	// NOTE: needed for our own operations on the buffer. Might be better to
 	// properly acquire/release it instead though, this might have
 	// a performance impact.
-	auto concurrent = false;
 	if(dev.usedQueueFamilyIndices.size() > 1 &&
 			nci.sharingMode != VK_SHARING_MODE_CONCURRENT &&
 			nearestSampling) {
@@ -224,6 +226,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	if((!dev.ini->vulkan11 || features & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT) && !isTransient) {
 		nci.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
+#endif // VIL_NO_SWAPCHAIN_MOD
 
 	auto res = dev.dispatch.CreateImage(dev.handle, &nci, pAllocator, pImage);
 	if(res != VK_SUCCESS) {

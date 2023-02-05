@@ -96,6 +96,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 	if(res != VK_SUCCESS) {
 		dlg_error("vkGetPhysicalDeviceSurfaceCapabilitiesKHR: {} ({})", vk::name(res), res);
 	} else {
+#ifndef VIL_NO_SWAPCHAIN_MOD
 		// We always need color_attachment when drawing a gui.
 		// Vulkan guarantees that it's supported.
 		dlg_assert(caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
@@ -108,6 +109,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchainKHR(
 		if(caps.supportedUsageFlags & VK_IMAGE_USAGE_SAMPLED_BIT) {
 			sci.imageUsage |= VK_IMAGE_USAGE_SAMPLED_BIT;
 		}
+#endif // VIL_NO_SWAPCHAIN_MOD
 	}
 
 	auto result = dev.dispatch.CreateSwapchainKHR(device, &sci, pAllocator, pSwapchain);
@@ -321,6 +323,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 	// TODO: not sure submitting these on the queue and then presenting
 	// is the same, probably not. Need to rework gui to not do present
 	// itself and do batch forward in the end instead.
+	/*
 	ThreadMemScope tms;
 	auto sems = tms.alloc<VkSemaphore>(pPresentInfo->waitSemaphoreCount);
 	auto topOfPipes = tms.alloc<VkPipelineStageFlags>(pPresentInfo->waitSemaphoreCount);
@@ -352,12 +355,25 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		ZoneScopedN("submit");
 		dev.dispatch.QueueSubmit(queue, 1u, &si, VK_NULL_HANDLE);
 	}
+	*/
+
+	// would need to figure out sync in this case
+	dlg_assertm(pPresentInfo->swapchainCount == 1u,
+		"Multipresent not supported atm");
 
 	// dispatch presents, separately
 	auto combinedResult = VK_SUCCESS;
 	for(auto i = 0u; i < pPresentInfo->swapchainCount; ++i) {
 		auto& swapchain = dev.swapchains.get(pPresentInfo->pSwapchains[i]);
 		VkResult res;
+
+		dlg_check({
+			auto it = static_cast<const VkBaseInStructure*>(pPresentInfo->pNext);
+			while (it) {
+				dlg_warn("unhandled queue present pNext {}", it->sType);
+				it = it->pNext;
+			}
+		});
 
 		bool visible {};
 		if(swapchain.overlay && swapchain.overlay->platform) {
@@ -377,25 +393,29 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 		swapchainPresent(swapchain);
 
 		if(swapchain.overlay && visible) {
-			res = swapchain.overlay->drawPresent(qd, {}, pPresentInfo->pImageIndices[i]);
+			span<const VkSemaphore> waitSems;
+			if(i == 0u) {
+				waitSems = {
+					pPresentInfo->pWaitSemaphores,
+					pPresentInfo->waitSemaphoreCount
+				};
+			}
+
+			res = swapchain.overlay->drawPresent(qd, waitSems,
+				pPresentInfo->pImageIndices[i]);
 		} else {
 			VkPresentInfoKHR pi {};
 			pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 			pi.pImageIndices = &pPresentInfo->pImageIndices[i];
 			pi.pSwapchains = &pPresentInfo->pSwapchains[i];
 			pi.swapchainCount = 1u;
-			// wait semaphores already submitted
-			pi.pWaitSemaphores = nullptr;
-			pi.waitSemaphoreCount = 0u;
+			if(i == 0u) {
+				pi.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
+				pi.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
+			} else if(pPresentInfo->waitSemaphoreCount) {
+				dlg_warn("Having to present without wait semaphores");
+			}
 			pi.pNext = pPresentInfo->pNext;
-
-			dlg_check({
-				auto it = static_cast<const VkBaseInStructure*>(pPresentInfo->pNext);
-				while (it) {
-					dlg_warn("unhandled queue present pNext {}", it->sType);
-					it = it->pNext;
-				}
-			});
 
 			std::lock_guard queueLock(qd.dev->queueMutex);
 			ZoneScopedN("dispatch");

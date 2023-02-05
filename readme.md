@@ -1,24 +1,18 @@
 # VIL: Vulkan Introspection Layer
 
-Vulkan in-app debugging layer that is able to provide
-live introspection and debugging via an overlay or window GUI.
+Vulkan layer that allows to inspect GPU state and submitted commands live
+inside your applications.
 
-![Example of command viewer 1](docs/pics/rtao-new.png)
-
-This is still in a very early stage of development. Bug reports are welcome.
-There are various known issues and some of the features below are work-in-progess.
-See the [rough overview](docs/features.md) over the currently implemented vulkan 
-commands/extensions. Keep in mind that using extensions/features not supported
-by the layer at the moment might cause crashes.
+![Example of command viewer](docs/pics/hiz.gif)
 
 Features:
 
-- showing all created resources, their usage, content and connection
+- show all created resources, their information and state
 	- can be identified via debug names
 	- visualize content of images and see buffer content
 - inspect recorded and executing command buffers with live GPU timings
 	- quickly inspect pipeline state
-	- inspect all submissions done to the device and their connection
+	- inspect all submissions, queues and synchronization primitives
 	- view the effective properties of draw & dispatch calls, also for indirect commands
 	- show all state bound for a draw/dispatch command and all outputs, live
 		- display images
@@ -26,10 +20,16 @@ Features:
 		- show vertex input (vertex output, model visualization and 
 		  other pre-rasterization stages are WIP)
 		- show the contents of framebuffer attachments after a draw call
-- showing general debug information about the application such as
+	- debug shaders, seeing the variables update live (WIP)
+- show general debug information about the application such as
 	- enabled device and instance extensions
 	- enabled features
 	- overall statistics on used memory and available memory budget
+
+This is still in an early stage of development, bug reports and feedback welcome.
+See the [rough overview](docs/features.md) over the currently implemented vulkan 
+commands/extensions. Keep in mind that using extensions/features not supported
+by the layer at the moment might cause crashes.
 
 Intended much more as a live debugging tool than a profiling tool.
 Does not have all the features of existing debugging tools (such as [renderdoc](https://github.com/baldurk/renderdoc))
@@ -50,12 +50,11 @@ Downsides:
   tools for that.
 - This isn't as stable/feature-complete as known tools
 - Shader debugging is in a very experimental stage, more of a prototype
-- The live nature of the introspection brings various problems with it.
-  While it is already possible to freeze some state and also view e.g.
+- The live nature of the introspection makes inspected state more volatile.
+  While it is possible to freeze some state and also view e.g.
   invalidated/destroyed command records, you might run into issues
   where state you would want to inspect (from a specific frame) is just
-  not available anymore. Sometimes, capturing a single
-  frame and inspecting that is the better approach.
+  not available anymore.
 
 <!--- ![Example of command viewer 2](docs/pics/sponza-buf.png) -->
 <!---- ![Example of resource viewer](docs/pics/sponza-scatter-res.png) -->

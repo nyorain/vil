@@ -14,6 +14,9 @@ urgent, bugs:
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
 
+- [ ] more xfb testing. Seems to currently cause issues with some mesa
+      linux drivers as well (see laptop intel and amd card)
+
 - [ ] histogram minMax auto-range not correctly working on all channels?
       just ignored the highs of the green-channel in a metallic/rough texture
 

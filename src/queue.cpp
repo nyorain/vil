@@ -256,10 +256,6 @@ VkResult doSubmit(Queue& qd, span<const VkSubmitInfo2> submits,
 		dev.pending.push_back(std::move(batchPtr));
 	}
 
-	// XXX: plain forward for debugging
-	// auto res = dev.dispatch.QueueSubmit(qd.handle,
-	// 	submitCount, pSubmits, fence);
-
 	return res;
 }
 
@@ -269,6 +265,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(
 		const VkSubmitInfo*                         pSubmits,
 		VkFence                                     fence) {
 	auto& queue = getData<Queue>(vkQueue);
+
+	// XXX: plain forward for debugging
+	// return queue.dev->dispatch.QueueSubmit(queue.handle,
+	// 	submitCount, pSubmits, fence);
 
 	ThreadMemScope tms;
 	auto submits2 = tms.alloc<VkSubmitInfo2>(submitCount);

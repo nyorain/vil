@@ -436,6 +436,7 @@ XfbPatchData patchShaderXfb(Device& dev, spc::Compiler& compiled,
 	}
 
 	(void) modName;
+
 // #define VIL_OUTPUT_PATCHED_SPIRV
 #ifdef VIL_OUTPUT_PATCHED_SPIRV
 	std::string output = "vil";
