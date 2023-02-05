@@ -51,10 +51,12 @@ std::mutex ThreadContext::mutex_;
 std::vector<ThreadContext*> ThreadContext::contexts_;
 
 void dlgHandler(const struct dlg_origin* origin, const char* string, void* data) {
-#ifndef DLG_DISABLE
-	dlg_default_output(origin, string, data);
 	// (void) string;
 	// (void) data;
+	// (void) origin;
+
+#ifndef DLG_DISABLE
+	dlg_default_output(origin, string, data);
 
 	if(origin->level >= dlg_level_warn) {
 		++dlgWarnErrorCount;

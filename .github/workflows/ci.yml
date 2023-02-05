@@ -211,7 +211,19 @@ jobs:
         -Dunit-tests=true 
         -Dintegration-tests=false
         -Dbuildtype=release
+        -Ddebug=true
     - run: meson test -C build/ -v
+    - name: Upload binaries
+      uses: actions/upload-artifact@v3
+      with:
+        name: Windows Binaries
+        path: |
+          build/VkLayer_live_introspection.dll  
+          build/VkLayer_live_introspection.json  
+          build/VkLayer_live_introspection.lib  
+          build/VkLayer_live_introspection.pdb  
+          build/register_layer.bat
+
 
   windows-release-tracy:
     runs-on: windows-latest
