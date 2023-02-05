@@ -3,7 +3,9 @@
 Vulkan layer that allows to inspect GPU state and submitted commands live
 inside your applications.
 
-![Example of command viewer](docs/pics/hiz.gif)
+<img align='center' src='https://github.com/nyorain/vil/blob/main/docs/pics/hiz.gif' width='300"'>
+<br>
+<br>
 
 Features:
 
