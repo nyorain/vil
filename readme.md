@@ -131,7 +131,7 @@ When building with something else than MSVC, you might have to adjust the name o
 Once installed, you have to make sure vulkan applications load `VK_LAYER_live_introspection`.
 Either pass it to your `VkInstanceCreateInfo` or enable it via environment variable `VK_INSTANCE_LAYERS=VK_LAYER_live_introspection`.
 During the early stages of this project, you likely want to load it *before* any validation layer. If
-your application then causes triggers validation errors with *vil* that are not there without it,
+your application then triggers validation errors with *vil* that are not there without it,
 make sure to report them here!
 
 There are multiple ways of using the introspection gui:
