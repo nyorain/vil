@@ -14,9 +14,6 @@ struct Image : MemoryResource {
 	VkImage handle {};
 	VkImageCreateInfo ci;
 
-	// TODO: remove
-	VkImageLayout pendingLayout {VK_IMAGE_LAYOUT_UNDEFINED};
-
 	// resource references
 	std::vector<ImageView*> views; // TODO: unordered set?
 
@@ -35,6 +32,10 @@ struct Image : MemoryResource {
 	// Device mutex must be locked and returned span only accessed
 	// while it's locked.
 	span<const ImageSubresourceLayout> pendingLayoutLocked() const;
+	void initLayout();
+	void applyLocked(span<const ImageSubresourceLayout>);
+	void onApiDestroy();
+
 	~Image();
 
 private:

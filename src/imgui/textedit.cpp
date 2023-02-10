@@ -912,7 +912,7 @@ void TextEditor::Render()
 
 			auto& line = mLines[lineNo];
 			longest = std::max(mTextStart + TextDistanceToLineStart(Coordinates(lineNo, GetLineMaxColumn(lineNo))), longest);
-			auto columnNo = 0;
+			// auto columnNo = 0;
 			Coordinates lineStartCoord(lineNo, 0);
 			Coordinates lineEndCoord(lineNo, GetLineMaxColumn(lineNo));
 
@@ -1083,7 +1083,7 @@ void TextEditor::Render()
 					while (l-- > 0)
 						mLineBuffer.push_back(line[i++].mChar);
 				}
-				++columnNo;
+				// ++columnNo;
 			}
 
 			if (!mLineBuffer.empty())

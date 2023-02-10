@@ -3,7 +3,6 @@
 #include <fwd.hpp>
 #include <handle.hpp>
 #include <data.hpp>
-#include <queue.hpp> // TODO: get rid of this include
 #include <util/handleCast.hpp>
 #include <util/syncedMap.hpp>
 #include <util/debugMutex.hpp>
@@ -84,7 +83,7 @@ struct Device {
 	VkPhysicalDeviceFeatures enabledFeatures {}; // features by application
 
 	// supported features/extensions
-	bool timelineSemaphores {}; // whether we have timeline smeaphores
+	bool timelineSemaphores {}; // whether we have timeline semaphores
 	bool transformFeedback {}; // whether we have transformFeedback
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress

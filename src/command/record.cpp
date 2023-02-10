@@ -247,4 +247,7 @@ CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
 		images(alloc) {
 }
 
+UsedImage::UsedImage(LinAllocator& alloc) noexcept :
+	RefHandle<Image>(alloc), layoutChanges(alloc) {}
+
 } // namespace vil

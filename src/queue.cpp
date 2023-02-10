@@ -473,12 +473,7 @@ void activateLocked(CommandSubmission& cmdSub) {
 	for(auto& scb : cmdSub.cbs) {
 		auto recPtr = scb.cb->lastRecordPtrLocked();
 		for(auto& ui : recPtr->used.images) {
-			if(ui.layoutChanged) {
-				dlg_assert(
-					ui.finalLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
-					ui.finalLayout != VK_IMAGE_LAYOUT_PREINITIALIZED);
-				ui.handle->pendingLayout = ui.finalLayout;
-			}
+			ui.handle->applyLocked(ui.layoutChanges);
 		}
 	}
 }

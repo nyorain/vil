@@ -61,7 +61,7 @@ args = cc.get_supported_arguments([
 	# See https://www.phoronix.com/news/LLVM-Clang-9.0-Time-Trace
 	# View e.g. via ui.perfetto.dev. The trace files will be in the build dir,
 	# right next to the object files
-	# '-ftime-trace',
+	'-ftime-trace',
 
 	# for clang
 	'-Wno-missing-braces',
@@ -486,7 +486,7 @@ pch = []
 if not with_win32 or not with_tracy
 	# TODO: fix. We want to use pch unless we are frequently editing shaders
 	# See https://github.com/mesonbuild/meson/issues/10882
-	# pch = 'src/pch.hpp'
+	pch = 'src/pch.hpp'
 endif
 
 lib_spvm = static_library(
@@ -502,6 +502,10 @@ lib_spvm = static_library(
 		'/wd4457', # declaration hides function parameter
 		# TODO: fix the ones below?
 		'-Wno-sign-compare',
+		# new clang warnings
+		'-Wno-strict-prototypes',
+		'-Wno-unused-but-set-parameter',
+		'-Wno-unused-but-set-variable',
 		'/wd4018', # signed/unsigned mismatch
 		'/wd4090', # different 'const' qualifier on free/realloc calls
 	]),
