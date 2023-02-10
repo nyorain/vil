@@ -17,9 +17,11 @@ static_assert(validExpression<HasOnApiDestroy, DeviceMemory>);
 
 // Classes
 Image::~Image() {
-	if(!dev) {
-		return;
-	}
+	dlg_assert_or(dev, return);
+}
+
+void Image::onApiDestroy() {
+	MemoryResource::onApiDestroy();
 
 	std::lock_guard lock(dev->mutex);
 	for(auto* view : this->views) {
@@ -27,10 +29,32 @@ Image::~Image() {
 	}
 }
 
+span<const ImageSubresourceLayout> Image::pendingLayoutLocked() const {
+	assertOwned(dev->mutex);
+	return pendingLayout_;
+}
+
+void Image::applyLocked(span<const ImageSubresourceLayout> changes) {
+	apply(pendingLayout_, changes);
+
+	// TODO: always do this here?
+	// simplify(pendingLayout_);
+
+	dlg_check(checkForErrors(pendingLayout_, ci););
+}
+
+void Image::initLayout() {
+	auto& fullSubres = pendingLayout_.emplace_back();
+	fullSubres.range.aspectMask = aspects(ci.format);
+	fullSubres.range.baseArrayLayer = 0u;
+	fullSubres.range.baseMipLevel = 0u;
+	fullSubres.range.layerCount = ci.arrayLayers;
+	fullSubres.range.levelCount = ci.mipLevels;
+	fullSubres.layout = ci.initialLayout;
+}
+
 ImageView::~ImageView() {
-	if(!dev) {
-		return;
-	}
+	dlg_assert_or(dev, return);
 
 	dlg_assert(DebugStats::get().aliveImagesViews > 0);
 	--DebugStats::get().aliveImagesViews;
@@ -274,11 +298,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(
 	img.dev = &dev;
 	img.handle = *pImage;
 	img.ci = *pCreateInfo;
-	img.pendingLayout = pCreateInfo->initialLayout;
 	img.allowsNearestSampling = nearestSampling;
 	img.allowsLinearSampling = linearSampling;
 	img.concurrentHooked = concurrent;
 	img.hasTransferSrc = nci.usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
+	img.initLayout();
 
 	if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT) {
 		img.memory = SparseMemoryState{};

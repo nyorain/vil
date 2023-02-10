@@ -19,11 +19,17 @@ ImageSubresourceLayout initialLayout(const VkImageCreateInfo& ci) {
 // That's the reason we do greedy (but never worsening) merging in the
 // layer dimension.
 // TODO: also simplify for aspect masks
-void simplify(std::vector<ImageSubresourceLayout>& state) {
-	for(auto it = state.begin(); it != state.end();) {
-		auto& sub = *it;
+u32 doSimplify(span<ImageSubresourceLayout> state) {
+	auto outIt = state.begin();
+	auto inIt = state.begin();
+	while(inIt != state.end()) {
+		auto& sub = *inIt;
 		if(sub.range.baseArrayLayer == 0 && sub.range.baseMipLevel == 0) {
-			++it;
+			if(inIt != outIt) {
+				*outIt = sub;
+			}
+			++inIt;
+			++outIt;
 			continue;
 		}
 
@@ -81,15 +87,26 @@ void simplify(std::vector<ImageSubresourceLayout>& state) {
 		}
 
 		if(erase) {
-			it = state.erase(it);
+			++inIt;
 		} else {
-			++it;
+			if(inIt != outIt) {
+				*outIt = sub;
+			}
+			++inIt;
+			++outIt;
 		}
 	}
+
+	return outIt - state.begin();
 }
 
-void apply(std::vector<ImageSubresourceLayout>& state,
+std::pair<span<ImageSubresourceLayout>, u32> doApply(
+		ThreadMemScope& tms,
+		span<ImageSubresourceLayout> state,
 		const ImageSubresourceLayout& change) {
+
+	dlg_assert(change.range.levelCount != VK_REMAINING_MIP_LEVELS);
+	dlg_assert(change.range.layerCount != VK_REMAINING_ARRAY_LAYERS);
 
 	// TODO: figure out multiplane support here. Somewhat complicated though
 	// as applications can mix changes of ASPECT_COLOR and plane-specific
@@ -108,7 +125,7 @@ void apply(std::vector<ImageSubresourceLayout>& state,
 		change.range.aspectMask != 0 &&
 		change.range.layerCount > 0 &&
 		change.range.levelCount > 0,
-		return);
+		return {});
 
 	// TODO: fast path for *full* overlap with a state
 
@@ -119,15 +136,21 @@ void apply(std::vector<ImageSubresourceLayout>& state,
 	dlg_assertlm(dlg_level_warn, state.size() < 1024u,
 		"Large ImageLayout state detected");
 
-	ThreadMemScope tms;
-	auto newStates = tms.alloc<ImageSubresourceLayout>(state.size() * 4);
+	auto newStates = tms.alloc<ImageSubresourceLayout>(state.size() * 4 + 1);
 	auto numNewStates = 0u;
 
-	for(auto it = state.begin(); it != state.end();) {
-		auto subState = *it;
+	auto outIt = state.begin();
+	auto inIt = state.begin();
+	while(inIt != state.end()) {
+		auto subState = *inIt;
 		auto aspectIntersection = subState.range.aspectMask & change.range.aspectMask;
 		if(aspectIntersection == 0u) {
-			++it;
+			if(outIt != inIt) {
+				*outIt = *inIt;
+			}
+
+			++outIt;
+			++inIt;
 			continue;
 		}
 
@@ -144,8 +167,14 @@ void apply(std::vector<ImageSubresourceLayout>& state,
 			change.range.baseMipLevel);
 		auto levelEndO = std::min(subLevelEnd, changeLevelEnd);
 
+		// check if the subranges overlap
 		if(layerEndO <= layerStartO || levelEndO <= levelStartO) {
-			++it;
+			if(outIt != inIt) {
+				*outIt = *inIt;
+			}
+
+			++outIt;
+			++inIt;
 			continue;
 		}
 
@@ -189,26 +218,25 @@ void apply(std::vector<ImageSubresourceLayout>& state,
 			newEnd.range.levelCount = subLevelEnd - levelEndO;
 		}
 
-		// erase original state
 		if(subState.range.aspectMask == change.range.aspectMask) {
-			it = state.erase(it);
+			// erase original state
+			++inIt;
 		} else {
 			subState.range.aspectMask &= (~change.range.aspectMask);
-			++it;
+
+			if(outIt != inIt) {
+				*outIt = subState;
+			}
+
+			++outIt;
+			++inIt;
 		}
 	}
 
-	state.insert(state.end(), newStates.begin(), newStates.begin() + numNewStates);
-	state.push_back(change);
-}
+	auto newSize = outIt - state.begin();
+	newStates[numNewStates++] = change;
 
-void apply(std::vector<ImageSubresourceLayout>& state,
-		span<const ImageSubresourceLayout> changes) {
-	for(auto& change : changes) {
-		apply(state, change);
-	}
-
-	// We don't simplify here to leave it up to the caller
+	return {newStates.first(numNewStates), newSize};
 }
 
 void checkForErrors(span<const ImageSubresourceLayout> state,
@@ -222,6 +250,9 @@ void checkForErrors(span<const ImageSubresourceLayout> state,
 
 		dlg_assert(sub.range.layerCount > 0);
 		dlg_assert(sub.range.levelCount > 0);
+
+		dlg_assert(sub.range.baseMipLevel + sub.range.levelCount <= ci.mipLevels);
+		dlg_assert(sub.range.baseArrayLayer + sub.range.layerCount <= ci.arrayLayers);
 
 		// check for non-overlap
 		auto subLayerEnd = sub.range.baseArrayLayer + sub.range.layerCount;
@@ -272,6 +303,16 @@ VkImageLayout layout(span<const ImageSubresourceLayout> state,
 
 	dlg_error("subresource not found");
 	return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+void resolve(VkImageSubresourceRange& range, const VkImageCreateInfo& ci) {
+	if(range.layerCount == VK_REMAINING_ARRAY_LAYERS) {
+		range.layerCount = ci.arrayLayers - range.baseArrayLayer;
+	}
+
+	if(range.levelCount == VK_REMAINING_MIP_LEVELS) {
+		range.levelCount = ci.mipLevels - range.baseMipLevel;
+	}
 }
 
 } // namespace vil

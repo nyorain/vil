@@ -6,6 +6,7 @@
 #include <util/intrusive.hpp>
 #include <util/debugMutex.hpp>
 #include <threadContext.hpp>
+#include <imageLayout.hpp>
 #include <vk/vulkan.h>
 
 #include <vector>
@@ -192,12 +193,8 @@ inline bool operator!=(const RefHandle<T>& a, const RefHandle<T>& b) {
 }
 
 struct UsedImage : RefHandle<Image> {
-	using RefHandle<Image>::RefHandle;
-	bool layoutChanged {};
-	VkImageLayout finalLayout {}; // only valid/relevant when 'layoutChanged'
-
-	// WIP
-	// CommandAllocVector<ImageSubresourceLayout> layoutChanges;
+	explicit UsedImage(LinAllocator& alloc) noexcept;
+	CommandAllocVector<ImageSubresourceLayout> layoutChanges;
 };
 
 struct UsedDescriptorSet {

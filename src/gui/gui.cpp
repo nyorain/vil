@@ -1599,51 +1599,59 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 
 		if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
 			ThreadMemScope tms;
-			auto imgBarriersPre = tms.alloc<VkImageMemoryBarrier>(1 + draw.usedImages.size());
-			auto imgBarriersPost = tms.alloc<VkImageMemoryBarrier>(1 + draw.usedImages.size());
-			auto numImgBarriers = 0u;
+
+			ScopedVector<VkImageMemoryBarrier> imgBarriersPre(tms);
+			ScopedVector<VkImageMemoryBarrier> imgBarriersPost(tms);
+
+			imgBarriersPre.reserve(2 * draw.usedImages.size());
+			imgBarriersPost.reserve(2 * draw.usedImages.size());
+
 			for(auto& [img, targetLayout] : draw.usedImages) {
 				// undefined doesn't make sense, whoever added it to usedImages
 				// can't know which layout the image is in and can't use it
 				// without knowing that.
 				dlg_assert_or(targetLayout != VK_IMAGE_LAYOUT_UNDEFINED, continue);
 
-				// we don't need a barrier in that case, access is already
-				// covered by the general memory barriers
-				// NOTE: just do it anyways atm, found memory barriers
-				// to be insufficient on some platforms
-				// if(targetLayout == img->pendingLayout) {
-				// 	continue;
-				// }
+				for(auto& subres : img->pendingLayoutLocked()) {
+					dlg_trace("mip {}:{} layer {}:{} layout {}",
+						subres.range.baseMipLevel,
+						subres.range.levelCount,
+						subres.range.baseArrayLayer,
+						subres.range.layerCount,
+						vk::name(subres.layout));
 
-				VkImageSubresourceRange subres {};
-				subres.layerCount = img->ci.arrayLayers;
-				subres.levelCount = img->ci.mipLevels;
-				subres.aspectMask = aspects(img->ci.format);
+					auto& barrierPre = imgBarriersPre.emplace_back();
+					barrierPre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+					barrierPre.image = img->handle;
+					barrierPre.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+					barrierPre.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+					barrierPre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+					barrierPre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+					barrierPre.oldLayout = subres.layout;
+					barrierPre.newLayout = targetLayout;
+					barrierPre.subresourceRange = subres.range;
 
-				auto& barrierPre = imgBarriersPre[numImgBarriers];
-				barrierPre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-				barrierPre.image = img->handle;
-				barrierPre.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-				barrierPre.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-				barrierPre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				barrierPre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				barrierPre.oldLayout = img->pendingLayout;
-				barrierPre.newLayout = targetLayout;
-				barrierPre.subresourceRange = subres;
+					// we can't (and don't have to) transition back to undefined
+					// layout.
+					if(subres.layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+						continue;
+					}
 
-				auto& barrierPost = imgBarriersPost[numImgBarriers];
-				barrierPost.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-				barrierPost.image = img->handle;
-				barrierPost.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-				barrierPost.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-				barrierPost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				barrierPost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-				barrierPost.oldLayout = targetLayout;
-				barrierPost.newLayout = img->pendingLayout;
-				barrierPost.subresourceRange = subres;
+					// TODO: fix this case, not so sure about handling it
+					dlg_assert_or(subres.layout != VK_IMAGE_LAYOUT_PREINITIALIZED,
+						continue);
 
-				++numImgBarriers;
+					auto& barrierPost = imgBarriersPost.emplace_back();
+					barrierPost.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+					barrierPost.image = img->handle;
+					barrierPost.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+					barrierPost.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+					barrierPost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+					barrierPost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+					barrierPost.oldLayout = targetLayout;
+					barrierPost.newLayout = subres.layout;
+					barrierPost.subresourceRange = subres.range;
+				}
 			}
 
 			// cbPre: General barrier to make sure all past submissions writing resources
@@ -1656,7 +1664,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 			dev().dispatch.CmdPipelineBarrier(draw.cbLockedPre,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-				0, 1, &membPre, 0, nullptr, numImgBarriers, imgBarriersPre.data());
+				0, 1, &membPre, 0, nullptr, imgBarriersPre.size(), imgBarriersPre.data());
 
 			// cbPost: General barrier to make sure all our reading is done before
 			// future application submissions to this queue.
@@ -1669,7 +1677,7 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 			dev().dispatch.CmdPipelineBarrier(draw.cbLockedPost,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-				0, 1, &membPost, 0, nullptr, numImgBarriers, imgBarriersPost.data());
+				0, 1, &membPost, 0, nullptr, imgBarriersPost.size(), imgBarriersPost.data());
 		}
 
 		dev().dispatch.EndCommandBuffer(draw.cbLockedPre);

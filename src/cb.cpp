@@ -752,10 +752,12 @@ void useHandle(CommandRecord& rec, Command& cmd, BufferView& view) {
 	}
 }
 
-void useHandle(CommandRecord& rec, Command& cmd, Image& image, VkImageLayout newLayout) {
+void useHandle(CommandRecord& rec, Command& cmd, Image& image,
+		ImageSubresourceLayout layoutChange) {
 	auto& img = useHandle(rec, cmd, image);
-	img.layoutChanged = true;
-	img.finalLayout = newLayout;
+
+	resolve(layoutChange.range, image.ci);
+	img.layoutChanges.push_back(layoutChange);
 }
 
 template<typename... Args>
@@ -783,7 +785,8 @@ void cmdBarrier(
 
 		auto& img = get(*cb.dev, imgb.image);
 		cmd.images[i] = &img;
-		useHandle(cb, cmd, img, imgb.newLayout);
+		useHandle(cb, cmd, img,
+			ImageSubresourceLayout{imgb.subresourceRange, imgb.newLayout});
 
 		imgb.image = img.handle;
 	}
@@ -821,7 +824,8 @@ void cmdBarrier(CommandBuffer& cb, Barrier2CmdBase& cmd,
 
 		auto& img = get(*cb.dev, imgb.image);
 		cmd.images[i] = &img;
-		useHandle(cb, cmd, img, imgb.newLayout);
+		useHandle(cb, cmd, img,
+			ImageSubresourceLayout{imgb.subresourceRange, imgb.newLayout});
 
 		imgb.image = img.handle;
 	}
@@ -938,8 +942,10 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 			dlg_assert(attachment.img);
 
 			useHandle(cb, cmd, attachment, false);
+
+			const auto finalLayout = cmd.rp->desc.attachments[i].finalLayout;
 			useHandle(cb, cmd, *attachment.img,
-				cmd.rp->desc.attachments[i].finalLayout);
+				ImageSubresourceLayout{attachment.ci.subresourceRange, finalLayout});
 
 			cmd.attachments[i] = &attachment;
 			fwdAttachments[i] = attachment.handle;
@@ -966,8 +972,10 @@ void cmdBeginRenderPass(CommandBuffer& cb,
 
 			cmd.attachments[i] = attachment;
 			useHandle(cb, cmd, *attachment, false);
+
+			const auto finalLayout = cmd.rp->desc.attachments[i].finalLayout;
 			useHandle(cb, cmd, *attachment->img,
-				cmd.rp->desc.attachments[i].finalLayout);
+				ImageSubresourceLayout{attachment->ci.subresourceRange, finalLayout});
 		}
 	}
 
@@ -1895,10 +1903,8 @@ VKAPI_ATTR void VKAPI_CALL CmdExecuteCommands(
 
 		for(auto& uimg : rec.used.images) {
 			auto& use = useHandle(cb, cmd, *uimg.handle);
-			if(uimg.layoutChanged) {
-				use.layoutChanged = true;
-				use.finalLayout = uimg.finalLayout;
-			}
+			use.layoutChanges.insert(use.layoutChanges.end(),
+				uimg.layoutChanges.begin(), uimg.layoutChanges.end());
 		}
 
 		cb.builder().record_->secondaries.push_back(std::move(recordPtr));

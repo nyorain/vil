@@ -72,6 +72,7 @@ bool ImageSparseMemoryBind::Cmp::operator()(const ImageSparseMemoryBind& a,
 }
 
 void MemoryResource::onApiDestroy() {
+	dlg_assert(dev);
 	std::lock_guard lock(dev->mutex);
 
 	// unregister at memory
@@ -107,6 +108,7 @@ void MemoryResource::onApiDestroy() {
 
 void DeviceMemory::onApiDestroy() {
 	std::lock_guard lock(dev->mutex);
+
 
 	for(auto* bind : allocations) {
 		auto& res = *bind->resource;

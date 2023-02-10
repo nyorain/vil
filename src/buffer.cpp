@@ -52,6 +52,10 @@ void Buffer::onApiDestroy() {
 		auto num = dev->bufferAddresses.erase(this);
 		dlg_assert(num == 1u);
 	}
+
+	for(auto* view : this->views) {
+		view->buffer = nullptr;
+	}
 }
 
 Buffer::~Buffer() {
@@ -61,11 +65,6 @@ Buffer::~Buffer() {
 
 	dlg_assert(DebugStats::get().aliveBuffers > 0);
 	--DebugStats::get().aliveBuffers;
-
-	std::lock_guard lock(dev->mutex);
-	for(auto* view : this->views) {
-		view->buffer = nullptr;
-	}
 }
 
 BufferView::~BufferView() {

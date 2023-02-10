@@ -212,13 +212,20 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 		ImGui::Text("Image can't be displayed since it's a swapchain image of");
 		ImGui::SameLine();
 		refButtonExpect(*gui_, swapchain.get());
+		return;
 	} else if(!image.allowsNearestSampling) {
 		ImGui::Text("Image can't be displayed since its format does not support sampling");
+		return;
 	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
 		ImGui::Text("Image can't be displayed since it has multiple samples");
+		return;
 	} else if(image.ci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT) {
 		ImGui::Text("Transient Image can't be displayed");
-	} else if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
+		return;
+	}
+
+	/*
+	if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
 		// TODO: well, we could still try to display it.
 		// But we have to modify our barrier logic a bit.
 		// And should probably at least output a warning here that it's in
@@ -230,14 +237,14 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 		// for waaaay later, i'm already wondering wth i'm doing with my life
 		// writing this).
 		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
-	} else if(image.memory.index() == 1) {
-		// see docs/own/sparse.md for an outline on how to handle it
-		// requires additional sync and tracking work
-		imGuiText("TODO: can't display sparse image contents yet");
-	} else {
+		return;
+	}
+	*/
+
+	VkImage imageHandle {};
+	constexpr auto layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	if(image.memory.index() == 0) {
 		FullMemoryBind::State memState {};
-		VkImage imageHandle {};
-		constexpr auto layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 		{
 			std::lock_guard lock(image.dev->mutex);
@@ -255,37 +262,49 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 
 		if(memState == FullMemoryBind::State::resourceDestroyed) {
 			ImGui::Text("Can't display contents since image was destroyed");
+			return;
 		} else if(memState == FullMemoryBind::State::unbound) {
 			ImGui::Text("Can't display contents since image was never bound to memory");
+			return;
 		} else if(memState == FullMemoryBind::State::memoryDestroyed) {
 			ImGui::Text("Can't display image contents since the memory "
 				"it was bound to was destroyed");
-		} else {
-			// NOTE: useful for destruction race repro/debugging
-			// std::this_thread::sleep_for(std::chrono::milliseconds(30));
-
-			if(doSelect) {
-				VkImageSubresourceRange subres {};
-				subres.layerCount = image.ci.arrayLayers;
-				subres.levelCount = image.ci.mipLevels;
-				subres.aspectMask = aspects(image.ci.format);
-				auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
-				if(image.hasTransferSrc) {
-					flags |= ImageViewer::supportsTransferSrc;
-				}
-
-				image_.viewer.reset(true);
-				image_.viewer.select(imageHandle, image.ci.extent,
-					image.ci.imageType, image.ci.format, subres,
-					layout, layout, flags);
-			}
-
-			ImGui::Spacing();
-			ImGui::Spacing();
-
-			image_.viewer.display(draw);
+			return;
 		}
+	} else if(image.memory.index() == 1) {
+		// see docs/own/sparse.md for an outline on how to handle it
+		// requires additional sync and tracking work
+		// imGuiText("TODO: can't display sparse image contents yet");
+		// return;
+
+		std::lock_guard lock(image.dev->mutex);
+		draw.usedImages.push_back({image_.object, layout});
+		imageHandle = image.handle;
 	}
+
+	// NOTE: useful for destruction race repro/debugging
+	// std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	if(doSelect) {
+		VkImageSubresourceRange subres {};
+		subres.layerCount = image.ci.arrayLayers;
+		subres.levelCount = image.ci.mipLevels;
+		subres.aspectMask = aspects(image.ci.format);
+		auto flags = ImageViewer::preserveSelection | ImageViewer::preserveZoomPan;
+		if(image.hasTransferSrc) {
+			flags |= ImageViewer::supportsTransferSrc;
+		}
+
+		image_.viewer.reset(true);
+		image_.viewer.select(imageHandle, image.ci.extent,
+			image.ci.imageType, image.ci.format, subres,
+			layout, layout, flags);
+	}
+
+	ImGui::Spacing();
+	ImGui::Spacing();
+
+	image_.viewer.display(draw);
 }
 
 void ResourceGui::drawDesc(Draw& draw, Image& image) {

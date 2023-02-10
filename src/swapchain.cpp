@@ -26,6 +26,8 @@ void Swapchain::destroy() {
 	for(auto* img : this->images) {
 		auto handle = castDispatch<VkImage>(*img);
 
+		img->onApiDestroy();
+
 		{
 			std::lock_guard lock(dev->mutex);
 			img->swapchain = nullptr;

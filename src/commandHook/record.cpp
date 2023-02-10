@@ -8,6 +8,7 @@
 #include <device.hpp>
 #include <stats.hpp>
 #include <buffer.hpp>
+#include <queue.hpp>
 #include <image.hpp>
 #include <swapchain.hpp>
 #include <pipe.hpp>
