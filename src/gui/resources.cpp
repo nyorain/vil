@@ -395,6 +395,54 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	// TODO: display pending layout?
 }
 
+void ResourceGui::showBufferViewer(Draw& draw, Buffer& buffer) {
+	(void) draw;
+
+	if(buffer.memory.index() == 0u) {
+		// NOTE: this check is racy and we don't insert into usedBuffers yet
+		//   since it's only relevant to insert the relevant gui message.
+		//   We do the real check (and insert) in the copyBuffer callback.
+		FullMemoryBind::State state;
+		{
+			std::lock_guard lock(buffer.dev->mutex);
+			state = std::get<0>(buffer.memory).memState;
+		}
+
+		if(state == FullMemoryBind::State::unbound) {
+			imGuiText("Can't display buffer content since it isn't bound to memory");
+			return;
+		} else if(state == FullMemoryBind::State::resourceDestroyed) {
+			imGuiText("Can't display buffer content since it was destroyed");
+			return;
+		} else if(state == FullMemoryBind::State::memoryDestroyed) {
+			imGuiText("Can't display buffer content since its memory was destroyed");
+			return;
+		}
+	} else if(buffer.memory.index() == 1u) {
+		std::lock_guard lock(buffer.dev->mutex);
+
+		auto& memBind = std::get<1>(buffer.memory);
+		dlg_assert(memBind.imageBinds.empty());
+		for(auto& bind : memBind.opaqueBinds) {
+			if(!bind.memory) {
+				imGuiText("Can't display buffer since it contains invalid "
+					"memory bindings (opaque), cannot be accessed");
+				return;
+			}
+		}
+	}
+
+	gui_->addPostRender([&](Draw& draw) { this->copyBuffer(draw); });
+	if(buffer_.lastReadback) {
+		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
+		dlg_assert(!readback.pending);
+		dlg_assert(readback.src == buffer_.handle->handle);
+
+		ImGui::Separator();
+		buffer_.viewer.display(readback.own.data());
+	}
+}
+
 void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	if(buffer_.handle != &buffer) {
 		// TODO: remember used layouts per-buffer?
@@ -424,37 +472,6 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	// resource references
 	ImGui::Spacing();
 	drawMemoryResDesc(draw, buffer);
-
-	if(buffer.memory.index() == 1u) {
-		imGuiText("TODO: add support for showing sparse buffer content");
-	} else {
-		// NOTE: this check is racy and we don't insert into usedBuffers yet
-		//   since it's only relevant to insert the relevant gui message.
-		//   We do the real check (and insert) in the copyBuffer callback.
-		FullMemoryBind::State state;
-		{
-			std::lock_guard lock(buffer.dev->mutex);
-			state = std::get<0>(buffer.memory).memState;
-		}
-
-		if(state == FullMemoryBind::State::unbound) {
-			imGuiText("Can't display buffer content since it isn't bound to memory");
-		} else if(state == FullMemoryBind::State::resourceDestroyed) {
-			imGuiText("Can't display buffer content since it was destroyed");
-		} else if(state == FullMemoryBind::State::memoryDestroyed) {
-			imGuiText("Can't display buffer content since its memory was destroyed");
-		} else {
-			gui_->addPostRender([&](Draw& draw) { this->copyBuffer(draw); });
-			if(buffer_.lastReadback) {
-				auto& readback = buffer_.readbacks[*buffer_.lastReadback];
-				dlg_assert(!readback.pending);
-				dlg_assert(readback.src == buffer_.handle->handle);
-
-				ImGui::Separator();
-				buffer_.viewer.display(readback.own.data());
-			}
-		}
-	}
 }
 
 void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
@@ -1829,17 +1846,38 @@ void ResourceGui::copyBuffer(Draw& draw) {
 	}
 
 	VkBuffer bufHandle {};
-	auto& memBind = std::get<0>(buffer_.handle->memory);
 
-	{
+	if(buffer_.handle->memory.index() == 0u) {
+		auto& memBind = std::get<0>(buffer_.handle->memory);
+
 		std::lock_guard lock(dev.mutex);
 		bool valid = (memBind.memState == FullMemoryBind::State::bound);
 		if(!valid) {
+			dlg_trace("Detected invalid buffer handle in copyBuffer");
 			return;
 		}
 
 		dlg_assert(buffer_.handle->handle);
 		dlg_assert(memBind.memory);
+		draw.usedBuffers.push_back(buffer_.handle);
+		bufHandle = buffer_.handle->handle;
+	} else if(buffer_.handle->memory.index() == 1u) {
+		auto& memBind = std::get<1>(buffer_.handle->memory);
+
+		std::lock_guard lock(dev.mutex);
+		if(!buffer_.handle->handle) {
+			dlg_trace("Detected invalid buffer handle in copyBuffer");
+			return;
+		}
+
+		dlg_assert(memBind.imageBinds.empty());
+		for(auto& bind : memBind.opaqueBinds) {
+			if(!bind.memory) {
+				dlg_trace("Detected invalid buffer memory binding in copyBuffer");
+				return;
+			}
+		}
+
 		draw.usedBuffers.push_back(buffer_.handle);
 		bufHandle = buffer_.handle->handle;
 	}

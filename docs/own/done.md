@@ -1,3 +1,8 @@
+- [x] way later: support for sparse binding
+      {LOL at the "way later"}
+- [x] sparse binding: fix 'success' assert in insert
+      e.g. try bind/flush with texturesparseresidency sample
+- [x] sparse: fix semaphore sync tracking stuff
 - [x] integrate per-subresource image layout tracking
 - [x] remove hardcoded vil api and vil platform toggles
 	- [x] env variables instead?

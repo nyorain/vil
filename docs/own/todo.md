@@ -1,22 +1,22 @@
 # Todo
 
-v0.2:
+v0.3:
 - fix urgent bug list
 - image viewer improvements
 - vertex viewer improvements
-- improve README
+- improve README, add more gifs/pics
 
 blocking sparse merge:
-- [ ] sparse binding: fix 'success' assert in insert
-      e.g. try bind/flush with texturesparseresidency sample
-- [x] fix semaphore sync tracking stuff
 - [ ] add separate list of bind sparse submissions to queue. See TODO there,
       we currently act like it's dependent on submission order
 
 urgent, bugs:
+- [ ] fix image viewer layout
 - [ ] test more on laptop, intel gpu
 	- [ ] seems like we do some nasty stuff in the histogram shaders,
 		  get gpu timeouts (try e.g. with curlnoise.ktx, zoom out on histogram)
+	- [ ] find out why mesa drivers don't like transform feedback.
+	      likely an issue on our side? but what?
 
 - [ ] fix swapchain present for async present
       when present happens on different queue than our gui drawing, we currently
@@ -34,14 +34,6 @@ urgent, bugs:
 
 - [ ] histogram minMax auto-range not correctly working on all channels?
       just ignored the highs of the green-channel in a metallic/rough texture
-
-- [ ] improve tabs ui: 
-	- [x] try out top-rounded corners {looks whack}, 
-	- [ ] play around further with alpha, 
-	- [x] signal somehow if window is focused or not
-		  Either make tab-background change color on being focused,
-		  make it more transparent or something or maybe use a thin window border?
-		  {think window border looks good imo}
 
 - [ ] fix resource viewer when switching handle types
       currently does not select the right handle then (e.g.
@@ -70,22 +62,6 @@ urgent, bugs:
 	  Note that they are usually NOT in the invalid image layout, just the last
 	  one they were used in.
 
-Freeze/selection changes:
-- [ ] wayland VIL_CREATE_WINDOW freezes of window:
-      when moving the application window to another workspace, the
-	  driver just indefinitely blocks in QueuePresent. The problem is,
-	  we have the queue mutex locked while that happens.
-	  And so our window thread just starves at some point, trying
-	  to acquire that mutex :/
-	  I have no idea how to solve that at the moment.
-	  We just can't submit while that is happening.
-	  Also see https://github.com/KhronosGroup/Vulkan-Docs/issues/1158
-	  QueuePresent also has no timeout parameter we could pass
-	  when forwarding it :(
-	  	- will probably not happen when applications use mailbox mode
-		  Should at least document it somewhere.
-		  Might also happen when the window is minimized on some platforms?
-
 new, workstack:
 - [ ] hook vkGetDescriptorSetLayoutSupport for sampler unwrapping
 - [ ] VK_EXT_depth_clip_enable
@@ -97,7 +73,19 @@ new, workstack:
 	- [x] proper setting of image's pending layout
 	- [ ] introduce first cow-like concept, just tracking when resources get
 	      modified
-- [ ] add sparse bind matching
+- [ ] improve tabs ui: 
+	- [x] try out top-rounded corners {looks whack}, 
+	- [ ] play around further with alpha, 
+	- [x] signal somehow if window is focused or not
+		  Either make tab-background change color on being focused,
+		  make it more transparent or something or maybe use a thin window border?
+		  {think window border looks good imo}
+
+- [ ] add sparse bind matching for frame matching
+- [ ] (low prio, ui) sparse: for images, allow to show popup with bound
+      memory on hover in imageViewer. Also bond-to-memory overlay
+- [ ] (hight prio) sparse: come up with some idea on how to support
+      partial un/re-binds. Applications might actually use this.
 - [ ] properly show sparse bindings in frame UI
 	- [ ] allow to inspect each bind/unbind
 	      should be possible to share code with resource mem state viz
@@ -116,7 +104,7 @@ new, workstack:
 
 - [ ] single-commandRecord viewing is buggy
 	- [ ] useful feature, we want to support it.
-- [ ] add global mutex priorities and add debug asserts
+- [ ] (low prio, debug) add global mutex priorities and add debug asserts
 - [ ] improve gui layout, too much wasted space in buffer viewer rn.
 - [ ] we often truncate buffers when copying them in record hook.
       Should *always* show some note in the UI, might be extremely confusing
@@ -220,6 +208,21 @@ On vertices and where to capture them:
 	- [ ] also handle matrices somehow
 - [ ] (later) support showing all draws from a render pass?
 
+Freeze/selection changes:
+- [ ] wayland VIL_CREATE_WINDOW freezes of window:
+      when moving the application window to another workspace, the
+	  driver just indefinitely blocks in QueuePresent. The problem is,
+	  we have the queue mutex locked while that happens.
+	  And so our window thread just starves at some point, trying
+	  to acquire that mutex :/
+	  I have no idea how to solve that at the moment.
+	  We just can't submit while that is happening.
+	  Also see https://github.com/KhronosGroup/Vulkan-Docs/issues/1158
+	  QueuePresent also has no timeout parameter we could pass
+	  when forwarding it :(
+	  	- will probably not happen when applications use mailbox mode
+		  Should at least document it somewhere.
+		  Might also happen when the window is minimized on some platforms?
 
 shader debugger:
 - [x] cleanup/fix freezing as described in node 2235
@@ -321,10 +324,6 @@ window/overlay
 	  vulkan extensions. Could extend swa for it, if useful
 	  (e.g. swa_display_create_for_vk_extensions)
 	- [ ] possibly fall back to xlib surface creation in swa
-	- [ ] at least make sure it does not crash for features we don't
-	      implement yet (such as sparse binding)
-		   (could for instance test what happens when memory field of a buffer/image
-		   is not set).
 - [ ] add a window icon for the separate window
       guess we need to implement it in swa for win32 first
 - [ ] {low prio, later} fix overlay for wayland. try xdg popup?
@@ -417,6 +416,8 @@ gui stuff
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
+- [ ] testing: at least make sure it does not crash for features we don't
+	  implement yet
 - [ ] (high prio) better pipeline/shader module display in resource viewer
       It's currently completely broken due to spirv-reflect removal
 	- [ ] especially inputs/outputs of vertex shaders (shows weird predefined spirv inputs/outputs)
@@ -838,7 +839,6 @@ optimization:
 	  maybe show time/frames since last re-record?
 	  Show statistics, how often the cb is re-recorded?
 - [ ] mode that allows to simply view all commands pushed to a queue?
-- [ ] way later: support for sparse binding
 - [ ] we might be able (with checks everywhere and no assumptions at all, basically)
       to support cases where extensions we don't know about/support are used.
 	  (e.g. image is created via a new extension, we don't hook that call,
