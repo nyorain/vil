@@ -1,3 +1,4 @@
+- [x] integrate per-subresource image layout tracking
 - [x] remove hardcoded vil api and vil platform toggles
 	- [x] env variables instead?
 - [x] toupper bug when searching for resource

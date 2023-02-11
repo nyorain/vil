@@ -1134,6 +1134,13 @@ void notifyApiHandleDestroyedLocked(Device& dev, Handle& handle, VkObjectType ty
 	}
 }
 
+void notifyMemoryResourceInvalidatedLocked(Device& dev, MemoryResource& res) {
+	assertOwned(dev.mutex);
+	if(dev.guiLocked()) {
+		dev.guiLocked()->memoryResourceInvalidated(res);
+	}
+}
+
 void nameHandle(Device& dev, VkObjectType objType, u64 handle, const char* name) {
 	if(!dev.ini->debugUtilsEnabled || !dev.dispatch.SetDebugUtilsObjectNameEXT) {
 		return;

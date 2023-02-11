@@ -109,8 +109,8 @@ void MemoryResource::onApiDestroy() {
 void DeviceMemory::onApiDestroy() {
 	std::lock_guard lock(dev->mutex);
 
-
 	for(auto* bind : allocations) {
+		dlg_assert(bind->resource);
 		auto& res = *bind->resource;
 
 		std::visit(Visitor{
@@ -121,20 +121,28 @@ void DeviceMemory::onApiDestroy() {
 				bind.memState = FullMemoryBind::State::memoryDestroyed;
 				bind.memOffset = 0u;
 				bind.memSize = 0u;
+
+				notifyMemoryResourceInvalidatedLocked(*dev, res);
 			},
 			[&](SparseMemoryState& mem) {
-				auto& sparseBind = static_cast<const SparseMemoryBind&>(*bind);
-				if(sparseBind.opaque) {
-					mem.opaqueBinds.erase(static_cast<const OpaqueSparseMemoryBind&>(*bind));
-				} else {
-					mem.imageBinds.erase(static_cast<const ImageSparseMemoryBind&>(*bind));
-				}
+				(void) mem;
+
+				// NOTE: we explicitly don't remove the allocation objects
+				//   here. We need to know (e.g. in gui code) if a resource
+				//   has sparse memory objects bound to it that were destroyed.
+				//   Per API spec they still need to be explicitly unbound,
+				//   otherwise using the resource is invalid
+				dlg_assert(bind->memory == this);
+				auto& dst = *const_cast<MemoryBind*>(bind);
+				dst.memory = nullptr;
+				dst.memOffset = 0u;
+
+				notifyMemoryResourceInvalidatedLocked(*dev, *dst.resource);
 			}
 		}, res.memory);
 	}
 
 	allocations.clear();
-	notifyApiHandleDestroyedLocked(*dev, *this, VK_OBJECT_TYPE_DEVICE_MEMORY);
 }
 
 // Memory

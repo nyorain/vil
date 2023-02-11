@@ -287,6 +287,7 @@ private:
 
 // Expects device mutex to be locked.
 void notifyApiHandleDestroyedLocked(Device& dev, Handle& handle, VkObjectType type);
+void notifyMemoryResourceInvalidatedLocked(Device& dev, MemoryResource& res);
 
 // Util for naming internal handles.
 // Mainly useful to get better validation layer output for stuff

@@ -105,6 +105,7 @@ public:
 	// The respective handle was already unset.
 	// Must only be called while device mutex is locked.
 	void apiHandleDestroyed(const Handle& handle, VkObjectType type);
+	void memoryResourceInvalidated(const MemoryResource&);
 
 	// Blocks until all pending draws have finished execution.
 	// Does not modify any internal state.

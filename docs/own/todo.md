@@ -9,8 +9,9 @@ v0.2:
 blocking sparse merge:
 - [ ] sparse binding: fix 'success' assert in insert
       e.g. try bind/flush with texturesparseresidency sample
-	  (might be fixed, found issues)
 - [x] fix semaphore sync tracking stuff
+- [ ] add separate list of bind sparse submissions to queue. See TODO there,
+      we currently act like it's dependent on submission order
 
 urgent, bugs:
 - [ ] test more on laptop, intel gpu
@@ -34,8 +35,6 @@ urgent, bugs:
 - [ ] histogram minMax auto-range not correctly working on all channels?
       just ignored the highs of the green-channel in a metallic/rough texture
 
-- [ ] integrate per-subresource image layout tracking
-
 - [ ] improve tabs ui: 
 	- [x] try out top-rounded corners {looks whack}, 
 	- [ ] play around further with alpha, 
@@ -43,9 +42,6 @@ urgent, bugs:
 		  Either make tab-background change color on being focused,
 		  make it more transparent or something or maybe use a thin window border?
 		  {think window border looks good imo}
-
-- [ ] sparse binding: fix 'success' assert in insert
-      e.g. try bind/flush with texturesparseresidency sample
 
 - [ ] fix resource viewer when switching handle types
       currently does not select the right handle then (e.g.
@@ -59,6 +55,7 @@ urgent, bugs:
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 
 - [ ] figure our why overlay on doom is broken
+      {seems to be due to async compute present}
 	- [ ] also fix the semaphore crash. Run with debug output enabled.
 - [ ] figure out tracy crashes with doom eternal :(
 

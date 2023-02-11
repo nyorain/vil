@@ -224,22 +224,27 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 		return;
 	}
 
-	/*
-	if(image.pendingLayout == VK_IMAGE_LAYOUT_UNDEFINED) {
-		// TODO: well, we could still try to display it.
-		// But we have to modify our barrier logic a bit.
-		// And should probably at least output a warning here that it's in
-		// undefined layout and therefore may contain garbage, nothing
-		// we can do about that (well, once again not entirely true, we could
-		// prevent this invalidation by hooking into state transitions
-		// and prevent images from being put into undefined layout; always
-		// storing in renderpass and so on. But that's really something
-		// for waaaay later, i'm already wondering wth i'm doing with my life
-		// writing this).
-		ImGui::Text("Image can't be displayed since it's in undefined layout, has undefined content");
-		return;
+	// NOTE: well, we could still try to display it.
+	// But we have to modify our barrier logic a bit.
+	// And should probably at least output a warning here that it's in
+	// undefined layout and therefore may contain garbage, nothing
+	// we can do about that (well, once again not entirely true, we could
+	// prevent this invalidation by hooking into state transitions
+	// and prevent images from being put into undefined layout; always
+	// storing in renderpass and so on. But that's really something
+	// for waaaay later, i'm already wondering wth i'm doing with my life
+	// writing this).
+	constexpr auto displayUndefined = true;
+	if(!displayUndefined) {
+		std::lock_guard lock(gui_->dev().mutex);
+		for(auto& subresLayout : image.pendingLayoutLocked()) {
+			if(subresLayout.layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+				ImGui::Text("Image can't be displayed since it's in undefined layout, "
+					"has undefined content");
+				return;
+			}
+		}
 	}
-	*/
 
 	VkImage imageHandle {};
 	constexpr auto layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -254,16 +259,11 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 				dlg_assert(image.handle);
 				dlg_assert(memBind.memory);
 				draw.usedImages.push_back({image_.object, layout});
-				draw.usedMemory.push_back(memBind.memory);
 				imageHandle = image.handle;
 			}
 		}
 
-
-		if(memState == FullMemoryBind::State::resourceDestroyed) {
-			ImGui::Text("Can't display contents since image was destroyed");
-			return;
-		} else if(memState == FullMemoryBind::State::unbound) {
+		if(memState == FullMemoryBind::State::unbound) {
 			ImGui::Text("Can't display contents since image was never bound to memory");
 			return;
 		} else if(memState == FullMemoryBind::State::memoryDestroyed) {
@@ -272,14 +272,31 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 			return;
 		}
 	} else if(image.memory.index() == 1) {
-		// see docs/own/sparse.md for an outline on how to handle it
-		// requires additional sync and tracking work
-		// imGuiText("TODO: can't display sparse image contents yet");
-		// return;
-
 		std::lock_guard lock(image.dev->mutex);
 		draw.usedImages.push_back({image_.object, layout});
 		imageHandle = image.handle;
+
+		auto& memBind = std::get<1>(image.memory);
+		for(auto& bind : memBind.imageBinds) {
+			if(!bind.memory) {
+				imGuiText("Can't display image since it contains invalid "
+					"memory bindings (non-opaque), cannot be accessed");
+				return;
+			}
+		}
+
+		for(auto& bind : memBind.opaqueBinds) {
+			if(!bind.memory) {
+				imGuiText("Can't display image since it contains invalid "
+					"memory bindings (opaque), cannot be accessed");
+				return;
+			}
+		}
+	}
+
+	if(!imageHandle) {
+		ImGui::Text("Can't display contents since image was destroyed");
+		return;
 	}
 
 	// NOTE: useful for destruction race repro/debugging
@@ -1824,7 +1841,6 @@ void ResourceGui::copyBuffer(Draw& draw) {
 		dlg_assert(buffer_.handle->handle);
 		dlg_assert(memBind.memory);
 		draw.usedBuffers.push_back(buffer_.handle);
-		draw.usedMemory.push_back(memBind.memory);
 		bufHandle = buffer_.handle->handle;
 	}
 
