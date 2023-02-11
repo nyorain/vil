@@ -157,10 +157,6 @@ For instance:
 
 Using these extensions will likely cause a crash.
 
-- VK_KHR_synchronization2
-- VK_EXT_vertex_input_dynamic_state
-- VK_EXT_extended_dynamic_state2
-- VK_EXT_color_write_enable
 - VK_EXT_transform_feedback
 - VK_AMD_buffer_marker
 - VK_NV_device_diagnostic_checkpoints

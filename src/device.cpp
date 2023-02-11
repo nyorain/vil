@@ -450,6 +450,31 @@ VkResult doCreateDevice(
 	auto extsEnd = ci->ppEnabledExtensionNames + ci->enabledExtensionCount;
 	std::vector<const char*> newExts = {extsBegin, extsEnd};
 
+	const auto unsupportedExts = std::set<std::string>{
+		// extensions that are not supported and will most likely cause crashes
+		"VK_NV_ray_tracing",
+		"VK_NV_shading_rate_image",
+		"VK_EXT_transform_feedback",
+		"VK_AMD_buffer_marker",
+		"VK_NV_device_diagnostic_checkpoints",
+		"VK_NV_scissor_exclusive",
+		"VK_NV_mesh_shader",
+		"VK_INTEL_performance_query",
+		"VK_NV_fragment_shading_rate_enums",
+		"VK_NV_device_generated_commands",
+	};
+
+	constexpr auto checkForUnsupportedExts = true;
+	if(checkForUnsupportedExts && !checkEnvBinary("VIL_SKIP_EXT_CHECK", false)) {
+		for(auto& ext : newExts) {
+			dlg_trace(ext);
+			if(unsupportedExts.find(ext) != unsupportedExts.end()) {
+				dlg_error("Application requested '{}' but extension is not supported by vil.\n"
+					"You can run again with env variable VIL_SKIP_EXT_CHECK=1 to try anyways", ext);
+				return VK_ERROR_EXTENSION_NOT_PRESENT;
+			}
+		}
+	}
 
 	std::unique_ptr<DisplayWindow> window;
 #ifdef VIL_WITH_SWA
