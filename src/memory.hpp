@@ -9,7 +9,7 @@
 namespace vil {
 
 struct MemoryBind {
-	DeviceMemory* memory {};
+	DeviceMemory* memory {}; // this can be null, e.g. if the memory was destroyed
 	MemoryResource* resource {};
 	VkDeviceSize memOffset {};
 	VkDeviceSize memSize {};

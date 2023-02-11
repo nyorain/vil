@@ -402,7 +402,22 @@ void activateLocked(MemoryResource& res, const OpaqueSparseMemoryBind& bind) {
 
 	if(bind.memory) {
 		auto [it, success] = bindState.opaqueBinds.insert(bind);
-		dlg_assert(success);
+		// NOTE The spec does not explicitly state this but
+		//   implicit rebinding seems to be allowed
+		if(!success) {
+			auto& oldBind = *it;
+			if(oldBind.memory) {
+				auto count = oldBind.memory->allocations.erase(&oldBind);
+				dlg_assert(count == 1u);
+			}
+
+			dlg_assertm(
+				oldBind.resourceOffset == bind.resourceOffset &&
+				oldBind.memSize == bind.memSize,
+				"TODO: Partial memory rebind not supported");
+			const_cast<OpaqueSparseMemoryBind&>(oldBind) = bind;
+		}
+
 		bind.memory->allocations.insert(&*it);
 	} else {
 		// unbind
@@ -412,7 +427,9 @@ void activateLocked(MemoryResource& res, const OpaqueSparseMemoryBind& bind) {
 				it->resourceOffset < resEnd) {
 			dlg_assertm(it->resourceOffset + it->memSize <= resEnd,
 				"TODO: partial unbinds not support");
-			it->memory->allocations.erase(&*it);
+			if(it->memory) {
+				it->memory->allocations.erase(&*it);
+			}
 			it = bindState.opaqueBinds.erase(it);
 		}
 	}
@@ -444,12 +461,38 @@ void activateLocked(BindSparseSubmission& bindSparse) {
 		for(auto& [bind, _] : imgBind.binds) {
 			if(bind.memory) {
 				auto [it, success] = bindState.imageBinds.insert(bind);
-				dlg_assert(success);
+				// NOTE The spec does not explicitly state this but
+				//   implicit rebinding seems to be allowed
+				if(!success) {
+					auto& oldBind = *it;
+					if(oldBind.memory) {
+						auto count = oldBind.memory->allocations.erase(&oldBind);
+						dlg_assert(count == 1u);
+					}
+
+					dlg_assert(
+						oldBind.subres.arrayLayer == bind.subres.arrayLayer &&
+						oldBind.subres.mipLevel == bind.subres.mipLevel &&
+						oldBind.subres.aspectMask == bind.subres.aspectMask);
+					dlg_assertm(oldBind.offset.x == bind.offset.x &&
+						oldBind.offset.y == bind.offset.y &&
+						oldBind.offset.z == bind.offset.z,
+						"TODO: partial rebind not supported");
+					dlg_assertm(oldBind.size.width == bind.size.width &&
+						oldBind.size.height == bind.size.height &&
+						oldBind.size.depth == bind.size.depth,
+						"TODO: partial rebind not supported");
+					const_cast<ImageSparseMemoryBind&>(oldBind) = bind;
+				}
 				bind.memory->allocations.insert(&*it);
 			} else {
 				// TODO: lower bound and iterate? not sure how
 				auto it = bindState.imageBinds.find(bind);
 				if(it != bindState.imageBinds.end()) {
+					dlg_assert(
+						it->subres.arrayLayer == bind.subres.arrayLayer &&
+						it->subres.mipLevel == bind.subres.mipLevel &&
+						it->subres.aspectMask == bind.subres.aspectMask);
 					// we currently don't support partial or multi- unbinding
 					dlg_assertm(it->offset.x == bind.offset.x &&
 						it->offset.y == bind.offset.y &&
@@ -460,7 +503,9 @@ void activateLocked(BindSparseSubmission& bindSparse) {
 						it->size.depth == bind.size.depth,
 						"TODO: partial unbind not supported");
 
-					it->memory->allocations.erase(&*it);
+					if(it->memory) {
+						it->memory->allocations.erase(&*it);
+					}
 					it = bindState.imageBinds.erase(it);
 				}
 			}

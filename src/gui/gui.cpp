@@ -1298,11 +1298,6 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 				return true;
 			}
 		}
-		for(auto& usedMem : draw.usedMemory) {
-			if(usedMem == &handle) {
-				return true;
-			}
-		}
 
 		return false;
 	};
@@ -1349,6 +1344,10 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 	}
 }
 
+void Gui::memoryResourceInvalidated(const MemoryResource& res) {
+	apiHandleDestroyed(res, res.memObjectType);
+}
+
 void Gui::activateTab(Tab tab) {
 	activeTab_ = tab;
 	activateTabCounter_ = 0u;
@@ -1369,7 +1368,6 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 		draw.onFinish.clear();
 		draw.usedImages.clear();
 		draw.usedBuffers.clear();
-		draw.usedMemory.clear();
 		draw.usedHookState.reset();
 	};
 
@@ -1544,30 +1542,6 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 	currDraw_ = nullptr;
 
 	if(currDrawInvalidated_.load() > 0u) {
-		dlg_check({
-			auto invalidated = false;
-			for(auto* usedBuf : draw.usedBuffers) {
-				if(!usedBuf->handle) {
-					invalidated = true;
-					break;
-				}
-			}
-			for(auto [usedImg, _targetLayout] : draw.usedImages) {
-				if(!usedImg->handle) {
-					invalidated = true;
-					break;
-				}
-			}
-			for(auto* usedMem : draw.usedMemory) {
-				if(!usedMem->handle) {
-					invalidated = true;
-					break;
-				}
-			}
-
-			dlg_assert(invalidated);
-		});
-
 		cleanupUnfished(draw);
 
 		// notify all destruction threads that they can carry on
@@ -1613,12 +1587,12 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 				dlg_assert_or(targetLayout != VK_IMAGE_LAYOUT_UNDEFINED, continue);
 
 				for(auto& subres : img->pendingLayoutLocked()) {
-					dlg_trace("mip {}:{} layer {}:{} layout {}",
-						subres.range.baseMipLevel,
-						subres.range.levelCount,
-						subres.range.baseArrayLayer,
-						subres.range.layerCount,
-						vk::name(subres.layout));
+					// dlg_trace("mip {}:{} layer {}:{} layout {}",
+					// 	subres.range.baseMipLevel,
+					// 	subres.range.levelCount,
+					// 	subres.range.baseArrayLayer,
+					// 	subres.range.layerCount,
+					// 	vk::name(subres.layout));
 
 					auto& barrierPre = imgBarriersPre.emplace_back();
 					barrierPre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1763,12 +1737,13 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		for(auto& draw : draws_) {
 			if(!draw->inUse) {
 				foundDraw = draw.get();
-				continue;
+				break;
 			}
 
 			if(dev().dispatch.GetFenceStatus(dev().handle, draw->fence) == VK_SUCCESS) {
 				finishedLocked(*draw);
 				foundDraw = draw.get();
+				break;
 			}
 		}
 
@@ -1781,7 +1756,6 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	auto& draw = *foundDraw;
 	draw.usedImages.clear();
 	draw.usedBuffers.clear();
-	draw.usedMemory.clear();
 	foundDraw->lastUsed = ++drawCounter_;
 
 	if(blur_.dev && !info.clear) {
@@ -2063,9 +2037,7 @@ void Gui::addFullSync(Draw& draw, VkSubmitInfo& submitInfo) {
 
 	// when we used any application resources we sync with *all*
 	// pending submissions.
-	if(!draw.usedImages.empty() ||
-			!draw.usedBuffers.empty() ||
-			!draw.usedMemory.empty()) {
+	if(!draw.usedImages.empty() || !draw.usedBuffers.empty()) {
 		for(auto& pqueue : dev().queues) {
 			auto& queue = *pqueue;
 			if(&queue == &usedQueue()) {
@@ -2175,7 +2147,6 @@ void Gui::finishedLocked(Draw& draw) {
 	draw.waitedUpon.clear();
 	draw.usedImages.clear();
 	draw.usedBuffers.clear();
-	draw.usedMemory.clear();
 	draw.usedHookState.reset();
 
 	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
