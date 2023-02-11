@@ -57,6 +57,7 @@ private:
 
 	void drawShaderInfo(VkPipeline, VkShaderStageFlagBits stage);
 	void drawImageContents(Draw&, Image&, bool doSelect);
+	void showBufferViewer(Draw&, Buffer&);
 
 	void drawHandleDesc(Draw&);
 	void copyBuffer(Draw&);
