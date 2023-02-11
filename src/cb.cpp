@@ -3397,4 +3397,70 @@ VKAPI_ATTR void VKAPI_CALL CmdSetColorWriteEnableEXT(
 		attachmentCount, pColorWriteEnables);
 }
 
+// VK_EXT_multi_draw
+VKAPI_ATTR void VKAPI_CALL CmdDrawMultiEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    drawCount,
+		const VkMultiDrawInfoEXT*                   pVertexInfo,
+		uint32_t                                    instanceCount,
+		uint32_t                                    firstInstance,
+		uint32_t                                    stride) {
+	ExtZoneScoped;
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<DrawMultiCmd>(cb, cb);
+
+	cmd.vertexInfos = alloc<VkMultiDrawInfoEXT>(cb, drawCount);
+	for(auto i = 0u; i < drawCount; ++i) {
+		auto* ptr = reinterpret_cast<const std::byte*>(pVertexInfo) + i * stride;
+		cmd.vertexInfos[i] = *reinterpret_cast<const VkMultiDrawInfoEXT*>(ptr);
+	}
+
+	cmd.vertexInfos = copySpan(cb, pVertexInfo, drawCount);
+	cmd.instanceCount = instanceCount;
+	cmd.firstInstance = firstInstance;
+	cmd.stride = stride;
+
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawMultiEXT(cb.handle,
+			drawCount, pVertexInfo, instanceCount, firstInstance, stride);
+	}
+}
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawMultiIndexedEXT(
+		VkCommandBuffer                             commandBuffer,
+		uint32_t                                    drawCount,
+		const VkMultiDrawIndexedInfoEXT*            pIndexInfo,
+		uint32_t                                    instanceCount,
+		uint32_t                                    firstInstance,
+		uint32_t                                    stride,
+		const int32_t*                              pVertexOffset) {
+	ExtZoneScoped;
+
+	auto& cb = getCommandBuffer(commandBuffer);
+	auto& cmd = addCmd<DrawMultiIndexedCmd>(cb, cb);
+
+	cmd.indexInfos = alloc<VkMultiDrawIndexedInfoEXT>(cb, drawCount);
+	for(auto i = 0u; i < drawCount; ++i) {
+		auto* ptr = reinterpret_cast<const std::byte*>(pIndexInfo) + i * stride;
+		cmd.indexInfos[i] = *reinterpret_cast<const VkMultiDrawIndexedInfoEXT*>(ptr);
+	}
+
+	cmd.instanceCount = instanceCount;
+	cmd.firstInstance = firstInstance;
+	cmd.stride = stride;
+
+	if(pVertexOffset) {
+		cmd.vertexOffset = *pVertexOffset;
+	}
+
+	{
+		ExtZoneScopedN("dispatch");
+		cb.dev->dispatch.CmdDrawMultiIndexedEXT(cb.handle,
+			drawCount, pIndexInfo, instanceCount, firstInstance, stride,
+			pVertexOffset);
+	}
+}
+
 } // namespace vil

@@ -430,11 +430,11 @@ struct DrawIndirectCmd final : DrawCmdBase {
 };
 
 struct DrawIndexedCmd final : DrawCmdBase {
-	u32 indexCount;
-	u32 instanceCount;
-	u32 firstIndex;
-	i32 vertexOffset;
-	u32 firstInstance;
+	u32 indexCount {};
+	u32 instanceCount {};
+	u32 firstIndex {};
+	i32 vertexOffset {};
+	u32 firstInstance {};
 
 	using DrawCmdBase::DrawCmdBase;
 
@@ -461,6 +461,39 @@ struct DrawIndirectCountCmd final : DrawCmdBase {
 	std::string_view nameDesc() const override {
 		return indexed ? "DrawIndexedIndirectCount" : "DrawIndirectCount";
 	}
+	void displayInspector(Gui& gui) const override;
+	void record(const Device&, VkCommandBuffer, u32) const override;
+	Matcher match(const Command&) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
+struct DrawMultiCmd final : DrawCmdBase {
+	span<VkMultiDrawInfoEXT> vertexInfos;
+	u32 instanceCount {};
+	u32 firstInstance {};
+	u32 stride {}; // NOTE: only here for gui, we don't forward it
+
+	using DrawCmdBase::DrawCmdBase;
+
+	std::string toString() const override;
+	std::string_view nameDesc() const override { return "DrawMulti"; };
+	void displayInspector(Gui& gui) const override;
+	void record(const Device&, VkCommandBuffer, u32) const override;
+	Matcher match(const Command&) const override;
+	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+};
+
+struct DrawMultiIndexedCmd final : DrawCmdBase {
+	span<VkMultiDrawIndexedInfoEXT> indexInfos;
+	u32 instanceCount {};
+	u32 firstInstance {};
+	u32 stride {}; // NOTE: only here for gui, we don't forward it
+	std::optional<i32> vertexOffset {};
+
+	using DrawCmdBase::DrawCmdBase;
+
+	std::string toString() const override;
+	std::string_view nameDesc() const override { return "DrawMultiIndexed"; };
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;

@@ -873,6 +873,9 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 
 	VIL_DEV_HOOK_EXT(CmdSetColorWriteEnableEXT, VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME),
 
+	VIL_DEV_HOOK_EXT(CmdDrawMultiEXT, VK_EXT_MULTI_DRAW_EXTENSION_NAME),
+	VIL_DEV_HOOK_EXT(CmdDrawMultiIndexedEXT, VK_EXT_MULTI_DRAW_EXTENSION_NAME),
+
 	// tmp test
 	VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
@@ -944,11 +947,88 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetInstanceProcAddr(VkInstance ini, con
 	return hook.func;
 }
 
+auto knownUnhooked = std::set<std::string>{
+	"vkGetDeviceQueue",
+	"vkGetDeviceQueue2",
+	// query pool
+	"vkGetQueryPoolResults",
+	"vkGetDescriptorSetLayoutSupport",
+	// pipeline cache
+	"vkCreatePipelineCache",
+	"vkMergePipelineCaches",
+	"vkDestroyPipelineCache",
+	"vkGetPipelineCacheData",
+	// general query
+	"vkGetRenderAreaGranularity",
+	"vkGetDeviceGroupPeerMemoryFeatures",
+	"vkGetImageSparseMemoryRequirements2",
+	"vkGetDeviceBufferMemoryRequirements",
+	"vkGetDeviceImageMemoryRequirements",
+	"vkGetDeviceImageSparseMemoryRequirements",
+	"vkGetDeviceGroupPresentCapabilitiesKHR",
+	"vkGetDeviceGroupSurfacePresentModesKHR",
+	"vkGetDeviceGroupPeerMemoryFeaturesKHR",
+	"vkGetImageSparseMemoryRequirements2KHR",
+	// private data stuff
+	"vkCreatePrivateDataSlot",
+	"vkDestroyPrivateDataSlot",
+	"vkSetPrivateData",
+	"vkGetPrivateData",
+
+	// the ones we need to hook
+	// vkCmdSetDeviceMask
+	// vkCmdSetRasterizerDiscardEnable
+	// vkCmdSetDepthBiasEnable
+	// vkCmdSetPrimitiveRestartEnable
+	//
+	// vkCreateSamplerYcbcrConversion
+	// vkDestroySamplerYcbcrConversion
+	// vkGetDescriptorSetLayoutSupport // for samplers!
+	// vkCreateSamplerYcbcrConversionKHR
+	// vkDestroySamplerYcbcrConversionKHR
+	// vkGetDescriptorSetLayoutSupportKHR
+	//
+	// vkGetSemaphoreCounterValue // for semaphore wrapping at some point?
+	//
+	// vkCreateSharedSwapchainsKHR
+	// vkCreateVideoSessionKHR
+	// vkDestroyVideoSessionKHR
+	// vkGetVideoSessionMemoryRequirementsKHR
+	// vkBindVideoSessionMemoryKHR
+	// vkCreateVideoSessionParametersKHR
+	// vkUpdateVideoSessionParametersKHR
+	// vkDestroyVideoSessionParametersKHR
+	// vkCmdBeginVideoCodingKHR
+	// vkCmdEndVideoCodingKHR
+	// vkCmdControlVideoCodingKHR
+	// vkCmdDecodeVideoKHR
+	//
+	// vkCmdSetDeviceMaskKHR
+	//
+	// vkCmdEncodeVideoKHR
+	// vkCmdWriteBufferMarker2AMD
+	// vkGetQueueCheckpointData2NV
+	// vkCmdTraceRaysIndirect2KHR
+
+	// resource import/export
+	// vkGetMemoryFdKHR
+	// vkGetMemoryFdPropertiesKHR
+	// vkImportSemaphoreFdKHR
+	// vkGetSemaphoreFdKHR
+	// vkGetSwapchainStatusKHR
+	// vkImportFenceFdKHR
+	// vkGetFenceFdKHR
+	// vkAcquireProfilingLockKHR
+	// vkReleaseProfilingLockKHR
+};
+
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetDeviceProcAddr(VkDevice vkDev, const char* funcName) {
 	auto it = funcPtrTable.find(std::string_view(funcName));
 	if(it == funcPtrTable.end()) {
 		// If it's not hooked, just forward it to the next chain link
-		dlg_trace("unhooked device function: {}", funcName);
+		if(knownUnhooked.find(funcName) == knownUnhooked.end()) {
+			dlg_trace("unhooked device function: {}", funcName);
+		}
 
 		auto* dev = vil::findData<vil::Device>(vkDev);
 		if(!dev || !dev->dispatch.GetDeviceProcAddr) {

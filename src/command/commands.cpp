@@ -330,6 +330,32 @@ Matcher match(const VkBufferImageCopy2KHR& a, const VkBufferImageCopy2KHR& b) {
 	return m;
 }
 
+Matcher match(const VkMultiDrawInfoEXT& a, const VkMultiDrawInfoEXT& b) {
+	Matcher m;
+	add(m, a.firstVertex, b.firstVertex);
+	add(m, a.vertexCount, b.vertexCount);
+	return m;
+}
+
+Matcher match(const VkMultiDrawIndexedInfoEXT& a, const VkMultiDrawIndexedInfoEXT& b) {
+	Matcher m;
+	add(m, a.firstIndex, b.firstIndex);
+	add(m, a.indexCount, b.indexCount);
+	add(m, a.vertexOffset, b.vertexOffset);
+	return m;
+}
+
+bool operator==(const VkMultiDrawInfoEXT& a, const VkMultiDrawInfoEXT& b) {
+	return a.firstVertex == b.firstVertex &&
+		a.vertexCount == b.vertexCount;
+}
+
+bool operator==(const VkMultiDrawIndexedInfoEXT& a, const VkMultiDrawIndexedInfoEXT& b) {
+	return a.firstIndex == b.firstIndex &&
+		a.indexCount == b.indexCount &&
+		a.vertexOffset == b.vertexOffset;
+}
+
 Matcher match(const VkImageSubresourceRange& a, const VkImageSubresourceRange& b) {
 	Matcher m;
 	add(m, a, b);
@@ -1459,6 +1485,75 @@ Matcher DrawIndirectCountCmd::match(const Command& base) const {
 	add(m, maxDrawCount, cmd->maxDrawCount);
 	add(m, countBufferOffset, cmd->countBufferOffset, 0.2);
 	add(m, offset, cmd->offset, 0.2);
+
+	return m;
+}
+
+// DrawMultiCmd
+std::string DrawMultiCmd::toString() const {
+	return dlg::format("DrawMulti({})", vertexInfos.size());
+}
+void DrawMultiCmd::displayInspector(Gui& gui) const {
+	// TODO
+	DrawCmdBase::displayInspector(gui);
+}
+void DrawMultiCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	auto ourStride = sizeof(VkMultiDrawInfoEXT);
+	dev.dispatch.CmdDrawMultiEXT(cb, vertexInfos.size(),
+		vertexInfos.data(), instanceCount, firstInstance, ourStride);
+}
+Matcher DrawMultiCmd::match(const Command& base) const {
+	auto* cmd = dynamic_cast<const DrawMultiCmd*>(&base);
+	if(!cmd) {
+		return Matcher::noMatch();
+	}
+
+	auto m = doMatch(*cmd, false);
+	if(m.total == -1.f) {
+		return Matcher::noMatch();
+	}
+
+	add(m, instanceCount, cmd->instanceCount);
+	add(m, firstInstance, cmd->firstInstance);
+	add(m, stride, cmd->stride);
+
+	// NOTE: not sure. Could also do unordered
+	addSpanOrderedStrict(m, vertexInfos, cmd->vertexInfos);
+
+	return m;
+}
+
+// DrawMultiIndexedCmd
+std::string DrawMultiIndexedCmd::toString() const {
+	return dlg::format("DrawMultiIndexed({})", indexInfos.size());
+}
+void DrawMultiIndexedCmd::displayInspector(Gui& gui) const {
+	// TODO
+	DrawCmdBase::displayInspector(gui);
+}
+void DrawMultiIndexedCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+	auto ourStride = sizeof(VkMultiDrawIndexedInfoEXT);
+	dev.dispatch.CmdDrawMultiIndexedEXT(cb, indexInfos.size(),
+		indexInfos.data(), instanceCount, firstInstance, ourStride,
+		vertexOffset ? &*vertexOffset : nullptr);
+}
+Matcher DrawMultiIndexedCmd::match(const Command& base) const {
+	auto* cmd = dynamic_cast<const DrawMultiIndexedCmd*>(&base);
+	if(!cmd) {
+		return Matcher::noMatch();
+	}
+
+	auto m = doMatch(*cmd, false);
+	if(m.total == -1.f) {
+		return Matcher::noMatch();
+	}
+
+	add(m, instanceCount, cmd->instanceCount);
+	add(m, firstInstance, cmd->firstInstance);
+	add(m, stride, cmd->stride);
+
+	// NOTE: not sure. Could also do unordered
+	addSpanOrderedStrict(m, indexInfos, cmd->indexInfos);
 
 	return m;
 }

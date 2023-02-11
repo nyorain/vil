@@ -817,5 +817,22 @@ VKAPI_ATTR void VKAPI_CALL CmdSetColorWriteEnableEXT(
     uint32_t                                    attachmentCount,
     const VkBool32*                             pColorWriteEnables);
 
+// VK_EXT_multi_draw
+VKAPI_ATTR void VKAPI_CALL CmdDrawMultiEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    drawCount,
+    const VkMultiDrawInfoEXT*                   pVertexInfo,
+    uint32_t                                    instanceCount,
+    uint32_t                                    firstInstance,
+    uint32_t                                    stride);
+
+VKAPI_ATTR void VKAPI_CALL CmdDrawMultiIndexedEXT(
+    VkCommandBuffer                             commandBuffer,
+    uint32_t                                    drawCount,
+    const VkMultiDrawIndexedInfoEXT*            pIndexInfo,
+    uint32_t                                    instanceCount,
+    uint32_t                                    firstInstance,
+    uint32_t                                    stride,
+    const int32_t*                              pVertexOffset);
 
 } // namespace vil

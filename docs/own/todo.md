@@ -64,6 +64,10 @@ Freeze/selection changes:
 		  Might also happen when the window is minimized on some platforms?
 
 new, workstack:
+- [ ] hook vkGetDescriptorSetLayoutSupport for sampler unwrapping
+- [ ] VK_EXT_depth_clip_enable
+- [ ] VK_EXT_sample_locations
+- [ ] VK_EXT_line_rasterization
 - [ ] make use of proper sync tracking
 	- [ ] fix added sync: only sync with active pending submission?
 	      not sure how to properly do this
