@@ -2,6 +2,7 @@
 #include <chrono>
 #include <string>
 #include <cmath>
+#include <iostream>
 #include <util/profiling.hpp>
 
 #include "textedit.h"
@@ -591,8 +592,9 @@ void TextEditor::RemoveLine(int aStart, int aEnd)
 	for (auto& i : mErrorMarkers)
 	{
 		ErrorMarkers::value_type e(i.first >= aStart ? i.first - 1 : i.first, i.second);
-		if (e.first >= aStart && e.first <= aEnd)
+		if (e.first >= aStart && e.first <= aEnd) {
 			continue;
+		}
 		etmp.insert(e);
 	}
 	mErrorMarkers = std::move(etmp);
@@ -621,8 +623,9 @@ void TextEditor::RemoveLine(int aIndex)
 	for (auto& i : mErrorMarkers)
 	{
 		ErrorMarkers::value_type e(i.first > aIndex ? i.first - 1 : i.first, i.second);
-		if (e.first - 1 == aIndex)
+		if (e.first - 1 == aIndex) {
 			continue;
+		}
 		etmp.insert(e);
 	}
 	mErrorMarkers = std::move(etmp);

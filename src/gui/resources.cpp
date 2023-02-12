@@ -161,7 +161,11 @@ void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 #endif
 
 					ImGui::SameLine();
+
+					ImGui::PushID(&imgBind);
 					refButtonExpect(*gui_, imgBind.memory);
+					ImGui::PopID();
+
 					ImGui::SameLine();
 					imGuiText(" (offset {}, size {})",
 						sepfmt(imgBind.memOffset),
@@ -175,7 +179,11 @@ void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 			for(auto& opaqueBind : memState.opaqueBinds) {
 				imGuiText("Offset {} ", opaqueBind.resourceOffset);
 				ImGui::SameLine();
+
+				ImGui::PushID(&opaqueBind);
 				refButtonExpect(*gui_, opaqueBind.memory);
+				ImGui::PopID();
+
 				ImGui::SameLine();
 				imGuiText(" (offset {}, size {})",
 					sepfmt(opaqueBind.memOffset),
@@ -201,6 +209,11 @@ void ResourceGui::drawMemoryResDesc(Draw&, MemoryResource& res) {
 }
 
 void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
+	// some other resource was selected in the meantime
+	if(image_.object != &image) {
+		return;
+	}
+
 	IntrusivePtr<Swapchain> swapchain;
 
 	{
@@ -398,6 +411,11 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 void ResourceGui::showBufferViewer(Draw& draw, Buffer& buffer) {
 	(void) draw;
 
+	// something else selected in the meantime
+	if(buffer_.handle != &buffer) {
+		return;
+	}
+
 	if(buffer.memory.index() == 0u) {
 		// NOTE: this check is racy and we don't insert into usedBuffers yet
 		//   since it's only relevant to insert the relevant gui message.
@@ -436,7 +454,7 @@ void ResourceGui::showBufferViewer(Draw& draw, Buffer& buffer) {
 	if(buffer_.lastReadback) {
 		auto& readback = buffer_.readbacks[*buffer_.lastReadback];
 		dlg_assert(!readback.pending);
-		dlg_assert(readback.src == buffer_.handle->handle);
+		dlg_assert(&buffer == buffer_.handle && readback.src == buffer_.handle->handle);
 
 		ImGui::Separator();
 		buffer_.viewer.display(readback.own.data());
@@ -472,6 +490,7 @@ void ResourceGui::drawDesc(Draw& draw, Buffer& buffer) {
 	// resource references
 	ImGui::Spacing();
 	drawMemoryResDesc(draw, buffer);
+	showBufferViewer(draw, buffer);
 }
 
 void ResourceGui::drawDesc(Draw&, Sampler& sampler) {
@@ -1491,9 +1510,6 @@ void ResourceGui::updateResourceList() {
 	clearHandles();
 
 	// find new handler
-	if(filter_ != newFilter_) {
-		clearSelection();
-	}
 	filter_ = newFilter_;
 
 	const ObjectTypeHandler* typeHandler {};
@@ -1586,6 +1602,7 @@ void ResourceGui::draw(Draw& draw) {
 			if(ImGui::Selectable(name)) {
 				newFilter_ = filter;
 				update = true;
+				clearSelection();
 			}
 		}
 

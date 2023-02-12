@@ -8,6 +8,10 @@ v0.3:
 
 urgent, bugs:
 - [ ] fix image viewer layout
+- [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
+      not the texture itself. Can be confusing otherwise
+	- [ ] maybe show full image size on hover?
+
 - [ ] test more on laptop, intel gpu
 	- [ ] seems like we do some nasty stuff in the histogram shaders,
 		  get gpu timeouts (try e.g. with curlnoise.ktx, zoom out on histogram)
@@ -18,7 +22,7 @@ urgent, bugs:
       when present happens on different queue than our gui drawing, we currently
 	  don't properly sync
 	- real problem in doom eternal with 'present from async compute'
-	- also investigate if the current approach even works with same-queue:
+	- investigate if the current approach even works with same-queue:
 	  we submit the wait semaphores to the queue just-like-that. Does
 	  QueuePresent respect submission order though?
 	- check if fixed now with single-swapchain-present restriction.
@@ -37,37 +41,33 @@ urgent, bugs:
 - [ ] histogram minMax auto-range not correctly working on all channels?
       just ignored the highs of the green-channel in a metallic/rough texture
 
-- [ ] fix resource viewer when switching handle types
-      currently does not select the right handle then (e.g.
-	  going from Image -> DeviceMemory via refButton)
-
-- [ ] fix command viewer update when nothing is selected
-
 - [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull
 	- [ ] a lot of descriptor code was probably never really tested for array bindings.
 	      Make sure everything works.
 
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
-
-- [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
-      not the texture itself. Can be confusing otherwise
-	- [ ] maybe show full image size on hover?
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
       Increased it temporarily but should probably just roll own block sub-allocator
+	  (try to test with RDR2 again)
+
+new, workstack:
 - [ ] when viewing resources aliasing others in memory in the resource viewer,
       we have to make sure that their content wasn't made undefined.
 	  Vulkan says it's not allowed to use such resources.
 	  Note that they are usually NOT in the invalid image layout, just the last
 	  one they were used in.
-
-new, workstack:
 - [ ] VK_KHR_ray_tracing_maintenance1 for vkCmdTraceRaysIndirect2KHR
 - [ ] VK_EXT_depth_clip_enable
 - [ ] VK_EXT_sample_locations
 - [ ] VK_EXT_line_rasterization
 - [ ] VK_AMD_buffer_marker, VK_NV_device_diagnostic_checkpoints
 	- [ ] test if vil works with the crash-report layer
+- [ ] revisit inline button/refButton. Full button looked better at *some* places
+- [ ] resource viewer: maybe use mechanism that just stores the 
+      new selection (e.g. from refButton) for the next frame instead of
+	  selecting immediately? Need quite some checks/returns in there.
+	  Error-prone atm!
 - [ ] make use of proper sync tracking
 	- [ ] fix added sync: only sync with active pending submission?
 	      not sure how to properly do this

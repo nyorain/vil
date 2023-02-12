@@ -1218,10 +1218,7 @@ void Gui::draw(Draw& draw, bool fullscreen) {
 				// auto pressed = ImGui::Button(label);
 
 				if(pressed && activeTab_ != type) {
-					if(type == Tab::resources) {
-						tabs_.resources->firstUpdate_ = true;
-					}
-					activeTab_ = type;
+					activateTab(type);
 				}
 
 				prevSelected = selected;
@@ -1356,6 +1353,15 @@ void Gui::activateTab(Tab tab) {
 	// the list of available resources, not showing "<Destroyed>"
 	if(tab == Tab::resources) {
 		tabs_.resources->firstUpdate_ = true;
+	} else if(tab == Tab::commandBuffer &&
+			!tabs_.cb->selector().record() &&
+			!tabs_.cb->selector().submission()) {
+		// when we first swtich to the command tab, select the swapchain
+		// by default (if there is any)
+		assertNotOwned(dev_->mutex);
+		if(auto sc = dev_->swapchain(); sc) {
+			tabs_.cb->showSwapchainSubmissions(*sc);
+		}
 	}
 }
 
@@ -2266,14 +2272,71 @@ vku::DynDs Gui::allocDs(const vku::DynDsLayout& layout, StringParam name) {
 }
 
 // util
+// Copied from ImGui::SmallButton
+bool inlineButton(const char* label, const ImVec2& size_arg = ImVec2(0, 0), ImGuiButtonFlags flags = 0) {
+	ImGuiWindow* window = ImGui::GetCurrentWindow();
+	if (window->SkipItems)
+		return false;
+
+	ImGuiContext& g = *GImGui;
+	const ImGuiID id = window->GetID(label);
+	const ImVec2 label_size = ImGui::CalcTextSize(label, NULL, true);
+
+	ImVec2 pos = window->DC.CursorPos;
+
+	// SmallButton-like
+	ImVec2 padding = ImVec2(0, 0);
+	// const ImGuiStyle& style = g.Style;
+	// ImVec2 padding = style.FramePadding;
+	// padding.y = 0;
+
+	ImVec2 size = ImGui::CalcItemSize(size_arg, label_size.x + padding.x * 2.0f, label_size.y + padding.y * 2.0f);
+
+	const ImRect bb(pos, pos + size);
+	ImGui::ItemSize(size, padding.y);
+	if (!ImGui::ItemAdd(bb, id))
+		return false;
+
+	if (g.LastItemData.InFlags & ImGuiItemFlags_ButtonRepeat)
+		flags |= ImGuiButtonFlags_Repeat;
+
+	bool hovered, held;
+	bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, flags);
+
+	// Render
+	ImGui::RenderNavHighlight(bb, id);
+
+	if (g.LogEnabled) {
+		ImGui::LogSetNextTextDecoration("[", "]");
+	}
+
+	const ImU32 col = ImGui::GetColorU32((held && hovered) ? ImGuiCol_ButtonActive :
+			hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button);
+	ImGui::PushStyleColor(ImGuiCol_Text, col);
+	ImGui::RenderText(bb.Min + padding, label, NULL);
+	ImGui::PopStyleColor(1);
+
+	return pressed;
+}
+
 void refButton(Gui& gui, Handle& handle, VkObjectType objectType) {
 	// We need the PushID/PopID since there may be multiple
 	// ref buttons with the same label (e.g. for unnamed handles)
 	constexpr auto showType = true;
 	ImGui::PushID(&handle);
-	if(ImGui::Button(name(handle, objectType, showType).c_str())) {
+
+	// ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_Button]);
+//
+	// ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+	// ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
+	// ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
+
+	if(inlineButton(name(handle, objectType, showType).c_str())) {
 		gui.selectResource(handle, objectType);
 	}
+
+	// ImGui::PopStyleColor(3);
+
 	ImGui::PopID();
 }
 
