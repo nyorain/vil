@@ -467,7 +467,6 @@ VkResult doCreateDevice(
 	constexpr auto checkForUnsupportedExts = true;
 	if(checkForUnsupportedExts && !checkEnvBinary("VIL_SKIP_EXT_CHECK", false)) {
 		for(auto& ext : newExts) {
-			dlg_trace(ext);
 			if(unsupportedExts.find(ext) != unsupportedExts.end()) {
 				dlg_error("Application requested '{}' but extension is not supported by vil.\n"
 					"You can run again with env variable VIL_SKIP_EXT_CHECK=1 to try anyways", ext);

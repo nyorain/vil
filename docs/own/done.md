@@ -1,3 +1,7 @@
+- [x] fix command viewer update when nothing is selected
+- [x] fix resource viewer when switching handle types
+      currently does not select the right handle then (e.g.
+	  going from Image -> DeviceMemory via refButton)
 - [~] add sparse bind matching for frame matching
       {nope, we don't really want/need this. Applications don't submit
 	   similar binds over and over again. Should fix/stabilize this via ui}

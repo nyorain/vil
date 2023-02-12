@@ -518,9 +518,7 @@ lib_imgui = static_library(
 	imgui_src,
 	gnu_symbol_visibility: 'hidden',
 	include_directories: inc,
-	c_args: args + cc.get_supported_arguments([
-		'-Wno-class-memaccess'
-	]),
+	cpp_args: layer_args + args,
 )
 
 link_args = [

@@ -255,7 +255,7 @@ void CommandRecordGui::draw(Draw& draw) {
 	if(updateMode == UpdateMode::swapchain && !selector_.freezeState && doUpdate) {
 		auto lastPresent = swapchain->frameSubmissions[0].presentID;
 		auto statePresent = selector_.hookStateSwapchainPresent();
-		if(selector_.submission() && lastPresent > statePresent + 5) {
+		if(!selector_.submission() || lastPresent > statePresent + 5) {
 			auto diff = lastPresent - statePresent;
 
 			auto selType = selector_.selectionType();
@@ -443,7 +443,12 @@ void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain) {
 	auto& dev = gui_->dev();
 	assertNotOwned(dev.mutex);
 
-	auto lastFrame = swapchain.frameSubmissions[0].batches;
+	std::vector<FrameSubmission> lastFrame;
+
+	{
+		std::lock_guard lock(dev.mutex);
+		lastFrame = swapchain.frameSubmissions[0].batches;
+	}
 
 	clearSelection(true);
 	selector_.select(std::move(lastFrame), u32(-1), nullptr, {});

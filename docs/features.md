@@ -9,19 +9,18 @@ See [env.md](env.md) for more details.
 
 ## Vulkan 1.0
 
-Missing:
-- Anything with sparse memory: not implemented/tested at all, 
-  will likely cause failed assert/crash in layer
+Fully implemented. 
 
 ## Vulkan 1.1
 
 Implemented:
 - VK_KHR_descriptor_update_template
+  resources tab description is still TODO
 - VK_KHR_bind_memory2
 - vkCmdDispatchBase
 - VK_KHR_maintenance1 (e.g. vkTrimCommandPool)
 - VK_KHR_dedicated_allocation (not indicated in ui yet though)
-- VK_KHR_maintenance3 (nothing to do afaik)
+- VK_KHR_maintenance3 (nothing to do)
 
 Missing:
 - Anything with device masks is missing; using it will very likely crash.
@@ -45,6 +44,8 @@ Implemented:
 	- some edge cases with update_unused_while_pending are not properly
 	  tested yet, might need some changes.
 - VK_KHR_timeline_semaphore
+	- has some tricky edge cases (especially when application is really making
+	  use of out-of-order submission chaining), not yet tested a lot.
 
 missing:
 - extensions extending render passes (e.g. VK_KHR_depth_stencil_resolve)
@@ -87,27 +88,25 @@ as spirv-tools supports them):
 Extensions promoted to core not explicitly mentioned here, see above.
 Supported extensions:
 
-- VK_KHR_swapchain
+- VK_KHR_surface, VK_KHR_swapchain
 - VK_EXT_debug_utils
 - VK_KHR_surface (tested overlay platforms: xlib, xcb, win32)
 	- other platforms should work without crash at least
 
 supported but no/incomplete gui interaction/information:
-- VK_EXT_conditional_rendering 
+- VK_KHR_acceleration_structure
+- VK_KHR_ray_tracing_pipeline
 - VK_EXT_extended_dynamic_state
 - VK_EXT_line_rasterization
 - VK_KHR_push_descriptor
-- VK_KHR_descriptor_update_template
+  not well tested, might have some issues.
+  push descriptors will not be shown correctly in UI
 - VK_KHR_draw_indirect_count
 - VK_EXT_sample_locations
 - VK_EXT_discard_rectangles
 - VK_EXT_vertex_input_dynamic_state
 - VK_EXT_color_write_enable
-
-There is basic support for ray tracing but no full UI support for TraceRays
-commands yet:
-- VK_KHR_acceleration_structure
-- VK_KHR_ray_tracing_pipeline
+- VK_EXT_multi_draw
 
 Extensions that just add new features or flags shouldn't need any 
 support by the layer but may have incomplete introspection. New functions
@@ -152,6 +151,8 @@ For instance:
 - VK_KHR_variable_pointers
 - VK_EXT_scalar_block_layout
 - VK_EXT_shader_subgroup_ballot
+
+The shader debugger does not work with most spirv extensions yet, though.
 
 ## Missing extensions
 
