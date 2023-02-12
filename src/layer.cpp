@@ -631,12 +631,15 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK(CreateDescriptorUpdateTemplate, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK(DestroyDescriptorUpdateTemplate, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK(UpdateDescriptorSetWithTemplate, VK_API_VERSION_1_1),
+	VIL_DEV_HOOK(GetDescriptorSetLayoutSupport, VK_API_VERSION_1_1),
 	VIL_DEV_HOOK_ALIAS_CORE(CreateDescriptorUpdateTemplateKHR,
 		CreateDescriptorUpdateTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(DestroyDescriptorUpdateTemplateKHR,
 		DestroyDescriptorUpdateTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
 	VIL_DEV_HOOK_ALIAS_CORE(UpdateDescriptorSetWithTemplateKHR,
 		UpdateDescriptorSetWithTemplate, VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME),
+	VIL_DEV_HOOK_ALIAS_CORE(GetDescriptorSetLayoutSupportKHR,
+		GetDescriptorSetLayoutSupport, VK_KHR_MAINTENANCE_3_EXTENSION_NAME),
 
 	// pipe.hpp
 	VIL_DEV_HOOK(CreateGraphicsPipelines, VK_API_VERSION_1_0),
@@ -876,11 +879,10 @@ static const std::unordered_map<std::string_view, HookedFunction> funcPtrTable {
 	VIL_DEV_HOOK_EXT(CmdDrawMultiEXT, VK_EXT_MULTI_DRAW_EXTENSION_NAME),
 	VIL_DEV_HOOK_EXT(CmdDrawMultiIndexedEXT, VK_EXT_MULTI_DRAW_EXTENSION_NAME),
 
-	// tmp test
-	VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
-	VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
-
-	VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
+	// For testing.
+	// VIL_DEV_HOOK_EXT(GetImageViewAddressNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
+	// VIL_DEV_HOOK_EXT(GetImageViewHandleNVX, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME),
+	// VIL_DEV_HOOK_EXT(CmdCuLaunchKernelNVX, VK_NVX_BINARY_IMPORT_EXTENSION_NAME),
 };
 
 #undef VIL_INI_HOOK

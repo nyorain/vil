@@ -831,6 +831,40 @@ bigger issue we have to tackle anyways.
 (something along the lines of tracking it as outlined above and resolving
 pending cows in 'activateSubmission' in that case)
 
+---
+
+Actually, could just not support cows on aliased resources. Check on 
+cow creation time & resource creation time.
+
+---
+
+Quick idea: we already have `forEachOverlappingResourceLocked` in `memory.cpp`.
+Activating a resource means transitioning away from undefined layout, right?
+That should also be the only way to activate it, anything else is
+undefined.
+So, every time we get a resource barrier with oldLayout=undefined, we
+remember that this resource is activated. On submission activation:
+
+```
+for(activation : subm.resourceActivations) {
+	invalidate = [&](auto& res) {
+		if(res != activationl.res) {
+			res.invalidate();
+		}
+	};
+
+	forEachOverlappingResourceLocked(activation.memAlloc, invalidate);
+}
+```
+
+But this has some overhead, I'm not sure we want it.
+If we can solve cows differently (see above, just not doing cows on aliased
+resources), that's probably the better way and enough.
+
+Violating the spec here and actually showing aliased resources that are not
+activate in the image/buffer viewer isn't a big deal as long as it does not
+cause crashes.
+
 # Relying on timeline semaphores
 
 Sooner or later, we'll likely just require timeline semaphores since that
@@ -961,6 +995,8 @@ TODO:
   	- this means CommandBuffers can outlive their commandPool, make
 	  sure to unset the reference on destruction of the CommandPool
 
+Update: something like this is implemented now.
+
 # Next CommandGroup-like prototype
 
 ideally: be able to show *complete* frame, stable.
@@ -1028,6 +1064,9 @@ something like draw commands though.
 Anyways, we'd have to do *full* record matches (i.e. not just the
 sections) at some points, which makes this whole concept probably impossible.
 
+(hm, otoh, we have pretty much just linear complexity if we do this algorithm
+the right way. Might be able to make it work).
+
 # Should there be struct PipelineBarrier2Cmd?
 
 Or should it be merged with the original PipelineBarrierCmd
@@ -1066,6 +1105,8 @@ rendering is done?
 
 The waiting itself (even if it might take >1ms) isn't a problem, this is 
 a very rare case.
+
+Update: yep, solved like this now.
 
 # Old commandSelection matching
 

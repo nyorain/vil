@@ -1,3 +1,10 @@
+- [~] add sparse bind matching for frame matching
+      {nope, we don't really want/need this. Applications don't submit
+	   similar binds over and over again. Should fix/stabilize this via ui}
+- [x] hook vkGetDescriptorSetLayoutSupport for sampler unwrapping
+- [x] add separate list of bind sparse submissions to queue. See TODO there,
+      we currently act like it's dependent on submission order
+	  {found better, simpler, implicit way for handling it}
 - [x] way later: support for sparse binding
       {LOL at the "way later"}
 - [x] sparse binding: fix 'success' assert in insert

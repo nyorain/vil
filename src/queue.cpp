@@ -378,6 +378,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
 // ugh this is way too messy, maybe build next pointers into submissions
 // already at submission time?
 Submission* nextSubmissionOrder(Submission& subm) {
+	assertOwned(subm.parent->queue->dev->mutex);
+
 	auto subID = &subm - subm.parent->submissions.data();
 	dlg_assert(subID >= 0 && subID < i64(subm.parent->submissions.size()));
 	if(subID + 1 < i64(subm.parent->submissions.size())) {
@@ -385,10 +387,12 @@ Submission* nextSubmissionOrder(Submission& subm) {
 	}
 
 	auto& dev = *subm.parent->queue->dev;
+	// we rely on dev.pending being sorted by submission order here
 	for(auto& pending : dev.pending) {
 		if(pending->queue == subm.parent->queue &&
+				pending->type == SubmissionType::command &&
 				!pending->submissions.empty() &&
-				pending->submissions[0].queueSubmitID == subm.queueSubmitID + 1) {
+				pending->submissions[0].queueSubmitID > subm.queueSubmitID) {
 			return &pending->submissions[0];
 		}
 	}
@@ -435,6 +439,62 @@ void activateLocked(MemoryResource& res, const OpaqueSparseMemoryBind& bind) {
 	}
 }
 
+void activateLocked(MemoryResource& res, const ImageSparseMemoryBind& bind) {
+	dlg_assert(res.memory.index() == 1u);
+	auto& bindState = std::get<1>(res.memory);
+
+	if(bind.memory) {
+		auto [it, success] = bindState.imageBinds.insert(bind);
+		// NOTE The spec does not explicitly state this but
+		//   implicit rebinding seems to be allowed
+		if(!success) {
+			auto& oldBind = *it;
+			if(oldBind.memory) {
+				auto count = oldBind.memory->allocations.erase(&oldBind);
+				dlg_assert(count == 1u);
+			}
+
+			dlg_assert(
+				oldBind.subres.arrayLayer == bind.subres.arrayLayer &&
+				oldBind.subres.mipLevel == bind.subres.mipLevel &&
+				oldBind.subres.aspectMask == bind.subres.aspectMask);
+			dlg_assertm(oldBind.offset.x == bind.offset.x &&
+				oldBind.offset.y == bind.offset.y &&
+				oldBind.offset.z == bind.offset.z,
+				"TODO: partial rebind not supported");
+			dlg_assertm(oldBind.size.width == bind.size.width &&
+				oldBind.size.height == bind.size.height &&
+				oldBind.size.depth == bind.size.depth,
+				"TODO: partial rebind not supported");
+			const_cast<ImageSparseMemoryBind&>(oldBind) = bind;
+		}
+		bind.memory->allocations.insert(&*it);
+	} else {
+		// TODO: lower bound and iterate? not sure how
+		auto it = bindState.imageBinds.find(bind);
+		if(it != bindState.imageBinds.end()) {
+			dlg_assert(
+				it->subres.arrayLayer == bind.subres.arrayLayer &&
+				it->subres.mipLevel == bind.subres.mipLevel &&
+				it->subres.aspectMask == bind.subres.aspectMask);
+			// we currently don't support partial or multi- unbinding
+			dlg_assertm(it->offset.x == bind.offset.x &&
+				it->offset.y == bind.offset.y &&
+				it->offset.z == bind.offset.z,
+				"TODO: partial unbind not supported");
+			dlg_assertm(it->size.width == bind.size.width &&
+				it->size.height == bind.size.height &&
+				it->size.depth == bind.size.depth,
+				"TODO: partial unbind not supported");
+
+			if(it->memory) {
+				it->memory->allocations.erase(&*it);
+			}
+			it = bindState.imageBinds.erase(it);
+		}
+	}
+}
+
 void activateLocked(BindSparseSubmission& bindSparse) {
 	for(auto& bufBind : bindSparse.buffer) {
 		dlg_assert(bufBind.dst);
@@ -455,60 +515,8 @@ void activateLocked(BindSparseSubmission& bindSparse) {
 	for(auto& imgBind : bindSparse.image) {
 		dlg_assert(imgBind.dst);
 		auto& res = *imgBind.dst;
-		dlg_assert(res.memory.index() == 1u);
-		auto& bindState = std::get<1>(res.memory);
-
 		for(auto& [bind, _] : imgBind.binds) {
-			if(bind.memory) {
-				auto [it, success] = bindState.imageBinds.insert(bind);
-				// NOTE The spec does not explicitly state this but
-				//   implicit rebinding seems to be allowed
-				if(!success) {
-					auto& oldBind = *it;
-					if(oldBind.memory) {
-						auto count = oldBind.memory->allocations.erase(&oldBind);
-						dlg_assert(count == 1u);
-					}
-
-					dlg_assert(
-						oldBind.subres.arrayLayer == bind.subres.arrayLayer &&
-						oldBind.subres.mipLevel == bind.subres.mipLevel &&
-						oldBind.subres.aspectMask == bind.subres.aspectMask);
-					dlg_assertm(oldBind.offset.x == bind.offset.x &&
-						oldBind.offset.y == bind.offset.y &&
-						oldBind.offset.z == bind.offset.z,
-						"TODO: partial rebind not supported");
-					dlg_assertm(oldBind.size.width == bind.size.width &&
-						oldBind.size.height == bind.size.height &&
-						oldBind.size.depth == bind.size.depth,
-						"TODO: partial rebind not supported");
-					const_cast<ImageSparseMemoryBind&>(oldBind) = bind;
-				}
-				bind.memory->allocations.insert(&*it);
-			} else {
-				// TODO: lower bound and iterate? not sure how
-				auto it = bindState.imageBinds.find(bind);
-				if(it != bindState.imageBinds.end()) {
-					dlg_assert(
-						it->subres.arrayLayer == bind.subres.arrayLayer &&
-						it->subres.mipLevel == bind.subres.mipLevel &&
-						it->subres.aspectMask == bind.subres.aspectMask);
-					// we currently don't support partial or multi- unbinding
-					dlg_assertm(it->offset.x == bind.offset.x &&
-						it->offset.y == bind.offset.y &&
-						it->offset.z == bind.offset.z,
-						"TODO: partial unbind not supported");
-					dlg_assertm(it->size.width == bind.size.width &&
-						it->size.height == bind.size.height &&
-						it->size.depth == bind.size.depth,
-						"TODO: partial unbind not supported");
-
-					if(it->memory) {
-						it->memory->allocations.erase(&*it);
-					}
-					it = bindState.imageBinds.erase(it);
-				}
-			}
+			activateLocked(res, bind);
 		}
 	}
 }
@@ -556,7 +564,8 @@ void activateLocked(Submission& subm) {
 		}
 	}
 
-	if(subm.parent->queue->firstWaiting) {
+	if(subm.parent->type == SubmissionType::command &&
+			subm.parent->queue->firstWaiting) {
 		dlg_assert(subm.parent->queue->firstWaiting == &subm);
 
 		auto* next = nextSubmissionOrder(subm);
@@ -580,7 +589,20 @@ bool checkActivateLocked(Submission& subm) {
 	dlg_assert(!subm.active);
 	dlg_assert(subm.parent->queue->firstWaiting);
 
-	if(subm.parent->queue->firstWaiting != &subm) {
+	// For command submissions, don't activate when there already is an
+	// inactive submission on this queue since submission order blocks
+	// further execution.
+	// Sparse bindings don't depend on submission order.
+	//
+	// From the Vulkan spec 7.4.1:
+	// Semaphore signal operations that are defined by vkQueueSubmit or
+	// vkQueueSubmit2 additionally include all commands that occur earlier
+	// in submission order. Semaphore signal operations that are defined by
+	// vkQueueSubmit , vkQueueSubmit2 or vkQueueBindSparse additionally
+	// include in the first synchronization scope any semaphore and fence
+	// signal operations that occur earlier in signal operation order.
+	if(subm.parent->type == SubmissionType::command &&
+			subm.parent->queue->firstWaiting != &subm) {
 		return false;
 	}
 

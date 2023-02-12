@@ -36,9 +36,13 @@ public:
 private:
 	void updateFromSelector();
 
+	void displaySparseBind(FrameSubmission& batch, u32 subID);
+	void displaySubmission(FrameSubmission& batch, u32 subID);
+	void displayBatch(FrameSubmission&, u32 batchID);
 	void displayFrameCommands(Swapchain&);
 	void displayRecordCommands();
 	void clearSelection(bool unselectCommandViewer);
+	void drawSelected(Draw& draw);
 
 	void updateRecord(IntrusivePtr<CommandRecord> record);
 	void updateRecords(std::vector<FrameSubmission>);
@@ -86,12 +90,15 @@ private:
 
 	CommandViewer commandViewer_ {};
 
-	bool focusSelected_ {}; // TODO WIP experiment
 	bool showSingleSections_ {};
 	UpdateTicker updateTick_ {};
 
 	LinAllocator matchAlloc_;
 	CommandSelection selector_;
+
+	// TODO WIP experiments
+	bool focusSelected_ {};
+	bool freezeOnSparseBind_ {};
 };
 
 } // namespace vil

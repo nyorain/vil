@@ -47,13 +47,12 @@ struct Queue : Handle {
 	// commands, e.g. for gui rendering or via a CommandHook.
 	u64 lastLayerSubmission {};
 
-	// First inactive submission to this queue. Per submission order,
-	// all following submissions are inactive (waiting) as well.
+	// First inactive command submission to this queue. Per submission order,
+	// all following (command) submissions are inactive (waiting) as well.
 	// Null if there is no such submission.
+	// Note that this completely ignores QueueBindSparse submissions,
+	// they are never blocked by submission order.
 	Submission* firstWaiting {};
-	// TODO(correctness): add a separate list of waiting bindSparse submissions
-	// since they don't follow submission order. We might currently treat
-	// BindSparse submissions as inactive even though they are not.
 };
 
 // All data we store for a queue family.

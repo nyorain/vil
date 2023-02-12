@@ -100,6 +100,7 @@ size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDes
 	}
 
 	if(lastCount) {
+		dlg_assert(last.descriptorType != VK_DESCRIPTOR_TYPE_MAX_ENUM);
 		ret += lastCount * descriptorSize(last.descriptorType);
 	}
 
@@ -1937,6 +1938,38 @@ bool hasBound(DescriptorStateRef state, const Handle& handle) {
 	}
 
 	return false;
+}
+
+// only implemented for sampler unwrapping
+VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutSupport(
+		VkDevice                                    device,
+		const VkDescriptorSetLayoutCreateInfo*      pCreateInfo,
+		VkDescriptorSetLayoutSupport*               pSupport) {
+	auto& dev = getDevice(device);
+
+	// unwrap immutable sampler handles
+	auto nci = *pCreateInfo;
+
+	ThreadMemScope memScope;
+	auto nbindings = memScope.copy(nci.pBindings, nci.bindingCount);
+	nci.pBindings = nbindings.data();
+
+	for(auto& bind : nbindings) {
+		if(!needsSampler(bind.descriptorType) || bind.descriptorCount == 0 ||
+				!bind.pImmutableSamplers) {
+			continue;
+		}
+
+		auto handles = memScope.alloc<VkSampler>(bind.descriptorCount);
+		for(auto i = 0u; i < bind.descriptorCount; ++i) {
+			auto& sampler = get(dev, bind.pImmutableSamplers[i]);
+			handles[i] = sampler.handle;
+		}
+
+		bind.pImmutableSamplers = handles.data();
+	}
+
+	dev.dispatch.GetDescriptorSetLayoutSupport(dev.handle, &nci, pSupport);
 }
 
 } // namespace vil

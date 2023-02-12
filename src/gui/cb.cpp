@@ -145,6 +145,13 @@ void CommandRecordGui::draw(Draw& draw) {
 		// ImGui::Separator();
 		// ImGui::Checkbox("Focus Selected", &focusSelected_);
 
+		// TODO: WIP
+		ImGui::Checkbox("Freeze Commands on Sparse Bind", &freezeOnSparseBind_);
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Will freeze the commands as soon as a vkQueueBindSparse "
+				"command is encountered to allow its inspection");
+		}
+
 		ImGui::Separator();
 		int updateTime = std::chrono::duration_cast<std::chrono::milliseconds>(updateTick_.interval).count();
 		ImGui::SliderInt("Update time (ms)", &updateTime, 0, 1000);
@@ -286,72 +293,8 @@ void CommandRecordGui::draw(Draw& draw) {
 
 	ImGui::Separator();
 
-	auto drawSelected = [&]{
-		ImGui::BeginChild("Command Info");
-
-		switch(selector_.selectionType()) {
-			case SelectionType::none:
-				imGuiText("Nothing selected yet");
-				break;
-			case SelectionType::submission: {
-				dlg_assert(updateMode == UpdateMode::swapchain);
-				auto* subm = selector_.submission();
-				dlg_assert(subm);
-				if(!subm) {
-					imGuiText("Error!");
-					break;
-				}
-
-				refButtonExpect(*gui_, subm->queue);
-				imGuiText("{} records", subm->submissions.size());
-				imGuiText("submissionID: {}", subm->submissionID);
-				break;
-			} case SelectionType::record: {
-				auto* rec = selector_.record().get();
-				dlg_assert(rec);
-
-				auto hookState = selector_.completedHookState();
-				if(hookState) {
-					auto lastTime = hookState->neededTime;
-					auto validBits = gui_->dev().queueFamilies[rec->queueFamily].props.timestampValidBits;
-					if(validBits == 0u) {
-						dlg_assert(lastTime == u64(-1));
-						imGuiText("Time: unavailable (Queue family does not support timing queries)");
-					} else if(lastTime == u64(-1)) {
-						dlg_error("lastTime is u64(-1), unexpectedly");
-						imGuiText("Time: Error");
-					} else {
-						auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
-						displayDiff /= 1000.f * 1000.f;
-						imGuiText("Time: {} ms", displayDiff);
-					}
-				} else {
-					imGuiText("Time: Waiting for submission...");
-				}
-
-				refButtonD(*gui_, rec->cb);
-				imGuiText("cb name: {}", rec->cbName ? rec->cbName : "<unnamed>");
-				imGuiText("broken labels: {}{}", std::boolalpha, rec->brokenHierarchyLabels);
-				imGuiText("record id: {}", rec->recordID);
-				imGuiText("refCount: {}", rec->refCount);
-				imGuiText("num hook records: {}", rec->hookRecords.size());
-				imGuiText("num secondaries: {}", rec->secondaries.size());
-				imGuiText("num pipeLayouts: {}", rec->used.pipeLayouts.size());
-				imGuiText("num gfx pipes: {}", rec->used.graphicsPipes.size());
-				imGuiText("num compute pipes: {}", rec->used.computePipes.size());
-				imGuiText("num rt pipes: {}", rec->used.rtPipes.size());
-				imGuiText("builds accel structs: {}", rec->buildsAccelStructs);
-				break;
-			} case SelectionType::command:
-				commandViewer_.draw(draw, actionFullscreen_);
-				break;
-		}
-
-		ImGui::EndChild();
-	};
-
 	if(actionFullscreen_) {
-		drawSelected();
+		drawSelected(draw);
 	} else {
 		// Command list
 		auto flags = ImGuiTableFlags_Resizable | ImGuiTableFlags_NoHostExtendY;
@@ -383,11 +326,83 @@ void CommandRecordGui::draw(Draw& draw) {
 		// ImGui::PopStyleColor();
 		ImGui::TableNextColumn();
 
-		drawSelected();
+		drawSelected(draw);
 
 		// command info
 		ImGui::EndTable();
 	}
+}
+
+void CommandRecordGui::drawSelected(Draw& draw) {
+	ImGui::BeginChild("Command Info");
+
+	switch(selector_.selectionType()) {
+		case SelectionType::none:
+			imGuiText("Nothing selected yet");
+			break;
+		case SelectionType::submission: {
+			dlg_assert(selector().updateMode() == UpdateMode::swapchain);
+			auto* subm = selector_.submission();
+			dlg_assert(subm);
+			if(!subm) {
+				imGuiText("Error!");
+				break;
+			}
+
+			refButtonExpect(*gui_, subm->queue);
+			imGuiText("submissionID: {}", subm->submissionID);
+
+			if(subm->type == SubmissionType::command) {
+				imGuiText("{} records", subm->submissions.size());
+			} else {
+				imGuiText("{} sparse binds", subm->sparseBinds.size());
+			}
+
+			// TODO: more information
+
+			break;
+		} case SelectionType::record: {
+			auto* rec = selector_.record().get();
+			dlg_assert(rec);
+
+			auto hookState = selector_.completedHookState();
+			if(hookState) {
+				auto lastTime = hookState->neededTime;
+				auto validBits = gui_->dev().queueFamilies[rec->queueFamily].props.timestampValidBits;
+				if(validBits == 0u) {
+					dlg_assert(lastTime == u64(-1));
+					imGuiText("Time: unavailable (Queue family does not support timing queries)");
+				} else if(lastTime == u64(-1)) {
+					dlg_error("lastTime is u64(-1), unexpectedly");
+					imGuiText("Time: Error");
+				} else {
+					auto displayDiff = lastTime * gui_->dev().props.limits.timestampPeriod;
+					displayDiff /= 1000.f * 1000.f;
+					imGuiText("Time: {} ms", displayDiff);
+				}
+			} else {
+				imGuiText("Time: Waiting for submission...");
+			}
+
+			refButtonD(*gui_, rec->cb);
+			imGuiText("cb name: {}", rec->cbName ? rec->cbName : "<unnamed>");
+			imGuiText("broken labels: {}{}", std::boolalpha, rec->brokenHierarchyLabels);
+			imGuiText("record id: {}", rec->recordID);
+			imGuiText("refCount: {}", rec->refCount);
+			imGuiText("num hook records: {}", rec->hookRecords.size());
+			imGuiText("num secondaries: {}", rec->secondaries.size());
+			imGuiText("num pipeLayouts: {}", rec->used.pipeLayouts.size());
+			imGuiText("num gfx pipes: {}", rec->used.graphicsPipes.size());
+			imGuiText("num compute pipes: {}", rec->used.computePipes.size());
+			imGuiText("num rt pipes: {}", rec->used.rtPipes.size());
+			imGuiText("builds accel structs: {}", rec->buildsAccelStructs);
+			break;
+		} case SelectionType::command:
+			commandViewer_.draw(draw, actionFullscreen_);
+			break;
+	}
+
+	ImGui::EndChild();
 }
 
 void CommandRecordGui::select(IntrusivePtr<CommandRecord> record, Command* cmd) {
@@ -453,10 +468,71 @@ void CommandRecordGui::showLocalCaptures(LocalCapture& lc) {
 	commandViewer_.updateFromSelector(true);
 }
 
-void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
-	if(frame_.empty() && swapchain.frameSubmissions[0].batches.empty()) {
-		dlg_warn("how did this happen?");
-		frame_ = swapchain.frameSubmissions[0].batches;
+void CommandRecordGui::displaySubmission(FrameSubmission& batch, u32 subID) {
+	dlg_assert(batch.type == SubmissionType::command);
+	dlg_assert(subID < batch.submissions.size());
+	auto& rec = batch.submissions[subID];
+
+	// extra tree node for every submission
+	const auto id = dlg::format("Commands:{}", subID);
+	auto name = "<Unnamed>";
+	if(rec->cbName) {
+		name = rec->cbName;
+	}
+
+	auto flags = ImGuiTreeNodeFlags_FramePadding |
+		ImGuiTreeNodeFlags_OpenOnArrow |
+		ImGuiTreeNodeFlags_OpenOnDoubleClick |
+		ImGuiTreeNodeFlags_SpanFullWidth;
+
+	// check if record was selected
+	if(record_ == rec.get() && command_.empty()) {
+		flags |= ImGuiTreeNodeFlags_Selected;
+	}
+
+	const auto opened = openedRecords_.count(rec.get());
+	ImGui::SetNextItemOpen(opened);
+
+	const auto open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name);
+	if(ImGui::IsItemActivated() && !ImGui::IsItemToggledOpen()) {
+		submission_ = &batch;
+		record_ = rec;
+		command_ = {};
+
+		auto submID = u32(submission_ - frame_.data());
+		selector_.select(frame_, submID, record_, command_);
+		commandViewer_.unselect();
+
+		// update ops to query time
+		CommandHook::Update update;
+		update.invalidate = true;
+		auto& ops = update.newOps.emplace();
+		ops.queryTime = true;
+		gui_->dev().commandHook->updateHook(std::move(update));
+	}
+
+	// check if open state changed
+	if(open && !opened) {
+		openedRecords_.insert(rec.get());
+	} else if(!open && opened) {
+		openedRecords_.erase(rec.get());
+	}
+
+	if(!open) {
+		return;
+	}
+
+	// we don't want as much space as tree nodes
+	auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+	ImGui::Unindent(s);
+
+	if(!brokenLabelNesting_ && rec->brokenHierarchyLabels) {
+		brokenLabelNesting_ = true;
+		// showing end commands in this viewing mode since
+		// they aren't implicitly shown via the nesting
+		// now anymore and stuff like EndRenderPass is
+		// kinda important.
+		commandFlags_ |= Command::Type::end;
 	}
 
 	const Command* selectedCommand = nullptr;
@@ -464,170 +540,131 @@ void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
 		selectedCommand = command_.back();
 	}
 
-	for(auto b = 0u; b < frame_.size(); ++b) {
-		auto& batch = frame_[b];
-		if(b > 0) {
-			ImGui::Separator();
-		}
+	DisplayVisitor visitor(openedSections_, selectedCommand,
+		commandFlags_, brokenLabelNesting_);
+	visitor.jumpToSelection_ = focusSelected_;
+	visitor.showSingleSections_ = showSingleSections_;
+	visitor.display(*rec->commands, true);
+	auto nsel = std::move(visitor.newSelection_);
 
-		const auto id = dlg::format("submission:{}", b);
-		auto flags = int(ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth);
-		if(batch.submissions.empty()) {
-			// empty submissions are displayed differently.
-			// There is nothing more disappointing than expanding a
-			// tree node just to see that it's empty :(
-			flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
-		} else {
-			flags |= ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick;
-		}
+	auto newSelection = !nsel.empty() && (
+		command_.empty() ||
+		nsel.back() != command_.back());
+	if(newSelection) {
+		submission_ = &batch;
+		record_ = rec;
+		command_ = std::move(nsel);
 
-		// check if this vkQueueSubmit was selected
-		if(submission_ == &batch && !record_) {
-			dlg_assert(command_.empty());
-			flags |= ImGuiTreeNodeFlags_Selected;
-		}
+		auto submID = u32(submission_ - frame_.data());
+		selector_.select(frame_, submID, record_, command_);
+		commandViewer_.updateFromSelector(true);
+	}
 
-		const auto opened = openedSubmissions_.count(&batch);
-		ImGui::SetNextItemOpen(opened);
+	ImGui::Indent(s);
+	ImGui::TreePop();
+}
 
-		std::string name;
-		if(batch.type == SubmissionType::command) {
-			name = "vkQueueSubmit";
-		} else if(batch.type == SubmissionType::bindSparse) {
-			name = "vkQueueBindSparse";
-		} else {
-			dlg_error("unreachable");
-			name = "???";
-		}
+void CommandRecordGui::displayBatch(FrameSubmission& batch, u32 batchID) {
+	const auto id = dlg::format("submission:{}", batchID);
+	auto flags = int(ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanFullWidth);
 
-		if(!batch.queue->name.empty()) {
-			name = dlg::format("{}({})", name, batch.queue->name);
-		}
+	// check if this vkQueueSubmit was selected
+	if(submission_ == &batch && !record_) {
+		dlg_assert(command_.empty());
+		flags |= ImGuiTreeNodeFlags_Selected;
+	}
 
-		const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name.c_str());
-		if(ImGui::IsItemActivated() && !ImGui::IsItemToggledOpen()) {
-			submission_ = &batch;
-			record_ = nullptr;
-			command_ = {};
+	const auto opened = openedSubmissions_.count(&batch);
+	ImGui::SetNextItemOpen(opened);
 
-			auto submID = u32(submission_ - frame_.data());
-			selector_.select(frame_, submID, record_, command_);
-			commandViewer_.unselect();
-		}
+	auto empty = false;
+	std::string name;
+	if(batch.type == SubmissionType::command) {
+		name = "vkQueueSubmit";
+		empty = batch.submissions.empty();
+	} else if(batch.type == SubmissionType::bindSparse) {
+		name = "vkQueueBindSparse";
+		empty = true; // this never has children
+	} else {
+		dlg_error("unreachable");
+		name = "???";
+	}
 
-		// check if open state changed
-		if(open && !opened) {
-			openedSubmissions_.insert(&batch);
-		} else if(!open && opened) {
-			openedSubmissions_.erase(&batch);
-		}
+	// empty submissions are displayed differently.
+	// There is nothing more disappointing than expanding a
+	// tree node just to see that it's empty :(
+	if(empty) {
+		flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet;
+	} else {
+		flags |= ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick;
+	}
 
-		if(!open) {
-			continue;
-		}
+	if(!batch.queue->name.empty()) {
+		name = dlg::format("{}({})", name, batch.queue->name);
+	}
 
-		if(!batch.submissions.empty()) {
-			ImGui::Separator();
-		}
+	const bool open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name.c_str());
+	if(ImGui::IsItemActivated() && !ImGui::IsItemToggledOpen()) {
+		submission_ = &batch;
+		record_ = nullptr;
+		command_ = {};
 
-		// we don't want as much space as tree nodes
-		auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
-		ImGui::Unindent(s);
+		auto submID = u32(submission_ - frame_.data());
+		selector_.select(frame_, submID, record_, command_);
+		commandViewer_.unselect();
+	}
 
+	// check if open state changed
+	if(open && !opened) {
+		openedSubmissions_.insert(&batch);
+	} else if(!open && opened) {
+		openedSubmissions_.erase(&batch);
+	}
+
+	if(!open) {
+		return;
+	}
+
+	if(!batch.submissions.empty()) {
+		ImGui::Separator();
+	}
+
+	// we don't want as much space as tree nodes
+	auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
+	ImGui::Unindent(s);
+
+	if(batch.type == SubmissionType::command) {
+		dlg_assert(batch.sparseBinds.empty());
 		for(auto r = 0u; r < batch.submissions.size(); ++r) {
-			auto& rec = batch.submissions[r];
 			if(r > 0) {
 				ImGui::Separator();
 			}
 
-			// extra tree node for every submission
-			const auto id = dlg::format("Commands:{}", r);
-			auto name = "<Unnamed>";
-			if(rec->cbName) {
-				name = rec->cbName;
-			}
+			displaySubmission(batch, r);
+		}
+	} else if(batch.type == SubmissionType::bindSparse) {
+		dlg_assert(batch.submissions.empty());
+		// no-op
+	} else {
+		dlg_error("unreachable");
+	}
 
-			auto flags = ImGuiTreeNodeFlags_FramePadding |
-				ImGuiTreeNodeFlags_OpenOnArrow |
-				ImGuiTreeNodeFlags_OpenOnDoubleClick |
-				ImGuiTreeNodeFlags_SpanFullWidth;
+	ImGui::Indent(s);
+	ImGui::TreePop();
+}
 
-			// check if record was selected
-			if(record_ == rec.get() && command_.empty()) {
-				flags |= ImGuiTreeNodeFlags_Selected;
-			}
+void CommandRecordGui::displayFrameCommands(Swapchain& swapchain) {
+	if(frame_.empty() && swapchain.frameSubmissions[0].batches.empty()) {
+		dlg_warn("how did this happen?");
+		frame_ = swapchain.frameSubmissions[0].batches;
+	}
 
-			const auto opened = openedRecords_.count(rec.get());
-			ImGui::SetNextItemOpen(opened);
-
-			const auto open = ImGui::TreeNodeEx(id.c_str(), flags, "%s", name);
-			if(ImGui::IsItemActivated() && !ImGui::IsItemToggledOpen()) {
-				submission_ = &batch;
-				record_ = rec;
-				command_ = {};
-
-				auto submID = u32(submission_ - frame_.data());
-				selector_.select(frame_, submID, record_, command_);
-				commandViewer_.unselect();
-
-				// update ops to query time
-				CommandHook::Update update;
-				update.invalidate = true;
-				auto& ops = update.newOps.emplace();
-				ops.queryTime = true;
-				gui_->dev().commandHook->updateHook(std::move(update));
-			}
-
-			// check if open state changed
-			if(open && !opened) {
-				openedRecords_.insert(rec.get());
-			} else if(!open && opened) {
-				openedRecords_.erase(rec.get());
-			}
-
-			if(!open) {
-				continue;
-			}
-
-			// we don't want as much space as tree nodes
-			auto s = 0.3 * ImGui::GetTreeNodeToLabelSpacing();
-			ImGui::Unindent(s);
-
-			if(!brokenLabelNesting_ && rec->brokenHierarchyLabels) {
-				brokenLabelNesting_ = true;
-				// showing end commands in this viewing mode since
-				// they aren't implicitly shown via the nesting
-				// now anymore and stuff like EndRenderPass is
-				// kinda important.
-				commandFlags_ |= Command::Type::end;
-			}
-
-			DisplayVisitor visitor(openedSections_, selectedCommand,
-				commandFlags_, brokenLabelNesting_);
-			visitor.jumpToSelection_ = focusSelected_;
-			visitor.showSingleSections_ = showSingleSections_;
-			visitor.display(*rec->commands, true);
-			auto nsel = std::move(visitor.newSelection_);
-
-			auto newSelection = !nsel.empty() && (
-				command_.empty() ||
-				nsel.back() != command_.back());
-			if(newSelection) {
-				submission_ = &batch;
-				record_ = rec;
-				command_ = std::move(nsel);
-
-				auto submID = u32(submission_ - frame_.data());
-				selector_.select(frame_, submID, record_, command_);
-				commandViewer_.updateFromSelector(true);
-			}
-
-			ImGui::Indent(s);
-			ImGui::TreePop();
+	for(auto b = 0u; b < frame_.size(); ++b) {
+		if(b > 0) {
+			ImGui::Separator();
 		}
 
-		ImGui::Indent(s);
-		ImGui::TreePop();
+		displayBatch(frame_[b], b);
 	}
 }
 
@@ -804,6 +841,14 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	newOpenRecords.clear();
 	newOpenSections.clear();
 	transitionedSections.clear();
+
+	if(freezeOnSparseBind_) {
+		for(auto& subm : frame_) {
+			if(subm.type == SubmissionType::bindSparse) {
+				freezeCommands_ = true;
+			}
+		}
+	}
 }
 
 void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records) {
