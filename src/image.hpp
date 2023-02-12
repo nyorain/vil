@@ -65,15 +65,6 @@ struct Sampler : SharedDeviceHandle {
 	VkSamplerCreateInfo ci;
 };
 
-// Returns whether the given image is bound to memory and can be used.
-// - Returns false when the image handle was destroyed
-// - For non-sparse images, returns true when the image was bound to memory
-//   that is still alive
-// - For sparse_residency images, returns true
-// - For sparse (but NOT sparse_residency) images, returns true iff
-//   all of the memory range is bound to memory
-bool memoryUsableLocked(const Image&);
-
 std::string defaultName(const Image&);
 std::string defaultName(const ImageView&);
 

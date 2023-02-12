@@ -280,12 +280,16 @@ VKAPI_ATTR void VKAPI_CALL GetDeviceMemoryCommitment(
 		pCommittedMemoryInBytes);
 }
 
-// Calls F for every resource overlapping the given range of [off, off + size)
+// Calls the given callback for every resource overlapping the given
+// range of mem[off, off + size)
 template<typename F>
-void forEachOverlappingResource(const DeviceMemory& mem,
+void forEachOverlappingResourceLocked(const DeviceMemory& mem,
 		VkDeviceSize off, VkDeviceSize size, F&& callback) {
+	assertOwned(mem.dev->mutex);
+
 	MemoryBind tester {};
 	tester.memOffset = off;
+	tester.memory = const_cast<DeviceMemory*>(&mem);
 
 	auto end = off + size;
 	auto it = mem.allocations.lower_bound(&tester);

@@ -149,9 +149,14 @@ Matcher match(const DescriptorStateRef& a, const DescriptorStateRef& b) {
 
 		// must have the same type
 		auto dsType = a.layout->bindings[bindingID].descriptorType;
-		auto dsCat = vil::category(dsType);
 		dlg_assert_or(a.layout->bindings[bindingID].descriptorType ==
 			b.layout->bindings[bindingID].descriptorType, continue);
+
+		// hole in the layout
+		if(dsType == VK_DESCRIPTOR_TYPE_MAX_ENUM) {
+			dlg_assert(sizeA == 0u && sizeB == 0u);
+			continue;
+		}
 
 		if(dsType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT) {
 			// This might seem like a low weight but the bytewise
@@ -168,6 +173,7 @@ Matcher match(const DescriptorStateRef& a, const DescriptorStateRef& b) {
 		// semantic equality as well. Applications sometimes create
 		// them lazily/on-demand or stuff like that.
 
+		auto dsCat = vil::category(dsType);
 		if(dsCat == DescriptorCategory::image) {
 			auto bindingsA = images(a, bindingID);
 			auto bindingsB = images(b, bindingID);
@@ -469,7 +475,10 @@ FrameSubmissionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 	ret.match.match += 1.f;
 	ret.match.total += 1.f;
 
-	// TODO: add matching for sparse bindings
+	// NOTE: add matching for sparse bindings?
+	//   This probably does not make sense though since no application
+	//   will submit similar sparse bindings over and over again so matching
+	//   is somewhat pointless
 
 	if(a.submissions.size() == 0u && b.submissions.size() == 0u) {
 		return ret;

@@ -6,10 +6,6 @@ v0.3:
 - vertex viewer improvements
 - improve README, add more gifs/pics
 
-blocking sparse merge:
-- [ ] add separate list of bind sparse submissions to queue. See TODO there,
-      we currently act like it's dependent on submission order
-
 urgent, bugs:
 - [ ] fix image viewer layout
 - [ ] test more on laptop, intel gpu
@@ -25,6 +21,12 @@ urgent, bugs:
 	- also investigate if the current approach even works with same-queue:
 	  we submit the wait semaphores to the queue just-like-that. Does
 	  QueuePresent respect submission order though?
+	- check if fixed now with single-swapchain-present restriction.
+- [ ] figure our why overlay on doom is broken
+      {seems to be due to async compute present}
+	- [ ] also fix the semaphore crash. Run with debug output enabled.
+- [ ] figure out tracy crashes with doom eternal :(
+- [ ] fix with DLSS (doom)
 
 - [ ] convert WM_INPUT mousePos in win32.cpp to AddMousePosEvent.
       just track internally?
@@ -39,17 +41,14 @@ urgent, bugs:
       currently does not select the right handle then (e.g.
 	  going from Image -> DeviceMemory via refButton)
 
+- [ ] fix command viewer update when nothing is selected
+
 - [ ] fix buffmt for storageBuffer array (crashes atm, does not expect array on that level)
       test with iro, shadowCull
 	- [ ] a lot of descriptor code was probably never really tested for array bindings.
 	      Make sure everything works.
 
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
-
-- [ ] figure our why overlay on doom is broken
-      {seems to be due to async compute present}
-	- [ ] also fix the semaphore crash. Run with debug output enabled.
-- [ ] figure out tracy crashes with doom eternal :(
 
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
@@ -63,10 +62,12 @@ urgent, bugs:
 	  one they were used in.
 
 new, workstack:
-- [ ] hook vkGetDescriptorSetLayoutSupport for sampler unwrapping
+- [ ] VK_KHR_ray_tracing_maintenance1 for vkCmdTraceRaysIndirect2KHR
 - [ ] VK_EXT_depth_clip_enable
 - [ ] VK_EXT_sample_locations
 - [ ] VK_EXT_line_rasterization
+- [ ] VK_AMD_buffer_marker, VK_NV_device_diagnostic_checkpoints
+	- [ ] test if vil works with the crash-report layer
 - [ ] make use of proper sync tracking
 	- [ ] fix added sync: only sync with active pending submission?
 	      not sure how to properly do this
@@ -81,7 +82,6 @@ new, workstack:
 		  make it more transparent or something or maybe use a thin window border?
 		  {think window border looks good imo}
 
-- [ ] add sparse bind matching for frame matching
 - [ ] (low prio, ui) sparse: for images, allow to show popup with bound
       memory on hover in imageViewer. Also bond-to-memory overlay
 - [ ] (hight prio) sparse: come up with some idea on how to support
@@ -89,6 +89,9 @@ new, workstack:
 - [ ] properly show sparse bindings in frame UI
 	- [ ] allow to inspect each bind/unbind
 	      should be possible to share code with resource mem state viz
+	- [ ] how to stabilize/make it possible to inspect sparse bind submissions?
+	      they are only there for a single frame.
+		  Implement something like "freeze on QueueBindSparse"?
 - [ ] rework buffmt with proper array types (and multdim arrays)
       allow to store spirv u32 id per Type.
 	  	- [ ] related to storageBuffer bug?

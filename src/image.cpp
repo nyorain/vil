@@ -73,41 +73,6 @@ ImageView::~ImageView() {
 	}
 }
 
-bool memoryUsableLocked(const Image& img) {
-	if(!img.handle) {
-		return false;
-	}
-
-	if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT) {
-		if(img.ci.flags & VK_IMAGE_CREATE_SPARSE_RESIDENCY_BIT) {
-			return true;
-		}
-
-		// sparse but not sparse residency
-		auto& state = std::get<1>(img.memory);
-		dlg_assert(state.imageBinds.empty());
-
-		auto last = 0u;
-		for(auto& bind : state.opaqueBinds) {
-			if(bind.resourceOffset != last) {
-				// detected hole
-				return false;
-			}
-		}
-
-		// TODO: cache reqs somewhere?
-		VkMemoryRequirements memReqs {};
-		img.dev->dispatch.GetImageMemoryRequirements(
-			img.dev->handle, img.handle, &memReqs);
-
-		// hole in the end
-		return last == memReqs.size;
-	}
-
-	// non-sparse
-	return std::get<0>(img.memory).memState == FullMemoryBind::State::bound;
-}
-
 std::string defaultName(const Image& img) {
 	// format
 	auto formatStr = vk::name(img.ci.format);

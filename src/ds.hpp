@@ -368,4 +368,10 @@ VKAPI_ATTR void VKAPI_CALL UpdateDescriptorSetWithTemplate(
     VkDescriptorUpdateTemplate                  descriptorUpdateTemplate,
     const void*                                 pData);
 
+// vulkan 1.1
+VKAPI_ATTR void VKAPI_CALL GetDescriptorSetLayoutSupport(
+    VkDevice                                    device,
+    const VkDescriptorSetLayoutCreateInfo*      pCreateInfo,
+    VkDescriptorSetLayoutSupport*               pSupport);
+
 } // namespace vil

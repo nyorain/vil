@@ -734,6 +734,8 @@ void addGuiSyncLocked(QueueSubmitter& subm) {
 void postProcessLocked(QueueSubmitter& subm) {
 	ZoneScoped;
 
+	auto& batch = *subm.dstBatch;
+
 	// add to swapchain
 	FrameSubmission* recordBatch = nullptr;
 	auto swapchain = subm.dev->swapchainLocked();
@@ -741,14 +743,24 @@ void postProcessLocked(QueueSubmitter& subm) {
 		recordBatch = &swapchain->nextFrameSubmissions.batches.emplace_back();
 		recordBatch->queue = subm.queue;
 		recordBatch->submissionID = subm.globalSubmitID;
+		recordBatch->type = batch.type;
 	}
 
-	auto& batch = *subm.dstBatch;
-
 	for(auto& sub : batch.submissions) {
-		// don't activate when there already is an inactive submission
-		// on this queue.
-		bool doActivate = !subm.queue->firstWaiting;
+		// For command submissions, don't activate when there already is an
+		// inactive submission on this queue since submission order blocks
+		// further execution.
+		// Sparse bindings don't depend on submission order.
+		//
+		// From the Vulkan spec 7.4.1:
+		// Semaphore signal operations that are defined by vkQueueSubmit or
+		// vkQueueSubmit2 additionally include all commands that occur earlier
+		// in submission order. Semaphore signal operations that are defined by
+		// vkQueueSubmit , vkQueueSubmit2 or vkQueueBindSparse additionally
+		// include in the first synchronization scope any semaphore and fence
+		// signal operations that occur earlier in signal operation order.
+		bool doActivate = subm.dstBatch->type != SubmissionType::command ||
+			!subm.queue->firstWaiting;
 
 		// process cbs
 		if(batch.type == SubmissionType::command) {
@@ -795,9 +807,6 @@ void postProcessLocked(QueueSubmitter& subm) {
 				// can't prevent activation via binary semaphores
 			} else if(dstSync->value > dstSync->semaphore->upperBound) {
 				doActivate = false;
-				if(!subm.queue->firstWaiting) {
-					subm.queue->firstWaiting = &sub;
-				}
 			}
 		}
 
@@ -819,6 +828,8 @@ void postProcessLocked(QueueSubmitter& subm) {
 
 		if(doActivate) {
 			activateLocked(sub);
+		} else if(!subm.queue->firstWaiting) {
+			subm.queue->firstWaiting = &sub;
 		}
 	}
 

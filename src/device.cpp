@@ -914,13 +914,17 @@ VkResult doCreateDevice(
 	aliasCmd(std::array{
 		&dev.dispatch.CmdResolveImage2,
 		&dev.dispatch.CmdResolveImage2KHR});
-	// VK_KHR_dynamic_rendering
+	// VK_KHR_dynamic_rendering, vulkan 1.3
 	aliasCmd(std::array{
 		&dev.dispatch.CmdBeginRendering,
 		&dev.dispatch.CmdBeginRenderingKHR});
 	aliasCmd(std::array{
 		&dev.dispatch.CmdEndRendering,
 		&dev.dispatch.CmdEndRenderingKHR});
+	// VK_KHR_maintenance3, vulkan 1.1
+	aliasCmd(std::array{
+		&dev.dispatch.GetDescriptorSetLayoutSupport,
+		&dev.dispatch.GetDescriptorSetLayoutSupportKHR});
 
 	// find vkSetDeviceLoaderData callback
 	if(standalone) {
