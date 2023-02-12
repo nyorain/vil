@@ -4,8 +4,6 @@ Vulkan layer that allows to inspect GPU state and submitted commands live
 inside your applications.
 
 <img align='center' src='https://github.com/nyorain/vil/blob/main/docs/pics/hiz.gif' width='300"'>
-<br>
-<br>
 
 Features:
 
@@ -72,17 +70,18 @@ Supported/Tested platforms:
 	for a separate window (that works on native wayland). Or make your application use xcb/xlib.
 	- only actively tested on linux, bug reports and improvements for
 	  other platforms appreciated
-- MSVC 2019 (x64)
-- MinGW (this one is not tested at the moment and might give you problems
-  but reported issues will be fixed. CI for this platform is WIP).
+- Windows with MSVC 2019/2022 (x64)
+  You can find prebuilt libraries in the release section. To install the layer,
+  just run the `register_layer.bat` after unpacking the zip.
+
+Windows+MinGW will hopefully eventually be supported/tested. Please report
+issues, if you try this.
 
 **NOTE**: 32-bit platforms are currently not supported. Pull requests are welcome but you'd likely have to maintain it yourself/set up CI.
 
-Currently (as there isn't even an official release), there are no prepackaged
-binaries or build scripts, you have to build and install it yourself. 
-You'll need an up-to-date version of [meson](https://github.com/mesonbuild/meson/releases).
+To build the layer from scratch, you'll need an up-to-date version of [meson](https://github.com/mesonbuild/meson/releases).
 
-## Unix
+## Building on Unix
 
 Just clone the repository and run:
 
@@ -99,33 +98,22 @@ via meson (e.g. run `meson --prefix=/usr build` in the beginning).
 Be warned that using the `/usr` prefix for manually built libs/applications is generally not recommended since it might mess
 with your package manager.
 
-## Windows
+## Building on Windows
 
 On windows, this is actively tested with MSVC 2019, older version will likely not work due to incomplete/incorrect C++17 support.
 Since we require c11, MSVC >= 19.28 is required (visual studio 16.8).
 The recommended/tested way to build it:
 
-1. open the `x64 Native Tools command prompt` for your visual studio version. You can just search for that using the start menu when you have visual studio installed.
-2. Navigate to the vil folder.
-3. Run `meson build --backend vs2019`
-4. If everything goes correctly, you will have a Visual Studio solution you can build.
+1. Run `meson build --backend vs2019` (or `vs2022`) from command line in the vil folder.
+2. If everything goes correctly, you will have a Visual Studio solution (in a `build` folder) that you can build.
 
-You will still need to install the layer after building it.
-On windows, layers are installed via registry entries, you have to add
-a registry entry in `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers` pointing to the generated layer config 
-json (that must be located in the same folder as `VkLayer_live_introspection.dll`).
-See [here](https://asawicki.info/news_1683_vulkan_layers_dont_work_look_at_registry.html) or [here](https://vulkan.lunarg.com/doc/view/1.1.121.1/linux/layer_configuration.html) for more details.
-You can simply run the `register_layer.bat` script in the build directory. Note that it will require admin privileges
-to add the registry key. You should usually not run random batch scripts from the internet that require admin privileges,
-so feel free to do it manually in an admin prompt:
+Alternatively, you can also use ninja to build it on windows.
 
-```
-REG ADD HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ExplicitLayers /v <filepath of VkLayer_live_introspection.json> /t REG_DWORD /d 0
-```
-
-Replace `<filepath of VkLayer_live_introspection.json>` with full file path of the generated `VkLayer_live_introspection.json` file, e.g. `D:\code\vil\build\vs19\VkLayer_live_introspection.json`.
-
-When building with something else than MSVC, you might have to adjust the name of the dll. For instance, MinGW might add a `lib` prefix. In that case, when using `vil_api.h`, you'll also have to redefine `VIL_LIB_NAME` before including the header to the name of the dll.
+You will still need to install the layer after building it, so that other applications
+can find it. Just run the `register_layer.bat` in the build folder (running it once
+is enough, it just adds the path to the registry).
+For more information, manual installation (or if you are vary of running random
+bat files from the internet), see [here](docs/install.md)
 
 # Using vil
 
@@ -138,7 +126,8 @@ make sure to report them here!
 There are multiple ways of using the introspection gui:
 
 - Make the layer create a new window containing the debug gui when the application starts.
-  You can enable it via the environment variable `VIL_CREATE_WINDOW=1`.
+  This is enabled by default.
+  You can control it via the environment variable `VIL_CREATE_WINDOW={0, 1}`.
 - Make the layer draw an overlay over your application
 	- Since the layer gui still needs input you have to supply it via
 	  a separate api. See [include/vil_api.h](include/vil_api.h).
@@ -152,13 +141,9 @@ There are multiple ways of using the introspection gui:
 	  build config or even completely removed from the layer in future).
 	  You can force it via the environment variable `VIL_HOOK_OVERLAY=1`.
 
-<!--- The layer running gui inside an extra window in doom eternal: -->
-
-<!--- ![Extra window doom eternal example](docs/pics/doom-eternal-window.png) -->
-
 ## About retail games
 
-Using this layer in retail application/games (i.e. games you don't develop yourself,
+Using this layer in retail application/games (i.e. applications you don't develop yourself,
 without available source code or debugging symbols) **IS NOT OFFICIALLY SUPPORTED**.
 There are multiple reasons for this:
 
@@ -169,15 +154,10 @@ There are multiple reasons for this:
   what it does to cause a crash in the layer. Sometimes, the result would
   be that the game/application simply does not follow the vulkan spec
   and while the driver can handle it, the layer cannot.
-  Even for open-source games such bug reports are not useful.
-- Using this layer in games will likely trigger anti-cheat mechanisms.
-  **USING THIS LAYER IN MULTIPLAYER GAMES MIGHT GET YOU BANNED AND THAT
-  IS NOT OUR FAULT**. This layer messes with draw calls
-  (you can literally view the final image without certain draw
-  calls being made) and so games are entirely right in banning
-  players for using it. Even just playing games that include
-  a multiplayer mode locally with the layer might get you in trouble.
-  Just don't do it. And don't blame us if it backfires.
+- Using this layer in games might trigger anti-cheat mechanisms.
+  Using this layer in multiplayer games might get you banned.
+  Even just playing games that include a multiplayer mode locally with the 
+  layer might get you in trouble. Just don't do it.
 - Usage of this layer in retail products might be motivated by abuse.
   Keep in mind that while game developers usually have no problem with
   players sharing videos or screenshots of the gameplay; extracting
