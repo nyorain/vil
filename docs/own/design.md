@@ -1231,3 +1231,48 @@ to decide whether to hook or not) isn't enough in some case.
 			}
 		}
 ```
+
+# update_unused_while_pending is evil
+
+Ok so how to support it?
+The most general case is updateAfterBind, updateUnusedWhilePending,
+partiallyBound *all* being set.
+Dynmically used descriptors can be updated any time the submission is
+not pending on the device and all bindings that are not dynamically
+used can be updated *any* time. That also implies that resources being
+bound but that are not dynamically used can be destroyed at any time.
+
+Properly supporting this (for the command hook copy case, i.e. when
+a command using such a descriptor set is inspected) is very hard
+because we don't know which resources are dynamically used.
+So we just always assume the worst:
+We get the resource from the ds to read from only at submission time (we already 
+do this), this covers the updateAfterBind case.
+We use validate ds handles before accessing them (when ds.cpp refBindings 
+is false; we do this by not accessing the ds directly but only a cow we made of it).
+With this, we already have the worst case partially covered.
+The only case missing: we record commands to read from a resource (that is
+not dynamically used) but that resource is then destroyed while our
+hooked submission is running on the device.
+
+Users could just avoid inspecting resources that are not used dynamically.
+And everything will work.
+But honestly, we still want to make this work. And currently it's a BAD crash,
+memory corruption, whatever. Accessing a destroyed resource. Oh noes.
+
+Could make it work like this, rough sketch:
+
+- Make sure CommandHookRecord knows which handles it uses
+- When a buffer/image is destroyed, we first ask CommandHook if it's currently
+  in use by any pending CommandHookRecord. 
+  If so, wait on the submission before destroying.
+
+That's really costly since we might have a LOT of CommandHookRecords though :/
+And in like 99% of the cases of destroyed resources this won't happen.
+We could even add a branch to only make this check when the
+updateUnusedWhilePending feature is activated (partially bound isn't relevant
+since we don't consider static usage either atm, we want to handle
+it via the dynamic usage mechanism as well). So, yeah, we can likely
+optimize this in some way later on. Maybe store in resources whether they
+were ever bound in a updateUnusedWhilePending slot or something.
+

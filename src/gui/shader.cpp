@@ -131,6 +131,13 @@ void ShaderDebugger::initState() {
 		return self->arrayLength(varID, {indices, std::size_t(index_count)});
 	};
 
+	static spvm_analyzer analyzer;
+	analyzer.on_undefined_behavior = [](spvm_state*, spvm_word ub) {
+		// TODO: allow to break on UB.
+		dlg_trace("shader triggered undefined behavior: {}", ub);
+	};
+	spvm_.state->analyzer = &analyzer;
+
 	spvm_word entryPoint = -1;
 	for(auto i = 0; i < spvm_.program->entry_point_count; ++i) {
 		if(u32(spvm_.program->entry_points[i].id) == compiled_->get_ir().default_entry_point) {
@@ -443,7 +450,7 @@ Vec3ui ShaderDebugger::numWorkgroups() const {
 
 void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
 		span<const spvm_word> indices, span<spvm_member> dst) {
-	dlg_trace("spirv OpLoad of builtin {}", builtin.builtin);
+	// dlg_trace("spirv OpLoad of builtin {}", builtin.builtin);
 
 	auto loadVecU = [&](const auto& vec) {
 		if(indices.empty()) {
@@ -726,7 +733,8 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 		return;
 	}
 
-	// dlg_trace("spirv OpLoad of var {}", srcID);
+	// dlg_trace("spirv OpLoad of non-builtin var {}", srcID);
+
 	dlg_assert(compiled_->has_decoration(res->id, spv::DecorationDescriptorSet) &&
 				compiled_->has_decoration(res->id, spv::DecorationBinding));
 	auto& spcTypeMaybeArrayed = compiled_->get_type(res->type_id);
@@ -1580,10 +1588,116 @@ void ShaderDebugger::drawCallstackTab() {
 
 void ShaderDebugger::drawInputsTab() {
 	// TODO: decide depending on shader type
-	// TODO: for compute shader, allow to select GlobalInvocationID
-	//   and automatically compute it here depending on workgroup size
+	using nytl::vec::cw::operators::operator*;
 
-	imGuiText("todo");
+	auto wgs = workgroupSize();
+	auto numWGs = numWorkgroups();
+	auto numThreads = numWGs * wgs;
+
+	if(numThreads.x * numThreads.y * numThreads.z == 0u) {
+		imGuiText("This dispatch call has no invocations!");
+	} else {
+		ImGui::Checkbox("Allow out-of-bounds invocation", &allowSelectOutOfBounds_);
+		auto sliderFlags = 0u;
+		if(!allowSelectOutOfBounds_) {
+			globalInvocationID_.x = std::min(globalInvocationID_.x, numThreads.x - 1);
+			globalInvocationID_.y = std::min(globalInvocationID_.y, numThreads.y - 1);
+			globalInvocationID_.z = std::min(globalInvocationID_.z, numThreads.z - 1);
+			sliderFlags = ImGuiSliderFlags_AlwaysClamp;
+		}
+
+		// output global
+		const unsigned globalDim =
+			numThreads.z > 1 ? 3 :
+			numThreads.y > 1 ? 2 :
+			numThreads.x > 1 ? 1 : 0;
+		float startX = 0.f;
+		float sizeX = 100.f;
+		if(globalDim == 0u && !allowSelectOutOfBounds_) {
+			imGuiText(numThreads.x == 1 ?
+				"There is only one invocation in this dispatch" :
+				"There are no invocations in this dispatch");
+		} else {
+			imGuiText("GlobalInvocation:");
+			ImGui::PushID("GlobalInv");
+
+			for(auto i = 0u; i < globalDim; ++i) {
+				ImGui::PushID(i);
+				ImGui::SameLine();
+				if(i == 0u) {
+					startX = ImGui::GetCursorPosX();
+					sizeX = ImGui::GetContentRegionAvail().x / float(globalDim) - 10.f;
+					// sizeX = ImGui::GetContentRegionAvail().x / 3.f - 10.f;
+				}
+
+				ImGui::PushItemWidth(sizeX);
+				int v = globalInvocationID_[i];
+				ImGui::DragInt("", &v, 1.f, 0, numThreads[i] - 1, "%d", sliderFlags);
+				globalInvocationID_[i] = u32(v);
+				ImGui::PopID();
+			}
+
+			ImGui::PopID();
+		}
+
+		// output work group
+		const unsigned wgDim =
+			numWGs.z > 1 ? 3 :
+			numWGs.y > 1 ? 2 :
+			numWGs.x > 1 ? 1 : 0;
+		if(wgDim > 0) {
+			imGuiText("WorkGroup:");
+			ImGui::PushID("WorkGroup");
+
+			for(auto i = 0u; i < wgDim; ++i) {
+				ImGui::PushID(i);
+				ImGui::SameLine();
+				if(i == 0u) {
+					ImGui::SetCursorPosX(startX);
+				}
+
+				ImGui::PushItemWidth(sizeX);
+				// floor by design
+				auto before = globalInvocationID_[i] / wgs[i];
+				int v = before;
+				if(ImGui::DragInt("", &v, 1.f, 0, numWGs[i] - 1, "%d", sliderFlags)) {
+					globalInvocationID_[i] += (v - before) * wgs[i];
+				}
+				ImGui::PopID();
+			}
+
+			ImGui::PopID();
+		}
+
+		// output local invocation
+		const unsigned localDim =
+			wgs.z > 1 ? 3 :
+			wgs.y > 1 ? 2 :
+			wgs.x > 1 ? 1 : 0;
+		if(localDim > 0) {
+			imGuiText("LocalInvocation:");
+			ImGui::PushID("LocalInv");
+
+			for(auto i = 0u; i < localDim; ++i) {
+				ImGui::PushID(i);
+				ImGui::SameLine();
+				if(i == 0u) {
+					ImGui::SetCursorPosX(startX);
+				}
+
+				ImGui::PushItemWidth(sizeX);
+				// floor by design
+				auto before = globalInvocationID_[i] % wgs[i];
+				int v = before;
+				if(ImGui::DragInt("", &v, 1.f, 0, wgs[i] - 1, "%d", sliderFlags)) {
+					globalInvocationID_[i] += v - before;
+				}
+				ImGui::PopID();
+			}
+
+			ImGui::PopID();
+		}
+	}
 }
 
 void ShaderDebugger::updatePosition(bool moveCursor) {

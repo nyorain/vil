@@ -407,6 +407,8 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresentKHR(
 					pPresentInfo->pWaitSemaphores,
 					pPresentInfo->waitSemaphoreCount
 				};
+			} else {
+				dlg_warn("Having to present without wait semaphores");
 			}
 
 			res = swapchain.overlay->drawPresent(qd, waitSems,

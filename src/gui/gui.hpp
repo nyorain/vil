@@ -86,6 +86,10 @@ public:
 	ImFont* defaultFont {};
 	ImFont* monoFont {};
 
+	ImVec4 inlineButtonCol;
+	ImVec4 inlineButtonColHovered;
+	ImVec4 inlineButtonColActive;
+
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
 

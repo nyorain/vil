@@ -282,10 +282,14 @@ void Gui::initImGui() {
 
 	auto accentHue = 0.f; // red
 
-	auto setColorHSV = [&](ImGuiCol_ col, u8 h, u8 s, u8 v, u8 a) {
+	auto getColorHSV = [&](u8 h, u8 s, u8 v, u8 a) {
 		float r, g, b;
 		ImGui::ColorConvertHSVtoRGB(h / 255.f, s / 255.f, v / 255.f, r, g, b);
-		style.Colors[col] = {r, g, b, a / 255.f};
+		return ImVec4{r, g, b, a / 255.f};
+	};
+
+	auto setColorHSV = [&](ImGuiCol_ col, u8 h, u8 s, u8 v, u8 a) {
+		style.Colors[col] = getColorHSV(h, s, v, a);
 	};
 
 	// hsv + alpha. H will always be accentHue
@@ -300,6 +304,10 @@ void Gui::initImGui() {
 	setAccentColor(ImGuiCol_Button, 187, 250, 102);
 	setAccentColor(ImGuiCol_ButtonHovered, 187, 250, 255);
 	setAccentColor(ImGuiCol_ButtonActive, 187, 239, 255);
+
+	this->inlineButtonCol = getColorHSV(accentHue, 100, 250, 255);
+	this->inlineButtonColHovered = getColorHSV(accentHue, 187, 250, 255);
+	this->inlineButtonColActive = getColorHSV(accentHue, 187, 239, 255);
 
 	setAccentColor(ImGuiCol_Header, 187, 250, 79);
 	setAccentColor(ImGuiCol_HeaderHovered, 187, 250, 204);
@@ -1634,30 +1642,30 @@ VkResult Gui::tryRender(Draw& draw, FrameInfo& info) {
 				}
 			}
 
-			// cbPre: General barrier to make sure all past submissions writing resources
-			// we read are done. Not needed when we don't read a device resource.
-			// PERF: could likely at least give a better dstAccessMask
-			VkMemoryBarrier membPre {};
-			membPre.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-			membPre.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-			membPre.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			// Insert general memory barrier to make sure we don't interfer
+			// with application on this queue.
+			auto allAccess = VK_ACCESS_MEMORY_WRITE_BIT |
+				VK_ACCESS_MEMORY_READ_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+				VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+				VK_ACCESS_SHADER_READ_BIT |
+				VK_ACCESS_SHADER_WRITE_BIT;
+			VkMemoryBarrier memb {};
+			memb.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			memb.srcAccessMask = allAccess;
+			memb.dstAccessMask = allAccess;
+
 			dev().dispatch.CmdPipelineBarrier(draw.cbLockedPre,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-				0, 1, &membPre, 0, nullptr, imgBarriersPre.size(), imgBarriersPre.data());
+				0, 1, &memb, 0, nullptr,
+				imgBarriersPre.size(), imgBarriersPre.data());
 
-			// cbPost: General barrier to make sure all our reading is done before
-			// future application submissions to this queue.
-			// Not needed when we don't read a device resource.
-			// PERF: could likely at least give a better srcAccessMask
-			VkMemoryBarrier membPost {};
-			membPost.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-			membPost.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-			membPost.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
 			dev().dispatch.CmdPipelineBarrier(draw.cbLockedPost,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
 				VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-				0, 1, &membPost, 0, nullptr, imgBarriersPost.size(), imgBarriersPost.data());
+				0, 1, &memb, 0, nullptr,
+				imgBarriersPost.size(), imgBarriersPost.data());
 		}
 
 		dev().dispatch.EndCommandBuffer(draw.cbLockedPre);
@@ -1881,6 +1889,7 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 	if(res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
 		dlg_error("vkQueuePresentKHR error: {}", vk::name(res));
 
+		// TODO: would have to reset foundDraw->presentSemaphore here right?
 		// TODO: not sure how to handle this the best
 		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1,
 			&foundDraw->fence, true, UINT64_MAX));
@@ -2325,17 +2334,15 @@ void refButton(Gui& gui, Handle& handle, VkObjectType objectType) {
 	constexpr auto showType = true;
 	ImGui::PushID(&handle);
 
-	// ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_Button]);
-//
-	// ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-	// ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
-	// ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
+	ImGui::PushStyleColor(ImGuiCol_Button, gui.inlineButtonCol);
+	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, gui.inlineButtonColHovered);
+	ImGui::PushStyleColor(ImGuiCol_ButtonActive, gui.inlineButtonColActive);
 
 	if(inlineButton(name(handle, objectType, showType).c_str())) {
 		gui.selectResource(handle, objectType);
 	}
 
-	// ImGui::PopStyleColor(3);
+	ImGui::PopStyleColor(3);
 
 	ImGui::PopID();
 }

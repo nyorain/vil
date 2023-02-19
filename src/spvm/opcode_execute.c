@@ -21,6 +21,10 @@ char spvm_use_access_callback(enum spvm_result_type result_type,
 		case SpvStorageClassUniform:
 		case SpvStorageClassStorageBuffer:
 		case SpvStorageClassUniformConstant:
+		// TODO: really always use access callback for these?
+		// could be set statically. Maybe leave up to the user?
+		case SpvStorageClassInput:
+		case SpvStorageClassOutput:
 		// TODO: workgroup?
 		// TODO: input, output?
 		// TODO: raytracing stuff?
@@ -1333,10 +1337,10 @@ void spvm_execute_OpUDiv(spvm_word word_count, spvm_state_t state)
 	spvm_word op2 = SPVM_READ_WORD(state->code_current);
 
 	for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-		state->results[id].members[i].value.u = state->results[op1].members[i].value.u / state->results[op2].members[i].value.u;
-
 		if (state->analyzer && state->results[op2].members[i].value.u == 0)
 			state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
+
+		state->results[id].members[i].value.u = state->results[op1].members[i].value.u / state->results[op2].members[i].value.u;
 	}
 }
 void spvm_execute_OpSDiv(spvm_word word_count, spvm_state_t state)
@@ -1365,15 +1369,17 @@ void spvm_execute_OpFDiv(spvm_word word_count, spvm_state_t state)
 	// TODO: is there a better way to do this?
 	if (type_info->value_bitcount > 32) {
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-			if (state->analyzer && state->results[op2].members[i].value.d == 0.0)
-				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
+			// NOTE: nope, this isn't UB
+			// if (state->analyzer && state->results[op2].members[i].value.d == 0.0)
+			// 	state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
 
 			state->results[id].members[i].value.d = state->results[op1].members[i].value.d / state->results[op2].members[i].value.d;
 		}
 	} else {
 		for (spvm_word i = 0; i < state->results[id].member_count; i++) {
-			if (state->analyzer && state->results[op2].members[i].value.f == 0.0f)
-				state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
+			// NOTE: nope, this isn't UB
+			// if (state->analyzer && state->results[op2].members[i].value.f == 0.0f)
+			// 	state->analyzer->on_undefined_behavior(state, spvm_undefined_behavior_div_by_zero);
 
 			state->results[id].members[i].value.f = state->results[op1].members[i].value.f / state->results[op2].members[i].value.f;
 		}

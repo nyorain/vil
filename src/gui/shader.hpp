@@ -136,8 +136,8 @@ private:
 	std::unordered_map<u32, u32> varIDToDsCopyMap_;
 	std::vector<Location> breakpoints_;
 
-	// TODO
 	Vec3ui globalInvocationID_ {0u, 0u, 0u};
+	bool allowSelectOutOfBounds_ {};
 
 	struct {
 		spvm_context_t context {};
