@@ -23,6 +23,45 @@
 				  regions as 0? We want that for the image viewer anyways I guess.
 				  (bind memory destruction is still a problem though, handle
 				  it via tracking and waiting)
+- Vertex rework 2: electric boogaloo
+	- [x] make vertex input/output styling consistent
+	      Using buffmt for xfb looks kinda bad, revisit. Also table headers.
+		- [x] Add ID before IDX column?
+	- [ ] add hover data for vertex stuff. With exact formatted scalar
+	- [x] Add imgui list clipper to tables and show *whole* captured data again
+	- [ ] figure out upside-down issue with iro. Flip y based on used viewport?
+	      I guess other games just flip the viewport, that's why they did not need it
+		- [ ] add "y-up-mode" to options. Can be any of the 3-axis-plus-directions
+			  by default for vertex input: y-up is y-up (although many models have z-up)
+			  default for vertex output: y-down is y-up (except when viewport is negative,
+			  then y-up is y-up).
+	- [x] Make vertices selectable
+	- [ ] Draw selected vertex
+	- [ ] Allow to select specific vertex (either input or output) in debugger
+	- [ ] Allow to choose display style
+		- [ ] solid (single-colored or shaded) vs wireframe
+		- [ ] color using another input.
+		- [x] allow not clearing background of canvas, draw on blurred ui directly?
+		      looks kinda neat as well. Should probably be checkbox
+	- [ ] allow to modify canvas size. I.e. make vertically resizeable
+	- [ ] Explicitly allow to modify what is used as position input?
+	- [ ] Allow to explicitly toggle between perspective and non-perspective projection?
+	- [ ] make perspective heuristic more robust, caused issues in past.
+	- [ ] Add arcball camera controls (allow both or allow to toggle via ui)
+	- [ ] later: Make vertex list properly page-able, allow to see *everything*
+	      without random size restrictions
+	    - [ ] For this to properly work with vertex input, we might need an indirect
+		  	  copy (based on indirect draw command and indices.
+			  See node 1749
+		- [ ] For this to properly work with xfb (vertex output), we potentially
+		      need to implement draw-call splitting. Which will be a pain in the ass.
+- Add vertex shaders to shader debugger
+	- [ ] copy vertex buffers in that case in updateHooks
+	- [ ] set up vertex inputs from vertex buffers
+	      Also set up stuff like VertexIndex, InstanceIndex etc.
+		  All the builtin inputs
+	- [ ] handle special vertex shader variables
+- [ ] shader debugger: add dropdown for all embdeeded sources.
 - [ ] implement sync tracking
 	- [ ] and fix full sync
 	- [ ] add test for out-of-order submission

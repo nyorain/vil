@@ -58,8 +58,8 @@ private:
 		DrawParams params;
 		BufferSpan indexBuffer; // only for indexed drawing
 
-		Vec2f canvasOffset;
-		Vec2f canvasSize;
+		Vec2f offset {};
+		Vec2f size {};
 
 		float scale {1.f};
 		bool useW {false};
@@ -82,6 +82,8 @@ private:
 	// - viewport and scissor dynamic state bound
 	// Uses the current imgui context.
 	void imGuiDraw(const DrawData& data);
+	void showSettings();
+	void displayVertexID(u32 id);
 
 private:
 	Gui* gui_ {};
@@ -117,8 +119,14 @@ private:
 	std::vector<Pipe> pipes_ {};
 	DrawData drawData_;
 
+	u32 selectedVertex_ {};
+
 	u32 selectedID_ {};
 	std::vector<DrawData> drawDatas_;
+
+	u32 precision_ {5u};
+	bool doClear_ {true};
+	bool flipY_ {true};
 };
 
 } // namespace vil
