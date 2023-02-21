@@ -17,6 +17,10 @@ urgent, bugs:
       comment for accelStruct captures
 - [ ] immediately free HookedRecords that are not to be re-used in finish.
 
+- [ ] accelStruct building rework: a big issue atm is rebuilding while
+      viewing; initBufs might have been called but the data not updated yet
+	  -> crash
+
 - [ ] test more on laptop, intel gpu
 	- [ ] seems like we do some nasty stuff in the histogram shaders,
 		  get gpu timeouts (try e.g. with curlnoise.ktx, zoom out on histogram)
