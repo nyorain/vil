@@ -13,11 +13,6 @@ namespace vil {
 
 using nytl::copy;
 
-struct FormattedScalar {
-	std::string scalar;
-	std::string error {};
-};
-
 template<typename T8, typename T16, typename T32, typename T64, typename Cast = T64>
 FormattedScalar formatScalar(span<const std::byte> data, u32 offset, u32 width, u32 precision) {
 	dlg_assert(width % 8 == 0u);
@@ -218,33 +213,8 @@ std::string atomTypeName(const Type& type) {
 	return dlg::format("{}mat, {} rows, {} colums", t, type.vecsize, type.columns);
 }
 
-void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
-	ImGui::TableNextRow();
-	ImGui::TableNextColumn();
-
-	ImGui::AlignTextToFramePadding();
-	ImGui::Bullet();
-	ImGui::SameLine();
-	imGuiText("{} ", baseName);
-
-	if(ImGui::IsItemHovered()) {
-		ImGui::BeginTooltip();
-		imGuiText("{}", atomTypeName(type));
-
-		if(type.deco.flags & Decoration::Bits::rowMajor) {
-			imGuiText("Row major memory layout");
-		}
-		if(type.deco.flags & Decoration::Bits::colMajor) {
-			imGuiText("Column major memory layout");
-		}
-		if(type.deco.matrixStride) {
-			imGuiText("Matrix stride: {}", type.deco.matrixStride);
-		}
-
-		ImGui::EndTooltip();
-	}
-
-	ImGui::TableNextColumn();
+void displayAtomValue(const Type& type, ReadBuf data, u32 offset) {
+	dlg_assert(type.type != Type::typeStruct);
 
 	auto baseSize = type.width / 8;
 	auto rowStride = baseSize;
@@ -266,7 +236,7 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 		(rowMajor ? rowStride : colStride) = type.deco.matrixStride;
 	}
 
-	auto id = dlg::format("Value:{}:{}", baseName, &type);
+	auto id = dlg::format("Value:{}:{}", &type, offset);
 	auto flags = ImGuiTableFlags_SizingFixedFit; // | ImGuiTableFlags_BordersInner;
 	if(ImGui::BeginTable(id.c_str(), numColumns, flags)) {
 		for(auto r = 0u; r < numRows; ++r) {
@@ -304,6 +274,36 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 
 		ImGui::EndTable();
 	}
+}
+
+void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+
+	ImGui::AlignTextToFramePadding();
+	ImGui::Bullet();
+	ImGui::SameLine();
+	imGuiText("{} ", baseName);
+
+	if(ImGui::IsItemHovered()) {
+		ImGui::BeginTooltip();
+		imGuiText("{}", atomTypeName(type));
+
+		if(type.deco.flags & Decoration::Bits::rowMajor) {
+			imGuiText("Row major memory layout");
+		}
+		if(type.deco.flags & Decoration::Bits::colMajor) {
+			imGuiText("Column major memory layout");
+		}
+		if(type.deco.matrixStride) {
+			imGuiText("Matrix stride: {}", type.deco.matrixStride);
+		}
+
+		ImGui::EndTooltip();
+	}
+
+	ImGui::TableNextColumn();
+	displayAtomValue(type, data, offset);
 }
 
 void displayStruct(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
