@@ -1,12 +1,14 @@
 #include <gui/vertexViewer.hpp>
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
+#include <gui/fontAwesome.hpp>
 #include <commandHook/hook.hpp>
 #include <commandHook/record.hpp>
 #include <util/f16.hpp>
 #include <util/util.hpp>
 #include <util/spirv.hpp>
 #include <util/fmt.hpp>
+#include <util/buffmt.hpp>
 #include <device.hpp>
 #include <shader.hpp>
 #include <accelStruct.hpp>
@@ -32,190 +34,42 @@ constexpr auto fov = float(0.48 * pi);
 
 // util
 template<typename T>
-std::string printFormat(u32 count, const Vec4d& val) {
-	auto ret = std::string {};
-	auto sep = "";
+void printFormat(u32 count, const Vec4d& val, u32 precision) {
+	auto prec = std::setprecision(precision);
+
 	for(auto i = 0u; i < count; ++i) {
-		ret += dlg::format("{}{}", sep, T(val[i]));
-		sep = ", ";
-	}
-
-	return ret;
-}
-
-// Need to convert the captures variable type info a vulkan format
-// so that we can read and display it.
-// TODO: should reuse buffmt for this.
-VkFormat formatForType(const XfbCapture& capture) {
-	auto compIDForWidth = [](u32 width) -> u32 {
-		switch(width) {
-			case 8: return 0u;
-			case 16: return 1u;
-			case 32: return 2u;
-			case 64: return 3u;
-			default: return u32(-1);
+		// auto str = dlg::format("{}{}{}", first ? "" : ", ", prec, T(val[i]));
+		auto str = dlg::format("{}{}", prec, T(val[i]));
+		if(i > 0) {
+			ImGui::SameLine();
 		}
-	};
-
-	// TODO
-	dlg_assertm(capture.columns == 1u, "Matrix captures currently not supported");
-
-	auto compID = compIDForWidth(capture.width);
-	if(compID == u32(-1)) {
-		dlg_error("Invalid width: {}", capture.width);
-		return VK_FORMAT_UNDEFINED;
+		imGuiText("{}", str);
 	}
-
-	if(capture.type == XfbCapture::typeFloat) {
-		VkFormat formats[4][4] = {
-			{
-				VK_FORMAT_UNDEFINED,
-				VK_FORMAT_UNDEFINED,
-				VK_FORMAT_UNDEFINED,
-				VK_FORMAT_UNDEFINED,
-			},
-			{
-				VK_FORMAT_R16_SFLOAT,
-				VK_FORMAT_R16G16_SFLOAT,
-				VK_FORMAT_R16G16B16_SFLOAT,
-				VK_FORMAT_R16G16B16A16_SFLOAT,
-			},
-			{
-				VK_FORMAT_R32_SFLOAT,
-				VK_FORMAT_R32G32_SFLOAT,
-				VK_FORMAT_R32G32B32_SFLOAT,
-				VK_FORMAT_R32G32B32A32_SFLOAT,
-			},
-			{
-				VK_FORMAT_R64_SFLOAT,
-				VK_FORMAT_R64G64_SFLOAT,
-				VK_FORMAT_R64G64B64_SFLOAT,
-				VK_FORMAT_R64G64B64A64_SFLOAT,
-			}
-		};
-
-		dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
-		dlg_assert_or(compID != 0u, return VK_FORMAT_UNDEFINED);
-		return formats[compID][capture.vecsize - 1];
-	} else if(capture.type == XfbCapture::typeUint) {
-		VkFormat formats[4][4] = {
-			{
-				VK_FORMAT_R8_UINT,
-				VK_FORMAT_R8G8_UINT,
-				VK_FORMAT_R8G8B8_UINT,
-				VK_FORMAT_R8G8B8A8_UINT,
-			},
-			{
-				VK_FORMAT_R16_UINT,
-				VK_FORMAT_R16G16_UINT,
-				VK_FORMAT_R16G16B16_UINT,
-				VK_FORMAT_R16G16B16A16_UINT,
-			},
-			{
-				VK_FORMAT_R32_UINT,
-				VK_FORMAT_R32G32_UINT,
-				VK_FORMAT_R32G32B32_UINT,
-				VK_FORMAT_R32G32B32A32_UINT,
-			},
-			{
-				VK_FORMAT_R64_UINT,
-				VK_FORMAT_R64G64_UINT,
-				VK_FORMAT_R64G64B64_UINT,
-				VK_FORMAT_R64G64B64A64_UINT,
-			}
-		};
-
-		dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
-		return formats[compID][capture.vecsize - 1];
-	} else if(capture.type == XfbCapture::typeInt) {
-		VkFormat formats[4][4] = {
-			{
-				VK_FORMAT_R8_SINT,
-				VK_FORMAT_R8G8_SINT,
-				VK_FORMAT_R8G8B8_SINT,
-				VK_FORMAT_R8G8B8A8_SINT,
-			},
-			{
-				VK_FORMAT_R16_SINT,
-				VK_FORMAT_R16G16_SINT,
-				VK_FORMAT_R16G16B16_SINT,
-				VK_FORMAT_R16G16B16A16_SINT,
-			},
-			{
-				VK_FORMAT_R32_SINT,
-				VK_FORMAT_R32G32_SINT,
-				VK_FORMAT_R32G32B32_SINT,
-				VK_FORMAT_R32G32B32A32_SINT,
-			},
-			{
-				VK_FORMAT_R64_SINT,
-				VK_FORMAT_R64G64_SINT,
-				VK_FORMAT_R64G64B64_SINT,
-				VK_FORMAT_R64G64B64A64_SINT,
-			}
-		};
-
-		dlg_assert_or(capture.vecsize <= 4, return VK_FORMAT_UNDEFINED);
-		return formats[compID][capture.vecsize - 1];
-	}
-
-	dlg_error("Invalid capture type {}", unsigned(capture.type));
-	return VK_FORMAT_UNDEFINED;
 }
 
-std::string printFormat(VkFormat format, span<const std::byte> src) {
+void printFormat(VkFormat format, span<const std::byte> src, u32 precision) {
 	u32 numChannels = FormatComponentCount(format);
-	u32 componentSize = FormatElementSize(format) / numChannels;
 
 	// TODO: not all formats covered
-	//   support compresssed formats! See ioFormat in util.cpp
-	// TODO: why do we care about componentSize??? shouldn't matter
-	//  probably legacy, should be removed
+	//   support compresssed formats? See ioFormat in util.cpp
 
 	Vec4d val = read(format, src);
 
 	if(FormatIsSFLOAT(format)) {
-		switch(componentSize) {
-			case 2: return printFormat<f16>(numChannels, val);
-			case 4: return printFormat<float>(numChannels, val);
-			case 8: return printFormat<double>(numChannels, val);
-			default: break;
-		}
+		return printFormat<double>(numChannels, val, precision);
 	} else if(FormatIsUINT(format) || FormatIsUSCALED(format)) {
-		switch(componentSize) {
-			case 1: return printFormat<u16>(numChannels, val);
-			case 2: return printFormat<u16>(numChannels, val);
-			case 4: return printFormat<u32>(numChannels, val);
-			case 8: return printFormat<u64>(numChannels, val);
-			default: break;
-		}
+		return printFormat<u64>(numChannels, val, precision);
 	} else if(FormatIsSINT(format) || FormatIsSSCALED(format)) {
-		switch(componentSize) {
-			case 1: return printFormat<i16>(numChannels, val);
-			case 2: return printFormat<i16>(numChannels, val);
-			case 4: return printFormat<i32>(numChannels, val);
-			case 8: return printFormat<i64>(numChannels, val);
-			default: break;
-		}
-	} else if(FormatIsUNORM(format)) {
-		switch(componentSize) {
-			case 1: return printFormat<u16> (numChannels, val);
-			case 2: return printFormat<u16>(numChannels, val);
-			default: break;
-		}
-	} else if(FormatIsSNORM(format)) {
-		switch(componentSize) {
-			case 1: return printFormat<i16> (numChannels, val);
-			case 2: return printFormat<i16>(numChannels, val);
-			default: break;
-		}
+		return printFormat<i64>(numChannels, val, precision);
+	} else if(FormatIsUNORM(format) || FormatIsSNORM(format)) {
+		return printFormat<float>(numChannels, val, precision);
 	} else if(format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32) {
-		auto rgb = e5b9g9r9ToRgb(read<u32>(src));
-		return dlg::format("{}", rgb[0], rgb[1], rgb[2]);
+		printFormat<float>(3, val, precision);
+		return;
 	}
 
 	dlg_warn("Format {} not supported", vk::name(format));
-	return "<Unsupported format>";
+	imGuiText("N/A");
 }
 
 // NOTE: this could probably be improved
@@ -698,21 +552,21 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	auto displaySize = ImGui::GetIO().DisplaySize;
 
 	VkRect2D scissor {};
-	scissor.offset.x = std::max<int>(data.canvasOffset.x, 0);
-	scissor.offset.y = std::max<int>(data.canvasOffset.y, 0);
+	scissor.offset.x = std::max<int>(data.offset.x, 0);
+	scissor.offset.y = std::max<int>(data.offset.y, 0);
 	scissor.extent.width = std::min<int>(
-		data.canvasSize.x + data.canvasOffset.x - scissor.offset.x,
-		displaySize.x - data.canvasOffset.x);
+		data.offset.x + data.size.x - scissor.offset.x,
+		displaySize.x - data.offset.x);
 	scissor.extent.height = std::min<int>(
-		data.canvasSize.y + data.canvasOffset.y - scissor.offset.y,
-		displaySize.y - data.canvasOffset.y);
+		data.offset.y + data.size.y - scissor.offset.y,
+		displaySize.y - data.offset.y);
 	dev.dispatch.CmdSetScissor(cb, 0, 1, &scissor);
 
 	VkViewport viewport {};
-	viewport.width = scissor.extent.width;
-	viewport.height = scissor.extent.height;
-	viewport.x = scissor.offset.x;
-	viewport.y = scissor.offset.y;
+	viewport.width = data.size.x;
+	viewport.height = data.size.y;
+	viewport.x = data.offset.x;
+	viewport.y = data.offset.y;
 	viewport.maxDepth = 1.f;
 	dev.dispatch.CmdSetViewport(cb, 0, 1, &viewport);
 
@@ -722,10 +576,12 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 		Mat4f matrix;
 		u32 useW;
 		float scale;
+		u32 flipY;
 	} pcData = {
 		viewProjMtx_ * data.mat,
 		data.useW,
 		data.scale,
+		flipY_
 	};
 
 	dev.dispatch.CmdPushConstants(cb, pipeLayout_,
@@ -734,17 +590,15 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 
 	dev.dispatch.CmdBindVertexBuffers(cb, 0, 1, &vbuf.buffer, &voffset);
 
-	// clear canvas color
-	VkClearAttachment clearAtt {};
-	clearAtt.clearValue.color = {0.f, 0.f, 0.f, 1.f};
-	clearAtt.colorAttachment = 0u;
-	clearAtt.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-	VkClearRect clearRect {};
-	clearRect.rect = scissor;
-	clearRect.layerCount = 1u;
-
 	if(data.clear) {
+		VkClearAttachment clearAtt {};
+		clearAtt.clearValue.color = {0.f, 0.f, 0.f, 1.f};
+		clearAtt.colorAttachment = 0u;
+		clearAtt.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+		VkClearRect clearRect {};
+		clearRect.rect = scissor;
+		clearRect.layerCount = 1u;
 		dev.dispatch.CmdClearAttachments(cb, 1u, &clearAtt, 1u, &clearRect);
 	}
 
@@ -866,10 +720,16 @@ void VertexViewer::updateInput(float dt) {
 	auto rect = ImGui::GetItemRectSize();
 	auto aspect = rect.x / rect.y;
 
-	auto projMtx = perspective(fov, aspect, near_, far_);
-	flipY(projMtx);
-
 	auto viewMtx = viewMatrix(cam_);
+	auto projMtx = perspective(fov, aspect, near_, far_);
+	// TODO: not always needed!
+	//   could probably figure it out better on our own (at least for xfb data),
+	//   depending on set viewport
+	// TODO: doesn't currently work since input is still inverted then.
+	// if(flipY_) {
+		flipY(projMtx);
+	// }
+
 	viewProjMtx_ = projMtx * viewMtx;
 }
 
@@ -1024,19 +884,35 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
 		if(colCount == 0u) {
 			ImGui::Text("No Vertex input");
-		} else if(ImGui::BeginTable("Vertices", colCount, flags)) {
-			ImGui::TableNextRow();
+		} else if(ImGui::BeginTable("Vertices", 1 + colCount, flags)) {
+			auto width = 60.f * gui_->uiScale();
+            ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, width);
+			if(params.indexType) {
+            	ImGui::TableSetupColumn("IDX", ImGuiTableColumnFlags_WidthFixed, width);
+			}
+			for(auto& [pipeAttribID, shaderVarID] : attribs) {
+				auto& iv = resources.stage_inputs[shaderVarID];
+				auto name = iv.name.empty() ? "<unnamed>" : iv.name.c_str();
+				auto& attrib = pipe.vertexAttribs[pipeAttribID];
+				u32 numChannels = FormatComponentCount(attrib.format);
+            	ImGui::TableSetupColumn(name,
+					ImGuiTableColumnFlags_WidthFixed, numChannels * width);
+			}
+
+			// NOTE: we don't use TableHeadersRow so that we
+			//   can show tooltips on hover.
+			ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+			ImGui::TableNextColumn();
+			imGuiText("ID");
 
 			if(params.indexType) {
-				// ImGui::TableSetupColumn("IDX");
 				ImGui::TableNextColumn();
-				imGuiText("IDX");
+				imGuiText("Index");
 			}
 
 			for(auto& [pipeAttribID, shaderVarID] : attribs) {
 				auto& iv = resources.stage_inputs[shaderVarID];
 				auto name = iv.name.empty() ? "<unnamed>" : iv.name.c_str();
-				// ImGui::TableSetupColumn(name);
 
 				ImGui::TableNextColumn();
 				imGuiText(name);
@@ -1061,63 +937,65 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 				}
 			}
 
-			// ImGui::TableHeadersRow();
-			ImGui::TableNextRow();
+            ImGuiListClipper clipper;
+            clipper.Begin(params.drawCount);
+			while(clipper.Step()) {
+				for(auto i = u32(clipper.DisplayStart); i < u32(clipper.DisplayEnd); ++i) {
+					ImGui::TableNextRow();
 
-			for(auto i = 0u; i < std::min(100u, params.drawCount); ++i) {
-				bool captured = true;
-				auto vertexID = i;
-				auto iniID = params.instanceID;
-				if(params.indexType) {
 					ImGui::TableNextColumn();
+					displayVertexID(i);
 
-					auto is = indexSize(*params.indexType);
-					auto ib = state.indexBufCopy.data();
-					auto off = (params.offset + i) * is;
-					if(off + is > ib.size()) {
-						captured = false;
-						imGuiText("N/A");
+					bool captured = true;
+					auto vertexID = i;
+					auto iniID = params.instanceID;
+					if(params.indexType) {
+						ImGui::TableNextColumn();
+
+						auto is = indexSize(*params.indexType);
+						auto ib = state.indexBufCopy.data();
+						auto off = (params.offset + i) * is;
+						if(off + is > ib.size()) {
+							captured = false;
+							imGuiText("N/A");
+						} else {
+							ib = ib.subspan(off, is);
+							vertexID = readIndex(*params.indexType, ib) + params.vertexOffset;
+							imGuiText("{}", vertexID);
+						}
 					} else {
-						ib = ib.subspan(off, is);
-						vertexID = readIndex(*params.indexType, ib) + params.vertexOffset;
-						imGuiText("{}", vertexID);
+						vertexID += params.offset;
+						// XXX this isn't needed, right? not sure.
+						// iniID += params.offset;
 					}
-				} else {
-					vertexID += params.offset;
-					// XXX this isn't needed, right? not sure.
-					// iniID += params.offset;
+
+					for(auto& [aID, _] : attribs) {
+						auto& attrib = pipe.vertexAttribs[aID];
+						ImGui::TableNextColumn();
+
+						auto& binding = pipe.vertexBindings[attrib.binding];
+						auto& buf = state.vertexBufCopies[binding.binding];
+
+						auto off = (binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX) ?
+							vertexID * binding.stride :
+							iniID * binding.stride;
+						off += attrib.offset;
+
+						// TODO: compressed support?
+						auto size = FormatElementSize(attrib.format);
+						if(off + size > buf.data().size()) {
+							captured = false;
+						}
+
+						if(!captured) {
+							imGuiText("N/A");
+							continue;
+						}
+
+						auto* ptr = buf.data().data() + off;
+						printFormat(attrib.format, {ptr, size}, precision_);
+					}
 				}
-
-				for(auto& [aID, _] : attribs) {
-					auto& attrib = pipe.vertexAttribs[aID];
-					ImGui::TableNextColumn();
-
-					auto& binding = pipe.vertexBindings[attrib.binding];
-					auto& buf = state.vertexBufCopies[binding.binding];
-
-					auto off = (binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX) ?
-						vertexID * binding.stride :
-						iniID * binding.stride;
-					off += attrib.offset;
-
-					// TODO: compressed support?
-					auto size = FormatElementSize(attrib.format);
-					if(off + size > buf.data().size()) {
-						captured = false;
-					}
-
-					if(!captured) {
-						imGuiText("N/A");
-						continue;
-					}
-
-					auto* ptr = buf.data().data() + off;
-					auto str = printFormat(attrib.format, {ptr, size});
-
-					imGuiText("{}", str);
-				}
-
-				ImGui::TableNextRow();
 			}
 
 			ImGui::EndTable();
@@ -1152,6 +1030,9 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		centerCamOnBounds(vertBounds);
 	}
 
+	ImGui::SameLine();
+	showSettings();
+
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
@@ -1181,13 +1062,14 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 		drawData_.cb = draw.cb;
 		drawData_.params = params;
-		drawData_.canvasOffset = {pos.x, pos.y};
-		drawData_.canvasSize = {avail.x, avail.y};
+		drawData_.offset = {pos.x, pos.y};
+		drawData_.size = {avail.x, avail.y};
 		drawData_.topology = pipe.inputAssemblyState.topology;
 		drawData_.vertexBuffers = {};
 		drawData_.scale = 1.f;
 		drawData_.useW = false;
 		drawData_.drawFrustum = false;
+		drawData_.clear = doClear_;
 
 		for(auto& buf : state.vertexBufCopies) {
 			drawData_.vertexBuffers.push_back({buf.buf, 0u, buf.size});
@@ -1352,50 +1234,77 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 	auto flags = ImGuiTableFlags_BordersInner | ImGuiTableFlags_Resizable |
 		ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
 	if(ImGui::BeginChild("vertexTable", {0.f, 200.f})) {
-		if(ImGui::BeginTable("Vertices", xfbPatch.captures.size(), flags)) {
+		if(ImGui::BeginTable("Vertices", 1 + xfbPatch.captures.size(), flags)) {
 			ZoneScopedN("Table");
+
+			auto width = 60.f * gui_->uiScale();
+            ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, width);
+			for(auto& capture : xfbPatch.captures) {
+            	ImGui::TableSetupColumn(capture.name.c_str(),
+					ImGuiTableColumnFlags_WidthFixed, capture.type->vecsize * width);
+			}
+
+			// NOTE: we don't use TableHeadersRow so that we
+			//   can show tooltips on hover.
+			ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+			ImGui::TableNextColumn();
+			imGuiText("ID");
 
 			// header
 			for(auto& capture : xfbPatch.captures) {
+				ImGui::TableNextColumn();
+
 				auto name = capture.name.c_str();
 				if(capture.builtin) {
 					name = vil::name(spv11::BuiltIn(*capture.builtin));
 				}
 
-				if(!capture.array.empty()) {
+				if(!capture.type->array.empty()) {
 					// TODO: print all array elements. Make sure to intitialize
 					// column count correctly in BeginTable!
 					auto sname = std::string(name) + "[0]";
-					ImGui::TableSetupColumn(sname.c_str());
+					imGuiText(sname.c_str());
 				} else {
-					ImGui::TableSetupColumn(name);
+					imGuiText(name);
 				}
 			}
-			ImGui::TableHeadersRow();
-			ImGui::TableNextRow();
 
 			// data
 			auto xfbData = state.transformFeedback.data();
 			xfbData = xfbData.subspan(vertexOffset * xfbPatch.stride);
 
 			// TODO: show pages
-			// TODO: make rows selectable
-			for(auto i = 0u; i < std::min(u32(100u), vertexCount); ++i) {
-				auto buf = xfbData.subspan(i * xfbPatch.stride, xfbPatch.stride);
+            ImGuiListClipper clipper;
+            clipper.Begin(vertexCount);
+			while(clipper.Step()) {
+				for(auto i = u32(clipper.DisplayStart); i < u32(clipper.DisplayEnd); ++i) {
 
-				for(auto& capture : xfbPatch.captures) {
+					ImGui::TableNextRow();
+					auto buf = xfbData.subspan(i * xfbPatch.stride, xfbPatch.stride);
+
 					ImGui::TableNextColumn();
+					displayVertexID(i);
 
-					auto cbuf = buf.subspan(capture.offset);
-					auto format = formatForType(capture);
-					if(format == VK_FORMAT_UNDEFINED) {
-						imGuiText("<error>");
-					} else {
-						imGuiText("{}", printFormat(format, cbuf));
+					for(auto& capture : xfbPatch.captures) {
+						ImGui::TableNextColumn();
+
+						// TODO: support matrices?
+						dlg_assert(capture.type->columns == 1u);
+						auto colStride = capture.type->width / 8;
+						for(auto c = 0u; c < capture.type->vecsize; ++c) {
+							auto off = capture.offset + c * colStride;
+							auto fs = formatScalar(*capture.type, buf, off, precision_);
+
+							if(c != 0u) {
+								ImGui::SameLine();
+							}
+
+							imGuiText("{}", fs.scalar);
+						}
+
+						// displayAtomValue(*capture.type, buf, capture.offset);
 					}
 				}
-
-				ImGui::TableNextRow();
 			}
 
 			ImGui::EndTable();
@@ -1425,11 +1334,11 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		return;
 	}
 
-	dlg_assert(posCapture->type == XfbCapture::typeFloat);
-	dlg_assert(posCapture->vecsize == 4u);
-	dlg_assert(posCapture->width == 32);
-	dlg_assert(posCapture->columns == 1u);
-	dlg_assert(posCapture->array.empty());
+	dlg_assert(posCapture->type->type == Type::typeFloat);
+	dlg_assert(posCapture->type->vecsize == 4u);
+	dlg_assert(posCapture->type->width == 32);
+	dlg_assert(posCapture->type->columns == 1u);
+	dlg_assert(posCapture->type->array.empty());
 
 	bspan = bspan.subspan(vertexOffset * xfbPatch.stride + posCapture->offset,
 		vertexCount * xfbPatch.stride);
@@ -1442,6 +1351,9 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		auto vertBounds = bounds(VK_FORMAT_R32G32B32A32_SFLOAT, bspan, xfbPatch.stride, useW);
 		centerCamOnBounds(vertBounds);
 	}
+
+	ImGui::SameLine();
+	showSettings();
 
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
@@ -1467,13 +1379,13 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.params.offset = vertexOffset;
 		drawData_.indexBuffer = {};
 		drawData_.vertexBuffers = {{{xfbBuf.buf, 0u, xfbBuf.size}}};
-		drawData_.canvasOffset = {pos.x, pos.y};
-		drawData_.canvasSize = {avail.x, avail.y};
+		drawData_.offset = {pos.x, pos.y};
+		drawData_.size = {avail.x, avail.y};
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		drawData_.useW = useW;
 		drawData_.scale = 1.f;
 		drawData_.drawFrustum = gui_->dev().nonSolidFill;
-		drawData_.clear = true;
+		drawData_.clear = doClear_;
 		drawData_.mat = nytl::identity<4, float>();
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
@@ -1520,6 +1432,9 @@ void VertexViewer::displayTriangles(Draw& draw, const OwnBuffer& buf,
 		centerCamOnBounds(vertBounds);
 	}
 
+	ImGui::SameLine();
+	showSettings();
+
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
@@ -1550,13 +1465,13 @@ void VertexViewer::displayTriangles(Draw& draw, const OwnBuffer& buf,
 		drawData_.params.drawCount = drawCount;
 		drawData_.indexBuffer = {};
 		drawData_.vertexBuffers = {{{buf.buf, 0u, buf.size}}};
-		drawData_.canvasOffset = {pos.x, pos.y};
-		drawData_.canvasSize = {avail.x, avail.y};
+		drawData_.offset = {pos.x, pos.y};
+		drawData_.size = {avail.x, avail.y};
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		drawData_.useW = false;
 		drawData_.scale = 1.f;
 		drawData_.drawFrustum = false;
-		drawData_.clear = true;
+		drawData_.clear = doClear_;
 		drawData_.mat = nytl::identity<4, float>();
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
@@ -1645,12 +1560,15 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		centerCamOnBounds(vertBounds);
 	}
 
+	ImGui::SameLine();
+	showSettings();
+
 	if(ImGui::BeginChild("vertexViewer")) {
 		auto avail = ImGui::GetContentRegionAvail();
 		auto pos = ImGui::GetCursorScreenPos();
 
 		// we statically know the single binding and attribute
-		drawData_.clear = true;
+		drawData_.clear = doClear_;
 		auto& vinput = drawData_.vertexInput;
 		vinput.bindings.resize(1);
 		vinput.attribs.resize(1);
@@ -1695,8 +1613,8 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 			data.cb = draw.cb;
 			data.params = {};
 			data.indexBuffer = {};
-			data.canvasOffset = {pos.x, pos.y};
-			data.canvasSize = {avail.x, avail.y};
+			data.offset = {pos.x, pos.y};
+			data.size = {avail.x, avail.y};
 			data.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 			data.useW = false;
 			data.scale = 1.f;
@@ -1720,6 +1638,39 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 	}
 
 	ImGui::EndChild();
+}
+
+void VertexViewer::showSettings() {
+	if(ImGui::Button(ICON_FA_WRENCH)) {
+		ImGui::OpenPopup("Vertex Viewer");
+	}
+
+	if(ImGui::BeginPopup("Vertex Viewer")) {
+		ImGui::Checkbox("Clear", &doClear_);
+		ImGui::Checkbox("Flip Y", &flipY_);
+		ImGui::EndPopup();
+	}
+}
+
+void VertexViewer::displayVertexID(u32 i) {
+	auto str = dlg::format("{}", i);
+	auto spacingY = ImGui::GetCurrentContext()->Style.ItemSpacing.y;
+	ImGui::GetCurrentContext()->Style.ItemSpacing.y = 0.f;
+	if(ImGui::Selectable(str.c_str(), i == selectedVertex_,
+			ImGuiSelectableFlags_SpanAllColumns)) {
+		selectedVertex_ = i;
+	}
+	ImGui::GetCurrentContext()->Style.ItemSpacing.y = spacingY;
+	// if(ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+	// 	dlg_trace("opening vertex context menu");
+	// 	ImGui::OpenPopup("Vertex Context");
+	// }
+	if(ImGui::BeginPopupContextItem(nullptr, ImGuiPopupFlags_MouseButtonRight)) {
+		if(ImGui::Button("Debug Vertex")) {
+			dlg_trace("TODO!");
+		}
+		ImGui::EndPopup();
+	}
 }
 
 } // namespace vil

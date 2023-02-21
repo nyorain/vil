@@ -13,6 +13,9 @@
 
 namespace vil {
 
+// buffmt.hpp
+struct Type;
+
 struct ShaderSpecialization {
 	std::vector<VkSpecializationMapEntry> entries;
 	std::vector<std::byte> data {};
@@ -21,23 +24,16 @@ struct ShaderSpecialization {
 ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo*);
 bool operator==(const ShaderSpecialization& a, const ShaderSpecialization& b);
 
-// TODO: should probably make this re-use buffmt
 struct XfbCapture {
-	enum Type {
-		typeFloat,
-		typeInt,
-		typeUint,
-	};
+	~XfbCapture(); // = default
+	XfbCapture(XfbCapture&&) noexcept = default;
+	XfbCapture& operator=(XfbCapture&&) noexcept = default;
 
-	Type type;
-	u32 columns {1};
-	u32 vecsize {1};
-	std::vector<u32> array {};
-	u32 width;
-
+	std::unique_ptr<Type> type;
 	std::optional<u32> builtin {}; // spv11::Builtin, may be 0
 	std::string name; // might be empty
 	u32 offset; // total offset into xfb buffer
+	std::vector<u32> arrayVals; // for type.array
 };
 
 // We separate the description from the patched VkShaderModule since the description
