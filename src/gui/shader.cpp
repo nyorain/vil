@@ -723,6 +723,9 @@ void ShaderDebugger::loadVar(unsigned srcID, span<const spvm_word> indices,
 
 	auto res = resource(*this->compiled_, srcID);
 	if(!res) {
+		// TODO: could probably pre-setup builtins instead of
+		//   loading them here every time.
+
 		auto builtin = builtinResource(*this->compiled_, srcID);
 		if(!builtin) {
 			dlg_error("OpLoad of invalid/unknown var {}", srcID);

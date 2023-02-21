@@ -71,6 +71,16 @@ static_assert(std::is_trivially_destructible_v<Type::Member>);
 void display(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
 void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset = 0u);
 
+// Display a single value from a non-struct type with imgui.
+void displayAtomValue(const Type& type, ReadBuf data, u32 offset);
+
+struct FormattedScalar {
+	std::string scalar;
+	std::string error {};
+};
+
+FormattedScalar formatScalar(const Type& type, ReadBuf data, u32 offset, u32 precision);
+
 enum class BufferLayout {
 	std140,
 	std430,
