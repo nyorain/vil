@@ -63,7 +63,7 @@ private:
 	std::vector<Buffer*> buffers;
 	std::vector<ImageView*> imageViews;
 	std::vector<BufferView*> bufferViews;
-	std::vector<DescriptorLayout*> dsLayouts;
+	std::vector<DescriptorSetLayout*> dsLayouts;
 	std::vector<PipelineLayout*> pipeLayouts;
 	std::vector<GraphicsPipeline*> gfxPipes;
 	std::vector<ComputePipeline*> computePipes;

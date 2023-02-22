@@ -485,6 +485,9 @@ struct DrawCmdBase : StateCmdBase {
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
 	const Pipeline* boundPipe() const override { return state->pipe; }
+
+	virtual bool isIndexed() const = 0;
+
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -502,6 +505,7 @@ struct DrawCmd final : CmdDerive<DrawCmdBase, CommandType::draw> {
 	std::string_view nameDesc() const override { return "Draw"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	bool isIndexed() const override { return false; }
 };
 
 struct DrawIndirectCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndirect> {
@@ -520,6 +524,7 @@ struct DrawIndirectCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndirect>
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	bool isIndexed() const override { return indexed; }
 };
 
 struct DrawIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndexed> {
@@ -536,6 +541,7 @@ struct DrawIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndexed> {
 	std::string_view nameDesc() const override { return "DrawIndexed"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	bool isIndexed() const override { return true; }
 };
 
 struct DrawIndirectCountCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndirectCount> {
@@ -556,6 +562,7 @@ struct DrawIndirectCountCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndi
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	bool isIndexed() const override { return indexed; }
 };
 
 struct DrawMultiCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti> {
@@ -573,6 +580,7 @@ struct DrawMultiCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti> {
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	bool isIndexed() const override { return false; }
 };
 
 struct DrawMultiIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawMultiIndexed> {
@@ -589,6 +597,7 @@ struct DrawMultiIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
+	bool isIndexed() const override { return true; }
 };
 
 struct BindVertexBuffersCmd final : CmdDerive<Command, CommandType::bindVertexBuffers> {
