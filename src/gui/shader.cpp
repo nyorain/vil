@@ -60,9 +60,11 @@ void ShaderDebugger::init(Gui& gui) {
 	textedit_.SetReadOnly(true);
 }
 
-void ShaderDebugger::select(std::unique_ptr<spc::Compiler> compiled) {
+void ShaderDebugger::select(VkShaderStageFlagBits stage,
+		std::unique_ptr<spc::Compiler> compiled) {
 	unselect();
 
+	this->stage_ = stage;
 	this->compiled_ = std::move(compiled);
 
 	static_assert(sizeof(spvm_word) == sizeof(u32));
@@ -173,6 +175,12 @@ void ShaderDebugger::unselect() {
 
 	compiled_ = {};
 	breakpoints_.clear();
+
+	globalInvocationID_ = {};
+
+	commandID_ = {};
+	vertexID_ = {};
+	instanceID_ = {};
 }
 
 void ShaderDebugger::draw() {
@@ -408,6 +416,8 @@ void ShaderDebugger::draw() {
 }
 
 Vec3ui ShaderDebugger::workgroupSize() const {
+	dlg_assert_or(stage_ == VK_SHADER_STAGE_COMPUTE_BIT, return {});
+
 	// parse workgroup size
 	// TODO: cache on load for compute shaders
 	spc::SpecializationConstant wgsc[3];
@@ -427,6 +437,8 @@ Vec3ui ShaderDebugger::workgroupSize() const {
 }
 
 Vec3ui ShaderDebugger::numWorkgroups() const {
+	dlg_assert_or(stage_ == VK_SHADER_STAGE_COMPUTE_BIT, return {});
+
 	// TODO: cache/compute only if needed
 	auto* baseCmd = selection().command().back();
 	Vec3ui numWGs {};
@@ -446,6 +458,100 @@ Vec3ui ShaderDebugger::numWorkgroups() const {
 	}
 
 	return numWGs;
+}
+
+ShaderDebugger::DrawInfo ShaderDebugger::drawInfo() const {
+	dlg_assert_or(stage_ == VK_SHADER_STAGE_VERTEX_BIT, return {});
+
+	auto* baseCmd = selection().command().back();
+	if(auto* idcmd = dynamic_cast<const DrawIndirectCmd*>(baseCmd); idcmd) {
+		return {idcmd->drawCount, idcmd->indexed};
+	} else if(auto* idcmd = dynamic_cast<const DrawIndirectCountCmd*>(baseCmd); idcmd) {
+		auto hookState = selection().completedHookState();
+		return {hookState->indirectCommandCount, idcmd->indexed};
+	} else if(auto* dcmd = dynamic_cast<const DrawMultiCmd*>(baseCmd); dcmd) {
+		return {u32(dcmd->vertexInfos.size()), false};
+	} else if(auto* dcmd = dynamic_cast<const DrawMultiIndexedCmd*>(baseCmd); dcmd) {
+		return {u32(dcmd->indexInfos.size()), true};
+	}
+
+	return {1u, static_cast<const DrawCmdBase*>(baseCmd)->isIndexed()};
+}
+
+ShaderDebugger::DrawCmdInfo ShaderDebugger::drawCmdInfo(u32 cmd) const {
+	dlg_assert_or(stage_ == VK_SHADER_STAGE_VERTEX_BIT, return {});
+
+	auto* baseCmd = selection().command().back();
+	auto hookState = selection().completedHookState();
+
+	auto readIndirect = [&](bool indexed, u32 numCmds) {
+		auto& ic = hookState->indirectCopy;
+		auto span = ic.data();
+
+		dlg_assert(cmd < numCmds);
+		if(indexed) {
+			span = span.subspan(cmd * sizeof(VkDrawIndexedIndirectCommand));
+			auto ecmd = read<VkDrawIndexedIndirectCommand>(span);
+			return DrawCmdInfo{
+				ecmd.vertexOffset,
+				ecmd.indexCount,
+				ecmd.instanceCount,
+				ecmd.firstInstance,
+				ecmd.firstIndex,
+			};
+		} else {
+			span = span.subspan(cmd * sizeof(VkDrawIndirectCommand));
+			auto ecmd = read<VkDrawIndirectCommand>(span);
+			return DrawCmdInfo{
+				i32(ecmd.firstVertex),
+				ecmd.vertexCount,
+				ecmd.instanceCount,
+				ecmd.firstInstance,
+			};
+		}
+	};
+
+	if(auto* idcmd = dynamic_cast<const DrawIndirectCmd*>(baseCmd); idcmd) {
+		return readIndirect(idcmd->indexed, idcmd->drawCount);
+	} else if(auto* idcmd = dynamic_cast<const DrawIndirectCountCmd*>(baseCmd); idcmd) {
+		dlg_assert(hookState);
+		return readIndirect(idcmd->indexed, hookState->indirectCommandCount);
+	} else if(auto* dcmd = dynamic_cast<const DrawCmd*>(baseCmd); dcmd) {
+		return {
+			i32(dcmd->firstVertex),
+			dcmd->vertexCount,
+			dcmd->instanceCount,
+			dcmd->firstInstance,
+		};
+	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(baseCmd); dcmd) {
+		return DrawCmdInfo{
+			dcmd->vertexOffset,
+			dcmd->indexCount,
+			dcmd->instanceCount,
+			dcmd->firstInstance,
+			dcmd->firstIndex,
+		};
+	} else if(auto* dcmd = dynamic_cast<const DrawMultiCmd*>(baseCmd); dcmd) {
+		dlg_assert(cmd < dcmd->vertexInfos.size());
+		return DrawCmdInfo{
+			i32(dcmd->vertexInfos[cmd].firstVertex),
+			dcmd->vertexInfos[cmd].vertexCount,
+			dcmd->instanceCount,
+			dcmd->firstInstance,
+		};
+	} else if(auto* dcmd = dynamic_cast<const DrawMultiIndexedCmd*>(baseCmd); dcmd) {
+		dlg_assert(cmd < dcmd->indexInfos.size());
+		return DrawCmdInfo{
+			dcmd->indexInfos[cmd].vertexOffset,
+			dcmd->indexInfos[cmd].indexCount,
+			dcmd->instanceCount,
+			dcmd->firstInstance,
+			dcmd->indexInfos[cmd].firstIndex,
+		};
+	}
+
+	dlg_error("unreachable");
+	return {};
 }
 
 void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
@@ -474,59 +580,82 @@ void ShaderDebugger::loadBuiltin(const spc::BuiltInResource& builtin,
 		dst[0].value.u = val;
 	};
 
-	auto wgs = workgroupSize();
-	auto numWGs = numWorkgroups();
+	if(stage_ == VK_SHADER_STAGE_COMPUTE_BIT) {
+		auto wgs = workgroupSize();
+		auto numWGs = numWorkgroups();
 
-	switch(builtin.builtin) {
-		case spv::BuiltInNumSubgroups: {
-			// TODO: proper subgroup support
-			loadScalarU(1u);
-			break;
+		switch(builtin.builtin) {
+			case spv::BuiltInNumSubgroups: {
+				// TODO: proper subgroup support
+				loadScalarU(1u);
+				return;
+			}
+			case spv::BuiltInNumWorkgroups: {
+				loadVecU(numWGs);
+				return;
+			}
+			case spv::BuiltInWorkgroupSize: {
+				loadVecU(wgs);
+				return;
+			}
+			case spv::BuiltInWorkgroupId: {
+				Vec3ui id {0u, 0u, 0u};
+				// floor by design
+				id.x = globalInvocationID_.x / wgs.x;
+				id.y = globalInvocationID_.y / wgs.y;
+				id.z = globalInvocationID_.z / wgs.z;
+				loadVecU(id);
+				return;
+			}
+			case spv::BuiltInGlobalInvocationId: {
+				loadVecU(globalInvocationID_);
+				return;
+			}
+			case spv::BuiltInLocalInvocationId: {
+				Vec3ui id {0u, 0u, 0u};
+				id.x = globalInvocationID_.x % wgs.x;
+				id.y = globalInvocationID_.y % wgs.y;
+				id.z = globalInvocationID_.z % wgs.z;
+				loadVecU(id);
+				return;
+			}
+			case spv::BuiltInLocalInvocationIndex: {
+				Vec3ui lid {0u, 0u, 0u};
+				lid.x = globalInvocationID_.x % wgs.x;
+				lid.y = globalInvocationID_.y % wgs.y;
+				lid.z = globalInvocationID_.z % wgs.z;
+				auto id =
+					lid.z * wgs.y * wgs.x +
+					lid.y * wgs.x +
+					lid.x;
+				loadScalarU(id);
+				return;
+			} default:
+				break;
 		}
-		case spv::BuiltInNumWorkgroups: {
-			loadVecU(numWGs);
-			break;
+	} else if(stage_ == VK_SHADER_STAGE_VERTEX_BIT) {
+		auto cmd = drawCmdInfo(commandID_);
+		switch(builtin.builtin) {
+			case spv::BuiltInVertexIndex:
+				loadScalarU(vertexID_);
+				return;
+			case spv::BuiltInInstanceIndex:
+				loadScalarU(instanceID_);
+				return;
+			case spv::BuiltInBaseVertex:
+				loadScalarU(cmd.vertexOffset);
+				return;
+			case spv::BuiltInBaseInstance:
+				loadScalarU(cmd.firstIni);
+				return;
+			default:
+				break;
 		}
-		case spv::BuiltInWorkgroupSize: {
-			loadVecU(wgs);
-			break;
-		}
-		case spv::BuiltInWorkgroupId: {
-			Vec3ui id {0u, 0u, 0u};
-			// floor by design
-			id.x = globalInvocationID_.x / wgs.x;
-			id.y = globalInvocationID_.y / wgs.y;
-			id.z = globalInvocationID_.z / wgs.z;
-			loadVecU(id);
-			break;
-		}
-		case spv::BuiltInGlobalInvocationId: {
-			loadVecU(globalInvocationID_);
-			break;
-		}
-		case spv::BuiltInLocalInvocationId: {
-			Vec3ui id {0u, 0u, 0u};
-			id.x = globalInvocationID_.x % wgs.x;
-			id.y = globalInvocationID_.y % wgs.y;
-			id.z = globalInvocationID_.z % wgs.z;
-			loadVecU(id);
-			break;
-		}
-		case spv::BuiltInLocalInvocationIndex: {
-			Vec3ui lid {0u, 0u, 0u};
-			lid.x = globalInvocationID_.x % wgs.x;
-			lid.y = globalInvocationID_.y % wgs.y;
-			lid.z = globalInvocationID_.z % wgs.z;
-			auto id =
-				lid.z * wgs.y * wgs.x +
-				lid.y * wgs.x +
-				lid.x;
-			loadScalarU(id);
-			break;
-		} default:
-			dlg_error("Unhandled builtin: {}", builtin.builtin);
-			break;
+	} else {
+		dlg_error("unhandled stage {}", stage_);
 	}
+
+	dlg_error("Unhandled builtin: {}", builtin.builtin);
 }
 
 unsigned ShaderDebugger::arrayLength(unsigned varID, span<const spvm_word> indices) {
@@ -1058,7 +1187,7 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 
 	// for indirect dispatch, need to know the number of workgrups
 	// since the shader might read that var
-	// TODO: only do it if the shader accesses the variable?
+	// TODO: only do it if the shader accesses the variable!
 	auto* baseCmd = selection().command().back();
 	if(commandCast<const DispatchIndirectCmd*>(baseCmd) ||
 			commandCast<const DrawIndirectCmd*>(baseCmd) ||
@@ -1590,6 +1719,41 @@ void ShaderDebugger::drawCallstackTab() {
 }
 
 void ShaderDebugger::drawInputsTab() {
+	if(stage_ == VK_SHADER_STAGE_COMPUTE_BIT) {
+		drawInputsCompute();
+	} else if(stage_ == VK_SHADER_STAGE_VERTEX_BIT) {
+		drawInputsVertex();
+	} else {
+		dlg_error("Unsupported stage: {}", stage_);
+		imGuiText("<Internal error, see log>");
+	}
+}
+
+void ShaderDebugger::drawInputsVertex() {
+	auto [numCmds, indexed] = drawInfo();
+	auto sliderFlags = ImGuiSliderFlags_AlwaysClamp;
+	if(numCmds > 1) {
+		auto v = int(commandID_);
+		ImGui::DragInt("Command", &v, 1.f, 0, numCmds - 1, "%d", sliderFlags);
+		commandID_ = v;
+	}
+
+	auto drawCmd = drawCmdInfo(commandID_);
+	if(drawCmd.firstIni > 1) {
+		auto v = int(instanceID_);
+		ImGui::DragInt("Instance", &v, 1.f, drawCmd.firstIni,
+			drawCmd.firstIni + drawCmd.numInis - 1, "%d", sliderFlags);
+		instanceID_ = v;
+	}
+
+	auto v = int(vertexID_);
+	ImGui::DragInt("ID", &v, 1.f, 0, drawCmd.numVerts - 1, "%d", sliderFlags);
+	// TODO: show popup explaining this is the vertex ID, i.e. for indexed
+	// drawing the index to be read.
+	vertexID_ = v;
+}
+
+void ShaderDebugger::drawInputsCompute() {
 	// TODO: decide depending on shader type
 	using nytl::vec::cw::operators::operator*;
 

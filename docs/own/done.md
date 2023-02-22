@@ -21,6 +21,43 @@
 	- [x] continue matching rework/improvements to make sure matching works
 	      with loaded handles
 	- [x] test: draw/dispatch/traceRays. But also Bind commands.
+- [x] Clean up DeviceHandle (?)
+	- [~] In some handles we don't need the DeviceHandle::dev pointer, e.g. imageView etc.
+	  Remove it?
+	  {Hm, we might need it in imageView, e.g. when the image was destroyed.
+	   And it does not hurt. Disregarding that idea}
+	- [x] Instead use DeviceHandle<ObjectType>, allowing to remove objectType from Handle
+	  In its destructor, pass the objectType to the destruction notification
+	  {NOTE: fixed in a different way, objectType no longer stored in handle}
+- [x] full commandbuffer/record timings.
+	- [x] for this we need proper prefix-matching support in CommandHook. WIP
+- [x] integration test: depend on meson subproject for mock driver
+      And don't hardcode my own env path
+	- [x] also make sure we don't need the layer to be installed
+	      but use the latest built version.
+		  pass build path in via meson config header file?
+	- [x] add manual meson dependencies from integration test to used layer
+	      and mock driver
+- [x] Clean up Handle (?)
+	- [x] remove objectType from Handle
+	- [~] could remove 'name' from Handle, instead use HashMap in device?
+	  not sure if this is a good idea though. Probably not for now.
+	  our main usecase after all is application debugging where we
+	  expect most handles to have a name -> embedding in object makes sense.
+	  {NOPE, we don't want this atm}
+- [x] write a simple test just creating an instance and device with
+  vil and the validation layer. And check that we can execute that on
+  CI as well
+- [x] got the null mock driver to work.
+- [x] rename main branch to main
+- [x] rework gui device locking. We should be able to execute draw/uploadDraw
+  without holding a lock THE WHOLE TIME. Only lock it where it's really
+  needed
+- [x] descriptorSet should not derive from DeviceHandle, does not need refRecords
+- [x] Maybe rename DeviceHandle to RecordReferenced or something?
+	- split up notifyDestruction functionality in DeviceObserved or something,
+	  many classes (like Fence, CommandPool etc) don't need refRecords I guess
+  {This was completely reworked, refRecords got killed}
 - [x] fix command viewer update when nothing is selected
 - [x] fix resource viewer when switching handle types
       currently does not select the right handle then (e.g.
