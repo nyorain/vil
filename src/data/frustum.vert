@@ -5,6 +5,7 @@ layout(push_constant, row_major) uniform PCR {
 	layout(offset = 64) float near;
 	layout(offset = 68) float far;
 	layout(offset = 72) uint useW;
+	// NOTE: offset = 76 already used by fragment shader.
 } pcr;
 
 void main() {

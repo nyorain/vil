@@ -17,7 +17,7 @@ struct AABB3f {
 	Vec3f extent; // 0.5 * size
 };
 
-// TODO: the representation is counter-intuitive and makes our lives
+// TODO(low): the representation is counter-intuitive and makes our lives
 // harder a couple of times in the implementation. 'vertexOffset' should
 // always mean vertexOffset and 'indexOffset' (instead of offset) only be
 // available for indexed drawing.
@@ -41,12 +41,15 @@ struct VertexViewer {
 	void displayTriangles(Draw&, const AccelTriangles&, float dt);
 	void displayInstances(Draw&, const AccelInstances&, float dt);
 
-	void updateInput(float dt);
-
 private:
 	void centerCamOnBounds(const AABB3f& bounds);
-	VkPipeline createPipe(VkFormat format, u32 stride, VkPrimitiveTopology topo);
+	VkPipeline createPipe(VkFormat format, u32 stride,
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode);
 	void createFrustumPipe();
+
+	void updateInput(float dt);
+	void updateFPCam(float dt);
+	void updateArcballCam(float dt);
 
 	struct DrawData {
 		VertexViewer* self {};
@@ -92,7 +95,6 @@ private:
 
 	Camera cam_ {};
 	bool rotating_ {};
-	Vec2f lastMousPos_ {};
 	float yaw_ {};
 	float pitch_ {};
 
@@ -113,6 +115,7 @@ private:
 		u32 stride {};
 		VkPrimitiveTopology topology {};
 		VkPipeline pipe {};
+		VkPolygonMode polygon {};
 	};
 
 	std::vector<Pipe> pipes_ {};
@@ -124,8 +127,11 @@ private:
 	std::vector<DrawData> drawDatas_;
 
 	u32 precision_ {5u};
-	bool doClear_ {true};
+	bool doClear_ {false};
 	bool flipY_ {true};
+	bool arcball_ {true}; // whether to use instead of first person cam
+	bool wireframe_ {false};
+	float arcOffset_ {1.f};
 };
 
 } // namespace vil
