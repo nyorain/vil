@@ -16,10 +16,12 @@
 #include <command/commands.hpp>
 #include <nytl/transform.hpp>
 #include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>
 #include <vk/format_utils.h>
 #include <vkutil/enumString.hpp>
 #include <spirv-cross/spirv_cross.hpp>
 #include <vil_api.h>
+#include <iomanip>
 
 #include <frustum.vert.spv.h>
 #include <vertices.vert.spv.h>
@@ -392,7 +394,7 @@ void VertexViewer::createFrustumPipe() {
 }
 
 VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
-		VkPrimitiveTopology topology) {
+		VkPrimitiveTopology topology, VkPolygonMode polygonMode) {
 	auto& dev = gui_->dev();
 
 	// store them for destruction later on
@@ -436,8 +438,7 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 
 	VkPipelineRasterizationStateCreateInfo rasterInfo {};
 	rasterInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-	// TODO: Allow to toggle? Or draw both?
-	rasterInfo.polygonMode = dev.nonSolidFill ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+	rasterInfo.polygonMode = polygonMode;
 	rasterInfo.cullMode = VK_CULL_MODE_NONE;
 	rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	rasterInfo.lineWidth = 1.0f;
@@ -504,6 +505,7 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	auto& ourPipe = pipes_.emplace_back();
 	ourPipe.pipe = pipe;
 	ourPipe.topology = topology;
+	ourPipe.polygon = polygonMode;
 	ourPipe.format = format;
 	ourPipe.stride = stride;
 
@@ -535,18 +537,26 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	auto& vbuf = data.vertexBuffers[binding.binding];
 	auto voffset = VkDeviceSize(vbuf.offset + attrib.offset);
 
+	dlg_assert(!wireframe_ || dev.nonSolidFill);
+	auto polygonMode = wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+
 	// try to find matching pipeline
 	VkPipeline foundPipe {};
 	for(auto& pipe : pipes_) {
 		if(pipe.format == attrib.format &&
 				pipe.stride == binding.stride &&
+				pipe.polygon == polygonMode &&
 				pipe.topology == data.topology) {
 			foundPipe = pipe.pipe;
 		}
 	}
 
 	if(!foundPipe) {
-		foundPipe = createPipe(attrib.format, binding.stride, data.topology);
+		// TODO: do async and show ui message meanwhile.
+		// We currently sometimes get ui hangs from this when first
+		// selecting the vertex viewer.
+		foundPipe = createPipe(attrib.format, binding.stride,
+			data.topology, polygonMode);
 	}
 
 	auto displaySize = ImGui::GetIO().DisplaySize;
@@ -577,11 +587,13 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 		u32 useW;
 		float scale;
 		u32 flipY;
+		u32 shade;
 	} pcData = {
 		viewProjMtx_ * data.mat,
 		data.useW,
 		data.scale,
-		flipY_
+		flipY_,
+		!wireframe_,
 	};
 
 	dev.dispatch.CmdPushConstants(cb, pipeLayout_,
@@ -621,12 +633,14 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 			float near;
 			float far;
 			u32 useW;
+			u32 shade;
 		} pcData = {
 			viewProjMtx_,
 			// TODO: we could calculate them from perspective z, w values
 			0.f,
 			data.useW ? 100000.f : 1.f,
 			data.useW,
+			0u,
 		};
 
 		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, frustumPipe_);
@@ -637,16 +651,14 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	}
 }
 
-void VertexViewer::updateInput(float dt) {
-	// update input
+void VertexViewer::updateFPCam(float dt) {
 	auto& io = ImGui::GetIO();
 
 	if(ImGui::IsItemHovered()) {
 		if(io.MouseDown[0]) {
-			auto mousePos = Vec2f{io.MousePos.x, io.MousePos.y};
+			// auto mousePos = Vec2f{io.MousePos.x, io.MousePos.y};
 			if(rotating_) {
-				auto delta = mousePos - lastMousPos_;
-				(void) delta; // TODO: move cam
+				auto delta = io.MouseDelta;
 
 				constexpr const auto fac = 0.005f;
 				constexpr const auto limitPitch = true;
@@ -661,8 +673,6 @@ void VertexViewer::updateInput(float dt) {
 
 				cam_.rot = Quaternion::yxz(yaw_, pitch_, 0.f);
 			}
-
-			lastMousPos_ = mousePos;
 		}
 
 		rotating_ = io.MouseDown[0];
@@ -715,6 +725,84 @@ void VertexViewer::updateInput(float dt) {
 		// need to inform application that we have captured keyboard
 		// input right now (when input comes from application)
 		io.WantCaptureKeyboard = true;
+	}
+}
+
+void VertexViewer::updateArcballCam(float dt) {
+	(void) dt;
+	if(!ImGui::IsItemHovered()) {
+		return;
+	}
+
+	// Controls inspired by Blender
+
+	auto& io = ImGui::GetIO();
+
+	auto rect = ImGui::GetItemRectSize();
+	auto aspect = rect.x / rect.y;
+	auto arcOffset = arcOffset_;
+
+	auto f = 0.5f / float(std::tan(fov / 2.f));
+	float fx = arcOffset * aspect / (f * rect.x);
+	float fy = arcOffset / (f * rect.y);
+	Vec2f panFac {fx, fy};
+
+	auto delta = io.MouseDelta;
+
+	auto shift = io.KeyShift;
+	auto ctrl = io.KeyCtrl;
+
+	// panning
+	if(io.MouseDown[2] && shift && !ctrl) {
+		// y is double flipped because of y-down convention for
+		// mouse corrds vs y-up convention of rendering
+		// TODO: maybe don't do this here but let the user decide
+		// by mirroring panFac? At least document it the behavior.
+		// Same for other functions though. Document how a movement
+		// (especially mouse up/down) is translated into camera rotation.
+		auto x = -panFac.x * delta.x * right(cam_);
+		auto y = panFac.y * delta.y * up(cam_);
+		cam_.pos += x + y;
+	}
+
+	auto center = cam_.pos + arcOffset * dir(cam_);
+	Vec2f rotateFac {0.005f, 0.005f};
+
+	// rotating
+	if(io.MouseDown[2] && !shift && !ctrl) {
+		float yaw = rotateFac.x * delta.x;
+		float pitch = rotateFac.y * delta.y;
+		Quaternion rot;
+
+		constexpr auto allowRoll = true;
+		if(allowRoll) {
+			rot = cam_.rot * Quaternion::yxz(-yaw, -pitch, 0);
+			// rot = Quaternion::taitBryan(yaw, pitch, 0) * cam.rot;
+		} else {
+			rot = cam_.rot * Quaternion::yxz(0, -pitch, 0);
+			rot = Quaternion::yxz(-yaw, 0, 0) * rot;
+		}
+
+		cam_.rot = rot;
+		cam_.pos = center - arcOffset * dir(cam_);
+	}
+
+	float zoomVal = -io.MouseWheel;
+	if(io.MouseDown[2] && !shift && ctrl) {
+		zoomVal += 0.1 * delta.y;
+	}
+
+	// zoom
+	constexpr auto zoomFac = 1.05f;
+	arcOffset_ *= std::pow(zoomFac, zoomVal);
+	cam_.pos = center - arcOffset_ * dir(cam_);
+}
+
+void VertexViewer::updateInput(float dt) {
+	if(arcball_) {
+		updateArcballCam(dt);
+	} else {
+		updateFPCam(dt);
 	}
 
 	auto rect = ImGui::GetItemRectSize();
@@ -1419,6 +1507,7 @@ void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 
 	auto sum = bounds.extent.x + bounds.extent.y + bounds.extent.z;
 	speed_ = sum;
+	arcOffset_ = sum;
 	near_ = -0.001 * sum;
 	far_ = -100 * sum;
 }
@@ -1648,6 +1737,15 @@ void VertexViewer::showSettings() {
 	if(ImGui::BeginPopup("Vertex Viewer")) {
 		ImGui::Checkbox("Clear", &doClear_);
 		ImGui::Checkbox("Flip Y", &flipY_);
+		ImGui::Checkbox("Arcball Camera", &arcball_);
+
+		auto& dev = gui_->dev();
+		if(dev.nonSolidFill) {
+			// TODO: make button disabled on devices that don't
+			// support it instead.
+			ImGui::Checkbox("Wireframe", &wireframe_);
+		}
+
 		ImGui::EndPopup();
 	}
 }
