@@ -1545,11 +1545,41 @@ void CommandViewer::displayCommand() {
 		if(ImGui::Button("Debug shader")) {
 			if(dcmd->state->pipe) {
 				auto mod = copySpecializeSpirv(dcmd->state->pipe->stage);
-				shaderDebugger_.select(std::move(mod));
+				shaderDebugger_.select(VK_SHADER_STAGE_COMPUTE_BIT, std::move(mod));
 				view_ = IOView::shader;
 				doUpdateHook_ = true;
 				return;
 			}
+		}
+	} else if(auto* dcmd = dynamic_cast<const DrawCmdBase*>(command_.back()); dcmd) {
+		auto* pipe = dcmd->boundPipe();
+		if(pipe) {
+			dlg_assert(pipe->type == VK_PIPELINE_BIND_POINT_GRAPHICS);
+			auto& gpipe = static_cast<const GraphicsPipeline&>(*pipe);
+			const PipelineShaderStage* vertex {};
+			for(auto& stage : gpipe.stages) {
+				if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
+					vertex = &stage;
+					break;
+				}
+			}
+
+			// TODO: add support for mesh shader. Or at least show
+			//   message in UI?
+			dlg_assertm(vertex, "TODO Graphics pipeline without vertex shader");
+			if(vertex) {
+				if(ImGui::Button("Debug vertex shader")) {
+					if(dcmd->state.pipe) {
+						auto mod = copySpecializeSpirv(*vertex);
+						shaderDebugger_.select(vertex->stage, std::move(mod));
+						view_ = IOView::shader;
+						doUpdateHook_ = true;
+						return;
+					}
+				}
+			}
+
+			// TODO: add fragment shader
 		}
 	}
 
