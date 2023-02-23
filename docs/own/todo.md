@@ -52,6 +52,9 @@ urgent, bugs:
 	  (try to test with RDR2 again)
 
 new, workstack:
+- [ ] handle imgui cursor-to-be-shown and clipboard
+	- [ ] make sure to pass it via interface
+	- [ ] with hooked overlay, we have to implement it ourselves
 - [ ] when viewing resources aliasing others in memory in the resource viewer,
       we have to make sure that their content wasn't made undefined.
 	  Vulkan says it's not allowed to use such resources.
@@ -92,6 +95,8 @@ new, workstack:
 	- [ ] how to stabilize/make it possible to inspect sparse bind submissions?
 	      they are only there for a single frame.
 		  Implement something like "freeze on QueueBindSparse"?
+- [ ] sparse bindings: make the resource mem ui a table instead,
+      looks a bit messy at the moment.
 - [ ] rework buffmt with proper array types (and multdim arrays)
       allow to store spirv u32 id per Type.
 	  	- [ ] related to storageBuffer bug?

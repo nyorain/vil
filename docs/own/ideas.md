@@ -12,6 +12,9 @@ be possible or useful in the end.
 
 - When clicking on a flag, extension name or something, link to vulkan api spec
   regarding that item? Not sure how easy to do.
+  Also e.g. for enabled extensions, features, etc.
+  	- maybe doing it on *every* click is annoying, only do it with some
+	  modifier, e.g. ctrl or something.
 - serialize command records. At least roughly, without referenced handles
   and stuff
   	- beside visualization, this would make debugging easier, allowing

@@ -564,6 +564,10 @@ VkResult doCreateDevice(
 	auto hasTransformFeedback = false;
 
 	// find generally relevant feature structs in chain
+	VkPhysicalDeviceVulkan11Features features11 {};
+	VkPhysicalDeviceVulkan12Features features12 {};
+	VkPhysicalDeviceVulkan13Features features13 {};
+
 	VkPhysicalDeviceVulkan12Features* inVulkan12 = nullptr;
 	VkPhysicalDeviceTimelineSemaphoreFeatures* inTS = nullptr;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT* inXFB = nullptr;
@@ -571,19 +575,22 @@ VkResult doCreateDevice(
 
 	auto* link = static_cast<VkBaseOutStructure*>(pNext);
 	while(link) {
-		if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+		if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES) {
+			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_1);
+			features11 = *reinterpret_cast<VkPhysicalDeviceVulkan11Features*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
 			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_2);
 			inVulkan12 = reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
-			break;
+			features12 = *reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_3);
+			features13 = *reinterpret_cast<VkPhysicalDeviceVulkan13Features*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
 			inTS = reinterpret_cast<VkPhysicalDeviceTimelineSemaphoreFeatures*>(link);
-			break;
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES) {
 			inBufAddr = reinterpret_cast<VkPhysicalDeviceBufferDeviceAddressFeatures*>(link);
-			break;
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT) {
 			inXFB = reinterpret_cast<VkPhysicalDeviceTransformFeedbackFeaturesEXT*>(link);
-			break;
 		}
 
 		link = (static_cast<VkBaseOutStructure*>(link->pNext));
@@ -735,9 +742,10 @@ VkResult doCreateDevice(
 	dev.appExts = {extsBegin, extsEnd};
 	dev.allExts = {newExts.begin(), newExts.end()};
 
-	if(ci->pEnabledFeatures) {
-		dev.enabledFeatures = *ci->pEnabledFeatures;
-	}
+	dev.enabledFeatures = *pEnabledFeatures10;
+	dev.enabledFeatures11 = features11;
+	dev.enabledFeatures12 = features12;
+	dev.enabledFeatures13 = features13;
 
 	layer_init_device_dispatch_table(dev.handle, &dev.dispatch, fpGetDeviceProcAddr);
 

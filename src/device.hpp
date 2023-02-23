@@ -80,7 +80,13 @@ struct Device {
 
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
-	VkPhysicalDeviceFeatures enabledFeatures {}; // features by application
+
+	// features enabled by application
+	VkPhysicalDeviceFeatures enabledFeatures {};
+	VkPhysicalDeviceVulkan11Features enabledFeatures11 {};
+	VkPhysicalDeviceVulkan12Features enabledFeatures12 {};
+	VkPhysicalDeviceVulkan13Features enabledFeatures13 {};
+	// TODO: extension features. Maybe just build own ext chain here?
 
 	// supported features/extensions
 	bool timelineSemaphores {}; // whether we have timeline semaphores

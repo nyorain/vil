@@ -742,6 +742,107 @@ std::vector<std::string> enabledFeatures(Device& dev) {
 	return ret;
 }
 
+std::vector<std::string> enabledFeatures11(Device& dev) {
+	std::vector<std::string> ret;
+
+#define FEATURE(x) if(dev.enabledFeatures11.x) ret.push_back(#x);
+    FEATURE(storageBuffer16BitAccess);
+    FEATURE(uniformAndStorageBuffer16BitAccess);
+    FEATURE(storagePushConstant16);
+    FEATURE(storageInputOutput16);
+    FEATURE(multiview);
+    FEATURE(multiviewGeometryShader);
+    FEATURE(multiviewTessellationShader);
+    FEATURE(variablePointersStorageBuffer);
+    FEATURE(variablePointers);
+    FEATURE(protectedMemory);
+    FEATURE(samplerYcbcrConversion);
+    FEATURE(shaderDrawParameters);
+#undef FEATURE
+
+	return ret;
+}
+
+std::vector<std::string> enabledFeatures12(Device& dev) {
+	std::vector<std::string> ret;
+
+#define FEATURE(x) if(dev.enabledFeatures12.x) ret.push_back(#x);
+    FEATURE(samplerMirrorClampToEdge);
+    FEATURE(drawIndirectCount);
+    FEATURE(storageBuffer8BitAccess);
+    FEATURE(uniformAndStorageBuffer8BitAccess);
+    FEATURE(storagePushConstant8);
+    FEATURE(shaderBufferInt64Atomics);
+    FEATURE(shaderSharedInt64Atomics);
+    FEATURE(shaderFloat16);
+    FEATURE(shaderInt8);
+    FEATURE(descriptorIndexing);
+    FEATURE(shaderInputAttachmentArrayDynamicIndexing);
+    FEATURE(shaderUniformTexelBufferArrayDynamicIndexing);
+    FEATURE(shaderStorageTexelBufferArrayDynamicIndexing);
+    FEATURE(shaderUniformBufferArrayNonUniformIndexing);
+    FEATURE(shaderSampledImageArrayNonUniformIndexing);
+    FEATURE(shaderStorageBufferArrayNonUniformIndexing);
+    FEATURE(shaderStorageImageArrayNonUniformIndexing);
+    FEATURE(shaderInputAttachmentArrayNonUniformIndexing);
+    FEATURE(shaderUniformTexelBufferArrayNonUniformIndexing);
+    FEATURE(shaderStorageTexelBufferArrayNonUniformIndexing);
+    FEATURE(descriptorBindingUniformBufferUpdateAfterBind);
+    FEATURE(descriptorBindingSampledImageUpdateAfterBind);
+    FEATURE(descriptorBindingStorageImageUpdateAfterBind);
+    FEATURE(descriptorBindingStorageBufferUpdateAfterBind);
+    FEATURE(descriptorBindingUniformTexelBufferUpdateAfterBind);
+    FEATURE(descriptorBindingStorageTexelBufferUpdateAfterBind);
+    FEATURE(descriptorBindingUpdateUnusedWhilePending);
+    FEATURE(descriptorBindingPartiallyBound);
+    FEATURE(descriptorBindingVariableDescriptorCount);
+    FEATURE(runtimeDescriptorArray);
+    FEATURE(samplerFilterMinmax);
+    FEATURE(scalarBlockLayout);
+    FEATURE(imagelessFramebuffer);
+    FEATURE(uniformBufferStandardLayout);
+    FEATURE(shaderSubgroupExtendedTypes);
+    FEATURE(separateDepthStencilLayouts);
+    FEATURE(hostQueryReset);
+    FEATURE(timelineSemaphore);
+    FEATURE(bufferDeviceAddress);
+    FEATURE(bufferDeviceAddressCaptureReplay);
+    FEATURE(bufferDeviceAddressMultiDevice);
+    FEATURE(vulkanMemoryModel);
+    FEATURE(vulkanMemoryModelDeviceScope);
+    FEATURE(vulkanMemoryModelAvailabilityVisibilityChains);
+    FEATURE(shaderOutputViewportIndex);
+    FEATURE(shaderOutputLayer);
+    FEATURE(subgroupBroadcastDynamicId);
+#undef FEATURE
+
+	return ret;
+}
+
+std::vector<std::string> enabledFeatures13(Device& dev) {
+	std::vector<std::string> ret;
+
+#define FEATURE(x) if(dev.enabledFeatures13.x) ret.push_back(#x);
+    FEATURE(robustImageAccess);
+    FEATURE(inlineUniformBlock);
+    FEATURE(descriptorBindingInlineUniformBlockUpdateAfterBind);
+    FEATURE(pipelineCreationCacheControl);
+    FEATURE(privateData);
+    FEATURE(shaderDemoteToHelperInvocation);
+    FEATURE(shaderTerminateInvocation);
+    FEATURE(subgroupSizeControl);
+    FEATURE(computeFullSubgroups);
+    FEATURE(synchronization2);
+    FEATURE(textureCompressionASTC_HDR);
+    FEATURE(shaderZeroInitializeWorkgroupMemory);
+    FEATURE(dynamicRendering);
+    FEATURE(shaderIntegerDotProduct);
+    FEATURE(maintenance4);
+#undef FEATURE
+
+	return ret;
+}
+
 void Gui::drawOverviewUI(Draw& draw) {
 	(void) draw;
 
@@ -826,16 +927,60 @@ void Gui::drawOverviewUI(Draw& draw) {
 		ImGui::TreePop();
 	}
 
-	auto features = enabledFeatures(dev);
-	auto featuresLbl = dlg::format("{} device features enabled", features.size());
+	// NOTE: only showing core features atm
+	// TODO: extend to cover extensions
+	auto features10 = enabledFeatures(dev);
+	auto features11 = enabledFeatures11(dev);
+	auto features12 = enabledFeatures12(dev);
+	auto features13 = enabledFeatures13(dev);
+
+	auto total = features10.size() + features11.size() + features12.size() + features13.size();
+	auto featuresLbl = dlg::format("{} Vulkan core device features enabled", total);
 	if(ImGui::TreeNodeEx(featuresLbl.c_str(), tnFlags)) {
-		ImGui::Indent();
-		for(auto& f : features) {
-			imGuiText("{}", f);
-		}
-		ImGui::Unindent();
+		auto print = [&](auto& name, auto& features) {
+			if(features.empty()) {
+				return;
+			}
+
+			imGuiText(name);
+			ImGui::Indent();
+			for(auto& f : features) {
+				imGuiText("{}", f);
+			}
+			ImGui::Unindent();
+		};
+
+		print("Vulkan 1.0", features10);
+		print("Vulkan 1.1", features11);
+		print("Vulkan 1.2", features12);
+		print("Vulkan 1.3", features13);
+
 		ImGui::TreePop();
 	}
+
+	/*
+	auto printFeatures = [&](auto version, auto name, auto featuresFunc) {
+		if(dev.props.apiVersion < version) {
+			return;
+		}
+
+		auto features = featuresFunc(dev);
+		auto featuresLbl = dlg::format("{} {} device features enabled", features.size(), name);
+		if(ImGui::TreeNodeEx(featuresLbl.c_str(), tnFlags)) {
+			ImGui::Indent();
+			for(auto& f : features) {
+				imGuiText("{}", f);
+			}
+			ImGui::Unindent();
+			ImGui::TreePop();
+		}
+	};
+
+	printFeatures(VK_API_VERSION_1_0, "Vulkan 1.0", &enabledFeatures);
+	printFeatures(VK_API_VERSION_1_1, "Vulkan 1.1", &enabledFeatures11);
+	printFeatures(VK_API_VERSION_1_2, "Vulkan 1.2", &enabledFeatures12);
+	printFeatures(VK_API_VERSION_1_3, "Vulkan 1.3", &enabledFeatures13);
+	*/
 
 	ImGui::PopStyleVar(2);
 	ImGui::Separator();
