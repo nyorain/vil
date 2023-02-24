@@ -464,7 +464,8 @@ CommandSectionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 
 FrameSubmissionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
 		const FrameSubmission& a, const FrameSubmission& b) {
-	if(a.queue != b.queue) {
+	// TODO WIP: nullptr queue for serialize
+	if(a.queue != b.queue && a.queue && b.queue) {
 		return {Matcher::noMatch(), &a, &b, {}};
 	}
 
@@ -701,6 +702,9 @@ FindResult find(const Command& srcParent, const Command& src,
 			auto& rest = restResult.hierarchy;
 			currCmds.insert(currCmds.end(), rest.begin(), rest.end());
 			childMatch = restResult.match;
+
+			// TODO: replace dynamic_cast with some 'isStateCmd(const Command&)'
+			//  check that simply checks for category (draw | dispatch | traceRays)
 		} else if(auto srcCmd = dynamic_cast<const StateCmdBase*>(it); srcCmd) {
 			// match descriptors, if any
 			// TODO: only consider descriptors statically used by pipeline

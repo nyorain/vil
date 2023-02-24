@@ -109,8 +109,8 @@ struct Matcher;
 
 struct ObjectTypeHandler;
 
-enum class CommandType : u32;
-using CommandTypeFlags = nytl::Flags<CommandType>;
+enum class CommandCategory : u32;
+using CommandCategoryFlags = nytl::Flags<CommandCategory>;
 
 enum class SubmissionType : u8;
 

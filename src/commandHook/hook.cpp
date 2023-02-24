@@ -307,9 +307,9 @@ bool CommandHook::copiedDescriptorChanged(const CommandHookRecord& record) {
 
 	auto* cmd = record.hcommand.back();
 	dlg_assert(cmd);
-	dlg_assert_or(cmd->type() == CommandType::draw ||
-		cmd->type() == CommandType::dispatch ||
-		cmd->type() == CommandType::traceRays,
+	dlg_assert_or(cmd->category() == CommandCategory::draw ||
+		cmd->category() == CommandCategory::dispatch ||
+		cmd->category() == CommandCategory::traceRays,
 		return false);
 	const DescriptorState& dsState =
 		static_cast<const StateCmdBase*>(cmd)->boundDescriptors();
@@ -649,7 +649,7 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 	dlg_assert(!dstCommand.empty());
 	auto& dstCmd = *dstCommand.back();
 
-	if(dstCmd.type() == CommandType::transfer) {
+	if(dstCmd.category() == CommandCategory::transfer) {
 		if(flags & LocalCaptureBits::transferBefore) {
 			opsTmp.copyTransferDstBefore = true;
 			opsTmp.copyTransferSrcBefore = true;
@@ -662,7 +662,7 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 	// we do this by default, independent of any capture flags
 	opsTmp.copyIndirectCmd = isIndirect(dstCmd);
 
-	if(dstCmd.type() == CommandType::draw) {
+	if(dstCmd.category() == CommandCategory::draw) {
 		if(flags & LocalCaptureBits::vertexInput) {
 			opsTmp.copyIndexBuffers = true;
 			opsTmp.copyVertexBuffers = true;
@@ -677,8 +677,8 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 			for(auto it = dstCommand.begin(); it != preEnd; ++it) {
 				auto* cmd = *it;
 
-				auto type = cmd->type();
-				if(type == CommandType::renderSection) {
+				auto type = cmd->category();
+				if(type == CommandCategory::renderSection) {
 					dlg_assert(dynamic_cast<const RenderSectionCommand*>(cmd));
 					auto& rpi = static_cast<const RenderSectionCommand*>(cmd)->rpi;
 

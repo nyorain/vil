@@ -350,7 +350,7 @@ struct CommandRecord {
 	std::vector<FinishPtr<CommandHookRecord>> hookRecords;
 
 	CommandRecord(CommandBuffer& cb);
-	explicit CommandRecord(ManualTag, Device& dev); // mainly for testing
+	explicit CommandRecord(ManualTag, Device* dev); // mainly for testing
 	~CommandRecord();
 
 	CommandRecord(CommandRecord&&) noexcept = delete;

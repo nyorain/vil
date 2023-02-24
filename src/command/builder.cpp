@@ -17,11 +17,11 @@ void doReset(RecordBuilder& builder) {
 }
 
 // RecordBuilder
-RecordBuilder::RecordBuilder(Device& dev) {
+RecordBuilder::RecordBuilder(Device* dev) {
 	reset(dev);
 }
 
-void RecordBuilder::reset(Device& dev) {
+void RecordBuilder::reset(Device* dev) {
 	record_ = IntrusivePtr<CommandRecord>(new CommandRecord(manualTag, dev));
 	doReset(*this);
 }
@@ -77,7 +77,7 @@ void RecordBuilder::endSection(Command* cmd) {
 		// Debug utils commands can span multiple command buffers, they
 		// are only queue-local.
 		// See docs/debug-utils-label-nesting.md
-		dlg_assert(dynamic_cast<EndDebugUtilsLabelCmd*>(cmd));
+		dlg_assert(commandCast<EndDebugUtilsLabelCmd*>(cmd));
 		++record_->numPopLabels;
 		return;
 	}
@@ -96,7 +96,7 @@ void RecordBuilder::endSection(Command* cmd) {
 	// We pop the label sections here that were previously ended by
 	// the application but not in the same nesting level they were created.
 	while(section_->parent && section_->pop) {
-		dlg_assert(dynamic_cast<BeginDebugUtilsLabelCmd*>(section_->cmd));
+		dlg_assert(commandCast<BeginDebugUtilsLabelCmd*>(section_->cmd));
 		lastCommand_ = section_->cmd;
 
 		// reset it for future use
@@ -113,28 +113,29 @@ void RecordBuilder::append(Command& cmd) {
 
 #ifdef VIL_COMMAND_CALLSTACKS
 	// TODO: captureCmdStack does not really belong here,
-	// don't want to access device
-	if(record_->dev->captureCmdStack.load()) {
+	// don't want to access device. Should probably be passed
+	// to RecordBuilder on construction or be a public attribute or smth
+	if(record_->dev && record_->dev->captureCmdStack.load()) {
 		cmd.stacktrace = backward::load_here(record_->alloc, 16u);
 	}
 #endif // VIL_COMMAND_CALLSTACKS
 
 	// add to stats
 	++section_->cmd->stats_.numTotalCommands;
-	switch(cmd.type()) {
-		case CommandType::draw:
+	switch(cmd.category()) {
+		case CommandCategory::draw:
 			++section_->cmd->stats_.numDraws;
 			break;
-		case CommandType::dispatch:
+		case CommandCategory::dispatch:
 			++section_->cmd->stats_.numDispatches;
 			break;
-		case CommandType::traceRays:
+		case CommandCategory::traceRays:
 			++section_->cmd->stats_.numRayTraces;
 			break;
-		case CommandType::sync:
+		case CommandCategory::sync:
 			++section_->cmd->stats_.numSyncCommands;
 			break;
-		case CommandType::transfer:
+		case CommandCategory::transfer:
 			++section_->cmd->stats_.numTransfers;
 			break;
 		default:

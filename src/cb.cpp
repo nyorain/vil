@@ -253,7 +253,7 @@ void CommandBuffer::doEnd() {
 
 	// debug utils labels can be unterminated, see docs/debug-utils-label-nesting.md
 	while(builder_.section_->parent) {
-		auto lblCmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(builder_.section_->cmd);
+		auto lblCmd = commandCast<const BeginDebugUtilsLabelCmd*>(builder_.section_->cmd);
 		dlg_assert(lblCmd);
 		dlg_assert(!builder_.section_->pop);
 		builder_.record_->pushLables.push_back(lblCmd->name);
@@ -299,7 +299,7 @@ void CommandBuffer::doEnd() {
 
 void CommandBuffer::popLabelSections() {
 	// See docs/debug-utils-label-nesting.md
-	while(auto* next = dynamic_cast<BeginDebugUtilsLabelCmd*>(builder_.section_->cmd)) {
+	while(auto* next = commandCast<BeginDebugUtilsLabelCmd*>(builder_.section_->cmd)) {
 		dlg_trace("Problematic debug utils label nesting detected "
 			"(Begin without end in scope): {}", next->name);
 		builder_.record_->brokenHierarchyLabels = true;
@@ -1000,7 +1000,7 @@ void cmdEndRenderPass(CommandBuffer& cb, const VkSubpassEndInfo& endInfo) {
 
 	cb.builder().endSection(nullptr); // pop subpass section
 	dlg_assert(cb.builder().section_ &&
-		dynamic_cast<BeginRenderPassCmd*>(cb.builder().section_->cmd));
+		commandCast<BeginRenderPassCmd*>(cb.builder().section_->cmd));
 
 	auto& cmd = addCmd<EndRenderPassCmd, SectionType::end>(cb);
 	cmd.endInfo = endInfo;
@@ -2082,12 +2082,12 @@ VKAPI_ATTR void VKAPI_CALL CmdEndDebugUtilsLabelEXT(
 	auto* section = cb.builder().section_;
 	if(cb.ignoreEndDebugLabels() > 0) {
 		--cb.ignoreEndDebugLabels();
-	} else if(section && dynamic_cast<const BeginDebugUtilsLabelCmd*>(section->cmd)) {
+	} else if(section && commandCast<const BeginDebugUtilsLabelCmd*>(section->cmd)) {
 		cb.builder().endSection(nullptr);
 	} else {
 		auto* it = section;
 		while(it) {
-			auto lcmd = dynamic_cast<BeginDebugUtilsLabelCmd*>(it->cmd);
+			auto lcmd = commandCast<BeginDebugUtilsLabelCmd*>(it->cmd);
 			if(lcmd && !it->pop) {
 				dlg_trace("Problematic debug utils label nesting detected (End)");
 				it->pop = true;
@@ -2954,7 +2954,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 		const VkAccelerationStructureBuildGeometryInfoKHR* pInfos,
 		const VkAccelerationStructureBuildRangeInfoKHR* const* ppBuildRangeInfos) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<BuildAccelStructsCmd>(cb, cb);
+	auto& cmd = addCmd<BuildAccelStructsCmd>(cb);
 
 	cmd.srcs = alloc<AccelStruct*>(cb, infoCount);
 	cmd.dsts = alloc<AccelStruct*>(cb, infoCount);
@@ -3009,7 +3009,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresIndirectKHR(
 		const uint32_t*                             pIndirectStrides,
 		const uint32_t* const*                      ppMaxPrimitiveCounts) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<BuildAccelStructsIndirectCmd>(cb, cb);
+	auto& cmd = addCmd<BuildAccelStructsIndirectCmd>(cb);
 
 	cmd.srcs = alloc<AccelStruct*>(cb, infoCount);
 	cmd.dsts = alloc<AccelStruct*>(cb, infoCount);
@@ -3066,7 +3066,7 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureKHR(
 		VkCommandBuffer                             commandBuffer,
 		const VkCopyAccelerationStructureInfoKHR*   pInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
-	auto& cmd = addCmd<CopyAccelStructureCmd>(cb);
+	auto& cmd = addCmd<CopyAccelStructCmd>(cb);
 	cmd.pNext = copyChain(cb, pInfo->pNext);
 	cmd.src = &get(*cb.dev, pInfo->src);
 	cmd.dst = &get(*cb.dev, pInfo->dst);

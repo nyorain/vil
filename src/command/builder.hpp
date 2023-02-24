@@ -32,9 +32,9 @@ struct RecordBuilder {
 	RecordBuilder(CommandBuffer&);
 	void reset(CommandBuffer&);
 
-	// Commandbuffer-less construction - mainly for testing
-	RecordBuilder(Device& dev);
-	void reset(Device& dev);
+	// Commandbuffer-less construction - for loading serialized commands and testing
+	RecordBuilder(Device* dev);
+	void reset(Device* dev);
 
 	void appendParent(ParentCommand& cmd);
 	void beginSection(SectionCommand& cmd);

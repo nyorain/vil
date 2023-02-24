@@ -170,7 +170,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	// Find out if final hooked command is inside render pass
 	const auto hookClearAttachment =
 		 (info.ops.copyTransferDstBefore || info.ops.copyTransferDstAfter)
-		  	&& dynamic_cast<const ClearAttachmentCmd*>(hcommand.back());
+		  	&& commandCast<const ClearAttachmentCmd*>(hcommand.back());
 	const auto careAboutRendering =
 		info.ops.copyVertexBuffers ||
 		 info.ops.copyIndexBuffers ||
@@ -185,10 +185,10 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	for(auto it = hcommand.begin(); it != preEnd; ++it) {
 		auto* cmd = *it;
 
-		auto type = cmd->type();
-		if(type == CommandType::beginRenderPass) {
+		auto category = cmd->category();
+		if(category == CommandCategory::beginRenderPass) {
 			info.beginRenderPassCmd = deriveCast<const BeginRenderPassCmd*>(cmd);
-		} else if(type == CommandType::renderSection) {
+		} else if(category == CommandCategory::renderSection) {
 			info.rpi = &deriveCast<const RenderSectionCommand*>(cmd)->rpi;
 
 			if(info.beginRenderPassCmd) {
@@ -254,7 +254,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 void CommandHookRecord::dispatchRecord(Command& cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 
-	if(info.rebindComputeState && cmd.type() == CommandType::dispatch) {
+	if(info.rebindComputeState && cmd.category() == CommandCategory::dispatch) {
 		auto& dcmd = static_cast<const DispatchCmdBase&>(cmd);
 
 		// pipe, descriptors
@@ -420,7 +420,8 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 
 	// transform feedback
 	auto endXfb = false;
-	if(auto drawCmd = dynamic_cast<DrawCmdBase*>(&cmd); drawCmd) {
+	if(cmd.category() == CommandCategory::draw) {
+		auto* drawCmd = deriveCast<DrawCmdBase*>(&cmd);
 		if(drawCmd->state.pipe->xfbPatch && info.ops.copyXfb) {
 			dlg_assert(dev.transformFeedback);
 			dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
@@ -519,9 +520,9 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	while(cmd) {
 		// check if command needs additional, manual hook
-		if(cmd->type() == CommandType::buildAccelStruct && CommandHook::hookAccelStructBuilds) {
-			auto* basCmd = dynamic_cast<BuildAccelStructsCmd*>(cmd);
-			auto* basCmdIndirect = dynamic_cast<BuildAccelStructsCmd*>(cmd);
+		if(cmd->category() == CommandCategory::buildAccelStruct && CommandHook::hookAccelStructBuilds) {
+			auto* basCmd = commandCast<BuildAccelStructsCmd*>(cmd);
+			auto* basCmdIndirect = commandCast<BuildAccelStructsCmd*>(cmd);
 			dlg_assert(basCmd || basCmdIndirect);
 
 			if(basCmd) {
@@ -610,9 +611,9 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 
 	dst.op = copyDesc;
 
-	dlg_assert_or(bcmd.type() == CommandType::draw ||
-		bcmd.type() == CommandType::dispatch ||
-		bcmd.type() == CommandType::traceRays,
+	dlg_assert_or(bcmd.category() == CommandCategory::draw ||
+		bcmd.category() == CommandCategory::dispatch ||
+		bcmd.category() == CommandCategory::traceRays,
 		return);
 
 	const DescriptorState& dsState =
@@ -905,18 +906,18 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info, bool isBef
 		std::optional<CopyImage> img;
 		std::optional<CopyBuffer> buf;
 
-		if(auto* cmd = dynamic_cast<const CopyImageCmd*>(&bcmd); cmd) {
+		if(auto* cmd = commandCast<const CopyImageCmd*>(&bcmd); cmd) {
 			img = {cmd->src, cmd->srcLayout, toRange(cmd->copies[idx].srcSubresource)};
-		} else if(auto* cmd = dynamic_cast<const BlitImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const BlitImageCmd*>(&bcmd); cmd) {
 			img = {cmd->src, cmd->srcLayout, toRange(cmd->blits[idx].srcSubresource)};
-		} else if(auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const CopyImageToBufferCmd*>(&bcmd); cmd) {
 			img = {cmd->src, cmd->srcLayout, toRange(cmd->copies[idx].imageSubresource)};
-		} else if(auto* cmd = dynamic_cast<const ResolveImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const ResolveImageCmd*>(&bcmd); cmd) {
 			img = {cmd->src, cmd->srcLayout, toRange(cmd->regions[idx].srcSubresource)};
-		} else if(auto* cmd = dynamic_cast<const CopyBufferCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const CopyBufferCmd*>(&bcmd); cmd) {
 			auto [offset, size] = minMaxInterval({{cmd->regions[idx]}}, true);
 			buf = {cmd->src, offset, size};
-		} else if(auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const CopyBufferToImageCmd*>(&bcmd); cmd) {
 			auto texelSize = FormatTexelSize(cmd->dst->ci.format);
 			auto [offset, size] = minMaxInterval({{cmd->copies[idx]}}, texelSize);
 			buf = {cmd->src, offset, size};
@@ -946,19 +947,19 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info, bool isBef
 		std::optional<CopyImage> img;
 		std::optional<CopyBuffer> buf;
 
-		if(auto* cmd = dynamic_cast<const CopyImageCmd*>(&bcmd); cmd) {
+		if(auto* cmd = commandCast<const CopyImageCmd*>(&bcmd); cmd) {
 			img = {cmd->dst, cmd->dstLayout, toRange(cmd->copies[idx].dstSubresource)};
-		} else if(auto* cmd = dynamic_cast<const BlitImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const BlitImageCmd*>(&bcmd); cmd) {
 			img = {cmd->dst, cmd->dstLayout, toRange(cmd->blits[idx].dstSubresource)};
-		} else if(auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const CopyBufferToImageCmd*>(&bcmd); cmd) {
 			img = {cmd->dst, cmd->dstLayout, toRange(cmd->copies[idx].imageSubresource)};
-		} else if(auto* cmd = dynamic_cast<const ResolveImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const ResolveImageCmd*>(&bcmd); cmd) {
 			img = {cmd->dst, cmd->dstLayout, toRange(cmd->regions[idx].dstSubresource)};
-		} else if(auto* cmd = dynamic_cast<const ClearColorImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const ClearColorImageCmd*>(&bcmd); cmd) {
 			img = {cmd->dst, cmd->dstLayout, cmd->ranges[idx]};
-		} else if(auto* cmd = dynamic_cast<const ClearDepthStencilImageCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const ClearDepthStencilImageCmd*>(&bcmd); cmd) {
 			img = {cmd->dst, cmd->dstLayout, cmd->ranges[idx]};
-		} else if(auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&bcmd)) {
+		} else if(auto* cmd = commandCast<const ClearAttachmentCmd*>(&bcmd)) {
 			dlg_assert(info.beginRenderPassCmd->rp && info.beginRenderPassCmd->fb);
 			auto& rp = *info.beginRenderPassCmd->rp;
 			auto& fb = *info.beginRenderPassCmd->fb;
@@ -986,16 +987,16 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info, bool isBef
 			// image must be in general layout because we are just between
 			// the split render passes
 			img = {&src, VK_IMAGE_LAYOUT_GENERAL, imgView.ci.subresourceRange};
-		} else if(auto* cmd = dynamic_cast<const CopyBufferCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const CopyBufferCmd*>(&bcmd); cmd) {
 			auto [offset, size] = minMaxInterval({{cmd->regions[idx]}}, false);
 			buf = {cmd->dst, offset, size};
-		} else if(auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const CopyImageToBufferCmd*>(&bcmd); cmd) {
 			auto texelSize = FormatTexelSize(cmd->src->ci.format);
 			auto [offset, size] = minMaxInterval({{cmd->copies[idx]}}, texelSize);
 			buf = {cmd->dst, offset, size};
-		} else if(auto* cmd = dynamic_cast<const FillBufferCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const FillBufferCmd*>(&bcmd); cmd) {
 			buf = {cmd->dst, cmd->offset, cmd->size};
-		} else if(auto* cmd = dynamic_cast<const UpdateBufferCmd*>(&bcmd); cmd) {
+		} else if(auto* cmd = commandCast<const UpdateBufferCmd*>(&bcmd); cmd) {
 			buf = {cmd->dst, cmd->offset, cmd->data.size()};
 		}
 
@@ -1056,7 +1057,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 
 		// we don't ever read the buffer from the gfxQueue so we can
 		// ignore queueFams here
-		if(auto* cmd = dynamic_cast<DrawIndirectCmd*>(&bcmd)) {
+		if(auto* cmd = commandCast<DrawIndirectCmd*>(&bcmd)) {
 			VkDeviceSize stride = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
@@ -1065,12 +1066,12 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			dlg_assert(cmd->buffer);
 			initAndCopy(dev, cb, state->indirectCopy,  0u,
 				*cmd->buffer, cmd->offset, dstSize, {});
-		} else if(auto* cmd = dynamic_cast<DispatchIndirectCmd*>(&bcmd)) {
+		} else if(auto* cmd = commandCast<DispatchIndirectCmd*>(&bcmd)) {
 			dlg_assert(cmd->buffer);
 			auto size = sizeof(VkDispatchIndirectCommand);
 			initAndCopy(dev, cb, state->indirectCopy, 0u,
 				*cmd->buffer, cmd->offset, size, {});
-		} else if(auto* cmd = dynamic_cast<DrawIndirectCountCmd*>(&bcmd)) {
+		} else if(auto* cmd = commandCast<DrawIndirectCountCmd*>(&bcmd)) {
 			dlg_assert(cmd->buffer && cmd->countBuffer);
 
 			auto cmdSize = cmd->indexed ?
@@ -1090,7 +1091,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			// values (which they shouldn't).
 			performCopy(dev, cb, *cmd->buffer, cmd->offset,
 				state->indirectCopy, 4u, cmd->maxDrawCount * cmdSize);
-		} else if(auto* cmd = dynamic_cast<TraceRaysIndirectCmd*>(&bcmd)) {
+		} else if(auto* cmd = commandCast<TraceRaysIndirectCmd*>(&bcmd)) {
 			auto size = sizeof(VkTraceRaysIndirectCommandKHR);
 			initAndCopy(dev, cb, state->indirectCopy, cmd->indirectDeviceAddress,
 				size, {});
@@ -1115,8 +1116,6 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		}
 	}
 
-	auto* drawCmd = dynamic_cast<DrawCmdBase*>(&bcmd);
-
 	// We might use the vertex/index buffer copies when rendering the ui
 	// later on so we have to care about queue families
 	auto queueFams = combineQueueFamilies({{record->queueFamily, dev.gfxQueue->family}});
@@ -1128,10 +1127,12 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// sizes of vertex/index buffers to copy, we could use that.
 	auto maxVertIndSize = maxBufCopySize;
 
-	if(info.ops.copyVertexBuffers) {
+	const bool isDraw = bcmd.category() == CommandCategory::draw;
+	dlg_assert(!info.ops.copyVertexBuffers || isDraw);
+	if(info.ops.copyVertexBuffers && isDraw) {
 		DebugLabel lbl(dev, cb, "vil:copyVertexBuffers");
 
-		dlg_assert(drawCmd);
+		auto* drawCmd = deriveCast<DrawCmdBase*>(&bcmd);
 		for(auto& vertbuf : drawCmd->state.vertices) {
 			auto& dst = state->vertexBufCopies.emplace_back();
 			if(!vertbuf.buffer) {
@@ -1144,10 +1145,11 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		}
 	}
 
-	if(info.ops.copyIndexBuffers) {
+	dlg_assert(!info.ops.copyIndexBuffers || isDraw);
+	if(info.ops.copyIndexBuffers && isDraw) {
 		DebugLabel lbl(dev, cb, "vil:copyIndexBuffers");
 
-		dlg_assert(drawCmd);
+		auto* drawCmd = deriveCast<DrawCmdBase*>(&bcmd);
 		auto& inds = drawCmd->state.indices;
 		if(inds.buffer) {
 			auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);

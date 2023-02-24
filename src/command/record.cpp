@@ -35,25 +35,19 @@ void onRecordFree(const std::byte* buf, u32 size) {
 
 // Record
 CommandRecord::CommandRecord(CommandBuffer& xcb) :
-		alloc(onRecordAlloc, onRecordFree),
-		dev(xcb.dev),
-		cb(&xcb),
-		recordID(xcb.recordCount()),
-		queueFamily(xcb.pool().queueFamily),
-		// initialize allocators
-		pushLables(alloc),
-		used(alloc),
-		secondaries(alloc) {
+		CommandRecord(manualTag, xcb.dev) {
+	cb = &xcb;
+	recordID = xcb.recordCount();
+	queueFamily = xcb.pool().queueFamily;
+
 	if(!cb->name.empty()) {
 		cbName = copyString(*this, cb->name);
 	}
-
-	++DebugStats::get().aliveRecords;
 }
 
-CommandRecord::CommandRecord(ManualTag, Device& dev) :
+CommandRecord::CommandRecord(ManualTag, Device* xdev) :
 		alloc(onRecordAlloc, onRecordFree),
-		dev(&dev),
+		dev(xdev),
 		cb(nullptr),
 		recordID(0u),
 		queueFamily(0u),
@@ -65,13 +59,9 @@ CommandRecord::CommandRecord(ManualTag, Device& dev) :
 }
 
 CommandRecord::~CommandRecord() {
-	if(!dev) {
-		return;
-	}
-
 	ZoneScoped;
 
-	{
+	if(dev) {
 		// HookRecord destructor might reference this.
 		// And it must be called while mutex is locked.
 		// TODO: don't require that
@@ -166,6 +156,9 @@ CommandDescriptorSnapshot snapshotRelevantDescriptors(Device& dev, const Command
 
 CommandDescriptorSnapshot snapshotRelevantDescriptorsLocked(const Command& cmd) {
 	CommandDescriptorSnapshot ret;
+
+	// TODO: replace dynamic_cast with some 'isStateCmd(const Command&)'
+	//  check that simply checks for category (draw | dispatch | traceRays)
 	auto* scmd = dynamic_cast<const StateCmdBase*>(&cmd);
 	if(!scmd) {
 		return ret;
