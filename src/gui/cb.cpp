@@ -18,6 +18,7 @@
 #include <shader.hpp>
 #include <pipe.hpp>
 #include <cb.hpp>
+#include <serialize.hpp>
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <command/match.hpp>
@@ -41,7 +42,7 @@ using SelectionType = CommandSelection::SelectionType;
 // CommandBufferGui
 void CommandRecordGui::init(Gui& gui) {
 	gui_ = &gui;
-	commandFlags_ = CommandType(~(CommandType::end | CommandType::bind | CommandType::query));
+	commandFlags_ = CommandCategory(~(CommandCategory::end | CommandCategory::bind | CommandCategory::query));
 	commandViewer_.init(gui);
 	selector_.init(gui_->dev());
 }
@@ -115,15 +116,15 @@ void CommandRecordGui::draw(Draw& draw) {
 		auto val = commandFlags_.value();
 
 		imGuiText("Visible commands");
-		ImGui::CheckboxFlags("Bind", &val, u32(CommandType::bind));
-		ImGui::CheckboxFlags("Draw", &val, u32(CommandType::draw));
-		ImGui::CheckboxFlags("Dispatch", &val, u32(CommandType::dispatch));
-		ImGui::CheckboxFlags("Transfer", &val, u32(CommandType::transfer));
-		ImGui::CheckboxFlags("Sync", &val, u32(CommandType::sync));
-		ImGui::CheckboxFlags("End", &val, u32(CommandType::end));
-		ImGui::CheckboxFlags("Query", &val, u32(CommandType::query));
-		ImGui::CheckboxFlags("Other", &val, u32(CommandType::other));
-		commandFlags_ = CommandType(val);
+		ImGui::CheckboxFlags("Bind", &val, u32(CommandCategory::bind));
+		ImGui::CheckboxFlags("Draw", &val, u32(CommandCategory::draw));
+		ImGui::CheckboxFlags("Dispatch", &val, u32(CommandCategory::dispatch));
+		ImGui::CheckboxFlags("Transfer", &val, u32(CommandCategory::transfer));
+		ImGui::CheckboxFlags("Sync", &val, u32(CommandCategory::sync));
+		ImGui::CheckboxFlags("End", &val, u32(CommandCategory::end));
+		ImGui::CheckboxFlags("Query", &val, u32(CommandCategory::query));
+		ImGui::CheckboxFlags("Other", &val, u32(CommandCategory::other));
+		commandFlags_ = CommandCategory(val);
 
 		ImGui::Separator();
 		ImGui::Checkbox("Unused Descriptor Bindings", &commandViewer_.showUnusedBindings_);
@@ -223,6 +224,25 @@ void CommandRecordGui::draw(Draw& draw) {
 					ImGui::SetTooltip("Show state as it was before the command");
 				}
 			}
+		}
+	}
+
+	// TODO: WIP test
+	{
+		ImGui::SameLine();
+		if(ImGui::Button(ICON_FA_SAVE)) {
+			gui_->saveState();
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Save the current selection");
+		}
+
+		ImGui::SameLine();
+		if(ImGui::Button(ICON_FA_FILE_ALT)) {
+			gui_->loadState();
+		}
+		if(gui_->showHelp && ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Load up the last saved selection (preserved across restarts)");
 		}
 	}
 
@@ -537,7 +557,7 @@ void CommandRecordGui::displaySubmission(FrameSubmission& batch, u32 subID) {
 		// they aren't implicitly shown via the nesting
 		// now anymore and stuff like EndRenderPass is
 		// kinda important.
-		commandFlags_ |= Command::Type::end;
+		commandFlags_ |= Command::Category::end;
 	}
 
 	const Command* selectedCommand = nullptr;
@@ -684,7 +704,7 @@ void CommandRecordGui::displayRecordCommands() {
 		// they aren't implicitly shown via the nesting
 		// now anymore and stuff like EndRenderPass is
 		// kinda important.
-		commandFlags_ |= Command::Type::end;
+		commandFlags_ |= Command::Category::end;
 	}
 
 	DisplayVisitor visitor(openedSections_,selected,
@@ -750,21 +770,15 @@ void addMatches(
 		transitioned.insert(sectionMatch.a);
 	}
 
-	auto found = false;
+	if(!oldCommand.empty() && sectionMatch.a == oldCommand[0]) {
+		newCommand.push_back(sectionMatch.b);
+		oldCommand = oldCommand.subspan(1u);
+	} else {
+		oldCommand = {};
+	}
+
 	for(auto& child : sectionMatch.children) {
-		auto added = false;
-		if(!oldCommand.empty() && child.a == oldCommand[0]) {
-			dlg_assert(!found);
-			newCommand.push_back(child.b);
-			oldCommand = oldCommand.subspan(1u);
-			added = true;
-			found = true;
-		}
-
-		auto prevSize = newCommand.size();
 		addMatches(oldSet, newSet, transitioned, child, oldCommand, newCommand);
-
-		dlg_assert(!added || prevSize == newCommand.size());
 	}
 }
 
@@ -807,10 +821,12 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 				newOpenRecords.insert(recordMatch.b);
 			}
 
-			for(auto& sectionMatch : recordMatch.matches) {
+			// should only contain the match for the root command, if any
+			dlg_assert(recordMatch.matches.size() <= 1);
+			if(!recordMatch.matches.empty()) {
 				auto prevSize = newCommand.size();
 				addMatches(openedSections_, newOpenSections,
-					transitionedSections, sectionMatch,
+					transitionedSections, recordMatch.matches[0],
 					command_, newCommand);
 				dlg_assert(record_ == recordMatch.a ||
 					prevSize == newCommand.size());
@@ -821,7 +837,7 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	VIL_DEBUG_ONLY(
 		for(auto& open : openedSections_) {
 			if(!transitionedSections.count(open)) {
-				if(auto* lbl = dynamic_cast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
+				if(auto* lbl = commandCast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
 					dlg_trace("Losing open label {}", lbl->name);
 				} else {
 					dlg_trace("Losing open cmd {}", (const void*) open);
@@ -889,7 +905,7 @@ void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record) {
 	VIL_DEBUG_ONLY(
 		for(auto& open : openedSections_) {
 			if(!transitionedSections.count(open)) {
-				if(auto* lbl = dynamic_cast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
+				if(auto* lbl = commandCast<const BeginDebugUtilsLabelCmd*>(open); lbl) {
 					dlg_trace("Losing open label {}", lbl->name);
 				} else {
 					dlg_trace("Losing open cmd {}", (const void*) open);
@@ -923,8 +939,167 @@ void CommandRecordGui::updateFromSelector() {
 		updateRecord(selector_.record());
 	}
 
+	// NOTE: command_ already gets updated by updateRecord(s) but
+	//   this will only find section commands. A bit messy/redundant
+	//   that we even do it in there.
 	auto commandSpan = selector_.command();
 	command_ = {commandSpan.begin(), commandSpan.end()};
+}
+
+void CommandRecordGui::save(StateSaver& slz, DynWriteBuf& buf) {
+	// selection
+	write<u64>(buf, frame_.size());
+	for(auto& subm : frame_) {
+		write(buf, subm.submissionID);
+		write<u64>(buf, subm.submissions.size());
+		for(auto& rec : subm.submissions) {
+			auto id = add(slz, *rec);
+			write<u64>(buf, id);
+		}
+
+		// TODO: sparse binds
+	}
+
+	auto submID = u32(-1);
+	if(submission_) {
+		submID = submission_ - frame_.data();
+	}
+	write(buf, submID);
+
+	auto recID = u64(-1);
+	if(record_) {
+		recID = add(slz, *record_);
+	}
+	write(buf, recID);
+
+	write<u64>(buf, command_.size());
+	for(auto* cmd : command_) {
+		write<u64>(buf, getID(slz, *cmd));
+	}
+
+	// opened
+	write<u64>(buf, openedSections_.size());
+	for(auto& cmd : openedSections_) {
+		write<u64>(buf, getID(slz, *cmd));
+	}
+
+	write<u64>(buf, openedSubmissions_.size());
+	for(auto* subm : openedSubmissions_) {
+		auto submID = subm - frame_.data();
+		write<u32>(buf, submID);
+	}
+
+	write<u64>(buf, openedRecords_.size());
+	for(auto& rec : openedRecords_) {
+		auto recID = add(slz, *rec);
+		write<u64>(buf, recID);
+	}
+}
+
+// void printMatch(const CommandSectionMatch& m, unsigned indent) {
+// 	std::string space;
+// 	space.resize(indent, ' ');
+//
+// 	dlg_trace("{} match {} - {}", space, m.a->toString(), m.b->toString());
+// 	for(auto& mm : m.children) {
+// 		printMatch(mm, indent + 1);
+// 	}
+// }
+
+void CommandRecordGui::load(StateLoader& loader, ReadBuf& buf) {
+	std::vector<FrameSubmission> frame;
+	auto submCount = read<u64>(buf);
+	for(auto i = 0u; i < submCount; ++i) {
+		auto& subm = frame.emplace_back();
+		read(buf, subm.submissionID);
+
+		auto recCount = read<u64>(buf);
+		for(auto j = 0u; j < recCount; ++j) {
+			auto id = read<u64>(buf);
+			subm.submissions.push_back(getRecord(loader, id));
+		}
+
+		// TODO: sparse binds
+	}
+
+	auto submissionID = read<u32>(buf);
+
+	auto recID = read<u64>(buf);
+	auto rec = getRecord(loader, recID);
+
+	std::vector<const Command*> cmd;
+	auto cmdCount = read<u64>(buf);
+	// dlg_trace(">> Command");
+	for(auto i = 0u; i < cmdCount; ++i) {
+		auto id = read<u64>(buf);
+		auto* c = getCommand(loader, id);
+		dlg_assert(c);
+		cmd.push_back(c);
+		// dlg_trace("  >> {}", c->toString());
+	}
+
+	// opened
+	openedSections_.clear();
+	auto count = read<u64>(buf);
+	for(auto i = 0u; i < count; ++i) {
+		auto id = read<u64>(buf);
+		auto* cmd = getCommand(loader, id);
+		dlg_assert(cmd && dynamic_cast<ParentCommand*>(cmd));
+		openedSections_.insert(static_cast<ParentCommand*>(cmd));
+	}
+
+	openedSubmissions_.clear();
+	count = read<u64>(buf);
+	for(auto i = 0u; i < count; ++i) {
+		auto id = read<u32>(buf);
+		auto& subm = frame[id];
+		openedSubmissions_.insert(&subm);
+	}
+
+	openedRecords_.clear();
+	count = read<u64>(buf);
+	for(auto i = 0u; i < count; ++i) {
+		auto id = read<u64>(buf);
+		auto rec = getRecord(loader, id);
+		openedRecords_.insert(rec.get());
+	}
+
+	// update:
+	// first store the loaded state locally but then transition via matching
+	// to the actual application's frame
+	std::swap(frame_, frame);
+	submission_ = submissionID == u32(-1) ? nullptr : &frame_[submissionID];
+	record_ = rec;
+	command_ = std::move(cmd);
+
+	ThreadMemScope tms;
+	LinAllocScope localMatchMem(matchAlloc_);
+	auto frameMatch = match(tms, localMatchMem, frame_, frame);
+
+	// dlg_trace("frame matches: {}", frameMatch.matches.size());
+	// for(auto& m : frameMatch.matches) {
+	// 	dlg_trace("rec matches: {}", m.matches.size());
+	// 	for(auto& mm : m.matches) {
+	// 		dlg_trace("cmd matches: {}", mm.matches.size());
+	// 		for(auto& mmm : mm.matches) {
+	// 			printMatch(mmm, 1u);
+	// 		}
+	// 	}
+	// }
+
+	updateRecords(frameMatch, std::move(frame));
+	// TODO: updateRecords can't find the final non-parent-cmd in the
+	//   hierarchy of command_, have to look that up via find() I guess?
+	//   But for that we need valid handles
+
+	// also update the selector
+	auto submID = 0u;
+	if(submission_) {
+		submID = u32(submission_ - frame_.data());
+	}
+
+	selector_.select(frame_, submID, record_, command_);
+	commandViewer_.updateFromSelector(true);
 }
 
 } // namespace vil

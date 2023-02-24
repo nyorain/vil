@@ -164,15 +164,15 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 	dlg_assert(!cmdh.empty());
 
 	auto& cmd = *cmdh.back();
-	switch(cmd.type()) {
-		case CommandType::draw:
+	switch(cmd.category()) {
+		case CommandCategory::draw:
 			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
 			stateCmd = drawCmd;
 			break;
-		case CommandType::dispatch:
+		case CommandCategory::dispatch:
 			stateCmd = deriveCast<const DispatchCmdBase*>(&cmd);
 			break;
-		case CommandType::traceRays:
+		case CommandCategory::traceRays:
 			stateCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
 			break;
 		default:
@@ -352,7 +352,7 @@ void CommandViewer::displayTransferIOList() {
 	dlg_assert(!command_.empty());
 	auto& cmd = *command_.back();
 
-	dlg_assert(cmd.type() == CommandType::transfer);
+	dlg_assert(cmd.category() == CommandCategory::transfer);
 
 	// TODO: add support for viewing buffers here.
 	// Hard to do in a meaningful way though.
@@ -415,16 +415,16 @@ void CommandViewer::displayTransferIOList() {
 		addDst(cmd);
 	};
 
-	addSrcDst(dynamic_cast<const CopyImageCmd*>(&cmd));
-	addSrcDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
-	addSrcDst(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
-	addSrcDst(dynamic_cast<const BlitImageCmd*>(&cmd));
-	addSrcDst(dynamic_cast<const ResolveImageCmd*>(&cmd));
-	addSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
-	addSrcDst(dynamic_cast<const UpdateBufferCmd*>(&cmd));
-	addDst(dynamic_cast<const ClearColorImageCmd*>(&cmd));
-	addDst(dynamic_cast<const ClearDepthStencilImageCmd*>(&cmd));
-	addDst(dynamic_cast<const FillBufferCmd*>(&cmd));
+	addSrcDst(commandCast<const CopyImageCmd*>(&cmd));
+	addSrcDst(commandCast<const CopyBufferToImageCmd*>(&cmd));
+	addSrcDst(commandCast<const CopyImageToBufferCmd*>(&cmd));
+	addSrcDst(commandCast<const BlitImageCmd*>(&cmd));
+	addSrcDst(commandCast<const ResolveImageCmd*>(&cmd));
+	addSrcDst(commandCast<const CopyBufferCmd*>(&cmd));
+	addSrcDst(commandCast<const UpdateBufferCmd*>(&cmd));
+	addDst(commandCast<const ClearColorImageCmd*>(&cmd));
+	addDst(commandCast<const ClearDepthStencilImageCmd*>(&cmd));
+	addDst(commandCast<const FillBufferCmd*>(&cmd));
 
 	if(auto* ca = dynamic_cast<const ClearAttachmentCmd*>(&cmd)) {
 		found = true;
@@ -460,16 +460,16 @@ void CommandViewer::displayDsList() {
 	const DispatchCmdBase* dispatchCmd {};
 	const TraceRaysCmdBase* traceCmd {};
 
-	switch(baseCmd.type()) {
-		case CommandType::draw:
+	switch(baseCmd.category()) {
+		case CommandCategory::draw:
 			drawCmd = deriveCast<const DrawCmdBase*>(&baseCmd);
 			cmd = drawCmd;
 			break;
-		case CommandType::dispatch:
+		case CommandCategory::dispatch:
 			dispatchCmd = deriveCast<const DispatchCmdBase*>(&baseCmd);
 			cmd = dispatchCmd;
 			break;
-		case CommandType::traceRays:
+		case CommandCategory::traceRays:
 			traceCmd = deriveCast<const TraceRaysCmdBase*>(&baseCmd);
 			cmd = traceCmd;
 			break;
@@ -630,16 +630,16 @@ void CommandViewer::displayIOList() {
 	const DispatchCmdBase* dispatchCmd {};
 	const TraceRaysCmdBase* traceCmd {};
 
-	switch(cmd.type()) {
-		case CommandType::draw:
+	switch(cmd.category()) {
+		case CommandCategory::draw:
 			drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
 			stateCmd = drawCmd;
 			break;
-		case CommandType::dispatch:
+		case CommandCategory::dispatch:
 			dispatchCmd = deriveCast<const DispatchCmdBase*>(&cmd);
 			stateCmd = dispatchCmd;
 			break;
-		case CommandType::traceRays:
+		case CommandCategory::traceRays:
 			traceCmd = deriveCast<const TraceRaysCmdBase*>(&cmd);
 			stateCmd = traceCmd;
 			break;
@@ -665,7 +665,7 @@ void CommandViewer::displayIOList() {
 	}
 
 	// Transfer IO
-	if(cmd.type() == CommandType::transfer) {
+	if(cmd.category() == CommandCategory::transfer) {
 		displayTransferIOList();
 		return;
 	}
@@ -1060,8 +1060,8 @@ void CommandViewer::displayDs(Draw& draw) {
 
 void CommandViewer::displayAttachment(Draw& draw) {
 	dlg_assert_or(!command_.empty(), return);
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(command_.back());
-	dlg_assert_or(drawCmd, return);
+	dlg_assert_or(command_.back()->category() == CommandCategory::draw, return);
+	// auto* drawCmd = deriveCast<const DrawCmdBase*>(command_.back());
 
 	// NOTE: maybe only show this button for output attachments (color, depthStencil)?
 	// Does not make sense otherwise as it stays the same i guess.
@@ -1248,18 +1248,18 @@ void CommandViewer::displayTransferData(Draw& draw) {
 
 	(void) refSrc;
 
-	refSrcDst(dynamic_cast<const CopyImageCmd*>(&cmd));
-	refSrcDst(dynamic_cast<const CopyBufferToImageCmd*>(&cmd));
-	refSrcDst(dynamic_cast<const CopyImageToBufferCmd*>(&cmd));
-	refSrcDst(dynamic_cast<const BlitImageCmd*>(&cmd));
-	refSrcDst(dynamic_cast<const ResolveImageCmd*>(&cmd));
+	refSrcDst(commandCast<const CopyImageCmd*>(&cmd));
+	refSrcDst(commandCast<const CopyBufferToImageCmd*>(&cmd));
+	refSrcDst(commandCast<const CopyImageToBufferCmd*>(&cmd));
+	refSrcDst(commandCast<const BlitImageCmd*>(&cmd));
+	refSrcDst(commandCast<const ResolveImageCmd*>(&cmd));
 
-	refSrcDst(dynamic_cast<const CopyBufferCmd*>(&cmd));
-	refDst(dynamic_cast<const FillBufferCmd*>(&cmd));
-	refDst(dynamic_cast<const ClearColorImageCmd*>(&cmd));
-	refDst(dynamic_cast<const ClearDepthStencilImageCmd*>(&cmd));
+	refSrcDst(commandCast<const CopyBufferCmd*>(&cmd));
+	refDst(commandCast<const FillBufferCmd*>(&cmd));
+	refDst(commandCast<const ClearColorImageCmd*>(&cmd));
+	refDst(commandCast<const ClearDepthStencilImageCmd*>(&cmd));
 
-	if(auto* ccmd = dynamic_cast<const UpdateBufferCmd*>(&cmd); ccmd) {
+	if(auto* ccmd = commandCast<const UpdateBufferCmd*>(&cmd); ccmd) {
 		if(view_ == IOView::transferSrc) {
 			ImGui::Separator();
 			imGuiText("Static data of size {}", ccmd->data.size());
@@ -1292,7 +1292,9 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 	dlg_assert(!command_.empty());
 
 	auto& cmd = *command_.back();
-	auto* drawCmd = dynamic_cast<const DrawCmdBase*>(&cmd);
+
+	dlg_assert_or(cmd.category() == CommandCategory::draw, return);
+	auto* drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
 
 	dlg_assert_or(drawCmd, return);
 	dlg_assert_or(drawCmd->state.pipe, return);
@@ -1479,19 +1481,19 @@ void CommandViewer::displayCommand() {
 	if(hookState && hookState->indirectCopy.size) {
 		auto& ic = hookState->indirectCopy;
 		auto span = ic.data();
-		if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(command_.back()); dcmd) {
+		if(auto* dcmd = commandCast<const DrawIndirectCmd*>(command_.back()); dcmd) {
 			displayMultidraw(dcmd->drawCount, dcmd->indexed, span);
-		} else if(dynamic_cast<const DispatchIndirectCmd*>(command_.back())) {
+		} else if(commandCast<const DispatchIndirectCmd*>(command_.back())) {
 			auto ecmd = read<VkDispatchIndirectCommand>(span);
 			imGuiText("groups X: {}", ecmd.x);
 			imGuiText("groups Y: {}", ecmd.y);
 			imGuiText("groups Z: {}", ecmd.z);
-		} else if(dynamic_cast<const TraceRaysIndirectCmd*>(command_.back())) {
+		} else if(commandCast<const TraceRaysIndirectCmd*>(command_.back())) {
 			auto ecmd = read<VkTraceRaysIndirectCommandKHR>(span);
 			imGuiText("width: {}", ecmd.width);
 			imGuiText("height: {}", ecmd.height);
 			imGuiText("depth: {}", ecmd.depth);
-		} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(command_.back()); dcmd) {
+		} else if(auto* dcmd = commandCast<const DrawIndirectCountCmd*>(command_.back()); dcmd) {
 			auto cmdSize = dcmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
@@ -1502,7 +1504,8 @@ void CommandViewer::displayCommand() {
 	}
 
 	// TODO: WIP
-	if(auto* dcmd = dynamic_cast<const DispatchCmdBase*>(command_.back()); dcmd) {
+	if(command_.back()->category() == CommandCategory::dispatch) {
+		auto* dcmd = deriveCast<const DispatchCmdBase*>(command_.back());
 		if(ImGui::Button("Debug shader")) {
 			if(dcmd->state.pipe) {
 				auto mod = copySpecializeSpirv(dcmd->state.pipe->stage);
@@ -1544,10 +1547,10 @@ void CommandViewer::draw(Draw& draw, bool skipList) {
 	}
 
 	auto& bcmd = *command_.back();
-	auto actionCmd = bcmd.type() == CommandType::dispatch ||
-		bcmd.type() == CommandType::draw ||
-		bcmd.type() == CommandType::traceRays ||
-		bcmd.type() == CommandType::transfer;
+	auto actionCmd = bcmd.category() == CommandCategory::dispatch ||
+		bcmd.category() == CommandCategory::draw ||
+		bcmd.category() == CommandCategory::traceRays ||
+		bcmd.category() == CommandCategory::transfer;
 
 	dlg_assert(actionCmd || view_ == IOView::command);
 	if(!actionCmd) {
@@ -1569,9 +1572,9 @@ void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
 	auto* cmd = command_.empty() ? nullptr : command_.back();
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
-	auto drawIndexedCmd = dynamic_cast<const DrawIndexedCmd*>(cmd);
-	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(cmd);
-	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(cmd);
+	auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
+	auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
+	auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
 
 	auto indirectCmd = cmd && isIndirect(*cmd);
 	auto indexedCmd = drawIndexedCmd ||
@@ -1594,7 +1597,7 @@ void CommandViewer::updateHook() {
 			}};
 			break;
 		case IOView::transferSrc:
-			if(dynamic_cast<const UpdateBufferCmd*>(cmd)) {
+			if(commandCast<const UpdateBufferCmd*>(cmd)) {
 				// nothing to do in that case, we know the data statically
 				break;
 			}

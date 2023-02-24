@@ -20,7 +20,7 @@
 namespace vil {
 
 // The type of a command is used e.g. to hide them in the UI.
-enum class CommandType : u32 {
+enum class CommandCategory : u32 {
 	other = (1u << 0u),
 	// Commands that bind state, buffers, push constants etc
 	bind = (1u << 1u),
@@ -47,7 +47,105 @@ enum class CommandType : u32 {
 	renderSection = (1u << 11u),
 };
 
-using CommandTypeFlags = nytl::Flags<CommandType>;
+enum class CommandType : u32 {
+	root = 0,
+	waitEvents,
+	waitEvents2,
+	barrier,
+	barrier2,
+	beginRenderPass,
+	nextSubpass,
+	firstSubpass, // implicit
+	endRenderPass,
+	draw,
+	drawIndirect,
+	drawIndexed,
+	drawIndirectCount,
+	drawMulti,
+	drawMultiIndexed,
+	bindVertexBuffers,
+	bindIndexBuffer,
+	bindDescriptorSet,
+	dispatch,
+	dispatchIndirect,
+	dispatchBase, // DispatchBaseCmd NOT DispatchCmdBase
+	copyImage,
+	copyBufferToImage,
+	copyImageToBuffer,
+	blitImage,
+	resolveImage,
+	copyBuffer,
+	updateBuffer,
+	fillBuffer,
+	clearColorImage,
+	clearDepthStencilImage,
+	clearAttachment,
+	setEvent,
+	setEvent2,
+	resetEvent,
+	executeCommandsChild, // implicit
+	executeCommands,
+	beginDebugUtilsLabel,
+	endDebugUtilsLabel,
+	insertDebugUtilsLabel,
+	bindPipeline,
+	pushConstants,
+	setViewport,
+	setScissor,
+	setLineWidth,
+	setDepthBias,
+	setDepthBounds,
+	setBlendConstants,
+	setStencilCompareMask,
+	setStencilWriteMask,
+	setStencilReference,
+	beginQuery,
+	endQuery,
+	resetQueryPool,
+	writeTimestamp,
+	copyQueryPoolResults,
+	pushDescriptorSet,
+	pushDescriptorSetWithTemplate,
+	setFragmentShadingRate,
+	beginConditionalRendering,
+	endConditionalRendering,
+	setLineStipple,
+	setCullMode,
+	setFrontFace,
+	setPrimitiveTopology,
+	setViewportWithCount,
+	setScissorWithCount,
+	setDepthTestEnable,
+	setDepthWriteEnable,
+	setDepthCompareOp,
+	setDepthBoundsTestEnable,
+	setStencilTestEnable,
+	setStencilOp,
+	setPatchControlPoints,
+	setRasterizerDiscardEnable,
+	setDepthBiasEnable,
+	setLogicOp,
+	setPrimitiveRestartEnable,
+	setSampleLocations,
+	setDisacrdRectangle,
+	copyAccelStruct,
+	copyAccelStructToMemory,
+	copyMemoryToAccelStruct,
+	writeAccelStructsProperties,
+	buildAccelStructs,
+	buildAccelStructsIndirect,
+	traceRays,
+	traceRaysIndirect,
+	setRayTracingPipelineStackSize,
+	beginRendering,
+	endRendering,
+	setVertexInput,
+	setColorWriteEnable,
+
+	count,
+};
+
+using CommandCategoryFlags = nytl::Flags<CommandCategory>;
 
 struct CommandVisitor;
 
@@ -59,7 +157,8 @@ void doVisit(CommandVisitor& v, C& cmd);
 // stored as children
 struct Command {
 	using Type = CommandType;
-	using TypeFlags = CommandTypeFlags;
+	using Category = CommandCategory;
+	using CategoryFlags = CommandCategoryFlags;
 
 	Command();
 
@@ -78,9 +177,8 @@ struct Command {
 	// Returns the name of the command.
 	virtual std::string_view nameDesc() const = 0;
 
-	// Whether this command is empty. Empty commands are usually hidden.
-	// Used for commands like CmdEndRenderPass.
-	virtual Type type() const { return Type::other; }
+	virtual Category category() const { return Category::other; }
+	virtual Type type() const = 0;
 
 	// Records itself into the given command buffer.
 	// Does not record its child commands (if it has any).
@@ -121,7 +219,7 @@ struct Command {
 #endif // VIL_COMMAND_CALLSTACKS
 };
 
-NYTL_FLAG_OPS(Command::Type)
+NYTL_FLAG_OPS(Command::Category)
 
 enum class NullName {
 	empty, // ""
@@ -200,12 +298,20 @@ struct SectionCommand : ParentCommand {
 	ParentCommand* firstChildParent() const override { return firstChildParent_; }
 };
 
+template<typename B, CommandType Type>
+struct CmdDerive : B {
+	using B::B;
+
+	static constexpr CommandType staticType() { return Type; }
+	CommandType type() const override { return staticType(); }
+};
+
 // Meta-command. Root node of the command hierarchy.
 // Empty SectionCommand.
-struct RootCommand final : SectionCommand {
+struct RootCommand final : CmdDerive<SectionCommand, CommandType::root> {
 	void record(const Device&, VkCommandBuffer, u32) const override {}
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-	Type type() const override { return Type::other; }
+	Category category() const override { return Category::other; }
 	std::string_view nameDesc() const override { return "<RootCommand>"; }
 };
 
@@ -260,42 +366,42 @@ struct Barrier2CmdBase : Command {
 		u32 qfam) const;
 };
 
-struct WaitEventsCmd : BarrierCmdBase {
+struct WaitEventsCmd : CmdDerive<BarrierCmdBase, CommandType::waitEvents> {
 	span<Event*> events;
 
 	std::string_view nameDesc() const override { return "WaitEvents"; }
-	Type type() const override { return Type::sync; }
+	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct WaitEvents2Cmd : Barrier2CmdBase {
+struct WaitEvents2Cmd : CmdDerive<Barrier2CmdBase, CommandType::waitEvents2> {
 	span<Event*> events;
 
 	std::string_view nameDesc() const override { return "WaitEvents2"; }
-	Type type() const override { return Type::sync; }
+	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct BarrierCmd : BarrierCmdBase {
+struct BarrierCmd : CmdDerive<BarrierCmdBase, CommandType::barrier> {
     VkDependencyFlags dependencyFlags {};
 
 	std::string_view nameDesc() const override { return "PipelineBarrier"; }
-	Type type() const override { return Type::sync; }
+	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct Barrier2Cmd : Barrier2CmdBase {
+struct Barrier2Cmd : CmdDerive<Barrier2CmdBase, CommandType::barrier2> {
 	std::string_view nameDesc() const override { return "PipelineBarrier2"; }
-	Type type() const override { return Type::sync; }
+	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command& rhs) const override;
@@ -303,7 +409,7 @@ struct Barrier2Cmd : Barrier2CmdBase {
 };
 
 // All direct children must be of type 'NextSubpassCmd'
-struct BeginRenderPassCmd final : SectionCommand {
+struct BeginRenderPassCmd final : CmdDerive<SectionCommand, CommandType::beginRenderPass> {
 	VkRenderPassBeginInfo info {};
 	span<VkClearValue> clearValues;
 
@@ -326,23 +432,23 @@ struct BeginRenderPassCmd final : SectionCommand {
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-	Type type() const override { return Type::beginRenderPass; }
+	Category category() const override { return Category::beginRenderPass; }
 };
 
 struct RenderSectionCommand : SectionCommand {
 	RenderPassInstanceState rpi;
-	Type type() const override { return Type::renderSection; }
+	Category category() const override { return Category::renderSection; }
 };
 
 struct SubpassCmd : RenderSectionCommand {
 	u32 subpassID {};
 };
 
-struct NextSubpassCmd final : SubpassCmd {
+struct NextSubpassCmd final : CmdDerive<SubpassCmd, CommandType::nextSubpass> {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 	VkSubpassBeginInfo beginInfo; // for the new subpass
 
-	using SubpassCmd::SubpassCmd;
+	using CmdDerive::CmdDerive;
 
 	// toString should probably rather return the subpass number.
 	// Must be tracked while recording
@@ -354,18 +460,18 @@ struct NextSubpassCmd final : SubpassCmd {
 
 // Meta command needed for correct hierachy. We want each subpass to
 // have its own section.
-struct FirstSubpassCmd final : SubpassCmd {
-	using SubpassCmd::SubpassCmd;
+struct FirstSubpassCmd final : CmdDerive<SubpassCmd, CommandType::firstSubpass> {
+	using CmdDerive::CmdDerive;
 	std::string_view nameDesc() const override { return "Subpass 0"; }
 	void record(const Device&, VkCommandBuffer, u32) const override {}
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct EndRenderPassCmd final : Command {
+struct EndRenderPassCmd final : CmdDerive<Command, CommandType::endRenderPass> {
 	VkSubpassEndInfo endInfo {}; // for the previous subpass
 
 	std::string_view nameDesc() const override { return "EndRenderPass"; }
-	Type type() const override { return Type::end; }
+	Category category() const override { return Category::end; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -382,9 +488,10 @@ struct DrawCmdBase : StateCmdBase {
 	const GraphicsState& state;
 	PushConstantData pushConstants;
 
+	DrawCmdBase(); // dummy constructor
 	DrawCmdBase(CommandBuffer& cb);
 
-	Type type() const override { return Type::draw; }
+	Category category() const override { return Category::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
 	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
 
@@ -394,13 +501,13 @@ struct DrawCmdBase : StateCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DrawCmd final : DrawCmdBase {
+struct DrawCmd final : CmdDerive<DrawCmdBase, CommandType::draw> {
 	u32 vertexCount;
 	u32 instanceCount;
 	u32 firstVertex;
 	u32 firstInstance;
 
-	using DrawCmdBase::DrawCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
@@ -410,14 +517,14 @@ struct DrawCmd final : DrawCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DrawIndirectCmd final : DrawCmdBase {
+struct DrawIndirectCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndirect> {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	u32 drawCount {};
 	u32 stride {};
 	bool indexed {};
 
-	using DrawCmdBase::DrawCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	std::string_view nameDesc() const override {
@@ -429,14 +536,14 @@ struct DrawIndirectCmd final : DrawCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DrawIndexedCmd final : DrawCmdBase {
+struct DrawIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndexed> {
 	u32 indexCount {};
 	u32 instanceCount {};
 	u32 firstIndex {};
 	i32 vertexOffset {};
 	u32 firstInstance {};
 
-	using DrawCmdBase::DrawCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
@@ -446,7 +553,7 @@ struct DrawIndexedCmd final : DrawCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DrawIndirectCountCmd final : DrawCmdBase {
+struct DrawIndirectCountCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndirectCount> {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	u32 maxDrawCount {};
@@ -455,7 +562,7 @@ struct DrawIndirectCountCmd final : DrawCmdBase {
 	VkDeviceSize countBufferOffset {};
 	bool indexed {};
 
-	using DrawCmdBase::DrawCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	std::string_view nameDesc() const override {
@@ -467,13 +574,15 @@ struct DrawIndirectCountCmd final : DrawCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DrawMultiCmd final : DrawCmdBase {
+struct DrawMultiCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti> {
 	span<VkMultiDrawInfoEXT> vertexInfos;
 	u32 instanceCount {};
 	u32 firstInstance {};
-	u32 stride {}; // NOTE: only here for gui, we don't forward it
+	// NOTE: only here for gui, we don't forward it since we copied
+	//   the vertexInfos into a tight span
+	u32 stride {};
 
-	using DrawCmdBase::DrawCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	std::string_view nameDesc() const override { return "DrawMulti"; };
@@ -483,14 +592,14 @@ struct DrawMultiCmd final : DrawCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DrawMultiIndexedCmd final : DrawCmdBase {
+struct DrawMultiIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawMultiIndexed> {
 	span<VkMultiDrawIndexedInfoEXT> indexInfos;
 	u32 instanceCount {};
 	u32 firstInstance {};
 	u32 stride {}; // NOTE: only here for gui, we don't forward it
 	std::optional<i32> vertexOffset {};
 
-	using DrawCmdBase::DrawCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	std::string_view nameDesc() const override { return "DrawMultiIndexed"; };
@@ -500,7 +609,7 @@ struct DrawMultiIndexedCmd final : DrawCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct BindVertexBuffersCmd final : Command {
+struct BindVertexBuffersCmd final : CmdDerive<Command, CommandType::bindVertexBuffers> {
 	u32 firstBinding;
 	span<BoundVertexBuffer> buffers;
 
@@ -508,25 +617,25 @@ struct BindVertexBuffersCmd final : Command {
 	void displayInspector(Gui&) const override;
 
 	std::string_view nameDesc() const override { return "BindVertexBuffers"; }
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct BindIndexBufferCmd final : Command {
+struct BindIndexBufferCmd final : CmdDerive<Command, CommandType::bindIndexBuffer> {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 	VkIndexType indexType {};
 
 	std::string_view nameDesc() const override { return "BindIndexBuffer"; }
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct BindDescriptorSetCmd final : Command {
+struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescriptorSet> {
 	u32 firstSet;
 	VkPipelineBindPoint pipeBindPoint;
 	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
@@ -535,7 +644,7 @@ struct BindDescriptorSetCmd final : Command {
 
 	std::string toString() const override;
 	std::string_view nameDesc() const override { return "BindDescriptorSets"; }
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void displayInspector(Gui& gui) const override;
 	Matcher match(const Command&) const override;
@@ -546,9 +655,10 @@ struct DispatchCmdBase : StateCmdBase {
 	const ComputeState& state;
 	PushConstantData pushConstants;
 
+	DispatchCmdBase();
 	DispatchCmdBase(CommandBuffer&);
 
-	Type type() const override { return Type::dispatch; }
+	Category category() const override { return Category::dispatch; }
 	void displayComputeState(Gui& gui) const;
 	Matcher doMatch(const DispatchCmdBase&) const;
 
@@ -558,12 +668,12 @@ struct DispatchCmdBase : StateCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DispatchCmd final : DispatchCmdBase {
+struct DispatchCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatch> {
 	u32 groupsX {};
 	u32 groupsY {};
 	u32 groupsZ {};
 
-	using DispatchCmdBase::DispatchCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
@@ -573,11 +683,11 @@ struct DispatchCmd final : DispatchCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DispatchIndirectCmd final : DispatchCmdBase {
+struct DispatchIndirectCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatchIndirect> {
 	Buffer* buffer {};
 	VkDeviceSize offset {};
 
-	using DispatchCmdBase::DispatchCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
@@ -587,7 +697,7 @@ struct DispatchIndirectCmd final : DispatchCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct DispatchBaseCmd final : DispatchCmdBase {
+struct DispatchBaseCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatchBase> {
 	u32 baseGroupX {};
 	u32 baseGroupY {};
 	u32 baseGroupZ {};
@@ -595,7 +705,7 @@ struct DispatchBaseCmd final : DispatchCmdBase {
 	u32 groupsY {};
 	u32 groupsZ {};
 
-	using DispatchCmdBase::DispatchCmdBase;
+	using CmdDerive::CmdDerive;
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
@@ -606,7 +716,7 @@ struct DispatchBaseCmd final : DispatchCmdBase {
 };
 
 // transfer commands
-struct CopyImageCmd final : Command {
+struct CopyImageCmd final : CmdDerive<Command, CommandType::copyImage> {
 	Image* src {};
 	Image* dst {};
 	VkImageLayout srcLayout {};
@@ -615,7 +725,7 @@ struct CopyImageCmd final : Command {
 	const void* pNext {};
 
 	std::string toString() const override;
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
@@ -623,7 +733,7 @@ struct CopyImageCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct CopyBufferToImageCmd final : Command {
+struct CopyBufferToImageCmd final : CmdDerive<Command, CommandType::copyBufferToImage> {
 	Buffer* src {};
 	Image* dst {};
 	VkImageLayout dstLayout {};
@@ -631,7 +741,7 @@ struct CopyBufferToImageCmd final : Command {
 	const void* pNext {};
 
 	std::string toString() const override;
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyBufferToImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
@@ -639,7 +749,7 @@ struct CopyBufferToImageCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct CopyImageToBufferCmd final : Command {
+struct CopyImageToBufferCmd final : CmdDerive<Command, CommandType::copyImageToBuffer> {
 	Image* src {};
 	Buffer* dst {};
 	VkImageLayout srcLayout {};
@@ -647,7 +757,7 @@ struct CopyImageToBufferCmd final : Command {
 	const void* pNext {};
 
 	std::string toString() const override;
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImageToBuffer"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
@@ -655,7 +765,7 @@ struct CopyImageToBufferCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct BlitImageCmd final : Command {
+struct BlitImageCmd final : CmdDerive<Command, CommandType::blitImage> {
 	Image* src {};
 	Image* dst {};
 	VkImageLayout srcLayout {};
@@ -665,7 +775,7 @@ struct BlitImageCmd final : Command {
 	const void* pNext {};
 
 	std::string toString() const override;
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "BlitImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
@@ -673,7 +783,7 @@ struct BlitImageCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct ResolveImageCmd final : Command {
+struct ResolveImageCmd final : CmdDerive<Command, CommandType::resolveImage> {
 	Image* src {};
 	VkImageLayout srcLayout {};
 	Image* dst {};
@@ -684,13 +794,13 @@ struct ResolveImageCmd final : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "ResolveImage"; }
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct CopyBufferCmd final : Command {
+struct CopyBufferCmd final : CmdDerive<Command, CommandType::copyBuffer> {
 	Buffer* src {};
 	Buffer* dst {};
 	span<VkBufferCopy2KHR> regions;
@@ -699,13 +809,13 @@ struct CopyBufferCmd final : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyBuffer"; }
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct UpdateBufferCmd final : Command {
+struct UpdateBufferCmd final : CmdDerive<Command, CommandType::updateBuffer> {
 	Buffer* dst {};
 	VkDeviceSize offset {};
 	span<std::byte> data;
@@ -713,13 +823,13 @@ struct UpdateBufferCmd final : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "UpdateBuffer"; }
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct FillBufferCmd final : Command {
+struct FillBufferCmd final : CmdDerive<Command, CommandType::fillBuffer> {
 	Buffer* dst {};
 	VkDeviceSize offset {};
 	VkDeviceSize size {};
@@ -728,13 +838,13 @@ struct FillBufferCmd final : Command {
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "FillBuffer"; }
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct ClearColorImageCmd final : Command {
+struct ClearColorImageCmd final : CmdDerive<Command, CommandType::clearColorImage> {
 	Image* dst {};
 	VkClearColorValue color;
 	VkImageLayout dstLayout {};
@@ -742,14 +852,14 @@ struct ClearColorImageCmd final : Command {
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "ClearColorImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct ClearDepthStencilImageCmd final : Command {
+struct ClearDepthStencilImageCmd final : CmdDerive<Command, CommandType::clearDepthStencilImage> {
 	Image* dst {};
 	VkClearDepthStencilValue value {};
 	VkImageLayout dstLayout {};
@@ -757,50 +867,50 @@ struct ClearDepthStencilImageCmd final : Command {
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "ClearDepthStencilImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct ClearAttachmentCmd final : Command {
+struct ClearAttachmentCmd final : CmdDerive<Command, CommandType::clearAttachment> {
 	span<VkClearAttachment> attachments;
 	span<VkClearRect> rects;
 
 	std::string_view nameDesc() const override { return "ClearAttachment"; }
 	void displayInspector(Gui& gui) const override;
 	// NOTE: strictly speaking this isn't a transfer, we don't care.
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetEventCmd final : Command {
+struct SetEventCmd final : CmdDerive<Command, CommandType::setEvent> {
 	Event* event {};
 	VkPipelineStageFlags stageMask {};
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "SetEvent"; }
-	Type type() const override { return Type::sync; }
+	Category category() const override { return Category::sync; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetEvent2Cmd final : Barrier2CmdBase {
+struct SetEvent2Cmd final : CmdDerive<Barrier2CmdBase, CommandType::setEvent2> {
 	Event* event {};
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "SetEvent"; }
-	Type type() const override { return Type::sync; }
+	Category category() const override { return Category::sync; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct ResetEventCmd final : Command {
+struct ResetEventCmd final : CmdDerive<Command, CommandType::resetEvent> {
 	Event* event {};
 	VkPipelineStageFlags2 stageMask {};
 	bool legacy {}; // whether it's coming from a legacy (not sync2) command
@@ -810,13 +920,13 @@ struct ResetEventCmd final : Command {
 	std::string_view nameDesc() const override {
 		return legacy ? "ResetEvent" : "ResetEvent2";
 	}
-	Type type() const override { return Type::sync; }
+	Category category() const override { return Category::sync; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // Meta-command, inserted for each command buffer passed to CmdExecuteCommands
-struct ExecuteCommandsChildCmd final : ParentCommand {
+struct ExecuteCommandsChildCmd final : CmdDerive<ParentCommand, CommandType::executeCommandsChild> {
 	CommandRecord* record_ {}; // kept alive in parent CommandRecord
 	unsigned id_ {};
 
@@ -830,7 +940,7 @@ struct ExecuteCommandsChildCmd final : ParentCommand {
 	ParentCommand* firstChildParent() const override;
 };
 
-struct ExecuteCommandsCmd final : ParentCommand {
+struct ExecuteCommandsCmd final : CmdDerive<ParentCommand, CommandType::executeCommands> {
 	ExecuteCommandsChildCmd* children_ {};
 	SectionStats stats_ {};
 
@@ -846,7 +956,7 @@ struct ExecuteCommandsCmd final : ParentCommand {
 	}
 };
 
-struct BeginDebugUtilsLabelCmd final : SectionCommand {
+struct BeginDebugUtilsLabelCmd final : CmdDerive<SectionCommand, CommandType::beginDebugUtilsLabel> {
 	const char* name {};
 	std::array<float, 4> color; // NOTE: could use this in UI
 
@@ -860,14 +970,14 @@ struct BeginDebugUtilsLabelCmd final : SectionCommand {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct EndDebugUtilsLabelCmd final : Command {
+struct EndDebugUtilsLabelCmd final : CmdDerive<Command, CommandType::endDebugUtilsLabel> {
 	std::string_view nameDesc() const override { return "EndLabel"; }
-	Type type() const override { return Type::end; }
+	Category category() const override { return Category::end; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct InsertDebugUtilsLabelCmd final : Command {
+struct InsertDebugUtilsLabelCmd final : CmdDerive<Command, CommandType::insertDebugUtilsLabel> {
 	const char* name {};
 	std::array<float, 4> color; // NOTE: could use this in UI
 
@@ -876,163 +986,163 @@ struct InsertDebugUtilsLabelCmd final : Command {
 	void record(const Device&, VkCommandBuffer, u32) const override;
 };
 
-struct BindPipelineCmd final : Command {
+struct BindPipelineCmd final : CmdDerive<Command, CommandType::bindPipeline> {
 	VkPipelineBindPoint bindPoint {};
 	Pipeline* pipe {};
 
 	std::string toString() const override;
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "BindPipeline"; }
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct PushConstantsCmd final : Command {
+struct PushConstantsCmd final : CmdDerive<Command, CommandType::pushConstants> {
 	PipelineLayout* pipeLayout; // kept alive via shared_ptr in CommandBuffer
 	VkShaderStageFlags stages {};
 	u32 offset {};
 	span<std::byte> values;
 
 	std::string_view nameDesc() const override { return "PushConstants"; }
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // dynamic state
-struct SetViewportCmd final : Command {
+struct SetViewportCmd final : CmdDerive<Command, CommandType::setViewport> {
 	u32 first {};
 	span<VkViewport> viewports;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetViewport"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void displayInspector(Gui& gui) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetScissorCmd final : Command {
+struct SetScissorCmd final : CmdDerive<Command, CommandType::setScissor> {
 	u32 first {};
 	span<VkRect2D> scissors;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetScissor"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void displayInspector(Gui& gui) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetLineWidthCmd final : Command {
+struct SetLineWidthCmd final : CmdDerive<Command, CommandType::setLineWidth> {
 	float width {};
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetLineWidth"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void displayInspector(Gui& gui) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetDepthBiasCmd final : Command {
+struct SetDepthBiasCmd final : CmdDerive<Command, CommandType::setDepthBias> {
 	DynamicStateDepthBias state {};
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBias"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetDepthBoundsCmd final : Command {
+struct SetDepthBoundsCmd final : CmdDerive<Command, CommandType::setDepthBounds> {
 	float min {};
 	float max {};
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBounds"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetBlendConstantsCmd final : Command {
+struct SetBlendConstantsCmd final : CmdDerive<Command, CommandType::setBlendConstants> {
 	std::array<float, 4> values {};
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetBlendConstants"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetStencilCompareMaskCmd final : Command {
+struct SetStencilCompareMaskCmd final : CmdDerive<Command, CommandType::setStencilCompareMask> {
 	VkStencilFaceFlags faceMask {};
 	u32 value {};
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilCompareMask"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetStencilWriteMaskCmd final : Command {
+struct SetStencilWriteMaskCmd final : CmdDerive<Command, CommandType::setStencilWriteMask> {
 	VkStencilFaceFlags faceMask {};
 	u32 value {};
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilWriteMask"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetStencilReferenceCmd final : Command {
+struct SetStencilReferenceCmd final : CmdDerive<Command, CommandType::setStencilReference> {
 	VkStencilFaceFlags faceMask {};
 	u32 value {};
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilReference"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // query pool
-struct BeginQueryCmd final : Command {
+struct BeginQueryCmd final : CmdDerive<Command, CommandType::beginQuery> {
 	QueryPool* pool {};
 	u32 query {};
 	VkQueryControlFlags flags {};
 
-	Type type() const override { return Type::query; }
+	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "BeginQuery"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct EndQueryCmd final : Command {
+struct EndQueryCmd final : CmdDerive<Command, CommandType::endQuery> {
 	QueryPool* pool {};
 	u32 query {};
 
-	Type type() const override { return Type::query; }
+	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "EndQuery"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct ResetQueryPoolCmd final : Command {
+struct ResetQueryPoolCmd final : CmdDerive<Command, CommandType::resetQueryPool> {
 	QueryPool* pool {};
 	u32 first {};
 	u32 count {};
 
-	Type type() const override { return Type::query; }
+	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "ResetQueryPool"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct WriteTimestampCmd final : Command {
+struct WriteTimestampCmd final : CmdDerive<Command, CommandType::writeTimestamp> {
 	QueryPool* pool {};
 	VkPipelineStageFlagBits2 stage {};
 	u32 query {};
 	bool legacy {}; // whether it's coming from a legacy (not sync2) command
 
-	Type type() const override { return Type::query; }
+	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override {
 		return legacy ? "WriteTimestamp" : "WriteTimestamp2";
 	}
@@ -1040,7 +1150,7 @@ struct WriteTimestampCmd final : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct CopyQueryPoolResultsCmd final : Command {
+struct CopyQueryPoolResultsCmd final : CmdDerive<Command, CommandType::copyQueryPoolResults> {
 	QueryPool* pool {};
 	u32 first {};
 	u32 count {};
@@ -1049,14 +1159,14 @@ struct CopyQueryPoolResultsCmd final : Command {
 	VkDeviceSize stride {};
 	VkQueryResultFlags flags {};
 
-	Type type() const override { return Type::query; }
+	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "CopyQueryPoolResults"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // Push descriptor commands
-struct PushDescriptorSetCmd final : Command {
+struct PushDescriptorSetCmd final : CmdDerive<Command, CommandType::pushDescriptorSet> {
 	VkPipelineBindPoint bindPoint {};
 	PipelineLayout* pipeLayout {};
 	u32 set {};
@@ -1065,106 +1175,106 @@ struct PushDescriptorSetCmd final : Command {
 	// are allocated in the CommandRecord-owned memory as well.
 	span<VkWriteDescriptorSet> descriptorWrites;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "PushDescriptorSet"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct PushDescriptorSetWithTemplateCmd final : Command {
+struct PushDescriptorSetWithTemplateCmd final : CmdDerive<Command, CommandType::pushDescriptorSetWithTemplate> {
 	DescriptorUpdateTemplate* updateTemplate {};
 	PipelineLayout* pipeLayout {};
 	u32 set {};
 	span<const std::byte> data;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "PushDescriptorSetWithTemplate"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_KHR_fragment_shading_rate
-struct SetFragmentShadingRateCmd final : Command {
+struct SetFragmentShadingRateCmd final : CmdDerive<Command, CommandType::setFragmentShadingRate> {
 	VkExtent2D fragmentSize;
 	std::array<VkFragmentShadingRateCombinerOpKHR, 2> combinerOps;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetFragmentShadingRateCmd"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_conditional_rendering
-struct BeginConditionalRenderingCmd final : SectionCommand {
+struct BeginConditionalRenderingCmd final : CmdDerive<SectionCommand, CommandType::beginConditionalRendering> {
 	Buffer* buffer;
 	VkDeviceSize offset;
 	VkConditionalRenderingFlagsEXT flags;
 
-	Type type() const override { return Type::other; }
+	Category category() const override { return Category::other; }
 	std::string_view nameDesc() const override { return "BeginConditionalRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct EndConditionalRenderingCmd final : Command {
-	Type type() const override { return Type::end; }
+struct EndConditionalRenderingCmd final : CmdDerive<Command, CommandType::endConditionalRendering> {
+	Category category() const override { return Category::end; }
 	std::string_view nameDesc() const override { return "EndConditionalRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_line_rasterization
-struct SetLineStippleCmd final : Command {
+struct SetLineStippleCmd final : CmdDerive<Command, CommandType::setLineStipple> {
 	u32 stippleFactor;
 	u16 stipplePattern;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetLineStipple"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_extended_dynamic_state
-struct SetCullModeCmd final : Command {
+struct SetCullModeCmd final : CmdDerive<Command, CommandType::setCullMode> {
 	VkCullModeFlags cullMode;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetCullMode"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetFrontFaceCmd final : Command {
+struct SetFrontFaceCmd final : CmdDerive<Command, CommandType::setFrontFace> {
 	VkFrontFace frontFace;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetFrontFace"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetPrimitiveTopologyCmd final : Command {
+struct SetPrimitiveTopologyCmd final : CmdDerive<Command, CommandType::setPrimitiveTopology> {
 	VkPrimitiveTopology topology;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetPrimitiveTopology"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetViewportWithCountCmd final : Command {
+struct SetViewportWithCountCmd final : CmdDerive<Command, CommandType::setViewportWithCount> {
 	span<VkViewport> viewports;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetViewportWithCount"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetScissorWithCountCmd final : Command {
+struct SetScissorWithCountCmd final : CmdDerive<Command, CommandType::setScissorWithCount> {
 	span<VkRect2D> scissors;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetScissorWithCount"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
@@ -1172,194 +1282,193 @@ struct SetScissorWithCountCmd final : Command {
 
 // BindVertexBuffers2Cmd should be mapped via BindVertexBuffers
 
-struct SetDepthTestEnableCmd final : Command {
+struct SetDepthTestEnableCmd final : CmdDerive<Command, CommandType::setDepthTestEnable> {
 	bool enable;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthTestEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetDepthWriteEnableCmd final : Command {
+struct SetDepthWriteEnableCmd final : CmdDerive<Command, CommandType::setDepthWriteEnable> {
 	bool enable;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthWriteEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetDepthCompareOpCmd final : Command {
+struct SetDepthCompareOpCmd final : CmdDerive<Command, CommandType::setDepthCompareOp> {
 	VkCompareOp op;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthCompareOp"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetDepthBoundsTestEnableCmd final : Command {
+struct SetDepthBoundsTestEnableCmd final : CmdDerive<Command, CommandType::setDepthBoundsTestEnable> {
 	bool enable;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBoundsTestEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetStencilTestEnableCmd final : Command {
+struct SetStencilTestEnableCmd final : CmdDerive<Command, CommandType::setStencilTestEnable> {
 	bool enable;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilTestEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetStencilOpCmd final : Command {
+struct SetStencilOpCmd final : CmdDerive<Command, CommandType::setStencilOp> {
     VkStencilFaceFlags faceMask;
     VkStencilOp failOp;
     VkStencilOp passOp;
     VkStencilOp depthFailOp;
     VkCompareOp compareOp;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetStencilOp"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_extended_dynamic_state2
-struct SetPatchControlPointsCmd final : Command {
+struct SetPatchControlPointsCmd final : CmdDerive<Command, CommandType::setPatchControlPoints> {
 	u32 patchControlPoints;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetPatchControlPoints"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetRasterizerDiscardEnableCmd final : Command {
+struct SetRasterizerDiscardEnableCmd final : CmdDerive<Command, CommandType::setRasterizerDiscardEnable> {
 	bool enable;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetRasterizerDiscardEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetDepthBiasEnableCmd final : Command {
+struct SetDepthBiasEnableCmd final : CmdDerive<Command, CommandType::setDepthBias> {
 	bool enable;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDepthBiasEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetLogicOpCmd final : Command {
+struct SetLogicOpCmd final : CmdDerive<Command, CommandType::setLogicOp> {
 	VkLogicOp logicOp;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetLogicOp"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetPrimitiveRestartEnableCmd final : Command {
+struct SetPrimitiveRestartEnableCmd final : CmdDerive<Command, CommandType::setPrimitiveRestartEnable> {
 	bool enable;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetPrimitiveRestartEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_sample_locations
-struct SetSampleLocationsCmd final : Command {
+struct SetSampleLocationsCmd final : CmdDerive<Command, CommandType::setSampleLocations> {
 	VkSampleLocationsInfoEXT info;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetSampleLocations"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_discard_rectangles
-struct SetDiscardRectangleCmd final : Command {
+struct SetDiscardRectangleCmd final : CmdDerive<Command, CommandType::setDisacrdRectangle> {
 	u32 first;
 	span<VkRect2D> rects;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetDiscardRectangle"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_KHR_acceleration_structure
-struct CopyAccelStructureCmd final : Command {
+struct CopyAccelStructCmd final : CmdDerive<Command, CommandType::copyAccelStruct> {
 	const void* pNext {};
 	AccelStruct* src {};
 	AccelStruct* dst {};
     VkCopyAccelerationStructureModeKHR mode;
 
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "CopyAccelerationStructure"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct CopyAccelStructToMemoryCmd final : Command {
+struct CopyAccelStructToMemoryCmd final : CmdDerive<Command, CommandType::copyAccelStructToMemory> {
 	const void* pNext {};
 	AccelStruct* src {};
     VkDeviceOrHostAddressKHR dst {};
     VkCopyAccelerationStructureModeKHR mode;
 
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "CopyAccelerationStructureToMemory"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct CopyMemoryToAccelStructCmd final : Command {
+struct CopyMemoryToAccelStructCmd final : CmdDerive<Command, CommandType::copyMemoryToAccelStruct> {
 	const void* pNext {};
     VkDeviceOrHostAddressConstKHR src {};
 	AccelStruct* dst {};
     VkCopyAccelerationStructureModeKHR mode;
 
-	Type type() const override { return Type::transfer; }
+	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "CopyMemoryToAccelerationStructure"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct WriteAccelStructsPropertiesCmd final : Command {
+struct WriteAccelStructsPropertiesCmd final : CmdDerive<Command, CommandType::writeAccelStructsProperties> {
 	span<AccelStruct*> accelStructs;
 	VkQueryType queryType {};
 	QueryPool* queryPool {};
 	u32 firstQuery {};
 
-	Type type() const override { return Type::query; }
+	Category category() const override { return Category::query; }
 	std::string_view nameDesc() const override { return "WriteAccelerationStructuresProperties"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct BuildAccelStructsCmd final : Command {
+struct BuildAccelStructsCmd final : CmdDerive<Command, CommandType::buildAccelStructs> {
 	span<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos; // already handle-fwd-patched
 	span<span<VkAccelerationStructureBuildRangeInfoKHR>> buildRangeInfos;
 	span<AccelStruct*> srcs;
 	span<AccelStruct*> dsts;
 
-	BuildAccelStructsCmd(CommandBuffer& cb);
-	Type type() const override { return Type::buildAccelStruct; }
+	Category category() const override { return Category::buildAccelStruct; }
 	std::string_view nameDesc() const override { return "BuildAccelerationStructures"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct BuildAccelStructsIndirectCmd final : Command {
+struct BuildAccelStructsIndirectCmd final : CmdDerive<Command, CommandType::buildAccelStructsIndirect> {
 	span<VkAccelerationStructureBuildGeometryInfoKHR> buildInfos; // already handle-fwd-patched
 	span<AccelStruct*> srcs;
 	span<AccelStruct*> dsts;
@@ -1369,8 +1478,7 @@ struct BuildAccelStructsIndirectCmd final : Command {
 	span<u32> indirectStrides;
 	span<u32*> maxPrimitiveCounts;
 
-	BuildAccelStructsIndirectCmd(CommandBuffer& cb);
-	Type type() const override { return Type::buildAccelStruct; }
+	Category category() const override { return Category::buildAccelStruct; }
 	std::string_view nameDesc() const override { return "BuildAccelerationStructuresIndirect"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
@@ -1381,8 +1489,10 @@ struct TraceRaysCmdBase : StateCmdBase {
 	const RayTracingState& state;
 	PushConstantData pushConstants;
 
+	TraceRaysCmdBase();
 	TraceRaysCmdBase(CommandBuffer& cb);
-	Type type() const override { return Type::traceRays; }
+
+	Category category() const override { return Category::traceRays; }
 	Matcher doMatch(const TraceRaysCmdBase& cmd) const;
 
 	const DescriptorState& boundDescriptors() const override { return state; }
@@ -1391,7 +1501,7 @@ struct TraceRaysCmdBase : StateCmdBase {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct TraceRaysCmd final : TraceRaysCmdBase {
+struct TraceRaysCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRays> {
 	u32 width;
 	u32 height;
 	u32 depth;
@@ -1401,38 +1511,38 @@ struct TraceRaysCmd final : TraceRaysCmdBase {
 	VkStridedDeviceAddressRegionKHR hitBindingTable;
 	VkStridedDeviceAddressRegionKHR callableBindingTable;
 
-	using TraceRaysCmdBase::TraceRaysCmdBase;
+	using CmdDerive::CmdDerive;
 	std::string_view nameDesc() const override { return "TraceRays"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct TraceRaysIndirectCmd final : TraceRaysCmdBase {
+struct TraceRaysIndirectCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRaysIndirect> {
 	VkDeviceAddress indirectDeviceAddress;
 	VkStridedDeviceAddressRegionKHR raygenBindingTable;
 	VkStridedDeviceAddressRegionKHR missBindingTable;
 	VkStridedDeviceAddressRegionKHR hitBindingTable;
 	VkStridedDeviceAddressRegionKHR callableBindingTable;
 
-	using TraceRaysCmdBase::TraceRaysCmdBase;
+	using CmdDerive::CmdDerive;
 	std::string_view nameDesc() const override { return "TraceRaysIndirect"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-struct SetRayTracingPipelineStackSizeCmd final : Command {
+struct SetRayTracingPipelineStackSizeCmd final : CmdDerive<Command, CommandType::setRayTracingPipelineStackSize> {
 	u32 stackSize;
 
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 	std::string_view nameDesc() const override { return "SetRayTracingPipelineStackSize"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_KHR_dynamic_rendering
-struct BeginRenderingCmd final : RenderSectionCommand {
+struct BeginRenderingCmd final : CmdDerive<RenderSectionCommand, CommandType::beginRendering> {
 	struct Attachment {
 		ImageView* view {};
 		VkImageLayout imageLayout;
@@ -1468,31 +1578,31 @@ struct BeginRenderingCmd final : RenderSectionCommand {
 	// TODO: toString?
 };
 
-struct EndRenderingCmd final : SectionCommand {
+struct EndRenderingCmd final : CmdDerive<SectionCommand, CommandType::endRendering> {
 	std::string_view nameDesc() const override { return "EndRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
 // VK_EXT_vertex_input_dynamic_state
-struct SetVertexInputCmd final : Command {
+struct SetVertexInputCmd final : CmdDerive<Command, CommandType::setVertexInput> {
 	span<VkVertexInputBindingDescription2EXT> bindings;
 	span<VkVertexInputAttributeDescription2EXT> attribs;
 
 	std::string_view nameDesc() const override { return "SetVertexInput"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 };
 
 // VK_EXT_color_write_enable
-struct SetColorWriteEnableCmd final : Command {
+struct SetColorWriteEnableCmd final : CmdDerive<Command, CommandType::setColorWriteEnable> {
 	span<VkBool32> writeEnables;
 
 	std::string_view nameDesc() const override { return "SetColorWriteEnable"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-	Type type() const override { return Type::bind; }
+	Category category() const override { return Category::bind; }
 };
 
 // Visitor
@@ -1527,6 +1637,39 @@ void doVisit(CommandVisitor& v, C& cmd) {
 // Return true for indirect commands (i.e. state or transfer commands that
 // contain command information in a passed address/buffer)
 bool isIndirect(const Command&);
+
+// Should be a lot faster than dynamic_cast on most compilers.
+// Designed to be a drop-in replacmenet for dynamic_cast.
+template<typename DstCmd, typename SrcCmd>
+std::enable_if_t<std::is_pointer_v<DstCmd>, DstCmd> commandCast(SrcCmd* cmd) {
+	using D = std::remove_pointer_t<DstCmd>;
+	if(cmd && cmd->type() == D::staticType()) {
+		return static_cast<DstCmd>(cmd);
+	}
+
+	return nullptr;
+}
+
+template<typename DstCmd, typename SrcCmd>
+std::enable_if_t<std::is_pointer_v<DstCmd>, DstCmd> commandCast(SrcCmd& cmd) {
+	using D = std::remove_pointer_t<DstCmd>;
+	if(cmd.type() == D::staticType()) {
+		return static_cast<DstCmd>(&cmd);
+	}
+
+	return nullptr;
+}
+
+template<typename DstCmd, typename SrcCmd>
+std::enable_if_t<std::is_reference_v<DstCmd>, DstCmd> commandCast(SrcCmd& cmd) {
+	using D = std::remove_reference_t<DstCmd>;
+	if(cmd.type() == D::staticType()) {
+		return static_cast<DstCmd>(cmd);
+	}
+
+	throw std::bad_cast();
+}
+
 
 } // namespace vil
 

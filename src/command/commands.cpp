@@ -736,7 +736,7 @@ void WaitEventsCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher WaitEventsCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const WaitEventsCmd*>(&base);
+	auto* cmd = commandCast<const WaitEventsCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -764,7 +764,7 @@ void WaitEvents2Cmd::displayInspector(Gui& gui) const {
 }
 
 Matcher WaitEvents2Cmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const WaitEvents2Cmd*>(&base);
+	auto* cmd = commandCast<const WaitEvents2Cmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -793,7 +793,7 @@ void BarrierCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher BarrierCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const BarrierCmd*>(&base);
+	auto* cmd = commandCast<const BarrierCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -819,7 +819,7 @@ void Barrier2Cmd::displayInspector(Gui& gui) const {
 }
 
 Matcher Barrier2Cmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const Barrier2Cmd*>(&base);
+	auto* cmd = commandCast<const Barrier2Cmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1004,7 +1004,7 @@ bool addAllowSwapchainViews(Matcher& m, ImageView* va, ImageView* vb) {
 }
 
 Matcher BeginRenderPassCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const BeginRenderPassCmd*>(&base);
+	auto* cmd = commandCast<const BeginRenderPassCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1064,7 +1064,7 @@ void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 }
 
 Matcher NextSubpassCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const NextSubpassCmd*>(&base);
+	auto* cmd = commandCast<const NextSubpassCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1084,6 +1084,10 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const 
 }
 
 // DrawCmdBase
+const GraphicsState emptyGraphicsState {};
+DrawCmdBase::DrawCmdBase() : state(emptyGraphicsState) {
+}
+
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb) :
 		state(cb.graphicsState()), pushConstants(cb.pushConstants()) {
 }
@@ -1283,7 +1287,7 @@ void DrawCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher DrawCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DrawCmd*>(&base);
+	auto* cmd = commandCast<const DrawCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1341,7 +1345,7 @@ std::string DrawIndirectCmd::toString() const {
 }
 
 Matcher DrawIndirectCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DrawIndirectCmd*>(&base);
+	auto* cmd = commandCast<const DrawIndirectCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1393,7 +1397,7 @@ void DrawIndexedCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher DrawIndexedCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DrawIndexedCmd*>(&base);
+	auto* cmd = commandCast<const DrawIndexedCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1458,7 +1462,7 @@ void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher DrawIndirectCountCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&base);
+	auto* cmd = commandCast<const DrawIndirectCountCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1503,7 +1507,7 @@ void DrawMultiCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 		vertexInfos.data(), instanceCount, firstInstance, ourStride);
 }
 Matcher DrawMultiCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DrawMultiCmd*>(&base);
+	auto* cmd = commandCast<const DrawMultiCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1538,7 +1542,7 @@ void DrawMultiIndexedCmd::record(const Device& dev, VkCommandBuffer cb, u32) con
 		vertexOffset ? &*vertexOffset : nullptr);
 }
 Matcher DrawMultiIndexedCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DrawMultiIndexedCmd*>(&base);
+	auto* cmd = commandCast<const DrawMultiIndexedCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1597,7 +1601,7 @@ void BindVertexBuffersCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher BindVertexBuffersCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const BindVertexBuffersCmd*>(&rhs);
+	auto* cmd = commandCast<const BindVertexBuffersCmd*>(&rhs);
 	if(!cmd || firstBinding != cmd->firstBinding) {
 		return Matcher::noMatch();
 	}
@@ -1617,7 +1621,7 @@ void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 }
 
 Matcher BindIndexBufferCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const BindIndexBufferCmd*>(&rhs);
+	auto* cmd = commandCast<const BindIndexBufferCmd*>(&rhs);
 	if(!cmd || indexType != cmd->indexType) {
 		return Matcher::noMatch();
 	}
@@ -1681,7 +1685,7 @@ void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const BindDescriptorSetCmd*>(&rhs);
+	auto* cmd = commandCast<const BindDescriptorSetCmd*>(&rhs);
 	if(!cmd || firstSet != cmd->firstSet ||
 			pipeBindPoint != cmd->pipeBindPoint || pipeLayout != cmd->pipeLayout) {
 		return Matcher::noMatch();
@@ -1698,6 +1702,10 @@ Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
 }
 
 // DispatchCmdBase
+const ComputeState emptyComputeState {};
+DispatchCmdBase::DispatchCmdBase() : state(emptyComputeState) {
+}
+
 DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) :
 		state(cb.computeState()), pushConstants(cb.pushConstants()) {
 }
@@ -1748,7 +1756,7 @@ void DispatchCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher DispatchCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DispatchCmd*>(&base);
+	auto* cmd = commandCast<const DispatchCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1789,7 +1797,7 @@ std::string DispatchIndirectCmd::toString() const {
 }
 
 Matcher DispatchIndirectCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DispatchIndirectCmd*>(&base);
+	auto* cmd = commandCast<const DispatchIndirectCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1823,7 +1831,7 @@ void DispatchBaseCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher DispatchBaseCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const DispatchBaseCmd*>(&base);
+	auto* cmd = commandCast<const DispatchBaseCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1910,7 +1918,7 @@ void CopyImageCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher CopyImageCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const CopyImageCmd*>(&rhs);
+	auto* cmd = commandCast<const CopyImageCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -1975,7 +1983,7 @@ std::string CopyBufferToImageCmd::toString() const {
 }
 
 Matcher CopyBufferToImageCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const CopyBufferToImageCmd*>(&rhs);
+	auto* cmd = commandCast<const CopyBufferToImageCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2038,7 +2046,7 @@ std::string CopyImageToBufferCmd::toString() const {
 }
 
 Matcher CopyImageToBufferCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const CopyImageToBufferCmd*>(&rhs);
+	auto* cmd = commandCast<const CopyImageToBufferCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2118,7 +2126,7 @@ std::string BlitImageCmd::toString() const {
 }
 
 Matcher BlitImageCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const BlitImageCmd*>(&rhs);
+	auto* cmd = commandCast<const BlitImageCmd*>(&rhs);
 	if(!cmd || filter != cmd->filter) {
 		return Matcher::noMatch();
 	}
@@ -2197,7 +2205,7 @@ std::string ResolveImageCmd::toString() const {
 }
 
 Matcher ResolveImageCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const ResolveImageCmd*>(&rhs);
+	auto* cmd = commandCast<const ResolveImageCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2261,7 +2269,7 @@ std::string CopyBufferCmd::toString() const {
 }
 
 Matcher CopyBufferCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const CopyBufferCmd*>(&rhs);
+	auto* cmd = commandCast<const CopyBufferCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2298,7 +2306,7 @@ void UpdateBufferCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher UpdateBufferCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const UpdateBufferCmd*>(&rhs);
+	auto* cmd = commandCast<const UpdateBufferCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2333,7 +2341,7 @@ void FillBufferCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher FillBufferCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const FillBufferCmd*>(&rhs);
+	auto* cmd = commandCast<const FillBufferCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2367,7 +2375,7 @@ void ClearColorImageCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher ClearColorImageCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const ClearColorImageCmd*>(&rhs);
+	auto* cmd = commandCast<const ClearColorImageCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2406,7 +2414,7 @@ void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher ClearDepthStencilImageCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const ClearDepthStencilImageCmd*>(&rhs);
+	auto* cmd = commandCast<const ClearDepthStencilImageCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2436,7 +2444,7 @@ void ClearAttachmentCmd::displayInspector(Gui& gui) const {
 }
 
 Matcher ClearAttachmentCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const ClearAttachmentCmd*>(&rhs);
+	auto* cmd = commandCast<const ClearAttachmentCmd*>(&rhs);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -2525,7 +2533,7 @@ void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 	std::vector<VkCommandBuffer> vkcbs;
 	auto child = children_;
 	while(child) {
-		auto* echild = dynamic_cast<ExecuteCommandsChildCmd*>(child);
+		auto* echild = commandCast<ExecuteCommandsChildCmd*>(child);
 		dlg_assert(echild);
 		dlg_assert(echild->record_->cb);
 		vkcbs.push_back(echild->record_->cb->handle());
@@ -2538,7 +2546,7 @@ void ExecuteCommandsCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 }
 
 void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
-	auto echild = dynamic_cast<ExecuteCommandsChildCmd*>(children_);
+	auto echild = commandCast<ExecuteCommandsChildCmd*>(children_);
 	while(echild) {
 		// TODO: could link to command buffer (if still valid/linked)
 		auto label = dlg::format("View Recording {}", echild->id_);
@@ -2550,7 +2558,7 @@ void ExecuteCommandsCmd::displayInspector(Gui& gui) const {
 			gui.activateTab(Gui::Tab::commandBuffer);
 		}
 
-		echild = dynamic_cast<ExecuteCommandsChildCmd*>(echild->next);
+		echild = commandCast<ExecuteCommandsChildCmd*>(echild->next);
 	}
 }
 
@@ -2586,7 +2594,7 @@ void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb, u32)
 }
 
 Matcher BeginDebugUtilsLabelCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const BeginDebugUtilsLabelCmd*>(&rhs);
+	auto* cmd = commandCast<const BeginDebugUtilsLabelCmd*>(&rhs);
 	if(!cmd || std::strcmp(cmd->name, this->name) != 0) {
 		return Matcher::noMatch();
 	}
@@ -2633,7 +2641,7 @@ std::string BindPipelineCmd::toString() const {
 }
 
 Matcher BindPipelineCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const BindPipelineCmd*>(&rhs);
+	auto* cmd = commandCast<const BindPipelineCmd*>(&rhs);
 	if(!cmd || cmd->bindPoint != this->bindPoint || cmd->pipe != this->pipe) {
 		return Matcher::noMatch();
 	}
@@ -2648,7 +2656,7 @@ void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const 
 }
 
 Matcher PushConstantsCmd::match(const Command& rhs) const {
-	auto* cmd = dynamic_cast<const PushConstantsCmd*>(&rhs);
+	auto* cmd = commandCast<const PushConstantsCmd*>(&rhs);
 
 	// hard matching on metadata here. The data is irrelevant when
 	// the push destination isn't the same.
@@ -2887,7 +2895,7 @@ void SetDiscardRectangleCmd::record(const Device& dev, VkCommandBuffer cb, u32) 
 }
 
 // VK_KHR_acceleration_structure
-void CopyAccelStructureCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
+void CopyAccelStructCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	VkCopyAccelerationStructureInfoKHR info {};
 	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
 	info.pNext = pNext;
@@ -2927,10 +2935,6 @@ void WriteAccelStructsPropertiesCmd::record(const Device& dev, VkCommandBuffer c
 }
 
 // BuildAccelStructs
-BuildAccelStructsCmd::BuildAccelStructsCmd(CommandBuffer& cb) {
-	(void) cb;
-}
-
 void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dlg_assert(buildInfos.size() == buildRangeInfos.size());
 
@@ -2944,10 +2948,6 @@ void BuildAccelStructsCmd::record(const Device& dev, VkCommandBuffer cb, u32) co
 		buildInfos.data(), ppRangeInfos.data());
 }
 
-BuildAccelStructsIndirectCmd::BuildAccelStructsIndirectCmd(CommandBuffer& cb) {
-	(void) cb;
-}
-
 void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdBuildAccelerationStructuresIndirectKHR(cb, u32(buildInfos.size()),
 		buildInfos.data(), indirectAddresses.data(), indirectStrides.data(),
@@ -2955,6 +2955,10 @@ void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb,
 }
 
 // VK_KHR_ray_tracing_pipeline
+const RayTracingState emptyRayTracingState {};
+TraceRaysCmdBase::TraceRaysCmdBase() : state(emptyRayTracingState) {
+}
+
 TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb) :
 		state(cb.rayTracingState()), pushConstants(cb.pushConstants()) {
 }
@@ -2991,7 +2995,7 @@ void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 }
 
 Matcher TraceRaysCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const TraceRaysCmd*>(&base);
+	auto* cmd = commandCast<const TraceRaysCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -3021,7 +3025,7 @@ void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) co
 }
 
 Matcher TraceRaysIndirectCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const TraceRaysCmd*>(&base);
+	auto* cmd = commandCast<const TraceRaysCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -3121,7 +3125,7 @@ const BeginRenderingCmd::Attachment* BeginRenderingCmd::findAttachment(const Ima
 }
 
 Matcher BeginRenderingCmd::match(const Command& base) const {
-	auto* cmd = dynamic_cast<const BeginRenderingCmd*>(&base);
+	auto* cmd = commandCast<const BeginRenderingCmd*>(&base);
 	if(!cmd) {
 		return Matcher::noMatch();
 	}
@@ -3194,15 +3198,11 @@ void SetColorWriteEnableCmd::record(const Device& dev, VkCommandBuffer cb, u32) 
 }
 
 bool isIndirect(const Command& cmd) {
-	auto drawIndirectCmd = dynamic_cast<const DrawIndirectCmd*>(&cmd);
-	auto dispatchIndirectCmd = dynamic_cast<const DispatchIndirectCmd*>(&cmd);
-	auto drawIndirectCountCmd = dynamic_cast<const DrawIndirectCountCmd*>(&cmd);
-	auto traceRaysIndirectCmd = dynamic_cast<const TraceRaysIndirectCmd*>(&cmd);
-
-	return dispatchIndirectCmd ||
-		drawIndirectCmd ||
-		drawIndirectCountCmd ||
-		traceRaysIndirectCmd;
+	return
+		cmd.type() == CommandType::drawIndirect ||
+		cmd.type() == CommandType::drawIndirectCount ||
+		cmd.type() == CommandType::dispatchIndirect ||
+		cmd.type() == CommandType::traceRaysIndirect;
 }
 
 } // namespace vil

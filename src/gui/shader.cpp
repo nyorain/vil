@@ -430,16 +430,16 @@ Vec3ui ShaderDebugger::numWorkgroups() const {
 	// TODO: cache/compute only if needed
 	auto* baseCmd = selection().command().back();
 	Vec3ui numWGs {};
-	if(auto* idcmd = dynamic_cast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
+	if(auto* idcmd = commandCast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
 		auto hookState = selection().completedHookState();
 		dlg_assert(hookState);
 		auto& ic = hookState->indirectCopy;
 		auto span = ic.data();
 		auto ecmd = read<VkDispatchIndirectCommand>(span);
 		numWGs = {ecmd.x, ecmd.y, ecmd.z};
-	} else if(auto* dcmd = dynamic_cast<const DispatchCmd*>(baseCmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DispatchCmd*>(baseCmd); dcmd) {
 		numWGs = {dcmd->groupsX, dcmd->groupsY, dcmd->groupsZ};
-	} else if(auto* dcmd = dynamic_cast<const DispatchBaseCmd*>(baseCmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DispatchBaseCmd*>(baseCmd); dcmd) {
 		numWGs = {dcmd->groupsX, dcmd->groupsY, dcmd->groupsZ};
 	} else {
 		dlg_error("unreachable");
@@ -1057,10 +1057,10 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	// since the shader might read that var
 	// TODO: only do it if the shader accesses the variable?
 	auto* baseCmd = selection().command().back();
-	if(dynamic_cast<const DispatchIndirectCmd*>(baseCmd) ||
-			dynamic_cast<const DrawIndirectCmd*>(baseCmd) ||
-			dynamic_cast<const DrawIndirectCountCmd*>(baseCmd) ||
-			dynamic_cast<const TraceRaysIndirectCmd*>(baseCmd)) {
+	if(commandCast<const DispatchIndirectCmd*>(baseCmd) ||
+			commandCast<const DrawIndirectCmd*>(baseCmd) ||
+			commandCast<const DrawIndirectCountCmd*>(baseCmd) ||
+			commandCast<const TraceRaysIndirectCmd*>(baseCmd)) {
 		ops.copyIndirectCmd = true;
 	}
 

@@ -965,20 +965,20 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		}
 	};
 
-	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
+	if(auto* dcmd = commandCast<const DrawCmd*>(&cmd); dcmd) {
 		params.offset = dcmd->firstVertex;
 		params.drawCount = dcmd->vertexCount;
 		params.instanceID = dcmd->firstInstance;
-	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DrawIndexedCmd*>(&cmd); dcmd) {
 		params.offset = dcmd->firstIndex;
 		params.vertexOffset = dcmd->vertexOffset;
 		params.drawCount = dcmd->indexCount;
 		params.indexType = dcmd->state.indices.type;
 		params.instanceID = dcmd->firstInstance;
-	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DrawIndirectCmd*>(&cmd); dcmd) {
 		auto i = dcmd->indexed ? std::optional(dcmd->state.indices.type) : std::nullopt;
 		displayCmdSlider(i, dcmd->stride);
-	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
 		auto i = dcmd->indexed ? std::optional(dcmd->state.indices.type) : std::nullopt;
 		displayCmdSlider(i, dcmd->stride, 4u); // skip u32 count
 	} else {
@@ -1312,16 +1312,16 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		}
 	};
 
-	if(auto* dcmd = dynamic_cast<const DrawCmd*>(&cmd); dcmd) {
+	if(auto* dcmd = commandCast<const DrawCmd*>(&cmd); dcmd) {
 		vertexCount = dcmd->vertexCount * dcmd->instanceCount;
-	} else if(auto* dcmd = dynamic_cast<const DrawIndexedCmd*>(&cmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DrawIndexedCmd*>(&cmd); dcmd) {
 		vertexCount = dcmd->indexCount * dcmd->instanceCount;
-	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCmd*>(&cmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DrawIndirectCmd*>(&cmd); dcmd) {
 		displayCmdSlider(dcmd->indexed, dcmd->stride);
 		if(selectedID_ == u32(-1)) {
 			return;
 		}
-	} else if(auto* dcmd = dynamic_cast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
+	} else if(auto* dcmd = commandCast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
 		displayCmdSlider(dcmd->indexed, dcmd->stride, 4u); // skip u32 count in the beginning
 		if(selectedID_ == u32(-1)) {
 			return;

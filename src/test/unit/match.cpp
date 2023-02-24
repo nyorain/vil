@@ -55,13 +55,13 @@ TEST(unit_match_simple_record) {
 	Device dev;
 	dev.captureCmdStack.store(false);
 
-	RecordBuilder rb(dev);
+	RecordBuilder rb(&dev);
 	rb.add<BarrierCmd>();
 	rb.add<BarrierCmd>();
 	rb.add<BarrierCmd>();
 	auto rec3Barriers = rb.record_;
 
-	rb.reset(dev);
+	rb.reset(&dev);
 	auto recEmpty = rb.record_;
 
 	ThreadMemScope tms;
@@ -78,14 +78,14 @@ TEST(unit_match_labels) {
 	Device dev;
 	dev.captureCmdStack.store(false);
 
-	RecordBuilder rb(dev);
+	RecordBuilder rb(&dev);
 	auto& a1 = emptyLabelSection(rb, "1");
 	auto& a2 = emptyLabelSection(rb, "2");
 	auto& a3 = emptyLabelSection(rb, "3"); (void) a3;
 	auto& a4 = emptyLabelSection(rb, "4");
 	auto recA = rb.record_;
 
-	rb.reset(dev);
+	rb.reset(&dev);
 	auto& b1 = emptyLabelSection(rb, "1");
 	auto& b2 = emptyLabelSection(rb, "2");
 	auto& b4 = emptyLabelSection(rb, "4");

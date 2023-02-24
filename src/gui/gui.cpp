@@ -12,6 +12,7 @@
 #include <commandHook/hook.hpp>
 #include <commandHook/record.hpp>
 #include <layer.hpp>
+#include <serialize.hpp>
 #include <swapchain.hpp>
 #include <image.hpp>
 #include <buffer.hpp>
@@ -25,6 +26,7 @@
 #include <nytl/bytes.hpp>
 #include <nytl/vecOps.hpp>
 #include <util/profiling.hpp>
+#include <imgio/file.hpp>
 
 #include <vil_api.h>
 #include <imgui/imgui.h>
@@ -36,6 +38,11 @@
 #include <map>
 #include <fstream>
 #include <filesystem>
+#include <cstdio>
+#include <cstring>
+#include <cerrno>
+
+namespace fs = std::filesystem;
 
 #ifdef VIL_DEBUG
 	// NOTE: tmp deubgging tool for the LMM algorithm
@@ -2629,6 +2636,68 @@ ImageViewer& Gui::standaloneImageViewer() {
 		tabs_.imageViewer->init(*this);
 	}
 	return *tabs_.imageViewer;
+}
+
+// TODO: proper header:
+// - magic value
+// - version id
+
+void Gui::saveState() {
+	auto serializerPtr = createStateSaver();
+	auto& saver = *serializerPtr;
+
+	DynWriteBuf ownBuf;
+	write(ownBuf, u32(activeTab_));
+	tabs_.cb->save(saver, ownBuf);
+
+	// write file
+	auto path = fs::path(stateFile);
+	auto binary = true;
+
+	errno = 0;
+	auto f = imgio::openFile(path.c_str(), binary ? "wb" : "w"); // RAII
+	if(!f) {
+		dlg_error("Could not open '{}' for writing: {}", path, std::strerror(errno));
+		return;
+	}
+
+	auto loaderData = getData(saver);
+
+	DynWriteBuf header;
+	write(header, u64(loaderData.size()));
+
+	std::fwrite(header.data(), 1u, header.size(), f);
+	std::fwrite(loaderData.data(), 1u, loaderData.size(), f);
+	std::fwrite(ownBuf.data(), 1u, ownBuf.size(), f);
+
+	f = {};
+	dlg_trace("saved '{}': loaderSize {}, ownBufSize {}",
+		path, loaderData.size(), ownBuf.size());
+}
+
+void Gui::loadState() {
+	// read file
+	auto path = fs::path(stateFile);
+	if(!fs::exists(path)) {
+		dlg_trace("'{}' does not exist", path);
+		return;
+	}
+
+	auto dataVec = imgio::readFile<std::vector<std::byte>>(path.c_str());
+	auto buf = ReadBuf(dataVec);
+
+	// read header
+	auto loaderSize = read<u64>(buf);
+
+	auto loaderBuf = buf.subspan(0, loaderSize);
+	auto ownBuf = buf.subspan(loaderSize);
+
+	auto loadPtr = createStateLoader(loaderBuf);
+	auto& load = *loadPtr;
+
+	activeTab_ = Tab(read<u32>(ownBuf));
+	tabs_.cb->load(load, ownBuf);
+	dlg_assert(ownBuf.empty());
 }
 
 } // namespace vil

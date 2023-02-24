@@ -65,7 +65,7 @@ template<typename T>
 
 [[nodiscard]] inline
 const char* copyString(CommandAlloc rec, std::string_view src) {
-	auto dst = allocUndef<char>(rec, src.size() + 2);
+	auto dst = allocUndef<char>(rec, src.size() + 1);
 	std::copy(src.begin(), src.end(), dst.data());
 	dst[src.size()] = 0;
 	return dst.data();
