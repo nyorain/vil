@@ -52,6 +52,7 @@ urgent, bugs:
 	  (try to test with RDR2 again)
 
 new, workstack:
+- [ ] add isStateCmd(const Command&) and remove remaining command dynamic casts
 - [ ] handle imgui cursor-to-be-shown and clipboard
 	- [ ] make sure to pass it via interface
 	- [ ] with hooked overlay, we have to implement it ourselves

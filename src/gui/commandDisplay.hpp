@@ -5,6 +5,7 @@
 #include <command/record.hpp>
 #include <imgui/imgui.h>
 #include <gui/util.hpp>
+#include <util/util.hpp>
 
 namespace vil {
 
@@ -12,7 +13,7 @@ struct DisplayVisitor : CommandVisitor {
 	std::unordered_set<const ParentCommand*>& openedSections_;
 
 	const Command* sel_;
-	Command::TypeFlags flags_;
+	Command::CategoryFlags flags_;
 	std::vector<const Command*> newSelection_;
 
 	// whether to use broken-hierarchy mode
@@ -25,7 +26,7 @@ struct DisplayVisitor : CommandVisitor {
 	bool showSingleSections_ {};
 
 	DisplayVisitor(std::unordered_set<const ParentCommand*>& opened,
-			const Command* sel, Command::TypeFlags flags, bool labelOnlyIndent) :
+			const Command* sel, Command::CategoryFlags flags, bool labelOnlyIndent) :
 		openedSections_(opened), sel_(sel), flags_(flags), labelOnlyIndent_(labelOnlyIndent) {
 	}
 
@@ -87,7 +88,7 @@ struct DisplayVisitor : CommandVisitor {
 		while(cmd) {
 
 			// No matter the flags, we never want to hide parent commands.
-			auto visible = (flags_ & cmd->type()) || (cmd == sel_);
+			auto visible = (flags_ & cmd->category()) || (cmd == sel_);
 			if(open_ && visible) {
 				if(showSep) {
 					ImGui::Separator();
@@ -180,7 +181,7 @@ struct DisplayVisitor : CommandVisitor {
 
 	void display(const Command& cmd) {
 		// never skip the selected command
-		auto visible = (flags_ & cmd.type()) || (&cmd == sel_);
+		auto visible = (flags_ & cmd.category()) || (&cmd == sel_);
 		if(!visible || !open_) {
 			return;
 		}
@@ -271,7 +272,7 @@ struct DisplayVisitor : CommandVisitor {
 				// for single-subpass renderpasses, this should
 				// be the EndRenderPassCmd
 				dlg_assert(first->next);
-				if(dynamic_cast<EndRenderPassCmd*>(first->next)) {
+				if(commandCast<EndRenderPassCmd*>(first->next)) {
 					children = first->children_;
 				}
 			}

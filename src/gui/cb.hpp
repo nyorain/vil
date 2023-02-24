@@ -13,6 +13,8 @@ namespace vil {
 
 struct FrameSubmission;
 struct FrameMatch;
+struct StateSaver;
+struct StateLoader;
 
 class CommandRecordGui {
 public:
@@ -32,6 +34,9 @@ public:
 
 	auto& commandViewer() { return commandViewer_; }
 	auto& selector() { return selector_; }
+
+	void save(StateSaver&, DynWriteBuf& buf);
+	void load(StateLoader&, ReadBuf& buf);
 
 private:
 	void updateFromSelector();
@@ -82,7 +87,7 @@ private:
 	} tmp_;
 
 	// The commands to display
-	CommandTypeFlags commandFlags_ {};
+	CommandCategoryFlags commandFlags_ {};
 
 	// Whether to only nest labels, supporting hierarchy-braking label nesting.
 	// We currently enable it the first time we encounter such a record.

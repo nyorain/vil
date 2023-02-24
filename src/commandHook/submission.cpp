@@ -73,7 +73,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	if(record->state->indirectCopy.buf) {
 		auto& bcmd = *record->hcommand.back();
 
-		if(auto* cmd = dynamic_cast<const DrawIndirectCountCmd*>(&bcmd)) {
+		if(auto* cmd = commandCast<const DrawIndirectCountCmd*>(&bcmd)) {
 			dlg_assert(record->state->indirectCopy.size >= 4u);
 			auto* count = reinterpret_cast<const u32*>(record->state->indirectCopy.map);
 			record->state->indirectCommandCount = *count;
@@ -90,7 +90,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 			// record->state->indirectCopy.cpuCopy(4u, cmdsSize);
 			// record->state->indirectCopy.copyOffset = 0u;
 			record->state->indirectCopy.invalidateMap();
-		} else if(auto* cmd = dynamic_cast<const DrawIndirectCmd*>(&bcmd)) {
+		} else if(auto* cmd = commandCast<const DrawIndirectCmd*>(&bcmd)) {
 			[[maybe_unused]] auto cmdSize = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
@@ -98,12 +98,12 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 			record->state->indirectCommandCount = cmd->drawCount;
 			record->state->indirectCopy.invalidateMap();
-		} else if(dynamic_cast<const DispatchIndirectCmd*>(&bcmd)) {
+		} else if(commandCast<const DispatchIndirectCmd*>(&bcmd)) {
 			dlg_assert(record->state->indirectCopy.size == sizeof(VkDispatchIndirectCommand));
 
 			record->state->indirectCommandCount = 1u;
 			record->state->indirectCopy.invalidateMap();
-		} else if(dynamic_cast<const TraceRaysIndirectCmd*>(&bcmd)) {
+		} else if(commandCast<const TraceRaysIndirectCmd*>(&bcmd)) {
 			dlg_assert(record->state->indirectCopy.size == sizeof(VkTraceRaysIndirectCommandKHR));
 
 			record->state->indirectCommandCount = 1u;
