@@ -278,6 +278,18 @@ static const ObjectTypeHandler* typeHandlers[] = {
 
 const span<const ObjectTypeHandler*> ObjectTypeHandler::handlers = typeHandlers;
 
+const ObjectTypeHandler* ObjectTypeHandler::handler(VkObjectType type) {
+	for(auto& handler : ObjectTypeHandler::handlers) {
+		if(handler->objectType() == type) {
+			return handler;
+		}
+	}
+
+	dlg_warn("Requested object type handler for unknown type {} ({})",
+		vk::name(type), u64(type));
+	return nullptr;
+}
+
 Handle* findHandle(Device& dev, VkObjectType objectType, u64 handle, u64& fwdID) {
 	for(auto& handler : ObjectTypeHandler::handlers) {
 		if(handler->objectType() == objectType) {

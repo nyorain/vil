@@ -1297,7 +1297,7 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 	auto* drawCmd = deriveCast<const DrawCmdBase*>(&cmd);
 
 	dlg_assert_or(drawCmd, return);
-	dlg_assert_or(drawCmd->state.pipe, return);
+	dlg_assert_or(drawCmd->state->pipe, return);
 
 	auto hookState = selection().completedHookState();
 	if(!hookState) {
@@ -1507,8 +1507,8 @@ void CommandViewer::displayCommand() {
 	if(command_.back()->category() == CommandCategory::dispatch) {
 		auto* dcmd = deriveCast<const DispatchCmdBase*>(command_.back());
 		if(ImGui::Button("Debug shader")) {
-			if(dcmd->state.pipe) {
-				auto mod = copySpecializeSpirv(dcmd->state.pipe->stage);
+			if(dcmd->state->pipe) {
+				auto mod = copySpecializeSpirv(dcmd->state->pipe->stage);
 				shaderDebugger_.select(std::move(mod));
 				view_ = IOView::shader;
 				doUpdateHook_ = true;

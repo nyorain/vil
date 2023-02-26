@@ -258,12 +258,12 @@ void CommandHookRecord::dispatchRecord(Command& cmd, RecordInfo& info) {
 		auto& dcmd = static_cast<const DispatchCmdBase&>(cmd);
 
 		// pipe, descriptors
-		bind(dev, this->cb, dcmd.state);
+		bind(dev, this->cb, *dcmd.state);
 
 		// push constants
 		if(!dcmd.pushConstants.data.empty()) {
 			auto data = dcmd.pushConstants.data;
-			auto& layout = dcmd.state.pipe->layout;
+			auto& layout = dcmd.state->pipe->layout;
 			for(auto& pcr : layout->pushConstants) {
 				if(!(pcr.stageFlags & VK_SHADER_STAGE_COMPUTE_BIT) ||
 						pcr.offset >= data.size()) {
@@ -422,7 +422,9 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 	auto endXfb = false;
 	if(cmd.category() == CommandCategory::draw) {
 		auto* drawCmd = deriveCast<DrawCmdBase*>(&cmd);
-		if(drawCmd->state.pipe->xfbPatch && info.ops.copyXfb) {
+		dlg_assert(drawCmd->state->pipe);
+
+		if(drawCmd->state->pipe->xfbPatch && info.ops.copyXfb) {
 			dlg_assert(dev.transformFeedback);
 			dlg_assert(dev.dispatch.CmdBeginTransformFeedbackEXT);
 			dlg_assert(dev.dispatch.CmdBindTransformFeedbackBuffersEXT);
@@ -1133,7 +1135,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		DebugLabel lbl(dev, cb, "vil:copyVertexBuffers");
 
 		auto* drawCmd = deriveCast<DrawCmdBase*>(&bcmd);
-		for(auto& vertbuf : drawCmd->state.vertices) {
+		for(auto& vertbuf : drawCmd->state->vertices) {
 			auto& dst = state->vertexBufCopies.emplace_back();
 			if(!vertbuf.buffer) {
 				continue;
@@ -1150,7 +1152,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		DebugLabel lbl(dev, cb, "vil:copyIndexBuffers");
 
 		auto* drawCmd = deriveCast<DrawCmdBase*>(&bcmd);
-		auto& inds = drawCmd->state.indices;
+		auto& inds = drawCmd->state->indices;
 		if(inds.buffer) {
 			auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
 			initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,

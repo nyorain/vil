@@ -98,6 +98,8 @@ void addNonNull(Matcher& m, T* a, T* b, float weight = 1.f) {
 	m.match += (a == b && a != nullptr) ? weight : 0.f;
 }
 
+bool addNonEmpty(Matcher&, std::string_view str1, std::string_view str2, float weight = 1.f);
+
 float eval(const Matcher& m);
 bool valid(const Matcher& m);
 

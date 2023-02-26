@@ -117,6 +117,7 @@ struct RayTracingPipeline : Pipeline {
 	std::unordered_set<VkDynamicState> dynamicState;
 };
 
+// API
 VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
     VkDevice                                    device,
     VkPipelineCache                             pipelineCache,

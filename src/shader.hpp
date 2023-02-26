@@ -127,6 +127,7 @@ std::unique_ptr<spc::Compiler> copySpecializeSpirv(ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel);
 
+// API
 VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
     VkDevice                                    device,
     const VkShaderModuleCreateInfo*             pCreateInfo,

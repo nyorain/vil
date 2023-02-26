@@ -534,6 +534,9 @@ void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 	dlg_assert(m.match <= m.total);
 }
 
+// TODO: code duplication with match.cpp, but moving it to match.hpp
+// instead of having it twice causes weird issues with overloading and name
+// lookup
 template<typename T>
 void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
 	m.total += weight;
@@ -543,6 +546,7 @@ void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) 
 	}
 
 	if(a.empty()) {
+		m.match += weight;
 		return;
 	}
 
@@ -1084,28 +1088,27 @@ void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const 
 }
 
 // DrawCmdBase
-const GraphicsState emptyGraphicsState {};
-DrawCmdBase::DrawCmdBase() : state(emptyGraphicsState) {
-}
+DrawCmdBase::DrawCmdBase() = default;
 
 DrawCmdBase::DrawCmdBase(CommandBuffer& cb) :
-		state(cb.graphicsState()), pushConstants(cb.pushConstants()) {
+		state(&cb.graphicsState()), pushConstants(cb.pushConstants()) {
 }
 
 void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	if(indices) {
-		dlg_assert(state.indices.buffer);
+		dlg_assert(state->indices.buffer);
 		imGuiText("Index Buffer: ");
 		ImGui::SameLine();
-		refButtonD(gui, state.indices.buffer);
+		refButtonD(gui, state->indices.buffer);
 		ImGui::SameLine();
-		imGuiText("Offset {}, Type {}", state.indices.offset, vk::name(state.indices.type));
+		imGuiText("Offset {}, Type {}", state->indices.offset,
+			vk::name(state->indices.type));
 	}
 
-	refButtonD(gui, state.pipe);
+	refButtonD(gui, state->pipe);
 
 	imGuiText("Vertex buffers");
-	for(auto& vertBuf : state.vertices) {
+	for(auto& vertBuf : state->vertices) {
 		if(!vertBuf.buffer) {
 			imGuiText("null");
 			continue;
@@ -1117,21 +1120,21 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 	}
 
 	// dynamic state
-	if(state.pipe && !state.pipe->dynamicState.empty()) {
+	if(state->pipe && !state->pipe->dynamicState.empty()) {
 		imGuiText("DynamicState");
 		ImGui::Indent();
 
 		// viewport
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
-			auto count = state.pipe->viewportState.viewportCount;
-			dlg_assert(state.dynamic.viewports.size() >= count);
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
+			auto count = state->pipe->viewportState.viewportCount;
+			dlg_assert(state->dynamic.viewports.size() >= count);
 			if(count == 1) {
-				auto& vp = state.dynamic.viewports[0];
+				auto& vp = state->dynamic.viewports[0];
 				imGuiText("Viewport: pos ({}, {}), size ({}, {}), depth [{}, {}]",
 					vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth);
 			} else if(count > 1) {
 				imGuiText("Viewports");
-				for(auto& vp : state.dynamic.viewports.first(count)) {
+				for(auto& vp : state->dynamic.viewports.first(count)) {
 					ImGui::Bullet();
 					imGuiText("pos ({}, {}), size ({}, {}), depth [{}, {}]",
 						vp.x, vp.y, vp.width, vp.height, vp.minDepth, vp.maxDepth);
@@ -1139,16 +1142,16 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 			}
 		}
 		// scissor
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_SCISSOR)) {
-			auto count = state.pipe->viewportState.scissorCount;
-			dlg_assert(state.dynamic.scissors.size() >= count);
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_SCISSOR)) {
+			auto count = state->pipe->viewportState.scissorCount;
+			dlg_assert(state->dynamic.scissors.size() >= count);
 			if(count == 1) {
-				auto& sc = state.dynamic.scissors[0];
+				auto& sc = state->dynamic.scissors[0];
 				imGuiText("Scissor: offset ({}, {}), extent ({} {})",
 					sc.offset.x, sc.offset.y, sc.extent.width, sc.extent.height);
 			} else if(count > 1) {
 				imGuiText("Scissors");
-				for(auto& sc : state.dynamic.scissors.first(count)) {
+				for(auto& sc : state->dynamic.scissors.first(count)) {
 					ImGui::Bullet();
 					imGuiText("offset ({} {}), extent ({} {})",
 						sc.offset.x, sc.offset.y, sc.extent.width, sc.extent.height);
@@ -1157,60 +1160,79 @@ void DrawCmdBase::displayGrahpicsState(Gui& gui, bool indices) const {
 		}
 
 		// line width
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_LINE_WIDTH)) {
-			imGuiText("Line width: {}", state.dynamic.lineWidth);
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_LINE_WIDTH)) {
+			imGuiText("Line width: {}", state->dynamic.lineWidth);
 		}
 
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_DEPTH_BIAS)) {
-			auto& db = state.dynamic.depthBias;
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_DEPTH_BIAS)) {
+			auto& db = state->dynamic.depthBias;
 			imGuiText("Depth bias: constant {}, clamp {}, slope {}",
 				db.constant, db.clamp, db.slope);
 		}
 
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_BLEND_CONSTANTS)) {
-			auto& bc = state.dynamic.blendConstants;
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_BLEND_CONSTANTS)) {
+			auto& bc = state->dynamic.blendConstants;
 			imGuiText("Blend Constants: {} {} {} {}",
 				bc[0], bc[1], bc[2], bc[3]);
 		}
 
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_DEPTH_BOUNDS)) {
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_DEPTH_BOUNDS)) {
 			imGuiText("Depth bounds: [{}, {}]",
-				state.dynamic.depthBoundsMin, state.dynamic.depthBoundsMax);
+				state->dynamic.depthBoundsMin, state->dynamic.depthBoundsMax);
 		}
 
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK)) {
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK)) {
 			imGuiText("Stencil compare mask front: {}{}", std::hex,
-				state.dynamic.stencilFront.compareMask);
+				state->dynamic.stencilFront.compareMask);
 			imGuiText("Stencil compare mask back: {}{}", std::hex,
-				state.dynamic.stencilBack.compareMask);
+				state->dynamic.stencilBack.compareMask);
 		}
 
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK)) {
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_WRITE_MASK)) {
 			imGuiText("Stencil write mask front: {}{}", std::hex,
-				state.dynamic.stencilFront.writeMask);
+				state->dynamic.stencilFront.writeMask);
 			imGuiText("Stencil write mask back: {}{}", std::hex,
-				state.dynamic.stencilBack.writeMask);
+				state->dynamic.stencilBack.writeMask);
 		}
 
-		if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_REFERENCE)) {
+		if(state->pipe->dynamicState.count(VK_DYNAMIC_STATE_STENCIL_REFERENCE)) {
 			imGuiText("Stencil reference front: {}{}", std::hex,
-				state.dynamic.stencilFront.reference);
+				state->dynamic.stencilFront.reference);
 			imGuiText("Stencil reference back: {}{}", std::hex,
-				state.dynamic.stencilBack.reference);
+				state->dynamic.stencilBack.reference);
 		}
 
 		ImGui::Unindent();
-	} else if(!state.pipe) {
+	} else if(!state->pipe) {
 		imGuiText("Can't display relevant dynamic state, pipeline was destroyed");
-	} else if(state.pipe->dynamicState.empty()) {
+	} else if(state->pipe->dynamicState.empty()) {
 		// imGuiText("No relevant dynamic state");
 	}
+}
+
+bool same(const Pipeline* a, const Pipeline* b) {
+	if(!a || !b) {
+		return false;
+	}
+
+	if(a == b) {
+		return true;
+	}
+
+	// TODO: also compare/match layout?
+	if(!a->name.empty() && a->name == b->name && a->type == b->type) {
+		return true;
+	}
+
+	// TODO: add option for deep matching
+
+	return false;
 }
 
 Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
-	if(!state.pipe || !cmd.state.pipe || state.pipe != cmd.state.pipe) {
+	if(!same(state->pipe, cmd.state->pipe)) {
 		return Matcher::noMatch();
 	}
 
@@ -1218,35 +1240,37 @@ Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 	m.total += 5.f;
 	m.match += 5.f;
 
-	for(auto i = 0u; i < state.pipe->vertexBindings.size(); ++i) {
-		dlg_assert(i < state.vertices.size());
-		dlg_assert(i < cmd.state.vertices.size());
+	for(auto i = 0u; i < state->pipe->vertexBindings.size(); ++i) {
+		dlg_assert_or(i < state->vertices.size(), break);
+		dlg_assert_or(i < cmd.state->vertices.size(), break);
 
-		addNonNull(m, state.vertices[i].buffer, cmd.state.vertices[i].buffer);
+		addNonNull(m, state->vertices[i].buffer, cmd.state->vertices[i].buffer);
 
 		// Low weight on offset here, it can change frequently for dynamic
 		// draw data. But the same buffer is a good indicator for similar
 		// commands
-		add(m, state.vertices[i].offset, cmd.state.vertices[i].offset, 0.1);
+		add(m, state->vertices[i].offset, cmd.state->vertices[i].offset, 0.1);
 	}
 
 	if(indexed) {
-		addNonNull(m, state.indices.buffer, cmd.state.indices.buffer);
-		add(m, state.indices.offset, cmd.state.indices.offset, 0.1);
+		addNonNull(m, state->indices.buffer, cmd.state->indices.buffer);
+		add(m, state->indices.offset, cmd.state->indices.offset, 0.1);
 
 		// different index types is an indicator for fundamentally different
 		// commands.
-		if(state.indices.type != cmd.state.indices.type) {
+		if(state->indices.type != cmd.state->indices.type) {
 			return Matcher::noMatch();
 		}
 	}
 
-	for(auto& pcr : state.pipe->layout->pushConstants) {
+	for(auto& pcr : state->pipe->layout->pushConstants) {
 		// TODO: these asserts can trigger if parts of the push constant
 		// range was left undefined. It might not be used by the shader
 		// anyways. No idea how to fix.
-		dlg_assertl_or(dlg_level_warn, pcr.offset + pcr.size <= pushConstants.data.size(), continue);
-		dlg_assertl_or(dlg_level_warn, pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
+		dlg_assertl_or(dlg_level_warn,
+			pcr.offset + pcr.size <= pushConstants.data.size(), continue);
+		dlg_assertl_or(dlg_level_warn,
+			pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 
 		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
 		m.total += pcrWeight;
@@ -1702,27 +1726,23 @@ Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
 }
 
 // DispatchCmdBase
-const ComputeState emptyComputeState {};
-DispatchCmdBase::DispatchCmdBase() : state(emptyComputeState) {
-}
-
 DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) :
-		state(cb.computeState()), pushConstants(cb.pushConstants()) {
+		state(&cb.computeState()), pushConstants(cb.pushConstants()) {
 }
 
 void DispatchCmdBase::displayComputeState(Gui& gui) const {
-	refButtonD(gui, state.pipe);
+	refButtonD(gui, state->pipe);
 }
 
 Matcher DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
-	if(!state.pipe || !cmd.state.pipe || state.pipe != cmd.state.pipe) {
+	if(!same(state->pipe, cmd.state->pipe)) {
 		return Matcher::noMatch();
 	}
 
 	Matcher m;
-	for(auto& pcr : state.pipe->layout->pushConstants) {
+	for(auto& pcr : state->pipe->layout->pushConstants) {
 		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
 		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 
@@ -2955,23 +2975,19 @@ void BuildAccelStructsIndirectCmd::record(const Device& dev, VkCommandBuffer cb,
 }
 
 // VK_KHR_ray_tracing_pipeline
-const RayTracingState emptyRayTracingState {};
-TraceRaysCmdBase::TraceRaysCmdBase() : state(emptyRayTracingState) {
-}
-
 TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb) :
-		state(cb.rayTracingState()), pushConstants(cb.pushConstants()) {
+		state(&cb.rayTracingState()), pushConstants(cb.pushConstants()) {
 }
 
 Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
-	if(!state.pipe || !cmd.state.pipe || state.pipe != cmd.state.pipe) {
+	if(!same(state->pipe, cmd.state->pipe)) {
 		return Matcher::noMatch();
 	}
 
 	Matcher m;
-	for(auto& pcr : state.pipe->layout->pushConstants) {
+	for(auto& pcr : state->pipe->layout->pushConstants) {
 		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
 		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
 

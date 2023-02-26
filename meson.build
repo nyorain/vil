@@ -190,7 +190,6 @@ src = files(
 	'src/overlay.cpp',
 	'src/platform.cpp',
 	'src/lmm.cpp',
-	'src/serialize.cpp',
 	'src/util/util.cpp',
 	'src/util/fmt.cpp',
 	'src/util/f16.cpp',
@@ -203,6 +202,10 @@ src = files(
 	'src/command/record.cpp',
 	'src/command/commands.cpp',
 	'src/command/builder.cpp',
+
+	'src/serialize/serialize.cpp',
+	'src/serialize/commands.cpp',
+	'src/serialize/handles.cpp',
 
 	# vulkan api entrypoints
 	'src/handle.cpp',
@@ -273,11 +276,15 @@ src = files(
 	'src/submit.hpp',
 	'src/frame.hpp',
 	'src/threadContext.hpp',
-	'src/serialize.hpp',
 	'src/command/commands.hpp',
 	'src/command/record.hpp',
 	'src/command/alloc.hpp',
 	'src/command/match.hpp',
+
+	'src/serialize/serialize.hpp',
+	'src/serialize/internal.hpp',
+	'src/serialize/util.hpp',
+	'src/serialize/bufs.hpp',
 
 	'src/tracy/TracyClient.cpp',
 

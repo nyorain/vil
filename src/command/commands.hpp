@@ -410,7 +410,7 @@ struct Barrier2Cmd : CmdDerive<Barrier2CmdBase, CommandType::barrier2> {
 
 // All direct children must be of type 'NextSubpassCmd'
 struct BeginRenderPassCmd final : CmdDerive<SectionCommand, CommandType::beginRenderPass> {
-	VkRenderPassBeginInfo info {};
+	VkRenderPassBeginInfo info {}; // TODO: remove, extract renderArea
 	span<VkClearValue> clearValues;
 
 	RenderPass* rp {};
@@ -420,7 +420,7 @@ struct BeginRenderPassCmd final : CmdDerive<SectionCommand, CommandType::beginRe
 	span<ImageView*> attachments;
 	Framebuffer* fb {}; // NOTE: might be null for imageless framebuffer ext
 
-	VkSubpassBeginInfo subpassBeginInfo; // for the first subpass
+	VkSubpassBeginInfo subpassBeginInfo {}; // for the first subpass
 
 	// Returns the subpass that contains the given command.
 	// Returns u32(-1) if no subpass is ancestor of the given command.
@@ -485,7 +485,7 @@ struct StateCmdBase : Command {
 };
 
 struct DrawCmdBase : StateCmdBase {
-	const GraphicsState& state;
+	const GraphicsState* state {};
 	PushConstantData pushConstants;
 
 	DrawCmdBase(); // dummy constructor
@@ -495,8 +495,8 @@ struct DrawCmdBase : StateCmdBase {
 	void displayGrahpicsState(Gui& gui, bool indices) const;
 	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
 
-	const DescriptorState& boundDescriptors() const override { return state; }
-	const Pipeline* boundPipe() const override { return state.pipe; }
+	const DescriptorState& boundDescriptors() const override { return *state; }
+	const Pipeline* boundPipe() const override { return state->pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -652,18 +652,18 @@ struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescript
 };
 
 struct DispatchCmdBase : StateCmdBase {
-	const ComputeState& state;
+	const ComputeState* state {};
 	PushConstantData pushConstants;
 
-	DispatchCmdBase();
+	DispatchCmdBase() = default;
 	DispatchCmdBase(CommandBuffer&);
 
 	Category category() const override { return Category::dispatch; }
 	void displayComputeState(Gui& gui) const;
 	Matcher doMatch(const DispatchCmdBase&) const;
 
-	const DescriptorState& boundDescriptors() const override { return state; }
-	const Pipeline* boundPipe() const override { return state.pipe; }
+	const DescriptorState& boundDescriptors() const override { return *state; }
+	const Pipeline* boundPipe() const override { return state->pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -721,7 +721,7 @@ struct CopyImageCmd final : CmdDerive<Command, CommandType::copyImage> {
 	Image* dst {};
 	VkImageLayout srcLayout {};
 	VkImageLayout dstLayout {};
-	span<VkImageCopy2KHR> copies;
+	span<VkImageCopy2> copies;
 	const void* pNext {};
 
 	std::string toString() const override;
@@ -737,7 +737,7 @@ struct CopyBufferToImageCmd final : CmdDerive<Command, CommandType::copyBufferTo
 	Buffer* src {};
 	Image* dst {};
 	VkImageLayout dstLayout {};
-	span<VkBufferImageCopy2KHR> copies;
+	span<VkBufferImageCopy2> copies;
 	const void* pNext {};
 
 	std::string toString() const override;
@@ -753,7 +753,7 @@ struct CopyImageToBufferCmd final : CmdDerive<Command, CommandType::copyImageToB
 	Image* src {};
 	Buffer* dst {};
 	VkImageLayout srcLayout {};
-	span<VkBufferImageCopy2KHR> copies;
+	span<VkBufferImageCopy2> copies;
 	const void* pNext {};
 
 	std::string toString() const override;
@@ -770,7 +770,7 @@ struct BlitImageCmd final : CmdDerive<Command, CommandType::blitImage> {
 	Image* dst {};
 	VkImageLayout srcLayout {};
 	VkImageLayout dstLayout {};
-	span<VkImageBlit2KHR> blits;
+	span<VkImageBlit2> blits;
 	VkFilter filter {};
 	const void* pNext {};
 
@@ -788,7 +788,7 @@ struct ResolveImageCmd final : CmdDerive<Command, CommandType::resolveImage> {
 	VkImageLayout srcLayout {};
 	Image* dst {};
 	VkImageLayout dstLayout {};
-	span<VkImageResolve2KHR> regions;
+	span<VkImageResolve2> regions;
 	const void* pNext {};
 
 	std::string toString() const override;
@@ -803,7 +803,7 @@ struct ResolveImageCmd final : CmdDerive<Command, CommandType::resolveImage> {
 struct CopyBufferCmd final : CmdDerive<Command, CommandType::copyBuffer> {
 	Buffer* src {};
 	Buffer* dst {};
-	span<VkBufferCopy2KHR> regions;
+	span<VkBufferCopy2> regions;
 	const void* pNext {};
 
 	std::string toString() const override;
@@ -925,7 +925,9 @@ struct ResetEventCmd final : CmdDerive<Command, CommandType::resetEvent> {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
-// Meta-command, inserted for each command buffer passed to CmdExecuteCommands
+// Meta-command, inserted for each command buffer passed to CmdExecuteCommands.
+// We want this since ExecuteCommandsCmd::children() would be awkward otherwise
+// when there are multiple command buffers executed.
 struct ExecuteCommandsChildCmd final : CmdDerive<ParentCommand, CommandType::executeCommandsChild> {
 	CommandRecord* record_ {}; // kept alive in parent CommandRecord
 	unsigned id_ {};
@@ -935,6 +937,10 @@ struct ExecuteCommandsChildCmd final : CmdDerive<ParentCommand, CommandType::exe
 	void record(const Device&, VkCommandBuffer, u32) const override {}
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
+	// Will return the commands from the embedded record.
+	// This means that traversal of the command hierarchy can happen without
+	// special consideration of ExecuteCommands, they will automatically
+	// be part of the hierarchy, *without* being duplicated into it.
 	Command* children() const override;
 	const SectionStats& sectionStats() const override;
 	ParentCommand* firstChildParent() const override;
@@ -1486,17 +1492,17 @@ struct BuildAccelStructsIndirectCmd final : CmdDerive<Command, CommandType::buil
 
 // VK_KHR_ray_tracing_pipeline
 struct TraceRaysCmdBase : StateCmdBase {
-	const RayTracingState& state;
+	const RayTracingState* state {};
 	PushConstantData pushConstants;
 
-	TraceRaysCmdBase();
+	TraceRaysCmdBase() = default;
 	TraceRaysCmdBase(CommandBuffer& cb);
 
 	Category category() const override { return Category::traceRays; }
 	Matcher doMatch(const TraceRaysCmdBase& cmd) const;
 
-	const DescriptorState& boundDescriptors() const override { return state; }
-	const Pipeline* boundPipe() const override { return state.pipe; }
+	const DescriptorState& boundDescriptors() const override { return *state; }
+	const Pipeline* boundPipe() const override { return state->pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -1607,27 +1613,135 @@ struct SetColorWriteEnableCmd final : CmdDerive<Command, CommandType::setColorWr
 };
 
 // Visitor
+// Might seem overkill to have this here but it's useful in multiple
+// scenarios: in many cases we have extensive external functionality operating
+// on commands that shouldn't be part of the commands themselves from a design
+// POV. E.g. advanced gui functionality or serialization; implementing them
+// freely makes for a cleaner, more modular design.
 struct CommandVisitor {
 	virtual ~CommandVisitor() = default;
 
 	virtual void visit(const Command&) = 0;
 	virtual void visit(const ParentCommand& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const SectionCommand& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
+	virtual void visit(const RenderSectionCommand& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
+
 	virtual void visit(const BeginRenderPassCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
 	virtual void visit(const EndRenderPassCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const BeginDebugUtilsLabelCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-	virtual void visit(const EndDebugUtilsLabelCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const StateCmdBase& cmd) { visit(static_cast<const Command&>(cmd)); }
-	virtual void visit(const DrawCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
-	virtual void visit(const DispatchCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
-	virtual void visit(const TraceRaysCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
-	virtual void visit(const ExecuteCommandsCmd& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
-	virtual void visit(const BeginConditionalRenderingCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
-	virtual void visit(const EndConditionalRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const SubpassCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
 	virtual void visit(const FirstSubpassCmd& cmd) { visit(static_cast<const SubpassCmd&>(cmd)); }
-	virtual void visit(const BeginRenderingCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
+	virtual void visit(const NextSubpassCmd& cmd) { visit(static_cast<const SubpassCmd&>(cmd)); }
+
+	virtual void visit(const BeginRenderingCmd& cmd) { visit(static_cast<const RenderSectionCommand&>(cmd)); }
 	virtual void visit(const EndRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const BeginDebugUtilsLabelCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
+	virtual void visit(const EndDebugUtilsLabelCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const InsertDebugUtilsLabelCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const StateCmdBase& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const DrawCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
+	virtual void visit(const DrawCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
+	virtual void visit(const DrawIndirectCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
+	virtual void visit(const DrawIndirectCountCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
+	virtual void visit(const DrawMultiCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
+	virtual void visit(const DrawMultiIndexedCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
+
+	virtual void visit(const DispatchCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
+	virtual void visit(const DispatchCmd& cmd) { visit(static_cast<const DispatchCmdBase&>(cmd)); }
+	virtual void visit(const DispatchIndirectCmd& cmd) { visit(static_cast<const DispatchCmdBase&>(cmd)); }
+	virtual void visit(const DispatchBaseCmd& cmd) { visit(static_cast<const DispatchCmdBase&>(cmd)); }
+
+	virtual void visit(const CopyImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const CopyBufferToImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const CopyImageToBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const BlitImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const ResolveImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const CopyBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const UpdateBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const FillBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const ClearColorImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const ClearDepthStencilImageCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const ClearAttachmentCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const SetEventCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetEvent2Cmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const ResetEventCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const ExecuteCommandsChildCmd& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
+	virtual void visit(const ExecuteCommandsCmd& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
+
+	virtual void visit(const TraceRaysCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
+	virtual void visit(const TraceRaysCmd& cmd) { visit(static_cast<const TraceRaysCmdBase&>(cmd)); }
+	virtual void visit(const TraceRaysIndirectCmd& cmd) { visit(static_cast<const TraceRaysCmdBase&>(cmd)); }
+
+	virtual void visit(const BeginConditionalRenderingCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
+	virtual void visit(const EndConditionalRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+};
+
+template<typename F>
+struct TemplateCommandVisitor : CommandVisitor {
+	F f;
+
+	TemplateCommandVisitor(F&& xf) : f(std::forward<F>(xf)) {}
+
+	void visit(const Command& cmd) override { f(cmd); }
+	void visit(const ParentCommand& cmd) override { f(cmd); }
+	void visit(const SectionCommand& cmd) override { f(cmd); }
+	void visit(const RenderSectionCommand& cmd) override { f(cmd); }
+
+	void visit(const BeginRenderPassCmd& cmd) override { f(cmd); }
+	void visit(const EndRenderPassCmd& cmd) override { f(cmd); }
+	void visit(const SubpassCmd& cmd) override { f(cmd); }
+	void visit(const FirstSubpassCmd& cmd) override { f(cmd); }
+	void visit(const NextSubpassCmd& cmd) override { f(cmd); }
+
+	void visit(const BeginRenderingCmd& cmd) override { f(cmd); }
+	void visit(const EndRenderingCmd& cmd) override { f(cmd); }
+
+	void visit(const BeginDebugUtilsLabelCmd& cmd) override { f(cmd); }
+	void visit(const EndDebugUtilsLabelCmd& cmd) override { f(cmd); }
+	void visit(const InsertDebugUtilsLabelCmd& cmd) override { f(cmd); }
+
+	void visit(const StateCmdBase& cmd) override { f(cmd); }
+	void visit(const DrawCmdBase& cmd) override { f(cmd); }
+	void visit(const DrawCmd& cmd) override { f(cmd); }
+	void visit(const DrawIndirectCmd& cmd) override { f(cmd); }
+	void visit(const DrawIndirectCountCmd& cmd) override { f(cmd); }
+	void visit(const DrawMultiCmd& cmd) override { f(cmd); }
+	void visit(const DrawMultiIndexedCmd& cmd) override { f(cmd); }
+
+	void visit(const DispatchCmdBase& cmd) override { f(cmd); }
+	void visit(const DispatchCmd& cmd) override { f(cmd); }
+	void visit(const DispatchIndirectCmd& cmd) override { f(cmd); }
+	void visit(const DispatchBaseCmd& cmd) override { f(cmd); }
+
+	void visit(const CopyImageCmd& cmd) override { f(cmd); }
+	void visit(const CopyBufferToImageCmd& cmd) override { f(cmd); }
+	void visit(const CopyImageToBufferCmd& cmd) override { f(cmd); }
+	void visit(const BlitImageCmd& cmd) override { f(cmd); }
+	void visit(const ResolveImageCmd& cmd) override { f(cmd); }
+	void visit(const CopyBufferCmd& cmd) override { f(cmd); }
+	void visit(const UpdateBufferCmd& cmd) override { f(cmd); }
+	void visit(const FillBufferCmd& cmd) override { f(cmd); }
+	void visit(const ClearColorImageCmd& cmd) override { f(cmd); }
+	void visit(const ClearDepthStencilImageCmd& cmd) override { f(cmd); }
+	void visit(const ClearAttachmentCmd& cmd) override { f(cmd); }
+
+	void visit(const SetEventCmd& cmd) override { f(cmd); }
+	void visit(const SetEvent2Cmd& cmd) override { f(cmd); }
+	void visit(const ResetEventCmd& cmd) override { f(cmd); }
+
+	void visit(const ExecuteCommandsChildCmd& cmd) override { f(cmd); }
+	void visit(const ExecuteCommandsCmd& cmd) override { f(cmd); }
+
+	void visit(const TraceRaysCmdBase& cmd) override { f(cmd); }
+	void visit(const TraceRaysCmd& cmd) override { f(cmd); }
+	void visit(const TraceRaysIndirectCmd& cmd) override { f(cmd); }
+
+	void visit(const BeginConditionalRenderingCmd& cmd) override { f(cmd); }
+	void visit(const EndConditionalRenderingCmd& cmd) override { f(cmd); }
 };
 
 template<typename C>

@@ -163,8 +163,12 @@ decltype(auto) constexpr templatize(T&& value) {
 	return std::forward<T>(value);
 }
 
-} // namespace vil
+// serialize stuff
+struct StateSaver;
+struct StateLoader;
+struct LoadBuf; // like readBuf but 'read' overloads throw on error
 
+} // namespace
 
 // spirv-cross
 namespace spc {
@@ -174,7 +178,7 @@ struct Resource;
 struct SPIRConstant;
 struct BuiltInResource;
 
-} // namespace spc
+} // namespace
 
 namespace vil::vku {
 
@@ -183,7 +187,15 @@ struct LocalBufferState;
 struct SyncScope;
 struct BufferSpan;
 
-} // namespace vil::vku
+} // namespace
+
+// nytl/bytes
+namespace nytl {
+
+using ReadBuf = span<const std::byte>;
+using WriteBuf = span<std::byte>;
+
+} // namespace
 
 // TODO: rename to something like VIL_VK_CHECK
 #define VK_CHECK(x) do {\
