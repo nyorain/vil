@@ -18,6 +18,9 @@
 
 namespace vil {
 
+// TODO: move somewhere else. In commands.cpp atm
+bool same(const Pipeline* a, const Pipeline* b);
+
 float eval(const Matcher& m) {
 	dlg_assertm(valid(m), "match {}, total {}", m.match, m.total);
 	if(m.match == 0.f) { // no match
@@ -34,16 +37,112 @@ bool valid(const Matcher& m) {
 	return m.total == -1.f || m.match <= m.total;
 }
 
-bool addAllowSwapchainViews(Matcher& m, const ImageView* va, const ImageView* vb) {
+bool addNonEmpty(Matcher& m, std::string_view str1, std::string_view str2, float w) {
+	if(str1.empty() && str2.empty()) {
+		return true;
+	}
+
+	return add(m, str1, str2, w);
+}
+
+// TODO: code duplication with commands.cpp, but moving it to match.hpp
+// instead of having it twice causes weird issues with overloading and name
+// lookup
+template<typename T>
+void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
+	m.total += weight;
+
+	if(a.size() != b.size()) {
+		return;
+	}
+
+	if(a.empty()) {
+		m.match += weight;
+		return;
+	}
+
+	Matcher accum {};
+	for(auto i = 0u; i < a.size(); ++i) {
+		auto res = match(a[i], b[i]);
+		accum.match += res.match;
+		accum.total += res.total;
+	}
+
+	// TODO: maybe better to make weight also dependent on size?
+	// could add flag/param for that behavior.
+	m.match += weight * eval(accum);
+}
+
+Matcher match(const DescriptorSetLayout::Binding& a,
+		const DescriptorSetLayout::Binding& b) {
+	Matcher m;
+	if(!add(m, a.descriptorType, b.descriptorType)) {
+		return m;
+	}
+
+	add(m, a.descriptorCount, b.descriptorCount);
+	add(m, a.flags, b.flags);
+	add(m, a.stageFlags, b.stageFlags);
+	add(m, a.immutableSamplers ? true : false,
+		b.immutableSamplers ? true : false);
+	return m;
+}
+
+void add(Matcher& m, const DescriptorSetLayout& a, const DescriptorSetLayout& b) {
+	addNonEmpty(m, a.name, b.name, 20.f);
+	add(m, a.flags, b.flags);
+	addSpanOrderedStrict(m,
+		span<const DescriptorSetLayout::Binding>(a.bindings),
+		span<const DescriptorSetLayout::Binding>(b.bindings),
+		float(std::max(a.bindings.size(), b.bindings.size())));
+}
+
+void add(Matcher& m, const Image& a, const Image& b) {
+	addNonEmpty(m, a.name, b.name, 10.f);
+	add(m, a.ci.extent.width, b.ci.extent.width);
+	add(m, a.ci.extent.height, b.ci.extent.height);
+	add(m, a.ci.extent.depth, b.ci.extent.depth);
+	add(m, a.ci.arrayLayers, b.ci.arrayLayers);
+	add(m, a.ci.mipLevels, b.ci.mipLevels);
+	add(m, a.ci.imageType, b.ci.imageType);
+	add(m, a.ci.tiling, b.ci.tiling);
+	add(m, a.ci.sharingMode, b.ci.sharingMode);
+	add(m, a.ci.samples, b.ci.samples);
+	add(m, a.ci.format, b.ci.format);
+	add(m, a.ci.flags, b.ci.flags);
+	add(m, a.ci.usage, b.ci.usage);
+}
+
+bool addImgOrSwapchain(Matcher& m, const ImageView* va, const ImageView* vb) {
+	bool same = false;
 	if(va && vb && va != vb && va->img && vb->img && va->img->swapchain) {
-		return add(m, va->img->swapchain, vb->img->swapchain);
+		same = (va->img->swapchain == vb->img->swapchain);
 	} else {
 		// the image views have to match, not the images to account
 		// for different mips or layers
 		// TODO: could consider the imageView description here instead?
 		// But creating similar image views for the same image is a weird corner case.
-		return add(m, va, vb);
+		same = (va == vb);
 	}
+
+	// TODO WIP, for serialize-matching
+	constexpr bool deepMatching = false;
+	if constexpr(deepMatching && !same) {
+		if(va->img == vb->img) {
+			add(m, true, true, 30.f);
+			return true;
+		}
+
+		if(va->img && vb->img) {
+			add(m, *va->img, *vb->img);
+		}
+
+		// always succeed.
+		return true;
+	}
+
+	add(m, same, true, 30.f);
+	return same;
 }
 
 void add(Matcher& m, const VkImageSubresourceRange& a, const VkImageSubresourceRange& b,
@@ -67,11 +166,11 @@ Matcher match(const ImageView& a, const ImageView& b) {
 	Matcher m;
 
 	// we require that they point to the same underlying resource
-	if(!addAllowSwapchainViews(m, &a, &b)) {
+	if(!addImgOrSwapchain(m, &a, &b)) {
 		return m;
 	}
 
-
+	addNonEmpty(m, a.name, b.name, 20.f);
 	add(m, a.ci.components.a, b.ci.components.a, 0.25f);
 	add(m, a.ci.components.r, b.ci.components.r, 0.25f);
 	add(m, a.ci.components.g, b.ci.components.g, 0.25f);
@@ -87,10 +186,12 @@ Matcher match(const BufferView& a, const BufferView& b) {
 	Matcher m;
 
 	// we require that they point to the same underlying resource
+	// TODO: deep match
 	if(!add(m, a.buffer, b.buffer)) {
 		return m;
 	}
 
+	addNonEmpty(m, a.name, b.name, 20.f);
 	add(m, a.ci.format, b.ci.format);
 	add(m, a.ci.offset, b.ci.offset);
 	add(m, a.ci.range, b.ci.range);
@@ -132,6 +233,9 @@ Matcher match(const DescriptorStateRef& a, const DescriptorStateRef& b) {
 
 	// we expect them to have the same layout since they must
 	// be bound for commands with the same pipeline
+	// TODO: not strictly required anymore, we e.g. want to support pipe
+	//  reload. In that case we could still return a valid result here even
+	//  if some bindings vanished or new appeared.
 	dlg_assert_or(compatible(*a.layout, *b.layout), return Matcher::noMatch());
 
 	// fast path: full match since same descriptorSet
@@ -291,7 +395,7 @@ void add(Matcher& m, const ParentCommand::SectionStats& a, const ParentCommand::
 	// TODO: slightly asymmetrical in special cases. Problem?
 	for(auto pipeA = b.boundPipelines; pipeA; pipeA = pipeA->next) {
 		for(auto pipeB = b.boundPipelines; pipeB; pipeB = pipeB->next) {
-			if(pipeA->pipe == pipeB->pipe) {
+			if(same(pipeA->pipe, pipeB->pipe)) {
 				m.match += pipeWeight;
 				break;
 			}
@@ -716,8 +820,7 @@ FindResult find(const Command& srcParent, const Command& src,
 
 			auto* srcPipe = srcCmd->boundPipe();
 			auto* dstPipe = dstCmd->boundPipe();
-			dlg_assert_or(srcPipe && dstPipe, continue);
-			dlg_assert_or(srcPipe == dstPipe, continue);
+			dlg_assert_or(same(srcPipe, dstPipe), continue);
 
 			auto srcDescriptors = srcCmd->boundDescriptors().descriptorSets;
 			auto dstDescriptors = dstCmd->boundDescriptors().descriptorSets;

@@ -104,3 +104,17 @@ std::vector<std::byte> CompletedHookSerializer::serialize(CompletedHook&) {
 }
 
 } // namespace
+
+// v2
+// rethinking source files
+// - create folder serialize/
+// - serialize/util.hpp: base stuff, read/write, SaveBuf/LoadBuf
+// - serialize/handles.hpp: serializes handles.
+//   (header-only or add handles.cpp and explicit template instantiations)
+// - serialize/serialize.hpp: main api, entrypoints
+// - serialize/commands.hpp
+
+// Stuff to pull fromm Command into visitors (later):
+// - displayInspector?
+// - match
+// - record?

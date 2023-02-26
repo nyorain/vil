@@ -12,7 +12,6 @@
 #include <commandHook/hook.hpp>
 #include <commandHook/record.hpp>
 #include <layer.hpp>
-#include <serialize.hpp>
 #include <swapchain.hpp>
 #include <image.hpp>
 #include <buffer.hpp>
@@ -21,6 +20,8 @@
 #include <handle.hpp>
 #include <data.hpp>
 #include <wrap.hpp>
+#include <serialize/serialize.hpp>
+#include <serialize/bufs.hpp>
 #include <command/commands.hpp>
 #include <util/util.hpp>
 #include <nytl/bytes.hpp>
@@ -2647,7 +2648,7 @@ void Gui::saveState() {
 	auto& saver = *serializerPtr;
 
 	DynWriteBuf ownBuf;
-	write(ownBuf, u32(activeTab_));
+	nytl::write(ownBuf, u32(activeTab_));
 	tabs_.cb->save(saver, ownBuf);
 
 	// write file
@@ -2661,10 +2662,17 @@ void Gui::saveState() {
 		return;
 	}
 
-	auto loaderData = getData(saver);
+	// TODO: inefficient, additional copy
+	DynWriteBuf loaderData;
+	auto writer = [&](ReadBuf data) {
+		write(loaderData, data);
+	};
 
+	write(saver, writer);
+
+	// write file
 	DynWriteBuf header;
-	write(header, u64(loaderData.size()));
+	nytl::write<u32>(header, loaderData.size());
 
 	std::fwrite(header.data(), 1u, header.size(), f);
 	std::fwrite(loaderData.data(), 1u, loaderData.size(), f);
@@ -2684,20 +2692,27 @@ void Gui::loadState() {
 	}
 
 	auto dataVec = imgio::readFile<std::vector<std::byte>>(path.c_str());
-	auto buf = ReadBuf(dataVec);
+	auto buf = LoadBuf{ReadBuf(dataVec)};
 
 	// read header
-	auto loaderSize = read<u64>(buf);
+	auto loaderSize = read<u32>(buf);
+	if(loaderSize >= buf.buf.size()) {
+		dlg_error("Invalid state file size");
+		return;
+	}
 
-	auto loaderBuf = buf.subspan(0, loaderSize);
-	auto ownBuf = buf.subspan(loaderSize);
+	auto loaderBuf = buf.buf.subspan(0, loaderSize);
+	auto ownBuf = LoadBuf{buf.buf.subspan(loaderSize)};
+
+	dlg_trace("loadState: total {}, loaderSize: {}, ownBufSize: {}",
+		dataVec.size(), loaderSize, ownBuf.buf.size());
 
 	auto loadPtr = createStateLoader(loaderBuf);
 	auto& load = *loadPtr;
 
 	activeTab_ = Tab(read<u32>(ownBuf));
 	tabs_.cb->load(load, ownBuf);
-	dlg_assert(ownBuf.empty());
+	dlg_assert(ownBuf.buf.empty());
 }
 
 } // namespace vil

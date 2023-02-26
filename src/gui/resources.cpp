@@ -1480,16 +1480,7 @@ void ResourceGui::clearHandles() {
 	});
 
 	// clear selection
-	const ObjectTypeHandler* typeHandler {};
-	for(auto& handler : ObjectTypeHandler::handlers) {
-		if(handler->objectType() == filter_) {
-			typeHandler = handler;
-			break;
-		}
-	}
-
-	dlg_assert(typeHandler);
-
+	auto typeHandler = ObjectTypeHandler::handler(filter_);
 	for(auto& handle : handles_) {
 		typeHandler->visit(decRefCountVisitor, *handle);
 	}
@@ -1517,16 +1508,7 @@ void ResourceGui::updateResourceList() {
 	// find new handler
 	filter_ = newFilter_;
 
-	const ObjectTypeHandler* typeHandler {};
-	for(auto& handler : ObjectTypeHandler::handlers) {
-		if(handler->objectType() == filter_) {
-			typeHandler = handler;
-			break;
-		}
-	}
-
-	dlg_assert(typeHandler);
-
+	auto typeHandler = ObjectTypeHandler::handler(filter_);
 	std::lock_guard lock(gui_->dev().mutex);
 
 	// find new handles
@@ -1551,12 +1533,7 @@ void ResourceGui::updateResourceList() {
 			}
 		}
 	} else {
-		for(auto& typeHandler : ObjectTypeHandler::handlers) {
-			if(typeHandler->objectType() == filter_) {
-				handles_ = typeHandler->resources(dev, search_);
-				break;
-			}
-		}
+		handles_ = typeHandler->resources(dev, search_);
 
 		for(auto& handle : handles_) {
 			typeHandler->visit(incRefCountVisitor, *handle);
@@ -1631,13 +1608,7 @@ void ResourceGui::draw(Draw& draw) {
 	ImGui::Separator();
 
 	// resource list
-	const ObjectTypeHandler* typeHandler {};
-	for(auto& handler : ObjectTypeHandler::handlers) {
-		if(handler->objectType() == filter_) {
-			typeHandler = handler;
-			break;
-		}
-	}
+	const auto* typeHandler = ObjectTypeHandler::handler(filter_);
 
 	bool isDestroyed {};
 	auto isDestroyedVisitor = TemplateResourceVisitor([&](auto& res) {

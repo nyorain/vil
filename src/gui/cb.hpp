@@ -36,7 +36,7 @@ public:
 	auto& selector() { return selector_; }
 
 	void save(StateSaver&, DynWriteBuf& buf);
-	void load(StateLoader&, ReadBuf& buf);
+	void load(StateLoader&, LoadBuf& buf);
 
 private:
 	void updateFromSelector();

@@ -875,13 +875,13 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
 	ZoneScoped;
 
-	dlg_assert_or(cmd.state.pipe, return);
-	if(state.vertexBufCopies.size() < cmd.state.pipe->vertexBindings.size()) {
+	dlg_assert_or(cmd.state->pipe, return);
+	if(state.vertexBufCopies.size() < cmd.state->pipe->vertexBindings.size()) {
 		ImGui::Text("Error: not enough vertex buffers bound. See log output");
 		return;
 	}
 
-	auto& pipe = *cmd.state.pipe;
+	auto& pipe = *cmd.state->pipe;
 
 	const PipelineShaderStage* vertStage = nullptr;
 	for(auto& stage : pipe.stages) {
@@ -973,13 +973,13 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		params.offset = dcmd->firstIndex;
 		params.vertexOffset = dcmd->vertexOffset;
 		params.drawCount = dcmd->indexCount;
-		params.indexType = dcmd->state.indices.type;
+		params.indexType = dcmd->state->indices.type;
 		params.instanceID = dcmd->firstInstance;
 	} else if(auto* dcmd = commandCast<const DrawIndirectCmd*>(&cmd); dcmd) {
-		auto i = dcmd->indexed ? std::optional(dcmd->state.indices.type) : std::nullopt;
+		auto i = dcmd->indexed ? std::optional(dcmd->state->indices.type) : std::nullopt;
 		displayCmdSlider(i, dcmd->stride);
 	} else if(auto* dcmd = commandCast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
-		auto i = dcmd->indexed ? std::optional(dcmd->state.indices.type) : std::nullopt;
+		auto i = dcmd->indexed ? std::optional(dcmd->state->indices.type) : std::nullopt;
 		displayCmdSlider(i, dcmd->stride, 4u); // skip u32 count
 	} else {
 		imGuiText("Vertex viewer unimplemented for command type");
@@ -1170,7 +1170,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 		if(pipe.dynamicState.count(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT)) {
 			for(auto i = 0u; i < bindingCount; ++i) {
-				auto& buf = cmd.state.vertices[i];
+				auto& buf = cmd.state->vertices[i];
 				if(buf.stride) {
 					vinput.bindings[i].stride = buf.stride;
 				}
@@ -1256,8 +1256,8 @@ const char* name(spv11::BuiltIn builtin) {
 void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
 	ZoneScoped;
-	dlg_assert_or(cmd.state.pipe, return);
-	auto& pipe = *cmd.state.pipe;
+	dlg_assert_or(cmd.state->pipe, return);
+	auto& pipe = *cmd.state->pipe;
 
 	if(!pipe.xfbPatch) {
 		imGuiText("Error: couldn't inject transform feedback code to shader");

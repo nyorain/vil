@@ -1,3 +1,25 @@
+- [ ] serialization
+	- [ ] create/save handles
+	- [ ] remove serialize.cpp
+	- [ ] update gui to new interface
+	- [ ] serialize further gui state, e.g. selected I/O
+	- [ ] use find() for last command level in gui when loading state
+	- [ ] allow to explicitly save relative-commands or gui states,
+	      not sure which perspective makes more sense.
+		- [ ] store in working dir? or in some vil-specific config dir?
+		      Guess it would make sense to make them global.
+			  And we want global vil settings at some point anyways.
+			  So figure out global config dir for this (make configure
+			  via env variable but choose good defaults).
+		- [ ] Allow to name the saved states
+		- [ ] Allow to load them, selecting the right stuff.
+		      Give meaningful error/warnings messages/stats?
+			  Would be useful to have the side-by-side-frames-with-vizlcs
+			  debug view for this (among other things).
+	- [ ] continue matching rework/improvements to make sure matching works
+	      with loaded handles
+	- [ ] add serialize support for more commands (e.g. Bind)
+	- [ ] test: draw/dispatch/traceRays. But also Bind commands.
 - [ ] implement sync tracking
 	- [ ] and fix full sync
 	- [ ] add test for out-of-order submission

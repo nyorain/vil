@@ -15,11 +15,17 @@ enum class SectionType {
 // Utility around building CommandRecords
 struct RecordBuilder {
     struct Section {
+		// command that started this section
         SectionCommand* cmd {};
-        ParentCommand* lastParentChild {}; // last child command of this section that is a parent to others
-        Section* parent {}; // one level up. Null only for root node
-        Section* next {}; // might be != null even when this is the last section. Re-using allocations
-		bool pop {}; // See docs/debug-utils-label-nesting.md
+		// last child command of this section that is a parent to others
+        ParentCommand* lastParentChild {};
+		// one level up, parent of cmd. Null only for root node
+        Section* parent {};
+		// might be != null even when this is the last section.
+		// Re-using allocations
+        Section* next {};
+		// for incorrect label nesting, see docs/debug-utils-label-nesting.md
+		bool pop {};
     };
 
 	IntrusivePtr<CommandRecord> record_;
@@ -35,6 +41,7 @@ struct RecordBuilder {
 	// Commandbuffer-less construction - for loading serialized commands and testing
 	RecordBuilder(Device* dev);
 	void reset(Device* dev);
+	void reset(IntrusivePtr<CommandRecord>);
 
 	void appendParent(ParentCommand& cmd);
 	void beginSection(SectionCommand& cmd);

@@ -101,6 +101,7 @@ struct TemplateResourceVisitor : ResourceVisitor {
 
 struct ObjectTypeHandler {
 	static const span<const ObjectTypeHandler*> handlers;
+	static const ObjectTypeHandler* handler(VkObjectType);
 
 	virtual ~ObjectTypeHandler() = default;
 	virtual VkObjectType objectType() const = 0;

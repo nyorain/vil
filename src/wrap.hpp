@@ -4,7 +4,7 @@
 #include <device.hpp>
 #include <data.hpp>
 #include <util/dlg.hpp>
-#include <util/tmpUtil.hpp>
+#include <nytl/tmpUtil.hpp>
 
 namespace vil {
 

@@ -26,6 +26,11 @@ void RecordBuilder::reset(Device* dev) {
 	doReset(*this);
 }
 
+void RecordBuilder::reset(IntrusivePtr<CommandRecord> rec) {
+	record_ = rec;
+	doReset(*this);
+}
+
 RecordBuilder::RecordBuilder(CommandBuffer& cb) {
 	reset(cb);
 }

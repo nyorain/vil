@@ -18,7 +18,8 @@
 #include <shader.hpp>
 #include <pipe.hpp>
 #include <cb.hpp>
-#include <serialize.hpp>
+#include <serialize/serialize.hpp>
+#include <serialize/util.hpp>
 #include <command/commands.hpp>
 #include <command/record.hpp>
 #include <command/match.hpp>
@@ -946,7 +947,7 @@ void CommandRecordGui::updateFromSelector() {
 	command_ = {commandSpan.begin(), commandSpan.end()};
 }
 
-void CommandRecordGui::save(StateSaver& slz, DynWriteBuf& buf) {
+void CommandRecordGui::save(StateSaver& slz, SaveBuf& buf) {
 	// selection
 	write<u64>(buf, frame_.size());
 	for(auto& subm : frame_) {
@@ -1006,7 +1007,7 @@ void CommandRecordGui::save(StateSaver& slz, DynWriteBuf& buf) {
 // 	}
 // }
 
-void CommandRecordGui::load(StateLoader& loader, ReadBuf& buf) {
+void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 	std::vector<FrameSubmission> frame;
 	auto submCount = read<u64>(buf);
 	for(auto i = 0u; i < submCount; ++i) {
