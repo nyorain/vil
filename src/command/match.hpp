@@ -74,7 +74,7 @@ struct FindResult {
 
 // Tries to find the an equivalent of 'dstHierachyToFind' in the command
 // sequence from 'srcRoot'.
-FindResult find(const ParentCommand& srcRoot, span<const Command*> dstHierachyToFind,
+FindResult find(const ParentCommand& srcRoot, span<const Command*> dstHierarchyToFind,
 	const CommandDescriptorSnapshot& dstDescriptors, float threshold = 0.0);
 
 // Matcher utility

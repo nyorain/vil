@@ -1920,6 +1920,12 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 		}
 	}
 
+	// cool but not a good idea while working on serialization :)
+	constexpr auto initialLoadState = false;
+	if(initialLoadState && drawCounter_ == 0u) {
+		loadState();
+	}
+
 	auto& draw = *foundDraw;
 	draw.usedImages.clear();
 	draw.usedBuffers.clear();
@@ -2710,7 +2716,8 @@ void Gui::loadState() {
 	auto loadPtr = createStateLoader(loaderBuf);
 	auto& load = *loadPtr;
 
-	activeTab_ = Tab(read<u32>(ownBuf));
+	activateTab(Tab(read<u32>(ownBuf)));
+
 	tabs_.cb->load(load, ownBuf);
 	dlg_assert(ownBuf.buf.empty());
 }

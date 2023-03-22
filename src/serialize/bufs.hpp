@@ -134,11 +134,6 @@ VoidEnableIfContainer<C> serializeContainer(SaveBuf& buf, C& container, Writer&&
 	writeContainer(buf, container, writer);
 }
 
-template<typename IO, typename C, typename Reader>
-VoidEnableIfContainer<C> serializeContainer(IO& buf, C& container) {
-	readContainer(buf, container, [](auto& buf, auto& elem) { serialize(buf, elem); });
-}
-
 // NOTE: dangerous, will only remain valid until the read buffer
 // is still alive. You probably don't want to use this.
 inline void read(LoadBuf& buf, std::string_view& ret) {
@@ -190,6 +185,12 @@ void serialize(LoadBuf& buf, std::optional<T>& obj) {
 	} else {
 		obj = std::nullopt;
 	}
+}
+
+template<typename IO, typename C>
+VoidEnableIfContainer<C> serializeContainer(IO& buf, C& container) {
+	auto cb = [](auto& buf, auto& elem) { serialize(buf, elem); };
+	serializeContainer(buf, container, cb);
 }
 
 } // namespace vil
