@@ -847,6 +847,28 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 		}
 	);
 
+	// TODO: hacked in here for serialization loading
+	//   just 'match' can't find the final non-parent-cmd in the
+	//   hierarchy of command_, have to look that up via find()
+	if(!newCommand.empty() && newCommand.size() < command_.size()) {
+		CommandDescriptorSnapshot noDescriptors {};
+		auto count = command_.size() - newCommand.size();
+		dlg_assert(count == 1u); // should only happen for non-parent selected cmd
+
+		auto dstHierarchy = span(command_).last(count + 1);
+		dlg_assert(dstHierarchy[0]->type() == newCommand.back()->type());
+
+		auto fr = find(*deriveCast<const ParentCommand*>(newCommand.back()),
+			dstHierarchy, noDescriptors);
+
+		if(!fr.hierarchy.empty()) {
+			dlg_assert(fr.hierarchy.size() == count + 1);
+			dlg_assert(fr.hierarchy[0] == newCommand.back());
+			newCommand.insert(newCommand.end(),
+				fr.hierarchy.begin() + 1, fr.hierarchy.end());
+		}
+	}
+
 	// apply
 	frame_ = std::move(records);
 
@@ -1089,9 +1111,6 @@ void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 	// }
 
 	updateRecords(frameMatch, std::move(frame));
-	// TODO: updateRecords can't find the final non-parent-cmd in the
-	//   hierarchy of command_, have to look that up via find() I guess?
-	//   But for that we need valid handles
 
 	// also update the selector
 	auto submID = 0u;

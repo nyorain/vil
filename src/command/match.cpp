@@ -774,6 +774,8 @@ FindResult find(const Command& srcParent, const Command& src,
 		auto m = it->match(*dst[0]);
 		auto em = eval(m);
 
+		// dlg_trace("em: {} {} - {}", em, it->toString(), dst[0]->toString());
+
 		// NOTE: early-continue on less-than-best here incorrect for
 		// non-parent commands as we might increase the matching value below.
 		if(em == 0.f || (em < bestMatch && dst.size() > 1)) {
@@ -863,6 +865,7 @@ FindResult find(const Command& srcParent, const Command& src,
 		}
 
 		em = eval(m) * childMatch;
+
 		if(em == 0.f || em < bestMatch) {
 			continue;
 		} else if(em == bestMatch && !bestCmds.empty()) {

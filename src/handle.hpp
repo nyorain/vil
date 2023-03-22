@@ -50,6 +50,9 @@ struct ResourceVisitor {
 	virtual void visit(CommandPool&) = 0;
 	virtual void visit(DeviceMemory&) = 0;
 	virtual void visit(Pipeline&) = 0;
+	virtual void visit(ComputePipeline& p);
+	virtual void visit(GraphicsPipeline& p);
+	virtual void visit(RayTracingPipeline& p);
 	virtual void visit(PipelineLayout&) = 0;
 	virtual void visit(DescriptorSet&) = 0;
 	virtual void visit(DescriptorPool&) = 0;
@@ -82,6 +85,9 @@ struct TemplateResourceVisitor : ResourceVisitor {
 	void visit(CommandPool& res) override { impl(res); }
 	void visit(DeviceMemory& res) override { impl(res); }
 	void visit(Pipeline& res) override { impl(res); }
+	void visit(GraphicsPipeline& res) override { impl(res); }
+	void visit(ComputePipeline& res) override { impl(res); }
+	void visit(RayTracingPipeline& res) override { impl(res); }
 	void visit(PipelineLayout& res) override { impl(res); }
 	void visit(DescriptorSet& res) override { impl(res); }
 	void visit(DescriptorPool& res) override { impl(res); }

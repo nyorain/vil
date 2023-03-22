@@ -85,15 +85,15 @@ template<typename Slz, typename IO> void serializeStage(Slz& slz, IO& io,
 		PipelineShaderStage& stage) {
 	serialize(io, stage.stage);
 	serialize(io, stage.entryPoint);
-	serialize(io, stage.specialization.entries);
+	serializeContainer(io, stage.specialization.entries);
 	// TODO: should provide fast memcpy overload for this
-	serialize(io, stage.specialization.data);
+	serializeContainer(io, stage.specialization.data);
 	serializeRef(slz, io, stage.spirv);
 }
 
 template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, PipelineLayout& layout) {
 	serialize(io, layout.name);
-	serialize(io, layout.pushConstants);
+	serializeContainer(io, layout.pushConstants);
 	serializeRefs(slz, io, layout.descriptors);
 }
 
@@ -104,11 +104,11 @@ template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, GraphicsPip
 		serializeStage(slz, buf, stage);
 	});
 
-	serialize(io, pipe.dynamicState);
-	serialize(io, pipe.viewports);
-	serialize(io, pipe.scissors);
-	serialize(io, pipe.vertexAttribs);
-	serialize(io, pipe.vertexBindings);
+	serializeContainer(io, pipe.dynamicState);
+	serializeContainer(io, pipe.viewports);
+	serializeContainer(io, pipe.scissors);
+	serializeContainer(io, pipe.vertexAttribs);
+	serializeContainer(io, pipe.vertexBindings);
 	// TODO: other graphics states
 	// TODO: properly connect serialized vectors to structs on load
 }
@@ -121,7 +121,7 @@ template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, RayTracingP
 	});
 
 	serialize(io, pipe.groups);
-	serialize(io, pipe.dynamicState);
+	serializeContainer(io, pipe.dynamicState);
 }
 
 template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, ComputePipeline& pipe) {
@@ -423,17 +423,18 @@ void writeHandle(StateSaver& saver, const Handle& handle, VkObjectType type) {
 }
 
 template<typename T>
-void addUnique(StateLoader& loader) {
+auto& addUnique(StateLoader& loader) {
 	auto ptr = new T();
 	auto dtor = [](Handle& handle) {
 		delete &static_cast<T&>(handle);
 	};
 	loader.destructors.push_back(dtor);
 	loader.handles.push_back(ptr);
+	return *ptr;
 }
 
 template<typename T>
-void addIntrusive(StateLoader& loader) {
+auto& addIntrusive(StateLoader& loader) {
 	auto ptr = new T();
 	++ptr->refCount;
 	auto dtor = [](Handle& handle) {
@@ -441,10 +442,10 @@ void addIntrusive(StateLoader& loader) {
 	};
 	loader.destructors.push_back(dtor);
 	loader.handles.push_back(ptr);
+	return *ptr;
 }
 
-void addPipe(StateLoader& loader) {
-	auto pbp = read<VkPipelineBindPoint>(loader.buf);
+Pipeline& addPipe(StateLoader& loader, VkPipelineBindPoint pbp) {
 	switch(pbp) {
 		case VK_PIPELINE_BIND_POINT_GRAPHICS: return addUnique<GraphicsPipeline>(loader);
 		case VK_PIPELINE_BIND_POINT_COMPUTE: return addUnique<ComputePipeline>(loader);
@@ -455,7 +456,7 @@ void addPipe(StateLoader& loader) {
 	}
 }
 
-void addHandle(StateLoader& loader) {
+Handle& addHandle(StateLoader& loader) {
 	auto type = read<VkObjectType>(loader.buf);
 	loader.handleTypes.push_back(type);
 
@@ -476,8 +477,14 @@ void addHandle(StateLoader& loader) {
 		case VK_OBJECT_TYPE_RENDER_PASS: return addIntrusive<RenderPass>(loader);
 		case VK_OBJECT_TYPE_FRAMEBUFFER: return addIntrusive<Framebuffer>(loader);
 		case VK_OBJECT_TYPE_DEVICE_MEMORY: return addUnique<DeviceMemory>(loader);
-		case VK_OBJECT_TYPE_PIPELINE: return addPipe(loader);
-		default:
+		case VK_OBJECT_TYPE_PIPELINE_LAYOUT: return addIntrusive<PipelineLayout>(loader);
+		case VK_OBJECT_TYPE_SHADER_MODULE: return addIntrusive<ShaderModule>(loader);
+		case VK_OBJECT_TYPE_PIPELINE: {
+			auto pbp = read<VkPipelineBindPoint>(loader.buf);
+			auto& pipe = addPipe(loader, pbp);
+			pipe.type = pbp;
+			return pipe;
+		} default:
 			dlg_error("Unexpected handle type {}", type);
 			throw std::runtime_error("Invalid handle type");
 	}

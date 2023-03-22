@@ -61,7 +61,7 @@ void saveRecord(StateSaver& saver, SaveBuf& io, CommandRecord& rec);
 // handles.cpp
 void writeHandle(StateSaver& saver, const Handle& handle, VkObjectType);
 
-void addHandle(StateLoader& loader);
+Handle& addHandle(StateLoader& loader);
 void readHandles(StateLoader& loader);
 
 } // namespace

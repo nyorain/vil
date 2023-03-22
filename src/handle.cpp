@@ -151,6 +151,16 @@ std::vector<Handle*> findHandles(const std::unordered_set<Args...>& set,
 	return ret;
 }
 
+void ResourceVisitor::visit(ComputePipeline& p) {
+	visit(static_cast<Pipeline&>(p));
+}
+void ResourceVisitor::visit(GraphicsPipeline& p) {
+	visit(static_cast<Pipeline&>(p));
+}
+void ResourceVisitor::visit(RayTracingPipeline& p) {
+	visit(static_cast<Pipeline&>(p));
+}
+
 template<VkObjectType OT, typename HT, auto DevMapPtr>
 struct ObjectTypeMapImpl : ObjectTypeHandler {
 	static const ObjectTypeMapImpl instance;
@@ -241,11 +251,35 @@ struct QueueTypeImpl : ObjectTypeHandler {
 	}
 };
 
+struct PipelineTypeImpl : ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &Device::pipes> {
+	static const PipelineTypeImpl instance;
+
+	void visit(ResourceVisitor& visitor, Handle& handle) const override {
+		auto& pipe = static_cast<Pipeline&>(handle);
+		switch(pipe.type) {
+			case VK_PIPELINE_BIND_POINT_GRAPHICS:
+				visitor.visit(static_cast<GraphicsPipeline&>(pipe));
+				break;
+			case VK_PIPELINE_BIND_POINT_COMPUTE:
+				visitor.visit(static_cast<ComputePipeline&>(pipe));
+				break;
+			case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
+				visitor.visit(static_cast<RayTracingPipeline&>(pipe));
+				break;
+			default:
+				dlg_error("unimplemented");
+				visitor.visit(pipe);
+				break;
+		}
+	}
+};
+
 template<VkObjectType OT, typename HT, auto DevMapPtr>
 const ObjectTypeMapImpl<OT, HT, DevMapPtr> ObjectTypeMapImpl<OT, HT, DevMapPtr>::instance;
 
 const QueueTypeImpl QueueTypeImpl::instance;
 const DescriptorSetTypeImpl DescriptorSetTypeImpl::instance;
+const PipelineTypeImpl PipelineTypeImpl::instance;
 
 static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_IMAGE, Image, &Device::images>::instance,
@@ -255,7 +289,6 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_BUFFER_VIEW, BufferView, &Device::bufferViews>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_BUFFER, CommandBuffer, &Device::commandBuffers>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_COMMAND_POOL, CommandPool, &Device::commandPools>::instance,
-	&ObjectTypeMapImpl<VK_OBJECT_TYPE_PIPELINE, Pipeline, &Device::pipes>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_FRAMEBUFFER, Framebuffer, &Device::framebuffers>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DEVICE_MEMORY, DeviceMemory, &Device::deviceMemories>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_RENDER_PASS, RenderPass, &Device::renderPasses>::instance,
@@ -270,6 +303,7 @@ static const ObjectTypeHandler* typeHandlers[] = {
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_SHADER_MODULE, ShaderModule, &Device::shaderModules>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE, DescriptorUpdateTemplate, &Device::dsuTemplates>::instance,
 	&ObjectTypeMapImpl<VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR, AccelStruct, &Device::accelStructs>::instance,
+	&PipelineTypeImpl::instance,
 	&QueueTypeImpl::instance,
 	// NOTE: this one is special, it does not support all operations.
 	// Caller must handle this on their side.

@@ -256,7 +256,8 @@ void serialize(Slz& slz, IO& io, RayTracingState& state) {
 	(void) slz;
 	(void) io;
 	(void) state;
-	dlg_trace("TODO state");
+
+	serializeRef(slz.slz, io, state.pipe);
 }
 
 template<typename Slz, typename IO>
@@ -264,7 +265,8 @@ void serialize(Slz& slz, IO& io, GraphicsState& state) {
 	(void) slz;
 	(void) io;
 	(void) state;
-	dlg_trace("TODO state");
+
+	serializeRef(slz.slz, io, state.pipe);
 }
 
 template<typename Slz, typename IO>
@@ -272,7 +274,8 @@ void serialize(Slz& slz, IO& io, ComputeState& state) {
 	(void) slz;
 	(void) io;
 	(void) state;
-	dlg_trace("TODO state");
+
+	serializeRef(slz.slz, io, state.pipe);
 }
 
 template<typename Slz, typename IO, typename Cmd, typename State>
@@ -675,7 +678,7 @@ void serialize(Slz& slz, IO& io, Cmd& cmd) {
 	(void) slz;
 	(void) io;
 	(void) cmd;
-	dlg_trace("unimplemented: {}", cmd.nameDesc());
+	// dlg_trace("unimplemented: {}", cmd.nameDesc());
 }
 
 // TODO: serializing of RootCommand currently not handled symmetrically
