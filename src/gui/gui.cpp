@@ -2662,7 +2662,7 @@ void Gui::saveState() {
 	auto binary = true;
 
 	errno = 0;
-	auto f = imgio::openFile(path.c_str(), binary ? "wb" : "w"); // RAII
+	auto f = imgio::openFile(path.string().c_str(), binary ? "wb" : "w"); // RAII
 	if(!f) {
 		dlg_error("Could not open '{}' for writing: {}", path, std::strerror(errno));
 		return;
@@ -2697,7 +2697,7 @@ void Gui::loadState() {
 		return;
 	}
 
-	auto dataVec = imgio::readFile<std::vector<std::byte>>(path.c_str());
+	auto dataVec = imgio::readFile<std::vector<std::byte>>(path.string().c_str());
 	auto buf = LoadBuf{ReadBuf(dataVec)};
 
 	// read header
