@@ -87,7 +87,7 @@ u64 getID(const StateSaver& saver, const Command& cmd) {
 	return it->second;
 }
 
-u64 add(StateSaver& saver, const Handle& handle, unsigned vkObjectType) {
+u64 add(StateSaver& saver, const Handle& handle, int vkObjectType) {
 	auto it = saver.handleToID.find(&handle);
 	if(it != saver.handleToID.end()) {
 		return it->second;
@@ -185,7 +185,7 @@ Handle* getHandle(const StateLoader& loader, u64 id) {
 	return loader.handles[id];
 }
 
-Handle* getHandle(const StateLoader& loader, u64 id, unsigned vkObjectType) {
+Handle* getHandle(const StateLoader& loader, u64 id, int vkObjectType) {
 	dlg_assert_or(id < loader.handles.size(), return nullptr);
 	dlg_assert_or(vkObjectType == loader.handleTypes[id], return nullptr);
 	return loader.handles[id];

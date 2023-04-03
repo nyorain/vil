@@ -44,7 +44,7 @@ u64 getID(const StateSaver&, const Command&);
 
 // Adds the given handle for serialization, returns its id.
 // Will just return the known id for a previously added handle.
-u64 add(StateSaver& saver, const Handle& handle, unsigned vkObjectType);
+u64 add(StateSaver& saver, const Handle& handle, int vkObjectType);
 
 template<typename H>
 u64 add(StateSaver& saver, const H& handle) {
@@ -76,7 +76,7 @@ Handle* getHandle(const StateLoader&, u64 id);
 
 // Like above, but this overload additionally asserts that the handle has
 // the given object type.
-Handle* getHandle(const StateLoader&, u64 id, unsigned vkObjectType);
+Handle* getHandle(const StateLoader&, u64 id, int vkObjectType);
 
 } // namespace
 
