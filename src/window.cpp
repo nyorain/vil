@@ -399,6 +399,22 @@ bool DisplayWindow::doCreateWindow() {
 
 	swa_window_set_userdata(window, this);
 	this->surface = bit_cast<VkSurfaceKHR>(swa_window_get_vk_surface(window));
+
+	// TODO WIP
+	swa_image icon {};
+	icon.format = swa_image_format_argb32;
+	icon.width = 32u;
+	icon.height = 32u;
+	icon.stride = icon.width * 4;
+	icon.data = (unsigned char*) malloc(4 * icon.width * icon.height);
+
+	for(auto i = 0u; i < icon.width * icon.height; ++i) {
+		((u32*)icon.data)[i] = 0xFFFFAA00u; // orange
+	}
+
+	swa_window_set_icon(window, &icon);
+	free(icon.data);
+
 	return true;
 }
 
