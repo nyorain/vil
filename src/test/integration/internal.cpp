@@ -253,7 +253,7 @@ TEST(int_secondary_cb) {
 	LinAllocScope lms(localMem);
 
 	ThreadMemScope tms;
-	auto res = match(tms, lms, *rec0.commands, *rec1.commands);
+	auto res = match(tms, lms, MatchType::identity, *rec0.commands, *rec1.commands);
 	auto matcher = res.match;
 	dlg_assert(matcher.match == matcher.total);
 	dlg_assert(matcher.match > 0.f);

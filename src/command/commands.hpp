@@ -203,12 +203,6 @@ struct Command {
 	// Returns false for itself.
 	virtual bool isDescendant(const Command& cmd) const;
 
-	// Returns how much this commands matches with the given one.
-	// Should always return 0.f for two commands that don't have the
-	// same type. Should not consider child commands, just itself.
-	// Will also never consider the stackTrace.
-	virtual Matcher match(const Command& cmd) const;
-
 	virtual void visit(CommandVisitor& v) const = 0;
 
 	// Forms a forward linked list with siblings
@@ -327,7 +321,7 @@ struct BarrierCmdBase : Command {
 	span<Buffer*> buffers;
 
 	void displayInspector(Gui& gui) const override;
-	Matcher doMatch(const BarrierCmdBase& rhs) const;
+	MatchVal doMatch(const BarrierCmdBase& rhs) const;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
 	// NOTE: we need to patch barriers when recording (instead of just
@@ -356,7 +350,7 @@ struct Barrier2CmdBase : Command {
 	span<Buffer*> buffers;
 
 	void displayInspector(Gui& gui) const override;
-	Matcher doMatch(const Barrier2CmdBase& rhs) const;
+	MatchVal doMatch(const Barrier2CmdBase& rhs) const;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 
 	// NOTE: we need to patch barriers when recording (instead of just
@@ -373,7 +367,6 @@ struct WaitEventsCmd : CmdDerive<BarrierCmdBase, CommandType::waitEvents> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -384,7 +377,6 @@ struct WaitEvents2Cmd : CmdDerive<Barrier2CmdBase, CommandType::waitEvents2> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -395,7 +387,6 @@ struct BarrierCmd : CmdDerive<BarrierCmdBase, CommandType::barrier> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -404,7 +395,6 @@ struct Barrier2Cmd : CmdDerive<Barrier2CmdBase, CommandType::barrier2> {
 	Category category() const override { return Category::sync; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -430,7 +420,6 @@ struct BeginRenderPassCmd final : CmdDerive<SectionCommand, CommandType::beginRe
 	std::string_view nameDesc() const override { return "BeginRenderPass"; }
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 	Category category() const override { return Category::beginRenderPass; }
 };
@@ -454,7 +443,6 @@ struct NextSubpassCmd final : CmdDerive<SubpassCmd, CommandType::nextSubpass> {
 	// Must be tracked while recording
 	std::string_view nameDesc() const override { return "NextSubpass"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command& rhs) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -493,7 +481,7 @@ struct DrawCmdBase : StateCmdBase {
 
 	Category category() const override { return Category::draw; }
 	void displayGrahpicsState(Gui& gui, bool indices) const;
-	Matcher doMatch(const DrawCmdBase& cmd, bool indexed) const;
+	MatchVal doMatch(const DrawCmdBase& cmd, bool indexed) const;
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
 	const Pipeline* boundPipe() const override { return state->pipe; }
@@ -513,7 +501,6 @@ struct DrawCmd final : CmdDerive<DrawCmdBase, CommandType::draw> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "Draw"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -532,7 +519,6 @@ struct DrawIndirectCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndirect>
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -549,7 +535,6 @@ struct DrawIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndexed> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "DrawIndexed"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -570,7 +555,6 @@ struct DrawIndirectCountCmd final : CmdDerive<DrawCmdBase, CommandType::drawIndi
 	}
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -588,7 +572,6 @@ struct DrawMultiCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti> {
 	std::string_view nameDesc() const override { return "DrawMulti"; };
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -605,7 +588,6 @@ struct DrawMultiIndexedCmd final : CmdDerive<DrawCmdBase, CommandType::drawMulti
 	std::string_view nameDesc() const override { return "DrawMultiIndexed"; };
 	void displayInspector(Gui& gui) const override;
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -619,7 +601,6 @@ struct BindVertexBuffersCmd final : CmdDerive<Command, CommandType::bindVertexBu
 	std::string_view nameDesc() const override { return "BindVertexBuffers"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -631,7 +612,6 @@ struct BindIndexBufferCmd final : CmdDerive<Command, CommandType::bindIndexBuffe
 	std::string_view nameDesc() const override { return "BindIndexBuffer"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -647,7 +627,6 @@ struct BindDescriptorSetCmd final : CmdDerive<Command, CommandType::bindDescript
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
 	void displayInspector(Gui& gui) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -660,7 +639,7 @@ struct DispatchCmdBase : StateCmdBase {
 
 	Category category() const override { return Category::dispatch; }
 	void displayComputeState(Gui& gui) const;
-	Matcher doMatch(const DispatchCmdBase&) const;
+	MatchVal doMatch(const DispatchCmdBase&) const;
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
 	const Pipeline* boundPipe() const override { return state->pipe; }
@@ -679,7 +658,6 @@ struct DispatchCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatch> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "Dispatch"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -693,7 +671,6 @@ struct DispatchIndirectCmd final : CmdDerive<DispatchCmdBase, CommandType::dispa
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "DispatchIndirect"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -711,7 +688,6 @@ struct DispatchBaseCmd final : CmdDerive<DispatchCmdBase, CommandType::dispatchB
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "DispatchBase"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -729,7 +705,6 @@ struct CopyImageCmd final : CmdDerive<Command, CommandType::copyImage> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -745,7 +720,6 @@ struct CopyBufferToImageCmd final : CmdDerive<Command, CommandType::copyBufferTo
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyBufferToImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -761,7 +735,6 @@ struct CopyImageToBufferCmd final : CmdDerive<Command, CommandType::copyImageToB
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "CopyImageToBuffer"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -779,7 +752,6 @@ struct BlitImageCmd final : CmdDerive<Command, CommandType::blitImage> {
 	void displayInspector(Gui& gui) const override;
 	std::string_view nameDesc() const override { return "BlitImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -796,7 +768,6 @@ struct ResolveImageCmd final : CmdDerive<Command, CommandType::resolveImage> {
 	std::string_view nameDesc() const override { return "ResolveImage"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -811,7 +782,6 @@ struct CopyBufferCmd final : CmdDerive<Command, CommandType::copyBuffer> {
 	std::string_view nameDesc() const override { return "CopyBuffer"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -825,7 +795,6 @@ struct UpdateBufferCmd final : CmdDerive<Command, CommandType::updateBuffer> {
 	std::string_view nameDesc() const override { return "UpdateBuffer"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -840,7 +809,6 @@ struct FillBufferCmd final : CmdDerive<Command, CommandType::fillBuffer> {
 	std::string_view nameDesc() const override { return "FillBuffer"; }
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -855,7 +823,6 @@ struct ClearColorImageCmd final : CmdDerive<Command, CommandType::clearColorImag
 	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "ClearColorImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -870,7 +837,6 @@ struct ClearDepthStencilImageCmd final : CmdDerive<Command, CommandType::clearDe
 	Category category() const override { return Category::transfer; }
 	std::string_view nameDesc() const override { return "ClearDepthStencilImage"; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -883,7 +849,6 @@ struct ClearAttachmentCmd final : CmdDerive<Command, CommandType::clearAttachmen
 	// NOTE: strictly speaking this isn't a transfer, we don't care.
 	Category category() const override { return Category::transfer; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -968,7 +933,6 @@ struct BeginDebugUtilsLabelCmd final : CmdDerive<SectionCommand, CommandType::be
 
 	std::string toString() const override { return name; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 
 	// NOTE: yes, we return more than just the command here.
 	// But that's because the command itself isn't of any use without the label.
@@ -1001,7 +965,6 @@ struct BindPipelineCmd final : CmdDerive<Command, CommandType::bindPipeline> {
 	std::string_view nameDesc() const override { return "BindPipeline"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1014,7 +977,6 @@ struct PushConstantsCmd final : CmdDerive<Command, CommandType::pushConstants> {
 	std::string_view nameDesc() const override { return "PushConstants"; }
 	Category category() const override { return Category::bind; }
 	void record(const Device&, VkCommandBuffer, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1499,7 +1461,7 @@ struct TraceRaysCmdBase : StateCmdBase {
 	TraceRaysCmdBase(CommandBuffer& cb);
 
 	Category category() const override { return Category::traceRays; }
-	Matcher doMatch(const TraceRaysCmdBase& cmd) const;
+	MatchVal doMatch(const TraceRaysCmdBase& cmd) const;
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
 	const Pipeline* boundPipe() const override { return state->pipe; }
@@ -1521,7 +1483,6 @@ struct TraceRaysCmd final : CmdDerive<TraceRaysCmdBase, CommandType::traceRays> 
 	std::string_view nameDesc() const override { return "TraceRays"; }
 	std::string toString() const override;
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1535,7 +1496,6 @@ struct TraceRaysIndirectCmd final : CmdDerive<TraceRaysCmdBase, CommandType::tra
 	using CmdDerive::CmdDerive;
 	std::string_view nameDesc() const override { return "TraceRaysIndirect"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
-	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
@@ -1579,7 +1539,6 @@ struct BeginRenderingCmd final : CmdDerive<RenderSectionCommand, CommandType::be
 	std::string_view nameDesc() const override { return "BeginRendering"; }
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
-	Matcher match(const Command& rhs) const override;
 
 	// TODO: inspector
 	// TODO: toString?
@@ -1625,6 +1584,7 @@ struct CommandVisitor {
 	virtual void visit(const ParentCommand& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const SectionCommand& cmd) { visit(static_cast<const ParentCommand&>(cmd)); }
 	virtual void visit(const RenderSectionCommand& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
+	virtual void visit(const RootCommand& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
 
 	virtual void visit(const BeginRenderPassCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
 	virtual void visit(const EndRenderPassCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
@@ -1643,6 +1603,7 @@ struct CommandVisitor {
 
 	virtual void visit(const DrawCmdBase& cmd) { visit(static_cast<const StateCmdBase&>(cmd)); }
 	virtual void visit(const DrawCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
+	virtual void visit(const DrawIndexedCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
 	virtual void visit(const DrawIndirectCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
 	virtual void visit(const DrawIndirectCountCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
 	virtual void visit(const DrawMultiCmd& cmd) { visit(static_cast<const DrawCmdBase&>(cmd)); }
@@ -1678,6 +1639,19 @@ struct CommandVisitor {
 
 	virtual void visit(const BeginConditionalRenderingCmd& cmd) { visit(static_cast<const SectionCommand&>(cmd)); }
 	virtual void visit(const EndConditionalRenderingCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const BarrierCmdBase& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const Barrier2CmdBase& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const WaitEventsCmd& cmd) { visit(static_cast<const BarrierCmdBase&>(cmd)); }
+	virtual void visit(const BarrierCmd& cmd) { visit(static_cast<const BarrierCmdBase&>(cmd)); }
+	virtual void visit(const WaitEvents2Cmd& cmd) { visit(static_cast<const Barrier2CmdBase&>(cmd)); }
+	virtual void visit(const Barrier2Cmd& cmd) { visit(static_cast<const Barrier2CmdBase&>(cmd)); }
+
+	virtual void visit(const BindVertexBuffersCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const BindIndexBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const BindPipelineCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const BindDescriptorSetCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 };
 
 template<typename F>
@@ -1690,6 +1664,7 @@ struct TemplateCommandVisitor : CommandVisitor {
 	void visit(const ParentCommand& cmd) override { f(cmd); }
 	void visit(const SectionCommand& cmd) override { f(cmd); }
 	void visit(const RenderSectionCommand& cmd) override { f(cmd); }
+	void visit(const RootCommand& cmd) override { f(cmd); }
 
 	void visit(const BeginRenderPassCmd& cmd) override { f(cmd); }
 	void visit(const EndRenderPassCmd& cmd) override { f(cmd); }
@@ -1707,6 +1682,7 @@ struct TemplateCommandVisitor : CommandVisitor {
 	void visit(const StateCmdBase& cmd) override { f(cmd); }
 	void visit(const DrawCmdBase& cmd) override { f(cmd); }
 	void visit(const DrawCmd& cmd) override { f(cmd); }
+	void visit(const DrawIndexedCmd& cmd) override { f(cmd); }
 	void visit(const DrawIndirectCmd& cmd) override { f(cmd); }
 	void visit(const DrawIndirectCountCmd& cmd) override { f(cmd); }
 	void visit(const DrawMultiCmd& cmd) override { f(cmd); }
@@ -1742,6 +1718,19 @@ struct TemplateCommandVisitor : CommandVisitor {
 
 	void visit(const BeginConditionalRenderingCmd& cmd) override { f(cmd); }
 	void visit(const EndConditionalRenderingCmd& cmd) override { f(cmd); }
+
+	void visit(const BarrierCmdBase& cmd) override { f(cmd); }
+	void visit(const Barrier2CmdBase& cmd) override { f(cmd); }
+
+	void visit(const WaitEventsCmd& cmd) override { f(cmd); }
+	void visit(const BarrierCmd& cmd) override { f(cmd); }
+	void visit(const WaitEvents2Cmd& cmd) override { f(cmd); }
+	void visit(const Barrier2Cmd& cmd) override { f(cmd); }
+
+	void visit(const BindVertexBuffersCmd& cmd) override { f(cmd); }
+	void visit(const BindIndexBufferCmd& cmd) override { f(cmd); }
+	void visit(const BindPipelineCmd& cmd) override { f(cmd); }
+	void visit(const BindDescriptorSetCmd& cmd) override { f(cmd); }
 };
 
 template<typename C>

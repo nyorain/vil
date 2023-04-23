@@ -1,9 +1,10 @@
 - [ ] serialization
-	- [ ] create/save handles
-	- [ ] remove serialize.cpp
-	- [ ] update gui to new interface
+	- [x] create/save handles
+	- [x] remove serialize.cpp
+	- [x] update gui to new interface
 	- [ ] serialize further gui state, e.g. selected I/O
-	- [ ] use find() for last command level in gui when loading state
+	- [x] use find() for last command level in gui when loading state
+		- [ ] don't always do it in updateRecords. figure out interface
 	- [ ] allow to explicitly save relative-commands or gui states,
 	      not sure which perspective makes more sense.
 		- [ ] store in working dir? or in some vil-specific config dir?

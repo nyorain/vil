@@ -40,6 +40,8 @@ void destroy(StateSaver& saver) {
 
 void flushPending(StateSaver& saver) {
 	auto done = false;
+	dlg_trace(">>flushPending: lastWrittenRecord {}, records.size {}",
+		saver.lastWrittenRecord, saver.records.size());
 	while(!done) {
 		done = true;
 
@@ -50,9 +52,14 @@ void flushPending(StateSaver& saver) {
 		saver.lastWrittenHandle = saver.handles.size();
 
 		for(auto i = saver.lastWrittenRecord; i < saver.records.size(); ++i) {
+			auto before = saver.recordBuf.size();
+
 			done = false;
 			auto& rec = const_cast<CommandRecord&>(*saver.records[i]);
 			saveRecord(saver, saver.recordBuf, rec);
+
+			auto after = saver.recordBuf.size();
+			dlg_trace("Saved record {}, {}B", i, after - before);
 		}
 		saver.lastWrittenRecord = saver.records.size();
 	}
@@ -66,6 +73,7 @@ u64 addNoFlush(StateSaver& slz, const CommandRecord& rec) {
 
 	auto id = slz.records.size();
 	slz.records.push_back(&rec);
+	dlg_trace("added record {}", id);
 
 	return id;
 }

@@ -134,6 +134,9 @@ VoidEnableIfContainer<C> serializeContainer(SaveBuf& buf, C& container, Writer&&
 	writeContainer(buf, container, writer);
 }
 
+template<typename T> void read(LoadBuf& buf, std::vector<T>& ret) = delete;
+template<typename T> void write(SaveBuf& buf, const std::vector<T>& ret) = delete;
+
 // NOTE: dangerous, will only remain valid until the read buffer
 // is still alive. You probably don't want to use this.
 inline void read(LoadBuf& buf, std::string_view& ret) {

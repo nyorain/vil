@@ -105,7 +105,7 @@ struct SparseMemoryBind;
 struct OpaqueSparseMemoryBind;
 struct ImageSparseMemoryBind;
 
-struct Matcher;
+struct MatchVal;
 
 struct ObjectTypeHandler;
 
@@ -167,6 +167,17 @@ decltype(auto) constexpr templatize(T&& value) {
 struct StateSaver;
 struct StateLoader;
 struct LoadBuf; // like readBuf but 'read' overloads throw on error
+
+enum class MatchType {
+	// mainly matches by identity of handles
+	// there are some special cases, e.g. swapchain images
+	identity,
+	// like identity but also considers names, when handles are named,
+	// apply deep matching. Useful for handle recreation, e.g. pipe reloading
+	mixed,
+	// do deep matching also for unnamed handles
+	deep,
+};
 
 } // namespace
 

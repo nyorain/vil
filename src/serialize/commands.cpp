@@ -672,13 +672,18 @@ void serialize(CommandSaver& saver, SaveBuf& io, ExecuteCommandsCmd& cmd) {
 	dlg_assert(count == cmd.stats_.numChildSections);
 }
 
+template<typename Slz, typename IO>
+void serialize(Slz& slz, IO& io, RootCommand& cmd) {
+	serialize(slz, io, static_cast<SectionCommand&>(cmd));
+}
+
 // fallback for all other commands
 template<typename Slz, typename IO, typename Cmd>
 void serialize(Slz& slz, IO& io, Cmd& cmd) {
 	(void) slz;
 	(void) io;
 	(void) cmd;
-	// dlg_trace("unimplemented: {}", cmd.nameDesc());
+	dlg_trace("unimplemented: {}", cmd.nameDesc());
 }
 
 // TODO: serializing of RootCommand currently not handled symmetrically
