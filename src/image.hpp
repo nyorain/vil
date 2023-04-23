@@ -49,7 +49,7 @@ private:
 struct ImageView : SharedDeviceHandle {
 	static constexpr auto objectType = VK_OBJECT_TYPE_IMAGE_VIEW;
 
-	Image* img {};
+	Image* img {}; // TODO: IntrusivePtr?
 	VkImageView handle {};
 	VkImageViewCreateInfo ci;
 

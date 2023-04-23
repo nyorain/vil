@@ -858,7 +858,8 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 		auto dstHierarchy = span(command_).last(count + 1);
 		dlg_assert(dstHierarchy[0]->type() == newCommand.back()->type());
 
-		auto fr = find(*deriveCast<const ParentCommand*>(newCommand.back()),
+		auto fr = find(MatchType::deep,
+			*deriveCast<const ParentCommand*>(newCommand.back()),
 			dstHierarchy, noDescriptors);
 
 		if(!fr.hierarchy.empty()) {
@@ -899,7 +900,7 @@ void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records) {
 	// update records
 	ThreadMemScope tms;
 	LinAllocScope localMatchMem(matchAlloc_);
-	auto frameMatch = match(tms, localMatchMem, frame_, records);
+	auto frameMatch = match(tms, localMatchMem, defaultMatchType_, frame_, records);
 	updateRecords(frameMatch, std::move(records));
 }
 
@@ -912,7 +913,7 @@ void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record) {
 
 	ThreadMemScope tms;
 	LinAllocScope localMatchMem(matchAlloc_);
-	auto recMatch = match(tms, localMatchMem,
+	auto recMatch = match(tms, localMatchMem, defaultMatchType_,
 		*record_->commands, *record->commands);
 	std::vector<const Command*> newCommand {};
 
@@ -970,11 +971,15 @@ void CommandRecordGui::updateFromSelector() {
 }
 
 void CommandRecordGui::save(StateSaver& slz, SaveBuf& buf) {
+	dlg_trace("cbgui save: {}", frame_.size());
+
 	// selection
 	write<u64>(buf, frame_.size());
 	for(auto& subm : frame_) {
 		write(buf, subm.submissionID);
 		write<u64>(buf, subm.submissions.size());
+
+		dlg_trace(" >> {}", subm.submissions.size());
 		for(auto& rec : subm.submissions) {
 			auto id = add(slz, *rec);
 			write<u64>(buf, id);
@@ -1001,11 +1006,6 @@ void CommandRecordGui::save(StateSaver& slz, SaveBuf& buf) {
 	}
 
 	// opened
-	write<u64>(buf, openedSections_.size());
-	for(auto& cmd : openedSections_) {
-		write<u64>(buf, getID(slz, *cmd));
-	}
-
 	write<u64>(buf, openedSubmissions_.size());
 	for(auto* subm : openedSubmissions_) {
 		auto submID = subm - frame_.data();
@@ -1017,6 +1017,12 @@ void CommandRecordGui::save(StateSaver& slz, SaveBuf& buf) {
 		auto recID = add(slz, *rec);
 		write<u64>(buf, recID);
 	}
+
+	write<u64>(buf, openedSections_.size());
+	for(auto& cmd : openedSections_) {
+		write<u64>(buf, getID(slz, *cmd));
+	}
+
 }
 
 // void printMatch(const CommandSectionMatch& m, unsigned indent) {
@@ -1062,17 +1068,8 @@ void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 	}
 
 	// opened
-	openedSections_.clear();
-	auto count = read<u64>(buf);
-	for(auto i = 0u; i < count; ++i) {
-		auto id = read<u64>(buf);
-		auto* cmd = getCommand(loader, id);
-		dlg_assert(cmd && dynamic_cast<ParentCommand*>(cmd));
-		openedSections_.insert(static_cast<ParentCommand*>(cmd));
-	}
-
 	openedSubmissions_.clear();
-	count = read<u64>(buf);
+	auto count = read<u64>(buf);
 	for(auto i = 0u; i < count; ++i) {
 		auto id = read<u32>(buf);
 		auto& subm = frame[id];
@@ -1087,6 +1084,15 @@ void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 		openedRecords_.insert(rec.get());
 	}
 
+	openedSections_.clear();
+	count = read<u64>(buf);
+	for(auto i = 0u; i < count; ++i) {
+		auto id = read<u64>(buf);
+		auto* cmd = getCommand(loader, id);
+		dlg_assert(cmd && dynamic_cast<ParentCommand*>(cmd));
+		openedSections_.insert(static_cast<ParentCommand*>(cmd));
+	}
+
 	// update:
 	// first store the loaded state locally but then transition via matching
 	// to the actual application's frame
@@ -1097,7 +1103,7 @@ void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 
 	ThreadMemScope tms;
 	LinAllocScope localMatchMem(matchAlloc_);
-	auto frameMatch = match(tms, localMatchMem, frame_, frame);
+	auto frameMatch = match(tms, localMatchMem, MatchType::deep, frame_, frame);
 
 	// dlg_trace("frame matches: {}", frameMatch.matches.size());
 	// for(auto& m : frameMatch.matches) {

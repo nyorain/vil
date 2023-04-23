@@ -437,7 +437,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 
 		ThreadMemScope tms;
 		LinAllocScope localMatchMem(matchAlloc_);
-		auto frameMatch = match(tms, localMatchMem, target_.frame, currFrame);
+		auto frameMatch = match(tms, localMatchMem, matchType, target_.frame, currFrame);
 
 		for(auto& submMatch : frameMatch.matches) {
 			if(submMatch.a != &target_.frame[target_.submissionID]) {
@@ -480,7 +480,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 				}
 
 				// shouldn't need descriptors to find *identicial* command
-				auto findRes = find(*rec->commands, lc->command, {});
+				auto findRes = find(MatchType::identity, *rec->commands, lc->command, {});
 				dlg_assert(!findRes.hierarchy.empty());
 				hooked = doHook(*rec, findRes.hierarchy,
 					findRes.match, sub, hookData, lc.get());
@@ -508,7 +508,8 @@ void CommandHook::hook(QueueSubmitter& subm) {
 				}
 
 				if(hookViaFind) {
-					auto findRes = find(*rec.commands, target_.command,
+					auto findRes = find(matchType,
+						*rec.commands, target_.command,
 						target_.descriptors);
 					if(findRes.match > 0.f) {
 						hooked = doHook(rec, findRes.hierarchy,
@@ -599,7 +600,7 @@ VkCommandBuffer CommandHook::hook(CommandRecord& record,
 		if(!finalCmdIsParent) {
 			dlg_assert(dstHierarchy.size() == target_.command.size() - 1);
 			auto* parent = static_cast<const ParentCommand*>(dstHierarchy.back());
-			auto findResult = find(*parent, span(target_.command).last(2),
+			auto findResult = find(matchType, *parent, span(target_.command).last(2),
 				target_.descriptors);
 
 			// no hook needed
@@ -624,7 +625,7 @@ VkCommandBuffer CommandHook::hook(CommandRecord& record,
 				dlg_assert(dstHierarchy.size() >= 2);
 				auto* parent = static_cast<const ParentCommand*>(
 					dstHierarchy[dstHierarchy.size() - 2]);
-				auto findResult = find(*parent,
+				auto findResult = find(matchType, *parent,
 					span(target_.command).last(2), target_.descriptors);
 				dlg_assert(!findResult.hierarchy.empty());
 				dlg_assert(findResult.hierarchy.size() == 2u);
@@ -893,7 +894,7 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 		if(!localCapture && !target_.command.empty()) {
 			dlg_assert(target_.record);
 
-			auto findRes = find(*record.commands, target_.command, target_.descriptors);
+			auto findRes = find(matchType, *record.commands, target_.command, target_.descriptors);
 			dlg_assert(findRes.match > 0.f);
 			dlg_assert(std::equal(
 				foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),

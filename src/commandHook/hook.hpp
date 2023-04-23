@@ -164,6 +164,9 @@ public:
 	// maximum number of completed hooks we store at a time.
 	static constexpr auto maxCompletedHooks = 8u;
 
+	// TODO: make setting?
+	static constexpr auto matchType = MatchType::mixed;
+
 	using TargetType = CommandHookTargetType;
 	using Target = CommandHookTarget;
 	using Ops = CommandHookOps;

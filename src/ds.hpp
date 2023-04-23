@@ -130,7 +130,19 @@ struct DescriptorSetLayout : SharedDeviceHandle {
 	~DescriptorSetLayout();
 };
 
-bool compatible(const DescriptorSetLayout&, const DescriptorSetLayout& b);
+// Returns whether the two given DescriptorSetLayouts are compatible
+// in the sense of the Vulkan specification
+// NOTE: does only compare sampler identity, no deep-equality
+bool compatible(const DescriptorSetLayout&, const DescriptorSetLayout& b,
+		bool checkImmutableSamplers = true);
+
+// Returns whether the two given DescriptorSetLayouts have bindings that
+// conflict with each other. Each layout can have bindings that the other
+// set does not have, as long as their common bindings have the same
+// type (and immutable samplers if 'checkImmutableSamplers' is true).
+// NOTE: does only compare sampler identity, no deep-equality
+bool conflicting(const DescriptorSetLayout&, const DescriptorSetLayout& b,
+		bool checkImmutableSamplers = false);
 
 // Information about a single binding in a DescriptorSet.
 struct ImageDescriptor {

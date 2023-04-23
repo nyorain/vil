@@ -120,7 +120,7 @@ template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, RayTracingP
 		serializeStage(slz, buf, stage);
 	});
 
-	serialize(io, pipe.groups);
+	serializeContainer(io, pipe.groups);
 	serializeContainer(io, pipe.dynamicState);
 }
 
@@ -129,7 +129,6 @@ template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, ComputePipe
 	serializeRef(slz, io, pipe.layout);
 	serializeStage(slz, io, pipe.stage);
 }
-
 
 template<typename Slz, typename IO> void serialize(Slz&, IO& io, ShaderModule& mod) {
 	serialize(io, mod.name);

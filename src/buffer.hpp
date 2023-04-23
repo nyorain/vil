@@ -27,7 +27,7 @@ struct BufferView : SharedDeviceHandle {
 
 	VkBufferView handle;
 	VkBufferViewCreateInfo ci;
-	Buffer* buffer {};
+	Buffer* buffer {}; // TODO: IntrusivePtr?
 
 	~BufferView();
 };

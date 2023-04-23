@@ -11,6 +11,7 @@
 using namespace vil;
 
 thread_local LinAllocator localMem;
+constexpr auto matchType = MatchType::identity;
 
 struct LabelSection {
 	BeginDebugUtilsLabelCmd* cmd;
@@ -40,15 +41,15 @@ TEST(unit_command_match_barrier) {
 	b1.dstStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
 	auto b2 = b1;
 
-	EXPECT(eval(b1.match(b2)), approx(1.f));
-	EXPECT(eval(b1.match(b2)), eval(b2.match(b1)));
+	EXPECT(eval(match(b1, b2, matchType)), approx(1.f));
+	EXPECT(eval(match(b1, b2, matchType)), eval(match(b2, b1, matchType)));
 
 	b1.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-	EXPECT(eval(b1.match(b2)) < 1.f, true);
+	EXPECT(eval(match(b1, b2, matchType)) < 1.f, true);
 
 	WaitEventsCmd waitCmd;
-	EXPECT(waitCmd.match(b2).match, 0.f);
-	EXPECT(eval(waitCmd.match(b2)), 0.f);
+	EXPECT(match(waitCmd, b2, matchType).match, 0.f);
+	EXPECT(eval(match(waitCmd, b2, matchType)), 0.f);
 }
 
 TEST(unit_match_simple_record) {
@@ -66,8 +67,10 @@ TEST(unit_match_simple_record) {
 
 	ThreadMemScope tms;
 	LinAllocScope lms(localMem);
-	auto [match1, _1, _2, matches1] = match(tms, lms, *rec3Barriers->commands, *recEmpty->commands);
-	auto [match2, _3, _4, matches2] = match(tms, lms, *rec3Barriers->commands, *rec3Barriers->commands);
+	auto [match1, _1, _2, matches1] = match(tms, lms, matchType,
+		*rec3Barriers->commands, *recEmpty->commands);
+	auto [match2, _3, _4, matches2] = match(tms, lms, matchType,
+		*rec3Barriers->commands, *rec3Barriers->commands);
 	dlg_trace("match1: {}/{}", match1.match, match1.total);
 	dlg_trace("match2: {}/{}", match2.match, match2.total);
 
@@ -93,7 +96,7 @@ TEST(unit_match_labels) {
 
 	ThreadMemScope tms;
 	LinAllocScope lms(localMem);
-	auto [matchRes, _1, _2, matches] = match(tms, lms, *recA->commands, *recB->commands);
+	auto [matchRes, _1, _2, matches] = match(tms, lms, matchType, *recA->commands, *recB->commands);
 	auto matchVal = eval(matchRes);
 	dlg_trace("match val: {}", matchVal);
 
@@ -117,7 +120,8 @@ TEST(unit_match_labels) {
 	// test symmetrical
 	{
 		LinAllocScope lms(localMem);
-		auto [matchRes2, _1, _2, matches2] = match(tms, lms, *recB->commands, *recA->commands);
+		auto [matchRes2, _1, _2, matches2] = match(tms, lms, matchType,
+			*recB->commands, *recA->commands);
 		auto matchVal2 = eval(matchRes2);
 		dlg_trace("match val 2: {}", matchVal2);
 

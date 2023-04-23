@@ -13,24 +13,20 @@ namespace vil {
 // The effective matching value is 'match/total' but having both values
 // gives additional information for further processing.
 // Invariant: For common objects, match <= total.
-struct Matcher {
+struct MatchVal {
 	float match {}; // sum of weights of comparisons that matched
 	float total {}; // sum of weights of all comparisons
 
 	// Special constant to signal that we are certain this isn't a match.
-	static Matcher noMatch() { return {0.f, -1.f}; }
+	static MatchVal noMatch() { return {0.f, -1.f}; }
 };
-
-Matcher match(const ImageView& a, const ImageView& b);
-Matcher match(const BufferView& a, const BufferView& b);
-Matcher match(const Sampler& a, const Sampler& b);
 
 // Matches the two given descriptor states, expects them to have
 // the same layout.
-Matcher match(const DescriptorStateRef& a, const DescriptorStateRef& b);
+MatchVal match(MatchType, const DescriptorStateRef& a, const DescriptorStateRef& b);
 
 struct CommandSectionMatch {
-	Matcher match; // including all children
+	MatchVal match; // including all children
 	const ParentCommand* a {};
 	const ParentCommand* b {};
 	span<CommandSectionMatch> children;
@@ -41,31 +37,31 @@ struct CommandSectionMatch {
 // (labels, render passes).
 // The spans in the returned section are alloced from 'tms'.
 CommandSectionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
-	const ParentCommand& rootA, const ParentCommand& rootB);
+	MatchType, const ParentCommand& rootA, const ParentCommand& rootB);
 
 struct CommandRecordMatch {
-	Matcher match;
+	MatchVal match;
 	const CommandRecord* a {};
 	const CommandRecord* b {};
 	span<CommandSectionMatch> matches;
 };
 
 struct FrameSubmissionMatch {
-	Matcher match;
+	MatchVal match;
 	const FrameSubmission* a {};
 	const FrameSubmission* b {};
 	span<CommandRecordMatch> matches;
 };
 
 struct FrameMatch {
-	Matcher match;
+	MatchVal match;
 	span<FrameSubmissionMatch> matches;
 };
 
 FrameSubmissionMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
-	const FrameSubmission& a, const FrameSubmission& b);
+	MatchType, const FrameSubmission& a, const FrameSubmission& b);
 FrameMatch match(LinAllocScope& retMem, LinAllocScope& localMem,
-	span<const FrameSubmission>, span<const FrameSubmission>);
+	MatchType, span<const FrameSubmission>, span<const FrameSubmission>);
 
 struct FindResult {
 	std::vector<const Command*> hierarchy;
@@ -74,40 +70,55 @@ struct FindResult {
 
 // Tries to find the an equivalent of 'dstHierachyToFind' in the command
 // sequence from 'srcRoot'.
-FindResult find(const ParentCommand& srcRoot, span<const Command*> dstHierarchyToFind,
-	const CommandDescriptorSnapshot& dstDescriptors, float threshold = 0.0);
+FindResult find(MatchType,
+	const ParentCommand& srcRoot,
+	span<const Command*> dstHierarchyToFind,
+	const CommandDescriptorSnapshot& dstDescriptors,
+	float threshold = 0.0);
 
 // Matcher utility
 template<typename T>
-bool add(Matcher& m, const T& a, const T& b, float weight = 1.f) {
+bool add(MatchVal& m, const T& a, const T& b, float weight = 1.f) {
 	auto same = (a == b);
 	m.total += weight;
 	m.match += same ? weight : 0.f;
 	return same;
 }
 
+inline bool noMatch(const MatchVal& m) {
+	return m.total < 0.f;
+}
+
+inline void add(MatchVal& m, const MatchVal& other, float weight = 1.0) {
+	dlg_assert(!noMatch(other) && !noMatch(m));
+	m.total += other.total * weight;
+	m.match += other.match * weight;
+}
+
 template<typename T>
-void addMemcmp(Matcher& m, const T& a, const T& b, float weight = 1.f) {
+void addMemcmp(MatchVal& m, const T& a, const T& b, float weight = 1.f) {
 	m.total += weight;
 	m.match += std::memcmp(&a, &b, sizeof(T)) == 0 ? weight : 0.f;
 }
 
 template<typename T>
-void addNonNull(Matcher& m, T* a, T* b, float weight = 1.f) {
+void addNonNull(MatchVal& m, T* a, T* b, float weight = 1.f) {
 	m.total += weight;
 	m.match += (a == b && a != nullptr) ? weight : 0.f;
 }
 
-bool addNonEmpty(Matcher&, std::string_view str1, std::string_view str2, float weight = 1.f);
+bool addNonEmpty(MatchVal&, std::string_view str1, std::string_view str2, float weight = 1.f);
 
-float eval(const Matcher& m);
-bool valid(const Matcher& m);
+float eval(const MatchVal& m);
+bool valid(const MatchVal& m);
 
-void add(Matcher& m,
+void add(MatchVal& m,
 	const VkImageSubresourceRange& a, const VkImageSubresourceRange& b,
 	float weight = 1.f);
-void add(Matcher& m,
+void add(MatchVal& m,
 	const VkImageSubresourceLayers& a, const VkImageSubresourceLayers& b,
 	float weight = 1.f);
+
+MatchVal match(const Command& a, const Command& b, MatchType matchType);
 
 } // namespace vil

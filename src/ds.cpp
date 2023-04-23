@@ -107,7 +107,52 @@ size_t totalDescriptorMemSize(const DescriptorSetLayout& layout, u32 variableDes
 	return ret;
 }
 
-bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
+bool conflicting(const DescriptorSetLayout& da, const DescriptorSetLayout& db,
+		bool checkImmutableSamplers) {
+	if(&da == &db) {
+		return false;
+	}
+
+	auto count = std::min(da.bindings.size(), db.bindings.size());
+	for(auto b = 0u; b < count; ++b) {
+		auto& ba = da.bindings[b];
+		auto& bb = db.bindings[b];
+
+		if(ba.descriptorCount == 0u || bb.descriptorCount == 0u) {
+			continue;
+		}
+
+		if(ba.descriptorType != bb.descriptorType) {
+			return true;
+		}
+
+		// immutable samplers
+		auto samplersRelevant = checkImmutableSamplers &&
+			(ba.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+			 ba.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+		if(samplersRelevant) {
+			if(bool(ba.immutableSamplers) != bool(bb.immutableSamplers)) {
+				return true;
+			}
+
+			if(ba.immutableSamplers) {
+				auto count = std::min(ba.descriptorCount, bb.descriptorCount);
+				for(auto e = 0u; e < count; ++e) {
+					// TODO: consider compatible (instead of just same)
+					// samplers as well?
+					if(ba.immutableSamplers[e] != bb.immutableSamplers[e]) {
+						return true;
+					}
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db,
+		bool checkImmutableSamplers) {
 	if(&da == &db) {
 		return true;
 	}
@@ -129,8 +174,10 @@ bool compatible(const DescriptorSetLayout& da, const DescriptorSetLayout& db) {
 		}
 
 		// immutable samplers
-		if(ba.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
-				ba.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+		auto samplersRelevant = checkImmutableSamplers &&
+			(ba.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+			 ba.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+		if(samplersRelevant) {
 			if(bool(ba.immutableSamplers) != bool(bb.immutableSamplers)) {
 				return false;
 			}

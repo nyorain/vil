@@ -104,6 +104,8 @@ private:
 	// TODO WIP experiments
 	bool focusSelected_ {};
 	bool freezeOnSparseBind_ {};
+
+	MatchType defaultMatchType_ {MatchType::mixed};
 };
 
 } // namespace vil

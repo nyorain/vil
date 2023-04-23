@@ -26,14 +26,6 @@
 #include <iomanip>
 #include <filesystem>
 
-// TODO:
-// - a lot of commands are still missing valid match() implementations.
-//   some commands (bind, sync) will need contextual information, i.e.
-//   an external match implementation. Or maybe just having 'prev'
-//   links in addition to 'next' is already enough? probably not,
-//   the commands itself also should not do the iteration, should not
-//   know about other commands.
-
 namespace vil {
 
 // Command utility
@@ -167,16 +159,6 @@ bool Command::isDescendant(const Command& cmd) const {
 	return false;
 }
 
-Matcher Command::match(const Command& cmd) const {
-	// default implementation: when the types are the same, return 1,
-	// otherwise 0
-	if(typeid(cmd) != typeid(*this)) {
-		return Matcher::noMatch();
-	}
-
-	return {1.f, 1.f};
-}
-
 std::string formatQueueFam(u32 fam) {
 	if(fam == VK_QUEUE_FAMILY_IGNORED) {
 		return "ignored";
@@ -274,294 +256,6 @@ void displayBarriers(
 	}
 }
 
-
-bool operator==(const VkImageSubresourceLayers& a, const VkImageSubresourceLayers& b) {
-	return a.aspectMask == b.aspectMask &&
-		a.baseArrayLayer == b.baseArrayLayer &&
-		a.layerCount == b.layerCount &&
-		a.mipLevel == b.mipLevel;
-}
-
-Matcher match(const VkBufferCopy2KHR& a, const VkBufferCopy2KHR& b) {
-	Matcher m;
-	add(m, a.size, b.size);
-	add(m, a.srcOffset, b.srcOffset, 0.2);
-	add(m, a.dstOffset, b.dstOffset, 0.2);
-	return m;
-}
-
-Matcher match(const VkImageCopy2KHR& a, const VkImageCopy2KHR& b) {
-	Matcher m;
-	addMemcmp(m, a.dstOffset, b.dstOffset);
-	addMemcmp(m, a.srcOffset, b.srcOffset);
-	addMemcmp(m, a.extent, b.extent);
-	add(m, a.dstSubresource, b.dstSubresource);
-	add(m, a.srcSubresource, b.srcSubresource);
-	return m;
-}
-
-Matcher match(const VkImageBlit2KHR& a, const VkImageBlit2KHR& b) {
-	Matcher m;
-	add(m, a.srcSubresource, b.srcSubresource);
-	add(m, a.dstSubresource, b.dstSubresource);
-	addMemcmp(m, a.srcOffsets, b.srcOffsets);
-	addMemcmp(m, a.dstOffsets, b.dstOffsets);
-	return m;
-}
-
-Matcher match(const VkImageResolve2KHR& a, const VkImageResolve2KHR& b) {
-	Matcher m;
-	add(m, a.srcSubresource, b.srcSubresource);
-	add(m, a.dstSubresource, b.dstSubresource);
-	addMemcmp(m, a.srcOffset, b.srcOffset);
-	addMemcmp(m, a.dstOffset, b.dstOffset);
-	addMemcmp(m, a.extent, b.extent);
-	return m;
-}
-
-Matcher match(const VkBufferImageCopy2KHR& a, const VkBufferImageCopy2KHR& b) {
-	Matcher m;
-	add(m, a.bufferImageHeight, b.bufferImageHeight);
-	add(m, a.bufferOffset, b.bufferOffset);
-	add(m, a.bufferRowLength, b.bufferRowLength);
-	addMemcmp(m, a.imageOffset, b.imageOffset);
-	addMemcmp(m, a.imageExtent, b.imageExtent);
-	add(m, a.imageSubresource, b.imageSubresource);
-	return m;
-}
-
-Matcher match(const VkMultiDrawInfoEXT& a, const VkMultiDrawInfoEXT& b) {
-	Matcher m;
-	add(m, a.firstVertex, b.firstVertex);
-	add(m, a.vertexCount, b.vertexCount);
-	return m;
-}
-
-Matcher match(const VkMultiDrawIndexedInfoEXT& a, const VkMultiDrawIndexedInfoEXT& b) {
-	Matcher m;
-	add(m, a.firstIndex, b.firstIndex);
-	add(m, a.indexCount, b.indexCount);
-	add(m, a.vertexOffset, b.vertexOffset);
-	return m;
-}
-
-bool operator==(const VkMultiDrawInfoEXT& a, const VkMultiDrawInfoEXT& b) {
-	return a.firstVertex == b.firstVertex &&
-		a.vertexCount == b.vertexCount;
-}
-
-bool operator==(const VkMultiDrawIndexedInfoEXT& a, const VkMultiDrawIndexedInfoEXT& b) {
-	return a.firstIndex == b.firstIndex &&
-		a.indexCount == b.indexCount &&
-		a.vertexOffset == b.vertexOffset;
-}
-
-Matcher match(const VkImageSubresourceRange& a, const VkImageSubresourceRange& b) {
-	Matcher m;
-	add(m, a, b);
-	return m;
-}
-
-Matcher match(const VkClearAttachment& a, const VkClearAttachment& b) {
-	if(a.aspectMask != b.aspectMask) {
-		return Matcher::noMatch();
-	}
-
-	auto sameCV = false;
-	if(a.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
-		if(a.colorAttachment != b.colorAttachment) {
-			return Matcher::noMatch();
-		}
-		// NOTE: stricly speaking we would have to check the format here
-		// and compare based on that
-		sameCV = std::memcmp(&a.clearValue.color.uint32, &b.clearValue.color.uint32,
-			sizeof(a.clearValue.color.uint32)) == 0;
-	} else {
-		sameCV = std::memcmp(&a.clearValue.depthStencil, &b.clearValue.depthStencil,
-			sizeof(a.clearValue.depthStencil)) == 0;
-	}
-
-	return sameCV ? Matcher{3.f, 3.f} : Matcher::noMatch();
-}
-
-Matcher match(const VkClearRect& a, const VkClearRect& b) {
-	Matcher m;
-	add(m, a.rect.offset.x, b.rect.offset.x);
-	add(m, a.rect.offset.y, b.rect.offset.y);
-	add(m, a.rect.extent.width, b.rect.extent.width);
-	add(m, a.rect.extent.height, b.rect.extent.height);
-	add(m, a.baseArrayLayer, b.baseArrayLayer);
-	add(m, a.layerCount, b.layerCount);
-	return m;
-}
-
-Matcher match(const BoundVertexBuffer& a, const BoundVertexBuffer& b) {
-	Matcher m;
-	addNonNull(m, a.buffer, b.buffer);
-	add(m, a.offset, b.offset, 0.1);
-	return m;
-}
-
-template<typename ResourceBarrier>
-bool equalOwnershipTransition(const ResourceBarrier& a, const ResourceBarrier& b) {
-	bool queueTransferA =
-		a.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		a.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		a.srcQueueFamilyIndex != a.dstQueueFamilyIndex;
-	bool queueTransferB =
-		b.srcQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		b.dstQueueFamilyIndex != VK_QUEUE_FAMILY_IGNORED &&
-		b.srcQueueFamilyIndex != b.dstQueueFamilyIndex;
-
-	if(queueTransferA || queueTransferB) {
-		return queueTransferA == queueTransferB &&
-				a.srcQueueFamilyIndex == b.srcQueueFamilyIndex &&
-				a.dstQueueFamilyIndex == b.dstQueueFamilyIndex;
-	}
-
-	return true;
-}
-
-// TODO: use fuzzy matching for barriers? I.e. return matcher?
-template<typename ImgBarrier>
-bool equalImgBarrier(const ImgBarrier& a, const ImgBarrier& b) {
-	if(!equalOwnershipTransition(a, b)) {
-		return false;
-	}
-
-	if constexpr(validExpression<SrcStageMaskMember, ImgBarrier>) {
-		if(a.srcStageMask != b.srcStageMask ||
-				a.dstStageMask != b.dstStageMask) {
-			return false;
-		}
-	}
-
-	return a.dstAccessMask == b.dstAccessMask &&
-		a.srcAccessMask == b.srcAccessMask &&
-		a.oldLayout == b.oldLayout &&
-		a.newLayout == b.newLayout &&
-		a.image == b.image &&
-		a.subresourceRange.aspectMask == b.subresourceRange.aspectMask &&
-		a.subresourceRange.baseArrayLayer == b.subresourceRange.baseArrayLayer &&
-		a.subresourceRange.baseMipLevel == b.subresourceRange.baseMipLevel &&
-		a.subresourceRange.layerCount == b.subresourceRange.layerCount &&
-		a.subresourceRange.levelCount == b.subresourceRange.levelCount;
-}
-
-template<typename BufferBarrier>
-bool equalBufBarrier(const BufferBarrier& a, const BufferBarrier& b) {
-	if(!equalOwnershipTransition(a, b)) {
-		return false;
-	}
-
-	if constexpr(validExpression<SrcStageMaskMember, BufferBarrier>) {
-		if(a.srcStageMask != b.srcStageMask ||
-				a.dstStageMask != b.dstStageMask) {
-			return false;
-		}
-	}
-
-	return a.dstAccessMask == b.dstAccessMask &&
-		a.srcAccessMask == b.srcAccessMask &&
-		a.buffer == b.buffer &&
-		a.size == b.size;
-}
-
-bool operator==(const VkMemoryBarrier& a, const VkMemoryBarrier& b) {
-	return a.dstAccessMask == b.dstAccessMask && a.srcAccessMask == b.srcAccessMask;
-}
-
-bool operator==(const VkMemoryBarrier2& a, const VkMemoryBarrier2& b) {
-	return a.dstAccessMask == b.dstAccessMask &&
-		a.srcAccessMask == b.srcAccessMask &&
-		a.srcStageMask == b.srcStageMask &&
-		a.dstStageMask == b.dstStageMask;
-}
-
-bool operator==(const VkImageMemoryBarrier& a, const VkImageMemoryBarrier& b) {
-	return equalImgBarrier(a, b);
-}
-
-bool operator==(const VkImageMemoryBarrier2& a, const VkImageMemoryBarrier2& b) {
-	return equalImgBarrier(a, b);
-}
-
-bool operator==(const VkBufferMemoryBarrier& a, const VkBufferMemoryBarrier& b) {
-	return equalBufBarrier(a, b);
-}
-
-bool operator==(const VkBufferMemoryBarrier2& a, const VkBufferMemoryBarrier2& b) {
-	return equalBufBarrier(a, b);
-}
-
-template<typename T>
-void addSpanUnordered(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
-	if(a.empty() && b.empty()) {
-		m.match += weight;
-		m.total += weight;
-		return;
-	}
-
-	// TODO: inefficient, find better way of doing this.
-
-	auto count = 0u;
-	for(auto i = 0u; i < a.size(); ++i) {
-		// check how many times we've seen it already
-		auto numSeen = 0u;
-		for(auto j = 0u; j < i; ++j) {
-			if(a[j] == a[i]) {
-				++numSeen;
-			}
-		}
-
-		// find it in b
-		for(auto j = 0u; j < b.size(); ++j) {
-			auto found = a[i] == b[j];
-			if(!found) {
-				continue;
-			}
-
-			if(numSeen-- == 0u) {
-				++count;
-				break;
-			}
-		}
-	}
-
-	m.match += (weight * count) / std::max(a.size(), b.size());
-	m.total += weight;
-
-	dlg_assert(m.match <= m.total);
-}
-
-// TODO: code duplication with match.cpp, but moving it to match.hpp
-// instead of having it twice causes weird issues with overloading and name
-// lookup
-template<typename T>
-void addSpanOrderedStrict(Matcher& m, span<T> a, span<T> b, float weight = 1.0) {
-	m.total += weight;
-
-	if(a.size() != b.size()) {
-		return;
-	}
-
-	if(a.empty()) {
-		m.match += weight;
-		return;
-	}
-
-	Matcher accum {};
-	for(auto i = 0u; i < a.size(); ++i) {
-		auto res = match(a[i], b[i]);
-		accum.match += res.match;
-		accum.total += res.total;
-	}
-
-	// TODO: maybe better to make weight also dependent on size?
-	// could add flag/param for that behavior.
-	m.match += weight * eval(accum);
-}
-
 // match ideas:
 // - matching for bitmask flags
 // - matching for sorted spans
@@ -605,27 +299,6 @@ void BarrierCmdBase::displayInspector(Gui& gui) const {
 		imgBarriers, bufBarriers, memBarriers);
 }
 
-Matcher BarrierCmdBase::doMatch(const BarrierCmdBase& cmd) const {
-	Matcher m;
-
-	// NOTE: we match hard on srcStageMask and dstStageMask now, otherwise
-	// we get way too many match candidates. With this formulation, we also
-	// need at least one common resource
-	// add(m, this->srcStageMask, cmd.srcStageMask);
-	// add(m, this->dstStageMask, cmd.dstStageMask);
-	if(this->srcStageMask != cmd.srcStageMask ||
-			this->dstStageMask != cmd.dstStageMask) {
-		return Matcher::noMatch();
-	}
-
-	addSpanUnordered(m, this->memBarriers, cmd.memBarriers);
-	addSpanUnordered(m, this->bufBarriers, cmd.bufBarriers);
-	addSpanUnordered(m, this->imgBarriers, cmd.imgBarriers);
-
-	dlg_assert(m.match <= m.total);
-	return m;
-}
-
 BarrierCmdBase::PatchedBarriers BarrierCmdBase::patchedBarriers(
 		ThreadMemScope& memScope, u32 qfam) const {
 	PatchedBarriers ret;
@@ -659,23 +332,6 @@ BarrierCmdBase::PatchedBarriers BarrierCmdBase::patchedBarriers(
 void Barrier2CmdBase::displayInspector(Gui& gui) const {
 	displayBarriers(gui, images, buffers,
 		imgBarriers, bufBarriers, memBarriers);
-}
-
-Matcher Barrier2CmdBase::doMatch(const Barrier2CmdBase& cmd) const {
-	Matcher m;
-
-	addSpanUnordered(m, this->memBarriers, cmd.memBarriers);
-	addSpanUnordered(m, this->bufBarriers, cmd.bufBarriers);
-	addSpanUnordered(m, this->imgBarriers, cmd.imgBarriers);
-
-	if(m.match == 0.f) {
-		return Matcher::noMatch();
-	}
-
-	add(m, this->flags, cmd.flags);
-
-	dlg_assert(m.match <= m.total);
-	return m;
 }
 
 VkDependencyInfo Barrier2CmdBase::patchedBarriers(
@@ -739,18 +395,6 @@ void WaitEventsCmd::displayInspector(Gui& gui) const {
 	BarrierCmdBase::displayInspector(gui);
 }
 
-Matcher WaitEventsCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const WaitEventsCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	addSpanUnordered(m, events, cmd->events);
-
-	return m;
-}
-
 // WaitEvents2Cmd
 void WaitEvents2Cmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const {
 	ThreadMemScope memScope;
@@ -765,18 +409,6 @@ void WaitEvents2Cmd::displayInspector(Gui& gui) const {
 	}
 
 	Barrier2CmdBase::displayInspector(gui);
-}
-
-Matcher WaitEvents2Cmd::match(const Command& base) const {
-	auto* cmd = commandCast<const WaitEvents2Cmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	addSpanUnordered(m, events, cmd->events);
-
-	return m;
 }
 
 // BarrierCmd
@@ -796,21 +428,6 @@ void BarrierCmd::displayInspector(Gui& gui) const {
 	BarrierCmdBase::displayInspector(gui);
 }
 
-Matcher BarrierCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const BarrierCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	if(m.match == 0.f || m.total == -1.f) {
-		return m;
-	}
-
-	add(m, dependencyFlags, cmd->dependencyFlags);
-	return m;
-}
-
 // BarrierCmd2
 void Barrier2Cmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const {
 	ThreadMemScope ms;
@@ -820,15 +437,6 @@ void Barrier2Cmd::record(const Device& dev, VkCommandBuffer cb, u32 qfam) const 
 
 void Barrier2Cmd::displayInspector(Gui& gui) const {
 	Barrier2CmdBase::displayInspector(gui);
-}
-
-Matcher Barrier2Cmd::match(const Command& base) const {
-	auto* cmd = commandCast<const Barrier2Cmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	return doMatch(*cmd);
 }
 
 // BeginRenderPassCmd
@@ -917,85 +525,7 @@ void BeginRenderPassCmd::displayInspector(Gui& gui) const {
 	// attachments here
 }
 
-bool same(const RenderPassDesc& a, const RenderPassDesc& b) {
-	if(a.subpasses.size() != b.subpasses.size() ||
-			a.attachments.size() != b.attachments.size()) {
-		return false;
-	}
-
-	// compare attachments
-	for(auto i = 0u; i < a.attachments.size(); ++i) {
-		auto& attA = a.attachments[i];
-		auto& attB = b.attachments[i];
-
-		if(attA.format != attB.format ||
-				attA.loadOp != attB.loadOp ||
-				attA.storeOp != attB.storeOp ||
-				attA.initialLayout != attB.initialLayout ||
-				attA.finalLayout != attB.finalLayout ||
-				attA.stencilLoadOp != attB.stencilLoadOp ||
-				attA.stencilStoreOp != attB.stencilStoreOp ||
-				attA.samples != attB.samples) {
-			return false;
-		}
-	}
-
-	// compare subpasses
-	auto attRefsSame = [](const VkAttachmentReference2& a, const VkAttachmentReference2& b) {
-		return a.attachment == b.attachment && (a.attachment == VK_ATTACHMENT_UNUSED ||
-				a.aspectMask == b.aspectMask);
-	};
-
-	for(auto i = 0u; i < a.subpasses.size(); ++i) {
-		auto& subA = a.subpasses[i];
-		auto& subB = b.subpasses[i];
-
-		if(subA.colorAttachmentCount != subB.colorAttachmentCount ||
-				subA.preserveAttachmentCount != subB.preserveAttachmentCount ||
-				bool(subA.pDepthStencilAttachment) != bool(subB.pDepthStencilAttachment) ||
-				bool(subA.pResolveAttachments) != bool(subB.pResolveAttachments) ||
-				subA.inputAttachmentCount != subB.inputAttachmentCount ||
-				subA.pipelineBindPoint != subB.pipelineBindPoint) {
-			return false;
-		}
-
-		for(auto j = 0u; j < subA.colorAttachmentCount; ++j) {
-			if(!attRefsSame(subA.pColorAttachments[j], subB.pColorAttachments[j])) {
-				return false;
-			}
-		}
-
-		for(auto j = 0u; j < subA.inputAttachmentCount; ++j) {
-			if(!attRefsSame(subA.pInputAttachments[j], subB.pInputAttachments[j])) {
-				return false;
-			}
-		}
-
-		for(auto j = 0u; j < subA.preserveAttachmentCount; ++j) {
-			if(subA.pPreserveAttachments[j] != subB.pPreserveAttachments[j]) {
-				return false;
-			}
-		}
-
-		if(subA.pResolveAttachments) {
-			for(auto j = 0u; j < subA.colorAttachmentCount; ++j) {
-				if(!attRefsSame(subA.pResolveAttachments[j], subB.pResolveAttachments[j])) {
-					return false;
-				}
-			}
-		}
-
-		if(subA.pDepthStencilAttachment &&
-				!attRefsSame(*subA.pDepthStencilAttachment, *subB.pDepthStencilAttachment)) {
-			return false;
-		}
-	}
-
-	// TODO: compare dependencies?
-	return true;
-}
-
-bool addAllowSwapchainViews(Matcher& m, ImageView* va, ImageView* vb) {
+bool addAllowSwapchainViews(MatchVal& m, ImageView* va, ImageView* vb) {
 	if(va && vb && va != vb && va->img && vb->img && va->img->swapchain) {
 		return add(m, va->img->swapchain, vb->img->swapchain);
 	} else {
@@ -1005,52 +535,6 @@ bool addAllowSwapchainViews(Matcher& m, ImageView* va, ImageView* vb) {
 		// But creating similar image views for the same image is a weird corner case.
 		return add(m, va, vb);
 	}
-}
-
-Matcher BeginRenderPassCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const BeginRenderPassCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-
-	// Match render pass description.
-	// When a render pass was destroyed, just ignore this check.
-	// That is unfortunate, but the attachment check below still
-	// provides significant information
-	auto rpmatch = false;
-	if(rp && cmd->rp) {
-		if(!same(rp->desc, cmd->rp->desc)) {
-			return Matcher::noMatch();
-		}
-
-		// High base match probability since the RenderPasses matched.
-		m.total += 4.f;
-		m.match += 4.f;
-		rpmatch = true;
-	}
-
-	// match attachments
-	if(attachments.size() != cmd->attachments.size()) {
-		return Matcher::noMatch();
-	}
-
-	for(auto i = 0u; i < attachments.size(); ++i) {
-		// special case: different images but both are of the same
-		// swapchain, we treat them as being the same
-		auto same = addAllowSwapchainViews(m, attachments[i], cmd->attachments[i]);
-		if(!same && !rpmatch) {
-			// When we have no renderpass information, we require all attachments
-			// to be the same.
-			return Matcher::noMatch();
-		}
-	}
-
-	// TODO: consider render area, clearValues?
-	// both might be very dynamic (render area e.g. for dynamic resolution scaling)
-
-	return m;
 }
 
 void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
@@ -1065,17 +549,6 @@ void NextSubpassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	} else {
 		dev.dispatch.CmdNextSubpass(cb, beginInfo.contents);
 	}
-}
-
-Matcher NextSubpassCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const NextSubpassCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	// we don't need to consider surrounding RenderPass, that is already
-	// considered when matching parent
-	return cmd->subpassID == subpassID ? Matcher{1.f, 1.f} : Matcher::noMatch();
 }
 
 void EndRenderPassCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
@@ -1229,14 +702,14 @@ bool same(const Pipeline* a, const Pipeline* b) {
 	return false;
 }
 
-Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
+MatchVal DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
 	if(!same(state->pipe, cmd.state->pipe)) {
-		return Matcher::noMatch();
+		return MatchVal::noMatch();
 	}
 
-	Matcher m;
+	MatchVal m;
 	m.total += 5.f;
 	m.match += 5.f;
 
@@ -1259,7 +732,7 @@ Matcher DrawCmdBase::doMatch(const DrawCmdBase& cmd, bool indexed) const {
 		// different index types is an indicator for fundamentally different
 		// commands.
 		if(state->indices.type != cmd.state->indices.type) {
-			return Matcher::noMatch();
+			return MatchVal::noMatch();
 		}
 	}
 
@@ -1310,33 +783,6 @@ void DrawCmd::displayInspector(Gui& gui) const {
 	DrawCmdBase::displayGrahpicsState(gui, false);
 }
 
-Matcher DrawCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DrawCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	// Hard matching on {indexCount, firstIndex, vertexOffset} since that's
-	// dependent on the rendered mesh.
-	// Soft matching on instancing parameters since renderers might batch dynamically,
-	// making this variable at runtime (but still obviously the same command).
-	if(vertexCount != cmd->vertexCount || firstVertex != cmd->firstVertex) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd, false);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	m.total += 5.f;
-	m.match += 5.f;
-	add(m, instanceCount, cmd->instanceCount, 3.f);
-	add(m, firstInstance, cmd->firstInstance, 3.f);
-
-	return m;
-}
-
 // DrawIndirectCmd
 void DrawIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(indexed) {
@@ -1368,36 +814,6 @@ std::string DrawIndirectCmd::toString() const {
 	}
 }
 
-Matcher DrawIndirectCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DrawIndirectCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	// hard matching on those; differences would indicate a totally
-	// different command structure.
-	if(cmd->indexed != this->indexed || cmd->stride != this->stride) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd, indexed);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	m.total += 5.f;
-	m.match += 5.f;
-
-	addNonNull(m, buffer, cmd->buffer);
-
-	// we don't hard-match on drawCount since architectures that choose
-	// this dynamically per-frame (e.g. for culling) are common
-	add(m, drawCount, cmd->drawCount);
-	add(m, offset, cmd->offset, 0.2);
-
-	return m;
-}
-
 // DrawIndexedCmd
 void DrawIndexedCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdDrawIndexed(cb, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
@@ -1418,36 +834,6 @@ void DrawIndexedCmd::displayInspector(Gui& gui) const {
 	}});
 
 	DrawCmdBase::displayGrahpicsState(gui, true);
-}
-
-Matcher DrawIndexedCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DrawIndexedCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	// Hard matching on {indexCount, firstIndex, vertexOffset} since that's
-	// dependent on the rendered mesh.
-	// Soft matching on instancing parameters since renderers might batch dynamically,
-	// making this variable at runtime (but still obviously the same command).
-	if(cmd->indexCount != indexCount ||
-			cmd->firstIndex != firstIndex ||
-			cmd->vertexOffset != vertexOffset) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd, true);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	m.total += 5.f;
-	m.match += 5.f;
-
-	add(m, cmd->instanceCount, instanceCount, 3.f);
-	add(m, cmd->firstInstance, firstInstance, 3.f);
-
-	return m;
 }
 
 // DrawIndirectCountCmd
@@ -1485,38 +871,6 @@ void DrawIndirectCountCmd::displayInspector(Gui& gui) const {
 	DrawCmdBase::displayGrahpicsState(gui, indexed);
 }
 
-Matcher DrawIndirectCountCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DrawIndirectCountCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	// hard matching on those; differences would indicate a totally
-	// different command structure.
-	if(cmd->indexed != this->indexed || cmd->stride != this->stride) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd, indexed);
-	if(m.total == -1.f) {
-		return Matcher::noMatch();
-	}
-
-	m.match += 2.0;
-	m.total += 2.0;
-
-	addNonNull(m, buffer, cmd->buffer);
-	addNonNull(m, countBuffer, cmd->countBuffer);
-
-	// we don't hard-match on maxDrawCount since architectures that choose
-	// this dynamically per-frame (e.g. for culling) are common
-	add(m, maxDrawCount, cmd->maxDrawCount);
-	add(m, countBufferOffset, cmd->countBufferOffset, 0.2);
-	add(m, offset, cmd->offset, 0.2);
-
-	return m;
-}
-
 // DrawMultiCmd
 std::string DrawMultiCmd::toString() const {
 	return dlg::format("DrawMulti({})", vertexInfos.size());
@@ -1529,26 +883,6 @@ void DrawMultiCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto ourStride = sizeof(VkMultiDrawInfoEXT);
 	dev.dispatch.CmdDrawMultiEXT(cb, vertexInfos.size(),
 		vertexInfos.data(), instanceCount, firstInstance, ourStride);
-}
-Matcher DrawMultiCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DrawMultiCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd, false);
-	if(m.total == -1.f) {
-		return Matcher::noMatch();
-	}
-
-	add(m, instanceCount, cmd->instanceCount);
-	add(m, firstInstance, cmd->firstInstance);
-	add(m, stride, cmd->stride);
-
-	// NOTE: not sure. Could also do unordered
-	addSpanOrderedStrict(m, vertexInfos, cmd->vertexInfos);
-
-	return m;
 }
 
 // DrawMultiIndexedCmd
@@ -1564,26 +898,6 @@ void DrawMultiIndexedCmd::record(const Device& dev, VkCommandBuffer cb, u32) con
 	dev.dispatch.CmdDrawMultiIndexedEXT(cb, indexInfos.size(),
 		indexInfos.data(), instanceCount, firstInstance, ourStride,
 		vertexOffset ? &*vertexOffset : nullptr);
-}
-Matcher DrawMultiIndexedCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DrawMultiIndexedCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd, false);
-	if(m.total == -1.f) {
-		return Matcher::noMatch();
-	}
-
-	add(m, instanceCount, cmd->instanceCount);
-	add(m, firstInstance, cmd->firstInstance);
-	add(m, stride, cmd->stride);
-
-	// NOTE: not sure. Could also do unordered
-	addSpanOrderedStrict(m, indexInfos, cmd->indexInfos);
-
-	return m;
 }
 
 // BindVertexBuffersCmd
@@ -1624,39 +938,9 @@ void BindVertexBuffersCmd::displayInspector(Gui& gui) const {
 	}
 }
 
-Matcher BindVertexBuffersCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const BindVertexBuffersCmd*>(&rhs);
-	if(!cmd || firstBinding != cmd->firstBinding) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	m.match += 2.0;
-	m.total += 2.0;
-
-	addSpanOrderedStrict(m, buffers, cmd->buffers);
-
-	return m;
-}
-
 // BindIndexBufferCmd
 void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdBindIndexBuffer(cb, buffer->handle, offset, indexType);
-}
-
-Matcher BindIndexBufferCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const BindIndexBufferCmd*>(&rhs);
-	if(!cmd || indexType != cmd->indexType) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	m.match += 1.0;
-	m.total += 1.0;
-	addNonNull(m, buffer, cmd->buffer);
-	add(m, offset, cmd->offset, 0.2);
-
-	return m;
 }
 
 // BindDescriptorSetCmd
@@ -1708,23 +992,6 @@ void BindDescriptorSetCmd::displayInspector(Gui& gui) const {
 	*/
 }
 
-Matcher BindDescriptorSetCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const BindDescriptorSetCmd*>(&rhs);
-	if(!cmd || firstSet != cmd->firstSet ||
-			pipeBindPoint != cmd->pipeBindPoint || pipeLayout != cmd->pipeLayout) {
-		return Matcher::noMatch();
-	}
-
-	// NOTE: evaluating the used descriptor sets or dynamic offsets
-	// is likely of no use as they are too instable.
-
-	Matcher m;
-	m.total += 3.f;
-	m.match += 3.f;
-
-	return m;
-}
-
 // DispatchCmdBase
 DispatchCmdBase::DispatchCmdBase(CommandBuffer& cb) :
 		state(&cb.computeState()), pushConstants(cb.pushConstants()) {
@@ -1734,14 +1001,14 @@ void DispatchCmdBase::displayComputeState(Gui& gui) const {
 	refButtonD(gui, state->pipe);
 }
 
-Matcher DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
+MatchVal DispatchCmdBase::doMatch(const DispatchCmdBase& cmd) const {
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
 	if(!same(state->pipe, cmd.state->pipe)) {
-		return Matcher::noMatch();
+		return MatchVal::noMatch();
 	}
 
-	Matcher m;
+	MatchVal m;
 	for(auto& pcr : state->pipe->layout->pushConstants) {
 		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
 		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
@@ -1775,28 +1042,6 @@ void DispatchCmd::displayInspector(Gui& gui) const {
 	DispatchCmdBase::displayComputeState(gui);
 }
 
-Matcher DispatchCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DispatchCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	// we don't hard-match on them since this may change for per-frame
-	// varying workloads (in comparison to draw parameters, which rarely
-	// change for per-frame stuff). The higher the dimension, the more unlikely
-	// this gets though.
-	add(m, groupsX, cmd->groupsX, 2.0);
-	add(m, groupsY, cmd->groupsY, 4.0);
-	add(m, groupsZ, cmd->groupsZ, 6.0);
-
-	return m;
-}
-
 // DispatchIndirectCmd
 void DispatchIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdDispatchIndirect(cb, buffer->handle, offset);
@@ -1816,23 +1061,6 @@ std::string DispatchIndirectCmd::toString() const {
 	return "DispatchIndirect";
 }
 
-Matcher DispatchIndirectCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DispatchIndirectCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	addNonNull(m, buffer, cmd->buffer);
-	add(m, offset, cmd->offset, 0.1);
-
-	return m;
-}
-
 // DispatchBaseCmd
 void DispatchBaseCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	auto f = dev.dispatch.CmdDispatchBase;
@@ -1848,32 +1076,6 @@ void DispatchBaseCmd::displayInspector(Gui& gui) const {
 	imGuiText("Base: {} {} {}", baseGroupX, baseGroupY, baseGroupZ);
 	imGuiText("Groups: {} {} {}", groupsX, groupsY, groupsZ);
 	DispatchCmdBase::displayComputeState(gui);
-}
-
-Matcher DispatchBaseCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const DispatchBaseCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	// we don't hard-match on them since this may change for per-frame
-	// varying workloads (in comparison to draw parameters, which rarely
-	// change for per-frame stuff). The higher the dimension, the more unlikely
-	// this gets though.
-	add(m, groupsX, cmd->groupsX, 2.0);
-	add(m, groupsY, cmd->groupsY, 4.0);
-	add(m, groupsZ, cmd->groupsZ, 8.0);
-
-	add(m, baseGroupX, cmd->baseGroupX, 2.0);
-	add(m, baseGroupY, cmd->baseGroupY, 4.0);
-	add(m, baseGroupZ, cmd->baseGroupZ, 8.0);
-
-	return m;
 }
 
 // CopyImageCmd
@@ -1937,23 +1139,6 @@ void CopyImageCmd::displayInspector(Gui& gui) const {
 	}
 }
 
-Matcher CopyImageCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const CopyImageCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, dst, cmd->dst, 5);
-	addNonNull(m, dst, cmd->dst, 5);
-	add(m, srcLayout, cmd->srcLayout);
-	add(m, dstLayout, cmd->dstLayout);
-
-	addSpanOrderedStrict(m, copies, cmd->copies);
-
-	return m;
-}
-
 // CopyBufferToImageCmd
 void CopyBufferToImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdCopyBufferToImage2KHR) {
@@ -2002,21 +1187,6 @@ std::string CopyBufferToImageCmd::toString() const {
 	}
 }
 
-Matcher CopyBufferToImageCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const CopyBufferToImageCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, src, cmd->src);
-	addNonNull(m, dst, cmd->dst);
-	add(m, dstLayout, cmd->dstLayout);
-	addSpanOrderedStrict(m, copies, cmd->copies);
-
-	return m;
-}
-
 // CopyImageToBufferCmd
 void CopyImageToBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdCopyImageToBuffer2KHR) {
@@ -2063,21 +1233,6 @@ std::string CopyImageToBufferCmd::toString() const {
 	} else {
 		return "CopyImageToBuffer";
 	}
-}
-
-Matcher CopyImageToBufferCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const CopyImageToBufferCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, src, cmd->src);
-	addNonNull(m, dst, cmd->dst);
-	add(m, srcLayout, cmd->srcLayout);
-	addSpanOrderedStrict(m, copies, cmd->copies);
-
-	return m;
 }
 
 // BlitImageCmd
@@ -2145,23 +1300,6 @@ std::string BlitImageCmd::toString() const {
 	}
 }
 
-Matcher BlitImageCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const BlitImageCmd*>(&rhs);
-	if(!cmd || filter != cmd->filter) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-
-	addNonNull(m, src, cmd->src, 5.0);
-	addNonNull(m, dst, cmd->dst, 5.0);
-	add(m, srcLayout, cmd->srcLayout);
-	add(m, dstLayout, cmd->dstLayout);
-	addSpanOrderedStrict(m, blits, cmd->blits);
-
-	return m;
-}
-
 // ResolveImageCmd
 void ResolveImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdResolveImage2KHR) {
@@ -2224,23 +1362,6 @@ std::string ResolveImageCmd::toString() const {
 	}
 }
 
-Matcher ResolveImageCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const ResolveImageCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-
-	addNonNull(m, src, cmd->src, 5.0);
-	addNonNull(m, dst, cmd->dst, 5.0);
-	add(m, srcLayout, cmd->srcLayout);
-	add(m, dstLayout, cmd->dstLayout);
-	addSpanOrderedStrict(m, regions, cmd->regions);
-
-	return m;
-}
-
 // CopyBufferCmd
 void CopyBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	if(dev.dispatch.CmdCopyBuffer2KHR) {
@@ -2288,21 +1409,6 @@ std::string CopyBufferCmd::toString() const {
 	}
 }
 
-Matcher CopyBufferCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const CopyBufferCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, dst, cmd->dst);
-	addNonNull(m, dst, cmd->dst);
-
-	addSpanOrderedStrict(m, regions, cmd->regions);
-
-	return m;
-}
-
 // UpdateBufferCmd
 void UpdateBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdUpdateBuffer(cb, dst->handle, offset, data.size(), data.data());
@@ -2323,19 +1429,6 @@ void UpdateBufferCmd::displayInspector(Gui& gui) const {
 	imGuiText("Offset {}", offset);
 
 	// TODO: display data?
-}
-
-Matcher UpdateBufferCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const UpdateBufferCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, dst, cmd->dst, 5.0);
-	add(m, data.size(), cmd->data.size());
-	add(m, offset, cmd->offset, 0.2);
-	return m;
 }
 
 // FillBufferCmd
@@ -2360,20 +1453,6 @@ void FillBufferCmd::displayInspector(Gui& gui) const {
 	imGuiText("Filled with {}{}", std::hex, data);
 }
 
-Matcher FillBufferCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const FillBufferCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, dst, cmd->dst, 5.0);
-	add(m, data, cmd->data);
-	add(m, size, cmd->size);
-	add(m, offset, cmd->offset, 0.1);
-	return m;
-}
-
 // ClearColorImageCmd
 void ClearColorImageCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdClearColorImage(cb, dst->handle, dstLayout, &color,
@@ -2392,25 +1471,6 @@ std::string ClearColorImageCmd::toString() const {
 void ClearColorImageCmd::displayInspector(Gui& gui) const {
 	refButtonD(gui, dst);
 	// TODO: color, layout, ranges
-}
-
-Matcher ClearColorImageCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const ClearColorImageCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, dst, cmd->dst, 5.0);
-	add(m, dstLayout, cmd->dstLayout, 2.0);
-	addSpanOrderedStrict(m, ranges, cmd->ranges);
-
-	m.total += 1;
-	if(std::memcmp(&color, &cmd->color, sizeof(color)) == 0u) {
-		m.match += 1;
-	}
-
-	return m;
 }
 
 // ClearDepthStencilImageCmd
@@ -2433,25 +1493,6 @@ void ClearDepthStencilImageCmd::displayInspector(Gui& gui) const {
 	// TODO: value, layout, ranges
 }
 
-Matcher ClearDepthStencilImageCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const ClearDepthStencilImageCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addNonNull(m, dst, cmd->dst, 5.0);
-	add(m, dstLayout, cmd->dstLayout, 2.0);
-	addSpanOrderedStrict(m, ranges, cmd->ranges);
-
-	m.total += 1;
-	if(std::memcmp(&value, &cmd->value, sizeof(value)) == 0u) {
-		m.match += 1;
-	}
-
-	return m;
-}
-
 // Clear AttachhmentCmd
 void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdClearAttachments(cb, u32(attachments.size()),
@@ -2461,18 +1502,6 @@ void ClearAttachmentCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 void ClearAttachmentCmd::displayInspector(Gui& gui) const {
 	// TODO: we probably need to refer to used render pass/fb here
 	(void) gui;
-}
-
-Matcher ClearAttachmentCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const ClearAttachmentCmd*>(&rhs);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	addSpanOrderedStrict(m, attachments, cmd->attachments, 5.0);
-	addSpanOrderedStrict(m, rects, cmd->rects);
-	return m;
 }
 
 // SetEventCmd
@@ -2613,15 +1642,6 @@ void BeginDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb, u32)
 	dev.dispatch.CmdBeginDebugUtilsLabelEXT(cb, &label);
 }
 
-Matcher BeginDebugUtilsLabelCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const BeginDebugUtilsLabelCmd*>(&rhs);
-	if(!cmd || std::strcmp(cmd->name, this->name) != 0) {
-		return Matcher::noMatch();
-	}
-
-	return Matcher{4.f, 4.f};
-}
-
 // EndDebugUtilsLabelCmd
 void EndDebugUtilsLabelCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdEndDebugUtilsLabelEXT(cb);
@@ -2660,41 +1680,10 @@ std::string BindPipelineCmd::toString() const {
 	}
 }
 
-Matcher BindPipelineCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const BindPipelineCmd*>(&rhs);
-	if(!cmd || cmd->bindPoint != this->bindPoint || cmd->pipe != this->pipe) {
-		return Matcher::noMatch();
-	}
-
-	return Matcher{4.f, 4.f};
-}
-
 // PushConstantsCmd
 void PushConstantsCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdPushConstants(cb, pipeLayout->handle, stages, offset,
 		u32(values.size()), values.data());
-}
-
-Matcher PushConstantsCmd::match(const Command& rhs) const {
-	auto* cmd = commandCast<const PushConstantsCmd*>(&rhs);
-
-	// hard matching on metadata here. The data is irrelevant when
-	// the push destination isn't the same.
-	if(!cmd || pipeLayout != cmd->pipeLayout || stages != cmd->stages ||
-			offset != cmd->offset || values.size() != cmd->values.size()) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-	m.total += 4.f;
-	m.match += 4.f;
-
-	if(std::memcmp(values.data(), cmd->values.data(), values.size()) == 0u) {
-		m.total += 1.f;
-		m.match += 1.f;
-	}
-
-	return m;
 }
 
 // SetViewportCmd
@@ -2979,14 +1968,14 @@ TraceRaysCmdBase::TraceRaysCmdBase(CommandBuffer& cb) :
 		state(&cb.rayTracingState()), pushConstants(cb.pushConstants()) {
 }
 
-Matcher TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
+MatchVal TraceRaysCmdBase::doMatch(const TraceRaysCmdBase& cmd) const {
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
 	if(!same(state->pipe, cmd.state->pipe)) {
-		return Matcher::noMatch();
+		return MatchVal::noMatch();
 	}
 
-	Matcher m;
+	MatchVal m;
 	for(auto& pcr : state->pipe->layout->pushConstants) {
 		dlg_assert_or(pcr.offset + pcr.size <= pushConstants.data.size(), continue);
 		dlg_assert_or(pcr.offset + pcr.size <= cmd.pushConstants.data.size(), continue);
@@ -3010,30 +1999,6 @@ void TraceRaysCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 		width, height, depth);
 }
 
-Matcher TraceRaysCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const TraceRaysCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	// we don't hard-match on them since this may change for per-frame
-	// varying workloads (in comparison to draw parameters, which rarely
-	// change for per-frame stuff). The higher the dimension, the more unlikely
-	// this gets though.
-	add(m, width, cmd->width, 2.0);
-	add(m, height, cmd->height, 4.0);
-	add(m, depth, cmd->depth, 6.0);
-
-	// TODO: consider bound tables? At least size and stride?
-
-	return m;
-}
-
 std::string TraceRaysCmd::toString() const {
 	return dlg::format("TraceRays({}, {}, {})", width, height, depth);
 }
@@ -3042,22 +2007,6 @@ void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) co
 	dev.dispatch.CmdTraceRaysIndirectKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
 		indirectDeviceAddress);
-}
-
-Matcher TraceRaysIndirectCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const TraceRaysCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	auto m = doMatch(*cmd);
-	if(m.total == -1.f) {
-		return m;
-	}
-
-	// TODO: consider bound tables? At least size and stride?
-
-	return m;
 }
 
 void SetRayTracingPipelineStackSizeCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
@@ -3142,61 +2091,6 @@ const BeginRenderingCmd::Attachment* BeginRenderingCmd::findAttachment(const Ima
 	}
 
 	return nullptr;
-}
-
-Matcher BeginRenderingCmd::match(const Command& base) const {
-	auto* cmd = commandCast<const BeginRenderingCmd*>(&base);
-	if(!cmd) {
-		return Matcher::noMatch();
-	}
-
-	Matcher m;
-
-	// Match attachments. We are strict here, we don't have any other information
-	if(colorAttachments.size() != cmd->colorAttachments.size()) {
-		return Matcher::noMatch();
-	}
-
-	auto addAttachment = [&](const Attachment& a, const Attachment& b) {
-		if(!a.view && !b.view) {
-			add(m, a.view, b.view);
-			return true;
-		}
-
-		if((a.resolveView || b.resolveView) && (
-				!addAllowSwapchainViews(m, a.resolveView, b.resolveView) ||
-				a.resolveMode != b.resolveMode ||
-				a.resolveImageLayout != b.resolveImageLayout)) {
-			return false;
-		}
-
-		// NOTE: clear value irrelevant, might change from frame to frame
-		return addAllowSwapchainViews(m, a.view, b.view) &&
-			a.loadOp == b.loadOp &&
-			a.storeOp == b.storeOp &&
-			a.imageLayout == b.imageLayout;
-	};
-
-	for(auto i = 0u; i < colorAttachments.size(); ++i) {
-		if(!addAttachment(colorAttachments[i], cmd->colorAttachments[i])) {
-			return Matcher::noMatch();
-		}
-	}
-
-	if(!addAttachment(depthAttachment, cmd->depthAttachment) ||
-			!addAttachment(stencilAttachment, cmd->stencilAttachment)) {
-		return Matcher::noMatch();
-	}
-
-	if(flags != cmd->flags ||
-			viewMask != cmd->viewMask ||
-			layerCount != cmd->layerCount) {
-		return Matcher::noMatch();
-	}
-
-	m.match += 4.f;
-	m.total += 4.f;
-	return m;
 }
 
 void EndRenderingCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
