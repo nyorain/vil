@@ -363,7 +363,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
 		}
 
 		if(res != VK_SUCCESS) {
-			dlg_trace("vkQueueBindSparse error: {} (res)", vk::name(res), res);
+			dlg_trace("vkQueueBindSparse error: {} ({})", vk::name(res), res);
 			cleanupOnErrorLocked(submitter);
 			return res;
 		}
