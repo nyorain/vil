@@ -1195,8 +1195,6 @@ bool Device::BufferAddressCmp::operator()(const Buffer* a, const Buffer* b) cons
 	dlg_assert(a && a->deviceAddress);
 	dlg_assert(b && b->deviceAddress);
 	if(a->deviceAddress == b->deviceAddress) {
-		// this serves as a tie breaker.
-		// This is mainly relevant for memory aliasing.
 		return a < b;
 	}
 
@@ -1209,8 +1207,8 @@ bool Device::BufferAddressCmp::operator()(VkDeviceAddress a, const Buffer* b) co
 }
 
 bool Device::BufferAddressCmp::operator()(const Buffer* a, VkDeviceAddress b) const {
-	dlg_assert(a && a->deviceAddress && a->ci.size > 0u);
-	return a->deviceAddress + a->ci.size <= b;
+	dlg_assert(a && a->deviceAddress);
+	return a->deviceAddress < b;
 }
 
 // Defined here (instead of util/util.hpp) since they access Device

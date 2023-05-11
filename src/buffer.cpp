@@ -13,29 +13,40 @@ VkDeviceSize evalRange(VkDeviceSize fullSize, VkDeviceSize offset, VkDeviceSize 
 	return range == VK_WHOLE_SIZE ? fullSize - offset : range;
 }
 
+Buffer* bufferAtInternal(const decltype(Device::bufferAddresses)& bufferAddresses,
+		VkDeviceAddress address) {
+	auto it = bufferAddresses.upper_bound(address);
+
+	// NOTE: for aliased buffers, this might degenerate into linear search,
+	// but we'll only ever have to iterate so many elements as elements
+	// overlap via aliasing so it should be fine.
+	// A better algorithmic solution would be to use an interval
+	// tree (e.g. augmented RB-Tree) but I couldn't find a good implementation
+	// to pull in easily and now it seems overkill anyways.
+	while(it != bufferAddresses.begin()) {
+		--it;
+		dlg_assert((*it)->deviceAddress <= address);
+		auto end = (*it)->deviceAddress + (*it)->ci.size;
+		if(end > address) {
+			return *it;
+		}
+	}
+
+	// When we didn't find anything we had to iterate *all* buffer addresses.
+	// This would be a major performance concern but we will most likely
+	// crash in this case anyways so we don't care.
+	return nullptr;
+}
+
 Buffer& bufferAtLocked(Device& dev, VkDeviceAddress address) {
 	assertOwnedOrShared(dev.mutex);
-
-	auto [begin, end] = dev.bufferAddresses.equal_range(address);
-	dlg_assertm(begin != end, "Invalid VkDeviceAddress: couldn't find buffer");
-	if(std::distance(begin, end) > 1) {
-		dlg_trace("More than one buffer found for device address; will have to guess");
+	auto* buf = bufferAtInternal(dev.bufferAddresses, address);
+	if(!buf) {
+		dlg_error("Unknown buffer device address {}", address);
+		throw std::invalid_argument("Invalid buffer device address");
 	}
 
-	Buffer* best = nullptr;
-	while(begin != end) {
-		// select the buffer with the biggest range from the
-		// given address on
-		if(!best || (best->deviceAddress + best->ci.size - address) <
-				((*begin)->deviceAddress + (*begin)->ci.size - address)) {
-			best = *begin;
-		}
-
-		++begin;
-	}
-
-	dlg_assert(best);
-	return *best;
+	return *buf;
 }
 
 Buffer& bufferAt(Device& dev, VkDeviceAddress address) {

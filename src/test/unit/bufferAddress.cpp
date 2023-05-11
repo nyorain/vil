@@ -3,6 +3,13 @@
 #include <buffer.hpp>
 #include <nytl/span.hpp>
 
+namespace vil {
+
+// buffer.cpp. Internal since we don't want to pull device.hpp in buffer.hpp
+Buffer* bufferAtInternal(const decltype(Device::bufferAddresses)& bufferAddresses,
+		VkDeviceAddress address);
+} // namespace
+
 using namespace vil;
 
 TEST(unit_cmp) {
@@ -38,81 +45,37 @@ TEST(unit_set) {
 	b.ci.size = 100;
 	set.insert(&b);
 
-	auto it = set.find(105);
-	EXPECT(it != set.end(), true);
-	EXPECT(*it, &a);
+	auto buf = bufferAtInternal(set, 105);
+	EXPECT(buf != nullptr, true);
+	EXPECT(buf, &a);
 
-	it = set.find(110);
-	EXPECT(it, set.end());
+	buf = bufferAtInternal(set, 110);
+	EXPECT(buf, nullptr);
 
-	it = set.find(0);
-	EXPECT(it, set.end());
+	buf = bufferAtInternal(set, 0);
+	EXPECT(buf, nullptr);
 
-	it = set.find(500);
-	EXPECT(it, set.end());
+	buf = bufferAtInternal(set, 500);
+	EXPECT(buf, nullptr);
 
-	it = set.find(99);
-	EXPECT(it, set.end());
+	buf = bufferAtInternal(set, 99);
+	EXPECT(buf, nullptr);
 
-	it = set.find(200);
-	EXPECT(it != set.end(), true);
-	EXPECT(*it, &b);
+	buf = bufferAtInternal(set, 200);
+	EXPECT(buf != nullptr, true);
+	EXPECT(buf, &b);
 
-	it = set.find(299);
-	EXPECT(it != set.end(), true);
-	EXPECT(*it, &b);
+	buf = bufferAtInternal(set, 299);
+	EXPECT(buf != nullptr, true);
+	EXPECT(buf, &b);
 }
 
+// problematic case that exposed an issue with the old handling
 TEST(unit_alias) {
 	decltype(Device::bufferAddresses) set;
 
 	Buffer a;
-	a.deviceAddress = VkDeviceAddress(100);
-	a.ci.size = 10;
-	set.insert(&a);
-
-	Buffer b;
-	b.deviceAddress = VkDeviceAddress(200);
-	b.ci.size = 100;
-	set.insert(&b);
-
-	Buffer c; // aliases with a
-	c.deviceAddress = VkDeviceAddress(50);
-	c.ci.size = 100;
-	set.insert(&c);
-
-	Buffer d; // aliases with all
-	d.deviceAddress = VkDeviceAddress(64);
-	d.ci.size = 1024;
-	set.insert(&d);
-
-	auto [begin0, end0] = set.equal_range(VkDeviceAddress(99));
-	EXPECT(std::distance(begin0, end0), 2u);
-	EXPECT(*begin0, &c);
-	EXPECT(*(++begin0), &d);
-
-	auto [begin1, end1] = set.equal_range(VkDeviceAddress(2000));
-	EXPECT(std::distance(begin1, end1), 0u);
-
-	auto [begin2, end2] = set.equal_range(VkDeviceAddress(0));
-	EXPECT(std::distance(begin2, end2), 0u);
-
-	auto [begin3, end3] = set.equal_range(VkDeviceAddress(1));
-	EXPECT(std::distance(begin3, end3), 0u);
-
-	auto [begin4, end4] = set.equal_range(VkDeviceAddress(109));
-	EXPECT(std::distance(begin4, end4), 3u);
-	EXPECT(*begin4, &c);
-	EXPECT(*(++begin4), &d);
-	EXPECT(*(++begin4), &a);
-}
-
-
-TEST(unit_alias_2) {
-	decltype(Device::bufferAddresses) set;
-
-	Buffer a;
-	a.deviceAddress = VkDeviceAddress(0);
+	a.deviceAddress = VkDeviceAddress(1);
 	a.ci.size = 80;
 	set.insert(&a);
 
@@ -141,7 +104,10 @@ TEST(unit_alias_2) {
 	f.ci.size = 1000;
 	set.insert(&f);
 
-	auto [begin0, end0] = set.equal_range(VkDeviceAddress(490));
-	EXPECT(std::distance(begin0, end0), 1u);
-	EXPECT(*begin0, &f);
+	auto buf = bufferAtInternal(set, VkDeviceAddress(490));
+	EXPECT(buf, &f);
+
+	buf = bufferAtInternal(set, VkDeviceAddress(105));
+	EXPECT(buf, nullptr);
 }
+
