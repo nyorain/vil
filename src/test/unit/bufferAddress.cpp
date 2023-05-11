@@ -107,3 +107,41 @@ TEST(unit_alias) {
 	EXPECT(*(++begin4), &a);
 }
 
+
+TEST(unit_alias_2) {
+	decltype(Device::bufferAddresses) set;
+
+	Buffer a;
+	a.deviceAddress = VkDeviceAddress(0);
+	a.ci.size = 80;
+	set.insert(&a);
+
+	Buffer b;
+	b.deviceAddress = VkDeviceAddress(200);
+	b.ci.size = 80;
+	set.insert(&b);
+
+	Buffer c;
+	c.deviceAddress = VkDeviceAddress(300);
+	c.ci.size = 80;
+	set.insert(&c);
+
+	Buffer d;
+	d.deviceAddress = VkDeviceAddress(400);
+	d.ci.size = 80;
+	set.insert(&d);
+
+	Buffer e;
+	e.deviceAddress = VkDeviceAddress(500);
+	e.ci.size = 80;
+	set.insert(&e);
+
+	Buffer f;
+	f.deviceAddress = VkDeviceAddress(110);
+	f.ci.size = 1000;
+	set.insert(&f);
+
+	auto [begin0, end0] = set.equal_range(VkDeviceAddress(490));
+	EXPECT(std::distance(begin0, end0), 1u);
+	EXPECT(*begin0, &f);
+}
