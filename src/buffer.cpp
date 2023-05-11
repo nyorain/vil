@@ -91,6 +91,27 @@ BufferView::~BufferView() {
 	}
 }
 
+void retrieveDeviceAddress(Buffer& buf) {
+	auto& dev = *buf.dev;
+	dlg_assert(dev.dispatch.GetBufferDeviceAddress);
+	dlg_assert(!buf.deviceAddress);
+
+	VkBufferDeviceAddressInfo info {};
+	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+	info.buffer = buf.handle;
+	auto address = dev.dispatch.GetBufferDeviceAddress(dev.handle, &info);
+
+	std::lock_guard lock(dev.mutex);
+	buf.deviceAddress = address;
+	dev.bufferAddresses.insert(&buf);
+}
+
+void checkDeviceAddress(Buffer& buf) {
+	if(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+		retrieveDeviceAddress(buf);
+	}
+}
+
 // API
 VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 		VkDevice                                    device,
@@ -131,6 +152,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 
 	if(buf.ci.flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT) {
 		buf.memory = SparseMemoryState{};
+
+		// for non-sparse buffer, the device address can only be retrieved when
+		// its bound to memory, but for non-sparse buffers it can be retrieved
+		// immediately
+		checkDeviceAddress(buf);
 	}
 
 	constexpr auto sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
@@ -203,23 +229,6 @@ void bindBufferMemory(Buffer& buf, DeviceMemory& mem, VkDeviceSize offset) {
 	memBind.resource = &buf;
 
 	mem.allocations.insert(&memBind);
-}
-
-void checkDeviceAddress(Buffer& buf) {
-	if(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-		auto& dev = *buf.dev;
-		dlg_assert(dev.dispatch.GetBufferDeviceAddress);
-		dlg_assert(!buf.deviceAddress);
-
-		VkBufferDeviceAddressInfo info {};
-		info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-		info.buffer = buf.handle;
-		auto address = dev.dispatch.GetBufferDeviceAddress(dev.handle, &info);
-
-		std::lock_guard lock(dev.mutex);
-		buf.deviceAddress = address;
-		dev.bufferAddresses.insert(&buf);
-	}
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL BindBufferMemory(
@@ -332,9 +341,30 @@ VKAPI_ATTR VkDeviceAddress VKAPI_CALL GetBufferDeviceAddress(
 		VkDevice                                    device,
 		const VkBufferDeviceAddressInfo*            pInfo) {
 	auto& buf = get(device, pInfo->buffer);
+	dlg_assert(buf.ci.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+
 	auto fwd = *pInfo;
 	fwd.buffer = buf.handle;
-	return buf.dev->dispatch.GetBufferDeviceAddressKHR(buf.dev->handle, &fwd);
+	auto ret = buf.dev->dispatch.GetBufferDeviceAddressKHR(buf.dev->handle, &fwd);
+
+	// This is a sign of a serious problem, we might have missed to retrieve
+	// it at the right point. We try to insert it now, in the hope that
+	// this avoid further problems
+	if(ret != buf.deviceAddress) {
+		dlg_error("Inconsistent/Unknown device address retrieved");
+
+		if(buf.deviceAddress) {
+			// We already retrieved a (different) device addres?!
+			// This makes no sense at all, we can't even try to fix the
+			// issue in this case.
+			dlg_error("Different device address retrieved?!");
+		} else {
+			retrieveDeviceAddress(buf);
+			dlg_assert(ret == buf.deviceAddress);
+		}
+	}
+
+	return ret;
 }
 
 // NOTE: these functions are specifically designed for layers that capture
