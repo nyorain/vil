@@ -1611,7 +1611,7 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		AABB3f vertBounds {inf, inf, inf, 0.f, 0.f, 0.f};
 
 		for(auto& ini : instances.instances) {
-			if(ini.accelStruct->data.index() != 0) {
+			if(!ini.accelStruct || ini.accelStruct->data.index() != 0) {
 				continue;
 			}
 			auto& tris = std::get<0>(ini.accelStruct->data);
@@ -1645,7 +1645,7 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		dlg_trace("drawing {} inis", instances.instances.size());
 
 		for(auto& ini : instances.instances) {
-			if(ini.accelStruct->data.index() != 0) {
+			if(!ini.accelStruct || ini.accelStruct->data.index() != 0) {
 				continue;
 			}
 			auto& tris = std::get<0>(ini.accelStruct->data);

@@ -1420,6 +1420,11 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 			imGuiText("No instances.");
 		} else if(ImGui::TreeNode("Instances")) {
 			for(auto& ini : inis.instances) {
+				if(!ini.accelStruct) {
+					imGuiText("null instance");
+					continue;
+				}
+
 				ImGui::Separator();
 				refButtonExpect(*gui_, ini.accelStruct);
 

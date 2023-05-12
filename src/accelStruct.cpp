@@ -161,12 +161,20 @@ void writeInstances(AccelStruct& accelStruct,
 			// TODO: we should probably not have this option here and instead
 			// do this conversion in CommandHookSubmission.
 			// And do this (potentially expensive) operation with lock
-			auto& ref = accelStructAtLocked(*accelStruct.dev, addr);
-			dstIni.accelStruct = &ref;
+			if(addr) {
+				auto& ref = accelStructAtLocked(*accelStruct.dev, addr);
+				dstIni.accelStruct = &ref;
+			} else {
+				dstIni.accelStruct = nullptr;
+			}
 		} else {
 			auto vkRef = u64ToHandle<VkAccelerationStructureKHR>(srcIni.accelerationStructureReference);
-			auto& ref = get(*accelStruct.dev, vkRef);
-			dstIni.accelStruct = &ref;
+			if(vkRef) {
+				auto& ref = get(*accelStruct.dev, vkRef);
+				dstIni.accelStruct = &ref;
+			} else {
+				dstIni.accelStruct = nullptr;
+			}
 		}
 
 		dstIni.bindingTableOffset = srcIni.instanceShaderBindingTableRecordOffset;
