@@ -92,10 +92,14 @@ void MemoryResource::onApiDestroy() {
 		},
 		[](SparseMemoryState& mem) {
 			for(auto& bind : mem.opaqueBinds) {
-				bind.memory->allocations.erase(&bind);
+				if(bind.memory) {
+					bind.memory->allocations.erase(&bind);
+				}
 			}
 			for(auto& bind : mem.imageBinds) {
-				bind.memory->allocations.erase(&bind);
+				if(bind.memory) {
+					bind.memory->allocations.erase(&bind);
+				}
 			}
 
 			mem.opaqueBinds.clear();
