@@ -19,7 +19,7 @@
 #include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <string_view>
-#include <locale>
+#include <cctype>
 
 namespace vil {
 
@@ -88,8 +88,8 @@ std::string name(const Handle& handle, VkObjectType objectType, bool addType, bo
 
 // case insensitive substring find
 template<typename T, typename O>
-int findSubstrCI(const T& haystack, const O& needle, const std::locale& loc = std::locale()) {
-	auto cmp = [&](int c1, int c2) { return std::tolower(c1, loc) == std::tolower(c2, loc); };
+int findSubstrCI(const T& haystack, const O& needle) {
+	auto cmp = [&](unsigned char c1, unsigned char c2) { return std::tolower(c1) == std::tolower(c2); };
     auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), cmp);
 	return it == haystack.end() ? -1 : it - haystack.begin();
 }
