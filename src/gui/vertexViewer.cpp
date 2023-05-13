@@ -1642,8 +1642,6 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		drawDatas_.clear();
 		drawDatas_.reserve(instances.instances.size());
 
-		dlg_trace("drawing {} inis", instances.instances.size());
-
 		for(auto& ini : instances.instances) {
 			if(!ini.accelStruct || ini.accelStruct->data.index() != 0) {
 				continue;
