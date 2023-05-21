@@ -308,7 +308,8 @@ VkDeviceSize memorySize(const Image& img, const VkSparseImageMemoryBind& bind) {
 	// compare vulkan pec: "Any bound partially-used-sparse-blocks must still
 	// have their full sparse block size in bytes allocated in memory"
 	// Granularity is the number of blocks for BC formats so this should be fine.
-	auto numTexels = alignPOT(bind.extent.depth / blockSize.depth, granularity.depth) *
+	auto numTexels =
+		alignPOT(bind.extent.depth / blockSize.depth, granularity.depth) *
 		alignPOT(bind.extent.height / blockSize.height, granularity.height) *
 		alignPOT(bind.extent.width / blockSize.width, granularity.width);
 	return numTexels * FormatElementSize(img.ci.format, bind.subresource.aspectMask);

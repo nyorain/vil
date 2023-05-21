@@ -150,6 +150,8 @@ dep_imgio = dependency('imgio',
 	default_options: ['png=false'],
 	fallback: ['imgio', 'imgio_dep'])
 
+layer_args += '-DDLG_DEFAULT_TAGS="vil"'
+
 if disable_dlg
 	warning('disabling dlg')
 
