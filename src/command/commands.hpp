@@ -1403,6 +1403,7 @@ struct TraceRaysCmd final : TraceRaysCmdBase {
 
 	using TraceRaysCmdBase::TraceRaysCmdBase;
 	std::string_view nameDesc() const override { return "TraceRays"; }
+	std::string toString() const override;
 	void record(const Device&, VkCommandBuffer cb, u32) const override;
 	Matcher match(const Command&) const override;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }

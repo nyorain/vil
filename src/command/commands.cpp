@@ -3014,6 +3014,10 @@ Matcher TraceRaysCmd::match(const Command& base) const {
 	return m;
 }
 
+std::string TraceRaysCmd::toString() const {
+	return dlg::format("TraceRays({}, {}, {})", width, height, depth);
+}
+
 void TraceRaysIndirectCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
 	dev.dispatch.CmdTraceRaysIndirectKHR(cb,
 		&raygenBindingTable, &missBindingTable, &hitBindingTable, &callableBindingTable,
