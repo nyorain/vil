@@ -7,16 +7,17 @@
 		- [ ] don't always do it in updateRecords. figure out interface
 	- [ ] allow to explicitly save relative-commands or gui states,
 	      not sure which perspective makes more sense.
-		- [ ] store in working dir? or in some vil-specific config dir?
+		- [x] store in working dir? or in some vil-specific config dir?
 		      Guess it would make sense to make them global.
 			  And we want global vil settings at some point anyways.
 			  So figure out global config dir for this (make configure
 			  via env variable but choose good defaults).
-		- [ ] Allow to name the saved states
-		- [ ] Allow to load them, selecting the right stuff.
-		      Give meaningful error/warnings messages/stats?
-			  Would be useful to have the side-by-side-frames-with-vizlcs
-			  debug view for this (among other things).
+			  {nope, working dir for now}
+		- [x] Allow to name the saved states
+		- [x] Allow to load them, selecting the right stuff.
+			- [ ] Give meaningful error/warnings messages/stats?
+			- [ ] Would be useful to have the side-by-side-frames-with-vizlcs
+				  debug view for this (among other things).
 	- [x] continue matching rework/improvements to make sure matching works
 	      with loaded handles
 	- [ ] add serialize support for more commands (e.g. Bind)

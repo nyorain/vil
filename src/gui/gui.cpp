@@ -43,8 +43,6 @@
 #include <cstring>
 #include <cerrno>
 
-namespace fs = std::filesystem;
-
 #ifdef VIL_DEBUG
 	// NOTE: tmp deubgging tool for the LMM algorithm
 	// #define VIL_VIZ_LCS
@@ -1521,7 +1519,7 @@ void Gui::activateTab(Tab tab) {
 		// by default (if there is any)
 		assertNotOwned(dev_->mutex);
 		if(auto sc = dev_->swapchain(); sc) {
-			tabs_.cb->showSwapchainSubmissions(*sc);
+			tabs_.cb->showSwapchainSubmissions(*sc, true);
 		}
 	}
 }
@@ -1918,12 +1916,6 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 			auto draw = std::make_unique<Draw>(*this, commandPool_);
 			foundDraw = draws_.emplace_back(std::move(draw)).get();
 		}
-	}
-
-	// cool but not a good idea while working on serialization :)
-	constexpr auto initialLoadState = false;
-	if(initialLoadState && drawCounter_ == 0u) {
-		loadState();
 	}
 
 	auto& draw = *foundDraw;
@@ -2643,83 +2635,6 @@ ImageViewer& Gui::standaloneImageViewer() {
 		tabs_.imageViewer->init(*this);
 	}
 	return *tabs_.imageViewer;
-}
-
-// TODO: proper header:
-// - magic value
-// - version id
-
-void Gui::saveState() {
-	auto serializerPtr = createStateSaver();
-	auto& saver = *serializerPtr;
-
-	DynWriteBuf ownBuf;
-	nytl::write(ownBuf, u32(activeTab_));
-	tabs_.cb->save(saver, ownBuf);
-
-	// write file
-	auto path = fs::path(stateFile);
-	auto binary = true;
-
-	errno = 0;
-	auto f = imgio::openFile(path.string().c_str(), binary ? "wb" : "w"); // RAII
-	if(!f) {
-		dlg_error("Could not open '{}' for writing: {}", path, std::strerror(errno));
-		return;
-	}
-
-	// TODO: inefficient, additional copy
-	DynWriteBuf loaderData;
-	auto writer = [&](ReadBuf data) {
-		write(loaderData, data);
-	};
-
-	write(saver, writer);
-
-	// write file
-	DynWriteBuf header;
-	nytl::write<u32>(header, loaderData.size());
-
-	std::fwrite(header.data(), 1u, header.size(), f);
-	std::fwrite(loaderData.data(), 1u, loaderData.size(), f);
-	std::fwrite(ownBuf.data(), 1u, ownBuf.size(), f);
-
-	f = {};
-	dlg_trace("saved '{}': loaderSize {}, ownBufSize {}",
-		path, loaderData.size(), ownBuf.size());
-}
-
-void Gui::loadState() {
-	// read file
-	auto path = fs::path(stateFile);
-	if(!fs::exists(path)) {
-		dlg_trace("'{}' does not exist", path);
-		return;
-	}
-
-	auto dataVec = imgio::readFile<std::vector<std::byte>>(path.string().c_str());
-	auto buf = LoadBuf{ReadBuf(dataVec)};
-
-	// read header
-	auto loaderSize = read<u32>(buf);
-	if(loaderSize >= buf.buf.size()) {
-		dlg_error("Invalid state file size");
-		return;
-	}
-
-	auto loaderBuf = buf.buf.subspan(0, loaderSize);
-	auto ownBuf = LoadBuf{buf.buf.subspan(loaderSize)};
-
-	dlg_trace("loadState: total {}, loaderSize: {}, ownBufSize: {}",
-		dataVec.size(), loaderSize, ownBuf.buf.size());
-
-	auto loadPtr = createStateLoader(loaderBuf);
-	auto& load = *loadPtr;
-
-	activateTab(Tab(read<u32>(ownBuf)));
-
-	tabs_.cb->load(load, ownBuf);
-	dlg_assert(ownBuf.buf.empty());
 }
 
 } // namespace vil

@@ -27,16 +27,13 @@ public:
 	// swapchain only guaranteed to stay valid during call
 	// TODO: somewhat misleading, will not consider the given swapchain but just
 	// use dev.swapchain for updates. See todo on multi-swapchain support
-	void showSwapchainSubmissions(Swapchain& swapchain);
+	void showSwapchainSubmissions(Swapchain& swapchain, bool initial = false);
 	void select(IntrusivePtr<CommandRecord> record, Command* cmd = nullptr);
 	void select(IntrusivePtr<CommandRecord> record, CommandBufferPtr cb);
 	void showLocalCaptures(LocalCapture& lc);
 
 	auto& commandViewer() { return commandViewer_; }
 	auto& selector() { return selector_; }
-
-	void save(StateSaver&, DynWriteBuf& buf);
-	void load(StateLoader&, LoadBuf& buf);
 
 private:
 	void updateFromSelector();
@@ -52,6 +49,14 @@ private:
 	void updateRecord(IntrusivePtr<CommandRecord> record);
 	void updateRecords(std::vector<FrameSubmission>);
 	void updateRecords(const FrameMatch&, std::vector<FrameSubmission>&&);
+
+	void showLoadPopup();
+	void showSavePopup();
+	void saveSelection(std::string_view name);
+	void loadSelection(std::string_view name);
+	void save(StateSaver&, DynWriteBuf& buf);
+	void load(StateLoader&, LoadBuf& buf);
+	void loadStartup();
 
 private:
 	friend class Gui;
