@@ -582,7 +582,7 @@ VkResult doCreateDevice(
 			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_2);
 			inVulkan12 = reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
 			features12 = *reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(link);
-		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES) {
 			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_3);
 			features13 = *reinterpret_cast<VkPhysicalDeviceVulkan13Features*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES) {
