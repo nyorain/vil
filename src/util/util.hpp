@@ -5,6 +5,7 @@
 #include <vk/vulkan.h>
 #include <nytl/vec.hpp>
 #include <nytl/bytes.hpp>
+#include <nytl/span.hpp>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -370,6 +371,11 @@ auto lockCopy(Mutex& mutex, T& obj) {
 	std::lock_guard lock(mutex);
 	auto cpy = obj;
 	return cpy;
+}
+
+template<typename T>
+std::vector<T> asVector(span<const T> range) {
+	return {range.begin(), range.end()};
 }
 
 } // namespace vil

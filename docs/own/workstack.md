@@ -1,27 +1,28 @@
-- [ ] serialization
-	- [x] create/save handles
-	- [x] remove serialize.cpp
-	- [x] update gui to new interface
-	- [ ] serialize further gui state, e.g. selected I/O
-	- [x] use find() for last command level in gui when loading state
-		- [ ] don't always do it in updateRecords. figure out interface
-	- [ ] allow to explicitly save relative-commands or gui states,
-	      not sure which perspective makes more sense.
-		- [x] store in working dir? or in some vil-specific config dir?
-		      Guess it would make sense to make them global.
-			  And we want global vil settings at some point anyways.
-			  So figure out global config dir for this (make configure
-			  via env variable but choose good defaults).
-			  {nope, working dir for now}
-		- [x] Allow to name the saved states
-		- [x] Allow to load them, selecting the right stuff.
-			- [ ] Give meaningful error/warnings messages/stats?
-			- [ ] Would be useful to have the side-by-side-frames-with-vizlcs
-				  debug view for this (among other things).
-	- [x] continue matching rework/improvements to make sure matching works
-	      with loaded handles
-	- [ ] add serialize support for more commands (e.g. Bind)
-	- [x] test: draw/dispatch/traceRays. But also Bind commands.
+- [ ] Would be useful to have the side-by-side-frames-with-vizlcs
+	  debug view via record serialization (among other things).
+	  {for later}
+- [ ] add serialize support for more commands (e.g. Bind)
+- [ ] serialize further gui state, e.g. selected I/O
+- [ ] better deep-matching for handles, especially pipelines
+- [ ] support viewing a specific array element in the buffer formatter
+	- [ ] we might not even copy the needed data for some elements.
+	      Only copy the needed data, we already have paging for the gui
+		  but never forward what we actually need to the Hook
+- [ ] support all-descriptor-indexing-flags-set, test with npt textures
+	- [ ] first fix the crash (descriptor bindings not being copied should
+	      not cause a crash anywhere)
+	- [ ] then fix the update_unused_while_pending limitation in hook/record.cpp
+		  by tracking all used handles and wait for hooked submissions before
+		  destroying the api handle (optionally only track the
+		  update_unused_while_pending handles? but I guess if we have the mechanism
+		  we wanna use it for everything, could assert that it only happens
+		  for update_unused_while_pending stuff)
+			- [ ] same mechanism for memory destruction (and sparse unbinding?)
+			      Have to think a bit more about the sparse handling I guess?
+				  Maybe just enable the device feature that reads unbound sparse
+				  regions as 0? We want that for the image viewer anyways I guess.
+				  (bind memory destruction is still a problem though, handle
+				  it via tracking and waiting)
 - [ ] implement sync tracking
 	- [ ] and fix full sync
 	- [ ] add test for out-of-order submission

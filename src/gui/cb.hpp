@@ -46,9 +46,22 @@ private:
 	void clearSelection(bool unselectCommandViewer);
 	void drawSelected(Draw& draw);
 
-	void updateRecord(IntrusivePtr<CommandRecord> record);
-	void updateRecords(std::vector<FrameSubmission>);
-	void updateRecords(const FrameMatch&, std::vector<FrameSubmission>&&);
+	// In single-record mode, updates the shown record.
+	// When the given newCommand is empty, will try to find it in the record.
+	void updateRecord(IntrusivePtr<CommandRecord> record,
+		std::vector<const Command*> newCommand);
+
+	// In frame-record mode, updates the shown frame.
+	// When the given newRecord is empty, will try to find it in the frame.
+	// When the given newCommand is empty, will try to find it in the record.
+	void updateRecords(const FrameMatch&, std::vector<FrameSubmission>&&,
+		IntrusivePtr<CommandRecord> newRecord,
+		std::vector<const Command*> newCommand);
+
+	// Helper for the function above, will perform a full frame match.
+	void updateRecords(std::vector<FrameSubmission>,
+		IntrusivePtr<CommandRecord> newRecord,
+		std::vector<const Command*> newCommand);
 
 	void showLoadPopup();
 	void showSavePopup();

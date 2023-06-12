@@ -28,7 +28,7 @@ using SaveBuf = DynWriteBuf;
 
 inline void readBytes(LoadBuf& buf, WriteBuf obj) {
 	if(buf.buf.size() < obj.size()) {
-		throw std::out_of_range("");
+		throw std::out_of_range("Serialization loading issue: Out of range (read)");
 	}
 	nytl::read(buf.buf, obj);
 }
@@ -59,7 +59,7 @@ T read(LoadBuf& buf) {
 
 inline void skip(LoadBuf& buf, u64 size) {
 	if(buf.buf.size() < size) {
-		throw std::out_of_range("");
+		throw std::out_of_range("Serialization loading issue: Out of range (skip)");
 	}
 	buf.buf = buf.buf.subspan(size);
 }
@@ -196,7 +196,10 @@ void serialize(LoadBuf& buf, std::optional<T>& obj) {
 // Costs almost nothing, so always leaving it in for now.
 inline void serializeMarker(LoadBuf& buf, u64 marker, std::string_view name) {
 	auto val = read<u64>(buf);
-	dlg_assertm(val == marker, "serialize marker mismatch for {}", name);
+	if(val != marker) {
+		dlg_error("serialize marker mismatch for {}", name);
+		throw std::invalid_argument("Serialization loading error: marker mismatch");
+	}
 }
 
 inline void serializeMarker(SaveBuf& buf, u64 marker, std::string_view) {
