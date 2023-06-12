@@ -93,7 +93,6 @@ public:
 
 	// TODO: make this into a setting
 	static constexpr bool showHelp = true;
-	static constexpr auto stateFile = "vilgui.bin";
 
 public:
 	Gui(Device& dev, VkFormat colorFormat);
@@ -181,9 +180,6 @@ public:
 	bool addMouseWheelEvent(Vec2f dir);
 	bool addInputEvent(std::string input);
 	bool addInputEvent(unsigned short input16);
-
-	void saveState();
-	void loadState();
 
 private:
 	void destroyRenderStuff();

@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <nytl/bytes.hpp>
 #include <nytl/tmpUtil.hpp>
+#include <util/dlg.hpp>
 #include <stdexcept>
 #include <optional>
 

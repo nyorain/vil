@@ -57,9 +57,9 @@ inline int imGuiTextStringCallback(ImGuiInputTextCallbackData* data) {
 	return 0;
 }
 
-inline bool imGuiTextInput(const char* label, std::string& output) {
+inline bool imGuiTextInput(const char* label, std::string& output, u32 flags = {}) {
 	auto ret = ImGui::InputText(label, (char*) output.c_str(), output.capacity() + 1,
-		ImGuiInputTextFlags_CallbackResize, imGuiTextStringCallback, (void*) &output);
+		flags | ImGuiInputTextFlags_CallbackResize, imGuiTextStringCallback, (void*) &output);
 	return ret;
 }
 

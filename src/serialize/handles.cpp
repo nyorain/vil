@@ -356,8 +356,13 @@ void serialize(Slz& slz, IO& io, RenderPass& rp) {
 
 		assertLoadImmediate(slz, sp.pipelineBindPoint, VK_PIPELINE_BIND_POINT_GRAPHICS);
 
-		u32 depthStencilCount = sp.pDepthStencilAttachment ? 1u : 0u;
-		u32 resolveCount = sp.pResolveAttachments ? sp.colorAttachmentCount : 0u;
+		u32 depthStencilCount;
+		u32 resolveCount;
+
+		if constexpr(std::is_same_v<Slz, StateSaver>) {
+			depthStencilCount = sp.pDepthStencilAttachment ? 1u : 0u;
+			resolveCount = sp.pResolveAttachments ? sp.colorAttachmentCount : 0u;
+		}
 
 		serializeAttRefs(buf, sp.pColorAttachments, sp.colorAttachmentCount);
 		serializeAttRefs(buf, sp.pDepthStencilAttachment, depthStencilCount);

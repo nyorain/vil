@@ -28,10 +28,14 @@
 #include <util/f16.hpp>
 #include <util/profiling.hpp>
 #include <vkutil/enumString.hpp>
+#include <imgio/file.hpp>
 #include <vk/format_utils.h>
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <bitset>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 namespace vil {
 
@@ -232,18 +236,26 @@ void CommandRecordGui::draw(Draw& draw) {
 	{
 		ImGui::SameLine();
 		if(ImGui::Button(ICON_FA_SAVE)) {
-			gui_->saveState();
+			ImGui::OpenPopup("SaveSelection");
 		}
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Save the current selection");
+			ImGui::SetTooltip("Open save selection dialog");
+		}
+		if(ImGui::BeginPopup("SaveSelection")) {
+			showSavePopup();
+			ImGui::EndPopup();
 		}
 
 		ImGui::SameLine();
 		if(ImGui::Button(ICON_FA_FILE_ALT)) {
-			gui_->loadState();
+			ImGui::OpenPopup("LoadSelection");
 		}
 		if(gui_->showHelp && ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Load up the last saved selection (preserved across restarts)");
+			ImGui::SetTooltip("Open load selection popup");
+		}
+		if(ImGui::BeginPopup("LoadSelection")) {
+			showLoadPopup();
+			ImGui::EndPopup();
 		}
 	}
 
@@ -460,7 +472,7 @@ void CommandRecordGui::select(IntrusivePtr<CommandRecord> record, CommandBufferP
 	updateFromSelector();
 }
 
-void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain) {
+void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain, bool initial) {
 	auto& dev = gui_->dev();
 	assertNotOwned(dev.mutex);
 
@@ -474,6 +486,12 @@ void CommandRecordGui::showSwapchainSubmissions(Swapchain& swapchain) {
 	clearSelection(true);
 	selector_.select(std::move(lastFrame), u32(-1), nullptr, {});
 	updateFromSelector();
+
+	// cool but not a good idea while working on serialization :)
+	constexpr auto initialLoadState = true;
+	if(initialLoadState && initial) {
+		loadStartup();
+	}
 }
 
 void CommandRecordGui::showLocalCaptures(LocalCapture& lc) {
@@ -968,6 +986,209 @@ void CommandRecordGui::updateFromSelector() {
 	//   that we even do it in there.
 	auto commandSpan = selector_.command();
 	command_ = {commandSpan.begin(), commandSpan.end()};
+}
+
+const auto serializeFolder = fs::path(".vil/");
+constexpr auto serializeFilePrefix = std::string_view("cmdsel_");
+constexpr auto serializeDefaultName = std::string_view("_default");
+
+fs::path buildSerializePath(std::string_view name) {
+	return serializeFolder / (std::string(serializeFilePrefix).append(name).append(".bin"));
+}
+
+std::string readStartup() {
+	auto defaultPath = buildSerializePath(serializeDefaultName);
+	if(!fs::exists(fs::symlink_status(defaultPath))) {
+		return {};
+	}
+
+	auto isSymlink = fs::is_symlink(defaultPath);
+	if(!isSymlink) {
+		dlg_error("{} not a symlink?!", defaultPath);
+		return {};
+	}
+
+	auto target = fs::read_symlink(defaultPath);
+	auto stem = target.stem().u8string();
+	if(stem.find(serializeFilePrefix) != 0) {
+		dlg_error("Invalid default symlink, target {}", target);
+		return {};
+	}
+
+	stem.erase(0, serializeFilePrefix.size());
+	return stem;
+}
+
+void CommandRecordGui::showLoadPopup() {
+	auto count = 0u;
+	if(fs::exists(serializeFolder)) {
+		// TODO: ugly
+		static auto startupFile = readStartup();
+
+		auto flags = 0u;
+		if(ImGui::BeginTable("Entries", 2, flags)) {
+			for(const auto& entry : fs::directory_iterator(serializeFolder)) {
+				if(entry.is_directory() || entry.is_symlink()) {
+					continue;
+				}
+
+				auto stem = entry.path().stem().u8string();
+				if(stem.find(serializeFilePrefix) != 0) {
+					continue;
+				}
+
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+
+				++count;
+				stem.erase(0, serializeFilePrefix.size());
+
+				// TODO: fix ui spacing
+				auto flags = ImGuiTreeNodeFlags_Leaf |
+					ImGuiTreeNodeFlags_NoTreePushOnOpen |
+					ImGuiTreeNodeFlags_Bullet |
+					ImGuiTreeNodeFlags_FramePadding;
+				if(ImGui::TreeNodeEx(stem.c_str(), flags)) {
+					if(ImGui::IsItemClicked()) {
+						loadSelection(stem);
+					}
+				}
+
+				// startup-button
+				ImGui::TableNextColumn();
+
+				ImGui::PushID(stem.c_str());
+				auto disable = (startupFile == stem);
+				pushDisabled(disable);
+
+				if(ImGui::Button(ICON_FA_UPLOAD)) {
+					auto startupPath = buildSerializePath(serializeDefaultName);
+					if(fs::exists(fs::symlink_status(startupPath))) {
+						dlg_trace("removed old symlink {}", startupPath);
+						fs::remove(startupPath);
+					}
+
+					fs::create_symlink(entry.path().filename(), startupPath);
+					dlg_trace("created symlink {} -> {}", startupPath, entry.path());
+
+					startupFile = stem;
+					dlg_trace("new startup file: {}", stem);
+				}
+
+				popDisabled(disable);
+
+				if(gui_->showHelp && ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Load this during startup");
+				}
+
+				ImGui::PopID();
+			}
+
+			ImGui::EndTable();
+		}
+	}
+
+	if(count == 0u) {
+		imGuiText("No saved selections found");
+	}
+}
+
+void CommandRecordGui::showSavePopup() {
+	static std::string name;
+	auto save = false;
+	save |= imGuiTextInput("Save selection as", name, ImGuiInputTextFlags_EnterReturnsTrue);
+	ImGui::SameLine();
+	save |= ImGui::Button("Save");
+
+	if(save) {
+		saveSelection(name);
+	}
+}
+
+void CommandRecordGui::loadStartup() {
+	auto startupFile = readStartup();
+	if(!startupFile.empty()) {
+		loadSelection(startupFile);
+	}
+}
+
+// TODO: proper header:
+// - magic value
+// - version id
+
+void CommandRecordGui::saveSelection(std::string_view name) {
+	if(!fs::exists(serializeFolder)) {
+		fs::create_directory(serializeFolder);
+	}
+
+	auto path = buildSerializePath(name);
+
+	auto serializerPtr = createStateSaver();
+	auto& saver = *serializerPtr;
+
+	DynWriteBuf ownBuf;
+	save(saver, ownBuf);
+
+	// write file
+	auto binary = true;
+
+	errno = 0;
+	auto f = imgio::openFile(path.string().c_str(), binary ? "wb" : "w"); // RAII
+	if(!f) {
+		dlg_error("Could not open '{}' for writing: {}", path, std::strerror(errno));
+		return;
+	}
+
+	// TODO: inefficient, additional copy
+	DynWriteBuf loaderData;
+	auto writer = [&](ReadBuf data) {
+		write(loaderData, data);
+	};
+
+	write(saver, writer);
+
+	// write file
+	DynWriteBuf header;
+	nytl::write<u32>(header, loaderData.size());
+
+	std::fwrite(header.data(), 1u, header.size(), f);
+	std::fwrite(loaderData.data(), 1u, loaderData.size(), f);
+	std::fwrite(ownBuf.data(), 1u, ownBuf.size(), f);
+
+	f = {};
+	dlg_trace("saved '{}': loaderSize {}, ownBufSize {}",
+		path, loaderData.size(), ownBuf.size());
+}
+
+void CommandRecordGui::loadSelection(std::string_view name) {
+	// read file
+	auto path = buildSerializePath(name);
+	if(!fs::exists(path)) {
+		dlg_trace("'{}' does not exist", path);
+		return;
+	}
+
+	auto dataVec = imgio::readFile<std::vector<std::byte>>(path.string().c_str());
+	auto buf = LoadBuf{ReadBuf(dataVec)};
+
+	// read header
+	auto loaderSize = read<u32>(buf);
+	if(loaderSize >= buf.buf.size()) {
+		dlg_error("Invalid state file size");
+		return;
+	}
+
+	auto loaderBuf = buf.buf.subspan(0, loaderSize);
+	auto ownBuf = LoadBuf{buf.buf.subspan(loaderSize)};
+
+	dlg_trace("loadState: total {}, loaderSize: {}, ownBufSize: {}",
+		dataVec.size(), loaderSize, ownBuf.buf.size());
+
+	auto loadPtr = createStateLoader(loaderBuf);
+	auto& loader = *loadPtr;
+
+	load(loader, ownBuf);
+	dlg_assert(ownBuf.buf.empty());
 }
 
 void CommandRecordGui::save(StateSaver& slz, SaveBuf& buf) {
