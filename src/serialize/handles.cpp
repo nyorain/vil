@@ -396,8 +396,12 @@ void serialize(Slz& slz, IO& io, RenderPass& rp) {
 template<typename Slz, typename IO, typename H> using HasSerialize =
 	decltype(serialize(std::declval<Slz>(), std::declval<IO>(), std::declval<H>()));
 
-void writeHandle(StateSaver& saver, const Handle& handle, VkObjectType type) {
+void writeHandle(StateSaver& saver, u32 handleID,
+		const Handle& handle, VkObjectType type) {
 	auto typeHandler = ObjectTypeHandler::handler(type);
+
+	serializeMarker(saver.handleBuf, markerStartHandle + handleID,
+		dlg::format("handle {}", handleID));
 
 	static_assert(validExpression<HasSerialize,
 		StateSaver&,
@@ -494,6 +498,9 @@ void readHandles(StateLoader& loader) {
 	for(auto i = 0u; i < loader.handles.size(); ++i) {
 		auto type = loader.handleTypes[i];
 		auto typeHandler = ObjectTypeHandler::handler(type);
+
+		serializeMarker(loader.buf, markerStartHandle + i,
+			dlg::format("handle {}", i));
 
 		static_assert(validExpression<HasSerialize,
 			StateLoader&,

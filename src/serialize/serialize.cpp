@@ -40,26 +40,22 @@ void destroy(StateSaver& saver) {
 
 void flushPending(StateSaver& saver) {
 	auto done = false;
-	dlg_trace(">>flushPending: lastWrittenRecord {}, records.size {}",
-		saver.lastWrittenRecord, saver.records.size());
 	while(!done) {
 		done = true;
 
 		for(auto i = saver.lastWrittenHandle; i < saver.handles.size(); ++i) {
 			done = false;
-			writeHandle(saver, *saver.handles[i], saver.handleTypes[i]);
+			writeHandle(saver, i, *saver.handles[i], saver.handleTypes[i]);
 		}
 		saver.lastWrittenHandle = saver.handles.size();
 
 		for(auto i = saver.lastWrittenRecord; i < saver.records.size(); ++i) {
-			auto before = saver.recordBuf.size();
-
 			done = false;
 			auto& rec = const_cast<CommandRecord&>(*saver.records[i]);
-			saveRecord(saver, saver.recordBuf, rec);
 
-			auto after = saver.recordBuf.size();
-			dlg_trace("Saved record {}, {}B", i, after - before);
+			serializeMarker(saver.recordBuf, markerStartRecord + i,
+				dlg::format("record {}", i));
+			saveRecord(saver, saver.recordBuf, rec);
 		}
 		saver.lastWrittenRecord = saver.records.size();
 	}
@@ -73,7 +69,6 @@ u64 addNoFlush(StateSaver& slz, const CommandRecord& rec) {
 
 	auto id = slz.records.size();
 	slz.records.push_back(&rec);
-	dlg_trace("added record {}", id);
 
 	return id;
 }
@@ -114,6 +109,9 @@ void write(StateSaver& saver, std::function<void(ReadBuf)> writer) {
 
 	// header
 	SaveBuf header;
+
+	serializeMarker(header, markerStartData, "Start");
+
 	write<u32>(header, saver.records.size());
 	write<u32>(header, saver.handles.size());
 	for(auto i = 0u; i < saver.handles.size(); ++i) {
@@ -134,6 +132,8 @@ StateLoaderPtr createStateLoader(ReadBuf rawByteBuf) {
 	auto ptr = StateLoaderPtr{new StateLoader()};
 	auto& loader = *ptr;
 	loader.buf.buf = rawByteBuf;
+
+	serializeMarker(loader.buf, markerStartData, "Start");
 
 	// load header
 	auto numRecords = read<u32>(loader.buf);
@@ -156,6 +156,8 @@ StateLoaderPtr createStateLoader(ReadBuf rawByteBuf) {
 
 	for(auto i = 0u; i < numRecords; ++i) {
 		auto& rec = loader.records[i];
+		serializeMarker(loader.buf, markerStartRecord + i,
+			dlg::format("record {}", i));
 		loadRecord(loader, rec, loader.buf);
 	}
 

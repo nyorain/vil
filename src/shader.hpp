@@ -110,6 +110,7 @@ struct ShaderModule : SharedDeviceHandle {
 	// versions in case the module has multiple entry points.
 	std::vector<XfbPatchData> xfb;
 
+	ShaderModule(); // = default
 	~ShaderModule();
 	void clearXfb();
 };

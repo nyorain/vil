@@ -971,15 +971,12 @@ void CommandRecordGui::updateFromSelector() {
 }
 
 void CommandRecordGui::save(StateSaver& slz, SaveBuf& buf) {
-	dlg_trace("cbgui save: {}", frame_.size());
-
 	// selection
 	write<u64>(buf, frame_.size());
 	for(auto& subm : frame_) {
 		write(buf, subm.submissionID);
 		write<u64>(buf, subm.submissions.size());
 
-		dlg_trace(" >> {}", subm.submissions.size());
 		for(auto& rec : subm.submissions) {
 			auto id = add(slz, *rec);
 			write<u64>(buf, id);
