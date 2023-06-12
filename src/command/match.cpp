@@ -1870,6 +1870,18 @@ MatchVal match(MatchType, const NextSubpassCmd& a, const NextSubpassCmd& b) {
 	return a.subpassID == b.subpassID ? MatchVal{1.f, 1.f} : MatchVal::noMatch();
 }
 
+MatchVal match(MatchType, const FirstSubpassCmd& a, const FirstSubpassCmd& b) {
+	(void) a;
+	(void) b;
+	return MatchVal{1.f, 1.f};
+}
+
+MatchVal match(MatchType, const RootCommand& a, const RootCommand& b) {
+	(void) a;
+	(void) b;
+	return MatchVal{1.f, 1.f};
+}
+
 // NOTE: for copy commands, src/dst layouts seem irrelevant but it's unlikely
 // they change between semantically equal commands so we give them full weight.
 

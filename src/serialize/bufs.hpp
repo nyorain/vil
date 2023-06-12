@@ -190,6 +190,18 @@ void serialize(LoadBuf& buf, std::optional<T>& obj) {
 	}
 }
 
+// Debug markers in binary serialization, could be disabled in release builds
+// (but that would make serializations incompatible between debug and release).
+// Costs almost nothing, so always leaving it in for now.
+inline void serializeMarker(LoadBuf& buf, u64 marker, std::string_view name) {
+	auto val = read<u64>(buf);
+	dlg_assertm(val == marker, "serialize marker mismatch for {}", name);
+}
+
+inline void serializeMarker(SaveBuf& buf, u64 marker, std::string_view) {
+	write(buf, marker);
+}
+
 template<typename IO, typename C>
 VoidEnableIfContainer<C> serializeContainer(IO& buf, C& container) {
 	auto cb = [](auto& buf, auto& elem) { serialize(buf, elem); };

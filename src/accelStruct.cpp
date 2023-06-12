@@ -198,7 +198,6 @@ void initBufs(AccelStruct& accelStruct,
 
 	auto& geom0 = info.pGeometries ? info.pGeometries[0] : *info.ppGeometries[0];
 	accelStruct.geometryType = geom0.geometryType;
-	dlg_trace("initBufs: {}", vk::name(accelStruct.geometryType));
 
 	auto bufSize = 0u;
 	for(auto i = 0u; i < info.geometryCount; ++i) {

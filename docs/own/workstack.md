@@ -17,10 +17,10 @@
 		      Give meaningful error/warnings messages/stats?
 			  Would be useful to have the side-by-side-frames-with-vizlcs
 			  debug view for this (among other things).
-	- [ ] continue matching rework/improvements to make sure matching works
+	- [x] continue matching rework/improvements to make sure matching works
 	      with loaded handles
 	- [ ] add serialize support for more commands (e.g. Bind)
-	- [ ] test: draw/dispatch/traceRays. But also Bind commands.
+	- [x] test: draw/dispatch/traceRays. But also Bind commands.
 - [ ] implement sync tracking
 	- [ ] and fix full sync
 	- [ ] add test for out-of-order submission
@@ -40,18 +40,18 @@
       resizing
 - [ ] fix bad vk::name impls. E.g. for DescriptorSetLayout, the stages
 - [ ] cleanup imageToBuffer implementation
-	- [x] for most formats (that we can read on cpu) we probably just 
+	- [x] for most formats (that we can read on cpu) we probably just
 	      want CmdCopyImageToBuffer
 	- [ ] some formats can't be easily read on cpu. We want support on the
 	      long term but there are probably always commands that won't
-		  easily allow it, e.g. ASTC. For them, try 
+		  easily allow it, e.g. ASTC. For them, try
 		  (1) blit to a format with at least that precision, if feature flags allow
 		  (2) write into a texel buffer with at least that precision
 		      need storageImageWithoutFormat device feature and the format
 			  feature flag
 			  In case storageImageWithoutFormat isn't supported, we
 			  could have a couple of default target formats that are
-			  guaranteed to be supported 
+			  guaranteed to be supported
 			  (e.g. rgba8unorm, rgba16Sfloat, rgba32Sflot, r32Uint etc)
 		  (3) if nothing else works, fall back to our old terrible
 		       copy to vec4[]-storage buffer solution?
@@ -73,7 +73,7 @@
 		  -> no idea. Crash inside the vulkan loader that i can't reproduce locally
 		  Maybe just execute on windows? seems to work there.
 - [ ] document what to do when descriptors are not available when
-      clicking new record in UI. Implement prototype for 
+      clicking new record in UI. Implement prototype for
 	  always-ds-cow-on-submission? Should probably be toggleable.
 - [ ] clean up special descriptorSet handling in handles.cpp
 - rework gui device locking. We should be able to execute draw/uploadDraw
@@ -81,7 +81,7 @@
   needed
 - [x] got the null mock driver to work.
   [x] Now write a simple test just creating an instance and device with
-  vil and the validation layer. And check that we can execute that on 
+  vil and the validation layer. And check that we can execute that on
   CI as well
 	- [ ] write test for creating ds, updating it with imageView, destroying
 	  imageView and then using ds in submission (might need partially_bound
@@ -111,7 +111,7 @@
 - check if we can get the null vulkan driver running and execute tests
 	- just create images/buffers with various parameters and record submissions,
 	  recording every command at least once.
-	- manually test command hooking, without gui (or use gui without actually 
+	- manually test command hooking, without gui (or use gui without actually
 	  rendering to a swapchain? would be nice to have that feature anyways
 	  but applications that don't use a swapchain e.g. wlroots)
 - clean up sonar code issues

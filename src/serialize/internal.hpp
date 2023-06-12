@@ -59,9 +59,14 @@ void loadRecord(StateLoader& loader, IntrusivePtr<CommandRecord> rec, LoadBuf& i
 void saveRecord(StateSaver& saver, SaveBuf& io, CommandRecord& rec);
 
 // handles.cpp
-void writeHandle(StateSaver& saver, const Handle& handle, VkObjectType);
+void writeHandle(StateSaver& saver, u32 handleID, const Handle& handle, VkObjectType);
 
 Handle& addHandle(StateLoader& loader);
 void readHandles(StateLoader& loader);
+
+constexpr u64 markerBase = 0xC0DEBABE00000000ull;
+constexpr u64 markerStartData = markerBase + 0xABCDABCD;
+constexpr u64 markerStartRecord = markerBase + 0xEC0D0000; // last bytes for record id
+constexpr u64 markerStartHandle = markerBase + 0xAD1E0000; // last bytes for handle id
 
 } // namespace

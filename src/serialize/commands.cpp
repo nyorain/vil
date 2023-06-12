@@ -10,6 +10,7 @@
 #include <rp.hpp>
 #include <pipe.hpp>
 #include <ds.hpp>
+#include <sync.hpp>
 
 namespace vil {
 
@@ -249,6 +250,14 @@ void serializeCmdSpan(Slz& slz, IO& io, span<T>& span, Serializer&& func) {
 			func(slz, io, val);
 		}
 	}
+}
+
+template<typename Slz, typename IO, typename T>
+void serializeCmdRefs(Slz& slz, IO& io, span<T>& span) {
+	auto serializeRes = [](Slz& slz, auto& buf, auto& res) {
+		serializeRef(slz.slz, buf, res);
+	};
+	serializeCmdSpan(slz, io, span, serializeRes);
 }
 
 template<typename Slz, typename IO>
@@ -591,6 +600,13 @@ void serialize(Slz& slz, IO& io, BeginRenderPassCmd& cmd) {
 }
 
 template<typename Slz, typename IO>
+void serialize(Slz& slz, IO& io, SubpassCmd& cmd) {
+	(void) slz;
+	(void) io;
+	serialize(io, cmd.subpassID);
+}
+
+template<typename Slz, typename IO>
 void serialize(Slz& slz, IO& io, BeginRenderingCmd& cmd) {
 	auto serializeAttachment = [](Slz& slz, auto& buf, auto& att) {
 		serializeRef(slz.slz, buf, att.view);
@@ -677,13 +693,111 @@ void serialize(Slz& slz, IO& io, RootCommand& cmd) {
 	serialize(slz, io, static_cast<SectionCommand&>(cmd));
 }
 
+// dummy for validExpression below
+template<typename B> using SrcStageMaskMember = decltype(B::srcStageMask);
+
+template<typename IO, typename BufBarrier>
+void serializeBufBarrier(IO& io, BufBarrier& b) {
+	serialize(io, b.srcQueueFamilyIndex);
+	serialize(io, b.dstQueueFamilyIndex);
+	serialize(io, b.srcAccessMask);
+	serialize(io, b.dstAccessMask);
+	serialize(io, b.offset);
+	serialize(io, b.size);
+
+	if constexpr(validExpression<SrcStageMaskMember, BufBarrier>) {
+		serialize(io, b.srcStageMask);
+		serialize(io, b.dstStageMask);
+	}
+}
+
+template<typename IO, typename ImgBarrier>
+void serializeImgBarrier(IO& io, ImgBarrier& b) {
+	serialize(io, b.srcQueueFamilyIndex);
+	serialize(io, b.dstQueueFamilyIndex);
+	serialize(io, b.srcAccessMask);
+	serialize(io, b.dstAccessMask);
+	serialize(io, b.oldLayout);
+	serialize(io, b.newLayout);
+	serialize(io, b.subresourceRange);
+
+	if constexpr(validExpression<SrcStageMaskMember, ImgBarrier>) {
+		serialize(io, b.srcStageMask);
+		serialize(io, b.dstStageMask);
+	}
+}
+
+template<typename Slz, typename IO, typename BCmd>
+void serializeBarrierCmd(Slz& slz, IO& io, BCmd& cmd) {
+	serializeCmdRefs(slz, io, cmd.buffers);
+	serializeCmdRefs(slz, io, cmd.images);
+
+	auto serializeImgb = [](Slz&, auto& buf, auto& barrier) {
+		serializeImgBarrier(buf, barrier);
+	};
+	auto serializeBufb = [](Slz&, auto& buf, auto& barrier) {
+		serializeBufBarrier(buf, barrier);
+	};
+	auto serializeMemb = [](Slz&, auto& buf, auto& barrier) {
+		serialize(buf, barrier.srcAccessMask);
+		serialize(buf, barrier.dstAccessMask);
+	};
+
+	serializeCmdSpan(slz, io, cmd.memBarriers, serializeMemb);
+	serializeCmdSpan(slz, io, cmd.bufBarriers, serializeBufb);
+	serializeCmdSpan(slz, io, cmd.imgBarriers, serializeImgb);
+
+	if constexpr(validExpression<SrcStageMaskMember, BCmd>) {
+		serialize(io, cmd.srcStageMask);
+		serialize(io, cmd.dstStageMask);
+	}
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz& slz, IO& io, BarrierCmd& cmd) {
+	serializeBarrierCmd(slz, io, cmd);
+	serialize(io, cmd.dependencyFlags);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz& slz, IO& io, Barrier2Cmd& cmd) {
+	serializeBarrierCmd(slz, io, cmd);
+	serialize(io, cmd.flags);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz& slz, IO& io, WaitEventsCmd& cmd) {
+	serializeBarrierCmd(slz, io, cmd);
+	serializeCmdRefs(slz, io, cmd.events);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz& slz, IO& io, WaitEvents2Cmd& cmd) {
+	serializeBarrierCmd(slz, io, cmd);
+	serializeCmdRefs(slz, io, cmd.events);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz& slz, IO& io, BindPipelineCmd& cmd) {
+	serialize(io, cmd.bindPoint);
+	serializeRef(slz.slz, io, cmd.pipe);
+}
+
+template<typename Cmd> constexpr bool NoSerialization =
+	std::is_same_v<Cmd, EndDebugUtilsLabelCmd> ||
+	std::is_same_v<Cmd, EndRenderPassCmd> ||
+	std::is_same_v<Cmd, EndRenderingCmd>;
+
 // fallback for all other commands
 template<typename Slz, typename IO, typename Cmd>
 void serialize(Slz& slz, IO& io, Cmd& cmd) {
 	(void) slz;
 	(void) io;
 	(void) cmd;
-	dlg_trace("unimplemented: {}", cmd.nameDesc());
+
+	if(!NoSerialization<Cmd>) {
+		dlg_trace("unimplemented: {}", cmd.nameDesc());
+	}
 }
 
 // TODO: serializing of RootCommand currently not handled symmetrically

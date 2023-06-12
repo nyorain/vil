@@ -488,6 +488,8 @@ XfbPatchData patchShaderXfb(Device& dev, spc::Compiler& compiled,
 
 
 // ShaderModule
+ShaderModule::ShaderModule() = default;
+
 ShaderModule::~ShaderModule() {
 	if(!dev) {
 		return;
