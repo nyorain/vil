@@ -56,12 +56,15 @@ void fwdVisit(CommandSaver& slz, const CmdType& cmd) {
 	slz.slz.commandToOffset[&cmd] = off;
 
 	write(slz.io, cmd.type());
+
+	serializeMarker(slz.io, markerStartCommand + u64(cmd.type()), "Command");
+
 	serialize(slz, slz.io, const_cast<CmdType&>(cmd));
 }
 
 // loader
 template<typename Slz>
-void visit(Slz& slz, Command& cmd) {
+void saveCommand(Slz& slz, Command& cmd) {
 	auto visitor = TemplateCommandVisitor([&slz](auto& cmd) {
 		fwdVisit(slz, cmd);
 	});
@@ -197,7 +200,11 @@ Command& loadCommand(CommandLoader& loader) {
 	auto off = loader.slz.recordOffset();
 
 	auto cmdType = read<CommandType>(loader.io);
-	dlg_assert(u32(cmdType) < creators.size());
+	dlg_assert_or(u32(cmdType) < creators.size(),
+		throw std::invalid_argument("Invalid command type"));
+
+	serializeMarker(loader.io, markerStartCommand + u64(cmdType), "Command");
+
 	auto creator = creators[u32(cmdType)];
 	auto& cmd = creator(loader);
 	dlg_assert(cmd.type() == cmdType);
@@ -331,7 +338,8 @@ void serializeState(Slz& slz, IO& io, Cmd& cmd, BindState<State>& bind) {
 void loadChildren(CommandLoader& loader, LoadBuf& io) {
 	auto childrenSize = read<u32>(io);
 	if(childrenSize > io.buf.size()) {
-		throw std::out_of_range("");
+		dlg_trace("childrenSize {}, io.buf.size() {}", childrenSize, io.buf.size());
+		throw std::out_of_range("Serialization loading issue: Out of range (cmd children)");
 	}
 
 	auto currOff = loader.slz.recordOffset();
@@ -358,7 +366,7 @@ void serialize(CommandSaver& saver, SaveBuf& io, SectionCommand& cmd) {
 
 	auto child = cmd.children();
 	while(child) {
-		visit(saver, *child);
+		saveCommand(saver, *child);
 		child = child->next;
 	}
 
@@ -817,6 +825,7 @@ void loadRecord(StateLoader& loader, IntrusivePtr<CommandRecord> recPtr, LoadBuf
 	CommandLoader cslz(loader, io, builder);
 	auto type = read<CommandType>(io);
 	dlg_assert_or(type == CommandType::root, throw std::invalid_argument("Expected root"));
+	serializeMarker(io, markerStartCommand + u64(type), "Command");
 
 	loader.offsetToCommand[off] = rec.commands;
 	loader.commandToOffset[rec.commands] = off;
@@ -831,7 +840,7 @@ void saveRecord(StateSaver& saver, SaveBuf& io, CommandRecord& rec) {
 	// serialize the root command as well for the section stats and
 	//   to get the RootCommand id
 	CommandSaver cslz(saver, io, rec);
-	visit(cslz, *rec.commands);
+	saveCommand(cslz, *rec.commands);
 }
 
 } // namespace vil

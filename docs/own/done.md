@@ -1,3 +1,25 @@
+- [x] first serialization support
+	- [x] create/save handles
+	- [x] remove serialize.cpp
+	- [x] update gui to new interface
+	- [x] use find() for last command level in gui when loading state
+		- [x] don't always do it in updateRecords. figure out interface
+	- [x] allow to explicitly save relative-commands or gui states,
+	      not sure which perspective makes more sense.
+		- [x] store in working dir? or in some vil-specific config dir?
+		      Guess it would make sense to make them global.
+			  And we want global vil settings at some point anyways.
+			  So figure out global config dir for this (make configure
+			  via env variable but choose good defaults).
+			  {nope, working dir for now}
+		- [x] Allow to name the saved states
+		- [x] Allow to load them, selecting the right stuff.
+			- [x] Give meaningful error/warnings messages/stats?
+			      {somewhat. Only via dlg_error for now but added debug
+				   markers to detect serialization flow mistmatches}
+	- [x] continue matching rework/improvements to make sure matching works
+	      with loaded handles
+	- [x] test: draw/dispatch/traceRays. But also Bind commands.
 - [x] fix command viewer update when nothing is selected
 - [x] fix resource viewer when switching handle types
       currently does not select the right handle then (e.g.
@@ -60,7 +82,7 @@
 	      or at least only call it on real selection and not on every
 		  state update?
 - [~] improve gui layout of image viewer (e.g. in command viewer).
-      really annoying rn to always scroll down. 
+      really annoying rn to always scroll down.
 	  Maybe use tabs? One for general information, one for the image viewer?
 	  {nope, inline is better. Found a better way but just allowing to hide
 	   everything else}
@@ -110,7 +132,7 @@
 - [x] with lockfree gui rendering, the overlay input events in api.cpp
       are racy when QueuePresent is called in another thread.
 	  Not trivial to fix. Gui-internal mutex just for that? ugly, deadlock-prone.
-	  Just insert events into queue that is processed at beginning of 
+	  Just insert events into queue that is processed at beginning of
 	  rendering? probably best. Actually, most (all?) events don't need queue.
 	  Just update a copy of (mutex-synced) state that is applied at beginning
 	  of render.
@@ -147,7 +169,7 @@
 - [x] figure out if our linear allocator (the std::allocator) adapter
       should value initialize on alloc
 	  {no, clearly not, per spec! See https://en.cppreference.com/w/cpp/named_req/Allocator}
-- [x] v0.1, goal: end of january 2021 (edit may 2021: lmao) 
+- [x] v0.1, goal: end of january 2021 (edit may 2021: lmao)
 	- overlay improvements (especially win32 but also x11; leave wl out)
 	- testing & stability improvements
 	- docs improvements (mainly: add introduction post explaining stuff)
@@ -187,7 +209,7 @@
       indirect command from buffer and display in command UI
 - [x] we might be able to not lock the device mutex for all the time we lock
       the ui (which can be a serious problem) by relying on weak/shared pointers
-	  eveywhere (making concurrently happening resource destruction no problem) 
+	  eveywhere (making concurrently happening resource destruction no problem)
 	  	- [x] probably requires a lot of other reworks as well, e.g. for buffer readback
 - implement at least extensions that record to command buffer to allow hooking when they are used
 	- [x] push descriptors
@@ -206,7 +228,7 @@
 - [~] with the ds changes, we don't correctly track commandRecord invalidation
       by destroyed handles anymore. But with e.g. update_unused_while_pending +
 	  partially_bound, we can't track that anyways and must just assume
-	  the records stays valid. 
+	  the records stays valid.
 	  We should just not expose any information about that in the gui or
 	  state it's limitation (e.g. on hover).
 	- [~] if we absolutely need this information (e.g. if it's really useful
@@ -239,14 +261,14 @@ match rework 2, electric boogaloo
 - [x] use LCS in hook already.
   See node 2305 for details.
   The final find operation could then either be LCS (careful! might have
-  a lot more commands here than sections for 'match') 
-  Or - e.g. inside a render pass without blending - be independent 
+  a lot more commands here than sections for 'match')
+  Or - e.g. inside a render pass without blending - be independent
   of the order of draw commands.
 	- for action commands inside small (non-solid-renderpass) blocks: do LCS
 	- for big blocks: do best-match. In this case something like relID is
 	  useful. Maybe build it on-the-fly? should be a lot cheaper, only
 	  needed for very few blocks compared to *everything*
-	- for order-independent (e.g. no blend/additive) renderpasses we probably 
+	- for order-independent (e.g. no blend/additive) renderpasses we probably
 	  want order-independency anyways, so just local-best-match
 -> don't hook every cb with matching command. At least do a rough check
       on other commands/record structure. Otherwise (e.g. when just selecting
@@ -292,13 +314,13 @@ match rework 2, electric boogaloo
 		- [ ] ImageView (already refCounted)
 		- [ ] DescriptorSet (already handled I guess)
 	- Would also be great because then we can always compare handles (could
-	  e.g. take name of destructed handles into account), and don't have 
+	  e.g. take name of destructed handles into account), and don't have
 	  this 'invalidated' mess.
 	- We could still evaluate whether a command buffer was invalidated:
 	  just iterate over all used (referenced) handles and check if any of
 	  them was unset
 	  	- harder for descriptor sets I guess? maybe store some modificationID
-		  for each ds and if was increased (i.e. ds updated) we know 
+		  for each ds and if was increased (i.e. ds updated) we know
 		  cb is invalidted (when ds isn't updateAfterBind).
 		  Otherwise, we can look at the ds and check for all handles if they
 		  are still valid (with or without refBindings, even though
@@ -312,12 +334,12 @@ match rework 2, electric boogaloo
 	  for old code (that was terrible, we would have to rework it to
 	  chain readbacks to a future frame, when a previous draw is finished)
 - [x] full support CmdDrawIndirectCount in gui (most stuff not implemented atm in CommandHook)
-	  {probably not for v0.1} 
+	  {probably not for v0.1}
 - [x] limit device mutex lock by ui/overlay/window as much as possible.
       {we don't have monolithic CS anymore now}
     - [ ] We might have to manually throttle frame rate for window
 	      {meh}
-	- [x] add tracy (or something like it) to the layer (in debug mode or via 
+	- [x] add tracy (or something like it) to the layer (in debug mode or via
 	      meson_options var) so we can properly profile the bottlenecks and
 		  problems
 - [x] (low prio) our descriptor matching fails in some cases when handles are abused
@@ -352,10 +374,10 @@ match rework 2, electric boogaloo
 	  we could copy the state on BindDescriptorSet time? not sure that's
 	  better though.
 	- [x] also don't pass *all* the descriptorSet states around (hook submission,
-	      cbGui, CommandViewer etc). We only need the state of the hooked command, 
+	      cbGui, CommandViewer etc). We only need the state of the hooked command,
 		  should be easy to determine.
 	- [x] See the commented-out condition in submit.cpp
-- [x] {from expensive CommandBuffer::doEnd} 
+- [x] {from expensive CommandBuffer::doEnd}
       I guess we could avoid a lot of this 'refRecords' stuff by
 	  simple making IntrusivePtr's out of all referenced handles.
 	  E.g. make sure Images, Buffers, QueryPools, etc are not destroyed
@@ -364,9 +386,9 @@ match rework 2, electric boogaloo
 	  OTOH this means it's even harder to find all command usages of
 	  a given handle. But we need a different approach for that anyways
 	  due to descriptor sets (something like one async search of all
-	  known records and then a notification callback for new records/ds 
+	  known records and then a notification callback for new records/ds
 	  or something)
-- [x] get rid of annotateRelIDLegacy, use proper context (across cb boundaries) 
+- [x] get rid of annotateRelIDLegacy, use proper context (across cb boundaries)
       when matching commands instead. Should fix CmdBarrier issues in RDR2
 	  See docs/own/desc2.hpp. But that isn't enough, we need more context.
 	- yeah desc2.hpp isn't too relevant here. In the two places where we
@@ -398,7 +420,7 @@ match rework 2, electric boogaloo
 	  like dependencyFlags or something). There should be at least
 	  one common handle and transition
 - [x] figure out why spirv-cross is sometimes providing these weird names
-	  (e.g. for buffers; something like _170_2344) instead of simply having 
+	  (e.g. for buffers; something like _170_2344) instead of simply having
 	  an empty alias string
 - [x] improve design for buffer viewer. Way too much space atm, make more compact
 - [x] add mutex to descriptorPool, make sure it's correctly used everywhere
@@ -503,8 +525,8 @@ match rework 2, electric boogaloo
 	- [x] refactor parsing code to correctly output errors and warnings.
 	      - Idea here was to use two types of exceptions: one for expected
 		    errors and one for failed asserts (that might happen often in the
-		    beginning or when adding new features to the lang; 
-		    we want to write-out a dot file in that case and don't 
+		    beginning or when adding new features to the lang;
+		    we want to write-out a dot file in that case and don't
 		    crash the application).
 		  - accumulate warnings inside Parser struct and just return them.
 		    For instance: badly aligned data, column-major matrices etc
@@ -592,7 +614,7 @@ match rework 2, electric boogaloo
 	  to hidden. But then we can't test vil. Maybe just export the stuff
 	  we test explicitly? Same for spirv_reflect basically.
 	  {can be removed in future, we don't export symbols anymore}
-- [x] ditch spirv_reflect for spirv_cross. Better maintained, support lots of features 
+- [x] ditch spirv_reflect for spirv_cross. Better maintained, support lots of features
       that we need that spirv_reflect does not
 - [x] commandHook: See the TODO on 'completed'. Might create problems atm.
 - [x] fix commandHook for updateAfterBind, updateUnusedWhilePending.
@@ -607,7 +629,7 @@ match rework 2, electric boogaloo
 		  See todo in Gui::init. Make sure there never is more than one
 - [x] should support image-less framebuffer extension as soon as possible,
 	  might need a lot of changes {it didn't but uncovered a bug in secondary cbs}
-- [x] Add more useful overview. 
+- [x] Add more useful overview.
 	- [x] Maybe directly link to last submitted command buffers?
 	      {this is kinda shitty though, need the concept of command buffer groups
 		   to make this beautiful}
@@ -616,7 +638,7 @@ match rework 2, electric boogaloo
 	- [x] show enabled features
 	- [x] only show application info if filled out by app. collapse by default?
 - [x] implement mechanism for deciding per-handle-type whether object wrapping
-      should be done. Either via GUI or env var. 
+      should be done. Either via GUI or env var.
 	  Performance-wise it's only really important for
 	  CommandBuffers and DescriptorSets (technically also for Device but
 	  that pretty much guarantees that 50% of new extensions will crash).
@@ -826,7 +848,7 @@ match rework 2, electric boogaloo
 	- [x] allow something like "update from swapchain" in command buffer viewer?
 	      It seems to me we want a more general "command source" concept
 		  for the command buffer viewer. Could be queue/command buffer/command group/
-		  swapchain/identified per-frame submission/fence-association or 
+		  swapchain/identified per-frame submission/fence-association or
 		  something like that.
 - [x] add explicit "updateFromGroup" checkbox to command viewer
 	- [x] we definitely need a "freeze" button. Would be same as unchecking
@@ -840,10 +862,10 @@ match rework 2, electric boogaloo
 	- [x] CmdPipelineBarrier
 	- [x] CmdSetEvent
 	- [x] CmdWaitEvents
-- [x] destroying a sampler should also invalidate all records that use 
+- [x] destroying a sampler should also invalidate all records that use
       a descriptor set allocated from a layout with that sampler bound as
 	  immutable sampler. No idea how to properly do that, we need a link
-	  sampler -> descriptorSetLayout and additionally 
+	  sampler -> descriptorSetLayout and additionally
 	  descriptorSetLayout -> descriptorSet. Or maybe implicitly link
 	  the sampler as soon as the descriptor set is created (from the layout,
 	  in which it is linked) and then treat it as normal binding (that
@@ -858,7 +880,7 @@ match rework 2, electric boogaloo
 	  When we then display (reading a buffer is fine, we copied them to separate memory
 	  and are not using the mapped memory directly anyways) from a CommandHookState
 	  and `writeSubmission` is set, we chain our gui draw behind it.
-- [x] IMPORTANT! keep command group (or at least the hook?) alive 
+- [x] IMPORTANT! keep command group (or at least the hook?) alive
 	  while it is viewed in cb viewer? Can lead to problems currently.
 	  Unset group in kept-alive records? We should probably keep the
 	  group alive while a record of it is alive (but adding intrusive
@@ -874,9 +896,9 @@ match rework 2, electric boogaloo
 - [x] fix "unimplemented descriptor category" bug (not sure when it appears)
       {we were casting from descriptor type to descriptor category in stead
 	   of using the function...}
-- [x] Remove virtual stuff from CommandBufferHook 
+- [x] Remove virtual stuff from CommandBufferHook
 - [x] optimization (important): when CommandRecord is invalidated (rather: removed as current
-      recording from cb), it should destroy (reset) its hook as it 
+      recording from cb), it should destroy (reset) its hook as it
 	  will never be used again anyways
 	  	- [x] see TODOs in CommandHookRecord (e.g. finish)
 - [x] support integer-format images (needs different image display shader)
@@ -888,7 +910,7 @@ match rework 2, electric boogaloo
 - [x] A lot of sources can be moved to src/gui
 	- [x] rename imguiutil. Move to gui
 - [x] figure out why we can't name handles from inside the layer
-	  {eh, see ugly workaround for now in device creation} 
+	  {eh, see ugly workaround for now in device creation}
 - [x] fix ui for fixed resource tracking: check for nullptr resource references
       everywhere ~~(and use weak/shared pointer where we can't manually reset to null)~~
 	- [x] use CommandBufferRecord::destroyed to show <destroyed> instead of
@@ -921,18 +943,18 @@ match rework 2, electric boogaloo
 	- [x] implement vkEnumerateInstanceVersion, return lowest version we are confident to support.
 		  maybe allow to overwrite this via environment variable (since, technically,
 		  the layer will usually work fine even with the latest vulkan version)
-		  EDIT: nope, that's not how it is done.	
+		  EDIT: nope, that's not how it is done.
 - [x] restructure repo
 	- [x] add an example (using swa)
 	- [x] move everything else into src (maybe api.h to include/?)
 	- [x] decide on license and add it
 	      pro GPL: no one has to link this layer so it would not have a negative
-		    impact on anyone. And using GPL it would prevent abusive usage (such as 
+		    impact on anyone. And using GPL it would prevent abusive usage (such as
 			forking/privately improving and selling it)
 		  pro MIT: companies are probably still wary about using GPL software
 		    and i totally don't have a problem with this being used for
-			proprietary software development (such as games). 
-			But otoh, companies not understanding licensing and open source 
+			proprietary software development (such as games).
+			But otoh, companies not understanding licensing and open source
 			should not be my problem.
 		  {yep, going with GPL for now}
 - [x] always try to enable swapchain extension on device creation
@@ -952,7 +974,7 @@ match rework 2, electric boogaloo
 	  {went with custom vkpp output generator, easy to write & maintain given
 	   the extensive registry parser}
 - [x] display in UI whether resources are destroyed or not
-	  {NOTE: nvm, we decided against shared_ptr approach and never have destroyed resources}	
+	  {NOTE: nvm, we decided against shared_ptr approach and never have destroyed resources}
 - [x] fix bug for cmdExecuteCommands when executed command buffers are invalid/destroyed
 - [x] Remove Device::lastDevice api hack. Instead return a dev handle from fuenLoadApi
       Should probably just store it inside the api struct.
@@ -975,7 +997,7 @@ match rework 2, electric boogaloo
 			  {nah, not worth it for now, using std works fine, opt for later}
 - [x] fix our global dispatchable handle hash table. Either use the vk_layer
 	  one or remove the type hashing (dispatchable handles are globally unique).
-- [x] we have to check in barrier commands whether the image (edit: or buffer) 
+- [x] we have to check in barrier commands whether the image (edit: or buffer)
       was put into concurrent mode by us, and if so, set queue families to ignored
 	  (otherwise it's a spec error)
 - [x] correctly store pNext chain when recording command buffers.
@@ -992,7 +1014,7 @@ match rework 2, electric boogaloo
 - [x] proper queue creation and querying for window display
 - [x] properly shut down rendering thread for own-window display
 - [x] test display window for compute-only applications
-	- [x] come up with something smart to block them before they shut down. 
+	- [x] come up with something smart to block them before they shut down.
 	      Is there a sensible way to do this in the layer or should applications
 		  do it themselves? **write wiki post**
 		  We could simply block the application in vkDestroyDevice? but then,

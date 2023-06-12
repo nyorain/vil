@@ -300,7 +300,8 @@ void CommandRecordGui::draw(Draw& draw) {
 
 			// force update
 			if(!freezeCommands_) {
-				updateRecords(swapchain->frameSubmissions[0].batches);
+				updateRecords(swapchain->frameSubmissions[0].batches,
+					{}, {});
 			}
 		}
 	}
@@ -802,7 +803,9 @@ void addMatches(
 }
 
 void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
-		std::vector<FrameSubmission>&& records) {
+		std::vector<FrameSubmission>&& records,
+		IntrusivePtr<CommandRecord> newRecordGiven,
+		std::vector<const Command*> newCommandGiven) {
 	ThreadMemScope tms;
 
 	// find matching openedSections_
@@ -865,10 +868,19 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 		}
 	);
 
-	// TODO: hacked in here for serialization loading
-	//   just 'match' can't find the final non-parent-cmd in the
-	//   hierarchy of command_, have to look that up via find()
-	if(!newCommand.empty() && newCommand.size() < command_.size()) {
+	if(newRecordGiven) {
+		dlg_assert(newRecordGiven == newRecord);
+		newRecord = newRecordGiven;
+	}
+
+	if(!newCommandGiven.empty()) {
+		dlg_assert(newCommandGiven.size() == command_.size());
+		dlg_assert(newCommand.size() <= command_.size());
+		std::equal(newCommand.begin(), newCommand.end(), newCommandGiven.begin());
+		newCommand = std::move(newCommandGiven);
+	} else if(!newCommand.empty() && newCommand.size() < command_.size()) {
+		// needed since 'match' can't find the final non-parent-cmd in the
+		// hierarchy of command_, have to look that up via find()
 		CommandDescriptorSnapshot noDescriptors {};
 		auto count = command_.size() - newCommand.size();
 		dlg_assert(count == 1u); // should only happen for non-parent selected cmd
@@ -914,15 +926,20 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	}
 }
 
-void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records) {
+void CommandRecordGui::updateRecords(std::vector<FrameSubmission> records,
+		IntrusivePtr<CommandRecord> newRecord,
+		std::vector<const Command*> newCommand) {
 	// update records
 	ThreadMemScope tms;
 	LinAllocScope localMatchMem(matchAlloc_);
 	auto frameMatch = match(tms, localMatchMem, defaultMatchType_, frame_, records);
-	updateRecords(frameMatch, std::move(records));
+	updateRecords(frameMatch, std::move(records),
+		std::move(newRecord), std::move(newCommand));
 }
 
-void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record) {
+void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record,
+		std::vector<const Command*> newCommandGiven) {
+
 	dlg_assert(record);
 	if(!record_) {
 		record_ = std::move(record);
@@ -956,6 +973,17 @@ void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record) {
 		}
 	);
 
+	// Would need a custom 'find' call as done in updateRecords in this case.
+	dlg_assertm(!newCommandGiven.empty() || command_.empty(),
+		"Command finding in single-record mode not implemented");
+
+	if(!newCommandGiven.empty()) {
+		dlg_assert(newCommandGiven.size() == command_.size());
+		dlg_assert(newCommand.size() <= command_.size());
+		std::equal(newCommand.begin(), newCommand.end(), newCommandGiven.begin());
+		newCommand = std::move(newCommandGiven);
+	}
+
 	record_ = std::move(record);
 	command_ = std::move(newCommand);
 
@@ -967,25 +995,20 @@ void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record) {
 void CommandRecordGui::updateFromSelector() {
 	if(selector_.updateMode() == UpdateMode::swapchain) {
 		auto frameSpan = selector_.frame();
-		updateRecords({frameSpan.begin(), frameSpan.end()});
+		updateRecords(asVector(selector_.frame()),
+			selector_.record(), asVector(selector_.command()));
 
+		// TODO: already done in updateRecords, I guess we don't need this
+		// here right?
 		if(selector_.submission()) {
 			auto submID = selector_.submission() - frameSpan.data();
 			submission_ = &frame_[submID];
 		} else {
 			submission_ = nullptr;
 		}
-
-		record_ = selector_.record();
 	} else {
-		updateRecord(selector_.record());
+		updateRecord(selector_.record(), asVector(selector_.command()));
 	}
-
-	// NOTE: command_ already gets updated by updateRecord(s) but
-	//   this will only find section commands. A bit messy/redundant
-	//   that we even do it in there.
-	auto commandSpan = selector_.command();
-	command_ = {commandSpan.begin(), commandSpan.end()};
 }
 
 const auto serializeFolder = fs::path(".vil/");
@@ -1164,11 +1187,16 @@ void CommandRecordGui::loadSelection(std::string_view name) {
 	// read file
 	auto path = buildSerializePath(name);
 	if(!fs::exists(path)) {
-		dlg_trace("'{}' does not exist", path);
+		dlg_error("'{}' does not exist", path);
 		return;
 	}
 
 	auto dataVec = imgio::readFile<std::vector<std::byte>>(path.string().c_str());
+	if(dataVec.empty()) {
+		dlg_error("Error loading {}", path);
+		return;
+	}
+
 	auto buf = LoadBuf{ReadBuf(dataVec)};
 
 	// read header
@@ -1184,11 +1212,16 @@ void CommandRecordGui::loadSelection(std::string_view name) {
 	dlg_trace("loadState: total {}, loaderSize: {}, ownBufSize: {}",
 		dataVec.size(), loaderSize, ownBuf.buf.size());
 
-	auto loadPtr = createStateLoader(loaderBuf);
-	auto& loader = *loadPtr;
+	try {
+		auto loadPtr = createStateLoader(loaderBuf);
+		auto& loader = *loadPtr;
 
-	load(loader, ownBuf);
-	dlg_assert(ownBuf.buf.empty());
+		load(loader, ownBuf);
+		dlg_assert(ownBuf.buf.empty());
+	} catch(const std::exception& err) {
+		// TODO: show that in UI
+		dlg_error("Error loading {}: {}", path, err.what());
+	}
 }
 
 void CommandRecordGui::save(StateSaver& slz, SaveBuf& buf) {
@@ -1334,7 +1367,7 @@ void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 	// 	}
 	// }
 
-	updateRecords(frameMatch, std::move(frame));
+	updateRecords(frameMatch, std::move(frame), {}, {});
 
 	// also update the selector
 	auto submID = 0u;

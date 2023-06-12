@@ -11,6 +11,8 @@ urgent, bugs:
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise
 	- [ ] maybe show full image size on hover?
+	- [ ] also fix mip/layer selector that sometimes automatically resets itself
+		  (seen with slice 3D selector e.g. npt surfel lookup tex)
 
 - [ ] test more on laptop, intel gpu
 	- [ ] seems like we do some nasty stuff in the histogram shaders,
@@ -68,7 +70,7 @@ new, workstack:
 - [ ] VK_AMD_buffer_marker, VK_NV_device_diagnostic_checkpoints
 	- [ ] test if vil works with the crash-report layer
 - [ ] revisit inline button/refButton. Full button looked better at *some* places
-- [ ] resource viewer: maybe use mechanism that just stores the 
+- [ ] resource viewer: maybe use mechanism that just stores the
       new selection (e.g. from refButton) for the next frame instead of
 	  selecting immediately? Need quite some checks/returns in there.
 	  Error-prone atm!
@@ -78,9 +80,9 @@ new, workstack:
 	- [x] proper setting of image's pending layout
 	- [ ] introduce first cow-like concept, just tracking when resources get
 	      modified
-- [ ] improve tabs ui: 
-	- [x] try out top-rounded corners {looks whack}, 
-	- [ ] play around further with alpha, 
+- [ ] improve tabs ui:
+	- [x] try out top-rounded corners {looks whack},
+	- [ ] play around further with alpha,
 	- [x] signal somehow if window is focused or not
 		  Either make tab-background change color on being focused,
 		  make it more transparent or something or maybe use a thin window border?
@@ -105,7 +107,7 @@ new, workstack:
       might not be expected/desired. Reworking this is hard:
 	  when freezing state we don't execute any hooks and therefore would need
 	  new mechanism to correctly match new records.
-	  Fix this when doing the next match/cbGui update iteration (related: next 
+	  Fix this when doing the next match/cbGui update iteration (related: next
 	  command group impl iteration)
 	  	- I guess just kicking out the '!selector_.freezeState' condition
 		  from the force-update logic should be enough? Just make
@@ -196,7 +198,7 @@ On vertices and where to capture them:
 	- [ ] show in UI if we truncate anything
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
-- [ ] figure out why copying attachments/descriptors shows weird/incorrect 
+- [ ] figure out why copying attachments/descriptors shows weird/incorrect
       output in the dota intro screen sometimes. Sync problem? Matching problem?
 	  {might be fixed now, with proper splitrp deps}
 - [ ] fix vertex viewer for POINT toplogy (need to write gl_PointSize in vert shader)
@@ -421,7 +423,7 @@ gui stuff
 		  Use custom accent color. Configurable?
 	- [x] Figure out transparency. Make it a setting?
 	- [ ] lots of places where we should replace column usage with tables
-	- [x] fix stupid looking duplicate header-seperator for commands in 
+	- [x] fix stupid looking duplicate header-seperator for commands in
 	      command viewer (command viewer header UI is a mess anyways)
 
 other
@@ -479,7 +481,7 @@ other
 - [ ] (low prio) when neither VIL_HOOK_OVERLAY nor VIL_CREATE_WINDOW is set, should
 
 local captures:
-- [ ] {feature, useful} support regular hooks on 
+- [ ] {feature, useful} support regular hooks on
       local-capture-hooked records. Not exactly sure how this would work.
 	  On a similar note, support hooking multiple commands in a single record
 	  (most general case: multiple local hooks, multiple regular captures)
@@ -500,7 +502,7 @@ matching:
 
 object wrapping:
 - [ ] (low prio, not sure yet)
-      only use the hash maps in Device when we are not using object 
+      only use the hash maps in Device when we are not using object
       wrapping. Otherwise a linked list is enough/better.
 	  Could always use the linked list and the hash maps just optionally.
 	  Maybe we can even spin up some lockfree linked list for this? We'd only
@@ -509,7 +511,7 @@ object wrapping:
 	  (i.e. views) we sometimes need to check whether a given handle is
 	  still valid. But that is kinda error-prone anyways due to reallocation
 	  of the same address later on :/
-	- [ ] Figure out how to correctly handle the maps in Device when using 
+	- [ ] Figure out how to correctly handle the maps in Device when using
 		  wrapping. Many ugly situations atm, see e.g. the
 		  hack in ~CommandPool and ~DescriptorPool.
 		  And we don't really need maps in the first place, see below.
@@ -526,10 +528,10 @@ improved matching
 	   some improvements tho}
 - [ ] (low prio) for order-dependent blocks, don't just use 'find' but use local
       matching instead? could get too expensive tho
-	
+
 
 descriptor indexing extension:
-- [ ] support partially_bound. See e.g. gui/command.cpp TODO where we 
+- [ ] support partially_bound. See e.g. gui/command.cpp TODO where we
 	  expect descriptors to be valid. Might also be a problem in CommandHook.
 - [ ] Make sure we have update_after_bind in
       mind everywhere. We would at least have to lock the descriptorSetState mutex
@@ -622,7 +624,7 @@ optimization:
 	  not sure if worth it at all though, the spirv patching is probably
 	  not that expensive (and could even be further optimized, skip
 	  the code sections).
-- [ ] get it to run without significant (slight (like couple of percent) increase 
+- [ ] get it to run without significant (slight (like couple of percent) increase
 	  of frame timings even with layer in release mode is ok) overhead.
 	  Just tests with the usual suspects of games
 - [ ] when available on hardware I can test it on: support using
@@ -676,7 +678,7 @@ optimization:
 		  And filter the supported extensions by the ones that we also support.
 		  Evaluate whether this is right approach though. Renderdoc does it like
 		  this. Alternatvely, we could simply fail on device/instance creation
-		  as mentioned above (probably want to do both approaches, both disableable 
+		  as mentioned above (probably want to do both approaches, both disableable
 		  (just found a new favorite word!) via env variable
 - [ ] add feature to see all commands that use a certain handle.
       we already have the references, just need to add it to command viewer.
@@ -740,7 +742,7 @@ optimization:
       overlay, to not be dependent on application refresh rate.
 - [ ] allow to view submissions to a queue
 - [ ] add support for ext mesh shaders
-- {low prio} implement at least extensions that record to command buffer 
+- {low prio} implement at least extensions that record to command buffer
   to allow hooking when they are used
 	- [ ] device masks (core vulkan by now)
 	      ugh, supporting this will be a MAJOR pain, especially gui rendering.
@@ -802,7 +804,7 @@ optimization:
 - [ ] track push constant range pipe layouts? correctly invalidate & disturb
       also track which range is bound for which stage.
 - [ ] can we support viewing multisample images?
-      either sample them directly in shader (requires a whole lotta new 
+      either sample them directly in shader (requires a whole lotta new
 	  shader permuatations, not sure if supported everywhere) or resolve
 	  into temporary image first (lot of work as well)
 - [ ] better installing
