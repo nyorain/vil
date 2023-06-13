@@ -1658,7 +1658,7 @@ template<typename F>
 struct TemplateCommandVisitor : CommandVisitor {
 	F f;
 
-	TemplateCommandVisitor(F&& xf) : f(std::forward<F>(xf)) {}
+	TemplateCommandVisitor(F xf) : f(std::move(xf)) {}
 
 	void visit(const Command& cmd) override { f(cmd); }
 	void visit(const ParentCommand& cmd) override { f(cmd); }

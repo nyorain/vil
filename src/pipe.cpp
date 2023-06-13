@@ -235,8 +235,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 				};
 
 				pipe.vertexInputState = *pci.pVertexInputState;
-				pipe.vertexInputState.pVertexAttributeDescriptions = pipe.vertexAttribs.data();
-				pipe.vertexInputState.pVertexBindingDescriptions = pipe.vertexBindings.data();
 			}
 
 			pipe.inputAssemblyState = *pci.pInputAssemblyState;
@@ -251,7 +249,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 					pipe.viewportState.pScissors,
 					pipe.viewportState.pScissors + pipe.viewportState.scissorCount
 				};
-				pipe.viewportState.pScissors = pipe.scissors.data();
 			}
 
 			if(!pipe.dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
@@ -259,7 +256,6 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 					pipe.viewportState.pViewports,
 					pipe.viewportState.pViewports + pipe.viewportState.viewportCount
 				};
-				pipe.viewportState.pViewports = pipe.viewports.data();
 			}
 
 			pipe.hasDepthStencil = hasDepthStencil;
@@ -288,8 +284,9 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 			};
 
 			pipe.colorBlendState = *pci.pColorBlendState;
-			pipe.colorBlendState.pAttachments = pipe.blendAttachments.data();
 		}
+
+		fixPointers(pipe);
 
 		pPipelines[i] = castDispatch<VkPipeline>(static_cast<Pipeline&>(pipe));
 
@@ -579,6 +576,14 @@ std::unique_ptr<spc::Compiler> copySpecializeSpirv(const PipelineShaderStage& st
 }
 
 GraphicsPipeline::~GraphicsPipeline() = default;
+
+void fixPointers(GraphicsPipeline& pipe) {
+	pipe.vertexInputState.pVertexAttributeDescriptions = pipe.vertexAttribs.data();
+	pipe.vertexInputState.pVertexBindingDescriptions = pipe.vertexBindings.data();
+	pipe.viewportState.pScissors = pipe.scissors.data();
+	pipe.viewportState.pViewports = pipe.viewports.data();
+	pipe.colorBlendState.pAttachments = pipe.blendAttachments.data();
+}
 
 // VK_KHR_ray_tracing_pipeline
 VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(

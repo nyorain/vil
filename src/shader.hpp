@@ -103,6 +103,7 @@ struct ShaderModule : SharedDeviceHandle {
 	// sync access.
 	std::unique_ptr<spc::Compiler> compiled;
 	std::vector<SpecializationConstantDefault> constantDefaults;
+	u64 spirvHash {};
 
 	// Owend by us.
 	// When the shader module is a vertex shader, we lazily create

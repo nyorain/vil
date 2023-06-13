@@ -528,6 +528,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(
 	mod.compiled = std::make_unique<spc::Compiler>(
 		pCreateInfo->pCode, pCreateInfo->codeSize / 4);
 
+	// compute hash
+	for(auto i = 0u; i < pCreateInfo->codeSize / 4; ++i) {
+		hash_combine(mod.spirvHash, pCreateInfo->pCode[i]);
+	}
+
 	// copy default values of specialization constants
 	auto& compiled = *mod.compiled;
 	auto specConstants = compiled.get_specialization_constants();

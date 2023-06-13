@@ -100,17 +100,58 @@ template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, PipelineLay
 template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, GraphicsPipeline& pipe) {
 	serialize(io, pipe.name);
 	serializeRef(slz, io, pipe.layout);
+	serializeRef(slz, io, pipe.renderPass);
+	serialize(io, pipe.subpass);
+
 	serializeContainer(io, pipe.stages, [&](auto& buf, auto& stage) {
 		serializeStage(slz, buf, stage);
 	});
 
 	serializeContainer(io, pipe.dynamicState);
+
 	serializeContainer(io, pipe.viewports);
 	serializeContainer(io, pipe.scissors);
+
 	serializeContainer(io, pipe.vertexAttribs);
 	serializeContainer(io, pipe.vertexBindings);
+
+	serializeContainer(io, pipe.blendAttachments);
+
+	serialize(io, pipe.depthStencilState.depthBoundsTestEnable);
+	serialize(io, pipe.depthStencilState.depthWriteEnable);
+	serialize(io, pipe.depthStencilState.depthCompareOp);
+	serialize(io, pipe.depthStencilState.depthBoundsTestEnable);
+	serialize(io, pipe.depthStencilState.stencilTestEnable);
+	serialize(io, pipe.depthStencilState.front);
+	serialize(io, pipe.depthStencilState.back);
+	serialize(io, pipe.depthStencilState.minDepthBounds);
+	serialize(io, pipe.depthStencilState.maxDepthBounds);
+
+	serialize(io, pipe.inputAssemblyState.primitiveRestartEnable);
+	serialize(io, pipe.inputAssemblyState.topology);
+
+	serialize(io, pipe.rasterizationState.cullMode);
+	serialize(io, pipe.rasterizationState.rasterizerDiscardEnable);
+	serialize(io, pipe.rasterizationState.lineWidth);
+	serialize(io, pipe.rasterizationState.polygonMode);
+	serialize(io, pipe.rasterizationState.frontFace);
+	serialize(io, pipe.rasterizationState.depthBiasEnable);
+	serialize(io, pipe.rasterizationState.depthBiasClamp);
+	serialize(io, pipe.rasterizationState.depthBiasConstantFactor);
+	serialize(io, pipe.rasterizationState.depthBiasSlopeFactor);
+
+	serialize(io, pipe.multisampleState.rasterizationSamples);
+	serialize(io, pipe.multisampleState.alphaToCoverageEnable);
+	serialize(io, pipe.multisampleState.alphaToOneEnable);
+	serialize(io, pipe.multisampleState.sampleShadingEnable);
+	serialize(io, pipe.multisampleState.flags);
+	serialize(io, pipe.multisampleState.minSampleShading);
+
+	if constexpr(std::is_same_v<Slz, StateLoader>) {
+		fixPointers(pipe);
+	}
+
 	// TODO: other graphics states
-	// TODO: properly connect serialized vectors to structs on load
 }
 
 template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, RayTracingPipeline& pipe) {
@@ -132,7 +173,7 @@ template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, ComputePipe
 
 template<typename Slz, typename IO> void serialize(Slz&, IO& io, ShaderModule& mod) {
 	serialize(io, mod.name);
-	// TODO: serialize hash, optionally serialize full binary
+	serialize(io, mod.spirvHash);
 }
 
 template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, MemoryBind& bind) {
@@ -159,7 +200,8 @@ void finishLoad(MemoryBind& bind, MemoryResource& res) {
 	}
 }
 
-template<typename Slz, typename IO> void serialize(Slz& slz, IO& io, FullMemoryBind& bind, MemoryResource& res) {
+template<typename Slz, typename IO> void serialize(Slz& slz, IO& io,
+		FullMemoryBind& bind, MemoryResource& res) {
 	serialize(io, bind.memOffset);
 	serialize(io, bind.memSize);
 	serialize(io, bind.memState); // TODO: could be computed on load I guess
@@ -398,6 +440,42 @@ void serialize(Slz& slz, IO& io, RenderPass& rp) {
 	serializeContainer(io, rp.desc.attachments, serializeAttachment);
 }
 
+template<typename Slz, typename IO>
+void serialize(Slz&, IO& io, Event& event) {
+	serialize(io, event.name);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz&, IO& io, Fence& fence) {
+	serialize(io, fence.name);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz&, IO& io, Semaphore& semaphore) {
+	serialize(io, semaphore.name);
+	serialize(io, semaphore.type);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz&, IO& io, AccelStruct& accelStruct) {
+	serialize(io, accelStruct.name);
+	serialize(io, accelStruct.type);
+	serialize(io, accelStruct.effectiveType);
+	serialize(io, accelStruct.geometryType);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz&, IO& io, DescriptorPool& pool) {
+	serialize(io, pool.name);
+	serializeContainer(io, pool.poolSizes);
+}
+
+template<typename Slz, typename IO>
+void serialize(Slz&, IO& io, DescriptorUpdateTemplate& dut) {
+	serialize(io, dut.name);
+	serializeContainer(io, dut.entries);
+}
+
 template<typename Slz, typename IO, typename H> using HasSerialize =
 	decltype(serialize(std::declval<Slz>(), std::declval<IO>(), std::declval<H>()));
 
@@ -455,9 +533,9 @@ auto& addIntrusive(StateLoader& loader) {
 
 Pipeline& addPipe(StateLoader& loader, VkPipelineBindPoint pbp) {
 	switch(pbp) {
-		case VK_PIPELINE_BIND_POINT_GRAPHICS: return addUnique<GraphicsPipeline>(loader);
-		case VK_PIPELINE_BIND_POINT_COMPUTE: return addUnique<ComputePipeline>(loader);
-		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR: return addUnique<RayTracingPipeline>(loader);
+		case VK_PIPELINE_BIND_POINT_GRAPHICS: return addIntrusive<GraphicsPipeline>(loader);
+		case VK_PIPELINE_BIND_POINT_COMPUTE: return addIntrusive<ComputePipeline>(loader);
+		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR: return addIntrusive<RayTracingPipeline>(loader);
 		default:
 			dlg_error("Unexpected pipeline bind point {}", pbp);
 			throw std::runtime_error("Invalid pipeline type");
@@ -476,7 +554,7 @@ Handle& addHandle(StateLoader& loader) {
 	// Hm, but that again would then need exactly this dtor list.
 	// fair enough.
 	switch(type) {
-		case VK_OBJECT_TYPE_IMAGE: return addUnique<Image>(loader);
+		case VK_OBJECT_TYPE_IMAGE: return addIntrusive<Image>(loader);
 		case VK_OBJECT_TYPE_BUFFER: return addIntrusive<Buffer>(loader);
 		case VK_OBJECT_TYPE_IMAGE_VIEW: return addIntrusive<ImageView>(loader);
 		case VK_OBJECT_TYPE_BUFFER_VIEW: return addIntrusive<BufferView>(loader);
@@ -484,9 +562,13 @@ Handle& addHandle(StateLoader& loader) {
 		case VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT: return addIntrusive<DescriptorSetLayout>(loader);
 		case VK_OBJECT_TYPE_RENDER_PASS: return addIntrusive<RenderPass>(loader);
 		case VK_OBJECT_TYPE_FRAMEBUFFER: return addIntrusive<Framebuffer>(loader);
-		case VK_OBJECT_TYPE_DEVICE_MEMORY: return addUnique<DeviceMemory>(loader);
+		case VK_OBJECT_TYPE_DEVICE_MEMORY: return addIntrusive<DeviceMemory>(loader);
 		case VK_OBJECT_TYPE_PIPELINE_LAYOUT: return addIntrusive<PipelineLayout>(loader);
 		case VK_OBJECT_TYPE_SHADER_MODULE: return addIntrusive<ShaderModule>(loader);
+		case VK_OBJECT_TYPE_EVENT: return addIntrusive<Event>(loader);
+		case VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR: return addIntrusive<AccelStruct>(loader);
+		case VK_OBJECT_TYPE_DESCRIPTOR_POOL: return addIntrusive<DescriptorPool>(loader);
+		case VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE: return addIntrusive<DescriptorUpdateTemplate>(loader);
 		case VK_OBJECT_TYPE_PIPELINE: {
 			auto pbp = read<VkPipelineBindPoint>(loader.buf);
 			auto& pipe = addPipe(loader, pbp);
