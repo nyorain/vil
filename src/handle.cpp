@@ -19,7 +19,6 @@
 #include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <string_view>
-#include <cctype>
 
 namespace vil {
 
@@ -87,13 +86,6 @@ std::string name(const Handle& handle, VkObjectType objectType, bool addType, bo
 }
 
 // case insensitive substring find
-template<typename T, typename O>
-int findSubstrCI(const T& haystack, const O& needle) {
-	auto cmp = [&](unsigned char c1, unsigned char c2) { return std::tolower(c1) == std::tolower(c2); };
-    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), cmp);
-	return it == haystack.end() ? -1 : it - haystack.begin();
-}
-
 // type handlers
 bool matchesSearch(Handle& handle, VkObjectType objectType, std::string_view search) {
 	if(search.empty()) {
@@ -106,15 +98,6 @@ bool matchesSearch(Handle& handle, VkObjectType objectType, std::string_view sea
 	auto label = name(handle, objectType);
 
 	return findSubstrCI(label, search) != -1;
-
-	/*
-	using StringViewCI = std::basic_string_view<char, CharTraitsCI>;
-	auto nameCI = StringViewCI(label.data(), label.size());
-	auto searchCI = StringViewCI(search.data(), search.size());
-
-	// TODO: better matching. Support regex?
-	return (nameCI.find(searchCI) != nameCI.npos);
-	*/
 }
 
 template<typename... Args>
