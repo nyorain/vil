@@ -1014,6 +1014,7 @@ void CommandRecordGui::updateFromSelector() {
 const auto serializeFolder = fs::path(".vil/");
 constexpr auto serializeFilePrefix = std::string_view("cmdsel_");
 constexpr auto serializeDefaultName = std::string_view("_default");
+constexpr auto serializeMagicValue = u64(0x411005314A7102BC);
 
 fs::path buildSerializePath(std::string_view name) {
 	return serializeFolder / (std::string(serializeFilePrefix).append(name).append(".bin"));
@@ -1171,10 +1172,11 @@ void CommandRecordGui::saveSelection(std::string_view name) {
 	write(saver, writer);
 
 	// write file
-	DynWriteBuf header;
-	nytl::write<u32>(header, loaderData.size());
+	DynWriteBuf headerBuf;
+	nytl::write(headerBuf, serializeMagicValue);
+	nytl::write<u32>(headerBuf, loaderData.size());
 
-	std::fwrite(header.data(), 1u, header.size(), f);
+	std::fwrite(headerBuf.data(), 1u, headerBuf.size(), f);
 	std::fwrite(loaderData.data(), 1u, loaderData.size(), f);
 	std::fwrite(ownBuf.data(), 1u, ownBuf.size(), f);
 
@@ -1200,6 +1202,13 @@ void CommandRecordGui::loadSelection(std::string_view name) {
 	auto buf = LoadBuf{ReadBuf(dataVec)};
 
 	// read header
+	auto magic = read<u64>(buf);
+	if(magic != serializeMagicValue) {
+		dlg_error("Invalid magic value. Expected {}, got {}",
+			serializeMagicValue, magic);
+		return;
+	}
+
 	auto loaderSize = read<u32>(buf);
 	if(loaderSize >= buf.buf.size()) {
 		dlg_error("Invalid state file size");

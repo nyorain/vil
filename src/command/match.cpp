@@ -801,8 +801,8 @@ void add(MatchVal& m, MatchType mt,
 	for(auto pipeA = b.boundPipelines; pipeA; pipeA = pipeA->next) {
 		float bestMatch = 0.f;
 		for(auto pipeB = b.boundPipelines; pipeB; pipeB = pipeB->next) {
-			auto m = match(mt, pipeA->pipe, pipeB->pipe);
-			bestMatch = std::max(bestMatch, eval(m));
+			auto pipeMatch = match(mt, pipeA->pipe, pipeB->pipe);
+			bestMatch = std::max(bestMatch, eval(pipeMatch));
 		}
 		m.match += bestMatch;
 	}
