@@ -98,6 +98,8 @@ struct GraphicsPipeline : Pipeline {
 	~GraphicsPipeline();
 };
 
+void fixPointers(GraphicsPipeline& pipe);
+
 struct ComputePipeline : Pipeline {
 	PipelineShaderStage stage;
 };

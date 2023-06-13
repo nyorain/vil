@@ -16,9 +16,7 @@ static_assert(validExpression<HasOnApiDestroy, Image>);
 static_assert(validExpression<HasOnApiDestroy, DeviceMemory>);
 
 // Classes
-Image::~Image() {
-	dlg_assert_or(dev, return);
-}
+Image::~Image() = default;
 
 void Image::onApiDestroy() {
 	MemoryResource::onApiDestroy();
@@ -54,7 +52,9 @@ void Image::initLayout() {
 }
 
 ImageView::~ImageView() {
-	dlg_assert_or(dev, return);
+	if(!dev) { // can happen for serialized handles
+		return;
+	}
 
 	dlg_assert(DebugStats::get().aliveImagesViews > 0);
 	--DebugStats::get().aliveImagesViews;

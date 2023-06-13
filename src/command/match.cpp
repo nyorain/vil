@@ -55,65 +55,6 @@ void addBits(MatchVal& m, T a, T b) {
 	m.match += popcount(ua ^ ub) / float(maxBits);
 }
 
-bool conflicting(const PipelineLayout& a, const PipelineLayout& b) {
-	// TODO: relax pcr-same requirement?
-	//   at least make order insensitive?
-	if(a.pushConstants.size() != b.pushConstants.size()) {
-		return true;
-	}
-
-	for(auto i = 0u; i < a.pushConstants.size(); ++i) {
-		auto& pca = a.pushConstants[i];
-		auto& pcb = b.pushConstants[i];
-		if(pca.offset != pcb.offset ||
-				pca.size != pcb.size ||
-				pca.stageFlags != pcb.stageFlags) {
-			return true;
-		}
-	}
-
-	// NOTE: we are intentionally lax about descriptor bindings
-	// compatibility to allow changes in pipeline reloads.
-	// We only disallow *conflicting* bindings
-	auto count = std::min(a.descriptors.size(),
-		b.descriptors.size());
-	for(auto i = 0u; i < count; ++i) {
-		auto* dsa = a.descriptors[i].get();
-		auto* dsb = b.descriptors[i].get();
-
-		if(!dsa || !dsb) {
-			continue;
-		}
-
-		if(conflicting(*dsa, *dsb)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
-bool equalDeep(const PipelineLayout& a, const PipelineLayout& b) {
-	return !conflicting(a, b);
-}
-
-bool equalDeep(const Pipeline& a, const Pipeline& b) {
-	if(a.type != b.type) {
-		return false;
-	}
-
-	// check for layout compat
-	if(!a.layout || !b.layout || !equalDeep(*a.layout.get(), *b.layout.get())) {
-		return false;
-	}
-
-	// TODO: check for pipeline-type-specific properties
-	// we don't want to check for shader code (to allow reloads) but
-	// e.g. for graphics pipelines could check vertex input/bindings.
-
-	return true;
-}
-
 bool equal(const RenderPassDesc& a, const RenderPassDesc& b) {
 	if(a.subpasses.size() != b.subpasses.size() ||
 			a.attachments.size() != b.attachments.size()) {
@@ -192,28 +133,230 @@ bool equal(const RenderPassDesc& a, const RenderPassDesc& b) {
 	return true;
 }
 
-template<typename Handle>
-bool equal(MatchType mt, const Handle* a, const Handle* b) {
-	if(!a || !b) {
-		return false;
-	}
-
-	if(a == b) {
+bool conflicting(const PipelineLayout& a, const PipelineLayout& b) {
+	// TODO: relax pcr-same requirement?
+	//   at least make order insensitive?
+	if(a.pushConstants.size() != b.pushConstants.size()) {
 		return true;
 	}
 
-	if(mt == MatchType::identity) {
-		return false;
+	for(auto i = 0u; i < a.pushConstants.size(); ++i) {
+		auto& pca = a.pushConstants[i];
+		auto& pcb = b.pushConstants[i];
+		if(pca.offset != pcb.offset ||
+				pca.size != pcb.size ||
+				pca.stageFlags != pcb.stageFlags) {
+			return true;
+		}
 	}
 
-	// When handles are named differently, we always assume them to be
-	// different. When both are unnamed, we only do a deep-check in the
-	// respective mode
-	if(a->name != b->name || (mt == MatchType::mixed && a->name.empty())) {
-		return false;
+	// NOTE: we are intentionally lax about descriptor bindings
+	// compatibility to allow changes in pipeline reloads.
+	// We only disallow *conflicting* bindings
+	auto count = std::min(a.descriptors.size(),
+		b.descriptors.size());
+	for(auto i = 0u; i < count; ++i) {
+		auto* dsa = a.descriptors[i].get();
+		auto* dsb = b.descriptors[i].get();
+
+		if(!dsa || !dsb) {
+			continue;
+		}
+
+		if(conflicting(*dsa, *dsb)) {
+			return true;
+		}
 	}
 
-	return equalDeep(*a, *b);
+	return false;
+}
+
+bool equal(const ShaderModule& a, const ShaderModule& b) {
+	// Treating shader modules with the same name as equal even when they have
+	// different content is useful e.g. for shader reloading.
+	return a.spirvHash == b.spirvHash ||
+		(!a.name.empty() && a.name == b.name);
+}
+
+MatchVal matchStages(span<const PipelineShaderStage> a,
+		span<const PipelineShaderStage> b, float weight = 1.0) {
+
+	MatchVal ret;
+	ret.total += std::max(a.size(), b.size()) * weight;
+
+	for(auto& stageA : a) {
+		for(auto& stageB : b) {
+			dlg_assert(stageA.spirv);
+			dlg_assert(stageB.spirv);
+
+			// TODO: also compare specialization somehow?
+			if(stageA.stage == stageB.stage &&
+					equal(*stageA.spirv, *stageB.spirv) &&
+					stageA.entryPoint == stageB.entryPoint) {
+				ret.match += weight;
+				break;
+			}
+		}
+	}
+
+	return ret;
+}
+
+MatchVal matchPipe(const GraphicsPipeline& a, const GraphicsPipeline& b) {
+	if(!equal(a.renderPass->desc, b.renderPass->desc) || a.subpass != b.subpass) {
+		return MatchVal::noMatch();
+	}
+
+	auto ret = matchStages(a.stages, b.stages, 10.f);
+
+	// vertex attribs
+	ret.total += std::max(a.vertexAttribs.size(), b.vertexAttribs.size());
+	for(auto& attribA : a.vertexAttribs) {
+		for(auto& attribB : b.vertexAttribs) {
+			if(attribA.binding == attribB.binding &&
+					attribA.location == attribB.location &&
+					attribA.format == attribB.format &&
+					attribA.offset == attribB.offset) {
+				ret.match += 1.f;
+				break;
+			}
+		}
+	}
+
+	// vertex bindings
+	ret.total += std::max(a.vertexBindings.size(), b.vertexBindings.size());
+	for(auto& bindingA : a.vertexBindings) {
+		for(auto& bindingB : b.vertexBindings) {
+			if(bindingA.binding == bindingB.binding &&
+					bindingA.inputRate == bindingB.inputRate &&
+					bindingA.stride == bindingB.stride) {
+				ret.match += 1.f;
+				break;
+			}
+		}
+	}
+
+	// dynamic states
+	ret.total += std::max(a.dynamicState.size(), b.dynamicState.size());
+	for(auto& dynState : a.dynamicState) {
+		if(b.dynamicState.count(dynState)) {
+			ret.match += 1.f;
+		}
+	}
+
+	// depth stencil
+	// TODO: don't compare the values that are present in dynamic state?
+	add(ret, a.hasDepthStencil, b.hasDepthStencil);
+	if(a.hasDepthStencil && b.hasDepthStencil) {
+		add(ret, a.depthStencilState.depthTestEnable, b.depthStencilState.depthTestEnable);
+		if(a.depthStencilState.depthTestEnable && b.depthStencilState.depthTestEnable) {
+			add(ret, a.depthStencilState.depthCompareOp, b.depthStencilState.depthCompareOp);
+		}
+
+		add(ret, a.depthStencilState.depthBoundsTestEnable, b.depthStencilState.depthBoundsTestEnable);
+		if(a.depthStencilState.depthBoundsTestEnable && b.depthStencilState.depthBoundsTestEnable) {
+			add(ret, a.depthStencilState.minDepthBounds, b.depthStencilState.minDepthBounds);
+			add(ret, a.depthStencilState.maxDepthBounds, b.depthStencilState.maxDepthBounds);
+		}
+
+		add(ret, a.depthStencilState.stencilTestEnable, b.depthStencilState.stencilTestEnable);
+		if(a.depthStencilState.stencilTestEnable && b.depthStencilState.stencilTestEnable) {
+			add(ret, a.depthStencilState.front.failOp, b.depthStencilState.front.failOp);
+			add(ret, a.depthStencilState.front.passOp, b.depthStencilState.front.passOp);
+			add(ret, a.depthStencilState.front.compareMask, b.depthStencilState.front.compareMask);
+			add(ret, a.depthStencilState.front.writeMask, b.depthStencilState.front.writeMask);
+			add(ret, a.depthStencilState.front.compareOp, b.depthStencilState.front.compareOp);
+			add(ret, a.depthStencilState.front.reference, b.depthStencilState.front.reference);
+			add(ret, a.depthStencilState.front.depthFailOp, b.depthStencilState.front.depthFailOp);
+		}
+
+		add(ret, a.depthStencilState.depthWriteEnable, b.depthStencilState.depthWriteEnable);
+		addBits(ret, a.depthStencilState.flags, b.depthStencilState.flags);
+	}
+
+	// color blend
+	add(ret, a.colorBlendState.logicOpEnable, b.colorBlendState.logicOpEnable);
+
+	auto blendCount = std::min(a.colorBlendState.attachmentCount, b.colorBlendState.attachmentCount);
+	ret.total += std::max(a.colorBlendState.attachmentCount, b.colorBlendState.attachmentCount) - blendCount;
+
+	for(auto i = 0u; i < blendCount; ++i) {
+		auto& blendA = a.colorBlendState.pAttachments[i];
+		auto& blendB = b.colorBlendState.pAttachments[i];
+		add(ret, blendA.blendEnable, blendB.blendEnable);
+		if(blendA.blendEnable && blendB.blendEnable) {
+			add(ret, blendA.alphaBlendOp, blendB.alphaBlendOp);
+			add(ret, blendA.colorBlendOp, blendB.colorBlendOp);
+			add(ret, blendA.dstAlphaBlendFactor, blendB.dstAlphaBlendFactor);
+			add(ret, blendA.srcAlphaBlendFactor, blendB.srcAlphaBlendFactor);
+			add(ret, blendA.dstColorBlendFactor, blendB.dstColorBlendFactor);
+			add(ret, blendA.srcColorBlendFactor, blendB.srcColorBlendFactor);
+			add(ret, blendA.colorWriteMask, blendB.colorWriteMask);
+		}
+	}
+
+	add(ret, a.inputAssemblyState.primitiveRestartEnable, b.inputAssemblyState.primitiveRestartEnable);
+	add(ret, a.inputAssemblyState.topology, b.inputAssemblyState.topology);
+
+	add(ret, a.rasterizationState.cullMode, b.rasterizationState.cullMode);
+	add(ret, a.rasterizationState.rasterizerDiscardEnable, b.rasterizationState.rasterizerDiscardEnable);
+	add(ret, a.rasterizationState.polygonMode, b.rasterizationState.polygonMode);
+	add(ret, a.rasterizationState.frontFace, b.rasterizationState.frontFace);
+	add(ret, a.rasterizationState.depthBiasEnable, b.rasterizationState.depthBiasEnable);
+	if(a.rasterizationState.depthBiasEnable && b.rasterizationState.depthBiasEnable) {
+		add(ret, a.rasterizationState.depthBiasClamp, b.rasterizationState.depthBiasClamp);
+		add(ret, a.rasterizationState.depthBiasSlopeFactor, b.rasterizationState.depthBiasSlopeFactor);
+		add(ret, a.rasterizationState.depthBiasConstantFactor, b.rasterizationState.depthBiasConstantFactor);
+	}
+
+	if(a.rasterizationState.polygonMode == VK_POLYGON_MODE_LINE &&
+			b.rasterizationState.polygonMode == VK_POLYGON_MODE_LINE) {
+		add(ret, a.rasterizationState.lineWidth, b.rasterizationState.lineWidth);
+	}
+
+	add(ret, a.multisampleState.rasterizationSamples, b.multisampleState.rasterizationSamples);
+
+	// TODO: other state. scissor? viewports?
+
+	return ret;
+}
+
+MatchVal matchPipe(const RayTracingPipeline& a, const RayTracingPipeline& b) {
+	// TODO: match other state
+	return matchStages(a.stages, b.stages, 10.f);
+}
+
+MatchVal matchPipe(const ComputePipeline& a, const ComputePipeline& b) {
+	return matchStages({{a.stage}}, {{b.stage}}, 10.f);
+}
+
+MatchVal matchDeep(const Pipeline& a, const Pipeline& b) {
+	if(a.type != b.type) {
+		return MatchVal::noMatch();
+	}
+
+	// check for layout compat
+	if(!a.layout || !b.layout || conflicting(*a.layout.get(), *b.layout.get())) {
+		return MatchVal::noMatch();
+	}
+
+	switch(a.type) {
+		case VK_PIPELINE_BIND_POINT_GRAPHICS:
+			return matchPipe(
+				static_cast<const GraphicsPipeline&>(a),
+				static_cast<const GraphicsPipeline&>(b));
+		case VK_PIPELINE_BIND_POINT_COMPUTE:
+			return matchPipe(
+				static_cast<const ComputePipeline&>(a),
+				static_cast<const ComputePipeline&>(b));
+		case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
+			return matchPipe(
+				static_cast<const RayTracingPipeline&>(a),
+				static_cast<const RayTracingPipeline&>(b));
+		default:
+			dlg_error("unsupported pipeline type");
+			return {1.f, 1.f};
+	}
 }
 
 float eval(const MatchVal& m) {
@@ -634,7 +777,9 @@ bool same(span<void*> a, span<void*> b, unsigned offset = 1u) {
 }
 
 // Adds the given stats to the given matcher
-void add(MatchVal& m, MatchType mt, const ParentCommand::SectionStats& a, const ParentCommand::SectionStats& b) {
+void add(MatchVal& m, MatchType mt,
+		const ParentCommand::SectionStats& a,
+		const ParentCommand::SectionStats& b) {
 	auto addMatch = [&](u32 dst, u32 src, float weight = 1.f) {
 		m.match += weight * std::min(dst, src); // in range [0, max]
 		m.total += weight * std::max(dst, src);
@@ -652,14 +797,14 @@ void add(MatchVal& m, MatchType mt, const ParentCommand::SectionStats& a, const 
 	const auto pipeWeight = 10.f;
 	m.total += pipeWeight * std::max(a.numPipeBinds, b.numPipeBinds);
 
-	// TODO: slightly asymmetrical in special cases. Problem?
+	// TODO PERF might be too expensive
 	for(auto pipeA = b.boundPipelines; pipeA; pipeA = pipeA->next) {
+		float bestMatch = 0.f;
 		for(auto pipeB = b.boundPipelines; pipeB; pipeB = pipeB->next) {
-			if(equal(mt, pipeA->pipe, pipeB->pipe)) {
-				m.match += pipeWeight;
-				break;
-			}
+			auto m = match(mt, pipeA->pipe, pipeB->pipe);
+			bestMatch = std::max(bestMatch, eval(m));
 		}
+		m.match += bestMatch;
 	}
 }
 
@@ -1246,6 +1391,8 @@ MatchVal match(MatchType, const VkClearAttachment& a, const VkClearAttachment& b
 	}
 
 	auto sameCV = false;
+
+	// TODO union comparison is sketchy
 	if(a.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) {
 		if(a.colorAttachment != b.colorAttachment) {
 			return MatchVal::noMatch();
@@ -1462,16 +1609,51 @@ MatchVal doMatch(MatchType mt, const Barrier2CmdBase& a, const Barrier2CmdBase& 
 	return m;
 }
 
-MatchVal doMatch(MatchType matchType, const DrawCmdBase& a, const DrawCmdBase& b, bool indexed) {
+MatchVal matchState(MatchType matchType, const StateCmdBase& a, const StateCmdBase& b) {
+	auto m = match(matchType, a.boundPipe(), b.boundPipe());
+
 	// different pipelines means the draw calls are fundamentally different,
 	// no matter if similar data is bound.
-	if(!equal(matchType, a.state->pipe, b.state->pipe)) {
-		return MatchVal::noMatch();
+	if(noMatch(m)) {
+		return m;
 	}
 
-	MatchVal m;
+	// same pipeline for a state cmd is a pretty important indicator
 	m.total += 5.f;
 	m.match += 5.f;
+
+	// this case should have already been caught in the incomptabile-pipeline
+	// case above
+	dlg_assert_or(a.boundPipe() && b.boundPipe(), return MatchVal::noMatch());
+	dlg_assert_or(a.boundPipe()->layout->pushConstants.size() ==
+			b.boundPipe()->layout->pushConstants.size(),
+			return MatchVal::noMatch());
+
+	for(auto& pcr : a.boundPipe()->layout->pushConstants) {
+		// TODO: these asserts can trigger if parts of the push constant
+		// range was left undefined. It might not be used by the shader
+		// anyways. Not sure how to fix.
+		dlg_assertl_or(dlg_level_warn,
+			pcr.offset + pcr.size <= a.boundPushConstants().data.size(), continue);
+		dlg_assertl_or(dlg_level_warn,
+			pcr.offset + pcr.size <= b.boundPushConstants().data.size(), continue);
+
+		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
+		m.total += pcrWeight;
+		if(std::memcmp(&a.boundPushConstants().data[pcr.offset],
+				&b.boundPushConstants().data[pcr.offset], pcr.size) == 0u) {
+			m.match += pcrWeight;
+		}
+	}
+
+	return m;
+}
+
+MatchVal doMatch(MatchType matchType, const DrawCmdBase& a, const DrawCmdBase& b, bool indexed) {
+	auto m = matchState(matchType, a, b);
+	if(noMatch(m)) {
+		return MatchVal::noMatch();
+	}
 
 	for(auto i = 0u; i < a.state->pipe->vertexBindings.size(); ++i) {
 		dlg_assert_or(i < a.state->vertices.size(), break);
@@ -1496,23 +1678,6 @@ MatchVal doMatch(MatchType matchType, const DrawCmdBase& a, const DrawCmdBase& b
 		}
 	}
 
-	for(auto& pcr : a.state->pipe->layout->pushConstants) {
-		// TODO: these asserts can trigger if parts of the push constant
-		// range was left undefined. It might not be used by the shader
-		// anyways. No idea how to fix.
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= a.pushConstants.data.size(), continue);
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= b.pushConstants.data.size(), continue);
-
-		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
-		m.total += pcrWeight;
-		if(std::memcmp(&a.pushConstants.data[pcr.offset],
-				&b.pushConstants.data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcrWeight;
-		}
-	}
-
 	// - we consider the bound descriptors somewhere else since they might
 	//   already have been unset from the command
 	// - we don't consider the render pass instance here since that should
@@ -1523,22 +1688,9 @@ MatchVal doMatch(MatchType matchType, const DrawCmdBase& a, const DrawCmdBase& b
 }
 
 MatchVal doMatch(MatchType mt, const TraceRaysCmdBase& a, const TraceRaysCmdBase& b) {
-	// different pipelines means the draw calls are fundamentally different,
-	// no matter if similar data is bound.
-	if(!equal(mt, a.state->pipe, b.state->pipe)) {
+	auto m = matchState(mt, a, b);
+	if(noMatch(m)) {
 		return MatchVal::noMatch();
-	}
-
-	MatchVal m;
-	for(auto& pcr : a.state->pipe->layout->pushConstants) {
-		dlg_assert_or(pcr.offset + pcr.size <= a.pushConstants.data.size(), continue);
-		dlg_assert_or(pcr.offset + pcr.size <= b.pushConstants.data.size(), continue);
-
-		m.total += pcr.size;
-		if(std::memcmp(&a.pushConstants.data[pcr.offset],
-				&b.pushConstants.data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcr.size;
-		}
 	}
 
 	// - we consider the bound descriptors somewhere else since they might
@@ -1732,11 +1884,14 @@ MatchVal match(MatchType mt, const BindIndexBufferCmd& a, const BindIndexBufferC
 	return ret;
 }
 
-MatchVal match(MatchType mt, const BindDescriptorSetCmd& a, const BindDescriptorSetCmd& b) {
+MatchVal match(MatchType, const BindDescriptorSetCmd& a, const BindDescriptorSetCmd& b) {
+	dlg_assert_or(a.pipeLayout, return MatchVal::noMatch());
+	dlg_assert_or(b.pipeLayout, return MatchVal::noMatch());
+
 	if(a.firstSet != b.firstSet ||
 			// NOTE: could relax this, only needing compatibility up
 			// to (and including) the bound sets
-			!equal(mt, a.pipeLayout, b.pipeLayout) ||
+			conflicting(*a.pipeLayout, *b.pipeLayout) ||
 			a.pipeBindPoint != b.pipeBindPoint) {
 		return MatchVal::noMatch();
 	}
@@ -1751,32 +1906,17 @@ MatchVal match(MatchType mt, const BindDescriptorSetCmd& a, const BindDescriptor
 }
 
 MatchVal match(MatchType mt, const BindPipelineCmd& a, const BindPipelineCmd& b) {
-	if(a.bindPoint != b.bindPoint || !equal(mt, a.pipe, b.pipe)) {
+	if(a.bindPoint != b.bindPoint) {
 		return MatchVal::noMatch();
 	}
 
-	// TODO: could do a match on the bound pipes
-
-	return MatchVal{4.f, 4.f};
+	return match(mt, a.pipe, b.pipe);
 }
 
 MatchVal doMatch(MatchType mt, const DispatchCmdBase& a, const DispatchCmdBase& b) {
-	// different pipelines means the draw calls are fundamentally different,
-	// no matter if similar data is bound.
-	if(!equal(mt, a.state->pipe, b.state->pipe)) {
+	auto m = matchState(mt, a, b);
+	if(noMatch(m)) {
 		return MatchVal::noMatch();
-	}
-
-	MatchVal m;
-	for(auto& pcr : a.state->pipe->layout->pushConstants) {
-		dlg_assert_or(pcr.offset + pcr.size <= a.pushConstants.data.size(), continue);
-		dlg_assert_or(pcr.offset + pcr.size <= b.pushConstants.data.size(), continue);
-
-		m.total += pcr.size;
-		if(std::memcmp(&a.pushConstants.data[pcr.offset],
-				&b.pushConstants.data[pcr.offset], pcr.size) == 0u) {
-			m.match += pcr.size;
-		}
 	}
 
 	// - we consider the bound descriptors somewhere else since they might
@@ -2017,8 +2157,9 @@ MatchVal match(MatchType mt, const ClearColorImageCmd& a, const ClearColorImageC
 	add(m, a.dstLayout, b.dstLayout, 2.0);
 	addSpanOrderedStrict(m, mt, a.ranges, b.ranges);
 
+	// TODO union comparison is sketchy
 	m.total += 1;
-	if(std::memcmp(&a.color, &b.color, sizeof(a.color)) == 0u) {
+	if(std::memcmp(&a.color.uint32, &b.color.uint32, sizeof(a.color)) == 0u) {
 		m.match += 1;
 	}
 
@@ -2057,10 +2198,13 @@ MatchVal match(MatchType, const BeginDebugUtilsLabelCmd& a, const BeginDebugUtil
 	return MatchVal{4.f, 4.f};
 }
 
-MatchVal match(MatchType mt, const PushConstantsCmd& a, const PushConstantsCmd& b) {
+MatchVal match(MatchType, const PushConstantsCmd& a, const PushConstantsCmd& b) {
+	dlg_assert_or(a.pipeLayout, return MatchVal::noMatch());
+	dlg_assert_or(b.pipeLayout, return MatchVal::noMatch());
+
 	// hard matching on metadata here. The data is irrelevant when
 	// the push destination isn't the same.
-	if(!equal(mt, a.pipeLayout, b.pipeLayout) ||
+	if(conflicting(*a.pipeLayout, *b.pipeLayout) ||
 			a.stages != b.stages ||
 			a.offset != b.offset ||
 			a.values.size() != b.values.size()) {
@@ -2082,7 +2226,7 @@ MatchVal match(MatchType mt, const PushConstantsCmd& a, const PushConstantsCmd& 
 MatchVal match(MatchType mt, const TraceRaysCmd& a, const TraceRaysCmd& b) {
 	auto m = doMatch(mt, a, b);
 	if(noMatch(m)) {
-		return m;
+		return MatchVal::noMatch();
 	}
 
 	// we don't hard-match on them since this may change for per-frame
@@ -2093,7 +2237,10 @@ MatchVal match(MatchType mt, const TraceRaysCmd& a, const TraceRaysCmd& b) {
 	add(m, a.height, b.height, 4.0);
 	add(m, a.depth, b.depth, 6.0);
 
-	// TODO: consider bound tables? At least size and stride?
+	add(m, a.raygenBindingTable.stride, b.raygenBindingTable.stride);
+	add(m, a.hitBindingTable.stride, b.hitBindingTable.stride);
+	add(m, a.missBindingTable.stride, b.missBindingTable.stride);
+	add(m, a.callableBindingTable.stride, b.callableBindingTable.stride);
 
 	return m;
 }
@@ -2101,10 +2248,13 @@ MatchVal match(MatchType mt, const TraceRaysCmd& a, const TraceRaysCmd& b) {
 MatchVal match(MatchType mt, const TraceRaysIndirectCmd& a, const TraceRaysIndirectCmd& b) {
 	auto m = doMatch(mt, a, b);
 	if(m.total == -1.f) {
-		return m;
+		return MatchVal::noMatch();
 	}
 
-	// TODO: consider bound tables? At least size and stride?
+	add(m, a.raygenBindingTable.stride, b.raygenBindingTable.stride);
+	add(m, a.hitBindingTable.stride, b.hitBindingTable.stride);
+	add(m, a.missBindingTable.stride, b.missBindingTable.stride);
+	add(m, a.callableBindingTable.stride, b.callableBindingTable.stride);
 
 	return m;
 }
