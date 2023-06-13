@@ -51,8 +51,13 @@ void addBits(MatchVal& m, T a, T b) {
 	auto ub = u64(b);
 
 	auto maxBits = std::max(popcount(ua), popcount(ub));
-	m.total += maxBits;
-	m.match += popcount(ua ^ ub) / float(maxBits);
+	if(maxBits == 0u) {
+		m.total += 0;
+		m.match += 0;
+	} else {
+		m.total += maxBits;
+		m.match += popcount(ua ^ ub) / float(maxBits);
+	}
 }
 
 bool equal(const RenderPassDesc& a, const RenderPassDesc& b) {
@@ -505,7 +510,12 @@ MatchVal match(MatchType mt, const Handle* a, const Handle* b) {
 	}
 
 	auto ret = matchDeep(*a, *b);
-	ret.total += 1; // reduce match rating since identity wasn't same
+	if(!noMatch(ret)) {
+		ret.total += 1; // reduce match rating since identity wasn't same
+	}
+
+	dlg_assert(valid(ret));
+
 	return ret;
 }
 
@@ -1460,7 +1470,7 @@ MatchVal matchImgBarrier(MatchType mt, const ImageBarrier& a,
 	}
 
 	MatchVal m = match(mt, imgA, imgB);
-	if(m.total == 0.f || m.match == -1.f) {
+	if(noMatch(m)) {
 		return MatchVal::noMatch();
 	}
 
@@ -1474,6 +1484,9 @@ MatchVal matchImgBarrier(MatchType mt, const ImageBarrier& a,
 	add(m, a.oldLayout, b.oldLayout);
 	add(m, a.newLayout, b.newLayout);
 	add(m, a.subresourceRange, b.subresourceRange);
+
+	dlg_assert(valid(m));
+
 	return m;
 }
 
@@ -1485,7 +1498,7 @@ MatchVal matchBufBarrier(MatchType mt, const BufferBarrier& a,
 	}
 
 	MatchVal m = match(mt, bufA, bufB);
-	if(m.total == 0.f || m.match == -1.f) {
+	if(noMatch(m)) {
 		return MatchVal::noMatch();
 	}
 
@@ -1498,6 +1511,8 @@ MatchVal matchBufBarrier(MatchType mt, const BufferBarrier& a,
 	addBits(m, a.dstAccessMask, b.dstAccessMask);
 	add(m, a.offset, b.offset);
 	add(m, a.size, b.size);
+
+	dlg_assert(valid(m));
 
 	return m;
 }
@@ -1526,17 +1541,13 @@ void addSpanOrderedStrict(MatchVal& m, u64 countA, u64 countB,
 
 	m.total += weight;
 
-	if(countA != countB) {
-		return;
-	}
-
-	if(countA == 0u) {
+	if(countA == 0u && countB == 0u) {
 		m.match += weight;
 		return;
 	}
 
 	MatchVal accum {};
-	for(auto i = 0u; i < countA; ++i) {
+	for(auto i = 0u; i < std::min(countA, countB); ++i) {
 		auto res = callback(i, i);
 		if(noMatch(res)) {
 			accum.total += 1.0;
@@ -1545,6 +1556,8 @@ void addSpanOrderedStrict(MatchVal& m, u64 countA, u64 countB,
 			accum.total += res.total;
 		}
 	}
+
+	dlg_assert(valid(accum));
 
 	// TODO: maybe better to make weight also dependent on size?
 	// could add flag/param for that behavior.

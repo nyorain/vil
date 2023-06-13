@@ -1,6 +1,3 @@
-- [ ] Would be useful to have the side-by-side-frames-with-vizlcs
-	  debug view via record serialization (among other things).
-	  {for later}
 - [ ] add serialize support for more commands (e.g. Bind)
 - [ ] serialize further gui state, e.g. selected I/O
 - [ ] better deep-matching for handles, especially pipelines
@@ -91,6 +88,9 @@
 - [x] rename main branch to main
 - [ ] Don't always alloc/free in LinAllocator.
       Enable our global memory block cache thingy?
+- [ ] Would be useful to have the side-by-side-frames-with-vizlcs
+	  debug view via record serialization (among other things).
+	  {for later}
 
 - look into found doom performance hotpaths
 	- Improve QueuePresent timing

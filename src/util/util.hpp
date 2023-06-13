@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <cctype>
 
 namespace vil {
 
@@ -339,29 +340,6 @@ struct ValidExpressionT<E, std::void_t<E<T...>>, T...> {
 template<template<typename...> typename E, typename... T>
 constexpr auto validExpression = detail::ValidExpressionT<E, void, T...>::value;
 
-// case-insensitive char traits
-// see https://stackoverflow.com/questions/11635
-// NOTE: somehow causes crashes on MSVC
-struct CharTraitsCI : public std::char_traits<char> {
-    static bool eq(char c1, char c2) { return toupper(c1) == toupper(c2); }
-    static bool ne(char c1, char c2) { return toupper(c1) != toupper(c2); }
-    static bool lt(char c1, char c2) { return toupper(c1) <  toupper(c2); }
-    static int compare(const char* s1, const char* s2, size_t n) {
-        while(n-- != 0) {
-            if(toupper(*s1) < toupper(*s2)) return -1;
-            if(toupper(*s1) > toupper(*s2)) return 1;
-            ++s1; ++s2;
-        }
-        return 0;
-    }
-    static const char* find(const char* s, int n, char a) {
-        while(n-- > 0 && toupper(*s) != toupper(a)) {
-            ++s;
-        }
-        return s;
-    }
-};
-
 // NOTE: this ignores multi-plane aspects, will never return them.
 VkImageAspectFlags aspects(VkFormat format);
 u32 combineQueueFamilies(span<const u32> queueFams);
@@ -376,6 +354,13 @@ auto lockCopy(Mutex& mutex, T& obj) {
 template<typename T>
 std::vector<T> asVector(span<const T> range) {
 	return {range.begin(), range.end()};
+}
+
+template<typename T, typename O>
+int findSubstrCI(const T& haystack, const O& needle) {
+	auto cmp = [&](unsigned char c1, unsigned char c2) { return std::tolower(c1) == std::tolower(c2); };
+    auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(), cmp);
+	return it == haystack.end() ? -1 : it - haystack.begin();
 }
 
 } // namespace vil

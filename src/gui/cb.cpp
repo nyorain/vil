@@ -1045,12 +1045,22 @@ std::string readStartup() {
 
 void CommandRecordGui::showLoadPopup() {
 	auto count = 0u;
+
+	static std::string search;
+	imGuiTextInput("Search", search);
+	ImGui::Separator();
+
 	if(fs::exists(serializeFolder)) {
 		// TODO: ugly
 		static auto startupFile = readStartup();
 
 		auto flags = 0u;
-		if(ImGui::BeginTable("Entries", 2, flags)) {
+		if(ImGui::BeginTable("Entries", 4, flags)) {
+			ImGui::TableSetupColumn("col0", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("but0", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("but1", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("but2", ImGuiTableColumnFlags_WidthFixed);
+
 			for(const auto& entry : fs::directory_iterator(serializeFolder)) {
 				if(entry.is_directory() || entry.is_symlink()) {
 					continue;
@@ -1061,31 +1071,36 @@ void CommandRecordGui::showLoadPopup() {
 					continue;
 				}
 
+				stem.erase(0, serializeFilePrefix.size());
+				if(!search.empty() && !findSubstrCI(stem, search)) {
+					continue;
+				}
+
 				ImGui::TableNextRow();
 				ImGui::TableNextColumn();
 
 				++count;
-				stem.erase(0, serializeFilePrefix.size());
 
-				// TODO: fix ui spacing
-				auto flags = ImGuiTreeNodeFlags_Leaf |
-					ImGuiTreeNodeFlags_NoTreePushOnOpen |
-					ImGuiTreeNodeFlags_Bullet |
-					ImGuiTreeNodeFlags_FramePadding;
-				if(ImGui::TreeNodeEx(stem.c_str(), flags)) {
-					if(ImGui::IsItemClicked()) {
-						loadSelection(stem);
-					}
+				ImGui::AlignTextToFramePadding();
+				imGuiText("{}", stem);
+
+				// buttons
+				ImGui::TableNextColumn();
+				ImGui::PushID(stem.c_str());
+				if(ImGui::Button(ICON_FA_FILE_ALT)) {
+					loadSelection(stem);
+				}
+				if(gui_->showHelp && ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Load this saved state");
 				}
 
 				// startup-button
 				ImGui::TableNextColumn();
 
-				ImGui::PushID(stem.c_str());
-				auto disable = (startupFile == stem);
-				pushDisabled(disable);
+				auto isDefault = (startupFile == stem);
+				pushDisabled(isDefault);
 
-				if(ImGui::Button(ICON_FA_UPLOAD)) {
+				if(ImGui::Button(ICON_FA_STAR)) {
 					auto startupPath = buildSerializePath(serializeDefaultName);
 					if(fs::exists(fs::symlink_status(startupPath))) {
 						dlg_trace("removed old symlink {}", startupPath);
@@ -1099,13 +1114,27 @@ void CommandRecordGui::showLoadPopup() {
 					dlg_trace("new startup file: {}", stem);
 				}
 
-				popDisabled(disable);
+				popDisabled(isDefault);
 
-				if(gui_->showHelp && ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Load this during startup");
+				if(gui_->showHelp && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+					auto str = dlg::format("Load this during startup");
+					if(isDefault) {
+						str += " (Already active)";
+					}
+
+					ImGui::SetTooltip("%s", str.c_str());
 				}
 
 				ImGui::PopID();
+
+				ImGui::TableNextColumn();
+
+				if(ImGui::Button(ICON_FA_WINDOW_CLOSE)) {
+					fs::remove(entry.path());
+				}
+				if(gui_->showHelp && ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Remove this saved state");
+				}
 			}
 
 			ImGui::EndTable();
@@ -1230,6 +1259,7 @@ void CommandRecordGui::loadSelection(std::string_view name) {
 	} catch(const std::exception& err) {
 		// TODO: show that in UI
 		dlg_error("Error loading {}: {}", path, err.what());
+		(void) err;
 	}
 }
 
