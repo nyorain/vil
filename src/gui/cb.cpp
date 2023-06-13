@@ -876,7 +876,7 @@ void CommandRecordGui::updateRecords(const FrameMatch& frameMatch,
 	if(!newCommandGiven.empty()) {
 		dlg_assert(newCommandGiven.size() == command_.size());
 		dlg_assert(newCommand.size() <= command_.size());
-		std::equal(newCommand.begin(), newCommand.end(), newCommandGiven.begin());
+		dlg_assert(std::equal(newCommand.begin(), newCommand.end(), newCommandGiven.begin()));
 		newCommand = std::move(newCommandGiven);
 	} else if(!newCommand.empty() && newCommand.size() < command_.size()) {
 		// needed since 'match' can't find the final non-parent-cmd in the
@@ -980,7 +980,7 @@ void CommandRecordGui::updateRecord(IntrusivePtr<CommandRecord> record,
 	if(!newCommandGiven.empty()) {
 		dlg_assert(newCommandGiven.size() == command_.size());
 		dlg_assert(newCommand.size() <= command_.size());
-		std::equal(newCommand.begin(), newCommand.end(), newCommandGiven.begin());
+		dlg_assert(std::equal(newCommand.begin(), newCommand.end(), newCommandGiven.begin()));
 		newCommand = std::move(newCommandGiven);
 	}
 
