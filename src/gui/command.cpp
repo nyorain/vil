@@ -1532,7 +1532,7 @@ void CommandViewer::displayCommand() {
 			dlg_assertm(vertex, "TODO Graphics pipeline without vertex shader");
 			if(vertex) {
 				if(ImGui::Button("Debug vertex shader")) {
-					if(dcmd->state.pipe) {
+					if(dcmd->state->pipe) {
 						auto mod = copySpecializeSpirv(*vertex);
 						shaderDebugger_.select(vertex->stage, std::move(mod));
 						view_ = IOView::shader;

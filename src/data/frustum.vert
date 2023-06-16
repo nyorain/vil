@@ -8,6 +8,8 @@ layout(push_constant, row_major) uniform PCR {
 	// NOTE: offset = 76 already used by fragment shader.
 } pcr;
 
+layout(location = 0) out vec3 outPos;
+
 void main() {
 	// Buffer-free cube line list generation. Needs 24 vertices in draw call
 	int mask = (1 << gl_VertexIndex);
@@ -24,5 +26,6 @@ void main() {
 		y *= z;
 	}
 
+	outPos = vec3(x, y, z);
     gl_Position = pcr.viewProjMtx * vec4(x, y, z, 1.0);
 }
