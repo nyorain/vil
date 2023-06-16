@@ -1568,13 +1568,20 @@ void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, floa
 }
 
 AABB3f bounds(const AABB3f& a, const AABB3f& b) {
-	auto endA = a.pos + 2.f * a.extent;
-	auto endB = b.pos + 2.f * b.extent;
+	auto inf = 99999999.f; // std::numeric_limits<float>::infinity();
+	if(a.pos.x >= inf)
+	{
+		return b;
+	}
+	if(b.pos.x >= inf)
+	{
+		return a;
+	}
 
-	auto start = nytl::vec::cw::min(a.pos, b.pos);
-	auto end = nytl::vec::cw::max(endA, endB);
+	auto start = nytl::vec::cw::min(a.pos - a.extent, b.pos - b.extent);
+	auto end = nytl::vec::cw::max(a.pos + a.extent, b.pos + b.extent);
 
-	return {start, 0.5f * (end - start)};
+	return {0.5f * (start + end), 0.5f * (end - start)};
 }
 
 AABB3f transform(const AABB3f& a, const Mat4f& transform) {
@@ -1582,14 +1589,14 @@ AABB3f transform(const AABB3f& a, const Mat4f& transform) {
 	using nytl::vec::cw::min;
 	using nytl::vec::cw::max;
 
-	auto p0 = multPos(transform, a.pos + Vec3f{1.f, 0.f, 0.f} * a.extent);
-	auto p1 = multPos(transform, a.pos + Vec3f{0.f, 1.f, 0.f} * a.extent);
-	auto p2 = multPos(transform, a.pos + Vec3f{0.f, 0.f, 1.f} * a.extent);
-	auto p3 = multPos(transform, a.pos + Vec3f{1.f, 1.f, 0.f} * a.extent);
-	auto p4 = multPos(transform, a.pos + Vec3f{1.f, 0.f, 1.f} * a.extent);
-	auto p5 = multPos(transform, a.pos + Vec3f{0.f, 1.f, 1.f} * a.extent);
+	auto p0 = multPos(transform, a.pos + Vec3f{1.f, -1.f, -1.f} * a.extent);
+	auto p1 = multPos(transform, a.pos + Vec3f{-1.f, 1.f, -1.f} * a.extent);
+	auto p2 = multPos(transform, a.pos + Vec3f{-1.f, -1.f, 1.f} * a.extent);
+	auto p3 = multPos(transform, a.pos + Vec3f{1.f, 1.f, -1.f} * a.extent);
+	auto p4 = multPos(transform, a.pos + Vec3f{1.f, -1.f, 1.f} * a.extent);
+	auto p5 = multPos(transform, a.pos + Vec3f{-1.f, 1.f, 1.f} * a.extent);
 	auto p6 = multPos(transform, a.pos + Vec3f{1.f, 1.f, 1.f} * a.extent);
-	auto p7 = multPos(transform, a.pos + Vec3f{0.f, 0.f, 0.f} * a.extent);
+	auto p7 = multPos(transform, a.pos + Vec3f{-1.f, -1.f, -1.f} * a.extent);
 
 	auto start = p0;
 	auto end = p0;
@@ -1602,7 +1609,7 @@ AABB3f transform(const AABB3f& a, const Mat4f& transform) {
 	start = min(start, p6); end = max(end, p6);
 	start = min(start, p7); end = max(end, p7);
 
-	return {start, 0.5f * (end - start)};
+	return {0.5f * (start + end), 0.5f * (end - start)};
 }
 
 void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances, float dt) {

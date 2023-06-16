@@ -96,7 +96,7 @@ void main() {
 		// NOTE: we assume little endian here. Should probably just use
 		// 16-bit ints in this case, devices that support raytracing
 		// will likely also support 16-bit shader storage.
-		if(id % 1 == 0u) {
+		if(id % 2 == 0u) {
 			idx &= 0xFFFFu;
 		} else {
 			idx >>= 16u;
