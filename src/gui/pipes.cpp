@@ -64,9 +64,22 @@ void initPipes(Device& dev,
 		VkPipelineLayout histogramPipeLayout,
 		Gui::Pipelines& dstPipes, bool manualSRGB) {
 	std::vector<vku::ShaderModule> modules;
-	auto createShaderMod = [&](span<const u32> spv) {
-		return modules.emplace_back(dev, spv).vkHandle();
+	auto createShaderModNamed = [&](span<const u32> spv, const char* name) {
+		auto ret = modules.emplace_back(dev, spv).vkHandle();
+		if(dev.dispatch.SetDebugUtilsObjectNameEXT) {
+			VkDebugUtilsObjectNameInfoEXT ni {};
+			ni.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+			ni.pObjectName = name;
+			ni.objectHandle = handleToU64(ret);
+			ni.objectType = VK_OBJECT_TYPE_SHADER_MODULE;
+			dev.dispatch.SetDebugUtilsObjectNameEXT(dev.handle,
+				&ni);
+		}
+		return ret;
 	};
+
+#define createShaderMod(spv) createShaderModNamed(spv, "vil:" #spv)
+#define initStages(spv) initStagesNamed(spv, "vil:" #spv)
 
 	auto vertModule = createShaderMod(gui_vert_spv_data);
 
@@ -82,8 +95,8 @@ void initPipes(Device& dev,
 	srgbSpec.mapEntryCount = 1u;
 	srgbSpec.pMapEntries = &manualSRGBEntry;
 
-	auto initStages = [&](span<const u32> fragSpv) {
-		VkShaderModule fragModule = createShaderMod(fragSpv);
+	auto initStagesNamed = [&](span<const u32> fragSpv, const char* name) {
+		VkShaderModule fragModule = createShaderModNamed(fragSpv, name);
 
 		std::array<VkPipelineShaderStageCreateInfo, 2> ret {};
 		ret[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
