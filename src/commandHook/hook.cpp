@@ -18,6 +18,7 @@
 #include <vkutil/enumString.hpp>
 #include <util/util.hpp>
 #include <util/profiling.hpp>
+
 #include <accelStructVertices.comp.spv.h>
 
 #include <copyTex.comp.1DArray.spv.h>

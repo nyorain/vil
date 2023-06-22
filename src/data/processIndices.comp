@@ -1,0 +1,47 @@
+#version 460
+
+layout(set = 0, binding = 0) readonly buffer Indices {
+	uint srcIndices[];
+};
+
+layout(set = 0, binding = 1) buffer OutData {
+	uint minIndex;
+	uint maxIndex;
+	uint dstIndices[];
+};
+
+layout(push_constant) uniform PCR {
+	uint indexType;
+	uint indexCount;
+};
+
+const uint uintsPerInvoc = 8u;
+
+void main() {
+	uint offset = gl_GlobalInvocationID.x * uintsPerInvoc;
+
+	uint ownMax = 0u;
+	uint ownMin = 0xFFFFFFFFu;
+
+	for(uint i = 0u; i < uintsPerInvoc && offset + i < indexCount; ++i) {
+		uint index = srcIndices[offset + i];
+		if(indexType == 2) {
+			uint index0 = index & 0xFFFFu;
+			uint index1 = index >> 16u;
+			ownMax = max(ownMax, index0);
+			ownMax = max(ownMax, index1);
+
+			ownMin = min(ownMin, index0);
+			ownMin = min(ownMin, index1);
+		} else {
+			ownMin = min(ownMin, index);
+			ownMax = max(ownMax, index);
+		}
+
+		dstIndices[offset + i] = index;
+	}
+
+	atomicMax(maxIndex, ownMax);
+	atomicMin(minIndex, ownMin);
+}
+
