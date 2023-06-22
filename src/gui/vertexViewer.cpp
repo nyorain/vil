@@ -618,6 +618,8 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 		dlg_assert_or(data.indexBuffer.buffer, return);
 		dlg_assert_or(data.indexBuffer.size, return);
 
+		// TODO: I guess we could currently have indices in the buffer
+		// here that aren't captured in the vertex buffer, so out-of-range
 		dev.dispatch.CmdBindIndexBuffer(cb, data.indexBuffer.buffer,
 			0, *data.params.indexType);
 		dev.dispatch.CmdDrawIndexed(cb, data.params.drawCount, 1,
