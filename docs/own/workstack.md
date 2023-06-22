@@ -45,11 +45,11 @@
 		- [ ] color using another input.
 		- [x] allow not clearing background of canvas, draw on blurred ui directly?
 		      looks kinda neat as well. Should probably be checkbox
-		- [ ] allow to render wireframe *and* shaded view.
+		- [ ] allow to render wireframe *and* shaded view together
 		- [ ] some more shading options? Allow to select a hdri and roughness?
 	- [ ] allow to modify canvas size. I.e. make vertically resizeable
 	- [ ] (low prio) Explicitly allow to modify what is used as position input?
-	- [ ] Fix Recenter for top-level AccelStruct view
+	- [x] Fix Recenter for top-level AccelStruct view
 	- [ ] Allow to explicitly toggle between perspective and non-perspective projection?
 	- [ ] make perspective heuristic more robust, caused issues in past.
 	- [x] Add arcball camera controls (allow both or allow to toggle via ui)
