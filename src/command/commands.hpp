@@ -1652,6 +1652,55 @@ struct CommandVisitor {
 	virtual void visit(const BindIndexBufferCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const BindPipelineCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const BindDescriptorSetCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetScissorCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetViewportCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetLineWidthCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthBiasCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthBoundsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetBlendConstantsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetStencilCompareMaskCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetStencilWriteMaskCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetStencilReferenceCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const BeginQueryCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const EndQueryCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const ResetQueryPoolCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const WriteTimestampCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const CopyQueryPoolResultsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const PushDescriptorSetCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const PushDescriptorSetWithTemplateCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetFragmentShadingRateCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const SetLineStippleCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetCullModeCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetFrontFaceCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetPrimitiveTopologyCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetScissorWithCountCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetViewportWithCountCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthTestEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthWriteEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthCompareOpCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthBoundsTestEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetStencilTestEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetStencilOpCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetPatchControlPointsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetRasterizerDiscardEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDepthBiasEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetLogicOpCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetPrimitiveRestartEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetSampleLocationsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetDiscardRectangleCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetVertexInputCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetColorWriteEnableCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+
+	virtual void visit(const CopyAccelStructCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const CopyAccelStructToMemoryCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const CopyMemoryToAccelStructCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const WriteAccelStructsPropertiesCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const BuildAccelStructsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const BuildAccelStructsIndirectCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
+	virtual void visit(const SetRayTracingPipelineStackSizeCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 };
 
 template<typename F>
@@ -1731,6 +1780,54 @@ struct TemplateCommandVisitor : CommandVisitor {
 	void visit(const BindIndexBufferCmd& cmd) override { f(cmd); }
 	void visit(const BindPipelineCmd& cmd) override { f(cmd); }
 	void visit(const BindDescriptorSetCmd& cmd) override { f(cmd); }
+
+	virtual void visit(const SetLineWidthCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDepthBiasCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDepthBoundsCmd& cmd) { f(cmd); }
+	virtual void visit(const SetBlendConstantsCmd& cmd) { f(cmd); }
+	virtual void visit(const SetStencilCompareMaskCmd& cmd) { f(cmd); }
+	virtual void visit(const SetStencilWriteMaskCmd& cmd) { f(cmd); }
+	virtual void visit(const SetStencilReferenceCmd& cmd) { f(cmd); }
+
+	virtual void visit(const BeginQueryCmd& cmd) { f(cmd); }
+	virtual void visit(const EndQueryCmd& cmd) { f(cmd); }
+	virtual void visit(const ResetQueryPoolCmd& cmd) { f(cmd); }
+	virtual void visit(const WriteTimestampCmd& cmd) { f(cmd); }
+	virtual void visit(const CopyQueryPoolResultsCmd& cmd) { f(cmd); }
+
+	virtual void visit(const PushDescriptorSetCmd& cmd) { f(cmd); }
+	virtual void visit(const PushDescriptorSetWithTemplateCmd& cmd) { f(cmd); }
+	virtual void visit(const SetFragmentShadingRateCmd& cmd) { f(cmd); }
+
+	virtual void visit(const SetLineStippleCmd& cmd) { f(cmd); }
+	virtual void visit(const SetCullModeCmd& cmd) { f(cmd); }
+	virtual void visit(const SetFrontFaceCmd& cmd) { f(cmd); }
+	virtual void visit(const SetPrimitiveTopologyCmd& cmd) { f(cmd); }
+	virtual void visit(const SetScissorWithCountCmd& cmd) { f(cmd); }
+	virtual void visit(const SetViewportWithCountCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDepthTestEnableCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDepthWriteEnableCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDepthCompareOpCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDepthBoundsTestEnableCmd& cmd) { f(cmd); }
+	virtual void visit(const SetStencilTestEnableCmd& cmd) { f(cmd); }
+	virtual void visit(const SetStencilOpCmd& cmd) { f(cmd); }
+	virtual void visit(const SetPatchControlPointsCmd& cmd) { f(cmd); }
+	virtual void visit(const SetRasterizerDiscardEnableCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDepthBiasEnableCmd& cmd) { f(cmd); }
+	virtual void visit(const SetLogicOpCmd& cmd) { f(cmd); }
+	virtual void visit(const SetPrimitiveRestartEnableCmd& cmd) { f(cmd); }
+	virtual void visit(const SetSampleLocationsCmd& cmd) { f(cmd); }
+	virtual void visit(const SetDiscardRectangleCmd& cmd) { f(cmd); }
+	virtual void visit(const SetVertexInputCmd& cmd) { f(cmd); }
+	virtual void visit(const SetColorWriteEnableCmd& cmd) { f(cmd); }
+
+	virtual void visit(const CopyAccelStructCmd& cmd) { f(cmd); }
+	virtual void visit(const CopyAccelStructToMemoryCmd& cmd) { f(cmd); }
+	virtual void visit(const CopyMemoryToAccelStructCmd& cmd) { f(cmd); }
+	virtual void visit(const WriteAccelStructsPropertiesCmd& cmd) { f(cmd); }
+	virtual void visit(const BuildAccelStructsCmd& cmd) { f(cmd); }
+	virtual void visit(const BuildAccelStructsIndirectCmd& cmd) { f(cmd); }
+	virtual void visit(const SetRayTracingPipelineStackSizeCmd& cmd) { f(cmd); }
 };
 
 template<typename C>
