@@ -7,6 +7,7 @@
 #include <nytl/bytes.hpp>
 #include <util/ownbuf.hpp>
 #include <util/util.hpp>
+#include <vkutil/pipe.hpp>
 #include <frame.hpp>
 #include <cb.hpp>
 #include <vk/vulkan.h>
@@ -61,9 +62,15 @@ struct CommandHookOps {
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
-	bool copyVertexBuffers {}; // could specify the needed subset in future
-	bool copyIndexBuffers {};
+
+	bool copyVertexInput {};
+	u32 vertexInputCmd {}; // for multi draw, specifies the command for which to copy
+	u32 indexSizeHint {u32(-1)};
+	std::vector<u32> vertexBufSizeHints;
+
 	bool copyXfb {}; // transform feedback
+	u32 xfbSizeHint {u32(-1)};
+
 	bool copyIndirectCmd {};
 	std::vector<DescriptorCopyOp> descriptorCopies;
 	std::vector<AttachmentCopyOp> attachmentCopies; // only for cmd inside renderpass
@@ -222,6 +229,7 @@ private:
 	// structure copies
 	void initAccelStructCopy(Device& dev);
 	void initImageCopyPipes(Device& dev);
+	void initVertexCopy(Device& dev);
 
 	// Checks whether the copied descriptors in the associated
 	// record have changed (via update-after-bind) since the hooked
@@ -269,6 +277,29 @@ public: // TODO, for copying. Maybe just move them to Device?
 	VkDescriptorSetLayout sampleImageDsLayout_ {};
 	VkPipelineLayout sampleImagePipeLayout_ {};
 	VkPipeline sampleImagePipes_[ShaderImageType::count] {};
+
+	// = Indirect vertex copy pipes =
+	// Transforms a DrawIndirectCommand into an indirect dispatch cmd
+	// for copyVertices
+	vku::DynamicPipe writeVertexCmdDirect_;
+	vku::DynamicPipe writeVertexCmdDirectCountBuf_;
+	// Transforms a DrawIndexedIndirectCommand into an indirect dispatch cmd
+	// for processIndices
+	vku::DynamicPipe writeIndexCmd_;
+	vku::DynamicPipe writeIndexCmdCountBuf_;
+	// iterates over indices, copies them and computes min/max bounds
+	vku::DynamicPipe processIndices16_;
+	vku::DynamicPipe processIndices32_;
+	// given index bounds, writes an indirect dispatch command for
+	// copyVertices. Also decides if vertices are copied as they are in the
+	// vertex buffer or indices are resolved
+	vku::DynamicPipe writeVertexCmd_;
+	// Copies the vertices from the vertex buffer (and potentially resolves
+	// indices in the process)
+	vku::DynamicPipe copyVertices16_;
+	vku::DynamicPipe copyVertices32_;
+
+	vku::DescriptorAllocator dsAlloc_;
 };
 
 } // namespace vil

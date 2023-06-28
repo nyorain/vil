@@ -1021,6 +1021,178 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info, bool isBef
 	}
 }
 
+void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
+	auto& dev = *record->dev;
+	DebugLabel lbl(dev, cb, "vil:copyVertexInput");
+
+	// We might use the vertex/index buffer copies when rendering the ui
+	// later on so we have to care about queue families
+	auto queueFams = combineQueueFamilies({{record->queueFamily, dev.gfxQueue->family}});
+
+	// PERF: we could support tighter buffer bounds for indirect/indexed draw
+	// calls. See node 1749 for a sketch using a couple of compute shaders,
+	// basically emulating an indirect transfer.
+	// PERF: for non-indexed/non-indirect draw calls we know the exact
+	// sizes of vertex/index buffers to copy, we could use that.
+	auto maxVertIndSize = maxBufCopySize;
+
+	DrawCmdBase* cmd {};
+
+	// bool indexed {};
+	// Buffer* indirectBuf {};
+	// u32 indirectOffset {};
+	// Buffer* countBuf {};
+	// u32 countBufOffset {};
+
+	auto copyVertexBufs = [&](bool indirect, unsigned vertexCount, VkIndexType indexType) {
+		auto* pipe = static_cast<const GraphicsPipeline*>(cmd->boundPipe());
+
+		// doesn't matter if we use 16-bit or 32-bit pipe
+		dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
+			indexType == VK_INDEX_TYPE_UINT16 ||
+			indexType == VK_INDEX_TYPE_NONE_KHR);
+		auto& vertPipe = indexType == VK_INDEX_TYPE_UINT16 ?
+			hook->copyVertices16_ :
+			hook->copyVertices32_;
+
+		for(auto& vertbuf : pipe->vertexBindings) {
+			ensureSize(state->vertexBufCopies, vertbuf.binding + 1);
+
+			dlg_assert_or(cmd->state->vertices.size() > vertbuf.binding, continue);
+			auto& src = cmd->state->vertices[vertbuf.binding];
+
+			auto& dst = state->vertexBufCopies[vertbuf.binding];
+			const auto usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+			dst.ensure(dev, 16 + vertexCount * vertbuf.stride,
+				usage, queueFams);
+
+			// write copyType
+			auto wbuf = dst.writeData();
+			nytl::skip(wbuf, 4 * sizeof(u32));
+			nytl::write<u32>(wbuf, 1u);
+			dst.flushMap();
+
+			auto ds = hook->dsAlloc_.alloc(vertPipe.dynDsLayout(0u));
+			vku::DescriptorUpdate dsu(ds);
+			if(indexType == VK_INDEX_TYPE_NONE_KHR) {
+				// indices, disregarded. Just set some buffer
+				dsu(vku::BufferSpan{src.buffer->handle, {src.offset, VK_WHOLE_SIZE}});
+			} else {
+				auto& inds = cmd->state->indices;
+				dsu(vku::BufferSpan{inds.buffer->handle, {inds.offset, VK_WHOLE_SIZE}});
+			}
+			dsu(vku::BufferSpan{src.buffer->handle, {src.offset, VK_WHOLE_SIZE}});
+			dsu(dst.buf);
+
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				vertPipe.pipe());
+			dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				vertPipe.pipeLayout().vkHandle(), 0u, 1u, &ds.vkHandle(), 0u, nullptr);
+
+			auto bufStride = u32(vertbuf.stride);
+			dev.dispatch.CmdPushConstants(cb, vertPipe.pipeLayout().vkHandle(),
+				VK_SHADER_STAGE_COMPUTE_BIT, 0u, 4u, &bufStride);
+
+			if(indirect) {
+				// TODO: hmm what to use here?
+				dev.dispatch.CmdDispatchIndirect(cb, ...);
+			} else {
+				auto groupCount = ceilDivide(vertexCount, 64u);
+				dev.dispatch.CmdDispatch(cb, groupCount, 1u, 1u);
+			}
+
+			dynds.push_back(std::move(ds));
+		}
+	};
+
+	auto finalizeIndexedCopy = [&]{
+		auto ds = hook->dsAlloc_.alloc(hook->writeIndexCmd_.dynDsLayout(0));
+		dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+
+		auto indexType = cmd->state->indices.type;
+		dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
+			indexType == VK_INDEX_TYPE_UINT16);
+		copyVertexBufs(true, hintCount, indexType);
+	};
+
+	if(auto* dcmd = commandCast<DrawCmd*>(&bcmd); dcmd) {
+		cmd = dcmd;
+		copyVertexBufs(false, dcmd->vertexCount, VK_INDEX_TYPE_NONE_KHR);
+	} else if(auto* dcmd = commandCast<DrawIndexedCmd*>(&bcmd); dcmd) {
+		cmd = dcmd;
+	} else if(auto* dcmd = commandCast<DrawIndirectCmd*>(&bcmd); dcmd) {
+		cmd = dcmd;
+	} else if(auto* dcmd = commandCast<DrawIndirectCountCmd*>(&bcmd); dcmd) {
+		cmd = dcmd;
+	} else if(auto* dcmd = commandCast<DrawMultiCmd*>(&bcmd); dcmd) {
+		cmd = dcmd;
+	} else if(auto* dcmd = commandCast<DrawMultiIndexedCmd*>(&bcmd); dcmd) {
+		cmd = dcmd;
+	}
+
+	if(indirectBuf) {
+		if(indexed) {
+			auto& cmdPipe = countBuf ?
+				hook->writeIndexCmdCountBuf_ :
+				hook->writeIndexCmd_;
+			auto ds = hook->dsAlloc_.alloc(cmdPipe.dynDsLayout(0u));
+			dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+
+			auto indexType = cmd->state->indices.type;
+			dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
+				indexType == VK_INDEX_TYPE_UINT16);
+			auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
+				hook->processIndices32_ :
+				hook->processIndices16_;
+			dev.dispatch.CmdDispatchIndirect(cb, ...);
+		} else {
+			auto& cmdPipe = countBuf ?
+				hook->writeVertexCmdDirectCountBuf_ :
+				hook->writeVertexCmdDirect_;
+			dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+
+			// doesn't matter if we use 16-bit or 32-bit pipe
+			auto& vertPipe = hook->copyVertices32_;
+			dev.dispatch.CmdDispatchIndirect(cb, ...);
+		}
+	} else {
+		if(indexed) {
+			auto indexType = cmd->state->indices.type;
+			dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
+				indexType == VK_INDEX_TYPE_UINT16);
+			auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
+				hook->processIndices32_ :
+				hook->processIndices16_;
+
+			auto ds = hook->dsAlloc_.alloc(indexPipe.dynDsLayout(0u));
+			dev.dispatch.CmdDispatch(cb, ...);
+		} else {
+		}
+	}
+
+	///
+	for(auto& vertbuf : cmd->state->vertices) {
+		auto& dst = state->vertexBufCopies.emplace_back();
+		if(!vertbuf.buffer) {
+			continue;
+		}
+
+		auto size = std::min(maxVertIndSize, vertbuf.buffer->ci.size - vertbuf.offset);
+		initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+			*vertbuf.buffer, vertbuf.offset, size, queueFams);
+	}
+
+	auto& inds = drawCmd->state->indices;
+	if(inds.buffer) {
+		auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
+		initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+			*inds.buffer, inds.offset, size, queueFams);
+	}
+
+	info.rebindComputeState = true;
+}
+
 void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:beforeDstOutsideRp");
@@ -1117,46 +1289,10 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		}
 	}
 
-	// We might use the vertex/index buffer copies when rendering the ui
-	// later on so we have to care about queue families
-	auto queueFams = combineQueueFamilies({{record->queueFamily, dev.gfxQueue->family}});
-
-	// PERF: we could support tighter buffer bounds for indirect/indexed draw
-	// calls. See node 1749 for a sketch using a couple of compute shaders,
-	// basically emulating an indirect transfer.
-	// PERF: for non-indexed/non-indirect draw calls we know the exact
-	// sizes of vertex/index buffers to copy, we could use that.
-	auto maxVertIndSize = maxBufCopySize;
-
 	const bool isDraw = bcmd.category() == CommandCategory::draw;
-	dlg_assert(!info.ops.copyVertexBuffers || isDraw);
-	if(info.ops.copyVertexBuffers && isDraw) {
-		DebugLabel lbl(dev, cb, "vil:copyVertexBuffers");
-
-		auto* drawCmd = deriveCast<DrawCmdBase*>(&bcmd);
-		for(auto& vertbuf : drawCmd->state->vertices) {
-			auto& dst = state->vertexBufCopies.emplace_back();
-			if(!vertbuf.buffer) {
-				continue;
-			}
-
-			auto size = std::min(maxVertIndSize, vertbuf.buffer->ci.size - vertbuf.offset);
-			initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-				*vertbuf.buffer, vertbuf.offset, size, queueFams);
-		}
-	}
-
-	dlg_assert(!info.ops.copyIndexBuffers || isDraw);
-	if(info.ops.copyIndexBuffers && isDraw) {
-		DebugLabel lbl(dev, cb, "vil:copyIndexBuffers");
-
-		auto* drawCmd = deriveCast<DrawCmdBase*>(&bcmd);
-		auto& inds = drawCmd->state->indices;
-		if(inds.buffer) {
-			auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
-			initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-				*inds.buffer, inds.offset, size, queueFams);
-		}
+	dlg_assert(!info.ops.copyVertexInput || isDraw);
+	if(info.ops.copyVertexInput) {
+		copyVertexInput(bcmd, info);
 	}
 
 	// transfer

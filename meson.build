@@ -272,6 +272,8 @@ src = files(
 	'src/vkutil/cmd.cpp',
 	'src/vkutil/handles.cpp',
 	'src/vkutil/dynds.cpp',
+	'src/vkutil/pipe.cpp',
+	'src/vkutil/spirv_reflect.c',
 
 	# useful for visual studio build to include headers here
 	'src/fwd.hpp',
