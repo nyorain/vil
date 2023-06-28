@@ -17,6 +17,11 @@ if glslang.found()
 		'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
 	}
 
+	idxtable = {
+		'idx16.': ['-DIndexType=u16'],
+		'idx32.': ['-DIndexType=uint'],
+	}
+
 	texelstore_table = imgtable
 	foreach name, config : imgtable
 		name = name + 'noformat.'
@@ -54,6 +59,12 @@ if glslang.found()
 		'histogramPrepare.comp': {'': [] },
 		'histogram.vert': {'': [] },
 		'histogram.frag': {'': [] },
+		# indirect vertex copy
+		'writeVertexCmdDirect.comp': {'': [] },
+		'writeIndexCmd.comp': {'': [] },
+		'processIndices.comp': idxtable,
+		'writeVertexCmd.comp': {'': [] },
+		'copyVertices.comp': idxtable,
 	}
 
 	glslang_version_info = run_command(glslang, '--version', check: true).stdout()
