@@ -4,6 +4,7 @@
 #include <util/ownbuf.hpp>
 #include <command/record.hpp>
 #include <commandHook/state.hpp>
+#include <vkutil/dynds.hpp>
 
 namespace vil {
 
@@ -96,6 +97,8 @@ struct CommandHookRecord {
 	std::vector<VkImageView> imageViews;
 	std::vector<VkBufferView> bufferViews;
 
+	std::vector<vku::DynDs> dynds;
+
 	// Linked list of all records belonging to this->hook
 	CommandHookRecord* next {};
 	CommandHookRecord* prev {};
@@ -167,6 +170,7 @@ private:
 		const DescriptorCopyOp&, unsigned copyDstID,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow);
+	void copyVertexInput(Command& bcmd, RecordInfo&);
 	void copyAttachment(const Command& bcmd, const RecordInfo&,
 		AttachmentType type, unsigned id,
 		CommandHookState::CopiedAttachment& dst);
