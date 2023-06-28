@@ -41,6 +41,14 @@
 #include <copyTex.comp.u3D.noformat.spv.h>
 #include <copyTex.comp.i3D.noformat.spv.h>
 
+#include <writeVertexCmd.comp.spv.h>
+#include <writeIndexCmd.comp.spv.h>
+#include <processIndices.comp.idx16.spv.h>
+#include <processIndices.comp.idx32.spv.h>
+#include <writeVertexCmdDirect.comp.spv.h>
+#include <copyVertices.comp.idx16.spv.h>
+#include <copyVertices.comp.idx32.spv.h>
+
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
 //   barriers.
@@ -103,6 +111,7 @@ CommandHook::CommandHook(Device& dev) {
 	dev_ = &dev;
 	hookAccelStructBuilds = checkEnvBinary("VIL_CAPTURE_ACCEL_STRUCTS", true);
 	initImageCopyPipes(dev);
+	initVertexCopy(dev);
 	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
 		initAccelStructCopy(dev);
 	}
@@ -291,6 +300,37 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	nameHandle(dev, accelStructVertCopy_, "CommandHook:accelStructVertCopy");
 
 	dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
+}
+
+void CommandHook::initVertexCopy(Device& dev) {
+	writeVertexCmdDirect_.init(dev, {{{
+		writeVertexCmdDirect_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeVertexCmdDirect");
+	writeIndexCmd_.init(dev, {{{
+		writeIndexCmd_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeIndexCmd");
+	processIndices16_.init(dev, {{{
+		processIndices_comp_idx16_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"processIndices16");
+	processIndices32_.init(dev, {{{
+		processIndices_comp_idx32_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"processIndices32");
+	writeVertexCmd_.init(dev, {{{
+		writeVertexCmdDirect_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeVertexCmd");
+	copyVertices16_.init(dev, {{{
+		copyVertices_comp_idx16_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVertices16");
+	copyVertices32_.init(dev, {{{
+		copyVertices_comp_idx32_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVertices32");
 }
 
 // TODO: temporary removal of record.dsState due to sync issues.

@@ -1,0 +1,54 @@
+#version 460
+
+layout(local_size_x = 1) in;
+
+#extension GL_GOOGLE_include_directive : require
+#include "vertexCopy.glsl"
+
+layout(set = 0, binding = 0) buffer InData {
+	uint indexCount;
+	uint minIndex;
+	uint maxIndex;
+};
+
+layout(push_constant) uniform PCR {
+	uint outVertexBufSize; // in bytes
+	uint outIndexBufSize; // in bytes
+	uint vertexSize;
+	uint indexSize;
+};
+
+layout(set = 0, binding = 1) buffer OutData {
+	uint dispatchX;
+	uint dispatchY;
+	uint dispatchZ;
+	uint dstType;
+};
+
+void main() {
+	if(indexCount == 0) {
+		dispatchX = 0u;
+		dispatchY = 0u;
+		dispatchZ = 0u;
+		break;
+	}
+
+	const uint neededCopyVertBufSize = vertexSize * (maxIndex - minIndex);
+	const bool doResolveIndices =
+		neededCopyVertBufSize > outVertexBufSize ||
+		maxIndex - minIndex > indexCount;
+
+	if(doResolveIndices) {
+		// In this case, we copy the vertices as addressed by index buffer
+		// We still copy the index buffer just to show its data in the UI
+		dstType = resolveIndices;
+		dispatchX = min(indexCount, outVertexBufSize / vertexSize);
+	} else {
+		// in this case, we copy the vertices just as they are in the vertex buffer
+		dstType = copyVertices;
+		dispatchX = maxIndex - minIndex;
+	}
+
+	dispatchY = 1u;
+	dispatchZ = 1u;
+}
