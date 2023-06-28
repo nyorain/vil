@@ -1,0 +1,61 @@
+#version 460
+
+// TODO: could find a way to not need this, but will
+// make code a lot more complicated (especially for non-4-byte-aligned
+// vertex strides).
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_GOOGLE_include_directive : require
+
+#define u16 uint16_t
+#define u8 uint8_t
+
+#include "vertexCopy.glsl"
+
+layout(local_size_x = 64) in;
+
+// defined during compilation for the different variants
+// #define IndexType uint
+// #define IndexType u16
+
+layout(set = 0, binding = 0) readonly buffer Indices {
+	IndexType srcIndices[];
+};
+
+layout(set = 0, binding = 1) readonly buffer InVertices {
+	u8 data[];
+} src;
+
+layout(set = 0, binding = 2) buffer OutVertices {
+	uint pad0_;
+	uint pad1_;
+	uint pad2_;
+	uint copyType;
+	u8 data[];
+} dst;
+
+layout(push_constant) uniform PCR {
+	uint vertexStride; // in bytes
+};
+
+void main() {
+	uint offset = gl_GlobalInvocationID.x;
+
+	if(offset * vertexStride > dst.data.length()) {
+		return;
+	}
+
+	uint numBytes = min(vertexStride, dst.data.length() - offset * vertexStride);
+	if(copyType == copyVertices) {
+		for(uint i = 0u; i < numBytes; ++i) {
+			dst.data[offset * vertexStride + i] = src.data[offset * vertexStride + i];
+		}
+	} else {
+		uint index = uint(srcIndices[offset]);
+		for(uint i = 0u; i < numBytes; ++i) {
+			dst.data[offset * vertexStride + i] =
+				src.data[index * vertexStride + i];
+		}
+	}
+}
+

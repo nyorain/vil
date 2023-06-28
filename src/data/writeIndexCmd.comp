@@ -1,0 +1,57 @@
+#version 460
+
+layout(local_size_x = 1) in;
+
+#extension GL_GOOGLE_include_directive : require
+#include "vertexCopy.glsl"
+
+layout(push_constant) uniform PCR {
+	uint outIndexBufSize; // in bytes
+	uint indexSize;
+};
+
+layout(set = 0, binding = 0) buffer InData {
+	// VkDrawIndexedIndirectCommand
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+layout(set = 0, binding = 1) buffer OutCmd {
+	uint dispatchX;
+	uint dispatchY;
+	uint dispatchZ;
+	uint _pad0;
+	uint numIndices;
+};
+
+#ifdef COUNTER_BUF
+layout(set = 0, binding = 2) buffer CountBuf {
+	uint counter;
+};
+#endif // COUNTER_BUF
+
+void main() {
+	// TODO: setup instance data copy
+
+#ifdef COUNTER_BUF
+	if(drawID > drawCount) {
+		numIndices = 0u;
+		dispatchX = 0u;
+		dispatchY = 0u;
+		dispatchZ = 0u;
+		return;
+	}
+#endif // COUNTER_BUF
+
+	numIndices = indexCount;
+	dispatchX = min(
+		ceilDivide(indexCount, 64 * indicesPerInvoc),
+		outIndexBufSize / indexSize // floor
+	);
+
+	dispatchY = 1u;
+	dispatchZ = 1u;
+}
