@@ -132,5 +132,13 @@ private:
 	span<const VkDescriptorBindingFlags> flags_;
 };
 
+class DescriptorAllocator {
+public:
+	DynDs alloc(const DynDsLayout& layout);
+
+private:
+	std::deque<DescriptorPool> dsPools_;
+};
+
 } // namespace vil::vku
 

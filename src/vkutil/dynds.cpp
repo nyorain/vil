@@ -266,4 +266,63 @@ void DescriptorUpdate::reset() {
 	currentID_ = 0u;
 }
 
+DynDs DescriptorAllocator::alloc(const DynDsLayout& layout) {
+	auto& dev = layout.dev();
+
+	VkDescriptorSetAllocateInfo dsi {};
+	dsi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	dsi.descriptorSetCount = 1u;
+	dsi.pSetLayouts = &layout.vkHandle();
+
+	// VkDescriptorSetVariableDescriptorCountAllocateInfo vci;
+	// if(varCount) {
+	//	vci.sType
+	// 	vci.descriptorSetCount = 1u;
+	// 	vci.pDescriptorCounts = &*varCount;
+	// 	dsi.pNext = &vci;
+	// }
+
+	// check if there is a pool with enough free space left
+	for(auto& pool : dsPools_) {
+		dlg_assert(pool.vkHandle());
+
+		dsi.descriptorPool = pool.vkHandle();
+		VkDescriptorSet ds;
+		auto res = dev.dispatch.AllocateDescriptorSets(dev.handle,
+			&dsi, &ds);
+
+		// with Vulkan 1.1, implementations must signal if they
+		// are out of space.
+		if(res == VK_ERROR_FRAGMENTED_POOL ||
+				res == VK_ERROR_OUT_OF_POOL_MEMORY) {
+			continue;
+		}
+
+		dlg_assert_or(res == VK_SUCCESS, continue);
+		return DynDs{pool.vkHandle(), layout, ds};
+	}
+
+	// Create a new pool
+	dlg_info("Creating new descriptor pool");
+
+	// TODO: don't just hardcode the types here...
+	auto sizes = std::vector {
+		VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+	};
+
+	VkDescriptorPoolCreateInfo dpci;
+	dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	dpci.pPoolSizes = sizes.data();
+	dpci.poolSizeCount = sizes.size();
+	dpci.maxSets = 1000;
+	auto& pool = dsPools_.emplace_back(dev, dpci);
+
+	dsi.descriptorPool = pool.vkHandle();
+	VkDescriptorSet ds;
+	auto res = dev.dispatch.AllocateDescriptorSets(dev.handle, &dsi, &ds);
+
+	dlg_assert(res == VK_SUCCESS);
+	return DynDs{pool.vkHandle(), layout, ds};
+}
+
 } // namespace vil::vku

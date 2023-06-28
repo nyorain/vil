@@ -1,44 +1,47 @@
 #version 460
 
+layout(local_size_x = 64) in;
+
+// TODO: could find a way to not need this, but will
+// make code a lot more complicated (especially for non-4-byte-aligned
+// vertex strides).
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_GOOGLE_include_directive : require
+
+#define u16 uint16_t
+#define u8 uint8_t
+
+#include "vertexCopy.glsl"
+
+// defined during compilation for the different variants
+// #define IndexType uint
+// #define IndexType u16
+
 layout(set = 0, binding = 0) readonly buffer Indices {
-	uint srcIndices[];
+	IndexType srcIndices[];
 };
 
 layout(set = 0, binding = 1) buffer OutData {
+	uint indexCount;
+	uint _pad;
 	uint minIndex;
 	uint maxIndex;
-	uint dstIndices[];
+	IndexType dstIndices[];
 };
-
-layout(push_constant) uniform PCR {
-	uint indexType;
-	uint indexCount;
-};
-
-const uint uintsPerInvoc = 8u;
 
 void main() {
-	uint offset = gl_GlobalInvocationID.x * uintsPerInvoc;
+	uint offset = gl_GlobalInvocationID.x * indicesPerInvoc;
 
 	uint ownMax = 0u;
 	uint ownMin = 0xFFFFFFFFu;
 
-	for(uint i = 0u; i < uintsPerInvoc && offset + i < indexCount; ++i) {
-		uint index = srcIndices[offset + i];
-		if(indexType == 2) {
-			uint index0 = index & 0xFFFFu;
-			uint index1 = index >> 16u;
-			ownMax = max(ownMax, index0);
-			ownMax = max(ownMax, index1);
+	uint maxCount = min(indexCount, dstIndices.length());
+	for(uint i = 0u; i < indicesPerInvoc && offset + i < maxCount; ++i) {
+		uint index = uint(srcIndices[offset + i]);
+		ownMin = min(ownMin, index);
+		ownMax = max(ownMax, index);
 
-			ownMin = min(ownMin, index0);
-			ownMin = min(ownMin, index1);
-		} else {
-			ownMin = min(ownMin, index);
-			ownMax = max(ownMax, index);
-		}
-
-		dstIndices[offset + i] = index;
+		dstIndices[offset + i] = IndexType(index);
 	}
 
 	atomicMax(maxIndex, ownMax);
