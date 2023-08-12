@@ -14,37 +14,45 @@ layout(local_size_x = 64) in;
 #include "vertexCopy.glsl"
 
 // defined during compilation for the different variants
-// #define IndexType uint
+#ifndef IndexType
+#define IndexType uint
 // #define IndexType u16
+#endif // IndexType
 
 layout(set = 0, binding = 0) readonly buffer Indices {
 	IndexType srcIndices[];
 };
 
 layout(set = 0, binding = 1) buffer OutData {
-	uint indexCount;
-	uint _pad;
-	uint minIndex;
-	uint maxIndex;
+	Metadata info;
 	IndexType dstIndices[];
 };
 
 void main() {
-	uint offset = gl_GlobalInvocationID.x * indicesPerInvoc;
+	const uint invocOff = gl_GlobalInvocationID.x * indicesPerInvoc;
+	const uint cmdIndexOffset = info.copyTypeOrIndexOffset;
+	const uint srcOffset = cmdIndexOffset + invocOff;
+	const uint dstOffset = invocOff;
+
+	const uint maxCount = min(srcOffset + info.indexCount, srcIndices.length());
+	if(srcOffset >= maxCount) {
+		return;
+	}
 
 	uint ownMax = 0u;
 	uint ownMin = 0xFFFFFFFFu;
 
-	uint maxCount = min(indexCount, dstIndices.length());
-	for(uint i = 0u; i < indicesPerInvoc && offset + i < maxCount; ++i) {
-		uint index = uint(srcIndices[offset + i]);
+	for(uint i = 0u; i < indicesPerInvoc && srcOffset + i < maxCount; ++i) {
+		uint index = uint(srcIndices[srcOffset + i]);
 		ownMin = min(ownMin, index);
 		ownMax = max(ownMax, index);
 
-		dstIndices[offset + i] = IndexType(index);
+		if(dstOffset + i < dstIndices.length()) {
+			dstIndices[dstOffset + i] = IndexType(index);
+		}
 	}
 
-	atomicMax(maxIndex, ownMax);
-	atomicMin(minIndex, ownMin);
+	atomicMax(info.maxIndex, ownMax);
+	atomicMin(info.minIndex, ownMin);
 }
 

@@ -52,21 +52,6 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	dev.setDeviceLoaderData(dev.handle, this->cb);
 	nameHandle(dev, this->cb, "CommandHookRecord:cb");
 
-	// query pool
-	if(ops.queryTime) {
-		auto validBits = dev.queueFamilies[xrecord.queueFamily].props.timestampValidBits;
-		if(validBits == 0u) {
-			dlg_info("Queue family {} does not support timing queries", xrecord.queueFamily);
-		} else {
-			VkQueryPoolCreateInfo qci {};
-			qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-			qci.queryCount = 2u;
-			qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-			VK_CHECK_DEV(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool), dev);
-			nameHandle(dev, this->queryPool, "CommandHookRecord:queryPool");
-		}
-	}
-
 	RecordInfo info {ops};
 	info.descriptors = &descriptors;
 	initState(info);
@@ -80,9 +65,32 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	VK_CHECK_DEV(dev.dispatch.BeginCommandBuffer(this->cb, &cbbi), dev);
 
-	// initial cmd stuff
-	if(this->queryPool) {
-		dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, 2);
+	// query pool
+	const auto ownQueryTime =
+#ifdef VIL_DEBUG
+		ops.copyVertexInput;
+#else // VIL_DEBUG
+		false;
+#endif // VIL_DEBUG
+
+	if(ops.queryTime || ownQueryTime) {
+		auto validBits = dev.queueFamilies[xrecord.queueFamily].props.timestampValidBits;
+		if(validBits == 0u) {
+			dlg_info("Queue family {} does not support timing queries", xrecord.queueFamily);
+		} else {
+			VkQueryPoolCreateInfo qci {};
+			qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+			qci.queryCount = 2u;
+			if(ownQueryTime) {
+				// just to remember not to leave this in here unconditionally
+				qci.queryCount += maxDebugTimings;
+			}
+			qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+			VK_CHECK_DEV(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool), dev);
+			nameHandle(dev, this->queryPool, "CommandHookRecord:queryPool");
+
+			dev.dispatch.CmdResetQueryPool(cb, queryPool, 0, qci.queryCount);
+		}
 	}
 
 	unsigned maxHookLevel {};
@@ -172,8 +180,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		 (info.ops.copyTransferDstBefore || info.ops.copyTransferDstAfter)
 		  	&& commandCast<const ClearAttachmentCmd*>(hcommand.back());
 	const auto careAboutRendering =
-		info.ops.copyVertexBuffers ||
-		 info.ops.copyIndexBuffers ||
+		info.ops.copyVertexInput ||
 		 !info.ops.attachmentCopies.empty() ||
 		 !info.ops.descriptorCopies.empty() ||
 		 info.ops.copyIndirectCmd ||
@@ -204,8 +211,7 @@ void CommandHookRecord::initState(RecordInfo& info) {
 	// some operations (index/vertex/attachment) copies only make sense
 	// inside a render pass.
 	dlg_assert(info.rpi ||
-		(!info.ops.copyVertexBuffers &&
-		 !info.ops.copyIndexBuffers &&
+		(!info.ops.copyVertexInput &&
 		 !hookClearAttachment &&
 		 info.ops.attachmentCopies.empty()));
 
@@ -1021,6 +1027,28 @@ void CommandHookRecord::copyTransfer(Command& bcmd, RecordInfo& info, bool isBef
 	}
 }
 
+// TODO: we over-synchronize here, could be optimized
+void cmdBarrierCompute(Device& dev, VkCommandBuffer cb, OwnBuffer& buf) {
+	auto access =
+		VK_ACCESS_SHADER_READ_BIT |
+		VK_ACCESS_SHADER_WRITE_BIT |
+		VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+
+	VkBufferMemoryBarrier barrier {};
+	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	barrier.srcAccessMask = access;
+	barrier.dstAccessMask = access;
+	barrier.buffer = buf.buf;
+	barrier.size = buf.size;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+
+	dev.dispatch.CmdPipelineBarrier(cb,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+		{}, 0u, nullptr, 1u, &barrier, 0u, nullptr);
+}
+
 void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	DebugLabel lbl(dev, cb, "vil:copyVertexInput");
@@ -1029,165 +1057,473 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 	// later on so we have to care about queue families
 	auto queueFams = combineQueueFamilies({{record->queueFamily, dev.gfxQueue->family}});
 
-	// PERF: we could support tighter buffer bounds for indirect/indexed draw
-	// calls. See node 1749 for a sketch using a couple of compute shaders,
-	// basically emulating an indirect transfer.
-	// PERF: for non-indexed/non-indirect draw calls we know the exact
-	// sizes of vertex/index buffers to copy, we could use that.
-	auto maxVertIndSize = maxBufCopySize;
+	// See vertexCopy.md for more information on this beast
+	// TODO:
+	// - we currently assume that index buffer offsets are aligned
+	//   to allow binding them as storage buffers. Can't assume that!
+	// - missing all the barriers!
+
+	using Metadata = VertexCopyMetadata;
+
+	const u32 fallbackVertexCountHint = 64 * 1024u;
+	const u32 fallbackInstanceCountHint = 1024u;
+	const u32 fallbackIndexCountHint = 64 * 1024u;
 
 	DrawCmdBase* cmd {};
 
-	// bool indexed {};
-	// Buffer* indirectBuf {};
-	// u32 indirectOffset {};
-	// Buffer* countBuf {};
-	// u32 countBufOffset {};
+	u32 timeStampID = 2u;
+	auto cmdTimestamp = [&](auto name) {
+#ifdef VIL_DEBUG
+		dlg_assert(timeStampID < 2 + maxDebugTimings);
 
-	auto copyVertexBufs = [&](bool indirect, unsigned vertexCount, VkIndexType indexType) {
+		VkMemoryBarrier barrier {};
+		barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0u,
+			1u, &barrier, 0u, nullptr, 0u, nullptr);
+
+		auto stage0 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		dev.dispatch.CmdWriteTimestamp(cb, stage0, this->queryPool, timeStampID);
+		dlg_trace("  vertexCopy timeStamp {}: {}", timeStampID, name);
+
+		ownTimingNames.push_back(name);
+
+		++timeStampID;
+#endif // VIL_DEBUG
+	};
+
+	cmdTimestamp("start"); // name irrelevant
+
+	// returned reference only stays valid until function is called again
+	auto allocDs = [&](vku::DynamicPipe& pipe) -> vku::DynDs& {
+		auto ds = hook->dsAlloc_.alloc(pipe.dynDsLayout(0u), pipe.name());
+		dynds.push_back(std::move(ds));
+		return dynds.back();
+	};
+
+	// Returns a BufferSpan fitting the range as closely as possible while
+	// respecting storage buffer alignment. Returns an additional offset
+	// (in number of 32-bit words, i.e. uints) into that range for the
+	// actual range start
+	auto alignedStorageBufferSpan = [&](const Buffer& buf, u64 offset, u64 size)
+			-> std::pair<vku::BufferSpan, u32> {
+		auto align = std::max<u32>(dev.props.limits.minStorageBufferOffsetAlignment, 4u);
+		auto alignedOff = align * (offset / align); // floor
+		auto addOff = offset - alignedOff;
+		dlg_assert(addOff % 4u == 0u);
+
+		if(u64(size) == VK_WHOLE_SIZE) {
+			// TODO: at least assert somehow if we expect that maxStorageBufferRange
+			// might not be large enough?
+			auto maxBufSize = dev.props.limits.maxStorageBufferRange;
+			size = std::min<u64>(maxBufSize - 1, buf.ci.size - alignedOff);
+		} else {
+			size += addOff;
+		}
+
+		return {vku::BufferSpan{buf.handle, {alignedOff, size}}, addOff / 4};
+	};
+
+	auto copyVertexBufs = [&](bool indirect, u32 vertexCount, u32 instanceCount, VkIndexType indexType) {
 		auto* pipe = static_cast<const GraphicsPipeline*>(cmd->boundPipe());
 
 		// doesn't matter if we use 16-bit or 32-bit pipe
 		dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
 			indexType == VK_INDEX_TYPE_UINT16 ||
 			indexType == VK_INDEX_TYPE_NONE_KHR);
-		auto& vertPipe = indexType == VK_INDEX_TYPE_UINT16 ?
-			hook->copyVertices16_ :
-			hook->copyVertices32_;
+
+		if(vertexCount == u32(-1)) {
+			vertexCount = fallbackVertexCountHint;
+		}
+		if(instanceCount == u32(-1)) {
+			instanceCount = fallbackInstanceCountHint;
+		}
 
 		for(auto& vertbuf : pipe->vertexBindings) {
 			ensureSize(state->vertexBufCopies, vertbuf.binding + 1);
 
 			dlg_assert_or(cmd->state->vertices.size() > vertbuf.binding, continue);
 			auto& src = cmd->state->vertices[vertbuf.binding];
-
 			auto& dst = state->vertexBufCopies[vertbuf.binding];
+
+			auto useBytes =
+				(src.stride % 4u != 0u) ||
+				(src.offset % 4u != 0u);
+			auto& vertPipe = indexType == VK_INDEX_TYPE_UINT16 ?
+				useBytes ? hook->copyVerticesByte16_ : hook->copyVerticesUint16_:
+				useBytes ? hook->copyVerticesUint32_ : hook->copyVerticesUint32_;
+
+			u32 inputCount;
+			u32 isInstanceData;
+			if(vertbuf.inputRate == VK_VERTEX_INPUT_RATE_VERTEX) {
+				inputCount = vertexCount;
+				isInstanceData = 0u;
+			} else {
+				inputCount = instanceCount;
+				isInstanceData = 1u;
+			}
+
 			const auto usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 				VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-			dst.ensure(dev, 16 + vertexCount * vertbuf.stride,
+			dst.ensure(dev, inputCount * vertbuf.stride,
 				usage, queueFams);
 
-			// write copyType
-			auto wbuf = dst.writeData();
-			nytl::skip(wbuf, 4 * sizeof(u32));
-			nytl::write<u32>(wbuf, 1u);
-			dst.flushMap();
+			auto& ds = allocDs(vertPipe);
 
-			auto ds = hook->dsAlloc_.alloc(vertPipe.dynDsLayout(0u));
-			vku::DescriptorUpdate dsu(ds);
-			if(indexType == VK_INDEX_TYPE_NONE_KHR) {
-				// indices, disregarded. Just set some buffer
-				dsu(vku::BufferSpan{src.buffer->handle, {src.offset, VK_WHOLE_SIZE}});
-			} else {
-				auto& inds = cmd->state->indices;
-				dsu(vku::BufferSpan{inds.buffer->handle, {inds.offset, VK_WHOLE_SIZE}});
+			// especially important for sparse buffers
+			auto [srcVertBuf, srcVertOffset] = alignedStorageBufferSpan(
+				*src.buffer, src.offset, VK_WHOLE_SIZE);
+
+			{
+				vku::DescriptorUpdate dsu(ds);
+				// TODO: also respect storage buf alignment
+				if(indexType == VK_INDEX_TYPE_NONE_KHR) {
+					// indices, disregarded. Just set some buffer
+					dsu(vku::BufferSpan{src.buffer->handle, {src.offset, VK_WHOLE_SIZE}});
+				} else {
+					auto& inds = cmd->state->indices;
+					dsu(vku::BufferSpan{inds.buffer->handle, {inds.offset, VK_WHOLE_SIZE}});
+				}
+				dsu(srcVertBuf);
+				dsu(dst.asSpan());
+				dsu(state->indexBufCopy.asSpan());
 			}
-			dsu(vku::BufferSpan{src.buffer->handle, {src.offset, VK_WHOLE_SIZE}});
-			dsu(dst.buf);
 
 			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 				vertPipe.pipe());
 			dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 				vertPipe.pipeLayout().vkHandle(), 0u, 1u, &ds.vkHandle(), 0u, nullptr);
 
-			auto bufStride = u32(vertbuf.stride);
+			u32 pcr[] = {0u, 0u, isInstanceData};
+			if(useBytes) {
+				pcr[0] = vertbuf.stride;
+				pcr[1] = 4u * srcVertOffset;
+			} else {
+				pcr[0] = vertbuf.stride / 4u;
+				pcr[1] = srcVertOffset;
+			}
+
 			dev.dispatch.CmdPushConstants(cb, vertPipe.pipeLayout().vkHandle(),
-				VK_SHADER_STAGE_COMPUTE_BIT, 0u, 4u, &bufStride);
+				VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), pcr);
 
 			if(indirect) {
-				// TODO: hmm what to use here?
-				dev.dispatch.CmdDispatchIndirect(cb, ...);
+				auto indirectDispatchOffset = isInstanceData ? 16u : 0u;
+				dev.dispatch.CmdDispatchIndirect(cb,
+					state->indexBufCopy.buf, indirectDispatchOffset);
 			} else {
-				auto groupCount = ceilDivide(vertexCount, 64u);
+				auto groupCount = ceilDivide(inputCount, 64u);
 				dev.dispatch.CmdDispatch(cb, groupCount, 1u, 1u);
 			}
 
 			dynds.push_back(std::move(ds));
 		}
+
+		cmdTimestamp("after_CopyVertexBufs");
 	};
 
-	auto finalizeIndexedCopy = [&]{
-		auto ds = hook->dsAlloc_.alloc(hook->writeIndexCmd_.dynDsLayout(0));
+	auto finalizeIndexedCopy = [&](u32 instanceCount){
+		auto& pipe = hook->writeVertexCmdIndexed_;
+		auto& ds = allocDs(pipe);
+
+		u32 vertexHint = info.ops.vertexCountHint;
+		if(vertexHint == u32(-1)) {
+			vertexHint = fallbackVertexCountHint;
+		}
+
+		vku::DescriptorUpdate dsu(ds);
+		dsu(state->indexBufCopy.asSpan());
+		dsu.apply();
+
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			pipe.pipe());
+		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			pipe.pipeLayout().vkHandle(), 0u, 1u, &ds.vkHandle(), 0u, nullptr);
+		u32 pcr[] = {vertexHint};
+		dev.dispatch.CmdPushConstants(cb, pipe.pipeLayout().vkHandle(),
+			VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), pcr);
+
 		dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+		cmdBarrierCompute(dev, cb, state->indexBufCopy);
 
 		auto indexType = cmd->state->indices.type;
 		dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
 			indexType == VK_INDEX_TYPE_UINT16);
-		copyVertexBufs(true, hintCount, indexType);
+
+		cmdTimestamp("after_WriteVertexCmdIndexed");
+
+		copyVertexBufs(true, vertexHint, instanceCount, indexType);
+	};
+
+	auto directVertexCopy = [&](const VkDrawIndirectCommand& params) {
+		state->indexBufCopy.ensure(dev, sizeof(Metadata),
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+		// write copyType and other meta information
+		auto wbuf = state->indexBufCopy.writeData();
+		Metadata md {};
+		md.copyTypeOrIndexOffset = copyTypeVertices;
+		md.firstVertex = params.firstVertex;
+		md.firstInstance = params.firstInstance;
+		nytl::write(wbuf, md);
+		state->indexBufCopy.flushMap();
+
+		copyVertexBufs(false, params.vertexCount, params.instanceCount, VK_INDEX_TYPE_NONE_KHR);
+	};
+
+	auto directIndexedCopy = [&](const VkDrawIndexedIndirectCommand& params) {
+		const auto indexType = cmd->state->indices.type;
+		dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
+			indexType == VK_INDEX_TYPE_UINT16);
+		const auto indSize = indexSize(indexType);
+		auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
+			hook->processIndices32_ :
+			hook->processIndices16_;
+
+		auto& dst = state->indexBufCopy;
+		const auto usage =
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+			VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+		dst.ensure(dev, sizeof(Metadata) + params.indexCount * indSize,
+			usage, queueFams);
+
+		// init meta information
+		auto wbuf = dst.writeData();
+		Metadata md {};
+		md.copyTypeOrIndexOffset = params.firstIndex; // indexOffset
+		md.minIndex = 0xFFFFFFFFu;
+		md.maxIndex = 0u;
+		md.indexCount = params.indexCount;
+		md.dispatchPerInstanceX = ceilDivide(params.instanceCount, 64u);
+		md.dispatchPerInstanceY = 1u;
+		md.dispatchPerInstanceZ = 1u;
+		md.firstInstance = params.firstInstance;
+		md.firstVertex = params.vertexOffset;
+		nytl::write(wbuf, md);
+		dst.flushMap();
+
+		auto& ds = allocDs(indexPipe);
+		{
+			vku::DescriptorUpdate dsu(ds);
+			// TODO: respect storage buf alignment
+			dsu(vku::BufferSpan{cmd->state->indices.buffer->handle,
+				{cmd->state->indices.offset, VK_WHOLE_SIZE}});
+			dsu(vku::BufferSpan{dst.buf, {0u, VK_WHOLE_SIZE}});
+		}
+
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			indexPipe.pipe());
+		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			indexPipe.pipeLayout().vkHandle(), 0u, 1u, &ds.vkHandle(), 0u, nullptr);
+		dev.dispatch.CmdDispatch(cb, ceilDivide(params.indexCount, 64u), 1u, 1u);
+		cmdBarrierCompute(dev, cb, state->indexBufCopy);
+
+		cmdTimestamp("after_processIndices");
+
+		finalizeIndexedCopy(params.instanceCount);
+	};
+
+	auto indirectCopy = [&](Buffer* cmdBuf, u32 cmdBufOffset,
+			Buffer* countBuf, u32 countBufOffset,
+			u32 maxDrawCount, u32 cmdStride) {
+		(void) maxDrawCount;
+		state->indexBufCopy.ensure(dev, sizeof(Metadata),
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+
+		auto& cmdPipe = countBuf ?
+			hook->writeVertexCmdCountBuf_ :
+			hook->writeVertexCmd_;
+		auto& ds = allocDs(cmdPipe);
+
+		vku::DescriptorUpdate dsu(ds);
+
+		auto [cmdBufShader, cmdBufOffsetShader] = alignedStorageBufferSpan(
+			*cmdBuf, cmdBufOffset,
+			maxDrawCount * sizeof(VkDrawIndirectCommand));
+
+		dsu(cmdBufShader);
+		dsu(state->indexBufCopy.asSpan());
+		if(countBuf) {
+			auto [countBufShader, countBufOffsetShader] = alignedStorageBufferSpan(
+				*countBuf, countBufOffset, sizeof(u32));
+			countBufOffset = countBufOffsetShader;
+			dsu(countBufShader);
+		}
+		dsu.apply();
+
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			cmdPipe.pipe());
+		dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			cmdPipe.pipeLayout().vkHandle(), 0u, 1u, &ds.vkHandle(), 0u, nullptr);
+		dlg_assert(cmdStride % 4u == 0u);
+		u32 pcr[] = {cmdBufOffsetShader, countBufOffset, info.ops.vertexInputCmd, cmdStride / 4u};
+		dev.dispatch.CmdPushConstants(cb, cmdPipe.pipeLayout().vkHandle(),
+			VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), pcr);
+		dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+		cmdBarrierCompute(dev, cb, state->indexBufCopy);
+
+		cmdTimestamp("after_writeVertexCmd");
+
+		copyVertexBufs(true, info.ops.vertexCountHint, info.ops.instanceCountHint, VK_INDEX_TYPE_NONE_KHR);
+	};
+
+	auto indirectIndexedCopy = [&](Buffer* cmdBuf, u32 cmdBufOffset,
+			Buffer* countBuf, u32 countBufOffset,
+			u32 maxDrawCount, u32 cmdStride) {
+		(void) maxDrawCount;
+		auto indexType = cmd->state->indices.type;
+		dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
+			indexType == VK_INDEX_TYPE_UINT16);
+
+		u32 numIndices = info.ops.indexCountHint;
+		if(numIndices == u32(-1)) {
+			numIndices = fallbackIndexCountHint;
+		}
+
+		state->indexBufCopy.ensure(dev, sizeof(Metadata) + numIndices * indexSize(indexType),
+			VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+			VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+			VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+
+		// write index processing command
+		{
+			auto& cmdPipe = countBuf ?
+				hook->writeIndexCmdCountBuf_ :
+				hook->writeIndexCmd_;
+
+			auto& ds = allocDs(cmdPipe);
+			vku::DescriptorUpdate dsu(ds);
+
+			auto [cmdBufShader, cmdBufOffsetShader] = alignedStorageBufferSpan(
+				*cmdBuf, cmdBufOffset,
+				sizeof(VkDrawIndexedIndirectCommand) * maxDrawCount);
+
+			dsu(cmdBufShader);
+			dsu(state->indexBufCopy.asSpan());
+			if(countBuf) {
+				auto [countBufShader, countBufOffsetShader] = alignedStorageBufferSpan(
+					*countBuf, countBufOffset, sizeof(u32));
+				countBufOffset = countBufOffsetShader;
+				dsu(countBufShader);
+			}
+
+			dlg_trace("countBufOffset: {}", countBufOffset);
+			dlg_trace("drawID: {}", info.ops.vertexInputCmd);
+
+			dsu.apply();
+
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				cmdPipe.pipe());
+			dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				cmdPipe.pipeLayout().vkHandle(), 0u, 1u, &ds.vkHandle(), 0u, nullptr);
+			dlg_assert(cmdStride % 4u == 0u);
+			u32 pcr[] = {cmdBufOffsetShader, countBufOffset, info.ops.vertexInputCmd, cmdStride / 4u};
+			dev.dispatch.CmdPushConstants(cb, cmdPipe.pipeLayout().vkHandle(),
+				VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), pcr);
+			dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+			cmdBarrierCompute(dev, cb, state->indexBufCopy);
+
+			cmdTimestamp("after_writeIndexCmd");
+		}
+
+		// processIndicies
+		{
+			auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
+				hook->processIndices32_ :
+				hook->processIndices16_;
+
+			auto& ds = allocDs(indexPipe);
+			vku::DescriptorUpdate dsu(ds);
+
+			auto& inds = cmd->state->indices;
+			// TODO: respect storage buffer alignment
+			dsu(vku::BufferSpan{inds.buffer->handle, {inds.offset, VK_WHOLE_SIZE}});
+			dsu(state->indexBufCopy.asSpan());
+			dsu.apply();
+
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				indexPipe.pipe());
+			dev.dispatch.CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				indexPipe.pipeLayout().vkHandle(), 0u, 1u, &ds.vkHandle(), 0u, nullptr);
+			dev.dispatch.CmdDispatchIndirect(cb, state->indexBufCopy.buf, 0u);
+			cmdBarrierCompute(dev, cb, state->indexBufCopy);
+
+			cmdTimestamp("after_processIndices");
+		}
+
+		finalizeIndexedCopy(info.ops.instanceCountHint);
 	};
 
 	if(auto* dcmd = commandCast<DrawCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
-		copyVertexBufs(false, dcmd->vertexCount, VK_INDEX_TYPE_NONE_KHR);
+
+		VkDrawIndirectCommand params;
+		params.vertexCount = dcmd->vertexCount;
+		params.instanceCount = dcmd->instanceCount;
+		params.firstVertex = dcmd->firstVertex;
+		params.firstInstance = dcmd->firstInstance;
+
+		directVertexCopy(params);
 	} else if(auto* dcmd = commandCast<DrawIndexedCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
+
+		VkDrawIndexedIndirectCommand params;
+		params.indexCount = dcmd->indexCount;
+		params.firstIndex = dcmd->firstIndex;
+		params.instanceCount = dcmd->instanceCount;
+		params.vertexOffset = dcmd->vertexOffset;
+		params.firstInstance = dcmd->firstInstance;
+
+		directIndexedCopy(params);
 	} else if(auto* dcmd = commandCast<DrawIndirectCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
+		indirectCopy(dcmd->buffer, dcmd->offset,
+			nullptr, 0u, dcmd->drawCount, dcmd->stride);
 	} else if(auto* dcmd = commandCast<DrawIndirectCountCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
+		if(dcmd->indexed) {
+			indirectIndexedCopy(dcmd->buffer, dcmd->offset,
+				dcmd->countBuffer, dcmd->countBufferOffset,
+				dcmd->maxDrawCount, dcmd->stride);
+		} else {
+			indirectCopy(dcmd->buffer, dcmd->offset,
+				dcmd->countBuffer, dcmd->countBufferOffset,
+				dcmd->maxDrawCount, dcmd->stride);
+		}
 	} else if(auto* dcmd = commandCast<DrawMultiCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
+
+		dlg_assertm_or(info.ops.vertexInputCmd < dcmd->vertexInfos.size(), return,
+			"Command to copy out-of-range");
+
+		auto& drawInfo = dcmd->vertexInfos[info.ops.vertexInputCmd];
+
+		VkDrawIndirectCommand params;
+		params.vertexCount = drawInfo.vertexCount;
+		params.instanceCount = dcmd->instanceCount;
+		params.firstVertex = drawInfo.firstVertex;
+		params.firstInstance = dcmd->firstInstance;
+
+		directVertexCopy(params);
 	} else if(auto* dcmd = commandCast<DrawMultiIndexedCmd*>(&bcmd); dcmd) {
 		cmd = dcmd;
-	}
 
-	if(indirectBuf) {
-		if(indexed) {
-			auto& cmdPipe = countBuf ?
-				hook->writeIndexCmdCountBuf_ :
-				hook->writeIndexCmd_;
-			auto ds = hook->dsAlloc_.alloc(cmdPipe.dynDsLayout(0u));
-			dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+		dlg_assertm_or(info.ops.vertexInputCmd < dcmd->indexInfos.size(), return,
+			"Command to copy out-of-range");
 
-			auto indexType = cmd->state->indices.type;
-			dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
-				indexType == VK_INDEX_TYPE_UINT16);
-			auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
-				hook->processIndices32_ :
-				hook->processIndices16_;
-			dev.dispatch.CmdDispatchIndirect(cb, ...);
-		} else {
-			auto& cmdPipe = countBuf ?
-				hook->writeVertexCmdDirectCountBuf_ :
-				hook->writeVertexCmdDirect_;
-			dev.dispatch.CmdDispatch(cb, 1u, 1u, 1u);
+		auto& drawInfo = dcmd->indexInfos[info.ops.vertexInputCmd];
 
-			// doesn't matter if we use 16-bit or 32-bit pipe
-			auto& vertPipe = hook->copyVertices32_;
-			dev.dispatch.CmdDispatchIndirect(cb, ...);
-		}
-	} else {
-		if(indexed) {
-			auto indexType = cmd->state->indices.type;
-			dlg_assert(indexType == VK_INDEX_TYPE_UINT32 ||
-				indexType == VK_INDEX_TYPE_UINT16);
-			auto& indexPipe = indexType == VK_INDEX_TYPE_UINT32 ?
-				hook->processIndices32_ :
-				hook->processIndices16_;
+		VkDrawIndexedIndirectCommand params;
+		params.indexCount = drawInfo.indexCount;
+		params.firstIndex = drawInfo.firstIndex;
+		params.vertexOffset = drawInfo.vertexOffset;
+		params.instanceCount = dcmd->instanceCount;
+		params.firstInstance = dcmd->firstInstance;
 
-			auto ds = hook->dsAlloc_.alloc(indexPipe.dynDsLayout(0u));
-			dev.dispatch.CmdDispatch(cb, ...);
-		} else {
-		}
-	}
-
-	///
-	for(auto& vertbuf : cmd->state->vertices) {
-		auto& dst = state->vertexBufCopies.emplace_back();
-		if(!vertbuf.buffer) {
-			continue;
-		}
-
-		auto size = std::min(maxVertIndSize, vertbuf.buffer->ci.size - vertbuf.offset);
-		initAndCopy(dev, cb, dst, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-			*vertbuf.buffer, vertbuf.offset, size, queueFams);
-	}
-
-	auto& inds = drawCmd->state->indices;
-	if(inds.buffer) {
-		auto size = std::min(maxVertIndSize, inds.buffer->ci.size - inds.offset);
-		initAndCopy(dev, cb, state->indexBufCopy, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-			*inds.buffer, inds.offset, size, queueFams);
+		directIndexedCopy(params);
 	}
 
 	info.rebindComputeState = true;
@@ -1247,10 +1583,12 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		} else if(auto* cmd = commandCast<DrawIndirectCountCmd*>(&bcmd)) {
 			dlg_assert(cmd->buffer && cmd->countBuffer);
 
-			auto cmdSize = cmd->indexed ?
+			auto stride = cmd->indexed ?
 				sizeof(VkDrawIndexedIndirectCommand) :
 				sizeof(VkDrawIndirectCommand);
-			auto size = 4 + cmd->maxDrawCount * cmdSize;
+			stride = cmd->stride ? cmd->stride : stride;
+
+			auto size = 4 + cmd->maxDrawCount * stride;
 			state->indirectCopy.ensure(dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
 			// copy count
@@ -1263,7 +1601,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			// it here though unless application pass *huge* maxDrawCount
 			// values (which they shouldn't).
 			performCopy(dev, cb, *cmd->buffer, cmd->offset,
-				state->indirectCopy, 4u, cmd->maxDrawCount * cmdSize);
+				state->indirectCopy, 4u, cmd->maxDrawCount * stride);
 		} else if(auto* cmd = commandCast<TraceRaysIndirectCmd*>(&bcmd)) {
 			auto size = sizeof(VkTraceRaysIndirectCommandKHR);
 			initAndCopy(dev, cb, state->indirectCopy, cmd->indirectDeviceAddress,
