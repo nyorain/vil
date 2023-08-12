@@ -185,8 +185,8 @@ void CommandHookSubmission::finish(Submission& subm) {
 
 void CommandHookSubmission::transmitTiming() {
 	ZoneScoped;
-
 	auto& dev = *record->record->dev;
+
 	if(!record->queryPool) {
 		// We didn't query the time or the query pool couldn't be created.
 		// Latter could be the case when the queue does not support
@@ -213,6 +213,36 @@ void CommandHookSubmission::transmitTiming() {
 
 	auto diff = after - before;
 	record->state->neededTime = diff;
+
+	// debug timing
+#ifdef VIL_DEBUG
+	auto timingCounts = record->ownTimingNames.size();
+	if(timingCounts) {
+		u64 data[CommandHookRecord::maxDebugTimings];
+		dlg_assert(timingCounts <= CommandHookRecord::maxDebugTimings);
+		res = dev.dispatch.GetQueryPoolResults(dev.handle, record->queryPool,
+			2, timingCounts, sizeof(data), data, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+		if(res != VK_SUCCESS) {
+			dlg_error("GetQueryPoolResults failed: {}", res);
+			return;
+		}
+
+		auto last = data[0];
+		dlg_trace("== debug timings ==");
+		for(auto [i, name] : enumerate(record->ownTimingNames)) {
+			if(i == 0u) {
+				continue;
+			}
+
+			auto diff = data[i] - last;
+			auto diffMS = dev.props.limits.timestampPeriod * diff / (1000.f * 1000.f);
+			dlg_trace("  {}: {} ms", name, diffMS);
+
+			last = data[i];
+		}
+	}
+#endif // VIL_DEBUG
+
 }
 
 void CommandHookSubmission::finishAccelStructBuilds() {
