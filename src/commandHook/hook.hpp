@@ -65,8 +65,9 @@ struct CommandHookOps {
 
 	bool copyVertexInput {};
 	u32 vertexInputCmd {}; // for multi draw, specifies the command for which to copy
-	u32 indexSizeHint {u32(-1)};
-	std::vector<u32> vertexBufSizeHints;
+	u32 indexCountHint {u32(-1)};
+	u32 vertexCountHint {u32(-1)};
+	u32 instanceCountHint {u32(-1)};
 
 	bool copyXfb {}; // transform feedback
 	u32 xfbSizeHint {u32(-1)};
@@ -281,8 +282,8 @@ public: // TODO, for copying. Maybe just move them to Device?
 	// = Indirect vertex copy pipes =
 	// Transforms a DrawIndirectCommand into an indirect dispatch cmd
 	// for copyVertices
-	vku::DynamicPipe writeVertexCmdDirect_;
-	vku::DynamicPipe writeVertexCmdDirectCountBuf_;
+	vku::DynamicPipe writeVertexCmd_;
+	vku::DynamicPipe writeVertexCmdCountBuf_;
 	// Transforms a DrawIndexedIndirectCommand into an indirect dispatch cmd
 	// for processIndices
 	vku::DynamicPipe writeIndexCmd_;
@@ -293,12 +294,15 @@ public: // TODO, for copying. Maybe just move them to Device?
 	// given index bounds, writes an indirect dispatch command for
 	// copyVertices. Also decides if vertices are copied as they are in the
 	// vertex buffer or indices are resolved
-	vku::DynamicPipe writeVertexCmd_;
+	vku::DynamicPipe writeVertexCmdIndexed_;
 	// Copies the vertices from the vertex buffer (and potentially resolves
 	// indices in the process)
-	vku::DynamicPipe copyVertices16_;
-	vku::DynamicPipe copyVertices32_;
+	vku::DynamicPipe copyVerticesByte16_;
+	vku::DynamicPipe copyVerticesUint16_;
+	vku::DynamicPipe copyVerticesByte32_;
+	vku::DynamicPipe copyVerticesUint32_;
 
+	// TODO: merge with Device DescriptorPool somehow
 	vku::DescriptorAllocator dsAlloc_;
 };
 

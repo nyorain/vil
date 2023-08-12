@@ -183,10 +183,13 @@ public:
 		return dynDsLayouts_;
 	}
 
+	const std::string& name() const { return name_; }
+
 private:
 	Pipeline pipe_;
 	PipelineLayout pipeLayout_;
 	std::array<DynDsLayout, maxNumDescriptorSets> dynDsLayouts_;
+	std::string name_;
 };
 
 } // namespace

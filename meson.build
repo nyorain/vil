@@ -650,11 +650,12 @@ if with_integration_tests
 	int_args += '-DVIL_MOCK_ICD_FILE="@0@"'.format(mock_icd_file)
 	int_args += '-DVIL_LAYER_PATH="@0@"'.format(meson.current_build_dir())
 
-	intest = executable('intest', [int_src, mock_icd_lib],
+	intest = executable('intest', int_src,
 		include_directories: inc,
 		cpp_args: int_args,
 		dependencies: [dep_dlg, dep_vulkan, dep_dl, dep_nytl])
-	test('intest', intest)
+	test('intest', intest,
+		depends: mock_icd_lib)
 endif
 
 # standalone

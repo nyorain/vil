@@ -1346,7 +1346,10 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = false;
 				updateHook();
 			} else {
-				vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				auto uh = vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				if(uh) {
+					updateHook();
+				}
 			}
 
 			ImGui::EndTabItem();
@@ -1638,14 +1641,14 @@ void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
 	auto* cmd = command_.empty() ? nullptr : command_.back();
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
-	auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
-	auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
-	auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
+	// auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
+	// auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
+	// auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
 
 	auto indirectCmd = cmd && isIndirect(*cmd);
-	auto indexedCmd = drawIndexedCmd ||
-		(drawIndirectCmd && drawIndirectCmd->indexed) ||
-		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
+	// auto indexedCmd = drawIndexedCmd ||
+	// 	(drawIndirectCmd && drawIndirectCmd->indexed) ||
+	// 	(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
 	CommandHook::Ops ops {};
 	bool setOps = true;
@@ -1705,13 +1708,15 @@ void CommandViewer::updateHook() {
 			ops.descriptorCopies = {dsCopy};
 			break;
 		} case IOView::mesh:
+			ops.copyIndirectCmd = indirectCmd;
 			if(viewData_.mesh.output) {
 				ops.copyXfb = true;
-				ops.copyIndirectCmd = indirectCmd;
 			} else {
-				ops.copyVertexBuffers = true;
-				ops.copyIndexBuffers = indexedCmd;
-				ops.copyIndirectCmd = indirectCmd;
+				// TODO: set buffer size hints!
+				dlg_info("TODO: set buffer size hints");
+
+				ops.copyVertexInput = true;
+				ops.vertexInputCmd = vertexViewer_.selectedCommand();
 			}
 			break;
 		case IOView::pushConstants:

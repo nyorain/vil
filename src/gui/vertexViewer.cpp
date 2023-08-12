@@ -535,7 +535,7 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 
 	dlg_assert_or(binding.binding < data.vertexBuffers.size(), return);
 	auto& vbuf = data.vertexBuffers[binding.binding];
-	auto voffset = VkDeviceSize(vbuf.offset + attrib.offset);
+	auto voffset = VkDeviceSize(vbuf.allocation.offset + attrib.offset);
 
 	dlg_assert(!wireframe_ || dev.nonSolidFill);
 	auto polygonMode = wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
@@ -616,10 +616,11 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 
 	if(data.params.indexType) {
 		dlg_assert_or(data.indexBuffer.buffer, return);
-		dlg_assert_or(data.indexBuffer.size, return);
+		dlg_assert_or(data.indexBuffer.allocation.size, return);
 
-		// TODO: I guess we could currently have indices in the buffer
-		// here that aren't captured in the vertex buffer, so out-of-range
+		// NOTE: on this path we must always make sure that the whole
+		// vertex buffer was captured, otherwise indices might be
+		// out-of-range
 		dev.dispatch.CmdBindIndexBuffer(cb, data.indexBuffer.buffer,
 			0, *data.params.indexType);
 		dev.dispatch.CmdDrawIndexed(cb, data.params.drawCount, 1,
@@ -811,6 +812,10 @@ void VertexViewer::updateInput(float dt) {
 	auto aspect = rect.x / rect.y;
 
 	auto viewMtx = viewMatrix(cam_);
+
+	near_ = std::min(near_, -0.000001f);
+	far_ = std::clamp(near_ - 0.0001f, -99999999.f, far_);
+
 	auto projMtx = perspective(fov, aspect, near_, far_);
 	// TODO: not always needed!
 	//   could probably figure it out better on our own (at least for xfb data),
@@ -823,15 +828,18 @@ void VertexViewer::updateInput(float dt) {
 	viewProjMtx_ = projMtx * viewMtx;
 }
 
-void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
+bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		const CommandHookState& state, float dt) {
 	ZoneScoped;
 
-	dlg_assert_or(cmd.state->pipe, return);
+	dlg_assert_or(cmd.state->pipe, return false);
 	if(state.vertexBufCopies.size() < cmd.state->pipe->vertexBindings.size()) {
 		ImGui::Text("Error: not enough vertex buffers bound. See log output");
-		return;
+		return false;
 	}
+
+	using Metadata = CommandHookRecord::VertexCopyMetadata;
+	dlg_assert_or(state.indexBufCopy.size >= sizeof(Metadata), return false);
 
 	auto& pipe = *cmd.state->pipe;
 
@@ -846,7 +854,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	if(!vertStage) {
 		// TODO: yeah this can happen with mesh shaders now
 		ImGui::Text("Error: Grahpics Pipeline has no vertex stage :o");
-		return;
+		return false;
 	}
 
 	// match bindings to input variables into
@@ -882,6 +890,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	// first, get draw params
 	DrawParams params;
 
+	auto updateHook = false;
 	auto displayCmdSlider = [&](std::optional<VkIndexType> indices, u32 stride, u32 offset = 0u){
 		dlg_assert(gui_->dev().commandHook->ops().copyIndirectCmd);
 		dlg_assert(state.indirectCopy.size);
@@ -895,7 +904,9 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			selectedID_ = 0u;
 		} else {
 			auto lbl = dlg::format("Commands: {}", count);
-			optSliderRange(lbl.c_str(), selectedID_, count);
+			if(optSliderRange(lbl.c_str(), selectedID_, count)) {
+				updateHook = true;
+			}
 		}
 
 		auto& ic = state.indirectCopy;
@@ -935,7 +946,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		displayCmdSlider(i, dcmd->stride, 4u); // skip u32 count
 	} else {
 		imGuiText("Vertex viewer unimplemented for command type");
-		return;
+		return false;
 	}
 
 	// TODO sort attribs by input location?
@@ -945,15 +956,36 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		++colCount;
 	}
 
-	// clamp drawCount to captured size
-	if(params.indexType) {
-		auto maxCount = state.indexBufCopy.size / indexSize(*params.indexType);
-		params.drawCount = std::min<u32>(params.drawCount, maxCount);
+	auto indexData = state.indexBufCopy.data();
+	const auto metadata = read<Metadata>(indexData);
+	const auto copyType = metadata.copyTypeOrIndexOffset;
+	dlg_assert(params.indexType || copyType == CommandHookRecord::copyTypeVertices);
+	const auto useIndexedDraw = params.indexType &&
+		copyType != CommandHookRecord::copyTypeResolveIndices;
 
-		// TODO: we also have to clamp to size of captured vertex buffers
-		// But for that we'd have to iterate over all the indices, too
-		// expensive here on cpu.
-		//   -> vertex buffer capture rework
+	// TODO: handle invalid copyType/the case where nothing was copied
+
+	dlg_trace("== vertex input metadata ==");
+	dlg_trace(" dispatchPerVertexX {}", metadata.dispatchPerVertexX);
+	dlg_trace(" dispatchPerVertexY {}", metadata.dispatchPerVertexY);
+	dlg_trace(" dispatchPerVertexZ {}", metadata.dispatchPerVertexZ);
+	dlg_trace(" dispatchPerInstanceX {}", metadata.dispatchPerInstanceX);
+	dlg_trace(" dispatchPerInstanceY {}", metadata.dispatchPerInstanceY);
+	dlg_trace(" dispatchPerInstanceZ {}", metadata.dispatchPerInstanceZ);
+	dlg_trace(" firstVertex {}", metadata.firstVertex);
+	dlg_trace(" firstInstance {}", metadata.firstInstance);
+	dlg_trace(" indexCount {}", metadata.indexCount);
+	dlg_trace(" minIndex {}", metadata.minIndex);
+	dlg_trace(" maxIndex {}", metadata.maxIndex);
+	dlg_trace(" copyType {}", copyType);
+
+	// clamp drawCount to captured size
+	if(useIndexedDraw) {
+		// NOTE: we should only land on this path when *all* vertex data
+		// was copied. Otherwise we could get out-of-bounds with the indices
+		// here
+		auto maxCount = indexData.size() / indexSize(*params.indexType);
+		params.drawCount = std::min<u32>(params.drawCount, maxCount);
 	} else {
 		for(auto& [pipeAttribID, shaderVarID] : attribs) {
 			auto& attrib = pipe.vertexAttribs[pipeAttribID];
@@ -964,7 +996,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			if(binding.inputRate == VK_VERTEX_INPUT_RATE_INSTANCE) {
 				// no-op atm, limit instances drawn
 			} else if(binding.inputRate == VK_VERTEX_INPUT_RATE_VERTEX) {
-				params.drawCount = std::min<u32>(params.drawCount, maxCount - params.vertexOffset);
+				params.drawCount = std::min<u32>(params.drawCount, maxCount);
 			}
 		}
 	}
@@ -1044,18 +1076,25 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 						auto is = indexSize(*params.indexType);
 						auto ib = state.indexBufCopy.data();
-						auto off = (params.offset + i) * is;
+						skip(ib, sizeof(Metadata));
+
+						auto off = i * is;
 						if(off + is > ib.size()) {
 							captured = false;
 							imGuiText("N/A");
 						} else {
 							ib = ib.subspan(off, is);
-							vertexID = readIndex(*params.indexType, ib) + params.vertexOffset;
-							imGuiText("{}", vertexID);
+							u32 index = readIndex(*params.indexType, ib);
+							imGuiText("{}", params.vertexOffset + index);
+
+							if (copyType == CommandHookRecord::copyTypeVertices) {
+								vertexID = index;
+							}
 						}
 					} else {
-						vertexID += params.offset;
-						// XXX this isn't needed, right? not sure.
+						// This isn't needed now that buffers are copied from the
+						// appropriate offset
+						// vertexID += params.offset;
 						// iniID += params.offset;
 					}
 
@@ -1096,24 +1135,24 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 
 	// 2: viewer
 	if(ImGui::Button("Recenter")) {
-		auto& attrib = pipe.vertexAttribs[0];
+		auto posAttrib = 0u; // TODO!
+		auto& attrib = pipe.vertexAttribs[posAttrib];
 		auto& binding = pipe.vertexBindings[attrib.binding];
 
 		AABB3f vertBounds;
 		auto vertData = state.vertexBufCopies[binding.binding].data();
 		vertData = vertData.subspan(attrib.offset);
-		if(params.indexType) {
-			vertData = vertData.subspan(params.vertexOffset * binding.stride);
+		if(useIndexedDraw) {
+			// not needed atm
+			// vertData = vertData.subspan(params.vertexOffset * binding.stride);
 			auto indData = state.indexBufCopy.data();
-			auto offset = indexSize(*params.indexType) * params.offset;
 			auto size = indexSize(*params.indexType) * params.drawCount;
-			indData = indData.subspan(offset, size);
+			indData = indData.subspan(sizeof(Metadata), size);
 			vertBounds = bounds(attrib.format, vertData, binding.stride,
 				*params.indexType, indData);
 		} else {
-			auto offset = params.offset * binding.stride;
 			auto size = params.drawCount * binding.stride;
-			vertData = vertData.subspan(offset, size);
+			vertData = vertData.subspan(0u, size);
 			vertBounds = bounds(attrib.format, vertData, binding.stride, false);
 		}
 
@@ -1165,9 +1204,15 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			drawData_.vertexBuffers.push_back({buf.buf, 0u, buf.size});
 		}
 
-		if(params.indexType) {
-			drawData_.indexBuffer = {state.indexBufCopy.buf, 0u, state.indexBufCopy.size};
+		if(useIndexedDraw) {
+			drawData_.indexBuffer = state.indexBufCopy.asSpan(sizeof(Metadata));
+		} else {
+			drawData_.params.indexType = {};
 		}
+
+		// never need this, copied buffers are tight
+		drawData_.params.offset = 0u;
+		drawData_.params.vertexOffset = 0u;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1183,6 +1228,7 @@ void VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 	}
 
 	ImGui::EndChild();
+	return updateHook;
 }
 
 u32 topologyOutputCount(VkPrimitiveTopology topo, i32 in) {

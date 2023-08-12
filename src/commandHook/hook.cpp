@@ -42,12 +42,16 @@
 #include <copyTex.comp.i3D.noformat.spv.h>
 
 #include <writeVertexCmd.comp.spv.h>
+#include <writeVertexCmd.comp.count.spv.h>
 #include <writeIndexCmd.comp.spv.h>
+#include <writeIndexCmd.comp.count.spv.h>
 #include <processIndices.comp.idx16.spv.h>
 #include <processIndices.comp.idx32.spv.h>
-#include <writeVertexCmdDirect.comp.spv.h>
-#include <copyVertices.comp.idx16.spv.h>
-#include <copyVertices.comp.idx32.spv.h>
+#include <writeVertexCmdIndexed.comp.spv.h>
+#include <copyVertices.comp.vert8.idx16.spv.h>
+#include <copyVertices.comp.vert8.idx32.spv.h>
+#include <copyVertices.comp.vert32.idx16.spv.h>
+#include <copyVertices.comp.vert32.idx32.spv.h>
 
 // TODO: instead of doing memory barrier per-resource when copying to
 //   our readback buffers, we should probably do just do general memory
@@ -303,14 +307,22 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 }
 
 void CommandHook::initVertexCopy(Device& dev) {
-	writeVertexCmdDirect_.init(dev, {{{
-		writeVertexCmdDirect_comp_spv_data,
+	writeVertexCmd_.init(dev, {{{
+		writeVertexCmd_comp_spv_data,
 		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
-		"writeVertexCmdDirect");
+		"writeVertexCmd");
+	writeVertexCmdCountBuf_.init(dev, {{{
+		writeVertexCmd_comp_count_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeVertexCmdCount");
 	writeIndexCmd_.init(dev, {{{
 		writeIndexCmd_comp_spv_data,
 		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
 		"writeIndexCmd");
+	writeIndexCmdCountBuf_.init(dev, {{{
+		writeIndexCmd_comp_count_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"writeIndexCmdCount");
 	processIndices16_.init(dev, {{{
 		processIndices_comp_idx16_spv_data,
 		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
@@ -319,18 +331,26 @@ void CommandHook::initVertexCopy(Device& dev) {
 		processIndices_comp_idx32_spv_data,
 		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
 		"processIndices32");
-	writeVertexCmd_.init(dev, {{{
-		writeVertexCmdDirect_comp_spv_data,
+	writeVertexCmdIndexed_.init(dev, {{{
+		writeVertexCmdIndexed_comp_spv_data,
 		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
-		"writeVertexCmd");
-	copyVertices16_.init(dev, {{{
-		copyVertices_comp_idx16_spv_data,
+		"writeVertexCmdIndexed");
+	copyVerticesByte16_.init(dev, {{{
+		copyVertices_comp_vert8_idx16_spv_data,
 		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
-		"copyVertices16");
-	copyVertices32_.init(dev, {{{
-		copyVertices_comp_idx32_spv_data,
+		"copyVerticesByte16");
+	copyVerticesByte32_.init(dev, {{{
+		copyVertices_comp_vert8_idx32_spv_data,
 		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
-		"copyVertices32");
+		"copyVerticesByte32");
+	copyVerticesUint16_.init(dev, {{{
+		copyVertices_comp_vert32_idx16_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVerticesUint16");
+	copyVerticesUint32_.init(dev, {{{
+		copyVertices_comp_vert32_idx32_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"copyVerticesUint32");
 }
 
 // TODO: temporary removal of record.dsState due to sync issues.
@@ -708,8 +728,7 @@ void fillLocalCaptureHookOps(Flags<LocalCaptureBits> flags, CommandHookOps& opsT
 
 	if(dstCmd.category() == CommandCategory::draw) {
 		if(flags & LocalCaptureBits::vertexInput) {
-			opsTmp.copyIndexBuffers = true;
-			opsTmp.copyVertexBuffers = true;
+			opsTmp.copyVertexInput = true;
 		}
 
 		if(flags & LocalCaptureBits::vertexOutput) {

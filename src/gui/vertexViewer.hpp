@@ -36,11 +36,14 @@ struct VertexViewer {
 
 	void init(Gui& gui);
 
-	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+	// Returns whether hook need update
+	bool displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayTriangles(Draw&, const OwnBuffer& buf, const AccelTriangles&, float dt);
 	void displayInstances(Draw&, const AccelInstances&, float dt,
 		std::function<AccelStructStatePtr(u64)> blasResolver);
+
+	u32 selectedCommand() const { return selectedID_; }
 
 private:
 	void centerCamOnBounds(const AABB3f& bounds);
@@ -56,10 +59,10 @@ private:
 		VertexViewer* self {};
 
 		VkPrimitiveTopology topology;
-		std::vector<BufferSpan> vertexBuffers;
+		std::vector<vku::BufferSpan> vertexBuffers;
 
 		DrawParams params;
-		BufferSpan indexBuffer; // only for indexed drawing
+		vku::BufferSpan indexBuffer; // only for indexed drawing
 
 		Vec2f offset {};
 		Vec2f size {};
