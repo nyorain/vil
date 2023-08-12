@@ -14,47 +14,77 @@
 
 layout(local_size_x = 64) in;
 
-// defined during compilation for the different variants
-// #define IndexType uint
-// #define IndexType u16
+// IndexType - set externally. Just here for linting
+// Can be u16 or uint
+#ifndef IndexType
+#define IndexType uint
+#endif // IndexType
+
+// VertexType - set externally. Just here for linting
+// Can be u8 or uint
+#ifndef VertexType
+#define VertexType uint
+#endif // VertexType
 
 layout(set = 0, binding = 0) readonly buffer Indices {
 	IndexType srcIndices[];
 };
 
 layout(set = 0, binding = 1) readonly buffer InVertices {
-	u8 data[];
+	VertexType data[];
 } src;
 
 layout(set = 0, binding = 2) buffer OutVertices {
-	uint pad0_;
-	uint pad1_;
-	uint pad2_;
-	uint copyType;
-	u8 data[];
+	VertexType data[];
 } dst;
 
+layout(set = 0, binding = 3) buffer Info {
+	Metadata info;
+};
+
 layout(push_constant) uniform PCR {
-	uint vertexStride; // in bytes
+	uint vertexStride; // in VertexType units
+	uint srcBufOffset; // in VertexType units
+	uint isInstanceData;
 };
 
 void main() {
-	uint offset = gl_GlobalInvocationID.x;
+	uint dtID = gl_GlobalInvocationID.x;
 
-	if(offset * vertexStride > dst.data.length()) {
+	// prevent out-of-bounds writing
+	if((dtID + 1) * vertexStride > dst.data.length()) {
 		return;
 	}
 
-	uint numBytes = min(vertexStride, dst.data.length() - offset * vertexStride);
-	if(copyType == copyVertices) {
-		for(uint i = 0u; i < numBytes; ++i) {
-			dst.data[offset * vertexStride + i] = src.data[offset * vertexStride + i];
+	// instance data has no indexing mechanism, always "resolved"
+	if(info.copyTypeOrIndexOffset == copyVertices || isInstanceData != 0) {
+		const uint idOffset = (isInstanceData != 0) ?
+			info.firstInstance :
+			(info.firstVertex + info.minIndex);
+
+		// prevent out-of-bounds reading
+		if(srcBufOffset + (dtID + 1) * vertexStride > src.data.length()) {
+			return;
+		}
+
+		const uint dstOff = dtID * vertexStride;
+		const uint srcOff = srcBufOffset + (idOffset + dtID) * vertexStride;
+		for(uint i = 0u; i < vertexStride; ++i) {
+			dst.data[dstOff + i] = src.data[srcOff + i];
 		}
 	} else {
-		uint index = uint(srcIndices[offset]);
-		for(uint i = 0u; i < numBytes; ++i) {
-			dst.data[offset * vertexStride + i] =
-				src.data[index * vertexStride + i];
+		// prevent out-of-bounds reading
+		if(info.minIndex + dtID > srcIndices.length()) {
+			return;
+		}
+
+		// NOTE: minIndex now contains the indexOffset, see writeVertexCmdIndexed
+		const uint index = info.firstVertex + uint(srcIndices[info.minIndex + dtID]);
+
+		const uint dstOff = dtID * vertexStride;
+		const uint srcOff = srcBufOffset + index * vertexStride;
+		for(uint i = 0u; i < vertexStride; ++i) {
+			dst.data[dstOff + i] = src.data[srcOff + i];
 		}
 	}
 }

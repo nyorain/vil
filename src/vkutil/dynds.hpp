@@ -50,7 +50,7 @@ protected:
 class DynDs : public Resource<DynDs, VkDescriptorSet, VK_OBJECT_TYPE_DESCRIPTOR_SET> {
 public:
 	DynDs() = default;
-	DynDs(VkDescriptorPool, const DynDsLayout&, VkDescriptorSet);
+	DynDs(VkDescriptorPool, const DynDsLayout&, VkDescriptorSet, StringParam name = {});
 	~DynDs() { destroy(); }
 
 	DynDs(DynDs&& rhs) noexcept = default;
@@ -88,6 +88,7 @@ public:
 	DescriptorUpdate(DescriptorUpdate&&) noexcept = delete;
 	DescriptorUpdate& operator=(DescriptorUpdate&&) noexcept = delete;
 
+	void apply();
 	void apply(Device& dev, VkDescriptorSet);
 
 	void set(BufferSpan span);
@@ -134,7 +135,7 @@ private:
 
 class DescriptorAllocator {
 public:
-	DynDs alloc(const DynDsLayout& layout);
+	DynDs alloc(const DynDsLayout& layout, StringParam name = {});
 
 private:
 	std::deque<DescriptorPool> dsPools_;

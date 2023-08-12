@@ -57,7 +57,7 @@
 	      without random size restrictions
 	    - [ ] For this to properly work with vertex input, we might need an indirect
 		  	  copy (based on indirect draw command and indices.
-			  See node 1749
+			  See vertexCopy.md
 		- [ ] For this to properly work with xfb (vertex output), we potentially
 		      need to implement draw-call splitting. Which will be a pain in the ass.
 - Allow to open where left off?

@@ -46,7 +46,7 @@ struct ReflectResult {
 PipelineLayout reflectPipeState(Device& dev,
 		span<const ReflectStage> stages, const PipeCreator& creator,
 		std::array<DynDsLayout, maxNumDescriptorSets>& dynLayouts,
-		std::string_view name, bool forceOneDynamic) {
+		const std::string& name, bool forceOneDynamic) {
 	ZoneScoped;
 
 	// NOTE: relevant for validation layers. They have issues with using
@@ -212,9 +212,8 @@ PipelineLayout reflectPipeState(Device& dev,
 		creator.initDynDsLayout(dev, i, dynLayouts[i], dynBindings[i].bindings,
 			dynBindings[i].flags);
 
-		// TODO: name!
-		// auto dslName = dlg::format("{}[{}]", name, i);
-		// vpp::nameHandle(dynLayouts[i], dslName);
+		auto dslName = dlg::format("{}:dynLayouts[{}]", name, i);
+		nameHandle(dynLayouts[i], dslName);
 
 		dlg_assert(dynLayouts[i].vkHandle());
 		setLayouts[i] = dynLayouts[i].vkHandle();
@@ -226,9 +225,7 @@ PipelineLayout reflectPipeState(Device& dev,
 	auto sl = span(setLayouts.data(), firstUnusedSetID);
 	auto ret = creator.createPipeLayout(dev, sl, pcrs);
 
-	// TODO: name!
-	// auto plName = dlg::format("{}", name);
-	// vpp::nameHandle(ret, plName);
+	nameHandle(ret, name);
 
 	return ret;
 }
@@ -265,7 +262,7 @@ std::unique_ptr<PipeCreator> PipeCreator::graphics(const VkGraphicsPipelineCreat
 		std::unordered_map<VkShaderStageFlagBits, SpecializationInfo> spec) {
 
 	struct Impl : public PipeCreator {
-		mutable VkGraphicsPipelineCreateInfo gpi;
+		mutable VkGraphicsPipelineCreateInfo gpi {};
 		std::unordered_map<VkShaderStageFlagBits, SpecializationInfo> spec;
 		DescriptorInfo dsInfo;
 
@@ -280,6 +277,7 @@ std::unique_ptr<PipeCreator> PipeCreator::graphics(const VkGraphicsPipelineCreat
 		Pipeline create(Device& dev, VkPipelineLayout layout, VkPipelineCache pc,
 				span<const VkPipelineShaderStageCreateInfo> stages) const override {
 			dlg_assert(stages.size() >= 1);
+			gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 			gpi.layout = layout;
 			gpi.pStages = stages.data();
 			gpi.stageCount = stages.size();
@@ -344,7 +342,8 @@ std::unique_ptr<PipeCreator> PipeCreator::compute(DescriptorInfo dsInfo,
 			dlg_assert(stages.size() == 1);
 			auto speci = spec.info();
 
-			VkComputePipelineCreateInfo cpi;
+			VkComputePipelineCreateInfo cpi {};
+			cpi.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
 			cpi.layout = layout;
 			cpi.stage = stages[0];
 			cpi.stage.pSpecializationInfo = &speci;
@@ -393,20 +392,16 @@ void DynamicPipe::init(Device& dev, span<const Stage> inStages,
 	dlg_assert(!inStages.empty());
 	std::vector<VkPipelineShaderStageCreateInfo> stages;
 	std::vector<ReflectStage> reflStages;
-	std::vector<VkShaderModule> modules;
+	std::vector<vku::ShaderModule> modules;
 
 	for(auto& stage : inStages) {
-		VkShaderModuleCreateInfo sci {};
-		sci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		sci.codeSize = stage.spirv.size() * 4;
-		sci.pCode = stage.spirv.data();
-
-		auto& shaderModule = modules.emplace_back();
-		dev.dispatch.CreateShaderModule(dev.handle, &sci, nullptr, &shaderModule);
+		auto& shaderModule = modules.emplace_back(dev, stage.spirv);
 
 		auto& dst = stages.emplace_back();
+		dst = {};
+		dst.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		dst.stage = stage.stage;
-		dst.module = shaderModule;
+		dst.module = shaderModule.vkHandle();
 		dst.pName = shaderEntryPointName;
 
 		auto& refl = reflStages.emplace_back();
@@ -420,6 +415,9 @@ void DynamicPipe::init(Device& dev, span<const Stage> inStages,
 
 	ZoneScopedN("vkCreatePipeline");
 	pipe_ = creator->create(dev, pipeLayout_.vkHandle(), {}, stages);
+	nameHandle(pipe_, name);
+
+	name_ = std::move(name);
 }
 
 } // namespace
