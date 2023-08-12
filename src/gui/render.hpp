@@ -10,12 +10,6 @@
 
 namespace vil {
 
-struct BufferSpan {
-	VkBuffer buffer {};
-	VkDeviceSize offset {};
-	VkDeviceSize size {};
-};
-
 // Represents all information associated with the rendering of a single
 // gui frame.
 struct Draw {

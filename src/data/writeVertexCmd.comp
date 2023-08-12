@@ -1,54 +1,71 @@
 #version 460
 
+// Used for indirect non-indexed vertex copy.
+// Dispatched right at the start, to convert the DrawIndirectCmd
+// into DispatchIndirectCmds to use for vertex buffer copies.
+
 layout(local_size_x = 1) in;
 
 #extension GL_GOOGLE_include_directive : require
 #include "vertexCopy.glsl"
 
-layout(set = 0, binding = 0) buffer InData {
-	uint indexCount;
-	uint minIndex;
-	uint maxIndex;
-};
-
 layout(push_constant) uniform PCR {
-	uint outVertexBufSize; // in bytes
-	uint outIndexBufSize; // in bytes
-	uint vertexSize;
-	uint indexSize;
+	uint drawOffset;
+	uint drawCmdOffset;
+	uint drawID;
+	uint drawCmdStride;
 };
 
-layout(set = 0, binding = 1) buffer OutData {
-	uint dispatchX;
-	uint dispatchY;
-	uint dispatchZ;
-	uint dstType;
+layout(set = 0, binding = 0) buffer InData {
+	// VkDrawIndirectCommand structs with drawCmdStride
+	uint drawCmdData[];
+
+	// VkDrawIndirectCommand:
+	// 0: uint vertexCount;
+    // 1: uint instanceCount;
+    // 2: uint firstVertex;
+    // 3: uint firstInstance;
 };
+
+layout(set = 0, binding = 1) buffer OutCmd {
+	Metadata info;
+};
+
+#ifdef COUNT_BUF
+layout(set = 0, binding = 2) buffer CountBuf {
+	uint drawCmdCount[];
+};
+#endif // COUNT_BUF
 
 void main() {
-	if(indexCount == 0) {
-		dispatchX = 0u;
-		dispatchY = 0u;
-		dispatchZ = 0u;
-		break;
+#ifdef COUNT_BUF
+	if(drawID > drawCmdCount[drawCmdOffset]) {
+		info.dispatchPerVertexX = 0u;
+		info.dispatchPerVertexY = 0u;
+		info.dispatchPerVertexZ = 0u;
+
+		info.dispatchPerInstanceX = 0u;
+		info.dispatchPerInstanceY = 0u;
+		info.dispatchPerInstanceZ = 0u;
+
+		return;
 	}
+#endif // COUNT_BUF
 
-	const uint neededCopyVertBufSize = vertexSize * (maxIndex - minIndex);
-	const bool doResolveIndices =
-		neededCopyVertBufSize > outVertexBufSize ||
-		maxIndex - minIndex > indexCount;
+	const uint cmdDataOff = drawOffset + drawID * drawCmdStride;
+	const uint vertexCount = drawCmdData[cmdDataOff + 0];
+	const uint instanceCount = drawCmdData[cmdDataOff + 1];
 
-	if(doResolveIndices) {
-		// In this case, we copy the vertices as addressed by index buffer
-		// We still copy the index buffer just to show its data in the UI
-		dstType = resolveIndices;
-		dispatchX = min(indexCount, outVertexBufSize / vertexSize);
-	} else {
-		// in this case, we copy the vertices just as they are in the vertex buffer
-		dstType = copyVertices;
-		dispatchX = maxIndex - minIndex;
-	}
+	info.dispatchPerVertexX = ceilDivide(vertexCount, 64);
+	info.dispatchPerVertexY = 1u;
+	info.dispatchPerVertexZ = 1u;
+	info.firstVertex = drawCmdData[cmdDataOff + 2];
 
-	dispatchY = 1u;
-	dispatchZ = 1u;
+	info.dispatchPerInstanceX = ceilDivide(instanceCount, 64);
+	info.dispatchPerInstanceY = 1u;
+	info.dispatchPerInstanceZ = 1u;
+	info.firstInstance = drawCmdData[cmdDataOff + 3];
+
+	info.copyTypeOrIndexOffset = copyVertices;
 }
+
