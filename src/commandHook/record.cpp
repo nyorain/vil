@@ -1154,7 +1154,7 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 				(src.offset % 4u != 0u);
 			auto& vertPipe = indexType == VK_INDEX_TYPE_UINT16 ?
 				useBytes ? hook->copyVerticesByte16_ : hook->copyVerticesUint16_:
-				useBytes ? hook->copyVerticesUint32_ : hook->copyVerticesUint32_;
+				useBytes ? hook->copyVerticesByte32_ : hook->copyVerticesUint32_;
 
 			u32 inputCount;
 			u32 isInstanceData;
