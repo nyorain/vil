@@ -302,6 +302,7 @@ void BarrierCmdBase::displayInspector(Gui& gui) const {
 BarrierCmdBase::PatchedBarriers BarrierCmdBase::patchedBarriers(
 		ThreadMemScope& memScope, u32 qfam) const {
 	PatchedBarriers ret;
+	ret.memBarriers = memBarriers; // need no patching
 	ret.imgBarriers = memScope.copy(imgBarriers);
 	ret.bufBarriers = memScope.copy(bufBarriers);
 

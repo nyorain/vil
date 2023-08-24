@@ -328,7 +328,7 @@ struct BarrierCmdBase : Command {
 	// storing the patched versions) so we can still show the correct,
 	// application-provided barriers in the UI.
 	struct PatchedBarriers {
-		span<VkMemoryBarrier> memBarriers;
+		span<const VkMemoryBarrier> memBarriers;
 		span<VkBufferMemoryBarrier> bufBarriers;
 		span<VkImageMemoryBarrier> imgBarriers;
 	};
