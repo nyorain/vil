@@ -2336,6 +2336,43 @@ MatchVal match(MatchType mt, const BeginRenderingCmd& a, const BeginRenderingCmd
 	return m;
 }
 
+MatchVal matchAccelStructBuild(
+		MatchType mt,
+		// a
+		const VkAccelerationStructureBuildGeometryInfoKHR& geomsA,
+		span<const VkAccelerationStructureBuildRangeInfoKHR> rangesA,
+		const AccelStruct* srcA,
+		const AccelStruct* dstA,
+		// b
+		const VkAccelerationStructureBuildGeometryInfoKHR& geomsB,
+		span<const VkAccelerationStructureBuildRangeInfoKHR> rangesB,
+		const AccelStruct* srcB,
+		const AccelStruct* dstB) {
+	if(geomsA.type != geomsB.type || geomsA.mode != geomsB.mode) {
+		return MatchVal::noMatch();
+	}
+
+	// TODO: consider other parameters
+	(void) rangesA;
+	(void) srcA;
+	(void) rangesB;
+	(void) srcB;
+
+	return match(mt, dstA, dstB);
+}
+
+MatchVal match(MatchType mt, const BuildAccelStructsCmd& a, const BuildAccelStructsCmd& b) {
+	auto cbBuild = [&](auto ia, auto ib) {
+		return matchAccelStructBuild(mt,
+			a.buildInfos[ia], a.buildRangeInfos[ia], a.srcs[ia], a.dsts[ia],
+			b.buildInfos[ib], b.buildRangeInfos[ib], b.srcs[ib], b.dsts[ib]);
+	};
+
+	MatchVal ret;
+	addSpanOrderedStrict(ret, a.buildInfos.size(), b.buildInfos.size(), cbBuild);
+	return ret;
+}
+
 // dummy for validExpression below
 template<typename Cmd> using HasStaticType = decltype(Cmd::staticType());
 template<typename Cmd> using HasMatch = decltype(match(MatchType::deep,
