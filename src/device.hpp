@@ -103,6 +103,12 @@ struct Device {
 
 	// Whether we are in integration testing mode
 	bool testing {};
+
+	// Whether indirect vertex copy is enabled.
+	// Will modify usage flags resources are created with
+	// TODO: respect this in commandHook/record.cpp! Or just always use, assume?
+	static constexpr auto indirectVertexCopy = true;
+
 	std::atomic<bool> doFullSync {};
 	std::atomic<bool> captureCmdStack {};
 

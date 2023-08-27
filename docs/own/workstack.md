@@ -36,8 +36,19 @@
 			  by default for vertex input: y-up is y-up (although many models have z-up)
 			  default for vertex output: y-down is y-up (except when viewport is negative,
 			  then y-up is y-up).
-	- [ ] Make vertices selectable. I.e. via mouse click in debugger
-	- [ ] Draw selected vertex via point
+		- [ ] hmm, y-flip isn't that useful atm, should rather be something
+		      like oneMinusY?
+	- [ ] Make vertices selectable. I.e. via mouse click in table
+	      {done only for vertex input/output for now, not RT}
+	- [ ] show vertex table for RT displayTriangles
+		- [ ] add support for vertex selection
+	- [ ] displayInstances: allow to give each instance its own color.
+	      Somehow display instances? Allow to select them.
+	- [ ] Draw selected vertex via point {partially done, ugly and has issues}
+		- [ ] visual: ignore depth for drawn point
+		- [ ] visual: color it in some obvious color, red/blue
+		- [ ] visual: make point size variable
+	- [ ] allow selecting a triangle, highlighting the three points in the table
 	- [x] Allow to select specific vertex (either input or output) in debugger
 	- [ ] Allow to choose display style
 		- [x] solid (single-colored or shaded) vs wireframe
@@ -132,24 +143,14 @@ low prio:
 			  (e.g. rgba8unorm, rgba16Sfloat, rgba32Sflot, r32Uint etc)
 		  (3) if nothing else works, fall back to our old terrible
 		       copy to vec4[]-storage buffer solution?
-<<<<<<< HEAD
-- [x] full commandbuffer/record timings.
-	- [x] for this we need proper prefix-matching support in CommandHook. WIP
-	- [ ] also full batch timings?
+- [ ] full batch timings?
 - [ ] Add "Jump to End/Begin" buttons in begin/end commands.
       only show them in brokenLabel display mode?
-- [x] integration test: depend on meson subproject for mock driver
-      And don't hardcode my own env path
-	- [x] also make sure we don't need the layer to be installed
-	      but use the latest built version.
-		  pass build path in via meson config header file?
-	- [x] add manual meson dependencies from integration test to used layer
-	      and mock driver
-	- [ ] figure out why integration test crashes on CI.
-	      execute with valgrind?
-		  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
-		  -> no idea. Crash inside the vulkan loader that i can't reproduce locally
-		  Maybe just execute on windows? seems to work there.
+- [ ] figure out why integration test crashes on CI.
+	  execute with valgrind?
+	  meson test --wrapper 'valgrind --leak-check=full --error-exitcode=1' --print-errorlogs
+	  -> no idea. Crash inside the vulkan loader that i can't reproduce locally
+	  Maybe just execute on windows? seems to work there.
 - [ ] document what to do when descriptors are not available when
       clicking new record in UI. Implement prototype for
 	  always-ds-cow-on-submission? Should probably be toggleable.
@@ -157,21 +158,14 @@ low prio:
 - rework gui device locking. We should be able to execute draw/uploadDraw
   without holding a lock THE WHOLE TIME. Only lock it where it's really
   needed
-- [x] got the null mock driver to work.
-  [x] Now write a simple test just creating an instance and device with
-  vil and the validation layer. And check that we can execute that on
-  CI as well
-	- [ ] write test for creating ds, updating it with imageView, destroying
-	  imageView and then using ds in submission (might need partially_bound
-	  or something I guess)
-- [x] rename main branch to main
+- [ ] write test for creating ds, updating it with imageView, destroying
+  imageView and then using ds in submission (might need partially_bound
+  or something I guess)
 - [ ] Don't always alloc/free in LinAllocator.
       Enable our global memory block cache thingy?
 - [ ] Would be useful to have the side-by-side-frames-with-vizlcs
 	  debug view via record serialization (among other things).
 	  {for later}
-=======
->>>>>>> 1dbd66b (Continue vertex viewer)
 
 - look into found doom performance hotpaths
 	- Improve QueuePresent timing

@@ -21,5 +21,10 @@ void main() {
 	outPos = pos;
 
     gl_Position = pcr.viewProjMtx * vec4(pos, 1.0);
+
+	// needed e.g. for pointPipe but also when displaying point data by
+	// application
+	// TODO: control via pcr
+	gl_PointSize = 8.f;
 }
 
