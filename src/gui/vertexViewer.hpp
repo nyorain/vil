@@ -25,7 +25,7 @@ struct DrawParams {
 	std::optional<VkIndexType> indexType {}; // nullopt for non-indexed draw
 	u32 offset {}; // firstVertex or firstIndex
 	u32 drawCount {}; // vertexCount or indexCount
-	u32 vertexOffset {}; // only for indexed drawing
+	i32 vertexOffset {}; // only for indexed drawing
 
 	// TODO: correctly implement multi-instance support
 	u32 instanceID {};
@@ -47,6 +47,8 @@ struct VertexViewer {
 
 private:
 	void centerCamOnBounds(const AABB3f& bounds);
+	VkPipeline getOrCreatePipe(VkFormat format, u32 stride,
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode);
 	VkPipeline createPipe(VkFormat format, u32 stride,
 		VkPrimitiveTopology topo, VkPolygonMode polygonMode);
 	void createFrustumPipe();
@@ -63,6 +65,7 @@ private:
 
 		DrawParams params;
 		vku::BufferSpan indexBuffer; // only for indexed drawing
+		u32 selectedVertex {0xFFFFFFFFu};
 
 		Vec2f offset {};
 		Vec2f size {};
@@ -127,7 +130,7 @@ private:
 
 	u32 selectedVertex_ {};
 
-	u32 selectedID_ {};
+	u32 selectedID_ {}; // command id
 	std::vector<DrawData> drawDatas_;
 
 	u32 precision_ {5u};
