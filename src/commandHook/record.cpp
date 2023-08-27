@@ -1294,12 +1294,14 @@ void CommandHookRecord::copyVertexInput(Command& bcmd, RecordInfo& info) {
 		auto wbuf = dst.writeData();
 		Metadata md {};
 		md.copyTypeOrIndexOffset = params.firstIndex; // indexOffset
-		md.minIndex = 0xFFFFFFFFu;
+		md.minIndex = params.indexCount > 0 ? 0xFFFFFFFFu : 0u;
 		md.maxIndex = 0u;
 		md.indexCount = params.indexCount;
 		md.dispatchPerInstanceX = ceilDivide(params.instanceCount, 64u);
 		md.dispatchPerInstanceY = 1u;
 		md.dispatchPerInstanceZ = 1u;
+		md.dispatchPerVertexY = 1u;
+		md.dispatchPerVertexZ = 1u;
 		md.firstInstance = params.firstInstance;
 		md.firstVertex = params.vertexOffset;
 		nytl::write(wbuf, md);

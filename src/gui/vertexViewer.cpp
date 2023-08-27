@@ -393,6 +393,23 @@ void VertexViewer::createFrustumPipe() {
 	dev.dispatch.DestroyShaderModule(dev.handle, vertShader, nullptr);
 }
 
+VkPipeline VertexViewer::getOrCreatePipe(VkFormat format, u32 stride,
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode) {
+	for(auto& pipe : pipes_) {
+		if(pipe.format == format &&
+				pipe.stride == stride &&
+				pipe.polygon == polygonMode &&
+				pipe.topology == topo) {
+			return pipe.pipe;
+		}
+	}
+
+	// TODO: do async and show ui message meanwhile.
+	// We currently sometimes get ui hangs from this when first
+	// selecting the vertex viewer.
+	return createPipe(format, stride, topo, polygonMode);
+}
+
 VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 		VkPrimitiveTopology topology, VkPolygonMode polygonMode) {
 	auto& dev = gui_->dev();
@@ -541,23 +558,8 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	auto polygonMode = wireframe_ ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
 
 	// try to find matching pipeline
-	VkPipeline foundPipe {};
-	for(auto& pipe : pipes_) {
-		if(pipe.format == attrib.format &&
-				pipe.stride == binding.stride &&
-				pipe.polygon == polygonMode &&
-				pipe.topology == data.topology) {
-			foundPipe = pipe.pipe;
-		}
-	}
-
-	if(!foundPipe) {
-		// TODO: do async and show ui message meanwhile.
-		// We currently sometimes get ui hangs from this when first
-		// selecting the vertex viewer.
-		foundPipe = createPipe(attrib.format, binding.stride,
-			data.topology, polygonMode);
-	}
+	auto foundPipe = getOrCreatePipe(attrib.format, binding.stride,
+		data.topology, polygonMode);
 
 	auto displaySize = ImGui::GetIO().DisplaySize;
 
@@ -622,12 +624,25 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 		// vertex buffer was captured, otherwise indices might be
 		// out-of-range
 		dev.dispatch.CmdBindIndexBuffer(cb, data.indexBuffer.buffer,
-			0, *data.params.indexType);
+			data.indexBuffer.offset(), *data.params.indexType);
 		dev.dispatch.CmdDrawIndexed(cb, data.params.drawCount, 1,
 			data.params.offset, data.params.vertexOffset, data.params.instanceID);
 	} else {
 		dev.dispatch.CmdDraw(cb, data.params.drawCount, 1,
 			data.params.offset, data.params.instanceID);
+	}
+
+	constexpr auto drawSelectedPoint = true;
+	if(drawSelectedPoint && data.selectedVertex < data.params.drawCount) {
+		auto pointPipe = getOrCreatePipe(attrib.format, binding.stride,
+			VK_PRIMITIVE_TOPOLOGY_POINT_LIST, VK_POLYGON_MODE_FILL);
+		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pointPipe);
+
+		pcData.shade = false;
+		dev.dispatch.CmdPushConstants(cb, pipeLayout_,
+			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+			0, sizeof(pcData), &pcData);
+		dev.dispatch.CmdDraw(cb, 1, 1, data.selectedVertex, 0u);
 	}
 
 	if(data.drawFrustum) {
@@ -1087,8 +1102,9 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 							u32 index = readIndex(*params.indexType, ib);
 							imGuiText("{}", params.vertexOffset + index);
 
-							if (copyType == CommandHookRecord::copyTypeVertices) {
-								vertexID = index;
+							if(copyType == CommandHookRecord::copyTypeVertices) {
+								dlg_assert(index >= metadata.minIndex);
+								vertexID = index - metadata.minIndex;
 							}
 						}
 					} else {
@@ -1204,15 +1220,42 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			drawData_.vertexBuffers.push_back({buf.buf, 0u, buf.size});
 		}
 
+		// normally won't need this, copied buffers are tight
+
 		if(useIndexedDraw) {
 			drawData_.indexBuffer = state.indexBufCopy.asSpan(sizeof(Metadata));
+			drawData_.params.offset = 0u;
+
+			// for copyTypeVertices, we just copied the raw index buffer.
+			// But we only copied the portion really needed by the draw call
+			dlg_assert(metadata.copyTypeOrIndexOffset == CommandHookRecord::copyTypeVertices);
+			drawData_.params.vertexOffset = -i32(metadata.minIndex);
+
+			// debug
+			// if(drawData_.params.drawCount > 100) {
+			// 	drawData_.params.drawCount = 3 * 16;
+			// }
+
+			auto indices = state.indexBufCopy.data();
+			skip(indices, sizeof(Metadata));
+			auto indSize = indexSize(*params.indexType);
+			auto indOff = selectedVertex_ * indSize;
+			if(indices.size() >= indOff + indSize) {
+				skip(indices, indOff);
+				drawData_.selectedVertex = readIndex(*params.indexType, indices) +
+					drawData_.params.vertexOffset;
+			} else {
+				dlg_trace("not enough indices for selected vertex");
+				drawData_.selectedVertex = 0xFFFFFFFFu;
+			}
 		} else {
 			drawData_.params.indexType = {};
-		}
 
-		// never need this, copied buffers are tight
-		drawData_.params.offset = 0u;
-		drawData_.params.vertexOffset = 0u;
+			drawData_.params.vertexOffset = 0;
+			drawData_.params.offset = 0u;
+
+			drawData_.selectedVertex = selectedVertex_;
+		}
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1523,6 +1566,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.drawFrustum = gui_->dev().nonSolidFill;
 		drawData_.clear = doClear_;
 		drawData_.mat = nytl::identity<4, float>();
+		drawData_.selectedVertex = 0xFFFFFFFFu; // TODO
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1610,6 +1654,7 @@ void VertexViewer::displayTriangles(Draw& draw, const OwnBuffer& buf,
 		drawData_.drawFrustum = false;
 		drawData_.clear = doClear_;
 		drawData_.mat = nytl::identity<4, float>();
+		drawData_.selectedVertex = 0xFFFFFFFFu; // TODO
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1760,6 +1805,7 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 			data.vertexBuffers = {{{blasState->buffer.buf, 0u, blasState->buffer.size}}};
 			data.self = this;
 			data.mat = toMat4f(ini.transform);
+			data.selectedVertex = 0xFFFFFFFFu; // TODO
 
 			auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 				auto* data = static_cast<DrawData*>(cmd->UserCallbackData);
