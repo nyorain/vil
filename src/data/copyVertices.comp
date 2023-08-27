@@ -63,7 +63,7 @@ void main() {
 			(info.firstVertex + info.minIndex);
 
 		// prevent out-of-bounds reading
-		if(srcBufOffset + (dtID + 1) * vertexStride > src.data.length()) {
+		if(srcBufOffset + (dtID + idOffset + 1) * vertexStride > src.data.length()) {
 			return;
 		}
 

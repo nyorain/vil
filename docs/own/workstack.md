@@ -36,8 +36,19 @@
 			  by default for vertex input: y-up is y-up (although many models have z-up)
 			  default for vertex output: y-down is y-up (except when viewport is negative,
 			  then y-up is y-up).
-	- [ ] Make vertices selectable. I.e. via mouse click in debugger
-	- [ ] Draw selected vertex via point
+		- [ ] hmm, y-flip isn't that useful atm, should rather be something
+		      like oneMinusY?
+	- [ ] Make vertices selectable. I.e. via mouse click in table
+	      {done only for vertex input/output for now, not RT}
+	- [ ] show vertex table for RT displayTriangles
+		- [ ] add support for vertex selection
+	- [ ] displayInstances: allow to give each instance its own color.
+	      Somehow display instances? Allow to select them.
+	- [ ] Draw selected vertex via point {partially done, ugly and has issues}
+		- [ ] visual: ignore depth for drawn point
+		- [ ] visual: color it in some obvious color, red/blue
+		- [ ] visual: make point size variable
+	- [ ] allow selecting a triangle, highlighting the three points in the table
 	- [x] Allow to select specific vertex (either input or output) in debugger
 	- [ ] Allow to choose display style
 		- [x] solid (single-colored or shaded) vs wireframe
