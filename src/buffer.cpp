@@ -126,6 +126,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(
 	// AFAIK this should always be supported, for all buffers.
 	nci.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
+	// storage buffer usage needed for indirect vertex copy
+	if(nci.usage & (VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT) &&
+			dev.indirectVertexCopy) {
+		nci.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	}
+
 	// NOTE: needed for our own operations on the buffer. Might be better to
 	// properly acquire/release it instead though, this might have
 	// a performance impact.

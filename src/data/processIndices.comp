@@ -34,15 +34,15 @@ void main() {
 	const uint srcOffset = cmdIndexOffset + invocOff;
 	const uint dstOffset = invocOff;
 
-	const uint maxCount = min(srcOffset + info.indexCount, srcIndices.length());
-	if(srcOffset >= maxCount) {
+	const uint indicesEnd = info.copyTypeOrIndexOffset + min(info.indexCount, srcIndices.length());
+	if(srcOffset >= indicesEnd) {
 		return;
 	}
 
 	uint ownMax = 0u;
 	uint ownMin = 0xFFFFFFFFu;
 
-	for(uint i = 0u; i < indicesPerInvoc && srcOffset + i < maxCount; ++i) {
+	for(uint i = 0u; i < indicesPerInvoc && srcOffset + i < indicesEnd; ++i) {
 		uint index = uint(srcIndices[srcOffset + i]);
 		ownMin = min(ownMin, index);
 		ownMax = max(ownMax, index);
