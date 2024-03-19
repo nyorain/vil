@@ -50,14 +50,14 @@ CmdBuildAccelerationStructure(params) {
 		auto& build = record.accelStructBuilds.emplace_back();
 		build.accelStruct = ...
 		// only need to create new state if buffers aren't large
-		// enough anymore. 
+		// enough anymore.
 		// Otherwise use existing accelStruct state.
 		build.dstState = ...
 		build.dstState->builtStatically = true;
 
 		// records the commands needed to capture the data
 		// directly into this cb
-		recordCaptureAccelStructData(cb, build.dstDate, params);	
+		recordCaptureAccelStructData(cb, build.dstDate, params);
 
 		dispatch.CmdBuildAccelerationStructure(params);
 	}
@@ -131,7 +131,7 @@ struct AccelStructBuildOp {
 	  inside the submission/hookRecord that is fired up on activation.
 - when a submission that updates AccelStructState (either dynamically
   or statically) is submitted (activated? don't think so. Just need to carefully
-  sync it with potential later submissions that might be executed first), 
+  sync it with potential later submissions that might be executed first),
   it first checks if it needs to resolve the cow.
   If so, it first submits the copy command.
   (wait, but at that point we can't submit it anymore before the activated
@@ -144,9 +144,42 @@ struct AccelStructBuildOp {
 
 This whole async submission/order thing is making this really hard :(
 If we already know at copyDs time that the state is written in future (by
-a submission that was not activated yet)(need an extra flag or something) 
-just copy the state instantly and don't bother with the whole cow thing 
+a submission that was not activated yet)(need an extra flag or something)
+just copy the state instantly and don't bother with the whole cow thing
 (important since it won't be resolved correctly otherwise).
 
 we REALLY don't want to delay hooking/submission until a submission is
 activated. That is way too intrusive.
+
+---
+
+# Next iteration 2024
+
+- meh, don't do any cow stuff for now. Keep it simple.
+- hard case: when viewing a tlas we don't want to blases (or its state)
+  to be destroyed. Could capture it once.
+	- current bad case: TLAS is build. BLAS referenced in it is destroyed.
+	  TLAS state is viewed in gui. :(
+	- capturing would happen in CommandHookSubmission finishing.
+	  Should be enough. But how to capture it? maybe store
+	  "finishedState" in accelStructs? hm when blas is built AFTER
+	  tlas was build (e.g. in same cb), it's wrong again.
+	  At each tlas build, capture a full mapping of all blas
+	  addresses to their current states (at that point in time).
+	  This could be very expensive :/
+	- fully correct way: maintain some kind of mapping on gpu.
+	  data structure allows getting metadata for blas address.
+	  we then write out the version number of the blas at the time
+	  of building, when copying tlas instances.
+	  uff. Then only need to ensure blas states are still alive when
+	  resolved (for ref count inc).
+	  Complicated!
+
+Hm okay wait. When a tlas is viewed in resource viewer, these
+considerations do not matter: when a blas in it was destroyed/updated/rebuilt
+afterwards, its invalid anyways. We just show new blas state in ui, no
+big deal.
+So its only important when viewing tlas in dispatchRays viewer. Or
+for shader debugging or something. But when we capture the tlas
+via descriptor, we could just create a map of active blas states
+at *that* point. `UnorderedMap<u64, IntrusivePtr<AccelStructState>>`

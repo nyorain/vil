@@ -3,8 +3,6 @@
 #include <fwd.hpp>
 #include <memory.hpp>
 #include <imageLayout.hpp>
-#include <unordered_set>
-#include <atomic>
 
 namespace vil {
 
@@ -39,9 +37,9 @@ struct Image : MemoryResource {
 	~Image();
 
 private:
-	// The image layout this image will have when *all* pending submissions
-	// are completed. When there are no pending submissions using this
-	// image, it's the current layout.
+	// The image layout this image will have when *all* activated and pending
+	// submissions are completed. When there are no pending submissions using
+	// this image, it's the current layout.
 	// Synced using device mutex.
 	std::vector<ImageSubresourceLayout> pendingLayout_;
 };

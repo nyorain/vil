@@ -1266,75 +1266,35 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 		auto& accelStruct = *cmd.dsts[i];
 
 		auto& dst = build.builds.emplace_back();
-		dst.info = srcBuildInfo;
 		// safe to just reference them here, record will stay alive at least
 		// until we read it again.
-		dst.rangeInfos = cmd.buildRangeInfos[i];
 		dst.dst = &accelStruct;
-		dst.geoms.resize(dst.info.geometryCount);
-		dst.info.pGeometries = dst.geoms.data();
 
-		auto needsInit = (dst.dst->geometryType == VK_GEOMETRY_TYPE_MAX_ENUM_KHR);
-		if(dst.dst->geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-			// when the accelStruct was built before, but never on the device,
-			// we might not have a instance device buffer.
-			needsInit = !(std::get<AccelInstances>(dst.dst->data).buffer.buf);
-		}
+		// init AccelStructState
+		dlg_assert(cmd.buildRangeInfos[i].size() == srcBuildInfo.geometryCount);
 
-		// TODO: we don't always need this. Not sure how to correctly handle it,
-		// we *sometimes* have to resize the buffer to make sure it can fit
-		// the new data. Maybe just always call initBufs and handle the logic
-		// in there? rename it to ensureBufSizes?
-		needsInit = true;
-		if(needsInit) {
-			dlg_assert(cmd.buildRangeInfos[i].size() == srcBuildInfo.geometryCount);
+		dst.state = createState(*dst.dst, srcBuildInfo, cmd.buildRangeInfos[i].data());
+		auto& state = *dst.state;
 
-			// TODO: calling this here is problematic. Another (running) submission
-			// might be writing to these buffers at the time (or a gui draw
-			// might read from them, right?!) but 'initBufs' might recreate the
-			// buffers (to make sure they are large enough).
-			// Either wait for all submissions using the buffers when we really
-			// have to resize or make sure they stay alive long enough somehow.
-			// -> AccelStructState rework
-			initBufs(*dst.dst, srcBuildInfo, cmd.buildRangeInfos[i].data(), true);
-		}
-
-		OwnBuffer* dstBuffer {};
-		if(dst.dst->geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
-			auto& dst = std::get<AccelAABBs>(accelStruct.data);
-			dstBuffer = &dst.buffer;
-		} else if(dst.dst->geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-			auto& dst = std::get<AccelTriangles>(accelStruct.data);
-			dstBuffer = &dst.buffer;
-		} else if(dst.dst->geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-			auto& dst = std::get<AccelInstances>(accelStruct.data);
-			dstBuffer = &dst.buffer;
-		} else {
-			dlg_error("Invalid VkGeometryTypeKHR: {}", dst.dst->geometryType);
-		}
-
-		dlg_assert(dstBuffer);
-		dlg_assert(dstBuffer->size);
+		auto& dstBuffer = state.buffer;
+		dlg_assert(dstBuffer.size);
 
 		VkBufferDeviceAddressInfo addrInfo {};
 		addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-		addrInfo.buffer = dstBuffer->buf;
+		addrInfo.buffer = dstBuffer.buf;
 		auto dstAddress = dev.dispatch.GetBufferDeviceAddress(dev.handle, &addrInfo);
 		dlg_assert(dstAddress);
 
 		auto dstOff = 0u;
-		for(auto g = 0u; g < dst.info.geometryCount; ++g) {
+		for(auto g = 0u; g < srcBuildInfo.geometryCount; ++g) {
 			auto& range = rangeInfos[g];
 			auto& srcGeom = srcBuildInfo.pGeometries ?
 				srcBuildInfo.pGeometries[g] : *srcBuildInfo.ppGeometries[g];
-			auto& dstGeom = dst.geoms[g];
-			dstGeom = srcGeom;
 
 			if(srcGeom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
 				dlg_error("TODO: need shader");
 			} else if(srcGeom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
 				auto& srcTris = srcGeom.geometry.triangles;
-				auto& dstTris = dstGeom.geometry.triangles;
 
 				// copy vertices
 				dlg_assert(cmdHook.accelStructVertCopy_);
@@ -1420,10 +1380,6 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 				auto gx = ceilDivide(3 * range.primitiveCount, 64u);
 				dev.dispatch.CmdDispatch(cb, gx, 1u, 1u);
 
-				dstTris.indexData.hostAddress = {};
-				dstTris.vertexData.hostAddress = dstBuffer->map + dstOff;
-				dstTris.indexType = VK_INDEX_TYPE_NONE_KHR;
-
 				dstOff += range.primitiveCount * sizeof(AccelTriangles::Triangle);
 			} else if(srcGeom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
 				// TODO: resolve indirection via custom compute shader
@@ -1434,9 +1390,7 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 				auto srcAddr = inis.data.deviceAddress;
 				srcAddr += range.primitiveOffset;
 				auto size = sizeof(VkAccelerationStructureInstanceKHR) * range.primitiveCount;
-				performCopy(dev, cb, srcAddr, *dstBuffer, dstOff, size);
-				dstGeom.geometry.instances.arrayOfPointers = false;
-				dstGeom.geometry.instances.data.hostAddress = dstBuffer->map + dstOff;
+				performCopy(dev, cb, srcAddr, dstBuffer, dstOff, size);
 
 				dstOff += size;
 			} else {

@@ -18,7 +18,6 @@ struct CommandHookSubmission {
 	// Called when the associated submission (passed again as parameter)
 	// successfully completed execution on the device.
 	void finish(Submission&);
-	void finishAccelStructBuilds();
 	void transmitTiming();
 	void transmitIndirect();
 };

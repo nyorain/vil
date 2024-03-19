@@ -51,8 +51,6 @@ void CommandHookSubmission::finish(Submission& subm) {
 		return;
 	}
 
-	finishAccelStructBuilds();
-
 	// when the record has no state, we don't have to transmit anything
 	if(!record->state) {
 		dlg_assert(record->hcommand.empty());
@@ -182,25 +180,6 @@ void CommandHookSubmission::transmitTiming() {
 
 	auto diff = after - before;
 	record->state->neededTime = diff;
-}
-
-void CommandHookSubmission::finishAccelStructBuilds() {
-	for(auto& buildCmd : record->accelStructBuilds) {
-		for(auto& build : buildCmd.builds) {
-			dlg_assert(build.dst);
-
-			auto& dst = *build.dst;
-			dlg_assert(build.rangeInfos.size() == build.info.geometryCount);
-			dlg_assert(build.dst->geometryType != VK_GEOMETRY_TYPE_MAX_ENUM_KHR);
-
-			// we only need this additional copy/retrieve step when a top
-			// level accelStruct (with instances) was built, otherwise
-			// we already copied everything into the right position.
-			if(build.dst->geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-				copyBuildData(dst, build.info, build.rangeInfos.data(), true);
-			}
-		}
-	}
 }
 
 } // namespace vil
