@@ -41,6 +41,7 @@ Mat4f toMat4f(const VkTransformMatrixKHR& src) {
 	return ret;
 }
 
+/*
 void writeAABBs(AccelStruct& accelStruct, unsigned id,
 		const VkAccelerationStructureGeometryKHR& srcGeom,
 		const VkAccelerationStructureBuildRangeInfoKHR& info) {
@@ -184,20 +185,19 @@ void writeInstances(AccelStruct& accelStruct,
 		dstIni.transform = toMat4f(srcIni.transform);
 	}
 }
+*/
 
-void initBufs(AccelStruct& accelStruct,
+IntrusivePtr<AccelStructState> createState(AccelStruct& accelStruct,
 		const VkAccelerationStructureBuildGeometryInfoKHR& info,
-		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
-		bool initInstanceBuffer) {
+		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos) {
 	auto& dev = *accelStruct.dev;
 
 	accelStruct.effectiveType = info.type;
 	if(info.geometryCount == 0u) {
-		return;
+		return {}; // TODO: still return state?
 	}
 
 	auto& geom0 = info.pGeometries ? info.pGeometries[0] : *info.ppGeometries[0];
-	accelStruct.geometryType = geom0.geometryType;
 
 	auto bufSize = 0u;
 	for(auto i = 0u; i < info.geometryCount; ++i) {
@@ -216,65 +216,63 @@ void initBufs(AccelStruct& accelStruct,
 	// Make sure that we at least always create a dummy buffer
 	bufSize = std::max(bufSize, 4u);
 
-	std::byte* mapped {};
+	auto state = IntrusivePtr<AccelStructState>(new AccelStructState());
+
 	auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
 		VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	state->buffer.ensure(dev, bufSize, usage);
+	auto mapped = state->buffer.map;
+
 	if(geom0.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
 		dlg_assert(accelStruct.effectiveType ==
 			VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
-		auto& aabbs = accelStruct.data.emplace<AccelAABBs>();
+		auto& aabbs = state->data.emplace<AccelAABBs>();
 		aabbs.geometries.resize(info.geometryCount);
-		aabbs.buffer.ensure(dev, bufSize, usage);
-		mapped = aabbs.buffer.map;
 	} else if(geom0.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
 		dlg_assert(accelStruct.effectiveType ==
 			VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR);
-		auto& tris = accelStruct.data.emplace<AccelTriangles>();
+		auto& tris = state->data.emplace<AccelTriangles>();
 		tris.geometries.resize(info.geometryCount);
-		tris.buffer.ensure(dev, bufSize, usage);
-		mapped = tris.buffer.map;
 	} else if(geom0.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
 		dlg_assert(accelStruct.effectiveType ==
 			VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
-		auto& instances = accelStruct.data.emplace<AccelInstances>();
-		dlg_assert(info.geometryCount == 1u);
-		instances.instances.resize(buildRangeInfos[0].primitiveCount);
+		auto& instances = state->data.emplace<AccelInstances>();
 
-		if(initInstanceBuffer) {
-			instances.buffer.ensure(dev, bufSize, usage);
-		}
+		dlg_assert(info.geometryCount == 1u);
+		auto ptr = reinterpret_cast<VkAccelerationStructureInstanceKHR*>(mapped);
+		instances.instances = {ptr, buildRangeInfos[0].primitiveCount};
 	} else {
 		dlg_error("Invalid VkGeometryTypeKHR: {}", geom0.geometryType);
 	}
 
 	auto off = 0u;
-	for(auto i = 0u; i < info.geometryCount; ++i) {
-		auto& geom = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
-		auto& rangeInfo = buildRangeInfos[i];
-		dlg_assert(geom.geometryType == accelStruct.geometryType);
+	if(geom0.geometryType != VK_GEOMETRY_TYPE_INSTANCES_KHR) {
+		for(auto i = 0u; i < info.geometryCount; ++i) {
+			auto& geom = info.pGeometries ? info.pGeometries[i] : *info.ppGeometries[i];
+			auto& rangeInfo = buildRangeInfos[i];
+			dlg_assert(geom.geometryType == geom0.geometryType);
 
-		if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
-			auto& dst = std::get<AccelAABBs>(accelStruct.data).geometries[i];
-			auto ptr = reinterpret_cast<VkAabbPositionsKHR*>(mapped + off);
-			dst.boxes = {ptr, rangeInfo.primitiveCount};
-			off += dst.boxes.size_bytes();
-		} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-			auto& dst = std::get<AccelTriangles>(accelStruct.data).geometries[i];
-			auto ptr = reinterpret_cast<AccelTriangles::Triangle*>(mapped + off);
-			dst.triangles = {ptr, rangeInfo.primitiveCount};
-			off += dst.triangles.size_bytes();
-		} else if(geom.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-			// no-op
-		} else {
-			dlg_error("Invalid VkGeometryTypeKHR: {}", geom0.geometryType);
+			if(geom.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+				auto& dst = std::get<AccelAABBs>(state->data).geometries[i];
+				auto ptr = reinterpret_cast<VkAabbPositionsKHR*>(mapped + off);
+				dst.boxes = {ptr, rangeInfo.primitiveCount};
+				off += dst.boxes.size_bytes();
+			} else if(geom.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
+				auto& dst = std::get<AccelTriangles>(state->data).geometries[i];
+				auto ptr = reinterpret_cast<AccelTriangles::Triangle*>(mapped + off);
+				dst.triangles = {ptr, rangeInfo.primitiveCount};
+				off += dst.triangles.size_bytes();
+			} else {
+				dlg_error("Invalid VkGeometryTypeKHR: {}", geom0.geometryType);
+			}
 		}
 	}
 
-	dlg_assert(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR ||
-		off == bufSize);
+	return state;
 }
 
+/*
 void copyBuildData(AccelStruct& accelStruct,
 		const VkAccelerationStructureBuildGeometryInfoKHR& info,
 		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
@@ -300,6 +298,7 @@ void copyBuildData(AccelStruct& accelStruct,
 		}
 	}
 }
+*/
 
 // api
 VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(

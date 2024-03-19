@@ -1509,6 +1509,7 @@ void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 	far_ = -100 * sum;
 }
 
+/*
 void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, float dt) {
 	if(ImGui::Button("Recenter")) {
 		AABB3f vertBounds = bounds(tris);
@@ -1696,5 +1697,6 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 
 	ImGui::EndChild();
 }
+*/
 
 } // namespace vil
