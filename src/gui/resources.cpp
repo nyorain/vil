@@ -1369,8 +1369,11 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 
 	imGuiText("type: {}", vk::name(accelStruct.type));
 	imGuiText("effective type: {}", vk::name(accelStruct.effectiveType));
-	imGuiText("geometry type: {}", vk::name(accelStruct.geometryType));
 
+	imGuiText("TODO: visualize state");
+	(void) draw;
+
+	/*
 	if(accelStruct.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
 		auto& tris = std::get<AccelTriangles>(accelStruct.data);
 
@@ -1450,6 +1453,7 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 		auto& vv = gui_->cbGui().commandViewer().vertexViewer();
 		vv.displayInstances(draw, inis, gui_->dt());
 	}
+	*/
 }
 
 void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {

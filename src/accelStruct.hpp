@@ -10,6 +10,7 @@
 namespace vil {
 
 struct AccelTriangles {
+	// TODO: use vec3f. Needs shader adjustments tho
 	struct Triangle {
 		Vec4f a;
 		Vec4f b;
@@ -20,7 +21,6 @@ struct AccelTriangles {
 		span<Triangle> triangles; // references the hostVisible buffer
 	};
 
-	OwnBuffer buffer;
 	std::vector<Geometry> geometries;
 };
 
@@ -29,37 +29,24 @@ struct AccelAABBs {
 		span<VkAabbPositionsKHR> boxes; // references the hostVisible buffer
 	};
 
-	OwnBuffer buffer;
 	std::vector<Geometry> geometries;
 };
 
+// NOTE: we do not convert accelerationStructureReference to AccelStruct*
+// here by design. We expected acceleration structure builds to happen often
+// but this resolving is expensive and only required when showing AccelStruct
+// in gui.
 struct AccelInstances {
-	struct Instance {
-		AccelStruct* accelStruct;
-		Mat4f transform;
-		u32 customIndex;
-		u32 bindingTableOffset;
-		VkGeometryInstanceFlagsKHR flags;
-		u8 mask;
-	};
-
-	std::vector<Instance> instances;
-	// optional, only for readback when built on device
-	// TODO: this leads to issues if AccelStruct is built multiple times
-	// in same submission (or otherwise in parallel). Fix that
-	// -> AccelStructState rework
-	OwnBuffer buffer;
-};
-
-struct AccelStructState;
-
-struct AccelStructBuildOp {
-	CommandRecord* record {};
-	AccelStructState* state {};
+	// references the hostVisible buffer
+	span<VkAccelerationStructureInstanceKHR> instances;
 };
 
 struct AccelStructState {
 	AccelStruct* accelStruct {};
+	OwnBuffer buffer;
+	std::atomic<u32> refCount {};
+
+	bool built {};
 	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
 };
 
@@ -81,17 +68,16 @@ struct AccelStruct : SharedDeviceHandle {
 
 	VkDeviceAddress deviceAddress {};
 
-	// geometry info
-	VkGeometryTypeKHR geometryType {VK_GEOMETRY_TYPE_MAX_ENUM_KHR};
-	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
+	// The state when all activated and pending submissions are completed.
+	// Synced using device mutex.
+	IntrusivePtr<AccelStructState> pendingState;
 
 	void onApiDestroy();
 };
 
-void initBufs(AccelStruct&,
+IntrusivePtr<AccelStructState> createState(AccelStruct&,
 	const VkAccelerationStructureBuildGeometryInfoKHR& info,
-    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos,
-	bool initInstanceBuffer = false);
+    const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos);
 
 // Assumes that all data pointers are host addresses
 // - instancesAreHandles: whether Instances are given via their VkDeviceAddress

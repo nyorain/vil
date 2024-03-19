@@ -65,9 +65,7 @@ struct CommandHookRecord {
 
 		struct Build {
 			AccelStruct* dst;
-			VkAccelerationStructureBuildGeometryInfoKHR info;
-			span<const VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
-			std::vector<VkAccelerationStructureGeometryKHR> geoms;
+			IntrusivePtr<AccelStructState> state;
 		};
 
 		std::vector<Build> builds;

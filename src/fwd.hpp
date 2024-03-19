@@ -97,6 +97,7 @@ struct BeginRenderPassCmd;
 struct BeginRenderingCmd;
 struct BuildAccelStructsCmd;
 struct BuildAccelStructsIndirectCmd;
+struct AccelStructState;
 struct DescriptorSetCow;
 
 struct MemoryBind;
