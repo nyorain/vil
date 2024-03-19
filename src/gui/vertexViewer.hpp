@@ -17,7 +17,7 @@ struct AABB3f {
 	Vec3f extent; // 0.5 * size
 };
 
-// TODO: the representation is counter-intuitive and makes our lives
+// TODO(low): the representation is counter-intuitive and makes our lives
 // harder a couple of times in the implementation. 'vertexOffset' should
 // always mean vertexOffset and 'indexOffset' (instead of offset) only be
 // available for indexed drawing.
@@ -25,7 +25,7 @@ struct DrawParams {
 	std::optional<VkIndexType> indexType {}; // nullopt for non-indexed draw
 	u32 offset {}; // firstVertex or firstIndex
 	u32 drawCount {}; // vertexCount or indexCount
-	u32 vertexOffset {}; // only for indexed drawing
+	i32 vertexOffset {}; // only for indexed drawing
 
 	// TODO: correctly implement multi-instance support
 	u32 instanceID {};
@@ -36,29 +36,38 @@ struct VertexViewer {
 
 	void init(Gui& gui);
 
-	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
+	// Returns whether hook need update
+	bool displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayTriangles(Draw&, const AccelTriangles&, float dt);
 	void displayInstances(Draw&, const AccelInstances&, float dt);
 
-	void updateInput(float dt);
+	u32 selectedCommand() const { return selectedID_; }
 
 private:
 	void centerCamOnBounds(const AABB3f& bounds);
-	VkPipeline createPipe(VkFormat format, u32 stride, VkPrimitiveTopology topo);
+	VkPipeline getOrCreatePipe(VkFormat format, u32 stride,
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode);
+	VkPipeline createPipe(VkFormat format, u32 stride,
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode);
 	void createFrustumPipe();
+
+	void updateInput(float dt);
+	void updateFPCam(float dt);
+	void updateArcballCam(float dt);
 
 	struct DrawData {
 		VertexViewer* self {};
 
 		VkPrimitiveTopology topology;
-		std::vector<BufferSpan> vertexBuffers;
+		std::vector<vku::BufferSpan> vertexBuffers;
 
 		DrawParams params;
-		BufferSpan indexBuffer; // only for indexed drawing
+		vku::BufferSpan indexBuffer; // only for indexed drawing
+		u32 selectedVertex {0xFFFFFFFFu};
 
-		Vec2f canvasOffset;
-		Vec2f canvasSize;
+		Vec2f offset {};
+		Vec2f size {};
 
 		float scale {1.f};
 		bool useW {false};
@@ -81,6 +90,8 @@ private:
 	// - viewport and scissor dynamic state bound
 	// Uses the current imgui context.
 	void imGuiDraw(const DrawData& data);
+	void showSettings();
+	void displayVertexID(u32 id);
 
 private:
 	Gui* gui_ {};
@@ -90,7 +101,6 @@ private:
 
 	Camera cam_ {};
 	bool rotating_ {};
-	Vec2f lastMousPos_ {};
 	float yaw_ {};
 	float pitch_ {};
 
@@ -111,13 +121,23 @@ private:
 		u32 stride {};
 		VkPrimitiveTopology topology {};
 		VkPipeline pipe {};
+		VkPolygonMode polygon {};
 	};
 
 	std::vector<Pipe> pipes_ {};
 	DrawData drawData_;
 
-	u32 selectedID_ {};
+	u32 selectedVertex_ {};
+
+	u32 selectedID_ {}; // command id
 	std::vector<DrawData> drawDatas_;
+
+	u32 precision_ {5u};
+	bool doClear_ {false};
+	bool flipY_ {true};
+	bool arcball_ {true}; // whether to use instead of first person cam
+	bool wireframe_ {false};
+	float arcOffset_ {1.f};
 };
 
 } // namespace vil

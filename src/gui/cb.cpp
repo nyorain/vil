@@ -1415,7 +1415,10 @@ void CommandRecordGui::load(StateLoader& loader, LoadBuf& buf) {
 	}
 
 	selector_.select(frame_, submID, record_, command_);
-	commandViewer_.updateFromSelector(true);
+
+	if(!command_.empty()) {
+		commandViewer_.updateFromSelector(true);
+	}
 }
 
 } // namespace vil
