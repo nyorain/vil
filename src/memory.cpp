@@ -157,6 +157,8 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(
 		VkDeviceMemory*                             pMemory) {
 	auto& dev = getDevice(device);
 
+	checkInitWindow(dev);
+
 	ThreadMemScope memScope;
 	auto chainCopy = copyChainLocal(memScope, pAllocateInfo->pNext);
 	auto allocInfo = *pAllocateInfo;

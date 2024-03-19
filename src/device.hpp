@@ -295,6 +295,9 @@ private:
 void notifyApiHandleDestroyedLocked(Device& dev, Handle& handle, VkObjectType type);
 void notifyMemoryResourceInvalidatedLocked(Device& dev, MemoryResource& res);
 
+// Lazily initializes the window, if needed.
+void checkInitWindow(Device& dev);
+
 // Util for naming internal handles.
 // Mainly useful to get better validation layer output for stuff
 // we do inside the layer. Should never be used on any non-internal

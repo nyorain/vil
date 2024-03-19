@@ -1079,17 +1079,14 @@ VkResult doCreateDevice(
 	// init command hook
 	dev.commandHook = std::make_unique<CommandHook>(dev);
 
-	// == window stuff ==
 #ifdef VIL_WITH_SWA
 	if(window) {
-		dlg_assert(window->presentQueue); // should have been set in queue querying
+		dlg_assert(window->presentQueue);
 		dev.window = std::move(window);
 
 		if(standaloneMode) {
 			dev.window->dev = &dev;
 			dev.window->doInitSwapchain();
-		} else {
-			dev.window->initDevice(dev);
 		}
 	}
 #endif // VIL_WITH_SWA
@@ -1309,6 +1306,19 @@ VkFormat findDepthFormat(const Device& dev) {
 		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 	return findSupported(dev, fmts, img, features);
+}
+
+// This delayed initialization is needed because we cannot
+// call vulkan functions (such as CreateSwapchain) inside window
+// creation, where we'd ideally initialize the window.
+// https://github.com/KhronosGroup/Vulkan-Loader/pull/1049 broke
+// this. We now have to make sure to make it later on.
+void checkInitWindow(Device& dev) {
+#ifdef VIL_WITH_SWA
+	if(dev.window && !dev.window->dev) {
+		dev.window->initDevice(dev);
+	}
+#endif // VIL_WITH_SWA
 }
 
 // NOTE: doesn't really belong here

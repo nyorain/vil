@@ -11,7 +11,6 @@
 #include <buffer.hpp>
 #include <image.hpp>
 #include <submit.hpp>
-#include <deque>
 #include <gui/gui.hpp>
 #include <commandHook/submission.hpp>
 #include <util/util.hpp>
@@ -162,6 +161,8 @@ VkResult doSubmit(Queue& queue, span<const VkSubmitInfo2> submits,
 		VkFence fence, bool legacy) {
 	ZoneScoped;
 	auto& dev = *queue.dev;
+
+	checkInitWindow(dev);
 
 	QueueSubmitter submitter {};
 	init(submitter, queue, SubmissionType::command, fence);
