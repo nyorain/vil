@@ -100,6 +100,7 @@ void invalidate(CommandHookRecord& rec) {
 // CommandHook
 CommandHook::CommandHook(Device& dev) {
 	dev_ = &dev;
+	hookAccelStructBuilds = checkEnvBinary("VIL_CAPTURE_ACCEL_STRUCTS", true);
 	initImageCopyPipes(dev);
 	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
 		initAccelStructCopy(dev);
@@ -147,8 +148,8 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	dslci.bindingCount = 2u;
 	dslci.pBindings = bindings;
-	VK_CHECK(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr,
-		&sampleImageDsLayout_));
+	VK_CHECK_DEV(dev.dispatch.CreateDescriptorSetLayout(dev.handle, &dslci, nullptr,
+		&sampleImageDsLayout_), dev);
 	nameHandle(dev, sampleImageDsLayout_, "CommandHook:copyImage");
 
 	// pipe layout
@@ -163,8 +164,8 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	plci.pPushConstantRanges = pcrs;
 	plci.setLayoutCount = 1u;
 	plci.pSetLayouts = &sampleImageDsLayout_;
-	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
-		&sampleImagePipeLayout_));
+	VK_CHECK_DEV(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
+		&sampleImagePipeLayout_), dev);
 	nameHandle(dev, sampleImagePipeLayout_, "CommandHook:sampleCopyImage");
 
 	// pipes
@@ -194,7 +195,7 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 		sci.pCode = spv.data();
 
 		auto& mod = mods[cpis.size()];
-		VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &sci, nullptr, &mod));
+		VK_CHECK_DEV(dev.dispatch.CreateShaderModule(dev.handle, &sci, nullptr, &mod), dev);
 
 		auto& cpi = cpis.emplace_back();
 		if(cpis.size() > 1u) {
@@ -239,8 +240,8 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 		addCpi(copyTex_comp_3D_noformat_spv_data, specOther);
 	}
 
-	VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
-		cpis.size(), cpis.data(), nullptr, sampleImagePipes_));
+	VK_CHECK_DEV(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
+		cpis.size(), cpis.data(), nullptr, sampleImagePipes_), dev);
 
 	for(auto pipe : sampleImagePipes_) {
 		nameHandle(dev, pipe, "CommandHook:copyImage");
@@ -261,8 +262,8 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	plci.pushConstantRangeCount = 1;
 	plci.pPushConstantRanges = pcrs;
-	VK_CHECK(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
-		&accelStructPipeLayout_));
+	VK_CHECK_DEV(dev.dispatch.CreatePipelineLayout(dev.handle, &plci, nullptr,
+		&accelStructPipeLayout_), dev);
 	nameHandle(dev, accelStructPipeLayout_, "CommandHook:accelStructVertCopy");
 
 	// init pipeline
@@ -273,7 +274,7 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	sci.codeSize = sizeof(accelStructVertices_comp_spv_data);
 	sci.pCode = accelStructVertices_comp_spv_data;
 
-	VK_CHECK(dev.dispatch.CreateShaderModule(dev.handle, &sci, nullptr, &mod));
+	VK_CHECK_DEV(dev.dispatch.CreateShaderModule(dev.handle, &sci, nullptr, &mod), dev);
 
 	// create pipeline
 	VkComputePipelineCreateInfo cpi {};
@@ -284,8 +285,8 @@ void CommandHook::initAccelStructCopy(Device& dev) {
 	cpi.stage.module = mod;
 	cpi.stage.pName = "main";
 
-	VK_CHECK(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
-		1u, &cpi, nullptr, &accelStructVertCopy_));
+	VK_CHECK_DEV(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
+		1u, &cpi, nullptr, &accelStructVertCopy_), dev);
 	nameHandle(dev, accelStructVertCopy_, "CommandHook:accelStructVertCopy");
 
 	dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);

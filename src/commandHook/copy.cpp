@@ -182,7 +182,7 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	}
 
 	// Create image
-	VK_CHECK(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &image));
+	VK_CHECK_DEV(dev.dispatch.CreateImage(dev.handle, &ici, nullptr, &image), dev);
 	nameHandle(dev, this->image, "CopiedImage:image");
 
 	VkMemoryRequirements memReqs;
@@ -201,10 +201,10 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	//   have a significant overhead.
 	auto memBits = memReqs.memoryTypeBits & dev.deviceLocalMemTypeBits;
 	allocInfo.memoryTypeIndex = findLSB(memBits);
-	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &memory));
+	VK_CHECK_DEV(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &memory), dev);
 	nameHandle(dev, this->memory, "CopiedImage:memory");
 
-	VK_CHECK(dev.dispatch.BindImageMemory(dev.handle, image, memory, 0));
+	VK_CHECK_DEV(dev.dispatch.BindImageMemory(dev.handle, image, memory, 0), dev);
 
 	neededMemory = memReqs.size;
 	DebugStats::get().copiedImageMem += memReqs.size;
@@ -553,7 +553,7 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 		ivi.subresourceRange = srcSubres;
 
 		auto& imgView = imgViews.emplace_back();
-		VK_CHECK(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &imgView));
+		VK_CHECK_DEV(dev.dispatch.CreateImageView(dev.handle, &ivi, nullptr, &imgView), dev);
 		nameHandle(dev, imgView, "CommandHook:copyImage");
 
 		// create/update descriptor bindings
@@ -563,7 +563,7 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 		dai.descriptorSetCount = 1u;
 		dai.pSetLayouts = &hook.sampleImageDsLayout_;
 		dai.descriptorPool = dev.dsPool;
-		VK_CHECK(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &ds));
+		VK_CHECK_DEV(dev.dispatch.AllocateDescriptorSets(dev.handle, &dai, &ds), dev);
 
 		VkDescriptorImageInfo imgInfo {};
 		imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -578,8 +578,8 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 		bvi.format = dstFormat;
 
 		VkBufferView bufferView;
-		VK_CHECK(dev.dispatch.CreateBufferView(dev.handle,
-			&bvi, nullptr, &bufferView));
+		VK_CHECK_DEV(dev.dispatch.CreateBufferView(dev.handle,
+			&bvi, nullptr, &bufferView), dev);
 		bufViews.push_back(bufferView);
 
 		writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

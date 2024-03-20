@@ -904,11 +904,11 @@ VKAPI_ATTR void VKAPI_CALL CmdPipelineBarrier(
 
 void cmdBeginRenderPass(CommandBuffer& cb,
 		VkRenderPassBeginInfo& rpBeginInfo,
-		const VkSubpassBeginInfo& subpassBeginInfo, ThreadMemScope& memScope) {
-	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
+		const VkSubpassBeginInfo& subpassBeginInfo/*, ThreadMemScope& memScope*/) {
+	// copy the chain, we might have to modify it below. TODO
+	// rpBeginInfo.pNext = copyChainLocal(memScope, rpBeginInfo.pNext);
 
-	// copy the chain, we might have to modify it below
-	rpBeginInfo.pNext = copyChainLocal(memScope, rpBeginInfo.pNext);
+	auto& cmd = addCmd<BeginRenderPassCmd, SectionType::begin>(cb);
 
 	cmd.clearValues = copySpan(cb, rpBeginInfo.pClearValues, rpBeginInfo.clearValueCount);
 	cmd.info = rpBeginInfo;
@@ -1038,9 +1038,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass(
 	subpassBeginInfo.contents = contents;
 	subpassBeginInfo.sType = VK_STRUCTURE_TYPE_SUBPASS_BEGIN_INFO;
 
-	ThreadMemScope memScope;
 	auto beginInfo = *pRenderPassBegin;
-	cmdBeginRenderPass(cb, beginInfo, subpassBeginInfo, memScope);
+	cmdBeginRenderPass(cb, beginInfo, subpassBeginInfo);
 
 	cb.dev->dispatch.CmdBeginRenderPass(cb.handle, &beginInfo, contents);
 }
@@ -1068,9 +1067,8 @@ VKAPI_ATTR void VKAPI_CALL CmdBeginRenderPass2(
 		const VkSubpassBeginInfo*                   pSubpassBeginInfo) {
 	auto& cb = getCommandBuffer(commandBuffer);
 
-	ThreadMemScope memScope;
 	auto beginInfo = *pRenderPassBegin;
-	cmdBeginRenderPass(cb, beginInfo, *pSubpassBeginInfo, memScope);
+	cmdBeginRenderPass(cb, beginInfo, *pSubpassBeginInfo);
 
 	cb.dev->dispatch.CmdBeginRenderPass2(cb.handle, &beginInfo, pSubpassBeginInfo);
 }

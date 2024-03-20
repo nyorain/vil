@@ -202,7 +202,8 @@ template<typename T> void apiHandleDestroyed(T& ourHandle) {
 }
 
 // Removes the given handle from the associated map in the given device.
-// Will additionally unset the internal forward handle in the given object.
+// Will additionally unset the internal forward handle in the given object
+// but store it in the passed handle.
 template<typename H> auto mustMoveUnset(Device& dev, H& handle) {
 	decltype(HandleDesc<H>::map(dev).mustMoveLocked(handle)) ptr {};
 

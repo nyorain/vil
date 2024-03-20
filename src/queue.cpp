@@ -36,12 +36,22 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& batch) {
 	}
 
 	if(batch.appFence) {
-		if(dev.dispatch.GetFenceStatus(dev.handle, batch.appFence->handle) != VK_SUCCESS) {
+		auto res = dev.dispatch.GetFenceStatus(dev.handle, batch.appFence->handle);
+		if(res != VK_SUCCESS) {
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(dev);
+			}
+
 			return std::nullopt;
 		}
 	} else {
 		dlg_assert(batch.ourFence);
-		if(dev.dispatch.GetFenceStatus(dev.handle, batch.ourFence) != VK_SUCCESS) {
+		auto res = dev.dispatch.GetFenceStatus(dev.handle, batch.ourFence);
+		if(res != VK_SUCCESS) {
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(dev);
+			}
+
 			return std::nullopt;
 		}
 	}
@@ -212,6 +222,10 @@ VkResult doSubmit(Queue& queue, span<const VkSubmitInfo2> submits,
 
 		if(res != VK_SUCCESS) {
 			dlg_trace("vkQueueSubmit error: {} ({})", vk::name(res), res);
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(dev);
+			}
+
 			cleanupOnErrorLocked(submitter);
 			return res;
 		}
@@ -262,6 +276,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue vkQueue) {
 		std::lock_guard lock(queue.dev->queueMutex);
 		res = queue.dev->dispatch.QueueWaitIdle(vkQueue);
 		if(res != VK_SUCCESS) {
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(*queue.dev);
+			}
+
 			return res;
 		}
 	}
@@ -297,6 +315,10 @@ VkResult waitIdleImpl(Device& dev) {
 		std::lock_guard lock(dev.queueMutex);
 		res = dev.dispatch.DeviceWaitIdle(dev.handle);
 		if(res != VK_SUCCESS) {
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(dev);
+			}
+
 			return res;
 		}
 	}
@@ -365,6 +387,10 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(
 
 		if(res != VK_SUCCESS) {
 			dlg_trace("vkQueueBindSparse error: {} ({})", vk::name(res), res);
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(dev);
+			}
+
 			cleanupOnErrorLocked(submitter);
 			return res;
 		}

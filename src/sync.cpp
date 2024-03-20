@@ -139,7 +139,12 @@ VKAPI_ATTR VkResult VKAPI_CALL ResetFences(
 		}
 	}
 
-	return dev.dispatch.ResetFences(device, fenceCount, pFences);
+	auto res = dev.dispatch.ResetFences(device, fenceCount, pFences);
+	if(res == VK_ERROR_DEVICE_LOST) {
+		onDeviceLost(dev);
+	}
+
+	return res;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
@@ -151,6 +156,10 @@ VKAPI_ATTR VkResult VKAPI_CALL GetFenceStatus(
 	VkResult res = dev.dispatch.GetFenceStatus(device, fence);
 
 	if(res != VK_SUCCESS) {
+		if(res == VK_ERROR_DEVICE_LOST) {
+			onDeviceLost(dev);
+		}
+
 		return res;
 	}
 
@@ -172,6 +181,10 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitForFences(
 		uint64_t                                    timeout) {
 	auto& dev = getDevice(device);
 	VkResult res = dev.dispatch.WaitForFences(device, fenceCount, pFences, waitAll, timeout);
+
+	if(res == VK_ERROR_DEVICE_LOST) {
+		onDeviceLost(dev);
+	}
 
 	if(res == VK_SUCCESS || !waitAll) {
 		// have to check all fences for completed payloads
@@ -259,7 +272,13 @@ VKAPI_ATTR VkResult VKAPI_CALL WaitSemaphores(
 	}
 
 	copy.pSemaphores = sems.data();
-	return dev.dispatch.WaitSemaphores(dev.handle, &copy, timeout);
+	auto res = dev.dispatch.WaitSemaphores(dev.handle, &copy, timeout);
+
+	if(res == VK_ERROR_DEVICE_LOST) {
+		onDeviceLost(dev);
+	}
+
+	return res;
 
 	// TODO: check completed workloads?
 }

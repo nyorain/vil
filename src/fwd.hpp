@@ -180,6 +180,8 @@ enum class MatchType {
 	deep,
 };
 
+void onDeviceLost(Device& dev);
+
 } // namespace
 
 // spirv-cross
@@ -213,6 +215,14 @@ using WriteBuf = span<std::byte>;
 #define VK_CHECK(x) do {\
 		auto result = (x);\
 		dlg_assertm(result == VK_SUCCESS, "result: {}", result); \
+	} while(0)
+
+#define VK_CHECK_DEV(x, dev) do {\
+		auto result = (x);\
+		dlg_assertm(result == VK_SUCCESS, "result: {}", result); \
+		if(result == VK_ERROR_DEVICE_LOST) { \
+			onDeviceLost(dev); \
+		} \
 	} while(0)
 
 
