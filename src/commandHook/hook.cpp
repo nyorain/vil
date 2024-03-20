@@ -100,6 +100,7 @@ void invalidate(CommandHookRecord& rec) {
 // CommandHook
 CommandHook::CommandHook(Device& dev) {
 	dev_ = &dev;
+	hookAccelStructBuilds = checkEnvBinary("VIL_CAPTURE_ACCEL_STRUCTS", true);
 	initImageCopyPipes(dev);
 	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
 		initAccelStructCopy(dev);

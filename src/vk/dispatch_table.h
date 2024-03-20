@@ -252,14 +252,6 @@ typedef struct VkLayerInstanceDispatchTable_ {
     PFN_vkAcquireDrmDisplayEXT AcquireDrmDisplayEXT;
     PFN_vkGetDrmDisplayEXT GetDrmDisplayEXT;
 
-    // ---- VK_NV_acquire_winrt_display extension commands
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-    PFN_vkAcquireWinrtDisplayNV AcquireWinrtDisplayNV;
-#endif // VK_USE_PLATFORM_WIN32_KHR
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-    PFN_vkGetWinrtDisplayNV GetWinrtDisplayNV;
-#endif // VK_USE_PLATFORM_WIN32_KHR
-
     // ---- VK_EXT_directfb_surface extension commands
 #ifdef VK_USE_PLATFORM_DIRECTFB_EXT
     PFN_vkCreateDirectFBSurfaceEXT CreateDirectFBSurfaceEXT;
@@ -968,6 +960,8 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkCmdTraceRaysIndirectKHR CmdTraceRaysIndirectKHR;
     PFN_vkGetRayTracingShaderGroupStackSizeKHR GetRayTracingShaderGroupStackSizeKHR;
     PFN_vkCmdSetRayTracingPipelineStackSizeKHR CmdSetRayTracingPipelineStackSizeKHR;
+
+	PFN_vkGetDeviceFaultInfoEXT GetDeviceFaultInfoEXT;
 } VkLayerDispatchTable;
 
 

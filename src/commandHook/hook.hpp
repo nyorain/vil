@@ -157,10 +157,6 @@ struct LocalCapture {
 // when the given CommandBuffer has a valid recording.
 struct CommandHook {
 public:
-	// Mainly useful for debugging, should always be true otherwise
-	// as we need it to have accelStruct data.
-	static constexpr bool hookAccelStructBuilds = true;
-
 	// maximum number of completed hooks we store at a time.
 	static constexpr auto maxCompletedHooks = 8u;
 
@@ -180,6 +176,10 @@ public:
 
 	// Always hooks, even with disabled gui. Mainly for testing.
 	std::atomic<bool> forceHook {};
+
+	// Mainly useful for debugging, should always be true otherwise
+	// as we need it to have accelStruct data.
+	bool hookAccelStructBuilds {true};
 
 public:
 	CommandHook(Device& dev);

@@ -522,7 +522,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	while(cmd) {
 		// check if command needs additional, manual hook
-		if(cmd->category() == CommandCategory::buildAccelStruct && CommandHook::hookAccelStructBuilds) {
+		if(cmd->category() == CommandCategory::buildAccelStruct && hook->hookAccelStructBuilds) {
 			auto* basCmd = commandCast<BuildAccelStructsCmd*>(cmd);
 			auto* basCmdIndirect = commandCast<BuildAccelStructsCmd*>(cmd);
 			dlg_assert(basCmd || basCmdIndirect);

@@ -15,6 +15,7 @@
 #include <overlay.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
+#include <fault.hpp>
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/hook.hpp>
@@ -551,6 +552,7 @@ VkResult doCreateDevice(
 	// useful to test fallback code paths
 	auto enableTimelineSemaphoreUsage = checkEnvBinary("VIL_TIMELINE_SEMAPHORES", true);
 	auto enableTransformFeedback = checkEnvBinary("VIL_TRANSFORM_FEEDBACK", true);
+	auto enableDeviceFault = checkEnvBinary("VIL_DEVICE_FAULT", true);
 
 	auto hasTimelineSemaphoresApi = enableTimelineSemaphoreUsage &&
 		fpPhdevFeatures2 && fpPhdevProps2 && (
@@ -559,9 +561,17 @@ VkResult doCreateDevice(
 	auto hasTransformFeedbackApi = enableTransformFeedback &&
 		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+	auto hasDeviceFaultApi = enableDeviceFault &&
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		hasExt(supportedExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+	auto hasAddressBindingReportAPI = enableDeviceFault &&
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		hasExt(supportedExts, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
 
 	auto hasTimelineSemaphores = false;
 	auto hasTransformFeedback = false;
+	auto hasDeviceFault = false;
+	auto hasAddressBindingReport = false;
 
 	// find generally relevant feature structs in chain
 	VkPhysicalDeviceVulkan11Features features11 {};
@@ -572,6 +582,8 @@ VkResult doCreateDevice(
 	VkPhysicalDeviceTimelineSemaphoreFeatures* inTS = nullptr;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT* inXFB = nullptr;
 	VkPhysicalDeviceBufferDeviceAddressFeatures* inBufAddr = nullptr;
+	VkPhysicalDeviceFaultFeaturesEXT* inDF = nullptr;
+	VkPhysicalDeviceAddressBindingReportFeaturesEXT* inABR = nullptr;
 
 	auto* link = static_cast<VkBaseOutStructure*>(pNext);
 	while(link) {
@@ -591,6 +603,10 @@ VkResult doCreateDevice(
 			inBufAddr = reinterpret_cast<VkPhysicalDeviceBufferDeviceAddressFeatures*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT) {
 			inXFB = reinterpret_cast<VkPhysicalDeviceTransformFeedbackFeaturesEXT*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT) {
+			inDF = reinterpret_cast<VkPhysicalDeviceFaultFeaturesEXT*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT) {
+			inABR = reinterpret_cast<VkPhysicalDeviceAddressBindingReportFeaturesEXT*>(link);
 		}
 
 		link = (static_cast<VkBaseOutStructure*>(link->pNext));
@@ -598,7 +614,9 @@ VkResult doCreateDevice(
 
 	VkPhysicalDeviceTimelineSemaphoreFeatures tsFeatures {};
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT tfFeatures {};
-	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi) {
+	VkPhysicalDeviceFaultFeaturesEXT dfFeatures {};
+	VkPhysicalDeviceAddressBindingReportFeaturesEXT abrFeatures {};
+	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi || hasDeviceFaultApi) {
 		dlg_assert(fpPhdevFeatures2);
 		dlg_assert(fpPhdevProps2);
 
@@ -606,22 +624,32 @@ VkResult doCreateDevice(
 		VkPhysicalDeviceFeatures2 features2 {};
 		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 
-		VkPhysicalDeviceTimelineSemaphoreFeatures timelineSemFeatures {};
 		if(hasTimelineSemaphoresApi) {
-			timelineSemFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
-			features2.pNext = &timelineSemFeatures;
+			tsFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+			features2.pNext = &tsFeatures;
 		}
 
-		VkPhysicalDeviceTransformFeedbackFeaturesEXT transformFeedbackFeatures {};
 		if(hasTransformFeedbackApi) {
-			transformFeedbackFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
-			transformFeedbackFeatures.pNext = features2.pNext;
-			features2.pNext = &transformFeedbackFeatures;
+			tfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
+			tfFeatures.pNext = features2.pNext;
+			features2.pNext = &tfFeatures;
+		}
+
+		if(hasDeviceFaultApi) {
+			dfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+			dfFeatures.pNext = features2.pNext;
+			features2.pNext = &dfFeatures;
+
+			if(hasAddressBindingReportAPI) {
+				abrFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT;
+				abrFeatures.pNext = features2.pNext;
+				features2.pNext = &abrFeatures;
+			}
 		}
 
 		fpPhdevFeatures2(phdev, &features2);
 
-		if(timelineSemFeatures.timelineSemaphore) {
+		if(tsFeatures.timelineSemaphore) {
 			hasTimelineSemaphores = true;
 
 			// check if application already has a feature struct holding it
@@ -635,8 +663,6 @@ VkResult doCreateDevice(
 			}
 
 			if(addLink) {
-				tsFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
-				tsFeatures.timelineSemaphore = true;
 				tsFeatures.pNext = const_cast<void*>(nci.pNext);
 				nci.pNext = &tsFeatures;
 			}
@@ -650,7 +676,7 @@ VkResult doCreateDevice(
 			}
 		}
 
-		if(transformFeedbackFeatures.transformFeedback) {
+		if(tfFeatures.transformFeedback) {
 			hasTransformFeedback = true;
 
 			// check if application already has a feature struct holding it
@@ -661,8 +687,7 @@ VkResult doCreateDevice(
 			}
 
 			if(addLink) {
-				tfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
-				tfFeatures.transformFeedback = true;
+				tfFeatures.geometryStreams = false;
 				tfFeatures.pNext = const_cast<void*>(nci.pNext);
 				nci.pNext = &tfFeatures;
 			}
@@ -670,6 +695,43 @@ VkResult doCreateDevice(
 			// also need to enable extension
 			if(!contains(newExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) {
 				newExts.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+			}
+		}
+
+		if(dfFeatures.deviceFault) {
+			hasDeviceFault = true;
+
+			// check if application already has a feature struct holding it
+			if(inDF) {
+				inDF->deviceFault = true;
+			} else {
+				dfFeatures.deviceFaultVendorBinary = false;
+				dfFeatures.pNext = const_cast<void*>(nci.pNext);
+				nci.pNext = &dfFeatures;
+			}
+
+			// also need to enable extension
+			if(!contains(newExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+				newExts.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+			}
+
+			// device memory address binding report
+			// we only enable this extension when we also have the device fault extension. Useless otherwise.
+			if (abrFeatures.reportAddressBinding) {
+				hasAddressBindingReport = true;
+
+				// check if application already has a feature struct holding it
+				if(inABR) {
+					inABR->reportAddressBinding = true;
+				} else {
+					abrFeatures.pNext = const_cast<void*>(nci.pNext);
+					nci.pNext = &abrFeatures;
+				}
+
+				// also need to enable extension
+				if(!contains(newExts, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)) {
+					newExts.push_back(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
+				}
 			}
 		}
 
@@ -730,6 +792,12 @@ VkResult doCreateDevice(
 	dev.transformFeedback = hasTransformFeedback;
 	dev.nonSolidFill = pEnabledFeatures10->fillModeNonSolid;
 	dev.shaderStorageImageWriteWithoutFormat = pEnabledFeatures10->shaderStorageImageWriteWithoutFormat;
+	dev.extDeviceFault = hasDeviceFault;
+
+	if(hasAddressBindingReport) {
+		dev.addressMap = std::make_unique<DeviceAddressMap>();
+		dev.addressMap->init(dev);
+	}
 
 	// NOTE: we don't ever enable buffer device address and just
 	// want to track whether it's enabled.
