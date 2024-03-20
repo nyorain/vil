@@ -50,7 +50,7 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 		bufInfo.queueFamilyIndexCount = qfcount;
 	}
 
-	VK_CHECK(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf));
+	VK_CHECK_DEV(dev.dispatch.CreateBuffer(dev.handle, &bufInfo, nullptr, &buf), dev);
 	nameHandle(dev, this->buf, name.empty() ? "OwnBuffer:buf" : name.c_str());
 
 	// get memory props
@@ -76,11 +76,11 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 		allocInfo.pNext = &flagsInfo;
 	}
 
-	VK_CHECK(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem));
+	VK_CHECK_DEV(dev.dispatch.AllocateMemory(dev.handle, &allocInfo, nullptr, &mem), dev);
 	nameHandle(dev, this->mem, "OwnBuffer:mem");
 
 	// bind
-	VK_CHECK(dev.dispatch.BindBufferMemory(dev.handle, buf, mem, 0));
+	VK_CHECK_DEV(dev.dispatch.BindBufferMemory(dev.handle, buf, mem, 0), dev);
 	this->size = reqSize;
 
 	// Might not be 100% accurate for used memory but good enough
@@ -89,7 +89,7 @@ void OwnBuffer::ensure(Device& dev, VkDeviceSize reqSize,
 	// map
 	if(type == Type::hostVisible) {
 		void* pmap;
-		VK_CHECK(dev.dispatch.MapMemory(dev.handle, mem, 0, VK_WHOLE_SIZE, 0, &pmap));
+		VK_CHECK_DEV(dev.dispatch.MapMemory(dev.handle, mem, 0, VK_WHOLE_SIZE, 0, &pmap), dev);
 		this->map = static_cast<std::byte*>(pmap);
 		dlg_assert(this->map);
 	}
@@ -119,7 +119,7 @@ void OwnBuffer::invalidateMap() {
 	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
 	range[0].memory = mem;
 	range[0].size = VK_WHOLE_SIZE;
-	VK_CHECK(dev->dispatch.InvalidateMappedMemoryRanges(dev->handle, 1, range));
+	VK_CHECK_DEV(dev->dispatch.InvalidateMappedMemoryRanges(dev->handle, 1, range), *dev);
 }
 
 void OwnBuffer::flushMap() {
@@ -133,7 +133,7 @@ void OwnBuffer::flushMap() {
 	range[0].sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
 	range[0].memory = mem;
 	range[0].size = VK_WHOLE_SIZE;
-	VK_CHECK(dev->dispatch.FlushMappedMemoryRanges(dev->handle, 1, range));
+	VK_CHECK_DEV(dev->dispatch.FlushMappedMemoryRanges(dev->handle, 1, range), *dev);
 }
 
 vku::BufferSpan OwnBuffer::asSpan(VkDeviceSize offset, VkDeviceSize size) const {

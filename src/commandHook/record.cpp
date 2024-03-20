@@ -47,7 +47,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	allocInfo.commandPool = dev.queueFamilies[record->queueFamily].commandPool;
 	allocInfo.commandBufferCount = 1;
 
-	VK_CHECK(dev.dispatch.AllocateCommandBuffers(dev.handle, &allocInfo, &this->cb));
+	VK_CHECK_DEV(dev.dispatch.AllocateCommandBuffers(dev.handle, &allocInfo, &this->cb), dev);
 	// command buffer is a dispatchable object
 	dev.setDeviceLoaderData(dev.handle, this->cb);
 	nameHandle(dev, this->cb, "CommandHookRecord:cb");
@@ -62,7 +62,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 			qci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 			qci.queryCount = 2u;
 			qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
-			VK_CHECK(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool));
+			VK_CHECK_DEV(dev.dispatch.CreateQueryPool(dev.handle, &qci, nullptr, &this->queryPool), dev);
 			nameHandle(dev, this->queryPool, "CommandHookRecord:queryPool");
 		}
 	}
@@ -78,7 +78,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	// we can never submit the cb simulataneously anyways, see CommandHook
 	VkCommandBufferBeginInfo cbbi {};
 	cbbi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	VK_CHECK(dev.dispatch.BeginCommandBuffer(this->cb, &cbbi));
+	VK_CHECK_DEV(dev.dispatch.BeginCommandBuffer(this->cb, &cbbi), dev);
 
 	// initial cmd stuff
 	if(this->queryPool) {
@@ -91,7 +91,7 @@ CommandHookRecord::CommandHookRecord(CommandHook& xhook,
 	ZoneScopedN("HookRecord");
 	this->hookRecord(record->commands, info);
 
-	VK_CHECK(dev.dispatch.EndCommandBuffer(this->cb));
+	VK_CHECK_DEV(dev.dispatch.EndCommandBuffer(this->cb), dev);
 
 	if(!hcommand.empty()) {
 		dlg_assert(maxHookLevel >= hcommand.size() - 1);
@@ -522,7 +522,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	auto& dev = *record->dev;
 	while(cmd) {
 		// check if command needs additional, manual hook
-		if(cmd->category() == CommandCategory::buildAccelStruct && CommandHook::hookAccelStructBuilds) {
+		if(cmd->category() == CommandCategory::buildAccelStruct && hook->hookAccelStructBuilds) {
 			auto* basCmd = commandCast<BuildAccelStructsCmd*>(cmd);
 			auto* basCmdIndirect = commandCast<BuildAccelStructsCmd*>(cmd);
 			dlg_assert(basCmd || basCmdIndirect);

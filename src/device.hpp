@@ -69,6 +69,8 @@ struct HandlePtrFactory<IntrusiveDerivedPtr<T>> {
 template<typename K, typename T>
 using SyncedIntrusiveDerivedUnorderedMap = SyncedUnorderedMap<K, T, IntrusiveDerivedPtr>;
 
+struct DeviceAddressMap;
+
 struct Device {
 	Instance* ini {};
 	VkDevice handle {};
@@ -94,10 +96,13 @@ struct Device {
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
 	bool shaderStorageImageWriteWithoutFormat {};
+	bool extDeviceFault {}; // whether EXT_device_fault was enabled
+
+	// Only valid when EXT_device_address_binding_report enabled.
+	std::unique_ptr<DeviceAddressMap> addressMap;
 
 	// Whether we are in integration testing mode
 	bool testing {};
-
 	std::atomic<bool> doFullSync {};
 	std::atomic<bool> captureCmdStack {};
 
@@ -297,6 +302,10 @@ void notifyMemoryResourceInvalidatedLocked(Device& dev, MemoryResource& res);
 
 // Lazily initializes the window, if needed.
 void checkInitWindow(Device& dev);
+
+// Called when we detected VK_ERROR_DEVICE_LOST.
+// Might be called while dev mutex is locked.
+void onDeviceLost(Device& dev);
 
 // Util for naming internal handles.
 // Mainly useful to get better validation layer output for stuff

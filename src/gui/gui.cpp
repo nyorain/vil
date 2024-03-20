@@ -1491,8 +1491,8 @@ void Gui::apiHandleDestroyed(const Handle& handle, VkObjectType type) {
 	if(!fences.empty()) {
 		dlg_trace("waiting for draw completion (GPU)");
 
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
-			fences.data(), true, UINT64_MAX));
+		VK_CHECK_DEV(dev().dispatch.WaitForFences(dev().handle, u32(fences.size()),
+			fences.data(), true, UINT64_MAX), dev());
 
 		for(auto* draw : draws) {
 			finishedLocked(*draw);
@@ -2042,8 +2042,8 @@ VkResult Gui::renderFrame(FrameInfo& info) {
 
 		// TODO: would have to reset foundDraw->presentSemaphore here right?
 		// TODO: not sure how to handle this the best
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle, 1,
-			&foundDraw->fence, true, UINT64_MAX));
+		VK_CHECK_DEV(dev().dispatch.WaitForFences(dev().handle, 1,
+			&foundDraw->fence, true, UINT64_MAX), dev());
 
 		std::lock_guard lock(dev().mutex);
 		finishedLocked(*foundDraw);
@@ -2264,8 +2264,8 @@ void Gui::waitForDraws() {
 	}
 
 	if(!fences.empty()) {
-		VK_CHECK(dev().dispatch.WaitForFences(dev().handle,
-			u32(fences.size()), fences.data(), true, UINT64_MAX));
+		VK_CHECK_DEV(dev().dispatch.WaitForFences(dev().handle,
+			u32(fences.size()), fences.data(), true, UINT64_MAX), dev());
 		// we can't reset the draws here
 	}
 }
@@ -2315,7 +2315,7 @@ void Gui::finishedLocked(Draw& draw) {
 	draw.usedBuffers.clear();
 	draw.usedHookState.reset();
 
-	VK_CHECK(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence));
+	VK_CHECK_DEV(dev().dispatch.ResetFences(dev().handle, 1, &draw.fence), dev());
 
 	draw.inUse = false;
 }
