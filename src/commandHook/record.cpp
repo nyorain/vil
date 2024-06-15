@@ -749,6 +749,33 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		// ignore queueFams here
 		auto& dstBuf = dst.data.emplace<OwnBuffer>();
 		initAndCopy(dev, cb, dstBuf, 0u, *elem.buffer, off, size, {});
+	} else if(cat == DescriptorCategory::accelStruct) {
+		auto& elem = accelStructs(ds, bindingID)[elemID];
+
+		using CapturedAccelStruct = CommandHookState::CapturedAccelerationStruct;
+		auto& dstCapture = dst.data.emplace<CapturedAccelStruct>();
+
+		// We only have to store the state now if the tlas has been
+		// previously built in this record. Otherwise we cannot know
+		// its state at execution time right now. It will get captured
+		// in CommandHookSubmission::activate
+		auto tlasBuildPtr = lastAccelStructBuild(elem.accelStruct->deviceAddress);
+		if(tlasBuildPtr) {
+			dstCapture.tlas = std::move(tlasBuildPtr);
+			auto& inis = std::get<AccelInstances>(dstCapture.tlas->data);
+
+			// NOTE: only capture the blases built by this record.
+			// The rest will be captured in CommandHookSubmission::activate.
+			// For BLASes not built in this record, we cannot tell their
+			// pending state at execution time for sure.
+			for(auto ini : inis.instances) {
+				auto blasAddress = ini.accelerationStructureReference;
+				auto builtStatePtr = lastAccelStructBuild(blasAddress);
+				if(builtStatePtr) {
+					dstCapture.blases.insert({blasAddress, std::move(builtStatePtr)});
+				}
+			}
+		}
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
 		//   as buffer but then create bufferView on our own?
@@ -762,20 +789,6 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		// We shouldn't land here at all, we catch that case when
 		// updting the hook in CommandViewer
 		dlg_error("Requested descriptor binding copy for inlineUniformBlock");
-	} else if(cat == DescriptorCategory::accelStruct) {
-		// TODO: do we need to copy acceleration structures?
-		// If we ever change this here, also change copyableDescriptorSame
-		//
-		// What we need to do here is this (-> AccelStructState rework):
-		// Copy a ref ptr to the current state of the used AccelStruct.
-		// That state should take into account all commands previously
-		// executed in this submission or from other submissions to the
-		// same queue. But it also needs to consider other queues:
-		// All submissions that have already finished on other queues
-		// or are chained to this submission. While already here we could
-		// make sure that there aren't any non-finished submissions to other
-		// queues that are building the accelStruct and are not chained
-		// to this submission. That would be a sync hazard and undefined anyways.
 	} else {
 		dlg_error("Unimplemented");
 	}
@@ -1404,6 +1417,21 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsIndirectCmd& cmd) {
 	// TODO: implement indirect copy concept
 	(void) cmd;
 	dlg_error("TODO: implement support for copying BuildAccelStructsIndirectCmd data");
+}
+
+IntrusivePtr<AccelStructState> CommandHookRecord::lastAccelStructBuild(u64 accelStructAddress) {
+	// TODO PERF: could be solved more efficiently with an unordered map
+	// might be relevant when there are many (thousand) builds
+	for(auto& cmd : accelStructBuilds) {
+		for(auto& build : cmd.builds) {
+			dlg_assert(build.dst);
+			if(build.dst->deviceAddress == accelStructAddress) {
+				return build.state;
+			}
+		}
+	}
+
+	return {};
 }
 
 void CommandHookRecord::finish() noexcept {

@@ -183,3 +183,8 @@ So its only important when viewing tlas in dispatchRays viewer. Or
 for shader debugging or something. But when we capture the tlas
 via descriptor, we could just create a map of active blas states
 at *that* point. `UnorderedMap<u64, IntrusivePtr<AccelStructState>>`
+
+In resource viewer, can compare TLAS build time with BLASes build times
+and show "invalid; blas out of date" warning.
+When a submission with a TLAS is used, we can be sure that is is valid
+*at that point*. So just capture the TLAS and all BLAS states at that point.

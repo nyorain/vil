@@ -3,6 +3,7 @@
 #include <fwd.hpp>
 #include <util/ownbuf.hpp>
 #include <vk/vulkan_core.h>
+#include <accelStruct.hpp>
 #include <variant>
 #include <vector>
 #include <optional>
@@ -57,12 +58,18 @@ struct AttachmentCopyOp {
 
 // Collection of data we got out of a submission/command.
 struct CommandHookState {
+	struct CapturedAccelerationStruct {
+		IntrusivePtr<AccelStructState> tlas;
+		std::unordered_map<u64, IntrusivePtr<AccelStructState>> blases;
+	};
+
 	struct CopiedDescriptor {
 		DescriptorCopyOp op;
 		std::variant<std::monostate,
 			CopiedImage,
 			OwnBuffer,
-			CopiedImageToBuffer> data;
+			CopiedImageToBuffer,
+			CapturedAccelerationStruct> data;
 	};
 
 	struct CopiedAttachment {
