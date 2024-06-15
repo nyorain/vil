@@ -35,7 +35,7 @@ struct AccelAABBs {
 // NOTE: we do not convert accelerationStructureReference to AccelStruct*
 // here by design. We expected acceleration structure builds to happen often
 // but this resolving is expensive and only required when showing AccelStruct
-// in gui.
+// in gui. See docs/accelStruct.md for details.
 struct AccelInstances {
 	// references the hostVisible buffer
 	span<VkAccelerationStructureInstanceKHR> instances;

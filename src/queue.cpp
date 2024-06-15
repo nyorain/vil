@@ -523,9 +523,13 @@ void activateLocked(BindSparseSubmission& bindSparse) {
 }
 
 void activateLocked(CommandSubmission& cmdSub) {
-	// store pending layouts
 	for(auto& scb : cmdSub.cbs) {
 		auto recPtr = scb.cb->lastRecordPtrLocked();
+		// notify hooks that submission was activated
+		if(scb.hook) {
+			scb.hook->activate();
+		}
+		// store pending layouts
 		for(auto& ui : recPtr->used.images) {
 			ui.handle->applyLocked(ui.layoutChanges);
 		}

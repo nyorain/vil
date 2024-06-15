@@ -34,6 +34,50 @@ CommandHookSubmission::~CommandHookSubmission() {
 	}
 }
 
+void CommandHookSubmission::activate() {
+	auto& dev = *record->hook->dev_;
+
+	// NOTE: the order (first capture/first update pending) should not
+	// matter here. All acceleration structures that are build by this
+	// command buffer should have already been entered into all captures.
+
+	// capture pending accelStruct states
+	for(auto& capture : record->accelStructCaptures) {
+		dlg_assert(capture.id < record->state->copiedDescriptors.size());
+		dlg_assert(capture.accelStruct);
+		dlg_assert(capture.accelStruct->effectiveType ==
+			VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+
+		using CapturedAccelStruct = CommandHookState::CapturedAccelerationStruct;
+
+		auto& dstDescriptor = record->state->copiedDescriptors[capture.id];
+		auto& dstCapture = std::get<CapturedAccelStruct>(dstDescriptor.data);
+		if (!dstCapture.tlas) { // already set when built during commandBuffer
+			dstCapture.tlas = capture.accelStruct->pendingState;
+		}
+
+		auto& tlasState = *dstCapture.tlas;
+		auto& inis = std::get<AccelInstances>(tlasState.data);
+
+		for(auto ini : inis.instances) {
+			auto address = ini.accelerationStructureReference;
+			auto& accelStruct = accelStructAtLocked(dev, address);
+			// NOTE: we use insert here by design. When the blas was
+			// built by the given commandBuffer, it was already
+			// inserted during record-hook-recording.
+			dstCapture.blases.insert({address, accelStruct.pendingState});
+		}
+	}
+
+	// set AccelStruct::pendingState for all build accelStructs.
+	for(auto& buildCmd : record->accelStructBuilds) {
+		for(auto& build : buildCmd.builds) {
+			dlg_assert(build.dst);
+			build.dst->pendingState = build.state;
+		}
+	}
+}
+
 void CommandHookSubmission::finish(Submission& subm) {
 	ZoneScoped;
 	dlg_assert(record->writer == &subm);

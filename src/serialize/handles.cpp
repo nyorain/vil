@@ -461,7 +461,7 @@ void serialize(Slz&, IO& io, AccelStruct& accelStruct) {
 	serialize(io, accelStruct.name);
 	serialize(io, accelStruct.type);
 	serialize(io, accelStruct.effectiveType);
-	serialize(io, accelStruct.geometryType);
+	serialize(io, accelStruct.type);
 }
 
 template<typename Slz, typename IO>

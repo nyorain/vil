@@ -73,6 +73,13 @@ struct CommandHookRecord {
 
 	std::vector<AccelStructBuild> accelStructBuilds;
 
+	struct AccelStructCapture {
+		unsigned id; // index into state->copiedDescriptors
+		AccelStruct* accelStruct;
+	};
+
+	std::vector<AccelStructCapture> accelStructCaptures;
+
 	// Needed for image to buffer sample-copying
 	std::vector<VkDescriptorSet> descriptorSets;
 	std::vector<VkImageView> imageViews;
@@ -138,6 +145,10 @@ private:
 
 	// Recursively records the given linked list of commands.
 	void hookRecord(Command* cmdChain, RecordInfo&);
+
+	// Returns the state of the *last* AccelStruct build for the acceleration
+	// structure at the given address, or null if there is none.
+	IntrusivePtr<AccelStructState> lastAccelStructBuild(u64 accelStructAddress);
 
 	// = Copying =
 	void copyTransfer(Command& bcmd, RecordInfo&, bool isBefore);

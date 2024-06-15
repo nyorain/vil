@@ -54,6 +54,8 @@ urgent, bugs:
 	  (try to test with RDR2 again)
 
 new, workstack:
+- [ ] add mode where hooking is disabled. Commands can still be inspected
+	but, like, just statically.
 - [ ] add isStateCmd(const Command&) and remove remaining command dynamic casts
 - [ ] handle imgui cursor-to-be-shown and clipboard
 	- [ ] make sure to pass it via interface

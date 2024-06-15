@@ -138,7 +138,7 @@ layout for sets that don't have any writable bindings to begin with?
 __For now, let's just ignore storage image writes, it's too hard to track
 efficiently. We just focus on resources (for now: only images) written
 explicitly, i.e. via transfer. Add support for attachments later__
-					
+
 # Support mappable resources
 
 in MapMemory:
@@ -270,7 +270,7 @@ we know all submissions happening before it). And not resolve cows
 before they are 'active'.
 But even then, we wouldn't catch all cases. We would incorrectly add
 the resolve to the first submitted-out-of-order write submission.
-So, in conclusion, we would have to postpone the cow adding (or activating) 
+So, in conclusion, we would have to postpone the cow adding (or activating)
 and resolve op scheduling until we know a submission to be logically ready.
 
 Wow, that complicates things a lot!
@@ -297,6 +297,8 @@ In the end we could still disable cows if events are used or something (or
 based on an environment variable).
 
 EDIT: yeah, seems valid per spec. damn.
+EDIT EDIT: no, not really. See discussion in
+	https://github.com/KhronosGroup/Vulkan-Docs/issues/755
 
 ---
 
@@ -417,7 +419,7 @@ Semaphore::updateUpper(u64 value) {
 	for(auto& wait : waits) {
 		// resolve the wait
 		if(wait.value > value) {
-			continue;	
+			continue;
 		}
 
 		// check if this activated the submission
@@ -457,7 +459,7 @@ struct SubmissionGraph {
 	// We just need to make sure semaphores aren't destroyed, use
 	// IntrusivePtrs for that.
 	using SyncedOp = std::variant<
-		SwapchainAcquireOp,	
+		SwapchainAcquireOp,
 		PresentOp,
 		QueueWaitOp,
 		IntrusivePtr<SubmissionBatch>,
@@ -492,7 +494,7 @@ __Detecting__ that a resource is potentially changed is easy, we don't
 need the whole complexity of the CoW mechanism fore that.
 
 Our main usecase for cows is the shader debugger. Secondary usecase:
-sometimes inputs to shaders are HUGE static resources (like >100MB textures, 
+sometimes inputs to shaders are HUGE static resources (like >100MB textures,
 think highly detailed cubemap or something). Having some CoW mechanism
 there would be nice as well.
 
@@ -504,7 +506,7 @@ Shader debugger:
   being modified. We could still "just use it" for debugging.
   This means we might get weird results for one frame. So what, nobody
   will notice :D
-  On a more serious note, performance in the shader debugger is mainly a 
+  On a more serious note, performance in the shader debugger is mainly a
   concern when not having frozen state. We could always force copies when
   our state is frozen so we guarantee coherent input state in that case.
 	- alternatively, if we detect the change, we could simply show some
