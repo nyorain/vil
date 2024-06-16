@@ -19,6 +19,12 @@
 #  pragma warning(push, 0)
 #endif
 
+#ifdef __GNUC__
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wunused-parameter"
+	#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif // __GNUC__
+
 #include "common/tracy_lz4.cpp"
 #include "client/TracyProfiler.cpp"
 #include "client/TracyCallstack.cpp"
@@ -54,5 +60,9 @@
 #  pragma comment(lib, "user32.lib")
 #  pragma warning(pop)
 #endif
+
+#ifdef __GNUC__
+	#pragma GCC diagnostic pop
+#endif // __GNUC__
 
 #endif
