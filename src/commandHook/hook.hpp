@@ -177,6 +177,9 @@ public:
 	// Always hooks, even with disabled gui. Mainly for testing.
 	std::atomic<bool> forceHook {};
 
+	// Never re-uses hooked records, even if possible. Mainly for debugging.
+	std::atomic<bool> allowReuse {true};
+
 	// Mainly useful for debugging, should always be true otherwise
 	// as we need it to have accelStruct data.
 	bool hookAccelStructBuilds {true};

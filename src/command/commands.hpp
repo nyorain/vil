@@ -1668,6 +1668,7 @@ struct CommandVisitor {
 	virtual void visit(const WriteTimestampCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const CopyQueryPoolResultsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 
+	virtual void visit(const PushConstantsCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const PushDescriptorSetCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const PushDescriptorSetWithTemplateCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
 	virtual void visit(const SetFragmentShadingRateCmd& cmd) { visit(static_cast<const Command&>(cmd)); }
@@ -1795,6 +1796,7 @@ struct TemplateCommandVisitor : CommandVisitor {
 	void visit(const WriteTimestampCmd& cmd) override { f(cmd); }
 	void visit(const CopyQueryPoolResultsCmd& cmd) override { f(cmd); }
 
+	void visit(const PushConstantsCmd& cmd) override { f(cmd); }
 	void visit(const PushDescriptorSetCmd& cmd) override { f(cmd); }
 	void visit(const PushDescriptorSetWithTemplateCmd& cmd) override { f(cmd); }
 	void visit(const SetFragmentShadingRateCmd& cmd) override { f(cmd); }
