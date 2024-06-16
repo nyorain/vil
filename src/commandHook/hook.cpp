@@ -774,15 +774,16 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 	auto foundCompletedIt = completed_.end();
 	auto completedCount = 0u;
 	auto hookNeededForCmd = bool(!dstCommand.empty());
+	// PERF: we might be able to make accel-struct-state re-using work.
+	// When no-one else references it (besides record and accelStruct itself).
+	// TODO: when re-use is not allowed, clear out finished records
+	// immediately somehow! Otherwise we might just grow and grow
+	// when a single record is resubmitted.
+	bool allowRecordReuse = this->allowReuse &&
+		(!hookAccelStructBuilds || !record.buildsAccelStructs);
 
-	if(allowReuse && (!hookAccelStructBuilds || !record.buildsAccelStructs)) {
+	if(allowRecordReuse) {
 		for(auto& hookRecord : record.hookRecords) {
-			// we can't use this record since it didn't hook a command and
-			// was just use for accelStruct data copying
-			if(hookNeededForCmd == hookRecord->hcommand.empty()) {
-				continue;
-			}
-
 			// the record is currently pending on the device
 			if(hookRecord->writer) {
 				continue;
@@ -790,6 +791,15 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 
 			// local capture mismath
 			if(hookRecord->localCapture != localCapture) {
+				continue;
+			}
+
+			// We want to capture an acceleration structure.
+			// CommandHookSubmission::{activate, finish} might write into
+			// the dst state, assumes it wasn't used before.
+			// PERF: we could make this work in theory. Might need
+			// more complicated state re-using logic
+			if(!hookRecord->accelStructCaptures.empty()) {
 				continue;
 			}
 

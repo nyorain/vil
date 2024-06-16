@@ -58,7 +58,7 @@ struct AttachmentCopyOp {
 
 // Collection of data we got out of a submission/command.
 struct CommandHookState {
-	struct CapturedAccelerationStruct {
+	struct CapturedAccelStruct {
 		IntrusivePtr<AccelStructState> tlas;
 		std::unordered_map<u64, IntrusivePtr<AccelStructState>> blases;
 	};
@@ -69,7 +69,7 @@ struct CommandHookState {
 			CopiedImage,
 			OwnBuffer,
 			CopiedImageToBuffer,
-			CapturedAccelerationStruct> data;
+			CapturedAccelStruct> data;
 	};
 
 	struct CopiedAttachment {

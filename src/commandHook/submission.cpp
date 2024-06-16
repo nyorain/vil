@@ -35,40 +35,6 @@ CommandHookSubmission::~CommandHookSubmission() {
 }
 
 void CommandHookSubmission::activate() {
-	auto& dev = *record->hook->dev_;
-
-	// NOTE: the order (first capture/first update pending) should not
-	// matter here. All acceleration structures that are build by this
-	// command buffer should have already been entered into all captures.
-
-	// capture pending accelStruct states
-	for(auto& capture : record->accelStructCaptures) {
-		dlg_assert(capture.id < record->state->copiedDescriptors.size());
-		dlg_assert(capture.accelStruct);
-		dlg_assert(capture.accelStruct->effectiveType ==
-			VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
-
-		using CapturedAccelStruct = CommandHookState::CapturedAccelerationStruct;
-
-		auto& dstDescriptor = record->state->copiedDescriptors[capture.id];
-		auto& dstCapture = std::get<CapturedAccelStruct>(dstDescriptor.data);
-		if (!dstCapture.tlas) { // already set when built during commandBuffer
-			dstCapture.tlas = capture.accelStruct->pendingState;
-		}
-
-		auto& tlasState = *dstCapture.tlas;
-		auto& inis = std::get<AccelInstances>(tlasState.data);
-
-		for(auto ini : inis.instances) {
-			auto address = ini.accelerationStructureReference;
-			auto& accelStruct = accelStructAtLocked(dev, address);
-			// NOTE: we use insert here by design. When the blas was
-			// built by the given commandBuffer, it was already
-			// inserted during record-hook-recording.
-			dstCapture.blases.insert({address, accelStruct.pendingState});
-		}
-	}
-
 	// set AccelStruct::pendingState for all build accelStructs.
 	for(auto& buildCmd : record->accelStructBuilds) {
 		for(auto& build : buildCmd.builds) {
@@ -82,24 +48,12 @@ void CommandHookSubmission::finish(Submission& subm) {
 	ZoneScoped;
 	dlg_assert(record->writer == &subm);
 
-	// Notify all accel struct builds that they have finished.
-	// We are guaranteed by the standard that all accelStructs build
-	// by the submission are still valid at this point.
-	for(auto& buildCmd : record->accelStructBuilds) {
-		for(auto& build : buildCmd.builds) {
-			dlg_assert(build.state);
-			build.state->built = true;
-
-			if(build.dst->pendingState == build.state) {
-				build.dst->lastValid = build.dst->pendingState;
-			}
-		}
-	}
-
 	// In this case the hook was invalidated, no longer interested in results.
 	// Since we are the only submission left to the record, it can be
 	// destroyed.
 	if(!record->hook) {
+		finishAccelStructBuilds();
+
 		record->writer = nullptr;
 		dlg_assert(!contains(record->record->hookRecords, record));
 		delete record;
@@ -112,6 +66,7 @@ void CommandHookSubmission::finish(Submission& subm) {
 	// when the record has no state, we don't have to transmit anything
 	if(!record->state) {
 		dlg_assert(record->hcommand.empty());
+		finishAccelStructBuilds();
 		return;
 	}
 
@@ -168,6 +123,53 @@ void CommandHookSubmission::finish(Submission& subm) {
 			dlg_warn("Unsupported indirect command (readback)");
 		}
 	}
+
+	// capture pending accelStruct states
+	// TODO: logically, we should do this in activate(). Here, the blas
+	// might already have gotten new states. But in activate() we might not
+	// know the instances on CPU side, as the TLAS might still be building.
+	// On the other hand, doing this here should be *relatively* safe as
+	// the tlas is invalidated when a blas is rebuilt.
+	//   We should guarantee that submissions are always finished in order
+	//   (submission order?) for stronger guarantees here.
+	// Alternatively, we could capture a map of ALL blases to their state
+	// in activate (meh).
+	auto& dev = *record->hook->dev_;
+	for(auto& capture : record->accelStructCaptures) {
+		dlg_assert(capture.id < record->state->copiedDescriptors.size());
+		dlg_assert(capture.accelStruct);
+		dlg_assert(capture.accelStruct->effectiveType ==
+			VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR);
+
+		using CapturedAccelStruct = CommandHookState::CapturedAccelStruct;
+
+		auto& dstDescriptor = record->state->copiedDescriptors[capture.id];
+		auto& dstCapture = std::get<CapturedAccelStruct>(dstDescriptor.data);
+		if(!dstCapture.tlas) { // already set when built during commandBuffer
+			dstCapture.tlas = capture.accelStruct->pendingState;
+		}
+
+		auto& tlasState = *dstCapture.tlas;
+		// TODO: this can probably fail due to missing finish ordering.
+		dlg_assert(tlasState.built);
+
+		auto& inis = std::get<AccelInstances>(tlasState.data);
+		for(auto ini : inis.instances) {
+			auto address = ini.accelerationStructureReference;
+			if(address) {
+				auto* accelStruct = tryAccelStructAtLocked(dev, address);
+				dlg_assertm(accelStruct, "Invalid BLAS in TLAS");
+				if(accelStruct) {
+					// NOTE: we use insert here by design. When the blas was
+					// built by the given commandBuffer, it was already
+					// inserted during record-hook-recording.
+					dstCapture.blases.insert({address, accelStruct->lastValid});
+				}
+			}
+		}
+	}
+
+	finishAccelStructBuilds();
 
 	CompletedHook* dstCompleted {};
 	if(record->localCapture) {
@@ -238,6 +240,25 @@ void CommandHookSubmission::transmitTiming() {
 
 	auto diff = after - before;
 	record->state->neededTime = diff;
+}
+
+void CommandHookSubmission::finishAccelStructBuilds() {
+	// Notify all accel struct builds that they have finished.
+	// We are guaranteed by the standard that all accelStructs build
+	// by the submission are still valid at this point.
+	for(auto& buildCmd : record->accelStructBuilds) {
+		for(auto& build : buildCmd.builds) {
+			dlg_assert(build.state);
+			build.state->built = true;
+
+			// TODO: needed?
+			build.state->buffer.invalidateMap();
+
+			if(build.dst->pendingState == build.state) {
+				build.dst->lastValid = build.dst->pendingState;
+			}
+		}
+	}
 }
 
 } // namespace vil

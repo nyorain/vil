@@ -13,6 +13,9 @@ urgent, bugs:
 	- [ ] maybe show full image size on hover?
 	- [ ] also fix mip/layer selector that sometimes automatically resets itself
 		  (seen with slice 3D selector e.g. npt surfel lookup tex)
+- [ ] finish submissions in order, see CommandHookSubmission::finish
+      comment for accelStruct captures
+- [ ] immediately free HookedRecords that are not to be re-used in finish.
 
 - [ ] test more on laptop, intel gpu
 	- [ ] seems like we do some nasty stuff in the histogram shaders,

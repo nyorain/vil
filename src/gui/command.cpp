@@ -1027,7 +1027,45 @@ void CommandViewer::displayDs(Draw& draw) {
 	} else if(dsCat == DescriptorCategory::accelStruct) {
 		auto& elem = accelStructs(dsState, bindingID)[elemID];
 		refButtonExpect(gui, elem.accelStruct);
-		// TODO: show data of acceleration structure
+
+		// content
+		if(!hookState) {
+			ImGui::Text("Waiting for a submission...");
+			return;
+		}
+
+		if(!copiedData) {
+			dlg_error("couldn't find copied descriptor data");
+			ImGui::Text("Error copying descriptor. See log output");
+			return;
+		}
+
+		using CapturedAccelStruct = CommandHookState::CapturedAccelStruct;
+		auto* capture = std::get_if<CapturedAccelStruct>(&copiedData->data);
+		if(!capture || !capture->tlas) {
+			imGuiText("Error capturing TLAS. See log output");
+			return;
+		}
+
+		dlg_assert(capture->tlas->built);
+		auto resolveBlas = [&](u64 address) -> AccelStructStatePtr {
+			auto it = capture->blases.find(address);
+			if(it == capture->blases.end()) {
+				dlg_error("Invalid blas address {}", address);
+				return {};
+			}
+			return it->second;
+		};
+
+		auto& instances = std::get<AccelInstances>(capture->tlas->data);
+
+		// TODO: also display other instance information
+		dlg_trace("{} inis", instances.instances.size());
+		dlg_trace(" [0]: {}", instances.instances[0].accelerationStructureReference);
+		dlg_trace(" [1]: {}", instances.instances[1].accelerationStructureReference);
+		dlg_trace(" [2]: {}", instances.instances[2].accelerationStructureReference);
+
+		vertexViewer_.displayInstances(draw, instances, gui_->dt(), resolveBlas);
 	} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
 		auto blockData = inlineUniformBlock(dsState, bindingID);
 		imGuiText("Inline Uniform Block, Size {}", blockData.size());
@@ -1323,7 +1361,6 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = true;
 				updateHook();
 			} else {
-				vertexViewer_.updateInput(gui_->dt());
 				vertexViewer_.displayOutput(draw, *drawCmd, *hookState, gui_->dt());
 			}
 

@@ -1626,6 +1626,9 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		AABB3f vertBounds {inf, inf, inf, 0.f, 0.f, 0.f};
 
 		for(auto& ini : instances.instances) {
+			if(!ini.accelerationStructureReference) {
+				continue;
+			}
 			auto blasState = blasResolver(ini.accelerationStructureReference);
 			// TODO: check that the build is finished?
 			//   hm, keep last built version in blas as well for
@@ -1665,12 +1668,16 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 
 		for(auto& ini : instances.instances) {
 			ZoneScopedN("ini");
+			if(!ini.accelerationStructureReference) {
+				continue;
+			}
 
 			auto blasState = blasResolver(ini.accelerationStructureReference);
-			// TODO: check that the build is finished?
 			if(!blasState || blasState->data.index() != 0u) {
 				continue;
 			}
+
+			dlg_assert(blasState->built);
 			auto& tris = std::get<0>(blasState->data);
 
 			// TODO: we should multiple draw calls instead of just batching

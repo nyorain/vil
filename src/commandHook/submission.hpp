@@ -26,6 +26,8 @@ struct CommandHookSubmission {
 	void finish(Submission&);
 	void transmitTiming();
 	void transmitIndirect();
+
+	void finishAccelStructBuilds();
 };
 
 } // namespace vil
