@@ -29,8 +29,8 @@ struct Row {
 };
 
 template<typename... Args>
-inline void imGuiText(const char* fmt, Args&&... args) {
-	ImGui::Text("%s", dlg::format(fmt, std::forward<Args>(args)...).c_str());
+inline void imGuiText(const char* fmt, const Args&... args) {
+	ImGui::Text("%s", dlg::format(fmt, args...).c_str());
 }
 
 inline void asColumns2(span<const Row> rows) {

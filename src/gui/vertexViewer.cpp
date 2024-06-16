@@ -1509,8 +1509,8 @@ void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 	far_ = -100 * sum;
 }
 
-/*
-void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, float dt) {
+void VertexViewer::displayTriangles(Draw& draw, const OwnBuffer& buf,
+		const AccelTriangles& tris, float dt) {
 	if(ImGui::Button("Recenter")) {
 		AABB3f vertBounds = bounds(tris);
 		centerCamOnBounds(vertBounds);
@@ -1545,7 +1545,7 @@ void VertexViewer::displayTriangles(Draw& draw, const AccelTriangles& tris, floa
 		drawData_.params = {};
 		drawData_.params.drawCount = drawCount;
 		drawData_.indexBuffer = {};
-		drawData_.vertexBuffers = {{{tris.buffer.buf, 0u, tris.buffer.size}}};
+		drawData_.vertexBuffers = {{{buf.buf, 0u, buf.size}}};
 		drawData_.canvasOffset = {pos.x, pos.y};
 		drawData_.canvasSize = {avail.x, avail.y};
 		drawData_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -1613,17 +1613,24 @@ AABB3f transform(const AABB3f& a, const Mat4f& transform) {
 	return {0.5f * (start + end), 0.5f * (end - start)};
 }
 
-void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances, float dt) {
+void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
+		float dt, std::function<AccelStructStatePtr(u64)> blasResolver) {
 	if(ImGui::Button("Recenter")) {
 		auto inf = 999999999.f; // std::numeric_limits<float>::infinity();
 		AABB3f vertBounds {inf, inf, inf, 0.f, 0.f, 0.f};
 
 		for(auto& ini : instances.instances) {
-			if(!ini.accelStruct || ini.accelStruct->data.index() != 0) {
+			auto blasState = blasResolver(ini.accelerationStructureReference);
+			// TODO: check that the build is finished?
+			//   hm, keep last built version in blas as well for
+			//   resource viewer and show that instead when built is not
+			//   finished for most current one?
+			if(!blasState || blasState->data.index() != 0u) {
 				continue;
 			}
-			auto& tris = std::get<0>(ini.accelStruct->data);
-			vertBounds = bounds(vertBounds, transform(bounds(tris), ini.transform));
+			auto& tris = std::get<0>(blasState->data);
+			vertBounds = bounds(vertBounds, transform(bounds(tris),
+				toMat4f(ini.transform)));
 		}
 
 		centerCamOnBounds(vertBounds);
@@ -1651,10 +1658,12 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		drawDatas_.reserve(instances.instances.size());
 
 		for(auto& ini : instances.instances) {
-			if(!ini.accelStruct || ini.accelStruct->data.index() != 0) {
+			auto blasState = blasResolver(ini.accelerationStructureReference);
+			// TODO: check that the build is finished?
+			if(!blasState || blasState->data.index() != 0u) {
 				continue;
 			}
-			auto& tris = std::get<0>(ini.accelStruct->data);
+			auto& tris = std::get<0>(blasState->data);
 
 			// TODO: we should multiple draw calls instead of just batching
 			// everything together. E.g. to visualize different geometry flags
@@ -1678,9 +1687,9 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 			data.scale = 1.f;
 			data.drawFrustum = false;
 			data.params.drawCount = drawCount;
-			data.vertexBuffers = {{{tris.buffer.buf, 0u, tris.buffer.size}}};
+			data.vertexBuffers = {{{blasState->buffer.buf, 0u, blasState->buffer.size}}};
 			data.self = this;
-			data.mat = ini.transform;
+			data.mat = toMat4f(ini.transform);
 
 			auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 				auto* data = static_cast<DrawData*>(cmd->UserCallbackData);
@@ -1697,6 +1706,5 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 
 	ImGui::EndChild();
 }
-*/
 
 } // namespace vil

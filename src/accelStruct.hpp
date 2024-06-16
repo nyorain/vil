@@ -41,12 +41,13 @@ struct AccelInstances {
 	span<VkAccelerationStructureInstanceKHR> instances;
 };
 
+// Ref-counted, can outlive the AccelStruct it originates from.
 struct AccelStructState {
-	AccelStruct* accelStruct {};
-	OwnBuffer buffer;
 	std::atomic<u32> refCount {};
+	bool built {}; // whether building has finished.
 
-	bool built {};
+	// Immutable after creation
+	OwnBuffer buffer;
 	std::variant<AccelTriangles, AccelAABBs, AccelInstances> data;
 };
 
@@ -58,19 +59,23 @@ struct AccelStruct : SharedDeviceHandle {
 	VkAccelerationStructureTypeKHR type; // can be generic
 	VkAccelerationStructureTypeKHR effectiveType; // only relevant when type == generic
 
-	// creation info
+	// creation info, immutable.
 	// TODO: can buffer get destroyed before AccelStruct?
 	//   should unset itself here then.
 	//   Or make it an IntrusivePtr
 	Buffer* buf {};
 	VkDeviceSize offset {};
 	VkDeviceSize size {};
-
 	VkDeviceAddress deviceAddress {};
 
 	// The state when all activated and pending submissions are completed.
 	// Synced using device mutex.
 	IntrusivePtr<AccelStructState> pendingState;
+
+	// The last state this had that has finished building.
+	// The same as pendingState, iff pendingState->built == true.
+	// Synced using device mutex.
+	IntrusivePtr<AccelStructState> lastValid;
 
 	void onApiDestroy();
 };
@@ -91,6 +96,9 @@ void copyBuildData(AccelStruct&,
 // must match exactly.
 AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address);
 AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address);
+AccelStruct* tryAccelStructAtLocked(Device& dev, VkDeviceAddress address);
+
+Mat4f toMat4f(const VkTransformMatrixKHR& src);
 
 // VK_KHR_acceleration_structure
 VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(

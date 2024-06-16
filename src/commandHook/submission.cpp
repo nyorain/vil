@@ -82,6 +82,20 @@ void CommandHookSubmission::finish(Submission& subm) {
 	ZoneScoped;
 	dlg_assert(record->writer == &subm);
 
+	// Notify all accel struct builds that they have finished.
+	// We are guaranteed by the standard that all accelStructs build
+	// by the submission are still valid at this point.
+	for(auto& buildCmd : record->accelStructBuilds) {
+		for(auto& build : buildCmd.builds) {
+			dlg_assert(build.state);
+			build.state->built = true;
+
+			if(build.dst->pendingState == build.state) {
+				build.dst->lastValid = build.dst->pendingState;
+			}
+		}
+	}
+
 	// In this case the hook was invalidated, no longer interested in results.
 	// Since we are the only submission left to the record, it can be
 	// destroyed.

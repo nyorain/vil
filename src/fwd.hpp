@@ -158,6 +158,7 @@ using IntrusivePtr = HandledPtr<T, RefCountHandler<T, D>>;
 template<typename T> using FinishPtr = HandledPtr<T, FinishHandler<T>>;
 
 using CommandBufferPtr = IntrusiveWrappedPtr<CommandBuffer>;
+using AccelStructStatePtr = IntrusivePtr<AccelStructState>;
 
 template<typename V, typename T>
 decltype(auto) constexpr templatize(T&& value) {
