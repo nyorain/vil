@@ -1027,7 +1027,7 @@ void CommandViewer::displayDs(Draw& draw) {
 	} else if(dsCat == DescriptorCategory::accelStruct) {
 		auto& elem = accelStructs(dsState, bindingID)[elemID];
 		refButtonExpect(gui, elem.accelStruct);
-		// TODO: show data of acceleration structure?
+		// TODO: show data of acceleration structure
 	} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
 		auto blockData = inlineUniformBlock(dsState, bindingID);
 		imGuiText("Inline Uniform Block, Size {}", blockData.size());

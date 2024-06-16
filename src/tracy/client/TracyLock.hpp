@@ -21,7 +21,7 @@ public:
         , m_active( false )
 #endif
     {
-        assert( m_id != std::numeric_limits<uint32_t>::max() );
+        assert( m_id != (std::numeric_limits<uint32_t>::max)() );
 
         auto item = Profiler::QueueSerial();
         MemWrite( &item->hdr.type, QueueType::LockAnnounce );
@@ -98,7 +98,6 @@ public:
 
         auto item = Profiler::QueueSerial();
         MemWrite( &item->hdr.type, QueueType::LockRelease );
-        MemWrite( &item->lockRelease.thread, GetThreadHandle() );
         MemWrite( &item->lockRelease.id, m_id );
         MemWrite( &item->lockRelease.time, Profiler::GetTime() );
         Profiler::QueueSerialFinish();
@@ -155,7 +154,7 @@ public:
 
     tracy_force_inline void CustomName( const char* name, size_t size )
     {
-        assert( size < std::numeric_limits<uint16_t>::max() );
+        assert( size < (std::numeric_limits<uint16_t>::max)() );
         auto ptr = (char*)tracy_malloc( size );
         memcpy( ptr, name, size );
         auto item = Profiler::QueueSerial();
@@ -220,10 +219,8 @@ public:
         m_ctx.CustomName( name, size );
     }
 
-	const T& inner() const
-	{
-        return m_lockable;
-	}
+	auto& inner() { return m_lockable; }
+	auto& inner() const { return m_lockable; }
 
 private:
     T m_lockable;
@@ -241,7 +238,7 @@ public:
         , m_active( false )
 #endif
     {
-        assert( m_id != std::numeric_limits<uint32_t>::max() );
+        assert( m_id != (std::numeric_limits<uint32_t>::max)() );
 
         auto item = Profiler::QueueSerial();
         MemWrite( &item->hdr.type, QueueType::LockAnnounce );
@@ -318,7 +315,6 @@ public:
 
         auto item = Profiler::QueueSerial();
         MemWrite( &item->hdr.type, QueueType::LockRelease );
-        MemWrite( &item->lockRelease.thread, GetThreadHandle() );
         MemWrite( &item->lockRelease.id, m_id );
         MemWrite( &item->lockRelease.time, Profiler::GetTime() );
         Profiler::QueueSerialFinish();
@@ -400,9 +396,9 @@ public:
 
         auto item = Profiler::QueueSerial();
         MemWrite( &item->hdr.type, QueueType::LockSharedRelease );
-        MemWrite( &item->lockRelease.thread, GetThreadHandle() );
-        MemWrite( &item->lockRelease.id, m_id );
-        MemWrite( &item->lockRelease.time, Profiler::GetTime() );
+        MemWrite( &item->lockReleaseShared.thread, GetThreadHandle() );
+        MemWrite( &item->lockReleaseShared.id, m_id );
+        MemWrite( &item->lockReleaseShared.time, Profiler::GetTime() );
         Profiler::QueueSerialFinish();
     }
 
@@ -457,7 +453,7 @@ public:
 
     tracy_force_inline void CustomName( const char* name, size_t size )
     {
-        assert( size < std::numeric_limits<uint16_t>::max() );
+        assert( size < (std::numeric_limits<uint16_t>::max)() );
         auto ptr = (char*)tracy_malloc( size );
         memcpy( ptr, name, size );
         auto item = Profiler::QueueSerial();
@@ -470,7 +466,6 @@ public:
 #endif
         Profiler::QueueSerialFinish();
     }
-
 
 private:
     uint32_t m_id;
@@ -543,10 +538,8 @@ public:
         m_ctx.CustomName( name, size );
     }
 
-	const T& inner() const
-	{
-        return m_lockable;
-	}
+	auto& inner() { return m_lockable; }
+	auto& inner() const { return m_lockable; }
 
 private:
     T m_lockable;

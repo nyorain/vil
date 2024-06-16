@@ -353,7 +353,7 @@ int Socket::Recv( void* _buf, int len, int timeout )
     }
 }
 
-int Socket::ReadUpTo( void* _buf, int len, int timeout )
+int Socket::ReadUpTo( void* _buf, int len )
 {
     const auto sock = m_sock.load( std::memory_order_relaxed );
     auto buf = (char*)_buf;
@@ -489,7 +489,7 @@ bool ListenSocket::Listen( uint16_t port, int backlog )
         m_sock = addrinfo_and_socket_for_family( port, AF_INET, &res );
         if( m_sock == -1 ) return false;
     }
-#if defined _WIN32 || defined __CYGWIN__
+#if defined _WIN32
     unsigned long val = 0;
     setsockopt( m_sock, IPPROTO_IPV6, IPV6_V6ONLY, (const char*)&val, sizeof( val ) );
 #elif defined BSD
@@ -678,10 +678,10 @@ bool UdpListen::Listen( uint16_t port )
 #endif
 #if defined _WIN32
     unsigned long reuse = 1;
-    setsockopt( m_sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof( reuse ) );
+    setsockopt( sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof( reuse ) );
 #else
     int reuse = 1;
-    setsockopt( m_sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof( reuse ) );
+    setsockopt( sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof( reuse ) );
 #endif
 #if defined _WIN32
     unsigned long broadcast = 1;
