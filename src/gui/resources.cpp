@@ -1431,6 +1431,7 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 		auto blasResolver = [&](u64 address) -> std::pair<AccelStruct*, AccelStructStatePtr> {
 			assertOwnedOrShared(dev.mutex);
 			auto* blas = tryAccelStructAtLocked(dev, address);
+			dlg_assert(blas);
 			if(!blas) {
 				return {nullptr, nullptr};
 			}

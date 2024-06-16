@@ -17,12 +17,10 @@ namespace vil {
 
 // util
 AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address) {
-	assertOwnedOrShared(dev.mutex);
-	auto it = dev.accelStructAddresses.find(address);
-	dlg_assertm(it != dev.accelStructAddresses.end(),
+	auto* accelStruct = tryAccelStructAtLocked(dev, address);
+	dlg_assertm(accelStruct,
 		"Couldn't find VkAccelerationStructure at address {}", address);
-	dlg_assert(it->second);
-	return *it->second;
+	return *accelStruct;
 }
 
 AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {

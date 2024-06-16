@@ -153,7 +153,7 @@ private:
 	// = Copying =
 	void copyTransfer(Command& bcmd, RecordInfo&, bool isBefore);
 	void copyDs(Command& bcmd, RecordInfo&,
-		const DescriptorCopyOp&,
+		const DescriptorCopyOp&, unsigned copyDstID,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow);
 	void copyAttachment(const Command& bcmd, const RecordInfo&,

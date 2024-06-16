@@ -605,7 +605,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 }
 
 void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
-		const DescriptorCopyOp& copyDesc,
+		const DescriptorCopyOp& copyDesc, unsigned dstID,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow) {
 	auto& dev = *record->dev;
@@ -752,30 +752,36 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	} else if(cat == DescriptorCategory::accelStruct) {
 		auto& elem = accelStructs(ds, bindingID)[elemID];
 
-		using CapturedAccelStruct = CommandHookState::CapturedAccelerationStruct;
+		using CapturedAccelStruct = CommandHookState::CapturedAccelStruct;
 		auto& dstCapture = dst.data.emplace<CapturedAccelStruct>();
 
 		// We only have to store the state now if the tlas has been
 		// previously built in this record. Otherwise we cannot know
 		// its state at execution time right now. It will get captured
-		// in CommandHookSubmission::activate
+		// in CommandHookSubmission::finish
 		auto tlasBuildPtr = lastAccelStructBuild(elem.accelStruct->deviceAddress);
 		if(tlasBuildPtr) {
 			dstCapture.tlas = std::move(tlasBuildPtr);
-			auto& inis = std::get<AccelInstances>(dstCapture.tlas->data);
 
 			// NOTE: only capture the blases built by this record.
-			// The rest will be captured in CommandHookSubmission::activate.
+			// The rest will be captured in CommandHookSubmission::finish.
 			// For BLASes not built in this record, we cannot tell their
 			// pending state at execution time for sure.
-			for(auto ini : inis.instances) {
-				auto blasAddress = ini.accelerationStructureReference;
-				auto builtStatePtr = lastAccelStructBuild(blasAddress);
-				if(builtStatePtr) {
-					dstCapture.blases.insert({blasAddress, std::move(builtStatePtr)});
+			// We just write everything we build into the map, we cannot
+			// know which blases are referenced by the tlas at this point on cpu.
+			// Yes, this might include blas builds *after* the TLAS was build.
+			// But when a blas was built that is inside the tlas,
+			// the tlas would be invalid at this point (application error).
+			for(auto& cmd : accelStructBuilds) {
+				for(auto& build : cmd.builds) {
+					dlg_assert_or(build.dst && build.state, continue);
+					auto blasAddress = build.dst->deviceAddress;
+					dstCapture.blases.insert({blasAddress, build.state});
 				}
 			}
 		}
+
+		accelStructCaptures.push_back({dstID, elem.accelStruct});
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
 		//   as buffer but then create bufferView on our own?
@@ -1127,7 +1133,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	for(auto [i, dc] : enumerate(info.ops.descriptorCopies)) {
 		if(dc.before) {
 			IntrusivePtr<DescriptorSetCow> tmpCow; // TODO: due to dsState removal
-			copyDs(bcmd, info, dc, state->copiedDescriptors[i], tmpCow);
+			copyDs(bcmd, info, dc, i, state->copiedDescriptors[i], tmpCow);
 		}
 	}
 
@@ -1222,7 +1228,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	for(auto [i, dc] : enumerate(info.ops.descriptorCopies)) {
 		if(!dc.before) {
 			IntrusivePtr<DescriptorSetCow> tmpCow; // TODO: due to dsState removal
-			copyDs(bcmd, info, dc, state->copiedDescriptors[i], tmpCow);
+			copyDs(bcmd, info, dc, i, state->copiedDescriptors[i], tmpCow);
 		}
 	}
 
