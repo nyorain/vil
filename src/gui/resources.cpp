@@ -1370,12 +1370,20 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 	imGuiText("type: {}", vk::name(accelStruct.type));
 	imGuiText("effective type: {}", vk::name(accelStruct.effectiveType));
 
-	imGuiText("TODO: visualize state");
-	(void) draw;
+	AccelStructStatePtr state;
 
-	/*
-	if(accelStruct.geometryType == VK_GEOMETRY_TYPE_TRIANGLES_KHR) {
-		auto& tris = std::get<AccelTriangles>(accelStruct.data);
+	{
+		std::shared_lock lock(gui_->dev().mutex);
+		state = accelStruct.lastValid;
+	}
+
+	if(!state) {
+		imGuiText("Has not been built yet");
+		return;
+	}
+
+	if(auto* pTris = std::get_if<AccelTriangles>(&state->data); pTris) {
+		auto& tris = *pTris;
 
 		auto triCount = 0u;
 		for(auto& geom : tris.geometries) {
@@ -1386,7 +1394,7 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 
 		// TODO: better display
 		auto& vv = gui_->cbGui().commandViewer().vertexViewer();
-		vv.displayTriangles(draw, tris, gui_->dt());
+		vv.displayTriangles(draw, state->buffer, tris, gui_->dt());
 
 		auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet |
 			ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_FramePadding;
@@ -1414,46 +1422,70 @@ void ResourceGui::drawDesc(Draw& draw, AccelStruct& accelStruct) {
 				ImGui::Separator();
 			}
 		}
-	} else if(accelStruct.geometryType == VK_GEOMETRY_TYPE_AABBS_KHR) {
+	} else if(auto* pBoxes = std::get_if<AccelAABBs>(&state->data); pBoxes) {
 		imGuiText("TODO: AABB info");
-	} else if(accelStruct.geometryType == VK_GEOMETRY_TYPE_INSTANCES_KHR) {
-		auto& inis = std::get<AccelInstances>(accelStruct.data);
+	} else if(auto* pInis = std::get_if<AccelInstances>(&state->data); pInis) {
+		auto& inis = *pInis;
+		auto& dev = gui_->dev();
+
+		auto blasResolver = [&](u64 address) -> std::pair<AccelStruct*, AccelStructStatePtr> {
+			assertOwnedOrShared(dev.mutex);
+			auto* blas = tryAccelStructAtLocked(dev, address);
+			if(!blas) {
+				return {nullptr, nullptr};
+			}
+
+			return {blas, blas->lastValid};
+		};
 
 		if(inis.instances.empty()) {
 			imGuiText("No instances.");
 		} else if(ImGui::TreeNode("Instances")) {
+			std::shared_lock lock(dev.mutex);
+
 			for(auto& ini : inis.instances) {
-				if(!ini.accelStruct) {
+				if(!ini.accelerationStructureReference) {
 					imGuiText("null instance");
 					continue;
 				}
 
-				ImGui::Separator();
-				refButtonExpect(*gui_, ini.accelStruct);
+				auto [blas, state] = blasResolver(ini.accelerationStructureReference);
+				if(!blas) {
+					imGuiText("Error: invalid instance");
+					continue;
+				}
 
-				imGuiText("tableOffset: {}", ini.bindingTableOffset);
-				imGuiText("customIndex: {}", ini.customIndex);
+				ImGui::Separator();
+				refButton(*gui_, *blas);
+
+				imGuiText("tableOffset: {}", ini.instanceShaderBindingTableRecordOffset);
+				imGuiText("customIndex: {}", ini.instanceCustomIndex);
 				imGuiText("mask: {}{}", std::hex, u32(ini.mask));
 				imGuiText("flags: {}", vk::nameGeometryInstanceFlagsKHR(ini.flags));
 
 				imGuiText("transform:");
+				auto transform = toMat4f(ini.transform);
 				for(auto r = 0u; r < 3; ++r) {
 					imGuiText("{} {} {} {}",
-						ini.transform[r][0],
-						ini.transform[r][1],
-						ini.transform[r][2],
-						ini.transform[r][3]);
+						transform[r][0],
+						transform[r][1],
+						transform[r][2],
+						transform[r][3]);
 				}
 			}
 
 			ImGui::TreePop();
 		}
 
+		auto blasStateResolver = [&](u64 address) -> AccelStructStatePtr {
+			std::shared_lock lock(dev.mutex);
+			return blasResolver(address).second;
+		};
+
 		// TODO: better display
 		auto& vv = gui_->cbGui().commandViewer().vertexViewer();
-		vv.displayInstances(draw, inis, gui_->dt());
+		vv.displayInstances(draw, inis, gui_->dt(), blasStateResolver);
 	}
-	*/
 }
 
 void ResourceGui::drawDesc(Draw& draw, DescriptorUpdateTemplate& dut) {

@@ -38,8 +38,9 @@ struct VertexViewer {
 
 	void displayInput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
 	void displayOutput(Draw&, const DrawCmdBase&, const CommandHookState&, float dt);
-	// void displayTriangles(Draw&, const AccelTriangles&, float dt);
-	// void displayInstances(Draw&, const AccelInstances&, float dt);
+	void displayTriangles(Draw&, const OwnBuffer& buf, const AccelTriangles&, float dt);
+	void displayInstances(Draw&, const AccelInstances&, float dt,
+		std::function<AccelStructStatePtr(u64)> blasResolver);
 
 	void updateInput(float dt);
 

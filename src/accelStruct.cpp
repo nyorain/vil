@@ -30,17 +30,16 @@ AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
 	return accelStructAtLocked(dev, address);
 }
 
-// building
-Mat4f toMat4f(const VkTransformMatrixKHR& src) {
-	Mat<3, 4, float> ret34;
-	static_assert(sizeof(ret34) == sizeof(src));
-	std::memcpy(&ret34, &src, sizeof(ret34));
-
-	auto ret = Mat4f(ret34);
-	ret[3][3] = 1.f;
-	return ret;
+AccelStruct* tryAccelStructAtLocked(Device& dev, VkDeviceAddress address) {
+	assertOwnedOrShared(dev.mutex);
+	auto it = dev.accelStructAddresses.find(address);
+	if(it == dev.accelStructAddresses.end()) {
+		return nullptr;
+	}
+	return it->second;
 }
 
+// building
 /*
 void writeAABBs(AccelStruct& accelStruct, unsigned id,
 		const VkAccelerationStructureGeometryKHR& srcGeom,
@@ -270,6 +269,16 @@ IntrusivePtr<AccelStructState> createState(AccelStruct& accelStruct,
 	}
 
 	return state;
+}
+
+Mat4f toMat4f(const VkTransformMatrixKHR& src) {
+	Mat<3, 4, float> ret34;
+	static_assert(sizeof(ret34) == sizeof(src));
+	std::memcpy(&ret34, &src, sizeof(ret34));
+
+	auto ret = Mat4f(ret34);
+	ret[3][3] = 1.f;
+	return ret;
 }
 
 /*
