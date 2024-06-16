@@ -657,6 +657,8 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 }
 
 void VertexViewer::imGuiDraw(const DrawData& data) {
+	ZoneScoped;
+
 	auto& dev = gui_->dev();
 	auto cb = data.cb;
 
@@ -1511,6 +1513,8 @@ void VertexViewer::centerCamOnBounds(const AABB3f& bounds) {
 
 void VertexViewer::displayTriangles(Draw& draw, const OwnBuffer& buf,
 		const AccelTriangles& tris, float dt) {
+	ZoneScoped;
+
 	if(ImGui::Button("Recenter")) {
 		AABB3f vertBounds = bounds(tris);
 		centerCamOnBounds(vertBounds);
@@ -1615,6 +1619,8 @@ AABB3f transform(const AABB3f& a, const Mat4f& transform) {
 
 void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		float dt, std::function<AccelStructStatePtr(u64)> blasResolver) {
+	ZoneScoped;
+
 	if(ImGui::Button("Recenter")) {
 		auto inf = 999999999.f; // std::numeric_limits<float>::infinity();
 		AABB3f vertBounds {inf, inf, inf, 0.f, 0.f, 0.f};
@@ -1658,6 +1664,8 @@ void VertexViewer::displayInstances(Draw& draw, const AccelInstances& instances,
 		drawDatas_.reserve(instances.instances.size());
 
 		for(auto& ini : instances.instances) {
+			ZoneScopedN("ini");
+
 			auto blasState = blasResolver(ini.accelerationStructureReference);
 			// TODO: check that the build is finished?
 			if(!blasState || blasState->data.index() != 0u) {

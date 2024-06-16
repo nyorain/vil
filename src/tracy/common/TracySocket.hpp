@@ -2,9 +2,8 @@
 #define __TRACYSOCKET_HPP__
 
 #include <atomic>
+#include <stddef.h>
 #include <stdint.h>
-
-#include "TracyForceInline.hpp"
 
 struct addrinfo;
 struct sockaddr;
@@ -30,7 +29,7 @@ public:
     int Send( const void* buf, int len );
     int GetSendBufSize();
 
-    int ReadUpTo( void* buf, int len, int timeout );
+    int ReadUpTo( void* buf, int len );
     bool Read( void* buf, int len, int timeout );
 
     template<typename ShouldExit>

@@ -19,19 +19,17 @@
 #  pragma warning(push, 0)
 #endif
 
-#ifdef __GNUC__
-	#pragma GCC diagnostic push
-	#pragma GCC diagnostic ignored "-Wunused-parameter"
-#endif // __GNUC__
-
 #include "common/tracy_lz4.cpp"
 #include "client/TracyProfiler.cpp"
 #include "client/TracyCallstack.cpp"
+#include "client/TracySysPower.cpp"
 #include "client/TracySysTime.cpp"
 #include "client/TracySysTrace.cpp"
 #include "common/TracySocket.cpp"
 #include "client/tracy_rpmalloc.cpp"
 #include "client/TracyDxt1.cpp"
+#include "client/TracyAlloc.cpp"
+#include "client/TracyOverride.cpp"
 
 #if TRACY_HAS_CALLSTACK == 2 || TRACY_HAS_CALLSTACK == 3 || TRACY_HAS_CALLSTACK == 4 || TRACY_HAS_CALLSTACK == 6
 #  include "libbacktrace/alloc.cpp"
@@ -46,6 +44,7 @@
 #  else
 #    include "libbacktrace/elf.cpp"
 #  endif
+#  include "common/TracyStackFrames.cpp"
 #endif
 
 #ifdef _MSC_VER
@@ -55,9 +54,5 @@
 #  pragma comment(lib, "user32.lib")
 #  pragma warning(pop)
 #endif
-
-#ifdef __GNUC__
-	#pragma GCC diagnostic pop
-#endif // __GNUC__
 
 #endif
