@@ -1119,6 +1119,16 @@ void Gui::drawOverviewUI(Draw& draw) {
 		}
 
 		ImGui::Checkbox("Show ImGui Demo", &showImguiDemo_);
+
+		auto force = dev.commandHook->forceHook.load();
+		if(ImGui::Checkbox("Force hooking", &force)) {
+			dev.commandHook->forceHook.store(force);
+		}
+
+		auto allow = dev.commandHook->allowReuse.load();
+		if(ImGui::Checkbox("Allow hook record reuse", &allow)) {
+			dev.commandHook->allowReuse.store(allow);
+		}
 	}
 }
 

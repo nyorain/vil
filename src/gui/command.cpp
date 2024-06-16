@@ -1440,6 +1440,9 @@ void CommandViewer::displayCommand() {
 			displayDiff /= 1000.f * 1000.f;
 			imGuiText("Time: {} ms", displayDiff);
 		}
+	} else {
+		// To avoid UI flickering
+		imGuiText("Time: pending");
 	}
 
 	auto displayMultidraw = [&](u32 count, bool indexed, ReadBuf cmds) {

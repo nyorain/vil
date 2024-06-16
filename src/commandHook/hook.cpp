@@ -394,6 +394,8 @@ void CommandHook::hook(QueueSubmitter& subm) {
 		}
 	}
 
+	LinAllocScope localMatchMem(matchAlloc_);
+
 	const CommandRecord* frameDstRecord {};
 	span<const CommandSectionMatch> frameRecMatchData {};
 	auto swapchain = dev_->swapchainLocked();
@@ -437,8 +439,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 		trimmedTargetFrame = trimmedTargetFrame.first(off + 1);
 
 		ThreadMemScope tms;
-		LinAllocScope localMatchMem(matchAlloc_);
-		auto frameMatch = match(tms, localMatchMem, matchType, target_.frame, currFrame);
+		auto frameMatch = match(localMatchMem, tms, matchType, target_.frame, currFrame);
 
 		for(auto& submMatch : frameMatch.matches) {
 			if(submMatch.a != &target_.frame[target_.submissionID]) {
@@ -774,50 +775,52 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 	auto completedCount = 0u;
 	auto hookNeededForCmd = bool(!dstCommand.empty());
 
-	for(auto& hookRecord : record.hookRecords) {
-		// we can't use this record since it didn't hook a command and
-		// was just use for accelStruct data copying
-		if(hookNeededForCmd == hookRecord->hcommand.empty()) {
-			continue;
-		}
-
-		// the record is currently pending on the device
-		if(hookRecord->writer) {
-			continue;
-		}
-
-		// local capture mismath
-		if(hookRecord->localCapture != localCapture) {
-			continue;
-		}
-
-		if(hookRecord->state->refCount > 1u) {
-			// We can't reuse this hook record, its state is still needded
-			// somewhere, e.g. referenced in gui or our completed list.
-			// The one ref count is always there and comes from the record.
-			// Note that this check isn't a race: when the refCount is
-			// 1 in this branch it can only be increased by CommandHook
-			// passing it out somewhere which only happens inside this
-			// critical section we are in.
-
-			// check if it's because its completed for the state re-using
-			// logic below this loop
-			auto completedIt = find_if(this->completed_, [&](const CompletedHook& completed) {
-				return completed.state == hookRecord->state;
-			});
-			if(completedIt != completed_.end()) {
-				++completedCount;
-				if(!foundCompleted || foundCompletedIt > completedIt) {
-					foundCompletedIt = completedIt;
-					foundCompleted = hookRecord.get();
-				}
+	if(allowReuse && (!hookAccelStructBuilds || !record.buildsAccelStructs)) {
+		for(auto& hookRecord : record.hookRecords) {
+			// we can't use this record since it didn't hook a command and
+			// was just use for accelStruct data copying
+			if(hookNeededForCmd == hookRecord->hcommand.empty()) {
+				continue;
 			}
 
-			continue;
-		}
+			// the record is currently pending on the device
+			if(hookRecord->writer) {
+				continue;
+			}
 
-		foundHookRecord = hookRecord.get();
-		break;
+			// local capture mismath
+			if(hookRecord->localCapture != localCapture) {
+				continue;
+			}
+
+			if(hookRecord->state->refCount > 1u) {
+				// We can't reuse this hook record, its state is still needded
+				// somewhere, e.g. referenced in gui or our completed list.
+				// The one ref count is always there and comes from the record.
+				// Note that this check isn't a race: when the refCount is
+				// 1 in this branch it can only be increased by CommandHook
+				// passing it out somewhere which only happens inside this
+				// critical section we are in.
+
+				// check if it's because its completed for the state re-using
+				// logic below this loop
+				auto completedIt = find_if(this->completed_, [&](const CompletedHook& completed) {
+					return completed.state == hookRecord->state;
+				});
+				if(completedIt != completed_.end()) {
+					++completedCount;
+					if(!foundCompleted || foundCompletedIt > completedIt) {
+						foundCompletedIt = completedIt;
+						foundCompleted = hookRecord.get();
+					}
+				}
+
+				continue;
+			}
+
+			foundHookRecord = hookRecord.get();
+			break;
+		}
 	}
 
 	// If there are already 2 versions for this record in our completed
@@ -891,17 +894,21 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 		foundHookRecord = hook;
 	}
 
+#ifdef VIL_DEBUG
+	// slow checks validating the hooked record.
 	dlg_check({
-		if(!localCapture && !target_.command.empty()) {
+		if(!localCapture && hookNeededForCmd && !target_.command.empty()) {
 			dlg_assert(target_.record);
 
-			auto findRes = find(matchType, *record.commands, target_.command, target_.descriptors);
+			auto findRes = find(matchType, *record.commands,
+				target_.command, target_.descriptors);
 			dlg_assert(findRes.match > 0.f);
 			dlg_assert(std::equal(
 				foundHookRecord->hcommand.begin(), foundHookRecord->hcommand.end(),
 				findRes.hierarchy.begin(), findRes.hierarchy.end()));
 		}
 	});
+#endif // VIL_DEBUG
 
 	data.reset(new CommandHookSubmission(*foundHookRecord, subm, std::move(descriptors)));
 	return foundHookRecord->cb;

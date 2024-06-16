@@ -1396,14 +1396,16 @@ void onDeviceLost(Device& dev) {
 		return;
 	}
 
-	VkDeviceFaultCountsEXT faultCounts {VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT};
+	VkDeviceFaultCountsEXT faultCounts {};
+	faultCounts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
 	dev.dispatch.GetDeviceFaultInfoEXT(dev.handle, &faultCounts, nullptr);
 
 	std::vector<VkDeviceFaultAddressInfoEXT> addressInfos(faultCounts.addressInfoCount);
 	std::vector<VkDeviceFaultVendorInfoEXT> vendorInfos(faultCounts.vendorInfoCount);
 	std::vector<std::byte> vendorBinary(faultCounts.vendorBinarySize);
 
-	VkDeviceFaultInfoEXT faultInfo {VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT};
+	VkDeviceFaultInfoEXT faultInfo {};
+	faultInfo.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
 	faultInfo.pAddressInfos = addressInfos.data();
 	faultInfo.pVendorBinaryData = vendorBinary.data();
 	faultInfo.pVendorInfos = vendorInfos.data();
