@@ -66,6 +66,7 @@ struct QueueFamily {
 struct SubmittedCommandBuffer {
 	CommandBuffer* cb {};
 	std::unique_ptr<CommandHookSubmission> hook; // optional
+	std::vector<AccelStructStatePtr> accelStructCopies; // size() == cb->rec->accelStructCopies.size()
 
 	SubmittedCommandBuffer();
 	SubmittedCommandBuffer(SubmittedCommandBuffer&&) noexcept = default;

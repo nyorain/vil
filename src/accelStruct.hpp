@@ -98,6 +98,10 @@ AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address);
 AccelStruct& accelStructAtLocked(Device& dev, VkDeviceAddress address);
 AccelStruct* tryAccelStructAtLocked(Device& dev, VkDeviceAddress address);
 
+// Returns a map of all BLASes (that have been built) and their
+// pending states at this point in time.
+std::unordered_map<VkDeviceAddress, AccelStructStatePtr> captureBLASesLocked(Device& dev);
+
 Mat4f toMat4f(const VkTransformMatrixKHR& src);
 
 // VK_KHR_acceleration_structure

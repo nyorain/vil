@@ -29,12 +29,30 @@ AccelStruct& accelStructAt(Device& dev, VkDeviceAddress address) {
 }
 
 AccelStruct* tryAccelStructAtLocked(Device& dev, VkDeviceAddress address) {
+	ZoneScoped;
+
 	assertOwnedOrShared(dev.mutex);
 	auto it = dev.accelStructAddresses.find(address);
 	if(it == dev.accelStructAddresses.end()) {
 		return nullptr;
 	}
 	return it->second;
+}
+
+std::unordered_map<VkDeviceAddress, AccelStructStatePtr> captureBLASesLocked(Device& dev) {
+	ZoneScoped;
+
+	// TODO: could be optimized (a bit) by maintaing such a map. Then we would just have to copy it
+	assertOwnedOrShared(dev.mutex);
+
+	std::unordered_map<VkDeviceAddress, AccelStructStatePtr> ret;
+	for(auto& as : dev.accelStructs.inner) {
+		if(as->effectiveType == VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR && as->pendingState) {
+			ret.emplace(as->deviceAddress, as->pendingState);
+		}
+	}
+
+	return ret;
 }
 
 // building
@@ -189,6 +207,10 @@ IntrusivePtr<AccelStructState> createState(AccelStruct& accelStruct,
 		const VkAccelerationStructureBuildRangeInfoKHR* buildRangeInfos) {
 	auto& dev = *accelStruct.dev;
 
+	dlg_assert(info.type != VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR);
+	dlg_assert(accelStruct.effectiveType == VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR ||
+		info.type == accelStruct.effectiveType);
+
 	accelStruct.effectiveType = info.type;
 	if(info.geometryCount == 0u) {
 		return {}; // TODO: still return state?
@@ -331,6 +353,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateAccelerationStructureKHR(
 	accelStruct.buf = &buf;
 	accelStruct.handle = *pAccelerationStructure;
 	accelStruct.type = pCreateInfo->type;
+	accelStruct.effectiveType = accelStruct.type;
 	accelStruct.offset = pCreateInfo->offset;
 	accelStruct.size = pCreateInfo->size;
 

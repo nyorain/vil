@@ -820,22 +820,17 @@ VkResult doCreateDevice(
 	// TODO: no idea exactly why this is needed. I guess they should not be
 	// part of the device loader table in the first place?
 	// Might be related: https://github.com/KhronosGroup/Vulkan-Loader/issues/116
-	dev.dispatch.QueueBeginDebugUtilsLabelEXT = (PFN_vkQueueBeginDebugUtilsLabelEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkQueueBeginDebugUtilsLabelEXT");
-	dev.dispatch.QueueEndDebugUtilsLabelEXT = (PFN_vkQueueEndDebugUtilsLabelEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkQueueEndDebugUtilsLabelEXT");
-	dev.dispatch.CmdInsertDebugUtilsLabelEXT = (PFN_vkCmdInsertDebugUtilsLabelEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkCmdInsertDebugUtilsLabelEXT");
-	dev.dispatch.CmdBeginDebugUtilsLabelEXT = (PFN_vkCmdBeginDebugUtilsLabelEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkCmdBeginDebugUtilsLabelEXT");
-	dev.dispatch.CmdEndDebugUtilsLabelEXT = (PFN_vkCmdEndDebugUtilsLabelEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkCmdEndDebugUtilsLabelEXT");
-	dev.dispatch.SetDebugUtilsObjectNameEXT = (PFN_vkSetDebugUtilsObjectNameEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkSetDebugUtilsObjectNameEXT");
-	dev.dispatch.SetDebugUtilsObjectTagEXT = (PFN_vkSetDebugUtilsObjectTagEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkSetDebugUtilsObjectTagEXT");
-	dev.dispatch.QueueInsertDebugUtilsLabelEXT = (PFN_vkQueueInsertDebugUtilsLabelEXT)
-		fpGetInstanceProcAddr(ini.handle, "vkQueueInsertDebugUtilsLabelEXT");
+#define LOAD_FALLBACK_INI(name) if(!dev.dispatch.name) dev.dispatch.name = (PFN_vk##name) \
+			fpGetInstanceProcAddr(ini.handle, "vk" #name)
+
+	LOAD_FALLBACK_INI(QueueBeginDebugUtilsLabelEXT);
+	LOAD_FALLBACK_INI(QueueEndDebugUtilsLabelEXT);
+	LOAD_FALLBACK_INI(CmdInsertDebugUtilsLabelEXT);
+	LOAD_FALLBACK_INI(CmdBeginDebugUtilsLabelEXT);
+	LOAD_FALLBACK_INI(CmdEndDebugUtilsLabelEXT);
+	LOAD_FALLBACK_INI(SetDebugUtilsObjectNameEXT);
+	LOAD_FALLBACK_INI(SetDebugUtilsObjectTagEXT);
+	LOAD_FALLBACK_INI(QueueInsertDebugUtilsLabelEXT);
 
 	// NOTE: not sure if this is needed actually.
 	// Should do it for all commands that need it for now.

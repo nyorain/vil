@@ -377,7 +377,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	std::lock_guard lock(dev.mutex);
 
 	// fast early-outs
-	if(localCaptures_.empty()) {
+	if(localCaptures_.empty() && !forceHook.load()) {
 		auto hasBuildCmd = false;
 		for(auto [subID, sub] : enumerate(subm.dstBatch->submissions)) {
 			auto& cmdSub = std::get<CommandSubmission>(sub.data);
@@ -389,7 +389,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 			}
 		}
 
-		if(!hasBuildCmd && (target_.type == TargetType::none || freeze.load())) {
+		if(!hasBuildCmd && (target_.type == TargetType::none)) {
 			return;
 		}
 	}
@@ -520,7 +520,7 @@ void CommandHook::hook(QueueSubmitter& subm) {
 				}
 			}
 
-			if(!hookData && rec.buildsAccelStructs && hookAccelStructBuilds) {
+			if(!hookData && (forceHook.load() || (rec.buildsAccelStructs && hookAccelStructBuilds))) {
 				dlg_assert(!hooked);
 				hooked = doHook(rec, {}, 0.f, sub, hookData);
 			}
@@ -794,12 +794,9 @@ VkCommandBuffer CommandHook::doHook(CommandRecord& record,
 				continue;
 			}
 
-			// We want to capture an acceleration structure.
-			// CommandHookSubmission::{activate, finish} might write into
-			// the dst state, assumes it wasn't used before.
-			// PERF: we could make this work in theory. Might need
-			// more complicated state re-using logic
-			if(!hookRecord->accelStructCaptures.empty()) {
+			// Accel Structure stuff re-use is hard due to ordering.
+			// PERF: we could make some of this work in theory.
+			if(!hookRecord->accelStructOps.empty()) {
 				continue;
 			}
 
