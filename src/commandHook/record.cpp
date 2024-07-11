@@ -523,6 +523,7 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 	while(cmd) {
 		// check if command needs additional, manual hook
 		if(cmd->category() == CommandCategory::buildAccelStruct && hook->hookAccelStructBuilds) {
+
 			auto* basCmd = commandCast<BuildAccelStructsCmd*>(cmd);
 			auto* basCmdIndirect = commandCast<BuildAccelStructsCmd*>(cmd);
 			dlg_assert(basCmd || basCmdIndirect);
@@ -536,6 +537,10 @@ void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
 			// We have to restore the original compute state here since the
 			// the acceleration structure copies change it.
 			info.rebindComputeState = true;
+		}
+
+		if(auto* cas = commandCast<CopyAccelStructCmd*>(cmd); cas) {
+			accelStructOps.push_back(AccelStructCopy{cas->src, cas->dst});
 		}
 
 		// check if command is on hooking chain
@@ -754,34 +759,9 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 
 		using CapturedAccelStruct = CommandHookState::CapturedAccelStruct;
 		auto& dstCapture = dst.data.emplace<CapturedAccelStruct>();
+		(void) dstCapture;
 
-		// We only have to store the state now if the tlas has been
-		// previously built in this record. Otherwise we cannot know
-		// its state at execution time right now. It will get captured
-		// in CommandHookSubmission::finish
-		auto tlasBuildPtr = lastAccelStructBuild(elem.accelStruct->deviceAddress);
-		if(tlasBuildPtr) {
-			dstCapture.tlas = std::move(tlasBuildPtr);
-
-			// NOTE: only capture the blases built by this record.
-			// The rest will be captured in CommandHookSubmission::finish.
-			// For BLASes not built in this record, we cannot tell their
-			// pending state at execution time for sure.
-			// We just write everything we build into the map, we cannot
-			// know which blases are referenced by the tlas at this point on cpu.
-			// Yes, this might include blas builds *after* the TLAS was build.
-			// But when a blas was built that is inside the tlas,
-			// the tlas would be invalid at this point (application error).
-			for(auto& cmd : accelStructBuilds) {
-				for(auto& build : cmd.builds) {
-					dlg_assert_or(build.dst && build.state, continue);
-					auto blasAddress = build.dst->deviceAddress;
-					dstCapture.blases.insert({blasAddress, build.state});
-				}
-			}
-		}
-
-		accelStructCaptures.push_back({dstID, elem.accelStruct});
+		accelStructOps.push_back(AccelStructCapture{dstID, elem.accelStruct});
 	} else if(cat == DescriptorCategory::bufferView) {
 		// TODO: copy as buffer or image? maybe best to copy
 		//   as buffer but then create bufferView on our own?
@@ -1270,7 +1250,8 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsCmd& cmd) {
 
 	auto& cmdHook = *dev.commandHook;
 
-	auto& build = accelStructBuilds.emplace_back();
+	auto& ops = accelStructOps.emplace_back();
+	auto& build = ops.emplace<AccelStructBuild>();
 	build.command = &cmd;
 
 	// TODO 1. Make sure all data has been written via memory barrier.
@@ -1423,21 +1404,6 @@ void CommandHookRecord::hookBefore(const BuildAccelStructsIndirectCmd& cmd) {
 	// TODO: implement indirect copy concept
 	(void) cmd;
 	dlg_error("TODO: implement support for copying BuildAccelStructsIndirectCmd data");
-}
-
-IntrusivePtr<AccelStructState> CommandHookRecord::lastAccelStructBuild(u64 accelStructAddress) {
-	// TODO PERF: could be solved more efficiently with an unordered map
-	// might be relevant when there are many (thousand) builds
-	for(auto& cmd : accelStructBuilds) {
-		for(auto& build : cmd.builds) {
-			dlg_assert(build.dst);
-			if(build.dst->deviceAddress == accelStructAddress) {
-				return build.state;
-			}
-		}
-	}
-
-	return {};
 }
 
 void CommandHookRecord::finish() noexcept {

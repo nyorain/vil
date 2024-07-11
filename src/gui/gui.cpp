@@ -1129,6 +1129,11 @@ void Gui::drawOverviewUI(Draw& draw) {
 		if(ImGui::Checkbox("Allow hook record reuse", &allow)) {
 			dev.commandHook->allowReuse.store(allow);
 		}
+
+		auto hookAccel = dev.commandHook->hookAccelStructBuilds.load();
+		if(ImGui::Checkbox("Hook AccelerationStructures", &hookAccel)) {
+			dev.commandHook->hookAccelStructBuilds.store(hookAccel);
+		}
 	}
 }
 

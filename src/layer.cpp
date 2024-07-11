@@ -45,6 +45,7 @@ namespace vil {
 // Util
 static auto dlgWarnErrorCount = 0u;
 static auto breakOnError = false;
+static auto dlgMinLevel = dlg_level_trace;
 
 // TODO: doesn't belong here
 std::mutex ThreadContext::mutex_;
@@ -56,6 +57,10 @@ void dlgHandler(const struct dlg_origin* origin, const char* string, void* data)
 	// (void) origin;
 
 #ifndef DLG_DISABLE
+	if(origin->level < dlgMinLevel) {
+		return;
+	}
+
 	dlg_default_output(origin, string, data);
 
 	if(origin->level >= dlg_level_warn) {
@@ -172,8 +177,16 @@ VkResult doCreateInstance(
 	}
 
 #ifndef DLG_DISABLE
-	if(checkEnvBinary("VIL_DLG_HANDLER", false) || breakOnError)
-	{
+	if(checkEnvBinary("VIL_DLG_HANDLER", false) || breakOnError) {
+		if(const char* minLevel = std::getenv("VIL_MIN_LOG_LEVEL"); minLevel) {
+			if(std::strcmp(minLevel, "trace")) dlgMinLevel = dlg_level_warn;
+			else if(std::strcmp(minLevel, "debug")) dlgMinLevel = dlg_level_debug;
+			else if(std::strcmp(minLevel, "info")) dlgMinLevel = dlg_level_info;
+			else if(std::strcmp(minLevel, "warn")) dlgMinLevel = dlg_level_warn;
+			else if(std::strcmp(minLevel, "error")) dlgMinLevel = dlg_level_error;
+			else dlg_error("Invalid value for VIL_MIN_LOG_LEVEL: {}", minLevel);
+		}
+
 		dlg_set_handler(dlgHandler, nullptr);
 		#ifdef _WIN32
 			AllocConsole();

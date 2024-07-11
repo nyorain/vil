@@ -2974,6 +2974,7 @@ VKAPI_ATTR void VKAPI_CALL CmdBuildAccelerationStructuresKHR(
 			}
 
 			buildInfo.pGeometries = dst.data();
+			buildInfo.ppGeometries = nullptr;
 		}
 
 		if(buildInfo.srcAccelerationStructure) {
@@ -3072,6 +3073,10 @@ VKAPI_ATTR void VKAPI_CALL CmdCopyAccelerationStructureKHR(
 
 	useHandle(cb, cmd, *cmd.src);
 	useHandle(cb, cmd, *cmd.dst);
+
+	auto& copy = cb.builder().record_->accelStructCopies.emplace_back();
+	copy.src = cmd.src;
+	copy.dst = cmd.dst;
 
 	auto fwd = *pInfo;
 	fwd.src = cmd.src->handle;

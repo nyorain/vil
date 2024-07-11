@@ -1909,8 +1909,8 @@ void CopyAccelStructCmd::record(const Device& dev, VkCommandBuffer cb, u32) cons
 	VkCopyAccelerationStructureInfoKHR info {};
 	info.sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
 	info.pNext = pNext;
-	info.dst = src->handle;
-	info.src = dst->handle;
+	info.src = src->handle;
+	info.dst = dst->handle;
 	info.mode = mode;
 	dev.dispatch.CmdCopyAccelerationStructureKHR(cb, &info);
 }

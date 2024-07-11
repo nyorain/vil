@@ -19,46 +19,8 @@
 
 namespace vil {
 
-std::optional<SubmIterator> checkLocked(SubmissionBatch& batch) {
-	ZoneScoped;
-
+void finish(SubmissionBatch& batch) {
 	auto& dev = *batch.queue->dev;
-	assertOwned(dev.mutex);
-
-	// If a submission in the batch isn't even active yet, it can't
-	// be finished. We don't have to check it, but it's an optimization.
-	// NOTE: this is important for integration testing though. The
-	//   mock icd always returns VK_SUCCESS for fences.
-	for(auto& sub : batch.submissions) {
-		if(!sub.active) {
-			return std::nullopt;
-		}
-	}
-
-	if(batch.appFence) {
-		auto res = dev.dispatch.GetFenceStatus(dev.handle, batch.appFence->handle);
-		if(res != VK_SUCCESS) {
-			if(res == VK_ERROR_DEVICE_LOST) {
-				onDeviceLost(dev);
-			}
-
-			return std::nullopt;
-		}
-	} else {
-		dlg_assert(batch.ourFence);
-		auto res = dev.dispatch.GetFenceStatus(dev.handle, batch.ourFence);
-		if(res != VK_SUCCESS) {
-			if(res == VK_ERROR_DEVICE_LOST) {
-				onDeviceLost(dev);
-			}
-
-			return std::nullopt;
-		}
-	}
-	// apparently unique_ptr == ptr comparision not supported in stdlibc++ yet?
-	auto finder = [&](auto& ptr){ return ptr.get() == &batch; };
-	auto it = std::find_if(dev.pending.begin(), dev.pending.end(), finder);
-	dlg_assert(it != dev.pending.end());
 
 	for(auto& sub : batch.submissions) {
 		dlg_assert(sub.active);
@@ -66,14 +28,20 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& batch) {
 		// process finished records
 		if(batch.type == SubmissionType::command) {
 			auto& cmdSub = std::get<CommandSubmission>(sub.data);
-			for(auto& [cb, hookData] : cmdSub.cbs) {
-				if(hookData) {
-					hookData->finish(sub);
+			for(auto& scb : cmdSub.cbs) {
+				if(scb.hook) {
+					scb.hook->finish(sub);
+				} else {
+					auto& accelStructCopies = scb.cb->lastRecordLocked()->accelStructCopies;
+					dlg_assert(accelStructCopies.size() == scb.accelStructCopies.size());
+					for(auto [i, copy] : enumerate(accelStructCopies)) {
+						copy.dst->lastValid = scb.accelStructCopies[i];
+					}
 				}
 
-				auto it2 = std::find(cb->pending.begin(), cb->pending.end(), &sub);
-				dlg_assert(it2 != cb->pending.end());
-				cb->pending.erase(it2);
+				auto it2 = std::find(scb.cb->pending.begin(), scb.cb->pending.end(), &sub);
+				dlg_assert(it2 != scb.cb->pending.end());
+				scb.cb->pending.erase(it2);
 			}
 		}
 
@@ -135,6 +103,50 @@ std::optional<SubmIterator> checkLocked(SubmissionBatch& batch) {
 			sem.signals.erase(it);
 		}
 	}
+}
+
+std::optional<SubmIterator> checkLocked(SubmissionBatch& batch) {
+	ZoneScoped;
+
+	auto& dev = *batch.queue->dev;
+	assertOwned(dev.mutex);
+
+	// If a submission in the batch isn't even active yet, it can't
+	// be finished. We don't have to check it, but it's an optimization.
+	// NOTE: this is important for integration testing though. The
+	//   mock icd always returns VK_SUCCESS for fences.
+	for(auto& sub : batch.submissions) {
+		if(!sub.active) {
+			return std::nullopt;
+		}
+	}
+
+	if(batch.appFence) {
+		auto res = dev.dispatch.GetFenceStatus(dev.handle, batch.appFence->handle);
+		if(res != VK_SUCCESS) {
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(dev);
+			}
+
+			return std::nullopt;
+		}
+	} else {
+		dlg_assert(batch.ourFence);
+		auto res = dev.dispatch.GetFenceStatus(dev.handle, batch.ourFence);
+		if(res != VK_SUCCESS) {
+			if(res == VK_ERROR_DEVICE_LOST) {
+				onDeviceLost(dev);
+			}
+
+			return std::nullopt;
+		}
+	}
+	// apparently unique_ptr == ptr comparision not supported in stdlibc++ yet?
+	auto finder = [&](auto& ptr){ return ptr.get() == &batch; };
+	auto it = std::find_if(dev.pending.begin(), dev.pending.end(), finder);
+	dlg_assert(it != dev.pending.end());
+
+	finish(batch);
 
 	if(batch.ourFence) {
 		dev.dispatch.ResetFences(dev.handle, 1, &batch.ourFence);
@@ -554,6 +566,13 @@ void activateLocked(CommandSubmission& cmdSub) {
 		// notify hooks that submission was activated
 		if(scb.hook) {
 			scb.hook->activate();
+		} else {
+			dlg_assert(scb.accelStructCopies.empty());
+			for(auto& copy : recPtr->accelStructCopies) {
+				dlg_assert(copy.src->pendingState);
+				copy.dst->pendingState = copy.src->pendingState;
+				scb.accelStructCopies.push_back(copy.src->pendingState);
+			}
 		}
 		// store pending layouts
 		for(auto& ui : recPtr->used.images) {

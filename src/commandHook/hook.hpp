@@ -182,7 +182,7 @@ public:
 
 	// Mainly useful for debugging, should always be true otherwise
 	// as we need it to have accelStruct data.
-	bool hookAccelStructBuilds {true};
+	std::atomic<bool> hookAccelStructBuilds {true};
 
 public:
 	CommandHook(Device& dev);

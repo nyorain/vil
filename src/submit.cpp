@@ -851,7 +851,8 @@ bool potentiallyWritesLocked(const Submission& subm, const Image* img, const Buf
 
 	if(subm.parent->type == SubmissionType::command) {
 		auto& cmdSub = std::get<CommandSubmission>(subm.data);
-		for(auto& [cb, _] : cmdSub.cbs) {
+		for(auto& scb : cmdSub.cbs) {
+			auto& cb = scb.cb;
 			auto& rec = *cb->lastRecordLocked();
 
 			if(buf) {
@@ -953,7 +954,8 @@ std::vector<const Submission*> needsSyncLocked(const SubmissionBatch& pending, c
 		// writen by the submission
 		if(subm.parent->type == SubmissionType::command) {
 			auto& cmdSub = std::get<CommandSubmission>(subm.data);
-			for(auto& [_, hookPtr] : cmdSub.cbs) {
+			for(auto& scb : cmdSub.cbs) {
+				auto& hookPtr = scb.hook;
 				// TODO(perf): we might not need sync in all cases. Pretty much only
 				// for images and xfb buffers I guess.
 				if(hookPtr && hookPtr->record->state.get() == draw.usedHookState.get()) {

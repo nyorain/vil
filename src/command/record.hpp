@@ -262,6 +262,11 @@ inline auto find(CommandAllocHashSet<UsedDescriptorSet, UsedDescriptorHash>& use
 	return it;
 }
 
+struct AccelStructCopy {
+	AccelStruct* src;
+	AccelStruct* dst;
+};
+
 // Represents the recorded state of a command buffer.
 // We represent it as extra, reference-counted object so we can display
 // old records as well.
@@ -305,6 +310,8 @@ struct CommandRecord {
 	// label it closes, numPopLabels is 0 and pushLabels empty.
 	u32 numPopLabels {};
 	CommandAllocList<const char*> pushLables;
+
+	CommandAllocList<AccelStructCopy> accelStructCopies;
 
 	struct UsedHandles {
 		// NOTE: change this when adding maps here!

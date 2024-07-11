@@ -53,6 +53,7 @@ CommandRecord::CommandRecord(ManualTag, Device* xdev) :
 		queueFamily(0u),
 		// initialize allocators
 		pushLables(alloc),
+		accelStructCopies(alloc),
 		used(alloc),
 		secondaries(alloc) {
 	++DebugStats::get().aliveRecords;

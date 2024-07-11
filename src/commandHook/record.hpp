@@ -65,20 +65,31 @@ struct CommandHookRecord {
 
 		struct Build {
 			AccelStruct* dst;
-			IntrusivePtr<AccelStructState> state;
+			AccelStructStatePtr state;
 		};
 
 		std::vector<Build> builds;
 	};
-
-	std::vector<AccelStructBuild> accelStructBuilds;
 
 	struct AccelStructCapture {
 		unsigned id; // index into state->copiedDescriptors
 		AccelStruct* accelStruct;
 	};
 
-	std::vector<AccelStructCapture> accelStructCaptures;
+	struct AccelStructCopy {
+		AccelStruct* src {};
+		AccelStruct* dst {};
+		AccelStructStatePtr state {}; // filled in later by CommandHookSubmission
+	};
+
+	using AccelStructOp = std::variant<
+		AccelStructBuild,
+		AccelStructCapture,
+		AccelStructCopy
+	>;
+
+	// Order here is important, ops might depend on each other
+	std::vector<AccelStructOp> accelStructOps;
 
 	// Needed for image to buffer sample-copying
 	std::vector<VkDescriptorSet> descriptorSets;
