@@ -50,14 +50,14 @@ CmdBuildAccelerationStructure(params) {
 		auto& build = record.accelStructBuilds.emplace_back();
 		build.accelStruct = ...
 		// only need to create new state if buffers aren't large
-		// enough anymore. 
+		// enough anymore.
 		// Otherwise use existing accelStruct state.
 		build.dstState = ...
 		build.dstState->builtStatically = true;
 
 		// records the commands needed to capture the data
 		// directly into this cb
-		recordCaptureAccelStructData(cb, build.dstDate, params);	
+		recordCaptureAccelStructData(cb, build.dstDate, params);
 
 		dispatch.CmdBuildAccelerationStructure(params);
 	}
@@ -96,6 +96,8 @@ struct AccelStructState {
 	IntrusivePtr<AccelStructCow> cow {};
 
 	// remember last submission that updated it?
+
+	// smth like bool buildPending;
 };
 
 struct AccelStructCow {
@@ -131,7 +133,7 @@ struct AccelStructBuildOp {
 	  inside the submission/hookRecord that is fired up on activation.
 - when a submission that updates AccelStructState (either dynamically
   or statically) is submitted (activated? don't think so. Just need to carefully
-  sync it with potential later submissions that might be executed first), 
+  sync it with potential later submissions that might be executed first),
   it first checks if it needs to resolve the cow.
   If so, it first submits the copy command.
   (wait, but at that point we can't submit it anymore before the activated
@@ -144,8 +146,8 @@ struct AccelStructBuildOp {
 
 This whole async submission/order thing is making this really hard :(
 If we already know at copyDs time that the state is written in future (by
-a submission that was not activated yet)(need an extra flag or something) 
-just copy the state instantly and don't bother with the whole cow thing 
+a submission that was not activated yet)(need an extra flag or something)
+just copy the state instantly and don't bother with the whole cow thing
 (important since it won't be resolved correctly otherwise).
 
 we REALLY don't want to delay hooking/submission until a submission is

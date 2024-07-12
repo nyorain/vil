@@ -14,6 +14,10 @@ urgent, bugs:
 	- [ ] also fix mip/layer selector that sometimes automatically resets itself
 		  (seen with slice 3D selector e.g. npt surfel lookup tex)
 
+- [ ] accelStruct building rework: a big issue atm is rebuilding while
+      viewing; initBufs might have been called but the data not updated yet
+	  -> crash
+
 - [ ] test more on laptop, intel gpu
 	- [ ] seems like we do some nasty stuff in the histogram shaders,
 		  get gpu timeouts (try e.g. with curlnoise.ktx, zoom out on histogram)

@@ -27,7 +27,7 @@ public:
 
 	// Select takes its own copy of a spc::Compiler mainly
 	// because of the specialization constant problematic
-	void select(std::unique_ptr<spc::Compiler> compiled);
+	void select(VkShaderStageFlagBits, std::unique_ptr<spc::Compiler> compiled);
 	void unselect();
 	void draw();
 
@@ -79,6 +79,8 @@ private:
 	void updatePosition(bool moveCursor = true);
 
 	void drawInputsTab();
+	void drawInputsCompute();
+	void drawInputsVertex();
 	void drawVariablesTab();
 	void drawBreakpointsTab();
 	void drawCallstackTab();
@@ -96,6 +98,23 @@ private:
 	// compute stuff
 	Vec3ui workgroupSize() const;
 	Vec3ui numWorkgroups() const;
+
+	// vertex stuff
+	struct DrawCmdInfo {
+		i32 vertexOffset; // for non-indexed this is 'firstVertex'
+		u32 numVerts; // for indexed, this is 'instanceCount'
+		u32 numInis;
+		u32 firstIni;
+		u32 firstIndex {}; // only for indexed draw
+	};
+
+	struct DrawInfo {
+		u32 numCommands {};
+		bool indexed {};
+	};
+
+	DrawInfo drawInfo() const;
+	DrawCmdInfo drawCmdInfo(u32 cmd = 0u) const;
 
 	CommandSelection& selection() const;
 
@@ -132,12 +151,19 @@ private:
 	Gui* gui_ {};
 	igt::TextEditor textedit_;
 	std::unique_ptr<spc::Compiler> compiled_ {};
+	VkShaderStageFlagBits stage_ {};
 
 	std::unordered_map<u32, u32> varIDToDsCopyMap_;
 	std::vector<Location> breakpoints_;
 
+	// compute inputs
 	Vec3ui globalInvocationID_ {0u, 0u, 0u};
 	bool allowSelectOutOfBounds_ {};
+
+	// vertex inputs
+	u32 commandID_ {0u};
+	u32 instanceID_ {0u};
+	u32 vertexID_ {0u}; // might also be instance id
 
 	struct {
 		spvm_context_t context {};

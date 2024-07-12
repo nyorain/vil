@@ -10,6 +10,9 @@ be possible or useful in the end.
   don't hook anything. Instead just insert our own command buffers
   (before and after) into the submission stream where we write out timestamps
 
+- (low prio) add also full batch (e.g. vkQueueSubmit/vkQueueBindSparse) timings? 
+  Would require custom cb recording on our side
+
 - When clicking on a flag, extension name or something, link to vulkan api spec
   regarding that item? Not sure how easy to do.
   Also e.g. for enabled extensions, features, etc.
