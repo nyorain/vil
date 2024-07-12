@@ -1059,11 +1059,7 @@ void CommandViewer::displayDs(Draw& draw) {
 
 		auto& instances = std::get<AccelInstances>(capture->tlas->data);
 
-		// TODO: also display other instance information
-		dlg_trace("{} inis", instances.instances.size());
-		dlg_trace(" [0]: {}", instances.instances[0].accelerationStructureReference);
-		dlg_trace(" [1]: {}", instances.instances[1].accelerationStructureReference);
-		dlg_trace(" [2]: {}", instances.instances[2].accelerationStructureReference);
+		// TODO: also display instance information
 
 		vertexViewer_.displayInstances(draw, instances, gui_->dt(), resolveBlas);
 	} else if(dsCat == DescriptorCategory::inlineUniformBlock) {
