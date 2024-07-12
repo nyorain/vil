@@ -1,6 +1,9 @@
 - [ ] add serialize support for more commands (e.g. Bind)
 - [ ] serialize further gui state, e.g. selected I/O
 - [ ] better deep-matching for handles, especially pipelines
+- [ ] ~hook.cpp:777 TODO PERF: clear out non-reuse hooked records
+- [ ] optimize acceleration structure capturing
+	- optimal: when UI is not open, don't allocate on every rebuilt
 - [ ] support viewing a specific array element in the buffer formatter
 	- [ ] we might not even copy the needed data for some elements.
 	      Only copy the needed data, we already have paging for the gui

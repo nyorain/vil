@@ -92,6 +92,7 @@ new, workstack:
 		  Either make tab-background change color on being focused,
 		  make it more transparent or something or maybe use a thin window border?
 		  {think window border looks good imo}
+- [ ] cleanup: move out device_default stuff to gfr fork?
 
 - [ ] (low prio, ui) sparse: for images, allow to show popup with bound
       memory on hover in imageViewer. Also bond-to-memory overlay
