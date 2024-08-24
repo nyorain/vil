@@ -469,13 +469,13 @@ void spvm_setup_OpAccessChain(spvm_word word_count, spvm_state_t state)
 
 		if(src->type == spvm_result_type_variable) {
 			dst->index_count = word_count - 3;
-			dst->indices = calloc(sizeof(spvm_word), dst->index_count);
+			dst->indices = calloc(dst->index_count, sizeof(spvm_word));
 		} else if(src->type == spvm_result_type_access_chain) {
 			dst->access_chain_ref = src->access_chain_ref;
 
 			spvm_word local_index_count = word_count - 3;
 			dst->index_count = local_index_count + src->index_count;
-			dst->indices = calloc(sizeof(spvm_word), dst->index_count);
+			dst->indices = calloc(dst->index_count, sizeof(spvm_word));
 		} else {
 			assert(!"Unimplemented");
 		}

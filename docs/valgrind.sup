@@ -14,4 +14,10 @@
    ...
    fun:dlclose
 }
-
+{
+   Ignore dlopen bug.
+   Memcheck:Leak
+   ...
+   fun:tracy::SetThreadName
+   ...
+}

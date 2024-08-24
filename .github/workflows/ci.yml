@@ -52,12 +52,13 @@ jobs:
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev vulkan-validationlayers valgrind
       # TODO: integration tests run in theory but crash inside vulkan
       # loader on ci, can't reproduce locally :(
-    - run: meson setup build/ --backend=ninja 
-        -Dunit-tests=true 
+    - run: meson setup build/ --backend=ninja
+        -Dunit-tests=true
         -Djson-config-absolute-path=true
         -Dintegration-tests=false
-        -Dx11-hook=false 
+        -Dx11-hook=false
         -Dtracy=true
+        -Dwerror=true
       env:
         CC: gcc
     # TODO: no idea why this is needed using 'meson test' but not 'ninja test'.
@@ -65,11 +66,11 @@ jobs:
     # - run: ninja -C build subprojects/vkmockicd/libVkICD_mock_icd.so
     # meson test -C build/ -v
     # valgrind --leak-check=full?
-    - run: meson test -C build 
-        --wrapper 'valgrind --leak-check=full --error-exitcode=1 --suppressions=../docs/valgrind.sup' 
+    - run: meson test -C build
+        --wrapper 'valgrind --leak-check=full --error-exitcode=1 --suppressions=../docs/valgrind.sup'
         --print-errorlogs
       # NOTE: the ci cpus seem to need this for tracy. Might result
-      # in issues (inconsistent timings between cpu cores or something), 
+      # in issues (inconsistent timings between cpu cores or something),
       # we don't care about it here
       env:
         TRACY_NO_INVARIANT_CHECK: 1
@@ -88,11 +89,12 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja 
-        -Dunit-tests=true 
-        -Dintegration-tests=false 
-        -Dx11-hook=false 
+    - run: meson setup build/ --backend=ninja
+        -Dunit-tests=true
+        -Dintegration-tests=false
+        -Dx11-hook=false
         -Dbuildtype=release
+        -Dwerror=true
       env:
         CC: gcc
     - run: meson test -C build/ -v
@@ -115,10 +117,11 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja 
-        -Dunit-tests=true 
-        -Dintegration-tests=false 
+    - run: meson setup build/ --backend=ninja
+        -Dunit-tests=true
+        -Dintegration-tests=false
         -Dx11-hook=false
+        -Dwerror=true
     - run: meson test -C build/ -v
 
   linux-clang-tracy-debugoptimized:
@@ -139,12 +142,13 @@ jobs:
         libxkbcommon-dev libwayland-dev libxcb1-dev wayland-protocols libxcb-ewmh-dev
         libxcb-icccm4-dev libxcb-shm0-dev libxcb-present-dev libxcb-xinput-dev libxcb-xkb-dev
         libxkbcommon-x11-dev libx11-dev libx11-xcb-dev
-    - run: meson setup build/ --backend=ninja 
-        -Dunit-tests=true 
-        -Dintegration-tests=false 
-        -Dx11-hook=false 
-        -Dtracy=true 
+    - run: meson setup build/ --backend=ninja
+        -Dunit-tests=true
+        -Dintegration-tests=false
+        -Dx11-hook=false
+        -Dtracy=true
         -Dbuildtype=debugoptimized
+        -Dwerror=true
     - run: meson test -C build/ -v
 
   # See https://dvdhrm.github.io/2021/04/21/meson-msvc-github-actions/
@@ -162,8 +166,9 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    - run: meson setup build/ --backend=ninja 
+    - run: meson setup build/ --backend=ninja
         -Dunit-tests=true
+        -Dwerror=true
     - run: meson test -C build/ -v
 
   windows:
@@ -183,6 +188,7 @@ jobs:
     - run: meson setup build/
         -Dunit-tests=true
         -Dintegration-tests=false
+        -Dwerror=true
     - run: meson test -C build/ -v
 
   windows-release:
@@ -206,21 +212,22 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    - run: meson setup build/ 
-        -Dunit-tests=true 
+    - run: meson setup build/
+        -Dunit-tests=true
         -Dintegration-tests=false
         -Dbuildtype=release
         -Ddebug=true
+        -Dwerror=true
     - run: meson test -C build/ -v
     - name: Upload binaries
       uses: actions/upload-artifact@v3
       with:
         name: Windows Binaries
         path: |
-          build/VkLayer_live_introspection.dll  
-          build/VkLayer_live_introspection.json  
-          build/VkLayer_live_introspection.lib  
-          build/VkLayer_live_introspection.pdb  
+          build/VkLayer_live_introspection.dll
+          build/VkLayer_live_introspection.json
+          build/VkLayer_live_introspection.lib
+          build/VkLayer_live_introspection.pdb
           build/register_layer.bat
 
 
@@ -238,10 +245,11 @@ jobs:
       uses: bus1/cabuild/action/msdevshell@v1
       with:
         architecture: x64
-    - run: meson setup build/ 
-        -Dunit-tests=true 
-        -Dbuildtype=release 
+    - run: meson setup build/
+        -Dunit-tests=true
+        -Dbuildtype=release
         -Dtracy=true
+        -Dwerror=true
     - run: meson test -C build/ -v
 
 # TODO:

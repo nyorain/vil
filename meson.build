@@ -1,7 +1,21 @@
 project('VIL', ['c', 'cpp'],
 	version: '0.1.0',
 	default_options: [
-		'werror=true',
+		# NOTE: werror is a good idea in theory but there are too many
+		# compiler versions out there and people building it having
+		# to fight with build errors (instead of warnings) is not worth it.
+		# Gets manually activated for CI.
+		# 'werror=true',
+		'werror=false',
+		'swa:werror=false',
+		'imgio:werror=false',
+		'nytl:werror=false',
+		'pml:werror=false',
+		'dlg:werror=false',
+		'png:werror=false',
+		'vkmockicd:werror=false',
+		'zlib:werror=false',
+
 		'warning_level=3',
 		'cpp_std=c++17',
 		# NOTE: this will cause issues on old msvc versions, with new
