@@ -15,9 +15,9 @@
    fun:dlclose
 }
 {
-   Ignore dlopen bug.
+   Ignore tracy leak.
    Memcheck:Leak
    ...
-   fun:tracy::SetThreadName
+   fun:_ZN5tracy13SetThreadNameEPKc
    ...
 }

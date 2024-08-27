@@ -1326,7 +1326,7 @@ void SysTraceWorker( void* ptr )
                 while( activeNum > 0 )
                 {
                     int sel = -1;
-                    int selPos;
+                    int selPos = 0;
                     int64_t t0 = std::numeric_limits<int64_t>::max();
                     for( int i=0; i<activeNum; i++ )
                     {
