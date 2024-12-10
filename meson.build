@@ -659,3 +659,19 @@ if with_standalone
 		dependencies: [],
 		link_with: vil_layer)
 endif
+
+# TODO
+dep_spc = dependency('spc',
+	fallback: ['spc', 'spc_dep'],
+	static: true)
+patch_files = files(
+	'src/test/patchtest.cpp',
+	# TODO uff
+	'src/util/linalloc.cpp',
+	'src/util/util.cpp',
+	'src/vk/format_utils.cpp',
+)
+patch_test = executable('patchtest', patch_files,
+	include_directories: inc,
+	cpp_args: args,
+	dependencies: [dep_spc, deps])
