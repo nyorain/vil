@@ -119,6 +119,19 @@ CommandHook::CommandHook(Device& dev) {
 	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
 		initAccelStructCopy(dev);
 	}
+
+	// init capture
+	auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+		VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	captureBuffer_.ensure(dev, shaderCaptureSize, usage, {},
+		"CaptureBuf", OwnBuffer::Type::deviceLocal);
+
+	VkBufferDeviceAddressInfo info {};
+	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+	info.buffer = captureBuffer_.buf;
+	captureAddress_ = dev.dispatch.GetBufferDeviceAddress(dev.handle, &info);
 }
 
 CommandHook::~CommandHook() {

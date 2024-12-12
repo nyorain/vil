@@ -1,3 +1,4 @@
+#include "vkutil/sync.hpp"
 #include <commandHook/record.hpp>
 #include <commandHook/hook.hpp>
 #include <commandHook/copy.hpp>
@@ -181,10 +182,11 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		  	&& commandCast<const ClearAttachmentCmd*>(hcommand.back());
 	const auto careAboutRendering =
 		info.ops.copyVertexInput ||
-		 !info.ops.attachmentCopies.empty() ||
-		 !info.ops.descriptorCopies.empty() ||
-		 info.ops.copyIndirectCmd ||
-		 hookClearAttachment;
+		!info.ops.attachmentCopies.empty() ||
+		!info.ops.descriptorCopies.empty() ||
+		info.ops.copyIndirectCmd ||
+		info.ops.useCapturePipe || // only for copying of the data afterwards
+		hookClearAttachment;
 
 	auto preEnd = hcommand.end() - 1;
 	info.hookedSubpass = u32(-1);
@@ -451,6 +453,21 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 			dev.dispatch.CmdBeginTransformFeedbackEXT(cb, 0u, 0u, nullptr, nullptr);
 
 			endXfb = true;
+		}
+	}
+
+	if(info.ops.useCapturePipe) {
+		if(cmd.category() == CommandCategory::draw) {
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				info.ops.useCapturePipe);
+		} else if(cmd.category() == CommandCategory::dispatch) {
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				info.ops.useCapturePipe);
+		} else if(cmd.category() == CommandCategory::traceRays) {
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+				info.ops.useCapturePipe);
+		} else {
+			dlg_error("Unexpected hooked command used with capturePipe");
 		}
 	}
 
@@ -1639,6 +1656,26 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	if(info.ops.copyTransferSrcBefore || info.ops.copyTransferDstBefore) {
 		copyTransfer(bcmd, info, true);
 	}
+
+	// capturePipe
+	if(info.ops.useCapturePipe) {
+		// TODO: only for debugging
+		dev.dispatch.CmdFillBuffer(cb, hook->shaderCaptureBuffer(),
+			0u, hook->shaderCaptureSize, 0x0u);
+		vku::cmdBarrier(dev, cb, vku::BufferSpan{
+			hook->shaderCaptureBuffer(), 0u, VK_WHOLE_SIZE},
+			vku::SyncScope::transferWrite(), vku::SyncScope::transferWrite());
+
+		Vec4u32 input {};
+		input[0] = info.ops.capturePipeInput[0];
+		input[1] = info.ops.capturePipeInput[1];
+		input[2] = info.ops.capturePipeInput[2];
+		dev.dispatch.CmdUpdateBuffer(cb, hook->shaderCaptureBuffer(),
+			0u, sizeof(input), &input);
+		vku::cmdBarrier(dev, cb, vku::BufferSpan{
+			hook->shaderCaptureBuffer(), 0u, VK_WHOLE_SIZE},
+			vku::SyncScope::transferWrite(), vku::SyncScope::allShaderRead());
+	}
 }
 
 void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
@@ -1691,6 +1728,48 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	// transfer
 	if(info.ops.copyTransferSrcAfter || info.ops.copyTransferDstAfter) {
 		copyTransfer(bcmd, info, false);
+	}
+
+	if(info.ops.useCapturePipe) {
+		if(bcmd.category() == CommandCategory::draw) {
+			dlg_error("rebindGraphicsState not implemented");
+		} else if(bcmd.category() == CommandCategory::dispatch) {
+			info.rebindComputeState = true;
+		} else if(bcmd.category() == CommandCategory::traceRays) {
+			dlg_error("rebindRayTraceState not implemented");
+		} else {
+			dlg_error("Unexpected hooked command used with capturePipe");
+		}
+
+		// TODO: could know exact size of captured data here.
+
+		auto usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		state->shaderCapture.ensure(dev, hook->shaderCaptureSize, usage);
+
+		// barrier
+		VkMemoryBarrier memBarrier {};
+		memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memBarrier.srcAccessMask =
+			VK_ACCESS_MEMORY_WRITE_BIT |
+			VK_ACCESS_MEMORY_READ_BIT |
+			VK_ACCESS_SHADER_WRITE_BIT |
+			VK_ACCESS_SHADER_READ_BIT;
+		memBarrier.dstAccessMask =
+			VK_ACCESS_TRANSFER_READ_BIT |
+			VK_ACCESS_TRANSFER_WRITE_BIT;
+
+		dev.dispatch.CmdPipelineBarrier(cb,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+
+		VkBufferCopy copy {};
+		copy.srcOffset = 0u;
+		copy.dstOffset = 0u;
+		copy.size = hook->shaderCaptureSize;
+
+		dev.dispatch.CmdCopyBuffer(cb, hook->shaderCaptureBuffer(),
+			state->shaderCapture.buf, 1, &copy);
 	}
 }
 

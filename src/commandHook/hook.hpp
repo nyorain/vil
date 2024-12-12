@@ -76,6 +76,9 @@ struct CommandHookOps {
 	std::vector<AttachmentCopyOp> attachmentCopies; // only for cmd inside renderpass
 	bool queryTime {};
 
+	VkPipeline useCapturePipe {};
+	Vec3u32 capturePipeInput {}; // globalThreadID/vertexID/...
+
 	// transfer
 	bool copyTransferSrcBefore {};
 	bool copyTransferSrcAfter {};
@@ -166,6 +169,7 @@ struct CommandHook {
 public:
 	// maximum number of completed hooks we store at a time.
 	static constexpr auto maxCompletedHooks = 8u;
+	static constexpr auto shaderCaptureSize = 64 * 1024u;
 
 	// TODO: make setting?
 	static constexpr auto matchType = MatchType::mixed;
@@ -224,6 +228,9 @@ public:
 	std::vector<LocalCapture*> localCaptures() const;
 	std::vector<LocalCapture*> localCapturesOnceCompleted() const;
 
+	VkDeviceAddress shaderCaptureAddress() const { return captureAddress_; }
+	VkBuffer shaderCaptureBuffer() const { return captureBuffer_.buf; }
+
 private:
 	// Initializes the pipelines and data needed for acceleration
 	// structure copies
@@ -267,6 +274,9 @@ private:
 
 	// TODO: wip hack
 	std::vector<CompletedHook> keepAliveLC_;
+
+	OwnBuffer captureBuffer_;
+	VkDeviceAddress captureAddress_;
 
 	// pipelines needed for the acceleration structure build copy
 public: // TODO, for copying. Maybe just move them to Device?

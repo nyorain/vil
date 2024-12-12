@@ -59,6 +59,10 @@ struct CommandHookRecord {
 	IntrusivePtr<CommandHookState> state {};
 	OwnBuffer dummyBuf {};
 
+	// For capturing shader table from ray tracing shaders with patched
+	// shaders, we need to create a hooked shaderTable.
+	OwnBuffer shaderTable {};
+
 	// AccelStruct-related stuff.
 	// We need to hook every CmdBuildAccelerationStructure, making sure
 	// we store the state the accelStruct is built with.

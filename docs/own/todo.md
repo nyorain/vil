@@ -204,6 +204,7 @@ On vertices and where to capture them:
 	      captured vertex buffers but can't really know/handle that
 		  while drawing the captured vertices
 	- [ ] show in UI if we truncate anything
+- [ ] fix flipY recenter
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
 - [ ] figure out why copying attachments/descriptors shows weird/incorrect
@@ -243,7 +244,44 @@ Freeze/selection changes:
 		  Should at least document it somewhere.
 		  Might also happen when the window is minimized on some platforms?
 
-shader debugger:
+patch capture shader debugging:
+- [ ] add support for structs and arrays
+- [ ] improve filtering of variables so that it works well for glslang and slang
+- [x] add support for dispatch thread ID selection
+	- [x] add branch to command patching
+	      branch based on root constant? or specialization constant?
+		  or just load information dynamically from the capture buffer?
+	- [x] re-add the selection widget (from debug emulation cpp)
+	- [ ] remove "allow outside of bounds exec"
+	- [ ] instead allow a mode where just any thread that hits the point
+	      writes info (via atomics). Connected to idea below,
+		  implementation could be the same.
+		  The writing thread could then overwrite the input ID, allowing
+		  the ui to read it later on.
+- [x] in captured output, write an additional bool on whether the
+      breakpoint was even hit. Clear it to 0 before recording dst command
+	- [x] when not hit: do not show variables in output, instead state
+	      that breakpoint is not hit.
+- [ ] add more general widget for selecting a stage of a pipe in the debugger
+- [ ] add support for vertex shader debugging
+	- [ ] branch based on vertexID
+	- [ ] widget to select vertexID. See vertexViewer branch
+- [ ] add support for pixel shader debugging
+	- [ ] branch based on pixel position
+	- [ ] widget to select pixel position
+	- [ ] allow to get there via a "debug this pixel" button
+	      in image viewer?
+- [ ] ray tracing debugging
+	- [ ] branch in all shaders via LaunchID
+	- [ ] additionally: allow to branch via ahs/chs inputs
+	- [ ] hook shader tables
+	      create reverse mapping inside of pipeline
+		  then, when hooking the traceRayCommand, create own shader table
+		  on the fly where the hooked shaders are replaced?
+- [ ] separate function arguments and local vars in UI
+- [ ] toggle via UI: also capture all local named SSA IDs
+
+(emulate) shader debugger, low prio:
 - [x] cleanup/fix freezing as described in node 2235
 - [x] implement breakpoints
 	- [x] issue: we currently check for equality for breakpoints.

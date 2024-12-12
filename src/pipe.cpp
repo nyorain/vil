@@ -6,8 +6,8 @@
 #include <ds.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
-#include <spirv-cross/spirv.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv.hpp>
+#include <spirv_cross.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <util/dlg.hpp>

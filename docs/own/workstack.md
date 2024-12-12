@@ -1,3 +1,6 @@
+- [ ] rename vku to vpp?
+- [ ] make xfb patching also use new dynamic on-demand patching system?
+	- [ ] make that less error-prone. Completely store/forward pNext?
 - [ ] add serialize support for more commands (e.g. Bind)
 - [ ] serialize further gui state, e.g. selected I/O
 - [ ] better deep-matching for handles, especially pipelines

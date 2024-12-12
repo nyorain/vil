@@ -1,6 +1,24 @@
 Moved from todo.md. Mostly ideas for experiments that might not even
 be possible or useful in the end.
 
+For shader capture debugging:
+- can we support capturing images/samples/buffers/RayTracingAccelStructs
+      and other types? Allowed in quite some high-level languages.
+	  I have no idea how this could work though, we have no useful
+	  information in the shader... Maybe somehow track which binding
+	  ID (+array ID) this resource is. But that sounds like a lot of work
+- support for stepping?
+      meh, I think what we have is more powerful and intuitive than
+	  the traditional approach. It feels "live", as it is.
+	- but current approach limited for loops/control flow following
+	  loops: allow to specify a "counter", how often control should
+	    have been at the cursor before output is written.
+		Alternatively: just write output for each iteration.
+		(we can then still do fancy viz stuff on the cpu with the data)
+	  how can we visualize control flow *live*?
+	    maybe it's already enough that no output is shown when a section
+		is not reached.
+
 - matching on indirect commands can be hard since we don't know their
   actual parameters. Could always retrieve their data (in many cases possible
   without hooking; if the data segment isn't written/made undefined by that command buffer
@@ -28,7 +46,7 @@ be possible or useful in the end.
 	  This one is even more tricky though, deciding which data to serialize.
 	  Probably wouldn't want to rely on stack traces here, right?
 
-- allow to visualize buffers as images where it makes sense 
+- allow to visualize buffers as images where it makes sense
   (using a bufferView or buffer-to-image copy)
 
 - use dynamic rendering as renderpass splitting fallback?
@@ -104,7 +122,7 @@ be possible or useful in the end.
 quick local-command capture
 
 During recording already, we can tell vil *somehow* that we are
-interested in *this* command (maybe pass flags, e.g. say that we are 
+interested in *this* command (maybe pass flags, e.g. say that we are
 interested in shader debugging).
 
 When opening the UI (even if that's way later), we can then select
@@ -114,7 +132,7 @@ Shouldn't be too hard via current api.
 
 The hardest part is the notification via api I guess.
 We can't just pass a VkCommandBuffer into vil api.
-Could store per-thread last recorded CommandBuffer but that introduces 
+Could store per-thread last recorded CommandBuffer but that introduces
 some overhead while recording; would like to avoid.
 
 Hm, maybe we can use some specific debug label names?

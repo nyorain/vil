@@ -1649,13 +1649,13 @@ MatchVal matchState(MatchType matchType, const StateCmdBase& a, const StateCmdBa
 			return MatchVal::noMatch());
 
 	for(auto& pcr : a.boundPipe()->layout->pushConstants) {
-		// TODO: these asserts can trigger if parts of the push constant
+		// this can happen if parts of the push constant
 		// range was left undefined. It might not be used by the shader
 		// anyways. Not sure how to fix.
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= a.boundPushConstants().data.size(), continue);
-		dlg_assertl_or(dlg_level_warn,
-			pcr.offset + pcr.size <= b.boundPushConstants().data.size(), continue);
+		if(pcr.offset + pcr.size > a.boundPushConstants().data.size() ||
+				pcr.offset + pcr.size > b.boundPushConstants().data.size()) {
+			continue;
+		}
 
 		auto pcrWeight = 1.f; // std::min(pcr.size / 4u, 4u);
 		m.total += pcrWeight;
