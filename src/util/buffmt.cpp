@@ -5,7 +5,7 @@
 #include <gui/gui.hpp>
 #include <util/profiling.hpp>
 #include <threadContext.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <numeric>
 #include <iomanip>
 
@@ -44,6 +44,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 	}
 
 	auto& dst = alloc.construct<Type>();
+	dst.deco.typeID = typeID;
 
 	auto* meta = compiler.get_ir().find_meta(typeID);
 	if(meta) {
@@ -60,9 +61,9 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		if(memberDeco->decoration_flags.get(spv::DecorationMatrixStride)) {
 			dst.deco.matrixStride = memberDeco->matrix_stride;
 		}
-		if(memberDeco->decoration_flags.get(spv::DecorationOffset)) {
-			dst.deco.offset = memberDeco->offset;
-		}
+		// if(memberDeco->decoration_flags.get(spv::DecorationOffset)) {
+		// 	dst.deco.offset = memberDeco->offset;
+		// }
 	}
 
 	// handle array
@@ -462,7 +463,15 @@ void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset) 
 }
 
 unsigned size(const Type& t, BufferLayout bl) {
-	u32 arrayFac = std::accumulate(t.array.begin(), t.array.end(), 1u, std::multiplies{});
+	if(!t.array.empty()) {
+		u32 arrayFac = std::accumulate(t.array.begin(), t.array.end(), 1u, std::multiplies{});
+		auto arrayStride = t.deco.arrayStride;
+		if(bl == BufferLayout::std140) {
+			arrayStride = alignPOT(arrayStride, 16u);
+		}
+		return arrayFac * t.deco.arrayStride;
+	}
+
 	switch(t.type) {
 		case Type::typeBool:
 		case Type::typeFloat:
@@ -472,13 +481,19 @@ unsigned size(const Type& t, BufferLayout bl) {
 			if(bl == BufferLayout::std140 && vec == 3u) {
 				vec = 4u;
 			}
-			return arrayFac * vec * t.columns * t.width / 8u;
+			return vec * t.columns * t.width / 8u;
 		} case Type::typeStruct: {
 			auto end = 0u;
 			for(auto& member : t.members) {
 				end = std::max(end, member.offset + size(*member.type, bl));
 			}
-			return arrayFac * end;
+
+			// TODO: in endAlign?
+			// if(bl == BufferLayout::std140) {
+			// 	end = alignPOT(end, 16u);
+			// }
+
+			return end;
 		}
 	}
 

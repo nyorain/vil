@@ -467,7 +467,7 @@ struct EndRenderPassCmd final : CmdDerive<Command, CommandType::endRenderPass> {
 // Base command from which all draw, dispatch and traceRays command are derived.
 struct StateCmdBase : Command {
 	virtual const DescriptorState& boundDescriptors() const = 0;
-	virtual const Pipeline* boundPipe() const = 0;
+	virtual Pipeline* boundPipe() const = 0;
 	virtual const PushConstantData& boundPushConstants() const = 0;
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -484,7 +484,7 @@ struct DrawCmdBase : StateCmdBase {
 	MatchVal doMatch(const DrawCmdBase& cmd, bool indexed) const;
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
-	const Pipeline* boundPipe() const override { return state->pipe; }
+	Pipeline* boundPipe() const override { return state->pipe; }
 
 	virtual bool isIndexed() const = 0;
 
@@ -651,7 +651,7 @@ struct DispatchCmdBase : StateCmdBase {
 	MatchVal doMatch(const DispatchCmdBase&) const;
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
-	const Pipeline* boundPipe() const override { return state->pipe; }
+	Pipeline* boundPipe() const override { return state->pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
@@ -1473,7 +1473,7 @@ struct TraceRaysCmdBase : StateCmdBase {
 	MatchVal doMatch(const TraceRaysCmdBase& cmd) const;
 
 	const DescriptorState& boundDescriptors() const override { return *state; }
-	const Pipeline* boundPipe() const override { return state->pipe; }
+	Pipeline* boundPipe() const override { return state->pipe; }
 	const PushConstantData& boundPushConstants() const override { return pushConstants; }
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };

@@ -1,0 +1,49 @@
+#version 460
+
+#extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer Src {
+	uint vals[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer Dst {
+	uint vals[];
+};
+
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer Mappings {
+	uint vals[];
+};
+
+layout(push_constant) uniform PCR {
+	uint stride;
+	uint size;
+	uint count;
+	Src src;
+	Dst dst;
+	Mappings mappings;
+} pcr;
+
+void main() {
+	const uint id = gl_GlobalInvocationID.x;
+	if(id >= pcr.count) {
+		return;
+	}
+
+	uint currEntry = 0u;
+	uint offset = id * pcr.stride;
+	uint mappingStride = 2 * pcr.size;
+	for(uint i = 0u; i < pcr.size; ++i) {
+		uint src = pcr.src.vals[offset + i];
+		while(src != pcr.mappings.vals[currEntry * mappingStride + i]) {
+			++currEntry;
+		}
+	}
+
+	for(uint i = 0u; i < pcr.size; ++i) {
+		uint src = pcr.mappings.vals[pcr.size + currEntry * mappingStride + i];
+		pcr.dst.vals[offset + i] = src;
+	}
+}
+

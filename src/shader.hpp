@@ -19,6 +19,8 @@ struct Type;
 struct ShaderSpecialization {
 	std::vector<VkSpecializationMapEntry> entries;
 	std::vector<std::byte> data {};
+
+	VkSpecializationInfo vkInfo() const;
 };
 
 ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo*);

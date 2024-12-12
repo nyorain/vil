@@ -19,7 +19,7 @@
 #include <imgui/imgui_internal.h>
 #include <vk/format_utils.h>
 #include <vkutil/enumString.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <vil_api.h>
 #include <iomanip>
 

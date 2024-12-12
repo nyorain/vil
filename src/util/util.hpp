@@ -324,6 +324,14 @@ T deriveCast(O* ptr) {
 	return static_cast<T>(ptr);
 }
 
+template<typename T, typename O>
+T deriveCast(O& obj) {
+	static_assert(std::is_reference_v<T>);
+	static_assert(std::is_base_of_v<O, std::remove_reference_t<T>>);
+	dlg_assertt(("deriveCast"), dynamic_cast<std::remove_reference_t<T>*>(&obj));
+	return static_cast<T>(obj);
+}
+
 // ValidExpression impl
 namespace detail {
 template<template<class...> typename E, typename C, typename... T> struct ValidExpressionT {
