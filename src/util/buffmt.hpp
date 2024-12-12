@@ -23,7 +23,6 @@ struct Decoration {
 	using Flags = nytl::Flags<Bits>;
 
 	std::string_view name {};
-	u32 offset {}; // for members; offset in struct
 	// TODO: for multidim arrays, each dimension might have a non-tight
 	// arrayStride in spirv i guess? In Vulkan, the stride for the
 	// dimension >= 1 won't be non-tight but we might still want to
@@ -31,6 +30,7 @@ struct Decoration {
 	// dimension (i.e. how large is one element in the array).
 	u32 arrayStride {};
 	u32 matrixStride {};
+	u32 typeID {};
 	Flags flags {};
 };
 
@@ -52,7 +52,7 @@ struct Type {
 	u32 vecsize {1};
 	// Set to 0 for runtime array.
 	span<u32> array {};
-	u32 width;
+	u32 width {};
 
 	Decoration deco;
 

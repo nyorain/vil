@@ -96,9 +96,26 @@ struct LinAllocator {
 	LinAllocator(Callback alloc, Callback free);
 	~LinAllocator();
 
-	// NOTE: could be implemented but need special handling of memRoot
-	LinAllocator(LinAllocator&& rhs) noexcept = delete;
-	LinAllocator& operator=(LinAllocator&& rhs) noexcept = delete;
+	LinAllocator(LinAllocator&& rhs) noexcept {
+		memRoot = rhs.memRoot;
+		memCurrent = rhs.memCurrent;
+		if(memCurrent == &rhs.memRoot) {
+			memCurrent = &memRoot;
+		}
+		rhs.memRoot = {};
+		rhs.memCurrent = &rhs.memRoot;
+	}
+	LinAllocator& operator=(LinAllocator&& rhs) noexcept {
+		release();
+		memRoot = rhs.memRoot;
+		memCurrent = rhs.memCurrent;
+		if(memCurrent == &rhs.memRoot) {
+			memCurrent = &memRoot;
+		}
+		rhs.memRoot = {};
+		rhs.memCurrent = &rhs.memRoot;
+		return *this;
+	}
 
 	// Resets the allocator to the beginning but does not free any
 	// associated memory.
@@ -457,8 +474,8 @@ inline std::string_view copy(LinAllocator& alloc, std::string_view src) {
 	return {copy.data(), copy.size()};
 }
 
-template<typename T>
-using ScopedVector = std::vector<T, LinearScopedAllocator<T>>;
+template<typename T> using ScopedVector = std::vector<T, LinearScopedAllocator<T>>;
+template<typename T> using LinAllocVector = std::vector<T, LinearUnscopedAllocator<T>>;
 
 } // namespace vil
 

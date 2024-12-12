@@ -94,8 +94,7 @@ args = cc.get_supported_arguments([
 
 # defines
 args += [
-	'-DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=1',
-	'-DSPIRV_CROSS_NAMESPACE_OVERRIDE=spc',
+	# '-DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=1',
 ]
 
 if get_option('buildtype') == 'debug'
@@ -167,6 +166,9 @@ dep_imgio = dependency('imgio',
 	static: true,
 	default_options: ['png=false'],
 	fallback: ['imgio', 'imgio_dep'])
+dep_spc = dependency('spc',
+	fallback: ['spc', 'spc_dep'],
+	static: true)
 
 layer_args += '-DDLG_DEFAULT_TAGS="vil"'
 
@@ -217,6 +219,7 @@ src = files(
 	'src/util/buffmt.cpp',
 	'src/util/bufparser.cpp',
 	'src/util/linalloc.cpp',
+	'src/util/patch.cpp',
 	'src/command/match.cpp',
 	'src/command/record.cpp',
 	'src/command/commands.cpp',
@@ -256,6 +259,7 @@ src = files(
 	'src/gui/bufferViewer.cpp',
 	'src/gui/imageViewer.cpp',
 	'src/gui/shader.cpp',
+	'src/gui/shaderEmulation.cpp',
 	'src/gui/blur.cpp',
 	'src/gui/commandSelection.cpp',
 	# debug wip
@@ -358,20 +362,20 @@ src = files(
 	'src/imgui/imgui.h',
 
 	# spirv-cross
-	'src/spirv-cross/spirv.h',
-	'src/spirv-cross/spirv.hpp',
-	'src/spirv-cross/spirv_cfg.hpp',
-	'src/spirv-cross/spirv_common.hpp',
-	'src/spirv-cross/spirv_cross.hpp',
-	'src/spirv-cross/spirv_cross_containers.hpp',
-	'src/spirv-cross/spirv_cross_error_handling.hpp',
-	'src/spirv-cross/spirv_cross_parsed_ir.hpp',
-	'src/spirv-cross/spirv_parser.hpp',
+	# 'src/spirv-cross/spirv.h',
+	# 'src/spirv-cross/spirv.hpp',
+	# 'src/spirv-cross/spirv_cfg.hpp',
+	# 'src/spirv-cross/spirv_common.hpp',
+	# 'src/spirv-cross/spirv_cross.hpp',
+	# 'src/spirv-cross/spirv_cross_containers.hpp',
+	# 'src/spirv-cross/spirv_cross_error_handling.hpp',
+	# 'src/spirv-cross/spirv_cross_parsed_ir.hpp',
+	# 'src/spirv-cross/spirv_parser.hpp',
 
-	'src/spirv-cross/spirv_cfg.cpp',
-	'src/spirv-cross/spirv_cross.cpp',
-	'src/spirv-cross/spirv_parser.cpp',
-	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
+	# 'src/spirv-cross/spirv_cfg.cpp',
+	# 'src/spirv-cross/spirv_cross.cpp',
+	# 'src/spirv-cross/spirv_parser.cpp',
+	# 'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
 
 imgui_src = files(
@@ -397,6 +401,7 @@ deps = [
 	dep_threads,
 	dep_dlg,
 	dep_nytl,
+	dep_spc,
 	dep_imgio,
 	tracy_deps,
 ]

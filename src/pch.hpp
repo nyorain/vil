@@ -46,7 +46,7 @@
 #include <vk/typemap_helper.h>
 #include <vkutil/enumString.hpp>
 
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 
 #include <nytl/span.hpp>
 #include <nytl/vec.hpp>

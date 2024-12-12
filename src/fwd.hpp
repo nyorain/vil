@@ -70,6 +70,7 @@ struct CommandHook;
 struct CommandHookSubmission;
 struct CommandHookRecord;
 struct CommandHookState;
+struct CommandHookTarget;
 struct LocalCapture;
 struct CommandHookOps;
 struct CompletedHook;
@@ -186,7 +187,7 @@ void onDeviceLost(Device& dev);
 } // namespace
 
 // spirv-cross
-namespace spc {
+namespace spirv_cross {
 
 class Compiler;
 struct Resource;
@@ -194,6 +195,8 @@ struct SPIRConstant;
 struct BuiltInResource;
 
 } // namespace
+
+namespace spc = spirv_cross;
 
 namespace vil::vku {
 

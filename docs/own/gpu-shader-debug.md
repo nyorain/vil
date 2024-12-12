@@ -114,3 +114,24 @@ We build this Type during shader patching.
 For OpLine candidates for the breakpoint, remember the start of their
 function. When we have our selected candidate, evaluate all OpVariable
 values in that function (that came before the OpLine instruction itself).
+
+---
+
+For raytracing commands, we have to hook the shader table.
+Do it like this:
+- RayTracingPipeline has a unordered_map<RTGroupHandleBuf, u32>
+  that maps the RTGroupHandleBuf identifier (dyn-sized u32[] buffer)
+  to the groupID
+- Our patched RT pipeline has retrieved all handles and knows
+  which groups need to be overwritten
+- when hook-recording dispatchRays command, first create a hooked
+  copy of the shader table
+	- allocate ownBuf large enough
+	- run compute shader, one thread per group
+	  thread compares its group with all groups that need to be replaced
+	  and does so, if needed. If not, just copies the group.
+	- barrier!
+	- then dispatch rays with our own shaderTable.
+	- maybe abort when the hooked shader table would get too large?
+	  maybe cache this somehow? could be major bottleneck for
+	  large shader tables.

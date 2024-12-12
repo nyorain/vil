@@ -5,7 +5,7 @@
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <vkutil/enumString.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <filesystem>
 #include <optional>
 
@@ -32,6 +32,15 @@ std::string extractString(span<const u32> spirv) {
 
 	dlg_error("Unterminated SPIR-V string");
 	return {};
+}
+
+VkSpecializationInfo ShaderSpecialization::vkInfo() const {
+	VkSpecializationInfo ret {};
+	ret.dataSize = data.size();
+	ret.pData = data.data();
+	ret.mapEntryCount = entries.size();
+	ret.pMapEntries = entries.data();
+	return ret;
 }
 
 ShaderSpecialization createShaderSpecialization(const VkSpecializationInfo* info) {
@@ -456,8 +465,8 @@ XfbPatchData patchShaderXfb(Device& dev, spc::Compiler& compiled,
 	}
 	output += ".";
 
-	auto badHash = u32(0u);
-	for(auto v : patched.spirv) badHash ^= v;
+	auto badHash = std::size_t(0u);
+	for(auto v : patched.spirv) hash_combine(hash, v);
 
 	output += std::to_string(badHash);
 	output += ".spv";

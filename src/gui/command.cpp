@@ -28,9 +28,8 @@
 #include <ds.hpp>
 #include <shader.hpp>
 #include <rp.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <imgui/imgui_internal.h>
-#include <bitset>
 
 #ifdef VIL_COMMAND_CALLSTACKS
 	#include <backward/resolve.hpp>
@@ -324,7 +323,9 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 				selectCommandView = true;
 				shaderDebugger_.unselect();
 			} else if(isLocalCapture && sel.completedHookState()) {
-				shaderDebugger_.initVarMap();
+				if(shaderDebugger_.emulation()) {
+					shaderDebugger_.emulation()->initVarMap();
+				}
 			}
 
 			break;
@@ -1548,7 +1549,8 @@ void CommandViewer::displayCommand() {
 		if(ImGui::Button("Debug shader")) {
 			if(dcmd->state->pipe) {
 				auto mod = copySpecializeSpirv(dcmd->state->pipe->stage);
-				shaderDebugger_.select(VK_SHADER_STAGE_COMPUTE_BIT, std::move(mod));
+				shaderDebugger_.select(VK_SHADER_STAGE_COMPUTE_BIT,
+					std::move(mod), dcmd->state->pipe->stage.entryPoint);
 				view_ = IOView::shader;
 				doUpdateHook_ = true;
 				return;
@@ -1574,7 +1576,8 @@ void CommandViewer::displayCommand() {
 				if(ImGui::Button("Debug vertex shader")) {
 					if(dcmd->state->pipe) {
 						auto mod = copySpecializeSpirv(*vertex);
-						shaderDebugger_.select(vertex->stage, std::move(mod));
+						shaderDebugger_.select(vertex->stage, std::move(mod),
+							vertex->entryPoint);
 						view_ = IOView::shader;
 						doUpdateHook_ = true;
 						return;
