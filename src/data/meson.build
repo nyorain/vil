@@ -91,7 +91,10 @@ if glslang.found()
 			# TODO: should compile with optimization but default glslang
 			# on arch does not come with optimizer linked in :(
 
-			args = [glslang, '-V', '--vn', varname, config, '-o', '@OUTPUT@', '@INPUT@']
+			args = [glslang, '-V', '--vn', varname, config, '@INPUT@']
+
+			args += ['-o', '@OUTPUT@']
+			args += ['--target-env', 'vulkan1.1']
 
 			if glslang_version.version_compare('>=11.0.0')
 				args += '--quiet'

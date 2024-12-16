@@ -505,6 +505,14 @@ VkResult doCreateDevice(
 	auto hasTransformFeedbackApi = enableTransformFeedback &&
 		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+	auto has16BitStorageApi =
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		((ini.vulkan11 && phdevProps.apiVersion >= VK_API_VERSION_1_1) ||
+			hasExt(supportedExts, VK_KHR_16BIT_STORAGE_EXTENSION_NAME));
+	auto has8BitStorageApi =
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		((ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
+			hasExt(supportedExts, VK_KHR_8BIT_STORAGE_EXTENSION_NAME));
 	auto hasDeviceFaultApi = enableDeviceFault &&
 		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
@@ -517,23 +525,29 @@ VkResult doCreateDevice(
 	auto hasTransformFeedback = false;
 	auto hasDeviceFault = false;
 	auto hasAddressBindingReport = false;
+	bool hasStorage8 = false;
+	bool hasStorage16 = false;
 
 	// find generally relevant feature structs in chain
 	VkPhysicalDeviceVulkan11Features features11 {};
 	VkPhysicalDeviceVulkan12Features features12 {};
 	VkPhysicalDeviceVulkan13Features features13 {};
 
+	VkPhysicalDeviceVulkan11Features* inVulkan11 = nullptr;
 	VkPhysicalDeviceVulkan12Features* inVulkan12 = nullptr;
 	VkPhysicalDeviceTimelineSemaphoreFeatures* inTS = nullptr;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT* inXFB = nullptr;
 	VkPhysicalDeviceBufferDeviceAddressFeatures* inBufAddr = nullptr;
 	VkPhysicalDeviceFaultFeaturesEXT* inDF = nullptr;
 	VkPhysicalDeviceAddressBindingReportFeaturesEXT* inABR = nullptr;
+	VkPhysicalDevice16BitStorageFeatures* inStorage16 {};
+	VkPhysicalDevice8BitStorageFeatures* inStorage8 {};
 
 	auto* link = static_cast<VkBaseOutStructure*>(pNext);
 	while(link) {
 		if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES) {
 			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_1);
+			inVulkan11 = reinterpret_cast<VkPhysicalDeviceVulkan11Features*>(link);
 			features11 = *reinterpret_cast<VkPhysicalDeviceVulkan11Features*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
 			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_2);
@@ -552,6 +566,10 @@ VkResult doCreateDevice(
 			inDF = reinterpret_cast<VkPhysicalDeviceFaultFeaturesEXT*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT) {
 			inABR = reinterpret_cast<VkPhysicalDeviceAddressBindingReportFeaturesEXT*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES) {
+			inStorage8 = reinterpret_cast<VkPhysicalDevice8BitStorageFeatures*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES) {
+			inStorage16 = reinterpret_cast<VkPhysicalDevice16BitStorageFeatures*>(link);
 		}
 
 		link = (static_cast<VkBaseOutStructure*>(link->pNext));
@@ -561,7 +579,10 @@ VkResult doCreateDevice(
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT tfFeatures {};
 	VkPhysicalDeviceFaultFeaturesEXT dfFeatures {};
 	VkPhysicalDeviceAddressBindingReportFeaturesEXT abrFeatures {};
-	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi || hasDeviceFaultApi) {
+	VkPhysicalDevice16BitStorageFeatures storage16Features {};
+	VkPhysicalDevice8BitStorageFeatures storage8Features {};
+	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi || hasDeviceFaultApi ||
+			has16BitStorageApi || has8BitStorageApi) {
 		dlg_assert(fpPhdevFeatures2);
 		dlg_assert(fpPhdevProps2);
 
@@ -578,6 +599,18 @@ VkResult doCreateDevice(
 			tfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
 			tfFeatures.pNext = features2.pNext;
 			features2.pNext = &tfFeatures;
+		}
+
+		if(has8BitStorageApi) {
+			storage8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
+			storage8Features.pNext = features2.pNext;
+			features2.pNext = &storage8Features;
+		}
+
+		if(has16BitStorageApi) {
+			storage16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
+			storage16Features.pNext = features2.pNext;
+			features2.pNext = &storage16Features;
 		}
 
 		if(hasDeviceFaultApi) {
@@ -598,16 +631,11 @@ VkResult doCreateDevice(
 			hasTimelineSemaphores = true;
 
 			// check if application already has a feature struct holding it
-			auto addLink = true;
 			if(inVulkan12) {
-				addLink = false;
 				inVulkan12->timelineSemaphore = true;
 			} else if(inTS) {
-				addLink = false;
 				inTS->timelineSemaphore = true;
-			}
-
-			if(addLink) {
+			} else {
 				tsFeatures.pNext = const_cast<void*>(nci.pNext);
 				nci.pNext = &tsFeatures;
 			}
@@ -625,13 +653,9 @@ VkResult doCreateDevice(
 			hasTransformFeedback = true;
 
 			// check if application already has a feature struct holding it
-			auto addLink = true;
 			if(inXFB) {
-				addLink = false;
 				inXFB->transformFeedback = true;
-			}
-
-			if(addLink) {
+			} else {
 				tfFeatures.geometryStreams = false;
 				tfFeatures.pNext = const_cast<void*>(nci.pNext);
 				nci.pNext = &tfFeatures;
@@ -640,6 +664,32 @@ VkResult doCreateDevice(
 			// also need to enable extension
 			if(!contains(newExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) {
 				newExts.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+			}
+		}
+
+		if(storage8Features.storageBuffer8BitAccess) {
+			hasStorage8 = true;
+
+			if(inStorage8) {
+				inStorage8->storageBuffer8BitAccess = true;
+			} else if(inVulkan12) {
+				inVulkan12->storageBuffer8BitAccess = true;
+			} else {
+				storage8Features.pNext = const_cast<void*>(nci.pNext);
+				nci.pNext = &storage8Features;
+			}
+		}
+
+		if(storage16Features.storageBuffer16BitAccess) {
+			hasStorage16 = true;
+
+			if(inStorage16) {
+				inStorage16->storageBuffer16BitAccess = true;
+			} else if(inVulkan11) {
+				inVulkan11->storageBuffer16BitAccess = true;
+			} else {
+				storage16Features.pNext = const_cast<void*>(nci.pNext);
+				nci.pNext = &storage16Features;
 			}
 		}
 
@@ -737,6 +787,8 @@ VkResult doCreateDevice(
 	dev.nonSolidFill = pEnabledFeatures10->fillModeNonSolid;
 	dev.shaderStorageImageWriteWithoutFormat = pEnabledFeatures10->shaderStorageImageWriteWithoutFormat;
 	dev.extDeviceFault = hasDeviceFault;
+	dev.storage8Bit = hasStorage8;
+	dev.storage16Bit = hasStorage16;
 
 	if(hasAddressBindingReport) {
 		dev.addressMap = std::make_unique<DeviceAddressMap>();
