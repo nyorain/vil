@@ -1346,7 +1346,10 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = false;
 				updateHook();
 			} else {
-				vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				auto uh = vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				if(uh) {
+					updateHook();
+				}
 			}
 
 			ImGui::EndTabItem();
@@ -1545,11 +1548,41 @@ void CommandViewer::displayCommand() {
 		if(ImGui::Button("Debug shader")) {
 			if(dcmd->state->pipe) {
 				auto mod = copySpecializeSpirv(dcmd->state->pipe->stage);
-				shaderDebugger_.select(std::move(mod));
+				shaderDebugger_.select(VK_SHADER_STAGE_COMPUTE_BIT, std::move(mod));
 				view_ = IOView::shader;
 				doUpdateHook_ = true;
 				return;
 			}
+		}
+	} else if(auto* dcmd = dynamic_cast<const DrawCmdBase*>(command_.back()); dcmd) {
+		auto* pipe = dcmd->boundPipe();
+		if(pipe) {
+			dlg_assert(pipe->type == VK_PIPELINE_BIND_POINT_GRAPHICS);
+			auto& gpipe = static_cast<const GraphicsPipeline&>(*pipe);
+			const PipelineShaderStage* vertex {};
+			for(auto& stage : gpipe.stages) {
+				if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
+					vertex = &stage;
+					break;
+				}
+			}
+
+			// TODO: add support for mesh shader. Or at least show
+			//   message in UI?
+			dlg_assertm(vertex, "TODO Graphics pipeline without vertex shader");
+			if(vertex) {
+				if(ImGui::Button("Debug vertex shader")) {
+					if(dcmd->state->pipe) {
+						auto mod = copySpecializeSpirv(*vertex);
+						shaderDebugger_.select(vertex->stage, std::move(mod));
+						view_ = IOView::shader;
+						doUpdateHook_ = true;
+						return;
+					}
+				}
+			}
+
+			// TODO: add fragment shader
 		}
 	}
 
@@ -1608,14 +1641,14 @@ void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
 	auto* cmd = command_.empty() ? nullptr : command_.back();
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
-	auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
-	auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
-	auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
+	// auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
+	// auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
+	// auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
 
 	auto indirectCmd = cmd && isIndirect(*cmd);
-	auto indexedCmd = drawIndexedCmd ||
-		(drawIndirectCmd && drawIndirectCmd->indexed) ||
-		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
+	// auto indexedCmd = drawIndexedCmd ||
+	// 	(drawIndirectCmd && drawIndirectCmd->indexed) ||
+	// 	(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
 	CommandHook::Ops ops {};
 	bool setOps = true;
@@ -1675,13 +1708,15 @@ void CommandViewer::updateHook() {
 			ops.descriptorCopies = {dsCopy};
 			break;
 		} case IOView::mesh:
+			ops.copyIndirectCmd = indirectCmd;
 			if(viewData_.mesh.output) {
 				ops.copyXfb = true;
-				ops.copyIndirectCmd = indirectCmd;
 			} else {
-				ops.copyVertexBuffers = true;
-				ops.copyIndexBuffers = indexedCmd;
-				ops.copyIndirectCmd = indirectCmd;
+				// TODO: set buffer size hints!
+				dlg_info("TODO: set buffer size hints");
+
+				ops.copyVertexInput = true;
+				ops.vertexInputCmd = vertexViewer_.selectedCommand();
 			}
 			break;
 		case IOView::pushConstants:

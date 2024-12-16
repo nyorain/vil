@@ -4,6 +4,8 @@
 #include <util/ownbuf.hpp>
 #include <command/record.hpp>
 #include <commandHook/state.hpp>
+#include <vkutil/dynds.hpp>
+#include <variant>
 
 namespace vil {
 
@@ -96,9 +98,37 @@ struct CommandHookRecord {
 	std::vector<VkImageView> imageViews;
 	std::vector<VkBufferView> bufferViews;
 
+	std::vector<vku::DynDs> dynds;
+
+	static constexpr auto maxDebugTimings = 10u;
+	VIL_DEBUG_ONLY(std::vector<std::string> ownTimingNames;)
+
 	// Linked list of all records belonging to this->hook
 	CommandHookRecord* next {};
 	CommandHookRecord* prev {};
+
+public:
+	// see vertexCopy.glsl
+	// must match it!
+	struct VertexCopyMetadata {
+		u32 dispatchPerVertexX;
+		u32 dispatchPerVertexY;
+		u32 dispatchPerVertexZ;
+		u32 firstVertex;
+
+		u32 dispatchPerInstanceX;
+		u32 dispatchPerInstanceY;
+		u32 dispatchPerInstanceZ;
+		u32 firstInstance;
+
+		u32 indexCount;
+		u32 minIndex;
+		u32 maxIndex;
+		u32 copyTypeOrIndexOffset;
+	};
+
+	static constexpr auto copyTypeVertices = 1u;
+	static constexpr auto copyTypeResolveIndices = 2u;
 
 public:
 	CommandHookRecord(CommandHook& hook, CommandRecord& record,
@@ -167,6 +197,7 @@ private:
 		const DescriptorCopyOp&, unsigned copyDstID,
 		CommandHookState::CopiedDescriptor& dst,
 		IntrusivePtr<DescriptorSetCow>& dstCow);
+	void copyVertexInput(Command& bcmd, RecordInfo&);
 	void copyAttachment(const Command& bcmd, const RecordInfo&,
 		AttachmentType type, unsigned id,
 		CommandHookState::CopiedAttachment& dst);

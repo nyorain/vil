@@ -1,6 +1,7 @@
 #include <shader.hpp>
 #include <device.hpp>
 #include <wrap.hpp>
+#include <util/buffmt.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <vkutil/enumString.hpp>
@@ -12,6 +13,8 @@
 // #define VIL_OUTPUT_PATCHED_SPIRV
 
 namespace vil {
+
+XfbCapture::~XfbCapture() = default;
 
 // util
 std::string extractString(span<const u32> spirv) {
@@ -98,38 +101,41 @@ bool isOpInSection8(spv11::Op op) {
 	}
 }
 
-u32 baseTypeSize(const spc::SPIRType& type, XfbCapture& cap) {
+// Returns the base type size
+u32 fillInType(const spc::SPIRType& type, XfbCapture& cap) {
 	dlg_assert(!type.pointer);
+	dlg_assert(!cap.type);
+	cap.type = std::make_unique<Type>();
 
 	switch(type.basetype) {
 		case spc::SPIRType::Float:
 		case spc::SPIRType::Half:
 		case spc::SPIRType::Double:
-			cap.type = XfbCapture::typeFloat;
+			cap.type->type = Type::typeFloat;
 			break;
 
 		case spc::SPIRType::UInt:
 		case spc::SPIRType::UInt64:
 		case spc::SPIRType::UByte:
 		case spc::SPIRType::UShort:
-			cap.type = XfbCapture::typeUint;
+			cap.type->type = Type::typeUint;
 			break;
 
 		case spc::SPIRType::Int:
 		case spc::SPIRType::Int64:
 		case spc::SPIRType::SByte:
 		case spc::SPIRType::Short:
-			cap.type = XfbCapture::typeInt;
+			cap.type->type = Type::typeInt;
 			break;
 
 		default:
 			dlg_assert("Invalid type");
-			return u32(-1);
+			return u32(0);
 	}
 
-	cap.width = type.width;
-	cap.columns = type.columns;
-	cap.vecsize = type.vecsize;
+	cap.type->width = type.width;
+	cap.type->columns = type.columns;
+	cap.type->vecsize = type.vecsize;
 
 	return type.vecsize * type.columns * (type.width / 8);
 }
@@ -175,7 +181,7 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 		}
 
 		XfbCapture cap {};
-		auto baseSize = baseTypeSize(mtype, cap);
+		auto baseSize = fillInType(mtype, cap);
 		if(baseSize == u32(-1)) {
 			continue;
 		}
@@ -196,9 +202,11 @@ void annotateCapture(const spc::Compiler& compiler, const spc::SPIRType& structT
 				dim = compiler.evaluate_constant_u32(dim);
 			}
 
-			cap.array.push_back(dim);
+			cap.arrayVals.push_back(dim);
 			size *= dim;
 		}
+
+		cap.type->array = cap.arrayVals;
 
 		// if(!compiler.has_decoration(mtype.self, spv::DecorationArrayStride) &&
 		// 		!mtype.array.empty()) {
@@ -353,7 +361,7 @@ XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
 			annotateCapture(compiled, type, name, bufOffset, captures, newDecos);
 		} else {
 			XfbCapture cap {};
-			auto baseSize = baseTypeSize(type, cap);
+			auto baseSize = fillInType(type, cap);
 			if(baseSize == u32(-1)) {
 				continue;
 			}
@@ -374,9 +382,11 @@ XfbPatchRes patchSpirvXfb(spc::Compiler& compiled, const char* entryPoint) {
 					dim = compiled.evaluate_constant_u32(dim);
 				}
 
-				cap.array.push_back(dim);
+				cap.arrayVals.push_back(dim);
 				size *= dim;
 			}
+
+			cap.type->array = cap.arrayVals;
 
 			// if(!compiled.has_decoration(type.self, spv::DecorationArrayStride) &&
 			// 		!type.array.empty()) {

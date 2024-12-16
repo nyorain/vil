@@ -268,6 +268,8 @@ src = files(
 	'src/vkutil/cmd.cpp',
 	'src/vkutil/handles.cpp',
 	'src/vkutil/dynds.cpp',
+	'src/vkutil/pipe.cpp',
+	'src/vkutil/spirv_reflect.c',
 
 	# useful for visual studio build to include headers here
 	'src/fwd.hpp',
@@ -513,7 +515,7 @@ pch = []
 if not with_win32 or not with_tracy
 	# TODO: fix. We want to use pch unless we are frequently editing shaders
 	# See https://github.com/mesonbuild/meson/issues/10882
-	pch = 'src/pch.hpp'
+	# pch = 'src/pch.hpp'
 endif
 
 lib_spvm = static_library(
@@ -644,11 +646,12 @@ if with_integration_tests
 	int_args += '-DVIL_MOCK_ICD_FILE="@0@"'.format(mock_icd_file)
 	int_args += '-DVIL_LAYER_PATH="@0@"'.format(meson.current_build_dir())
 
-	intest = executable('intest', [int_src, mock_icd_lib],
+	intest = executable('intest', int_src,
 		include_directories: inc,
 		cpp_args: int_args,
 		dependencies: [dep_dlg, dep_vulkan, dep_dl, dep_nytl])
-	test('intest', intest)
+	test('intest', intest,
+		depends: mock_icd_lib)
 endif
 
 # standalone
