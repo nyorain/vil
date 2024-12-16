@@ -5,6 +5,7 @@
 #include <command/record.hpp>
 #include <commandHook/state.hpp>
 #include <vkutil/dynds.hpp>
+#include <variant>
 
 namespace vil {
 
