@@ -13,7 +13,6 @@
 #include <vk/vulkan.h>
 #include <vector>
 #include <memory>
-#include <variant>
 #include <optional>
 #include <string>
 

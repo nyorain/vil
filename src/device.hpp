@@ -95,6 +95,8 @@ struct Device {
 	bool transformFeedback {}; // whether we have transformFeedback
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
+	bool storage8Bit {};
+	bool storage16Bit {};
 	bool shaderStorageImageWriteWithoutFormat {};
 	bool extDeviceFault {}; // whether EXT_device_fault was enabled
 
