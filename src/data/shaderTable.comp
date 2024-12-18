@@ -1,5 +1,6 @@
 #version 460
 
+#extension GL_EXT_buffer_reference : require
 #extension GL_GOOGLE_include_directive : require
 
 layout(local_size_x = 64) in;
@@ -17,12 +18,12 @@ layout(buffer_reference, std430, buffer_reference_align = 16) buffer Mappings {
 };
 
 layout(push_constant) uniform PCR {
-	uint stride;
-	uint size;
-	uint count;
 	Src src;
 	Dst dst;
 	Mappings mappings;
+	uint stride;
+	uint size;
+	uint count;
 } pcr;
 
 void main() {

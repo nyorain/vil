@@ -31,6 +31,7 @@ struct Decoration {
 	u32 arrayStride {};
 	u32 matrixStride {};
 	u32 typeID {};
+	u32 arrayTypeID {};
 	Flags flags {};
 };
 

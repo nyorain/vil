@@ -37,8 +37,6 @@ struct PatchJobData {
 	u32 line;
 	PatchJobState state {PatchJobState::started};
 	u64 captureAddress;
-	Vec3u32 captureInput {};
-	// CommandHookTarget hookTarget;
 };
 
 struct PatchJobResult {
