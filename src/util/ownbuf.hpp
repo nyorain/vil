@@ -33,6 +33,7 @@ struct OwnBuffer {
 	void invalidateMap();
 	void flushMap();
 	ReadBuf data() const { return {map, size}; }
+	WriteBuf writeData() const { return {map, size}; }
 
 	OwnBuffer() = default;
 	~OwnBuffer();

@@ -1,0 +1,50 @@
+#version 460
+
+// Used for (direct/indirect) indexed vertex copy.
+// Dispatched after index processing when we already know the index bounds.
+// Supposed to write the indirect vertex buffer copy commands.
+
+layout(local_size_x = 1) in;
+
+#extension GL_GOOGLE_include_directive : require
+#include "vertexCopy.glsl"
+
+layout(push_constant) uniform PCR {
+	uint vertexCountHint;
+};
+
+layout(set = 0, binding = 0) buffer OutData {
+	Metadata info;
+};
+
+void main() {
+	if(info.indexCount == 0) {
+		info.dispatchPerVertexX = 0u;
+		// info.dispatchPerVertexY = 0u;
+		// info.dispatchPerVertexZ = 0u;
+		return;
+	}
+
+	const uint neededVertCount = (info.maxIndex - info.minIndex);
+	const bool doResolveIndices =
+		// when the buffers don't have enough space to begin with, we always
+		// have to resolve indices since we couldn't draw the output
+		// otherwise (any index might be out-of-bounds for the copied
+		// vertex buffer)
+		neededVertCount > vertexCountHint ||
+		info.maxIndex - info.minIndex > info.indexCount;
+
+	if(doResolveIndices) {
+		// needed for resolve path in copyVertices.comp
+		info.minIndex = info.copyTypeOrIndexOffset;
+
+		// In this case, we copy the vertices as addressed by index buffer
+		// We still copy the index buffer just to show its data in the UI
+		info.copyTypeOrIndexOffset = resolveIndices;
+		info.dispatchPerVertexX = ceilDivide(info.indexCount, 64u);
+	} else {
+		// in this case, we copy the vertices just as they are in the vertex buffer
+		info.copyTypeOrIndexOffset = copyVertices;
+		info.dispatchPerVertexX = ceilDivide(info.maxIndex - info.minIndex, 64u);
+	}
+}

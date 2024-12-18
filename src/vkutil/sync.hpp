@@ -6,7 +6,7 @@
 
 namespace vil::vku {
 
-constexpr VkImageLayout invalidImageLayout = VkImageLayout(-1);
+constexpr VkImageLayout invalidImageLayout = VK_IMAGE_LAYOUT_MAX_ENUM;
 
 struct SyncScope {
 	VkPipelineStageFlags stages {};

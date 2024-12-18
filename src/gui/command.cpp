@@ -28,9 +28,8 @@
 #include <ds.hpp>
 #include <shader.hpp>
 #include <rp.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <imgui/imgui_internal.h>
-#include <bitset>
 
 #ifdef VIL_COMMAND_CALLSTACKS
 	#include <backward/resolve.hpp>
@@ -323,8 +322,6 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 					|| stateCmd->boundPipe() != lastStateCmd->boundPipe()) {
 				selectCommandView = true;
 				shaderDebugger_.unselect();
-			} else if(isLocalCapture && sel.completedHookState()) {
-				shaderDebugger_.initVarMap();
 			}
 
 			break;
@@ -1346,7 +1343,10 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = false;
 				updateHook();
 			} else {
-				vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				auto uh = vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				if(uh) {
+					updateHook();
+				}
 			}
 
 			ImGui::EndTabItem();
@@ -1539,17 +1539,13 @@ void CommandViewer::displayCommand() {
 		}
 	}
 
-	// TODO: WIP
-	if(command_.back()->category() == CommandCategory::dispatch) {
-		auto* dcmd = deriveCast<const DispatchCmdBase*>(command_.back());
-		if(ImGui::Button("Debug shader")) {
-			if(dcmd->state->pipe) {
-				auto mod = copySpecializeSpirv(dcmd->state->pipe->stage);
-				shaderDebugger_.select(std::move(mod));
-				view_ = IOView::shader;
-				doUpdateHook_ = true;
-				return;
-			}
+	if(isStateCmd(*command_.back())) {
+		auto* dcmd = deriveCast<const StateCmdBase*>(command_.back());
+		if(dcmd->boundPipe() && ImGui::Button("Debug shader")) {
+			shaderDebugger_.select(*dcmd->boundPipe());
+			view_ = IOView::shader;
+			doUpdateHook_ = true;
+			return;
 		}
 	}
 
@@ -1608,14 +1604,14 @@ void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
 	auto* cmd = command_.empty() ? nullptr : command_.back();
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
-	auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
-	auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
-	auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
+	// auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
+	// auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
+	// auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
 
 	auto indirectCmd = cmd && isIndirect(*cmd);
-	auto indexedCmd = drawIndexedCmd ||
-		(drawIndirectCmd && drawIndirectCmd->indexed) ||
-		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
+	// auto indexedCmd = drawIndexedCmd ||
+	// 	(drawIndirectCmd && drawIndirectCmd->indexed) ||
+	// 	(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
 	CommandHook::Ops ops {};
 	bool setOps = true;
@@ -1675,13 +1671,15 @@ void CommandViewer::updateHook() {
 			ops.descriptorCopies = {dsCopy};
 			break;
 		} case IOView::mesh:
+			ops.copyIndirectCmd = indirectCmd;
 			if(viewData_.mesh.output) {
 				ops.copyXfb = true;
-				ops.copyIndirectCmd = indirectCmd;
 			} else {
-				ops.copyVertexBuffers = true;
-				ops.copyIndexBuffers = indexedCmd;
-				ops.copyIndirectCmd = indirectCmd;
+				// TODO: set buffer size hints!
+				dlg_info("TODO: set buffer size hints");
+
+				ops.copyVertexInput = true;
+				ops.vertexInputCmd = vertexViewer_.selectedCommand();
 			}
 			break;
 		case IOView::pushConstants:

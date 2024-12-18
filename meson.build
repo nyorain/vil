@@ -10,6 +10,7 @@ project('VIL', ['c', 'cpp'],
 		'swa:werror=false',
 		'imgio:werror=false',
 		'nytl:werror=false',
+		'spc:werror=false',
 		'pml:werror=false',
 		'dlg:werror=false',
 		'png:werror=false',
@@ -79,7 +80,6 @@ args = cc.get_supported_arguments([
 
 	# for clang
 	'-Wno-missing-braces',
-	'-Wno-newline-eof', # needed for spvm TODO re-enable and fix!
 	'-Wno-nonnull-compare', # seems like clang bug
 
 	# to be compatible with msvc warning level on gcc/clang
@@ -90,8 +90,7 @@ args = cc.get_supported_arguments([
 
 # defines
 args += [
-	'-DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=1',
-	'-DSPIRV_CROSS_NAMESPACE_OVERRIDE=spc',
+	# '-DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=1',
 ]
 
 if get_option('buildtype') == 'debug'
@@ -163,6 +162,9 @@ dep_imgio = dependency('imgio',
 	static: true,
 	default_options: ['png=false'],
 	fallback: ['imgio', 'imgio_dep'])
+dep_spc = dependency('spc',
+	fallback: ['spc', 'spc_dep'],
+	static: true)
 
 layer_args += '-DDLG_DEFAULT_TAGS="vil"'
 
@@ -182,20 +184,6 @@ elif get_option('throw-on-assert')
 	layer_args += '-DVIL_THROW_ON_ASSERT'
 endif
 
-# spvm
-spvm_src = files(
-	'src/spvm/context.c',
-	'src/spvm/result.c',
-	'src/spvm/state.c',
-	'src/spvm/types.c',
-	'src/spvm/value.c',
-	'src/spvm/image.c',
-	'src/spvm/program.c',
-	'src/spvm/opcode_setup.c',
-	'src/spvm/opcode_execute.c',
-	'src/spvm/ext/GLSL450.c',
-)
-
 src = files(
 	# own meta sources & util
 	'src/layer.cpp',
@@ -213,6 +201,7 @@ src = files(
 	'src/util/buffmt.cpp',
 	'src/util/bufparser.cpp',
 	'src/util/linalloc.cpp',
+	'src/util/patch.cpp',
 	'src/command/match.cpp',
 	'src/command/record.cpp',
 	'src/command/commands.cpp',
@@ -268,6 +257,8 @@ src = files(
 	'src/vkutil/cmd.cpp',
 	'src/vkutil/handles.cpp',
 	'src/vkutil/dynds.cpp',
+	'src/vkutil/pipe.cpp',
+	'src/vkutil/spirv_reflect.c',
 
 	# useful for visual studio build to include headers here
 	'src/fwd.hpp',
@@ -352,20 +343,20 @@ src = files(
 	'src/imgui/imgui.h',
 
 	# spirv-cross
-	'src/spirv-cross/spirv.h',
-	'src/spirv-cross/spirv.hpp',
-	'src/spirv-cross/spirv_cfg.hpp',
-	'src/spirv-cross/spirv_common.hpp',
-	'src/spirv-cross/spirv_cross.hpp',
-	'src/spirv-cross/spirv_cross_containers.hpp',
-	'src/spirv-cross/spirv_cross_error_handling.hpp',
-	'src/spirv-cross/spirv_cross_parsed_ir.hpp',
-	'src/spirv-cross/spirv_parser.hpp',
+	# 'src/spirv-cross/spirv.h',
+	# 'src/spirv-cross/spirv.hpp',
+	# 'src/spirv-cross/spirv_cfg.hpp',
+	# 'src/spirv-cross/spirv_common.hpp',
+	# 'src/spirv-cross/spirv_cross.hpp',
+	# 'src/spirv-cross/spirv_cross_containers.hpp',
+	# 'src/spirv-cross/spirv_cross_error_handling.hpp',
+	# 'src/spirv-cross/spirv_cross_parsed_ir.hpp',
+	# 'src/spirv-cross/spirv_parser.hpp',
 
-	'src/spirv-cross/spirv_cfg.cpp',
-	'src/spirv-cross/spirv_cross.cpp',
-	'src/spirv-cross/spirv_parser.cpp',
-	'src/spirv-cross/spirv_cross_parsed_ir.cpp',
+	# 'src/spirv-cross/spirv_cfg.cpp',
+	# 'src/spirv-cross/spirv_cross.cpp',
+	# 'src/spirv-cross/spirv_parser.cpp',
+	# 'src/spirv-cross/spirv_cross_parsed_ir.cpp',
 )
 
 imgui_src = files(
@@ -391,6 +382,7 @@ deps = [
 	dep_threads,
 	dep_dlg,
 	dep_nytl,
+	dep_spc,
 	dep_imgio,
 	tracy_deps,
 ]
@@ -513,30 +505,8 @@ pch = []
 if not with_win32 or not with_tracy
 	# TODO: fix. We want to use pch unless we are frequently editing shaders
 	# See https://github.com/mesonbuild/meson/issues/10882
-	pch = 'src/pch.hpp'
+	# pch = 'src/pch.hpp'
 endif
-
-lib_spvm = static_library(
-	'spvm',
-	spvm_src,
-	gnu_symbol_visibility: 'hidden',
-	include_directories: inc,
-	c_args: args + cc.get_supported_arguments([
-		'-Wno-unused-parameter',
-		'-Wno-unused-variable',
-		'/wd4100', # unreferenced formal parameter.
-		'/wd4189', # unused local variable
-		'/wd4457', # declaration hides function parameter
-		# TODO: fix the ones below?
-		'-Wno-sign-compare',
-		# new clang warnings
-		'-Wno-strict-prototypes',
-		'-Wno-unused-but-set-parameter',
-		'-Wno-unused-but-set-variable',
-		'/wd4018', # signed/unsigned mismatch
-		'/wd4090', # different 'const' qualifier on free/realloc calls
-	]),
-)
 
 # building as separate lib as ugly workaround for gcc pch warning issue
 # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=64117
@@ -566,7 +536,7 @@ vil_layer = shared_library(
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
-	link_whole: [lib_spvm, lib_imgui],
+	link_whole: [lib_imgui],
 	cpp_args: args + layer_args,
 	c_args: args,
 	link_args: cc.get_supported_link_arguments(link_args),
@@ -644,11 +614,12 @@ if with_integration_tests
 	int_args += '-DVIL_MOCK_ICD_FILE="@0@"'.format(mock_icd_file)
 	int_args += '-DVIL_LAYER_PATH="@0@"'.format(meson.current_build_dir())
 
-	intest = executable('intest', [int_src, mock_icd_lib],
+	intest = executable('intest', int_src,
 		include_directories: inc,
 		cpp_args: int_args,
 		dependencies: [dep_dlg, dep_vulkan, dep_dl, dep_nytl])
-	test('intest', intest)
+	test('intest', intest,
+		depends: mock_icd_lib)
 endif
 
 # standalone
@@ -661,9 +632,6 @@ if with_standalone
 endif
 
 # TODO
-dep_spc = dependency('spc',
-	fallback: ['spc', 'spc_dep'],
-	static: true)
 patch_files = files(
 	'src/test/patchtest.cpp',
 	# TODO uff

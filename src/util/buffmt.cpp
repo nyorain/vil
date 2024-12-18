@@ -5,18 +5,13 @@
 #include <gui/gui.hpp>
 #include <util/profiling.hpp>
 #include <threadContext.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <numeric>
 #include <iomanip>
 
 namespace vil {
 
 using nytl::copy;
-
-struct FormattedScalar {
-	std::string scalar;
-	std::string error {};
-};
 
 template<typename T8, typename T16, typename T32, typename T64, typename Cast = T64>
 FormattedScalar formatScalar(span<const std::byte> data, u32 offset, u32 width, u32 precision) {
@@ -49,6 +44,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 	}
 
 	auto& dst = alloc.construct<Type>();
+	dst.deco.typeID = typeID;
 
 	auto* meta = compiler.get_ir().find_meta(typeID);
 	if(meta) {
@@ -65,15 +61,13 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		if(memberDeco->decoration_flags.get(spv::DecorationMatrixStride)) {
 			dst.deco.matrixStride = memberDeco->matrix_stride;
 		}
-		if(memberDeco->decoration_flags.get(spv::DecorationOffset)) {
-			dst.deco.offset = memberDeco->offset;
-		}
 	}
 
 	// handle array
 	if(!stype->array.empty()) {
-		dlg_assert(meta && meta->decoration.decoration_flags.get(spv::DecorationArrayStride));
-		dst.deco.arrayStride = meta->decoration.array_stride;
+		if(meta && meta->decoration.decoration_flags.get(spv::DecorationArrayStride)) {
+			dst.deco.arrayStride = meta->decoration.array_stride;
+		}
 
 		dlg_assert(stype->array.size() == stype->array_size_literal.size());
 		dst.array = alloc.alloc<u32>(stype->array.size());
@@ -86,11 +80,14 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 			}
 		}
 
-		// apparently this is needed? not entirely sure why
+		dst.deco.arrayTypeID = typeID;
+
 		dlg_assert(stype->parent_type);
 		typeID = stype->parent_type;
 		stype = &compiler.get_type(typeID);
 		meta = compiler.get_ir().find_meta(typeID);
+
+		dst.deco.typeID = typeID;
 	}
 
 	if(stype->basetype == spc::SPIRType::Struct) {
@@ -99,14 +96,15 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		for(auto i = 0u; i < stype->member_types.size(); ++i) {
 			auto memTypeID = stype->member_types[i];
 
-			dlg_assert(meta && meta->members.size() > i);
-			auto deco = &meta->members[i];
-			auto off = deco->offset;
+			const spc::Meta::Decoration* deco {};
+			if(meta && meta->members.size() > i) {
+				deco = &meta->members[i];
+			}
 
 			// TODO PERF: remove allocation via dlg format here,
 			// use linearAllocator instead if needed
 			auto name = dlg::format("?{}", i);
-			if(!deco->alias.empty()) {
+			if(deco && !deco->alias.empty()) {
 				// TODO PERF: we copy here with new, terrible
 				name = deco->alias;
 			}
@@ -114,7 +112,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 			auto& mdst = dst.members[i];
 			mdst.type = buildType(compiler, memTypeID, alloc, deco);
 			mdst.name = copy(alloc, name);
-			mdst.offset = off;
+			mdst.offset = deco ? deco->offset : 0u;
 
 			if(!mdst.type) {
 				return nullptr;
@@ -218,33 +216,8 @@ std::string atomTypeName(const Type& type) {
 	return dlg::format("{}mat, {} rows, {} colums", t, type.vecsize, type.columns);
 }
 
-void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
-	ImGui::TableNextRow();
-	ImGui::TableNextColumn();
-
-	ImGui::AlignTextToFramePadding();
-	ImGui::Bullet();
-	ImGui::SameLine();
-	imGuiText("{} ", baseName);
-
-	if(ImGui::IsItemHovered()) {
-		ImGui::BeginTooltip();
-		imGuiText("{}", atomTypeName(type));
-
-		if(type.deco.flags & Decoration::Bits::rowMajor) {
-			imGuiText("Row major memory layout");
-		}
-		if(type.deco.flags & Decoration::Bits::colMajor) {
-			imGuiText("Column major memory layout");
-		}
-		if(type.deco.matrixStride) {
-			imGuiText("Matrix stride: {}", type.deco.matrixStride);
-		}
-
-		ImGui::EndTooltip();
-	}
-
-	ImGui::TableNextColumn();
+void displayAtomValue(const Type& type, ReadBuf data, u32 offset) {
+	dlg_assert(type.type != Type::typeStruct);
 
 	auto baseSize = type.width / 8;
 	auto rowStride = baseSize;
@@ -266,7 +239,7 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 		(rowMajor ? rowStride : colStride) = type.deco.matrixStride;
 	}
 
-	auto id = dlg::format("Value:{}:{}", baseName, &type);
+	auto id = dlg::format("Value:{}:{}", &type, offset);
 	auto flags = ImGuiTableFlags_SizingFixedFit; // | ImGuiTableFlags_BordersInner;
 	if(ImGui::BeginTable(id.c_str(), numColumns, flags)) {
 		for(auto r = 0u; r < numRows; ++r) {
@@ -304,6 +277,36 @@ void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offse
 
 		ImGui::EndTable();
 	}
+}
+
+void displayAtom(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
+	ImGui::TableNextRow();
+	ImGui::TableNextColumn();
+
+	ImGui::AlignTextToFramePadding();
+	ImGui::Bullet();
+	ImGui::SameLine();
+	imGuiText("{} ", baseName);
+
+	if(ImGui::IsItemHovered()) {
+		ImGui::BeginTooltip();
+		imGuiText("{}", atomTypeName(type));
+
+		if(type.deco.flags & Decoration::Bits::rowMajor) {
+			imGuiText("Row major memory layout");
+		}
+		if(type.deco.flags & Decoration::Bits::colMajor) {
+			imGuiText("Column major memory layout");
+		}
+		if(type.deco.matrixStride) {
+			imGuiText("Matrix stride: {}", type.deco.matrixStride);
+		}
+
+		ImGui::EndTooltip();
+	}
+
+	ImGui::TableNextColumn();
+	displayAtomValue(type, data, offset);
 }
 
 void displayStruct(const char* baseName, const Type& type, ReadBuf data, u32 offset) {
@@ -462,7 +465,15 @@ void displayTable(const char* name, const Type& type, ReadBuf data, u32 offset) 
 }
 
 unsigned size(const Type& t, BufferLayout bl) {
-	u32 arrayFac = std::accumulate(t.array.begin(), t.array.end(), 1u, std::multiplies{});
+	if(!t.array.empty()) {
+		u32 arrayFac = std::accumulate(t.array.begin(), t.array.end(), 1u, std::multiplies{});
+		auto arrayStride = t.deco.arrayStride;
+		if(bl == BufferLayout::std140) {
+			arrayStride = alignPOT(arrayStride, 16u);
+		}
+		return arrayFac * t.deco.arrayStride;
+	}
+
 	switch(t.type) {
 		case Type::typeBool:
 		case Type::typeFloat:
@@ -472,13 +483,19 @@ unsigned size(const Type& t, BufferLayout bl) {
 			if(bl == BufferLayout::std140 && vec == 3u) {
 				vec = 4u;
 			}
-			return arrayFac * vec * t.columns * t.width / 8u;
+			return vec * t.columns * t.width / 8u;
 		} case Type::typeStruct: {
 			auto end = 0u;
 			for(auto& member : t.members) {
 				end = std::max(end, member.offset + size(*member.type, bl));
 			}
-			return arrayFac * end;
+
+			// TODO: in endAlign?
+			// if(bl == BufferLayout::std140) {
+			// 	end = alignPOT(end, 16u);
+			// }
+
+			return end;
 		}
 	}
 
