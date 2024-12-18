@@ -273,10 +273,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		// be null e.g. if rasterizerDiscardEnable is true.
 		// We can't rely on comparison of pColorBlendState to null here,
 		// might be set to invalid pointer.
-		auto needsColorBlend =
+		pipe.needsColorBlend =
 			colorAttachmentCount != 0u &&
 			!pci.pRasterizationState->rasterizerDiscardEnable;
-		if(needsColorBlend) {
+		if(pipe.needsColorBlend) {
 			dlg_assert(pci.pColorBlendState);
 			pipe.blendAttachments = {
 				pci.pColorBlendState->pAttachments,

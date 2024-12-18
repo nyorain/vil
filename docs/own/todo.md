@@ -15,8 +15,6 @@ urgent, bugs:
 	- [ ] maybe show full image size on hover?
 	- [ ] also fix mip/layer selector that sometimes automatically resets itself
 		  (seen with slice 3D selector e.g. npt surfel lookup tex)
-- [ ] finish submissions in order, see CommandHookSubmission::finish
-      comment for accelStruct captures
 - [ ] immediately free HookedRecords that are not to be re-used in finish.
 
 - [ ] test more on laptop, intel gpu
@@ -59,9 +57,7 @@ urgent, bugs:
 	  (try to test with RDR2 again)
 
 new, workstack:
-- [ ] add mode where hooking is disabled. Commands can still be inspected
-	but, like, just statically.
-- [ ] add isStateCmd(const Command&) and remove remaining command dynamic casts
+- [ ] use isStateCmd(const Command&) to remove remaining command dynamic casts
 - [ ] handle imgui cursor-to-be-shown and clipboard
 	- [ ] make sure to pass it via interface
 	- [ ] with hooked overlay, we have to implement it ourselves
@@ -245,14 +241,14 @@ Freeze/selection changes:
 		  Might also happen when the window is minimized on some platforms?
 
 patch capture shader debugging:
-- [ ] add support for structs and arrays
-- [ ] improve filtering of variables so that it works well for glslang and slang
+- [x] add support for structs and arrays
+- [x] improve filtering of variables so that it works well for glslang and slang
 - [x] add support for dispatch thread ID selection
 	- [x] add branch to command patching
 	      branch based on root constant? or specialization constant?
 		  or just load information dynamically from the capture buffer?
 	- [x] re-add the selection widget (from debug emulation cpp)
-	- [ ] remove "allow outside of bounds exec"
+	- [x] remove "allow outside of bounds exec"
 	- [ ] instead allow a mode where just any thread that hits the point
 	      writes info (via atomics). Connected to idea below,
 		  implementation could be the same.
@@ -262,32 +258,42 @@ patch capture shader debugging:
       breakpoint was even hit. Clear it to 0 before recording dst command
 	- [x] when not hit: do not show variables in output, instead state
 	      that breakpoint is not hit.
-- [ ] add more general widget for selecting a stage of a pipe in the debugger
-- [ ] add support for vertex shader debugging
+- [x] add more general widget for selecting a stage of a pipe in the debugger
+- [x] add support for vertex shader debugging
 	- [x] branch based on vertexID
 	- [x] widget to select vertexID. See vertexViewer branch
-- [ ] additional shader debug selects
-	- [ ] Layer
-	- [ ] ViewIndex
-	- [ ] ViewportIndex
 - [ ] add support for pixel shader debugging
-	- [ ] branch based on pixel position
+	- [x] branch based on pixel position
 	- [ ] allow to select sample for msaa
-	- [ ] widget to select pixel position
+	- [x] widget to select pixel position
+	- [x] alternative positions: mouse cursor/last cliked mouse cursor
 	- [ ] allow to get there via a "debug this pixel" button
 	      in image viewer?
+- [ ] separate function arguments and local vars in UI
+- [ ] toggle via UI: also capture all local named SSA IDs
+- [ ] matrix decoration in captured output
+- [ ] show global variables in captured output? (entry point interface vars)
+	- [ ] also builtins? maybe in different tab/node?
 - [ ] ray tracing debugging
-	- [ ] branch in all shaders via LaunchID
+	- [x] branch in all shaders via LaunchID
 	- [ ] additionally: allow to branch via ahs/chs inputs
 	- [ ] hook shader tables
 	      create reverse mapping inside of pipeline
 		  then, when hooking the traceRayCommand, create own shader table
 		  on the fly where the hooked shaders are replaced?
-- [ ] separate function arguments and local vars in UI
-- [ ] toggle via UI: also capture all local named SSA IDs
-- [ ] matrix decoration in captured output
-- [ ] show global variables in captured output?
-	- [ ] also builtins? maybe in different tab/node?
+- [ ] fix CRASH potential in PatchJobData::pipe. Should not be
+      IntrusiveDerivedPtr, something else. Should keep it alive in
+	  a different way.
+- [ ] fix terrible pipeline-keepAlive ShaderPatch hack
+- [ ] additional shader debug selects (vertex/fragment)
+	- [ ] Layer
+	- [ ] ViewIndex
+	- [ ] ViewportIndex
+- [ ] improve patch compile time by passing in basePipelineHandle
+- [ ] improve patching speed: don't insert every instruction into spirv vector.
+      First gather everything (for every section etc) then do one
+	  patch-build pass.
+	  Current approach copies again and again, problematic for large shaders.
 
 spvm:
 - [x] Add OpSpecConstant* support

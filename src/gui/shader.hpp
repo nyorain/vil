@@ -31,7 +31,7 @@ struct ShaderDebugPatch {
 	// TODO: find proper solution
 	std::vector<vku::Pipeline> keepAlive;
 
-	void updateJobs(Device& dev);
+	bool updateJobs(Device& dev);
 	void reset(Device& dev);
 };
 
@@ -41,6 +41,7 @@ public:
 	~ShaderDebugger();
 	void init(Gui& gui);
 
+	void select(const Pipeline& pipe);
 	// Select takes its own copy of a spc::Compiler mainly
 	// because of the specialization constant problematic
 	void select(VkShaderStageFlagBits stage,
@@ -54,7 +55,7 @@ public:
 	Vec3ui numWorkgroups() const;
 	const auto& breakpoints() const { return breakpoints_; }
 	const auto& compiled() const { return compiled_; }
-	const auto& globalInvocationID() const { return globalInvocationID_; }
+	const auto& invocationID() const { return invocationID_; }
 	CommandSelection& selection() const;
 	void updateHooks(CommandHook&);
 
@@ -62,7 +63,7 @@ private:
 	// vertex stuff
 	struct DrawCmdInfo {
 		i32 vertexOffset; // for non-indexed this is 'firstVertex'
-		u32 numVerts; // for indexed, this is 'instanceCount'
+		u32 numVerts; // for indexed, this is 'indexCount'
 		u32 numInis;
 		u32 firstIni;
 		u32 firstIndex {}; // only for indexed draw
@@ -73,6 +74,15 @@ private:
 		bool indexed {};
 	};
 
+	enum class FragmentMode {
+		none,
+		cursor,
+		cursorClicked,
+		count,
+	};
+
+	const char* name(FragmentMode);
+
 	DrawInfo drawInfo() const;
 	DrawCmdInfo drawCmdInfo(u32 cmd = 0u) const;
 
@@ -81,6 +91,7 @@ private:
 	void drawInputsTab();
 	void drawInputsCompute();
 	void drawInputsVertex();
+	void drawInputsFragment();
 
 	std::string_view fileContents(u32 fileID);
 
@@ -110,11 +121,8 @@ private:
 	std::vector<Location> breakpoints_;
 	std::vector<u32> sourceFilesIDs_;
 	u32 currentFile_ {};
-
-	Vec3ui globalInvocationID_ {0u, 0u, 0u};
-	u32 commandID_ {0u};
-	u32 instanceID_ {0u};
-	u32 vertexID_ {0u}; // might also be instance id
+	Vec3ui invocationID_ {0u, 0u, 0u};
+	FragmentMode fragmentMode_ {};
 
 	bool livePatch_ {true};
 	ShaderDebugPatch patch_ {};
