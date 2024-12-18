@@ -44,11 +44,6 @@ void ShaderDebugger::init(Gui& gui) {
 	textedit_.SetShowWhitespaces(false);
 	textedit_.SetTabSize(4);
 	textedit_.SetReadOnly(true);
-
-	// emu_ = std::make_unique<ShaderEmulation>(*this);
-	if(emu_) {
-		emu_->init();
-	}
 }
 
 void ShaderDebugger::select(VkShaderStageFlagBits stage,
@@ -78,10 +73,6 @@ void ShaderDebugger::select(VkShaderStageFlagBits stage,
 		currentFile_ = sourceFilesIDs_[0];
 		textedit_.SetText(fileContent(currentFile_));
 	}
-
-	if(emu_) {
-		emu_->select();
-	}
 }
 
 void ShaderDebugger::unselect() {
@@ -96,10 +87,6 @@ void ShaderDebugger::unselect() {
 	commandID_ = {};
 	vertexID_ = {};
 	instanceID_ = {};
-
-	if(emu_) {
-		emu_->unselect();
-	}
 }
 
 void ShaderDebugger::draw() {
@@ -174,35 +161,31 @@ void ShaderDebugger::draw() {
 
 	// variable view
 	if(ImGui::BeginChild("Views")) {
-		if(emu_) {
-			emu_->drawControlTabs();
-		} else {
-			if(ImGui::BeginTabBar("Tabs")) {
-				if(ImGui::BeginTabItem("Inputs")) {
-					drawInputsTab();
-					ImGui::EndTabItem();
-				}
-				if(ImGui::BeginTabItem("Variables")) {
-					auto state = selection().completedHookState().get();
-					if(state && state->shaderCapture.size && !patch_.current.captures.empty()) {
-						Type base {};
-						base.type = Type::typeStruct;
-						base.members = patch_.current.captures;
-						auto data = state->shaderCapture.data();
-						auto io = read<Vec4u32>(data);
-
-						imGuiText("hitcount for {}, {}, {}: {}",
-							io[0], io[1], io[2], io[3]);
-
-						if(io[3] >= 1u) {
-							displayTable("vars", base, data);
-						}
-					}
-					ImGui::EndTabItem();
-				}
-
-				ImGui::EndTabBar();
+		if(ImGui::BeginTabBar("Tabs")) {
+			if(ImGui::BeginTabItem("Inputs")) {
+				drawInputsTab();
+				ImGui::EndTabItem();
 			}
+			if(ImGui::BeginTabItem("Variables")) {
+				auto state = selection().completedHookState().get();
+				if(state && state->shaderCapture.size && !patch_.current.captures.empty()) {
+					Type base {};
+					base.type = Type::typeStruct;
+					base.members = patch_.current.captures;
+					auto data = state->shaderCapture.data();
+					auto io = read<Vec4u32>(data);
+
+					imGuiText("hitcount for {}, {}, {}: {}",
+						io[0], io[1], io[2], io[3]);
+
+					if(io[3] >= 1u) {
+						displayTable("vars", base, data);
+					}
+				}
+				ImGui::EndTabItem();
+			}
+
+			ImGui::EndTabBar();
 		}
 	}
 
@@ -375,7 +358,41 @@ CommandSelection& ShaderDebugger::selection() const {
 }
 
 void ShaderDebugger::drawInputsTab() {
-	// TODO: decide depending on shader type
+	if(stage_ == VK_SHADER_STAGE_COMPUTE_BIT) {
+		drawInputsCompute();
+	} else if(stage_ == VK_SHADER_STAGE_VERTEX_BIT) {
+		drawInputsVertex();
+	} else {
+		dlg_error("Unsupported stage: {}", stage_);
+		imGuiText("Error: unsupported stage selected");
+	}
+}
+
+void ShaderDebugger::drawInputsVertex() {
+	auto [numCmds, indexed] = drawInfo();
+	auto sliderFlags = ImGuiSliderFlags_AlwaysClamp;
+	if(numCmds > 1) {
+		auto v = int(commandID_);
+		ImGui::DragInt("Command", &v, 1.f, 0, numCmds - 1, "%d", sliderFlags);
+		commandID_ = v;
+	}
+
+	auto drawCmd = drawCmdInfo(commandID_);
+	if(drawCmd.firstIni > 1) {
+		auto v = int(instanceID_);
+		ImGui::DragInt("Instance", &v, 1.f, drawCmd.firstIni,
+			drawCmd.firstIni + drawCmd.numInis - 1, "%d", sliderFlags);
+		instanceID_ = v;
+	}
+
+	auto v = int(vertexID_);
+	ImGui::DragInt("ID", &v, 1.f, 0, drawCmd.numVerts - 1, "%d", sliderFlags);
+	// TODO: show popup explaining this is the vertex ID, i.e. for indexed
+	// drawing the index to be read.
+	vertexID_ = v;
+}
+
+void ShaderDebugger::drawInputsCompute() {
 	using nytl::vec::cw::operators::operator*;
 
 	auto wgs = workgroupSize();
