@@ -150,10 +150,15 @@ struct ShaderPatch {
 	u32 funcInstrOffset {};
 
 	u32 typeBool = u32(-1);
+	u32 typeFloat = u32(-1);
+	u32 typeFloat4 = u32(-1);
 	u32 typeUint = u32(-1);
 	u32 typeUint2 = u32(-1);
 	u32 typeUint3 = u32(-1);
 	u32 typeBool3 = u32(-1);
+
+	u32 const0 = u32(-1);
+	u32 const1 = u32(-1);
 
 	LinAllocator alloc {};
 
@@ -166,8 +171,11 @@ struct ShaderPatch {
 
 	FuncInstrBuilder instr(spv::Op op);
 
-	// template<typename... Args>
-	// FuncInstrBuilder instr(spv::Op op, Args... args);
+	template<typename... Args>
+	void instr(spv::Op op, Args... args);
+
+	template<typename... Args>
+	u32 genOp(spv::Op op, u32 type, Args... args);
 };
 
 struct FuncInstrBuilder : InstrBuilder {
@@ -208,11 +216,18 @@ FuncInstrBuilder ShaderPatch::instr(spv::Op op) {
 	return {op, *this};
 }
 
-// template<typename... Args>
-// FuncInstrBuilder ShaderPatch::instr(spv::Op op, Args... args) {
-// 	auto builder = instr(op);
-// 	(builder.push(args), ...);
-// }
+template<typename... Args>
+u32 ShaderPatch::genOp(spv::Op op, u32 type, Args... args) {
+	auto id = ++freeID;
+	instr(op, type, id, args...);
+	return id;
+}
+
+template<typename... Args>
+void ShaderPatch::instr(spv::Op op, Args... args) {
+	auto builder = instr(op);
+	(builder.push(args), ...);
+}
 
 u32 declareBufferStruct(ShaderPatch& patch, u32 captureStruct) {
 	const u32 inputStruct = ++patch.freeID;
@@ -251,11 +266,14 @@ u32 declareBufferStruct(ShaderPatch& patch, u32 captureStruct) {
 	return bufferStruct;
 }
 
-void findDeclareScalarTypes(ShaderPatch& patch) {
+void findDeclareBaseTypes(ShaderPatch& patch) {
+	// spir-v does not allow duplicate declarations of non-aggregate types
 	patch.typeBool = u32(-1);
+	patch.typeFloat = u32(-1);
 	patch.typeUint = u32(-1);
 	patch.typeUint2 = u32(-1);
 	patch.typeUint3 = u32(-1);
+	patch.typeFloat4 = u32(-1);
 
 	for(auto& id : patch.compiler.get_ir().ids) {
 		if(id.get_type() != spc::TypeType) {
@@ -267,6 +285,7 @@ void findDeclareScalarTypes(ShaderPatch& patch) {
 			continue;
 		}
 
+		// scalar
 		if(type.basetype == spc::SPIRType::UInt &&
 				type.columns == 1u && type.vecsize == 1u &&
 				type.width == 32u) {
@@ -274,27 +293,51 @@ void findDeclareScalarTypes(ShaderPatch& patch) {
 			patch.typeUint = id.get_id();
 		}
 
+		if(type.basetype == spc::SPIRType::Boolean &&
+				type.columns == 1u && type.vecsize == 1u) {
+			dlg_assert(patch.typeBool == u32(-1));
+			patch.typeBool = id.get_id();
+		}
+
+		if(type.basetype == spc::SPIRType::Float &&
+				type.columns == 1u && type.vecsize == 1u &&
+				type.width == 32u) {
+			dlg_assert(patch.typeFloat == u32(-1));
+			patch.typeFloat = id.get_id();
+		}
+
+		// vector
+		if(type.basetype == spc::SPIRType::Float &&
+				type.columns == 1u && type.vecsize == 4u &&
+				type.width == 32u) {
+			dlg_assert(patch.typeFloat4 == u32(-1));
+			patch.typeFloat4 = id.get_id();
+		}
 		if(type.basetype == spc::SPIRType::UInt &&
 				type.columns == 1u && type.vecsize == 2u &&
 				type.width == 32u) {
 			dlg_assert(patch.typeUint2 == u32(-1));
 			patch.typeUint2 = id.get_id();
 		}
-
 		if(type.basetype == spc::SPIRType::UInt &&
 				type.columns == 1u && type.vecsize == 3u &&
 				type.width == 32u) {
 			dlg_assert(patch.typeUint3 == u32(-1));
 			patch.typeUint3 = id.get_id();
 		}
-
 		if(type.basetype == spc::SPIRType::Boolean &&
-				type.columns == 1u && type.vecsize == 1u) {
-			dlg_assert(patch.typeBool == u32(-1));
-			patch.typeBool = id.get_id();
+				type.columns == 1u && type.vecsize == 3u &&
+				type.width == 32u) {
+			dlg_assert(patch.typeBool3 == u32(-1));
+			patch.typeBool3 = id.get_id();
 		}
 	}
 
+	// scalars
+	if(patch.typeBool == u32(-1)) {
+		patch.typeBool = ++patch.freeID;
+		patch.decl<spv::OpTypeBool>().push(patch.typeBool);
+	}
 	if(patch.typeUint == u32(-1)) {
 		patch.typeUint = ++patch.freeID;
 		patch.decl<spv::OpTypeInt>()
@@ -302,6 +345,21 @@ void findDeclareScalarTypes(ShaderPatch& patch) {
 			.push(32)
 			.push(0);
 	}
+	if(patch.typeFloat == u32(-1)) {
+		patch.typeFloat = ++patch.freeID;
+		patch.decl<spv::OpTypeFloat>()
+			.push(patch.typeFloat)
+			.push(32);
+	}
+	// vectors
+	if(patch.typeBool3 == u32(-1)) {
+		patch.typeBool3 = ++patch.freeID;
+		patch.decl<spv::OpTypeVector>()
+			.push(patch.typeBool3)
+			.push(patch.typeBool)
+			.push(3);
+	}
+
 	if(patch.typeUint2 == u32(-1)) {
 		patch.typeUint2 = ++patch.freeID;
 		patch.decl<spv::OpTypeVector>()
@@ -316,16 +374,20 @@ void findDeclareScalarTypes(ShaderPatch& patch) {
 			.push(patch.typeUint)
 			.push(3);
 	}
-	if(patch.typeBool == u32(-1)) {
-		patch.typeBool = ++patch.freeID;
-		patch.decl<spv::OpTypeBool>().push(patch.typeBool);
+	if(patch.typeFloat4 == u32(-1)) {
+		patch.typeFloat4 = ++patch.freeID;
+		patch.decl<spv::OpTypeVector>()
+			.push(patch.typeFloat4)
+			.push(patch.typeFloat)
+			.push(4);
 	}
+}
 
-	patch.typeBool3 = ++patch.freeID;
-	patch.decl<spv::OpTypeVector>()
-		.push(patch.typeBool3)
-		.push(patch.typeBool)
-		.push(3);
+void declareConstants(ShaderPatch& patch) {
+	patch.const0 = ++patch.freeID;
+	patch.const1 = ++patch.freeID;
+	patch.decl<spv::OpConstant>().push(patch.typeUint).push(patch.const0).push(0);
+	patch.decl<spv::OpConstant>().push(patch.typeUint).push(patch.const1).push(1);
 }
 
 struct VariableCapture {
@@ -391,6 +453,116 @@ void fixDecorateCaptureType(ShaderPatch& patch, Type& type) {
 	}
 }
 
+u32 findBuiltin(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint, spv::BuiltIn builtinType) {
+	auto& compiler = patch.compiler;
+
+	u32 ret = u32(-1);
+	for(auto& builtin : compiler.get_shader_resources().builtin_inputs) {
+		if(builtin.builtin == builtinType) {
+			auto varID = builtin.resource.id;
+			if(contains(entryPoint.interface_variables, varID)) {
+				ret = varID;
+				break;
+			}
+		}
+	}
+
+	return ret;
+}
+
+u32 findOrDeclareBuiltinInput(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint, spv::BuiltIn builtinType, u32 type) {
+	u32 id = findBuiltin(patch, entryPoint, builtinType);
+	if(id != u32(-1)) {
+		return id;
+	}
+
+	auto pointerType = ++patch.freeID;
+
+	patch.decl<spv::OpTypePointer>()
+		.push(pointerType)
+		.push(spv::StorageClassInput)
+		.push(type);
+
+	auto varID = ++patch.freeID;
+	patch.decl<spv::OpVariable>()
+		.push(pointerType)
+		.push(varID)
+		.push(spv::StorageClassInput);
+
+	return varID;
+}
+
+u32 generateInvocationCompute(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint) {
+	u32 globalInvocationVar = findOrDeclareBuiltinInput(patch, entryPoint,
+		spv::BuiltInGlobalInvocationId, patch.typeUint3);
+	return patch.genOp(spv::OpLoad, patch.typeUint3, globalInvocationVar);
+}
+
+u32 generateInvocationVertex(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint) {
+	u32 drawIndexVar = findOrDeclareBuiltinInput(patch, entryPoint,
+		spv::BuiltInDrawIndex, patch.typeUint);
+	u32 instanceIndexVar = findOrDeclareBuiltinInput(patch, entryPoint,
+		spv::BuiltInInstanceIndex, patch.typeUint);
+	u32 vertexIndexVar = findOrDeclareBuiltinInput(patch, entryPoint,
+		spv::BuiltInVertexIndex, patch.typeUint);
+
+	auto drawIndex = patch.genOp(spv::OpLoad, patch.typeUint, drawIndexVar);
+	auto instanceIndex = patch.genOp(spv::OpLoad, patch.typeUint, instanceIndexVar);
+	auto vertexIndex = patch.genOp(spv::OpLoad, patch.typeUint, vertexIndexVar);
+	auto composited = patch.genOp(spv::OpCompositeConstruct, patch.typeUint3,
+		drawIndex, instanceIndex, vertexIndex);
+
+	return composited;
+}
+
+u32 generateInvocationFragment(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint) {
+	u32 positionVar = findOrDeclareBuiltinInput(patch, entryPoint,
+		spv::BuiltInFragCoord, patch.typeFloat4);
+
+	u32 fx = patch.genOp(spv::OpCompositeExtract, patch.typeFloat, positionVar, 0);
+	u32 fy = patch.genOp(spv::OpCompositeExtract, patch.typeFloat, positionVar, 0);
+	u32 ux = patch.genOp(spv::OpConvertFToU, patch.typeUint, fx);
+	u32 uy = patch.genOp(spv::OpConvertFToU, patch.typeUint, fy);
+	u32 composite = patch.genOp(spv::OpCompositeConstruct, patch.typeUint3,
+		ux, uy, patch.const0);
+
+	return composite;
+}
+
+u32 generateInvocationRaytrace(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint) {
+	u32 launchIDVar = findOrDeclareBuiltinInput(patch, entryPoint,
+		spv::BuiltInLaunchIdKHR, patch.typeFloat4);
+	return patch.genOp(spv::OpLoad, patch.typeUint3, launchIDVar);
+}
+
+u32 generateCurrentInvocation(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint, VkShaderStageFlagBits stage) {
+	switch(stage) {
+		case VK_SHADER_STAGE_VERTEX_BIT:
+			return generateInvocationVertex(patch, entryPoint);
+		case VK_SHADER_STAGE_FRAGMENT_BIT:
+			return generateInvocationFragment(patch, entryPoint);
+		case VK_SHADER_STAGE_COMPUTE_BIT:
+			return generateInvocationCompute(patch, entryPoint);
+		case VK_SHADER_STAGE_RAYGEN_BIT_KHR:
+		case VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:
+		case VK_SHADER_STAGE_ANY_HIT_BIT_KHR:
+		case VK_SHADER_STAGE_MISS_BIT_KHR:
+		case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
+		case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
+			return generateInvocationCompute(patch, entryPoint);
+		default:
+			dlg_error("unsupported shader stage");
+			return {};
+	}
+}
+
 PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line,
 		u64 captureAddress, const std::string& entryPointName,
 		VkShaderStageFlagBits stage) {
@@ -443,7 +615,8 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		addressing = u32(spv::AddressingModelPhysicalStorageBuffer64);
 	}
 
-	findDeclareScalarTypes(patch);
+	findDeclareBaseTypes(patch);
+	declareConstants(patch);
 
 	// add extension
 	patch.decl<spv::OpExtension>().push("SPV_KHR_physical_storage_buffer");
@@ -579,32 +752,6 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		.push(addressConstHigh);
 
 	// find builtin GlobalInvocationID
-	u32 globalInvocationVar = u32(-1);
-	for(auto& builtin : compiler.get_shader_resources().builtin_inputs) {
-		if(builtin.builtin == spv::BuiltInGlobalInvocationId) {
-			auto varID = builtin.resource.id;
-			if(contains(entryPoint.interface_variables, varID)) {
-				globalInvocationVar = varID;
-				break;
-			}
-		}
-	}
-
-	if(globalInvocationVar == u32(-1)) {
-		auto globalInvocationType = ++freeID;
-
-		patch.decl<spv::OpTypePointer>()
-			.push(globalInvocationType)
-			.push(spv::StorageClassInput)
-			.push(patch.typeUint3);
-
-		globalInvocationVar = ++freeID;
-		patch.decl<spv::OpVariable>()
-			.push(globalInvocationType)
-			.push(globalInvocationVar)
-			.push(spv::StorageClassInput);
-	}
-
 	//  - construct struct C via OpCompositeConstruct
 	patch.funcInstrOffset = lb->offset;
 	auto srcStruct = ++freeID;
@@ -629,12 +776,8 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		}
 	}
 
-	auto const0 = ++freeID;
-	auto const1 = ++freeID;
 	auto constScopeDevice = ++freeID;
 	auto constMemorySemanticsBuf = ++freeID;
-	patch.decl<spv::OpConstant>().push(patch.typeUint).push(const0).push(0);
-	patch.decl<spv::OpConstant>().push(patch.typeUint).push(const1).push(1);
 	patch.decl<spv::OpConstant>().
 		push(patch.typeUint).
 		push(constScopeDevice).
@@ -644,12 +787,7 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		push(constMemorySemanticsBuf).
 		push(u32(spv::MemorySemanticsMaskNone | spv::MemorySemanticsUniformMemoryMask));
 
-	// - at dst: OpBitcast B from A to type TP
-	auto bufferPointer = ++freeID;
-	patch.instr(spv::OpBitcast)
-		.push(bufferPointerType)
-		.push(bufferPointer)
-		.push(addressUint2);
+	auto bufferPointer = patch.genOp(spv::OpBitcast, bufferPointerType, addressUint2);
 
 	// access chains
 	auto inputThreadAccessType = ++freeID;
@@ -663,8 +801,8 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		.push(inputThreadAccessType)
 		.push(inputThreadAccess)
 		.push(bufferPointer)
-		.push(const0)
-		.push(const0);
+		.push(patch.const0)
+		.push(patch.const0);
 
 	auto ioCounterAccessType = ++freeID;
 	patch.decl<spv::OpTypePointer>()
@@ -677,49 +815,27 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		.push(ioCounterAccessType)
 		.push(ioCounterAccess)
 		.push(bufferPointer)
-		.push(const0)
-		.push(const1);
+		.push(patch.const0)
+		.push(patch.const1);
 
 	// ==========
-	auto loadedCurrentThreadID = ++freeID;
-	auto loadedWriteThreadID = ++freeID;
-	auto vecEqualID = ++freeID;
-	auto allEqualID = ++freeID;
-	auto blockWriteID = ++freeID;
-	auto blockRestID = ++freeID;
+	auto blockWrite = ++freeID;
+	auto blockRest = ++freeID;
 
-	patch.instr(spv::OpLoad)
-		.push(patch.typeUint3)
-		.push(loadedCurrentThreadID)
-		.push(globalInvocationVar);
-	patch.instr(spv::OpLoad)
-		.push(patch.typeUint3)
-		.push(loadedWriteThreadID)
-		.push(inputThreadAccess)
-		.push(spv::MemoryAccessAlignedMask)
-		.push(16u);
+	auto writingInvocation = patch.genOp(spv::OpLoad, patch.typeUint3,
+		inputThreadAccess, spv::MemoryAccessAlignedMask, 16u);
+	auto currentInvocation = generateCurrentInvocation(patch,
+		entryPoint, stage);
+	auto vecEqual = patch.genOp(spv::OpIEqual, patch.typeBool3,
+		writingInvocation, currentInvocation);
+	auto allEqual = patch.genOp(spv::OpAll, patch.typeBool, vecEqual);
 
-	patch.instr(spv::OpIEqual)
-		.push(patch.typeBool3)
-		.push(vecEqualID)
-		.push(loadedCurrentThreadID)
-		.push(loadedWriteThreadID);
-	patch.instr(spv::OpAll)
-		.push(patch.typeBool)
-		.push(allEqualID)
-		.push(vecEqualID);
-
-	patch.instr(spv::OpSelectionMerge)
-		.push(blockRestID)
-		.push(spv::SelectionControlMaskNone);
-	patch.instr(spv::OpBranchConditional)
-		.push(allEqualID)
-		.push(blockWriteID)
-		.push(blockRestID);
+	patch.instr(spv::OpSelectionMerge, blockRest, spv::SelectionControlMaskNone);
+	patch.instr(spv::OpBranchConditional, allEqual, blockWrite, blockRest);
 
 	// block for writing output
 	{
-		patch.instr(spv::OpLabel).push(blockWriteID);
+		patch.instr(spv::OpLabel, blockWrite);
 
 		auto captureAccessType = ++freeID;
 		patch.decl<spv::OpTypePointer>()
@@ -732,7 +848,7 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 			.push(captureAccessType)
 			.push(captureAccess)
 			.push(bufferPointer)
-			.push(const1);
+			.push(patch.const1);
 
 		// atomic counter
 		auto oldCounter = ++freeID;
@@ -750,30 +866,34 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 			.push(patch.typeBool)
 			.push(counterEqual)
 			.push(oldCounter)
-			.push(const0);
+			.push(patch.const0);
 
-		auto blockOutputID = ++freeID;
+		auto blockNoWrite = ++freeID; // spirv does not allow re-using merge block
+		auto blockOutput = ++freeID;
 		patch.instr(spv::OpSelectionMerge)
-			.push(blockRestID)
+			.push(blockNoWrite)
 			.push(spv::SelectionControlMaskNone);
 		patch.instr(spv::OpBranchConditional)
 			.push(counterEqual)
-			.push(blockOutputID)
-			.push(blockRestID);
+			.push(blockOutput)
+			.push(blockNoWrite);
 
 		{
-			patch.instr(spv::OpLabel).push(blockOutputID);
+			patch.instr(spv::OpLabel).push(blockOutput);
 			patch.instr(spv::OpStore)
 				.push(captureAccess)
 				.push(srcStruct)
 				.push(spv::MemoryAccessAlignedMask)
 				.push(16u);
-			patch.instr(spv::OpBranch).push(blockRestID);
+			patch.instr(spv::OpBranch, blockNoWrite);
 		}
+
+		patch.instr(spv::OpLabel, blockNoWrite);
+		patch.instr(spv::OpBranch, blockRest);
 	}
 
 	// rest of the current block
-	patch.instr(spv::OpLabel).push(blockRestID);
+	patch.instr(spv::OpLabel, blockRest);
 
 	// update ID bound
 	copy[3] = freeID + 1;

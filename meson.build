@@ -80,7 +80,6 @@ args = cc.get_supported_arguments([
 
 	# for clang
 	'-Wno-missing-braces',
-	'-Wno-newline-eof', # needed for spvm TODO re-enable and fix!
 	'-Wno-nonnull-compare', # seems like clang bug
 
 	# gcc bug for optimized builds
@@ -188,20 +187,6 @@ elif get_option('throw-on-assert')
 	layer_args += '-DVIL_THROW_ON_ASSERT'
 endif
 
-# spvm
-spvm_src = files(
-	'src/spvm/context.c',
-	'src/spvm/result.c',
-	'src/spvm/state.c',
-	'src/spvm/types.c',
-	'src/spvm/value.c',
-	'src/spvm/image.c',
-	'src/spvm/program.c',
-	'src/spvm/opcode_setup.c',
-	'src/spvm/opcode_execute.c',
-	'src/spvm/ext/GLSL450.c',
-)
-
 src = files(
 	# own meta sources & util
 	'src/layer.cpp',
@@ -259,7 +244,6 @@ src = files(
 	'src/gui/bufferViewer.cpp',
 	'src/gui/imageViewer.cpp',
 	'src/gui/shader.cpp',
-	'src/gui/shaderEmulation.cpp',
 	'src/gui/blur.cpp',
 	'src/gui/commandSelection.cpp',
 	# debug wip
@@ -527,28 +511,6 @@ if not with_win32 or not with_tracy
 	# pch = 'src/pch.hpp'
 endif
 
-lib_spvm = static_library(
-	'spvm',
-	spvm_src,
-	gnu_symbol_visibility: 'hidden',
-	include_directories: inc,
-	c_args: args + cc.get_supported_arguments([
-		'-Wno-unused-parameter',
-		'-Wno-unused-variable',
-		'/wd4100', # unreferenced formal parameter.
-		'/wd4189', # unused local variable
-		'/wd4457', # declaration hides function parameter
-		# TODO: fix the ones below?
-		'-Wno-sign-compare',
-		# new clang warnings
-		'-Wno-strict-prototypes',
-		'-Wno-unused-but-set-parameter',
-		'-Wno-unused-but-set-variable',
-		'/wd4018', # signed/unsigned mismatch
-		'/wd4090', # different 'const' qualifier on free/realloc calls
-	]),
-)
-
 # building as separate lib as ugly workaround for gcc pch warning issue
 # See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=64117
 lib_imgui = static_library(
@@ -577,7 +539,7 @@ vil_layer = shared_library(
 	gnu_symbol_visibility: 'hidden',
 	dependencies: deps,
 	include_directories: inc,
-	link_whole: [lib_spvm, lib_imgui],
+	link_whole: [lib_imgui],
 	cpp_args: args + layer_args,
 	c_args: args,
 	link_args: cc.get_supported_link_arguments(link_args),

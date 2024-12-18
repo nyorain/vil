@@ -264,10 +264,15 @@ patch capture shader debugging:
 	      that breakpoint is not hit.
 - [ ] add more general widget for selecting a stage of a pipe in the debugger
 - [ ] add support for vertex shader debugging
-	- [ ] branch based on vertexID
-	- [ ] widget to select vertexID. See vertexViewer branch
+	- [x] branch based on vertexID
+	- [x] widget to select vertexID. See vertexViewer branch
+- [ ] additional shader debug selects
+	- [ ] Layer
+	- [ ] ViewIndex
+	- [ ] ViewportIndex
 - [ ] add support for pixel shader debugging
 	- [ ] branch based on pixel position
+	- [ ] allow to select sample for msaa
 	- [ ] widget to select pixel position
 	- [ ] allow to get there via a "debug this pixel" button
 	      in image viewer?
@@ -280,65 +285,9 @@ patch capture shader debugging:
 		  on the fly where the hooked shaders are replaced?
 - [ ] separate function arguments and local vars in UI
 - [ ] toggle via UI: also capture all local named SSA IDs
-
-(emulate) shader debugger, low prio:
-- [x] cleanup/fix freezing as described in node 2235
-- [x] implement breakpoints
-	- [x] issue: we currently check for equality for breakpoints.
-	      breakpoints for lines that don't have code associated with them
-		  in spirv won't trigger. Need to do a more proper check
-	- [ ] clean up breakpoint handling
-- [ ] factor out retrieving descriptor from varID+indicies as used
-      in load/store/arrayLength callbacks. Code duplication atm.
-- [ ] set spec constants for shader module in gui shader debugger.
-      Test with shader from tkn/iro
-- [ ] detect unsupported features/capabilities (such as subgroup ops)
-      and display "unsupported feature: X" error message in gui
-- [ ] test, fix, cleanup handling of multiple files. Broken
-      with breakpoints and their visualization.
-- [ ] add UI for selecting workgroup/invocation
-- [x] return workgroup size from shader in loadBuiltin
-	- [ ] TODO: test
-- [x] add support for loading push constants
-	- [ ] TODO: test. Can we write unit tests for this? Should be possible
-- [ ] support vertex shaders
-	- [ ] correctly wire up the vertex input. And add ui for selecting
-	      instance/vertex id to debug.
-- [ ] support fragment shaders
-	- [ ] figure out how to wire up input. Sketch: allow to select the
-	      pixel, then select the primitive in the current draw call
-		  covering the pixel (if more than one; or always use the last
-		  one if it makes sense via vulkan drawing order guarantees?).
-		  We then interpolate the input we got from xfb and use that
-		  as input to the fragment shader.
-	- geometry and tesselation shaders can remain unsupported for now.
-- [ ] support ray tracing pipelines
-	- [ ] as with compute shaders, we want to select the dispatch index
-	- [ ] add support in spvm. Not sure about callback interface, probably
-	      just pass the parameters from TraceRay to the application callback
-		  and then let the application return the hit?
-		  Hm, no, it's probably better to let the application then handle
-		  everything (i.e. invoking all the required intersection/hit/miss shaders)
-		  and just return/modify the ray payload, right?
-	- [ ] aside from debugging the shaders (and the acceleration structure
-		  hitting process), allow to visualize the rays (we can probably
-		  just do a very small number of rays) in the acceleration
-		  structure.
-	- [ ] if we are serious about it, we need to really build our own
-	      host-side acceleration structures
-- [ ] add proper stack trace (ui tab)
-	- [ ] allow to jump to positions in stack trace
-- [ ] allow to view all sources in ui
-- [ ] figure out where to put the "Debug shader" buttons
-- [ ] add support for stores. And make sure reading variables later
-      on return the correct values. Might need changes in spvm, the
-	  was_loaded optimization is incorrect in that case.
-	  Maybe set was_loaded to false when the OpVariable was stored to?
-- [ ] clean up implementation. How we gather/display variables
-      Make sure the variable display tree nodes can opened while the
-	  state is being recreated (with "refresh" set. Should probably just
-	  use the name, not its pointer as well. Figure out why we did
-	  it for buffmt. arrays?)
+- [ ] matrix decoration in captured output
+- [ ] show global variables in captured output?
+	- [ ] also builtins? maybe in different tab/node?
 
 spvm:
 - [x] Add OpSpecConstant* support

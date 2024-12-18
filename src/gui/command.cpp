@@ -322,10 +322,6 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 					|| stateCmd->boundPipe() != lastStateCmd->boundPipe()) {
 				selectCommandView = true;
 				shaderDebugger_.unselect();
-			} else if(isLocalCapture && sel.completedHookState()) {
-				if(shaderDebugger_.emulation()) {
-					shaderDebugger_.emulation()->initVarMap();
-				}
 			}
 
 			break;
