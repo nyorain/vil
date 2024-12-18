@@ -1,3 +1,4 @@
+- [x] look into annoying lmm.cpp:138 match assert
 - [x] first serialization support
 	- [x] create/save handles
 	- [x] remove serialize.cpp

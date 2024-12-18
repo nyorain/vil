@@ -135,8 +135,7 @@ LazyMatrixMarch::Result LazyMatrixMarch::run() {
 
 	auto [i, j] = bestRes_;
 	auto& lastMatch = match(i, j);
-	dlg_assert(bestMatch_ >= lastMatch.best);
-	dlg_assert(bestMatch_ - lastMatch.best <= 1.f);
+	dlg_assert(std::abs(bestMatch_ - (lastMatch.best + lastMatch.eval)) < 0.0001);
 	if(lastMatch.eval > 0.f) {
 		res.matches[outID - 1] = {i, j, lastMatch.eval};
 		--outID;
