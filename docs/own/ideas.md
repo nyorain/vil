@@ -1,6 +1,9 @@
 Moved from todo.md. Mostly ideas for experiments that might not even
 be possible or useful in the end.
 
+- add mode where hooking is disabled. Commands can still be inspected
+	but, like, just statically.
+
 For shader capture debugging:
 - can we support capturing images/samples/buffers/RayTracingAccelStructs
       and other types? Allowed in quite some high-level languages.
@@ -28,7 +31,7 @@ For shader capture debugging:
   don't hook anything. Instead just insert our own command buffers
   (before and after) into the submission stream where we write out timestamps
 
-- (low prio) add also full batch (e.g. vkQueueSubmit/vkQueueBindSparse) timings? 
+- (low prio) add also full batch (e.g. vkQueueSubmit/vkQueueBindSparse) timings?
   Would require custom cb recording on our side
 
 - When clicking on a flag, extension name or something, link to vulkan api spec

@@ -750,7 +750,7 @@ spc::Compiler& specializeSpirv(ShaderModule& mod,
 	return compiled;
 }
 
-std::unique_ptr<spc::Compiler> copySpecializeSpirv(ShaderModule& mod,
+std::unique_ptr<spc::Compiler> copySpecializeSpirv(const ShaderModule& mod,
 		const ShaderSpecialization& specialization, const std::string& entryPoint,
 		u32 spvExecutionModel) {
 	dlg_assert(mod.compiled);

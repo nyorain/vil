@@ -472,6 +472,12 @@ struct StateCmdBase : Command {
 	void visit(CommandVisitor& v) const override { doVisit(v, *this); }
 };
 
+inline bool isStateCmd(const Command& cmd) {
+	return cmd.category() == CommandCategory::dispatch ||
+		cmd.category() == CommandCategory::draw ||
+		cmd.category() == CommandCategory::traceRays;
+}
+
 struct DrawCmdBase : StateCmdBase {
 	const GraphicsState* state {};
 	PushConstantData pushConstants;

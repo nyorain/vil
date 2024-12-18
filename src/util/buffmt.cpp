@@ -61,15 +61,13 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		if(memberDeco->decoration_flags.get(spv::DecorationMatrixStride)) {
 			dst.deco.matrixStride = memberDeco->matrix_stride;
 		}
-		// if(memberDeco->decoration_flags.get(spv::DecorationOffset)) {
-		// 	dst.deco.offset = memberDeco->offset;
-		// }
 	}
 
 	// handle array
 	if(!stype->array.empty()) {
-		dlg_assert(meta && meta->decoration.decoration_flags.get(spv::DecorationArrayStride));
-		dst.deco.arrayStride = meta->decoration.array_stride;
+		if(meta && meta->decoration.decoration_flags.get(spv::DecorationArrayStride)) {
+			dst.deco.arrayStride = meta->decoration.array_stride;
+		}
 
 		dlg_assert(stype->array.size() == stype->array_size_literal.size());
 		dst.array = alloc.alloc<u32>(stype->array.size());
@@ -82,11 +80,14 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 			}
 		}
 
-		// apparently this is needed? not entirely sure why
+		dst.deco.arrayTypeID = typeID;
+
 		dlg_assert(stype->parent_type);
 		typeID = stype->parent_type;
 		stype = &compiler.get_type(typeID);
 		meta = compiler.get_ir().find_meta(typeID);
+
+		dst.deco.typeID = typeID;
 	}
 
 	if(stype->basetype == spc::SPIRType::Struct) {
@@ -95,14 +96,15 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 		for(auto i = 0u; i < stype->member_types.size(); ++i) {
 			auto memTypeID = stype->member_types[i];
 
-			dlg_assert(meta && meta->members.size() > i);
-			auto deco = &meta->members[i];
-			auto off = deco->offset;
+			const spc::Meta::Decoration* deco {};
+			if(meta && meta->members.size() > i) {
+				deco = &meta->members[i];
+			}
 
 			// TODO PERF: remove allocation via dlg format here,
 			// use linearAllocator instead if needed
 			auto name = dlg::format("?{}", i);
-			if(!deco->alias.empty()) {
+			if(deco && !deco->alias.empty()) {
 				// TODO PERF: we copy here with new, terrible
 				name = deco->alias;
 			}
@@ -110,7 +112,7 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 			auto& mdst = dst.members[i];
 			mdst.type = buildType(compiler, memTypeID, alloc, deco);
 			mdst.name = copy(alloc, name);
-			mdst.offset = off;
+			mdst.offset = deco ? deco->offset : 0u;
 
 			if(!mdst.type) {
 				return nullptr;

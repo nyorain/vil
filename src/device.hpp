@@ -98,6 +98,7 @@ struct Device {
 	bool storage8Bit {};
 	bool storage16Bit {};
 	bool shaderStorageImageWriteWithoutFormat {};
+	bool shaderDrawParameters {};
 	bool extDeviceFault {}; // whether EXT_device_fault was enabled
 
 	// Only valid when EXT_device_address_binding_report enabled.

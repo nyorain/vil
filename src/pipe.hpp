@@ -92,6 +92,7 @@ struct GraphicsPipeline : Pipeline {
 	bool hasTessellation : 1;
 	bool hasDepthStencil : 1;
 	bool hasMeshShader : 1;
+	bool needsColorBlend : 1;
 
 	IntrusivePtr<XfbPatchDesc> xfbPatch; // valid when we injected xfb
 

@@ -464,8 +464,9 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 				info.ops.useCapturePipe);
 		} else if(cmd.category() == CommandCategory::traceRays) {
-			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-				info.ops.useCapturePipe);
+			dlg_warn("TODO: implement capturePipe for RayTracing via shaderTable patching");
+			// dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+			// 	info.ops.useCapturePipe);
 		} else {
 			dlg_error("Unexpected hooked command used with capturePipe");
 		}
@@ -1732,11 +1733,14 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 
 	if(info.ops.useCapturePipe) {
 		if(bcmd.category() == CommandCategory::draw) {
-			dlg_error("rebindGraphicsState not implemented");
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+				static_cast<const DrawCmdBase&>(bcmd).boundPipe()->handle);
 		} else if(bcmd.category() == CommandCategory::dispatch) {
-			info.rebindComputeState = true;
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				static_cast<const DispatchCmdBase&>(bcmd).boundPipe()->handle);
 		} else if(bcmd.category() == CommandCategory::traceRays) {
-			dlg_error("rebindRayTraceState not implemented");
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+				static_cast<const TraceRaysCmdBase&>(bcmd).boundPipe()->handle);
 		} else {
 			dlg_error("Unexpected hooked command used with capturePipe");
 		}

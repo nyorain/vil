@@ -1,6 +1,7 @@
 #include "command/alloc.hpp"
 #include <util/patch.hpp>
 #include <ds.hpp>
+#include <rp.hpp>
 #include <pipe.hpp>
 #include <device.hpp>
 #include <commandHook/hook.hpp>
@@ -143,6 +144,7 @@ struct FuncInstrBuilder;
 struct ShaderPatch {
 	constexpr static auto bufLayout = vil::BufferLayout::std430;
 
+	const Device& dev;
 	const spc::Compiler& compiler;
 	std::vector<u32> copy {};
 	spc::ParsedIR::SectionOffsets offsets {};
@@ -161,6 +163,7 @@ struct ShaderPatch {
 	u32 const1 = u32(-1);
 
 	LinAllocator alloc {};
+	std::vector<u32> addInterface {};
 
 	template<spv::Op Op>
 	DeclInstrBuilder decl() {
@@ -395,7 +398,7 @@ struct VariableCapture {
 	u32 typeID;
 	Type* parsed;
 
-	bool isFuncParameter {};
+	bool isPointer {};
 	u32 offset {};
 };
 
@@ -437,13 +440,24 @@ void fixDecorateCaptureType(ShaderPatch& patch, Type& type) {
 	}
 
 	if(!type.array.empty()) {
-		auto* meta = ir.find_meta(type.deco.typeID);
+		dlg_assert(type.deco.arrayTypeID != 0u);
+		auto* meta = ir.find_meta(type.deco.arrayTypeID);
 		if(!meta || !meta->decoration.decoration_flags.get(spv::DecorationArrayStride)) {
-			type.deco.arrayStride = size(type, patch.bufLayout);
+			dlg_assert(type.deco.arrayStride == 0u);
+
+			auto tarray = type.array;
+			type.array = {};
+			type.deco.arrayStride = align(
+				size(type, patch.bufLayout),
+				align(type, patch.bufLayout));
+			type.array = tarray;
+
 			patch.decl<spv::OpDecorate>()
-				.push(type.deco.typeID)
+				.push(type.deco.arrayTypeID)
 				.push(spv::DecorationArrayStride)
 				.push(type.deco.arrayStride);
+		} else {
+			dlg_assert(type.deco.arrayStride);
 		}
 	}
 
@@ -471,11 +485,14 @@ u32 findBuiltin(ShaderPatch& patch,
 	return ret;
 }
 
-u32 findOrDeclareBuiltinInput(ShaderPatch& patch,
+std::pair<u32, u32> findOrDeclareBuiltinInput(ShaderPatch& patch,
 		const spc::SPIREntryPoint& entryPoint, spv::BuiltIn builtinType, u32 type) {
 	u32 id = findBuiltin(patch, entryPoint, builtinType);
 	if(id != u32(-1)) {
-		return id;
+		auto ptype = patch.compiler.get_ir().get<spc::SPIRVariable>(id).basetype;
+		auto& typeInfo = patch.compiler.get_ir().get<spc::SPIRType>(ptype);
+		dlg_assert(typeInfo.pointer);
+		return {id, u32(typeInfo.parent_type)};
 	}
 
 	auto pointerType = ++patch.freeID;
@@ -491,28 +508,59 @@ u32 findOrDeclareBuiltinInput(ShaderPatch& patch,
 		.push(varID)
 		.push(spv::StorageClassInput);
 
-	return varID;
+	patch.decl<spv::OpDecorate>()
+		.push(varID)
+		.push(spv::DecorationBuiltIn)
+		.push(builtinType);
+
+	patch.addInterface.push_back(varID);
+
+	return {varID, type};
+}
+
+u32 loadBuiltinInput(ShaderPatch& patch,
+		const spc::SPIREntryPoint& entryPoint, spv::BuiltIn builtinType, u32 dstType) {
+	auto [varID, varType] = findOrDeclareBuiltinInput(patch, entryPoint, builtinType, dstType);
+	auto loaded = patch.genOp(spv::OpLoad, varType, varID);
+
+	if(dstType == varType) {
+		return loaded;
+	}
+
+	// NOTE: only valid for signed conversation when value is unsigned anyways
+	return patch.genOp(spv::OpBitcast, dstType, loaded);
 }
 
 u32 generateInvocationCompute(ShaderPatch& patch,
 		const spc::SPIREntryPoint& entryPoint) {
-	u32 globalInvocationVar = findOrDeclareBuiltinInput(patch, entryPoint,
+	return loadBuiltinInput(patch, entryPoint,
 		spv::BuiltInGlobalInvocationId, patch.typeUint3);
-	return patch.genOp(spv::OpLoad, patch.typeUint3, globalInvocationVar);
 }
 
 u32 generateInvocationVertex(ShaderPatch& patch,
 		const spc::SPIREntryPoint& entryPoint) {
-	u32 drawIndexVar = findOrDeclareBuiltinInput(patch, entryPoint,
-		spv::BuiltInDrawIndex, patch.typeUint);
-	u32 instanceIndexVar = findOrDeclareBuiltinInput(patch, entryPoint,
+	auto drawIndex = patch.const0;
+	if(patch.dev.shaderDrawParameters) {
+		drawIndex = loadBuiltinInput(patch, entryPoint,
+			spv::BuiltInDrawIndex, patch.typeUint);
+
+		auto& ir = patch.compiler.get_ir();
+
+		auto extName = "SPV_KHR_shader_draw_parameters";
+		if(!contains(ir.declared_extensions, extName)) {
+			patch.decl<spv::OpExtension>().push(extName);
+		}
+
+		auto capName = spv::CapabilityDrawParameters;
+		if(!contains(ir.declared_capabilities, capName)) {
+			patch.decl<spv::OpCapability>() .push(capName);
+		}
+	}
+	auto instanceIndex = loadBuiltinInput(patch, entryPoint,
 		spv::BuiltInInstanceIndex, patch.typeUint);
-	u32 vertexIndexVar = findOrDeclareBuiltinInput(patch, entryPoint,
+	auto vertexIndex = loadBuiltinInput(patch, entryPoint,
 		spv::BuiltInVertexIndex, patch.typeUint);
 
-	auto drawIndex = patch.genOp(spv::OpLoad, patch.typeUint, drawIndexVar);
-	auto instanceIndex = patch.genOp(spv::OpLoad, patch.typeUint, instanceIndexVar);
-	auto vertexIndex = patch.genOp(spv::OpLoad, patch.typeUint, vertexIndexVar);
 	auto composited = patch.genOp(spv::OpCompositeConstruct, patch.typeUint3,
 		drawIndex, instanceIndex, vertexIndex);
 
@@ -521,11 +569,15 @@ u32 generateInvocationVertex(ShaderPatch& patch,
 
 u32 generateInvocationFragment(ShaderPatch& patch,
 		const spc::SPIREntryPoint& entryPoint) {
-	u32 positionVar = findOrDeclareBuiltinInput(patch, entryPoint,
+	auto [posVar, posType] = findOrDeclareBuiltinInput(patch, entryPoint,
 		spv::BuiltInFragCoord, patch.typeFloat4);
+	dlg_assert(posType == patch.typeFloat4);
+	(void) posType;
 
-	u32 fx = patch.genOp(spv::OpCompositeExtract, patch.typeFloat, positionVar, 0);
-	u32 fy = patch.genOp(spv::OpCompositeExtract, patch.typeFloat, positionVar, 0);
+	auto pos = patch.genOp(spv::OpLoad, patch.typeFloat4, posVar);
+
+	u32 fx = patch.genOp(spv::OpCompositeExtract, patch.typeFloat, pos, 0);
+	u32 fy = patch.genOp(spv::OpCompositeExtract, patch.typeFloat, pos, 1);
 	u32 ux = patch.genOp(spv::OpConvertFToU, patch.typeUint, fx);
 	u32 uy = patch.genOp(spv::OpConvertFToU, patch.typeUint, fy);
 	u32 composite = patch.genOp(spv::OpCompositeConstruct, patch.typeUint3,
@@ -536,9 +588,8 @@ u32 generateInvocationFragment(ShaderPatch& patch,
 
 u32 generateInvocationRaytrace(ShaderPatch& patch,
 		const spc::SPIREntryPoint& entryPoint) {
-	u32 launchIDVar = findOrDeclareBuiltinInput(patch, entryPoint,
-		spv::BuiltInLaunchIdKHR, patch.typeFloat4);
-	return patch.genOp(spv::OpLoad, patch.typeUint3, launchIDVar);
+	return loadBuiltinInput(patch, entryPoint,
+		spv::BuiltInLaunchIdKHR, patch.typeUint3);
 }
 
 u32 generateCurrentInvocation(ShaderPatch& patch,
@@ -563,11 +614,12 @@ u32 generateCurrentInvocation(ShaderPatch& patch,
 	}
 }
 
-PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line,
+PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
+		u32 file, u32 line,
 		u64 captureAddress, const std::string& entryPointName,
 		VkShaderStageFlagBits stage) {
 	auto& ir = compiler.get_ir();
-	ShaderPatch patch{compiler};
+	ShaderPatch patch{dev, compiler};
 
 	// get entry point
 	auto executionModel = executionModelFromStage(stage);
@@ -618,12 +670,16 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 	findDeclareBaseTypes(patch);
 	declareConstants(patch);
 
-	// add extension
-	patch.decl<spv::OpExtension>().push("SPV_KHR_physical_storage_buffer");
+	// allow us to use physical storage buffer pointers
+	auto extName = "SPV_KHR_physical_storage_buffer";
+	if(!contains(ir.declared_extensions, extName)) {
+		patch.decl<spv::OpExtension>().push(extName);
+	}
 
-	// add capability
-	patch.decl<spv::OpCapability>()
-		.push(spv::CapabilityPhysicalStorageBufferAddresses);
+	auto capName = spv::CapabilityPhysicalStorageBufferAddresses;
+	if(!contains(ir.declared_capabilities, capName)) {
+		patch.decl<spv::OpCapability>() .push(capName);
+	}
 
 	// parse local variables
 	vil::Type baseType;
@@ -635,7 +691,7 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 	auto offset = 0u;
 	std::vector<VariableCapture> captures;
 
-	auto addCapture = [&](u32 varID, u32 typeID, bool funcParam, const std::string& name) {
+	auto addCapture = [&](u32 varID, u32 typeID, bool isPointer, const std::string& name) {
 		auto* parsedType = buildType(patch.compiler, typeID, patch.alloc);
 		fixDecorateCaptureType(patch, *parsedType);
 
@@ -646,7 +702,7 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		capture.typeID = typeID;
 		capture.varID = varID;
 		capture.offset = offset;
-		capture.isFuncParameter = funcParam;
+		capture.isPointer = isPointer;
 
 		auto& member = members.emplace_back();
 		member.type = capture.parsed;
@@ -682,7 +738,7 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		dlg_assert(srcType.pointer);
 		dlg_assert(srcType.pointer_depth == 1u);
 
-		addCapture(varID, srcType.parent_type, false, name);
+		addCapture(varID, srcType.parent_type, true, name);
 	}
 
 	// capture function arguments
@@ -697,7 +753,15 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 			continue;
 		}
 
-		addCapture(param.id, param.type, true, name);
+		auto typeID = param.type;
+		bool isPointer = false;
+		if(srcType.pointer) {
+			dlg_assert(srcType.pointer_depth == 1u);
+			typeID = srcType.parent_type;
+			isPointer = true;
+		}
+
+		addCapture(param.id, typeID, isPointer, name);
 	}
 
 	// declare that struct type in spirv [patch]
@@ -762,14 +826,14 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 		for(auto [i, capture] : enumerate(captures)) {
 			u32 memID {};
 
-			if(capture.isFuncParameter) {
-				memID = capture.varID;
-			} else {
+			if(capture.isPointer) {
 				memID = ++freeID;
 				patch.instr(spv::OpLoad)
 					.push(capture.typeID)
 					.push(memID)
 					.push(capture.varID);
+			} else {
+				memID = capture.varID;
 			}
 
 			builder.push(memID);
@@ -895,6 +959,18 @@ PatchResult patchShaderCapture(const spc::Compiler& compiler, u32 file, u32 line
 	// rest of the current block
 	patch.instr(spv::OpLabel, blockRest);
 
+	// update interface of entry point
+	auto eOffset = patch.offsets.named.entry_points - ir.section_offsets.named.entry_points;
+	auto& instrHead = patch.copy[entryPoint.offset + eOffset];
+	auto numWords = (instrHead >> 16u) & 0xFFFFu;
+	numWords += u32(patch.addInterface.size());
+	dlg_assert(numWords < (1u << 16u));
+	instrHead = (numWords << 16u) | (instrHead & 0xFFFFu);
+
+	auto ioffset = entryPoint.interface_offset + eOffset;
+	patch.copy.insert(patch.copy.begin() + ioffset,
+		patch.addInterface.begin(), patch.addInterface.end());
+
 	// update ID bound
 	copy[3] = freeID + 1;
 
@@ -930,11 +1006,85 @@ vku::Pipeline createPatchCopy(const ComputePipeline& src, VkShaderStageFlagBits 
 
 vku::Pipeline createPatchCopy(const GraphicsPipeline& src, VkShaderStageFlagBits stage,
 		span<const u32> patchedSpv) {
-	(void) src;
-	(void) stage;
-	(void) patchedSpv;
-	dlg_error("unimplemented");
-	return {};
+	auto& dev = *src.dev;
+
+	VkGraphicsPipelineCreateInfo gpi {};
+	gpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	gpi.layout = src.layout->handle;
+	gpi.pRasterizationState = &src.rasterizationState;
+
+	if(!src.hasMeshShader) {
+		if(!src.dynamicState.count(VK_DYNAMIC_STATE_VERTEX_INPUT_EXT)) {
+			gpi.pVertexInputState = &src.vertexInputState;
+		}
+		gpi.pInputAssemblyState = &src.inputAssemblyState;
+	}
+
+	if(!src.rasterizationState.rasterizerDiscardEnable) {
+		gpi.pMultisampleState = &src.multisampleState;
+		gpi.pViewportState = &src.viewportState;
+
+		if(src.hasDepthStencil) {
+			gpi.pDepthStencilState = &src.depthStencilState;
+		}
+	}
+
+	if(src.hasTessellation) {
+		gpi.pTessellationState = &src.tessellationState;
+	}
+
+	if(src.needsColorBlend) {
+		gpi.pColorBlendState = &src.colorBlendState;
+	}
+
+	std::vector<VkDynamicState> dynStates {
+		src.dynamicState.begin(), src.dynamicState.end()};
+	VkPipelineDynamicStateCreateInfo dynState {};
+	dynState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynState.dynamicStateCount = dynStates.size();
+	dynState.pDynamicStates = dynStates.data();
+	gpi.pDynamicState = &dynState;
+
+	std::vector<VkPipelineShaderStageCreateInfo> stages;
+	std::vector<VkSpecializationInfo> specInfos;
+	std::vector<vku::ShaderModule> mods;
+
+	specInfos.reserve(src.stages.size());
+
+	for(auto& srcStage : src.stages) {
+		// Create shader module
+		// We even do it for non-patched shaders, as the original modules
+		// might have been destroyed.
+		span<const u32> spirv;
+
+		if(srcStage.stage == stage) {
+			spirv = patchedSpv;
+		} else {
+			// normally, we use a mutex to access 'compiled'. But here
+			// we only access the immutable spirv so it is not needed.
+			spirv = srcStage.spirv->compiled->get_ir().spirv;
+		}
+
+		auto& mod = mods.emplace_back(dev, spirv);
+
+		// add stage
+
+		auto& dstStage = stages.emplace_back();
+		dstStage = {};
+		dstStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		dstStage.stage = srcStage.stage;
+		dstStage.pName = srcStage.entryPoint.c_str();
+		dstStage.module = mod.vkHandle();
+		dstStage.pSpecializationInfo =
+			&specInfos.emplace_back(srcStage.specialization.vkInfo());
+	}
+
+	gpi.stageCount = u32(stages.size());
+	gpi.pStages = stages.data();
+	gpi.renderPass = src.renderPass->handle; // TODO: can this be destroyed?
+	gpi.subpass = src.subpass;
+
+	return vku::Pipeline(dev, gpi);
 }
 
 vku::Pipeline createPatchCopy(const RayTracingPipeline& src, VkShaderStageFlagBits stage,
@@ -961,8 +1111,8 @@ vku::Pipeline createPatchCopy(const Pipeline& src, VkShaderStageFlagBits stage,
 }
 
 PatchJobResult patchJob(PatchJobData& data) {
-	auto patchRes = patchShaderCapture(*data.compiler, data.file, data.line,
-		data.captureAddress, data.entryPoint, data.stage);
+	auto patchRes = patchShaderCapture(*data.pipe->dev, *data.compiler,
+		data.file, data.line, data.captureAddress, data.entryPoint, data.stage);
 	if(patchRes.copy.empty()) {
 		PatchJobResult res {};
 		res.error = "Shader patching failed";
@@ -989,31 +1139,14 @@ PatchJobResult patchJob(PatchJobData& data) {
 #endif // VIL_OUTPUT_PATCHED_SPIRV
 
 	auto pipe = createPatchCopy(*data.pipe, data.stage, patchRes.copy);
-	auto newName = "patched:" + pipeName;
-	nameHandle(pipe, newName);
-
-	CommandHookUpdate hookUpdate;
-	hookUpdate.invalidate = true;
-	// hookUpdate.newTarget = std::move(data.hookTarget);
-	auto& ops = hookUpdate.newOps.emplace();
-	ops.useCapturePipe = pipe.vkHandle();
-	ops.capturePipeInput = data.captureInput;
-
-	auto& dev = *data.pipe->dev;
-
-	{
-		std::lock_guard lock(dev.mutex);
-		if(data.state == PatchJobState::canceled) {
-			PatchJobResult res {};
-			res.error = "Canceled";
-			return res;
-		}
-
-		data.state = PatchJobState::installing;
+	if(!pipe.vkHandle()) {
+		PatchJobResult res {};
+		res.error = "Creating pipeline failed";
+		return res;
 	}
 
-	auto& hook = *dev.commandHook;
-	hook.updateHook(std::move(hookUpdate));
+	auto newName = "patched:" + pipeName;
+	nameHandle(pipe, newName);
 
 	PatchJobResult res {};
 	res.pipe = std::move(pipe);
