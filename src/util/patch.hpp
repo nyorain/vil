@@ -32,6 +32,7 @@ struct PatchJobData {
 	IntrusiveDerivedPtr<Pipeline> pipe;
 	const spc::Compiler* compiler;
 	VkShaderStageFlagBits stage;
+	u32 stageID;
 	std::string entryPoint;
 	u32 file;
 	u32 line;
@@ -42,8 +43,8 @@ struct PatchJobData {
 struct PatchJobResult {
 	LinAllocator alloc;
 	span<Type::Member> captures;
-	vku::Pipeline pipe;
 	std::string error;
+	IntrusivePtr<ShaderCaptureHook> hook;
 };
 
 PatchJobResult patchJob(PatchJobData& data);

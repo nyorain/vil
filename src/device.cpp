@@ -207,6 +207,10 @@ bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
 	return false;
 }
 
+bool hasExt(span<const char*> exts, const char* name) {
+	return contains(exts, std::string_view(name));
+}
+
 #ifdef VIL_WITH_SWA
 std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		std::vector<const char*>& devExts,
@@ -591,9 +595,6 @@ VkResult doCreateDevice(
 	VkPhysicalDevice8BitStorageFeatures storage8Features {};
 	VkPhysicalDeviceShaderDrawParametersFeatures drawParamsFeatures {};
 	if(fpPhdevFeatures2 && fpPhdevProps2) {
-		dlg_assert(fpPhdevFeatures2);
-		dlg_assert(fpPhdevProps2);
-
 		// query features support
 		VkPhysicalDeviceFeatures2 features2 {};
 		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -605,37 +606,31 @@ VkResult doCreateDevice(
 
 		if(hasTransformFeedbackApi) {
 			tfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
-			tfFeatures.pNext = features2.pNext;
-			features2.pNext = &tfFeatures;
+			addChain(features2, tfFeatures);
 		}
 
 		if(has8BitStorageApi) {
 			storage8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
-			storage8Features.pNext = features2.pNext;
-			features2.pNext = &storage8Features;
+			addChain(features2, storage8Features);
 		}
 
 		if(has16BitStorageApi) {
 			storage16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
-			storage16Features.pNext = features2.pNext;
-			features2.pNext = &storage16Features;
+			addChain(features2, storage16Features);
 		}
 
 		if(hasDrawParamsApi) {
 			drawParamsFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
-			drawParamsFeatures.pNext = features2.pNext;
-			features2.pNext = &drawParamsFeatures;
+			addChain(features2, drawParamsFeatures);
 		}
 
 		if(hasDeviceFaultApi) {
 			dfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
-			dfFeatures.pNext = features2.pNext;
-			features2.pNext = &dfFeatures;
+			addChain(features2, dfFeatures);
 
 			if(hasAddressBindingReportAPI) {
 				abrFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT;
-				abrFeatures.pNext = features2.pNext;
-				features2.pNext = &abrFeatures;
+				addChain(features2, abrFeatures);
 			}
 		}
 
@@ -650,14 +645,13 @@ VkResult doCreateDevice(
 			} else if(inTS) {
 				inTS->timelineSemaphore = true;
 			} else {
-				tsFeatures.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &tsFeatures;
+				addChain(nci, tsFeatures);
 			}
 
 			// we might need to enable the extension
 			if(!ini.vulkan12 || phdevProps.apiVersion < VK_API_VERSION_1_2) {
 				dlg_assert(hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));
-				if(!contains(newExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
+				if(!hasExt(newExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
 					newExts.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
 				}
 			}
@@ -671,12 +665,11 @@ VkResult doCreateDevice(
 				inXFB->transformFeedback = true;
 			} else {
 				tfFeatures.geometryStreams = false;
-				tfFeatures.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &tfFeatures;
+				addChain(nci, tfFeatures);
 			}
 
 			// also need to enable extension
-			if(!contains(newExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) {
+			if(!hasExt(newExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) {
 				newExts.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
 			}
 		}
@@ -689,8 +682,7 @@ VkResult doCreateDevice(
 			} else if(inVulkan12) {
 				inVulkan12->storageBuffer8BitAccess = true;
 			} else {
-				storage8Features.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &storage8Features;
+				addChain(nci, storage8Features);
 			}
 		}
 
@@ -702,8 +694,7 @@ VkResult doCreateDevice(
 			} else if(inVulkan11) {
 				inVulkan11->storageBuffer16BitAccess = true;
 			} else {
-				storage16Features.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &storage16Features;
+				addChain(nci, storage16Features);
 			}
 		}
 
@@ -715,8 +706,7 @@ VkResult doCreateDevice(
 			} else if(inVulkan11) {
 				inVulkan11->shaderDrawParameters = true;
 			} else {
-				drawParamsFeatures.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &drawParamsFeatures;
+				addChain(nci, drawParamsFeatures);
 			}
 		}
 
@@ -727,12 +717,11 @@ VkResult doCreateDevice(
 			if(inDF) {
 				inDF->deviceFault = true;
 			} else {
-				dfFeatures.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &dfFeatures;
+				addChain(nci, dfFeatures);
 			}
 
 			// also need to enable extension
-			if(!contains(newExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+			if(!hasExt(newExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
 				newExts.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 			}
 
@@ -745,27 +734,22 @@ VkResult doCreateDevice(
 				if(inABR) {
 					inABR->reportAddressBinding = true;
 				} else {
-					abrFeatures.pNext = const_cast<void*>(nci.pNext);
-					nci.pNext = &abrFeatures;
+					addChain(nci, abrFeatures);
 				}
 
 				// also need to enable extension
-				if(!contains(newExts, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)) {
+				if(!hasExt(newExts, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)) {
 					newExts.push_back(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
 				}
 			}
 		}
 
-		// TODO: could find out props, e.g. for transform feedback
-		// VkPhysicalDeviceProperties2 phProps2 {};
-		// phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-		// fpPhdevProps2(phdev, &phProps2);
 	}
 
 	// = Useful extensions =
 	auto checkEnable = [&](const char* name) {
 		if(hasExt(supportedExts, name)) {
-			if(!contains(newExts, name)) {
+			if(!contains(newExts, std::string_view(name))) {
 				newExts.push_back(name);
 			}
 
@@ -777,8 +761,19 @@ VkResult doCreateDevice(
 
 	checkEnable(VK_AMD_SHADER_INFO_EXTENSION_NAME);
 
+	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps {};
 	if(fpPhdevProps2) {
 		checkEnable(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+
+		VkPhysicalDeviceProperties2 phProps2 {};
+		phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+
+		if(hasExt(newExts, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+			rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+			addChain(phProps2, rtProps);
+		}
+
+		fpPhdevProps2(phdev, &phProps2);
 	}
 
 	// == Create Device! ==
@@ -808,6 +803,7 @@ VkResult doCreateDevice(
 	dev.phdev = phdev;
 	dev.handle = devHandle;
 	dev.props = phdevProps;
+	dev.rtProps = rtProps;
 
 	dev.timelineSemaphores = hasTimelineSemaphores;
 	dev.transformFeedback = hasTransformFeedback;

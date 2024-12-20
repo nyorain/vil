@@ -5,15 +5,15 @@
 
 layout(local_size_x = 64) in;
 
-layout(buffer_reference, std430, buffer_reference_align = 16) buffer Src {
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Src {
 	uint vals[];
 };
 
-layout(buffer_reference, std430, buffer_reference_align = 16) buffer Dst {
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Dst {
 	uint vals[];
 };
 
-layout(buffer_reference, std430, buffer_reference_align = 16) buffer Mappings {
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer Mappings {
 	uint vals[];
 };
 
@@ -22,8 +22,9 @@ layout(push_constant) uniform PCR {
 	Dst dst;
 	Mappings mappings;
 	uint stride;
-	uint size;
+	uint handleSize;
 	uint count;
+	uint groupCount;
 } pcr;
 
 void main() {
@@ -34,17 +35,24 @@ void main() {
 
 	uint currEntry = 0u;
 	uint offset = id * pcr.stride;
-	uint mappingStride = 2 * pcr.size;
-	for(uint i = 0u; i < pcr.size; ++i) {
+	uint mappingStride = 2 * pcr.handleSize;
+	for(uint i = 0u; i < pcr.handleSize; ++i) {
 		uint src = pcr.src.vals[offset + i];
-		while(src != pcr.mappings.vals[currEntry * mappingStride + i]) {
+		while(src > pcr.mappings.vals[currEntry * mappingStride + i] &&
+				currEntry < pcr.groupCount) {
 			++currEntry;
 		}
 	}
 
-	for(uint i = 0u; i < pcr.size; ++i) {
-		uint src = pcr.mappings.vals[pcr.size + currEntry * mappingStride + i];
+	for(uint i = 0u; i < pcr.handleSize; ++i) {
+		uint mapOff = currEntry * mappingStride + i + pcr.handleSize;
+		uint src = pcr.mappings.vals[mapOff];
 		pcr.dst.vals[offset + i] = src;
+	}
+
+	// copy remaining data, might contain constants or stuff
+	for(uint i = pcr.handleSize; i < pcr.stride; ++i) {
+		pcr.dst.vals[offset + i] = pcr.src.vals[offset + i];
 	}
 }
 
