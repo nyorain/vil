@@ -28,9 +28,6 @@ struct ShaderDebugPatch {
 	std::vector<PendingJob> jobs;
 	PatchJobResult current;
 
-	// TODO: find proper solution
-	std::vector<vku::Pipeline> keepAlive;
-
 	bool updateJobs(Device& dev);
 	void reset(Device& dev);
 };
@@ -42,11 +39,6 @@ public:
 	void init(Gui& gui);
 
 	void select(const Pipeline& pipe);
-	// Select takes its own copy of a spc::Compiler mainly
-	// because of the specialization constant problematic
-	void select(VkShaderStageFlagBits stage,
-		std::unique_ptr<spc::Compiler> compiled,
-		std::string entryPoint);
 	void unselect();
 	void draw();
 
@@ -81,6 +73,12 @@ private:
 		count,
 	};
 
+	// Select takes its own copy of a spc::Compiler mainly
+	// because of the specialization constant problematic
+	void select(VkShaderStageFlagBits stage, u32 stageID,
+		std::unique_ptr<spc::Compiler> compiled,
+		std::string entryPoint);
+
 	const char* name(FragmentMode);
 
 	DrawInfo drawInfo() const;
@@ -90,6 +88,7 @@ private:
 	const std::string& fileContent(u32 fileID) const;
 	void drawInputsTab();
 	void drawInputsCompute();
+	void drawInputsRaytrace();
 	void drawInputsVertex();
 	void drawInputsFragment();
 
@@ -117,6 +116,7 @@ private:
 	std::unique_ptr<spc::Compiler> compiled_ {};
 	std::string entryPoint_ {};
 	VkShaderStageFlagBits stage_ {};
+	u32 stageID_ {};
 
 	std::vector<Location> breakpoints_;
 	std::vector<u32> sourceFilesIDs_;

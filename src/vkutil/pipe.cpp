@@ -388,7 +388,8 @@ std::unique_ptr<PipeCreator> PipeCreator::compute(DescriptorInfo dsInfo,
 }
 
 void DynamicPipe::init(Device& dev, span<const Stage> inStages,
-		std::unique_ptr<PipeCreator> creator, std::string name) {
+		std::unique_ptr<PipeCreator> creator, std::string name,
+		bool forceDynDs) {
 	dlg_assert(!inStages.empty());
 	std::vector<VkPipelineShaderStageCreateInfo> stages;
 	std::vector<ReflectStage> reflStages;
@@ -409,9 +410,8 @@ void DynamicPipe::init(Device& dev, span<const Stage> inStages,
 		refl.stage = dst.stage;
 	}
 
-	constexpr auto forceOneDynamicDs = true;
 	pipeLayout_ = reflectPipeState(dev, reflStages, *creator,
-		dynDsLayouts_, name, forceOneDynamicDs);
+		dynDsLayouts_, name, forceDynDs);
 
 	ZoneScopedN("vkCreatePipeline");
 	pipe_ = creator->create(dev, pipeLayout_.vkHandle(), {}, stages);

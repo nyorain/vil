@@ -51,6 +51,8 @@ urgent, bugs:
 	- [ ] a lot of descriptor code was probably never really tested for array bindings.
 	      Make sure everything works.
 
+- [ ] revisit timestamp queries. Shouldn't the first query be done
+      *before* the hooked cmd and not after??
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
       Increased it temporarily but should probably just roll own block sub-allocator
@@ -58,6 +60,9 @@ urgent, bugs:
 
 new, workstack:
 - [ ] use isStateCmd(const Command&) to remove remaining command dynamic casts
+- [ ] generate structSize in util/util.cpp, it is incomplete at the moment.
+      Also problematic that we cannot know the size of some platform-specific
+	  structs. Important for chain copying!
 - [ ] handle imgui cursor-to-be-shown and clipboard
 	- [ ] make sure to pass it via interface
 	- [ ] with hooked overlay, we have to implement it ourselves
@@ -269,6 +274,14 @@ patch capture shader debugging:
 	- [x] alternative positions: mouse cursor/last cliked mouse cursor
 	- [ ] allow to get there via a "debug this pixel" button
 	      in image viewer?
+- [ ] indicate in UI when patch job is running.
+      For raytracing pipelines, it can be quite a while.
+- [ ] improve patching speed: don't insert every instruction into spirv vector.
+      First gather everything (for every section etc) then do one
+	  patch-build pass.
+	  Current approach copies again and again, problematic for large shaders.
+- [ ] potential CRASH: we assume the pipeLayout still has a valid handle.
+	  this might not be the case. We could recreate it, though.
 - [ ] separate function arguments and local vars in UI
 - [ ] toggle via UI: also capture all local named SSA IDs
 - [ ] matrix decoration in captured output
@@ -277,23 +290,24 @@ patch capture shader debugging:
 - [ ] ray tracing debugging
 	- [x] branch in all shaders via LaunchID
 	- [ ] additionally: allow to branch via ahs/chs inputs
-	- [ ] hook shader tables
+	- [x] hook shader tables
 	      create reverse mapping inside of pipeline
 		  then, when hooking the traceRayCommand, create own shader table
 		  on the fly where the hooked shaders are replaced?
 - [ ] fix CRASH potential in PatchJobData::pipe. Should not be
       IntrusiveDerivedPtr, something else. Should keep it alive in
 	  a different way.
-- [ ] fix terrible pipeline-keepAlive ShaderPatch hack
+- [x] fix terrible pipeline-keepAlive ShaderPatch hack
 - [ ] additional shader debug selects (vertex/fragment)
 	- [ ] Layer
 	- [ ] ViewIndex
 	- [ ] ViewportIndex
 - [ ] improve patch compile time by passing in basePipelineHandle
-- [ ] improve patching speed: don't insert every instruction into spirv vector.
-      First gather everything (for every section etc) then do one
-	  patch-build pass.
-	  Current approach copies again and again, problematic for large shaders.
+      Difficult: we have to gurantee that the handle stays alive while
+	  the pipeline is created.
+	- [ ] maybe create the inner handle as an intrusive ptr as well?
+	      can we really always use a basePipelineHandle tho?
+		  What if related resources got destroyed?
 
 spvm:
 - [x] Add OpSpecConstant* support

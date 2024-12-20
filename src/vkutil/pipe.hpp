@@ -160,7 +160,7 @@ public:
 
 public:
 	void init(Device& dev, span<const Stage>, std::unique_ptr<PipeCreator>,
-		std::string name);
+		std::string name, bool forceDynDs = true);
 
 	const PipelineLayout& pipeLayout() const {
 		dlg_assert(pipeLayout_.vkHandle());

@@ -185,8 +185,10 @@ void CommandHookRecord::initState(RecordInfo& info) {
 		!info.ops.attachmentCopies.empty() ||
 		!info.ops.descriptorCopies.empty() ||
 		info.ops.copyIndirectCmd ||
-		info.ops.useCapturePipe || // only for copying of the data afterwards
+		info.ops.shaderCapture || // only for copying of the data afterwards
 		hookClearAttachment;
+
+	this->shaderCapture = info.ops.shaderCapture;
 
 	auto preEnd = hcommand.end() - 1;
 	info.hookedSubpass = u32(-1);
@@ -456,17 +458,18 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 		}
 	}
 
-	if(info.ops.useCapturePipe) {
+	if(info.ops.shaderCapture) {
 		if(cmd.category() == CommandCategory::draw) {
 			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-				info.ops.useCapturePipe);
+				info.ops.shaderCapture->pipe.vkHandle());
 		} else if(cmd.category() == CommandCategory::dispatch) {
 			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
-				info.ops.useCapturePipe);
+				info.ops.shaderCapture->pipe.vkHandle());
 		} else if(cmd.category() == CommandCategory::traceRays) {
-			dlg_warn("TODO: implement capturePipe for RayTracing via shaderTable patching");
-			// dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
-			// 	info.ops.useCapturePipe);
+			// NOTE: indirect trace rays not supported here
+			dlg_assert(cmd.type() == CommandType::traceRays);
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+				info.ops.shaderCapture->pipe.vkHandle());
 		} else {
 			dlg_error("Unexpected hooked command used with capturePipe");
 		}
@@ -499,7 +502,11 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 		}
 	}
 
-	dispatchRecord(cmd, info);
+	if(info.ops.shaderCapture && cmd.category() == CommandCategory::traceRays) {
+		hookRecordDstHookShaderTable(cmd, info);
+	} else {
+		dispatchRecord(cmd, info);
+	}
 
 	auto cmdAsParent = dynamic_cast<const ParentCommand*>(&cmd);
 	auto nextInfo = info;
@@ -538,6 +545,107 @@ void CommandHookRecord::hookRecordDst(Command& cmd, RecordInfo& info) {
 
 	// render pass split: rp2
 	hookRecordAfterDst(cmd, info);
+}
+
+void CommandHookRecord::hookRecordDstHookShaderTable(Command& dst, RecordInfo& info) {
+	// TODO: this computation is included in the queryTime.
+
+	auto& dev = *record->dev;
+	DebugLabel lbl(dev, cb, "vil:hookRecordDstHookShaderTable");
+
+	dlg_assert(info.ops.shaderCapture->shaderTableMapping.buf);
+	const auto& rtcmd = static_cast<const TraceRaysCmd&>(dst);
+
+	const auto shaderTableSize =
+		rtcmd.raygenBindingTable.size +
+		rtcmd.callableBindingTable.size +
+		rtcmd.hitBindingTable.size +
+		rtcmd.missBindingTable.size;
+	const auto usage =
+		VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+		VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+
+	this->shaderTable.ensure(dev, shaderTableSize, usage, {},
+		"hookedShaderTable");
+	auto dstAddress = this->shaderTable.queryAddress();
+	// TODO: cache this!
+	auto mappingAddress =
+		info.ops.shaderCapture->shaderTableMapping.queryAddress();
+
+	struct TableToPatch {
+		const VkStridedDeviceAddressRegionKHR& src;
+		VkStridedDeviceAddressRegionKHR dst {};
+	};
+
+	auto tables = std::array{
+		TableToPatch{rtcmd.raygenBindingTable},
+		TableToPatch{rtcmd.missBindingTable},
+		TableToPatch{rtcmd.hitBindingTable},
+		TableToPatch{rtcmd.callableBindingTable},
+	};
+
+	// dlg_trace("raygen: {} {}", rtcmd.raygenBindingTable.size, rtcmd.raygenBindingTable.stride);
+	// dlg_trace("miss: {} {}", rtcmd.missBindingTable.size, rtcmd.missBindingTable.stride);
+	// dlg_trace("hit: {} {}", rtcmd.hitBindingTable.size, rtcmd.hitBindingTable.stride);
+	// dlg_trace("call: {} {}", rtcmd.callableBindingTable.size, rtcmd.callableBindingTable.stride);
+
+	auto& pipe = dev.commandHook->hookShaderTable_;
+	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+		pipe.pipe());
+
+	for(auto& table : tables) {
+		if(!table.src.size || !table.src.deviceAddress) {
+			table.dst = {};
+			continue;
+		}
+
+		struct {
+			u64 srcTable;
+			u64 dstTable;
+			u64 mappings;
+			u32 stride;
+			u32 handleSize;
+			u32 count;
+			u32 groupCount; // TODO: remove, not needed.
+		} pcr;
+
+		dlg_assert(table.src.size % 4u == 0u);
+		dlg_assert(table.src.stride % 4u == 0u);
+		dlg_assert(dev.rtProps.shaderGroupHandleSize % 4u == 0u);
+
+		// floor by design
+		auto maxCount = table.src.size / table.src.stride;
+		pcr.srcTable = table.src.deviceAddress;
+		pcr.dstTable = dstAddress;
+		pcr.mappings = mappingAddress;
+		pcr.stride = table.src.stride / 4u;
+		pcr.count = maxCount;
+		pcr.handleSize = dev.rtProps.shaderGroupHandleSize / 4u;
+		pcr.groupCount = rtcmd.state->pipe->groups.size();
+
+		dev.dispatch.CmdPushConstants(cb, pipe.pipeLayout().vkHandle(),
+			VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(pcr), &pcr);
+
+		auto gx = ceilDivide(maxCount, 64u);
+		dev.dispatch.CmdDispatch(cb, gx, 1u, 1u);
+
+		table.dst.deviceAddress = dstAddress;
+		table.dst.size = table.src.size;
+		table.dst.stride = table.src.stride;
+
+		dstAddress += table.src.size;
+	}
+
+	vku::cmdBarrier(dev, cb, this->shaderTable.asSpan(),
+		vku::SyncScope::computeWrite(),
+		vku::SyncScope::allShaderRead() | vku::SyncScope::readIndirectCommand());
+
+	dev.dispatch.CmdTraceRaysKHR(cb,
+		&tables[0].dst, &tables[1].dst, &tables[2].dst, &tables[3].dst,
+		rtcmd.width, rtcmd.height, rtcmd.depth);
+
+	info.rebindComputeState = true;
 }
 
 void CommandHookRecord::hookRecord(Command* cmd, RecordInfo& info) {
@@ -1659,7 +1767,7 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 	}
 
 	// capturePipe
-	if(info.ops.useCapturePipe) {
+	if(info.ops.shaderCapture) {
 		// TODO: only for debugging
 		dev.dispatch.CmdFillBuffer(cb, hook->shaderCaptureBuffer(),
 			0u, hook->shaderCaptureSize, 0x0u);
@@ -1668,9 +1776,9 @@ void CommandHookRecord::beforeDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			vku::SyncScope::transferWrite(), vku::SyncScope::transferWrite());
 
 		Vec4u32 input {};
-		input[0] = info.ops.capturePipeInput[0];
-		input[1] = info.ops.capturePipeInput[1];
-		input[2] = info.ops.capturePipeInput[2];
+		input[0] = info.ops.shaderCaptureInput[0];
+		input[1] = info.ops.shaderCaptureInput[1];
+		input[2] = info.ops.shaderCaptureInput[2];
 		dev.dispatch.CmdUpdateBuffer(cb, hook->shaderCaptureBuffer(),
 			0u, sizeof(input), &input);
 		vku::cmdBarrier(dev, cb, vku::BufferSpan{
@@ -1731,7 +1839,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 		copyTransfer(bcmd, info, false);
 	}
 
-	if(info.ops.useCapturePipe) {
+	if(info.ops.shaderCapture) {
 		if(bcmd.category() == CommandCategory::draw) {
 			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 				static_cast<const DrawCmdBase&>(bcmd).boundPipe()->handle);
@@ -1739,7 +1847,7 @@ void CommandHookRecord::afterDstOutsideRp(Command& bcmd, RecordInfo& info) {
 			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 				static_cast<const DispatchCmdBase&>(bcmd).boundPipe()->handle);
 		} else if(bcmd.category() == CommandCategory::traceRays) {
-			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
+			dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
 				static_cast<const TraceRaysCmdBase&>(bcmd).boundPipe()->handle);
 		} else {
 			dlg_error("Unexpected hooked command used with capturePipe");

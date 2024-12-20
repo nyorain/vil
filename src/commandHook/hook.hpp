@@ -56,6 +56,12 @@ struct CommandHookTarget {
 	u32 submissionID {u32(-1)};
 };
 
+struct ShaderCaptureHook {
+	vku::Pipeline pipe {};
+	OwnBuffer shaderTableMapping {};
+	std::atomic<u32> refCount {};
+};
+
 // Defines which data to retrieve
 struct CommandHookOps {
 	// Which operations/state copies to peform.
@@ -71,13 +77,13 @@ struct CommandHookOps {
 	bool copyXfb {}; // transform feedback
 	u32 xfbSizeHint {u32(-1)};
 
+	IntrusivePtr<ShaderCaptureHook> shaderCapture {};
+	Vec3u32 shaderCaptureInput {}; // globalThreadID/vertexID/...
+
 	bool copyIndirectCmd {};
 	std::vector<DescriptorCopyOp> descriptorCopies;
 	std::vector<AttachmentCopyOp> attachmentCopies; // only for cmd inside renderpass
 	bool queryTime {};
-
-	VkPipeline useCapturePipe {};
-	Vec3u32 capturePipeInput {}; // globalThreadID/vertexID/...
 
 	// transfer
 	bool copyTransferSrcBefore {};
@@ -235,6 +241,7 @@ private:
 	// Initializes the pipelines and data needed for acceleration
 	// structure copies
 	void initAccelStructCopy(Device& dev);
+	void initShaderTableHook(Device& dev);
 	void initImageCopyPipes(Device& dev);
 	void initVertexCopy(Device& dev);
 
@@ -310,6 +317,8 @@ public: // TODO, for copying. Maybe just move them to Device?
 	vku::DynamicPipe copyVerticesUint16_;
 	vku::DynamicPipe copyVerticesByte32_;
 	vku::DynamicPipe copyVerticesUint32_;
+
+	vku::DynamicPipe hookShaderTable_;
 
 	// TODO: merge with Device DescriptorPool somehow
 	vku::DescriptorAllocator dsAlloc_;

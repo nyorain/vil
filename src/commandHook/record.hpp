@@ -9,6 +9,8 @@
 
 namespace vil {
 
+struct ShaderCaptureHook;
+
 // Internal representation of a hooked recording of a CommandRecord.
 // Is kept alive only as long as the associated Record is referencing this
 // (since it might resubmitted again, making this useful) or there are
@@ -55,6 +57,8 @@ struct CommandHookRecord {
 	VkRenderPass rp0 {};
 	VkRenderPass rp1 {};
 	VkRenderPass rp2 {};
+
+	IntrusivePtr<ShaderCaptureHook> shaderCapture {}; // keep alive
 
 	IntrusivePtr<CommandHookState> state {};
 	OwnBuffer dummyBuf {};
@@ -179,6 +183,7 @@ private:
 	// Called when we arrived ath the hooked command itself. Will make sure
 	// all barriers are set, render passes split correclty and copies are done.
 	void hookRecordDst(Command& dst, RecordInfo&);
+	void hookRecordDstHookShaderTable(Command& dst, RecordInfo&);
 
 	// Called immediately before recording the hooked command itself.
 	// Will perform all needed operations.

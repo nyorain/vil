@@ -585,7 +585,7 @@ VKAPI_ATTR VkResult VKAPI_CALL BeginCommandBuffer(
 		dlg_assert(pBeginInfo->pInheritanceInfo->renderPass);
 		inherit = *pBeginInfo->pInheritanceInfo;
 
-		auto* dynRender = LvlFindInChain<
+		auto* dynRender = lvl_find_in_chain<
 			VkCommandBufferInheritanceRenderingInfo>(inherit.pNext);
 		if(pBeginInfo->pInheritanceInfo->renderPass) {
 			// get render pass
