@@ -145,6 +145,14 @@ vku::BufferSpan OwnBuffer::asSpan(VkDeviceSize offset, VkDeviceSize size) const 
 	return ret;
 }
 
+VkDeviceAddress OwnBuffer::queryAddress() const {
+	dlg_assert(dev && buf);
+	VkBufferDeviceAddressInfo info {};
+	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+	info.buffer = buf;
+	return dev->dispatch.GetBufferDeviceAddress(dev->handle, &info);
+}
+
 void swap(OwnBuffer& a, OwnBuffer& b) noexcept {
 	using std::swap;
 	swap(a.dev, b.dev);

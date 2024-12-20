@@ -1541,7 +1541,11 @@ void CommandViewer::displayCommand() {
 
 	if(isStateCmd(*command_.back())) {
 		auto* dcmd = deriveCast<const StateCmdBase*>(command_.back());
-		if(dcmd->boundPipe() && ImGui::Button("Debug shader")) {
+		// NOTE: we do not support traceRaysIndirect as of now.
+		// This would make shader table hooking significantly more complicated.
+		auto supported = dcmd->category() != CommandCategory::traceRays ||
+			dcmd->type() == CommandType::traceRays;
+		if(supported && dcmd->boundPipe() && ImGui::Button("Debug shader")) {
 			shaderDebugger_.select(*dcmd->boundPipe());
 			view_ = IOView::shader;
 			doUpdateHook_ = true;

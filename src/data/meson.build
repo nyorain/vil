@@ -60,6 +60,8 @@ if glslang.found()
 		'blur.comp': {'': [] },
 		# accelStruct building
 		'accelStructVertices.comp': {'': [] },
+		# shader table patching for shader capture debugging
+		'shaderTable.comp': {'': [] },
 		# image analyze shaders
 		'histogram.comp': imgtable,
 		'minmax.comp': imgtable,

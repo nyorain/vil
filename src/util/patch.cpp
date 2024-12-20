@@ -1,4 +1,5 @@
 #include "command/alloc.hpp"
+#include <numeric>
 #include <util/patch.hpp>
 #include <ds.hpp>
 #include <rp.hpp>
@@ -329,8 +330,7 @@ void findDeclareBaseTypes(ShaderPatch& patch) {
 			patch.typeUint3 = id.get_id();
 		}
 		if(type.basetype == spc::SPIRType::Boolean &&
-				type.columns == 1u && type.vecsize == 3u &&
-				type.width == 32u) {
+				type.columns == 1u && type.vecsize == 3u) {
 			dlg_assert(patch.typeBool3 == u32(-1));
 			patch.typeBool3 = id.get_id();
 		}
@@ -607,7 +607,7 @@ u32 generateCurrentInvocation(ShaderPatch& patch,
 		case VK_SHADER_STAGE_MISS_BIT_KHR:
 		case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
 		case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
-			return generateInvocationCompute(patch, entryPoint);
+			return generateInvocationRaytrace(patch, entryPoint);
 		default:
 			dlg_error("unsupported shader stage");
 			return {};
@@ -1004,8 +1004,55 @@ vku::Pipeline createPatchCopy(const ComputePipeline& src, VkShaderStageFlagBits 
 	return vku::Pipeline(dev, cpi);
 }
 
-vku::Pipeline createPatchCopy(const GraphicsPipeline& src, VkShaderStageFlagBits stage,
+struct PatchedStages {
+	std::vector<VkPipelineShaderStageCreateInfo> stages;
+	std::vector<VkSpecializationInfo> specInfos;
+	std::vector<vku::ShaderModule> mods;
+};
+
+PatchedStages patchStages(span<const PipelineShaderStage> stages,
+		Device& dev, VkShaderStageFlagBits dstStage, u32 stageID,
 		span<const u32> patchedSpv) {
+	dlg_assert(stageID < stages.size());
+	PatchedStages ret;
+
+	ret.specInfos.reserve(stages.size());
+	ret.mods.reserve(stages.size());
+	ret.stages.reserve(stages.size());
+
+	for(auto [i, srcStage] : enumerate(stages)) {
+		// Create shader module
+		// We even do it for non-patched shaders, as the original modules
+		// might have been destroyed.
+		span<const u32> spirv;
+
+		if(stageID == i) {
+			dlg_assert(srcStage.stage == dstStage);
+			spirv = patchedSpv;
+		} else {
+			// normally, we use a mutex to access 'compiled'. But here
+			// we only access the immutable spirv so it is not needed.
+			spirv = srcStage.spirv->compiled->get_ir().spirv;
+		}
+
+		auto& mod = ret.mods.emplace_back(dev, spirv);
+
+		// add stage
+		auto& dstStage = ret.stages.emplace_back();
+		dstStage = {};
+		dstStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		dstStage.stage = srcStage.stage;
+		dstStage.pName = srcStage.entryPoint.c_str();
+		dstStage.module = mod.vkHandle();
+		dstStage.pSpecializationInfo =
+			&ret.specInfos.emplace_back(srcStage.specialization.vkInfo());
+	}
+
+	return ret;
+}
+
+vku::Pipeline createPatchCopy(const GraphicsPipeline& src,
+		VkShaderStageFlagBits stage, u32 stageID, span<const u32> patchedSpv) {
 	auto& dev = *src.dev;
 
 	VkGraphicsPipelineCreateInfo gpi {};
@@ -1045,65 +1092,136 @@ vku::Pipeline createPatchCopy(const GraphicsPipeline& src, VkShaderStageFlagBits
 	dynState.pDynamicStates = dynStates.data();
 	gpi.pDynamicState = &dynState;
 
-	std::vector<VkPipelineShaderStageCreateInfo> stages;
-	std::vector<VkSpecializationInfo> specInfos;
-	std::vector<vku::ShaderModule> mods;
-
-	specInfos.reserve(src.stages.size());
-
-	for(auto& srcStage : src.stages) {
-		// Create shader module
-		// We even do it for non-patched shaders, as the original modules
-		// might have been destroyed.
-		span<const u32> spirv;
-
-		if(srcStage.stage == stage) {
-			spirv = patchedSpv;
-		} else {
-			// normally, we use a mutex to access 'compiled'. But here
-			// we only access the immutable spirv so it is not needed.
-			spirv = srcStage.spirv->compiled->get_ir().spirv;
-		}
-
-		auto& mod = mods.emplace_back(dev, spirv);
-
-		// add stage
-
-		auto& dstStage = stages.emplace_back();
-		dstStage = {};
-		dstStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		dstStage.stage = srcStage.stage;
-		dstStage.pName = srcStage.entryPoint.c_str();
-		dstStage.module = mod.vkHandle();
-		dstStage.pSpecializationInfo =
-			&specInfos.emplace_back(srcStage.specialization.vkInfo());
-	}
-
-	gpi.stageCount = u32(stages.size());
-	gpi.pStages = stages.data();
+	auto patchedStages = patchStages(src.stages, dev, stage, stageID, patchedSpv);
+	gpi.stageCount = u32(patchedStages.stages.size());
+	gpi.pStages = patchedStages.stages.data();
 	gpi.renderPass = src.renderPass->handle; // TODO: can this be destroyed?
 	gpi.subpass = src.subpass;
 
 	return vku::Pipeline(dev, gpi);
 }
 
-vku::Pipeline createPatchCopy(const RayTracingPipeline& src, VkShaderStageFlagBits stage,
-		span<const u32> patchedSpv) {
-	(void) src;
-	(void) stage;
-	(void) patchedSpv;
-	dlg_error("unimplemented");
-	return {};
+vku::Pipeline createPatchCopy(const RayTracingPipeline& src,
+		VkShaderStageFlagBits stage, u32 stageID,
+		span<const u32> patchedSpv, OwnBuffer& groupMapping) {
+	auto& dev = *src.dev;
+
+	VkRayTracingPipelineCreateInfoKHR rti {};
+	rti.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+	rti.layout = src.layout->handle;
+	rti.maxPipelineRayRecursionDepth = src.maxPipelineRayRecursionDepth;
+
+	std::vector<VkDynamicState> dynStates {
+		src.dynamicState.begin(), src.dynamicState.end()};
+	VkPipelineDynamicStateCreateInfo dynState {};
+	dynState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynState.dynamicStateCount = dynStates.size();
+	dynState.pDynamicStates = dynStates.data();
+	rti.pDynamicState = &dynState;
+
+	auto patchedStages = patchStages(src.stages, dev, stage, stageID, patchedSpv);
+	rti.stageCount = u32(patchedStages.stages.size());
+	rti.pStages = patchedStages.stages.data();
+
+	std::vector<VkRayTracingShaderGroupCreateInfoKHR> groups;
+	groups.reserve(src.groups.size());
+
+	for(auto& group : src.groups) {
+		auto& dst = groups.emplace_back();
+		dst = {};
+		dst.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+		dst.type = group.type;
+		dst.generalShader = group.general;
+		dst.closestHitShader = group.closestHit;
+		dst.anyHitShader = group.anyHit;
+		dst.intersectionShader = group.intersection;
+	}
+
+	rti.groupCount = groups.size();
+	rti.pGroups = groups.data();
+
+	auto pipe = vku::Pipeline(dev, rti);
+
+	auto handleSize = dev.rtProps.shaderGroupHandleSize;
+	dlg_assert(handleSize % 4u == 0u);
+	auto handleSize32 = dev.rtProps.shaderGroupHandleSize / 4u;
+	std::vector<std::byte> groupHandles;
+	groupHandles.resize(handleSize * src.groups.size());
+	VK_CHECK(dev.dispatch.GetRayTracingShaderGroupHandlesKHR(dev.handle,
+		pipe.vkHandle(), 0u, src.groups.size(), groupHandles.size(),
+		groupHandles.data()));
+
+	auto usage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	groupMapping.ensure(dev, handleSize * src.groups.size() * 2,
+		usage, {}, "patchedShaderTable");
+
+	// we sort the mappings by key lexicographical order
+	// that makes patching in the shader later much more efficient
+	// see shaderTable.comp
+	std::vector<u32> order;
+	order.resize(src.groups.size());
+	std::iota(order.begin(), order.end(), 0u);
+	auto cmp = [&](auto i, auto j) {
+		auto ptr = reinterpret_cast<const u32*>(src.groupHandles.data());
+		auto iBegin = ptr + i * handleSize32;
+		auto iEnd = ptr + (i + 1) * handleSize32;
+		auto jBegin = ptr + j * handleSize32;
+		auto jEnd = ptr + (j + 1) * handleSize32;
+		return std::lexicographical_compare(iBegin, iEnd, jBegin, jEnd);
+	};
+	std::sort(order.begin(), order.end(), cmp);
+
+	auto mappings = groupMapping.writeData();
+	for(auto [i, dstID] : enumerate(order)) {
+		std::memcpy(mappings.data() + 2 * i * handleSize,
+			src.groupHandles.data() + dstID * handleSize,
+			handleSize);
+		std::memcpy(mappings.data() + (2 * i + 1) * handleSize,
+			groupHandles.data() + dstID * handleSize,
+			handleSize);
+	}
+
+	// === debug ====
+	/*
+	dlg_trace("Patched RT groups mapping");
+	dlg_trace("order: ");
+	for(auto& i : order) dlg_trace(" >> {}", i);
+
+	auto buf = groupMapping.data();
+	for(auto i = 0u; i < src.groups.size(); ++i) {
+		std::string src;
+		std::string dst;
+
+		for(auto j = 0u; j < handleSize32; ++j) {
+			auto val = read<u32>(buf);
+			src += dlg::format("{}{} ", std::hex, val);
+		}
+
+		for(auto j = 0u; j < handleSize32; ++j) {
+			auto val = read<u32>(buf);
+			dst += dlg::format("{}{} ", std::hex, val);
+		}
+
+		dlg_trace("{} -> {}", src, dst);
+	}
+	*/
+	// === /debug ====
+
+	return pipe;
 }
 
 vku::Pipeline createPatchCopy(const Pipeline& src, VkShaderStageFlagBits stage,
-		span<const u32> patchedSpv) {
+		u32 stageID, span<const u32> patchedSpv, OwnBuffer& shaderTableMapping) {
 	if(src.type == VK_PIPELINE_BIND_POINT_COMPUTE) {
-		return createPatchCopy(static_cast<const ComputePipeline&>(src), stage, patchedSpv);
+		return createPatchCopy(static_cast<const ComputePipeline&>(src),
+			stage, patchedSpv);
 	} else if(src.type == VK_PIPELINE_BIND_POINT_GRAPHICS) {
-		return createPatchCopy(static_cast<const GraphicsPipeline&>(src), stage, patchedSpv);
+		return createPatchCopy(static_cast<const GraphicsPipeline&>(src),
+			stage, stageID, patchedSpv);
 	} else if(src.type == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
-		return createPatchCopy(static_cast<const RayTracingPipeline&>(src), stage, patchedSpv);
+		return createPatchCopy(static_cast<const RayTracingPipeline&>(src),
+			stage, stageID, patchedSpv, shaderTableMapping);
 	} else {
 		dlg_error("Unsupported pipe type!");
 		return {};
@@ -1138,7 +1256,9 @@ PatchJobResult patchJob(PatchJobData& data) {
 	writeFile(output.c_str(), bytes(patchRes.copy), true);
 #endif // VIL_OUTPUT_PATCHED_SPIRV
 
-	auto pipe = createPatchCopy(*data.pipe, data.stage, patchRes.copy);
+	OwnBuffer shaderTableMapping;
+	auto pipe = createPatchCopy(*data.pipe, data.stage, data.stageID,
+		patchRes.copy, shaderTableMapping);
 	if(!pipe.vkHandle()) {
 		PatchJobResult res {};
 		res.error = "Creating pipeline failed";
@@ -1149,7 +1269,9 @@ PatchJobResult patchJob(PatchJobData& data) {
 	nameHandle(pipe, newName);
 
 	PatchJobResult res {};
-	res.pipe = std::move(pipe);
+	res.hook.reset(new ShaderCaptureHook());
+	res.hook->pipe = std::move(pipe);
+	res.hook->shaderTableMapping = std::move(shaderTableMapping);
 	res.alloc = std::move(patchRes.alloc);
 	res.captures = patchRes.captures;
 

@@ -51,26 +51,28 @@ void ShaderDebugger::select(const Pipeline& pipe) {
 	if(pipe.type == VK_PIPELINE_BIND_POINT_COMPUTE) {
 		auto& cpipe = static_cast<const ComputePipeline&>(pipe);
 		auto mod = copySpecializeSpirv(cpipe.stage);
-		select(VK_SHADER_STAGE_COMPUTE_BIT,
+		select(VK_SHADER_STAGE_COMPUTE_BIT, 0,
 			std::move(mod), cpipe.stage.entryPoint);
 	} else if(pipe.type == VK_PIPELINE_BIND_POINT_GRAPHICS) {
 		auto& gpipe = static_cast<const GraphicsPipeline&>(pipe);
-		const PipelineShaderStage* fragment {};
-		const PipelineShaderStage* vertex {};
-		for(auto& stage : gpipe.stages) {
+		u32 fragmentID = u32(-1);
+		u32 vertexID = u32(-1);
+		for(auto [i, stage] : enumerate(gpipe.stages)) {
 			if(stage.stage == VK_SHADER_STAGE_VERTEX_BIT) {
-				vertex = &stage;
+				vertexID = i;
 			} else if(stage.stage == VK_SHADER_STAGE_FRAGMENT_BIT) {
-				fragment = &stage;
+				fragmentID = i;
 			}
 		}
 
-		if(vertex) {
-			auto mod = copySpecializeSpirv(*vertex);
-			select(vertex->stage, std::move(mod), vertex->entryPoint);
-		} else if(fragment) {
-			auto mod = copySpecializeSpirv(*fragment);
-			select(fragment->stage, std::move(mod), fragment->entryPoint);
+		if(vertexID != u32(-1)) {
+			auto& vertex = gpipe.stages[vertexID];
+			auto mod = copySpecializeSpirv(vertex);
+			select(vertex.stage, vertexID, std::move(mod), vertex.entryPoint);
+		} else if(fragmentID != u32(-1)) {
+			auto& fragment = gpipe.stages[fragmentID];
+			auto mod = copySpecializeSpirv(fragment);
+			select(fragment.stage, fragmentID, std::move(mod), fragment.entryPoint);
 		} else {
 			dlg_error("No supported debugging stage in pipeline");
 			unselect();
@@ -78,9 +80,11 @@ void ShaderDebugger::select(const Pipeline& pipe) {
 	} else if(pipe.type == VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR) {
 		auto& rpipe = static_cast<const RayTracingPipeline&>(pipe);
 		const PipelineShaderStage* raygen {};
-		for(auto& stage : rpipe.stages) {
+		auto stageID = 0u;
+		for(auto [i, stage] : enumerate(rpipe.stages)) {
 			if(stage.stage == VK_SHADER_STAGE_RAYGEN_BIT_KHR) {
 				raygen = &stage;
+				stageID = i;
 				break;
 			}
 		}
@@ -92,16 +96,17 @@ void ShaderDebugger::select(const Pipeline& pipe) {
 		}
 
 		auto mod = copySpecializeSpirv(*raygen);
-		select(raygen->stage, std::move(mod), raygen->entryPoint);
+		select(raygen->stage, stageID, std::move(mod), raygen->entryPoint);
 	}
 }
 
-void ShaderDebugger::select(VkShaderStageFlagBits stage,
+void ShaderDebugger::select(VkShaderStageFlagBits stage, u32 stageID,
 		std::unique_ptr<spc::Compiler> compiled,
 		std::string entryPoint) {
 	unselect();
 
 	this->stage_ = stage;
+	this->stageID_ = stageID;
 	this->compiled_ = std::move(compiled);
 	this->stage_ = stage;
 	this->entryPoint_ = std::move(entryPoint);
@@ -128,6 +133,7 @@ void ShaderDebugger::select(VkShaderStageFlagBits stage,
 void ShaderDebugger::unselect() {
 	compiled_ = {};
 	stage_ = {};
+	stageID_ = {};
 	breakpoints_.clear();
 	currentFile_ = 0u;
 	sourceFilesIDs_.clear();
@@ -151,7 +157,7 @@ void ShaderDebugger::draw() {
 		auto* pipe = static_cast<const GraphicsPipeline*>(stateCmd->boundPipe());
 
 		if(ImGui::BeginCombo("Shader Stage", vk::name(stage_))) {
-			for(auto& stage : pipe->stages) {
+			for(auto [i, stage] : enumerate(pipe->stages)) {
 				if(stage.stage != VK_SHADER_STAGE_VERTEX_BIT &&
 						stage.stage != VK_SHADER_STAGE_FRAGMENT_BIT) {
 					dlg_warn("shader stage {} unsupported for debugging",
@@ -162,7 +168,7 @@ void ShaderDebugger::draw() {
 				auto str = dlg::format("{}: {}", vk::name(stage.stage), stage.entryPoint);
 				if(ImGui::Selectable(str.c_str())) {
 					auto mod = copySpecializeSpirv(stage);
-					select(stage.stage, std::move(mod), stage.entryPoint);
+					select(stage.stage, i, std::move(mod), stage.entryPoint);
 					break;
 				}
 			}
@@ -172,11 +178,11 @@ void ShaderDebugger::draw() {
 		auto* pipe = static_cast<const RayTracingPipeline*>(stateCmd->boundPipe());
 
 		if(ImGui::BeginCombo("Shader Stage", vk::name(stage_))) {
-			for(auto& stage : pipe->stages) {
+			for(auto [i, stage] : enumerate(pipe->stages)) {
 				auto str = dlg::format("{}: {}", vk::name(stage.stage), stage.entryPoint);
 				if(ImGui::Selectable(str.c_str())) {
 					auto mod = copySpecializeSpirv(stage);
-					select(stage.stage, std::move(mod), stage.entryPoint);
+					select(stage.stage, i, std::move(mod), stage.entryPoint);
 					break;
 				}
 			}
@@ -222,6 +228,7 @@ void ShaderDebugger::draw() {
 			job.data->compiler = compiled_.get();
 			job.data->entryPoint = entryPoint_;
 			job.data->stage = stage_;
+			job.data->stageID = stageID_;
 			job.data->file = patch_.file;
 			job.data->line = patch_.line;
 			job.data->captureAddress = dev.commandHook->shaderCaptureAddress();
@@ -278,7 +285,7 @@ void ShaderDebugger::draw() {
 	}
 
 	auto changed = prevID != invocationID_;
-	if(changed && patch_.current.pipe.vkHandle()) {
+	if(changed && patch_.current.hook) {
 		updateHooks(*gui_->dev().commandHook);
 	}
 
@@ -457,6 +464,13 @@ void ShaderDebugger::drawInputsTab() {
 		drawInputsVertex();
 	} else if(stage_ == VK_SHADER_STAGE_FRAGMENT_BIT) {
 		drawInputsFragment();
+	} else if(stage_ == VK_SHADER_STAGE_RAYGEN_BIT_KHR ||
+			stage_ == VK_SHADER_STAGE_MISS_BIT_KHR ||
+			stage_ == VK_SHADER_STAGE_ANY_HIT_BIT_KHR ||
+			stage_ == VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR ||
+			stage_ == VK_SHADER_STAGE_INTERSECTION_BIT_KHR ||
+			stage_ == VK_SHADER_STAGE_CALLABLE_BIT_KHR) {
+		drawInputsRaytrace();
 	} else {
 		dlg_error("Unsupported stage: {}", stage_);
 		imGuiText("Error: unsupported stage selected");
@@ -656,12 +670,49 @@ void ShaderDebugger::drawInputsCompute() {
 	(void) changed;
 }
 
+void ShaderDebugger::drawInputsRaytrace() {
+	imGuiText("Thread:");
+	ImGui::PushID("GlobalInv");
+
+	float sizeX;
+	auto sliderFlags = ImGuiSliderFlags_AlwaysClamp;
+
+	auto* baseCmd = selection().command().back();
+	auto* rtCmd = deriveCast<const TraceRaysCmd*>(baseCmd);
+
+	auto numThreads = Vec3ui {
+		rtCmd->width,
+		rtCmd->height,
+		rtCmd->depth,
+	};
+	const unsigned globalDim =
+		numThreads.z > 1 ? 3 :
+		numThreads.y > 1 ? 2 :
+		numThreads.x > 1 ? 1 : 0;
+
+	for(auto i = 0u; i < globalDim; ++i) {
+		ImGui::PushID(i);
+		ImGui::SameLine();
+		if(i == 0u) {
+			sizeX = ImGui::GetContentRegionAvail().x / float(globalDim) - 10.f;
+		}
+
+		ImGui::PushItemWidth(sizeX);
+		int v = invocationID_[i];
+		ImGui::DragInt("", &v, 1.f, 0, numThreads[i] - 1, "%d", sliderFlags);
+		invocationID_[i] = u32(v);
+		ImGui::PopID();
+	}
+
+	ImGui::PopID();
+}
+
 void ShaderDebugger::updateHooks(CommandHook& hook) {
 	CommandHookUpdate hookUpdate;
 	hookUpdate.invalidate = true;
 	auto& ops = hookUpdate.newOps.emplace();
-	ops.useCapturePipe = patch_.current.pipe.vkHandle();
-	ops.capturePipeInput = Vec3u32(invocationID_);
+	ops.shaderCapture = patch_.current.hook;
+	ops.shaderCaptureInput = Vec3u32(invocationID_);
 	hook.updateHook(std::move(hookUpdate));
 }
 
@@ -678,10 +729,6 @@ bool ShaderDebugPatch::updateJobs(Device& dev) {
 		}
 
 		if(job.data->state == PatchJobState::done) {
-			if(current.pipe.vkHandle()) {
-				keepAlive.push_back(std::move(current.pipe));
-			}
-
 			auto res = job.result.get();
 			if(res.error.empty()) {
 				dlg_debug("patch job has finished succesfully. {} captures",
@@ -701,17 +748,9 @@ bool ShaderDebugPatch::updateJobs(Device& dev) {
 }
 
 void ShaderDebugPatch::reset(Device& dev) {
-	for(auto it = jobs.begin(); it != jobs.end();) {
-		auto& job = *it;
-
-		{
-			std::lock_guard lock(dev.mutex);
-			job.data->state = PatchJobState::canceled;
-		}
-	}
-
-	if(current.pipe.vkHandle()) {
-		keepAlive.push_back(std::move(current.pipe));
+	for(auto& job : jobs) {
+		std::lock_guard lock(dev.mutex);
+		job.data->state = PatchJobState::canceled;
 	}
 
 	current = {};

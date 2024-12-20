@@ -82,6 +82,7 @@ struct Device {
 
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
+	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps {};
 
 	// features enabled by application
 	VkPhysicalDeviceFeatures enabledFeatures {};
