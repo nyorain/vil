@@ -118,6 +118,8 @@ struct RayTracingPipeline : Pipeline {
 	std::vector<PipelineShaderStage> stages;
 	std::vector<Group> groups;
 	std::unordered_set<VkDynamicState> dynamicState;
+	std::vector<std::byte> groupHandles;
+	u32 maxPipelineRayRecursionDepth;
 };
 
 // API

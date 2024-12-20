@@ -88,6 +88,26 @@ void CommandHookSubmission::finish(Submission& subm) {
 		return;
 	}
 
+	// === debug ====
+	/*
+	if(record->shaderTable.buf) {
+		dlg_assert(record->shaderCapture);
+
+		dlg_trace("shaderTable content");
+		auto data = record->shaderTable.data();
+
+		while(data.size() >= 64u) {
+			std::string str;
+			for(auto i = 0u; i < 16; ++i) {
+				str += dlg::format("{}{} ", std::hex, read<u32>(data));
+			}
+
+			dlg_trace(" >> {}", str);
+		}
+	}
+	*/
+	// === /debug ====
+
 	assertOwned(record->hook->dev_->mutex);
 	transmitTiming();
 

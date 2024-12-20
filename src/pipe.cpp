@@ -645,6 +645,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
 		pipe.layout = getPtr(dev, ci.layout);
+		pipe.maxPipelineRayRecursionDepth = ci.maxPipelineRayRecursionDepth;
+
+		// TODO: support, for shader patching
+		dlg_assertm(!ci.pLibraryInfo, "not supported");
+		dlg_assertm(!ci.pLibraryInterface, "not supported");
 
 		if(ci.pDynamicState) {
 			pipe.dynamicState = {
@@ -656,6 +661,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		for(auto i = 0u; i < ci.stageCount; ++i) {
 			pipe.stages.emplace_back(dev, ci.pStages[i]);
 		}
+
+		dlg_assert(dev.rtProps.shaderGroupHandleSize);
+		pipe.groupHandles.resize(dev.rtProps.shaderGroupHandleSize * ci.groupCount);
+		VK_CHECK(dev.dispatch.GetRayTracingShaderGroupHandlesKHR(dev.handle,
+			pipe.handle, 0u, ci.groupCount, pipe.groupHandles.size(),
+			pipe.groupHandles.data()));
 
 		for(auto i = 0u; i < ci.groupCount; ++i) {
 			auto& src = ci.pGroups[i];

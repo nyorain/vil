@@ -20,6 +20,7 @@
 #include <util/profiling.hpp>
 
 #include <accelStructVertices.comp.spv.h>
+#include <shaderTable.comp.spv.h>
 
 #include <copyTex.comp.1DArray.spv.h>
 #include <copyTex.comp.u1DArray.spv.h>
@@ -118,6 +119,7 @@ CommandHook::CommandHook(Device& dev) {
 	initVertexCopy(dev);
 	if(hasAppExt(dev, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
 		initAccelStructCopy(dev);
+		initShaderTableHook(dev);
 	}
 
 	// init capture
@@ -127,11 +129,7 @@ CommandHook::CommandHook(Device& dev) {
 		VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	captureBuffer_.ensure(dev, shaderCaptureSize, usage, {},
 		"CaptureBuf", OwnBuffer::Type::deviceLocal);
-
-	VkBufferDeviceAddressInfo info {};
-	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-	info.buffer = captureBuffer_.buf;
-	captureAddress_ = dev.dispatch.GetBufferDeviceAddress(dev.handle, &info);
+	captureAddress_ = captureBuffer_.queryAddress();
 }
 
 CommandHook::~CommandHook() {
@@ -277,6 +275,13 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	for(auto mod : mods) {
 		dev.dispatch.DestroyShaderModule(dev.handle, mod, nullptr);
 	}
+}
+
+void CommandHook::initShaderTableHook(Device& dev) {
+	hookShaderTable_.init(dev, {{{
+		shaderTable_comp_spv_data,
+		VK_SHADER_STAGE_COMPUTE_BIT}}}, vku::PipeCreator::compute({}),
+		"hookShaderTable", false);
 }
 
 void CommandHook::initAccelStructCopy(Device& dev) {

@@ -111,6 +111,12 @@ void ensureSize(C& container, std::size_t size) {
 	}
 }
 
+template<typename Base, typename Link>
+void addChain(Base& base, Link& link) {
+	link.pNext = const_cast<void*>(base.pNext);
+	base.pNext = &link;
+}
+
 template<typename CI>
 bool hasChain(const CI& ci, VkStructureType sType) {
 	auto* link = static_cast<const VkBaseInStructure*>(ci.pNext);
