@@ -215,6 +215,12 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		u32 numQueueFams, u32& presentQueueInfoID,
 		span<const VkExtensionProperties> extProps,
 		bool standaloneMode) {
+	(void) presentQueueInfoID;
+	(void) queueCreateInfos;
+	(void) phdev;
+	(void) fpGetInstanceProcAddr;
+	(void) numQueueFams;
+
 	auto hookOverlay = checkEnvBinary("VIL_HOOK_OVERLAY", false);
 	if(!checkEnvBinary("VIL_CREATE_WINDOW", !hookOverlay) && !standaloneMode) {
 		return nullptr;
@@ -250,78 +256,16 @@ std::unique_ptr<DisplayWindow> tryCreateWindow(Instance& ini,
 		}
 	}
 
-	if(standaloneMode) {
-		window->ini = &ini;
-		if(!window->doCreateWindow()) {
-			return nullptr;
-		}
-	} else {
-		if(!window->createWindow(ini)) {
-			return nullptr;
-		}
-	}
-
-	// Find present queue
-	auto vkSurf64 = swa_window_get_vk_surface(window->window);
-	window->surface = bit_cast<VkSurfaceKHR>(vkSurf64);
-
-	auto fpGetPhysicalDeviceSurfaceSupportKHR =
-		(PFN_vkGetPhysicalDeviceSurfaceSupportKHR)
-		fpGetInstanceProcAddr(ini.handle, "vkGetPhysicalDeviceSurfaceSupportKHR");
-	dlg_assert(fpGetPhysicalDeviceSurfaceSupportKHR);
-
-	// Check queues that are already created for presentation support.
-	for(auto i = 0u; i < queueCreateInfos.size(); ++i) {
-		auto& q = queueCreateInfos[i];
-		if(presentQueueInfoID == u32(-1)) {
-			VkBool32 supported {};
-			auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
-				q.queueFamilyIndex, window->surface, &supported);
-			if(res == VK_SUCCESS && supported) {
-				presentQueueInfoID = i;
-				break;
-			}
-		}
-	}
-
-	// If none found, add our own
-	static const float prio1 = 1.f;
-	if(presentQueueInfoID == u32(-1)) {
-		// The application does not create a graphics queue, so we
-		// add one.
-		for(auto qf = 0u; qf < numQueueFams; ++qf) {
-			VkBool32 supported {};
-			auto res = fpGetPhysicalDeviceSurfaceSupportKHR(phdev,
-				qf, window->surface, &supported);
-			if(res == VK_SUCCESS && supported) {
-				presentQueueInfoID = u32(queueCreateInfos.size());
-
-				dlg_trace("Adding new queue (for present), family {}", qf);
-				auto& q = queueCreateInfos.emplace_back();
-				q.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-				q.pQueuePriorities = &prio1;
-				q.queueFamilyIndex = qf;
-				q.queueCount = 1u;
-				break;
-			}
-		}
-	}
-
-	if(presentQueueInfoID == u32(-1)) {
-		dlg_warn("Can't create gui window since no queue supports presenting to it");
-		window.reset();
-	} else {
-		// If swapchain extension wasn't enabled, enable it.
-		auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-		auto it = find(devExts, extName);
-		if(it == devExts.end()) {
-			if(hasExt(extProps, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
-				devExts.push_back(extName.data());
-				dlg_info("Adding {} device extension", extName);
-			} else {
-				dlg_warn("Can't create gui window since swapchain extension is not supported");
-				window.reset();
-			}
+	// If swapchain extension wasn't enabled, enable it.
+	auto extName = std::string_view(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+	auto it = find(devExts, extName);
+	if(it == devExts.end()) {
+		if(hasExt(extProps, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+			devExts.push_back(extName.data());
+			dlg_info("Adding {} device extension", extName);
+		} else {
+			dlg_warn("Can't create gui window since swapchain extension is not supported");
+			window.reset();
 		}
 	}
 
@@ -1038,15 +982,19 @@ VkResult doCreateDevice(
 			if(i == gfxQueueInfoID && j == 0u) {
 				dlg_assert(!dev.gfxQueue);
 				dev.gfxQueue = &q;
-			}
 
 #ifdef VIL_WITH_SWA
-			if(i == presentQueueInfoID && j == 0u) {
-				dlg_assert(window);
-				dlg_assert(!window->presentQueue);
-				window->presentQueue = &q;
-			}
+				// TODO: See https://github.com/nyorain/vil/issues/21.
+				// We should instead query a suitable presentQueue at least
+				// with the non-surface-specific query functions, via swa.
+				// We just guess right now that the graphics queue has a good
+				// chance of allowing presenting.
+				if(window) {
+					dlg_assert(!window->presentQueue);
+					window->presentQueue = &q;
+				}
 #endif // VIL_WITH_SWA
+			}
 
 			if(dev.timelineSemaphores) {
 				VkSemaphoreCreateInfo sci {};
@@ -1379,6 +1327,7 @@ VkFormat findDepthFormat(const Device& dev) {
 void checkInitWindow(Device& dev) {
 #ifdef VIL_WITH_SWA
 	if(dev.window && !dev.window->dev) {
+		dev.window->createWindow(*dev.ini);
 		dev.window->initDevice(dev);
 	}
 #endif // VIL_WITH_SWA
