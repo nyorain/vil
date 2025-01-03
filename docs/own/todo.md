@@ -280,11 +280,19 @@ patch capture shader debugging:
       First gather everything (for every section etc) then do one
 	  patch-build pass.
 	  Current approach copies again and again, problematic for large shaders.
+	  (NOTE: we already do this now for in-function instructions.
+	   But should be done on per-section basis for decls, too)
 - [ ] potential CRASH: we assume the pipeLayout still has a valid handle.
 	  this might not be the case. We could recreate it, though.
+	  Or make sure it is kept alive?
 - [ ] separate function arguments and local vars in UI
 - [ ] toggle via UI: also capture all local named SSA IDs
-- [ ] matrix decoration in captured output
+- [ ] only add breakpoint when there is prev/curr/next line marker.
+      Not across functions etc.
+- [ ] patching: only load/convert all the variables when we know that this
+      shader should write stuff. Not in each invocation.
+	  (atm done in processCapture already)
+- [x] matrix decoration in captured output
 - [ ] show global variables in captured output? (entry point interface vars)
 	- [ ] also builtins? maybe in different tab/node?
 - [ ] ray tracing debugging
@@ -298,6 +306,11 @@ patch capture shader debugging:
       IntrusiveDerivedPtr, something else. Should keep it alive in
 	  a different way.
 - [x] fix terrible pipeline-keepAlive ShaderPatch hack
+- [x] convert booleans in captured outputs
+	- [x] recursively, in structs.
+- [x] fix phi instructions in following blocks
+- [ ] allow showing all sources of all stages, inserting the breakpoint into all
+      Shaders should then probably output more about their origin.
 - [ ] additional shader debug selects (vertex/fragment)
 	- [ ] Layer
 	- [ ] ViewIndex
@@ -308,6 +321,9 @@ patch capture shader debugging:
 	- [ ] maybe create the inner handle as an intrusive ptr as well?
 	      can we really always use a basePipelineHandle tho?
 		  What if related resources got destroyed?
+	- meh does not help much (nvidia, linux). This time is mainly
+	  problematic for ray tracing pipelines.
+	  [ ] Try out pipeline library
 
 spvm:
 - [x] Add OpSpecConstant* support

@@ -208,7 +208,7 @@ template<typename Rule> using control = tao::pegtl::must_if<error>::control<Rule
 } // namespace syn
 
 // tree parser
-const Type* parseBuiltin(std::string_view str) {
+Type* parseBuiltin(std::string_view str) {
 	constexpr auto createAtomPair = [](std::string_view name, Type::BaseType type,
 			u32 width, u32 vec, u32 col) {
 		Type ret;
@@ -225,7 +225,7 @@ const Type* parseBuiltin(std::string_view str) {
 		return std::pair(name, ret);
 	};
 
-	static const std::unordered_map<std::string_view, Type> builtins = {
+	static std::unordered_map<std::string_view, Type> builtins = {
 		// base types
 		createAtomPair("float", Type::typeFloat, 32, 1, 1),
 		createAtomPair("f32", Type::typeFloat, 32, 1, 1),
@@ -384,7 +384,7 @@ struct TreeParser {
 		}
 	}
 
-	const Type* parseType(const ParseTreeNode& node) const {
+	Type* parseType(const ParseTreeNode& node) const {
 		checkType<syn::Type>(node);
 		auto name = node.string_view();
 
@@ -402,7 +402,7 @@ struct TreeParser {
 		return t;
 	}
 
-	const Type* applyArrayQualifiers(const ParseTreeNode& quals, const Type& in) {
+	Type* applyArrayQualifiers(const ParseTreeNode& quals, const Type& in) {
 		checkType<syn::ArrayQualifiers>(quals);
 		passert(!quals.children.empty(), quals);
 
@@ -517,7 +517,7 @@ struct TreeParser {
 	// Should probably just use a vector (or map/linked list with
 	// LinearAllocator), we don't have so many types that we need an
 	// unordered map
-	std::unordered_map<std::string_view, const Type*> structs_ {};
+	std::unordered_map<std::string_view, Type*> structs_ {};
 	const Type* main_ {};
 	BufferLayout bufferLayout_ {BufferLayout::std430}; // TODO
 };

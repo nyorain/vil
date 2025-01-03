@@ -149,6 +149,12 @@ void ShaderDebugger::draw() {
 		return;
 	}
 
+	if(sourceFilesIDs_.empty()) {
+		// TODO: allow to show and debug plain spirv without debug sources?
+		imGuiText("The shader contains no debug sources");
+		return;
+	}
+
 	auto* baseCmd = selection().command().back();
 	auto* stateCmd = deriveCast<const StateCmdBase*>(baseCmd);
 	dlg_assert(stateCmd->boundPipe());
@@ -438,6 +444,11 @@ const std::string& ShaderDebugger::fileName(u32 fileID) const {
 	dlg_assert(fileID < ir.sources.size());
 
 	auto& source = ir.sources[fileID];
+	if(source.fileID == 0u) {
+		static const auto empty = std::string {"unnamed"};
+		return empty;
+	}
+
 	auto& str = ir.get<spc::SPIRString>(source.fileID);
 	return str.str;
 }
