@@ -187,5 +187,4 @@ void SwaPlatform::activateWindow(bool doActivate) {
 	swa_window_show(this->window, doActivate);
 }
 
-
 } // namespace vil

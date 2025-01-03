@@ -8,7 +8,7 @@ v0.3:
 
 urgent, bugs:
 - [ ] fix standalone window version
-	- [ ] broken by commit that removed window creation from device init, issue 20
+	- [ ] broken by commit that removed window creation from device init, issue 21
 - [ ] fix image viewer layout
 - [ ] viewing texture in command viewer: show size of view (i.e. active mip level),
       not the texture itself. Can be confusing otherwise

@@ -83,6 +83,9 @@ args = cc.get_supported_arguments([
 	'-Wno-newline-eof', # needed for spvm TODO re-enable and fix!
 	'-Wno-nonnull-compare', # seems like clang bug
 
+	# gcc bug for optimized builds
+	'-Wno-error=array-bounds',
+
 	# to be compatible with msvc warning level on gcc/clang
 	# debatable whether the warnings are actually useful
 	# '-Wconversion',
