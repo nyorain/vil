@@ -619,6 +619,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 			copy.pLibraries = libHandles.data();
 			nci.pLibraryInfo = &copy;
 		}
+
+		nci.flags |= VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 	}
 
 	{

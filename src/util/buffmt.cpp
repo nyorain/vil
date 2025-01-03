@@ -82,8 +82,8 @@ Type* buildType(const spc::Compiler& compiler, u32 typeID,
 
 		dst.deco.arrayTypeID = typeID;
 
-		dlg_assert(stype->parent_type);
-		typeID = stype->parent_type;
+		dlg_assert(stype->self);
+		typeID = stype->self;
 		stype = &compiler.get_type(typeID);
 		meta = compiler.get_ir().find_meta(typeID);
 
@@ -448,6 +448,12 @@ void display(const char* name, const Type& type, ReadBuf data, u32 offset) {
 	}
 
 	// display array
+	// we want the dimension with the highest stride first, makes
+	// displaying easier.
+	ThreadMemScope tms;
+	span<u32> array = tms.copy(type.array);
+	std::reverse(array.begin(), array.end());
+
 	displayArrayDim(name, type, type.array, data, offset);
 }
 
@@ -479,6 +485,7 @@ unsigned size(const Type& t, BufferLayout bl) {
 		case Type::typeFloat:
 		case Type::typeUint:
 		case Type::typeInt: {
+			// TODO: matrixStride!
 			auto vec = t.vecsize;
 			if(bl == BufferLayout::std140 && vec == 3u) {
 				vec = 4u;

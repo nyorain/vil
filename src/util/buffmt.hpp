@@ -35,6 +35,7 @@ struct Decoration {
 	Flags flags {};
 };
 
+NYTL_FLAG_OPS(Decoration::Bits);
 static_assert(std::is_trivially_destructible_v<Decoration>);
 
 // TODO: rename or move to namespace, kinda unfitting here.
@@ -59,7 +60,7 @@ struct Type {
 
 	struct Member {
 		std::string_view name;
-		const Type* type;
+		Type* type;
 		u32 offset;
 	};
 
