@@ -327,7 +327,10 @@ Vec3ui ShaderDebugger::numWorkgroups() const {
 	Vec3ui numWGs {};
 	if(auto* idcmd = commandCast<const DispatchIndirectCmd*>(baseCmd); idcmd) {
 		auto hookState = selection().completedHookState();
-		dlg_assert(hookState);
+		if(!hookState) {
+			return {1u, 1u, 1u};
+		}
+
 		auto& ic = hookState->indirectCopy;
 		auto span = ic.data();
 		auto ecmd = read<VkDispatchIndirectCommand>(span);
@@ -351,6 +354,10 @@ ShaderDebugger::DrawInfo ShaderDebugger::drawInfo() const {
 		return {idcmd->drawCount, idcmd->indexed};
 	} else if(auto* idcmd = dynamic_cast<const DrawIndirectCountCmd*>(baseCmd); idcmd) {
 		auto hookState = selection().completedHookState();
+		if(!hookState) {
+			return {1u, false};
+		}
+
 		return {hookState->indirectCommandCount, idcmd->indexed};
 	} else if(auto* dcmd = dynamic_cast<const DrawMultiCmd*>(baseCmd); dcmd) {
 		return {u32(dcmd->vertexInfos.size()), false};
@@ -366,6 +373,9 @@ ShaderDebugger::DrawCmdInfo ShaderDebugger::drawCmdInfo(u32 cmd) const {
 
 	auto* baseCmd = selection().command().back();
 	auto hookState = selection().completedHookState();
+	if(!hookState) {
+		return {0u, 4u, 1u, 0u, 0u};
+	}
 
 	auto readIndirect = [&](bool indexed, u32 numCmds) {
 		auto& ic = hookState->indirectCopy;
@@ -722,9 +732,11 @@ void ShaderDebugger::updateHooks(CommandHook& hook) {
 	CommandHookUpdate hookUpdate;
 	hookUpdate.invalidate = true;
 	auto& ops = hookUpdate.newOps.emplace();
+	ops.copyIndirectCmd = true;
 	ops.shaderCapture = patch_.current.hook;
 	ops.shaderCaptureInput = Vec3u32(invocationID_);
 	hook.updateHook(std::move(hookUpdate));
+	selection().clearState();
 }
 
 bool ShaderDebugPatch::updateJobs(Device& dev) {
