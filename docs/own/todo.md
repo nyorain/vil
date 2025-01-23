@@ -292,6 +292,7 @@ patch capture shader debugging:
 - [ ] patching: only load/convert all the variables when we know that this
       shader should write stuff. Not in each invocation.
 	  (atm done in processCapture already)
+- [ ] fix matrix layout. They are broken in the UI (wrong offsets)
 - [x] matrix decoration in captured output
 - [ ] show global variables in captured output? (entry point interface vars)
 	- [ ] also builtins? maybe in different tab/node?
