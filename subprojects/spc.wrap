@@ -1,5 +1,5 @@
 [wrap-git]
 directory=spc
 url=https://github.com/nyorain/spc.git
-revision=main
+revision=356ff63e617e9510d7997b33a0127ec090dd369c
 
