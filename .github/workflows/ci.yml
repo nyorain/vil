@@ -220,7 +220,7 @@ jobs:
         -Dwerror=true
     - run: meson test -C build/ -v
     - name: Upload binaries
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Windows Binaries
         path: |
