@@ -173,6 +173,7 @@ struct ShaderPatch {
 
 	u32 const0 = u32(-1);
 	u32 const1 = u32(-1);
+	u32 constMax = u32(-1);
 
 	LinAllocator alloc {};
 	std::vector<u32> addInterface {};
@@ -401,8 +402,10 @@ void findDeclareBaseTypes(ShaderPatch& patch) {
 void declareConstants(ShaderPatch& patch) {
 	patch.const0 = ++patch.freeID;
 	patch.const1 = ++patch.freeID;
+	patch.constMax = ++patch.freeID;
 	patch.decl<spv::OpConstant>().push(patch.typeUint).push(patch.const0).push(0);
 	patch.decl<spv::OpConstant>().push(patch.typeUint).push(patch.const1).push(1);
+	patch.decl<spv::OpConstant>().push(patch.typeUint).push(patch.constMax).push(0xFFFFFFFFu);
 }
 
 struct VariableCapture {
@@ -454,11 +457,17 @@ ProcessedCapture processCaptureArray(ShaderPatch& patch, LinAllocScope& tms,
 		processCaptureArray(patch, tms, type, expanded, remArrayDims,
 			patch.compiler.get_type(spcType.parent_type));
 
+	auto dstSizeID = ++patch.freeID;
+	patch.decl<spv::OpConstant>()
+		.push(patch.typeUint)
+		.push(dstSizeID)
+		.push(u32(dimSize));
+
 	auto dstTypeID = ++patch.freeID;
 	patch.decl<spv::OpTypeArray>()
 		.push(dstTypeID)
 		.push(subCapture.typeID)
-		.push(u32(dimSize));
+		.push(dstSizeID);
 
 	type.deco.arrayStride = align(
 		size(type, patch.bufLayout),
@@ -1072,16 +1081,22 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 	auto blockWrite = ++freeID;
 	auto blockRest = ++freeID;
 
+	auto ignoreCheckVec = patch.genOp(spv::OpCompositeConstruct,
+		patch.typeUint3, patch.constMax, patch.constMax, patch.constMax);
 	auto writingInvocation = patch.genOp(spv::OpLoad, patch.typeUint3,
 		inputThreadAccess, spv::MemoryAccessAlignedMask, 16u);
 	auto currentInvocation = generateCurrentInvocation(patch,
 		entryPoint, stage);
-	auto vecEqual = patch.genOp(spv::OpIEqual, patch.typeBool3,
+	auto currentEqualWriting = patch.genOp(spv::OpIEqual, patch.typeBool3,
 		writingInvocation, currentInvocation);
-	auto allEqual = patch.genOp(spv::OpAll, patch.typeBool, vecEqual);
+	auto ignoreEqualWriting = patch.genOp(spv::OpIEqual, patch.typeBool3,
+		writingInvocation, ignoreCheckVec);
+	auto passedWriteTest = patch.genOp(spv::OpLogicalOr, patch.typeBool3,
+		currentEqualWriting, ignoreEqualWriting);
+	auto allPassed = patch.genOp(spv::OpAll, patch.typeBool, passedWriteTest);
 
 	patch.instr(spv::OpSelectionMerge, blockRest, spv::SelectionControlMaskNone);
-	patch.instr(spv::OpBranchConditional, allEqual, blockWrite, blockRest);
+	patch.instr(spv::OpBranchConditional, allPassed, blockWrite, blockRest);
 
 	// block for writing output
 	{

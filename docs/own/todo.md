@@ -274,6 +274,21 @@ patch capture shader debugging:
 	- [x] alternative positions: mouse cursor/last cliked mouse cursor
 	- [ ] allow to get there via a "debug this pixel" button
 	      in image viewer?
+- [ ] input tab: modus with no clamping
+	- [ ] allow to select which values should be fixed at all
+	      via special (0xFFFFFFFFu) shader value
+	      Already done for fragment->pos, should be done for all inputs
+	- [ ] with indirect commands: when not ready yet, don't do any
+	      clamping at all to not destroy input
+	- [ ] fix indirect command read assert for non-indirect commands
+	      Best fix is probably to just not set it when it's not indirect.
+- [ ] only show variables that shader has written to
+	- [ ] maybe allow to toggle this off in options?
+	- [ ] really check stores? could get complicated
+	      With DebugExt (slang annotations) could just check for Declare
+		  For full impl: Could use OpcodeHandler (see spirv_cross.hpp)
+		  Check for all stores whether there is path from that store
+		  to the debugged line. If so, show it.
 - [ ] indicate in UI when patch job is running.
       For raytracing pipelines, it can be quite a while.
 - [ ] improve patching speed: don't insert every instruction into spirv vector.

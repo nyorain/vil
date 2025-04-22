@@ -227,7 +227,6 @@ void ShaderDebugger::draw() {
 			patch_.line = currLine;
 			patch_.file = currentFile_;
 
-
 			auto& job = patch_.jobs.emplace_back();
 			job.data = std::make_unique<PatchJobData>();
 			job.data->pipe.reset(stateCmd->boundPipe());
@@ -264,6 +263,7 @@ void ShaderDebugger::draw() {
 	if(ImGui::BeginChild("Views")) {
 		if(ImGui::BeginTabBar("Tabs")) {
 			if(ImGui::BeginTabItem("Inputs")) {
+				dlg_assertl(dlg_level_warn, selection().completedHookState());
 				drawInputsTab();
 				ImGui::EndTabItem();
 			}
@@ -276,13 +276,25 @@ void ShaderDebugger::draw() {
 					auto data = state->shaderCapture.data();
 					auto io = read<Vec4u32>(data);
 
+					// TODO: format depending on debugged stage
 					imGuiText("hitcount for {}, {}, {}: {}",
 						io[0], io[1], io[2], io[3]);
+
+					if(!patch_.jobs.empty()) {
+						ImGui::SameLine();
+						ImGui::Indent();
+						imGuiText("[Patching...]");
+					}
 
 					if(io[3] >= 1u) {
 						displayTable("vars", base, data);
 					}
+				} else if(!patch_.jobs.empty()) {
+					imGuiText("[Patching...]");
+				} else {
+					imGuiText("[Waiting for capture...]");
 				}
+
 				ImGui::EndTabItem();
 			}
 
@@ -355,7 +367,7 @@ ShaderDebugger::DrawInfo ShaderDebugger::drawInfo() const {
 	} else if(auto* idcmd = dynamic_cast<const DrawIndirectCountCmd*>(baseCmd); idcmd) {
 		auto hookState = selection().completedHookState();
 		if(!hookState) {
-			return {1u, false};
+			return {1u, idcmd->indexed};
 		}
 
 		return {hookState->indirectCommandCount, idcmd->indexed};
@@ -518,8 +530,7 @@ void ShaderDebugger::drawInputsFragment() {
 	// TODO: only show this when rendering via overlay, does not
 	// make sense in separate window. We do not have this info
 	// here atm tho
-
-	if(ImGui::BeginCombo("Debug From", name(fragmentMode_))) {
+	if(ImGui::BeginCombo("Update position from", name(fragmentMode_))) {
 		for(auto mode = u32(FragmentMode::none); mode < u32(FragmentMode::count); ++mode) {
 			if(ImGui::Selectable(name(FragmentMode(mode)))) {
 				fragmentMode_ = FragmentMode(mode);
@@ -528,7 +539,25 @@ void ShaderDebugger::drawInputsFragment() {
 		ImGui::EndCombo();
 	}
 
-	ImGui::DragInt2("Position", (int*) &invocationID_);
+	// TODO: allow clamping to render pass framebuffer width/height
+
+	auto selectPosition = invocationID_[0] != 0xFFFFFFFFu;
+	if(ImGui::Checkbox("Position", &selectPosition)) {
+		if(selectPosition) {
+			invocationID_[0] = 0u;
+			invocationID_[1] = 0u;
+		}
+	}
+
+	if(selectPosition) {
+		ImGui::SameLine();
+		ImGui::DragInt2("##pos", (int*) &invocationID_);
+	} else {
+		invocationID_[0] = 0xFFFFFFFFu;
+		invocationID_[1] = 0xFFFFFFFFu;
+	}
+
+	invocationID_[2] = 0xFFFFFFFFu; // ignore
 }
 
 void ShaderDebugger::drawInputsVertex() {
@@ -561,7 +590,8 @@ void ShaderDebugger::drawInputsVertex() {
 			drawCmd.firstIni + drawCmd.numInis - 1, "%d", sliderFlags);
 		instanceID = v;
 	}
-	instanceID = std::min(instanceID, drawCmd.numInis - 1);
+	instanceID = std::clamp(instanceID, drawCmd.firstIni,
+		drawCmd.firstIni + drawCmd.numInis - 1);
 
 	// vertexID
 	auto v = int(vertexID);
@@ -571,12 +601,17 @@ void ShaderDebugger::drawInputsVertex() {
 		minVertID = drawCmd.vertexOffset;
 		maxVertID = minVertID + drawCmd.numVerts;
 	}
-	ImGui::DragInt("ID", &v, 1.f, minVertID, maxVertID - 1, "%d",
+	ImGui::DragInt("VertexID", &v, 1.f, minVertID, maxVertID - 1, "%d",
 		ImGuiSliderFlags_AlwaysClamp);
 	vertexID = v;
 }
 
 void ShaderDebugger::drawInputsCompute() {
+	// TODO Add "update from (clicked) cursor" dropdown like in fragments
+	// tab. For both, should check for dimensions (optionally?)
+	// e.g. when final target is up/downscaled by factor N, consider that.
+	// Alternatively: don't show it then.
+
 	using nytl::vec::cw::operators::operator*;
 
 	auto wgs = workgroupSize();
