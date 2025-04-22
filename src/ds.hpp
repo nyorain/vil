@@ -8,8 +8,6 @@
 #include <nytl/span.hpp>
 #include <vk/vulkan.h>
 
-#include <optional>
-#include <variant>
 #include <memory>
 #include <atomic>
 
@@ -38,6 +36,8 @@ bool needsImageView(VkDescriptorType);
 bool needsImageLayout(VkDescriptorType);
 bool needsDynamicOffset(VkDescriptorType);
 
+// Lifetime of these objects bound to lifetime of their DescriptorPool.
+// Pool mutex is locked when offset/size/set members are modified.
 struct DescriptorPoolSetEntry {
 	// NOTE: could compute offset, size from the referenced set.
 	// But it's not that expensive to store them here and might be faster.

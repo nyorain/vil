@@ -374,6 +374,7 @@ tryAccess(const BoundDescriptorSet&);
 // Asserts that it can be accessed. This method must only be used if
 // the validity of the BoundDescriptorSet is guaranteed, otherwise use
 // tryAccessLocked.
+// ONLY USE THIS DURING SUBMISSION
 DescriptorSet& access(const BoundDescriptorSet&);
 
 // Creates a snapshot of all descriptors relevant to the given command.

@@ -6,6 +6,7 @@
 #include <ds.hpp>
 #include <buffer.hpp>
 #include <string>
+#include <optional>
 
 namespace vil {
 

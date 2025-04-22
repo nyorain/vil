@@ -1264,9 +1264,15 @@ FindResult find(MatchType mt, const Command& srcParent, const Command& src,
 						continue;
 					}
 
-					// We can safely directly access the BoundDescriptorSet
-					// here since we can assume the given record to be valid.
-					auto& srcDs = access(srcBound[i]);
+					// We cannot rely on the src record being valid here
+					// srcLock will hold a look on the ds pool while
+					// dstLock below will hold a lock on a specific cow (valid
+					// lock order).
+					auto [srcDs, srcLock] = tryAccess(srcBound[i]);
+					if(!srcDs) {
+						continue;
+					}
+
 					auto dstDsCow = dstDsState.states.find(dstBound[i].dsEntry);
 					// TODO: we might not find it here due to the new
 					// descriptor set capturing rework.
@@ -1274,9 +1280,9 @@ FindResult find(MatchType mt, const Command& srcParent, const Command& src,
 						continue;
 					}
 
-					auto [dstDs, lock] = access(*dstDsCow->second);
+					auto [dstDs, dstLock] = access(*dstDsCow->second);
 
-					auto res = vil::match(mt, srcDs, dstDs);
+					auto res = vil::match(mt, *srcDs, dstDs);
 					m.match += res.match;
 					m.total += res.total;
 				}
