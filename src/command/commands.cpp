@@ -908,7 +908,7 @@ void BindVertexBuffersCmd::record(const Device& dev, VkCommandBuffer cb, u32) co
 	vkbuffers.reserve(buffers.size());
 	vkoffsets.reserve(buffers.size());
 	for(auto& b : buffers) {
-		vkbuffers.push_back(b.buffer->handle);
+		vkbuffers.push_back(b.buffer ? b.buffer->handle : VK_NULL_HANDLE);
 		vkoffsets.push_back(b.offset);
 	}
 
@@ -941,7 +941,7 @@ void BindVertexBuffersCmd::displayInspector(Gui& gui) const {
 
 // BindIndexBufferCmd
 void BindIndexBufferCmd::record(const Device& dev, VkCommandBuffer cb, u32) const {
-	dev.dispatch.CmdBindIndexBuffer(cb, buffer->handle, offset, indexType);
+	dev.dispatch.CmdBindIndexBuffer(cb, buffer ? buffer->handle : VK_NULL_HANDLE, offset, indexType);
 }
 
 // BindDescriptorSetCmd
