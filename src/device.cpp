@@ -19,6 +19,8 @@
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/hook.hpp>
+#include <commandHook/submission.hpp>
+#include <commandHook/record.hpp>
 #include <vk/dispatch_table_helper.h>
 
 #ifdef VIL_WITH_SWA
@@ -1222,10 +1224,46 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 }
 
 // util
+bool waitForSubmissionsUsingHandle(Device& dev, SubmissionBatch& batch, const Handle& handle) {
+	for(auto& submission : batch.submissions) {
+		if(auto* cmdSubmission = std::get_if<CommandSubmission>(&submission.data); cmdSubmission) {
+			for(auto& cb : cmdSubmission->cbs) {
+				if(!cb.hook) {
+					continue;
+				}
+
+				dlg_info("Waiting for hooked submission using destroyed handle");
+
+				if(contains(cb.hook->record->usedHandles, &handle)) {
+					auto res = dev.dispatch.WaitForFences(dev.handle, 1u, &batch.ourFence, true, UINT64_MAX);
+					if(res != VK_SUCCESS) {
+						if(res == VK_ERROR_DEVICE_LOST) {
+							onDeviceLost(dev);
+						}
+					}
+
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
 void notifyApiHandleDestroyedLocked(Device& dev, Handle& handle, VkObjectType type) {
 	assertOwned(dev.mutex);
 	if(dev.guiLocked()) {
 		dev.guiLocked()->apiHandleDestroyed(handle, type);
+	}
+
+	auto waited = false;
+	for(auto& batch : dev.pending) {
+		waited |= waitForSubmissionsUsingHandle(dev, *batch, handle);
+	}
+
+	if (waited) {
+		checkPendingSubmissionsLocked(dev);
 	}
 }
 

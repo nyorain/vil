@@ -96,6 +96,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 			if(src.stage == VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT ||
 					src.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT ||
+					src.stage == VK_SHADER_STAGE_GEOMETRY_BIT ||
 					src.stage == VK_SHADER_STAGE_MESH_BIT_NV) {
 				useXfb = false;
 				xfbVertexStageID = u32(-1);

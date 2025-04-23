@@ -115,6 +115,10 @@ struct CommandHookRecord {
 	CommandHookRecord* next {};
 	CommandHookRecord* prev {};
 
+	// application handles that we use in inserted GPU commands that might
+	// be destroyed by the application. Mainly relevant for update_unused_while_pending descriptors.
+	std::vector<const Handle*> usedHandles;
+
 public:
 	// see vertexCopy.glsl
 	// must match it!

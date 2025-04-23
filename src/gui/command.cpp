@@ -1755,7 +1755,7 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 			refStages[stageCount] = i;
 			++stageCount;
 
-			if(viewData_.ds.stage == stage.stage) {
+			if(viewData_.ds.stage == i) {
 				selectedValid = true;
 			}
 		}
@@ -1768,32 +1768,27 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 	}
 
 	if(!selectedValid) {
-		viewData_.ds.stage = sstages[refStages[0]].stage;
+		viewData_.ds.stage = refStages[0];
 	}
 
 	if(stageCount == 1u) {
 		return &sstages[refStages[0]];
 	}
 
-	if(ImGui::BeginCombo("Stage", vk::name(viewData_.ds.stage))) {
+	auto& stage = sstages[viewData_.ds.stage];
+	auto preview = dlg::format("{}: {}", stage.entryPoint, vk::name(stage.stage));
+	if(ImGui::BeginCombo("Stage", preview.c_str())) {
 		for(auto id : refStages) {
-			auto name = vk::name(sstages[id].stage);
-			if(ImGui::Selectable(name)) {
-				viewData_.ds.stage = sstages[id].stage;
+			auto name = dlg::format("{}: {}", sstages[id].entryPoint, vk::name(sstages[id].stage));
+			if(ImGui::Selectable(name.c_str())) {
+				viewData_.ds.stage = id;
 			}
 		}
 
 		ImGui::EndCombo();
 	}
 
-	for(auto& stage : sstages) {
-		if(stage.stage == viewData_.ds.stage) {
-			return &stage;
-		}
-	}
-
-	dlg_error("unreachable");
-	return nullptr;
+	return &sstages[viewData_.ds.stage];
 }
 
 CommandSelection& CommandViewer::selection() const {

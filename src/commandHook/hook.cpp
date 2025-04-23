@@ -455,8 +455,71 @@ void CommandHook::hook(QueueSubmitter& subm) {
 	// section here as well and quite expensive.
 	std::lock_guard lock(dev.mutex);
 
+	LinAllocScope localMatchMem(matchAlloc_);
+
+	bool trySkipHook = target_.type == TargetType::none;
+	const CommandRecord* frameDstRecord {};
+	span<const CommandSectionMatch> frameRecMatchData {};
+	auto swapchain = dev_->swapchainLocked();
+	if(target_.type == TargetType::inFrame) {
+		dlg_assertm(swapchain, "no swapchain anymore");
+		if(swapchain) {
+			dlg_assert(target_.submissionID < target_.frame.size());
+			if(subm.queue == target_.frame[target_.submissionID].queue) {
+				// get the current frame
+				std::vector<FrameSubmission> currFrame =
+					swapchain->nextFrameSubmissions.batches;
+
+				// add the new submissions
+				auto& curr = currFrame.emplace_back();
+				curr.queue = subm.queue;
+				curr.submissionID = subm.globalSubmitID;
+				for(auto& sub : subm.dstBatch->submissions) {
+					auto& cmdSub = std::get<CommandSubmission>(sub.data);
+					for(auto& cb : cmdSub.cbs) {
+						dlg_assertm(!cb.hook, "Hooking already hooked submission?!");
+						auto rec = cb.cb->lastRecordPtrLocked();
+						dlg_assert(rec);
+						curr.submissions.push_back(std::move(rec));
+					}
+				}
+
+				// Match current frame against hook target frame.
+				// Since we don't have the full current frame here yet and want
+				// to avoid false negatives, we trim the target frame up unto
+				// the target submission.
+				auto trimmedTargetFrame = span<FrameSubmission>(target_.frame);
+				auto off = target_.submissionID;
+				dlg_assert(off < target_.frame.size());
+				trimmedTargetFrame = trimmedTargetFrame.first(off + 1);
+
+				ThreadMemScope tms;
+				auto frameMatch = match(localMatchMem, tms, matchType, target_.frame, currFrame);
+
+				for(auto& submMatch : frameMatch.matches) {
+					if(submMatch.a != &target_.frame[target_.submissionID]) {
+						continue;
+					}
+
+					for(auto& recMatch : submMatch.matches) {
+						if(recMatch.a == target_.record) {
+							frameDstRecord = recMatch.b;
+							frameRecMatchData = recMatch.matches;
+							break;
+						}
+
+					}
+
+					break;
+				}
+			}
+		}
+
+		trySkipHook = !frameDstRecord;
+	}
+
 	// fast early-outs
-	if(localCaptures_.empty() && !forceHook.load()) {
+	if(trySkipHook && localCaptures_.empty() && !forceHook.load()) {
 		auto hasBuildCmd = false;
 		for(auto [subID, sub] : enumerate(subm.dstBatch->submissions)) {
 			auto& cmdSub = std::get<CommandSubmission>(sub.data);
@@ -464,77 +527,17 @@ void CommandHook::hook(QueueSubmitter& subm) {
 				auto& rec = *cb.cb->lastRecordLocked();
 				if(rec.buildsAccelStructs) {
 					hasBuildCmd = true;
-				}
-			}
-		}
-
-		if(!hasBuildCmd && (target_.type == TargetType::none)) {
-			return;
-		}
-	}
-
-	LinAllocScope localMatchMem(matchAlloc_);
-
-	const CommandRecord* frameDstRecord {};
-	span<const CommandSectionMatch> frameRecMatchData {};
-	auto swapchain = dev_->swapchainLocked();
-	if(target_.type == TargetType::inFrame) {
-		if(!swapchain) {
-			dlg_warn("no swapchain anymore");
-			return;
-		}
-
-		// different queue
-		dlg_assert(target_.submissionID < target_.frame.size());
-		if(subm.queue != target_.frame[target_.submissionID].queue) {
-			return;
-		}
-
-		// get the current frame
-		std::vector<FrameSubmission> currFrame =
-			swapchain->nextFrameSubmissions.batches;
-
-		// add the new submissions
-		auto& curr = currFrame.emplace_back();
-		curr.queue = subm.queue;
-		curr.submissionID = subm.globalSubmitID;
-		for(auto& sub : subm.dstBatch->submissions) {
-			auto& cmdSub = std::get<CommandSubmission>(sub.data);
-			for(auto& cb : cmdSub.cbs) {
-				dlg_assertm(!cb.hook, "Hooking already hooked submission?!");
-				auto rec = cb.cb->lastRecordPtrLocked();
-				dlg_assert(rec);
-				curr.submissions.push_back(std::move(rec));
-			}
-		}
-
-		// Match current frame against hook target frame.
-		// Since we don't have the full current frame here yet and want
-		// to avoid false negatives, we trim the target frame up unto
-		// the target submission.
-		auto trimmedTargetFrame = span<FrameSubmission>(target_.frame);
-		auto off = target_.submissionID;
-		dlg_assert(off < target_.frame.size());
-		trimmedTargetFrame = trimmedTargetFrame.first(off + 1);
-
-		ThreadMemScope tms;
-		auto frameMatch = match(localMatchMem, tms, matchType, target_.frame, currFrame);
-
-		for(auto& submMatch : frameMatch.matches) {
-			if(submMatch.a != &target_.frame[target_.submissionID]) {
-				continue;
-			}
-
-			for(auto& recMatch : submMatch.matches) {
-				if(recMatch.a == target_.record) {
-					frameDstRecord = recMatch.b;
-					frameRecMatchData = recMatch.matches;
 					break;
 				}
-
 			}
 
-			break;
+			if(hasBuildCmd) {
+				break;
+			}
+		}
+
+		if(!hasBuildCmd) {
+			return;
 		}
 	}
 
