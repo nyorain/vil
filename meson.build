@@ -93,7 +93,7 @@ args = cc.get_supported_arguments([
 
 # defines
 args += [
-	# '-DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=1',
+	#'-DSPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS=1',
 ]
 
 if get_option('buildtype') == 'debug'

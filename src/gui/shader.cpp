@@ -196,15 +196,17 @@ void ShaderDebugger::draw() {
 		}
 	}
 
-	if(ImGui::BeginCombo("File", fileName(currentFile_).c_str())) {
-		for(auto& id : sourceFilesIDs_) {
-			if(ImGui::Selectable(fileName(id).c_str())) {
-				currentFile_ = id;
-				textedit_.SetText(fileContent(currentFile_));
+	if(sourceFilesIDs_.size() > 1u) {
+		if(ImGui::BeginCombo("File", fileName(currentFile_).c_str())) {
+			for(auto& id : sourceFilesIDs_) {
+				if(ImGui::Selectable(fileName(id).c_str())) {
+					currentFile_ = id;
+					textedit_.SetText(fileContent(currentFile_));
+				}
 			}
-		}
 
-		ImGui::EndCombo();
+			ImGui::EndCombo();
+		}
 	}
 
 	// shader view
@@ -730,7 +732,7 @@ void ShaderDebugger::drawInputsRaytrace() {
 	imGuiText("Thread:");
 	ImGui::PushID("GlobalInv");
 
-	float sizeX;
+	float sizeX = 0.f;
 	auto sliderFlags = ImGuiSliderFlags_AlwaysClamp;
 
 	auto* baseCmd = selection().command().back();

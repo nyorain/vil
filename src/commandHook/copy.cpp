@@ -699,6 +699,11 @@ void performCopy(Device& dev, VkCommandBuffer cb, const Buffer& src,
 void initAndCopy(Device& dev, VkCommandBuffer cb, OwnBuffer& dst,
 		VkBufferUsageFlags addFlags, Buffer& src,
 		VkDeviceSize offset, VkDeviceSize size, u32 queueFamsBitset) {
+	dlg_assert(offset < src.ci.size);
+	if (size == VK_WHOLE_SIZE) {
+		size = src.ci.size - offset;
+	}
+
 	addFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	dst.ensure(dev, size, addFlags, queueFamsBitset);
 	performCopy(dev, cb, src, offset, dst, 0, size);
