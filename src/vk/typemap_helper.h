@@ -30,7 +30,7 @@
  ****************************************************************************/
 
 #pragma once
-#include <vulkan/vulkan.h>
+#include <vk/vulkan.h>
 
 // These empty generic templates are specialized for each type with sType
 // members and for each sType -- providing a two way map between structure
@@ -2569,6 +2569,7 @@ template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR> 
 };
 
 #endif // VK_USE_PLATFORM_WIN32_KHR
+/*
 // Map type VkQueueFamilyQueryResultStatusPropertiesKHR to id VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR
 template <> struct LvlTypeMap<VkQueueFamilyQueryResultStatusPropertiesKHR> {
     static const VkStructureType kSType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR;
@@ -3054,6 +3055,7 @@ template <> struct LvlTypeMap<VkVideoDecodeH264DpbSlotInfoKHR> {
 template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_DPB_SLOT_INFO_KHR> {
     typedef VkVideoDecodeH264DpbSlotInfoKHR Type;
 };
+*/
 
 #ifdef VK_USE_PLATFORM_WIN32_KHR
 // Map type VkImportMemoryWin32HandleInfoKHR to id VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR
@@ -3434,6 +3436,7 @@ template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FE
     typedef VkPhysicalDeviceShaderClockFeaturesKHR Type;
 };
 
+/*
 // Map type VkVideoDecodeH265ProfileInfoKHR to id VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR
 template <> struct LvlTypeMap<VkVideoDecodeH265ProfileInfoKHR> {
     static const VkStructureType kSType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR;
@@ -3487,6 +3490,7 @@ template <> struct LvlTypeMap<VkVideoDecodeH265DpbSlotInfoKHR> {
 template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_DPB_SLOT_INFO_KHR> {
     typedef VkVideoDecodeH265DpbSlotInfoKHR Type;
 };
+*/
 
 // Map type VkFragmentShadingRateAttachmentInfoKHR to id VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR
 template <> struct LvlTypeMap<VkFragmentShadingRateAttachmentInfoKHR> {
@@ -3650,6 +3654,7 @@ template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEAT
     typedef VkPhysicalDevicePresentIdFeaturesKHR Type;
 };
 
+/*
 // Map type VkVideoEncodeInfoKHR to id VK_STRUCTURE_TYPE_VIDEO_ENCODE_INFO_KHR
 template <> struct LvlTypeMap<VkVideoEncodeInfoKHR> {
     static const VkStructureType kSType = VK_STRUCTURE_TYPE_VIDEO_ENCODE_INFO_KHR;
@@ -3748,6 +3753,7 @@ template <> struct LvlTypeMap<VkVideoEncodeSessionParametersFeedbackInfoKHR> {
 template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_FEEDBACK_INFO_KHR> {
     typedef VkVideoEncodeSessionParametersFeedbackInfoKHR Type;
 };
+*/
 
 // Map type VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR to id VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR
 template <> struct LvlTypeMap<VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR> {
@@ -3947,6 +3953,7 @@ template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_
     typedef VkPhysicalDeviceComputeShaderDerivativesPropertiesKHR Type;
 };
 
+/*
 // Map type VkVideoDecodeAV1ProfileInfoKHR to id VK_STRUCTURE_TYPE_VIDEO_DECODE_AV1_PROFILE_INFO_KHR
 template <> struct LvlTypeMap<VkVideoDecodeAV1ProfileInfoKHR> {
     static const VkStructureType kSType = VK_STRUCTURE_TYPE_VIDEO_DECODE_AV1_PROFILE_INFO_KHR;
@@ -4108,6 +4115,7 @@ template <> struct LvlTypeMap<VkVideoInlineQueryInfoKHR> {
 template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_VIDEO_INLINE_QUERY_INFO_KHR> {
     typedef VkVideoInlineQueryInfoKHR Type;
 };
+*/
 
 // Map type VkCalibratedTimestampInfoKHR to id VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_KHR
 template <> struct LvlTypeMap<VkCalibratedTimestampInfoKHR> {
@@ -4136,6 +4144,7 @@ template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_BIND_DESCRIPTOR_BUFFER_EMBEDDED
     typedef VkBindDescriptorBufferEmbeddedSamplersInfoEXT Type;
 };
 
+/*
 // Map type VkVideoEncodeQuantizationMapCapabilitiesKHR to id VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUANTIZATION_MAP_CAPABILITIES_KHR
 template <> struct LvlTypeMap<VkVideoEncodeQuantizationMapCapabilitiesKHR> {
     static const VkStructureType kSType = VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUANTIZATION_MAP_CAPABILITIES_KHR;
@@ -4225,6 +4234,7 @@ template <> struct LvlTypeMap<VkVideoFormatAV1QuantizationMapPropertiesKHR> {
 template <> struct LvlSTypeMap<VK_STRUCTURE_TYPE_VIDEO_FORMAT_AV1_QUANTIZATION_MAP_PROPERTIES_KHR> {
     typedef VkVideoFormatAV1QuantizationMapPropertiesKHR Type;
 };
+*/
 
 // Map type VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR to id VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_RELAXED_EXTENDED_INSTRUCTION_FEATURES_KHR
 template <> struct LvlTypeMap<VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR> {

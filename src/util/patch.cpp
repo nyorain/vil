@@ -878,7 +878,8 @@ PatchResult patchShaderCapture(const Device& dev, const spc::Compiler& compiler,
 		dlg_debug("no exact match found: {} vs {}", line, lb->line);
 	}
 
-	assert(lb->function);
+	dlg_assert_or(lb->function, return {});
+	dlg_assert_or(lb->block, return {});
 
 	patch.copy = ir.spirv;
 	patch.offsets = ir.section_offsets;
@@ -1221,7 +1222,7 @@ struct PatchedStages {
 };
 
 PatchedStages patchStages(span<const PipelineShaderStage> stages,
-		Device& dev, VkShaderStageFlagBits dstStage, u32 stageID,
+		Device& dev, VkShaderStageFlagBits dstStageType, u32 stageID,
 		span<const u32> patchedSpv) {
 	dlg_assert(stageID < stages.size());
 	PatchedStages ret;
@@ -1237,7 +1238,7 @@ PatchedStages patchStages(span<const PipelineShaderStage> stages,
 		span<const u32> spirv;
 
 		if(stageID == i) {
-			dlg_assert(srcStage.stage == dstStage);
+			dlg_assert(srcStage.stage == dstStageType);
 			spirv = patchedSpv;
 		} else {
 			// normally, we use a mutex to access 'compiled'. But here

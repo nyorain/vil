@@ -8882,6 +8882,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateSharedSwapchainsKHR(
 #define VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME "VK_KHR_sampler_mirror_clamp_to_edge"
 
 
+/*
 // VK_KHR_video_queue is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_video_queue 1
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkVideoSessionKHR)
@@ -9718,6 +9719,7 @@ typedef struct VkVideoDecodeH264DpbSlotInfoKHR {
     const StdVideoDecodeH264ReferenceInfo*    pStdReferenceInfo;
 } VkVideoDecodeH264DpbSlotInfoKHR;
 
+*/
 
 
 // VK_KHR_dynamic_rendering is a preprocessor guard. Do not pass it to API calls.
@@ -10850,6 +10852,7 @@ typedef struct VkPhysicalDeviceShaderClockFeaturesKHR {
 
 
 
+/*
 // VK_KHR_video_decode_h265 is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_video_decode_h265 1
 #include "vk_video/vulkan_video_codec_h265std_decode.h"
@@ -10901,6 +10904,7 @@ typedef struct VkVideoDecodeH265DpbSlotInfoKHR {
     const StdVideoDecodeH265ReferenceInfo*    pStdReferenceInfo;
 } VkVideoDecodeH265DpbSlotInfoKHR;
 
+*/
 
 
 // VK_KHR_global_priority is a preprocessor guard. Do not pass it to API calls.
@@ -11438,6 +11442,7 @@ typedef struct VkPhysicalDevicePresentIdFeaturesKHR {
 } VkPhysicalDevicePresentIdFeaturesKHR;
 
 
+/*
 
 // VK_KHR_video_encode_queue is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_video_encode_queue 1
@@ -11618,7 +11623,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdEncodeVideoKHR(
     VkCommandBuffer                             commandBuffer,
     const VkVideoEncodeInfoKHR*                 pEncodeInfo);
 #endif
-
+*/
 
 // VK_KHR_synchronization2 is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_synchronization2 1
@@ -12208,6 +12213,7 @@ typedef struct VkPhysicalDeviceComputeShaderDerivativesPropertiesKHR {
 
 
 
+/*
 // VK_KHR_video_decode_av1 is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_video_decode_av1 1
 #include "vk_video/vulkan_video_codec_av1std.h"
@@ -12464,7 +12470,7 @@ typedef struct VkVideoInlineQueryInfoKHR {
     uint32_t           firstQuery;
     uint32_t           queryCount;
 } VkVideoInlineQueryInfoKHR;
-
+*/
 
 
 // VK_KHR_vertex_attribute_divisor is a preprocessor guard. Do not pass it to API calls.
@@ -12644,6 +12650,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorBufferEmbeddedSamplers2EXT(
 #endif
 
 
+/*
 // VK_KHR_video_encode_quantization_map is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_video_encode_quantization_map 1
 #define VK_KHR_VIDEO_ENCODE_QUANTIZATION_MAP_SPEC_VERSION 2
@@ -12712,6 +12719,7 @@ typedef struct VkVideoFormatAV1QuantizationMapPropertiesKHR {
     VkVideoEncodeAV1SuperblockSizeFlagsKHR    compatibleSuperblockSizes;
 } VkVideoFormatAV1QuantizationMapPropertiesKHR;
 
+*/
 
 
 // VK_KHR_shader_relaxed_extended_instruction is a preprocessor guard. Do not pass it to API calls.
@@ -12723,7 +12731,6 @@ typedef struct VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR {
     void*              pNext;
     VkBool32           shaderRelaxedExtendedInstruction;
 } VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR;
-
 
 
 // VK_KHR_maintenance7 is a preprocessor guard. Do not pass it to API calls.
