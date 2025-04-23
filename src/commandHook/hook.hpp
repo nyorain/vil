@@ -7,12 +7,12 @@
 #include <nytl/bytes.hpp>
 #include <util/ownbuf.hpp>
 #include <util/util.hpp>
+#include <vkutil/pipe.hpp>
 #include <frame.hpp>
 #include <cb.hpp>
 #include <vk/vulkan.h>
 #include <vector>
 #include <memory>
-#include <variant>
 #include <optional>
 #include <string>
 
@@ -56,14 +56,30 @@ struct CommandHookTarget {
 	u32 submissionID {u32(-1)};
 };
 
+struct ShaderCaptureHook {
+	vku::Pipeline pipe {};
+	OwnBuffer shaderTableMapping {};
+	std::atomic<u32> refCount {};
+};
+
 // Defines which data to retrieve
 struct CommandHookOps {
 	// Which operations/state copies to peform.
 	// When updating e.g. the id of the ds to be copied, all existing
 	// recordings have to be invalidated!
-	bool copyVertexBuffers {}; // could specify the needed subset in future
-	bool copyIndexBuffers {};
+
+	bool copyVertexInput {};
+	u32 vertexInputCmd {}; // for multi draw, specifies the command for which to copy
+	u32 indexCountHint {u32(-1)};
+	u32 vertexCountHint {u32(-1)};
+	u32 instanceCountHint {u32(-1)};
+
 	bool copyXfb {}; // transform feedback
+	u32 xfbSizeHint {u32(-1)};
+
+	IntrusivePtr<ShaderCaptureHook> shaderCapture {};
+	Vec3u32 shaderCaptureInput {}; // globalThreadID/vertexID/...
+
 	bool copyIndirectCmd {};
 	std::vector<DescriptorCopyOp> descriptorCopies;
 	std::vector<AttachmentCopyOp> attachmentCopies; // only for cmd inside renderpass
@@ -159,6 +175,7 @@ struct CommandHook {
 public:
 	// maximum number of completed hooks we store at a time.
 	static constexpr auto maxCompletedHooks = 8u;
+	static constexpr auto shaderCaptureSize = 64 * 1024u;
 
 	// TODO: make setting?
 	static constexpr auto matchType = MatchType::mixed;
@@ -217,11 +234,16 @@ public:
 	std::vector<LocalCapture*> localCaptures() const;
 	std::vector<LocalCapture*> localCapturesOnceCompleted() const;
 
+	VkDeviceAddress shaderCaptureAddress() const { return captureAddress_; }
+	VkBuffer shaderCaptureBuffer() const { return captureBuffer_.buf; }
+
 private:
 	// Initializes the pipelines and data needed for acceleration
 	// structure copies
 	void initAccelStructCopy(Device& dev);
+	void initShaderTableHook(Device& dev);
 	void initImageCopyPipes(Device& dev);
+	void initVertexCopy(Device& dev);
 
 	// Checks whether the copied descriptors in the associated
 	// record have changed (via update-after-bind) since the hooked
@@ -260,6 +282,9 @@ private:
 	// TODO: wip hack
 	std::vector<CompletedHook> keepAliveLC_;
 
+	OwnBuffer captureBuffer_;
+	VkDeviceAddress captureAddress_;
+
 	// pipelines needed for the acceleration structure build copy
 public: // TODO, for copying. Maybe just move them to Device?
 	VkPipelineLayout accelStructPipeLayout_ {};
@@ -269,6 +294,34 @@ public: // TODO, for copying. Maybe just move them to Device?
 	VkDescriptorSetLayout sampleImageDsLayout_ {};
 	VkPipelineLayout sampleImagePipeLayout_ {};
 	VkPipeline sampleImagePipes_[ShaderImageType::count] {};
+
+	// = Indirect vertex copy pipes =
+	// Transforms a DrawIndirectCommand into an indirect dispatch cmd
+	// for copyVertices
+	vku::DynamicPipe writeVertexCmd_;
+	vku::DynamicPipe writeVertexCmdCountBuf_;
+	// Transforms a DrawIndexedIndirectCommand into an indirect dispatch cmd
+	// for processIndices
+	vku::DynamicPipe writeIndexCmd_;
+	vku::DynamicPipe writeIndexCmdCountBuf_;
+	// iterates over indices, copies them and computes min/max bounds
+	vku::DynamicPipe processIndices16_;
+	vku::DynamicPipe processIndices32_;
+	// given index bounds, writes an indirect dispatch command for
+	// copyVertices. Also decides if vertices are copied as they are in the
+	// vertex buffer or indices are resolved
+	vku::DynamicPipe writeVertexCmdIndexed_;
+	// Copies the vertices from the vertex buffer (and potentially resolves
+	// indices in the process)
+	vku::DynamicPipe copyVerticesByte16_;
+	vku::DynamicPipe copyVerticesUint16_;
+	vku::DynamicPipe copyVerticesByte32_;
+	vku::DynamicPipe copyVerticesUint32_;
+
+	vku::DynamicPipe hookShaderTable_;
+
+	// TODO: merge with Device DescriptorPool somehow
+	vku::DescriptorAllocator dsAlloc_;
 };
 
 } // namespace vil

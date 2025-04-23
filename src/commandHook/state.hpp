@@ -110,6 +110,8 @@ struct CommandHookState {
 	CopiedTransferIO transferDstBefore {};
 	CopiedTransferIO transferDstAfter {};
 
+	OwnBuffer shaderCapture {};
+
 	CommandHookState();
 	~CommandHookState();
 };

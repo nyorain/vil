@@ -28,9 +28,8 @@
 #include <ds.hpp>
 #include <shader.hpp>
 #include <rp.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv_cross.hpp>
 #include <imgui/imgui_internal.h>
-#include <bitset>
 
 #ifdef VIL_COMMAND_CALLSTACKS
 	#include <backward/resolve.hpp>
@@ -323,8 +322,6 @@ void CommandViewer::updateFromSelector(bool forceUpdateHook) {
 					|| stateCmd->boundPipe() != lastStateCmd->boundPipe()) {
 				selectCommandView = true;
 				shaderDebugger_.unselect();
-			} else if(isLocalCapture && sel.completedHookState()) {
-				shaderDebugger_.initVarMap();
 			}
 
 			break;
@@ -1346,7 +1343,10 @@ void CommandViewer::displayVertexViewer(Draw& draw) {
 				viewData_.mesh.output = false;
 				updateHook();
 			} else {
-				vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				auto uh = vertexViewer_.displayInput(draw, *drawCmd, *hookState, gui_->dt());
+				if(uh) {
+					updateHook();
+				}
 			}
 
 			ImGui::EndTabItem();
@@ -1539,17 +1539,17 @@ void CommandViewer::displayCommand() {
 		}
 	}
 
-	// TODO: WIP
-	if(command_.back()->category() == CommandCategory::dispatch) {
-		auto* dcmd = deriveCast<const DispatchCmdBase*>(command_.back());
-		if(ImGui::Button("Debug shader")) {
-			if(dcmd->state->pipe) {
-				auto mod = copySpecializeSpirv(dcmd->state->pipe->stage);
-				shaderDebugger_.select(std::move(mod));
-				view_ = IOView::shader;
-				doUpdateHook_ = true;
-				return;
-			}
+	if(isStateCmd(*command_.back())) {
+		auto* dcmd = deriveCast<const StateCmdBase*>(command_.back());
+		// NOTE: we do not support traceRaysIndirect as of now.
+		// This would make shader table hooking significantly more complicated.
+		auto supported = dcmd->category() != CommandCategory::traceRays ||
+			dcmd->type() == CommandType::traceRays;
+		if(supported && dcmd->boundPipe() && ImGui::Button("Debug shader")) {
+			shaderDebugger_.select(*dcmd->boundPipe());
+			view_ = IOView::shader;
+			doUpdateHook_ = true;
+			return;
 		}
 	}
 
@@ -1608,14 +1608,14 @@ void CommandViewer::updateHook() {
 	auto& hook = *gui_->dev().commandHook;
 	auto* cmd = command_.empty() ? nullptr : command_.back();
 	auto stateCmd = dynamic_cast<const StateCmdBase*>(cmd);
-	auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
-	auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
-	auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
+	// auto drawIndexedCmd = commandCast<const DrawIndexedCmd*>(cmd);
+	// auto drawIndirectCmd = commandCast<const DrawIndirectCmd*>(cmd);
+	// auto drawIndirectCountCmd = commandCast<const DrawIndirectCountCmd*>(cmd);
 
 	auto indirectCmd = cmd && isIndirect(*cmd);
-	auto indexedCmd = drawIndexedCmd ||
-		(drawIndirectCmd && drawIndirectCmd->indexed) ||
-		(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
+	// auto indexedCmd = drawIndexedCmd ||
+	// 	(drawIndirectCmd && drawIndirectCmd->indexed) ||
+	// 	(drawIndirectCountCmd && drawIndirectCountCmd->indexed);
 
 	CommandHook::Ops ops {};
 	bool setOps = true;
@@ -1675,13 +1675,15 @@ void CommandViewer::updateHook() {
 			ops.descriptorCopies = {dsCopy};
 			break;
 		} case IOView::mesh:
+			ops.copyIndirectCmd = indirectCmd;
 			if(viewData_.mesh.output) {
 				ops.copyXfb = true;
-				ops.copyIndirectCmd = indirectCmd;
 			} else {
-				ops.copyVertexBuffers = true;
-				ops.copyIndexBuffers = indexedCmd;
-				ops.copyIndirectCmd = indirectCmd;
+				// TODO: set buffer size hints!
+				dlg_info("TODO: set buffer size hints");
+
+				ops.copyVertexInput = true;
+				ops.vertexInputCmd = vertexViewer_.selectedCommand();
 			}
 			break;
 		case IOView::pushConstants:
@@ -1753,7 +1755,7 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 			refStages[stageCount] = i;
 			++stageCount;
 
-			if(viewData_.ds.stage == stage.stage) {
+			if(viewData_.ds.stage == i) {
 				selectedValid = true;
 			}
 		}
@@ -1766,32 +1768,27 @@ const PipelineShaderStage* CommandViewer::displayDescriptorStageSelector(
 	}
 
 	if(!selectedValid) {
-		viewData_.ds.stage = sstages[refStages[0]].stage;
+		viewData_.ds.stage = refStages[0];
 	}
 
 	if(stageCount == 1u) {
 		return &sstages[refStages[0]];
 	}
 
-	if(ImGui::BeginCombo("Stage", vk::name(viewData_.ds.stage))) {
+	auto& stage = sstages[viewData_.ds.stage];
+	auto preview = dlg::format("{}: {}", stage.entryPoint, vk::name(stage.stage));
+	if(ImGui::BeginCombo("Stage", preview.c_str())) {
 		for(auto id : refStages) {
-			auto name = vk::name(sstages[id].stage);
-			if(ImGui::Selectable(name)) {
-				viewData_.ds.stage = sstages[id].stage;
+			auto name = dlg::format("{}: {}", sstages[id].entryPoint, vk::name(sstages[id].stage));
+			if(ImGui::Selectable(name.c_str())) {
+				viewData_.ds.stage = id;
 			}
 		}
 
 		ImGui::EndCombo();
 	}
 
-	for(auto& stage : sstages) {
-		if(stage.stage == viewData_.ds.stage) {
-			return &stage;
-		}
-	}
-
-	dlg_error("unreachable");
-	return nullptr;
+	return &sstages[viewData_.ds.stage];
 }
 
 CommandSelection& CommandViewer::selection() const {

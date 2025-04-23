@@ -96,6 +96,8 @@ struct AccelStructState {
 	IntrusivePtr<AccelStructCow> cow {};
 
 	// remember last submission that updated it?
+
+	// smth like bool buildPending;
 };
 
 struct AccelStructCow {

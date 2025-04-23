@@ -19,6 +19,8 @@
 #include <util/util.hpp>
 #include <gui/gui.hpp>
 #include <commandHook/hook.hpp>
+#include <commandHook/submission.hpp>
+#include <commandHook/record.hpp>
 #include <vk/dispatch_table_helper.h>
 
 #ifdef VIL_WITH_SWA
@@ -205,6 +207,10 @@ bool hasExt(span<const VkExtensionProperties> extProps, const char* name) {
 	}
 
 	return false;
+}
+
+bool hasExt(span<const char*> exts, const char* name) {
+	return contains(exts, std::string_view(name));
 }
 
 #ifdef VIL_WITH_SWA
@@ -505,6 +511,18 @@ VkResult doCreateDevice(
 	auto hasTransformFeedbackApi = enableTransformFeedback &&
 		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+	auto has16BitStorageApi =
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		((ini.vulkan11 && phdevProps.apiVersion >= VK_API_VERSION_1_1) ||
+			hasExt(supportedExts, VK_KHR_16BIT_STORAGE_EXTENSION_NAME));
+	auto has8BitStorageApi =
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		((ini.vulkan12 && phdevProps.apiVersion >= VK_API_VERSION_1_2) ||
+			hasExt(supportedExts, VK_KHR_8BIT_STORAGE_EXTENSION_NAME));
+	auto hasDrawParamsApi =
+		fpPhdevFeatures2 && fpPhdevProps2 &&
+		((ini.vulkan11 && phdevProps.apiVersion >= VK_API_VERSION_1_1) ||
+			hasExt(supportedExts, VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME));
 	auto hasDeviceFaultApi = enableDeviceFault &&
 		fpPhdevFeatures2 && fpPhdevProps2 &&
 		hasExt(supportedExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
@@ -517,23 +535,31 @@ VkResult doCreateDevice(
 	auto hasTransformFeedback = false;
 	auto hasDeviceFault = false;
 	auto hasAddressBindingReport = false;
+	bool hasStorage8 = false;
+	bool hasStorage16 = false;
+	bool hasDrawParams = false;
 
 	// find generally relevant feature structs in chain
 	VkPhysicalDeviceVulkan11Features features11 {};
 	VkPhysicalDeviceVulkan12Features features12 {};
 	VkPhysicalDeviceVulkan13Features features13 {};
 
+	VkPhysicalDeviceVulkan11Features* inVulkan11 = nullptr;
 	VkPhysicalDeviceVulkan12Features* inVulkan12 = nullptr;
 	VkPhysicalDeviceTimelineSemaphoreFeatures* inTS = nullptr;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT* inXFB = nullptr;
 	VkPhysicalDeviceBufferDeviceAddressFeatures* inBufAddr = nullptr;
 	VkPhysicalDeviceFaultFeaturesEXT* inDF = nullptr;
 	VkPhysicalDeviceAddressBindingReportFeaturesEXT* inABR = nullptr;
+	VkPhysicalDevice16BitStorageFeatures* inStorage16 {};
+	VkPhysicalDevice8BitStorageFeatures* inStorage8 {};
+	VkPhysicalDeviceShaderDrawParametersFeatures* inDrawParams {};
 
 	auto* link = static_cast<VkBaseOutStructure*>(pNext);
 	while(link) {
 		if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES) {
 			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_1);
+			inVulkan11 = reinterpret_cast<VkPhysicalDeviceVulkan11Features*>(link);
 			features11 = *reinterpret_cast<VkPhysicalDeviceVulkan11Features*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
 			dlg_assert(phdevProps.apiVersion >= VK_API_VERSION_1_2);
@@ -552,6 +578,12 @@ VkResult doCreateDevice(
 			inDF = reinterpret_cast<VkPhysicalDeviceFaultFeaturesEXT*>(link);
 		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT) {
 			inABR = reinterpret_cast<VkPhysicalDeviceAddressBindingReportFeaturesEXT*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES) {
+			inStorage8 = reinterpret_cast<VkPhysicalDevice8BitStorageFeatures*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES) {
+			inStorage16 = reinterpret_cast<VkPhysicalDevice16BitStorageFeatures*>(link);
+		} else if(link->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES) {
+			inDrawParams = reinterpret_cast<VkPhysicalDeviceShaderDrawParametersFeatures*>(link);
 		}
 
 		link = (static_cast<VkBaseOutStructure*>(link->pNext));
@@ -561,10 +593,10 @@ VkResult doCreateDevice(
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT tfFeatures {};
 	VkPhysicalDeviceFaultFeaturesEXT dfFeatures {};
 	VkPhysicalDeviceAddressBindingReportFeaturesEXT abrFeatures {};
-	if(hasTimelineSemaphoresApi || hasTransformFeedbackApi || hasDeviceFaultApi) {
-		dlg_assert(fpPhdevFeatures2);
-		dlg_assert(fpPhdevProps2);
-
+	VkPhysicalDevice16BitStorageFeatures storage16Features {};
+	VkPhysicalDevice8BitStorageFeatures storage8Features {};
+	VkPhysicalDeviceShaderDrawParametersFeatures drawParamsFeatures {};
+	if(fpPhdevFeatures2 && fpPhdevProps2) {
 		// query features support
 		VkPhysicalDeviceFeatures2 features2 {};
 		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -576,19 +608,31 @@ VkResult doCreateDevice(
 
 		if(hasTransformFeedbackApi) {
 			tfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT;
-			tfFeatures.pNext = features2.pNext;
-			features2.pNext = &tfFeatures;
+			addChain(features2, tfFeatures);
+		}
+
+		if(has8BitStorageApi) {
+			storage8Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES;
+			addChain(features2, storage8Features);
+		}
+
+		if(has16BitStorageApi) {
+			storage16Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES;
+			addChain(features2, storage16Features);
+		}
+
+		if(hasDrawParamsApi) {
+			drawParamsFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
+			addChain(features2, drawParamsFeatures);
 		}
 
 		if(hasDeviceFaultApi) {
 			dfFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
-			dfFeatures.pNext = features2.pNext;
-			features2.pNext = &dfFeatures;
+			addChain(features2, dfFeatures);
 
 			if(hasAddressBindingReportAPI) {
 				abrFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT;
-				abrFeatures.pNext = features2.pNext;
-				features2.pNext = &abrFeatures;
+				addChain(features2, abrFeatures);
 			}
 		}
 
@@ -598,24 +642,18 @@ VkResult doCreateDevice(
 			hasTimelineSemaphores = true;
 
 			// check if application already has a feature struct holding it
-			auto addLink = true;
 			if(inVulkan12) {
-				addLink = false;
 				inVulkan12->timelineSemaphore = true;
 			} else if(inTS) {
-				addLink = false;
 				inTS->timelineSemaphore = true;
-			}
-
-			if(addLink) {
-				tsFeatures.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &tsFeatures;
+			} else {
+				addChain(nci, tsFeatures);
 			}
 
 			// we might need to enable the extension
 			if(!ini.vulkan12 || phdevProps.apiVersion < VK_API_VERSION_1_2) {
 				dlg_assert(hasExt(supportedExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME));
-				if(!contains(newExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
+				if(!hasExt(newExts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME)) {
 					newExts.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
 				}
 			}
@@ -625,21 +663,52 @@ VkResult doCreateDevice(
 			hasTransformFeedback = true;
 
 			// check if application already has a feature struct holding it
-			auto addLink = true;
 			if(inXFB) {
-				addLink = false;
 				inXFB->transformFeedback = true;
-			}
-
-			if(addLink) {
+			} else {
 				tfFeatures.geometryStreams = false;
-				tfFeatures.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &tfFeatures;
+				addChain(nci, tfFeatures);
 			}
 
 			// also need to enable extension
-			if(!contains(newExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) {
+			if(!hasExt(newExts, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME)) {
 				newExts.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+			}
+		}
+
+		if(storage8Features.storageBuffer8BitAccess) {
+			hasStorage8 = true;
+
+			if(inStorage8) {
+				inStorage8->storageBuffer8BitAccess = true;
+			} else if(inVulkan12) {
+				inVulkan12->storageBuffer8BitAccess = true;
+			} else {
+				addChain(nci, storage8Features);
+			}
+		}
+
+		if(storage16Features.storageBuffer16BitAccess) {
+			hasStorage16 = true;
+
+			if(inStorage16) {
+				inStorage16->storageBuffer16BitAccess = true;
+			} else if(inVulkan11) {
+				inVulkan11->storageBuffer16BitAccess = true;
+			} else {
+				addChain(nci, storage16Features);
+			}
+		}
+
+		if(drawParamsFeatures.shaderDrawParameters) {
+			hasDrawParams = true;
+
+			if(inDrawParams) {
+				inDrawParams->shaderDrawParameters = true;
+			} else if(inVulkan11) {
+				inVulkan11->shaderDrawParameters = true;
+			} else {
+				addChain(nci, drawParamsFeatures);
 			}
 		}
 
@@ -650,12 +719,11 @@ VkResult doCreateDevice(
 			if(inDF) {
 				inDF->deviceFault = true;
 			} else {
-				dfFeatures.pNext = const_cast<void*>(nci.pNext);
-				nci.pNext = &dfFeatures;
+				addChain(nci, dfFeatures);
 			}
 
 			// also need to enable extension
-			if(!contains(newExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+			if(!hasExt(newExts, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
 				newExts.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 			}
 
@@ -668,27 +736,22 @@ VkResult doCreateDevice(
 				if(inABR) {
 					inABR->reportAddressBinding = true;
 				} else {
-					abrFeatures.pNext = const_cast<void*>(nci.pNext);
-					nci.pNext = &abrFeatures;
+					addChain(nci, abrFeatures);
 				}
 
 				// also need to enable extension
-				if(!contains(newExts, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)) {
+				if(!hasExt(newExts, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)) {
 					newExts.push_back(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
 				}
 			}
 		}
 
-		// TODO: could find out props, e.g. for transform feedback
-		// VkPhysicalDeviceProperties2 phProps2 {};
-		// phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-		// fpPhdevProps2(phdev, &phProps2);
 	}
 
 	// = Useful extensions =
 	auto checkEnable = [&](const char* name) {
 		if(hasExt(supportedExts, name)) {
-			if(!contains(newExts, name)) {
+			if(!contains(newExts, std::string_view(name))) {
 				newExts.push_back(name);
 			}
 
@@ -700,8 +763,19 @@ VkResult doCreateDevice(
 
 	checkEnable(VK_AMD_SHADER_INFO_EXTENSION_NAME);
 
+	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps {};
 	if(fpPhdevProps2) {
 		checkEnable(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+
+		VkPhysicalDeviceProperties2 phProps2 {};
+		phProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+
+		if(hasExt(newExts, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+			rtProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+			addChain(phProps2, rtProps);
+		}
+
+		fpPhdevProps2(phdev, &phProps2);
 	}
 
 	// == Create Device! ==
@@ -731,12 +805,16 @@ VkResult doCreateDevice(
 	dev.phdev = phdev;
 	dev.handle = devHandle;
 	dev.props = phdevProps;
+	dev.rtProps = rtProps;
 
 	dev.timelineSemaphores = hasTimelineSemaphores;
 	dev.transformFeedback = hasTransformFeedback;
 	dev.nonSolidFill = pEnabledFeatures10->fillModeNonSolid;
 	dev.shaderStorageImageWriteWithoutFormat = pEnabledFeatures10->shaderStorageImageWriteWithoutFormat;
 	dev.extDeviceFault = hasDeviceFault;
+	dev.storage8Bit = hasStorage8;
+	dev.storage16Bit = hasStorage16;
+	dev.shaderDrawParameters = hasDrawParams;
 
 	if(hasAddressBindingReport) {
 		dev.addressMap = std::make_unique<DeviceAddressMap>();
@@ -1146,10 +1224,46 @@ VKAPI_ATTR void VKAPI_CALL DestroyDevice(
 }
 
 // util
+bool waitForSubmissionsUsingHandle(Device& dev, SubmissionBatch& batch, const Handle& handle) {
+	for(auto& submission : batch.submissions) {
+		if(auto* cmdSubmission = std::get_if<CommandSubmission>(&submission.data); cmdSubmission) {
+			for(auto& cb : cmdSubmission->cbs) {
+				if(!cb.hook) {
+					continue;
+				}
+
+				dlg_info("Waiting for hooked submission using destroyed handle");
+
+				if(contains(cb.hook->record->usedHandles, &handle)) {
+					auto res = dev.dispatch.WaitForFences(dev.handle, 1u, &batch.ourFence, true, UINT64_MAX);
+					if(res != VK_SUCCESS) {
+						if(res == VK_ERROR_DEVICE_LOST) {
+							onDeviceLost(dev);
+						}
+					}
+
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
 void notifyApiHandleDestroyedLocked(Device& dev, Handle& handle, VkObjectType type) {
 	assertOwned(dev.mutex);
 	if(dev.guiLocked()) {
 		dev.guiLocked()->apiHandleDestroyed(handle, type);
+	}
+
+	auto waited = false;
+	for(auto& batch : dev.pending) {
+		waited |= waitForSubmissionsUsingHandle(dev, *batch, handle);
+	}
+
+	if (waited) {
+		checkPendingSubmissionsLocked(dev);
 	}
 }
 

@@ -92,6 +92,7 @@ struct GraphicsPipeline : Pipeline {
 	bool hasTessellation : 1;
 	bool hasDepthStencil : 1;
 	bool hasMeshShader : 1;
+	bool needsColorBlend : 1;
 
 	IntrusivePtr<XfbPatchDesc> xfbPatch; // valid when we injected xfb
 
@@ -117,6 +118,8 @@ struct RayTracingPipeline : Pipeline {
 	std::vector<PipelineShaderStage> stages;
 	std::vector<Group> groups;
 	std::unordered_set<VkDynamicState> dynamicState;
+	std::vector<std::byte> groupHandles;
+	u32 maxPipelineRayRecursionDepth;
 };
 
 // API

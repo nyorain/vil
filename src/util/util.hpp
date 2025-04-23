@@ -111,6 +111,12 @@ void ensureSize(C& container, std::size_t size) {
 	}
 }
 
+template<typename Base, typename Link>
+void addChain(Base& base, Link& link) {
+	link.pNext = const_cast<void*>(base.pNext);
+	base.pNext = &link;
+}
+
 template<typename CI>
 bool hasChain(const CI& ci, VkStructureType sType) {
 	auto* link = static_cast<const VkBaseInStructure*>(ci.pNext);
@@ -322,6 +328,14 @@ T deriveCast(O* ptr) {
 	static_assert(std::is_base_of_v<O, std::remove_pointer_t<T>>);
 	dlg_assertt(("deriveCast"), !ptr || dynamic_cast<T>(ptr));
 	return static_cast<T>(ptr);
+}
+
+template<typename T, typename O>
+T deriveCast(O& obj) {
+	static_assert(std::is_reference_v<T>);
+	static_assert(std::is_base_of_v<O, std::remove_reference_t<T>>);
+	dlg_assertt(("deriveCast"), dynamic_cast<std::remove_reference_t<T>*>(&obj));
+	return static_cast<T>(obj);
 }
 
 // ValidExpression impl

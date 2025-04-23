@@ -6,8 +6,8 @@
 #include <ds.hpp>
 #include <accelStruct.hpp>
 #include <threadContext.hpp>
-#include <spirv-cross/spirv.hpp>
-#include <spirv-cross/spirv_cross.hpp>
+#include <spirv.hpp>
+#include <spirv_cross.hpp>
 #include <util/spirv.hpp>
 #include <util/util.hpp>
 #include <util/dlg.hpp>
@@ -96,6 +96,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 
 			if(src.stage == VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT ||
 					src.stage == VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT ||
+					src.stage == VK_SHADER_STAGE_GEOMETRY_BIT ||
 					src.stage == VK_SHADER_STAGE_MESH_BIT_NV) {
 				useXfb = false;
 				xfbVertexStageID = u32(-1);
@@ -273,10 +274,10 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(
 		// be null e.g. if rasterizerDiscardEnable is true.
 		// We can't rely on comparison of pColorBlendState to null here,
 		// might be set to invalid pointer.
-		auto needsColorBlend =
+		pipe.needsColorBlend =
 			colorAttachmentCount != 0u &&
 			!pci.pRasterizationState->rasterizerDiscardEnable;
-		if(needsColorBlend) {
+		if(pipe.needsColorBlend) {
 			dlg_assert(pci.pColorBlendState);
 			pipe.blendAttachments = {
 				pci.pColorBlendState->pAttachments,
@@ -619,6 +620,8 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 			copy.pLibraries = libHandles.data();
 			nci.pLibraryInfo = &copy;
 		}
+
+		nci.flags |= VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 	}
 
 	{
@@ -645,6 +648,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		pipe.dev = &dev;
 		pipe.handle = pPipelines[i];
 		pipe.layout = getPtr(dev, ci.layout);
+		pipe.maxPipelineRayRecursionDepth = ci.maxPipelineRayRecursionDepth;
+
+		// TODO: support, for shader patching
+		dlg_assertm(!ci.pLibraryInfo, "not supported");
+		dlg_assertm(!ci.pLibraryInterface, "not supported");
 
 		if(ci.pDynamicState) {
 			pipe.dynamicState = {
@@ -656,6 +664,12 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		for(auto i = 0u; i < ci.stageCount; ++i) {
 			pipe.stages.emplace_back(dev, ci.pStages[i]);
 		}
+
+		dlg_assert(dev.rtProps.shaderGroupHandleSize);
+		pipe.groupHandles.resize(dev.rtProps.shaderGroupHandleSize * ci.groupCount);
+		VK_CHECK(dev.dispatch.GetRayTracingShaderGroupHandlesKHR(dev.handle,
+			pipe.handle, 0u, ci.groupCount, pipe.groupHandles.size(),
+			pipe.groupHandles.data()));
 
 		for(auto i = 0u; i < ci.groupCount; ++i) {
 			auto& src = ci.pGroups[i];

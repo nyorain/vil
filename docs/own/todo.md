@@ -15,8 +15,6 @@ urgent, bugs:
 	- [ ] maybe show full image size on hover?
 	- [ ] also fix mip/layer selector that sometimes automatically resets itself
 		  (seen with slice 3D selector e.g. npt surfel lookup tex)
-- [ ] finish submissions in order, see CommandHookSubmission::finish
-      comment for accelStruct captures
 - [ ] immediately free HookedRecords that are not to be re-used in finish.
 
 - [ ] test more on laptop, intel gpu
@@ -53,15 +51,18 @@ urgent, bugs:
 	- [ ] a lot of descriptor code was probably never really tested for array bindings.
 	      Make sure everything works.
 
+- [ ] revisit timestamp queries. Shouldn't the first query be done
+      *before* the hooked cmd and not after??
 - [ ] fix syncval hazards in gui (try out commands, e.g. transfer UpdateBuffer)
 - [ ] windows performance is *severely* bottlenecked by system allocations from LinearAllocator.
       Increased it temporarily but should probably just roll own block sub-allocator
 	  (try to test with RDR2 again)
 
 new, workstack:
-- [ ] add mode where hooking is disabled. Commands can still be inspected
-	but, like, just statically.
-- [ ] add isStateCmd(const Command&) and remove remaining command dynamic casts
+- [ ] use isStateCmd(const Command&) to remove remaining command dynamic casts
+- [ ] generate structSize in util/util.cpp, it is incomplete at the moment.
+      Also problematic that we cannot know the size of some platform-specific
+	  structs. Important for chain copying!
 - [ ] handle imgui cursor-to-be-shown and clipboard
 	- [ ] make sure to pass it via interface
 	- [ ] with hooked overlay, we have to implement it ourselves
@@ -204,6 +205,7 @@ On vertices and where to capture them:
 	      captured vertex buffers but can't really know/handle that
 		  while drawing the captured vertices
 	- [ ] show in UI if we truncate anything
+- [ ] fix flipY recenter
 - [ ] vertex viewer: show pages
 - [ ] vertex viewer: make rows selectable, show vertex in 3D view
 - [ ] figure out why copying attachments/descriptors shows weird/incorrect
@@ -243,64 +245,101 @@ Freeze/selection changes:
 		  Should at least document it somewhere.
 		  Might also happen when the window is minimized on some platforms?
 
-shader debugger:
-- [x] cleanup/fix freezing as described in node 2235
-- [x] implement breakpoints
-	- [x] issue: we currently check for equality for breakpoints.
-	      breakpoints for lines that don't have code associated with them
-		  in spirv won't trigger. Need to do a more proper check
-	- [ ] clean up breakpoint handling
-- [ ] factor out retrieving descriptor from varID+indicies as used
-      in load/store/arrayLength callbacks. Code duplication atm.
-- [ ] set spec constants for shader module in gui shader debugger.
-      Test with shader from tkn/iro
-- [ ] detect unsupported features/capabilities (such as subgroup ops)
-      and display "unsupported feature: X" error message in gui
-- [ ] test, fix, cleanup handling of multiple files. Broken
-      with breakpoints and their visualization.
-- [ ] add UI for selecting workgroup/invocation
-- [x] return workgroup size from shader in loadBuiltin
-	- [ ] TODO: test
-- [x] add support for loading push constants
-	- [ ] TODO: test. Can we write unit tests for this? Should be possible
-- [ ] support vertex shaders
-	- [ ] correctly wire up the vertex input. And add ui for selecting
-	      instance/vertex id to debug.
-- [ ] support fragment shaders
-	- [ ] figure out how to wire up input. Sketch: allow to select the
-	      pixel, then select the primitive in the current draw call
-		  covering the pixel (if more than one; or always use the last
-		  one if it makes sense via vulkan drawing order guarantees?).
-		  We then interpolate the input we got from xfb and use that
-		  as input to the fragment shader.
-	- geometry and tesselation shaders can remain unsupported for now.
-- [ ] support ray tracing pipelines
-	- [ ] as with compute shaders, we want to select the dispatch index
-	- [ ] add support in spvm. Not sure about callback interface, probably
-	      just pass the parameters from TraceRay to the application callback
-		  and then let the application return the hit?
-		  Hm, no, it's probably better to let the application then handle
-		  everything (i.e. invoking all the required intersection/hit/miss shaders)
-		  and just return/modify the ray payload, right?
-	- [ ] aside from debugging the shaders (and the acceleration structure
-		  hitting process), allow to visualize the rays (we can probably
-		  just do a very small number of rays) in the acceleration
-		  structure.
-	- [ ] if we are serious about it, we need to really build our own
-	      host-side acceleration structures
-- [ ] add proper stack trace (ui tab)
-	- [ ] allow to jump to positions in stack trace
-- [ ] allow to view all sources in ui
-- [ ] figure out where to put the "Debug shader" buttons
-- [ ] add support for stores. And make sure reading variables later
-      on return the correct values. Might need changes in spvm, the
-	  was_loaded optimization is incorrect in that case.
-	  Maybe set was_loaded to false when the OpVariable was stored to?
-- [ ] clean up implementation. How we gather/display variables
-      Make sure the variable display tree nodes can opened while the
-	  state is being recreated (with "refresh" set. Should probably just
-	  use the name, not its pointer as well. Figure out why we did
-	  it for buffmt. arrays?)
+patch capture shader debugging:
+- [x] add support for structs and arrays
+- [x] improve filtering of variables so that it works well for glslang and slang
+- [x] add support for dispatch thread ID selection
+	- [x] add branch to command patching
+	      branch based on root constant? or specialization constant?
+		  or just load information dynamically from the capture buffer?
+	- [x] re-add the selection widget (from debug emulation cpp)
+	- [x] remove "allow outside of bounds exec"
+	- [ ] instead allow a mode where just any thread that hits the point
+	      writes info (via atomics). Connected to idea below,
+		  implementation could be the same.
+		  The writing thread could then overwrite the input ID, allowing
+		  the ui to read it later on.
+- [x] in captured output, write an additional bool on whether the
+      breakpoint was even hit. Clear it to 0 before recording dst command
+	- [x] when not hit: do not show variables in output, instead state
+	      that breakpoint is not hit.
+- [x] add more general widget for selecting a stage of a pipe in the debugger
+- [x] add support for vertex shader debugging
+	- [x] branch based on vertexID
+	- [x] widget to select vertexID. See vertexViewer branch
+- [ ] add support for pixel shader debugging
+	- [x] branch based on pixel position
+	- [ ] allow to select sample for msaa
+	- [x] widget to select pixel position
+	- [x] alternative positions: mouse cursor/last cliked mouse cursor
+	- [ ] allow to get there via a "debug this pixel" button
+	      in image viewer?
+- [ ] input tab: modus with no clamping
+	- [ ] allow to select which values should be fixed at all
+	      via special (0xFFFFFFFFu) shader value
+	      Already done for fragment->pos, should be done for all inputs
+	- [ ] with indirect commands: when not ready yet, don't do any
+	      clamping at all to not destroy input
+	- [ ] fix indirect command read assert for non-indirect commands
+	      Best fix is probably to just not set it when it's not indirect.
+- [ ] only show variables that shader has written to
+	- [ ] maybe allow to toggle this off in options?
+	- [ ] really check stores? could get complicated
+	      With DebugExt (slang annotations) could just check for Declare
+		  For full impl: Could use OpcodeHandler (see spirv_cross.hpp)
+		  Check for all stores whether there is path from that store
+		  to the debugged line. If so, show it.
+- [ ] indicate in UI when patch job is running.
+      For raytracing pipelines, it can be quite a while.
+- [ ] improve patching speed: don't insert every instruction into spirv vector.
+      First gather everything (for every section etc) then do one
+	  patch-build pass.
+	  Current approach copies again and again, problematic for large shaders.
+	  (NOTE: we already do this now for in-function instructions.
+	   But should be done on per-section basis for decls, too)
+- [ ] potential CRASH: we assume the pipeLayout still has a valid handle.
+	  this might not be the case. We could recreate it, though.
+	  Or make sure it is kept alive?
+- [ ] separate function arguments and local vars in UI
+- [ ] toggle via UI: also capture all local named SSA IDs
+- [ ] only add breakpoint when there is prev/curr/next line marker.
+      Not across functions etc.
+- [ ] patching: only load/convert all the variables when we know that this
+      shader should write stuff. Not in each invocation.
+	  (atm done in processCapture already)
+- [ ] fix matrix layout. They are broken in the UI (wrong offsets)
+- [x] matrix decoration in captured output
+- [ ] show global variables in captured output? (entry point interface vars)
+	- [ ] also builtins? maybe in different tab/node?
+- [ ] ray tracing debugging
+	- [x] branch in all shaders via LaunchID
+	- [ ] additionally: allow to branch via ahs/chs inputs
+	- [x] hook shader tables
+	      create reverse mapping inside of pipeline
+		  then, when hooking the traceRayCommand, create own shader table
+		  on the fly where the hooked shaders are replaced?
+- [ ] fix CRASH potential in PatchJobData::pipe. Should not be
+      IntrusiveDerivedPtr, something else. Should keep it alive in
+	  a different way.
+- [x] fix terrible pipeline-keepAlive ShaderPatch hack
+- [x] convert booleans in captured outputs
+	- [x] recursively, in structs.
+- [x] fix phi instructions in following blocks
+- [ ] allow showing all sources of all stages, inserting the breakpoint into all
+      Shaders should then probably output more about their origin.
+- [ ] additional shader debug selects (vertex/fragment)
+	- [ ] Layer
+	- [ ] ViewIndex
+	- [ ] ViewportIndex
+- [ ] improve patch compile time by passing in basePipelineHandle
+      Difficult: we have to gurantee that the handle stays alive while
+	  the pipeline is created.
+	- [ ] maybe create the inner handle as an intrusive ptr as well?
+	      can we really always use a basePipelineHandle tho?
+		  What if related resources got destroyed?
+	- meh does not help much (nvidia, linux). This time is mainly
+	  problematic for ray tracing pipelines.
+	  [ ] Try out pipeline library
 
 spvm:
 - [x] Add OpSpecConstant* support

@@ -82,6 +82,7 @@ struct Device {
 
 	VkPhysicalDeviceProperties props {};
 	VkPhysicalDeviceMemoryProperties memProps {};
+	VkPhysicalDeviceRayTracingPipelinePropertiesKHR rtProps {};
 
 	// features enabled by application
 	VkPhysicalDeviceFeatures enabledFeatures {};
@@ -95,7 +96,10 @@ struct Device {
 	bool transformFeedback {}; // whether we have transformFeedback
 	bool nonSolidFill {}; // whether we have nonSolidFill mode
 	bool bufferDeviceAddress {}; // whether we have bufferDeviceAddress
+	bool storage8Bit {};
+	bool storage16Bit {};
 	bool shaderStorageImageWriteWithoutFormat {};
+	bool shaderDrawParameters {};
 	bool extDeviceFault {}; // whether EXT_device_fault was enabled
 
 	// Only valid when EXT_device_address_binding_report enabled.
@@ -103,6 +107,11 @@ struct Device {
 
 	// Whether we are in integration testing mode
 	bool testing {};
+
+	// Whether indirect vertex copy is enabled.
+	// Will modify usage flags resources are created with
+	static constexpr auto indirectVertexCopy = true;
+
 	std::atomic<bool> doFullSync {};
 	std::atomic<bool> captureCmdStack {};
 

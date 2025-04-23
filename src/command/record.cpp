@@ -93,6 +93,7 @@ void bind(Device& dev, VkCommandBuffer cb, const ComputeState& state) {
 		// anymore at the moment.
 		if(state.pipe && !compatibleForSetN(*state.pipe->layout,
 				*bds.layout, i)) {
+			dlg_info("incompatible set {}", i);
 			break;
 		}
 

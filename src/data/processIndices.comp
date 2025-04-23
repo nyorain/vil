@@ -1,0 +1,58 @@
+#version 460
+
+layout(local_size_x = 64) in;
+
+// TODO: could find a way to not need this, but will
+// make code a lot more complicated (especially for non-4-byte-aligned
+// vertex strides).
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_GOOGLE_include_directive : require
+
+#define u16 uint16_t
+#define u8 uint8_t
+
+#include "vertexCopy.glsl"
+
+// defined during compilation for the different variants
+#ifndef IndexType
+#define IndexType uint
+// #define IndexType u16
+#endif // IndexType
+
+layout(set = 0, binding = 0) readonly buffer Indices {
+	IndexType srcIndices[];
+};
+
+layout(set = 0, binding = 1) buffer OutData {
+	Metadata info;
+	IndexType dstIndices[];
+};
+
+void main() {
+	const uint invocOff = gl_GlobalInvocationID.x * indicesPerInvoc;
+	const uint cmdIndexOffset = info.copyTypeOrIndexOffset;
+	const uint srcOffset = cmdIndexOffset + invocOff;
+	const uint dstOffset = invocOff;
+
+	const uint indicesEnd = info.copyTypeOrIndexOffset + min(info.indexCount, srcIndices.length());
+	if(srcOffset >= indicesEnd) {
+		return;
+	}
+
+	uint ownMax = 0u;
+	uint ownMin = 0xFFFFFFFFu;
+
+	for(uint i = 0u; i < indicesPerInvoc && srcOffset + i < indicesEnd; ++i) {
+		uint index = uint(srcIndices[srcOffset + i]);
+		ownMin = min(ownMin, index);
+		ownMax = max(ownMax, index);
+
+		if(dstOffset + i < dstIndices.length()) {
+			dstIndices[dstOffset + i] = IndexType(index);
+		}
+	}
+
+	atomicMax(info.maxIndex, ownMax);
+	atomicMin(info.minIndex, ownMin);
+}
+
