@@ -157,6 +157,7 @@ void InitCallstack()
     SymInitialize( GetCurrentProcess(), nullptr, true );
     SymSetOptions( SYMOPT_LOAD_LINES );
 
+	/*
     DWORD needed;
     LPVOID dev[4096];
     if( EnumDeviceDrivers( dev, sizeof(dev), &needed ) != 0 )
@@ -208,12 +209,14 @@ void InitCallstack()
         s_krnlCacheCnt = cnt;
         std::sort( s_krnlCache, s_krnlCache + s_krnlCacheCnt, []( const KernelDriver& lhs, const KernelDriver& rhs ) { return lhs.addr > rhs.addr; } );
     }
+	*/
 
     s_modCache = (FastVector<ModuleCache>*)tracy_malloc( sizeof( FastVector<ModuleCache> ) );
     new(s_modCache) FastVector<ModuleCache>( 512 );
 
     HANDLE proc = GetCurrentProcess();
     HMODULE mod[1024];
+	/*
     if( EnumProcessModules( proc, mod, sizeof( mod ), &needed ) != 0 )
     {
         const auto sz = needed / sizeof( HMODULE );
@@ -247,6 +250,7 @@ void InitCallstack()
             }
         }
     }
+	*/
 
 #ifdef TRACY_DBGHELP_LOCK
     DBGHELP_UNLOCK;
