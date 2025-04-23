@@ -77,6 +77,9 @@ FindResult find(MatchType,
 	float threshold = 0.0);
 
 // Matcher utility
+float eval(const MatchVal& m);
+bool valid(const MatchVal& m);
+
 template<typename T>
 bool add(MatchVal& m, const T& a, const T& b, float weight = 1.f) {
 	auto same = (a == b);
@@ -86,6 +89,7 @@ bool add(MatchVal& m, const T& a, const T& b, float weight = 1.f) {
 }
 
 inline bool noMatch(const MatchVal& m) {
+	dlg_assert(valid(m));
 	return m.total < 0.f;
 }
 
@@ -108,9 +112,6 @@ void addNonNull(MatchVal& m, T* a, T* b, float weight = 1.f) {
 }
 
 bool addNonEmpty(MatchVal&, std::string_view str1, std::string_view str2, float weight = 1.f);
-
-float eval(const MatchVal& m);
-bool valid(const MatchVal& m);
 
 void add(MatchVal& m,
 	const VkImageSubresourceRange& a, const VkImageSubresourceRange& b,

@@ -105,7 +105,7 @@ private:
 
 			// image view state
 			// buffer view state
-			VkShaderStageFlagBits stage;
+			unsigned stage;
 		} ds;
 
 		struct {

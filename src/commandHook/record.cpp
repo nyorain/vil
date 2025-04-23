@@ -782,19 +782,6 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 		return;
 	}
 
-	if(ds.layout->bindings[bindingID].flags & VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) {
-		// TODO: we could make this work but it's not easy. The main problem is
-		// that we have no guarantees for the handle we are reading here staying valid.
-		// At the time of the submission, a binding could e.g. contain a buffer
-		// that gets destroyed during submission (valid usage for update_unused_while_pending)
-		// so we can't just use it here.
-		// We would have to track the update_unused_while_pending handles that are used
-		// somehow and when one of them is destroyed, wait for the associated
-		// hooked submission. No way around this I guess.
-		dlg_trace("Trying to read content of UPDATE_UNUSED_WHILE_PENDING descriptor");
-		return;
-	}
-
 	if(elemID >= descriptorCount(ds, bindingID)) {
 		dlg_trace("elemID out of range");
 		return;
@@ -840,6 +827,7 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 
 				// TODO: select exact layer/mip in view range via gui
 				auto subres = imgView->ci.subresourceRange;
+				usedHandles.push_back(imgView->img);
 
 				if(imageAsBuffer) {
 					// we don't ever use that buffer in a submission again
@@ -865,6 +853,8 @@ void CommandHookRecord::copyDs(Command& bcmd, RecordInfo& info,
 	} else if(cat == DescriptorCategory::buffer) {
 		auto& elem = buffers(ds, bindingID)[elemID];
 		dlg_assert(elem.buffer);
+
+		usedHandles.push_back(elem.buffer);
 
 		// calculate offset, taking dynamic offset into account
 		auto off = elem.offset;
