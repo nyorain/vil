@@ -14,6 +14,7 @@ on:
       - "**.frag"
       - "**meson.build"
       - "**ci.yml"
+      - "subprojects/**"
   pull_request:
     branches: [ main ]
     paths:
@@ -26,6 +27,8 @@ on:
       - "**.vert"
       - "**.frag"
       - "*meson.build"
+      - "**ci.yml"
+      - "subprojects/**"
 
 # NOTE: we currently don't test all permutations of {release, debug, ...},
 # {tracy, !tracy}, {gcc, clang, msvc, msvc-ninja} since it would be many
