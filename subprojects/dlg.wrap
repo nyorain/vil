@@ -1,5 +1,0 @@
-[wrap-git]
-directory=dlg
-url=https://github.com/nyorain/dlg.git
-# main branch, with assert_or
-revision=72dfcc858c040c54a6a0b88fcb7e70ee186d3167
