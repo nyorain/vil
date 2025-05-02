@@ -1,0 +1,21 @@
+[submodule "subprojects/dlg"]
+	path = subprojects/dlg
+	url = https://github.com/nyorain/dlg
+[submodule "subprojects/spc"]
+	path = subprojects/spc
+	url = https://github.com/nyorain/spc
+[submodule "subprojects/swa"]
+	path = subprojects/swa
+	url = https://github.com/nyorain/swa
+[submodule "subprojects/pml"]
+	path = subprojects/pml
+	url = https://github.com/nyorain/pml
+[submodule "subprojects/imgio"]
+	path = subprojects/imgio
+	url = https://github.com/nyorain/imgio
+[submodule "subprojects/nytl"]
+	path = subprojects/nytl
+	url = https://github.com/nyorain/nytl
+[submodule "subprojects/vkmockicd"]
+	path = subprojects/vkmockicd
+	url = https://github.com/nyorain/vkmockicd
