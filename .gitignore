@@ -1,6 +1,8 @@
 .clangd/
 compile_commands.json
-subprojects/*/
+subprojects/packagecache/
+subprojects/zlib-*
+subprojects/libpng-*
 build/
 buildwin/
 docs/traces/
