@@ -1,0 +1,89 @@
+#version 460
+
+// Used for indirect indexed vertex copy.
+// Dispatched right at the start, to convert the DrawIndirectCmd
+// into DispatchIndirectCmds to use for index processing.
+
+layout(local_size_x = 1) in;
+
+#extension GL_GOOGLE_include_directive : require
+#include "vertexCopy.glsl"
+
+layout(push_constant) uniform PCR {
+	uint drawOffset;
+	uint drawCmdOffset;
+	uint drawID;
+	uint drawCmdStride;
+};
+
+layout(set = 0, binding = 0) buffer InData {
+	// VkDrawIndexedIndirectCommand structs with drawCmdStride
+	uint drawCmdData[];
+
+	// VkDrawIndexedIndirectCommand:
+    // 0: uint indexCount;
+    // 1: uint instanceCount;
+    // 2: uint firstIndex;
+    // 3: int  vertexOffset;
+    // 4: uint firstInstance;
+};
+
+layout(set = 0, binding = 1) buffer OutCmd {
+	Metadata info;
+};
+
+#ifdef COUNT_BUF
+layout(set = 0, binding = 2) buffer CountBuf {
+	uint drawCmdCount[];
+};
+#endif // COUNT_BUF
+
+void main() {
+	// NOTE: we abuse the info.dispatchPerVertex fields for indirect
+	// index processing. It will be overwritetn after index processing
+	// with the actual vertex copy indirect commands.
+
+#ifdef COUNT_BUF
+	if(drawID > drawCmdCount[drawCmdOffset]) {
+		info.indexCount = 0u;
+		info.copyTypeOrIndexOffset = 0u;
+		info.firstVertex = 0u;
+		info.firstInstance = 0u;
+		info.minIndex = 0u;
+		info.maxIndex = 0u;
+
+		info.dispatchPerVertexX = 0u;
+		info.dispatchPerVertexY = 0u;
+		info.dispatchPerVertexZ = 0u;
+
+		info.dispatchPerInstanceX = 0u;
+		info.dispatchPerInstanceY = 0u;
+		info.dispatchPerInstanceZ = 0u;
+
+		// debug
+		// info.dispatchPerInstanceY = drawCmdCount[drawCmdOffset];
+		// info.dispatchPerInstanceZ = drawID;
+
+		return;
+	}
+#endif // COUNT_BUF
+
+	const uint cmdDataOff = drawOffset + drawID * drawCmdStride;
+
+	info.indexCount = drawCmdData[cmdDataOff + 0];
+	info.dispatchPerVertexX = ceilDivide(info.indexCount, 64 * indicesPerInvoc);
+	info.dispatchPerVertexY = 1u;
+	info.dispatchPerVertexZ = 1u;
+
+	info.dispatchPerInstanceX = ceilDivide(drawCmdData[cmdDataOff + 1], 64);
+	info.dispatchPerInstanceY = 1u;
+	info.dispatchPerInstanceZ = 1u;
+
+	// indexOffset
+	info.copyTypeOrIndexOffset = drawCmdData[cmdDataOff + 2];
+	info.firstVertex = drawCmdData[cmdDataOff + 3];
+	info.firstInstance = drawCmdData[cmdDataOff + 4];
+
+	info.minIndex = info.indexCount > 0u ? 0xFFFFFFFFu : 0u;
+	info.maxIndex = 0u;
+}

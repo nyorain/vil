@@ -33,7 +33,7 @@ thread destroys a resource R_b of type B that is connected to R_a.
 So the destruction of R_a must signal R_b that it was destroyed (and remove
 itself from the list of connected resources) while the destruction of
 R_b vice versa. This case (and possibly other, related cases; some of them
-possibly even simpler) are extremely hard to synchronize correctly on a 
+possibly even simpler) are extremely hard to synchronize correctly on a
 per-object basis. The native way (during destruction of a resource, first
 lock their own mutex, then unregister from all connected resources, locking
 each of their mutexes nestedly) may result in a deadlock in the situation
@@ -50,7 +50,7 @@ but already removed from the devices resource list. So don't assume that
 all handles referenced somewhere must be present in the device's list
 of resources.
 
-If that is ever a problem, could add something like 
+If that is ever a problem, could add something like
 ```
 // Function that is called when this handle is removed from the
 // device list of resources. Will be called while the device mutex is locked.
@@ -70,7 +70,7 @@ In general, member of a handle can be
 - the application might destroy a vulkan object while we are currently
   displaying information about it in the overlay renderer. How to
   handle that?
-  	- first try was to require handle destructors to be called while 
+  	- first try was to require handle destructors to be called while
 	  the device mutex is locked (we already need to do that for
 	  removing it from the device's resource list) and informing
 	  all renderers about it
@@ -79,8 +79,8 @@ But the problem isn't restricted to renderers. Any handle may reference
 another handle. And often enough vulkan allows to destroy handle A even
 though B still references it, e.g. you can destroy an image before a
 framebuffer it is used in (couldn't find anything in vulkan saying it's not
-allowed at least, validation layers don't warn; even though that obviously 
-makes the framebuffer invalid and you can only destroy it afterwards). 
+allowed at least, validation layers don't warn; even though that obviously
+makes the framebuffer invalid and you can only destroy it afterwards).
 Especially for command buffers (where we might want to display the state
 even if they are invalid by a referenced resource being destroyed/changed)
 this is a problem.
@@ -208,8 +208,8 @@ struct EventGui {
 In our vulkan api implementation we just assume that we know handles
 that are passed to us. This might not be always true in practice. Consider:
 - Some day, there is a a VK_KHR_lit_renderpass extension that adds a
-  new method `vkCreateLitRenderpassKHR` to create totally new, awesome 
-  renderpasses and we don't support this extension (yet). 
+  new method `vkCreateLitRenderpassKHR` to create totally new, awesome
+  renderpasses and we don't support this extension (yet).
   When an application uses this extension it creates a renderpass that isn't
   known to us, which will lead to a failed assertion when this renderpass
   is used in functions we do hook (we will call dev.renderpasses.get(rp)
@@ -244,7 +244,7 @@ useful as a super-quick dropin. When applications don't explicitly use the
 vil api to pass input to the layer (for gui stuff) we can atempt to hijack
 the windows input using platform-specific APIs. Yes, this is super ugly
 and super evil and not guaranteed to work at all, will just ignore bugs
-regarding that. 
+regarding that.
 
 Getting input isn't the hard part, it's doable on all platforms. The hard
 part is finding a consistent implementation for all backends of what input
@@ -305,13 +305,13 @@ continuously, even if they are rerecorded in every frame.
   group was submitted for N frames/time? probably not a good idea)
 - The command buffer viewer can then also display command groups (and we always
   link to command groups in the list of submissions to avoid the flickering
-  of a new command buffer in every frame). What do to when the structure/the 
+  of a new command buffer in every frame). What do to when the structure/the
   commands is different somewhere?
   	- we could explicitly show this in command view and offer a selection
 	  to only show commands from one of the command buffers in that region
 	- extend the idea above: toggle display of each command buffer in the view.
 	  We display the union of them (still trying to merge what can be merged).
-	  
+
 # Performance
 
 First performance tests on a real game showed: basic resource tracking is
@@ -323,7 +323,7 @@ enough to completely mess up frame times! Couple of reasons:
   and destruction are not acceptable.
 - completely underestimated the number of commands in a command buffer.
   Games can easily have thousands of draw calls (where each draw call previously
-  has multiple bind commands) and, as it turns out, allocating memory 
+  has multiple bind commands) and, as it turns out, allocating memory
   in __EVERY SINGLE ONE OF THEM__ is a bad idea. Also, games record command
   buffers in every frame, in practice (we at least have to be ready
   for this case).
@@ -359,7 +359,7 @@ fairly complicated.
 	  Lots of work, modifying spirv. Might be error-prone as well, think
 	  of complicated use-cases such as multiview renderpasses.
 	- modify the vertex shaders to (optionally) write out stuff to a
-	  ssbo. The spirv changes should be minimal. Could be problematic as we 
+	  ssbo. The spirv changes should be minimal. Could be problematic as we
 	  need an additional descriptor though.
 3. The problems don't stop with the vertex stage. To allow debugging
    of geometry and tessellation stages, we need their output as well.
@@ -403,8 +403,8 @@ When application submits to a queue:
 	  write any of our own copies (of images) that are read by pending
 	  draws. If so, we also have to chain them.
 	  We cannot simply "use the last available image copy and then block
-	  that from begin written" when rendering the gui as that would 
-	  require potentially a new hook-record for each submission or 
+	  that from begin written" when rendering the gui as that would
+	  require potentially a new hook-record for each submission or
 	  skipping many (potentially all) submission hooks.
 
 When we submit our gui rendering commands:
@@ -434,7 +434,7 @@ When application destroys a resource:
 
 Placing the copied images on the cpu has certain advantages, e.g. for displaying
 texel values in the gui. We could also perform more complicated operations
-(like computing a histogram) directly on the cpu. 
+(like computing a histogram) directly on the cpu.
 But vulkan guarantees for cpu-side image support (with linear tiling) is
 fairly limited. It might furthermore have a *serious* performance impact.
 We therefore try to perform as many operations as possible on the gpu
@@ -473,7 +473,7 @@ Ok, let's figure this out. How should the I/O inspector actually behave?
   have already finished and is invalid) and there may be a new submission
   immediately following.
   	- Imagine a case where all application submissions always already finish
-	  and the application destroys the cb/a record-referenced resource 
+	  and the application destroys the cb/a record-referenced resource
 	  before we draw our gui. In that case we could still provide a fully
 	  functional and working I/O viewer.
   	- We likely really have to code fore that. When drawing the inspector,
@@ -558,7 +558,7 @@ work without any problems for new extensions. This means
   we are calling it etc. Also try not to call any other function down the chain
   in between.
 
-- not sure if this makes sense or not: code defensively in a way that we 
+- not sure if this makes sense or not: code defensively in a way that we
   always handle the case where the application passes us handles we don't
   know? For instance, a future extension could add something like
   `vkCreateGraphicPipelines2` and when we don't intercept it, we don't
@@ -573,15 +573,15 @@ work without any problems for new extensions. This means
 
 So implementing an "indirect copy" via compute shaders seemed like a bad
 idea in the beginning. But seeing that CmdCopyBuffer itself might actually
-be implemented via a compute shader on desktop hardware (see e.g. mesas's radv driver), 
+be implemented via a compute shader on desktop hardware (see e.g. mesas's radv driver),
 this does not seem such a bad idea anymore.
 And we won't really get around implementing something like this for raytracing
-anyways, can't found any tricks to get around it for 
+anyways, can't found any tricks to get around it for
 CmdBuildAccelerationStructuresIndirect since we might not even have any
 upper bounds for data that is safe to read (like we do for indirect draw/dispatch).
 
 So, let's come up with a general indirect copy framework.
-We will built upon the first concept from node 1749.
+We will built upon the first concept from vertexCopy.md
 
 First, we always have a compute shader that prepares the command(s).
 In this case, it reads the buildRangeInfos and writes the commands into
@@ -591,7 +591,7 @@ This command will also be able to determine the output size of the copy/copies.
 For hooked records where we need indirect copy we will allocate a large
 hostVisible buffer with a counter in the beginning into which we will
 output the copied data. Might need a second buffer with offset metadata
-(allocated at record time, opposed to the other buffer) so we can correctly 
+(allocated at record time, opposed to the other buffer) so we can correctly
 retrieve everything later on.
 
 Second, we simply run CmdDispatchIndirect, possibly multiple times.
@@ -627,7 +627,7 @@ So, we need an alternative approach.
   only read addresses from state that is currently bound, so just
   relying on the application to manage synchronization is tempting.
   But AFAIK it's allowed to have data or device addresses *accessible* (as long
-  as it's not read in the end) in a shader that is currently written 
+  as it's not read in the end) in a shader that is currently written
   somewhere else.
   	- Hm, wait, this is a general problem we have at the moment. We don't/can't
 	  synchronize for that at all.
@@ -658,9 +658,9 @@ and might not match the state we are viewing.
 
 Ok, maybe we really want this overly complicated reference-following
 mechanism with a gpu (hostVisible) table of all addresses and their sizes.
-Can we even really do this? 
+Can we even really do this?
 
-If we really follow *all* references and copy all the data, we might end up 
+If we really follow *all* references and copy all the data, we might end up
 with *huge* copies.
 	Could limit the copy size.
 
@@ -739,7 +739,7 @@ They may differ and we need both:
   it really should not matter. Nah, we should probably even prefer the new
   one since it has less invalidated handles I guess. But might change
   slightly over time, that's the downside.
-  
+
 Ok we need it in the following case:
 - a command was selected, state is shown, nothing frozen.
   Suddenly the command can't be matched anymore. We still want to update
@@ -768,7 +768,7 @@ With timeline semaphores, we could simply have for each queue:
   to that. We will wait for it in all future submissions the application makes.
 
 Without timeline semaphores, things look worse:
-- we potentially have to insert *a lot* of semaphores later on to other queues, 
+- we potentially have to insert *a lot* of semaphores later on to other queues,
   on demand. That is really ugly, causing many vkQueueSubmit calls.
 
 Maybe just don't support full-sync when timeline semaphores aren't supported?
@@ -777,7 +777,7 @@ be buffer_device_address (ok, granted: and weird applications binding the same
 resource from multiple queues at the same time. Sounds bad, but applications are
 probably doing it) anyways and drivers will more likely support
 timeline semaphores than buffer_device_address I guess. If someone
-pops up that really needs the feature (strictly speaking: fix, not feature) for 
+pops up that really needs the feature (strictly speaking: fix, not feature) for
 some ancient hardware, we can still see how to add it without making the
 code 10x more complicated.
 
@@ -831,7 +831,7 @@ and we maybe explicitly *want* to show the broken/weird/racy data.
 (Only concern: might cause a crash in theory, would be bad).
 
 We only want it for gui submissions I guess.
-For images displayed in resource viewer, it doesn't really matter, 
+For images displayed in resource viewer, it doesn't really matter,
 we just sync with the submissions that use it.
 For buffers, it harder. buffer_device_address is really a concern.
 So maybe only add full sync when reading a buffer with the flag set?
@@ -866,7 +866,7 @@ pending cows in 'activateSubmission' in that case)
 
 ---
 
-Actually, could just not support cows on aliased resources. Check on 
+Actually, could just not support cows on aliased resources. Check on
 cow creation time & resource creation time.
 
 ---
@@ -947,8 +947,8 @@ struct CommandSelection {
 		record, // only in swapchain mode
 	};
 
-	// Whether to freeze the selected state. 
-	// New completed hooks will still be fetched when something new is 
+	// Whether to freeze the selected state.
+	// New completed hooks will still be fetched when something new is
 	// selected but once we have a state we don't gather more and don't
 	// update the selection.
 	bool freezeState {};
@@ -959,7 +959,7 @@ public:
 
 	// Sets updateMode to 'none'
 	// 'cmd' must be empty or a valid hierarchy inside 'record'
-	void select(IntrusivePtr<CommandRecord> record, 
+	void select(IntrusivePtr<CommandRecord> record,
 		std::vector<const Command*> cmd);
 
 	// Sets updateMode to swapchain
@@ -968,7 +968,7 @@ public:
 	// 'cmd' must be empty or a valid hierarchy inside 'record'
 	void select(std::vector<FrameSubmission> frame,
 		FrameSubmission* submission,
-		IntrusivePtr<CommandRecord> record, 
+		IntrusivePtr<CommandRecord> record,
 		std::vector<const Command*> cmd);
 
 	// Sets updateMode to 'commandBuffer'
@@ -1009,7 +1009,7 @@ private:
 	// Only valid if selectionType_ == command.
 	std::vector<const Command*> command_ {};
 
-	// [swapchain mode] 
+	// [swapchain mode]
 	// Potentially old, selected command, in its record and its batch.
 	// Needed for matching potential candidates later.
 	std::vector<FrameSubmission> frame_;
@@ -1036,7 +1036,7 @@ ideally: be able to show *complete* frame, stable.
 Just color in the sections that aren't always submitted or something.
 
 ```
-namespace summary { 
+namespace summary {
 
 struct FragmentSection {
 	u32 lastSeen {}; // frameID
@@ -1050,7 +1050,7 @@ struct FragmentSection {
 	std::vector<FragmentSection> children;
 
 	// TODO: some extra metadata
-	// e.g. for renderpasses, we could store the max number of 
+	// e.g. for renderpasses, we could store the max number of
 	// draw commands ever seen or something like that.
 	// Need some special handling for render passes anyways I guess?
 	// But same problematic applies to dispatches, could be highly
@@ -1124,7 +1124,7 @@ Imagine this situation:
 - <img> gets destroyed in another thread
 
 How should this be handled?
-We can keep the vil::Image object alive via IntrusivePtr (e.g. in the 
+We can keep the vil::Image object alive via IntrusivePtr (e.g. in the
 Gui Draw object) but in this case we also need the handle.
 Keeping all image handles alive until their vil representation is destroyed
 is problematic. The application might immediate re-use the memory,
@@ -1136,7 +1136,7 @@ rendering is done?
 	Done in the sense that we've gotten to the checkpoint where we see
 	that the image was destroyed and abort the rendering.
 
-The waiting itself (even if it might take >1ms) isn't a problem, this is 
+The waiting itself (even if it might take >1ms) isn't a problem, this is
 a very rare case.
 
 Update: yep, solved like this now.
@@ -1246,9 +1246,9 @@ Properly supporting this (for the command hook copy case, i.e. when
 a command using such a descriptor set is inspected) is very hard
 because we don't know which resources are dynamically used.
 So we just always assume the worst:
-We get the resource from the ds to read from only at submission time (we already 
+We get the resource from the ds to read from only at submission time (we already
 do this), this covers the updateAfterBind case.
-We use validate ds handles before accessing them (when ds.cpp refBindings 
+We use validate ds handles before accessing them (when ds.cpp refBindings
 is false; we do this by not accessing the ds directly but only a cow we made of it).
 With this, we already have the worst case partially covered.
 The only case missing: we record commands to read from a resource (that is
@@ -1264,7 +1264,7 @@ Could make it work like this, rough sketch:
 
 - Make sure CommandHookRecord knows which handles it uses
 - When a buffer/image is destroyed, we first ask CommandHook if it's currently
-  in use by any pending CommandHookRecord. 
+  in use by any pending CommandHookRecord.
   If so, wait on the submission before destroying.
 
 That's really costly since we might have a LOT of CommandHookRecords though :/
