@@ -408,7 +408,7 @@ struct LinearScopedAllocator {
 
 	template<typename O>
 	LinearScopedAllocator& operator=(const LinearScopedAllocator<O>& rhs) noexcept {
-		this->rec = rhs.rec;
+		this->memScope_ = rhs.memScope_;
 		return *this;
 	}
 
@@ -438,7 +438,7 @@ struct LinearUnscopedAllocator {
 
 	template<typename O>
 	LinearUnscopedAllocator& operator=(const LinearUnscopedAllocator<O>& rhs) noexcept {
-		this->rec = rhs.rec;
+		this->linalloc_ = rhs.linalloc_;
 		return *this;
 	}
 
