@@ -2,6 +2,8 @@
 #include <gui/gui.hpp>
 #include <gui/util.hpp>
 #include <gui/fontAwesome.hpp>
+#include <gui/command.hpp>
+#include <gui/cb.hpp>
 #include <commandHook/hook.hpp>
 #include <commandHook/record.hpp>
 #include <util/f16.hpp>
@@ -394,12 +396,14 @@ void VertexViewer::createFrustumPipe() {
 }
 
 VkPipeline VertexViewer::getOrCreatePipe(VkFormat format, u32 stride,
-		VkPrimitiveTopology topo, VkPolygonMode polygonMode) {
+		VkPrimitiveTopology topo, VkPolygonMode polygonMode,
+		bool enableDepth) {
 	for(auto& pipe : pipes_) {
 		if(pipe.format == format &&
 				pipe.stride == stride &&
 				pipe.polygon == polygonMode &&
-				pipe.topology == topo) {
+				pipe.topology == topo &&
+				pipe.enableDepth == enableDepth) {
 			return pipe.pipe;
 		}
 	}
@@ -407,11 +411,12 @@ VkPipeline VertexViewer::getOrCreatePipe(VkFormat format, u32 stride,
 	// TODO: do async and show ui message meanwhile.
 	// We currently sometimes get ui hangs from this when first
 	// selecting the vertex viewer.
-	return createPipe(format, stride, topo, polygonMode);
+	return createPipe(format, stride, topo, polygonMode, enableDepth);
 }
 
 VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
-		VkPrimitiveTopology topology, VkPolygonMode polygonMode) {
+		VkPrimitiveTopology topology, VkPolygonMode polygonMode,
+		bool enableDepth) {
 	auto& dev = gui_->dev();
 
 	// store them for destruction later on
@@ -475,9 +480,6 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	colorAttach[0].colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
 		VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-	VkPipelineDepthStencilStateCreateInfo depthInfo {};
-	depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-
 	VkPipelineColorBlendStateCreateInfo blendInfo {};
 	blendInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 	blendInfo.attachmentCount = 1;
@@ -485,8 +487,8 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 
 	VkPipelineDepthStencilStateCreateInfo depthStencil {};
 	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-	depthStencil.depthTestEnable = true;
-	depthStencil.depthWriteEnable = true;
+	depthStencil.depthTestEnable = enableDepth;
+	depthStencil.depthWriteEnable = enableDepth;
 	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 	depthStencil.stencilTestEnable = false;
 
@@ -507,7 +509,6 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	gpi[0].pViewportState = &viewportInfo;
 	gpi[0].pRasterizationState = &rasterInfo;
 	gpi[0].pMultisampleState = &msInfo;
-	gpi[0].pDepthStencilState = &depthInfo;
 	gpi[0].pColorBlendState = &blendInfo;
 	gpi[0].pDepthStencilState = &depthStencil;
 	gpi[0].pDynamicState = &dynState;
@@ -525,6 +526,7 @@ VkPipeline VertexViewer::createPipe(VkFormat format, u32 stride,
 	ourPipe.polygon = polygonMode;
 	ourPipe.format = format;
 	ourPipe.stride = stride;
+	ourPipe.enableDepth = enableDepth;
 
 	return pipe;
 }
@@ -559,7 +561,7 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 
 	// try to find matching pipeline
 	auto foundPipe = getOrCreatePipe(attrib.format, binding.stride,
-		data.topology, polygonMode);
+		data.topology, polygonMode, true);
 
 	auto displaySize = ImGui::GetIO().DisplaySize;
 
@@ -584,18 +586,12 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 
 	dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, foundPipe);
 
-	struct {
-		Mat4f matrix;
-		u32 useW;
-		float scale;
-		u32 flipY;
-		u32 shade;
-	} pcData = {
+	PCData pcData = {
 		viewProjMtx_ * data.mat,
 		data.useW,
 		data.scale,
 		flipY_,
-		!wireframe_,
+		wireframe_ ? colWireframe : colShade
 	};
 
 	dev.dispatch.CmdPushConstants(cb, pipeLayout_,
@@ -635,10 +631,11 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 	constexpr auto drawSelectedPoint = true;
 	if(drawSelectedPoint && data.selectedVertex < data.params.drawCount) {
 		auto pointPipe = getOrCreatePipe(attrib.format, binding.stride,
-			VK_PRIMITIVE_TOPOLOGY_POINT_LIST, VK_POLYGON_MODE_FILL);
+			VK_PRIMITIVE_TOPOLOGY_POINT_LIST, VK_POLYGON_MODE_FILL,
+			false);
 		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pointPipe);
 
-		pcData.shade = false;
+		pcData.color = colSelected;
 		dev.dispatch.CmdPushConstants(cb, pipeLayout_,
 			VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 			0, sizeof(pcData), &pcData);
@@ -658,7 +655,7 @@ void VertexViewer::imGuiDraw(const DrawData& data) {
 			0.f,
 			data.useW ? 100000.f : 1.f,
 			data.useW,
-			0u,
+			colFrustum,
 		};
 
 		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, frustumPipe_);
@@ -832,19 +829,13 @@ void VertexViewer::updateInput(float dt) {
 	far_ = std::clamp(near_ - 0.0001f, -99999999.f, far_);
 
 	auto projMtx = perspective(fov, aspect, near_, far_);
-	// TODO: not always needed!
-	//   could probably figure it out better on our own (at least for xfb data),
-	//   depending on set viewport
-	// TODO: doesn't currently work since input is still inverted then.
-	// if(flipY_) {
-		flipY(projMtx);
-	// }
+	flipY(projMtx); // always desired to make sure (-1, -1) is bottom left
 
 	viewProjMtx_ = projMtx * viewMtx;
 }
 
 bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
-		const CommandHookState& state, float dt) {
+		const CommandHookState& state, float dt, CommandViewer& cmdView) {
 	ZoneScoped;
 
 	dlg_assert_or(cmd.state->pipe, return false);
@@ -913,13 +904,13 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		auto count = state.indirectCommandCount;
 		if(count == 0u) {
 			imGuiText("No commands (drawCount = 0)");
-			selectedID_ = -1;
+			selectedCommand_ = -1;
 			return;
 		} else if(count == 1u) {
-			selectedID_ = 0u;
+			selectedCommand_ = 0u;
 		} else {
 			auto lbl = dlg::format("Commands: {}", count);
-			if(optSliderRange(lbl.c_str(), selectedID_, count)) {
+			if(optSliderRange(lbl.c_str(), selectedCommand_, count)) {
 				updateHook = true;
 			}
 		}
@@ -927,7 +918,7 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 		auto& ic = state.indirectCopy;
 		auto span = ic.data().subspan(offset);
 		if(indices) {
-			auto sub = span.subspan(selectedID_ * stride);
+			auto sub = span.subspan(selectedCommand_ * stride);
 			auto ecmd = read<VkDrawIndexedIndirectCommand>(sub);
 			params.offset = ecmd.firstIndex;
 			params.drawCount = ecmd.indexCount;
@@ -935,7 +926,7 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 			params.indexType = indices;
 			params.instanceID = ecmd.firstInstance;
 		} else {
-			auto sub = span.subspan(selectedID_ * stride);
+			auto sub = span.subspan(selectedCommand_ * stride);
 			auto ecmd = read<VkDrawIndirectCommand>(sub);
 			params.offset = ecmd.firstVertex;
 			params.drawCount = ecmd.vertexCount;
@@ -1100,6 +1091,8 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 						} else {
 							ib = ib.subspan(off, is);
 							u32 index = readIndex(*params.indexType, ib);
+							displayDebugPopup(params.vertexOffset + index, cmdView, cmd);
+
 							imGuiText("{}", params.vertexOffset + index);
 
 							if(copyType == CommandHookRecord::copyTypeVertices) {
@@ -1108,10 +1101,7 @@ bool VertexViewer::displayInput(Draw& draw, const DrawCmdBase& cmd,
 							}
 						}
 					} else {
-						// This isn't needed now that buffers are copied from the
-						// appropriate offset
-						// vertexID += params.offset;
-						// iniID += params.offset;
+						displayDebugPopup(vertexID + params.offset, cmdView, cmd);
 					}
 
 					for(auto& [aID, _] : attribs) {
@@ -1317,10 +1307,18 @@ const char* name(spv11::BuiltIn builtin) {
 }
 
 void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
-		const CommandHookState& state, float dt) {
+		const CommandHookState& state, float dt, CommandViewer& cmdView) {
 	ZoneScoped;
 	dlg_assert_or(cmd.state->pipe, return);
 	auto& pipe = *cmd.state->pipe;
+
+	// For captures vertices, we want to flip y by default, as our
+	// projection matrix is already flipped in y direction such that y=-1
+	// after projection goes to the bottom. Captured vertices
+	// follow vulkan convention, y=-1 -> top.
+	// khr_maintenance1 allows negative viewport height, reversing this.
+	auto vps = viewports(*cmd.state);
+	flipY_ = vps.empty() || vps[0].height >= 0.f;
 
 	if(!pipe.xfbPatch) {
 		imGuiText("Error: couldn't inject transform feedback code to shader");
@@ -1341,35 +1339,35 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		auto count = state.indirectCommandCount;
 		if(count == 0u) {
 			imGuiText("No commands (drawCount = 0)");
-			selectedID_ = -1;
+			selectedCommand_ = -1;
 			return;
 		} else if(count == 1u) {
-			selectedID_ = 0u;
+			selectedCommand_ = 0u;
 		} else {
 			auto lbl = dlg::format("Commands: {}", count);
-			optSliderRange(lbl.c_str(), selectedID_, count);
+			optSliderRange(lbl.c_str(), selectedCommand_, count);
 		}
 
 		auto& ic = state.indirectCopy;
 		auto span = ic.data().subspan(offset);
 		if(indexed) {
-			for(auto i = 0u; i < selectedID_; ++i) {
+			for(auto i = 0u; i < selectedCommand_; ++i) {
 				auto sub = span.subspan(i * stride);
 				auto ecmd = read<VkDrawIndexedIndirectCommand>(sub);
 				vertexOffset += ecmd.indexCount * ecmd.instanceCount;
 			}
 
-			auto sub = span.subspan(selectedID_ * stride);
+			auto sub = span.subspan(selectedCommand_ * stride);
 			auto ecmd = read<VkDrawIndexedIndirectCommand>(sub);
 			vertexCount = ecmd.indexCount * ecmd.instanceCount;
 		} else {
-			for(auto i = 0u; i < selectedID_; ++i) {
+			for(auto i = 0u; i < selectedCommand_; ++i) {
 				auto sub = span.subspan(i * stride);
 				auto ecmd = read<VkDrawIndirectCommand>(sub);
 				vertexOffset += ecmd.vertexCount * ecmd.instanceCount;
 			}
 
-			auto sub = span.subspan(selectedID_ * stride);
+			auto sub = span.subspan(selectedCommand_ * stride);
 			auto ecmd = read<VkDrawIndirectCommand>(sub);
 			vertexCount = ecmd.vertexCount * ecmd.instanceCount;
 		}
@@ -1381,12 +1379,12 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		vertexCount = dcmd->indexCount * dcmd->instanceCount;
 	} else if(auto* dcmd = commandCast<const DrawIndirectCmd*>(&cmd); dcmd) {
 		displayCmdSlider(dcmd->indexed, dcmd->stride);
-		if(selectedID_ == u32(-1)) {
+		if(selectedCommand_ == u32(-1)) {
 			return;
 		}
 	} else if(auto* dcmd = commandCast<const DrawIndirectCountCmd*>(&cmd); dcmd) {
 		displayCmdSlider(dcmd->indexed, dcmd->stride, 4u); // skip u32 count in the beginning
-		if(selectedID_ == u32(-1)) {
+		if(selectedCommand_ == u32(-1)) {
 			return;
 		}
 	} else {
@@ -1463,6 +1461,11 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 
 					ImGui::TableNextColumn();
 					displayVertexID(i);
+
+					// TODO: display debug popup
+					// But how to know at this point what the source vertex was?
+					// Would require us to capture source buffers
+					(void) cmdView;
 
 					for(auto& capture : xfbPatch.captures) {
 						ImGui::TableNextColumn();
@@ -1566,7 +1569,7 @@ void VertexViewer::displayOutput(Draw& draw, const DrawCmdBase& cmd,
 		drawData_.drawFrustum = gui_->dev().nonSolidFill;
 		drawData_.clear = doClear_;
 		drawData_.mat = nytl::identity<4, float>();
-		drawData_.selectedVertex = 0xFFFFFFFFu; // TODO
+		drawData_.selectedVertex = selectedVertex_;
 
 		auto cb = [](const ImDrawList*, const ImDrawCmd* cmd) {
 			auto* self = static_cast<VertexViewer*>(cmd->UserCallbackData);
@@ -1830,7 +1833,6 @@ void VertexViewer::showSettings() {
 
 	if(ImGui::BeginPopup("Vertex Viewer")) {
 		ImGui::Checkbox("Clear", &doClear_);
-		ImGui::Checkbox("Flip Y", &flipY_);
 		ImGui::Checkbox("Arcball Camera", &arcball_);
 
 		auto& dev = gui_->dev();
@@ -1853,13 +1855,19 @@ void VertexViewer::displayVertexID(u32 i) {
 		selectedVertex_ = i;
 	}
 	ImGui::GetCurrentContext()->Style.ItemSpacing.y = spacingY;
-	// if(ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-	// 	dlg_trace("opening vertex context menu");
-	// 	ImGui::OpenPopup("Vertex Context");
-	// }
+}
+
+void VertexViewer::displayDebugPopup(u32 vertexID, CommandViewer& cmdView,
+		const DrawCmdBase& cmd) {
+
 	if(ImGui::BeginPopupContextItem(nullptr, ImGuiPopupFlags_MouseButtonRight)) {
 		if(ImGui::Button("Debug Vertex")) {
-			dlg_trace("TODO!");
+			// TODO: implement support for multiple instances
+			auto invocation = Vec3ui{selectedCommand_, 0u, vertexID};
+			dlg_assert(cmd.boundPipe());
+			if(cmd.boundPipe()) {
+				cmdView.selectShaderDebugger(*cmd.boundPipe(), invocation);
+			}
 		}
 		ImGui::EndPopup();
 	}

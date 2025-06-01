@@ -45,6 +45,7 @@ public:
 	void updateFromSelector(bool forceUpdateHook);
 
 	auto& vertexViewer() { return vertexViewer_; }
+	void selectShaderDebugger(const Pipeline& pipe, const Vec3ui& invocation = {});
 
 private:
 	Device& dev() const;

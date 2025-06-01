@@ -245,4 +245,16 @@ CommandRecord::UsedHandles::UsedHandles(LinAllocator& alloc) :
 UsedImage::UsedImage(LinAllocator& alloc) noexcept :
 	RefHandle<Image>(alloc), layoutChanges(alloc) {}
 
+span<const VkViewport> viewports(const GraphicsState& state) {
+	if(!state.pipe) {
+		return state.dynamic.viewports;
+	}
+
+	if(state.pipe->dynamicState.count(VK_DYNAMIC_STATE_VIEWPORT)) {
+		return state.dynamic.viewports;
+	}
+
+	return state.pipe->viewports;
+}
+
 } // namespace vil

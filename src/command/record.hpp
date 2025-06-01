@@ -126,6 +126,8 @@ struct GraphicsState : DescriptorState {
 	} dynamic {};
 };
 
+span<const VkViewport> viewports(const GraphicsState&);
+
 struct ComputeState : DescriptorState {
 	ComputePipeline* pipe;
 };

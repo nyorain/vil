@@ -72,7 +72,7 @@ void main() {
 		for(uint i = 0u; i < vertexStride; ++i) {
 			dst.data[dstOff + i] = src.data[srcOff + i];
 		}
-	} else {
+	} else { // indexed path
 		// prevent out-of-bounds reading
 		if(info.minIndex + dtID > srcIndices.length()) {
 			return;

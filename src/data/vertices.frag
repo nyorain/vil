@@ -4,7 +4,7 @@ layout(location = 0) in vec3 inPos;
 layout(location = 0) out vec4 outFragColor;
 
 layout(push_constant, row_major) uniform PCR {
-	layout(offset = 76) bool shade;
+	layout(offset = 76) uint color; // alpha = 0: use shading instead
 } pcr;
 
 // 9-band spherical harmonics
@@ -56,12 +56,21 @@ vec3 shCoeffs[9] = {
 	vec3(0.265, 0.195, 0.114),
 };
 
+vec4 decodeColor(uint col) {
+	return vec4(
+		((col >> 24) & 0xFF) / 255.f,
+		((col >> 16) & 0xFF) / 255.f,
+		((col >> 8) & 0xFF) / 255.f,
+		((col >> 0) & 0xFF) / 255.f);
+}
+
 void main() {
-	if(pcr.shade) {
+	vec4 col = decodeColor(pcr.color);
+	if(col.a < 0.001f) {
 		vec3 n = -normalize(cross(dFdx(inPos), dFdy(inPos)));
 		vec3 col = max(evalSH(n, shCoeffs), vec3(0.0));
 		outFragColor = vec4(col, 1.0);
 	} else {
-		outFragColor = vec4(1.0);
+		outFragColor = col;
 	}
 }
