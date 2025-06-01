@@ -138,6 +138,7 @@ struct DrawGuiImage {
 	// the layer/level to sample
 	float layer {};
 	float level {};
+	u32 sample {};
 };
 
 } // namespace vil

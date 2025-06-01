@@ -26,10 +26,12 @@ struct CopiedImage {
 	VkImageAspectFlags aspectMask {};
 	VkDeviceSize neededMemory {};
 	VkFormat format {};
+	VkSampleCountFlagBits samples {};
 
 	CopiedImage() = default;
 	[[nodiscard]] bool init(Device& dev, VkFormat, const VkExtent3D&,
-		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam);
+		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam,
+		VkSampleCountFlagBits samples);
 	~CopiedImage();
 
 	VkImageSubresourceRange subresRange() const {
@@ -47,6 +49,7 @@ struct DescriptorCopyOp {
 	// buffer as well. Useful to reading the data back on cpu instead
 	// of displaying it.
 	// Format of data in the buffer will be sampleFormat(imgFormat)
+	// NOTE: this path is deprecated, it was used for old cpu-size shader debugger
 	bool imageAsBuffer {};
 };
 

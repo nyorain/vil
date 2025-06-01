@@ -14,8 +14,11 @@
 #include <image.frag.u1DArray.spv.h>
 #include <image.frag.i1DArray.spv.h>
 #include <image.frag.2DArray.spv.h>
+#include <image.frag.2DMSArray.spv.h>
 #include <image.frag.u2DArray.spv.h>
+#include <image.frag.u2DMSArray.spv.h>
 #include <image.frag.i2DArray.spv.h>
+#include <image.frag.i2DMSArray.spv.h>
 #include <image.frag.3D.spv.h>
 #include <image.frag.u3D.spv.h>
 #include <image.frag.i3D.spv.h>
@@ -26,6 +29,9 @@
 #include <readTex.comp.2DArray.spv.h>
 #include <readTex.comp.u2DArray.spv.h>
 #include <readTex.comp.i2DArray.spv.h>
+#include <readTex.comp.2DMSArray.spv.h>
+#include <readTex.comp.u2DMSArray.spv.h>
+#include <readTex.comp.i2DMSArray.spv.h>
 #include <readTex.comp.3D.spv.h>
 #include <readTex.comp.u3D.spv.h>
 #include <readTex.comp.i3D.spv.h>
@@ -36,6 +42,9 @@
 #include <minmax.comp.2DArray.spv.h>
 #include <minmax.comp.u2DArray.spv.h>
 #include <minmax.comp.i2DArray.spv.h>
+#include <minmax.comp.2DMSArray.spv.h>
+#include <minmax.comp.u2DMSArray.spv.h>
+#include <minmax.comp.i2DMSArray.spv.h>
 #include <minmax.comp.3D.spv.h>
 #include <minmax.comp.u3D.spv.h>
 #include <minmax.comp.i3D.spv.h>
@@ -46,6 +55,9 @@
 #include <histogram.comp.2DArray.spv.h>
 #include <histogram.comp.u2DArray.spv.h>
 #include <histogram.comp.i2DArray.spv.h>
+#include <histogram.comp.2DMSArray.spv.h>
+#include <histogram.comp.u2DMSArray.spv.h>
+#include <histogram.comp.i2DMSArray.spv.h>
 #include <histogram.comp.3D.spv.h>
 #include <histogram.comp.u3D.spv.h>
 #include <histogram.comp.i3D.spv.h>
@@ -122,6 +134,10 @@ void initPipes(Device& dev,
 	auto image2DStages = initStages(image_frag_2DArray_spv_data);
 	auto uimage2DStages = initStages(image_frag_u2DArray_spv_data);
 	auto iimage2DStages = initStages(image_frag_i2DArray_spv_data);
+
+	auto image2DMSStages = initStages(image_frag_2DMSArray_spv_data);
+	auto uimage2DMSStages = initStages(image_frag_u2DMSArray_spv_data);
+	auto iimage2DMSStages = initStages(image_frag_i2DMSArray_spv_data);
 
 	auto image3DStages = initStages(image_frag_3D_spv_data);
 	auto uimage3DStages = initStages(image_frag_u3D_spv_data);
@@ -206,7 +222,7 @@ void initPipes(Device& dev,
 
 	auto& guiGpi = gpis.emplace_back();
 	guiGpi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	guiGpi.flags = 0;
+	guiGpi.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 	guiGpi.stageCount = 2;
 	guiGpi.pStages = guiStages.data();
 	guiGpi.pVertexInputState = &vertexInfo;
@@ -219,31 +235,30 @@ void initPipes(Device& dev,
 	guiGpi.pDynamicState = &dynState;
 	guiGpi.layout = renderPipeLayout;
 	guiGpi.renderPass = rp;
-	guiGpi.flags = VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
 
 	VkGraphicsPipelineCreateInfo imgGpi = guiGpi;
 	imgGpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
-	imgGpi.basePipelineIndex = 0u;
-	imgGpi.pStages = uimage1DStages.data();
-	gpis.push_back(imgGpi);
 
-	auto addImGpi = [&](auto& stages) {
+	auto addImGpi = [&](auto& stages, u32 baseIndex = 1u) {
 		VkGraphicsPipelineCreateInfo gpi = imgGpi;
-		gpi.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
-		gpi.basePipelineIndex = 1u;
+		gpi.basePipelineIndex = baseIndex;
 		gpi.pStages = stages.data();
 		gpis.push_back(gpi);
 	};
 
+	addImGpi(uimage1DStages, 0u);
 	addImGpi(uimage2DStages);
+	addImGpi(uimage2DMSStages);
 	addImGpi(uimage3DStages);
 
 	addImGpi(iimage1DStages);
 	addImGpi(iimage2DStages);
+	addImGpi(iimage2DMSStages);
 	addImGpi(iimage3DStages);
 
 	addImGpi(image1DStages);
 	addImGpi(image2DStages);
+	addImGpi(image2DMSStages);
 	addImGpi(image3DStages);
 
 	// imageBg pipe
@@ -303,25 +318,30 @@ void initPipes(Device& dev,
 	gpis.push_back(histGpi);
 
 	// init pipes
-	VkPipeline pipes[12];
+	VkPipeline pipes[ShaderImageType::count + 3];
 	dlg_assert(gpis.size() == sizeof(pipes) / sizeof(pipes[0]));
 
 	VK_CHECK(dev.dispatch.CreateGraphicsPipelines(dev.handle,
 		VK_NULL_HANDLE, u32(gpis.size()), gpis.data(), nullptr, pipes));
 
 	dstPipes.gui = pipes[0];
+	dlg_assert(dstPipes.gui);
 	nameHandle(dev, dstPipes.gui, "Gui:pipeGui");
 
 	for(auto i = 0u; i < ShaderImageType::count; ++i) {
 		dstPipes.image[i] = pipes[1 + i];
+		dlg_assert(dstPipes.image[i]);
+
 		auto name = dlg::format("Gui:pipeImage[{}]", i);
 		nameHandle(dev, dstPipes.image[i], name.c_str());
 	}
 
-	dstPipes.imageBg = pipes[10];
+	dstPipes.imageBg = pipes[ShaderImageType::count + 1];
+	dlg_assert(dstPipes.imageBg);
 	nameHandle(dev, dstPipes.imageBg, "Gui:pipeImageBg");
 
-	dstPipes.histogramRender = pipes[11];
+	dstPipes.histogramRender = pipes[ShaderImageType::count + 2];
+	dlg_assert(dstPipes.histogramRender);
 	nameHandle(dev, dstPipes.histogramRender, "Gui:histogramRender");
 
 	// init compute pipelines
@@ -354,12 +374,15 @@ void initPipes(Device& dev,
 			dstPipes.readTex, imgOpPipeLayout, {
 				readTex_comp_u1DArray_spv_data,
 				readTex_comp_u2DArray_spv_data,
+				readTex_comp_u2DMSArray_spv_data,
 				readTex_comp_u3D_spv_data,
 				readTex_comp_i1DArray_spv_data,
 				readTex_comp_i2DArray_spv_data,
+				readTex_comp_i2DMSArray_spv_data,
 				readTex_comp_i3D_spv_data,
 				readTex_comp_1DArray_spv_data,
 				readTex_comp_2DArray_spv_data,
+				readTex_comp_2DMSArray_spv_data,
 				readTex_comp_3D_spv_data,
 			}
 		},
@@ -367,12 +390,15 @@ void initPipes(Device& dev,
 			dstPipes.histogramTex, imgOpPipeLayout, {
 				histogram_comp_u1DArray_spv_data,
 				histogram_comp_u2DArray_spv_data,
+				histogram_comp_u2DMSArray_spv_data,
 				histogram_comp_u3D_spv_data,
 				histogram_comp_i1DArray_spv_data,
 				histogram_comp_i2DArray_spv_data,
+				histogram_comp_i2DMSArray_spv_data,
 				histogram_comp_i3D_spv_data,
 				histogram_comp_1DArray_spv_data,
 				histogram_comp_2DArray_spv_data,
+				histogram_comp_2DMSArray_spv_data,
 				histogram_comp_3D_spv_data,
 			}
 		},
@@ -380,12 +406,15 @@ void initPipes(Device& dev,
 			dstPipes.minMaxTex, imgOpPipeLayout, {
 				minmax_comp_u1DArray_spv_data,
 				minmax_comp_u2DArray_spv_data,
+				minmax_comp_u2DMSArray_spv_data,
 				minmax_comp_u3D_spv_data,
 				minmax_comp_i1DArray_spv_data,
 				minmax_comp_i2DArray_spv_data,
+				minmax_comp_i2DMSArray_spv_data,
 				minmax_comp_i3D_spv_data,
 				minmax_comp_1DArray_spv_data,
 				minmax_comp_2DArray_spv_data,
+				minmax_comp_2DMSArray_spv_data,
 				minmax_comp_3D_spv_data,
 			}
 		},
@@ -393,6 +422,7 @@ void initPipes(Device& dev,
 
 	for(auto& creation : creations) {
 		for(auto& spv : creation.spvs) {
+			dlg_assert(!creation.spvs.empty());
 			addCpi(creation.layout, spv);
 		}
 

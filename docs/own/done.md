@@ -1,3 +1,7 @@
+- [x] can we support viewing multisample images?
+      either sample them directly in shader (requires a whole lotta new
+	  shader permuatations, not sure if supported everywhere) or resolve
+	  into temporary image first (lot of work as well)
 - [x] look into annoying lmm.cpp:138 match assert
 - [x] use spc from subproject, remove the files in src/
 - [x] first serialization support

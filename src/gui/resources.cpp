@@ -229,9 +229,6 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 	} else if(!image.allowsNearestSampling) {
 		ImGui::Text("Image can't be displayed since its format does not support sampling");
 		return;
-	} else if(image.ci.samples != VK_SAMPLE_COUNT_1_BIT) {
-		ImGui::Text("Image can't be displayed since it has multiple samples");
-		return;
 	} else if(image.ci.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT) {
 		ImGui::Text("Transient Image can't be displayed");
 		return;
@@ -328,7 +325,7 @@ void ResourceGui::drawImageContents(Draw& draw, Image& image, bool doSelect) {
 		image_.viewer.reset(true);
 		image_.viewer.select(imageHandle, image.ci.extent,
 			image.ci.imageType, image.ci.format, subres,
-			layout, layout, flags);
+			layout, layout, image.ci.samples, flags);
 	}
 
 	ImGui::Spacing();
@@ -342,34 +339,35 @@ void ResourceGui::drawDesc(Draw& draw, Image& image) {
 	image_.object = &image;
 
 	// info
-	/*
-	const auto& ci = image.ci;
-	ImGui::Columns(2);
+	if(ImGui::TreeNode("Create Info")) {
+		const auto& ci = image.ci;
+		ImGui::Columns(2);
 
-	ImGui::Text("Extent");
-	ImGui::Text("Layers");
-	ImGui::Text("Levels");
-	ImGui::Text("Format");
-	ImGui::Text("Usage");
-	ImGui::Text("Tiling");
-	ImGui::Text("Samples");
-	ImGui::Text("Type");
-	ImGui::Text("Flags");
+		ImGui::Text("Extent");
+		ImGui::Text("Layers");
+		ImGui::Text("Levels");
+		ImGui::Text("Format");
+		ImGui::Text("Usage");
+		ImGui::Text("Tiling");
+		ImGui::Text("Samples");
+		ImGui::Text("Type");
+		ImGui::Text("Flags");
 
-	ImGui::NextColumn();
+		ImGui::NextColumn();
 
-	ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
-	ImGui::Text("%d", ci.arrayLayers);
-	ImGui::Text("%d", ci.mipLevels);
-	ImGui::Text("%s", vk::name(ci.format));
-	ImGui::Text("%s", vk::nameImageUsageFlags(ci.usage).c_str());
-	ImGui::Text("%s", vk::name(ci.tiling));
-	ImGui::Text("%s", vk::name(ci.samples));
-	ImGui::Text("%s", vk::name(ci.imageType));
-	ImGui::Text("%s", vk::nameImageCreateFlags(ci.flags).c_str());
+		ImGui::Text("%dx%dx%d", ci.extent.width, ci.extent.height, ci.extent.depth);
+		ImGui::Text("%d", ci.arrayLayers);
+		ImGui::Text("%d", ci.mipLevels);
+		ImGui::Text("%s", vk::name(ci.format));
+		ImGui::Text("%s", vk::nameImageUsageFlags(ci.usage).c_str());
+		ImGui::Text("%s", vk::name(ci.tiling));
+		ImGui::Text("%s", vk::name(ci.samples));
+		ImGui::Text("%s", vk::name(ci.imageType));
+		ImGui::Text("%s", vk::nameImageCreateFlags(ci.flags).c_str());
 
-	ImGui::Columns();
-	*/
+		ImGui::Columns();
+		ImGui::TreePop();
+	}
 
 	// resource references
 	ImGui::Spacing();

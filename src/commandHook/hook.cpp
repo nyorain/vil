@@ -28,6 +28,9 @@
 #include <copyTex.comp.2DArray.spv.h>
 #include <copyTex.comp.u2DArray.spv.h>
 #include <copyTex.comp.i2DArray.spv.h>
+#include <copyTex.comp.2DMSArray.spv.h>
+#include <copyTex.comp.u2DMSArray.spv.h>
+#include <copyTex.comp.i2DMSArray.spv.h>
 #include <copyTex.comp.3D.spv.h>
 #include <copyTex.comp.u3D.spv.h>
 #include <copyTex.comp.i3D.spv.h>
@@ -38,6 +41,9 @@
 #include <copyTex.comp.2DArray.noformat.spv.h>
 #include <copyTex.comp.u2DArray.noformat.spv.h>
 #include <copyTex.comp.i2DArray.noformat.spv.h>
+#include <copyTex.comp.2DMSArray.noformat.spv.h>
+#include <copyTex.comp.u2DMSArray.noformat.spv.h>
+#include <copyTex.comp.i2DMSArray.noformat.spv.h>
 #include <copyTex.comp.3D.noformat.spv.h>
 #include <copyTex.comp.u3D.noformat.spv.h>
 #include <copyTex.comp.i3D.noformat.spv.h>
@@ -242,29 +248,36 @@ void CommandHook::initImageCopyPipes(Device& dev) {
 	if(dev.shaderStorageImageWriteWithoutFormat) {
 		addCpi(copyTex_comp_u1DArray_spv_data, spec1D);
 		addCpi(copyTex_comp_u2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_u2DMSArray_spv_data, specOther);
 		addCpi(copyTex_comp_u3D_spv_data, specOther);
 
 		addCpi(copyTex_comp_i1DArray_spv_data, spec1D);
 		addCpi(copyTex_comp_i2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_i2DMSArray_spv_data, specOther);
 		addCpi(copyTex_comp_i3D_spv_data, specOther);
 
 		addCpi(copyTex_comp_1DArray_spv_data, spec1D);
 		addCpi(copyTex_comp_2DArray_spv_data, specOther);
+		addCpi(copyTex_comp_2DMSArray_spv_data, specOther);
 		addCpi(copyTex_comp_3D_spv_data, specOther);
 	} else {
 		addCpi(copyTex_comp_u1DArray_noformat_spv_data, spec1D);
 		addCpi(copyTex_comp_u2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_u2DMSArray_noformat_spv_data, specOther);
 		addCpi(copyTex_comp_u3D_noformat_spv_data, specOther);
 
 		addCpi(copyTex_comp_i1DArray_noformat_spv_data, spec1D);
 		addCpi(copyTex_comp_i2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_i2DMSArray_noformat_spv_data, specOther);
 		addCpi(copyTex_comp_i3D_noformat_spv_data, specOther);
 
 		addCpi(copyTex_comp_1DArray_noformat_spv_data, spec1D);
 		addCpi(copyTex_comp_2DArray_noformat_spv_data, specOther);
+		addCpi(copyTex_comp_2DMSArray_noformat_spv_data, specOther);
 		addCpi(copyTex_comp_3D_noformat_spv_data, specOther);
 	}
 
+	dlg_assert(cpis.size() == sizeof(sampleImagePipes_) / sizeof(sampleImagePipes_[0]));
 	VK_CHECK_DEV(dev.dispatch.CreateComputePipelines(dev.handle, VK_NULL_HANDLE,
 		cpis.size(), cpis.data(), nullptr, sampleImagePipes_), dev);
 

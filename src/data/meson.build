@@ -14,6 +14,10 @@ if glslang.found()
 		'u2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_UINT'],
 		'i2DArray.': ['-DTEX_TYPE_2D_ARRAY', '-DTEX_FORMAT_INT'],
 
+		'2DMSArray.': ['-DTEX_TYPE_2D_MS_ARRAY', '-DTEX_FORMAT_FLOAT'],
+		'u2DMSArray.': ['-DTEX_TYPE_2D_MS_ARRAY', '-DTEX_FORMAT_UINT'],
+		'i2DMSArray.': ['-DTEX_TYPE_2D_MS_ARRAY', '-DTEX_FORMAT_INT'],
+
 		'3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_FLOAT'],
 		'u3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_UINT'],
 		'i3D.': ['-DTEX_TYPE_3D', '-DTEX_FORMAT_INT'],
@@ -88,18 +92,25 @@ if glslang.found()
 	foreach file, configs : overlay_shaders
 		foreach name, config : configs
 			varname = file.underscorify() + '_' + name.underscorify() + 'spv_data'
-			outname = file + '.' + name + 'spv.h'
 
 			# TODO: should compile with optimization but default glslang
 			# on arch does not come with optimizer linked in :(
-
-			args = [glslang, '-V', '--vn', varname, config, '@INPUT@']
+			args = [glslang, '-V', config, '@INPUT@']
 
 			args += ['-o', '@OUTPUT@']
 			args += ['--target-env', 'vulkan1.1']
 
 			if glslang_version.version_compare('>=11.0.0')
 				args += '--quiet'
+			endif
+
+			# Useful for inspecting binary spv
+			debug_bin = false
+			if debug_bin
+				outname = file + '.' + name + 'spv'
+			else
+				outname = file + '.' + name + 'spv.h'
+				args += ['--vn', varname]
 			endif
 
 			# meh, glslc produces shitty c headers, would need to change include workflow

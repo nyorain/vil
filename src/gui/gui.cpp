@@ -641,6 +641,9 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 						dlg_assert(img->type < ShaderImageType::count);
 						pipe = pipes_.image[img->type];
 
+						const auto isMS = ShaderImageType::isMS(img->type);
+						dlg_assertm(!isMS || img->level == 0.f, "LODs not supported for MS image");
+
 						// bind push constant data
 						struct PcrImageData {
 							float layer;
@@ -654,7 +657,8 @@ void Gui::recordDraw(Draw& draw, VkExtent2D extent, VkFramebuffer,
 							img->minValue,
 							img->maxValue,
 							img->flags,
-							img->level,
+							// MS shader interprets level as sample
+							isMS ? img->sample : img->level,
 							img->power
 						};
 

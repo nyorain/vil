@@ -7,6 +7,9 @@ v0.3:
 - improve README, add more gifs/pics
 
 urgent, bugs:
+- [ ] when loading unrelated serialized file (cmdsel),
+      updateRecords breaks as it can match only a parent but the
+	  function assumes otherwise (dlg_assert(count == 1u) in gui/cb.cpp)
 - [ ] fix standalone window version
 	- [ ] broken by commit that removed window creation from device init, issue 21
 - [ ] fix image viewer layout
@@ -59,6 +62,7 @@ urgent, bugs:
 	  (try to test with RDR2 again)
 
 new, workstack:
+- [ ] make optional dependencies optional (imgio)
 - [ ] use isStateCmd(const Command&) to remove remaining command dynamic casts
 - [ ] generate structSize in util/util.cpp, it is incomplete at the moment.
       Also problematic that we cannot know the size of some platform-specific
@@ -850,10 +854,6 @@ optimization:
 	  they are rarely changed just like that (neither is their order I guess)
 - [ ] track push constant range pipe layouts? correctly invalidate & disturb
       also track which range is bound for which stage.
-- [ ] can we support viewing multisample images?
-      either sample them directly in shader (requires a whole lotta new
-	  shader permuatations, not sure if supported everywhere) or resolve
-	  into temporary image first (lot of work as well)
 - [ ] better installing
 	- [ ] simple wix windows installer, just needs to install prebuilt layer,
 	  	   json file and add the registry file. Should probably also install

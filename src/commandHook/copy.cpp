@@ -104,7 +104,8 @@ VkFormat sampleFormat(VkFormat src, VkImageAspectFlagBits aspect) {
 }
 
 bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
-		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam) {
+		u32 layers, u32 levels, VkImageAspectFlags aspects, u32 srcQueueFam,
+		VkSampleCountFlagBits samples) {
 	ZoneScoped;
 
 	this->dev = &dev;
@@ -113,6 +114,7 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	this->layerCount = layers;
 	this->aspectMask = aspects;
 	this->format = format;
+	this->samples = samples;
 
 	// TODO: support multisampling?
 	VkImageCreateInfo ici {};
@@ -120,6 +122,7 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	ici.arrayLayers = layerCount;
 	ici.extent = extent;
 	ici.format = format;
+	ici.samples = samples;
 	ici.imageType = minImageType(this->extent);
 	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT |
 		VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -140,7 +143,6 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
 	ici.mipLevels = levelCount;
 	ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	ici.samples = VK_SAMPLE_COUNT_1_BIT;
 
 	// Before creating image, check if device supports everything we need.
 	// We will not copy the image in that case but in almost all cases there
@@ -153,10 +155,11 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		ici.usage, ici.flags, &fmtProps);
 	if(res == VK_ERROR_FORMAT_NOT_SUPPORTED) {
 		dlg_warn("CopiedImage: Unsupported format {} (imageType {}, "
-			"tiling {}, usage {}, flags {}",
+			"tiling {}, usage {}, flags {}, samples {}",
 			vk::name(ici.format), vk::name(ici.imageType), vk::name(ici.tiling),
 			vk::nameImageUsageFlags(ici.usage),
-			vk::nameImageCreateFlags(ici.flags));
+			vk::nameImageCreateFlags(ici.flags),
+			u32(samples));
 		return false;
 	}
 
@@ -178,6 +181,12 @@ bool CopiedImage::init(Device& dev, VkFormat format, const VkExtent3D& extent,
 		dlg_warn("CopiedImage: max supported size {}x{}x{} (needing {}x{}x{})",
 			fmtProps.maxExtent.width, fmtProps.maxExtent.height, fmtProps.maxExtent.depth,
 			ici.extent.width, ici.extent.height, ici.extent.depth);
+		return false;
+	}
+
+	if(ici.samples > fmtProps.sampleCounts) {
+		dlg_warn("CopiedImage: max supported samples {} (needing {})",
+			fmtProps.sampleCounts, samples);
 		return false;
 	}
 
@@ -267,8 +276,9 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		return;
 	}
 
+	auto dstSamples = CommandHook::copyMultisampled ? src.ci.samples : VK_SAMPLE_COUNT_1_BIT;
 	auto success = dst.init(dev, src.ci.format, extent, srcSubres.layerCount,
-		srcSubres.levelCount, srcSubres.aspectMask, srcQueueFam);
+		srcSubres.levelCount, srcSubres.aspectMask, srcQueueFam, dstSamples);
 	if(!success) {
 		dlg_warn("Initializing image copy failed");
 		return;
@@ -308,9 +318,8 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 		VK_PIPELINE_STAGE_TRANSFER_BIT,
 		0, 0, nullptr, 0, nullptr, 2, imgBarriers);
 
-	// for 1-sample images we can copy, otherwise we need resolve
 	ThreadMemScope memScope;
-	if(src.ci.samples == VK_SAMPLE_COUNT_1_BIT) {
+	if(src.ci.samples == dstSamples) {
 		auto copies = memScope.alloc<VkImageCopy>(srcSubres.levelCount);
 		for(auto m = 0u; m < srcSubres.levelCount; ++m) {
 			auto& copy = copies[m];
@@ -337,6 +346,7 @@ void initAndCopy(Device& dev, VkCommandBuffer cb, CopiedImage& dst, Image& src,
 			dst.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			u32(copies.size()), copies.data());
 	} else {
+		dlg_assert(dstSamples == VK_SAMPLE_COUNT_1_BIT);
 		auto resolves = memScope.alloc<VkImageResolve>(srcSubres.levelCount);
 		for(auto m = 0u; m < srcSubres.levelCount; ++m) {
 			auto& resolve = resolves[m];
@@ -601,7 +611,8 @@ void initAndSampleCopy(Device& dev, VkCommandBuffer cb,
 			hook.sampleImagePipeLayout_, 0u, 1u, &ds, 0u, nullptr);
 
 		auto sit = ShaderImageType::parseType(src.ci.imageType,
-			src.ci.format, VkImageAspectFlagBits(srcSubres.aspectMask));
+			src.ci.format, VkImageAspectFlagBits(srcSubres.aspectMask),
+			src.ci.samples);
 		dev.dispatch.CmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE,
 			hook.sampleImagePipes_[sit]);
 
