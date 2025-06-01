@@ -215,18 +215,24 @@ struct ShaderImageType {
 	enum Value {
 		u1,
 		u2,
+		u2MS,
 		u3,
 		i1,
 		i2,
+		i2MS,
 		i3,
 		f1,
 		f2,
+		f2MS,
 		f3,
 		count
 	};
 
 	static Value parseType(VkImageType type, VkFormat format,
-		VkImageAspectFlagBits aspect);
+		VkImageAspectFlagBits aspect, VkSampleCountFlagBits samples);
+	static bool isMS(Value value) {
+		return value == u2MS || value == i2MS || value == f2MS;
+	}
 };
 
 // TODO: bad performance due to taking string parameter. Should

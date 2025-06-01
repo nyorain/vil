@@ -176,6 +176,7 @@ public:
 	// maximum number of completed hooks we store at a time.
 	static constexpr auto maxCompletedHooks = 8u;
 	static constexpr auto shaderCaptureSize = 64 * 1024u;
+	static constexpr auto copyMultisampled = true;
 
 	// TODO: make setting?
 	static constexpr auto matchType = MatchType::mixed;

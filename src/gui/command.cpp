@@ -909,6 +909,7 @@ void CommandViewer::displayDs(Draw& draw) {
 		auto& elem = buffers(dsState, bindingID)[elemID];
 		dlg_assert(elem.buffer);
 
+		ImGui::SameLine();
 		refButton(gui, *elem.buffer);
 		ImGui::SameLine();
 		drawOffsetSize(elem, dynOffset);
@@ -1011,11 +1012,16 @@ void CommandViewer::displayDs(Draw& draw) {
 					return;
 				}
 
+				refButton(*gui_, *imgView.img);
+				imGuiSameLineSep();
+				refButton(*gui_, imgView);
+				imGuiSameLineSep();
+				imGuiText("Layout: {}", vk::name(elem.layout));
+
 				// TODO: hacky, done because displayImage used to
 				// acquire the device mutex in some cases
 				lock = {};
 				dsState = {};
-
 				displayImage(draw, *img);
 			}
 		}
@@ -1121,9 +1127,10 @@ void CommandViewer::displayAttachment(Draw& draw) {
 
 	dlg_assert(aid < attachments.size());
 
-	// refButtonD(*gui_, attachments[aid]);
-	if(attachments[aid]) {
-		// refButtonD(*gui_, attachments[aid]->img);
+	if(aid < attachments.size() && attachments[aid]) {
+		refButtonExpect(*gui_, attachments[aid]);
+		imGuiSameLineSep();
+		refButtonExpect(*gui_, attachments[aid]->img);
 	}
 
 	auto hookState = selection().completedHookState();
@@ -1731,7 +1738,7 @@ void CommandViewer::displayImage(Draw& draw, const CopiedImage& img) {
 	//   slider beginning at a number that isn't 0 might be confusing.
 	auto range = img.subresRange();
 	imageViewer_.select(img.image, img.extent, minImageType(img.extent),
-		img.format, range, imgLayout, imgLayout, flags);
+		img.format, range, imgLayout, imgLayout, img.samples, flags);
 	imageViewer_.display(draw);
 }
 

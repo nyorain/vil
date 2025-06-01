@@ -38,7 +38,8 @@ public:
 	//   min/max/layer) should be preserved, if possible.
 	void select(VkImage, VkExtent3D, VkImageType, VkFormat,
 		const VkImageSubresourceRange&, VkImageLayout initialLayout,
-		VkImageLayout finalLayout, u32 /*Flags*/ flags);
+		VkImageLayout finalLayout, VkSampleCountFlagBits samples,
+		u32 /*Flags*/ flags);
 
 	void reset(bool resetZoomPanSelection);
 	void unselect();
@@ -56,6 +57,7 @@ private:
 		VkOffset2D texel {};
 		float layer {};
 		unsigned level {};
+		u32 sample {};
 
 		vku::DynDs opDS {};
 	};
@@ -112,6 +114,7 @@ private:
 	VkExtent3D extent_ {};
 	VkImageType imgType_ {};
 	VkFormat format_ {};
+	VkSampleCountFlagBits samples_ {};
 	VkImageSubresourceRange subresRange_ {};
 
 	Vec2f offset_ {}; // in uv coords

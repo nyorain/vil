@@ -13,7 +13,6 @@
 #include <vkutil/enumString.hpp>
 #include <vkutil/sync.hpp>
 #include <vkutil/cmd.hpp>
-#include <iomanip>
 #include <imgio/image.hpp>
 #include <gui/fontAwesome.hpp>
 
@@ -230,6 +229,14 @@ void ImageViewer::drawHistogram(Draw& draw) {
 		}
 	}
 
+	if(samples_ > VK_SAMPLE_COUNT_1_BIT) {
+		dlg_assert(subresRange_.levelCount == 1u);
+		if(subresRange_.levelCount == 1u) {
+			auto numSamples = u32(samples_);
+			ImGui::SliderInt("Sample", (int*) &imageDraw_.sample, 0u, numSamples - 1);
+		}
+	}
+
 	// == Histogram ==
 	// TODO:
 	// - add power/gamma button-slider (add such a widget in gui/util)
@@ -427,6 +434,9 @@ void ImageViewer::drawImageInfoTable(Draw& draw) {
 		addRow("Depth", extent_.depth);
 		addRow("ImageType", vk::name(imgType_));
 		addRow("Format", vk::name(format_));
+		addRow("Samples", vk::name(samples_));
+		addRow("Levels", subresRange_.levelCount);
+		addRow("Layers", subresRange_.layerCount);
 
 		ImGui::EndTable();
 	}
@@ -591,7 +601,8 @@ void ImageViewer::drawImageArea(Draw& draw) {
 				rb.texel.x == readTexelOffset_.x &&
 				rb.texel.y == readTexelOffset_.y)) &&
 				rb.layer == imageDraw_.layer &&
-				rb.level == imageDraw_.level) {
+				rb.level == imageDraw_.level &&
+				rb.sample == imageDraw_.sample) {
 			texelValid = true;
 			Vec4d value;
 
@@ -950,7 +961,7 @@ void ImageViewer::doSample(Draw& draw, vku::LocalImageState& srcState, Readback&
 		int level;
 	} pcr;
 
-	pcr.level = level;
+	pcr.level = samples_ == VK_SAMPLE_COUNT_1_BIT ? level : imageDraw_.sample;
 	pcr.coords = coords;
 
 	if(imgType_ == VK_IMAGE_TYPE_1D) {
@@ -969,6 +980,7 @@ void ImageViewer::doSample(Draw& draw, vku::LocalImageState& srcState, Readback&
 	rb.level = level;
 	rb.layer = layer;
 	rb.texel = readTexelOffset_;
+	rb.sample = imageDraw_.sample;
 }
 
 void ImageViewer::doCopy(Draw& draw, vku::LocalImageState& srcState, Readback& rb) {
@@ -1021,6 +1033,9 @@ void ImageViewer::doCopy(Draw& draw, vku::LocalImageState& srcState, Readback& r
 	rb.level = imageDraw_.level;
 	rb.layer = imageDraw_.layer;
 	rb.texel = readTexelOffset_;
+
+	dlg_assert(imageDraw_.sample == 0u);
+	rb.sample = 0u;
 }
 
 void ImageViewer::computeHistogram(Draw& draw, vku::LocalImageState& srcState,
@@ -1208,7 +1223,7 @@ VkImageAspectFlagBits defaultAspect(VkImageAspectFlags flags) {
 void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		VkFormat format, const VkImageSubresourceRange& subresRange,
 		VkImageLayout initialLayout, VkImageLayout finalLayout,
-		u32 /*Flags*/ flags) {
+		VkSampleCountFlagBits samples, u32 /*Flags*/ flags) {
 	src_ = src;
 	extent_ = extent;
 	imgType_ = imgType;
@@ -1216,6 +1231,7 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 	subresRange_ = subresRange;
 	initialImageLayout_ = initialLayout;
 	finalImageLayout_ = finalLayout;
+	samples_ = samples;
 	copyTexel_ = useSamplingCopy || (flags & supportsTransferSrc);
 
 	draw_ = {};
@@ -1256,6 +1272,7 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		imageDraw_.minValue = 0.f;
 		imageDraw_.maxValue = 1.f;
 		imageDraw_.level = subresRange.baseMipLevel;
+		imageDraw_.sample = 0u;
 		if(imgType == VK_IMAGE_TYPE_3D) {
 			imageDraw_.layer = subresRange.baseArrayLayer;
 		} else {
@@ -1282,6 +1299,9 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		if(imageDraw_.layer < layerBegin || imageDraw_.layer >= layerEnd) {
 			imageDraw_.layer = layerBegin;
 		}
+
+		auto numSamples = u32(samples);
+		imageDraw_.sample = std::clamp<u32>(imageDraw_.sample, 0u, numSamples - 1);
 	}
 
 	if(!(flags & preserveReadbacks)) {
@@ -1290,9 +1310,11 @@ void ImageViewer::select(VkImage src, VkExtent3D extent, VkImageType imgType,
 		}
 	}
 
-	imageDraw_.type = ShaderImageType::parseType(imgType, format, aspect_);
+	imageDraw_.type = ShaderImageType::parseType(imgType, format,
+		aspect_, samples);
 	dlg_assertm(imageDraw_.type != ShaderImageType::count,
-		"imgType {}, format {}", vk::name(imgType_), vk::name(format_));
+		"imgType {}, format {}, samples {}",
+		vk::name(imgType_), vk::name(format_), vk::name(samples));
 
 	createData();
 }

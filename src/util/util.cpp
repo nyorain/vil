@@ -1162,7 +1162,8 @@ u32 combineQueueFamilies(span<const u32> queueFams) {
 }
 
 ShaderImageType::Value ShaderImageType::parseType(VkImageType imgType,
-		VkFormat format, VkImageAspectFlagBits aspect) {
+		VkFormat format, VkImageAspectFlagBits aspect,
+		VkSampleCountFlagBits samples) {
 	// NOTE: relies on ordering of DrawGuiImage::Type enum
 	using NumType = FORMAT_NUMERICAL_TYPE;
 	auto imageTypeFUI = [](auto numt) {
@@ -1197,10 +1198,20 @@ ShaderImageType::Value ShaderImageType::parseType(VkImageType imgType,
 
 	auto off = 0u;
 	switch(imgType) {
-		case VK_IMAGE_TYPE_1D: off = 0u; break;
-		case VK_IMAGE_TYPE_2D: off = 1u; break;
-		case VK_IMAGE_TYPE_3D: off = 2u; break;
-		default: dlg_error("unreachable"); return ShaderImageType::count;
+		case VK_IMAGE_TYPE_1D:
+			dlg_assert(samples == VK_SAMPLE_COUNT_1_BIT);
+			off = 0u;
+			break;
+		case VK_IMAGE_TYPE_2D:
+			off = (samples == VK_SAMPLE_COUNT_1_BIT) ? 1u : 2u;
+			break;
+		case VK_IMAGE_TYPE_3D:
+			dlg_assert(samples == VK_SAMPLE_COUNT_1_BIT);
+			off = 3u;
+			break;
+		default:
+			dlg_error("unreachable");
+			return ShaderImageType::count;
 	}
 
 	return Value(unsigned(baseType) + off);
